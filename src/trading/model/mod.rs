@@ -2,19 +2,11 @@ pub mod biz_activity;
 pub mod biz_activity_model;
 pub mod market;
 
+use std::println;
 use rbatis::RBatis;
 use rbdc_mysql::MysqlDriver;
-
-// pub struct Model {
-//     db: Db,
-// }
-//
-// impl Model {
-//     fn new() -> &mut Model {
-//         Self.db = Db::get_db_client();
-//         Self
-//     }
-// }
+use serde_json::json;
+use crate::trading::model::market::candles::CandlesEntity;
 
 pub struct Db {}
 
@@ -39,5 +31,13 @@ impl Db {
         // mssql/sqlserver
         // rb.link(MssqlDriver{},"jdbc:sqlserver://localhost:1433;User=SA;Password={TestPass!123456};Database=test").await.unwrap();
         rb
+    }
+}
+
+struct Model {}
+
+impl Model {
+    pub async fn db(&self) -> RBatis {
+        Db::get_db_client().await
     }
 }

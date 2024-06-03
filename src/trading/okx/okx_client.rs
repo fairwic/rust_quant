@@ -11,29 +11,6 @@ pub struct Ticker {
     // 其他字段...
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-struct CandleData {
-    ts: String,
-    o: String,
-    h: String,
-    l: String,
-    c: String,
-    vol: String,
-    vol_ccy: String,
-    vol_ccy_quote: String,
-    confirm: String,
-}
-
-
-#[derive(Serialize, Deserialize, Debug)]
-struct CandleResponse {
-    code: String,
-    msg: String,
-    data: Vec<CandleData>,
-}
-
-
 #[derive(Serialize, Deserialize)]
 struct ErrorResponse {
     msg: String,
@@ -100,11 +77,6 @@ impl OkxClient {
             Err(anyhow!("请求失败: {}", error.msg))
         }
     }
-
-
-
-
-
 }
 
 pub fn get_okx_client() -> OkxClient {

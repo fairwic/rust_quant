@@ -13,10 +13,11 @@ use tokio::time::{Instant, interval, sleep_until};
 mod trading;
 
 use trading::okx::okx_client;
-use trading::okx::model::biz_activity_model::BizActivityModel;
+use trading::model::biz_activity_model::BizActivityModel;
 use clap::Parser;
+use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::okx::market::Market;
-use crate::trading::okx::model::market::tickers::TicketsModel;
+use crate::trading::model::market::tickers::TicketsModel;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -42,16 +43,33 @@ async fn main() {
     //     let res = res.add(ticker_list).await;
     //     println!("插入数据库结果: {:?}", res);
     // }
-    let ins_type = "BTC-USDT-SWAP";
-    let ticker = Market::get_ticker(&ins_type).await;
-    println!("单个ticket: {:?}", ticker);
-    //
-    if let Ok(ticker_list) = ticker {
-        let res = TicketsModel::new().await;
-        let res = res.update(ticker_list.get(0).unwrap()).await;
-        println!("插入数据库结果: {:?}", res);
-    }
+    //2
+    // let ins_type = "BTC-USDT-SWAP";
+    // let ticker = Market::get_ticker(&ins_type).await;
+    // println!("单个ticket: {:?}", ticker);
+    // //
+    // if let Ok(ticker_list) = ticker {
+    //     let res = TicketsModel::new().await;
+    //     let res = res.update(ticker_list.get(0).unwrap()).await;
+    //     println!("插入数据库结果: {:?}", res);
+    // }
+    //3
+    // let res = TicketsModel::new().await;
+    // let res = res.get_all().await;
+    // println!("全部结果: {:?}", res);
 
+    let ins_id = "BTC-USDT-SWAP";
+    let ins_id = "btc";
+    let bar = "1d";
+    // let ticker = Market::get_candles(&ins_id, bar, None, None, None).await;
+    // if let Ok(ticket_list) = ticker {
+    //     let res = CandlesModel::new().await;
+    //     let res = res.add(ticket_list, "btc", "1d").await;
+    //     println!("全部结果: {:?}", res);
+    // }
+    let res = CandlesModel::new().await;
+    let res = res.get_all(ins_id, bar).await;
+    println!("全部结果: {:?}", res);
 
     // let symbol = "BTC-USDT";
     //

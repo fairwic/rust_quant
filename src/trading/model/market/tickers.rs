@@ -1,15 +1,18 @@
 extern crate rbatis;
+
 use rbatis::{crud, impl_insert, impl_update, RBatis};
 use rbatis::rbdc::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use crate::trading::okx::market::TickersData;
-use crate::trading::okx::model::Db;
+use crate::trading::model::Db;
+use anyhow::Result;
 
 /// table
 #[derive(Serialize, Deserialize, Debug)]
+// #[serde(rename_all = "camelCase")]
 #[serde(rename_all = "snake_case")]
-pub struct TickersDataDb {
+pub struct TickersDataEntity {
     pub inst_type: String,
     pub inst_id: String,
     pub last: String,
@@ -29,8 +32,10 @@ pub struct TickersDataDb {
 }
 
 
-crud!(TickersDataDb{},"tickers_data");
-impl_update!(TickersDataDb{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
+crud!(TickersDataEntity{},"tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
+
+impl_update!(TickersDataEntity{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
+impl_select!(TickersDataEntity{fetch_list() => ""},"tickers_data");
 
 
 pub struct TicketsModel {
@@ -44,8 +49,8 @@ impl TicketsModel {
         }
     }
     pub async fn add(&self, list: Vec<TickersData>) -> anyhow::Result<()> {
-        let tickers_db: Vec<TickersDataDb> = list.iter()
-            .map(|ticker| TickersDataDb {
+        let tickers_db: Vec<TickersDataEntity> = list.iter()
+            .map(|ticker| TickersDataEntity {
                 inst_type: ticker.inst_type.clone(),
                 inst_id: ticker.inst_id.clone(),
                 last: ticker.last.clone(),
@@ -65,12 +70,12 @@ impl TicketsModel {
             })
             .collect();
 
-        let data = TickersDataDb::insert_batch(&self.db, &tickers_db, list.len() as u64).await;
+        let data = TickersDataEntity::insert_batch(&self.db, &tickers_db, list.len() as u64).await;
         println!("insert_batch = {}", json!(data));
         Ok(())
     }
     pub async fn update(&self, ticker: &TickersData) -> anyhow::Result<()> {
-        let tickets_data = TickersDataDb {
+        let tickets_data = TickersDataEntity {
             inst_type: ticker.inst_type.clone(),
             inst_id: ticker.inst_id.clone(),
             last: ticker.last.clone(),
@@ -88,11 +93,14 @@ impl TicketsModel {
             sod_utc8: ticker.sod_utc8.clone(),
             ts: ticker.ts.clone(),
         };
-        let data = TickersDataDb::update_by_column(&self.db, &tickets_data, "inst_id").await;
+        let data = TickersDataEntity::update_by_column(&self.db, &tickets_data, "inst_id").await;
         println!("update_by_column = {}", json!(data));
-
         // let data = TickersDataDb::update_by_name(&self.db, &tickets_data, ticker.inst_id.clone()).await;
         // println!("update_by_name = {}", json!(data));
         Ok(())
+    }
+    pub async fn get_all(&self) -> Result<Vec<TickersDataEntity>> {
+        let results: Vec<TickersDataEntity> = TickersDataEntity::fetch_list(&self.db).await?;
+        Ok(results)
     }
 }

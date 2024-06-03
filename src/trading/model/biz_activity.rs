@@ -2,7 +2,7 @@ extern crate rbatis;
 use rbatis::{crud, impl_insert, impl_update, RBatis};
 use rbatis::rbdc::DateTime;
 use serde_json::json;
-use crate::trading::okx::model::Db;
+use crate::trading::model::Db;
 
 /// table
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

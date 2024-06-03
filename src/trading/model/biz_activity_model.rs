@@ -1,8 +1,8 @@
 use rbatis::RBatis;
 use rbatis::rbdc::DateTime;
 use serde_json::json;
-use crate::trading::okx::model::biz_activity::BizActivity;
-use crate::trading::okx::model::Db;
+use crate::trading::model::biz_activity::BizActivity;
+use crate::trading::model::Db;
 
 pub struct BizActivityModel {
     db: RBatis,

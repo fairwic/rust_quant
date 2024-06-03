@@ -4,7 +4,6 @@ pub mod okx_client;
 pub mod public_data;
 pub mod account;
 pub mod trade;
-pub mod model;
 pub mod market;
 
 
