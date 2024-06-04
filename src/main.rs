@@ -1,8 +1,9 @@
 #[macro_use]
 extern crate rbatis;
 
+use std::env;
 use std::time::Duration;
-use anyhow::Result;
+// use anyhow::{Error, Result};
 use base64;
 use chrono::{DateTime, Timelike, Utc};
 use hmac::Mac;
@@ -18,6 +19,7 @@ use clap::Parser;
 use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::okx::market::Market;
 use crate::trading::model::market::tickers::TicketsModel;
+use crate::trading::okx::okx_websocket_client;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -32,8 +34,130 @@ struct Args {
     count: u8,
 }
 
+use std::{
+    collections::HashMap,
+    io::Error as IoError,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
+use dotenv::dotenv;
+
+use futures_channel::mpsc::{unbounded, UnboundedSender};
+use futures_util::{future, pin_mut, SinkExt, stream::TryStreamExt, StreamExt};
+use log::{error};
+use serde_json::json;
+
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::{tungstenite};
+// use tokio_tungstenite::tungstenite::Error;
+use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::{
+    accept_async,
+    tungstenite::{Error, Result},
+};
+use tracing::{info, Level};
+use tracing_subscriber::FmtSubscriber;
+use crate::trading::okx::okx_websocket_client::ApiType;
+
+async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
+    if let Err(e) = handle_connection(peer, stream).await {
+        match e {
+            tungstenite::Error::ConnectionClosed | tungstenite::Error::Protocol(_) | tungstenite::Error::Utf8 => (),
+            err => error!("Error processing connection: {}", err),
+        }
+    }
+}
+
+async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
+    let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
+
+    info!("New WebSocket connection: {}", peer);
+
+    while let Some(msg) = ws_stream.next().await {
+        let msg = msg?;
+        info!("New Message : {}", msg);
+        if msg.is_text() || msg.is_binary() {
+            let response = "hhhh";
+            ws_stream.send(Message::from(response)).await?;
+        }
+    }
+
+    Ok(())
+}
+
+
 #[tokio::main]
 async fn main() {
+    //env init
+    dotenv().ok();
+    // a builder for `FmtSubscriber`.
+    let subscriber = FmtSubscriber::builder()
+        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::TRACE)
+        // completes the builder.
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("setting default subscriber failed");
+    //模拟交易
+    // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
+    let api_key = env::var("OKX_API_KEY").expect("");
+    let api_secret = env::var("OKX_API_SECRET").expect("");
+    let passphrase = env::var("OKX_PASSPHRASE").expect("");
+    let okx_websocket_clinet = okx_websocket_client::OkxWebsocket::new(api_key, api_secret, passphrase);
+
+    //
+    // // 订阅公共频道
+    // let public_channels = vec![
+    //     json!({
+    //         "channel": "tickers",
+    //         "instId": "LTC-USDT"
+    //     }),
+    //     json!({
+    //         "channel":"tickers",
+    //         "instId":"ETH-USDT"
+    //     }),
+    // ];
+    // // 订阅私有频道
+    // let private_channels = vec![
+    //     json!({
+    //        "channel": "account",
+    //         "ccy": "BTC-USDT_SWAP",
+    //         "extraParams": "
+    //     {
+    //       \"updateInterval\": \"0\"
+    //     }
+    //   "
+    //     }),
+    // ];
+    // // 创建并行任务
+    // let public_task = okx_websocket_clinet.subscribe(ApiType::Public, public_channels);
+    // let private_task = okx_websocket_clinet.subscribe(ApiType::Private, private_channels);
+    //
+    // // 并行运行两个订阅任务
+    // if let (Err(public_err), Err(private_err)) = tokio::join!(public_task, private_task) {
+    //     eprintln!("Failed to subscribe to public channels: {}", public_err);
+    //     eprintln!("Failed to subscribe to private channels: {}", private_err);
+    // }
+
+
+    // let res = okx_websocket_clinet.socket_connect().await;
+    // println!("!!!!!!!");
+    // let res = okx_websocket_clinet.private_subscribe("tickers", "LTC-USDT").await;
+
+
+    // let addr = "127.0.0.1:9002";
+    // let listener = TcpListener::bind(&addr).await.expect("Can't listen");
+    // info!("Listening on: {}", addr);
+    //
+    // while let Ok((stream, _)) = listener.accept().await {
+    //     let peer = stream.peer_addr().expect("connected streams should have a peer address");
+    //     info!("Peer address: {}", peer);
+    //
+    //     let res = tokio::spawn(accept_connection(peer, stream));
+    // }
+
+
     // let ins_type = "SWAP";
     // let ticker = Market::get_tickers(&ins_type, None, None).await;
     // println!("全部tickets: {:?}", ticker);
@@ -58,7 +182,7 @@ async fn main() {
     // let res = res.get_all().await;
     // println!("全部结果: {:?}", res);
 
-    let ins_id = "BTC-USDT-SWAP";
+    // let ins_id = "BTC-USDT-SWAP";
     let ins_id = "btc";
     let bar = "1d";
     // let ticker = Market::get_candles(&ins_id, bar, None, None, None).await;
@@ -68,8 +192,11 @@ async fn main() {
     //     println!("全部结果: {:?}", res);
     // }
     let res = CandlesModel::new().await;
-    let res = res.get_all(ins_id, bar).await;
-    println!("全部结果: {:?}", res);
+    // let res = res.get_all(ins_id, bar).await;
+    // println!("全部结果: {:?}", res);
+
+    let res = CandlesModel::new().await;
+    let res = res.create_table(ins_id, bar).await;
 
     // let symbol = "BTC-USDT";
     //

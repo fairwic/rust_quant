@@ -29,3 +29,14 @@ rbatis = { version = "4.5" }
 log = "0.4"
 fast_log = "1.6"
 clap = { version = "4.5.4", features = ["derive"] }
+
+tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
+futures-channel = "0.3.30"
+futures-util = "0.3.30"
+env_logger = "0.11.3"
+
+
+tracing = "0.1"
+tracing-subscriber = "0.3.0"
+hmac-sha256 = "0.1"
+dotenv = "0.15.0"

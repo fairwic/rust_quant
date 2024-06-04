@@ -1,4 +1,3 @@
-use std::env;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -18,16 +17,16 @@ struct ErrorResponse {
     code: String,
 }
 
-pub(crate) struct OkxClient {
+pub(crate) struct OkxWebsocket {
     client: Client,
     api_key: String,
     api_secret: String,
     passphrase: String,
 }
 
-impl OkxClient {
+impl OkxWebsocket {
     fn new(api_key: String, api_secret: String, passphrase: String) -> Self {
-        OkxClient {
+        OkxWebsocket {
             client: Client::new(),
             api_key,
             api_secret,
@@ -80,10 +79,19 @@ impl OkxClient {
     }
 }
 
-pub fn get_okx_client() -> OkxClient {
-    let api_key = env::var("OKX_API_KEY").expect("");
-    let api_secret = env::var("OKX_API_SECRET").expect("");
-    let passphrase = env::var("OKX_PASSPHRASE").expect("");
-    let okx_client = OkxClient::new(api_key, api_secret, passphrase);
+pub fn get_okx_client() -> OkxWebsocket {
+
+    //真实交易
+    // let api_key = "e9f4ac8d-42cf-4616-a870-ba59398a75fd".to_string();
+    // let api_secret = "2ACC57D2AD7A1FF5683D80F6E62E5A73".to_string();
+    // let passphrase = "Fwc_okx_520".to_string();
+
+    //模拟交易
+    // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
+    let api_key = "b6bf48c4-a1fc-45e0-b3f0-f0a544549a67".to_string();
+    let api_secret = "63373C32B1B7F6DBFB659A428E859564".to_string();
+    let passphrase = "Fwc_okx_520".to_string();
+
+    let okx_client = OkxWebsocket::new(api_key, api_secret, passphrase);
     okx_client
 }

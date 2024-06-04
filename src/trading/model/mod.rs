@@ -23,7 +23,7 @@ impl Db {
 
         // link() will set driver and try use acquire() link database
         // sqlite
-        rb.link(MysqlDriver {}, "mysql://root:example@localhost:3306/test").await.unwrap();
+        rb.link(MysqlDriver {}, "mysql://root:example@localhost:33306/test").await.unwrap();
         // mysql
         // rb.link(MysqlDriver{},"mysql://root:123456@localhost:3306/test").await.unwrap();
         // postgresql

@@ -62,7 +62,7 @@ impl CandlesModel {
         }
     }
 
-    async fn create_table(&self, inst_id: &str, time_interval: &str) -> Result<ExecResult> {
+    pub async fn create_table(&self, inst_id: &str, time_interval: &str) -> Result<ExecResult> {
         let table_name = self.get_tale_name(inst_id, time_interval);
         let create_table_sql = format!(
             "CREATE TABLE IF NOT EXISTS `{}` (

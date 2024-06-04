@@ -5,6 +5,8 @@ pub mod public_data;
 pub mod account;
 pub mod trade;
 pub mod market;
+pub mod okx_websocket;
+pub mod okx_websocket_client;
 
 
 // 通用的响应结构体
