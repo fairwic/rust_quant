@@ -45,6 +45,7 @@ use dotenv::dotenv;
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, SinkExt, stream::TryStreamExt, StreamExt};
 use log::{error};
+use redis::streams::StreamClaimOptions;
 use serde_json::json;
 
 use tokio::net::{TcpListener, TcpStream};
@@ -57,7 +58,9 @@ use tokio_tungstenite::{
 };
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
+use crate::trading::model::Db;
 use crate::trading::okx::okx_websocket_client::ApiType;
+use trading::strategy::StopLossStrategy;
 
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     if let Err(e) = handle_connection(peer, stream).await {
@@ -183,23 +186,26 @@ async fn main() {
     // println!("全部结果: {:?}", res);
 
     // let ins_id = "BTC-USDT-SWAP";
-    let ins_id = "btc";
-    let bar = "1d";
+    // let ins_id = "BTC-USDT";
+    // let bar = "1D";
     // let ticker = Market::get_candles(&ins_id, bar, None, None, None).await;
+    // println!("获取数据: {:?}", ticker);
     // if let Ok(ticket_list) = ticker {
     //     let res = CandlesModel::new().await;
-    //     let res = res.add(ticket_list, "btc", "1d").await;
+    //     let res = res.add(ticket_list, "btc", "1D").await;
     //     println!("全部结果: {:?}", res);
     // }
-    let res = CandlesModel::new().await;
+    // let ins_id = "btc";
+    // let bar = "1D";
+    // let res = CandlesModel::new().await;
     // let res = res.get_all(ins_id, bar).await;
     // println!("全部结果: {:?}", res);
 
-    let res = CandlesModel::new().await;
-    let res = res.create_table(ins_id, bar).await;
+    //创建蜡烛图表
+    // let res = CandlesModel::new().await;
+    // let res = res.create_table(ins_id, bar).await;
 
     // let symbol = "BTC-USDT";
-    //
     // 获取交易产品的k线数据
     // let symbol = "BTC-USDT";
     // let bar = "1m";
@@ -229,12 +235,16 @@ async fn main() {
     //获取系统时间
     // let time = public_data::get_time().await?;
     // println!("系统时间:{:#?}", time);
+    // 初始化 Redis
+    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").unwrap();
+    let mut con = client.get_multiplexed_async_connection().await.unwrap();
 
     // let db = BizActivityModel::new().await;
+    let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
+    let res = startegy.main("btc", "1D", 12, 26, 9,StopLossStrategy::Amount(3.00)).await;
+    println!("strategy{:#?}", res)
+
     // let result = db.add().await?;
-    //
-
-
     // let every_n_seconds = Duration::from_secs(10); // 每隔10秒执行一次
     // let mut interval_timer = interval(every_n_seconds);
     //

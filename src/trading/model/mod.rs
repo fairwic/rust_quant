@@ -3,8 +3,10 @@ pub mod biz_activity_model;
 pub mod market;
 
 use std::println;
+use fast_log::Config;
 use rbatis::RBatis;
 use rbdc_mysql::MysqlDriver;
+use rbdc_mysql::protocol::response;
 use serde_json::json;
 use crate::trading::model::market::candles::CandlesEntity;
 
@@ -13,7 +15,11 @@ pub struct Db {}
 impl Db {
     pub async fn get_db_client() -> RBatis {
         /// enable log crate to show sql logs
-        fast_log::init(fast_log::Config::new().console()).expect("rbatis init fail");
+        // fast_log::init(fast_log::Config::new().console()).expect("fast_log init error");
+        // if let Err(e) = fast_log::init(Config::new().console()) {
+        //     eprintln!("fast_log init error: {:?}", e);
+        // }
+
         /// initialize rbatis. also you can call rb.clone(). this is  an Arc point
         let rb = RBatis::new();
         /// connect to database
@@ -24,6 +30,7 @@ impl Db {
         // link() will set driver and try use acquire() link database
         // sqlite
         rb.link(MysqlDriver {}, "mysql://root:example@localhost:33306/test").await.unwrap();
+        // rb.link_opt("mysql://yourusername:yourpassword@localhost:3306/yourdatabase", DBPoolOptions::new().max_connections(10)).await?;
         // mysql
         // rb.link(MysqlDriver{},"mysql://root:123456@localhost:3306/test").await.unwrap();
         // postgresql

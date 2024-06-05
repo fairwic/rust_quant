@@ -1,11 +1,12 @@
 extern crate rbatis;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use rbatis::{crud, impl_update, RBatis};
 use rbatis::rbdc::db::ExecResult;
 use rbs::Value;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::info;
 
 use crate::trading::model::{Db, Model};
 use crate::trading::okx::market::TickersData;
@@ -114,9 +115,15 @@ impl CandlesModel {
 
         // 移除最后一个逗号
         query.pop();
-
-        let res = self.db.exec(&query, params).await?;
-        Ok(res)
+        println!("query: {}", query);
+        println!("parmas: {:?}", params);
+        if params.is_empty() {
+            //抛出错误
+            return Err(anyhow!("params is empty"));
+        } else {
+            let res = self.db.exec(&query, params).await?;
+            Ok(res)
+        }
     }
     // pub async fn update(&self, ticker: &TickersData) -> anyhow::Result<()> {
     //     let tickets_data = CandlesEntity {
@@ -143,10 +150,24 @@ impl CandlesModel {
     //     // println!("update_by_name = {}", json!(data));
     //     Ok(())
     // }
-    pub async fn get_all(&self, inst_id: &str, time_interval: &str) -> Result<Value> {
-        let mut query = format!("select * from  {} ", self.get_tale_name(inst_id, time_interval));
+    pub async fn get_all(&self, inst_id: &str, time_interval: &str) -> Result<Vec<CandlesEntity>> {
+        let mut query = format!("select * from  {} order by ts desc limit 1000 ", self.get_tale_name(inst_id, time_interval));
+        println!("query: {}", query);
         let res: Value = self.db.query(&query, vec![]).await?;
+
+
+        if res.is_array() && res.as_array().unwrap().is_empty() {
+            info!("No candles found in MySQL");
+            return Ok(vec![]);
+        }
+
+        // 将 rbatis::core::value::Value 转换为 serde_json::Value
+        let json_value: serde_json::Value = serde_json::from_str(&res.to_string())?;
+
+        // 将 serde_json::Value 转换为 Vec<CandlesEntity>
+        let candles: Vec<CandlesEntity> = serde_json::from_value(json_value)?;
+        // let res:Vec<CandlesEntity>=serde_json::from_value(res);
         // let results: Vec<CandlesEntity> = CandlesEntity::fetch_list(&self.db).await?;
-        Ok(res)
+        Ok(candles)
     }
 }
