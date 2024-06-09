@@ -14,18 +14,17 @@ pub struct Balance {
 }
 
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CandleData {
-    ts: String,
-    o: String,
-    h: String,
-    l: String,
-    c: String,
-    vol: String,
-    vol_ccy: String,
-    vol_ccy_quote: String,
-    confirm: String,
+    pub(crate) ts: String,
+    pub(crate) o: String,
+    pub(crate) h: String,
+    pub(crate) l: String,
+    pub(crate) c: String,
+    pub(crate) vol: String,
+    pub(crate) vol_ccy: String,
+    pub(crate) vol_ccy_quote: String,
+    pub(crate) confirm: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

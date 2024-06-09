@@ -13,7 +13,7 @@ hmac = "0.12.1"
 sha2 = "0.10.8"
 chrono = "0.4.38"
 hex = "0.4.3"
-tokio = { version = "1.37.0", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.37.0", features = ["rt", "rt-multi-thread", "macros","full"] }
 anyhow = "1.0.86"
 base64 = "0.21.7"
 thiserror = "1.0.61"
@@ -40,6 +40,6 @@ tracing = "0.1"
 tracing-subscriber = "0.3.0"
 hmac-sha256 = "0.1"
 dotenv = "0.15.0"
-ta = "0.4.0"
+ta = "0.5.0"
 futures = "0.3.30"
 redis = { version = "0.25.3", features = ["aio","tokio-comp"] }

@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use crate::trading::okx::market::TickersData;
 use crate::trading::model::Db;
 use anyhow::Result;
+use tracing::debug;
 
 /// table
 #[derive(Serialize, Deserialize, Debug)]
@@ -28,14 +29,14 @@ pub struct TickersDataEntity {
     pub vol24h: String,
     pub sod_utc0: String,
     pub sod_utc8: String,
-    pub ts: String,
+    pub ts: i64,
 }
 
 
 crud!(TickersDataEntity{},"tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
 
 impl_update!(TickersDataEntity{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
-impl_select!(TickersDataEntity{fetch_list() => ""},"tickers_data");
+impl_select!(TickersDataEntity{fetch_list() => "`where inst_id = 'BTC-USDT-SWAP' ORDER BY id DESC` "},"tickers_data");
 
 
 pub struct TicketsModel {
@@ -66,7 +67,7 @@ impl TicketsModel {
                 vol24h: ticker.vol24h.clone(),
                 sod_utc0: ticker.sod_utc0.clone(),
                 sod_utc8: ticker.sod_utc8.clone(),
-                ts: ticker.ts.clone(),
+                ts: ticker.ts.parse().unwrap(),
             })
             .collect();
 
@@ -91,7 +92,7 @@ impl TicketsModel {
             vol24h: ticker.vol24h.clone(),
             sod_utc0: ticker.sod_utc0.clone(),
             sod_utc8: ticker.sod_utc8.clone(),
-            ts: ticker.ts.clone(),
+            ts: ticker.ts.parse().unwrap(),
         };
         let data = TickersDataEntity::update_by_column(&self.db, &tickets_data, "inst_id").await;
         println!("update_by_column = {}", json!(data));
@@ -99,6 +100,7 @@ impl TicketsModel {
         // println!("update_by_name = {}", json!(data));
         Ok(())
     }
+    /*获取全部*/
     pub async fn get_all(&self) -> Result<Vec<TickersDataEntity>> {
         let results: Vec<TickersDataEntity> = TickersDataEntity::fetch_list(&self.db).await?;
         Ok(results)

@@ -3,6 +3,7 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use anyhow::{Result, Error, anyhow};
+use tracing::{debug, info};
 use reqwest::{Client, Method, StatusCode};
 
 // ... (保持 Ticker、Balance 和 ErrorResponse 结构体的定义不变)
@@ -68,7 +69,7 @@ impl OkxClient {
 
         let status_code = response.status();
         let response_body = response.text().await?;
-        println!("okx_response: {}", response_body);
+        info!("okx_response: {}", response_body);
 
         if status_code == StatusCode::OK {
             let result: T = serde_json::from_str(&response_body)?;

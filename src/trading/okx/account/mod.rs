@@ -1,7 +1,7 @@
 /*获取交易账户余额*/
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use crate::trading::okx::okx_client;
+use crate::trading::okx::{okx_client, OkxApiResponse};
 use anyhow::{Result, Error, anyhow};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -38,9 +38,12 @@ impl Account {
     pub fn new() -> Self {
         Account {}
     }
-    pub async fn get_balances(ccy: &[String]) -> anyhow::Result<CandleResponse> {
-        let ccy_param = ccy.join(",");
-        let path = format!("/api/v5/account/balance?ccy={}", ccy_param);
+    pub async fn get_balances(ccy: Option<&Vec<String>>) -> anyhow::Result<OkxApiResponse<Balance>> {
+        let mut path = "/api/v5/account/balance".to_string();
+        if let Some(ccy) = ccy {
+            let ccy_param = ccy.join(",");
+            path.push_str(&format!("&ccy={}", ccy_param));
+        }
         okx_client::get_okx_client().send_request(Method::GET, &path, "").await
     }
 

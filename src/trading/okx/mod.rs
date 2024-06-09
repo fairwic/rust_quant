@@ -7,6 +7,7 @@ pub mod trade;
 pub mod market;
 pub mod okx_websocket;
 pub mod okx_websocket_client;
+pub mod asset;
 
 
 // 通用的响应结构体

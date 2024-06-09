@@ -12,6 +12,8 @@ use tokio::time::{Instant, interval, sleep_until};
 
 
 mod trading;
+mod Job;
+mod time_util;
 
 use trading::okx::okx_client;
 use trading::model::biz_activity_model::BizActivityModel;
@@ -20,6 +22,8 @@ use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::okx::market::Market;
 use crate::trading::model::market::tickers::TicketsModel;
 use crate::trading::okx::okx_websocket_client;
+use crate::trading::task::asset_job;
+use crate::trading::task::candles_job;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -61,6 +65,9 @@ use tracing_subscriber::FmtSubscriber;
 use crate::trading::model::Db;
 use crate::trading::okx::okx_websocket_client::ApiType;
 use trading::strategy::StopLossStrategy;
+use crate::Job::task_scheduler::TaskScheduler;
+use crate::trading::okx::public_data::public_data;
+use crate::trading::task::{account_job, tickets_job};
 
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     if let Err(e) = handle_connection(peer, stream).await {
@@ -89,19 +96,45 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
 }
 
 
+async fn validate_system_time() {
+    let time_str = public_data::get_time().await;
+    println!("获取okx系统时间: {:#?}", time_str);
+    // 将字符串转换为DateTime<Utc>
+    let time = time_str.unwrap().parse::<i64>().unwrap();
+    let time = DateTime::<Utc>::from_utc(
+        chrono::NaiveDateTime::from_timestamp(time / 1000, ((time % 1000) * 1_000_000) as u32),
+        Utc,
+    );
+
+    // 获取本地时间
+    let now = Utc::now().timestamp_millis();
+    let okx_time = time.timestamp_millis();
+
+    // 判断获取到时间是否与本地时间相差不超过100ms
+    let time_diff = (now - okx_time).abs();
+    if time_diff < 20000 {
+        println!("时间间隔相差值: {} 毫秒", time_diff);
+    } else {
+        panic!("时间未同步，时间间隔相差值: {} 毫秒", time_diff);
+    }
+}
+
+
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     //env init
     dotenv().ok();
     // a builder for `FmtSubscriber`.
     let subscriber = FmtSubscriber::builder()
         // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
         // will be written to stdout.
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::DEBUG)
         // completes the builder.
         .finish();
     tracing::subscriber::set_global_default(subscriber)
         .expect("setting default subscriber failed");
+
+
     //模拟交易
     // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
     let api_key = env::var("OKX_API_KEY").expect("");
@@ -222,70 +255,73 @@ async fn main() {
     // println!("交易产品信息:{:#?}", res);
     // //
     // //
-    // // let ccy = vec!["BTC".to_string(), "USDT".to_string(), "ETH".to_string()];
-    // // let balances = okx_client.get_balances(&ccy).await?;
-    // // println!("账户余额:");
-    // // for balance in balances {
-    // //     println!("{}: {}", balance.ccy, balance.bal);
-    // // }
-    // let ccy = vec!["BTC".to_string(), "USDT".to_string(), "ETH".to_string()];
-    // let balances = Account::get_balances(&ccy).await?;
-    // println!("账户余额:{:#?}", balances);
 
-    //获取系统时间
-    // let time = public_data::get_time().await?;
-    // println!("系统时间:{:#?}", time);
+
     // 初始化 Redis
     let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").unwrap();
     let mut con = client.get_multiplexed_async_connection().await.unwrap();
 
     // let db = BizActivityModel::new().await;
     let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
-    let res = startegy.main("btc", "1D", 12, 26, 9,StopLossStrategy::Amount(3.00)).await;
-    println!("strategy{:#?}", res)
+    let res = startegy.main("BTC-USDT-SWAP", "1D", 12, 26, 9, StopLossStrategy::Amount(12.00)).await;
+    // println!("strategy{:#?}", res);
+
+    //验证当前系统时间
+    validate_system_time().await;
+
+    //初始化可以交易产品
+    // tickets_job::init_all_ticker().await;
+
+    // candles_job::init_all_table().await;
+    candles_job::init_before_candles().await?;
+    candles_job::init_all_candles().await?;
+    // let ins_id = "BTC-USDT-SWAP";
+    // let bar = "1D";
+    // candles_job::update_new_candles_to_redis(con, ins_id, bar).await?;
+
+    // let ins_id = "BTC-USDT-SWAP";
+    // let bar = "1D";
+    // candles_job::update_new_candles_to_redis(con, ins_id, bar).await?;
 
     // let result = db.add().await?;
-    // let every_n_seconds = Duration::from_secs(10); // 每隔10秒执行一次
-    // let mut interval_timer = interval(every_n_seconds);
-    //
-    // // 指定时间
-    // let now: DateTime<Utc> = Utc::now();
-    // let target_time = now
-    //     .with_hour(23).unwrap() // 指定小时
-    //     .with_minute(30).unwrap() // 指定分钟
-    //     .with_second(0).unwrap() // 指定秒
-    //     .with_nanosecond(0).unwrap(); // 指定纳秒
-    //
-    // let duration_until_target = (target_time - now).to_std().unwrap();
-    // let mut target_instant = Instant::now() + duration_until_target;
-    //
-    // println!("Current time: {:?}", now);
-    // println!("Target time: {:?}", target_time);
-    //
-    //
-    //   let args = Args::parse();
-    //
-    // for _ in 0..args.count {
-    //     println!("Hello {}!", args.name)
-    // }
-    //
-    // // 任务调度
-    // loop {
-    //     tokio::select! {
-    //         _ = interval_timer.tick() => {
-    //             println!("Periodic task executed at {:?}", tokio::time::Instant::now());
-    //         }
-    //         _ = sleep_until(target_instant) => {
-    //             println!("Scheduled task executed at {:?}", tokio::time::Instant::now());
-    //             // 重新计算下一次指定时间的间隔，如果你想要重复执行这个指定时间任务
-    //             let next_target_time = target_time + chrono::Duration::days(1);
-    //             let duration_until_next_target = (next_target_time - Utc::now()).to_std().unwrap();
-    //             let next_target_instant = Instant::now() + duration_until_next_target;
-    //             target_instant = next_target_instant; // 更新目标时间
-    //         }
-    //     }
-    // }
+    let mut scheduler = TaskScheduler::new();
+
+    // //周期性任务
+    // scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
+    //     println!("Periodic Job executed at {:?}", tokio::time::Instant::now());
+    //     //同步单个交易产品
+    //     tickets_job::sync_ticker().await;
+    // });
+    // // 周期性任务
+    // scheduler.add_periodic_task("periodic_task_2".to_string(), 500, || async {
+    //     println!("Periodic Job executed at {:?}", tokio::time::Instant::now());
+    //     //获取账户交易余额
+    //     account_job::get_account_balance().await.expect("获取同步账户余额异常");
+    // });
+    // 周期性任务
+    // scheduler.add_periodic_task("periodic_task_3".to_string(), 500, || async {
+    //     // println!("Periodic Job executed at {:?}", tokio::time::Instant::now());
+    //     //获取账户交易余额
+    //     asset_job::get_balance().await.expect("获取资金账户余额异常");
+    // });
 
 
-    // Ok(())
+    // // 添加一个定时任务
+    // let target_time = Utc::now() + chrono::Duration::seconds(30);
+    // scheduler.add_scheduled_task("scheduled_task_1".to_string(), target_time, || async {
+    //     println!("Scheduled Job executed at {:?}", tokio::time::Instant::now());
+    // });
+
+    // 捕捉Ctrl+C信号以平滑关闭
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!("Ctrl+C received, shutting down.");
+        }
+    }
+
+    scheduler.shutdown().await;
+    // 模拟运行一段时间后关闭调度器
+    // tokio::time::sleep(Duration::from_secs(60)).await;
+    // scheduler.shutdown().await;
+    Ok(())
 }

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::okx::{okx_client, OkxApiResponse};
 use crate::trading::okx::market::Market;
@@ -17,7 +18,7 @@ pub struct RequestParams {
 }
 
 // 使用类型别名来定义特定的响应类型
-pub type CandleResponse = OkxApiResponse<Vec<CandlesEntity>>;
+pub type CandleResponse = OkxApiResponse<Vec<CandleData>>;
 
 impl Market {
     // 获取交易产品最近的K线数据
@@ -32,13 +33,13 @@ impl Market {
     // before	String	否	请求此时间戳之后（更新的数据）的分页内容，传的值为对应接口的ts, 单独使用时，会返回最新的数据。
     // limit	String	否	分页返回的结果集数量，最大为300，不填默认返回100条
 
-    pub async fn get_candles(
-        inst_id: &str,
-        bar: &str,
-        after: Option<&str>,
-        before: Option<&str>,
-        limit: Option<&str>,
-    ) -> Result<Vec<CandlesEntity>> {
+    pub async fn get_candles(&self,
+                             inst_id: &str,
+                             bar: &str,
+                             after: Option<&str>,
+                             before: Option<&str>,
+                             limit: Option<&str>,
+    ) -> Result<Vec<CandleData>> {
         let mut path = format!("/api/v5/market/candles?instId={}", inst_id);
 
         if !bar.is_empty() {
@@ -70,8 +71,8 @@ impl Market {
         after: Option<&str>,
         before: Option<&str>,
         limit: Option<&str>,
-    ) -> Result<CandleResponse> {
-        let mut path = format!("/api/v5/market/candles?instId={}", inst_id);
+    ) -> Result<Vec<CandleData>> {
+        let mut path = format!("/api/v5/market/history-candles?instId={}", inst_id);
 
         if !bar.is_empty() {
             path.push_str(&format!("&bar={}", bar));
@@ -89,7 +90,66 @@ impl Market {
             path.push_str(&format!("&limit={}", limit_val));
         }
 
-        okx_client::get_okx_client().send_request(Method::GET, &path, "").await
+        debug!("path:{}", path);
+        let res: OkxApiResponse<Vec<CandleData>> = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
+        Ok(res.data)
+    }
+
+    /**
+    GET / 获取交易产品公共成交数据
+    查询市场上的成交信息数据
+    限速：100次/2s
+    限速规则：IP
+     **/
+    pub async fn get_trades(
+        &self,
+        inst_id: &str,
+        limit: Option<&str>,
+    ) -> Result<Vec<CandleData>> {
+        let mut path = format!("/api/v5/market/trades?instId={}", inst_id);
+        if let Some(limit_val) = limit {
+            path.push_str(&format!("&limit={}", limit_val));
+        }
+        debug!("path:{}", path);
+        let res: OkxApiResponse<Vec<CandleData>> = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
+        Ok(res.data)
+    }
+
+    /**
+     GET / 获取交易产品公共历史成交数据
+     查询市场上的成交信息数据，可以分页获取最近3个月的数据。
+     限速：20次/2s
+     限速规则：IP
+    **/
+    pub async fn get_history_trades(
+        &self,
+        inst_id: &str,
+        bar: &str,
+        after: Option<&str>,
+        before: Option<&str>,
+        limit: Option<&str>,
+    ) -> Result<Vec<CandleData>> {
+        let mut path = format!("/api/v5/market/trades?instId={}", inst_id);
+
+        if !bar.is_empty() {
+            path.push_str(&format!("&bar={}", bar));
+        }
+
+        if let Some(after_ts) = after {
+            path.push_str(&format!("&after={}", after_ts));
+        }
+
+        if let Some(before_ts) = before {
+            path.push_str(&format!("&before={}", before_ts));
+        }
+
+        if let Some(limit_val) = limit {
+            path.push_str(&format!("&limit={}", limit_val));
+        }
+
+        debug!("path:{}", path);
+        let res: OkxApiResponse<Vec<CandleData>> = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
+        Ok(res.data)
     }
 }
 
