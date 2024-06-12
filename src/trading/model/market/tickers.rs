@@ -101,8 +101,17 @@ impl TicketsModel {
         Ok(())
     }
     /*获取全部*/
-    pub async fn get_all(&self) -> Result<Vec<TickersDataEntity>> {
-        let results: Vec<TickersDataEntity> = TickersDataEntity::fetch_list(&self.db).await?;
+    pub async fn get_all(&self, inst_ids: Option<Vec<&str>>) -> Result<Vec<TickersDataEntity>> {
+        let sql = if let Some(inst_ids) = inst_ids {
+            format!(
+                "SELECT * FROM tickers_data WHERE inst_id IN ({}) ORDER BY id DESC",
+                inst_ids.iter().map(|id| format!("'{}'", id)).collect::<Vec<String>>().join(", ")
+            )
+        } else {
+            "SELECT * FROM tickers_data ORDER BY id DESC".to_string()
+        };
+
+        let results: Vec<TickersDataEntity> = self.db.query_decode(sql.as_str(), vec![]).await?;
         Ok(results)
     }
 }

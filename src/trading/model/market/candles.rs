@@ -156,7 +156,7 @@ impl CandlesModel {
     //     Ok(())
     // }
     pub async fn get_all(&self, inst_id: &str, time_interval: &str) -> Result<Vec<CandlesEntity>> {
-        let mut query = format!("select * from  `{}` order by ts desc limit 1000 ", Self::get_tale_name(inst_id, time_interval));
+        let mut query = format!("select * from  `{}` order by ts ASC limit 4000 ", Self::get_tale_name(inst_id, time_interval));
         println!("query: {}", query);
         let res: Value = self.db.query(&query, vec![]).await?;
 

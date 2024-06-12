@@ -12,13 +12,13 @@ use crate::trading::okx::market::Market;
 use crate::trading::strategy::redis_operations::{Candle, RedisOperations};
 
 
-pub async fn init_create_table() -> anyhow::Result<()> {
+pub async fn init_create_table(inst_ids: Option<Vec<&str>>, times: Option<Vec<&str>>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
-    let res = res.get_all().await.unwrap();
+    let res = res.get_all(inst_ids).await.unwrap();
     //获取获取数据更旧的数据
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
-        for time in ["1D"] {
+        for time in times.clone().unwrap() {
             //获取当前数据最旧的数据
             let res = CandlesModel::new().await.create_table(ticker.inst_id.as_str(), time).await?;
             debug!("执行创建表语句 execResult{}",res);
@@ -28,14 +28,18 @@ pub async fn init_create_table() -> anyhow::Result<()> {
 }
 
 /** 同步所有更旧的蜡烛图**/
-pub async fn init_all_candles() -> anyhow::Result<()> {
+pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<&str>>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
-    let res = res.get_all().await.unwrap();
+    let res = res.get_all(inst_ids).await.unwrap();
 
     //获取获取数据更旧的数据
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
-        for time in ["1D"] {
+        for time in times.clone().unwrap() {
+            //判断是否达到最新的3000条
+            let res = CandlesModel::new().await.count().await?;
+
+
             //获取当前数据最旧的数据
             let res = CandlesModel::new().await.get_oldest_data(ticker.inst_id.as_str(), time).await?;
             println!("res: {:?}", res);
@@ -65,14 +69,14 @@ pub async fn init_all_candles() -> anyhow::Result<()> {
 }
 
 /** 同步所有更新的蜡烛图**/
-pub async fn init_before_candles() -> anyhow::Result<()> {
+pub async fn init_before_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<&str>>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
-    let res = res.get_all().await.unwrap();
+    let res = res.get_all(inst_ids).await.unwrap();
 
     //获取获取数据更新的数据
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
-        for time in ["1D"] {
+        for time in times.clone().unwrap() {
             //获取当前数据最旧的数据
             let res = CandlesModel::new().await.get_new_data(ticker.inst_id.as_str(), time).await?;
             println!("res: {:?}", res);

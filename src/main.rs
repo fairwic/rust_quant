@@ -261,21 +261,30 @@ async fn main() -> anyhow::Result<()> {
     let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").unwrap();
     let mut con = client.get_multiplexed_async_connection().await.unwrap();
 
-    // let db = BizActivityModel::new().await;
-    let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
-    let res = startegy.main("BTC-USDT-SWAP", "1D", 12, 26, 9, StopLossStrategy::Amount(12.00)).await;
-    // println!("strategy{:#?}", res);
 
     //验证当前系统时间
     validate_system_time().await;
 
     //初始化可以交易产品
     // tickets_job::init_all_ticker().await;
+    let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"];
+    let tims = ["1m", "3m", "5m"];
 
-    // candles_job::init_all_table().await;
-    candles_job::init_before_candles().await?;
-    candles_job::init_all_candles().await?;
-    // let ins_id = "BTC-USDT-SWAP";
+    candles_job::init_create_table(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await.expect("init create_table errror");
+    candles_job::init_before_candles(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await?;
+    candles_job::init_all_candles(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await?;
+
+
+    // let db = BizActivityModel::new().await;
+    let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
+
+    for inst_id in inst_ids {
+        for time in tims {
+            let res = startegy.main(inst_id, time, 12, 26, 9, 10, 3, 1.0, StopLossStrategy::Amount(5.00)).await;
+            println!("strategy{:#?}", res);    // let ins_id = "BTC-USDT-SWAP";
+        }
+    }
+
     // let bar = "1D";
     // candles_job::update_new_candles_to_redis(con, ins_id, bar).await?;
 
