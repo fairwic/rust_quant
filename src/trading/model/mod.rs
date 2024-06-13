@@ -2,7 +2,7 @@ pub mod biz_activity;
 pub mod biz_activity_model;
 pub mod market;
 pub(crate) mod asset;
-mod strategy;
+pub(crate) mod strategy;
 
 use std::println;
 use fast_log::Config;

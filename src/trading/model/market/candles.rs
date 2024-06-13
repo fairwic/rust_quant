@@ -200,4 +200,20 @@ impl CandlesModel {
         debug!("result: {:?}", res);
         Ok(res)
     }
+
+    pub async fn fetch_candles_from_mysql(&self,ins_id: &str, time: &str) -> anyhow::Result<Vec<CandlesEntity>> {
+        let candles_model = CandlesModel::new().await;
+        let candles = candles_model.get_all(ins_id, time).await;
+        match candles {
+            Ok(mut data) => {
+                info!("Fetched {} candles from MySQL", data.len());
+                data.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+                Ok(data)
+            }
+            Err(e) => {
+                info!("Error fetching candles from MySQL: {}", e);
+                Err(anyhow::anyhow!("Error fetching candles from MySQL"))
+            }
+        }
+    }
 }

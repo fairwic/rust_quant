@@ -13,7 +13,7 @@ pub fn mill_time_to_datetime(timestamp_ms: i64) -> Result<String, String> {
     }
 }
 
-pub fn mill_time_to_datetime_SHANGHAI(timestamp_ms: i64) -> Result<String, String> {
+pub fn mill_time_to_datetime_shanghai(timestamp_ms: i64) -> Result<String, String> {
     // 将毫秒级时间戳转换为 DateTime<Utc>
     match Utc.timestamp_millis_opt(timestamp_ms) {
         chrono::LocalResult::Single(datetime) => {
