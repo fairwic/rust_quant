@@ -6,8 +6,10 @@ use chrono::Utc;
 use futures_util::{future, pin_mut, SinkExt, StreamExt};
 use hmac_sha256::HMAC;
 use log::{info, error};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 pub(crate) struct OkxWebsocket {
@@ -21,6 +23,31 @@ pub enum ApiType {
     Public,
     Private,
     Business,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Arg {
+    channel: String,
+    instId: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Data {
+    ts: String,
+    o: String,
+    h: String,
+    l: String,
+    c: String,
+    vol: String,
+    volCcy: String,
+    volCcyQuote: String,
+    confirm: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MessageData {
+    arg: Arg,
+    data: Vec<Vec<String>>,
 }
 
 impl OkxWebsocket {
@@ -95,14 +122,76 @@ impl OkxWebsocket {
         }
     }
 
+    // pub async fn subscribe(&self, api_type: ApiType, channels: Vec<serde_json::Value>) -> Result<(), Box<dyn std::error::Error>> {
+    //     let ws_stream = self.connect_and_login(&api_type).await?;
+    //     let (mut write, mut read) = ws_stream.split();
+    //
+    //     let subscribe_msg = json!({
+    //         "op": "subscribe",
+    //         "args": channels
+    //     });
+    //
+    //     write.send(Message::Text(subscribe_msg.to_string())).await.expect("Failed to send subscribe message");
+    //
+    //     while let Some(msg) = read.next().await {
+    //         match msg {
+    //             Ok(msg) => {
+    //                 if msg.is_text() {
+    //                     let text = msg.to_text().unwrap();
+    //                     println!("Received: {}", text);
+    //                 }
+    //             }
+    //             Err(e) => {
+    //                 eprintln!("Error: {}", e);
+    //                 break;
+    //             }
+    //         }
+    //     }
+    //
+    //     Ok(())
+    // }
+
+
+    async fn parse_and_log_message(&self, text: &str) {
+        // 记录收到的原始消息
+        info!("Received: {}", text);
+
+        // 解析消息
+        match serde_json::from_str::<MessageData>(text) {
+            Ok(message_data) => {
+                info!("Parsed message: {:?}", message_data);
+
+                // 解析具体的数据
+                for data in message_data.data {
+                    let candle_data = Data {
+                        ts: data[0].clone(),
+                        o: data[1].clone(),
+                        h: data[2].clone(),
+                        l: data[3].clone(),
+                        c: data[4].clone(),
+                        vol: data[5].clone(),
+                        volCcy: data[6].clone(),
+                        volCcyQuote: data[7].clone(),
+                        confirm: data[8].clone(),
+                    };
+                    info!("Candle data: {:?}", candle_data);
+                }
+            }
+            Err(e) => {
+                error!("Failed to parse message: {}", e);
+            }
+        }
+    }
+
+
     pub async fn subscribe(&self, api_type: ApiType, channels: Vec<serde_json::Value>) -> Result<(), Box<dyn std::error::Error>> {
         let ws_stream = self.connect_and_login(&api_type).await?;
         let (mut write, mut read) = ws_stream.split();
 
         let subscribe_msg = json!({
-            "op": "subscribe",
-            "args": channels
-        });
+        "op": "subscribe",
+        "args": channels
+    });
 
         write.send(Message::Text(subscribe_msg.to_string())).await.expect("Failed to send subscribe message");
 
@@ -111,11 +200,11 @@ impl OkxWebsocket {
                 Ok(msg) => {
                     if msg.is_text() {
                         let text = msg.to_text().unwrap();
-                        println!("Received: {}", text);
+                        self.parse_and_log_message(text).await;
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    error!("Error: {}", e);
                     break;
                 }
             }

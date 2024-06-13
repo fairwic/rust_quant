@@ -14,7 +14,9 @@ use tokio::time::{Instant, interval, sleep_until};
 mod trading;
 mod Job;
 mod time_util;
+mod socket;
 
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use trading::okx::okx_client;
 use trading::model::biz_activity_model::BizActivityModel;
 use clap::Parser;
@@ -61,8 +63,8 @@ use tokio_tungstenite::{
     accept_async,
     tungstenite::{Error, Result},
 };
-use tracing::{info, Level};
-use tracing_subscriber::FmtSubscriber;
+use tracing::{debug, info, Level, span};
+use tracing_subscriber::{EnvFilter, fmt, FmtSubscriber};
 use crate::trading::model::Db;
 use crate::trading::okx::okx_websocket_client::ApiType;
 use trading::strategy::StopLossStrategy;
@@ -76,6 +78,8 @@ use crate::trading::model::strategy::back_test_log::BackTestLog;
 use crate::trading::okx::trade;
 use crate::trading::okx::trade::{AttachAlgoOrd, OrderRequest};
 use crate::trading::strategy::StrategyType;
+use tracing_subscriber::prelude::*;
+use crate::trading::task;  // 导入所有必要的扩展 trait
 
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     if let Err(e) = handle_connection(peer, stream).await {
@@ -106,7 +110,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
 
 async fn validate_system_time() {
     let time_str = public_data::get_time().await;
-    println!("获取okx系统时间: {:#?}", time_str);
+    debug!("获取okx系统时间: {:?}", time_str);
     // 将字符串转换为DateTime<Utc>
     let time = time_str.unwrap().parse::<i64>().unwrap();
     let time = DateTime::<Utc>::from_utc(
@@ -121,9 +125,9 @@ async fn validate_system_time() {
     // 判断获取到时间是否与本地时间相差不超过100ms
     let time_diff = (now - okx_time).abs();
     if time_diff < 20000 {
-        println!("时间间隔相差值: {} 毫秒", time_diff);
+        info!("时间间隔相差值: {} 毫秒", time_diff);
     } else {
-        panic!("时间未同步，时间间隔相差值: {} 毫秒", time_diff);
+        info!("时间未同步，时间间隔相差值: {} 毫秒", time_diff);
     }
 }
 
@@ -132,15 +136,51 @@ async fn validate_system_time() {
 async fn main() -> anyhow::Result<()> {
     //env init
     dotenv().ok();
-    // a builder for `FmtSubscriber`.
-    let subscriber = FmtSubscriber::builder()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(Level::DEBUG)
-        // completes the builder.
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("setting default subscriber failed");
+
+    if env::var("APP_ENV").expect("app_env config is none") == "LOCAL" {
+        // a builder for `FmtSubscriber`.
+        let subscriber = FmtSubscriber::builder()
+            // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
+            // will be written to stdout.
+            .with_max_level(Level::DEBUG)
+            // completes the builder.
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting default subscriber failed");
+    } else {
+        // 设置日志轮换配置
+        let debug_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "debug.log");
+        let info_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "info.log");
+        let error_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "error.log");
+
+        // 创建非阻塞的日志记录器
+        let (debug_non_blocking, _debug_guard) = tracing_appender::non_blocking(debug_file);
+        let (info_non_blocking, _info_guard) = tracing_appender::non_blocking(info_file);
+        let (error_non_blocking, _error_guard) = tracing_appender::non_blocking(error_file);
+
+
+        // 初始化 tracing 订阅器
+        tracing_subscriber::registry()
+            .with(
+                fmt::layer()
+                    .with_writer(debug_non_blocking)
+                    .with_filter(EnvFilter::new("debug"))
+                    .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG)
+            )
+            .with(
+                fmt::layer()
+                    .with_writer(info_non_blocking)
+                    .with_filter(EnvFilter::new("info"))
+                    .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
+            )
+            .with(
+                fmt::layer()
+                    .with_writer(error_non_blocking)
+                    .with_filter(EnvFilter::new("error"))
+                    .with_filter(tracing_subscriber::filter::LevelFilter::ERROR)
+            )
+            .init();
+    }
 
 
     //模拟交易
@@ -182,23 +222,6 @@ async fn main() -> anyhow::Result<()> {
     // if let (Err(public_err), Err(private_err)) = tokio::join!(public_task, private_task) {
     //     eprintln!("Failed to subscribe to public channels: {}", public_err);
     //     eprintln!("Failed to subscribe to private channels: {}", private_err);
-    // }
-
-
-    // let res = okx_websocket_clinet.socket_connect().await;
-    // println!("!!!!!!!");
-    // let res = okx_websocket_clinet.private_subscribe("tickers", "LTC-USDT").await;
-
-
-    // let addr = "127.0.0.1:9002";
-    // let listener = TcpListener::bind(&addr).await.expect("Can't listen");
-    // info!("Listening on: {}", addr);
-    //
-    // while let Ok((stream, _)) = listener.accept().await {
-    //     let peer = stream.peer_addr().expect("connected streams should have a peer address");
-    //     info!("Peer address: {}", peer);
-    //
-    //     let res = tokio::spawn(accept_connection(peer, stream));
     // }
 
 
@@ -273,84 +296,17 @@ async fn main() -> anyhow::Result<()> {
     //验证当前系统时间
     validate_system_time().await;
 
+    //初始化数据
+    task::run_sync_data_job().await;
+
+    //执行策略
+    task::run_strategy_job().await?;
+
+
     //初始化可以交易产品
     // tickets_job::init_all_ticker().await;
     // let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"];
 
-    let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP", "ADA-USDT-SWAP"];
-    let tims = ["4H"];
-
-    candles_job::init_create_table(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await.expect("init create_table errror");
-    candles_job::init_all_candles(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await?;
-    candles_job::init_before_candles(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await?;
-
-
-    // let db = BizActivityModel::new().await;
-    let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
-
-
-    // let inst_ids = ["BTC-USDT-SWAP"];
-    let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP", "ADA-USDT-SWAP"];
-    let tims = ["4H"];
-    for inst_id in inst_ids {
-        for time in tims {
-            let mysql_candles_5m = candles::CandlesModel::new().await.fetch_candles_from_mysql(inst_id, time).await?;
-            if mysql_candles_5m.is_empty() {
-                return Err(anyhow!("mysql candles 5m is empty"));
-            }
-
-
-            //macd
-            let macd_fast_period = 12;
-            let macd_slow_period = 26;
-            let macd_signal_period = 9;
-
-            //突破周期，确认周期，成交量比例
-            let breakout_period = 10;
-            let confirmation_period = 2;
-            let volume_threshold = 1.1;
-            let stop_loss_strategy = StopLossStrategy::Amount(5.00);
-
-            // let res = startegy.breakout_strategy(&*mysql_candles_5m, breakout_period, confirmation_period, volume_threshold, stop_loss_strategy).await;
-            // println!("strategy{:#?}", res);    // let ins_id = "BTC-USDT-SWAP";
-            //
-            // // 解包 Result 类型
-            // let (final_fund, win_rate) = res;
-            // //把back test strategy结果写入数据
-            // let back_test_log = BackTestLog {
-            //     strategy_type: format!("{:?}", StrategyType::BreakoutUp),
-            //     inst_type: inst_id.parse()?,
-            //     time: time.parse()?,
-            //     final_fund: final_fund.to_string(),
-            //     win_rate: win_rate.to_string(),
-            //     strategy_detail: Some(format!("macd_fast_period: {}, macd_slow_period: {}, macd_signal:{},breakout_period:{},\
-            //                                   confirmation_period:{},volume_threshold:{},stop_loss_strategy:{:?}",
-            //                                   macd_fast_period, macd_slow_period, macd_signal_period, breakout_period, confirmation_period, volume_threshold, stop_loss_strategy
-            //     )),
-            // };
-            // back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
-            //
-
-            let res = startegy.short_strategy(&*mysql_candles_5m, breakout_period, confirmation_period, volume_threshold, stop_loss_strategy).await;
-            println!("strategy{:#?}", res);    // let ins_id = "BTC-USDT-SWAP";
-
-            // 解包 Result 类型
-            let (final_fund, win_rate) = res;
-            //把back test strategy结果写入数据
-            let back_test_log = BackTestLog {
-                strategy_type: format!("{:?}", StrategyType::BreakoutDown),
-                inst_type: inst_id.parse()?,
-                time: time.parse()?,
-                final_fund: final_fund.to_string(),
-                win_rate: win_rate.to_string(),
-                strategy_detail: Some(format!("macd_fast_period: {}, macd_slow_period: {}, macd_signal:{},breakout_period:{},\
-                                              confirmation_period:{},volume_threshold:{},stop_loss_strategy:{:?}",
-                                              macd_fast_period, macd_slow_period, macd_signal_period, breakout_period, confirmation_period, volume_threshold, stop_loss_strategy
-                )),
-            };
-            back_test_log::BackTestLogModel::new().await.add(back_test_log).await?
-        }
-    }
 
     // let order_params = OrderRequest {
     //     inst_id: "BTC-USDT".to_string(),
@@ -401,14 +357,16 @@ async fn main() -> anyhow::Result<()> {
     // candles_job::update_new_candles_to_redis(con, ins_id, bar).await?;
 
     // let result = db.add().await?;
+
+
     let mut scheduler = TaskScheduler::new();
 
-    // //周期性任务
-    // scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
-    //     println!("Periodic Job executed at {:?}", tokio::time::Instant::now());
-    //     //同步单个交易产品
-    //     tickets_job::sync_ticker().await;
-    // });
+    //周期性任务
+    scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
+        info!("Periodic Job executed at {:?}", tokio::time::Instant::now());
+        //同步单个交易产品
+        tickets_job::sync_ticker().await;
+    });
     // // 周期性任务
     // scheduler.add_periodic_task("periodic_task_2".to_string(), 500, || async {
     //     println!("Periodic Job executed at {:?}", tokio::time::Instant::now());
@@ -429,12 +387,15 @@ async fn main() -> anyhow::Result<()> {
     //     println!("Scheduled Job executed at {:?}", tokio::time::Instant::now());
     // });
 
+    //运行websocket,实时同步数据
+    socket::run_socket().await;
     // 捕捉Ctrl+C信号以平滑关闭
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             println!("Ctrl+C received, shutting down.");
         }
     }
+
 
     scheduler.shutdown().await;
     // 模拟运行一段时间后关闭调度器

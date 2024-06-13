@@ -45,7 +45,7 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<&st
             }
             //获取当前数据最旧的数据
             let res = CandlesModel::new().await.get_oldest_data(ticker.inst_id.as_str(), time).await?;
-            println!("res: {:?}", res);
+            debug!("res: {:?}", res);
             let mut after: i64 = 0;
             if res.is_none() {
                 after = Utc::now().naive_utc().timestamp_millis();
@@ -82,7 +82,7 @@ pub async fn init_before_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<
         for time in times.clone().unwrap() {
             //获取当前数据最旧的数据
             let res = CandlesModel::new().await.get_new_data(ticker.inst_id.as_str(), time).await?;
-            println!("res: {:?}", res);
+            debug!("res: {:?}", res);
             let mut before: i64 = 0;
             if res.is_none() {
                 before = Utc::now().naive_utc().timestamp_millis();
@@ -111,7 +111,7 @@ pub async fn update_new_candles_to_redis(mut redis: MultiplexedConnection, inst_
     //获取当前交易产品的历史蜡烛图数据
     //获取当前数据最旧的数据
     let res = CandlesModel::new().await.get_new_data(inst_id, time).await?;
-    println!("res: {:?}", res);
+    debug!("res: {:?}", res);
     let mut before: i64 = 0;
     if res.is_none() {
         before = Utc::now().naive_utc().timestamp_millis();
@@ -137,7 +137,7 @@ pub async fn update_new_candles_to_db(inst_id: &str, time: &str) -> anyhow::Resu
     //获取当前交易产品的历史蜡烛图数据
     //获取当前数据最旧的数据
     let res = CandlesModel::new().await.get_new_data(inst_id, time).await?;
-    println!("res: {:?}", res);
+    debug!("res: {:?}", res);
     let mut before: i64 = 0;
     if res.is_none() {
         before = Utc::now().naive_utc().timestamp_millis();

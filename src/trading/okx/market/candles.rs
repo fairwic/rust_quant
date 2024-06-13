@@ -57,7 +57,7 @@ impl Market {
         if let Some(limit_val) = limit {
             path.push_str(&format!("&limit={}", limit_val));
         }
-        println!("path:{}", path);
+        debug!("path:{}", path);
 
         let res: CandleResponse = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
 

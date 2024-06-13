@@ -121,8 +121,8 @@ impl CandlesModel {
 
         // 移除最后一个逗号
         query.pop();
-        println!("query: {}", query);
-        println!("parmas: {:?}", params);
+        debug!("query: {}", query);
+        debug!("parmas: {:?}", params);
         if params.is_empty() {
             //抛出错误
             return Err(anyhow!("params is empty"));
@@ -158,10 +158,8 @@ impl CandlesModel {
     // }
     pub async fn get_all(&self, inst_id: &str, time_interval: &str) -> Result<Vec<CandlesEntity>> {
         let mut query = format!("select * from  `{}` order by ts DESC limit 4000 ", Self::get_tale_name(inst_id, time_interval));
-        println!("query: {}", query);
+        debug!("query: {}", query);
         let res: Value = self.db.query(&query, vec![]).await?;
-
-
         if res.is_array() && res.as_array().unwrap().is_empty() {
             info!("No candles found in MySQL");
             return Ok(vec![]);
@@ -178,14 +176,14 @@ impl CandlesModel {
     }
     pub async fn get_new_data(&self, inst_id: &str, time_interval: &str) -> Result<Option<CandlesEntity>> {
         let mut query = format!("select * from  `{}` ORDER BY ts DESC limit 1; ", Self::get_tale_name(inst_id, time_interval));
-        println!("query: {}", query);
+        debug!("query: {}", query);
         let res: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
         debug!("result: {:?}", res);
         Ok(res)
     }
     pub async fn get_oldest_data(&self, inst_id: &str, time_interval: &str) -> Result<Option<CandlesEntity>> {
         let mut query = format!("select * from  `{}` ORDER BY ts ASC limit 1; ", Self::get_tale_name(inst_id, time_interval));
-        println!("query: {}", query);
+        debug!("query: {}", query);
         let res: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
         debug!("result: {:?}", res);
         Ok(res)
@@ -195,13 +193,13 @@ impl CandlesModel {
             limit = Option::from(30000);
         }
         let mut query = format!("select count(*) from  `{}` ORDER BY ts DESC limit {};", Self::get_tale_name(inst_id, time_interval), limit.unwrap());
-        println!("query: {}", query);
+        debug!("query: {}", query);
         let res: u64 = self.db.query_decode(&query, vec![]).await?;
         debug!("result: {:?}", res);
         Ok(res)
     }
 
-    pub async fn fetch_candles_from_mysql(&self,ins_id: &str, time: &str) -> anyhow::Result<Vec<CandlesEntity>> {
+    pub async fn fetch_candles_from_mysql(&self, ins_id: &str, time: &str) -> anyhow::Result<Vec<CandlesEntity>> {
         let candles_model = CandlesModel::new().await;
         let candles = candles_model.get_all(ins_id, time).await;
         match candles {
