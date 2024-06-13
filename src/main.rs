@@ -69,6 +69,9 @@ use crate::Job::task_scheduler::TaskScheduler;
 use crate::trading::okx::public_data::public_data;
 use crate::trading::task::{account_job, tickets_job};
 
+use crate::trading::okx::trade;
+use crate::trading::okx::trade::{AttachAlgoOrd, OrderRequest};
+
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     if let Err(e) = handle_connection(peer, stream).await {
         match e {
@@ -258,8 +261,8 @@ async fn main() -> anyhow::Result<()> {
 
 
     // 初始化 Redis
-    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").unwrap();
-    let mut con = client.get_multiplexed_async_connection().await.unwrap();
+    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").expect("get redis client error");
+    let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
 
 
     //验证当前系统时间
@@ -268,22 +271,66 @@ async fn main() -> anyhow::Result<()> {
     //初始化可以交易产品
     // tickets_job::init_all_ticker().await;
     let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"];
-    let tims = ["1m", "3m", "5m"];
+    let tims = ["5m", "1H"];
 
     candles_job::init_create_table(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await.expect("init create_table errror");
-    candles_job::init_before_candles(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await?;
     candles_job::init_all_candles(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await?;
+    candles_job::init_before_candles(Some(Vec::from(inst_ids)), Some(Vec::from(tims))).await?;
 
 
     // let db = BizActivityModel::new().await;
     let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
 
+    let inst_ids = ["BTC-USDT-SWAP"];
+    // let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"];
+    let tims = ["5m"];
     for inst_id in inst_ids {
         for time in tims {
             let res = startegy.main(inst_id, time, 12, 26, 9, 10, 3, 1.0, StopLossStrategy::Amount(5.00)).await;
             println!("strategy{:#?}", res);    // let ins_id = "BTC-USDT-SWAP";
         }
     }
+
+    // let order_params = OrderRequest {
+    //     inst_id: "BTC-USDT".to_string(),
+    //     td_mode: "isolated".to_string(),
+    //     ccy: None,
+    //     cl_ord_id: Some("custom_order_id".to_string()),
+    //     tag: Some("order_tag".to_string()),
+    //     side: "buy".to_string(),
+    //     pos_side: Some("long".to_string()),
+    //     ord_type: "limit".to_string(),
+    //     sz: "1".to_string(),
+    //     px: Some("30000".to_string()),
+    //     px_usd: None,
+    //     px_vol: None,
+    //     reduce_only: Some(false),
+    //     tgt_ccy: Some("quote_ccy".to_string()),
+    //     ban_amend: Some(false),
+    //     quick_mgn_type: None,
+    //     stp_id: None,
+    //     stp_mode: Some("cancel_maker".to_string()),
+    //     attach_algo_ords: Some(vec![
+    //         AttachAlgoOrd {
+    //             attach_algo_cl_ord_id: Some("algo_order_id".to_string()),
+    //             tp_trigger_px: Some("35000".to_string()),
+    //             tp_ord_px: Some("34900".to_string()),
+    //             tp_ord_kind: Some("limit".to_string()),
+    //             sl_trigger_px: Some("29000".to_string()),
+    //             sl_ord_px: Some("28900".to_string()),
+    //             tp_trigger_px_type: Some("last".to_string()),
+    //             sl_trigger_px_type: Some("last".to_string()),
+    //             sz: Some("1".to_string()),
+    //             amend_px_on_trigger_type: Some(0),
+    //         }
+    //     ]),
+    // };
+    //
+    // //下单
+    // let result = trade::Trade::order(order_params).await?;
+    // println!("Order result: {}", result);
+    //
+
 
     // let bar = "1D";
     // candles_job::update_new_candles_to_redis(con, ins_id, bar).await?;

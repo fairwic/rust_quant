@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use anyhow::{Result, Error, anyhow};
 use reqwest::{Client, Method, StatusCode};
+use tracing::info;
 
 // ... (保持 Ticker、Balance 和 ErrorResponse 结构体的定义不变)
 #[derive(Serialize, Deserialize, Debug)]
@@ -67,9 +68,10 @@ impl OkxWebsocket {
 
         let status_code = response.status();
         let response_body = response.text().await?;
-        println!("okx_response: {}", response_body);
 
         if status_code == StatusCode::OK {
+            // println!("okx_response OK: {}", response_body);
+            info!("okx_response OK");
             let result: T = serde_json::from_str(&response_body)?;
             Ok(result)
         } else {

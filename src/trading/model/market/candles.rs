@@ -1,5 +1,6 @@
 extern crate rbatis;
 
+use std::convert::TryInto;
 use anyhow::{anyhow, Result};
 use log::debug;
 use rbatis::{crud, impl_update, RBatis};
@@ -156,7 +157,7 @@ impl CandlesModel {
     //     Ok(())
     // }
     pub async fn get_all(&self, inst_id: &str, time_interval: &str) -> Result<Vec<CandlesEntity>> {
-        let mut query = format!("select * from  `{}` order by ts ASC limit 4000 ", Self::get_tale_name(inst_id, time_interval));
+        let mut query = format!("select * from  `{}` order by ts DESC limit 4000 ", Self::get_tale_name(inst_id, time_interval));
         println!("query: {}", query);
         let res: Value = self.db.query(&query, vec![]).await?;
 
@@ -186,6 +187,16 @@ impl CandlesModel {
         let mut query = format!("select * from  `{}` ORDER BY ts ASC limit 1; ", Self::get_tale_name(inst_id, time_interval));
         println!("query: {}", query);
         let res: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
+        debug!("result: {:?}", res);
+        Ok(res)
+    }
+    pub async fn get_new_count(&self, inst_id: &str, time_interval: &str, mut limit: Option<i32>) -> Result<u64> {
+        if limit.is_none() {
+            limit = Option::from(30000);
+        }
+        let mut query = format!("select count(*) from  `{}` ORDER BY ts DESC limit {};", Self::get_tale_name(inst_id, time_interval), limit.unwrap());
+        println!("query: {}", query);
+        let res: u64 = self.db.query_decode(&query, vec![]).await?;
         debug!("result: {:?}", res);
         Ok(res)
     }

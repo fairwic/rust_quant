@@ -36,10 +36,13 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<&st
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
         for time in times.clone().unwrap() {
-            //判断是否达到最新的3000条
-            let res = CandlesModel::new().await.count().await?;
-
-
+            //判断是否达到最新的300000条
+            let limit = 50000;
+            let res = CandlesModel::new().await.get_new_count(ticker.inst_id.as_str(), time, Some(limit)).await?;
+            if (res > limit as u64) {
+                debug!("达到最新的{}条,跳过",limit);
+                continue;
+            }
             //获取当前数据最旧的数据
             let res = CandlesModel::new().await.get_oldest_data(ticker.inst_id.as_str(), time).await?;
             println!("res: {:?}", res);
@@ -91,7 +94,6 @@ pub async fn init_before_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<
                 if res.is_empty() {
                     debug!("No new candles patch{},{}",ticker.inst_id, time);
                     break;
-                    //插入数据
                 }
                 let res = CandlesModel::new().await.add(res, ticker.inst_id.as_str(), time).await?;
                 let res = CandlesModel::new().await.get_new_data(ticker.inst_id.as_str(), time).await?;
