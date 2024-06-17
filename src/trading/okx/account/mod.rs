@@ -77,6 +77,7 @@ impl Account {
         if let Some(postId) = post_id {
             path.push_str(&format!("&postId={}", postId));
         }
+
         okx_client::get_okx_client().send_request(Method::GET, &path, "").await
     }
 }

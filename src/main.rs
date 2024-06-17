@@ -70,16 +70,16 @@ use crate::trading::okx::okx_websocket_client::ApiType;
 use trading::strategy::StopLossStrategy;
 use crate::Job::task_scheduler::TaskScheduler;
 use crate::trading::model::market::candles;
-use crate::trading::okx::public_data::public_data;
+use crate::trading::okx::public_data::OkxPublicData;
 use crate::trading::task::{account_job, tickets_job};
 
 use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
 use crate::trading::okx::trade;
-use crate::trading::okx::trade::{AttachAlgoOrd, OrderRequest};
+use crate::trading::okx::trade::{AttachAlgoOrd, OrderRequest, Side};
 use crate::trading::strategy::StrategyType;
 use tracing_subscriber::prelude::*;
-use crate::trading::task;  // 导入所有必要的扩展 trait
+use crate::trading::{order, task};  // 导入所有必要的扩展 trait
 
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     if let Err(e) = handle_connection(peer, stream).await {
@@ -109,7 +109,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
 
 
 async fn validate_system_time() {
-    let time_str = public_data::get_time().await;
+    let time_str = OkxPublicData::get_time().await;
     debug!("获取okx系统时间: {:?}", time_str);
     // 将字符串转换为DateTime<Utc>
     let time = time_str.unwrap().parse::<i64>().unwrap();
@@ -157,8 +157,6 @@ async fn main() -> anyhow::Result<()> {
         let (debug_non_blocking, _debug_guard) = tracing_appender::non_blocking(debug_file);
         let (info_non_blocking, _info_guard) = tracing_appender::non_blocking(info_file);
         let (error_non_blocking, _error_guard) = tracing_appender::non_blocking(error_file);
-
-
         // 初始化 tracing 订阅器
         tracing_subscriber::registry()
             .with(
@@ -189,40 +187,6 @@ async fn main() -> anyhow::Result<()> {
     let api_secret = env::var("OKX_API_SECRET").expect("");
     let passphrase = env::var("OKX_PASSPHRASE").expect("");
     let okx_websocket_clinet = okx_websocket_client::OkxWebsocket::new(api_key, api_secret, passphrase);
-
-    //
-    // // 订阅公共频道
-    // let public_channels = vec![
-    //     json!({
-    //         "channel": "tickers",
-    //         "instId": "LTC-USDT"
-    //     }),
-    //     json!({
-    //         "channel":"tickers",
-    //         "instId":"ETH-USDT"
-    //     }),
-    // ];
-    // // 订阅私有频道
-    // let private_channels = vec![
-    //     json!({
-    //        "channel": "account",
-    //         "ccy": "BTC-USDT_SWAP",
-    //         "extraParams": "
-    //     {
-    //       \"updateInterval\": \"0\"
-    //     }
-    //   "
-    //     }),
-    // ];
-    // // 创建并行任务
-    // let public_task = okx_websocket_clinet.subscribe(ApiType::Public, public_channels);
-    // let private_task = okx_websocket_clinet.subscribe(ApiType::Private, private_channels);
-    //
-    // // 并行运行两个订阅任务
-    // if let (Err(public_err), Err(private_err)) = tokio::join!(public_task, private_task) {
-    //     eprintln!("Failed to subscribe to public channels: {}", public_err);
-    //     eprintln!("Failed to subscribe to private channels: {}", private_err);
-    // }
 
 
     // let ins_type = "SWAP";
@@ -293,80 +257,27 @@ async fn main() -> anyhow::Result<()> {
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
 
 
-    //验证当前系统时间
-    validate_system_time().await;
-
-    //初始化数据
-    task::run_sync_data_job().await;
-
+    // //验证当前系统时间
+    // validate_system_time().await;
+    //
+    // //初始化数据
+    // task::run_sync_data_job().await?;
+    //
     //执行策略
     task::run_strategy_job().await?;
 
-
-    //初始化可以交易产品
-    // tickets_job::init_all_ticker().await;
-    // let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"];
-
-
-    // let order_params = OrderRequest {
-    //     inst_id: "BTC-USDT".to_string(),
-    //     td_mode: "isolated".to_string(),
-    //     ccy: None,
-    //     cl_ord_id: Some("custom_order_id".to_string()),
-    //     tag: Some("order_tag".to_string()),
-    //     side: "buy".to_string(),
-    //     pos_side: Some("long".to_string()),
-    //     ord_type: "limit".to_string(),
-    //     sz: "1".to_string(),
-    //     px: Some("30000".to_string()),
-    //     px_usd: None,
-    //     px_vol: None,
-    //     reduce_only: Some(false),
-    //     tgt_ccy: Some("quote_ccy".to_string()),
-    //     ban_amend: Some(false),
-    //     quick_mgn_type: None,
-    //     stp_id: None,
-    //     stp_mode: Some("cancel_maker".to_string()),
-    //     attach_algo_ords: Some(vec![
-    //         AttachAlgoOrd {
-    //             attach_algo_cl_ord_id: Some("algo_order_id".to_string()),
-    //             tp_trigger_px: Some("35000".to_string()),
-    //             tp_ord_px: Some("34900".to_string()),
-    //             tp_ord_kind: Some("limit".to_string()),
-    //             sl_trigger_px: Some("29000".to_string()),
-    //             sl_ord_px: Some("28900".to_string()),
-    //             tp_trigger_px_type: Some("last".to_string()),
-    //             sl_trigger_px_type: Some("last".to_string()),
-    //             sz: Some("1".to_string()),
-    //             amend_px_on_trigger_type: Some(0),
-    //         }
-    //     ]),
-    // };
-    //
-    // //下单
-    // let result = trade::Trade::order(order_params).await?;
-    // println!("Order result: {}", result);
-    //
-
-
-    // let bar = "1D";
-    // candles_job::update_new_candles_to_redis(con, ins_id, bar).await?;
-
-    // let ins_id = "BTC-USDT-SWAP";
-    // let bar = "1D";
-    // candles_job::update_new_candles_to_redis(con, ins_id, bar).await?;
-
-    // let result = db.add().await?;
+    /// 执行下单
+    // let inst_id = "ETH-USDT";
+    // order::place_order_spot(inst_id, Side::BUY, 30000.00).await?;
 
 
     let mut scheduler = TaskScheduler::new();
-
-    //周期性任务
-    scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
-        info!("Periodic Job executed at {:?}", tokio::time::Instant::now());
-        //同步单个交易产品
-        tickets_job::sync_ticker().await;
-    });
+    // //周期性任务
+    // scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
+    //     info!("Periodic Job executed at {:?}", tokio::time::Instant::now());
+    //     //同步单个交易产品
+    //     tickets_job::sync_ticker().await;
+    // });
     // // 周期性任务
     // scheduler.add_periodic_task("periodic_task_2".to_string(), 500, || async {
     //     println!("Periodic Job executed at {:?}", tokio::time::Instant::now());
@@ -380,15 +291,14 @@ async fn main() -> anyhow::Result<()> {
     //     asset_job::get_balance().await.expect("获取资金账户余额异常");
     // });
 
-
     // // 添加一个定时任务
     // let target_time = Utc::now() + chrono::Duration::seconds(30);
     // scheduler.add_scheduled_task("scheduled_task_1".to_string(), target_time, || async {
     //     println!("Scheduled Job executed at {:?}", tokio::time::Instant::now());
     // });
 
-    //运行websocket,实时同步数据
-    socket::run_socket().await;
+    // 运行websocket,实时同步数据
+    // socket::run_socket().await;
     // 捕捉Ctrl+C信号以平滑关闭
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {

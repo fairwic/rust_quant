@@ -36,10 +36,10 @@ pub struct Ts {
 pub type CandleResponse = OkxApiResponse<Vec<CandleData>>;
 pub type TimeResponse = OkxApiResponse<Vec<Ts>>;
 
-pub(crate) struct public_data {}
+pub(crate) struct OkxPublicData {}
 
-impl public_data {
-    pub fn new(&self) -> &public_data {
+impl OkxPublicData {
+    pub fn new(&self) -> &OkxPublicData {
         self
     }
     pub async fn get_time() -> Result<String, anyhow::Error> {

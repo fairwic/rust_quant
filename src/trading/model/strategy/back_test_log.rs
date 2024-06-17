@@ -23,6 +23,7 @@ pub struct BackTestLog {
     pub time: String,
     pub win_rate: String,
     pub final_fund: String,
+    pub open_positions_num: i32,
     pub strategy_detail: Option<String>,
 }
 

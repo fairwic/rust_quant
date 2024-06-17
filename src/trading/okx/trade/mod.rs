@@ -1,8 +1,13 @@
+use std::fmt::{Display, Formatter};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use crate::trading::okx::{okx_client, OkxApiResponse};
 
 use anyhow::{Result, Error, anyhow};
+use serde_json::json;
+use tracing::debug;
+use tracing::field::debug;
+use tracing_subscriber::fmt::format::json;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Balance {
@@ -33,8 +38,81 @@ pub struct Ts {
 pub type CandleResponse = OkxApiResponse<Vec<CandleData>>;
 pub type TimeResponse = OkxApiResponse<Vec<Ts>>;
 
+/// 订单响应
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderResponse {
+    /// 结果代码，0表示成功
+    pub code: String,
+    /// 错误信息，代码为0时，该字段为空
+    pub msg: Option<String>,
+    /// 包含结果的对象数组
+    pub data: Vec<OrderResponseData>,
+    /// REST网关接收请求时的时间戳，Unix时间戳的微秒数格式，如 1597026383085123
+    pub in_time: String,
+    /// REST网关发送响应时的时间戳，Unix时间戳的微秒数格式，如 1597026383085123
+    pub out_time: String,
+}
+
+pub enum Side {
+    BUY,
+    SELL,
+}
+
+pub enum OrdType {
+    /// 限价单
+    LIMIT,
+    /// 市价单
+    MARKET,
+    /// 只做make单
+    PostOnly,
+    /// 全部成交或立即取消
+    FOK,
+    /// 立即成交并取消全部
+    Ioc,
+}
+
+impl Display for OrdType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OrdType::LIMIT => write!(f, "limit"),
+            OrdType::MARKET => write!(f, "market"),
+            OrdType::PostOnly => write!(f, "post_only"),
+            OrdType::FOK => write!(f, "fok"),
+            OrdType::Ioc => write!(f, "ioc"),
+        }
+    }
+}
+
+impl Display for Side {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Side::BUY => write!(f, "buy"),
+            Side::SELL => write!(f, "sell"),
+        }
+    }
+}
+
+pub enum TdMode {
+    /// 保证金模式：isolated：逐仓 ；cross：全仓
+    ISOLATED,
+    CROSS,
+    ///非保证模式，现货
+    CASH,
+}
+
+impl Display for TdMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TdMode::ISOLATED => write!(f, "isolated"),
+            TdMode::CROSS => write!(f, "cross"),
+            TdMode::CASH => write!(f, "cash")
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct OrderRequest {
     /// 产品ID，如 BTC-USDT
     pub inst_id: String,
@@ -62,14 +140,14 @@ pub struct OrderRequest {
     /// limit：限价单
     /// post_only：只做maker单
     /// fok：全部成交或立即取消
-    /// ioc：立即成交并取消剩余
+    /// Ioc：立即成交并取消剩余
     /// optimal_limit_ioc：市价委托立即成交并取消剩余（仅适用交割、永续）
     /// mmp：做市商保护(仅适用于组合保证金账户模式下的期权订单)
     /// mmp_and_post_only：做市商保护且只做maker单(仅适用于组合保证金账户模式下的期权订单)
     pub ord_type: String,
     /// 委托数量
     pub sz: String,
-    /// 委托价格，仅适用于limit、post_only、fok、ioc、mmp、mmp_and_post_only类型的订单
+    /// 委托价格，仅适用于limit、post_only、fok、Ioc、mmp、mmp_and_post_only类型的订单
     /// 期权下单时，px/pxUsd/pxVol 只能填一个
     pub px: Option<String>,
     /// 以USD价格进行期权下单，仅适用于期权
@@ -149,31 +227,36 @@ pub struct AttachAlgoOrd {
     pub amend_px_on_trigger_type: Option<i32>,
 }
 
+/// 订单响应数据
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderResponseData {
+    /// 订单ID
+    pub ord_id: String,
+    /// 客户自定义订单ID
+    pub cl_ord_id: Option<String>,
+    /// 订单标签
+    pub tag: Option<String>,
+    /// 系统完成订单请求处理的时间戳，Unix时间戳的毫秒数格式，如 1597026383085
+    pub ts: String,
+    /// 事件执行结果的code，0代表成功
+    pub s_code: String,
+    /// 事件执行失败或成功时的msg
+    pub s_msg: Option<String>,
+}
 
 pub(crate) struct Trade {}
 
 impl Trade {
-    pub fn new(&self) -> &Trade {
-        self
+    pub fn new() -> Self {
+        Trade {}
     }
-    pub async fn order(params: OrderRequest) -> Result<String, anyhow::Error> {
+    pub async fn order(&self, params: OrderRequest) -> Result<Vec<OrderResponseData>, anyhow::Error> {
         let path = "/api/v5/trade/order";
-        let res: Result<TimeResponse> = okx_client::get_okx_client().send_request(Method::GET, &path, "").await;
-
-        match res {
-            Ok(res) => {
-                let res = res.data;
-                let res = res.get(0);
-                if res.is_none() {
-                    return Ok("".to_string());
-                } else {
-                    return Ok(res.unwrap().ts.to_string());
-                }
-            }
-            Err(err) => {
-                return Err(err);
-            }
-        }
+        let body = &serde_json::to_string(&params).unwrap();
+        debug!("send order request params:{}",body);
+        let res: Result<OrderResponse> = okx_client::get_okx_client().send_request(Method::POST, &path, body).await;
+        Ok(res.unwrap().data)
     }
 }
 
