@@ -12,7 +12,7 @@ use tokio::time::{Instant, interval, sleep_until};
 
 
 mod trading;
-mod Job;
+mod job;
 mod time_util;
 mod socket;
 
@@ -51,7 +51,7 @@ use dotenv::dotenv;
 
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, SinkExt, stream::TryStreamExt, StreamExt};
-use log::{error};
+use tracing::{error};
 use redis::streams::StreamClaimOptions;
 use serde_json::json;
 
@@ -68,7 +68,7 @@ use tracing_subscriber::{EnvFilter, fmt, FmtSubscriber};
 use crate::trading::model::Db;
 use crate::trading::okx::okx_websocket_client::ApiType;
 use trading::strategy::StopLossStrategy;
-use crate::Job::task_scheduler::TaskScheduler;
+use crate::job::task_scheduler::TaskScheduler;
 use crate::trading::model::market::candles;
 use crate::trading::okx::public_data::OkxPublicData;
 use crate::trading::task::{account_job, tickets_job};
@@ -257,48 +257,65 @@ async fn main() -> anyhow::Result<()> {
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
 
 
-    // //验证当前系统时间
-    // validate_system_time().await;
-    //
-    // //初始化数据
-    // task::run_sync_data_job().await?;
-    //
-    //执行策略
-    task::run_strategy_job().await?;
+    //验证当前系统时间
+    if env::var("APP_ENV").unwrap() != "LOCAL" {
+        validate_system_time().await;
+    }
 
-    /// 执行下单
-    // let inst_id = "ETH-USDT";
-    // order::place_order_spot(inst_id, Side::BUY, 30000.00).await?;
+    // let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP", "ADA-USDT-SWAP"];
+    // let tims = ["1H", "5m", "1D", "4H"];
+
+    //初始化需要同步数据产品数据
+    let inst_ids = vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"];
+    // let inst_ids = ["ETH-USDT-SWAP","BTC-USDT-SWAP","S”];
+    let tims = vec!["1H"];
+    task::run_sync_data_job(inst_ids, tims).await?;
 
 
     let mut scheduler = TaskScheduler::new();
     // //周期性任务
     // scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
-    //     info!("Periodic Job executed at {:?}", tokio::time::Instant::now());
+    //     info!("Periodic job executed at {:?}", tokio::time::Instant::now());
     //     //同步单个交易产品
     //     tickets_job::sync_ticker().await;
     // });
     // // 周期性任务
     // scheduler.add_periodic_task("periodic_task_2".to_string(), 500, || async {
-    //     println!("Periodic Job executed at {:?}", tokio::time::Instant::now());
+    //     println!("Periodic job executed at {:?}", tokio::time::Instant::now());
     //     //获取账户交易余额
     //     account_job::get_account_balance().await.expect("获取同步账户余额异常");
     // });
     // 周期性任务
     // scheduler.add_periodic_task("periodic_task_3".to_string(), 500, || async {
-    //     // println!("Periodic Job executed at {:?}", tokio::time::Instant::now());
-    //     //获取账户交易余额
-    //     asset_job::get_balance().await.expect("获取资金账户余额异常");
+    //     println!("Periodic job executed at {:?}", tokio::time::Instant::now());
+    //     获取账户交易余额
+    // asset_job::get_balance().await.expect("获取资金账户余额异常");
     // });
+
+    // 运行websocket,实时同步数据
+    socket::run_socket().await;
+
+
+    //执行下单逻辑
+    scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, || async {
+        //执行策略
+        let res = task::run_ut_boot_strategy_job().await;
+        match res {
+            Ok(()) => {
+                info!("run strategy success:");
+            }
+            Err(error) => {
+                error!("run strategy error: {}", error);
+            }
+        }
+    });
 
     // // 添加一个定时任务
     // let target_time = Utc::now() + chrono::Duration::seconds(30);
     // scheduler.add_scheduled_task("scheduled_task_1".to_string(), target_time, || async {
-    //     println!("Scheduled Job executed at {:?}", tokio::time::Instant::now());
+    //     println!("Scheduled job executed at {:?}", tokio::time::Instant::now());
     // });
 
-    // 运行websocket,实时同步数据
-    // socket::run_socket().await;
     // 捕捉Ctrl+C信号以平滑关闭
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {

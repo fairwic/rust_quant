@@ -69,7 +69,7 @@ impl OkxClient {
 
         let status_code = response.status();
         let response_body = response.text().await?;
-        info!("okx_response: {}", response_body);
+        info!("path:{},okx_response: {}", path,response_body);
 
         if status_code == StatusCode::OK {
             let result: T = serde_json::from_str(&response_body)?;

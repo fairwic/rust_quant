@@ -14,7 +14,7 @@ pub struct Balance {
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CandleData {
     pub(crate) ts: String,
     pub(crate) o: String,

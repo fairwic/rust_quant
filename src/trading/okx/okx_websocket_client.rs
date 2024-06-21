@@ -5,12 +5,16 @@ use chrono::Utc;
 
 use futures_util::{future, pin_mut, SinkExt, StreamExt};
 use hmac_sha256::HMAC;
-use log::{info, error};
+use tracing::{info, error, error_span};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tracing::debug;
+use crate::trading::model::market::candles::{CandlesEntity, CandlesModel};
+use crate::trading::okx::public_data::CandleData;
+// use crate::trading::okx::trade::CandleData;
 
 pub(crate) struct OkxWebsocket {
     api_key: String,
@@ -25,11 +29,64 @@ pub enum ApiType {
     Business,
 }
 
+
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum WebSocketMessage {
+    Tickers(TickersMessage),
+    Candle(CandleMessage),
+    Event(EventMessage),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EventMessage {
+    //事件类型
+    event: String,
+    arg: Arg,
+    //连接id
+    conn_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TickersMessage {
+    arg: Arg,
+    data: Vec<TickerData>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TickerData {
+    instType: String,
+    instId: String,
+    last: String,
+    lastSz: String,
+    askPx: String,
+    askSz: String,
+    bidPx: String,
+    bidSz: String,
+    open24h: String,
+    high24h: String,
+    low24h: String,
+    sodUtc0: String,
+    sodUtc8: String,
+    volCcy24h: String,
+    vol24h: String,
+    ts: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CandleMessage {
+    arg: Arg,
+    data: Vec<[String; 9]>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Arg {
     channel: String,
-    instId: String,
+    inst_id: String,
 }
+
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Data {
@@ -45,9 +102,9 @@ struct Data {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct MessageData {
+struct CandleMessageData {
     arg: Arg,
-    data: Vec<Vec<String>>,
+    data: Vec<Data>,
 }
 
 impl OkxWebsocket {
@@ -152,35 +209,54 @@ impl OkxWebsocket {
     // }
 
 
-    async fn parse_and_log_message(&self, text: &str) {
+    async fn parse_and_log_message(&self, text: &str) -> anyhow::Result<()> {
         // 记录收到的原始消息
         info!("Received: {}", text);
 
+        let message = serde_json::from_str::<WebSocketMessage>(text).unwrap();
         // 解析消息
-        match serde_json::from_str::<MessageData>(text) {
-            Ok(message_data) => {
-                info!("Parsed message: {:?}", message_data);
-
-                // 解析具体的数据
-                for data in message_data.data {
-                    let candle_data = Data {
-                        ts: data[0].clone(),
-                        o: data[1].clone(),
-                        h: data[2].clone(),
-                        l: data[3].clone(),
-                        c: data[4].clone(),
-                        vol: data[5].clone(),
-                        volCcy: data[6].clone(),
-                        volCcyQuote: data[7].clone(),
-                        confirm: data[8].clone(),
-                    };
-                    info!("Candle data: {:?}", candle_data);
-                }
+        match message {
+            WebSocketMessage::Candle(message_data) => {
+                self.deal_candles_socker_messge(message_data).await?
             }
-            Err(e) => {
-                error!("Failed to parse message: {}", e);
+            WebSocketMessage::Tickers(message_data) => {
+                info!("解析websocket tickers")
+            }
+            WebSocketMessage::Event(mesage_data) => {
+                info!("解析websocket evene")
             }
         }
+        Ok(())
+    }
+
+    pub async fn deal_candles_socker_messge(&self, message_data: CandleMessage) -> anyhow::Result<()> {
+        info!("Parsed message: {:?}", message_data);
+        let arg = &message_data.arg;
+        let inst_id = &arg.inst_id; //ETH-USDT-SWAP
+        let channel = &arg.channel; //candle1m
+        //对字符串进行截取，从弟6个字符开始
+        let time = &channel[6..];
+        info!("substr time: {}", time);
+        // 解析具体的数据
+
+        // 解析具体的数据
+        for data in message_data.data {
+            let candle_data = CandleData {
+                ts: data[0].clone(),
+                o: data[1].clone(),
+                h: data[2].clone(),
+                l: data[3].clone(),
+                c: data[4].clone(),
+                vol: data[5].clone(),
+                vol_ccy: data[6].clone(),
+                vol_ccy_quote: data[7].clone(),
+                confirm: data[8].clone(),
+            };
+            info!("Candle data: {:?}", candle_data);
+            //把当前数据写入到数据库中
+            CandlesModel::new().await.update_or_create(&candle_data, inst_id, time).await?;
+        }
+        Ok(())
     }
 
 
@@ -189,18 +265,20 @@ impl OkxWebsocket {
         let (mut write, mut read) = ws_stream.split();
 
         let subscribe_msg = json!({
-        "op": "subscribe",
-        "args": channels
-    });
-
+                         "op": "subscribe",
+                         "args": channels
+          });
         write.send(Message::Text(subscribe_msg.to_string())).await.expect("Failed to send subscribe message");
 
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(msg) => {
+                    debug!("okx websocket Received a new message: {}", msg);
+                    debug!("is_text: {}", msg.is_text());
                     if msg.is_text() {
                         let text = msg.to_text().unwrap();
-                        self.parse_and_log_message(text).await;
+                        debug!("to_text: {}", text);
+                        self.parse_and_log_message(text).await?
                     }
                 }
                 Err(e) => {

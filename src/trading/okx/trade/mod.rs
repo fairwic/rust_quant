@@ -18,15 +18,15 @@ pub struct Balance {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CandleData {
-    ts: String,
-    o: String,
-    h: String,
-    l: String,
-    c: String,
-    vol: String,
-    vol_ccy: String,
-    vol_ccy_quote: String,
-    confirm: String,
+    pub ts: String,
+    pub o: String,
+    pub h: String,
+    pub l: String,
+    pub c: String,
+    pub vol: String,
+    pub vol_ccy: String,
+    pub vol_ccy_quote: String,
+    pub confirm: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -59,6 +59,33 @@ pub enum Side {
     SELL,
 }
 
+impl Display for Side {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Side::BUY => write!(f, "buy"),
+            Side::SELL => write!(f, "sell"),
+        }
+    }
+}
+
+
+pub enum MgnMode {}
+
+
+pub enum PosSide {
+    LONG,
+    SHORT,
+}
+
+impl Display for PosSide {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PosSide::LONG => write!(f, "long"),
+            PosSide::SHORT => write!(f, "short"),
+        }
+    }
+}
+
 pub enum OrdType {
     /// 限价单
     LIMIT,
@@ -70,6 +97,8 @@ pub enum OrdType {
     FOK,
     /// 立即成交并取消全部
     Ioc,
+    // 市价委托立即成交并取消剩余（仅适用交割、永续）
+    OptimalLimitIoc,
 }
 
 impl Display for OrdType {
@@ -80,25 +109,37 @@ impl Display for OrdType {
             OrdType::PostOnly => write!(f, "post_only"),
             OrdType::FOK => write!(f, "fok"),
             OrdType::Ioc => write!(f, "ioc"),
+            OrdType::OptimalLimitIoc => write!(f, "optimal_limit_ioc"),
         }
     }
 }
 
-impl Display for Side {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Side::BUY => write!(f, "buy"),
-            Side::SELL => write!(f, "sell"),
-        }
-    }
-}
 
 pub enum TdMode {
-    /// 保证金模式：isolated：逐仓 ；cross：全仓
+    /// 保证金模式：isolated：逐仓
     ISOLATED,
+    //保证金模式 ；cross：全仓
     CROSS,
     ///非保证模式，现货
     CASH,
+}
+
+// 止盈订单类型
+// 默认为condition
+pub enum TpOrdKind {
+    // : 条件单
+    CONDITION,
+    // : 限价单
+    LIMIT,
+}
+
+impl Display for TpOrdKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TpOrdKind::CONDITION => write!(f, "condition"),
+            TpOrdKind::LIMIT => write!(f, "limit"),
+        }
+    }
 }
 
 impl Display for TdMode {
@@ -227,6 +268,7 @@ pub struct AttachAlgoOrd {
     pub amend_px_on_trigger_type: Option<i32>,
 }
 
+
 /// 订单响应数据
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -245,17 +287,76 @@ pub struct OrderResponseData {
     pub s_msg: Option<String>,
 }
 
-pub(crate) struct Trade {}
 
-impl Trade {
+/// 市价平仓请求参数结构体
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseOrderRequest {
+    /// 产品ID
+    pub inst_id: String,
+    /// 持仓方向（可选）
+    /// 买卖模式下：可不填写此参数，默认值net，如果填写，仅可以填写net
+    /// 开平仓模式下：必须填写此参数，且仅可以填写 long：平多，short：平空
+    pub pos_side: Option<String>,
+    /// 保证金模式
+    /// cross：全仓；isolated：逐仓
+    pub mgn_mode: String,
+    /// 保证金币种（可选）
+    /// 单币种保证金模式的全仓币币杠杆平仓必填
+    pub ccy: Option<String>,
+    /// 当市价全平时，平仓单是否需要自动撤销，默认为false
+    /// false：不自动撤单；true：自动撤单
+    pub auto_cxl: Option<bool>,
+    /// 客户自定义ID（可选）
+    /// 字母（区分大小写）与数字的组合，可以是纯字母、纯数字且长度要在1-32位之间
+    pub cl_ord_id: Option<String>,
+    /// 订单标签（可选）
+    /// 字母（区分大小写）与数字的组合，可以是纯字母、纯数字，且长度在1-16位之间
+    pub tag: Option<String>,
+}
+
+/// 市价平仓请求参数结构体
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseOrderResponseData {
+    /// 产品ID
+    pub inst_id: String,
+    /// 持仓方向（可选）
+    /// 买卖模式下：可不填写此参数，默认值net，如果填写，仅可以填写net
+    /// 开平仓模式下：必须填写此参数，且仅可以填写 long：平多，short：平空
+    pub pos_side: Option<String>,
+    /// 客户自定义ID（可选）
+    /// 字母（区分大小写）与数字的组合，可以是纯字母、纯数字且长度要在1-32位之间
+    pub cl_ord_id: Option<String>,
+    /// 订单标签（可选）
+    /// 字母（区分大小写）与数字的组合，可以是纯字母、纯数字，且长度在1-16位之间
+    pub tag: Option<String>,
+}
+
+type CloseOrderResponse = OkxApiResponse<Vec<CloseOrderResponseData>>;
+
+
+pub(crate) struct OkxTrade {}
+
+impl OkxTrade {
     pub fn new() -> Self {
-        Trade {}
+        OkxTrade {}
     }
+    ///下单
     pub async fn order(&self, params: OrderRequest) -> Result<Vec<OrderResponseData>, anyhow::Error> {
         let path = "/api/v5/trade/order";
         let body = &serde_json::to_string(&params).unwrap();
-        debug!("send order request params:{}",body);
+        debug!("send place order okx_request params:{}",body);
         let res: Result<OrderResponse> = okx_client::get_okx_client().send_request(Method::POST, &path, body).await;
+        Ok(res.unwrap().data)
+    }
+
+    ///市价仓位全平
+    pub async fn close_position(&self, params: CloseOrderRequest) -> Result<Vec<CloseOrderResponseData>, anyhow::Error> {
+        let path = "/api/v5/trade/close-position";
+        let body = &serde_json::to_string(&params).unwrap();
+        debug!("send close_position okx_request params:{}",body);
+        let res: Result<CloseOrderResponse> = okx_client::get_okx_client().send_request(Method::POST, &path, body).await;
         Ok(res.unwrap().data)
     }
 }

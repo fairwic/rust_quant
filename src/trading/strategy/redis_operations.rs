@@ -6,7 +6,7 @@ use clap::builder::TypedValueParser;
 use tracing::info;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Candle {
+pub struct RedisCandle {
     pub ts: i64,
     pub c: String,
 }
@@ -14,7 +14,7 @@ pub struct Candle {
 pub struct RedisOperations;
 
 impl RedisOperations {
-    pub async fn save_candles_to_redis(con: &mut MultiplexedConnection, key: &str, candles: &[Candle]) -> Result<()> {
+    pub async fn save_candles_to_redis(con: &mut MultiplexedConnection, key: &str, candles: &[RedisCandle]) -> Result<()> {
         let mut pipe = redis::pipe();
         for candle in candles {
             let timestamp: i64 = candle.ts;
@@ -26,12 +26,12 @@ impl RedisOperations {
         Ok(())
     }
 
-    pub async fn fetch_candles_from_redis(con: &mut MultiplexedConnection, key: &str) -> Result<Vec<Candle>> {
+    pub async fn fetch_candles_from_redis(con: &mut MultiplexedConnection, key: &str) -> Result<Vec<RedisCandle>> {
         // let data: Vec<(f64, f64)> = con.zrangebyscore_withscores(key, "-inf", "+inf").await?;
         let data: Vec<(f64, f64)> = con.zrange_withscores(key, 0, -1).await?;
-        let mut candles: Vec<Candle> = data
+        let mut candles: Vec<RedisCandle> = data
             .into_iter()
-            .map(|(timestamp, close_price)| Candle {
+            .map(|(timestamp, close_price)| RedisCandle {
                 ts: timestamp as i64,
                 c: close_price.to_string(),
             })

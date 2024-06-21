@@ -10,7 +10,7 @@ use crate::trading::model::market::tickers::{TickersDataEntity, TicketsModel};
 use crate::trading::model::asset::AssetModel;
 use crate::trading::model::market::candles::{CandlesEntity, CandlesModel};
 use crate::trading::okx::market::Market;
-use crate::trading::strategy::redis_operations::{Candle, RedisOperations};
+use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 
 
 // pub async fn update_trades_to_redis(inst_id: &str) -> anyhow::Result<()> {

@@ -1,14 +1,14 @@
 extern crate rbatis;
 
 use std::convert::TryInto;
+use std::env;
 use anyhow::{anyhow, Result};
-use log::debug;
 use rbatis::{crud, impl_update, RBatis};
 use rbatis::rbdc::db::ExecResult;
 use rbs::Value;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 use crate::trading::model::{Db, Model};
 use crate::trading::okx::market::TickersData;
@@ -131,33 +131,97 @@ impl CandlesModel {
             Ok(res)
         }
     }
-    // pub async fn update(&self, ticker: &TickersData) -> anyhow::Result<()> {
-    //     let tickets_data = CandlesEntity {
-    //         inst_type: ticker.inst_type.clone(),
-    //         inst_id: ticker.inst_id.clone(),
-    //         last: ticker.last.clone(),
-    //         last_sz: ticker.last_sz.clone(),
-    //         ask_px: ticker.ask_px.clone(),
-    //         ask_sz: ticker.ask_sz.clone(),
-    //         bid_px: ticker.bid_px.clone(),
-    //         bid_sz: ticker.bid_sz.clone(),
-    //         open24h: ticker.open24h.clone(),
-    //         high24h: ticker.high24h.clone(),
-    //         low24h: ticker.low24h.clone(),
-    //         vol_ccy24h: ticker.vol_ccy24h.clone(),
-    //         vol24h: ticker.vol24h.clone(),
-    //         sod_utc0: ticker.sod_utc0.clone(),
-    //         sod_utc8: ticker.sod_utc8.clone(),
-    //         ts: ticker.ts.clone(),
-    //     };
-    //     let data = CandlesEntity::update_by_column(&self.db, &tickets_data, "inst_id").await;
-    //     println!("update_by_column = {}", json!(data));
-    //     // let data = TickersDataDb::update_by_name(&self.db, &tickets_data, ticker.inst_id.clone()).await;
-    //     // println!("update_by_name = {}", json!(data));
-    //     Ok(())
-    // }
+
+    pub(crate) async fn delete_lg_time(&self, inst_id: &str, time_interval: &str, ts: i64) -> anyhow::Result<ExecResult> {
+        let table_name = Self::get_tale_name(inst_id, time_interval);
+        let query = format!(
+            "DELETE  FROM `{}` WHERE ts >= ?",
+            table_name
+        );
+        let params = vec![ts.into()];
+
+        debug!("delete lg confirm >0 data sql:{}", query);
+        debug!("delete lg confirm >0 data param:{:?}", params);
+        let result = self.db.exec(&query, params).await?;
+        Ok(result)
+    }
+
+    pub(crate) async fn get_older_un_confirm_data(&self, inst_id: &str, time_interval: &str) -> anyhow::Result<Option<CandlesEntity>> {
+        let table_name = Self::get_tale_name(inst_id, time_interval);
+        let query = format!(
+            "select * from `{}` WHERE confirm = 0 order by ts asc limit 1",
+            table_name
+        );
+        debug!("update candle db sql:{}", query);
+        let result: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
+        Ok(result)
+    }
+
+
+    pub(crate) async fn update_one(&self, candle: CandlesEntity, inst_id: &str, time_interval: &str) -> anyhow::Result<u64> {
+        let table_name = format!("{}_candles_{}", inst_id, time_interval);
+        let query = format!(
+            "UPDATE `{}` SET o = ?, h = ?, l = ?, c = ?, vol = ?, vol_ccy = ?, vol_ccy_quote = ?, confirm = ? WHERE ts = ?",
+            table_name
+        );
+
+        let params = vec![
+            candle.o.into(),
+            candle.h.into(),
+            candle.l.into(),
+            candle.c.into(),
+            candle.vol.into(),
+            candle.vol_ccy.into(),
+            candle.vol_ccy_quote.into(),
+            candle.confirm.into(),
+            candle.ts.into(),
+        ];
+
+        if params.is_empty() {
+            return Err(anyhow!("params is empty"));
+        } else {
+            debug!("update candle db sql:{}", query);
+            let result = self.db.exec(&query, params).await?;
+            Ok(result.rows_affected)
+        }
+    }
+
+    pub async fn update_or_create(&self, candle_data: &CandleData, inst_id: &str, time_interval: &str) -> anyhow::Result<()> {
+        //查询是否存在
+        //不存在写入，存在且confirm==0 更新
+        let existing_record: Option<CandlesEntity> = self.get_one_by_ts(inst_id, time_interval, candle_data.ts.parse::<i64>().unwrap()).await?;
+        info!("existing_record: {:?}", existing_record);
+        if existing_record.is_none() {
+            let res = self.add(vec![candle_data.clone()], inst_id, time_interval).await?;
+            info!("Record insert result: {:?}", res);
+        } else {
+            let data = CandlesEntity {
+                ts: candle_data.ts.parse::<i64>().unwrap(),
+                o: candle_data.o.to_string(),
+                h: candle_data.h.to_string(),
+                l: candle_data.l.to_string(),
+                c: candle_data.c.to_string(),
+                vol: candle_data.vol.to_string(),
+                vol_ccy: candle_data.vol_ccy.to_string(),
+                vol_ccy_quote: candle_data.vol_ccy_quote.to_string(),
+                confirm: candle_data.confirm.to_string(),
+            };
+            let exec_result: u64 = self.update_one(data, inst_id, time_interval).await?;
+            info!("update candles ts:{},update result-rows_affected:{}",candle_data.ts, exec_result);
+        }
+        Ok(())
+    }
+
     pub async fn get_all(&self, inst_id: &str, time_interval: &str) -> Result<Vec<CandlesEntity>> {
-        let mut query = format!("select * from  `{}` order by ts DESC limit 4000 ", Self::get_tale_name(inst_id, time_interval));
+        // 如 [1m/3m/5m/15m/30m/1H/2H/4H]
+        // 香港时间开盘价k线：[6H/12H/1D/2D/3D/1W/1M/3M]
+        let limit = if env::var("IS_BACK_TEST").unwrap() == "true" {
+            4000
+        } else {
+            80
+        };
+
+        let mut query = format!("select * from `{}` order by ts DESC limit {} ", Self::get_tale_name(inst_id, time_interval), limit);
         debug!("query: {}", query);
         let res: Value = self.db.query(&query, vec![]).await?;
         if res.is_array() && res.as_array().unwrap().is_empty() {
@@ -174,6 +238,7 @@ impl CandlesModel {
         // let results: Vec<CandlesEntity> = CandlesEntity::fetch_list(&self.db).await?;
         Ok(candles)
     }
+
     pub async fn get_new_data(&self, inst_id: &str, time_interval: &str) -> Result<Option<CandlesEntity>> {
         let mut query = format!("select * from  `{}` ORDER BY ts DESC limit 1; ", Self::get_tale_name(inst_id, time_interval));
         debug!("query: {}", query);
@@ -181,6 +246,15 @@ impl CandlesModel {
         debug!("result: {:?}", res);
         Ok(res)
     }
+
+    pub async fn get_one_by_ts(&self, inst_id: &str, time_interval: &str, ts: i64) -> Result<Option<CandlesEntity>> {
+        let mut query = format!("select * from  `{}` where `ts` = {} ORDER BY ts DESC limit 1; ", Self::get_tale_name(inst_id, time_interval), ts);
+        debug!("query: {}", query);
+        let res: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
+        debug!("result: {:?}", res);
+        Ok(res)
+    }
+
     pub async fn get_oldest_data(&self, inst_id: &str, time_interval: &str) -> Result<Option<CandlesEntity>> {
         let mut query = format!("select * from  `{}` ORDER BY ts ASC limit 1; ", Self::get_tale_name(inst_id, time_interval));
         debug!("query: {}", query);
@@ -188,6 +262,7 @@ impl CandlesModel {
         debug!("result: {:?}", res);
         Ok(res)
     }
+
     pub async fn get_new_count(&self, inst_id: &str, time_interval: &str, mut limit: Option<i32>) -> Result<u64> {
         if limit.is_none() {
             limit = Option::from(30000);
