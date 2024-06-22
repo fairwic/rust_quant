@@ -262,7 +262,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     //同步所有tickets
-    tickets_job::init_all_ticker().await?;
+    // tickets_job::init_all_ticker().await?;
 
 
     // let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP", "ADA-USDT-SWAP"];
@@ -295,12 +295,10 @@ async fn main() -> anyhow::Result<()> {
     // asset_job::get_balance().await.expect("获取资金账户余额异常");
     // });
 
-    // 运行websocket,实时同步数据
-    socket::run_socket().await;
 
 
     //执行下单逻辑
-    scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, || async {
+    scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 300, || async {
         //执行策略
         let res = task::run_ut_boot_strategy_job().await;
         match res {
@@ -312,6 +310,9 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+    // 运行websocket,实时同步数据
+    socket::run_socket().await;
 
     // // 添加一个定时任务
     // let target_time = Utc::now() + chrono::Duration::seconds(30);

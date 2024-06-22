@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use chrono::{DateTime, Timelike, TimeZone, Utc};
 use tracing::{info, Level, span};
 use crate::trading;
 use crate::trading::model::Db;
@@ -268,6 +269,25 @@ pub async fn run_ut_boot_strategy_job() -> Result<(), anyhow::Error> {
     let times = ["1H"];
     for inst_id in inst_ids {
         for time in times {
+            //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
+            let mysql_candles_5m = candles::CandlesModel::new().await.get_new_data(inst_id, time).await?;
+            if mysql_candles_5m.is_none() {
+                continue;
+            }
+            let ts = mysql_candles_5m.unwrap().ts;
+
+            // 将毫秒时间戳转换为 DateTime<Utc>
+            let datetime: DateTime<Utc> = Utc.timestamp_millis(ts);
+            // 获取小时
+            let hour = datetime.hour();
+            // 获取当前时间的小时
+            let current_hour = Utc::now().hour();
+            // 比较时间戳的小时与当前小时
+            if hour != current_hour {
+                println!("时间戳的小时 ({}) 不等于当前小时 ({}), 跳过", hour, current_hour);
+                continue;
+            }
+
             let mysql_candles_5m = candles::CandlesModel::new().await.fetch_candles_from_mysql(inst_id, time).await?;
             if mysql_candles_5m.is_empty() {
                 return Err(anyhow!("mysql candles 5m is empty"));

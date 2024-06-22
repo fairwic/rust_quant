@@ -190,10 +190,8 @@ impl CandlesModel {
         //查询是否存在
         //不存在写入，存在且confirm==0 更新
         let existing_record: Option<CandlesEntity> = self.get_one_by_ts(inst_id, time_interval, candle_data.ts.parse::<i64>().unwrap()).await?;
-        info!("existing_record: {:?}", existing_record);
         if existing_record.is_none() {
             let res = self.add(vec![candle_data.clone()], inst_id, time_interval).await?;
-            info!("Record insert result: {:?}", res);
         } else {
             let data = CandlesEntity {
                 ts: candle_data.ts.parse::<i64>().unwrap(),
@@ -207,7 +205,6 @@ impl CandlesModel {
                 confirm: candle_data.confirm.to_string(),
             };
             let exec_result: u64 = self.update_one(data, inst_id, time_interval).await?;
-            info!("update candles ts:{},update result-rows_affected:{}",candle_data.ts, exec_result);
         }
         Ok(())
     }

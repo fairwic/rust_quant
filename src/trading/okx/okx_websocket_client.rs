@@ -209,15 +209,13 @@ impl OkxWebsocket {
     // }
 
 
-    async fn parse_and_log_message(&self, text: &str) -> anyhow::Result<()> {
+    async fn parse_and_deal_socket_message(&self, text: &str) -> anyhow::Result<()> {
         // 记录收到的原始消息
-        info!("Received: {}", text);
-
         let message = serde_json::from_str::<WebSocketMessage>(text).unwrap();
         // 解析消息
         match message {
             WebSocketMessage::Candle(message_data) => {
-                self.deal_candles_socker_messge(message_data).await?
+                self.deal_candles_socket_message(message_data).await?
             }
             WebSocketMessage::Tickers(message_data) => {
                 info!("解析websocket tickers")
@@ -226,17 +224,16 @@ impl OkxWebsocket {
                 info!("解析websocket evene")
             }
         }
+        info!("parse socket_message Ok ");
         Ok(())
     }
 
-    pub async fn deal_candles_socker_messge(&self, message_data: CandleMessage) -> anyhow::Result<()> {
-        info!("Parsed message: {:?}", message_data);
+    pub async fn deal_candles_socket_message(&self, message_data: CandleMessage) -> anyhow::Result<()> {
         let arg = &message_data.arg;
         let inst_id = &arg.inst_id; //ETH-USDT-SWAP
         let channel = &arg.channel; //candle1m
         //对字符串进行截取，从弟6个字符开始
         let time = &channel[6..];
-        info!("substr time: {}", time);
         // 解析具体的数据
 
         // 解析具体的数据
@@ -252,7 +249,6 @@ impl OkxWebsocket {
                 vol_ccy_quote: data[7].clone(),
                 confirm: data[8].clone(),
             };
-            info!("Candle data: {:?}", candle_data);
             //把当前数据写入到数据库中
             CandlesModel::new().await.update_or_create(&candle_data, inst_id, time).await?;
         }
@@ -274,11 +270,12 @@ impl OkxWebsocket {
             match msg {
                 Ok(msg) => {
                     debug!("okx websocket Received a new message: {}", msg);
-                    debug!("is_text: {}", msg.is_text());
                     if msg.is_text() {
                         let text = msg.to_text().unwrap();
-                        debug!("to_text: {}", text);
-                        self.parse_and_log_message(text).await?
+                        let res = self.parse_and_deal_socket_message(text).await;
+                        if let Err(e) = res {
+                            error!("parse and deal socket message: {}", e);
+                        }
                     }
                 }
                 Err(e) => {
