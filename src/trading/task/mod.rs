@@ -23,7 +23,6 @@ pub async fn run_sync_data_job(inst_ids: Vec<&str>, tims: Vec<&str>) -> Result<(
     let span = span!(Level::DEBUG, "run_sync_data_job");
     let _enter = span.enter();
 
-
     candles_job::init_create_table(Some(&inst_ids), Some(&tims)).await.expect("init create_table errror");
     candles_job::init_all_candles(Some(&inst_ids), Some(&tims)).await?;
     candles_job::init_before_candles(Some(&inst_ids), Some(tims)).await?;

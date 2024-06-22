@@ -13,29 +13,29 @@ pub async fn get_ticket(ins_type: &str) {
     }
 }
 
-pub async fn init_all_ticker() {
+pub async fn init_all_ticker() -> anyhow::Result<()> {
 
     //同步合约产品
     let ins_type = "SWAP";
-    let ticker = Market::get_tickers(&ins_type, None, None).await;
+    let ticker = Market::get_tickers(&ins_type, None, None).await?;
     debug!("全部tickets: {:?}", ticker);
 
-    if let Ok(ticker_list) = ticker {
+    if ticker.len() > 0 {
         let res = TicketsModel::new().await;
-        let res = res.add(ticker_list).await;
-        debug!("插入数据库结果: {:?}", res);
-    }
+        let res = res.add(ticker).await?;
+    };
 
     //同步币币产品
     let ins_type = "SPOT";
-    let ticker = Market::get_tickers(&ins_type, None, None).await;
+    let ticker = Market::get_tickers(&ins_type, None, None).await?;
     debug!("全部tickets: {:?}", ticker);
 
-    if let Ok(ticker_list) = ticker {
+    if ticker.len() > 0 {
         let res = TicketsModel::new().await;
-        let res = res.add(ticker_list).await;
+        let res = res.add(ticker).await?;
         debug!("插入数据库结果: {:?}", res);
     }
+    Ok(())
 }
 
 pub async fn sync_ticker() {

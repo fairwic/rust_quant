@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use crate::trading::okx::market::TickersData;
 use crate::trading::model::Db;
 use anyhow::Result;
+use rbatis::rbdc::db::ExecResult;
 use tracing::debug;
 
 /// table
@@ -49,7 +50,9 @@ impl TicketsModel {
             db: Db::get_db_client().await,
         }
     }
-    pub async fn add(&self, list: Vec<TickersData>) -> anyhow::Result<()> {
+
+
+    pub async fn add(&self, list: Vec<TickersData>) -> anyhow::Result<ExecResult> {
         let tickers_db: Vec<TickersDataEntity> = list.iter()
             .map(|ticker| TickersDataEntity {
                 inst_type: ticker.inst_type.clone(),
@@ -71,9 +74,9 @@ impl TicketsModel {
             })
             .collect();
 
-        let data = TickersDataEntity::insert_batch(&self.db, &tickers_db, list.len() as u64).await;
+        let data = TickersDataEntity::insert_batch(&self.db, &tickers_db, list.len() as u64).await?;
         println!("insert_batch = {}", json!(data));
-        Ok(())
+        Ok(data)
     }
     pub async fn update(&self, ticker: &TickersData) -> anyhow::Result<()> {
         let tickets_data = TickersDataEntity {

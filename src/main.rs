@@ -188,10 +188,9 @@ async fn main() -> anyhow::Result<()> {
     let passphrase = env::var("OKX_PASSPHRASE").expect("");
     let okx_websocket_clinet = okx_websocket_client::OkxWebsocket::new(api_key, api_secret, passphrase);
 
-
-    // let ins_type = "SWAP";
-    // let ticker = Market::get_tickers(&ins_type, None, None).await;
-    // println!("全部tickets: {:?}", ticker);
+    let ins_type = "SWAP";
+    let ticker = Market::get_tickers(&ins_type, None, None).await;
+    println!("全部tickets: {:?}", ticker);
     // //
     // if let Ok(ticker_list) = ticker {
     //     let res = TicketsModel::new().await;
@@ -262,6 +261,10 @@ async fn main() -> anyhow::Result<()> {
         validate_system_time().await;
     }
 
+    //同步所有tickets
+    tickets_job::init_all_ticker().await?;
+
+
     // let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP", "ADA-USDT-SWAP"];
     // let tims = ["1H", "5m", "1D", "4H"];
 
@@ -273,12 +276,12 @@ async fn main() -> anyhow::Result<()> {
 
 
     let mut scheduler = TaskScheduler::new();
-    // //周期性任务
-    // scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
-    //     info!("Periodic job executed at {:?}", tokio::time::Instant::now());
-    //     //同步单个交易产品
-    //     tickets_job::sync_ticker().await;
-    // });
+    //周期性任务
+    scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
+        info!("Periodic job executed at {:?}", tokio::time::Instant::now());
+        //同步单个交易产品
+        tickets_job::sync_ticker().await;
+    });
     // // 周期性任务
     // scheduler.add_periodic_task("periodic_task_2".to_string(), 500, || async {
     //     println!("Periodic job executed at {:?}", tokio::time::Instant::now());
