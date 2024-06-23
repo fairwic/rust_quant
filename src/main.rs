@@ -46,9 +46,7 @@ use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
 };
-use std::fs::File;
 use anyhow::anyhow;
-use daemonize::Daemonize;
 use dotenv::dotenv;
 
 use futures_channel::mpsc::{unbounded, UnboundedSender};
@@ -181,41 +179,7 @@ async fn main() -> anyhow::Result<()> {
             )
             .init();
     }
-    // Configure the daemon
-    let stdout = File::create("/tmp/daemon.out").unwrap();
-    let stderr = File::create("/tmp/daemon.err").unwrap();
 
-    let daemonize = Daemonize::new()
-        .pid_file("/tmp/test.pid") // Specify the pid file
-        .chown_pid_file(true)      // Let the daemon set the ownership of the pid file
-        .working_directory("/")    // Change the working directory to /
-        .user("nobody")            // Drop privileges to "nobody" user
-        .group("daemon")           // Drop privileges to "daemon" group
-        .umask(0o027)              // Set umask
-        .stdout(stdout)            // Redirect stdout to the specified file
-        .stderr(stderr);           // Redirect stderr to the specified file
-
-    // Start the daemon
-    match daemonize.start() {
-        Ok(_) => {
-            println!("Daemon started successfully");
-
-            // Run the Tokio async runtime
-            run();
-
-            // Prevent the main function from exiting
-            tokio::signal::ctrl_c().await.unwrap();
-            println!("Daemon exiting");
-        }
-        Err(e) => eprintln!("Error, {}", e),
-    }
-
-
-    Ok(())
-}
-
-
-async fn run() -> anyhow::Result<()> {
 
     //模拟交易
     // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
@@ -333,7 +297,7 @@ async fn run() -> anyhow::Result<()> {
 
 
     //执行下单逻辑
-    scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 300, || async {
+    scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 3000, || async {
         //执行策略
         let res = task::run_ut_boot_strategy_job().await;
         match res {
@@ -363,9 +327,9 @@ async fn run() -> anyhow::Result<()> {
     }
 
 
-    scheduler.shutdown().await?
+    scheduler.shutdown().await;
     // 模拟运行一段时间后关闭调度器
     // tokio::time::sleep(Duration::from_secs(60)).await;
     // scheduler.shutdown().await;
+    Ok(())
 }
-
