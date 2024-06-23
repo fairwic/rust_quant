@@ -5,8 +5,9 @@ use crate::trading;
 use crate::trading::model::Db;
 use crate::trading::model::market::candles;
 use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::model::strategy::back_test_log;
+use crate::trading::model::strategy::{back_test_log, strategy_job_signal_log};
 use crate::trading::model::strategy::back_test_log::BackTestLog;
+use crate::trading::model::strategy::strategy_job_signal_log::StrategyJobSignalLog;
 use crate::trading::order;
 use crate::trading::strategy::{StopLossStrategy, StrategyType};
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
@@ -159,6 +160,7 @@ pub async fn ut_boot_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, t
     Ok(())
 }
 
+
 pub async fn ut_boot_order(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
     let key_value = 1.2;
     let atr_period = 3;
@@ -166,6 +168,19 @@ pub async fn ut_boot_order(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
     //获取开仓信号
     let signal = UtBootStrategy::get_trade_signal(&mysql_candles_5m, key_value, atr_period, heikin_ashi);
     info!("ut_boot_strategy signal:{:?}", signal);
+    //插入信号记录到数据库中
+    let signal_result = SignalResult {
+        should_buy: signal.should_buy,
+        should_sell: signal.should_sell,
+        price: signal.price,
+    };
+    let signal_record = StrategyJobSignalLog {
+        inst_id: inst_id.parse().unwrap(),
+        time: time.parse().unwrap(),
+        strategy_type: StrategyType::UtBoot.to_string(),
+        strategy_result: serde_json::to_string(&signal_result).unwrap(),
+    };
+    strategy_job_signal_log::StrategyJobSignalLogModel::new().await.add(signal_record).await?;
     // let signal = SignalResult {
     //     should_buy: true,
     //     should_sell: false,

@@ -20,6 +20,7 @@ use crate::trading::strategy::support_resistance::SupportResistance;
 use crate::time_util;
 use crate::trading::okx::trade::CandleData;
 use std::collections::VecDeque;
+use std::fmt::Display;
 
 // 枚举表示止损策略的选择
 #[derive(Clone, Copy, Debug)]
@@ -35,8 +36,21 @@ pub enum StrategyType {
     Macd,
     MacdWithEma,
     Boll,
+    UtBoot,
 }
 
+impl Display for StrategyType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StrategyType::BreakoutUp => write!(f, "BreakoutUp"),
+            StrategyType::BreakoutDown => write!(f, "BreakoutDown"),
+            StrategyType::Macd => write!(f, "Macd"),
+            StrategyType::MacdWithEma => write!(f, "MacdWithEma"),
+            StrategyType::Boll => write!(f, "Boll"),
+            StrategyType::UtBoot => write!(f, "UtBoot"),
+        }
+    }
+}
 
 pub struct Strategy {
     rb: RBatis,
@@ -75,7 +89,6 @@ impl Close for KdjCandle {
         self.close
     }
 }
-
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]

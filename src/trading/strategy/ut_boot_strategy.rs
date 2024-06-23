@@ -1,16 +1,17 @@
-#[derive(Debug)]
+use serde::{Deserialize, Serialize};
+use ta::indicators::{AverageTrueRange, ExponentialMovingAverage};
+use ta::Next;
+use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::strategy::KdjCandle;
+
+pub struct UtBootStrategy {}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SignalResult {
     pub should_buy: bool,
     pub should_sell: bool,
     pub price: f64,
 }
-
-pub struct UtBootStrategy {}
-
-use ta::indicators::{AverageTrueRange, ExponentialMovingAverage};
-use ta::Next;
-use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::strategy::KdjCandle;
 
 impl UtBootStrategy {
     pub fn get_trade_signal(candles_5m: &[CandlesEntity], key_value: f64, atr_period: usize, heikin_ashi: bool) -> SignalResult {
