@@ -4,7 +4,7 @@ pub mod market;
 pub(crate) mod asset;
 pub(crate) mod strategy;
 
-use std::println;
+use std::{env, println};
 use fast_log::Config;
 use rbatis::RBatis;
 use rbdc_mysql::MysqlDriver;
@@ -31,7 +31,7 @@ impl Db {
 
         // link() will set driver and try use acquire() link database
         // sqlite
-        rb.link(MysqlDriver {}, "mysql://root:example@localhost:33306/test").await.unwrap();
+        rb.link(MysqlDriver {}, &*env::var("DB_HOST").unwrap()).await.unwrap();
         // rb.link_opt("mysql://yourusername:yourpassword@localhost:3306/yourdatabase", DBPoolOptions::new().max_connections(10)).await?;
         // mysql
         // rb.link(MysqlDriver{},"mysql://root:123456@localhost:3306/test").await.unwrap();

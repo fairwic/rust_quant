@@ -252,7 +252,7 @@ async fn main() -> anyhow::Result<()> {
 
 
     // 初始化 Redis
-    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").expect("get redis client error");
+    let client = redis::Client::open(env::var("REDIS_HOST").unwrap()).expect("get redis client error");
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
 
 
