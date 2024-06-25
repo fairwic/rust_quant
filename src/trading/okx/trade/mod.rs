@@ -72,6 +72,7 @@ impl Display for Side {
 pub enum MgnMode {}
 
 
+#[derive(Clone, Copy)]
 pub enum PosSide {
     LONG,
     SHORT,

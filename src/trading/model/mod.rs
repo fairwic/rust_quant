@@ -3,6 +3,7 @@ pub mod biz_activity_model;
 pub mod market;
 pub(crate) mod asset;
 pub(crate) mod strategy;
+pub mod order;
 
 use std::{env, println};
 use fast_log::Config;

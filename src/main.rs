@@ -51,6 +51,7 @@ use dotenv::dotenv;
 
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, SinkExt, stream::TryStreamExt, StreamExt};
+use futures_util::future::join_all;
 use tracing::{error};
 use redis::streams::StreamClaimOptions;
 use serde_json::json;
@@ -130,7 +131,6 @@ async fn validate_system_time() {
         info!("时间未同步，时间间隔相差值: {} 毫秒", time_diff);
     }
 }
-
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -261,27 +261,27 @@ async fn main() -> anyhow::Result<()> {
         validate_system_time().await;
     }
 
-    //同步所有tickets
+    //----- 同步所有tickets
     // tickets_job::init_all_ticker().await?;
-
-
+    //----- 1.定义想要交易的产品及周期
     // let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP", "ADA-USDT-SWAP"];
     // let tims = ["1H", "5m", "1D", "4H"];
+    // let inst_ids = vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"];
+    // let inst_ids = vec!["SOL-USDT-SWAP"];
 
-    //初始化需要同步数据产品数据
-    let inst_ids = vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"];
-    // let inst_ids = ["ETH-USDT-SWAP","BTC-USDT-SWAP","S”];
-    let tims = vec!["1H"];
-    task::run_sync_data_job(inst_ids, tims).await?;
+    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"]);
+    let times = Arc::new(vec!["1H", "4H", "1D"]);
 
+    //------2. 初始化需要同步数据产品数据
+    task::run_sync_data_job(&inst_ids, &times).await?;
 
     let mut scheduler = TaskScheduler::new();
-    //周期性任务
-    scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
-        info!("Periodic job executed at {:?}", tokio::time::Instant::now());
-        //同步单个交易产品
-        tickets_job::sync_ticker().await;
-    });
+    // //周期性任务
+    // scheduler.add_periodic_task("periodic_task_1".to_string(), 500, || async {
+    //     info!("Periodic job executed at {:?}", tokio::time::Instant::now());
+    //     //同步单个交易产品
+    //     tickets_job::sync_ticker().await;
+    // });
     // // 周期性任务
     // scheduler.add_periodic_task("periodic_task_2".to_string(), 500, || async {
     //     println!("Periodic job executed at {:?}", tokio::time::Instant::now());
@@ -296,21 +296,55 @@ async fn main() -> anyhow::Result<()> {
     // });
 
 
-    //执行下单逻辑
-    scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 3000, || async {
-        //执行策略
-        let res = task::run_ut_boot_strategy_job().await;
-        match res {
-            Ok(()) => {
-                info!("run strategy success:");
-            }
-            Err(error) => {
-                error!("run strategy error: {}", error);
+    //---------执行回测任务
+    // let mut tasks = Vec::new();
+    // for inst_id in &inst_ids {
+    //     for time in &times {
+    //         let inst_id = inst_id.to_string();
+    //         let time = time.to_string();
+    //         tasks.push(tokio::spawn(async move {
+    //             let res = task::run_ut_boot_run_test(&inst_id, &time).await;
+    //         }));
+    //     }
+    // }
+    // 并发执行所有任务
+    // join_all(tasks).await;
+
+
+    // ------ 执行下单逻辑
+
+    //test执行一次
+    // let res = task::run_ut_boot_strategy_job(inst_ids, times).await;
+    // match res {
+    //     Ok(()) => {
+    //         info!("run strategy success:");
+    //     }
+    //     Err(error) => {
+    //         error!("run strategy error: {}", error);
+    //     }
+    // }
+
+    // let inst_ids_clone = Arc::clone(&inst_ids);
+    // let times_clone = Arc::clone(&times);
+
+    //--- 重复运行
+    scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 3000, move || {
+        let inst_ids_inner = vec!["SOL-USDT-SWAP"];
+        let times_inner = vec!["1D", "4H"];
+        async move {
+            let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
+            match res {
+                Ok(()) => {
+                    info!("run strategy success:");
+                }
+                Err(error) => {
+                    error!("run strategy error: {}", error);
+                }
             }
         }
     });
 
-    // 运行websocket,实时同步数据
+    // ---------3.运行websocket,实时同步数据
     socket::run_socket().await;
 
     // // 添加一个定时任务
@@ -329,7 +363,5 @@ async fn main() -> anyhow::Result<()> {
 
     scheduler.shutdown().await;
     // 模拟运行一段时间后关闭调度器
-    // tokio::time::sleep(Duration::from_secs(60)).await;
-    // scheduler.shutdown().await;
     Ok(())
 }

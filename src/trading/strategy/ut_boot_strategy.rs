@@ -4,7 +4,12 @@ use ta::Next;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::strategy::KdjCandle;
 
-pub struct UtBootStrategy {}
+#[derive(Deserialize, Serialize, Debug)]
+pub struct UtBootStrategy {
+    pub key_value: f64,
+    pub atr_period: usize,
+    pub heikin_ashi: bool,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SignalResult {

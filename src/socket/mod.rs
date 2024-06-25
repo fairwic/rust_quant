@@ -34,8 +34,8 @@ pub async fn run_socket() {
     // 订阅k线频道
     // 从数据库中获取需要订阅的产品
     // let inst_ids = vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP", "ADA-USDT-SWAP"];
-    let inst_ids = vec!["ETH-USDT-SWAP"];
-    let times = vec!["1H"];
+    let inst_ids = vec!["ETH-USDT-SWAP", "SOL-USDT-SWAP"];
+    let times = vec!["4H", "1D"];
 
     let mut public_candles_channels = Vec::new();
     for inst_id in &inst_ids {
