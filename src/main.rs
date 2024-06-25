@@ -154,17 +154,11 @@ async fn main() -> anyhow::Result<()> {
         let error_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "error.log");
 
         // 创建非阻塞的日志记录器
-        let (debug_non_blocking, _debug_guard) = tracing_appender::non_blocking(debug_file);
+        // let (debug_non_blocking, _debug_guard) = tracing_appender::non_blocking(debug_file);
         let (info_non_blocking, _info_guard) = tracing_appender::non_blocking(info_file);
         let (error_non_blocking, _error_guard) = tracing_appender::non_blocking(error_file);
         // 初始化 tracing 订阅器
         tracing_subscriber::registry()
-            .with(
-                fmt::layer()
-                    .with_writer(debug_non_blocking)
-                    .with_filter(EnvFilter::new("debug"))
-                    .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG)
-            )
             .with(
                 fmt::layer()
                     .with_writer(info_non_blocking)
