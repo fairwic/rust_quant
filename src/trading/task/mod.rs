@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use chrono::{DateTime, Local, Timelike, TimeZone, Utc};
-use tracing::{info, Level, span};
+use tracing::{error, info, Level, span};
 
 use crate::{time_util, trading};
 use crate::trading::model::Db;
@@ -326,7 +326,7 @@ pub fn validte_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool 
 }
 
 pub async fn run_ut_boot_run_real(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-    info!("run_ut_boot_run_real inst_id:{:?} time:{:?}", inst_id,time);
+    info!("run ut_boot_run_real inst_id:{:?} time:{:?}", inst_id,time);
     //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
     let mysql_candles_5m = candles::CandlesModel::new().await.get_new_data(inst_id, time).await?;
     if mysql_candles_5m.is_none() {
@@ -372,7 +372,10 @@ pub async fn run_ut_boot_strategy_job(inst_ids: Vec<&str>, times: Vec<&str>) -> 
             //实际执行
             let inst_id = inst_id.to_string();
             let time = time.to_string();
-            self::run_ut_boot_run_real(&inst_id, &time).await?;
+            let res = self::run_ut_boot_run_real(&inst_id, &time).await;
+            if let Err(e) = res {
+                error!("run_ut_boot_run_real inst_id:{:?} time:{:?} error:{:?}", inst_id, time, e);
+            }
             //执行回测
             // self::run_ut_boot_run_test(inst_id, time).await?;
         }
