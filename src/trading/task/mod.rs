@@ -313,19 +313,13 @@ pub async fn run_ut_boot_run_test(inst_id: &str, time: &str) -> Result<(), anyho
 pub fn validte_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool {
     let ts = mysql_candles_5m.ts;
     let local_time = Local::now();
-    println!("当前时区偏移: {}", local_time);
-    println!("ts:{:?}", ts);
     // 将毫秒时间戳转换为 DateTime<Utc>
     let datetime: DateTime<Local> = Local.timestamp_millis_opt(ts).unwrap();
-    println!("date_time:{:?}", datetime);
     let date = time_util::format_to_period(time, Some(datetime));
-    println!("date:{:?}", date);
     let current_date = time_util::format_to_period(time, None);
-    println!("current_date:{:?}", current_date);
-
     // 比较时间戳的小时与当前小时
     if date != current_date {
-        println!("数据库最新数据的时间 ({}) 不等于当前最新时间 ({}), 跳过,candles:{:?},time:{}", date, current_date, mysql_candles_5m, time);
+        println!("数据库最新数据的时间ts:{} date:({}) 不等于当前最新时间 local time:({}), 跳过,candles:{:?},time:{}", ts, date, current_date, mysql_candles_5m, time);
         return false;
     }
     return true;

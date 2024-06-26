@@ -1,20 +1,18 @@
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
+use tokio_retry::Retry;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message, MaybeTlsStream};
+use futures_util::{SinkExt, StreamExt};
+use tokio::time::{self, Duration};
+use tracing::{debug, error, info};
 use std::env;
-use std::io::{stdin, stdout};
 use base64::encode;
 use chrono::Utc;
-
-use futures_util::{future, pin_mut, SinkExt, StreamExt};
 use hmac_sha256::HMAC;
-use tracing::{info, error, error_span};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
-use tracing::debug;
-use crate::trading::model::market::candles::{CandlesEntity, CandlesModel};
+use anyhow::{Result, anyhow};
+use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::okx::public_data::CandleData;
-// use crate::trading::okx::trade::CandleData;
 
 pub(crate) struct OkxWebsocket {
     api_key: String,
@@ -29,22 +27,20 @@ pub enum ApiType {
     Business,
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 enum WebSocketMessage {
     Tickers(TickersMessage),
     Candle(CandleMessage),
     Event(EventMessage),
+    Pong,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EventMessage {
-    //事件类型
     event: String,
     arg: Arg,
-    //连接id
     conn_id: String,
 }
 
@@ -87,7 +83,6 @@ struct Arg {
     inst_id: String,
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 struct Data {
     ts: String,
@@ -116,127 +111,153 @@ impl OkxWebsocket {
         }
     }
 
-    fn generate_sign(&self, timestamp: &str, method: &str, request_path: &str, secret_key: String) -> String {
+    fn generate_sign(&self, timestamp: &str, method: &str, request_path: &str) -> String {
         let prehash = format!("{}{}{}", timestamp, method, request_path);
-        let hash = HMAC::mac(prehash.as_bytes(), secret_key.as_bytes());
+        let hash = HMAC::mac(prehash.as_bytes(), self.api_secret.as_bytes());
         encode(hash)
     }
 
-    fn get_ws_url(&self, api_type: &ApiType) -> Result<String, Box<dyn std::error::Error>> {
+    fn get_ws_url(&self, api_type: &ApiType) -> Result<String> {
         let env_var = match api_type {
             ApiType::Public => "WS_PUBLIC_URL",
             ApiType::Private => "WS_PRIVATE_URL",
             ApiType::Business => "WS_BUSINESS_URL",
         };
-        println!("{}", env::var(env_var).unwrap());
-        env::var(env_var).map_err(|_| format!("Environment variable {} not set", env_var).into())
+        env::var(env_var).map_err(|_| anyhow!("Environment variable {} not set", env_var))
     }
 
-    async fn connect_and_login(&self, api_type: &ApiType) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, Box<dyn std::error::Error>> {
+    async fn connect_and_login(&self, api_type: &ApiType) -> Result<tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>> {
         let ws_url = self.get_ws_url(api_type)?;
-        let (ws_stream, _) = connect_async(&ws_url).await?;
-        println!("WebSocket handshake has been successfully completed");
+        let (mut ws_stream, _) = connect_async(&ws_url).await?;
+        info!("WebSocket handshake has been successfully completed");
 
-        if matches!(api_type, ApiType::Private) {
-            let (mut write, mut read) = ws_stream.split();
-            let timestamp = Utc::now().timestamp().to_string();
-            let sign = self.generate_sign(&timestamp, "GET", "/users/self/verify", self.api_secret.clone());
+        if let ApiType::Private = api_type {
+            self.login(&mut ws_stream).await?;
+        }
 
-            let login_msg = json!({
-                "op": "login",
-                "args": [{
-                    "apiKey": self.api_key,
-                    "passphrase": self.passphrase,
-                    "timestamp": timestamp,
-                    "sign": sign,
-                }]
-            });
+        Ok(ws_stream)
+    }
 
-            write.send(Message::Text(login_msg.to_string())).await.expect("Failed to send login message");
+    async fn login(&self, ws_stream: &mut tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>)
+                   -> Result<()> {
+        let (mut write, mut read) = ws_stream.split();
+        let timestamp = Utc::now().timestamp().to_string();
+        let sign = self.generate_sign(&timestamp, "GET", "/users/self/verify");
 
-            while let Some(msg) = read.next().await {
-                match msg {
-                    Ok(msg) => {
-                        if msg.is_text() {
-                            let text = msg.to_text().unwrap();
-                            if text.contains("\"event\":\"login\"") && text.contains("\"code\":\"0\"") {
-                                println!("Login successful: {}", text);
-                                return Ok(write.reunite(read).unwrap());
-                            } else {
-                                println!("Private received: {}", text);
-                            }
+        let login_msg = json!({
+            "op": "login",
+            "args": [{
+                "apiKey": self.api_key,
+                "passphrase": self.passphrase,
+                "timestamp": timestamp,
+                "sign": sign,
+            }]
+        });
+
+        write.send(Message::Text(login_msg.to_string())).await.map_err(|e| anyhow!(e))?;
+
+        while let Some(msg) = read.next().await {
+            match msg {
+                Ok(msg) => {
+                    if msg.is_text() {
+                        let text = msg.to_text().unwrap();
+                        if text.contains("\"event\":\"login\"") && text.contains("\"code\":\"0\"") {
+                            info!("Login successful: {}", text);
+                            return Ok(());
+                        } else {
+                            info!("Private received: {}", text);
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        break;
-                    }
+                }
+                Err(e) => {
+                    error!("Error: {}", e);
+                    break;
                 }
             }
-            Err("Login failed".into())
-        } else {
-            Ok(ws_stream)
         }
+        Err(anyhow!("Login failed"))
     }
 
-    // pub async fn subscribe(&self, api_type: ApiType, channels: Vec<serde_json::Value>) -> Result<(), Box<dyn std::error::Error>> {
-    //     let ws_stream = self.connect_and_login(&api_type).await?;
-    //     let (mut write, mut read) = ws_stream.split();
-    //
-    //     let subscribe_msg = json!({
-    //         "op": "subscribe",
-    //         "args": channels
-    //     });
-    //
-    //     write.send(Message::Text(subscribe_msg.to_string())).await.expect("Failed to send subscribe message");
-    //
-    //     while let Some(msg) = read.next().await {
-    //         match msg {
-    //             Ok(msg) => {
-    //                 if msg.is_text() {
-    //                     let text = msg.to_text().unwrap();
-    //                     println!("Received: {}", text);
-    //                 }
-    //             }
-    //             Err(e) => {
-    //                 eprintln!("Error: {}", e);
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //
-    //     Ok(())
-    // }
-
-
-    async fn parse_and_deal_socket_message(&self, text: &str) -> anyhow::Result<()> {
-        // 记录收到的原始消息
-        let message = serde_json::from_str::<WebSocketMessage>(text).unwrap();
-        // 解析消息
-        match message {
-            WebSocketMessage::Candle(message_data) => {
-                self.deal_candles_socket_message(message_data).await?
-            }
-            WebSocketMessage::Tickers(message_data) => {
-                info!("解析websocket tickers")
-            }
-            WebSocketMessage::Event(mesage_data) => {
-                info!("解析websocket evene")
-            }
-        }
-        info!("parse socket_message Ok ");
+    async fn subscribe_channels(&self, write: &mut futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>, channels: &[serde_json::Value]) -> Result<()> {
+        let subscribe_msg = json!({
+            "op": "subscribe",
+            "args": channels
+        });
+        write.send(Message::Text(subscribe_msg.to_string())).await.map_err(|e| anyhow!(e))?;
         Ok(())
     }
 
-    pub async fn deal_candles_socket_message(&self, message_data: CandleMessage) -> anyhow::Result<()> {
-        let arg = &message_data.arg;
-        let inst_id = &arg.inst_id; //ETH-USDT-SWAP
-        let channel = &arg.channel; //candle1m
-        //对字符串进行截取，从弟6个字符开始
-        let time = &channel[6..];
-        // 解析具体的数据
+    async fn handle_reconnect(&self, api_type: &ApiType, channels: &[serde_json::Value]) -> Result<()> {
+        let retry_strategy = ExponentialBackoff::from_millis(10)
+            .map(jitter)
+            .take(5);
 
-        // 解析具体的数据
+        Retry::spawn(retry_strategy, || async {
+            self.connect_and_subscribe(api_type, channels).await
+        }).await?;
+        Ok(())
+    }
+
+    async fn connect_and_subscribe(&self, api_type: &ApiType, channels: &[serde_json::Value]) -> Result<()> {
+        let mut ws_stream = self.connect_and_login(api_type).await?;
+        let (mut write, mut read) = ws_stream.split();
+        self.subscribe_channels(&mut write, channels).await?;
+
+        self.start_heartbeat(&mut write, &mut read).await?;
+        Ok(())
+    }
+
+    async fn start_heartbeat(&self, write: &mut futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>, read: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>>) -> Result<()> {
+        let heartbeat_interval = Duration::from_secs(25);
+        let mut heartbeat_timer = time::interval(heartbeat_interval);
+
+        loop {
+            tokio::select! {
+                Some(msg) = read.next() => {
+                    match msg {
+                        Ok(msg) => {
+                            info!("okx websocket Received a new message: {}", msg);
+                            if msg.is_text() {
+                                let text = msg.to_text().unwrap();
+                                if let Err(e) = self.parse_and_deal_socket_message(&text).await {
+                                    error!("parse and deal socket message: {}", e);
+                                }
+                                // Reset the timer on any received message
+                                heartbeat_timer.reset();
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error: {}", e);
+                            return Err(anyhow!(e));
+                        }
+                    }
+                },
+                _ = heartbeat_timer.tick() => {
+                    // Send a ping message if no messages were received within the interval
+                    write.send(Message::Text("ping".into())).await.map_err(|e| anyhow!(e))?;
+                }
+            }
+        }
+    }
+
+    async fn parse_and_deal_socket_message(&self, text: &str) -> Result<()> {
+        let message: WebSocketMessage = serde_json::from_str(text)?;
+        match message {
+            WebSocketMessage::Candle(message_data) => self.deal_candles_socket_message(message_data).await?,
+            WebSocketMessage::Tickers(_) => info!("Parsing websocket tickers"),
+            WebSocketMessage::Event(_) => info!("Parsing websocket event"),
+            WebSocketMessage::Pong => info!("Received pong"),
+        }
+        debug!("Parsed socket message successfully");
+        Ok(())
+    }
+
+    pub async fn deal_candles_socket_message(&self, message_data: CandleMessage) -> Result<()> {
+        let arg = &message_data.arg;
+        let inst_id = &arg.inst_id;
+        let channel = &arg.channel;
+        let time = &channel[6..];
+
         for data in message_data.data {
             let candle_data = CandleData {
                 ts: data[0].clone(),
@@ -249,42 +270,13 @@ impl OkxWebsocket {
                 vol_ccy_quote: data[7].clone(),
                 confirm: data[8].clone(),
             };
-            //把当前数据写入到数据库中
             CandlesModel::new().await.update_or_create(&candle_data, inst_id, time).await?;
         }
         Ok(())
     }
 
-
-    pub async fn subscribe(&self, api_type: ApiType, channels: Vec<serde_json::Value>) -> Result<(), Box<dyn std::error::Error>> {
-        let ws_stream = self.connect_and_login(&api_type).await?;
-        let (mut write, mut read) = ws_stream.split();
-
-        let subscribe_msg = json!({
-                         "op": "subscribe",
-                         "args": channels
-          });
-        write.send(Message::Text(subscribe_msg.to_string())).await.expect("Failed to send subscribe message");
-
-        while let Some(msg) = read.next().await {
-            match msg {
-                Ok(msg) => {
-                    debug!("okx websocket Received a new message: {}", msg);
-                    if msg.is_text() {
-                        let text = msg.to_text().unwrap();
-                        let res = self.parse_and_deal_socket_message(text).await;
-                        if let Err(e) = res {
-                            error!("parse and deal socket message: {}", e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Error: {}", e);
-                    break;
-                }
-            }
-        }
-
+    pub async fn subscribe(&self, api_type: ApiType, channels: Vec<serde_json::Value>) -> Result<()> {
+        self.handle_reconnect(&api_type, &channels).await?;
         Ok(())
     }
 }
