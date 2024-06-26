@@ -324,7 +324,7 @@ async fn main() -> anyhow::Result<()> {
     // let times_clone = Arc::clone(&times);
 
     //--- 重复运行
-    scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 3000, move || {
+    scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, move || {
         let inst_ids_inner = vec!["SOL-USDT-SWAP"];
         let times_inner = vec!["1D", "4H", "1H"];
         async move {
