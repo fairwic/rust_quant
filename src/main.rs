@@ -325,7 +325,7 @@ async fn main() -> anyhow::Result<()> {
 
     //--- 重复运行
     scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, move || {
-        let inst_ids_inner = vec!["SOL-USDT-SWAP"];
+        let inst_ids_inner = vec!["SOL-USDT-SWAP", "ETH-USDT-SWAP"];
         let times_inner = vec!["1D", "4H", "1H"];
         async move {
             let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
