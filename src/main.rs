@@ -326,7 +326,7 @@ async fn main() -> anyhow::Result<()> {
     //--- 重复运行
     scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 3000, move || {
         let inst_ids_inner = vec!["SOL-USDT-SWAP"];
-        let times_inner = vec!["1D", "4H"];
+        let times_inner = vec!["1D", "4H", "1H"];
         async move {
             let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
             match res {
@@ -342,7 +342,7 @@ async fn main() -> anyhow::Result<()> {
 
     if env::var("IS_OPEN_SOCKET").unwrap() == "true" {
         // ---------3.运行websocket,实时同步数据
-        socket::run_socket().await;
+        socket::run_socket(inst_ids.clone(), times.clone()).await;
     }
 
     // // 添加一个定时任务

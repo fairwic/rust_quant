@@ -1,4 +1,5 @@
 use std::env;
+use std::sync::Arc;
 use futures_util::StreamExt;
 use log::{debug, error, warn};
 use serde_json::json;
@@ -8,7 +9,7 @@ use crate::accept_connection;
 use crate::trading::okx::okx_websocket_client;
 use crate::trading::okx::okx_websocket_client::ApiType;
 
-pub async fn run_socket() {
+pub async fn run_socket(inst_ids: Arc<Vec<&str>>, times: Arc<Vec<&str>>) {
     let span = span!(Level::DEBUG, "socket_logic");
     let _enter = span.enter();
     // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
@@ -31,22 +32,12 @@ pub async fn run_socket() {
     ];
 
 
-    // 订阅k线频道
-    // 从数据库中获取需要订阅的产品
-    // let inst_ids = vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP", "ADA-USDT-SWAP"];
-    let inst_ids = vec!["ETH-USDT-SWAP", "SOL-USDT-SWAP"];
-    let times = vec!["4H", "1D"];
-
     let mut public_candles_channels = Vec::new();
-    for inst_id in &inst_ids {
-        for time in &times {
-            // public_candles_channels.push(json!({
-            //  "channel": format!("candle{}",time.clone()),
-            // "instId": inst_id.clone(),
-
+    for inst_id in inst_ids.iter() {
+        for time in times.iter() {
             public_candles_channels.push(json!({
              "channel": format!("candle{}",time.clone()),
-            "instId": inst_id.clone(),
+             "instId": inst_id.clone(),
         }));
         }
     }

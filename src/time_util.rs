@@ -1,10 +1,10 @@
 use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, ParseError, Timelike, TimeZone, Utc};
 
 // 将 DateTime 格式化为周期字符串（如 "4H", "5min" 等）
-pub fn format_to_period(period: &str, mut dt: Option<DateTime<Utc>>) -> String {
+pub fn format_to_period(period: &str, mut dt: Option<DateTime<Local>>) -> String {
     if dt.is_none() {
         //当前时间
-        dt = Some(Utc::now());
+        dt = Some(Local::now());
     }
 
     let dt = dt.unwrap();

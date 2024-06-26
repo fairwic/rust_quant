@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use chrono::{DateTime, Timelike, TimeZone, Utc};
+use chrono::{DateTime, Local, Timelike, TimeZone, Utc};
 use tracing::{info, Level, span};
 
 use crate::{time_util, trading};
@@ -312,9 +312,11 @@ pub async fn run_ut_boot_run_test(inst_id: &str, time: &str) -> Result<(), anyho
 
 pub fn validte_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool {
     let ts = mysql_candles_5m.ts;
+    let local_time = Local::now();
+    println!("当前时区偏移: {}", local_time);
     println!("ts:{:?}", ts);
     // 将毫秒时间戳转换为 DateTime<Utc>
-    let mut datetime = Utc.timestamp_millis_opt(ts).unwrap();
+    let datetime: DateTime<Local> = Local.timestamp_millis_opt(ts).unwrap();
     println!("date_time:{:?}", datetime);
     let date = time_util::format_to_period(time, Some(datetime));
     println!("date:{:?}", date);
@@ -350,7 +352,7 @@ pub async fn run_ut_boot_run_real(inst_id: &str, time: &str) -> Result<(), anyho
     //从策略配置中获取到对应的产品配置
     let strategy_config = StrategyConfigEntityModel::new().await.get_config(StrategyType::UtBoot.to_string().as_str(), inst_id, time).await?;
     if strategy_config.len() < 1 {
-        return Err(anyhow!("ut boot strategy config is none"));
+        return Err(anyhow!("ut boot strategy config is none.inst_id:{},time:{}",inst_id,time));
     }
 
     // let ut_boot_strategy = UtBootStrategy {
