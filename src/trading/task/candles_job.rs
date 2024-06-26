@@ -1,3 +1,4 @@
+use std::thread;
 use std::time::Duration;
 use chrono::Utc;
 use hmac::digest::typenum::op;
@@ -86,7 +87,7 @@ pub async fn init_all_candles(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<&
                 let res = CandlesModel::new().await.add(res, ticker.inst_id.as_str(), time).await?;
                 let res = CandlesModel::new().await.get_oldest_data(ticker.inst_id.as_str(), time).await?;
                 after = res.unwrap().ts;
-                sleep(Duration::from_millis(400)).await;
+                thread::sleep(Duration::from_millis(300));
             }
         }
     }
@@ -120,7 +121,7 @@ pub async fn init_before_candles(inst_ids: Option<&Vec<&str>>, times: Option<Vec
                 let res = CandlesModel::new().await.add(res, ticker.inst_id.as_str(), time).await?;
                 let res = CandlesModel::new().await.get_new_data(ticker.inst_id.as_str(), time).await?;
                 before = res.unwrap().ts;
-                sleep(Duration::from_millis(400)).await;
+                thread::sleep(Duration::from_millis(300));
             }
         }
     }
