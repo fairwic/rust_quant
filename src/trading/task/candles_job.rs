@@ -78,6 +78,7 @@ pub async fn init_all_candles(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<&
             //
             // }
             loop {
+                sleep(Duration::from_millis(200)).await;
                 let res = Market::new().get_history_candles(&ticker.inst_id, time, Some(&after.to_string()), None, None).await?;
                 if res.is_empty() {
                     debug!("No old candles patch{},{}",ticker.inst_id, time);
@@ -87,7 +88,6 @@ pub async fn init_all_candles(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<&
                 let res = CandlesModel::new().await.add(res, ticker.inst_id.as_str(), time).await?;
                 let res = CandlesModel::new().await.get_oldest_data(ticker.inst_id.as_str(), time).await?;
                 after = res.unwrap().ts;
-                sleep(Duration::from_millis(500)).await;
             }
         }
     }
@@ -113,6 +113,7 @@ pub async fn init_before_candles(inst_ids: Option<&Vec<&str>>, times: Option<Vec
                 before = res.unwrap().ts;
             }
             loop {
+                sleep(Duration::from_millis(200)).await;
                 let res = Market::new().get_history_candles(&ticker.inst_id, time, None, Some(&before.to_string()), Some("300")).await?;
                 if res.is_empty() {
                     debug!("No new candles patch{},{}",ticker.inst_id, time);
@@ -121,7 +122,6 @@ pub async fn init_before_candles(inst_ids: Option<&Vec<&str>>, times: Option<Vec
                 let res = CandlesModel::new().await.add(res, ticker.inst_id.as_str(), time).await?;
                 let res = CandlesModel::new().await.get_new_data(ticker.inst_id.as_str(), time).await?;
                 before = res.unwrap().ts;
-                sleep(Duration::from_millis(500)).await;
             }
         }
     }
