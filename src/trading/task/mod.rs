@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use chrono::{DateTime, Timelike, TimeZone, Utc};
 use tracing::{info, Level, span};
 
-use crate::trading;
+use crate::{time_util, trading};
 use crate::trading::model::Db;
 use crate::trading::model::market::candles;
 use crate::trading::model::market::candles::CandlesEntity;
@@ -310,30 +310,30 @@ pub async fn run_ut_boot_run_test(inst_id: &str, time: &str) -> Result<(), anyho
     Ok(())
 }
 
-pub fn validte_candle_data(mysql_candles_5m: CandlesEntity) -> bool {
+pub fn validte_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool {
     let ts = mysql_candles_5m.ts;
     // 将毫秒时间戳转换为 DateTime<Utc>
-    let datetime: DateTime<Utc> = Utc.timestamp_millis(ts);
-    // 获取小时
-    let hour = datetime.hour();
-    // 获取当前时间的小时
-    let current_hour = Utc::now().hour();
+    let mut datetime = Utc.timestamp_millis_opt(ts).unwrap();
+    let date = time_util::format_to_period(time, Some(datetime));
+    let current_date = time_util::format_to_period(time, None);
+
     // 比较时间戳的小时与当前小时
-    if hour != current_hour {
-        println!("时间戳的小时 ({}) 不等于当前小时 ({}), 跳过", hour, current_hour);
+    if date != current_date {
+        println!("数据库最新数据的时间 ({}) 不等于当前最新时间 ({}), 跳过,candles:{:?},time:{}", date, current_date, mysql_candles_5m, time);
         return false;
     }
     return true;
 }
 
 pub async fn run_ut_boot_run_real(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+    info!("run_ut_boot_run_real inst_id:{:?} time:{:?}", inst_id,time);
     //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
     let mysql_candles_5m = candles::CandlesModel::new().await.get_new_data(inst_id, time).await?;
     if mysql_candles_5m.is_none() {
         return Ok(());
     }
     //验证数据准确性
-    let is_valid = self::validte_candle_data(mysql_candles_5m.unwrap());
+    let is_valid = self::validte_candle_data(mysql_candles_5m.unwrap(), time);
     if !is_valid {
         return Ok(());
     }

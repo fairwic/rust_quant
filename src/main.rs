@@ -267,7 +267,9 @@ async fn main() -> anyhow::Result<()> {
     let times = Arc::new(vec!["1H", "4H", "1D"]);
 
     //------2. 初始化需要同步数据产品数据
-    task::run_sync_data_job(&inst_ids, &times).await?;
+    if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
+        task::run_sync_data_job(&inst_ids, &times).await?;
+    }
 
     let mut scheduler = TaskScheduler::new();
     // //周期性任务
@@ -338,8 +340,10 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // ---------3.运行websocket,实时同步数据
-    socket::run_socket().await;
+    if env::var("IS_OPEN_SOCKET").unwrap() == "true" {
+        // ---------3.运行websocket,实时同步数据
+        socket::run_socket().await;
+    }
 
     // // 添加一个定时任务
     // let target_time = Utc::now() + chrono::Duration::seconds(30);
