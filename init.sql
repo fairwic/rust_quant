@@ -34,17 +34,16 @@ CREATE TABLE `swap_orders` (
 
 
 
-CREATE TABLE `ut_boot_inst_config` (
-  `id` int NOT NULL,
+CREATE TABLE `strategy_config` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `strategy_type` varchar(50) NOT NULL COMMENT '策略类型',
   `inst_id` varchar(50) NOT NULL COMMENT '交易产品类型',
+  `value` varchar(600) DEFAULT NULL COMMENT '配置详情',
   `time` varchar(50) NOT NULL COMMENT '交易时间段',
-  `index_value` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'Key Vaule. ''This changes the sensitivity''',
-  `atr_period` int NOT NULL COMMENT '周期',
-  `heikin_ashi` varchar(10) DEFAULT NULL COMMENT 'Signals from Heikin Ashi Candles',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='ut_boot策略配置表';
-
-
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='ut_boot策略配置表';
 
 
 
