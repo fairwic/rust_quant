@@ -312,10 +312,14 @@ pub async fn run_ut_boot_run_test(inst_id: &str, time: &str) -> Result<(), anyho
 
 pub fn validte_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool {
     let ts = mysql_candles_5m.ts;
+    println!("ts:{:?}", ts);
     // 将毫秒时间戳转换为 DateTime<Utc>
     let mut datetime = Utc.timestamp_millis_opt(ts).unwrap();
+    println!("date_time:{:?}", datetime);
     let date = time_util::format_to_period(time, Some(datetime));
+    println!("date:{:?}", date);
     let current_date = time_util::format_to_period(time, None);
+    println!("current_date:{:?}", current_date);
 
     // 比较时间戳的小时与当前小时
     if date != current_date {
