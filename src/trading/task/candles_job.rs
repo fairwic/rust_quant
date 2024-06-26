@@ -86,7 +86,7 @@ pub async fn init_all_candles(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<&
                 let res = CandlesModel::new().await.add(res, ticker.inst_id.as_str(), time).await?;
                 let res = CandlesModel::new().await.get_oldest_data(ticker.inst_id.as_str(), time).await?;
                 after = res.unwrap().ts;
-                sleep(Duration::from_millis(300)).await;
+                sleep(Duration::from_millis(400)).await;
             }
         }
     }
@@ -120,7 +120,7 @@ pub async fn init_before_candles(inst_ids: Option<&Vec<&str>>, times: Option<Vec
                 let res = CandlesModel::new().await.add(res, ticker.inst_id.as_str(), time).await?;
                 let res = CandlesModel::new().await.get_new_data(ticker.inst_id.as_str(), time).await?;
                 before = res.unwrap().ts;
-                sleep(Duration::from_millis(300)).await;
+                sleep(Duration::from_millis(400)).await;
             }
         }
     }
