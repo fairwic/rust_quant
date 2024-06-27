@@ -292,10 +292,10 @@ async fn main() -> anyhow::Result<()> {
     // });
 
 
-    //---------执行回测任务
+    // ---------执行回测任务
     // let mut tasks = Vec::new();
-    // for inst_id in &inst_ids {
-    //     for time in &times {
+    // for inst_id in inst_ids.iter() {
+    //     for time in times.iter() {
     //         let inst_id = inst_id.to_string();
     //         let time = time.to_string();
     //         tasks.push(tokio::spawn(async move {
@@ -340,16 +340,18 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+
+    // // 添加一个定时任务 删除3天前或者更早的信号日志，
+    let target_time = Utc::now() + chrono::Duration::hours(12);
+    scheduler.add_scheduled_task("scheduled_task_1".to_string(), target_time, || async {
+        println!("Scheduled job executed at {:?}", tokio::time::Instant::now());
+    });
+
     if env::var("IS_OPEN_SOCKET").unwrap() == "true" {
         // ---------3.运行websocket,实时同步数据
         socket::run_socket(inst_ids.clone(), times.clone()).await;
     }
 
-    // // 添加一个定时任务
-    // let target_time = Utc::now() + chrono::Duration::seconds(30);
-    // scheduler.add_scheduled_task("scheduled_task_1".to_string(), target_time, || async {
-    //     println!("Scheduled job executed at {:?}", tokio::time::Instant::now());
-    // });
 
     // 捕捉Ctrl+C信号以平滑关闭
     tokio::select! {

@@ -49,19 +49,23 @@ CREATE TABLE `strategy_config` (
 
 
 
+WITH ranked_results AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (PARTITION BY inst_type ORDER BY CAST(final_fund AS DECIMAL(20, 2)) DESC) as `rank`
+    FROM
+        `back_test_log`
+    WHERE
+        strategy_type = "UtBootShort"
+        AND win_rate > 0.8
+        AND open_positions_num > 20
+)
 SELECT
-	*
+    *
 FROM
-	`back_test_log`
+    ranked_results
 WHERE
-	strategy_type = "UtBootShort"
-
-	AND win_rate > 0.8
-	AND open_positions_num > 20
+    `rank` = 1
 ORDER BY
-	CAST(
-	final_fund AS DECIMAL ( 20, 2 )) DESC ,
-	open_positions_num DESC
-
-
-
+    CAST(final_fund AS DECIMAL(20, 2)) DESC,
+    open_positions_num DESC

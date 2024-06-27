@@ -1,4 +1,20 @@
+use anyhow::anyhow;
 use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, ParseError, Timelike, TimeZone, Utc};
+
+
+pub fn parse_period(period: &str) -> anyhow::Result<i64> {
+    let duration = match &period.to_uppercase()[..] {
+        "1m" => 60,
+        "3m" => 3 * 60,
+        "5m" => 5 * 60,
+        "1H" => 3600,
+        "4H" => 4 * 3600,
+        "1D" => 24 * 3600,
+        "5D" => 5 * 24 * 3600,
+        _ => return Err(anyhow!("Unsupported period format")),
+    };
+    Ok(duration * 1000) // 转换为毫秒
+}
 
 // 将 DateTime 格式化为周期字符串（如 "4H", "5min" 等）
 pub fn format_to_period(period: &str, mut dt: Option<DateTime<Local>>) -> String {

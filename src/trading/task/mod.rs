@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use chrono::{DateTime, Local, Timelike, TimeZone, Utc};
-use tracing::{error, info, Level, span};
+use tracing::{error, info, Level, span, warn};
 
 use crate::{time_util, trading};
 use crate::trading::model::Db;
@@ -283,24 +283,6 @@ pub async fn comprehensive_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
 
 
 pub async fn run_ut_boot_run_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-    // //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
-    // let mysql_candles_5m = candles::CandlesModel::new().await.get_new_data(inst_id, time).await?;
-    // if mysql_candles_5m.is_none() {
-    //     return Ok(());
-    // }
-    // let ts = mysql_candles_5m.unwrap().ts;
-    //
-    // // 将毫秒时间戳转换为 DateTime<Utc>
-    // let datetime: DateTime<Utc> = Utc.timestamp_millis(ts);
-    // // 获取小时
-    // let hour = datetime.hour();
-    // // 获取当前时间的小时
-    // let current_hour = Utc::now().hour();
-    // // 比较时间戳的小时与当前小时
-    // if hour != current_hour {
-    //     println!("时间戳的小时 ({}) 不等于当前小时 ({}), 跳过", hour, current_hour);
-    //     return Ok(());
-    // }
     let mysql_candles_5m = candles::CandlesModel::new().await.fetch_candles_from_mysql(inst_id, time).await?;
     if mysql_candles_5m.is_empty() {
         return Err(anyhow!("mysql candles 5m is empty"));
@@ -310,7 +292,7 @@ pub async fn run_ut_boot_run_test(inst_id: &str, time: &str) -> Result<(), anyho
     Ok(())
 }
 
-pub fn validte_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool {
+pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool {
     let ts = mysql_candles_5m.ts;
     let local_time = Local::now();
     // 将毫秒时间戳转换为 DateTime<Utc>
@@ -325,6 +307,35 @@ pub fn validte_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool 
     return true;
 }
 
+pub fn valid_candles_data(mysql_candles_5m: &Vec<CandlesEntity>, time: &str) -> anyhow::Result<()> {
+    //验证头尾数据正确性
+    let first_timestamp = mysql_candles_5m.first().unwrap().ts;
+    let last_timestamp = mysql_candles_5m.last().unwrap().ts;
+    let difference = last_timestamp - first_timestamp;
+    let period_milliseconds = time_util::parse_period(time)?;
+    let expected_length = difference / period_milliseconds;
+    if expected_length != (mysql_candles_5m.len() - 1) as i64 {
+        let mut discontinuities = Vec::new();
+
+        //获取哪个数据的不连续
+        for window in mysql_candles_5m.windows(2) {
+            let current = &window[0];
+            let next = &window[1];
+            let expected_next_ts = current.ts + period_milliseconds;
+
+            if next.ts != expected_next_ts {
+                discontinuities.push(expected_next_ts);
+            }
+        }
+        return Err(anyhow!(
+            "The difference between the first and last timestamps is not consistent with the period. Expected: {}, Actual: {},discontinuities:{:?}",
+            expected_length,
+            mysql_candles_5m.len() - 1,discontinuities
+        ));
+    }
+    Ok(())
+}
+
 pub async fn run_ut_boot_run_real(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
     info!("run ut_boot_run_real inst_id:{:?} time:{:?}", inst_id,time);
     //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
@@ -332,8 +343,8 @@ pub async fn run_ut_boot_run_real(inst_id: &str, time: &str) -> Result<(), anyho
     if mysql_candles_5m.is_none() {
         return Ok(());
     }
-    //验证数据准确性
-    let is_valid = self::validte_candle_data(mysql_candles_5m.unwrap(), time);
+    //验证最新数据准确性
+    let is_valid = self::valid_newest_candle_data(mysql_candles_5m.unwrap(), time);
     if !is_valid {
         return Ok(());
     }
@@ -343,10 +354,14 @@ pub async fn run_ut_boot_run_real(inst_id: &str, time: &str) -> Result<(), anyho
         return Err(anyhow!("mysql candles 5m is empty"));
     }
 
+    //验证所有数据是否准确
+    self::valid_candles_data(&mysql_candles_5m, time)?;
+
     //从策略配置中获取到对应的产品配置
     let strategy_config = StrategyConfigEntityModel::new().await.get_config(StrategyType::UtBoot.to_string().as_str(), inst_id, time).await?;
     if strategy_config.len() < 1 {
-        return Err(anyhow!("ut boot strategy config is none.inst_id:{},time:{}",inst_id,time));
+        warn!("策略配置为空 inst_id:{:?} time:{:?}", inst_id, time);
+        return Ok(());
     }
 
     // let ut_boot_strategy = UtBootStrategy {

@@ -883,12 +883,11 @@ impl Strategy {
         let mut entry_price = 0.0; // 记录每次开仓时的价格
         let mut fib_triggered = [false; 6]; // 用于记录每个斐波那契级别是否已经触发
         let mut trade_completed = true; // 交易完成标志
-        let max_loss_percent = 0.1; // 最大损失百分比设置为10%
+        let max_loss_percent = 0.02; // 最大损失百分比设置为10%
 
         for (i, candle) in candles_5m.iter().enumerate() {
             let signal = ut_boot_strategy::UtBootStrategy::get_trade_signal(&candles_5m[..=i], key_value, atr_period, heikin_ashi);
             //记录信号到数据库中
-
 
 
             // 添加日志记录
