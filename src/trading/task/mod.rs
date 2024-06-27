@@ -338,6 +338,13 @@ pub fn valid_candles_data(mysql_candles_5m: &Vec<CandlesEntity>, time: &str) -> 
 
 pub async fn run_ut_boot_run_real(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
     info!("run ut_boot_run_real inst_id:{:?} time:{:?}", inst_id,time);
+    //从策略配置中获取到对应的产品配置
+    let strategy_config = StrategyConfigEntityModel::new().await.get_config(StrategyType::UtBoot.to_string().as_str(), inst_id, time).await?;
+    if strategy_config.len() < 1 {
+        warn!("策略配置为空 inst_id:{:?} time:{:?}", inst_id, time);
+        return Ok(());
+    }
+
     //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
     let mysql_candles_5m = candles::CandlesModel::new().await.get_new_data(inst_id, time).await?;
     if mysql_candles_5m.is_none() {
@@ -356,13 +363,6 @@ pub async fn run_ut_boot_run_real(inst_id: &str, time: &str) -> Result<(), anyho
 
     //验证所有数据是否准确
     self::valid_candles_data(&mysql_candles_5m, time)?;
-
-    //从策略配置中获取到对应的产品配置
-    let strategy_config = StrategyConfigEntityModel::new().await.get_config(StrategyType::UtBoot.to_string().as_str(), inst_id, time).await?;
-    if strategy_config.len() < 1 {
-        warn!("策略配置为空 inst_id:{:?} time:{:?}", inst_id, time);
-        return Ok(());
-    }
 
     // let ut_boot_strategy = UtBootStrategy {
     //     key_value: 1.2,
