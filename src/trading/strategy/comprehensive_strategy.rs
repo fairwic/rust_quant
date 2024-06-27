@@ -2,7 +2,6 @@ use ta::indicators::{BollingerBands, ExponentialMovingAverage, RelativeStrengthI
 use ta::{Close, High, Low, Next};
 use crate::time_util;
 use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::strategy::KdjCandle;
 use ta::indicators::KeltnerChannel;
 
 /// Squeeze 结构体

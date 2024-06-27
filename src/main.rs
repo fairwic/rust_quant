@@ -264,7 +264,10 @@ async fn main() -> anyhow::Result<()> {
     // let inst_ids = vec!["SOL-USDT-SWAP"];
 
     let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"]);
-    let times = Arc::new(vec!["1H", "4H", "1D"]);
+    // let times = Arc::new(vec!["1H", "4H", "1D"]);
+
+    let times = Arc::new(vec!["5m"]);
+    // let times = Arc::new(vec!["1H", "5m", "4H", "1D"]);
 
     //------2. 初始化需要同步数据产品数据
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
@@ -293,18 +296,23 @@ async fn main() -> anyhow::Result<()> {
 
 
     // ---------执行回测任务
-    // let mut tasks = Vec::new();
-    // for inst_id in inst_ids.iter() {
-    //     for time in times.iter() {
-    //         let inst_id = inst_id.to_string();
-    //         let time = time.to_string();
-    //         tasks.push(tokio::spawn(async move {
-    //             let res = task::run_ut_boot_run_test(&inst_id, &time).await;
-    //         }));
-    //     }
-    // }
-    // 并发执行所有任务
-    // join_all(tasks).await;
+    if env::var("APP_ENV").unwrap() == "LOCAL" {
+        let mut tasks = Vec::new();
+        for inst_id in inst_ids.iter() {
+            for time in times.iter() {
+                let inst_id = inst_id.to_string();
+                let time = time.to_string();
+                tasks.push(tokio::spawn(async move {
+                    //执行ut_boot策略
+                    // let res = task::ut_boot_test(&inst_id, &time).await;
+                    //执行macd&kdj策略
+                    let res = task::kdj_macd_test(&inst_id, &time).await;
+                }));
+            }
+        }
+        // 并发执行所有任务
+        join_all(tasks).await;
+    }
 
 
     // ------ 执行下单逻辑

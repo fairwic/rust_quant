@@ -15,6 +15,8 @@ use crate::trading::order;
 use crate::trading::strategy;
 use crate::trading::strategy::{StopLossStrategy, Strategy, StrategyType};
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
+use crate::trading::strategy::macd_kdj_strategy::MacdKdjStrategy;
+use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
 use crate::trading::strategy::ut_boot_strategy::{SignalResult, UtBootStrategy};
 
 pub mod tickets_job;
@@ -108,7 +110,8 @@ pub async fn macd_ema_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
 }
 
 
-pub async fn kdj_macd_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+    let mysql_candles = self::get_candle_data(inst_id, time).await?;
     // 初始化 Redis
     let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").expect("get redis client error");
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
@@ -117,23 +120,25 @@ pub async fn kdj_macd_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
     let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
 
     // let stopo_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
-    let stop_percent: Vec<f64> = vec![0.1]; //失仓位,从10%
+
+    let fib_levels = ProfitStopLoss::get_fibonacci_level(inst_id, time);
+    let stop_percent: Vec<f64> = vec![0.02]; //失仓位,从10%
     for stop in stop_percent.clone() {
         for kdj_period in 2..30 {
-            for ema_period in 1..30 {
-                let res = startegy.kdj_macd_strategy(&*mysql_candles_5m, stop, kdj_period, ema_period).await;
+            for signal_period in 1..30 {
+                let res = MacdKdjStrategy::run_test(&mysql_candles, &fib_levels, stop, kdj_period, signal_period).await;
                 println!("strategy{:#?}", res);    // let ins_id = "BTC-USDT-SWAP";
                 // 解包 Result 类型
                 let (final_fund, win_rate, open_position_num) = res;
                 //把back test strategy结果写入数据
                 let back_test_log = BackTestLog {
-                    strategy_type: format!("{:?}", StrategyType::BreakoutUp),
+                    strategy_type: format!("{:?}", StrategyType::MacdWithKdj),
                     inst_type: inst_id.parse()?,
                     time: time.parse()?,
                     final_fund: final_fund.to_string(),
                     win_rate: win_rate.to_string(),
                     open_positions_num: open_position_num as i32,
-                    strategy_detail: Some(format!("stop_loss_percent: {:?},kdj_period:{}", stop, kdj_period)),
+                    strategy_detail: Some(format!("stop_loss_percent: {:?},kdj_period:{},signal_period:{}", stop, kdj_period, signal_period)),
                 };
                 back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
             }
@@ -143,7 +148,8 @@ pub async fn kdj_macd_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
 }
 
 
-pub async fn ut_boot_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+    let mysql_candles = self::get_candle_data(inst_id, time).await?;
     // 初始化 Redis
     let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").expect("get redis client error");
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
@@ -151,12 +157,12 @@ pub async fn ut_boot_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, t
 
     let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
     let atr_threshold: Vec<f64> = (10..=30).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
-    let fibonacci_level = Strategy::get_fibonacci_level(inst_id, time);
+    let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
 
     for key_value in atr_threshold {
         for atr_period in 2..20 {
-            let res = startegy.ut_bot_alert_strategy(&mysql_candles_5m, &fibonacci_level, key_value, atr_period, false).await;
+            let res = startegy.ut_bot_alert_strategy(&mysql_candles, &fibonacci_level, key_value, atr_period, false).await;
             // let res = startegy.ut_bot_alert_strategy_with_shorting(&mysql_candles_5m, &fibonacci_level, key_value, atr_period, false).await;
             //save test to log
             let (final_fund, win_rate, open_position_num) = res;
@@ -282,14 +288,12 @@ pub async fn comprehensive_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
 }
 
 
-pub async fn run_ut_boot_run_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+pub async fn get_candle_data(inst_id: &str, time: &str) -> Result<Vec<CandlesEntity>, anyhow::Error> {
     let mysql_candles_5m = candles::CandlesModel::new().await.fetch_candles_from_mysql(inst_id, time).await?;
     if mysql_candles_5m.is_empty() {
         return Err(anyhow!("mysql candles 5m is empty"));
     }
-    // ut boot atr 策略回测
-    ut_boot_test(mysql_candles_5m, inst_id, time).await?;
-    Ok(())
+    Ok(mysql_candles_5m)
 }
 
 pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool {

@@ -2,11 +2,15 @@ pub mod redis_operations;
 pub mod support_resistance;
 pub mod comprehensive_strategy;
 pub(crate) mod ut_boot_strategy;
+pub mod macd_kdj_strategy;
+pub mod profit_stop_loss;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use log::{error, trace};
 use serde::{Deserialize, Serialize};
-use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergence, RelativeStrengthIndex, SlowStochastic, FastStochastic, AverageTrueRange, BollingerBands, KeltnerChannel};
+use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergence,
+                     RelativeStrengthIndex, SlowStochastic, FastStochastic, AverageTrueRange, BollingerBands, KeltnerChannel,
+};
 
 use ta::{Close, High, Low, Next};
 use tokio;
@@ -22,6 +26,9 @@ use crate::trading::okx::trade::CandleData;
 use std::collections::VecDeque;
 use std::fmt::Display;
 use crate::trading::model::strategy::strategy_job_signal_log;
+use crate::trading::indicator::kdj_simple_indicator::{KDJ, KdjCandle};
+use crate::trading::indicator::macd_simple_indicator::MacdSimpleIndicator;
+use crate::trading::strategy::ut_boot_strategy::SignalResult;
 
 // 枚举表示止损策略的选择
 #[derive(Clone, Copy, Debug)]
@@ -35,6 +42,7 @@ pub enum StrategyType {
     BreakoutUp,
     BreakoutDown,
     Macd,
+    MacdWithKdj,
     MacdWithEma,
     Boll,
     UtBoot,
@@ -51,6 +59,7 @@ impl Display for StrategyType {
             StrategyType::Boll => write!(f, "Boll"),
             StrategyType::UtBoot => write!(f, "UtBoot"),
             StrategyType::UtBootShort => write!(f, "UtBootShort"),
+            StrategyType::MacdWithKdj => write!(f, "MacdWithKdj"),
         }
     }
 }
@@ -61,36 +70,6 @@ pub struct Strategy {
     rsi: RelativeStrengthIndex,
     ema_1h: ExponentialMovingAverage,
     macd: MovingAverageConvergenceDivergence,
-}
-
-struct KDJ {
-    k: f64,
-    d: f64,
-    j: f64,
-}
-
-struct KdjCandle {
-    high: f64,
-    low: f64,
-    close: f64,
-}
-
-impl High for KdjCandle {
-    fn high(&self) -> f64 {
-        self.high
-    }
-}
-
-impl Low for KdjCandle {
-    fn low(&self) -> f64 {
-        self.low
-    }
-}
-
-impl Close for KdjCandle {
-    fn close(&self) -> f64 {
-        self.close
-    }
 }
 
 
@@ -123,51 +102,6 @@ impl Strategy {
         }
     }
 
-    pub fn get_fibonacci_level(inst_id: &str, period: &str) -> Vec<f64> {
-        let multiplier = match period {
-            "5m" | "1H" => {
-                if inst_id == "BTC-USDT_SWAP" {
-                    2.0
-                } else if inst_id == "ETH-USDT-SWAP" {
-                    4.0
-                } else {
-                    8.0
-                }
-            }
-            "4H" => {
-                if inst_id == "BTC-USDT_SWAP" {
-                    3.0
-                } else if inst_id == "ETH-USDT-SWAP" {
-                    9.0
-                } else {
-                    12.0
-                }
-            }
-            "1D" => {
-                if inst_id == "BTC-USDT_SWAP" {
-                    5.0
-                } else if inst_id == "ETH-USDT-SWAP" {
-                    10.0
-                } else {
-                    20.0
-                }
-            }
-            "5D" => {
-                if inst_id == "BTC-USDT_SWAP" {
-                    10.0
-                } else if inst_id == "ETH-USDT-SWAP" {
-                    20.0
-                } else {
-                    40.0
-                }
-            }
-            _ => 1.0, // 默认不改变倍率
-        };
-
-        let mut array = vec![0.00236, 0.00382, 0.005, 0.00618, 0.00786, 0.01];
-        array.iter_mut().for_each(|x| *x *= multiplier);
-        array
-    }
 
     fn calculate_ema(candles: &[CandlesEntity], period: usize) -> Vec<(i64, f64)> {
         let mut ema = ExponentialMovingAverage::new(period).unwrap();
@@ -178,17 +112,6 @@ impl Strategy {
             ema_values.push((candle.ts, ema_value));
         }
         ema_values
-    }
-
-    fn calculate_macd(candles: &[CandlesEntity], fast_period: usize, slow_period: usize, signal_period: usize) -> Vec<(i64, f64, f64)> {
-        let mut macd = MovingAverageConvergenceDivergence::new(fast_period, slow_period, signal_period).unwrap();
-        let mut macd_values = Vec::with_capacity(candles.len());
-        for candle in candles {
-            let price = candle.c.parse::<f64>().unwrap_or(0.0);
-            let macd_value = macd.next(price);
-            macd_values.push((candle.ts, macd_value.macd, macd_value.signal));
-        }
-        macd_values
     }
 
     fn apply_fibonacci_levels(position: &mut f64, funds: &mut f64, current_price: f64, entry_price: f64, fib_levels: &[f64], fib_triggered: &mut [bool]) -> f64 {
@@ -369,32 +292,6 @@ impl Strategy {
     }
 
 
-    pub fn calculate_kdj(&self, candles: &[CandlesEntity], period: usize) -> Vec<KDJ> {
-        let mut kdjs = Vec::new();
-        let mut k = 50.0;
-        let mut d = 50.0;
-        for i in 0..candles.len() {
-            if i >= period - 1 {
-                let slice = &candles[i + 1 - period..=i];
-                let high = slice.iter().map(|c| c.h.parse::<f64>().unwrap_or(0.0)).fold(f64::MIN, f64::max);
-                let low = slice.iter().map(|c| c.l.parse::<f64>().unwrap_or(0.0)).fold(f64::MAX, f64::min);
-                let close = candles[i].c.parse::<f64>().unwrap_or(0.0);
-                let rsv = if high == low {
-                    50.0
-                } else {
-                    (close - low) / (high - low) * 100.0
-                };
-                k = 2.0 / 3.0 * k + 1.0 / 3.0 * rsv;
-                d = 2.0 / 3.0 * d + 1.0 / 3.0 * k;
-                let j = 3.0 * k - 2.0 * d;
-                kdjs.push(KDJ { k, d, j });
-            } else {
-                kdjs.push(KDJ { k: 50.0, d: 50.0, j: 50.0 });
-            }
-        }
-        kdjs
-    }
-
     pub async fn kdj_macd_strategy(&mut self, candles_5m: &[CandlesEntity], stop_loss_percent: f64, kdj_period: usize, ema_period: usize) -> (f64, f64, usize) {
         let initial_funds = 100.0; // 初始资金
         let mut funds = initial_funds; // 当前资金
@@ -405,7 +302,7 @@ impl Strategy {
 
 
         // 计算所有的 MACD 值
-        let macd_values = Self::calculate_macd(candles_5m, 12, 26, 9);
+        let macd_values = MacdSimpleIndicator::calculate_macd(candles_5m, 12, 26, 9);
 
         let mut fast_stochastic = FastStochastic::new(14).unwrap(); // 初始化快速随机指标（FastStochastic）
         let mut slow_stochastic = SlowStochastic::new(14, 3).unwrap(); // 初始化慢速随机指标（SlowStochastic）
@@ -496,6 +393,8 @@ impl Strategy {
         info!("Final Win rate: {}", win_rate);
         (funds, win_rate, open_trades) // 返回最终资金，胜率和开仓次数
     }
+
+
     // 线性回归计算
     fn calculate_linreg(candles: &[CandlesEntity], length: usize) -> Vec<f64> {
         let mut linreg_values = vec![0.0; candles.len()];

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ta::indicators::{AverageTrueRange, ExponentialMovingAverage};
 use ta::Next;
 use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::strategy::KdjCandle;
+use crate::trading::indicator::kdj_simple_indicator::KdjCandle;
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct UtBootStrategy {
