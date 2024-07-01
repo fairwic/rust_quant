@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, ParseError, Timelike, TimeZone, Utc};
+use chrono::{DateTime, FixedOffset, Local, MappedLocalTime, NaiveDateTime, ParseError, Timelike, TimeZone, Utc};
 
 
 pub fn parse_period(period: &str) -> anyhow::Result<i64> {
@@ -107,6 +107,12 @@ pub fn mill_time_to_datetime(timestamp_ms: i64) -> Result<String, String> {
     // 创建 DateTime<Local> 对象
     let datetime = Local.timestamp_opt(seconds, 0).unwrap();
     Ok(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+}
+
+pub fn mill_time_to_local_datetime(timestamp_ms: i64) -> DateTime<Local> {
+    // 创建 DateTime<Local> 对象
+    let datetime = Local.timestamp_millis_opt(timestamp_ms);
+    datetime.unwrap()
 }
 
 pub fn mill_time_to_datetime_shanghai(timestamp_ms: i64) -> Result<String, String> {

@@ -360,7 +360,8 @@ pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> 
     let ts = mysql_candles_5m.ts;
     let local_time = Local::now();
     // 将毫秒时间戳转换为 DateTime<Utc>
-    let datetime: DateTime<Local> = Local.timestamp_millis_opt(ts).unwrap();
+    let datetime: DateTime<Local> = time_util::mill_time_to_local_datetime(ts);
+
     let date = time_util::format_to_period(time, Some(datetime));
     let current_date = time_util::format_to_period(time, None);
     // 比较时间戳的小时与当前小时
