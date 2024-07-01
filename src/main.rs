@@ -165,7 +165,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut scheduler = TaskScheduler::new();
     // 本地环境下执行回测任务
-    if env::var("IS_BACK_TEST").unwrap() == "LOCAL" {
+    if env::var("IS_BACK_TEST").unwrap() == "true" {
         let mut tasks = Vec::new();
         for inst_id in inst_ids.iter() {
             for time in times.iter() {

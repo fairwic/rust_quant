@@ -62,10 +62,9 @@ pub async fn run_set_leverage(inst_ids: &Vec<&str>) -> Result<(), anyhow::Error>
                 lever: level.to_string(),
                 pos_side: Some(post_side.to_string()),
             };
-            if env::var("APP_ENV").unwrap() != "LOCAL" {
-                //延迟100ms
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            }
+            //延迟100ms
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
             Account::set_leverage(params).await?;
         }
     }
