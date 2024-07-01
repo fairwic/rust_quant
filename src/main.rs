@@ -263,11 +263,15 @@ async fn main() -> anyhow::Result<()> {
     // let inst_ids = vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"];
     // let inst_ids = vec!["SOL-USDT-SWAP"];
 
-    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"]);
+    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"]);
+    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
+    let inst_ids = Arc::new(vec!["OMU-USDT-SWAP", "ETHFI-USDT-SWAP"]);
+    // let inst_ids = Arc::new(vec!["ETH-USDT-SWAP"]);
+    // let times = Arc::new(vec!["1Dunc"]);
+    // let times = Arc::new(vec!["4H", "1H", "1D"]);
     // let times = Arc::new(vec!["1H", "4H", "1D"]);
-
-    let times = Arc::new(vec!["5m"]);
-    // let times = Arc::new(vec!["1H", "5m", "4H", "1D"]);
+    // let times = Arc::new(vec!["5m"]);
+    let times = Arc::new(vec!["1H", "5m", "4H", "1D"]);
 
     //------2. 初始化需要同步数据产品数据
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
@@ -304,9 +308,9 @@ async fn main() -> anyhow::Result<()> {
                 let time = time.to_string();
                 tasks.push(tokio::spawn(async move {
                     //执行ut_boot策略
-                    // let res = task::ut_boot_test(&inst_id, &time).await;
+                    let res = task::ut_boot_test(&inst_id, &time).await;
                     //执行macd&kdj策略
-                    let res = task::kdj_macd_test(&inst_id, &time).await;
+                    // let res = task::kdj_macd_test(&inst_id, &time).await;
                 }));
             }
         }
@@ -336,15 +340,15 @@ async fn main() -> anyhow::Result<()> {
         let inst_ids_inner = vec!["SOL-USDT-SWAP", "ETH-USDT-SWAP", "BTC-USDT-SWAP"];
         let times_inner = vec!["1D", "4H", "1H"];
         async move {
-            let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
-            match res {
-                Ok(()) => {
-                    info!("run strategy success:");
-                }
-                Err(error) => {
-                    error!("run strategy error: {}", error);
-                }
-            }
+            // let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
+            // match res {
+            //     Ok(()) => {
+            //         info!("run strategy success:");
+            //     }
+            //     Err(error) => {
+            //         error!("run strategy error: {}", error);
+            //     }
+            // }
         }
     });
 

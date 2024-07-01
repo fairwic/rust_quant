@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use chrono::{DateTime, Local, Timelike, TimeZone, Utc};
+use hmac::digest::generic_array::arr;
 use tracing::{error, info, Level, span, warn};
 
 use crate::{time_util, trading};
@@ -7,7 +8,8 @@ use crate::trading::model::Db;
 use crate::trading::model::market::candles;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::order::swap_order::SwapOrderEntityModel;
-use crate::trading::model::strategy::{back_test_log, strategy_job_signal_log};
+use crate::trading::model::strategy::{back_test_detail, back_test_log, strategy_job_signal_log};
+use crate::trading::model::strategy::back_test_detail::BackTestDetail;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
 use crate::trading::model::strategy::strategy_config::*;
 use crate::trading::model::strategy::strategy_job_signal_log::StrategyJobSignalLog;
@@ -17,7 +19,7 @@ use crate::trading::strategy::{StopLossStrategy, Strategy, StrategyType};
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
 use crate::trading::strategy::macd_kdj_strategy::MacdKdjStrategy;
 use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
-use crate::trading::strategy::ut_boot_strategy::{SignalResult, UtBootStrategy};
+use crate::trading::strategy::ut_boot_strategy::{SignalResult, TradeRecord, UtBootStrategy};
 
 pub mod tickets_job;
 pub mod account_job;
@@ -111,6 +113,7 @@ pub async fn macd_ema_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
 
 
 pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+    //获取candle数据
     let mysql_candles = self::get_candle_data(inst_id, time).await?;
     // 初始化 Redis
     let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").expect("get redis client error");
@@ -125,7 +128,7 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
     let stop_percent: Vec<f64> = vec![0.02]; //失仓位,从10%
     for stop in stop_percent.clone() {
         for kdj_period in 2..30 {
-            for signal_period in 1..30 {
+            for signal_period in 1..10 {
                 let res = MacdKdjStrategy::run_test(&mysql_candles, &fib_levels, stop, kdj_period, signal_period).await;
                 println!("strategy{:#?}", res);    // let ins_id = "BTC-USDT-SWAP";
                 // 解包 Result 类型
@@ -155,19 +158,23 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
     // let db = BizActivityModel::new().await;
 
-    let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
     let atr_threshold: Vec<f64> = (10..=30).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
 
     for key_value in atr_threshold {
         for atr_period in 2..20 {
-            let res = startegy.ut_bot_alert_strategy(&mysql_candles, &fibonacci_level, key_value, atr_period, false).await;
+            if key_value > atr_period as f64 {
+                continue;
+            }
+            let res = UtBootStrategy::run_test(&mysql_candles, &fibonacci_level, key_value, atr_period, false).await;
             // let res = startegy.ut_bot_alert_strategy_with_shorting(&mysql_candles_5m, &fibonacci_level, key_value, atr_period, false).await;
             //save test to log
-            let (final_fund, win_rate, open_position_num) = res;
+            let (final_fund, win_rate, open_position_num, trade_record_list) = res;
             let strategy_detail = Some(format!("key_value: {:?},atr_period:{}", key_value, atr_period));
-            save_test_log(StrategyType::UtBootShort, inst_id, time, final_fund, win_rate, open_position_num as i32, strategy_detail).await?;
+            let insert_id = save_test_log(StrategyType::UtBoot, inst_id, time, final_fund, win_rate, open_position_num as i32, strategy_detail).await?;
+
+            let inset_id = save_test_detail(insert_id, StrategyType::UtBoot, inst_id, time, trade_record_list).await?;
         }
     }
     Ok(())
@@ -202,7 +209,7 @@ pub async fn ut_boot_order(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
     Ok(())
 }
 
-pub async fn save_test_log(strategy_type: StrategyType, inst_id: &str, time: &str, final_fund: f64, win_rate: f64, open_position_num: i32, detail: Option<String>) -> Result<(), anyhow::Error> {
+pub async fn save_test_log(strategy_type: StrategyType, inst_id: &str, time: &str, final_fund: f64, win_rate: f64, open_position_num: i32, detail: Option<String>) -> Result<i64, anyhow::Error> {
     // 解包 Result 类型
     //把back test strategy结果写入数据
     let back_test_log = BackTestLog {
@@ -214,8 +221,33 @@ pub async fn save_test_log(strategy_type: StrategyType, inst_id: &str, time: &st
         open_positions_num: open_position_num,
         strategy_detail: detail,
     };
-    back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
-    Ok(())
+    let res = back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
+    Ok(res)
+}
+
+pub async fn save_test_detail(back_test_id: i64, strategy_type: StrategyType, inst_id: &str, time: &str, list: Vec<TradeRecord>) -> Result<u64, anyhow::Error> {
+    // 解包 Result 类型
+    //把back test strategy结果写入数据
+    let mut array = Vec::new();
+    for trade_record in list {
+        let back_test_log = BackTestDetail {
+            back_test_id,
+            strategy_type: strategy_type.to_string(),
+            inst_id: inst_id.to_string(),
+            time: time.to_string(),
+            open_position_time: trade_record.open_position_time.to_string(),
+            close_position_time: trade_record.close_position_time.to_string(),
+            open_price: trade_record.open_price.to_string(),
+            close_price: trade_record.close_price.to_string(),
+            profit_loss: trade_record.profit_loss.to_string(),
+            quantity: trade_record.quantity.to_string(),
+            full_close: trade_record.full_close,
+            close_type: "".to_string(),
+        };
+        array.push(back_test_log);
+    }
+    let res = back_test_detail::BackTestDetailModel::new().await.batch_add(array).await?;
+    Ok(res)
 }
 
 
@@ -415,8 +447,9 @@ pub async fn run_strategy_job() -> Result<(), anyhow::Error> {
     // let inst_ids = ["BTC-USDT-SWAP"];
     // let inst_ids = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SUSHI-USDT-SWAP", "SOL-USDT-SWAP", "ADA-USDT-SWAP"];
     let inst_ids = ["ETH-USDT-SWAP"];
-    // let tims = ["1D", "4H", "1H", "5m"];
-    let tims = ["1H"];
+    let inst_ids = ["OMU-USDT-SWAP"];
+    let tims = ["1D", "4H", "1H", "5m"];
+    // let tims = ["1H"];
     // let tims = ["1D"];
     for inst_id in inst_ids {
         for time in tims {

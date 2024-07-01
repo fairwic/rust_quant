@@ -102,16 +102,11 @@ pub fn datetime_to_timestamp_ms(dt: DateTime<Utc>) -> i64 {
 }
 
 pub fn mill_time_to_datetime(timestamp_ms: i64) -> Result<String, String> {
-    // 将毫秒级时间戳转换为 DateTime<Utc>
-    match Utc.timestamp_millis_opt(timestamp_ms) {
-        chrono::LocalResult::Single(datetime) => {
-            // 格式化时间为字符串
-            let formatted_datetime = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
-            Ok(formatted_datetime)
-        }
-        chrono::LocalResult::None => Err("Invalid timestamp: None".to_string()),
-        chrono::LocalResult::Ambiguous(_, _) => Err("Invalid timestamp: Ambiguous".to_string()),
-    }
+    // 将毫秒级时间戳转换为秒级
+    let seconds = timestamp_ms / 1000;
+    // 创建 DateTime<Local> 对象
+    let datetime = Local.timestamp_opt(seconds, 0).unwrap();
+    Ok(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
 }
 
 pub fn mill_time_to_datetime_shanghai(timestamp_ms: i64) -> Result<String, String> {

@@ -3,6 +3,8 @@ extern crate rbatis;
 use tracing::debug;
 use rbatis::{crud, impl_insert, impl_update, RBatis};
 use rbatis::rbdc::{Date, DateTime};
+use rbatis::rbdc::db::ExecResult;
+use rbs::Value;
 use serde_json::json;
 use crate::trading::model::Db;
 
@@ -40,9 +42,9 @@ impl BackTestLogModel {
             db: Db::get_db_client().await,
         }
     }
-    pub async fn add(&self, list: BackTestLog) -> anyhow::Result<()> {
+    pub async fn add(&self, list: BackTestLog) -> anyhow::Result<i64> {
         let data = BackTestLog::insert(&self.db, &list).await;
         debug!("insert_back_test_log_result = {}", json!(data));
-        Ok(())
+        Ok(data.unwrap().last_insert_id.as_i64().unwrap())
     }
 }

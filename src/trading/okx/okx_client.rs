@@ -3,6 +3,7 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use anyhow::{Result, Error, anyhow};
+use fast_log::TimeType::Utc;
 use tracing::{debug, info};
 use reqwest::{Client, Method, StatusCode};
 
@@ -53,6 +54,8 @@ impl OkxClient {
         let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S.%3fZ").to_string();
         let signature = self.generate_signature(&timestamp, &method, path, body);
 
+        let exp_time = chrono::Utc::now().timestamp_millis() + 500;
+
         let url = format!("https://www.okx.com{}", path);
         let response = self.client
             .request(method, &url)
@@ -61,6 +64,8 @@ impl OkxClient {
             .header("OK-ACCESS-TIMESTAMP", timestamp)
             .header("OK-ACCESS-PASSPHRASE", &self.passphrase)
             .header("Content-Type", "application/json")
+            .header("expTime", exp_time.to_string())
+            // expTime 	String 	否 	请求有效截止时间。Unix时间戳的毫秒数格式，如 1597026383085
             //设置是否是模拟盘
             .header("x-simulated-trading", 1)
             .body(body.to_string())
