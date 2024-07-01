@@ -152,8 +152,6 @@ async fn main() -> anyhow::Result<()> {
     let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"]);
     let times = Arc::new(vec!["1H", "4H", "1D"]);
 
-    //设置交易产品最大杠杆
-    task::run_set_leverage(&inst_ids).await?;
 
     // 初始化需要同步的数据
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
@@ -167,7 +165,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut scheduler = TaskScheduler::new();
     // 本地环境下执行回测任务
-    if env::var("APP_ENV").unwrap() == "LOCAL" {
+    if env::var("IS_BACK_TEST").unwrap() == "LOCAL" {
         let mut tasks = Vec::new();
         for inst_id in inst_ids.iter() {
             for time in times.iter() {
@@ -183,25 +181,31 @@ async fn main() -> anyhow::Result<()> {
 
     // 添加定时任务执行策略
     {
-        let inst_ids = Arc::clone(&inst_ids);
-        let times = Arc::clone(&times);
-        scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, move || {
-            let inst_ids_inner = Arc::clone(&inst_ids);
-            let times_inner = Arc::clone(&times);
-            async move {
-                let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
-                if let Err(error) = res {
-                    error!("run strategy error: {}", error);
+        if env::var("IS_RUN_REAL_STRATEGY").unwrap() == "true" {
+
+            //设置交易产品最大杠杆
+            task::run_set_leverage(&inst_ids).await?;
+
+            let inst_ids = Arc::clone(&inst_ids);
+            let times = Arc::clone(&times);
+            scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, move || {
+                let inst_ids_inner = Arc::clone(&inst_ids);
+                let times_inner = Arc::clone(&times);
+                async move {
+                    let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
+                    if let Err(error) = res {
+                        error!("run strategy error: {}", error);
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     // 运行WebSocket服务
     {
-        let inst_ids = Arc::clone(&inst_ids);
-        let times = Arc::clone(&times);
         if env::var("IS_OPEN_SOCKET").unwrap() == "true" {
+            let inst_ids = Arc::clone(&inst_ids);
+            let times = Arc::clone(&times);
             socket::run_socket(inst_ids, times).await;
         }
     }
