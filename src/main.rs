@@ -275,9 +275,9 @@ async fn main() -> anyhow::Result<()> {
     // let times = Arc::new(vec!["1H", "5m", "4H", "1D"]);
 
     //------2. 初始化需要同步数据产品数据
-    // if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
-    //     task::run_sync_data_job(&inst_ids, &times).await?;
-    // }
+    if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
+        task::run_sync_data_job(&inst_ids, &times).await?;
+    }
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
         //设置仓位倍数
         task::run_set_leverage(&inst_ids).await?;
