@@ -1,4 +1,5 @@
 use std::env;
+use std::sync::Arc;
 use anyhow::anyhow;
 use chrono::{DateTime, Local, Timelike, TimeZone, Utc};
 use hmac::digest::generic_array::arr;
@@ -36,7 +37,7 @@ pub async fn run_sync_data_job(inst_ids: &Vec<&str>, tims: &Vec<&str>) -> Result
     let span = span!(Level::DEBUG, "run_sync_data_job");
     let _enter = span.enter();
 
-    candles_job::init_create_table(Some(&inst_ids), Some(&tims)).await.expect("init create_table errror");
+    candles_job::init_create_table(Some(&inst_ids), Some(&tims)).await.expect("init create_table error");
     candles_job::init_all_candles(Some(&inst_ids), Some(&tims)).await?;
     candles_job::init_before_candles(Some(&inst_ids), Some(tims.clone())).await?;
     Ok(())
@@ -102,12 +103,9 @@ pub async fn breakout_long_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
                     strategy_detail: Some(format!("breakout_period:{},confirmation_period:{},volume_threshold:{},stop_loss_strategy: {:?}", breakout_period, confirmation_period, volume_threshold, stop_loss_strategy)),
                 };
                 back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
-                // }
             }
         }
     }
-
-
     Ok(())
 }
 
@@ -448,9 +446,9 @@ pub async fn run_ut_boot_run_real(inst_id: &str, time: &str) -> Result<(), anyho
 
 
 /** 执行ut boot 策略 任务**/
-pub async fn run_ut_boot_strategy_job(inst_ids: Vec<&str>, times: Vec<&str>) -> Result<(), anyhow::Error> {
-    for inst_id in &inst_ids {
-        for time in &times {
+pub async fn run_ut_boot_strategy_job(inst_ids: Arc<Vec<&str>>, times: Arc<Vec<&str>>) -> Result<(), anyhow::Error> {
+    for inst_id in inst_ids.iter() {
+        for time in times.iter() {
             //实际执行
             let inst_id = inst_id.to_string();
             let time = time.to_string();
