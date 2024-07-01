@@ -1,3 +1,4 @@
+use std::env;
 use anyhow::anyhow;
 use chrono::{DateTime, Local, Timelike, TimeZone, Utc};
 use hmac::digest::generic_array::arr;
@@ -13,6 +14,8 @@ use crate::trading::model::strategy::back_test_detail::BackTestDetail;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
 use crate::trading::model::strategy::strategy_config::*;
 use crate::trading::model::strategy::strategy_job_signal_log::StrategyJobSignalLog;
+use crate::trading::okx::account::{Account, Position, PositionResponse};
+use crate::trading::okx::trade::{PosSide, TdMode};
 use crate::trading::order;
 use crate::trading::strategy;
 use crate::trading::strategy::{StopLossStrategy, Strategy, StrategyType};
@@ -36,6 +39,35 @@ pub async fn run_sync_data_job(inst_ids: &Vec<&str>, tims: &Vec<&str>) -> Result
     candles_job::init_create_table(Some(&inst_ids), Some(&tims)).await.expect("init create_table errror");
     candles_job::init_all_candles(Some(&inst_ids), Some(&tims)).await?;
     candles_job::init_before_candles(Some(&inst_ids), Some(tims.clone())).await?;
+    Ok(())
+}
+
+pub async fn run_set_leverage(inst_ids: &Vec<&str>) -> Result<(), anyhow::Error> {
+    let span = span!(Level::DEBUG, "run_set_leverage");
+    let _enter = span.enter();
+    for inst_id in inst_ids.iter() {
+        let mut level = 10;
+        if inst_id == &"BTC-USDT-SWAP" {
+            level = 20;
+        } else if inst_id == &"ETH-USDT-SWAP" {
+            level = 15;
+        }
+
+        for post_side in [PosSide::LONG, PosSide::SHORT] {
+            let params = trading::okx::account::SetLeverageRequest {
+                inst_id: Some(inst_id.to_string()),
+                ccy: None,
+                mgn_mode: TdMode::ISOLATED.to_string(),
+                lever: level.to_string(),
+                pos_side: Some(post_side.to_string()),
+            };
+            if env::var("APP_ENV").unwrap() != "LOCAL" {
+                //延迟100ms
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            Account::set_leverage(params).await?;
+        }
+    }
     Ok(())
 }
 
@@ -158,7 +190,7 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
     // let db = BizActivityModel::new().await;
 
-    let atr_threshold: Vec<f64> = (10..=30).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
+    let atr_threshold: Vec<f64> = (1..=10).map(|x| x as f64 * 1.0).collect(); //损失仓位,从0到30%
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
 
@@ -202,7 +234,6 @@ pub async fn ut_boot_order(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
         strategy_result: serde_json::to_string(&signal_result).unwrap(),
     };
     strategy_job_signal_log::StrategyJobSignalLogModel::new().await.add(signal_record).await?;
-
 
     //执行下单
     order::deal(StrategyType::UtBoot, inst_id, time, signal).await?;

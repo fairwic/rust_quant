@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+
 use ta::indicators::{AverageTrueRange, ExponentialMovingAverage};
 use ta::Next;
 use tracing::{error, info};
@@ -114,7 +115,7 @@ impl UtBootStrategy {
         let max_loss_percent = 0.02; // 最大损失百分比设置为2%
 
         let mut trade_records = Vec::new(); // 记录所有交易的详细信息
-        let mut entry_time = String::new(); // 记录每次开仓的时间点
+       let mut entry_time = String::new(); // 记录每次开仓的时间点
         let mut initial_quantity = 0.0; // 记录每次开仓的数量
 
         for (i, candle) in candles_5m.iter().enumerate() {
@@ -159,47 +160,47 @@ impl UtBootStrategy {
                     losses += 1;
                 }
             } else if position > 0.0 {
-                // 斐波那契止盈逻辑
-                let mut remaining_position = position;
-                for (idx, &level) in fib_levels.iter().enumerate() {
-                    let fib_price = entry_price * (1.0 + level); // 计算斐波那契目标价格
-                    if signal.price >= fib_price && !fib_triggered[idx] {
-                        let sell_amount = remaining_position * 0.1; // 按仓位的10%
-                        if sell_amount < 1e-8 { // 防止非常小的数值
-                            continue;
-                        }
-                        funds += sell_amount * signal.price; // 累加当前平仓收益
-                        remaining_position -= sell_amount;
-                        fib_triggered[idx] = true; // 记录该斐波那契级别已经触发
-                        info!("Fibonacci profit taking at level: {:?}, time: {}, price: {}, sell amount: {}, remaining position: {}, funds after profit taking: {}",
-                            time_util::mill_time_to_datetime_shanghai(candle.ts), level, signal.price, sell_amount, remaining_position, funds);
-                        // 如果剩余仓位为零，更新win或loss
-                        if remaining_position <= 1e-8 {
-                            let exit_time = time_util::mill_time_to_datetime(candle.ts).unwrap(); // 记录平仓时间
-                            let profit_loss = funds - initial_funds; // 计算盈利或损失
-                            trade_records.push(TradeRecord {
-                                open_position_time: entry_time.clone(),
-                                close_position_time: exit_time,
-                                open_price: entry_price,
-                                close_price: signal.price,
-                                profit_loss,
-                                quantity: initial_quantity,
-                                full_close: true,
-                                close_type: "止盈".to_string(),
-                            });
-                            position = 0.0;
-                            trade_completed = true; // 标记交易完成
-                            if funds > initial_funds {
-                                wins += 1;
-                            } else {
-                                losses += 1;
-                            }
-                            break;
-                        }
-                    }
-                }
-                // 更新持仓
-                position = remaining_position;
+                // // 斐波那契止盈逻辑
+                // let mut remaining_position = position;
+                // for (idx, &level) in fib_levels.iter().enumerate() {
+                //     let fib_price = entry_price * (1.0 + level); // 计算斐波那契目标价格
+                //     if signal.price >= fib_price && !fib_triggered[idx] {
+                //         let sell_amount = remaining_position * 0.1; // 按仓位的10%
+                //         if sell_amount < 1e-8 { // 防止非常小的数值
+                //             continue;
+                //         }
+                //         funds += sell_amount * signal.price; // 累加当前平仓收益
+                //         remaining_position -= sell_amount;
+                //         fib_triggered[idx] = true; // 记录该斐波那契级别已经触发
+                //         info!("Fibonacci profit taking at level: {:?}, time: {}, price: {}, sell amount: {}, remaining position: {}, funds after profit taking: {}",
+                //             time_util::mill_time_to_datetime_shanghai(candle.ts), level, signal.price, sell_amount, remaining_position, funds);
+                //         // 如果剩余仓位为零，更新win或loss
+                //         if remaining_position <= 1e-8 {
+                //             let exit_time = time_util::mill_time_to_datetime(candle.ts).unwrap(); // 记录平仓时间
+                //             let profit_loss = funds - initial_funds; // 计算盈利或损失
+                //             trade_records.push(TradeRecord {
+                //                 open_position_time: entry_time.clone(),
+                //                 close_position_time: exit_time,
+                //                 open_price: entry_price,
+                //                 close_price: signal.price,
+                //                 profit_loss,
+                //                 quantity: initial_quantity,
+                //                 full_close: true,
+                //                 close_type: "止盈".to_string(),
+                //             });
+                //             position = 0.0;
+                //             trade_completed = true; // 标记交易完成
+                //             if funds > initial_funds {
+                //                 wins += 1;
+                //             } else {
+                //                 losses += 1;
+                //             }
+                //             break;
+                //         }
+                //     }
+                // }
+                // // 更新持仓
+                // position = remaining_position;
             }
         }
 

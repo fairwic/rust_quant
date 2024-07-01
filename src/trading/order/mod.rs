@@ -1,10 +1,10 @@
 use std::cmp::PartialEq;
 use anyhow::anyhow;
-use log::error;
-use tracing::{debug, info, info_span};
+use log::{error, warn};
+use tracing::{debug, info, info_span, trace, warn_span};
 use crate::trading::model::order::swap_order::{SwapOrderEntity, SwapOrderEntityModel};
 use crate::trading::okx;
-use crate::trading::okx::account::{Account, Position, TradingNumResponseData};
+use crate::trading::okx::account::{Account, Position, TradingNumResponseData, TradingSwapNumResponseData};
 use crate::trading::okx::trade;
 use crate::trading::okx::trade::{AttachAlgoOrd, CloseOrderRequest, OkxTrade, OrderRequest, OrderResponse, OrderResponseData, OrdType, PosSide, Side, TdMode, TpOrdKind};
 use crate::trading::strategy::StrategyType;
@@ -102,13 +102,13 @@ pub async fn close_position(position_list: &Vec<Position>, inst_id: &str, pos_si
     Ok(have_anthor_position)
 }
 
-pub fn get_place_order_num(avalid_num: &TradingNumResponseData, price: f64, pos_side: PosSide) -> String {
+pub fn get_place_order_num(avalid_num: &TradingSwapNumResponseData, price: f64, pos_side: PosSide) -> String {
     let size = match pos_side {
         PosSide::LONG => {
-            format!("{}", (avalid_num.avail_buy.parse::<f64>().unwrap() / price * 100.00).floor())
+            format!("{}", (avalid_num.max_buy.parse::<f64>().unwrap() / 10.00).floor())
         }
         PosSide::SHORT => {
-            format!("{}", (avalid_num.avail_sell.parse::<f64>().unwrap() / price * 100.00).floor())
+            format!("{}", (avalid_num.max_sell.parse::<f64>().unwrap() / 10.00).floor())
         }
     };
     size.to_string()
@@ -177,8 +177,8 @@ pub async fn deal(strategy_type: StrategyType, inst_id: &str, time: &str, signal
         // 获取当前仓位状态
         let position_list = Account::new().get_account_positions(Some("SWAP"), Some(inst_id), None).await?;
         // 获取可用账户可用数量
-        let max_avail_size = Account::get_max_avail_size(inst_id, TdMode::ISOLATED).await?;
-        info!("max_avail_size: {:?}", max_avail_size);
+        let max_avail_size = Account::get_max_size(inst_id, TdMode::ISOLATED).await?;
+        tracing::warn!("max_avail_size: {:?}", max_avail_size);
 
         let (order_result, side, pos_side) = if signal.should_buy {
             (
@@ -213,7 +213,7 @@ async fn process_order(
     close_pos_side: PosSide,
     side: Side,
     pos_side: PosSide,
-    max_avail_size: &TradingNumResponseData,
+    max_avail_size: &TradingSwapNumResponseData,
     price: f64,
 ) -> Option<Vec<OrderResponseData>> {
 

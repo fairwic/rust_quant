@@ -52,7 +52,7 @@ use dotenv::dotenv;
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, SinkExt, stream::TryStreamExt, StreamExt};
 use futures_util::future::join_all;
-use tracing::{error};
+use tracing::{error, warn, warn_span};
 use redis::streams::StreamClaimOptions;
 use serde_json::json;
 
@@ -77,10 +77,11 @@ use crate::trading::task::{account_job, tickets_job};
 use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
 use crate::trading::okx::trade;
-use crate::trading::okx::trade::{AttachAlgoOrd, OrderRequest, Side};
+use crate::trading::okx::trade::{AttachAlgoOrd, OrderRequest, Side, TdMode};
 use crate::trading::strategy::StrategyType;
 use tracing_subscriber::prelude::*;
-use crate::trading::{order, task};  // 导入所有必要的扩展 trait
+use crate::trading::{order, task};
+use crate::trading::okx::account::Account;  // 导入所有必要的扩展 trait
 
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     if let Err(e) = handle_connection(peer, stream).await {
@@ -263,20 +264,25 @@ async fn main() -> anyhow::Result<()> {
     // let inst_ids = vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"];
     // let inst_ids = vec!["SOL-USDT-SWAP"];
 
-    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"]);
+    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"]);
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
-    let inst_ids = Arc::new(vec!["OMU-USDT-SWAP", "ETHFI-USDT-SWAP"]);
+    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETHFI-USDT-SWAP"]);
     // let inst_ids = Arc::new(vec!["ETH-USDT-SWAP"]);
     // let times = Arc::new(vec!["1Dunc"]);
-    // let times = Arc::new(vec!["4H", "1H", "1D"]);
-    // let times = Arc::new(vec!["1H", "4H", "1D"]);
+    // let times = Arc::new(vec!["1H", "5m"]);
+    let times = Arc::new(vec!["1H", "4H", "1D"]);
     // let times = Arc::new(vec!["5m"]);
-    let times = Arc::new(vec!["1H", "5m", "4H", "1D"]);
+    // let times = Arc::new(vec!["1H", "5m", "4H", "1D"]);
 
     //------2. 初始化需要同步数据产品数据
+    // if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
+    //     task::run_sync_data_job(&inst_ids, &times).await?;
+    // }
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
-        task::run_sync_data_job(&inst_ids, &times).await?;
+        //设置仓位倍数
+        task::run_set_leverage(&inst_ids).await?;
     }
+
 
     let mut scheduler = TaskScheduler::new();
     // //周期性任务
@@ -298,6 +304,9 @@ async fn main() -> anyhow::Result<()> {
     // asset_job::get_balance().await.expect("获取资金账户余额异常");
     // });
 
+    // 获取可用账户可用数量
+    let max_avail_size = Account::get_max_size("ETH-USDT-SWAP", TdMode::ISOLATED).await?;
+    warn!("max_avail_size: {:?}", max_avail_size);
 
     // ---------执行回测任务
     if env::var("APP_ENV").unwrap() == "LOCAL" {
@@ -340,15 +349,15 @@ async fn main() -> anyhow::Result<()> {
         let inst_ids_inner = vec!["SOL-USDT-SWAP", "ETH-USDT-SWAP", "BTC-USDT-SWAP"];
         let times_inner = vec!["1D", "4H", "1H"];
         async move {
-            // let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
-            // match res {
-            //     Ok(()) => {
-            //         info!("run strategy success:");
-            //     }
-            //     Err(error) => {
-            //         error!("run strategy error: {}", error);
-            //     }
-            // }
+            let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
+            match res {
+                Ok(()) => {
+                    info!("run strategy success:");
+                }
+                Err(error) => {
+                    error!("run strategy error: {}", error);
+                }
+            }
         }
     });
 
