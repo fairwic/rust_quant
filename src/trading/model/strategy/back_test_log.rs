@@ -27,6 +27,7 @@ pub struct BackTestLog {
     pub final_fund: String,
     pub open_positions_num: i32,
     pub strategy_detail: Option<String>,
+    pub profit: String,
 }
 
 crud!(BackTestLog{});
