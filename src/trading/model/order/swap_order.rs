@@ -8,9 +8,8 @@ use rbatis::rbdc::db::ExecResult;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use crate::time_util;
-
 use crate::trading::model::Db;
-
+use rbatis::impl_select;
 /// table
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // #[serde(rename_all = "camelCase")]

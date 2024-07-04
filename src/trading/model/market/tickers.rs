@@ -9,7 +9,7 @@ use crate::trading::model::Db;
 use anyhow::Result;
 use rbatis::rbdc::db::ExecResult;
 use tracing::debug;
-
+use rbatis::impl_select;
 /// table
 #[derive(Serialize, Deserialize, Debug)]
 // #[serde(rename_all = "camelCase")]

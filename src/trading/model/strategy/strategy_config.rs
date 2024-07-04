@@ -1,5 +1,5 @@
 extern crate rbatis;
-
+use rbatis::impl_select;
 use tracing::debug;
 use rbatis::{crud, impl_insert, impl_update, RBatis};
 use rbatis::rbdc::{Date, DateTime};

@@ -13,7 +13,7 @@ use tracing::{error, info, debug};
 use crate::trading::model::{Db, Model};
 use crate::trading::okx::market::TickersData;
 use crate::trading::okx::public_data::CandleData;
-
+use rbatis::impl_select;
 /// table
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // #[serde(rename_all = "camelCase")]

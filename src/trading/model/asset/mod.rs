@@ -1,4 +1,3 @@
-extern crate rbatis;
 
 use anyhow::Result;
 use rbatis::{crud, impl_update, RBatis};
@@ -6,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use crate::trading::model::Db;
 use crate::trading::okx::asset::AssetData;
-
+use rbatis::impl_select;
 /// table
 #[derive(Serialize, Deserialize, Debug)]
 // #[serde(rename_all = "camelCase")]
