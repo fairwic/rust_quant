@@ -10,6 +10,7 @@ use crate::trading::model::Db;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BackTestDetail {
+    pub option_type: String,
     pub strategy_type: String,
     pub inst_id: String,
     pub time: String,
@@ -22,6 +23,8 @@ pub struct BackTestDetail {
     pub quantity: String,
     pub full_close: bool,
     pub close_type: String,
+    pub win_nums: i64,
+    pub loss_nums: i64,
 }
 
 crud!(BackTestDetail{});
