@@ -4,6 +4,8 @@ pub mod comprehensive_strategy;
 pub(crate) mod ut_boot_strategy;
 pub mod macd_kdj_strategy;
 pub mod profit_stop_loss;
+pub mod engulfing_strategy;
+pub mod strategy_common;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use log::{error, trace};
@@ -28,7 +30,7 @@ use std::fmt::Display;
 use crate::trading::model::strategy::strategy_job_signal_log;
 use crate::trading::indicator::kdj_simple_indicator::{KDJ, KdjCandle};
 use crate::trading::indicator::macd_simple_indicator::MacdSimpleIndicator;
-use crate::trading::strategy::ut_boot_strategy::SignalResult;
+// use crate::trading::strategy::ut_boot_strategy::SignalResult;
 
 // 枚举表示止损策略的选择
 #[derive(Clone, Copy, Debug)]
@@ -47,6 +49,7 @@ pub enum StrategyType {
     Boll,
     UtBoot,
     UtBootShort,
+    Engulfing,
 }
 
 impl Display for StrategyType {
@@ -60,6 +63,7 @@ impl Display for StrategyType {
             StrategyType::UtBoot => write!(f, "UtBoot"),
             StrategyType::UtBootShort => write!(f, "UtBootShort"),
             StrategyType::MacdWithKdj => write!(f, "MacdWithKdj"),
+            StrategyType::Engulfing => write!(f, "Engulfing"),
         }
     }
 }
@@ -770,8 +774,6 @@ impl Strategy {
         info!("Final Win rate: {}", win_rate);
         (funds, win_rate, open_trades) // 返回最终资金,胜率和开仓次数
     }
-
-
 
 
     pub async fn ut_bot_alert_strategy_with_shorting(&mut self, candles_5m: &Vec<CandlesEntity>, fib_levels: &Vec<f64>, key_value: f64, atr_period: usize, heikin_ashi: bool) -> (f64, f64, usize) {

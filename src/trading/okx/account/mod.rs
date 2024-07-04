@@ -297,7 +297,7 @@ impl Account {
         inst_id: Option<&str>,
         post_id: Option<&str>,
     ) -> anyhow::Result<Vec<Position>> {
-        let mut path = format!("/api/v5/account/positions?test=1");
+        let mut path = format!("/api/v5/account/positions?tests=1");
         if let Some(instType) = inst_type {
             path.push_str(&format!("&instId={}", instType));
         }

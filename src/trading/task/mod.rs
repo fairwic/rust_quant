@@ -19,11 +19,12 @@ use crate::trading::okx::account::{Account, Position, PositionResponse};
 use crate::trading::okx::trade::{PosSide, TdMode};
 use crate::trading::order;
 use crate::trading::strategy;
-use crate::trading::strategy::{StopLossStrategy, Strategy, StrategyType};
+use crate::trading::strategy::{engulfing_strategy, StopLossStrategy, Strategy, StrategyType};
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
 use crate::trading::strategy::macd_kdj_strategy::MacdKdjStrategy;
 use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
-use crate::trading::strategy::ut_boot_strategy::{SignalResult, TradeRecord, UtBootStrategy};
+use crate::trading::strategy::strategy_common::SignalResult;
+use crate::trading::strategy::ut_boot_strategy::{TradeRecord, UtBootStrategy};
 
 pub mod tickets_job;
 pub mod account_job;
@@ -91,7 +92,7 @@ pub async fn breakout_long_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
 
                 // 解包 Result 类型
                 let (final_fund, win_rate, open_position_num) = res;
-                //把back test strategy结果写入数据
+                //把back tests strategy结果写入数据
                 let back_test_log = BackTestLog {
                     strategy_type: format!("{:?}", StrategyType::BreakoutUp),
                     inst_type: inst_id.parse()?,
@@ -100,6 +101,7 @@ pub async fn breakout_long_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
                     win_rate: win_rate.to_string(),
                     open_positions_num: open_position_num,
                     strategy_detail: Some(format!("breakout_period:{},confirmation_period:{},volume_threshold:{},stop_loss_strategy: {:?}", breakout_period, confirmation_period, volume_threshold, stop_loss_strategy)),
+                    profit: "".to_string(),
                 };
                 back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
             }
@@ -125,7 +127,7 @@ pub async fn macd_ema_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
 
         // 解包 Result 类型
         let (final_fund, win_rate, open_position_num) = res;
-        //把back test strategy结果写入数据
+        //把back tests strategy结果写入数据
         let back_test_log = BackTestLog {
             strategy_type: format!("{:?}", StrategyType::BreakoutUp),
             inst_type: inst_id.parse()?,
@@ -134,6 +136,7 @@ pub async fn macd_ema_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
             win_rate: win_rate.to_string(),
             open_positions_num: open_position_num as i32,
             strategy_detail: Some(format!("stop_loss_percent: {:?}", stop)),
+            profit: "".to_string(),
         };
         back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
     }
@@ -162,7 +165,7 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
                 println!("strategy{:#?}", res);    // let ins_id = "BTC-USDT-SWAP";
                 // 解包 Result 类型
                 let (final_fund, win_rate, open_position_num) = res;
-                //把back test strategy结果写入数据
+                //把back tests strategy结果写入数据
                 let back_test_log = BackTestLog {
                     strategy_type: format!("{:?}", StrategyType::MacdWithKdj),
                     inst_type: inst_id.parse()?,
@@ -171,6 +174,7 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
                     win_rate: win_rate.to_string(),
                     open_positions_num: open_position_num as i32,
                     strategy_detail: Some(format!("stop_loss_percent: {:?},kdj_period:{},signal_period:{}", stop, kdj_period, signal_period)),
+                    profit: "".to_string(),
                 };
                 back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
             }
@@ -180,7 +184,100 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
 }
 
 
+use anyhow::Result;
+use futures::future::join_all;
+use redis::AsyncCommands;
+use tokio;
+use tokio::sync::Semaphore;
+
 pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+    let mysql_candles = self::get_candle_data(inst_id, time).await?;
+    // 初始化 Redis
+    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")?;
+    let mut con = client.get_multiplexed_async_connection().await?;
+    // let db = BizActivityModel::new().await;
+    let max_loss_percent: Vec<f64> = (1..=3).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
+
+    let key_values: Vec<f64> = (1..=10).map(|x| x as f64 * 1.0).collect(); //损失仓位,从0到30%
+    let atr_periods = vec![2..20];
+
+    let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
+    println!("fibonacci_level:{:?}", fibonacci_level);
+
+    let semaphore = Arc::new(Semaphore::new(3)); // 最大并发任务数为 10
+    let mut tasks = Vec::new();
+
+    for key_value in key_values {
+        for atr_period in (2..20) {
+            if key_value > atr_period as f64 {
+                continue;
+            }
+            for &max_loss_percent in &max_loss_percent {
+                let is_fibonacci_profit = false;
+                //是否允许开多
+                let is_open_long = true;
+                //是否允许开空
+                let is_open_short = false;
+                let ut_boot_strategy = UtBootStrategy {
+                    key_value,
+                    atr_period,
+                    heikin_ashi: false,
+                };
+
+                let mysql_candles_clone = mysql_candles.clone();
+                let fibonacci_level_clone = fibonacci_level.clone();
+                let inst_id_clone = inst_id.to_string();
+                let time_clone = time.to_string();
+                let semaphore_clone = semaphore.clone();
+
+                let task = tokio::spawn(async move {
+                    let permit = semaphore_clone.acquire().await.unwrap();
+                    let res = UtBootStrategy::run_test(
+                        &mysql_candles_clone,
+                        &fibonacci_level_clone,
+                        max_loss_percent,
+                        is_fibonacci_profit,
+                        is_open_long,
+                        is_open_short,
+                        ut_boot_strategy,
+                    ).await;
+
+                    let (final_fund, win_rate, open_position_num, trade_record_list) = res;
+                    let strategy_detail = Some(format!(
+                        "key_value: {:?},atr_period:{},is_open_fibonacci_profit:{},is_open_long:{},is_open_short:{}",
+                        key_value, atr_period, is_fibonacci_profit, is_open_long, is_open_short
+                    ));
+
+                    let insert_id = save_test_log(
+                        StrategyType::UtBoot,
+                        &inst_id_clone,
+                        &time_clone,
+                        final_fund,
+                        win_rate,
+                        open_position_num as i32,
+                        strategy_detail,
+                    ).await?;
+                    if !trade_record_list.is_empty() {
+                        save_test_detail(insert_id, StrategyType::UtBoot, &inst_id_clone, &time_clone, trade_record_list).await?;
+                    }
+                    drop(permit); // 释放 permit
+                    Ok::<(), anyhow::Error>(())
+                });
+
+                tasks.push(task);
+            }
+        }
+    }
+
+    let results = join_all(tasks).await;
+    for result in results {
+        result??;
+    }
+
+    Ok(())
+}
+
+pub async fn engulfing_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
     let mysql_candles = self::get_candle_data(inst_id, time).await?;
     // 初始化 Redis
     let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").expect("get redis client error");
@@ -188,27 +285,37 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
     // let db = BizActivityModel::new().await;
 
     let atr_threshold: Vec<f64> = (1..=10).map(|x| x as f64 * 1.0).collect(); //损失仓位,从0到30%
+    let max_loss_percent: Vec<f64> = (1..=5).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
+    for num_bar in 3..8 {
+        for max_loss_percent in &max_loss_percent {
+            for is_fibonacci_profit in [true, false].iter() {
+                //是否允许开多
+                let is_open_long = true;
+                //是否允许开空
+                let is_open_short = true;
+                let res = engulfing_strategy::EngulfingStrategy::run_test(&mysql_candles, &fibonacci_level, max_loss_percent.clone(),
+                                                                          num_bar,
+                                                                          *is_fibonacci_profit,
+                                                                          is_open_long,
+                                                                          is_open_short,
+                ).await;
 
-    for key_value in atr_threshold {
-        for atr_period in 2..20 {
-            if key_value > atr_period as f64 {
-                continue;
+                // let res = startegy.ut_bot_alert_strategy_with_shorting(&mysql_candles_5m, &fibonacci_level, key_value, atr_period, false).await;
+                //save tests to log
+                let (final_fund, win_rate, open_position_num, trade_record_list) = res;
+                let strategy_detail = Some(format!("bum_bar:{},max_loss_percent:{},is_open_fibonacci_profit:{},is_open_long:{},is_open_short:{}",
+                                                   num_bar, max_loss_percent, is_fibonacci_profit, is_open_long, is_open_short));
+                let insert_id = save_test_log(StrategyType::Engulfing, inst_id, time, final_fund, win_rate, open_position_num as i32, strategy_detail).await?;
+
+                let inset_id = save_test_detail(insert_id, StrategyType::Engulfing, inst_id, time, trade_record_list).await?;
             }
-            let res = UtBootStrategy::run_test(&mysql_candles, &fibonacci_level, key_value, atr_period, false).await;
-            // let res = startegy.ut_bot_alert_strategy_with_shorting(&mysql_candles_5m, &fibonacci_level, key_value, atr_period, false).await;
-            //save test to log
-            let (final_fund, win_rate, open_position_num, trade_record_list) = res;
-            let strategy_detail = Some(format!("key_value: {:?},atr_period:{}", key_value, atr_period));
-            let insert_id = save_test_log(StrategyType::UtBoot, inst_id, time, final_fund, win_rate, open_position_num as i32, strategy_detail).await?;
-
-            let inset_id = save_test_detail(insert_id, StrategyType::UtBoot, inst_id, time, trade_record_list).await?;
         }
     }
+
     Ok(())
 }
-
 
 pub async fn ut_boot_order(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, time: &str, ut_boot_strategy: UtBootStrategy) -> Result<(), anyhow::Error> {
     let key_value = ut_boot_strategy.key_value;
@@ -239,7 +346,7 @@ pub async fn ut_boot_order(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
 
 pub async fn save_test_log(strategy_type: StrategyType, inst_id: &str, time: &str, final_fund: f64, win_rate: f64, open_position_num: i32, detail: Option<String>) -> Result<i64, anyhow::Error> {
     // 解包 Result 类型
-    //把back test strategy结果写入数据
+    //把back tests strategy结果写入数据
     let back_test_log = BackTestLog {
         strategy_type: format!("{:?}", strategy_type),
         inst_type: inst_id.parse().unwrap(),
@@ -248,6 +355,7 @@ pub async fn save_test_log(strategy_type: StrategyType, inst_id: &str, time: &st
         win_rate: win_rate.to_string(),
         open_positions_num: open_position_num,
         strategy_detail: detail,
+        profit: (final_fund - 100.00).to_string(),
     };
     let res = back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
     Ok(res)
@@ -255,22 +363,28 @@ pub async fn save_test_log(strategy_type: StrategyType, inst_id: &str, time: &st
 
 pub async fn save_test_detail(back_test_id: i64, strategy_type: StrategyType, inst_id: &str, time: &str, list: Vec<TradeRecord>) -> Result<u64, anyhow::Error> {
     // 解包 Result 类型
-    //把back test strategy结果写入数据
+    //把back tests strategy结果写入数据
     let mut array = Vec::new();
     for trade_record in list {
         let back_test_log = BackTestDetail {
             back_test_id,
+            option_type: trade_record.option_type,
             strategy_type: strategy_type.to_string(),
             inst_id: inst_id.to_string(),
             time: time.to_string(),
             open_position_time: trade_record.open_position_time.to_string(),
-            close_position_time: trade_record.close_position_time.to_string(),
+            close_position_time: match trade_record.close_position_time {
+                Some(x) => x.to_string(),
+                None => "".to_string(),
+            },
             open_price: trade_record.open_price.to_string(),
             close_price: trade_record.close_price.to_string(),
             profit_loss: trade_record.profit_loss.to_string(),
             quantity: trade_record.quantity.to_string(),
             full_close: trade_record.full_close,
-            close_type: "".to_string(),
+            close_type: trade_record.close_type,
+            win_nums: trade_record.win_num,
+            loss_nums: trade_record.loss_num,
         };
         array.push(back_test_log);
     }
@@ -331,7 +445,7 @@ pub async fn comprehensive_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
     println!("strategy{:#?}", res);    // let ins_id = "BTC-USDT-SWAP";
     // 解包 Result 类型
     let (final_fund, win_rate, open_position_num) = res;
-    //把back test strategy结果写入数据
+    //把back tests strategy结果写入数据
     let back_test_log = BackTestLog {
         strategy_type: format!("{:?}", StrategyType::BreakoutUp),
         inst_type: inst_id.parse()?,
@@ -340,6 +454,7 @@ pub async fn comprehensive_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
         win_rate: win_rate.to_string(),
         open_positions_num: open_position_num as i32,
         strategy_detail: Some(format!("atr_threshold: {:?},ema_short_period:{}", atr_threshold, sig_length)),
+        profit: "".to_string(),
     };
     back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
 
@@ -515,7 +630,7 @@ pub async fn run_strategy_job() -> Result<(), anyhow::Error> {
             //
             // // 解包 Result 类型
             // let (final_fund, win_rate) = res;
-            // //把back test strategy结果写入数据
+            // //把back tests strategy结果写入数据
             // let back_test_log = BackTestLog {
             //     strategy_type: format!("{:?}", StrategyType::BreakoutDown),
             //     inst_type: inst_id.parse()?,

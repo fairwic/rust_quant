@@ -8,9 +8,9 @@ use crate::trading::okx::account::{Account, Position, TradingNumResponseData, Tr
 use crate::trading::okx::trade;
 use crate::trading::okx::trade::{AttachAlgoOrd, CloseOrderRequest, OkxTrade, OrderRequest, OrderResponse, OrderResponseData, OrdType, PosSide, Side, TdMode, TpOrdKind};
 use crate::trading::strategy::StrategyType;
-use crate::trading::strategy::ut_boot_strategy::SignalResult;
 
 use anyhow::Result;
+use crate::trading::strategy::strategy_common::SignalResult;
 
 //下单现货
 pub async fn place_order_spot(inst_id: &str, side: Side, px: f64) -> anyhow::Result<Vec<OrderResponseData>> {

@@ -1,2 +1,2 @@
-pub(crate) mod tickers;
+pub mod tickers;
 pub mod candles;

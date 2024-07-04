@@ -16,7 +16,7 @@ mod socket;
 
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use trading::okx::okx_client;
-use trading::model::biz_activity_model::BizActivityModel;
+// use trading::model::biz_activity_model::BizActivityModel;
 use clap::Parser;
 use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::okx::market::Market;
@@ -140,6 +140,7 @@ async fn setup_logging() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+
     // 设置日志
     setup_logging().await?;
 
@@ -149,8 +150,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 定义需要交易的产品及周期
-    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP"]);
-    let times = Arc::new(vec!["1H", "4H", "1D"]);
+    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "SUSHI-USDT-SWAP", "ADA-USDT-SWAP"]);
+    let times = Arc::new(vec!["1H", "4H", "1D", "5m"]);
+
+    // let inst_ids = Arc::new(vec!["SUSHI-USDT-SWAP"]);
+    // let times = Arc::new(vec!["4H"]);
 
 
     // 初始化需要同步的数据
@@ -172,7 +176,13 @@ async fn main() -> anyhow::Result<()> {
                 let inst_id = inst_id.to_string();
                 let time = time.to_string();
                 tasks.push(tokio::spawn(async move {
-                    task::ut_boot_test(&inst_id, &time).await;
+                    //ut_boot_strategy
+                    let res = task::ut_boot_test(&inst_id, &time).await;
+                    //engulfing_strategy
+                    // let res = task::engulfing_test(&inst_id, &time).await;
+                    if let Err(error) = res {
+                        error!("run strategy error: {}", error);
+                    }
                 }));
             }
         }

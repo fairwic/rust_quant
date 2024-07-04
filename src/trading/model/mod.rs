@@ -35,11 +35,11 @@ impl Db {
         rb.link(MysqlDriver {}, &*env::var("DB_HOST").unwrap()).await.unwrap();
         // rb.link_opt("mysql://yourusername:yourpassword@localhost:3306/yourdatabase", DBPoolOptions::new().max_connections(10)).await?;
         // mysql
-        // rb.link(MysqlDriver{},"mysql://root:123456@localhost:3306/test").await.unwrap();
+        // rb.link(MysqlDriver{},"mysql://root:123456@localhost:3306/tests").await.unwrap();
         // postgresql
         // rb.link(PgDriver{},"postgres://postgres:123456@localhost:5432/postgres").await.unwrap();
         // mssql/sqlserver
-        // rb.link(MssqlDriver{},"jdbc:sqlserver://localhost:1433;User=SA;Password={TestPass!123456};Database=test").await.unwrap();
+        // rb.link(MssqlDriver{},"jdbc:sqlserver://localhost:1433;User=SA;Password={TestPass!123456};Database=tests").await.unwrap();
         rb
     }
 }
