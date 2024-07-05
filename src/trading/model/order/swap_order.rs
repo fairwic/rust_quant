@@ -1,6 +1,7 @@
 extern crate rbatis;
 
 use std::convert::TryInto;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use rbatis::{crud, impl_update, RBatis};
@@ -8,8 +9,9 @@ use rbatis::rbdc::db::ExecResult;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use crate::time_util;
-use crate::trading::model::Db;
+use crate::config::db;
 use rbatis::impl_select;
+
 /// table
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // #[serde(rename_all = "camelCase")]
@@ -59,25 +61,25 @@ impl TimeInterval {
 
 
 pub struct SwapOrderEntityModel {
-    db: RBatis,
+    db: &'static RBatis,
 }
 
 impl SwapOrderEntityModel {
     pub async fn new() -> Self {
         Self {
-            db: Db::get_db_client().await,
+            db: db::get_db_client(),
         }
     }
 
 
     pub async fn add(&self, swap_order_entity: SwapOrderEntity) -> anyhow::Result<ExecResult> {
-        let data = SwapOrderEntity::insert(&self.db, &swap_order_entity).await?;
+        let data = SwapOrderEntity::insert(self.db, &swap_order_entity).await?;
         println!("insert_batch = {}", json!(data));
         Ok(data)
     }
     pub async fn getOne(&self, inst_id: &str, time: &str, side: String, pos_side: String) -> anyhow::Result<Vec<SwapOrderEntity>> {
         let uuid = SwapOrderEntity::gen_uuid(inst_id, time, side, pos_side);
-        let data = SwapOrderEntity::select_by_column(&self.db, "uuid", uuid.as_str()).await?;
+        let data = SwapOrderEntity::select_by_column(self.db, "uuid", uuid.as_str()).await?;
         println!("query swap_oder uuid = {},result:{}", uuid, json!(data));
         Ok(data)
     }

@@ -100,4 +100,20 @@ WHERE
     `rank` = 1
 ORDER BY
     CAST(final_fund AS DECIMAL(20, 2)) DESC,
-    open_positions_num DESC
+    open_positions_num DESC;
+
+
+
+    SELECT
+    	*
+    FROM
+    	back_test_log
+    WHERE
+    	1 = 1
+    	AND open_positions_num > 10
+    -- 			AND TIME = "1D"
+    	AND win_rate > 0.8
+    	AND strategy_type = "UtBoot"
+    ORDER BY
+    	CAST(
+    	final_fund AS DECIMAL ( 20, 0 )) DESC;

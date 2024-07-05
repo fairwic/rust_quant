@@ -1,12 +1,13 @@
 extern crate rbatis;
 
+use std::sync::Arc;
 use tracing::debug;
 use rbatis::{crud, impl_insert, impl_update, RBatis};
 use rbatis::rbdc::{Date, DateTime};
 use rbatis::rbdc::db::ExecResult;
 use rbs::Value;
 use serde_json::json;
-use crate::trading::model::Db;
+use crate::config::db;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BackTestDetail {
@@ -27,27 +28,59 @@ pub struct BackTestDetail {
     pub loss_nums: i64,
 }
 
-crud!(BackTestDetail{});
+impl_insert!(BackTestDetail{});
+// rbatis::crud!(BackTestDetail{});
 impl_update!(BackTestDetail{update_by_name(name:&str) => "`where id = '2'`"});
 
 pub struct BackTestDetailModel {
-    db: RBatis,
+    db: &'static RBatis,
 }
 
 impl BackTestDetailModel {
     pub async fn new() -> BackTestDetailModel {
         Self {
-            db: Db::get_db_client().await,
+            db: db::get_db_client(),
         }
     }
     pub async fn add(&self, list: BackTestDetail) -> anyhow::Result<i64> {
-        let data = BackTestDetail::insert(&self.db, &list).await;
+        let data = BackTestDetail::insert(self.db, &list).await;
         debug!("insert_back_test_log_result = {}", json!(data));
         Ok(data.unwrap().last_insert_id.as_i64().unwrap())
     }
     pub async fn batch_add(&self, list: Vec<BackTestDetail>) -> anyhow::Result<u64> {
-        let data = BackTestDetail::insert_batch(&self.db, &list, list.len() as u64).await;
-        debug!("insert_back_test_log_result = {}", json!(data));
-        Ok(data.unwrap().rows_affected)
+        // let data = BackTestDetail::insert_batch(&self.db, &list, list.len() as u64).await;
+        // debug!("insert_back_test_log_result = {}", json!(data));
+        // let data = BackTestLog::insert_batch(&self.db, &v1, 1).await?;
+        let table_name = format!("{}", "back_test_detail");
+        // 构建批量插入的 SQL 语句
+        let mut query = format!("INSERT INTO `{}` (option_type, strategy_type, inst_id, time, back_test_id, open_position_time,\
+         close_position_time, open_price,close_price,profit_loss,quantity,full_close,close_type,win_nums,loss_nums) VALUES ", table_name);
+        let mut params = Vec::new();
+
+        for candle in list {
+            query.push_str("(?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?),");
+            params.push(candle.option_type.to_string().into());
+            params.push(candle.strategy_type.to_string().into());
+            params.push(candle.inst_id.to_string().into());
+            params.push(candle.time.to_string().into());
+            params.push(candle.back_test_id.to_string().into());
+            params.push(candle.open_position_time.to_string().into());
+            params.push(candle.close_position_time.to_string().into());
+            params.push(candle.open_price.to_string().into());
+            params.push(candle.close_price.to_string().into());
+            params.push(candle.profit_loss.to_string().into());
+            params.push(candle.quantity.to_string().into());
+            params.push(candle.full_close.to_string().into());
+            params.push(candle.close_type.to_string().into());
+            params.push(candle.win_nums.to_string().into());
+            params.push(candle.loss_nums.to_string().into());
+        }
+
+        // 移除最后一个逗号
+        query.pop();
+        let data = self.db.exec(&query, params).await?;
+        // Ok(res
+        debug!("insert_back_test_detail_result = {}", json!(data));
+        Ok(data.rows_affected)
     }
 }

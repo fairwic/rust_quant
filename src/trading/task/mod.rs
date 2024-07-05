@@ -6,7 +6,7 @@ use hmac::digest::generic_array::arr;
 use tracing::{error, info, Level, span, warn};
 
 use crate::{time_util, trading};
-use crate::trading::model::Db;
+use crate::config::db;
 use crate::trading::model::market::candles;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::order::swap_order::SwapOrderEntityModel;
@@ -78,7 +78,7 @@ pub async fn breakout_long_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
-    let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
+    let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
 
     for breakout_period in 1..20 {
         for confirmation_period in 1..20 {
@@ -103,7 +103,7 @@ pub async fn breakout_long_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
                     strategy_detail: Some(format!("breakout_period:{},confirmation_period:{},volume_threshold:{},stop_loss_strategy: {:?}", breakout_period, confirmation_period, volume_threshold, stop_loss_strategy)),
                     profit: "".to_string(),
                 };
-                back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
+                back_test_log::BackTestLogModel::new().await.add(&back_test_log).await?;
             }
         }
     }
@@ -117,7 +117,7 @@ pub async fn macd_ema_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
-    let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
+    let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
 
     // let stopo_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
     let stop_percent: Vec<f64> = vec![0.1]; //失仓位,从10%
@@ -138,7 +138,7 @@ pub async fn macd_ema_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
             strategy_detail: Some(format!("stop_loss_percent: {:?}", stop)),
             profit: "".to_string(),
         };
-        back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
+        back_test_log::BackTestLogModel::new().await.add(&back_test_log).await?;
     }
     Ok(())
 }
@@ -152,7 +152,7 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
-    let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
+    let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
 
     // let stopo_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
 
@@ -176,7 +176,7 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
                     strategy_detail: Some(format!("stop_loss_percent: {:?},kdj_period:{},signal_period:{}", stop, kdj_period, signal_period)),
                     profit: "".to_string(),
                 };
-                back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
+                back_test_log::BackTestLogModel::new().await.add(&back_test_log).await?;
             }
         }
     }
@@ -196,43 +196,38 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
     let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")?;
     let mut con = client.get_multiplexed_async_connection().await?;
     // let db = BizActivityModel::new().await;
-    let max_loss_percent: Vec<f64> = (1..=3).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
 
-    let key_values: Vec<f64> = (1..=10).map(|x| x as f64 * 1.0).collect(); //损失仓位,从0到30%
-    let atr_periods = vec![2..20];
-
+    let atr_threshold: Vec<f64> = (1..=10).map(|x| x as f64 * 1.0).collect(); //损失仓位,从0到30%
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
 
-    let semaphore = Arc::new(Semaphore::new(3)); // 最大并发任务数为 10
-    let mut tasks = Vec::new();
 
-    for key_value in key_values {
-        for atr_period in (2..20) {
+    for key_value in atr_threshold {
+        for atr_period in 2..20 {
             if key_value > atr_period as f64 {
                 continue;
             }
-            for &max_loss_percent in &max_loss_percent {
-                let is_fibonacci_profit = false;
-                //是否允许开多
-                let is_open_long = true;
-                //是否允许开空
-                let is_open_short = false;
-                let ut_boot_strategy = UtBootStrategy {
-                    key_value,
-                    atr_period,
-                    heikin_ashi: false,
-                };
+            let max_loss_percent: Vec<f64> = (1..=5).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
+            for &is_fibonacci_profit in &[true, false] {
+                for &max_loss_percent in &max_loss_percent {
+                    //是否允许开多
+                    let is_open_long = true;
+                    //是否允许开空
+                    let is_open_short = true;
+                    let ut_boot_strategy = UtBootStrategy {
+                        key_value,
+                        atr_period,
+                        heikin_ashi: false,
+                    };
 
-                let mysql_candles_clone = mysql_candles.clone();
-                let fibonacci_level_clone = fibonacci_level.clone();
-                let inst_id_clone = inst_id.to_string();
-                let time_clone = time.to_string();
-                let semaphore_clone = semaphore.clone();
+                    let mysql_candles_clone = mysql_candles.clone();
+                    let fibonacci_level_clone = fibonacci_level.clone();
+                    let inst_id_clone = inst_id.to_string();
+                    let time_clone = time.to_string();
 
-                let task = tokio::spawn(async move {
-                    let permit = semaphore_clone.acquire().await.unwrap();
-                    let res = UtBootStrategy::run_test(
+
+                    // (funds, win_rate, open_trades, trade_records)
+                    let (final_fund, win_rate, open_position_num, trade_record_list) = UtBootStrategy::run_test(
                         &mysql_candles_clone,
                         &fibonacci_level_clone,
                         max_loss_percent,
@@ -242,7 +237,6 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
                         ut_boot_strategy,
                     ).await;
 
-                    let (final_fund, win_rate, open_position_num, trade_record_list) = res;
                     let strategy_detail = Some(format!(
                         "key_value: {:?},atr_period:{},is_open_fibonacci_profit:{},is_open_long:{},is_open_short:{}",
                         key_value, atr_period, is_fibonacci_profit, is_open_long, is_open_short
@@ -256,22 +250,19 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
                         win_rate,
                         open_position_num as i32,
                         strategy_detail,
-                    ).await?;
-                    if !trade_record_list.is_empty() {
-                        save_test_detail(insert_id, StrategyType::UtBoot, &inst_id_clone, &time_clone, trade_record_list).await?;
-                    }
-                    drop(permit); // 释放 permit
-                    Ok::<(), anyhow::Error>(())
-                });
+                    ).await.unwrap();
 
-                tasks.push(task);
+                    // 只在交易记录列表不为空时插入记录
+                    if !trade_record_list.is_empty() {
+                        if let Err(e) = save_test_detail(insert_id, StrategyType::UtBoot, &inst_id_clone, &time_clone, trade_record_list).await {
+                            error!("Failed to save test detail: {:?}", e);
+                        }
+                    } else {
+                        warn!("Empty trade record list, skipping save_test_detail.");
+                    }
+                }
             }
         }
-    }
-
-    let results = join_all(tasks).await;
-    for result in results {
-        result??;
     }
 
     Ok(())
@@ -348,7 +339,7 @@ pub async fn save_test_log(strategy_type: StrategyType, inst_id: &str, time: &st
     // 解包 Result 类型
     //把back tests strategy结果写入数据
     let back_test_log = BackTestLog {
-        strategy_type: format!("{:?}", strategy_type),
+        strategy_type: strategy_type.to_string(),
         inst_type: inst_id.parse().unwrap(),
         time: time.parse().unwrap(),
         final_fund: final_fund.to_string(),
@@ -357,7 +348,9 @@ pub async fn save_test_log(strategy_type: StrategyType, inst_id: &str, time: &st
         strategy_detail: detail,
         profit: (final_fund - 100.00).to_string(),
     };
-    let res = back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
+    println!("back_test_log:{:#?}", back_test_log);
+
+    let res = back_test_log::BackTestLogModel::new().await.add(&back_test_log).await?;
     Ok(res)
 }
 
@@ -399,7 +392,7 @@ pub async fn comprehensive_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
     let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
-    let mut startegy = trading::strategy::Strategy::new(Db::get_db_client().await, con);
+    let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
 
     let atr_threshold: Vec<f64> = (10..=30).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
     let stop_percent: Vec<f64> = vec![0.1]; //失仓位,从10%
@@ -456,7 +449,7 @@ pub async fn comprehensive_test(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &
         strategy_detail: Some(format!("atr_threshold: {:?},ema_short_period:{}", atr_threshold, sig_length)),
         profit: "".to_string(),
     };
-    back_test_log::BackTestLogModel::new().await.add(back_test_log).await?;
+    back_test_log::BackTestLogModel::new().await.add(&back_test_log).await?;
 
 
     Ok(())

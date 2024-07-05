@@ -2,6 +2,7 @@ extern crate rbatis;
 
 use std::convert::TryInto;
 use std::env;
+use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use rbatis::{crud, impl_update, RBatis};
 use rbatis::rbdc::db::ExecResult;
@@ -10,10 +11,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, debug};
 
-use crate::trading::model::{Db, Model};
+use crate::config::{db};
 use crate::trading::okx::market::TickersData;
 use crate::trading::okx::public_data::CandleData;
 use rbatis::impl_select;
+
 /// table
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // #[serde(rename_all = "camelCase")]
@@ -56,13 +58,13 @@ impl TimeInterval {
 
 
 pub struct CandlesModel {
-    db: RBatis,
+    db: &'static RBatis,
 }
 
 impl CandlesModel {
     pub async fn new() -> Self {
         Self {
-            db: Db::get_db_client().await,
+            db: db::get_db_client(),
         }
     }
 

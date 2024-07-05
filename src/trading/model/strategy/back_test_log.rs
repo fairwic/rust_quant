@@ -1,23 +1,16 @@
 extern crate rbatis;
 
-use tracing::debug;
-use rbatis::{crud, impl_insert, impl_update, RBatis};
-use rbatis::rbdc::{Date, DateTime};
-use rbatis::rbdc::db::ExecResult;
+use std::sync::Arc;
+use std::vec;
+use anyhow::anyhow;
+use rbatis::{crud, impl_insert, RBatis};
 use rbs::Value;
 use serde_json::json;
-use crate::trading::model::Db;
+use tracing::debug;
 
-/// CREATE TABLE `back_test_log` (
-//   `id` int NOT NULL,
-//   `int_type` varchar(255) NOT NULL,
-//   `time` varchar(255) NOT NULL,
-//   `win_rate` varchar(255) NOT NULL,
-//   `Final fund` varchar(255) NOT NULL,
-//   `strategy_detail` varchar(255) NOT NULL,
-//   `created_at` datetime NOT NULL,
-//   PRIMARY KEY (`id`)
-// ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+use crate::config::db;
+
+/// table
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BackTestLog {
     pub strategy_type: String,
@@ -29,23 +22,49 @@ pub struct BackTestLog {
     pub strategy_detail: Option<String>,
     pub profit: String,
 }
-
 crud!(BackTestLog{});
-impl_update!(BackTestLog{update_by_name(name:&str) => "`where id = '2'`"});
+
+
 
 pub struct BackTestLogModel {
-    db: RBatis,
+    db: &'static RBatis,
 }
 
 impl BackTestLogModel {
     pub async fn new() -> BackTestLogModel {
         Self {
-            db: Db::get_db_client().await,
+            db: db::get_db_client(),
         }
     }
-    pub async fn add(&self, list: BackTestLog) -> anyhow::Result<i64> {
-        let data = BackTestLog::insert(&self.db, &list).await;
+    pub async fn add(&self, list: &BackTestLog) -> anyhow::Result<i64> {
+        // println!("111111111 list:{:#?}", list);
+        // println!("db:{:#?}", self.db);
+        let mut v1 = vec::Vec::new();
+        v1.push(list.clone());
+
+        // let data = BackTestLog::insert_batch(&self.db, &v1, 1).await?;
+        let table_name = format!("{}", "back_test_log");
+        // 构建批量插入的 SQL 语句
+        let mut query = format!("INSERT INTO `{}` (strategy_type, inst_type, time, win_rate, final_fund, open_positions_num, strategy_detail, profit) VALUES ", table_name);
+        let mut params = Vec::new();
+
+        for candle in v1 {
+            query.push_str("(?, ?, ?, ?, ?, ?, ?, ?),");
+            params.push(candle.strategy_type.to_string().into());
+            params.push(candle.inst_type.to_string().into());
+            params.push(candle.time.to_string().into());
+            params.push(candle.win_rate.to_string().into());
+            params.push(candle.final_fund.to_string().into());
+            params.push(candle.open_positions_num.to_string().into());
+            params.push(candle.strategy_detail.unwrap().to_string().into());
+            params.push(candle.profit.to_string().into());
+        }
+
+        // 移除最后一个逗号
+        query.pop();
+        let data = self.db.exec(&query, params).await?;
+        // Ok(res
         debug!("insert_back_test_log_result = {}", json!(data));
-        Ok(data.unwrap().last_insert_id.as_i64().unwrap())
+        Ok(data.last_insert_id.as_i64().unwrap())
     }
 }

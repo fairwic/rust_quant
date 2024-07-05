@@ -1,11 +1,12 @@
-
+use std::sync::Arc;
 use anyhow::Result;
 use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use crate::trading::model::Db;
+use crate::config;
 use crate::trading::okx::asset::AssetData;
 use rbatis::impl_select;
+
 /// table
 #[derive(Serialize, Deserialize, Debug)]
 // #[serde(rename_all = "camelCase")]
@@ -26,13 +27,13 @@ impl_select!(AssetEntity{fetch_list() => ""},"asset");
 
 
 pub struct AssetModel {
-    db: RBatis,
+    db: &'static RBatis,
 }
 
 impl AssetModel {
     pub async fn new() -> Self {
         Self {
-            db: Db::get_db_client().await,
+            db: config::db::get_db_client(),
         }
     }
     pub async fn add(&self, list: Vec<AssetData>) -> anyhow::Result<()> {
@@ -45,7 +46,7 @@ impl AssetModel {
             })
             .collect();
 
-        let data = AssetEntity::insert_batch(&self.db, &tickers_db, list.len() as u64).await;
+        let data = AssetEntity::insert_batch(self.db, &tickers_db, list.len() as u64).await;
         println!("insert_batch = {}", json!(data));
         Ok(())
     }
@@ -56,14 +57,14 @@ impl AssetModel {
             frozen_bal: ticker.frozen_bal.clone(),
             avail_bal: ticker.avail_bal.clone(),
         };
-        let data = AssetEntity::update_by_column(&self.db, &tickets_data, "inst_id").await;
+        let data = AssetEntity::update_by_column(self.db, &tickets_data, "inst_id").await;
         println!("update_by_column = {}", json!(data));
         // let data = TickersDataDb::update_by_name(&self.db, &tickets_data, ticker.inst_id.clone()).await;
         // println!("update_by_name = {}", json!(data));
         Ok(())
     }
     pub async fn get_all(&self) -> Result<Vec<AssetEntity>> {
-        let results: Vec<AssetEntity> = AssetEntity::fetch_list(&self.db).await?;
+        let results: Vec<AssetEntity> = AssetEntity::fetch_list(self.db).await?;
         Ok(results)
     }
 }

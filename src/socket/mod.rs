@@ -1,13 +1,46 @@
 use std::env;
+use std::net::SocketAddr;
 use std::sync::Arc;
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, warn};
 use serde_json::json;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite;
 use tracing::{info, Level, span};
-use crate::accept_connection;
 use crate::trading::okx::okx_websocket_client;
 use crate::trading::okx::okx_websocket_client::ApiType;
+
+use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::{
+    accept_async,
+    tungstenite::{Error, Result},
+};
+
+async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
+    if let Err(e) = handle_connection(peer, stream).await {
+        match e {
+            tungstenite::Error::ConnectionClosed | tungstenite::Error::Protocol(_) | tungstenite::Error::Utf8 => (),
+            err => error!("Error processing connection: {}", err),
+        }
+    }
+}
+
+async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
+    let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
+
+    info!("New WebSocket connection: {}", peer);
+
+    while let Some(msg) = ws_stream.next().await {
+        let msg = msg?;
+        info!("New Message : {}", msg);
+        if msg.is_text() || msg.is_binary() {
+            let response = "hhhh";
+            ws_stream.send(Message::from(response)).await?;
+        }
+    }
+
+    Ok(())
+}
 
 pub async fn run_socket(inst_ids: Arc<Vec<&str>>, times: Arc<Vec<&str>>) {
     let span = span!(Level::DEBUG, "socket_logic");

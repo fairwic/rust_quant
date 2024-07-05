@@ -27,7 +27,7 @@ rbs = { version = "4.5" }
 rbdc-mysql = { version = "4.5", default-features = false, features = ["tls-native-tls"] }
 #rbdc-pg={version="4.5", default-features = false, features = ["tls-native-tls"]}
 #rbdc-mssql={version="4.5", default-features = false, features = ["tls-native-tls"]}
-rbatis = { version = "4.5" }
+rbatis = { version = "4.5", features = ["debug_mode"]}
 
 log = "0.4"
 fast_log = "1.6"
@@ -94,3 +94,4 @@ futures = "0.3.30"
 redis = { version = "0.25.3", features = ["aio", "tokio-comp"] }
 
 tokio-retry = "0.3.0"
+once_cell = "1.19.0"

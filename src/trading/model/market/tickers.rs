@@ -1,15 +1,17 @@
 extern crate rbatis;
 
+use std::sync::Arc;
 use rbatis::{crud, impl_insert, impl_update, RBatis};
 use rbatis::rbdc::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use crate::trading::okx::market::TickersData;
-use crate::trading::model::Db;
+use crate::config::db;
 use anyhow::Result;
 use rbatis::rbdc::db::ExecResult;
 use tracing::debug;
 use rbatis::impl_select;
+
 /// table
 #[derive(Serialize, Deserialize, Debug)]
 // #[serde(rename_all = "camelCase")]
@@ -41,13 +43,13 @@ impl_select!(TickersDataEntity{fetch_list() => "`where inst_id = 'BTC-USDT-SWAP'
 
 
 pub struct TicketsModel {
-    db: RBatis,
+    db: &'static RBatis,
 }
 
 impl TicketsModel {
     pub async fn new() -> Self {
         Self {
-            db: Db::get_db_client().await,
+            db: db::get_db_client(),
         }
     }
 
@@ -74,7 +76,7 @@ impl TicketsModel {
             })
             .collect();
 
-        let data = TickersDataEntity::insert_batch(&self.db, &tickers_db, list.len() as u64).await?;
+        let data = TickersDataEntity::insert_batch(self.db, &tickers_db, list.len() as u64).await?;
         println!("insert_batch = {}", json!(data));
         Ok(data)
     }
@@ -97,7 +99,7 @@ impl TicketsModel {
             sod_utc8: ticker.sod_utc8.clone(),
             ts: ticker.ts.parse().unwrap(),
         };
-        let data = TickersDataEntity::update_by_column(&self.db, &tickets_data, "inst_id").await;
+        let data = TickersDataEntity::update_by_column(self.db, &tickets_data, "inst_id").await;
         println!("update_by_column = {}", json!(data));
         // let data = TickersDataDb::update_by_name(&self.db, &tickets_data, ticker.inst_id.clone()).await;
         // println!("update_by_name = {}", json!(data));

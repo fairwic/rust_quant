@@ -69,7 +69,7 @@ impl Display for StrategyType {
 }
 
 pub struct Strategy {
-    rb: RBatis,
+    rb: &'static RBatis,
     redis: MultiplexedConnection,
     rsi: RelativeStrengthIndex,
     ema_1h: ExponentialMovingAverage,
@@ -96,7 +96,7 @@ impl UTBotAlert {
 }
 
 impl Strategy {
-    pub fn new(db: RBatis, redis: MultiplexedConnection) -> Self {
+    pub fn new(db: &'static RBatis, redis: MultiplexedConnection) -> Self {
         Self {
             rb: db,
             redis,
