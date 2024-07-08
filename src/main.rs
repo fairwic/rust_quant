@@ -86,11 +86,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 定义需要交易的产品及周期
-    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
-    let times = Arc::new(vec!["1D"]);
+    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
+    // let times = Arc::new(vec!["1D"]);
 
-    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
-    // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
+    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
+    let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
     // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);

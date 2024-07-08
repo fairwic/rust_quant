@@ -198,7 +198,7 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
     // let db = BizActivityModel::new().await;
 
     //灵敏度
-    let key_values: Vec<f64> = (4..=20).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
+    let key_values: Vec<f64> = (2..=20).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
 
@@ -209,7 +209,7 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
                 continue;
             }
             let max_loss_percent: Vec<f64> = (1..=6).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
-            for &is_fibonacci_profit in &[false] {
+            for &is_fibonacci_profit in &[true] {
                 for &max_loss_percent in &max_loss_percent {
                     //是否允许开多
                     let is_open_long = true;

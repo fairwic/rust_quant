@@ -240,12 +240,13 @@ async fn process_order(
     }
 
     //判断是否当前信号类型，并判断是否要下单当前信号方向的单
+    //todo 从数据读取当前配置是否更适合开多，还是开空
     match strategy_type {
         StrategyType::UtBoot => {
-            if PosSide::SHORT == pos_side {
-                warn!("ut boot strategy is short strategy, no need to place order");
-                return None;
-            }
+            // if PosSide::SHORT == pos_side {
+            //     warn!("ut boot strategy is short strategy, no need to place order");
+            //     return None;
+            // }
         }
         _ => {}
     }
