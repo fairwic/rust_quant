@@ -1,6 +1,35 @@
+use std::pin::pin;
 use anyhow::anyhow;
-use chrono::{DateTime, FixedOffset, Local, MappedLocalTime, NaiveDateTime, ParseError, Timelike, TimeZone, Utc};
+use chrono::{Datelike, DateTime, FixedOffset, Local, MappedLocalTime, NaiveDateTime, ParseError, Timelike, TimeZone, Utc};
+use tracing::warn;
 
+
+pub(crate) fn is_within_business_hours(ts: i64) -> bool {
+    // 获取当前UTC时间
+    let now_utc: DateTime<Utc> = DateTime::from_timestamp_millis(ts).unwrap();
+    // 定义美国东部时间的偏移量
+    // EST（标准时间）为UTC-5，EDT（夏令时）为UTC-4
+    let est_offset = FixedOffset::west(3 * 3600); // 偏移量为-5小时
+    let edt_offset = FixedOffset::west(3 * 3600); // 偏移量为-4小时
+
+    // 判断当前时间是否在夏令时范围内
+    let now_local: DateTime<Local> = Local::now();
+    let is_dst = now_local.offset().local_minus_utc() == -4 * 3600;
+    // 根据是否夏令时选择正确的偏移量
+
+    let est_or_edt_offset = if is_dst { edt_offset } else { est_offset };
+    // 将UTC时间转换为美国东部时间
+    let now_washington_time = now_utc.with_timezone(&est_or_edt_offset);
+    // 判断转换后的时间是否在早上7点到晚上22点之间
+    let hour = now_washington_time.hour();
+    let in_with_hour = hour >= 7 && hour < 22;
+    let day_week = now_washington_time.weekday().number_from_monday();
+    let is_saturday = day_week == 5;
+    if is_saturday {
+        warn!("time is not within business hours or in saturday hour:{},day_week:{}", hour, day_week);
+    }
+    !is_saturday && in_with_hour
+}
 
 pub fn parse_period(period: &str) -> anyhow::Result<i64> {
     let duration = match &period.to_uppercase()[..] {

@@ -187,16 +187,33 @@ impl OkxWebsocket {
         Ok(())
     }
 
+    // async fn handle_reconnect(&self, api_type: &ApiType, channels: &[serde_json::Value]) -> Result<()> {
+    //     let retry_strategy = ExponentialBackoff::from_millis(10)
+    //         .map(jitter)
+    //         .take(5);
+    //
+    //     Retry::spawn(retry_strategy, || async {
+    //         self.connect_and_subscribe(api_type, channels).await
+    //     }).await?;
+    //     Ok(())
+    // }
     async fn handle_reconnect(&self, api_type: &ApiType, channels: &[serde_json::Value]) -> Result<()> {
         let retry_strategy = ExponentialBackoff::from_millis(10)
             .map(jitter)
             .take(5);
 
         Retry::spawn(retry_strategy, || async {
-            self.connect_and_subscribe(api_type, channels).await
+            match self.connect_and_subscribe(api_type, channels).await {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    error!("Retry failed with error: {}", e);
+                    Err(e)
+                }
+            }
         }).await?;
         Ok(())
     }
+
 
     async fn connect_and_subscribe(&self, api_type: &ApiType, channels: &[serde_json::Value]) -> Result<()> {
         let mut ws_stream = self.connect_and_login(api_type).await?;
@@ -213,30 +230,31 @@ impl OkxWebsocket {
 
         loop {
             tokio::select! {
-                Some(msg) = read.next() => {
-                    match msg {
-                        Ok(msg) => {
-                            info!("okx websocket Received a new message: {}", msg);
-                            if msg.is_text() {
-                                let text = msg.to_text().unwrap();
-                                if let Err(e) = self.parse_and_deal_socket_message(&text).await {
-                                    error!("parse and deal socket message: {}", e);
-                                }
-                                // Reset the timer on any received message
-                                heartbeat_timer.reset();
+            Some(msg) = read.next() => {
+                match msg {
+                    Ok(msg) => {
+                        info!("Received a new message: {}", msg);
+                        if msg.is_text() {
+                            let text = msg.to_text().unwrap();
+                            if let Err(e) = self.parse_and_deal_socket_message(&text).await {
+                                error!("parse and deal socket message: {}", e);
                             }
-                        }
-                        Err(e) => {
-                            error!("Error: {}", e);
-                            return Err(anyhow!(e));
+                            // 重置心跳计时器
+                            heartbeat_timer.reset();
                         }
                     }
-                },
-                _ = heartbeat_timer.tick() => {
-                    // Send a ping message if no messages were received within the interval
-                    write.send(Message::Text("ping".into())).await.map_err(|e| anyhow!(e))?;
+                    Err(e) => {
+                        error!("Error: {}", e);
+                        return Err(anyhow!(e));
+                    }
                 }
+            },
+            _ = heartbeat_timer.tick() => {
+                // 在指定时间间隔内未收到消息时发送ping消息
+                info!("Sending ping");
+                write.send(Message::Text("ping".into())).await.map_err(|e| anyhow!(e))?;
             }
+        }
         }
     }
 

@@ -1,3 +1,4 @@
+use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -17,9 +18,10 @@ impl EngulfingStrategy {
         let mut should_buy = false;
         let mut should_sell = false;
         let mut price = 0.0;
+        let ts = 0;
 
         // 确保有足够的K线数据
-        if candles_5m.len() >= num_bars + 1 {
+        if candles_5m.len() == num_bars + 1 {
             let current_candle = &candles_5m[candles_5m.len() - 1];
 
             // println!("1111111 current_candel= {:#?}", json!(current_candle));
@@ -48,7 +50,9 @@ impl EngulfingStrategy {
             // println!("all_previous_bearish= {:#?}", all_previous_bearish);
             // println!("all_previous_bullish= {:#?}", all_previous_bullish);
             // 牛市吞没形态条件
-            if all_previous_bearish && current_close > previous_candles[previous_candles.len() - 1].o.parse::<f64>().unwrap_or(0.0) {
+            if all_previous_bearish && current_close > previous_candles[previous_candles.len() - 1].o.parse::<f64>().unwrap_or(0.0)
+            // &&current_
+            {
                 should_buy = true;
             }
 
@@ -58,9 +62,12 @@ impl EngulfingStrategy {
             }
 
             price = current_close;
+        } else {
+            error!("engulfingStrategy run_test candles_5m.len() < num_bar")
         }
+        // ts = candles_5m.last().unwrap().ts;
 
-        SignalResult { should_buy, should_sell, price }
+        SignalResult { should_buy, should_sell, price, ts: candles_5m.last().unwrap().ts }
     }
 
     /// 运行回测
@@ -72,6 +79,7 @@ impl EngulfingStrategy {
         is_need_fibonacci_profit: bool,
         is_open_long: bool,
         is_open_short: bool,
+        is_judge_trade_time:bool,
     ) -> (f64, f64, usize, Vec<TradeRecord>) {
         let min_data_length = num_bars + 1;
         let res = run_test(
@@ -83,6 +91,7 @@ impl EngulfingStrategy {
             is_need_fibonacci_profit,
             is_open_long,
             is_open_short,
+            is_judge_trade_time,
         );
         // println!("res= {:#?}", json!(res));
         res

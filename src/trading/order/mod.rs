@@ -10,6 +10,7 @@ use crate::trading::okx::trade::{AttachAlgoOrd, CloseOrderRequest, OkxTrade, Ord
 use crate::trading::strategy::StrategyType;
 
 use anyhow::Result;
+use crate::time_util;
 use crate::trading::strategy::strategy_common::SignalResult;
 
 //下单现货
@@ -182,13 +183,13 @@ pub async fn deal(strategy_type: StrategyType, inst_id: &str, time: &str, signal
 
         let (order_result, side, pos_side) = if signal.should_buy {
             (
-                process_order(inst_id, time, &position_list, PosSide::SHORT, Side::BUY, PosSide::LONG, &max_avail_size, signal.price).await,
+                process_order(inst_id, time, &position_list, PosSide::SHORT, Side::BUY, PosSide::LONG, &max_avail_size, signal, strategy_type).await,
                 Side::BUY,
                 PosSide::LONG
             )
         } else if signal.should_sell {
             (
-                process_order(inst_id, time, &position_list, PosSide::LONG, Side::SELL, PosSide::SHORT, &max_avail_size, signal.price).await,
+                process_order(inst_id, time, &position_list, PosSide::LONG, Side::SELL, PosSide::SHORT, &max_avail_size, signal, strategy_type).await,
                 Side::SELL,
                 PosSide::SHORT
             )
@@ -206,6 +207,7 @@ pub async fn deal(strategy_type: StrategyType, inst_id: &str, time: &str, signal
     Ok(())
 }
 
+
 async fn process_order(
     inst_id: &str,
     time: &str,
@@ -214,7 +216,8 @@ async fn process_order(
     side: Side,
     pos_side: PosSide,
     max_avail_size: &TradingSwapNumResponseData,
-    price: f64,
+    signal: SignalResult,
+    strategy_type: StrategyType,
 ) -> Option<Vec<OrderResponseData>> {
 
     //判断相同周期下是否已经有了订单
@@ -223,9 +226,29 @@ async fn process_order(
         info!("same period same inst_id same side, already have order");
         return None;
     }
+    let price = signal.price;
+    let ts = signal.ts;
 
     // 平掉现有的已经存在的反向仓位
     close_position(position_list, inst_id, close_pos_side).await.ok()?;
+
+    // 判断当下需要下单的时间，是不是不在交易设定的时间范围内
+    let can_order = time_util::is_within_business_hours(ts);
+    if !can_order {
+        warn!("time is not within business hours or in saturday");
+        return None;
+    }
+
+    //判断是否当前信号类型，并判断是否要下单当前信号方向的单
+    match strategy_type {
+        StrategyType::UtBoot => {
+            if PosSide::SHORT == pos_side {
+                warn!("ut boot strategy is short strategy, no need to place order");
+                return None;
+            }
+        }
+        _ => {}
+    }
 
     // 获取下单数量
     let size = get_place_order_num(max_avail_size, price, pos_side);

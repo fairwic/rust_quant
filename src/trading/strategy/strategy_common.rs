@@ -11,6 +11,7 @@ pub struct SignalResult {
     pub should_buy: bool,
     pub should_sell: bool,
     pub price: f64,
+    pub ts: i64,
 }
 
 fn record_trade(
@@ -227,6 +228,7 @@ pub fn run_test(
     is_need_fibonacci_profit: bool,
     is_open_long: bool,
     is_open_short: bool,
+    is_judge_trade_time: bool,
 ) -> (f64, f64, usize, Vec<TradeRecord>) {
     let initial_funds = 100.0;
     let mut funds = initial_funds;
@@ -279,6 +281,10 @@ pub fn run_test(
                 }
             } else {
                 if is_open_long {
+                    //如果需要判断开仓时间，且当前时间不在开仓时间范围内
+                    if is_judge_trade_time && !time_util::is_within_business_hours(candle.ts) {
+                        continue;
+                    }
                     // 开多仓
                     position = funds / signal.price;
                     initial_quantity = position;
@@ -328,6 +334,10 @@ pub fn run_test(
                 }
             } else {
                 if is_open_short {
+                    //如果需要判断开仓时间，且当前时间不在开仓时间范围内
+                    if is_judge_trade_time && !time_util::is_within_business_hours(candle.ts) {
+                        continue;
+                    }
                     // 开空仓
                     position = funds / signal.price;
                     initial_quantity = position;

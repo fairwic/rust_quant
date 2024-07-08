@@ -197,23 +197,27 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
     let mut con = client.get_multiplexed_async_connection().await?;
     // let db = BizActivityModel::new().await;
 
-    let atr_threshold: Vec<f64> = (1..=10).map(|x| x as f64 * 1.0).collect(); //损失仓位,从0到30%
+    //灵敏度
+    let key_values: Vec<f64> = (4..=20).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
 
 
-    for key_value in atr_threshold {
+    for key_value in key_values {
         for atr_period in 2..20 {
             if key_value > atr_period as f64 {
                 continue;
             }
-            let max_loss_percent: Vec<f64> = (1..=5).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
-            for &is_fibonacci_profit in &[true, false] {
+            let max_loss_percent: Vec<f64> = (1..=6).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
+            for &is_fibonacci_profit in &[false] {
                 for &max_loss_percent in &max_loss_percent {
                     //是否允许开多
                     let is_open_long = true;
                     //是否允许开空
                     let is_open_short = true;
+                    //是否判断交易时间
+                    let is_judge_trade_time = false;
+
                     let ut_boot_strategy = UtBootStrategy {
                         key_value,
                         atr_period,
@@ -235,11 +239,12 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
                         is_open_long,
                         is_open_short,
                         ut_boot_strategy,
+                        is_judge_trade_time,
                     ).await;
 
                     let strategy_detail = Some(format!(
-                        "key_value: {:?},atr_period:{},is_open_fibonacci_profit:{},is_open_long:{},is_open_short:{}",
-                        key_value, atr_period, is_fibonacci_profit, is_open_long, is_open_short
+                        "key_value: {:?},atr_period:{},is_open_fibonacci_profit:{},is_open_long:{},is_open_short:{},max_loss_percen:{},is_judege_trade_time:{}",
+                        key_value, atr_period, is_fibonacci_profit, is_open_long, is_open_short, max_loss_percent, is_judge_trade_time
                     ));
 
                     let insert_id = save_test_log(
@@ -276,7 +281,8 @@ pub async fn engulfing_test(inst_id: &str, time: &str) -> Result<(), anyhow::Err
     // let db = BizActivityModel::new().await;
 
     let atr_threshold: Vec<f64> = (1..=10).map(|x| x as f64 * 1.0).collect(); //损失仓位,从0到30%
-    let max_loss_percent: Vec<f64> = (1..=5).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
+
+    let max_loss_percent: Vec<f64> = (1..=4).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
     for num_bar in 3..8 {
@@ -285,19 +291,23 @@ pub async fn engulfing_test(inst_id: &str, time: &str) -> Result<(), anyhow::Err
                 //是否允许开多
                 let is_open_long = true;
                 //是否允许开空
-                let is_open_short = true;
+                let is_open_short = false;
+                //是否判断交易时间段
+                let is_judge_trade_time = true;
+
                 let res = engulfing_strategy::EngulfingStrategy::run_test(&mysql_candles, &fibonacci_level, max_loss_percent.clone(),
                                                                           num_bar,
                                                                           *is_fibonacci_profit,
                                                                           is_open_long,
                                                                           is_open_short,
+                                                                          is_judge_trade_time,
                 ).await;
 
                 // let res = startegy.ut_bot_alert_strategy_with_shorting(&mysql_candles_5m, &fibonacci_level, key_value, atr_period, false).await;
                 //save tests to log
                 let (final_fund, win_rate, open_position_num, trade_record_list) = res;
-                let strategy_detail = Some(format!("bum_bar:{},max_loss_percent:{},is_open_fibonacci_profit:{},is_open_long:{},is_open_short:{}",
-                                                   num_bar, max_loss_percent, is_fibonacci_profit, is_open_long, is_open_short));
+                let strategy_detail = Some(format!("bum_bar:{},max_loss_percent:{},is_open_fibonacci_profit:{},is_open_long:{},is_open_short:{},is_judge_trade_time:{}",
+                                                   num_bar, max_loss_percent, is_fibonacci_profit, is_open_long, is_open_short, is_judge_trade_time));
                 let insert_id = save_test_log(StrategyType::Engulfing, inst_id, time, final_fund, win_rate, open_position_num as i32, strategy_detail).await?;
 
                 let inset_id = save_test_detail(insert_id, StrategyType::Engulfing, inst_id, time, trade_record_list).await?;
@@ -317,16 +327,17 @@ pub async fn ut_boot_order(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, 
     let signal = UtBootStrategy::get_trade_signal(&mysql_candles_5m, key_value, atr_period, heikin_ashi);
 
     //插入信号记录到数据库中
-    let signal_result = SignalResult {
-        should_buy: signal.should_buy,
-        should_sell: signal.should_sell,
-        price: signal.price,
-    };
+    // let signal_result = SignalResult {
+    //     should_buy: signal.should_buy,
+    //     should_sell: signal.should_sell,
+    //     price: signal.price,
+    //     ts: signal.ts,
+    // };
     let signal_record = StrategyJobSignalLog {
         inst_id: inst_id.parse().unwrap(),
         time: time.parse().unwrap(),
         strategy_type: StrategyType::UtBoot.to_string(),
-        strategy_result: serde_json::to_string(&signal_result).unwrap(),
+        strategy_result: serde_json::to_string(&signal).unwrap(),
     };
     strategy_job_signal_log::StrategyJobSignalLogModel::new().await.add(signal_record).await?;
 

@@ -87,6 +87,13 @@ impl Display for PosSide {
     }
 }
 
+impl PartialEq for PosSide {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_string() == other.to_string()
+    }
+}
+
+
 pub enum OrdType {
     /// 限价单
     LIMIT,

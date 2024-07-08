@@ -1,3 +1,4 @@
+use std::env;
 use serde::{Deserialize, Serialize};
 
 use ta::indicators::{AverageTrueRange, ExponentialMovingAverage};
@@ -41,6 +42,7 @@ impl UtBootStrategy {
         let mut should_buy = false;
         let mut should_sell = false;
         let mut price = 0.0;
+        let mut ts: i64 = 0;
 
         // 确保至少有 atr_period + 1 根 K 线
         if candles_5m.len() >= atr_period + 1 {
@@ -89,9 +91,11 @@ impl UtBootStrategy {
 
                 // 记录开仓价格或卖出价格
                 price = current_price;
+                //记录时间
+                ts = candle.ts;
             }
         }
-        SignalResult { should_buy, should_sell, price } // 返回是否应该开仓和是否应该卖出的信号, 开仓或卖出价格
+        SignalResult { should_buy, should_sell, price, ts } // 返回是否应该开仓和是否应该卖出的信号, 开仓或卖出价格
     }
 
 
@@ -104,6 +108,7 @@ impl UtBootStrategy {
         is_open_long: bool,
         is_open_short: bool,
         ut_boot_strategy: UtBootStrategy,
+        is_jude_trade_time: bool,
     ) -> (f64, f64, usize, Vec<TradeRecord>) {
         let min_data_length = ut_boot_strategy.atr_period + 1;
         let res = run_test(
@@ -115,6 +120,7 @@ impl UtBootStrategy {
             is_need_fibonacci_profit,
             is_open_long,
             is_open_short,
+            is_jude_trade_time,
         );
         // println!("res= {:#?}", json!(res));
         res

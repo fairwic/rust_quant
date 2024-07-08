@@ -73,6 +73,7 @@ use crate::trading::okx::account::Account;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+
     // 设置日志
     setup_logging().await?;
 
@@ -85,11 +86,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 定义需要交易的产品及周期
-    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
-    // let times = Arc::new(vec!["1H", "4H", "1D", "5m"]);
+    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
+    let times = Arc::new(vec!["1D"]);
 
-    let inst_ids = Arc::new(vec!["SUSHI-USDT-SWAP", "BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP", "ADA-USDT-SWAP"]);
-    let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
+    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
+    // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
+
+    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
+    // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
 
 
     // 初始化需要同步的数据
@@ -127,10 +131,8 @@ async fn main() -> anyhow::Result<()> {
     // 添加定时任务执行策略
     {
         if env::var("IS_RUN_REAL_STRATEGY").unwrap() == "true" {
-
             //设置交易产品最大杠杆
             task::run_set_leverage(&inst_ids).await?;
-
             let inst_ids = Arc::clone(&inst_ids);
             let times = Arc::clone(&times);
             scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, move || {
