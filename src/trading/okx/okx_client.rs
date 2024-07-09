@@ -59,7 +59,7 @@ impl OkxClient {
         let url = format!("https://www.okx.com{}", path);
         let is_simulated_trading = env::var("IS_SIMULATED_TRADING").unwrap_or(1.to_string());
         println!("is_simulated_trading: {}", is_simulated_trading);
-        let response = self.client
+        let request_builder = self.client
             .request(method, &url)
             .header("OK-ACCESS-KEY", &self.api_key)
             .header("OK-ACCESS-SIGN", signature)
@@ -69,8 +69,15 @@ impl OkxClient {
             .header("expTime", exp_time.to_string())
             // expTime 	String 	否 	请求有效截止时间。Unix时间戳的毫秒数格式，如 1597026383085
             //设置是否是模拟盘
-            .header("x-simulated-trading", is_simulated_trading)
-            .body(body.to_string())
+            .body(body.to_string());
+
+        let request_builder = if is_simulated_trading == "1" {
+            request_builder.header("x-simulated-trading", &is_simulated_trading)
+        } else {
+            request_builder
+        };
+
+        let response = request_builder
             .send()
             .await?;
 

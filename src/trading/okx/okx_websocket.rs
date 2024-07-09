@@ -1,3 +1,4 @@
+use std::env;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -53,7 +54,7 @@ impl OkxWebsocket {
         let signature = self.generate_signature(&timestamp, &method, path, body);
 
         let url = format!("https://www.okx.com{}", path);
-        let response = self.client
+        let request_builder = self.client
             .request(method, &url)
             .header("OK-ACCESS-KEY", &self.api_key)
             .header("OK-ACCESS-SIGN", signature)
@@ -62,8 +63,16 @@ impl OkxWebsocket {
             .header("Content-Type", "application/json")
             //设置是否是模拟盘
             .header("x-simulated-trading", 1)
-            .body(body.to_string())
-            .send()
+            .body(body.to_string());
+
+        let is_simulated_trading = env::var("IS_SIMULATED_TRADING").unwrap_or(1.to_string());
+        let request_builder = if is_simulated_trading == "1" {
+            request_builder.header("x-simulated-trading", &is_simulated_trading)
+        } else {
+            request_builder
+        };
+
+        let response = request_builder.send()
             .await?;
 
         let status_code = response.status();
