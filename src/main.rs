@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
     // let times = Arc::new(vec!["1D"]);
 
     let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
-    let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
+    let times = Arc::new(vec!["4H", "1h", "5m", "1D", "1m"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
     // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
@@ -116,9 +116,9 @@ async fn main() -> anyhow::Result<()> {
                 let time = time.to_string();
                 tasks.push(tokio::spawn(async move {
                     //ut_boot_strategy
-                    let res = task::ut_boot_test(&inst_id, &time).await;
+                    // let res = task::ut_boot_test(&inst_id, &time).await;
                     //engulfing_strategy
-                    // let res = task::engulfing_test(&inst_id, &time).await;
+                    let res = task::engulfing_test(&inst_id, &time).await;
                     if let Err(error) = res {
                         error!("run strategy error: {}", error);
                     }
@@ -135,16 +135,38 @@ async fn main() -> anyhow::Result<()> {
             task::run_set_leverage(&inst_ids).await?;
             let inst_ids = Arc::clone(&inst_ids);
             let times = Arc::clone(&times);
-            scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, move || {
-                let inst_ids_inner = Arc::clone(&inst_ids);
-                let times_inner = Arc::clone(&times);
-                async move {
-                    let res = task::run_ut_boot_strategy_job(inst_ids_inner, times_inner).await;
-                    if let Err(error) = res {
-                        error!("run strategy error: {}", error);
+
+            {
+                let inst_ids = Arc::clone(&inst_ids);
+                let times = Arc::clone(&times);
+                //执行ut_boot策略
+                scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, move || {
+                    let inst_ids_inner = Arc::clone(&inst_ids);
+                    let times_inner = Arc::clone(&times);
+                    async move {
+                        let res = task::run_strategy_job(inst_ids_inner, times_inner, StrategyType::UtBoot).await;
+                        if let Err(error) = res {
+                            error!("run ut boot strategy error: {}", error);
+                        }
                     }
-                }
-            });
+                });
+            }
+
+            {
+                let inst_ids = Arc::clone(&inst_ids);
+                let times = Arc::clone(&times);
+                //添务执行Engulfing策略
+                scheduler.add_periodic_task("run_engulfing_strategy_job".to_string(), 30000, move || {
+                    let inst_ids_inner = Arc::clone(&inst_ids);
+                    let times_inner = Arc::clone(&times);
+                    async move {
+                        let res = task::run_strategy_job(inst_ids_inner, times_inner, StrategyType::Engulfing).await;
+                        if let Err(error) = res {
+                            error!("run engulfing strategy error: {}", error);
+                        }
+                    }
+                });
+            }
         }
     }
 
