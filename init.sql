@@ -1,4 +1,28 @@
 
+CREATE TABLE `tickers_data` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `inst_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '产品类型',
+  `inst_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '产品ID',
+  `last` varchar(255) NOT NULL COMMENT '最新成交价',
+  `last_sz` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '最新成交的数量',
+  `ask_px` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '卖一价',
+  `ask_sz` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '卖一价对应的数量',
+  `bid_px` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '买一价',
+  `bid_sz` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '买一价对应的数量',
+  `open24h` varchar(255) NOT NULL COMMENT '24小时开盘价',
+  `high24h` varchar(255) NOT NULL COMMENT '24小时最高价',
+  `low24h` varchar(255) NOT NULL COMMENT '24小时最低价',
+  `vol_ccy24h` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '24小时成交量，以币为单位。如果是衍生品合约，数值为交易货币的数量。如果是币币/币币杠杆，数值为计价货币的数量',
+  `vol24h` varchar(255) NOT NULL COMMENT '24小时成交量，以张为单位。如果是衍生品合约，数值为合约的张数。如果是币币/币币杠杆，数值为交易货币的数量',
+  `sod_utc0` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'UTC+0 时开盘价',
+  `sod_utc8` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'UTC+8 时开盘价',
+  `ts` bigint NOT NULL COMMENT 'ticker数据产生时间，Unix时间戳的毫秒数格式，如 1597026383085',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `inst_type_2` (`inst_type`,`inst_id`),
+  KEY `inst_type` (`inst_type`)
+) ENGINE=InnoDB AUTO_INCREMENT=6808 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Ticker 数据表';
+
+
 CREATE TABLE `strategy_job_signal_log` (
   `id` int NOT NULL AUTO_INCREMENT,
   `inst_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '交易产品id',
