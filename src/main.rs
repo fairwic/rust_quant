@@ -89,8 +89,8 @@ async fn main() -> anyhow::Result<()> {
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
     // let times = Arc::new(vec!["1D"]);
 
-    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
-    let times = Arc::new(vec!["4H", "1h", "5m", "1D", "1m"]);
+    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP", "ADA-USDT-SWAP", "SUSHI-USDT-SWAP"]);
+    let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
     // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
@@ -98,6 +98,9 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化需要同步的数据
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
+        //初始化同步一次就行
+        tickets_job::init_all_ticker();
+
         task::run_sync_data_job(&inst_ids, &times).await?;
     }
 
