@@ -1,5 +1,6 @@
 use std::env;
 use dotenv::dotenv;
+use fast_log::Config;
 use tracing::Level;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{EnvFilter, fmt, FmtSubscriber, Layer};
@@ -29,10 +30,10 @@ pub async fn setup_logging() -> anyhow::Result<()> {
     }
 
     /// enable log crate to show sql logs
-    // fast_log::init(fast_log::Config::new().console().level(log::LevelFilter::Debug)).expect("fast_log init error");
-    // if let Err(e) = fast_log::init(Config::new().console()) {
-    //     eprintln!("fast_log init error: {:?}", e);
-    // }
+    fast_log::init(fast_log::Config::new().console().level(log::LevelFilter::Debug)).expect("fast_log init error");
+    if let Err(e) = fast_log::init(Config::new().console()) {
+        eprintln!("fast_log init error: {:?}", e);
+    }
 
     Ok(())
 }
