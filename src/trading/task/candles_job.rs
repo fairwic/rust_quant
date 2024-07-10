@@ -6,7 +6,7 @@ use rbatis::rbatis_codegen::ops::AsProxy;
 use rbatis::rbdc::datetime;
 use redis::aio::MultiplexedConnection;
 use tokio::time::sleep;
-use tracing::debug;
+use tracing::{debug, info};
 use tracing::field::debug;
 use crate::trading::model::market::tickers::{TickersDataEntity, TicketsModel};
 use crate::trading::model::asset::AssetModel;
@@ -91,7 +91,7 @@ pub async fn init_all_candles(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<&
                 let limit = 5000;
                 let count = CandlesModel::new().await.get_new_count(ticker.inst_id.as_str(), time, Some(limit)).await?;
                 if (count > limit as u64) {
-                    debug!("已达到所需数据的{}条,跳过",limit);
+                    info!("已达到所需数据的{}条,跳过",limit);
                     break;
                 }
 
