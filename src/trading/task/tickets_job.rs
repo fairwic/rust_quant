@@ -29,11 +29,11 @@ pub async fn init_all_ticker(inst_ids: &Arc<Vec<&str>>) -> anyhow::Result<()> {
                 //判断数据库是否有
                 let res = model.find_one(&ticker.inst_id).await?;
                 if res.len() > 0 {
-                    println!("不存在");
-                    let res = model.add(vec![ticker]).await?;
-                } else {
                     println!("已经存在,更新");
                     let res = model.update(&ticker).await?;
+                } else {
+                    println!("不存在");
+                    let res = model.add(vec![ticker]).await?;
                 }
             }
         }
