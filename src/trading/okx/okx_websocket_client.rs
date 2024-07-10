@@ -13,6 +13,7 @@ use serde_json::json;
 use anyhow::{Result, anyhow};
 use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
+use tokio::sync::mpsc;
 use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::okx::public_data::CandleData;
 
@@ -305,11 +306,14 @@ impl OkxWebsocket {
         Ok(())
     }
 
+
     pub async fn deal_candles_socket_message(&self, message_data: CandleMessage) -> Result<()> {
         let arg = &message_data.arg;
-        let inst_id = &arg.inst_id;
         let channel = &arg.channel;
-        let time = &channel[6..];
+        let inst_id = Arc::new(message_data.arg.inst_id.clone());
+        let time = Arc::new(message_data.arg.channel[6..].to_string());
+
+        let (tx, mut rx) = mpsc::channel(100); // 创建一个容量为100的通道
 
         for data in message_data.data {
             let candle_data = CandleData {
@@ -323,11 +327,28 @@ impl OkxWebsocket {
                 vol_ccy_quote: data[7].clone(),
                 confirm: data[8].clone(),
             };
-            CandlesModel::new().await.update_or_create(&candle_data, inst_id, time).await?;
+            let tx = tx.clone();
+            let inst_id = Arc::clone(&inst_id);
+            let time = Arc::clone(&time);
+            tokio::spawn(async move {
+                if let Err(e) = tx.send((candle_data, inst_id, time)).await {
+                    error!("Failed to send data to channel: {}", e);
+                }
+            });
         }
+
+        // 在另一个任务中处理数据
+        tokio::spawn(async move {
+            while let Some((candle_data, inst_id, time)) = rx.recv().await {
+                match CandlesModel::new().await.update_or_create(&candle_data, &inst_id, &time).await {
+                    Ok(_) => debug!("Successfully updated/created candle data"),
+                    Err(e) => error!("Failed to update/create candle data: {}", e),
+                }
+            }
+        });
+
         Ok(())
     }
-
     pub async fn subscribe(&self, api_type: ApiType, channels: Vec<serde_json::Value>) -> Result<()> {
         self.handle_reconnect(&api_type, &channels).await?;
         Ok(())
