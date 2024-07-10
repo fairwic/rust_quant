@@ -104,7 +104,6 @@ async fn main() -> anyhow::Result<()> {
 
         task::run_sync_data_job(&inst_ids, &times).await?;
     }
-    return Ok(());
 
 
     // 获取可用账户的最大数量
