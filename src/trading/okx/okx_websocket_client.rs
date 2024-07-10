@@ -11,8 +11,17 @@ use hmac_sha256::HMAC;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use anyhow::{Result, anyhow};
+use std::sync::{Arc, Mutex};
+use lazy_static::lazy_static;
 use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::okx::public_data::CandleData;
+
+lazy_static! {
+    static ref CONNECTION_COUNT: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+    static ref MAX_CONNECTIONS: u32 = 20;
+    static ref REQUEST_COUNT: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+    static ref MAX_REQUESTS: u32 = 480;
+}
 
 pub(crate) struct OkxWebsocket {
     api_key: String,
@@ -126,35 +135,22 @@ impl OkxWebsocket {
         env::var(env_var).map_err(|_| anyhow!("Environment variable {} not set", env_var))
     }
 
-    async fn connect_and_login(&self, api_type: &ApiType) -> Result<tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>> {
-        let ws_url = self.get_ws_url(api_type)?;
-        let (mut ws_stream, _) = connect_async(&ws_url).await?;
-        info!("WebSocket handshake has been successfully completed");
-
-        if let ApiType::Private = api_type {
-            self.login(&mut ws_stream).await?;
-        }
-
-        Ok(ws_stream)
-    }
-
-    async fn login(&self, ws_stream: &mut tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>)
-                   -> Result<()> {
+    async fn login(&self, ws_stream: tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>) -> Result<tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>> {
         let (mut write, mut read) = ws_stream.split();
         let timestamp = Utc::now().timestamp().to_string();
         let sign = self.generate_sign(&timestamp, "GET", "/users/self/verify");
 
         let login_msg = json!({
-            "op": "login",
-            "args": [{
-                "apiKey": self.api_key,
-                "passphrase": self.passphrase,
-                "timestamp": timestamp,
-                "sign": sign,
-            }]
-        });
+        "op": "login",
+        "args": [{
+            "apiKey": self.api_key,
+            "passphrase": self.passphrase,
+            "timestamp": timestamp,
+            "sign": sign,
+        }]
+    });
 
-        write.send(Message::Text(login_msg.to_string())).await.map_err(|e| anyhow!(e))?;
+        self.send_request(&mut write, &login_msg).await?;
 
         while let Some(msg) = read.next().await {
             match msg {
@@ -162,20 +158,41 @@ impl OkxWebsocket {
                     if msg.is_text() {
                         let text = msg.to_text().unwrap();
                         if text.contains("\"event\":\"login\"") && text.contains("\"code\":\"0\"") {
-                            info!("Login successful: {}", text);
-                            return Ok(());
+                            info!("登录成功: {}", text);
+                            return Ok(write.reunite(read).expect("Failed to reunite the stream"));
                         } else {
-                            info!("Private received: {}", text);
+                            info!("私有接收到: {}", text);
                         }
                     }
                 }
                 Err(e) => {
-                    error!("Error: {}", e);
+                    error!("错误: {}", e);
                     break;
                 }
             }
         }
-        Err(anyhow!("Login failed"))
+        Err(anyhow!("登录失败"))
+    }
+
+    async fn connect_and_login(&self, api_type: &ApiType) -> Result<tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>> {
+        {
+            let mut count = CONNECTION_COUNT.lock().unwrap();
+            if *count >= *MAX_CONNECTIONS {
+                error!("连接数过多");
+                return Err(anyhow!("连接数过多"));
+            }
+            *count += 1;
+        }
+
+        let ws_url = self.get_ws_url(api_type)?;
+        let (ws_stream, _) = connect_async(&ws_url).await?;
+        info!("WebSocket握手已成功完成");
+
+        if let ApiType::Private = api_type {
+            self.login(ws_stream).await
+        } else {
+            Ok(ws_stream)
+        }
     }
 
     async fn subscribe_channels(&self, write: &mut futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>, channels: &[serde_json::Value]) -> Result<()> {
@@ -183,26 +200,39 @@ impl OkxWebsocket {
             "op": "subscribe",
             "args": channels
         });
-        write.send(Message::Text(subscribe_msg.to_string())).await.map_err(|e| anyhow!(e))?;
+        self.send_request(write, &subscribe_msg).await?;
         Ok(())
     }
 
-    // async fn handle_reconnect(&self, api_type: &ApiType, channels: &[serde_json::Value]) -> Result<()> {
-    //     let retry_strategy = ExponentialBackoff::from_millis(10)
-    //         .map(jitter)
-    //         .take(5);
-    //
-    //     Retry::spawn(retry_strategy, || async {
-    //         self.connect_and_subscribe(api_type, channels).await
-    //     }).await?;
-    //     Ok(())
-    // }
+    async fn send_request(&self, write: &mut futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>, request: &serde_json::Value) -> Result<()> {
+        let mut request_count = REQUEST_COUNT.lock().unwrap();
+        if *request_count >= *MAX_REQUESTS {
+            error!("Too many requests");
+            return Err(anyhow!("Too many requests"));
+        }
+
+        write.send(Message::Text(request.to_string())).await.map_err(|e| anyhow!(e))?;
+        *request_count += 1;
+
+        // Reset request count every hour
+        tokio::spawn({
+            let request_count = REQUEST_COUNT.clone();
+            async move {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                *request_count.lock().unwrap() = 0;
+            }
+        });
+
+        Ok(())
+    }
+
     async fn handle_reconnect(&self, api_type: &ApiType, channels: &[serde_json::Value]) -> Result<()> {
         let retry_strategy = ExponentialBackoff::from_millis(10)
             .map(jitter)
             .take(5);
 
         Retry::spawn(retry_strategy, || async {
+            time::sleep(Duration::from_secs(1)).await; // 限制每秒最多3次连接尝试
             match self.connect_and_subscribe(api_type, channels).await {
                 Ok(_) => Ok(()),
                 Err(e) => {
@@ -214,13 +244,18 @@ impl OkxWebsocket {
         Ok(())
     }
 
-
     async fn connect_and_subscribe(&self, api_type: &ApiType, channels: &[serde_json::Value]) -> Result<()> {
         let mut ws_stream = self.connect_and_login(api_type).await?;
         let (mut write, mut read) = ws_stream.split();
         self.subscribe_channels(&mut write, channels).await?;
 
         self.start_heartbeat(&mut write, &mut read).await?;
+
+        {
+            let mut count = CONNECTION_COUNT.lock().unwrap();
+            *count -= 1;
+        }
+
         Ok(())
     }
 
@@ -230,31 +265,31 @@ impl OkxWebsocket {
 
         loop {
             tokio::select! {
-            Some(msg) = read.next() => {
-                match msg {
-                    Ok(msg) => {
-                        info!("Received a new message: {}", msg);
-                        if msg.is_text() {
-                            let text = msg.to_text().unwrap();
-                            if let Err(e) = self.parse_and_deal_socket_message(&text).await {
-                                error!("parse and deal socket message: {}", e);
+                Some(msg) = read.next() => {
+                    match msg {
+                        Ok(msg) => {
+                            info!("Received a new message: {}", msg);
+                            if msg.is_text() {
+                                let text = msg.to_text().unwrap();
+                                if let Err(e) = self.parse_and_deal_socket_message(&text).await {
+                                    error!("parse and deal socket message: {}", e);
+                                }
+                                // 重置心跳计时器
+                                heartbeat_timer.reset();
                             }
-                            // 重置心跳计时器
-                            heartbeat_timer.reset();
+                        }
+                        Err(e) => {
+                            error!("Error: {}", e);
+                            return Err(anyhow!(e));
                         }
                     }
-                    Err(e) => {
-                        error!("Error: {}", e);
-                        return Err(anyhow!(e));
-                    }
+                },
+                _ = heartbeat_timer.tick() => {
+                    // 在指定时间间隔内未收到消息时发送ping消息
+                    info!("Sending ping");
+                    write.send(Message::Text("ping".into())).await.map_err(|e| anyhow!(e))?;
                 }
-            },
-            _ = heartbeat_timer.tick() => {
-                // 在指定时间间隔内未收到消息时发送ping消息
-                info!("Sending ping");
-                write.send(Message::Text("ping".into())).await.map_err(|e| anyhow!(e))?;
             }
-        }
         }
     }
 
