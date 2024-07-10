@@ -86,6 +86,15 @@ pub async fn init_all_candles(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<&
                     //插入数据
                 }
                 let res = CandlesModel::new().await.add(res, ticker.inst_id.as_str(), time).await?;
+
+                //判断是否达到最新的300000条
+                let limit = 5000;
+                let count = CandlesModel::new().await.get_new_count(ticker.inst_id.as_str(), time, Some(limit)).await?;
+                if (count > limit as u64) {
+                    debug!("已达到所需数据的{}条,跳过",limit);
+                    break;
+                }
+
                 let res = CandlesModel::new().await.get_oldest_data(ticker.inst_id.as_str(), time).await?;
                 after = res.unwrap().ts;
             }

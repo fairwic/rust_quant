@@ -100,10 +100,11 @@ async fn main() -> anyhow::Result<()> {
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
         println!("111111111111");
         //初始化同步一次就行
-        tickets_job::init_all_ticker().await?;
+        tickets_job::init_all_ticker(&inst_ids).await?;
 
         task::run_sync_data_job(&inst_ids, &times).await?;
     }
+    return Ok(());
 
 
     // 获取可用账户的最大数量

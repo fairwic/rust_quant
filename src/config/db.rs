@@ -9,6 +9,7 @@ static DB_CLIENT: OnceCell<RBatis> = OnceCell::new();
 pub async fn init_db() -> &'static RBatis {
     let rb = RBatis::new();
     rb.link(MysqlDriver {}, &*env::var("DB_HOST").unwrap()).await.unwrap();
+    //这里建议 需要调整数据库的最大连接数
     rb.get_pool().unwrap().set_max_open_conns(400).await;
 
     DB_CLIENT.set(rb).expect("Failed to set DB_CLIENT");

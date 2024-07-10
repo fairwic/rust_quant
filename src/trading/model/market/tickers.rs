@@ -76,6 +76,8 @@ impl TicketsModel {
             })
             .collect();
 
+        println!("insert_batch = {}", json!(tickers_db));
+
         let data = TickersDataEntity::insert_batch(self.db, &tickers_db, list.len() as u64).await?;
         println!("insert_batch = {}", json!(data));
         Ok(data)
@@ -117,6 +119,11 @@ impl TicketsModel {
         };
 
         let results: Vec<TickersDataEntity> = self.db.query_decode(sql.as_str(), vec![]).await?;
+        Ok(results)
+    }
+
+    pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersDataEntity>> {
+        let results: Vec<TickersDataEntity> = TickersDataEntity::select_by_column(self.db, "inst_id", inst_id).await?;
         Ok(results)
     }
 }
