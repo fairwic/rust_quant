@@ -98,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化需要同步的数据
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
+        println!("111111111111");
         //初始化同步一次就行
         tickets_job::init_all_ticker();
 

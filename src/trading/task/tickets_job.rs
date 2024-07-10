@@ -14,7 +14,7 @@ pub async fn get_ticket(ins_type: &str) {
 }
 
 pub async fn init_all_ticker() -> anyhow::Result<()> {
-
+    println!("开始同步ticker...");
     //同步合约产品
     let ins_type = "SWAP";
     let ticker = Market::get_tickers(&ins_type, None, None).await?;

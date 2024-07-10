@@ -36,6 +36,8 @@ pub mod trades_job;
 
 /** 同步数据 任务**/
 pub async fn run_sync_data_job(inst_ids: &Vec<&str>, tims: &Vec<&str>) -> Result<(), anyhow::Error> {
+    println!("run_sync_data_job start");
+
     let span = span!(Level::DEBUG, "run_sync_data_job");
     let _enter = span.enter();
 
