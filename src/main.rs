@@ -85,16 +85,18 @@ async fn main() -> anyhow::Result<()> {
     if env::var("APP_ENV").unwrap() != "LOCAL" {
         validate_system_time().await;
     }
+    //测试下单
     //插入信号记录到数据库中
-    let signal_result = SignalResult {
-        should_buy: true,
-        should_sell: false,
-        price: 58600.00,
-        ts: 1720569600000,
-    };
-    let res = place_order("BTC-USDT-SWAP", "4H", signal_result).await;
-    println!("{:?}", res);
-    return Ok(());
+
+    // let signal_result = SignalResult {
+    //     should_buy: true,
+    //     should_sell: false,
+    //     price: 59692.00,
+    //     ts: 1720569600000,
+    // };
+    // let res = place_order("BTC-USDT-SWAP", "4H", signal_result).await;
+    // println!("{:?}", res);
+    // return Ok(());
 
 
     // 定义需要交易的产品及周期

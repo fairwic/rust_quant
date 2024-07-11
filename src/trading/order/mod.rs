@@ -106,10 +106,10 @@ pub async fn close_position(position_list: &Vec<Position>, inst_id: &str, pos_si
 pub fn get_place_order_num(avalid_num: &TradingSwapNumResponseData, price: f64, pos_side: PosSide) -> String {
     let size = match pos_side {
         PosSide::LONG => {
-            format!("{}", (avalid_num.max_buy.parse::<f64>().unwrap() / 10.00).floor())
+            format!("{}", (avalid_num.max_buy.parse::<f64>().unwrap() / 3.00).floor())
         }
         PosSide::SHORT => {
-            format!("{}", (avalid_num.max_sell.parse::<f64>().unwrap() / 10.00).floor())
+            format!("{}", (avalid_num.max_sell.parse::<f64>().unwrap() / 3.00).floor())
         }
     };
     size.to_string()

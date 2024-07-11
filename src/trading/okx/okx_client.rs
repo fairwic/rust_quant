@@ -58,7 +58,6 @@ impl OkxClient {
 
         let url = format!("https://www.okx.com{}", path);
         let is_simulated_trading = env::var("IS_SIMULATED_TRADING").unwrap_or(1.to_string());
-        println!("is_simulated_trading: {}", is_simulated_trading);
         let request_builder = self.client
             .request(method, &url)
             .header("OK-ACCESS-KEY", &self.api_key)
