@@ -23,7 +23,7 @@ use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::okx::market::Market;
 use crate::trading::model::market::tickers::TicketsModel;
 use crate::trading::okx::{okx_websocket_client, validate_system_time};
-use crate::trading::task::asset_job;
+use crate::trading::task::{asset_job, place_order};
 use crate::trading::task::candles_job;
 use std::{
     collections::HashMap,
@@ -70,6 +70,7 @@ use crate::config::db::init_db;
 use crate::config::log::setup_logging;
 use crate::trading::{order, task};
 use crate::trading::okx::account::Account;
+use crate::trading::strategy::strategy_common::SignalResult;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -84,6 +85,17 @@ async fn main() -> anyhow::Result<()> {
     if env::var("APP_ENV").unwrap() != "LOCAL" {
         validate_system_time().await;
     }
+    //插入信号记录到数据库中
+    let signal_result = SignalResult {
+        should_buy: true,
+        should_sell: false,
+        price: 58600.00,
+        ts: 1720569600000,
+    };
+    let res = place_order("BTC-USDT-SWAP", "4H", signal_result).await;
+    println!("{:?}", res);
+    return Ok(());
+
 
     // 定义需要交易的产品及周期
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);

@@ -323,7 +323,7 @@ pub async fn engulfing_test(inst_id: &str, time: &str) -> Result<(), anyhow::Err
     Ok(())
 }
 
-pub async fn ut_boot_order(mysql_candles_5m: Vec<CandlesEntity>, inst_id: &str, time: &str, signal: SignalResult) -> Result<(), anyhow::Error> {
+pub async fn place_order(inst_id: &str, time: &str, signal: SignalResult) -> Result<(), anyhow::Error> {
     //插入信号记录到数据库中
     // let signal_result = SignalResult {
     //     should_buy: signal.should_buy,
@@ -584,7 +584,7 @@ pub async fn run_ready_to_order(inst_id: &str, time: &str, strategy_type: Strate
     };
 
     // ut boot atr 策略回测
-    ut_boot_order(mysql_candles_5m.clone(), inst_id, time, signal).await?;
+    place_order(inst_id, time, signal).await?;
     Ok(())
 }
 

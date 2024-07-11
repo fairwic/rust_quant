@@ -141,3 +141,9 @@ ORDER BY
     ORDER BY
     	CAST(
     	final_fund AS DECIMAL ( 20, 0 )) DESC;
+
+
+
+ SHOW VARIABLES LIKE 'max_connections';
+
+ SHOW STATUS LIKE 'Threads_connected';
