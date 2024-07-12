@@ -79,7 +79,7 @@ impl EngulfingStrategy {
         is_need_fibonacci_profit: bool,
         is_open_long: bool,
         is_open_short: bool,
-        is_judge_trade_time:bool,
+        is_judge_trade_time: bool,
     ) -> (f64, f64, usize, Vec<TradeRecord>) {
         let min_data_length = num_bars + 1;
         let res = run_test(

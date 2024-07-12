@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::trading::okx::{okx_client, OkxApiResponse};
 
 use anyhow::{Result, Error, anyhow};
+use tracing::error;
 use serde_json::json;
 use tracing::debug;
 use tracing::field::debug;
@@ -355,8 +356,12 @@ impl OkxTrade {
         let path = "/api/v5/trade/order";
         let body = &serde_json::to_string(&params).unwrap();
         debug!("send place order okx_request params:{}",body);
-        let res: Result<OrderResponse> = okx_client::get_okx_client().send_request(Method::POST, &path, body).await;
-        Ok(res.unwrap().data)
+        let res: OrderResponse = okx_client::get_okx_client().send_request(Method::POST, &path, body).await?;
+        if res.code != "0" {
+            error!("okx请求成功，但是操作失败，code:{},msg:{:?},data:{:?}",res.code,res.msg,res.data)
+        }
+        //判断返回的okx cod是否是0
+        Ok(res.data)
     }
 
     ///市价仓位全平

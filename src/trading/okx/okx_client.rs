@@ -86,6 +86,7 @@ impl OkxClient {
 
         if status_code == StatusCode::OK {
             let result: T = serde_json::from_str(&response_body)?;
+            // println!("result 1111:{:?}", result);
             Ok(result)
         } else {
             let error: ErrorResponse = serde_json::from_str(&response_body)?;

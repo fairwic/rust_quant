@@ -10,6 +10,7 @@ use crate::trading::okx::trade::{AttachAlgoOrd, CloseOrderRequest, OkxTrade, Ord
 use crate::trading::strategy::StrategyType;
 
 use anyhow::Result;
+use serde_json::json;
 use crate::time_util;
 use crate::trading::strategy::strategy_common::SignalResult;
 
@@ -255,7 +256,6 @@ async fn process_order(
     let size = get_place_order_num(max_avail_size, price, pos_side);
     info!("allot place order size: {:?}", size);
 
-
     // 下单
     let order_result = order_swap(inst_id, side, pos_side, price, size).await.ok()?;
     Some(order_result)
@@ -271,20 +271,18 @@ async fn record_order(
 ) -> Result<()> {
     for order in order_results {
         // 下单成功
-        if order.s_code == "0" {
-            let swap_order_entity = SwapOrderEntity {
-                uuid: SwapOrderEntity::gen_uuid(inst_id, time, side.to_string(), pos_side.to_string()),
-                strategy_type: strategy_type.to_string(),
-                period: time.to_string(),
-                inst_id: inst_id.to_string(),
-                side: Side::SELL.to_string(),
-                pos_side: PosSide::SHORT.to_string(),
-                okx_ord_id: order.ord_id.to_string(),
-                tag: "".to_string(),
-                detail: "".to_string(),
-            };
-            SwapOrderEntityModel::new().await.add(swap_order_entity).await?;
-        }
+        let swap_order_entity = SwapOrderEntity {
+            uuid: SwapOrderEntity::gen_uuid(inst_id, time, side.to_string(), pos_side.to_string()),
+            strategy_type: strategy_type.to_string(),
+            period: time.to_string(),
+            inst_id: inst_id.to_string(),
+            side: Side::SELL.to_string(),
+            pos_side: PosSide::SHORT.to_string(),
+            okx_ord_id: order.ord_id.to_string(),
+            tag: "".to_string(),
+            detail: json!(order).to_string(),
+        };
+        SwapOrderEntityModel::new().await.add(swap_order_entity).await?;
     }
     Ok(())
 }
@@ -393,6 +391,6 @@ pub async fn order_swap(inst_id: &str, side: Side, pos_side: PosSide, entry_pric
     //下单
     let result = trade::OkxTrade::new().order(order_params).await;
     // {"code":"0","data":[{"clOrdId":"","ordId":"1570389280202194944","sCode":"0","sMsg":"Order placed","tag":"","ts":"1719303647602"}],"inTime":"1719303647601726","msg":"","outTime":"1719303647603880"}
-    info!("Order result: {:?}", result);
+    info!("send order request okx result: {:?}", result);
     result
 }

@@ -23,7 +23,7 @@ use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::okx::market::Market;
 use crate::trading::model::market::tickers::TicketsModel;
 use crate::trading::okx::{okx_websocket_client, validate_system_time};
-use crate::trading::task::{asset_job, place_order};
+use crate::trading::task::{asset_job};
 use crate::trading::task::candles_job;
 use std::{
     collections::HashMap,
@@ -94,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
     //     price: 59692.00,
     //     ts: 1720569600000,
     // };
-    // let res = place_order("BTC-USDT-SWAP", "4H", signal_result).await;
+    // let res = order::deal(StrategyType::Engulfing, "BTC-USDT-SWAP", "4H", signal_result).await;
     // println!("{:?}", res);
     // return Ok(());
 

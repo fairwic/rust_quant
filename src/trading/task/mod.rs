@@ -189,6 +189,7 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
 
 use anyhow::Result;
 use futures::future::join_all;
+use rbatis::dark_std::err;
 use redis::AsyncCommands;
 use tokio;
 use tokio::sync::Semaphore;
@@ -323,26 +324,6 @@ pub async fn engulfing_test(inst_id: &str, time: &str) -> Result<(), anyhow::Err
     Ok(())
 }
 
-pub async fn place_order(inst_id: &str, time: &str, signal: SignalResult) -> Result<(), anyhow::Error> {
-    //插入信号记录到数据库中
-    // let signal_result = SignalResult {
-    //     should_buy: signal.should_buy,
-    //     should_sell: signal.should_sell,
-    //     price: signal.price,
-    //     ts: signal.ts,
-    // };
-    let signal_record = StrategyJobSignalLog {
-        inst_id: inst_id.parse().unwrap(),
-        time: time.parse().unwrap(),
-        strategy_type: StrategyType::UtBoot.to_string(),
-        strategy_result: serde_json::to_string(&signal).unwrap(),
-    };
-    strategy_job_signal_log::StrategyJobSignalLogModel::new().await.add(signal_record).await?;
-
-    //执行下单
-    order::deal(StrategyType::UtBoot, inst_id, time, signal).await?;
-    Ok(())
-}
 
 pub async fn save_test_log(strategy_type: StrategyType, inst_id: &str, time: &str, final_fund: f64, win_rate: f64, open_position_num: i32, detail: Option<String>) -> Result<i64, anyhow::Error> {
     // 解包 Result 类型
@@ -483,7 +464,7 @@ pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> 
     let current_date = time_util::format_to_period(time, None);
     // 比较时间戳的小时与当前小时
     if date != current_date {
-        println!("数据库最新数据的时间ts:{} date:({}) 不等于当前最新时间 local time:({}), 跳过,candles:{:?},time:{}", ts, date, current_date, mysql_candles_5m, time);
+        error!("数据库最新数据的时间ts:{} date:({}) 不等于当前最新时间 local time:({}), 跳过,candles:{:?},time:{}", ts, date, current_date, mysql_candles_5m, time);
         return false;
     }
     return true;
@@ -534,14 +515,15 @@ pub async fn run_ready_to_order(inst_id: &str, time: &str, strategy_type: Strate
         return Ok(());
     }
 
-    //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
     let mysql_candles_5m = candles::CandlesModel::new().await.get_new_data(inst_id, time).await?;
     if mysql_candles_5m.is_none() {
         return Ok(());
     }
+    //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
     //验证最新数据准确性
     let is_valid = self::valid_newest_candle_data(mysql_candles_5m.unwrap(), time);
     if !is_valid {
+        error!("下单失败 valid_newest_candle_data inst_id:{:?} time:{}", inst_id, time);
         return Ok(());
     }
 
@@ -583,8 +565,18 @@ pub async fn run_ready_to_order(inst_id: &str, time: &str, strategy_type: Strate
         }
     };
 
+    //记录日志
+    let signal_record = StrategyJobSignalLog {
+        inst_id: inst_id.parse().unwrap(),
+        time: time.parse().unwrap(),
+        strategy_type: strategy_type.to_string(),
+        strategy_result: serde_json::to_string(&signal).unwrap(),
+    };
+    strategy_job_signal_log::StrategyJobSignalLogModel::new().await.add(signal_record).await?;
+
+
     // ut boot atr 策略回测
-    place_order(inst_id, time, signal).await?;
+    order::deal(strategy_type, inst_id, time, signal).await?;
     Ok(())
 }
 
