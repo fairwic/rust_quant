@@ -112,6 +112,7 @@ pub async fn init_before_candles(inst_ids: Option<&Vec<&str>>, times: Option<Vec
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
         for time in times.clone().unwrap() {
+
             //获取当前数据最旧的数据
             let res = CandlesModel::new().await.get_new_data(ticker.inst_id.as_str(), time).await?;
             debug!("res: {:?}", res);

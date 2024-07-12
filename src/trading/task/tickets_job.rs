@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, error};
 use crate::trading::model::market::tickers::TicketsModel;
 use crate::trading::okx::market::Market;
 
@@ -19,8 +19,6 @@ pub async fn init_all_ticker(inst_ids: &Arc<Vec<&str>>) -> anyhow::Result<()> {
     //同步合约产品
     let ins_type = "SWAP";
     let tickers = Market::get_tickers(&ins_type, None, None).await?;
-    debug!("全部tickets: {:?}", tickers);
-
     if tickers.len() > 0 {
         let model = TicketsModel::new().await;
         for ticker in tickers {

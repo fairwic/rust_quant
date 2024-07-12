@@ -29,8 +29,12 @@ pub(crate) struct OkxClient {
 
 impl OkxClient {
     fn new(api_key: String, api_secret: String, passphrase: String) -> Self {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(3)) // 设置请求超时时间为3秒
+            .build()
+            .unwrap();
         OkxClient {
-            client: Client::new(),
+            client: client,
             api_key,
             api_secret,
             passphrase,
@@ -69,6 +73,7 @@ impl OkxClient {
             // expTime 	String 	否 	请求有效截止时间。Unix时间戳的毫秒数格式，如 1597026383085
             //设置是否是模拟盘
             .body(body.to_string());
+
 
         let request_builder = if is_simulated_trading == "1" {
             request_builder.header("x-simulated-trading", &is_simulated_trading)

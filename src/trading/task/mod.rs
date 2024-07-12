@@ -515,16 +515,19 @@ pub async fn run_ready_to_order(inst_id: &str, time: &str, strategy_type: Strate
         return Ok(());
     }
 
+
     let mysql_candles_5m = candles::CandlesModel::new().await.get_new_data(inst_id, time).await?;
     if mysql_candles_5m.is_none() {
         return Ok(());
     }
-    //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
-    //验证最新数据准确性
-    let is_valid = self::valid_newest_candle_data(mysql_candles_5m.unwrap(), time);
-    if !is_valid {
-        error!("下单失败 valid_newest_candle_data inst_id:{:?} time:{}", inst_id, time);
-        return Ok(());
+    if true {
+        //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
+        //验证最新数据准确性
+        let is_valid = self::valid_newest_candle_data(mysql_candles_5m.unwrap(), time);
+        if !is_valid {
+            error!("下单失败 valid_newest_candle_data inst_id:{:?} time:{}", inst_id, time);
+            return Ok(());
+        }
     }
 
     let mysql_candles_5m = candles::CandlesModel::new().await.fetch_candles_from_mysql(inst_id, time).await?;
@@ -532,8 +535,11 @@ pub async fn run_ready_to_order(inst_id: &str, time: &str, strategy_type: Strate
         return Err(anyhow!("mysql candles 5m is empty"));
     }
 
-    //验证所有数据是否准确
-    self::valid_candles_data(&mysql_candles_5m, time)?;
+    if true {
+        //验证所有数据是否准确
+        self::valid_candles_data(&mysql_candles_5m, time)?;
+    }
+
 
     // let ut_boot_strategy = UtBootStrategy {
     //     key_value: 1.2,
@@ -564,6 +570,14 @@ pub async fn run_ready_to_order(inst_id: &str, time: &str, strategy_type: Strate
             return Err(anyhow!("Unknown strategy type: {:?}", strategy_type));
         }
     };
+
+
+    // let signal = SignalResult {
+    //     should_buy: true,
+    //     should_sell: false,
+    //     price: 59692.00,
+    //     ts: 1720569600000,
+    // };
 
     //记录日志
     let signal_record = StrategyJobSignalLog {

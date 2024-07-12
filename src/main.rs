@@ -76,6 +76,7 @@ use crate::trading::strategy::strategy_common::SignalResult;
 async fn main() -> anyhow::Result<()> {
 
     // 设置日志
+    println!("init log config");
     setup_logging().await?;
 
     //初始化数据库连接
@@ -83,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 验证当前系统时间
     if env::var("APP_ENV").unwrap() != "LOCAL" {
+        println!("valid okx with local time");
         validate_system_time().await;
     }
     //测试下单
@@ -113,10 +115,16 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化需要同步的数据
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
+        println!("IS_RUN_SYNC_DATA_JOB");
         //初始化同步一次就行
-        tickets_job::init_all_ticker(&inst_ids).await?;
-
-        task::run_sync_data_job(&inst_ids, &times).await?;
+        let res = tickets_job::init_all_ticker(&inst_ids).await;
+        if let Err(error) = res {
+            error!("init all tickers error: {}", error);
+        }
+        let res = task::run_sync_data_job(&inst_ids, &times).await;
+        if let Err(error) = res {
+            error!("run sync data job error: {}", error);
+        }
     }
 
 
@@ -127,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
     let mut scheduler = TaskScheduler::new();
     // 本地环境下执行回测任务
     if env::var("IS_BACK_TEST").unwrap() == "true" {
+        println!("IS_BACK_TEST");
         let mut tasks = Vec::new();
         for inst_id in inst_ids.iter() {
             for time in times.iter() {
@@ -148,9 +157,15 @@ async fn main() -> anyhow::Result<()> {
 
     // 添加定时任务执行策略
     {
-        if env::var("IS_RUN_REAL_STRATEGY").unwrap() == "true" {
+        if env::var("IS_RUN_REAL_STRATEGY").unwrap_or(String::from("false")) == "true" {
+            println!("run real strategy job");
+
             //设置交易产品最大杠杆
-            task::run_set_leverage(&inst_ids).await?;
+            let result = task::run_set_leverage(&inst_ids).await;
+            if let Err(error) = result {
+                error!("run set leverage error: {}", error);
+            }
+
             let inst_ids = Arc::clone(&inst_ids);
             let times = Arc::clone(&times);
 
@@ -158,10 +173,12 @@ async fn main() -> anyhow::Result<()> {
                 let inst_ids = Arc::clone(&inst_ids);
                 let times = Arc::clone(&times);
                 //执行ut_boot策略
+
                 scheduler.add_periodic_task("run_ut_boot_strategy_job".to_string(), 30000, move || {
                     let inst_ids_inner = Arc::clone(&inst_ids);
                     let times_inner = Arc::clone(&times);
                     async move {
+                        println!("run ut boot job");
                         let res = task::run_strategy_job(inst_ids_inner, times_inner, StrategyType::UtBoot).await;
                         if let Err(error) = res {
                             error!("run ut boot strategy error: {}", error);
@@ -178,6 +195,7 @@ async fn main() -> anyhow::Result<()> {
                     let inst_ids_inner = Arc::clone(&inst_ids);
                     let times_inner = Arc::clone(&times);
                     async move {
+                        println!("run engulfing job");
                         let res = task::run_strategy_job(inst_ids_inner, times_inner, StrategyType::Engulfing).await;
                         if let Err(error) = res {
                             error!("run engulfing strategy error: {}", error);
@@ -199,6 +217,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 捕捉Ctrl+C信号以平滑关闭
     tokio::signal::ctrl_c().await?;
+
     scheduler.shutdown().await;
 
     Ok(())
