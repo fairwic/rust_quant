@@ -125,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
         if let Err(error) = res {
             error!("run sync data job error: {}", error);
         }
+        info!("RUN_SYNC_DATA_JOB Ok!");
     }
 
 
