@@ -17,10 +17,7 @@ mod config;
 
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use trading::okx::okx_client;
-// use trading::model::biz_activity_model::BizActivityModel;
-use clap::Parser;
-use crate::trading::model::market::candles::CandlesModel;
-use crate::trading::okx::market::Market;
+// use trading::model::biz_activity_model::BizActivityModel; use clap::Parser; use crate::trading::model::market::candles::CandlesModel; use crate::trading::okx::market::Market;
 use crate::trading::model::market::tickers::TicketsModel;
 use crate::trading::okx::{okx_websocket_client, validate_system_time};
 use crate::trading::task::{asset_job};
@@ -74,7 +71,8 @@ use crate::trading::strategy::strategy_common::SignalResult;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-
+    //设置env
+    dotenv().ok();
     // 设置日志
     println!("init log config");
     setup_logging().await?;

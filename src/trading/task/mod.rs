@@ -551,8 +551,7 @@ pub async fn run_ready_to_order(inst_id: &str, time: &str, strategy_type: Strate
     let ut_boot_strategy_info = strategy_config.get(0).unwrap();
     let signal = match strategy_type {
         StrategyType::UtBoot => {
-            let strategy_config = serde_json::from_str::<UtBootStrategy>(&*ut_boot_strategy_info.value)
-                .map_err(|e| anyhow!("Failed to parse UtBootStrategy config: {}", e))?;
+            let strategy_config = serde_json::from_str::<UtBootStrategy>(&*ut_boot_strategy_info.value).map_err(|e| anyhow!("Failed to parse UtBootStrategy config: {}", e))?;
 
             let key_value = strategy_config.key_value;
             let atr_period = strategy_config.atr_period;
@@ -561,8 +560,7 @@ pub async fn run_ready_to_order(inst_id: &str, time: &str, strategy_type: Strate
             UtBootStrategy::get_trade_signal(&mysql_candles_5m, key_value, atr_period, heikin_ashi)
         }
         StrategyType::Engulfing => {
-            let strategy_config = serde_json::from_str::<EngulfingStrategy>(&*ut_boot_strategy_info.value)
-                .map_err(|e| anyhow!("Failed to parse EngulfingStrategy config: {}", e))?;
+            let strategy_config = serde_json::from_str::<EngulfingStrategy>(&*ut_boot_strategy_info.value).map_err(|e| anyhow!("Failed to parse EngulfingStrategy config: {}", e))?;
 
             EngulfingStrategy::get_trade_signal(&mysql_candles_5m, strategy_config.num_bars)
         }

@@ -9,8 +9,10 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use std::sync::Arc;
+use crate::config;
 
 // 定义一个自定义的 Layer
+
 struct CustomLayer {
     event_count: Arc<Mutex<u32>>,
 }
@@ -22,14 +24,16 @@ where
     fn on_event(&self, event: &Event, _: tracing_subscriber::layer::Context<S>) {
         let event_count = Arc::clone(&self.event_count);
         let level = *event.metadata().level();
-        let event_message = format!("Event received: {:?}", event);
-
+        let event_message = format!("tracing log Event received: {:?}", event);
         // 在异步任务中处理事件
         tokio::spawn(async move {
             let mut count = event_count.lock().await;
             *count += 1;
             if level == Level::ERROR {
-                // todo: 日志事件发送到远程服务器、记录到数据库或触发告警
+                // 日志事件发送到远程服务器、记录到数据库或触发告警
+                let email_title = "发生错误日志";
+                let email_body = format!("发生错误日志内容:{}", event_message);
+                config::email::send_email(email_title, email_body).await;
                 println!("收到Error级别错误: {:?}", event_message);
             }
         });
@@ -38,7 +42,6 @@ where
 
 // 设置日志
 pub async fn setup_logging() -> anyhow::Result<()> {
-    dotenv().ok();
     let app_env = env::var("APP_ENV").expect("app_env config is none");
 
     let custom_layer = CustomLayer {
@@ -46,9 +49,7 @@ pub async fn setup_logging() -> anyhow::Result<()> {
     };
 
     if app_env == "LOCAL" {
-        let subscriber = FmtSubscriber::builder()
-            .with_max_level(Level::INFO)
-            .finish();
+        let subscriber = FmtSubscriber::builder().with_max_level(Level::INFO).finish();
         tracing::subscriber::set_global_default(subscriber)?;
     } else {
         let info_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "info.log");
@@ -57,10 +58,7 @@ pub async fn setup_logging() -> anyhow::Result<()> {
         let (info_non_blocking, _info_guard) = tracing_appender::non_blocking(info_file);
         let (error_non_blocking, _error_guard) = tracing_appender::non_blocking(error_file);
 
-        let subscriber = Registry::default()
-            .with(fmt::layer().with_writer(info_non_blocking).with_filter(EnvFilter::new("info")))
-            .with(fmt::layer().with_writer(error_non_blocking).with_filter(EnvFilter::new("error")))
-            .with(custom_layer);
+        let subscriber = Registry::default().with(fmt::layer().with_writer(info_non_blocking).with_filter(EnvFilter::new("info"))).with(fmt::layer().with_writer(error_non_blocking).with_filter(EnvFilter::new("error"))).with(custom_layer);
 
         tracing::subscriber::set_global_default(subscriber)?;
     }

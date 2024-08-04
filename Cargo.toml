@@ -96,3 +96,6 @@ redis = { version = "0.25.3", features = ["aio", "tokio-comp"] }
 tokio-retry = "0.3.0"
 once_cell = "1.19.0"
 lazy_static = "1.4.0"
+
+#邮件服务
+lettre = "0.11"
