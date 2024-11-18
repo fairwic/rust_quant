@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, debug};
 
-use crate::config::{db};
+use crate::app_config::{db};
 use crate::trading::okx::market::TickersData;
 use crate::trading::okx::public_data::CandleData;
 use rbatis::impl_select;
@@ -31,7 +31,6 @@ pub struct CandlesEntity {
     pub vol_ccy_quote: String, // 交易量，以计价货币为单位
     pub confirm: String, // K线状态
 }
-
 
 crud!(CandlesEntity{},"tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
 
@@ -215,9 +214,9 @@ impl CandlesModel {
         // 如 [1m/3m/5m/15m/30m/1H/2H/4H]
         // 香港时间开盘价k线：[6H/12H/1D/2D/3D/1W/1M/3M]
         let limit = if env::var("IS_BACK_TEST").unwrap() == "true" {
-            4000
+            40
         } else {
-            80
+            20
         };
 
         let mut query = format!("select * from `{}` order by ts DESC limit {} ", Self::get_tale_name(inst_id, time_interval), limit);
@@ -276,6 +275,7 @@ impl CandlesModel {
     pub async fn fetch_candles_from_mysql(&self, ins_id: &str, time: &str) -> anyhow::Result<Vec<CandlesEntity>> {
         let candles_model = CandlesModel::new().await;
         let candles = candles_model.get_all(ins_id, time).await;
+        println!("{:?}",candles);
         match candles {
             Ok(mut data) => {
                 info!("Fetched {} candles from MySQL", data.len());

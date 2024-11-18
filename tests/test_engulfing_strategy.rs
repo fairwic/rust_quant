@@ -7,6 +7,10 @@ use chrono::Utc;
 
 #[tokio::test]
 async fn test_engulfing_strategy() {
+    println!("111");
+
+    println!("111");
+
 
     // 测试做多
     // 生成测试数据，4根K线，其中最后一根K线满足牛市吞没形态

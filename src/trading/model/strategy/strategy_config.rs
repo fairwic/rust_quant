@@ -5,7 +5,7 @@ use rbatis::{crud, impl_insert, impl_update, RBatis};
 use rbatis::rbdc::{Date, DateTime};
 use rbatis::rbdc::db::ExecResult;
 use serde_json::json;
-use crate::config::db;
+use crate::app_config::db;
 use crate::trading::strategy::StrategyType;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

@@ -10,10 +10,8 @@ use crate::trading::indicator::kdj_simple_indicator::KdjCandle;
 use crate::trading::indicator::atr::ATR;
 use crate::trading::strategy::strategy_common::{run_test, SignalResult};
 #[derive(Deserialize, Serialize, Debug)]
-pub struct UtBootStrategy {
-    pub key_value: f64,
-    pub atr_period: usize,
-    pub heikin_ashi: bool,
+pub enum  MultCombineStartegy {
+    UT_BOOT,
 }
 
 

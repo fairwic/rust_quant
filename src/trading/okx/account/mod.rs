@@ -230,7 +230,7 @@ pub struct SetLeverageData {
     pub pos_side: String,
 }
 
-pub(crate) struct Account {}
+pub struct Account {}
 
 
 impl Account {

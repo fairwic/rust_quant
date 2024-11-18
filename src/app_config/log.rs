@@ -9,7 +9,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use std::sync::Arc;
-use crate::config;
+use crate::app_config;
 
 // 定义一个自定义的 Layer
 
@@ -33,7 +33,7 @@ where
                 // 日志事件发送到远程服务器、记录到数据库或触发告警
                 let email_title = "发生错误日志";
                 let email_body = format!("发生错误日志内容:{}", event_message);
-                config::email::send_email(email_title, email_body).await;
+                app_config::email::send_email(email_title, email_body).await;
                 println!("收到Error级别错误: {:?}", event_message);
             }
         });

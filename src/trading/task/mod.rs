@@ -7,7 +7,7 @@ use hmac::digest::generic_array::arr;
 use tracing::{error, info, Level, span, warn};
 
 use crate::{time_util, trading};
-use crate::config::db;
+use crate::app_config::db;
 use crate::trading::model::market::candles;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::order::swap_order::SwapOrderEntityModel;
@@ -30,7 +30,7 @@ use crate::trading::strategy::ut_boot_strategy::{TradeRecord, UtBootStrategy};
 pub mod tickets_job;
 pub mod account_job;
 pub mod asset_job;
-pub(crate) mod candles_job;
+pub mod candles_job;
 pub mod trades_job;
 
 
@@ -198,23 +198,21 @@ use crate::trading::strategy::engulfing_strategy::EngulfingStrategy;
 pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
     let mysql_candles = self::get_candle_data(inst_id, time).await?;
     // 初始化 Redis
-    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")?;
-    let mut con = client.get_multiplexed_async_connection().await?;
+    // let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")?;
+    // error!("111");
+    // let mut con = client.get_multiplexed_async_connection().await?;
     // let db = BizActivityModel::new().await;
 
     //灵敏度
-    let key_values: Vec<f64> = (2..=20).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
+    let key_values: Vec<f64> = (20..21).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
 
 
     for key_value in key_values {
-        for atr_period in 2..20 {
-            if key_value > atr_period as f64 {
-                continue;
-            }
-            let max_loss_percent: Vec<f64> = (1..=6).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
-            for &is_fibonacci_profit in &[true] {
+        for atr_period in 3..4 {
+            let max_loss_percent: Vec<f64> = (7..8).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
+            for &is_fibonacci_profit in &[false] {
                 for &max_loss_percent in &max_loss_percent {
                     //是否允许开多
                     let is_open_long = true;
@@ -305,7 +303,7 @@ pub async fn engulfing_test(inst_id: &str, time: &str) -> Result<(), anyhow::Err
                                                                           num_bar,
                                                                           *is_fibonacci_profit,
                                                                           is_open_long,
-                                                                          is_open_short,
+                                                                         is_open_short,
                                                                           is_judge_trade_time,
                 ).await;
 

@@ -36,7 +36,7 @@ pub struct Ts {
 pub type CandleResponse = OkxApiResponse<Vec<CandleData>>;
 pub type TimeResponse = OkxApiResponse<Vec<Ts>>;
 
-pub(crate) struct OkxPublicData {}
+pub struct OkxPublicData {}
 
 impl OkxPublicData {
     pub fn new(&self) -> &OkxPublicData {

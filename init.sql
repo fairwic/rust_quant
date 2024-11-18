@@ -79,18 +79,20 @@ CREATE TABLE `back_test_log` (
   `final_fund` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `strategy_detail` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `profit` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `win_rate` (`win_rate`),
   KEY `final_fund` (`final_fund`),
   KEY `inst_type` (`inst_type`),
   KEY `strategy_type` (`strategy_type`)
-) ENGINE=InnoDB AUTO_INCREMENT=60901 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=60903 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `back_test_detail` (
   `id` int NOT NULL AUTO_INCREMENT,
   `inst_id` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `time` varchar(255) NOT NULL COMMENT '周期',
   `strategy_type` varchar(255) NOT NULL COMMENT '策略类型',
+  `option_type` varchar(255) NOT NULL,
   `back_test_id` int NOT NULL COMMENT '回测记录表id',
   `open_position_time` datetime NOT NULL COMMENT '开仓时间',
   `close_position_time` datetime NOT NULL COMMENT '平仓时间',
@@ -101,8 +103,11 @@ CREATE TABLE `back_test_detail` (
   `full_close` varchar(10) NOT NULL COMMENT '是否全部平仓',
   `close_type` varchar(255) NOT NULL COMMENT '平仓类型',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '时间',
+  `win_nums` int NOT NULL,
+  `loss_nums` int DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=320686 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=368588 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 
 
 WITH ranked_results AS (

@@ -1,16 +1,14 @@
 extern crate rbatis;
 
-use std::sync::Arc;
-use rbatis::{crud, impl_insert, impl_update, RBatis};
-use rbatis::rbdc::DateTime;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use crate::trading::okx::market::TickersData;
-use crate::config::db;
 use anyhow::Result;
-use rbatis::rbdc::db::ExecResult;
-use tracing::debug;
+use rbatis::{crud, impl_update, RBatis};
 use rbatis::impl_select;
+use rbatis::rbdc::db::ExecResult;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+use crate::app_config::db::get_db_client;
+use crate::trading::okx::market::TickersData;
 
 /// table
 #[derive(Serialize, Deserialize, Debug)]
@@ -49,7 +47,7 @@ pub struct TicketsModel {
 impl TicketsModel {
     pub async fn new() -> Self {
         Self {
-            db: db::get_db_client(),
+            db: get_db_client(),
         }
     }
 

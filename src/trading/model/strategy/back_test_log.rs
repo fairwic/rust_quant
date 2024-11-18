@@ -8,7 +8,7 @@ use rbs::Value;
 use serde_json::json;
 use tracing::debug;
 
-use crate::config::db;
+use crate::app_config::db;
 
 /// table
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

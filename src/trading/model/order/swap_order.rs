@@ -9,7 +9,7 @@ use rbatis::rbdc::db::ExecResult;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use crate::time_util;
-use crate::config::db;
+use crate::app_config::db;
 use rbatis::impl_select;
 
 /// table

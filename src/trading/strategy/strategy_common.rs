@@ -254,7 +254,7 @@ pub fn run_test(
         //调用函数,获取信号
         let signal = strategy(signal_data);
 
-        info!("Time: {:?}, funds: {}, Price: {}, Buy: {}, Sell: {}",
+        info!("ts:{},Time: {:?}, funds: {}, Price: {}, Buy: {}, Sell: {}",candle.ts,
             time_util::mill_time_to_datetime_shanghai(candle.ts),funds,signal.price,signal.should_buy,signal.should_sell);
 
         if signal.should_buy {

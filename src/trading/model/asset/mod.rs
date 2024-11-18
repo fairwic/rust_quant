@@ -3,7 +3,7 @@ use anyhow::Result;
 use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use crate::config;
+use crate::app_config;
 use crate::trading::okx::asset::AssetData;
 use rbatis::impl_select;
 
@@ -33,7 +33,7 @@ pub struct AssetModel {
 impl AssetModel {
     pub async fn new() -> Self {
         Self {
-            db: config::db::get_db_client(),
+            db: app_config::db::get_db_client(),
         }
     }
     pub async fn add(&self, list: Vec<AssetData>) -> anyhow::Result<()> {

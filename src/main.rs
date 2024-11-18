@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate rbatis;
 
+
 use std::env;
 use std::time::Duration;
 use base64;
@@ -9,19 +10,14 @@ use hmac::Mac;
 use serde::{Deserialize, Serialize};
 use tokio::time::{interval, sleep_until, Instant};
 
-mod trading;
-mod job;
-mod time_util;
-mod socket;
-mod config;
+
 
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use trading::okx::okx_client;
-// use trading::model::biz_activity_model::BizActivityModel; use clap::Parser; use crate::trading::model::market::candles::CandlesModel; use crate::trading::okx::market::Market;
-use crate::trading::model::market::tickers::TicketsModel;
-use crate::trading::okx::{okx_websocket_client, validate_system_time};
-use crate::trading::task::{asset_job};
-use crate::trading::task::candles_job;
+use rust_quant::trading::okx::okx_client;
+// use trading::model::biz_activity_model::BizActivityModel; use clap::Parser; use crate::trading::model::market::candles::CandlesModel; use crate::trading::okx::market::Market; use crate::trading::model::market::tickers::TicketsModel;
+use rust_quant::trading::okx::{okx_websocket_client, validate_system_time};
+use rust_quant::trading::task::{asset_job, tickets_job};
+use rust_quant::trading::task::candles_job;
 use std::{
     collections::HashMap,
     io::Error as IoError,
@@ -50,24 +46,26 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, info, Level, span};
 use tracing_subscriber::{EnvFilter, fmt, FmtSubscriber};
-use crate::config::db;
-use crate::trading::okx::okx_websocket_client::ApiType;
-use trading::strategy::StopLossStrategy;
-use crate::job::task_scheduler::TaskScheduler;
-use crate::trading::model::market::candles;
-use crate::trading::okx::public_data::OkxPublicData;
-use crate::trading::task::{account_job, tickets_job};
+use rust_quant::app_config::db;
+use rust_quant::trading::okx::okx_websocket_client::ApiType;
+use rust_quant::trading::strategy::StopLossStrategy;
+use rust_quant::job::task_scheduler::TaskScheduler;
+use rust_quant::trading::model::market::candles;
+use rust_quant::trading::okx::public_data::OkxPublicData;
+use rust_quant::trading::task::{account_job};
 
-use crate::trading::model::strategy::back_test_log;
-use crate::trading::okx::trade;
-use crate::trading::okx::trade::{AttachAlgoOrd, OrderRequest, Side, TdMode};
-use crate::trading::strategy::StrategyType;
+use rust_quant::trading::model::strategy::back_test_log;
+use rust_quant::trading::okx::trade;
+use rust_quant::trading::okx::trade::{AttachAlgoOrd, OrderRequest, Side, TdMode};
 use tracing_subscriber::prelude::*;
-use crate::config::db::init_db;
-use crate::config::log::setup_logging;
-use crate::trading::{order, task};
-use crate::trading::okx::account::Account;
-use crate::trading::strategy::strategy_common::SignalResult;
+use rust_quant::socket;
+use rust_quant::trading::strategy::StrategyType;
+use rust_quant::app_config::db::init_db;
+use rust_quant::app_config::log::setup_logging;
+use rust_quant::trading::{order, task};
+use rust_quant::trading::indicator::atr::ATR;
+use rust_quant::trading::okx::account::Account;
+use rust_quant::trading::strategy::strategy_common::SignalResult;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -88,6 +86,32 @@ async fn main() -> anyhow::Result<()> {
     //测试下单
     //插入信号记录到数据库中
 
+
+    // //test atr
+    // let prices = [
+    //     [60198.1, 59420.0, 60020.1],
+    //     [60287.0, 59668.1, 59867.0],
+    //     [59959.4, 59365.0, 59710.1],
+    //     [59875.3, 58421.0, 58435.8],
+    //     [58769.9, 58210.0, 58730.3],
+    //     [58748.5, 58379.0, 58503.6]
+    // ];
+    //
+    // let prices = [
+    //     [60196.7, 59427.8, 60020.3],
+    //     [60281.9, 59674.0, 59865.6],
+    //     [59956.1, 59370.8, 59710.0],
+    //     [59874.3, 58308.9, 58427.8],
+    //     [58766.1, 58088.0, 58737.7],
+    //     [58746.5, 58380.0, 58506.6],
+    // ];
+    // let mut atr = ATR::new(2);
+    // for line in prices {
+    //     let atr = atr.next(line[0], line[1], line[2]);
+    //     println!("atr reuslt{}", atr)
+    // }
+    //
+
     // let signal_result = SignalResult {
     //     should_buy: true,
     //     should_sell: false,
@@ -100,12 +124,15 @@ async fn main() -> anyhow::Result<()> {
 
 
     // 定义需要交易的产品及周期
-    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
-    // let times = Arc::new(vec!["1D"]);
+    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
+    let times = Arc::new(vec!["4H"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP", "ADA-USDT-SWAP", "SUSHI-USDT-SWAP"]);
-    let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
-    let times = Arc::new(vec!["4H", "1H", "5m", "1Dutc"]);
+    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
+    // let times = Arc::new(vec!["4H", "1H", "5m", "1Dutc"]);
+
+    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP"]);
+    // let times = Arc::new(vec!["4H"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
     // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
@@ -142,9 +169,9 @@ async fn main() -> anyhow::Result<()> {
                 let time = time.to_string();
                 tasks.push(tokio::spawn(async move {
                     //ut_boot_strategy
-                    // let res = task::ut_boot_test(&inst_id, &time).await;
+                    let res = task::ut_boot_test(&inst_id, &time).await;
                     //engulfing_strategy
-                    let res = task::engulfing_test(&inst_id, &time).await;
+                    // let res = task::engulfing_test(&inst_id, &time).await;
                     if let Err(error) = res {
                         error!("run strategy error: {}", error);
                     }

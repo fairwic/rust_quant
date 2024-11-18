@@ -1,7 +1,7 @@
 pub mod redis_operations;
 pub mod support_resistance;
 pub mod comprehensive_strategy;
-pub(crate) mod ut_boot_strategy;
+pub mod ut_boot_strategy;
 pub mod macd_kdj_strategy;
 pub mod profit_stop_loss;
 pub mod engulfing_strategy;
