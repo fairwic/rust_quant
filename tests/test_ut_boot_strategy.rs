@@ -1,58 +1,59 @@
+use anyhow::Result;
 use dotenv::dotenv;
-use rust_quant::app_config::db::init_db;
-use rust_quant::trading::indicator::atr::ATR;
-use rust_quant::trading::model::market::candles::CandlesEntity;
-use rust_quant::{time_util, trading};
-use ta::{Close, High, Low};
+use rust_quant::{
+    app_config::db::init_db,
+    time_util,
+    trading,
+    trading::model::market::candles::CandlesEntity,
+    trading::indicator::atr::ATR,
+};
 
-// 将 CandlesEntity 转换为 PriceType 类型的价格数据，并返回时间戳
-fn to_price(candle: &CandlesEntity) -> (f64, f64, f64, f64, i64) {
-    (
-        candle.o.parse::<f64>().unwrap_or(0.0),
-        candle.h.parse::<f64>().unwrap_or(0.0),
-        candle.l.parse::<f64>().unwrap_or(0.0),
-        candle.c.parse::<f64>().unwrap_or(0.0),
-        candle.ts, // 返回时间戳
-    )
-}
-
-pub fn calculate_atr(candles: &Vec<CandlesEntity>, period: usize) -> f64 {
-    let mut atr = ATR::new(period);
-
-    // 遍历所有K线数据计算ATR
-    let last_atr = candles.iter().fold(0.0, |_, candle| {
-        let current_atr = atr.next(candle.high(), candle.low(), candle.close());
-
-        println!(
-            "time:{:?},current_price{:?},current_atr:{}",
-            time_util::mill_time_to_datetime(candle.ts),
-            candle.close(),
-            current_atr
-        );
-        return current_atr;
-    });
-
-    last_atr
-}
 #[tokio::test]
-async fn test_atr_strategy() {
-    // 假设的 CandlesEntity 数据 (OHLC 数据)
+async fn test_atr_calculation() -> Result<()> {
+    // 初始化环境和数据库连接
     dotenv().ok();
     init_db().await;
+
+    // 设置参数
     let inst_id = "BTC-USDT-SWAP";
     let time = "4H";
+    let period = 10;
 
-    // 获取 K 线数据
-    let mysql_candles: Vec<CandlesEntity> =
-        trading::task::get_candle_data(inst_id, time).await.unwrap();
+    // 获取K线数据
+    let mysql_candles: Vec<CandlesEntity> = trading::task::get_candle_data(inst_id, time).await?;
 
-    let res = calculate_atr(&mysql_candles, 10);
-    println!("{}", res)
+    // 确保有数据
+    if mysql_candles.is_empty() {
+        println!("警告: 未获取到K线数据");
+        return Ok(());
+    }
 
-    // rust_quant::trading::strategy::ut_boot_strategy::UtBootStrategy::get_trade_signal(
-    //     &mysql_candles,
-    //     2.0,
-    //     3,
-    //     false,
-    // );
+    let mut atr = ATR::new(period);
+
+    // 打印表头
+    println!("\n{} {}K线 ATR({})计算结果:", inst_id, time, period);
+    println!("{:<25} {:<12} {:<12} {:<12} {:<12}",
+             "时间", "最高价", "最低价", "收盘价", "ATR");
+    println!("{}", "=".repeat(75));
+
+    // 计算并显示结果
+    for candle in mysql_candles.iter() {
+        // 解析价格数据
+        let high = candle.h.parse::<f64>()?;
+        let low = candle.l.parse::<f64>()?;
+        let close = candle.c.parse::<f64>()?;
+
+        // 计算ATR
+        let atr_value = atr.next(high, low, close);
+
+        // 时间格式化
+        let time_str = time_util::mill_time_to_datetime_shanghai(candle.ts).unwrap();
+
+        // 输出结果
+        println!("{:<25} {:<12.2} {:<12.2} {:<12.2} {:<12.4}",
+                 time_str, high, low, close, atr_value
+        );
+    }
+
+    Ok(())
 }

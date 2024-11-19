@@ -69,10 +69,11 @@ impl UtBootStrategy {
 
                 let prev_xatr_trailing_stop = xatr_trailing_stop;
 
-                // let current_atr = atr.next(high_price, low_price, current_price);
-                let current_atr = 0.00;
-                // let n_loss = key_value * current_atr;
-                let n_loss = 0.00;
+                let current_atr = atr.next(high_price, low_price, current_price);
+                let n_loss = key_value * current_atr;
+
+                // let current_atr = 0.00;
+                // let n_loss = 0.00;
 
                 xatr_trailing_stop = if i == 0 {
                     current_price

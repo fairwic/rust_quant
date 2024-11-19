@@ -204,13 +204,13 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
     // let db = BizActivityModel::new().await;
 
     //灵敏度
-    let key_values: Vec<f64> = (20..21).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
+    let key_values: Vec<f64> = (10..40).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     println!("fibonacci_level:{:?}", fibonacci_level);
 
 
     for key_value in key_values {
-        for atr_period in 3..4 {
+        for atr_period in 1..12 {
             let max_loss_percent: Vec<f64> = (7..8).map(|x| x as f64 * 0.01).collect(); //损失仓位,从0到30%
             for &is_fibonacci_profit in &[false] {
                 for &max_loss_percent in &max_loss_percent {

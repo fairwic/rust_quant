@@ -214,9 +214,9 @@ impl CandlesModel {
         // 如 [1m/3m/5m/15m/30m/1H/2H/4H]
         // 香港时间开盘价k线：[6H/12H/1D/2D/3D/1W/1M/3M]
         let limit = if env::var("IS_BACK_TEST").unwrap() == "true" {
-            40
+            4000
         } else {
-            20
+            80
         };
 
         let mut query = format!("select * from `{}` order by ts DESC limit {} ", Self::get_tale_name(inst_id, time_interval), limit);
@@ -275,7 +275,7 @@ impl CandlesModel {
     pub async fn fetch_candles_from_mysql(&self, ins_id: &str, time: &str) -> anyhow::Result<Vec<CandlesEntity>> {
         let candles_model = CandlesModel::new().await;
         let candles = candles_model.get_all(ins_id, time).await;
-        println!("{:?}",candles);
+        println!("{:?}", candles);
         match candles {
             Ok(mut data) => {
                 info!("Fetched {} candles from MySQL", data.len());

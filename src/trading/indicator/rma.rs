@@ -1,6 +1,5 @@
 use super::sma;
 use ndarray::Array1;
-use ta::indicators::Re
 /// Rolling Moving Average implementation based on PineScript
 pub struct RMA {
     period: usize,
