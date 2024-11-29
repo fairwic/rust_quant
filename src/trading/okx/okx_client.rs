@@ -1,11 +1,11 @@
-use std::env;
+use anyhow::{anyhow, Error, Result};
+use fast_log::TimeType::Utc;
 use hmac::{Hmac, Mac};
+use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use anyhow::{Result, Error, anyhow};
-use fast_log::TimeType::Utc;
+use std::env;
 use tracing::{debug, info};
-use reqwest::{Client, Method, StatusCode};
 
 // ... (保持 Ticker、Balance 和 ErrorResponse 结构体的定义不变)
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,7 +41,13 @@ impl OkxClient {
         }
     }
 
-    fn generate_signature(&self, timestamp: &str, method: &Method, path: &str, body: &str) -> String {
+    fn generate_signature(
+        &self,
+        timestamp: &str,
+        method: &Method,
+        path: &str,
+        body: &str,
+    ) -> String {
         let sign_payload = format!("{}{}{}{}", timestamp, method.as_str(), path, body);
         let mut hmac = Hmac::<Sha256>::new_from_slice(self.api_secret.as_bytes()).unwrap();
         hmac.update(sign_payload.as_bytes());
@@ -55,14 +61,19 @@ impl OkxClient {
         path: &str,
         body: &str,
     ) -> Result<T> {
-        let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S.%3fZ").to_string();
+        let timestamp = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S.%3fZ")
+            .to_string();
         let signature = self.generate_signature(&timestamp, &method, path, body);
 
         let exp_time = chrono::Utc::now().timestamp_millis() + 500;
 
         let url = format!("https://www.okx.com{}", path);
+        println!("request okx url:{}", url);
         let is_simulated_trading = env::var("IS_SIMULATED_TRADING").unwrap_or(1.to_string());
-        let request_builder = self.client
+
+        let request_builder = self
+            .client
             .request(method, &url)
             .header("OK-ACCESS-KEY", &self.api_key)
             .header("OK-ACCESS-SIGN", signature)
@@ -74,22 +85,19 @@ impl OkxClient {
             //设置是否是模拟盘
             .body(body.to_string());
 
-
         let request_builder = if is_simulated_trading == "1" {
             request_builder.header("x-simulated-trading", &is_simulated_trading)
         } else {
             request_builder
         };
 
-        let response = request_builder
-            .send()
-            .await?;
+        let response = request_builder.send().await?;
 
         let status_code = response.status();
         let response_body = response.text().await?;
-        info!("path:{},okx_response: {}", path,response_body);
-
+        // info!("path:{},okx_response: {}", path, response_body);
         if status_code == StatusCode::OK {
+            // println!("okx response body:{:#?}", &response_body);
             let result: T = serde_json::from_str(&response_body)?;
             // println!("result 1111:{:?}", result);
             Ok(result)
@@ -101,9 +109,10 @@ impl OkxClient {
 }
 
 pub fn get_okx_client() -> OkxClient {
-    let api_key = env::var("OKX_API_KEY").expect("");
-    let api_secret = env::var("OKX_API_SECRET").expect("");
-    let passphrase = env::var("OKX_PASSPHRASE").expect("");
+    let api_key = env::var("OKX_API_KEY").expect("OKX_API_KEY 不能配置为空");
+    let api_secret = env::var("OKX_API_SECRET").expect("OKX_API_SECRET 不能配置为空");
+    let passphrase = env::var("OKX_PASSPHRASE").expect("OKX_PASSPHRASE 不能配置为空");
+
     let okx_client = OkxClient::new(api_key, api_secret, passphrase);
     okx_client
 }

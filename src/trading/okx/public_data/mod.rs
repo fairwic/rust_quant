@@ -1,4 +1,5 @@
 mod error;
+pub mod contracts;
 
 use reqwest::Method;
 use serde::{Deserialize, Serialize};

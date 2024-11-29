@@ -1,17 +1,17 @@
 extern crate rbatis;
 
-use std::convert::TryInto;
-use std::env;
-use std::sync::Arc;
 use anyhow::{anyhow, Result};
-use rbatis::{crud, impl_update, RBatis};
 use rbatis::rbdc::db::ExecResult;
+use rbatis::{crud, impl_update, RBatis};
 use rbs::Value;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{error, info, debug};
+use std::convert::TryInto;
+use std::env;
+use std::sync::Arc;
+use tracing::{debug, error, info};
 
-use crate::app_config::{db};
+use crate::app_config::db;
 use crate::trading::okx::market::TickersData;
 use crate::trading::okx::public_data::CandleData;
 use rbatis::impl_select;
@@ -21,22 +21,32 @@ use rbatis::impl_select;
 // #[serde(rename_all = "camelCase")]
 #[serde(rename_all = "snake_case")]
 pub struct CandlesEntity {
-    pub ts: i64, // 开始时间，Unix时间戳的毫秒数格式
-    pub o: String, // 开盘价格
-    pub h: String, // 最高价格
-    pub l: String, // 最低价格
-    pub c: String, // 收盘价格
-    pub vol: String, // 交易量，以张为单位
-    pub vol_ccy: String, // 交易量，以币为单位
+    pub ts: i64,               // 开始时间，Unix时间戳的毫秒数格式
+    pub o: String,             // 开盘价格
+    pub h: String,             // 最高价格
+    pub l: String,             // 最低价格
+    pub c: String,             // 收盘价格
+    pub vol: String,           // 交易量，以张为单位
+    pub vol_ccy: String,       // 交易量，以币为单位
     pub vol_ccy_quote: String, // 交易量，以计价货币为单位
-    pub confirm: String, // K线状态
+    pub confirm: String,       // K线状态
+}
+pub enum TimeDirect {
+    BEFORE,
+    AFTER,
 }
 
-crud!(CandlesEntity{},"tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
+pub struct SelectTime {
+    //选择时间
+    pub point_time: i64,
+    //选择方向1 正
+    pub direct: TimeDirect,
+}
+
+crud!(CandlesEntity {}, "tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
 
 impl_update!(CandlesEntity{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
 impl_select!(CandlesEntity{fetch_list() => ""},"tickers_data");
-
 
 #[derive(Debug)]
 enum TimeInterval {
@@ -54,7 +64,6 @@ impl TimeInterval {
         }
     }
 }
-
 
 pub struct CandlesModel {
     db: &'static RBatis,
@@ -98,13 +107,21 @@ impl CandlesModel {
         let table_name = format!("{}_candles_{}", inst_id, time_interval);
         table_name
     }
-    pub(crate) async fn add(&self, list: Vec<CandleData>, inst_id: &str, time_interval: &str) -> anyhow::Result<ExecResult> {
+    pub(crate) async fn add(
+        &self,
+        list: Vec<CandleData>,
+        inst_id: &str,
+        time_interval: &str,
+    ) -> anyhow::Result<ExecResult> {
         // let data = CandlesEntity::insert_batch(&self.db, &list, list.len() as u64).await;
         // println!("insert_batch = {}", json!(data));
 
         let table_name = format!("{}_candles_{}", inst_id, time_interval);
         // 构建批量插入的 SQL 语句
-        let mut query = format!("INSERT INTO `{}` (ts, o, h, l, c, vol, vol_ccy, vol_ccy_quote, confirm) VALUES ", table_name);
+        let mut query = format!(
+            "INSERT INTO `{}` (ts, o, h, l, c, vol, vol_ccy, vol_ccy_quote, confirm) VALUES ",
+            table_name
+        );
         let mut params = Vec::new();
 
         for candle in list {
@@ -133,12 +150,14 @@ impl CandlesModel {
         }
     }
 
-    pub(crate) async fn delete_lg_time(&self, inst_id: &str, time_interval: &str, ts: i64) -> anyhow::Result<ExecResult> {
+    pub(crate) async fn delete_lg_time(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+        ts: i64,
+    ) -> anyhow::Result<ExecResult> {
         let table_name = Self::get_tale_name(inst_id, time_interval);
-        let query = format!(
-            "DELETE  FROM `{}` WHERE ts >= ?",
-            table_name
-        );
+        let query = format!("DELETE  FROM `{}` WHERE ts >= ?", table_name);
         let params = vec![ts.into()];
 
         debug!("delete lg confirm >0 data sql:{}", query);
@@ -147,7 +166,11 @@ impl CandlesModel {
         Ok(result)
     }
 
-    pub(crate) async fn get_older_un_confirm_data(&self, inst_id: &str, time_interval: &str) -> anyhow::Result<Option<CandlesEntity>> {
+    pub(crate) async fn get_older_un_confirm_data(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+    ) -> anyhow::Result<Option<CandlesEntity>> {
         let table_name = Self::get_tale_name(inst_id, time_interval);
         let query = format!(
             "select * from `{}` WHERE confirm = 0 order by ts asc limit 1",
@@ -158,8 +181,12 @@ impl CandlesModel {
         Ok(result)
     }
 
-
-    pub(crate) async fn update_one(&self, candle: CandlesEntity, inst_id: &str, time_interval: &str) -> anyhow::Result<u64> {
+    pub(crate) async fn update_one(
+        &self,
+        candle: CandlesEntity,
+        inst_id: &str,
+        time_interval: &str,
+    ) -> anyhow::Result<u64> {
         let table_name = format!("{}_candles_{}", inst_id, time_interval);
         let query = format!(
             "UPDATE `{}` SET o = ?, h = ?, l = ?, c = ?, vol = ?, vol_ccy = ?, vol_ccy_quote = ?, confirm = ? WHERE ts = ?",
@@ -187,12 +214,25 @@ impl CandlesModel {
         }
     }
 
-    pub async fn update_or_create(&self, candle_data: &CandleData, inst_id: &str, time_interval: &str) -> anyhow::Result<()> {
+    pub async fn update_or_create(
+        &self,
+        candle_data: &CandleData,
+        inst_id: &str,
+        time_interval: &str,
+    ) -> anyhow::Result<()> {
         //查询是否存在
         //不存在写入，存在且confirm==0 更新
-        let existing_record: Option<CandlesEntity> = self.get_one_by_ts(inst_id, time_interval, candle_data.ts.parse::<i64>().unwrap()).await?;
+        let existing_record: Option<CandlesEntity> = self
+            .get_one_by_ts(
+                inst_id,
+                time_interval,
+                candle_data.ts.parse::<i64>().unwrap(),
+            )
+            .await?;
         if existing_record.is_none() {
-            let res = self.add(vec![candle_data.clone()], inst_id, time_interval).await?;
+            let res = self
+                .add(vec![candle_data.clone()], inst_id, time_interval)
+                .await?;
         } else {
             let data = CandlesEntity {
                 ts: candle_data.ts.parse::<i64>().unwrap(),
@@ -210,23 +250,40 @@ impl CandlesModel {
         Ok(())
     }
 
-    pub async fn get_all(&self, inst_id: &str, time_interval: &str) -> Result<Vec<CandlesEntity>> {
+    pub async fn get_all(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+        limit: usize,
+        select_time: Option<SelectTime>,
+    ) -> Result<Vec<CandlesEntity>> {
         // 如 [1m/3m/5m/15m/30m/1H/2H/4H]
         // 香港时间开盘价k线：[6H/12H/1D/2D/3D/1W/1M/3M]
-        let limit = if env::var("IS_BACK_TEST").unwrap() == "true" {
-            4000
-        } else {
-            80
-        };
 
-        let mut query = format!("select * from `{}` order by ts DESC limit {} ", Self::get_tale_name(inst_id, time_interval), limit);
-        debug!("query: {}", query);
+        let mut query = format!(
+            "select * from `{}` ",
+            Self::get_tale_name(inst_id, time_interval)
+        );
+        //如果指定了时间
+        if let Some(SelectTime { direct, point_time }) = select_time {
+            match direct {
+                TimeDirect::BEFORE => {
+                    query = format!("{} where ts<= {} ", query, point_time);
+                }
+                TimeDirect::AFTER => {
+                    query = format!("{} where ts>= {} ", query, point_time);
+                }
+            }
+        }
+        //默认取最后的条数
+        query = format!("{} order by ts DESC limit {}", query, limit);
+        info!("query get candle SQL: {}", query);
+
         let res: Value = self.db.query(&query, vec![]).await?;
         if res.is_array() && res.as_array().unwrap().is_empty() {
             info!("No candles found in MySQL");
             return Ok(vec![]);
         }
-
         // 将 rbatis::core::value::Value 转换为 serde_json::Value
         let json_value: serde_json::Value = serde_json::from_str(&res.to_string())?;
 
@@ -237,53 +294,90 @@ impl CandlesModel {
         Ok(candles)
     }
 
-    pub async fn get_new_data(&self, inst_id: &str, time_interval: &str) -> Result<Option<CandlesEntity>> {
-        let mut query = format!("select * from  `{}` ORDER BY ts DESC limit 1; ", Self::get_tale_name(inst_id, time_interval));
+    pub async fn get_new_data(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+    ) -> Result<Option<CandlesEntity>> {
+        let mut query = format!(
+            "select * from  `{}` ORDER BY ts DESC limit 1; ",
+            Self::get_tale_name(inst_id, time_interval)
+        );
         debug!("query: {}", query);
         let res: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
         debug!("result: {:?}", res);
         Ok(res)
     }
 
-    pub async fn get_one_by_ts(&self, inst_id: &str, time_interval: &str, ts: i64) -> Result<Option<CandlesEntity>> {
-        let mut query = format!("select * from  `{}` where `ts` = {} ORDER BY ts DESC limit 1; ", Self::get_tale_name(inst_id, time_interval), ts);
+    pub async fn get_one_by_ts(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+        ts: i64,
+    ) -> Result<Option<CandlesEntity>> {
+        let mut query = format!(
+            "select * from  `{}` where `ts` = {} ORDER BY ts DESC limit 1; ",
+            Self::get_tale_name(inst_id, time_interval),
+            ts
+        );
         debug!("query: {}", query);
         let res: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
         debug!("result: {:?}", res);
         Ok(res)
     }
 
-    pub async fn get_oldest_data(&self, inst_id: &str, time_interval: &str) -> Result<Option<CandlesEntity>> {
-        let mut query = format!("select * from  `{}` ORDER BY ts ASC limit 1; ", Self::get_tale_name(inst_id, time_interval));
+    pub async fn get_oldest_data(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+    ) -> Result<Option<CandlesEntity>> {
+        let mut query = format!(
+            "select * from  `{}` ORDER BY ts ASC limit 1; ",
+            Self::get_tale_name(inst_id, time_interval)
+        );
         debug!("query: {}", query);
         let res: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
         debug!("result: {:?}", res);
         Ok(res)
     }
 
-    pub async fn get_new_count(&self, inst_id: &str, time_interval: &str, mut limit: Option<i32>) -> Result<u64> {
+    pub async fn get_new_count(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+        mut limit: Option<i32>,
+    ) -> Result<u64> {
         if limit.is_none() {
             limit = Option::from(30000);
         }
-        let mut query = format!("select count(*) from  `{}` ORDER BY ts DESC limit {};", Self::get_tale_name(inst_id, time_interval), limit.unwrap());
+        let mut query = format!(
+            "select count(*) from  `{}` ORDER BY ts DESC limit {};",
+            Self::get_tale_name(inst_id, time_interval),
+            limit.unwrap()
+        );
         debug!("query: {}", query);
         let res: u64 = self.db.query_decode(&query, vec![]).await?;
         debug!("result: {:?}", res);
         Ok(res)
     }
 
-    pub async fn fetch_candles_from_mysql(&self, ins_id: &str, time: &str) -> anyhow::Result<Vec<CandlesEntity>> {
+    pub async fn fetch_candles_from_mysql(
+        &self,
+        ins_id: &str,
+        time: &str,
+        limit:usize,
+        select_time: Option<SelectTime>,
+    ) -> anyhow::Result<Vec<CandlesEntity>> {
         let candles_model = CandlesModel::new().await;
-        let candles = candles_model.get_all(ins_id, time).await;
-        println!("{:?}", candles);
+        let candles = candles_model.get_all(ins_id, time, limit,select_time).await;
         match candles {
             Ok(mut data) => {
-                info!("Fetched {} candles from MySQL", data.len());
                 data.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+                info!("get candle data form db{:?}", data);
                 Ok(data)
             }
             Err(e) => {
-                info!("Error fetching candles from MySQL: {}", e);
+                error!("Error fetching candles from MySQL: {}", e);
                 Err(anyhow::anyhow!("Error fetching candles from MySQL"))
             }
         }

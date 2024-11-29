@@ -1,50 +1,45 @@
-use super::sma;
-use ndarray::Array1;
-/// Rolling Moving Average implementation based on PineScript
-pub struct RMA {
-    period: usize,
-    current_value: Option<f64>,
-    history: Vec<f64>,
+use crate::trading::indicator::sma::Sma;
+
+#[derive(Debug)]
+pub struct Rma {
+    peroid: usize,
+    alpha: f64,            // 平滑因子
+    prev_rma: Option<f64>, // 上一周期的 RMA 值
+    values: Vec<f64>,      // 用于计算 SMA
+    sma: Sma,
+    sum: f64,
 }
 
-impl RMA {
-    pub fn new(period: usize) -> Self {
-        RMA {
-            period,
-            current_value: None,
-            history: Vec::with_capacity(period),
+impl Rma {
+    // 构造器，初始化 RMA 的周期、平滑因子以及之前的 RMA 和价格值
+    pub fn new(length: usize) -> Self {
+        Self {
+            peroid: length,
+            alpha: 1.0 / length as f64,
+            prev_rma: None,                     // 初始时没有前一个 RMA
+            values: Vec::with_capacity(length), // 用于计算 SMA
+            sma: Sma::new(length),
+            sum: 0.00,
         }
     }
 
-    pub fn next(&mut self, value: f64) -> f64 {
-        // 收集数据直到满足计算SMA所需的周期
-        self.history.push(value);
-
-        // 第一次计算时使用SMA初始化
-        if self.current_value.is_none() {
-            if self.history.len() >= self.period {
-                // 计算初始的SMA值
-                let sum: f64 = self.history.iter().sum();
-                let sma = sum / self.period as f64;
-                self.current_value = Some(sma);
-
-                // 保持最后一个值用于下次计算
-                let last_value = *self.history.last().unwrap();
-                self.history.clear();
-                self.history.push(last_value);
-
-                return sma;
-            }
-            // 在收集足够数据之前，返回初始累积平均值
-            let sum: f64 = self.history.iter().sum();
-            return sum / self.history.len() as f64;
+    // 计算下一个 RMA 值
+    pub fn next(&mut self, price: f64) -> f64 {
+        // 第一次计算时，返回 SMA
+        self.values.push(price);
+        if self.values.len() == 0 {
+            let sma = self.sma.next(price);
+            self.sum += sma;
+            return sma;
         }
+        if self.values.len() > self.peroid {
+            // 滑动窗口：移除最旧的元素，加入新的元素
+            let oldest_value = self.values.remove(0); // 移除最旧的元素
+            self.sum -= oldest_value; // 从 sum 中减去最旧的元素
+        }
+        // 非第一次计算，使用递归公式
+        self.sum = self.sum + self.alpha * price + (1.0 - self.alpha) * self.sum;
 
-        // 使用 Wilder 的计算公式: (current + (period-1) * previous) / period
-        let prev_value = self.current_value.unwrap();
-        let new_value = (value + (self.period as f64 - 1.0) * prev_value) / self.period as f64;
-        self.current_value = Some(new_value);
-
-        new_value
+        return self.sum;
     }
 }

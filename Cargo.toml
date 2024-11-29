@@ -96,3 +96,5 @@ ndarray = "0.15"  # 用于数值计算
 
 technical_indicators = "0.5.0"
 tech_analysis = "0.1.1"
+simple_moving_average = "1.0.2"
+linregress = "0.5.4"

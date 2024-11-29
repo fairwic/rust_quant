@@ -109,6 +109,41 @@ CREATE TABLE `back_test_detail` (
 ) ENGINE=InnoDB AUTO_INCREMENT=368588 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
+CREATE TABLE `asset_classification` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `contentKey` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `isNew` int NOT NULL,
+  `message` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `nameKey` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=40 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (1, 'asset_db_asset_classficiation_desc_hot_currency', 0, '主流币', 'asset_db_text_main_currency', 'Top', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (4, 'asset_db_asset_classficiation_desc_hot_defi_currency', 0, 'DeFi', 'asset_db_text_defi', 'DeFi', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (5, 'asset_db_asset_classficiation_desc_hot_nft_currency', 0, 'NFT 生态', 'asset_db_text_nft', 'NFT', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (6, 'asset_db_asset_classficiation_desc_storage', 0, '存储项目', 'asset_db_text_storage', 'Storage', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (9, 'asset_db_asset_classficiation_desc_layer_2', 0, 'Layer 2', 'asset_db_text_layer2', 'Layer 2', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (10, 'asset_db_asset_classficiation_desc_meme', 0, 'Meme', 'asset_db_text_meme', 'Meme', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (11, 'asset_db_asset_classficiation_desc_gamefi', 0, '游戏代币', 'asset_db_text_gamefi', 'Gaming', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (12, 'asset_db_asset_classficiation_desc_publicchain', 0, 'Layer 1', 'asset_db_text_blockchain', 'Layer 1', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (14, 'asset_db_asset_classficiation_desc_fantoken', 0, '粉丝代币', 'asset_db_text_fantoken', 'Fan Tokens', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (17, 'asset_db_asset_classficiation_desc_pow', 0, 'PoW', 'asset_db_text_pow', 'Proof of Work', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (18, 'asset_db_asset_classficiation_desc_ai', 0, '人工智能与大数据', 'asset_db_text_ai', 'AI Big Data', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (30, 'asset_db_asset_classficiation_desc_inscription', 0, '铭文', 'asset_db_text_inscription', 'Inscriptions', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (32, 'asset_db_asset_classficiation_desc_depin', 0, 'DePIN', 'asset_db_text_depin', 'DePIN', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (33, 'asset_db_asset_classficiation_desc_dex', 0, 'DEX', 'asset_db_text_dex', 'DEX', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (34, 'asset_db_asset_classficiation_desc_governance', 0, '治理代币', 'asset_db_text_governance', 'Governance', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (35, 'asset_db_asset_classficiation_desc_infrastructure', 0, '基础设施', 'asset_db_text_infrastructure', 'Infrastructure', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (36, 'asset_db_asset_classficiation_desc_lend_borrow', 0, '借贷项目', 'asset_db_text_lend_borrow', 'Lending Borrowing', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (37, 'asset_db_asset_classficiation_desc_metaverse', 0, '元宇宙', 'asset_db_text_metaverse', 'Metaverse', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (38, 'asset_db_asset_classficiation_desc_others', 0, '其他分类', 'asset_db_text_others', 'Others', NULL);
+INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (39, 'asset_db_asset_classficiation_desc_yieldfarm', 0, '流动性挖矿', 'asset_db_text_yieldfarm', 'Yield Farming', NULL);
+
+
+
 
 WITH ranked_results AS (
     SELECT

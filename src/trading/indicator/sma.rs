@@ -1,25 +1,33 @@
-use ndarray::Array1;
-use ta::indicators::SimpleMovingAverage;
-use ta::{DataItem, Next};
+#[derive(Debug)]
+pub struct Sma {
+    peroid: usize,
+    sum: f64,
+    values: Vec<f64>,
+}
 
-pub fn calculate(data: &Array1<f64>, length: usize) -> Array1<f64> {
-    let vec_data: Vec<DataItem> = data
-        .iter()
-        .map(|&x| {
-            DataItem::builder()
-                .close(x)
-                .open(x)
-                .high(x)
-                .low(x)
-                .volume(0.0)
-                .build()
-                .unwrap()
-        })
-        .collect();
-    let mut sma_indicator = SimpleMovingAverage::new(length).unwrap();
-    let result = vec_data
-        .iter()
-        .map(|x| sma_indicator.next(x))
-        .collect::<Vec<f64>>();
-    Array1::from(result)
+impl Sma {
+    pub fn new(length: usize) -> Self {
+        Self {
+            peroid: length,
+            sum: 0.0,
+            values: Vec::with_capacity(length),
+        }
+    }
+
+    pub fn next(&mut self, price: f64) -> f64 {
+        // 如果窗口未满，添加新的值并累加到 sum
+        self.values.push(price);
+        if self.values.len() < self.peroid {
+            self.sum += price;
+        } else {
+            self.sum += price; // 更新 sum
+            if self.values.len() > self.peroid {
+                // 滑动窗口：移除最旧的元素，加入新的元素
+                let oldest_value = self.values.remove(0); // 移除最旧的元素
+                self.sum -= oldest_value; // 从 sum 中减去最旧的元素
+            }
+        }
+        // 返回当前窗口的 SMA
+        self.sum / self.peroid as f64
+    }
 }
