@@ -1,5 +1,4 @@
 mod candles;
-use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use crate::trading::okx::{okx_client, OkxApiResponse};
@@ -56,14 +55,14 @@ impl Market {
     }
     /**
     获取所有产品行情信息
-    inst_type	String	是	产品类型
+    inst_type String 是 产品类型
     SPOT：币币
     SWAP：永续合约
     FUTURES：交割合约
     OPTION：期权
-    uly	String	否	标的指数
+    uly	String 否 标的指数
     适用于交割/永续/期权，如 BTC-USD
-    instFamily	String	否	交易品种
+    instFamily String 否  易品种
     适用于交割/永续/期权，如 BTC-USD
     **/
     pub async fn get_tickers(inst_type: &str, uly: Option<String>, inst_family: Option<String>) -> anyhow::Result<Vec<TickersData>> {
@@ -81,7 +80,7 @@ impl Market {
 
     /**
     获取单个产品行情信息
-    inst_type	String	是	产品类型
+    inst_type String 是 产品类型
     SPOT：币币
     SWAP：永续合约
     FUTURES：交割合约

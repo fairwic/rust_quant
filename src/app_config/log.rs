@@ -1,14 +1,13 @@
 use std::env;
-use dotenv::dotenv;
-use fast_log::Config;
+use std::sync::Arc;
+
 use tokio::sync::Mutex;
 use tracing::{Event, Level, Subscriber};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{EnvFilter, fmt, FmtSubscriber, Layer, Registry};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::util::SubscriberInitExt;
-use std::sync::Arc;
+
 use crate::app_config;
 
 // 定义一个自定义的 Layer

@@ -1,11 +1,11 @@
-mod error;
-pub mod contracts;
-
+use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+
 use crate::trading::okx::{okx_client, OkxApiResponse};
 
-use anyhow::{Result, Error, anyhow};
+mod error;
+pub mod contracts;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Balance {
@@ -66,15 +66,15 @@ impl OkxPublicData {
     /**
     获取交易产品基础信息
     获取所有可交易产品的信息列表。
-    inst_type	String	是	产品类型
+    inst_type String 是 产品类型
     SPOT：币币
     MARGIN：币币杠杆
     SWAP：永续合约
     FUTURES：交割合约
     OPTION：期权
-    uly	String	可选	标的指数，仅适用于交割/永续/期权，期权必填
-    inst_family	String	否	交易品种，仅适用于交割/永续/期权
-    inst_id	String	否	产品ID
+    uly String 可选 标的指数，仅适用于交割/永续/期权，期权必填
+    inst_family	Stringl 交易品种，仅适用于交割/永续/期权
+    inst_id	String 否 产品ID
      **/
     pub async fn get_instruments(
         inst_type: &str,

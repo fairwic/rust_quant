@@ -44,7 +44,7 @@ async fn test_sma() -> Result<()> {
     };
 
     let candles =
-        trading::task::get_candle_data("BTC-USDT-SWAP", "4H", 10, Some(select_time)).await?;
+        trading::task::basic::get_candle_data("BTC-USDT-SWAP", "4H", 10, Some(select_time)).await?;
 
     let mut sma_value = 0.00;
     for candle in candles {
@@ -61,7 +61,7 @@ async fn test_sma() -> Result<()> {
     };
 
     let candles =
-        trading::task::get_candle_data("BTC-USDT-SWAP", "4H", 10, Some(select_time)).await?;
+        trading::task::basic::get_candle_data("BTC-USDT-SWAP", "4H", 10, Some(select_time)).await?;
 
     let mut sma_value = 0.00;
     for candle in candles {

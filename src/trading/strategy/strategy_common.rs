@@ -213,7 +213,7 @@ pub fn close_remaining_position(
     });
     *position = 0.0;
 
-    info!("Final sell at price: {}, funds after final sell: {}, profit/loss: {}",last_price, *funds, *total_profit_loss);
+    // info!("Final sell at price: {}, funds after final sell: {}, profit/loss: {}",last_price, *funds, *total_profit_loss);
 
     triggered_fib_levels.clear(); // 重置斐波那契级别触发记录
 }
@@ -254,8 +254,7 @@ pub fn run_test(
         //调用函数,获取信号
         let signal = strategy(signal_data);
 
-        info!("ts:{},Time: {:?}, funds: {}, Price: {}, Buy: {}, Sell: {}",candle.ts,
-            time_util::mill_time_to_datetime_shanghai(candle.ts),funds,signal.price,signal.should_buy,signal.should_sell);
+        // info!("ts:{},Time: {:?}, funds: {}, Price: {}, Buy: {}, Sell: {}",candle.ts,time_util::mill_time_to_datetime_shanghai(candle.ts),funds,signal.price,signal.should_buy,signal.should_sell);
 
         if signal.should_buy {
             if position > 0.0 {
@@ -293,7 +292,7 @@ pub fn run_test(
                     open_trades += 1;
                     total_profit_loss = 0.0;
                     is_long = true;
-                    info!("Buy at time: {:?}, price: {}, position: {}, funds after buy: {}",entry_time, signal.price, position, funds);
+                    // info!("Buy at time: {:?}, price: {}, position: {}, funds after buy: {}",entry_time, signal.price, position, funds);
 
                     trade_records.push(TradeRecord {
                         option_type: PosSide::LONG.to_string(),
@@ -346,7 +345,7 @@ pub fn run_test(
                     open_trades += 1;
                     total_profit_loss = 0.0;
                     is_long = false;
-                    info!("Short at time: {:?}, price: {}, position: {}, funds after short: {}", entry_time, signal.price, position, funds);
+                    // info!("Short at time: {:?}, price: {}, position: {}, funds after short: {}", entry_time, signal.price, position, funds);
 
                     trade_records.push(TradeRecord {
                         option_type: PosSide::SHORT.to_string(),
@@ -396,7 +395,7 @@ pub fn run_test(
             });
             position = 0.0;
             triggered_fib_levels.clear(); // 重置斐波那契级别触发记录
-            info!("Sell (close long) at time: {:?}, price: {}, funds after sell: {}, profit/loss: {}",entry_time, signal.price, funds, total_profit_loss);
+            // info!("Sell (close long) at time: {:?}, price: {}, funds after sell: {}, profit/loss: {}",entry_time, signal.price, funds, total_profit_loss);
         } else if position > 0.0 {
             if is_need_fibonacci_profit {
                 // 斐波那契部分止盈逻辑
@@ -446,6 +445,6 @@ pub fn run_test(
         0.0
     };
 
-    info!("Final Win rate: {}", win_rate);
+    // info!("Final Win rate: {}", win_rate);
     (funds, win_rate, open_trades, trade_records)
 }

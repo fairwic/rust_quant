@@ -26,7 +26,7 @@ impl ATR {
         // 计算当前周期的TrueRange
         let tr = self.true_range(high, low, close);
 
-        println!("truerange:{:?}",tr);
+        // println!("truerange:{:?}",tr);
         // 如果缓存未满，填充缓存
         if self.tr_buffer.len() < self.period {
             self.tr_buffer.push(tr);
@@ -47,7 +47,7 @@ impl ATR {
             // 计算ATR的平滑值（递归计算）
             self.sum = self.alpha * tr + (1.0 - self.alpha) * self.sum;
         }
-        println!("sum:{:?}",self.sum);
+        // println!("sum:{:?}",self.sum);
         // 返回平滑后的ATR
         self.prev_close = Some(close);
         self.sum

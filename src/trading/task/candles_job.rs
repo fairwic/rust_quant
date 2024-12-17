@@ -15,7 +15,7 @@ use crate::trading::okx::market::Market;
 use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 
 
-pub async fn init_create_table(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<&str>>) -> anyhow::Result<()> {
+pub async fn init_create_table(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&str>>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
     let res = res.get_all(inst_ids).await.unwrap();
     //获取获取数据更旧的数据
@@ -31,7 +31,7 @@ pub async fn init_create_table(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<
 }
 
 /** 同步所有更旧的蜡烛图**/
-pub async fn init_all_candles(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<&str>>) -> anyhow::Result<()> {
+pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&str>>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
     let res = res.get_all(inst_ids).await.unwrap();
 
@@ -106,7 +106,7 @@ pub async fn init_all_candles(inst_ids: Option<&Vec<&str>>, times: Option<&Vec<&
 }
 
 /** 同步所有更新的蜡烛图**/
-pub async fn init_before_candles(inst_ids: Option<&Vec<&str>>, times: Option<Vec<&str>>) -> anyhow::Result<()> {
+pub async fn init_before_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<&str>>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
     let res = res.get_all(inst_ids).await.unwrap();
 

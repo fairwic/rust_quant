@@ -237,7 +237,7 @@ impl Account {
     pub fn new() -> Self {
         Account {}
     }
-    pub async fn get_balances(ccy: Option<&Vec<String>>) -> anyhow::Result<OkxApiResponse<Balance>> {
+    pub async fn get_balances(ccy: Option<&Vec<String>>) -> Result<OkxApiResponse<Balance>> {
         let mut path = "/api/v5/account/balance".to_string();
         if let Some(ccy) = ccy {
             let ccy_param = ccy.join(",");
@@ -247,7 +247,7 @@ impl Account {
     }
 
     /// 设置杠杆倍数
-    pub async fn set_leverage(params: SetLeverageRequest) -> anyhow::Result<SetLeverageData> {
+    pub async fn set_leverage(params: SetLeverageRequest) -> Result<SetLeverageData> {
         let mut path = "/api/v5/account/set-leverage".to_string();
         let body = &serde_json::to_string(&params).unwrap();
         info!("send set_leverage okx_request params:{}",body);
@@ -256,7 +256,7 @@ impl Account {
     }
 
     /// 获取最大可买卖/开仓数量
-    pub async fn get_max_size(ins_id: &str, td_mode: TdMode) -> anyhow::Result<TradingSwapNumResponseData> {
+    pub async fn get_max_size(ins_id: &str, td_mode: TdMode) -> Result<TradingSwapNumResponseData> {
         let mut path = "/api/v5/account/max-size?".to_string();
         path.push_str(&format!("instId={}", ins_id));
         path.push_str(&format!("&tdMode={}", td_mode));
@@ -268,7 +268,7 @@ impl Account {
     }
 
     /// 获取最大可用数量
-    pub async fn get_max_avail_size(ins_id: &str, td_mode: TdMode) -> anyhow::Result<TradingNumResponseData> {
+    pub async fn get_max_avail_size(ins_id: &str, td_mode: TdMode) -> Result<TradingNumResponseData> {
         let mut path = "/api/v5/account/max-avail-size?".to_string();
         path.push_str(&format!("instId={}", ins_id));
         path.push_str(&format!("&tdMode={}", td_mode));
@@ -280,15 +280,15 @@ impl Account {
 
     /**
     获取该账户下拥有实际持仓的信息。账户为买卖模式会显示净持仓（net），账户为开平仓模式下会分别返回开多（long）或开空（short）的仓位。按照仓位创建时间倒序排列。
-    instType	String	否	产品类型
+    instType String	否 产品类型
     MARGIN：币币杠杆
     SWAP：永续合约
     FUTURES：交割合约
     OPTION：期权
     instType和instId同时传入的时候会校验instId与instType是否一致。
-    instId	String	否	交易产品ID，如：BTC-USDT-SWAP
+    instId String 否 交易产品ID，如：BTC-USDT-SWAP
     支持多个instId查询（不超过10个），半角逗号分隔
-    posId	String	否	持仓ID
+    posId String 否 持仓ID
     支持多个posId查询（不超过20个）。
     存在有效期的属性，自最近一次完全平仓算起，满30天 posId 以及整个仓位会被清除。**/
     pub async fn get_account_positions(

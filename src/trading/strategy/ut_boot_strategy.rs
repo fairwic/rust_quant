@@ -102,10 +102,10 @@ impl UtBootStrategy {
                 };
 
                 let ema_value = ema.next(current_price);
-                warn!(
-                    "pre_ema_value:{},prev_xatr_trailing_stop{}",
-                    prev_ema_value, prev_xatr_trailing_stop
-                );
+                // warn!(
+                //     "pre_ema_value:{},prev_xatr_trailing_stop{}",
+                //     prev_ema_value, prev_xatr_trailing_stop
+                // );
 
                 let above =
                     ema_value > xatr_trailing_stop && prev_ema_value <= prev_xatr_trailing_stop;
@@ -121,11 +121,11 @@ impl UtBootStrategy {
                         .parse::<f64>()
                         .unwrap_or(0.0)
                         .clone();
-                    warn!("pre_price:{}", pre_close);
+                    // warn!("pre_price:{}", pre_close);
                 }
-                println!("time:{:?},current_atr:{},prev_xatr_trailing_stop:{},ema:{},current_price:{}\
-                ,xatr_trailing_stop:{},above:{},below:{},pre_ema_value:{},prev_xatr_trailing_stop{}",
-                  time_util::mill_time_to_datetime_shanghai(candle.ts),  current_atr,prev_xatr_trailing_stop,ema_value, current_price, xatr_trailing_stop, above, below,prev_ema_value,prev_xatr_trailing_stop);
+                // println!("time:{:?},current_atr:{},prev_xatr_trailing_stop:{},ema:{},current_price:{}\
+                // ,xatr_trailing_stop:{},above:{},below:{},pre_ema_value:{},prev_xatr_trailing_stop{}",
+                //   time_util::mill_time_to_datetime_shanghai(candle.ts),  current_atr,prev_xatr_trailing_stop,ema_value, current_price, xatr_trailing_stop, above, below,prev_ema_value,prev_xatr_trailing_stop);
 
                 // 记录开仓价格或卖出价格
                 price = current_price;

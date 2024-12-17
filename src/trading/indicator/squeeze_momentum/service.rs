@@ -62,7 +62,7 @@ pub async fn get_last_squeeze_single(
 ) -> anyhow::Result<SqueezeResult> {
     let min_length = config.bb_length.max(config.kc_length);
     let candles =
-        trading::task::get_candle_data(inst_id, period, min_length * 2, select_time).await?;
+        trading::task::basic::get_candle_data(inst_id, period, min_length * 2, select_time).await?;
 
     if candles.len() < min_length {
         return Err(anyhow::anyhow!("Insufficient data"));

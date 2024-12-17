@@ -3,19 +3,10 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use crate::trading::okx::{okx_client, OkxApiResponse};
 
-use anyhow::{Result, Error, anyhow};
+use anyhow::{Result, anyhow};
 use tracing::error;
-use serde_json::json;
 use tracing::debug;
 use tracing::field::debug;
-use tracing_subscriber::fmt::format::json;
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Balance {
-    ccy: String,
-    bal: String,
-    // 其他字段...
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CandleData {

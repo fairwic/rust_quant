@@ -21,13 +21,13 @@ async fn test_rma() -> Result<()> {
     };
 
     let candles =
-        trading::task::get_candle_data("BTC-USDT-SWAP", "4H", 3, Some(select_time)).await?;
+        trading::task::basic::get_candle_data("BTC-USDT-SWAP", "4H", 3, Some(select_time)).await?;
 
     let mut rma_value = 0.00;
     for candle in candles {
         rma_value = rma.next(candle.c.parse::<f64>().unwrap());
-        println!("rma:{:?}",rma);
-        println!("ram_value:{}",rma_value);
+        println!("rma:{:?}", rma);
+        println!("ram_value:{}", rma_value);
     }
     assert_eq!(format!("{:2}", rma_value), "97692.10");
 
@@ -39,12 +39,12 @@ async fn test_rma() -> Result<()> {
     };
 
     let candles =
-        trading::task::get_candle_data("BTC-USDT-SWAP", "4H", 10, Some(select_time)).await?;
+        trading::task::basic::get_candle_data("BTC-USDT-SWAP", "4H", 10, Some(select_time)).await?;
 
     let mut rma_value = 0.00;
     for candle in candles {
         rma_value = rma.next(candle.c.parse::<f64>().unwrap());
-        println!("rma:{:?}",rma)
+        println!("rma:{:?}", rma)
     }
     assert_eq!(format!("{:2}", rma_value), "98485.93");
     println!("测试rma通过-------");

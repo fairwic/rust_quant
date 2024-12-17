@@ -1,11 +1,10 @@
-use anyhow::{anyhow, Error, Result};
-use fast_log::TimeType::Utc;
+use std::env;
+
+use anyhow::{anyhow, Result};
 use hmac::{Hmac, Mac};
 use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::env;
-use tracing::{debug, info};
 
 // ... (保持 Ticker、Balance 和 ErrorResponse 结构体的定义不变)
 #[derive(Serialize, Deserialize, Debug)]
@@ -30,11 +29,11 @@ pub(crate) struct OkxClient {
 impl OkxClient {
     fn new(api_key: String, api_secret: String, passphrase: String) -> Self {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(3)) // 设置请求超时时间为3秒
+            .timeout(std::time::Duration::from_secs(5)) // 设置请求超时时间为3秒
             .build()
             .unwrap();
         OkxClient {
-            client: client,
+            client,
             api_key,
             api_secret,
             passphrase,

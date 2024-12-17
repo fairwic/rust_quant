@@ -1,18 +1,14 @@
 extern crate rbatis;
 
 use anyhow::Result;
-use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
 use clap::builder::TypedValueParser;
-use rbatis::rbdc::db::ExecResult;
 use rbatis::{crud, impl_update, RBatis};
 use rbatis::{impl_delete, impl_select};
+use rbatis::rbdc::db::ExecResult;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
 
 use crate::app_config::db::get_db_client;
-use crate::trading::model::market::tickers::TickersDataEntity;
-use crate::trading::okx::market::TickersData;
 
 /// table
 #[derive(Serialize, Deserialize, Debug)]

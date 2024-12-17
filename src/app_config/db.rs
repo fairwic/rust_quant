@@ -7,9 +7,9 @@ use rbdc_mysql::MysqlDriver;
 static DB_CLIENT: OnceCell<RBatis> = OnceCell::new();
 
 pub async fn init_db() -> &'static RBatis {
-    println!("init db config ant connecting ");
+    // println!("init db config ant connecting ");
     let rb = RBatis::new();
-    rb.link(MysqlDriver {}, &*env::var("DB_HOST").unwrap()).await.unwrap();
+    rb.link(MysqlDriver {}, &*env::var("DB_HOST").unwrap()).await.expect("Failed to connect db");
     //这里建议 需要调整数据库的最大连接数
     rb.get_pool().unwrap().set_max_open_conns(300).await;
 

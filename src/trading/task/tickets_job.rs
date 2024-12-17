@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use tracing::{debug, error};
 use crate::trading::model::market::tickers::TicketsModel;
 use crate::trading::okx::market::Market;
+use std::sync::Arc;
+use tracing::{debug, error};
 
 pub async fn get_ticket(ins_type: &str) {
     let ticker = Market::get_ticker(&ins_type).await;
@@ -14,7 +14,7 @@ pub async fn get_ticket(ins_type: &str) {
     }
 }
 
-pub async fn init_all_ticker(inst_ids: &Arc<Vec<&str>>) -> anyhow::Result<()> {
+pub async fn init_all_ticker(inst_ids: Option<Vec<&str>>) -> anyhow::Result<()> {
     println!("开始同步ticker...");
     //同步合约产品
     let ins_type = "SWAP";
@@ -23,7 +23,8 @@ pub async fn init_all_ticker(inst_ids: &Arc<Vec<&str>>) -> anyhow::Result<()> {
         let model = TicketsModel::new().await;
         for ticker in tickers {
             //判断是否在inst_ids中
-            if inst_ids.contains(&&**&ticker.inst_id) {
+            let is_valid = true;
+            if !is_valid || (inst_ids.is_some()&& inst_ids.as_ref().unwrap().contains(&&**&ticker.inst_id)) {
                 //判断数据库是否有
                 let res = model.find_one(&ticker.inst_id).await?;
                 if res.len() > 0 {

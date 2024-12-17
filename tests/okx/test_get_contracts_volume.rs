@@ -5,7 +5,6 @@ use rust_quant::app_config::db::init_db;
 use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading::okx::public_data::contracts::Contracts;
 use rust_quant::trading::task::tickets_volume_job;
-use rust_quant::trading::task::{account_job, asset_job};
 
 #[tokio::test]
 async fn test_contracts_volume() -> Result<()> {

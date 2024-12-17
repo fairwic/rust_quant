@@ -6,13 +6,9 @@ use rbatis::{crud, impl_update, RBatis};
 use rbs::Value;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::convert::TryInto;
-use std::env;
-use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use crate::app_config::db;
-use crate::trading::okx::market::TickersData;
 use crate::trading::okx::public_data::CandleData;
 use rbatis::impl_select;
 
