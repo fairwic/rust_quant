@@ -14,9 +14,17 @@ pub struct Ticker {
 }
 
 #[derive(Serialize, Deserialize)]
-struct ErrorResponse {
+struct OkxApiErrorResponse {
     msg: String,
     code: String,
+}
+
+// 通用的响应结构体
+#[derive(Serialize, Deserialize, Debug)]
+pub struct OkxApiResponse<T> {
+    pub code: String,
+    pub msg: String,
+    pub data: T,
 }
 
 pub(crate) struct OkxClient {
@@ -59,7 +67,7 @@ impl OkxClient {
         method: Method,
         path: &str,
         body: &str,
-    ) -> Result<T> {
+    ) -> Result<T, anyhow::Error> {
         let timestamp = chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S.%3fZ")
             .to_string();
@@ -96,12 +104,12 @@ impl OkxClient {
         let response_body = response.text().await?;
         // info!("path:{},okx_response: {}", path, response_body);
         if status_code == StatusCode::OK {
-            // println!("okx response body:{:#?}", &response_body);
-            let result: T = serde_json::from_str(&response_body)?;
+            println!("okx response body:{:#?}", &response_body);
+            let result: OkxApiResponse<T> = serde_json::from_str(&response_body)?;
             // println!("result 1111:{:?}", result);
-            Ok(result)
+            Ok(result.data)
         } else {
-            let error: ErrorResponse = serde_json::from_str(&response_body)?;
+            let error: OkxApiErrorResponse = serde_json::from_str(&response_body)?;
             Err(anyhow!("请求失败: {}", error.msg))
         }
     }

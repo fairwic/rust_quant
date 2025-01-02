@@ -4,9 +4,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{Event, Level, Subscriber};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::{EnvFilter, fmt, FmtSubscriber, Layer, Registry};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::{fmt, EnvFilter, FmtSubscriber, Layer, Registry};
 
 use crate::app_config;
 
@@ -48,7 +48,9 @@ pub async fn setup_logging() -> anyhow::Result<()> {
     };
 
     if app_env == "LOCAL" {
-        let subscriber = FmtSubscriber::builder().with_max_level(Level::INFO).finish();
+        let subscriber = FmtSubscriber::builder()
+            .with_max_level(Level::INFO)
+            .finish();
         tracing::subscriber::set_global_default(subscriber)?;
     } else {
         let info_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "info.log");
@@ -57,12 +59,31 @@ pub async fn setup_logging() -> anyhow::Result<()> {
         let (info_non_blocking, _info_guard) = tracing_appender::non_blocking(info_file);
         let (error_non_blocking, _error_guard) = tracing_appender::non_blocking(error_file);
 
-        let subscriber = Registry::default().with(fmt::layer().with_writer(info_non_blocking).with_filter(EnvFilter::new("info"))).with(fmt::layer().with_writer(error_non_blocking).with_filter(EnvFilter::new("error"))).with(custom_layer);
+        let subscriber = Registry::default()
+            .with(
+                fmt::layer()
+                    .with_writer(info_non_blocking)
+                    .with_filter(EnvFilter::new("info")),
+            )
+            .with(
+                fmt::layer()
+                    .with_writer(error_non_blocking)
+                    .with_filter(EnvFilter::new("error")),
+            )
+            .with(custom_layer);
 
         tracing::subscriber::set_global_default(subscriber)?;
     }
-    /// enable log crate to show sql logs
-    // fast_log::init(fast_log::Config::new().console().level(log::LevelFilter::Debug)).expect("fast_log init error");
+
+    if "true" == env::var("DB_DEBUG").unwrap_or_default() {
+        fast_log::init(
+            fast_log::Config::new()
+                .console()
+                .level(log::LevelFilter::Debug),
+        )
+        .expect("fast_log init error");
+    }
+    // enable log crate to show sql logs
     // if let Err(e) = fast_log::init(Config::new().console()) {
     //     eprintln!("fast_log init error: {:?}", e);
     // }

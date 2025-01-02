@@ -1,7 +1,8 @@
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-use crate::trading::okx::{okx_client, OkxApiResponse};
+use crate::trading::okx::{okx_client};
+use crate::trading::okx::okx_client::OkxApiResponse;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VolumeData {

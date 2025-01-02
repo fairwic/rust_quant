@@ -2,7 +2,8 @@ use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-use crate::trading::okx::{okx_client, OkxApiResponse};
+use crate::trading::okx::{okx_client};
+use crate::trading::okx::okx_client::OkxApiResponse;
 
 mod error;
 pub mod contracts;

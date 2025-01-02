@@ -2,8 +2,9 @@ use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
-use crate::trading::okx::{okx_client, OkxApiResponse};
+use crate::trading::okx::{okx_client};
 use crate::trading::okx::market::Market;
+use crate::trading::okx::okx_client::OkxApiResponse;
 use crate::trading::okx::public_data::CandleData;
 
 

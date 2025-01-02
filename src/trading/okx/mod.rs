@@ -1,25 +1,19 @@
+use crate::trading::okx::public_data::OkxPublicData;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
-use crate::trading::okx::public_data::OkxPublicData;
 
-pub mod okx_client;
-pub mod public_data;
 pub mod account;
-pub mod trade;
+pub mod asset;
+pub mod big_data;
 pub mod market;
+pub mod okx_client;
 pub mod okx_websocket;
 pub mod okx_websocket_client;
-pub mod asset;
+pub mod public_data;
+pub mod trade;
 
 
-// 通用的响应结构体
-#[derive(Serialize, Deserialize, Debug)]
-pub struct OkxApiResponse<T> {
-    code: String,
-    msg: String,
-    data: T,
-}
 
 // 验证系统时间
 pub async fn validate_system_time() {

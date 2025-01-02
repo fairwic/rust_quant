@@ -1,10 +1,11 @@
 /*获取交易账户余额*/
+use crate::trading::okx::okx_client;
+use crate::trading::okx::okx_client::OkxApiResponse;
+use crate::trading::okx::trade::TdMode;
+use anyhow::{anyhow, Error, Result};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use crate::trading::okx::{okx_client, OkxApiResponse};
-use anyhow::{Result, Error, anyhow};
 use tracing::{debug, info};
-use crate::trading::okx::trade::TdMode;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Balance {
@@ -26,7 +27,6 @@ struct CandleData {
     confirm: String,
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PositionResponse {
     code: String,
@@ -34,34 +34,33 @@ pub struct PositionResponse {
     data: Vec<Position>,
 }
 
-
 /// 持仓信息结构体
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TradingNumRequestParams {
-    pub inst_id: String,          // 产品ID，如 BTC-USDT
-    pub td_mode: String,          // 交易模式: cross, isolated, cash, spot_isolated
-    pub ccy: Option<String>,      // 保证金币种，仅适用于单币种保证金模式下的全仓杠杆订单
-    pub reduce_only: Option<bool>, // 是否为只减仓模式，仅适用于币币杠杆
-    pub px: Option<String>,       // 对应平仓价格下的可用数量，默认为市价，仅适用于杠杆只减仓
+    pub inst_id: String,              // 产品ID，如 BTC-USDT
+    pub td_mode: String,              // 交易模式: cross, isolated, cash, spot_isolated
+    pub ccy: Option<String>,          // 保证金币种，仅适用于单币种保证金模式下的全仓杠杆订单
+    pub reduce_only: Option<bool>,    // 是否为只减仓模式，仅适用于币币杠杆
+    pub px: Option<String>,           // 对应平仓价格下的可用数量，默认为市价，仅适用于杠杆只减仓
     pub un_spot_offset: Option<bool>, // true：禁止现货对冲，false：允许现货对冲，默认为false，仅适用于组合保证金模式
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TradingNumResponseData {
-    pub inst_id: String,          // 产品ID，如 BTC-USDT
-    pub avail_buy: String,   //最大买入可用数量
-    pub avail_sell: String,    //最大卖出可用数量
+    pub inst_id: String,    // 产品ID，如 BTC-USDT
+    pub avail_buy: String,  //最大买入可用数量
+    pub avail_sell: String, //最大卖出可用数量
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TradingSwapNumRequestParams {
-    pub inst_id: String,          // 产品ID，如 BTC-USDT
-    pub td_mode: String,          // 交易模式: cross, isolated, cash, spot_isolated
-    pub ccy: Option<String>,      // 保证金币种，仅适用于单币种保证金模式下的全仓杠杆订单
-    pub px: Option<String>,       // 委托价格当不填委托价时，交割和永续会取当前限价计算，其他业务线会按当前最新成交价计算当指定多个产品ID查询时，忽略该参数，当未填写处理
+    pub inst_id: String,              // 产品ID，如 BTC-USDT
+    pub td_mode: String,              // 交易模式: cross, isolated, cash, spot_isolated
+    pub ccy: Option<String>,          // 保证金币种，仅适用于单币种保证金模式下的全仓杠杆订单
+    pub px: Option<String>, // 委托价格当不填委托价时，交割和永续会取当前限价计算，其他业务线会按当前最新成交价计算当指定多个产品ID查询时，忽略该参数，当未填写处理
     pub leverage: Option<String>, // 开仓杠杆倍数默认为当前杠杆倍数仅适用于币币杠杆/交割/永续
     pub un_spot_offset: Option<bool>, // true：禁止现货对冲，false：允许现货对冲，默认为false，仅适用于组合保证金模式
 }
@@ -69,10 +68,10 @@ pub struct TradingSwapNumRequestParams {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TradingSwapNumResponseData {
-    pub inst_id: String,          // 产品ID，如 BTC-USDT
-    pub ccy: String,   //保证金币种
-    pub max_buy: String,   //最大买入可用数量
-    pub max_sell: String,    //最大卖出可用数量
+    pub inst_id: String,  // 产品ID，如 BTC-USDT
+    pub ccy: String,      //保证金币种
+    pub max_buy: String,  //最大买入可用数量
+    pub max_sell: String, //最大卖出可用数量
 }
 
 /// 持仓信息结构体
@@ -232,7 +231,6 @@ pub struct SetLeverageData {
 
 pub struct Account {}
 
-
 impl Account {
     pub fn new() -> Self {
         Account {}
@@ -243,15 +241,19 @@ impl Account {
             let ccy_param = ccy.join(",");
             path.push_str(&format!("&ccy={}", ccy_param));
         }
-        okx_client::get_okx_client().send_request(Method::GET, &path, "").await
+        okx_client::get_okx_client()
+            .send_request(Method::GET, &path, "")
+            .await
     }
 
     /// 设置杠杆倍数
     pub async fn set_leverage(params: SetLeverageRequest) -> Result<SetLeverageData> {
         let mut path = "/api/v5/account/set-leverage".to_string();
         let body = &serde_json::to_string(&params).unwrap();
-        info!("send set_leverage okx_request params:{}",body);
-        let res: OkxApiResponse<Vec<SetLeverageData>> = okx_client::get_okx_client().send_request(Method::POST, &path, body).await?;
+        info!("send set_leverage okx_request params:{}", body);
+        let res: OkxApiResponse<Vec<SetLeverageData>> = okx_client::get_okx_client()
+            .send_request(Method::POST, &path, body)
+            .await?;
         Ok(res.data[0].clone())
     }
 
@@ -262,18 +264,25 @@ impl Account {
         path.push_str(&format!("&tdMode={}", td_mode));
 
         info!("request okx path: {}", path);
-        let res: OkxApiResponse<Vec<TradingSwapNumResponseData>> = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
+        let res: OkxApiResponse<Vec<TradingSwapNumResponseData>> = okx_client::get_okx_client()
+            .send_request(Method::GET, &path, "")
+            .await?;
         println!("res: {:?}", res);
         Ok(res.data[0].clone())
     }
 
     /// 获取最大可用数量
-    pub async fn get_max_avail_size(ins_id: &str, td_mode: TdMode) -> Result<TradingNumResponseData> {
+    pub async fn get_max_avail_size(
+        ins_id: &str,
+        td_mode: TdMode,
+    ) -> Result<TradingNumResponseData> {
         let mut path = "/api/v5/account/max-avail-size?".to_string();
         path.push_str(&format!("instId={}", ins_id));
         path.push_str(&format!("&tdMode={}", td_mode));
 
-        let res: OkxApiResponse<Vec<TradingNumResponseData>> = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
+        let res: OkxApiResponse<Vec<TradingNumResponseData>> = okx_client::get_okx_client()
+            .send_request(Method::GET, &path, "")
+            .await?;
         println!("res: {:?}", res);
         Ok(res.data[0].clone())
     }
@@ -309,9 +318,9 @@ impl Account {
             path.push_str(&format!("&postId={}", postId));
         }
         info!("okx request path: {}", path);
-        let res: PositionResponse = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
+        let res: PositionResponse = okx_client::get_okx_client()
+            .send_request(Method::GET, &path, "")
+            .await?;
         Ok(res.data)
     }
 }
-
-

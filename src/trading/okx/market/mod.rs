@@ -1,9 +1,9 @@
 mod candles;
+use crate::trading::okx::okx_client;
+use crate::trading::okx::okx_client::OkxApiResponse;
+use crate::trading::okx::public_data::CandleData;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use crate::trading::okx::{okx_client, OkxApiResponse};
-use crate::trading::okx::public_data::CandleData;
-
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -41,7 +41,6 @@ pub struct Ts {
     ts: String,
 }
 
-
 // 使用类型别名来定义特定的响应类型
 pub type CandleResponse = OkxApiResponse<Vec<CandleData>>;
 pub type TickersResponse = OkxApiResponse<Vec<TickersData>>;
@@ -65,7 +64,11 @@ impl Market {
     instFamily String 否  易品种
     适用于交割/永续/期权，如 BTC-USD
     **/
-    pub async fn get_tickers(inst_type: &str, uly: Option<String>, inst_family: Option<String>) -> anyhow::Result<Vec<TickersData>> {
+    pub async fn get_tickers(
+        inst_type: &str,
+        uly: Option<String>,
+        inst_family: Option<String>,
+    ) -> anyhow::Result<Vec<TickersData>> {
         let mut path = format!("/api/v5/market/tickers?instType={}", inst_type);
         if let Some(uly) = uly {
             path.push_str(&format!("&inst_id={}", uly));
@@ -74,7 +77,9 @@ impl Market {
         if let Some(inst_family) = inst_family {
             path.push_str(&format!("&inst_family={}", inst_family));
         }
-        let res: TickersResponse = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
+        let res: TickersResponse = okx_client::get_okx_client()
+            .send_request(Method::GET, &path, "")
+            .await?;
         Ok(res.data)
     }
 
@@ -92,8 +97,9 @@ impl Market {
     **/
     pub async fn get_ticker(inst_id: &str) -> anyhow::Result<Vec<TickersData>> {
         let path = format!("/api/v5/market/ticker?instId={}", inst_id);
-        let res: TickersResponse = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
+        let res: TickersResponse = okx_client::get_okx_client()
+            .send_request(Method::GET, &path, "")
+            .await?;
         Ok(res.data)
     }
 }
-

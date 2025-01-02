@@ -1,8 +1,10 @@
-use std::pin::pin;
 use anyhow::anyhow;
-use chrono::{Datelike, DateTime, FixedOffset, Local, MappedLocalTime, NaiveDateTime, ParseError, Timelike, TimeZone, Utc};
+use chrono::{
+    DateTime, Datelike, Duration, FixedOffset, Local, MappedLocalTime, NaiveDateTime, ParseError,
+    TimeZone, Timelike, Utc,
+};
+use std::pin::pin;
 use tracing::warn;
-
 
 pub(crate) fn is_within_business_hours(ts: i64) -> bool {
     // 获取当前UTC时间
@@ -26,12 +28,15 @@ pub(crate) fn is_within_business_hours(ts: i64) -> bool {
     let day_week = now_washington_time.weekday().number_from_monday();
     let is_saturday = day_week == 5;
     if is_saturday {
-        warn!("time is not within business hours or in saturday hour:{},day_week:{}", hour, day_week);
+        warn!(
+            "time is not within business hours or in saturday hour:{},day_week:{}",
+            hour, day_week
+        );
     }
     !is_saturday && in_with_hour
 }
 
-pub fn parse_period(period: &str) -> anyhow::Result<i64> {
+pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
     let duration = match &period.to_uppercase()[..] {
         "1m" => 60,
         "3m" => 3 * 60,
@@ -43,6 +48,22 @@ pub fn parse_period(period: &str) -> anyhow::Result<i64> {
         _ => return Err(anyhow!("Unsupported period format")),
     };
     Ok(duration * 1000) // 转换为毫秒
+}
+
+//当前毫秒级时间增加或减少指定周期的毫秒数
+pub(crate) fn ts_reduce_n_period(mut ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
+    let res = parse_period_to_mill(period);
+    //最大条数100
+    let mill = n as i64 * res.unwrap();
+    Ok(ts - mill)
+}
+
+//当前毫秒级时间增加或减少指定周期的毫秒数
+pub(crate) fn ts_add_n_period(mut ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
+    let res = parse_period_to_mill(period);
+    //最大条数100
+    let mill = n as i64 * res.unwrap();
+    Ok(ts + mill)
 }
 
 // 将 DateTime 格式化为周期字符串（如 "4H", "5min" 等）
@@ -63,24 +84,26 @@ pub fn format_to_period(period: &str, mut dt: Option<DateTime<Local>>) -> String
     match unit.to_lowercase().as_str() {
         "h" => {
             let hours = dt.hour() / num as u32 * num as u32;
-            dt.date_naive().and_hms_opt(hours, 0, 0)
+            dt.date_naive()
+                .and_hms_opt(hours, 0, 0)
                 .unwrap()
                 .format("%Y%m%d%H")
                 .to_string()
         }
         "min" | "m" => {
             let minutes = dt.minute() / num as u32 * num as u32;
-            dt.date_naive().and_hms_opt(dt.hour(), minutes, 0)
+            dt.date_naive()
+                .and_hms_opt(dt.hour(), minutes, 0)
                 .unwrap()
                 .format("%Y%m%d%H%M")
                 .to_string()
         }
-        "d" => {
-            dt.date_naive().and_hms_opt(0, 0, 0)
-                .unwrap()
-                .format("%Y%m%d")
-                .to_string()
-        }
+        "d" => dt
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .format("%Y%m%d")
+            .to_string(),
         _ => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
     }
 }
@@ -108,6 +131,60 @@ pub fn string_to_datetime(date_str: &str, format: &str) -> Result<DateTime<Utc>,
 // 获取当前时间的字符串表示
 pub fn now_string(format: &str) -> String {
     Local::now().format(format).to_string()
+}
+
+//获取当前毫秒级时间戳
+// return "1735632797959"
+pub fn now_timestamp_mills() -> String {
+    // 获取当前 UTC 时间
+    let now = Local::now();
+    // 获取当前时间的时间戳（毫秒）
+    now.timestamp_millis().to_string()
+}
+
+/// 获取指定周期的开始时间戳
+/// 例如：周期为 1小时（1h），5分钟（5m），1天（1D）等
+pub fn get_period_start_timestamp(period: &str) -> i64 {
+    // 获取当前 UTC 时间
+    let now = Local::now();
+    // 获取当前的时间戳，并根据周期进行调整
+    let period_start = match period {
+        "5m" => now
+            .with_minute(now.minute() / 5 * 5)
+            .unwrap()
+            .with_second(0)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap(),
+        "1H" => now
+            .with_minute(0)
+            .unwrap()
+            .with_second(0)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap(),
+        "6H" => now
+            .with_minute(0)
+            .unwrap()
+            .with_second(0)
+            .unwrap()
+            .with_hour(now.hour() / 6 * 6)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap(),
+        "1D" => now.date().and_hms(0, 0, 0).with_nanosecond(0).unwrap(),
+        "4D" => now
+            .date()
+            .and_hms(0, 0, 0)
+            .with_day(now.day() / 4 * 4)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap(),
+        _ => panic!("Unsupported period: {}", period),
+    };
+
+    // 返回周期开始时间的毫秒级时间戳
+    period_start.timestamp_millis()
 }
 
 // 计算两个日期之间的天数差

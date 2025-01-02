@@ -494,7 +494,7 @@ pub fn valid_candles_data(mysql_candles_5m: &Vec<CandlesEntity>, time: &str) -> 
     let first_timestamp = mysql_candles_5m.first().unwrap().ts;
     let last_timestamp = mysql_candles_5m.last().unwrap().ts;
     let difference = last_timestamp - first_timestamp;
-    let period_milliseconds = time_util::parse_period(time)?;
+    let period_milliseconds = time_util::parse_period_to_mill(time)?;
     let expected_length = difference / period_milliseconds;
     if expected_length != (mysql_candles_5m.len() - 1) as i64 {
         let mut discontinuities = Vec::new();

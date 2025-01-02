@@ -5,3 +5,6 @@ pub mod sma;
 pub mod rma;
 pub mod squeeze_momentum;
 pub mod bar;
+pub mod detect_support_resistance;
+pub mod candle;
+pub mod enums;

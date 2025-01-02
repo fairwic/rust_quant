@@ -1,12 +1,13 @@
 use std::fmt::{Display, Formatter};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use crate::trading::okx::{okx_client, OkxApiResponse};
+use crate::trading::okx::{okx_client};
 
 use anyhow::{Result, anyhow};
 use tracing::error;
 use tracing::debug;
 use tracing::field::debug;
+use crate::trading::okx::okx_client::OkxApiResponse;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CandleData {
