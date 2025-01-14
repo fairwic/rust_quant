@@ -163,6 +163,15 @@ pub fn get_period_start_timestamp(period: &str) -> i64 {
             .unwrap()
             .with_nanosecond(0)
             .unwrap(),
+        "4H" => now
+            .with_minute(0)
+            .unwrap()
+            .with_second(0)
+            .unwrap()
+            .with_hour(now.hour() / 4 * 4)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap(),
         "6H" => now
             .with_minute(0)
             .unwrap()
