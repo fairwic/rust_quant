@@ -1,6 +1,7 @@
 use crate::trading::model::big_data::top_contract_account_ratio::{
     ModelEntity, TopContractAccountRatioModel,
 };
+use crate::trading::model::market::candles::SelectTime;
 use crate::trading::okx::big_data::{BigDataOkxApi, TakerVolume};
 use crate::trading::okx::market::Market;
 use chrono::Utc;
@@ -24,6 +25,9 @@ impl BigDataTopContractService {
             for period in periods.iter() {
                 // 获取一条最新的数据并处理
                 let mut begin_end = Self::get_sync_begin_with_end(inst_id, period).await?;
+
+                //延迟100ms
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
                 while let Some(t) = Self::get_new_one_data(inst_id, period).await? {
                     let right = crate::time_util::get_period_start_timestamp(period);
@@ -56,6 +60,8 @@ impl BigDataTopContractService {
         let limit = 1440; // 设置限制
         for inst_id in inst_ids {
             for period in periods.iter() {
+                //延迟100ms
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 let (mut begin, mut end) =
                     Self::get_initial_begin_with_end(inst_id, period).await?;
                 while let Some(t) =
@@ -196,6 +202,19 @@ impl BigDataTopContractService {
         TopContractAccountRatioModel::new()
             .await
             .get_new_one_data(inst_id, period)
+            .await
+    }
+
+    // 获取最新数据
+    pub async fn get_list_by_time(
+        inst_id: &str,
+        period: &str,
+        limit: usize,
+        select_time: Option<SelectTime>,
+    ) -> anyhow::Result<Vec<ModelEntity>> {
+        TopContractAccountRatioModel::new()
+            .await
+            .get_all(inst_id, period, limit, select_time)
             .await
     }
 }

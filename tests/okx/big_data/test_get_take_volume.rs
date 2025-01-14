@@ -14,28 +14,19 @@ async fn test_get_take_volume() -> Result<()> {
     println!("init log config");
     setup_logging().await?;
     init_db().await;
-
-
     // 设置参数
-    let inst_id = "BTC";
-    let time = "4H";
     let period = 10;
-
     // let res = BigData::get_taker_volume(inst_id, "SPOT", None, None, None).await?;
     // println!("volume {:?}", res);
-    //
-    // let inst_id = "BTC-USDT-SWAP";
+    let inst_id = Some(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
+    let period = Some(vec!["4H"]);
     //
     // let res = BigData::get_taker_volume_contract(inst_id, Some(time), Some("2"), None, None, None)
     //     .await?;
     // let contract = res;
     // println!("contract volume {:?}", contract);
 
-    let res = big_data_job::run_take_volume_job(None, None).await?;
+    let res = big_data_job::run_take_volume_job(inst_id, period).await?;
     println!("take volume {:?}", res);
-
-    let res = BigDataOkxApi::get_taker_volume_contract(inst_id, Some(time), Some("2"), None, None, None)
-        .await?;
-    println!("take volume contract {:?}", res);
     Ok(())
 }

@@ -15,6 +15,7 @@ use crate::trading::okx::market::Market;
 use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 
 
+//初始化创建表
 pub async fn init_create_table(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&str>>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
     let res = res.get_all(inst_ids).await.unwrap();
@@ -74,9 +75,7 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&s
             } else {
                 after = res.unwrap().ts;
             }
-            //     after=
-            //
-            // }
+
             loop {
                 sleep(Duration::from_millis(200)).await;
                 info!("get after history_candles {},{}",&ticker.inst_id,time);

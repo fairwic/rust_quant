@@ -4,6 +4,7 @@ use hmac::digest::generic_array::arr;
 use std::cmp::PartialEq;
 use std::env;
 use std::sync::Arc;
+use tokio::task::spawn;
 use tracing::{error, info, warn, Level};
 
 use crate::time_util;
@@ -18,8 +19,8 @@ use crate::trading::okx::account::{Position, PositionResponse};
 use crate::trading::order;
 use crate::trading::strategy;
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
-use crate::trading::strategy::strategy_common::SignalResult;
-use crate::trading::strategy::ut_boot_strategy::{TradeRecord, UtBootStrategy};
+use crate::trading::strategy::strategy_common::{SignalResult, TradeRecord};
+use crate::trading::strategy::ut_boot_strategy::{ UtBootStrategy};
 use crate::trading::strategy::{engulfing_strategy, Strategy};
 
 use crate::app_config::db;
@@ -247,10 +248,9 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
     }
     Ok(())
 }
-use tokio::task::spawn;
 
 // 这个函数用于执行单个策略测试，封装了主要的测试逻辑
-async fn run_test_strategy(
+pub(crate) async fn run_test_strategy(
     inst_id: &str,
     time: &str,
     key_value: f64,
@@ -321,9 +321,9 @@ async fn run_test_strategy(
     } else {
         warn!("Empty trade record list, skipping save_test_detail.");
     }
-
     Ok(())
 }
+
 
 // 主函数，执行所有策略测试
 pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
@@ -473,9 +473,9 @@ pub async fn get_candle_data(
     Ok(mysql_candles_5m)
 }
 
+//判断最新得数据是否所在当前时间的周期
 pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool {
     let ts = mysql_candles_5m.ts;
-    let local_time = Local::now();
     // 将毫秒时间戳转换为 DateTime<Utc>
     let datetime: DateTime<Local> = time_util::mill_time_to_local_datetime(ts);
 
@@ -489,7 +489,7 @@ pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> 
     return true;
 }
 
-pub fn valid_candles_data(mysql_candles_5m: &Vec<CandlesEntity>, time: &str) -> anyhow::Result<()> {
+pub fn valid_candles_data(mysql_candles_5m: &Vec<CandlesEntity>, time: &str) -> Result<()> {
     //验证头尾数据正确性
     let first_timestamp = mysql_candles_5m.first().unwrap().ts;
     let last_timestamp = mysql_candles_5m.last().unwrap().ts;
@@ -498,13 +498,11 @@ pub fn valid_candles_data(mysql_candles_5m: &Vec<CandlesEntity>, time: &str) -> 
     let expected_length = difference / period_milliseconds;
     if expected_length != (mysql_candles_5m.len() - 1) as i64 {
         let mut discontinuities = Vec::new();
-
         //获取哪个数据的不连续
         for window in mysql_candles_5m.windows(2) {
             let current = &window[0];
             let next = &window[1];
             let expected_next_ts = current.ts + period_milliseconds;
-
             if next.ts != expected_next_ts {
                 discontinuities.push(expected_next_ts);
             }
@@ -585,11 +583,9 @@ pub async fn run_ready_to_order(
             let strategy_config =
                 serde_json::from_str::<UtBootStrategy>(&*ut_boot_strategy_info.value)
                     .map_err(|e| anyhow!("Failed to parse UtBootStrategy config: {}", e))?;
-
             let key_value = strategy_config.key_value;
             let atr_period = strategy_config.atr_period;
             let heikin_ashi = strategy_config.heikin_ashi;
-
             UtBootStrategy::get_trade_signal(&mysql_candles_5m, key_value, atr_period, heikin_ashi)
         }
         StrategyType::Engulfing => {

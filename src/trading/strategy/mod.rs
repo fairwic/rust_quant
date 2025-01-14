@@ -6,6 +6,7 @@ pub mod macd_kdj_strategy;
 pub mod profit_stop_loss;
 pub mod engulfing_strategy;
 pub mod strategy_common;
+pub mod top_contract_strategy;
 mod squeeze_strategy;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};

@@ -1,14 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::env;
-
-use crate::time_util;
-use crate::trading::indicator::atr::ATR;
-use crate::trading::indicator::kdj_simple_indicator::KdjCandle;
-use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::strategy::strategy_common::{run_test, SignalResult};
-use ta::indicators::{AverageTrueRange, ExponentialMovingAverage};
+use ta::indicators::ExponentialMovingAverage;
 use ta::Next;
-use tracing::{debug, error, info, warn};
+
+use crate::trading::indicator::atr::ATR;
+use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::strategy::strategy_common::{run_test, SignalResult, TradeRecord};
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct UtBootStrategy {
     pub key_value: f64,
@@ -16,20 +13,7 @@ pub struct UtBootStrategy {
     pub heikin_ashi: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct TradeRecord {
-    pub option_type: String,
-    pub open_position_time: String,
-    pub close_position_time: Option<String>,
-    pub open_price: f64,
-    pub close_price: f64,
-    pub profit_loss: f64,
-    pub quantity: f64,
-    pub full_close: bool,
-    pub close_type: String,
-    pub win_num: i64,
-    pub loss_num: i64,
-}
+
 
 impl UtBootStrategy {
     pub fn get_trade_signal(

@@ -1,11 +1,13 @@
 use crate::app_config;
+use crate::trading::model::market::candles::{SelectTime, TimeDirect};
 use anyhow::{anyhow, Result};
 use rbatis::rbdc::Error;
 use rbatis::RBatis;
 use rbatis::{crud, impl_select, impl_select_page};
+use rbs::Value;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// 与 `top_contract_position_ratio` 表对应的实体结构
 ///
@@ -20,7 +22,7 @@ use tracing::debug;
 // UNIQUE KEY `inst_id` (`inst_id`,`period`,`ts`)
 // ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /// ) ...
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug,Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct TopContractPositionRatioEntity {
     // 主键ID
@@ -111,5 +113,39 @@ impl TopContractPositionRatioModel {
             Ok(list) => Ok(list),
             Err(_) => Err(anyhow!("db error ")),
         }
+    }
+
+    pub async fn get_all(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+        limit: usize,
+        select_time: Option<SelectTime>,
+    ) -> Result<Vec<ModelEntity>> {
+        let mut query = format!("select * from `{}` ", "top_contract_position_ratio");
+        //如果指定了时间
+        if let Some(SelectTime { direct, point_time }) = select_time {
+            match direct {
+                TimeDirect::BEFORE => {
+                    query = format!("{} where ts<= {} ", query, point_time);
+                }
+                TimeDirect::AFTER => {
+                    query = format!("{} where ts>= {} ", query, point_time);
+                }
+            }
+        }
+        //默认取最后的条数
+        query = format!("{} order by ts DESC limit {}", query, limit);
+        info!("query  SQL: {}", query);
+        let res: Value = self.db.query(&query, vec![]).await?;
+        if res.is_array() && res.as_array().unwrap().is_empty() {
+            info!("No data found in MySQL");
+            return Ok(vec![]);
+        }
+        // 将 rbatis::core::value::Value 转换为 serde_json::Value
+        let json_value: serde_json::Value = serde_json::from_str(&res.to_string())?;
+        // 将 serde_json::Value 转换为 Vec<CandlesEntity>
+        let candles: Vec<ModelEntity> = serde_json::from_value(json_value)?;
+        Ok(candles)
     }
 }

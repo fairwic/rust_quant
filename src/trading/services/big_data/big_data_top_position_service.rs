@@ -9,6 +9,7 @@ use redis::Commands;
 use std::error::Error;
 use std::time::Duration;
 use tracing::{debug, warn};
+use crate::trading::model::market::candles::SelectTime;
 
 pub struct BigDataTopPositionService {}
 
@@ -24,6 +25,8 @@ impl BigDataTopPositionService {
             for period in periods.iter() {
                 // 获取一条最新的数据并处理
                 let mut begin_end = Self::get_sync_begin_with_end(inst_id, period).await?;
+                //延迟100ms
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
                 while let Some(t) = Self::get_new_one_data(inst_id, period).await? {
                     let right = crate::time_util::get_period_start_timestamp(period);
@@ -58,6 +61,10 @@ impl BigDataTopPositionService {
             for period in periods.iter() {
                 let (mut begin, mut end) =
                     Self::get_initial_begin_with_end(inst_id, period).await?;
+
+                //延迟100ms
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
                 while let Some(t) =
                     Self::fetch_and_process_okx_data(inst_id, period, &begin, &end).await?
                 {
@@ -197,4 +204,13 @@ impl BigDataTopPositionService {
             .get_new_one_data(inst_id, period)
             .await
     }
+
+    // 获取最新数据
+    pub  async fn get_list_by_time(inst_id: &str, period: &str, limit:usize, select_time:Option<SelectTime>) -> anyhow::Result<Vec<ModelEntity>> {
+        TopContractPositionRatioModel::new()
+            .await
+            .get_all(inst_id, period,limit,select_time)
+            .await
+    }
+
 }

@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::strategy::strategy_common::{run_test, SignalResult};
-use crate::trading::strategy::ut_boot_strategy::TradeRecord;
+use crate::trading::strategy::strategy_common::{run_test, SignalResult, TradeRecord};
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct EngulfingStrategy {

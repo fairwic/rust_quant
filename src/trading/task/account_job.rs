@@ -1,5 +1,4 @@
 use crate::trading::okx::account::Account;
-use crate::trading::okx::okx_client;
 
 pub async fn get_account_balance() -> anyhow::Result<()> {
     // let ccy = vec!["BTC".to_string(), "USDT".to_string(), "ETH".to_string()];

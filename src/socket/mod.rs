@@ -42,7 +42,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     Ok(())
 }
 
-pub async fn run_socket(inst_ids: Arc<Vec<&str>>, times: Arc<Vec<&str>>) {
+pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
     let span = span!(Level::DEBUG, "socket_logic");
     let _enter = span.enter();
     // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
