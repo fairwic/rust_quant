@@ -3,6 +3,7 @@ use chrono::{
     DateTime, Datelike, Duration, FixedOffset, Local, MappedLocalTime, NaiveDateTime, ParseError,
     TimeZone, Timelike, Utc,
 };
+use rbatis::rbdc::Timestamp;
 use std::pin::pin;
 use tracing::warn;
 
@@ -38,14 +39,14 @@ pub(crate) fn is_within_business_hours(ts: i64) -> bool {
 
 pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
     let duration = match &period.to_uppercase()[..] {
-        "1m" => 60,
-        "3m" => 3 * 60,
-        "5m" => 5 * 60,
+        "1M" => 60,
+        "3M" => 3 * 60,
+        "5M" => 5 * 60,
         "1H" => 3600,
         "4H" => 4 * 3600,
         "1D" => 24 * 3600,
         "5D" => 5 * 24 * 3600,
-        _ => return Err(anyhow!("Unsupported period format")),
+        _ => return Err(anyhow!("Unsupported period format{}",period)),
     };
     Ok(duration * 1000) // 转换为毫秒
 }
@@ -149,6 +150,8 @@ pub fn get_period_start_timestamp(period: &str) -> i64 {
     let now = Local::now();
     // 获取当前的时间戳，并根据周期进行调整
     let period_start = match period {
+        "1m" => now.with_minute(now.minute()).unwrap().with_second(0).unwrap().with_nanosecond(0).unwrap(),
+        "3m" => now.with_minute(now.minute() / 3 * 3).unwrap().with_second(0).unwrap().with_nanosecond(0).unwrap(),
         "5m" => now
             .with_minute(now.minute() / 5 * 5)
             .unwrap()
@@ -247,10 +250,8 @@ pub fn mill_time_to_datetime_shanghai(timestamp_ms: i64) -> Result<String, Strin
     }
 }
 
-pub fn millis_time_diff(period: &str) -> i64 {
+pub fn millis_time_diff(period: &str, timestamp1: i64, timestamp2: i64) -> i64 {
     // 定义两个时间戳（毫秒）
-    let timestamp1: i64 = 1622512800000; // 示例时间戳1
-    let timestamp2: i64 = 1622599200000; // 示例时间戳2
 
     // 尝试将时间戳转换为 DateTime 对象
     let datetime1 = Utc.timestamp_millis_opt(timestamp1).single();
@@ -263,9 +264,11 @@ pub fn millis_time_diff(period: &str) -> i64 {
             let duration = dt2.signed_duration_since(dt1);
             // 根据 period 参数返回相应的时间差
             let diff = match period {
-                "H" => duration.num_hours(),
-                "m" => duration.num_minutes(),
-                "D" => duration.num_days(),
+                "1H" => duration.num_hours(),
+                "2H" => duration.num_hours() / 2,
+                "4H" => duration.num_hours() / 4,
+                "1m" => duration.num_minutes(),
+                "1D" => duration.num_days(),
                 _ => {
                     panic!("无效的 period 参数");
                 }

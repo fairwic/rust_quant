@@ -15,6 +15,20 @@ use crate::trading::okx::market::Market;
 use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 
 
+fn get_period_back_test_candle_nums(period: &str) -> i32 {
+    match period {
+        // 24 * 60 * 20,
+        "1m" => 28800,
+        "5m" => 28800,
+        "1H" => 28800,
+        "4H" => 28800,
+        "1D" => 28800,
+        "1Dutc" => 28800,
+        _ => 28800
+    }
+}
+
+
 //初始化创建表
 pub async fn init_create_table(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&str>>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
@@ -58,9 +72,8 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&s
             //     after = res.unwrap().ts;
             // }
 
-
             //判断是否达到最新的300000条
-            let limit = 50000;
+            let limit = get_period_back_test_candle_nums(time);
             let res = CandlesModel::new().await.get_new_count(ticker.inst_id.as_str(), time, Some(limit)).await?;
             if (res > limit as u64) {
                 debug!("达到最新的{}条,跳过",limit);
@@ -89,7 +102,7 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&s
                 let res = CandlesModel::new().await.add(res, ticker.inst_id.as_str(), time).await?;
 
                 //判断是否达到最新的300000条
-                let limit = 5000;
+                let limit = get_period_back_test_candle_nums(time);
                 let count = CandlesModel::new().await.get_new_count(ticker.inst_id.as_str(), time, Some(limit)).await?;
                 if (count > limit as u64) {
                     info!("已达到所需数据的{}条,跳过",limit);
@@ -113,7 +126,6 @@ pub async fn init_before_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
         for time in times.clone().unwrap() {
-
             //获取当前数据最旧的数据
             let res = CandlesModel::new().await.get_new_data(ticker.inst_id.as_str(), time).await?;
             debug!("res: {:?}", res);

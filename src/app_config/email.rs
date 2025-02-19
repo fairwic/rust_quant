@@ -1,8 +1,8 @@
 use std::env;
+
 use lettre::{Message, SmtpTransport, Transport};
 use lettre::message::header;
 use lettre::transport::smtp::authentication::Credentials;
-use redis::ToRedisArgs;
 
 pub async fn send_email(title: &str, body: String) {
     // SMTP 服务器地址和端口

@@ -62,6 +62,8 @@ impl BackTestLogModel {
 
         // 移除最后一个逗号
         query.pop();
+
+        debug!("insert_back_test_log_quey = {}", query);
         let data = self.db.exec(&query, params).await?;
         // Ok(res
         debug!("insert_back_test_log_result = {}", json!(data));

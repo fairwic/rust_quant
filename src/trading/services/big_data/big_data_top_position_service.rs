@@ -1,6 +1,7 @@
 use crate::trading::model::big_data::top_contract_position_ratio::{
     ModelEntity, TopContractPositionRatioModel,
 };
+use crate::trading::model::market::candles::SelectTime;
 use crate::trading::okx::big_data::{BigDataOkxApi, TakerVolume};
 use crate::trading::okx::market::Market;
 use chrono::Utc;
@@ -8,39 +9,56 @@ use log::info;
 use redis::Commands;
 use std::error::Error;
 use std::time::Duration;
-use tracing::{debug, warn};
-use crate::trading::model::market::candles::SelectTime;
+use tokio::time::sleep;
+use tracing::{debug, error, warn};
+use crate::trading::services::big_data::top_contract_service_trait::TopContractTrait;
 
 pub struct BigDataTopPositionService {}
 
-impl BigDataTopPositionService {
-    //同步精英交易员合约多空持仓仓位比
-    pub async fn sync_top_contract_position_ratio(
+
+
+impl TopContractTrait for BigDataTopPositionService {
+    //同步精英交易员合约多空持仓人数比
+    async fn sync(
         inst_ids: Vec<&str>,
         periods: Vec<&str>,
     ) -> anyhow::Result<()> {
-        println!("sync long-short-position-ratio-contract-top-trader...");
+        println!("sync long-short-account-ratio-contract-top-trader...");
         // 遍历所有交易对和周期
         for inst_id in inst_ids {
             for period in periods.iter() {
-                // 获取一条最新的数据并处理
-                let mut begin_end = Self::get_sync_begin_with_end(inst_id, period).await?;
-                //延迟100ms
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-                while let Some(t) = Self::get_new_one_data(inst_id, period).await? {
+                // 获取一条最新的数据并处理+1period
+                let res = Self::get_new_one_data(inst_id, period).await?;
+                let right = crate::time_util::get_period_start_timestamp(period);
+                if res.is_none() {
+                    error!("请先初始化数据topContract {} {}",inst_id,period);
+                    continue; // 数据更新完毕，跳出循环
+                }
+                let start = res.unwrap().ts;
+                if start >= right {
+                    info!("新数据已经达到最新时间周期，跳过");
+                    continue; // 数据更新完毕，跳出循环
+                }
+                let mut begin_end = Self::ts_add_n_period(start, period)?;
+                loop {
+                    //获取当前最新时间的周期
                     let right = crate::time_util::get_period_start_timestamp(period);
-                    if t.ts < right {
-                        // 获取Okx数据并插入
-                        let res = Self::fetch_okx_data(inst_id, period, &begin_end.0, &begin_end.1)
-                            .await?;
-                        if res.is_empty() {
-                            debug!("No old candles need patch: {},{}", inst_id, period);
-                            break;
-                        }
-                        let taker_volumes = Self::process_okx_data(res, inst_id, period)?;
-                        Self::insert_taker_volumes(&taker_volumes).await?;
-                    } else {
+                    //延迟100ms
+                    tokio::time::sleep(Duration::from_millis(1500)).await;
+                    // 获取Okx数据并插入
+                    let res = Self::fetch_okx_data(inst_id, period, &Some(begin_end.unwrap().0.to_string()), &Some(begin_end.unwrap().1.to_string())).await?;
+                    if res.is_empty() {
+                        debug!("No old candles need patch: {},{}", inst_id, period);
+                        break;
+                    }
+                    //处理数据
+                    let taker_volumes = Self::process_okx_data(res, inst_id, period)?;
+                    //插入数据库
+                    Self::insert_taker_volumes(&taker_volumes).await?;
+                    //更新开始时间结束时间
+                    begin_end = Self::get_sync_begin_with_end(inst_id, period).await?;
+
+                    if begin_end.unwrap().0 <= right {
                         info!("新数据已经达到最新时间，跳过");
                         break; // 数据更新完毕，跳出循环
                     }
@@ -50,8 +68,9 @@ impl BigDataTopPositionService {
         Ok(())
     }
 
+
     //初始精英交易员合约多空持仓仓位比
-    pub async fn init_top_contract_position_ratio(
+     async fn init(
         inst_ids: Vec<&str>,
         periods: Vec<&str>,
     ) -> anyhow::Result<()> {
@@ -61,9 +80,6 @@ impl BigDataTopPositionService {
             for period in periods.iter() {
                 let (mut begin, mut end) =
                     Self::get_initial_begin_with_end(inst_id, period).await?;
-
-                //延迟100ms
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
                 while let Some(t) =
                     Self::fetch_and_process_okx_data(inst_id, period, &begin, &end).await?
@@ -77,11 +93,17 @@ impl BigDataTopPositionService {
                     let new_times = Self::get_initial_begin_with_end(inst_id, period).await?;
                     begin = new_times.0;
                     end = new_times.1;
+
+                    //延迟100ms
+                    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
                 }
             }
         }
         Ok(())
     }
+}
+impl  BigDataTopPositionService {
+
 
     // 获取Okx数据
     async fn fetch_okx_data(
@@ -123,17 +145,18 @@ impl BigDataTopPositionService {
     async fn get_sync_begin_with_end(
         inst_id: &str,
         period: &str,
-    ) -> anyhow::Result<(Option<String>, Option<String>)> {
+    ) -> anyhow::Result<Option<(i64, i64)>> {
         let res = Self::get_new_one_data(inst_id, period).await?;
         match res {
             Some(t) => {
                 let begin = crate::time_util::ts_add_n_period(t.ts, period, 1)?;
                 let end = crate::time_util::ts_add_n_period(t.ts, period, 101)?;
-                Ok((Some(begin.to_string()), Some(end.to_string())))
+                Ok(Some((begin, end)))
             }
-            None => Ok((None, None)),
+            None => Ok(None),
         }
     }
+
 
     // 获取初始数据的时间范围
     async fn get_initial_begin_with_end(
@@ -206,11 +229,18 @@ impl BigDataTopPositionService {
     }
 
     // 获取最新数据
-    pub  async fn get_list_by_time(inst_id: &str, period: &str, limit:usize, select_time:Option<SelectTime>) -> anyhow::Result<Vec<ModelEntity>> {
-        TopContractPositionRatioModel::new()
-            .await
-            .get_all(inst_id, period,limit,select_time)
-            .await
+    pub async fn get_list_by_time(
+        inst_id: &str,
+        period: &str,
+        offset:Option<usize>,
+        limit: usize,
+        select_time: Option<SelectTime>,
+    ) -> anyhow::Result<Vec<ModelEntity>> {
+        let mut data = TopContractPositionRatioModel::new().await.get_all(inst_id, period,offset, limit, select_time).await?;
+        if !data.is_empty() {
+            //数据进行反向排序
+            data.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+        }
+        Ok(data)
     }
-
 }

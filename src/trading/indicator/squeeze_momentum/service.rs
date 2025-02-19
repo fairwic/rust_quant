@@ -1,8 +1,8 @@
 use crate::trading;
-use crate::trading::indicator::squeeze_momentum::types::{SqueezeConfig, SqueezeResult};
-use crate::trading::model::market::candles::{CandlesEntity, SelectTime};
-use ta::DataItem;
 use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
+use crate::trading::indicator::squeeze_momentum::squeeze_config::SqueezeConfig;
+use crate::trading::model::market::candles::SelectTime;
+use crate::trading::strategy::strategy_common::SignalResult;
 
 /// 返回线性回归的结果 (f64)。
 pub fn calculate_linreg(source: &[f64], length: usize, offset: usize) -> Option<f64> {
@@ -39,42 +39,24 @@ pub fn calculate_linreg(source: &[f64], length: usize, offset: usize) -> Option<
     Some(result)
 }
 
-pub fn convert_to_data_items(prices: &Vec<CandlesEntity>) -> Vec<DataItem> {
-    prices
-        .iter()
-        .map(|candle| {
-            DataItem::builder()
-                .open(candle.o.parse().unwrap())
-                .high(candle.h.parse().unwrap())
-                .low(candle.l.parse().unwrap())
-                .close(candle.c.parse().unwrap())
-                .volume(0.0)
-                .build()
-                .unwrap()
-        })
-        .collect()
-}
+
 pub async fn get_last_squeeze_single(
     config: SqueezeConfig,
     inst_id: &str,
     period: &str,
     select_time: Option<SelectTime>,
-) -> anyhow::Result<SqueezeResult> {
+) -> anyhow::Result<SignalResult> {
     let min_length = config.bb_length.max(config.kc_length);
-    let candles =
-        trading::task::basic::get_candle_data(inst_id, period, min_length * 2, select_time).await?;
-
+    let candles = trading::task::basic::get_candle_data(inst_id, period, min_length * 2, select_time).await?;
     if candles.len() < min_length {
         return Err(anyhow::anyhow!("Insufficient data"));
     }
-
     //组装数据
-    let data_items = convert_to_data_items(&candles);
     //初始化配置类
-    let mut calculator = SqueezeCalculator::new(config)?;
+    let mut calculator = SqueezeCalculator::new(config);
     //计算
-    let mut result = calculator.calculate(&data_items)?;
-    result.timestamp = candles.last().unwrap().ts;
+    let mut result = calculator.get_trade_signal(&candles);
+    // result.timestamp = candles.last().unwrap().ts;
 
     Ok(result)
 }

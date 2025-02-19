@@ -91,8 +91,8 @@ impl Market {
         }
 
         debug!("path:{}", path);
-        let res: OkxApiResponse<Vec<CandleData>> = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
-        Ok(res.data)
+        let res: Vec<CandleData> = okx_client::get_okx_client().send_request(Method::GET, &path, "").await?;
+        Ok(res)
     }
 
     /**

@@ -89,12 +89,17 @@ async fn main() -> anyhow::Result<()> {
 
     // let period = Arc::new(vec!["1m", "3m", "5m", "15m"]);
 
-    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP", "ADA-USDT-SWAP", "SUSHI-USDT-SWAP"]);
+    // let inst_ids =Some(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP","OM-USDT-SWAP", "ADA-USDT-SWAP", "SUSHI-USDT-SWAP"]);
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
     // let times = Arc::new(vec!["4H", "1H", "5m", "1Dutc"]);
 
-    let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
-    let period = Some(vec!["4H"]);
+    // let inst_ids =Some(vec![ "ETH-USDT-SWAP"]);
+    // let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
+    let inst_ids = Some(vec!["OM-USDT-SWAP"]);
+    // let period = Some(vec!["4H",]);
+    // let period = Some(vec!["1m"]);
+    // let period = Some(vec!["4H", "1H", "1m","5m", "1Dutc"]);
+    let period = Some(vec!["1H"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
     // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
@@ -108,9 +113,14 @@ async fn main() -> anyhow::Result<()> {
         }
         let res = task::basic::run_sync_data_job(inst_ids.clone(), &period.clone().unwrap()).await;
         if let Err(error) = res {
-            error!("run sync data job error: {}", error);
+            error!("run sync [tickets] data job error: {}", error);
         }
-        info!("RUN_SYNC_DATA_JOB Ok!");
+
+        // let res = task::big_data_job::sync_top_contract(inst_ids.clone(), period.clone()).await;
+        // if let Err(error) = res {
+        //     error!("run sync [top contract] data job error: {}", error);
+        // }
+        // info!("RUN_SYNC_DATA_JOB Ok!");
     }
 
     // 获取可用账户的最大数量
@@ -126,11 +136,17 @@ async fn main() -> anyhow::Result<()> {
                 for time in period.clone().unwrap().iter() {
                     let time = time.to_string();
                     //ut_boot_strategy
-                    let res = task::basic::ut_boot_test(inst_id, &time).await;
+                    // let res = task::basic::squeeze_test(inst_id, &time).await;
+                    //ut_boot_strategy
+                    // let res = task::basic::top_contract_test(inst_id, &time).await;
+                    //ut_boot_strategy
+                    // let res = task::basic::ut_boot_test(inst_id, &time).await;
+                    //vegas_strategy
+                    let res = task::basic::vegas_test(inst_id, &time).await;
                     //engulfing_strategy
                     // let res = task::engulfing_test(&inst_id, &time).await;
                     if let Err(error) = res {
-                        error!("run strategy error: {}", error);
+                        error!("run strategy error: {} {} {}", error,inst_id,time);
                     }
                 }
             }

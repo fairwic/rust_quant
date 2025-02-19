@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::strategy::strategy_common::{run_test, SignalResult, TradeRecord};
+use crate::trading::strategy::strategy_common::{BackTestResult, run_test, SignalResult, TradeRecord};
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct EngulfingStrategy {
@@ -66,7 +66,7 @@ impl EngulfingStrategy {
         }
         // ts = candles_5m.last().unwrap().ts;
 
-        SignalResult { should_buy, should_sell, price, ts: candles_5m.last().unwrap().ts }
+        SignalResult { should_buy, should_sell, price, ts: candles_5m.last().unwrap().ts ,single_detail:None}
     }
 
     /// 运行回测
@@ -79,7 +79,7 @@ impl EngulfingStrategy {
         is_open_long: bool,
         is_open_short: bool,
         is_judge_trade_time: bool,
-    ) -> (f64, f64, usize, Vec<TradeRecord>) {
+    ) ->BackTestResult {
         let min_data_length = num_bars + 1;
         let res = run_test(
             |candles| Self::get_trade_signal(candles, num_bars),

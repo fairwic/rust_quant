@@ -1,10 +1,12 @@
 use crate::time_util;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::okx::trade::{PosSide, Side};
+use crate::trading::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tracing::{error, info};
-use crate::trading::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
+
+
 
 pub trait StrategyCommonTrait<D, S> {
     async fn get_trade_signal(data: &D, _key_value: f64, _atr_period: usize, _heikin_ashi: bool);
@@ -20,6 +22,18 @@ pub trait StrategyCommonTrait<D, S> {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct BackTestResult {
+    pub funds:f64,
+    pub win_rate:f64,
+    pub open_trades:usize,
+    pub trade_records:Vec<TradeRecord>
+}
+
+pub trait  BackTestTrait {
+    fn to_string();
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TradeRecord {
     pub option_type: String,
     pub open_position_time: String,
@@ -32,6 +46,7 @@ pub struct TradeRecord {
     pub close_type: String,
     pub win_num: i64,
     pub loss_num: i64,
+    pub signal_detail: Option<String>,
 }
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SignalResult {
@@ -39,6 +54,7 @@ pub struct SignalResult {
     pub should_sell: bool,
     pub price: f64,
     pub ts: i64,
+    pub single_detail: Option<String>,
 }
 
 fn record_trade(
@@ -54,6 +70,7 @@ fn record_trade(
     close_type: &str,
     win_num: i64,
     loss_num: i64,
+    detail: Option<String>,
 ) {
     trade_records.push(TradeRecord {
         option_type: option_type.to_string(),
@@ -67,6 +84,7 @@ fn record_trade(
         close_type: close_type.to_string(),
         win_num,
         loss_num,
+        signal_detail: detail,
     });
 }
 
@@ -125,7 +143,7 @@ pub fn process_fibonacci_levels(
         if (is_long && signal.price >= fib_price) || (!is_long && signal.price <= fib_price) {
             // println!(" 触发斐波那契止损，fib_level:{},price:{}", level, signal.price);
             let sell_amount = *position * feibon_profil_levels[idx]; // 按斐波那契级别的比例止盈
-            // println!(" 原来数量:{}", *position);
+                                                                     // println!(" 原来数量:{}", *position);
             if sell_amount < 1e-8 {
                 // 防止非常小的数值
                 continue;
@@ -181,6 +199,7 @@ pub fn process_fibonacci_levels(
                     close_type: "斐波那契止盈".to_string(),
                     win_num: 0,
                     loss_num: 0,
+                    signal_detail: None,
                 });
                 triggered_fib_levels.insert(idx); // 标记该斐波那契级别已触发
                 info!(
@@ -242,6 +261,7 @@ pub fn close_remaining_position(
         },
         win_num: *wins,
         loss_num: *losses,
+        signal_detail: None,
     });
     *position = 0.0;
 
@@ -261,7 +281,7 @@ pub fn run_test_top_contract(
     is_open_long: bool,
     is_open_short: bool,
     is_judge_trade_time: bool,
-) -> (f64, f64, usize, Vec<TradeRecord>) {
+) -> BackTestResult {
     let initial_funds = 100.0;
     let mut funds = initial_funds;
     let mut position: f64 = 0.0;
@@ -278,15 +298,15 @@ pub fn run_test_top_contract(
     let mut total_profit_loss = 0.0; // 总的盈利或损失
     let mut triggered_fib_levels = HashSet::new(); // 用于记录已触发的斐波那契级别
 
-    let accout_ratio_list=data.clone().account_ratio;
-    let position_ratio_list=data.clone().position_ratio;
+    let accout_ratio_list = data.clone().account_ratio;
+    let position_ratio_list = data.clone().position_ratio;
 
     for (i, candle) in data.candle_list.iter().enumerate() {
         if i + 1 < min_data_length {
             continue; // 确保有足够的K线数据
         }
         // println!("signal_data:{:?}", signal_data);
-       let top_contract_single_data = TopContractSingleData{
+        let top_contract_single_data = TopContractSingleData {
             candle_list: candle.clone(),
             account_ratio: accout_ratio_list.get(i).unwrap().clone(),
             position_ratio: position_ratio_list.get(i).clone().unwrap().clone(),
@@ -297,6 +317,7 @@ pub fn run_test_top_contract(
         // info!("ts:{},Time: {:?}, funds: {}, Price: {}, Buy: {}, Sell: {}",candle.ts,time_util::mill_time_to_datetime_shanghai(candle.ts),funds,signal.price,signal.should_buy,signal.should_sell);
 
         if signal.should_buy {
+            info!("should.buy");
             if position > 0.0 {
                 if !is_long {
                     // 平掉所有空单
@@ -346,6 +367,7 @@ pub fn run_test_top_contract(
                         close_type: "".to_string(),
                         win_num: 0,
                         loss_num: 0,
+                        signal_detail:signal.single_detail
                     });
                 }
             }
@@ -399,6 +421,7 @@ pub fn run_test_top_contract(
                         close_type: "".to_string(),
                         win_num: 0,
                         loss_num: 0,
+                        signal_detail:signal.single_detail
                     });
                 }
             }
@@ -437,6 +460,7 @@ pub fn run_test_top_contract(
                 close_type: "止损".to_string(),
                 win_num: wins,
                 loss_num: losses,
+                signal_detail: signal.single_detail
             });
             position = 0.0;
             triggered_fib_levels.clear(); // 重置斐波那契级别触发记录
@@ -489,14 +513,23 @@ pub fn run_test_top_contract(
     } else {
         0.0
     };
-
+    BackTestResult{
+        funds,
+        win_rate,
+        open_trades,
+        trade_records,
+    }
     // info!("Final Win rate: {}", win_rate);
-    (funds, win_rate, open_trades, trade_records)
 }
+
+
+
+
+
 /// 运行回测
 pub fn run_test(
-    strategy: impl Fn(&[CandlesEntity]) -> SignalResult,
-    candles_5m: &[CandlesEntity],
+    mut strategy: impl FnMut(&[CandlesEntity]) -> SignalResult,
+    candles_5m: &Vec<CandlesEntity>,
     fib_levels: &[f64],
     max_loss_percent: f64,
     min_data_length: usize,
@@ -504,7 +537,7 @@ pub fn run_test(
     is_open_long: bool,
     is_open_short: bool,
     is_judge_trade_time: bool,
-) -> (f64, f64, usize, Vec<TradeRecord>) {
+) -> BackTestResult {
     let initial_funds = 100.0;
     let mut funds = initial_funds;
     let mut position: f64 = 0.0;
@@ -525,12 +558,12 @@ pub fn run_test(
         if i + 1 < min_data_length {
             continue; // 确保有足够的K线数据
         }
+
         let signal_data = &candles_5m[i + 1 - min_data_length..=i];
         // println!("signal_data:{:?}", signal_data);
         //调用函数,获取信号
-        let signal = strategy(signal_data);
+        let signal =  strategy(signal_data);
         // println!("signal_result:{:?}", signal);
-
         // info!("ts:{},Time: {:?}, funds: {}, Price: {}, Buy: {}, Sell: {}",candle.ts,time_util::mill_time_to_datetime_shanghai(candle.ts),funds,signal.price,signal.should_buy,signal.should_sell);
 
         if signal.should_buy {
@@ -583,6 +616,7 @@ pub fn run_test(
                         close_type: "".to_string(),
                         win_num: 0,
                         loss_num: 0,
+                        signal_detail: signal.single_detail,
                     });
                 }
             }
@@ -636,6 +670,7 @@ pub fn run_test(
                         close_type: "".to_string(),
                         win_num: 0,
                         loss_num: 0,
+                        signal_detail:signal.single_detail
                     });
                 }
             }
@@ -674,6 +709,7 @@ pub fn run_test(
                 close_type: "止损".to_string(),
                 win_num: wins,
                 loss_num: losses,
+                signal_detail: signal.single_detail,
             });
             position = 0.0;
             triggered_fib_levels.clear(); // 重置斐波那契级别触发记录
@@ -727,6 +763,12 @@ pub fn run_test(
         0.0
     };
 
+    BackTestResult {
+        funds,
+        win_rate,
+        open_trades,
+        trade_records,
+    }
     // info!("Final Win rate: {}", win_rate);
-    (funds, win_rate, open_trades, trade_records)
+    // (funds, win_rate, open_trades, trade_records)
 }

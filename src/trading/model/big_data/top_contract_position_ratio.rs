@@ -119,10 +119,14 @@ impl TopContractPositionRatioModel {
         &self,
         inst_id: &str,
         time_interval: &str,
+        offset: Option<usize>,
         limit: usize,
         select_time: Option<SelectTime>,
     ) -> Result<Vec<ModelEntity>> {
-        let mut query = format!("select * from `{}` ", "top_contract_position_ratio");
+        let mut query = format!(
+            "select * from `{}` where  `inst_id`= '{}' and `period`='{}'",
+            "top_contract_position_ratio", inst_id, time_interval
+        );
         //如果指定了时间
         if let Some(SelectTime { direct, point_time }) = select_time {
             match direct {
@@ -135,7 +139,13 @@ impl TopContractPositionRatioModel {
             }
         }
         //默认取最后的条数
-        query = format!("{} order by ts DESC limit {}", query, limit);
+        query = format!("{} order by ts DESC ", query);
+        query = format!("{} limit {}", query, limit);
+
+        if let Some(of) = offset {
+            query = format!("{} offset {}", query, of);
+        }
+
         info!("query  SQL: {}", query);
         let res: Value = self.db.query(&query, vec![]).await?;
         if res.is_array() && res.as_array().unwrap().is_empty() {

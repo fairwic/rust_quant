@@ -9,7 +9,7 @@ use rust_quant::trading;
 use rust_quant::trading::indicator::bar::Bar;
 use rust_quant::trading::indicator::sma::Sma;
 use rust_quant::trading::indicator::squeeze_momentum::service::get_last_squeeze_single;
-use rust_quant::trading::indicator::squeeze_momentum::types::SqueezeConfig;
+use rust_quant::trading::indicator::squeeze_momentum::squeeze_config::SqueezeConfig;
 use rust_quant::trading::model::market::candles::{SelectTime, TimeDirect};
 
 // tests/squeeze_test.rs

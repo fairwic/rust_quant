@@ -369,7 +369,6 @@ impl CandlesModel {
         match candles {
             Ok(mut data) => {
                 data.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
-                info!("get candle data form db{:?}", data);
                 Ok(data)
             }
             Err(e) => {

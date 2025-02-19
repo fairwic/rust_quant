@@ -6,6 +6,9 @@ use rbdc_mysql::MysqlDriver;
 
 static DB_CLIENT: OnceCell<RBatis> = OnceCell::new();
 
+// lazy_static! {
+//     pub static ref DB_CLIENT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+// }
 pub async fn init_db() -> &'static RBatis {
     // println!("init db config ant connecting ");
     let rb = RBatis::new();

@@ -26,6 +26,7 @@ pub struct BackTestDetail {
     pub close_type: String,
     pub win_nums: i64,
     pub loss_nums: i64,
+    pub signal_detail: String,
 }
 
 impl_insert!(BackTestDetail{});
@@ -54,11 +55,11 @@ impl BackTestDetailModel {
         let table_name = format!("{}", "back_test_detail");
         // 构建批量插入的 SQL 语句
         let mut query = format!("INSERT INTO `{}` (option_type, strategy_type, inst_id, time, back_test_id, open_position_time,\
-         close_position_time, open_price,close_price,profit_loss,quantity,full_close,close_type,win_nums,loss_nums) VALUES ", table_name);
+         close_position_time, open_price,close_price,profit_loss,quantity,full_close,close_type,win_nums,loss_nums,signal_detail) VALUES ", table_name);
         let mut params = Vec::new();
 
         for candle in list {
-            query.push_str("(?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?),");
+            query.push_str("(?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?),");
             params.push(candle.option_type.to_string().into());
             params.push(candle.strategy_type.to_string().into());
             params.push(candle.inst_id.to_string().into());
@@ -74,6 +75,7 @@ impl BackTestDetailModel {
             params.push(candle.close_type.to_string().into());
             params.push(candle.win_nums.to_string().into());
             params.push(candle.loss_nums.to_string().into());
+            params.push(candle.signal_detail.to_string().into());
         }
 
         // 移除最后一个逗号

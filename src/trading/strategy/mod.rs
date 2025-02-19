@@ -52,6 +52,7 @@ pub enum StrategyType {
     UtBoot,
     UtBootShort,
     Engulfing,
+    TopContract,
 }
 
 impl PartialEq for StrategyType {
@@ -71,6 +72,7 @@ impl Display for StrategyType {
             StrategyType::UtBootShort => write!(f, "UtBootShort"),
             StrategyType::MacdWithKdj => write!(f, "MacdWithKdj"),
             StrategyType::Engulfing => write!(f, "Engulfing"),
+            StrategyType::TopContract => write!(f, "TopContract"),
         }
     }
 }
@@ -783,107 +785,107 @@ impl Strategy {
     }
 
 
-    pub async fn ut_bot_alert_strategy_with_shorting(&mut self, candles_5m: &Vec<CandlesEntity>, fib_levels: &Vec<f64>, key_value: f64, atr_period: usize, heikin_ashi: bool) -> (f64, f64, usize) {
-        let initial_funds = 100.0; // 初始资金
-        let mut funds = initial_funds; // 当前资金
-        let mut position: f64 = 0.0; // 当前持仓量, 显式指定为 f64 类型
-        let mut wins = 0; // 赢的次数
-        let mut losses = 0; // 输的次数
-        let mut open_trades = 0; // 开仓次数
-        let mut entry_price = 0.0; // 记录每次开仓时的价格
-        let mut fib_triggered = [false; 6]; // 用于记录每个斐波那契级别是否已经触发
-        let mut trade_completed = true; // 交易完成标志
-        let max_loss_percent = 0.1; // 最大损失百分比设置为10%
-
-        for (i, candle) in candles_5m.iter().enumerate() {
-            let signal = ut_boot_strategy::UtBootStrategy::get_trade_signal(&candles_5m[..=i], key_value, atr_period, heikin_ashi);
-
-            // 添加日志记录
-            info!("Time: {:?}, funds: {}, Price: {}, Buy: {}, Sell: {}, key_value: {}, atr_period: {}",
-            time_util::mill_time_to_datetime_shanghai(candle.ts), funds, signal.price, signal.should_buy, signal.should_sell, key_value, atr_period);
-
-            if signal.should_sell && position.abs() < f64::EPSILON && trade_completed {
-                // 做空逻辑
-                position = funds / signal.price;
-                entry_price = signal.price; // 记录开仓价格
-                funds = 0.0;
-                open_trades += 1;
-                fib_triggered = [false; 6]; // 重置斐波那契触发标记
-                trade_completed = false; // 标记交易未完成
-                info!("Short at time: {:?}, price: {}, position: {}, funds after short: {}",
-                time_util::mill_time_to_datetime_shanghai(candle.ts), signal.price, position, funds);
-            } else if (signal.should_buy || signal.price > entry_price * (1.0 + max_loss_percent)) && position > 0.0 {
-                // 平仓逻辑
-                funds += position * (2.0 * entry_price - signal.price); // 计算做空平仓收益
-                position = 0.0;
-                trade_completed = true; // 标记交易完成
-                info!("Cover (close short) at time: {:?}, price: {}, funds after cover: {}",
-                time_util::mill_time_to_datetime_shanghai(candle.ts), signal.price, funds);
-                if funds > initial_funds {
-                    wins += 1;
-                } else {
-                    losses += 1;
-                }
-            } else if position > 0.0 {
-                // 斐波那契止盈逻辑
-                let mut remaining_position = position;
-                for (idx, &level) in fib_levels.iter().enumerate() {
-                    let fib_price = entry_price * (1.0 - level); // 计算斐波那契目标价格
-                    if signal.price <= fib_price && !fib_triggered[idx] {
-                        let cover_amount = remaining_position * 0.1; // 按仓位的10%
-                        if cover_amount < 1e-8 { // 防止非常小的数值
-                            continue;
-                        }
-                        funds += cover_amount * (2.0 * entry_price - signal.price); // 计算做空平仓收益
-                        remaining_position -= cover_amount;
-                        fib_triggered[idx] = true; // 记录该斐波那契级别已经触发
-                        info!("Fibonacci profit taking at level: {:?}, time:{}, price: {}, cover amount: {}, remaining position: {}, funds after profit taking: {}",
-                        time_util::mill_time_to_datetime_shanghai(candle.ts), level, signal.price, cover_amount, remaining_position, funds);
-                        // 如果剩余仓位为零，更新win或loss
-                        if remaining_position <= 1e-8 {
-                            position = 0.0;
-                            trade_completed = true; // 标记交易完成
-                            if funds > initial_funds {
-                                wins += 1;
-                            } else {
-                                losses += 1;
-                            }
-                            break;
-                        }
-                    }
-                }
-                // 更新持仓
-                position = remaining_position;
-            }
-        }
-
-        if position > 0.0 {
-            if let Some(last_candle) = candles_5m.last() {
-                let last_price = last_candle.c.parse::<f64>().unwrap_or_else(|e| {
-                    error!("Failed to parse price: {}", e);
-                    0.0
-                });
-                funds += position * (2.0 * entry_price - last_price); // 计算做空平仓收益
-                position = 0.0;
-                trade_completed = true; // 标记交易完成
-                info!("Final cover at price: {}, funds after final cover: {}", last_price, funds);
-                if funds > initial_funds {
-                    wins += 1;
-                } else {
-                    losses += 1;
-                }
-            }
-        }
-
-        let win_rate = if wins + losses > 0 {
-            wins as f64 / (wins + losses) as f64
-        } else {
-            0.0
-        }; // 计算胜率
-
-        info!("Final Win rate: {}", win_rate);
-        (funds, win_rate, open_trades) // 返回最终资金,胜率和开仓次数
-    }
+    // pub async fn ut_bot_alert_strategy_with_shorting(&mut self, candles_5m: &Vec<CandlesEntity>, fib_levels: &Vec<f64>, key_value: f64, atr_period: usize, heikin_ashi: bool) -> (f64, f64, usize) {
+    //     let initial_funds = 100.0; // 初始资金
+    //     let mut funds = initial_funds; // 当前资金
+    //     let mut position: f64 = 0.0; // 当前持仓量, 显式指定为 f64 类型
+    //     let mut wins = 0; // 赢的次数
+    //     let mut losses = 0; // 输的次数
+    //     let mut open_trades = 0; // 开仓次数
+    //     let mut entry_price = 0.0; // 记录每次开仓时的价格
+    //     let mut fib_triggered = [false; 6]; // 用于记录每个斐波那契级别是否已经触发
+    //     let mut trade_completed = true; // 交易完成标志
+    //     let max_loss_percent = 0.1; // 最大损失百分比设置为10%
+    //
+    //     for (i, candle) in candles_5m.iter().enumerate() {
+    //         let signal = ut_boot_strategy::UtBootStrategy::get_trade_signal(&candles_5m[..=i], key_value, atr_period, heikin_ashi);
+    //
+    //         // 添加日志记录
+    //         info!("Time: {:?}, funds: {}, Price: {}, Buy: {}, Sell: {}, key_value: {}, atr_period: {}",
+    //         time_util::mill_time_to_datetime_shanghai(candle.ts), funds, signal.price, signal.should_buy, signal.should_sell, key_value, atr_period);
+    //
+    //         if signal.should_sell && position.abs() < f64::EPSILON && trade_completed {
+    //             // 做空逻辑
+    //             position = funds / signal.price;
+    //             entry_price = signal.price; // 记录开仓价格
+    //             funds = 0.0;
+    //             open_trades += 1;
+    //             fib_triggered = [false; 6]; // 重置斐波那契触发标记
+    //             trade_completed = false; // 标记交易未完成
+    //             info!("Short at time: {:?}, price: {}, position: {}, funds after short: {}",
+    //             time_util::mill_time_to_datetime_shanghai(candle.ts), signal.price, position, funds);
+    //         } else if (signal.should_buy || signal.price > entry_price * (1.0 + max_loss_percent)) && position > 0.0 {
+    //             // 平仓逻辑
+    //             funds += position * (2.0 * entry_price - signal.price); // 计算做空平仓收益
+    //             position = 0.0;
+    //             trade_completed = true; // 标记交易完成
+    //             info!("Cover (close short) at time: {:?}, price: {}, funds after cover: {}",
+    //             time_util::mill_time_to_datetime_shanghai(candle.ts), signal.price, funds);
+    //             if funds > initial_funds {
+    //                 wins += 1;
+    //             } else {
+    //                 losses += 1;
+    //             }
+    //         } else if position > 0.0 {
+    //             // 斐波那契止盈逻辑
+    //             let mut remaining_position = position;
+    //             for (idx, &level) in fib_levels.iter().enumerate() {
+    //                 let fib_price = entry_price * (1.0 - level); // 计算斐波那契目标价格
+    //                 if signal.price <= fib_price && !fib_triggered[idx] {
+    //                     let cover_amount = remaining_position * 0.1; // 按仓位的10%
+    //                     if cover_amount < 1e-8 { // 防止非常小的数值
+    //                         continue;
+    //                     }
+    //                     funds += cover_amount * (2.0 * entry_price - signal.price); // 计算做空平仓收益
+    //                     remaining_position -= cover_amount;
+    //                     fib_triggered[idx] = true; // 记录该斐波那契级别已经触发
+    //                     info!("Fibonacci profit taking at level: {:?}, time:{}, price: {}, cover amount: {}, remaining position: {}, funds after profit taking: {}",
+    //                     time_util::mill_time_to_datetime_shanghai(candle.ts), level, signal.price, cover_amount, remaining_position, funds);
+    //                     // 如果剩余仓位为零，更新win或loss
+    //                     if remaining_position <= 1e-8 {
+    //                         position = 0.0;
+    //                         trade_completed = true; // 标记交易完成
+    //                         if funds > initial_funds {
+    //                             wins += 1;
+    //                         } else {
+    //                             losses += 1;
+    //                         }
+    //                         break;
+    //                     }
+    //                 }
+    //             }
+    //             // 更新持仓
+    //             position = remaining_position;
+    //         }
+    //     }
+    //
+    //     if position > 0.0 {
+    //         if let Some(last_candle) = candles_5m.last() {
+    //             let last_price = last_candle.c.parse::<f64>().unwrap_or_else(|e| {
+    //                 error!("Failed to parse price: {}", e);
+    //                 0.0
+    //             });
+    //             funds += position * (2.0 * entry_price - last_price); // 计算做空平仓收益
+    //             position = 0.0;
+    //             trade_completed = true; // 标记交易完成
+    //             info!("Final cover at price: {}, funds after final cover: {}", last_price, funds);
+    //             if funds > initial_funds {
+    //                 wins += 1;
+    //             } else {
+    //                 losses += 1;
+    //             }
+    //         }
+    //     }
+    //
+    //     let win_rate = if wins + losses > 0 {
+    //         wins as f64 / (wins + losses) as f64
+    //     } else {
+    //         0.0
+    //     }; // 计算胜率
+    //
+    //     info!("Final Win rate: {}", win_rate);
+    //     (funds, win_rate, open_trades) // 返回最终资金,胜率和开仓次数
+    // }
 
     pub async fn short_strategy(&self, candles: &[CandlesEntity], breakout_period: usize, confirmation_period: usize, volume_threshold: f64, stop_loss_strategy: StopLossStrategy) -> (f64, f64) {
         let initial_funds = 100.0;

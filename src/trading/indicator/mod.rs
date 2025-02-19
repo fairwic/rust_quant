@@ -8,3 +8,5 @@ pub mod bar;
 pub mod detect_support_resistance;
 pub mod candle;
 pub mod enums;
+pub mod super_trend;
+pub mod vegas_indicator;
