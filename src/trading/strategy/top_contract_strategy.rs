@@ -16,9 +16,11 @@ use crate::trading::model::big_data::top_contract_position_ratio::TopContractPos
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::services::big_data::big_data_top_contract_service::BigDataTopContractService;
 use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
-use crate::trading::strategy::strategy_common::{BackTestResult, run_test, run_test_top_contract, SignalResult, StrategyCommonTrait, TradeRecord};
+use crate::trading::strategy::strategy_common::{BackTestResult, run_test, run_test_top_contract, SignalResult, TradeRecord};
 use crate::trading::task::basic;
 use crate::trading::task::basic::save_log;
+
+use super::strategy_common::TradingStrategyConfig;
 
 // Define the TopContractData struct with corrected types
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -198,22 +200,27 @@ impl TopContractStrategy {
         // Determine the minimum data length required for the backtest
         let min_data_length = Self::get_min_data_length(&self.data);
 
-        // Execute the external run_test function with appropriate parameters
-        let res = run_test_top_contract(
-            |candles| {
-                // Generate trade signals using the strategy
-                self.get_trade_signal(candles)
-            },
-            Self::extract_candle_data(&self.data), // Extract candle data from generic data D
-            fib_levels,
-            max_loss_percent,
-            min_data_length,
-            is_need_fibonacci_profit,
-            is_open_long,
-            is_open_short,
-            is_jude_trade_time,
-        ); // Await the asynchronous run_test function
+        // // Execute the external run_test function with appropriate parameters
+        // let res = run_test(
+        //     |candles| {
+        //         // Generate trade signals using the strategy
+        //         self.get_trade_signal(&candles)
+        //     },
+        //     Self::extract_candle_data(&self.data), // Extract candle data from generic data D
+        //     fib_levels,
+        //     TradingStrategyConfig::default(),
+        //     min_data_length,
+        //     is_open_long,
+        //     is_open_short,
+        //     is_jude_trade_time,
+        // ); // Await the asynchronous run_test function
 
+        let res = BackTestResult{
+            funds: 0.0,
+            win_rate: 0.0,
+            open_trades: 0,
+            trade_records: vec![]
+        };
         res // Return the result of the backtest
     }
 

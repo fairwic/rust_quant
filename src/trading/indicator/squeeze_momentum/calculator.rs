@@ -7,12 +7,12 @@ use ta::{
 };
 use tracing::info;
 
-use crate::trading::indicator::squeeze_momentum::service::calculate_linreg;
+use crate::trading::{indicator::squeeze_momentum::service::calculate_linreg, strategy::strategy_common::TradingStrategyConfig};
 use crate::trading::indicator::squeeze_momentum::squeeze_config::{
     MomentumColor, SqueezeConfig, SqueezeResult, SqueezeState,
 };
 use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::strategy::strategy_common::{BackTestResult, SignalResult, StrategyCommonTrait, TradeRecord};
+use crate::trading::strategy::strategy_common::{BackTestResult, SignalResult, TradeRecord};
 use crate::trading::strategy::strategy_common;
 
 pub struct SqueezeCalculator {
@@ -248,9 +248,8 @@ impl SqueezeCalculator {
             },
             &data, // Extract candle data from generic data D
             fib_levels,
-            max_loss_percent,
+            TradingStrategyConfig::default(),
             min_data_length,
-            is_need_fibonacci_profit,
             is_open_long,
             is_open_short,
             is_jude_trade_time,

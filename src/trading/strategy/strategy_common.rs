@@ -8,18 +8,18 @@ use tracing::{error, info};
 
 
 
-pub trait StrategyCommonTrait<D, S> {
-    async fn get_trade_signal(data: &D, _key_value: f64, _atr_period: usize, _heikin_ashi: bool);
-    async fn run_test(
-        &self,
-        fib_levels: &Vec<f64>,
-        max_loss_percent: f64,
-        is_need_fibonacci_profit: bool,
-        is_open_long: bool,
-        is_open_short: bool,
-        is_jude_trade_time: bool,
-    );
-}
+// pub trait StrategyCommonTrait<D, S> {
+//     async fn get_trade_signal(data: &D, _key_value: f64, _atr_period: usize, _heikin_ashi: bool);
+//     async fn run_test(
+//         &self,
+//         fib_levels: &Vec<f64>,
+//         max_loss_percent: f64,
+//         is_need_fibonacci_profit: bool,
+//         is_open_long: bool,
+//         is_open_short: bool,
+//         is_jude_trade_time: bool,
+//     );
+// }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BackTestResult {
@@ -522,253 +522,401 @@ pub fn run_test_top_contract(
     // info!("Final Win rate: {}", win_rate);
 }
 
+/// 止盈止损策略配置
+#[derive(Debug, Clone, Copy)]
+pub struct TradingStrategyConfig {
+    pub use_dynamic_tp: bool,      // 是否使用动态止盈
+    pub use_fibonacci_tp: bool,    // 是否使用斐波那契止盈
+    pub use_trailing_stop: bool,   // 是否使用追踪止损
+    pub max_loss_percent: f64,     // 最大止损百分比
+    pub profit_threshold: f64,     // 盈利阈值，用于动态止盈
+}
 
+impl Default for TradingStrategyConfig {
+    fn default() -> Self {
+        Self {
+            use_dynamic_tp: false,
+            use_fibonacci_tp: false,
+            use_trailing_stop: false,
+            max_loss_percent: 0.03,  // 默认3%止损
+            profit_threshold: 0.01,   // 默认1%盈利开始启用动态止盈
+        }
+    }
+}
 
-
-
-/// 运行回测
+/// 修改 run_test 函数签名
 pub fn run_test(
     mut strategy: impl FnMut(&[CandlesEntity]) -> SignalResult,
     candles_5m: &Vec<CandlesEntity>,
     fib_levels: &[f64],
-    max_loss_percent: f64,
+    strategy_config: TradingStrategyConfig,
     min_data_length: usize,
     is_need_fibonacci_profit: bool,
     is_open_long: bool,
     is_open_short: bool,
-    is_judge_trade_time: bool,
 ) -> BackTestResult {
-    let initial_funds = 100.0;
-    let mut funds = initial_funds;
-    let mut position: f64 = 0.0;
-    let mut wins: i64 = 0;
-    let mut losses: i64 = 0;
-    let mut open_trades = 0;
-    let mut entry_price = 0.0;
-    let mut is_long = true; // 标记当前持仓是否为做多
-    let feibon_profil_levels = vec![0.236, 0.382, 0.500, 0.618, 0.786, 1.0];
+    let mut trading_state = TradingState {
+        funds: 100.0,
+        position: 0.0,
+        wins: 0,
+        losses: 0,
+        open_trades: 0,
+        entry_price: 0.0,
+        is_long: true,
+        entry_time: String::new(),
+        initial_quantity: 0.0,
+        total_profit_loss: 0.0,
+        triggered_fib_levels: HashSet::new(),
+        trade_records: Vec::new(),
+    };
 
-    let mut trade_records = Vec::new();
-    let mut entry_time = String::new();
-    let mut initial_quantity = 0.0;
-    let mut total_profit_loss = 0.0; // 总的盈利或损失
-    let mut triggered_fib_levels = HashSet::new(); // 用于记录已触发的斐波那契级别
-
+    // 主循环：遍历每根K线
     for (i, candle) in candles_5m.iter().enumerate() {
         if i + 1 < min_data_length {
-            continue; // 确保有足够的K线数据
+            continue;
         }
 
         let signal_data = &candles_5m[i + 1 - min_data_length..=i];
-        // println!("signal_data:{:?}", signal_data);
-        //调用函数,获取信号
-        let signal =  strategy(signal_data);
-        // println!("signal_result:{:?}", signal);
-        // info!("ts:{},Time: {:?}, funds: {}, Price: {}, Buy: {}, Sell: {}",candle.ts,time_util::mill_time_to_datetime_shanghai(candle.ts),funds,signal.price,signal.should_buy,signal.should_sell);
+        let signal = strategy(signal_data);
 
-        if signal.should_buy {
-            if position > 0.0 {
-                if !is_long {
-                    // 平掉所有空单
-                    // println!("平掉所有空单");
-                    close_remaining_position(
-                        &entry_price,
-                        &mut funds,
-                        &mut position,
-                        &mut total_profit_loss,
-                        &mut trade_records,
-                        &candles_5m[i],
-                        &entry_time,
-                        &mut wins,
-                        &mut losses,
-                        &mut triggered_fib_levels,
-                        is_long,
-                    );
-                } else {
-                    // println!("已经存在多单")
-                    continue;
-                }
+        // 如果有持仓，检查止盈止损
+        if trading_state.position > 0.0 {
+            let current_price = signal.price;
+            let entry_price = trading_state.entry_price;  // 先保存入场价格
+            let profit_pct = if trading_state.is_long {
+                (current_price - entry_price) / entry_price
             } else {
-                if is_open_long {
-                    //如果需要判断开仓时间，且当前时间不在开仓时间范围内
-                    if is_judge_trade_time && !time_util::is_within_business_hours(candle.ts) {
+                (entry_price - current_price) / entry_price  // 做空的盈亏计算
+            };
+            let profit = profit_pct * entry_price;
+
+            // 1. 检查止损
+            if profit_pct < -strategy_config.max_loss_percent {
+                // println!(">>> 触发止损 <<< 开仓价:{}, 当前价:{}, 盈亏率:{:.2}% < 止损线:{:.2}%", entry_price, current_price, profit_pct * 100.0, -strategy_config.max_loss_percent * 100.0);
+                close_position(&mut trading_state, candle, &signal, "止损", profit);
+                continue;
+            }
+
+            // 2. 检查动态止盈
+            if strategy_config.use_dynamic_tp && profit_pct > strategy_config.profit_threshold {
+                if i >= 2 {
+                    let prev_close = candles_5m[i-1].c.parse::<f64>().unwrap();
+                    let prev_prev_close = candles_5m[i-2].c.parse::<f64>().unwrap();
+                    // println!("\n检查动态止盈条件:");
+                    // println!("当前价: {}, 前一K线收盘价: {}, 前前K线收盘价: {}", current_price, prev_close, prev_prev_close);
+                    // println!("盈利率: {:.2}% > 启动阈值: {:.2}%", 
+                        // profit_pct * 100.0, strategy_config.profit_threshold * 100.0);
+                    
+                    // 根据多空方向判断动态止盈条件
+                    let should_take_profit = if trading_state.is_long {
+                        current_price < prev_close && current_price < prev_prev_close
+                    } else {
+                        current_price > prev_close && current_price > prev_prev_close
+                    };
+                    
+                    if should_take_profit {
+                        println!(">>> 触发动态止盈 <<< 当前价突破前两根K线 {}->{}->{}", 
+                            prev_prev_close, prev_close, current_price);
+                        close_position(&mut trading_state, candle, &signal, "动态止盈", profit);
                         continue;
                     }
-                    // 开多仓
-                    position = funds / signal.price;
-                    initial_quantity = position;
-                    entry_price = signal.price;
-                    entry_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
-                    open_trades += 1;
-                    total_profit_loss = 0.0;
-                    is_long = true;
-                    // info!("Buy at time: {:?}, price: {}, position: {}, funds after buy: {}",entry_time, signal.price, position, funds);
-
-                    trade_records.push(TradeRecord {
-                        option_type: PosSide::LONG.to_string(),
-                        open_position_time: entry_time.clone(),
-                        close_position_time: Some(entry_time.clone()),
-                        open_price: entry_price,
-                        close_price: signal.price,
-                        profit_loss: total_profit_loss,
-                        quantity: initial_quantity,
-                        full_close: false,
-                        close_type: "".to_string(),
-                        win_num: 0,
-                        loss_num: 0,
-                        signal_detail: signal.single_detail,
-                    });
                 }
+            }
+        }
+
+        // 处理策略信号
+        if signal.should_buy && is_open_long {
+            if trading_state.position == 0.0 {
+                open_long_position(&mut trading_state, candle, &signal);
             }
         } else if signal.should_sell {
-            if position > 0.0 {
-                if is_long {
-                    // 平掉所有多单
-                    // println!("平掉所有多单");
-                    close_remaining_position(
-                        &entry_price,
-                        &mut funds,
-                        &mut position,
-                        &mut total_profit_loss,
-                        &mut trade_records,
-                        &candles_5m[i],
-                        &entry_time,
-                        &mut wins,
-                        &mut losses,
-                        &mut triggered_fib_levels,
-                        is_long,
-                    );
-                } else {
-                    // println!("已经存在空单")
-                    continue;
-                }
-            } else {
-                if is_open_short {
-                    //如果需要判断开仓时间，且当前时间不在开仓时间范围内
-                    if is_judge_trade_time && !time_util::is_within_business_hours(candle.ts) {
-                        continue;
-                    }
-                    // 开空仓
-                    position = funds / signal.price;
-                    initial_quantity = position;
-                    entry_price = signal.price;
-                    entry_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
-                    open_trades += 1;
-                    total_profit_loss = 0.0;
-                    is_long = false;
-                    // info!("Short at time: {:?}, price: {}, position: {}, funds after short: {}", entry_time, signal.price, position, funds);
-
-                    trade_records.push(TradeRecord {
-                        option_type: PosSide::SHORT.to_string(),
-                        open_position_time: entry_time.clone(),
-                        close_position_time: Some(entry_time.clone()),
-                        open_price: entry_price,
-                        close_price: signal.price,
-                        profit_loss: total_profit_loss,
-                        quantity: initial_quantity,
-                        full_close: false,
-                        close_type: "".to_string(),
-                        win_num: 0,
-                        loss_num: 0,
-                        signal_detail:signal.single_detail
-                    });
-                }
-            }
-        } else if (is_long
-            && (signal.price < entry_price * (1.0 - max_loss_percent))
-            && position > 0.0)
-            || (!is_long
-                && (signal.price > entry_price * (1.0 + max_loss_percent))
-                && position > 0.0)
-        {
-            // 全部平仓
-            // println!("触发止损");
-            let exit_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
-            let current_loss = if is_long {
-                position * (signal.price - entry_price)
-            } else {
-                position * (entry_price - signal.price)
-            };
-            total_profit_loss += current_loss;
-            if total_profit_loss > 0.0 {
-                wins += 1;
-            } else {
-                losses += 1;
-            }
-
-            funds += current_loss;
-            trade_records.push(TradeRecord {
-                option_type: "close".to_string(),
-                open_position_time: entry_time.clone(),
-                close_position_time: Some(exit_time),
-                open_price: entry_price,
-                close_price: signal.price,
-                profit_loss: total_profit_loss,
-                quantity: initial_quantity,
-                full_close: true,
-                close_type: "止损".to_string(),
-                win_num: wins,
-                loss_num: losses,
-                signal_detail: signal.single_detail,
-            });
-            position = 0.0;
-            triggered_fib_levels.clear(); // 重置斐波那契级别触发记录
-                                          // info!("Sell (close long) at time: {:?}, price: {}, funds after sell: {}, profit/loss: {}",entry_time, signal.price, funds, total_profit_loss);
-        } else if position > 0.0 {
-            if is_need_fibonacci_profit {
-                // 斐波那契部分止盈逻辑
-                position = process_fibonacci_levels(
-                    &candles_5m[i],
-                    &mut funds,
-                    &mut position,
-                    entry_price,
-                    &signal,
-                    fib_levels,
-                    &feibon_profil_levels,
-                    &entry_time,
-                    &candle.ts,
-                    &mut total_profit_loss,
-                    &mut trade_records,
-                    &mut triggered_fib_levels, // 传入已触发的斐波那契级别的索引集合
-                    is_long,
-                    &mut wins,
-                    &mut losses,
-                );
+            if trading_state.position == 0.0 && is_open_short {
+                // 开空仓
+                open_short_position(&mut trading_state, candle, &signal);
+            } else if trading_state.position > 0.0 && trading_state.is_long {
+                // 平多仓
+                let profit = signal.price - trading_state.entry_price;
+                close_position(&mut trading_state, candle, &signal, "策略平仓", profit);
             }
         }
     }
 
-    // 最后一次平仓
-    if position > 0.0 {
-        // println!("最后k线平仓了");
-        close_remaining_position(
-            &entry_price,
-            &mut funds,
-            &mut position,
-            &mut total_profit_loss,
-            &mut trade_records,
-            &candles_5m.last().unwrap(),
-            &entry_time,
-            &mut wins,
-            &mut losses,
-            &mut triggered_fib_levels, // 传入已触发的斐波那契级别的索引集合
-            is_long,
-        );
-        // println!("平仓了最终资金: {}", funds);
+    // 处理最后一次平仓
+    if trading_state.position > 0.0 {
+        let last_candle = candles_5m.last().unwrap();
+        let last_price = last_candle.c.parse::<f64>().unwrap();
+        let profit = last_price - trading_state.entry_price;
+        close_position(&mut trading_state, last_candle, &SignalResult {
+            should_buy: false,
+            should_sell: true,
+            price: last_price,
+            ts: last_candle.ts,
+            single_detail: Some("结束平仓".to_string()),
+        }, "结束平仓", profit);
     }
 
-    let win_rate = if wins + losses > 0 {
+    BackTestResult {
+        funds: trading_state.funds,
+        win_rate: calculate_win_rate(trading_state.wins, trading_state.losses),
+        open_trades: trading_state.open_trades,
+        trade_records: trading_state.trade_records,
+    }
+}
+
+/// 交易状态结构体
+#[derive(Debug)]
+struct TradingState {
+    funds: f64,
+    position: f64,
+    wins: i64,
+    losses: i64,
+    open_trades: usize,
+    entry_price: f64,
+    is_long: bool,
+    entry_time: String,
+    initial_quantity: f64,
+    total_profit_loss: f64,
+    triggered_fib_levels: HashSet<usize>,
+    trade_records: Vec<TradeRecord>,
+}
+
+/// 处理买入信号
+fn handle_buy_signal(
+    state: &mut TradingState,
+    candle: &CandlesEntity,
+    signal: &SignalResult,
+    is_open_long: bool,
+    is_judge_trade_time: bool,
+) {
+    if state.position > 0.0 {
+        if !state.is_long {
+            close_remaining_position(
+                &state.entry_price,
+                &mut state.funds,
+                &mut state.position,
+                &mut state.total_profit_loss,
+                &mut state.trade_records,
+                candle,
+                &state.entry_time,
+                &mut state.wins,
+                &mut state.losses,
+                &mut state.triggered_fib_levels,
+                state.is_long,
+            );
+        }
+    } else if is_open_long && (!is_judge_trade_time || time_util::is_within_business_hours(candle.ts)) {
+        open_long_position(state, candle, signal);
+    }
+}
+
+/// 处理卖出信号
+fn handle_sell_signal(
+    state: &mut TradingState,
+    candle: &CandlesEntity,
+    signal: &SignalResult,
+    is_open_short: bool,
+    is_judge_trade_time: bool,
+) {
+    if state.position > 0.0 {
+        if state.is_long {
+            close_remaining_position(
+                &state.entry_price,
+                &mut state.funds,
+                &mut state.position,
+                &mut state.total_profit_loss,
+                &mut state.trade_records,
+                candle,
+                &state.entry_time,
+                &mut state.wins,
+                &mut state.losses,
+                &mut state.triggered_fib_levels,
+                state.is_long,
+            );
+        }
+    } else if is_open_short && (!is_judge_trade_time || time_util::is_within_business_hours(candle.ts)) {
+        open_short_position(state, candle, signal);
+    }
+}
+
+/// 开多仓
+fn open_long_position(state: &mut TradingState, candle: &CandlesEntity, signal: &SignalResult) {
+    state.position = state.funds / signal.price;
+    state.initial_quantity = state.position;
+    state.entry_price = signal.price;
+    state.entry_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
+    state.open_trades += 1;
+    state.total_profit_loss = 0.0;
+    state.is_long = true;
+
+    record_trade_entry(state, PosSide::LONG.to_string(), signal.single_detail.clone());
+}
+
+/// 开空仓
+fn open_short_position(state: &mut TradingState, candle: &CandlesEntity, signal: &SignalResult) {
+    state.position = state.funds / signal.price;
+    state.initial_quantity = state.position;
+    state.entry_price = signal.price;
+    state.entry_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
+    state.open_trades += 1;
+    state.total_profit_loss = 0.0;
+    state.is_long = false;
+
+    record_trade_entry(state, "SHORT".to_string(), signal.single_detail.clone());
+}
+
+/// 记录交易入场
+fn record_trade_entry(state: &mut TradingState, option_type: String, signal_detail: Option<String>) {
+    state.trade_records.push(TradeRecord {
+        option_type,
+        open_position_time: state.entry_time.clone(),
+        close_position_time: Some(state.entry_time.clone()),
+        open_price: state.entry_price,
+        close_price: state.entry_price,
+        profit_loss: state.total_profit_loss,
+        quantity: state.initial_quantity,
+        full_close: false,
+        close_type: "".to_string(),
+        win_num: 0,
+        loss_num: 0,
+        signal_detail,
+    });
+}
+
+/// 修改风险管理函数
+fn handle_risk_management(
+    state: &mut TradingState,
+    candle: &CandlesEntity,
+    signal: &SignalResult,
+    config: &TradingStrategyConfig,
+    fib_levels: &[f64],
+    feibon_profil_levels: &[f64],
+) {
+    // 计算当前盈亏
+    let current_profit = if state.is_long {
+        signal.price - state.entry_price
+    } else {
+        state.entry_price - signal.price
+    };
+    let profit_percent = current_profit / state.entry_price;
+    let is_in_profit = profit_percent > config.profit_threshold;
+
+    // 1. 动态止盈策略
+    if config.use_dynamic_tp && is_in_profit {
+        if let Some(prev_candles) = get_previous_candles(candle, 2) {
+            let (prev_high, prev_low) = (prev_candles[0].h.parse::<f64>().unwrap(), 
+                                       prev_candles[0].l.parse::<f64>().unwrap());
+            let (prev_prev_high, prev_prev_low) = (prev_candles[1].h.parse::<f64>().unwrap(), 
+                                                  prev_candles[1].l.parse::<f64>().unwrap());
+
+            let should_close_long = state.is_long && signal.price < prev_low && signal.price < prev_prev_low;
+            let should_close_short = !state.is_long && signal.price > prev_high && signal.price > prev_prev_high;
+
+            if should_close_long || should_close_short {
+                close_position(state, candle, signal, "动态止盈", current_profit);
+                return;
+            }
+        }
+    }
+
+    // 2. 止损检查
+    let stop_loss_triggered = (state.is_long && signal.price < state.entry_price * (1.0 - config.max_loss_percent)) ||
+                            (!state.is_long && signal.price > state.entry_price * (1.0 + config.max_loss_percent));
+
+    if stop_loss_triggered {
+        close_position(state, candle, signal, "止损", current_profit);
+        return;
+    }
+
+    // 3. 斐波那契止盈
+    if config.use_fibonacci_tp {
+        state.position = process_fibonacci_levels(
+            candle,
+            &mut state.funds,
+            &mut state.position,
+            state.entry_price,
+            signal,
+            fib_levels,
+            feibon_profil_levels,
+            &state.entry_time,
+            &candle.ts,
+            &mut state.total_profit_loss,
+            &mut state.trade_records,
+            &mut state.triggered_fib_levels,
+            state.is_long,
+            &mut state.wins,
+            &mut state.losses,
+        );
+    }
+}
+
+/// 辅助函数：获取前N根K线
+fn get_previous_candles(current_candle: &CandlesEntity, n: usize) -> Option<Vec<&CandlesEntity>> {
+    // 这个函数需要根据您的数据结构来实现
+    // 返回前n根K线的数据
+    None  // 临时返回值，需要实现具体逻辑
+}
+
+/// 辅助函数：平仓
+fn close_position(
+    state: &mut TradingState,
+    candle: &CandlesEntity,
+    signal: &SignalResult,
+    close_type: &str,
+    profit: f64,
+) {
+    let exit_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
+    state.total_profit_loss += profit;
+    state.funds += profit;
+    
+    if profit > 0.0 {
+        state.wins += 1;
+    } else {
+        state.losses += 1;
+    }
+
+    // 根据平仓原因和盈亏设置正确的平仓类型
+    let actual_close_type = match close_type {
+        "平多" => {
+            if profit > 0.0 { "止盈" } else { "止损" }
+        },
+        _ => close_type
+    };
+
+    record_trade_exit(state, exit_time, signal, actual_close_type);
+    state.position = 0.0;
+    state.triggered_fib_levels.clear();
+}
+
+/// 记录交易出场
+fn record_trade_exit(
+    state: &mut TradingState,
+    exit_time: String,
+    signal: &SignalResult,
+    close_type: &str,
+) {
+    state.trade_records.push(TradeRecord {
+        option_type: "close".to_string(),
+        open_position_time: state.entry_time.clone(),
+        close_position_time: Some(exit_time),
+        open_price: state.entry_price,
+        close_price: signal.price,
+        profit_loss: state.total_profit_loss,
+        quantity: state.initial_quantity,
+        full_close: true,
+        close_type: close_type.to_string(),
+        win_num: state.wins,
+        loss_num: state.losses,
+        signal_detail: signal.single_detail.clone(),
+    });
+}
+
+/// 计算胜率
+fn calculate_win_rate(wins: i64, losses: i64) -> f64 {
+    if wins + losses > 0 {
         wins as f64 / (wins + losses) as f64
     } else {
         0.0
-    };
-
-    BackTestResult {
-        funds,
-        win_rate,
-        open_trades,
-        trade_records,
     }
-    // info!("Final Win rate: {}", win_rate);
-    // (funds, win_rate, open_trades, trade_records)
 }
+
+

@@ -1,0 +1,85 @@
+@startuml Vegas Strategy Backtest Flow
+
+' 定义参与者
+actor Client
+participant VegasTest
+participant RunVegasTest
+participant VegasIndicator
+participant StrategyCommon
+database Database
+
+' 主流程
+Client -> VegasTest: vegas_test(inst_id, time)
+activate VegasTest
+
+VegasTest -> Database: 获取历史K线数据
+Database --> VegasTest: 返回K线数据
+
+' 参数遍历循环
+loop 遍历参数组合 (EMA,止损,止盈)
+    VegasTest -> RunVegasTest: run_vegas_test(strategy, config)
+    activate RunVegasTest
+
+    RunVegasTest -> VegasIndicator: run_test(candles, config)
+    activate VegasIndicator
+
+    VegasIndicator -> VegasIndicator: get_min_data_length()
+    VegasIndicator -> StrategyCommon: run_test(signal_generator, config)
+    activate StrategyCommon
+
+    ' K线遍历循环
+    loop 遍历每根K线
+        StrategyCommon -> VegasIndicator: get_trade_signal(candles)
+        activate VegasIndicator
+        
+        VegasIndicator -> VegasIndicator: 计算技术指标(EMA,RSI)
+        VegasIndicator -> VegasIndicator: 判断趋势
+        VegasIndicator -> VegasIndicator: 检查交易信号
+        VegasIndicator --> StrategyCommon: 返回交易信号
+        deactivate VegasIndicator
+
+        alt 有交易信号
+            StrategyCommon -> StrategyCommon: 执行风险管理
+            StrategyCommon -> StrategyCommon: 记录交易
+        end
+    end
+
+    StrategyCommon --> VegasIndicator: 返回回测结果
+    deactivate StrategyCommon
+    
+    VegasIndicator --> RunVegasTest: 返回回测结果
+    deactivate VegasIndicator
+
+    RunVegasTest -> Database: 保存回测日志
+    RunVegasTest -> Database: 保存交易明细
+    RunVegasTest --> VegasTest: 完成回测
+    deactivate RunVegasTest
+end
+
+VegasTest --> Client: 返回执行结果
+deactivate VegasTest
+
+' 添加注释
+note right of VegasTest
+  参数范围:
+  - EMA: 12/144/169
+  - 止损: 1%-3%
+  - 止盈: 0.5%-2%
+end note
+
+note right of VegasIndicator
+  技术指标:
+  - EMA(12,144,169)
+  - RSI(14)
+  - 趋势判断
+  - 成交量分析
+end note
+
+note right of StrategyCommon
+  风险管理:
+  - 固定止损
+  - 动态止盈
+  - 斐波那契止盈
+end note
+
+@enduml

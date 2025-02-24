@@ -22,7 +22,7 @@ pub struct BackTestDetail {
     pub close_price: String,
     pub profit_loss: String,
     pub quantity: String,
-    pub full_close: bool,
+    pub full_close: String,
     pub close_type: String,
     pub win_nums: i64,
     pub loss_nums: i64,

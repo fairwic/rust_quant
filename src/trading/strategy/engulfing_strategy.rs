@@ -5,6 +5,8 @@ use serde_json::json;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::strategy::strategy_common::{BackTestResult, run_test, SignalResult, TradeRecord};
 
+use super::strategy_common::TradingStrategyConfig;
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct EngulfingStrategy {
     pub heikin_ashi: bool,
@@ -85,9 +87,8 @@ impl EngulfingStrategy {
             |candles| Self::get_trade_signal(candles, num_bars),
             candles_5m,
             fib_levels,
-            max_loss_percent,
+            TradingStrategyConfig::default(),
             min_data_length,
-            is_need_fibonacci_profit,
             is_open_long,
             is_open_short,
             is_judge_trade_time,

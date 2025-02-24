@@ -5,3 +5,4 @@ pub mod task;
 pub mod order;
 pub mod indicator;
 pub mod services;
+pub mod analysis;

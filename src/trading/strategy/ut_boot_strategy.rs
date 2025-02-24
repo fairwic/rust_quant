@@ -9,6 +9,8 @@ use crate::trading::indicator::atr::ATR;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::strategy::strategy_common::{BackTestResult, run_test, SignalResult, TradeRecord};
 
+use super::strategy_common::TradingStrategyConfig;
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct UtBootStrategy {
     pub key_value: f64,
@@ -177,9 +179,8 @@ impl UtBootStrategy {
             },
             candles_5m,
             fib_levels,
-            max_loss_percent,
+            TradingStrategyConfig::default(),
             min_data_length,
-            is_need_fibonacci_profit,
             is_open_long,
             is_open_short,
             is_jude_trade_time,

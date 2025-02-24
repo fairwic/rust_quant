@@ -45,6 +45,7 @@ pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
         "1H" => 3600,
         "4H" => 4 * 3600,
         "1D" => 24 * 3600,
+        "1Dutc" => 24 * 3600,
         "5D" => 5 * 24 * 3600,
         _ => return Err(anyhow!("Unsupported period format{}",period)),
     };
