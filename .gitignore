@@ -2,4 +2,4 @@
 .env
 .vcs.xml
 .idea
-.vscode
+.vscode/
