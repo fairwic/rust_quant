@@ -8,8 +8,9 @@ use tokio::task::spawn;
 use tracing::{error, info, warn, Level};
 
 use crate::time_util;
-use crate::trading::model::market::candles::{self, TimeDirect};
+use crate::trading::indicator::signal_weight::SignalWeights;
 use crate::trading::model::market::candles::SelectTime;
+use crate::trading::model::market::candles::{self, TimeDirect};
 use crate::trading::model::order::swap_order::SwapOrderEntityModel;
 use crate::trading::model::strategy::back_test_detail::BackTestDetail;
 use crate::trading::model::strategy::strategy_config::*;
@@ -19,12 +20,18 @@ use crate::trading::okx::account::{Position, PositionResponse};
 use crate::trading::order;
 use crate::trading::strategy;
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
-use crate::trading::strategy::strategy_common::{BackTestResult, SignalResult, TradeRecord, TradingStrategyConfig};
+use crate::trading::strategy::strategy_common::{
+    BackTestResult, SignalResult, TradeRecord, TradingStrategyConfig,
+};
 use crate::trading::strategy::ut_boot_strategy::UtBootStrategy;
 use crate::trading::strategy::{engulfing_strategy, Strategy};
 
 use crate::app_config::db;
 use crate::trading;
+use crate::trading::analysis::position_analysis::PositionAnalysis;
+use crate::trading::indicator::squeeze_momentum;
+use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
+use crate::trading::indicator::vegas_indicator::VegasIndicator;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
@@ -33,8 +40,9 @@ use crate::trading::okx::trade::{PosSide, TdMode};
 use crate::trading::strategy::engulfing_strategy::EngulfingStrategy;
 use crate::trading::strategy::macd_kdj_strategy::MacdKdjStrategy;
 use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
-use crate::trading::strategy::top_contract_strategy::{TopContractStrategy, TopContractStrategyConfig};
-use crate::trading::indicator::squeeze_momentum;
+use crate::trading::strategy::top_contract_strategy::{
+    TopContractStrategy, TopContractStrategyConfig,
+};
 use crate::trading::strategy::{StopLossStrategy, StrategyType};
 use crate::trading::task::candles_job;
 use anyhow::Result;
@@ -45,9 +53,6 @@ use redis::AsyncCommands;
 use tokio;
 use tokio::sync::Semaphore;
 use tracing::span;
-use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
-use crate::trading::indicator::vegas_indicator::VegasIndicator;
-use crate::trading::analysis::position_analysis::PositionAnalysis;
 
 /** 同步数据 任务**/
 pub async fn run_sync_data_job(
@@ -59,7 +64,9 @@ pub async fn run_sync_data_job(
     let span = span!(Level::DEBUG, "run_sync_data_job");
     let _enter = span.enter();
 
-    candles_job::init_create_table(inst_ids.clone(), Some(&tims)).await.expect("init create_table error");
+    candles_job::init_create_table(inst_ids.clone(), Some(&tims))
+        .await
+        .expect("init create_table error");
 
     //初始化获取历史的k线路
     candles_job::init_all_candles(inst_ids.clone(), Some(&tims)).await?;
@@ -103,8 +110,12 @@ pub async fn breakout_long_test(
     time: &str,
 ) -> Result<(), anyhow::Error> {
     // 初始化 Redis
-    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").expect("get redis client error");
-    let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
+    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")
+        .expect("get redis client error");
+    let mut con = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
     let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
@@ -116,13 +127,15 @@ pub async fn breakout_long_test(
                 // let stopo_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
                 // for stop in stopo_percent {
                 let stop_loss_strategy = StopLossStrategy::Percent(0.1);
-                let res = startegy.breakout_strategy(
-                    &*mysql_candles_5m,
-                    breakout_period,
-                    confirmation_period,
-                    volume_threshold,
-                    stop_loss_strategy,
-                ).await;
+                let res = startegy
+                    .breakout_strategy(
+                        &*mysql_candles_5m,
+                        breakout_period,
+                        confirmation_period,
+                        volume_threshold,
+                        stop_loss_strategy,
+                    )
+                    .await;
                 println!("strategy{:#?}", res); // let ins_id = "BTC-USDT-SWAP";
 
                 // 解包 Result 类型
@@ -136,9 +149,13 @@ pub async fn breakout_long_test(
                     win_rate: win_rate.to_string(),
                     open_positions_num: open_position_num,
                     strategy_detail: Some(format!("breakout_period:{},confirmation_period:{},volume_threshold:{},stop_loss_strategy: {:?}", breakout_period, confirmation_period, volume_threshold, stop_loss_strategy)),
-                    profit: "".to_string(),
+                    profit: (final_fund - 100.00).to_string(),
+                    ..Default::default()
                 };
-                back_test_log::BackTestLogModel::new().await.add(&back_test_log).await?;
+                back_test_log::BackTestLogModel::new()
+                    .await
+                    .add(&back_test_log)
+                    .await?;
             }
         }
     }
@@ -151,8 +168,12 @@ pub async fn macd_ema_test(
     time: &str,
 ) -> Result<(), anyhow::Error> {
     // 初始化 Redis
-    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").expect("get redis client error");
-    let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
+    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")
+        .expect("get redis client error");
+    let mut con = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
     let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
@@ -174,9 +195,13 @@ pub async fn macd_ema_test(
             win_rate: win_rate.to_string(),
             open_positions_num: open_position_num as i32,
             strategy_detail: Some(format!("stop_loss_percent: {:?}", stop)),
-            profit: "".to_string(),
+            profit: (final_fund - 100.00).to_string(),
+            ..Default::default()
         };
-        back_test_log::BackTestLogModel::new().await.add(&back_test_log).await?;
+        back_test_log::BackTestLogModel::new()
+            .await
+            .add(&back_test_log)
+            .await?;
     }
     Ok(())
 }
@@ -185,8 +210,12 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
     //获取candle数据
     let mysql_candles = self::get_candle_data(inst_id, time, 50, None).await?;
     // 初始化 Redis
-    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/").expect("get redis client error");
-    let mut con = client.get_multiplexed_async_connection().await.expect("get multi redis connection error");
+    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")
+        .expect("get redis client error");
+    let mut con = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
     let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
@@ -204,9 +233,10 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
                     stop,
                     kdj_period,
                     signal_period,
-                ).await;
+                )
+                .await;
                 println!("strategy{:#?}", res); // let ins_id = "BTC-USDT-SWAP";
-                // 解包 Result 类型
+                                                // 解包 Result 类型
                 let (final_fund, win_rate, open_position_num) = res;
                 //把back tests strategy结果写入数据
                 let back_test_log = BackTestLog {
@@ -220,9 +250,15 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
                         "stop_loss_percent: {:?},kdj_period:{},signal_period:{}",
                         stop, kdj_period, signal_period
                     )),
-                    profit: "".to_string(),
+                    profit: (final_fund - 100.00).to_string(),
+                    three_bar_after_win_rate: 0.0,
+                    five_bar_after_win_rate: 0.0,
+                    ten_bar_after_win_rate: 0.0,
                 };
-                back_test_log::BackTestLogModel::new().await.add(&back_test_log).await?;
+                back_test_log::BackTestLogModel::new()
+                    .await
+                    .add(&back_test_log)
+                    .await?;
             }
         }
     }
@@ -235,7 +271,7 @@ pub async fn run_vegas_test(
     strategy_config: TradingStrategyConfig,
     mysql_candles: Arc<Vec<CandlesEntity>>,
     fibonacci_level: Arc<Vec<f64>>,
-) -> Result<(), anyhow::Error> {
+) -> Result<i64, anyhow::Error> {
     let res = strategy.run_test(
         &mysql_candles,
         &fibonacci_level,
@@ -248,27 +284,21 @@ pub async fn run_vegas_test(
 
     // 构建更详细的策略配置描述
     let config_desc = format!(
-        "Vegas({},{},{}), Stop:{:.1}%, TP:{:.1}%, DynamicTP:{}, FibTP:{}, TrailingStop:{}, Breakthrough:{:.1}%, RSI:({:.1}/{:.1})", 
+        "Vegas({},{},{}), 最大止损:{:.1}%, 止盈:{:.1}%, 动态止盈:{}, 斐波那契止盈:{}, Breakthrough:{:.1}%, RSI:({:.1}/{:.1})", 
         strategy.ema1_length, strategy.ema2_length, strategy.ema3_length,
         strategy_config.max_loss_percent * 100.0,
         strategy_config.profit_threshold * 100.0,
         strategy_config.use_dynamic_tp,
         strategy_config.use_fibonacci_tp,
-        strategy_config.use_trailing_stop,
         strategy.breakthrough_threshold * 100.0,
-        strategy.rsi_oversold,
-        strategy.rsi_overbought
+        strategy.rsi_oversold, strategy.rsi_overbought
     );
 
-    println!("Strategy config: {}", config_desc);
-    let result = save_log(
-        inst_id,
-        time,
-        Some(config_desc),
-        res,
-    ).await;
-    println!("save log Result: {:?}", result);
-    Ok(())
+    // 保存测试日志并获取 back_test_id
+    let back_test_id = save_log(inst_id, time, Some(config_desc), res).await?;
+
+    // 返回 back_test_id
+    Ok(back_test_id)
 }
 
 // 这个函数用于执行单个策略测试，封装了主要的测试逻辑
@@ -298,15 +328,11 @@ pub async fn run_test_strategy(
         true,  // is_open_short
         strategy.clone(),
         false, // is_judge_trade_time
-    ).await;
+    )
+    .await;
 
     println!("UtBootStrategy:{:?}", strategy);
-    let result = save_log(
-        inst_id,
-        time,
-        Some(strategy.to_string()),
-        res,
-    ).await;
+    let result = save_log(inst_id, time, Some(strategy.to_string()), res).await;
     println!("save log Result: {:?}", result);
     Ok(())
 }
@@ -316,116 +342,142 @@ pub async fn save_log(
     time: &str,
     strategy_config_string: Option<String>,
     back_test_result: BackTestResult,
-) -> Result<()> {
+) -> Result<i64> {
     // 添加调试日志
-    println!("Trade records count: {}", back_test_result.trade_records.len());
-    println!("Funds: {}, Win rate: {}", back_test_result.funds, back_test_result.win_rate);
+    println!("Trade records count: {}", back_test_result.open_trades);
 
+    // 解包 Result 类型
+    //把back tests strategy结果写入数据
+    let back_test_log = BackTestLog {
+        // 需要确定策略类型，这里使用参数传入或推断
+        strategy_type: strategy_config_string
+            .as_ref()
+            .and_then(|s| {
+                if s.contains("Vegas") {
+                    Some("Vegas")
+                } else {
+                    None
+                }
+            })
+            .unwrap_or("Unknown")
+            .to_string(),
+        inst_type: inst_id.parse().unwrap(),
+        time: time.parse().unwrap(),
+        final_fund: back_test_result.funds.to_string(), // 确保字段名称正确
+        win_rate: back_test_result.win_rate.to_string(),
+        open_positions_num: back_test_result.open_trades as i32,
+        strategy_detail: strategy_config_string,
+        profit: (back_test_result.funds - 100.00).to_string(), // 确保字段名称正确
+        // 初始化为0，后续会通过分析更新
+        three_bar_after_win_rate: 0.0,
+        five_bar_after_win_rate: 0.0,
+        ten_bar_after_win_rate: 0.0,
+    };
+
+    // 保存日志
+    let back_test_id = back_test_log::BackTestLogModel::new()
+        .await
+        .add(&back_test_log)
+        .await?;
+
+    // 保存详细交易记录
     if !back_test_result.trade_records.is_empty() {
-        let insert_id = match save_test_log(
-            StrategyType::TopContract,
+        save_test_detail(
+            back_test_id,
+            StrategyType::Vegas, // 确保选择正确的策略类型
             inst_id,
             time,
-            back_test_result.funds,
-            back_test_result.win_rate,
-            back_test_result.open_trades as i32,
-            strategy_config_string,
-        ).await {
-            Ok(id) => id,
-            Err(e) => {
-                error!("Failed to save test log: {:?}", e);
-                return Err(e);  // 返回原始错误，而不是包装新错误
-            }
-        };
-
-        if let Err(e) = save_test_detail(
-            insert_id, 
-            StrategyType::TopContract, 
-            inst_id, 
-            time, 
-            back_test_result.trade_records
-        ).await {
-            error!("Failed to save test detail: {:?}", e);
-            return Err(e);  // 返回原始错误
-        }
-        Ok(())
-    } else {
-        warn!("Empty trade record list, skipping save_test_detail.");
-        Ok(())  // 空记录不算错误，返回成功
+            back_test_result.trade_records,
+        )
+        .await?;
     }
+
+    Ok(back_test_id)
 }
 
 // 主函数，执行所有策略测试
 pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-
-    let select_time = SelectTime{
-        point_time: 1739444400000,
-        direct: TimeDirect::BEFORE,
-    };
-
     // 获取数据
-    let mysql_candles = self::get_candle_data(inst_id, time, 3000, Some(select_time)).await?;
-    let mysql_candles_clone = Arc::new(mysql_candles);
+    let mysql_candles = self::get_candle_data(inst_id, time, 2000, None).await?;
+    let mysql_candles_clone = Arc::new(mysql_candles.clone()); // 克隆一份用于后续分析
 
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     let fibonacci_level_clone = Arc::new(fibonacci_level);
 
     // 创建信号量限制并发数
-    let semaphore = Arc::new(Semaphore::new(20));
+    let semaphore = Arc::new(Semaphore::new(10)); // 控制最大并发数量为 10
 
-    // 策略参数范围
-    let emas1: Vec<usize> = (12..=12).collect();
-    let emas2: Vec<usize> = (144..=144).collect();
-    let emas3: Vec<usize> = (169..=169).collect();
-    let emas4: Vec<usize> = (576..=576).collect();
-    let emas5: Vec<usize> = (676..=676).collect();
-    
-    // 风险管理参数范围
-    let stop_losses: Vec<f64> = (50..=50).map(|x| x as f64 * 0.001).collect(); // 1%到3%止损
-    let profit_thresholds: Vec<f64> = (20..=20).map(|x| x as f64 * 0.001).collect(); // 0.5%到2%启动动态止盈
-    let use_dynamic_tp_options = vec![true]; // 是否使用动态止盈
+    // 参数范围
+    let ema1_lengths = vec![12];
+    let ema2_lengths = vec![144];
+    let ema3_lengths = vec![169];
+    let breakthrough_thresholds = vec![0.003];
+    let rsi_periods = vec![12];
+    let rsi_overboughts = vec![75.0];
+    let rsi_oversolds = vec![25.0];
 
+    // 收集所有 back_test_id
+    let mut back_test_ids = Vec::new();
+
+    // 创建任务容器
     let mut tasks = Vec::new();
 
-    // 遍历所有参数组合
-    for ema1 in emas1 {
-        for ema2 in emas2.clone() {
-            for ema3 in emas3.clone() {
-                for &stop_loss in &stop_losses {
-                    for &profit_threshold in &profit_thresholds {
-                        for &use_dynamic_tp in &use_dynamic_tp_options {
-                            let strategy_config = TradingStrategyConfig {
-                                use_dynamic_tp,
-                                use_fibonacci_tp: false,
-                                use_trailing_stop: false,
-                                max_loss_percent: stop_loss,
-                                profit_threshold,
-                            };
+    for &ema1 in &ema1_lengths {
+        for &ema2 in &ema2_lengths {
+            for &ema3 in &ema3_lengths {
+                for &breakthrough in &breakthrough_thresholds {
+                    for &rsi_period in &rsi_periods {
+                        for &rsi_overbought in &rsi_overboughts {
+                            for &rsi_oversold in &rsi_oversolds {
+                                let strategy_config = TradingStrategyConfig {
+                                    use_dynamic_tp: true,
+                                    use_fibonacci_tp: false,
+                                    max_loss_percent: 0.02,
+                                    profit_threshold: 0.01,
+                                };
 
-                            let inst_id_clone = inst_id.to_string();
-                            let time_clone = time.to_string();
-                            let mysql_candles_clone = Arc::clone(&mysql_candles_clone);
-                            let fibonacci_level_clone = Arc::clone(&fibonacci_level_clone);
-                            let permit = Arc::clone(&semaphore);
+                                let strategy = VegasIndicator {
+                                    ema1_length: ema1,
+                                    ema2_length: ema2,
+                                    ema3_length: ema3,
+                                    ema4_length: 576,
+                                    ema5_length: 676,
+                                    volume_multiplier: 1.0,
+                                    breakthrough_threshold: breakthrough,
+                                    rsi_length: rsi_period,
+                                    rsi_oversold: rsi_oversold,
+                                    rsi_overbought: rsi_overbought,
+                                    signal_weights: SignalWeights::default(),
+                                };
 
-                            tasks.push(tokio::spawn({
-                                let inst_id_clone = inst_id_clone.clone();
-                                let time_clone = time_clone.clone();
-                                async move {
+                                let inst_id = inst_id.to_string();
+                                let time = time.to_string();
+                                let mysql_candles = Arc::clone(&mysql_candles_clone);
+                                let fibonacci_level = Arc::clone(&fibonacci_level_clone);
+                                let permit = Arc::clone(&semaphore);
+
+                                // 创建任务
+                                tasks.push(tokio::spawn(async move {
                                     let _permit = permit.acquire().await.unwrap();
-                                    let indicator = VegasIndicator::new(ema1, ema2, ema3, 576, 676);
-                                    if let Err(e) = run_vegas_test(
-                                        &inst_id_clone,
-                                        &time_clone,
-                                        indicator,
+
+                                    match run_vegas_test(
+                                        &inst_id,
+                                        &time,
+                                        strategy,
                                         strategy_config,
-                                        mysql_candles_clone,
-                                        fibonacci_level_clone,
-                                    ).await {
-                                        error!("Strategy test failed: {:?}", e);
+                                        mysql_candles,
+                                        fibonacci_level,
+                                    )
+                                    .await
+                                    {
+                                        Ok(back_test_id) => Some(back_test_id),
+                                        Err(e) => {
+                                            error!("Vegas test failed: {:?}", e);
+                                            None
+                                        }
                                     }
-                                }
-                            }));
+                                }));
+                            }
                         }
                     }
                 }
@@ -433,16 +485,25 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
         }
     }
 
-    // 等待所有任务完成
-    join_all(tasks).await;
+    // 等待所有任务完成并收集 back_test_id
+    for task in join_all(tasks).await {
+        if let Ok(Some(back_test_id)) = task {
+            back_test_ids.push(back_test_id);
+        }
+    }
 
-    // 获取最新的回测ID
-    let rb = db::get_db_client();
-    let sql = "SELECT id FROM back_test_log ORDER BY id DESC LIMIT 1";
-    let back_test_id: i32 = rb.query_decode(&sql, vec![]).await?;
-    // 执行开仓后价格变化分析
-    PositionAnalysis::analyze_positions(back_test_id, &mysql_candles_clone).await?;
-    
+    info!(
+        "收集到 {} 个 back_test_id 用于位置分析",
+        back_test_ids.len()
+    );
+
+    // 执行位置分析
+    for back_test_id in back_test_ids {
+        match PositionAnalysis::analyze_positions(back_test_id as i32, &mysql_candles).await {
+            Ok(_) => info!("成功分析 back_test_id: {}", back_test_id),
+            Err(e) => error!("分析 back_test_id {} 失败: {:?}", back_test_id, e),
+        }
+    }
 
     Ok(())
 }
@@ -497,7 +558,8 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
                                 max_loss,
                                 mysql_candles_clone,
                                 fibonacci_level_clone,
-                            ).await
+                            )
+                            .await
                             {
                                 error!("Strategy test failed: {:?}", e);
                             }
@@ -556,12 +618,24 @@ pub async fn squeeze_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
                                     kc_length,
                                     kc_multi,
                                 };
-                                let fibonacci_level = ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
+                                let fibonacci_level =
+                                    ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
                                 let mut stregety = SqueezeCalculator::new(config.clone());
 
-                                let res = stregety.run_test(&arc, &fibonacci_level, 10.00, false, true, true, false).await;
+                                let res = stregety
+                                    .run_test(
+                                        &arc,
+                                        &fibonacci_level,
+                                        10.00,
+                                        false,
+                                        true,
+                                        true,
+                                        false,
+                                    )
+                                    .await;
 
-                                let result = save_log(&inst_id, &time, Some(config.to_string()), res).await;
+                                let result =
+                                    save_log(&inst_id, &time, Some(config.to_string()), res).await;
                                 if result.is_err() {
                                     error!("保存日志异常")
                                 }
@@ -614,8 +688,21 @@ pub async fn top_contract_test(inst_id: &str, time: &str) -> Result<(), anyhow::
                     };
                     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
 
-                    let res = stra.run_test(&fibonacci_level, 10.00, false, true, false, false).await;
-                    let result = save_log(&inst_id, &time, Some(TopContractStrategyConfig { basic_ratio: key_value }.to_string()), res).await;
+                    let res = stra
+                        .run_test(&fibonacci_level, 10.00, false, true, false, false)
+                        .await;
+                    let result = save_log(
+                        &inst_id,
+                        &time,
+                        Some(
+                            TopContractStrategyConfig {
+                                basic_ratio: key_value,
+                            }
+                            .to_string(),
+                        ),
+                        res,
+                    )
+                    .await;
                     if result.is_err() {
                         error!("保存日志异常")
                     }
@@ -650,9 +737,15 @@ pub async fn save_test_log(
         open_positions_num: open_position_num,
         strategy_detail: detail,
         profit: (final_fund - 100.00).to_string(),
+        three_bar_after_win_rate: 0.0,
+        five_bar_after_win_rate: 0.0,
+        ten_bar_after_win_rate: 0.0,
     };
     // println!("back_test_log:{:?}", back_test_log);
-    let res = back_test_log::BackTestLogModel::new().await.add(&back_test_log).await?;
+    let res = back_test_log::BackTestLogModel::new()
+        .await
+        .add(&back_test_log)
+        .await?;
     Ok(res)
 }
 
@@ -690,7 +783,10 @@ pub async fn save_test_detail(
         };
         array.push(back_test_log);
     }
-    let res = back_test_detail::BackTestDetailModel::new().await.batch_add(array).await?;
+    let res = back_test_detail::BackTestDetailModel::new()
+        .await
+        .batch_add(array)
+        .await?;
     Ok(res)
 }
 
@@ -700,13 +796,16 @@ pub async fn get_candle_data(
     limit: usize,
     select_time: Option<SelectTime>,
 ) -> Result<Vec<CandlesEntity>, anyhow::Error> {
-    let mysql_candles_5m = candles::CandlesModel::new().await.fetch_candles_from_mysql(inst_id, period, limit, select_time).await?;
+    let mysql_candles_5m = candles::CandlesModel::new()
+        .await
+        .fetch_candles_from_mysql(inst_id, period, limit, select_time)
+        .await?;
     if mysql_candles_5m.is_empty() {
         return Err(anyhow!("mysql candles 5m is empty"));
     }
     let result = self::valid_candles_data(&mysql_candles_5m, period);
     if result.is_err() {
-        return Err(anyhow!("mysql candles is error {}",result.err().unwrap()));
+        return Err(anyhow!("mysql candles is error {}", result.err().unwrap()));
     }
     Ok(mysql_candles_5m)
 }
@@ -767,7 +866,10 @@ pub async fn run_ready_to_order(
 ) -> Result<()> {
     info!("run ut_boot_run_real inst_id:{:?} time:{:?}", inst_id, time);
     //从策略配置中获取到对应的产品配置
-    let strategy_config = StrategyConfigEntityModel::new().await.get_config(strategy_type.to_string().as_str(), inst_id, time).await?;
+    let strategy_config = StrategyConfigEntityModel::new()
+        .await
+        .get_config(strategy_type.to_string().as_str(), inst_id, time)
+        .await?;
     if strategy_config.len() < 1 {
         warn!(
             "策略配置为空strategy_type:{} inst_id:{:?} time:{:?}",
@@ -776,7 +878,10 @@ pub async fn run_ready_to_order(
         return Ok(());
     }
 
-    let mysql_candles_5m = candles::CandlesModel::new().await.get_new_data(inst_id, time).await?;
+    let mysql_candles_5m = candles::CandlesModel::new()
+        .await
+        .get_new_data(inst_id, time)
+        .await?;
     if mysql_candles_5m.is_none() {
         return Ok(());
     }
@@ -789,7 +894,10 @@ pub async fn run_ready_to_order(
             return Ok(());
         }
     }
-    let mysql_candles_5m = candles::CandlesModel::new().await.fetch_candles_from_mysql(inst_id, time, 50, None).await?;
+    let mysql_candles_5m = candles::CandlesModel::new()
+        .await
+        .fetch_candles_from_mysql(inst_id, time, 50, None)
+        .await?;
     if mysql_candles_5m.is_empty() {
         return Err(anyhow!("mysql candles 5m is empty"));
     }
@@ -809,11 +917,15 @@ pub async fn run_ready_to_order(
     let ut_boot_strategy_info = strategy_config.get(0).unwrap();
     let signal = match strategy_type {
         StrategyType::UtBoot => {
-            let strategy_config = serde_json::from_str::<UtBootStrategy>(&*ut_boot_strategy_info.value).map_err(|e| anyhow!("Failed to parse UtBootStrategy config: {}", e))?;
+            let strategy_config =
+                serde_json::from_str::<UtBootStrategy>(&*ut_boot_strategy_info.value)
+                    .map_err(|e| anyhow!("Failed to parse UtBootStrategy config: {}", e))?;
             strategy_config.get_trade_signal(&mysql_candles_5m)
         }
         StrategyType::Engulfing => {
-            let strategy_config = serde_json::from_str::<EngulfingStrategy>(&*ut_boot_strategy_info.value).map_err(|e| anyhow!("Failed to parse EngulfingStrategy config: {}", e))?;
+            let strategy_config =
+                serde_json::from_str::<EngulfingStrategy>(&*ut_boot_strategy_info.value)
+                    .map_err(|e| anyhow!("Failed to parse EngulfingStrategy config: {}", e))?;
 
             EngulfingStrategy::get_trade_signal(&mysql_candles_5m, strategy_config.num_bars)
         }
@@ -836,7 +948,10 @@ pub async fn run_ready_to_order(
         strategy_type: strategy_type.to_string(),
         strategy_result: serde_json::to_string(&signal).unwrap(),
     };
-    strategy_job_signal_log::StrategyJobSignalLogModel::new().await.add(signal_record).await?;
+    strategy_job_signal_log::StrategyJobSignalLogModel::new()
+        .await
+        .add(signal_record)
+        .await?;
 
     // ut boot atr 策略回测
     order::deal(strategy_type, inst_id, time, signal).await?;

@@ -10,3 +10,4 @@ pub mod candle;
 pub mod enums;
 pub mod super_trend;
 pub mod vegas_indicator;
+pub mod signal_weight;

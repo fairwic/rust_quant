@@ -527,7 +527,6 @@ pub fn run_test_top_contract(
 pub struct TradingStrategyConfig {
     pub use_dynamic_tp: bool,      // 是否使用动态止盈
     pub use_fibonacci_tp: bool,    // 是否使用斐波那契止盈
-    pub use_trailing_stop: bool,   // 是否使用追踪止损
     pub max_loss_percent: f64,     // 最大止损百分比
     pub profit_threshold: f64,     // 盈利阈值，用于动态止盈
 }
@@ -537,7 +536,6 @@ impl Default for TradingStrategyConfig {
         Self {
             use_dynamic_tp: false,
             use_fibonacci_tp: false,
-            use_trailing_stop: false,
             max_loss_percent: 0.03,  // 默认3%止损
             profit_threshold: 0.01,   // 默认1%盈利开始启用动态止盈
         }

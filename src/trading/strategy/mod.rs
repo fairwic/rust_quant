@@ -53,6 +53,7 @@ pub enum StrategyType {
     UtBootShort,
     Engulfing,
     TopContract,
+    Vegas,
 }
 
 impl PartialEq for StrategyType {
@@ -73,6 +74,7 @@ impl Display for StrategyType {
             StrategyType::MacdWithKdj => write!(f, "MacdWithKdj"),
             StrategyType::Engulfing => write!(f, "Engulfing"),
             StrategyType::TopContract => write!(f, "TopContract"),
+            StrategyType::Vegas => write!(f, "Vegas"),
         }
     }
 }

@@ -53,7 +53,7 @@ pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
 }
 
 //当前毫秒级时间增加或减少指定周期的毫秒数
-pub(crate) fn ts_reduce_n_period(mut ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
+pub(crate) fn ts_reduce_n_period(ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
     let res = parse_period_to_mill(period);
     //最大条数100
     let mill = n as i64 * res.unwrap();
@@ -61,7 +61,7 @@ pub(crate) fn ts_reduce_n_period(mut ts: i64, period: &str, n: usize) -> anyhow:
 }
 
 //当前毫秒级时间增加或减少指定周期的毫秒数
-pub(crate) fn ts_add_n_period(mut ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
+pub(crate) fn ts_add_n_period( ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
     let res = parse_period_to_mill(period);
     //最大条数100
     let mill = n as i64 * res.unwrap();

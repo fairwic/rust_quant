@@ -11,12 +11,15 @@ use redis::Commands;
 use std::error::Error;
 use std::time::Duration;
 use tracing::{debug, error, warn};
-use crate::trading::services::big_data::top_contract_service_trait::TopContractTrait;
+use crate::trading::services::big_data::top_contract_service_trait::TopContractServiceTrait;
+use async_trait::async_trait;
 
 pub struct BigDataTopContractService {}
-impl TopContractTrait for BigDataTopContractService  {
+
+#[async_trait]
+impl TopContractServiceTrait for BigDataTopContractService {
     //同步精英交易员合约多空持仓人数比
-     async fn sync(
+    async fn sync(&self,
         inst_ids: Vec<&str>,
         periods: Vec<&str>,
     ) -> anyhow::Result<()> {
@@ -66,7 +69,7 @@ impl TopContractTrait for BigDataTopContractService  {
     }
 
     //初始化精英交易员合约多空持仓人数比
-     async fn init(
+    async fn init(&self,
         inst_ids: Vec<&str>,
         periods: Vec<&str>,
     ) -> anyhow::Result<()> {
@@ -97,8 +100,18 @@ impl TopContractTrait for BigDataTopContractService  {
         Ok(())
     }
 }
-impl BigDataTopContractService {
 
+impl BigDataTopContractService {
+    // 静态方法包装
+    pub async fn init(inst_ids: Vec<&str>, periods: Vec<&str>) -> anyhow::Result<()> {
+        let service = Self {};
+        service.init(inst_ids, periods).await
+    }
+    
+    pub async fn sync(inst_ids: Vec<&str>, periods: Vec<&str>) -> anyhow::Result<()> {
+        let service = Self {};
+        service.sync(inst_ids, periods).await
+    }
 
     // 获取Okx数据
     async fn fetch_okx_data(

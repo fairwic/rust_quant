@@ -1,3 +1,7 @@
+#![allow(dead_code)]        // 允许未使用的函数/类型
+#![allow(unused_variables)] // 允许未使用的变量
+#![allow(unused_imports)]   // 允许未使用的导入
+
 #[macro_use]
 extern crate rbatis;
 
@@ -121,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
         //     error!("run sync [top contract] data job error: {}", error);
         // }
         // info!("RUN_SYNC_DATA_JOB Ok!");
+
     }
 
     // 获取可用账户的最大数量
@@ -146,7 +151,7 @@ async fn main() -> anyhow::Result<()> {
                     //engulfing_strategy
                     // let res = task::engulfing_test(&inst_id, &time).await;
                     if let Err(error) = res {
-                        error!("run strategy error: {} {} {}", error,inst_id,time);
+                        error!("run strategy error: {:#?} {} {} {}",error.backtrace(), error,inst_id,time);
                     }
                 }
             }

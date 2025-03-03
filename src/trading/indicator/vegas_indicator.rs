@@ -8,6 +8,7 @@ use ta::indicators::{RelativeStrengthIndex, MovingAverageConvergenceDivergence};
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::strategy::strategy_common::{BackTestResult, SignalResult, TradingStrategyConfig};
 use crate::trading::strategy::strategy_common;
+use crate::trading::indicator::signal_weight::{SignalWeights, SignalScore, SignalType, SignalCondition};
 
 #[derive(Debug)]
 pub struct VolumeTrend {
@@ -50,11 +51,12 @@ pub struct VegasIndicator {
     pub ema3_length: usize,
     pub ema4_length: usize,  // 新增: EMA4周期
     pub ema5_length: usize,  // 新增: EMA5周期
-    rsi_length: usize,
-    volume_multiplier: f64,  // 成交量放大的倍数阈值
+    pub rsi_length: usize,
+    pub volume_multiplier: f64,  // 成交量放大的倍数阈值
     pub(crate) breakthrough_threshold: f64,  // 新增：突破阈值
     pub(crate) rsi_oversold: f64,           // 新增：RSI超卖阈值
     pub(crate) rsi_overbought: f64,         // 新增：RSI超买阈值
+    pub signal_weights: SignalWeights,  // 新增权重配置
 }
 
 impl Display for VegasIndicator {
@@ -75,6 +77,17 @@ impl VegasIndicator {
             breakthrough_threshold: 0.003,  // 默认0.3%
             rsi_oversold: 25.0,            // 默认25
             rsi_overbought: 75.0,          // 默认75
+            signal_weights: SignalWeights {
+                weights: vec![
+                    (SignalType::Breakthrough, 2.0),
+                    (SignalType::VolumeTrend, 1.5),
+                    (SignalType::Rsi, 1.0),
+                    (SignalType::TrendStrength, 1.5),
+                    (SignalType::EmaDivergence, 1.8),
+                    (SignalType::PriceLevel, 1.2),
+                ],
+                min_total_weight: 3.0,  // 需要至少3分才触发信号
+            },
         }
     }
     pub fn get_min_data_length(&mut self) -> usize {
@@ -115,7 +128,7 @@ impl VegasIndicator {
         // 计算EMA值
         for i in 0..data.len() {
             let close = data[i].close();
-            
+
             if i >= self.ema1_length { ema1_value = ema1.next(close); }
             if i >= self.ema2_length { ema2_value = ema2.next(close); }
             if i >= self.ema3_length { ema3_value = ema3.next(close); }
@@ -134,7 +147,7 @@ impl VegasIndicator {
         }).collect()
     }
 
-    pub fn get_trade_signal(&mut self, data: &[CandlesEntity]) -> SignalResult {
+    pub fn get_trade_signal(&mut self, data: &[CandlesEntity], weights: &SignalWeights) -> SignalResult {
         let mut signal_result = SignalResult {
             should_buy: false,
             should_sell: false,
@@ -154,7 +167,7 @@ impl VegasIndicator {
         let (ema1_value, ema2_value, ema3_value, ema4_value, ema5_value) = self.calculate(&data_items);
         let current_price = data.last().unwrap().c.parse::<f64>().unwrap();
         let lower_price = data.last().unwrap().l.parse::<f64>().unwrap();
-        
+
         // 计算RSI
         let mut rsi = RelativeStrengthIndex::new(self.rsi_length).unwrap();
         let rsi_values: Vec<f64> = data_items.iter()
@@ -164,7 +177,7 @@ impl VegasIndicator {
 
         println!("\n信号检查 - 当前状态:");
         // 1. 计算趋势强度
-        let trend_strength = self.calculate_trend_strength(&data_items); 
+        let trend_strength = self.calculate_trend_strength(&data_items);
         let ema_trend = self.calculate_ema_trend(&data_items);
         let volume_trend = self.check_volume_trend(&data_items);
         println!("时间：{:?} 价格: {:.3}, EMA2: {:.4}, EMA3: {:.4}  ema4: {:.4}  ema5: {:.4}", crate::time_util::mill_time_to_datetime_shanghai(data.last().unwrap().ts), current_price, ema2_value, ema3_value, ema4_value, ema5_value);
@@ -181,56 +194,51 @@ impl VegasIndicator {
         // 检查突破的持续性
         let breakthrough_confirmed = self.check_breakthrough_confirmation(&data_items, price_above);
         
-        //价格上涨突破，且成交量增加指定赔率
-        if price_above  && volume_trend.is_increasing && breakthrough_confirmed {
-            signal_result.should_buy = true;
-            signal_result.single_detail = Some(format!(
-                "突破做多信号: 价格({:.2})突破上轨({:.2}),成交量放大倍数={:.2}, RSI={:.2}, 趋势强度={:.2}", 
-                current_price, ema2_value, volume_trend.volume_ratio, current_rsi, trend_strength
-            ));
-        } else if price_below && ema_trend.is_downtrend {
-            println!("突破做空信号: 价格({:.2})跌破下轨({:.2}), RSI={:.2}, 趋势强度={:.2}", 
-                current_price, ema2_value, current_rsi, trend_strength);
-            signal_result.should_sell = true;
-            signal_result.single_detail = Some(format!(
-                "突破做空信号: 价格({:.2})跌破下轨({:.2}), RSI={:.2}, 趋势强度={:.2}", 
-                current_price, ema3_value, current_rsi, trend_strength
-            ));
-        } else if let Some(sell_signal) = self.check_key_price_level_sell(current_price, &volume_trend) {
-            // 在关键价位产生卖出信号
-            println!("{}", sell_signal);
-            signal_result.should_sell = true;
-            signal_result.single_detail = Some(sell_signal);
-        } else if ema3_value > ema4_value * 1.02 && lower_price <= ema4_value * 1.005 {
-            // 当EMA2和EMA3有足够的发散度(>2%)，且价格回踩到EMA3附近时(±0.5%)做多
-            println!("均线发散做多信号: EMA2({:.2}) > EMA3({:.2}), 价格({:.2})回踩EMA3位置", 
-                ema2_value, ema3_value, current_price);
-            signal_result.should_buy = true;
-            signal_result.single_detail = Some(format!(
-                "均线发散做多信号: EMA2({:.2}) > EMA3({:.2}), 价格({:.2})回踩EMA3位置", 
-                ema2_value, ema3_value, current_price
-            ));
-        }
-        println!("k线低价: {:.4}  ema4 *1.02: {:.4}  ema4*1.005: {:.4}", lower_price, ema4_value * 1.02, ema4_value * 1.005);
+        let conditions = vec![
+            (SignalType::Breakthrough, SignalCondition::PriceBreakout {
+                price_above,
+                price_below,
+            }),
 
-        // 3. 回调信号检查 - 动态回调幅度
-        if !signal_result.should_buy && !signal_result.should_sell {
-            let pullback_threshold = self.calculate_dynamic_pullback_threshold(&data_items);
-            let price_near_ema2 = (current_price - ema2_value).abs() / ema2_value < pullback_threshold;
-            
-            if ema_trend.is_strong_uptrend && price_near_ema2 && current_rsi < self.rsi_oversold 
-                && trend_strength > 0.6 && volume_trend.is_stable {
+          (SignalType::VolumeTrend, SignalCondition::Volume {
+                 is_increasing: volume_trend.is_increasing,
+                 ratio: volume_trend.volume_ratio,
+             }),
+
+            // (SignalType::Rsi, SignalCondition::RsiLevel {
+            //     current: current_rsi,
+            //     oversold: self.rsi_oversold,
+            //     overbought: self.rsi_overbought,
+            // }),
+            // (SignalType::TrendStrength, SignalCondition::Trend {
+            //     strength: trend_strength,
+            //     threshold: 0.6,
+            // }),
+            //(SignalType::EmaDivergence, SignalCondition::EmaStatus {
+            //     is_diverging: ema2_value > ema3_value * 1.02,
+            // }),
+        ];
+
+        let score = weights.calculate_score(conditions);
+
+        if weights.is_signal_valid(&score) {
+            if price_above {
                 signal_result.should_buy = true;
                 signal_result.single_detail = Some(format!(
-                    "回调做多信号: 价格({:.2})回踩均线({:.2}), RSI={:.2}, 趋势强度={:.2}", 
-                    current_price, ema2_value, current_rsi, trend_strength
+                    "做多信号 (总分:{:.1}): 价格({:.2})突破上轨({:.2})\n信号构成:\n{}", 
+                    score.total_weight,
+                    current_price, 
+                    ema2_value,
+                    score.details.join("\n")
                 ));
-            } else if ema_trend.is_strong_downtrend && price_near_ema2 && current_rsi > self.rsi_overbought 
-                && trend_strength > 0.6 && volume_trend.is_stable {
+            } else if price_below {
                 signal_result.should_sell = true;
                 signal_result.single_detail = Some(format!(
-                    "回调做空信号: 价格({:.2})反弹至均线({:.2}), RSI={:.2}, 趋势强度={:.2}", 
-                    current_price, ema2_value, current_rsi, trend_strength
+                    "做空信号 (总分:{:.1}): 价格({:.2})跌破下轨({:.2})\n信号构成:\n{}", 
+                    score.total_weight,
+                    current_price, 
+                    ema2_value,
+                    score.details.join("\n")
                 ));
             }
         }
@@ -331,7 +339,7 @@ impl VegasIndicator {
     ) -> BackTestResult {
         let min_length = self.get_min_data_length();
         strategy_common::run_test(
-            |candles| self.get_trade_signal(candles),
+            |candles| self.get_trade_signal(candles, &SignalWeights::default()),
             candles,
             fib_levels,
             strategy_config,
@@ -346,7 +354,7 @@ impl VegasIndicator {
     fn check_ema_cross(&mut self, data: &[DataItem]) -> EmaCross {
         let recent_data = &data[data.len()-3..];
         let mut ema_values = Vec::new();
-        
+
         for window in recent_data.windows(2) {
             let (_, ema2, ema3, _, _) = self.calculate(window);
             let prev_diff = ema2 - ema3;
@@ -423,7 +431,7 @@ impl VegasIndicator {
     }
 
     // 新增：计算动态回调幅度
-    fn calculate_dynamic_pullback_threshold(&self, data: &[DataItem]) -> f64 {
+    fn calculate_dynamic_pullback_threshold(&self, _data: &[DataItem]) -> f64 {
         // 实现动态回调幅度计算逻辑
         // 可以考虑:
         // 1. 价格波动性
@@ -435,8 +443,8 @@ impl VegasIndicator {
 
     // 修改成交量趋势判断
     fn check_volume_trend(&self, data: &[DataItem]) -> VolumeTrend {
-        const VOLUME_LOOKBACK: usize = 10;  // 看前10根K线
-        const VOLUME_INCREASE_RATIO: f64 = 2.5;  // 放量倍数
+        const VOLUME_LOOKBACK: usize = 5;  // 看前10根K线
+        const VOLUME_INCREASE_RATIO: f64 = 1.8;  // 放量倍数
         const VOLUME_DECREASE_RATIO: f64 = 0.5;  // 缩量倍数
 
         if data.len() < VOLUME_LOOKBACK + 1 { 

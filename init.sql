@@ -89,11 +89,11 @@ CREATE TABLE `back_test_log` (
 
 CREATE TABLE `back_test_detail` (
   `id` int NOT NULL AUTO_INCREMENT,
+  `back_test_id` int NOT NULL COMMENT '回测记录表id',
   `inst_id` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `time` varchar(255) NOT NULL COMMENT '周期',
   `strategy_type` varchar(255) NOT NULL COMMENT '策略类型',
-  `option_type` varchar(255) NOT NULL,
-  `back_test_id` int NOT NULL COMMENT '回测记录表id',
+  `option_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'long 开多，short开空 close平仓',
   `open_position_time` datetime NOT NULL COMMENT '开仓时间',
   `close_position_time` datetime NOT NULL COMMENT '平仓时间',
   `open_price` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '开仓时间',
@@ -103,11 +103,32 @@ CREATE TABLE `back_test_detail` (
   `full_close` varchar(10) NOT NULL COMMENT '是否全部平仓',
   `close_type` varchar(255) NOT NULL COMMENT '平仓类型',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '时间',
-  `win_nums` int NOT NULL,
-  `loss_nums` int DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=368588 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  `win_nums` int NOT NULL COMMENT '盈利金额',
+  `loss_nums` int DEFAULT NULL COMMENT '亏损金额',
+  `signal_detail` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '此次操作依赖的信号详情',
+  PRIMARY KEY (`id`),
+  KEY `back_test_id` (`back_test_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=55 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+WITH trade_stats AS (
+    SELECT 
+        back_test_id,
+        bars_after,
+        COUNT(DISTINCT concat(inst_id, open_time)) as total_trades,
+        SUM(is_profitable) as profitable_trades,
+        AVG(price_change_percent) as avg_price_change
+    FROM back_test_analysis
+    GROUP BY back_test_id, bars_after
+)
+SELECT 
+    back_test_id,
+    bars_after as 'K线数',
+    total_trades as '总交易数',
+    profitable_trades as '盈利次数',
+    ROUND(profitable_trades * 100.0 / total_trades, 2) as '胜率%',
+    ROUND(avg_price_change, 2) as '平均收益%'
+FROM trade_stats
+ORDER BY back_test_id, bars_after;
 
 CREATE TABLE `asset_classification` (
   `id` int NOT NULL AUTO_INCREMENT,

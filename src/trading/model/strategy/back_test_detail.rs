@@ -8,6 +8,7 @@ use rbatis::rbdc::db::ExecResult;
 use rbs::Value;
 use serde_json::json;
 use crate::app_config::db;
+use rbatis::impl_select;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BackTestDetail {
@@ -32,6 +33,7 @@ pub struct BackTestDetail {
 impl_insert!(BackTestDetail{});
 // rbatis::crud!(BackTestDetail{});
 impl_update!(BackTestDetail{update_by_name(name:&str) => "`where id = '2'`"});
+impl_select!(BackTestDetail{select_positions(back_test_id:i32) => "`where back_test_id = #{back_test_id} and option_type IN ('long', 'SHORT')`"});
 
 pub struct BackTestDetailModel {
     db: &'static RBatis,

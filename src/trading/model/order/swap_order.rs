@@ -70,8 +70,7 @@ impl SwapOrderEntityModel {
             db: db::get_db_client(),
         }
     }
-
-
+        
     pub async fn add(&self, swap_order_entity: SwapOrderEntity) -> anyhow::Result<ExecResult> {
         let data = SwapOrderEntity::insert(self.db, &swap_order_entity).await?;
         println!("insert_batch = {}", json!(data));
