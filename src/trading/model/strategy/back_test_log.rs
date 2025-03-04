@@ -107,14 +107,21 @@ impl BackTestLogModel {
         
         let sql = r#"
             UPDATE back_test_log 
-            SET three_bar_after_win_rate = ?,
+            SET
+                one_bar_after_win_rate = ?,
+                two_bar_after_win_rate = ?,
+                three_bar_after_win_rate = ?,
                 five_bar_after_win_rate = ?,
+                four_bar_after_win_rate = ?,
                 ten_bar_after_win_rate = ?
             WHERE id = ?
         "#;
         
         let params = vec![
+            stats.one_bar_after_win_rate.to_string().into(),
+            stats.two_bar_after_win_rate.to_string().into(),
             stats.three_bar_after_win_rate.to_string().into(),
+            stats.four_bar_after_win_rate.to_string().into(),
             stats.five_bar_after_win_rate.to_string().into(),
             stats.ten_bar_after_win_rate.to_string().into(),
             back_test_id.to_string().into(),

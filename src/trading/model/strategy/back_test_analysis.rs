@@ -27,7 +27,10 @@ rbatis::crud!(BackTestAnalysis {});
 // 持仓统计结果
 #[derive(Debug)]
 pub struct PositionStats {
+    pub one_bar_after_win_rate: f32,
+    pub two_bar_after_win_rate: f32,
     pub three_bar_after_win_rate: f32,
+    pub four_bar_after_win_rate: f32,
     pub five_bar_after_win_rate: f32,
     pub ten_bar_after_win_rate: f32,
 }
@@ -88,10 +91,21 @@ impl BackTestAnalysisModel {
     // 计算持仓统计数据
     pub async fn calculate_position_stats(&self, back_test_id: i32) -> anyhow::Result<PositionStats> {
         debug!("计算 back_test_id {} 的K线后胜率统计", back_test_id);
+        // 计算1根K线后的胜率
+        let one_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 1).await?;
+        debug!("back_test_id {} 的1K后胜率: {:.4}", back_test_id, one_bar_stats);
+        
+        // 计算2根K线后的胜率
+        let two_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 2).await?;
+        debug!("back_test_id {} 的2K后胜率: {:.4}", back_test_id, two_bar_stats);       
         
         // 计算3根K线后的胜率
         let three_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 3).await?;
         debug!("back_test_id {} 的3K后胜率: {:.4}", back_test_id, three_bar_stats);
+        
+        // 计算4根K线后的胜率
+        let four_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 4).await?;
+        debug!("back_test_id {} 的4K后胜率: {:.4}", back_test_id, four_bar_stats); 
         
         // 计算5根K线后的胜率
         let five_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 5).await?;
@@ -102,21 +116,27 @@ impl BackTestAnalysisModel {
         debug!("back_test_id {} 的10K后胜率: {:.4}", back_test_id, ten_bar_stats);
         
         let stats = PositionStats {
+            one_bar_after_win_rate: one_bar_stats,
+            two_bar_after_win_rate: two_bar_stats,
             three_bar_after_win_rate: three_bar_stats,
+            four_bar_after_win_rate: four_bar_stats,
             five_bar_after_win_rate: five_bar_stats,
             ten_bar_after_win_rate: ten_bar_stats,
         };
         
-        debug!("back_test_id {} 的统计结果: {:.2}% / {:.2}% / {:.2}%", 
+        debug!("back_test_id {} 的统计结果: {:.2}% / {:.2}% / {:.2}% / {:.2}% / {:.2}% / {:.2}%", 
                back_test_id, 
+               stats.one_bar_after_win_rate * 100.0,
+               stats.two_bar_after_win_rate * 100.0,
                stats.three_bar_after_win_rate * 100.0,
+               stats.four_bar_after_win_rate * 100.0,
                stats.five_bar_after_win_rate * 100.0, 
                stats.ten_bar_after_win_rate * 100.0);
         
         Ok(stats)
     }
     
-    
+
     // 计算指定K线数后的胜率
     async fn calculate_win_rate_after_bars(&self, back_test_id: i32, bars: i32) -> anyhow::Result<f32> {
         let sql = r#"
