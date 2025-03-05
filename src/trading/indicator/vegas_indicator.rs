@@ -18,6 +18,14 @@ pub struct VolumeTrend {
     pub volume_ratio: f64,  // 添加 volume_ratio 字段
 }
 
+#[derive(Debug)]
+pub struct VolumeSignal {
+    pub volume_bar_num: usize,  // 看前10根K线
+    pub volume_increase_ratio: f64,  // 放量倍数
+    pub volume_decrease_ratio: f64,  // 缩量倍数
+    pub is_open: bool,  // 缩量倍数
+}
+
 impl VolumeTrend {
     pub fn new(is_increasing: bool, is_decreasing: bool, is_stable: bool, volume_ratio: f64) -> Self {
         Self {
@@ -46,13 +54,18 @@ pub struct EmaCross {
 }
 
 pub struct VegasIndicator {
+
     pub ema1_length: usize,
     pub ema2_length: usize,
     pub ema3_length: usize,
     pub ema4_length: usize,  // 新增: EMA4周期
     pub ema5_length: usize,  // 新增: EMA5周期
+
     pub rsi_length: usize,
-    pub volume_multiplier: f64,  // 成交量放大的倍数阈值
+
+    pub volume_signal: VolumeSignal,  // 新增：成交量信号配置
+
+
     pub(crate) breakthrough_threshold: f64,  // 新增：突破阈值
     pub(crate) rsi_oversold: f64,           // 新增：RSI超卖阈值
     pub(crate) rsi_overbought: f64,         // 新增：RSI超买阈值
@@ -73,7 +86,12 @@ impl VegasIndicator {
             ema4_length: ema4,  // 新增: EMA4默认周期
             ema5_length: ema5,  // 新增: EMA5默认周期
             rsi_length: 14,  // 默认RSI周期
-            volume_multiplier: 1.5,  // 成交量放大1.5倍视为显著
+            volume_signal: VolumeSignal {
+                volume_bar_num: 10,
+                volume_increase_ratio: 2.5,
+                volume_decrease_ratio: 0.5,
+                is_open: true,
+            },
             breakthrough_threshold: 0.003,  // 默认0.3%
             rsi_oversold: 25.0,            // 默认25
             rsi_overbought: 75.0,          // 默认75
@@ -104,7 +122,7 @@ impl VegasIndicator {
         let mut ema3 = ExponentialMovingAverage::new(self.ema3_length).unwrap();
         let mut ema4 = ExponentialMovingAverage::new(self.ema4_length).unwrap();  // 新增
         let mut ema5 = ExponentialMovingAverage::new(self.ema5_length).unwrap();  // 新增
-        
+
         let mut ema1_value = 0.0;
         let mut ema2_value = 0.0;
         let mut ema3_value = 0.0;
@@ -176,36 +194,42 @@ impl VegasIndicator {
         let current_rsi = *rsi_values.last().unwrap();
 
         println!("\n信号检查 - 当前状态:");
-        // 1. 计算趋势强度
-        let trend_strength = self.calculate_trend_strength(&data_items);
-        let ema_trend = self.calculate_ema_trend(&data_items);
-        let volume_trend = self.check_volume_trend(&data_items);
-        println!("时间：{:?} 价格: {:.3}, EMA2: {:.4}, EMA3: {:.4}  ema4: {:.4}  ema5: {:.4}", crate::time_util::mill_time_to_datetime_shanghai(data.last().unwrap().ts), current_price, ema2_value, ema3_value, ema4_value, ema5_value);
-        println!("RSI: {:.2}", current_rsi);
-        println!("趋势: 上升={}, 下降={}", ema_trend.is_uptrend, ema_trend.is_downtrend);
-        println!("成交量趋势: 增加={}, 减少={}, 稳定={}", volume_trend.is_increasing, volume_trend.is_decreasing, volume_trend.is_stable);
-        println!("趋势强度: {:.3}", trend_strength);
 
+
+        // 1. 计算ema
+        let ema_trend = self.calculate_ema_trend(&data_items);
         // 2. 突破信号检查 - 增加确认条件
         let (price_above, price_below) = self.check_breakthrough_conditions(&data_items, ema2_value);
-        println!("突破信号检查： 价格突破是否{} 价格跌破是否{} 上升趋势{} 下降趋势{}", 
-            price_above, price_below, ema_trend.is_uptrend, ema_trend.is_downtrend);
+        println!("突破信号检查： 价格突破是否{} 价格跌破是否{} 上升趋势{} 下降趋势{}",
+                 price_above, price_below, ema_trend.is_uptrend, ema_trend.is_downtrend);
 
-        // 检查突破的持续性
-        let breakthrough_confirmed = self.check_breakthrough_confirmation(&data_items, price_above);
-        
-        let conditions = vec![
+        let mut conditions = vec![
             (SignalType::Breakthrough, SignalCondition::PriceBreakout {
                 price_above,
                 price_below,
             }),
+        ];
+        //成交量
+        if self.volume_signal.is_open {
+            let volume_trend = self.check_volume_trend(&data_items);
+            println!("成交量趋势: 增加={}, 减少={}, 稳定={}", volume_trend.is_increasing, volume_trend.is_decreasing, volume_trend.is_stable);
+            conditions.push((SignalType::VolumeTrend, SignalCondition::Volume { is_increasing: volume_trend.is_increasing, ratio: volume_trend.volume_ratio }))
+        }
 
-          (SignalType::VolumeTrend, SignalCondition::Volume {
-                 is_increasing: volume_trend.is_increasing,
-                 ratio: volume_trend.volume_ratio,
-             }),
 
-            // (SignalType::Rsi, SignalCondition::RsiLevel {
+        let trend_strength = self.calculate_trend_strength(&data_items);
+        println!("时间：{:?} 价格: {:.3}, EMA2: {:.4}, EMA3: {:.4}  ema4: {:.4}  ema5: {:.4}", crate::time_util::mill_time_to_datetime_shanghai(data.last().unwrap().ts), current_price, ema2_value, ema3_value, ema4_value, ema5_value);
+        println!("RSI: {:.2}", current_rsi);
+        println!("趋势: 上升={}, 下降={}", ema_trend.is_uptrend, ema_trend.is_downtrend);
+        println!("趋势强度: {:.3}", trend_strength);
+
+
+
+        // 检查突破的持续性
+        let breakthrough_confirmed = self.check_breakthrough_confirmation(&data_items, price_above);
+
+
+        // (SignalType::Rsi, SignalCondition::RsiLevel {
             //     current: current_rsi,
             //     oversold: self.rsi_oversold,
             //     overbought: self.rsi_overbought,
@@ -217,7 +241,7 @@ impl VegasIndicator {
             //(SignalType::EmaDivergence, SignalCondition::EmaStatus {
             //     is_diverging: ema2_value > ema3_value * 1.02,
             // }),
-        ];
+
 
         let score = weights.calculate_score(conditions);
 
@@ -264,8 +288,7 @@ impl VegasIndicator {
             .sum::<f64>() / 5.0;
         
         // println!("成交量检查 - 当前: {}, 平均: {}, 倍数: {}", current_volume, avg_volume, current_volume / avg_volume);
-        
-        current_volume > avg_volume * self.volume_multiplier
+        current_volume > avg_volume * self.volume_signal.volume_increase_ratio // 倍数大于1.5
     }
 
     // 辅助方法：计算EMA趋势
@@ -443,11 +466,7 @@ impl VegasIndicator {
 
     // 修改成交量趋势判断
     fn check_volume_trend(&self, data: &[DataItem]) -> VolumeTrend {
-        const VOLUME_LOOKBACK: usize = 5;  // 看前10根K线
-        const VOLUME_INCREASE_RATIO: f64 = 1.8;  // 放量倍数
-        const VOLUME_DECREASE_RATIO: f64 = 0.5;  // 缩量倍数
-
-        if data.len() < VOLUME_LOOKBACK + 1 { 
+        if data.len() < self.volume_signal.volume_bar_num + 1 {
             return VolumeTrend {
                 is_increasing: false,
                 is_decreasing: false,
@@ -459,7 +478,7 @@ impl VegasIndicator {
         let current_volume = data.last().unwrap().volume();
         
         // 计算前N根K线的平均成交量
-        let prev_volumes: Vec<f64> = data[data.len()-VOLUME_LOOKBACK-1..data.len()-1]
+        let prev_volumes: Vec<f64> = data[data.len() - self.volume_signal.volume_bar_num - 1..data.len() - 1]
             .iter()
             .map(|x| x.volume())
             .collect();
@@ -472,9 +491,9 @@ impl VegasIndicator {
             current_volume, avg_volume, volume_ratio);
 
         VolumeTrend {
-            is_increasing: volume_ratio > VOLUME_INCREASE_RATIO,  // 放量
-            is_decreasing: volume_ratio < VOLUME_DECREASE_RATIO,  // 缩量
-            is_stable: volume_ratio >= VOLUME_DECREASE_RATIO && volume_ratio <= VOLUME_INCREASE_RATIO,  // 稳定
+            is_increasing: volume_ratio > self.volume_signal.volume_increase_ratio,  // 放量
+            is_decreasing: volume_ratio < self.volume_signal.volume_decrease_ratio,  // 缩量
+            is_stable: volume_ratio >= self.volume_signal.volume_decrease_ratio && volume_ratio <= self.volume_signal.volume_increase_ratio,  // 稳定
             volume_ratio,
         }
     }

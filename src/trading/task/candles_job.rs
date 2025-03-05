@@ -61,17 +61,6 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&s
                 //删除大于等于当前时间的所有数据
                 let res = CandlesModel::new().await.delete_lg_time(ticker.inst_id.as_str(), time, res.unwrap().ts).await?;
             }
-
-            // //获取当前数据最旧的数据
-            // let res = CandlesModel::new().await.get_oldest_data(ticker.inst_id.as_str(), time).await?;
-            // debug!("res: {:?}", res);
-            // let mut after: i64 = 0;
-            // if res.is_none() {
-            //     after = Utc::now().naive_utc().timestamp_millis();
-            // } else {
-            //     after = res.unwrap().ts;
-            // }
-
             //判断是否达到最新的300000条
             let limit = get_period_back_test_candle_nums(time);
             let res = CandlesModel::new().await.get_new_count(ticker.inst_id.as_str(), time, Some(limit)).await?;
@@ -88,7 +77,6 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&s
             } else {
                 after = res.unwrap().ts;
             }
-
             loop {
                 sleep(Duration::from_millis(200)).await;
                 info!("get after history_candles {},{}",&ticker.inst_id,time);
@@ -117,6 +105,17 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&s
     Ok(())
 }
 
+async fn get_sync_begin_with_end(inst_id: &str, period: &str) -> anyhow::Result<(Option<String>, Option<String>)> {
+    let res = CandlesModel::new().await.get_new_data(inst_id, period).await?;
+    match res {
+        Some(t) => {
+            let begin = t.ts;
+            let end = crate::time_util::ts_add_n_period(t.ts, period, 100)?;
+            Ok((Some(begin.to_string()), Some(end.to_string())))
+        }
+        None => Ok((None, None)),
+    }
+}
 /** 同步所有更新的蜡烛图**/
 pub async fn init_before_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<&str>>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
@@ -138,7 +137,10 @@ pub async fn init_before_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<
             loop {
                 sleep(Duration::from_millis(200)).await;
                 info!("get before history_candles {},{}",&ticker.inst_id,time);
-                let res = Market::new().get_history_candles(&ticker.inst_id, time, None, Some(&before.to_string()), Some("300")).await?;
+                //要计算出after_time
+                let (begin, after) = get_sync_begin_with_end(ticker.inst_id.as_str(), time).await?;
+
+                let res = Market::new().get_history_candles(&ticker.inst_id, time, Some(&after.unwrap()), Some(&begin.unwrap()), Some("300")).await?;
                 if res.is_empty() {
                     debug!("No new candles patch{},{}",ticker.inst_id, time);
                     break;

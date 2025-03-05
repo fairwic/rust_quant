@@ -123,16 +123,6 @@ impl BackTestAnalysisModel {
             five_bar_after_win_rate: five_bar_stats,
             ten_bar_after_win_rate: ten_bar_stats,
         };
-        
-        debug!("back_test_id {} 的统计结果: {:.2}% / {:.2}% / {:.2}% / {:.2}% / {:.2}% / {:.2}%", 
-               back_test_id, 
-               stats.one_bar_after_win_rate * 100.0,
-               stats.two_bar_after_win_rate * 100.0,
-               stats.three_bar_after_win_rate * 100.0,
-               stats.four_bar_after_win_rate * 100.0,
-               stats.five_bar_after_win_rate * 100.0, 
-               stats.ten_bar_after_win_rate * 100.0);
-        
         Ok(stats)
     }
     

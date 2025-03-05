@@ -31,7 +31,7 @@ use crate::trading;
 use crate::trading::analysis::position_analysis::PositionAnalysis;
 use crate::trading::indicator::squeeze_momentum;
 use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
-use crate::trading::indicator::vegas_indicator::VegasIndicator;
+use crate::trading::indicator::vegas_indicator::{VegasIndicator, VolumeSignal};
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
@@ -50,6 +50,7 @@ use futures::future::join_all;
 use hmac::digest::typenum::op;
 use rbatis::dark_std::err;
 use redis::AsyncCommands;
+use serde_json::json;
 use tokio;
 use tokio::sync::Semaphore;
 use tracing::span;
@@ -251,7 +252,10 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
                         stop, kdj_period, signal_period
                     )),
                     profit: (final_fund - 100.00).to_string(),
+                    one_bar_after_win_rate: 0.0,
+                    two_bar_after_win_rate: 0.0,
                     three_bar_after_win_rate: 0.0,
+                    four_bar_after_win_rate: 0.0,
                     five_bar_after_win_rate: 0.0,
                     ten_bar_after_win_rate: 0.0,
                 };
@@ -284,14 +288,19 @@ pub async fn run_vegas_test(
 
     // 构建更详细的策略配置描述
     let config_desc = format!(
-        "Vegas({},{},{}), 最大止损:{:.1}%, 止盈:{:.1}%, 动态止盈:{}, 斐波那契止盈:{}, Breakthrough:{:.1}%, RSI:({:.1}/{:.1})", 
-        strategy.ema1_length, strategy.ema2_length, strategy.ema3_length,
+        "VegasConfig({},{},{}), VolumeConfig {:?}最大止损:{:.1}%, 止盈:{:.1}%, 动态止盈:{}, 斐波那契止盈:{}, Breakthrough:{:.1}%, RSI:({:.1}/{:.1})",
+        strategy.ema1_length,
+        strategy.ema2_length,
+        strategy.ema3_length,
+        strategy.volume_signal,
         strategy_config.max_loss_percent * 100.0,
         strategy_config.profit_threshold * 100.0,
         strategy_config.use_dynamic_tp,
         strategy_config.use_fibonacci_tp,
+
         strategy.breakthrough_threshold * 100.0,
-        strategy.rsi_oversold, strategy.rsi_overbought
+        strategy.rsi_oversold,
+        strategy.rsi_overbought
     );
 
     // 保存测试日志并获取 back_test_id
@@ -369,7 +378,10 @@ pub async fn save_log(
         strategy_detail: strategy_config_string,
         profit: (back_test_result.funds - 100.00).to_string(), // 确保字段名称正确
         // 初始化为0，后续会通过分析更新
+        one_bar_after_win_rate: 0.0,
+        two_bar_after_win_rate: 0.0,
         three_bar_after_win_rate: 0.0,
+        four_bar_after_win_rate: 0.0,
         five_bar_after_win_rate: 0.0,
         ten_bar_after_win_rate: 0.0,
     };
@@ -411,6 +423,11 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     let ema1_lengths = vec![12];
     let ema2_lengths = vec![144];
     let ema3_lengths = vec![169];
+
+    let volume_bar_nums = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+
+    let volume_increase_ratios: Vec<f64> = (10..=50).map(|x| x as f64 * 0.1).collect();
+    let volume_decrease_ratios: Vec<f64> = (20..=20).map(|x| x as f64 * 0.1).collect();
     let breakthrough_thresholds = vec![0.003];
     let rsi_periods = vec![12];
     let rsi_overboughts = vec![75.0];
@@ -419,12 +436,13 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     // 收集所有 back_test_id
     let mut back_test_ids = Vec::new();
 
+
     // 创建任务容器
     let mut tasks = Vec::new();
 
-    for &ema1 in &ema1_lengths {
-        for &ema2 in &ema2_lengths {
-            for &ema3 in &ema3_lengths {
+    for &volume_bar_num in &volume_bar_nums {
+        for &volume_increase_ratio in &volume_increase_ratios {
+            for &volume_decrease_ratio in &volume_decrease_ratios {
                 for &breakthrough in &breakthrough_thresholds {
                     for &rsi_period in &rsi_periods {
                         for &rsi_overbought in &rsi_overboughts {
@@ -435,14 +453,20 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                                     max_loss_percent: 0.02,
                                     profit_threshold: 0.01,
                                 };
+                                let volumn_signal = VolumeSignal {
+                                    volume_bar_num,
+                                    volume_increase_ratio,
+                                    volume_decrease_ratio,
+                                    is_open: true,
+                                };
 
                                 let strategy = VegasIndicator {
-                                    ema1_length: ema1,
-                                    ema2_length: ema2,
-                                    ema3_length: ema3,
+                                    ema1_length: 12,
+                                    ema2_length: 144,
+                                    ema3_length: 169,
                                     ema4_length: 576,
                                     ema5_length: 676,
-                                    volume_multiplier: 1.0,
+                                    volume_signal: volumn_signal,
                                     breakthrough_threshold: breakthrough,
                                     rsi_length: rsi_period,
                                     rsi_oversold: rsi_oversold,
@@ -459,7 +483,6 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                                 // 创建任务
                                 tasks.push(tokio::spawn(async move {
                                     let _permit = permit.acquire().await.unwrap();
-
                                     match run_vegas_test(
                                         &inst_id,
                                         &time,
@@ -467,9 +490,7 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                                         strategy_config,
                                         mysql_candles,
                                         fibonacci_level,
-                                    )
-                                    .await
-                                    {
+                                    ).await {
                                         Ok(back_test_id) => Some(back_test_id),
                                         Err(e) => {
                                             error!("Vegas test failed: {:?}", e);
@@ -539,7 +560,6 @@ pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error
                     let mysql_candles_clone = Arc::clone(&mysql_candles_clone);
                     let fibonacci_level_clone = Arc::clone(&fibonacci_level_clone);
                     let permit = Arc::clone(&semaphore);
-
                     // 创建任务
                     tasks.push(tokio::spawn({
                         let inst_id_clone = inst_id_clone.clone();
@@ -737,7 +757,10 @@ pub async fn save_test_log(
         open_positions_num: open_position_num,
         strategy_detail: detail,
         profit: (final_fund - 100.00).to_string(),
+        one_bar_after_win_rate: 0.0,
+        two_bar_after_win_rate: 0.00,
         three_bar_after_win_rate: 0.0,
+        four_bar_after_win_rate: 0.00,
         five_bar_after_win_rate: 0.0,
         ten_bar_after_win_rate: 0.0,
     };

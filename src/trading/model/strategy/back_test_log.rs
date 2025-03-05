@@ -22,8 +22,11 @@ pub struct BackTestLog {
     pub open_positions_num: i32,
     pub strategy_detail: Option<String>,
     pub profit: String,
+    pub one_bar_after_win_rate: f32,
+    pub two_bar_after_win_rate: f32,
     // 开仓之后第3根结束时，仓位的是盈利的数/总开仓次数的比例
     pub three_bar_after_win_rate: f32,
+    pub four_bar_after_win_rate: f32,
     // 开仓之后第5根结束时，仓位的是盈利的数/总开仓次数的比例
     pub five_bar_after_win_rate: f32,
     // 开仓之后第10根结束时，仓位的是盈利的数/总开仓次数的比例
@@ -41,7 +44,10 @@ impl Default for BackTestLog {
             open_positions_num: 0,
             strategy_detail: None,
             profit: "".to_string(),
+            one_bar_after_win_rate: 0.0,
+            two_bar_after_win_rate: 0.0,
             three_bar_after_win_rate: 0.0,
+            four_bar_after_win_rate: 0.0,
             five_bar_after_win_rate: 0.0,
             ten_bar_after_win_rate: 0.0,
         }
@@ -99,12 +105,6 @@ impl BackTestLogModel {
     
     // 更新持仓统计数据
     pub async fn update_position_stats(&self, back_test_id: i64, stats: PositionStats) -> anyhow::Result<u64> {
-        debug!("更新 back_test_id {} 的统计数据: 3K胜率: {:.4}, 5K胜率: {:.4}, 10K胜率: {:.4}", 
-               back_test_id, 
-               stats.three_bar_after_win_rate,
-               stats.five_bar_after_win_rate,
-               stats.ten_bar_after_win_rate);
-        
         let sql = r#"
             UPDATE back_test_log 
             SET

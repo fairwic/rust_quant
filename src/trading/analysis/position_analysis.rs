@@ -130,10 +130,11 @@ impl PositionAnalysis {
                 .context("Failed to calculate position statistics")?;
             
             // 打印分析结果
-            info!("统计结果 - 3K后胜率: {:.2}%, 5K后胜率: {:.2}%, 10K后胜率: {:.2}%", 
+            info!("统计结果 - 3K后胜率: {:.2}%, 5K后胜率: {:.2}%, 10K后胜率: {:.2}%",
                   stats.three_bar_after_win_rate * 100.0,
                   stats.five_bar_after_win_rate * 100.0,
-                  stats.ten_bar_after_win_rate * 100.0);
+                  stats.ten_bar_after_win_rate * 100.0)
+            ;
             
             // 更新 back_test_log 表
             let log_model = BackTestLogModel::new().await;

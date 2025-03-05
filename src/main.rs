@@ -98,8 +98,8 @@ async fn main() -> anyhow::Result<()> {
     // let times = Arc::new(vec!["4H", "1H", "5m", "1Dutc"]);
 
     // let inst_ids =Some(vec![ "ETH-USDT-SWAP"]);
-    // let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
-    let inst_ids = Some(vec!["OM-USDT-SWAP"]);
+    let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
+    // let inst_ids = Some(vec!["OM-USDT-SWAP"]);
     // let period = Some(vec!["4H",]);
     // let period = Some(vec!["1m"]);
     // let period = Some(vec!["4H", "1H", "1m","5m", "1Dutc"]);
@@ -113,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
         //初始化同步一次就行
         let res = tickets_job::init_all_ticker(inst_ids.clone()).await;
         if let Err(error) = res {
+            println!("{:?}",error);
             error!("init all tickers error: {}", error);
         }
         let res = task::basic::run_sync_data_job(inst_ids.clone(), &period.clone().unwrap()).await;

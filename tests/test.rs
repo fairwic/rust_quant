@@ -8,6 +8,19 @@ struct AppError {
     kind: String,    // 错误类型
     message: String, // 错误信息
 }
+impl Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let a=1;
+        let b=2;
+        let c=3;
+        let d=4;
+        let e=5;
+        let f=6;
+        let g=7;
+        let h=8;
+        write!(f, "AppError: kind={}, message={}", self.kind, self.message)
+    }
+}
 impl From<io::Error> for AppError {
     fn from(error: io::Error) -> Self {
         AppError {
