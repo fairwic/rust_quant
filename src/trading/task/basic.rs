@@ -31,7 +31,7 @@ use crate::trading;
 use crate::trading::analysis::position_analysis::PositionAnalysis;
 use crate::trading::indicator::squeeze_momentum;
 use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
-use crate::trading::indicator::vegas_indicator::{VegasIndicator, VolumeSignal};
+use crate::trading::indicator::vegas_indicator::{EmaSignal, EmaTouchTrendSignal, RsiSignal, VegasIndicator, VolumeSignal};
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
@@ -288,19 +288,18 @@ pub async fn run_vegas_test(
 
     // 构建更详细的策略配置描述
     let config_desc = format!(
-        "VegasConfig({},{},{}), VolumeConfig {:?}最大止损:{:.1}%, 止盈:{:.1}%, 动态止盈:{}, 斐波那契止盈:{}, Breakthrough:{:.1}%, RSI:({:.1}/{:.1})",
-        strategy.ema1_length,
-        strategy.ema2_length,
-        strategy.ema3_length,
+        "VegasConfig({},{},{} {}), VolumeConfig {:?}最大止损:{:.1}%, 止盈:{:.1}%, 动态止盈:{}, 斐波那契止盈:{}, RSI:({:.1}/{:.1})",
+        strategy.ema_signal.ema1_length,
+        strategy.ema_signal.ema2_length,
+        strategy.ema_signal.ema3_length,
+        strategy.ema_signal.ema_breakthrough_threshold * 100.0,
         strategy.volume_signal,
         strategy_config.max_loss_percent * 100.0,
         strategy_config.profit_threshold * 100.0,
         strategy_config.use_dynamic_tp,
         strategy_config.use_fibonacci_tp,
-
-        strategy.breakthrough_threshold * 100.0,
-        strategy.rsi_oversold,
-        strategy.rsi_overbought
+        strategy.rsi_signal.rsi_oversold,
+        strategy.rsi_signal.rsi_overbought
     );
 
     // 保存测试日志并获取 back_test_id
@@ -428,9 +427,10 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
 
     let volume_increase_ratios: Vec<f64> = (10..=50).map(|x| x as f64 * 0.1).collect();
     let volume_decrease_ratios: Vec<f64> = (20..=20).map(|x| x as f64 * 0.1).collect();
-    let breakthrough_thresholds = vec![0.003];
+    let breakthrough_thresholds:Vec<f64> = vec![0.003];
+
     let rsi_periods = vec![12];
-    let rsi_overboughts = vec![75.0];
+    let rsi_overboughts = vec![85.0];
     let rsi_oversolds = vec![25.0];
 
     // 收集所有 back_test_id
@@ -459,18 +459,36 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                                     volume_decrease_ratio,
                                     is_open: true,
                                 };
-
-                                let strategy = VegasIndicator {
-                                    ema1_length: 12,
-                                    ema2_length: 144,
-                                    ema3_length: 169,
-                                    ema4_length: 576,
-                                    ema5_length: 676,
-                                    volume_signal: volumn_signal,
-                                    breakthrough_threshold: breakthrough,
+                                let rsi_signal = RsiSignal {
                                     rsi_length: rsi_period,
                                     rsi_oversold: rsi_oversold,
                                     rsi_overbought: rsi_overbought,
+                                    is_open: true,
+                                };
+                                let ema_touch_trend_signal = EmaTouchTrendSignal {
+                                    ema2_with_ema3_ratio: 0.9,
+                                    ema3_with_ema4_ratio: 0.9,
+                                    ema4_with_ema5_ratio: 0.9,
+                                    is_open: true,
+                                };
+                                let ema_touch_trend_signal = EmaTouchTrendSignal {
+                                    is_open: true,
+                                   ..Default::default()
+                                };
+
+                                let strategy = VegasIndicator {
+                                    ema_signal: EmaSignal {
+                                        ema1_length: 12,
+                                        ema2_length: 144,
+                                        ema3_length: 169,
+                                        ema4_length: 576,
+                                        ema5_length: 676,
+                                        ema_breakthrough_threshold: breakthrough,
+                                        is_open: true,
+                                    },
+                                    volume_signal: volumn_signal,
+                                    ema_touch_trend_signal,
+                                    rsi_signal,
                                     signal_weights: SignalWeights::default(),
                                 };
 

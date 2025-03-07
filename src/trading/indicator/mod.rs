@@ -11,3 +11,5 @@ pub mod enums;
 pub mod super_trend;
 pub mod vegas_indicator;
 pub mod signal_weight;
+pub mod rsi_indicator;
+pub mod rsi_rma;

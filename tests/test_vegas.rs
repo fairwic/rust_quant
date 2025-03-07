@@ -9,6 +9,7 @@ use rust_quant::{
 use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading::indicator::vegas_indicator::VegasIndicator;
 use tracing::error;
+use rust_quant::trading::indicator::signal_weight::SignalWeights;
 
 #[tokio::test]
 async fn test_vegas() -> Result<()> {
@@ -58,7 +59,7 @@ async fn test_vegas() -> Result<()> {
         .collect();
     println!("最近5根K线收盘价: {:?}", last_prices);
     
-    let result = strategy.get_trade_signal(&mysql_candles);
+    let result = strategy.get_trade_signal(&mysql_candles, &SignalWeights::default());
     println!("交易信号结果: {:?}", result);
     
     if let Some(detail) = &result.single_detail {

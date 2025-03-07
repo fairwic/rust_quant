@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum SignalType {
     Breakthrough,    // 突破信号
     VolumeTrend,    // 成交量趋势
+    EmaTrend,       // ema趋势
     Rsi,            // RSI指标
     TrendStrength,  // 趋势强度
     EmaDivergence,  // 均线发散
@@ -12,7 +13,7 @@ pub enum SignalType {
 }
 
 // 信号条件枚举
-#[derive(Debug)]
+#[derive(Debug,Clone, Copy, Deserialize, Serialize)]
 pub enum SignalCondition {
     PriceBreakout {
         price_above: bool,
@@ -33,6 +34,10 @@ pub enum SignalCondition {
     },
     EmaStatus {
         is_diverging: bool,
+    },
+    EmaTrend {
+        is_long_signal: bool,
+        is_short_signal: bool,
     },
 }
 
@@ -60,6 +65,7 @@ impl Default for SignalWeights {
                 (SignalType::TrendStrength, 1.0),
                 (SignalType::EmaDivergence, 1.0),
                 (SignalType::PriceLevel, 1.0),
+                (SignalType::EmaTrend, 1.0),
             ],
             min_total_weight: 2.0,
         }
@@ -113,6 +119,13 @@ impl SignalWeights {
             SignalCondition::EmaStatus { is_diverging } => {
                 if is_diverging {
                     Some((base_weight, format!("均线发散 +{:.1}", base_weight)))
+                } else {
+                    None
+                }
+            },
+            SignalCondition::EmaTrend { is_long_signal, is_short_signal } => {
+                if is_long_signal || is_short_signal {
+                    Some((base_weight, format!("ema趋势 +{:.1}", base_weight)))
                 } else {
                     None
                 }
