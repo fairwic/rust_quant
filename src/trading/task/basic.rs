@@ -8,6 +8,7 @@ use tokio::task::spawn;
 use tracing::{error, info, warn, Level};
 
 use crate::time_util;
+use crate::trading::indicator::bollings::BollingerBandsSignal;
 use crate::trading::indicator::signal_weight::SignalWeights;
 use crate::trading::model::market::candles::SelectTime;
 use crate::trading::model::market::candles::{self, TimeDirect};
@@ -287,20 +288,7 @@ pub async fn run_vegas_test(
     );
 
     // 构建更详细的策略配置描述
-    let config_desc = format!(
-        "VegasConfig({},{},{} {}), VolumeConfig {:?}最大止损:{:.1}%, 止盈:{:.1}%, 动态止盈:{}, 斐波那契止盈:{}, RSI:({:.1}/{:.1})",
-        strategy.ema_signal.ema1_length,
-        strategy.ema_signal.ema2_length,
-        strategy.ema_signal.ema3_length,
-        strategy.ema_signal.ema_breakthrough_threshold * 100.0,
-        strategy.volume_signal,
-        strategy_config.max_loss_percent * 100.0,
-        strategy_config.profit_threshold * 100.0,
-        strategy_config.use_dynamic_tp,
-        strategy_config.use_fibonacci_tp,
-        strategy.rsi_signal.rsi_oversold,
-        strategy.rsi_signal.rsi_overbought
-    );
+    let config_desc = json!(strategy).to_string();
 
     // 保存测试日志并获取 back_test_id
     let back_test_id = save_log(inst_id, time, Some(config_desc), res).await?;
@@ -353,7 +341,6 @@ pub async fn save_log(
 ) -> Result<i64> {
     // 添加调试日志
     println!("Trade records count: {}", back_test_result.open_trades);
-
     // 解包 Result 类型
     //把back tests strategy结果写入数据
     let back_test_log = BackTestLog {
@@ -409,7 +396,7 @@ pub async fn save_log(
 // 主函数，执行所有策略测试
 pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
     // 获取数据
-    let mysql_candles = self::get_candle_data(inst_id, time, 2000, None).await?;
+    let mysql_candles = self::get_candle_data(inst_id, time, 6000, None).await?;
     let mysql_candles_clone = Arc::new(mysql_candles.clone()); // 克隆一份用于后续分析
 
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
@@ -423,13 +410,15 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     let ema2_lengths = vec![144];
     let ema3_lengths = vec![169];
 
-    let volume_bar_nums = vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    let volume_bar_nums = vec![ 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let volume_bar_nums = vec![3];
 
-    let volume_increase_ratios: Vec<f64> = (10..=50).map(|x| x as f64 * 0.1).collect();
-    let volume_decrease_ratios: Vec<f64> = (20..=20).map(|x| x as f64 * 0.1).collect();
+    let volume_increase_ratios: Vec<f64> = (20..=20).map(|x| x as f64 * 0.1).collect();
+    let volume_decrease_ratios: Vec<f64> = (37..=37).map(|x| x as f64 * 0.1).collect();
     let breakthrough_thresholds:Vec<f64> = vec![0.003];
 
     let rsi_periods = vec![12];
+    // let rsi_periods = vec![14];
     let rsi_overboughts = vec![85.0];
     let rsi_oversolds = vec![25.0];
 
@@ -449,7 +438,7 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                             for &rsi_oversold in &rsi_oversolds {
                                 let strategy_config = TradingStrategyConfig {
                                     use_dynamic_tp: true,
-                                    use_fibonacci_tp: false,
+                                    use_fibonacci_tp: true,
                                     max_loss_percent: 0.02,
                                     profit_threshold: 0.01,
                                 };
@@ -466,30 +455,21 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                                     is_open: true,
                                 };
                                 let ema_touch_trend_signal = EmaTouchTrendSignal {
-                                    ema2_with_ema3_ratio: 0.9,
-                                    ema3_with_ema4_ratio: 0.9,
-                                    ema4_with_ema5_ratio: 0.9,
-                                    is_open: true,
-                                };
-                                let ema_touch_trend_signal = EmaTouchTrendSignal {
                                     is_open: true,
                                    ..Default::default()
                                 };
 
                                 let strategy = VegasIndicator {
                                     ema_signal: EmaSignal {
-                                        ema1_length: 12,
-                                        ema2_length: 144,
-                                        ema3_length: 169,
-                                        ema4_length: 576,
-                                        ema5_length: 676,
-                                        ema_breakthrough_threshold: breakthrough,
-                                        is_open: true,
+                                        ..Default::default()
                                     },
                                     volume_signal: volumn_signal,
                                     ema_touch_trend_signal,
                                     rsi_signal,
                                     signal_weights: SignalWeights::default(),
+                                    bollinger_signal: BollingerBandsSignal {
+                                        ..Default::default()
+                                    },
                                 };
 
                                 let inst_id = inst_id.to_string();

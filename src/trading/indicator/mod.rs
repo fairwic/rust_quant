@@ -13,3 +13,4 @@ pub mod vegas_indicator;
 pub mod signal_weight;
 pub mod rsi_indicator;
 pub mod rsi_rma;
+pub mod bollings;

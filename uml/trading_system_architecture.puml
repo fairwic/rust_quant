@@ -1,0 +1,150 @@
+@startuml
+title 交易系统分布式架构
+
+' 简化样式定义
+skinparam {
+  componentStyle uml2
+  backgroundColor white
+  defaultTextAlignment center
+}
+
+' 定义客户端/接入层
+package "客户端层" {
+  [Web应用] as WebApp
+  [移动应用] as MobileApp
+  [交易终端] as TradingTerminal
+  [API客户端] as APIClient
+}
+
+' 定义API网关和负载均衡
+node "接入层" {
+  [负载均衡器] as LoadBalancer
+  [API网关] as APIGateway
+  [认证授权服务] as AuthService
+  [速率限制] as RateLimit
+}
+
+' 定义服务层
+package "核心服务层" {
+  ' 交易处理相关服务
+  node "交易服务集群" {
+    [订单管理服务] as OrderService
+    [撮合引擎] as MatchingEngine
+    [定价与行情服务] as PricingService
+    [交易历史服务] as TradeHistoryService
+  }
+  
+  ' 账户管理相关服务
+  node "账户服务集群" {
+    [账户服务] as AccountService
+    [持仓管理] as PositionService
+    [清算结算服务] as SettlementService
+  }
+  
+  ' 风控系统
+  node "风控服务集群" {
+    [实时风控] as RiskControl
+    [反欺诈系统] as AntiFraud
+    [交易限制服务] as TradingLimit
+  }
+  
+  ' 辅助服务
+  node "辅助服务" {
+    [通知服务] as NotificationService
+    [报表服务] as ReportingService
+    [策略回测服务] as BacktestService
+  }
+}
+
+' 数据层
+package "数据层" {
+  database "主数据存储" {
+    [订单数据库] as OrderDB
+    [账户数据库] as AccountDB
+    [交易数据库] as TradeDB
+  }
+  
+  database "分析数据存储" {
+    [时间序列数据库] as TSDB
+    [数据仓库] as DataWarehouse
+  }
+  
+  [分布式缓存] as Redis
+  [消息队列] as MessageQueue
+  [搜索引擎] as ElasticSearch
+}
+
+' 监控层
+package "监控与运维" {
+  [日志收集] as LogCollector
+  [监控系统] as Monitoring
+  [告警系统] as AlertSystem
+  [链路追踪] as Tracing
+  [运维管理工具] as DevOps
+}
+
+' 外部集成
+cloud "外部系统" {
+  [外部行情提供商] as ExternalDataProvider
+  [支付网关] as PaymentGateway
+  [监管报送] as Compliance
+}
+
+' 定义连接
+' 客户端连接
+WebApp --> LoadBalancer
+MobileApp --> LoadBalancer
+TradingTerminal --> LoadBalancer
+APIClient --> LoadBalancer
+
+' 负载均衡器连接
+LoadBalancer --> APIGateway
+APIGateway --> AuthService
+APIGateway --> RateLimit
+
+' API网关连接到各服务
+APIGateway --> OrderService
+APIGateway --> AccountService
+APIGateway --> PricingService
+APIGateway --> TradeHistoryService
+APIGateway --> BacktestService
+
+' 服务间连接
+OrderService --> MatchingEngine
+MatchingEngine --> PricingService
+MatchingEngine --> PositionService
+MatchingEngine --> RiskControl
+OrderService --> NotificationService
+AccountService --> SettlementService
+OrderService --> MessageQueue
+SettlementService --> AccountService
+
+' 数据层连接
+OrderService --> OrderDB
+AccountService --> AccountDB
+MatchingEngine --> TradeDB
+TradeHistoryService --> TradeDB
+PricingService --> TSDB
+PricingService --> Redis
+ReportingService --> DataWarehouse
+RiskControl --> Redis
+
+' 消息队列连接
+MatchingEngine --> MessageQueue : 推送交易事件
+NotificationService <-- MessageQueue : 消费通知事件
+
+' 外部系统连接
+PricingService <-- ExternalDataProvider
+AccountService --> PaymentGateway
+ReportingService --> Compliance
+
+' 监控系统连接
+OrderService --> LogCollector
+MatchingEngine --> LogCollector
+LogCollector --> Monitoring
+Monitoring --> AlertSystem
+APIGateway --> Tracing
+OrderService --> Tracing
+MatchingEngine --> Tracing
+
+@enduml 

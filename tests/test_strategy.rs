@@ -9,7 +9,6 @@ async fn test_strategy_signals() -> Result<()> {
     let strategy_config = TradingStrategyConfig {
         use_dynamic_tp: true,
         use_fibonacci_tp: false,
-        use_trailing_stop: false,
         max_loss_percent: 0.02,
         profit_threshold: 0.01,
     };
@@ -89,7 +88,6 @@ async fn verify_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result
     let strategy_config = TradingStrategyConfig {
         use_dynamic_tp: true,
         use_fibonacci_tp: false,
-        use_trailing_stop: false,
         max_loss_percent: 0.02,    // 2%止损
         profit_threshold: 0.01,    // 1%启用动态止盈
     };
@@ -117,7 +115,6 @@ async fn verify_short_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> 
     let strategy_config = TradingStrategyConfig {
         use_dynamic_tp: true,
         use_fibonacci_tp: false,
-        use_trailing_stop: false,
         max_loss_percent: 0.02,    // 2%止损
         profit_threshold: 0.01,    // 1%启用动态止盈
     };
@@ -348,7 +345,7 @@ fn create_stoploss_scenario() -> Vec<CandlesEntity> {
     candles
 }
 
-/// 创建动态止盈场景
+// 创建动态止盈场景
 fn create_dynamic_tp_scenario() -> Vec<CandlesEntity> {
     let mut candles = Vec::new();
     let now = chrono::Utc::now().timestamp_millis();

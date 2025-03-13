@@ -1,0 +1,105 @@
+@startuml
+title 优化后的交易回测系统执行流程
+
+skinparam backgroundColor white
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam activityDiamondBackgroundColor #FEF9E7
+skinparam noteBackgroundColor #D4EFDF
+skinparam noteBorderColor #27AE60
+
+start
+
+:初始化TradingState;
+note right
+  funds = 100.0
+  position = 0.0
+  wins/losses = 0
+  entry_price = 0.0
+  is_long = true
+  trade_records = []
+end note
+
+repeat
+  :获取当前K线;
+  
+  if (数据长度不足min_data_length?) then (是)
+    :跳过当前K线;
+  else (否)
+    :获取策略信号;
+    
+    partition "持仓管理" {
+      if (当前持有仓位?) then (是)
+        :计算盈亏率;
+        note right
+          多头: (price-entry)/entry
+          空头: (entry-price)/entry
+        end note
+        
+        if (触发止损条件?) then (是)
+          :执行止损平仓;
+          :更新资金和统计;
+          note right: 跳到下一K线
+        else (否)
+          if (启用动态止盈且盈利超过阈值?) then (是)
+            if (满足动态止盈条件?) then (是)
+              :执行动态止盈;
+              :更新资金和统计;
+              note right: 跳到下一K线
+            endif
+          endif
+        endif
+      endif
+    }
+    
+    partition "信号处理" {
+      if (收到买入信号?) then (是)
+        if (持有空仓?) then (是)
+          :平掉空仓;
+          :计算并记录平仓盈亏;
+          :开多仓;
+          :记录开仓交易;
+          note right: 完成交易对
+        elseif (已持有多仓?) then (是)
+          :忽略重复信号;
+          note right: 跳到下一K线
+        else (否)
+          :开多仓;
+          :记录开仓交易;
+        endif
+      elseif (收到卖出信号?) then (是)
+        if (持有多仓?) then (是)
+          :平掉多仓;
+          :计算并记录平仓盈亏;
+          :开空仓;
+          :记录开仓交易;
+          note right: 完成交易对
+        elseif (已持有空仓?) then (是)
+          :忽略重复信号;
+          note right: 跳到下一K线
+        else (否)
+          :开空仓;
+          :记录开仓交易;
+        endif
+      endif
+    }
+  endif
+repeat while (还有K线?) is (是)
+
+partition "最终处理" {
+  if (最终还有持仓?) then (是)
+    :获取最后一根K线;
+    :计算最终盈亏;
+    :执行最后一次平仓;
+    :更新资金和统计;
+  endif
+  
+  :计算最终胜率;
+  :生成BackTestResult;
+}
+
+stop
+
+footer 优化后的回测流程 - 使用TradingState统一管理状态
+
+@enduml 
