@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_rsi_calculation() {
-        let mut rsi = Rsi::new(14, true);
+        let mut rsi = Rsi::new(14);
         
         // TradingView documentation example data
         let prices = vec![

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use dotenv::dotenv;
 use rust_quant::app_config::log::setup_logging;
-use rust_quant::trading::indicator::signal_weight::SignalWeights;
+use rust_quant::trading::indicator::signal_weight::SignalWeightsConfig;
 use rust_quant::trading::indicator::vegas_indicator::VegasIndicator;
 use rust_quant::trading::model::market::candles::CandlesEntity;
 use rust_quant::trading::model::market::candles::SelectTime;
@@ -19,8 +19,8 @@ async fn test_vegas() -> Result<()> {
     // 设置参数
     let inst_id = "BTC-USDT-SWAP";
     let time = "1H";
-    let select_time = SelectTime {
-        point_time: 1734552000000,
+    let select_time: SelectTime = SelectTime {
+        point_time: 1736776800000,
         direct: TimeDirect::BEFORE,
     };
 
@@ -44,7 +44,7 @@ async fn test_vegas() -> Result<()> {
     strategy.volume_signal.is_open = true;
     strategy.rsi_signal.is_open = true;
 
-    let signal_weights = SignalWeights::default();
+    let signal_weights = SignalWeightsConfig::default();
     let result = strategy.get_trade_signal(&mysql_candles, &signal_weights);
     println!("交易信号结果: {:?}", result);
 

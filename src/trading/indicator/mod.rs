@@ -14,3 +14,5 @@ pub mod signal_weight;
 pub mod rsi_indicator;
 pub mod rsi_rma;
 pub mod bollings;
+pub mod key_levels;
+pub mod volume_indicator;

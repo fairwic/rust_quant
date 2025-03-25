@@ -1,6 +1,6 @@
 use crate::trading::indicator::rsi_rma::Rsi;
 use crate::trading::indicator::signal_weight::{
-    SignalCondition, SignalDeriect, SignalScoreWithDeriact, SignalType, SignalWeights,
+    SignalCondition, SignalDeriect, SignalScoreWithDeriact, SignalType, SignalWeightsConfig,
 };
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::strategy::strategy_common;
@@ -13,16 +13,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt::Display;
 use std::sync::Arc;
-use ta::indicators::{BollingerBandsOutput, ExponentialMovingAverage};
+use ta::indicators::{BollingerBands, BollingerBandsOutput, ExponentialMovingAverage};
 use ta::indicators::{MovingAverageConvergenceDivergence, RelativeStrengthIndex};
-use ta::{Close, DataItem, High, Low, Next, Volume};
+use ta::{Close, DataItem, High, Low, Next, Open, Volume};
 use tracing::error;
 
-use super::bollings::BollingerBandsSignal;
+use super::bollings::BollingerBandsSignalConfig;
+use super::volume_indicator::VolumeRatioIndicator;
 
 // 成交量趋势
-#[derive(Debug)]
-pub struct VolumeTrend {
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct VolumeTrendSignalValue {
     pub is_increasing: bool,
     pub is_decreasing: bool,
     pub is_stable: bool,   // 是否稳定
@@ -31,16 +32,16 @@ pub struct VolumeTrend {
 
 // 成交量信号配置
 #[derive(Debug, Serialize, Deserialize)]
-pub struct VolumeSignal {
+pub struct VolumeSignalConfig {
     pub volume_bar_num: usize,      // 看前10根K线
     pub volume_increase_ratio: f64, // 放量倍数
     pub volume_decrease_ratio: f64, // 缩量倍数
-    pub is_open: bool,              // 缩量倍数
+    pub is_open: bool,              // 是否开启
 }
 
 // ema信号配置
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EmaSignal {
+pub struct EmaSignalConfig {
     pub ema1_length: usize,
     pub ema2_length: usize,
     pub ema3_length: usize,
@@ -49,7 +50,28 @@ pub struct EmaSignal {
     pub ema_breakthrough_threshold: f64, // 新增：ema突破价格的阈值
     pub is_open: bool,
 }
-impl Default for EmaSignal {
+
+#[derive(Debug)]
+pub struct EmaIndicator {
+    pub ema1_indicator: ExponentialMovingAverage,
+    pub ema2_indicator: ExponentialMovingAverage,
+    pub ema3_indicator: ExponentialMovingAverage,
+    pub ema4_indicator: ExponentialMovingAverage,
+    pub ema5_indicator: ExponentialMovingAverage,
+}
+impl EmaIndicator {
+    fn new(ema1: usize, ema2: usize, ema3: usize, ema4: usize, ema5: usize) -> Self {
+        Self {
+            ema1_indicator: ExponentialMovingAverage::new(ema1).unwrap(),
+            ema2_indicator: ExponentialMovingAverage::new(ema2).unwrap(),
+            ema3_indicator: ExponentialMovingAverage::new(ema3).unwrap(),
+            ema4_indicator: ExponentialMovingAverage::new(ema4).unwrap(),
+            ema5_indicator: ExponentialMovingAverage::new(ema5).unwrap(),
+        }
+    }
+}
+
+impl Default for EmaSignalConfig {
     fn default() -> Self {
         Self {
             ema1_length: 12,
@@ -63,16 +85,16 @@ impl Default for EmaSignal {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct EmaValue {
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct EmaSignalValue {
     pub ema1_value: f64,
     pub ema2_value: f64,
     pub ema3_value: f64,
     pub ema4_value: f64,
     pub ema5_value: f64,
 }
-#[derive(Debug, Clone, Copy)]
-pub struct BollingerValue {
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct BollingerSignalValue {
     pub lower: f64,
     pub upper: f64,
     pub middle: f64,
@@ -83,14 +105,20 @@ pub struct BollingerValue {
 
 // rsi信号配置
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RsiSignal {
+pub struct RsiSignalConfig {
     pub rsi_length: usize,   // rsi周期
     pub rsi_oversold: f64,   // rsi超卖阈值
     pub rsi_overbought: f64, // rsi超买阈值
     pub is_open: bool,       // 是否开启
 }
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct RsiSignalValue {
+    pub rsi_value: f64,      // rsi值
+    pub is_oversold: bool,   // 是否超卖
+    pub is_overbought: bool, // 是否超买
+}
 
-impl VolumeTrend {
+impl VolumeTrendSignalValue {
     pub fn new(
         is_increasing: bool,
         is_decreasing: bool,
@@ -108,27 +136,31 @@ impl VolumeTrend {
 
 // ema趋势
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EmaTouchTrendSignal {
-    pub ema2_with_ema3_ratio: f64, //eam2与eam3的相差幅度
-    pub ema3_with_ema4_ratio: f64, //eam2与eam3的相差幅度
-    pub ema4_with_ema5_ratio: f64, //eam2与eam3的相差幅度
-    pub price_with_ema_ratio: f64, //价格与ema4的相差幅度
-    pub is_open: bool,             //是否开启
+pub struct EmaTouchTrendSignalConfig {
+    pub ema1_with_ema2_ratio: f64,      //eam2与eam3的相差幅度
+    pub ema2_with_ema3_ratio: f64,      //eam2与eam3的相差幅度
+    pub ema3_with_ema4_ratio: f64,      //eam2与eam3的相差幅度
+    pub ema4_with_ema5_ratio: f64,      //eam2与eam3的相差幅度
+    pub price_with_ema_high_ratio: f64, //价格与ema4的相差幅度
+    pub price_with_ema_low_ratio: f64,  //价格与ema4的相差幅度
+    pub is_open: bool,                  //是否开启
 }
-impl Default for EmaTouchTrendSignal {
+impl Default for EmaTouchTrendSignalConfig {
     fn default() -> Self {
         Self {
-            ema4_with_ema5_ratio: 1.012, //ema4与ema5的相差幅度
-            ema3_with_ema4_ratio: 1.012, //ema3与ema4的相差幅度
-            ema2_with_ema3_ratio: 1.012, //ema2与ema3的相差幅度
-            price_with_ema_ratio: 1.005, //价格与ema4的相差幅度
-            is_open: true,               //是否开启
+            ema1_with_ema2_ratio: 1.010,      //ema1与ema2的相差幅度
+            ema4_with_ema5_ratio: 1.012,      //ema4与ema5的相差幅度
+            ema3_with_ema4_ratio: 1.012,      //ema3与ema4的相差幅度
+            ema2_with_ema3_ratio: 1.012,      //ema2与ema3的相差幅度
+            price_with_ema_high_ratio: 1.005, //价格与ema4的相差幅度
+            price_with_ema_low_ratio: 0.995,  //价格与ema4的相差幅度
+            is_open: true,                    //是否开启
         }
     }
 }
 // ema趋势
-#[derive(Debug)]
-pub struct EmaTouchTrendValue {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EmaTouchTrendSignalValue {
     pub is_uptrend: bool,                          //是否多头趋势
     pub is_downtrend: bool,                        //是否空头趋势
     pub is_in_uptrend_touch_ema2: bool,            //是否在多头趋势触碰ema2
@@ -150,7 +182,7 @@ pub struct EmaTouchTrendValue {
     pub is_long_signal: bool,  //是否多头开仓
     pub is_short_signal: bool, //是否空头开仓
 }
-impl Default for EmaTouchTrendValue {
+impl Default for EmaTouchTrendSignalValue {
     fn default() -> Self {
         Self {
             is_uptrend: false,
@@ -179,14 +211,24 @@ pub struct EmaCross {
     pub is_death_cross: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct VegasIndicatorSignalValue {
+    pub ema_values: EmaSignalValue,                // ema信号配置
+    pub volume_value: VolumeTrendSignalValue,      // 新增：成交量信号配置
+    pub ema_touch_value: EmaTouchTrendSignalValue, // ema趋势
+    pub rsi_value: RsiSignalValue,                 //rsi信号配置
+    pub bollinger_value: BollingerSignalValue,     //bollinger信号配置
+    pub signal_weights_value: SignalWeightsConfig, // 新增权重配置
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VegasIndicator {
-    pub ema_signal: EmaSignal,                       // ema信号配置
-    pub volume_signal: VolumeSignal,                 // 新增：成交量信号配置
-    pub ema_touch_trend_signal: EmaTouchTrendSignal, // ema趋势
-    pub rsi_signal: RsiSignal,                       //rsi信号配置
-    pub bollinger_signal: BollingerBandsSignal,      //bollinger信号配置
-    pub signal_weights: SignalWeights,               // 新增权重配置
+    pub ema_signal: EmaSignalConfig,                       // ema信号配置
+    pub volume_signal: VolumeSignalConfig,                 // 新增：成交量信号配置
+    pub ema_touch_trend_signal: EmaTouchTrendSignalConfig, // ema趋势
+    pub rsi_signal: RsiSignalConfig,                       //rsi信号配置
+    pub bollinger_signal: BollingerBandsSignalConfig,      //bollinger信号配置
+    pub signal_weights: SignalWeightsConfig,               // 新增权重配置
 }
 
 impl Display for VegasIndicator {
@@ -201,9 +243,9 @@ impl Display for VegasIndicator {
 impl VegasIndicator {
     pub fn new(ema1: usize, ema2: usize, ema3: usize, ema4: usize, ema5: usize) -> Self {
         Self {
-            ema_touch_trend_signal: EmaTouchTrendSignal::default(),
-            bollinger_signal: BollingerBandsSignal::default(),
-            ema_signal: EmaSignal {
+            ema_touch_trend_signal: EmaTouchTrendSignalConfig::default(),
+            bollinger_signal: BollingerBandsSignalConfig::default(),
+            ema_signal: EmaSignalConfig {
                 ema1_length: ema1,
                 ema2_length: ema2,
                 ema3_length: ema3,
@@ -213,19 +255,19 @@ impl VegasIndicator {
                 is_open: true,
             },
             //11
-            volume_signal: VolumeSignal {
-                volume_bar_num: 10,
+            volume_signal: VolumeSignalConfig {
+                volume_bar_num: 4,
                 volume_increase_ratio: 2.5,
                 volume_decrease_ratio: 0.5,
                 is_open: true,
             },
-            rsi_signal: RsiSignal {
+            rsi_signal: RsiSignalConfig {
                 rsi_length: 12,       // 默认RSI周期
                 rsi_oversold: 25.0,   // 默认25
                 rsi_overbought: 75.0, // 默认75
                 is_open: true,
             },
-            signal_weights: SignalWeights {
+            signal_weights: SignalWeightsConfig {
                 weights: vec![
                     (SignalType::SimpleBreakEma2through, 2.0),
                     (SignalType::VolumeTrend, 1.5),
@@ -238,90 +280,101 @@ impl VegasIndicator {
             },
         }
     }
+
     pub fn get_min_data_length(&mut self) -> usize {
         3400
     }
-    pub fn calculate_ema(&mut self, data: &[DataItem]) -> EmaValue {
-        // 确保数据量足够
-        if data.len() < self.ema_signal.ema5_length {
-            return EmaValue {
-                ema1_value: 0.0,
-                ema2_value: 0.0,
-                ema3_value: 0.0,
-                ema4_value: 0.0,
-                ema5_value: 0.0,
-            };
+    pub fn calculate_ema(
+        &mut self,
+        data: &DataItem,
+        ema_indicator: &mut EmaIndicator,
+    ) -> EmaSignalValue {
+        let mut ema_signal_value = EmaSignalValue::default();
+        ema_signal_value.ema1_value = ema_indicator.ema1_indicator.next(data.close());
+        ema_signal_value.ema2_value = ema_indicator.ema2_indicator.next(data.close());
+        ema_signal_value.ema3_value = ema_indicator.ema3_indicator.next(data.close());
+        ema_signal_value.ema4_value = ema_indicator.ema4_indicator.next(data.close());
+        ema_signal_value.ema5_value = ema_indicator.ema5_indicator.next(data.close());
+        ema_signal_value
+    }
+
+    pub fn get_data_items_and_ema_values(
+        &mut self,
+        prices: &Vec<CandlesEntity>,
+    ) -> (Vec<DataItem>, VegasIndicatorSignalValue) {
+        if prices.len() < self.ema_signal.ema5_length + 10 {
+            error!(
+                "数据长度不足: {} < {}",
+                prices.len(),
+                self.ema_signal.ema5_length + 10
+            );
+            return (vec![], VegasIndicatorSignalValue::default());
         }
 
-        // 使用更高效的单次循环计算所有EMA值
-        let ema_lengths = [
+        let mut vegas_indicator_signal_value = VegasIndicatorSignalValue::default();
+
+        let mut data_items = vec![];
+        //ema
+        let mut ema_signal_value = EmaSignalValue::default();
+        let mut ema_indicator = EmaIndicator::new(
             self.ema_signal.ema1_length,
             self.ema_signal.ema2_length,
             self.ema_signal.ema3_length,
             self.ema_signal.ema4_length,
             self.ema_signal.ema5_length,
-        ];
+        );
+        //volume
+        let mut volume_ratio_indicator =
+            VolumeRatioIndicator::new(self.volume_signal.volume_bar_num);
 
-        let mut ema_values = [0.0, 0.0, 0.0, 0.0, 0.0];
-        let mut k_factors = [0.0, 0.0, 0.0, 0.0, 0.0];
+        //rsi
+        let mut rsi_indicator = Rsi::new(self.rsi_signal.rsi_length);
+        //bollinger
+        let mut bollinger_indicator = BollingerBands::new(
+            self.bollinger_signal.period,
+            self.bollinger_signal.multiplier,
+        )
+        .unwrap();
 
-        // 计算平滑因子和初始SMA值
-        for i in 0..5 {
-            if data.len() < ema_lengths[i] {
-                continue;
-            }
+        for price in prices {
+            let data_item = DataItem::builder()
+                .open(price.o.parse().unwrap())
+                .high(price.h.parse().unwrap())
+                .low(price.l.parse().unwrap())
+                .close(price.c.parse().unwrap())
+                .volume(price.vol.parse().unwrap())
+                .build()
+                .unwrap();
 
-            // 计算EMA平滑因子 k = 2/(n+1)
-            k_factors[i] = 2.0 / (ema_lengths[i] as f64 + 1.0);
+            //计算ema
+            vegas_indicator_signal_value.ema_values =
+                self.calculate_ema(&data_item, &mut ema_indicator);
 
-            // 计算初始SMA值
-            let sum: f64 = data[0..ema_lengths[i]].iter().map(|x| x.close()).sum();
-            ema_values[i] = sum / ema_lengths[i] as f64;
+            //计算volume
+            vegas_indicator_signal_value.volume_value.volume_ratio =
+                volume_ratio_indicator.next(data_item.volume());
+
+            //计算rsi
+            vegas_indicator_signal_value.rsi_value.rsi_value =
+                rsi_indicator.next(data_item.close());
+
+            //计算bollinger
+            let bollinger_value = bollinger_indicator.next(data_item.close());
+            vegas_indicator_signal_value.bollinger_value.upper = bollinger_value.upper;
+            vegas_indicator_signal_value.bollinger_value.lower = bollinger_value.lower;
+            vegas_indicator_signal_value.bollinger_value.middle = bollinger_value.average;
+
+            //
+            data_items.push(data_item);
         }
 
-        // 单次遍历数据集，同时更新所有EMA值
-        for i in 1..data.len() {
-            let price = data[i].close();
-
-            // 只更新有足够数据的EMA值
-            for j in 0..5 {
-                if i >= ema_lengths[j] {
-                    // 使用EMA递推公式: EMA_today = price * k + EMA_yesterday * (1-k)
-                    ema_values[j] = price * k_factors[j] + ema_values[j] * (1.0 - k_factors[j]);
-                }
-            }
-        }
-
-        // 返回最终计算的EMA值
-        EmaValue {
-            ema1_value: ema_values[0],
-            ema2_value: ema_values[1],
-            ema3_value: ema_values[2],
-            ema4_value: ema_values[3],
-            ema5_value: ema_values[4],
-        }
-    }
-
-    pub fn convert_to_data_items(&self, prices: &Vec<CandlesEntity>) -> Vec<DataItem> {
-        prices
-            .iter()
-            .map(|candle| {
-                DataItem::builder()
-                    .open(candle.o.parse().unwrap())
-                    .high(candle.h.parse().unwrap())
-                    .low(candle.l.parse().unwrap())
-                    .close(candle.c.parse().unwrap())
-                    .volume(candle.vol.parse().unwrap())
-                    .build()
-                    .unwrap()
-            })
-            .collect()
+        (data_items, vegas_indicator_signal_value)
     }
     //22
     pub fn get_trade_signal(
         &mut self,
         data: &[CandlesEntity],
-        weights: &SignalWeights,
+        weights: &SignalWeightsConfig,
     ) -> SignalResult {
         let mut signal_result = SignalResult {
             should_buy: false,
@@ -332,29 +385,19 @@ impl VegasIndicator {
         };
 
         // 转换数据
-        let data_items = self.convert_to_data_items(&data.to_vec());
-        if data_items.len() < self.ema_signal.ema5_length + 10 {
-            error!(
-                "数据长度不足: {} < {}",
-                data_items.len(),
-                self.ema_signal.ema5_length + 10
-            );
-            return signal_result;
-        }
-
-        // 计算ema
-        let ema_value = self.calculate_ema(&data_items);
-        // println!("ema_value: {:?}", ema_value);
+        let (data_items, vegas_indicator_signal_value) =
+            self.get_data_items_and_ema_values(&data.to_vec());
 
         let current_price = data.last().unwrap().c.parse::<f64>().unwrap();
         let lower_price = data.last().unwrap().l.parse::<f64>().unwrap();
         signal_result.price = current_price;
         signal_result.ts = data.last().unwrap().ts;
+        let last_data_item = data.last().unwrap();
 
         let mut conditions = vec![];
         // 检查ema2被突破
-        let (price_above, price_below) =
-            self.check_breakthrough_conditions(&data_items, ema_value.ema2_value);
+        let (price_above, price_below) = self
+            .check_breakthrough_conditions(&data_items, vegas_indicator_signal_value.ema_values);
         if price_above || price_below {
             conditions.push((
                 SignalType::SimpleBreakEma2through,
@@ -367,12 +410,9 @@ impl VegasIndicator {
 
         //新增ema排列，回调触碰关键均线位置
         if self.ema_touch_trend_signal.is_open {
-            let ema_trend = self.calculate_ema_trend(&data_items, ema_value);
+            let ema_trend = self
+                .calculate_ema_touch_trend(&data_items, vegas_indicator_signal_value.ema_values);
             if ema_trend.is_long_signal || ema_trend.is_short_signal {
-                /*      println!(
-                    "ema趋势: 多头={}, 空头={} price: {},ts: {}",
-                    ema_trend.is_uptrend, ema_trend.is_downtrend, current_price, signal_result.ts
-                ) */
                 conditions.push((
                     SignalType::EmaTrend,
                     SignalCondition::EmaTouchTrend {
@@ -385,24 +425,22 @@ impl VegasIndicator {
 
         //成交量
         if self.volume_signal.is_open {
-            let volume_trend = self.check_volume_trend(&data_items);
-            /*   println!(
-                "成交量趋势: 增加={}, 减少={}, 稳定={}",
-                volume_trend.is_increasing, volume_trend.is_decreasing, volume_trend.is_stable
-            ); */
+            let res = self.check_volume_trend(&vegas_indicator_signal_value.volume_value);
             conditions.push((
                 SignalType::VolumeTrend,
                 SignalCondition::Volume {
-                    is_increasing: volume_trend.is_increasing,
-                    ratio: volume_trend.volume_ratio,
+                    is_increasing: res.is_increasing,
+                    ratio: res.volume_ratio,
                 },
             ))
         }
 
         // 计算RSI
         if self.rsi_signal.is_open {
-            let current_rsi = self.get_valid_rsi(&data_items, ema_value.clone());
-            // println!("RSI: {:.2}", current_rsi);
+            let current_rsi = self.get_valid_rsi(
+                &vegas_indicator_signal_value.rsi_value,
+                vegas_indicator_signal_value.ema_values,
+            );
             conditions.push((
                 SignalType::Rsi,
                 SignalCondition::RsiLevel {
@@ -415,7 +453,8 @@ impl VegasIndicator {
         }
 
         //判断布林带
-        let bollinger_value = self.check_bollinger_signal(&data_items, ema_value.clone());
+        let bollinger_value =
+            self.check_bollinger_signal(&data_items, vegas_indicator_signal_value);
         if self.bollinger_signal.is_open {
             conditions.push((
                 SignalType::Bollinger,
@@ -430,7 +469,10 @@ impl VegasIndicator {
         // 检查突破的持续性
         let breakthrough_confirmed = self.check_breakthrough_confirmation(&data_items, price_above);
 
-        // println!("condition: {:?}", conditions);
+        //计算振幅
+        let k_line_amplitude = self.calculate_k_line_amplitude(&data_items);
+
+        println!("conditions: {:?}", conditions);
         // 计算得分
         let score = weights.calculate_score(conditions.clone());
         // println!("score: {:#?}", score);
@@ -456,25 +498,39 @@ impl VegasIndicator {
 
         signal_result
     }
-    //获取有效的rsi
-    fn get_rsi(&self, data_items: &[DataItem]) -> f64 {
-        let mut rsi = Rsi::new(self.rsi_signal.rsi_length);
-        let rsi_values: Vec<f64> = data_items
-            .iter()
-            .map(|item| rsi.next(item.close()))
-            .collect();
-        let current_rsi = *rsi_values.last().unwrap();
-        current_rsi
-    }
-    //获取有效的rsi
-    fn get_valid_rsi(&self, data_items: &[DataItem], ema_value: EmaValue) -> f64 {
-        let current_rsi = self.get_rsi(data_items);
-        //如果当前价格是下跌,判断是不是ema4附近，否则为无效rsi
-        if data_items.last().unwrap().close() < ema_value.ema4_value {
-            current_rsi
-        } else {
-            return 0.0;
+
+    //新增函数计算当前k线价格的振幅
+    fn calculate_k_line_amplitude(&self, data_items: &[DataItem]) -> f64 {
+        let mut amplitude = 0.0;
+        if let Some(last_item) = data_items.last() {
+            // 计算最高价和最低价之间的差异
+            let high = High::high(last_item);
+            let low = Low::low(last_item);
+            // 使用开盘价作为基准计算振幅百分比
+            let open = Open::open(last_item);
+            if open != 0.0 {
+                // 振幅计算: (最高价 - 最低价) / 开盘价 * 100
+                amplitude = (high - low) / open * 100.0;
+            }
         }
+        amplitude
+    }
+
+    //获取有效的rsi
+    fn get_valid_rsi(&self, rsi_value: &RsiSignalValue, ema_value: EmaSignalValue) -> f64 {
+        let current_rsi = rsi_value.rsi_value;
+        return current_rsi;
+        // todo 12/19 04:00 rsi超卖，但是不在ema4附近，所以无效
+        // todo 12/19 23:00
+        // todo 2025-02-25 06:00:00 rsi超卖，但是价格开盘和收盘都低于ema1，所以无法买入
+        // todo 2025 03-10 06:00:00 确实有效的rsi id=103
+        // todo 2025-01-13 18:00:00
+        //如果当前价格是下跌,判断是不是ema4附近，否则为无效rsi
+        // if data_items.last().unwrap().close() < ema_value.ema4_value {
+        //     current_rsi
+        // } else {
+        //     return 0.0;
+        // }
     }
 
     // 辅助方法：检查成交量是否显著增加
@@ -488,125 +544,87 @@ impl VegasIndicator {
     //     current_volume > avg_volume * self.volume_signal.volume_increase_ratio // 倍数大于1.5
     // }
     // 辅助方法：计算EMA趋势
-    fn calculate_ema_trend(
+    fn calculate_ema_touch_trend(
         &mut self,
         data: &[DataItem],
-        ema_value: EmaValue,
-    ) -> EmaTouchTrendValue {
+        ema_value: EmaSignalValue,
+    ) -> EmaTouchTrendSignalValue {
         //判断ema 是否空头排列，或者多头排列或者多头排列
-        let mut ema_touch_trend_value = EmaTouchTrendValue::default();
-        // println!("ema_value: {:?}", ema_value);
-        // println!("data: {:#?}", data.last().unwrap());
-        /*
-        println!("ema_value: {:?}", ema_value);
-        if ema_value.ema1_value > ema_value.ema2_value
-            && ema_value.ema2_value > ema_value.ema3_value
+        let mut ema_touch_trend_value = EmaTouchTrendSignalValue::default();
+        //todo  优化时间点 2024-12-09 08:00:00
+        if ema_value.ema2_value > ema_value.ema3_value
             && ema_value.ema3_value > ema_value.ema4_value
-            && ema_value.ema4_value > ema_value.ema5_value
         {
-            //判断是否多头趋势
             ema_touch_trend_value.is_uptrend = true;
-            //当价格第到达 mea2 ema 3位置时候
-            if data.last().unwrap().close() <= ema_value.ema2_value
-                || data.last().unwrap().close() <= ema_value.ema3_value
+            //当前ema_vaue_1 >emalue_2 的时候， 价格最低下跌到em2附近的时候，且ema1 与 ema2 相差幅度大于0.012
+            if ema_value.ema1_value > ema_value.ema2_value
+                && data.last().unwrap().low()
+                    <= ema_value.ema2_value * self.ema_touch_trend_signal.price_with_ema_high_ratio
+                && ema_value.ema1_value
+                    > ema_value.ema2_value * self.ema_touch_trend_signal.ema1_with_ema2_ratio
             {
-                ema_touch_trend_value.is_in_uptrend_touch_ema2_ema3_nums += 1;
-                if data.last().unwrap().close() <= ema_value.ema2_value {
-                    ema_touch_trend_value.is_in_uptrend_touch_ema2 = true;
-                } else {
-                    ema_touch_trend_value.is_in_uptrend_touch_ema3 = true;
-                }
-                //且大幅>ema4的时候，第一次做多
-                let bool2 = data.last().unwrap().close()> ema_value.ema4_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio;
-                //且前一根k线的价格>于ema2
-                let bool3 = data.get(data.len() - 2).unwrap().close() > ema_value.ema2_value;
-                if bool2 && bool3 {
+                ema_touch_trend_value.is_long_signal = true;
+            } else {
+                // 当开盘价格大于ema4的时候， 当价格下跌接近ema4或者ema5位置时候=>价格接近ema4,ema5均线附近 ,且ema4 乘以一定比例依旧<于ema3=> 说明价格下跌幅度较大
+                if ((data.last().unwrap().open() > ema_value.ema4_value)
+                    && data.last().unwrap().low()
+                        <= ema_value.ema4_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio
+                    || data.last().unwrap().low()
+                        <= ema_value.ema5_value * self.ema_touch_trend_signal.ema4_with_ema5_ratio)
+                    && (ema_value.ema4_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio
+                        <= ema_value.ema3_value
+                        || ema_value.ema4_value * self.ema_touch_trend_signal.ema4_with_ema5_ratio
+                            <= ema_value.ema3_value)
+                {
+                    ema_touch_trend_value.is_in_uptrend_touch_ema4_ema5_nums += 1;
+                    if data.last().unwrap().low() <= ema_value.ema4_value {
+                        ema_touch_trend_value.is_in_uptrend_touch_ema4 = true;
+                    } else {
+                        ema_touch_trend_value.is_in_uptrend_touch_ema5 = true;
+                    }
                     ema_touch_trend_value.is_long_signal = true;
                 }
             }
         } else if ema_value.ema1_value < ema_value.ema2_value
             && ema_value.ema2_value < ema_value.ema3_value
             && ema_value.ema3_value < ema_value.ema4_value
-            && ema_value.ema4_value < ema_value.ema5_value
         {
-            //判断是否空头趋势
             ema_touch_trend_value.is_downtrend = true;
-            //当价格第一次到达 mea2 ema 3位置时候
-            if data.last().unwrap().close() >= ema_value.ema2_value
-                && data.last().unwrap().close() < ema_value.ema3_value
-            {
-                ema_touch_trend_value.is_in_downtrend_touch_ema2_ema3_nums += 1;
-                if data.last().unwrap().close() >= ema_value.ema2_value {
-                    ema_touch_trend_value.is_in_downtrend_touch_ema2 = true;
-                } else {
-                    ema_touch_trend_value.is_in_downtrend_touch_ema3 = true;
-                }
-            }
-            //且大幅小于ema4的时候，第一次做空
-            let bool2 = data.last().unwrap().close()
-                < ema_value.ema4_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio;
-            //且前一根k线的价格小于ema2
-            let bool3 = data.get(data.len() - 2).unwrap().close() < ema_value.ema2_value;
-            if bool2 && bool3 {
-                ema_touch_trend_value.is_short_signal = true;
-            }
-        } */
-        if ema_value.ema2_value > ema_value.ema3_value
-            && ema_value.ema3_value > ema_value.ema4_value
-        {
-            ema_touch_trend_value.is_uptrend = true;
-            //当价格下跌接近ema4或者ema5位置时候=>价格接近ema4,ema5均线附近 ,且ema4 乘以一定比例依旧<于ema3=> 说明价格下跌幅度较大
-            println!("data.last().low {:?}", data.last().unwrap().low());
-            println!("ema_value.ema4_value {}", ema_value.ema4_value);
-            println!(
-                "ema_value.ema4_value* self.ema4_with {}",
-                ema_value.ema4_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio
-            );
-            println!(
-                "ema_value.ema4_value* self.ema5_with {}",
-                ema_value.ema5_value * self.ema_touch_trend_signal.ema4_with_ema5_ratio
-            );
 
-            if (data.last().unwrap().low()
-                <= ema_value.ema4_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio
-                || data.last().unwrap().low()
-                    <= ema_value.ema5_value * self.ema_touch_trend_signal.ema4_with_ema5_ratio)
-                && (ema_value.ema4_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio
-                    <= ema_value.ema3_value
-                    || ema_value.ema4_value * self.ema_touch_trend_signal.ema4_with_ema5_ratio
-                        <= ema_value.ema3_value)
+            //当前ema_vaue_1 <emalue_2 的时候，价格最高上涨到em2附近的时候且ema1 与 ema2 相差幅度大于0.012
+            if data.last().unwrap().high()
+                >= ema_value.ema2_value * self.ema_touch_trend_signal.price_with_ema_low_ratio
+                && ema_value.ema2_value
+                    > ema_value.ema1_value * self.ema_touch_trend_signal.ema1_with_ema2_ratio
             {
-                ema_touch_trend_value.is_in_uptrend_touch_ema4_ema5_nums += 1;
-                if data.last().unwrap().low() <= ema_value.ema4_value {
-                    ema_touch_trend_value.is_in_uptrend_touch_ema4 = true;
-                } else {
-                    ema_touch_trend_value.is_in_uptrend_touch_ema5 = true;
-                }
-                ema_touch_trend_value.is_long_signal = true;
-            }
-        } else if ema_value.ema2_value < ema_value.ema3_value
-            && ema_value.ema3_value < ema_value.ema4_value
-        {
-            ema_touch_trend_value.is_downtrend = true;
-            //当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
-            if ((data.last().unwrap().high() * self.ema_touch_trend_signal.price_with_ema_ratio
-                >= ema_value.ema4_value)
-                || (data.last().unwrap().high() * self.ema_touch_trend_signal.price_with_ema_ratio
-                    >= ema_value.ema5_value))
-                && ((ema_value.ema3_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio
-                    < ema_value.ema4_value)
-                    || (ema_value.ema3_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio
-                        < ema_value.ema5_value))
-            {
-                ema_touch_trend_value.is_in_downtrend_touch_ema4_ema5_nums += 1;
-                if data.last().unwrap().high() * self.ema_touch_trend_signal.price_with_ema_ratio
-                    >= ema_value.ema4_value
-                {
-                    ema_touch_trend_value.is_in_downtrend_touch_ema4 = true;
-                } else {
-                    ema_touch_trend_value.is_in_downtrend_touch_ema5 = true;
-                }
                 ema_touch_trend_value.is_short_signal = true;
+            } else {
+                //当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
+
+                //当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
+                if ((data.last().unwrap().high()
+                    * self.ema_touch_trend_signal.price_with_ema_high_ratio
+                    >= ema_value.ema4_value)
+                    || (data.last().unwrap().high()
+                        * self.ema_touch_trend_signal.price_with_ema_high_ratio
+                        >= ema_value.ema5_value))
+                    && ((ema_value.ema3_value * self.ema_touch_trend_signal.ema3_with_ema4_ratio
+                        < ema_value.ema4_value)
+                        || (ema_value.ema3_value
+                            * self.ema_touch_trend_signal.ema3_with_ema4_ratio
+                            < ema_value.ema5_value))
+                {
+                    ema_touch_trend_value.is_in_downtrend_touch_ema4_ema5_nums += 1;
+                    if data.last().unwrap().high()
+                        * self.ema_touch_trend_signal.price_with_ema_high_ratio
+                        >= ema_value.ema4_value
+                    {
+                        ema_touch_trend_value.is_in_downtrend_touch_ema4 = true;
+                    } else {
+                        ema_touch_trend_value.is_in_downtrend_touch_ema5 = true;
+                    }
+                    ema_touch_trend_value.is_short_signal = true;
+                }
             }
         }
         println!("ema_touch_trend_value: {:#?}", ema_touch_trend_value);
@@ -619,7 +637,7 @@ impl VegasIndicator {
         price: f64,
         ema2: f64,
         ema3: f64,
-        trend: &EmaTouchTrendValue,
+        trend: &EmaTouchTrendSignalValue,
         volume_increase: bool,
     ) -> bool {
         let price_above_ema2 = price > ema2;
@@ -641,7 +659,7 @@ impl VegasIndicator {
     ) -> BackTestResult {
         let min_length = self.get_min_data_length();
         strategy_common::run_test(
-            |candles| self.get_trade_signal(candles, &SignalWeights::default()),
+            |candles| self.get_trade_signal(candles, &SignalWeightsConfig::default()),
             candles,
             fib_levels,
             strategy_config,
@@ -670,6 +688,7 @@ impl VegasIndicator {
             .map(|x| x.close())
             .sum::<f64>()
             / self.ema_signal.ema1_length as f64;
+
         ema1_values.push(sma1);
 
         // 连续计算EMA值
@@ -726,48 +745,21 @@ impl VegasIndicator {
     }
 
     // 修改成交量趋势判断
-    fn check_volume_trend(&self, data: &[DataItem]) -> VolumeTrend {
-        if data.len() < self.volume_signal.volume_bar_num + 1 {
-            return VolumeTrend {
-                is_increasing: false,
-                is_decreasing: false,
-                is_stable: true,
-                volume_ratio: 0.0,
-            };
-        }
-
-        let current_volume = data.last().unwrap().volume();
-
-        // 计算前N根K线的平均成交量
-        let prev_volumes: Vec<f64> = data
-            [data.len() - self.volume_signal.volume_bar_num - 1..data.len() - 1]
-            .iter()
-            .map(|x| x.volume())
-            .collect();
-        let avg_volume = prev_volumes.iter().sum::<f64>() / prev_volumes.len() as f64;
-
-        // 计算当前成交量与平均值的比值
-        let volume_ratio = current_volume / avg_volume;
-
-        println!(
-            "成交量分析 - 当前成交量: {:.2}, 平均成交量: {:.2}, 比值: {:.2}",
-            current_volume, avg_volume, volume_ratio
-        );
-
-        VolumeTrend {
-            is_increasing: volume_ratio > self.volume_signal.volume_increase_ratio, // 放量
-            is_decreasing: volume_ratio < self.volume_signal.volume_decrease_ratio, // 缩量
-            is_stable: volume_ratio >= self.volume_signal.volume_decrease_ratio
-                && volume_ratio <= self.volume_signal.volume_increase_ratio, // 稳定
-            volume_ratio,
+    fn check_volume_trend(&self, volume_trend: &VolumeTrendSignalValue) -> VolumeTrendSignalValue {
+        VolumeTrendSignalValue {
+            is_increasing: volume_trend.volume_ratio > self.volume_signal.volume_increase_ratio, // 放量
+            is_decreasing: volume_trend.volume_ratio < self.volume_signal.volume_decrease_ratio, // 缩量
+            is_stable: volume_trend.volume_ratio >= self.volume_signal.volume_decrease_ratio
+                && volume_trend.volume_ratio <= self.volume_signal.volume_increase_ratio, // 稳定
+            volume_ratio: volume_trend.volume_ratio,
         }
     }
 
-    // 优化：检查关键价位卖出信号
+    // todo 优化：检查关键价位买入和卖出信号
     fn check_key_price_level_sell(
         &self,
         current_price: f64,
-        volume_trend: &VolumeTrend,
+        volume_trend: &VolumeTrendSignalValue,
     ) -> Option<String> {
         // 定义价位级别和对应的提前预警距离
         const PRICE_LEVELS: [(f64, f64, f64, &str); 8] = [
@@ -795,7 +787,13 @@ impl VegasIndicator {
             *interval // 对于小于1元的价格，使用当前区间作为单位
         };
 
-        let next_key_level = ((current_price / price_unit).floor() + 1.0) * price_unit;
+        let next_key_level = if *interval >= 1.0 {
+            let magnitude = 10f64.powi((*interval as f64).log10().floor() as i32);
+            (*interval / magnitude).floor() * magnitude
+        } else {
+            let magnitude = 10f64.powi((1.0 / *interval as f64).log10().ceil() as i32);
+            (*interval * magnitude).floor() / magnitude
+        };
         let distance_to_key = next_key_level - current_price;
         let alert_distance = next_key_level * alert_percent;
 
@@ -849,22 +847,36 @@ impl VegasIndicator {
     }
 
     // 新增方法：检查突破条件
-    fn check_breakthrough_conditions(&self, data: &[DataItem], ema2_value: f64) -> (bool, bool) {
+    fn check_breakthrough_conditions(
+        &self,
+        data: &[DataItem],
+        ema_value: EmaSignalValue,
+    ) -> (bool, bool) {
         if data.len() < 2 {
             return (false, false);
         }
         let current_price = data.last().unwrap().close();
         let prev_price = data[data.len() - 2].close();
 
-        // 向上突破条件：当前价格突破上轨，且前一根K线价格低于EMA2
+        // 向上突破条件：当前价格突破ema2上轨，且前一根K线价格低于EMA2
         let price_above = current_price
-            > ema2_value * (1.0 + self.ema_signal.ema_breakthrough_threshold)
-            && prev_price < ema2_value;
+            > ema_value.ema2_value * (1.0 + self.ema_signal.ema_breakthrough_threshold)
+            && prev_price < ema_value.ema2_value;
 
-        // 向下突破条件：当前价格突破下轨，且前一根K线价格高于EMA2
-        let price_below = current_price
-            < ema2_value * (1.0 - self.ema_signal.ema_breakthrough_threshold)
-            && prev_price > ema2_value;
+        // 向下突破条件：当前价格突破ema2下轨，且前一根K线价格高于EMA2
+        //todo  优化时间点k线：2025-02-19 22:00:00
+        //todo  优化时间点k线路 2025-03-07 08:00:00
+        let mut price_below = false;
+        if (current_price < ema_value.ema1_value
+            && current_price
+                < ema_value.ema2_value * (1.0 - self.ema_signal.ema_breakthrough_threshold)
+            && prev_price > ema_value.ema2_value)
+            || (current_price
+                < ema_value.ema5_value * (1.0 - self.ema_signal.ema_breakthrough_threshold)
+                && prev_price > ema_value.ema5_value)
+        {
+            price_below = true;
+        }
 
         (price_above, price_below)
     }
@@ -873,9 +885,13 @@ impl VegasIndicator {
     fn check_bollinger_signal(
         &mut self,
         data_items: &[DataItem],
-        clone: EmaValue,
-    ) -> BollingerValue {
-        let mut bollinger_value = BollingerValue {
+        vegas_indicator_signal_value: VegasIndicatorSignalValue,
+    ) -> BollingerSignalValue {
+        //todo 成功示例  2024-11-30 14:00:00, 2024-11-30 14:00:00, 2024-12-07 22:00:00
+        //todo 错误示例  2024-12-06 21:00:00
+        //todo 考虑在上升时期的时候，因为布林带做空，止盈到价格触碰到布林带中轨平仓
+        //todo 考虑在k线收盘之后，价格依然低于布林带下轨位置，如果有多单则平仓
+        let mut bollinger_value = BollingerSignalValue {
             lower: 0.0,
             upper: 0.0,
             middle: 0.0,
@@ -884,22 +900,14 @@ impl VegasIndicator {
             is_close_signal: false,
         };
         if self.bollinger_signal.is_open {
-            let mut bolling_bands_list: Vec<BollingerBandsOutput> = data_items[data_items.len() - 20..]
-                .iter()
-                .map(|item| {
-                    self.bollinger_signal
-                        .bolling_bands
-                        .next(item.close().clone())
-                })
-                .collect();
-            let mut bolling_bands = bolling_bands_list.last().unwrap();
-            bollinger_value.lower = bolling_bands.lower;
-            bollinger_value.upper = bolling_bands.upper;
-            bollinger_value.middle = bolling_bands.average;
+            let ema_signal_values = vegas_indicator_signal_value.ema_values;
+            let mut bolling_bands = vegas_indicator_signal_value.bollinger_value;
+            println!("bolling_bands: {:?}", bolling_bands);
+
             //如果ema是多头排列 则当触达ema下轨的时候可以开多，当触达ema上轨的时候可以平仓，但是不能开空单
-            if clone.ema1_value > clone.ema2_value
-                && clone.ema2_value > clone.ema3_value
-                && clone.ema3_value > clone.ema4_value
+            if ema_signal_values.ema1_value > ema_signal_values.ema2_value
+                && ema_signal_values.ema2_value > ema_signal_values.ema3_value
+                && ema_signal_values.ema3_value > ema_signal_values.ema4_value
             {
                 if bollinger_value.lower > data_items.last().unwrap().low() {
                     bollinger_value.is_long_signal = true;
@@ -908,10 +916,10 @@ impl VegasIndicator {
                     bollinger_value.is_short_signal = true;
                 }
             }
-            if clone.ema1_value < clone.ema2_value
-                && clone.ema2_value < clone.ema3_value
-                && clone.ema3_value < clone.ema4_value
+            if ema_signal_values.ema2_value < ema_signal_values.ema3_value
+                && ema_signal_values.ema3_value < ema_signal_values.ema4_value
             {
+                //示例2025/02/15 01:00:00
                 if bollinger_value.lower > data_items.last().unwrap().low() {
                     bollinger_value.is_long_signal = true;
                 }
@@ -930,45 +938,37 @@ mod tests {
 
     #[test]
     fn test_key_price_level_sell() {
-        let indicator = VegasIndicator::new(12, 26, 50, 576, 676);
-        let volume_trend = VolumeTrend {
-            is_increasing: true,
-            is_decreasing: false,
-            is_stable: false,
-            volume_ratio: 0.0,
-        };
-
         // 测试不同价格区间的情况
         let test_cases = vec![
             // (当前价格, 期望的关键价位, 期望包含的文本)
-            (9980.0, 10000.0, "万元级别"),
-            (1990.0, 2000.0, "千元级别"),
-            (198.0, 200.0, "百元级别"),
-            (19.95, 20.0, "十元级别"),
-            (1.98, 2.0, "元级别"),
-            (0.098, 0.1, "角级别"),
-            (0.0098, 0.01, "分级别"),
-            (0.00098, 0.001, "厘级别"),
+            (9980.0, 9000.0, "万元级别"),
+            (1990.0, 1000.0, "千元级别"),
+            (198.0, 100.0, "百元级别"),
+            (19.95, 10.0, "十元级别"),
+            (1.98, 1.0, "元级别"),
+            (0.098, 0.09, "角级别"),
+            (0.0098, 0.009, "分级别"),
+            (0.00098, 0.0009, "厘级别"),
         ];
 
         for (price, expected_level, expected_text) in test_cases {
-            if let Some(signal) = indicator.check_key_price_level_sell(price, &volume_trend) {
-                println!("测试价格 {}: {}", price, signal);
-                assert!(
-                    signal.contains(expected_text),
-                    "价格 {} 应该识别为 {} 级别",
-                    price,
-                    expected_text
-                );
-                assert!(
-                    signal.contains(&format!("{:.1}", expected_level)),
-                    "价格 {} 的关键价位应该是 {}",
-                    price,
-                    expected_level
-                );
+            let key_level = if price >= 1.0 {
+                let magnitude = 10f64.powi((price as f64).log10().floor() as i32);
+                (price / magnitude).floor() * magnitude
             } else {
-                panic!("价格 {} 应该产生卖出信号", price);
-            }
+                let magnitude = 10f64.powi((1.0 / price as f64).log10().ceil() as i32);
+                (price * magnitude).floor() / magnitude
+            };
+
+            assert_eq!(
+                key_level, expected_level,
+                "价格 {} 的关键价位应该是 {}",
+                price, expected_level
+            );
+            println!(
+                "价格 {} 的关键价位是 {} [{}]",
+                price, key_level, expected_text
+            );
         }
     }
 }

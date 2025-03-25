@@ -4,12 +4,13 @@ use hmac::digest::generic_array::arr;
 use std::cmp::PartialEq;
 use std::env;
 use std::sync::Arc;
+use ta::indicators::BollingerBands;
 use tokio::task::spawn;
 use tracing::{error, info, warn, Level};
 
 use crate::time_util;
-use crate::trading::indicator::bollings::BollingerBandsSignal;
-use crate::trading::indicator::signal_weight::SignalWeights;
+use crate::trading::indicator::bollings::BollingerBandsSignalConfig;
+use crate::trading::indicator::signal_weight::SignalWeightsConfig;
 use crate::trading::model::market::candles::SelectTime;
 use crate::trading::model::market::candles::{self, TimeDirect};
 use crate::trading::model::order::swap_order::SwapOrderEntityModel;
@@ -32,7 +33,9 @@ use crate::trading;
 use crate::trading::analysis::position_analysis::PositionAnalysis;
 use crate::trading::indicator::squeeze_momentum;
 use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
-use crate::trading::indicator::vegas_indicator::{EmaSignal, EmaTouchTrendSignal, RsiSignal, VegasIndicator, VolumeSignal};
+use crate::trading::indicator::vegas_indicator::{
+    EmaSignalConfig, EmaTouchTrendSignalConfig, RsiSignalConfig, VegasIndicator, VolumeSignalConfig,
+};
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
@@ -396,7 +399,7 @@ pub async fn save_log(
 // 主函数，执行所有策略测试
 pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
     // 获取数据
-    let mysql_candles = self::get_candle_data(inst_id, time, 6000, None).await?;
+    let mysql_candles = self::get_candle_data(inst_id, time, 10000, None).await?;
     let mysql_candles_clone = Arc::new(mysql_candles.clone()); // 克隆一份用于后续分析
 
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
@@ -410,92 +413,105 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     let ema2_lengths = vec![144];
     let ema3_lengths = vec![169];
 
-    let volume_bar_nums = vec![ 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    // let volume_bar_nums = vec![3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let volume_bar_nums = vec![3];
 
     let volume_increase_ratios: Vec<f64> = (20..=20).map(|x| x as f64 * 0.1).collect();
     let volume_decrease_ratios: Vec<f64> = (37..=37).map(|x| x as f64 * 0.1).collect();
-    let breakthrough_thresholds:Vec<f64> = vec![0.003];
+    let breakthrough_thresholds: Vec<f64> = vec![0.003];
 
     let rsi_periods = vec![12];
     // let rsi_periods = vec![14];
     let rsi_overboughts = vec![85.0];
-    let rsi_oversolds = vec![25.0];
+    let rsi_oversolds = vec![20.0];
 
     // 收集所有 back_test_id
     let mut back_test_ids = Vec::new();
-
+    let mut bb_periods = vec![
+        9,
+    ];
+    let mut bb_multipliers = vec![
+        3.6
+    ];
 
     // 创建任务容器
     let mut tasks = Vec::new();
 
-    for &volume_bar_num in &volume_bar_nums {
-        for &volume_increase_ratio in &volume_increase_ratios {
-            for &volume_decrease_ratio in &volume_decrease_ratios {
-                for &breakthrough in &breakthrough_thresholds {
-                    for &rsi_period in &rsi_periods {
-                        for &rsi_overbought in &rsi_overboughts {
-                            for &rsi_oversold in &rsi_oversolds {
-                                let strategy_config = TradingStrategyConfig {
-                                    use_dynamic_tp: true,
-                                    use_fibonacci_tp: true,
-                                    max_loss_percent: 0.02,
-                                    profit_threshold: 0.01,
-                                };
-                                let volumn_signal = VolumeSignal {
-                                    volume_bar_num,
-                                    volume_increase_ratio,
-                                    volume_decrease_ratio,
-                                    is_open: true,
-                                };
-                                let rsi_signal = RsiSignal {
-                                    rsi_length: rsi_period,
-                                    rsi_oversold: rsi_oversold,
-                                    rsi_overbought: rsi_overbought,
-                                    is_open: true,
-                                };
-                                let ema_touch_trend_signal = EmaTouchTrendSignal {
-                                    is_open: true,
-                                   ..Default::default()
-                                };
+    for &bb_period in &bb_periods {
+        for &bb_multiplier in &bb_multipliers {
+            for &volume_bar_num in &volume_bar_nums {
+                for &volume_increase_ratio in &volume_increase_ratios {
+                    for &volume_decrease_ratio in &volume_decrease_ratios {
+                        for &breakthrough in &breakthrough_thresholds {
+                            for &rsi_period in &rsi_periods {
+                                for &rsi_overbought in &rsi_overboughts {
+                                    for &rsi_oversold in &rsi_oversolds {
+                                        let strategy_config = TradingStrategyConfig {
+                                            use_dynamic_tp: false,
+                                            use_fibonacci_tp: true,
+                                            max_loss_percent: 0.02,
+                                            profit_threshold: 0.01,
+                                        };
+                                        let volumn_signal = VolumeSignalConfig {
+                                            volume_bar_num,
+                                            volume_increase_ratio,
+                                            volume_decrease_ratio,
+                                            is_open: true,
+                                        };
+                                        let rsi_signal = RsiSignalConfig {
+                                            rsi_length: rsi_period,
+                                            rsi_oversold: rsi_oversold,
+                                            rsi_overbought: rsi_overbought,
+                                            is_open: true,
+                                        };
+                                        let ema_touch_trend_signal = EmaTouchTrendSignalConfig {
+                                            is_open: true,
+                                            ..Default::default()
+                                        };
 
-                                let strategy = VegasIndicator {
-                                    ema_signal: EmaSignal {
-                                        ..Default::default()
-                                    },
-                                    volume_signal: volumn_signal,
-                                    ema_touch_trend_signal,
-                                    rsi_signal,
-                                    signal_weights: SignalWeights::default(),
-                                    bollinger_signal: BollingerBandsSignal {
-                                        ..Default::default()
-                                    },
-                                };
+                                        let strategy = VegasIndicator {
+                                            ema_signal: EmaSignalConfig {
+                                                ..Default::default()
+                                            },
+                                            volume_signal: volumn_signal,
+                                            ema_touch_trend_signal,
+                                            rsi_signal,
+                                            signal_weights: SignalWeightsConfig::default(),
+                                            bollinger_signal: BollingerBandsSignalConfig {
+                                                period: bb_period,
+                                                multiplier: bb_multiplier,
+                                                is_open: true,
+                                            },
+                                        };
 
-                                let inst_id = inst_id.to_string();
-                                let time = time.to_string();
-                                let mysql_candles = Arc::clone(&mysql_candles_clone);
-                                let fibonacci_level = Arc::clone(&fibonacci_level_clone);
-                                let permit = Arc::clone(&semaphore);
+                                        let inst_id = inst_id.to_string();
+                                        let time = time.to_string();
+                                        let mysql_candles = Arc::clone(&mysql_candles_clone);
+                                        let fibonacci_level = Arc::clone(&fibonacci_level_clone);
+                                        let permit = Arc::clone(&semaphore);
 
-                                // 创建任务
-                                tasks.push(tokio::spawn(async move {
-                                    let _permit = permit.acquire().await.unwrap();
-                                    match run_vegas_test(
-                                        &inst_id,
-                                        &time,
-                                        strategy,
-                                        strategy_config,
-                                        mysql_candles,
-                                        fibonacci_level,
-                                    ).await {
-                                        Ok(back_test_id) => Some(back_test_id),
-                                        Err(e) => {
-                                            error!("Vegas test failed: {:?}", e);
-                                            None
-                                        }
+                                        // 创建任务
+                                        tasks.push(tokio::spawn(async move {
+                                            let _permit = permit.acquire().await.unwrap();
+                                            match run_vegas_test(
+                                                &inst_id,
+                                                &time,
+                                                strategy,
+                                                strategy_config,
+                                                mysql_candles,
+                                                fibonacci_level,
+                                            )
+                                            .await
+                                            {
+                                                Ok(back_test_id) => Some(back_test_id),
+                                                Err(e) => {
+                                                    error!("Vegas test failed: {:?}", e);
+                                                    None
+                                                }
+                                            }
+                                        }));
                                     }
-                                }));
+                                }
                             }
                         }
                     }
@@ -503,7 +519,6 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
             }
         }
     }
-
     // 等待所有任务完成并收集 back_test_id
     for task in join_all(tasks).await {
         if let Ok(Some(back_test_id)) = task {

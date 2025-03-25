@@ -69,6 +69,7 @@ use rust_quant::trading::strategy::StrategyType;
 use rust_quant::trading::{order, task};
 use tracing_subscriber::prelude::*;
 
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     //设置env

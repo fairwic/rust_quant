@@ -1,0 +1,166 @@
+ @startuml
+' PlantUML - Rust量化交易系统-服务内部结构
+' 使用更简化的样式和标准语法
+
+' 基本样式设置
+skinparam backgroundColor #FFFFFF
+skinparam linetype ortho
+skinparam roundcorner 15
+skinparam ArrowColor #3498DB
+skinparam packageStyle rectangle
+
+' 设置组件样式
+skinparam component {
+  BackgroundColor #E6E6FA
+  BorderColor #8A2BE2
+}
+
+skinparam package {
+  BackgroundColor #FFFFFF
+  BorderColor #A9A9A9
+}
+
+title Rust量化交易系统 - 微服务内部结构 (领域驱动设计)
+
+package "微服务通用结构" {
+  package "domain (领域层)" {
+    component "model" as Model {
+      [领域实体]
+      [值对象]
+      [聚合]
+      [领域事件]
+    }
+    
+    component "service" as DomainService {
+      [领域服务]
+    }
+    
+    component "repository (接口)" as RepositoryInterface {
+      [仓储接口定义]
+    }
+    
+    component "error" as DomainError {
+      [领域错误]
+    }
+  }
+  
+  package "application (应用层)" {
+    component "service" as ApplicationService {
+      [应用服务]
+      [命令处理]
+      [查询处理]
+    }
+    
+    component "dto" as DTO {
+      [数据传输对象]
+    }
+    
+    component "error" as ApplicationError {
+      [应用错误]
+    }
+  }
+  
+  package "infrastructure (基础设施层)" {
+    component "database" as Database {
+      [数据库连接]
+      [查询构建]
+    }
+    
+    component "repository (实现)" as RepositoryImpl {
+      [仓储实现]
+    }
+    
+    component "messaging" as Messaging {
+      [消息发布]
+      [消息订阅]
+    }
+    
+    component "external" as External {
+      [外部服务客户端]
+    }
+    
+    component "config" as Config {
+      [配置管理]
+    }
+    
+    component "error" as InfrastructureError {
+      [基础设施错误]
+    }
+  }
+  
+  package "presentation (表现层)" {
+    component "api" as API {
+      [HTTP路由]
+      [控制器]
+      [中间件]
+    }
+    
+    component "websocket" as WebSocket {
+      [WebSocket处理]
+    }
+    
+    component "error" as PresentationError {
+      [表现层错误]
+    }
+  }
+  
+  component "main.rs" as Main {
+    [服务启动入口]
+    [依赖注入]
+    [配置加载]
+    [日志初始化]
+  }
+}
+
+' 依赖关系
+Main --> Config
+Main --> API
+Main --> WebSocket
+Main --> ApplicationService
+Main --> RepositoryImpl
+Main --> Messaging
+
+API --> ApplicationService
+WebSocket --> ApplicationService
+
+ApplicationService --> DomainService
+ApplicationService --> RepositoryInterface
+ApplicationService --> Model
+
+DomainService --> Model
+DomainService --> RepositoryInterface
+
+RepositoryImpl --> RepositoryInterface
+RepositoryImpl --> Database
+RepositoryImpl --> Model
+
+Messaging --> ApplicationService
+Messaging --> Model
+
+' 错误传播路径
+PresentationError <-- ApplicationError
+ApplicationError <-- DomainError
+ApplicationError <-- InfrastructureError
+
+note right of Model
+  领域模型是系统的核心，
+  包含业务规则和业务逻辑
+end note
+
+note right of RepositoryInterface
+  仓储接口定义了领域模型的持久化方法，
+  但隐藏了具体实现细节
+end note
+
+note right of ApplicationService
+  应用服务协调领域对象，
+  实现用例和业务流程
+end note
+
+note right of RepositoryImpl
+  仓储实现处理与数据存储的交互，
+  将数据库实体映射到领域模型
+end note
+
+footer Rust量化交易系统 - 微服务内部结构 (领域驱动设计)
+@enduml

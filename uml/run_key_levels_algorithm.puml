@@ -1,0 +1,95 @@
+@startuml
+title 关键支撑位和压力位识别算法流程
+
+skinparam backgroundColor white
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam activityDiamondBackgroundColor #FEF9E7
+skinparam noteBackgroundColor #D4EFDF
+skinparam noteBorderColor #27AE60
+
+start
+
+:加载K线数据;
+
+partition "1. 识别多源价格水平" {
+  fork
+    :识别历史高低点(摆动点);
+    note right
+      寻找局部高点和低点
+      计算强度基于:
+      -价格波动幅度
+      -成交量
+      -确认次数
+      -时间因素
+    end note
+  fork again
+    :计算斐波那契水平;
+    note right
+      基于主要高低点
+      黄金分割比例获得更高权重
+      0.382/0.618比例最强
+    end note
+  fork again
+    :识别移动平均线水平;
+    note right
+      计算多个周期MA
+      长期MA(如200周期)
+      获得更高权重
+    end note
+  fork again
+    :识别成交量轮廓关键区域;
+    note right
+      寻找高成交量集中的价格区域
+      高成交量区域通常形成支撑/压力
+    end note
+  fork again
+    :识别心理价格水平;
+    note right
+      整数关卡和半数关卡
+      如10.00, 20.00, 20.50等
+      圆整数获得更高权重
+    end note
+  end fork
+}
+
+:整合所有价格水平;
+
+:增强最近形成的价格水平;
+note right
+  最近30%的数据更重要
+  增加强度系数
+end note
+
+:聚类相近的价格水平;
+note right
+  合并距离接近的价格点
+  计算加权平均价格
+  合并强度和确认次数
+  应用聚类奖励
+end note
+
+:按当前价格分离支撑位和压力位;
+note right
+  低于当前价格的 → 支撑位
+  高于当前价格的 → 压力位
+end note
+
+:按强度排序支撑位和压力位;
+note right
+  强度是综合评分
+  包含价格影响
+  成交量
+  确认次数
+  时间因素
+end note
+
+:返回排序后的支撑位和压力位;
+note right
+  第一个支撑位 = 最强支撑位
+  第一个压力位 = 最强压力位
+end note
+
+stop
+
+@enduml 

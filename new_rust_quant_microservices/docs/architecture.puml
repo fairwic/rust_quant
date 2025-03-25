@@ -1,0 +1,252 @@
+@startuml "Rust量化交易系统微服务架构"
+
+' 删除外部依赖，改用内置样式
+!define COMPONENT_FONT_COLOR #000000
+!define COMPONENT_BG_COLOR #85BBF0
+!define DATABASE_BG_COLOR #C8F0DA
+!define QUEUE_BG_COLOR #FADAA7
+
+' 自定义样式
+skinparam backgroundColor #FFFFFF
+skinparam linetype ortho
+skinparam roundcorner 20
+skinparam ArrowColor #3498DB
+skinparam componentStyle uml2
+
+' 自定义组件样式
+skinparam component {
+  BackgroundColor COMPONENT_BG_COLOR
+  BorderColor #2E6295
+  FontColor COMPONENT_FONT_COLOR
+}
+
+' 自定义数据库样式
+skinparam database {
+  BackgroundColor DATABASE_BG_COLOR
+  BorderColor #038048
+}
+
+' 自定义队列样式
+skinparam queue {
+  BackgroundColor QUEUE_BG_COLOR
+  BorderColor #E78A25
+}
+
+title Rust量化交易系统 - 微服务架构
+
+' 外部系统
+package "外部系统" {
+  [交易所API] as ExchangeAPI
+  [市场数据源] as MarketDataSource
+  database "时序数据库" as TimeseriesDB
+}
+
+' 基础设施
+package "基础设施" {
+  database "PostgreSQL" as PostgreSQL {
+    [市场数据] as MarketData
+    [交易数据] as TradingData
+    [策略数据] as StrategyData
+    [风控数据] as RiskData
+    [分析数据] as AnalyticsData
+  }
+  
+  queue "RabbitMQ" as RabbitMQ {
+    [市场数据队列] as MarketQueue
+    [策略信号队列] as SignalQueue
+    [订单队列] as OrderQueue
+    [风控决策队列] as RiskQueue
+  }
+  
+  [Docker容器] as Docker
+}
+
+' 共享库
+package "共享库" {
+  component "Core-Lib" as CoreLib {
+    package "domain" {
+      [共享领域模型] as SharedDomain
+      [错误处理] as ErrorHandling
+    }
+    package "utils" {
+      [工具函数] as Utils
+    }
+  }
+}
+
+' 微服务
+package "微服务" {
+  ' 市场服务
+  component "市场服务 (Market Service)" as MarketService {
+    package "domain" {
+      [市场领域模型] as MarketDomain
+      [市场领域服务] as MarketDomainService
+    }
+    package "application" {
+      [市场应用服务] as MarketApp
+    }
+    package "infrastructure" {
+      [市场数据存储] as MarketRepo
+      [交易所连接器] as ExchangeConnector
+    }
+    package "presentation" {
+      [市场API] as MarketAPI
+      [WebSocket发布] as WebSocket
+    }
+  }
+  
+  ' 策略服务
+  component "策略服务 (Strategy Service)" as StrategyService {
+    package "domain" {
+      [策略领域模型] as StrategyDomain
+      [策略领域服务] as StrategyDomainService
+    }
+    package "application" {
+      [策略应用服务] as StrategyApp
+    }
+    package "infrastructure" {
+      [策略数据存储] as StrategyRepo
+      [市场数据消费] as MarketConsumer
+    }
+    package "presentation" {
+      [策略API] as StrategyAPI
+    }
+  }
+  
+  ' 交易服务
+  component "交易服务 (Trading Service)" as TradingService {
+    package "domain" {
+      [交易领域模型] as TradingDomain
+      [交易领域服务] as TradingDomainService
+    }
+    package "application" {
+      [交易应用服务] as TradingApp
+    }
+    package "infrastructure" {
+      [交易数据存储] as TradingRepo
+      [订单执行器] as OrderExecutor
+    }
+    package "presentation" {
+      [交易API] as TradingAPI
+    }
+  }
+  
+  ' 风控服务
+  component "风控服务 (Risk Service)" as RiskService {
+    package "domain" {
+      [风控领域模型] as RiskDomain
+      [风控领域服务] as RiskDomainService
+    }
+    package "application" {
+      [风控应用服务] as RiskApp
+    }
+    package "infrastructure" {
+      [风控数据存储] as RiskRepo
+    }
+    package "presentation" {
+      [风控API] as RiskAPI
+    }
+  }
+  
+  ' 分析服务
+  component "分析服务 (Analytics Service)" as AnalyticsService {
+    package "domain" {
+      [分析领域模型] as AnalyticsDomain
+      [分析领域服务] as AnalyticsDomainService
+    }
+    package "application" {
+      [回测服务] as BacktestService
+      [性能分析服务] as PerformanceService
+    }
+    package "infrastructure" {
+      [分析数据存储] as AnalyticsRepo
+    }
+    package "presentation" {
+      [分析API] as AnalyticsAPI
+    }
+  }
+}
+
+' 工具服务
+package "工具服务" {
+  [监控服务] as MonitoringService
+  [日志服务] as LoggingService
+  [配置管理] as ConfigService
+}
+
+' 前端应用
+package "前端应用" {
+  [交易界面] as TradingUI
+  [策略编辑器] as StrategyEditor
+  [监控界面] as MonitoringUI
+  [回测界面] as BacktestUI
+}
+
+' 服务之间的关系
+MarketService --> CoreLib
+StrategyService --> CoreLib
+TradingService --> CoreLib
+RiskService --> CoreLib
+AnalyticsService --> CoreLib
+
+' 外部数据连接
+MarketService --> ExchangeAPI
+MarketService --> MarketDataSource
+
+' 数据库连接
+MarketService --> MarketData
+StrategyService --> StrategyData
+TradingService --> TradingData
+RiskService --> RiskData
+AnalyticsService --> AnalyticsData
+
+' 消息队列连接
+MarketService --> MarketQueue : 发布市场数据
+StrategyService --> MarketQueue : 订阅市场数据
+StrategyService --> SignalQueue : 发布交易信号
+TradingService --> SignalQueue : 订阅交易信号
+TradingService --> OrderQueue : 发布订单状态
+RiskService --> OrderQueue : 订阅订单状态
+RiskService --> RiskQueue : 发布风控决策
+TradingService --> RiskQueue : 订阅风控决策
+
+' 服务间REST API调用
+StrategyService --> MarketService : REST API
+TradingService --> StrategyService : REST API
+TradingService --> RiskService : REST API
+AnalyticsService --> MarketService : REST API
+AnalyticsService --> StrategyService : REST API
+AnalyticsService --> TradingService : REST API
+
+' 前端与后端连接
+TradingUI --> MarketService : REST/WebSocket
+TradingUI --> TradingService : REST API
+StrategyEditor --> StrategyService : REST API
+MonitoringUI --> MonitoringService : REST API
+BacktestUI --> AnalyticsService : REST API
+
+' 工具服务连接
+MonitoringService --> MarketService : 监控
+MonitoringService --> StrategyService : 监控
+MonitoringService --> TradingService : 监控
+MonitoringService --> RiskService : 监控
+MonitoringService --> AnalyticsService : 监控
+
+LoggingService --> MarketService : 日志收集
+LoggingService --> StrategyService : 日志收集
+LoggingService --> TradingService : 日志收集
+LoggingService --> RiskService : 日志收集
+LoggingService --> AnalyticsService : 日志收集
+
+ConfigService --> MarketService : 配置管理
+ConfigService --> StrategyService : 配置管理
+ConfigService --> TradingService : 配置管理
+ConfigService --> RiskService : 配置管理
+ConfigService --> AnalyticsService : 配置管理
+
+' 基础设施
+Docker -[hidden]-> PostgreSQL
+Docker -[hidden]-> RabbitMQ
+
+footer Rust量化交易系统 - 微服务架构
+@enduml 

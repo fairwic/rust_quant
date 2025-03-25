@@ -1,0 +1,108 @@
+@startuml
+title Vegas Indicator 交易信号获取流程
+
+skinparam backgroundColor white
+skinparam activityBackgroundColor #E8F4FE
+skinparam activityBorderColor #2A7AE2
+skinparam activityDiamondBackgroundColor #FEFCE8
+skinparam noteBackgroundColor #E8FEEA
+skinparam noteBorderColor #27AE60
+
+start
+
+:接收市场K线数据和信号权重;
+
+if (数据长度不足?) then (是)
+  :返回无信号结果;
+  stop
+else (否)
+  :转换数据为内部格式 DataItem;
+endif
+
+:计算当前价格;
+
+partition "技术指标计算" {
+  :计算EMA值;
+  note right: ema1,ema2,ema3,ema4,ema5
+  
+  fork
+    :检查突破EMA2条件;
+    note right: 当前价格是否突破EMA2
+    
+    if (检测到突破?) then (是)
+      :添加突破信号条件;
+    endif
+  fork again
+    :检查EMA趋势;
+    note right: 判断均线排列和价格回调
+    
+    if (ema_touch_trend_signal开启?) then (是)
+      :计算EMA趋势值;
+      
+      if (检测到有效趋势信号?) then (是)
+        :添加EMA趋势信号条件;
+      endif
+    endif
+  fork again
+    :检查成交量趋势;
+    note right: 计算成交量变化比率
+    
+    if (volume_signal开启?) then (是)
+      :分析成交量趋势;
+      :添加成交量信号条件;
+    endif
+  fork again
+    :计算RSI指标;
+    
+    if (rsi_signal开启?) then (是)
+      :获取有效RSI值;
+      :添加RSI信号条件;
+    endif
+  fork again
+    :检查布林带信号;
+    
+    if (bollinger_signal开启?) then (是)
+      :计算布林带上下轨;
+      
+      if (价格触及布林带边界?) then (是)
+        if (均线处于多头排列?) then (是)
+          :添加多头布林带信号;
+        else (否)
+          :添加空头布林带信号;
+        endif
+      endif
+    endif
+  end fork
+}
+
+:计算综合信号得分;
+note right
+  根据各信号条件类型和权重
+  计算总得分
+end note
+
+if (达到最小总权重?) then (是)
+  if (得分显示多头信号?) then (是)
+    :设置买入信号;
+    :记录信号详情;
+  elseif (得分显示空头信号?) then (是)
+    :设置卖出信号;
+    :记录信号详情;
+  endif
+endif
+
+:返回信号结果;
+note right
+  signal_result包含:
+  - should_buy
+  - should_sell
+  - price
+  - ts
+  - single_detail
+end note
+
+stop
+
+footer Vegas Indicator 交易信号处理流程
+
+@enduml 

@@ -77,10 +77,10 @@ impl Market {
         if let Some(inst_family) = inst_family {
             path.push_str(&format!("&inst_family={}", inst_family));
         }
-        let res: TickersResponse = okx_client::get_okx_client()
+        let res:Vec<TickersData>=okx_client::get_okx_client()
             .send_request(Method::GET, &path, "")
             .await?;
-        Ok(res.data)
+        Ok(res)
     }
 
     /**

@@ -56,7 +56,7 @@ pub enum SignalCondition {
 
 // 权重配置结构体
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignalWeights {
+pub struct SignalWeightsConfig {
     pub weights: Vec<(SignalType, f64)>,
     pub min_total_weight: f64,
 }
@@ -69,7 +69,7 @@ pub struct SignalScoreWithDeriact {
     pub signal_result: Option<SignalDeriect>,
 }
 
-impl Default for SignalWeights {
+impl Default for SignalWeightsConfig {
     fn default() -> Self {
         Self {
             weights: vec![
@@ -95,7 +95,7 @@ pub struct CheckConditionResult {
     pub signal_result: Option<SignalDeriect>,
 }
 
-impl SignalWeights {
+impl SignalWeightsConfig {
     // 获取特定信号类型的权重
     fn get_weight(&self, signal_type: SignalType) -> f64 {
         self.weights
