@@ -23,7 +23,7 @@ use crate::trading::order;
 use crate::trading::strategy;
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
 use crate::trading::strategy::strategy_common::{
-    BackTestResult, SignalResult, TradeRecord, TradingStrategyConfig,
+    BackTestResult, SignalResult, TradeRecord, BasicRiskStrategyConfig,
 };
 use crate::trading::strategy::ut_boot_strategy::UtBootStrategy;
 use crate::trading::strategy::{engulfing_strategy, Strategy};
@@ -34,7 +34,7 @@ use crate::trading::analysis::position_analysis::PositionAnalysis;
 use crate::trading::indicator::squeeze_momentum;
 use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
 use crate::trading::indicator::vegas_indicator::{
-    EmaSignalConfig, EmaTouchTrendSignalConfig, RsiSignalConfig, VegasIndicator, VolumeSignalConfig,
+    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, RsiSignalConfig, VegasIndicator, VolumeSignalConfig
 };
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::strategy::back_test_log;
@@ -272,22 +272,17 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
     }
     Ok(())
 }
+
 pub async fn run_vegas_test(
     inst_id: &str,
     time: &str,
     mut strategy: VegasIndicator,
-    strategy_config: TradingStrategyConfig,
+    strategy_config: BasicRiskStrategyConfig,
     mysql_candles: Arc<Vec<CandlesEntity>>,
-    fibonacci_level: Arc<Vec<f64>>,
 ) -> Result<i64, anyhow::Error> {
     let res = strategy.run_test(
         &mysql_candles,
-        &fibonacci_level,
         strategy_config,
-        true,
-        true,
-        true,
-        false,
     );
 
     // 构建更详细的策略配置描述
@@ -300,41 +295,35 @@ pub async fn run_vegas_test(
     Ok(back_test_id)
 }
 
-// 这个函数用于执行单个策略测试，封装了主要的测试逻辑
-pub async fn run_test_strategy(
-    inst_id: &str,
-    time: &str,
-    key_value: f64,
-    atr_period: usize,
-    ema: usize,
-    max_loss_percent: f64,
-    mysql_candles: Arc<Vec<CandlesEntity>>,
-    fibonacci_level: Arc<Vec<f64>>,
-) -> Result<(), anyhow::Error> {
-    let strategy = UtBootStrategy {
-        key_value,
-        ema_period: ema,
-        atr_period,
-        heikin_ashi: false,
-    };
-    // 执行策略
-    let res = UtBootStrategy::run_test(
-        &mysql_candles,
-        &fibonacci_level,
-        max_loss_percent,
-        false, // is_fibonacci_profit
-        true,  // is_open_long
-        true,  // is_open_short
-        strategy.clone(),
-        false, // is_judge_trade_time
-    )
-    .await;
+// // 这个函数用于执行单个策略测试，封装了主要的测试逻辑
+// pub async fn run_test_strategy(
+//     inst_id: &str,
+//     time: &str,
+//     key_value: f64,
+//     atr_period: usize,
+//     ema: usize,
+//     max_loss_percent: f64,
+//     mysql_candles: Arc<Vec<CandlesEntity>>,
+//     fibonacci_level: Arc<Vec<f64>>,
+// ) -> Result<(), anyhow::Error> {
+//     let strategy = UtBootStrategy {
+//         key_value,
+//         ema_period: ema,
+//         atr_period,
+//         heikin_ashi: false,
+//     };
+//     // 执行策略
+//     let res = strategy.get_trade_signal(&mysql_candles);
+//         strategy.clone(),
+//         false, // is_judge_trade_time
+//     )
+//     .await;
 
-    println!("UtBootStrategy:{:?}", strategy);
-    let result = save_log(inst_id, time, Some(strategy.to_string()), res).await;
-    println!("save log Result: {:?}", result);
-    Ok(())
-}
+//     println!("UtBootStrategy:{:?}", strategy);
+//     let result = save_log(inst_id, time, Some(strategy.to_string()), res).await;
+//     println!("save log Result: {:?}", result);
+//     Ok(())
+// }
 
 pub async fn save_log(
     inst_id: &str,
@@ -415,24 +404,26 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
 
     // let volume_bar_nums = vec![3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let volume_bar_nums = vec![3];
-
     let volume_increase_ratios: Vec<f64> = (20..=20).map(|x| x as f64 * 0.1).collect();
-    let volume_decrease_ratios: Vec<f64> = (37..=37).map(|x| x as f64 * 0.1).collect();
+    let volume_decrease_ratios: Vec<f64> = (20..=20).map(|x| x as f64 * 0.1).collect();
+    //突破阈值
     let breakthrough_thresholds: Vec<f64> = vec![0.003];
 
-    let rsi_periods = vec![12];
+    //RSI 参数
+    let rsi_periods = vec![8];
     // let rsi_periods = vec![14];
-    let rsi_overboughts = vec![85.0];
-    let rsi_oversolds = vec![20.0];
+    let rsi_overboughts = vec![81.0];
+    let rsi_oversolds = vec![ 21.0];
+
+    // Bollinger Bands 参数
+    let mut bb_periods = vec![9];
+    let mut bb_multipliers = vec![
+        3.6,
+    ];
 
     // 收集所有 back_test_id
     let mut back_test_ids = Vec::new();
-    let mut bb_periods = vec![
-        9,
-    ];
-    let mut bb_multipliers = vec![
-        3.6
-    ];
+
 
     // 创建任务容器
     let mut tasks = Vec::new();
@@ -446,11 +437,12 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                             for &rsi_period in &rsi_periods {
                                 for &rsi_overbought in &rsi_overboughts {
                                     for &rsi_oversold in &rsi_oversolds {
-                                        let strategy_config = TradingStrategyConfig {
+                                        let strategy_config = BasicRiskStrategyConfig {
                                             use_dynamic_tp: false,
                                             use_fibonacci_tp: true,
-                                            max_loss_percent: 0.02,
+                                            max_loss_percent: 0.03,
                                             profit_threshold: 0.01,
+                                            is_move_stop_loss: true,
                                         };
                                         let volumn_signal = VolumeSignalConfig {
                                             volume_bar_num,
@@ -470,18 +462,18 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                                         };
 
                                         let strategy = VegasIndicator {
-                                            ema_signal: EmaSignalConfig {
-                                                ..Default::default()
-                                            },
-                                            volume_signal: volumn_signal,
-                                            ema_touch_trend_signal,
-                                            rsi_signal,
-                                            signal_weights: SignalWeightsConfig::default(),
-                                            bollinger_signal: BollingerBandsSignalConfig {
+                                            engulfing_signal: Some(EngulfingSignalConfig::default()),
+                                            ema_signal: Some(EmaSignalConfig::default()),
+                                            signal_weights: Some(SignalWeightsConfig::default()),
+
+                                            volume_signal: Some(volumn_signal),
+                                            ema_touch_trend_signal: Some(ema_touch_trend_signal),
+                                            rsi_signal: Some(rsi_signal),
+                                            bollinger_signal: Some(BollingerBandsSignalConfig {
                                                 period: bb_period,
                                                 multiplier: bb_multiplier,
                                                 is_open: true,
-                                            },
+                                            }),
                                         };
 
                                         let inst_id = inst_id.to_string();
@@ -493,13 +485,13 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                                         // 创建任务
                                         tasks.push(tokio::spawn(async move {
                                             let _permit = permit.acquire().await.unwrap();
+                                            println!("strategy:{:?}", strategy);
                                             match run_vegas_test(
                                                 &inst_id,
                                                 &time,
                                                 strategy,
                                                 strategy_config,
                                                 mysql_candles,
-                                                fibonacci_level,
                                             )
                                             .await
                                             {
@@ -542,147 +534,146 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     Ok(())
 }
 
-// 主函数，执行所有策略测试
-pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-    // 获取数据
-    let mysql_candles = self::get_candle_data(inst_id, time, 5000, None).await?;
-    let mysql_candles_clone = Arc::new(mysql_candles);
+// // 主函数，执行所有策略测试
+// pub async fn squeeze_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+//     // 获取数据
+//     let mysql_candles = self::get_candle_data(inst_id, time, 2200, None).await?;
+//     let mysql_candles_clone = Arc::new(mysql_candles);
+//     // 创建信号量限制并发数
+//     let semaphore = Arc::new(Semaphore::new(100)); // 控制最大并发数量为 100
 
-    let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
-    let fibonacci_level_clone = Arc::new(fibonacci_level);
+//     // 灵敏度参数
+//     let bb_lengths: Vec<usize> = (26..=30).collect();
+//     let bb_multi_nums: Vec<f64> = (10..=60).map(|x| x as f64 * 0.1).collect();
+//     let kc_lengths: Vec<usize> = (10..=30).collect();
+//     let kc_multi_nums: Vec<f64> = (10..=60).map(|x| x as f64 * 0.1).collect();
+//     let max_loss_percent: Vec<f64> = (5..=5).map(|x| x as f64 * 0.01).collect();
 
-    // 创建信号量限制并发数
-    let semaphore = Arc::new(Semaphore::new(100)); // 控制最大并发数量为 100
+//     // 创建任务容器
+//     let mut tasks = Vec::new();
+//     for bb_length in bb_lengths {
+//         for bb_multi in bb_multi_nums.clone() {
+//             for kc_length in kc_lengths.clone() {
+//                 for kc_multi in kc_multi_nums.clone() {
+//                     for &max_loss in &max_loss_percent {
+//                         let arc = mysql_candles_clone.clone();
+//                         let inst_id_clone = inst_id.to_string();
+//                         let time_clone = time.to_string();
+//                         // 获取信号量，控制并发
+//                         // 创建任务
+//                         let permit = Arc::clone(&semaphore);
 
-    // 灵敏度参数
-    let key_values: Vec<f64> = (2..=80).map(|x| x as f64 * 0.1).collect();
-    let emas: Vec<usize> = (1..=3).map(|i| i).collect();
-    let max_loss_percent: Vec<f64> = (5..6).map(|x| x as f64 * 0.01).collect();
+//                         tasks.push(tokio::spawn({
+//                             // 持有 permit，直到异步任务结束才释放
 
-    // 创建任务容器
-    let mut tasks = Vec::new();
+//                             let inst_id = inst_id_clone.clone();
+//                             let time = time_clone.clone();
+//                             async move {
+//                                 let _permit = permit.acquire().await.unwrap();
+//                                 let config = squeeze_momentum::squeeze_config::SqueezeConfig {
+//                                     bb_length,
+//                                     bb_multi,
+//                                     kc_length,
+//                                     kc_multi,
+//                                 };
+//                                 let fibonacci_level =
+//                                     ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
+//                                 let mut stregety = SqueezeCalculator::new(config.clone());
 
-    // 遍历所有组合并为每个组合生成一个任务
-    for key_value in key_values {
-        for atr_period in 1..=15 {
-            let ema_clone = emas.clone();
-            for ema in ema_clone.into_iter() {
-                for &max_loss in &max_loss_percent {
-                    let inst_id_clone = inst_id.to_string();
-                    let time_clone = time.to_string();
-                    let mysql_candles_clone = Arc::clone(&mysql_candles_clone);
-                    let fibonacci_level_clone = Arc::clone(&fibonacci_level_clone);
-                    let permit = Arc::clone(&semaphore);
-                    // 创建任务
-                    tasks.push(tokio::spawn({
-                        let inst_id_clone = inst_id_clone.clone();
-                        let time_clone = time_clone.clone();
-                        async move {
-                            // 获取信号量，控制并发
-                            let _permit = permit.acquire().await.unwrap();
+//                                 let res = stregety
+//                                     .run_test(
+//                                         &arc,
+//                                         &fibonacci_level,
+//                                         10.00,
+//                                         false,
+//                                         true,
+//                                         true,
+//                                         false,
+//                                     )
+//                                     .await;
 
-                            // 执行策略测试并处理结果
-                            if let Err(e) = run_test_strategy(
-                                &inst_id_clone,
-                                &time_clone,
-                                key_value,
-                                atr_period,
-                                ema.clone(),
-                                max_loss,
-                                mysql_candles_clone,
-                                fibonacci_level_clone,
-                            )
-                            .await
-                            {
-                                error!("Strategy test failed: {:?}", e);
-                            }
-                        }
-                    }));
-                }
-            }
-        }
-    }
+//                                 let result =
+//                                     save_log(&inst_id, &time, Some(config.to_string()), res).await;
+//                                 if result.is_err() {
+//                                     error!("保存日志异常")
+//                                 }
+//                             }
+//                         }));
+//                     }
+//                 }
+//             }
+//         }
+//     }
+//     // 等待所有任务完成
+//     join_all(tasks).await;
+//     Ok(()
 
-    // 等待所有任务完成
-    join_all(tasks).await;
+// // 主函数，执行所有策略测试
+// pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+//     // 获取数据
+//     let mysql_candles = self::get_candle_data(inst_id, time, 5000, None).await?;
+//     let mysql_candles_clone = Arc::new(mysql_candles);
 
-    Ok(())
-}
+//     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
+//     let fibonacci_level_clone = Arc::new(fibonacci_level);
 
-// 主函数，执行所有策略测试
-pub async fn squeeze_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-    // 获取数据
-    let mysql_candles = self::get_candle_data(inst_id, time, 2200, None).await?;
-    let mysql_candles_clone = Arc::new(mysql_candles);
-    // 创建信号量限制并发数
-    let semaphore = Arc::new(Semaphore::new(100)); // 控制最大并发数量为 100
+//     // 创建信号量限制并发数
+//     let semaphore = Arc::new(Semaphore::new(100)); // 控制最大并发数量为 100
 
-    // 灵敏度参数
-    let bb_lengths: Vec<usize> = (26..=30).collect();
-    let bb_multi_nums: Vec<f64> = (10..=60).map(|x| x as f64 * 0.1).collect();
-    let kc_lengths: Vec<usize> = (10..=30).collect();
-    let kc_multi_nums: Vec<f64> = (10..=60).map(|x| x as f64 * 0.1).collect();
-    let max_loss_percent: Vec<f64> = (5..=5).map(|x| x as f64 * 0.01).collect();
+//     // 灵敏度参数
+//     let key_values: Vec<f64> = (2..=80).map(|x| x as f64 * 0.1).collect();
+//     let emas: Vec<usize> = (1..=3).map(|i| i).collect();
+//     let max_loss_percent: Vec<f64> = (5..6).map(|x| x as f64 * 0.01).collect();
 
-    // 创建任务容器
-    let mut tasks = Vec::new();
-    for bb_length in bb_lengths {
-        for bb_multi in bb_multi_nums.clone() {
-            for kc_length in kc_lengths.clone() {
-                for kc_multi in kc_multi_nums.clone() {
-                    for &max_loss in &max_loss_percent {
-                        let arc = mysql_candles_clone.clone();
-                        let inst_id_clone = inst_id.to_string();
-                        let time_clone = time.to_string();
-                        // 获取信号量，控制并发
-                        // 创建任务
-                        let permit = Arc::clone(&semaphore);
+//     // 创建任务容器
+//     let mut tasks = Vec::new();
 
-                        tasks.push(tokio::spawn({
-                            // 持有 permit，直到异步任务结束才释放
+//     // 遍历所有组合并为每个组合生成一个任务
+//     for key_value in key_values {
+//         for atr_period in 1..=15 {
+//             let ema_clone = emas.clone();
+//             for ema in ema_clone.into_iter() {
+//                 for &max_loss in &max_loss_percent {
+//                     let inst_id_clone = inst_id.to_string();
+//                     let time_clone = time.to_string();
+//                     let mysql_candles_clone = Arc::clone(&mysql_candles_clone);
+//                     let fibonacci_level_clone = Arc::clone(&fibonacci_level_clone);
+//                     let permit = Arc::clone(&semaphore);
+//                     // 创建任务
+//                     tasks.push(tokio::spawn({
+//                         let inst_id_clone = inst_id_clone.clone();
+//                         let time_clone = time_clone.clone();
+//                         async move {
+//                             // 获取信号量，控制并发
+//                             let _permit = permit.acquire().await.unwrap();
 
-                            let inst_id = inst_id_clone.clone();
-                            let time = time_clone.clone();
-                            async move {
-                                let _permit = permit.acquire().await.unwrap();
-                                let config = squeeze_momentum::squeeze_config::SqueezeConfig {
-                                    bb_length,
-                                    bb_multi,
-                                    kc_length,
-                                    kc_multi,
-                                };
-                                let fibonacci_level =
-                                    ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
-                                let mut stregety = SqueezeCalculator::new(config.clone());
+//                             // 执行策略测试并处理结果
+//                             if let Err(e) = run_test_strategy(
+//                                 &inst_id_clone,
+//                                 &time_clone,
+//                                 key_value,
+//                                 atr_period,
+//                                 ema.clone(),
+//                                 max_loss,
+//                                 mysql_candles_clone,
+//                                 fibonacci_level_clone,
+//                             )
+//                             .await
+//                             {
+//                                 error!("Strategy test failed: {:?}", e);
+//                             }
+//                         }
+//                     }));
+//                 }
+//             }
+//         }
+//     }
 
-                                let res = stregety
-                                    .run_test(
-                                        &arc,
-                                        &fibonacci_level,
-                                        10.00,
-                                        false,
-                                        true,
-                                        true,
-                                        false,
-                                    )
-                                    .await;
+//     // 等待所有任务完成
+//     join_all(tasks).await;
 
-                                let result =
-                                    save_log(&inst_id, &time, Some(config.to_string()), res).await;
-                                if result.is_err() {
-                                    error!("保存日志异常")
-                                }
-                            }
-                        }));
-                    }
-                }
-            }
-        }
-    }
-    // 等待所有任务完成
-    join_all(tasks).await;
-    Ok(())
-}
+//     Ok(())
+// }
 
 // 主函数，执行所有策略测试
 pub async fn top_contract_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
@@ -815,7 +806,8 @@ pub async fn save_test_detail(
             close_type: trade_record.close_type,
             win_nums: trade_record.win_num,
             loss_nums: trade_record.loss_num,
-            signal_detail: trade_record.signal_detail.unwrap_or_else(|| "".to_string()),
+            signal_value: trade_record.signal_value.unwrap_or_else(|| "".to_string()),
+            signal_result: trade_record.signal_result.unwrap_or_else(|| "".to_string()),
         };
         array.push(back_test_log);
     }
@@ -862,6 +854,10 @@ pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> 
     return true;
 }
 
+
+/**
+ * 验证蜡烛图数据是否正确
+ */
 pub fn valid_candles_data(mysql_candles_5m: &Vec<CandlesEntity>, time: &str) -> Result<()> {
     //验证头尾数据正确性
     let first_timestamp = mysql_candles_5m.first().unwrap().ts;

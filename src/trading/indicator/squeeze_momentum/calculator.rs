@@ -7,7 +7,7 @@ use ta::{
 };
 use tracing::info;
 
-use crate::trading::{indicator::squeeze_momentum::service::calculate_linreg, strategy::strategy_common::TradingStrategyConfig};
+use crate::trading::{indicator::squeeze_momentum::service::calculate_linreg, strategy::strategy_common::BasicRiskStrategyConfig};
 use crate::trading::indicator::squeeze_momentum::squeeze_config::{
     MomentumColor, SqueezeConfig, SqueezeResult, SqueezeState,
 };
@@ -202,7 +202,8 @@ impl SqueezeCalculator {
             should_sell: false,
             price: 0.0,
             ts: 0,
-            single_detail: None,
+            single_value: None,
+            single_result: None,
         };
         //组装数据
         let data_items = self.convert_to_data_items(&data.to_vec());
@@ -227,36 +228,36 @@ impl SqueezeCalculator {
         signal_result
     }
 
-    /// Runs the backtest asynchronously.
-    pub async fn run_test(
-        &mut self,
-        data: &Arc<Vec<CandlesEntity>>,
-        fib_levels: &Vec<f64>,
-        max_loss_percent: f64,
-        is_need_fibonacci_profit: bool,
-        is_open_long: bool,
-        is_open_short: bool,
-        is_jude_trade_time: bool,
-    ) -> BackTestResult {
-        // Determine the minimum data length required for the backtest
-        let min_data_length = self.get_min_data_length();
-        // Execute the external run_test function with appropriate parameters
-        let res = strategy_common::run_test(
-            |candles| {
-                // Generate trade signals using the strategy
-                self.get_trade_signal(candles)
-            },
-            &data, // Extract candle data from generic data D
-            fib_levels,
-            TradingStrategyConfig::default(),
-            min_data_length,
-            is_open_long,
-            is_open_short,
-            is_jude_trade_time,
-        ); // Await the asynchronous run_test function
+    // /// Runs the backtest asynchronously.
+    // pub async fn run_test(
+    //     &mut self,
+    //     data: &Arc<Vec<CandlesEntity>>,
+    //     fib_levels: &Vec<f64>,
+    //     max_loss_percent: f64,
+    //     is_need_fibonacci_profit: bool,
+    //     is_open_long: bool,
+    //     is_open_short: bool,
+    //     is_jude_trade_time: bool,
+    // ) -> BackTestResult {
+    //     // Determine the minimum data length required for the backtest
+    //     // let min_data_length = self.get_min_data_length();
+    //     // // Execute the external run_test function with appropriate parameters
+    //     // let res = strategy_common::run_test(
+    //     //     |candles| {
+    //     //         // Generate trade signals using the strategy
+    //     //         self.get_trade_signal(candles)
+    //     //     },
+    //     //     &data, // Extract candle data from generic data D
+    //     //     fib_levels,
+    //     //     TradingStrategyConfig::default(),
+    //     //     min_data_length,
+    //     //     is_open_long,
+    //     //     is_open_short,
+    //     //     is_jude_trade_time,
+    //     // ); // Await the asynchronous run_test function
 
-        res // Return the result of the backtest
-    }
+    //     // res // Return the result of the backtest
+    // }
     pub fn get_min_data_length(&mut self) -> usize {
         self.config.bb_length.max(self.config.kc_length) * 2
     }

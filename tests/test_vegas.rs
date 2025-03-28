@@ -6,6 +6,8 @@ use rust_quant::trading::indicator::vegas_indicator::VegasIndicator;
 use rust_quant::trading::model::market::candles::CandlesEntity;
 use rust_quant::trading::model::market::candles::SelectTime;
 use rust_quant::trading::model::market::candles::TimeDirect;
+use rust_quant::trading::strategy::profit_stop_loss::ProfitStopLoss;
+use rust_quant::trading::strategy::strategy_common::BasicRiskStrategyConfig;
 use rust_quant::trading::task::basic;
 use rust_quant::{app_config::db::init_db, trading};
 use tracing::error;
@@ -20,14 +22,13 @@ async fn test_vegas() -> Result<()> {
     let inst_id = "BTC-USDT-SWAP";
     let time = "1H";
     let select_time: SelectTime = SelectTime {
-        point_time: 1736776800000,
+        point_time: 1742274000000,
         direct: TimeDirect::BEFORE,
     };
 
     // 获取K线数据
     let mysql_candles: Vec<CandlesEntity> =
         trading::task::basic::get_candle_data(inst_id, time, 3400, Some(select_time)).await?;
-    println!("{:#?}", mysql_candles);
 
     if true {
         //取出最新的一条数据，判断时间是否==当前时间的H,如果不是跳过
@@ -39,13 +40,12 @@ async fn test_vegas() -> Result<()> {
         }
     }
 
-    let mut strategy = VegasIndicator::new(12, 144, 169, 576, 676);
-    strategy.ema_signal.is_open = true;
-    strategy.volume_signal.is_open = true;
-    strategy.rsi_signal.is_open = true;
+    let mut strategy = VegasIndicator::default();
 
-    let signal_weights = SignalWeightsConfig::default();
-    let result = strategy.get_trade_signal(&mysql_candles, &signal_weights);
+    let result = strategy.run_test(
+        &mysql_candles,
+        BasicRiskStrategyConfig::default(),
+    );
     println!("交易信号结果: {:?}", result);
 
     Ok(())

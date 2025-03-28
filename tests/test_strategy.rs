@@ -1,12 +1,12 @@
 use rust_quant::trading::model::market::candles::CandlesEntity;
-use rust_quant::trading::strategy::strategy_common::{run_test, SignalResult, TradeRecord, TradingStrategyConfig};
+use rust_quant::trading::strategy::strategy_common::{run_test, SignalResult, TradeRecord, BasicRiskStrategyConfig};
 use anyhow::Result;
 
 #[tokio::test]
 async fn test_strategy_signals() -> Result<()> {
     let mock_candles = create_mock_candles();
     
-    let strategy_config = TradingStrategyConfig {
+    let strategy_config = BasicRiskStrategyConfig {
         use_dynamic_tp: true,
         use_fibonacci_tp: false,
         max_loss_percent: 0.02,
@@ -85,7 +85,7 @@ async fn test_short_scenarios() -> Result<()> {
 async fn verify_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result<()> {
     println!("\n测试场景: {}", name);
     
-    let strategy_config = TradingStrategyConfig {
+    let strategy_config = BasicRiskStrategyConfig {
         use_dynamic_tp: true,
         use_fibonacci_tp: false,
         max_loss_percent: 0.02,    // 2%止损
@@ -112,7 +112,7 @@ async fn verify_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result
 async fn verify_short_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result<()> {
     println!("\n测试场景: {}", name);
     
-    let strategy_config = TradingStrategyConfig {
+    let strategy_config = BasicRiskStrategyConfig {
         use_dynamic_tp: true,
         use_fibonacci_tp: false,
         max_loss_percent: 0.02,    // 2%止损
@@ -194,7 +194,7 @@ fn mock_strategy(candles: &[CandlesEntity]) -> SignalResult {
         should_sell: false,
         price,
         ts: current.ts,
-        single_detail: None,
+        single_value: None,
     };
 
     if candles.len() < 3 {
@@ -217,7 +217,7 @@ fn mock_strategy(candles: &[CandlesEntity]) -> SignalResult {
     if prev_close >= 99.9 && prev_close <= 100.1 && change > 0.02 {
         signal.should_buy = true;
         signal.should_sell = false;
-        signal.single_detail = Some("做多信号".to_string());
+        signal.single_value = Some("做多信号".to_string());
         println!(">>> 触发做多信号 <<< 开仓价格: {}", price);
     }
     // 止损信号：相对开仓价下跌超过2%
@@ -226,7 +226,7 @@ fn mock_strategy(candles: &[CandlesEntity]) -> SignalResult {
         if loss_pct < -0.02 {
             signal.should_buy = false;
             signal.should_sell = true;
-            signal.single_detail = Some(format!("止损信号: 跌幅{:.2}% > 止损线2%", loss_pct * 100.0));
+            signal.single_value = Some(format!("止损信号: 跌幅{:.2}% > 止损线2%", loss_pct * 100.0));
             println!(">>> 触发止损信号 <<< 开仓价:{}, 当前价:{}, 跌幅{:.2}% > 止损线2%", 
                 entry, price, loss_pct * 100.0);
         }
@@ -244,7 +244,7 @@ fn mock_short_strategy(candles: &[CandlesEntity]) -> SignalResult {
         should_sell: false,
         price,
         ts: current.ts,
-        single_detail: None,
+        single_value: None,
     };
 
     if candles.len() < 3 {
@@ -262,7 +262,7 @@ fn mock_short_strategy(candles: &[CandlesEntity]) -> SignalResult {
     if prev_close >= 99.9 && prev_close <= 100.1 && change < -0.02 {
         signal.should_sell = true;
         signal.should_buy = false;
-        signal.single_detail = Some("做空信号".to_string());
+        signal.single_value = Some("做空信号".to_string());
         println!(">>> 触发做空信号 <<< 开仓价格: {}", price);
     }
 

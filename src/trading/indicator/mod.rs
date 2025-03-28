@@ -16,3 +16,4 @@ pub mod rsi_rma;
 pub mod bollings;
 pub mod key_levels;
 pub mod volume_indicator;
+pub mod engulfing_indicator;

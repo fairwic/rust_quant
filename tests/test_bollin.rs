@@ -15,13 +15,13 @@ async fn test_bolling_bands() -> Result<()> {
     init_db().await;
 
     let select_time = SelectTime {
-        point_time: 1741266000000,
+        point_time: 1742274000000,
         direct: TimeDirect::BEFORE,
     };
 
-    let candles =  trading::task::basic::get_candle_data("BTC-USDT-SWAP", "1H", 12, Some(select_time)).await?;
+    let candles =  trading::task::basic::get_candle_data("BTC-USDT-SWAP", "1H", 1200, Some(select_time)).await?;
 
-    let mut boll = BollingerBands::new(12, 3.0).unwrap();
+    let mut boll = BollingerBands::new(9, 3.6).unwrap();
 
     for candle in candles {
         let boll_value = boll.next(candle.c.parse::<f64>().unwrap());

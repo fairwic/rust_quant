@@ -112,29 +112,29 @@ CREATE TABLE `back_test_analysis` (
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
 
-
 CREATE TABLE `back_test_detail` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `back_test_id` int NOT NULL COMMENT '回测记录表id',
-  `inst_id` varchar(20) CHARACTER SET utf8mb4   NOT NULL,
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `back_test_id` int(11) NOT NULL COMMENT '回测记录表id',
+  `inst_id` varchar(20) NOT NULL,
   `time` varchar(255) NOT NULL COMMENT '周期',
   `strategy_type` varchar(255) NOT NULL COMMENT '策略类型',
-  `option_type` varchar(255) CHARACTER SET utf8mb4   NOT NULL COMMENT 'long 开多，short开空 close平仓',
+  `option_type` varchar(255) NOT NULL COMMENT 'long 开多，short开空 close平仓',
   `open_position_time` datetime NOT NULL COMMENT '开仓时间',
   `close_position_time` datetime NOT NULL COMMENT '平仓时间',
-  `open_price` varchar(255) CHARACTER SET utf8mb4   NOT NULL COMMENT '开仓时间',
+  `open_price` varchar(255) NOT NULL COMMENT '开仓时间',
   `close_price` varchar(255) NOT NULL COMMENT '平仓时间',
   `profit_loss` varchar(255) NOT NULL COMMENT '盈利/亏损金额',
   `quantity` varchar(255) NOT NULL COMMENT '开仓/平仓数量',
   `full_close` varchar(10) NOT NULL COMMENT '是否全部平仓',
   `close_type` varchar(255) NOT NULL COMMENT '平仓类型',
+  `signal_value` varchar(2000) NOT NULL COMMENT '此次操作依赖的信号详情',
+  `signal_result` varchar(2000) DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '时间',
-  `win_nums` int NOT NULL COMMENT '盈利金额',
-  `loss_nums` int DEFAULT NULL COMMENT '亏损金额',
-  `signal_detail` varchar(500) CHARACTER SET utf8mb4   NOT NULL COMMENT '此次操作依赖的信号详情',
+  `win_nums` int(11) NOT NULL COMMENT '盈利金额',
+  `loss_nums` int(11) DEFAULT NULL COMMENT '亏损金额',
   PRIMARY KEY (`id`),
   KEY `back_test_id` (`back_test_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=55 DEFAULT CHARSET=utf8mb4  ;
+) ENGINE=InnoDB AUTO_INCREMENT=1193487 DEFAULT CHARSET=utf8mb4;
 
 WITH trade_stats AS (
     SELECT 

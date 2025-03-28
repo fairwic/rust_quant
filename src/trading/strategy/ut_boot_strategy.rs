@@ -9,7 +9,7 @@ use crate::trading::indicator::atr::ATR;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::strategy::strategy_common::{BackTestResult, run_test, SignalResult, TradeRecord};
 
-use super::strategy_common::TradingStrategyConfig;
+use super::strategy_common::BasicRiskStrategyConfig;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct UtBootStrategy {
@@ -68,7 +68,8 @@ impl UtBootStrategy {
             should_sell,
             price,
             ts,
-            single_detail:None
+            single_value:None,
+            single_result:None
         };
         // 增加三个新过滤条件
         let mut volume_ma = 0.0;
@@ -156,36 +157,37 @@ impl UtBootStrategy {
             should_sell,
             price,
             ts,
-            single_detail:None
+            single_value:None,
+            single_result:None
         }
     }
 
 
-    /// 运行回测
-    pub async fn run_test(
-        candles_5m: &Vec<CandlesEntity>,
-        fib_levels: &Vec<f64>,
-        max_loss_percent: f64,
-        is_need_fibonacci_profit: bool,
-        is_open_long: bool,
-        is_open_short: bool,
-        ut_boot_strategy: UtBootStrategy,
-        is_jude_trade_time: bool,
-    ) -> BackTestResult {
-        let min_data_length = ut_boot_strategy.get_min_single_length();
-        let res = run_test(
-            |candles| {
-                ut_boot_strategy.get_trade_signal(candles)
-            },
-            candles_5m,
-            fib_levels,
-            TradingStrategyConfig::default(),
-            min_data_length,
-            is_open_long,
-            is_open_short,
-            is_jude_trade_time,
-        );
-        // println!("res= {:#?}", json!(res));
-        res
-    }
+    // /// 运行回测
+    // pub async fn run_test(
+    //     candles_5m: &Vec<CandlesEntity>,
+    //     fib_levels: &Vec<f64>,
+    //     max_loss_percent: f64,
+    //     is_need_fibonacci_profit: bool,
+    //     is_open_long: bool,
+    //     is_open_short: bool,
+    //     ut_boot_strategy: UtBootStrategy,
+    //     is_jude_trade_time: bool,
+    // ) -> BackTestResult {
+    //     let min_data_length = ut_boot_strategy.get_min_single_length();
+    //     let res = run_test(
+    //         |candles| {
+    //             ut_boot_strategy.get_trade_signal(candles)
+    //         },
+    //         candles_5m,
+    //         fib_levels,
+    //         TradingStrategyConfig::default(),
+    //         min_data_length,
+    //         is_open_long,
+    //         is_open_short,
+    //         is_jude_trade_time,
+    //     );
+    //     // println!("res= {:#?}", json!(res));
+    //     res
+    // }
 }

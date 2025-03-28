@@ -12,6 +12,7 @@ pub enum SignalType {
     EmaDivergence,          // 均线发散
     PriceLevel,             // 关键价位
     Bollinger,              // 布林带
+    Engulfing,              // 吞没形态
 }
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub enum SignalDeriect {
@@ -52,6 +53,10 @@ pub enum SignalCondition {
         is_short_signal: bool,
         is_close_signal: bool,
     },
+    Engulfing {
+        is_long_engulfing: bool,
+        is_short_engulfing: bool,
+    },
 }
 
 // 权重配置结构体
@@ -81,6 +86,7 @@ impl Default for SignalWeightsConfig {
                 (SignalType::PriceLevel, 1.0),
                 (SignalType::EmaTrend, 1.0),
                 (SignalType::Bollinger, 1.0),
+                (SignalType::Engulfing, 1.0),
             ],
             min_total_weight: 2.0,
         }
@@ -115,6 +121,28 @@ impl SignalWeightsConfig {
         let base_weight = self.get_weight(signal_type);
 
         match condition {
+            SignalCondition::Engulfing {
+                is_long_engulfing,
+                is_short_engulfing,
+            } => {
+                if is_long_engulfing {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDeriect::IsLong),
+                    })
+                } else if is_short_engulfing    {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDeriect::IsShort),
+                    })
+                } else {
+                    None
+                }
+            }
             SignalCondition::PriceBreakout {
                 price_above,
                 price_below,

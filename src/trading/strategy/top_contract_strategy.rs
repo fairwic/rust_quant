@@ -20,7 +20,7 @@ use crate::trading::strategy::strategy_common::{BackTestResult, run_test, run_te
 use crate::trading::task::basic;
 use crate::trading::task::basic::save_log;
 
-use super::strategy_common::TradingStrategyConfig;
+use super::strategy_common::BasicRiskStrategyConfig;
 
 // Define the TopContractData struct with corrected types
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -132,7 +132,8 @@ impl TopContractStrategy {
                 should_sell,
                 price,
                 ts,
-                single_detail:None
+                single_value:None,
+                single_result: None,
             };
         }
         let acct_ratio = &data.account_ratio;
@@ -184,7 +185,8 @@ impl TopContractStrategy {
             should_sell,
             price,
             ts,
-            single_detail: None,
+            single_value: None,
+            single_result: None,
         }
     }
     /// Runs the backtest asynchronously.

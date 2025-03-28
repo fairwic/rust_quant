@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::strategy::strategy_common::{BackTestResult, run_test, SignalResult, TradeRecord};
 
-use super::strategy_common::TradingStrategyConfig;
+use super::strategy_common::BasicRiskStrategyConfig;
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct EngulfingStrategy {
@@ -68,32 +68,32 @@ impl EngulfingStrategy {
         }
         // ts = candles_5m.last().unwrap().ts;
 
-        SignalResult { should_buy, should_sell, price, ts: candles_5m.last().unwrap().ts ,single_detail:None}
+        SignalResult { should_buy, should_sell, price, ts: candles_5m.last().unwrap().ts ,single_value:None,single_result:None}
     }
 
-    /// 运行回测
-    pub async fn run_test(
-        candles_5m: &Vec<CandlesEntity>,
-        fib_levels: &Vec<f64>,
-        max_loss_percent: f64,
-        num_bars: usize,
-        is_need_fibonacci_profit: bool,
-        is_open_long: bool,
-        is_open_short: bool,
-        is_judge_trade_time: bool,
-    ) ->BackTestResult {
-        let min_data_length = num_bars + 1;
-        let res = run_test(
-            |candles| Self::get_trade_signal(candles, num_bars),
-            candles_5m,
-            fib_levels,
-            TradingStrategyConfig::default(),
-            min_data_length,
-            is_open_long,
-            is_open_short,
-            is_judge_trade_time,
-        );
-        // println!("res= {:#?}", json!(res));
-        res
-    }
+    // /// 运行回测
+    // pub async fn run_test(
+    //     candles_5m: &Vec<CandlesEntity>,
+    //     fib_levels: &Vec<f64>,
+    //     max_loss_percent: f64,
+    //     num_bars: usize,
+    //     is_need_fibonacci_profit: bool,
+    //     is_open_long: bool,
+    //     is_open_short: bool,
+    //     is_judge_trade_time: bool,
+    // ) ->BackTestResult {
+    //     let min_data_length = num_bars + 1;
+    //     let res = run_test(
+    //         |candles| Self::get_trade_signal(candles, num_bars),
+    //         candles_5m,
+    //         fib_levels,
+    //         TradingStrategyConfig::default(),
+    //         min_data_length,
+    //         is_open_long,
+    //         is_open_short,
+    //         is_judge_trade_time,
+    //     );
+    //     // println!("res= {:#?}", json!(res));
+    //     res
+    // }
 }

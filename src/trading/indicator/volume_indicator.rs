@@ -19,12 +19,15 @@ impl VolumeRatioIndicator {
 
     pub fn next(&mut self, current_volume: f64) -> f64 {
         //只保留前N根K线的成交量
-        self.prev_volumes.push(current_volume);
         if self.prev_volumes.len() > self.volume_bar_num {
             self.prev_volumes.remove(0);
         }
+        // println!("111111111111111111111", );
+        // println!("self.prev_volumes: {:?}", self.prev_volumes);
         let avg_volume = self.prev_volumes.iter().sum::<f64>() / self.prev_volumes.len() as f64;
         let volume_ratio = current_volume / avg_volume;
+        self.prev_volumes.push(current_volume);
+
         volume_ratio
     }
 }
