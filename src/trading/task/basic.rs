@@ -34,7 +34,7 @@ use crate::trading::analysis::position_analysis::PositionAnalysis;
 use crate::trading::indicator::squeeze_momentum;
 use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
 use crate::trading::indicator::vegas_indicator::{
-    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, RsiSignalConfig, VegasIndicator, VolumeSignalConfig
+    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, RsiSignalConfig, VegasStrategy, VolumeSignalConfig
 };
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::strategy::back_test_log;
@@ -276,7 +276,7 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
 pub async fn run_vegas_test(
     inst_id: &str,
     time: &str,
-    mut strategy: VegasIndicator,
+    mut strategy: VegasStrategy,
     strategy_config: BasicRiskStrategyConfig,
     mysql_candles: Arc<Vec<CandlesEntity>>,
 ) -> Result<i64, anyhow::Error> {
@@ -461,7 +461,7 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                                             ..Default::default()
                                         };
 
-                                        let strategy = VegasIndicator {
+                                        let strategy = VegasStrategy {
                                             engulfing_signal: Some(EngulfingSignalConfig::default()),
                                             ema_signal: Some(EmaSignalConfig::default()),
                                             signal_weights: Some(SignalWeightsConfig::default()),
@@ -961,6 +961,12 @@ pub async fn run_ready_to_order(
 
             EngulfingStrategy::get_trade_signal(&mysql_candles_5m, strategy_config.num_bars)
         }
+        // StrategyType::Vegas => {
+        //     let strategy_config =
+        //         serde_json::from_str::<VegasStrategy>(&*ut_boot_strategy_info.value)
+        //             .map_err(|e| anyhow!("Failed to parse VegasStrategy config: {}", e))?;
+        //     strategy_config.get_trade_signal(&mysql_candles_5m)
+        // }
         _ => {
             return Err(anyhow!("Unknown strategy type: {:?}", strategy_type));
         }

@@ -1,6 +1,7 @@
-use crate::trading::indicator::rsi_rma::Rsi;
+use crate::trading::indicator::ema_indicator::EmaIndicator;
+use crate::trading::indicator::rsi_rma_indicator::RsiIndicator;
 use crate::trading::indicator::vegas_indicator::{
-    EmaIndicator, EmaSignalValue, IndicatorCombine, VegasIndicator, VegasIndicatorSignalValue,
+ EmaSignalValue, IndicatorCombine, VegasStrategy, VegasIndicatorSignalValue,
 };
 use crate::trading::indicator::volume_indicator::VolumeRatioIndicator;
 use crate::trading::model::market::candles::CandlesEntity;
@@ -532,6 +533,12 @@ pub fn calculate_ema(data: &CandleItem, ema_indicator: &mut EmaIndicator) -> Ema
     ema_signal_value.ema3_value = ema_indicator.ema3_indicator.next(data.c());
     ema_signal_value.ema4_value = ema_indicator.ema4_indicator.next(data.c());
     ema_signal_value.ema5_value = ema_indicator.ema5_indicator.next(data.c());
+
+    //判断是否多头排列
+    ema_signal_value.is_long_trend = ema_signal_value.ema1_value > ema_signal_value.ema2_value && ema_signal_value.ema2_value > ema_signal_value.ema3_value && ema_signal_value.ema3_value > ema_signal_value.ema4_value && ema_signal_value.ema4_value > ema_signal_value.ema5_value;
+    //判断是否空头排列
+    ema_signal_value.is_short_trend = ema_signal_value.ema1_value < ema_signal_value.ema2_value && ema_signal_value.ema2_value < ema_signal_value.ema3_value && ema_signal_value.ema3_value < ema_signal_value.ema4_value && ema_signal_value.ema4_value < ema_signal_value.ema5_value;
+
     ema_signal_value
 }
 
@@ -557,7 +564,7 @@ pub fn get_multi_indivator_values(
     //计算rsi
     if let Some(rsi_indicator) = &mut indicator_combine.rsi_indicator {
         vegas_indicator_signal_value.rsi_value.rsi_value =
-            rsi_indicator.rsi_indicator.next(data_item.c());
+            rsi_indicator.next(data_item.c());
     }
 
     //计算bollinger
@@ -637,7 +644,7 @@ pub fn run_test(
     }
 }
 
-fn parse_candle_to_data_item(candle: &CandlesEntity) -> CandleItem {
+pub fn parse_candle_to_data_item(candle: &CandlesEntity) -> CandleItem {
     CandleItem::builder()
         .c(candle.c.parse::<f64>().unwrap())
         .v(candle.vol_ccy.parse::<f64>().unwrap())

@@ -22,12 +22,33 @@ impl VolumeRatioIndicator {
         if self.prev_volumes.len() > self.volume_bar_num {
             self.prev_volumes.remove(0);
         }
-        // println!("111111111111111111111", );
-        // println!("self.prev_volumes: {:?}", self.prev_volumes);
-        let avg_volume = self.prev_volumes.iter().sum::<f64>() / self.prev_volumes.len() as f64;
-        let volume_ratio = current_volume / avg_volume;
+        let volume_ratio = current_volume / self.avg_volume();
         self.prev_volumes.push(current_volume);
-
         volume_ratio
+    }
+    pub fn avg_volume(&self) -> f64 {
+        self.prev_volumes.iter().sum::<f64>() / self.prev_volumes.len() as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_volume_ratio_indicator() {
+        let mut indicator = VolumeRatioIndicator::new(3);
+        indicator.next(100.0);
+        indicator.next(200.0);
+        indicator.next(300.0);
+        assert_eq!(indicator.avg_volume(), 200.0);
+    }
+    #[test]
+    fn test_volume_ratio_indicator_next() {
+        let mut indicator = VolumeRatioIndicator::new(3);
+        indicator.next(100.0);
+        indicator.next(200.0);
+        indicator.next(300.0);
+        assert_eq!(indicator.next(400.0), 2.0);
     }
 }

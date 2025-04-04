@@ -49,12 +49,29 @@ pub async fn setup_logging() -> anyhow::Result<()> {
 
     if app_env == "LOCAL" {
         let subscriber = FmtSubscriber::builder()
-            .with_max_level(Level::WARN)
+            .with_max_level(Level::INFO)
+            .with_ansi(true)
+            .with_target(false)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .with_file(true)
+            .with_line_number(true)
+            .with_level(true)
+            .with_writer(std::io::stdout)
+            // .with_timer(UtcTime::rfc_3339())
             .finish();
         tracing::subscriber::set_global_default(subscriber)?;
     } else {
-        let info_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "info.log");
-        let error_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "error.log");
+        let info_file = RollingFileAppender::new(
+            Rotation::DAILY,
+            "log_files",
+            "info.log",
+        );
+        let error_file = RollingFileAppender::new(
+            Rotation::DAILY,
+            "log_files",
+            "error.log",
+        );
 
         let (info_non_blocking, _info_guard) = tracing_appender::non_blocking(info_file);
         let (error_non_blocking, _error_guard) = tracing_appender::non_blocking(error_file);
@@ -62,11 +79,25 @@ pub async fn setup_logging() -> anyhow::Result<()> {
         let subscriber = Registry::default()
             .with(
                 fmt::layer()
+                    .with_ansi(false)
+                    .with_target(false)
+                    .with_thread_ids(true)
+                    .with_thread_names(true)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_level(true)
                     .with_writer(info_non_blocking)
                     .with_filter(EnvFilter::new("info")),
             )
             .with(
                 fmt::layer()
+                    .with_ansi(false)
+                    .with_target(false)
+                    .with_thread_ids(true)
+                    .with_thread_names(true)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_level(true)
                     .with_writer(error_non_blocking)
                     .with_filter(EnvFilter::new("error")),
             )

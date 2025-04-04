@@ -62,7 +62,7 @@ impl TvRma {
 /// RSI indicator using RMA (Relative Moving Average) for calculations
 /// Implements the exact same logic as TradingView's Pine Script RSI
 #[derive(Debug)]
-pub struct Rsi {
+pub struct RsiIndicator {
     length: usize,
     up_rma: TvRma,
     down_rma: TvRma,
@@ -70,7 +70,7 @@ pub struct Rsi {
     debug: bool,
 }
 
-impl Rsi {
+impl RsiIndicator {
     pub fn new(length: usize) -> Self {
         Self {
             length,
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_rsi_calculation() {
-        let mut rsi = Rsi::new(14);
+        let mut rsi = RsiIndicator::new(14);
         
         // TradingView documentation example data
         let prices = vec![

@@ -94,7 +94,7 @@ impl CandlesModel {
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ;",
             table_name
         );
-        println!("create_table_sql = {}", create_table_sql);
+        // println!("create_table_sql = {}", create_table_sql);
         let res = self.db.exec(&create_table_sql, vec![]).await?;
         Ok(res)
     }
@@ -102,7 +102,7 @@ impl CandlesModel {
     pub fn get_tale_name(inst_id: &str, time_interval: &str) -> String {
         println!("inst_id{},time_interval{}",inst_id,time_interval);
         let table_name = format!("{}_candles_{}", inst_id, time_interval);
-        print!("table_name{}",table_name);
+        // print!("table_name{}",table_name);
         table_name
     }
     pub(crate) async fn add(

@@ -7,7 +7,7 @@ use rust_quant::trading;
 use rust_quant::trading::indicator::rma::Rma;
 use rust_quant::trading::indicator::rsi_indicator::RsiIndicator;
 use rust_quant::trading::model::market::candles::{SelectTime, TimeDirect};
-use rust_quant::trading::indicator::rsi_rma::Rsi;
+use rust_quant::trading::indicator::rsi_rma_indicator::RsiIndicator;
 
   // 原有的异步测试，用于测试实时数据
 #[tokio::test]
@@ -16,7 +16,7 @@ async fn test_rsi_real_data() -> Result<()> {
     setup_logging().await?;
     init_db().await;
 
-    let mut rsi = Rsi::new(12);
+    let mut rsi = RsiIndicator::new(12);
 
     let select_time = SelectTime {
         point_time: 1732392000000,

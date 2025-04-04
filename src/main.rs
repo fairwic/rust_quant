@@ -198,32 +198,6 @@ async fn main() -> anyhow::Result<()> {
                         },
                     );
                 }
-
-                {
-                    let inst_ids = Arc::clone(&inst_ids);
-                    let times = Arc::clone(&times);
-                    //添务执行Engulfing策略
-                    scheduler.add_periodic_task(
-                        "run_engulfing_strategy_job".to_string(),
-                        30000,
-                        move || {
-                            let inst_ids_inner = Arc::clone(&inst_ids);
-                            let times_inner = Arc::clone(&times);
-                            async move {
-                                println!("run engulfing job");
-                                let res = task::basic::run_strategy_job(
-                                    inst_ids_inner,
-                                    times_inner,
-                                    StrategyType::Engulfing,
-                                )
-                                .await;
-                                if let Err(error) = res {
-                                    error!("run engulfing strategy error: {}", error);
-                                }
-                            }
-                        },
-                    );
-                }
             }
         }
     }

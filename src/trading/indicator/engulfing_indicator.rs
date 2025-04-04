@@ -36,13 +36,18 @@ impl EngulfingIndicator {
         let current_kline = current_kline;
 
         //看涨吞没 ,当前k线的开盘价小于前一根k线的开盘价，且当前k线的收盘价大于前一根k线的收盘价,且当前k线的收盘价大于前一根k线的最高价
-        let is_bullish = current_kline.o < last_kline.o
+        let is_bullish = (current_kline.o < last_kline.o || current_kline.l < last_kline.l)
             && current_kline.c > last_kline.c
-            && current_kline.c > last_kline.h;
+            && current_kline.c > last_kline.h
+            //要求上一个根k线是阴线
+            && last_kline.c < last_kline.o;
+
         //看跌吞没，当前k线的开盘价大于前一根k线的开盘价，且当前k线的收盘价小于前一根k线的收盘价,且当前k线的收盘价小于前一根k线的最低价
-        let is_bearish = current_kline.o > last_kline.o
+        let is_bearish = (current_kline.o > last_kline.o || current_kline.h > last_kline.h)
             && current_kline.c < last_kline.c
-            && current_kline.c < last_kline.l;
+            && current_kline.c < last_kline.l
+            //要求上一个根k线是阳线
+            && last_kline.c > last_kline.o;
 
         let body_ratio = if is_bullish || is_bearish {
             //计算实体比例,当前k线实体部分与当前k线路的上下影线部分的比例

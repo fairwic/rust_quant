@@ -1,4 +1,4 @@
-use crate::trading::indicator::rsi_rma::Rsi;
+use crate::trading::indicator::rsi_rma_indicator::RsiIndicator;
 use crate::trading::indicator::signal_weight::{
     SignalCondition, SignalDeriect, SignalScoreWithDeriact, SignalType, SignalWeightsConfig,
 };
@@ -21,7 +21,9 @@ use ta::{Close, DataItem, High, Low, Next, Open, Volume};
 use tracing::error;
 
 use super::bollings::BollingerBandsSignalConfig;
+use super::ema_indicator::EmaIndicator;
 use super::engulfing_indicator::EngulfingIndicator;
+use super::is_big_kline::IsBigKLineIndicator;
 use super::volume_indicator::VolumeRatioIndicator;
 
 //吞没形态指标
@@ -39,10 +41,19 @@ pub struct EngulfingSignalConfig {
     //是否开仓
     pub is_open: bool,
 }
-//吞没形态指标值
+//k线路形态指标值
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
 pub struct EngulfingSignalValue {
+    //是否吞没形态
     pub is_engulfing: bool,
+    //是否是锤子形态
+    pub is_hammer: bool,
+    //是否是上吊线形态
+    pub is_hanging_man: bool,
+    //是否是流星形态
+    pub is_shooting_star: bool,
+    //是否是十字星形态
+    pub is_doji: bool,
     pub is_valid_engulfing: bool,
     pub body_ratio: f64,
 }
@@ -112,36 +123,7 @@ impl Default for EmaSignalConfig {
         }
     }
 }
-#[derive(Debug)]
-pub struct EmaIndicator {
-    pub ema1_indicator: ExponentialMovingAverage,
-    pub ema2_indicator: ExponentialMovingAverage,
-    pub ema3_indicator: ExponentialMovingAverage,
-    pub ema4_indicator: ExponentialMovingAverage,
-    pub ema5_indicator: ExponentialMovingAverage,
-}
-impl EmaIndicator {
-    pub fn new(ema1: usize, ema2: usize, ema3: usize, ema4: usize, ema5: usize) -> Self {
-        Self {
-            ema1_indicator: ExponentialMovingAverage::new(ema1).unwrap(),
-            ema2_indicator: ExponentialMovingAverage::new(ema2).unwrap(),
-            ema3_indicator: ExponentialMovingAverage::new(ema3).unwrap(),
-            ema4_indicator: ExponentialMovingAverage::new(ema4).unwrap(),
-            ema5_indicator: ExponentialMovingAverage::new(ema5).unwrap(),
-        }
-    }
-}
-#[derive(Debug)]
-pub struct RsiIndicator {
-    pub rsi_indicator: Rsi,
-}
-impl RsiIndicator {
-    pub fn new(rsi_length: usize) -> Self {
-        Self {
-            rsi_indicator: Rsi::new(rsi_length),
-        }
-    }
-}
+
 #[derive(Debug)]
 pub struct IndicatorCombine {
     pub ema_indicator: Option<EmaIndicator>,
@@ -169,6 +151,10 @@ pub struct EmaSignalValue {
     pub ema3_value: f64,
     pub ema4_value: f64,
     pub ema5_value: f64,
+    //是否多头排列
+    pub is_long_trend: bool,
+    //是否空头排列
+    pub is_short_trend: bool,
 }
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct BollingerSignalValue {
@@ -178,6 +164,8 @@ pub struct BollingerSignalValue {
     pub is_long_signal: bool,
     pub is_short_signal: bool,
     pub is_close_signal: bool,
+    //虽然触发了布林带开多，或者开空，但是被过滤了
+    pub is_foce_filter_signal: bool,
 }
 
 // rsi信号配置
@@ -311,8 +299,16 @@ pub struct VegasIndicatorSignalValue {
     pub engulfing_value: EngulfingSignalValue,     //吞没形态指标
 }
 
+/// vegae 综合策略配置
+/// 1. ema信号配置
+/// 2. 成交量信号配置
+/// 3. ema趋势
+/// 4. rsi信号配置
+/// 5. bollinger信号配置
+/// 6. 新增权重配置
+/// 7. 新增吞没形态指标
 #[derive(Debug, Serialize, Deserialize)]
-pub struct VegasIndicator {
+pub struct VegasStrategy {
     pub ema_signal: Option<EmaSignalConfig>,       // ema信号配置
     pub volume_signal: Option<VolumeSignalConfig>, // 新增：成交量信号配置
     pub ema_touch_trend_signal: Option<EmaTouchTrendSignalConfig>, // ema趋势
@@ -323,7 +319,7 @@ pub struct VegasIndicator {
     pub engulfing_signal: Option<EngulfingSignalConfig>, // 新增吞没形态指标
 }
 
-impl Default for VegasIndicator {
+impl Default for VegasStrategy {
     fn default() -> Self {
         Self {
             ema_touch_trend_signal: Some(EmaTouchTrendSignalConfig::default()),
@@ -347,7 +343,7 @@ impl Default for VegasIndicator {
     }
 }
 
-impl VegasIndicator {
+impl VegasStrategy {
     pub fn get_min_data_length(&mut self) -> usize {
         3400
     }
@@ -413,6 +409,7 @@ impl VegasIndicator {
         // 计算RSI
         if let Some(rsi_signal) = &self.rsi_signal {
             let current_rsi = self.get_valid_rsi(
+                data_items,
                 &vegas_indicator_signal_values.rsi_value,
                 vegas_indicator_signal_values.ema_values,
             );
@@ -469,6 +466,9 @@ impl VegasIndicator {
             }
         }
 
+
+        // println!("vegas_indicator_signal_values: {:#?}", vegas_indicator_signal_values);
+        //todo 可以考虑在出现上影线，且价格在恰好收盘在均线下方，可以开空，反之可以开多
         // 计算得分
         let score = weights.calculate_score(conditions.clone());
         //计算分数到达指定值
@@ -510,7 +510,18 @@ impl VegasIndicator {
     }
 
     //获取有效的rsi
-    fn get_valid_rsi(&self, rsi_value: &RsiSignalValue, ema_value: EmaSignalValue) -> f64 {
+    fn get_valid_rsi(
+        &self,
+        data_items: &[CandleItem],
+        rsi_value: &RsiSignalValue,
+        ema_value: EmaSignalValue,
+    ) -> f64 {
+        // 如果当前k线价格波动比较大，且k线路的实体部分占比大于80%,表明当前k线为大阳线或者大阴线，则不使用rsi指标,因为大概率趋势还会继续  2025-03-03 00:00:00,2025-03-09 18:00:00
+        let is_big_k_line =
+            IsBigKLineIndicator::new(70.0).is_big_k_line(data_items.last().unwrap());
+        if is_big_k_line {
+            return 50.0;
+        }
         let current_rsi = rsi_value.rsi_value;
         return current_rsi;
         // todo 12/19 04:00 rsi超卖，但是不在ema4附近，所以无效
@@ -904,6 +915,26 @@ impl VegasIndicator {
             if bolling_bands.upper < data_items.last().unwrap().h() {
                 bolling_bands.is_short_signal = true;
             }
+
+            //如果ema多头排列，且收盘价格大于ema 则不能做空，
+            //如果ema空头排列，且收盘价格小于ema 则不能做空
+            if bolling_bands.is_long_signal
+                && ema_signal_values.ema1_value < ema_signal_values.ema2_value
+                && ema_signal_values.ema2_value < ema_signal_values.ema3_value
+                && data_items.last().unwrap().c < ema_signal_values.ema1_value
+            {
+                bolling_bands.is_long_signal = false;
+                bolling_bands.is_foce_filter_signal = true;
+            }
+
+            if bolling_bands.is_short_signal
+                && ema_signal_values.ema1_value > ema_signal_values.ema2_value
+                && ema_signal_values.ema2_value > ema_signal_values.ema3_value
+                && data_items.last().unwrap().c > ema_signal_values.ema1_value
+            {
+                bolling_bands.is_short_signal = false;
+                bolling_bands.is_foce_filter_signal = true;
+            }
             bolling_bands
         } else {
             BollingerSignalValue::default()
@@ -916,6 +947,8 @@ impl VegasIndicator {
         data_items: &[CandleItem],
         vegas_indicator_signal_value: &mut VegasIndicatorSignalValue,
     ) -> bool {
+        //todo 如果是吞没形态，开仓几个大概率是在趋势的末端，所以需要判断当前k线是否是趋势的末端，且开仓挂单价格最好小于当前k线路的最高价70% ，或者小于当前k线路的最低价30%
+
         if let Some(engulfing_signal) = &self.engulfing_signal {
             if vegas_indicator_signal_value.engulfing_value.is_engulfing
                 && vegas_indicator_signal_value.engulfing_value.body_ratio

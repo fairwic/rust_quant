@@ -251,10 +251,10 @@ impl Account {
         let mut path = "/api/v5/account/set-leverage".to_string();
         let body = &serde_json::to_string(&params).unwrap();
         info!("send set_leverage okx_request params:{}", body);
-        let res: OkxApiResponse<Vec<SetLeverageData>> = okx_client::get_okx_client()
+        let res: Vec<SetLeverageData> = okx_client::get_okx_client()
             .send_request(Method::POST, &path, body)
             .await?;
-        Ok(res.data[0].clone())
+        Ok(res[0].clone())
     }
 
     /// 获取最大可买卖/开仓数量
