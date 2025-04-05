@@ -192,7 +192,7 @@ fn mock_strategy(candles: &[CandlesEntity]) -> SignalResult {
     let mut signal = SignalResult {
         should_buy: false,
         should_sell: false,
-        price,
+        open_price: price,
         ts: current.ts,
         single_value: None,
     };
@@ -242,7 +242,7 @@ fn mock_short_strategy(candles: &[CandlesEntity]) -> SignalResult {
     let mut signal = SignalResult {
         should_buy: false,
         should_sell: false,
-        price,
+        open_price: price,
         ts: current.ts,
         single_value: None,
     };
