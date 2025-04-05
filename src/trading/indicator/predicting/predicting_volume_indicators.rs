@@ -10,7 +10,7 @@ pub struct VolumePredictionIndicator {
 impl VolumePredictionIndicator {
     pub fn new(length: usize, target_ratios: f64) -> Self {
         Self {
-            volumes_rate_indicator: VolumeRatioIndicator::new(length),
+            volumes_rate_indicator: VolumeRatioIndicator::new(length, true),
             target_volumes: 0.0,
             target_ratios: target_ratios,
         }

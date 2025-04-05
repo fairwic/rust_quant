@@ -176,7 +176,6 @@ async fn main() -> anyhow::Result<()> {
                     let inst_ids = Arc::clone(&inst_ids);
                     let times = Arc::clone(&times);
                     //执行ut_boot策略
-
                     scheduler.add_periodic_task(
                         "run_ut_boot_strategy_job".to_string(),
                         30000,

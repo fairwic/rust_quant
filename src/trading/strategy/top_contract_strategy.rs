@@ -130,7 +130,7 @@ impl TopContractStrategy {
             return SignalResult {
                 should_buy,
                 should_sell,
-                price,
+                open_price: price,
                 ts,
                 single_value:None,
                 single_result: None,
@@ -183,7 +183,7 @@ impl TopContractStrategy {
         SignalResult {
             should_buy,
             should_sell,
-            price,
+            open_price: price,
             ts,
             single_value: None,
             single_result: None,

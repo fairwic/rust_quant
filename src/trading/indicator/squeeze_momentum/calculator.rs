@@ -200,7 +200,7 @@ impl SqueezeCalculator {
         let mut signal_result = SignalResult {
             should_buy: false,
             should_sell: false,
-            price: 0.0,
+            open_price: 0.0,
             ts: 0,
             single_value: None,
             single_result: None,
@@ -212,7 +212,7 @@ impl SqueezeCalculator {
             return signal_result
         };
         if let Ok(res) = result_squeeze {
-            signal_result.price = res.close;
+            signal_result.open_price = res.close;
             signal_result.ts = res.timestamp;
             match res.momentum_color {
                 MomentumColor::Lime => {

@@ -27,7 +27,7 @@ impl IsBigKLineIndicator {
         let close = data_item.c();
         let high = data_item.h();
         let low = data_item.l();
-        println!("data_item: {:?}", data_item);
+        // println!("data_item: {:?}", data_item);
 
         //计算实体部分占比
         let amplitude = if open < close {
@@ -45,7 +45,7 @@ impl IsBigKLineIndicator {
             }
             (open - close) / (open - low) * 100.0
         };
-        println!("amplitude: {:?}", amplitude);
+        // println!("amplitude: {:?}", amplitude);
         amplitude > self.amplitude
     }
     pub fn amplitude(&self) -> f64 {

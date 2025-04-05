@@ -4,7 +4,7 @@ use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergenc
 /// 成交量比率指标
 /// 计算当前成交量与历史n根K线的平均值的比值
 #[derive(Debug)]
-pub struct EngulfingIndicator {
+pub struct KlineEngulfingIndicator {
     //吞没形态指标值
     last_kline: Option<CandleItem>,
     //看涨||看跌吞没
@@ -12,22 +12,22 @@ pub struct EngulfingIndicator {
 }
 
 #[derive(Debug)]
-pub struct EngulfingOutput {
+pub struct KlineEngulfingOutput {
     pub is_engulfing: bool,
     pub body_ratio: f64,
 }
 
-impl EngulfingIndicator {
+impl KlineEngulfingIndicator {
     pub fn new() -> Self {
         Self {
             last_kline: None,
             is_bullish: false,
         }
     }
-    pub fn next(&mut self, current_kline: &CandleItem) -> EngulfingOutput {
+    pub fn next(&mut self, current_kline: &CandleItem) -> KlineEngulfingOutput {
         if self.last_kline.is_none() {
             self.last_kline = Some(current_kline.clone());
-            return EngulfingOutput {
+            return KlineEngulfingOutput {
                 is_engulfing: false,
                 body_ratio: 0.0,
             };
@@ -38,14 +38,14 @@ impl EngulfingIndicator {
         //看涨吞没 ,当前k线的开盘价小于前一根k线的开盘价，且当前k线的收盘价大于前一根k线的收盘价,且当前k线的收盘价大于前一根k线的最高价
         let is_bullish = (current_kline.o < last_kline.o || current_kline.l < last_kline.l)
             && current_kline.c > last_kline.c
-            && current_kline.c > last_kline.h
+           && (current_kline.c > last_kline.h ||current_kline.c>current_kline.h*1.005)
             //要求上一个根k线是阴线
             && last_kline.c < last_kline.o;
 
         //看跌吞没，当前k线的开盘价大于前一根k线的开盘价，且当前k线的收盘价小于前一根k线的收盘价,且当前k线的收盘价小于前一根k线的最低价
         let is_bearish = (current_kline.o > last_kline.o || current_kline.h > last_kline.h)
             && current_kline.c < last_kline.c
-            && current_kline.c < last_kline.l
+            && (current_kline.c < last_kline.l || current_kline.c < last_kline.l*1.005)
             //要求上一个根k线是阳线
             && last_kline.c > last_kline.o;
 
@@ -58,14 +58,14 @@ impl EngulfingIndicator {
             0.0
         };
         self.last_kline = Some(current_kline.clone());
-        EngulfingOutput {
+        KlineEngulfingOutput {
             is_engulfing: is_bullish || is_bearish,
             body_ratio,
         }
     }
 }
 
-impl Default for EngulfingIndicator {
+impl Default for KlineEngulfingIndicator {
     fn default() -> Self {
         Self::new()
     }
@@ -77,7 +77,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_engulfing_indicator() {
-        let mut indicator = EngulfingIndicator::new();
+        let mut indicator = KlineEngulfingIndicator::new();
         // 创建一个看涨吞没的例子
         let kline1 = CandleItem {
             o: 100.0,

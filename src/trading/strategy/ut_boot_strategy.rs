@@ -66,7 +66,7 @@ impl UtBootStrategy {
         let sing_result = SignalResult {
             should_buy,
             should_sell,
-            price,
+            open_price: price,
             ts,
             single_value:None,
             single_result:None
@@ -155,7 +155,7 @@ impl UtBootStrategy {
         SignalResult {
             should_buy,
             should_sell,
-            price,
+            open_price: price,
             ts,
             single_value:None,
             single_result:None

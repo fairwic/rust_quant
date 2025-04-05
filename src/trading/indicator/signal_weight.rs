@@ -13,6 +13,7 @@ pub enum SignalType {
     PriceLevel,             // 关键价位
     Bollinger,              // 布林带
     Engulfing,              // 吞没形态
+    KlineHammer,            // 锤子形态
 }
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub enum SignalDeriect {
@@ -57,6 +58,10 @@ pub enum SignalCondition {
         is_long_engulfing: bool,
         is_short_engulfing: bool,
     },
+    KlineHammer {
+        is_long_signal: bool,
+        is_short_signal: bool,
+    },
 }
 
 // 权重配置结构体
@@ -87,6 +92,7 @@ impl Default for SignalWeightsConfig {
                 (SignalType::EmaTrend, 1.0),
                 (SignalType::Bollinger, 1.0),
                 (SignalType::Engulfing, 1.0),
+                (SignalType::KlineHammer, 1.0),
             ],
             min_total_weight: 2.0,
         }
@@ -280,6 +286,28 @@ impl SignalWeightsConfig {
                         score: base_weight,
                         detail: condition,
                         signal_result: None,
+                    })
+                } else {
+                    None
+                }
+            }
+            SignalCondition::KlineHammer {
+                is_long_signal,
+                is_short_signal,
+            } => {
+                if is_long_signal {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDeriect::IsLong),
+                    })
+                } else if is_short_signal {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDeriect::IsShort),
                     })
                 } else {
                     None

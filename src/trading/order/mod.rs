@@ -227,7 +227,7 @@ async fn process_order(
         info!("same period same inst_id same side, already have order");
         return None;
     }
-    let price = signal.price;
+    let price = signal.open_price;
     let ts = signal.ts;
 
     // 平掉现有的已经存在的反向仓位

@@ -23,7 +23,7 @@ use crate::trading::order;
 use crate::trading::strategy;
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
 use crate::trading::strategy::strategy_common::{
-    BackTestResult, SignalResult, TradeRecord, BasicRiskStrategyConfig,
+    BackTestResult, BasicRiskStrategyConfig, SignalResult, TradeRecord,
 };
 use crate::trading::strategy::ut_boot_strategy::UtBootStrategy;
 use crate::trading::strategy::{engulfing_strategy, Strategy};
@@ -34,7 +34,8 @@ use crate::trading::analysis::position_analysis::PositionAnalysis;
 use crate::trading::indicator::squeeze_momentum;
 use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
 use crate::trading::indicator::vegas_indicator::{
-    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, RsiSignalConfig, VegasStrategy, VolumeSignalConfig
+    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, KlineHammerConfig,
+    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
 };
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::strategy::back_test_log;
@@ -280,10 +281,7 @@ pub async fn run_vegas_test(
     strategy_config: BasicRiskStrategyConfig,
     mysql_candles: Arc<Vec<CandlesEntity>>,
 ) -> Result<i64, anyhow::Error> {
-    let res = strategy.run_test(
-        &mysql_candles,
-        strategy_config,
-    );
+    let res = strategy.run_test(&mysql_candles, strategy_config);
 
     // 构建更详细的策略配置描述
     let config_desc = json!(strategy).to_string();
@@ -413,95 +411,111 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     let rsi_periods = vec![8];
     // let rsi_periods = vec![14];
     let rsi_overboughts = vec![81.0];
-    let rsi_oversolds = vec![ 21.0];
+    let rsi_oversolds = vec![21.0];
 
     // Bollinger Bands 参数
     let mut bb_periods = vec![9];
-    let mut bb_multipliers = vec![
-        3.6,
-    ];
+    let mut bb_multipliers = vec![3.6];
 
     // 收集所有 back_test_id
     let mut back_test_ids = Vec::new();
 
-
     // 创建任务容器
     let mut tasks = Vec::new();
+    let mut shadow_ratios = vec![0.60];
 
     for &bb_period in &bb_periods {
-        for &bb_multiplier in &bb_multipliers {
-            for &volume_bar_num in &volume_bar_nums {
-                for &volume_increase_ratio in &volume_increase_ratios {
-                    for &volume_decrease_ratio in &volume_decrease_ratios {
-                        for &breakthrough in &breakthrough_thresholds {
-                            for &rsi_period in &rsi_periods {
-                                for &rsi_overbought in &rsi_overboughts {
-                                    for &rsi_oversold in &rsi_oversolds {
-                                        let strategy_config = BasicRiskStrategyConfig {
-                                            use_dynamic_tp: false,
-                                            use_fibonacci_tp: true,
-                                            max_loss_percent: 0.03,
-                                            profit_threshold: 0.01,
-                                            is_move_stop_loss: true,
-                                        };
-                                        let volumn_signal = VolumeSignalConfig {
-                                            volume_bar_num,
-                                            volume_increase_ratio,
-                                            volume_decrease_ratio,
-                                            is_open: true,
-                                        };
-                                        let rsi_signal = RsiSignalConfig {
-                                            rsi_length: rsi_period,
-                                            rsi_oversold: rsi_oversold,
-                                            rsi_overbought: rsi_overbought,
-                                            is_open: true,
-                                        };
-                                        let ema_touch_trend_signal = EmaTouchTrendSignalConfig {
-                                            is_open: true,
-                                            ..Default::default()
-                                        };
-
-                                        let strategy = VegasStrategy {
-                                            engulfing_signal: Some(EngulfingSignalConfig::default()),
-                                            ema_signal: Some(EmaSignalConfig::default()),
-                                            signal_weights: Some(SignalWeightsConfig::default()),
-
-                                            volume_signal: Some(volumn_signal),
-                                            ema_touch_trend_signal: Some(ema_touch_trend_signal),
-                                            rsi_signal: Some(rsi_signal),
-                                            bollinger_signal: Some(BollingerBandsSignalConfig {
-                                                period: bb_period,
-                                                multiplier: bb_multiplier,
+        for &shadow_ratio in &shadow_ratios {
+            for &bb_multiplier in &bb_multipliers {
+                for &volume_bar_num in &volume_bar_nums {
+                    for &volume_increase_ratio in &volume_increase_ratios {
+                        for &volume_decrease_ratio in &volume_decrease_ratios {
+                            for &breakthrough in &breakthrough_thresholds {
+                                for &rsi_period in &rsi_periods {
+                                    for &rsi_overbought in &rsi_overboughts {
+                                        for &rsi_oversold in &rsi_oversolds {
+                                            let risk_strategy_config = BasicRiskStrategyConfig {
+                                                use_dynamic_tp: false,
+                                                use_fibonacci_tp: true,
+                                                max_loss_percent: 0.02,
+                                                profit_threshold: 0.01,
+                                                is_move_stop_loss: false,
+                                                is_set_low_price_stop_loss: true,
+                                            };
+                                            let volumn_signal = VolumeSignalConfig {
+                                                volume_bar_num,
+                                                volume_increase_ratio,
+                                                volume_decrease_ratio,
                                                 is_open: true,
-                                            }),
-                                        };
+                                            };
+                                            let rsi_signal = RsiSignalConfig {
+                                                rsi_length: rsi_period,
+                                                rsi_oversold: rsi_oversold,
+                                                rsi_overbought: rsi_overbought,
+                                                is_open: true,
+                                            };
+                                            let ema_touch_trend_signal =
+                                                EmaTouchTrendSignalConfig {
+                                                    is_open: true,
+                                                    ..Default::default()
+                                                };
+                                            let kline_hammer_signal = KlineHammerConfig {
+                                                up_shadow_ratio: shadow_ratio,
+                                                down_shadow_ratio: shadow_ratio,
+                                                max_other_side_shadow_ratio: 0.1,
+                                                body_ratio: 0.7,
+                                            };
 
-                                        let inst_id = inst_id.to_string();
-                                        let time = time.to_string();
-                                        let mysql_candles = Arc::clone(&mysql_candles_clone);
-                                        let fibonacci_level = Arc::clone(&fibonacci_level_clone);
-                                        let permit = Arc::clone(&semaphore);
+                                            let strategy = VegasStrategy {
+                                                engulfing_signal: Some(
+                                                    EngulfingSignalConfig::default(),
+                                                ),
+                                                ema_signal: Some(EmaSignalConfig::default()),
+                                                signal_weights: Some(SignalWeightsConfig::default()),
 
-                                        // 创建任务
-                                        tasks.push(tokio::spawn(async move {
-                                            let _permit = permit.acquire().await.unwrap();
-                                            println!("strategy:{:?}", strategy);
-                                            match run_vegas_test(
-                                                &inst_id,
-                                                &time,
-                                                strategy,
-                                                strategy_config,
-                                                mysql_candles,
-                                            )
-                                            .await
-                                            {
-                                                Ok(back_test_id) => Some(back_test_id),
-                                                Err(e) => {
-                                                    error!("Vegas test failed: {:?}", e);
-                                                    None
+                                                volume_signal: Some(volumn_signal),
+                                                ema_touch_trend_signal: Some(
+                                                    ema_touch_trend_signal,
+                                                ),
+                                                rsi_signal: Some(rsi_signal),
+                                                bollinger_signal: Some(
+                                                    BollingerBandsSignalConfig {
+                                                        period: bb_period,
+                                                        multiplier: bb_multiplier,
+                                                        is_open: true,
+                                                    },
+                                                ),
+                                                kline_hammer_signal: Some(kline_hammer_signal),
+                                            };
+
+                                            let inst_id = inst_id.to_string();
+                                            let time = time.to_string();
+                                            let mysql_candles = Arc::clone(&mysql_candles_clone);
+                                            let fibonacci_level =
+                                                Arc::clone(&fibonacci_level_clone);
+                                            let permit = Arc::clone(&semaphore);
+
+                                            // 创建任务
+                                            tasks.push(tokio::spawn(async move {
+                                                let _permit = permit.acquire().await.unwrap();
+                                                println!("strategy:{:?}", strategy);
+                                                match run_vegas_test(
+                                                    &inst_id,
+                                                    &time,
+                                                    strategy,
+                                                    risk_strategy_config,
+                                                    mysql_candles,
+                                                )
+                                                .await
+                                                {
+                                                    Ok(back_test_id) => Some(back_test_id),
+                                                    Err(e) => {
+                                                        error!("Vegas test failed: {:?}", e);
+                                                        None
+                                                    }
                                                 }
-                                            }
-                                        }));
+                                            }));
+                                        }
                                     }
                                 }
                             }
@@ -854,7 +868,6 @@ pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> 
     return true;
 }
 
-
 /**
  * 验证蜡烛图数据是否正确
  */
@@ -961,12 +974,12 @@ pub async fn run_ready_to_order(
 
             EngulfingStrategy::get_trade_signal(&mysql_candles_5m, strategy_config.num_bars)
         }
-        // StrategyType::Vegas => {
-        //     let strategy_config =
-        //         serde_json::from_str::<VegasStrategy>(&*ut_boot_strategy_info.value)
-        //             .map_err(|e| anyhow!("Failed to parse VegasStrategy config: {}", e))?;
-        //     strategy_config.get_trade_signal(&mysql_candles_5m)
-        // }
+        StrategyType::Vegas => {
+            let strategy_config =
+                serde_json::from_str::<VegasStrategy>(&*ut_boot_strategy_info.value)
+                    .map_err(|e| anyhow!("Failed to parse VegasStrategy config: {}", e))?;
+            strategy_config.get_trade_signal(&mysql_candles_5m, &mut  vegas_indicator_signal_values, &signal_weights_config, &risk_config)
+        }
         _ => {
             return Err(anyhow!("Unknown strategy type: {:?}", strategy_type));
         }
@@ -1015,7 +1028,7 @@ pub async fn run_strategy_job(
                 );
             }
             //执行回测
-            // self::run_ut_boot_run_test(inst_id, time).await?;
+            self::run_ut_boot_run_test(inst_id, time).await?;
         }
     }
     Ok(())

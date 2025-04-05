@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::trading::okx::{okx_client};
 use crate::trading::okx::okx_client::OkxApiResponse;
 
-mod error;
 pub mod contracts;
+pub mod economic_calendar;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Balance {

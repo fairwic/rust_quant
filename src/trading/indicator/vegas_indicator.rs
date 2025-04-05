@@ -22,18 +22,54 @@ use tracing::error;
 
 use super::bollings::BollingerBandsSignalConfig;
 use super::ema_indicator::EmaIndicator;
-use super::engulfing_indicator::EngulfingIndicator;
 use super::is_big_kline::IsBigKLineIndicator;
+use super::k_line_engulfing_indicator::KlineEngulfingIndicator;
+use super::k_line_hammer_indicator::KlineHammerIndicator;
 use super::volume_indicator::VolumeRatioIndicator;
+
+/// 锤子形态配置
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct KlineHammerConfig {
+    pub up_shadow_ratio: f64,
+    pub down_shadow_ratio: f64,
+    //最大其他方向影线比例
+    pub max_other_side_shadow_ratio: f64,
+    //实体比例
+    pub body_ratio: f64,
+}
+impl Default for KlineHammerConfig {
+    fn default() -> Self {
+        Self {
+            up_shadow_ratio: 0.62,
+            down_shadow_ratio: 0.62,
+            max_other_side_shadow_ratio: 0.1,
+            body_ratio: 0.7,
+        }
+    }
+}
+/// 锤子形态信号值
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+pub struct KlineHammerSignalValue {
+    //上影线比例
+    pub up_shadow_ratio: f64,
+    //下影线比例
+    pub down_shadow_ratio: f64,
+    //实体比例
+    pub body_ratio: f64,
+    //是否开多信号
+    pub is_long_signal: bool,
+    //是否开空信号
+    pub is_short_signal: bool,
+    //是否是锤子形态
+    pub is_hammer: bool,
+    //是否是上吊线形态
+    pub is_hanging_man: bool,
+}
 
 //吞没形态指标
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct EngulfingSignalConfig {
     //吞没形态指标
-    //是否有上影线
-    pub is_upper_shadow: bool,
-    //是否有下影线
-    pub is_lower_shadow: bool,
     //是否吞没
     pub is_engulfing: bool,
     //实体部分占比
@@ -41,19 +77,12 @@ pub struct EngulfingSignalConfig {
     //是否开仓
     pub is_open: bool,
 }
+
 //k线路形态指标值
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
 pub struct EngulfingSignalValue {
     //是否吞没形态
     pub is_engulfing: bool,
-    //是否是锤子形态
-    pub is_hammer: bool,
-    //是否是上吊线形态
-    pub is_hanging_man: bool,
-    //是否是流星形态
-    pub is_shooting_star: bool,
-    //是否是十字星形态
-    pub is_doji: bool,
     pub is_valid_engulfing: bool,
     pub body_ratio: f64,
 }
@@ -61,8 +90,6 @@ pub struct EngulfingSignalValue {
 impl Default for EngulfingSignalConfig {
     fn default() -> Self {
         Self {
-            is_upper_shadow: true,
-            is_lower_shadow: true,
             is_engulfing: true,
             body_ratio: 0.5,
             is_open: true,
@@ -130,7 +157,8 @@ pub struct IndicatorCombine {
     pub rsi_indicator: Option<RsiIndicator>,
     pub volume_indicator: Option<VolumeRatioIndicator>,
     pub bollinger_indicator: Option<BollingerBands>,
-    pub engulfing_indicator: Option<EngulfingIndicator>,
+    pub engulfing_indicator: Option<KlineEngulfingIndicator>,
+    pub kline_hammer_indicator: Option<KlineHammerIndicator>,
 }
 impl Default for IndicatorCombine {
     fn default() -> Self {
@@ -140,6 +168,7 @@ impl Default for IndicatorCombine {
             volume_indicator: None,
             bollinger_indicator: None,
             engulfing_indicator: None,
+            kline_hammer_indicator: None,
         }
     }
 }
@@ -235,6 +264,9 @@ impl Default for EmaTouchTrendSignalConfig {
         }
     }
 }
+
+
+
 // ema趋势
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct EmaTouchTrendSignalValue {
@@ -290,13 +322,14 @@ pub struct EmaCross {
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct VegasIndicatorSignalValue {
-    pub ema_values: EmaSignalValue,                // ema信号配置
-    pub volume_value: VolumeTrendSignalValue,      // 新增：成交量信号配置
-    pub ema_touch_value: EmaTouchTrendSignalValue, // ema趋势
-    pub rsi_value: RsiSignalValue,                 //rsi信号配置
-    pub bollinger_value: BollingerSignalValue,     //bollinger信号配置
-    pub signal_weights_value: SignalWeightsConfig, // 新增权重配置
-    pub engulfing_value: EngulfingSignalValue,     //吞没形态指标
+    pub ema_values: EmaSignalValue,                 // ema信号配置
+    pub volume_value: VolumeTrendSignalValue,       // 新增：成交量信号配置
+    pub ema_touch_value: EmaTouchTrendSignalValue,  // ema趋势
+    pub rsi_value: RsiSignalValue,                  //rsi信号配置
+    pub bollinger_value: BollingerSignalValue,      //bollinger信号配置
+    pub signal_weights_value: SignalWeightsConfig,  // 新增权重配置
+    pub engulfing_value: EngulfingSignalValue,      //吞没形态指标
+    pub kline_hammer_value: KlineHammerSignalValue, //锤子形态指标
 }
 
 /// vegae 综合策略配置
@@ -317,6 +350,8 @@ pub struct VegasStrategy {
     pub signal_weights: Option<SignalWeightsConfig>, // 新增权重配置
     //新增吞没形态指标
     pub engulfing_signal: Option<EngulfingSignalConfig>, // 新增吞没形态指标
+    //新增锤子形态指标
+    pub kline_hammer_signal: Option<KlineHammerConfig>, // 新增锤子形态指标
 }
 
 impl Default for VegasStrategy {
@@ -339,6 +374,7 @@ impl Default for VegasStrategy {
                 min_total_weight: 3.0, // 需要至少3分才触发信号
             }),
             engulfing_signal: Some(EngulfingSignalConfig::default()),
+            kline_hammer_signal: Some(KlineHammerConfig::default()),
         }
     }
 }
@@ -354,17 +390,17 @@ impl VegasStrategy {
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &mut VegasIndicatorSignalValue,
         weights: &SignalWeightsConfig,
+        risk_config:&BasicRiskStrategyConfig
     ) -> SignalResult {
         // 初始化交易信号
         let mut signal_result = SignalResult {
             should_buy: false,
             should_sell: false,
-            price: data_items.last().unwrap().c,
+            open_price: data_items.last().unwrap().c,
             ts: data_items.last().unwrap().ts,
             single_value: None,
             single_result: None,
         };
-
         let last_data_item = data_items.last().unwrap();
 
         let mut conditions = vec![];
@@ -466,6 +502,29 @@ impl VegasStrategy {
             }
         }
 
+        //添加锤子形态
+        if let Some(kline_hammer_signal) = &self.kline_hammer_signal {
+                self.check_kline_hammer_signal(data_items, vegas_indicator_signal_values);
+            if vegas_indicator_signal_values
+                .kline_hammer_value
+                .is_long_signal
+                || vegas_indicator_signal_values
+                    .kline_hammer_value
+                    .is_short_signal
+            {
+                conditions.push((
+                    SignalType::KlineHammer,
+                    SignalCondition::KlineHammer {
+                        is_long_signal: vegas_indicator_signal_values
+                            .kline_hammer_value
+                            .is_long_signal,
+                        is_short_signal: vegas_indicator_signal_values
+                            .kline_hammer_value
+                            .is_short_signal,
+                    },
+                ));
+            }
+        }
 
         // println!("vegas_indicator_signal_values: {:#?}", vegas_indicator_signal_values);
         //todo 可以考虑在出现上影线，且价格在恰好收盘在均线下方，可以开空，反之可以开多
@@ -562,12 +621,14 @@ impl VegasStrategy {
                 && ema_value.ema3_value > ema_value.ema4_value
             {
                 ema_touch_trend_value.is_uptrend = true;
-                //当前ema_vaue_1 >emalue_2 的时候， 价格最低下跌到em2附近的时候，且ema1 与 ema2 相差幅度大于0.012
+                //当前ema_vaue_1 >emalue_2 的时候， 且要求开盘价>ema2,价格最低下跌到em2附近的时候，且ema1 与 ema2 相差幅度大于0.012
                 if ema_value.ema1_value > ema_value.ema2_value
                     && data_itms.last().unwrap().l()
                         <= ema_value.ema2_value * ema_touch_trend_signal.price_with_ema_high_ratio
                     && ema_value.ema1_value
                         > ema_value.ema2_value * ema_touch_trend_signal.ema1_with_ema2_ratio
+                        && data_itms.last().unwrap().o() > ema_value.ema2_value
+                        && data_itms.last().unwrap().c() > ema_value.ema2_value
                 {
                     ema_touch_trend_value.is_long_signal = true;
                 } else {
@@ -597,20 +658,26 @@ impl VegasStrategy {
             {
                 ema_touch_trend_value.is_downtrend = true;
 
-                //当前ema_vaue_1 <emalue_2 的时候，价格最高上涨到em2附近的时候且ema1 与 ema2 相差幅度大于0.012
+                //当前ema_vaue_1 <emalue_2 的时候， 且要求开盘价<ema2,价格最高上涨到em2附近的时候且ema1 与 ema2 相差幅度大于0.012
                 if data_itms.last().unwrap().h()
                     >= ema_value.ema2_value * ema_touch_trend_signal.price_with_ema_low_ratio
                     && ema_value.ema2_value
                         > ema_value.ema1_value * ema_touch_trend_signal.ema1_with_ema2_ratio
+                        && data_itms.last().unwrap().o() < ema_value.ema2_value
+                        && data_itms.last().unwrap().c() < ema_value.ema2_value
                 {
+                    println!("data.last().unwrap(): {:#?}", data_itms.last().unwrap());
+                    println!("ema2_value: {:#?}", ema_value.ema2_value);
                     ema_touch_trend_value.is_short_signal = true;
+                    ema_touch_trend_value.is_in_downtrend_touch_ema2 = true;
                 } else {
                     //当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
 
                     //当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
-                    if ((data_itms.last().unwrap().h()
-                        * ema_touch_trend_signal.price_with_ema_high_ratio
-                        >= ema_value.ema4_value)
+                    if ((data_itms.last().unwrap().o() < ema_value.ema4_value)
+                        && (data_itms.last().unwrap().h()
+                            * ema_touch_trend_signal.price_with_ema_high_ratio
+                            >= ema_value.ema4_value)
                         || (data_itms.last().unwrap().h()
                             * ema_touch_trend_signal.price_with_ema_high_ratio
                             >= ema_value.ema5_value))
@@ -632,7 +699,7 @@ impl VegasStrategy {
                     }
                 }
             }
-            // println!("ema_touch_trend_value: {:#?}", ema_touch_trend_value);
+            // println!("111111111ema_touch_trend_value: {:#?}", ema_touch_trend_value);
         }
 
         ema_touch_trend_value
@@ -658,7 +725,7 @@ impl VegasStrategy {
         let mut indicator_combine = IndicatorCombine::default();
         //添加吞没形态
         if let Some(engulfing_signal) = &self.engulfing_signal {
-            indicator_combine.engulfing_indicator = Some(EngulfingIndicator::new());
+            indicator_combine.engulfing_indicator = Some(KlineEngulfingIndicator::new());
         }
         //添加ema
         if let Some(ema_signal) = &self.ema_signal {
@@ -673,7 +740,7 @@ impl VegasStrategy {
         //添加成交量
         if let Some(volume_signal) = &self.volume_signal {
             indicator_combine.volume_indicator =
-                Some(VolumeRatioIndicator::new(volume_signal.volume_bar_num));
+                Some(VolumeRatioIndicator::new(volume_signal.volume_bar_num, true));
         }
         //添加rsi
         if let Some(rsi_signal) = &self.rsi_signal {
@@ -685,6 +752,14 @@ impl VegasStrategy {
                 BollingerBands::new(bollinger_signal.period, bollinger_signal.multiplier).unwrap(),
             );
         }
+        //添加锤子形态
+        if let Some(kline_hammer_signal) = &self.kline_hammer_signal {
+            indicator_combine.kline_hammer_indicator = Some(KlineHammerIndicator::new(
+                kline_hammer_signal.up_shadow_ratio,
+                kline_hammer_signal.down_shadow_ratio,
+                kline_hammer_signal.body_ratio,
+            ));
+        }
         // println!("indicator_combine: {:#?}", indicator_combine);
         indicator_combine
     }
@@ -693,7 +768,7 @@ impl VegasStrategy {
     pub fn run_test(
         &mut self,
         candles: &Vec<CandlesEntity>,
-        strategy_config: BasicRiskStrategyConfig,
+        risk_strategy_config: BasicRiskStrategyConfig,
     ) -> BackTestResult {
         let min_length = self.get_min_data_length();
 
@@ -703,11 +778,11 @@ impl VegasStrategy {
             {
                 let signal_weights = self.signal_weights.as_ref().unwrap().clone();
                 move |candles, multi_indicator_values| {
-                    self.get_trade_signal(candles, multi_indicator_values, &signal_weights)
+                    self.get_trade_signal(candles, multi_indicator_values, &signal_weights, &risk_strategy_config)
                 }
             },
             candles,
-            strategy_config,
+            risk_strategy_config,
             min_length,
             indicator_combine,
         )
@@ -909,6 +984,8 @@ impl VegasStrategy {
             //     && ema_signal_values.ema3_value < ema_signal_values.ema4_value
             // {
             //示例2025/02/15 01:00:00
+            println!("111bolling_bands.lower: {:#?}", bolling_bands.lower);
+            println!("1111data_items.last().unwrap().l(): {:#?}", data_items.last().unwrap().l());
             if bolling_bands.lower > data_items.last().unwrap().l() {
                 bolling_bands.is_long_signal = true;
             }
@@ -919,8 +996,8 @@ impl VegasStrategy {
             //如果ema多头排列，且收盘价格大于ema 则不能做空，
             //如果ema空头排列，且收盘价格小于ema 则不能做空
             if bolling_bands.is_long_signal
-                && ema_signal_values.ema1_value < ema_signal_values.ema2_value
-                && ema_signal_values.ema2_value < ema_signal_values.ema3_value
+                // && ema_signal_values.ema1_value < ema_signal_values.ema2_value
+                // && ema_signal_values.ema2_value < ema_signal_values.ema3_value
                 && data_items.last().unwrap().c < ema_signal_values.ema1_value
             {
                 bolling_bands.is_long_signal = false;
@@ -928,8 +1005,8 @@ impl VegasStrategy {
             }
 
             if bolling_bands.is_short_signal
-                && ema_signal_values.ema1_value > ema_signal_values.ema2_value
-                && ema_signal_values.ema2_value > ema_signal_values.ema3_value
+                // && ema_signal_values.ema1_value > ema_signal_values.ema2_value
+                // && ema_signal_values.ema2_value > ema_signal_values.ema3_value
                 && data_items.last().unwrap().c > ema_signal_values.ema1_value
             {
                 bolling_bands.is_short_signal = false;
@@ -961,5 +1038,39 @@ impl VegasStrategy {
             }
         }
         false
+    }
+
+    fn check_kline_hammer_signal(
+        &self,
+        data_items: &[CandleItem],
+        vegas_indicator_signal_values: &mut VegasIndicatorSignalValue,
+    )  {
+        if let Some(kline_hammer_signal) = &self.kline_hammer_signal {
+            let is_hammer = vegas_indicator_signal_values.kline_hammer_value.is_hammer;
+            let is_hanging_man = vegas_indicator_signal_values
+                .kline_hammer_value
+                .is_hanging_man;
+            if is_hammer
+                // && vegas_indicator_signal_values
+                //     .kline_hammer_value
+                //     .up_shadow_ratio
+                //     < kline_hammer_signal.max_other_side_shadow_ratio
+            {
+                vegas_indicator_signal_values
+                    .kline_hammer_value
+                    .is_long_signal = true;
+            }
+
+            if is_hanging_man
+                // && vegas_indicator_signal_values
+                //     .kline_hammer_value
+                //     .down_shadow_ratio
+                //     < kline_hammer_signal.max_other_side_shadow_ratio
+            {
+                vegas_indicator_signal_values
+                    .kline_hammer_value
+                    .is_short_signal = true;
+            }
+        }
     }
 }

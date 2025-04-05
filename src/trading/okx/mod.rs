@@ -12,7 +12,7 @@ pub mod okx_websocket;
 pub mod okx_websocket_client;
 pub mod public_data;
 pub mod trade;
-
+pub mod error;
 
 
 // 验证系统时间
