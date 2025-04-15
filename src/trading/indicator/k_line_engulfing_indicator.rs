@@ -3,7 +3,7 @@ use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergenc
 
 /// 成交量比率指标
 /// 计算当前成交量与历史n根K线的平均值的比值
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct KlineEngulfingIndicator {
     //吞没形态指标值
     last_kline: Option<CandleItem>,
@@ -11,7 +11,7 @@ pub struct KlineEngulfingIndicator {
     is_bullish: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct KlineEngulfingOutput {
     pub is_engulfing: bool,
     pub body_ratio: f64,

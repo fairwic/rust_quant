@@ -1,7 +1,7 @@
 use crate::trading::indicator::sma::Sma;
 
 /// RMA (Relative Moving Average) implementation matching TradingView's ta.rma()
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 struct TvRma {
     length: usize,
     alpha: f64,
@@ -61,7 +61,7 @@ impl TvRma {
 
 /// RSI indicator using RMA (Relative Moving Average) for calculations
 /// Implements the exact same logic as TradingView's Pine Script RSI
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct RsiIndicator {
     length: usize,
     up_rma: TvRma,

@@ -1,18 +1,14 @@
 use anyhow::Result;
 use dotenv::dotenv;
 use rust_quant::app_config::log::setup_logging;
-use rust_quant::trading::indicator::signal_weight::SignalWeightsConfig;
 use rust_quant::trading::indicator::vegas_indicator::VegasStrategy;
 use rust_quant::trading::model::market::candles::CandlesEntity;
 use rust_quant::trading::model::market::candles::SelectTime;
 use rust_quant::trading::model::market::candles::TimeDirect;
-use rust_quant::trading::strategy::profit_stop_loss::ProfitStopLoss;
 use rust_quant::trading::strategy::strategy_common::get_multi_indivator_values;
 use rust_quant::trading::strategy::strategy_common::parse_candle_to_data_item;
 use rust_quant::trading::strategy::strategy_common::BasicRiskStrategyConfig;
-use rust_quant::trading::task::basic;
 use rust_quant::{app_config::db::init_db, trading};
-use tracing::error;
 #[tokio::test]
 async fn test_vegas() -> Result<()> {
     // 初始化环境和数据库连接
@@ -21,10 +17,10 @@ async fn test_vegas() -> Result<()> {
     init_db().await;
 
     // 设置参数
-    let inst_id = "ETH-USDT-SWAP";
+    let inst_id = "BTC-USDT-SWAP";
     let time = "1H";
     let select_time: SelectTime = SelectTime {
-        point_time: 1736355600000,
+        point_time: 1744513200000,
         direct: TimeDirect::BEFORE,
     };
 

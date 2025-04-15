@@ -610,6 +610,27 @@ pub fn get_multi_indivator_values(
     vegas_indicator_signal_value
 }
 
+/// 获取最新的指标值
+pub fn get_neweast_indicator_values(
+    candles_list: &Vec<CandlesEntity>,
+    strategy: &mut impl FnMut(&[CandleItem], &mut VegasIndicatorSignalValue) -> SignalResult,
+    basic_risk_config: BasicRiskStrategyConfig,
+) {
+    let mut indicator_combine = IndicatorCombine::default();
+    
+    let mut candle_item_list = Vec::new();
+    for (i, candle) in candles_list.iter().enumerate() {
+        // 获取数据项
+        let data_item = parse_candle_to_data_item(candle);
+
+        // 获取指标的值
+        let mut multi_indicator_values =
+            get_multi_indivator_values(&mut indicator_combine, &data_item);
+
+        candle_item_list.push(data_item);
+    }
+}
+
 /// 修改 run_test 函数签名
 pub fn run_test(
     mut strategy: impl FnMut(&[CandleItem], &mut VegasIndicatorSignalValue) -> SignalResult,

@@ -5,13 +5,40 @@
 #![allow(unused_assignments)]
 #![allow(unused_must_use)]
 
+use once_cell::sync::Lazy;
+use std::sync::Arc;
+use tokio_cron_scheduler::JobScheduler;
+use tokio::sync::Mutex;
+use serde::{Deserialize, Serialize};
+
+// 定义全局调度器容器，会在需要时被初始化
+pub static SCHEDULER: Lazy<Mutex<Option<Arc<JobScheduler>>>> = Lazy::new(|| {
+    Mutex::new(None)
+});
+
+// 初始化调度器的辅助函数
+pub async fn init_scheduler() -> anyhow::Result<Arc<JobScheduler>> {
+    let mut lock = SCHEDULER.lock().await;
+    
+    if lock.is_none() {
+        // 只有在调度器未初始化时才创建
+        let scheduler = JobScheduler::new().await?;
+        let arc_scheduler = Arc::new(scheduler);
+        *lock = Some(Arc::clone(&arc_scheduler));
+        return Ok(arc_scheduler);
+    }
+    
+    // 返回已存在的调度器
+    Ok(Arc::clone(lock.as_ref().unwrap()))
+}
+
 pub mod app_config;
 pub mod job;
 pub mod socket;
 pub mod time_util;
 pub mod trading;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,Deserialize,Serialize)]
 pub struct CandleItem {
     o: f64,
     h: f64,

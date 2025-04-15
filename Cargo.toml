@@ -103,3 +103,7 @@ linregress = "0.5.4"
 async-trait = "0.1.81"
 approx = "0.5.1"
 float-cmp = "0.10.0"
+
+# 定时任务调度库
+tokio-cron-scheduler = { version = "0.10.0", features = ["signal"] }
+uuid = { version = "1.4.1", features = ["v4"] }

@@ -3,7 +3,7 @@ use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergenc
 
 /// 成交量比率指标
 /// 计算当前成交量与历史n根K线的平均值的比值
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct VolumeRatioIndicator {
     prev_volumes: Vec<f64>,
     volume_bar_num: usize,

@@ -108,7 +108,7 @@ pub struct VolumeTrendSignalValue {
 }
 
 // 成交量信号配置
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize,Clone, Copy)]
 pub struct VolumeSignalConfig {
     pub volume_bar_num: usize,      // 看前10根K线
     pub volume_increase_ratio: f64, // 放量倍数
@@ -127,7 +127,7 @@ impl Default for VolumeSignalConfig {
 }
 
 // ema信号配置
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug,Clone, Copy, Serialize, Deserialize)]
 pub struct EmaSignalConfig {
     pub ema1_length: usize,
     pub ema2_length: usize,
@@ -151,7 +151,7 @@ impl Default for EmaSignalConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct IndicatorCombine {
     pub ema_indicator: Option<EmaIndicator>,
     pub rsi_indicator: Option<RsiIndicator>,
@@ -160,6 +160,8 @@ pub struct IndicatorCombine {
     pub engulfing_indicator: Option<KlineEngulfingIndicator>,
     pub kline_hammer_indicator: Option<KlineHammerIndicator>,
 }
+
+
 impl Default for IndicatorCombine {
     fn default() -> Self {
         Self {
@@ -198,7 +200,7 @@ pub struct BollingerSignalValue {
 }
 
 // rsi信号配置
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize,Clone,Copy)]
 pub struct RsiSignalConfig {
     pub rsi_length: usize,   // rsi周期
     pub rsi_oversold: f64,   // rsi超卖阈值
@@ -241,7 +243,7 @@ impl VolumeTrendSignalValue {
 }
 
 // ema趋势
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize,Clone, Copy)]
 pub struct EmaTouchTrendSignalConfig {
     pub ema1_with_ema2_ratio: f64,      //eam2与eam3的相差幅度
     pub ema2_with_ema3_ratio: f64,      //eam2与eam3的相差幅度
@@ -342,6 +344,7 @@ pub struct VegasIndicatorSignalValue {
 /// 7. 新增吞没形态指标
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VegasStrategy {
+    pub min_k_line_num: usize, //最小需要的k线数量
     pub ema_signal: Option<EmaSignalConfig>,       // ema信号配置
     pub volume_signal: Option<VolumeSignalConfig>, // 新增：成交量信号配置
     pub ema_touch_trend_signal: Option<EmaTouchTrendSignalConfig>, // ema趋势
@@ -357,6 +360,7 @@ pub struct VegasStrategy {
 impl Default for VegasStrategy {
     fn default() -> Self {
         Self {
+            min_k_line_num: 3400,
             ema_touch_trend_signal: Some(EmaTouchTrendSignalConfig::default()),
             bollinger_signal: Some(BollingerBandsSignalConfig::default()),
             ema_signal: Some(EmaSignalConfig::default()),

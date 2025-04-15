@@ -1,6 +1,6 @@
 use ta::indicators::ExponentialMovingAverage;
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct EmaIndicator {
     pub ema1_indicator: ExponentialMovingAverage,
     pub ema2_indicator: ExponentialMovingAverage,

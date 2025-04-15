@@ -20,7 +20,7 @@ impl TaskScheduler {
         }
     }
 
-    pub fn add_periodic_task<F, Fut>(&mut self, name: String, every_n_millis: u64, task: F)
+    pub fn add_periodic_task<F, Fut>(&mut self, name: String, every_n_millis: u64, task_fn: F)
     where
         F: Fn() -> Fut + Send + 'static,
         Fut: std::future::Future<Output=()> + Send + 'static,
@@ -36,7 +36,7 @@ impl TaskScheduler {
             loop {
                 tokio::select! {
                     _ = interval_timer.tick() => {
-                        task().await;
+                        task_fn().await;
                     }
                     _ = shutdown_receiver.recv() => {
                         println!("Periodic task {} is shutting down", task_name);

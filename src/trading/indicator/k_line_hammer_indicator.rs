@@ -2,7 +2,7 @@ use crate::{trading::indicator::rma::Rma, CandleItem};
 use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergence};
 
 /// 锤子/上吊线形态指标
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct KlineHammerIndicator {
     stander_down_shadow_ratio: f64,
     stander_up_shadow_ratio: f64,
@@ -14,7 +14,7 @@ impl Default for KlineHammerIndicator {
     }
 }
 /// 锤子/上吊线形态指标
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct KlineHammerIndicatorOutput {
     //是否是锤子形态,是指下影线较长,上影线较短的形态
     pub is_hammer: bool,

@@ -8,6 +8,8 @@ pub mod engulfing_strategy;
 pub mod strategy_common;
 pub mod top_contract_strategy;
 mod squeeze_strategy;
+pub mod arc;
+pub mod order;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use log::{error, trace};
