@@ -2,7 +2,7 @@
 
 use rust_quant::trading::model::market::candles::CandlesEntity;
 use rust_quant::trading::strategy::engulfing_strategy::EngulfingStrategy;
-use rust_quant::trading::strategy::strategy_common::{run_test}; // 导入工具函数
+use rust_quant::trading::strategy::strategy_common::{run_back_test}; // 导入工具函数
 use chrono::Utc;
 
 #[tokio::test]
@@ -28,7 +28,7 @@ async fn test_engulfing_strategy() {
     let max_loss_percent = 0.02;
 
     // 执行回测
-    let (final_funds, win_rate, open_trades, trade_records) = run_test(
+    let (final_funds, win_rate, open_trades, trade_records) = run_back_test(
         |candles| EngulfingStrategy::get_trade_signal(candles, num_bars),
         &candles,
         &fib_levels,
@@ -56,7 +56,7 @@ async fn test_engulfing_strategy() {
     let max_loss_percent = 0.02;
 
     // 执行回测
-    let (final_funds, win_rate, open_trades, trade_records) = run_test(
+    let (final_funds, win_rate, open_trades, trade_records) = run_back_test(
         |candles| EngulfingStrategy::get_trade_signal(candles, num_bars),
         &candles,
         &fib_levels,
@@ -90,7 +90,7 @@ async fn test_engulfing_strategy() {
     let max_loss_percent = 0.02;
 
     // 执行回测
-    let (final_funds, win_rate, open_trades, trade_records) = run_test(
+    let (final_funds, win_rate, open_trades, trade_records) = run_back_test(
         |candles| EngulfingStrategy::get_trade_signal(candles, num_bars),
         &candles,
         &fib_levels,

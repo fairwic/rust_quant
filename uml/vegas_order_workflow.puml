@@ -1,0 +1,141 @@
+@startuml
+title Vegas Order 策略初始化和调度流程
+
+skinparam backgroundColor white
+skinparam activityBackgroundColor #E8F4FE
+skinparam activityBorderColor #2A7AE2
+skinparam activityDiamondBackgroundColor #FEFCE8
+skinparam noteBackgroundColor #E8FEEA
+skinparam noteBorderColor #27AE60
+skinparam partitionBackgroundColor #F5F5F5
+
+start
+
+:调用 **VagasOrder::new()**;
+note right: 创建默认组件:\n* state_manager\n* task_manager\n* metric_collector
+
+:调用 **order(strategy, inst_id, time)**;
+note right: 记录日志：开始初始化Vegas策略
+
+partition "1. 初始化策略数据 (可重试)" {
+  :初始化 **initialize_with_retry**;
+  note right: 最多重试3次，每次失败等待2秒
+
+  repeat
+    :调用 **initialize_strategy_data**;
+    
+    partition "策略数据初始化流程" {
+      :获取历史K线数据;
+      note right: 调用 task::basic::get_candle_data
+      
+      :初始化指标计算;
+      note right: * 创建 vegas_indicator_values\n* 从策略获取 indicator_combine
+      
+      :遍历历史K线创建数据项;
+      note right: * 预先分配空间优化性能\n* 调用 parse_candle_to_data_item\n* 计算指标值 get_multi_indivator_values
+      
+      :生成唯一哈希键;
+      note right: 调用 get_hash_key(inst_id, time, strategy_type)\n格式："inst_id time Vegas"
+      
+      :设置初始指标值;
+      note right: 调用 set_ema_indicator_values\n* 传入 inst_id, time, timestamp\n* 传入 hash_key, candle_items\n* 传入 multi_strategy_indicators
+      
+      :验证数据存在性;
+      note right: 调用 get_vegas_indicator_values_by_inst_id_with_period\n检查数据是否成功保存
+    }
+    
+    if (初始化成功?) then (是)
+      :返回哈希键;
+      break
+    else (否)
+      :记录错误日志;
+    endif
+  repeat while (尝试次数 < 最大重试次数?) is (是)
+  
+  if (全部尝试失败?) then (是)
+    :抛出初始化失败错误;
+    stop
+  endif
+}
+
+partition "2. 创建任务调度信息" {
+  :创建 **StrategyTaskInfo** 实例;
+  note right: 包含:\n* inst_id\n* time_period\n* strategy_type="Vegas"\n* created_at=当前时间戳
+  
+  :提前获取 job_name;
+  note right: 避免闭包中移动所有权
+  
+  :创建 Arc 包装对象;
+  note right: * strategy_arc = Arc::new(strategy)\n* inst_id_arc = Arc::new(inst_id)\n* time_arc = Arc::new(time)
+  
+  :获取最佳执行频率;
+  note right: 默认 "*/5 * * * * *" (每5秒执行一次)
+}
+
+partition "3. 调度任务执行" {
+  :调用 **task_manager.schedule_task**;
+  
+  partition "任务调度流程" {
+    :创建闭包函数;
+    note right: 使用 move 关键字捕获:\n* task_info\n* strategy_arc\n* VEGAS_INDICATOR_VALUES
+    
+    :创建任务实例;
+    note right: * 创建 Job::new_async\n* 设置 cron 表达式\n* 添加闭包执行内容
+    
+    :获取任务UUID;
+    
+    :添加任务到调度器;
+    note right: 使用 scheduler.add(job)
+    
+    :注册任务信息;
+    note right: 将任务信息保存到 task_map\n包含 job_name 与 task_info 映射
+  }
+  
+  :获取生成的任务UUID;
+}
+
+partition "4. 注册监控和记录日志" {
+  :注册任务监控;
+  note right: 调用 metric_collector.register_task
+  
+  :记录成功日志;
+  note right: 记录关键信息:\n* inst_id\n* time\n* uuid
+}
+
+partition "5. 任务定期执行流程" {
+  note: 每5秒将执行一次以下流程:
+  
+  :调用 **run_strategy_job**;
+  note right: 执行策略任务:\n* 记录开始日志\n* 检查 OnceCell 初始化状态
+  
+  :调用 **run_ready_to_order**;
+  
+  partition "订单准备流程" {
+    :尝试获取 OnceCell 的值;
+    
+    :构建哈希键;
+    note right: 使用 get_hash_key
+    
+    :检查数据是否存在;
+    
+    :获取最新K线数据;
+    note right: 调用 get_candle_data
+    
+    :处理K线数据;
+    note right: 转换为 CandleItem 格式
+    
+    :获取写锁并更新数据;
+    note right: * 更新 candle_item\n* 更新指标计算
+  }
+  
+  :捕获可能的错误;
+  note right: 使用 if let Err(e) 处理错误\n记录错误日志但不中断定时任务
+}
+
+:返回成功结果;
+
+stop
+
+footer Vegas Order 策略初始化和调度流程图
+
+@enduml 

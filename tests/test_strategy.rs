@@ -1,5 +1,5 @@
 use rust_quant::trading::model::market::candles::CandlesEntity;
-use rust_quant::trading::strategy::strategy_common::{run_test, SignalResult, TradeRecord, BasicRiskStrategyConfig};
+use rust_quant::trading::strategy::strategy_common::{run_back_test, SignalResult, TradeRecord, BasicRiskStrategyConfig};
 use anyhow::Result;
 
 #[tokio::test]
@@ -20,7 +20,7 @@ async fn test_strategy_signals() -> Result<()> {
             i+1, candle.o, candle.h, candle.l, candle.c, candle.ts);
     }
 
-    let result = run_test(
+    let result = run_back_test(
         |candles| mock_strategy(candles),
         &mock_candles,
         &vec![],  // 不使用斐波那契水平
@@ -92,7 +92,7 @@ async fn verify_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result
         profit_threshold: 0.01,    // 1%启用动态止盈
     };
 
-    let result = run_test(
+    let result = run_back_test(
         |candles| mock_strategy(candles),
         &mock_candles,
         &vec![],
@@ -119,7 +119,7 @@ async fn verify_short_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> 
         profit_threshold: 0.01,    // 1%启用动态止盈
     };
 
-    let result = run_test(
+    let result = run_back_test(
         |candles| mock_short_strategy(candles),
         &mock_candles,
         &vec![],
