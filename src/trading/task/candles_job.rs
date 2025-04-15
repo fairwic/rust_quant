@@ -6,7 +6,7 @@ use rbatis::rbatis_codegen::ops::AsProxy;
 use rbatis::rbdc::datetime;
 use redis::aio::MultiplexedConnection;
 use tokio::time::sleep;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use tracing::field::debug;
 use crate::trading::model::market::tickers::{TickersDataEntity, TicketsModel};
 use crate::trading::model::asset::AssetModel;
@@ -80,8 +80,13 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&s
             loop {
                 sleep(Duration::from_millis(200)).await;
                 info!("get after history_candles {},{}",&ticker.inst_id,time);
-
-                let res = Market::new().get_history_candles(&ticker.inst_id, time, Some(&after.to_string()), None, None).await?;
+                //对下面进行的请求超时的时候进行重试
+                let res = Market::new().get_history_candles(&ticker.inst_id, time, Some(&after.to_string()), None, None).await;
+                if res.is_err() {
+                    warn!("get history_candles {} {} error",&ticker.inst_id,time);
+                    continue;
+                }
+                let res = res.unwrap();
                 if res.is_empty() {
                     debug!("No old candles patch{},{}",ticker.inst_id, time);
                     break;

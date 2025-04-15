@@ -24,7 +24,7 @@ pub struct CandlesEntity {
     pub c: String,             // 收盘价格
     pub vol: String,           // 交易量，以张为单位
     pub vol_ccy: String,       // 交易量，以币为单位
-    pub vol_ccy_quote: String, // 交易量，以计价货币为单位
+    // pub vol_ccy_quote: String, // 交易量，以计价货币为单位
     pub confirm: String,       // K线状态
 }
 pub enum TimeDirect {
@@ -100,9 +100,8 @@ impl CandlesModel {
     }
 
     pub fn get_tale_name(inst_id: &str, time_interval: &str) -> String {
-        println!("inst_id{},time_interval{}",inst_id,time_interval);
+        // println!("inst_id{},time_interval{}",inst_id,time_interval);
         let table_name = format!("{}_candles_{}", inst_id, time_interval);
-        // print!("table_name{}",table_name);
         table_name
     }
     pub(crate) async fn add(
@@ -198,7 +197,7 @@ impl CandlesModel {
             candle.c.into(),
             candle.vol.into(),
             candle.vol_ccy.into(),
-            candle.vol_ccy_quote.into(),
+            // candle.vol_ccy_quote.into(),
             candle.confirm.into(),
             candle.ts.into(),
         ];
@@ -240,7 +239,7 @@ impl CandlesModel {
                 c: candle_data.c.to_string(),
                 vol: candle_data.vol.to_string(),
                 vol_ccy: candle_data.vol_ccy.to_string(),
-                vol_ccy_quote: candle_data.vol_ccy_quote.to_string(),
+                // vol_ccy_quote: candle_data.vol_ccy_quote.to_string(),
                 confirm: candle_data.confirm.to_string(),
             };
             let exec_result: u64 = self.update_one(data, inst_id, time_interval).await?;
@@ -259,7 +258,7 @@ impl CandlesModel {
         // 香港时间开盘价k线：[6H/12H/1D/2D/3D/1W/1M/3M]
 
         let mut query = format!(
-            "select * from `{}` ",
+            "SELECT ts,o,h,l,c,vol,vol_ccy,confirm FROM `{}` ",
             Self::get_tale_name(inst_id, time_interval)
         );
         //如果指定了时间

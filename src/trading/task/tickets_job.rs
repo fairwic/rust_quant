@@ -24,7 +24,8 @@ pub async fn init_all_ticker(inst_ids: Option<Vec<&str>>) -> anyhow::Result<()> 
         for ticker in tickers {
             //判断是否在inst_ids中
             let is_valid = true;
-            if !is_valid || (inst_ids.is_some()&& inst_ids.as_ref().unwrap().contains(&&**&ticker.inst_id)) {
+            let inst_id = ticker.inst_id.clone();
+            if !is_valid || (inst_ids.is_some() && inst_ids.as_deref().unwrap().contains(&inst_id.as_str())) {
                 //判断数据库是否有
                 let res = model.find_one(&ticker.inst_id).await?;
                 if res.len() > 0 {

@@ -27,7 +27,7 @@ pub struct OkxApiResponse<T> {
     pub data: T,
 }
 
-pub(crate) struct OkxClient {
+pub struct OkxClient {
     client: Client,
     api_key: String,
     api_secret: String,
@@ -62,7 +62,7 @@ impl OkxClient {
         signature
     }
 
-    pub(crate) async fn send_request<T: for<'a> Deserialize<'a>>(
+    pub async fn send_request<T: for<'a> Deserialize<'a>>(
         &self,
         method: Method,
         path: &str,
@@ -104,12 +104,13 @@ impl OkxClient {
         let response_body = response.text().await?;
         // info!("path:{},okx_response: {}", path, response_body);
         if status_code == StatusCode::OK {
-            println!("okx response body:{:#?}", &response_body);
+            // println!("okx response body:{:#?}", &response_body);
             let result: OkxApiResponse<T> = serde_json::from_str(&response_body)?;
             // println!("result 1111:{:?}", result);
             Ok(result.data)
         } else {
             let error: OkxApiErrorResponse = serde_json::from_str(&response_body)?;
+            println!("okx response body:{:#?}", &response_body);
             Err(anyhow!("请求失败: {}", error.msg))
         }
     }

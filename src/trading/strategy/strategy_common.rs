@@ -94,7 +94,6 @@ pub fn process_fibonacci_levels(
     losses: &mut i64,
 ) -> f64 {
     // println!(" 判断斐波那契止损");
-
     let mut remaining_position = *position;
     // println!("fib_levels:{:#?}", fib_levels);
     for (idx, &level) in fib_levels.iter().enumerate() {
@@ -617,7 +616,6 @@ pub fn get_neweast_indicator_values(
     basic_risk_config: BasicRiskStrategyConfig,
 ) {
     let mut indicator_combine = IndicatorCombine::default();
-    
     let mut candle_item_list = Vec::new();
     for (i, candle) in candles_list.iter().enumerate() {
         // 获取数据项
@@ -632,7 +630,7 @@ pub fn get_neweast_indicator_values(
 }
 
 /// 修改 run_test 函数签名
-pub fn run_test(
+pub fn run_back_test(
     mut strategy: impl FnMut(&[CandleItem], &mut VegasIndicatorSignalValue) -> SignalResult,
     candles_list: &Vec<CandlesEntity>,
     basic_risk_config: BasicRiskStrategyConfig,
@@ -744,10 +742,13 @@ pub fn check_risk_config(
     i: usize,
 ) -> TradingState {
     let current_price = signal.open_price;
+    let current_low_price = candle.l.parse::<f64>().unwrap();
+    let current_high_price = candle.h.parse::<f64>().unwrap();
     let entry_price = trading_state.entry_price; // 先保存入场价格
 
     //检查移动止损
     if risk_config.is_move_stop_loss {
+        //如果设置了移动止损价格
         if let Some(move_stop_loss_price) = trading_state.move_stop_loss_price {
             if trading_state.is_long {
                 if current_price <= move_stop_loss_price {
@@ -763,10 +764,12 @@ pub fn check_risk_config(
         } else {
             if trading_state.is_long {
                 if current_price > entry_price {
+                    //如果开仓后第一根k线有盈利，则设置止损价格为开仓价,保存本金
                     trading_state.move_stop_loss_price = Some(entry_price);
                 }
             } else {
                 if current_price < entry_price {
+                    //如果开仓后第一根k线有盈利，则设置止损价格为开仓价,保存本金
                     trading_state.move_stop_loss_price = Some(entry_price);
                 }
             }

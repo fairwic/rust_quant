@@ -12,16 +12,13 @@ static DB_CLIENT: OnceCell<RBatis> = OnceCell::new();
 // }
 pub async fn init_db() -> &'static RBatis {
     info!("Initializing database connection pool...");
-    
     let rb = RBatis::new();
-    
     // 从环境变量获取数据库配置
     let db_host = env::var("DB_HOST").expect("DB_HOST must be set");
     let max_connections = env::var("DB_MAX_CONNECTIONS")
         .unwrap_or_else(|_| "200".to_string())
         .parse::<u32>()
         .expect("DB_MAX_CONNECTIONS must be a number");
-        
     // 连接数据库
     match rb.link(MysqlDriver {}, &db_host).await {
         Ok(_) => info!("Successfully connected to database"),

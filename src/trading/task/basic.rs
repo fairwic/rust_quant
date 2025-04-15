@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use chrono::{DateTime, Local, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Local, TimeZone, Timelike, Utc, Duration};
 use hmac::digest::generic_array::arr;
 use std::cmp::PartialEq;
 use std::collections::HashMap;
@@ -50,6 +50,9 @@ use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules:
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::{
     self, ArcVegasIndicatorValues,
 };
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::get_vegas_indicator_values;
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::update_candle_items;
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::update_vegas_indicator_values;
 use crate::trading::strategy::engulfing_strategy::EngulfingStrategy;
 use crate::trading::strategy::macd_kdj_strategy::MacdKdjStrategy;
 use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
@@ -367,7 +370,7 @@ pub async fn save_log(
 // 主函数，执行所有策略测试
 pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
     // 获取数据
-    let mysql_candles = self::get_candle_data(inst_id, time, 10000, None).await?;
+    let mysql_candles = self::get_candle_data(inst_id, time, 20000, None).await?;
     let mysql_candles_clone = Arc::new(mysql_candles.clone()); // 克隆一份用于后续分析
 
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
@@ -428,6 +431,8 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                                                 volume_increase_ratio,
                                                 volume_decrease_ratio,
                                                 is_open: true,
+                                                // 是否强制依赖成交量指标
+                                                is_force_dependent: false,
                                             };
                                             let rsi_signal = RsiSignalConfig {
                                                 rsi_length: rsi_period,
@@ -520,12 +525,12 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     );
 
     // 执行位置分析
-    for back_test_id in back_test_ids {
-        match PositionAnalysis::analyze_positions(back_test_id as i32, &mysql_candles).await {
-            Ok(_) => info!("成功分析 back_test_id: {}", back_test_id),
-            Err(e) => error!("分析 back_test_id {} 失败: {:?}", back_test_id, e),
-        }
-    }
+    // for back_test_id in back_test_ids {
+    //     match PositionAnalysis::analyze_positions(back_test_id as i32, &mysql_candles).await {
+    //         Ok(_) => info!("成功分析 back_test_id: {}", back_test_id),
+    //         Err(e) => error!("分析 back_test_id {} 失败: {:?}", back_test_id, e),
+    //     }
+    // }
 
     Ok(())
 }
@@ -913,8 +918,13 @@ pub async fn run_strategy_job(
     info!("run_strategy_job开始: inst_id={}, time={}", inst_id, time);
 
     // 检查cell是否已初始化
-    let cell_initialized = cell.get().is_some();
-    info!("OnceCell是否已初始化: {}", cell_initialized);
+    let cell_initialized = cell.get().is_none();
+    if cell_initialized {
+        error!("OnceCell未初始化");
+        return Err(anyhow!("OnceCell未初始化"));
+    } else {
+        info!("OnceCell已初始化");
+    }
 
     let res = self::run_ready_to_order(inst_id, time, strategy, cell).await;
 
@@ -923,183 +933,128 @@ pub async fn run_strategy_job(
             "run ready to order inst_id:{:?} time:{:?} error:{:?}",
             inst_id, time, e
         );
-        return Err(e);
+        return Err(anyhow!(e));
     }
 
     info!("run_strategy_job完成: inst_id={}, time={}", inst_id, time);
     Ok(())
 }
 
+/// 运行准备好的订单函数
 pub async fn run_ready_to_order(
     inst_id: &str,
-    time: &str,
+    period: &str,
     strategy: &VegasStrategy,
     arc_vegas_indicator_signal_values: &OnceCell<RwLock<HashMap<String, ArcVegasIndicatorValues>>>,
-) -> Result<()> {
-    // 定义最大历史K线数量
+) -> anyhow::Result<()> {
+    // 常量定义
     const MAX_HISTORY_SIZE: usize = 10000;
-
+    
+    // 1. 预处理：获取哈希键和RwLock
     let strategy_type = StrategyType::Vegas.to_string();
-    //获取最新的数据
-    let values_rwlock =
-        arc_vegas_indicator_signal_values.get_or_init(|| RwLock::new(HashMap::new()));
-
-    //获取最新的k线路数据
-    let candle_list = task::basic::get_candle_data(&inst_id, &time, 1, None).await?;
-    print!("new candle_list:{:?}", candle_list);
-
-    //计算出最新的策略中所有指标的值
-    let key = get_hash_key(&inst_id, &time, &strategy_type);
-
-    // 使用读锁获取值
-    let read_guard = values_rwlock.read().await;
-    let arc_vegas_indicator_values = match read_guard.get(&key) {
-        Some(value) => value.clone(),
-        None => {
-            error!("没有找到对应的策略值: {}", key);
-            return Err(anyhow!("没有找到对应的策略值"));
+    let key = get_hash_key(inst_id, period, &strategy_type);
+    let values_rwlock = arc_vegas_indicator_signal_values.get_or_init(|| RwLock::new(HashMap::new()));
+    
+    // 2. 获取最新K线数据
+    let candle_list = task::basic::get_candle_data(inst_id, period, 1, None)
+        .await
+        .map_err(|e| anyhow!("获取最新K线数据失败: {}", e))?;
+    
+    if candle_list.is_empty() {
+        return Err(anyhow!("获取的K线列表为空"));
+    }
+    
+    let new_candle_item = parse_candle_to_data_item(&candle_list[0]);
+    
+    // 3. 读取现有数据并验证
+    let current_data = {
+        let read_guard = values_rwlock.read().await;
+        match read_guard.get(&key) {
+            Some(value) => value.clone(),
+            None => {
+                return Err(anyhow!("没有找到对应的策略值: {}", key));
+            }
         }
     };
-    println!(
-        "strategy_valus item_length:{:?}",
-        arc_vegas_indicator_values.candle_item.len()
-    );
-    println!(
-        "strategy_valus indicator_combines11:{:?}",
-        arc_vegas_indicator_values.indicator_combines
-    );
-    let mut candle_item_list = arc_vegas_indicator_values.candle_item.clone();
-    let new_candle_item = parse_candle_to_data_item(&candle_list.get(0).unwrap());
-
-    //判断全局策略的value中时间是否刚好小于最新的数据的一个周期
-    let old_time = arc_vegas_indicator_values.timestamp.clone();
+    
+    // 4. 验证时间戳，检查是否有新数据
+    let old_time = current_data.timestamp;
     let new_time = new_candle_item.ts;
+    
     if old_time == new_time {
-        info!("candle_list no new data,wait.....");
+        info!("未检测到新的K线数据，等待下次更新");
         return Ok(());
     }
-
-    info!("get a new data success");
-    //验证是否刚好相差一个周期
-    let period_diff = ts_add_n_period(old_time, time, 1)?;
-    if period_diff != new_time {
-        error!(
-            "run_ready_to_order error: old_time add period neq new_time{} {} {}",
-            old_time, new_time, period_diff
-        );
-    }
     
-    // 添加新K线数据
-    candle_item_list.push(new_candle_item.clone());
-    
-    // 限制历史数据大小，防止无限增长
-    if candle_item_list.len() > MAX_HISTORY_SIZE {
-        info!(
-            "K线数据超过最大容量({})，正在裁剪旧数据...",
-            MAX_HISTORY_SIZE
-        );
-        candle_item_list = candle_item_list.split_off(candle_item_list.len() - MAX_HISTORY_SIZE);
-        info!("K线数据裁剪完成，当前数量: {}", candle_item_list.len());
-    }
-    
-    drop(read_guard); // 在获取写锁之前释放读锁，避免可能的死锁
-    info!(
-        "更新K线数据前 - 键: {}, 数据项数量: {}",
-        key,
-        candle_item_list.len()
-    );
-
-    let mut new_vegas_indicator_vaules = VegasIndicatorSignalValue::default();
-    // 更新K线数据到全局存储
-    {
-        // 使用块作用域限制写锁的持有时间
-        info!("准备获取写锁...");
-        let result =
-            arc_vegas_indicator_vaules::update_candle_items(&key, candle_item_list.clone()).await;
-        info!(
-            "写锁释放，更新结果: {}",
-            if result.is_ok() { "成功" } else { "失败" }
-        );
-        if let Err(e) = result {
-            error!("更新K线数据失败: {}", e);
-            return Err(anyhow!("更新K线数据失败: {}", e));
+    // 验证时间差是否为一个周期（记录警告，中断执行）
+    if let Ok(period_diff) = ts_add_n_period(old_time, period, 1) {
+        if period_diff != new_time {
+            warn!(
+                "K线时间戳不连续: 上一时间戳 {}, 当前时间戳 {}, 预期时间戳 {}", 
+                old_time, new_time, period_diff
+            );
+            return Err(anyhow!("K线时间戳不连续: 上一时间戳 {}, 当前时间戳 {}, 预期时间戳 {}", old_time, new_time, period_diff));
         }
-        // 计算出最新的策略中所有指标的值
-        let mut new_indicator_combines = arc_vegas_indicator_values.indicator_combines.clone();
-
-        println!(
-            "new_indicator_combines-1111:{:?}",
-            new_indicator_combines
-        );
-        new_vegas_indicator_vaules = strategy_common::get_multi_indivator_values(
-            &mut new_indicator_combines,
-            &new_candle_item,
-        );
-        println!(
-            "new_vegas_indicator_vaules:{:?}",
-            new_vegas_indicator_vaules
-        );
-        // 更新策略的values
-        arc_vegas_indicator_vaules::update_vegas_indicator_values(&key, new_indicator_combines)
-            .await;
     }
-    info!("更新K线数据后");
-    //计算出最新的策略中所有指标的值
-    let key = get_hash_key(&inst_id, &time, &strategy_type);
-
-    // 使用读锁获取值
-    let read_guard = values_rwlock.read().await;
-    let vegas_values = match read_guard.get(&key) {
-        Some(value) => value.clone(),
-        None => {
-            error!("没有找到对应的策略值: {}", key);
-            return Err(anyhow!("没有找到对应的策略值"));
+    
+    // 5. 准备更新数据
+    let mut candle_items = current_data.candle_item.clone();
+    candle_items.push(new_candle_item.clone());
+    
+    // 限制历史数据大小
+    if candle_items.len() > MAX_HISTORY_SIZE {
+        candle_items = candle_items.split_off(candle_items.len() - MAX_HISTORY_SIZE);
+    }
+    
+    // 6. 更新K线数据到全局存储
+    if let Err(e) = update_candle_items(&key, candle_items.clone()).await {
+        return Err(anyhow!("更新K线数据失败: {}", e));
+    }
+    
+    // 7. 计算最新指标值
+    let mut indicator_combines = current_data.indicator_combines.clone();
+    let new_indicator_values = strategy_common::get_multi_indivator_values(
+        &mut indicator_combines,
+        &new_candle_item
+    );
+    
+    // 8. 更新指标值
+    if let Err(e) = update_vegas_indicator_values(&key, indicator_combines).await {
+        return Err(anyhow!("更新指标值失败: {}", e));
+    }
+    
+    // 9. 获取更新后的数据进行信号计算
+    let updated_data = {
+        let read_guard = values_rwlock.read().await;
+        match read_guard.get(&key) {
+            Some(value) => value.clone(),
+            None => {
+                return Err(anyhow!("无法读取更新后的数据"));
+            }
         }
     };
-    println!(
-        "更新后的，strategy_valus.items.length():{:?}",
-        vegas_values.candle_item.len()
-    );
-    println!(
-        "更新后的，strategy_valus.indicator_combines:{:?}",
-        vegas_values.indicator_combines
-    );
-
-    // 创建一个可变克隆，只包含需要的字段
-    let mut strategy = VegasStrategy {
-        min_k_line_num: strategy.min_k_line_num,
-        ema_signal: strategy.ema_signal,
-        volume_signal: strategy.volume_signal,
-        ema_touch_trend_signal: strategy.ema_touch_trend_signal,
-        rsi_signal: strategy.rsi_signal,
-        bollinger_signal: strategy.bollinger_signal.clone(),
-        signal_weights: strategy.signal_weights.clone(),
-        engulfing_signal: strategy.engulfing_signal.clone(),
-        kline_hammer_signal: strategy.kline_hammer_signal.clone(),
-    };
-    print!("vegasStragegy1111111:{:?}", strategy);
-
-    //解析数据
+    
+    // 10. 计算交易信号
     let signal_result = strategy.get_trade_signal(
-        &candle_item_list,
-        &mut new_vegas_indicator_vaules,
-        &crate::trading::indicator::signal_weight::SignalWeightsConfig::default(),
-        &crate::trading::strategy::strategy_common::BasicRiskStrategyConfig::default(),
+        &updated_data.candle_item,
+        &mut new_indicator_values.clone(),
+        &SignalWeightsConfig::default(),
+        &strategy_common::BasicRiskStrategyConfig::default(),
     );
-
+    
     print!("signal_result:{:#?}", signal_result);
     //记录日志
-    // let signal_record = StrategyJobSignalLog {
-    //     inst_id: inst_id.parse().unwrap(),
-    //     time: time.parse().unwrap(),
-    //     strategy_type: StrategyType::Vegas.to_string(),
-    //     strategy_result: serde_json::to_string(&signal_result).unwrap(),
-    // };
-    // strategy_job_signal_log::StrategyJobSignalLogModel::new()
-    //     .await
-    //     .add(signal_record)
-    //     .await?;
-    // // ut boot atr 策略回测
-    // order::deal(StrategyType::Vegas, inst_id, time, signal_result).await?;
+    let signal_record = StrategyJobSignalLog {
+        inst_id: inst_id.parse().unwrap(),
+        time: period.parse().unwrap(),
+        strategy_type: StrategyType::Vegas.to_string(),
+        strategy_result: serde_json::to_string(&signal_result).unwrap(),
+    };
+    strategy_job_signal_log::StrategyJobSignalLogModel::new()
+        .await
+        .add(signal_record)
+        .await?;
+
+    order::deal(StrategyType::Vegas, inst_id, period, signal_result).await?;
     Ok(())
 }

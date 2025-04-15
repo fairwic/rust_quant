@@ -96,7 +96,6 @@ async fn main() -> anyhow::Result<()> {
             return Err(anyhow!("初始化任务调度器失败: {}", e));
         }
     };
-    
     if let Err(e) = scheduler.start().await {
         error!("启动任务调度器失败: {}", e);
         return Err(anyhow!("启动任务调度器失败: {}", e));
@@ -116,16 +115,15 @@ async fn main() -> anyhow::Result<()> {
 
     // let period = Arc::new(vec!["1m", "3m", "5m", "15m"]);
 
-    // let inst_ids =Some(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP","OM-USDT-SWAP", "ADA-USDT-SWAP", "SUSHI-USDT-SWAP"]);
-    // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
-    // let times = Arc::new(vec!["4H", "1H", "5m", "1Dutc"]);
-
+    // let inst_ids =Some(vec!["OM-USDT-SWAP", "ADA-USDT-SWAP","SUSHI-USDT-SWAP","SOL-USDT-SWAP","XRP-USDT-SWAP","SUI-USDT-SWAP","BTC-USDT-SWAP","ETH-USDT-SWAP"]);
+    let inst_ids = Some(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
     // let inst_ids =Some(vec![ "ETH-USDT-SWAP"]);
-    let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
+    // let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
     // let inst_ids = Some(vec!["OM-USDT-SWAP"]);
     // let period = Some(vec!["4H",]);
     // let period = Some(vec!["1m"]);
     // let period = Some(vec!["4H", "1H", "1m","5m", "1Dutc"]);
+    // let times = Arc::new(vec!["4H", "1H", "5m", "1Dutc"]);
     let period = Some(vec!["1H"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
@@ -217,7 +215,7 @@ async fn main() -> anyhow::Result<()> {
                                 serde_json::from_str::<VegasStrategy>(&*strategy.value).map_err(
                                     |e| anyhow!("Failed to parse VegasStrategy config: {}", e),
                                 )?;
-                            VagasOrder::order(strategy_config, inst_id, time).await?;
+                            VagasOrder::new().order(strategy_config, inst_id, time).await?;
                         }
                     }
                 }

@@ -7,7 +7,7 @@ use ta::Next;
 use tracing::warn;
 use crate::trading::indicator::atr::ATR;
 use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::strategy::strategy_common::{BackTestResult, run_test, SignalResult, TradeRecord};
+use crate::trading::strategy::strategy_common::{BackTestResult, run_back_test, SignalResult, TradeRecord};
 
 use super::strategy_common::BasicRiskStrategyConfig;
 
@@ -69,7 +69,7 @@ impl UtBootStrategy {
             open_price: price,
             ts,
             single_value:None,
-            single_result:None
+            single_result: None,
         };
         // 增加三个新过滤条件
         let mut volume_ma = 0.0;
@@ -158,7 +158,7 @@ impl UtBootStrategy {
             open_price: price,
             ts,
             single_value:None,
-            single_result:None
+            single_result:None,
         }
     }
 
