@@ -388,6 +388,7 @@ impl VegasStrategy {
     }
 
     /// 获取交易信号
+    ///  data_items 数据列表,在突破策略中要考虑到前一根k线
     pub fn get_trade_signal(
         &self,
         data_items: &[CandleItem],
@@ -400,12 +401,12 @@ impl VegasStrategy {
         let mut signal_result = SignalResult {
             should_buy: false,
             should_sell: false,
-            open_price: data_items.last().unwrap().c,
-            ts: data_items.last().unwrap().ts,
+            open_price: last_data_item.c,
+            ts: last_data_item.ts,
             single_value: None,
             single_result: None,
         };
-        let mut conditions = vec![];
+        let mut conditions = Vec::with_capacity(10);
         //优先判断成交量
         if let Some(volume_signal) = &self.volume_signal {
             let res = self.check_volume_trend(&vegas_indicator_signal_values.volume_value);
@@ -776,13 +777,13 @@ impl VegasStrategy {
     /// Runs the backtest asynchronously.
     pub fn run_test(
         &mut self,
-        candles: &Vec<CandlesEntity>,
+        candles: &Vec<CandleItem>,
         risk_strategy_config: BasicRiskStrategyConfig,
     ) -> BackTestResult {
         let min_length = self.get_min_data_length();
 
         //获取组合配置策略
-        let indicator_combine = self.get_indicator_combine();
+        let mut indicator_combine = self.get_indicator_combine();
         strategy_common::run_back_test(
             {
                 let signal_weights = self.signal_weights.as_ref().unwrap().clone();
@@ -798,7 +799,7 @@ impl VegasStrategy {
             candles,
             risk_strategy_config,
             min_length,
-            indicator_combine,
+            &mut indicator_combine,
         )
     }
 

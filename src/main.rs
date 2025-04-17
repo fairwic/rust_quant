@@ -115,8 +115,8 @@ async fn main() -> anyhow::Result<()> {
 
     // let period = Arc::new(vec!["1m", "3m", "5m", "15m"]);
 
-    // let inst_ids =Some(vec!["OM-USDT-SWAP", "ADA-USDT-SWAP","SUSHI-USDT-SWAP","SOL-USDT-SWAP","XRP-USDT-SWAP","SUI-USDT-SWAP","BTC-USDT-SWAP","ETH-USDT-SWAP"]);
-    let inst_ids = Some(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
+    let inst_ids =Some(vec!["OM-USDT-SWAP", "ADA-USDT-SWAP","SUSHI-USDT-SWAP","SOL-USDT-SWAP","XRP-USDT-SWAP","SUI-USDT-SWAP","BTC-USDT-SWAP","ETH-USDT-SWAP"]);
+    // let inst_ids = Some(vec!["ETH-USDT-SWAP", "SUI-USDT-SWAP","OM-USDT-SWAP"]);
     // let inst_ids =Some(vec![ "ETH-USDT-SWAP"]);
     // let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
     // let inst_ids = Some(vec!["OM-USDT-SWAP"]);

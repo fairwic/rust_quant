@@ -10,6 +10,7 @@ use tracing::{debug, warn, info};
 
 use crate::app_config::db;
 use crate::trading::model::strategy::back_test_analysis::PositionStats;
+use std::time::Instant;
 
 /// table
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -96,10 +97,12 @@ impl BackTestLogModel {
         // 移除最后一个逗号
         query.pop();
 
-        debug!("insert_back_test_log_quey = {}", query);
+        // info!("insert_back_test_log_quey = {}", query);
+        let start_time = Instant::now();
         let data = self.db.exec(&query, params).await?;
-        // Ok(res
-        debug!("insert_back_test_log_result = {}", json!(data));
+        let duration = start_time.elapsed();
+        // let res = format!("insert_back_test_log_result = 执行时间{}毫秒 影响行数{}", duration.as_millis(), data.rows_affected);
+        // info!("{}", res);
         Ok(data.last_insert_id.as_i64().unwrap())
     }
     

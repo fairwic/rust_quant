@@ -1,7 +1,7 @@
 extern crate rbatis;
 
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, info};
 use rbatis::{crud, impl_insert, impl_update, RBatis};
 use rbatis::rbdc::{Date, DateTime};
 use rbatis::rbdc::db::ExecResult;
@@ -9,6 +9,7 @@ use rbs::Value;
 use serde_json::json;
 use crate::app_config::db;
 use rbatis::impl_select;
+use chrono::Local;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BackTestDetail {
@@ -84,9 +85,14 @@ impl BackTestDetailModel {
 
         // 移除最后一个逗号
         query.pop();
+        let time = Local::now();
         let data = self.db.exec(&query, params).await?;
-        // Ok(res
-        debug!("insert_back_test_detail_result = {}", json!(data));
+        //记录执行所的时间
+        let duration = Local::now().signed_duration_since(time);
+        let duration_ms = duration.num_milliseconds();
+
+        // let res = format!("insert_back_test_detail_result = 执行时间{}毫秒 影响行数{}", duration_ms, data.rows_affected);
+        // info!("{}", res);
         Ok(data.rows_affected)
     }
 }

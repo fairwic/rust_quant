@@ -9,6 +9,7 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{fmt, EnvFilter, FmtSubscriber, Layer, Registry};
 
 use crate::app_config;
+use fast_log::Config;
 
 // 定义一个自定义的 Layer
 

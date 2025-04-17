@@ -16,7 +16,7 @@ use crate::trading::model::big_data::top_contract_position_ratio::TopContractPos
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::services::big_data::big_data_top_contract_service::BigDataTopContractService;
 use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
-use crate::trading::strategy::strategy_common::{BackTestResult, run_back_test, run_test_top_contract, SignalResult, TradeRecord};
+use crate::trading::strategy::strategy_common::{BackTestResult, run_back_test, SignalResult, TradeRecord};
 use crate::trading::task::basic;
 use crate::trading::task::basic::save_log;
 
