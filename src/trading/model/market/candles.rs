@@ -9,7 +9,7 @@ use serde_json::json;
 use tracing::{debug, error, info};
 
 use crate::app_config::db;
-use crate::trading::okx::public_data::CandleData;
+use okx::dto::market_dto::CandleOkxRespDto;
 use rbatis::impl_select;
 
 /// table
@@ -104,33 +104,48 @@ impl CandlesModel {
         let table_name = format!("{}_candles_{}", inst_id, time_interval);
         table_name
     }
-    pub(crate) async fn add(
+    pub async fn add(
         &self,
-        list: Vec<CandleData>,
+        list: Vec<CandleOkxRespDto>,
         inst_id: &str,
         time_interval: &str,
     ) -> anyhow::Result<ExecResult> {
-        // let data = CandlesEntity::insert_batch(&self.db, &list, list.len() as u64).await;
+        // let items :Vec<CandlesEntity>= list.iter().map(|candle| {
+        //     CandlesEntity {
+        //         ts: candle.ts.parse::<i64>().unwrap(),
+        //         o: candle.o.to_string(),
+        //         h: candle.h.to_string(),
+        //         l: candle.l.to_string(),
+        //         c: candle.c.to_string(),
+        //         vol: candle.v.to_string(),
+        //         vol_ccy: candle.vol_ccy.to_string(),
+        //         // vol_ccy_quote: candle.vol_ccy_quote.to_string(),
+        //         confirm: candle.confirm.to_string(),
+        //     }
+        // }).collect();
+        // let data = CandlesEntity::insert_batch(self.db, &items, items.len() as u64).await?;
         // println!("insert_batch = {}", json!(data));
+        // Ok(data)
 
+        //自定义表名
         let table_name = format!("{}_candles_{}", inst_id, time_interval);
         // 构建批量插入的 SQL 语句
         let mut query = format!(
-            "INSERT INTO `{}` (ts, o, h, l, c, vol, vol_ccy, vol_ccy_quote, confirm) VALUES ",
+            "INSERT INTO `{}` (ts, o, h, l, c, vol, vol_ccy, confirm) VALUES ",
             table_name
         );
         let mut params = Vec::new();
 
         for candle in list {
-            query.push_str("(?, ?, ?, ?, ?, ?, ?, ?, ?),");
+            query.push_str("(?, ?, ?, ?, ?, ?,?,?),");
             params.push(candle.ts.into());
             params.push(candle.o.into());
             params.push(candle.h.into());
             params.push(candle.l.into());
             params.push(candle.c.into());
-            params.push(candle.vol.into());
+            params.push(candle.v.into());
             params.push(candle.vol_ccy.into());
-            params.push(candle.vol_ccy_quote.into());
+            // params.push(candle.vol_ccy_quote.into());
             params.push(candle.confirm.into());
         }
 
@@ -186,7 +201,7 @@ impl CandlesModel {
     ) -> anyhow::Result<u64> {
         let table_name = format!("{}_candles_{}", inst_id, time_interval);
         let query = format!(
-            "UPDATE `{}` SET o = ?, h = ?, l = ?, c = ?, vol = ?, vol_ccy = ?, vol_ccy_quote = ?, confirm = ? WHERE ts = ?",
+            "UPDATE `{}` SET o = ?, h = ?, l = ?, c = ?, vol = ?, vol_ccy = ?, confirm = ? WHERE ts = ?",
             table_name
         );
 
@@ -213,7 +228,7 @@ impl CandlesModel {
 
     pub async fn update_or_create(
         &self,
-        candle_data: &CandleData,
+        candle_data: &CandleOkxRespDto,
         inst_id: &str,
         time_interval: &str,
     ) -> anyhow::Result<()> {
@@ -237,7 +252,7 @@ impl CandlesModel {
                 h: candle_data.h.to_string(),
                 l: candle_data.l.to_string(),
                 c: candle_data.c.to_string(),
-                vol: candle_data.vol.to_string(),
+                vol: candle_data.v.to_string(),
                 vol_ccy: candle_data.vol_ccy.to_string(),
                 // vol_ccy_quote: candle_data.vol_ccy_quote.to_string(),
                 confirm: candle_data.confirm.to_string(),

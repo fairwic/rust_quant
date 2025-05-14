@@ -11,7 +11,7 @@ use tracing::field::debug;
 use crate::trading::model::market::tickers::{TickersDataEntity, TicketsModel};
 use crate::trading::model::asset::AssetModel;
 use crate::trading::model::market::candles::{CandlesEntity, CandlesModel};
-use crate::trading::okx::market::Market;
+use okx::api::market::OkxMarket;
 use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 
 
@@ -81,7 +81,7 @@ pub async fn init_all_candles(inst_ids: Option<Vec<&str>>, times: Option<&Vec<&s
                 sleep(Duration::from_millis(200)).await;
                 info!("get after history_candles {},{}",&ticker.inst_id,time);
                 //对下面进行的请求超时的时候进行重试
-                let res = Market::new().get_history_candles(&ticker.inst_id, time, Some(&after.to_string()), None, None).await;
+                let res = OkxMarket::from_env()?.get_history_candles(&ticker.inst_id, time, Some(&after.to_string()), None, None).await;
                 if res.is_err() {
                     warn!("get history_candles {} {} error",&ticker.inst_id,time);
                     continue;
@@ -144,8 +144,18 @@ pub async fn init_before_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<
                 info!("get before history_candles {},{}",&ticker.inst_id,time);
                 //要计算出after_time
                 let (begin, after) = get_sync_begin_with_end(ticker.inst_id.as_str(), time).await?;
+                // info!("begin: {}, after: {}", begin.unwrap().clone(), after.unwrap().clone());
+                info!("11111");
 
-                let res = Market::new().get_history_candles(&ticker.inst_id, time, Some(&after.unwrap()), Some(&begin.unwrap()), Some("300")).await?;
+                let res = OkxMarket::from_env();
+                if res.is_err() {
+                    info!("OKX Market 初始化失败");
+                    continue;
+                }
+                let res = res.unwrap();
+                println!("res: {:?}", res);
+
+                let res = res.get_history_candles(&ticker.inst_id, time, Some(&after.unwrap()), Some(&begin.unwrap()), Some("300")).await?;
                 if res.is_empty() {
                     debug!("No new candles patch{},{}",ticker.inst_id, time);
                     break;
@@ -174,7 +184,7 @@ pub async fn update_new_candles_to_redis(mut redis: MultiplexedConnection, inst_
         before = res.unwrap().ts;
     }
     let key = CandlesModel::get_tale_name(inst_id, time);
-    let res = Market::new().get_candles(&inst_id, time, None, Some(&before.to_string()), Some("300")).await?;
+    let res = OkxMarket::from_env()?.get_candles(&inst_id, time, None, Some(&before.to_string()), Some("300")).await?;
     if res.is_empty() {
         debug!("No new candles patch{},{}",inst_id, time);
         return Ok(());
@@ -200,7 +210,7 @@ pub async fn update_new_candles_to_db(inst_id: &str, time: &str) -> anyhow::Resu
         before = res.unwrap().ts;
     }
     loop {
-        let res = Market::new().get_candles(&inst_id, time, None, Some(&before.to_string()), Some("300")).await?;
+        let res = OkxMarket::from_env()?.get_candles(&inst_id, time, None, Some(&before.to_string()), Some("300")).await?;
         if res.is_empty() {
             debug!("No new candles patch{},{}",inst_id, time);
             break;

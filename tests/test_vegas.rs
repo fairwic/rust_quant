@@ -20,7 +20,7 @@ async fn test_vegas() -> Result<()> {
     let inst_id = "BTC-USDT-SWAP";
     let time = "1H";
     let select_time: SelectTime = SelectTime {
-        point_time: 1744513200000,
+        point_time: 1745146800000,
         direct: TimeDirect::BEFORE,
     };
 
@@ -30,14 +30,14 @@ async fn test_vegas() -> Result<()> {
 
     let mut data_items = vec![];
     let mut strategy = VegasStrategy::default();
+    println!("strategy: {:#?}", strategy);
     let mut indicator_combine = strategy.get_indicator_combine();
 
     for (i, candle) in candles_list.iter().enumerate() {
         // 获取数据项
         let data_item = parse_candle_to_data_item(candle);
 
-        if i == (candles_list.len() - 1) {
-        }
+        //
         // 获取指标的值
         let mut multi_indicator_values =
             get_multi_indivator_values(&mut indicator_combine, &data_item);

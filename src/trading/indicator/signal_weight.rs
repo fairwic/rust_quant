@@ -55,8 +55,8 @@ pub enum SignalCondition {
         is_close_signal: bool,
     },
     Engulfing {
-        is_long_engulfing: bool,
-        is_short_engulfing: bool,
+        is_long_signal: bool,
+        is_short_signal: bool,
     },
     KlineHammer {
         is_long_signal: bool,
@@ -128,8 +128,8 @@ impl SignalWeightsConfig {
 
         match condition {
             SignalCondition::Engulfing {
-                is_long_engulfing,
-                is_short_engulfing,
+                is_long_signal: is_long_engulfing,
+                is_short_signal: is_short_engulfing,
             } => {
                 if is_long_engulfing {
                     Some(CheckConditionResult {

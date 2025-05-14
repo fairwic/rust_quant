@@ -26,6 +26,7 @@ use super::is_big_kline::IsBigKLineIndicator;
 use super::k_line_engulfing_indicator::KlineEngulfingIndicator;
 use super::k_line_hammer_indicator::KlineHammerIndicator;
 use super::volume_indicator::VolumeRatioIndicator;
+use crate::trading::strategy::arc::indicator_values::ema_indicator_values;
 
 /// 锤子形态配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -40,8 +41,8 @@ pub struct KlineHammerConfig {
 impl Default for KlineHammerConfig {
     fn default() -> Self {
         Self {
-            up_shadow_ratio: 0.62,
-            down_shadow_ratio: 0.62,
+            up_shadow_ratio: 0.6,
+            down_shadow_ratio: 0.6,
             max_other_side_shadow_ratio: 0.1,
             body_ratio: 0.7,
         }
@@ -120,8 +121,8 @@ impl Default for VolumeSignalConfig {
     fn default() -> Self {
         Self {
             volume_bar_num: 3,
-            volume_increase_ratio: 2.5,
-            volume_decrease_ratio: 2.5,
+            volume_increase_ratio: 2.2,
+            volume_decrease_ratio: 2.2,
             is_open: true,
             is_force_dependent: false,
         }
@@ -211,9 +212,9 @@ pub struct RsiSignalConfig {
 impl Default for RsiSignalConfig {
     fn default() -> Self {
         Self {
-            rsi_length: 12,
-            rsi_oversold: 25.0,
-            rsi_overbought: 75.0,
+            rsi_length: 18,
+            rsi_oversold: 90.0,
+            rsi_overbought: 20.0,
             is_open: true,
         }
     }
@@ -258,8 +259,8 @@ impl Default for EmaTouchTrendSignalConfig {
     fn default() -> Self {
         Self {
             ema1_with_ema2_ratio: 1.010,      //ema1与ema2的相差幅度
-            ema4_with_ema5_ratio: 1.012,      //ema4与ema5的相差幅度
-            ema3_with_ema4_ratio: 1.012,      //ema3与ema4的相差幅度
+            ema4_with_ema5_ratio: 1.006,      //ema4与ema5的相差幅度
+            ema3_with_ema4_ratio: 1.006,      //ema3与ema4的相差幅度
             ema2_with_ema3_ratio: 1.012,      //ema2与ema3的相差幅度
             price_with_ema_high_ratio: 1.005, //价格与ema4的相差幅度
             price_with_ema_low_ratio: 0.995,  //价格与ema4的相差幅度
@@ -402,6 +403,7 @@ impl VegasStrategy {
             should_buy: false,
             should_sell: false,
             open_price: last_data_item.c,
+            tp_price: None,
             ts: last_data_item.ts,
             single_value: None,
             single_result: None,
@@ -488,51 +490,20 @@ impl VegasStrategy {
         let k_line_amplitude = self.calculate_k_line_amplitude(data_items);
 
         //计算吞没形态
-        let is_engulfing = self.check_engulfing_signal(data_items, vegas_indicator_signal_values);
-        if is_engulfing {
-            //如果当前k线收盘价大于开盘价，则认为是多头吞没形态，否则为空头吞没形态
-            if data_items.last().unwrap().c > data_items.last().unwrap().o() {
-                conditions.push((
-                    SignalType::Engulfing,
-                    SignalCondition::Engulfing {
-                        is_long_engulfing: true,
-                        is_short_engulfing: false,
-                    },
-                ));
-            } else {
-                conditions.push((
-                    SignalType::Engulfing,
-                    SignalCondition::Engulfing {
-                        is_long_engulfing: false,
-                        is_short_engulfing: true,
-                    },
-                ));
-            }
-        }
+        self.check_engulfing_signal(
+            data_items,
+            vegas_indicator_signal_values,
+            &mut conditions,
+            vegas_indicator_signal_values.ema_values,
+        );
 
         //添加锤子形态
-        if let Some(kline_hammer_signal) = &self.kline_hammer_signal {
-                self.check_kline_hammer_signal(data_items, vegas_indicator_signal_values);
-            if vegas_indicator_signal_values
-                .kline_hammer_value
-                .is_long_signal
-                || vegas_indicator_signal_values
-                    .kline_hammer_value
-                    .is_short_signal
-            {
-                conditions.push((
-                    SignalType::KlineHammer,
-                    SignalCondition::KlineHammer {
-                        is_long_signal: vegas_indicator_signal_values
-                            .kline_hammer_value
-                            .is_long_signal,
-                        is_short_signal: vegas_indicator_signal_values
-                            .kline_hammer_value
-                            .is_short_signal,
-                    },
-                ));
-            }
-        }
+        self.check_kline_hammer_signal(
+            data_items,
+            vegas_indicator_signal_values,
+            &mut conditions,
+            vegas_indicator_signal_values.ema_values,
+        );
 
         // println!("vegas_indicator_signal_values: {:#?}", vegas_indicator_signal_values);
         //todo 可以考虑在出现上影线，且价格在恰好收盘在均线下方，可以开空，反之可以开多
@@ -625,6 +596,7 @@ impl VegasStrategy {
 
         if let Some(ema_touch_trend_signal) = &self.ema_touch_trend_signal {
             //todo  优化时间点 2024-12-09 08:00:00
+            // println!("111111111 ema_value: {:#?}", ema_value);
             if ema_value.ema2_value > ema_value.ema3_value
                 && ema_value.ema3_value > ema_value.ema4_value
             {
@@ -641,16 +613,31 @@ impl VegasStrategy {
                     ema_touch_trend_value.is_long_signal = true;
                 } else {
                     // 当开盘价格大于ema4的时候， 当价格下跌接近ema4或者ema5位置时候=>价格接近ema4,ema5均线附近 ,且ema4 乘以一定比例依旧<于ema3=> 说明价格下跌幅度较大
-                    if ((data_itms.last().unwrap().o() > ema_value.ema4_value)
-                        && data_itms.last().unwrap().l()
-                            <= ema_value.ema4_value * ema_touch_trend_signal.ema3_with_ema4_ratio
+                    let condition_1 = data_itms.last().unwrap().o() > ema_value.ema4_value;
+                    let condition_2 = data_itms.last().unwrap().l()
+                        <= ema_value.ema4_value * ema_touch_trend_signal.ema3_with_ema4_ratio
                         || data_itms.last().unwrap().l()
-                            <= ema_value.ema5_value * ema_touch_trend_signal.ema4_with_ema5_ratio)
-                        && (ema_value.ema4_value * ema_touch_trend_signal.ema3_with_ema4_ratio
-                            <= ema_value.ema3_value
-                            || ema_value.ema4_value * ema_touch_trend_signal.ema4_with_ema5_ratio
-                                <= ema_value.ema3_value)
-                    {
+                            <= ema_value.ema5_value * ema_touch_trend_signal.ema4_with_ema5_ratio;
+                    // println!(
+                    //     "ema_value.ema3_value: {}, ema_value.ema4_value: {}, ema_value.ema5_value: {}",
+                    //     ema_value.ema3_value, ema_value.ema4_value, ema_value.ema5_value
+                    // );
+                    // println!(
+                    //     "ema_value.ema4_value * ema_touch_trend_signal.ema3_with_ema4_ratio: {}, ema_value.ema4_value * ema_touch_trend_signal.ema4_with_ema5_ratio: {}",
+                    //     ema_value.ema4_value * ema_touch_trend_signal.ema3_with_ema4_ratio,
+                    //     ema_value.ema5_value * ema_touch_trend_signal.ema4_with_ema5_ratio
+                    // );
+
+                    let condition_3 = ema_value.ema4_value
+                        * ema_touch_trend_signal.ema3_with_ema4_ratio
+                        <= ema_value.ema3_value
+                        || ema_value.ema4_value * ema_touch_trend_signal.ema4_with_ema5_ratio
+                            <= ema_value.ema3_value;
+                    // println!(
+                    //     "condition_1: {}, condition_2: {}, condition_3: {}",
+                    //     condition_1, condition_2, condition_3
+                    // );
+                    if condition_1 && condition_2 && condition_3 {
                         ema_touch_trend_value.is_in_uptrend_touch_ema4_ema5_nums += 1;
                         if data_itms.last().unwrap().l() <= ema_value.ema4_value {
                             ema_touch_trend_value.is_in_uptrend_touch_ema4 = true;
@@ -707,7 +694,10 @@ impl VegasStrategy {
                     }
                 }
             }
-            // println!("111111111ema_touch_trend_value: {:#?}", ema_touch_trend_value);
+            // println!(
+            //     "2222222 ema_touch_trend_value: {:#?}",
+            //     ema_touch_trend_value
+            // );
         }
 
         ema_touch_trend_value
@@ -1041,9 +1031,11 @@ impl VegasStrategy {
         &self,
         data_items: &[CandleItem],
         vegas_indicator_signal_value: &mut VegasIndicatorSignalValue,
-    ) -> bool {
+        conditions: &mut Vec<(SignalType, SignalCondition)>,
+        ema_value: EmaSignalValue,
+    ) {
         //todo 如果是吞没形态，开仓几个大概率是在趋势的末端，所以需要判断当前k线是否是趋势的末端，且开仓挂单价格最好小于当前k线路的最高价70% ，或者小于当前k线路的最低价30%
-
+        let mut is_engulfing = false;
         if let Some(engulfing_signal) = &self.engulfing_signal {
             if vegas_indicator_signal_value.engulfing_value.is_engulfing
                 && vegas_indicator_signal_value.engulfing_value.body_ratio
@@ -1052,22 +1044,54 @@ impl VegasStrategy {
                 vegas_indicator_signal_value
                     .engulfing_value
                     .is_valid_engulfing = true;
-                return true;
+                is_engulfing = true;
             }
         }
-        false
+
+        if is_engulfing {
+            let mut is_long_signal = false;
+            let mut is_short_signal = false;
+            //但出现吞没形态，且如果当前k线收盘价大于开盘价，则认为是多头吞没形态，否则为空头吞没形态
+            if data_items.last().unwrap().c > data_items.last().unwrap().o() {
+                is_long_signal = true;
+                //且当ema均线是空头排列，且收盘小于于ema1均线，则多头形态失效
+                // if ema_value.is_short_trend == true
+                //     && data_items.last().unwrap().c < ema_value.ema1_value
+                // {
+                //     is_long_signal = false;
+                // }
+            } else {
+                is_short_signal = true;
+                //且当ema均线是多头排列，且收盘大于ema1均线，则空头形态失效
+                // if ema_value.is_long_trend == true
+                //     && data_items.last().unwrap().c > ema_value.ema1_value
+                // {
+                //     is_short_signal = false;
+                // }
+            }
+            conditions.push((
+                SignalType::Engulfing,
+                SignalCondition::Engulfing {
+                    is_long_signal: is_long_signal,
+                    is_short_signal: is_short_signal,
+                },
+            ));
+        }
     }
 
     fn check_kline_hammer_signal(
         &self,
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &mut VegasIndicatorSignalValue,
+        conditions: &mut Vec<(SignalType, SignalCondition)>,
+        ema_value: EmaSignalValue,
     ) {
         if let Some(kline_hammer_signal) = &self.kline_hammer_signal {
             let is_hammer = vegas_indicator_signal_values.kline_hammer_value.is_hammer;
             let is_hanging_man = vegas_indicator_signal_values
                 .kline_hammer_value
                 .is_hanging_man;
+
             if is_hammer
             // && vegas_indicator_signal_values
             //     .kline_hammer_value
@@ -1077,8 +1101,17 @@ impl VegasStrategy {
                 vegas_indicator_signal_values
                     .kline_hammer_value
                     .is_long_signal = true;
+                // //如果ema均线是空头排列，且收盘价<于ema1均线，则不能开多单
+                if ema_value.is_short_trend == true
+                    && data_items.last().unwrap().c < ema_value.ema1_value
+                {
+                    vegas_indicator_signal_values
+                        .kline_hammer_value
+                        .is_long_signal = false;
+                }
             }
 
+            //如果ema均线是空头排列，且收盘价小于ema1均线，则才能是下跌信号
             if is_hanging_man
             // && vegas_indicator_signal_values
             //     .kline_hammer_value
@@ -1088,7 +1121,34 @@ impl VegasStrategy {
                 vegas_indicator_signal_values
                     .kline_hammer_value
                     .is_short_signal = true;
+                // //如果ema均线是空头排列，且收盘价小于ema1均线，则不能开空单
+                if ema_value.is_long_trend == true
+                    && data_items.last().unwrap().c > ema_value.ema1_value
+                {
+                    vegas_indicator_signal_values
+                        .kline_hammer_value
+                        .is_short_signal = false;
+                }
             }
+        }
+        if vegas_indicator_signal_values
+            .kline_hammer_value
+            .is_long_signal
+            || vegas_indicator_signal_values
+                .kline_hammer_value
+                .is_short_signal
+        {
+            conditions.push((
+                SignalType::KlineHammer,
+                SignalCondition::KlineHammer {
+                    is_long_signal: vegas_indicator_signal_values
+                        .kline_hammer_value
+                        .is_long_signal,
+                    is_short_signal: vegas_indicator_signal_values
+                        .kline_hammer_value
+                        .is_short_signal,
+                },
+            ));
         }
     }
 }

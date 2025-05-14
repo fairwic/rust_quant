@@ -2,8 +2,6 @@ use crate::trading::model::big_data::top_contract_position_ratio::{
     ModelEntity, TopContractPositionRatioModel,
 };
 use crate::trading::model::market::candles::SelectTime;
-use crate::trading::okx::big_data::{BigDataOkxApi, TakerVolume};
-use crate::trading::okx::market::Market;
 use chrono::Utc;
 use log::info;
 use redis::Commands;
@@ -13,6 +11,7 @@ use tokio::time::sleep;
 use tracing::{debug, error, warn};
 use crate::trading::services::big_data::top_contract_service_trait::TopContractServiceTrait;
 use async_trait::async_trait;
+use okx::OkxBigData;
 
 pub struct BigDataTopPositionService {}
 impl  BigDataTopPositionService {
@@ -126,14 +125,16 @@ impl  BigDataTopPositionService {
         begin: &Option<String>,
         end: &Option<String>,
     ) -> anyhow::Result<Vec<Vec<String>>> {
-        BigDataOkxApi::get_long_short_account_ratio_contract_top_trader(
+        let okx = OkxBigData::from_env()?;
+        let res = okx.get_long_short_account_ratio_contract_top_trader(
             inst_id,
             Some(period),
             begin.as_deref(),
             end.as_deref(),
             Some("100"),
         )
-        .await
+        .await?;
+        Ok(res)
     }
 
     // 同步 Okx 数据并插入

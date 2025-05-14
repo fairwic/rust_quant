@@ -4,7 +4,7 @@ use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use crate::app_config;
-use crate::trading::okx::asset::AssetData;
+use okx::dto::asset::asset_dto::AssetBalance;
 use rbatis::impl_select;
 
 /// table
@@ -36,7 +36,7 @@ impl AssetModel {
             db: app_config::db::get_db_client(),
         }
     }
-    pub async fn add(&self, list: Vec<AssetData>) -> anyhow::Result<()> {
+    pub async fn add(&self, list: Vec<AssetBalance>) -> anyhow::Result<()> {
         let tickers_db: Vec<AssetEntity> = list.iter()
             .map(|ticker| AssetEntity {
                 ccy: ticker.ccy.clone(),
@@ -50,7 +50,7 @@ impl AssetModel {
         println!("insert_batch = {}", json!(data));
         Ok(())
     }
-    pub async fn update(&self, ticker: &AssetData) -> anyhow::Result<()> {
+    pub async fn update(&self, ticker: &AssetBalance) -> anyhow::Result<()> {
         let tickets_data = AssetEntity {
             ccy: ticker.ccy.clone(),
             bal: ticker.bal.clone(),

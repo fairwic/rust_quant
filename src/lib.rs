@@ -4,8 +4,25 @@
 #![allow(unused_mut)]
 #![allow(unused_assignments)]
 #![allow(unused_must_use)]
-
 use once_cell::sync::Lazy;
+use dotenv::dotenv;
+use tracing::{info, error};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::fmt::Subscriber;
+use tracing_subscriber::EnvFilter;
+
+pub async fn app_init() -> anyhow::Result<()> {
+    //设置env
+    dotenv().ok();
+    // 设置日志
+    println!("init log config");
+    crate::app_config::log::setup_logging().await?;
+
+    //初始化数据库连接
+    crate::app_config::db::init_db().await;
+    Ok(())
+}
+
 use std::sync::Arc;
 use tokio_cron_scheduler::JobScheduler;
 use tokio::sync::Mutex;

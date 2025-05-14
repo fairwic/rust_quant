@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::app_config::db::get_db_client;
-use crate::trading::okx::market::TickersData;
+use okx::dto::market_dto::TickerOkxResDto;
+// use okx::dto::market_model::TickersData;
 
 /// table
 #[derive(Serialize, Deserialize, Debug)]
@@ -84,7 +85,7 @@ impl TicketsModel {
     }
 
 
-    pub async fn add(&self, list: Vec<TickersData>) -> anyhow::Result<ExecResult> {
+    pub async fn add(&self, list: Vec<TickerOkxResDto>) -> anyhow::Result<ExecResult> {
         let tickers_db: Vec<TickersDataEntity> = list.iter()
             .map(|ticker| TickersDataEntity {
                 inst_type: ticker.inst_type.clone(),
@@ -112,7 +113,7 @@ impl TicketsModel {
         println!("insert_batch = {}", json!(data));
         Ok(data)
     }
-    pub async fn update(&self, ticker: &TickersData) -> anyhow::Result<()> {
+    pub async fn update(&self, ticker: &TickerOkxResDto) -> anyhow::Result<()> {
         let tickets_data = TickersDataEntity {
             inst_type: ticker.inst_type.clone(),
             inst_id: ticker.inst_id.clone(),

@@ -2,14 +2,12 @@ use crate::trading::model::big_data::take_volume::{TakerVolumeEntity, TakerVolum
 use crate::trading::model::big_data::take_volume_contract::{
     ModelEntity, TakerVolumeContractModel,
 };
-use crate::trading::okx::big_data::{BigDataOkxApi, TakerVolume};
-use crate::trading::okx::market::Market;
 use chrono::Utc;
 use log::info;
 use redis::Commands;
-use std::error::Error;
 use std::time::Duration;
 use tracing::debug;
+use okx::{Error, OkxBigData};
 
 pub struct BigDataContractService {}
 
@@ -83,8 +81,8 @@ impl BigDataContractService {
         period: &str,
         begin: &Option<String>,
         end: &Option<String>,
-    ) -> anyhow::Result<Vec<Vec<String>>> {
-        BigDataOkxApi::get_taker_volume_contract(
+    ) -> Result<Vec<Vec<String>>,Error> {
+        OkxBigData::from_env()?.get_taker_volume_contract(
             inst_id,
             Some(period),
             Some("2"),

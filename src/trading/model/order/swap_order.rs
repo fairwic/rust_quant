@@ -23,7 +23,7 @@ pub struct SwapOrderEntity {
     pub inst_id: String,  // 使用 Vec<u8> 来表示 VARBINARY
     pub side: String,
     pub pos_side: String,
-    pub okx_ord_id: String,
+    pub cl_ord_id: String,
     pub tag: String,
     pub detail: String,
 }

@@ -3,3 +3,4 @@
 .vcs.xml
 .idea
 .vscode
+.cargo

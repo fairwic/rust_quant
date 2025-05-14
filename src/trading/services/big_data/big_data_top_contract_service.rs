@@ -3,16 +3,15 @@ use crate::trading::model::big_data::top_contract_account_ratio::{
 };
 use crate::trading::model::market::candles;
 use crate::trading::model::market::candles::SelectTime;
-use crate::trading::okx::big_data::{BigDataOkxApi, TakerVolume};
-use crate::trading::okx::market::Market;
+use okx::api::market::OkxMarket;
 use chrono::Utc;
 use log::info;
 use redis::Commands;
-use std::error::Error;
 use std::time::Duration;
 use tracing::{debug, error, warn};
 use crate::trading::services::big_data::top_contract_service_trait::TopContractServiceTrait;
 use async_trait::async_trait;
+use okx::{Error, OkxBigData};
 
 pub struct BigDataTopContractService {}
 
@@ -119,8 +118,8 @@ impl BigDataTopContractService {
         period: &str,
         begin: &Option<String>,
         end: &Option<String>,
-    ) -> anyhow::Result<Vec<Vec<String>>> {
-        BigDataOkxApi::get_long_short_account_ratio_contract_top_trader(
+    ) -> Result<Vec<Vec<String>>, Error> {
+        OkxBigData::from_env()?.get_long_short_account_ratio_contract_top_trader(
             inst_id,
             Some(period),
             begin.as_deref(),

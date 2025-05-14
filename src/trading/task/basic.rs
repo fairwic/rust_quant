@@ -20,7 +20,8 @@ use crate::trading::model::strategy::back_test_detail::BackTestDetail;
 use crate::trading::model::strategy::strategy_config::*;
 use crate::trading::model::strategy::strategy_job_signal_log::StrategyJobSignalLog;
 use crate::trading::model::strategy::{back_test_detail, strategy_job_signal_log};
-use crate::trading::okx::account::{Position, PositionResponse};
+use okx::api::account::OkxAccount;
+use okx::dto::account::account_dto::SetLeverageRequest;
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
 use crate::trading::strategy::strategy_common::{
     get_multi_indivator_values, parse_candle_to_data_item, BackTestResult, BasicRiskStrategyConfig,
@@ -31,6 +32,7 @@ use crate::trading::strategy::{self, strategy_common};
 use crate::trading::strategy::{engulfing_strategy, Strategy};
 use crate::trading::{order, task};
 
+use super::job_param_generator::ParamMerge;
 use crate::app_config::db;
 use crate::time_util::millis_time_diff;
 use crate::trading::analysis::position_analysis::PositionAnalysis;
@@ -43,8 +45,7 @@ use crate::trading::indicator::vegas_indicator::{
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
-use crate::trading::okx::account::Account;
-use crate::trading::okx::trade::{PosSide, TdMode};
+use okx::api::trade::OkxTrade;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::get_hash_key;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::get_vegas_indicator_values;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::update_candle_items;
@@ -60,6 +61,7 @@ use crate::trading::strategy::top_contract_strategy::{
 };
 use crate::trading::strategy::{StopLossStrategy, StrategyType};
 use crate::trading::task::candles_job;
+use crate::trading::task::job_param_generator::ParamGenerator;
 use crate::{trading, CandleItem};
 use anyhow::Result;
 use futures::future::join_all;
@@ -71,6 +73,9 @@ use serde_json::json;
 use tokio;
 use tokio::time::Instant;
 use tracing::span;
+use crate::trading::order::swap_ordr::SwapOrder;
+use okx::dto::trade_dto::TdModeEnum;
+use okx::dto::PositionSide;
 
 /** 同步数据 任务**/
 pub async fn run_sync_data_job(
@@ -108,18 +113,18 @@ pub async fn run_set_leverage(inst_ids: &Vec<&str>) -> Result<(), anyhow::Error>
             level = 15;
         }
 
-        for post_side in [PosSide::LONG, PosSide::SHORT] {
-            let params = trading::okx::account::SetLeverageRequest {
+        for post_side in [PositionSide::Long, PositionSide::Short] {
+            let params = SetLeverageRequest {
                 inst_id: Some(inst_id.to_string()),
                 ccy: None,
-                mgn_mode: TdMode::ISOLATED.to_string(),
+                mgn_mode: TdModeEnum::ISOLATED.to_string(),
                 lever: level.to_string(),
                 pos_side: Some(post_side.to_string()),
             };
             //延迟100ms
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-            Account::set_leverage(params).await?;
+            OkxAccount::from_env()?.set_leverage(params).await?;
         }
     }
     Ok(())
@@ -356,15 +361,8 @@ pub async fn save_log(
         .await
         .add(&back_test_log)
         .await?;
-    // let duration = start_time.elapsed();
-    // let res = format!(
-    //     "save_log add 函数 执行时间{}毫秒 影响行数{}",
-    //     duration.as_millis(),
-    //     1
-    // );
-    // info!("{}", res);
 
-    if false {
+    // if false {
         // 保存详细交易记录
         if !back_test_result.trade_records.is_empty() {
             save_test_detail(
@@ -376,14 +374,75 @@ pub async fn save_log(
             )
             .await?;
         }
-    }
+    // }
     Ok(back_test_id)
+}
+
+pub async fn test_random_strategy(
+    inst_id: &str,
+    time: &str,
+    arc_candle_item_clone: Arc<Vec<CandleItem>>,
+    semaphore: Arc<Semaphore>,
+) {
+    // 参数范围
+    let bb_periods = vec![12, 13, 14, 15, 16];
+    let bb_multipliers = vec![2.0, 2.5, 3.0, 3.5, 4.0];
+
+    let shadow_ratios = vec![0.6, 0.7, 0.8, 0.9];
+
+    let volume_bar_nums = vec![3, 4, 5, 6];
+    let volume_increase_ratios: Vec<f64> = (20..=41).map(|x| x as f64 * 0.1).collect();
+    let volume_decrease_ratios: Vec<f64> = (20..=41).map(|x| x as f64 * 0.1).collect();
+    let breakthrough_thresholds = vec![0.003];
+
+    let rsi_periods = vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    let rsi_overboughts = vec![85.0, 86.0, 87.0, 88.0, 89.0, 90.0];
+    let rsi_oversolds = vec![15.0, 16.0, 17.0, 18.0, 19.0, 20.0];
+
+    // 将参数组合转换为扁平的迭代器
+    info!("正在生成参数组合...");
+
+    let mut param_generator = ParamGenerator::new(
+        bb_periods,
+        shadow_ratios,
+        bb_multipliers,
+        volume_bar_nums,
+        volume_increase_ratios,
+        volume_decrease_ratios,
+        breakthrough_thresholds,
+        rsi_periods,
+        rsi_overboughts,
+        rsi_oversolds,
+    );
+
+    let (_, total_count) = param_generator.progress();
+    info!("总共需要处理 {} 个参数组合", total_count);
+
+    // 批量处理
+    let batch_size = 100;
+    let mut batch_num = 0;
+    let mut params_batch = Vec::new();
+
+    loop {
+        params_batch = param_generator.get_next_batch(batch_size);
+        if params_batch.is_empty() {
+            break; // 所有参数处理完毕
+        }
+        run_test_strategy(
+            params_batch,
+            inst_id,
+            time,
+            arc_candle_item_clone.clone(),
+            semaphore.clone(),
+        )
+        .await;
+    }
 }
 
 // 主函数，执行所有策略测试
 pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
     // 获取数据
-    let mysql_candles = self::get_candle_data(inst_id, time, 10000, None).await?;
+    let mysql_candles = self::get_candle_data(inst_id, time, 20000, None).await?;
 
     let candle_item_vec: Vec<CandleItem> = mysql_candles
         .iter()
@@ -409,299 +468,226 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     // 创建信号量限制并发数
     let semaphore = Arc::new(Semaphore::new(30)); // 控制最大并发数量为 10
 
-    // 参数范围
-    let bb_periods = vec![12, 13, 14, 15, 16];
-    let bb_multipliers = vec![2.0, 2.5, 3.0, 3.5, 4.0];
+    // 测试随机策略
+    // test_random_strategy(inst_id, time, arc_candle_item_clone.clone(), semaphore.clone()).await;
+    //测试指定策略
+    test_specified_strategy(
+        inst_id,
+        time,
+        arc_candle_item_clone.clone(),
+        semaphore.clone(),
+    )
+    .await;
 
-    let shadow_ratios = vec![0.6, 0.7, 0.8, 0.9];
-
-    let volume_bar_nums = vec![3, 4, 5, 6];
-    let volume_increase_ratios: Vec<f64> = (20..=41).map(|x| x as f64 * 0.1).collect();
-    let volume_decrease_ratios: Vec<f64> = (20..=41).map(|x| x as f64 * 0.1).collect();
-    let breakthrough_thresholds = vec![0.003];
-
-    let rsi_periods = vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
-    let rsi_overboughts = vec![85.0, 86.0, 87.0, 88.0, 89.0, 90.0];
-    let rsi_oversolds = vec![15.0, 16.0, 17.0, 18.0, 19.0, 20.0];
-
-    // 将参数组合转换为扁平的迭代器
-    info!("正在生成参数组合...");
-
-    // 使用一个生成参数的函数，避免存储所有组合
-    struct ParamGenerator {
-        bb_periods: Vec<i32>,
-        shadow_ratios: Vec<f64>,
-        bb_multipliers: Vec<f64>,
-        volume_bar_nums: Vec<usize>,
-        volume_increase_ratios: Vec<f64>,
-        volume_decrease_ratios: Vec<f64>,
-        breakthrough_thresholds: Vec<f64>,
-        rsi_periods: Vec<usize>,
-        rsi_overboughts: Vec<f64>,
-        rsi_oversolds: Vec<f64>,
-        current_index: usize,
-        total_count: usize,
-    }
-
-    impl ParamGenerator {
-        fn new(
-            bb_periods: Vec<i32>,
-            shadow_ratios: Vec<f64>,
-            bb_multipliers: Vec<f64>,
-            volume_bar_nums: Vec<usize>,
-            volume_increase_ratios: Vec<f64>,
-            volume_decrease_ratios: Vec<f64>,
-            breakthrough_thresholds: Vec<f64>,
-            rsi_periods: Vec<usize>,
-            rsi_overboughts: Vec<f64>,
-            rsi_oversolds: Vec<f64>,
-        ) -> Self {
-            let total_count = bb_periods.len()
-                * shadow_ratios.len()
-                * bb_multipliers.len()
-                * volume_bar_nums.len()
-                * volume_increase_ratios.len()
-                * volume_decrease_ratios.len()
-                * breakthrough_thresholds.len()
-                * rsi_periods.len()
-                * rsi_overboughts.len()
-                * rsi_oversolds.len();
-
-            Self {
-                bb_periods,
-                shadow_ratios,
-                bb_multipliers,
-                volume_bar_nums,
-                volume_increase_ratios,
-                volume_decrease_ratios,
-                breakthrough_thresholds,
-                rsi_periods,
-                rsi_overboughts,
-                rsi_oversolds,
-                current_index: 0,
-                total_count,
-            }
-        }
-
-        fn get_next_batch(
-            &mut self,
-            batch_size: usize,
-        ) -> Vec<(i32, f64, f64, usize, f64, f64, f64, usize, f64, f64)> {
-            let mut batch = Vec::with_capacity(batch_size);
-
-            // 计算当前组合的索引
-            while batch.len() < batch_size && self.current_index < self.total_count {
-                let mut index = self.current_index;
-
-                // 计算每个维度的索引
-                let bb_p_size = self.bb_periods.len();
-                let sr_size = self.shadow_ratios.len();
-                let bm_size = self.bb_multipliers.len();
-                let vbn_size = self.volume_bar_nums.len();
-                let vir_size = self.volume_increase_ratios.len();
-                let vdr_size = self.volume_decrease_ratios.len();
-                let bt_size = self.breakthrough_thresholds.len();
-                let rp_size = self.rsi_periods.len();
-                let rob_size = self.rsi_overboughts.len();
-
-                let i_bb_p = index % bb_p_size;
-                index /= bb_p_size;
-
-                let i_sr = index % sr_size;
-                index /= sr_size;
-
-                let i_bm = index % bm_size;
-                index /= bm_size;
-
-                let i_vbn = index % vbn_size;
-                index /= vbn_size;
-
-                let i_vir = index % vir_size;
-                index /= vir_size;
-
-                let i_vdr = index % vdr_size;
-                index /= vdr_size;
-
-                let i_bt = index % bt_size;
-                index /= bt_size;
-
-                let i_rp = index % rp_size;
-                index /= rp_size;
-
-                let i_rob = index % rob_size;
-                index /= rob_size;
-
-                let i_ros = index % self.rsi_oversolds.len();
-
-                // 获取参数值
-                let param = (
-                    self.bb_periods[i_bb_p],
-                    self.shadow_ratios[i_sr],
-                    self.bb_multipliers[i_bm],
-                    self.volume_bar_nums[i_vbn],
-                    self.volume_increase_ratios[i_vir],
-                    self.volume_decrease_ratios[i_vdr],
-                    self.breakthrough_thresholds[i_bt],
-                    self.rsi_periods[i_rp],
-                    self.rsi_overboughts[i_rob],
-                    self.rsi_oversolds[i_ros],
-                );
-
-                batch.push(param);
-                self.current_index += 1;
-            }
-
-            batch
-        }
-
-        fn progress(&self) -> (usize, usize) {
-            (self.current_index, self.total_count)
-        }
-    }
-
-    let mut param_generator = ParamGenerator::new(
-        bb_periods,
-        shadow_ratios,
-        bb_multipliers,
-        volume_bar_nums,
-        volume_increase_ratios,
-        volume_decrease_ratios,
-        breakthrough_thresholds,
-        rsi_periods,
-        rsi_overboughts,
-        rsi_oversolds,
-    );
-
-    let (_, total_count) = param_generator.progress();
-    info!("总共需要处理 {} 个参数组合", total_count);
-
-    // 批量处理
-    let batch_size = 100;
-    let mut batch_num = 0;
-
-    loop {
-        let params_batch = param_generator.get_next_batch(batch_size);
-        if params_batch.is_empty() {
-            break; // 所有参数处理完毕
-        }
-
-        batch_num += 1;
-        let (processed, total) = param_generator.progress();
-        info!(
-            "处理批次 #{}: {}/{} ({}%)",
-            batch_num,
-            processed,
-            total,
-            (processed as f64 / total as f64 * 100.0) as u32
-        );
-
-        let mut batch_tasks = Vec::with_capacity(params_batch.len());
-
-        for (
-            bb_period,
-            shadow_ratio,
-            bb_multiplier,
-            volume_bar_num,
-            volume_increase_ratio,
-            volume_decrease_ratio,
-            breakthrough,
-            rsi_period,
-            rsi_overbought,
-            rsi_oversold,
-        ) in params_batch
-        {
-            let risk_strategy_config = BasicRiskStrategyConfig {
-                use_dynamic_tp: false,
-                use_fibonacci_tp: true,
-                max_loss_percent: 0.02,
-                profit_threshold: 0.01,
-                is_move_stop_loss: false,
-                is_set_low_price_stop_loss: false,
-            };
-
-            let volumn_signal = VolumeSignalConfig {
-                volume_bar_num,
-                volume_increase_ratio,
-                volume_decrease_ratio,
-                is_open: true,
-                is_force_dependent: false,
-            };
-
-            let rsi_signal = RsiSignalConfig {
-                rsi_length: rsi_period,
-                rsi_oversold,
-                rsi_overbought,
-                is_open: true,
-            };
-
-            let ema_touch_trend_signal = EmaTouchTrendSignalConfig {
-                is_open: true,
-                ..Default::default()
-            };
-
-            let kline_hammer_signal = KlineHammerConfig {
-                up_shadow_ratio: shadow_ratio,
-                down_shadow_ratio: shadow_ratio,
-                max_other_side_shadow_ratio: 0.1,
-                body_ratio: 0.7,
-            };
-
-            let strategy = VegasStrategy {
-                min_k_line_num: 3600,
-                engulfing_signal: Some(EngulfingSignalConfig::default()),
-                ema_signal: Some(EmaSignalConfig::default()),
-                signal_weights: Some(SignalWeightsConfig::default()),
-                volume_signal: Some(volumn_signal),
-                ema_touch_trend_signal: Some(ema_touch_trend_signal),
-                rsi_signal: Some(rsi_signal),
-                bollinger_signal: Some(BollingerBandsSignalConfig {
-                    period: bb_period as usize,
-                    multiplier: bb_multiplier,
-                    is_open: true,
-                }),
-                kline_hammer_signal: Some(kline_hammer_signal),
-            };
-
-            let inst_id = inst_id.to_string();
-            let time = time.to_string();
-            let mysql_candles = Arc::clone(&arc_candle_item_clone);
-            let permit = Arc::clone(&semaphore);
-
-            // 创建任务
-            batch_tasks.push(tokio::spawn(async move {
-                let _permit = permit.acquire().await.unwrap();
-                match run_vegas_test(
-                    &inst_id,
-                    &time,
-                    strategy,
-                    risk_strategy_config,
-                    mysql_candles,
-                )
-                .await
-                {
-                    Ok(back_test_id) => Some(back_test_id),
-                    Err(e) => {
-                        error!("Vegas test failed: {:?}", e);
-                        None
-                    }
-                }
-            }));
-        }
-        // 等待当前批次完成
-        let batch_start = Instant::now();
-        join_all(batch_tasks).await;
-        info!(
-            "批次 #{} 已完成, 耗时: {}ms",
-            batch_num,
-            batch_start.elapsed().as_millis()
-        );
-        batch_tasks = Vec::new();
-    }
-
-    info!("所有任务执行完毕, 共处理 {} 个批次", batch_num);
     Ok(())
 }
 
+pub async fn test_specified_strategy(
+    inst_id: &str,
+    time: &str,
+    arc_candle_item_clone: Arc<Vec<CandleItem>>,
+    semaphore: Arc<Semaphore>,
+) {
+    let params_batch = vec![
+        //btc
+        ParamMerge::build()
+            .shadow_ratio(0.6)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(8).bb_multiplier(2.0)
+            //volume
+            .volume_bar_num(3).volume_increase_ratio(2.2).volume_decrease_ratio(2.2)
+            //rsi
+            .rsi_period(18).rsi_overbought(90.0).rsi_oversold(20.0),
+        //eth
+        ParamMerge::build()
+            .shadow_ratio(0.8)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(16).bb_multiplier(3.0)
+            //volume
+            .volume_bar_num(6).volume_increase_ratio(2.9).volume_decrease_ratio(3.4)
+            //rsi
+            .rsi_period(12).rsi_overbought(85.0).rsi_oversold(15.0),
+        //ada
+        ParamMerge::build()
+            .shadow_ratio(0.6)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(12).bb_multiplier(2.0)
+            //volume
+            .volume_bar_num(6).volume_increase_ratio(2.6).volume_decrease_ratio(4.1)
+            //rsi
+            .rsi_period(8).rsi_overbought(85.0).rsi_oversold(15.0),
+        //om
+        ParamMerge::build()
+            .shadow_ratio(0.6)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(14).bb_multiplier(2.5)
+            //volume
+            .volume_bar_num(3).volume_increase_ratio(3.0).volume_decrease_ratio(4.1)
+            //rsi
+            .rsi_period(8).rsi_overbought(85.0).rsi_oversold(15.0),
+        //sol
+        ParamMerge::build()
+            .shadow_ratio(0.6)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(14).bb_multiplier(2.0)
+            //volume
+            .volume_bar_num(6).volume_increase_ratio(2.9).volume_decrease_ratio(2.4)
+            //rsi
+            .rsi_period(10).rsi_overbought(85.0).rsi_oversold(15.0),
+        //xrp
+        ParamMerge::build()
+            .shadow_ratio(0.6)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(16).bb_multiplier(3.0)
+            //volume
+            .volume_bar_num(5).volume_increase_ratio(2.4).volume_decrease_ratio(3.6)
+            //rsi
+            .rsi_period(13).rsi_overbought(85.0).rsi_oversold(15.0),
+        //sui
+        ParamMerge::build()
+            .shadow_ratio(0.9)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(14).bb_multiplier(3.0)
+            //volume
+            .volume_bar_num(4).volume_increase_ratio(2.2).volume_decrease_ratio(4.1)
+            //rsi
+            .rsi_period(8).rsi_overbought(85.0).rsi_oversold(15.0),
+    ];
+
+//测试
+   let params_batch = vec![
+        //btc
+        ParamMerge::build()
+            .shadow_ratio(0.6)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(8).bb_multiplier(2.8)
+            //volume
+            .volume_bar_num(3).volume_increase_ratio(2.2).volume_decrease_ratio(2.2)
+            //rsi
+            .rsi_period(18).rsi_overbought(90.0).rsi_oversold(20.0),
+   ];
+
+    run_test_strategy(
+        params_batch,
+        inst_id,
+        time,
+        arc_candle_item_clone.clone(),
+        semaphore.clone(),
+    )
+    .await;
+}
+
+pub async fn run_test_strategy(
+    params_batch: Vec<ParamMerge>,
+    inst_id: &str,
+    time: &str,
+    arc_candle_item_clone: Arc<Vec<CandleItem>>,
+    semaphore: Arc<Semaphore>,
+) {
+    let mut batch_tasks = Vec::with_capacity(params_batch.len());
+    for param in params_batch {
+        let bb_period = param.bb_period;
+        let shadow_ratio = param.shadow_ratio;
+        let bb_multiplier = param.bb_multiplier;
+        let volume_bar_num = param.volume_bar_num;
+        let volume_increase_ratio = param.volume_increase_ratio;
+        let volume_decrease_ratio = param.volume_decrease_ratio;
+        let breakthrough_threshold = param.breakthrough_threshold;
+        let rsi_period = param.rsi_period;
+        let rsi_overbought = param.rsi_overbought;
+        let rsi_oversold = param.rsi_oversold;
+
+        let risk_strategy_config = BasicRiskStrategyConfig {
+            use_dynamic_tp: false,
+            use_fibonacci_tp: true,
+            max_loss_percent: 0.02,
+            profit_threshold: 0.01,
+            is_move_stop_loss: true,
+            is_used_signal_k_line_stop_loss: false,
+        };
+
+        let volumn_signal = VolumeSignalConfig {
+            volume_bar_num,
+            volume_increase_ratio,
+            volume_decrease_ratio,
+            is_open: true,
+            is_force_dependent: false,
+        };
+
+        let rsi_signal = RsiSignalConfig {
+            rsi_length: rsi_period,
+            rsi_oversold,
+            rsi_overbought,
+            is_open: true,
+        };
+
+        let ema_touch_trend_signal = EmaTouchTrendSignalConfig {
+            is_open: true,
+            ..Default::default()
+        };
+
+        let kline_hammer_signal = KlineHammerConfig {
+            up_shadow_ratio: shadow_ratio,
+            down_shadow_ratio: shadow_ratio,
+            max_other_side_shadow_ratio: 0.1,
+            body_ratio: 0.7,
+        };
+
+        let strategy = VegasStrategy {
+            min_k_line_num: 3600,
+            engulfing_signal: Some(EngulfingSignalConfig::default()),
+            ema_signal: Some(EmaSignalConfig::default()),
+            signal_weights: Some(SignalWeightsConfig::default()),
+            volume_signal: Some(volumn_signal),
+            ema_touch_trend_signal: Some(ema_touch_trend_signal),
+            rsi_signal: Some(rsi_signal),
+            bollinger_signal: Some(BollingerBandsSignalConfig {
+                period: bb_period as usize,
+                multiplier: bb_multiplier,
+                is_open: true,
+            }),
+            kline_hammer_signal: Some(kline_hammer_signal),
+        };
+
+        let inst_id = inst_id.to_string();
+        let time = time.to_string();
+        let mysql_candles = Arc::clone(&arc_candle_item_clone);
+        let permit = Arc::clone(&semaphore);
+
+        // 创建任务
+        batch_tasks.push(tokio::spawn(async move {
+            let _permit = permit.acquire().await.unwrap();
+            match run_vegas_test(
+                &inst_id,
+                &time,
+                strategy,
+                risk_strategy_config,
+                mysql_candles,
+            )
+            .await
+            {
+                Ok(back_test_id) => Some(back_test_id),
+                Err(e) => {
+                    error!("Vegas test failed: {:?}", e);
+                    None
+                }
+            }
+        }));
+    }
+    // 等待当前批次完成
+    let batch_start = Instant::now();
+    join_all(batch_tasks).await;
+    let batch_end = Instant::now();
+    info!("当前批次完成，用时：{:?}", batch_end.duration_since(batch_start));
+}
 // // 主函数，执行所有策略测试
 // pub async fn squeeze_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
 //     // 获取数据
@@ -1226,6 +1212,6 @@ pub async fn run_ready_to_order(
         .add(signal_record)
         .await?;
 
-    order::deal(StrategyType::Vegas, inst_id, period, signal_result).await?;
+    SwapOrder::new().ready_to_order(StrategyType::Vegas, inst_id, period, signal_result).await?;
     Ok(())
 }

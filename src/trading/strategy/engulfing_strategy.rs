@@ -68,7 +68,7 @@ impl EngulfingStrategy {
         }
         // ts = candles_5m.last().unwrap().ts;
 
-        SignalResult { should_buy, should_sell, open_price: price, ts: candles_5m.last().unwrap().ts ,single_value:None,single_result:None}
+        SignalResult { should_buy, should_sell, open_price: price, ts: candles_5m.last().unwrap().ts ,single_value:None,single_result:None,tp_price:None}
     }
 
     // /// 运行回测

@@ -1,12 +1,13 @@
 use crate::trading::model::market::tickers::TicketsModel;
 use crate::trading::model::market::tickers_volume::{TickersVolume, TickersVolumeModel};
-use crate::trading::okx::market::Market;
-use crate::trading::okx::public_data::contracts::Contracts;
+use okx::api::market::OkxMarket;
+use okx::api::public_data::OkxPublicData;
 use std::sync::Arc;
 use tracing::{debug, error};
+use okx::api::account::OkxContracts;
 
-pub async fn get_ticket(ins_type: &str) {
-    let ticker = Market::get_ticker(&ins_type).await;
+pub async fn get_ticket(ins_type: &str) -> anyhow::Result<()> {
+    let ticker = OkxMarket::from_env()?.get_ticker(&ins_type).await;
     debug!("单个ticket: {:?}", ticker);
     //
     if let Ok(ticker_list) = ticker {
@@ -14,6 +15,7 @@ pub async fn get_ticket(ins_type: &str) {
         let res = res.update(ticker_list.get(0).unwrap()).await;
         debug!("插入数据库结果: {:?}", res);
     }
+    Ok(())
 }
 
 pub async fn init_all_ticker_volume(inst_ids: &str, period: &str) -> anyhow::Result<()> {
@@ -21,9 +23,8 @@ pub async fn init_all_ticker_volume(inst_ids: &str, period: &str) -> anyhow::Res
     //同步合约产品
     let ins_type = "SWAP";
     let inst_id = "BTC";
-    let items = Contracts::get_open_interest_volume(Some("BTC"), None, None, Some("1D"))
-        .await
-        .unwrap();
+    let items = OkxContracts::from_env()?.get_open_interest_volume(Some("BTC"), None, None, Some("1D"))
+        .await?;
 
     let model = TickersVolumeModel::new().await;
 

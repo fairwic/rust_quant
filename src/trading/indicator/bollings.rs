@@ -13,7 +13,7 @@ pub struct BollingerBandsSignalConfig {
 
 impl Default for BollingerBandsSignalConfig {
     fn default() -> Self {
-        Self { period: 9, multiplier: 3.6, is_open: true }
+        Self { period: 8, multiplier: 2.0, is_open: true }
     }
 }
 

@@ -4,7 +4,6 @@
 
 #[macro_use]
 extern crate rbatis;
-
 use base64;
 use chrono::{DateTime, Utc};
 use hmac::Mac;
@@ -12,14 +11,11 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::time::Duration;
 use tokio::time::{interval, sleep_until, Instant};
-
-use rust_quant::trading::okx::okx_client;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 // use trading::model::biz_activity_model::BizActivityModel; use clap::Parser; use crate::trading::model::market::candles::CandlesModel; use crate::trading::okx::market::Market; use crate::trading::model::market::tickers::TicketsModel;
 use anyhow::anyhow;
 use dotenv::dotenv;
 use fast_log::Config;
-use rust_quant::trading::okx::{okx_websocket_client, validate_system_time};
 use rust_quant::trading::task::candles_job;
 use rust_quant::trading::task::{asset_job, tickets_job};
 use std::{
@@ -42,8 +38,6 @@ use tracing::{error, warn, warn_span};
 use rust_quant::app_config::db;
 use rust_quant::job::task_scheduler::TaskScheduler;
 use rust_quant::trading::model::market::candles;
-use rust_quant::trading::okx::okx_websocket_client::ApiType;
-use rust_quant::trading::okx::public_data::OkxPublicData;
 use rust_quant::trading::strategy::{strategy_common, StopLossStrategy};
 use rust_quant::trading::task::account_job;
 use tokio::net::{TcpListener, TcpStream};
@@ -64,30 +58,21 @@ use rust_quant::trading::indicator::vegas_indicator::{
 };
 use rust_quant::trading::model::strategy::back_test_log;
 use rust_quant::trading::model::strategy::strategy_config::StrategyConfigEntityModel;
-use rust_quant::trading::okx::account::Account;
-use rust_quant::trading::okx::trade;
-use rust_quant::trading::okx::trade::{AttachAlgoOrd, OrderRequest, Side, TdMode};
 use rust_quant::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules;
 use rust_quant::trading::strategy::order::vagas_order::VagasOrder;
 use rust_quant::trading::strategy::strategy_common::{parse_candle_to_data_item, SignalResult};
 use rust_quant::trading::strategy::StrategyType;
 use rust_quant::trading::{order, task};
-use rust_quant::{socket, trading};
+use rust_quant::{app_init, socket, trading};
 use tracing_subscriber::prelude::*;
 use once_cell::sync::Lazy;
 use tokio_cron_scheduler::JobScheduler;
+use okx::utils::validate_system_time;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    //设置env
-    dotenv().ok();
-    // 设置日志
-    println!("init log config");
-    setup_logging().await?;
-
-    //初始化数据库连接
-    init_db().await;
-
+    //初始化环境
+    app_init().await?;
     // 初始化并启动调度器
     let scheduler = match rust_quant::init_scheduler().await {
         Ok(s) => s,
@@ -111,14 +96,12 @@ async fn main() -> anyhow::Result<()> {
     // 定义需要交易的产品及周期
     // let inst_ids = Some(Arc::new(vec![
     //     "BTC-USDT-SWAP",
-    // ]));
+    // ]))    // let period = Arc::new(vec!["1m", "3m", "5m", "15m"]);
 
-    // let period = Arc::new(vec!["1m", "3m", "5m", "15m"]);
-
-    let inst_ids =Some(vec!["OM-USDT-SWAP", "ADA-USDT-SWAP","SUSHI-USDT-SWAP","SOL-USDT-SWAP","XRP-USDT-SWAP","SUI-USDT-SWAP","BTC-USDT-SWAP","ETH-USDT-SWAP"]);
+    // let inst_ids =Some(vec!["SUI-USDT-SWAP","BTC-USDT-SWAP","ETH-USDT-SWAP"]);
     // let inst_ids = Some(vec!["ETH-USDT-SWAP", "SUI-USDT-SWAP","OM-USDT-SWAP"]);
     // let inst_ids =Some(vec![ "ETH-USDT-SWAP"]);
-    // let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
+    let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
     // let inst_ids = Some(vec!["OM-USDT-SWAP"]);
     // let period = Some(vec!["4H",]);
     // let period = Some(vec!["1m"]);
@@ -226,12 +209,11 @@ async fn main() -> anyhow::Result<()> {
     // 运行WebSocket服务
     {
         if env::var("IS_OPEN_SOCKET").unwrap() == "true" {
-            socket::run_socket(inst_ids.clone().unwrap(), period.unwrap()).await;
+            socket::websocket_service::run_socket(inst_ids.clone().unwrap(), period.unwrap()).await;
         }
     }
-
     // 捕捉Ctrl+C信号以平滑关闭
     tokio::signal::ctrl_c().await?;
-
     Ok(())
 }
+

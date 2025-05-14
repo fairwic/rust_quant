@@ -38,7 +38,7 @@ CREATE TABLE `strategy_job_signal_log` (
 CREATE TABLE `swap_orders` (
   `id` int NOT NULL AUTO_INCREMENT,
   `uuid` varchar(50) CHARACTER SET utf8mb4   NOT NULL COMMENT '策略周期唯一值（时间-周期-策略类型-产品id-side-postside）\r\n示例2024+0625+4h+ut_boot+btc-usdt-swap+buy+short',
-  `okx_ord_id` varchar(50) CHARACTER SET utf8mb4   NOT NULL COMMENT 'okx_订单id',
+  `cl_ord_id` varchar(50) CHARACTER SET utf8mb4   NOT NULL COMMENT 'okx_订单id',
   `strategy_type` varchar(50) NOT NULL COMMENT '策略类型',
   `period` varchar(50) CHARACTER SET utf8mb4   NOT NULL COMMENT '策略周期',
   `inst_id` varchar(20) NOT NULL COMMENT '交易产品id',
@@ -50,7 +50,7 @@ CREATE TABLE `swap_orders` (
   `update_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uuid` (`uuid`),
-  KEY `okx_ord_id` (`okx_ord_id`),
+  KEY `cl_ord_id` (`cl_ord_id`),
   KEY `inst_id` (`inst_id`),
   KEY `strategy_type` (`strategy_type`),
   KEY `period` (`period`)

@@ -28,7 +28,7 @@ use crate::trading::model::market::candles::{CandlesEntity, CandlesModel};
 use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 use crate::trading::strategy::support_resistance::SupportResistance;
 use crate::time_util;
-use crate::trading::okx::trade::CandleData;
+use okx::dto::market_dto::CandleOkxRespDto;
 use std::collections::VecDeque;
 use std::fmt::Display;
 use crate::trading::model::strategy::strategy_job_signal_log;

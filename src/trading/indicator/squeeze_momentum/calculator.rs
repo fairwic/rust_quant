@@ -202,6 +202,7 @@ impl SqueezeCalculator {
             should_sell: false,
             open_price: 0.0,
             ts: 0,
+            tp_price: None,
             single_value: None,
             single_result: None,
         };
