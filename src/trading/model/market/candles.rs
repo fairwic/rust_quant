@@ -84,16 +84,16 @@ impl CandlesModel {
   `c` varchar(20) NOT NULL COMMENT '收盘价格',
   `vol` varchar(20) NOT NULL COMMENT '交易量，以张为单位',
   `vol_ccy` varchar(50) NOT NULL COMMENT '交易量，以币为单位',
-  `vol_ccy_quote` varchar(50) NOT NULL COMMENT '交易量，以计价货币为单位',
   `confirm` varchar(20) NOT NULL COMMENT 'K线状态',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `ts` (`ts` DESC) USING BTREE,
-  KEY `vol_ccy_quote` (`vol_ccy_quote` DESC)
+  KEY `vol_ccy` (`vol_ccy` DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ;",
             table_name
         );
+//   `vol_ccy_quote` varchar(50) NOT NULL COMMENT '交易量，以计价货币为单位',
         // println!("create_table_sql = {}", create_table_sql);
         let res = self.db.exec(&create_table_sql, vec![]).await?;
         Ok(res)

@@ -1052,7 +1052,7 @@ impl VegasStrategy {
             let mut is_long_signal = false;
             let mut is_short_signal = false;
             //但出现吞没形态，且如果当前k线收盘价大于开盘价，则认为是多头吞没形态，否则为空头吞没形态
-            if data_items.last().unwrap().c > data_items.last().unwrap().o() {
+            if data_items.last().unwrap().c() > data_items.last().unwrap().o() {
                 is_long_signal = true;
                 //且当ema均线是空头排列，且收盘小于于ema1均线，则多头形态失效
                 // if ema_value.is_short_trend == true

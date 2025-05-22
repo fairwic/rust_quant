@@ -1,5 +1,5 @@
 use okx::api::account::OkxAccount;
-
+use okx::api::api_trait::OkxApiTrait;
 pub async fn get_account_balance() -> anyhow::Result<()> {
     // let ccy = vec!["BTC".to_string(), "USDT".to_string(), "ETH".to_string()];
     // let ccy = vec!["BTC".to_string(), "USDT".to_string(), "ETH".to_string()];

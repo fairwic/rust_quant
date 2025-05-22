@@ -12,6 +12,7 @@ use tracing::{debug, error, warn};
 use crate::trading::services::big_data::top_contract_service_trait::TopContractServiceTrait;
 use async_trait::async_trait;
 use okx::OkxBigData;
+use okx::api::api_trait::OkxApiTrait;
 
 pub struct BigDataTopPositionService {}
 impl  BigDataTopPositionService {

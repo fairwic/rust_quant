@@ -50,7 +50,7 @@ pub async fn setup_logging() -> anyhow::Result<()> {
 
     if app_env == "LOCAL" {
         let subscriber = FmtSubscriber::builder()
-            .with_max_level(Level::DEBUG)
+            .with_max_level(Level::INFO)
             .with_ansi(true)
             .with_target(false)
             .with_thread_ids(true)
@@ -108,12 +108,12 @@ pub async fn setup_logging() -> anyhow::Result<()> {
     }
 
     if "true" == env::var("DB_DEBUG").unwrap_or_default() {
-        fast_log::init(
-            fast_log::Config::new()
-                .console()
-                .level(log::LevelFilter::Debug),
-        )
-        .expect("fast_log init error");
+        // fast_log::init(
+        //     fast_log::Config::new()
+        //         .console()
+        //         .level(log::LevelFilter::Info),
+        // )
+        // .expect("fast_log init error");
     }
     // enable log crate to show sql logs
     // if let Err(e) = fast_log::init(Config::new().console()) {

@@ -11,8 +11,8 @@ use std::time::Duration;
 use tracing::{debug, error, warn};
 use crate::trading::services::big_data::top_contract_service_trait::TopContractServiceTrait;
 use async_trait::async_trait;
-use okx::{Error, OkxBigData};
-
+use okx::{Error, OkxBigData, OkxClient};
+use okx::api::api_trait::OkxApiTrait;
 pub struct BigDataTopContractService {}
 
 #[async_trait]

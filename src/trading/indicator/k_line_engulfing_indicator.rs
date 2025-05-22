@@ -38,7 +38,7 @@ impl KlineEngulfingIndicator {
         //看涨吞没 ,当前k线的开盘价小于前一根k线的开盘价，且当前k线的收盘价大于前一根k线的收盘价,且当前k线的收盘价大于前一根k线的最高价
         let is_bullish = (current_kline.o < last_kline.o || current_kline.l < last_kline.l)
             && current_kline.c > last_kline.c
-           && (current_kline.c > last_kline.h ||current_kline.c>current_kline.h*1.005)
+           && (current_kline.c > last_kline.h || current_kline.c>current_kline.h*1.005)
             //要求上一个根k线是阴线
             && last_kline.c < last_kline.o;
 

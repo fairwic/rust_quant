@@ -5,7 +5,7 @@ use okx::api::public_data::OkxPublicData;
 use std::sync::Arc;
 use tracing::{debug, error};
 use okx::api::account::OkxContracts;
-
+use okx::api::api_trait::OkxApiTrait;
 pub async fn get_ticket(ins_type: &str) -> anyhow::Result<()> {
     let ticker = OkxMarket::from_env()?.get_ticker(&ins_type).await;
     debug!("单个ticket: {:?}", ticker);

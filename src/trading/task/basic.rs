@@ -76,7 +76,7 @@ use tracing::span;
 use crate::trading::order::swap_ordr::SwapOrder;
 use okx::dto::trade_dto::TdModeEnum;
 use okx::dto::PositionSide;
-
+use okx::api::api_trait::OkxApiTrait;
 /** 同步数据 任务**/
 pub async fn run_sync_data_job(
     inst_ids: Option<Vec<&str>>,
@@ -362,7 +362,7 @@ pub async fn save_log(
         .add(&back_test_log)
         .await?;
 
-    // if false {
+    if true {
         // 保存详细交易记录
         if !back_test_result.trade_records.is_empty() {
             save_test_detail(
@@ -374,7 +374,7 @@ pub async fn save_log(
             )
             .await?;
         }
-    // }
+    }
     Ok(back_test_id)
 }
 
@@ -428,7 +428,7 @@ pub async fn test_random_strategy(
         if params_batch.is_empty() {
             break; // 所有参数处理完毕
         }
-        run_test_strategy(
+        run_back_test_strategy(
             params_batch,
             inst_id,
             time,
@@ -470,14 +470,8 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
 
     // 测试随机策略
     // test_random_strategy(inst_id, time, arc_candle_item_clone.clone(), semaphore.clone()).await;
-    //测试指定策略
-    test_specified_strategy(
-        inst_id,
-        time,
-        arc_candle_item_clone.clone(),
-        semaphore.clone(),
-    )
-    .await;
+    // //测试指定策略
+    test_specified_strategy(inst_id, time, arc_candle_item_clone.clone(), semaphore.clone()).await;
 
     Ok(())
 }
@@ -561,7 +555,7 @@ pub async fn test_specified_strategy(
             .rsi_period(8).rsi_overbought(85.0).rsi_oversold(15.0),
     ];
 
-//测试
+   //测试 1
    let params_batch = vec![
         //btc
         ParamMerge::build()
@@ -573,9 +567,19 @@ pub async fn test_specified_strategy(
             .volume_bar_num(3).volume_increase_ratio(2.2).volume_decrease_ratio(2.2)
             //rsi
             .rsi_period(18).rsi_overbought(90.0).rsi_oversold(20.0),
+
+        ParamMerge::build()
+            .shadow_ratio(0.9)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(12).bb_multiplier(2.0)
+            //volume
+            .volume_bar_num(3).volume_increase_ratio(2.1).volume_decrease_ratio(4.1)
+            //rsi
+            .rsi_period(13).rsi_overbought(85.0).rsi_oversold(15.0),
    ];
 
-    run_test_strategy(
+    run_back_test_strategy(
         params_batch,
         inst_id,
         time,
@@ -585,7 +589,7 @@ pub async fn test_specified_strategy(
     .await;
 }
 
-pub async fn run_test_strategy(
+pub async fn run_back_test_strategy(
     params_batch: Vec<ParamMerge>,
     inst_id: &str,
     time: &str,
@@ -611,7 +615,7 @@ pub async fn run_test_strategy(
             max_loss_percent: 0.02,
             profit_threshold: 0.01,
             is_move_stop_loss: true,
-            is_used_signal_k_line_stop_loss: false,
+            is_used_signal_k_line_stop_loss: true,
         };
 
         let volumn_signal = VolumeSignalConfig {

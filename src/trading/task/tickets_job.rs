@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tracing::{debug, error};
 use okx::Error;
 use okx::dto::market_dto::TickerOkxResDto;
-
+use okx::api::api_trait::OkxApiTrait;
 pub async fn get_ticket(ins_type: &str) -> anyhow::Result<()> {
     let ticker = OkxMarket::from_env()?.get_ticker(&ins_type).await;
     debug!("单个ticket: {:?}", ticker);

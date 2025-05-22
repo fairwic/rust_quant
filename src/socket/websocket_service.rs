@@ -27,7 +27,7 @@ use okx::dto::CommonOkxWsResDto;
 use serde::de;
 use crate::trading::services::candle_service::candle_service::CandleService;
 use okx::dto::market_dto::CandleOkxRespDto;
-
+use okx::api::api_trait::OkxApiTrait;
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     if let Err(e) = handle_connection(peer, stream).await {
         match e {
@@ -62,11 +62,12 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
     let api_key = env::var("OKX_API_KEY").expect("");
     let api_secret = env::var("OKX_API_SECRET").expect("");
     let passphrase = env::var("OKX_PASSPHRASE").expect("");
+    let sim_trading = env::var("OKX_SIM_TRADING").expect("");
 
     let mut okx_websocket_clinet = OkxWebsocketClient::new_public();
     let mut rx_public = okx_websocket_clinet.connect().await.unwrap();
 
-    let mut okx_websocket_clinet_private = OkxWebsocketClient::new_private(Credentials::new(api_key, api_secret, passphrase));
+    let mut okx_websocket_clinet_private = OkxWebsocketClient::new_private(Credentials::new(api_key, api_secret, passphrase,sim_trading));
     let mut rx_private = okx_websocket_clinet_private.connect().await.unwrap();
 
 

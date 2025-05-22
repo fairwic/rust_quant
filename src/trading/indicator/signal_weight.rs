@@ -84,7 +84,7 @@ impl Default for SignalWeightsConfig {
         Self {
             weights: vec![
                 (SignalType::SimpleBreakEma2through, 1.0),
-                (SignalType::VolumeTrend, 1.0),
+                (SignalType::VolumeTrend, 2.0),
                 (SignalType::Rsi, 1.0),
                 (SignalType::TrendStrength, 1.0),
                 (SignalType::EmaDivergence, 1.0),
@@ -94,7 +94,7 @@ impl Default for SignalWeightsConfig {
                 (SignalType::Engulfing, 1.0),
                 (SignalType::KlineHammer, 1.0),
             ],
-            min_total_weight: 2.0,
+            min_total_weight: 3.0,
         }
     }
 }

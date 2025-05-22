@@ -8,7 +8,7 @@ use redis::Commands;
 use std::time::Duration;
 use tracing::debug;
 use okx::{Error, OkxBigData};
-
+use okx::api::api_trait::OkxApiTrait;
 pub struct BigDataContractService {}
 
 impl BigDataContractService {

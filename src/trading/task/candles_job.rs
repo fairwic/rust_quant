@@ -13,7 +13,7 @@ use crate::trading::model::asset::AssetModel;
 use crate::trading::model::market::candles::{CandlesEntity, CandlesModel};
 use okx::api::market::OkxMarket;
 use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
-
+use okx::api::api_trait::OkxApiTrait;
 
 fn get_period_back_test_candle_nums(period: &str) -> i32 {
     match period {
@@ -153,7 +153,7 @@ pub async fn init_before_candles(inst_ids: Option<Vec<&str>>, times: Option<Vec<
                     continue;
                 }
                 let res = res.unwrap();
-                println!("res: {:?}", res);
+                // println!("res: {:?}", res);
 
                 let res = res.get_history_candles(&ticker.inst_id, time, Some(&after.unwrap()), Some(&begin.unwrap()), Some("300")).await?;
                 if res.is_empty() {

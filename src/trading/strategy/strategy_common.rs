@@ -879,7 +879,7 @@ pub fn check_risk_config(
     //检查设置了是否预止损价格
     if let Some(pre_stop_close_price) = trading_state.pre_stop_close_price {
         if trading_state.is_long {
-            if current_low_price <= pre_stop_close_price {
+            if current_close_price <= pre_stop_close_price {
                 //重新计算利润
                 let profit = (pre_stop_close_price - entry_price) * trading_state.position;
                 close_position(
@@ -892,7 +892,7 @@ pub fn check_risk_config(
                 return trading_state;
             }
         } else {
-            if current_high_price >= pre_stop_close_price {
+            if current_close_price >= pre_stop_close_price {
                 //重新计算利润
                 let profit = (entry_price - pre_stop_close_price) * trading_state.position;
                 close_position(

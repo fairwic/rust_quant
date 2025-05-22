@@ -41,6 +41,7 @@ pub(crate) fn is_within_business_hours(ts: i64) -> bool {
 }
 
 pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
+    println!("period:{}",period);
     let duration = match &period.to_uppercase()[..] {
         "1M" => 60,
         "3M" => 3 * 60,
@@ -48,7 +49,7 @@ pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
         "1H" => 3600,
         "4H" => 4 * 3600,
         "1D" => 24 * 3600,
-        "1Dutc" => 24 * 3600,
+        "1DUTC" => 24 * 3600,
         "5D" => 5 * 24 * 3600,
         _ => return Err(anyhow!("Unsupported period format{}",period)),
     };

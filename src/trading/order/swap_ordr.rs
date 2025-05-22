@@ -1,5 +1,4 @@
 use crate::trading::model::order::swap_order::{SwapOrderEntity, SwapOrderEntityModel};
-
 use crate::trading::constants;
 use crate::trading::strategy::StrategyType;
 use log::{error, warn};
@@ -23,8 +22,10 @@ use okx::dto::trade::trade_dto::{
 };
 use okx::dto::trade_dto::{CloseOrderReqDto, OrdTypeEnum};
 use okx::dto::PositionSide;
-use okx::{Error, OkxAccount, OkxTrade};
+use okx::{Error, OkxAccount, OkxClient, OkxTrade};
 use serde_json::json;
+use tracing::{debug, info};
+use okx::api::api_trait::OkxApiTrait;
 pub struct SwapOrder {}
 impl SwapOrder {
     pub fn new() -> Self {
@@ -433,7 +434,7 @@ impl SwapOrder {
             attach_algo_ords: Some(attach_algo_ords),
         };
         //下单
-        let result = OkxTrade::from_env()?.place_order(order_params).await;
+        let result = OkxTrade::new(OkxClient::from_env()?).place_order(order_params).await;
         // {"code":"0","data":[{"clOrdId":"","ordId":"1570389280202194944","sCode":"0","sMsg":"Order placed","tag":"","ts":"1719303647602"}],"inTime":"1719303647601726","msg":"","outTime":"1719303647603880"}
         info!("send order request okx result: {:?}", result);
         result
