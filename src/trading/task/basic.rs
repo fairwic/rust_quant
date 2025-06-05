@@ -11,7 +11,7 @@ use tokio::task::spawn;
 use tracing::{error, info, warn, Level};
 
 use crate::time_util::{self, ts_add_n_period};
-use crate::trading::indicator::bollings::BollingerBandsSignalConfig;
+use crate::trading::indicator::bollings::BollingBandsSignalConfig;
 use crate::trading::indicator::signal_weight::SignalWeightsConfig;
 use crate::trading::model::market::candles::SelectTime;
 use crate::trading::model::market::candles::{self, TimeDirect};
@@ -99,36 +99,7 @@ pub async fn run_sync_data_job(
     Ok(())
 }
 
-/**
- * 设置杠杆
- */
-pub async fn run_set_leverage(inst_ids: &Vec<&str>) -> Result<(), anyhow::Error> {
-    let span = span!(Level::DEBUG, "run_set_leverage");
-    let _enter = span.enter();
-    for inst_id in inst_ids.iter() {
-        let mut level = 10;
-        if inst_id == &"BTC-USDT-SWAP" {
-            level = 20;
-        } else if inst_id == &"ETH-USDT-SWAP" {
-            level = 15;
-        }
 
-        for post_side in [PositionSide::Long, PositionSide::Short] {
-            let params = SetLeverageRequest {
-                inst_id: Some(inst_id.to_string()),
-                ccy: None,
-                mgn_mode: TdModeEnum::ISOLATED.to_string(),
-                lever: level.to_string(),
-                pos_side: Some(post_side.to_string()),
-            };
-            //延迟100ms
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-            OkxAccount::from_env()?.set_leverage(params).await?;
-        }
-    }
-    Ok(())
-}
 
 pub async fn breakout_long_test(
     mysql_candles_5m: Vec<CandlesEntity>,
@@ -653,7 +624,7 @@ pub async fn run_back_test_strategy(
             volume_signal: Some(volumn_signal),
             ema_touch_trend_signal: Some(ema_touch_trend_signal),
             rsi_signal: Some(rsi_signal),
-            bollinger_signal: Some(BollingerBandsSignalConfig {
+            bolling_signal: Some(BollingBandsSignalConfig {
                 period: bb_period as usize,
                 multiplier: bb_multiplier,
                 is_open: true,

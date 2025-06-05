@@ -5,13 +5,13 @@ use crate::trading::indicator::sma::Sma;
 use crate::trading::model::market::candles::CandlesEntity;
 
 #[derive(Debug,Clone,Deserialize,Serialize)]
-pub struct BollingerBandsSignalConfig {
+pub struct BollingBandsSignalConfig {
     pub period: usize,
     pub multiplier: f64,
     pub is_open: bool,
 }
 
-impl Default for BollingerBandsSignalConfig {
+impl Default for BollingBandsSignalConfig {
     fn default() -> Self {
         Self { period: 8, multiplier: 2.0, is_open: true }
     }

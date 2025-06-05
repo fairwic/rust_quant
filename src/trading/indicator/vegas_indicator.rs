@@ -1,6 +1,6 @@
 use crate::trading::indicator::rsi_rma_indicator::RsiIndicator;
 use crate::trading::indicator::signal_weight::{
-    SignalCondition, SignalDeriect, SignalScoreWithDeriact, SignalType, SignalWeightsConfig,
+    SignalCondition, SignalDirect, SignalScoreWithDirect, SignalType, SignalWeightsConfig,
 };
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::strategy::strategy_common;
@@ -20,13 +20,18 @@ use ta::indicators::{MovingAverageConvergenceDivergence, RelativeStrengthIndex};
 use ta::{Close, DataItem, High, Low, Next, Open, Volume};
 use tracing::error;
 
-use super::bollings::BollingerBandsSignalConfig;
+use super::bollings::BollingBandsSignalConfig;
 use super::ema_indicator::EmaIndicator;
 use super::is_big_kline::IsBigKLineIndicator;
 use super::k_line_engulfing_indicator::KlineEngulfingIndicator;
 use super::k_line_hammer_indicator::KlineHammerIndicator;
 use super::volume_indicator::VolumeRatioIndicator;
 use crate::trading::strategy::arc::indicator_values::ema_indicator_values;
+use crate::trading::indicator::leg_detection_indicator::{LegDetectionIndicator, LegDetectionValue};
+use crate::trading::indicator::market_structure_indicator::{MarketStructureIndicator, MarketStructureValue};
+use crate::trading::indicator::fair_value_gap_indicator::{FairValueGapIndicator, FairValueGapValue};
+use crate::trading::indicator::equal_high_low_indicator::{EqualHighLowIndicator, EqualHighLowValue};
+use crate::trading::indicator::premium_discount_indicator::{PremiumDiscountIndicator, PremiumDiscountValue};
 
 /// 锤子形态配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -162,6 +167,12 @@ pub struct IndicatorCombine {
     pub bollinger_indicator: Option<BollingerBands>,
     pub engulfing_indicator: Option<KlineEngulfingIndicator>,
     pub kline_hammer_indicator: Option<KlineHammerIndicator>,
+    // 新增Smart Money Concepts相关指标
+    pub leg_detection_indicator: Option<LegDetectionIndicator>,
+    pub market_structure_indicator: Option<MarketStructureIndicator>,
+    pub fair_value_gap_indicator: Option<FairValueGapIndicator>,
+    pub equal_high_low_indicator: Option<EqualHighLowIndicator>,
+    pub premium_discount_indicator: Option<PremiumDiscountIndicator>,
 }
 
 impl Default for IndicatorCombine {
@@ -173,6 +184,12 @@ impl Default for IndicatorCombine {
             bollinger_indicator: None,
             engulfing_indicator: None,
             kline_hammer_indicator: None,
+            // 新增Smart Money Concepts相关指标
+            leg_detection_indicator: None,
+            market_structure_indicator: None,
+            fair_value_gap_indicator: None,
+            equal_high_low_indicator: None,
+            premium_discount_indicator: None,
         }
     }
 }
@@ -332,6 +349,12 @@ pub struct VegasIndicatorSignalValue {
     pub signal_weights_value: SignalWeightsConfig,  // 新增权重配置
     pub engulfing_value: EngulfingSignalValue,      //吞没形态指标
     pub kline_hammer_value: KlineHammerSignalValue, //锤子形态指标
+    // 新增Smart Money Concepts相关字段
+    pub leg_detection_value: LegDetectionValue,              // 腿部识别
+    pub market_structure_value: MarketStructureValue,        // 市场结构
+    pub fair_value_gap_value: FairValueGapValue,             // 公平价值缺口
+    pub equal_high_low_value: EqualHighLowValue,             // 等高/等低点
+    pub premium_discount_value: PremiumDiscountValue,        // 溢价/折扣区域
 }
 
 /// vegae 综合策略配置
@@ -349,12 +372,18 @@ pub struct VegasStrategy {
     pub volume_signal: Option<VolumeSignalConfig>, // 新增：成交量信号配置
     pub ema_touch_trend_signal: Option<EmaTouchTrendSignalConfig>, // ema趋势
     pub rsi_signal: Option<RsiSignalConfig>,       //rsi信号配置
-    pub bollinger_signal: Option<BollingerBandsSignalConfig>, //bollinger信号配置
+    pub bolling_signal: Option<BollingBandsSignalConfig>, //bollinger信号配置
     pub signal_weights: Option<SignalWeightsConfig>, // 新增权重配置
     //新增吞没形态指标
     pub engulfing_signal: Option<EngulfingSignalConfig>, // 新增吞没形态指标
     //新增锤子形态指标
     pub kline_hammer_signal: Option<KlineHammerConfig>, // 新增锤子形态指标
+    // 新增Smart Money Concepts相关配置
+    // pub leg_detection_signal: Option<LegDetectionConfig>,           // 腿部识别系统
+    // pub market_structure_signal: Option<MarketStructureConfig>,     // 市场结构识别
+    // pub fair_value_gap_signal: Option<FairValueGapConfig>,          // 公平价值缺口
+    // pub equal_high_low_signal: Option<EqualHighLowConfig>,          // 等高/等低点识别
+    // pub premium_discount_signal: Option<PremiumDiscountConfig>,     // 溢价/折扣区域
 }
 
 impl Default for VegasStrategy {
@@ -362,23 +391,19 @@ impl Default for VegasStrategy {
         Self {
             min_k_line_num: 3400,
             ema_touch_trend_signal: Some(EmaTouchTrendSignalConfig::default()),
-            bollinger_signal: Some(BollingerBandsSignalConfig::default()),
+            bolling_signal: Some(BollingBandsSignalConfig::default()),
             ema_signal: Some(EmaSignalConfig::default()),
             volume_signal: Some(VolumeSignalConfig::default()),
             rsi_signal: Some(RsiSignalConfig::default()),
-            signal_weights: Some(SignalWeightsConfig {
-                weights: vec![
-                    (SignalType::SimpleBreakEma2through, 2.0),
-                    (SignalType::VolumeTrend, 1.5),
-                    (SignalType::Rsi, 1.0),
-                    (SignalType::TrendStrength, 1.5),
-                    (SignalType::EmaDivergence, 1.8),
-                    (SignalType::PriceLevel, 1.2),
-                ],
-                min_total_weight: 3.0, // 需要至少3分才触发信号
-            }),
+            signal_weights: Some(SignalWeightsConfig::default()),
             engulfing_signal: Some(EngulfingSignalConfig::default()),
             kline_hammer_signal: Some(KlineHammerConfig::default()),
+            // // 新增Smart Money Concepts相关配置默认值
+            // leg_detection_signal: Some(LegDetectionConfig::default()),
+            // market_structure_signal: Some(MarketStructureConfig::default()),
+            // fair_value_gap_signal: Some(FairValueGapConfig::default()),
+            // equal_high_low_signal: Some(EqualHighLowConfig::default()),
+            // premium_discount_signal: Some(PremiumDiscountConfig::default()),
         }
     }
 }
@@ -470,12 +495,12 @@ impl VegasStrategy {
         }
 
         //判断布林带
-        if let Some(bollinger_signal) = &self.bollinger_signal {
+        if let Some(bollinger_signal) = &self.bolling_signal {
             let bollinger_value =
                 self.check_bollinger_signal(data_items, vegas_indicator_signal_values.clone());
             conditions.push((
-                SignalType::Bollinger,
-                SignalCondition::Bollinger {
+                SignalType::Bolling,
+                SignalCondition::Bolling {
                     is_long_signal: bollinger_value.is_long_signal,
                     is_short_signal: bollinger_value.is_short_signal,
                     is_close_signal: bollinger_value.is_close_signal,
@@ -505,20 +530,120 @@ impl VegasStrategy {
             vegas_indicator_signal_values.ema_values,
         );
 
-        // println!("vegas_indicator_signal_values: {:#?}", vegas_indicator_signal_values);
-        //todo 可以考虑在出现上影线，且价格在恰好收盘在均线下方，可以开空，反之可以开多
+        // 新增Smart Money Concepts相关信号检查
+        // // 检查腿部识别信号
+        // if let Some(leg_config) = &self.leg_detection_signal {
+        //     if leg_config.is_open {
+        //         conditions.push((
+        //             SignalType::LegDetection,
+        //             SignalCondition::LegDetection {
+        //                 is_bullish_leg: vegas_indicator_signal_values.leg_detection_value.is_bullish_leg,
+        //                 is_bearish_leg: vegas_indicator_signal_values.leg_detection_value.is_bearish_leg,
+        //                 is_new_leg: vegas_indicator_signal_values.leg_detection_value.is_new_leg,
+        //             },
+        //         ));
+        //     }
+        // }
+        // // 检查市场结构信号
+        // if let Some(structure_config) = &self.market_structure_signal {
+        //     if structure_config.is_open {
+        //         // 检查摆动结构信号
+        //         let ms_value = &vegas_indicator_signal_values.market_structure_value;
+                
+        //         if ms_value.swing_bullish_bos || ms_value.swing_bearish_bos || 
+        //            ms_value.swing_bullish_choch || ms_value.swing_bearish_choch {
+        //             conditions.push((
+        //                 SignalType::MarketStructure,
+        //                 SignalCondition::MarketStructure {
+        //                     is_bullish_bos: ms_value.swing_bullish_bos,
+        //                     is_bearish_bos: ms_value.swing_bearish_bos,
+        //                     is_bullish_choch: ms_value.swing_bullish_choch,
+        //                     is_bearish_choch: ms_value.swing_bearish_choch,
+        //                     is_internal: false,
+        //                 },
+        //             ));
+        //         }
+                
+        //         // 检查内部结构信号
+        //         if ms_value.internal_bullish_bos || ms_value.internal_bearish_bos || 
+        //            ms_value.internal_bullish_choch || ms_value.internal_bearish_choch {
+        //             conditions.push((
+        //                 SignalType::MarketStructure,
+        //                 SignalCondition::MarketStructure {
+        //                     is_bullish_bos: ms_value.internal_bullish_bos,
+        //                     is_bearish_bos: ms_value.internal_bearish_bos,
+        //                     is_bullish_choch: ms_value.internal_bullish_choch,
+        //                     is_bearish_choch: ms_value.internal_bearish_choch,
+        //                     is_internal: true,
+        //                 },
+        //             ));
+        //         }
+        //     }
+        // }
+        
+        // // 检查公平价值缺口信号
+        // if let Some(fvg_config) = &self.fair_value_gap_signal {
+        //     if fvg_config.is_open {
+        //         let fvg_value = &vegas_indicator_signal_values.fair_value_gap_value;
+                
+        //         if fvg_value.current_bullish_fvg || fvg_value.current_bearish_fvg {
+        //             conditions.push((
+        //                 SignalType::FairValueGap,
+        //                 SignalCondition::FairValueGap {
+        //                     is_bullish_fvg: fvg_value.current_bullish_fvg,
+        //                     is_bearish_fvg: fvg_value.current_bearish_fvg,
+        //                 },
+        //             ));
+        //         }
+        //     }
+        // }
+        
+        // // 检查等高/等低点信号
+        // if let Some(ehl_config) = &self.equal_high_low_signal {
+        //     if ehl_config.is_open {
+        //         let ehl_value = &vegas_indicator_signal_values.equal_high_low_value;
+                
+        //         if ehl_value.current_equal_high || ehl_value.current_equal_low {
+        //             conditions.push((
+        //                 SignalType::EqualHighLow,
+        //                 SignalCondition::EqualHighLow {
+        //                     is_equal_high: ehl_value.current_equal_high,
+        //                     is_equal_low: ehl_value.current_equal_low,
+        //                 },
+        //             ));
+        //         }
+        //     }
+        // }
+        
+        // // 检查溢价/折扣区域信号
+        // if let Some(pd_config) = &self.premium_discount_signal {
+        //     if pd_config.is_open {
+        //         let pd_value = &vegas_indicator_signal_values.premium_discount_value;
+                
+        //         if pd_value.in_premium_zone || pd_value.in_discount_zone {
+        //             conditions.push((
+        //                 SignalType::PremiumDiscount,
+        //                 SignalCondition::PremiumDiscount {
+        //                     in_premium_zone: pd_value.in_premium_zone,
+        //                     in_discount_zone: pd_value.in_discount_zone,
+        //                 },
+        //             ));
+        //         }
+        //     }
+        // }
+        
         // 计算得分
         let score = weights.calculate_score(conditions.clone());
         //计算分数到达指定值
         if let Some(signal_direction) = weights.is_signal_valid(&score) {
             match signal_direction {
-                SignalDeriect::IsLong => {
+                SignalDirect::IsLong => {
                     signal_result.should_buy = true;
                     signal_result.single_value =
                         Some(json!(vegas_indicator_signal_values).to_string());
                     signal_result.single_result = Some(json!(conditions).to_string());
                 }
-                SignalDeriect::IsShort => {
+                SignalDirect::IsShort => {
                     signal_result.should_sell = true;
                     signal_result.single_value =
                         Some(json!(vegas_indicator_signal_values).to_string());
@@ -588,7 +713,7 @@ impl VegasStrategy {
     // 辅助方法：计算EMA趋势
     fn calculate_ema_touch_trend(
         &self,
-        data_itms: &[CandleItem],
+        data_items: &[CandleItem],
         ema_value: EmaSignalValue,
     ) -> EmaTouchTrendSignalValue {
         //判断ema 是否空头排列，或者多头排列或者多头排列
@@ -601,22 +726,22 @@ impl VegasStrategy {
                 && ema_value.ema3_value > ema_value.ema4_value
             {
                 ema_touch_trend_value.is_uptrend = true;
-                //当前ema_vaue_1 >emalue_2 的时候， 且要求开盘价>ema2,价格最低下跌到em2附近的时候，且ema1 与 ema2 相差幅度大于0.012
+                //当前ema_value_1 >ema_value_2 的时候， 且要求开盘价>ema2,价格最低下跌到em2附近的时候，且ema1 与 ema2 相差幅度大于0.012
                 if ema_value.ema1_value > ema_value.ema2_value
-                    && data_itms.last().unwrap().l()
+                    && data_items.last().unwrap().l()
                         <= ema_value.ema2_value * ema_touch_trend_signal.price_with_ema_high_ratio
                     && ema_value.ema1_value
                         > ema_value.ema2_value * ema_touch_trend_signal.ema1_with_ema2_ratio
-                    && data_itms.last().unwrap().o() > ema_value.ema2_value
-                    && data_itms.last().unwrap().c() > ema_value.ema2_value
+                    && data_items.last().unwrap().o() > ema_value.ema2_value
+                    && data_items.last().unwrap().c() > ema_value.ema2_value
                 {
                     ema_touch_trend_value.is_long_signal = true;
                 } else {
                     // 当开盘价格大于ema4的时候， 当价格下跌接近ema4或者ema5位置时候=>价格接近ema4,ema5均线附近 ,且ema4 乘以一定比例依旧<于ema3=> 说明价格下跌幅度较大
-                    let condition_1 = data_itms.last().unwrap().o() > ema_value.ema4_value;
-                    let condition_2 = data_itms.last().unwrap().l()
+                    let condition_1 = data_items.last().unwrap().o() > ema_value.ema4_value;
+                    let condition_2 = data_items.last().unwrap().l()
                         <= ema_value.ema4_value * ema_touch_trend_signal.ema3_with_ema4_ratio
-                        || data_itms.last().unwrap().l()
+                        || data_items.last().unwrap().l()
                             <= ema_value.ema5_value * ema_touch_trend_signal.ema4_with_ema5_ratio;
                     // println!(
                     //     "ema_value.ema3_value: {}, ema_value.ema4_value: {}, ema_value.ema5_value: {}",
@@ -639,7 +764,7 @@ impl VegasStrategy {
                     // );
                     if condition_1 && condition_2 && condition_3 {
                         ema_touch_trend_value.is_in_uptrend_touch_ema4_ema5_nums += 1;
-                        if data_itms.last().unwrap().l() <= ema_value.ema4_value {
+                        if data_items.last().unwrap().l() <= ema_value.ema4_value {
                             ema_touch_trend_value.is_in_uptrend_touch_ema4 = true;
                         } else {
                             ema_touch_trend_value.is_in_uptrend_touch_ema5 = true;
@@ -654,12 +779,12 @@ impl VegasStrategy {
                 ema_touch_trend_value.is_downtrend = true;
 
                 //当前ema_vaue_1 <emalue_2 的时候， 且要求开盘价<ema2,价格最高上涨到em2附近的时候且ema1 与 ema2 相差幅度大于0.012
-                if data_itms.last().unwrap().h()
+                if data_items.last().unwrap().h()
                     >= ema_value.ema2_value * ema_touch_trend_signal.price_with_ema_low_ratio
                     && ema_value.ema2_value
                         > ema_value.ema1_value * ema_touch_trend_signal.ema1_with_ema2_ratio
-                    && data_itms.last().unwrap().o() < ema_value.ema2_value
-                    && data_itms.last().unwrap().c() < ema_value.ema2_value
+                    && data_items.last().unwrap().o() < ema_value.ema2_value
+                    && data_items.last().unwrap().c() < ema_value.ema2_value
                 {
                     // println!("data.last().unwrap(): {:#?}", data_itms.last().unwrap());
                     // println!("ema2_value: {:#?}", ema_value.ema2_value);
@@ -669,11 +794,11 @@ impl VegasStrategy {
                     //当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
 
                     //当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
-                    if ((data_itms.last().unwrap().o() < ema_value.ema4_value)
-                        && (data_itms.last().unwrap().h()
+                    if ((data_items.last().unwrap().o() < ema_value.ema4_value)
+                        && (data_items.last().unwrap().h()
                             * ema_touch_trend_signal.price_with_ema_high_ratio
                             >= ema_value.ema4_value)
-                        || (data_itms.last().unwrap().h()
+                        || (data_items.last().unwrap().h()
                             * ema_touch_trend_signal.price_with_ema_high_ratio
                             >= ema_value.ema5_value))
                         && ((ema_value.ema3_value * ema_touch_trend_signal.ema3_with_ema4_ratio
@@ -682,7 +807,7 @@ impl VegasStrategy {
                                 < ema_value.ema5_value))
                     {
                         ema_touch_trend_value.is_in_downtrend_touch_ema4_ema5_nums += 1;
-                        if data_itms.last().unwrap().h()
+                        if data_items.last().unwrap().h()
                             * ema_touch_trend_signal.price_with_ema_high_ratio
                             >= ema_value.ema4_value
                         {
@@ -746,10 +871,10 @@ impl VegasStrategy {
         if let Some(rsi_signal) = &self.rsi_signal {
             indicator_combine.rsi_indicator = Some(RsiIndicator::new(rsi_signal.rsi_length));
         }
-        //添加bollinger
-        if let Some(bollinger_signal) = &self.bollinger_signal {
+        //添加bolling
+        if let Some(bolling_signal) = &self.bolling_signal {
             indicator_combine.bollinger_indicator = Some(
-                BollingerBands::new(bollinger_signal.period, bollinger_signal.multiplier).unwrap(),
+                BollingerBands::new(bolling_signal.period, bolling_signal.multiplier).unwrap(),
             );
         }
         //添加锤子形态
@@ -760,6 +885,62 @@ impl VegasStrategy {
                 kline_hammer_signal.body_ratio,
             ));
         }
+        // 新增Smart Money Concepts相关指标
+        
+        // // 添加腿部识别指标
+        // if let Some(leg_config) = &self.leg_detection_signal {
+        //     if leg_config.is_open {
+        //         indicator_combine.leg_detection_indicator = Some(
+        //             LegDetectionIndicator::new(leg_config.size)
+        //         );
+        //     }
+        // }
+        
+        // // 添加市场结构指标
+        // if let Some(structure_config) = &self.market_structure_signal {
+        //     if structure_config.is_open {
+        //         indicator_combine.market_structure_indicator = Some(
+        //             MarketStructureIndicator::new(
+        //                 structure_config.swing_length,
+        //                 structure_config.internal_length
+        //             )
+        //         );
+        //     }
+        // }
+        // // 添加公平价值缺口指标
+        // if let Some(fvg_config) = &self.fair_value_gap_signal {
+        //     if fvg_config.is_open {
+        //         indicator_combine.fair_value_gap_indicator = Some(
+        //             FairValueGapIndicator::new(
+        //                 fvg_config.threshold_multiplier,
+        //                 fvg_config.auto_threshold
+        //             )
+        //         );
+        //     }
+        // }
+        // // 添加等高/等低点指标
+        // if let Some(ehl_config) = &self.equal_high_low_signal {
+        //     if ehl_config.is_open {
+        //         indicator_combine.equal_high_low_indicator = Some(
+        //             EqualHighLowIndicator::new(
+        //                 ehl_config.lookback,
+        //                 ehl_config.threshold_pct
+        //             )
+        //         );
+        //     }
+        // }
+        // // 添加溢价/折扣区域指标
+        // if let Some(pd_config) = &self.premium_discount_signal {
+        //     if pd_config.is_open {
+        //         indicator_combine.premium_discount_indicator = Some(
+        //             PremiumDiscountIndicator::new(
+        //                 pd_config.premium_threshold,
+        //                 pd_config.discount_threshold,
+        //                 pd_config.lookback
+        //             )
+        //         );
+        //     }
+        // }
         // println!("indicator_combine: {:#?}", indicator_combine);
         indicator_combine
     }
@@ -794,7 +975,7 @@ impl VegasStrategy {
     }
 
     // 新增：检查突破确认
-    fn check_breakthrough_confirmation(&self, data_itms: &[CandleItem], is_upward: bool) -> bool {
+    fn check_breakthrough_confirmation(&self, data_items: &[CandleItem], is_upward: bool) -> bool {
         // 实现突破确认逻辑
         // 可以检查:
         // 1. 突破后的持续性
@@ -804,7 +985,7 @@ impl VegasStrategy {
     }
 
     // 新增：计算动态回调幅度
-    fn calculate_dynamic_pullback_threshold(&self, _data_itms: &[CandleItem]) -> f64 {
+    fn calculate_dynamic_pullback_threshold(&self, _data_items: &[CandleItem]) -> f64 {
         // 实现动态回调幅度计算逻辑
         // 可以考虑:
         // 1. 价格波动性
@@ -924,14 +1105,14 @@ impl VegasStrategy {
     // 新增方法：检查突破条件
     fn check_breakthrough_conditions(
         &self,
-        data_itms: &[CandleItem],
+        data_items: &[CandleItem],
         ema_value: EmaSignalValue,
     ) -> (bool, bool) {
-        if data_itms.len() < 2 {
+        if data_items.len() < 2 {
             return (false, false);
         }
-        let current_price = data_itms.last().unwrap().c;
-        let prev_price = data_itms[data_itms.len() - 2].c;
+        let current_price = data_items.last().unwrap().c;
+        let prev_price = data_items[data_items.len() - 2].c;
         if let Some(ema_signal) = &self.ema_signal {
             // 向上突破条件：当前价格突破ema2上轨，且前一根K线价格低于EMA2
             let price_above = current_price
@@ -970,7 +1151,7 @@ impl VegasStrategy {
         //todo 考虑在k线收盘之后，价格依然低于布林带下轨位置，如果有多单则平仓
 
         let mut bolling_bands = vegas_indicator_signal_value.bollinger_value;
-        if let Some(bollinger_signal) = &self.bollinger_signal {
+        if let Some(bollinger_signal) = &self.bolling_signal {
             let ema_signal_values = vegas_indicator_signal_value.ema_values;
             //如果ema是多头排列 则当触达ema下轨的时候可以开多，当触达ema上轨的时候可以平仓，但是不能开空单
             // if ema_signal_values.ema1_value > ema_signal_values.ema2_value
@@ -1149,6 +1330,96 @@ impl VegasStrategy {
                         .is_short_signal,
                 },
             ));
+        }
+    }
+}
+
+/// 腿部识别系统配置
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct LegDetectionConfig {
+    pub size: usize,           // 用于识别腿部的bar数量
+    pub is_open: bool,         // 是否启用腿部识别
+}
+
+impl Default for LegDetectionConfig {
+    fn default() -> Self {
+        Self {
+            size: 5,
+            is_open: true,
+        }
+    }
+}
+
+/// 市场结构识别配置
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct MarketStructureConfig {
+    pub swing_length: usize,    // 摆动结构长度
+    pub internal_length: usize, // 内部结构长度
+    pub is_open: bool,          // 是否启用
+}
+
+impl Default for MarketStructureConfig {
+    fn default() -> Self {
+        Self {
+            swing_length: 20,
+            internal_length: 5,
+            is_open: true,
+        }
+    }
+}
+
+/// 公平价值缺口配置
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct FairValueGapConfig {
+    pub threshold_multiplier: f64, // 阈值乘数
+    pub auto_threshold: bool,      // 是否使用自动阈值
+    pub is_open: bool,             // 是否启用
+}
+
+impl Default for FairValueGapConfig {
+    fn default() -> Self {
+        Self {
+            threshold_multiplier: 1.0,
+            auto_threshold: true,
+            is_open: true,
+        }
+    }
+}
+
+/// 等高/等低点识别配置
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct EqualHighLowConfig {
+    pub lookback: usize,          // 回看K线数量
+    pub threshold_pct: f64,       // 阈值百分比
+    pub is_open: bool,            // 是否启用
+}
+
+impl Default for EqualHighLowConfig {
+    fn default() -> Self {
+        Self {
+            lookback: 10,
+            threshold_pct: 0.1,
+            is_open: true,
+        }
+    }
+}
+
+/// 溢价/折扣区域配置
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct PremiumDiscountConfig {
+    pub premium_threshold: f64,   // 溢价阈值
+    pub discount_threshold: f64,  // 折扣阈值
+    pub lookback: usize,          // 回看K线数量
+    pub is_open: bool,            // 是否启用
+}
+
+impl Default for PremiumDiscountConfig {
+    fn default() -> Self {
+        Self {
+            premium_threshold: 0.05,
+            discount_threshold: 0.05,
+            lookback: 20,
+            is_open: true,
         }
     }
 }

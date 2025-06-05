@@ -59,7 +59,7 @@ use rust_quant::trading::indicator::vegas_indicator::{
 use rust_quant::trading::model::strategy::back_test_log;
 use rust_quant::trading::model::strategy::strategy_config::StrategyConfigEntityModel;
 use rust_quant::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules;
-use rust_quant::trading::strategy::order::vagas_order::VagasOrder;
+use rust_quant::trading::strategy::order::vagas_order::VegasOrder;
 use rust_quant::trading::strategy::strategy_common::{parse_candle_to_data_item, SignalResult};
 use rust_quant::trading::strategy::StrategyType;
 use rust_quant::trading::{order, task};
@@ -68,6 +68,7 @@ use tracing_subscriber::prelude::*;
 use once_cell::sync::Lazy;
 use tokio_cron_scheduler::JobScheduler;
 use okx::utils::validate_system_time;
+use rust_quant::job::RiskJob;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -172,14 +173,12 @@ async fn main() -> anyhow::Result<()> {
         if env::var("IS_RUN_REAL_STRATEGY").unwrap_or(String::from("false")) == "true" {
             println!("run real strategy job");
             if let Some(inst_ids) = inst_ids.clone() {
-                //设置交易产品最大杠杆
-                let result = task::basic::run_set_leverage(&inst_ids.clone()).await;
-                if let Err(error) = result {
-                    error!("run set leverage error: {}", error);
-                }
+
+                //执行风险控制,初始化
+                let risk_job = RiskJob::new();
+                risk_job.run(&inst_ids).await.unwrap();
                 let inst_ids = Arc::new(inst_ids);
                 let times = Arc::new(period.clone().unwrap());
-
                 //获取指定产品的策略
                 //计算出最新的指标values
                 let strategy_list = StrategyConfigEntityModel::new().await.get_list().await;
@@ -198,7 +197,7 @@ async fn main() -> anyhow::Result<()> {
                                 serde_json::from_str::<VegasStrategy>(&*strategy.value).map_err(
                                     |e| anyhow!("Failed to parse VegasStrategy config: {}", e),
                                 )?;
-                            VagasOrder::new().order(strategy_config, inst_id, time).await?;
+                            VegasOrder::new().order(strategy_config, inst_id, time).await?;
                         }
                     }
                 }

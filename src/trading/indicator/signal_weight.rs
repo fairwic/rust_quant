@@ -11,12 +11,18 @@ pub enum SignalType {
     TrendStrength,          // 趋势强度
     EmaDivergence,          // 均线发散
     PriceLevel,             // 关键价位
-    Bollinger,              // 布林带
+    Bolling,              // 布林带
     Engulfing,              // 吞没形态
     KlineHammer,            // 锤子形态
+    // 新增Smart Money Concepts相关信号类型
+    LegDetection,           // 腿部识别
+    MarketStructure,        // 市场结构
+    FairValueGap,           // 公平价值缺口
+    EqualHighLow,           // 等高/等低点
+    PremiumDiscount,        // 溢价/折扣区域
 }
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
-pub enum SignalDeriect {
+pub enum SignalDirect {
     IsLong,
     IsShort,
 }
@@ -49,7 +55,7 @@ pub enum SignalCondition {
         is_long_signal: bool,
         is_short_signal: bool,
     },
-    Bollinger {
+    Bolling {
         is_long_signal: bool,
         is_short_signal: bool,
         is_close_signal: bool,
@@ -62,6 +68,31 @@ pub enum SignalCondition {
         is_long_signal: bool,
         is_short_signal: bool,
     },
+    // 新增Smart Money Concepts相关信号条件
+    LegDetection {
+        is_bullish_leg: bool,
+        is_bearish_leg: bool,
+        is_new_leg: bool,
+    },
+    MarketStructure {
+        is_bullish_bos: bool,
+        is_bearish_bos: bool,
+        is_bullish_choch: bool,
+        is_bearish_choch: bool,
+        is_internal: bool,
+    },
+    FairValueGap {
+        is_bullish_fvg: bool,
+        is_bearish_fvg: bool,
+    },
+    EqualHighLow {
+        is_equal_high: bool,
+        is_equal_low: bool,
+    },
+    PremiumDiscount {
+        in_premium_zone: bool,
+        in_discount_zone: bool,
+    },
 }
 
 // 权重配置结构体
@@ -73,10 +104,10 @@ pub struct SignalWeightsConfig {
 
 // 信号评分结构体
 #[derive(Debug)]
-pub struct SignalScoreWithDeriact {
+pub struct SignalScoreWithDirect {
     pub total_weight: f64,
     pub details: Vec<CheckConditionResult>,
-    pub signal_result: Option<SignalDeriect>,
+    pub signal_result: Option<SignalDirect>,
 }
 
 impl Default for SignalWeightsConfig {
@@ -90,9 +121,15 @@ impl Default for SignalWeightsConfig {
                 (SignalType::EmaDivergence, 1.0),
                 (SignalType::PriceLevel, 1.0),
                 (SignalType::EmaTrend, 1.0),
-                (SignalType::Bollinger, 1.0),
+                (SignalType::Bolling, 1.0),
                 (SignalType::Engulfing, 1.0),
                 (SignalType::KlineHammer, 1.0),
+                // 新增Smart Money Concepts相关权重
+                (SignalType::LegDetection, 1.2),
+                (SignalType::MarketStructure, 1.8),
+                (SignalType::FairValueGap, 1.5),
+                (SignalType::EqualHighLow, 1.2),
+                (SignalType::PremiumDiscount, 1.3),
             ],
             min_total_weight: 3.0,
         }
@@ -104,7 +141,7 @@ pub struct CheckConditionResult {
     pub signal_type: SignalType,
     pub score: f64,
     pub detail: SignalCondition,
-    pub signal_result: Option<SignalDeriect>,
+    pub signal_result: Option<SignalDirect>,
 }
 
 impl SignalWeightsConfig {
@@ -127,6 +164,144 @@ impl SignalWeightsConfig {
         let base_weight = self.get_weight(signal_type);
 
         match condition {
+            // 新增Smart Money Concepts相关条件评估
+            SignalCondition::LegDetection { 
+                is_bullish_leg, 
+                is_bearish_leg, 
+                is_new_leg 
+            } => {
+                if is_new_leg {
+                    let score = base_weight * 1.2; // 新腿部形成权重更高
+                    if is_bullish_leg {
+                        Some(CheckConditionResult {
+                            signal_type,
+                            score,
+                            detail: condition,
+                            signal_result: Some(SignalDirect::IsLong),
+                        })
+                    } else if is_bearish_leg {
+                        Some(CheckConditionResult {
+                            signal_type,
+                            score,
+                            detail: condition,
+                            signal_result: Some(SignalDirect::IsShort),
+                        })
+                    } else {
+                        None
+                    }
+                } else if is_bullish_leg {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsLong),
+                    })
+                } else if is_bearish_leg {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsShort),
+                    })
+                } else {
+                    None
+                }
+            },
+            SignalCondition::MarketStructure { 
+                is_bullish_bos, 
+                is_bearish_bos, 
+                is_bullish_choch, 
+                is_bearish_choch, 
+                is_internal 
+            } => {
+                let multiplier = if is_internal { 1.0 } else { 1.5 }; // 摆动结构比内部结构更重要
+                
+                if is_bullish_bos || is_bullish_choch {
+                    let score = base_weight * multiplier * if is_bullish_choch { 1.2 } else { 1.0 };
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsLong),
+                    })
+                } else if is_bearish_bos || is_bearish_choch {
+                    let score = base_weight * multiplier * if is_bearish_choch { 1.2 } else { 1.0 };
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsShort),
+                    })
+                } else {
+                    None
+                }
+            },
+            SignalCondition::FairValueGap {
+                is_bullish_fvg,
+                is_bearish_fvg
+            } => {
+                if is_bullish_fvg {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsLong),
+                    })
+                } else if is_bearish_fvg {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsShort),
+                    })
+                } else {
+                    None
+                }
+            },
+            SignalCondition::EqualHighLow {
+                is_equal_high,
+                is_equal_low
+            } => {
+                if is_equal_high {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsShort), // 等高点通常是卖出信号
+                    })
+                } else if is_equal_low {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsLong), // 等低点通常是买入信号
+                    })
+                } else {
+                    None
+                }
+            },
+            SignalCondition::PremiumDiscount {
+                in_premium_zone,
+                in_discount_zone
+            } => {
+                if in_premium_zone {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsShort), // 溢价区域是卖出信号
+                    })
+                } else if in_discount_zone {
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsLong), // 折扣区域是买入信号
+                    })
+                } else {
+                    None
+                }
+            },
             SignalCondition::Engulfing {
                 is_long_signal: is_long_engulfing,
                 is_short_signal: is_short_engulfing,
@@ -136,14 +311,14 @@ impl SignalWeightsConfig {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsLong),
+                        signal_result: Some(SignalDirect::IsLong),
                     })
                 } else if is_short_engulfing    {
                     Some(CheckConditionResult {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsShort),
+                        signal_result: Some(SignalDirect::IsShort),
                     })
                 } else {
                     None
@@ -158,14 +333,14 @@ impl SignalWeightsConfig {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsLong),
+                        signal_result: Some(SignalDirect::IsLong),
                     })
                 } else if price_below {
                     Some(CheckConditionResult {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsShort),
+                        signal_result: Some(SignalDirect::IsShort),
                     })
                 } else {
                     None
@@ -198,14 +373,14 @@ impl SignalWeightsConfig {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsLong),
+                        signal_result: Some(SignalDirect::IsLong),
                     })
                 } else if current > overbought {
                     Some(CheckConditionResult {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsShort),
+                        signal_result: Some(SignalDirect::IsShort),
                     })
                 } else {
                     None
@@ -248,20 +423,20 @@ impl SignalWeightsConfig {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsLong),
+                        signal_result: Some(SignalDirect::IsLong),
                     })
                 } else if is_short_signal {
                     Some(CheckConditionResult {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsShort),
+                        signal_result: Some(SignalDirect::IsShort),
                     })
                 } else {
                     None
                 }
             }
-            SignalCondition::Bollinger {
+            SignalCondition::Bolling {
                 is_long_signal,
                 is_short_signal,
                 is_close_signal,
@@ -271,14 +446,14 @@ impl SignalWeightsConfig {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsLong),
+                        signal_result: Some(SignalDirect::IsLong),
                     })
                 } else if is_short_signal {
                     Some(CheckConditionResult {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsShort),
+                        signal_result: Some(SignalDirect::IsShort),
                     })
                 } else if is_close_signal {
                     Some(CheckConditionResult {
@@ -300,14 +475,14 @@ impl SignalWeightsConfig {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsLong),
+                        signal_result: Some(SignalDirect::IsLong),
                     })
                 } else if is_short_signal {
                     Some(CheckConditionResult {
                         signal_type,
                         score: base_weight,
                         detail: condition,
-                        signal_result: Some(SignalDeriect::IsShort),
+                        signal_result: Some(SignalDirect::IsShort),
                     })
                 } else {
                     None
@@ -320,7 +495,7 @@ impl SignalWeightsConfig {
     pub fn calculate_score(
         &self,
         conditions: Vec<(SignalType, SignalCondition)>,
-    ) -> SignalScoreWithDeriact {
+    ) -> SignalScoreWithDirect {
         let mut total_weight = 0.0;
         let mut details = Vec::new();
         let mut is_long_nums = 0;
@@ -334,10 +509,10 @@ impl SignalWeightsConfig {
 
                 if let Some(signal_result) = result.signal_result {
                     match signal_result {
-                        SignalDeriect::IsLong => {
+                        SignalDirect::IsLong => {
                             is_long_nums += 1;
                         }
-                        SignalDeriect::IsShort => {
+                        SignalDirect::IsShort => {
                             is_short_nums += 1;
                         }
                     }
@@ -346,20 +521,20 @@ impl SignalWeightsConfig {
             }
         }
 
-        SignalScoreWithDeriact {
+        SignalScoreWithDirect {
             total_weight,
             details,
             signal_result: if is_long_nums > is_short_nums {
-                Some(SignalDeriect::IsLong)
+                Some(SignalDirect::IsLong)
             } else if is_long_nums < is_short_nums {
-                Some(SignalDeriect::IsShort)
+                Some(SignalDirect::IsShort)
             } else {
                 None
             },
         }
     }
 
-    pub fn is_signal_valid(&self, score: &SignalScoreWithDeriact) -> Option<SignalDeriect> {
+    pub fn is_signal_valid(&self, score: &SignalScoreWithDirect) -> Option<SignalDirect> {
         if score.total_weight >= self.min_total_weight {
             score.signal_result
         } else {

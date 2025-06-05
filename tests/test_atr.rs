@@ -1,15 +1,16 @@
 #[cfg(test)]
 mod test {
     use dotenv::dotenv;
-    use ta::indicators::AverageTrueRange;
-    use ta::Next;
     use rust_quant::app_config::db::init_db;
     use rust_quant::app_config::log::setup_logging;
-    use rust_quant::{time_util, trading};
     use rust_quant::trading::indicator::atr::ATR;
     use rust_quant::trading::indicator::bar::Bar;
     use rust_quant::trading::model::market::candles::CandlesEntity;
+    use rust_quant::{time_util, trading};
+    use ta::indicators::AverageTrueRange;
+    use ta::Next;
 
+    /// 使用rust_quant库的ATR
     #[tokio::test]
     async fn test_atr_calculation() -> anyhow::Result<()> {
         dotenv().ok();
@@ -18,32 +19,38 @@ mod test {
         let mut atr = ATR::new(10).unwrap();
         // 设置参数
         let inst_id = "BTC-USDT-SWAP";
-        let period = "4H";
-        let min_length = 70;
+        let period = "1H";
+        let min_length = 11;
         let select_time = None;
-        let candles = trading::task::basic::get_candle_data(inst_id, period, min_length, select_time).await?;
+        let candles =
+            trading::task::basic::get_candle_data(inst_id, period, min_length, select_time).await?;
         println!("{:#?}", candles);
-        for item in candles.iter() {
-            println!("item c:{:#?}",item);
+        for (idx, item) in candles.iter().enumerate() {
+            println!("item c:{:#?}", item);
             let x = atr.next(item.h.parse()?, item.l.parse()?, item.c.parse()?);
-            println!("my atr{}", x)
+            println!("my atr{}", x);
+            //判断最后一个x值是否等于1129.8
+            if idx == min_length - 1 {
+                assert_eq!(x, 1129.8);
+            }
         }
         Ok(())
     }
+    /// 使用ta库的AverageTrueRange
     #[tokio::test]
-    async fn test_ta_atr() ->anyhow::Result<()> {
+    async fn test_ta_atr() -> anyhow::Result<()> {
         // 初始化环境和数据库连接
         dotenv().ok();
         init_db().await;
 
         // 设置参数
         let inst_id = "BTC-USDT-SWAP";
-        let time = "4H";
-        let period = 2;
+        let time = "1H";
+        let period = 10;
 
         // 获取K线数据
         let mysql_candles: Vec<CandlesEntity> =
-            trading::task::basic::get_candle_data(inst_id, time, 5, None).await?;
+            trading::task::basic::get_candle_data(inst_id, time, 300, None).await?;
         println!("{:#?}", mysql_candles);
 
         // 确保有数据
@@ -51,11 +58,8 @@ mod test {
             println!("警告: 未获取到K线数据");
             return Ok(());
         }
-
         let mut atr = AverageTrueRange::new(period).unwrap();
-
         // let mut sma = SMA::new(2); // 设置周期为15
-
         // 打印表头
         println!("\n{} {}K线 ATR({})计算结果:", inst_id, time, period);
         println!(

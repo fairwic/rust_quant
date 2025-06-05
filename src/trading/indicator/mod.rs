@@ -20,3 +20,9 @@ pub mod k_line_hammer_indicator;
 pub mod is_big_kline;
 pub mod predicting;
 pub mod ema_indicator;
+// Smart Money Concepts相关模块
+pub mod leg_detection_indicator;
+pub mod market_structure_indicator;
+pub mod fair_value_gap_indicator;
+pub mod equal_high_low_indicator;
+pub mod premium_discount_indicator;

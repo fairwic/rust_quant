@@ -18,7 +18,7 @@ use crate::SCHEDULER;
 use crate::CandleItem;
 use chrono::Local;
 use crate::trading::indicator::signal_weight::SignalWeightsConfig;
-use crate::trading::indicator::bollings::BollingerBandsSignalConfig;
+use crate::trading::indicator::bollings::BollingBandsSignalConfig;
 
 
 /// 储存每个策略任务的信息
@@ -116,15 +116,15 @@ static JOB_NAME_TO_UUID: Lazy<Mutex<HashMap<String, Uuid>>> = Lazy::new(|| {
 });
 
 // 策略订单管理器
-pub struct VagasOrder {
+pub struct VegasOrder {
     // 依赖注入的组件
     state_manager: Arc<StrategyStateManager>,
     task_manager: Arc<StrategyTaskManager>,
     metric_collector: Arc<MetricCollector>,
 }
 
-impl VagasOrder {
-    // 创建新的VagasOrder实例
+impl VegasOrder {
+    // 创建新的VegasOrder实例
     pub fn new() -> Self {
         // 创建默认的组件
         let state_manager = Arc::new(StrategyStateManager::new());
@@ -601,7 +601,7 @@ pub async fn usage_example() -> anyhow::Result<()> {
     let scheduler = crate::init_scheduler().await?;
     
     // 创建VagasOrder实例
-    let vegas_order = VagasOrder::new();
+    let vegas_order = VegasOrder::new();
     
     // 创建策略配置
     let strategy = VegasStrategy {
@@ -626,7 +626,7 @@ pub async fn usage_example() -> anyhow::Result<()> {
             rsi_overbought: 81.0,
             is_open: true,
         }),
-        bollinger_signal: Some(BollingerBandsSignalConfig {
+        bolling_signal: Some(BollingBandsSignalConfig {
             period: 9,
             multiplier: 3.6,
             is_open: true,
@@ -667,7 +667,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_vagas_order_creation() {
-        let order = VagasOrder::new();
+        let order = VegasOrder::new();
         assert!(Arc::strong_count(&order.state_manager) == 1);
         assert!(Arc::strong_count(&order.task_manager) == 1);
         assert!(Arc::strong_count(&order.metric_collector) == 1);

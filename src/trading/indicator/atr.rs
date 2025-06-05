@@ -40,6 +40,8 @@ impl ATR {
     /// 处理K线数据，始终返回f64：
     /// - 数据不足时返回0.00
     /// - 有效数据返回实际ATR值
+    /// 
+    /// 只需传入最新K线的高低收盘价，指标内部会维护所需的历史数据
     pub fn next(&mut self, high: f64, low: f64, close: f64) -> f64 {
         let tr = self.calculate_tr(high, low, close);
         self.buffer.push_back(tr);
@@ -68,6 +70,20 @@ impl ATR {
     /// 获取当前ATR值（可能为0.00）
     pub fn value(&self) -> f64 {
         self.current
+    }
+
+    /// 检查是否有足够的数据来计算有效的ATR值
+    pub fn is_ready(&self) -> bool {
+        self.buffer.len() >= self.period
+    }
+
+    /// 获取当前ATR值，如果数据不足返回None（类似PineScript的na）
+    pub fn value_optional(&self) -> Option<f64> {
+        if self.is_ready() && self.current > 0.0 {
+            Some(self.current)
+        } else {
+            None
+        }
     }
 
     fn calculate_tr(&self, high: f64, low: f64, close: f64) -> f64 {
