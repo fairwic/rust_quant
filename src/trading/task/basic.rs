@@ -20,17 +20,17 @@ use crate::trading::model::strategy::back_test_detail::BackTestDetail;
 use crate::trading::model::strategy::strategy_config::*;
 use crate::trading::model::strategy::strategy_job_signal_log::StrategyJobSignalLog;
 use crate::trading::model::strategy::{back_test_detail, strategy_job_signal_log};
-use okx::api::account::OkxAccount;
-use okx::dto::account::account_dto::SetLeverageRequest;
 use crate::trading::strategy::comprehensive_strategy::ComprehensiveStrategy;
 use crate::trading::strategy::strategy_common::{
-    get_multi_indivator_values, parse_candle_to_data_item, BackTestResult, BasicRiskStrategyConfig,
+    get_multi_indicator_values, parse_candle_to_data_item, BackTestResult, BasicRiskStrategyConfig,
     SignalResult, TradeRecord,
 };
 use crate::trading::strategy::ut_boot_strategy::UtBootStrategy;
 use crate::trading::strategy::{self, strategy_common};
 use crate::trading::strategy::{engulfing_strategy, Strategy};
 use crate::trading::{order, task};
+use okx::api::account::OkxAccount;
+use okx::dto::account::account_dto::SetLeverageRequest;
 
 use super::job_param_generator::ParamMerge;
 use crate::app_config::db;
@@ -45,12 +45,12 @@ use crate::trading::indicator::vegas_indicator::{
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
-use okx::api::trade::OkxTrade;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::get_hash_key;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::get_vegas_indicator_values;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::update_candle_items;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::update_vegas_indicator_values;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::{
+use crate::trading::order::swap_ordr::SwapOrder;
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::get_hash_key;
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::get_vegas_indicator_values;
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::update_candle_items;
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::update_vegas_indicator_values;
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::{
     self, ArcVegasIndicatorValues,
 };
 use crate::trading::strategy::engulfing_strategy::EngulfingStrategy;
@@ -66,6 +66,10 @@ use crate::{trading, CandleItem};
 use anyhow::Result;
 use futures::future::join_all;
 use hmac::digest::typenum::op;
+use okx::api::api_trait::OkxApiTrait;
+use okx::api::trade::OkxTrade;
+use okx::dto::trade_dto::TdModeEnum;
+use okx::dto::PositionSide;
 use once_cell::sync::OnceCell;
 use rbatis::dark_std::err;
 use redis::AsyncCommands;
@@ -73,10 +77,6 @@ use serde_json::json;
 use tokio;
 use tokio::time::Instant;
 use tracing::span;
-use crate::trading::order::swap_ordr::SwapOrder;
-use okx::dto::trade_dto::TdModeEnum;
-use okx::dto::PositionSide;
-use okx::api::api_trait::OkxApiTrait;
 /** 同步数据 任务**/
 pub async fn run_sync_data_job(
     inst_ids: Option<Vec<&str>>,
@@ -99,8 +99,6 @@ pub async fn run_sync_data_job(
     Ok(())
 }
 
-
-
 pub async fn breakout_long_test(
     mysql_candles_5m: Vec<CandlesEntity>,
     inst_id: &str,
@@ -115,16 +113,16 @@ pub async fn breakout_long_test(
         .expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
-    let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
+    let mut strategy = trading::strategy::Strategy::new(db::get_db_client(), con);
 
     for breakout_period in 1..20 {
         for confirmation_period in 1..20 {
             let volume_threshold_range: Vec<f64> = (0..=20).map(|x| x as f64 * 0.1).collect(); // 从0.1到2.0，每步0.1
             for volume_threshold in volume_threshold_range.clone() {
-                // let stopo_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
-                // for stop in stopo_percent {
+                // let stop_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
+                // for stop in stop_percent {
                 let stop_loss_strategy = StopLossStrategy::Percent(0.1);
-                let res = startegy
+                let res = strategy
                     .breakout_strategy(
                         &*mysql_candles_5m,
                         breakout_period,
@@ -173,12 +171,12 @@ pub async fn macd_ema_test(
         .expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
-    let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
+    let mut strategy = trading::strategy::Strategy::new(db::get_db_client(), con);
 
-    // let stopo_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
+    // let stop_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
     let stop_percent: Vec<f64> = vec![0.1]; //失仓位,从10%
     for stop in stop_percent.clone() {
-        let res = startegy.macd_ema_strategy(&*mysql_candles_5m, stop).await;
+        let res = strategy.macd_ema_strategy(&*mysql_candles_5m, stop).await;
         println!("strategy{:#?}", res); // let ins_id = "BTC-USDT-SWAP";
 
         // 解包 Result 类型
@@ -215,9 +213,9 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
         .expect("get multi redis connection error");
 
     // let db = BizActivityModel::new().await;
-    let mut startegy = trading::strategy::Strategy::new(db::get_db_client(), con);
+    let mut strategy = trading::strategy::Strategy::new(db::get_db_client(), con);
 
-    // let stopo_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
+    // let stop_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
 
     let fib_levels = ProfitStopLoss::get_fibonacci_level(inst_id, time);
     let stop_percent: Vec<f64> = vec![0.02]; //失仓位,从10%
@@ -367,8 +365,8 @@ pub async fn test_random_strategy(
     let breakthrough_thresholds = vec![0.003];
 
     let rsi_periods = vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
-    let rsi_overboughts = vec![85.0, 86.0, 87.0, 88.0, 89.0, 90.0];
-    let rsi_oversolds = vec![15.0, 16.0, 17.0, 18.0, 19.0, 20.0];
+    let rsi_over_buy = vec![85.0, 86.0, 87.0, 88.0, 89.0, 90.0];
+    let rsi_over_sold = vec![15.0, 16.0, 17.0, 18.0, 19.0, 20.0];
 
     // 将参数组合转换为扁平的迭代器
     info!("正在生成参数组合...");
@@ -382,8 +380,8 @@ pub async fn test_random_strategy(
         volume_decrease_ratios,
         breakthrough_thresholds,
         rsi_periods,
-        rsi_overboughts,
-        rsi_oversolds,
+        rsi_over_buy,
+        rsi_over_sold,
     );
 
     let (_, total_count) = param_generator.progress();
@@ -439,10 +437,16 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     // 创建信号量限制并发数
     let semaphore = Arc::new(Semaphore::new(30)); // 控制最大并发数量为 10
 
-    // 测试随机策略
+    // // 测试随机策略
     // test_random_strategy(inst_id, time, arc_candle_item_clone.clone(), semaphore.clone()).await;
     // //测试指定策略
-    test_specified_strategy(inst_id, time, arc_candle_item_clone.clone(), semaphore.clone()).await;
+    test_specified_strategy(
+        inst_id,
+        time,
+        arc_candle_item_clone.clone(),
+        semaphore.clone(),
+    )
+    .await;
 
     Ok(())
 }
@@ -459,96 +463,157 @@ pub async fn test_specified_strategy(
             .shadow_ratio(0.6)
             .breakthrough_threshold(0.003)
             //bollinger bands
-            .bb_periods(8).bb_multiplier(2.0)
+            .bb_periods(8)
+            .bb_multiplier(2.0)
             //volume
-            .volume_bar_num(3).volume_increase_ratio(2.2).volume_decrease_ratio(2.2)
+            .volume_bar_num(3)
+            .volume_increase_ratio(2.2)
+            .volume_decrease_ratio(2.2)
             //rsi
-            .rsi_period(18).rsi_overbought(90.0).rsi_oversold(20.0),
+            .rsi_period(18)
+            .rsi_overbought(90.0)
+            .rsi_oversold(20.0),
         //eth
         ParamMerge::build()
             .shadow_ratio(0.8)
             .breakthrough_threshold(0.003)
             //bollinger bands
-            .bb_periods(16).bb_multiplier(3.0)
+            .bb_periods(16)
+            .bb_multiplier(3.0)
             //volume
-            .volume_bar_num(6).volume_increase_ratio(2.9).volume_decrease_ratio(3.4)
+            .volume_bar_num(6)
+            .volume_increase_ratio(2.9)
+            .volume_decrease_ratio(3.4)
             //rsi
-            .rsi_period(12).rsi_overbought(85.0).rsi_oversold(15.0),
+            .rsi_period(12)
+            .rsi_overbought(85.0)
+            .rsi_oversold(15.0),
         //ada
         ParamMerge::build()
             .shadow_ratio(0.6)
             .breakthrough_threshold(0.003)
             //bollinger bands
-            .bb_periods(12).bb_multiplier(2.0)
+            .bb_periods(12)
+            .bb_multiplier(2.0)
             //volume
-            .volume_bar_num(6).volume_increase_ratio(2.6).volume_decrease_ratio(4.1)
+            .volume_bar_num(6)
+            .volume_increase_ratio(2.6)
+            .volume_decrease_ratio(4.1)
             //rsi
-            .rsi_period(8).rsi_overbought(85.0).rsi_oversold(15.0),
+            .rsi_period(8)
+            .rsi_overbought(85.0)
+            .rsi_oversold(15.0),
         //om
         ParamMerge::build()
             .shadow_ratio(0.6)
             .breakthrough_threshold(0.003)
             //bollinger bands
-            .bb_periods(14).bb_multiplier(2.5)
+            .bb_periods(14)
+            .bb_multiplier(2.5)
             //volume
-            .volume_bar_num(3).volume_increase_ratio(3.0).volume_decrease_ratio(4.1)
+            .volume_bar_num(3)
+            .volume_increase_ratio(3.0)
+            .volume_decrease_ratio(4.1)
             //rsi
-            .rsi_period(8).rsi_overbought(85.0).rsi_oversold(15.0),
+            .rsi_period(8)
+            .rsi_overbought(85.0)
+            .rsi_oversold(15.0),
         //sol
         ParamMerge::build()
             .shadow_ratio(0.6)
             .breakthrough_threshold(0.003)
             //bollinger bands
-            .bb_periods(14).bb_multiplier(2.0)
+            .bb_periods(14)
+            .bb_multiplier(2.0)
             //volume
-            .volume_bar_num(6).volume_increase_ratio(2.9).volume_decrease_ratio(2.4)
+            .volume_bar_num(6)
+            .volume_increase_ratio(2.9)
+            .volume_decrease_ratio(2.4)
             //rsi
-            .rsi_period(10).rsi_overbought(85.0).rsi_oversold(15.0),
+            .rsi_period(10)
+            .rsi_overbought(85.0)
+            .rsi_oversold(15.0),
         //xrp
         ParamMerge::build()
             .shadow_ratio(0.6)
             .breakthrough_threshold(0.003)
             //bollinger bands
-            .bb_periods(16).bb_multiplier(3.0)
+            .bb_periods(16)
+            .bb_multiplier(3.0)
             //volume
-            .volume_bar_num(5).volume_increase_ratio(2.4).volume_decrease_ratio(3.6)
+            .volume_bar_num(5)
+            .volume_increase_ratio(2.4)
+            .volume_decrease_ratio(3.6)
             //rsi
-            .rsi_period(13).rsi_overbought(85.0).rsi_oversold(15.0),
+            .rsi_period(13)
+            .rsi_overbought(85.0)
+            .rsi_oversold(15.0),
         //sui
         ParamMerge::build()
             .shadow_ratio(0.9)
             .breakthrough_threshold(0.003)
             //bollinger bands
-            .bb_periods(14).bb_multiplier(3.0)
+            .bb_periods(14)
+            .bb_multiplier(3.0)
             //volume
-            .volume_bar_num(4).volume_increase_ratio(2.2).volume_decrease_ratio(4.1)
+            .volume_bar_num(4)
+            .volume_increase_ratio(2.2)
+            .volume_decrease_ratio(4.1)
             //rsi
-            .rsi_period(8).rsi_overbought(85.0).rsi_oversold(15.0),
+            .rsi_period(8)
+            .rsi_overbought(85.0)
+            .rsi_oversold(15.0),
     ];
 
-   //测试 1
-   let params_batch = vec![
+    //测试 1
+    let params_batch = vec![
         //btc
+        //301u
         ParamMerge::build()
             .shadow_ratio(0.6)
             .breakthrough_threshold(0.003)
             //bollinger bands
-            .bb_periods(8).bb_multiplier(2.8)
+            .bb_periods(8)
+            .bb_multiplier(2.8)
             //volume
-            .volume_bar_num(3).volume_increase_ratio(2.2).volume_decrease_ratio(2.2)
+            .volume_bar_num(3)
+            .volume_increase_ratio(2.2)
+            .volume_decrease_ratio(2.2)
             //rsi
-            .rsi_period(18).rsi_overbought(90.0).rsi_oversold(20.0),
-
+            .rsi_period(18)
+            .rsi_overbought(90.0)
+            .rsi_oversold(20.0),
+        //335 u
         ParamMerge::build()
             .shadow_ratio(0.9)
             .breakthrough_threshold(0.003)
             //bollinger bands
-            .bb_periods(12).bb_multiplier(2.0)
+            .bb_periods(12)
+            .bb_multiplier(2.0)
             //volume
-            .volume_bar_num(3).volume_increase_ratio(2.1).volume_decrease_ratio(4.1)
+            .volume_bar_num(3)
+            .volume_increase_ratio(2.1)
+            .volume_decrease_ratio(4.1)
             //rsi
-            .rsi_period(13).rsi_overbought(85.0).rsi_oversold(15.0),
-   ];
+            .rsi_period(13)
+            .rsi_overbought(85.0)
+            .rsi_oversold(15.0),
+        //121.7u
+        ParamMerge::build()
+            .shadow_ratio(0.7)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(16)
+            .bb_multiplier(2.0)
+            //volume
+            .volume_bar_num(6)
+            .volume_increase_ratio(2.8)
+            .volume_decrease_ratio(2.9)
+            //rsi
+            .rsi_period(8)
+            .rsi_overbought(85.0)
+            .rsi_oversold(15.0),
+    ];
 
     run_back_test_strategy(
         params_batch,
@@ -585,11 +650,11 @@ pub async fn run_back_test_strategy(
             use_fibonacci_tp: true,
             max_loss_percent: 0.02,
             profit_threshold: 0.01,
-            is_move_stop_loss: true,
+            is_move_stop_loss: false,
             is_used_signal_k_line_stop_loss: true,
         };
 
-        let volumn_signal = VolumeSignalConfig {
+        let volume_signal = VolumeSignalConfig {
             volume_bar_num,
             volume_increase_ratio,
             volume_decrease_ratio,
@@ -621,7 +686,7 @@ pub async fn run_back_test_strategy(
             engulfing_signal: Some(EngulfingSignalConfig::default()),
             ema_signal: Some(EmaSignalConfig::default()),
             signal_weights: Some(SignalWeightsConfig::default()),
-            volume_signal: Some(volumn_signal),
+            volume_signal: Some(volume_signal),
             ema_touch_trend_signal: Some(ema_touch_trend_signal),
             rsi_signal: Some(rsi_signal),
             bolling_signal: Some(BollingBandsSignalConfig {
@@ -661,7 +726,10 @@ pub async fn run_back_test_strategy(
     let batch_start = Instant::now();
     join_all(batch_tasks).await;
     let batch_end = Instant::now();
-    info!("当前批次完成，用时：{:?}", batch_end.duration_since(batch_start));
+    info!(
+        "当前批次完成，用时：{:?}",
+        batch_end.duration_since(batch_start)
+    );
 }
 // // 主函数，执行所有策略测试
 // pub async fn squeeze_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
@@ -819,7 +887,7 @@ pub async fn top_contract_test(inst_id: &str, time: &str) -> Result<(), anyhow::
 
     let mut strate = TopContractStrategy::new(&inst_id, &time).await?;
 
-    let arc_starte = Arc::new(strate);
+    let arc_strategy = Arc::new(strate);
     // 遍历所有组合并为每个组合生成一个任务
     for key_value in key_values {
         for &max_loss in &max_loss_percent {
@@ -831,9 +899,9 @@ pub async fn top_contract_test(inst_id: &str, time: &str) -> Result<(), anyhow::
             tasks.push(tokio::spawn({
                 let inst_id = inst_id_clone.clone();
                 let time = time_clone.clone();
-                let strate_clone = Arc::clone(&arc_starte);
+                let strate_clone = Arc::clone(&arc_strategy);
                 async move {
-                    let stra = TopContractStrategy {
+                    let strategy = TopContractStrategy {
                         data: strate_clone,
                         key_value,
                         atr_period: 0,
@@ -841,7 +909,7 @@ pub async fn top_contract_test(inst_id: &str, time: &str) -> Result<(), anyhow::
                     };
                     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
 
-                    let res = stra
+                    let res = strategy
                         .run_test(&fibonacci_level, 10.00, false, true, false, false)
                         .await;
                     let result = save_log(
@@ -928,13 +996,19 @@ pub async fn save_test_detail(
                 None => "".to_string(),
             },
             open_price: trade_record.open_price.to_string(),
-            close_price: trade_record.close_price.to_string(),
+            close_price: if trade_record.close_price.is_some() {
+                Some(trade_record.close_price.unwrap().to_string())
+            } else {
+                None
+            },
             profit_loss: trade_record.profit_loss.to_string(),
             quantity: trade_record.quantity.to_string(),
             full_close: trade_record.full_close.to_string(),
             close_type: trade_record.close_type,
             win_nums: trade_record.win_num,
             loss_nums: trade_record.loss_num,
+            signal_status: trade_record.signal_status,
+            signal_open_position_time: trade_record.signal_open_position_time.clone(),
             signal_value: trade_record.signal_value.unwrap_or_else(|| "".to_string()),
             signal_result: trade_record.signal_result.unwrap_or_else(|| "".to_string()),
         };
@@ -1148,7 +1222,7 @@ pub async fn run_ready_to_order(
     // 7. 计算最新指标值
     let mut indicator_combines = current_data.indicator_combines.clone();
     let new_indicator_values =
-        strategy_common::get_multi_indivator_values(&mut indicator_combines, &new_candle_item);
+        strategy_common::get_multi_indicator_values(&mut indicator_combines, &new_candle_item);
 
     // 8. 更新指标值
     if let Err(e) = update_vegas_indicator_values(&key, indicator_combines).await {
@@ -1187,6 +1261,8 @@ pub async fn run_ready_to_order(
         .add(signal_record)
         .await?;
 
-    SwapOrder::new().ready_to_order(StrategyType::Vegas, inst_id, period, signal_result).await?;
+    SwapOrder::new()
+        .ready_to_order(StrategyType::Vegas, inst_id, period, signal_result)
+        .await?;
     Ok(())
 }

@@ -11,15 +11,15 @@ pub enum SignalType {
     TrendStrength,          // 趋势强度
     EmaDivergence,          // 均线发散
     PriceLevel,             // 关键价位
-    Bolling,              // 布林带
+    Bolling,                // 布林带
     Engulfing,              // 吞没形态
     KlineHammer,            // 锤子形态
     // 新增Smart Money Concepts相关信号类型
-    LegDetection,           // 腿部识别
-    MarketStructure,        // 市场结构
-    FairValueGap,           // 公平价值缺口
-    EqualHighLow,           // 等高/等低点
-    PremiumDiscount,        // 溢价/折扣区域
+    LegDetection,    // 腿部识别
+    MarketStructure, // 市场结构
+    FairValueGap,    // 公平价值缺口
+    EqualHighLow,    // 等高/等低点
+    PremiumDiscount, // 溢价/折扣区域
 }
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub enum SignalDirect {
@@ -165,10 +165,10 @@ impl SignalWeightsConfig {
 
         match condition {
             // 新增Smart Money Concepts相关条件评估
-            SignalCondition::LegDetection { 
-                is_bullish_leg, 
-                is_bearish_leg, 
-                is_new_leg 
+            SignalCondition::LegDetection {
+                is_bullish_leg,
+                is_bearish_leg,
+                is_new_leg,
             } => {
                 if is_new_leg {
                     let score = base_weight * 1.2; // 新腿部形成权重更高
@@ -206,16 +206,16 @@ impl SignalWeightsConfig {
                 } else {
                     None
                 }
-            },
-            SignalCondition::MarketStructure { 
-                is_bullish_bos, 
-                is_bearish_bos, 
-                is_bullish_choch, 
-                is_bearish_choch, 
-                is_internal 
+            }
+            SignalCondition::MarketStructure {
+                is_bullish_bos,
+                is_bearish_bos,
+                is_bullish_choch,
+                is_bearish_choch,
+                is_internal,
             } => {
                 let multiplier = if is_internal { 1.0 } else { 1.5 }; // 摆动结构比内部结构更重要
-                
+
                 if is_bullish_bos || is_bullish_choch {
                     let score = base_weight * multiplier * if is_bullish_choch { 1.2 } else { 1.0 };
                     Some(CheckConditionResult {
@@ -235,10 +235,10 @@ impl SignalWeightsConfig {
                 } else {
                     None
                 }
-            },
+            }
             SignalCondition::FairValueGap {
                 is_bullish_fvg,
-                is_bearish_fvg
+                is_bearish_fvg,
             } => {
                 if is_bullish_fvg {
                     Some(CheckConditionResult {
@@ -257,10 +257,10 @@ impl SignalWeightsConfig {
                 } else {
                     None
                 }
-            },
+            }
             SignalCondition::EqualHighLow {
                 is_equal_high,
-                is_equal_low
+                is_equal_low,
             } => {
                 if is_equal_high {
                     Some(CheckConditionResult {
@@ -279,10 +279,10 @@ impl SignalWeightsConfig {
                 } else {
                     None
                 }
-            },
+            }
             SignalCondition::PremiumDiscount {
                 in_premium_zone,
-                in_discount_zone
+                in_discount_zone,
             } => {
                 if in_premium_zone {
                     Some(CheckConditionResult {
@@ -301,7 +301,7 @@ impl SignalWeightsConfig {
                 } else {
                     None
                 }
-            },
+            }
             SignalCondition::Engulfing {
                 is_long_signal: is_long_engulfing,
                 is_short_signal: is_short_engulfing,
@@ -313,7 +313,7 @@ impl SignalWeightsConfig {
                         detail: condition,
                         signal_result: Some(SignalDirect::IsLong),
                     })
-                } else if is_short_engulfing    {
+                } else if is_short_engulfing {
                     Some(CheckConditionResult {
                         signal_type,
                         score: base_weight,

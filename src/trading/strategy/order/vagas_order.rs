@@ -9,8 +9,8 @@ use uuid::Uuid;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::trading::indicator::vegas_indicator::{EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, KlineHammerConfig, RsiSignalConfig, VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig};
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::{VEGAS_INDICATOR_VALUES, ArcVegasIndicatorValues};
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values;
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::{VEGAS_INDICATOR_VALUES, ArcVegasIndicatorValues};
 use crate::trading::strategy::strategy_common::parse_candle_to_data_item;
 use crate::trading::strategy::{strategy_common, Strategy, StrategyType};
 use crate::trading::task;
@@ -281,7 +281,7 @@ impl VegasOrder {
         for candle in candles.iter() {
             // 获取数据项
             let data_item = parse_candle_to_data_item(candle);
-            vegas_indicator_vaules = strategy_common::get_multi_indivator_values(
+            vegas_indicator_vaules = strategy_common::get_multi_indicator_values(
                 &mut multi_strategy_indicators,
                 &data_item,
             );
@@ -290,7 +290,7 @@ impl VegasOrder {
 
         // 创建并保存数据
         let strategy_type = StrategyType::Vegas.to_string();
-        let hash_key = arc_vegas_indicator_vaules::get_hash_key(
+        let hash_key = arc_vegas_indicator_values::get_hash_key(
             inst_id,
             time,
             &strategy_type,
@@ -300,7 +300,7 @@ impl VegasOrder {
 
         // 设置初始指标值
         info!("准备设置初始指标值");
-        arc_vegas_indicator_vaules::set_ema_indicator_values(
+        arc_vegas_indicator_values::set_ema_indicator_values(
             inst_id.to_string(),
             time.to_string(),
             candles.last().unwrap().ts,
@@ -311,7 +311,7 @@ impl VegasOrder {
         info!("初始指标值设置完成");
 
         // 验证数据
-        if arc_vegas_indicator_vaules::get_vegas_indicator_values_by_inst_id_with_period(hash_key.clone())
+        if arc_vegas_indicator_values::get_vegas_indicator_values_by_inst_id_with_period(hash_key.clone())
             .await
             .is_none() 
         {
@@ -446,7 +446,7 @@ impl StrategyTaskManager {
                         &task_info.inst_id,
                         &task_info.time_period,
                         &VegasStrategy::default(), // 这应该由调用者传入
-                        &crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules::VEGAS_INDICATOR_VALUES
+                        &crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::VEGAS_INDICATOR_VALUES
                     ).await.ok();
                 };
                 

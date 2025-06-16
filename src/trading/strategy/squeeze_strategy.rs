@@ -232,9 +232,11 @@ impl SqueezeMomentumIndicator {
             should_sell,
             open_price: price,
             ts,
-            tp_price: None,
+            stop_loss_price: None,
+            best_take_profit_price: None,
             single_value: None,
             single_result: None,
+            best_open_price: None,
         } // 返回是否应该开仓和是否应该卖出的信号, 开仓或卖出价格
     }
 }

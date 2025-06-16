@@ -6,3 +6,4 @@ pub mod indicator;
 pub mod services;
 pub mod analysis;
 pub mod constants;
+pub mod utils;

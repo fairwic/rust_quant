@@ -202,9 +202,11 @@ impl SqueezeCalculator {
             should_sell: false,
             open_price: 0.0,
             ts: 0,
-            tp_price: None,
+            stop_loss_price: None,
+            best_take_profit_price: None,
             single_value: None,
             single_result: None,
+            best_open_price: None,
         };
         //组装数据
         let data_items = self.convert_to_data_items(&data.to_vec());

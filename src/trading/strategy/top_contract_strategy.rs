@@ -131,10 +131,12 @@ impl TopContractStrategy {
                 should_buy,
                 should_sell,
                 open_price: price,
-                tp_price: None,
+                stop_loss_price: None,
+                best_take_profit_price: None,
                 ts,
                 single_value:None,
                 single_result: None,
+                best_open_price: None,
             };
         }
         let acct_ratio = &data.account_ratio;
@@ -185,10 +187,12 @@ impl TopContractStrategy {
             should_buy,
             should_sell,
             open_price: price,
-            tp_price: None,
+            best_take_profit_price: None,
+            stop_loss_price: None,
             ts,
             single_value: None,
             single_result: None,
+            best_open_price: None,
         }
     }
     /// Runs the backtest asynchronously.

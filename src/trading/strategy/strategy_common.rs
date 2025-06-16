@@ -1,5 +1,12 @@
 use crate::trading::indicator::ema_indicator::EmaIndicator;
+use crate::trading::indicator::enums::common_enums::TradeSide;
+use crate::trading::indicator::equal_high_low_indicator::EqualHighLowValue;
+use crate::trading::indicator::fair_value_gap_indicator::FairValueGapValue;
+use crate::trading::indicator::leg_detection_indicator::LegDetectionValue;
+use crate::trading::indicator::market_structure_indicator::MarketStructureValue;
+use crate::trading::indicator::premium_discount_indicator::PremiumDiscountValue;
 use crate::trading::indicator::rsi_rma_indicator::RsiIndicator;
+use crate::trading::indicator::signal_weight::SignalWeightsConfig;
 use crate::trading::indicator::vegas_indicator::{
     EmaSignalValue, IndicatorCombine, VegasIndicatorSignalValue, VegasStrategy,
 };
@@ -7,6 +14,9 @@ use crate::trading::indicator::volume_indicator::VolumeRatioIndicator;
 use crate::trading::model::market::candles::CandlesEntity;
 use crate::trading::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
 use crate::{time_util, CandleItem};
+use chrono::{DateTime, Utc};
+use hmac::digest::typenum::Min;
+use okx::dto::common::PositionSide;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::time::Instant;
@@ -21,15 +31,6 @@ use ta::Volume;
 use tracing::span;
 use tracing::Level;
 use tracing::{error, info};
-use okx::dto::common::PositionSide;
-use crate::trading::indicator::signal_weight::SignalWeightsConfig;
-use crate::trading::indicator::leg_detection_indicator::LegDetectionValue;
-use crate::trading::indicator::market_structure_indicator::MarketStructureValue;
-use crate::trading::indicator::fair_value_gap_indicator::FairValueGapValue;
-use crate::trading::indicator::equal_high_low_indicator::EqualHighLowValue;
-use crate::trading::indicator::premium_discount_indicator::PremiumDiscountValue;
-use chrono::{DateTime, Utc};
-use hmac::digest::typenum::Min;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BackTestResult {
@@ -41,21 +42,27 @@ pub struct BackTestResult {
 
 impl Default for BackTestResult {
     fn default() -> Self {
-        BackTestResult { funds: 0.0, win_rate: 0.0, open_trades: 0, trade_records: vec![] }
+        BackTestResult {
+            funds: 0.0,
+            win_rate: 0.0,
+            open_trades: 0,
+            trade_records: vec![],
+        }
     }
-}
-
-pub trait BackTestTrait {
-    fn to_string();
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TradeRecord {
     pub option_type: String,
     pub open_position_time: String,
+    //信号开仓时间
+    pub signal_open_position_time: Option<String>,
     pub close_position_time: Option<String>,
     pub open_price: f64,
-    pub close_price: f64,
+    //信号状态
+    pub signal_status: i32,
+    //平仓价格
+    pub close_price: Option<f64>,
     pub profit_loss: f64,
     pub quantity: f64,
     pub full_close: bool,
@@ -72,8 +79,12 @@ pub struct SignalResult {
     pub should_sell: bool,
     //开仓价格
     pub open_price: f64,
-    //止损加个价格
-    pub tp_price: Option<f64>,
+    //止损价格
+    pub stop_loss_price: Option<f64>,
+    //最优开仓价格(通常设置为信号线的0.382位置出开仓)
+    pub best_open_price: Option<f64>,
+    //最优止盈价格(通常设置为信号线的价差的2倍率) 1:2 1:3 1:4 1:5
+    pub best_take_profit_price: Option<f64>,
     pub ts: i64,
     pub single_value: Option<String>,
     pub single_result: Option<String>,
@@ -125,10 +136,10 @@ pub fn process_fibonacci_levels(
             entry_price * (1.0 - level) // 做空情况下的斐波那契目标价格
         };
 
-        println!(
-            "signal.price:{},fib_price:{},level:{}",
-            signal.open_price, fib_price, level
-        );
+        // println!(
+        //     "signal.price:{},fib_price:{},level:{}",
+        //     signal.open_price, fib_price, level
+        // );
 
         if (is_long && signal.open_price >= fib_price)
             || (!is_long && signal.open_price <= fib_price)
@@ -180,11 +191,13 @@ pub fn process_fibonacci_levels(
                 );
 
                 trade_records.push(TradeRecord {
+                    signal_status: 0,
                     option_type: "fibonacci_close".to_string(),
                     open_position_time: entry_time.to_string(),
+                    signal_open_position_time: Some(signal.ts.to_string()),
                     close_position_time: Some(exit_time),
                     open_price: entry_price,
-                    close_price: fib_price,
+                    close_price: Some(fib_price),
                     profit_loss: *total_profit_loss,
                     quantity: sell_amount,
                     full_close: remaining_position <= 1e-8,
@@ -239,11 +252,13 @@ pub fn close_remaining_position(
     }
 
     trade_records.push(TradeRecord {
+        signal_status: 0,
         option_type: "close".to_string(),
         open_position_time: entry_time.to_string(),
+        signal_open_position_time: Some(entry_time.to_string()),
         close_position_time: Some(exit_time),
         open_price: *entry_price, // 在最终平仓时记录开仓价格
-        close_price: last_price,
+        close_price: Some(last_price),
         profit_loss: *total_profit_loss,
         quantity: *position,
         full_close: true,
@@ -271,11 +286,11 @@ pub struct MoveStopLoss {
 /// 止盈止损策略配置
 #[derive(Debug, Clone, Copy)]
 pub struct BasicRiskStrategyConfig {
-    pub use_dynamic_tp: bool,             // 是否使用动态止盈
-    pub use_fibonacci_tp: bool,           // 是否使用斐波那契止盈
-    pub max_loss_percent: f64,            // 最大止损百分比
-    pub profit_threshold: f64,            // 盈利阈值，用于动态止盈
-    pub is_move_stop_loss: bool,          //是否使用移动止损,当盈利之后,止损价格变成开仓价
+    pub use_dynamic_tp: bool,                  // 是否使用动态止盈
+    pub use_fibonacci_tp: bool,                // 是否使用斐波那契止盈
+    pub max_loss_percent: f64,                 // 最大止损百分比
+    pub profit_threshold: f64,                 // 盈利阈值，用于动态止盈
+    pub is_move_stop_loss: bool,               //是否使用移动止损,当盈利之后,止损价格变成开仓价
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
 }
 
@@ -305,18 +320,18 @@ pub fn calculate_ema(data: &CandleItem, ema_indicator: &mut EmaIndicator) -> Ema
     ema_signal_value.is_long_trend = ema_signal_value.ema1_value > ema_signal_value.ema2_value
         && ema_signal_value.ema2_value > ema_signal_value.ema3_value
         && ema_signal_value.ema3_value > ema_signal_value.ema4_value;
-        // && ema_signal_value.ema4_value > ema_signal_value.ema5_value;
+    // && ema_signal_value.ema4_value > ema_signal_value.ema5_value;
     //判断是否空头排列
     ema_signal_value.is_short_trend = ema_signal_value.ema1_value < ema_signal_value.ema2_value
         && ema_signal_value.ema2_value < ema_signal_value.ema3_value
         && ema_signal_value.ema3_value < ema_signal_value.ema4_value;
-        // && ema_signal_value.ema4_value < ema_signal_value.ema5_value;
+    // && ema_signal_value.ema4_value < ema_signal_value.ema5_value;
 
     ema_signal_value
 }
 
 /// 获取数据项和ema值
-pub fn get_multi_indivator_values(
+pub fn get_multi_indicator_values(
     indicator_combine: &mut IndicatorCombine,
     data_item: &CandleItem,
 ) -> VegasIndicatorSignalValue {
@@ -425,11 +440,12 @@ pub fn get_multi_indivator_values(
             "计算腿部识别"
         );
     }
-    
+
     // 市场结构
     let structure_start = Instant::now();
     if let Some(market_structure_indicator) = &mut indicator_combine.market_structure_indicator {
-        vegas_indicator_signal_value.market_structure_value = market_structure_indicator.next(data_item);
+        vegas_indicator_signal_value.market_structure_value =
+            market_structure_indicator.next(data_item);
     }
     if structure_start.elapsed().as_millis() > 10 {
         info!(
@@ -437,11 +453,12 @@ pub fn get_multi_indivator_values(
             "计算市场结构"
         );
     }
-    
+
     // 公平价值缺口
     let fvg_start = Instant::now();
     if let Some(fair_value_gap_indicator) = &mut indicator_combine.fair_value_gap_indicator {
-        vegas_indicator_signal_value.fair_value_gap_value = fair_value_gap_indicator.next(data_item);
+        vegas_indicator_signal_value.fair_value_gap_value =
+            fair_value_gap_indicator.next(data_item);
     }
     if fvg_start.elapsed().as_millis() > 10 {
         info!(
@@ -449,11 +466,12 @@ pub fn get_multi_indivator_values(
             "计算公平价值缺口"
         );
     }
-    
+
     // 等高/等低点
     let ehl_start = Instant::now();
     if let Some(equal_high_low_indicator) = &mut indicator_combine.equal_high_low_indicator {
-        vegas_indicator_signal_value.equal_high_low_value = equal_high_low_indicator.next(data_item);
+        vegas_indicator_signal_value.equal_high_low_value =
+            equal_high_low_indicator.next(data_item);
     }
     if ehl_start.elapsed().as_millis() > 10 {
         info!(
@@ -461,11 +479,12 @@ pub fn get_multi_indivator_values(
             "计算等高/等低点"
         );
     }
-    
+
     // 溢价/折扣区域
     let pd_start = Instant::now();
     if let Some(premium_discount_indicator) = &mut indicator_combine.premium_discount_indicator {
-        vegas_indicator_signal_value.premium_discount_value = premium_discount_indicator.next(data_item);
+        vegas_indicator_signal_value.premium_discount_value =
+            premium_discount_indicator.next(data_item);
     }
     if pd_start.elapsed().as_millis() > 10 {
         info!(
@@ -485,10 +504,6 @@ pub fn run_back_test(
     min_data_length: usize,
     indicator_combine: &mut IndicatorCombine,
 ) -> BackTestResult {
-    let function_start = Instant::now();
-    let main_span = span!(Level::INFO, "run_back_test");
-    let _main_guard = main_span.enter();
-
     // 预分配交易状态，减少初始化开销
     let mut trading_state = TradingState {
         pre_stop_close_price: None,
@@ -497,15 +512,22 @@ pub fn run_back_test(
         wins: 0,
         losses: 0,
         open_trades: 0,
-        entry_price: 0.0,
+        open_price: 0.0,
+        close_price: None,
+        best_take_profit_price: None,
+        signal_status: 0,
+        last_signal_result: None,
+        is_use_best_open_price: false,
         move_stop_loss_price: None,
-        is_long: true,
-        entry_time: String::new(),
+        trade_side: None,
+        open_position_time: String::new(),
+        signal_open_position_time: None,
         initial_quantity: 0.0,
         total_profit_loss: 0.0,
         triggered_fib_levels: HashSet::with_capacity(10), // 预分配适当容量
-        trade_records: Vec::with_capacity(candles_list.len() / 20), // 假设平均每20根K线产生一笔交易
+        trade_records: Vec::with_capacity(candles_list.len() / 10), // 假设平均每20根K线产生一笔交易
     };
+
     // 预分配K线容量
     let mut candle_item_list = Vec::with_capacity(candles_list.len());
 
@@ -519,21 +541,36 @@ pub fn run_back_test(
         // let parsed = &parsed_candles[i];
         // let data_item = parse_candle_to_data_item(candle);
         // 计算指标值
-        let mut multi_indicator_values = get_multi_indivator_values(indicator_combine, &candle);
+        let mut multi_indicator_values = get_multi_indicator_values(indicator_combine, &candle);
 
         // 将新数据添加到列表，如果超过最大回溯期，删除最旧的数据
         candle_item_list.push(candle.clone());
         if candle_item_list.len() > MAX_LOOKBACK {
             candle_item_list.remove(0);
         }
-
         // 计算交易信号
         let mut signal = strategy(&candle_item_list, &mut multi_indicator_values);
 
-        // 处理交易信号前检查是否值得处理（性能优化）
-        let should_process_signal =
-            signal.should_buy || signal.should_sell || trading_state.position > 0.0; // 有持仓时始终需要处理
+        if signal.should_buy || signal.should_sell {
+            if signal.best_open_price.is_some() {
+                trading_state.last_signal_result = Some(signal.clone());
+                trading_state.is_use_best_open_price = true;
+            } else {
+                trading_state.is_use_best_open_price = false;
+                trading_state.last_signal_result = None;
+            }
 
+            if signal.best_take_profit_price.is_some() {
+                trading_state.best_take_profit_price = signal.best_take_profit_price;
+            } else {
+                trading_state.best_take_profit_price = None;
+            }
+        }
+        // 处理交易信号前检查是否值得处理（性能优化）
+        let should_process_signal = signal.should_buy
+            || signal.should_sell
+            || trading_state.position > 0.0
+            || trading_state.last_signal_result.is_some(); // 有持仓时始终需要处理
         if should_process_signal {
             trading_state = deal_signal(
                 trading_state,
@@ -545,6 +582,7 @@ pub fn run_back_test(
             );
         }
     }
+
     // 最终平仓处理
     finalize_trading_state(&mut trading_state, &candle_item_list);
 
@@ -579,11 +617,16 @@ fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list: &V
     if trading_state.position > 0.0 {
         let last_candle = candle_item_list.last().unwrap();
         let last_price = last_candle.c;
+        trading_state.close_price = Some(last_price);
 
-        let profit = if trading_state.is_long {
-            (last_price - trading_state.entry_price) * trading_state.position
-        } else {
-            (trading_state.entry_price - last_price) * trading_state.position
+        let profit = match trading_state.trade_side {
+            Some(TradeSide::Long) => {
+                (last_price - trading_state.open_price) * trading_state.position
+            }
+            Some(TradeSide::Short) => {
+                (trading_state.open_price - last_price) * trading_state.position
+            }
+            None => 0.0,
         };
 
         close_position(
@@ -593,7 +636,9 @@ fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list: &V
                 should_buy: false,
                 should_sell: true,
                 open_price: last_price,
-                tp_price: None,
+                best_open_price: None,
+                best_take_profit_price: None,
+                stop_loss_price: None,
                 ts: last_candle.ts,
                 single_value: Some("结束平仓".to_string()),
                 single_result: Some("结束平仓".to_string()),
@@ -615,128 +660,185 @@ pub fn check_risk_config(
     candle_item_list: &Vec<CandleItem>,
     i: usize,
 ) -> TradingState {
-    let current_price = signal.open_price;
+    let current_open_price = signal.open_price;
     let current_low_price = candle.l;
     let current_high_price = candle.h;
     let current_close_price = candle.c;
-    let entry_price = trading_state.entry_price; // 先保存入场价格
+    let entry_price = trading_state.open_price; // 先保存入场价格
 
     let position = trading_state.position.clone();
-    //检查移动止损
-    if risk_config.is_move_stop_loss {
-        //如果设置了移动止损价格
-        if let Some(move_stop_loss_price) = trading_state.move_stop_loss_price {
-            if trading_state.is_long {
-                if current_close_price <= move_stop_loss_price {
-                    close_position(&mut trading_state, candle, &signal, "移动止损", (current_close_price - entry_price) * position);
-                    return trading_state;
+
+    if signal.stop_loss_price.is_some() {
+        let tp_price = signal.stop_loss_price.unwrap();
+        match trading_state.trade_side {
+            Some(TradeSide::Long) => {
+                if current_close_price < tp_price {
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "信号线失效-止损",
+                        (current_open_price - entry_price) * position,
+                    );
                 }
-            } else {
-                if current_close_price >= move_stop_loss_price {
-                    close_position(&mut trading_state, candle, &signal, "移动止损", (entry_price - current_close_price) * position);
-                    return trading_state;
+            }
+            Some(TradeSide::Short) => {
+                if current_close_price > tp_price {
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "信号线失效-止损",
+                        (entry_price - current_open_price) * position,
+                    );
+                }
+            }
+            None => {
+                // do nothing
+            }
+        }
+    }
+
+    //检查移动止盈
+    if risk_config.is_move_stop_loss {
+        //如果设置了移动止盈价格
+        if let Some(move_stop_loss_price) = trading_state.move_stop_loss_price {
+            match trading_state.trade_side {
+                Some(TradeSide::Long) => {
+                    if current_close_price <= move_stop_loss_price {
+                        trading_state.close_price = Some(current_close_price);
+                        close_position(
+                            &mut trading_state,
+                            candle,
+                            &signal,
+                            "移动止盈",
+                            (current_close_price - entry_price) * position,
+                        );
+                        return trading_state;
+                    }
+                }
+                Some(TradeSide::Short) => {
+                    if current_close_price >= move_stop_loss_price {
+                        trading_state.close_price = Some(current_close_price);
+                        close_position(
+                            &mut trading_state,
+                            candle,
+                            &signal,
+                            "移动止盈",
+                            (entry_price - current_close_price) * position,
+                        );
+                        return trading_state;
+                    }
+                }
+                None => {
+                    // do nothing
                 }
             }
         } else {
-            if trading_state.is_long {
-                if current_price > entry_price {
-                    //如果开仓后第一根k线有盈利，则设置止损价格为开仓价,保存本金
-                    trading_state.move_stop_loss_price = Some(entry_price);
+            match trading_state.trade_side {
+                Some(TradeSide::Long) => {
+                    if current_open_price > entry_price {
+                        //如果开仓后第一根k线有盈利，则设置止损价格为开仓价,保存本金
+                        trading_state.move_stop_loss_price = Some(entry_price);
+                    }
                 }
-            } else {
-                if current_price < entry_price {
-                    //如果开仓后第一根k线有盈利，则设置止损价格为开仓价,保存本金
-                    trading_state.move_stop_loss_price = Some(entry_price);
+                Some(TradeSide::Short) => {
+                    if current_open_price < entry_price {
+                        //如果开仓后第一根k线有盈利，则设置止损价格为开仓价,保存本金
+                        trading_state.move_stop_loss_price = Some(entry_price);
+                    }
+                }
+                None => {
+                    // do nothing
                 }
             }
         }
     }
     // 计算盈亏率
-    let profit_pct = if trading_state.is_long {
-        (current_price - entry_price) / entry_price
-    } else {
-        (entry_price - current_price) / entry_price // 做空的盈亏计算
+    let profit_pct = match trading_state.trade_side {
+        Some(TradeSide::Long) => (current_open_price - entry_price) / entry_price,
+        Some(TradeSide::Short) => {
+            (entry_price - current_open_price) / entry_price // 做空的盈亏计算
+        }
+        None => 0.0,
     };
 
     //计算盈亏
-    let profit = if trading_state.is_long {
-        (current_price - entry_price) * trading_state.position
-    } else {
-        (entry_price - current_price) * trading_state.position
+    let profit = match trading_state.trade_side {
+        Some(TradeSide::Long) => (current_open_price - entry_price) * trading_state.position,
+        Some(TradeSide::Short) => (entry_price - current_open_price) * trading_state.position,
+        None => 0.0,
     };
+
+    //检查是否设置了最优止盈价格
+    if let Some(best_take_profit_price) = trading_state.best_take_profit_price {
+        match trading_state.trade_side {
+            Some(TradeSide::Long) => {
+                if current_high_price >= best_take_profit_price {
+                    let profit = (best_take_profit_price - entry_price) * trading_state.position;
+                    close_position(&mut trading_state, candle, &signal, "最优止盈", profit);
+                    return trading_state;
+                }
+            }
+            Some(TradeSide::Short) => {
+                if current_low_price <= best_take_profit_price {
+                    let profit = (entry_price - best_take_profit_price) * trading_state.position;
+                    close_position(&mut trading_state, candle, &signal, "最优止盈", profit);
+                    return trading_state;
+                }
+            }
+            None => {
+                // do nothing
+            }
+        }
+    }
 
     // 1. 检查最大止损
     if profit_pct < -risk_config.max_loss_percent {
         // println!(">>> 触发止损 <<< 开仓价:{}, 当前价:{}, 盈亏率:{:.2}% < 止损线:{:.2}%", entry_price, current_price, profit_pct * 100.0, -strategy_config.max_loss_percent * 100.0);
-        close_position(&mut trading_state, candle, &signal, "止损", profit);
+        trading_state.close_price = Some(current_open_price);
+        close_position(&mut trading_state, candle, &signal, "最大亏损止损", profit);
         return trading_state;
     }
 
     //检查设置了是否预止损价格
     if let Some(pre_stop_close_price) = trading_state.pre_stop_close_price {
-        if trading_state.is_long {
-            if current_close_price <= pre_stop_close_price {
-                //重新计算利润
-                let profit = (pre_stop_close_price - entry_price) * trading_state.position;
-                close_position(
-                    &mut trading_state,
-                    candle,
-                    &signal,
-                    "预止损-信号线失效",
-                    profit,
-                );
-                return trading_state;
+        match trading_state.trade_side {
+            Some(TradeSide::Long) => {
+                if current_close_price <= pre_stop_close_price {
+                    //重新计算利润
+                    trading_state.close_price = Some(pre_stop_close_price);
+                    let profit = (pre_stop_close_price - entry_price) * trading_state.position;
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "预止损-信号线失效",
+                        profit,
+                    );
+                    return trading_state;
+                }
             }
-        } else {
-            if current_close_price >= pre_stop_close_price {
-                //重新计算利润
-                let profit = (entry_price - pre_stop_close_price) * trading_state.position;
-                close_position(
-                    &mut trading_state,
-                    candle,
-                    &signal,
-                    "预止损-信号线失效",
-                    profit,
-                );
-                return trading_state;
+            Some(TradeSide::Short) => {
+                if current_close_price >= pre_stop_close_price {
+                    //重新计算利润
+                    trading_state.close_price = Some(pre_stop_close_price);
+                    let profit = (entry_price - pre_stop_close_price) * trading_state.position;
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "预止损-信号线失效",
+                        profit,
+                    );
+                    return trading_state;
+                }
             }
-        }
-    }
-    // 2. 检查动态止盈
-    if risk_config.use_dynamic_tp && profit_pct > risk_config.profit_threshold {
-        if i >= 2 {
-            let prev_close = candle_item_list[i - 1].c;
-            let prev_prev_close = candle_item_list[i - 2].c;
-            // println!("\n检查动态止盈条件:");
-            // println!("当前价: {}, 前一K线收盘价: {}, 前前K线收盘价: {}", current_price, prev_close, prev_prev_close);
-            // println!("盈利率: {:.2}% > 启动阈值: {:.2}%",
-            // profit_pct * 100.0, strategy_config.profit_threshold * 100.0);
-
-            // 根据多空方向判断动态止盈条件
-            let should_take_profit = if trading_state.is_long {
-                current_price < prev_close && current_price < prev_prev_close
-            } else {
-                current_price > prev_close && current_price > prev_prev_close
-            };
-
-            if should_take_profit {
-                println!(
-                    ">>> 触发动态止盈 <<< 当前价突破前两根K线 {}->{}->{}",
-                    prev_prev_close, prev_close, current_price
-                );
-                let mut modified_signal = signal.clone();
-                modified_signal.single_value = Some("触发动态止盈,价格突破前两根k线".to_string());
-                close_position(
-                    &mut trading_state,
-                    candle,
-                    &modified_signal,
-                    "动态止盈",
-                    profit,
-                );
+            None => {
+                // do nothing
             }
         }
     }
-
     trading_state
 }
 
@@ -775,6 +877,45 @@ pub fn deal_signal(
         handle_buy_signal_logic(&mut trading_state, signal, candle);
     } else if signal.should_sell {
         handle_sell_signal_logic(&mut trading_state, signal, candle);
+    } else if trading_state.last_signal_result.is_some() && trading_state.position <= 0.0 {
+        //要确保大于信号的开仓时间
+        if candle.ts >= trading_state.last_signal_result.clone().unwrap().ts {
+            let last_signal_result = trading_state.last_signal_result.clone().unwrap();
+            if last_signal_result.should_buy {
+                //如果信号是买，但是当前价格低于信号的最优开仓价格，则使用信号的最优开仓价格
+                if candle.l < last_signal_result.best_open_price.unwrap() {
+                    signal.open_price = last_signal_result.best_open_price.unwrap();
+                    signal.should_buy = true;
+                    signal.stop_loss_price = last_signal_result.stop_loss_price;
+                    signal.single_value = last_signal_result.single_value;
+                    signal.single_result = last_signal_result.single_result;
+
+                    trading_state.trade_side = Some(TradeSide::Long);
+                    trading_state.last_signal_result = None;
+                    trading_state.is_use_best_open_price = true;
+                    trading_state.signal_open_position_time =
+                        Some(time_util::mill_time_to_datetime(last_signal_result.ts).unwrap());
+                    handle_buy_signal_logic(&mut trading_state, signal, candle);
+                }
+            } else if last_signal_result.should_sell {
+                //如果信号是卖，但是当前价格高于信号的最优开仓价格，则使用信号的最优开仓价格
+                if candle.h > last_signal_result.best_open_price.unwrap() {
+                    signal.open_price = last_signal_result.best_open_price.unwrap();
+                    signal.should_sell = true;
+                    trading_state.trade_side = Some(TradeSide::Short);
+                    signal.stop_loss_price = last_signal_result.stop_loss_price;
+                    signal.single_value = last_signal_result.single_value;
+                    signal.single_result = last_signal_result.single_result;
+
+                    trading_state.last_signal_result = None;
+                    trading_state.is_use_best_open_price = true;
+                    trading_state.signal_open_position_time =
+                        Some(time_util::mill_time_to_datetime(last_signal_result.ts).unwrap());
+
+                    handle_sell_signal_logic(&mut trading_state, signal, candle);
+                }
+            }
+        }
     }
 
     trading_state
@@ -786,17 +927,26 @@ fn handle_buy_signal_logic(
     signal: &SignalResult,
     candle: &CandleItem,
 ) {
-    if trading_state.position <= 0.000000000 {
-        // 没有仓位，直接开多仓
-        open_long_position(trading_state, candle, signal);
-    } else if !trading_state.is_long {
+    if trading_state.position <= 0.0 {
+        //不使用最优开仓价格，直接开多仓
+        if trading_state.last_signal_result.is_none() {
+            open_long_position(trading_state, candle, signal);
+        }
+    } else if trading_state.trade_side.is_some()
+        && trading_state.trade_side.unwrap() == TradeSide::Short
+    {
         // 持有空单，先平空单
-        let profit = (trading_state.entry_price - signal.open_price) * trading_state.position;
+        let profit = (trading_state.open_price - signal.open_price) * trading_state.position;
+        trading_state.close_price = Some(signal.open_price);
+
         close_position(trading_state, candle, signal, "反向信号触发平仓", profit);
         // 然后开多仓
-        open_long_position(trading_state, candle, signal);
+        if trading_state.last_signal_result.is_none() {
+            open_long_position(trading_state, candle, signal);
+        }
+    } else {
+        //todo 如果已持有多单，则不执行任何操作
     }
-    // 如果已持有多单，则不执行任何操作
 }
 
 /// 处理卖出信号的逻辑
@@ -805,17 +955,25 @@ fn handle_sell_signal_logic(
     signal: &SignalResult,
     candle: &CandleItem,
 ) {
-    if trading_state.position <= 0.000000000 {
-        // 没有仓位，直接开空仓
-        open_short_position(trading_state, candle, signal);
-    } else if trading_state.is_long {
+    if trading_state.position <= 0.0 {
+        //不使用最优开仓价格，直接开空仓
+        if trading_state.last_signal_result.is_none() {
+            open_short_position(trading_state, candle, signal);
+        }
+    } else if trading_state.trade_side.is_some()
+        && trading_state.trade_side.unwrap() == TradeSide::Long
+    {
         // 持有多单，先平多单
-        let profit = (signal.open_price - trading_state.entry_price) * trading_state.position;
+        let profit = (signal.open_price - trading_state.open_price) * trading_state.position;
+        trading_state.close_price = Some(signal.open_price);
         close_position(trading_state, candle, signal, "反向信号平仓", profit);
         // 然后开空仓
-        open_short_position(trading_state, candle, signal);
+        if trading_state.last_signal_result.is_none() {
+            open_short_position(trading_state, candle, signal);
+        }
+    } else {
+        //todo  如果已持有空单，则不执行任何操作
     }
-    // 如果已持有空单，则不执行任何操作
 }
 
 /// 交易状态结构体
@@ -826,12 +984,24 @@ pub struct TradingState {
     pub wins: i64,
     pub losses: i64,
     pub open_trades: usize,
-    pub entry_price: f64,
+    //实际开仓价格
+    pub open_price: f64,
+    //实际平仓价格
+    pub close_price: Option<f64>,
     //预止损价格
     pub pre_stop_close_price: Option<f64>,
+    //最优止盈价格
+    pub best_take_profit_price: Option<f64>,
     pub move_stop_loss_price: Option<f64>,
-    pub is_long: bool,
-    pub entry_time: String,
+    pub last_signal_result: Option<SignalResult>,
+    pub is_use_best_open_price: bool,
+    pub trade_side: Option<TradeSide>,
+    //开仓价格
+    pub open_position_time: String,
+    //信号开仓时间
+    pub signal_open_position_time: Option<String>,
+    //signal_status 信号状态  0使用信号正常 -1信号错过 1使用信号的最优价格
+    pub signal_status: i32,
     pub initial_quantity: f64,
     pub total_profit_loss: f64,
     pub triggered_fib_levels: HashSet<usize>,
@@ -842,11 +1012,13 @@ pub struct TradingState {
 fn open_long_position(state: &mut TradingState, candle: &CandleItem, signal: &SignalResult) {
     state.position = state.funds / signal.open_price;
     state.initial_quantity = state.position;
-    state.entry_price = signal.open_price;
-    state.entry_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
+    state.open_price = signal.open_price;
+    state.open_position_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
     state.open_trades += 1;
     state.total_profit_loss = 0.0;
-    state.is_long = true;
+    state.trade_side = Some(TradeSide::Long);
+    state.last_signal_result = None;
+    state.is_use_best_open_price = false;
 
     record_trade_entry(state, PositionSide::Long.to_string(), signal);
 }
@@ -855,35 +1027,43 @@ fn open_long_position(state: &mut TradingState, candle: &CandleItem, signal: &Si
 fn open_short_position(state: &mut TradingState, candle: &CandleItem, signal: &SignalResult) {
     state.position = state.funds / signal.open_price;
     state.initial_quantity = state.position;
-    state.entry_price = signal.open_price;
-    state.entry_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
+    state.open_price = signal.open_price;
+    state.open_position_time = time_util::mill_time_to_datetime(candle.ts).unwrap();
     state.open_trades += 1;
     state.total_profit_loss = 0.0;
-    state.is_long = false;
+    state.trade_side = Some(TradeSide::Short);
 
-    record_trade_entry(state, "SHORT".to_string(), &signal);
+    state.last_signal_result = None;
+    state.is_use_best_open_price = false;
+
+    record_trade_entry(state, PositionSide::Short.to_string(), &signal);
 }
 
 /// 记录交易入场
 fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
     // if false {
-        //批量回测的时候不进行记录
-        state.trade_records.push(TradeRecord {
-            option_type,
-            open_position_time: state.entry_time.clone(),
-            close_position_time: Some(state.entry_time.clone()),
-            open_price: state.entry_price,
-            close_price: state.entry_price,
-            profit_loss: state.total_profit_loss,
-            quantity: state.initial_quantity,
-            full_close: false,
-            close_type: "".to_string(),
-            win_num: 0,
-            loss_num: 0,
-            signal_value: signal.single_value.clone(),
-            signal_result: signal.single_result.clone(),
-        });
-    // }
+    //批量回测的时候不进行记录
+    state.trade_records.push(TradeRecord {
+        option_type,
+        open_position_time: state.open_position_time.clone(),
+        close_position_time: Some(state.open_position_time.clone()),
+        //开仓价格
+        open_price: state.open_price,
+        //信号开仓价格
+        signal_open_position_time: state.signal_open_position_time.clone(),
+        //信号状态
+        signal_status: state.signal_status as i32,
+        //平仓价格
+        close_price: state.close_price.clone(),
+        profit_loss: state.total_profit_loss,
+        quantity: state.initial_quantity,
+        full_close: false,
+        close_type: "".to_string(),
+        win_num: 0,
+        loss_num: 0,
+        signal_value: signal.single_value.clone(),
+        signal_result: signal.single_result.clone(),
+    });
 }
 
 /// 辅助函数：获取前N根K线
@@ -905,8 +1085,12 @@ fn close_position(
     // 更新总利润和资金
     state.move_stop_loss_price = None;
 
-    state.total_profit_loss += profit;
-    state.funds += profit;
+    //手续费设定0.007,假设开仓平仓各收一次 (数量*价格 *0.07%)
+    let fee = state.position * state.open_price * 0.0007;
+    println!("手续费: {}", fee);
+    let profit_after_fee = profit - fee;
+    state.total_profit_loss += profit_after_fee;
+    state.funds += profit_after_fee;
 
     if profit > 0.0 {
         state.wins += 1;
@@ -919,8 +1103,20 @@ fn close_position(
     record_trade_exit(state, exit_time, signal, close_type, state.position);
 
     // Set position to zero AFTER recording the exit with correct quantity
-    state.position = 0.00000;
+    state_init(state);
+}
+
+/// 初始化交易状态
+pub fn state_init(state: &mut TradingState) {
+    state.position = 0.0;
+    state.open_price = 0.0;
+    state.close_price = None;
     state.triggered_fib_levels.clear();
+    state.trade_side = None;
+    state.last_signal_result = None;
+    state.is_use_best_open_price = false;
+    state.signal_open_position_time = None;
+    state.best_take_profit_price = None;
 }
 
 /// 记录交易出场
@@ -929,24 +1125,26 @@ fn record_trade_exit(
     exit_time: String,
     signal: &SignalResult,
     close_type: &str,
-    closing_quantity: f64 // Add parameter for quantity being closed
+    closing_quantity: f64, // Add parameter for quantity being closed
 ) {
-        //todo 批量回测的时候不进行记录
-        state.trade_records.push(TradeRecord {
-            option_type: "close".to_string(),
-            open_position_time: state.entry_time.clone(),
-            close_position_time: Some(exit_time),
-            open_price: state.entry_price,
-            close_price: signal.open_price,
-            profit_loss: state.total_profit_loss,
-            quantity: closing_quantity, // Use the actual closing quantity, not initial_quantity
-            full_close: true,
-            close_type: close_type.to_string(),
-            win_num: state.wins,
-            loss_num: state.losses,
-            signal_value: signal.single_value.clone(),
-            signal_result: signal.single_result.clone(),
-        });
+    //todo 批量回测的时候不进行记录
+    state.trade_records.push(TradeRecord {
+        option_type: "close".to_string(),
+        open_position_time: state.open_position_time.clone(),
+        signal_open_position_time: state.signal_open_position_time.clone(),
+        signal_status: state.signal_status as i32,
+        close_position_time: Some(exit_time),
+        open_price: state.open_price,
+        close_price: state.close_price,
+        profit_loss: state.total_profit_loss,
+        quantity: closing_quantity, // Use the actual closing quantity, not initial_quantity
+        full_close: true,
+        close_type: close_type.to_string(),
+        win_num: state.wins,
+        loss_num: state.losses,
+        signal_value: signal.single_value.clone(),
+        signal_result: signal.single_result.clone(),
+    });
 }
 
 /// 计算胜率
@@ -958,19 +1156,25 @@ fn calculate_win_rate(wins: i64, losses: i64) -> f64 {
     }
 }
 
-/// 处理策略信号时的利润计算
-fn handle_strategy_signals(state: &mut TradingState, signal: &SignalResult, candle: &CandleItem) {
-    if state.position > 0.0 {
-        // 计算当前利润，考虑多空方向
-        let current_profit = if state.is_long {
-            (signal.open_price - state.entry_price) * state.position
-        } else {
-            (state.entry_price - signal.open_price) * state.position
-        };
+// /// 处理策略信号时的利润计算
+// fn handle_strategy_signals(state: &mut TradingState, signal: &SignalResult, candle: &CandleItem) {
+//     if state.position > 0.0 {
+//         // 计算当前利润，考虑多空方向
+//         let current_profit = match state.trade_side {
+//             Some(TradeSide::Long) => (signal.open_price - state.open_price) * state.position,
+//             Some(TradeSide::Short) => (state.open_price - signal.open_price) * state.position,
+//             None => 0.0,
+//         };
 
-        // 处理平仓信号
-        if (state.is_long && signal.should_sell) || (!state.is_long && signal.should_buy) {
-            close_position(state, candle, signal, "策略平仓", current_profit);
-        }
-    }
-}
+//         // 处理平仓信号
+//         if (state.trade_side.is_some()
+//             && state.trade_side.unwrap() == TradeSide::Short
+//             && signal.should_sell)
+//             || (state.trade_side.is_some()
+//                 && state.trade_side.unwrap() == TradeSide::Long
+//                 && signal.should_buy)
+//         {
+//             close_position(state, candle, signal, "策略平仓", current_profit);
+//         }
+//     }
+// }

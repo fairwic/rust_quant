@@ -58,7 +58,7 @@ use rust_quant::trading::indicator::vegas_indicator::{
 };
 use rust_quant::trading::model::strategy::back_test_log;
 use rust_quant::trading::model::strategy::strategy_config::StrategyConfigEntityModel;
-use rust_quant::trading::strategy::arc::indicator_values::arc_vegas_indicator_vaules;
+use rust_quant::trading::strategy::arc::indicator_values::arc_vegas_indicator_values;
 use rust_quant::trading::strategy::order::vagas_order::VegasOrder;
 use rust_quant::trading::strategy::strategy_common::{parse_candle_to_data_item, SignalResult};
 use rust_quant::trading::strategy::StrategyType;

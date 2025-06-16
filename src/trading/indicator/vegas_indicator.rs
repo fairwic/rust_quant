@@ -1,11 +1,5 @@
-use crate::trading::indicator::rsi_rma_indicator::RsiIndicator;
-use crate::trading::indicator::signal_weight::{
-    SignalCondition, SignalDirect, SignalScoreWithDirect, SignalType, SignalWeightsConfig,
-};
-use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::strategy::strategy_common;
 use crate::trading::strategy::strategy_common::{
-    BackTestResult, BasicRiskStrategyConfig, SignalResult,
+    self, BackTestResult, BasicRiskStrategyConfig, SignalResult,
 };
 use crate::CandleItem;
 use fast_log::print;
@@ -18,20 +12,34 @@ use std::sync::Arc;
 use ta::indicators::{BollingerBands, BollingerBandsOutput, ExponentialMovingAverage};
 use ta::indicators::{MovingAverageConvergenceDivergence, RelativeStrengthIndex};
 use ta::{Close, DataItem, High, Low, Next, Open, Volume};
-use tracing::error;
+use tracing::{debug, error};
 
 use super::bollings::BollingBandsSignalConfig;
 use super::ema_indicator::EmaIndicator;
 use super::is_big_kline::IsBigKLineIndicator;
 use super::k_line_engulfing_indicator::KlineEngulfingIndicator;
 use super::k_line_hammer_indicator::KlineHammerIndicator;
+use super::rsi_rma_indicator::RsiIndicator;
+use super::signal_weight::{SignalCondition, SignalDirect, SignalType, SignalWeightsConfig};
 use super::volume_indicator::VolumeRatioIndicator;
+use crate::trading::indicator::equal_high_low_indicator::{
+    EqualHighLowIndicator, EqualHighLowValue,
+};
+use crate::trading::indicator::fair_value_gap_indicator::{
+    FairValueGapIndicator, FairValueGapValue,
+};
+use crate::trading::indicator::leg_detection_indicator::{
+    LegDetectionIndicator, LegDetectionValue,
+};
+use crate::trading::indicator::market_structure_indicator::{
+    MarketStructureIndicator, MarketStructureValue,
+};
+use crate::trading::indicator::premium_discount_indicator::{
+    PremiumDiscountIndicator, PremiumDiscountValue,
+};
 use crate::trading::strategy::arc::indicator_values::ema_indicator_values;
-use crate::trading::indicator::leg_detection_indicator::{LegDetectionIndicator, LegDetectionValue};
-use crate::trading::indicator::market_structure_indicator::{MarketStructureIndicator, MarketStructureValue};
-use crate::trading::indicator::fair_value_gap_indicator::{FairValueGapIndicator, FairValueGapValue};
-use crate::trading::indicator::equal_high_low_indicator::{EqualHighLowIndicator, EqualHighLowValue};
-use crate::trading::indicator::premium_discount_indicator::{PremiumDiscountIndicator, PremiumDiscountValue};
+use crate::trading::utils;
+use uuid::fmt::Braced;
 
 /// 锤子形态配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -230,8 +238,8 @@ impl Default for RsiSignalConfig {
     fn default() -> Self {
         Self {
             rsi_length: 18,
-            rsi_oversold: 90.0,
-            rsi_overbought: 20.0,
+            rsi_oversold: 20.0,
+            rsi_overbought: 90.0,
             is_open: true,
         }
     }
@@ -350,11 +358,11 @@ pub struct VegasIndicatorSignalValue {
     pub engulfing_value: EngulfingSignalValue,      //吞没形态指标
     pub kline_hammer_value: KlineHammerSignalValue, //锤子形态指标
     // 新增Smart Money Concepts相关字段
-    pub leg_detection_value: LegDetectionValue,              // 腿部识别
-    pub market_structure_value: MarketStructureValue,        // 市场结构
-    pub fair_value_gap_value: FairValueGapValue,             // 公平价值缺口
-    pub equal_high_low_value: EqualHighLowValue,             // 等高/等低点
-    pub premium_discount_value: PremiumDiscountValue,        // 溢价/折扣区域
+    pub leg_detection_value: LegDetectionValue, // 腿部识别
+    pub market_structure_value: MarketStructureValue, // 市场结构
+    pub fair_value_gap_value: FairValueGapValue, // 公平价值缺口
+    pub equal_high_low_value: EqualHighLowValue, // 等高/等低点
+    pub premium_discount_value: PremiumDiscountValue, // 溢价/折扣区域
 }
 
 /// vegae 综合策略配置
@@ -378,12 +386,12 @@ pub struct VegasStrategy {
     pub engulfing_signal: Option<EngulfingSignalConfig>, // 新增吞没形态指标
     //新增锤子形态指标
     pub kline_hammer_signal: Option<KlineHammerConfig>, // 新增锤子形态指标
-    // 新增Smart Money Concepts相关配置
-    // pub leg_detection_signal: Option<LegDetectionConfig>,           // 腿部识别系统
-    // pub market_structure_signal: Option<MarketStructureConfig>,     // 市场结构识别
-    // pub fair_value_gap_signal: Option<FairValueGapConfig>,          // 公平价值缺口
-    // pub equal_high_low_signal: Option<EqualHighLowConfig>,          // 等高/等低点识别
-    // pub premium_discount_signal: Option<PremiumDiscountConfig>,     // 溢价/折扣区域
+                                                        // 新增Smart Money Concepts相关配置
+                                                        // pub leg_detection_signal: Option<LegDetectionConfig>,           // 腿部识别系统
+                                                        // pub market_structure_signal: Option<MarketStructureConfig>,     // 市场结构识别
+                                                        // pub fair_value_gap_signal: Option<FairValueGapConfig>,          // 公平价值缺口
+                                                        // pub equal_high_low_signal: Option<EqualHighLowConfig>,          // 等高/等低点识别
+                                                        // pub premium_discount_signal: Option<PremiumDiscountConfig>,     // 溢价/折扣区域
 }
 
 impl Default for VegasStrategy {
@@ -428,7 +436,9 @@ impl VegasStrategy {
             should_buy: false,
             should_sell: false,
             open_price: last_data_item.c,
-            tp_price: None,
+            best_open_price: None,
+            best_take_profit_price: None,
+            stop_loss_price: None,
             ts: last_data_item.ts,
             single_value: None,
             single_result: None,
@@ -549,8 +559,8 @@ impl VegasStrategy {
         //     if structure_config.is_open {
         //         // 检查摆动结构信号
         //         let ms_value = &vegas_indicator_signal_values.market_structure_value;
-                
-        //         if ms_value.swing_bullish_bos || ms_value.swing_bearish_bos || 
+
+        //         if ms_value.swing_bullish_bos || ms_value.swing_bearish_bos ||
         //            ms_value.swing_bullish_choch || ms_value.swing_bearish_choch {
         //             conditions.push((
         //                 SignalType::MarketStructure,
@@ -563,9 +573,9 @@ impl VegasStrategy {
         //                 },
         //             ));
         //         }
-                
+
         //         // 检查内部结构信号
-        //         if ms_value.internal_bullish_bos || ms_value.internal_bearish_bos || 
+        //         if ms_value.internal_bullish_bos || ms_value.internal_bearish_bos ||
         //            ms_value.internal_bullish_choch || ms_value.internal_bearish_choch {
         //             conditions.push((
         //                 SignalType::MarketStructure,
@@ -580,12 +590,12 @@ impl VegasStrategy {
         //         }
         //     }
         // }
-        
+
         // // 检查公平价值缺口信号
         // if let Some(fvg_config) = &self.fair_value_gap_signal {
         //     if fvg_config.is_open {
         //         let fvg_value = &vegas_indicator_signal_values.fair_value_gap_value;
-                
+
         //         if fvg_value.current_bullish_fvg || fvg_value.current_bearish_fvg {
         //             conditions.push((
         //                 SignalType::FairValueGap,
@@ -597,12 +607,12 @@ impl VegasStrategy {
         //         }
         //     }
         // }
-        
+
         // // 检查等高/等低点信号
         // if let Some(ehl_config) = &self.equal_high_low_signal {
         //     if ehl_config.is_open {
         //         let ehl_value = &vegas_indicator_signal_values.equal_high_low_value;
-                
+
         //         if ehl_value.current_equal_high || ehl_value.current_equal_low {
         //             conditions.push((
         //                 SignalType::EqualHighLow,
@@ -614,12 +624,12 @@ impl VegasStrategy {
         //         }
         //     }
         // }
-        
+
         // // 检查溢价/折扣区域信号
         // if let Some(pd_config) = &self.premium_discount_signal {
         //     if pd_config.is_open {
         //         let pd_value = &vegas_indicator_signal_values.premium_discount_value;
-                
+
         //         if pd_value.in_premium_zone || pd_value.in_discount_zone {
         //             conditions.push((
         //                 SignalType::PremiumDiscount,
@@ -631,7 +641,7 @@ impl VegasStrategy {
         //         }
         //     }
         // }
-        
+        // println!("conditions: {:#?}", conditions);
         // 计算得分
         let score = weights.calculate_score(conditions.clone());
         //计算分数到达指定值
@@ -652,7 +662,31 @@ impl VegasStrategy {
             }
         };
 
+        // //判断是否使用最优开仓价格
+        // self.calculate_best_open_price(data_items, &mut signal_result);
+        //设置止盈比例为1:2
+        // self.calculate_best_take_profit_price(data_items, &mut signal_result);
+
         signal_result
+    }
+
+    //计算最优止盈价格
+    fn calculate_best_take_profit_price(
+        &self,
+        data_items: &[CandleItem],
+        signal_result: &mut SignalResult,
+    ) {
+        if signal_result.should_buy {
+            let last_data_item = data_items.last().unwrap();
+            let amplitude = last_data_item.c() - last_data_item.l();
+            let best_take_profit_price = last_data_item.c() + amplitude * 3.0;
+            signal_result.best_take_profit_price = Some(best_take_profit_price);
+        } else if signal_result.should_sell {
+            let last_data_item = data_items.last().unwrap();
+            let amplitude = last_data_item.c() - last_data_item.l();
+            let best_take_profit_price = last_data_item.c() - amplitude * 3.0;
+            signal_result.best_take_profit_price = Some(best_take_profit_price);
+        }
     }
 
     //新增函数计算当前k线价格的振幅
@@ -670,6 +704,61 @@ impl VegasStrategy {
             }
         }
         amplitude
+    }
+
+    //计算最优开仓价格
+    fn calculate_best_open_price(
+        &self,
+        data_items: &[CandleItem],
+        signal_result: &mut SignalResult,
+    ) {
+        //判断最新的k线是否跌了超过1.5个点
+        let last_data_item = data_items.last().unwrap();
+        let amplitude = self.calculate_k_line_amplitude(data_items);
+        if amplitude <= 1.2 {
+            debug!("k线振幅小于1.5个点，不计算最优开仓价格");
+            return;
+        }
+        //没有出现特别的利空消息，因为出现大的利空消息会一直下跌不会触发反弹
+        if true {
+            if signal_result.should_sell {
+                //判断是否使用最优开仓价格,如果k线是下跌，且跌幅较大，且没有利空消息，则使用最优开仓价格(当前k线最高价格-当前k线最低价格)的38.2%作为最优开仓价格
+                let high_price = last_data_item.h();
+                let low_price = last_data_item.l();
+                let diff = high_price - low_price;
+                let best_open_price =
+                    low_price + diff * utils::fibonacci::FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO;
+                signal_result.best_open_price = Some(best_open_price);
+                signal_result.stop_loss_price = Some(high_price);
+
+                // //找到之前的一根不连续上涨或下跌的k线的，最低价格或者最高价格作为信号止损线路
+                // for i in (0..data_items.len()).rev() {
+                //     if data_items[i].c() > data_items[i].o() {
+                //         let high_price = data_items[i].h();
+                //         signal_result.tp_price = Some(high_price);
+                //         break;
+                //     }
+                // }
+            } else if signal_result.should_buy {
+                //判断是否使用最优开仓价格,如果k线是上涨，且涨幅较大，且没有利好消息，则使用最优开仓价格,(当前k线最高价格-当前k线最低价格)的23.6%作为最优开仓价格
+                let high_price = last_data_item.h();
+                let low_price = last_data_item.l();
+                let diff = high_price - low_price;
+                let best_open_price =
+                    high_price - (diff * utils::fibonacci::FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO);
+                signal_result.best_open_price = Some(best_open_price);
+                signal_result.stop_loss_price = Some(low_price);
+
+                // //找到之前的一根不连续上涨或下跌的k线的，最低价格或者最高价格作为信号止损线路
+                // for i in (0..data_items.len()).rev() {
+                //     if data_items[i].c() < data_items[i].o() {
+                //         let low_price = data_items[i].l();
+                //         signal_result.tp_price = Some(low_price);
+                //         break;
+                //     }
+                // }
+            }
+        }
     }
 
     //获取有效的rsi
@@ -886,7 +975,7 @@ impl VegasStrategy {
             ));
         }
         // 新增Smart Money Concepts相关指标
-        
+
         // // 添加腿部识别指标
         // if let Some(leg_config) = &self.leg_detection_signal {
         //     if leg_config.is_open {
@@ -895,7 +984,7 @@ impl VegasStrategy {
         //         );
         //     }
         // }
-        
+
         // // 添加市场结构指标
         // if let Some(structure_config) = &self.market_structure_signal {
         //     if structure_config.is_open {
@@ -1337,8 +1426,8 @@ impl VegasStrategy {
 /// 腿部识别系统配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct LegDetectionConfig {
-    pub size: usize,           // 用于识别腿部的bar数量
-    pub is_open: bool,         // 是否启用腿部识别
+    pub size: usize,   // 用于识别腿部的bar数量
+    pub is_open: bool, // 是否启用腿部识别
 }
 
 impl Default for LegDetectionConfig {
@@ -1389,9 +1478,9 @@ impl Default for FairValueGapConfig {
 /// 等高/等低点识别配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct EqualHighLowConfig {
-    pub lookback: usize,          // 回看K线数量
-    pub threshold_pct: f64,       // 阈值百分比
-    pub is_open: bool,            // 是否启用
+    pub lookback: usize,    // 回看K线数量
+    pub threshold_pct: f64, // 阈值百分比
+    pub is_open: bool,      // 是否启用
 }
 
 impl Default for EqualHighLowConfig {
@@ -1407,10 +1496,10 @@ impl Default for EqualHighLowConfig {
 /// 溢价/折扣区域配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct PremiumDiscountConfig {
-    pub premium_threshold: f64,   // 溢价阈值
-    pub discount_threshold: f64,  // 折扣阈值
-    pub lookback: usize,          // 回看K线数量
-    pub is_open: bool,            // 是否启用
+    pub premium_threshold: f64,  // 溢价阈值
+    pub discount_threshold: f64, // 折扣阈值
+    pub lookback: usize,         // 回看K线数量
+    pub is_open: bool,           // 是否启用
 }
 
 impl Default for PremiumDiscountConfig {

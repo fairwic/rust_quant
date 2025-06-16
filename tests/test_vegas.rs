@@ -5,7 +5,7 @@ use rust_quant::trading::indicator::vegas_indicator::VegasStrategy;
 use rust_quant::trading::model::market::candles::CandlesEntity;
 use rust_quant::trading::model::market::candles::SelectTime;
 use rust_quant::trading::model::market::candles::TimeDirect;
-use rust_quant::trading::strategy::strategy_common::get_multi_indivator_values;
+use rust_quant::trading::strategy::strategy_common::get_multi_indicator_values;
 use rust_quant::trading::strategy::strategy_common::parse_candle_to_data_item;
 use rust_quant::trading::strategy::strategy_common::BasicRiskStrategyConfig;
 use rust_quant::{app_config::db::init_db, trading};
@@ -20,7 +20,7 @@ async fn test_vegas() -> Result<()> {
     let inst_id = "BTC-USDT-SWAP";
     let time = "1H";
     let select_time: SelectTime = SelectTime {
-        point_time: 1745146800000,
+        point_time: 1749459600000,
         direct: TimeDirect::BEFORE,
     };
 
@@ -37,10 +37,9 @@ async fn test_vegas() -> Result<()> {
         // 获取数据项
         let data_item = parse_candle_to_data_item(candle);
 
-        //
         // 获取指标的值
         let mut multi_indicator_values =
-            get_multi_indivator_values(&mut indicator_combine, &data_item);
+            get_multi_indicator_values(&mut indicator_combine, &data_item);
         data_items.push(data_item);
 
         let signal_weights = strategy.signal_weights.as_ref().unwrap().clone();
@@ -56,7 +55,7 @@ async fn test_vegas() -> Result<()> {
         let result =
             strategy.get_trade_signal(&data_items, &mut multi_indicator_values, &signal_weights, &risk_strategy_config);
         if i == (candles_list.len() - 1) {
-            println!("交易信号结果: {:?}", result);
+            println!("交易信号结果: {:#?}", result);
         }
     }
 
