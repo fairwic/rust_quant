@@ -20,7 +20,7 @@ async fn test_vegas() -> Result<()> {
     let inst_id = "BTC-USDT-SWAP";
     let time = "1H";
     let select_time: SelectTime = SelectTime {
-        point_time: 1749459600000,
+        point_time:1747810800000,
         direct: TimeDirect::BEFORE,
     };
 
