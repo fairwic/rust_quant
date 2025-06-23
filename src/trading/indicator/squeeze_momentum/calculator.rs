@@ -202,7 +202,7 @@ impl SqueezeCalculator {
             should_sell: false,
             open_price: 0.0,
             ts: 0,
-            stop_loss_price: None,
+            signal_kline_stop_loss_price: None,
             best_take_profit_price: None,
             single_value: None,
             single_result: None,

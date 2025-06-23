@@ -232,7 +232,7 @@ impl SqueezeMomentumIndicator {
             should_sell,
             open_price: price,
             ts,
-            stop_loss_price: None,
+            signal_kline_stop_loss_price: None,
             best_take_profit_price: None,
             single_value: None,
             single_result: None,

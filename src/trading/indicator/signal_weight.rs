@@ -131,7 +131,7 @@ impl Default for SignalWeightsConfig {
                 (SignalType::EqualHighLow, 1.2),
                 (SignalType::PremiumDiscount, 1.3),
             ],
-            min_total_weight: 3.0,
+            min_total_weight: 2.0,
         }
     }
 }

@@ -569,20 +569,20 @@ pub async fn test_specified_strategy(
     let params_batch = vec![
         //btc
         //301u
-        ParamMerge::build()
-            .shadow_ratio(0.6)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(8)
-            .bb_multiplier(2.8)
-            //volume
-            .volume_bar_num(3)
-            .volume_increase_ratio(2.2)
-            .volume_decrease_ratio(2.2)
-            //rsi
-            .rsi_period(18)
-            .rsi_overbought(90.0)
-            .rsi_oversold(20.0),
+        // ParamMerge::build()
+        //     .shadow_ratio(0.6)
+        //     .breakthrough_threshold(0.003)
+        //     //bollinger bands
+        //     .bb_periods(8)
+        //     .bb_multiplier(2.8)
+        //     //volume
+        //     .volume_bar_num(3)
+        //     .volume_increase_ratio(2.2)
+        //     .volume_decrease_ratio(2.2)
+        //     //rsi
+        //     .rsi_period(18)
+        //     .rsi_overbought(90.0)
+        //     .rsi_oversold(20.0),
         //335 u
         ParamMerge::build()
             .shadow_ratio(0.9)
@@ -599,20 +599,20 @@ pub async fn test_specified_strategy(
             .rsi_overbought(85.0)
             .rsi_oversold(15.0),
         //121.7u
-        ParamMerge::build()
-            .shadow_ratio(0.7)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(16)
-            .bb_multiplier(2.0)
-            //volume
-            .volume_bar_num(6)
-            .volume_increase_ratio(2.8)
-            .volume_decrease_ratio(2.9)
-            //rsi
-            .rsi_period(8)
-            .rsi_overbought(85.0)
-            .rsi_oversold(15.0),
+        // ParamMerge::build()
+        //     .shadow_ratio(0.7)
+        //     .breakthrough_threshold(0.003)
+        //     //bollinger bands
+        //     .bb_periods(16)
+        //     .bb_multiplier(2.0)
+        //     //volume
+        //     .volume_bar_num(6)
+        //     .volume_increase_ratio(2.8)
+        //     .volume_decrease_ratio(2.9)
+        //     //rsi
+        //     .rsi_period(8)
+        //     .rsi_overbought(85.0)
+        //     .rsi_oversold(15.0),
     ];
 
     run_back_test_strategy(
@@ -693,6 +693,7 @@ pub async fn run_back_test_strategy(
                 period: bb_period as usize,
                 multiplier: bb_multiplier,
                 is_open: true,
+                consecutive_touch_times: 4,
             }),
             kline_hammer_signal: Some(kline_hammer_signal),
         };

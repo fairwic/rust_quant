@@ -15,6 +15,12 @@ pub enum CandleNums {
 pub enum TradeSide {
     Long,
     Short,
+    None,
+}
+impl Default for TradeSide {
+    fn default() -> Self {
+        TradeSide::None
+    }
 }
 
 /// 交易类型

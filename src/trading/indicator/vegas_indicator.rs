@@ -14,7 +14,8 @@ use ta::indicators::{MovingAverageConvergenceDivergence, RelativeStrengthIndex};
 use ta::{Close, DataItem, High, Low, Next, Open, Volume};
 use tracing::{debug, error};
 
-use super::bollings::BollingBandsSignalConfig;
+use super::bollings::{BollingBandsPlusIndicator, BollingBandsSignalConfig};
+use super::candle;
 use super::ema_indicator::EmaIndicator;
 use super::is_big_kline::IsBigKLineIndicator;
 use super::k_line_engulfing_indicator::KlineEngulfingIndicator;
@@ -39,6 +40,7 @@ use crate::trading::indicator::premium_discount_indicator::{
 };
 use crate::trading::strategy::arc::indicator_values::ema_indicator_values;
 use crate::trading::utils;
+use crate::trading::utils::fibonacci::FIBONACCI_ZERO_POINT_FIVE;
 use uuid::fmt::Braced;
 
 /// 锤子形态配置
@@ -172,7 +174,7 @@ pub struct IndicatorCombine {
     pub ema_indicator: Option<EmaIndicator>,
     pub rsi_indicator: Option<RsiIndicator>,
     pub volume_indicator: Option<VolumeRatioIndicator>,
-    pub bollinger_indicator: Option<BollingerBands>,
+    pub bollinger_indicator: Option<BollingBandsPlusIndicator>,
     pub engulfing_indicator: Option<KlineEngulfingIndicator>,
     pub kline_hammer_indicator: Option<KlineHammerIndicator>,
     // 新增Smart Money Concepts相关指标
@@ -219,11 +221,13 @@ pub struct BollingerSignalValue {
     pub lower: f64,
     pub upper: f64,
     pub middle: f64,
+    //连续触达上轨/下轨次数
+    pub consecutive_touch_times: usize,
     pub is_long_signal: bool,
     pub is_short_signal: bool,
     pub is_close_signal: bool,
     //虽然触发了布林带开多，或者开空，但是被过滤了
-    pub is_foce_filter_signal: bool,
+    pub is_force_filter_signal: bool,
 }
 
 // rsi信号配置
@@ -438,7 +442,7 @@ impl VegasStrategy {
             open_price: last_data_item.c,
             best_open_price: None,
             best_take_profit_price: None,
-            stop_loss_price: None,
+            signal_kline_stop_loss_price: None,
             ts: last_data_item.ts,
             single_value: None,
             single_result: None,
@@ -508,6 +512,7 @@ impl VegasStrategy {
         if let Some(bollinger_signal) = &self.bolling_signal {
             let bollinger_value =
                 self.check_bollinger_signal(data_items, vegas_indicator_signal_values.clone());
+            vegas_indicator_signal_values.bollinger_value = bollinger_value.clone();
             conditions.push((
                 SignalType::Bolling,
                 SignalCondition::Bolling {
@@ -652,39 +657,61 @@ impl VegasStrategy {
                     signal_result.single_value =
                         Some(json!(vegas_indicator_signal_values).to_string());
                     signal_result.single_result = Some(json!(conditions).to_string());
+                    if risk_config.is_used_signal_k_line_stop_loss {
+                        self.calculate_best_stop_loss_price(last_data_item, &mut signal_result);
+                    }
                 }
                 SignalDirect::IsShort => {
                     signal_result.should_sell = true;
                     signal_result.single_value =
                         Some(json!(vegas_indicator_signal_values).to_string());
                     signal_result.single_result = Some(json!(conditions).to_string());
+                    if risk_config.is_used_signal_k_line_stop_loss {
+                        self.calculate_best_stop_loss_price(last_data_item, &mut signal_result);
+                    }
                 }
             }
+        } else {
+            signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
+            signal_result.single_result = Some(json!(conditions).to_string());
         };
 
-        // //判断是否使用最优开仓价格
         // self.calculate_best_open_price(data_items, &mut signal_result);
         //设置止盈比例为1:2
-        // self.calculate_best_take_profit_price(data_items, &mut signal_result);
-
+        // self.calculate_best_take_profit_price(last_data_item, &mut signal_result);
         signal_result
+    }
+
+    //计算最佳止损价格
+    fn calculate_best_stop_loss_price(
+        &self,
+        last_data_item: &CandleItem,
+        signal_result: &mut SignalResult,
+    ) {
+        if signal_result.should_buy {
+            let amplitude = last_data_item.h() - last_data_item.l();
+            let best_stop_loss_price = last_data_item.h() - (amplitude * FIBONACCI_ZERO_POINT_FIVE);
+            signal_result.signal_kline_stop_loss_price = Some(best_stop_loss_price);
+        } else if signal_result.should_sell {
+            let amplitude = last_data_item.h() - last_data_item.l();
+            let best_stop_loss_price = last_data_item.l() + (amplitude * FIBONACCI_ZERO_POINT_FIVE);
+            signal_result.signal_kline_stop_loss_price = Some(best_stop_loss_price);
+        }
     }
 
     //计算最优止盈价格
     fn calculate_best_take_profit_price(
         &self,
-        data_items: &[CandleItem],
+        last_data_item: &CandleItem,
         signal_result: &mut SignalResult,
     ) {
         if signal_result.should_buy {
-            let last_data_item = data_items.last().unwrap();
             let amplitude = last_data_item.c() - last_data_item.l();
-            let best_take_profit_price = last_data_item.c() + amplitude * 3.0;
+            let best_take_profit_price = last_data_item.c() + (amplitude * 4.0);
             signal_result.best_take_profit_price = Some(best_take_profit_price);
         } else if signal_result.should_sell {
-            let last_data_item = data_items.last().unwrap();
             let amplitude = last_data_item.c() - last_data_item.l();
-            let best_take_profit_price = last_data_item.c() - amplitude * 3.0;
+            let best_take_profit_price = last_data_item.c() - (amplitude * 4.0);
             signal_result.best_take_profit_price = Some(best_take_profit_price);
         }
     }
@@ -729,7 +756,7 @@ impl VegasStrategy {
                 let best_open_price =
                     low_price + diff * utils::fibonacci::FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO;
                 signal_result.best_open_price = Some(best_open_price);
-                signal_result.stop_loss_price = Some(high_price);
+                signal_result.signal_kline_stop_loss_price = Some(high_price);
 
                 // //找到之前的一根不连续上涨或下跌的k线的，最低价格或者最高价格作为信号止损线路
                 // for i in (0..data_items.len()).rev() {
@@ -747,8 +774,7 @@ impl VegasStrategy {
                 let best_open_price =
                     high_price - (diff * utils::fibonacci::FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO);
                 signal_result.best_open_price = Some(best_open_price);
-                signal_result.stop_loss_price = Some(low_price);
-
+                signal_result.signal_kline_stop_loss_price = Some(low_price);
                 // //找到之前的一根不连续上涨或下跌的k线的，最低价格或者最高价格作为信号止损线路
                 // for i in (0..data_items.len()).rev() {
                 //     if data_items[i].c() < data_items[i].o() {
@@ -769,11 +795,14 @@ impl VegasStrategy {
         ema_value: EmaSignalValue,
     ) -> f64 {
         // 如果当前k线价格波动比较大，且k线路的实体部分占比大于80%,表明当前k线为大阳线或者大阴线，则不使用rsi指标,因为大概率趋势还会继续  2025-03-03 00:00:00,2025-03-09 18:00:00
-        let is_big_k_line =
-            IsBigKLineIndicator::new(70.0).is_big_k_line(data_items.last().unwrap());
-        if is_big_k_line {
-            return 50.0;
+        if true {
+            let is_big_k_line =
+                IsBigKLineIndicator::new(70.0).is_big_k_line(data_items.last().unwrap());
+            if is_big_k_line {
+                return 50.0;
+            }
         }
+
         let current_rsi = rsi_value.rsi_value;
         return current_rsi;
         // todo 12/19 04:00 rsi超卖，但是不在ema4附近，所以无效
@@ -962,9 +991,11 @@ impl VegasStrategy {
         }
         //添加bolling
         if let Some(bolling_signal) = &self.bolling_signal {
-            indicator_combine.bollinger_indicator = Some(
-                BollingerBands::new(bolling_signal.period, bolling_signal.multiplier).unwrap(),
-            );
+            indicator_combine.bollinger_indicator = Some(BollingBandsPlusIndicator::new(
+                bolling_signal.period,
+                bolling_signal.multiplier,
+                bolling_signal.consecutive_touch_times,
+            ));
         }
         //添加锤子形态
         if let Some(kline_hammer_signal) = &self.kline_hammer_signal {
@@ -1239,7 +1270,7 @@ impl VegasStrategy {
         //todo 考虑在上升时期的时候，因为布林带做空，止盈到价格触碰到布林带中轨平仓
         //todo 考虑在k线收盘之后，价格依然低于布林带下轨位置，如果有多单则平仓
 
-        let mut bolling_bands = vegas_indicator_signal_value.bollinger_value;
+        let mut bolling_bands = vegas_indicator_signal_value.bollinger_value.clone();
         if let Some(bollinger_signal) = &self.bolling_signal {
             let ema_signal_values = vegas_indicator_signal_value.ema_values;
             //如果ema是多头排列 则当触达ema下轨的时候可以开多，当触达ema上轨的时候可以平仓，但是不能开空单
@@ -1247,49 +1278,41 @@ impl VegasStrategy {
             //     && ema_signal_values.ema2_value > ema_signal_values.ema3_value
             //     && ema_signal_values.ema3_value > ema_signal_values.ema4_value
             // {
-            if bolling_bands.lower > data_items.last().unwrap().l() {
+
+            let data_item = data_items.last().unwrap();
+
+            if bolling_bands.lower > data_item.l() {
                 bolling_bands.is_long_signal = true;
             }
-            if bolling_bands.upper < data_items.last().unwrap().h() {
-                bolling_bands.is_short_signal = true;
-            }
-            // }
-            //如果ema是空头排列 则当触达ema上轨的时候可以开空，当触达ema下轨的时候可以平仓，但是不能开多单
-            // if ema_signal_values.ema2_value < ema_signal_values.ema3_value
-            //     && ema_signal_values.ema3_value < ema_signal_values.ema4_value
-            // {
-            //示例2025/02/15 01:00:00
-            // println!("111bolling_bands.lower: {:#?}", bolling_bands.lower);
-            // println!(
-            //     "1111data_items.last().unwrap().l(): {:#?}",
-            //     data_items.last().unwrap().l()
-            // );
-            if bolling_bands.lower > data_items.last().unwrap().l() {
-                bolling_bands.is_long_signal = true;
-            }
-            if bolling_bands.upper < data_items.last().unwrap().h() {
+            if bolling_bands.upper < data_item.h() {
                 bolling_bands.is_short_signal = true;
             }
 
-            //如果ema多头排列，且收盘价格大于ema 则不能做空，
-            //如果ema空头排列，且收盘价格小于ema 则不能做空
-            if bolling_bands.is_long_signal
+            //如果连续触达上轨/下轨次数小于4次,则需要进行额外过滤
+            // if bolling_bands.consecutive_touch_times < bollinger_signal.consecutive_touch_times
+            // && (bolling_bands.is_long_signal || bolling_bands.is_short_signal)
+            if (bolling_bands.is_long_signal || bolling_bands.is_short_signal) {
+                //如果ema多头排列，且收盘价格大于ema 则不能做空，
+                //如果ema空头排列，且收盘价格小于ema 则不能做空
+                if bolling_bands.is_long_signal
                 // && ema_signal_values.ema1_value < ema_signal_values.ema2_value
                 // && ema_signal_values.ema2_value < ema_signal_values.ema3_value
                 && data_items.last().unwrap().c < ema_signal_values.ema1_value
-            {
-                bolling_bands.is_long_signal = false;
-                bolling_bands.is_foce_filter_signal = true;
-            }
+                {
+                    bolling_bands.is_long_signal = false;
+                    bolling_bands.is_force_filter_signal = true;
+                }
 
-            if bolling_bands.is_short_signal
+                if bolling_bands.is_short_signal
                 // && ema_signal_values.ema1_value > ema_signal_values.ema2_value
                 // && ema_signal_values.ema2_value > ema_signal_values.ema3_value
                 && data_items.last().unwrap().c > ema_signal_values.ema1_value
-            {
-                bolling_bands.is_short_signal = false;
-                bolling_bands.is_foce_filter_signal = true;
+                {
+                    bolling_bands.is_short_signal = false;
+                    bolling_bands.is_force_filter_signal = true;
+                }
             }
+
             bolling_bands
         } else {
             BollingerSignalValue::default()
@@ -1339,6 +1362,8 @@ impl VegasStrategy {
                 //     is_short_signal = false;
                 // }
             }
+            //如果吞没形态跌幅
+
             conditions.push((
                 SignalType::Engulfing,
                 SignalCondition::Engulfing {
@@ -1371,9 +1396,10 @@ impl VegasStrategy {
                 vegas_indicator_signal_values
                     .kline_hammer_value
                     .is_long_signal = true;
-                // //如果ema均线是空头排列，且收盘价<于ema1均线，则不能开多单
+                //如果ema均线是空头排列，且收盘价<于ema1均线，则不能开多单,且成交量<5000
                 if ema_value.is_short_trend == true
                     && data_items.last().unwrap().c < ema_value.ema1_value
+                    && data_items.last().unwrap().v < 5000.0
                 {
                     vegas_indicator_signal_values
                         .kline_hammer_value
@@ -1381,7 +1407,7 @@ impl VegasStrategy {
                 }
             }
 
-            //如果ema均线是空头排列，且收盘价小于ema1均线，则才能是下跌信号
+            //如果ema均线是空头排列，且收盘价小于ema1均线，则才能是下跌信号,且成交量<5000
             if is_hanging_man
             // && vegas_indicator_signal_values
             //     .kline_hammer_value
@@ -1391,14 +1417,16 @@ impl VegasStrategy {
                 vegas_indicator_signal_values
                     .kline_hammer_value
                     .is_short_signal = true;
-                // //如果ema均线是空头排列，且收盘价小于ema1均线，则不能开空单
+                //case 1如果ema均线是空头排列，且收盘价小于ema1均线，则不能开空单,且成交量<5000
                 if ema_value.is_long_trend == true
                     && data_items.last().unwrap().c > ema_value.ema1_value
+                    && data_items.last().unwrap().v < 5000.0
                 {
                     vegas_indicator_signal_values
                         .kline_hammer_value
                         .is_short_signal = false;
                 }
+                //case 2如果当前跌幅超过3个点，且emas是多头趋势，则不再继续开空
             }
         }
         if vegas_indicator_signal_values

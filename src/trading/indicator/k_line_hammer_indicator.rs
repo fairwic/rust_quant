@@ -91,6 +91,23 @@ impl KlineHammerIndicator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_kline_hammer_indicator() {
+        let mut indicator = KlineHammerIndicator::new(0.7, 0.7, 0.7);
+        // 109623	110360	109582	109829.5
+        let kline = CandleItem {
+            o: 108929.0,
+            h: 109839.0,
+            l: 108650.0,
+            c: 109084.5,
+            v: 100.0,
+            ts: 1749650400000,
+        };
+        let output = indicator.next(&kline);
+        println!("indicator: {:?}", output);
+        assert!(output.is_hammer);
+    }
     #[test]
     fn test_engulfing_indicator() {
         println!("创建一个锤子形态指标");

@@ -630,6 +630,7 @@ pub async fn usage_example() -> anyhow::Result<()> {
             period: 9,
             multiplier: 3.6,
             is_open: true,
+            consecutive_touch_times: 3,
         }),
         kline_hammer_signal: Some(KlineHammerConfig {
             up_shadow_ratio: 0.6,

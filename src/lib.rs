@@ -69,27 +69,27 @@ impl CandleItem {
     pub fn builder() -> CandleItemBuilder {
         CandleItemBuilder::new()
     }
-    fn ts(&self) -> i64 {
+    pub fn ts(&self) -> i64 {
         self.ts
     }
 
-    fn o(&self) -> f64 {
+    pub fn o(&self) -> f64 {
         self.o
     }
 
-    fn h(&self) -> f64 {
+    pub fn h(&self) -> f64 {
         self.h
     }
 
-    fn l(&self) -> f64 {
+    pub fn l(&self) -> f64 {
         self.l
     }
 
-    fn c(&self) -> f64 {
+    pub fn c(&self) -> f64 {
         self.c
     }
 
-    fn v(&self) -> f64 {
+    pub fn v(&self) -> f64 {
         self.v
     }
 }

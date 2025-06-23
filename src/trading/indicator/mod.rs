@@ -26,3 +26,4 @@ pub mod market_structure_indicator;
 pub mod fair_value_gap_indicator;
 pub mod equal_high_low_indicator;
 pub mod premium_discount_indicator;
+pub mod break_indicator;
