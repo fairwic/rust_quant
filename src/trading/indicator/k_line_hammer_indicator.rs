@@ -2,7 +2,7 @@ use crate::{trading::indicator::rma::Rma, CandleItem};
 use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergence};
 
 /// 锤子/上吊线形态指标
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct KlineHammerIndicator {
     stander_down_shadow_ratio: f64,
     stander_up_shadow_ratio: f64,
@@ -14,7 +14,7 @@ impl Default for KlineHammerIndicator {
     }
 }
 /// 锤子/上吊线形态指标
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct KlineHammerIndicatorOutput {
     //是否是锤子形态,是指下影线较长,上影线较短的形态
     pub is_hammer: bool,
@@ -40,10 +40,10 @@ impl KlineHammerIndicator {
         //计算下影线比例
         let down_shadow_ratio = if current_kline.o > current_kline.c {
             //价格下跌
-            (current_kline.c - current_kline.l) / (current_kline.o - current_kline.l)
+            (current_kline.c - current_kline.l) / (current_kline.h - current_kline.l)
         } else {
             //价格上涨
-            (current_kline.o - current_kline.l) / (current_kline.c - current_kline.l)
+            (current_kline.o - current_kline.l) / (current_kline.h - current_kline.l)
         };
         //是否是长下影线
         //   let kline = CandleItem {
@@ -56,9 +56,9 @@ impl KlineHammerIndicator {
         //     };
         //计算上影线比例
         let up_shadow_ratio = if current_kline.o > current_kline.c {
-            (current_kline.h - current_kline.o) / (current_kline.h - current_kline.c)
+            (current_kline.h - current_kline.o) / (current_kline.h - current_kline.l)
         } else {
-            (current_kline.h - current_kline.c) / (current_kline.h - current_kline.o)
+            (current_kline.h - current_kline.c) / (current_kline.h - current_kline.l)
         };
 
         //计算实体比例
@@ -68,14 +68,13 @@ impl KlineHammerIndicator {
             (current_kline.o - current_kline.c) / (current_kline.h - current_kline.l)
         };
 
-        //是否是长上影线
-        let is_hammer =
-            down_shadow_ratio > self.stander_down_shadow_ratio && down_shadow_ratio > up_shadow_ratio;
+        //是否是长下影线
+        let is_hammer = down_shadow_ratio > self.stander_down_shadow_ratio
+            && down_shadow_ratio > up_shadow_ratio;
 
-        //要求上影线长度大于下影线长度,并且下影线比例小于10%
+        //是否是长上影线
         let is_hanging_man =
             up_shadow_ratio > self.stander_up_shadow_ratio && up_shadow_ratio > down_shadow_ratio;
-
 
         KlineHammerIndicatorOutput {
             is_hammer,
@@ -97,10 +96,10 @@ mod tests {
         let mut indicator = KlineHammerIndicator::new(0.7, 0.7, 0.7);
         // 109623	110360	109582	109829.5
         let kline = CandleItem {
-            o: 108929.0,
-            h: 109839.0,
-            l: 108650.0,
-            c: 109084.5,
+            o: 103687.2,
+            h: 104171.4,
+            l: 103571.4,
+            c: 103640.2,
             v: 100.0,
             ts: 1749650400000,
         };

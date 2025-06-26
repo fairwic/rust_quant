@@ -331,19 +331,19 @@ pub async fn save_log(
         .add(&back_test_log)
         .await?;
 
-    if true {
-        // 保存详细交易记录
-        if !back_test_result.trade_records.is_empty() {
-            save_test_detail(
-                back_test_id,
-                StrategyType::Vegas, // 确保选择正确的策略类型
-                inst_id,
-                time,
-                back_test_result.trade_records,
-            )
-            .await?;
-        }
+    // if false {
+    // 保存详细交易记录
+    if !back_test_result.trade_records.is_empty() {
+        save_test_detail(
+            back_test_id,
+            StrategyType::Vegas, // 确保选择正确的策略类型
+            inst_id,
+            time,
+            back_test_result.trade_records,
+        )
+        .await?;
     }
+    // }
     Ok(back_test_id)
 }
 
@@ -354,14 +354,14 @@ pub async fn test_random_strategy(
     semaphore: Arc<Semaphore>,
 ) {
     // 参数范围
-    let bb_periods = vec![12, 13, 14, 15, 16];
-    let bb_multipliers = vec![2.0, 2.5, 3.0, 3.5, 4.0];
+    let bb_periods = vec![10, 11, 12, 13, 14, 15, 16];
+    let bb_multipliers = vec![2.0, 2.5, 3.0, 3.1, 3.2];
 
-    let shadow_ratios = vec![0.6, 0.7, 0.8, 0.9];
+    let shadow_ratios = vec![0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9];
 
     let volume_bar_nums = vec![3, 4, 5, 6];
-    let volume_increase_ratios: Vec<f64> = (20..=41).map(|x| x as f64 * 0.1).collect();
-    let volume_decrease_ratios: Vec<f64> = (20..=41).map(|x| x as f64 * 0.1).collect();
+    let volume_increase_ratios: Vec<f64> = (16..=25).map(|x| x as f64 * 0.1).collect();
+    let volume_decrease_ratios: Vec<f64> = (16..=25).map(|x| x as f64 * 0.1).collect();
     let breakthrough_thresholds = vec![0.003];
 
     let rsi_periods = vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
@@ -438,7 +438,13 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     let semaphore = Arc::new(Semaphore::new(30)); // 控制最大并发数量为 10
 
     // // 测试随机策略
-    // test_random_strategy(inst_id, time, arc_candle_item_clone.clone(), semaphore.clone()).await;
+    // test_random_strategy(
+    //     inst_id,
+    //     time,
+    //     arc_candle_item_clone.clone(),
+    //     semaphore.clone(),
+    // )
+    // .await;
     // //测试指定策略
     test_specified_strategy(
         inst_id,
@@ -585,7 +591,7 @@ pub async fn test_specified_strategy(
         //     .rsi_oversold(20.0),
         //335 u
         ParamMerge::build()
-            .shadow_ratio(0.9)
+            .shadow_ratio(0.7)
             .breakthrough_threshold(0.003)
             //bollinger bands
             .bb_periods(12)
@@ -596,6 +602,20 @@ pub async fn test_specified_strategy(
             .volume_decrease_ratio(4.1)
             //rsi
             .rsi_period(13)
+            .rsi_overbought(85.0)
+            .rsi_oversold(15.0),
+        ParamMerge::build()
+            .shadow_ratio(0.6)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(13)
+            .bb_multiplier(2.5)
+            //volume
+            .volume_bar_num(6)
+            .volume_increase_ratio(2.4)
+            .volume_decrease_ratio(2.0)
+            //rsi
+            .rsi_period(9)
             .rsi_overbought(85.0)
             .rsi_oversold(15.0),
         //121.7u
@@ -678,7 +698,7 @@ pub async fn run_back_test_strategy(
             up_shadow_ratio: shadow_ratio,
             down_shadow_ratio: shadow_ratio,
             max_other_side_shadow_ratio: 0.1,
-            body_ratio: 0.7,
+            body_ratio: 0.4,
         };
 
         let strategy = VegasStrategy {

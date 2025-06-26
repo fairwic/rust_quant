@@ -17,8 +17,8 @@ pub struct BollingBandsSignalConfig {
 impl Default for BollingBandsSignalConfig {
     fn default() -> Self {
         Self {
-            period: 12,
-            multiplier: 2.0,
+            period: 13,
+            multiplier: 2.5,
             is_open: true,
             consecutive_touch_times: 4,
         }

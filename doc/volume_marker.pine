@@ -1,0 +1,28 @@
+//@version=5
+indicator(shorttitle="VM", title="Volume Marker", overlay=true)
+
+// 输入参数
+volume_multiplier = input.float(3.1, title="成交量倍数", minval=1.0, maxval=10.0)
+lookback_period = input.int(6, title="回看周期", minval=1, maxval=50)
+marker_color = input.color(color.green, title="买入标记颜色")
+marker_size_str = input.string("normal", title="标记大小", options=["tiny", "small", "normal", "large"])
+
+// 字符串转常量
+// 字符串转常量 - 使用 switch
+marker_size = switch marker_size_str
+    "tiny" => size.tiny
+    "small" => size.small
+    "normal" => size.normal
+    "large" => size.large
+    => size.normal  // 默认值
+
+// 计算过去6根K线的平均成交量
+avg_volume = ta.sma(volume, lookback_period)
+
+// 计算当前成交量是否达到平均成交量的3倍
+volume_condition = volume >= (avg_volume * volume_multiplier)
+val=volume/avg_volume 
+val_string=str.tostring(val)
+
+// 在满足条件时绘制买入标记
+plotshape(volume_condition, title="成交量放大", location=location.belowbar, color=marker_color, style=shape.triangleup, text=val_string)

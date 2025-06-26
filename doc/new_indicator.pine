@@ -1,0 +1,25 @@
+//@version=5
+indicator(shorttitle="NI", title="New Indicator", overlay=true)
+
+// 输入参数
+// input_value = input.float(1.0, title="参数名称", minval=0.1, maxval=10.0)
+// input_period = input.int(14, title="周期", minval=1, maxval=200)
+// input_color = input.color(color.blue, title="颜色")
+
+// 主要逻辑区域
+// 在这里添加您的指标计算逻辑
+
+// 示例：简单移动平均线
+sma_period = input.int(20, title="SMA周期", minval=1, maxval=200)
+sma_value = ta.sma(close, sma_period)
+
+// 绘制图表
+plot(sma_value, title="SMA", color=color.blue, linewidth=2)
+
+// 示例：条件信号
+// condition = close > sma_value
+// plotshape(condition, title="买入信号", location=location.belowbar, color=color.green, style=shape.triangleup)
+
+// 示例：标签
+// if condition
+//     label.new(bar_index, low, "信号", color=color.green, style=label.style_label_up, textcolor=color.white) 

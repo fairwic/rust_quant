@@ -40,7 +40,10 @@ use crate::trading::indicator::premium_discount_indicator::{
 };
 use crate::trading::strategy::arc::indicator_values::ema_indicator_values;
 use crate::trading::utils;
-use crate::trading::utils::fibonacci::FIBONACCI_ZERO_POINT_FIVE;
+use crate::trading::utils::fibonacci::{
+    FIBONACCI_ZERO_POINT_FIVE, FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO,
+    FIBONACCI_ZERO_POINT_TWO_THREE_SIX,
+};
 use uuid::fmt::Braced;
 
 /// 锤子形态配置
@@ -59,7 +62,7 @@ impl Default for KlineHammerConfig {
             up_shadow_ratio: 0.6,
             down_shadow_ratio: 0.6,
             max_other_side_shadow_ratio: 0.1,
-            body_ratio: 0.7,
+            body_ratio: 0.4,
         }
     }
 }
@@ -107,7 +110,7 @@ impl Default for EngulfingSignalConfig {
     fn default() -> Self {
         Self {
             is_engulfing: true,
-            body_ratio: 0.5,
+            body_ratio: 0.4,
             is_open: true,
         }
     }
@@ -135,9 +138,9 @@ pub struct VolumeSignalConfig {
 impl Default for VolumeSignalConfig {
     fn default() -> Self {
         Self {
-            volume_bar_num: 3,
-            volume_increase_ratio: 2.2,
-            volume_decrease_ratio: 2.2,
+            volume_bar_num: 6,
+            volume_increase_ratio: 2.0,
+            volume_decrease_ratio: 2.4,
             is_open: true,
             is_force_dependent: false,
         }
@@ -152,6 +155,8 @@ pub struct EmaSignalConfig {
     pub ema3_length: usize,
     pub ema4_length: usize,
     pub ema5_length: usize,
+    pub ema6_length: usize,
+    pub ema7_length: usize,
     pub ema_breakthrough_threshold: f64, // 新增：ema突破价格的阈值
     pub is_open: bool,
 }
@@ -163,6 +168,8 @@ impl Default for EmaSignalConfig {
             ema3_length: 169,
             ema4_length: 576,
             ema5_length: 676,
+            ema6_length: 2304,
+            ema7_length: 2704,
             ema_breakthrough_threshold: 0.003,
             is_open: true,
         }
@@ -211,6 +218,9 @@ pub struct EmaSignalValue {
     pub ema3_value: f64,
     pub ema4_value: f64,
     pub ema5_value: f64,
+    pub ema6_value: f64,
+    pub ema7_value: f64,
+
     //是否多头排列
     pub is_long_trend: bool,
     //是否空头排列
@@ -241,9 +251,9 @@ pub struct RsiSignalConfig {
 impl Default for RsiSignalConfig {
     fn default() -> Self {
         Self {
-            rsi_length: 18,
-            rsi_oversold: 20.0,
-            rsi_overbought: 90.0,
+            rsi_length: 9,
+            rsi_oversold: 15.0,
+            rsi_overbought: 85.0,
             is_open: true,
         }
     }
@@ -280,6 +290,7 @@ pub struct EmaTouchTrendSignalConfig {
     pub ema2_with_ema3_ratio: f64,      //eam2与eam3的相差幅度
     pub ema3_with_ema4_ratio: f64,      //eam2与eam3的相差幅度
     pub ema4_with_ema5_ratio: f64,      //eam2与eam3的相差幅度
+    pub ema5_with_ema7_ratio: f64,      //eam2与eam3的相差幅度
     pub price_with_ema_high_ratio: f64, //价格与ema4的相差幅度
     pub price_with_ema_low_ratio: f64,  //价格与ema4的相差幅度
     pub is_open: bool,                  //是否开启
@@ -291,7 +302,8 @@ impl Default for EmaTouchTrendSignalConfig {
             ema4_with_ema5_ratio: 1.006,      //ema4与ema5的相差幅度
             ema3_with_ema4_ratio: 1.006,      //ema3与ema4的相差幅度
             ema2_with_ema3_ratio: 1.012,      //ema2与ema3的相差幅度
-            price_with_ema_high_ratio: 1.005, //价格与ema4的相差幅度
+            ema5_with_ema7_ratio: 1.022,      //ema5与ema7的相差幅度
+            price_with_ema_high_ratio: 1.002, //价格与ema4的相差幅度
             price_with_ema_low_ratio: 0.995,  //价格与ema4的相差幅度
             is_open: true,                    //是否开启
         }
@@ -311,13 +323,16 @@ pub struct EmaTouchTrendSignalValue {
     pub is_in_uptrend_touch_ema5: bool, //是否在多头趋势触碰ema4
     pub is_in_uptrend_touch_ema4_ema5_nums: usize, //当前多头趋势中触碰ema4和ema5的次数
 
-    pub is_in_downtrend_touch_ema2: bool, //是否在空头趋势触碰ema2
-    pub is_in_downtrend_touch_ema3: bool, //是否在空头趋势触碰ema3
-    pub is_in_downtrend_touch_ema2_ema3_nums: usize, //当前空头趋势触碰ema2和ema3的次数
+    pub is_touch_ema2: bool,      //是否在空头趋势触碰ema2
+    pub is_touch_ema3: bool,      //是否在空头趋势触碰ema3
+    pub is_ema2_ema3_nums: usize, //当前空头趋势触碰ema2和ema3的次数
 
-    pub is_in_downtrend_touch_ema4: bool, //是否在空头趋势触碰ema4
-    pub is_in_downtrend_touch_ema5: bool, //是否在空头趋势触碰ema5
-    pub is_in_downtrend_touch_ema4_ema5_nums: usize, //当前空头趋势中触碰ema4和ema5的次数
+    pub is_touch_ema4: bool,            //是否在空头趋势触碰ema4
+    pub is_touch_ema5: bool,            //是否在空头趋势触碰ema5
+    pub is_touch_ema4_ema5_nums: usize, //当前空头趋势中触碰ema4和ema5的次数
+
+    pub is_touch_ema7: bool,       //是否在空头趋势触碰ema7
+    pub is_touch_ema7_nums: usize, //当前空头趋势中触碰ema7的次数
 
     pub is_long_signal: bool,  //是否多头开仓
     pub is_short_signal: bool, //是否空头开仓
@@ -333,12 +348,14 @@ impl Default for EmaTouchTrendSignalValue {
             is_in_uptrend_touch_ema4: false,
             is_in_uptrend_touch_ema5: false,
             is_in_uptrend_touch_ema4_ema5_nums: 0,
-            is_in_downtrend_touch_ema2: false,
-            is_in_downtrend_touch_ema3: false,
-            is_in_downtrend_touch_ema2_ema3_nums: 0,
-            is_in_downtrend_touch_ema4: false,
-            is_in_downtrend_touch_ema5: false,
-            is_in_downtrend_touch_ema4_ema5_nums: 0,
+            is_touch_ema2: false,
+            is_touch_ema3: false,
+            is_ema2_ema3_nums: 0,
+            is_touch_ema4: false,
+            is_touch_ema5: false,
+            is_touch_ema4_ema5_nums: 0,
+            is_touch_ema7: false,
+            is_touch_ema7_nums: 0,
             is_long_signal: false,
             is_short_signal: false,
         }
@@ -401,7 +418,7 @@ pub struct VegasStrategy {
 impl Default for VegasStrategy {
     fn default() -> Self {
         Self {
-            min_k_line_num: 3400,
+            min_k_line_num: 3600,
             ema_touch_trend_signal: Some(EmaTouchTrendSignalConfig::default()),
             bolling_signal: Some(BollingBandsSignalConfig::default()),
             ema_signal: Some(EmaSignalConfig::default()),
@@ -422,7 +439,7 @@ impl Default for VegasStrategy {
 
 impl VegasStrategy {
     pub fn get_min_data_length(&mut self) -> usize {
-        3400
+        self.min_k_line_num
     }
 
     /// 获取交易信号
@@ -479,7 +496,8 @@ impl VegasStrategy {
 
         //新增ema排列，回调触碰关键均线位置
         let ema_trend =
-            self.calculate_ema_touch_trend(data_items, vegas_indicator_signal_values.ema_values);
+            self.check_ema_touch_trend(data_items, vegas_indicator_signal_values.ema_values);
+        vegas_indicator_signal_values.ema_touch_value = ema_trend.clone();
         if ema_trend.is_long_signal || ema_trend.is_short_signal {
             conditions.push((
                 SignalType::EmaTrend,
@@ -654,27 +672,30 @@ impl VegasStrategy {
             match signal_direction {
                 SignalDirect::IsLong => {
                     signal_result.should_buy = true;
-                    signal_result.single_value =
-                        Some(json!(vegas_indicator_signal_values).to_string());
-                    signal_result.single_result = Some(json!(conditions).to_string());
                     if risk_config.is_used_signal_k_line_stop_loss {
-                        self.calculate_best_stop_loss_price(last_data_item, &mut signal_result);
+                        self.calculate_best_stop_loss_price(
+                            last_data_item,
+                            &mut signal_result,
+                            &conditions,
+                        );
                     }
                 }
                 SignalDirect::IsShort => {
                     signal_result.should_sell = true;
-                    signal_result.single_value =
-                        Some(json!(vegas_indicator_signal_values).to_string());
-                    signal_result.single_result = Some(json!(conditions).to_string());
                     if risk_config.is_used_signal_k_line_stop_loss {
-                        self.calculate_best_stop_loss_price(last_data_item, &mut signal_result);
+                        self.calculate_best_stop_loss_price(
+                            last_data_item,
+                            &mut signal_result,
+                            &conditions,
+                        );
                     }
                 }
             }
-        } else {
-            signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
-            signal_result.single_result = Some(json!(conditions).to_string());
-        };
+        }
+        // if false {
+        signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
+        signal_result.single_result = Some(json!(conditions).to_string());
+        // }
 
         // self.calculate_best_open_price(data_items, &mut signal_result);
         //设置止盈比例为1:2
@@ -687,15 +708,60 @@ impl VegasStrategy {
         &self,
         last_data_item: &CandleItem,
         signal_result: &mut SignalResult,
+        conditions: &Vec<(SignalType, SignalCondition)>,
     ) {
-        if signal_result.should_buy {
-            let amplitude = last_data_item.h() - last_data_item.l();
-            let best_stop_loss_price = last_data_item.h() - (amplitude * FIBONACCI_ZERO_POINT_FIVE);
-            signal_result.signal_kline_stop_loss_price = Some(best_stop_loss_price);
-        } else if signal_result.should_sell {
-            let amplitude = last_data_item.h() - last_data_item.l();
-            let best_stop_loss_price = last_data_item.l() + (amplitude * FIBONACCI_ZERO_POINT_FIVE);
-            signal_result.signal_kline_stop_loss_price = Some(best_stop_loss_price);
+        //todo 可以做调整，如果出现吞没形态，则止损价格为前一个k线的最高价的0.382位置,
+        //todo 可以做调整，如果出现锤子形态，则止损价格为最高价和开盘价的0.382位置,
+        for (signal_type, signal_condition) in conditions {
+            let mut signal_kline_stop_loss_price: Option<f64> = None;
+           // match signal_type {
+            //     //吞没形态
+            //     SignalType::Engulfing => {
+            //         signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+            //     }
+            //     SignalType::Bolling => {
+            //         if signal_result.should_buy {
+            //             signal_kline_stop_loss_price = Some(last_data_item.l());
+            //         } else if signal_result.should_sell {
+            //             //如果止损价格为空，或者止损价格>当前最新止损价格，则更新止损价格
+            //             signal_kline_stop_loss_price = Some(last_data_item.h());
+            //         }
+            //     }
+            //     _ => {}
+            // }
+            if signal_result.should_buy && signal_kline_stop_loss_price.is_some() {
+                //如果止损价格为空，或者止损价格<当前最新止损价格，则更新止损价格
+                if signal_result.signal_kline_stop_loss_price.is_none()
+                    || signal_result.signal_kline_stop_loss_price.unwrap()
+                        < signal_kline_stop_loss_price.unwrap()
+                {
+                    signal_result.signal_kline_stop_loss_price = signal_kline_stop_loss_price;
+                }
+            } else if signal_result.should_sell {
+                //如果止损价格为空，或者止损价格>当前最新止损价格，则更新止损价格
+                let signal_kline_stop_loss_price = last_data_item.h();
+                if signal_result.signal_kline_stop_loss_price.is_none()
+                    || signal_result.signal_kline_stop_loss_price.unwrap()
+                        > signal_kline_stop_loss_price
+                {
+                    signal_result.signal_kline_stop_loss_price = Some(signal_kline_stop_loss_price);
+                }
+            }
+        }
+
+        //如果条件中没有出现吞没形态和锤子形态，则使用默认止损价格
+        if signal_result.signal_kline_stop_loss_price.is_none() {
+            if signal_result.should_buy {
+                let amplitude = last_data_item.h() - last_data_item.l();
+                let best_stop_loss_price =
+                    last_data_item.l() + (amplitude * FIBONACCI_ZERO_POINT_TWO_THREE_SIX);
+                signal_result.signal_kline_stop_loss_price = Some(best_stop_loss_price);
+            } else if signal_result.should_sell {
+                let amplitude = last_data_item.h() - last_data_item.l();
+                let best_stop_loss_price =
+                    last_data_item.h() - (amplitude * FIBONACCI_ZERO_POINT_TWO_THREE_SIX);
+                signal_result.signal_kline_stop_loss_price = Some(best_stop_loss_price);
+            }
         }
     }
 
@@ -829,13 +895,14 @@ impl VegasStrategy {
     //     current_volume > avg_volume * self.volume_signal.volume_increase_ratio // 倍数大于1.5
     // }
     // 辅助方法：计算EMA趋势
-    fn calculate_ema_touch_trend(
+    fn check_ema_touch_trend(
         &self,
         data_items: &[CandleItem],
         ema_value: EmaSignalValue,
     ) -> EmaTouchTrendSignalValue {
         //判断ema 是否空头排列，或者多头排列或者多头排列
         let mut ema_touch_trend_value = EmaTouchTrendSignalValue::default();
+        let last_data_item = data_items.last().unwrap();
 
         if let Some(ema_touch_trend_signal) = &self.ema_touch_trend_signal {
             //todo  优化时间点 2024-12-09 08:00:00
@@ -890,13 +957,34 @@ impl VegasStrategy {
                         ema_touch_trend_value.is_long_signal = true;
                     }
                 }
+
+                //短期多头趋势
+                if ema_value.ema1_value > ema_value.ema2_value
+                    && ema_value.ema2_value > ema_value.ema3_value
+                    && ema_value.ema3_value > ema_value.ema4_value
+                    //长期空头趋势
+                    && ema_value.ema4_value < ema_value.ema5_value
+                    && ema_value.ema5_value < ema_value.ema6_value
+                    && ema_value.ema6_value < ema_value.ema7_value
+                {
+                    //case 3当价格到达接近ema7位置时候,且ema5 与 ema7相差幅度大于0.09,则开始短多
+                    if last_data_item.h() >= ema_value.ema7_value
+                        && ema_value.ema5_value * ema_touch_trend_signal.ema5_with_ema7_ratio
+                            > ema_value.ema7_value
+                    {
+                        ema_touch_trend_value.is_touch_ema7_nums += 1;
+                        ema_touch_trend_value.is_touch_ema7 = true;
+                        ema_touch_trend_value.is_short_signal = true;
+                        ema_touch_trend_value.is_long_signal = false;
+                    }
+                }
             } else if ema_value.ema1_value < ema_value.ema2_value
                 && ema_value.ema2_value < ema_value.ema3_value
                 && ema_value.ema3_value < ema_value.ema4_value
             {
                 ema_touch_trend_value.is_downtrend = true;
 
-                //当前ema_vaue_1 <emalue_2 的时候， 且要求开盘价<ema2,价格最高上涨到em2附近的时候且ema1 与 ema2 相差幅度大于0.012
+                //case 1当前ema_vaue_1 <emalue_2 的时候， 且要求开盘价<ema2,价格最高上涨到em2附近的时候且ema1 与 ema2 相差幅度大于0.012
                 if data_items.last().unwrap().h()
                     >= ema_value.ema2_value * ema_touch_trend_signal.price_with_ema_low_ratio
                     && ema_value.ema2_value
@@ -907,33 +995,51 @@ impl VegasStrategy {
                     // println!("data.last().unwrap(): {:#?}", data_itms.last().unwrap());
                     // println!("ema2_value: {:#?}", ema_value.ema2_value);
                     ema_touch_trend_value.is_short_signal = true;
-                    ema_touch_trend_value.is_in_downtrend_touch_ema2 = true;
-                } else {
-                    //当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
-
-                    //当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
-                    if ((data_items.last().unwrap().o() < ema_value.ema4_value)
-                        && (data_items.last().unwrap().h()
-                            * ema_touch_trend_signal.price_with_ema_high_ratio
-                            >= ema_value.ema4_value)
+                    ema_touch_trend_value.is_touch_ema2 = true;
+                }
+                //case 2当价格到达接近ema4或者ema5位置时候,且ema3 与 ema4 或 ema5 相差幅度大于0.09
+                if (data_items.last().unwrap().o() < ema_value.ema4_value
+                    && ((data_items.last().unwrap().h()
+                        * ema_touch_trend_signal.price_with_ema_high_ratio
+                        >= ema_value.ema4_value)
                         || (data_items.last().unwrap().h()
                             * ema_touch_trend_signal.price_with_ema_high_ratio
-                            >= ema_value.ema5_value))
-                        && ((ema_value.ema3_value * ema_touch_trend_signal.ema3_with_ema4_ratio
-                            < ema_value.ema4_value)
-                            || (ema_value.ema3_value * ema_touch_trend_signal.ema3_with_ema4_ratio
-                                < ema_value.ema5_value))
+                            >= ema_value.ema5_value)))
+                    && ((ema_value.ema3_value * ema_touch_trend_signal.ema3_with_ema4_ratio
+                        < ema_value.ema4_value)
+                        || (ema_value.ema3_value * ema_touch_trend_signal.ema3_with_ema4_ratio
+                            < ema_value.ema5_value))
+                {
+                    ema_touch_trend_value.is_touch_ema4_ema5_nums += 1;
+                    if data_items.last().unwrap().h()
+                        * ema_touch_trend_signal.price_with_ema_high_ratio
+                        >= ema_value.ema4_value
                     {
-                        ema_touch_trend_value.is_in_downtrend_touch_ema4_ema5_nums += 1;
-                        if data_items.last().unwrap().h()
-                            * ema_touch_trend_signal.price_with_ema_high_ratio
-                            >= ema_value.ema4_value
-                        {
-                            ema_touch_trend_value.is_in_downtrend_touch_ema4 = true;
-                        } else {
-                            ema_touch_trend_value.is_in_downtrend_touch_ema5 = true;
-                        }
-                        ema_touch_trend_value.is_short_signal = true;
+                        ema_touch_trend_value.is_touch_ema4 = true;
+                    } else {
+                        ema_touch_trend_value.is_touch_ema5 = true;
+                    }
+                    ema_touch_trend_value.is_short_signal = true;
+                }
+
+                //短期空头趋势
+                if ema_value.ema1_value < ema_value.ema2_value
+                    && ema_value.ema2_value < ema_value.ema3_value
+                    && ema_value.ema3_value < ema_value.ema4_value
+                    //长期多头趋势
+                    && ema_value.ema4_value > ema_value.ema5_value
+                    && ema_value.ema5_value > ema_value.ema6_value
+                    && ema_value.ema6_value > ema_value.ema7_value
+                {
+                    //case 3当价格到达接近ema7位置时候,且ema5 与 ema7相差幅度大于0.09,则开始短多
+                    if last_data_item.l() <= ema_value.ema7_value
+                        && ema_value.ema7_value * ema_touch_trend_signal.ema5_with_ema7_ratio
+                            < ema_value.ema5_value
+                    {
+                        ema_touch_trend_value.is_touch_ema7_nums += 1;
+                        ema_touch_trend_value.is_touch_ema7 = true;
+                        ema_touch_trend_value.is_long_signal = true;
+                        ema_touch_trend_value.is_short_signal = false;
                     }
                 }
             }
@@ -976,6 +1082,8 @@ impl VegasStrategy {
                 ema_signal.ema3_length,
                 ema_signal.ema4_length,
                 ema_signal.ema5_length,
+                ema_signal.ema6_length,
+                ema_signal.ema7_length,
             ));
         }
         //添加成交量
@@ -1327,8 +1435,10 @@ impl VegasStrategy {
         conditions: &mut Vec<(SignalType, SignalCondition)>,
         ema_value: EmaSignalValue,
     ) {
-        //todo 如果是吞没形态，开仓几个大概率是在趋势的末端，所以需要判断当前k线是否是趋势的末端，且开仓挂单价格最好小于当前k线路的最高价70% ，或者小于当前k线路的最低价30%
+        // todo 如果是吞没形态，开仓几个大概率是在趋势的末端，所以需要判断当前k线是否是趋势的末端，且开仓挂单价格最好小于当前k线路的最高价70% ，或者小于当前k线路的最低价30%
         let mut is_engulfing = false;
+        let last_data_item = data_items.last().unwrap();
+        //判断如果是吞没形态，且要求实体部分要大于指定的配置值
         if let Some(engulfing_signal) = &self.engulfing_signal {
             if vegas_indicator_signal_value.engulfing_value.is_engulfing
                 && vegas_indicator_signal_value.engulfing_value.body_ratio
@@ -1340,12 +1450,11 @@ impl VegasStrategy {
                 is_engulfing = true;
             }
         }
-
         if is_engulfing {
             let mut is_long_signal = false;
             let mut is_short_signal = false;
             //但出现吞没形态，且如果当前k线收盘价大于开盘价，则认为是多头吞没形态，否则为空头吞没形态
-            if data_items.last().unwrap().c() > data_items.last().unwrap().o() {
+            if last_data_item.c() > last_data_item.o() {
                 is_long_signal = true;
                 //且当ema均线是空头排列，且收盘小于于ema1均线，则多头形态失效
                 // if ema_value.is_short_trend == true
@@ -1363,7 +1472,6 @@ impl VegasStrategy {
                 // }
             }
             //如果吞没形态跌幅
-
             conditions.push((
                 SignalType::Engulfing,
                 SignalCondition::Engulfing {
@@ -1387,12 +1495,8 @@ impl VegasStrategy {
                 .kline_hammer_value
                 .is_hanging_man;
 
-            if is_hammer
-            // && vegas_indicator_signal_values
-            //     .kline_hammer_value
-            //     .up_shadow_ratio
-            //     < kline_hammer_signal.max_other_side_shadow_ratio
-            {
+            //如果上有长上影线，且振幅>0.5,则才能判断是有效的
+            if is_hammer && self.calculate_k_line_amplitude(data_items) >= 0.6 {
                 vegas_indicator_signal_values
                     .kline_hammer_value
                     .is_long_signal = true;
@@ -1408,12 +1512,7 @@ impl VegasStrategy {
             }
 
             //如果ema均线是空头排列，且收盘价小于ema1均线，则才能是下跌信号,且成交量<5000
-            if is_hanging_man
-            // && vegas_indicator_signal_values
-            //     .kline_hammer_value
-            //     .down_shadow_ratio
-            //     < kline_hammer_signal.max_other_side_shadow_ratio
-            {
+            if is_hanging_man && self.calculate_k_line_amplitude(data_items) >= 0.6 {
                 vegas_indicator_signal_values
                     .kline_hammer_value
                     .is_short_signal = true;
@@ -1426,9 +1525,9 @@ impl VegasStrategy {
                         .kline_hammer_value
                         .is_short_signal = false;
                 }
-                //case 2如果当前跌幅超过3个点，且emas是多头趋势，则不再继续开空
             }
         }
+
         if vegas_indicator_signal_values
             .kline_hammer_value
             .is_long_signal

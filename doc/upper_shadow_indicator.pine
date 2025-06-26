@@ -1,0 +1,98 @@
+//@version=5
+indicator(shorttitle="SI", title="Shadow Indicator", overlay=true)
+
+// 输入参数
+upper_shadow_ratio = input.float(0.6, title="上影线占比阈值", minval=0.1, maxval=0.9, step=0.05)
+lower_shadow_ratio = input.float(0.6, title="下影线占比阈值", minval=0.1, maxval=0.9, step=0.05)
+volume_threshold = input.float(5000, title="成交量阈值", minval=100)
+price_amplitude_threshold = input.float(0.5, title="价格振幅阈值", minval=0.1, step=0.1)
+show_percentage = input.bool(true, title="显示百分比")
+upper_signal_color = input.color(color.red, title="上影线信号颜色")
+lower_signal_color = input.color(color.green, title="下影线信号颜色")
+label_size = input.string("normal", title="标签大小", options=["tiny", "small", "normal", "large"])
+
+// 字符串转常量
+label_size_const = label_size == "tiny" ? size.tiny : 
+                   label_size == "small" ? size.small : 
+                   label_size == "normal" ? size.normal : 
+                   size.large
+
+// 计算上影线和下影线长度
+upper_shadow = high - math.max(open, close)  // 上影线长度
+lower_shadow = math.min(open, close) - low   // 下影线长度
+total_range = high - low                     // K线总高度
+
+// 计算上影线和下影线占比
+upper_shadow_percentage = total_range > 0 ? upper_shadow / total_range : 0
+lower_shadow_percentage = total_range > 0 ? lower_shadow / total_range : 0
+
+// 计算开盘价与收盘价的振幅
+price_amplitude = math.abs(close - open)
+
+// 额外条件：成交量大于阈值 或 价格振幅大于阈值
+volume_condition = volume > volume_threshold
+amplitude_condition = price_amplitude > price_amplitude_threshold
+additional_condition = volume_condition or amplitude_condition
+
+// 上影线信号条件：上影线 > 下影线 且 上影线占比 > 阈值 且 满足额外条件
+upper_shadow_condition = upper_shadow > lower_shadow and upper_shadow_percentage >= upper_shadow_ratio and additional_condition
+
+// 下影线信号条件：下影线 > 上影线 且 下影线占比 > 阈值 且 满足额外条件
+lower_shadow_condition = lower_shadow > upper_shadow and lower_shadow_percentage >= lower_shadow_ratio and additional_condition
+
+// 当上影线条件满足时，创建标签显示信号
+if upper_shadow_condition
+    // 准备显示文本
+    base_text = show_percentage ? 
+                "🔻 " + str.tostring(upper_shadow_percentage * 100, "#") + "%" : 
+                "🔻 上影线信号"
+    
+    // 添加触发条件信息
+    condition_text = volume_condition ? " V:" + str.tostring(volume, "#") : 
+                     amplitude_condition ? " A:" + str.tostring(price_amplitude, "#.##") : ""
+    
+    display_text = base_text + condition_text
+    
+    // 创建标签
+    label.new(bar_index, high, display_text, 
+              color=upper_signal_color, 
+              style=label.style_label_down, 
+              textcolor=color.white, 
+              size=label_size_const)
+
+// 当下影线条件满足时，创建标签显示信号
+if lower_shadow_condition
+    // 准备显示文本
+    base_text = show_percentage ? 
+                "🔺 " + str.tostring(lower_shadow_percentage * 100, "#") + "%" : 
+                "🔺 下影线信号"
+    
+    // 添加触发条件信息
+    condition_text = volume_condition ? " V:" + str.tostring(volume, "#") : 
+                     amplitude_condition ? " A:" + str.tostring(price_amplitude, "#.##") : ""
+    
+    display_text = base_text + condition_text
+    
+    // 创建标签
+    label.new(bar_index, low, display_text, 
+              color=lower_signal_color, 
+              style=label.style_label_up, 
+              textcolor=color.white, 
+              size=label_size_const)
+
+// 可选：在副图显示影线占比
+// 如果想在副图显示占比变化，可以取消下面的注释
+// plot(upper_shadow_percentage * 100, title="上影线占比%", color=color.red, linewidth=2)
+// plot(lower_shadow_percentage * 100, title="下影线占比%", color=color.green, linewidth=2)
+// hline(upper_shadow_ratio * 100, title="上影线阈值线", color=color.red, linestyle=hline.style_dashed)
+// hline(lower_shadow_ratio * 100, title="下影线阈值线", color=color.green, linestyle=hline.style_dashed)
+
+// 背景高亮（可选）
+bgcolor(upper_shadow_condition ? color.new(upper_signal_color, 90) : lower_shadow_condition ? color.new(lower_signal_color, 90) : na, title="信号背景")
+
+// 可选：绘制影线比例线
+// plot(upper_shadow_percentage - lower_shadow_percentage, title="影线差值", color=color.blue, linewidth=1)
+
+// 可选：显示当前成交量和价格振幅信息
+// plotchar(volume, title="成交量", char="", location=location.top, color=color.blue, size=size.tiny)
+// plotchar(price_amplitude, title="价格振幅", char="", location=location.top, color=color.orange, size=size.tiny) 

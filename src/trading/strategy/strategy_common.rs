@@ -328,6 +328,8 @@ pub fn calculate_ema(data: &CandleItem, ema_indicator: &mut EmaIndicator) -> Ema
     ema_signal_value.ema3_value = ema_indicator.ema3_indicator.next(data.c());
     ema_signal_value.ema4_value = ema_indicator.ema4_indicator.next(data.c());
     ema_signal_value.ema5_value = ema_indicator.ema5_indicator.next(data.c());
+    ema_signal_value.ema6_value = ema_indicator.ema6_indicator.next(data.c());
+    ema_signal_value.ema7_value = ema_indicator.ema7_indicator.next(data.c());
 
     //判断是否多头排列
     ema_signal_value.is_long_trend = ema_signal_value.ema1_value > ema_signal_value.ema2_value
@@ -856,10 +858,6 @@ pub fn deal_signal(
     candle_item_list: &Vec<CandleItem>,
     i: usize,
 ) -> TradingState {
-    if candle.ts == 1749661200000 {
-        println!("111- trade_position{:?}", trading_state.trade_position);
-    }
-
     if signal.should_buy || signal.should_sell {
         //使用更优点位开仓
         if signal.best_open_price.is_some() {
@@ -935,11 +933,6 @@ pub fn deal_signal(
             }
         }
     }
-
-    if candle.ts == 1749643200000 {
-        println!("222- trade_position{:?}", trading_state.trade_position);
-    }
-
     trading_state
 }
 
@@ -968,9 +961,6 @@ fn handle_buy_signal_logic(
         }
     } else {
         //todo 如果已持有多单，则不执行任何操作
-    }
-    if candle.ts == 1749643200000 {
-        println!("bbb- trade_position{:?}", trading_state.trade_position);
     }
 }
 
@@ -1088,13 +1078,6 @@ fn open_long_position(
         trade_side: TradeSide::Long,
         ..Default::default()
     };
-    if candle.ts == 1749643200000 {
-        println!(
-            "aaa-risk_config.is_used_signal_k_line_stop_loss:{:?}",
-            risk_config.is_used_signal_k_line_stop_loss
-        );
-        print!("temp_trade_position{:?}", temp_trade_position);
-    }
     // 如果启用了设置预止损价格,则根据开仓方向设置预止损价格
     if risk_config.is_used_signal_k_line_stop_loss {
         temp_trade_position.signal_kline_stop_close_price = signal.signal_kline_stop_loss_price;
@@ -1119,9 +1102,6 @@ fn open_long_position(
     // state.is_use_best_open_price = false;
 
     record_trade_entry(state, PositionSide::Long.to_string(), signal);
-    if candle.ts == 1749643200000 {
-        println!("ccc- trade_position{:?}", state.trade_position);
-    }
 }
 
 /// 开空仓
@@ -1169,7 +1149,6 @@ fn open_short_position(
 
 /// 记录交易入场
 fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
-    // if false {
     //批量回测的时候不进行记录
     let trade_position = state.trade_position.clone().unwrap();
     state.trade_records.push(TradeRecord {

@@ -20,16 +20,16 @@ async fn test_vegas() -> Result<()> {
     let inst_id = "BTC-USDT-SWAP";
     let time = "1H";
     let select_time: SelectTime = SelectTime {
-        point_time:1747810800000,
+        point_time:1731178800000,
         direct: TimeDirect::BEFORE,
     };
 
     // 获取K线数据
     let candles_list: Vec<CandlesEntity> =
-        trading::task::basic::get_candle_data(inst_id, time, 5000, Some(select_time)).await?;
+        trading::task::basic::get_candle_data(inst_id, time, 7000, Some(select_time)).await?;
 
     let mut data_items = vec![];
-    let mut strategy = VegasStrategy::default();
+    let  strategy = VegasStrategy::default();
     println!("strategy: {:#?}", strategy);
     let mut indicator_combine = strategy.get_indicator_combine();
 
