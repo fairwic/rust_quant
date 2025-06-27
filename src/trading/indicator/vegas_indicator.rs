@@ -51,18 +51,12 @@ use uuid::fmt::Braced;
 pub struct KlineHammerConfig {
     pub up_shadow_ratio: f64,
     pub down_shadow_ratio: f64,
-    //最大其他方向影线比例
-    pub max_other_side_shadow_ratio: f64,
-    //实体比例
-    pub body_ratio: f64,
 }
 impl Default for KlineHammerConfig {
     fn default() -> Self {
         Self {
             up_shadow_ratio: 0.6,
             down_shadow_ratio: 0.6,
-            max_other_side_shadow_ratio: 0.1,
-            body_ratio: 0.4,
         }
     }
 }
@@ -692,10 +686,10 @@ impl VegasStrategy {
                 }
             }
         }
-        // if false {
-        signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
-        signal_result.single_result = Some(json!(conditions).to_string());
-        // }
+        if false {
+            signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
+            signal_result.single_result = Some(json!(conditions).to_string());
+        }
 
         // self.calculate_best_open_price(data_items, &mut signal_result);
         //设置止盈比例为1:2
@@ -714,7 +708,7 @@ impl VegasStrategy {
         //todo 可以做调整，如果出现锤子形态，则止损价格为最高价和开盘价的0.382位置,
         for (signal_type, signal_condition) in conditions {
             let mut signal_kline_stop_loss_price: Option<f64> = None;
-           // match signal_type {
+            // match signal_type {
             //     //吞没形态
             //     SignalType::Engulfing => {
             //         signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
@@ -1110,7 +1104,6 @@ impl VegasStrategy {
             indicator_combine.kline_hammer_indicator = Some(KlineHammerIndicator::new(
                 kline_hammer_signal.up_shadow_ratio,
                 kline_hammer_signal.down_shadow_ratio,
-                kline_hammer_signal.body_ratio,
             ));
         }
         // 新增Smart Money Concepts相关指标

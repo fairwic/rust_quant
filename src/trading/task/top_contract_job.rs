@@ -6,7 +6,6 @@ use crate::trading::services::big_data::{big_data_service, big_data_top_contract
 use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
 use crate::trading::strategy::ut_boot_strategy::UtBootStrategy;
 use crate::trading::strategy::StrategyType;
-use crate::trading::task::basic::{save_test_detail, save_test_log};
 use crate::trading::task::{basic, big_data_job};
 use futures_util::future::join_all;
 use std::sync::Arc;

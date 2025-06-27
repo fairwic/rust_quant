@@ -252,6 +252,9 @@ pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Erro
                     four_bar_after_win_rate: 0.0,
                     five_bar_after_win_rate: 0.0,
                     ten_bar_after_win_rate: 0.0,
+                    kline_start_time: 0,
+                    kline_end_time: 0,
+                    kline_nums: 0,
                 };
                 back_test_log::BackTestLogModel::new()
                     .await
@@ -276,7 +279,7 @@ pub async fn run_vegas_test(
     let config_desc = json!(strategy).to_string();
 
     // 保存测试日志并获取 back_test_id
-    let back_test_id = save_log(inst_id, time, Some(config_desc), res).await?;
+    let back_test_id = save_log(inst_id, time, Some(config_desc), res, mysql_candles).await?;
 
     // 返回 back_test_id
     Ok(back_test_id)
@@ -287,6 +290,7 @@ pub async fn save_log(
     time: &str,
     strategy_config_string: Option<String>,
     back_test_result: BackTestResult,
+    mysql_candles: Arc<Vec<CandleItem>>,
 ) -> Result<i64> {
     // 添加调试日志
     // info!(
@@ -322,6 +326,9 @@ pub async fn save_log(
         four_bar_after_win_rate: 0.0,
         five_bar_after_win_rate: 0.0,
         ten_bar_after_win_rate: 0.0,
+        kline_start_time: mysql_candles[0].ts,
+        kline_end_time: mysql_candles.last().unwrap().ts,
+        kline_nums: mysql_candles.len() as i32,
     };
 
     // 保存日志
@@ -331,19 +338,19 @@ pub async fn save_log(
         .add(&back_test_log)
         .await?;
 
-    // if false {
-    // 保存详细交易记录
-    if !back_test_result.trade_records.is_empty() {
-        save_test_detail(
-            back_test_id,
-            StrategyType::Vegas, // 确保选择正确的策略类型
-            inst_id,
-            time,
-            back_test_result.trade_records,
-        )
-        .await?;
+    if false {
+        // 保存详细交易记录
+        if !back_test_result.trade_records.is_empty() {
+            save_test_detail(
+                back_test_id,
+                StrategyType::Vegas, // 确保选择正确的策略类型
+                inst_id,
+                time,
+                back_test_result.trade_records,
+            )
+            .await?;
+        }
     }
-    // }
     Ok(back_test_id)
 }
 
@@ -437,22 +444,22 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
     // 创建信号量限制并发数
     let semaphore = Arc::new(Semaphore::new(30)); // 控制最大并发数量为 10
 
-    // // 测试随机策略
-    // test_random_strategy(
-    //     inst_id,
-    //     time,
-    //     arc_candle_item_clone.clone(),
-    //     semaphore.clone(),
-    // )
-    // .await;
-    // //测试指定策略
-    test_specified_strategy(
+    // 测试随机策略
+    test_random_strategy(
         inst_id,
         time,
         arc_candle_item_clone.clone(),
         semaphore.clone(),
     )
     .await;
+    // //测试指定策略
+    // test_specified_strategy(
+    //     inst_id,
+    //     time,
+    //     arc_candle_item_clone.clone(),
+    //     semaphore.clone(),
+    // )
+    // .await;
 
     Ok(())
 }
@@ -466,6 +473,21 @@ pub async fn test_specified_strategy(
     let params_batch = vec![
         //btc
         ParamMerge::build()
+            .shadow_ratio(0.85)
+            .breakthrough_threshold(0.003)
+            //bollinger bands
+            .bb_periods(12)
+            .bb_multiplier(2.0)
+            //volume
+            .volume_bar_num(6)
+            .volume_increase_ratio(1.9)
+            .volume_decrease_ratio(2.5)
+            //rsi
+            .rsi_period(19)
+            .rsi_overbought(90.0)
+            .rsi_oversold(15.0),
+            //btc-th
+            ParamMerge::build()
             .shadow_ratio(0.6)
             .breakthrough_threshold(0.003)
             //bollinger bands
@@ -697,8 +719,6 @@ pub async fn run_back_test_strategy(
         let kline_hammer_signal = KlineHammerConfig {
             up_shadow_ratio: shadow_ratio,
             down_shadow_ratio: shadow_ratio,
-            max_other_side_shadow_ratio: 0.1,
-            body_ratio: 0.4,
         };
 
         let strategy = VegasStrategy {
@@ -893,106 +913,110 @@ pub async fn run_back_test_strategy(
 //     Ok(())
 // }
 
-// 主函数，执行所有策略测试
-pub async fn top_contract_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-    // 创建信号量限制并发数
-    let semaphore = Arc::new(Semaphore::new(100)); // 控制最大并发数量为 100
+// // 主函数，执行所有策略测试
+// pub async fn top_contract_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+//     // 创建信号量限制并发数
+//     let semaphore = Arc::new(Semaphore::new(100)); // 控制最大并发数量为 100
 
-    // 灵敏度参数
-    let key_values: Vec<f64> = (100..=250).map(|x| x as f64 * 0.01).collect();
+//     // 灵敏度参数
+//     let key_values: Vec<f64> = (100..=250).map(|x| x as f64 * 0.01).collect();
 
-    let max_loss_percent: Vec<f64> = (5..6).map(|x| x as f64 * 0.01).collect();
+//     let max_loss_percent: Vec<f64> = (5..6).map(|x| x as f64 * 0.01).collect();
 
-    // 创建任务容器
-    let mut tasks = Vec::new();
+//     // 创建任务容器
+//     let mut tasks = Vec::new();
 
-    let mut strate = TopContractStrategy::new(&inst_id, &time).await?;
+//     let mut strate = TopContractStrategy::new(&inst_id, &time).await?;
 
-    let arc_strategy = Arc::new(strate);
-    // 遍历所有组合并为每个组合生成一个任务
-    for key_value in key_values {
-        for &max_loss in &max_loss_percent {
-            let inst_id_clone = inst_id.to_string();
-            let time_clone = time.to_string();
-            // 获取信号量，控制并发
-            let _permit = semaphore.acquire().await.unwrap();
-            // 创建任务
-            tasks.push(tokio::spawn({
-                let inst_id = inst_id_clone.clone();
-                let time = time_clone.clone();
-                let strate_clone = Arc::clone(&arc_strategy);
-                async move {
-                    let strategy = TopContractStrategy {
-                        data: strate_clone,
-                        key_value,
-                        atr_period: 0,
-                        heikin_ashi: false,
-                    };
-                    let fibonacci_level = ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
+//     let arc_strategy = Arc::new(strate);
+//     // 遍历所有组合并为每个组合生成一个任务
+//     for key_value in key_values {
+//         for &max_loss in &max_loss_percent {
+//             let inst_id_clone = inst_id.to_string();
+//             let time_clone = time.to_string();
+//             // 获取信号量，控制并发
+//             let _permit = semaphore.acquire().await.unwrap();
+//             // 创建任务
+//             tasks.push(tokio::spawn({
+//                 let inst_id = inst_id_clone.clone();
+//                 let time = time_clone.clone();
+//                 let strate_clone = Arc::clone(&arc_strategy);
+//                 async move {
+//                     let strategy = TopContractStrategy {
+//                         data: strate_clone,
+//                         key_value,
+//                         atr_period: 0,
+//                         heikin_ashi: false,
+//                     };
+//                     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
 
-                    let res = strategy
-                        .run_test(&fibonacci_level, 10.00, false, true, false, false)
-                        .await;
-                    let result = save_log(
-                        &inst_id,
-                        &time,
-                        Some(
-                            TopContractStrategyConfig {
-                                basic_ratio: key_value,
-                            }
-                            .to_string(),
-                        ),
-                        res,
-                    )
-                    .await;
-                    if result.is_err() {
-                        error!("保存日志异常")
-                    }
-                }
-            }));
-        }
-    }
+//                     let res = strategy
+//                         .run_test(&fibonacci_level, 10.00, false, true, false, false)
+//                         .await;
+//                     let result = save_log(
+//                         &inst_id,
+//                         &time,
+//                         Some(
+//                             TopContractStrategyConfig {
+//                                 basic_ratio: key_value,
+//                             }
+//                             .to_string(),
+//                         ),
+//                         res,
+//                         mysql_candles,
+//                     )
+//                     .await;
+//                     if result.is_err() {
+//                         error!("保存日志异常")
+//                     }
+//                 }
+//             }));
+//         }
+//     }
 
-    // 等待所有任务完成
-    join_all(tasks).await;
+//     // 等待所有任务完成
+//     join_all(tasks).await;
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-pub async fn save_test_log(
-    strategy_type: StrategyType,
-    inst_id: &str,
-    time: &str,
-    final_fund: f64,
-    win_rate: f64,
-    open_position_num: i32,
-    detail: Option<String>,
-) -> Result<i64, anyhow::Error> {
-    // 解包 Result 类型
-    //把back tests strategy结果写入数据
-    let back_test_log = BackTestLog {
-        strategy_type: strategy_type.to_string(),
-        inst_type: inst_id.parse().unwrap(),
-        time: time.parse().unwrap(),
-        final_fund: final_fund.to_string(),
-        win_rate: win_rate.to_string(),
-        open_positions_num: open_position_num,
-        strategy_detail: detail,
-        profit: (final_fund - 100.00).to_string(),
-        one_bar_after_win_rate: 0.0,
-        two_bar_after_win_rate: 0.00,
-        three_bar_after_win_rate: 0.0,
-        four_bar_after_win_rate: 0.00,
-        five_bar_after_win_rate: 0.0,
-        ten_bar_after_win_rate: 0.0,
-    };
-    // println!("back_test_log:{:?}", back_test_log);
-    let res = back_test_log::BackTestLogModel::new()
-        .await
-        .add(&back_test_log)
-        .await?;
-    Ok(res)
-}
+// pub async fn save_test_log(
+//     strategy_type: StrategyType,
+//     inst_id: &str,
+//     time: &str,
+//     final_fund: f64,
+//     win_rate: f64,
+//     open_position_num: i32,
+//     detail: Option<String>,
+// ) -> Result<i64, anyhow::Error> {
+//     // 解包 Result 类型
+//     //把back tests strategy结果写入数据
+//     let back_test_log = BackTestLog {
+//         strategy_type: strategy_type.to_string(),
+//         inst_type: inst_id.parse().unwrap(),
+//         time: time.parse().unwrap(),
+//         final_fund: final_fund.to_string(),
+//         win_rate: win_rate.to_string(),
+//         open_positions_num: open_position_num,
+//         strategy_detail: detail,
+//         profit: (final_fund - 100.00).to_string(),
+//         one_bar_after_win_rate: 0.0,
+//         two_bar_after_win_rate: 0.00,
+//         three_bar_after_win_rate: 0.0,
+//         four_bar_after_win_rate: 0.00,
+//         five_bar_after_win_rate: 0.0,
+//         ten_bar_after_win_rate: 0.0,
+//         kline_start_time: 0,
+//         kline_end_time: 0,
+//         kline_nums: 0,
+//     };
+//     // println!("back_test_log:{:?}", back_test_log);
+//     let res = back_test_log::BackTestLogModel::new()
+//         .await
+//         .add(&back_test_log)
+//         .await?;
+//     Ok(res)
+// }
 
 pub async fn save_test_detail(
     back_test_id: i64,

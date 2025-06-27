@@ -1150,6 +1150,7 @@ fn open_short_position(
 /// 记录交易入场
 fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
     //批量回测的时候不进行记录
+    return;
     let trade_position = state.trade_position.clone().unwrap();
     state.trade_records.push(TradeRecord {
         option_type,
@@ -1227,6 +1228,7 @@ fn record_trade_exit(
     closing_quantity: f64, // Add parameter for quantity being closed
 ) {
     //todo 批量回测的时候不进行记录
+    return;
     let trade_position = state.trade_position.clone().unwrap();
     state.trade_records.push(TradeRecord {
         option_type: "close".to_string(),

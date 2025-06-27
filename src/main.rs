@@ -50,8 +50,11 @@ use tokio_tungstenite::{
 use tracing::{debug, info, span, Level};
 use tracing_subscriber::{fmt, EnvFilter, FmtSubscriber};
 
+use okx::utils::validate_system_time;
+use once_cell::sync::Lazy;
 use rust_quant::app_config::db::init_db;
 use rust_quant::app_config::log::setup_logging;
+use rust_quant::job::RiskJob;
 use rust_quant::trading::indicator::atr::ATR;
 use rust_quant::trading::indicator::vegas_indicator::{
     self, VegasIndicatorSignalValue, VegasStrategy,
@@ -64,11 +67,8 @@ use rust_quant::trading::strategy::strategy_common::{parse_candle_to_data_item, 
 use rust_quant::trading::strategy::StrategyType;
 use rust_quant::trading::{order, task};
 use rust_quant::{app_init, socket, trading};
-use tracing_subscriber::prelude::*;
-use once_cell::sync::Lazy;
 use tokio_cron_scheduler::JobScheduler;
-use okx::utils::validate_system_time;
-use rust_quant::job::RiskJob;
+use tracing_subscriber::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -106,9 +106,9 @@ async fn main() -> anyhow::Result<()> {
     // let inst_ids = Some(vec!["OM-USDT-SWAP"]);
     // let period = Some(vec!["4H",]);
     // let period = Some(vec!["1m"]);
-    // let period = Some(vec!["4H", "1H", "1m","5m", "1Dutc"]);
+    let period = Some(vec!["5m", "1m", "3m", "1Dutc"]);
     // let times = Arc::new(vec!["4H", "1H", "5m", "1Dutc"]);
-    let period = Some(vec!["1H"]);
+    // let period = Some(vec!["1H"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
     // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
@@ -173,10 +173,10 @@ async fn main() -> anyhow::Result<()> {
         if env::var("IS_RUN_REAL_STRATEGY").unwrap_or(String::from("false")) == "true" {
             println!("run real strategy job");
             if let Some(inst_ids) = inst_ids.clone() {
-
-                //执行风险控制,初始化
+                //1. 执行风险控制,初始化
                 let risk_job = RiskJob::new();
                 risk_job.run(&inst_ids).await.unwrap();
+
                 let inst_ids = Arc::new(inst_ids);
                 let times = Arc::new(period.clone().unwrap());
                 //获取指定产品的策略
@@ -197,7 +197,9 @@ async fn main() -> anyhow::Result<()> {
                                 serde_json::from_str::<VegasStrategy>(&*strategy.value).map_err(
                                     |e| anyhow!("Failed to parse VegasStrategy config: {}", e),
                                 )?;
-                            VegasOrder::new().order(strategy_config, inst_id, time).await?;
+                            VegasOrder::new()
+                                .order(strategy_config, inst_id, time)
+                                .await?;
                         }
                     }
                 }
@@ -215,4 +217,3 @@ async fn main() -> anyhow::Result<()> {
     tokio::signal::ctrl_c().await?;
     Ok(())
 }
-

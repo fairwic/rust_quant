@@ -6,11 +6,10 @@ use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergenc
 pub struct KlineHammerIndicator {
     stander_down_shadow_ratio: f64,
     stander_up_shadow_ratio: f64,
-    stander_body_ratio: f64,
 }
 impl Default for KlineHammerIndicator {
     fn default() -> Self {
-        Self::new(0.7, 0.7, 0.7)
+        Self::new(0.7, 0.7)
     }
 }
 /// 锤子/上吊线形态指标
@@ -29,11 +28,10 @@ pub struct KlineHammerIndicatorOutput {
 }
 
 impl KlineHammerIndicator {
-    pub fn new(low_shadow_ratio: f64, up_shadow_ratio: f64, body_ratio: f64) -> Self {
+    pub fn new(low_shadow_ratio: f64, up_shadow_ratio: f64) -> Self {
         Self {
             stander_down_shadow_ratio: low_shadow_ratio,
             stander_up_shadow_ratio: up_shadow_ratio,
-            stander_body_ratio: body_ratio,
         }
     }
     pub fn next(&mut self, current_kline: &CandleItem) -> KlineHammerIndicatorOutput {
@@ -93,7 +91,7 @@ mod tests {
 
     #[test]
     fn test_kline_hammer_indicator() {
-        let mut indicator = KlineHammerIndicator::new(0.7, 0.7, 0.7);
+        let mut indicator = KlineHammerIndicator::new(0.7, 0.7);
         // 109623	110360	109582	109829.5
         let kline = CandleItem {
             o: 103687.2,
@@ -110,7 +108,7 @@ mod tests {
     #[test]
     fn test_engulfing_indicator() {
         println!("创建一个锤子形态指标");
-        let mut indicator = KlineHammerIndicator::new(0.7, 0.7, 0.7);
+        let mut indicator = KlineHammerIndicator::new(0.7, 0.7);
         println!("创建一个价格下跌，一个锤子形态");
         // 创建价格是下跌的，一个锤子形态
         let kline = CandleItem {

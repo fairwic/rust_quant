@@ -635,8 +635,6 @@ pub async fn usage_example() -> anyhow::Result<()> {
         kline_hammer_signal: Some(KlineHammerConfig {
             up_shadow_ratio: 0.6,
             down_shadow_ratio: 0.6,
-            max_other_side_shadow_ratio: 0.1,
-            body_ratio: 0.7,
         }),
     };
     
