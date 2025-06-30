@@ -348,7 +348,7 @@ mod tests {
         init_db().await;
 
         let select_time: SelectTime = SelectTime {
-            point_time: 1747494000000,
+            start_time: 1747494000000,
             direct: TimeDirect::BEFORE,
         };
         let candles =

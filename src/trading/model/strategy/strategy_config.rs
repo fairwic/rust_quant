@@ -10,10 +10,14 @@ use crate::trading::strategy::StrategyType;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StrategyConfigEntity {
+    pub id: i64,
     pub strategy_type: String,
     pub inst_id: String,
     pub time: String,
     pub value: String,
+    pub kline_start_time: i64,
+    pub kline_end_time: i64,
+    pub final_fund:f64
 }
 
 crud!(StrategyConfigEntity{},"strategy_config");

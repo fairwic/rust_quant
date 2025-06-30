@@ -43,6 +43,7 @@ pub(crate) fn is_within_business_hours(ts: i64) -> bool {
 pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
     println!("period:{}",period);
     let duration = match &period.to_uppercase()[..] {
+        "1S" => 1,
         "1M" => 60,
         "3M" => 3 * 60,
         "5M" => 5 * 60,

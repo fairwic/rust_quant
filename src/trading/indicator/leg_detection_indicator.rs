@@ -282,8 +282,9 @@ mod tests {
 
         // 获取实际数据 - 使用一段有明显趋势变化的时间段
         let select_time: SelectTime = SelectTime {
-            point_time: 1747494000000, // 可以根据需要调整时间戳
+            start_time: 1747494000000, // 可以根据需要调整时间戳
             direct: TimeDirect::BEFORE,
+            end_time: None,
         };
 
         let candles =

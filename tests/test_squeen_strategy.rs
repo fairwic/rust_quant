@@ -24,7 +24,7 @@ async fn test_squeeze_strategy() -> Result<()> {
     };
 
     let select_time = SelectTime {
-        point_time: 1737057600000,
+        start_time: 1737057600000,
         direct: TimeDirect::BEFORE,
     };
 
@@ -48,7 +48,7 @@ async fn test_squeeze_strategy() -> Result<()> {
     };
 
     let select_time = SelectTime {
-        point_time: 1732392000000,
+        start_time: 1732392000000,
         direct: TimeDirect::BEFORE,
     };
 

@@ -19,7 +19,7 @@ async fn test_rsi_real_data() -> Result<()> {
     let mut rsi = RsiIndicator::new(12);
 
     let select_time = SelectTime {
-        point_time: 1732392000000,
+        start_time: 1732392000000,
         direct: TimeDirect::BEFORE,
     };
 

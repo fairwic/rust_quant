@@ -555,12 +555,12 @@ mod tests {
 
         // 修改时间戳匹配2025-05-19附近
         let select_time: SelectTime = SelectTime {
-            point_time: 1747894800000, // 2025-05-19
+            start_time: 1747894800000, // 2025-05-19
             direct: TimeDirect::BEFORE,
         };
 
         println!("\n===== 等高/等低点真实数据测试 =====");
-        println!("目标时间戳: {}", select_time.point_time);
+        println!("目标时间戳: {}", select_time.start_time);
 
         let candles =
             trading::task::basic::get_candle_data("BTC-USDT-SWAP", "1H", 600, Some(select_time))

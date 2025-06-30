@@ -106,12 +106,13 @@ async fn main() -> anyhow::Result<()> {
     // let inst_ids = Some(vec!["OM-USDT-SWAP"]);
     // let period = Some(vec!["4H",]);
     // let period = Some(vec!["1m"]);
-    let period = Some(vec!["5m", "1m", "3m", "1Dutc"]);
-    // let times = Arc::new(vec!["4H", "1H", "5m", "1Dutc"]);
+    // let period = Some(vec!["1Dutc"]);
+    let period = Some(vec!["4H", "1H", "5m", "1Dutc"]);
     // let period = Some(vec!["1H"]);
+    // let period = Some(vec!["1s"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
-    // let times = Arc::new(vec!["4H", "1h", "5m", "1D"]);
+    // let times = Arc::new(vec!["4H", "1h", "5m", "1D"b;
 
     // 初始化需要同步的数据
     if env::var("IS_RUN_SYNC_DATA_JOB").unwrap() == "true" {
@@ -151,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
                     //ut_boot_strategy
                     // let res = task::basic::ut_boot_test(inst_id, &time).await;
                     //vegas_strategy
-                    let res = task::basic::vegas_test(inst_id, &time).await;
+                    let res = task::basic::vegas_back_test(inst_id, &time).await;
                     //engulfing_strategy
                     // let res = task::engulfing_test(&inst_id, &time).await;
                     if let Err(error) = res {

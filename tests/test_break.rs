@@ -21,7 +21,7 @@ async fn test_break_indicator() -> Result<()> {
     let inst_id = "BTC-USDT-SWAP";
     let time = "1H";
     let select_time: SelectTime = SelectTime {
-        point_time: 1749456000000,
+        start_time: 1749456000000,
         direct: TimeDirect::BEFORE,
     };
 

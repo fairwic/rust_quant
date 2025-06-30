@@ -22,7 +22,7 @@ async fn test_sma() -> Result<()> {
     let mut sma = Sma::new(2);
 
     let select_time = SelectTime {
-        point_time: 1732392000000,
+        start_time: 1732392000000,
         direct: TimeDirect::BEFORE,
     };
 
@@ -39,7 +39,7 @@ async fn test_sma() -> Result<()> {
 
     let mut sma = Sma::new(10);
     let select_time = SelectTime {
-        point_time: 1732392000000,
+        start_time: 1732392000000,
         direct: TimeDirect::BEFORE,
     };
 
@@ -56,7 +56,7 @@ async fn test_sma() -> Result<()> {
     println!("测试3");
     let mut sma = SimpleMovingAverage::new(10).unwrap();
     let select_time = SelectTime {
-        point_time: 1732392000000,
+        start_time: 1732392000000,
         direct: TimeDirect::BEFORE,
     };
 

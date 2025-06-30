@@ -16,7 +16,7 @@ async fn test_rma() -> Result<()> {
     let mut rma = Rma::new(2);
 
     let select_time = SelectTime {
-        point_time: 1732392000000,
+        start_time: 1732392000000,
         direct: TimeDirect::BEFORE,
     };
 
@@ -34,7 +34,7 @@ async fn test_rma() -> Result<()> {
     println!("测试2");
     let mut rma = Rma::new(10);
     let select_time = SelectTime {
-        point_time: 1732392000000,
+        start_time: 1732392000000,
         direct: TimeDirect::BEFORE,
     };
 

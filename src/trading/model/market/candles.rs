@@ -17,15 +17,15 @@ use rbatis::impl_select;
 // #[serde(rename_all = "camelCase")]
 #[serde(rename_all = "snake_case")]
 pub struct CandlesEntity {
-    pub ts: i64,               // 开始时间，Unix时间戳的毫秒数格式
-    pub o: String,             // 开盘价格
-    pub h: String,             // 最高价格
-    pub l: String,             // 最低价格
-    pub c: String,             // 收盘价格
-    pub vol: String,           // 交易量，以张为单位
-    pub vol_ccy: String,       // 交易量，以币为单位
+    pub ts: i64,         // 开始时间，Unix时间戳的毫秒数格式
+    pub o: String,       // 开盘价格
+    pub h: String,       // 最高价格
+    pub l: String,       // 最低价格
+    pub c: String,       // 收盘价格
+    pub vol: String,     // 交易量，以张为单位
+    pub vol_ccy: String, // 交易量，以币为单位
     // pub vol_ccy_quote: String, // 交易量，以计价货币为单位
-    pub confirm: String,       // K线状态
+    pub confirm: String, // K线状态
 }
 pub enum TimeDirect {
     BEFORE,
@@ -33,8 +33,10 @@ pub enum TimeDirect {
 }
 
 pub struct SelectTime {
-    //选择时间
-    pub point_time: i64,
+    //选择开始时间
+    pub start_time: i64,
+    //选择结束时间
+    pub end_time: Option<i64>,
     //选择方向1 正
     pub direct: TimeDirect,
 }
@@ -93,7 +95,7 @@ impl CandlesModel {
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ;",
             table_name
         );
-//   `vol_ccy_quote` varchar(50) NOT NULL COMMENT '交易量，以计价货币为单位',
+        //   `vol_ccy_quote` varchar(50) NOT NULL COMMENT '交易量，以计价货币为单位',
         // println!("create_table_sql = {}", create_table_sql);
         let res = self.db.exec(&create_table_sql, vec![]).await?;
         Ok(res)
@@ -269,21 +271,29 @@ impl CandlesModel {
         limit: usize,
         select_time: Option<SelectTime>,
     ) -> Result<Vec<CandlesEntity>> {
-        // 如 [1m/3m/5m/15m/30m/1H/2H/4H]
-        // 香港时间开盘价k线：[6H/12H/1D/2D/3D/1W/1M/3M]
-
         let mut query = format!(
             "SELECT ts,o,h,l,c,vol,vol_ccy,confirm FROM `{}` ",
             Self::get_tale_name(inst_id, time_interval)
         );
         //如果指定了时间
-        if let Some(SelectTime { direct, point_time }) = select_time {
+        if let Some(SelectTime {
+            direct,
+            start_time: point_time,
+            end_time: end_time,
+        }) = select_time
+        {
             match direct {
                 TimeDirect::BEFORE => {
                     query = format!("{} where ts<= {} ", query, point_time);
+                    if let Some(end_time) = end_time {
+                        query = format!("{} and ts>= {} ", query, end_time);
+                    }
                 }
                 TimeDirect::AFTER => {
                     query = format!("{} where ts>= {} ", query, point_time);
+                    if let Some(end_time) = end_time {
+                        query = format!("{} and ts<= {} ", query, end_time);
+                    }
                 }
             }
         }
@@ -377,11 +387,13 @@ impl CandlesModel {
         &self,
         ins_id: &str,
         time: &str,
-        limit:usize,
+        limit: usize,
         select_time: Option<SelectTime>,
     ) -> anyhow::Result<Vec<CandlesEntity>> {
         let candles_model = CandlesModel::new().await;
-        let candles = candles_model.get_all(ins_id, time, limit,select_time).await;
+        let candles = candles_model
+            .get_all(ins_id, time, limit, select_time)
+            .await;
         match candles {
             Ok(mut data) => {
                 data.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));

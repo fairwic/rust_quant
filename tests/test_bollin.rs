@@ -15,7 +15,7 @@ async fn test_bolling_bands() -> Result<()> {
     init_db().await;
 
     let select_time = SelectTime {
-        point_time: 1742274000000,
+        start_time: 1742274000000,
         direct: TimeDirect::BEFORE,
     };
 

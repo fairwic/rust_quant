@@ -12,7 +12,7 @@ async fn test_predicting_ema() -> anyhow::Result<()> {
     init_db().await;
 
     let select_time = SelectTime {
-        point_time: 1743508800000,
+        start_time: 1743508800000,
         direct: TimeDirect::BEFORE,
     };
 

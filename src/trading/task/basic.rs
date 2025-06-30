@@ -99,173 +99,6 @@ pub async fn run_sync_data_job(
     Ok(())
 }
 
-pub async fn breakout_long_test(
-    mysql_candles_5m: Vec<CandlesEntity>,
-    inst_id: &str,
-    time: &str,
-) -> Result<(), anyhow::Error> {
-    // 初始化 Redis
-    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")
-        .expect("get redis client error");
-    let mut con = client
-        .get_multiplexed_async_connection()
-        .await
-        .expect("get multi redis connection error");
-
-    // let db = BizActivityModel::new().await;
-    let mut strategy = trading::strategy::Strategy::new(db::get_db_client(), con);
-
-    for breakout_period in 1..20 {
-        for confirmation_period in 1..20 {
-            let volume_threshold_range: Vec<f64> = (0..=20).map(|x| x as f64 * 0.1).collect(); // 从0.1到2.0，每步0.1
-            for volume_threshold in volume_threshold_range.clone() {
-                // let stop_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
-                // for stop in stop_percent {
-                let stop_loss_strategy = StopLossStrategy::Percent(0.1);
-                let res = strategy
-                    .breakout_strategy(
-                        &*mysql_candles_5m,
-                        breakout_period,
-                        confirmation_period,
-                        volume_threshold,
-                        stop_loss_strategy,
-                    )
-                    .await;
-                println!("strategy{:#?}", res); // let ins_id = "BTC-USDT-SWAP";
-
-                // 解包 Result 类型
-                let (final_fund, win_rate, open_position_num) = res;
-                //把back tests strategy结果写入数据
-                let back_test_log = BackTestLog {
-                    strategy_type: format!("{:?}", StrategyType::BreakoutUp),
-                    inst_type: inst_id.parse()?,
-                    time: time.parse()?,
-                    final_fund: final_fund.to_string(),
-                    win_rate: win_rate.to_string(),
-                    open_positions_num: open_position_num,
-                    strategy_detail: Some(format!("breakout_period:{},confirmation_period:{},volume_threshold:{},stop_loss_strategy: {:?}", breakout_period, confirmation_period, volume_threshold, stop_loss_strategy)),
-                    profit: (final_fund - 100.00).to_string(),
-                    ..Default::default()
-                };
-                back_test_log::BackTestLogModel::new()
-                    .await
-                    .add(&back_test_log)
-                    .await?;
-            }
-        }
-    }
-    Ok(())
-}
-
-pub async fn macd_ema_test(
-    mysql_candles_5m: Vec<CandlesEntity>,
-    inst_id: &str,
-    time: &str,
-) -> Result<(), anyhow::Error> {
-    // 初始化 Redis
-    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")
-        .expect("get redis client error");
-    let mut con = client
-        .get_multiplexed_async_connection()
-        .await
-        .expect("get multi redis connection error");
-
-    // let db = BizActivityModel::new().await;
-    let mut strategy = trading::strategy::Strategy::new(db::get_db_client(), con);
-
-    // let stop_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
-    let stop_percent: Vec<f64> = vec![0.1]; //失仓位,从10%
-    for stop in stop_percent.clone() {
-        let res = strategy.macd_ema_strategy(&*mysql_candles_5m, stop).await;
-        println!("strategy{:#?}", res); // let ins_id = "BTC-USDT-SWAP";
-
-        // 解包 Result 类型
-        let (final_fund, win_rate, open_position_num) = res;
-        //把back tests strategy结果写入数据
-        let back_test_log = BackTestLog {
-            strategy_type: format!("{:?}", StrategyType::BreakoutUp),
-            inst_type: inst_id.parse()?,
-            time: time.parse()?,
-            final_fund: final_fund.to_string(),
-            win_rate: win_rate.to_string(),
-            open_positions_num: open_position_num as i32,
-            strategy_detail: Some(format!("stop_loss_percent: {:?}", stop)),
-            profit: (final_fund - 100.00).to_string(),
-            ..Default::default()
-        };
-        back_test_log::BackTestLogModel::new()
-            .await
-            .add(&back_test_log)
-            .await?;
-    }
-    Ok(())
-}
-
-pub async fn kdj_macd_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-    //获取candle数据
-    let mysql_candles = self::get_candle_data(inst_id, time, 50, None).await?;
-    // 初始化 Redis
-    let client = redis::Client::open("redis://:pxb7_redis@127.0.0.1:26379/")
-        .expect("get redis client error");
-    let mut con = client
-        .get_multiplexed_async_connection()
-        .await
-        .expect("get multi redis connection error");
-
-    // let db = BizActivityModel::new().await;
-    let mut strategy = trading::strategy::Strategy::new(db::get_db_client(), con);
-
-    // let stop_percent: Vec<f64> = (0..=3).map(|x| x as f64 * 0.1).collect(); //损失仓位,从0到30%
-
-    let fib_levels = ProfitStopLoss::get_fibonacci_level(inst_id, time);
-    let stop_percent: Vec<f64> = vec![0.02]; //失仓位,从10%
-    for stop in stop_percent.clone() {
-        for kdj_period in 2..30 {
-            for signal_period in 1..10 {
-                let res = MacdKdjStrategy::run_test(
-                    &mysql_candles,
-                    &fib_levels,
-                    stop,
-                    kdj_period,
-                    signal_period,
-                )
-                .await;
-                println!("strategy{:#?}", res); // let ins_id = "BTC-USDT-SWAP";
-                                                // 解包 Result 类型
-                let (final_fund, win_rate, open_position_num) = res;
-                //把back tests strategy结果写入数据
-                let back_test_log = BackTestLog {
-                    strategy_type: format!("{:?}", StrategyType::MacdWithKdj),
-                    inst_type: inst_id.parse()?,
-                    time: time.parse()?,
-                    final_fund: final_fund.to_string(),
-                    win_rate: win_rate.to_string(),
-                    open_positions_num: open_position_num as i32,
-                    strategy_detail: Some(format!(
-                        "stop_loss_percent: {:?},kdj_period:{},signal_period:{}",
-                        stop, kdj_period, signal_period
-                    )),
-                    profit: (final_fund - 100.00).to_string(),
-                    one_bar_after_win_rate: 0.0,
-                    two_bar_after_win_rate: 0.0,
-                    three_bar_after_win_rate: 0.0,
-                    four_bar_after_win_rate: 0.0,
-                    five_bar_after_win_rate: 0.0,
-                    ten_bar_after_win_rate: 0.0,
-                    kline_start_time: 0,
-                    kline_end_time: 0,
-                    kline_nums: 0,
-                };
-                back_test_log::BackTestLogModel::new()
-                    .await
-                    .add(&back_test_log)
-                    .await?;
-            }
-        }
-    }
-    Ok(())
-}
-
 pub async fn run_vegas_test(
     inst_id: &str,
     time: &str,
@@ -354,76 +187,120 @@ pub async fn save_log(
     Ok(back_test_id)
 }
 
+/// 随机策略测试配置
+#[derive(Debug, Clone)]
+pub struct RandomStrategyConfig {
+    pub bb_periods: Vec<i32>,
+    pub bb_multipliers: Vec<f64>,
+    pub shadow_ratios: Vec<f64>,
+    pub volume_bar_nums: Vec<usize>,
+    pub volume_increase_ratios: Vec<f64>,
+    pub volume_decrease_ratios: Vec<f64>,
+    pub breakthrough_thresholds: Vec<f64>,
+    pub rsi_periods: Vec<usize>,
+    pub rsi_over_buy: Vec<f64>,
+    pub rsi_over_sold: Vec<f64>,
+    pub batch_size: usize,
+}
+
+impl Default for RandomStrategyConfig {
+    fn default() -> Self {
+        Self {
+            bb_periods: vec![10, 11, 12, 13, 14, 15, 16],
+            bb_multipliers: vec![2.0, 2.5, 3.0, 3.1, 3.2],
+            shadow_ratios: vec![0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9],
+            volume_bar_nums: vec![3, 4, 5, 6],
+            volume_increase_ratios: (16..=25).map(|x| x as f64 * 0.1).collect(),
+            volume_decrease_ratios: (16..=25).map(|x| x as f64 * 0.1).collect(),
+            breakthrough_thresholds: vec![0.003],
+            rsi_periods: vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+            rsi_over_buy: vec![85.0, 86.0, 87.0, 88.0, 89.0, 90.0],
+            rsi_over_sold: vec![15.0, 16.0, 17.0, 18.0, 19.0, 20.0],
+            batch_size: 100,
+        }
+    }
+}
+
 pub async fn test_random_strategy(
     inst_id: &str,
     time: &str,
-    arc_candle_item_clone: Arc<Vec<CandleItem>>,
     semaphore: Arc<Semaphore>,
-) {
-    // 参数范围
-    let bb_periods = vec![10, 11, 12, 13, 14, 15, 16];
-    let bb_multipliers = vec![2.0, 2.5, 3.0, 3.1, 3.2];
+) -> Result<(), anyhow::Error> {
+    test_random_strategy_with_config(inst_id, time, semaphore, RandomStrategyConfig::default()).await
+}
 
-    let shadow_ratios = vec![0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9];
+pub async fn test_random_strategy_with_config(
+    inst_id: &str,
+    time: &str,
+    semaphore: Arc<Semaphore>,
+    config: RandomStrategyConfig,
+) -> Result<(), anyhow::Error> {
+    info!("开始随机策略测试: inst_id={}, time={}", inst_id, time);
 
-    let volume_bar_nums = vec![3, 4, 5, 6];
-    let volume_increase_ratios: Vec<f64> = (16..=25).map(|x| x as f64 * 0.1).collect();
-    let volume_decrease_ratios: Vec<f64> = (16..=25).map(|x| x as f64 * 0.1).collect();
-    let breakthrough_thresholds = vec![0.003];
-
-    let rsi_periods = vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
-    let rsi_over_buy = vec![85.0, 86.0, 87.0, 88.0, 89.0, 90.0];
-    let rsi_over_sold = vec![15.0, 16.0, 17.0, 18.0, 19.0, 20.0];
-
-    // 将参数组合转换为扁平的迭代器
-    info!("正在生成参数组合...");
-
+    // 构建参数生成器
     let mut param_generator = ParamGenerator::new(
-        bb_periods,
-        shadow_ratios,
-        bb_multipliers,
-        volume_bar_nums,
-        volume_increase_ratios,
-        volume_decrease_ratios,
-        breakthrough_thresholds,
-        rsi_periods,
-        rsi_over_buy,
-        rsi_over_sold,
+        config.bb_periods,
+        config.shadow_ratios,
+        config.bb_multipliers,
+        config.volume_bar_nums,
+        config.volume_increase_ratios,
+        config.volume_decrease_ratios,
+        config.breakthrough_thresholds,
+        config.rsi_periods,
+        config.rsi_over_buy,
+        config.rsi_over_sold,
     );
 
     let (_, total_count) = param_generator.progress();
     info!("总共需要处理 {} 个参数组合", total_count);
 
-    // 批量处理
-    let batch_size = 100;
-    let mut batch_num = 0;
-    let mut params_batch = Vec::new();
+    // 获取并转换K线数据
+    let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
 
+    // 批量处理参数组合
+    let mut processed_count = 0;
     loop {
-        params_batch = param_generator.get_next_batch(batch_size);
+        let params_batch = param_generator.get_next_batch(config.batch_size);
         if params_batch.is_empty() {
-            break; // 所有参数处理完毕
+            break;
         }
+
         run_back_test_strategy(
             params_batch,
             inst_id,
             time,
-            arc_candle_item_clone.clone(),
+            arc_candle_data.clone(),
             semaphore.clone(),
         )
         .await;
+
+        processed_count += config.batch_size;
+        info!("已处理 {}/{} 个参数组合", processed_count.min(total_count), total_count);
     }
+
+    info!("随机策略测试完成: 总计处理 {} 个参数组合", total_count);
+    Ok(())
 }
 
-// 主函数，执行所有策略测试
-pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-    // 获取数据
-    let mysql_candles = self::get_candle_data(inst_id, time, 20000, None).await?;
-
+/// 加载并转换K线数据的辅助函数
+async fn load_and_convert_candle_data(
+    inst_id: &str, 
+    time: &str, 
+    limit: usize
+) -> Result<Arc<Vec<CandleItem>>, anyhow::Error> {
+    info!("加载K线数据: inst_id={}, time={}, limit={}", inst_id, time, limit);
+    
+    let mysql_candles = get_candle_data(inst_id, time, limit, None).await
+        .map_err(|e| anyhow!("获取K线数据失败: {}", e))?;
+    
+    if mysql_candles.is_empty() {
+        return Err(anyhow!("K线数据为空"));
+    }
+    
     let candle_item_vec: Vec<CandleItem> = mysql_candles
         .iter()
         .map(|candle| {
-            let data_item = CandleItem::builder()
+            CandleItem::builder()
                 .c(candle.c.parse::<f64>().unwrap_or(0.0))
                 .o(candle.o.parse::<f64>().unwrap_or(0.0))
                 .h(candle.h.parse::<f64>().unwrap_or(0.0))
@@ -431,240 +308,206 @@ pub async fn vegas_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> 
                 .v(candle.vol_ccy.parse::<f64>().unwrap_or(0.0))
                 .ts(candle.ts)
                 .build()
-                .unwrap();
-            data_item
+                .unwrap_or_else(|e| {
+                    warn!("构建CandleItem失败: {}, 跳过该条记录", e);
+                    // 返回一个有效的默认CandleItem
+                    CandleItem::builder()
+                        .c(0.0)
+                        .o(0.0)
+                        .h(0.0)
+                        .l(0.0)
+                        .v(0.0)
+                        .ts(0)
+                        .build()
+                        .unwrap()
+                })
         })
         .collect();
+    
+    info!("成功加载 {} 条K线数据", candle_item_vec.len());
+    Ok(Arc::new(candle_item_vec))
+}
 
-    let arc_candle_item_clone = Arc::new(candle_item_vec.clone()); // 克隆一份用于后续分析
+/// Vegas 策略回测配置
+#[derive(Debug, Clone)]
+pub struct VegasBackTestConfig {
+    /// 最大并发数
+    pub max_concurrent: usize,
+    /// K线数据限制
+    pub candle_limit: usize,
+    /// 是否启用随机策略测试
+    pub enable_random_test: bool,
+    /// 是否启用指定策略测试
+    pub enable_specified_test: bool,
+}
 
-    let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
-    let fibonacci_level_clone = Arc::new(fibonacci_level);
+impl Default for VegasBackTestConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent: 30,
+            candle_limit: 20000,
+            enable_random_test: false,
+            enable_specified_test: true,
+        }
+    }
+}
+
+/// 主函数，执行所有策略测试
+pub async fn vegas_back_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
+    vegas_back_test_with_config(inst_id, time, VegasBackTestConfig::default()).await
+}
+
+/// 带配置的 Vegas 策略回测
+pub async fn vegas_back_test_with_config(
+    inst_id: &str, 
+    time: &str, 
+    config: VegasBackTestConfig
+) -> Result<(), anyhow::Error> {
+    info!("开始 Vegas 策略回测: inst_id={}, time={}, config={:?}", inst_id, time, config);
+    
+    // 验证输入参数
+    if inst_id.is_empty() || time.is_empty() {
+        return Err(anyhow!("无效的输入参数: inst_id={}, time={}", inst_id, time));
+    }
 
     // 创建信号量限制并发数
-    let semaphore = Arc::new(Semaphore::new(30)); // 控制最大并发数量为 10
-
-    // 测试随机策略
-    test_random_strategy(
-        inst_id,
-        time,
-        arc_candle_item_clone.clone(),
-        semaphore.clone(),
-    )
-    .await;
-    // //测试指定策略
-    // test_specified_strategy(
-    //     inst_id,
-    //     time,
-    //     arc_candle_item_clone.clone(),
-    //     semaphore.clone(),
-    // )
-    // .await;
-
+    let semaphore = Arc::new(Semaphore::new(config.max_concurrent));
+    
+    // 执行不同类型的测试
+    let mut test_results = Vec::new();
+    
+    if config.enable_random_test {
+        info!("执行随机策略测试");
+        if let Err(e) = test_random_strategy(inst_id, time, semaphore.clone()).await {
+            error!("随机策略测试失败: {}", e);
+            test_results.push(("random", false));
+        } else {
+            test_results.push(("random", true));
+        }
+    }
+    
+    if config.enable_specified_test {
+        info!("执行指定策略测试");
+        if let Err(e) = test_specified_strategy(inst_id, time, semaphore.clone()).await {
+            error!("指定策略测试失败: {}", e);
+            test_results.push(("specified", false));
+        } else {
+            test_results.push(("specified", true));
+        }
+    }
+    
+    // 汇总测试结果
+    let success_count = test_results.iter().filter(|(_, success)| *success).count();
+    let total_count = test_results.len();
+    
+    info!(
+        "Vegas 策略回测完成: 成功 {}/{}, 详情: {:?}", 
+        success_count, total_count, test_results
+    );
+    
+    if success_count == 0 && total_count > 0 {
+        return Err(anyhow!("所有策略测试都失败了"));
+    }
+    
     Ok(())
 }
 
 pub async fn test_specified_strategy(
     inst_id: &str,
     time: &str,
-    arc_candle_item_clone: Arc<Vec<CandleItem>>,
     semaphore: Arc<Semaphore>,
-) {
-    let params_batch = vec![
-        //btc
-        ParamMerge::build()
-            .shadow_ratio(0.85)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(12)
-            .bb_multiplier(2.0)
-            //volume
-            .volume_bar_num(6)
-            .volume_increase_ratio(1.9)
-            .volume_decrease_ratio(2.5)
-            //rsi
-            .rsi_period(19)
-            .rsi_overbought(90.0)
-            .rsi_oversold(15.0),
-            //btc-th
-            ParamMerge::build()
-            .shadow_ratio(0.6)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(8)
-            .bb_multiplier(2.0)
-            //volume
-            .volume_bar_num(3)
-            .volume_increase_ratio(2.2)
-            .volume_decrease_ratio(2.2)
-            //rsi
-            .rsi_period(18)
-            .rsi_overbought(90.0)
-            .rsi_oversold(20.0),
-        //eth
-        ParamMerge::build()
-            .shadow_ratio(0.8)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(16)
-            .bb_multiplier(3.0)
-            //volume
-            .volume_bar_num(6)
-            .volume_increase_ratio(2.9)
-            .volume_decrease_ratio(3.4)
-            //rsi
-            .rsi_period(12)
-            .rsi_overbought(85.0)
-            .rsi_oversold(15.0),
-        //ada
-        ParamMerge::build()
-            .shadow_ratio(0.6)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(12)
-            .bb_multiplier(2.0)
-            //volume
-            .volume_bar_num(6)
-            .volume_increase_ratio(2.6)
-            .volume_decrease_ratio(4.1)
-            //rsi
-            .rsi_period(8)
-            .rsi_overbought(85.0)
-            .rsi_oversold(15.0),
-        //om
-        ParamMerge::build()
-            .shadow_ratio(0.6)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(14)
-            .bb_multiplier(2.5)
-            //volume
-            .volume_bar_num(3)
-            .volume_increase_ratio(3.0)
-            .volume_decrease_ratio(4.1)
-            //rsi
-            .rsi_period(8)
-            .rsi_overbought(85.0)
-            .rsi_oversold(15.0),
-        //sol
-        ParamMerge::build()
-            .shadow_ratio(0.6)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(14)
-            .bb_multiplier(2.0)
-            //volume
-            .volume_bar_num(6)
-            .volume_increase_ratio(2.9)
-            .volume_decrease_ratio(2.4)
-            //rsi
-            .rsi_period(10)
-            .rsi_overbought(85.0)
-            .rsi_oversold(15.0),
-        //xrp
-        ParamMerge::build()
-            .shadow_ratio(0.6)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(16)
-            .bb_multiplier(3.0)
-            //volume
-            .volume_bar_num(5)
-            .volume_increase_ratio(2.4)
-            .volume_decrease_ratio(3.6)
-            //rsi
-            .rsi_period(13)
-            .rsi_overbought(85.0)
-            .rsi_oversold(15.0),
-        //sui
-        ParamMerge::build()
-            .shadow_ratio(0.9)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(14)
-            .bb_multiplier(3.0)
-            //volume
-            .volume_bar_num(4)
-            .volume_increase_ratio(2.2)
-            .volume_decrease_ratio(4.1)
-            //rsi
-            .rsi_period(8)
-            .rsi_overbought(85.0)
-            .rsi_oversold(15.0),
-    ];
-
-    //测试 1
-    let params_batch = vec![
-        //btc
-        //301u
-        // ParamMerge::build()
-        //     .shadow_ratio(0.6)
-        //     .breakthrough_threshold(0.003)
-        //     //bollinger bands
-        //     .bb_periods(8)
-        //     .bb_multiplier(2.8)
-        //     //volume
-        //     .volume_bar_num(3)
-        //     .volume_increase_ratio(2.2)
-        //     .volume_decrease_ratio(2.2)
-        //     //rsi
-        //     .rsi_period(18)
-        //     .rsi_overbought(90.0)
-        //     .rsi_oversold(20.0),
-        //335 u
-        ParamMerge::build()
-            .shadow_ratio(0.7)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(12)
-            .bb_multiplier(2.0)
-            //volume
-            .volume_bar_num(3)
-            .volume_increase_ratio(2.1)
-            .volume_decrease_ratio(4.1)
-            //rsi
-            .rsi_period(13)
-            .rsi_overbought(85.0)
-            .rsi_oversold(15.0),
-        ParamMerge::build()
-            .shadow_ratio(0.6)
-            .breakthrough_threshold(0.003)
-            //bollinger bands
-            .bb_periods(13)
-            .bb_multiplier(2.5)
-            //volume
-            .volume_bar_num(6)
-            .volume_increase_ratio(2.4)
-            .volume_decrease_ratio(2.0)
-            //rsi
-            .rsi_period(9)
-            .rsi_overbought(85.0)
-            .rsi_oversold(15.0),
-        //121.7u
-        // ParamMerge::build()
-        //     .shadow_ratio(0.7)
-        //     .breakthrough_threshold(0.003)
-        //     //bollinger bands
-        //     .bb_periods(16)
-        //     .bb_multiplier(2.0)
-        //     //volume
-        //     .volume_bar_num(6)
-        //     .volume_increase_ratio(2.8)
-        //     .volume_decrease_ratio(2.9)
-        //     //rsi
-        //     .rsi_period(8)
-        //     .rsi_overbought(85.0)
-        //     .rsi_oversold(15.0),
-    ];
-
+) -> Result<(), anyhow::Error> {
+    info!("开始指定策略测试: inst_id={}, time={}", inst_id, time);
+    
+    // 从数据库获取策略配置
+    let strategy_configs = get_strate_config(inst_id, time).await
+        .map_err(|e| anyhow!("获取策略配置失败: {}", e))?;
+    
+    if strategy_configs.is_empty() {
+        warn!("未找到策略配置: inst_id={}, time={}", inst_id, time);
+        return Ok(());
+    }
+    
+    info!("找到 {} 个策略配置", strategy_configs.len());
+    
+    // 转换策略配置为参数
+    let mut params_batch = Vec::with_capacity(strategy_configs.len());
+    let mut conversion_errors = 0;
+    
+    for config in strategy_configs.iter() {
+        match convert_strategy_config_to_param(config) {
+            Ok(param) => params_batch.push(param),
+            Err(e) => {
+                error!("转换策略配置失败: {}, config_id: {:?}", e, config.id);
+                conversion_errors += 1;
+            }
+        }
+    }
+    
+    if params_batch.is_empty() {
+        return Err(anyhow!("所有策略配置转换都失败了"));
+    }
+    
+    if conversion_errors > 0 {
+        warn!("有 {} 个策略配置转换失败", conversion_errors);
+    }
+    
+    info!("成功转换 {} 个策略配置", params_batch.len());
+    
+    // 加载K线数据
+    let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
+    
+    // 执行回测
     run_back_test_strategy(
         params_batch,
         inst_id,
         time,
-        arc_candle_item_clone.clone(),
-        semaphore.clone(),
+        arc_candle_data,
+        semaphore,
     )
     .await;
+    
+    info!("指定策略测试完成");
+    Ok(())
+}
+
+/// 转换策略配置为参数的辅助函数
+fn convert_strategy_config_to_param(config: &StrategyConfigEntity) -> Result<ParamMerge, anyhow::Error> {
+    let vegas_strategy = serde_json::from_str::<VegasStrategy>(&config.value)
+        .map_err(|e| anyhow!("解析策略配置JSON失败: {}", e))?;
+    
+    // 安全地提取配置值，避免unwrap
+    let kline_hammer = vegas_strategy.kline_hammer_signal
+        .ok_or_else(|| anyhow!("缺少kline_hammer_signal配置"))?;
+    
+    let ema_signal = vegas_strategy.ema_signal
+        .ok_or_else(|| anyhow!("缺少ema_signal配置"))?;
+    
+    let bolling_signal = vegas_strategy.bolling_signal
+        .as_ref()
+        .ok_or_else(|| anyhow!("缺少bolling_signal配置"))?;
+    
+    let volume_signal = vegas_strategy.volume_signal
+        .ok_or_else(|| anyhow!("缺少volume_signal配置"))?;
+    
+    let rsi_signal = vegas_strategy.rsi_signal
+        .ok_or_else(|| anyhow!("缺少rsi_signal配置"))?;
+    
+    let param = ParamMerge::build()
+        .shadow_ratio(kline_hammer.up_shadow_ratio)
+        .breakthrough_threshold(ema_signal.ema_breakthrough_threshold)
+        .bb_periods(bolling_signal.period as i32)
+        .bb_multiplier(bolling_signal.multiplier)
+        .volume_bar_num(volume_signal.volume_bar_num)
+        .volume_increase_ratio(volume_signal.volume_increase_ratio)
+        .volume_decrease_ratio(volume_signal.volume_decrease_ratio)
+        .rsi_period(rsi_signal.rsi_length)
+        .rsi_overbought(rsi_signal.rsi_overbought)
+        .rsi_oversold(rsi_signal.rsi_oversold)
+        .kline_start_time(config.kline_start_time)
+        .kline_end_time(config.kline_end_time);
+    
+    Ok(param)
 }
 
 pub async fn run_back_test_strategy(

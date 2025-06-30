@@ -20,7 +20,7 @@ async fn test_big_k_line_real_data() -> Result<()> {
         // point_time: 1741514400000,
         // point_time: 1740931200000,
         // point_time: 1740956400000,
-        point_time: 1707476400000,
+        start_time: 1707476400000,
 
         direct: TimeDirect::BEFORE,
     };

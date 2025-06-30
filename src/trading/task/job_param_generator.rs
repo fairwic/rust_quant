@@ -12,6 +12,9 @@ pub struct ParamMerge {
     pub rsi_period: usize,
     pub rsi_overbought: f64,
     pub rsi_oversold: f64,
+
+    pub kline_start_time:Option<i64>,
+    pub kline_end_time:Option<i64>,
 }
 impl ParamMerge {
     //使用构造器
@@ -56,6 +59,14 @@ impl ParamMerge {
     }
     pub fn rsi_oversold(mut self,rsi_oversold: f64) ->Self{
         self.rsi_oversold=rsi_oversold;
+        self
+    }
+    pub fn kline_start_time(mut self,kline_start_time: i64) ->Self{
+        self.kline_start_time=Some(kline_start_time);
+        self
+    }
+    pub fn kline_end_time(mut self,kline_end_time: i64) ->Self{
+        self.kline_end_time=Some(kline_end_time);
         self
     }
 }
@@ -182,6 +193,8 @@ impl ParamGenerator {
                 rsi_period: self.rsi_periods[i_rp],
                 rsi_overbought: self.rsi_overboughts[i_rob],
                 rsi_oversold: self.rsi_oversolds[i_ros],
+                kline_start_time: None,
+                kline_end_time: None,
             };
 
             batch.push(param);
