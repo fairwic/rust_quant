@@ -15,6 +15,12 @@ pub struct ParamMerge {
 
     pub kline_start_time:Option<i64>,
     pub kline_end_time:Option<i64>,
+
+    //risk 
+    pub max_loss_percent: f64,                 // 最大止损百分比
+    pub profit_threshold: f64,                 // 盈利阈值，用于动态止盈
+    pub is_move_stop_loss: bool,               //是否使用移动止损,当盈利之后,止损价格变成开仓价
+    pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
 }
 impl ParamMerge {
     //使用构造器
@@ -69,6 +75,23 @@ impl ParamMerge {
         self.kline_end_time=Some(kline_end_time);
         self
     }
+
+    pub fn max_loss_percent(mut self,max_loss_percent: f64) ->Self{
+        self.max_loss_percent=max_loss_percent;
+        self
+    }
+    pub fn profit_threshold(mut self,profit_threshold: f64) ->Self{
+        self.profit_threshold=profit_threshold;
+        self
+    }
+    pub fn is_move_stop_loss(mut self,is_move_stop_loss: bool) ->Self{
+        self.is_move_stop_loss=is_move_stop_loss;
+        self
+    }
+    pub fn is_used_signal_k_line_stop_loss(mut self,is_used_signal_k_line_stop_loss: bool) ->Self{
+        self.is_used_signal_k_line_stop_loss=is_used_signal_k_line_stop_loss;
+        self
+    }
 }
 //使用构造器
 
@@ -83,10 +106,15 @@ impl ParamMerge {
     volume_decrease_ratios: Vec<f64>,
     breakthrough_thresholds: Vec<f64>,
     rsi_periods: Vec<usize>,
-    rsi_overboughts: Vec<f64>,
-    rsi_oversolds: Vec<f64>,
+    rsi_over_buy: Vec<f64>,
+    rsi_over_sold: Vec<f64>,
     current_index: usize,
     total_count: usize,
+    //risk
+    max_loss_percent: Vec<f64>,
+    profit_threshold: Vec<f64>,
+    is_move_stop_loss: Vec<bool>,
+    is_used_signal_k_line_stop_loss: Vec<bool>,
 }
 
 
@@ -101,8 +129,12 @@ impl ParamGenerator {
         volume_decrease_ratios: Vec<f64>,
         breakthrough_thresholds: Vec<f64>,
         rsi_periods: Vec<usize>,
-        rsi_overboughts: Vec<f64>,
-        rsi_oversolds: Vec<f64>,
+        rsi_over_buy: Vec<f64>,
+        rsi_over_sold: Vec<f64>,
+        max_loss_percent: Vec<f64>,
+        profit_threshold: Vec<f64>,
+        is_move_stop_loss: Vec<bool>,
+        is_used_signal_k_line_stop_loss: Vec<bool>,
     ) -> Self {
         let total_count = bb_periods.len()
             * shadow_ratios.len()
@@ -112,8 +144,12 @@ impl ParamGenerator {
             * volume_decrease_ratios.len()
             * breakthrough_thresholds.len()
             * rsi_periods.len()
-            * rsi_overboughts.len()
-            * rsi_oversolds.len();
+            * rsi_over_buy.len()
+            * rsi_over_sold.len()
+            * max_loss_percent.len()
+            * profit_threshold.len()
+            * is_move_stop_loss.len()
+            * is_used_signal_k_line_stop_loss.len();
 
         Self {
             bb_periods,
@@ -124,10 +160,14 @@ impl ParamGenerator {
             volume_decrease_ratios,
             breakthrough_thresholds,
             rsi_periods,
-            rsi_overboughts,
-            rsi_oversolds,
+            rsi_over_buy,
+            rsi_over_sold,
             current_index: 0,
             total_count,
+            max_loss_percent,
+            profit_threshold,
+            is_move_stop_loss,
+            is_used_signal_k_line_stop_loss,
         }
     }
 
@@ -150,7 +190,13 @@ impl ParamGenerator {
             let vdr_size = self.volume_decrease_ratios.len();
             let bt_size = self.breakthrough_thresholds.len();
             let rp_size = self.rsi_periods.len();
-            let rob_size = self.rsi_overboughts.len();
+            let rob_size = self.rsi_over_buy.len();
+
+            let mlp_size = self.max_loss_percent.len();
+            let pt_size = self.profit_threshold.len();
+            let mst_size = self.is_move_stop_loss.len();
+            let usklsl_size = self.is_used_signal_k_line_stop_loss.len();
+
 
             let i_bb_p = index % bb_p_size;
             index /= bb_p_size;
@@ -179,7 +225,21 @@ impl ParamGenerator {
             let i_rob = index % rob_size;
             index /= rob_size;
 
-            let i_ros = index % self.rsi_oversolds.len();
+            let i_ros = index % self.rsi_over_sold.len();
+            index /= self.rsi_over_sold.len();
+
+            let i_mlp = index % self.max_loss_percent.len();
+            index /= self.max_loss_percent.len();
+
+            let i_pt = index % self.profit_threshold.len();
+            index /= self.profit_threshold.len();
+
+            let i_mst = index % self.is_move_stop_loss.len();
+            index /= self.is_move_stop_loss.len();
+
+            let i_usklsl = index % self.is_used_signal_k_line_stop_loss.len();
+            index /= self.is_used_signal_k_line_stop_loss.len();
+
 
             // 获取参数值
             let param = ParamMerge {
@@ -191,10 +251,14 @@ impl ParamGenerator {
                 volume_decrease_ratio: self.volume_decrease_ratios[i_vdr],
                 breakthrough_threshold: self.breakthrough_thresholds[i_bt],
                 rsi_period: self.rsi_periods[i_rp],
-                rsi_overbought: self.rsi_overboughts[i_rob],
-                rsi_oversold: self.rsi_oversolds[i_ros],
+                rsi_overbought: self.rsi_over_buy[i_rob],
+                rsi_oversold: self.rsi_over_sold[i_ros],
                 kline_start_time: None,
                 kline_end_time: None,
+                max_loss_percent: self.max_loss_percent[i_mlp],
+                profit_threshold: self.profit_threshold[i_pt],
+                is_move_stop_loss: self.is_move_stop_loss[i_mst],
+                is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
             };
 
             batch.push(param);

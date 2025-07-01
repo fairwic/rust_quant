@@ -103,16 +103,16 @@ pub async fn run_vegas_test(
     inst_id: &str,
     time: &str,
     mut strategy: VegasStrategy,
-    strategy_config: BasicRiskStrategyConfig,
+    risk_strategy_config: BasicRiskStrategyConfig,
     mysql_candles: Arc<Vec<CandleItem>>,
 ) -> Result<i64, anyhow::Error> {
-    let res = strategy.run_test(&mysql_candles, strategy_config);
+    let res = strategy.run_test(&mysql_candles, risk_strategy_config);
 
     // 构建更详细的策略配置描述
     let config_desc = json!(strategy).to_string();
 
     // 保存测试日志并获取 back_test_id
-    let back_test_id = save_log(inst_id, time, Some(config_desc), res, mysql_candles).await?;
+    let back_test_id = save_log(inst_id, time, Some(config_desc), res, mysql_candles,risk_strategy_config).await?;
 
     // 返回 back_test_id
     Ok(back_test_id)
@@ -124,6 +124,7 @@ pub async fn save_log(
     strategy_config_string: Option<String>,
     back_test_result: BackTestResult,
     mysql_candles: Arc<Vec<CandleItem>>,
+    risk_strategy_config: BasicRiskStrategyConfig,
 ) -> Result<i64> {
     // 添加调试日志
     // info!(
@@ -151,6 +152,7 @@ pub async fn save_log(
         win_rate: back_test_result.win_rate.to_string(),
         open_positions_num: back_test_result.open_trades as i32,
         strategy_detail: strategy_config_string,
+        risk_config_detail: json!(risk_strategy_config).to_string(),
         profit: (back_test_result.funds - 100.00).to_string(), // 确保字段名称正确
         // 初始化为0，后续会通过分析更新
         one_bar_after_win_rate: 0.0,
@@ -201,6 +203,11 @@ pub struct RandomStrategyConfig {
     pub rsi_over_buy: Vec<f64>,
     pub rsi_over_sold: Vec<f64>,
     pub batch_size: usize,
+    //risk
+    pub max_loss_percent: Vec<f64>,
+    pub profit_threshold: Vec<f64>,
+    pub is_move_stop_loss: Vec<bool>,
+    pub is_used_signal_k_line_stop_loss: Vec<bool>,
 }
 
 impl Default for RandomStrategyConfig {
@@ -208,8 +215,8 @@ impl Default for RandomStrategyConfig {
         Self {
             bb_periods: vec![10, 11, 12, 13, 14, 15, 16],
             bb_multipliers: vec![2.0, 2.5, 3.0, 3.1, 3.2],
-            shadow_ratios: vec![0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9],
-            volume_bar_nums: vec![3, 4, 5, 6],
+            shadow_ratios: vec![0.7, 0.75, 0.8, 0.85, 0.9],
+            volume_bar_nums: vec![4, 5, 6],
             volume_increase_ratios: (16..=25).map(|x| x as f64 * 0.1).collect(),
             volume_decrease_ratios: (16..=25).map(|x| x as f64 * 0.1).collect(),
             breakthrough_thresholds: vec![0.003],
@@ -217,6 +224,11 @@ impl Default for RandomStrategyConfig {
             rsi_over_buy: vec![85.0, 86.0, 87.0, 88.0, 89.0, 90.0],
             rsi_over_sold: vec![15.0, 16.0, 17.0, 18.0, 19.0, 20.0],
             batch_size: 100,
+            //risk
+            max_loss_percent: vec![0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1],
+            profit_threshold: vec![0.03],
+            is_move_stop_loss: vec![false],
+            is_used_signal_k_line_stop_loss: vec![true],
         }
     }
 }
@@ -226,7 +238,8 @@ pub async fn test_random_strategy(
     time: &str,
     semaphore: Arc<Semaphore>,
 ) -> Result<(), anyhow::Error> {
-    test_random_strategy_with_config(inst_id, time, semaphore, RandomStrategyConfig::default()).await
+    test_random_strategy_with_config(inst_id, time, semaphore, RandomStrategyConfig::default())
+        .await
 }
 
 pub async fn test_random_strategy_with_config(
@@ -249,6 +262,10 @@ pub async fn test_random_strategy_with_config(
         config.rsi_periods,
         config.rsi_over_buy,
         config.rsi_over_sold,
+        config.max_loss_percent,
+        config.profit_threshold,
+        config.is_move_stop_loss,
+        config.is_used_signal_k_line_stop_loss,
     );
 
     let (_, total_count) = param_generator.progress();
@@ -264,7 +281,6 @@ pub async fn test_random_strategy_with_config(
         if params_batch.is_empty() {
             break;
         }
-
         run_back_test_strategy(
             params_batch,
             inst_id,
@@ -275,7 +291,11 @@ pub async fn test_random_strategy_with_config(
         .await;
 
         processed_count += config.batch_size;
-        info!("已处理 {}/{} 个参数组合", processed_count.min(total_count), total_count);
+        info!(
+            "已处理 {}/{} 个参数组合",
+            processed_count.min(total_count),
+            total_count
+        );
     }
 
     info!("随机策略测试完成: 总计处理 {} 个参数组合", total_count);
@@ -284,19 +304,23 @@ pub async fn test_random_strategy_with_config(
 
 /// 加载并转换K线数据的辅助函数
 async fn load_and_convert_candle_data(
-    inst_id: &str, 
-    time: &str, 
-    limit: usize
+    inst_id: &str,
+    time: &str,
+    limit: usize,
 ) -> Result<Arc<Vec<CandleItem>>, anyhow::Error> {
-    info!("加载K线数据: inst_id={}, time={}, limit={}", inst_id, time, limit);
-    
-    let mysql_candles = get_candle_data(inst_id, time, limit, None).await
+    info!(
+        "加载K线数据: inst_id={}, time={}, limit={}",
+        inst_id, time, limit
+    );
+
+    let mysql_candles = get_candle_data(inst_id, time, limit, None)
+        .await
         .map_err(|e| anyhow!("获取K线数据失败: {}", e))?;
-    
+
     if mysql_candles.is_empty() {
         return Err(anyhow!("K线数据为空"));
     }
-    
+
     let candle_item_vec: Vec<CandleItem> = mysql_candles
         .iter()
         .map(|candle| {
@@ -323,7 +347,7 @@ async fn load_and_convert_candle_data(
                 })
         })
         .collect();
-    
+
     info!("成功加载 {} 条K线数据", candle_item_vec.len());
     Ok(Arc::new(candle_item_vec))
 }
@@ -344,10 +368,10 @@ pub struct VegasBackTestConfig {
 impl Default for VegasBackTestConfig {
     fn default() -> Self {
         Self {
-            max_concurrent: 30,
+            max_concurrent: 15,
             candle_limit: 20000,
-            enable_random_test: false,
-            enable_specified_test: true,
+            enable_random_test: true,
+            enable_specified_test: false,
         }
     }
 }
@@ -359,23 +383,30 @@ pub async fn vegas_back_test(inst_id: &str, time: &str) -> Result<(), anyhow::Er
 
 /// 带配置的 Vegas 策略回测
 pub async fn vegas_back_test_with_config(
-    inst_id: &str, 
-    time: &str, 
-    config: VegasBackTestConfig
+    inst_id: &str,
+    time: &str,
+    config: VegasBackTestConfig,
 ) -> Result<(), anyhow::Error> {
-    info!("开始 Vegas 策略回测: inst_id={}, time={}, config={:?}", inst_id, time, config);
-    
+    info!(
+        "开始 Vegas 策略回测: inst_id={}, time={}, config={:?}",
+        inst_id, time, config
+    );
+
     // 验证输入参数
     if inst_id.is_empty() || time.is_empty() {
-        return Err(anyhow!("无效的输入参数: inst_id={}, time={}", inst_id, time));
+        return Err(anyhow!(
+            "无效的输入参数: inst_id={}, time={}",
+            inst_id,
+            time
+        ));
     }
 
     // 创建信号量限制并发数
     let semaphore = Arc::new(Semaphore::new(config.max_concurrent));
-    
+
     // 执行不同类型的测试
     let mut test_results = Vec::new();
-    
+
     if config.enable_random_test {
         info!("执行随机策略测试");
         if let Err(e) = test_random_strategy(inst_id, time, semaphore.clone()).await {
@@ -385,7 +416,7 @@ pub async fn vegas_back_test_with_config(
             test_results.push(("random", true));
         }
     }
-    
+
     if config.enable_specified_test {
         info!("执行指定策略测试");
         if let Err(e) = test_specified_strategy(inst_id, time, semaphore.clone()).await {
@@ -395,20 +426,20 @@ pub async fn vegas_back_test_with_config(
             test_results.push(("specified", true));
         }
     }
-    
+
     // 汇总测试结果
     let success_count = test_results.iter().filter(|(_, success)| *success).count();
     let total_count = test_results.len();
-    
+
     info!(
-        "Vegas 策略回测完成: 成功 {}/{}, 详情: {:?}", 
+        "Vegas 策略回测完成: 成功 {}/{}, 详情: {:?}",
         success_count, total_count, test_results
     );
-    
+
     if success_count == 0 && total_count > 0 {
         return Err(anyhow!("所有策略测试都失败了"));
     }
-    
+
     Ok(())
 }
 
@@ -418,22 +449,23 @@ pub async fn test_specified_strategy(
     semaphore: Arc<Semaphore>,
 ) -> Result<(), anyhow::Error> {
     info!("开始指定策略测试: inst_id={}, time={}", inst_id, time);
-    
+
     // 从数据库获取策略配置
-    let strategy_configs = get_strate_config(inst_id, time).await
+    let strategy_configs = get_strate_config(inst_id, time)
+        .await
         .map_err(|e| anyhow!("获取策略配置失败: {}", e))?;
-    
+
     if strategy_configs.is_empty() {
         warn!("未找到策略配置: inst_id={}, time={}", inst_id, time);
         return Ok(());
     }
-    
+
     info!("找到 {} 个策略配置", strategy_configs.len());
-    
+
     // 转换策略配置为参数
     let mut params_batch = Vec::with_capacity(strategy_configs.len());
     let mut conversion_errors = 0;
-    
+
     for config in strategy_configs.iter() {
         match convert_strategy_config_to_param(config) {
             Ok(param) => params_batch.push(param),
@@ -443,56 +475,59 @@ pub async fn test_specified_strategy(
             }
         }
     }
-    
+
     if params_batch.is_empty() {
         return Err(anyhow!("所有策略配置转换都失败了"));
     }
-    
+
     if conversion_errors > 0 {
         warn!("有 {} 个策略配置转换失败", conversion_errors);
     }
-    
+
     info!("成功转换 {} 个策略配置", params_batch.len());
-    
+
     // 加载K线数据
     let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
-    
+
     // 执行回测
-    run_back_test_strategy(
-        params_batch,
-        inst_id,
-        time,
-        arc_candle_data,
-        semaphore,
-    )
-    .await;
-    
+    run_back_test_strategy(params_batch, inst_id, time, arc_candle_data, semaphore).await;
+
     info!("指定策略测试完成");
     Ok(())
 }
 
 /// 转换策略配置为参数的辅助函数
-fn convert_strategy_config_to_param(config: &StrategyConfigEntity) -> Result<ParamMerge, anyhow::Error> {
+fn convert_strategy_config_to_param(
+    config: &StrategyConfigEntity,
+) -> Result<ParamMerge, anyhow::Error> {
     let vegas_strategy = serde_json::from_str::<VegasStrategy>(&config.value)
         .map_err(|e| anyhow!("解析策略配置JSON失败: {}", e))?;
-    
+
+    let risk_config = serde_json::from_str::<BasicRiskStrategyConfig>(&config.risk_config)
+        .unwrap_or_default();
+
     // 安全地提取配置值，避免unwrap
-    let kline_hammer = vegas_strategy.kline_hammer_signal
+    let kline_hammer = vegas_strategy
+        .kline_hammer_signal
         .ok_or_else(|| anyhow!("缺少kline_hammer_signal配置"))?;
-    
-    let ema_signal = vegas_strategy.ema_signal
+
+    let ema_signal = vegas_strategy
+        .ema_signal
         .ok_or_else(|| anyhow!("缺少ema_signal配置"))?;
-    
-    let bolling_signal = vegas_strategy.bolling_signal
+
+    let bolling_signal = vegas_strategy
+        .bolling_signal
         .as_ref()
         .ok_or_else(|| anyhow!("缺少bolling_signal配置"))?;
-    
-    let volume_signal = vegas_strategy.volume_signal
+
+    let volume_signal = vegas_strategy
+        .volume_signal
         .ok_or_else(|| anyhow!("缺少volume_signal配置"))?;
-    
-    let rsi_signal = vegas_strategy.rsi_signal
+
+    let rsi_signal = vegas_strategy
+        .rsi_signal
         .ok_or_else(|| anyhow!("缺少rsi_signal配置"))?;
-    
+
     let param = ParamMerge::build()
         .shadow_ratio(kline_hammer.up_shadow_ratio)
         .breakthrough_threshold(ema_signal.ema_breakthrough_threshold)
@@ -505,8 +540,13 @@ fn convert_strategy_config_to_param(config: &StrategyConfigEntity) -> Result<Par
         .rsi_overbought(rsi_signal.rsi_overbought)
         .rsi_oversold(rsi_signal.rsi_oversold)
         .kline_start_time(config.kline_start_time)
-        .kline_end_time(config.kline_end_time);
-    
+        .kline_end_time(config.kline_end_time)
+        //risk
+        .max_loss_percent(risk_config.max_loss_percent)
+        .profit_threshold(risk_config.profit_threshold)
+        .is_move_stop_loss(risk_config.is_move_stop_loss)
+        .is_used_signal_k_line_stop_loss(risk_config.is_used_signal_k_line_stop_loss);
+
     Ok(param)
 }
 
@@ -531,13 +571,12 @@ pub async fn run_back_test_strategy(
         let rsi_oversold = param.rsi_oversold;
 
         let risk_strategy_config = BasicRiskStrategyConfig {
-            use_dynamic_tp: false,
-            use_fibonacci_tp: true,
-            max_loss_percent: 0.02,
-            profit_threshold: 0.01,
-            is_move_stop_loss: false,
-            is_used_signal_k_line_stop_loss: true,
+            max_loss_percent: param.max_loss_percent,
+            profit_threshold: param.profit_threshold,
+            is_move_stop_loss: param.is_move_stop_loss,
+            is_used_signal_k_line_stop_loss: param.is_used_signal_k_line_stop_loss,
         };
+
 
         let volume_signal = VolumeSignalConfig {
             volume_bar_num,
@@ -588,7 +627,7 @@ pub async fn run_back_test_strategy(
 
         // 创建任务
         batch_tasks.push(tokio::spawn(async move {
-            let _permit = permit.acquire().await.unwrap();
+            let _permit: tokio::sync::SemaphorePermit<'_> = permit.acquire().await.unwrap();
             match run_vegas_test(
                 &inst_id,
                 &time,
@@ -615,252 +654,6 @@ pub async fn run_back_test_strategy(
         batch_end.duration_since(batch_start)
     );
 }
-// // 主函数，执行所有策略测试
-// pub async fn squeeze_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-//     // 获取数据
-//     let mysql_candles = self::get_candle_data(inst_id, time, 2200, None).await?;
-//     let mysql_candles_clone = Arc::new(mysql_candles);
-//     // 创建信号量限制并发数
-//     let semaphore = Arc::new(Semaphore::new(100)); // 控制最大并发数量为 100
-
-//     // 灵敏度参数
-//     let bb_lengths: Vec<usize> = (26..=30).collect();
-//     let bb_multi_nums: Vec<f64> = (10..=60).map(|x| x as f64 * 0.1).collect();
-//     let kc_lengths: Vec<usize> = (10..=30).collect();
-//     let kc_multi_nums: Vec<f64> = (10..=60).map(|x| x as f64 * 0.1).collect();
-//     let max_loss_percent: Vec<f64> = (5..=5).map(|x| x as f64 * 0.01).collect();
-
-//     // 创建任务容器
-//     let mut tasks = Vec::new();
-//     for bb_length in bb_lengths {
-//         for bb_multi in bb_multi_nums.clone() {
-//             for kc_length in kc_lengths.clone() {
-//                 for kc_multi in kc_multi_nums.clone() {
-//                     for &max_loss in &max_loss_percent {
-//                         let arc = mysql_candles_clone.clone();
-//                         let inst_id_clone = inst_id.to_string();
-//                         let time_clone = time.to_string();
-//                         // 获取信号量，控制并发
-//                         // 创建任务
-//                         let permit = Arc::clone(&semaphore);
-
-//                         tasks.push(tokio::spawn({
-//                             // 持有 permit，直到异步任务结束才释放
-
-//                             let inst_id = inst_id_clone.clone();
-//                             let time = time_clone.clone();
-//                             async move {
-//                                 let _permit = permit.acquire().await.unwrap();
-//                                 let config = squeeze_momentum::squeeze_config::SqueezeConfig {
-//                                     bb_length,
-//                                     bb_multi,
-//                                     kc_length,
-//                                     kc_multi,
-//                                 };
-//                                 let fibonacci_level =
-//                                     ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
-//                                 let mut stregety = SqueezeCalculator::new(config.clone());
-
-//                                 let res = stregety
-//                                     .run_test(
-//                                         &arc,
-//                                         &fibonacci_level,
-//                                         10.00,
-//                                         false,
-//                                         true,
-//                                         true,
-//                                         false,
-//                                     )
-//                                     .await;
-
-//                                 let result =
-//                                     save_log(&inst_id, &time, Some(config.to_string()), res).await;
-//                                 if result.is_err() {
-//                                     error!("保存日志异常")
-//                                 }
-//                             }
-//                         }));
-//                     }
-//                 }
-//             }
-//         }
-//     }
-//     // 等待所有任务完成
-//     join_all(tasks).await;
-//     Ok(()
-
-// // 主函数，执行所有策略测试
-// pub async fn ut_boot_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-//     // 获取数据
-//     let mysql_candles = self::get_candle_data(inst_id, time, 5000, None).await?;
-//     let mysql_candles_clone = Arc::new(mysql_candles);
-
-//     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
-//     let fibonacci_level_clone = Arc::new(fibonacci_level);
-
-//     // 创建信号量限制并发数
-//     let semaphore = Arc::new(Semaphore::new(100)); // 控制最大并发数量为 100
-
-//     // 灵敏度参数
-//     let key_values: Vec<f64> = (2..=80).map(|x| x as f64 * 0.1).collect();
-//     let emas: Vec<usize> = (1..=3).map(|i| i).collect();
-//     let max_loss_percent: Vec<f64> = (5..6).map(|x| x as f64 * 0.01).collect();
-
-//     // 创建任务容器
-//     let mut tasks = Vec::new();
-
-//     // 遍历所有组合并为每个组合生成一个任务
-//     for key_value in key_values {
-//         for atr_period in 1..=15 {
-//             let ema_clone = emas.clone();
-//             for ema in ema_clone.into_iter() {
-//                 for &max_loss in &max_loss_percent {
-//                     let inst_id_clone = inst_id.to_string();
-//                     let time_clone = time.to_string();
-//                     let mysql_candles_clone = Arc::clone(&mysql_candles_clone);
-//                     let fibonacci_level_clone = Arc::clone(&fibonacci_level_clone);
-//                     let permit = Arc::clone(&semaphore);
-//                     // 创建任务
-//                     tasks.push(tokio::spawn({
-//                         let inst_id_clone = inst_id_clone.clone();
-//                         let time_clone = time_clone.clone();
-//                         async move {
-//                             // 获取信号量，控制并发
-//                             let _permit = permit.acquire().await.unwrap();
-
-//                             // 执行策略测试并处理结果
-//                             if let Err(e) = run_test_strategy(
-//                                 &inst_id_clone,
-//                                 &time_clone,
-//                                 key_value,
-//                                 atr_period,
-//                                 ema.clone(),
-//                                 max_loss,
-//                                 mysql_candles_clone,
-//                                 fibonacci_level_clone,
-//                             )
-//                             .await
-//                             {
-//                                 error!("Strategy test failed: {:?}", e);
-//                             }
-//                         }
-//                     }));
-//                 }
-//             }
-//         }
-//     }
-
-//     // 等待所有任务完成
-//     join_all(tasks).await;
-
-//     Ok(())
-// }
-
-// // 主函数，执行所有策略测试
-// pub async fn top_contract_test(inst_id: &str, time: &str) -> Result<(), anyhow::Error> {
-//     // 创建信号量限制并发数
-//     let semaphore = Arc::new(Semaphore::new(100)); // 控制最大并发数量为 100
-
-//     // 灵敏度参数
-//     let key_values: Vec<f64> = (100..=250).map(|x| x as f64 * 0.01).collect();
-
-//     let max_loss_percent: Vec<f64> = (5..6).map(|x| x as f64 * 0.01).collect();
-
-//     // 创建任务容器
-//     let mut tasks = Vec::new();
-
-//     let mut strate = TopContractStrategy::new(&inst_id, &time).await?;
-
-//     let arc_strategy = Arc::new(strate);
-//     // 遍历所有组合并为每个组合生成一个任务
-//     for key_value in key_values {
-//         for &max_loss in &max_loss_percent {
-//             let inst_id_clone = inst_id.to_string();
-//             let time_clone = time.to_string();
-//             // 获取信号量，控制并发
-//             let _permit = semaphore.acquire().await.unwrap();
-//             // 创建任务
-//             tasks.push(tokio::spawn({
-//                 let inst_id = inst_id_clone.clone();
-//                 let time = time_clone.clone();
-//                 let strate_clone = Arc::clone(&arc_strategy);
-//                 async move {
-//                     let strategy = TopContractStrategy {
-//                         data: strate_clone,
-//                         key_value,
-//                         atr_period: 0,
-//                         heikin_ashi: false,
-//                     };
-//                     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(&inst_id, &time);
-
-//                     let res = strategy
-//                         .run_test(&fibonacci_level, 10.00, false, true, false, false)
-//                         .await;
-//                     let result = save_log(
-//                         &inst_id,
-//                         &time,
-//                         Some(
-//                             TopContractStrategyConfig {
-//                                 basic_ratio: key_value,
-//                             }
-//                             .to_string(),
-//                         ),
-//                         res,
-//                         mysql_candles,
-//                     )
-//                     .await;
-//                     if result.is_err() {
-//                         error!("保存日志异常")
-//                     }
-//                 }
-//             }));
-//         }
-//     }
-
-//     // 等待所有任务完成
-//     join_all(tasks).await;
-
-//     Ok(())
-// }
-
-// pub async fn save_test_log(
-//     strategy_type: StrategyType,
-//     inst_id: &str,
-//     time: &str,
-//     final_fund: f64,
-//     win_rate: f64,
-//     open_position_num: i32,
-//     detail: Option<String>,
-// ) -> Result<i64, anyhow::Error> {
-//     // 解包 Result 类型
-//     //把back tests strategy结果写入数据
-//     let back_test_log = BackTestLog {
-//         strategy_type: strategy_type.to_string(),
-//         inst_type: inst_id.parse().unwrap(),
-//         time: time.parse().unwrap(),
-//         final_fund: final_fund.to_string(),
-//         win_rate: win_rate.to_string(),
-//         open_positions_num: open_position_num,
-//         strategy_detail: detail,
-//         profit: (final_fund - 100.00).to_string(),
-//         one_bar_after_win_rate: 0.0,
-//         two_bar_after_win_rate: 0.00,
-//         three_bar_after_win_rate: 0.0,
-//         four_bar_after_win_rate: 0.00,
-//         five_bar_after_win_rate: 0.0,
-//         ten_bar_after_win_rate: 0.0,
-//         kline_start_time: 0,
-//         kline_end_time: 0,
-//         kline_nums: 0,
-//     };
-//     // println!("back_test_log:{:?}", back_test_log);
-//     let res = back_test_log::BackTestLogModel::new()
-//         .await
-//         .add(&back_test_log)
-//         .await?;
-//     Ok(res)
-// }
-
 pub async fn save_test_detail(
     back_test_id: i64,
     strategy_type: StrategyType,

@@ -106,8 +106,8 @@ async fn main() -> anyhow::Result<()> {
     // let inst_ids = Some(vec!["OM-USDT-SWAP"]);
     // let period = Some(vec!["4H",]);
     // let period = Some(vec!["1m"]);
-    // let period = Some(vec!["1Dutc"]);
-    let period = Some(vec!["4H", "1H", "5m", "1Dutc"]);
+    let period = Some(vec!["1Dutc"]);
+    // let period = Some(vec!["4H", "1H", "5m", "1Dutc"]);
     // let period = Some(vec!["1H"]);
     // let period = Some(vec!["1s"]);
 

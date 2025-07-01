@@ -297,10 +297,8 @@ pub struct MoveStopLoss {
     pub price: f64,
 }
 /// 止盈止损策略配置
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy,Deserialize,Serialize)]
 pub struct BasicRiskStrategyConfig {
-    pub use_dynamic_tp: bool,                  // 是否使用动态止盈
-    pub use_fibonacci_tp: bool,                // 是否使用斐波那契止盈
     pub max_loss_percent: f64,                 // 最大止损百分比
     pub profit_threshold: f64,                 // 盈利阈值，用于动态止盈
     pub is_move_stop_loss: bool,               //是否使用移动止损,当盈利之后,止损价格变成开仓价
@@ -311,8 +309,6 @@ impl Default for BasicRiskStrategyConfig {
     fn default() -> Self {
         Self {
             is_used_signal_k_line_stop_loss: true,
-            use_dynamic_tp: false,
-            use_fibonacci_tp: false,
             max_loss_percent: 0.02,   // 默认3%止损
             profit_threshold: 0.01,   // 默认1%盈利开始启用动态止盈
             is_move_stop_loss: false, // 默认不使用移动止损
@@ -1227,7 +1223,6 @@ fn record_trade_exit(
     close_type: &str,
     closing_quantity: f64, // Add parameter for quantity being closed
 ) {
-    //todo 批量回测的时候不进行记录
     return;
     let trade_position = state.trade_position.clone().unwrap();
     state.trade_records.push(TradeRecord {

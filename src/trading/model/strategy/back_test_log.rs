@@ -22,6 +22,7 @@ pub struct BackTestLog {
     pub final_fund: String,
     pub open_positions_num: i32,
     pub strategy_detail: Option<String>,
+    pub risk_config_detail: String,
     pub profit: String,
     pub one_bar_after_win_rate: f32,
     pub two_bar_after_win_rate: f32,
@@ -37,29 +38,6 @@ pub struct BackTestLog {
     pub kline_nums: i32,
 }
 crud!(BackTestLog{});
-impl Default for BackTestLog {
-    fn default() -> Self {
-        Self {
-            strategy_type: "".to_string(),
-            inst_type: "".to_string(),
-            time: "".to_string(),
-            win_rate: "".to_string(),
-            final_fund: "".to_string(),
-            open_positions_num: 0,
-            strategy_detail: None,
-            profit: "".to_string(),
-            one_bar_after_win_rate: 0.0,
-            two_bar_after_win_rate: 0.0,
-            three_bar_after_win_rate: 0.0,
-            four_bar_after_win_rate: 0.0,
-            five_bar_after_win_rate: 0.0,
-            ten_bar_after_win_rate: 0.0,
-            kline_start_time: 0,
-            kline_end_time: 0,
-            kline_nums: 0,
-        }
-    }
-}
 
 pub struct BackTestLogModel {
     db: &'static RBatis,
@@ -72,7 +50,6 @@ impl BackTestLogModel {
             db: db::get_db_client(),
         }
     }
-    
     pub async fn add(&self, list: &BackTestLog) -> anyhow::Result<i64> {
         // println!("111111111 list:{:#?}", list);
         // println!("db:{:#?}", self.db);
@@ -82,11 +59,11 @@ impl BackTestLogModel {
         // let data = BackTestLog::insert_batch(&self.db, &v1, 1).await?;
         let table_name = format!("{}", "back_test_log");
         // 构建批量插入的 SQL 语句
-        let mut query = format!("INSERT INTO `{}` (strategy_type, inst_type, time, win_rate, final_fund, open_positions_num, strategy_detail, profit, three_bar_after_win_rate, five_bar_after_win_rate, ten_bar_after_win_rate, kline_start_time, kline_end_time, kline_nums) VALUES ", table_name);
+        let mut query = format!("INSERT INTO `{}` (strategy_type, inst_type, time, win_rate, final_fund, open_positions_num, strategy_detail, risk_config_detail, profit, three_bar_after_win_rate, five_bar_after_win_rate, ten_bar_after_win_rate, kline_start_time, kline_end_time, kline_nums) VALUES ", table_name);
         let mut params = Vec::new();
 
         for candle in v1 {
-            query.push_str("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),");
+            query.push_str("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),");
             params.push(candle.strategy_type.to_string().into());
             params.push(candle.inst_type.to_string().into());
             params.push(candle.time.to_string().into());
@@ -94,6 +71,7 @@ impl BackTestLogModel {
             params.push(candle.final_fund.to_string().into());
             params.push(candle.open_positions_num.to_string().into());
             params.push(candle.strategy_detail.unwrap_or_default().to_string().into());
+            params.push(candle.risk_config_detail.to_string().into());
             params.push(candle.profit.to_string().into());
             params.push(candle.three_bar_after_win_rate.to_string().into());
             params.push(candle.five_bar_after_win_rate.to_string().into());

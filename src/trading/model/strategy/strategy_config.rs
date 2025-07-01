@@ -15,6 +15,7 @@ pub struct StrategyConfigEntity {
     pub inst_id: String,
     pub time: String,
     pub value: String,
+    pub risk_config: String,
     pub kline_start_time: i64,
     pub kline_end_time: i64,
     pub final_fund:f64
