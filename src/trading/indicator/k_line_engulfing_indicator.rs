@@ -33,7 +33,6 @@ impl KlineEngulfingIndicator {
             };
         }
         let last_kline = self.last_kline.as_ref().unwrap();
-        let current_kline = current_kline;
 
         //看涨吞没 ,当前k线的开盘价小于前一根k线的开盘价，且当前k线的收盘价大于前一根k线的收盘价,且当前k线的收盘价大于前一根k线的最高价
         let is_bullish = (current_kline.o < last_kline.o || current_kline.l < last_kline.l)

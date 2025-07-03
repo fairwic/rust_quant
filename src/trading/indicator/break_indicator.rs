@@ -157,7 +157,7 @@ impl BreakIndicator {
                 self.highest_in_period = self.prev_highs.iter().cloned().fold(0.0, f64::max);
                 self.lowest_in_period = self.prev_lows.iter().cloned().fold(f64::MAX, f64::min);
             }
-            return (high_break, low_break, break_strength);
+            (high_break, low_break, break_strength)
         } else {
             // 振幅条件不满足，滑动窗口
             self.prev_highs.push(current_high);

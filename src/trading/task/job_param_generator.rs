@@ -1,28 +1,31 @@
 use hmac::digest::consts::U321;
 
 #[derive(Default)]
-pub struct ParamMerge {
+pub struct ParamMergeBuilder {
+    //bolling
     pub bb_period: i32,
-    pub shadow_ratio: f64,
     pub bb_multiplier: f64,
+    //volume
     pub volume_bar_num: usize,
     pub volume_increase_ratio: f64,
     pub volume_decrease_ratio: f64,
     pub breakthrough_threshold: f64,
+    //rsi
     pub rsi_period: usize,
     pub rsi_overbought: f64,
     pub rsi_oversold: f64,
-
+    //hammer
+    pub hammer_shadow_ratio: f64,
+    //kline
     pub kline_start_time:Option<i64>,
     pub kline_end_time:Option<i64>,
-
-    //risk 
+    //risk
     pub max_loss_percent: f64,                 // 最大止损百分比
     pub profit_threshold: f64,                 // 盈利阈值，用于动态止盈
     pub is_move_stop_loss: bool,               //是否使用移动止损,当盈利之后,止损价格变成开仓价
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
 }
-impl ParamMerge {
+impl ParamMergeBuilder {
     //使用构造器
     pub fn build() -> Self {
         Self::default()
@@ -31,8 +34,8 @@ impl ParamMerge {
         self.bb_period=bb_period;
         self
     }
-    pub fn shadow_ratio(mut self,shadow_ratio: f64) ->Self{
-        self.shadow_ratio=shadow_ratio;
+    pub fn hammer_shadow_ratio(mut self,shadow_ratio: f64) ->Self{
+        self.hammer_shadow_ratio=shadow_ratio;
         self
     }
     pub fn bb_multiplier(mut self,bb_multiplier: f64) ->Self{
@@ -174,7 +177,7 @@ impl ParamGenerator {
     pub fn get_next_batch(
         &mut self,
         batch_size: usize,
-    ) -> Vec<ParamMerge> {
+    ) -> Vec<ParamMergeBuilder> {
         let mut batch = Vec::with_capacity(batch_size);
 
         // 计算当前组合的索引
@@ -242,9 +245,9 @@ impl ParamGenerator {
 
 
             // 获取参数值
-            let param = ParamMerge {
+            let param = ParamMergeBuilder {
                 bb_period: self.bb_periods[i_bb_p],
-                shadow_ratio: self.shadow_ratios[i_sr],
+                hammer_shadow_ratio: self.shadow_ratios[i_sr],
                 bb_multiplier: self.bb_multipliers[i_bm],
                 volume_bar_num: self.volume_bar_nums[i_vbn],
                 volume_increase_ratio: self.volume_increase_ratios[i_vir],

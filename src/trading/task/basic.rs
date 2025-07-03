@@ -32,7 +32,7 @@ use crate::trading::{order, task};
 use okx::api::account::OkxAccount;
 use okx::dto::account::account_dto::SetLeverageRequest;
 
-use super::job_param_generator::ParamMerge;
+use super::job_param_generator::ParamMergeBuilder;
 use crate::app_config::db;
 use crate::time_util::millis_time_diff;
 use crate::trading::analysis::position_analysis::PositionAnalysis;
@@ -72,6 +72,7 @@ use okx::dto::trade_dto::TdModeEnum;
 use okx::dto::PositionSide;
 use once_cell::sync::OnceCell;
 use rbatis::dark_std::err;
+use rbatis::dark_std::errors::new;
 use redis::AsyncCommands;
 use serde_json::json;
 use tokio;
@@ -112,7 +113,15 @@ pub async fn run_vegas_test(
     let config_desc = json!(strategy).to_string();
 
     // 保存测试日志并获取 back_test_id
-    let back_test_id = save_log(inst_id, time, Some(config_desc), res, mysql_candles,risk_strategy_config).await?;
+    let back_test_id = save_log(
+        inst_id,
+        time,
+        Some(config_desc),
+        res,
+        mysql_candles,
+        risk_strategy_config,
+    )
+    .await?;
 
     // 返回 back_test_id
     Ok(back_test_id)
@@ -173,7 +182,7 @@ pub async fn save_log(
         .add(&back_test_log)
         .await?;
 
-    if false {
+    if true {
         // 保存详细交易记录
         if !back_test_result.trade_records.is_empty() {
             save_test_detail(
@@ -370,8 +379,8 @@ impl Default for VegasBackTestConfig {
         Self {
             max_concurrent: 15,
             candle_limit: 20000,
-            enable_random_test: true,
-            enable_specified_test: false,
+            enable_random_test: false,
+            enable_specified_test: true,
         }
     }
 }
@@ -442,14 +451,10 @@ pub async fn vegas_back_test_with_config(
 
     Ok(())
 }
-
-pub async fn test_specified_strategy(
+pub async fn get_strategy_config_from_db(
     inst_id: &str,
     time: &str,
-    semaphore: Arc<Semaphore>,
-) -> Result<(), anyhow::Error> {
-    info!("开始指定策略测试: inst_id={}, time={}", inst_id, time);
-
+) -> Result<Vec<ParamMergeBuilder>, anyhow::Error> {
     // 从数据库获取策略配置
     let strategy_configs = get_strate_config(inst_id, time)
         .await
@@ -457,15 +462,12 @@ pub async fn test_specified_strategy(
 
     if strategy_configs.is_empty() {
         warn!("未找到策略配置: inst_id={}, time={}", inst_id, time);
-        return Ok(());
+        return Ok(vec![]);
     }
+    let mut conversion_errors = 0;
+    let mut params_batch = Vec::with_capacity(strategy_configs.len());
 
     info!("找到 {} 个策略配置", strategy_configs.len());
-
-    // 转换策略配置为参数
-    let mut params_batch = Vec::with_capacity(strategy_configs.len());
-    let mut conversion_errors = 0;
-
     for config in strategy_configs.iter() {
         match convert_strategy_config_to_param(config) {
             Ok(param) => params_batch.push(param),
@@ -475,16 +477,56 @@ pub async fn test_specified_strategy(
             }
         }
     }
+    Ok(params_batch)
+}
+pub async fn test_specified_strategy_with_config(
+    inst_id: &str,
+    time: &str,
+) -> Result<Vec<ParamMergeBuilder>, anyhow::Error> {
+    //1Dutc
+    let params_batch = vec![ParamMergeBuilder::build()
+        .bb_multiplier(2.0)
+        .bb_periods(10)
+        .hammer_shadow_ratio(0.9)
+        .breakthrough_threshold(0.003)
+        .volume_bar_num(4)
+        .volume_increase_ratio(2.0)
+        .volume_decrease_ratio(2.5)
+        .rsi_period(9)
+        .rsi_overbought(90.0)
+        .rsi_oversold(20.0)
+        .max_loss_percent(0.03)
+        .profit_threshold(0.03)
+        .is_move_stop_loss(true)
+        .is_used_signal_k_line_stop_loss(true)];
+    //1H
+    let params_batch = vec![ParamMergeBuilder::build()
+        .bb_periods(13)
+        .bb_multiplier(2.5)
+        .hammer_shadow_ratio(0.6)
+        .breakthrough_threshold(0.003)
+        .volume_bar_num(6)
+        .volume_increase_ratio(2.4)
+        .volume_decrease_ratio(2.0)
+        .rsi_period(9)
+        .rsi_overbought(85.0)
+        .rsi_oversold(15.0)
+        .max_loss_percent(0.02)
+        .profit_threshold(0.01)
+        .is_move_stop_loss(false)
+        .is_used_signal_k_line_stop_loss(true)];
+    Ok(params_batch)
+}
+pub async fn test_specified_strategy(
+    inst_id: &str,
+    time: &str,
+    semaphore: Arc<Semaphore>,
+) -> Result<(), anyhow::Error> {
+    info!("开始指定策略测试: inst_id={}, time={}", inst_id, time);
 
-    if params_batch.is_empty() {
-        return Err(anyhow!("所有策略配置转换都失败了"));
-    }
-
-    if conversion_errors > 0 {
-        warn!("有 {} 个策略配置转换失败", conversion_errors);
-    }
-
-    info!("成功转换 {} 个策略配置", params_batch.len());
+    // 转换策略配置为参数
+    let mut params_batch = test_specified_strategy_with_config(inst_id, time).await?;
+    // let mut params_batch = get_strategy_config_from_db(inst_id, time).await?;
 
     // 加载K线数据
     let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
@@ -499,12 +541,12 @@ pub async fn test_specified_strategy(
 /// 转换策略配置为参数的辅助函数
 fn convert_strategy_config_to_param(
     config: &StrategyConfigEntity,
-) -> Result<ParamMerge, anyhow::Error> {
+) -> Result<ParamMergeBuilder, anyhow::Error> {
     let vegas_strategy = serde_json::from_str::<VegasStrategy>(&config.value)
         .map_err(|e| anyhow!("解析策略配置JSON失败: {}", e))?;
 
-    let risk_config = serde_json::from_str::<BasicRiskStrategyConfig>(&config.risk_config)
-        .unwrap_or_default();
+    let risk_config =
+        serde_json::from_str::<BasicRiskStrategyConfig>(&config.risk_config).unwrap_or_default();
 
     // 安全地提取配置值，避免unwrap
     let kline_hammer = vegas_strategy
@@ -528,8 +570,8 @@ fn convert_strategy_config_to_param(
         .rsi_signal
         .ok_or_else(|| anyhow!("缺少rsi_signal配置"))?;
 
-    let param = ParamMerge::build()
-        .shadow_ratio(kline_hammer.up_shadow_ratio)
+    let param = ParamMergeBuilder::build()
+        .hammer_shadow_ratio(kline_hammer.up_shadow_ratio)
         .breakthrough_threshold(ema_signal.ema_breakthrough_threshold)
         .bb_periods(bolling_signal.period as i32)
         .bb_multiplier(bolling_signal.multiplier)
@@ -551,7 +593,7 @@ fn convert_strategy_config_to_param(
 }
 
 pub async fn run_back_test_strategy(
-    params_batch: Vec<ParamMerge>,
+    params_batch: Vec<ParamMergeBuilder>,
     inst_id: &str,
     time: &str,
     arc_candle_item_clone: Arc<Vec<CandleItem>>,
@@ -560,7 +602,7 @@ pub async fn run_back_test_strategy(
     let mut batch_tasks = Vec::with_capacity(params_batch.len());
     for param in params_batch {
         let bb_period = param.bb_period;
-        let shadow_ratio = param.shadow_ratio;
+        let shadow_ratio = param.hammer_shadow_ratio;
         let bb_multiplier = param.bb_multiplier;
         let volume_bar_num = param.volume_bar_num;
         let volume_increase_ratio = param.volume_increase_ratio;
@@ -576,7 +618,6 @@ pub async fn run_back_test_strategy(
             is_move_stop_loss: param.is_move_stop_loss,
             is_used_signal_k_line_stop_loss: param.is_used_signal_k_line_stop_loss,
         };
-
 
         let volume_signal = VolumeSignalConfig {
             volume_bar_num,
@@ -735,7 +776,7 @@ pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> 
         error!("数据库最新数据的时间ts:{} date:({}) 不等于当前最新时间 local time:({}), 跳过,candles:{:?},time:{}", ts, date, current_date, mysql_candles_5m, time);
         return false;
     }
-    return true;
+    true
 }
 
 /**

@@ -350,6 +350,7 @@ mod tests {
         let select_time: SelectTime = SelectTime {
             start_time: 1747494000000,
             direct: TimeDirect::BEFORE,
+            end_time: None,
         };
         let candles =
             trading::task::basic::get_candle_data("BTC-USDT-SWAP", "1H", 300, Some(select_time))

@@ -556,6 +556,7 @@ mod tests {
         // 修改时间戳匹配2025-05-19附近
         let select_time: SelectTime = SelectTime {
             start_time: 1747894800000, // 2025-05-19
+            end_time: None,
             direct: TimeDirect::BEFORE,
         };
 

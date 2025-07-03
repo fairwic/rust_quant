@@ -40,6 +40,6 @@ impl Rma {
         // 非第一次计算，使用递归公式
         self.sum = self.sum + self.alpha * price + (1.0 - self.alpha) * self.sum;
 
-        return self.sum;
+        self.sum
     }
 }
