@@ -28,7 +28,7 @@ async fn test_vegas() -> Result<()> {
 
     // 获取K线数据
     let candles_list: Vec<CandlesEntity> =
-        trading::task::basic::get_candle_data(inst_id, time, 7000, Some(select_time)).await?;
+        trading::task::basic::get_candle_data_confirm(inst_id, time, 7000, Some(select_time)).await?;
 
     let mut data_items = vec![];
     let mut  strategy = VegasStrategy::default();

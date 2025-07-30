@@ -1,8 +1,7 @@
 use crate::trading::model::big_data::top_contract_account_ratio::{
     ModelEntity, TopContractAccountRatioModel,
 };
-use crate::trading::model::market::candles;
-use crate::trading::model::market::candles::SelectTime;
+use crate::trading::model::entity::candles::enums::SelectTime;
 use okx::api::market::OkxMarket;
 use chrono::Utc;
 use log::info;

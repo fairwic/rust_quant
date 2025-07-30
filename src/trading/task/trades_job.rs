@@ -8,7 +8,8 @@ use tracing::debug;
 use tracing::field::debug;
 use crate::trading::model::market::tickers::{TickersDataEntity, TicketsModel};
 use crate::trading::model::asset::AssetModel;
-use crate::trading::model::market::candles::{CandlesEntity, CandlesModel};
+use crate::trading::model::entity::candles::entity::CandlesEntity;
+use crate::trading::model::market::candles::CandlesModel;
 use okx::api::market::OkxMarket;
 use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 

@@ -81,6 +81,7 @@ mod tests {
             c: 95.0, // min(c, l) = 90.0
             ts: 0,
             v: 0.00,
+            confirm: 0,
         };
         indicator.add_candle(&kline1);
 
@@ -97,6 +98,7 @@ mod tests {
             c: 100.0, // max(c, h) = 105.0
             ts: 1,
             v: 0.00,
+            confirm: 0,
         };
         indicator.add_candle(&kline2);
         let prediction3 = indicator.get_prediction();

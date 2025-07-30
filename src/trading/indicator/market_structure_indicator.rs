@@ -378,6 +378,7 @@ mod tests {
                 l: 95.0 + i as f64 * 1.5,
                 c: 102.0 + i as f64 * 1.5,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -390,6 +391,7 @@ mod tests {
                 l: 118.0 - i as f64 * 0.5,
                 c: 121.0 - i as f64 * 0.5,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -402,6 +404,7 @@ mod tests {
                 l: 112.0 + i as f64 * 2.0,
                 c: 119.0 + i as f64 * 2.0,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -414,6 +417,7 @@ mod tests {
                 l: 132.0 - i as f64 * 3.0,
                 c: 135.0 - i as f64 * 3.0,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -493,6 +497,7 @@ mod tests {
                 l: price - 3.0,
                 c: price + 1.0,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -506,6 +511,7 @@ mod tests {
                 l: price - 2.0,
                 c: price - 0.5,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -517,6 +523,7 @@ mod tests {
             l: 106.0,
             c: 120.0,
             v: 1000.0,
+            confirm: 0,
         });
 
         println!("=== 市场结构调试测试 ===");

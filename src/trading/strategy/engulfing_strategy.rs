@@ -2,7 +2,7 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::strategy::strategy_common::{BackTestResult, run_back_test, SignalResult, TradeRecord};
 
 use super::strategy_common::BasicRiskStrategyConfig;

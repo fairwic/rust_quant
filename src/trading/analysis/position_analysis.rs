@@ -4,7 +4,7 @@ use futures::future::join_all;
 use anyhow::{Result, Context};
 use crate::app_config::db;
 use crate::time_util;
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::model::strategy::back_test_analysis::{BackTestAnalysis, BackTestAnalysisModel};
 use crate::trading::model::strategy::back_test_log::BackTestLogModel;
 use tokio::task;

@@ -168,6 +168,7 @@ mod tests {
                 l: 95.0 + i as f64 * 2.0,
                 c: 102.0 + i as f64 * 2.0,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -180,6 +181,7 @@ mod tests {
                 l: 110.0 - i as f64 * 3.0,
                 c: 114.0 - i as f64 * 3.0,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -192,6 +194,7 @@ mod tests {
                 l: 87.0 + i as f64 * 2.5,
                 c: 94.0 + i as f64 * 2.5,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -239,6 +242,7 @@ mod tests {
                 l: 95.0,
                 c: 102.0,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -250,6 +254,7 @@ mod tests {
             l: 100.0,
             c: 115.0,
             v: 1000.0,
+            confirm: 0,
         });
 
         // 初始化历史数据
@@ -274,7 +279,7 @@ mod tests {
         use crate::app_config::log::setup_logging;
         use crate::dotenv;
         use crate::trading;
-        use crate::trading::model::market::candles::{SelectTime, TimeDirect};
+        use crate::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 
         dotenv().ok();
         setup_logging().await?;
@@ -287,9 +292,13 @@ mod tests {
             end_time: None,
         };
 
-        let candles =
-            trading::task::basic::get_candle_data("BTC-USDT-SWAP", "1H", 300, Some(select_time))
-                .await?;
+        let candles = trading::task::basic::get_candle_data_confirm(
+            "BTC-USDT-SWAP",
+            "1H",
+            300,
+            Some(select_time),
+        )
+        .await?;
 
         println!("总共获取 {} 根K线", candles.len());
 

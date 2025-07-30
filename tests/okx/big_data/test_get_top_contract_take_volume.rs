@@ -1,9 +1,9 @@
 use anyhow::Result;
 use dotenv::dotenv;
 use log::error;
+use okx::api::big_data::OkxBigData;
 use rust_quant::app_config::db::init_db;
 use rust_quant::app_config::log::setup_logging;
-use rust_quant::trading::okx::big_data::BigDataOkxApi;
 use rust_quant::trading::task::big_data_job;
 
 #[tokio::test]
@@ -20,8 +20,8 @@ async fn test_get_take_volume() -> Result<()> {
     let period = 10;
     // let res = BigData::get_taker_volume(inst_id, "SPOT", None, None, None).await?;
     // println!("volume {:?}", res);
-    let inst_id = Some(vec!["BTC-USDT-SWAP","ETH-USDT-SWAP","OM-USDT-SWAP"]);
-    let period = Some(vec!["4H", "1H", "5m",  "1D"]);
+    let inst_id = Some(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP", "OM-USDT-SWAP"]);
+    let period = Some(vec!["4H", "1H", "5m", "1D"]);
 
     // let inst_id = Some(vec!["OM-USDT-SWAP"]);
     // let period = Some(vec![ "1m"]);

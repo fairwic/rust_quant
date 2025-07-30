@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ta::indicators::BollingerBands;
 
 use crate::trading::indicator::sma::Sma;
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::CandleItem;
 use ta::{DataItem, High, Low, Next};
 

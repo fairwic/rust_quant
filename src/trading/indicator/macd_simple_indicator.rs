@@ -2,7 +2,7 @@ use ta::indicators::MovingAverageConvergenceDivergence;
 use ta::Next;
 use tracing::warn;
 use crate::time_util;
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 
 pub struct MacdSimpleIndicator {}
 

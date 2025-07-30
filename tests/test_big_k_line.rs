@@ -27,7 +27,7 @@ async fn test_big_k_line_real_data() -> Result<()> {
 
     println!("\n===== RSI Real Data Test =====");
     
-    let candles = trading::task::basic::get_candle_data("BTC-USDT-SWAP", "1H", 100, Some(select_time)).await?;
+    let candles = trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "1H", 100, Some(select_time)).await?;
 
     let mut vega_indicator = VegasStrategy::default();
     let data_items = strategy_common::parse_candle_to_data_item(&candles.last().unwrap());

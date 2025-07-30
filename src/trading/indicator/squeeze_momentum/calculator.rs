@@ -11,7 +11,7 @@ use crate::trading::{indicator::squeeze_momentum::service::calculate_linreg, str
 use crate::trading::indicator::squeeze_momentum::squeeze_config::{
     MomentumColor, SqueezeConfig, SqueezeResult, SqueezeState,
 };
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::strategy::strategy_common::{BackTestResult, SignalResult, TradeRecord};
 use crate::trading::strategy::strategy_common;
 

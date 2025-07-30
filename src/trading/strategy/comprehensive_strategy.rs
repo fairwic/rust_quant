@@ -1,7 +1,7 @@
 use ta::indicators::{BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex, SimpleMovingAverage, TrueRange};
 use ta::{Close, High, Low, Next};
 use crate::time_util;
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use ta::indicators::KeltnerChannel;
 
 /// Squeeze 结构体

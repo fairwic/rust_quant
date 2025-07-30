@@ -100,6 +100,7 @@ mod tests {
             c: 103640.2,
             v: 100.0,
             ts: 1749650400000,
+            confirm: 0,
         };
         let output = indicator.next(&kline);
         println!("indicator: {:?}", output);
@@ -118,6 +119,7 @@ mod tests {
             c: 90.0,
             v: 100.0,
             ts: 1000,
+            confirm: 0,
         };
         let output = indicator.next(&kline);
         println!("indicator: {:?}", output);
@@ -133,6 +135,7 @@ mod tests {
             c: 100.5,
             v: 100.0,
             ts: 1000,
+            confirm: 0,
         };
         indicator.next(&kline);
         println!("indicator: {:?}", indicator);
@@ -148,6 +151,7 @@ mod tests {
             c: 101.0,
             v: 100.0,
             ts: 1000,
+            confirm: 0,
         };
         indicator.next(&kline);
         println!("indicator: {:?}", indicator);
@@ -163,6 +167,7 @@ mod tests {
             c: 99.0,
             v: 100.0,
             ts: 1000,
+            confirm: 0,
         };
 
         indicator.next(&kline);
@@ -179,6 +184,7 @@ mod tests {
             c: 101.0,
             v: 100.0,
             ts: 1000,
+            confirm: 0,
         };
         indicator.next(&kline);
         println!("indicator: {:?}", indicator);
@@ -194,6 +200,7 @@ mod tests {
             c: 101.0,
             v: 100.0,
             ts: 1000,
+            confirm: 0,
         };
         let output = indicator.next(&kline);
         println!("indicator: {:?}", output);

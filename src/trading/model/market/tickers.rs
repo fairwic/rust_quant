@@ -133,7 +133,7 @@ impl TicketsModel {
             ts: ticker.ts.parse().unwrap(),
         };
         let data = TickersDataEntity::update_by_column(self.db, &tickets_data, "inst_id").await;
-        println!("update_by_column = {}", json!(data));
+        // println!("update_by_column = {}", json!(data));
         // let data = TickersDataDb::update_by_name(&self.db, &tickets_data, ticker.inst_id.clone()).await;
         // println!("update_by_name = {}", json!(data));
         Ok(())

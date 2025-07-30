@@ -50,7 +50,7 @@ pub async fn setup_logging() -> anyhow::Result<()> {
 
     if app_env == "LOCAL" {
         let subscriber = FmtSubscriber::builder()
-            .with_max_level(Level::INFO)
+            .with_max_level(Level::DEBUG)
             .with_ansi(true)
             .with_target(false)
             .with_thread_ids(true)
@@ -63,16 +63,8 @@ pub async fn setup_logging() -> anyhow::Result<()> {
             .finish();
         tracing::subscriber::set_global_default(subscriber)?;
     } else {
-        let info_file = RollingFileAppender::new(
-            Rotation::DAILY,
-            "log_files",
-            "info.log",
-        );
-        let error_file = RollingFileAppender::new(
-            Rotation::DAILY,
-            "log_files",
-            "error.log",
-        );
+        let info_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "info.log");
+        let error_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "error.log");
 
         let (info_non_blocking, _info_guard) = tracing_appender::non_blocking(info_file);
         let (error_non_blocking, _error_guard) = tracing_appender::non_blocking(error_file);

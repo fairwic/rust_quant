@@ -12,7 +12,7 @@ use crate::trading::indicator::vegas_indicator::{
     VegasStrategy,
 };
 use crate::trading::indicator::volume_indicator::VolumeRatioIndicator;
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
 use crate::trading::utils::fibonacci::FIBONACCI_ONE_POINT_TWO_THREE_SIX;
 use crate::{time_util, CandleItem};
@@ -528,22 +528,16 @@ pub fn run_back_test(
     min_data_length: usize,
     indicator_combine: &mut IndicatorCombine,
 ) -> BackTestResult {
-    // 预分配交易状态，减少初始化开销
+    use tracing::{info, warn};
+    // 初始化阶段
     let mut trading_state = TradingState::default();
-
-    // 预分配K线容量
     let mut candle_item_list = Vec::with_capacity(candles_list.len());
-
-    // K线处理循环
-    // 批量处理，每1000根K线报告一次进度
     const MAX_LOOKBACK: usize = 5;
-    // K线数据预处理 - 一次性解析所有数字
-    let loop_start = Instant::now();
 
+    let loop_start = Instant::now();
     for (i, candle) in candles_list.iter().enumerate() {
-        // let parsed = &parsed_candles[i];
-        // let data_item = parse_candle_to_data_item(candle);
         // 计算指标值
+        let indicator_start = Instant::now();
         let mut multi_indicator_values = get_multi_indicator_values(indicator_combine, &candle);
 
         // 将新数据添加到列表，如果超过最大回溯期，删除最旧的数据
@@ -551,6 +545,7 @@ pub fn run_back_test(
         if candle_item_list.len() > MAX_LOOKBACK {
             candle_item_list.remove(0);
         }
+
         // 计算交易信号
         let mut signal = strategy(&candle_item_list, &mut multi_indicator_values);
 
@@ -558,7 +553,8 @@ pub fn run_back_test(
         let should_process_signal = signal.should_buy
             || signal.should_sell
             || trading_state.trade_position.is_some()
-            || trading_state.last_signal_result.is_some(); // 有持仓时始终需要处理
+            || trading_state.last_signal_result.is_some();
+
         if should_process_signal {
             trading_state = deal_signal(
                 trading_state,
@@ -570,22 +566,19 @@ pub fn run_back_test(
             );
         }
     }
-
     // 最终平仓处理
+    let finalize_start = Instant::now();
     finalize_trading_state(&mut trading_state, &candle_item_list);
 
     // 构建结果
+    let result_build_start = Instant::now();
     let result = BackTestResult {
         funds: trading_state.funds,
         win_rate: calculate_win_rate(trading_state.wins, trading_state.losses),
         open_trades: trading_state.open_position_times,
         trade_records: trading_state.trade_records,
     };
-    // // 记录总执行时间
-    // info!(
-    //     total_duration_ms = function_start.elapsed().as_millis(),
-    //     "run_back_test总执行时间"
-    // );
+
     result
 }
 
@@ -1144,6 +1137,7 @@ fn open_short_position(
 /// 记录交易入场
 fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
     //批量回测的时候不进行记录
+    return;
     let trade_position = state.trade_position.clone().unwrap();
     state.trade_records.push(TradeRecord {
         option_type,
@@ -1221,6 +1215,7 @@ fn record_trade_exit(
     closing_quantity: f64, // Add parameter for quantity being closed
 ) {
     let trade_position = state.trade_position.clone().unwrap();
+    return;
     state.trade_records.push(TradeRecord {
         option_type: "close".to_string(),
         open_position_time: trade_position.open_position_time.clone(),

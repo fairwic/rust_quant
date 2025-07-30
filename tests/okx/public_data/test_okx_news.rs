@@ -14,11 +14,11 @@ async fn test_get_economic_calendar() -> Result<()> {
     println!("init log config");
     setup_logging().await?;
 
-    for i in 0..10 {
-        let res = rust_quant::trading::okx::public_data::economic_calendar::EconomicCalendar::get_economic_calendar(None, Some("3"), None, None, Some(100)).await.expect("TODO: panic message");
-        println!("111111111");
-        println!("res: {:?}", serde_json::to_string(&res).unwrap());
-    }
+    // for i in 0..10 {
+    //     let res = rust_quant::trading::okx::public_data::economic_calendar::EconomicCalendar::get_economic_calendar(None, Some("3"), None, None, Some(100)).await.expect("TODO: panic message");
+    //     println!("111111111");
+    //     println!("res: {:?}", serde_json::to_string(&res).unwrap());
+    // }
 
     Ok(())
 }

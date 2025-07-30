@@ -24,7 +24,8 @@ use rbatis::RBatis;
 use redis::aio::MultiplexedConnection;
 use tracing::info;
 use tracing::debug;
-use crate::trading::model::market::candles::{CandlesEntity, CandlesModel};
+use crate::trading::model::entity::candles::entity::CandlesEntity;
+use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 use crate::trading::strategy::support_resistance::SupportResistance;
 use crate::time_util;
@@ -635,158 +636,158 @@ impl Strategy {
     }
 
 
-    pub async fn ut_bot_alert_strategy_all(&mut self, candles_5m: &[CandlesEntity], key_value: f64, atr_period: usize, heikin_ashi: bool) -> (f64, f64, usize) {
-        let initial_funds = 100.0; // 初始资金
-        let mut funds = initial_funds; // 当前资金
-        let mut position: f64 = 0.0; // 当前持仓量,显式指定为 f64 类型
-        let mut wins = 0; // 赢的次数
-        let mut losses = 0; // 输的次数
-        let mut open_trades = 0; // 开仓次数
-        let mut entry_price = 0.0; // 记录每次开仓时的价格
-        let fib_levels = [0.0236, 0.0382, 0.05, 0.0618, 0.0786, 0.1]; // 斐波那契回撤级别
-        let mut fib_triggered = [false; 6]; // 用于记录每个斐波那契级别是否已经触发
-        let mut atr = AverageTrueRange::new(atr_period).unwrap(); // 初始化ATR指标
-        let mut ema = ExponentialMovingAverage::new(1).unwrap(); // 初始化EMA指标
-        let mut xatr_trailing_stop = 0.0; // 初始化xATRTrailingStop变量
-        let mut pos = 0; // 初始化pos变量
-        let mut prev_ema_value = 0.0; // 用于保存前一个EMA值
-        let mut trade_completed = true; // 交易完成标志
-        let max_loss_percent = 0.1; // 最大损失百分比设置为10%
+    // pub async fn ut_bot_alert_strategy_all(&mut self, candles_5m: &[CandlesEntity], key_value: f64, atr_period: usize, heikin_ashi: bool) -> (f64, f64, usize) {
+    //     let initial_funds = 100.0; // 初始资金
+    //     let mut funds = initial_funds; // 当前资金
+    //     let mut position: f64 = 0.0; // 当前持仓量,显式指定为 f64 类型
+    //     let mut wins = 0; // 赢的次数
+    //     let mut losses = 0; // 输的次数
+    //     let mut open_trades = 0; // 开仓次数
+    //     let mut entry_price = 0.0; // 记录每次开仓时的价格
+    //     let fib_levels = [0.0236, 0.0382, 0.05, 0.0618, 0.0786, 0.1]; // 斐波那契回撤级别
+    //     let mut fib_triggered = [false; 6]; // 用于记录每个斐波那契级别是否已经触发
+    //     let mut atr = AverageTrueRange::new(atr_period).unwrap(); // 初始化ATR指标
+    //     let mut ema = ExponentialMovingAverage::new(1).unwrap(); // 初始化EMA指标
+    //     let mut xatr_trailing_stop = 0.0; // 初始化xATRTrailingStop变量
+    //     let mut pos = 0; // 初始化pos变量
+    //     let mut prev_ema_value = 0.0; // 用于保存前一个EMA值
+    //     let mut trade_completed = true; // 交易完成标志
+    //     let max_loss_percent = 0.1; // 最大损失百分比设置为10%
 
-        for (i, candle) in candles_5m.iter().enumerate() {
-            let current_price = if heikin_ashi {
-                // 如果使用平均K线,则计算平均K线的收盘价
-                let open = candle.o.parse::<f64>().unwrap_or(0.0);
-                let high = candle.h.parse::<f64>().unwrap_or(0.0);
-                let low = candle.l.parse::<f64>().unwrap_or(0.0);
-                let close = candle.c.parse::<f64>().unwrap_or(0.0);
-                (open + high + low + close) / 4.0
-            } else {
-                candle.c.parse::<f64>().unwrap_or(0.0)
-            };
+    //     for (i, candle) in candles_5m.iter().enumerate() {
+    //         let current_price = if heikin_ashi {
+    //             // 如果使用平均K线,则计算平均K线的收盘价
+    //             let open = candle.o.parse::<f64>().unwrap_or(0.0);
+    //             let high = candle.h.parse::<f64>().unwrap_or(0.0);
+    //             let low = candle.l.parse::<f64>().unwrap_or(0.0);
+    //             let close = candle.c.parse::<f64>().unwrap_or(0.0);
+    //             (open + high + low + close) / 4.0
+    //         } else {
+    //             candle.c.parse::<f64>().unwrap_or(0.0)
+    //         };
 
-            let high_price = candle.h.parse::<f64>().unwrap_or(0.0);
-            let low_price = candle.l.parse::<f64>().unwrap_or(0.0);
+    //         let high_price = candle.h.parse::<f64>().unwrap_or(0.0);
+    //         let low_price = candle.l.parse::<f64>().unwrap_or(0.0);
 
-            let prev_xatr_trailing_stop = if i > 0 { xatr_trailing_stop } else { 0.0 };
+    //         let prev_xatr_trailing_stop = if i > 0 { xatr_trailing_stop } else { 0.0 };
 
-            let n_loss = key_value * atr.next(&KdjCandle { high: high_price, low: low_price, close: current_price });
+    //         let n_loss = key_value * atr.next(&KdjCandle { high: high_price, low: low_price, close: current_price });
 
-            xatr_trailing_stop = if i == 0 {
-                current_price
-            } else if current_price > prev_xatr_trailing_stop && candles_5m[i - 1].c.parse::<f64>().unwrap_or(0.0) > prev_xatr_trailing_stop {
-                let new_stop = current_price - n_loss;
-                prev_xatr_trailing_stop.max(new_stop)
-            } else if current_price < prev_xatr_trailing_stop && candles_5m[i - 1].c.parse::<f64>().unwrap_or(0.0) < prev_xatr_trailing_stop {
-                let new_stop = current_price + n_loss;
-                prev_xatr_trailing_stop.min(new_stop)
-            } else if current_price > prev_xatr_trailing_stop {
-                let new_stop = current_price - n_loss;
-                new_stop
-            } else {
-                let new_stop = current_price + n_loss;
-                new_stop
-            };
+    //         xatr_trailing_stop = if i == 0 {
+    //             current_price
+    //         } else if current_price > prev_xatr_trailing_stop && candles_5m[i - 1].c.parse::<f64>().unwrap_or(0.0) > prev_xatr_trailing_stop {
+    //             let new_stop = current_price - n_loss;
+    //             prev_xatr_trailing_stop.max(new_stop)
+    //         } else if current_price < prev_xatr_trailing_stop && candles_5m[i - 1].c.parse::<f64>().unwrap_or(0.0) < prev_xatr_trailing_stop {
+    //             let new_stop = current_price + n_loss;
+    //             prev_xatr_trailing_stop.min(new_stop)
+    //         } else if current_price > prev_xatr_trailing_stop {
+    //             let new_stop = current_price - n_loss;
+    //             new_stop
+    //         } else {
+    //             let new_stop = current_price + n_loss;
+    //             new_stop
+    //         };
 
-            pos = if i == 0 {
-                0
-            } else if candles_5m[i - 1].c.parse::<f64>().unwrap_or(0.0) < prev_xatr_trailing_stop && current_price > xatr_trailing_stop {
-                1
-            } else if candles_5m[i - 1].c.parse::<f64>().unwrap_or(0.0) > prev_xatr_trailing_stop && current_price < xatr_trailing_stop {
-                -1
-            } else {
-                pos
-            };
+    //         pos = if i == 0 {
+    //             0
+    //         } else if candles_5m[i - 1].c.parse::<f64>().unwrap_or(0.0) < prev_xatr_trailing_stop && current_price > xatr_trailing_stop {
+    //             1
+    //         } else if candles_5m[i - 1].c.parse::<f64>().unwrap_or(0.0) > prev_xatr_trailing_stop && current_price < xatr_trailing_stop {
+    //             -1
+    //         } else {
+    //             pos
+    //         };
 
-            let ema_value = ema.next(current_price);
-            let above = ema_value > xatr_trailing_stop && prev_ema_value <= prev_xatr_trailing_stop;
-            let below = ema_value < xatr_trailing_stop && prev_ema_value >= prev_xatr_trailing_stop;
-            prev_ema_value = ema_value; // 保存当前EMA值为下一次迭代的前一个EMA值
+    //         let ema_value = ema.next(current_price);
+    //         let above = ema_value > xatr_trailing_stop && prev_ema_value <= prev_xatr_trailing_stop;
+    //         let below = ema_value < xatr_trailing_stop && prev_ema_value >= prev_xatr_trailing_stop;
+    //         prev_ema_value = ema_value; // 保存当前EMA值为下一次迭代的前一个EMA值
 
-            let buy = current_price > xatr_trailing_stop && above;
-            let sell = current_price < xatr_trailing_stop && below;
+    //         let buy = current_price > xatr_trailing_stop && above;
+    //         let sell = current_price < xatr_trailing_stop && below;
 
-            // 添加日志记录
-            info!("Time: {:?},funds:{}, Price: {}, EMA: {}, xATRTrailingStop: {}, Buy: {}, Sell: {}",
-        time_util::mill_time_to_datetime_shanghai(candle.ts),funds, current_price, ema_value, xatr_trailing_stop, buy, sell);
+    //         // 添加日志记录
+    //         info!("Time: {:?},funds:{}, Price: {}, EMA: {}, xATRTrailingStop: {}, Buy: {}, Sell: {}",
+    //     time_util::mill_time_to_datetime_shanghai(candle.ts),funds, current_price, ema_value, xatr_trailing_stop, buy, sell);
 
-            if buy && position.abs() < f64::EPSILON && trade_completed {
-                position = funds / current_price;
-                entry_price = current_price; // 记录开仓价格
-                funds = 0.0;
-                open_trades += 1;
-                fib_triggered = [false; 6]; // 重置斐波那契触发标记
-                trade_completed = false; // 标记交易未完成
-                info!("Buy at time: {:?}, price: {}, position: {}, funds after buy: {}", time_util::mill_time_to_datetime_shanghai(candle.ts), current_price, position, funds);
-            } else if (sell || current_price < entry_price * (1.0 - max_loss_percent)) && position > 0.0 {
-                funds += position * current_price; // 累加当前平仓收益
-                position = 0.0;
-                trade_completed = true; // 标记交易完成
-                info!("Sell (close long) at time: {:?}, price: {}, funds after sell: {}", time_util::mill_time_to_datetime_shanghai(candle.ts), current_price, funds);
-                if funds > initial_funds {
-                    wins += 1;
-                } else {
-                    losses += 1;
-                }
-            } else if position > 0.0 {
-                // 斐波那契止盈逻辑
-                let mut remaining_position = position;
-                for (idx, &level) in fib_levels.iter().enumerate() {
-                    let fib_price = entry_price * (1.0 + level); // 计算斐波那契目标价格
-                    if current_price >= fib_price && !fib_triggered[idx] {
-                        let sell_amount = remaining_position * 0.1; // 按仓位的10%
-                        if sell_amount < 1e-8 { // 防止非常小的数值
-                            continue;
-                        }
-                        funds += sell_amount * current_price; // 累加当前平仓收益
-                        remaining_position -= sell_amount;
-                        fib_triggered[idx] = true; // 记录该斐波那契级别已经触发
-                        info!("Fibonacci profit taking at level: {:?}, time:{}, price: {}, sell amount: {}, remaining position: {}, funds after profit taking: {}",time_util::mill_time_to_datetime_shanghai(candle.ts),level, current_price, sell_amount, remaining_position, funds);
-                        // 如果剩余仓位为零，更新win或loss
-                        if remaining_position <= 1e-8 {
-                            position = 0.0;
-                            trade_completed = true; // 标记交易完成
-                            if funds > initial_funds {
-                                wins += 1;
-                            } else {
-                                losses += 1;
-                            }
-                            break;
-                        }
-                    }
-                }
-                // 更新持仓
-                position = remaining_position;
-            }
-        }
+    //         if buy && position.abs() < f64::EPSILON && trade_completed {
+    //             position = funds / current_price;
+    //             entry_price = current_price; // 记录开仓价格
+    //             funds = 0.0;
+    //             open_trades += 1;
+    //             fib_triggered = [false; 6]; // 重置斐波那契触发标记
+    //             trade_completed = false; // 标记交易未完成
+    //             info!("Buy at time: {:?}, price: {}, position: {}, funds after buy: {}", time_util::mill_time_to_datetime_shanghai(candle.ts), current_price, position, funds);
+    //         } else if (sell || current_price < entry_price * (1.0 - max_loss_percent)) && position > 0.0 {
+    //             funds += position * current_price; // 累加当前平仓收益
+    //             position = 0.0;
+    //             trade_completed = true; // 标记交易完成
+    //             info!("Sell (close long) at time: {:?}, price: {}, funds after sell: {}", time_util::mill_time_to_datetime_shanghai(candle.ts), current_price, funds);
+    //             if funds > initial_funds {
+    //                 wins += 1;
+    //             } else {
+    //                 losses += 1;
+    //             }
+    //         } else if position > 0.0 {
+    //             // 斐波那契止盈逻辑
+    //             let mut remaining_position = position;
+    //             for (idx, &level) in fib_levels.iter().enumerate() {
+    //                 let fib_price = entry_price * (1.0 + level); // 计算斐波那契目标价格
+    //                 if current_price >= fib_price && !fib_triggered[idx] {
+    //                     let sell_amount = remaining_position * 0.1; // 按仓位的10%
+    //                     if sell_amount < 1e-8 { // 防止非常小的数值
+    //                         continue;
+    //                     }
+    //                     funds += sell_amount * current_price; // 累加当前平仓收益
+    //                     remaining_position -= sell_amount;
+    //                     fib_triggered[idx] = true; // 记录该斐波那契级别已经触发
+    //                     info!("Fibonacci profit taking at level: {:?}, time:{}, price: {}, sell amount: {}, remaining position: {}, funds after profit taking: {}",time_util::mill_time_to_datetime_shanghai(candle.ts),level, current_price, sell_amount, remaining_position, funds);
+    //                     // 如果剩余仓位为零，更新win或loss
+    //                     if remaining_position <= 1e-8 {
+    //                         position = 0.0;
+    //                         trade_completed = true; // 标记交易完成
+    //                         if funds > initial_funds {
+    //                             wins += 1;
+    //                         } else {
+    //                             losses += 1;
+    //                         }
+    //                         break;
+    //                     }
+    //                 }
+    //             }
+    //             // 更新持仓
+    //             position = remaining_position;
+    //         }
+    //     }
 
-        if position > 0.0 {
-            if let Some(last_candle) = candles_5m.last() {
-                let last_price = last_candle.c.parse::<f64>().unwrap_or_else(|e| {
-                    error!("Failed to parse price: {}", e);
-                    0.0
-                });
-                funds += position * last_price; // 累加当前平仓收益
-                position = 0.0;
-                trade_completed = true; // 标记交易完成
-                info!("Final sell at price: {}, funds after final sell: {}", last_price, funds);
-                if funds > initial_funds {
-                    wins += 1;
-                } else {
-                    losses += 1;
-                }
-            }
-        }
+    //     if position > 0.0 {
+    //         if let Some(last_candle) = candles_5m.last() {
+    //             let last_price = last_candle.c.parse::<f64>().unwrap_or_else(|e| {
+    //                 error!("Failed to parse price: {}", e);
+    //                 0.0
+    //             });
+    //             funds += position * last_price; // 累加当前平仓收益
+    //             position = 0.0;
+    //             trade_completed = true; // 标记交易完成
+    //             info!("Final sell at price: {}, funds after final sell: {}", last_price, funds);
+    //             if funds > initial_funds {
+    //                 wins += 1;
+    //             } else {
+    //                 losses += 1;
+    //             }
+    //         }
+    //     }
 
-        let win_rate = if wins + losses > 0 {
-            wins as f64 / (wins + losses) as f64
-        } else {
-            0.0
-        }; // 计算胜率
+    //     let win_rate = if wins + losses > 0 {
+    //         wins as f64 / (wins + losses) as f64
+    //     } else {
+    //         0.0
+    //     }; // 计算胜率
 
-        info!("Final Win rate: {}", win_rate);
-        (funds, win_rate, open_trades) // 返回最终资金,胜率和开仓次数
-    }
+    //     info!("Final Win rate: {}", win_rate);
+    //     (funds, win_rate, open_trades) // 返回最终资金,胜率和开仓次数
+    // }
 
 
     // pub async fn ut_bot_alert_strategy_with_shorting(&mut self, candles_5m: &Vec<CandlesEntity>, fib_levels: &Vec<f64>, key_value: f64, atr_period: usize, heikin_ashi: bool) -> (f64, f64, usize) {

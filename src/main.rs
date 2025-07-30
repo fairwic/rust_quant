@@ -54,7 +54,7 @@ use okx::utils::validate_system_time;
 use once_cell::sync::Lazy;
 use rust_quant::app_config::db::init_db;
 use rust_quant::app_config::log::setup_logging;
-use rust_quant::job::RiskJob;
+use rust_quant::job::RiskBalanceWithLevelJob;
 use rust_quant::trading::indicator::atr::ATR;
 use rust_quant::trading::indicator::vegas_indicator::{
     self, VegasIndicatorSignalValue, VegasStrategy,
@@ -62,8 +62,10 @@ use rust_quant::trading::indicator::vegas_indicator::{
 use rust_quant::trading::model::strategy::back_test_log;
 use rust_quant::trading::model::strategy::strategy_config::StrategyConfigEntityModel;
 use rust_quant::trading::strategy::arc::indicator_values::arc_vegas_indicator_values;
-use rust_quant::trading::strategy::order::vagas_order::VegasOrder;
-use rust_quant::trading::strategy::strategy_common::{parse_candle_to_data_item, SignalResult};
+use rust_quant::trading::strategy::order::vagas_order::{StrategyConfig, StrategyOrder};
+use rust_quant::trading::strategy::strategy_common::{
+    parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
+};
 use rust_quant::trading::strategy::StrategyType;
 use rust_quant::trading::{order, task};
 use rust_quant::{app_init, socket, trading};
@@ -102,13 +104,13 @@ async fn main() -> anyhow::Result<()> {
     // let inst_ids =Some(vec!["SUI-USDT-SWAP","BTC-USDT-SWAP","ETH-USDT-SWAP"]);
     // let inst_ids = Some(vec!["ETH-USDT-SWAP", "SUI-USDT-SWAP","OM-USDT-SWAP"]);
     // let inst_ids =Some(vec![ "ETH-USDT-SWAP"]);
-    let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
+    let inst_ids = Some(vec!["ETH-USDT-SWAP"]);
     // let inst_ids = Some(vec!["OM-USDT-SWAP"]);
     // let period = Some(vec!["4H",]);
     // let period = Some(vec!["1m"]);
     // let period = Some(vec!["1Dutc"]);
-    // let period = Some(vec!["4H", "1H", "5m", "1Dutc"]);
-    let period = Some(vec!["1H"]);
+    let period = Some(vec!["1H", "5m", "1Dutc"]);
+    // let period = Some(vec!["1H"]);
     // let period = Some(vec!["1s"]);
 
     // let inst_ids = Arc::new(vec!["BTC-USDT-SWAP", "SOL-USDT-SWAP", "ETH-USDT-SWAP"]);
@@ -175,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
             println!("run real strategy job");
             if let Some(inst_ids) = inst_ids.clone() {
                 //1. 执行风险控制,初始化
-                let risk_job = RiskJob::new();
+                let risk_job = RiskBalanceWithLevelJob::new();
                 risk_job.run(&inst_ids).await.unwrap();
 
                 let inst_ids = Arc::new(inst_ids);
@@ -184,23 +186,50 @@ async fn main() -> anyhow::Result<()> {
                 //计算出最新的指标values
                 let strategy_list = StrategyConfigEntityModel::new().await.get_list().await;
                 info!("获取策略配置:{:?}", strategy_list);
-                if !strategy_list.is_err() {
-                    //遍历配置
-                    for strategy in strategy_list.unwrap().iter() {
-                        //遍历产品数据，计算出当前最新的指标
-                        let inst_id = strategy.inst_id.clone();
-                        let time = strategy.time.clone();
-                        //获取策略的详情
-                        let strategy_type = strategy.strategy_type.clone();
-                        if strategy_type == StrategyType::Vegas.to_string() {
-                            //获取数据
-                            let strategy_config: VegasStrategy =
-                                serde_json::from_str::<VegasStrategy>(&*strategy.value).map_err(
-                                    |e| anyhow!("Failed to parse VegasStrategy config: {}", e),
-                                )?;
-                            VegasOrder::new()
-                                .order(strategy_config, inst_id, time)
-                                .await?;
+
+                let strategy_list = match strategy_list {
+                    Ok(list) => list,
+                    Err(e) => {
+                        error!("获取策略配置失败: {:?}", e);
+                        return Err(anyhow!("获取策略配置失败: {:?}", e));
+                    }
+                };
+                // 创建策略订单管理器实例（复用同一个实例避免重复启动）
+                let strategy_order = StrategyOrder::new();
+
+                //遍历配置
+                for strategy in strategy_list.into_iter() {
+                    //遍历产品数据，计算出当前最新的指标
+                    let inst_id = strategy.inst_id;
+                    let time = strategy.time;
+                    //获取策略的详情
+                    let strategy_type = strategy.strategy_type;
+                    if strategy_type == StrategyType::Vegas.to_string() {
+                        //获取数据
+                        let strategy_config: VegasStrategy = serde_json::from_str::<VegasStrategy>(
+                            &*strategy.value,
+                        )
+                        .map_err(|e| anyhow!("Failed to parse VegasStrategy config: {}", e))?;
+
+                        let risk_config: BasicRiskStrategyConfig =
+                            serde_json::from_str::<BasicRiskStrategyConfig>(&*strategy.risk_config)
+                                .map_err(|e| {
+                                    anyhow!("Failed to parse BasicRiskStrategyConfig config: {}", e)
+                                })?;
+
+                        let strategy_config = StrategyConfig {
+                            strategy_config: strategy_config,
+                            risk_config: risk_config,
+                            strategy_config_id: strategy.id,
+                        };
+
+                        // 启动策略（如果已存在会跳过）
+                        if let Err(e) = strategy_order
+                            .run_strategy(strategy_config, inst_id, time)
+                            .await
+                        {
+                            error!("启动策略失败:  错误: {}", e);
+                            // 继续处理其他策略，不中断整个流程
                         }
                     }
                 }

@@ -159,7 +159,7 @@ mod tests {
         let period = "4H";
         let min_length = 200;
         let select_time = None;
-        let candles = trading::task::basic::get_candle_data(inst_id, period, min_length, select_time).await?;
+        let candles = trading::task::basic::get_candle_data_confirm(inst_id, period, min_length, select_time).await?;
         let results:Vec<_> = candles.iter()
             .map(|item| strategy.next(item.h.parse().unwrap(), item.l.parse().unwrap(), item.c.parse().unwrap()))
             .collect();

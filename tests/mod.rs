@@ -2,7 +2,6 @@ use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
-
 pub mod back_test;
 pub mod okx;
 pub mod test_predicting;
@@ -35,7 +34,7 @@ async fn test_mspc_job() -> anyhow::Result<()> {
     // }
     // });
     //等待所有线程完成
-    // handle.join().unwrap(); 
+    // handle.join().unwrap();
     // 显式丢弃原始发送者，这样当所有线程结束后通道会关闭
     Ok(())
 }

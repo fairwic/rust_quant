@@ -6,7 +6,7 @@ use ta::indicators::ExponentialMovingAverage;
 use ta::Next;
 use tracing::warn;
 use crate::trading::indicator::atr::ATR;
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::strategy::strategy_common::{BackTestResult, run_back_test, SignalResult, TradeRecord};
 
 use super::strategy_common::BasicRiskStrategyConfig;

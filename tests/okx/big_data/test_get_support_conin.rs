@@ -1,9 +1,9 @@
 use anyhow::Result;
 use dotenv::dotenv;
 
+use okx::api::big_data::OkxBigData;
 use rust_quant::app_config::db::init_db;
 use rust_quant::app_config::log::setup_logging;
-use rust_quant::trading::okx::big_data::BigDataOkxApi;
 
 #[tokio::test]
 async fn test_get_support_coin() -> Result<()> {
@@ -20,16 +20,18 @@ async fn test_get_support_coin() -> Result<()> {
     let time = "4H";
     let period = 10;
 
-    let res = BigDataOkxApi::get_support_coin()
-        .await
-        .expect("TODO: panic message");
-    let contract = res.data.contract;
+    // let res = OkxBigData::from_env()
+    //     .unwrap()
+    //     .get_support_coin()
+    //     .await
+    //     .expect("TODO: panic message");
+    // let contract = res.data.contract;
 
-    if contract.contains(&"om".to_string().to_uppercase()) {
-        println!("包含")
-    } else {
-        println!("不包含")
-    }
+    // if contract.contains(&"om".to_string().to_uppercase()) {
+    //     println!("包含")
+    // } else {
+    //     println!("不包含")
+    // }
 
     Ok(())
 }

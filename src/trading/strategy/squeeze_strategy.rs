@@ -1,7 +1,7 @@
 use crate::time_util;
 use crate::trading::indicator::atr::ATR;
 use crate::trading::indicator::kdj_simple_indicator::KdjCandle;
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::strategy::strategy_common::{SignalResult};
 use clap::builder::Str;
 use ndarray::{s, Array1};

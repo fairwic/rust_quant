@@ -3,7 +3,7 @@ use crate::app_config::db::init_db;
 use crate::app_config::log::setup_logging;
 use crate::dotenv;
 use crate::trading::indicator::vegas_indicator::VegasStrategy;
-use crate::trading::model::market::candles::{SelectTime, TimeDirect};
+use crate::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 use crate::trading::strategy::strategy_common;
 use crate::{trading, CandleItem};
 use serde::{Deserialize, Serialize};
@@ -498,6 +498,7 @@ mod tests {
                 l: 95.0 + i as f64 * 2.0,
                 c: 102.0 + i as f64 * 2.0,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -510,6 +511,7 @@ mod tests {
                 l: 115.0 - i as f64 * 3.0,
                 c: 118.0 - i as f64 * 3.0,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -522,6 +524,7 @@ mod tests {
                 l: 91.0 + i as f64 * 2.5,
                 c: 98.0 + i as f64 * 2.5,
                 v: 1000.0,
+                confirm: 0,
             });
         }
 
@@ -563,9 +566,13 @@ mod tests {
         println!("\n===== 等高/等低点真实数据测试 =====");
         println!("目标时间戳: {}", select_time.start_time);
 
-        let candles =
-            trading::task::basic::get_candle_data("BTC-USDT-SWAP", "1H", 600, Some(select_time))
-                .await?;
+        let candles = trading::task::basic::get_candle_data_confirm(
+            "BTC-USDT-SWAP",
+            "1H",
+            600,
+            Some(select_time),
+        )
+        .await?;
 
         println!("获取了 {} 根K线数据", candles.len());
 
@@ -719,14 +726,7 @@ mod tests {
                 l: 100.0,
                 c: 102.0,
                 v: 1000.0,
-            },
-            CandleItem {
-                ts: 1,
-                o: 102.0,
-                h: 103.0,
-                l: 95.0,
-                c: 96.0,
-                v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 2,
@@ -735,6 +735,7 @@ mod tests {
                 l: 90.0,
                 c: 91.0,
                 v: 1000.0,
+                confirm: 0,
             }, // 低点1
             CandleItem {
                 ts: 3,
@@ -743,6 +744,7 @@ mod tests {
                 l: 91.0,
                 c: 94.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 4,
@@ -751,6 +753,7 @@ mod tests {
                 l: 93.0,
                 c: 97.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 5,
@@ -759,6 +762,7 @@ mod tests {
                 l: 96.0,
                 c: 100.0,
                 v: 1000.0,
+                confirm: 0,
             },
             // 第二个低点形成
             CandleItem {
@@ -768,6 +772,7 @@ mod tests {
                 l: 95.0,
                 c: 96.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 7,
@@ -776,6 +781,7 @@ mod tests {
                 l: 90.2,
                 c: 91.0,
                 v: 1000.0,
+                confirm: 0,
             }, // 低点2，非常接近低点1（90.2 vs 90.0）
             CandleItem {
                 ts: 8,
@@ -784,6 +790,7 @@ mod tests {
                 l: 91.0,
                 c: 94.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 9,
@@ -792,6 +799,7 @@ mod tests {
                 l: 93.0,
                 c: 97.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 10,
@@ -800,6 +808,7 @@ mod tests {
                 l: 96.0,
                 c: 99.0,
                 v: 1000.0,
+                confirm: 0,
             },
         ];
 
@@ -845,6 +854,7 @@ mod tests {
                 l: 95.0,
                 c: 100.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 1,
@@ -853,6 +863,7 @@ mod tests {
                 l: 93.0,
                 c: 95.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 2,
@@ -861,6 +872,7 @@ mod tests {
                 l: 90.0,
                 c: 92.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 3,
@@ -869,6 +881,7 @@ mod tests {
                 l: 88.0,
                 c: 90.0,
                 v: 1000.0,
+                confirm: 0,
             }, // 最低点
             CandleItem {
                 ts: 4,
@@ -877,6 +890,7 @@ mod tests {
                 l: 89.0,
                 c: 94.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 5,
@@ -885,6 +899,7 @@ mod tests {
                 l: 93.0,
                 c: 97.0,
                 v: 1000.0,
+                confirm: 0,
             },
             CandleItem {
                 ts: 6,
@@ -893,6 +908,7 @@ mod tests {
                 l: 96.0,
                 c: 100.0,
                 v: 1000.0,
+                confirm: 0,
             },
         ];
 

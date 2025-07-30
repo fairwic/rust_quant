@@ -1,7 +1,7 @@
 use crate::trading::model::big_data::top_contract_position_ratio::{
     ModelEntity, TopContractPositionRatioModel,
 };
-use crate::trading::model::market::candles::SelectTime;
+use crate::trading::model::entity::candles::enums::SelectTime;
 use chrono::Utc;
 use log::info;
 use redis::Commands;

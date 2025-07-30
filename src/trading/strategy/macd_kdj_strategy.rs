@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 use crate::time_util;
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::indicator::kdj_simple_indicator::{KDJ, KdjSimpleIndicator};
 use crate::trading::indicator::macd_simple_indicator::MacdSimpleIndicator;
 use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;

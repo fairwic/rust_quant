@@ -13,7 +13,7 @@ use tracing::{error, warn};
 // Import necessary crates and modules
 use crate::trading::model::big_data::top_contract_account_ratio::TopContractAccountRatioEntity;
 use crate::trading::model::big_data::top_contract_position_ratio::TopContractPositionRatioEntity;
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::services::big_data::big_data_top_contract_service::BigDataTopContractService;
 use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
 use crate::trading::strategy::strategy_common::{BackTestResult, run_back_test, SignalResult, TradeRecord};
@@ -94,7 +94,7 @@ impl TopContractStrategy {
             error!("数据长度异常 acct_ratio_list,position_ratio_list");
         }
         // 获取K线数据
-        let mysql_candles: Vec<CandlesEntity> = basic::get_candle_data(inst_id, time, account_ratio_list.len(), None).await?;
+        let mysql_candles: Vec<CandlesEntity> = basic::get_candle_data_confirm(inst_id, time, account_ratio_list.len(), None).await?;
 
         // println!("{:#?}", mysql_candles);
 

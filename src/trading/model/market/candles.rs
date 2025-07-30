@@ -1,5 +1,3 @@
-extern crate rbatis;
-
 use anyhow::{anyhow, Result};
 use rbatis::rbdc::db::ExecResult;
 use rbatis::{crud, impl_update, RBatis};
@@ -9,42 +7,11 @@ use serde_json::json;
 use tracing::{debug, error, info};
 
 use crate::app_config::db;
+use crate::trading::model::entity::candles::dto::SelectCandleReqDto;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
+use crate::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 use okx::dto::market_dto::CandleOkxRespDto;
 use rbatis::impl_select;
-
-/// table
-#[derive(Serialize, Deserialize, Debug, Clone)]
-// #[serde(rename_all = "camelCase")]
-#[serde(rename_all = "snake_case")]
-pub struct CandlesEntity {
-    pub ts: i64,         // 开始时间，Unix时间戳的毫秒数格式
-    pub o: String,       // 开盘价格
-    pub h: String,       // 最高价格
-    pub l: String,       // 最低价格
-    pub c: String,       // 收盘价格
-    pub vol: String,     // 交易量，以张为单位
-    pub vol_ccy: String, // 交易量，以币为单位
-    // pub vol_ccy_quote: String, // 交易量，以计价货币为单位
-    pub confirm: String, // K线状态
-}
-pub enum TimeDirect {
-    BEFORE,
-    AFTER,
-}
-
-pub struct SelectTime {
-    //选择开始时间
-    pub start_time: i64,
-    //选择结束时间
-    pub end_time: Option<i64>,
-    //选择方向1 正
-    pub direct: TimeDirect,
-}
-
-crud!(CandlesEntity {}, "tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
-
-impl_update!(CandlesEntity{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
-impl_select!(CandlesEntity{fetch_list() => ""},"tickers_data");
 
 #[derive(Debug)]
 enum TimeInterval {
@@ -264,33 +231,32 @@ impl CandlesModel {
         Ok(())
     }
 
-    pub async fn get_all(
-        &self,
-        inst_id: &str,
-        time_interval: &str,
-        limit: usize,
-        select_time: Option<SelectTime>,
-    ) -> Result<Vec<CandlesEntity>> {
+    pub async fn get_all(&self, dto: SelectCandleReqDto) -> Result<Vec<CandlesEntity>> {
         let mut query = format!(
-            "SELECT ts,o,h,l,c,vol,vol_ccy,confirm FROM `{}` ",
-            Self::get_tale_name(inst_id, time_interval)
+            "SELECT ts,o,h,l,c,vol,vol_ccy,confirm FROM `{}` where 1=1 ",
+            Self::get_tale_name(&dto.inst_id, &dto.time_interval)
         );
+        //如果指定了确认
+        if let Some(confirm) = dto.confirm {
+            query = format!("{} and confirm = {} ", query, confirm);
+        }
+
         //如果指定了时间
         if let Some(SelectTime {
             direct,
             start_time: point_time,
-            end_time: end_time,
-        }) = select_time
+            end_time,
+        }) = dto.select_time
         {
             match direct {
                 TimeDirect::BEFORE => {
-                    query = format!("{} where ts<= {} ", query, point_time);
+                    query = format!("{} and ts<= {} ", query, point_time);
                     if let Some(end_time) = end_time {
                         query = format!("{} and ts>= {} ", query, end_time);
                     }
                 }
                 TimeDirect::AFTER => {
-                    query = format!("{} where ts>= {} ", query, point_time);
+                    query = format!("{} and ts>= {} ", query, point_time);
                     if let Some(end_time) = end_time {
                         query = format!("{} and ts<= {} ", query, end_time);
                     }
@@ -298,7 +264,7 @@ impl CandlesModel {
             }
         }
         //默认取最后的条数
-        query = format!("{} order by ts DESC limit {}", query, limit);
+        query = format!("{} order by ts DESC limit {}", query, dto.limit);
         info!("query get candle SQL: {}", query);
 
         let res: Value = self.db.query(&query, vec![]).await?;
@@ -385,15 +351,9 @@ impl CandlesModel {
 
     pub async fn fetch_candles_from_mysql(
         &self,
-        ins_id: &str,
-        time: &str,
-        limit: usize,
-        select_time: Option<SelectTime>,
+        dto: SelectCandleReqDto,
     ) -> anyhow::Result<Vec<CandlesEntity>> {
-        let candles_model = CandlesModel::new().await;
-        let candles = candles_model
-            .get_all(ins_id, time, limit, select_time)
-            .await;
+        let candles = self.get_all(dto).await;
         match candles {
             Ok(mut data) => {
                 data.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));

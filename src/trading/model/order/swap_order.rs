@@ -3,44 +3,66 @@ extern crate rbatis;
 use std::convert::TryInto;
 use std::sync::Arc;
 
+use crate::app_config::db;
+use crate::time_util;
 use chrono::{DateTime, Utc};
-use rbatis::{crud, impl_update, RBatis};
+use rbatis::impl_select;
 use rbatis::rbdc::db::ExecResult;
+use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use crate::time_util;
-use crate::app_config::db;
-use rbatis::impl_select;
 
 /// table
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // #[serde(rename_all = "camelCase")]
 #[serde(rename_all = "snake_case")]
 pub struct SwapOrderEntity {
-    pub uuid: String,
+    // 内部订单id
+    pub in_order_id: String,
+    // 外部订单id
+    pub out_order_id: String,
+    // 策略id
+    pub strategy_id: i64,
+    // 策略类型
     pub strategy_type: String,
+    // 周期
     pub period: String,
-    pub inst_id: String,  // 使用 Vec<u8> 来表示 VARBINARY
+    // 交易对
+    pub inst_id: String,
+    // 方向
     pub side: String,
+    // 持仓数量
+    pub pos_size: String,
+    // 持仓方向
     pub pos_side: String,
-    pub cl_ord_id: String,
+    // 订单标签
     pub tag: String,
+    // 订单详情
     pub detail: String,
+    // 平台类型
+    pub platform_type: String, //okx,binance,huobi,bitget,
 }
 
 impl SwapOrderEntity {
-    pub fn gen_uuid(inst_id: &str, period: &str, side: String, pos_side: String) -> String {
-        let time = time_util::format_to_period(period, None);
-        format!("{}+{}+{}+{}+{}", time, inst_id, period, side, pos_side)
+    pub fn gen_order_id(inst_id: &str, period: &str, side: String, pos_side: String) -> String {
+        let time = time_util::format_to_period_str(period);
+        //btc-1d-buy-l-20250710000000
+        //eth-1h-sell-s-20250710150000
+        //nxpc-1s-buy-s-20250710150101
+        //doge-1m-sell-l-20250710150100
+        //btc-usdt-swap 只保留 btc
+        let inst_id = inst_id.to_lowercase();
+        let inst_id = inst_id.split("-").nth(0).unwrap();
+        let side = if side == "buy" { "b" } else { "s" };
+        let pos_side = if pos_side == "long" { "l" } else { "s" };
+        format!("{}{}{}{}{}", inst_id, period, side, pos_side, time)
     }
 }
 
+crud!(SwapOrderEntity {}, "swap_orders"); //crud = insert+select_by_column+update_by_column+delete_by_column
 
-crud!(SwapOrderEntity{},"swap_orders"); //crud = insert+select_by_column+update_by_column+delete_by_column
-
-impl_update!(SwapOrderEntity{update_by_name(name:String) => "`where id = '2'`"},"swap_orders");
+impl_select!(SwapOrderEntity{select_by_in_order_id(in_order_id:String) => "`where in_order_id = #{in_order_id}`"},"swap_orders");
 impl_select!(SwapOrderEntity{fetch_list() => ""},"swap_orders");
-
 
 #[derive(Debug)]
 enum TimeInterval {
@@ -59,7 +81,6 @@ impl TimeInterval {
     }
 }
 
-
 pub struct SwapOrderEntityModel {
     db: &'static RBatis,
 }
@@ -70,16 +91,21 @@ impl SwapOrderEntityModel {
             db: db::get_db_client(),
         }
     }
-        
-    pub async fn add(&self, swap_order_entity: SwapOrderEntity) -> anyhow::Result<ExecResult> {
+
+    pub async fn add(&self, swap_order_entity: &SwapOrderEntity) -> anyhow::Result<ExecResult> {
         let data = SwapOrderEntity::insert(self.db, &swap_order_entity).await?;
         println!("insert_batch = {}", json!(data));
         Ok(data)
     }
-    pub async fn getOne(&self, inst_id: &str, time: &str, side: String, pos_side: String) -> anyhow::Result<Vec<SwapOrderEntity>> {
-        let uuid = SwapOrderEntity::gen_uuid(inst_id, time, side, pos_side);
-        let data = SwapOrderEntity::select_by_column(self.db, "uuid", uuid.as_str()).await?;
-        println!("query swap_oder uuid = {},result:{}", uuid, json!(data));
+    pub async fn query_one(
+        &self,
+        inst_id: &str,
+        time: &str,
+        side: String,
+        pos_side: String,
+    ) -> anyhow::Result<Vec<SwapOrderEntity>> {
+        let in_ord_id = SwapOrderEntity::gen_order_id(inst_id, time, side, pos_side);
+        let data = SwapOrderEntity::select_by_in_order_id(self.db, in_ord_id).await?;
         Ok(data)
     }
     //

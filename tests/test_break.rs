@@ -27,7 +27,7 @@ async fn test_break_indicator() -> Result<()> {
 
     // 获取K线数据
     let candles_list: Vec<CandlesEntity> =
-        trading::task::basic::get_candle_data(inst_id, time, 8, Some(select_time)).await?;
+        trading::task::basic::get_candle_data_confirm(inst_id, time, 8, Some(select_time)).await?;
 
     let mut break_indicator = BreakIndicator::new(5, 5, 0.8);
     println!("break_indicator: {:#?}", break_indicator);

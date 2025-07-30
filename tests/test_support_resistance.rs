@@ -20,7 +20,7 @@ async fn test_support_resistance() -> Result<()> {
 
     // 获取K线数据
     let mysql_candles: Vec<CandlesEntity> =
-        trading::task::basic::get_candle_data(inst_id, time, 100, None).await?;
+        trading::task::basic::get_candle_data_confirm(inst_id, time, 100, None).await?;
 
     // 确保有数据
     if mysql_candles.is_empty() {

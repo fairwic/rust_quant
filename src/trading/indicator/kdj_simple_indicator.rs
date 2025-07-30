@@ -1,5 +1,5 @@
 use ta::{Close, High, Low};
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 
 pub struct KDJ {
     pub(crate) k: f64,

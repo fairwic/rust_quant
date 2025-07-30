@@ -21,14 +21,14 @@ const ETH_LEVEL: i32 = 15;
 const OTHER_LEVEL: i32 = 10;
 
 /// 风险管理任务，负责在资金账户和交易账户之间平衡资金
-pub struct RiskJob {
+pub struct RiskBalanceWithLevelJob {
     /// 默认货币类型
     currency: String,
     /// 资金平衡比例（资金账户:交易账户）
     balance_ratio: f64,
 }
 
-impl RiskJob {
+impl RiskBalanceWithLevelJob {
     /// 创建新的风险管理任务实例
     pub fn new() -> Self {
         Self {
@@ -38,12 +38,12 @@ impl RiskJob {
     }
 
     pub async fn run(&self, inst_ids: &Vec<&str>) -> Result<(), anyhow::Error> {
-        // 控制交易资金
+        //1. 控制交易资金
         match self.control_trade_amount().await {
             Ok(_) => info!("风险管理任务成功完成"),
             Err(e) => error!("风险管理任务失败: {:?}", e),
         }
-        //控制合约杠杆
+        //2. 控制合约杠杆
         match self.run_set_leverage(inst_ids).await {
             Ok(_) => info!("风险管理任务成功完成"),
             Err(e) => error!("风险管理任务失败: {:?}", e),
@@ -246,7 +246,10 @@ mod tests {
     async fn test_risk_job() {
         // 设置日志
         env_logger::init();
-        let risk_job = RiskJob::new();
-        risk_job.run(&vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]).await.unwrap();
+        let risk_job = RiskBalanceWithLevelJob::new();
+        risk_job
+            .run(&vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"])
+            .await
+            .unwrap();
     }
 }

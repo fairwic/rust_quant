@@ -59,10 +59,10 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
     let span = span!(Level::DEBUG, "socket_logic");
     let _enter = span.enter();
     // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
-    let api_key = env::var("OKX_API_KEY").expect("");
-    let api_secret = env::var("OKX_API_SECRET").expect("");
-    let passphrase = env::var("OKX_PASSPHRASE").expect("");
-    let sim_trading = env::var("OKX_SIM_TRADING").expect("");
+    let api_key = env::var("OKX_API_KEY").expect("未配置OKX_API_KEY");
+    let api_secret = env::var("OKX_API_SECRET").expect("未配置OKX_API_SECRET");
+    let passphrase = env::var("OKX_PASSPHRASE").expect("未配置OKX_PASSPHRASE");
+    let sim_trading = env::var("OKX_SIMULATED_TRADING").expect("未配置OKX_SIMULATED_TRADING");
 
     let mut okx_websocket_clinet = OkxWebsocketClient::new_public();
     let mut rx_public = okx_websocket_clinet.connect().await.unwrap();
@@ -123,10 +123,10 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
             let res = serde_json::from_str::<TickerOkxResWsDto>(&msg_str);
             if res.is_ok() {
                 let ticker = res.unwrap();
-                info!("ticketOkxResWsDto数据: {:?}", ticker);
+                // info!("ticketOkxResWsDto数据: {:?}", ticker);
                 let res=update_ticker(ticker.data,Some(vec![&ticker.arg.inst_id.as_str()])).await;
                 if res.is_ok() {
-                    info!("更新ticker成功: {:?}", res.unwrap());
+                    // info!("更新ticker成功: {:?}", res.unwrap());
                 }else {
                     error!("更新ticker失败: {:?}", res.err());
                 }
@@ -163,7 +163,7 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
                 let candle_data =candle.data.iter().map(|v| CandleOkxRespDto::from_vec(v.clone())).collect();
                 let res=CandleService::new().update_candle(candle_data,candle.arg.inst_id.as_str(),period.as_str()).await;
                 if res.is_ok() {
-                    info!("更新candle成功: {:?}", res.unwrap());
+                    debug!("更新candle成功: {:?}", res.unwrap());
                 }else {
                     error!("更新candle失败: {:?}", res.err());
                 }

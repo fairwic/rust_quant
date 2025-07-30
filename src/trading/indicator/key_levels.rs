@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ta::{Close, DataItem, High, Low, Volume};
 use tracing::{debug, info};
 
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 
 #[derive(Debug, Clone)]
 pub struct PriceLevel {

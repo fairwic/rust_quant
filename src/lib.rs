@@ -4,11 +4,19 @@
 #![allow(unused_mut)]
 #![allow(unused_assignments)]
 #![allow(unused_must_use)]
-use once_cell::sync::Lazy;
+
+pub mod app_config;
+pub mod error;
+pub mod job;
+pub mod socket;
+pub mod time_util;
+pub mod trading;
+
 use dotenv::dotenv;
-use tracing::{info, error};
-use tracing_subscriber::prelude::*;
+use once_cell::sync::Lazy;
+use tracing::{error, info};
 use tracing_subscriber::fmt::Subscriber;
+use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 pub async fn app_init() -> anyhow::Result<()> {
@@ -23,20 +31,18 @@ pub async fn app_init() -> anyhow::Result<()> {
     Ok(())
 }
 
-use std::sync::Arc;
-use tokio_cron_scheduler::JobScheduler;
-use tokio::sync::Mutex;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio_cron_scheduler::JobScheduler;
 
 // 定义全局调度器容器，会在需要时被初始化
-pub static SCHEDULER: Lazy<Mutex<Option<Arc<JobScheduler>>>> = Lazy::new(|| {
-    Mutex::new(None)
-});
+pub static SCHEDULER: Lazy<Mutex<Option<Arc<JobScheduler>>>> = Lazy::new(|| Mutex::new(None));
 
 // 初始化调度器的辅助函数
 pub async fn init_scheduler() -> anyhow::Result<Arc<JobScheduler>> {
     let mut lock = SCHEDULER.lock().await;
-    
+
     if lock.is_none() {
         // 只有在调度器未初始化时才创建
         let scheduler = JobScheduler::new().await?;
@@ -44,18 +50,12 @@ pub async fn init_scheduler() -> anyhow::Result<Arc<JobScheduler>> {
         *lock = Some(Arc::clone(&arc_scheduler));
         return Ok(arc_scheduler);
     }
-    
+
     // 返回已存在的调度器
     Ok(Arc::clone(lock.as_ref().unwrap()))
 }
 
-pub mod app_config;
-pub mod job;
-pub mod socket;
-pub mod time_util;
-pub mod trading;
-
-#[derive(Debug, Clone,Deserialize,Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CandleItem {
     o: f64,
     h: f64,
@@ -63,6 +63,7 @@ pub struct CandleItem {
     c: f64,
     v: f64,
     ts: i64,
+    confirm: i32,
 }
 
 impl CandleItem {
@@ -92,6 +93,9 @@ impl CandleItem {
     pub fn v(&self) -> f64 {
         self.v
     }
+    pub fn confirm(&self) -> i32 {
+        self.confirm
+    }
 }
 
 pub struct CandleItemBuilder {
@@ -101,6 +105,7 @@ pub struct CandleItemBuilder {
     c: Option<f64>,
     v: Option<f64>,
     ts: Option<i64>,
+    confirm: Option<i32>,
 }
 
 impl CandleItemBuilder {
@@ -112,6 +117,7 @@ impl CandleItemBuilder {
             c: None,
             v: None,
             ts: None,
+            confirm: None,
         }
     }
     pub fn ts(mut self, val: i64) -> Self {
@@ -149,7 +155,15 @@ impl CandleItemBuilder {
         {
             // validate
             if l <= o && l <= c && l <= h && h >= o && h >= c && v >= 0.0 && l >= 0.0 {
-                let item = CandleItem { o, h, l, c, v, ts };
+                let item = CandleItem {
+                    o,
+                    h,
+                    l,
+                    c,
+                    v,
+                    ts,
+                    confirm: self.confirm.unwrap_or(1),
+                };
                 Ok(item)
             } else {
                 Err(anyhow::anyhow!("CandleItemInvalid"))

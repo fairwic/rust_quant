@@ -23,7 +23,7 @@ async fn test_atr() -> Result<()> {
     let period = 2;
 
     // 获取K线数据
-    let mysql_candles: Vec<CandlesEntity> = trading::task::basic::get_candle_data(inst_id, time, 100, None).await?;
+    let mysql_candles: Vec<CandlesEntity> = trading::task::basic::get_candle_data_confirm(inst_id, time, 100, None).await?;
     println!("{:#?}", mysql_candles);
 
     // 确保有数据

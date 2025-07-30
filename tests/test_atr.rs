@@ -23,7 +23,7 @@ mod test {
         let min_length = 11;
         let select_time = None;
         let candles =
-            trading::task::basic::get_candle_data(inst_id, period, min_length, select_time).await?;
+            trading::task::basic::get_candle_data_confirm(inst_id, period, min_length, select_time).await?;
         println!("{:#?}", candles);
         for (idx, item) in candles.iter().enumerate() {
             println!("item c:{:#?}", item);
@@ -50,7 +50,7 @@ mod test {
 
         // 获取K线数据
         let mysql_candles: Vec<CandlesEntity> =
-            trading::task::basic::get_candle_data(inst_id, time, 300, None).await?;
+            trading::task::basic::get_candle_data_confirm(inst_id, time, 300, None).await?;
         println!("{:#?}", mysql_candles);
 
         // 确保有数据

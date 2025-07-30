@@ -1,4 +1,4 @@
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 
 #[derive(Debug, Clone)]
 pub struct Candle {

@@ -1,5 +1,5 @@
 use crate::app_config;
-use crate::trading::model::market::candles::{SelectTime, TimeDirect};
+use crate::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 use anyhow::{anyhow, Result};
 use rbatis::rbdc::Error;
 use rbatis::RBatis;
@@ -128,7 +128,7 @@ impl TopContractPositionRatioModel {
             "top_contract_position_ratio", inst_id, time_interval
         );
         //如果指定了时间
-        if let Some(SelectTime { direct, start_time: point_time,end_time:end_time }) = select_time {
+        if let Some(SelectTime { direct, start_time: point_time,end_time }) = select_time {
             match direct {
                 TimeDirect::BEFORE => {
                     query = format!("{} where ts<= {} ", query, point_time);

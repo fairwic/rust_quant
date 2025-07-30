@@ -217,7 +217,7 @@ impl FairValueGapIndicator {
 mod tests {
     use super::*;
     use crate::trading;
-    use crate::trading::model::market::candles::{SelectTime, TimeDirect};
+    use crate::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 
     #[test]
     fn test_fvg_basic() {
@@ -233,6 +233,7 @@ mod tests {
             l: 95.0,
             c: 105.0,
             v: 1000.0,
+            confirm: 0,
         });
         candles.push(CandleItem {
             // k2 (prev) - 收盘价必须高于k1的高点
@@ -242,6 +243,7 @@ mod tests {
             l: 100.0,
             c: 112.0, // 112.0 > 110.0 ✓
             v: 1000.0,
+            confirm: 0,
         });
         candles.push(CandleItem {
             // k3 (current) - 低点必须高于k1的高点
@@ -251,6 +253,7 @@ mod tests {
             l: 115.0, // 115.0 > 110.0 ✓ 形成多头FVG
             c: 125.0,
             v: 1000.0,
+            confirm: 0,
         });
         // 初始化前两根K线作为历史数据
         indicator.init_with_history(&candles[..2]);
@@ -295,6 +298,7 @@ mod tests {
             l: 110.0, // 这是关键低点
             c: 115.0,
             v: 1000.0,
+            confirm: 0,
         });
         candles.push(CandleItem {
             // k2 (prev) - 收盘价必须低于k1的低点
@@ -304,6 +308,7 @@ mod tests {
             l: 105.0,
             c: 108.0, // 108.0 < 110.0 ✓
             v: 1000.0,
+            confirm: 0,
         });
         candles.push(CandleItem {
             // k3 (current) - 高点必须低于k1的低点
@@ -313,6 +318,7 @@ mod tests {
             l: 95.0,
             c: 102.0,
             v: 1000.0,
+            confirm: 0,
         });
         // 初始化前两根K线作为历史数据
         indicator.init_with_history(&candles[..2]);
@@ -352,9 +358,13 @@ mod tests {
             direct: TimeDirect::BEFORE,
             end_time: None,
         };
-        let candles =
-            trading::task::basic::get_candle_data("BTC-USDT-SWAP", "1H", 300, Some(select_time))
-                .await?;
+        let candles = trading::task::basic::get_candle_data_confirm(
+            "BTC-USDT-SWAP",
+            "1H",
+            300,
+            Some(select_time),
+        )
+        .await?;
 
         let mut indicator = FairValueGapIndicator::new(1.0, true);
 

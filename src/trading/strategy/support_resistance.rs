@@ -3,7 +3,7 @@ use rbatis::rbatis_codegen::ops::AsProxy;
 use serde::{Deserialize, Serialize};
 use ta::indicators::{BollingerBands, CommodityChannelIndex, ExponentialMovingAverage, Maximum, Minimum};
 use ta::{DataItem, Next};
-use crate::trading::model::market::candles::CandlesEntity;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 
 pub struct SupportResistance;
 

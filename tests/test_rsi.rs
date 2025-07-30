@@ -25,7 +25,7 @@ async fn test_rsi_real_data() -> Result<()> {
 
     println!("\n===== RSI Real Data Test =====");
     
-    let candles = trading::task::basic::get_candle_data("BTC-USDT-SWAP", "1H", 100, None).await?;
+    let candles = trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "1H", 100, None).await?;
 
     for candle in candles {
         let price = candle.c.parse::<f64>().unwrap();

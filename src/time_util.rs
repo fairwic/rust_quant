@@ -7,9 +7,6 @@ use rbatis::rbdc::Timestamp;
 use std::pin::pin;
 use tracing::warn;
 
-
-
-
 pub(crate) fn is_within_business_hours(ts: i64) -> bool {
     // 获取当前UTC时间
     let now_utc: DateTime<Utc> = DateTime::from_timestamp_millis(ts).unwrap();
@@ -41,7 +38,6 @@ pub(crate) fn is_within_business_hours(ts: i64) -> bool {
 }
 
 pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
-    println!("period:{}",period);
     let duration = match &period.to_uppercase()[..] {
         "1S" => 1,
         "1M" => 60,
@@ -52,7 +48,7 @@ pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
         "1D" => 24 * 3600,
         "1DUTC" => 24 * 3600,
         "5D" => 5 * 24 * 3600,
-        _ => return Err(anyhow!("Unsupported period format{}",period)),
+        _ => return Err(anyhow!("Unsupported period format{}", period)),
     };
     Ok(duration * 1000) // 转换为毫秒
 }
@@ -66,11 +62,47 @@ pub(crate) fn ts_reduce_n_period(ts: i64, period: &str, n: usize) -> anyhow::Res
 }
 
 //当前毫秒级时间增加或减少指定周期的毫秒数
-pub(crate) fn ts_add_n_period( ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
+pub(crate) fn ts_add_n_period(ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
     let res = parse_period_to_mill(period);
     //最大条数100
     let mill = n as i64 * res.unwrap();
     Ok(ts + mill)
+}
+
+// 将 DateTime 格式化为周期字符串（如 "4H", "5min" 等）
+pub fn format_to_period_str(period: &str) -> String {
+    let dt = Local::now();
+    let (num, unit) = period.split_at(period.chars().take_while(|c| c.is_numeric()).count());
+    // println!("333333333333333333333333");
+    // println!("dt {}", dt);
+    // println!("num:{},unit:{}", num, unit);
+    let num: i64 = num.parse().unwrap_or(1);
+    //转换成小写
+    match unit.to_lowercase().as_str() {
+        "h" => {
+            let hours = dt.hour() / num as u32 * num as u32;
+            dt.date_naive()
+                .and_hms_opt(hours, 0, 0)
+                .unwrap()
+                .format("%Y%m%d%H0000")
+                .to_string()
+        }
+        "min" | "m" => {
+            let minutes = dt.minute() / num as u32 * num as u32;
+            dt.date_naive()
+                .and_hms_opt(dt.hour(), minutes, 0)
+                .unwrap()
+                .format("%Y%m%d%H%M00")
+                .to_string()
+        }
+        "d" => dt
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .format("%Y%m%d000000")
+            .to_string(),
+        _ => dt.format("%Y-%m-%d %H:%M:%S000000").to_string(),
+    }
 }
 
 // 将 DateTime 格式化为周期字符串（如 "4H", "5min" 等）
@@ -156,8 +188,20 @@ pub fn get_period_start_timestamp(period: &str) -> i64 {
     let now = Local::now();
     // 获取当前的时间戳，并根据周期进行调整
     let period_start = match period {
-        "1m" => now.with_minute(now.minute()).unwrap().with_second(0).unwrap().with_nanosecond(0).unwrap(),
-        "3m" => now.with_minute(now.minute() / 3 * 3).unwrap().with_second(0).unwrap().with_nanosecond(0).unwrap(),
+        "1m" => now
+            .with_minute(now.minute())
+            .unwrap()
+            .with_second(0)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap(),
+        "3m" => now
+            .with_minute(now.minute() / 3 * 3)
+            .unwrap()
+            .with_second(0)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap(),
         "5m" => now
             .with_minute(now.minute() / 5 * 5)
             .unwrap()

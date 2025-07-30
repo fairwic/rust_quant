@@ -1,7 +1,7 @@
 use crate::trading;
 use crate::trading::indicator::squeeze_momentum::calculator::SqueezeCalculator;
 use crate::trading::indicator::squeeze_momentum::squeeze_config::SqueezeConfig;
-use crate::trading::model::market::candles::SelectTime;
+use crate::trading::model::entity::candles::enums::SelectTime;
 use crate::trading::strategy::strategy_common::SignalResult;
 
 /// 返回线性回归的结果 (f64)。
@@ -47,7 +47,7 @@ pub async fn get_last_squeeze_single(
     select_time: Option<SelectTime>,
 ) -> anyhow::Result<SignalResult> {
     let min_length = config.bb_length.max(config.kc_length);
-    let candles = trading::task::basic::get_candle_data(inst_id, period, min_length * 2, select_time).await?;
+    let candles = trading::task::basic::get_candle_data_confirm(inst_id, period, min_length * 2, select_time).await?;
     if candles.len() < min_length {
         return Err(anyhow::anyhow!("Insufficient data"));
     }
