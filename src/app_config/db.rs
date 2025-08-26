@@ -1,9 +1,9 @@
-use std::env;
-use std::time::Duration;
 use once_cell::sync::OnceCell;
 use rbatis::RBatis;
 use rbdc_mysql::MysqlDriver;
-use tracing::{info, error};
+use std::env;
+use std::time::Duration;
+use tracing::{error, info};
 
 static DB_CLIENT: OnceCell<RBatis> = OnceCell::new();
 
@@ -30,10 +30,14 @@ pub async fn init_db() -> &'static RBatis {
 
     // 配置连接池
     let pool = rb.get_pool().expect("Failed to get connection pool");
-    pool.set_max_open_conns(max_connections as u64).await;  // 最大连接数
-    pool.set_max_idle_conns(max_connections as u64 / 2).await;  // 最大空闲连接数
-    pool.set_conn_max_lifetime(Some(Duration::from_secs(60))).await;  // 连接最大生命周期
-    info!("Connection pool configured with {} max connections", max_connections);
+    pool.set_max_open_conns(max_connections as u64).await; // 最大连接数
+    pool.set_max_idle_conns(max_connections as u64 / 2).await; // 最大空闲连接数
+    pool.set_conn_max_lifetime(Some(Duration::from_secs(60)))
+        .await; // 连接最大生命周期
+    info!(
+        "Connection pool configured with {} max connections",
+        max_connections
+    );
 
     match DB_CLIENT.set(rb) {
         Ok(_) => info!("DB_CLIENT initialized successfully"),
@@ -54,7 +58,7 @@ pub fn get_db_client() -> &'static RBatis {
 pub async fn monitor_connection_pool() -> String {
     let pool = get_db_client().get_pool().expect("Failed to get pool");
     let state = pool.state().await;
-    
+
     format!(
         "连接池状态：原始信息 {}",
         serde_json::to_string(&state).unwrap_or_default()

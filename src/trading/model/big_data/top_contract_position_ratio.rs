@@ -22,7 +22,7 @@ use tracing::{debug, info};
 // UNIQUE KEY `inst_id` (`inst_id`,`period`,`ts`)
 // ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /// ) ...
-#[derive(Serialize, Deserialize, Debug,Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct TopContractPositionRatioEntity {
     // 主键ID
@@ -128,7 +128,12 @@ impl TopContractPositionRatioModel {
             "top_contract_position_ratio", inst_id, time_interval
         );
         //如果指定了时间
-        if let Some(SelectTime { direct, start_time: point_time,end_time }) = select_time {
+        if let Some(SelectTime {
+            direct,
+            start_time: point_time,
+            end_time,
+        }) = select_time
+        {
             match direct {
                 TimeDirect::BEFORE => {
                     query = format!("{} where ts<= {} ", query, point_time);

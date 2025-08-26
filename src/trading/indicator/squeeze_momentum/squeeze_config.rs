@@ -1,5 +1,5 @@
-use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqueezeConfig {
@@ -8,9 +8,13 @@ pub struct SqueezeConfig {
     pub kc_length: usize,
     pub kc_multi: f64,
 }
-impl Display for SqueezeConfig{
+impl Display for SqueezeConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f,"bb_length:{} bb_multi:{} kc_length:{} kc_multi:{}",self.bb_length,self.bb_multi,self.kc_length,self.kc_multi)
+        write!(
+            f,
+            "bb_length:{} bb_multi:{} kc_length:{} kc_multi:{}",
+            self.bb_length, self.bb_multi, self.kc_length, self.kc_multi
+        )
     }
 }
 

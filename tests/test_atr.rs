@@ -23,7 +23,8 @@ mod test {
         let min_length = 11;
         let select_time = None;
         let candles =
-            trading::task::basic::get_candle_data_confirm(inst_id, period, min_length, select_time).await?;
+            trading::task::basic::get_candle_data_confirm(inst_id, period, min_length, select_time)
+                .await?;
         println!("{:#?}", candles);
         for (idx, item) in candles.iter().enumerate() {
             println!("item c:{:#?}", item);

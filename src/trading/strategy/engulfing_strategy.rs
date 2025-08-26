@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::strategy_common::{BackTestResult, run_back_test, SignalResult, TradeRecord};
+use crate::trading::strategy::strategy_common::{
+    run_back_test, BackTestResult, SignalResult, TradeRecord,
+};
 
 use super::strategy_common::BasicRiskStrategyConfig;
 
@@ -25,8 +27,8 @@ impl EngulfingStrategy {
         if candles_5m.len() == num_bars + 1 {
             let current_candle = &candles_5m[candles_5m.len() - 1];
 
-            // println!("1111111 current_candel= {:#?}", json!(current_candle));
-            let previous_candles = &candles_5m[candles_5m.len() - num_bars - 1..candles_5m.len() - 1];
+            let previous_candles =
+                &candles_5m[candles_5m.len() - num_bars - 1..candles_5m.len() - 1];
 
             let current_open = current_candle.o.parse::<f64>().unwrap_or(0.0);
             let current_close = current_candle.c.parse::<f64>().unwrap_or(0.0);
@@ -51,14 +53,25 @@ impl EngulfingStrategy {
             // println!("all_previous_bearish= {:#?}", all_previous_bearish);
             // println!("all_previous_bullish= {:#?}", all_previous_bullish);
             // 牛市吞没形态条件
-            if all_previous_bearish && current_close > previous_candles[previous_candles.len() - 1].o.parse::<f64>().unwrap_or(0.0)
+            if all_previous_bearish
+                && current_close
+                    > previous_candles[previous_candles.len() - 1]
+                        .o
+                        .parse::<f64>()
+                        .unwrap_or(0.0)
             // &&current_
             {
                 should_buy = true;
             }
 
             // 熊市吞没形态条件
-            if all_previous_bullish && current_close < previous_candles[previous_candles.len() - 1].o.parse::<f64>().unwrap_or(0.0) {
+            if all_previous_bullish
+                && current_close
+                    < previous_candles[previous_candles.len() - 1]
+                        .o
+                        .parse::<f64>()
+                        .unwrap_or(0.0)
+            {
                 should_sell = true;
             }
 
@@ -68,7 +81,17 @@ impl EngulfingStrategy {
         }
         // ts = candles_5m.last().unwrap().ts;
 
-        SignalResult { should_buy, should_sell, open_price: price, ts: candles_5m.last().unwrap().ts ,single_value:None,single_result:None,signal_kline_stop_loss_price:None,best_open_price:None,best_take_profit_price:None}
+        SignalResult {
+            should_buy,
+            should_sell,
+            open_price: price,
+            ts: candles_5m.last().unwrap().ts,
+            single_value: None,
+            single_result: None,
+            signal_kline_stop_loss_price: None,
+            best_open_price: None,
+            best_take_profit_price: None,
+        }
     }
 
     // /// 运行回测

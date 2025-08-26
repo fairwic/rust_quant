@@ -41,7 +41,7 @@ pub struct FibTrendStrategy {
 impl FibTrendStrategy {
     pub fn new(config: FibTrendConfig) -> Result<Self> {
         Ok(Self {
-            supertrend: Supertrend::new(config.factor,25)?,
+            supertrend: Supertrend::new(config.factor, 25)?,
             atr: ATR::new(200).unwrap(),
             current_atr: 0.0, // 初始化ATR值
             extreme_high: 0.0,
@@ -92,7 +92,9 @@ impl FibTrendStrategy {
         };
 
         let range = target - base;
-        self.config.fib_levels.iter()
+        self.config
+            .fib_levels
+            .iter()
             .map(|level| base + range * level)
             .collect()
     }
@@ -101,7 +103,7 @@ impl FibTrendStrategy {
     fn calculate_upper_band(&self, high: f64, direction: i8) -> f64 {
         match direction {
             1 => high + self.current_atr * 3.0,
-            _ => high
+            _ => high,
         }
     }
 
@@ -109,7 +111,7 @@ impl FibTrendStrategy {
     fn calculate_lower_band(&self, low: f64, direction: i8) -> f64 {
         match direction {
             -1 => low - self.current_atr * 3.0,
-            _ => low
+            _ => low,
         }
     }
 
@@ -147,8 +149,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[trace(prefix_enter="[ENTER]", prefix_exit="[EXIT]")]
-   async fn test_atr_calculation() ->anyhow::Result<()> {
+    #[trace(prefix_enter = "[ENTER]", prefix_exit = "[EXIT]")]
+    async fn test_atr_calculation() -> anyhow::Result<()> {
         dotenv().ok();
         setup_logging().await?;
         init_db().await;
@@ -159,11 +161,20 @@ mod tests {
         let period = "4H";
         let min_length = 200;
         let select_time = None;
-        let candles = trading::task::basic::get_candle_data_confirm(inst_id, period, min_length, select_time).await?;
-        let results:Vec<_> = candles.iter()
-            .map(|item| strategy.next(item.h.parse().unwrap(), item.l.parse().unwrap(), item.c.parse().unwrap()))
+        let candles =
+            trading::task::basic::get_candle_data_confirm(inst_id, period, min_length, select_time)
+                .await?;
+        let results: Vec<_> = candles
+            .iter()
+            .map(|item| {
+                strategy.next(
+                    item.h.parse().unwrap(),
+                    item.l.parse().unwrap(),
+                    item.c.parse().unwrap(),
+                )
+            })
             .collect();
-        println!("{:#?}",results);
+        println!("{:#?}", results);
         Ok(())
     }
 

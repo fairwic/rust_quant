@@ -258,4 +258,4 @@ impl Default for PremiumDiscountConfig {
             is_open: true,
         }
     }
-} 
+}

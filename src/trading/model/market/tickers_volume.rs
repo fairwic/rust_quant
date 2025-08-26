@@ -2,9 +2,9 @@ extern crate rbatis;
 
 use anyhow::Result;
 use clap::builder::TypedValueParser;
+use rbatis::rbdc::db::ExecResult;
 use rbatis::{crud, impl_update, RBatis};
 use rbatis::{impl_delete, impl_select};
-use rbatis::rbdc::db::ExecResult;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -62,8 +62,7 @@ impl TickersVolumeModel {
 
         println!("insert_batch = {}", json!(tickers_db));
 
-        let data =
-            TickersVolume::insert_batch(self.db, &tickers_db, list.len() as u64).await?;
+        let data = TickersVolume::insert_batch(self.db, &tickers_db, list.len() as u64).await?;
         println!("insert_batch = {}", json!(data));
         Ok(data)
     }

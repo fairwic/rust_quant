@@ -1,7 +1,7 @@
-use crate::CandleItem;
 use super::config::EmaTouchTrendSignalConfig;
 use super::signal::{EmaSignalValue, EmaTouchTrendSignalValue};
 use crate::trading::indicator::is_big_kline::IsBigKLineIndicator;
+use crate::CandleItem;
 
 /// 检查EMA趋势
 pub fn check_ema_touch_trend(
@@ -16,7 +16,7 @@ pub fn check_ema_touch_trend(
     if is_bullish_trend(&ema_value) {
         ema_touch_trend_value.is_uptrend = true;
         check_bullish_signals(data_items, &ema_value, config, &mut ema_touch_trend_value);
-    } 
+    }
     // 判断空头排列
     else if is_bearish_trend(&ema_value) {
         ema_touch_trend_value.is_downtrend = true;
@@ -28,8 +28,7 @@ pub fn check_ema_touch_trend(
 
 /// 判断是否为多头趋势
 fn is_bullish_trend(ema_value: &EmaSignalValue) -> bool {
-    ema_value.ema2_value > ema_value.ema3_value
-        && ema_value.ema3_value > ema_value.ema4_value
+    ema_value.ema2_value > ema_value.ema3_value && ema_value.ema3_value > ema_value.ema4_value
 }
 
 /// 判断是否为空头趋势
@@ -57,7 +56,7 @@ fn check_bullish_signals(
     // 检查EMA4/EMA5触碰信号
     if check_ema45_touch_signal_bullish(last_item, ema_value, config) {
         trend_value.is_in_uptrend_touch_ema4_ema5_nums += 1;
-        
+
         if last_item.l() <= ema_value.ema4_value {
             trend_value.is_in_uptrend_touch_ema4 = true;
         } else {
@@ -94,7 +93,7 @@ fn check_bearish_signals(
     // 检查EMA4/EMA5触碰信号
     if check_ema45_touch_signal_bearish(last_item, ema_value, config) {
         trend_value.is_touch_ema4_ema5_nums += 1;
-        
+
         if last_item.h() * config.price_with_ema_high_ratio >= ema_value.ema4_value {
             trend_value.is_touch_ema4 = true;
         } else {
@@ -177,7 +176,7 @@ fn check_ema7_touch_signal_bullish(
     let short_term_bullish = ema_value.ema1_value > ema_value.ema2_value
         && ema_value.ema2_value > ema_value.ema3_value
         && ema_value.ema3_value > ema_value.ema4_value;
-    
+
     let long_term_bearish = ema_value.ema4_value < ema_value.ema5_value
         && ema_value.ema5_value < ema_value.ema6_value
         && ema_value.ema6_value < ema_value.ema7_value;
@@ -200,7 +199,7 @@ fn check_ema7_touch_signal_bearish(
     let short_term_bearish = ema_value.ema1_value < ema_value.ema2_value
         && ema_value.ema2_value < ema_value.ema3_value
         && ema_value.ema3_value < ema_value.ema4_value;
-    
+
     let long_term_bullish = ema_value.ema4_value > ema_value.ema5_value
         && ema_value.ema5_value > ema_value.ema6_value
         && ema_value.ema6_value > ema_value.ema7_value;
@@ -261,19 +260,15 @@ pub fn calculate_dynamic_pullback_threshold(_data_items: &[CandleItem]) -> f64 {
 }
 
 /// 获取有效的RSI
-pub fn get_valid_rsi(
-    data_items: &[CandleItem],
-    rsi_value: f64,
-    ema_value: EmaSignalValue,
-) -> f64 {
+pub fn get_valid_rsi(data_items: &[CandleItem], rsi_value: f64, ema_value: EmaSignalValue) -> f64 {
     // 如果当前k线价格波动比较大，且k线的实体部分占比大于80%,
     // 表明当前k线为大阳线或者大阴线，则不使用rsi指标,因为大概率趋势还会继续
-    let is_big_k_line = IsBigKLineIndicator::new(70.0)
-        .is_big_k_line(data_items.last().expect("数据不能为空"));
-    
+    let is_big_k_line =
+        IsBigKLineIndicator::new(70.0).is_big_k_line(data_items.last().expect("数据不能为空"));
+
     if is_big_k_line {
         50.0
     } else {
         rsi_value
     }
-} 
+}

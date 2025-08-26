@@ -1,3 +1,2 @@
-pub mod service;
 mod enums;
-
+pub mod service;

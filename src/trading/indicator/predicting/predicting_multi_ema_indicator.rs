@@ -119,7 +119,10 @@ mod tests {
         let ema5_2 = indicator.get_prediction_for_period(5).unwrap();
         println!("EMA 5 Touch Price 2: {}", ema5_2);
         // 使用近似比较代替字符串比较
-        assert!((ema5_2 - 18.0340).abs() < F64_EPSILON, "EMA5 value mismatch"); // 假设精确值为 18.0340
+        assert!(
+            (ema5_2 - 18.0340).abs() < F64_EPSILON,
+            "EMA5 value mismatch"
+        ); // 假设精确值为 18.0340
 
         // 添加另一个价格并检查 EMA10
         // 需要重新初始化以获得精确的 EMA10 值
@@ -129,7 +132,10 @@ mod tests {
         let ema10_3 = indicator2.get_prediction_for_period(10).unwrap();
         println!("EMA 10 Touch Price 3: {}", ema10_3);
         // 使用近似比较代替字符串比较
-        assert!((ema10_3 - 16.1044).abs() < F64_EPSILON, "EMA10 value mismatch"); // 假设精确值为 16.1044
+        assert!(
+            (ema10_3 - 16.1044).abs() < F64_EPSILON,
+            "EMA10 value mismatch"
+        ); // 假设精确值为 16.1044
     }
 
     #[test]
@@ -152,7 +158,10 @@ mod tests {
         assert!(predictions_after_recalc.touch_prices.contains_key(&5));
         let ema5_recalc = indicator.get_prediction_for_period(5).unwrap();
         // EMA5 of (10,11,12,13,14) is the SMA = (10+11+12+13+14)/5 = 12.0
-        assert!((ema5_recalc - 12.0).abs() < F64_EPSILON, "EMA5 after reset mismatch");
+        assert!(
+            (ema5_recalc - 12.0).abs() < F64_EPSILON,
+            "EMA5 after reset mismatch"
+        );
     }
 
     #[test]

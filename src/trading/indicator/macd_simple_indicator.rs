@@ -1,14 +1,21 @@
+use crate::time_util;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use ta::indicators::MovingAverageConvergenceDivergence;
 use ta::Next;
 use tracing::warn;
-use crate::time_util;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
 
 pub struct MacdSimpleIndicator {}
 
 impl MacdSimpleIndicator {
-    pub fn calculate_macd(candles: &[CandlesEntity], fast_period: usize, slow_period: usize, signal_period: usize) -> Vec<(i64, f64, f64)> {
-        let mut macd = MovingAverageConvergenceDivergence::new(fast_period, slow_period, signal_period).unwrap();
+    pub fn calculate_macd(
+        candles: &[CandlesEntity],
+        fast_period: usize,
+        slow_period: usize,
+        signal_period: usize,
+    ) -> Vec<(i64, f64, f64)> {
+        let mut macd =
+            MovingAverageConvergenceDivergence::new(fast_period, slow_period, signal_period)
+                .unwrap();
         let mut macd_values = Vec::with_capacity(candles.len());
         for candle in candles {
             let price = candle.o.parse::<f64>().unwrap();

@@ -1,8 +1,8 @@
-use redis::AsyncCommands;
-use redis::aio::MultiplexedConnection;
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use clap::builder::TypedValueParser;
+use redis::aio::MultiplexedConnection;
+use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -14,7 +14,11 @@ pub struct RedisCandle {
 pub struct RedisOperations;
 
 impl RedisOperations {
-    pub async fn save_candles_to_redis(con: &mut MultiplexedConnection, key: &str, candles: &[RedisCandle]) -> Result<()> {
+    pub async fn save_candles_to_redis(
+        con: &mut MultiplexedConnection,
+        key: &str,
+        candles: &[RedisCandle],
+    ) -> Result<()> {
         let mut pipe = redis::pipe();
         for candle in candles {
             let timestamp: i64 = candle.ts;
@@ -26,7 +30,10 @@ impl RedisOperations {
         Ok(())
     }
 
-    pub async fn fetch_candles_from_redis(con: &mut MultiplexedConnection, key: &str) -> Result<Vec<RedisCandle>> {
+    pub async fn fetch_candles_from_redis(
+        con: &mut MultiplexedConnection,
+        key: &str,
+    ) -> Result<Vec<RedisCandle>> {
         // let data: Vec<(f64, f64)> = con.zrangebyscore_withscores(key, "-inf", "+inf").await?;
         let data: Vec<(f64, f64)> = con.zrange_withscores(key, 0, -1).await?;
         let mut candles: Vec<RedisCandle> = data

@@ -1,10 +1,10 @@
+use crate::time_util;
+use crate::trading::indicator::kdj_simple_indicator::{KdjSimpleIndicator, KDJ};
+use crate::trading::indicator::macd_simple_indicator::MacdSimpleIndicator;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
+use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
-use crate::time_util;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::indicator::kdj_simple_indicator::{KDJ, KdjSimpleIndicator};
-use crate::trading::indicator::macd_simple_indicator::MacdSimpleIndicator;
-use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SignalResult {
@@ -43,7 +43,15 @@ impl MacdKdjStrategy {
                 continue;
             }
             let signal_data = &candles_5m[i + 1 - min_data_length..=i];
-            let signal = Self::get_trade_signal(signal_data, kdj_period, signal_period, stop_loss_percent, position, entry_price, is_long);
+            let signal = Self::get_trade_signal(
+                signal_data,
+                kdj_period,
+                signal_period,
+                stop_loss_percent,
+                position,
+                entry_price,
+                is_long,
+            );
 
             entry_price = Self::process_signals(
                 &mut current_funds,
@@ -65,7 +73,17 @@ impl MacdKdjStrategy {
         }
 
         if position.abs() > 0.0 {
-            Self::final_close_trade(candles_5m, &mut current_funds, &mut position, initial_funds, &mut win_count, &mut loss_count, &mut total_profit, is_long, entry_price);
+            Self::final_close_trade(
+                candles_5m,
+                &mut current_funds,
+                &mut position,
+                initial_funds,
+                &mut win_count,
+                &mut loss_count,
+                &mut total_profit,
+                is_long,
+                entry_price,
+            );
         }
 
         let win_rate = if win_count + loss_count > 0 {
@@ -74,7 +92,10 @@ impl MacdKdjStrategy {
             0.0
         };
 
-        info!("Final Win rate: {}, Total Profit: {}", win_rate, total_profit);
+        info!(
+            "Final Win rate: {}, Total Profit: {}",
+            win_rate, total_profit
+        );
         (current_funds, win_rate, trade_count)
     }
 
@@ -88,7 +109,8 @@ impl MacdKdjStrategy {
         is_long: bool,
     ) -> SignalResult {
         let macd_values = MacdSimpleIndicator::calculate_macd(candles, 12, 26, 9);
-        let kdjs = KdjSimpleIndicator::calculate_kdj_with_bcwsma(candles, kdj_period, signal_period);
+        let kdjs =
+            KdjSimpleIndicator::calculate_kdj_with_bcwsma(candles, kdj_period, signal_period);
 
         let last_index = candles.len() - 1;
         let current_price = candles[last_index].c.parse::<f64>().unwrap_or(0.0);
@@ -105,10 +127,18 @@ impl MacdKdjStrategy {
         info!("ts:{:?},macd_golden_cross: {},macd_death_cross{}, kdj_golden_cross: {},kdj_death_cross:{}",
            time_util::mill_time_to_datetime(ts), macd_golden_cross, macd_death_cross, kdj_golden_cross,kdj_death_cross);
 
-        let should_buy = is_long && ((macd_golden_cross && kdj_golden_cross) || (macd_above_zero && kdj_golden_cross && !macd_death_cross));
-        let should_sell = is_long && ((macd_death_cross && kdj_death_cross) || (!macd_above_zero && kdj_death_cross) || (position > 0.0 && current_price < entry_price * (1.0 - stop_loss_percent)));
-        let should_short = !is_long && ((macd_death_cross && kdj_death_cross) || (!macd_above_zero && kdj_death_cross));
-        let should_cover = !is_long && ((macd_golden_cross && kdj_golden_cross) || (position > 0.0 && current_price > entry_price * (1.0 + stop_loss_percent)));
+        let should_buy = is_long
+            && ((macd_golden_cross && kdj_golden_cross)
+                || (macd_above_zero && kdj_golden_cross && !macd_death_cross));
+        let should_sell = is_long
+            && ((macd_death_cross && kdj_death_cross)
+                || (!macd_above_zero && kdj_death_cross)
+                || (position > 0.0 && current_price < entry_price * (1.0 - stop_loss_percent)));
+        let should_short = !is_long
+            && ((macd_death_cross && kdj_death_cross) || (!macd_above_zero && kdj_death_cross));
+        let should_cover = !is_long
+            && ((macd_golden_cross && kdj_golden_cross)
+                || (position > 0.0 && current_price > entry_price * (1.0 + stop_loss_percent)));
         let false_signal = !macd_above_zero && kdj_golden_cross;
 
         SignalResult {
@@ -143,13 +173,26 @@ impl MacdKdjStrategy {
             *funds = 0.0;
             *is_long = true;
             *trades += 1;
-            info!("Buy at time: {:?}, price: {}, position: {}", time_util::mill_time_to_datetime(timestamp), current_price, *position);
-        } else if signal.should_sell || (*position > 0.0 && current_price < entry_price * (1.0 - stop_loss_percent)) {
-            *funds += *position * current_price;  // Add the value of the position to the funds
+            info!(
+                "Buy at time: {:?}, price: {}, position: {}",
+                time_util::mill_time_to_datetime(timestamp),
+                current_price,
+                *position
+            );
+        } else if signal.should_sell
+            || (*position > 0.0 && current_price < entry_price * (1.0 - stop_loss_percent))
+        {
+            *funds += *position * current_price; // Add the value of the position to the funds
             let profit = *funds - initial_funds;
             *total_profit += profit;
             *position = 0.0;
-            info!("Sell at time: {:?}, price: {}, funds: {}, profit: {}",  time_util::mill_time_to_datetime(timestamp), current_price, *funds, profit);
+            info!(
+                "Sell at time: {:?}, price: {}, funds: {}, profit: {}",
+                time_util::mill_time_to_datetime(timestamp),
+                current_price,
+                *funds,
+                profit
+            );
             if profit > 0.0 {
                 *wins += 1;
             } else {
@@ -161,13 +204,26 @@ impl MacdKdjStrategy {
             *funds = 0.0;
             *is_long = false;
             *trades += 1;
-            info!("Short at time: {:?}, price: {}, position: {}",  time_util::mill_time_to_datetime(timestamp), current_price, *position);
-        } else if signal.should_cover || (*position > 0.0 && current_price > entry_price * (1.0 + stop_loss_percent)) {
-            *funds += *position * (2.0 * entry_price - current_price);  // Add the value of the position to the funds
+            info!(
+                "Short at time: {:?}, price: {}, position: {}",
+                time_util::mill_time_to_datetime(timestamp),
+                current_price,
+                *position
+            );
+        } else if signal.should_cover
+            || (*position > 0.0 && current_price > entry_price * (1.0 + stop_loss_percent))
+        {
+            *funds += *position * (2.0 * entry_price - current_price); // Add the value of the position to the funds
             let profit = *funds - initial_funds;
             *total_profit += profit;
             *position = 0.0;
-            info!("Cover at time: {:?}, price: {}, funds: {}, profit: {}",  time_util::mill_time_to_datetime(timestamp), current_price, *funds, profit);
+            info!(
+                "Cover at time: {:?}, price: {}, funds: {}, profit: {}",
+                time_util::mill_time_to_datetime(timestamp),
+                current_price,
+                *funds,
+                profit
+            );
             if profit > 0.0 {
                 *wins += 1;
             } else {
@@ -176,7 +232,11 @@ impl MacdKdjStrategy {
         } else if *position > 0.0 {
             println!("fetching fib levels {:?}", fib_levels);
             for &level in fib_levels.iter() {
-                println!("original_entry_price: {},current:{}", original_entry_price * (1.0 + level), current_price);
+                println!(
+                    "original_entry_price: {},current:{}",
+                    original_entry_price * (1.0 + level),
+                    current_price
+                );
                 if *is_long && current_price >= original_entry_price * (1.0 + level) {
                     let sell_amount = *position * 0.1;
                     *funds += sell_amount * current_price;
@@ -209,14 +269,20 @@ impl MacdKdjStrategy {
         if let Some(last_candle) = candles_5m.last() {
             let last_price = last_candle.c.parse::<f64>().unwrap_or(0.0);
             if is_long {
-                *funds += *position * last_price;  // Add the value of the position to the funds
+                *funds += *position * last_price; // Add the value of the position to the funds
             } else {
-                *funds += *position * (2.0 * entry_price - last_price);  // Add the value of the position to the funds
+                *funds += *position * (2.0 * entry_price - last_price); // Add the value of the position to the funds
             }
             let profit = *funds - initial_funds;
             *total_profit += profit;
             *position = 0.0;
-            info!("Final {} at price: {}, funds: {}, profit: {}", if is_long { "sell" } else { "cover" }, last_price, *funds, profit);
+            info!(
+                "Final {} at price: {}, funds: {}, profit: {}",
+                if is_long { "sell" } else { "cover" },
+                last_price,
+                *funds,
+                profit
+            );
             if profit > 0.0 {
                 *wins += 1;
             } else {

@@ -249,8 +249,8 @@ impl VegasStrategy {
 
         // 可选：添加详细信息到结果中
         if signal_result.should_buy || signal_result.should_sell {
-            // signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
-            // signal_result.single_result = Some(json!(conditions).to_string());
+            signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
+            signal_result.single_result = Some(json!(conditions).to_string());
         }
 
         signal_result

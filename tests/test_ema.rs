@@ -21,8 +21,13 @@ async fn test_ema() -> Result<()> {
 
     let mut ema1 = ExponentialMovingAverage::new(12).unwrap();
     let mut ema2 = ExponentialMovingAverage::new(676).unwrap();
-    let candles =
-        trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "1H", 3200, Some(select_time)).await?;
+    let candles = trading::task::basic::get_candle_data_confirm(
+        "BTC-USDT-SWAP",
+        "1H",
+        3200,
+        Some(select_time),
+    )
+    .await?;
 
     let mut ema1_value = 0.00;
     let mut ema2_value = 0.00;

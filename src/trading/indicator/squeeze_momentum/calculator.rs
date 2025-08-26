@@ -1,19 +1,22 @@
-use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use ta::{
     indicators::{BollingerBands, SimpleMovingAverage, TrueRange},
     Close, DataItem, High, Low, Next,
 };
 use tracing::info;
 
-use crate::trading::{indicator::squeeze_momentum::service::calculate_linreg, strategy::strategy_common::BasicRiskStrategyConfig};
 use crate::trading::indicator::squeeze_momentum::squeeze_config::{
     MomentumColor, SqueezeConfig, SqueezeResult, SqueezeState,
 };
 use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::strategy_common::{BackTestResult, SignalResult, TradeRecord};
 use crate::trading::strategy::strategy_common;
+use crate::trading::strategy::strategy_common::{BackTestResult, SignalResult, TradeRecord};
+use crate::trading::{
+    indicator::squeeze_momentum::service::calculate_linreg,
+    strategy::strategy_common::BasicRiskStrategyConfig,
+};
 
 pub struct SqueezeCalculator {
     config: SqueezeConfig,
@@ -61,7 +64,14 @@ impl SqueezeCalculator {
         }
     }
 
-    pub fn calculate_momentum(&self, closes: &[f64], highs: &[f64], lows: &[f64], period_kc_ma: f64, more_close: &[f64]) -> Result<Vec<f64>> {
+    pub fn calculate_momentum(
+        &self,
+        closes: &[f64],
+        highs: &[f64],
+        lows: &[f64],
+        period_kc_ma: f64,
+        more_close: &[f64],
+    ) -> Result<Vec<f64>> {
         let period_highest = highs
             .iter()
             .max_by(|a, b| a.partial_cmp(b).unwrap())
@@ -103,13 +113,17 @@ impl SqueezeCalculator {
         let mut linreg_values: Vec<f64> = Vec::with_capacity(momentum_source.len());
         // 逐个计算 momentum_source 中每个数据的线性回归值
         for i in 0..momentum_source.len() {
-            let start = if i > self.config.kc_length { i - self.config.kc_length + 1 } else { 0 };  // 计算线性回归的起始索引
-            let end = i + 1;  // 线性回归的结束索引是当前元素的索引
+            let start = if i > self.config.kc_length {
+                i - self.config.kc_length + 1
+            } else {
+                0
+            }; // 计算线性回归的起始索引
+            let end = i + 1; // 线性回归的结束索引是当前元素的索引
             let subset = &momentum_source[start..end];
             // 计算当前子集的线性回归值
             // println!("subset:{:?}", subset);
             let linreg_value = calculate_linreg(&subset, self.config.kc_length, 0).unwrap_or(0.00);
-            linreg_values.push(linreg_value);  //将计算得到的线性回归值加入结果向量
+            linreg_values.push(linreg_value); //将计算得到的线性回归值加入结果向量
         }
         Ok(linreg_values)
     }
@@ -176,7 +190,10 @@ impl SqueezeCalculator {
         } else {
             SqueezeState::NoSqueeze
         };
-        let momentum_color = self.determine_momentum_color(momentum.last().unwrap().clone(), momentum.get(momentum.len() - 2).copied());
+        let momentum_color = self.determine_momentum_color(
+            momentum.last().unwrap().clone(),
+            momentum.get(momentum.len() - 2).copied(),
+        );
         Ok(SqueezeResult {
             timestamp: 0, // 需要外部设置
             close: *closes.last().unwrap(),
@@ -191,9 +208,19 @@ impl SqueezeCalculator {
     }
 
     pub fn convert_to_data_items(&self, prices: &Vec<CandlesEntity>) -> Vec<DataItem> {
-        prices.iter().map(|candle| {
-            DataItem::builder().open(candle.o.parse().unwrap()).high(candle.h.parse().unwrap()).low(candle.l.parse().unwrap()).close(candle.c.parse().unwrap()).volume(0.0).build().unwrap()
-        }).collect()
+        prices
+            .iter()
+            .map(|candle| {
+                DataItem::builder()
+                    .open(candle.o.parse().unwrap())
+                    .high(candle.h.parse().unwrap())
+                    .low(candle.l.parse().unwrap())
+                    .close(candle.c.parse().unwrap())
+                    .volume(0.0)
+                    .build()
+                    .unwrap()
+            })
+            .collect()
     }
 
     pub fn get_trade_signal(&mut self, data: &[CandlesEntity]) -> SignalResult {
@@ -212,7 +239,7 @@ impl SqueezeCalculator {
         let data_items = self.convert_to_data_items(&data.to_vec());
         let result_squeeze = self.calculate(&data_items);
         if result_squeeze.is_err() {
-            return signal_result
+            return signal_result;
         };
         if let Ok(res) = result_squeeze {
             signal_result.open_price = res.close;

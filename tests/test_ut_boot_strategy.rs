@@ -2,13 +2,12 @@ use anyhow::Result;
 use dotenv::dotenv;
 use ta::Next;
 
-use rust_quant::{
-    app_config::db::init_db, time_util, trading,
-    trading::model::market::candles::CandlesEntity,
-};
 use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading::indicator::bar::Bar;
 use rust_quant::trading::strategy::ut_boot_strategy::UtBootStrategy;
+use rust_quant::{
+    app_config::db::init_db, time_util, trading, trading::model::market::candles::CandlesEntity,
+};
 
 #[tokio::test]
 async fn test_atr() -> Result<()> {
@@ -23,7 +22,8 @@ async fn test_atr() -> Result<()> {
     let period = 2;
 
     // 获取K线数据
-    let mysql_candles: Vec<CandlesEntity> = trading::task::basic::get_candle_data_confirm(inst_id, time, 100, None).await?;
+    let mysql_candles: Vec<CandlesEntity> =
+        trading::task::basic::get_candle_data_confirm(inst_id, time, 100, None).await?;
     println!("{:#?}", mysql_candles);
 
     // 确保有数据
@@ -35,8 +35,7 @@ async fn test_atr() -> Result<()> {
     let mut stategy = UtBootStrategy::new(2.0, 1, 10, false);
     let result = stategy.get_trade_signal(&mysql_candles);
 
-    println!("result:{:?}",result);
-
+    println!("result:{:?}", result);
 
     Ok(())
 }

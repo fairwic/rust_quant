@@ -51,7 +51,6 @@ use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
 use crate::trading::order::swap_ordr::SwapOrder;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::get_hash_key;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::get_vegas_indicator_values;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::update_candle_items;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::update_vegas_indicator_values;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::{
@@ -71,6 +70,7 @@ use crate::{trading, CandleItem};
 use anyhow::Result;
 use futures::future::join_all;
 use hmac::digest::typenum::op;
+use log::debug;
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::trade::OkxTrade;
 use okx::dto::trade_dto::TdModeEnum;
@@ -146,17 +146,7 @@ pub async fn save_log(
     // 构建日志对象阶段
     let back_test_log = BackTestLog {
         // 需要确定策略类型，这里使用参数传入或推断
-        strategy_type: strategy_config_string
-            .as_ref()
-            .and_then(|s| {
-                if s.contains("Vegas") {
-                    Some("Vegas")
-                } else {
-                    None
-                }
-            })
-            .unwrap_or("Unknown")
-            .to_string(),
+        strategy_type: "vegas".to_string(),
         inst_type: inst_id.parse().unwrap(),
         time: time.parse().unwrap(),
         final_fund: back_test_result.funds.to_string(), // 确保字段名称正确
@@ -182,7 +172,7 @@ pub async fn save_log(
         .add(&back_test_log)
         .await?;
 
-    if false {
+    if true {
         // 保存详细交易记录
         if !back_test_result.trade_records.is_empty() {
             save_test_detail(
@@ -291,14 +281,7 @@ pub async fn test_random_strategy_with_config(
     );
 
     // 获取并转换K线数据
-    let data_load_start = Instant::now();
     let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
-    let data_load_duration = data_load_start.elapsed();
-    info!(
-        "[性能跟踪] K线数据加载完成 - 耗时: {}ms, K线数量: {}",
-        data_load_duration.as_millis(),
-        arc_candle_data.len()
-    );
 
     // 批量处理参数组合
     let mut processed_count = 0;
@@ -332,10 +315,9 @@ pub async fn test_random_strategy_with_config(
     let batch_processing_duration = batch_processing_start.elapsed();
     let total_duration = start_time.elapsed();
     info!(
-        "[性能跟踪] test_random_strategy_with_config 完成 - 总耗时: {}ms, 参数生成: {}ms, 数据加载: {}ms, 批量处理: {}ms, 处理组合数: {}",
+        "[性能跟踪] test_random_strategy_with_config 完成 - 总耗时: {}ms, 参数生成: {}ms, 批量处理: {}ms, 处理组合数: {}",
         total_duration.as_millis(),
         param_gen_duration.as_millis(),
-        data_load_duration.as_millis(),
         batch_processing_duration.as_millis(),
         total_count
     );
@@ -422,8 +404,8 @@ impl Default for VegasBackTestConfig {
         Self {
             max_concurrent: 15,
             candle_limit: 20000,
-            enable_random_test: true,
-            enable_specified_test: false,
+            enable_random_test: false,
+            enable_specified_test: true,
         }
     }
 }
@@ -491,19 +473,12 @@ pub async fn vegas_back_test_with_config(
     }
 
     if config.enable_specified_test {
-        let specified_start = Instant::now();
-        info!("[性能跟踪] 开始执行指定策略测试");
         if let Err(e) = test_specified_strategy(inst_id, time, semaphore.clone()).await {
             error!("指定策略测试失败: {}", e);
             test_results.push(("specified", false));
         } else {
             test_results.push(("specified", true));
         }
-        let specified_duration = specified_start.elapsed();
-        info!(
-            "[性能跟踪] 指定策略测试完成 - 耗时: {}ms",
-            specified_duration.as_millis()
-        );
     }
 
     // 汇总测试结果
@@ -614,13 +589,7 @@ pub async fn test_specified_strategy(
     );
 
     // 加载K线数据阶段
-    let data_load_start = Instant::now();
     let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
-    let data_load_duration = data_load_start.elapsed();
-    info!(
-        "[性能跟踪] K线数据加载完成 - 耗时: {}ms",
-        data_load_duration.as_millis()
-    );
 
     // 执行回测阶段
     let backtest_start = Instant::now();
@@ -629,10 +598,9 @@ pub async fn test_specified_strategy(
 
     let total_duration = start_time.elapsed();
     info!(
-        "[性能跟踪] test_specified_strategy 完成 - 总耗时: {}ms, 配置获取: {}ms, 数据加载: {}ms, 回测执行: {}ms",
+        "[性能跟踪] test_specified_strategy 完成 - 总耗时: {}ms, 配置获取: {}ms, 回测执行: {}ms",
         total_duration.as_millis(),
         config_get_duration.as_millis(),
-        data_load_duration.as_millis(),
         backtest_duration.as_millis()
     );
     Ok(())
@@ -961,7 +929,6 @@ pub async fn run_strategy_job(
     inst_id: &str,
     time: &str,
     strategy: &StrategyConfig,
-    _cell: &OnceCell<RwLock<HashMap<String, ArcVegasIndicatorValues>>>,
 ) -> Result<(), anyhow::Error> {
     //实际执行
     info!("run_strategy_job开始: inst_id={}, time={}", inst_id, time);
@@ -995,7 +962,6 @@ pub async fn run_ready_to_order_with_manager(
 ) -> anyhow::Result<()> {
     // 常量定义
     const MAX_HISTORY_SIZE: usize = 10000;
-
     // 1. 预处理：获取哈希键和管理器
     let strategy_type = StrategyType::Vegas.to_string();
     let key = get_hash_key(inst_id, period, &strategy_type);
@@ -1007,30 +973,38 @@ pub async fn run_ready_to_order_with_manager(
         .get_candle_data_last(inst_id, period)
         .await
         .map_err(|e| anyhow!("获取最新K线数据失败: {}", e))?;
-
+    println!("candle_list:{:?}", candle_list);
     if candle_list.is_empty() {
         return Err(anyhow!("获取的K线列表为空"));
     }
 
     let new_candle_item = parse_candle_to_data_item(&candle_list[0]);
 
-    // 3. 读取现有数据并验证
-    let current_data = match manager.get(&key).await {
-        Some(value) => value,
-        None => {
-            return Err(anyhow!("没有找到对应的策略值: {}", key));
-        }
-    };
+    // 3. 同键互斥，读取快照并验证
+    let key_mutex = manager.acquire_key_mutex(&key).await;
+    let _guard = key_mutex.lock().await;
+
+    let (mut last_candles_vec, mut old_indicator_combines, old_time) =
+        match manager.get_snapshot_last_n(&key, MAX_HISTORY_SIZE).await {
+            Some((v, indicators, ts)) => (v, indicators, ts),
+            None => {
+                return Err(anyhow!("没有找到对应的策略值: {}", key));
+            }
+        };
+    // 转为 VecDeque 以保持原逻辑（并保证后续 push/pop_front 性能）
+    let mut new_candle_items: VecDeque<CandleItem> = last_candles_vec.into_iter().collect();
 
     // 4. 验证时间戳，检查是否有新数据
-    let old_time = current_data.timestamp;
     let new_time = new_candle_item.ts;
 
     let is_update = new_candle_item.confirm == 1;
     //如果最新数据确认了的。
     if is_update {
         if old_time == new_time {
-            info!("未检测到新的K线数据，等待下次更新");
+            info!(
+                "未检测到新的K线数据，等待下次更新 inst_id:{:?} period;{:?}",
+                inst_id, period
+            );
             return Ok(());
         }
         // 验证时间差是否为一个周期（记录警告，中断执行）
@@ -1058,15 +1032,17 @@ pub async fn run_ready_to_order_with_manager(
         }
     }
 
-    let mut old_candle_items = current_data.candle_item;
-    let mut old_indicator_combines = current_data.indicator_combines.clone();
-
-    let mut new_candle_items = old_candle_items.clone();
-    // 5. 准备更新数据
-    new_candle_items.push_back(new_candle_item.clone());
     // 6. 计算最新指标值
     let new_indicator_values =
         strategy_common::get_multi_indicator_values(&mut old_indicator_combines, &new_candle_item);
+    if inst_id == "BTC-USDT-SWAP" {
+        println!(
+            "new_indicator_values{:?}",
+            json!(new_indicator_values).to_string()
+        );
+    }
+    // 5. 准备更新数据
+    new_candle_items.push_back(new_candle_item.clone());
 
     if is_update {
         // 限制历史数据大小 - 使用VecDeque的高效操作
@@ -1077,26 +1053,29 @@ pub async fn run_ready_to_order_with_manager(
             }
         }
 
-        // 7. 更新K线数据到管理器
+        // 7-8. 原子更新：同时写入K线与指标，避免中间态
         if let Err(e) = manager
-            .update_candle_items(&key, new_candle_items.clone())
+            .update_both(
+                &key,
+                new_candle_items.clone(),
+                old_indicator_combines.clone(),
+                new_candle_item.ts,
+            )
             .await
         {
-            return Err(anyhow!("更新K线数据失败: {}", e));
-        }
-
-        // 8. 更新指标值到管理器
-        if let Err(e) = manager
-            .update_indicator_values(&key, old_indicator_combines)
-            .await
-        {
-            return Err(anyhow!("更新指标值失败: {}", e));
+            return Err(anyhow!("原子更新指标与K线失败: {}", e));
         }
     }
 
     // 10. 计算交易信号
     // 将VecDeque转换为Vec,为了增加性能和部分场景需要，最后n根k线的情况，取最后N根,并保留原始排序，以供策略使用,
-    let candle_vec: Vec<CandleItem> = new_candle_items.iter().rev().take(10).cloned().collect();
+    let candle_vec: Vec<CandleItem> = new_candle_items
+        .iter()
+        .rev()
+        .take(10)
+        .cloned()
+        .rev()
+        .collect();
 
     let signal_result = strategy.strategy_config.get_trade_signal(
         &candle_vec,
@@ -1104,25 +1083,15 @@ pub async fn run_ready_to_order_with_manager(
         &SignalWeightsConfig::default(),
         &strategy.risk_config,
     );
-
-    info!(
-        "signal_result:{:?},ts:{}",
-        signal_result, new_candle_item.ts
-    );
-    //
-    //todo 异步记录日志
-    let signal_record = StrategyJobSignalLog {
-        inst_id: inst_id.parse().unwrap(),
-        time: period.parse().unwrap(),
-        strategy_type: StrategyType::Vegas.to_string(),
-        strategy_result: serde_json::to_string(&signal_result).unwrap(),
-    };
-    strategy_job_signal_log::StrategyJobSignalLogModel::new()
-        .await
-        .add(signal_record)
-        .await?;
+    println!("signal_result:{:?}", signal_result);
 
     if signal_result.should_buy || signal_result.should_sell {
+        info!(
+            "signal_result:{:?},ts:{}",
+            signal_result, new_candle_item.ts
+        );
+        //异步记录日志
+        save_signal_log(inst_id, period, &signal_result);
         //执行交易
         let risk_config = strategy.risk_config.clone();
         SwapOrder::new()
@@ -1135,6 +1104,42 @@ pub async fn run_ready_to_order_with_manager(
                 strategy.strategy_config_id,
             )
             .await?;
+    } else {
+        debug!(
+            "signal_result:{:?},ts:{}",
+            signal_result,
+            new_candle_items.back().unwrap().ts
+        );
     }
     Ok(())
+}
+
+pub fn save_signal_log(inst_id: &str, period: &str, signal_result: &SignalResult) {
+    // 异步记录日志（不阻塞下单），并移除 unwrap
+    let strategy_result_str = match serde_json::to_string(&signal_result) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("序列化 signal_result 失败: {}", e);
+            format!("{:?}", signal_result)
+        }
+    };
+    let signal_record = StrategyJobSignalLog {
+        inst_id: inst_id.to_string(),
+        time: period.to_string(),
+        strategy_type: StrategyType::Vegas.to_string(),
+        strategy_result: strategy_result_str,
+    };
+    //启动新线程执行（捕获所有 owned 数据，满足 'static）
+    let inst_id_owned = signal_record.inst_id.clone();
+    tokio::spawn(async move {
+        let res = strategy_job_signal_log::StrategyJobSignalLogModel::new()
+            .await
+            .add(signal_record)
+            .await;
+        if let Err(e) = res {
+            error!("写入策略信号日志失败: {}", e);
+        } else {
+            info!("写入策略信号日志成功: {}", inst_id_owned);
+        }
+    });
 }

@@ -110,10 +110,7 @@ impl CandleDomainServiceStateless {
     }
 
     /// 获取最后一条数据（无状态版本）
-    pub async fn get_last_candle(
-        inst_id: &str,
-        period: &str,
-    ) -> Result<Vec<CandlesEntity>> {
+    pub async fn get_last_candle(inst_id: &str, period: &str) -> Result<Vec<CandlesEntity>> {
         let dto = SelectCandleReqDto {
             inst_id: inst_id.to_string(),
             time_interval: period.to_string(),

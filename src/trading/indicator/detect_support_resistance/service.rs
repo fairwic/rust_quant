@@ -1,7 +1,9 @@
-use std::cmp::PartialEq;
-use serde::{Deserialize, Serialize};
 use crate::trading::indicator::candle::Candle;
-use crate::trading::indicator::detect_support_resistance::enums::{BreakoutType, LevelType, SupportResistance, TrendState};
+use crate::trading::indicator::detect_support_resistance::enums::{
+    BreakoutType, LevelType, SupportResistance, TrendState,
+};
+use serde::{Deserialize, Serialize};
+use std::cmp::PartialEq;
 
 /// 在检测过程中，对最近的 pivot 进行合并去噪
 fn merge_close_pivots(
@@ -42,7 +44,10 @@ pub fn calc_atr(candles: &[Candle], period: usize) -> Vec<f64> {
         let low = candles[i].low;
         let prev_close = candles[i - 1].close;
 
-        let tr = f64::max(high - low, f64::max((high - prev_close).abs(), (prev_close - low).abs()));
+        let tr = f64::max(
+            high - low,
+            f64::max((high - prev_close).abs(), (prev_close - low).abs()),
+        );
         tr_values.push(tr);
     }
 
@@ -62,8 +67,6 @@ pub fn calc_atr(candles: &[Candle], period: usize) -> Vec<f64> {
     atr_values
 }
 
-
-
 pub fn detect_support_resistance_with_bos_choch(
     candles: &[Candle],
     lookback: usize,
@@ -78,12 +81,12 @@ pub fn detect_support_resistance_with_bos_choch(
 
     for i in lookback..(candles.len() - lookback) {
         let current_high = candles[i].high;
-        let current_low  = candles[i].low;
+        let current_low = candles[i].low;
 
         let mut is_pivot_high = true;
-        let mut is_pivot_low  = true;
+        let mut is_pivot_low = true;
 
-        for j in (i - lookback)..=i+lookback {
+        for j in (i - lookback)..=i + lookback {
             if candles[j].high > current_high {
                 is_pivot_high = false;
             }

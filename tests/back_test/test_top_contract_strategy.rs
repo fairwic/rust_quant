@@ -33,7 +33,8 @@ async fn test_top_contract() -> Result<()> {
     };
     let fibonacci_level = ProfitStopLoss::get_fibonacci_level(inst_id, time);
 
-    let res = stra.run_test(&fibonacci_level, 10.00, false, true, true, false)
+    let res = stra
+        .run_test(&fibonacci_level, 10.00, false, true, true, false)
         .await;
 
     print!("res{:?}", res);

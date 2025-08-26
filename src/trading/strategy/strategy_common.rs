@@ -20,7 +20,7 @@ use chrono::{DateTime, Utc};
 use hmac::digest::typenum::Min;
 use okx::dto::common::PositionSide;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::time::Instant;
 use ta::indicators::BollingerBands;
 use ta::Close;
@@ -30,9 +30,9 @@ use ta::Low;
 use ta::Next;
 use ta::Open;
 use ta::Volume;
-use tracing::span;
 use tracing::Level;
 use tracing::{error, info};
+use tracing::{span, warn};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BackTestResult {
@@ -361,7 +361,7 @@ pub fn get_multi_indicator_values(
         vegas_indicator_signal_value.ema_values = calculate_ema(data_item, ema_indicator);
     }
     if ema_start.elapsed().as_millis() > 10 {
-        info!(duration_ms = ema_start.elapsed().as_millis(), "计算EMA");
+        warn!(duration_ms = ema_start.elapsed().as_millis(), "计算EMA");
     }
 
     // 计算volume - 避免重复调用data_item.v()
@@ -371,7 +371,7 @@ pub fn get_multi_indicator_values(
         vegas_indicator_signal_value.volume_value.volume_ratio = volume_indicator.next(volume);
     }
     if volume_start.elapsed().as_millis() > 10 {
-        info!(
+        warn!(
             duration_ms = volume_start.elapsed().as_millis(),
             "计算Volume"
         );
@@ -383,7 +383,7 @@ pub fn get_multi_indicator_values(
         vegas_indicator_signal_value.rsi_value.rsi_value = rsi_indicator.next(close_price);
     }
     if rsi_start.elapsed().as_millis() > 10 {
-        info!(duration_ms = rsi_start.elapsed().as_millis(), "计算RSI");
+        warn!(duration_ms = rsi_start.elapsed().as_millis(), "计算RSI");
     }
 
     // 计算bollinger - 同样避免重复调用
@@ -398,7 +398,7 @@ pub fn get_multi_indicator_values(
             .consecutive_touch_times = bollinger_value.consecutive_touch_times;
     }
     if bb_start.elapsed().as_millis() > 10 {
-        info!(
+        warn!(
             duration_ms = bb_start.elapsed().as_millis(),
             "计算Bollinger"
         );
@@ -531,8 +531,12 @@ pub fn run_back_test(
     use tracing::{info, warn};
     // 初始化阶段
     let mut trading_state = TradingState::default();
-    let mut candle_item_list = Vec::with_capacity(candles_list.len());
-    const MAX_LOOKBACK: usize = 5;
+    use std::collections::VecDeque;
+    let mut candle_item_list: VecDeque<CandleItem> = VecDeque::with_capacity(candles_list.len());
+    // 基于指标组合动态计算回看窗口
+    let dynamic_lookback = indicator_combine
+        .max_required_lookback()
+        .max(min_data_length);
 
     let loop_start = Instant::now();
     for (i, candle) in candles_list.iter().enumerate() {
@@ -541,13 +545,19 @@ pub fn run_back_test(
         let mut multi_indicator_values = get_multi_indicator_values(indicator_combine, &candle);
 
         // 将新数据添加到列表，如果超过最大回溯期，删除最旧的数据
-        candle_item_list.push(candle.clone());
-        if candle_item_list.len() > MAX_LOOKBACK {
-            candle_item_list.remove(0);
+        candle_item_list.push_back(candle.clone());
+        if candle_item_list.len() > dynamic_lookback {
+            let _ = candle_item_list.pop_front();
         }
-
         // 计算交易信号
-        let mut signal = strategy(&candle_item_list, &mut multi_indicator_values);
+        // 在热身期内不生成交易信号
+        // if candle_item_list.len() < dynamic_lookback {
+        //     continue;
+        // }
+        let mut signal = strategy(
+            candle_item_list.make_contiguous(),
+            &mut multi_indicator_values,
+        );
 
         // 处理交易信号前检查是否值得处理（性能优化）
         let should_process_signal = signal.should_buy
@@ -594,10 +604,13 @@ pub fn parse_candle_to_data_item(candle: &CandlesEntity) -> CandleItem {
         .unwrap()
 }
 
-fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list: &Vec<CandleItem>) {
+fn finalize_trading_state(
+    trading_state: &mut TradingState,
+    candle_item_list: &VecDeque<CandleItem>,
+) {
     if trading_state.trade_position.is_some() {
         let mut trade_position = trading_state.trade_position.clone().unwrap();
-        let last_candle = candle_item_list.last().unwrap();
+        let last_candle = candle_item_list.back().unwrap();
         let last_price = last_candle.c;
         trade_position.close_price = Some(last_price);
 
@@ -639,7 +652,7 @@ pub fn check_risk_config(
     mut trading_state: TradingState,
     signal: &SignalResult,
     candle: &CandleItem,
-    candle_item_list: &Vec<CandleItem>,
+    candle_item_list: &VecDeque<CandleItem>,
     i: usize,
 ) -> TradingState {
     let current_open_price = signal.open_price;
@@ -717,17 +730,17 @@ pub fn check_risk_config(
 
     // 计算盈亏率
     let profit_pct = match trade_position.trade_side {
-        TradeSide::Long => (current_open_price - entry_price) / entry_price,
+        TradeSide::Long => (current_close_price - entry_price) / entry_price,
         TradeSide::Short => {
-            (entry_price - current_open_price) / entry_price // 做空的盈亏计算
+            (entry_price - current_close_price) / entry_price // 做空的盈亏计算
         }
         _ => 0.0,
     };
 
     //计算盈亏
     let profit = match trade_position.trade_side {
-        TradeSide::Long => (current_open_price - entry_price) * trade_position.position_nums,
-        TradeSide::Short => (entry_price - current_open_price) * trade_position.position_nums,
+        TradeSide::Long => (current_close_price - entry_price) * trade_position.position_nums,
+        TradeSide::Short => (entry_price - current_close_price) * trade_position.position_nums,
         _ => 0.0,
     };
 
@@ -823,7 +836,7 @@ pub fn deal_signal(
     signal: &mut SignalResult,
     candle: &CandleItem,
     risk_config: BasicRiskStrategyConfig,
-    candle_item_list: &Vec<CandleItem>,
+    candle_item_list: &VecDeque<CandleItem>,
     i: usize,
 ) -> TradingState {
     if signal.should_buy || signal.should_sell {
@@ -848,7 +861,7 @@ pub fn deal_signal(
                 trading_state,
                 signal,
                 candle,
-                &candle_item_list,
+                candle_item_list,
                 i,
             );
         } else if trading_state.last_signal_result.is_some() {
@@ -1064,11 +1077,6 @@ fn open_long_position(
         temp_trade_position.touch_take_profit_price =
             Some(signal.open_price + (candle.h - candle.l));
     }
-    if candle.ts() == 1736208000000 {
-        println!("candle.ts: {:?}", candle);
-        println!("risk_config: {:?}", risk_config);
-        println!("temp_trade_position: {:?}", temp_trade_position);
-    }
 
     state.trade_position = Some(temp_trade_position);
     state.open_position_times += 1;
@@ -1137,7 +1145,6 @@ fn open_short_position(
 /// 记录交易入场
 fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
     //批量回测的时候不进行记录
-    return;
     let trade_position = state.trade_position.clone().unwrap();
     state.trade_records.push(TradeRecord {
         option_type,
@@ -1215,7 +1222,6 @@ fn record_trade_exit(
     closing_quantity: f64, // Add parameter for quantity being closed
 ) {
     let trade_position = state.trade_position.clone().unwrap();
-    return;
     state.trade_records.push(TradeRecord {
         option_type: "close".to_string(),
         open_position_time: trade_position.open_position_time.clone(),

@@ -1,13 +1,15 @@
-use std::cmp::{max, min};
-use std::fmt::{Display, Formatter};
+use crate::trading::indicator::atr::ATR;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
+use crate::trading::strategy::strategy_common::{
+    run_back_test, BackTestResult, SignalResult, TradeRecord,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::cmp::{max, min};
+use std::fmt::{Display, Formatter};
 use ta::indicators::ExponentialMovingAverage;
 use ta::Next;
 use tracing::warn;
-use crate::trading::indicator::atr::ATR;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::strategy_common::{BackTestResult, run_back_test, SignalResult, TradeRecord};
 
 use super::strategy_common::BasicRiskStrategyConfig;
 
@@ -20,11 +22,13 @@ pub struct UtBootStrategy {
 }
 impl Display for UtBootStrategy {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "key_value:{},atr_period:{},ema:{},heikin_ashi:{}", self.key_value, self.atr_period, self.ema_period, self.heikin_ashi)
+        write!(
+            f,
+            "key_value:{},atr_period:{},ema:{},heikin_ashi:{}",
+            self.key_value, self.atr_period, self.ema_period, self.heikin_ashi
+        )
     }
 }
-
-
 
 impl UtBootStrategy {
     pub fn new(key_value: f64, ema_period: usize, atr_period: usize, is_heikin_ashi: bool) -> Self {
@@ -43,14 +47,20 @@ impl UtBootStrategy {
     pub fn get_volatility_ratio(candles_5m: &[CandlesEntity], volatility_period: usize) -> f64 {
         // 新增1：波动率自适应系数（需在循环外初始化）
         let volatility_ratio = 1.0;
-        if candles_5m.len() >= volatility_period { // 计算周期波动率
-            let returns = candles_5m.iter().map(|c| (c.c.parse::<f64>().unwrap_or(0.0) / c.o.parse::<f64>().unwrap_or(1.0)).ln()).collect::<Vec<_>>();
-            let stdev = returns.iter().fold(0.0, |acc, &x| acc + x.powi(2)).sqrt() / (returns.len() as f64).sqrt();
-            return 1.0 + stdev * 3.0 // 波动越大系数越高
+        if candles_5m.len() >= volatility_period {
+            // 计算周期波动率
+            let returns = candles_5m
+                .iter()
+                .map(|c| {
+                    (c.c.parse::<f64>().unwrap_or(0.0) / c.o.parse::<f64>().unwrap_or(1.0)).ln()
+                })
+                .collect::<Vec<_>>();
+            let stdev = returns.iter().fold(0.0, |acc, &x| acc + x.powi(2)).sqrt()
+                / (returns.len() as f64).sqrt();
+            return 1.0 + stdev * 3.0; // 波动越大系数越高
         };
         volatility_ratio
     }
-
 
     pub fn get_trade_signal(&self, candles_5m: &[CandlesEntity]) -> SignalResult {
         let mut atr = ATR::new(self.atr_period).unwrap(); // 初始化ATR指标
@@ -70,7 +80,7 @@ impl UtBootStrategy {
             signal_kline_stop_loss_price: None,
             best_take_profit_price: None,
             ts,
-            single_value:None,
+            single_value: None,
             single_result: None,
             best_open_price: None,
         };
@@ -82,7 +92,11 @@ impl UtBootStrategy {
         //获取最小k线
         let min_single_len = self.get_min_single_length();
         if candles_5m.len() < min_single_len {
-            warn!("数据不满足最小k线 candle_len:{},mim_length:{}",candles_5m.len(),min_single_len);
+            warn!(
+                "数据不满足最小k线 candle_len:{},mim_length:{}",
+                candles_5m.len(),
+                min_single_len
+            );
             return sing_result;
         }
         // 确保至少有 atr_period + 1 根 K 线
@@ -119,11 +133,21 @@ impl UtBootStrategy {
                 // let n_loss = 0.00;
                 xatr_trailing_stop = if i == 0 {
                     current_price
-                } else if current_price > prev_xatr_trailing_stop && candles_5m[start_index + i - 1].c.parse::<f64>().unwrap_or(0.0) > prev_xatr_trailing_stop
+                } else if current_price > prev_xatr_trailing_stop
+                    && candles_5m[start_index + i - 1]
+                        .c
+                        .parse::<f64>()
+                        .unwrap_or(0.0)
+                        > prev_xatr_trailing_stop
                 {
                     let new_stop = current_price - n_loss;
                     prev_xatr_trailing_stop.max(new_stop)
-                } else if current_price < prev_xatr_trailing_stop && candles_5m[start_index + i - 1].c.parse::<f64>().unwrap_or(0.0) < prev_xatr_trailing_stop
+                } else if current_price < prev_xatr_trailing_stop
+                    && candles_5m[start_index + i - 1]
+                        .c
+                        .parse::<f64>()
+                        .unwrap_or(0.0)
+                        < prev_xatr_trailing_stop
                 {
                     let new_stop = current_price + n_loss;
                     prev_xatr_trailing_stop.min(new_stop)
@@ -139,8 +163,10 @@ impl UtBootStrategy {
                 //     prev_ema_value, prev_xatr_trailing_stop
                 // );
 
-                let above = ema_value > xatr_trailing_stop && prev_ema_value <= prev_xatr_trailing_stop;
-                let below = ema_value < xatr_trailing_stop && prev_ema_value >= prev_xatr_trailing_stop;
+                let above =
+                    ema_value > xatr_trailing_stop && prev_ema_value <= prev_xatr_trailing_stop;
+                let below =
+                    ema_value < xatr_trailing_stop && prev_ema_value >= prev_xatr_trailing_stop;
                 prev_ema_value = ema_value; // 保存当前EMA值为下一次迭代的前一个EMA值
 
                 should_buy = current_price > xatr_trailing_stop && above;
@@ -161,13 +187,12 @@ impl UtBootStrategy {
             open_price: price,
             signal_kline_stop_loss_price: None,
             ts,
-            single_value:None,
-            single_result:None,
+            single_value: None,
+            single_result: None,
             best_open_price: None,
             best_take_profit_price: None,
         }
     }
-
 
     // /// 运行回测
     // pub async fn run_test(

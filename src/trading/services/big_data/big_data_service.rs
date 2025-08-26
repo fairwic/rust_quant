@@ -4,11 +4,11 @@ use crate::trading::model::big_data::take_volume_contract::{
 };
 use chrono::Utc;
 use log::info;
+use okx::api::api_trait::OkxApiTrait;
+use okx::{Error, OkxBigData};
 use redis::Commands;
 use std::time::Duration;
 use tracing::debug;
-use okx::{Error, OkxBigData};
-use okx::api::api_trait::OkxApiTrait;
 pub struct BigDataContractService {}
 
 impl BigDataContractService {
@@ -81,16 +81,17 @@ impl BigDataContractService {
         period: &str,
         begin: &Option<String>,
         end: &Option<String>,
-    ) -> Result<Vec<Vec<String>>,Error> {
-        OkxBigData::from_env()?.get_taker_volume_contract(
-            inst_id,
-            Some(period),
-            Some("2"),
-            begin.as_deref(),
-            end.as_deref(),
-            Some("100"),
-        )
-        .await
+    ) -> Result<Vec<Vec<String>>, Error> {
+        OkxBigData::from_env()?
+            .get_taker_volume_contract(
+                inst_id,
+                Some(period),
+                Some("2"),
+                begin.as_deref(),
+                end.as_deref(),
+                Some("100"),
+            )
+            .await
     }
 
     // 同步 Okx 数据并插入

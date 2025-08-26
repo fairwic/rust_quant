@@ -11,7 +11,12 @@ members = ["okx"]
 
 [workspace.dependencies]
 # okx = { path = "./okx" }
-tokio = { version = "1.37.0", features = ["rt", "rt-multi-thread", "macros", "full"] }
+tokio = { version = "1.37.0", features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "full",
+] }
 reqwest = "0.11.27"
 serde = { version = "1.0.202", features = ["derive"] }
 serde_json = "1.0.117"
@@ -26,7 +31,9 @@ thiserror = "1.0.61"
 
 rbs = { version = "4.5" }
 #rbdc-sqlite = { version = "4.5", default-features = false, features = ["tls-native-tls"] }
-rbdc-mysql = { version = "4.5", default-features = false, features = ["tls-native-tls"] }
+rbdc-mysql = { version = "4.5", default-features = false, features = [
+    "tls-native-tls",
+] }
 #rbdc-pg={version="4.5", default-features = false, features = ["tls-native-tls"]}
 #rbdc-mssql={version="4.5", default-features = false, features = ["tls-native-tls"]}
 rbatis = { version = "4.5", features = ["debug_mode"] }
@@ -78,7 +85,9 @@ once_cell = "1.19.0"
 #rbdc-mssql={version="4.5", default-features = false, features = ["tls-native-tls"]}
 rbatis = { version = "4.5" }
 #rbdc-sqlite = { version = "4.5", default-features = false, features = ["tls-native-tls"] }
-rbdc-mysql = { version = "4.5", default-features = false, features = ["tls-native-tls"] }
+rbdc-mysql = { version = "4.5", default-features = false, features = [
+    "tls-native-tls",
+] }
 
 rbs = { version = "4.5" }
 redis = { version = "0.25.3", features = ["aio", "tokio-comp"] }
@@ -88,7 +97,12 @@ serde_json = "1.0.117"
 sha2 = "0.10.8"
 ta = "0.5.0"
 thiserror = "1.0.61"
-tokio = { version = "1.37.0", features = ["rt", "rt-multi-thread", "macros", "full"] }
+tokio = { version = "1.37.0", features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "full",
+] }
 
 tokio-retry = "0.3.0"
 
@@ -97,7 +111,7 @@ tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
 tracing = "0.1"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.0", features = ["env-filter", "json"] }
-ndarray = "0.15"  # 用于数值计算
+ndarray = "0.15"                                                              # 用于数值计算
 
 technical_indicators = "0.5.0"
 tech_analysis = "0.1.1"
@@ -110,5 +124,4 @@ float-cmp = "0.10.0"
 # 定时任务调度库
 tokio-cron-scheduler = { version = "0.10.0", features = ["signal"] }
 uuid = { version = "1.4.1", features = ["v4"] }
-
-
+dashmap = "5"

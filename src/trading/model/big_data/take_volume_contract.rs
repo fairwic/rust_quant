@@ -88,7 +88,6 @@ impl TakerVolumeContractModel {
         time_interval: &str,
     ) -> Result<Option<ModelEntity>> {
         let res = ModelEntity::select_older_one_data(self.db, inst_id, time_interval).await;
-        println!("11111111{:?}", res);
         match res {
             Ok(list) => Ok(list),
             Err(_) => Err(anyhow!("获取数据库数据异常")),

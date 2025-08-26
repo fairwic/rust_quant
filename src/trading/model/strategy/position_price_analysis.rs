@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PositionPriceAnalysis {
     pub id: Option<i32>,
@@ -27,4 +26,4 @@ pub struct PositionPriceAnalysis {
 //     fn skip_serialize_field(field_name: &str) -> bool {
 //         matches!(field_name, "id" | "created_at")
 //     }
-// } 
+// }

@@ -40,7 +40,7 @@ impl ATR {
     /// 处理K线数据，始终返回f64：
     /// - 数据不足时返回0.00
     /// - 有效数据返回实际ATR值
-    /// 
+    ///
     /// 只需传入最新K线的高低收盘价，指标内部会维护所需的历史数据
     pub fn next(&mut self, high: f64, low: f64, close: f64) -> f64 {
         let tr = self.calculate_tr(high, low, close);
@@ -128,17 +128,17 @@ mod tests {
     fn test_full_calculation() {
         let test_data = vec![
             // (high, low, close, expected)
-            (10.0, 8.0, 9.0, 0.0),    // Bar 1
-            (11.0, 9.0, 10.0, 0.0),  // Bar 2
-            (12.0, 10.0, 11.0, 2.0), // Bar 3: SMA(2, 2, 2) = 2.0
-            (13.0, 11.0, 12.0, 2.0 * (2.0/3.0) + (2.0/3.0)), // Bar 4: RMA计算
+            (10.0, 8.0, 9.0, 0.0),                               // Bar 1
+            (11.0, 9.0, 10.0, 0.0),                              // Bar 2
+            (12.0, 10.0, 11.0, 2.0),                             // Bar 3: SMA(2, 2, 2) = 2.0
+            (13.0, 11.0, 12.0, 2.0 * (2.0 / 3.0) + (2.0 / 3.0)), // Bar 4: RMA计算
         ];
 
         let mut atr = ATR::new(3).unwrap();
 
         for (idx, (h, l, c, expected)) in test_data.iter().enumerate() {
             let result = atr.next(*h, *l, *c);
-            println!("Bar {}: {:.4} (expected: {:.4})", idx+1, result, expected);
+            println!("Bar {}: {:.4} (expected: {:.4})", idx + 1, result, expected);
             assert!(approx_eq!(f64, result, *expected, epsilon = 0.001));
         }
     }

@@ -17,8 +17,8 @@ pub struct ParamMergeBuilder {
     //hammer
     pub hammer_shadow_ratio: f64,
     //kline
-    pub kline_start_time:Option<i64>,
-    pub kline_end_time:Option<i64>,
+    pub kline_start_time: Option<i64>,
+    pub kline_end_time: Option<i64>,
     //risk
     pub max_loss_percent: f64,                 // 最大止损百分比
     pub profit_threshold: f64,                 // 盈利阈值，用于动态止盈
@@ -30,77 +30,79 @@ impl ParamMergeBuilder {
     pub fn build() -> Self {
         Self::default()
     }
-    pub fn bb_periods(mut self,bb_period: i32) ->Self{
-        self.bb_period=bb_period;
+    pub fn bb_periods(mut self, bb_period: i32) -> Self {
+        self.bb_period = bb_period;
         self
     }
-    pub fn hammer_shadow_ratio(mut self,shadow_ratio: f64) ->Self{
-        self.hammer_shadow_ratio=shadow_ratio;
+    pub fn hammer_shadow_ratio(mut self, shadow_ratio: f64) -> Self {
+        self.hammer_shadow_ratio = shadow_ratio;
         self
     }
-    pub fn bb_multiplier(mut self,bb_multiplier: f64) ->Self{
-        self.bb_multiplier=bb_multiplier;
+    pub fn bb_multiplier(mut self, bb_multiplier: f64) -> Self {
+        self.bb_multiplier = bb_multiplier;
         self
     }
-    pub fn volume_bar_num(mut self,volume_bar_num: usize) ->Self{
-        self.volume_bar_num=volume_bar_num;
+    pub fn volume_bar_num(mut self, volume_bar_num: usize) -> Self {
+        self.volume_bar_num = volume_bar_num;
         self
     }
-    pub fn volume_increase_ratio(mut self,volume_increase_ratio: f64) ->Self{
-        self.volume_increase_ratio=volume_increase_ratio;
+    pub fn volume_increase_ratio(mut self, volume_increase_ratio: f64) -> Self {
+        self.volume_increase_ratio = volume_increase_ratio;
         self
     }
-    pub fn volume_decrease_ratio(mut self,volume_decrease_ratio: f64) ->Self{
-        self.volume_decrease_ratio=volume_decrease_ratio;
+    pub fn volume_decrease_ratio(mut self, volume_decrease_ratio: f64) -> Self {
+        self.volume_decrease_ratio = volume_decrease_ratio;
         self
     }
-    pub fn breakthrough_threshold(mut self,breakthrough_threshold: f64) ->Self{
-        self.breakthrough_threshold=breakthrough_threshold;
+    pub fn breakthrough_threshold(mut self, breakthrough_threshold: f64) -> Self {
+        self.breakthrough_threshold = breakthrough_threshold;
         self
     }
-    pub fn rsi_period(mut self,rsi_period: usize) ->Self{
-        self.rsi_period=rsi_period;
+    pub fn rsi_period(mut self, rsi_period: usize) -> Self {
+        self.rsi_period = rsi_period;
         self
     }
-    pub fn rsi_overbought(mut self,rsi_overbought: f64) ->Self{
-        self.rsi_overbought=rsi_overbought;
+    pub fn rsi_overbought(mut self, rsi_overbought: f64) -> Self {
+        self.rsi_overbought = rsi_overbought;
         self
     }
-    pub fn rsi_oversold(mut self,rsi_oversold: f64) ->Self{
-        self.rsi_oversold=rsi_oversold;
+    pub fn rsi_oversold(mut self, rsi_oversold: f64) -> Self {
+        self.rsi_oversold = rsi_oversold;
         self
     }
-    pub fn kline_start_time(mut self,kline_start_time: i64) ->Self{
-        self.kline_start_time=Some(kline_start_time);
+    pub fn kline_start_time(mut self, kline_start_time: i64) -> Self {
+        self.kline_start_time = Some(kline_start_time);
         self
     }
-    pub fn kline_end_time(mut self,kline_end_time: i64) ->Self{
-        self.kline_end_time=Some(kline_end_time);
+    pub fn kline_end_time(mut self, kline_end_time: i64) -> Self {
+        self.kline_end_time = Some(kline_end_time);
         self
     }
 
-    pub fn max_loss_percent(mut self,max_loss_percent: f64) ->Self{
-        self.max_loss_percent=max_loss_percent;
+    pub fn max_loss_percent(mut self, max_loss_percent: f64) -> Self {
+        self.max_loss_percent = max_loss_percent;
         self
     }
-    pub fn profit_threshold(mut self,profit_threshold: f64) ->Self{
-        self.profit_threshold=profit_threshold;
+    pub fn profit_threshold(mut self, profit_threshold: f64) -> Self {
+        self.profit_threshold = profit_threshold;
         self
     }
-    pub fn is_move_stop_loss(mut self,is_move_stop_loss: bool) ->Self{
-        self.is_move_stop_loss=is_move_stop_loss;
+    pub fn is_move_stop_loss(mut self, is_move_stop_loss: bool) -> Self {
+        self.is_move_stop_loss = is_move_stop_loss;
         self
     }
-    pub fn is_used_signal_k_line_stop_loss(mut self,is_used_signal_k_line_stop_loss: bool) ->Self{
-        self.is_used_signal_k_line_stop_loss=is_used_signal_k_line_stop_loss;
+    pub fn is_used_signal_k_line_stop_loss(
+        mut self,
+        is_used_signal_k_line_stop_loss: bool,
+    ) -> Self {
+        self.is_used_signal_k_line_stop_loss = is_used_signal_k_line_stop_loss;
         self
     }
 }
 //使用构造器
 
-
 // 使用一个生成参数的函数，避免存储所有组合
- pub struct ParamGenerator {
+pub struct ParamGenerator {
     bb_periods: Vec<i32>,
     shadow_ratios: Vec<f64>,
     bb_multipliers: Vec<f64>,
@@ -119,8 +121,6 @@ impl ParamMergeBuilder {
     is_move_stop_loss: Vec<bool>,
     is_used_signal_k_line_stop_loss: Vec<bool>,
 }
-
-
 
 impl ParamGenerator {
     pub fn new(
@@ -174,10 +174,7 @@ impl ParamGenerator {
         }
     }
 
-    pub fn get_next_batch(
-        &mut self,
-        batch_size: usize,
-    ) -> Vec<ParamMergeBuilder> {
+    pub fn get_next_batch(&mut self, batch_size: usize) -> Vec<ParamMergeBuilder> {
         let mut batch = Vec::with_capacity(batch_size);
 
         // 计算当前组合的索引
@@ -199,7 +196,6 @@ impl ParamGenerator {
             let pt_size = self.profit_threshold.len();
             let mst_size = self.is_move_stop_loss.len();
             let usklsl_size = self.is_used_signal_k_line_stop_loss.len();
-
 
             let i_bb_p = index % bb_p_size;
             index /= bb_p_size;
@@ -242,7 +238,6 @@ impl ParamGenerator {
 
             let i_usklsl = index % self.is_used_signal_k_line_stop_loss.len();
             index /= self.is_used_signal_k_line_stop_loss.len();
-
 
             // 获取参数值
             let param = ParamMergeBuilder {

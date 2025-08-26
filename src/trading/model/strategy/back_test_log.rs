@@ -1,12 +1,12 @@
 extern crate rbatis;
 
-use std::sync::Arc;
-use std::vec;
 use anyhow::anyhow;
 use rbatis::{crud, impl_insert, RBatis};
 use rbs::Value;
 use serde_json::json;
-use tracing::{debug, warn, info};
+use std::sync::Arc;
+use std::vec;
+use tracing::{debug, info, warn};
 
 use crate::app_config::db;
 use crate::trading::model::strategy::back_test_analysis::PositionStats;
@@ -37,22 +37,19 @@ pub struct BackTestLog {
     pub kline_end_time: i64,
     pub kline_nums: i32,
 }
-crud!(BackTestLog{});
+crud!(BackTestLog {});
 
 pub struct BackTestLogModel {
     db: &'static RBatis,
 }
 
 impl BackTestLogModel {
-
     pub async fn new() -> BackTestLogModel {
         Self {
             db: db::get_db_client(),
         }
     }
     pub async fn add(&self, list: &BackTestLog) -> anyhow::Result<i64> {
-        // println!("111111111 list:{:#?}", list);
-        // println!("db:{:#?}", self.db);
         let mut v1 = vec::Vec::new();
         v1.push(list.clone());
 
@@ -70,7 +67,13 @@ impl BackTestLogModel {
             params.push(candle.win_rate.to_string().into());
             params.push(candle.final_fund.to_string().into());
             params.push(candle.open_positions_num.to_string().into());
-            params.push(candle.strategy_detail.unwrap_or_default().to_string().into());
+            params.push(
+                candle
+                    .strategy_detail
+                    .unwrap_or_default()
+                    .to_string()
+                    .into(),
+            );
             params.push(candle.risk_config_detail.to_string().into());
             params.push(candle.profit.to_string().into());
             params.push(candle.three_bar_after_win_rate.to_string().into());
@@ -92,9 +95,13 @@ impl BackTestLogModel {
         // info!("{}", res);
         Ok(data.last_insert_id.as_i64().unwrap())
     }
-    
+
     // 更新持仓统计数据
-    pub async fn update_position_stats(&self, back_test_id: i64, stats: PositionStats) -> anyhow::Result<u64> {
+    pub async fn update_position_stats(
+        &self,
+        back_test_id: i64,
+        stats: PositionStats,
+    ) -> anyhow::Result<u64> {
         let sql = r#"
             UPDATE back_test_log 
             SET
@@ -106,7 +113,7 @@ impl BackTestLogModel {
                 ten_bar_after_win_rate = ?
             WHERE id = ?
         "#;
-        
+
         let params = vec![
             stats.one_bar_after_win_rate.to_string().into(),
             stats.two_bar_after_win_rate.to_string().into(),
@@ -116,12 +123,18 @@ impl BackTestLogModel {
             stats.ten_bar_after_win_rate.to_string().into(),
             back_test_id.to_string().into(),
         ];
-        
+
         let result = self.db.exec(sql, params).await?;
-        debug!("更新 back_test_log id {} 的统计数据结果: 影响行数 {}", back_test_id, result.rows_affected);
-        
+        debug!(
+            "更新 back_test_log id {} 的统计数据结果: 影响行数 {}",
+            back_test_id, result.rows_affected
+        );
+
         if result.rows_affected == 0 {
-            warn!("未能更新 back_test_id {} 的统计数据，可能ID不存在", back_test_id);
+            warn!(
+                "未能更新 back_test_id {} 的统计数据，可能ID不存在",
+                back_test_id
+            );
         } else {
             info!("成功更新 back_test_id {} 的统计数据: 3K胜率: {:.2}%, 5K胜率: {:.2}%, 10K胜率: {:.2}%", 
                   back_test_id, 
@@ -129,7 +142,7 @@ impl BackTestLogModel {
                   stats.five_bar_after_win_rate * 100.0,
                   stats.ten_bar_after_win_rate * 100.0);
         }
-        
+
         Ok(result.rows_affected)
     }
 }

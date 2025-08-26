@@ -20,7 +20,6 @@ async fn test_atr_calculation() -> Result<()> {
     let time = "4H";
     let period = 10;
 
-
     asset_job::get_balance().await.expect("TODO: panic message");
 
     Ok(())

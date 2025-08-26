@@ -1,18 +1,17 @@
 // 交易量任务
+use crate::trading::model::asset::AssetModel;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
+use crate::trading::model::market::candles::CandlesModel;
+use crate::trading::model::market::tickers::{TickersDataEntity, TicketsModel};
+use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 use chrono::Utc;
 use hmac::digest::typenum::op;
+use okx::api::market::OkxMarket;
 use rbatis::rbatis_codegen::ops::AsProxy;
 use rbatis::rbdc::datetime;
 use redis::aio::MultiplexedConnection;
 use tracing::debug;
 use tracing::field::debug;
-use crate::trading::model::market::tickers::{TickersDataEntity, TicketsModel};
-use crate::trading::model::asset::AssetModel;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::model::market::candles::CandlesModel;
-use okx::api::market::OkxMarket;
-use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
-
 
 // pub async fn update_trades_to_redis(inst_id: &str) -> anyhow::Result<()> {
 //     let res = CandlesModel::new().await.get_new_data(inst_id).await?;
@@ -37,6 +36,3 @@ use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 //
 //     Ok(())
 // }
-
-
-

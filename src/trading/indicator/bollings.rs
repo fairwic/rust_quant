@@ -34,6 +34,8 @@ pub struct BollingBandsPlusIndicator {
     pub consecutive_touch_up_times: usize,
     //连续触达下轨次数
     pub consecutive_touch_down_times: usize,
+    // 保存周期以供回看窗口动态计算
+    pub period: usize,
 }
 
 /// 布林带加强版输出
@@ -52,6 +54,7 @@ impl BollingBandsPlusIndicator {
             bollinger_bands: BollingerBands::new(period, multiplier).unwrap(),
             consecutive_touch_up_times: consecutive_touch_times,
             consecutive_touch_down_times: consecutive_touch_times,
+            period,
         }
     }
 }

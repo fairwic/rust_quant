@@ -10,14 +10,14 @@ struct AppError {
 }
 impl Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let a=1;
-        let b=2;
-        let c=3;
-        let d=4;
-        let e=5;
-        let f=6;
-        let g=7;
-        let h=8;
+        let a = 1;
+        let b = 2;
+        let c = 3;
+        let d = 4;
+        let e = 5;
+        let f = 6;
+        let g = 7;
+        let h = 8;
         write!(f, "AppError: kind={}, message={}", self.kind, self.message)
     }
 }

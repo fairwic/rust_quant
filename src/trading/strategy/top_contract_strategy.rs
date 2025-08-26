@@ -16,7 +16,9 @@ use crate::trading::model::big_data::top_contract_position_ratio::TopContractPos
 use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::services::big_data::big_data_top_contract_service::BigDataTopContractService;
 use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
-use crate::trading::strategy::strategy_common::{BackTestResult, run_back_test, SignalResult, TradeRecord};
+use crate::trading::strategy::strategy_common::{
+    run_back_test, BackTestResult, SignalResult, TradeRecord,
+};
 use crate::trading::task::basic;
 use crate::trading::task::basic::save_log;
 
@@ -53,10 +55,9 @@ pub struct TopContractStrategyConfig {
 }
 impl Display for TopContractStrategyConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f,"basic_ratio:{}",self.basic_ratio)
+        write!(f, "basic_ratio:{}", self.basic_ratio)
     }
 }
-
 
 // 模块实现 Arc 的自定义序列化和反序列化
 
@@ -86,15 +87,18 @@ impl TopContractStrategy {
     pub async fn new(inst_id: &str, time: &str) -> anyhow::Result<TopContractData> {
         //压测的时候需要跳过最新的一条数据
         //获取到精英交易员仓位和人数的比例
-        let account_ratio_list = BigDataTopContractService::get_list_by_time(inst_id, time, Some(1),1400, None).await?;
+        let account_ratio_list =
+            BigDataTopContractService::get_list_by_time(inst_id, time, Some(1), 1400, None).await?;
 
-        let position_ratio_list = BigDataTopPositionService::get_list_by_time(inst_id, time, Some(1),1400, None).await?;
+        let position_ratio_list =
+            BigDataTopPositionService::get_list_by_time(inst_id, time, Some(1), 1400, None).await?;
 
         if account_ratio_list.len() != position_ratio_list.len() {
             error!("数据长度异常 acct_ratio_list,position_ratio_list");
         }
         // 获取K线数据
-        let mysql_candles: Vec<CandlesEntity> = basic::get_candle_data_confirm(inst_id, time, account_ratio_list.len(), None).await?;
+        let mysql_candles: Vec<CandlesEntity> =
+            basic::get_candle_data_confirm(inst_id, time, account_ratio_list.len(), None).await?;
 
         // println!("{:#?}", mysql_candles);
 
@@ -104,8 +108,12 @@ impl TopContractStrategy {
         }
 
         //判断数据准确性
-        if mysql_candles.len() != account_ratio_list.len() || account_ratio_list.len() != position_ratio_list.len() || mysql_candles.get(0).unwrap().ts != account_ratio_list.get(0).unwrap().ts || account_ratio_list.get(0).unwrap().ts != position_ratio_list.get(0).unwrap().ts {
-            return Err(anyhow!("数据长度或时间不匹配 {} {}",inst_id,time));
+        if mysql_candles.len() != account_ratio_list.len()
+            || account_ratio_list.len() != position_ratio_list.len()
+            || mysql_candles.get(0).unwrap().ts != account_ratio_list.get(0).unwrap().ts
+            || account_ratio_list.get(0).unwrap().ts != position_ratio_list.get(0).unwrap().ts
+        {
+            return Err(anyhow!("数据长度或时间不匹配 {} {}", inst_id, time));
         }
 
         println!("position res{:?}", position_ratio_list);
@@ -134,7 +142,7 @@ impl TopContractStrategy {
                 signal_kline_stop_loss_price: None,
                 best_take_profit_price: None,
                 ts,
-                single_value:None,
+                single_value: None,
                 single_result: None,
                 best_open_price: None,
             };
@@ -223,11 +231,11 @@ impl TopContractStrategy {
         //     is_jude_trade_time,
         // ); // Await the asynchronous run_test function
 
-        let res = BackTestResult{
+        let res = BackTestResult {
             funds: 0.0,
             win_rate: 0.0,
             open_trades: 0,
-            trade_records: vec![]
+            trade_records: vec![],
         };
         res // Return the result of the backtest
     }

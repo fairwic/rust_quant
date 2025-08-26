@@ -1,7 +1,7 @@
 use crate::trading::indicator::sma::Sma;
 
 /// RMA (Relative Moving Average) implementation matching TradingView's ta.rma()
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 struct TvRma {
     length: usize,
     alpha: f64,
@@ -46,7 +46,7 @@ impl TvRma {
                     }
                     sma
                 } else {
-                    value  // 在收集数据阶段返回当前值
+                    value // 在收集数据阶段返回当前值
                 }
             }
             Some(prev_sum) => {
@@ -61,7 +61,7 @@ impl TvRma {
 
 /// RSI indicator using RMA (Relative Moving Average) for calculations
 /// Implements the exact same logic as TradingView's Pine Script RSI
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct RsiIndicator {
     length: usize,
     up_rma: TvRma,
@@ -146,10 +146,10 @@ mod tests {
     fn test_pine_sma_calculation() {
         let mut rma = TvRma::new(14);
         let values = vec![
-            44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 
-            45.89, 46.03, 45.61, 46.28
+            44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 45.89, 46.03,
+            45.61, 46.28,
         ];
-        
+
         println!("===== Pine Script SMA Test =====");
         for value in values {
             let result = rma.next(value);
@@ -160,18 +160,18 @@ mod tests {
     #[test]
     fn test_rsi_calculation() {
         let mut rsi = RsiIndicator::new(14);
-        
+
         // TradingView documentation example data
         let prices = vec![
-            44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 
-            45.89, 46.03, 45.61, 46.28, 46.28, 46.00, 46.03, 46.41, 46.22, 45.64,
-            46.21, 46.25, 45.71, 46.45, 45.78, 45.35
+            44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 45.89, 46.03,
+            45.61, 46.28, 46.28, 46.00, 46.03, 46.41, 46.22, 45.64, 46.21, 46.25, 45.71, 46.45,
+            45.78, 45.35,
         ];
-        
+
         println!("===== RSI Calculation Test =====");
         for (i, &price) in prices.iter().enumerate() {
             let rsi_value = rsi.next(price);
-            println!("#{}\tPrice: {:.2}\tRSI: {:.2}", i+1, price, rsi_value);
+            println!("#{}\tPrice: {:.2}\tRSI: {:.2}", i + 1, price, rsi_value);
         }
     }
 }

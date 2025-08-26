@@ -1,8 +1,8 @@
 use std::env;
 
-use lettre::{Message, SmtpTransport, Transport};
 use lettre::message::header;
 use lettre::transport::smtp::authentication::Credentials;
+use lettre::{Message, SmtpTransport, Transport};
 
 pub async fn send_email(title: &str, body: String) {
     // SMTP 服务器地址和端口
@@ -20,12 +20,22 @@ pub async fn send_email(title: &str, body: String) {
     // println!("user_name:{}", username);
     // println!("user_password:{}", password);
     // 创建邮件内容
-    let email = Message::builder().from(from.parse().unwrap()).to(to.parse().unwrap()).subject(title).header(header::ContentType::TEXT_PLAIN).body(body).unwrap();
+    let email = Message::builder()
+        .from(from.parse().unwrap())
+        .to(to.parse().unwrap())
+        .subject(title)
+        .header(header::ContentType::TEXT_PLAIN)
+        .body(body)
+        .unwrap();
 
     // 设置 SMTP 客户端
     let creds = Credentials::new(username.to_string(), password.to_string());
 
-    let mailer = SmtpTransport::starttls_relay(smtp_server).unwrap().port(smtp_port.parse().unwrap()).credentials(creds).build();
+    let mailer = SmtpTransport::starttls_relay(smtp_server)
+        .unwrap()
+        .port(smtp_port.parse().unwrap())
+        .credentials(creds)
+        .build();
 
     // 发送邮件
     match mailer.send(&email) {

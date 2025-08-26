@@ -1,8 +1,7 @@
-use crate::CandleItem;
 use crate::trading::utils::fibonacci::{
-    FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO,
-    FIBONACCI_ZERO_POINT_TWO_THREE_SIX,
+    FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO, FIBONACCI_ZERO_POINT_TWO_THREE_SIX,
 };
+use crate::CandleItem;
 use tracing::debug;
 
 /// 计算当前K线价格的振幅
@@ -30,7 +29,7 @@ pub fn calculate_best_open_price(
 ) -> Option<f64> {
     let last_data_item = data_items.last()?;
     let amplitude = calculate_k_line_amplitude(data_items);
-    
+
     if amplitude <= 1.2 {
         debug!("k线振幅小于1.5个点，不计算最优开仓价格");
         return None;
@@ -125,7 +124,7 @@ pub fn check_key_price_level_sell(
         let magnitude = 10f64.powi((1.0 / *interval as f64).log10().ceil() as i32);
         (*interval * magnitude).floor() / magnitude
     };
-    
+
     let distance_to_key = next_key_level - current_price;
     let alert_distance = next_key_level * alert_percent;
 
@@ -176,4 +175,4 @@ pub fn check_key_price_level_sell(
     }
 
     None
-} 
+}

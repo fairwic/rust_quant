@@ -2,25 +2,22 @@ use crate::trading::model::big_data::top_contract_account_ratio::{
     ModelEntity, TopContractAccountRatioModel,
 };
 use crate::trading::model::entity::candles::enums::SelectTime;
-use okx::api::market::OkxMarket;
+use crate::trading::services::big_data::top_contract_service_trait::TopContractServiceTrait;
+use async_trait::async_trait;
 use chrono::Utc;
 use log::info;
+use okx::api::api_trait::OkxApiTrait;
+use okx::api::market::OkxMarket;
+use okx::{Error, OkxBigData, OkxClient};
 use redis::Commands;
 use std::time::Duration;
 use tracing::{debug, error, warn};
-use crate::trading::services::big_data::top_contract_service_trait::TopContractServiceTrait;
-use async_trait::async_trait;
-use okx::{Error, OkxBigData, OkxClient};
-use okx::api::api_trait::OkxApiTrait;
 pub struct BigDataTopContractService {}
 
 #[async_trait]
 impl TopContractServiceTrait for BigDataTopContractService {
     //同步精英交易员合约多空持仓人数比
-    async fn sync(&self,
-        inst_ids: Vec<&str>,
-        periods: Vec<&str>,
-    ) -> anyhow::Result<()> {
+    async fn sync(&self, inst_ids: Vec<&str>, periods: Vec<&str>) -> anyhow::Result<()> {
         println!("sync long-short-account-ratio-contract-top-trader...");
         // 遍历所有交易对和周期
         for inst_id in inst_ids {
@@ -29,7 +26,7 @@ impl TopContractServiceTrait for BigDataTopContractService {
                 let res = Self::get_new_one_data(inst_id, period).await?;
                 let right = crate::time_util::get_period_start_timestamp(period);
                 if res.is_none() {
-                    error!("请先初始化数据topContract {} {}",inst_id,period);
+                    error!("请先初始化数据topContract {} {}", inst_id, period);
                     continue; // 数据更新完毕，跳出循环
                 }
                 let start = res.unwrap().ts;
@@ -44,7 +41,13 @@ impl TopContractServiceTrait for BigDataTopContractService {
                     //延迟100ms
                     tokio::time::sleep(Duration::from_millis(1200)).await;
                     // 获取Okx数据并插入
-                    let res = Self::fetch_okx_data(inst_id, period, &Some(begin_end.unwrap().0.to_string()), &Some(begin_end.unwrap().1.to_string())).await?;
+                    let res = Self::fetch_okx_data(
+                        inst_id,
+                        period,
+                        &Some(begin_end.unwrap().0.to_string()),
+                        &Some(begin_end.unwrap().1.to_string()),
+                    )
+                    .await?;
                     if res.is_empty() {
                         debug!("No old candles need patch: {},{}", inst_id, period);
                         break;
@@ -67,10 +70,7 @@ impl TopContractServiceTrait for BigDataTopContractService {
     }
 
     //初始化精英交易员合约多空持仓人数比
-    async fn init(&self,
-        inst_ids: Vec<&str>,
-        periods: Vec<&str>,
-    ) -> anyhow::Result<()> {
+    async fn init(&self, inst_ids: Vec<&str>, periods: Vec<&str>) -> anyhow::Result<()> {
         println!("init_long-short-account-ratio-contract-top-trader...");
         let limit = 1440; // 设置限制
         for inst_id in inst_ids {
@@ -105,7 +105,7 @@ impl BigDataTopContractService {
         let service = Self {};
         service.init(inst_ids, periods).await
     }
-    
+
     pub async fn sync(inst_ids: Vec<&str>, periods: Vec<&str>) -> anyhow::Result<()> {
         let service = Self {};
         service.sync(inst_ids, periods).await
@@ -118,14 +118,15 @@ impl BigDataTopContractService {
         begin: &Option<String>,
         end: &Option<String>,
     ) -> Result<Vec<Vec<String>>, Error> {
-        OkxBigData::from_env()?.get_long_short_account_ratio_contract_top_trader(
-            inst_id,
-            Some(period),
-            begin.as_deref(),
-            end.as_deref(),
-            Some("100"),
-        )
-        .await
+        OkxBigData::from_env()?
+            .get_long_short_account_ratio_contract_top_trader(
+                inst_id,
+                Some(period),
+                begin.as_deref(),
+                end.as_deref(),
+                Some("100"),
+            )
+            .await
     }
 
     // 同步 Okx 数据并插入
@@ -162,7 +163,6 @@ impl BigDataTopContractService {
             None => Ok(None),
         }
     }
-
 
     // 获取初始数据的时间范围
     async fn get_initial_begin_with_end(
@@ -239,11 +239,14 @@ impl BigDataTopContractService {
     pub async fn get_list_by_time(
         inst_id: &str,
         period: &str,
-        offset:Option<usize>,
+        offset: Option<usize>,
         limit: usize,
         select_time: Option<SelectTime>,
     ) -> anyhow::Result<Vec<ModelEntity>> {
-        let mut data = TopContractAccountRatioModel::new().await.get_all(inst_id, period, limit,offset, select_time).await?;
+        let mut data = TopContractAccountRatioModel::new()
+            .await
+            .get_all(inst_id, period, limit, offset, select_time)
+            .await?;
         if !data.is_empty() {
             //数据进行反向排序
             data.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));

@@ -1,3 +1,4 @@
+pub mod announcement_service;
 pub mod big_data;
 pub mod candle_service;
 pub mod order_service;

@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize};
 use crate::trading::indicator::equal_high_low_indicator::EqualHighLowValue;
 use crate::trading::indicator::fair_value_gap_indicator::FairValueGapValue;
 use crate::trading::indicator::leg_detection_indicator::LegDetectionValue;
 use crate::trading::indicator::market_structure_indicator::MarketStructureValue;
 use crate::trading::indicator::premium_discount_indicator::PremiumDiscountValue;
 use crate::trading::indicator::signal_weight::SignalWeightsConfig;
+use serde::{Deserialize, Serialize};
 
 /// 锤子形态信号值
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
@@ -213,4 +213,4 @@ pub struct VegasIndicatorSignalValue {
 pub struct EmaCross {
     pub is_golden_cross: bool,
     pub is_death_cross: bool,
-} 
+}

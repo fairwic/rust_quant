@@ -19,7 +19,13 @@ async fn test_bolling_bands() -> Result<()> {
         direct: TimeDirect::BEFORE,
     };
 
-    let candles =  trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "1H", 1200, Some(select_time)).await?;
+    let candles = trading::task::basic::get_candle_data_confirm(
+        "BTC-USDT-SWAP",
+        "1H",
+        1200,
+        Some(select_time),
+    )
+    .await?;
 
     let mut boll = BollingerBands::new(9, 3.6).unwrap();
 

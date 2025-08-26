@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use crate::app_config;
 use anyhow::Result;
+use okx::dto::asset::asset_dto::AssetBalance;
+use rbatis::impl_select;
 use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use crate::app_config;
-use okx::dto::asset::asset_dto::AssetBalance;
-use rbatis::impl_select;
+use std::sync::Arc;
 
 /// table
 #[derive(Serialize, Deserialize, Debug)]
@@ -21,10 +21,9 @@ pub struct AssetEntity {
     // 可用余额
     pub avail_bal: String,
 }
-crud!(AssetEntity{},"asset"); //crud = insert+select_by_column+update_by_column+delete_by_column
+crud!(AssetEntity {}, "asset"); //crud = insert+select_by_column+update_by_column+delete_by_column
 impl_update!(AssetEntity{update_by_name(name:String) => "`where id = '2'`"},"asset");
 impl_select!(AssetEntity{fetch_list() => ""},"asset");
-
 
 pub struct AssetModel {
     db: &'static RBatis,
@@ -37,7 +36,8 @@ impl AssetModel {
         }
     }
     pub async fn add(&self, list: Vec<AssetBalance>) -> anyhow::Result<()> {
-        let tickers_db: Vec<AssetEntity> = list.iter()
+        let tickers_db: Vec<AssetEntity> = list
+            .iter()
             .map(|ticker| AssetEntity {
                 ccy: ticker.ccy.clone(),
                 bal: ticker.bal.clone(),

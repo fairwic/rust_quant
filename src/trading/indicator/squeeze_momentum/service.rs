@@ -39,7 +39,6 @@ pub fn calculate_linreg(source: &[f64], length: usize, offset: usize) -> Option<
     Some(result)
 }
 
-
 pub async fn get_last_squeeze_single(
     config: SqueezeConfig,
     inst_id: &str,
@@ -47,7 +46,9 @@ pub async fn get_last_squeeze_single(
     select_time: Option<SelectTime>,
 ) -> anyhow::Result<SignalResult> {
     let min_length = config.bb_length.max(config.kc_length);
-    let candles = trading::task::basic::get_candle_data_confirm(inst_id, period, min_length * 2, select_time).await?;
+    let candles =
+        trading::task::basic::get_candle_data_confirm(inst_id, period, min_length * 2, select_time)
+            .await?;
     if candles.len() < min_length {
         return Err(anyhow::anyhow!("Insufficient data"));
     }

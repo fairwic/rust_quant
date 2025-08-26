@@ -1,9 +1,11 @@
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rbatis::rbatis_codegen::ops::AsProxy;
 use serde::{Deserialize, Serialize};
-use ta::indicators::{BollingerBands, CommodityChannelIndex, ExponentialMovingAverage, Maximum, Minimum};
+use ta::indicators::{
+    BollingerBands, CommodityChannelIndex, ExponentialMovingAverage, Maximum, Minimum,
+};
 use ta::{DataItem, Next};
-use crate::trading::model::entity::candles::entity::CandlesEntity;
 
 pub struct SupportResistance;
 
@@ -16,8 +18,14 @@ impl SupportResistance {
 
         for segment in candles.chunks(segment_size) {
             // 提取每个分段中的最高价和最低价
-            let high_prices: Vec<f64> = segment.iter().map(|c| c.h.parse::<f64>().unwrap_or(0.0)).collect();
-            let low_prices: Vec<f64> = segment.iter().map(|c| c.l.parse::<f64>().unwrap_or(0.0)).collect();
+            let high_prices: Vec<f64> = segment
+                .iter()
+                .map(|c| c.h.parse::<f64>().unwrap_or(0.0))
+                .collect();
+            let low_prices: Vec<f64> = segment
+                .iter()
+                .map(|c| c.l.parse::<f64>().unwrap_or(0.0))
+                .collect();
 
             // 找出当前分段中的最高价和最低价
             let segment_resistance = high_prices.iter().cloned().fold(f64::NAN, f64::max);
@@ -35,7 +43,10 @@ impl SupportResistance {
     /// 使用布林带计算上轨和下轨，分别作为阻力位和支撑位
     pub fn bollinger_bands(candles: &[CandlesEntity], period: usize) -> (f64, f64) {
         // 提取收盘价
-        let close_prices: Vec<f64> = candles.iter().map(|c| c.c.parse::<f64>().unwrap_or(0.0)).collect();
+        let close_prices: Vec<f64> = candles
+            .iter()
+            .map(|c| c.c.parse::<f64>().unwrap_or(0.0))
+            .collect();
         let mut bb = BollingerBands::new(period, 2.0).unwrap();
 
         let mut upper_band = f64::MIN;
@@ -55,21 +66,29 @@ impl SupportResistance {
     /// 使用布林带计算最新价格的上轨、中轨和下轨，分别作为阻力位和支撑位
     pub fn bollinger_bands_latest(candles: &[CandlesEntity], period: usize) -> (f64, f64, f64) {
         // 提取收盘价
-        let close_prices: Vec<f64> = candles.iter().map(|c| c.c.parse::<f64>().unwrap_or(0.0)).collect();
+        let close_prices: Vec<f64> = candles
+            .iter()
+            .map(|c| c.c.parse::<f64>().unwrap_or(0.0))
+            .collect();
         let mut bb = BollingerBands::new(period, 2.0).unwrap();
 
         // 计算布林带的上下轨和中轨
-        let bands = close_prices.iter().map(|&price| bb.next(price)).last().unwrap();
+        let bands = close_prices
+            .iter()
+            .map(|&price| bb.next(price))
+            .last()
+            .unwrap();
 
         (bands.upper, bands.average, bands.lower)
     }
 
-
     /// 方法3：找出波峰和波谷
     /// 找出交易量中的波峰和波谷，并返回相应的时间点
     /// 方法3：找出波峰和波谷
     /// 找出交易量中的波峰和波谷，并返回相应的时间点
-    pub fn peaks_and_valleys(candles: &[CandlesEntity]) -> (Vec<(String, f64)>, Vec<(String, f64)>) {
+    pub fn peaks_and_valleys(
+        candles: &[CandlesEntity],
+    ) -> (Vec<(String, f64)>, Vec<(String, f64)>) {
         let mut peaks = Vec::new();
         let mut valleys = Vec::new();
 
@@ -81,8 +100,9 @@ impl SupportResistance {
             let timestamp = DateTime::<Utc>::from_utc(
                 NaiveDateTime::from_timestamp_millis(candles[i].ts.u64() as i64).unwrap(),
                 Utc,
-            ).format("%Y-%m-%d %H:%M:%S")
-                .to_string();
+            )
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
 
             if curr_vol > prev_vol && curr_vol > next_vol {
                 peaks.push((timestamp.clone(), curr_vol));
@@ -132,8 +152,14 @@ impl SupportResistance {
     /// 手动标注前期显著高点和低点，作为支撑位和阻力位
     pub fn manual_marking(candles: &[CandlesEntity]) -> (f64, f64) {
         // 提取每个蜡烛图的最高价和最低价
-        let high_prices: Vec<f64> = candles.iter().map(|c| c.h.parse::<f64>().unwrap_or(0.0)).collect();
-        let low_prices: Vec<f64> = candles.iter().map(|c| c.l.parse::<f64>().unwrap_or(0.0)).collect();
+        let high_prices: Vec<f64> = candles
+            .iter()
+            .map(|c| c.h.parse::<f64>().unwrap_or(0.0))
+            .collect();
+        let low_prices: Vec<f64> = candles
+            .iter()
+            .map(|c| c.l.parse::<f64>().unwrap_or(0.0))
+            .collect();
 
         // 找出所有价格中的最高价和最低价
         let resistance_level = high_prices.iter().cloned().fold(f64::NAN, f64::max);
@@ -171,7 +197,10 @@ impl SupportResistance {
     // KAMA适应性很强,会根据市场波动自动调整权重。当市场波动较大时,KAMA对当前价格的反应更为敏捷;当市场走平时,KAMA对价格的反应较为迟缓。因此KAMA能较好地跟踪价格趋势变化。
     pub fn kama(candles: &[CandlesEntity], period: usize) -> (f64, f64) {
         // 提取收盘价
-        let close_prices: Vec<f64> = candles.iter().map(|c| c.c.parse::<f64>().unwrap_or(0.0)).collect();
+        let close_prices: Vec<f64> = candles
+            .iter()
+            .map(|c| c.c.parse::<f64>().unwrap_or(0.0))
+            .collect();
         let mut kama = ExponentialMovingAverage::new(period).unwrap();
 
         let mut resistance_level = f64::MIN;
@@ -189,9 +218,18 @@ impl SupportResistance {
     /// 方法7：使用CCI计算支撑位和阻力位
     pub fn cci(candles: &[CandlesEntity], period: usize) -> (Vec<f64>, Vec<f64>) {
         // 提取蜡烛图的最高价、最低价和收盘价
-        let high_prices: Vec<f64> = candles.iter().map(|c| c.h.parse::<f64>().unwrap_or(0.0)).collect();
-        let low_prices: Vec<f64> = candles.iter().map(|c| c.l.parse::<f64>().unwrap_or(0.0)).collect();
-        let close_prices: Vec<f64> = candles.iter().map(|c| c.c.parse::<f64>().unwrap_or(0.0)).collect();
+        let high_prices: Vec<f64> = candles
+            .iter()
+            .map(|c| c.h.parse::<f64>().unwrap_or(0.0))
+            .collect();
+        let low_prices: Vec<f64> = candles
+            .iter()
+            .map(|c| c.l.parse::<f64>().unwrap_or(0.0))
+            .collect();
+        let close_prices: Vec<f64> = candles
+            .iter()
+            .map(|c| c.c.parse::<f64>().unwrap_or(0.0))
+            .collect();
         let mut cci = CommodityChannelIndex::new(period).unwrap();
 
         let mut overbought = Vec::new();

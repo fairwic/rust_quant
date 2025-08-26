@@ -1,5 +1,5 @@
-use ta::{Close, High, Low};
 use crate::trading::model::entity::candles::entity::CandlesEntity;
+use ta::{Close, High, Low};
 
 pub struct KDJ {
     pub(crate) k: f64,
@@ -34,7 +34,11 @@ impl Close for KdjCandle {
 pub struct KdjSimpleIndicator {}
 
 impl KdjSimpleIndicator {
-    pub fn calculate_kdj_with_bcwsma(candles: &[CandlesEntity], period: usize, signal_period: usize) -> Vec<KDJ> {
+    pub fn calculate_kdj_with_bcwsma(
+        candles: &[CandlesEntity],
+        period: usize,
+        signal_period: usize,
+    ) -> Vec<KDJ> {
         let mut kdjs = Vec::with_capacity(candles.len());
         let mut k = 50.0;
         let mut d = 50.0;
@@ -73,7 +77,11 @@ impl KdjSimpleIndicator {
                 kdjs.push(KDJ { k, d, j });
             } else {
                 // 初始周期内使用默认值
-                kdjs.push(KDJ { k: 50.0, d: 50.0, j: 50.0 });
+                kdjs.push(KDJ {
+                    k: 50.0,
+                    d: 50.0,
+                    j: 50.0,
+                });
             }
         }
 

@@ -1,9 +1,14 @@
+use crate::error::app_error::AppError;
+use crate::trading::model::order::swap_orders_detail::{
+    SwapOrderDetailEntity, SwapOrderDetailEntityModel,
+};
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::trade::OkxTrade;
-use okx::dto::trade::trade_dto::Order;
+use okx::dto::trade::trade_dto::OrderPendingRespDto;
+use okx::dto::trade_dto::OrderDetailRespDto;
 use okx::error::Error;
 use serde_json::json;
-use tracing::info;
+use tracing::{info, warn};
 
 pub struct OrderService {}
 
@@ -12,12 +17,53 @@ impl OrderService {
         Self {}
     }
 
-    pub async fn get_pending_orders(&self, inst_id: Option<&str>) -> Result<Vec<Order>, Error> {
-        let account = OkxTrade::from_env()?; //获取合约持仓信息
-        let position_list = account
+    pub async fn get_pending_orders(
+        &self,
+        inst_id: Option<&str>,
+    ) -> Result<Vec<OrderPendingRespDto>, Error> {
+        let trade_client = OkxTrade::from_env()?;
+        let position_list = trade_client
             .get_pending_orders(Some("SWAP"), None, None, None, None, None, None)
             .await?;
         info!("get pending orders: {:?}", json!(position_list).to_string());
         Ok(position_list)
+    }
+
+    pub async fn get_order_detail(
+        &self,
+        inst_id: &str,
+        order_id: Option<&str>,
+        client_order_id: Option<&str>,
+    ) -> Result<Vec<OrderDetailRespDto>, Error> {
+        let trade_client = OkxTrade::from_env()?;
+        let order_list = trade_client
+            .get_order_details(inst_id, order_id, client_order_id)
+            .await?;
+        info!("get order detail: {:?}", json!(order_list).to_string());
+        Ok(order_list)
+    }
+    ///
+    pub async fn sync_order_detail(
+        &self,
+        inst_id: &str,
+        order_id: Option<&str>,
+        client_order_id: Option<&str>,
+    ) -> Result<(), AppError> {
+        let detail = self
+            .get_order_detail(inst_id, order_id, client_order_id)
+            .await?;
+        if detail.len() == 0 {
+            warn!("get order detail is empty");
+            return Ok(());
+        }
+        self.update_order_detail(detail[0].to_owned()).await?;
+        Ok(())
+    }
+
+    pub async fn update_order_detail(&self, order_detail: OrderDetailRespDto) -> Result<(), Error> {
+        let order_detail = SwapOrderDetailEntity::from(order_detail);
+        let model = SwapOrderDetailEntityModel::new().await;
+        model.add(&order_detail).await;
+        Ok(())
     }
 }

@@ -12,7 +12,6 @@ use crate::trading::indicator::vegas_indicator::{VegasIndicatorSignalValue, Vega
 use crate::trading::model::entity::candles::dto::SelectCandleReqDto;
 use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::VEGAS_INDICATOR_VALUES;
 use crate::trading::strategy::strategy_common::{
     parse_candle_to_data_item, BasicRiskStrategyConfig,
 };
@@ -48,24 +47,16 @@ impl StrategyOrder {
     }
 
     /// 初始化策略数据并确保全局状态同步
-    async fn initialize_strategy_data(
+    pub async fn initialize_strategy_data(
         strategy: &StrategyConfig,
         inst_id: &str,
         time: &str,
     ) -> anyhow::Result<()> {
         info!("开始初始化策略数据: {}_{}", inst_id, time);
-
-        let dto = SelectCandleReqDto {
-            inst_id: inst_id.to_string(),
-            time_interval: time.to_string(),
-            limit: 1,
-            select_time: None,
-            confirm: None,
-        };
         //获取K线数据 confirm=1
         let candles = CandleDomainService::new_default()
             .await
-            .get_candle_data_confirm(inst_id, time, 1, None)
+            .get_candle_data_confirm(inst_id, time, 7000, None)
             .await?;
         if candles.is_empty() {
             return Err(anyhow!("未获取到K线数据"));
@@ -131,7 +122,7 @@ impl StrategyOrder {
         strategy: Arc<StrategyConfig>,
     ) -> anyhow::Result<Job> {
         // 根据时间周期设置不同的执行频率
-        let cron_expression = match time.as_str() {
+        let mut cron_expression = match time.as_str() {
             "1m" => "0 * * * * *",     // 每分钟开始时执行
             "5m" => "0 */5 * * * *",   // 每5分钟开始时执行
             "15m" => "0 */15 * * * *", // 每15分钟开始时执行
@@ -143,23 +134,16 @@ impl StrategyOrder {
 
         if env::var("APP_ENV").unwrap() == "local" {
             //开发环境，每10秒执行一次
-            let cron_expression = "*/10 * * * * *";
+            cron_expression = "*/10 * * * * *";
         }
 
         let job = Job::new_async(cron_expression, move |_uuid, _lock| {
             let inst_id = inst_id.clone();
             let time = time.clone();
+            info!("运行定时任务任务: {}_{}", inst_id, time);
             let strategy = Arc::clone(&strategy);
-
             Box::pin(async move {
-                match task::basic::run_strategy_job(
-                    &inst_id,
-                    &time,
-                    &strategy,
-                    &VEGAS_INDICATOR_VALUES,
-                )
-                .await
-                {
+                match task::basic::run_strategy_job(&inst_id, &time, &strategy).await {
                     Ok(_) => {
                         tracing::debug!("策略任务执行成功: {}_{}", inst_id, time);
                     }
@@ -181,7 +165,6 @@ impl StrategyOrder {
         time: String,
     ) -> anyhow::Result<()> {
         let task_key = Self::build_task_key(&inst_id, &time);
-
         // 检查是否已有相同任务在运行
         {
             let active_tasks = self.active_tasks.lock().await;
@@ -193,33 +176,12 @@ impl StrategyOrder {
 
         info!("启动Vegas策略: {}_{}", inst_id, time);
 
-        // 步骤1: 初始化策略数据（带重试机制）
-        let mut attempts = 0;
-        const MAX_RETRIES: usize = 3;
-
-        while attempts < MAX_RETRIES {
-            match Self::initialize_strategy_data(&strategy, &inst_id, &time).await {
-                Ok(_) => break,
-                Err(e) => {
-                    attempts += 1;
-                    if attempts >= MAX_RETRIES {
-                        return Err(anyhow!(
-                            "策略数据初始化失败，已重试{}次: {}",
-                            MAX_RETRIES,
-                            e
-                        ));
-                    }
-                    warn!(
-                        "策略数据初始化失败，重试 {}/{}: {}",
-                        attempts, MAX_RETRIES, e
-                    );
-                }
+        match Self::initialize_strategy_data(&strategy, &inst_id, &time).await {
+            Ok(_) => (),
+            Err(e) => {
+                return Err(anyhow!("策略数据初始化失败: {}", e));
             }
         }
-
-        // 步骤2: 等待系统完全准备好
-        info!("策略数据初始化完成，等待系统准备就绪...");
-        tokio::time::sleep(Duration::from_millis(100)).await;
 
         // 步骤3: 创建并调度任务
         let strategy_arc = Arc::new(strategy);

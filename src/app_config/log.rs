@@ -48,9 +48,9 @@ pub async fn setup_logging() -> anyhow::Result<()> {
         event_count: Arc::new(Mutex::new(0)),
     };
 
-    if app_env == "LOCAL" {
+    if app_env == "local" {
         let subscriber = FmtSubscriber::builder()
-            .with_max_level(Level::DEBUG)
+            .with_max_level(Level::INFO)
             .with_ansi(true)
             .with_target(false)
             .with_thread_ids(true)

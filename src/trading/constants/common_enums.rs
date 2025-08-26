@@ -12,4 +12,3 @@ pub const ADA_SWAP_INST_ID: &str = "ADA-USDT-SWAP";
 pub const DOT_SWAP_INST_ID: &str = "DOT-USDT-SWAP";
 /// link币永续合约
 pub const LINK_SWAP_INST_ID: &str = "LINK-USDT-SWAP";
-

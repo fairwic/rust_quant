@@ -1,14 +1,14 @@
 extern crate rbatis;
 
-use std::collections::HashMap;
 use anyhow::Result;
 use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
 use clap::builder::TypedValueParser;
-use rbatis::{crud, impl_update, RBatis};
 use rbatis::impl_select;
 use rbatis::rbdc::db::ExecResult;
+use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 
 use crate::app_config::db::get_db_client;
 use okx::dto::market_dto::TickerOkxResDto;
@@ -41,7 +41,7 @@ pub struct TickersDataQueryResult {
     pub inst_id: String,
     // pub ts: i64,    // 存储 Unix 时间戳
     pub daily_vol: f64, // 存储 24小时交易量
-    pub ts: i64
+    pub ts: i64,
 }
 
 impl TickersDataQueryResult {
@@ -49,9 +49,8 @@ impl TickersDataQueryResult {
     // 将时间戳转换为 NaiveDate（按日期分组）
     pub fn get_date(&self) -> NaiveDate {
         // 转换时间戳为 NaiveDate
-        NaiveDateTime::from_timestamp(self.ts / 1000, 0).date()  // /1000 是将毫秒转换为秒
+        NaiveDateTime::from_timestamp(self.ts / 1000, 0).date() // /1000 是将毫秒转换为秒
     }
-
 
     // 将 vol24h 转换为 f64
     pub fn get_vol24h(&self) -> f64 {
@@ -59,14 +58,12 @@ impl TickersDataQueryResult {
     }
 }
 
-
-crud!(TickersDataEntity{},"tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
+crud!(TickersDataEntity {}, "tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
 
 impl_update!(TickersDataEntity{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
 impl_select!(TickersDataEntity{fetch_list() => "`where inst_id = 'BTC-USDT-SWAP' ORDER BY id DESC` "},"tickers_data");
 
 impl TickersDataEntity {
-
     // 将 ts 字段转换为 NaiveDate
     pub fn get_date(&self) -> NaiveDate {
         let naive_datetime = Utc.timestamp_millis(self.ts).naive_utc();
@@ -84,9 +81,9 @@ impl TicketsModel {
         }
     }
 
-
     pub async fn add(&self, list: Vec<TickerOkxResDto>) -> anyhow::Result<ExecResult> {
-        let tickers_db: Vec<TickersDataEntity> = list.iter()
+        let tickers_db: Vec<TickersDataEntity> = list
+            .iter()
             .map(|ticker| TickersDataEntity {
                 inst_type: ticker.inst_type.clone(),
                 inst_id: ticker.inst_id.clone(),
@@ -154,11 +151,15 @@ impl TicketsModel {
     }
 
     pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersDataEntity>> {
-        let results: Vec<TickersDataEntity> = TickersDataEntity::select_by_column(self.db, "inst_id", inst_id).await?;
+        let results: Vec<TickersDataEntity> =
+            TickersDataEntity::select_by_column(self.db, "inst_id", inst_id).await?;
         Ok(results)
     }
 
-    pub async fn get_daily_volumes(&self, inst_ids: Option<Vec<&str>>) -> Result<Vec<(String, NaiveDate, f64)>> {
+    pub async fn get_daily_volumes(
+        &self,
+        inst_ids: Option<Vec<&str>>,
+    ) -> Result<Vec<(String, NaiveDate, f64)>> {
         // 构造查询
         let sql = if let Some(inst_ids) = inst_ids {
             format!(
@@ -167,38 +168,47 @@ impl TicketsModel {
                  WHERE inst_id IN ({})
                  GROUP BY inst_id, DATE(FROM_UNIXTIME(ts / 1000))
                  ORDER BY ts DESC",
-                inst_ids.iter().map(|id| format!("'{}'", id)).collect::<Vec<String>>().join(", ")
+                inst_ids
+                    .iter()
+                    .map(|id| format!("'{}'", id))
+                    .collect::<Vec<String>>()
+                    .join(", ")
             )
         } else {
             "SELECT inst_id, MAX(ts) AS ts, SUM(vol24h) AS daily_vol
              FROM tickers_data
              GROUP BY inst_id, DATE(FROM_UNIXTIME(ts / 1000))
-             ORDER BY ts DESC".to_string()
+             ORDER BY ts DESC"
+                .to_string()
         };
 
         // 查询并反序列化到中间结构体
-        let results: Vec<TickersDataQueryResult> = self.db.query_decode(sql.as_str(), vec![]).await?;
+        let results: Vec<TickersDataQueryResult> =
+            self.db.query_decode(sql.as_str(), vec![]).await?;
 
         // 将查询结果转换为包含日期和交易量的元组
-        let daily_volumes = results.into_iter().map(|entry| {
-            let date = entry.get_date();  // 将 ts 转换为 NaiveDate
-            (entry.inst_id.clone(), date, entry.get_vol24h())
-        }).collect();
+        let daily_volumes = results
+            .into_iter()
+            .map(|entry| {
+                let date = entry.get_date(); // 将 ts 转换为 NaiveDate
+                (entry.inst_id.clone(), date, entry.get_vol24h())
+            })
+            .collect();
 
         Ok(daily_volumes)
     }
 
-
     // 计算过去7天的平均交易量
     pub fn calculate_7_day_avg_volume(
         &self,
-        daily_volumes: Vec<(String, NaiveDate, f64)>
+        daily_volumes: Vec<(String, NaiveDate, f64)>,
     ) -> HashMap<String, f64> {
         let mut daily_vol_map: HashMap<String, Vec<(NaiveDate, f64)>> = HashMap::new();
 
         // 将交易量数据按 inst_id 和日期分组
         for (inst_id, date, vol) in daily_volumes {
-            daily_vol_map.entry(inst_id.clone())
+            daily_vol_map
+                .entry(inst_id.clone())
                 .or_insert_with(Vec::new)
                 .push((date, vol));
         }
@@ -206,9 +216,10 @@ impl TicketsModel {
         // 计算每个板块的7天平均交易量
         let mut avg_volumes: HashMap<String, f64> = HashMap::new();
         for (inst_id, volumes) in daily_vol_map {
-            let last_7_days = volumes.iter()
+            let last_7_days = volumes
+                .iter()
                 .rev()
-                .take(7)  // 取最近7天的交易量
+                .take(7) // 取最近7天的交易量
                 .map(|(_, vol)| *vol)
                 .collect::<Vec<f64>>();
 

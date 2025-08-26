@@ -1,8 +1,8 @@
-use tokio::sync::{broadcast};
-use tokio::time::{interval, sleep_until, Duration, Instant};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
+use tokio::time::{interval, sleep_until, Duration, Instant};
 
 pub struct TaskScheduler {
     periodic_tasks: HashMap<String, JoinHandle<()>>,
@@ -23,7 +23,7 @@ impl TaskScheduler {
     pub fn add_periodic_task<F, Fut>(&mut self, name: String, every_n_millis: u64, task_fn: F)
     where
         F: Fn() -> Fut + Send + 'static,
-        Fut: std::future::Future<Output=()> + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         if every_n_millis < 100 {
             panic!("Minimum interval is 100 milliseconds");
@@ -51,7 +51,7 @@ impl TaskScheduler {
     pub fn add_scheduled_task<F, Fut>(&mut self, name: String, target_time: DateTime<Utc>, task: F)
     where
         F: Fn() -> Fut + Send + 'static,
-        Fut: std::future::Future<Output=()> + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         let duration_until_target = (target_time - Utc::now()).to_std().unwrap();
         let target_instant = Instant::now() + duration_until_target;

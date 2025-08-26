@@ -1,37 +1,39 @@
+use futures_util::{SinkExt, StreamExt};
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use futures_util::{SinkExt, StreamExt};
 // use log::{debug, error, warn};
+use okx::websocket::ChannelType;
+use okx::websocket::OkxWebsocketClient;
 use serde_json::json;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite;
-use tracing::{info, Level, span};
-use okx::websocket::OkxWebsocketClient;
-use okx::websocket::ChannelType;
+use tracing::{info, span, Level};
 
+use crate::trading::services::candle_service::candle_service::CandleService;
+use crate::trading::task::tickets_job::update_ticker;
+use okx::api::api_trait::OkxApiTrait;
+use okx::config::Credentials;
+use okx::dto::market_dto::CandleOkxRespDto;
+use okx::dto::market_dto::TickerOkxResDto;
+use okx::dto::CandleOkxWsResDto;
+use okx::dto::CommonOkxWsResDto;
+use okx::dto::TickerOkxResWsDto;
+use okx::websocket::Args;
+use serde::de;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{
     accept_async,
     tungstenite::{Error, Result},
 };
-use okx::config::Credentials;
-use okx::websocket::Args;
 use tracing::debug;
 use tracing::error;
-use okx::dto::market_dto::TickerOkxResDto;
-use crate::trading::task::tickets_job::update_ticker;
-use okx::dto::TickerOkxResWsDto;
-use okx::dto::CandleOkxWsResDto;
-use okx::dto::CommonOkxWsResDto;
-use serde::de;
-use crate::trading::services::candle_service::candle_service::CandleService;
-use okx::dto::market_dto::CandleOkxRespDto;
-use okx::api::api_trait::OkxApiTrait;
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
     if let Err(e) = handle_connection(peer, stream).await {
         match e {
-            tungstenite::Error::ConnectionClosed | tungstenite::Error::Protocol(_) | tungstenite::Error::Utf8 => (),
+            tungstenite::Error::ConnectionClosed
+            | tungstenite::Error::Protocol(_)
+            | tungstenite::Error::Utf8 => (),
             err => error!("Error processing connection: {}", err),
         }
     }
@@ -54,7 +56,6 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     Ok(())
 }
 
-
 pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
     let span = span!(Level::DEBUG, "socket_logic");
     let _enter = span.enter();
@@ -63,13 +64,21 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
     let api_secret = env::var("OKX_API_SECRET").expect("未配置OKX_API_SECRET");
     let passphrase = env::var("OKX_PASSPHRASE").expect("未配置OKX_PASSPHRASE");
     let sim_trading = env::var("OKX_SIMULATED_TRADING").expect("未配置OKX_SIMULATED_TRADING");
+    println!("sim_trading: {:?}", sim_trading);
+    println!("api_key: {:?}", api_key);
+    println!("api_secret: {:?}", api_secret);
+    println!("passphrase: {:?}", passphrase);
 
-    let mut okx_websocket_clinet = OkxWebsocketClient::new_public();
-    let mut rx_public = okx_websocket_clinet.connect().await.unwrap();
+    let mut okx_websocket_client = OkxWebsocketClient::new_public();
+    let mut rx_public = okx_websocket_client.connect().await.unwrap();
 
-    let mut okx_websocket_clinet_private = OkxWebsocketClient::new_private(Credentials::new(api_key, api_secret, passphrase,sim_trading));
-    let mut rx_private = okx_websocket_clinet_private.connect().await.unwrap();
-
+    let mut okx_websocket_client_private = OkxWebsocketClient::new_private(Credentials::new(
+        api_key,
+        api_secret,
+        passphrase,
+        sim_trading,
+    ));
+    let mut rx_private = okx_websocket_client_private.connect().await.unwrap();
 
     // 订阅多个k线频道
     let mut candle_tasks = Vec::new();
@@ -79,7 +88,8 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
                 .with_inst_id(inst_id.to_string())
                 .with_param("period".to_string(), time.to_string());
             // 用私有client订阅k线频道
-            let task = okx_websocket_clinet_private.subscribe(ChannelType::Candle(time.to_string()), args.clone());
+            let task = okx_websocket_client_private
+                .subscribe(ChannelType::Candle(time.to_string()), args.clone());
             candle_tasks.push(task);
         }
     }
@@ -89,7 +99,7 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
     for inst_id in inst_ids.iter() {
         let mut args = Args::new().with_inst_id(inst_id.to_string());
         // 用公有client订阅tickers频道
-        let task = okx_websocket_clinet.subscribe(ChannelType::Tickers, args.clone());
+        let task = okx_websocket_client.subscribe(ChannelType::Tickers, args.clone());
         ticker_tasks.push(task);
     }
 
@@ -124,19 +134,20 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
             if res.is_ok() {
                 let ticker = res.unwrap();
                 // info!("ticketOkxResWsDto数据: {:?}", ticker);
-                let res=update_ticker(ticker.data,Some(vec![&ticker.arg.inst_id.as_str()])).await;
+                let res =
+                    update_ticker(ticker.data, Some(vec![&ticker.arg.inst_id.as_str()])).await;
                 if res.is_ok() {
                     // info!("更新ticker成功: {:?}", res.unwrap());
-                }else {
+                } else {
                     error!("更新ticker失败: {:?}", res.err());
                 }
-            }else  {
+            } else {
                 let res = serde_json::from_str::<CommonOkxWsResDto>(&msg_str);
                 if res.is_ok() {
                     let dto = res.unwrap();
                     if dto.code == "0" {
-                        info!("get a message from common okx ws : {:?}", dto);
-                    }else {
+                        debug!("get a message from common okx ws : {:?}", dto);
+                    } else {
                         error!("get a message from common okx ws error : {:?}", dto);
                     }
                 }
@@ -158,22 +169,28 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
                 let candle = res.unwrap();
                 debug!("candleOkxResWsDto数据: {:?}", candle);
                 //candle2h 处理成 2h
-                let period =candle.arg.channel.as_str().replace("candle", "");
+                let period = candle.arg.channel.as_str().replace("candle", "");
                 // 更新candle
-                let candle_data =candle.data.iter().map(|v| CandleOkxRespDto::from_vec(v.clone())).collect();
-                let res=CandleService::new().update_candle(candle_data,candle.arg.inst_id.as_str(),period.as_str()).await;
+                let candle_data = candle
+                    .data
+                    .iter()
+                    .map(|v| CandleOkxRespDto::from_vec(v.clone()))
+                    .collect();
+                let res = CandleService::new()
+                    .update_candle(candle_data, candle.arg.inst_id.as_str(), period.as_str())
+                    .await;
                 if res.is_ok() {
                     debug!("更新candle成功: {:?}", res.unwrap());
-                }else {
+                } else {
                     error!("更新candle失败: {:?}", res.err());
                 }
-            }else  {
+            } else {
                 let res = serde_json::from_str::<CommonOkxWsResDto>(&msg_str);
                 if res.is_ok() {
                     let dto = res.unwrap();
                     if dto.code == "0" {
-                        info!("get a message from common okx ws : {:?}", dto);
-                    }else {
+                        debug!("get a message from common okx ws : {:?}", dto);
+                    } else {
                         error!("get a message from common okx ws error : {:?}", dto);
                     }
                 }

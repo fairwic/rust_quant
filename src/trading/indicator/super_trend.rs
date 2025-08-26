@@ -1,18 +1,18 @@
 // src/indicators/supertrend.rs use ta::{Next, Reset};
 
-use ta::{Next, Reset};
 use crate::trading::indicator::atr::ATR;
+use ta::{Next, Reset};
 
 // 修正后的Supertrend结构体
 #[derive(Debug, Clone)]
 pub struct Supertrend {
     factor: f64,
-    atr: ATR,          // 确保ATR使用RMA实现
+    atr: ATR, // 确保ATR使用RMA实现
     prev_upper: f64,
     prev_lower: f64,
     prev_close: f64,
     direction: i8,
-    initialized: bool,  // 新增初始化标志
+    initialized: bool, // 新增初始化标志
 }
 
 impl Supertrend {
@@ -47,27 +47,35 @@ impl Supertrend {
         let (final_upper, final_lower) = match self.direction {
             1 => (
                 upper.max(self.prev_upper), // 上涨趋势继承更严格的upper
-                lower
+                lower,
             ),
             -1 => (
                 upper,
-                lower.min(self.prev_lower)  // 下跌趋势继承更严格的lower
+                lower.min(self.prev_lower), // 下跌趋势继承更严格的lower
             ),
-            _ => (upper, lower)
+            _ => (upper, lower),
         };
 
         // 方向变化判断（严格遵循Pine Script逻辑）
         let new_direction = if self.prev_close > self.prev_upper {
-            if close < final_lower { -1} else {1}
+            if close < final_lower {
+                -1
+            } else {
+                1
+            }
         } else {
-            if (close > final_upper) {1} else {-1}
+            if (close > final_upper) {
+                1
+            } else {
+                -1
+            }
         };
 
         // 趋势延续时保持轨道值稳定
         let (final_upper, final_lower) = if new_direction == self.direction {
             (
                 final_upper.max(self.prev_upper),
-                final_lower.min(self.prev_lower)
+                final_lower.min(self.prev_lower),
             )
         } else {
             (upper, lower) // 趋势反转时重置轨道
@@ -83,9 +91,9 @@ impl Supertrend {
             match new_direction {
                 1 => final_upper,
                 -1 => final_lower,
-                _ => unreachable!()
+                _ => unreachable!(),
             },
-            new_direction
+            new_direction,
         )
     }
 }

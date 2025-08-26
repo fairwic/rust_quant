@@ -1,8 +1,10 @@
-use ta::indicators::{BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex, SimpleMovingAverage, TrueRange};
-use ta::{Close, High, Low, Next};
 use crate::time_util;
 use crate::trading::model::entity::candles::entity::CandlesEntity;
 use ta::indicators::KeltnerChannel;
+use ta::indicators::{
+    BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex, SimpleMovingAverage, TrueRange,
+};
+use ta::{Close, High, Low, Next};
 
 /// Squeeze 结构体
 struct Squeeze {
@@ -14,13 +16,24 @@ struct Squeeze {
 
 impl Squeeze {
     /// 创建新的 Squeeze 实例
-    pub fn new(bb_mult: f64, kc_mult_high: f64, kc_mult_mid: f64, kc_mult_low: f64, ttm_length: usize) -> Self {
+    pub fn new(
+        bb_mult: f64,
+        kc_mult_high: f64,
+        kc_mult_mid: f64,
+        kc_mult_low: f64,
+        ttm_length: usize,
+    ) -> Self {
         let bb = BollingerBands::new(bb_mult as usize, ttm_length as f64).unwrap();
         let kc_high = KeltnerChannel::new(kc_mult_high as usize, ttm_length as f64).unwrap();
         let kc_mid = KeltnerChannel::new(kc_mult_mid as usize, ttm_length as f64).unwrap();
         let kc_low = KeltnerChannel::new(kc_mult_low as usize, ttm_length as f64).unwrap();
 
-        Squeeze { bb, kc_high, kc_mid, kc_low }
+        Squeeze {
+            bb,
+            kc_high,
+            kc_mid,
+            kc_low,
+        }
     }
 
     /// 计算 Squeeze 条件
@@ -32,9 +45,12 @@ impl Squeeze {
 
         let no_squeeze = bb_value.lower < kc_low_value.lower || bb_value.upper > kc_low_value.upper;
         // let no_squeeze = bb_value.lower < kc_low_value.lower || bb_value.upper > kc_low_value.upper;
-        let low_squeeze = bb_value.lower >= kc_low_value.lower && bb_value.upper <= kc_low_value.upper;
-        let mid_squeeze = bb_value.lower >= kc_mid_value.lower && bb_value.upper <= kc_mid_value.upper;
-        let high_squeeze = bb_value.lower >= kc_high_value.lower && bb_value.upper <= kc_high_value.upper;
+        let low_squeeze =
+            bb_value.lower >= kc_low_value.lower && bb_value.upper <= kc_low_value.upper;
+        let mid_squeeze =
+            bb_value.lower >= kc_mid_value.lower && bb_value.upper <= kc_mid_value.upper;
+        let high_squeeze =
+            bb_value.lower >= kc_high_value.lower && bb_value.upper <= kc_high_value.upper;
 
         (no_squeeze, low_squeeze, mid_squeeze, high_squeeze)
     }
@@ -95,17 +111,31 @@ impl ComprehensiveStrategy {
         let mut open_trades = 0;
 
         // 计算 ADX 值
-        println!("计算adx,adx_smoothing:{},adx_period:{}", self.adx_smoothing, self.adx_period);
-        let adx_values = ComprehensiveStrategy::calculate_adx(&self.candles_5m, self.adx_smoothing, self.adx_period);
+        println!(
+            "计算adx,adx_smoothing:{},adx_period:{}",
+            self.adx_smoothing, self.adx_period
+        );
+        let adx_values = ComprehensiveStrategy::calculate_adx(
+            &self.candles_5m,
+            self.adx_smoothing,
+            self.adx_period,
+        );
 
         // 初始化 Squeeze
-        let mut squeeze = Squeeze::new(self.bb_mult, self.kc_mult_high, self.kc_mult_mid, self.kc_mult_low, self.ttm_length);
+        let mut squeeze = Squeeze::new(
+            self.bb_mult,
+            self.kc_mult_high,
+            self.kc_mult_mid,
+            self.kc_mult_low,
+            self.ttm_length,
+        );
 
         // 初始化 Andean Oscillator 参数
         let mut andean_oscillator = AndeanOscillator::new(self.andean_length, self.sig_length);
 
         // 计算线性回归值
-        let linreg_values = ComprehensiveStrategy::calculate_linreg(&self.candles_5m, self.ttm_length);
+        let linreg_values =
+            ComprehensiveStrategy::calculate_linreg(&self.candles_5m, self.ttm_length);
 
         let mut prev_mom = 0.0;
 
@@ -127,7 +157,8 @@ impl ComprehensiveStrategy {
             // let signal = andean_oscillator.ema_signal.value();
 
             // 计算 TTM Squeeze
-            let (no_squeeze, low_squeeze, mid_squeeze, high_squeeze) = squeeze.calculate(current_price);
+            let (no_squeeze, low_squeeze, mid_squeeze, high_squeeze) =
+                squeeze.calculate(current_price);
 
             // 获取动量值
             let mom = linreg_values[i];
@@ -157,12 +188,18 @@ impl ComprehensiveStrategy {
                 position = funds / current_price;
                 funds = 0.0;
                 open_trades += 1;
-                println!("Buy at time: {}, price: {}, position: {}", candle.ts, current_price, position);
+                println!(
+                    "Buy at time: {}, price: {}, position: {}",
+                    candle.ts, current_price, position
+                );
             } else if sell_condition && position > 0.0 {
                 // 当满足卖出条件时平多仓
                 funds = position * current_price;
                 position = 0.0;
-                println!("Sell (close long) at time: {}, price: {}, funds: {}", candle.ts, current_price, funds);
+                println!(
+                    "Sell (close long) at time: {}, price: {}, funds: {}",
+                    candle.ts, current_price, funds
+                );
                 if funds > initial_funds {
                     wins += 1;
                 } else {
@@ -173,7 +210,10 @@ impl ComprehensiveStrategy {
                 funds = position * current_price;
                 position = 0.0;
                 losses += 1;
-                println!("Stop loss at time: {}, price: {}, funds: {}", candle.ts, current_price, funds);
+                println!(
+                    "Stop loss at time: {}, price: {}, funds: {}",
+                    candle.ts, current_price, funds
+                );
             }
 
             prev_mom = mom;
@@ -262,7 +302,6 @@ impl ComprehensiveStrategy {
         adx_values
     }
 
-
     // 线性回归计算函数
     fn calculate_linreg(candles: &[CandlesEntity], length: usize) -> Vec<f64> {
         let mut linreg_values = vec![0.0; candles.len()];
@@ -275,8 +314,16 @@ impl ComprehensiveStrategy {
             let mut sum_xx = 0.0;
 
             // 计算高低价格的复合平均值
-            let high_avg = candles[i - length + 1..=i].iter().map(|c| c.h.parse::<f64>().unwrap_or(0.0)).fold(0.0, |a, b| a + b) / length as f64;
-            let low_avg = candles[i - length + 1..=i].iter().map(|c| c.l.parse::<f64>().unwrap_or(0.0)).fold(0.0, |a, b| a + b) / length as f64;
+            let high_avg = candles[i - length + 1..=i]
+                .iter()
+                .map(|c| c.h.parse::<f64>().unwrap_or(0.0))
+                .fold(0.0, |a, b| a + b)
+                / length as f64;
+            let low_avg = candles[i - length + 1..=i]
+                .iter()
+                .map(|c| c.l.parse::<f64>().unwrap_or(0.0))
+                .fold(0.0, |a, b| a + b)
+                / length as f64;
             let sma_value = sma_close.next(candles[i].c.parse::<f64>().unwrap_or(0.0));
             let compound_avg = (high_avg + low_avg + sma_value) / 3.0;
 
@@ -288,7 +335,8 @@ impl ComprehensiveStrategy {
                 sum_xy += x * y;
                 sum_xx += x * x;
             }
-            let slope = (length as f64 * sum_xy - sum_x * sum_y) / (length as f64 * sum_xx - sum_x * sum_x);
+            let slope =
+                (length as f64 * sum_xy - sum_x * sum_y) / (length as f64 * sum_xx - sum_x * sum_x);
             linreg_values[i] = slope;
         }
 

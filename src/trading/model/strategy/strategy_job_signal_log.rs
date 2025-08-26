@@ -1,11 +1,11 @@
 extern crate rbatis;
 
-use tracing::debug;
-use rbatis::{crud, impl_update, RBatis};
-use rbatis::rbdc::db::ExecResult;
-use serde_json::json;
 use crate::app_config::db;
 use crate::trading::strategy::StrategyType;
+use rbatis::rbdc::db::ExecResult;
+use rbatis::{crud, impl_update, RBatis};
+use serde_json::json;
+use tracing::debug;
 
 /// CREATE TABLE `back_test_log` (
 //   `id` int NOT NULL,
@@ -25,7 +25,7 @@ pub struct StrategyJobSignalLog {
     pub strategy_result: String,
 }
 
-crud!(StrategyJobSignalLog{});
+crud!(StrategyJobSignalLog {});
 impl_update!(StrategyJobSignalLog{update_by_name(name:&str) => "`where id = '2'`"});
 
 pub struct StrategyJobSignalLogModel {

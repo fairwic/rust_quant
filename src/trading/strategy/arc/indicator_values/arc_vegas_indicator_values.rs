@@ -2,13 +2,14 @@ use crate::trading::indicator::vegas_indicator::IndicatorCombine;
 use crate::trading::indicator::vegas_indicator::VegasIndicatorSignalValue;
 use crate::CandleItem;
 use chrono::{DateTime, TimeZone, Utc};
+use dashmap::DashMap;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fmt::format;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 
 // 定义最大容量常量
@@ -44,8 +45,9 @@ pub fn get_hash_key(inst_id: &str, period: &str, strategy_type: &str) -> String 
 // 指标值存储管理器 - 替代全局静态变量
 #[derive(Clone)]
 pub struct IndicatorValuesManager {
-    values: Arc<RwLock<HashMap<String, ArcVegasIndicatorValues>>>,
-    metrics: Arc<RwLock<HashMap<String, IndicatorMetrics>>>, // 记录性能指标
+    values: Arc<DashMap<String, ArcVegasIndicatorValues>>,
+    metrics: Arc<DashMap<String, IndicatorMetrics>>, // 记录性能指标
+    key_mutex: Arc<DashMap<String, Arc<Mutex<()>>>>, // 每键互斥，防止同键重入
 }
 
 // 指标操作的性能指标
@@ -63,81 +65,57 @@ impl IndicatorValuesManager {
     /// 创建新的管理器实例
     pub fn new() -> Self {
         Self {
-            values: Arc::new(RwLock::new(HashMap::new())),
-            metrics: Arc::new(RwLock::new(HashMap::new())),
+            values: Arc::new(DashMap::new()),
+            metrics: Arc::new(DashMap::new()),
+            key_mutex: Arc::new(DashMap::new()),
         }
     }
 
     /// 获取指定键的指标值
     pub async fn get(&self, key: &str) -> Option<ArcVegasIndicatorValues> {
-        // 记录读取开始时间
         let start = Instant::now();
-
-        // 获取读锁
-        let read_result = tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.values.read(),
-        )
-        .await;
-
-        // 处理锁获取超时
-        let read_guard = match read_result {
-            Ok(guard) => guard,
-            Err(_) => {
-                warn!("获取指标值读锁超时: {}", key);
-                return None;
-            }
-        };
-
-        // 获取值并克隆
-        let result = read_guard.get(key).cloned();
-
-        // 更新指标
+        let result = self.values.get(key).map(|r| r.clone());
         self.record_metrics(key, true, start.elapsed().as_millis() as u64)
             .await;
+        result
+    }
 
+    /// 仅返回末 n 根K线与当前指标的轻量快照，减少大对象克隆
+    pub async fn get_snapshot_last_n(
+        &self,
+        key: &str,
+        n: usize,
+    ) -> Option<(Vec<CandleItem>, IndicatorCombine, i64)> {
+        let start = Instant::now();
+        let result = self.values.get(key).map(|r| {
+            let v = r.value();
+            let len = v.candle_item.len();
+            let take_n = n.min(len);
+            let mut last_n: Vec<CandleItem> = Vec::with_capacity(take_n);
+            // 只克隆末 n 根，保持原始顺序
+            for i in len.saturating_sub(take_n)..len {
+                last_n.push(v.candle_item[i].clone());
+            }
+            (last_n, v.indicator_combines.clone(), v.timestamp)
+        });
+        self.record_metrics(key, true, start.elapsed().as_millis() as u64)
+            .await;
         result
     }
 
     /// 设置指标值
     pub async fn set(&self, key: String, value: ArcVegasIndicatorValues) -> Result<(), String> {
-        // 记录写入开始时间
         let start = Instant::now();
-
-        // 获取写锁
-        let write_result = tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.values.write(),
-        )
-        .await;
-
-        // 处理锁获取超时
-        let mut write_guard = match write_result {
-            Ok(guard) => guard,
-            Err(_) => {
-                let error_msg = format!("获取指标值写锁超时: {}", key);
-                error!("{}", error_msg);
-                return Err(error_msg);
-            }
-        };
-
-        // 限制K线历史数据大小
         let mut value_with_limited_history = value.clone();
         if value_with_limited_history.candle_item.len() > MAX_CANDLE_ITEMS {
-            // 使用VecDeque的高效操作：从前端移除多余的元素
             let excess = value_with_limited_history.candle_item.len() - MAX_CANDLE_ITEMS;
             for _ in 0..excess {
                 value_with_limited_history.candle_item.pop_front();
             }
         }
-
-        // 更新数据
-        write_guard.insert(key.clone(), value_with_limited_history);
-
-        // 更新指标
+        self.values.insert(key.clone(), value_with_limited_history);
         self.record_metrics(&key, false, start.elapsed().as_millis() as u64)
             .await;
-
         Ok(())
     }
 
@@ -148,31 +126,11 @@ impl IndicatorValuesManager {
         candles: VecDeque<CandleItem>,
     ) -> Result<(), String> {
         let start = Instant::now();
-
-        // 先检查键是否存在
         if !self.key_exists(key).await {
             return Err(format!("键 {} 不存在", key));
         }
-
-        // 获取写锁
-        let write_result = tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.values.write(),
-        )
-        .await;
-
-        let mut write_guard = match write_result {
-            Ok(guard) => guard,
-            Err(_) => {
-                let error_msg = format!("更新K线数据时获取写锁超时: {}", key);
-                error!("{}", error_msg);
-                return Err(error_msg);
-            }
-        };
-
-        // 更新K线数据
-        if let Some(values) = write_guard.get_mut(key) {
-            // 限制数据大小 - 使用VecDeque的高效操作
+        if let Some(mut entry) = self.values.get_mut(key) {
+            let values = entry.value_mut();
             values.candle_item = candles;
             if values.candle_item.len() > MAX_CANDLE_ITEMS {
                 let excess = values.candle_item.len() - MAX_CANDLE_ITEMS;
@@ -180,14 +138,11 @@ impl IndicatorValuesManager {
                     values.candle_item.pop_front();
                 }
             }
-
-            // 更新指标
             self.record_metrics(key, false, start.elapsed().as_millis() as u64)
                 .await;
-
             Ok(())
         } else {
-            Err(format!("获取写锁后键 {} 不存在", key))
+            Err(format!("键 {} 不存在", key))
         }
     }
 
@@ -198,163 +153,113 @@ impl IndicatorValuesManager {
         indicators: IndicatorCombine,
     ) -> Result<(), String> {
         let start = Instant::now();
-
-        // 先检查键是否存在
         if !self.key_exists(key).await {
             return Err(format!("键 {} 不存在", key));
         }
-
-        // 获取写锁
-        let write_result = tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.values.write(),
-        )
-        .await;
-
-        let mut write_guard = match write_result {
-            Ok(guard) => guard,
-            Err(_) => {
-                let error_msg = format!("更新指标值时获取写锁超时: {}", key);
-                error!("{}", error_msg);
-                return Err(error_msg);
-            }
-        };
-
-        // 更新指标数据
-        if let Some(values) = write_guard.get_mut(key) {
+        if let Some(mut entry) = self.values.get_mut(key) {
+            let values = entry.value_mut();
             values.indicator_combines = indicators;
-
-            // 更新指标
             self.record_metrics(key, false, start.elapsed().as_millis() as u64)
                 .await;
-
             Ok(())
         } else {
-            Err(format!("获取写锁后键 {} 不存在", key))
+            Err(format!("键 {} 不存在", key))
+        }
+    }
+
+    /// 原子更新：同时更新K线与指标，避免中间态
+    pub async fn update_both(
+        &self,
+        key: &str,
+        candles: VecDeque<CandleItem>,
+        indicators: IndicatorCombine,
+        timestamp: i64,
+    ) -> Result<(), String> {
+        let start = Instant::now();
+        if !self.key_exists(key).await {
+            return Err(format!("键 {} 不存在", key));
+        }
+        if let Some(mut entry) = self.values.get_mut(key) {
+            let values = entry.value_mut();
+            let mut new_candles = candles;
+            if new_candles.len() > MAX_CANDLE_ITEMS {
+                let excess = new_candles.len() - MAX_CANDLE_ITEMS;
+                for _ in 0..excess {
+                    new_candles.pop_front();
+                }
+            }
+            values.candle_item = new_candles;
+            values.indicator_combines = indicators;
+            values.timestamp = timestamp;
+            self.record_metrics(key, false, start.elapsed().as_millis() as u64)
+                .await;
+            Ok(())
+        } else {
+            Err(format!("键 {} 不存在", key))
         }
     }
 
     /// 检查键是否存在
     pub async fn key_exists(&self, key: &str) -> bool {
-        match tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.values.read(),
-        )
-        .await
-        {
-            Ok(guard) => guard.contains_key(key),
-            Err(_) => {
-                warn!("检查键是否存在时获取读锁超时: {}", key);
-                false
-            }
-        }
+        self.values.contains_key(key)
     }
 
     /// 获取所有键
     pub async fn get_all_keys(&self) -> Vec<String> {
-        match tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.values.read(),
-        )
-        .await
-        {
-            Ok(guard) => guard.keys().cloned().collect(),
-            Err(_) => {
-                warn!("获取所有键时读锁超时");
-                vec![]
-            }
-        }
+        self.values.iter().map(|e| e.key().clone()).collect()
     }
     /// 获取当前缓存的键数量
     pub async fn get_count(&self) -> usize {
-        match tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.values.read(),
-        )
-        .await
-        {
-            Ok(guard) => guard.len(),
-            Err(_) => {
-                warn!("获取键数量时读锁超时");
-                0
-            }
-        }
+        self.values.len()
     }
     /// 清除指定键的数据
     pub async fn remove(&self, key: &str) -> bool {
-        match tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.values.write(),
-        )
-        .await
-        {
-            Ok(mut guard) => {
-                let removed = guard.remove(key).is_some();
-                if removed {
-                    // 同时清理指标记录
-                    if let Ok(mut metrics_guard) = tokio::time::timeout(
-                        Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-                        self.metrics.write(),
-                    )
-                    .await
-                    {
-                        metrics_guard.remove(key);
-                    }
-                }
-                removed
-            }
-            Err(_) => {
-                warn!("移除键 {} 时写锁超时", key);
-                false
-            }
+        let removed = self.values.remove(key).is_some();
+        if removed {
+            self.metrics.remove(key);
         }
+        removed
     }
     /// 记录性能指标
     async fn record_metrics(&self, key: &str, is_read: bool, elapsed_ms: u64) {
-        if let Ok(mut metrics_guard) = tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.metrics.write(),
-        )
-        .await
-        {
-            let entry = metrics_guard
-                .entry(key.to_string())
-                .or_insert_with(IndicatorMetrics::default);
-            if is_read {
-                entry.read_count += 1;
-                entry.last_read_time_ms = elapsed_ms;
-                entry.max_read_time_ms = entry.max_read_time_ms.max(elapsed_ms);
-            } else {
-                entry.write_count += 1;
-                entry.last_write_time_ms = elapsed_ms;
-                entry.max_write_time_ms = entry.max_write_time_ms.max(elapsed_ms);
-            }
+        let mut entry = self
+            .metrics
+            .entry(key.to_string())
+            .or_insert_with(IndicatorMetrics::default);
+        if is_read {
+            entry.read_count += 1;
+            entry.last_read_time_ms = elapsed_ms;
+            entry.max_read_time_ms = entry.max_read_time_ms.max(elapsed_ms);
+        } else {
+            entry.write_count += 1;
+            entry.last_write_time_ms = elapsed_ms;
+            entry.max_write_time_ms = entry.max_write_time_ms.max(elapsed_ms);
         }
     }
     /// 获取性能指标
     pub async fn get_metrics(&self, key: &str) -> Option<IndicatorMetrics> {
-        match tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.metrics.read(),
-        )
-        .await
-        {
-            Ok(metrics_guard) => metrics_guard.get(key).cloned(),
-            Err(_) => None,
-        }
+        self.metrics.get(key).map(|e| e.clone())
     }
 
     /// 获取所有性能指标
     pub async fn get_all_metrics(&self) -> HashMap<String, IndicatorMetrics> {
-        match tokio::time::timeout(
-            Duration::from_millis(MAX_LOCKS_WAIT_TIME_MS),
-            self.metrics.read(),
-        )
-        .await
-        {
-            Ok(metrics_guard) => metrics_guard.clone(),
-            Err(_) => HashMap::new(),
+        self.metrics
+            .iter()
+            .map(|e| (e.key().clone(), e.value().clone()))
+            .collect()
+    }
+
+    /// 获取某键的互斥锁（不存在则插入）
+    pub async fn acquire_key_mutex(&self, key: &str) -> Arc<Mutex<()>> {
+        if let Some(m) = self.key_mutex.get(key) {
+            return m.value().clone();
         }
+        let mutex = Arc::new(Mutex::new(()));
+        let entry = self
+            .key_mutex
+            .entry(key.to_string())
+            .or_insert_with(|| mutex.clone());
+        entry.value().clone()
     }
 }
 
@@ -366,13 +271,13 @@ pub fn get_indicator_manager() -> &'static IndicatorValuesManager {
     INDICATOR_MANAGER.get_or_init(|| IndicatorValuesManager::new())
 }
 
-// 为了向后兼容，保留原来的全局变量，但改为从管理器获取数据
-pub static VEGAS_INDICATOR_VALUES: OnceCell<RwLock<HashMap<String, ArcVegasIndicatorValues>>> =
-    OnceCell::new();
+// // 为了向后兼容，保留原来的全局变量，但改为从管理器获取数据
+// pub static VEGAS_INDICATOR_VALUES: OnceCell<RwLock<HashMap<String, ArcVegasIndicatorValues>>> =
+//     OnceCell::new();
 
-pub fn get_vegas_indicator_values() -> &'static RwLock<HashMap<String, ArcVegasIndicatorValues>> {
-    VEGAS_INDICATOR_VALUES.get_or_init(|| RwLock::new(HashMap::new()))
-}
+// pub fn get_vegas_indicator_values() -> &'static RwLock<HashMap<String, ArcVegasIndicatorValues>> {
+//     VEGAS_INDICATOR_VALUES.get_or_init(|| RwLock::new(HashMap::new()))
+// }
 
 /// 设置策略指标值 - 使用新的管理器
 pub async fn set_strategy_indicator_values(
@@ -410,7 +315,10 @@ pub async fn get_vegas_indicator_values_by_inst_id_with_period(
 }
 
 /// 更新策略指标值中的K线数据 - 使用新的管理器
-pub async fn update_candle_items(hash_key: &str, candles: VecDeque<CandleItem>) -> Result<(), String> {
+pub async fn update_candle_items(
+    hash_key: &str,
+    candles: VecDeque<CandleItem>,
+) -> Result<(), String> {
     get_indicator_manager()
         .update_candle_items(hash_key, candles)
         .await

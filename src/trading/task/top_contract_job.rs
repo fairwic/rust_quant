@@ -14,7 +14,6 @@ use tracing::{error, span, warn, Level};
 
 pub struct TopContractJob {}
 impl TopContractJob {
-
     // pub async fn run_strategy(
     //     inst_id: &str,
     //     time: &str,

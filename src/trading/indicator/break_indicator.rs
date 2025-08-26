@@ -93,7 +93,10 @@ impl BreakIndicator {
         }
 
         // 判断窗口内振幅是否都小于阈值
-        let amplitude_ok = self.amplitude_history.iter().all(|&amp| amp < self.amplitude_threshold);
+        let amplitude_ok = self
+            .amplitude_history
+            .iter()
+            .all(|&amp| amp < self.amplitude_threshold);
 
         if amplitude_ok {
             // 判断突破

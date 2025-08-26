@@ -1,6 +1,6 @@
 extern crate rbatis;
-use rbatis::{crud, impl_update, RBatis};
 use rbatis::impl_select;
+use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 
 use crate::app_config::db::get_db_client;
@@ -27,12 +27,13 @@ pub struct AssetClassificationDetailEntity {
     pub ts: i64,
 }
 
-
-crud!(AssetClassificationDetailEntity{},"asset_classification_detail"); //crud = insert+select_by_column+update_by_column+delete_by_column
+crud!(
+    AssetClassificationDetailEntity {},
+    "asset_classification_detail"
+); //crud = insert+select_by_column+update_by_column+delete_by_column
 
 impl_update!(AssetClassificationDetailEntity{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
 impl_select!(AssetClassificationDetailEntity{fetch_list() => "`where inst_id = 'BTC-USDT-SWAP' ORDER BY id DESC` "},"tickers_data");
-
 
 pub struct AssetClassificationDetailEntityModel {
     db: &'static RBatis,
@@ -44,5 +45,4 @@ impl AssetClassificationDetailEntityModel {
             db: get_db_client(),
         }
     }
-
 }

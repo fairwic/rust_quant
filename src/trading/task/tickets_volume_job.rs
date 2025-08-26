@@ -1,11 +1,11 @@
 use crate::trading::model::market::tickers::TicketsModel;
 use crate::trading::model::market::tickers_volume::{TickersVolume, TickersVolumeModel};
+use okx::api::account::OkxContracts;
+use okx::api::api_trait::OkxApiTrait;
 use okx::api::market::OkxMarket;
 use okx::api::public_data::OkxPublicData;
 use std::sync::Arc;
 use tracing::{debug, error};
-use okx::api::account::OkxContracts;
-use okx::api::api_trait::OkxApiTrait;
 pub async fn get_ticket(ins_type: &str) -> anyhow::Result<()> {
     let ticker = OkxMarket::from_env()?.get_ticker(&ins_type).await;
     debug!("单个ticket: {:?}", ticker);
@@ -23,7 +23,8 @@ pub async fn init_all_ticker_volume(inst_ids: &str, period: &str) -> anyhow::Res
     //同步合约产品
     let ins_type = "SWAP";
     let inst_id = "BTC";
-    let items = OkxContracts::from_env()?.get_open_interest_volume(Some("BTC"), None, None, Some("1D"))
+    let items = OkxContracts::from_env()?
+        .get_open_interest_volume(Some("BTC"), None, None, Some("1D"))
         .await?;
 
     let model = TickersVolumeModel::new().await;
