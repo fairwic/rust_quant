@@ -152,7 +152,6 @@ impl SwapOrder {
             error!("create okx account client error: {:?}", e);
             AppError::OkxApiError(e.to_string())
         })?;
-
         //todo 如有反向的仓位，应该开启异步去立即关闭
         let position_list = account
             .get_account_positions(Some("SWAP"), Some(inst_id), None)

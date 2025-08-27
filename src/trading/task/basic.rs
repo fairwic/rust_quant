@@ -89,17 +89,13 @@ pub async fn run_sync_data_job(
     tims: &Vec<&str>,
 ) -> Result<(), anyhow::Error> {
     println!("run_sync_data_job start");
-
     let span = span!(Level::DEBUG, "run_sync_data_job");
     let _enter = span.enter();
-
     candles_job::init_create_table(inst_ids.clone(), Some(&tims))
         .await
         .expect("init create_table error");
-
     //初始化获取历史的k线路
     candles_job::init_all_candles(inst_ids.clone(), Some(&tims)).await?;
-
     //获取最新的k线路
     candles_job::init_before_candles(inst_ids.clone(), Some(tims.clone())).await?;
     Ok(())
@@ -934,7 +930,7 @@ pub async fn run_strategy_job(
     info!("run_strategy_job开始: inst_id={}, time={}", inst_id, time);
     //记录执行时间
     let start_time = Instant::now();
-    // 直接使用新的管理器，不再依赖旧的cell参数
+    // 直接使用新的管理器
     let res = self::run_ready_to_order_with_manager(inst_id, time, strategy).await;
 
     if let Err(e) = res {
