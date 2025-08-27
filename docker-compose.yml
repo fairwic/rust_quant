@@ -26,3 +26,14 @@ services:
     volumes:
       - .:/usr/src/rust_quant
     command: sh -c "cargo build --release && ./target/release/rust_quant"
+  mysql:
+      image: mysql:8.0
+      container_name: my_mysql
+      restart: always
+      environment:
+        MYSQL_ROOT_PASSWORD: example   # root 用户密码
+        MYSQL_DATABASE: test                 # 默认创建的数据库
+      ports:
+        - "33306:3306"
+      volumes:
+        - ./mysql_data:/var/lib/mysql        # 本地路径映射到 MySQL 数据目录
