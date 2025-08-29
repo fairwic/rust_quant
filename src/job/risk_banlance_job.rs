@@ -6,6 +6,7 @@ use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::SetLeverageRequest;
 use okx::dto::asset_dto::{AssetBalance, TransferOkxReqDto};
 use okx::dto::trade_dto::TdModeEnum;
+use okx::dto::EnumToStrTrait;
 use okx::dto::PositionSide;
 use okx::enums::account_enums::AccountType;
 use okx::{OkxAccount, OkxAsset};
@@ -78,9 +79,9 @@ impl RiskBalanceWithLevelJob {
                 let params = SetLeverageRequest {
                     inst_id: Some(inst_id.to_string()),
                     ccy: None,
-                    mgn_mode: TdModeEnum::ISOLATED.to_string(),
+                    mgn_mode: TdModeEnum::ISOLATED.as_str().to_owned(),
                     lever: level.to_string(),
-                    pos_side: Some(post_side.to_string()),
+                    pos_side: Some(post_side.as_str().to_owned()),
                 };
                 //延迟100ms
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;

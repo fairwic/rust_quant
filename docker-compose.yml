@@ -33,6 +33,7 @@ services:
       environment:
         MYSQL_ROOT_PASSWORD: example   # root 用户密码
         MYSQL_DATABASE: test                 # 默认创建的数据库
+        MYSQL_PASSWORD: example           # 普通用户密码
       ports:
         - "33306:3306"
       volumes:

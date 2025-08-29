@@ -37,6 +37,7 @@ pub(crate) fn is_within_business_hours(ts: i64) -> bool {
     !is_saturday && in_with_hour
 }
 
+/// 解析周期字符串为毫秒数
 pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
     let duration = match &period.to_uppercase()[..] {
         "1S" => 1,
@@ -53,7 +54,7 @@ pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
     Ok(duration * 1000) // 转换为毫秒
 }
 
-//当前毫秒级时间增加或减少指定周期的毫秒数
+///当前毫秒级时间增加或减少指定周期的毫秒数
 pub(crate) fn ts_reduce_n_period(ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
     let res = parse_period_to_mill(period);
     //最大条数100
@@ -61,7 +62,7 @@ pub(crate) fn ts_reduce_n_period(ts: i64, period: &str, n: usize) -> anyhow::Res
     Ok(ts - mill)
 }
 
-//当前毫秒级时间增加或减少指定周期的毫秒数
+///当前毫秒级时间增加或减少指定周期的毫秒数
 pub(crate) fn ts_add_n_period(ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
     let res = parse_period_to_mill(period);
     //最大条数100
@@ -69,7 +70,7 @@ pub(crate) fn ts_add_n_period(ts: i64, period: &str, n: usize) -> anyhow::Result
     Ok(ts + mill)
 }
 
-// 将 DateTime 格式化为周期字符串（如 "4H", "5min" 等）
+///
 pub fn format_to_period_str(period: &str) -> String {
     let dt = Local::now();
     let (num, unit) = period.split_at(period.chars().take_while(|c| c.is_numeric()).count());
@@ -181,6 +182,12 @@ pub fn now_timestamp_mills() -> String {
     now.timestamp_millis().to_string()
 }
 
+/// 判断指定时间戳是否是周期的开始时间戳
+pub fn ts_is_match_period(ts: i64, period: &str) -> bool {
+    let period_start = get_period_start_timestamp(period);
+    period_start == ts
+}
+
 /// 获取指定周期的开始时间戳
 /// 例如：周期为 1小时（1h），5分钟（5m），1天（1D）等
 pub fn get_period_start_timestamp(period: &str) -> i64 {
@@ -234,7 +241,7 @@ pub fn get_period_start_timestamp(period: &str) -> i64 {
             .unwrap()
             .with_nanosecond(0)
             .unwrap(),
-        "1D" => now.date().and_hms(0, 0, 0).with_nanosecond(0).unwrap(),
+        "1D" | "1Dutc" => now.date().and_hms(0, 0, 0).with_nanosecond(0).unwrap(),
         "4D" => now
             .date()
             .and_hms(0, 0, 0)
@@ -244,7 +251,6 @@ pub fn get_period_start_timestamp(period: &str) -> i64 {
             .unwrap(),
         _ => panic!("Unsupported period: {}", period),
     };
-
     // 返回周期开始时间的毫秒级时间戳
     period_start.timestamp_millis()
 }

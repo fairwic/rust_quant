@@ -11,6 +11,7 @@ use tracing::{debug, error, info};
 use crate::app_config::db;
 use okx::dto::market_dto::CandleOkxRespDto;
 use rbatis::impl_select;
+use rbatis::rbdc::DateTime;
 
 /// table
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -26,9 +27,10 @@ pub struct CandlesEntity {
     pub vol_ccy: String, // 交易量，以币为单位
     // pub vol_ccy_quote: String, // 交易量，以计价货币为单位
     pub confirm: String, // K线状态
+    pub update_time: Option<DateTime>,
 }
-
-crud!(CandlesEntity {}, "tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
-
-impl_update!(CandlesEntity{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
-impl_select!(CandlesEntity{fetch_list() => ""},"tickers_data");
+//
+// crud!(CandlesEntity {}, "tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
+//
+// impl_update!(CandlesEntity{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
+// impl_select!(CandlesEntity{fetch_list() => ""},"tickers_data");

@@ -44,7 +44,8 @@ pub struct SwapOrderEntity {
 }
 
 impl SwapOrderEntity {
-    pub fn gen_order_id(inst_id: &str, period: &str, side: String, pos_side: String) -> String {
+    // 生成订单id
+    pub fn gen_order_id(inst_id: &str, period: &str, side: &str, pos_side: &str) -> String {
         let time = time_util::format_to_period_str(period);
         //btc-1d-buy-l-20250710000000
         //eth-1h-sell-s-20250710150000
@@ -101,8 +102,8 @@ impl SwapOrderEntityModel {
         &self,
         inst_id: &str,
         time: &str,
-        side: String,
-        pos_side: String,
+        side: &str,
+        pos_side: &str,
     ) -> anyhow::Result<Vec<SwapOrderEntity>> {
         let in_ord_id = SwapOrderEntity::gen_order_id(inst_id, time, side, pos_side);
         let data = SwapOrderEntity::select_by_in_order_id(self.db, in_ord_id).await?;

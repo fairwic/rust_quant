@@ -51,11 +51,11 @@ async fn test_okx_order() {
 
     let order = SwapOrder::new()
         .ready_to_order(
-            StrategyType::Vegas,
+            &StrategyType::Vegas,
             inst_id,
             period,
-            signal_result,
-            risk_config,
+            &signal_result,
+            &risk_config,
             5,
         )
         .await;

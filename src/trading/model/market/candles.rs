@@ -225,6 +225,7 @@ impl CandlesModel {
                 vol_ccy: candle_data.vol_ccy.to_string(),
                 // vol_ccy_quote: candle_data.vol_ccy_quote.to_string(),
                 confirm: candle_data.confirm.to_string(),
+                update_time:None
             };
             let exec_result: u64 = self.update_one(data, inst_id, time_interval).await?;
         }
@@ -265,8 +266,7 @@ impl CandlesModel {
         }
         //默认取最后的条数
         query = format!("{} order by ts DESC limit {}", query, dto.limit);
-        info!("query get candle SQL: {}", query);
-
+        // info!("query get candle SQL: {}", query);
         let res: Value = self.db.query(&query, vec![]).await?;
         if res.is_array() && res.as_array().unwrap().is_empty() {
             info!("No candles found in MySQL");

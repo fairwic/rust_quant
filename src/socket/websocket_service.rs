@@ -64,10 +64,10 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
     let api_secret = env::var("OKX_API_SECRET").expect("未配置OKX_API_SECRET");
     let passphrase = env::var("OKX_PASSPHRASE").expect("未配置OKX_PASSPHRASE");
     let sim_trading = env::var("OKX_SIMULATED_TRADING").expect("未配置OKX_SIMULATED_TRADING");
-    println!("sim_trading: {:?}", sim_trading);
-    println!("api_key: {:?}", api_key);
-    println!("api_secret: {:?}", api_secret);
-    println!("passphrase: {:?}", passphrase);
+    // println!("sim_trading: {:?}", sim_trading);
+    // println!("api_key: {:?}", api_key);
+    // println!("api_secret: {:?}", api_secret);
+    // println!("passphrase: {:?}", passphrase);
 
     let mut okx_websocket_client = OkxWebsocketClient::new_public();
     let mut rx_public = okx_websocket_client.connect().await.unwrap();

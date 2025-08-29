@@ -19,6 +19,7 @@ use crate::{time_util, CandleItem};
 use chrono::{DateTime, Utc};
 use hmac::digest::typenum::Min;
 use okx::dto::common::PositionSide;
+use okx::dto::EnumToStrTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 use std::time::Instant;
@@ -1091,7 +1092,7 @@ fn open_long_position(
     // state.last_signal_result = None;
     // state.is_use_best_open_price = false;
 
-    record_trade_entry(state, PositionSide::Long.to_string(), signal);
+    record_trade_entry(state, PositionSide::Long.as_str().to_owned(), signal);
 }
 
 /// 开空仓
@@ -1139,7 +1140,7 @@ fn open_short_position(
     // state.last_signal_result = None;
     // state.is_use_best_open_price = false;
 
-    record_trade_entry(state, PositionSide::Short.to_string(), &signal);
+    record_trade_entry(state, PositionSide::Short.as_str().to_owned(), &signal);
 }
 
 /// 记录交易入场

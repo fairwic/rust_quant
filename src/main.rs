@@ -50,6 +50,7 @@ use tokio_tungstenite::{
 use tracing::{debug, info, span, Level};
 use tracing_subscriber::{fmt, EnvFilter, FmtSubscriber};
 
+use okx::dto::EnumToStrTrait;
 use okx::utils::validate_system_time;
 use once_cell::sync::Lazy;
 use rust_quant::app_config::db::init_db;
@@ -68,10 +69,9 @@ use rust_quant::trading::strategy::strategy_common::{
 };
 use rust_quant::trading::strategy::StrategyType;
 use rust_quant::trading::{order, task};
-use rust_quant::{app_init, socket, trading};
+use rust_quant::{app_init, socket, trading, ENVIRONMENT_LOCAL};
 use tokio_cron_scheduler::JobScheduler;
 use tracing_subscriber::prelude::*;
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 环境变量工具方法
@@ -104,15 +104,16 @@ async fn main() -> anyhow::Result<()> {
     info!("全局任务调度器已启动");
 
     // 验证当前系统时间（非本地）
-    let app_env = env_or_default("APP_ENV", "LOCAL");
+    let app_env = env_or_default("APP_ENV", ENVIRONMENT_LOCAL);
     if app_env != "LOCAL" {
         info!("校验系统时间与 OKX 时间差");
         let _time_diff = validate_system_time().await?;
     }
 
-    let inst_ids = Some(vec!["ETH-USDT-SWAP","BTC-USDT-SWAP"]);
+    let inst_ids = Some(vec!["ETH-USDT-SWAP", "BTC-USDT-SWAP"]);
     // let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
     let period = Some(vec!["1H", "4H", "1Dutc"]);
+    let period = Some(vec!["1H", "4H"]);
     // let period = Some(vec!["1H"]);
     // let period = Some(vec!["1Dutc"]);
 
@@ -160,8 +161,19 @@ async fn main() -> anyhow::Result<()> {
             warn!("跳过回测：未设置 inst_ids 或 period");
         }
     }
+    // 先运行WebSocket服务,及时同步最新的数据
+    {
+        if env_is_true("IS_OPEN_SOCKET", false) {
+            match (inst_ids.clone(), period.clone()) {
+                (Some(inst_id), Some(times)) => {
+                    socket::websocket_service::run_socket(inst_id, times).await;
+                }
+                _ => warn!("无法启动WebSocket：未设置 inst_ids 或 period"),
+            }
+        }
+    }
 
-    // 添加定时任务执行策略
+    // 2再执行定时任务执行策略
     {
         if env_is_true("IS_RUN_REAL_STRATEGY", false) {
             info!("run real strategy job");
@@ -179,9 +191,9 @@ async fn main() -> anyhow::Result<()> {
                 let strategy_list = StrategyConfigEntityModel::new().await.get_list().await;
                 let strategy_list = match strategy_list {
                     Ok(list) => {
-                        info!("获取策略配置数量{:?}",list.len());
+                        info!("获取策略配置数量{:?}", list.len());
                         list
-                    },
+                    }
                     Err(e) => {
                         error!("获取策略配置失败: {:?}", e);
                         return Err(anyhow!("获取策略配置失败: {:?}", e));
@@ -197,7 +209,7 @@ async fn main() -> anyhow::Result<()> {
                     let time = strategy.time;
                     //获取策略的详情
                     let strategy_type = strategy.strategy_type;
-                    if strategy_type == StrategyType::Vegas.to_string() {
+                    if &strategy_type == StrategyType::Vegas.as_str() {
                         //获取数据
                         let strategy_config: VegasStrategy = serde_json::from_str::<VegasStrategy>(
                             &*strategy.value,
@@ -230,17 +242,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 运行WebSocket服务
-    {
-        if env_is_true("IS_OPEN_SOCKET", false) {
-            match (inst_ids.clone(), period.clone()) {
-                (Some(inst_id), Some(times)) => {
-                    socket::websocket_service::run_socket(inst_id, times).await;
-                }
-                _ => warn!("无法启动WebSocket：未设置 inst_ids 或 period"),
-            }
-        }
-    }
     // 捕捉Ctrl+C信号以平滑关闭
     tokio::signal::ctrl_c().await?;
     Ok(())

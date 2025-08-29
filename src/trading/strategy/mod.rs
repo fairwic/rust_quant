@@ -28,6 +28,7 @@ use crate::trading::model::strategy::strategy_job_signal_log;
 use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
 use crate::trading::strategy::support_resistance::SupportResistance;
 use okx::dto::market_dto::CandleOkxRespDto;
+use okx::dto::EnumToStrTrait;
 use rbatis::RBatis;
 use redis::aio::MultiplexedConnection;
 use std::collections::VecDeque;
@@ -59,29 +60,29 @@ pub enum StrategyType {
     TopContract,
     Vegas,
 }
-
-impl PartialEq for StrategyType {
-    fn eq(&self, other: &Self) -> bool {
-        self.to_string() == other.to_string()
-    }
-}
-impl Display for StrategyType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl EnumToStrTrait for StrategyType {
+    fn as_str(&self) -> &'static str {
         match self {
-            StrategyType::BreakoutUp => write!(f, "BreakoutUp"),
-            StrategyType::BreakoutDown => write!(f, "BreakoutDown"),
-            StrategyType::Macd => write!(f, "Macd"),
-            StrategyType::MacdWithEma => write!(f, "MacdWithEma"),
-            StrategyType::Boll => write!(f, "Boll"),
-            StrategyType::UtBoot => write!(f, "UtBoot"),
-            StrategyType::UtBootShort => write!(f, "UtBootShort"),
-            StrategyType::MacdWithKdj => write!(f, "MacdWithKdj"),
-            StrategyType::Engulfing => write!(f, "Engulfing"),
-            StrategyType::TopContract => write!(f, "TopContract"),
-            StrategyType::Vegas => write!(f, "Vegas"),
+            StrategyType::BreakoutUp => "BreakoutUp",
+            StrategyType::BreakoutDown => "BreakoutDown",
+            StrategyType::Macd => "Macd",
+            StrategyType::MacdWithKdj => "MacdWithKdj",
+            StrategyType::MacdWithEma => "MacdWithEma",
+            StrategyType::Boll => "Boll",
+            StrategyType::UtBoot => "UtBoot",
+            StrategyType::UtBootShort => "UtBootShort",
+            StrategyType::Engulfing => "Engulfing",
+            StrategyType::TopContract => "TopContract",
+            StrategyType::Vegas => "Vegas",
         }
     }
 }
+
+// impl PartialEq for StrategyType {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.to_string() == other.to_string()
+//     }
+// }
 
 pub struct Strategy {
     rb: &'static RBatis,

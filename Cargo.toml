@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace]
-#members = ["okx"]
+members = ["okx"]
 #[profile.release]
 #debug = true
 
 [workspace.dependencies]
-okx = { version = "0.1.7" }
+okx = { path = "./okx" }
 tokio = { version = "1.37.0", features = [
     "rt",
     "rt-multi-thread",
@@ -56,7 +56,8 @@ futures = "0.3.30"
 redis = { version = "0.25.3", features = ["aio", "tokio-comp"] }
 
 [dependencies]
-okx = { version = "0.1.7" }
+# okx = { version = "0.1.7" }
+okx = { path = "./okx" }
 anyhow = "1.0.86"
 base64 = "0.21.7"
 chrono = "0.4.38"

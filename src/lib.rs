@@ -14,10 +14,7 @@ pub mod trading;
 
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
-use tracing::{error, info};
-use tracing_subscriber::fmt::Subscriber;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::EnvFilter;
 
 pub async fn app_init() -> anyhow::Result<()> {
     //设置env
@@ -173,3 +170,8 @@ impl CandleItemBuilder {
         }
     }
 }
+
+pub const ENVIRONMENT_LOCAL: &'static str = "local";
+pub const ENVIRONMENT_DEV: &'static str = "dev";
+pub const ENVIRONMENT_TEST: &'static str = "test";
+pub const ENVIRONMENT_PROD: &'static str = "prod";

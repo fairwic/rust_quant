@@ -74,7 +74,7 @@ use log::debug;
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::trade::OkxTrade;
 use okx::dto::trade_dto::TdModeEnum;
-use okx::dto::PositionSide;
+use okx::dto::{EnumToStrTrait, PositionSide};
 use once_cell::sync::OnceCell;
 use rbatis::dark_std::err;
 use rbatis::dark_std::errors::new;
@@ -768,7 +768,7 @@ pub async fn save_test_detail(
         let back_test_log = BackTestDetail {
             back_test_id,
             option_type: trade_record.option_type,
-            strategy_type: strategy_type.to_string(),
+            strategy_type: strategy_type.as_str().to_owned(),
             inst_id: inst_id.to_string(),
             time: time.to_string(),
             open_position_time: trade_record.open_position_time.to_string(),
@@ -959,27 +959,31 @@ pub async fn run_ready_to_order_with_manager(
     // 常量定义
     const MAX_HISTORY_SIZE: usize = 10000;
     // 1. 预处理：获取哈希键和管理器
-    let strategy_type = StrategyType::Vegas.to_string();
+    let strategy_type = StrategyType::Vegas.as_str().to_owned();
     let key = get_hash_key(inst_id, period, &strategy_type);
     let manager = arc_vegas_indicator_values::get_indicator_manager();
 
     // 2. 获取最新K线数据
-    let candle_list = CandleDomainService::new_default()
+    let new_candle_data = CandleDomainService::new_default()
         .await
-        .get_candle_data_last(inst_id, period)
+        .get_new_one_candle_fresh(inst_id, period, None)
         .await
         .map_err(|e| anyhow!("获取最新K线数据失败: {}", e))?;
-    println!("candle_list:{:?}", candle_list);
-    if candle_list.is_empty() {
-        return Err(anyhow!("获取的K线列表为空"));
+    println!("new candle :{:?}", new_candle_data);
+    if new_candle_data.is_none() {
+        warn!(
+            "获取的最新K线s数据不是最新的,无法继续执行策略{:?},{:?}",
+            inst_id, period
+        );
+        return Err(anyhow!("获取的最新K线异常"));
     }
-
-    let new_candle_item = parse_candle_to_data_item(&candle_list[0]);
-
+    let new_candle_data = new_candle_data.unwrap();
+    let new_candle_item = parse_candle_to_data_item(&new_candle_data);
     // 3. 同键互斥，读取快照并验证
     let key_mutex = manager.acquire_key_mutex(&key).await;
     let _guard = key_mutex.lock().await;
 
+    /// 获取缓存，快照
     let (mut last_candles_vec, mut old_indicator_combines, old_time) =
         match manager.get_snapshot_last_n(&key, MAX_HISTORY_SIZE).await {
             Some((v, indicators, ts)) => (v, indicators, ts),
@@ -1015,11 +1019,20 @@ pub async fn run_ready_to_order_with_manager(
             }
         }
     } else {
-        // 验证时间差是否小于一个周期（记录警告，中断执行）
         if let Ok(period_diff) = ts_add_n_period(old_time, period, 1) {
-            if period_diff > new_time {
+            if new_time < period_diff {
+                // 非确认状态，预期内，直接早退等待确认即可
+                tracing::debug!(
+                    "K线未确认，等待下一次: inst_id={}, period={}",
+                    inst_id,
+                    period
+                );
+                return Ok(());
+            }
+            // 只有当 new_time 超过期望时间戳（异常倒流/脏数据）才需要报错
+            if new_time > period_diff {
                 return Err(anyhow!(
-                    "K线时间戳不连续: 上一时间戳 {}, 当前时间戳 {}, 预期时间戳 {}",
+                    "K线时间戳异常: 上一={}, 当前={}, 期望={}",
                     old_time,
                     new_time,
                     period_diff
@@ -1092,11 +1105,11 @@ pub async fn run_ready_to_order_with_manager(
         let risk_config = strategy.risk_config.clone();
         SwapOrder::new()
             .ready_to_order(
-                StrategyType::Vegas,
+                &StrategyType::Vegas,
                 inst_id,
                 period,
-                signal_result,
-                risk_config,
+                &signal_result,
+                &risk_config,
                 strategy.strategy_config_id,
             )
             .await?;
@@ -1122,7 +1135,7 @@ pub fn save_signal_log(inst_id: &str, period: &str, signal_result: &SignalResult
     let signal_record = StrategyJobSignalLog {
         inst_id: inst_id.to_string(),
         time: period.to_string(),
-        strategy_type: StrategyType::Vegas.to_string(),
+        strategy_type: StrategyType::Vegas.as_str().to_owned(),
         strategy_result: strategy_result_str,
     };
     //启动新线程执行（捕获所有 owned 数据，满足 'static）

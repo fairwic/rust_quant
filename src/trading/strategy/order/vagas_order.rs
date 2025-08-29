@@ -17,7 +17,8 @@ use crate::trading::strategy::strategy_common::{
 };
 use crate::trading::strategy::{strategy_common, StrategyType};
 use crate::trading::task;
-use crate::CandleItem;
+use crate::{CandleItem, ENVIRONMENT_LOCAL};
+use okx::dto::EnumToStrTrait;
 use std::env;
 
 /// 策略配置
@@ -78,8 +79,8 @@ impl StrategyOrder {
         }
 
         // 生成存储键并保存数据
-        let strategy_type = StrategyType::Vegas.to_string();
-        let hash_key = arc_vegas_indicator_values::get_hash_key(inst_id, time, &strategy_type);
+        let hash_key =
+            arc_vegas_indicator_values::get_hash_key(inst_id, time, StrategyType::Vegas.as_str());
 
         // 保存到全局存储
         arc_vegas_indicator_values::set_strategy_indicator_values(
@@ -91,10 +92,6 @@ impl StrategyOrder {
             multi_strategy_indicators,
         )
         .await;
-
-        // 等待一小段时间确保数据写入完成
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
         // 验证数据是否保存成功
         if arc_vegas_indicator_values::get_vegas_indicator_values_by_inst_id_with_period(
             hash_key.clone(),
@@ -121,23 +118,29 @@ impl StrategyOrder {
         time: String,
         strategy: Arc<StrategyConfig>,
     ) -> anyhow::Result<Job> {
-        // 根据时间周期设置不同的执行频率
-        let mut cron_expression = match time.as_str() {
-            "1m" => "0 * * * * *",     // 每分钟开始时执行
-            "5m" => "0 */5 * * * *",   // 每5分钟开始时执行
-            "15m" => "0 */15 * * * *", // 每15分钟开始时执行
-            "1H" => "0 0 * * * *",     // 每小时开始时执行
-            "4H" => "0 0 */4 * * *",   // 每4小时开始时执行
-            "1Dutc" => "0 0 0 * * *",  // 每天UTC 00:00执行
-            _ => "*/30 * * * * *",     // 默认每30秒执行一次
+        // 根据时间周期设置不同的执行频率，并支持按秒级偏移（offset），减少空跑
+        let offset_sec: u64 = std::env::var("STRATEGY_CRON_OFFSET_SEC")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(|v| v.min(59))
+            .unwrap_or(5);
+        let sec = offset_sec.to_string();
+        let mut cron_expression: String = match time.as_str() {
+            "1m" => format!("{} * * * * *", sec),
+            "5m" => format!("{} */5 * * * *", sec),
+            "15m" => format!("{} */15 * * * *", sec),
+            "1H" => format!("{} 0 * * * *", sec),
+            "4H" => format!("{} 0 */4 * * *", sec),
+            "1Dutc" => format!("{} 0 0 * * *", sec),
+            _ => "*/30 * * * * *".to_string(),
         };
 
-        if env::var("APP_ENV").unwrap() == "local" {
-            //开发环境，每10秒执行一次
-            cron_expression = "*/10 * * * * *";
+        // 本地环境：每10秒执行一次，忽略 offset
+        let app_env = env::var("APP_ENV").unwrap_or_else(|_| "LOCAL".to_string());
+        if app_env.eq_ignore_ascii_case(ENVIRONMENT_LOCAL) {
+            cron_expression = "*/10 * * * * *".to_string();
         }
-
-        let job = Job::new_async(cron_expression, move |_uuid, _lock| {
+        let job = Job::new_async(cron_expression.as_str(), move |_uuid, _lock| {
             let inst_id = inst_id.clone();
             let time = time.clone();
             info!("运行定时任务任务: {}_{}", inst_id, time);

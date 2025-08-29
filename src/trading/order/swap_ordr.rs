@@ -18,6 +18,7 @@ use chrono::Local;
 use core::time;
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::{Position, TradingSwapNumResponseData};
+use okx::dto::common::EnumToStrTrait;
 use okx::dto::common::Side;
 use okx::dto::trade::trade_dto::{
     AttachAlgoOrdReqDto, OrderReqDto, OrderResDto, TdModeEnum, TpOrdKindEnum,
@@ -47,9 +48,9 @@ impl SwapOrder {
 
         let order_params = OrderReqDto {
             inst_id: inst_id.to_string(),
-            td_mode: TdModeEnum::CASH.to_string(),
-            side: side.to_string(),
-            ord_type: OrdTypeEnum::LIMIT.to_string(),
+            td_mode: TdModeEnum::CASH.as_str().to_owned(),
+            side: side.as_str().to_string(),
+            ord_type: OrdTypeEnum::LIMIT.as_str().to_owned(),
             sz: sz.to_string(),
             px: Option::from(px.to_string()),
             reduce_only: Some(false),
@@ -58,7 +59,7 @@ impl SwapOrder {
                 attach_algo_cl_ord_id: None,
                 tp_trigger_px: Some("3500".to_string()),
                 tp_ord_px: Some("-1".to_string()),
-                tp_ord_kind: Some(TpOrdKindEnum::CONDITION.to_string()),
+                tp_ord_kind: Some(TpOrdKindEnum::CONDITION.as_str().to_owned()),
                 sl_trigger_px: Some("2200".to_string()),
                 sl_ord_px: Some("-1".to_string()),
                 tp_trigger_px_type: Some("last".to_string()),
@@ -91,9 +92,9 @@ impl SwapOrder {
     /// 平仓
     pub async fn close_position(
         &self,
-        position_list: Vec<Position>,
+        position_list: &Vec<Position>,
         inst_id: &str,
-        pos_side: PositionSide,
+        pos_side: &PositionSide,
     ) -> Result<bool, Error> {
         let already_have_position = position_list.len() > 0;
         //是否已经有反向仓位
@@ -104,17 +105,17 @@ impl SwapOrder {
                 //且持仓量不为0
                 if position.inst_id == inst_id && position.pos != "0" {
                     //如果当前仓位是反向仓位，则平仓
-                    if position.pos_side == pos_side.to_string() {
+                    if position.pos_side == pos_side.as_str() {
                         let params = CloseOrderReqDto {
                             inst_id: inst_id.to_string(),
-                            pos_side: Option::from(pos_side.to_string()),
-                            mgn_mode: position.mgn_mode,
+                            pos_side: Option::from(pos_side.as_str().to_owned()),
+                            mgn_mode: position.mgn_mode.clone(),
                             ccy: None,
                             auto_cxl: Some(true), //自动撤单
                             cl_ord_id: None,
                             tag: None,
                         };
-                        let res = OkxTrade::from_env()?.close_position(params).await?;
+                        let res = OkxTrade::from_env()?.close_position(&params).await?;
                         info!("close  order position result {:?}", res);
                     } else {
                         have_another_position = true
@@ -132,45 +133,64 @@ impl SwapOrder {
 
     /// 获取下单数量
     pub fn get_place_order_num(&self, valid_num: &TradingSwapNumResponseData) -> String {
-        format!(
-            "{}",
-            (valid_num.max_buy.parse::<f64>().unwrap() / 1.1).floor()
-        )
+        match valid_num.max_buy.parse::<f64>() {
+            Ok(v) if v.is_finite() => ((v / 1.1).floor().max(0.0)).to_string(),
+            _ => "0".to_string(),
+        }
     }
     /// 准备下单
     pub async fn ready_to_order(
         &self,
-        strategy_type: StrategyType,
+        strategy_type: &StrategyType,
         inst_id: &str,
         period: &str,
-        signal: SignalResult,
-        risk_config: BasicRiskStrategyConfig,
+        signal: &SignalResult,
+        risk_config: &BasicRiskStrategyConfig,
         strategy_config_id: i64,
     ) -> Result<(), AppError> {
-        // 获取当前仓位状态
+        // 无信号早返回，避免后续不必要开销
+        if !(signal.should_buy || signal.should_sell) {
+            return Ok(());
+        }
+        // 幂等校验前置：同品种×周期×方向×持仓方向的在途单直接返回
+        let (pre_side, pre_pos_side) = if signal.should_buy {
+            (Side::Buy, PositionSide::Long)
+        } else {
+            (Side::Sell, PositionSide::Short)
+        };
+        let exists = SwapOrderEntityModel::new()
+            .await
+            .query_one(inst_id, period, pre_side.as_str(), pre_pos_side.as_str())
+            .await
+            .map_err(|e| {
+                error!("get swap order list error: {:?}", e);
+                AppError::DbError(e.to_string())
+            })?;
+        if exists.len() > 0 {
+            info!(
+                "same period same inst_id same side already exists, skip order: inst_id={}, period={}, side={}, pos_side={}",
+                inst_id,
+                period,
+                pre_side.as_str(),
+                pre_pos_side.as_str()
+            );
+            return Ok(());
+        }
+        // 获取当前仓位状态与可开仓数量（并发请求，降低总时延）
         let account = OkxAccount::from_env().map_err(|e| {
             error!("create okx account client error: {:?}", e);
             AppError::OkxApiError(e.to_string())
         })?;
-        //todo 如有反向的仓位，应该开启异步去立即关闭
-        let position_list = account
-            .get_account_positions(Some("SWAP"), Some(inst_id), None)
-            .await
-            .map_err(|e| {
-                error!("get position error: {:?}", e);
-                AppError::OkxApiError(e.to_string())
-            })?;
-        info!(
-            "current okx position_list: {:?}",
-            json!(position_list).to_string()
-        );
-        let max_avail_size = account
-            .get_max_size(inst_id, &TdModeEnum::CROSS.to_string(), None, None, None)
-            .await
-            .map_err(|e| {
-                error!("get max size error: {:?}", e);
-                AppError::OkxApiError(e.to_string())
-            })?;
+        let cross = TdModeEnum::CROSS.as_str().to_owned();
+        let (position_list, max_avail_size) = tokio::try_join!(
+            account.get_account_positions(Some("SWAP"), Some(inst_id), None),
+            account.get_max_size(inst_id, &cross, None, None, None)
+        )
+        .map_err(|e| {
+            error!("get account data error: {:?}", e);
+            AppError::OkxApiError(e.to_string())
+        })?;
+        info!("current okx position_count: {}", position_list.len());
 
         if max_avail_size.len() == 0 || max_avail_size[0].inst_id != inst_id.to_string() {
             error!("max_avail_size is empty or inst_id not match");
@@ -179,9 +199,16 @@ impl SwapOrder {
             ));
         }
         let trad_swap_nums = max_avail_size[0].clone();
-        info!("max_avail_size: {:?}", trad_swap_nums);
+        info!(
+            "max_avail_size(inst_id={}): max_buy={}",
+            inst_id, trad_swap_nums.max_buy
+        );
         // 处理下单数量
-        let pos_size = SwapOrder::new().get_place_order_num(&trad_swap_nums);
+        let pos_size = self.get_place_order_num(&trad_swap_nums);
+        if pos_size == "0" {
+            warn!("pos_size is 0, skip placing order");
+            return Ok(());
+        }
 
         // if pos_size.parse::<f64>().unwrap() < 1.0 {
         //     error!("pos_size is  small than 1.0, not enough to place order");
@@ -190,69 +217,62 @@ impl SwapOrder {
         //     ));
         // }
         let pos_size = "2.0".to_string();
-
         info!("ready to place order size: {:?}", pos_size);
         //平掉现有的已经存在的反向仓位
         let pos_side = match signal.should_buy {
             true => PositionSide::Short,
             false => PositionSide::Long,
         };
-        self.sync_close_order(inst_id, period, position_list, pos_side)
-            .await
-            .map_err(|e| {
-                error!("close position error: {:?}", e);
-                AppError::OkxApiError(e.to_string())
-            })?;
+        self.async_ready_close_order(inst_id, period, &position_list, &pos_side)
+            .await?;
 
         let (order_result, side, pos_side) = if signal.should_buy {
-            //生成in_order_id
+            //买入开多
             let in_order_id = SwapOrderEntity::gen_order_id(
                 inst_id,
                 period,
-                Side::Buy.to_string(),
-                PositionSide::Long.to_string(),
+                Side::Buy.as_str(),
+                PositionSide::Long.as_str(),
             );
             (
-                SwapOrder::new()
-                    .start_to_order(
-                        inst_id,
-                        period,
-                        in_order_id,
-                        PositionSide::Short,
-                        Side::Buy,
-                        PositionSide::Long,
-                        pos_size.clone(),
-                        signal,
-                        strategy_type,
-                        risk_config,
-                    )
-                    .await,
+                self.start_to_order(
+                    inst_id,
+                    period,
+                    in_order_id,
+                    PositionSide::Short,
+                    Side::Buy,
+                    PositionSide::Long,
+                    pos_size.clone(),
+                    signal,
+                    strategy_type,
+                    risk_config,
+                )
+                .await,
                 Side::Buy,
                 PositionSide::Long,
             )
         } else if signal.should_sell {
-            //生成in_order_id
+            //买入做空
             let in_order_id = SwapOrderEntity::gen_order_id(
                 inst_id,
                 period,
-                Side::Buy.to_string(),
-                PositionSide::Short.to_string(),
+                Side::Sell.as_str(),
+                PositionSide::Short.as_str(),
             );
             (
-                SwapOrder::new()
-                    .start_to_order(
-                        inst_id,
-                        period,
-                        in_order_id,
-                        PositionSide::Long,
-                        Side::Sell,
-                        PositionSide::Short,
-                        pos_size.clone(),
-                        signal,
-                        strategy_type,
-                        risk_config,
-                    )
-                    .await,
+                self.start_to_order(
+                    inst_id,
+                    period,
+                    in_order_id,
+                    PositionSide::Long,
+                    Side::Sell,
+                    PositionSide::Short,
+                    pos_size.clone(),
+                    signal,
+                    strategy_type,
+                    risk_config,
+                )
+                .await,
                 Side::Sell,
                 PositionSide::Short,
             )
@@ -262,37 +282,47 @@ impl SwapOrder {
 
         if let Ok(order_result) = order_result {
             // 记录到订单中
-            SwapOrder::new()
-                .record_order(
-                    strategy_type,
-                    inst_id,
-                    period,
-                    order_result,
-                    side,
-                    pos_side,
-                    strategy_config_id,
-                    pos_size,
-                )
-                .await?;
+            self.record_order(
+                strategy_type,
+                inst_id,
+                period,
+                order_result,
+                side,
+                pos_side,
+                strategy_config_id,
+                pos_size,
+            )
+            .await?;
         }
         Ok(())
     }
 
     //同步平掉现有的已经存在的反向仓位
-    pub async fn sync_close_order(
+    pub async fn async_ready_close_order(
         &self,
         inst_id: &str,
         time: &str,
-        position_list: Vec<Position>,
-        close_pos_side: PositionSide,
+        position_list: &Vec<Position>,
+        close_pos_side: &PositionSide,
     ) -> Result<(), AppError> {
-        // todo 异步平掉现有的已经存在的反向仓位
-        self.close_position(position_list, inst_id, close_pos_side)
-            .await
-            .map_err(|e| {
-                error!("close position error: {:?}", e);
-                AppError::OkxApiError(e.to_string())
-            })?;
+        // 开启异步去平掉现有的已经存在的反向仓位（移动 owned 数据进入任务，满足 'static）
+        let inst_id_owned = inst_id.to_string();
+        let close_pos_side_owned = close_pos_side.clone();
+        let position_list_owned = position_list.clone();
+        tokio::spawn(async move {
+            let res = SwapOrder::new()
+                .close_position(
+                    &position_list_owned,
+                    inst_id_owned.as_str(),
+                    &close_pos_side_owned,
+                )
+                .await;
+            if res.is_err() {
+                error!("判断关闭反向仓位失败 position error: {:?}", res);
+            } else {
+                info!("判断关闭反向仓位结束");
+            }
+        });
         Ok(())
     }
     /// 开始下单
@@ -305,14 +335,14 @@ impl SwapOrder {
         side: Side,
         pos_side: PositionSide,
         pos_size: String,
-        signal: SignalResult,
-        strategy_type: StrategyType,
-        risk_config: BasicRiskStrategyConfig,
+        signal: &SignalResult,
+        strategy_type: &StrategyType,
+        risk_config: &BasicRiskStrategyConfig,
     ) -> Result<Vec<OrderResDto>, AppError> {
         //判断相同周期下是否已经有了订单
         let swap_order_list = SwapOrderEntityModel::new()
             .await
-            .query_one(inst_id, time, side.to_string(), pos_side.to_string())
+            .query_one(inst_id, time, side.as_str(), pos_side.as_str())
             .await
             .map_err(|e| {
                 error!("get swap order list error: {:?}", e);
@@ -351,7 +381,7 @@ impl SwapOrder {
 
     pub async fn record_order(
         &self,
-        strategy_type: StrategyType,
+        strategy_type: &StrategyType,
         inst_id: &str,
         time: &str,
         order_results: Vec<OrderResDto>,
@@ -365,11 +395,11 @@ impl SwapOrder {
             let swap_order_entity = SwapOrderEntity {
                 strategy_id,
                 in_order_id: order.cl_ord_id.clone().unwrap_or("".to_string()),
-                strategy_type: strategy_type.to_string(),
+                strategy_type: strategy_type.as_str().to_owned(),
                 period: time.to_string(),
                 inst_id: inst_id.to_string(),
-                side: side.to_string(),
-                pos_side: pos_side.to_string(),
+                side: side.as_str().to_owned(),
+                pos_side: pos_side.as_str().to_owned(),
                 pos_size: pos_size.clone(),
                 out_order_id: order.ord_id.to_string(),
                 tag: "".to_string(),
@@ -439,8 +469,8 @@ impl SwapOrder {
         pos_side: PositionSide,
         entry_price: f64,
         size: String,
-        signal: SignalResult,
-        risk_config: BasicRiskStrategyConfig,
+        signal: &SignalResult,
+        risk_config: &BasicRiskStrategyConfig,
     ) -> Result<Vec<OrderResDto>, AppError> {
         //最大止盈
         println!("risk_config: {:?}", risk_config);
@@ -481,14 +511,14 @@ impl SwapOrder {
 
         let order_params = OrderReqDto {
             inst_id: inst_id.to_string(),
-            td_mode: TdModeEnum::ISOLATED.to_string(),
+            td_mode: TdModeEnum::ISOLATED.as_str().to_owned(),
             ccy: None,
             cl_ord_id: Some(in_order_id),
             tag: None,
-            side: side.to_string(),
-            pos_side: Option::from(pos_side.to_string()),
+            side: side.as_str().to_string(),
+            pos_side: Option::from(pos_side.as_str().to_string()),
             // pos_side: None,
-            ord_type: OrdTypeEnum::MARKET.to_string(),
+            ord_type: OrdTypeEnum::MARKET.as_str().to_owned(),
             sz: size,
             px: None,
             // px: Some("30000".to_string()),

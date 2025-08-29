@@ -14,7 +14,6 @@ use tracing::{error, info, warn};
 
 // 定义最大容量常量
 const MAX_CANDLE_ITEMS: usize = 10000;
-const MAX_LOCKS_WAIT_TIME_MS: u64 = 500; // 最大锁等待时间
 
 #[derive(Debug, Clone)]
 pub struct ArcVegasIndicatorValues {
