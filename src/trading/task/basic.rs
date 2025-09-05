@@ -200,7 +200,7 @@ pub struct RandomStrategyConfig {
     pub batch_size: usize,
     //risk
     pub max_loss_percent: Vec<f64>,
-    pub profit_threshold: Vec<f64>,
+    pub is_take_profit: Vec<bool>,
     pub is_move_stop_loss: Vec<bool>,
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
 }
@@ -221,7 +221,7 @@ impl Default for RandomStrategyConfig {
             batch_size: 100,
             //risk
             max_loss_percent: vec![0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1],
-            profit_threshold: vec![0.03],
+            is_take_profit: vec![true, false],
             is_move_stop_loss: vec![false, true],
             is_used_signal_k_line_stop_loss: vec![true, false],
         }
@@ -263,7 +263,7 @@ pub async fn test_random_strategy_with_config(
         config.rsi_over_buy,
         config.rsi_over_sold,
         config.max_loss_percent,
-        config.profit_threshold,
+        config.is_take_profit,
         config.is_move_stop_loss,
         config.is_used_signal_k_line_stop_loss,
     );
@@ -541,7 +541,7 @@ pub async fn test_specified_strategy_with_config(
         .rsi_overbought(90.0)
         .rsi_oversold(20.0)
         .max_loss_percent(0.03)
-        .profit_threshold(0.03)
+        .is_take_profit(true)
         .is_move_stop_loss(true)
         .is_used_signal_k_line_stop_loss(true)];
     //1H
@@ -557,7 +557,7 @@ pub async fn test_specified_strategy_with_config(
         .rsi_overbought(85.0)
         .rsi_oversold(15.0)
         .max_loss_percent(0.02)
-        .profit_threshold(0.01)
+        .is_take_profit(true)
         .is_move_stop_loss(false)
         .is_used_signal_k_line_stop_loss(true)];
     Ok(params_batch)
@@ -610,7 +610,7 @@ fn convert_strategy_config_to_param(
         .map_err(|e| anyhow!("解析策略配置JSON失败: {}", e))?;
 
     let risk_config =
-        serde_json::from_str::<BasicRiskStrategyConfig>(&config.risk_config).unwrap_or_default();
+        serde_json::from_str::<BasicRiskStrategyConfig>(&config.risk_config)?;
 
     // 安全地提取配置值，避免unwrap
     let kline_hammer = vegas_strategy
@@ -649,8 +649,8 @@ fn convert_strategy_config_to_param(
         .kline_end_time(config.kline_end_time)
         //risk
         .max_loss_percent(risk_config.max_loss_percent)
-        .profit_threshold(risk_config.profit_threshold)
-        .is_move_stop_loss(risk_config.is_move_stop_loss)
+        .is_take_profit(risk_config.is_take_profit)
+        .is_move_stop_loss(risk_config.is_one_k_line_diff_stop_loss)
         .is_used_signal_k_line_stop_loss(risk_config.is_used_signal_k_line_stop_loss);
 
     Ok(param)
@@ -678,8 +678,8 @@ pub async fn run_back_test_strategy(
 
         let risk_strategy_config = BasicRiskStrategyConfig {
             max_loss_percent: param.max_loss_percent,
-            profit_threshold: param.profit_threshold,
-            is_move_stop_loss: param.is_move_stop_loss,
+            is_take_profit: param.is_take_profit,
+            is_one_k_line_diff_stop_loss: param.is_move_stop_loss,
             is_used_signal_k_line_stop_loss: param.is_used_signal_k_line_stop_loss,
         };
 

@@ -151,6 +151,21 @@ impl SwapOrderDetailEntityModel {
         println!("insert_batch = {}", json!(data));
         Ok(data)
     }
+
+    // pub async fn batch_update(
+    //     &self,
+    //     swap_order_entity: &SwapOrderDetailEntity,
+    // ) -> anyhow::Result<ExecResult> {
+    //     let data = SwapOrderDetailEntity::update_by_column_batch(
+    //         self.db,
+    //         &[swap_order_entity],
+    //         "in_order_id",
+    //         1,
+    //     )
+    //     .await?;
+    //     println!("update_batch = {}", json!(data));
+    //     Ok(data)
+    // }
     pub async fn update(
         &self,
         swap_order_entity: &SwapOrderDetailEntity,

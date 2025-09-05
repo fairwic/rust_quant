@@ -301,19 +301,22 @@ pub struct MoveStopLoss {
 /// 止盈止损策略配置
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct BasicRiskStrategyConfig {
-    pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
-    pub max_loss_percent: f64,                 // 最大止损百分比
-    pub profit_threshold: f64,                 // 盈利阈值，用于动态止盈
-    pub is_move_stop_loss: bool,               //是否使用移动止损,当盈利之后,止损价格变成开仓价
+    pub is_used_signal_k_line_stop_loss: bool, //(开仓K线止盈止损),多单时,当价格低于入场k线的最低价时,止损;空单时,
+    // 价格高于入场k线的最高价时,止损
+    pub max_loss_percent: f64, // 最大止损百分比(避免当k线振幅过大，使用k线最低/高价止损时候，造成太大的亏损)
+    pub is_take_profit: bool,  // 是否设置止盈，比如当盈利超过1:1时，开始启用动态止盈,
+    // 1:1时候设置止损价格为开仓价格(保本)，价格到达赢利点1:2的时候，设置止损价格为开仓价格+1:1(保证本金+1:1的利润),当赢利点达到1：3的时候，设置止损价格为开仓价格+1:2(保证本金+1:2的利润)
+    pub is_one_k_line_diff_stop_loss: bool, // 是否使用固定止损最大止损为1:1开多+(当前k线的最高价-最低价) 开空-
+                                            // (当前k线的最高价-最低价)
 }
 
 impl Default for BasicRiskStrategyConfig {
     fn default() -> Self {
         Self {
             is_used_signal_k_line_stop_loss: true,
-            max_loss_percent: 0.02,   // 默认3%止损
-            profit_threshold: 0.01,   // 默认1%盈利开始启用动态止盈
-            is_move_stop_loss: false, // 默认不使用移动止损
+            max_loss_percent: 0.02,              // 默认3%止损
+            is_take_profit: false,               // 默认1%盈利开始启用动态止盈
+            is_one_k_line_diff_stop_loss: false, // 默认不使用移动止损
         }
     }
 }
@@ -666,7 +669,7 @@ pub fn check_risk_config(
     let position_nums = trade_position.position_nums.clone();
 
     //检查移动止盈
-    if risk_config.is_move_stop_loss {
+    if risk_config.is_one_k_line_diff_stop_loss {
         //如果设置了移动止盈价格
         if let Some(move_stop_loss_price) = trade_position.move_take_profit_price {
             match trade_position.trade_side {
@@ -726,6 +729,34 @@ pub fn check_risk_config(
                     }
                 }
             }
+        }
+    }
+
+    //检查移动止损
+    if risk_config.is_take_profit {
+        match trade_position.trade_side {
+            TradeSide::Long => {
+                if current_close_price >= trade_position.touch_take_profit_price.unwrap() {
+                    trade_position.signal_kline_stop_close_price = Some(trade_position.open_price);
+                    //重新赋值
+                    trading_state.trade_position = Some(trade_position.clone());
+                }
+            }
+            TradeSide::Short => {
+                if signal.ts == 1755633600000 {
+                    info!(
+                        "current_close_price:{},{}",
+                        current_close_price,
+                        trade_position.touch_take_profit_price.unwrap()
+                    );
+                }
+                if current_close_price <= trade_position.touch_take_profit_price.unwrap() {
+                    trade_position.signal_kline_stop_close_price = Some(trade_position.open_price);
+                    //重新赋值
+                    trading_state.trade_position = Some(trade_position.clone());
+                }
+            }
+            _ => {}
         }
     }
 
@@ -797,6 +828,12 @@ pub fn check_risk_config(
                 }
             }
             TradeSide::Short => {
+                if signal.ts == 1755864000000 {
+                    info!(
+                        "current_close_price:{},{}",
+                        current_close_price, signal_kline_stop_close_price
+                    );
+                }
                 if current_close_price >= signal_kline_stop_close_price {
                     //重新计算利润
                     trade_position.close_price = Some(signal_kline_stop_close_price);
@@ -828,7 +865,6 @@ pub fn check_risk_config(
         close_position(&mut trading_state, candle, &signal, "最大亏损止损", profit);
         return trading_state;
     }
-
     trading_state
 }
 
@@ -841,6 +877,22 @@ pub fn deal_signal(
     i: usize,
 ) -> TradingState {
     if signal.should_buy || signal.should_sell {
+        if let Some(trade_position) = trading_state.trade_position.clone() {
+            //如是反向仓位，优先判断一下止盈止损
+            if (trade_position.trade_side == TradeSide::Long && signal.should_sell)
+                || (trade_position.trade_side == TradeSide::Short && signal.should_buy)
+            {
+                trading_state = check_risk_config(
+                    &risk_config,
+                    trading_state,
+                    signal,
+                    candle,
+                    candle_item_list,
+                    i,
+                );
+            }
+        }
+
         //使用更优点位开仓
         if signal.best_open_price.is_some() {
             trading_state.last_signal_result = Some(signal.clone());
@@ -1006,6 +1058,8 @@ pub struct TradePosition {
     pub move_take_profit_price: Option<f64>,
     //信号状态
     pub signal_status: i32,
+    //信号线最高最低价差
+    pub signal_high_low_diff: f64,
 }
 
 /// 交易状态结构体
@@ -1073,10 +1127,11 @@ fn open_long_position(
         temp_trade_position.best_take_profit_price = signal.best_take_profit_price;
     }
 
-    //如果开仓后k线的最低价格和投入价格的差值 > 开仓信号线路最低价格和最高价格的差值，则设置最低止盈价格
-    if risk_config.is_move_stop_loss {
+    // 如果启用了移动止盈,则设置移动止盈价格为当前k线的最高价
+    if risk_config.is_take_profit {
+        temp_trade_position.signal_high_low_diff = candle.h - candle.l;
         temp_trade_position.touch_take_profit_price =
-            Some(signal.open_price + (candle.h - candle.l));
+            Some(signal.open_price + temp_trade_position.signal_high_low_diff);
     }
 
     state.trade_position = Some(temp_trade_position);
@@ -1122,9 +1177,17 @@ fn open_short_position(
     if risk_config.is_used_signal_k_line_stop_loss {
         trade_position.signal_kline_stop_close_price = signal.signal_kline_stop_loss_price;
     }
-    //如果开仓后k线的最低价格和投入价格的差值 > 开仓信号线路最低价格和最高价格的差值，则设置最低止盈价格
-    if risk_config.is_move_stop_loss {
-        trade_position.touch_take_profit_price = Some(signal.open_price - (candle.h - candle.l));
+    //如果启用了移动止盈,则设置移动止盈价格为当前k线的最低价-当前k线的最高价-当前k线的最低价
+    if risk_config.is_take_profit {
+        trade_position.signal_high_low_diff = candle.h - candle.l;
+        trade_position.touch_take_profit_price =
+            Some(signal.open_price - trade_position.signal_high_low_diff);
+        if signal.ts == 1755446400000 {
+            log::info!(
+                "移动止盈价格:{}",
+                trade_position.touch_take_profit_price.unwrap()
+            );
+        }
     }
 
     state.trade_position = Some(trade_position);
@@ -1270,6 +1333,4 @@ fn calculate_win_rate(wins: i64, losses: i64) -> f64 {
 //                 && signal.should_buy)
 //         {
 //             close_position(state, candle, signal, "策略平仓", current_profit);
-//         }
-//     }
-// }
+//

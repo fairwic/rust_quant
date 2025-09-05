@@ -131,7 +131,7 @@ impl CandlesModel {
         }
     }
 
-    pub(crate) async fn delete_lg_time(
+    pub async fn delete_lg_time(
         &self,
         inst_id: &str,
         time_interval: &str,
@@ -147,7 +147,7 @@ impl CandlesModel {
         Ok(result)
     }
 
-    pub(crate) async fn get_older_un_confirm_data(
+    pub async fn get_older_un_confirm_data(
         &self,
         inst_id: &str,
         time_interval: &str,

@@ -105,16 +105,17 @@ async fn main() -> anyhow::Result<()> {
 
     // 验证当前系统时间（非本地）
     let app_env = env_or_default("APP_ENV", ENVIRONMENT_LOCAL);
-    if app_env != "LOCAL" {
+    if app_env != ENVIRONMENT_LOCAL {
         info!("校验系统时间与 OKX 时间差");
         let _time_diff = validate_system_time().await?;
     }
 
     let inst_ids = Some(vec!["ETH-USDT-SWAP", "BTC-USDT-SWAP"]);
+    let inst_ids = Some(vec!["ETH-USDT-SWAP"]);
     // let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
     let period = Some(vec!["1H", "4H", "1Dutc"]);
     let period = Some(vec!["1H", "4H"]);
-    // let period = Some(vec!["1H"]);
+    let period = Some(vec!["4H"]);
     // let period = Some(vec!["1Dutc"]);
 
     // 初始化需要同步的数据

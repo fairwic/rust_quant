@@ -9,11 +9,9 @@ async fn test_strategy_signals() -> Result<()> {
     let mock_candles = create_mock_candles();
 
     let strategy_config = BasicRiskStrategyConfig {
-        use_dynamic_tp: true,
-        use_fibonacci_tp: false,
         max_loss_percent: 0.02,
-        profit_threshold: 0.01,
-        is_move_stop_loss: false,
+        is_take_profit: true,
+        is_one_k_line_diff_stop_loss: false,
         is_used_signal_k_line_stop_loss: false,
     };
 
@@ -100,8 +98,8 @@ async fn verify_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result
         use_dynamic_tp: true,
         use_fibonacci_tp: false,
         max_loss_percent: 0.02, // 2%止损
-        profit_threshold: 0.01, // 1%启用动态止盈
-        is_move_stop_loss: false,
+        is_take_profit: 0.01, // 1%启用动态止盈
+        is_one_k_line_diff_stop_loss: false,
         is_used_signal_k_line_stop_loss: false,
     };
 
@@ -129,8 +127,8 @@ async fn verify_short_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> 
         use_dynamic_tp: true,
         use_fibonacci_tp: false,
         max_loss_percent: 0.02, // 2%止损
-        profit_threshold: 0.01, // 1%启用动态止盈
-        is_move_stop_loss: false,
+        is_take_profit: 0.01, // 1%启用动态止盈
+        is_one_k_line_diff_stop_loss: false,
         is_used_signal_k_line_stop_loss: false,
     };
 

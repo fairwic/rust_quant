@@ -66,4 +66,17 @@ impl OrderService {
         model.add(&order_detail).await;
         Ok(())
     }
+    
+    pub async fn sync_order_history_archive(&self) -> Result<(), AppError> {
+        let model = OkxTrade::from_env()?;
+        let order_list = model
+            .orders_history_archive("SWAP", None, None, None, None, None, None)
+            .await?;
+        for order in order_list {
+            let order_detail = SwapOrderDetailEntity::from(order);
+            let model = SwapOrderDetailEntityModel::new().await;
+            model.update(&order_detail).await;
+        }
+        Ok(())
+    }
 }

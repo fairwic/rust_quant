@@ -95,7 +95,7 @@ async fn test_vegas() -> Result<()> {
         }
 
         let risk_strategy_config = BasicRiskStrategyConfig {
-            is_move_stop_loss: true,
+            is_one_k_line_diff_stop_loss: true,
             ..Default::default()
         };
 

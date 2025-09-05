@@ -58,7 +58,6 @@ pub async fn init_all_candles(
 ) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
     let res = res.get_all(inst_ids).await.unwrap();
-
     //获取获取数据更旧的数据
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
@@ -176,7 +175,6 @@ pub async fn init_before_candles(
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
         for time in times.clone().unwrap() {
-            //获取当前数据最旧的数据
             let res = CandlesModel::new()
                 .await
                 .get_new_data(ticker.inst_id.as_str(), time)
@@ -201,7 +199,6 @@ pub async fn init_before_candles(
                 }
                 let res = res.unwrap();
                 // println!("res: {:?}", res);
-
                 let res = res
                     .get_history_candles(
                         &ticker.inst_id,

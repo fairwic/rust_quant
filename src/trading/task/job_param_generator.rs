@@ -21,7 +21,7 @@ pub struct ParamMergeBuilder {
     pub kline_end_time: Option<i64>,
     //risk
     pub max_loss_percent: f64,                 // 最大止损百分比
-    pub profit_threshold: f64,                 // 盈利阈值，用于动态止盈
+    pub is_take_profit: bool,                 // 盈利阈值，用于动态止盈
     pub is_move_stop_loss: bool,               //是否使用移动止损,当盈利之后,止损价格变成开仓价
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
 }
@@ -83,8 +83,8 @@ impl ParamMergeBuilder {
         self.max_loss_percent = max_loss_percent;
         self
     }
-    pub fn profit_threshold(mut self, profit_threshold: f64) -> Self {
-        self.profit_threshold = profit_threshold;
+    pub fn is_take_profit(mut self, profit_threshold: bool) -> Self {
+        self.is_take_profit = profit_threshold;
         self
     }
     pub fn is_move_stop_loss(mut self, is_move_stop_loss: bool) -> Self {
@@ -117,7 +117,7 @@ pub struct ParamGenerator {
     total_count: usize,
     //risk
     max_loss_percent: Vec<f64>,
-    profit_threshold: Vec<f64>,
+    is_take_profit: Vec<bool>,
     is_move_stop_loss: Vec<bool>,
     is_used_signal_k_line_stop_loss: Vec<bool>,
 }
@@ -135,7 +135,7 @@ impl ParamGenerator {
         rsi_over_buy: Vec<f64>,
         rsi_over_sold: Vec<f64>,
         max_loss_percent: Vec<f64>,
-        profit_threshold: Vec<f64>,
+        is_take_profit: Vec<bool>,
         is_move_stop_loss: Vec<bool>,
         is_used_signal_k_line_stop_loss: Vec<bool>,
     ) -> Self {
@@ -150,7 +150,7 @@ impl ParamGenerator {
             * rsi_over_buy.len()
             * rsi_over_sold.len()
             * max_loss_percent.len()
-            * profit_threshold.len()
+            * is_take_profit.len()
             * is_move_stop_loss.len()
             * is_used_signal_k_line_stop_loss.len();
 
@@ -168,7 +168,7 @@ impl ParamGenerator {
             current_index: 0,
             total_count,
             max_loss_percent,
-            profit_threshold,
+            is_take_profit,
             is_move_stop_loss,
             is_used_signal_k_line_stop_loss,
         }
@@ -193,7 +193,7 @@ impl ParamGenerator {
             let rob_size = self.rsi_over_buy.len();
 
             let mlp_size = self.max_loss_percent.len();
-            let pt_size = self.profit_threshold.len();
+            let pt_size = self.is_take_profit.len();
             let mst_size = self.is_move_stop_loss.len();
             let usklsl_size = self.is_used_signal_k_line_stop_loss.len();
 
@@ -230,8 +230,8 @@ impl ParamGenerator {
             let i_mlp = index % self.max_loss_percent.len();
             index /= self.max_loss_percent.len();
 
-            let i_pt = index % self.profit_threshold.len();
-            index /= self.profit_threshold.len();
+            let i_pt = index % self.is_take_profit.len();
+            index /= self.is_take_profit.len();
 
             let i_mst = index % self.is_move_stop_loss.len();
             index /= self.is_move_stop_loss.len();
@@ -254,7 +254,7 @@ impl ParamGenerator {
                 kline_start_time: None,
                 kline_end_time: None,
                 max_loss_percent: self.max_loss_percent[i_mlp],
-                profit_threshold: self.profit_threshold[i_pt],
+                is_take_profit: self.is_take_profit[i_pt],
                 is_move_stop_loss: self.is_move_stop_loss[i_mst],
                 is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
             };

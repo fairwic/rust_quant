@@ -57,7 +57,7 @@ async fn test_run_strategy_job() -> Result<()> {
     println!("strategy: {:#?}", strategy);
 
     let risk_config: BasicRiskStrategyConfig = BasicRiskStrategyConfig {
-        is_move_stop_loss: true,
+        is_one_k_line_diff_stop_loss: true,
         ..Default::default()
     };
     let strategy_config = StrategyConfig {
