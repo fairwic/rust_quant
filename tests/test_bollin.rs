@@ -3,7 +3,7 @@ use dotenv::dotenv;
 use rust_quant::app_config::db::init_db;
 use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading;
-use rust_quant::trading::model::market::candles::{SelectTime, TimeDirect};
+use rust_quant::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 use ta::indicators::BollingerBands;
 use ta::Next;
 
@@ -14,10 +14,7 @@ async fn test_bolling_bands() -> Result<()> {
     setup_logging().await?;
     init_db().await;
 
-    let select_time = SelectTime {
-        start_time: 1742274000000,
-        direct: TimeDirect::BEFORE,
-    };
+    let select_time = SelectTime {start_time:1742274000000,direct:TimeDirect::BEFORE, end_time: todo!() };
 
     let candles = trading::task::basic::get_candle_data_confirm(
         "BTC-USDT-SWAP",

@@ -5,7 +5,7 @@ use rust_quant::app_config::db::init_db;
 use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading;
 use rust_quant::trading::indicator::rma::Rma;
-use rust_quant::trading::model::market::candles::{SelectTime, TimeDirect};
+use rust_quant::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 
 #[tokio::test]
 async fn test_rma() -> Result<()> {
@@ -15,10 +15,7 @@ async fn test_rma() -> Result<()> {
 
     let mut rma = Rma::new(2);
 
-    let select_time = SelectTime {
-        start_time: 1732392000000,
-        direct: TimeDirect::BEFORE,
-    };
+    let select_time = SelectTime {start_time:1732392000000,direct:TimeDirect::BEFORE, end_time: todo!() };
 
     let candles =
         trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "4H", 3, Some(select_time))
@@ -34,10 +31,7 @@ async fn test_rma() -> Result<()> {
 
     println!("测试2");
     let mut rma = Rma::new(10);
-    let select_time = SelectTime {
-        start_time: 1732392000000,
-        direct: TimeDirect::BEFORE,
-    };
+    let select_time = SelectTime {start_time:1732392000000,direct:TimeDirect::BEFORE, end_time: todo!() };
 
     let candles =
         trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "4H", 10, Some(select_time))

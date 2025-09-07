@@ -110,7 +110,7 @@ pub async fn init_all_candles(
                     )
                     .await;
                 if res.is_err() {
-                    warn!("get history_candles {} {} error", &ticker.inst_id, time);
+                    warn!("get history_candles {} {} error{:?}", &ticker.inst_id, time, res.err());
                     continue;
                 }
                 let res = res.unwrap();

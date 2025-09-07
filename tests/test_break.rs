@@ -3,9 +3,9 @@ use dotenv::dotenv;
 use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading::indicator::break_indicator::BreakIndicator;
 use rust_quant::trading::indicator::vegas_indicator::VegasStrategy;
-use rust_quant::trading::model::market::candles::CandlesEntity;
-use rust_quant::trading::model::market::candles::SelectTime;
-use rust_quant::trading::model::market::candles::TimeDirect;
+use rust_quant::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant::trading::model::entity::candles::enums::SelectTime;
+use rust_quant::trading::model::entity::candles::enums::TimeDirect;
 use rust_quant::trading::strategy::strategy_common::get_multi_indicator_values;
 use rust_quant::trading::strategy::strategy_common::parse_candle_to_data_item;
 use rust_quant::trading::strategy::strategy_common::BasicRiskStrategyConfig;
@@ -20,10 +20,7 @@ async fn test_break_indicator() -> Result<()> {
     // 设置参数
     let inst_id = "BTC-USDT-SWAP";
     let time = "1H";
-    let select_time: SelectTime = SelectTime {
-        start_time: 1749456000000,
-        direct: TimeDirect::BEFORE,
-    };
+    let select_time: SelectTime = SelectTime {start_time:1749456000000,direct:TimeDirect::BEFORE, end_time: todo!() };
 
     // 获取K线数据
     let candles_list: Vec<CandlesEntity> =

@@ -18,12 +18,12 @@ async fn test_vegas() -> Result<()> {
 
     // 设置参数
     let inst_id = "ETH-USDT-SWAP";
-    let inst_id = "BTC-USDT-SWAP";
+    // let inst_id = "BTC-USDT-SWAP";
     // let time = "1H";
-    // let time = "4H";
-    let time = "1Dutc";
+    let time = "4H";
+    // let time = "1Dutc";
     let select_time: SelectTime = SelectTime {
-        start_time: 1756180800000,
+        start_time: 1756051200000,
         direct: TimeDirect::BEFORE,
         end_time: None,
     };
@@ -34,11 +34,11 @@ async fn test_vegas() -> Result<()> {
             .await?;
 
     let mut data_items = vec![];
-    let mut strategy = VegasStrategy::default();
+    let mut strategy = VegasStrategy::new(time.to_string());
 
     // 设置布林带参数
     strategy.bolling_signal.as_mut().unwrap().multiplier = 2.0;
-    strategy.bolling_signal.as_mut().unwrap().period = 10;
+    strategy.bolling_signal.as_mut().unwrap().period = 12;
     strategy
         .bolling_signal
         .as_mut()
@@ -46,31 +46,31 @@ async fn test_vegas() -> Result<()> {
         .consecutive_touch_times = 4;
     //rsi
     strategy.rsi_signal.as_mut().unwrap().rsi_length = 20;
-    strategy.rsi_signal.as_mut().unwrap().rsi_overbought = 90.0;
-    strategy.rsi_signal.as_mut().unwrap().rsi_oversold = 20.0;
+    strategy.rsi_signal.as_mut().unwrap().rsi_overbought = 88.0;
+    strategy.rsi_signal.as_mut().unwrap().rsi_oversold = 15.0;
     //hammer
     strategy
         .kline_hammer_signal
         .as_mut()
         .unwrap()
-        .up_shadow_ratio = 0.9;
+        .up_shadow_ratio = 0.7;
     strategy
         .kline_hammer_signal
         .as_mut()
         .unwrap()
-        .down_shadow_ratio = 0.9;
+        .down_shadow_ratio = 0.7;
     //volume
     strategy
         .volume_signal
         .as_mut()
         .unwrap()
-        .volume_increase_ratio = 2.0;
+        .volume_increase_ratio = 1.8;
     strategy
         .volume_signal
         .as_mut()
         .unwrap()
-        .volume_decrease_ratio = 2.0;
-    strategy.volume_signal.as_mut().unwrap().volume_bar_num = 6;
+        .volume_decrease_ratio = 1.8;
+    strategy.volume_signal.as_mut().unwrap().volume_bar_num = 4;
     //engulfing
     strategy.engulfing_signal.as_mut().unwrap().body_ratio = 0.4;
 

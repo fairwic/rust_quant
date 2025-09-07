@@ -8,7 +8,7 @@ use rust_quant::trading::indicator::bar::Bar;
 use rust_quant::trading::indicator::sma::Sma;
 use rust_quant::trading::indicator::squeeze_momentum::service::get_last_squeeze_single;
 use rust_quant::trading::indicator::squeeze_momentum::squeeze_config::SqueezeConfig;
-use rust_quant::trading::model::market::candles::{SelectTime, TimeDirect};
+use rust_quant::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 use ta::indicators::SimpleMovingAverage;
 use ta::Next;
 
@@ -21,10 +21,7 @@ async fn test_sma() -> Result<()> {
 
     let mut sma = Sma::new(2);
 
-    let select_time = SelectTime {
-        start_time: 1732392000000,
-        direct: TimeDirect::BEFORE,
-    };
+    let select_time = SelectTime {start_time:1732392000000,direct:TimeDirect::BEFORE, end_time: todo!() };
 
     let candles =
         trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "4H", 2, Some(select_time))
@@ -39,10 +36,7 @@ async fn test_sma() -> Result<()> {
     //测试2
 
     let mut sma = Sma::new(10);
-    let select_time = SelectTime {
-        start_time: 1732392000000,
-        direct: TimeDirect::BEFORE,
-    };
+    let select_time = SelectTime {start_time:1732392000000,direct:TimeDirect::BEFORE, end_time: todo!() };
 
     let candles =
         trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "4H", 10, Some(select_time))
@@ -57,10 +51,7 @@ async fn test_sma() -> Result<()> {
     //测试3
     println!("测试3");
     let mut sma = SimpleMovingAverage::new(10).unwrap();
-    let select_time = SelectTime {
-        start_time: 1732392000000,
-        direct: TimeDirect::BEFORE,
-    };
+    let select_time = SelectTime {start_time:1732392000000,direct:TimeDirect::BEFORE, end_time: todo!() };
 
     let candles =
         trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "4H", 10, Some(select_time))
@@ -68,7 +59,7 @@ async fn test_sma() -> Result<()> {
 
     let mut sma_value = 0.00;
     for candle in candles {
-        sma_value = sma.next(&Bar::new().close(candle.c.f64()));
+        sma_value = sma.next(&Bar::new().close(candle.c.parse::<f64>().unwrap()));
         println!("3 sma_value{}", sma_value)
     }
     assert_eq!(format!("{:2}", sma_value), "98485.93");

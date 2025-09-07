@@ -5,7 +5,7 @@ use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading;
 use rust_quant::trading::indicator::is_big_kline::IsBigKLineIndicator;
 use rust_quant::trading::indicator::vegas_indicator::VegasStrategy;
-use rust_quant::trading::model::market::candles::{SelectTime, TimeDirect};
+use rust_quant::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 use rust_quant::trading::strategy::strategy_common;
 
 // 原有的异步测试，用于测试实时数据
@@ -15,14 +15,7 @@ async fn test_big_k_line_real_data() -> Result<()> {
     setup_logging().await?;
     init_db().await;
 
-    let select_time: SelectTime = SelectTime {
-        // point_time: 1741514400000,
-        // point_time: 1740931200000,
-        // point_time: 1740956400000,
-        start_time: 1707476400000,
-
-        direct: TimeDirect::BEFORE,
-    };
+    let select_time: SelectTime = SelectTime {start_time:1707476400000,direct:TimeDirect::BEFORE, end_time: todo!() };
 
     println!("\n===== RSI Real Data Test =====");
 

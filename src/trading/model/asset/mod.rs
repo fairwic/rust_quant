@@ -5,6 +5,7 @@ use rbatis::impl_select;
 use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use rbs::value;
 use std::sync::Arc;
 
 /// table
@@ -57,8 +58,9 @@ impl AssetModel {
             frozen_bal: ticker.frozen_bal.clone(),
             avail_bal: ticker.avail_bal.clone(),
         };
-        let data = AssetEntity::update_by_column(self.db, &tickets_data, "inst_id").await;
-        println!("update_by_column = {}", json!(data));
+        //todo fix
+        // let data = AssetEntity::update_by_map(self.db, &tickets_data, value! {"inst_id":&tickets_data.inst_id}).await;
+        // println!("update_by_column = {}", json!(data));
         // let data = TickersDataDb::update_by_name(&self.db, &tickets_data, ticker.inst_id.clone()).await;
         // println!("update_by_name = {}", json!(data));
         Ok(())

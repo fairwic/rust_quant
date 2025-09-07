@@ -4,9 +4,8 @@ use rust_quant::app_config::db::init_db;
 use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading;
 use rust_quant::trading::indicator::rma::Rma;
-use rust_quant::trading::indicator::rsi_indicator::RsiIndicator;
 use rust_quant::trading::indicator::rsi_rma_indicator::RsiIndicator;
-use rust_quant::trading::model::market::candles::{SelectTime, TimeDirect};
+use rust_quant::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 use ta::Next;
 
 // 原有的异步测试，用于测试实时数据
@@ -18,10 +17,7 @@ async fn test_rsi_real_data() -> Result<()> {
 
     let mut rsi = RsiIndicator::new(12);
 
-    let select_time = SelectTime {
-        start_time: 1732392000000,
-        direct: TimeDirect::BEFORE,
-    };
+    let select_time = SelectTime {start_time:1732392000000,direct:TimeDirect::BEFORE, end_time: todo!() };
 
     println!("\n===== RSI Real Data Test =====");
 

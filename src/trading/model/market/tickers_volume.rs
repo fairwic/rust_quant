@@ -7,6 +7,7 @@ use rbatis::{crud, impl_update, RBatis};
 use rbatis::{impl_delete, impl_select};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use rbs::value;
 
 use crate::app_config::db::get_db_client;
 
@@ -40,7 +41,7 @@ impl TickersVolumeModel {
 
     pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersVolume>> {
         let results: Vec<TickersVolume> =
-            TickersVolume::select_by_column(self.db, "inst_id", inst_id).await?;
+            TickersVolume::select_by_map(self.db, value! {"inst_id":inst_id}).await?;
         Ok(results)
     }
 

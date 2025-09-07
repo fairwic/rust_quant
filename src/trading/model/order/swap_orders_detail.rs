@@ -12,6 +12,7 @@ use rbatis::rbdc::db::ExecResult;
 use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use rbs::value;
 
 /// 合约订单详情表
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -23,7 +24,7 @@ pub struct SwapOrderDetailEntity {
     // 产品类型
     pub inst_type: String,
     // 订单id
-    pub ord_id: String,
+    pub in_ord_id: String,
     // 内部订单id 唯一
     pub cl_ord_id: String,
     // 委托价格
@@ -92,7 +93,7 @@ impl SwapOrderDetailEntity {
             inst_id: order_detail.inst_id,
             side: order_detail.side,
             inst_type: order_detail.inst_type,
-            ord_id: order_detail.ord_id,
+            in_ord_id: order_detail.ord_id,
             cl_ord_id: order_detail.cl_ord_id,
             px: order_detail.px,
             tag: order_detail.tag,
@@ -171,7 +172,7 @@ impl SwapOrderDetailEntityModel {
         swap_order_entity: &SwapOrderDetailEntity,
     ) -> anyhow::Result<ExecResult> {
         let data =
-            SwapOrderDetailEntity::update_by_column(self.db, &swap_order_entity, "in_order_id")
+            SwapOrderDetailEntity::update_by_map(self.db, &swap_order_entity, value! {"in_order_id":&swap_order_entity.in_ord_id})
                 .await?;
         println!("update_batch = {}", json!(data));
         Ok(data)

@@ -5,7 +5,7 @@ use crate::trading::model::order::swap_orders_detail::{
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::trade::OkxTrade;
 use okx::dto::trade::trade_dto::OrderPendingRespDto;
-use okx::dto::trade_dto::OrderDetailRespDto;
+use okx::dto::trade_dto::{OrdListReqDto, OrderDetailRespDto};
 use okx::error::Error;
 use serde_json::json;
 use tracing::{info, warn};
@@ -66,17 +66,63 @@ impl OrderService {
         model.add(&order_detail).await;
         Ok(())
     }
-    
-    pub async fn sync_order_history_archive(&self) -> Result<(), AppError> {
+
+    pub async fn sync_order_history(
+        &self,
+        inst_type: &str,
+        inst_id: Option<&str>,
+        order_type: Option<&str>,
+        state: Option<&str>,
+        after: Option<&str>,
+        before: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<OrderDetailRespDto>, AppError> {
         let model = OkxTrade::from_env()?;
         let order_list = model
-            .orders_history_archive("SWAP", None, None, None, None, None, None)
+            .get_order_history(OrdListReqDto {
+                inst_type: inst_type.to_string(),
+                inst_id: inst_id.map(|s| s.to_string()),
+                ord_type: order_type.map(|s| s.to_string()),
+                state: state.map(|s| s.to_string()),
+                after: after.map(|s| s.to_string()),
+                before: before.map(|s| s.to_string()),
+                limit: limit,
+            })
             .await?;
-        for order in order_list {
-            let order_detail = SwapOrderDetailEntity::from(order);
-            let model = SwapOrderDetailEntityModel::new().await;
-            model.update(&order_detail).await;
-        }
-        Ok(())
+        // for order in order_list {
+        //     let order_detail = SwapOrderDetailEntity::from(order);
+        //     let model = SwapOrderDetailEntityModel::new().await;
+        //     model.update(&order_detail).await;
+        // }
+        Ok(order_list)
+    }
+    pub async fn sync_order_history_archive(
+        &self,
+        inst_type: &str,
+        inst_id: Option<&str>,
+        order_type: Option<&str>,
+        state: Option<&str>,
+        after: Option<&str>,
+        before: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<OrderDetailRespDto>, AppError> {
+        let model = OkxTrade::from_env()?;
+        let order_list = model
+            .get_order_history_archive(OrdListReqDto {
+                inst_type: inst_type.to_string(),
+                inst_id: inst_id.map(|s| s.to_string()),
+                ord_type: order_type.map(|s| s.to_string()),
+                state: state.map(|s| s.to_string()),
+                after: after.map(|s| s.to_string()),
+                before: before.map(|s| s.to_string()),
+                limit: limit,
+            })
+            .await?;
+        // for order in order_list {
+        //     let order_detail = SwapOrderDetailEntity::from(order);
+        //     let model = SwapOrderDetailEntityModel::new().await;
+        //     model.update(&order_detail).await;
+        // }
+        Ok(order_list)
     }
 }

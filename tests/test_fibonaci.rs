@@ -149,7 +149,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[trace(prefix_enter = "[ENTER]", prefix_exit = "[EXIT]")]
     async fn test_atr_calculation() -> anyhow::Result<()> {
         dotenv().ok();
         setup_logging().await?;

@@ -709,6 +709,7 @@ pub async fn run_back_test_strategy(
         };
 
         let strategy = VegasStrategy {
+            period:time.to_string(),
             min_k_line_num: 3600,
             engulfing_signal: Some(EngulfingSignalConfig::default()),
             ema_signal: Some(EmaSignalConfig::default()),

@@ -5,7 +5,7 @@ mod test {
     use rust_quant::app_config::log::setup_logging;
     use rust_quant::trading::indicator::atr::ATR;
     use rust_quant::trading::indicator::bar::Bar;
-    use rust_quant::trading::model::market::candles::CandlesEntity;
+    use rust_quant::trading::model::entity::candles::entity::CandlesEntity;
     use rust_quant::{time_util, trading};
     use ta::indicators::AverageTrueRange;
     use ta::Next;

@@ -5,7 +5,7 @@ use rust_quant::time_util;
 use rust_quant::trading::indicator::candle::Candle;
 use rust_quant::trading::indicator::detect_support_resistance;
 use rust_quant::{
-    app_config::db::init_db, trading, trading::model::market::candles::CandlesEntity,
+    app_config::db::init_db, trading, trading::model::entity::candles::entity::CandlesEntity,
 };
 #[tokio::test]
 async fn test_support_resistance() -> Result<()> {

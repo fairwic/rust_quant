@@ -6,7 +6,7 @@ use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading::indicator::bar::Bar;
 use rust_quant::trading::strategy::ut_boot_strategy::UtBootStrategy;
 use rust_quant::{
-    app_config::db::init_db, time_util, trading, trading::model::market::candles::CandlesEntity,
+    app_config::db::init_db, time_util, trading, trading::model::entity::candles::entity::CandlesEntity,
 };
 
 #[tokio::test]

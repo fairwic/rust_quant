@@ -34,7 +34,7 @@ async fn test_okx_order() {
     let signal_result = SignalResult {
         should_buy: false,
         should_sell: true,
-        open_price: 116801.0,
+        open_price: 110838.0,
         signal_kline_stop_loss_price: Some(130921.0),
         best_open_price: None,
         best_take_profit_price: None,

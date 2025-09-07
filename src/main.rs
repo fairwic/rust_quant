@@ -111,11 +111,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let inst_ids = Some(vec!["ETH-USDT-SWAP", "BTC-USDT-SWAP"]);
-    let inst_ids = Some(vec!["ETH-USDT-SWAP"]);
+    // let inst_ids = Some(vec!["ETH-USDT-SWAP"]);
     // let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
     let period = Some(vec!["1H", "4H", "1Dutc"]);
-    let period = Some(vec!["1H", "4H"]);
-    let period = Some(vec!["4H"]);
+    // let period = Some(vec!["1H", "4H"]);
+    // let period = Some(vec!["4H"]);
     // let period = Some(vec!["1Dutc"]);
 
     // 初始化需要同步的数据

@@ -2,17 +2,18 @@
 
 use crate::trading::services::order_service::order_service::OrderService;
 use crate::trading::services::position_service::position_service::PositionService;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow};
 use log::{debug, error, info};
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::SetLeverageRequest;
 use okx::dto::asset_dto::{AssetBalance, TransferOkxReqDto};
-use okx::dto::trade_dto::TdModeEnum;
+use okx::dto::trade_dto::{OrderDetailRespDto, TdModeEnum};
 use okx::dto::PositionSide;
 use okx::enums::account_enums::AccountType;
 use okx::{OkxAccount, OkxAsset};
 use std::str::FromStr;
 use tracing::{span, Level};
+use crate::error::app_error::AppError;
 
 // 常量定义
 
@@ -29,16 +30,43 @@ impl RiskOrderJob {
         inst_id: Option<&str>,
         order_id: Option<&str>,
         client_order_id: Option<&str>,
-    ) -> Result<()> {
-        //1. 获取现有的仓位，判断是否有止损价格，没有需要告警，并自动设置最大止损价格
+    ) -> Result<(), AppError> {
+        //1. 获取未成交的订单
         let pending_orders = OrderService::new().get_pending_orders(inst_id).await?;
+        if pending_orders.len() == 0 {
+            info!("获取未成交订单为空");
+            return Ok(());
+        }
         for order in pending_orders {
+            //获取订单详情
             OrderService::new()
                 .sync_order_detail(order.inst_id.as_str(), order_id, client_order_id)
                 .await?;
         }
         //更新订单详情到数据库中去
         Ok(())
+    }
+
+    ///同步订单列表
+    pub async fn sync_order_list(
+        &self,
+        inst_type: &str,
+        inst_id: Option<&str>,
+        order_type: Option<&str>,
+        state: Option<&str>,
+        after: Option<&str>,
+        before: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<OrderDetailRespDto>, AppError> {
+        let order_list = OrderService::new()
+            .sync_order_history(inst_type, inst_id, order_type, state, after, before, limit)
+            .await?;
+        if order_list.len() == 0 {
+            info!("获取历史已完成的订单列表为空");
+            return Ok(vec![]);
+        }
+
+        Ok(order_list)
     }
 }
 
@@ -47,18 +75,38 @@ impl RiskOrderJob {
 mod tests {
     use super::*;
     use crate::app_init;
+    use serde_json::json;
 
     #[tokio::test]
     async fn test_risk_job() {
         // 设置日志
         env_logger::init();
         app_init().await;
-        let inst_id = "BTC-USDT-SWAP";
+        let inst_id = Some("BTC-USDT-SWAP");
         let order_id = Some("2752618588464259072");
         let client_order_id = Some("btc1Hbs20250807110000");
+        // let risk_job = RiskOrderJob::new()
+        //     .sync_order_list("SWAP", inst_id, None, None, None, None, None, Some(10))
+        //     .await;
+        // println!("risk_job: {:?}", risk_job);
+    }
+
+    #[tokio::test]
+    async fn test_sync_order_list() ->Result<(), AppError>{
+        // 设置日志
+        env_logger::init();
+        app_init().await;
+        let inst_id = Some("BTC-USDT-SWAP");
+        let state = None;
+        let after: Option<&str> = None;
+        let before = None;
+        let limit = None;
+        let order_type = None;
         let risk_job = RiskOrderJob::new()
-            .run(Some(inst_id), order_id, client_order_id)
-            .await;
+            .sync_order_list("SWAP", inst_id, order_type, state, after, before, limit)
+            .await?;
         println!("risk_job: {:?}", risk_job);
+        println!("risk_job_json: {:?}", json!(risk_job).to_string());
+        Ok(())
     }
 }

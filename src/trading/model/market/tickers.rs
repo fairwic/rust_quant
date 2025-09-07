@@ -9,7 +9,7 @@ use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-
+use rbs::value;
 use crate::app_config::db::get_db_client;
 use okx::dto::market_dto::TickerOkxResDto;
 // use okx::dto::market_model::TickersData;
@@ -129,7 +129,7 @@ impl TicketsModel {
             sod_utc8: ticker.sod_utc8.clone(),
             ts: ticker.ts.parse().unwrap(),
         };
-        let data = TickersDataEntity::update_by_column(self.db, &tickets_data, "inst_id").await;
+        let data = TickersDataEntity::update_by_map(self.db, &tickets_data,value! {"inst_id":&tickets_data.inst_id}).await;
         // println!("update_by_column = {}", json!(data));
         // let data = TickersDataDb::update_by_name(&self.db, &tickets_data, ticker.inst_id.clone()).await;
         // println!("update_by_name = {}", json!(data));
@@ -152,7 +152,7 @@ impl TicketsModel {
 
     pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersDataEntity>> {
         let results: Vec<TickersDataEntity> =
-            TickersDataEntity::select_by_column(self.db, "inst_id", inst_id).await?;
+            TickersDataEntity::select_by_map(self.db, value! {"inst_id":inst_id}).await?;
         Ok(results)
     }
 

@@ -15,10 +15,14 @@ use super::indicator_combine::IndicatorCombine;
 use super::signal::*;
 use super::trend;
 use super::utils;
+use crate::enums::common::PeriodEnum;
+use crate::enums::common::EnumAsStrTrait;
 
 /// Vegas综合策略配置
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize,Default)]
 pub struct VegasStrategy {
+    /// 周期
+    pub period: String,
     /// 最小需要的k线数量
     pub min_k_line_num: usize,
     /// EMA信号配置
@@ -39,23 +43,22 @@ pub struct VegasStrategy {
     pub kline_hammer_signal: Option<KlineHammerConfig>,
 }
 
-impl Default for VegasStrategy {
-    fn default() -> Self {
+
+impl VegasStrategy {
+    pub fn new (period: String) -> Self {
         Self {
-            min_k_line_num: 3600,
-            ema_touch_trend_signal: Some(EmaTouchTrendSignalConfig::default()),
-            bolling_signal: Some(BollingBandsSignalConfig::default()),
+            period: period,
+            min_k_line_num: 7000,
             ema_signal: Some(EmaSignalConfig::default()),
             volume_signal: Some(VolumeSignalConfig::default()),
+            ema_touch_trend_signal: Some(EmaTouchTrendSignalConfig::default()),
             rsi_signal: Some(RsiSignalConfig::default()),
+            bolling_signal: Some(BollingBandsSignalConfig::default()),
             signal_weights: Some(SignalWeightsConfig::default()),
             engulfing_signal: Some(EngulfingSignalConfig::default()),
             kline_hammer_signal: Some(KlineHammerConfig::default()),
         }
     }
-}
-
-impl VegasStrategy {
     /// 获取最小数据长度
     pub fn get_min_data_length(&mut self) -> usize {
         self.min_k_line_num
@@ -220,7 +223,6 @@ impl VegasStrategy {
 
         // 计算得分
         let score = weights.calculate_score(conditions.clone());
-
         // 计算分数到达指定值
         if let Some(signal_direction) = weights.is_signal_valid(&score) {
             match signal_direction {
@@ -414,7 +416,10 @@ impl VegasStrategy {
         vegas_indicator_signal_value: VegasIndicatorSignalValue,
     ) -> BollingerSignalValue {
         let mut bolling_bands = vegas_indicator_signal_value.bollinger_value;
-
+        // if data_items.last().expect("数据不能为空").ts == 1756051200000 {
+        //     print!("bolling_bands: {:?}", bolling_bands);
+        //     print!("data_items: {:?}", data_items.last());
+        // }
         if let Some(_bollinger_signal) = &self.bolling_signal {
             let ema_signal_values = vegas_indicator_signal_value.ema_values;
             let data_item = data_items.last().expect("数据不能为空");
@@ -426,8 +431,8 @@ impl VegasStrategy {
                 bolling_bands.is_short_signal = true;
             }
 
-            // 过滤逻辑
-            if bolling_bands.is_long_signal || bolling_bands.is_short_signal {
+            // // 过滤逻辑
+            if (bolling_bands.is_long_signal || bolling_bands.is_short_signal) && self.period == PeriodEnum::OneDayUtc.as_str() {
                 if bolling_bands.is_long_signal
                     && data_items.last().expect("数据不能为空").c < ema_signal_values.ema1_value
                 {
@@ -438,6 +443,10 @@ impl VegasStrategy {
                 if bolling_bands.is_short_signal
                     && data_items.last().expect("数据不能为空").c > ema_signal_values.ema1_value
                 {
+                    if data_items.last().expect("数据不能为空").ts == 1756051200000 {
+                        println!("bolling_bands.is_short_signal: {:?}", bolling_bands.is_short_signal);
+                        println!("ema_signal_values.ema1_value: {:?}", ema_signal_values.ema1_value);
+                    }
                     bolling_bands.is_short_signal = false;
                     bolling_bands.is_force_filter_signal = true;
                 }
