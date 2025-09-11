@@ -77,6 +77,15 @@ impl OrderService {
         before: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<OrderDetailRespDto>, AppError> {
+        //获取数据库中最新的更新的订单id
+        // let last_update_info = SwapOrderDetailEntityModel::new()
+        //     .await
+        //     .get_new_update_order_id()
+        //     .await?;
+        // let mut before = before;
+        // if last_update_info.is_some() && before.is_none() {
+        //     before = Some(last_update_info.unwrap().update_at.unwrap().as_str());
+        // }
         let model = OkxTrade::from_env()?;
         let order_list = model
             .get_order_history(OrdListReqDto {
@@ -84,9 +93,11 @@ impl OrderService {
                 inst_id: inst_id.map(|s| s.to_string()),
                 ord_type: order_type.map(|s| s.to_string()),
                 state: state.map(|s| s.to_string()),
+                // after: after.map(|s| s.to_string()),
+                // before: before.map(|s| s.to_string()),
+                limit: limit,
                 after: after.map(|s| s.to_string()),
                 before: before.map(|s| s.to_string()),
-                limit: limit,
             })
             .await?;
         // for order in order_list {

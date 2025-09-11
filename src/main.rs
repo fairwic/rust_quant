@@ -67,8 +67,9 @@ use rust_quant::trading::strategy::order::vagas_order::{StrategyConfig, Strategy
 use rust_quant::trading::strategy::strategy_common::{
     parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
 };
+use rust_quant::trading::strategy::strategy_manager::get_strategy_manager;
 use rust_quant::trading::strategy::StrategyType;
-use rust_quant::trading::{order, task};
+use rust_quant::trading::task;
 use rust_quant::{app_init, socket, trading, ENVIRONMENT_LOCAL};
 use tokio_cron_scheduler::JobScheduler;
 use tracing_subscriber::prelude::*;
@@ -110,10 +111,11 @@ async fn main() -> anyhow::Result<()> {
         let _time_diff = validate_system_time().await?;
     }
 
-    let inst_ids = Some(vec!["ETH-USDT-SWAP", "BTC-USDT-SWAP"]);
+    // let inst_ids = Some(vec!["ETH-USDT-SWAP", "BTC-USDT-SWAP"]);
     // let inst_ids = Some(vec!["ETH-USDT-SWAP"]);
     // let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
-    let period = Some(vec!["1H", "4H", "1Dutc"]);
+    let inst_ids = Some(vec!["SOL-USDT-SWAP", "DOGE-USDT-SWAP"]);
+    let period = Some(vec!["4H", "1Dutc", "1H"]);
     // let period = Some(vec!["1H", "4H"]);
     // let period = Some(vec!["4H"]);
     // let period = Some(vec!["1Dutc"]);
@@ -200,8 +202,8 @@ async fn main() -> anyhow::Result<()> {
                         return Err(anyhow!("获取策略配置失败: {:?}", e));
                     }
                 };
-                // 创建策略订单管理器实例（复用同一个实例避免重复启动）
-                let strategy_order = StrategyOrder::new();
+                // 使用策略管理器（单例模式）
+                let strategy_manager = get_strategy_manager();
 
                 //遍历配置
                 for strategy in strategy_list.into_iter() {
@@ -229,12 +231,12 @@ async fn main() -> anyhow::Result<()> {
                             strategy_config_id: strategy.id,
                         };
 
-                        // 启动策略（如果已存在会跳过）
-                        if let Err(e) = strategy_order
-                            .run_strategy(strategy_config, inst_id, time)
+                        // 通过策略管理器启动策略
+                        if let Err(e) = strategy_manager
+                            .start_strategy(strategy.id, inst_id.clone(), time.clone())
                             .await
                         {
-                            error!("启动策略失败:  错误: {}", e);
+                            error!("启动策略失败: 策略ID={}, 错误: {}", strategy.id, e);
                             // 继续处理其他策略，不中断整个流程
                         }
                     }

@@ -743,13 +743,6 @@ pub fn check_risk_config(
                 }
             }
             TradeSide::Short => {
-                if signal.ts == 1755633600000 {
-                    info!(
-                        "current_close_price:{},{}",
-                        current_close_price,
-                        trade_position.touch_take_profit_price.unwrap()
-                    );
-                }
                 if current_close_price <= trade_position.touch_take_profit_price.unwrap() {
                     trade_position.signal_kline_stop_close_price = Some(trade_position.open_price);
                     //重新赋值
@@ -828,12 +821,6 @@ pub fn check_risk_config(
                 }
             }
             TradeSide::Short => {
-                if signal.ts == 1755864000000 {
-                    info!(
-                        "current_close_price:{},{}",
-                        current_close_price, signal_kline_stop_close_price
-                    );
-                }
                 if current_close_price >= signal_kline_stop_close_price {
                     //重新计算利润
                     trade_position.close_price = Some(signal_kline_stop_close_price);
@@ -1210,6 +1197,7 @@ fn open_short_position(
 fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
     //批量回测的时候不进行记录
     let trade_position = state.trade_position.clone().unwrap();
+    return;
     state.trade_records.push(TradeRecord {
         option_type,
         open_position_time: trade_position.open_position_time.clone(),
@@ -1286,6 +1274,7 @@ fn record_trade_exit(
     closing_quantity: f64, // Add parameter for quantity being closed
 ) {
     let trade_position = state.trade_position.clone().unwrap();
+    return;
     state.trade_records.push(TradeRecord {
         option_type: "close".to_string(),
         open_position_time: trade_position.open_position_time.clone(),

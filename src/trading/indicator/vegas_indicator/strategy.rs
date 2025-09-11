@@ -15,11 +15,11 @@ use super::indicator_combine::IndicatorCombine;
 use super::signal::*;
 use super::trend;
 use super::utils;
-use crate::enums::common::PeriodEnum;
 use crate::enums::common::EnumAsStrTrait;
+use crate::enums::common::PeriodEnum;
 
 /// Vegas综合策略配置
-#[derive(Debug, Serialize, Deserialize,Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VegasStrategy {
     /// 周期
     pub period: String,
@@ -43,9 +43,8 @@ pub struct VegasStrategy {
     pub kline_hammer_signal: Option<KlineHammerConfig>,
 }
 
-
 impl VegasStrategy {
-    pub fn new (period: String) -> Self {
+    pub fn new(period: String) -> Self {
         Self {
             period: period,
             min_k_line_num: 7000,
@@ -432,7 +431,9 @@ impl VegasStrategy {
             }
 
             // // 过滤逻辑
-            if (bolling_bands.is_long_signal || bolling_bands.is_short_signal) && self.period == PeriodEnum::OneDayUtc.as_str() {
+            if (bolling_bands.is_long_signal || bolling_bands.is_short_signal)
+                && self.period == PeriodEnum::OneDayUtc.as_str()
+            {
                 if bolling_bands.is_long_signal
                     && data_items.last().expect("数据不能为空").c < ema_signal_values.ema1_value
                 {
@@ -444,8 +445,14 @@ impl VegasStrategy {
                     && data_items.last().expect("数据不能为空").c > ema_signal_values.ema1_value
                 {
                     if data_items.last().expect("数据不能为空").ts == 1756051200000 {
-                        println!("bolling_bands.is_short_signal: {:?}", bolling_bands.is_short_signal);
-                        println!("ema_signal_values.ema1_value: {:?}", ema_signal_values.ema1_value);
+                        println!(
+                            "bolling_bands.is_short_signal: {:?}",
+                            bolling_bands.is_short_signal
+                        );
+                        println!(
+                            "ema_signal_values.ema1_value: {:?}",
+                            ema_signal_values.ema1_value
+                        );
                     }
                     bolling_bands.is_short_signal = false;
                     bolling_bands.is_force_filter_signal = true;

@@ -29,8 +29,8 @@ use okx::{Error, OkxAccount, OkxClient, OkxTrade};
 use serde::de;
 use serde_json::json;
 use tracing::{debug, info};
-pub struct SwapOrder {}
-impl SwapOrder {
+pub struct SwapOrderService {}
+impl SwapOrderService {
     pub fn new() -> Self {
         Self {}
     }
@@ -310,7 +310,7 @@ impl SwapOrder {
         let close_pos_side_owned = close_pos_side.clone();
         let position_list_owned = position_list.clone();
         tokio::spawn(async move {
-            let res = SwapOrder::new()
+            let res = SwapOrderService::new()
                 .close_position(
                     &position_list_owned,
                     inst_id_owned.as_str(),
@@ -501,7 +501,7 @@ impl SwapOrder {
             ));
         }
         //todo 确保最大止损不会触发爆仓
-        let attach_algo_ords = SwapOrder::new().generate_fibonacci_take_profit_orders(
+        let attach_algo_ords = SwapOrderService::new().generate_fibonacci_take_profit_orders(
             entry_price,
             stop_loss_price,
             &size,

@@ -3,7 +3,7 @@ use okx::api::api_trait::OkxApiTrait;
 use okx::OkxAccount;
 use rust_quant::app_init;
 use rust_quant::error::app_error::AppError;
-use rust_quant::trading::order::swap_ordr::SwapOrder;
+use rust_quant::trading::order::swap_order_service::SwapOrderService;
 use rust_quant::trading::strategy::strategy_common::{BasicRiskStrategyConfig, SignalResult};
 use rust_quant::trading::strategy::StrategyType;
 use serde_json::json;
@@ -49,7 +49,7 @@ async fn test_okx_order() {
     let risk_config = BasicRiskStrategyConfig::default();
     println!("⚡ 开始执行订单...");
 
-    let order = SwapOrder::new()
+    let order = SwapOrderService::new()
         .ready_to_order(
             &StrategyType::Vegas,
             inst_id,

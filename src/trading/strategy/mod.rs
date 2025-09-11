@@ -7,6 +7,7 @@ pub mod profit_stop_loss;
 pub mod redis_operations;
 mod squeeze_strategy;
 pub mod strategy_common;
+pub mod strategy_manager;
 pub mod support_resistance;
 pub mod top_contract_strategy;
 pub mod ut_boot_strategy;

@@ -1,18 +1,13 @@
 extern crate rbatis;
 
-use std::convert::TryInto;
-use std::sync::Arc;
-
 use crate::app_config::db;
-use crate::time_util;
-use chrono::{DateTime, Utc};
 use okx::dto::trade_dto::OrderDetailRespDto;
 use rbatis::impl_select;
 use rbatis::rbdc::db::ExecResult;
 use rbatis::{crud, impl_update, RBatis};
+use rbs::value;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use rbs::value;
 
 /// 合约订单详情表
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -131,6 +126,7 @@ const TABLE_NAME: &str = "swap_orders_detail";
 crud!(SwapOrderDetailEntity {}, TABLE_NAME);
 impl_select!(SwapOrderDetailEntity{select_by_in_order_id(in_order_id:String) => "`where in_order_id = #{in_order_id}`"},TABLE_NAME);
 impl_select!(SwapOrderDetailEntity{fetch_list() => ""},TABLE_NAME);
+impl_select!(SwapOrderDetailEntity{get_new_update_order_id()-> Option=> "`order by update_at desc limit 1`"},TABLE_NAME);
 
 ///模型结构体
 pub struct SwapOrderDetailEntityModel {
@@ -171,10 +167,18 @@ impl SwapOrderDetailEntityModel {
         &self,
         swap_order_entity: &SwapOrderDetailEntity,
     ) -> anyhow::Result<ExecResult> {
-        let data =
-            SwapOrderDetailEntity::update_by_map(self.db, &swap_order_entity, value! {"in_order_id":&swap_order_entity.in_ord_id})
-                .await?;
+        let data = SwapOrderDetailEntity::update_by_map(
+            self.db,
+            &swap_order_entity,
+            value! {"in_order_id":&swap_order_entity.in_ord_id},
+        )
+        .await?;
         println!("update_batch = {}", json!(data));
         Ok(data)
+    }
+
+    pub async fn get_new_update_order_id(&self) -> anyhow::Result<Option<SwapOrderDetailEntity>> {
+        let res = SwapOrderDetailEntity::get_new_update_order_id(self.db).await?;
+        Ok(res)
     }
 }

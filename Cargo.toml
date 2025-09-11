@@ -3,28 +3,11 @@ name = "rust_quant"
 version = "0.1.0"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+rust-version = "1.89.0"
 [workspace]
 members = ["okx"]
 #[profile.release]
 #debug = true
-
-[profile.dev]
-debug = false # 完全关闭调试信息
-opt-level = 0
-overflow-checks = true
-lto = false
-panic = "unwind"
-incremental = true
-codegen-units = 256
-
-[profile.release]
-debug = false # 完全关闭调试信息
-opt-level = 3
-overflow-checks = false
-lto = true
-panic = "abort"
-incremental = false
-codegen-units = 1
 
 [workspace.dependencies]
 okx = { path = "./okx" }
@@ -47,12 +30,9 @@ base64 = "0.21.7"
 thiserror = "1.0.61"
 
 rbs = { version = "4.5" }
-#rbdc-sqlite = { version = "4.5", default-features = false, features = ["tls-native-tls"] }
 rbdc-mysql = { version = "4.5", default-features = false, features = [
     "tls-native-tls",
 ] }
-#rbdc-pg={version="4.5", default-features = false, features = ["tls-native-tls"]}
-#rbdc-mssql={version="4.5", default-features = false, features = ["tls-native-tls"]}
 rbatis = { version = "4.5" }
 
 log = "0.4"
@@ -91,7 +71,7 @@ tokio-cron-scheduler = { version = "0.10.0", features = ["signal"] }
 uuid = { version = "1.4.1", features = ["v4"] }
 dashmap = "6.1.0"
 [dependencies]
-okx = { workspace = true}
+okx = { workspace = true }
 anyhow = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }

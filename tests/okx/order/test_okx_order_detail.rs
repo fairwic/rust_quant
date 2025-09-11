@@ -3,7 +3,7 @@ use okx::api::api_trait::OkxApiTrait;
 use okx::OkxAccount;
 use rust_quant::app_init;
 use rust_quant::error::app_error::AppError;
-use rust_quant::trading::order::swap_ordr::SwapOrder;
+use rust_quant::trading::order::swap_order_service::SwapOrderService;
 use rust_quant::trading::services::order_service::order_service::OrderService;
 use rust_quant::trading::strategy::strategy_common::{BasicRiskStrategyConfig, SignalResult};
 use rust_quant::trading::strategy::StrategyType;

@@ -14,7 +14,7 @@ use std::thread;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::field::debug;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 fn get_period_back_test_candle_nums(period: &str) -> i32 {
     match period {
@@ -110,7 +110,12 @@ pub async fn init_all_candles(
                     )
                     .await;
                 if res.is_err() {
-                    warn!("get history_candles {} {} error{:?}", &ticker.inst_id, time, res.err());
+                    error!(
+                        "get history_candles {} {} error{:?}",
+                        &ticker.inst_id,
+                        time,
+                        res.err()
+                    );
                     continue;
                 }
                 let res = res.unwrap();

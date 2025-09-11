@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio_cron_scheduler::Job;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -22,6 +22,7 @@ use okx::dto::EnumToStrTrait;
 use std::env;
 
 /// 策略配置
+#[derive(Clone, Debug)]
 pub struct StrategyConfig {
     pub strategy_config_id: i64,
     pub strategy_config: VegasStrategy,
@@ -32,6 +33,8 @@ pub struct StrategyConfig {
 pub struct StrategyOrder {
     /// 活跃任务映射：task_key -> job_uuid
     active_tasks: Arc<Mutex<HashMap<String, Uuid>>>,
+    /// 运行中策略配置存储：task_key -> StrategyConfig（支持热更新）
+    running_configs: Arc<RwLock<HashMap<String, Arc<RwLock<StrategyConfig>>>>>,
 }
 
 impl StrategyOrder {
@@ -39,6 +42,7 @@ impl StrategyOrder {
     pub fn new() -> Self {
         Self {
             active_tasks: Arc::new(Mutex::new(HashMap::new())),
+            running_configs: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -116,7 +120,7 @@ impl StrategyOrder {
     fn create_scheduled_job(
         inst_id: String,
         time: String,
-        strategy: Arc<StrategyConfig>,
+        strategy_cfg_handle: Arc<RwLock<StrategyConfig>>,
     ) -> anyhow::Result<Job> {
         // 根据时间周期设置不同的执行频率，并支持按秒级偏移（offset），减少空跑
         let offset_sec: u64 = std::env::var("STRATEGY_CRON_OFFSET_SEC")
@@ -144,9 +148,14 @@ impl StrategyOrder {
             let inst_id = inst_id.clone();
             let time = time.clone();
             info!("运行定时任务任务: {}_{}", inst_id, time);
-            let strategy = Arc::clone(&strategy);
+            let strategy_cfg_handle = Arc::clone(&strategy_cfg_handle);
             Box::pin(async move {
-                match task::basic::run_strategy_job(&inst_id, &time, &strategy).await {
+                // 每次触发时读取最新配置（支持热更新）
+                let current_cfg = {
+                    let guard = strategy_cfg_handle.read().await;
+                    guard.clone()
+                };
+                match task::basic::run_strategy_job(&inst_id, &time, &current_cfg).await {
                     Ok(_) => {
                         tracing::debug!("策略任务执行成功: {}_{}", inst_id, time);
                     }
@@ -186,9 +195,13 @@ impl StrategyOrder {
             }
         }
 
-        // 步骤3: 创建并调度任务
-        let strategy_arc = Arc::new(strategy);
-        let job = Self::create_scheduled_job(inst_id.clone(), time.clone(), strategy_arc)?;
+        // 步骤3: 将配置放入可热更新存储，并创建调度任务
+        let cfg_handle = Arc::new(RwLock::new(strategy));
+        {
+            let mut map = self.running_configs.write().await;
+            map.insert(task_key.clone(), Arc::clone(&cfg_handle));
+        }
+        let job = Self::create_scheduled_job(inst_id.clone(), time.clone(), cfg_handle)?;
 
         let job_uuid = job.guid();
 
@@ -220,6 +233,12 @@ impl StrategyOrder {
                 .remove(&task_key)
                 .ok_or_else(|| anyhow!("任务不存在或已停止: {}", task_key))?
         };
+
+        // 同步移除运行中配置句柄
+        {
+            let mut map = self.running_configs.write().await;
+            map.remove(&task_key);
+        }
 
         let scheduler_lock = crate::SCHEDULER.lock().await;
         let scheduler = scheduler_lock
@@ -257,6 +276,26 @@ impl StrategyOrder {
     }
 
     /// 获取活跃任务数量
+
+    /// 热更新策略配置：更新运行中的指定策略配置（不会重启job）
+    pub async fn update_running_strategy_config(
+        &self,
+        inst_id: &str,
+        time: &str,
+        new_config: StrategyConfig,
+    ) -> anyhow::Result<()> {
+        let task_key = Self::build_task_key(inst_id, time);
+        let map = self.running_configs.read().await;
+        if let Some(cfg_handle) = map.get(&task_key) {
+            let mut guard = cfg_handle.write().await;
+            *guard = new_config;
+            info!("已热更新策略配置: {}", task_key);
+            Ok(())
+        } else {
+            Err(anyhow!(format!("策略未运行: {}", task_key)))
+        }
+    }
+
     pub async fn get_active_task_count(&self) -> usize {
         let active_tasks = self.active_tasks.lock().await;
         active_tasks.len()

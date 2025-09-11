@@ -28,7 +28,7 @@ use crate::trading::strategy::strategy_common::{
 use crate::trading::strategy::ut_boot_strategy::UtBootStrategy;
 use crate::trading::strategy::{self, strategy_common};
 use crate::trading::strategy::{engulfing_strategy, Strategy};
-use crate::trading::{order, task};
+use crate::trading::task;
 use okx::api::account::OkxAccount;
 use okx::dto::account::account_dto::SetLeverageRequest;
 
@@ -49,7 +49,7 @@ use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::model::strategy::back_test_log;
 use crate::trading::model::strategy::back_test_log::BackTestLog;
-use crate::trading::order::swap_ordr::SwapOrder;
+use crate::trading::services::order_service::swap_order_service::SwapOrderService;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::get_hash_key;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::update_candle_items;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::update_vegas_indicator_values;
@@ -168,7 +168,7 @@ pub async fn save_log(
         .add(&back_test_log)
         .await?;
 
-    if true {
+    if false {
         // 保存详细交易记录
         if !back_test_result.trade_records.is_empty() {
             save_test_detail(
@@ -400,8 +400,8 @@ impl Default for VegasBackTestConfig {
         Self {
             max_concurrent: 15,
             candle_limit: 20000,
-            enable_random_test: false,
-            enable_specified_test: true,
+            enable_random_test: true,
+            enable_specified_test: false,
         }
     }
 }
@@ -609,8 +609,7 @@ fn convert_strategy_config_to_param(
     let vegas_strategy = serde_json::from_str::<VegasStrategy>(&config.value)
         .map_err(|e| anyhow!("解析策略配置JSON失败: {}", e))?;
 
-    let risk_config =
-        serde_json::from_str::<BasicRiskStrategyConfig>(&config.risk_config)?;
+    let risk_config = serde_json::from_str::<BasicRiskStrategyConfig>(&config.risk_config)?;
 
     // 安全地提取配置值，避免unwrap
     let kline_hammer = vegas_strategy
@@ -709,7 +708,7 @@ pub async fn run_back_test_strategy(
         };
 
         let strategy = VegasStrategy {
-            period:time.to_string(),
+            period: time.to_string(),
             min_k_line_num: 3600,
             engulfing_signal: Some(EngulfingSignalConfig::default()),
             ema_signal: Some(EmaSignalConfig::default()),
@@ -1104,7 +1103,8 @@ pub async fn run_ready_to_order_with_manager(
         save_signal_log(inst_id, period, &signal_result);
         //执行交易
         let risk_config = strategy.risk_config.clone();
-        SwapOrder::new()
+
+        SwapOrderService::new()
             .ready_to_order(
                 &StrategyType::Vegas,
                 inst_id,

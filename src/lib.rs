@@ -6,12 +6,12 @@
 #![allow(unused_must_use)]
 
 pub mod app_config;
+pub mod enums;
 pub mod error;
 pub mod job;
 pub mod socket;
 pub mod time_util;
 pub mod trading;
-pub mod enums;
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
 use tracing_subscriber::prelude::*;

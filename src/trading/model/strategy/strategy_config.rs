@@ -4,6 +4,7 @@ use rbatis::impl_select;
 use rbatis::rbdc::db::ExecResult;
 use rbatis::rbdc::{Date, DateTime};
 use rbatis::{crud, impl_insert, impl_update, RBatis};
+use rbs::value;
 use serde_json::json;
 use std::sync::Arc;
 use tracing::debug;
@@ -24,7 +25,10 @@ pub struct StrategyConfigEntity {
 
 crud!(StrategyConfigEntity {}, "strategy_config");
 impl_select!(StrategyConfigEntity{get_all() => "`where is_deleted=0`"},"strategy_config");
+// impl_update!(StrategyConfigEntity{update_by_name(name:&str) => "`where id = '2'`"},"strategy_config");
+
 impl_update!(StrategyConfigEntity{update_by_name(name:&str) => "`where id = '2'`"},"strategy_config");
+
 impl_select!(StrategyConfigEntity{select_by_strate_type(strategy_type:&str,inst_id:&str,time:&str) =>
     "`where strategy_type=#{strategy_type} and  inst_id = #{inst_id} and time = #{time}`"},"strategy_config");
 
@@ -77,5 +81,47 @@ impl StrategyConfigEntityModel {
         let data = StrategyConfigEntity::get_all(self.db).await?;
         debug!("query strategy_config result:{}", json!(data));
         Ok(data)
+    }
+
+    pub async fn get_config_by_id(&self, id: i64) -> anyhow::Result<Vec<StrategyConfigEntity>> {
+        let data = StrategyConfigEntity::select_by_map(self.db, value! {"id":id}).await?;
+        Ok(data)
+    }
+
+    pub async fn update_strategy_config(
+        &self,
+        id: i64,
+        strategy_config: &str,
+    ) -> anyhow::Result<ExecResult> {
+        // let strategy_config_entity = StrategyConfigEntity {
+        //     id,
+        //     value: strategy_config.to_string(),
+        //     ..Default::default()
+        // };
+        // let result =
+        //     StrategyConfigEntity::update_by_map(self.db, &strategy_config_entity, value! {"id":id})
+        //         .await?;
+        // Ok(result)
+        Ok(ExecResult::default())
+    }
+
+    pub async fn update_risk_config(
+        &self,
+        id: i64,
+        risk_config: &str,
+    ) -> anyhow::Result<ExecResult> {
+        // 使用参数化查询避免SQL注入
+        // let result = StrategyConfigEntity::update_by_map(
+        //     self.db,
+        //     &StrategyConfigEntity {
+        //         id,
+        //         risk_config: risk_config.to_string(),
+        //         ..Default::default()
+        //     },
+        //     value! {"id":id},
+        // )
+        // .await?;
+        Ok(ExecResult::default())
+        // Ok(result)
     }
 }
