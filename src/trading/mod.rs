@@ -8,3 +8,4 @@ pub mod services;
 pub mod strategy;
 pub mod task;
 pub mod utils;
+pub mod types;

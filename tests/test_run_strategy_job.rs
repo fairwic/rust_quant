@@ -3,7 +3,7 @@ use dotenv::dotenv;
 use rust_quant::app_config::db::init_db;
 use rust_quant::app_config::log::setup_logging;
 use rust_quant::trading::indicator::vegas_indicator::VegasStrategy;
-use rust_quant::trading::strategy::order::vagas_order::{StrategyConfig, StrategyOrder};
+use rust_quant::trading::strategy::order::strategy_config::StrategyConfig;
 use rust_quant::trading::strategy::strategy_common::BasicRiskStrategyConfig;
 use rust_quant::trading::task::basic;
 
@@ -60,18 +60,18 @@ async fn test_run_strategy_job() -> Result<()> {
         is_one_k_line_diff_stop_loss: true,
         ..Default::default()
     };
-    let strategy_config = StrategyConfig {
-        strategy_config: strategy,
-        risk_config: risk_config,
-        strategy_config_id: 5,
-    };
+    let strategy_config = StrategyConfig::new(
+        5,
+        serde_json::to_string(&strategy).unwrap(),
+        serde_json::to_string(&risk_config).unwrap(),
+    );
     let inst_id = "BTC-USDT-SWAP";
     let time = "1Dutc";
     //初始化数据与获取初始化的指标值
-    let result = StrategyOrder::initialize_strategy_data(
+    let result = rust_quant::trading::services::strategy_data_service::StrategyDataService::initialize_strategy_data(
         &strategy_config,
-        &*"BTC-USDT-SWAP".to_string(),
-        &*"1Dutc".to_string(),
+        "BTC-USDT-SWAP",
+        "1Dutc",
     )
     .await;
     println!("result: {:?}", result);

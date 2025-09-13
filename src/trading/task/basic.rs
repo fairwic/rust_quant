@@ -58,7 +58,7 @@ use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values:
 };
 use crate::trading::strategy::engulfing_strategy::EngulfingStrategy;
 use crate::trading::strategy::macd_kdj_strategy::MacdKdjStrategy;
-use crate::trading::strategy::order::vagas_order::StrategyConfig;
+use crate::trading::strategy::order::strategy_config::StrategyConfig;
 use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
 use crate::trading::strategy::top_contract_strategy::{
     TopContractStrategy, TopContractStrategyConfig,
@@ -972,10 +972,10 @@ pub async fn run_ready_to_order_with_manager(
     println!("new candle :{:?}", new_candle_data);
     if new_candle_data.is_none() {
         warn!(
-            "获取的最新K线s数据不是最新的,无法继续执行策略{:?},{:?}",
+            "获取的最新K线数据为空,跳过本次策略执行: {:?}, {:?}",
             inst_id, period
         );
-        return Err(anyhow!("获取的最新K线异常"));
+        return Ok(()); // 改为返回Ok，避免阻塞策略执行
     }
     let new_candle_data = new_candle_data.unwrap();
     let new_candle_item = parse_candle_to_data_item(&new_candle_data);
@@ -1086,11 +1086,14 @@ pub async fn run_ready_to_order_with_manager(
         .rev()
         .collect();
 
-    let signal_result = strategy.strategy_config.get_trade_signal(
+    // 解析策略配置
+    let vegas_strategy: crate::trading::indicator::vegas_indicator::VegasStrategy = 
+        serde_json::from_str(&strategy.strategy_config)?;
+    let signal_result = vegas_strategy.get_trade_signal(
         &candle_vec,
         &mut new_indicator_values.clone(),
         &SignalWeightsConfig::default(),
-        &strategy.risk_config,
+        &serde_json::from_str::<crate::trading::strategy::strategy_common::BasicRiskStrategyConfig>(&strategy.risk_config)?,
     );
     println!("signal_result:{:?}", signal_result);
 
@@ -1110,7 +1113,7 @@ pub async fn run_ready_to_order_with_manager(
                 inst_id,
                 period,
                 &signal_result,
-                &risk_config,
+                &serde_json::from_str::<crate::trading::strategy::strategy_common::BasicRiskStrategyConfig>(&strategy.risk_config)?,
                 strategy.strategy_config_id,
             )
             .await?;

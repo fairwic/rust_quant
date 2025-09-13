@@ -1,0 +1,111 @@
+# 优雅停止配置文件
+[shutdown]
+# 总体超时时间（秒）
+total_timeout_secs = 30
+
+# 策略停止超时时间（秒）
+strategy_stop_timeout_secs = 20
+
+# 调度器关闭超时时间（秒）
+scheduler_shutdown_timeout_secs = 5
+
+# 数据库清理超时时间（秒）
+db_cleanup_timeout_secs = 5
+
+# 每个关闭回调的超时时间（秒）
+hook_timeout_secs = 10
+
+# 超时时是否强制退出
+force_exit_on_timeout = true
+
+# 是否启用详细日志
+verbose_logging = true
+
+# 关闭信号配置
+[shutdown.signals]
+# 是否处理 SIGTERM
+handle_sigterm = true
+
+# 是否处理 SIGINT (Ctrl+C)
+handle_sigint = true
+
+# 是否处理 SIGQUIT
+handle_sigquit = true
+
+# 数据库连接池清理配置
+[shutdown.database]
+# 清理重试次数
+cleanup_retry_count = 10
+
+# 每次重试间隔（毫秒）
+retry_interval_ms = 200
+
+# 连接池缩减比例（0.0-1.0）
+pool_reduction_ratio = 0.25
+
+# 连接生命周期缩短时间（秒）
+connection_lifetime_secs = 1
+
+# 策略停止配置
+[shutdown.strategy]
+# 是否并行停止策略
+parallel_stop = true
+
+# 单个策略停止超时（秒）
+single_strategy_timeout_secs = 5
+
+# 停止失败时是否继续
+continue_on_error = true
+
+# 调度器配置
+[shutdown.scheduler]
+# 调度器关闭方式：graceful | force
+shutdown_mode = "graceful"
+
+# 等待任务完成的时间（秒）
+wait_for_jobs_secs = 3
+
+# 是否取消正在运行的任务
+cancel_running_jobs = true
+
+# 监控配置
+[shutdown.monitoring]
+# 是否启用关闭性能监控
+enable_performance_monitoring = true
+
+# 是否记录每个步骤的耗时
+log_step_timing = true
+
+# 是否生成关闭报告
+generate_shutdown_report = true
+
+# 关闭报告保存路径
+report_path = "logs/shutdown_reports"
+
+# 健康检查配置
+[shutdown.health_check]
+# 关闭前是否进行健康检查
+enable_pre_shutdown_check = true
+
+# 健康检查超时（秒）
+health_check_timeout_secs = 2
+
+# 不健康时是否继续关闭
+continue_if_unhealthy = true
+
+# 资源清理配置
+[shutdown.cleanup]
+# 是否清理临时文件
+cleanup_temp_files = true
+
+# 临时文件目录
+temp_file_dirs = ["tmp", "cache", "logs/temp"]
+
+# 是否清理内存缓存
+cleanup_memory_cache = true
+
+# 是否清理网络连接
+cleanup_network_connections = true
+
+# 文件句柄清理超时（秒）
+file_handle_cleanup_timeout_secs = 2

@@ -28,7 +28,7 @@ services:
     command: sh -c "cargo build --release && ./target/release/rust_quant"
   mysql:
       image: mysql:8.0
-      container_name: my_mysql
+      container_name: mysql
       restart: always
       environment:
         MYSQL_ROOT_PASSWORD: example   # root 用户密码
@@ -37,4 +37,15 @@ services:
       ports:
         - "33306:3306"
       volumes:
-        - ./mysql_data:/var/lib/mysql        # 本地路径映射到 MySQL 数据目录
+        - ~/onions/docker-volumes/mysql_data:/var/lib/mysql        # 本地路径映射到 MySQL 数据目录
+      command: --max_connections=1000
+  redis:
+    image: redis:6.2
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379"   # 映射端口：宿主机6379 -> 容器6379
+    volumes:
+      - ~/onions/docker-volumes/redis/redis_data:/data
+      - ~/onions/docker-volumes/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]

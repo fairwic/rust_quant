@@ -70,7 +70,7 @@ impl CandlesModel {
 
     pub fn get_tale_name(inst_id: &str, time_interval: &str) -> String {
         // println!("inst_id{},time_interval{}",inst_id,time_interval);
-        let table_name = format!("{}_candles_{}", inst_id, time_interval);
+        let table_name = format!("{}_candles_{}", inst_id.to_ascii_lowercase(), time_interval);
         table_name
     }
     pub async fn add(

@@ -8,6 +8,7 @@ use rbatis::rbdc::db::ExecResult;
 use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::debug;
 use std::collections::HashMap;
 use rbs::value;
 use crate::app_config::db::get_db_client;
@@ -103,11 +104,8 @@ impl TicketsModel {
                 ts: ticker.ts.parse().unwrap(),
             })
             .collect();
-
-        println!("insert_batch = {}", json!(tickers_db));
-
         let data = TickersDataEntity::insert_batch(self.db, &tickers_db, list.len() as u64).await?;
-        println!("insert_batch = {}", json!(data));
+        debug!("insert_batch = {}", json!(data));
         Ok(data)
     }
     pub async fn update(&self, ticker: &TickerOkxResDto) -> anyhow::Result<()> {
