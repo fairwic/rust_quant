@@ -542,10 +542,8 @@ pub fn run_back_test(
         .max_required_lookback()
         .max(min_data_length);
 
-    let loop_start = Instant::now();
     for (i, candle) in candles_list.iter().enumerate() {
         // 计算指标值
-        let indicator_start = Instant::now();
         let mut multi_indicator_values = get_multi_indicator_values(indicator_combine, &candle);
 
         // 将新数据添加到列表，如果超过最大回溯期，删除最旧的数据
@@ -581,11 +579,9 @@ pub fn run_back_test(
         }
     }
     // 最终平仓处理
-    let finalize_start = Instant::now();
     finalize_trading_state(&mut trading_state, &candle_item_list);
 
     // 构建结果
-    let result_build_start = Instant::now();
     let result = BackTestResult {
         funds: trading_state.funds,
         win_rate: calculate_win_rate(trading_state.wins, trading_state.losses),
@@ -1197,7 +1193,6 @@ fn open_short_position(
 fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
     //批量回测的时候不进行记录
     let trade_position = state.trade_position.clone().unwrap();
-    return;
     state.trade_records.push(TradeRecord {
         option_type,
         open_position_time: trade_position.open_position_time.clone(),
@@ -1274,7 +1269,6 @@ fn record_trade_exit(
     closing_quantity: f64, // Add parameter for quantity being closed
 ) {
     let trade_position = state.trade_position.clone().unwrap();
-    return;
     state.trade_records.push(TradeRecord {
         option_type: "close".to_string(),
         open_position_time: trade_position.open_position_time.clone(),

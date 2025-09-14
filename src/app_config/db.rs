@@ -3,7 +3,7 @@ use rbatis::RBatis;
 use rbdc_mysql::MysqlDriver;
 use std::env;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info,debug};
 
 static DB_CLIENT: OnceCell<RBatis> = OnceCell::new();
 
@@ -11,7 +11,7 @@ static DB_CLIENT: OnceCell<RBatis> = OnceCell::new();
 //     pub static ref DB_CLIENT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 // }
 pub async fn init_db() -> &'static RBatis {
-    info!("Initializing database connection pool...");
+    debug!("Initializing database connection pool...");
     let rb = RBatis::new();
     // 从环境变量获取数据库配置
     let db_host = env::var("DB_HOST").expect("DB_HOST must be set");
@@ -21,7 +21,7 @@ pub async fn init_db() -> &'static RBatis {
         .expect("DB_MAX_CONNECTIONS must be a number");
     // 连接数据库
     match rb.link(MysqlDriver {}, &db_host).await {
-        Ok(_) => info!("Successfully connected to database"),
+        Ok(_) => debug!("Successfully connected to database"),
         Err(e) => {
             error!("Failed to connect to database: {}", e);
             panic!("Database connection failed");
@@ -32,17 +32,15 @@ pub async fn init_db() -> &'static RBatis {
     let pool = rb.get_pool().expect("Failed to get connection pool");
     pool.set_max_open_conns(max_connections as u64).await; // 最大连接数
     pool.set_max_idle_conns(max_connections as u64 / 3).await; // 减少空闲连接数，避免占用过多
-    pool.set_conn_max_lifetime(Some(Duration::from_secs(3600)))
-        .await; // 连接最大生命周期延长到1小时，减少频繁创建销毁
-    pool.set_conn_max_lifetime(Some(Duration::from_secs(300)))
-        .await; // 空闲连接5分钟后关闭
-    info!(
+    // 连接最大生命周期：1小时，减少频繁创建/销毁
+    pool.set_conn_max_lifetime(Some(Duration::from_secs(3600))).await;
+    debug!(
         "Connection pool configured with {} max connections",
         max_connections
     );
 
     match DB_CLIENT.set(rb) {
-        Ok(_) => info!("DB_CLIENT initialized successfully"),
+        Ok(_) => info!("DB_CLIENT initialized successfully !"),
         Err(_) => {
             error!("Failed to set DB_CLIENT");
             panic!("Failed to initialize DB_CLIENT");
@@ -72,12 +70,13 @@ pub async fn cleanup_connection_pool() -> anyhow::Result<()> {
     let before_state = pool.state().await;
     info!("清理前状态：{:?}", before_state);
 
-    // 设置较短的连接生命周期，促使连接自然过期
+    // 1) 禁止保留空闲连接，并缩短连接寿命，促使池子快速收缩
+    pool.set_max_idle_conns(0).await;
     pool.set_conn_max_lifetime(Some(Duration::from_secs(1))).await;
 
-    // 等待连接自然释放，期间记录状态
-    const MAX_RETRIES: u32 = 10;
-    const RETRY_INTERVAL_MS: u64 = 200;
+    // 2) 轮询等待收缩完成（或直到超时）
+    const MAX_RETRIES: u32 = 15;           // 最多等待 ~3s
+    const RETRY_INTERVAL_MS: u64 = 200;    // 每次检查间隔 200ms
 
     for i in 1..=MAX_RETRIES {
         tokio::time::sleep(Duration::from_millis(RETRY_INTERVAL_MS)).await;

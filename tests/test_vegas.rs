@@ -20,10 +20,10 @@ async fn test_vegas() -> Result<()> {
     let inst_id = "ETH-USDT-SWAP";
     // let inst_id = "BTC-USDT-SWAP";
     // let time = "1H";
-    let time = "4H";
+    let time = "1H";
     // let time = "1Dutc";
     let select_time: SelectTime = SelectTime {
-        start_time: 1756051200000,
+        start_time: 1757635200000,
         direct: TimeDirect::BEFORE,
         end_time: None,
     };
@@ -37,8 +37,8 @@ async fn test_vegas() -> Result<()> {
     let mut strategy = VegasStrategy::new(time.to_string());
 
     // 设置布林带参数
-    strategy.bolling_signal.as_mut().unwrap().multiplier = 2.0;
-    strategy.bolling_signal.as_mut().unwrap().period = 12;
+    strategy.bolling_signal.as_mut().unwrap().multiplier = 3.0;
+    strategy.bolling_signal.as_mut().unwrap().period = 15;
     strategy
         .bolling_signal
         .as_mut()

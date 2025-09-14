@@ -55,7 +55,7 @@ impl CandlesModel {
   `vol_ccy` varchar(50) NOT NULL COMMENT '交易量，以币为单位',
   `confirm` varchar(20) NOT NULL COMMENT 'K线状态',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `ts` (`ts` DESC) USING BTREE,
   KEY `vol_ccy` (`vol_ccy` DESC)

@@ -1,4 +1,6 @@
 use crate::app_config::redis as app_redis;
+use crate::app_config::env as app_env;
+
 use crate::time_util;
 use crate::trading::cache::latest_candle_cache as local_cache;
 use crate::trading::model::entity::candles::dto::SelectCandleReqDto;
@@ -79,14 +81,25 @@ impl CandleDomainService {
         period: &str,
         max_staleness_ms: Option<i64>,
     ) -> Result<Option<CandlesEntity>> {
-        let limit = max_staleness_ms.unwrap_or(DEFAULT_MAX_STALENESS_MS);
+        let limit = max_staleness_ms
+            .unwrap_or_else(|| crate::app_config::env::candle_cache_staleness_ms(period, DEFAULT_MAX_STALENESS_MS));
         // 先查缓存（内存/Redis），不做新鲜度过滤
         if let Some(c) = local_cache::default_provider()
             .get_or_fetch(inst_id, period)
             .await
         {
             if time_util::ts_is_match_period(c.ts, period) {
-                return Ok(Some(c));
+                //  :  update_time 
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                if let Some(ut) = c.update_time.clone() {
+                    if i64::from(ut.ms()) > (now_ms - limit) {
+                        return Ok(Some(c));
+                    }
+                }
+                //  update_time  ->  DB
             }
         }
         // 缓存不新鲜或未命中：查 DB

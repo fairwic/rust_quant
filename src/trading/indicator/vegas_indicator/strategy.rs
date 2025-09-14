@@ -430,9 +430,9 @@ impl VegasStrategy {
                 bolling_bands.is_short_signal = true;
             }
 
-            // // 过滤逻辑
+            //过滤逻辑,如果虽然触发了bollinger的信号，但是k线的收盘价，依然大于em1值,则认为bollinger的信号是无效的(除了对4H周期，其他的周期的提升非常大,特别是日线级别)
             if (bolling_bands.is_long_signal || bolling_bands.is_short_signal)
-                && self.period == PeriodEnum::OneDayUtc.as_str()
+                && self.period != PeriodEnum::FourHour.as_str()
             {
                 if bolling_bands.is_long_signal
                     && data_items.last().expect("数据不能为空").c < ema_signal_values.ema1_value
@@ -444,16 +444,6 @@ impl VegasStrategy {
                 if bolling_bands.is_short_signal
                     && data_items.last().expect("数据不能为空").c > ema_signal_values.ema1_value
                 {
-                    if data_items.last().expect("数据不能为空").ts == 1756051200000 {
-                        println!(
-                            "bolling_bands.is_short_signal: {:?}",
-                            bolling_bands.is_short_signal
-                        );
-                        println!(
-                            "ema_signal_values.ema1_value: {:?}",
-                            ema_signal_values.ema1_value
-                        );
-                    }
                     bolling_bands.is_short_signal = false;
                     bolling_bands.is_force_filter_signal = true;
                 }

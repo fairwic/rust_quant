@@ -21,8 +21,8 @@ impl CandleService {
         inst_id: &str,
         time_interval: &str,
     ) -> anyhow::Result<()> {
-        let candle_model = CandlesModel::new().await;
-        let first = candle.get(0).unwrap();
+        // 优先使用最后一条（通常是最新）
+        let first = candle.last().unwrap();
         let new_ts = first.ts.parse::<i64>().unwrap_or(0);
         let incoming_confirm = first.confirm.parse::<i32>().unwrap_or(0);
 
@@ -56,21 +56,28 @@ impl CandleService {
                 vol: first.v.clone(),
                 vol_ccy: first.vol_ccy.clone(),
                 confirm: first.confirm.clone(),
-                update_time:None,
+                update_time: Some(rbatis::rbdc::DateTime::now()),
             };
             self.cache.set_both(inst_id, time_interval, &snap).await;
         } else {
             println!("skip cache update: new_ts={}, last_ts={}, incoming_confirm={}, cached_confirm={}", new_ts, last_ts, incoming_confirm, cached_confirm);
         }
 
-        // 2) 异步落库（幂等）
+        // 2) 异步落库（幂等）并回刷缓存
         let inst = inst_id.to_string();
         let per = time_interval.to_string();
         let first_clone = first.clone();
+        let cache = Arc::clone(&self.cache);
+        let new_ts_captured = new_ts;
         tokio::spawn(async move {
-            let _ = CandlesModel::new().await
-                .update_or_create(&first_clone, &inst, &per).await;
-                // todo：落库后以 DB 最新值回刷缓存（确保 confirm 等字段最终正确）
+            let model = CandlesModel::new().await;
+            let _ = model.update_or_create(&first_clone, &inst, &per).await;
+            if let Ok(opt) = model.get_one_by_ts(&inst, &per, new_ts_captured).await {
+                if let Some(mut c) = opt {
+                    if c.update_time.is_none() { c.update_time = Some(rbatis::rbdc::DateTime::now()); }
+                    cache.set_both(&inst, &per, &c).await;
+                }
+            }
         });
         Ok(())
     }

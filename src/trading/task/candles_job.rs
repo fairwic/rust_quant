@@ -233,81 +233,81 @@ pub async fn init_before_candles(
     Ok(())
 }
 
-/** 更新最新的蜡烛图**/
-pub async fn update_new_candles_to_redis(
-    mut redis: MultiplexedConnection,
-    inst_id: &str,
-    time: &str,
-) -> anyhow::Result<()> {
-    //获取获取数据更新的数据
-    //获取当前交易产品的历史蜡烛图数据
-    //获取当前数据最旧的数据
-    let res = CandlesModel::new()
-        .await
-        .get_new_data(inst_id, time)
-        .await?;
-    debug!("res: {:?}", res);
-    let mut before: i64 = 0;
-    if res.is_none() {
-        before = Utc::now().naive_utc().timestamp_millis();
-    } else {
-        before = res.unwrap().ts;
-    }
-    let key = CandlesModel::get_tale_name(inst_id, time);
-    let res = OkxMarket::from_env()?
-        .get_candles(&inst_id, time, None, Some(&before.to_string()), Some("300"))
-        .await?;
-    if res.is_empty() {
-        debug!("No new candles patch{},{}", inst_id, time);
-        return Ok(());
-        //插入数据
-    } else {
-        let mut redis_conn = redis.clone();
-        let candle_structs: Vec<RedisCandle> = res
-            .iter()
-            .map(|c| RedisCandle {
-                ts: c.ts.parse().unwrap(),
-                c: c.c.clone(),
-            })
-            .collect();
-        let res =
-            RedisOperations::save_candles_to_redis(&mut redis_conn, key.as_str(), &candle_structs)
-                .await?;
-    }
-    Ok(())
-}
+// /** 更新最新的蜡烛图**/
+// pub async fn update_new_candles_to_redis(
+//     mut redis: MultiplexedConnection,
+//     inst_id: &str,
+//     time: &str,
+// ) -> anyhow::Result<()> {
+//     //获取获取数据更新的数据
+//     //获取当前交易产品的历史蜡烛图数据
+//     //获取当前数据最旧的数据
+//     let res = CandlesModel::new()
+//         .await
+//         .get_new_data(inst_id, time)
+//         .await?;
+//     debug!("res: {:?}", res);
+//     let mut before: i64 = 0;
+//     if res.is_none() {
+//         before = Utc::now().naive_utc().timestamp_millis();
+//     } else {
+//         before = res.unwrap().ts;
+//     }
+//     let key = CandlesModel::get_tale_name(inst_id, time);
+//     let res = OkxMarket::from_env()?
+//         .get_candles(&inst_id, time, None, Some(&before.to_string()), Some("300"))
+//         .await?;
+//     if res.is_empty() {
+//         debug!("No new candles patch{},{}", inst_id, time);
+//         return Ok(());
+//         //插入数据
+//     } else {
+//         let mut redis_conn = redis.clone();
+//         let candle_structs: Vec<RedisCandle> = res
+//             .iter()
+//             .map(|c| RedisCandle {
+//                 ts: c.ts.parse().unwrap(),
+//                 c: c.c.clone(),
+//             })
+//             .collect();
+//         let res =
+//             RedisOperations::save_candles_to_redis(&mut redis_conn, key.as_str(), &candle_structs)
+//                 .await?;
+//     }
+//     Ok(())
+// }
 
-pub async fn update_new_candles_to_db(inst_id: &str, time: &str) -> anyhow::Result<()> {
-    //获取获取数据更新的数据
-    //获取当前交易产品的历史蜡烛图数据
-    //获取当前数据最旧的数据
-    let res = CandlesModel::new()
-        .await
-        .get_new_data(inst_id, time)
-        .await?;
-    debug!("res: {:?}", res);
-    let mut before: i64 = 0;
-    if res.is_none() {
-        before = Utc::now().naive_utc().timestamp_millis();
-    } else {
-        before = res.unwrap().ts;
-    }
-    loop {
-        let res = OkxMarket::from_env()?
-            .get_candles(&inst_id, time, None, Some(&before.to_string()), Some("300"))
-            .await?;
-        if res.is_empty() {
-            debug!("No new candles patch{},{}", inst_id, time);
-            break;
-            //插入数据
-        }
-        let res = CandlesModel::new().await.add(res, inst_id, time).await?;
-        let res = CandlesModel::new()
-            .await
-            .get_new_data(inst_id, time)
-            .await?;
-        before = res.unwrap().ts;
-    }
+// pub async fn update_new_candles_to_db(inst_id: &str, time: &str) -> anyhow::Result<()> {
+//     //获取获取数据更新的数据
+//     //获取当前交易产品的历史蜡烛图数据
+//     //获取当前数据最旧的数据
+//     let res = CandlesModel::new()
+//         .await
+//         .get_new_data(inst_id, time)
+//         .await?;
+//     debug!("res: {:?}", res);
+//     let mut before: i64 = 0;
+//     if res.is_none() {
+//         before = Utc::now().naive_utc().timestamp_millis();
+//     } else {
+//         before = res.unwrap().ts;
+//     }
+//     loop {
+//         let res = OkxMarket::from_env()?
+//             .get_candles(&inst_id, time, None, Some(&before.to_string()), Some("300"))
+//             .await?;
+//         if res.is_empty() {
+//             debug!("No new candles patch{},{}", inst_id, time);
+//             break;
+//             //插入数据
+//         }
+//         let res = CandlesModel::new().await.add(res, inst_id, time).await?;
+//         let res = CandlesModel::new()
+//             .await
+//             .get_new_data(inst_id, time)
+//             .await?;
+//         before = res.unwrap().ts;
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }

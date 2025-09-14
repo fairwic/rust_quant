@@ -168,7 +168,7 @@ pub async fn save_log(
         .add(&back_test_log)
         .await?;
 
-    if false {
+    if true {
         // 保存详细交易记录
         if !back_test_result.trade_records.is_empty() {
             save_test_detail(
@@ -400,8 +400,8 @@ impl Default for VegasBackTestConfig {
         Self {
             max_concurrent: 15,
             candle_limit: 20000,
-            enable_random_test: true,
-            enable_specified_test: false,
+            enable_random_test: false,
+            enable_specified_test: true,
         }
     }
 }
@@ -509,7 +509,6 @@ pub async fn get_strategy_config_from_db(
         warn!("未找到策略配置: inst_id={}, time={}", inst_id, time);
         return Ok(vec![]);
     }
-    let mut conversion_errors = 0;
     let mut params_batch = Vec::with_capacity(strategy_configs.len());
 
     info!("找到 {} 个策略配置", strategy_configs.len());
@@ -518,7 +517,6 @@ pub async fn get_strategy_config_from_db(
             Ok(param) => params_batch.push(param),
             Err(e) => {
                 error!("转换策略配置失败: {}, config_id: {:?}", e, config.id);
-                conversion_errors += 1;
             }
         }
     }
@@ -670,7 +668,6 @@ pub async fn run_back_test_strategy(
         let volume_bar_num = param.volume_bar_num;
         let volume_increase_ratio = param.volume_increase_ratio;
         let volume_decrease_ratio = param.volume_decrease_ratio;
-        let breakthrough_threshold = param.breakthrough_threshold;
         let rsi_period = param.rsi_period;
         let rsi_overbought = param.rsi_overbought;
         let rsi_oversold = param.rsi_oversold;
@@ -1087,13 +1084,15 @@ pub async fn run_ready_to_order_with_manager(
         .collect();
 
     // 解析策略配置
-    let vegas_strategy: crate::trading::indicator::vegas_indicator::VegasStrategy = 
+    let vegas_strategy: crate::trading::indicator::vegas_indicator::VegasStrategy =
         serde_json::from_str(&strategy.strategy_config)?;
     let signal_result = vegas_strategy.get_trade_signal(
         &candle_vec,
         &mut new_indicator_values.clone(),
         &SignalWeightsConfig::default(),
-        &serde_json::from_str::<crate::trading::strategy::strategy_common::BasicRiskStrategyConfig>(&strategy.risk_config)?,
+        &serde_json::from_str::<crate::trading::strategy::strategy_common::BasicRiskStrategyConfig>(
+            &strategy.risk_config,
+        )?,
     );
     println!("signal_result:{:?}", signal_result);
 
@@ -1113,7 +1112,9 @@ pub async fn run_ready_to_order_with_manager(
                 inst_id,
                 period,
                 &signal_result,
-                &serde_json::from_str::<crate::trading::strategy::strategy_common::BasicRiskStrategyConfig>(&strategy.risk_config)?,
+                &serde_json::from_str::<
+                    crate::trading::strategy::strategy_common::BasicRiskStrategyConfig,
+                >(&strategy.risk_config)?,
                 strategy.strategy_config_id,
             )
             .await?;
