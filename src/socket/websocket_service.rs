@@ -72,7 +72,7 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
     // println!("passphrase: {:?}", passphrase);
 
     // 创建自动重连客户端
-    println!("📡 创建自动重连客户端...");
+    info!("📡 创建自动重连客户端...");
     let public_client = AutoReconnectWebsocketClient::new_public();
 
     let mut public_receiver = match public_client.start().await {

@@ -90,28 +90,22 @@ impl CandleDomainService {
             .get_or_fetch(inst_id, period)
             .await
         {
-            //只要匹配到周期，直接,默认缓存中的数据就是最新的。返回数据
-            if time_util::ts_is_match_period(c.ts, period) {
                 return Ok(Some(c));
-            }else{
-                error!("缓存中的数据周期不匹配：{:?}",c.ts)
-            }
-        }
-
-        // 缓存不新鲜或未命中：查 DB
-        let db_res = self.candles_model.get_new_data(inst_id, period).await?;
-        if let Some(ref c) = db_res {
-            //如果是当前周期的数据
-            if time_util::ts_is_match_period(c.ts, period) {
-                // 回填缓存（可选）
-                local_cache::default_provider()
-                    .set_both(inst_id, period, c)
-                    .await;
-                return Ok(Some(c.clone()));
-            }else {
-                error!("数据库中的最新数据周期不匹配：{:?}",c.ts)
-            }
-        }
+         }
+        // // 缓存不新鲜或未命中：查 DB
+        // let db_res = self.candles_model.get_new_data(inst_id, period).await?;
+        // if let Some(ref c) = db_res {
+        //     //如果是当前周期的数据
+        //     if time_util::ts_is_max_period(c.ts, period) {
+        //         // 回填缓存（可选）
+        //         local_cache::default_provider()
+        //             .set_both(inst_id, period, c)
+        //             .await;
+        //         return Ok(Some(c.clone()));
+        //     }else {
+        //         error!("数据库中的最新数据周期不匹配：{:?}",c.ts)
+        //     }
+        // }
         Ok(None)
     }
 

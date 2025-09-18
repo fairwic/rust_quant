@@ -88,7 +88,7 @@ pub async fn run_sync_data_job(
     inst_ids: Option<Vec<&str>>,
     tims: &Vec<&str>,
 ) -> Result<(), anyhow::Error> {
-    println!("run_sync_data_job start");
+    info!("run_sync_data_job start");
     let span = span!(Level::DEBUG, "run_sync_data_job");
     let _enter = span.enter();
     candles_job::init_create_table(inst_ids.clone(), Some(&tims))
@@ -966,7 +966,7 @@ pub async fn run_ready_to_order_with_manager(
 
     let is_new_time = check_new_time(old_time, new_time, period, is_update, true)?;
     if !is_new_time {
-        info!("k线未更新，跳过策略执行: {:?}, {:?}", inst_id, period);
+        info!("跳过策略执行: inst_id:{:?} period:{:?}", inst_id, period);
         return Ok(());
     }
 
@@ -1058,7 +1058,7 @@ pub fn check_new_time(
     old_time: i64,
     new_time: i64,
     period: &str,
-    is_update: bool,
+    is_close_confim: bool,
     just_check_confim: bool,
 ) -> Result<bool> {
     if (new_time < old_time) {
@@ -1071,13 +1071,15 @@ pub fn check_new_time(
     }
     //优先判断
     if old_time == new_time {
+        info!("k线时间戳未更新，跳过策略执行: {:?}", period);
         return Ok(false);
     }
-    if (is_update) {
+    if (is_close_confim) {
         return Ok(true);
     }
     //如果必须要在收盘价确认
-    if (just_check_confim && !is_update) {
+    if (just_check_confim && !is_close_confim) {
+        info!("k线未确认，跳过策略执行: {:?}", period);
         return Ok(false);
     }
     //TODO 如果不需要收盘价确认
