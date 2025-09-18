@@ -25,6 +25,8 @@ pub async fn app_init() -> anyhow::Result<()> {
 
     //初始化数据库连接
     crate::app_config::db::init_db().await;
+    //初始化redis连接池
+    crate::app_config::redis::init_redis_pool().await?;
     Ok(())
 }
 
@@ -144,7 +146,17 @@ pub async fn graceful_shutdown_with_config(config: GracefulShutdownConfig) -> an
         })
         .await;
 
-    // 3) 其他资源清理（通常较快，可不设独立超时）
+    // 3) Redis连接池清理
+    manager
+        .register_shutdown_hook("redis_cleanup".to_string(), || async {
+            if let Err(e) = crate::app_config::redis::cleanup_redis_pool().await {
+                error!("清理Redis连接池失败: {}", e);
+            }
+            Ok(())
+        })
+        .await;
+
+    // 4) 其他资源清理（通常较快，可不设独立超时）
     manager
         .register_shutdown_hook("metrics_cleanup".to_string(), || async {
             cleanup_other_resources().await;

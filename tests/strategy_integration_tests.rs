@@ -410,7 +410,7 @@ async fn test_system_health_monitoring() {
     println!("📊 初始健康状态:");
     println!("  - 总策略数: {}", initial_health.total_strategies);
     println!("  - 运行中策略数: {}", initial_health.running_strategies);
-    println!("  - 调度器健康: {}", initial_health.scheduler_health.is_healthy);
+    println!("  - 调度器健康: {}", initial_health.scheduler_health);
     println!("  - 系统运行时间: {}ms", initial_health.system_uptime_ms);
 
     // 启动一个策略

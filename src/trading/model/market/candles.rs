@@ -42,7 +42,7 @@ impl CandlesModel {
     }
 
     pub async fn create_table(&self, inst_id: &str, time_interval: &str) -> Result<ExecResult> {
-        let table_name = CandlesModel::get_tale_name(inst_id, time_interval);
+        let table_name = CandlesModel::get_table_name(inst_id, time_interval);
         let create_table_sql = format!(
             "CREATE TABLE IF NOT EXISTS `{}` (
   `id` int NOT NULL AUTO_INCREMENT,
@@ -68,9 +68,9 @@ impl CandlesModel {
         Ok(res)
     }
 
-    pub fn get_tale_name(inst_id: &str, time_interval: &str) -> String {
+    pub fn get_table_name(inst_id: &str, time_interval: &str) -> String {
         // println!("inst_id{},time_interval{}",inst_id,time_interval);
-        let table_name = format!("{}_candles_{}", inst_id.to_ascii_lowercase(), time_interval);
+        let table_name = format!("{}_candles_{}", inst_id.to_ascii_lowercase(), time_interval.to_ascii_lowercase());
         table_name
     }
     pub async fn add(
@@ -137,7 +137,7 @@ impl CandlesModel {
         time_interval: &str,
         ts: i64,
     ) -> anyhow::Result<ExecResult> {
-        let table_name = Self::get_tale_name(inst_id, time_interval);
+        let table_name = Self::get_table_name(inst_id, time_interval);
         let query = format!("DELETE  FROM `{}` WHERE ts >= ?", table_name);
         let params = vec![ts.into()];
 
@@ -152,7 +152,7 @@ impl CandlesModel {
         inst_id: &str,
         time_interval: &str,
     ) -> anyhow::Result<Option<CandlesEntity>> {
-        let table_name = Self::get_tale_name(inst_id, time_interval);
+        let table_name = Self::get_table_name(inst_id, time_interval);
         let query = format!(
             "select * from `{}` WHERE confirm = 0 order by ts asc limit 1",
             table_name
@@ -225,7 +225,7 @@ impl CandlesModel {
                 vol_ccy: candle_data.vol_ccy.to_string(),
                 // vol_ccy_quote: candle_data.vol_ccy_quote.to_string(),
                 confirm: candle_data.confirm.to_string(),
-                update_time:None
+                updated_at:None
             };
             let exec_result: u64 = self.update_one(data, inst_id, time_interval).await?;
         }
@@ -235,7 +235,7 @@ impl CandlesModel {
     pub async fn get_all(&self, dto: SelectCandleReqDto) -> Result<Vec<CandlesEntity>> {
         let mut query = format!(
             "SELECT ts,o,h,l,c,vol,vol_ccy,confirm FROM `{}` where 1=1 ",
-            Self::get_tale_name(&dto.inst_id, &dto.time_interval)
+            Self::get_table_name(&dto.inst_id, &dto.time_interval)
         );
         //如果指定了确认
         if let Some(confirm) = dto.confirm {
@@ -289,7 +289,7 @@ impl CandlesModel {
     ) -> Result<Option<CandlesEntity>> {
         let mut query = format!(
             "select * from  `{}` ORDER BY ts DESC limit 1; ",
-            Self::get_tale_name(inst_id, time_interval)
+            Self::get_table_name(inst_id, time_interval)
         );
         debug!("query: {}", query);
         let res: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
@@ -303,9 +303,9 @@ impl CandlesModel {
         time_interval: &str,
         ts: i64,
     ) -> Result<Option<CandlesEntity>> {
-        let mut query = format!(
+        let  query = format!(
             "select * from  `{}` where `ts` = {} ORDER BY ts DESC limit 1; ",
-            Self::get_tale_name(inst_id, time_interval),
+            Self::get_table_name(inst_id, time_interval),
             ts
         );
         debug!("query: {}", query);
@@ -319,9 +319,9 @@ impl CandlesModel {
         inst_id: &str,
         time_interval: &str,
     ) -> Result<Option<CandlesEntity>> {
-        let mut query = format!(
+        let  query = format!(
             "select * from  `{}` ORDER BY ts ASC limit 1; ",
-            Self::get_tale_name(inst_id, time_interval)
+            Self::get_table_name(inst_id, time_interval)
         );
         debug!("query: {}", query);
         let res: Option<CandlesEntity> = self.db.query_decode(&query, vec![]).await?;
@@ -340,7 +340,7 @@ impl CandlesModel {
         }
         let mut query = format!(
             "select count(*) from  `{}` ORDER BY ts DESC limit {};",
-            Self::get_tale_name(inst_id, time_interval),
+            Self::get_table_name(inst_id, time_interval),
             limit.unwrap()
         );
         debug!("query: {}", query);

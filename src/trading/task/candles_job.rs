@@ -9,7 +9,7 @@ use okx::api::api_trait::OkxApiTrait;
 use okx::api::market::OkxMarket;
 use rbatis::rbatis_codegen::ops::AsProxy;
 use rbatis::rbdc::datetime;
-use redis::aio::MultiplexedConnection;
+
 use std::thread;
 use std::time::Duration;
 use tokio::time::sleep;

@@ -31,7 +31,6 @@ use crate::trading::strategy::support_resistance::SupportResistance;
 use okx::dto::market_dto::CandleOkxRespDto;
 use okx::dto::EnumToStrTrait;
 use rbatis::RBatis;
-use redis::aio::MultiplexedConnection;
 use std::collections::VecDeque;
 use std::fmt::Display;
 use ta::{Close, High, Low, Next};
@@ -87,7 +86,6 @@ impl EnumToStrTrait for StrategyType {
 
 pub struct Strategy {
     rb: &'static RBatis,
-    redis: MultiplexedConnection,
     rsi: RelativeStrengthIndex,
     ema_1h: ExponentialMovingAverage,
     macd: MovingAverageConvergenceDivergence,
@@ -116,10 +114,9 @@ impl UTBotAlert {
 }
 
 impl Strategy {
-    pub fn new(db: &'static RBatis, redis: MultiplexedConnection) -> Self {
+    pub fn new(db: &'static RBatis) -> Self {
         Self {
             rb: db,
-            redis,
             rsi: RelativeStrengthIndex::new(14).unwrap(),
             ema_1h: ExponentialMovingAverage::new(12 * 5).unwrap(),
             macd: MovingAverageConvergenceDivergence::new(12, 26, 9).unwrap(),

@@ -44,6 +44,7 @@ impl CandleItemBuilder {
     pub fn l(mut self, val: f64) -> Self { self.l = Some(val); self }
     pub fn c(mut self, val: f64) -> Self { self.c = Some(val); self }
     pub fn v(mut self, val: f64) -> Self { self.v = Some(val); self }
+    pub fn confirm(mut self, val: i32) -> Self { self.confirm = Some(val); self }
 
     pub fn build(self) -> anyhow::Result<CandleItem> {
         if let (Some(o), Some(h), Some(l), Some(c), Some(v), Some(ts)) = (self.o, self.h, self.l, self.c, self.v, self.ts) {

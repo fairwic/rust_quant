@@ -98,7 +98,7 @@ impl SchedulerService {
         // 本地环境：每秒执行一次，用于测试
         let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "LOCAL".to_string());
         let final_cron_expression = if app_env.eq_ignore_ascii_case("LOCAL") {
-            "* * * * * *".to_string()
+            "*/10 * * * * *".to_string()
         } else {
             cron_expression
         };
@@ -112,7 +112,6 @@ impl SchedulerService {
             let inst_id = inst_id.clone();
             let time = time.clone();
             let strategy_type = strategy_type.clone();
-            info!("运行定时任务: {}_{} ({})", inst_id, time, strategy_type);
             let strategy_cfg_handle: Arc<RwLock<StrategyConfig>> = Arc::clone(&strategy_cfg_handle);
 
             Box::pin(async move {
@@ -121,7 +120,7 @@ impl SchedulerService {
                     let guard = strategy_cfg_handle.read().await;
                     guard.clone()
                 };
-                match crate::trading::task::basic::run_strategy_job(&inst_id, &time, &current_cfg).await {
+                match crate::trading::task::basic::run_ready_to_order_with_manager(&inst_id, &time, &current_cfg).await {
                     Ok(_) => {
                         debug!("策略任务执行成功: {}_{}", inst_id, time);
                     }

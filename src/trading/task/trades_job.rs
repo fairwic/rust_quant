@@ -9,7 +9,7 @@ use hmac::digest::typenum::op;
 use okx::api::market::OkxMarket;
 use rbatis::rbatis_codegen::ops::AsProxy;
 use rbatis::rbdc::datetime;
-use redis::aio::MultiplexedConnection;
+
 use tracing::debug;
 use tracing::field::debug;
 

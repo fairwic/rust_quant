@@ -5,6 +5,7 @@ use std::thread;
 pub mod back_test;
 pub mod okx;
 pub mod test_predicting;
+pub mod email;
 
 #[tokio::test]
 async fn test_mspc_job() -> anyhow::Result<()> {

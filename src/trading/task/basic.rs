@@ -917,36 +917,6 @@ enum RealStrategy {
     Engulfing(EngulfingStrategy),
 }
 
-/** 执行ut boot 策略 任务**/
-pub async fn run_strategy_job(
-    inst_id: &str,
-    time: &str,
-    strategy: &StrategyConfig,
-) -> Result<(), anyhow::Error> {
-    //实际执行
-    info!("run_strategy_job开始: inst_id={}, time={}", inst_id, time);
-    //记录执行时间
-    let start_time = Instant::now();
-    // 直接使用新的管理器
-    let res = self::run_ready_to_order_with_manager(inst_id, time, strategy).await;
-
-    if let Err(e) = res {
-        error!(
-            "run ready to order inst_id:{:?} time:{:?} error:{:?}",
-            inst_id, time, e
-        );
-        return Err(anyhow!(e));
-    }
-
-    info!(
-        "run_strategy_job完成: inst_id={}, time={}, 执行时间:{}ms",
-        inst_id,
-        time,
-        start_time.elapsed().as_millis()
-    );
-    Ok(())
-}
-
 /// 运行准备好的订单函数 - 使用新的管理器
 pub async fn run_ready_to_order_with_manager(
     inst_id: &str,
@@ -966,7 +936,6 @@ pub async fn run_ready_to_order_with_manager(
         .get_new_one_candle_fresh(inst_id, period, None)
         .await
         .map_err(|e| anyhow!("获取最新K线数据失败: {}", e))?;
-    println!("new candle :{:?}", new_candle_data);
     if new_candle_data.is_none() {
         warn!(
             "获取的最新K线数据为空,跳过本次策略执行: {:?}, {:?}",
@@ -993,84 +962,40 @@ pub async fn run_ready_to_order_with_manager(
 
     // 4. 验证时间戳，检查是否有新数据
     let new_time = new_candle_item.ts;
-
     let is_update = new_candle_item.confirm == 1;
-    //如果最新数据确认了的。
-    if is_update {
-        if old_time == new_time {
-            info!(
-                "未检测到新的K线数据，等待下次更新 inst_id:{:?} period;{:?}",
-                inst_id, period
-            );
-            return Ok(());
-        }
-        // 验证时间差是否为一个周期（记录警告，中断执行）
-        if let Ok(period_diff) = ts_add_n_period(old_time, period, 1) {
-            if period_diff != new_time {
-                return Err(anyhow!(
-                    "K线时间戳不连续: 上一时间戳 {}, 当前时间戳 {}, 预期时间戳 {}",
-                    old_time,
-                    new_time,
-                    period_diff
-                ));
-            }
-        }
-    } else {
-        if let Ok(period_diff) = ts_add_n_period(old_time, period, 1) {
-            if new_time < period_diff {
-                // 非确认状态，预期内，直接早退等待确认即可
-                tracing::debug!(
-                    "K线未确认，等待下一次: inst_id={}, period={}",
-                    inst_id,
-                    period
-                );
-                return Ok(());
-            }
-            // 只有当 new_time 超过期望时间戳（异常倒流/脏数据）才需要报错
-            if new_time > period_diff {
-                return Err(anyhow!(
-                    "K线时间戳异常: 上一={}, 当前={}, 期望={}",
-                    old_time,
-                    new_time,
-                    period_diff
-                ));
-            }
-        }
+
+    let is_new_time = check_new_time(old_time, new_time, period, is_update, true)?;
+    if !is_new_time {
+        info!("k线未更新，跳过策略执行: {:?}, {:?}", inst_id, period);
+        return Ok(());
     }
 
     // 6. 计算最新指标值
     let new_indicator_values =
         strategy_common::get_multi_indicator_values(&mut old_indicator_combines, &new_candle_item);
-    if inst_id == "BTC-USDT-SWAP" {
-        println!(
-            "new_indicator_values{:?}",
-            json!(new_indicator_values).to_string()
-        );
-    }
+
     // 5. 准备更新数据
     new_candle_items.push_back(new_candle_item.clone());
 
-    if is_update {
-        // 限制历史数据大小 - 使用VecDeque的高效操作
-        if new_candle_items.len() > MAX_HISTORY_SIZE {
-            let excess = new_candle_items.len() - MAX_HISTORY_SIZE;
-            for _ in 0..excess {
-                new_candle_items.pop_front();
-            }
+    // 限制历史数据大小 - 使用VecDeque的高效操作
+    if new_candle_items.len() > MAX_HISTORY_SIZE {
+        let excess = new_candle_items.len() - MAX_HISTORY_SIZE;
+        for _ in 0..excess {
+            new_candle_items.pop_front();
         }
+    }
 
-        // 7-8. 原子更新：同时写入K线与指标，避免中间态
-        if let Err(e) = manager
-            .update_both(
-                &key,
-                new_candle_items.clone(),
-                old_indicator_combines.clone(),
-                new_candle_item.ts,
-            )
-            .await
-        {
-            return Err(anyhow!("原子更新指标与K线失败: {}", e));
-        }
+    // 7-8. 原子更新：同时写入K线与指标，避免中间态
+    if let Err(e) = manager
+        .update_both(
+            &key,
+            new_candle_items.clone(),
+            old_indicator_combines.clone(),
+            new_candle_item.ts,
+        )
+        .await
+    {
+        return Err(anyhow!("原子更新指标与K线失败: {}", e));
     }
 
     // 10. 计算交易信号
@@ -1094,12 +1019,14 @@ pub async fn run_ready_to_order_with_manager(
             &strategy.risk_config,
         )?,
     );
-    println!("signal_result:{:?}", signal_result);
-
     if signal_result.should_buy || signal_result.should_sell {
         info!(
-            "signal_result:{:?},ts:{}",
-            signal_result, new_candle_item.ts
+            "出现买入或者卖出信号！inst_id:{:?} period:{:?},signal_result:should_buy:{},should_sell:{},ts:{}",
+            inst_id,
+            period,
+            signal_result.should_buy,
+            signal_result.should_sell,
+            new_candle_item.ts
         );
         //异步记录日志
         save_signal_log(inst_id, period, &signal_result);
@@ -1127,7 +1054,35 @@ pub async fn run_ready_to_order_with_manager(
     }
     Ok(())
 }
-
+pub fn check_new_time(
+    old_time: i64,
+    new_time: i64,
+    period: &str,
+    is_update: bool,
+    just_check_confim: bool,
+) -> Result<bool> {
+    if (new_time < old_time) {
+        return Err(anyhow!(
+            "K线时间戳异常: 上一时间戳 {}, 当前时间戳 {}, 预期时间戳 {}",
+            old_time,
+            new_time,
+            period
+        ));
+    }
+    //优先判断
+    if old_time == new_time {
+        return Ok(false);
+    }
+    if (is_update) {
+        return Ok(true);
+    }
+    //如果必须要在收盘价确认
+    if (just_check_confim && !is_update) {
+        return Ok(false);
+    }
+    //TODO 如果不需要收盘价确认
+    return Ok(true);
+}
 pub fn save_signal_log(inst_id: &str, period: &str, signal_result: &SignalResult) {
     // 异步记录日志（不阻塞下单），并移除 unwrap
     let strategy_result_str = match serde_json::to_string(&signal_result) {

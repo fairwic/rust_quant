@@ -599,6 +599,7 @@ pub fn parse_candle_to_data_item(candle: &CandlesEntity) -> CandleItem {
         .h(candle.h.parse::<f64>().unwrap())
         .l(candle.l.parse::<f64>().unwrap())
         .o(candle.o.parse::<f64>().unwrap())
+        .confirm(candle.confirm.parse::<i32>().unwrap())
         .ts(candle.ts)
         .build()
         .unwrap()

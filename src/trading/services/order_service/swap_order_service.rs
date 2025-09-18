@@ -320,7 +320,7 @@ impl SwapOrderService {
             if res.is_err() {
                 error!("判断关闭反向仓位失败 position error: {:?}", res);
             } else {
-                info!("判断关闭反向仓位结束");
+                debug!("判断关闭反向仓位结束");
             }
         });
         Ok(())
@@ -473,8 +473,6 @@ impl SwapOrderService {
         risk_config: &BasicRiskStrategyConfig,
     ) -> Result<Vec<OrderResDto>, AppError> {
         //最大止盈
-        println!("risk_config: {:?}", risk_config);
-        println!("signal: {:?}", signal);
         let max_loss_percent = risk_config.max_loss_percent;
         let mut stop_loss_price: f64 = match side {
             Side::Sell => entry_price * (1.0 + max_loss_percent),
@@ -507,7 +505,7 @@ impl SwapOrderService {
             &size,
             &side,
         );
-        println!("place order attach_algo_ords{:?}", attach_algo_ords);
+        debug!("place order attach_algo_ords{:?}", attach_algo_ords);
 
         let order_params = OrderReqDto {
             inst_id: inst_id.to_string(),

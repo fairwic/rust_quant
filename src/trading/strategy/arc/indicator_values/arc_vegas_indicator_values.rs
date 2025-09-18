@@ -13,7 +13,7 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 
 // 定义最大容量常量
-const MAX_CANDLE_ITEMS: usize = 10000;
+const MAX_CANDLE_ITEMS: usize = 100;
 
 #[derive(Debug, Clone)]
 pub struct ArcVegasIndicatorValues {

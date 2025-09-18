@@ -217,7 +217,7 @@ fn add_mock_candle(candles: &mut Vec<CandlesEntity>, base_price: f64, ts: i64, p
         vol: "1000.0".to_string(),
         vol_ccy: "1000.0".to_string(),
         confirm: "0".to_string(),
-        update_time: None,
+        updated_at: None,
     });
 }
 

@@ -379,11 +379,11 @@ impl StrategyManager {
             operation: format!("获取策略配置失败: {}", e)
         })?;
 
-        if config_result.is_empty() {
+        if config_result.is_none() {
             return Err(StrategyManagerError::ConfigNotFound { config_id: strategy_config_id }.into());
         }
 
-        let config_entity = &config_result[0];
+        let config_entity = &config_result.unwrap();
 
         // 解析策略配置
         let vegas_strategy: VegasStrategy = serde_json::from_str(&config_entity.value)
@@ -615,12 +615,14 @@ impl StrategyManager {
         // 5. 重新加载配置并启动策略
         let config_model = StrategyConfigEntityModel::new().await;
         let configs = config_model.get_config_by_id(strategy_config_id).await?;
-
-        if configs.is_empty() {
+        if configs.is_none() {
             return Err(anyhow!("策略配置不存在"));
         }
+        let config_entity = &configs.unwrap();
+        if config_entity.is_deleted == 1 {
+            return Err(anyhow!("策略配置已删除"));
+        }
 
-        let config_entity = &configs[0];
         let vegas_strategy: VegasStrategy = serde_json::from_str(&config_entity.value)?;
         let risk_config: BasicRiskStrategyConfig =
             serde_json::from_str(&config_entity.risk_config)?;

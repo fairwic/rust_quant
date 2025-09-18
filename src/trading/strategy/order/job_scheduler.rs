@@ -75,16 +75,14 @@ impl StrategyJobScheduler {
         let job = Job::new_async(final_cron_expression.as_str(), move |_uuid, _lock| {
             let inst_id = inst_id.clone();
             let time = time.clone();
-            info!("运行定时任务任务: {}_{}", inst_id, time);
             let strategy_cfg_handle: Arc<RwLock<StrategyConfig>> = Arc::clone(&strategy_cfg_handle);
-
             Box::pin(async move {
                 // 每次触发时读取最新配置（支持热更新）
                 let current_cfg = {
                     let guard = strategy_cfg_handle.read().await;
                     guard.clone()
                 };
-                match crate::trading::task::basic::run_strategy_job(&inst_id, &time, &current_cfg).await {
+                match crate::trading::task::basic::run_ready_to_order_with_manager(&inst_id, &time, &current_cfg).await {
                     Ok(_) => {
                         debug!("策略任务执行成功: {}_{}", inst_id, time);
                     }

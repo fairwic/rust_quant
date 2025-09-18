@@ -1,5 +1,5 @@
-use crate::app_config::redis as app_redis;
 use crate::app_config::env as app_env;
+use crate::app_config::redis as app_redis;
 
 use crate::time_util;
 use crate::trading::cache::latest_candle_cache as local_cache;
@@ -10,10 +10,11 @@ use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::task::basic;
 use anyhow::{anyhow, Result};
 use redis::AsyncCommands;
+use tracing::error;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DEFAULT_MAX_STALENESS_MS: i64 = 2_500; // 默认允许交易最大数据延迟 2.5s
+const DEFAULT_MAX_STALENESS_MS: i64 = 1000; // 默认允许交易最大数据延迟 0.5s
 
 // 方案1：依赖注入设计 - 最推荐的方式
 pub struct CandleDomainService {
@@ -79,47 +80,36 @@ impl CandleDomainService {
         &self,
         inst_id: &str,
         period: &str,
-        max_staleness_ms: Option<i64>,
+        _max_staleness_ms: Option<i64>,
     ) -> Result<Option<CandlesEntity>> {
-        let limit = max_staleness_ms
-            .unwrap_or_else(|| crate::app_config::env::candle_cache_staleness_ms(period, DEFAULT_MAX_STALENESS_MS));
+        // let limit = max_staleness_ms.unwrap_or_else(|| {
+        //     crate::app_config::env::candle_cache_staleness_ms(period, DEFAULT_MAX_STALENESS_MS)
+        // });
         // 先查缓存（内存/Redis），不做新鲜度过滤
         if let Some(c) = local_cache::default_provider()
             .get_or_fetch(inst_id, period)
             .await
         {
+            //只要匹配到周期，直接,默认缓存中的数据就是最新的。返回数据
             if time_util::ts_is_match_period(c.ts, period) {
-                //  :  update_time 
-                let now_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
-                if let Some(ut) = c.update_time.clone() {
-                    if i64::from(ut.ms()) > (now_ms - limit) {
-                        return Ok(Some(c));
-                    }
-                }
-                //  update_time  ->  DB
+                return Ok(Some(c));
+            }else{
+                error!("缓存中的数据周期不匹配：{:?}",c.ts)
             }
         }
+
         // 缓存不新鲜或未命中：查 DB
         let db_res = self.candles_model.get_new_data(inst_id, period).await?;
         if let Some(ref c) = db_res {
             //如果是当前周期的数据
             if time_util::ts_is_match_period(c.ts, period) {
-                //且数据库的最新数据的更新时间必须要在阈值内
-                let now_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
-                if i64::from(c.update_time.clone().unwrap().ms()) > (now_ms - limit)
-                {
-                    // 回填缓存（可选）
-                    local_cache::default_provider()
-                        .set_both(inst_id, period, c)
-                        .await;
-                    return Ok(Some(c.clone()));
-                }
+                // 回填缓存（可选）
+                local_cache::default_provider()
+                    .set_both(inst_id, period, c)
+                    .await;
+                return Ok(Some(c.clone()));
+            }else {
+                error!("数据库中的最新数据周期不匹配：{:?}",c.ts)
             }
         }
         Ok(None)

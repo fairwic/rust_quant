@@ -1,4 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
+use okx::websocket::auto_reconnect_client::AutoReconnectWebsocketClient;
+use okx::websocket::auto_reconnect_client::ReconnectConfig;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -69,62 +71,77 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
     // println!("api_secret: {:?}", api_secret);
     // println!("passphrase: {:?}", passphrase);
 
-    let mut okx_websocket_client = OkxWebsocketClient::new_public();
-    let mut rx_public = okx_websocket_client.connect().await.unwrap();
+    // 创建自动重连客户端
+    println!("📡 创建自动重连客户端...");
+    let public_client = AutoReconnectWebsocketClient::new_public();
 
-    let mut okx_websocket_client_private = OkxWebsocketClient::new_private(Credentials::new(
-        api_key,
-        api_secret,
-        passphrase,
-        sim_trading,
-    ));
-    let mut rx_private = okx_websocket_client_private.connect().await.unwrap();
+    let mut public_receiver = match public_client.start().await {
+        Ok(rx) => {
+            info!("✅ okx public websocket启动成功");
+            rx
+        }
+        Err(e) => {
+            error!("❌ okx public websocket启动失败: {}", e);
+            return;
+        }
+    };
+    let credentials = Credentials::new(api_key, api_secret, passphrase, sim_trading);
+
+    let mut okx_websocket_client_business = AutoReconnectWebsocketClient::new_business(credentials);
+
+    let mut private_message_receiver = match okx_websocket_client_business.start().await {
+        Ok(rx) => {
+            info!("✅ okx private websocket启动成功");
+            rx
+        }
+        Err(e) => {
+            error!("❌ okx private websocket启动失败: {}", e);
+            return;
+        }
+    };
 
     // 订阅多个k线频道
-    let mut candle_tasks = Vec::new();
     for inst_id in inst_ids.iter() {
         for time in times.iter() {
             let mut args = Args::new()
                 .with_inst_id(inst_id.to_string())
                 .with_param("period".to_string(), time.to_string());
             // 用私有client订阅k线频道
-            let task = okx_websocket_client_private
-                .subscribe(ChannelType::Candle(time.to_string()), args.clone());
-            candle_tasks.push(task);
+            let task = okx_websocket_client_business
+                .subscribe(ChannelType::Candle(time.to_string()), args.clone())
+                .await;
+            match task {
+                Ok(_) => {
+                    info!("订阅k线频道成功: {:?},{:?}", inst_id, time);
+                }
+                Err(e) => {
+                    error!("订阅k线频道失败: {:?}", e);
+                }
+            }
         }
     }
 
     // 订阅多个tickers频道
-    let mut ticker_tasks = Vec::new();
     for inst_id in inst_ids.iter() {
-        let mut args = Args::new().with_inst_id(inst_id.to_string());
+        let args = Args::new().with_inst_id(inst_id.to_string());
         // 用公有client订阅tickers频道
-        let task = okx_websocket_client.subscribe(ChannelType::Tickers, args.clone());
-        ticker_tasks.push(task);
-    }
-
-    // 并行等待所有订阅
-    let (candle_results, ticker_results): (Vec<_>, Vec<_>) = tokio::join!(
-        futures::future::join_all(candle_tasks),
-        futures::future::join_all(ticker_tasks)
-    );
-
-    // 错误处理
-    for res in candle_results {
-        if let Err(e) = res {
-            error!("订阅k线频道失败: {:?}", e);
-        }
-    }
-    for res in ticker_results {
-        if let Err(e) = res {
-            error!("订阅tickers频道失败: {:?}", e);
+        let task = public_client
+            .subscribe(ChannelType::Tickers, args.clone())
+            .await;
+        match task {
+            Ok(_) => {
+                info!("订阅tickers频道成功: {:?}", inst_id);
+            }
+            Err(e) => {
+                error!("订阅tickers频道失败: {:?}", e);
+            }
         }
     }
 
     // 持续监听并处理 websocket 消息
     tokio::spawn(async move {
-        while let Some(msg) = rx_public.recv().await {
-            debug!("收到公共频道消息: {:?}", msg);
+        while let Some(msg) = public_receiver.recv().await {
+            // info!("收到公共频道消息: {:?}", msg);
             // Object {"arg": Object {"channel": String("tickers"), "instId": String("BTC-USDT")}, "data": Array [Object {"askPx": String("103808"), "askSz": String("0.42913987"), "bidPx": String("103807.9"), "bidSz": String("0.75111858"), "high24h": String("104651.8"), "instId": String("BTC-USDT"), "instType": String("SPOT"), "last": String("103807.9"), "lastSz": String("0.00015066"), "low24h": String("100733"), "open24h": String("104016.9"), "sodUtc0": String("102790.1"), "sodUtc8": String("102520.1"), "ts": String("1747136969082"), "vol24h": String("8547.16177946"), "volCcy24h": String("878595784.826748153")}]}
             // 这里可以根据业务需求进一步处理消息
             //  todo 更新tickets
@@ -156,8 +173,8 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
         }
     });
     tokio::spawn(async move {
-        while let Some(msg) = rx_private.recv().await {
-            debug!("收到私有频道消息: {:?}", msg);
+        while let Some(msg) = private_message_receiver.recv().await {
+            // debug!("收到私有频道消息: {:?}", msg);
             // Object {"arg": Object {"channel": String("candle1D"), "instId": String("BTC-USDT")}, "data": Array [Array [String("1747065600000"), String("102520.1"), String("103834.1"),
             // String("100733"), String("103807.9"), String("5492.76982429"), String("562452565.494063325"), String("562452565.494063325"), String("0")]]}
             // 这里可以根据业务需求进一步处理消息
