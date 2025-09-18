@@ -4,7 +4,7 @@ use okx::api::market::OkxMarket;
 use okx::dto::market_dto::TickerOkxResDto;
 use okx::Error;
 use std::sync::Arc;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 pub async fn get_ticket(ins_type: &str) -> anyhow::Result<()> {
     let ticker = OkxMarket::from_env()?.get_ticker(&ins_type).await;
     debug!("单个ticket: {:?}", ticker);
@@ -17,7 +17,7 @@ pub async fn get_ticket(ins_type: &str) -> anyhow::Result<()> {
 }
 
 pub async fn init_all_ticker(inst_ids: Option<Vec<&str>>) -> anyhow::Result<()> {
-    println!("开始同步ticker...");
+    info!("开始同步ticker...");
     //同步合约产品
     let ins_type = "SWAP";
     let tickers = OkxMarket::from_env()?.get_tickers(&ins_type).await?;

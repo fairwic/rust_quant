@@ -56,7 +56,7 @@ pub async fn init_redis_pool() -> Result<()> {
         .set(pool)
         .map_err(|_| anyhow!("Failed to initialize Redis connection pool"))?;
 
-    info!("Redis连接池初始化成功 ！");
+    info!("Redis connection pool initialized successfully ！");
     Ok(())
 }
 

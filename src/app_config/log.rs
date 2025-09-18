@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex, mpsc};
-use tracing::{Event, Level, Subscriber};
+use tracing::{info, Event, Level, Subscriber};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
@@ -304,5 +304,6 @@ pub async fn setup_logging() -> anyhow::Result<()> {
     // if let Err(e) = fast_log::init(Config::new().console()) {
     //     eprintln!("fast_log init error: {:?}", e);
     // }
+    info!("log config setup successfully ！");
     Ok(())
 }

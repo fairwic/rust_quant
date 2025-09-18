@@ -20,7 +20,6 @@ pub async fn app_init() -> anyhow::Result<()> {
     //设置env
     dotenv().ok();
     // 设置日志
-    println!("init log config");
     crate::app_config::log::setup_logging().await?;
 
     //初始化数据库连接
