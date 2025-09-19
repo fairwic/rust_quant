@@ -1,6 +1,6 @@
 use hmac::digest::consts::U321;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ParamMergeBuilder {
     //bolling
     pub bb_period: i32,
@@ -268,5 +268,29 @@ impl ParamGenerator {
 
     pub fn progress(&self) -> (usize, usize) {
         (self.current_index, self.total_count)
+    }
+
+    /// 设置当前索引（用于断点续传）
+    pub fn set_current_index(&mut self, index: usize) {
+        self.current_index = index.min(self.total_count);
+    }
+
+    /// 重置到开始位置
+    pub fn reset(&mut self) {
+        self.current_index = 0;
+    }
+
+    /// 检查是否已完成所有组合
+    pub fn is_completed(&self) -> bool {
+        self.current_index >= self.total_count
+    }
+
+    /// 获取剩余组合数
+    pub fn remaining_count(&self) -> usize {
+        if self.current_index >= self.total_count {
+            0
+        } else {
+            self.total_count - self.current_index
+        }
     }
 }

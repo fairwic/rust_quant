@@ -58,6 +58,7 @@ pub async fn init_all_candles(
 ) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
     let res = res.get_all(inst_ids).await.unwrap();
+    //选择并发操作
     //获取获取数据更旧的数据
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
@@ -97,7 +98,7 @@ pub async fn init_all_candles(
                 after = res.unwrap().ts;
             }
             loop {
-                sleep(Duration::from_millis(200)).await;
+                sleep(Duration::from_millis(50)).await;
                 info!("get after history_candles {},{}", &ticker.inst_id, time);
                 //对下面进行的请求超时的时候进行重试
                 let res = OkxMarket::from_env()?

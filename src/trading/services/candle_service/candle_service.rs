@@ -3,8 +3,9 @@ use std::sync::Arc;
 use crate::trading::cache::latest_candle_cache::{default_provider, LatestCandleCacheProvider};
 use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::model::market::candles::CandlesModel;
+use crate::trading::strategy::strategy_manager::get_strategy_manager;
 use okx::dto::market_dto::CandleOkxRespDto;
-use tracing::info;
+use tracing::{error, info};
 
 pub struct CandleService {
     cache: Arc<dyn LatestCandleCacheProvider>,
@@ -45,9 +46,9 @@ impl CandleService {
         match self.cache.get_or_fetch(inst_id, time_interval).await {
             Some(cache_candle) => {
                 //只有当新数据的时间戳大于等于缓存中的时间戳，并且新数据的成交量大于等于缓存中的成交量时，才更新缓存
-                if new_ts >= cache_candle.ts
-                    && first.vol_ccy.parse::<f64>().unwrap_or(0.0)
-                        >= cache_candle.vol_ccy.parse::<f64>().unwrap_or(0.0)
+                if new_ts > cache_candle.ts
+                   ||(new_ts == cache_candle.ts && first.vol_ccy.parse::<f64>().unwrap_or(0.0)
+                        >= cache_candle.vol_ccy.parse::<f64>().unwrap_or(0.0))
                 {
                     if_update_db = true;
                     if_update_cache = true;
@@ -60,6 +61,34 @@ impl CandleService {
         }
         if if_update_cache {
             self.cache.set_both(inst_id, time_interval, &snap).await;
+
+            // 🚀 **K线确认时自动触发策略执行**
+            if snap.confirm == "1" {
+                info!(
+                    "📈 K线已确认，触发策略执行: inst_id={}, time_interval={}, ts={}",
+                    inst_id, time_interval, new_ts
+                );
+                // 异步触发策略执行，避免阻塞K线更新
+                let inst_id_owned = inst_id.to_string();
+                let time_interval_owned = time_interval.to_string();
+                tokio::spawn(async move {
+                    let strategy_manager = get_strategy_manager();
+                    if let Err(e) = strategy_manager
+                        .run_ready_to_order_with_manager(&inst_id_owned, &time_interval_owned)
+                        .await
+                    {
+                        tracing::error!(
+                            "❌ 策略执行失败: inst_id={}, time_interval={}, error={}",
+                            inst_id_owned, time_interval_owned, e
+                        );
+                    } else {
+                        tracing::info!(
+                            "✅ 策略执行完成: inst_id={}, time_interval={}",
+                            inst_id_owned, time_interval_owned
+                        );
+                    }
+                });
+            }
         }
         if if_update_db {
             // 2) 异步落库（幂等）不回刷缓存

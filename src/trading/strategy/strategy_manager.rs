@@ -728,6 +728,49 @@ impl StrategyManager {
         result
     }
 
+    /// 执行策略订单准备 - K线确认时触发
+    pub async fn run_ready_to_order_with_manager(
+        &self,
+        inst_id: &str,
+        period: &str,
+    ) -> Result<()> {
+        // 参数验证
+        self.validate_strategy_params(inst_id, period)?;
+
+        // 查找运行中的策略
+        let strategy_key_prefix = format!("{}{}{}", inst_id, STRATEGY_KEY_SEPARATOR, period);
+        let mut found_strategy = None;
+
+        for entry in self.running_strategies.iter() {
+            if entry.key().contains(&strategy_key_prefix) {
+                found_strategy = Some(entry.value().clone());
+                break;
+            }
+        }
+
+        if let Some(runtime_info) = found_strategy {
+            // 获取当前策略配置
+            let current_config = runtime_info.get_current_config().await;
+            // 调用策略执行函数
+            crate::trading::task::basic::run_ready_to_order_with_manager(
+                inst_id,
+                period,
+                &current_config
+            ).await?;
+            debug!(
+                "策略执行完成: inst_id={}, period={}, strategy_type={}",
+                inst_id, period, runtime_info.strategy_type
+            );
+        } else {
+            warn!(
+                "未找到运行中的策略: inst_id={}, period={}",
+                inst_id, period
+            );
+        }
+
+        Ok(())
+    }
+
     /// 获取指定策略的运行信息
     pub async fn get_strategy_info(
         &self,

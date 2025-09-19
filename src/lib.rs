@@ -21,7 +21,6 @@ pub async fn app_init() -> anyhow::Result<()> {
     dotenv().ok();
     // 设置日志
     crate::app_config::log::setup_logging().await?;
-
     //初始化数据库连接
     crate::app_config::db::init_db().await;
     //初始化redis连接池

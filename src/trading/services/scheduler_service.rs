@@ -98,7 +98,7 @@ impl SchedulerService {
         // 本地环境：每秒执行一次，用于测试
         let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "LOCAL".to_string());
         let final_cron_expression = if app_env.eq_ignore_ascii_case("LOCAL") {
-            "*/10 * * * * *".to_string()
+            "*/1 * * * * *".to_string()
         } else {
             cron_expression
         };

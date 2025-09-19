@@ -19,8 +19,11 @@ use crate::app_config::env::{env_is_true, env_or_default};
 /// 运行基于环境变量控制的各个模式（数据同步、回测、WebSocket、实盘策略）
 pub async fn run_modes() -> anyhow::Result<()> {
     // 可根据需要从环境加载，当前保持项目的默认值
-    let inst_ids = Some(vec!["ETH-USDT-SWAP","BTC-USDT-SWAP","SOL-USDT-SWAP"]);
-    let period = Some(vec!["1H","4H","1Dutc"]);
+    // let inst_ids = Some(vec!["ETH-USDT-SWAP","BTC-USDT-SWAP","SOL-USDT-SWAP"]);
+    // let period = Some(vec!["1H","4H","1Dutc"]);
+
+    let inst_ids = Some(vec!["ETH-USDT-SWAP"]);
+    let period = Some(vec!["5m"]);
 
     // 1) 初始化需要同步的数据
     if env_is_true("IS_RUN_SYNC_DATA_JOB", false) {
