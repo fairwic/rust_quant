@@ -115,7 +115,7 @@ impl Default for SignalWeightsConfig {
         Self {
             weights: vec![
                 (SignalType::SimpleBreakEma2through, 1.0),
-                (SignalType::VolumeTrend, 2.0),
+                (SignalType::VolumeTrend, 1.0),
                 (SignalType::Rsi, 1.0),
                 (SignalType::TrendStrength, 1.0),
                 (SignalType::EmaDivergence, 1.0),
@@ -351,10 +351,9 @@ impl SignalWeightsConfig {
                 ratio,
             } => {
                 if is_increasing {
-                    let score = base_weight * (ratio / 2.0).min(1.0);
                     Some(CheckConditionResult {
                         signal_type,
-                        score,
+                        score: base_weight,
                         detail: condition,
                         signal_result: None,
                     })

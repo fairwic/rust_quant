@@ -107,12 +107,10 @@ pub struct ParamGenerator {
     shadow_ratios: Vec<f64>,
     bb_multipliers: Vec<f64>,
     volume_bar_nums: Vec<usize>,
-    volume_increase_ratios: Vec<f64>,
-    volume_decrease_ratios: Vec<f64>,
+    volume_ratios: Vec<f64>,
     breakthrough_thresholds: Vec<f64>,
     rsi_periods: Vec<usize>,
-    rsi_over_buy: Vec<f64>,
-    rsi_over_sold: Vec<f64>,
+    rsi_over_buy_sell: Vec<(f64,f64)>,
     current_index: usize,
     total_count: usize,
     //risk
@@ -128,12 +126,10 @@ impl ParamGenerator {
         shadow_ratios: Vec<f64>,
         bb_multipliers: Vec<f64>,
         volume_bar_nums: Vec<usize>,
-        volume_increase_ratios: Vec<f64>,
-        volume_decrease_ratios: Vec<f64>,
+        volume_ratios: Vec<f64>,
         breakthrough_thresholds: Vec<f64>,
         rsi_periods: Vec<usize>,
-        rsi_over_buy: Vec<f64>,
-        rsi_over_sold: Vec<f64>,
+        rsi_over_buy_sell: Vec<(f64,f64)>,
         max_loss_percent: Vec<f64>,
         is_take_profit: Vec<bool>,
         is_move_stop_loss: Vec<bool>,
@@ -143,12 +139,10 @@ impl ParamGenerator {
             * shadow_ratios.len()
             * bb_multipliers.len()
             * volume_bar_nums.len()
-            * volume_increase_ratios.len()
-            * volume_decrease_ratios.len()
+            * volume_ratios.len()
             * breakthrough_thresholds.len()
             * rsi_periods.len()
-            * rsi_over_buy.len()
-            * rsi_over_sold.len()
+            * rsi_over_buy_sell.len()
             * max_loss_percent.len()
             * is_take_profit.len()
             * is_move_stop_loss.len()
@@ -159,12 +153,10 @@ impl ParamGenerator {
             shadow_ratios,
             bb_multipliers,
             volume_bar_nums,
-            volume_increase_ratios,
-            volume_decrease_ratios,
+            volume_ratios,
             breakthrough_thresholds,
             rsi_periods,
-            rsi_over_buy,
-            rsi_over_sold,
+            rsi_over_buy_sell,
             current_index: 0,
             total_count,
             max_loss_percent,
@@ -186,11 +178,10 @@ impl ParamGenerator {
             let sr_size = self.shadow_ratios.len();
             let bm_size = self.bb_multipliers.len();
             let vbn_size = self.volume_bar_nums.len();
-            let vir_size = self.volume_increase_ratios.len();
-            let vdr_size = self.volume_decrease_ratios.len();
+            let vir_size = self.volume_ratios.len();
             let bt_size = self.breakthrough_thresholds.len();
             let rp_size = self.rsi_periods.len();
-            let rob_size = self.rsi_over_buy.len();
+            let rob_size = self.rsi_over_buy_sell.len();
 
             let mlp_size = self.max_loss_percent.len();
             let pt_size = self.is_take_profit.len();
@@ -212,9 +203,6 @@ impl ParamGenerator {
             let i_vir = index % vir_size;
             index /= vir_size;
 
-            let i_vdr = index % vdr_size;
-            index /= vdr_size;
-
             let i_bt = index % bt_size;
             index /= bt_size;
 
@@ -224,8 +212,8 @@ impl ParamGenerator {
             let i_rob = index % rob_size;
             index /= rob_size;
 
-            let i_ros = index % self.rsi_over_sold.len();
-            index /= self.rsi_over_sold.len();
+            let i_ros = index % self.rsi_over_buy_sell.len();
+            index /= self.rsi_over_buy_sell.len();
 
             let i_mlp = index % self.max_loss_percent.len();
             index /= self.max_loss_percent.len();
@@ -245,12 +233,12 @@ impl ParamGenerator {
                 hammer_shadow_ratio: self.shadow_ratios[i_sr],
                 bb_multiplier: self.bb_multipliers[i_bm],
                 volume_bar_num: self.volume_bar_nums[i_vbn],
-                volume_increase_ratio: self.volume_increase_ratios[i_vir],
-                volume_decrease_ratio: self.volume_decrease_ratios[i_vdr],
+                volume_increase_ratio: self.volume_ratios[i_vir],
+                volume_decrease_ratio: self.volume_ratios[i_vir],
                 breakthrough_threshold: self.breakthrough_thresholds[i_bt],
                 rsi_period: self.rsi_periods[i_rp],
-                rsi_overbought: self.rsi_over_buy[i_rob],
-                rsi_oversold: self.rsi_over_sold[i_ros],
+                rsi_overbought: self.rsi_over_buy_sell[i_rob].0,
+                rsi_oversold: self.rsi_over_buy_sell[i_ros].1,
                 kline_start_time: None,
                 kline_end_time: None,
                 max_loss_percent: self.max_loss_percent[i_mlp],

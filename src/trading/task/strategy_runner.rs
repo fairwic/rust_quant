@@ -138,7 +138,7 @@ pub async fn test_random_strategy_with_config(
                     "[断点续传] 发现已保存的进度: inst_id={}, time={}, 已完成 {}/{} 个组合",
                     inst_id, time, saved_progress.completed_combinations, saved_progress.total_combinations
                 );
-                
+
                 if saved_progress.status == "completed" {
                     info!("[断点续传] 测试已完成，跳过执行");
                     return Ok(());
@@ -164,12 +164,10 @@ pub async fn test_random_strategy_with_config(
         config.shadow_ratios.clone(),
         config.bb_multipliers.clone(),
         config.volume_bar_nums.clone(),
-        config.volume_increase_ratios.clone(),
-        config.volume_decrease_ratios.clone(),
+        config.volume_ratios.clone(),
         config.breakthrough_thresholds.clone(),
         config.rsi_periods.clone(),
-        config.rsi_over_buy.clone(),
-        config.rsi_over_sold.clone(),
+        config.rsi_over_buy_sell.clone(),
         config.max_loss_percent.clone(),
         config.is_take_profit.clone(),
         config.is_move_stop_loss.clone(),
@@ -178,7 +176,7 @@ pub async fn test_random_strategy_with_config(
 
     // 🎯 **关键: 设置生成器的起始位置**
     param_generator.set_current_index(current_progress.current_index);
-    
+
     let (current_index, total_count) = param_generator.progress();
     let param_gen_duration = param_gen_start.elapsed();
     info!(
@@ -198,7 +196,7 @@ pub async fn test_random_strategy_with_config(
     // 🔄 **步骤4: 批量处理参数组合（支持断点续传）**
     let mut processed_count = current_progress.completed_combinations;
     let batch_processing_start = Instant::now();
-    
+
     loop {
         let batch_start = Instant::now();
         let params_batch = param_generator.get_next_batch(config.batch_size);
@@ -220,12 +218,12 @@ pub async fn test_random_strategy_with_config(
         // 更新进度
         processed_count += batch_len;
         let (current_index, _) = param_generator.progress();
-        
+
         // 💾 **定期保存进度**
         if let Err(e) = StrategyProgressManager::update_progress(
-            inst_id, 
-            time, 
-            processed_count, 
+            inst_id,
+            time,
+            processed_count,
             current_index
         ).await {
             warn!("[断点续传] 保存进度失败: {}", e);
@@ -439,7 +437,7 @@ pub async fn run_ready_to_order_with_manager(
 
     let is_new_time = check_new_time(old_time, new_time, period, is_update, true)?;
     if !is_new_time {
-        info!("跳过策略执行: inst_id:{:?} period:{:?}", inst_id, period);
+        info!("跳过策略执行: inst_id:{:?} period:{:?} new_candle_data:{:?}", inst_id, period, new_candle_data);
         return Ok(());
     }
 
@@ -501,7 +499,7 @@ pub async fn run_ready_to_order_with_manager(
             new_candle_item.ts
         );
     if signal_result.should_buy || signal_result.should_sell {
-        
+
         //异步记录日志
         save_signal_log(inst_id, period, &signal_result);
         //执行交易
@@ -557,7 +555,7 @@ pub fn check_new_time(
         info!("k线时间戳未更新，跳过策略执行: {:?}", period);
         return Ok(false);
     }
-    
+
     //如果必须要在收盘价确认
     if (just_check_confim && !is_close_confim) {
         info!("k线未确认，跳过策略执行: {:?}", period);

@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use futures::future::join_all;
 use okx::dto::EnumToStrTrait;
 use serde_json::json;
+use std::env;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
@@ -95,7 +96,7 @@ pub async fn save_log(
         .add(&back_test_log)
         .await?;
 
-    if false {
+    if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true" {
         // 保存详细交易记录
         if !back_test_result.trade_records.is_empty() {
             save_test_detail(
@@ -305,7 +306,6 @@ pub async fn run_back_test_strategy(
             volume_increase_ratio,
             volume_decrease_ratio,
             is_open: true,
-            is_force_dependent: false,
         };
 
         let rsi_signal = RsiSignalConfig {

@@ -1,3 +1,5 @@
+use std::env;
+
 use crate::trading::indicator::bollings::BollingBandsSignalConfig;
 use crate::trading::indicator::signal_weight::{
     SignalCondition, SignalDirect, SignalType, SignalWeightsConfig,
@@ -5,7 +7,7 @@ use crate::trading::indicator::signal_weight::{
 use crate::trading::strategy::strategy_common::{
     BackTestResult, BasicRiskStrategyConfig, SignalResult,
 };
-use crate::CandleItem;
+use crate::{time_util, CandleItem};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::debug;
@@ -121,17 +123,13 @@ impl VegasStrategy {
 
         // 优先判断成交量
         if let Some(volume_signal) = &self.volume_signal {
-            let res = self.check_volume_trend(&vegas_indicator_signal_values.volume_value);
-            if volume_signal.is_force_dependent
-                && res.volume_ratio < volume_signal.volume_decrease_ratio
-            {
-                return signal_result;
-            }
+            let is_than_vol_ratio =
+                self.check_volume_trend(&vegas_indicator_signal_values.volume_value);
             conditions.push((
                 SignalType::VolumeTrend,
                 SignalCondition::Volume {
-                    is_increasing: res.is_increasing,
-                    ratio: res.volume_ratio,
+                    is_increasing: is_than_vol_ratio,
+                    ratio: vegas_indicator_signal_values.volume_value.volume_ratio,
                 },
             ));
         }
@@ -227,31 +225,46 @@ impl VegasStrategy {
             match signal_direction {
                 SignalDirect::IsLong => {
                     signal_result.should_buy = true;
-                    if risk_config.is_used_signal_k_line_stop_loss {
-                        self.calculate_best_stop_loss_price(
-                            last_data_item,
-                            &mut signal_result,
-                            &conditions,
-                        );
-                    }
                 }
                 SignalDirect::IsShort => {
                     signal_result.should_sell = true;
-                    if risk_config.is_used_signal_k_line_stop_loss {
-                        self.calculate_best_stop_loss_price(
-                            last_data_item,
-                            &mut signal_result,
-                            &conditions,
-                        );
-                    }
                 }
             }
         }
+        // todo 如果出现信号，但是成交量小于要求的比例，且比上一更k线的成交量还要小，则认为信号无效
+        // if signal_result.should_buy || signal_result.should_sell {
+        //     if let Some(volume_signal) = &self.volume_signal {
+        //         if vegas_indicator_signal_values.volume_value.volume_ratio
+        //             < volume_signal.volume_increase_ratio
+        //             && vegas_indicator_signal_values
+        //                 .volume_value
+        //                 .is_decreasing_than_pre
+        //         {
+        //             println!("成交量小于要求的比例，且比上一更k线的成交量还要小，则认为信号无效");
+        //             println!("信号buy:{}",signal_result.should_buy);
+        //             println!("信号buy:{}",signal_result.should_buy);
+        //             println!("time:{}",time_util::mill_time_to_datetime_shanghai(last_data_item.ts).unwrap());
+        //             signal_result.should_buy = false;
+        //             signal_result.should_sell = false;
+        //         }
+        //     }
+        // }
 
         // 可选：添加详细信息到结果中
-        if signal_result.should_buy || signal_result.should_sell {
-            // signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
-            // signal_result.single_result = Some(json!(conditions).to_string());
+        if signal_result.should_buy
+            || signal_result.should_sell
+                && env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true"
+        {
+            //如果有使用信号k线路止盈止损
+            if risk_config.is_used_signal_k_line_stop_loss {
+                self.calculate_best_stop_loss_price(
+                    last_data_item,
+                    &mut signal_result,
+                    &conditions,
+                );
+            }
+            signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
+            signal_result.single_result = Some(json!(conditions).to_string());
         }
 
         signal_result
@@ -353,19 +366,11 @@ impl VegasStrategy {
     }
 
     // 私有辅助方法
-    fn check_volume_trend(&self, volume_trend: &VolumeTrendSignalValue) -> VolumeTrendSignalValue {
-        if let Some(volume_signal) = &self.volume_signal {
-            VolumeTrendSignalValue {
-                is_increasing: volume_trend.volume_ratio > volume_signal.volume_increase_ratio,
-                is_decreasing: volume_trend.volume_ratio < volume_signal.volume_decrease_ratio,
-                is_stable: volume_trend.volume_ratio >= volume_signal.volume_decrease_ratio
-                    && volume_trend.volume_ratio <= volume_signal.volume_increase_ratio,
-                volume_ratio: volume_trend.volume_ratio,
-                volume_value: volume_trend.volume_value,
-            }
-        } else {
-            VolumeTrendSignalValue::default()
+    fn check_volume_trend(&self, volume_trend: &VolumeTrendSignalValue) -> bool {
+        if let Some(volume_signal_config) = &self.volume_signal {
+            return volume_trend.volume_ratio > volume_signal_config.volume_increase_ratio;
         }
+        return false;
     }
 
     fn check_breakthrough_conditions(
@@ -534,6 +539,23 @@ impl VegasStrategy {
                         .is_short_signal = false;
                 }
             }
+            // //如何没有长上影线和长下影线的长影线，但是此时如何实体特别大，且是放量的大实体，则标记为上涨
+            // if !is_hanging_man
+            //     && !is_hammer
+            //     && vegas_indicator_signal_values.kline_hammer_value.body_ratio > 0.9
+            //     && vegas_indicator_signal_values.volume_value.volume_ratio > 1.7
+            // {
+            //     println!("time:{}",time_util::mill_time_to_datetime_shanghai(data_items.last().unwrap().ts).unwrap());
+            //     if data_items.last().unwrap().c > data_items.last().unwrap().o() {
+            //         vegas_indicator_signal_values
+            //             .kline_hammer_value
+            //             .is_long_signal = true;
+            //     } else {
+            //         vegas_indicator_signal_values
+            //             .kline_hammer_value
+            //             .is_long_signal = false;
+            //     }
+            // }
         }
 
         if vegas_indicator_signal_values

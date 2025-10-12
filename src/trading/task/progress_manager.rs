@@ -25,12 +25,10 @@ pub struct RandomStrategyConfig {
     pub bb_multipliers: Vec<f64>,
     pub shadow_ratios: Vec<f64>,
     pub volume_bar_nums: Vec<usize>,
-    pub volume_increase_ratios: Vec<f64>,
-    pub volume_decrease_ratios: Vec<f64>,
+    pub volume_ratios: Vec<f64>,
     pub breakthrough_thresholds: Vec<f64>,
     pub rsi_periods: Vec<usize>,
-    pub rsi_over_buy: Vec<f64>,
-    pub rsi_over_sold: Vec<f64>,
+    pub rsi_over_buy_sell: Vec<(f64, f64)>,
     pub batch_size: usize,
     //risk
     pub max_loss_percent: Vec<f64>,
@@ -44,17 +42,15 @@ impl Default for RandomStrategyConfig {
         Self {
             bb_periods: vec![10, 11, 12, 13, 14, 15, 16],
             bb_multipliers: vec![2.0, 2.5, 3.0, 3.1, 3.2],
-            shadow_ratios: vec![0.7, 0.75, 0.8, 0.85, 0.9],
-            volume_bar_nums: vec![4, 5, 6],
-            volume_increase_ratios: (16..=25).map(|x| x as f64 * 0.1).collect(),
-            volume_decrease_ratios: (16..=25).map(|x| x as f64 * 0.1).collect(),
+            shadow_ratios: vec![0.65, 0.7, 0.75, 0.8, 0.85, 0.9],
+            volume_bar_nums: vec![4, 5, 6, 7],
+            volume_ratios: (16..=25).map(|x| x as f64 * 0.1).collect(),
             breakthrough_thresholds: vec![0.003],
-            rsi_periods: vec![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            rsi_over_buy: vec![85.0, 86.0, 87.0, 88.0, 89.0, 90.0],
-            rsi_over_sold: vec![15.0, 16.0, 17.0, 18.0, 19.0, 20.0],
+            rsi_periods: vec![8, 9, 10, 11, 12, 13, 14, 15, 16],
+            rsi_over_buy_sell: vec![(75.0, 25.0), (80.0, 20.0), (85.0, 15.0), (90.0, 10.0)],
             batch_size: 100,
             //risk
-            max_loss_percent: vec![0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1],
+            max_loss_percent: vec![0.03, 0.04, 0.05],
             is_take_profit: vec![true, false],
             is_move_stop_loss: vec![false, true],
             is_used_signal_k_line_stop_loss: vec![true, false],
@@ -70,19 +66,17 @@ impl RandomStrategyConfig {
         config_json.hash(&mut hasher);
         format!("{:x}", hasher.finish())
     }
-    
+
     /// 计算总的参数组合数
     pub fn calculate_total_combinations(&self) -> usize {
         self.bb_periods.len()
             * self.bb_multipliers.len()
             * self.shadow_ratios.len()
             * self.volume_bar_nums.len()
-            * self.volume_increase_ratios.len()
-            * self.volume_decrease_ratios.len()
+            * self.volume_ratios.len()
             * self.breakthrough_thresholds.len()
             * self.rsi_periods.len()
-            * self.rsi_over_buy.len()
-            * self.rsi_over_sold.len()
+            * self.rsi_over_buy_sell.len()
             * self.max_loss_percent.len()
             * self.is_take_profit.len()
             * self.is_move_stop_loss.len()
@@ -98,41 +92,54 @@ impl StrategyProgressManager {
     fn get_progress_key(inst_id: &str, time: &str) -> String {
         format!("strategy_progress:{}:{}", inst_id, time)
     }
-    
+
     /// 保存进度到 Redis
     pub async fn save_progress(progress: &StrategyTestProgress) -> Result<()> {
         let mut redis_conn = crate::app_config::redis::get_redis_connection().await?;
         let key = Self::get_progress_key(&progress.inst_id, &progress.time);
         let progress_json = serde_json::to_string(progress)?;
-        
+
         redis_conn.set_ex(&key, progress_json, 86400 * 7).await?; // 保存7天
-        info!("进度已保存: {} - {}/{}", key, progress.completed_combinations, progress.total_combinations);
+        info!(
+            "进度已保存: {} - {}/{}",
+            key, progress.completed_combinations, progress.total_combinations
+        );
         Ok(())
     }
-    
+
     /// 从 Redis 加载进度
     pub async fn load_progress(inst_id: &str, time: &str) -> Result<Option<StrategyTestProgress>> {
         let mut redis_conn = crate::app_config::redis::get_redis_connection().await?;
         let key = Self::get_progress_key(inst_id, time);
-        
+
         let progress_json: Option<String> = redis_conn.get(&key).await?;
         if let Some(json) = progress_json {
             let progress: StrategyTestProgress = serde_json::from_str(&json)?;
-            info!("进度已加载: {} - {}/{}", key, progress.completed_combinations, progress.total_combinations);
+            info!(
+                "进度已加载: {} - {}/{}",
+                key, progress.completed_combinations, progress.total_combinations
+            );
             Ok(Some(progress))
         } else {
             Ok(None)
         }
     }
-    
+
     /// 检查配置是否变化
-    pub fn is_config_changed(current_config: &RandomStrategyConfig, saved_progress: &StrategyTestProgress) -> bool {
+    pub fn is_config_changed(
+        current_config: &RandomStrategyConfig,
+        saved_progress: &StrategyTestProgress,
+    ) -> bool {
         let current_hash = current_config.calculate_hash();
         current_hash != saved_progress.config_hash
     }
-    
+
     /// 创建新的进度记录
-    pub fn create_new_progress(inst_id: &str, time: &str, config: &RandomStrategyConfig) -> StrategyTestProgress {
+    pub fn create_new_progress(
+        inst_id: &str,
+        time: &str,
+        config: &RandomStrategyConfig,
+    ) -> StrategyTestProgress {
         StrategyTestProgress {
             inst_id: inst_id.to_string(),
             time: time.to_string(),
@@ -144,13 +151,13 @@ impl StrategyProgressManager {
             status: "running".to_string(),
         }
     }
-    
+
     /// 更新进度
     pub async fn update_progress(
-        inst_id: &str, 
-        time: &str, 
-        completed_count: usize, 
-        current_index: usize
+        inst_id: &str,
+        time: &str,
+        completed_count: usize,
+        current_index: usize,
     ) -> Result<()> {
         if let Ok(Some(mut progress)) = Self::load_progress(inst_id, time).await {
             progress.completed_combinations = completed_count;
@@ -160,7 +167,7 @@ impl StrategyProgressManager {
         }
         Ok(())
     }
-    
+
     /// 标记完成
     pub async fn mark_completed(inst_id: &str, time: &str) -> Result<()> {
         if let Ok(Some(mut progress)) = Self::load_progress(inst_id, time).await {
@@ -173,7 +180,7 @@ impl StrategyProgressManager {
         }
         Ok(())
     }
-    
+
     /// 清除进度（重新开始）
     pub async fn clear_progress(inst_id: &str, time: &str) -> Result<()> {
         let mut redis_conn = crate::app_config::redis::get_redis_connection().await?;
@@ -182,7 +189,7 @@ impl StrategyProgressManager {
         info!("[断点续传] 进度已清除: {}", key);
         Ok(())
     }
-    
+
     /// 获取进度百分比
     pub fn get_progress_percentage(progress: &StrategyTestProgress) -> f64 {
         if progress.total_combinations == 0 {
@@ -191,16 +198,20 @@ impl StrategyProgressManager {
             (progress.completed_combinations as f64 / progress.total_combinations as f64) * 100.0
         }
     }
-    
+
     /// 估算剩余时间（基于已用时间和完成进度）
-    pub fn estimate_remaining_time(progress: &StrategyTestProgress, start_time: i64) -> Option<i64> {
+    pub fn estimate_remaining_time(
+        progress: &StrategyTestProgress,
+        start_time: i64,
+    ) -> Option<i64> {
         if progress.completed_combinations == 0 {
             return None;
         }
-        
+
         let elapsed_time = chrono::Utc::now().timestamp_millis() - start_time;
-        let progress_ratio = progress.completed_combinations as f64 / progress.total_combinations as f64;
-        
+        let progress_ratio =
+            progress.completed_combinations as f64 / progress.total_combinations as f64;
+
         if progress_ratio > 0.0 {
             let estimated_total_time = elapsed_time as f64 / progress_ratio;
             let remaining_time = estimated_total_time - elapsed_time as f64;

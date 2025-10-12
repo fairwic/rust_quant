@@ -1,3 +1,5 @@
+use std::env;
+
 use anyhow::{anyhow, Result};
 use tracing::warn;
 
@@ -22,10 +24,10 @@ pub struct VegasBackTestConfig {
 impl Default for VegasBackTestConfig {
     fn default() -> Self {
         Self {
-            max_concurrent: 15,
+            max_concurrent: 30,
             candle_limit: 20000,
-            enable_random_test: true,
-            enable_specified_test: false,
+            enable_random_test: env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true",
+            enable_specified_test: env::var("ENABLE_SPECIFIED_TEST").unwrap_or_default() == "true",
         }
     }
 }

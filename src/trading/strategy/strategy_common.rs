@@ -22,6 +22,7 @@ use okx::dto::common::PositionSide;
 use okx::dto::EnumToStrTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
+use std::env;
 use std::time::Instant;
 use ta::indicators::BollingerBands;
 use ta::Close;
@@ -373,6 +374,8 @@ pub fn get_multi_indicator_values(
     if let Some(volume_indicator) = &mut indicator_combine.volume_indicator {
         vegas_indicator_signal_value.volume_value.volume_value = volume;
         vegas_indicator_signal_value.volume_value.volume_ratio = volume_indicator.next(volume);
+        vegas_indicator_signal_value.volume_value.is_increasing_than_pre = volume_indicator.is_increasing_than_pre();
+        vegas_indicator_signal_value.volume_value.is_decreasing_than_pre = volume_indicator.is_decreasing_than_pre();
     }
     if volume_start.elapsed().as_millis() > 10 {
         warn!(
@@ -1194,7 +1197,10 @@ fn open_short_position(
 fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
     //批量回测的时候不进行记录
     let trade_position = state.trade_position.clone().unwrap();
-    return;
+    //随机测试的时候不记录详情日志了
+    if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true" {
+        return;
+    }
     state.trade_records.push(TradeRecord {
         option_type,
         open_position_time: trade_position.open_position_time.clone(),
@@ -1271,7 +1277,10 @@ fn record_trade_exit(
     closing_quantity: f64, // Add parameter for quantity being closed
 ) {
     let trade_position = state.trade_position.clone().unwrap();
-    return;
+    //随机测试的时候不记录详情日志了
+    if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true" {
+        return;
+    }
     state.trade_records.push(TradeRecord {
         option_type: "close".to_string(),
         open_position_time: trade_position.open_position_time.clone(),

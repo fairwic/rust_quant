@@ -5,9 +5,16 @@ use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergenc
 /// 计算当前成交量与历史n根K线的平均值的比值
 #[derive(Debug, Clone)]
 pub struct VolumeRatioIndicator {
+    // 前N根K线的成交量
     prev_volumes: Vec<f64>,
+    // 前N根K线的
     volume_bar_num: usize,
-    is_fitler_last_volume: bool,
+    // 是否过滤最后一根K线的成交量
+    is_filter_last_volume: bool,
+    // 是否增长
+    is_increasing_than_pre: bool,
+    // 是否下降
+    is_decreasing_than_pre: bool,
 }
 
 impl VolumeRatioIndicator {
@@ -19,21 +26,37 @@ impl VolumeRatioIndicator {
         Self {
             prev_volumes: vec![],
             volume_bar_num: length,
-            is_fitler_last_volume: is_fitler_last_volume,
+            is_filter_last_volume: is_fitler_last_volume,
+            is_increasing_than_pre: false,
+            is_decreasing_than_pre: false,
         }
     }
 
     pub fn next(&mut self, current_volume: f64) -> f64 {
         //只保留前N根K线的成交量
         if self.prev_volumes.len() > self.volume_bar_num {
+            //连续成交量下降,或者连续成交量上身
+            let list = self.prev_volumes.clone();
+            if current_volume > *list.last().unwrap() && list[list.len() - 2] > list[list.len() - 3]
+            {
+                self.is_increasing_than_pre = true;
+                self.is_decreasing_than_pre = false;
+            }
+            if current_volume < *list.last().unwrap() && list[list.len() - 2] < list[list.len() - 3]
+            {
+                self.is_increasing_than_pre = false;
+                self.is_decreasing_than_pre = true;
+            }
+
             self.prev_volumes.remove(0);
         }
         let volume_ratio = current_volume / self.avg_volume();
         self.prev_volumes.push(current_volume);
+
         volume_ratio
     }
     pub fn avg_volume(&self) -> f64 {
-        if self.is_fitler_last_volume && self.prev_volumes.len() > 1 {
+        if self.is_filter_last_volume && self.prev_volumes.len() > 1 {
             //去除最后一根k线
             self.prev_volumes
                 .iter()
@@ -43,6 +66,12 @@ impl VolumeRatioIndicator {
         } else {
             self.prev_volumes.iter().sum::<f64>() / self.prev_volumes.len() as f64
         }
+    }
+    pub fn is_increasing_than_pre(&mut self) -> bool {
+        self.is_increasing_than_pre
+    }
+    pub fn is_decreasing_than_pre(&self) -> bool {
+        self.is_decreasing_than_pre
     }
 }
 

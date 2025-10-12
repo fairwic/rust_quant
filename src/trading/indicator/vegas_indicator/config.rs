@@ -48,18 +48,15 @@ pub struct VolumeSignalConfig {
     pub volume_decrease_ratio: f64,
     /// 是否开启
     pub is_open: bool,
-    /// 是否是必要的指标
-    pub is_force_dependent: bool,
 }
 
 impl Default for VolumeSignalConfig {
     fn default() -> Self {
         Self {
-            volume_bar_num: 6,
+            volume_bar_num: 4,
             volume_increase_ratio: 2.0,
-            volume_decrease_ratio: 2.4,
+            volume_decrease_ratio: 2.0,
             is_open: true,
-            is_force_dependent: false,
         }
     }
 }

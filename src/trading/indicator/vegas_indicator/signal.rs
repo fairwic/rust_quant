@@ -39,35 +39,18 @@ pub struct EngulfingSignalValue {
 /// 成交量趋势信号值
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
 pub struct VolumeTrendSignalValue {
-    /// 是否增长
-    pub is_increasing: bool,
-    /// 是否下降
-    pub is_decreasing: bool,
-    /// 是否稳定
-    pub is_stable: bool,
-    /// 成交量比例
+    /// 是否增长,对比上一跟k线路
+    pub is_increasing_than_pre: bool,
+    /// 是否下降,对比上一跟k线路
+    pub is_decreasing_than_pre: bool,
+    /// 是否大于指标设置的成交量放大的比例
+    pub is_increase_than_ratio: bool,
+    /// 成交量比例(当前成交量/前N根K线成交量平均值)
     pub volume_ratio: f64,
     /// 成交量值
     pub volume_value: f64,
 }
 
-impl VolumeTrendSignalValue {
-    pub fn new(
-        is_increasing: bool,
-        is_decreasing: bool,
-        is_stable: bool,
-        volume_ratio: f64,
-        volume_value: f64,
-    ) -> Self {
-        Self {
-            is_increasing,
-            is_decreasing,
-            is_stable,
-            volume_ratio,
-            volume_value,
-        }
-    }
-}
 
 /// EMA信号值
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]

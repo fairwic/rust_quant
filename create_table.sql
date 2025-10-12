@@ -34,127 +34,124 @@ CREATE TABLE `strategy_job_signal_log` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=307 DEFAULT CHARSET=utf8mb4   COMMENT='策略任务信号记录表';
 
-
 CREATE TABLE `swap_orders` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(50) CHARACTER SET utf8mb4   NOT NULL COMMENT '策略周期唯一值（时间-周期-策略类型-产品id-side-postside）\r\n示例2024+0625+4h+ut_boot+btc-usdt-swap+buy+short',
-  `cl_ord_id` varchar(50) CHARACTER SET utf8mb4   NOT NULL COMMENT 'okx_订单id',
-  `strategy_type` varchar(50) NOT NULL COMMENT '策略类型',
-  `period` varchar(50) CHARACTER SET utf8mb4   NOT NULL COMMENT '策略周期',
-  `inst_id` varchar(20) NOT NULL COMMENT '交易产品id',
-  `side` varchar(20) CHARACTER SET utf8mb4   NOT NULL COMMENT '买进，卖出',
-  `pos_side` varchar(20) CHARACTER SET utf8mb4   NOT NULL COMMENT '多、空',
-  `tag` varchar(255) CHARACTER SET utf8mb4   NOT NULL DEFAULT '' COMMENT '订单标签(时间-策略类型-产品id-周期-side-postside)',
-  `detail` text NOT NULL COMMENT '下单详情',
+  `strategy_id` int NOT NULL COMMENT '使用的策略id',
+  `in_order_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '内部订单id 唯一',
+  `out_order_id` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '第三方平台id',
+  `strategy_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '策略类型',
+  `period` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '策略周期',
+  `inst_id` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '交易产品id',
+  `side` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '买进，卖出',
+  `pos_size` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '持仓数量',
+  `pos_side` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '多、空',
+  `tag` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '订单标签(时间-策略类型-产品id-周期-side-postside)',
+  `platform_type` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '下单的平台类型1okx',
+  `detail` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '下单详情',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `cl_ord_id` (`cl_ord_id`),
-  KEY `inst_id` (`inst_id`),
-  KEY `strategy_type` (`strategy_type`),
-  KEY `period` (`period`)
-) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4   COMMENT='合约下单记录表';
-
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `cl_ord_id` (`in_order_id`) USING BTREE,
+  UNIQUE KEY `out_order_id` (`out_order_id`) USING BTREE,
+  KEY `inst_id` (`inst_id`) USING BTREE,
+  KEY `strategy_type` (`strategy_type`) USING BTREE,
+  KEY `period` (`period`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=27 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='合约下单记录表';
 
 
 CREATE TABLE `strategy_config` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `strategy_type` varchar(50) NOT NULL COMMENT '策略类型',
-  `inst_id` varchar(50) NOT NULL COMMENT '交易产品类型',
-  `value` varchar(600) DEFAULT NULL COMMENT '配置详情',
-  `time` varchar(50) NOT NULL COMMENT '交易时间段',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4   COMMENT='ut_boot策略配置表';
+  `strategy_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '策略类型',
+  `inst_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '交易产品类型',
+  `value` varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '配置详情',
+  `risk_config` varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '风险配置',
+  `time` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '交易时间段',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `kline_start_time` bigint DEFAULT NULL COMMENT '回测开始时间',
+  `kline_end_time` bigint DEFAULT NULL COMMENT '回测结束时间',
+  `final_fund` float NOT NULL COMMENT '回测最终资金',
+  `is_deleted` smallint NOT NULL COMMENT '是否删除',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `inst_id` (`inst_id`,`time`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC COMMENT='ut_boot策略配置表';
+
+
 
 CREATE TABLE `back_test_log` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `strategy_type` varchar(255) NOT NULL COMMENT '策略类型',
-  `inst_type` varchar(255) NOT NULL,
-  `time` varchar(255) NOT NULL,
-  `win_rate` varchar(255) NOT NULL,
-  `open_positions_num` int(11) NOT NULL COMMENT '开仓次数',
-  `final_fund` varchar(255) NOT NULL,
-  `strategy_detail` text NOT NULL,
+  `id` int NOT NULL AUTO_INCREMENT,
+  `strategy_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '策略类型',
+  `inst_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '交易产品',
+  `time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '周期',
+  `win_rate` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '胜率',
+  `open_positions_num` int NOT NULL COMMENT '开仓次数',
+  `final_fund` float NOT NULL COMMENT '最终金额',
+  `strategy_detail` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '策略的配置',
+  `risk_config_detail` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '风险控制的配置',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `profit` varchar(255) DEFAULT NULL,
+  `profit` float DEFAULT NULL COMMENT '收益利润',
   `one_bar_after_win_rate` float DEFAULT NULL COMMENT '第1根线是盈利的状态占总开仓次数的比例',
   `two_bar_after_win_rate` float DEFAULT NULL COMMENT '第2根线是盈利的状态占总开仓次数的比例',
   `three_bar_after_win_rate` float DEFAULT NULL COMMENT '第3根线是盈利的状态占总开仓次数的比例',
   `four_bar_after_win_rate` float DEFAULT NULL COMMENT '第4根线是盈利的状态占总开仓次数的比例',
   `five_bar_after_win_rate` float DEFAULT NULL COMMENT '第5根线是盈利的状态占总开仓次数的比例',
   `ten_bar_after_win_rate` float DEFAULT NULL COMMENT '第10根线是盈利的状态占总开仓次数的比例',
-  PRIMARY KEY (`id`),
-  KEY `win_rate` (`win_rate`),
-  KEY `final_fund` (`final_fund`),
-  KEY `inst_type` (`inst_type`),
-  KEY `strategy_type` (`strategy_type`)
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4;
+  `kline_start_time` bigint NOT NULL COMMENT 'k线开始时间',
+  `kline_end_time` bigint NOT NULL COMMENT 'k线结束时间',
+  `kline_nums` int NOT NULL COMMENT '总回测k线根数',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `final_fund` (`final_fund`) USING BTREE,
+  KEY `inst_type` (`inst_type`) USING BTREE,
+  KEY `time` (`time`,`final_fund`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=44700 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC;
 
 
 
 CREATE TABLE `back_test_analysis` (
-  `id` int(11) NOT NULL AUTO_INCREMENT COMMENT '    pub id: Option<i32>,\r\n    pub back_test_id: i32,\r\n    pub inst_id: String,\r\n    pub time: String,\r\n    pub option_type: String,\r\n    pub open_position_time: String,\r\n    pub open_price: String,\r\n    pub bars_after: i32,\r\n    pub price_after: String,\r\n    pub price_change_percent: String,\r\n    pub is_profitable: i32,\r\n    pub created_at: Option<String>,',
-  `back_test_id` int(11) NOT NULL,
-  `inst_id` varchar(255) COLLATE utf8mb4_unicode_520_ci NOT NULL,
-  `time` varchar(255) COLLATE utf8mb4_unicode_520_ci NOT NULL,
-  `option_type` varchar(255) COLLATE utf8mb4_unicode_520_ci NOT NULL,
-  `open_position_time` varchar(255) COLLATE utf8mb4_unicode_520_ci DEFAULT NULL,
-  `open_price` varchar(255) COLLATE utf8mb4_unicode_520_ci NOT NULL,
-  `bars_after` int(11) NOT NULL,
-  `price_after` varchar(255) COLLATE utf8mb4_unicode_520_ci NOT NULL,
-  `price_change_percent` varchar(255) COLLATE utf8mb4_unicode_520_ci NOT NULL,
-  `is_profitable` tinyint(4) NOT NULL,
+  `id` int NOT NULL AUTO_INCREMENT COMMENT '    pub id: Option<i32>,\r\n    pub back_test_id: i32,\r\n    pub inst_id: String,\r\n    pub time: String,\r\n    pub option_type: String,\r\n    pub open_position_time: String,\r\n    pub open_price: String,\r\n    pub bars_after: i32,\r\n    pub price_after: String,\r\n    pub price_change_percent: String,\r\n    pub is_profitable: i32,\r\n    pub created_at: Option<String>,',
+  `back_test_id` int NOT NULL,
+  `inst_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci NOT NULL,
+  `time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci NOT NULL,
+  `option_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci NOT NULL,
+  `open_position_time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci DEFAULT NULL,
+  `open_price` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci NOT NULL,
+  `bars_after` int NOT NULL,
+  `price_after` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci NOT NULL,
+  `price_change_percent` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci NOT NULL,
+  `is_profitable` tinyint NOT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci ROW_FORMAT=DYNAMIC;
 
 
 CREATE TABLE `back_test_detail` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `back_test_id` int(11) NOT NULL COMMENT '回测记录表id',
-  `inst_id` varchar(20) NOT NULL,
-  `time` varchar(255) NOT NULL COMMENT '周期',
-  `strategy_type` varchar(255) NOT NULL COMMENT '策略类型',
-  `option_type` varchar(255) NOT NULL COMMENT 'long 开多，short开空 close平仓',
-  `open_position_time` datetime NOT NULL COMMENT '开仓时间',
+  `id` int NOT NULL AUTO_INCREMENT,
+  `back_test_id` int NOT NULL COMMENT '回测记录表id',
+  `inst_id` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `time` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '周期',
+  `strategy_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '策略类型',
+  `option_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'long 开多，short开空 close平仓',
+  `signal_open_position_time` datetime DEFAULT NULL COMMENT '信号触发时间',
+  `open_position_time` datetime NOT NULL COMMENT '实际开仓时间',
   `close_position_time` datetime NOT NULL COMMENT '平仓时间',
-  `open_price` varchar(255) NOT NULL COMMENT '开仓时间',
-  `close_price` varchar(255) NOT NULL COMMENT '平仓时间',
-  `profit_loss` varchar(255) NOT NULL COMMENT '盈利/亏损金额',
-  `quantity` varchar(255) NOT NULL COMMENT '开仓/平仓数量',
-  `full_close` varchar(10) NOT NULL COMMENT '是否全部平仓',
-  `close_type` varchar(255) NOT NULL COMMENT '平仓类型',
-  `signal_value` varchar(2000) NOT NULL COMMENT '此次操作依赖的信号详情',
-  `signal_result` varchar(2000) DEFAULT NULL,
+  `open_price` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '实际开仓价格',
+  `close_price` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '实际平仓时间',
+  `fee` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '手续费',
+  `profit_loss` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '盈利/亏损金额',
+  `quantity` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '开仓/平仓数量',
+  `full_close` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '是否全部平仓',
+  `close_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '平仓类型',
+  `signal_status` int NOT NULL COMMENT '0使用信号正常 -1信号错过 1使用信号的最优价格',
+  `signal_value` varchar(5000) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '此次操作依赖的信号详情',
+  `signal_result` varchar(4000) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '时间',
-  `win_nums` int(11) NOT NULL COMMENT '盈利金额',
-  `loss_nums` int(11) DEFAULT NULL COMMENT '亏损金额',
-  PRIMARY KEY (`id`),
-  KEY `back_test_id` (`back_test_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1193487 DEFAULT CHARSET=utf8mb4;
+  `win_nums` int NOT NULL COMMENT '盈利金额数量',
+  `loss_nums` int DEFAULT NULL COMMENT '亏损金额数量',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `back_test_id` (`back_test_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC;
 
-WITH trade_stats AS (
-    SELECT 
-        back_test_id,
-        bars_after,
-        COUNT(DISTINCT concat(inst_id, open_time)) as total_trades,
-        SUM(is_profitable) as profitable_trades,
-        AVG(price_change_percent) as avg_price_change
-    FROM back_test_analysis
-    GROUP BY back_test_id, bars_after
-)
-SELECT 
-    back_test_id,
-    bars_after as 'K线数',
-    total_trades as '总交易数',
-    profitable_trades as '盈利次数',
-    ROUND(profitable_trades * 100.0 / total_trades, 2) as '胜率%',
-    ROUND(avg_price_change, 2) as '平均收益%'
-FROM trade_stats
-ORDER BY back_test_id, bars_after;
+
 
 CREATE TABLE `asset_classification` (
   `id` int NOT NULL AUTO_INCREMENT,
@@ -189,48 +186,3 @@ INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message
 INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (38, 'asset_db_asset_classficiation_desc_others', 0, '其他分类', 'asset_db_text_others', 'Others', NULL);
 INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (39, 'asset_db_asset_classficiation_desc_yieldfarm', 0, '流动性挖矿', 'asset_db_text_yieldfarm', 'Yield Farming', NULL);
 
-
-
-
-WITH ranked_results AS (
-    SELECT
-        *,
-        ROW_NUMBER() OVER (PARTITION BY inst_type ORDER BY CAST(final_fund AS DECIMAL(20, 2)) DESC) as `rank`
-    FROM
-        `back_test_log`
-    WHERE
-        strategy_type = "UtBootShort"
-        AND win_rate > 0.8
-        AND open_positions_num > 20
-)
-SELECT
-    *
-FROM
-    ranked_results
-WHERE
-    `rank` = 1
-ORDER BY
-    CAST(final_fund AS DECIMAL(20, 2)) DESC,
-    open_positions_num DESC;
-
-
-
-    SELECT
-    	*
-    FROM
-    	back_test_log
-    WHERE
-    	1 = 1
-    	AND open_positions_num > 10
-    -- 			AND TIME = "1D"
-    	AND win_rate > 0.8
-    	AND strategy_type = "UtBoot"
-    ORDER BY
-    	CAST(
-    	final_fund AS DECIMAL ( 20, 0 )) DESC;
-
-
-
- SHOW VARIABLES LIKE 'max_connections';
-
- SHOW STATUS LIKE 'Threads_connected';
