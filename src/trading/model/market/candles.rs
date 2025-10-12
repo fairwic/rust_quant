@@ -97,7 +97,7 @@ impl CandlesModel {
         // Ok(data)
 
         //自定义表名
-        let table_name = format!("{}_candles_{}", inst_id, time_interval);
+        let table_name = Self::get_table_name(inst_id, time_interval);
         // 构建批量插入的 SQL 语句
         let mut query = format!(
             "INSERT INTO `{}` (ts, o, h, l, c, vol, vol_ccy, confirm) VALUES ",
