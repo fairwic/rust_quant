@@ -1,28 +1,15 @@
 version: '3.0'
 services:
   prod-rust-quant:
-    container_name: prod-rust-quant
-    build:
-      context: .
-      dockerfile: Dockerfile
-    volumes:
-      - .:/usr/src/rust_quant
-    environment:
-      IS_BACK_TEST: 'false'
-      IS_OPEN_SOCKET: 'false'
-      IS_RUN_SYNC_DATA_JOB : 'false'
-      IS_RUN_REAL_STRATEGY: 'true'
-    command: sh -c "cargo build --release && ./target/release/rust_quant"
-  prod-rust-quant-job:
     container_name: prod-rust-quant-job
     build:
       context: .
       dockerfile: Dockerfile
     environment:
       IS_BACK_TEST: 'false'
-      IS_RUN_REAL_STRATEGY: 'false'
-      IS_OPEN_SOCKET: 'true'
       IS_RUN_SYNC_DATA_JOB : 'true'
+      IS_RUN_REAL_STRATEGY: 'true'
+      IS_OPEN_SOCKET: 'true'
     volumes:
       - .:/usr/src/rust_quant
     command: sh -c "cargo build --release && ./target/release/rust_quant"
