@@ -22,7 +22,7 @@ pub async fn run_modes() -> anyhow::Result<()> {
     // let inst_ids = Some(vec!["ETH-USDT-SWAP","BTC-USDT-SWAP","SOL-USDT-SWAP"]);
     // let period = Some(vec!["1H","4H","1Dutc"]);
 
-    let inst_ids = Some(vec!["BTC-USDT-SWAP"]);
+    let inst_ids = Some(vec!["ETH-USDT-SWAP"]);
     let period = Some(vec!["4H"]);
 
     // 1) 初始化需要同步的数据
