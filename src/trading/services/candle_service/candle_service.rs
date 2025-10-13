@@ -61,7 +61,6 @@ impl CandleService {
         }
         if if_update_cache {
             self.cache.set_both(inst_id, time_interval, &snap).await;
-
             // 🚀 **K线确认时自动触发策略执行**
             if snap.confirm == "1" {
                 info!(
@@ -74,7 +73,7 @@ impl CandleService {
                 tokio::spawn(async move {
                     let strategy_manager = get_strategy_manager();
                     if let Err(e) = strategy_manager
-                        .run_ready_to_order_with_manager(&inst_id_owned, &time_interval_owned)
+                        .run_ready_to_order_with_manager(&inst_id_owned, &time_interval_owned,Some(snap))
                         .await
                     {
                         tracing::error!(

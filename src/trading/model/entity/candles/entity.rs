@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
+use okx::dto::market_dto::CandleOkxRespDto;
 use rbatis::rbdc::DateTime;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -16,3 +17,18 @@ pub struct CandlesEntity {
     pub updated_at: Option<DateTime>,
 }
 
+impl From<&CandleOkxRespDto> for CandlesEntity {
+    fn from(candle: &CandleOkxRespDto) -> Self {
+        CandlesEntity {
+            ts: candle.ts.parse::<i64>().unwrap(),
+            o: candle.o.to_string(),
+            h: candle.h.to_string(),
+            l: candle.l.to_string(),
+            c: candle.c.to_string(),
+            vol: candle.v.to_string(),
+            vol_ccy: candle.vol_ccy.to_string(),
+            confirm: candle.confirm.to_string(),
+            updated_at: None,
+        }
+    }
+}

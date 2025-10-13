@@ -231,16 +231,94 @@ where
     }
 }
 
+// 全局变量用于保持日志文件句柄
+use std::sync::OnceLock;
+
+static INFO_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+static ERROR_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+
+// 日志配置结构体
+#[derive(Debug, Clone)]
+struct LogConfig {
+    app_env: String,
+    log_level: String,
+    log_dir: String,
+    log_rotation: String,
+    info_file_name: String,
+    error_file_name: String,
+    enable_file_logging: bool,
+    enable_console_logging: bool,
+    enable_email_notification: bool,
+    max_file_size: u64,
+    max_files: usize,
+}
+
+impl LogConfig {
+    fn from_env() -> anyhow::Result<Self> {
+        let app_env = env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+        let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+        let log_dir = env::var("LOG_DIR").unwrap_or_else(|_| "log_files".to_string());
+        let log_rotation = env::var("LOG_ROTATION").unwrap_or_else(|_| "daily".to_string());
+        let info_file_name = env::var("LOG_INFO_FILE").unwrap_or_else(|_| "info.log".to_string());
+        let error_file_name = env::var("LOG_ERROR_FILE").unwrap_or_else(|_| "error.log".to_string());
+        let enable_file_logging = env::var("ENABLE_FILE_LOGGING")
+            .unwrap_or_else(|_| "true".to_string())
+            .parse()
+            .unwrap_or(true);
+        let enable_console_logging = env::var("ENABLE_CONSOLE_LOGGING")
+            .unwrap_or_else(|_| "true".to_string())
+            .parse()
+            .unwrap_or(true);
+        let enable_email_notification = env::var("ENABLE_EMAIL_NOTIFICATION")
+            .unwrap_or_else(|_| "true".to_string())
+            .parse()
+            .unwrap_or(true);
+        let max_file_size = env::var("LOG_MAX_FILE_SIZE_MB")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse()
+            .unwrap_or(100);
+        let max_files = env::var("LOG_MAX_FILES")
+            .unwrap_or_else(|_| "30".to_string())
+            .parse()
+            .unwrap_or(30);
+
+        Ok(Self {
+            app_env,
+            log_level,
+            log_dir,
+            log_rotation,
+            info_file_name,
+            error_file_name,
+            enable_file_logging,
+            enable_console_logging,
+            enable_email_notification,
+            max_file_size,
+            max_files,
+        })
+    }
+}
+
+// 解析时间轮转策略
+fn parse_rotation(s: &str) -> Rotation {
+    match s.to_lowercase().as_str() {
+        "minutely" | "minute" | "min" => Rotation::MINUTELY,
+        "hourly" | "hour" | "hr" => Rotation::HOURLY,
+        "daily" | "day" => Rotation::DAILY,
+        _ => Rotation::DAILY,
+    }
+}
+
 // 设置日志
 pub async fn setup_logging() -> anyhow::Result<()> {
-    let app_env = env::var("APP_ENV").expect("app_env config is none");
+    let config = LogConfig::from_env()?;
 
-    let custom_layer = CustomLayer {
-        event_count: Arc::new(Mutex::new(0)),
-    };
+    let custom_layer_opt = if config.enable_email_notification {
+        Some(CustomLayer { event_count: Arc::new(Mutex::new(0)) })
+    } else { None };
 
-    if app_env == "local" {
-        let subscriber = Registry::default()
+    // 本地环境：仅控制台输出
+    if config.app_env == "local" {
+        let base = Registry::default()
             .with(
                 fmt::layer()
                     .with_ansi(true)
@@ -251,59 +329,93 @@ pub async fn setup_logging() -> anyhow::Result<()> {
                     .with_line_number(true)
                     .with_level(true)
                     .with_writer(std::io::stdout)
-                    .with_filter(EnvFilter::new("info")),
-            )
-            .with(custom_layer);  // 在local环境下也添加CustomLayer
-        tracing::subscriber::set_global_default(subscriber)?;
+                    .with_filter(EnvFilter::new(&config.log_level)),
+            );
+
+        if let Some(custom) = custom_layer_opt {
+            tracing::subscriber::set_global_default(base.with(custom))?;
+        } else {
+            tracing::subscriber::set_global_default(base)?;
+        }
+
+        info!("Log configuration setup successfully!");
+        info!("Environment: {}, Log Level: {}, File Logging: {}, Console Logging: {}",
+              config.app_env, config.log_level, false, true);
+        return Ok(());
+    }
+
+    // 非本地环境：文件输出（可选控制台）
+    std::fs::create_dir_all(&config.log_dir)
+        .map_err(|e| anyhow::anyhow!("Failed to create log directory '{}': {}", config.log_dir, e))?;
+
+    let rotation_info = parse_rotation(&config.log_rotation);
+    let rotation_error = parse_rotation(&config.log_rotation);
+
+    let info_file = RollingFileAppender::new(rotation_info, &config.log_dir, &config.info_file_name);
+    let error_file = RollingFileAppender::new(rotation_error, &config.log_dir, &config.error_file_name);
+
+    let (info_non_blocking, info_guard) = tracing_appender::non_blocking(info_file);
+    let (error_non_blocking, error_guard) = tracing_appender::non_blocking(error_file);
+
+    // 保存guard到全局，防止被丢弃
+    INFO_GUARD.set(info_guard).map_err(|_| anyhow::anyhow!("Failed to set INFO_GUARD"))?;
+    ERROR_GUARD.set(error_guard).map_err(|_| anyhow::anyhow!("Failed to set ERROR_GUARD"))?;
+
+    let base = Registry::default()
+        .with(
+            fmt::layer()
+                .with_ansi(false)
+                .with_target(false)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_level(true)
+                .with_writer(info_non_blocking)
+                .with_filter(EnvFilter::new(&config.log_level)),
+        )
+        .with(
+            fmt::layer()
+                .with_ansi(false)
+                .with_target(false)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_level(true)
+                .with_writer(error_non_blocking)
+                .with_filter(EnvFilter::new("error")),
+        );
+
+    // 按需添加控制台层与自定义层，并立即设置全局订阅者，避免类型不一致
+    if config.enable_console_logging {
+        let with_console = base.with(
+            fmt::layer()
+                .with_ansi(false)
+                .with_target(false)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_level(true)
+                .with_writer(std::io::stdout)
+                .with_filter(EnvFilter::new(&config.log_level)),
+        );
+        if let Some(custom) = custom_layer_opt {
+            tracing::subscriber::set_global_default(with_console.with(custom))?;
+        } else {
+            tracing::subscriber::set_global_default(with_console)?;
+        }
     } else {
-        let info_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "info.log");
-        let error_file = RollingFileAppender::new(Rotation::DAILY, "log_files", "error.log");
-
-        let (info_non_blocking, _info_guard) = tracing_appender::non_blocking(info_file);
-        let (error_non_blocking, _error_guard) = tracing_appender::non_blocking(error_file);
-
-        let subscriber = Registry::default()
-            .with(
-                fmt::layer()
-                    .with_ansi(false)
-                    .with_target(false)
-                    .with_thread_ids(true)
-                    .with_thread_names(true)
-                    .with_file(true)
-                    .with_line_number(true)
-                    .with_level(true)
-                    .with_writer(info_non_blocking)
-                    .with_filter(EnvFilter::new("info")),
-            )
-            .with(
-                fmt::layer()
-                    .with_ansi(false)
-                    .with_target(false)
-                    .with_thread_ids(true)
-                    .with_thread_names(true)
-                    .with_file(true)
-                    .with_line_number(true)
-                    .with_level(true)
-                    .with_writer(error_non_blocking)
-                    .with_filter(EnvFilter::new("error")),
-            )
-            .with(custom_layer);
-
-        tracing::subscriber::set_global_default(subscriber)?;
+        if let Some(custom) = custom_layer_opt {
+            tracing::subscriber::set_global_default(base.with(custom))?;
+        } else {
+            tracing::subscriber::set_global_default(base)?;
+        }
     }
 
-    if "true" == env::var("DB_DEBUG").unwrap_or_default() {
-        // fast_log::init(
-        //     fast_log::Config::new()
-        //         .console()
-        //         .level(log::LevelFilter::Info),
-        // )
-        // .expect("fast_log init error");
-    }
-    // enable log crate to show sql logs
-    // if let Err(e) = fast_log::init(Config::new().console()) {
-    //     eprintln!("fast_log init error: {:?}", e);
-    // }
-    info!("log config setup successfully ！");
+    info!("Log configuration setup successfully!");
+    info!("Environment: {}, Log Level: {}, File Logging: {}, Console Logging: {}",
+          config.app_env, config.log_level, true, config.enable_console_logging);
     Ok(())
 }

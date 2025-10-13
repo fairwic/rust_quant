@@ -1,28 +1,37 @@
 use anyhow::{anyhow, Result};
+use dashmap::DashMap;
 use okx::dto::EnumToStrTrait;
+use once_cell::sync::Lazy;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
-use once_cell::sync::Lazy;
-use dashmap::DashMap;
 
 use crate::trading::domain_service::candle_domain_service::CandleDomainService;
 use crate::trading::indicator::signal_weight::SignalWeightsConfig;
-use crate::trading::model::strategy::strategy_job_signal_log::{StrategyJobSignalLog, StrategyJobSignalLogModel};
+use crate::trading::model::entity::candles::entity::CandlesEntity;
+use crate::trading::model::strategy::strategy_job_signal_log::{
+    StrategyJobSignalLog, StrategyJobSignalLogModel,
+};
 use crate::trading::services::order_service::swap_order_service::SwapOrderService;
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::{
     self, get_hash_key, ArcVegasIndicatorValues,
 };
 use crate::trading::strategy::order::strategy_config::StrategyConfig;
-use crate::trading::strategy::strategy_common::{get_multi_indicator_values, parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult};
-use crate::trading::strategy::{StrategyType, Strategy};
-use crate::trading::task::backtest_executor::{load_and_convert_candle_data, run_back_test_strategy};
-use crate::trading::task::progress_manager::{RandomStrategyConfig, StrategyProgressManager};
-use crate::trading::task::strategy_config::{get_strategy_config_from_db, test_specified_strategy_with_config, VegasBackTestConfig};
+use crate::trading::strategy::strategy_common::{
+    get_multi_indicator_values, parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
+};
+use crate::trading::strategy::{Strategy, StrategyType};
+use crate::trading::task::backtest_executor::{
+    load_and_convert_candle_data, run_back_test_strategy,
+};
 use crate::trading::task::job_param_generator::ParamGenerator;
+use crate::trading::task::progress_manager::{RandomStrategyConfig, StrategyProgressManager};
+use crate::trading::task::strategy_config::{
+    get_strategy_config_from_db, test_specified_strategy_with_config, VegasBackTestConfig,
+};
 use crate::CandleItem;
 
 /// 策略执行状态跟踪 - 用于时间戳去重
@@ -33,7 +42,8 @@ struct StrategyExecutionState {
 }
 
 /// 全局策略执行状态管理器 - 防止重复处理相同时间戳的K线
-static STRATEGY_EXECUTION_STATES: Lazy<DashMap<String, StrategyExecutionState>> = Lazy::new(|| DashMap::new());
+static STRATEGY_EXECUTION_STATES: Lazy<DashMap<String, StrategyExecutionState>> =
+    Lazy::new(|| DashMap::new());
 
 /// 策略执行状态管理器
 pub struct StrategyExecutionStateManager;
@@ -68,7 +78,10 @@ impl StrategyExecutionStateManager {
             let duration = SystemTime::now()
                 .duration_since(state.start_time)
                 .unwrap_or(Duration::from_millis(0));
-            info!("策略执行完成: key={}, timestamp={}, 耗时={:?}", key, timestamp, duration);
+            info!(
+                "策略执行完成: key={}, timestamp={}, 耗时={:?}",
+                key, timestamp, duration
+            );
         }
     }
 
@@ -79,7 +92,8 @@ impl StrategyExecutionStateManager {
 
         for entry in STRATEGY_EXECUTION_STATES.iter() {
             if let Ok(duration) = now.duration_since(entry.value().start_time) {
-                if duration > Duration::from_secs(300) { // 5分钟
+                if duration > Duration::from_secs(300) {
+                    // 5分钟
                     expired_keys.push(entry.key().clone());
                 }
             }
@@ -93,7 +107,8 @@ impl StrategyExecutionStateManager {
     /// 获取当前处理状态统计
     pub fn get_stats() -> (usize, Vec<String>) {
         let count = STRATEGY_EXECUTION_STATES.len();
-        let keys: Vec<String> = STRATEGY_EXECUTION_STATES.iter()
+        let keys: Vec<String> = STRATEGY_EXECUTION_STATES
+            .iter()
             .map(|entry| entry.key().clone())
             .collect();
         (count, keys)
@@ -136,7 +151,10 @@ pub async fn test_random_strategy_with_config(
             } else {
                 info!(
                     "[断点续传] 发现已保存的进度: inst_id={}, time={}, 已完成 {}/{} 个组合",
-                    inst_id, time, saved_progress.completed_combinations, saved_progress.total_combinations
+                    inst_id,
+                    time,
+                    saved_progress.completed_combinations,
+                    saved_progress.total_combinations
                 );
 
                 if saved_progress.status == "completed" {
@@ -220,12 +238,10 @@ pub async fn test_random_strategy_with_config(
         let (current_index, _) = param_generator.progress();
 
         // 💾 **定期保存进度**
-        if let Err(e) = StrategyProgressManager::update_progress(
-            inst_id,
-            time,
-            processed_count,
-            current_index
-        ).await {
+        if let Err(e) =
+            StrategyProgressManager::update_progress(inst_id, time, processed_count, current_index)
+                .await
+        {
             warn!("[断点续传] 保存进度失败: {}", e);
         }
 
@@ -391,6 +407,7 @@ pub async fn run_ready_to_order_with_manager(
     inst_id: &str,
     period: &str,
     strategy: &StrategyConfig,
+    snap: Option<CandlesEntity>,
 ) -> Result<()> {
     // 常量定义
     const MAX_HISTORY_SIZE: usize = 10000;
@@ -398,13 +415,18 @@ pub async fn run_ready_to_order_with_manager(
     let strategy_type = StrategyType::Vegas.as_str().to_owned();
     let key = get_hash_key(inst_id, period, &strategy_type);
     let manager = arc_vegas_indicator_values::get_indicator_manager();
-
-    // 2. 获取最新K线数据
-    let new_candle_data = CandleDomainService::new_default()
-        .await
-        .get_new_one_candle_fresh(inst_id, period, None)
-        .await
-        .map_err(|e| anyhow!("获取最新K线数据失败: {}", e))?;
+    let mut new_candle_data: Option<CandlesEntity> = None;
+    if snap.is_none() {
+        // 2. 获取最新K线数据
+        let new_candle_data = CandleDomainService::new_default()
+            .await
+            .get_new_one_candle_fresh(inst_id, period, None)
+            .await
+            .map_err(|e| anyhow!("获取最新K线数据失败: {}", e))?;
+    } else {
+        //直接从传过来的数据中获取，传过来的参数默认是认为最新的
+        new_candle_data = snap;
+    }
     if new_candle_data.is_none() {
         warn!(
             "获取的最新K线数据为空,跳过本次策略执行: {:?}, {:?}",
@@ -414,7 +436,6 @@ pub async fn run_ready_to_order_with_manager(
     }
     let new_candle_data = new_candle_data.unwrap();
     let new_candle_item = parse_candle_to_data_item(&new_candle_data);
-
 
     // 3. 同键互斥，读取快照并验证
     let key_mutex = manager.acquire_key_mutex(&key).await;
@@ -437,7 +458,10 @@ pub async fn run_ready_to_order_with_manager(
 
     let is_new_time = check_new_time(old_time, new_time, period, is_update, true)?;
     if !is_new_time {
-        info!("跳过策略执行: inst_id:{:?} period:{:?} new_candle_data:{:?}", inst_id, period, new_candle_data);
+        info!(
+            "跳过策略执行: inst_id:{:?} period:{:?} new_candle_data:{:?}",
+            inst_id, period, new_candle_data
+        );
         return Ok(());
     }
 
@@ -499,7 +523,6 @@ pub async fn run_ready_to_order_with_manager(
             new_candle_item.ts
         );
     if signal_result.should_buy || signal_result.should_sell {
-
         //异步记录日志
         save_signal_log(inst_id, period, &signal_result);
         //执行交易

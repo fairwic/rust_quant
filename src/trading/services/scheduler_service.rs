@@ -47,9 +47,9 @@ pub struct SchedulerHealth {
 
 impl std::fmt::Display for SchedulerHealth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "健康: {}, 总任务: {}, 错误数: {}", 
-               if self.is_healthy { "是" } else { "否" }, 
-               self.total_jobs, 
+        write!(f, "健康: {}, 总任务: {}, 错误数: {}",
+               if self.is_healthy { "是" } else { "否" },
+               self.total_jobs,
                self.error_count)
     }
 }
@@ -120,7 +120,7 @@ impl SchedulerService {
                     let guard = strategy_cfg_handle.read().await;
                     guard.clone()
                 };
-                match crate::trading::task::basic::run_ready_to_order_with_manager(&inst_id, &time, &current_cfg).await {
+                match crate::trading::task::basic::run_ready_to_order_with_manager(&inst_id, &time, &current_cfg,None).await {
                     Ok(_) => {
                         debug!("策略任务执行成功: {}_{}", inst_id, time);
                     }
@@ -141,7 +141,7 @@ impl SchedulerService {
     /// 注册任务到调度器（带重试机制）
     pub async fn register_job(job: Job) -> Result<Uuid, SchedulerServiceError> {
         let job_id = job.guid();
-        
+
         for attempt in 1..=Self::MAX_RETRY_ATTEMPTS {
             match Self::try_register_job(job.clone()).await {
                 Ok(_) => {
@@ -158,7 +158,7 @@ impl SchedulerService {
                 }
             }
         }
-        
+
         Err(SchedulerServiceError::JobRegistrationFailed {
             reason: "达到最大重试次数".to_string(),
         })
@@ -248,7 +248,7 @@ impl SchedulerService {
     /// 检查调度器健康状态
     pub async fn get_scheduler_health() -> SchedulerHealth {
         let scheduler_guard = crate::SCHEDULER.lock().await;
-        
+
         match scheduler_guard.as_ref() {
             Some(scheduler) => {
                 // 这里可以添加更多健康检查逻辑

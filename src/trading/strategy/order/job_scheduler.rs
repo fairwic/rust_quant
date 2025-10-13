@@ -3,13 +3,20 @@
 //! 负责定时任务的创建、管理和调度器交互操作，
 //! 与业务逻辑解耦，提供独立的调度服务。
 
+use crate::{
+    time_util,
+    trading::{
+        domain_service::candle_domain_service::CandleDomainService,
+        model::entity::candles::entity::CandlesEntity,
+        strategy::order::strategy_config::StrategyConfig,
+    },
+};
+use okx::{api::api_trait::OkxApiTrait, OkxMarket};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_cron_scheduler::Job;
 use tracing::{debug, error, info};
 use uuid::Uuid;
-
-use crate::trading::strategy::order::strategy_config::StrategyConfig;
 
 /// 调度器相关的错误类型
 #[derive(thiserror::Error, Debug)]
@@ -47,30 +54,35 @@ impl StrategyJobScheduler {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .map(|v| v.min(59))
-            .unwrap_or(5);
+            .unwrap_or(1); // 默认1秒偏移
 
         let sec = offset_sec.to_string();
-
         // 根据时间周期设置不同的执行频率
         let cron_expression: String = match time.as_str() {
-            "1m" => format!("{} * * * * *", sec),
-            "5m" => format!("{} */5 * * * *", sec),
-            "15m" => format!("{} */15 * * * *", sec),
-            "1H" => format!("{} 0 * * * *", sec),
-            "4H" => format!("{} 0 */4 * * *", sec),
-            "1Dutc" => format!("{} 0 0 * * *", sec),
-            _ => "*/30 * * * * *".to_string(),
+            "1m" => format!("{} * * * * *", sec),          // 每分钟执行
+            "5m" => format!("{} */5 * * * *", sec),        // 每5分钟执行
+            "15m" => format!("{} */15 * * * *", sec),      // 每15分钟执行
+            "1h" | "1H" => format!("{} 0 * * * *", sec),   // 每小时执行
+            "4h" | "4H" => format!("{} 0 */4 * * *", sec), // 每4小时执行
+            "1d" | "1D" | "1Dutc" => format!("{} 0 0 * * *", sec), // 每天执行
+            _ => {
+                error!("未知的时间周期: {}, 使用默认的每30秒执行", time);
+                "*/30 * * * * *".to_string()
+            }
         };
 
         // 本地环境：每秒执行一次，用于测试
-        let app_env = std::env::var("APP_ENV").unwrap_or_else(|_ | "LOCAL".to_string());
+        let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "LOCAL".to_string());
         let final_cron_expression = if app_env.eq_ignore_ascii_case("LOCAL") {
             "* * * * * *".to_string()
         } else {
             cron_expression
         };
 
-        debug!("创建定时任务: inst_id={}, time={}, cron={}", inst_id, time, final_cron_expression);
+        debug!(
+            "创建定时任务: inst_id={}, time={}, cron={}",
+            inst_id, time, final_cron_expression
+        );
 
         let job = Job::new_async(final_cron_expression.as_str(), move |_uuid, _lock| {
             let inst_id = inst_id.clone();
@@ -82,18 +94,51 @@ impl StrategyJobScheduler {
                     let guard = strategy_cfg_handle.read().await;
                     guard.clone()
                 };
-                match crate::trading::task::basic::run_ready_to_order_with_manager(&inst_id, &time, &current_cfg).await {
-                    Ok(_) => {
-                        debug!("策略任务执行成功: {}_{}", inst_id, time);
+
+                // 此处特殊处理，直接从交易所获取最新K线数据,不走缓存
+                let okx = OkxMarket::from_env();
+
+                match okx {
+                    Ok(okx) => {
+                        let after=time_util::get_period_start_timestamp(&time).to_string();
+                        match okx
+                            .get_candles(&inst_id, &time, Some(&after), None, Some("1"))
+                            .await
+                        {
+                            Ok(candle_data) => {
+                                if let Some(new_candle_data) = candle_data.first() {
+                                    // 这里可以处理新的K线数据
+                                    debug!("获取到最新K线数据: {}_{}", inst_id, time);
+                                   match crate::trading::task::basic::run_ready_to_order_with_manager(
+                                    &inst_id,
+                                    &time,
+                                    &current_cfg,
+                                    Some(CandlesEntity::from(new_candle_data)),
+                                )
+                                .await
+                                {
+                                    Ok(_) => {
+                                        debug!("策略任务执行成功: {}_{}", inst_id, time);
+                                    }
+                                    Err(e) => {
+                                        error!("策略任务执行失败: {}_{}, 错误: {}", inst_id, time, e);
+                                    }
+                                }
+                                }
+                            }
+                            Err(e) => {
+                                error!("获取K线数据失败: {:?}", e);
+                            }
+                        }
                     }
                     Err(e) => {
-                        error!("策略任务执行失败: {}_{}, 错误: {}", inst_id, time, e);
+                        error!("初始化OKX客户端失败: {:?}", e);
                     }
                 }
             })
         })
         .map_err(|e| JobSchedulerError::JobCreationFailed {
-            reason: format!("创建定时任务失败: {}", e)
+            reason: format!("创建定时任务失败: {}", e),
         })?;
 
         debug!("定时任务创建成功: {}", job.guid());
@@ -103,11 +148,16 @@ impl StrategyJobScheduler {
     /// 注册任务到调度器
     pub async fn register_job(job: Job) -> Result<(), JobSchedulerError> {
         let scheduler_guard = crate::SCHEDULER.lock().await;
-        let scheduler = scheduler_guard.as_ref().ok_or(JobSchedulerError::SchedulerNotInitialized)?;
+        let scheduler = scheduler_guard
+            .as_ref()
+            .ok_or(JobSchedulerError::SchedulerNotInitialized)?;
 
-        scheduler.add(job).await.map_err(|e| JobSchedulerError::JobRegistrationFailed {
-            reason: format!("添加任务到调度器失败: {}", e)
-        })?;
+        scheduler
+            .add(job)
+            .await
+            .map_err(|e| JobSchedulerError::JobRegistrationFailed {
+                reason: format!("添加任务到调度器失败: {}", e),
+            })?;
 
         Ok(())
     }
@@ -115,11 +165,16 @@ impl StrategyJobScheduler {
     /// 从调度器中移除单个任务
     pub async fn remove_job(job_id: Uuid) -> Result<(), JobSchedulerError> {
         let scheduler_guard = crate::SCHEDULER.lock().await;
-        let scheduler = scheduler_guard.as_ref().ok_or(JobSchedulerError::SchedulerNotInitialized)?;
+        let scheduler = scheduler_guard
+            .as_ref()
+            .ok_or(JobSchedulerError::SchedulerNotInitialized)?;
 
-        scheduler.remove(&job_id).await.map_err(|e| JobSchedulerError::JobRemovalFailed {
-            reason: format!("从调度器移除任务失败: {}", e)
-        })?;
+        scheduler
+            .remove(&job_id)
+            .await
+            .map_err(|e| JobSchedulerError::JobRemovalFailed {
+                reason: format!("从调度器移除任务失败: {}", e),
+            })?;
 
         Ok(())
     }
@@ -127,7 +182,9 @@ impl StrategyJobScheduler {
     /// 从调度器中批量移除任务
     pub async fn remove_jobs(job_ids: Vec<Uuid>) -> Result<usize, JobSchedulerError> {
         let scheduler_guard = crate::SCHEDULER.lock().await;
-        let scheduler = scheduler_guard.as_ref().ok_or(JobSchedulerError::SchedulerNotInitialized)?;
+        let scheduler = scheduler_guard
+            .as_ref()
+            .ok_or(JobSchedulerError::SchedulerNotInitialized)?;
 
         let mut removed_count = 0;
         for job_id in job_ids {
@@ -150,4 +207,3 @@ mod tests {
         assert_eq!(key, "vegas_BTC-USDT-SWAP_5m");
     }
 }
-

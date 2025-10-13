@@ -11,6 +11,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::trading::indicator::vegas_indicator::VegasStrategy;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::model::strategy::strategy_config::{
     StrategyConfigEntity, StrategyConfigEntityModel,
 };
@@ -413,7 +414,7 @@ impl StrategyManager {
         period: String,
     ) -> Result<()> {
         let start_time = std::time::Instant::now();
-        
+
         // 参数验证
         if strategy_config_id <= 0 {
             return Err(anyhow!("策略配置ID必须大于0"));
@@ -520,7 +521,7 @@ impl StrategyManager {
         strategy_type: &str,
     ) -> Result<()> {
         let stop_start_time = std::time::Instant::now();
-        
+
         // 参数验证
         self.validate_strategy_params(inst_id, period)?;
 
@@ -733,21 +734,19 @@ impl StrategyManager {
         &self,
         inst_id: &str,
         period: &str,
+        snap:Option<CandlesEntity>
     ) -> Result<()> {
         // 参数验证
         self.validate_strategy_params(inst_id, period)?;
-
         // 查找运行中的策略
         let strategy_key_prefix = format!("{}{}{}", inst_id, STRATEGY_KEY_SEPARATOR, period);
         let mut found_strategy = None;
-
         for entry in self.running_strategies.iter() {
             if entry.key().contains(&strategy_key_prefix) {
                 found_strategy = Some(entry.value().clone());
                 break;
             }
         }
-
         if let Some(runtime_info) = found_strategy {
             // 获取当前策略配置
             let current_config = runtime_info.get_current_config().await;
@@ -755,7 +754,8 @@ impl StrategyManager {
             crate::trading::task::basic::run_ready_to_order_with_manager(
                 inst_id,
                 period,
-                &current_config
+                &current_config,
+                snap
             ).await?;
             debug!(
                 "策略执行完成: inst_id={}, period={}, strategy_type={}",

@@ -76,7 +76,8 @@ async fn test_run_strategy_job() -> Result<()> {
     .await;
     println!("result: {:?}", result);
     //执行一次策略
-    let manager = basic::run_ready_to_order_with_manager(&*inst_id, &*time, &strategy_config).await;
+    let manager =
+        basic::run_ready_to_order_with_manager(&*inst_id, &*time, &strategy_config, None).await;
     println!("result: {:?}", result);
     Ok(())
 }
