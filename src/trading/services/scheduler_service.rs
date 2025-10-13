@@ -6,13 +6,17 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use anyhow::{anyhow, Result};
+use okx::{OkxMarket, api::api_trait::OkxApiTrait};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio_cron_scheduler::Job;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use crate::time_util;
+use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::strategy::order::strategy_config::StrategyConfig;
+use crate::trading::task::basic;
 
 /// 调度器服务错误类型
 #[derive(thiserror::Error, Debug)]
@@ -80,7 +84,7 @@ impl SchedulerService {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .map(|v| v.min(59))
-            .unwrap_or(5);
+            .unwrap_or(1);
 
         let sec = offset_sec.to_string();
 
@@ -114,18 +118,51 @@ impl SchedulerService {
             let strategy_type = strategy_type.clone();
             let strategy_cfg_handle: Arc<RwLock<StrategyConfig>> = Arc::clone(&strategy_cfg_handle);
 
+
             Box::pin(async move {
+                info!("job tick started: inst_id={}, time={}", inst_id, time);
                 // 每次触发时读取最新配置（支持热更新）
                 let current_cfg = {
                     let guard = strategy_cfg_handle.read().await;
                     guard.clone()
                 };
-                match crate::trading::task::basic::run_ready_to_order_with_manager(&inst_id, &time, &current_cfg,None).await {
-                    Ok(_) => {
-                        debug!("策略任务执行成功: {}_{}", inst_id, time);
+                // 此处特殊处理，直接从交易所获取最新K线数据,不走缓存
+                let okx = OkxMarket::from_env();
+                match okx {
+                    Ok(okx) => {
+                        let after=time_util::get_period_start_timestamp(&time).to_string();
+                        match okx
+                            .get_candles(&inst_id, &time, Some(&after), None, Some("1"))
+                            .await
+                        {
+                            Ok(candle_data) => {
+                                info!("获取到最新K线数据: {}_{}", inst_id, time);
+                                if let Some(new_candle_data) = candle_data.first() {
+                                    // 这里可以处理新的K线数据
+                                   match crate::trading::task::basic::run_ready_to_order_with_manager(
+                                    &inst_id,
+                                    &time,
+                                    &current_cfg,
+                                    Some(CandlesEntity::from(new_candle_data)),
+                                )
+                                .await
+                                {
+                                    Ok(_) => {
+                                        debug!("策略任务执行成功: {}_{}", inst_id, time);
+                                    }
+                                    Err(e) => {
+                                        error!("策略任务执行失败: {}_{}, 错误: {}", inst_id, time, e);
+                                    }
+                                }
+                                }
+                            }
+                            Err(e) => {
+                                error!("获取K线数据失败: {:?}", e);
+                            }
+                        }
                     }
                     Err(e) => {
-                        error!("策略任务执行失败: {}_{}, 错误: {}", inst_id, time, e);
+                        error!("初始化OKX客户端失败: {:?}", e);
                     }
                 }
             })

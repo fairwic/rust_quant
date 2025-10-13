@@ -418,7 +418,7 @@ pub async fn run_ready_to_order_with_manager(
     let mut new_candle_data: Option<CandlesEntity> = None;
     if snap.is_none() {
         // 2. 获取最新K线数据
-        let new_candle_data = CandleDomainService::new_default()
+        new_candle_data = CandleDomainService::new_default()
             .await
             .get_new_one_candle_fresh(inst_id, period, None)
             .await

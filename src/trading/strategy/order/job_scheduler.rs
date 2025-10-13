@@ -89,15 +89,17 @@ impl StrategyJobScheduler {
             let time = time.clone();
             let strategy_cfg_handle: Arc<RwLock<StrategyConfig>> = Arc::clone(&strategy_cfg_handle);
             Box::pin(async move {
+                info!("job tick started: inst_id={}, time={}", inst_id, time);
                 // 每次触发时读取最新配置（支持热更新）
                 let current_cfg = {
                     let guard = strategy_cfg_handle.read().await;
                     guard.clone()
                 };
 
+                println!("current_cfg: {:?}", current_cfg);
                 // 此处特殊处理，直接从交易所获取最新K线数据,不走缓存
                 let okx = OkxMarket::from_env();
-
+                println!("okx: {:?}", okx);
                 match okx {
                     Ok(okx) => {
                         let after=time_util::get_period_start_timestamp(&time).to_string();
@@ -106,9 +108,9 @@ impl StrategyJobScheduler {
                             .await
                         {
                             Ok(candle_data) => {
+                                info!("获取到最新K线数据: {}_{}", inst_id, time);
                                 if let Some(new_candle_data) = candle_data.first() {
                                     // 这里可以处理新的K线数据
-                                    debug!("获取到最新K线数据: {}_{}", inst_id, time);
                                    match crate::trading::task::basic::run_ready_to_order_with_manager(
                                     &inst_id,
                                     &time,
@@ -136,6 +138,9 @@ impl StrategyJobScheduler {
                     }
                 }
             })
+
+
+
         })
         .map_err(|e| JobSchedulerError::JobCreationFailed {
             reason: format!("创建定时任务失败: {}", e),
