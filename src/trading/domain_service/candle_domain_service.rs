@@ -1,5 +1,5 @@
 use crate::app_config::env as app_env;
-use crate::app_config::redis as app_redis;
+use crate::app_config::redis_config as app_redis;
 
 use crate::time_util;
 use crate::trading::cache::latest_candle_cache as local_cache;

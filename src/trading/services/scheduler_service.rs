@@ -3,16 +3,18 @@
 //! 提供统一的调度器操作接口，包含重试机制、错误处理和健康检查，
 //! 与具体的策略业务逻辑解耦。
 
+use anyhow::{anyhow, Result};
+use okx::{api::api_trait::OkxApiTrait, OkxMarket};
+use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use anyhow::{anyhow, Result};
-use okx::{OkxMarket, api::api_trait::OkxApiTrait};
-use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio_cron_scheduler::Job;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use crate::app_config::redis_config;
 use crate::time_util;
 use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::strategy::order::strategy_config::StrategyConfig;
@@ -41,7 +43,7 @@ pub enum SchedulerServiceError {
 }
 
 /// 系统健康状态
-#[derive(Debug, Clone,Deserialize,Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SchedulerHealth {
     pub is_healthy: bool,
     pub total_jobs: usize,
@@ -51,10 +53,13 @@ pub struct SchedulerHealth {
 
 impl std::fmt::Display for SchedulerHealth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "健康: {}, 总任务: {}, 错误数: {}",
-               if self.is_healthy { "是" } else { "否" },
-               self.total_jobs,
-               self.error_count)
+        write!(
+            f,
+            "健康: {}, 总任务: {}, 错误数: {}",
+            if self.is_healthy { "是" } else { "否" },
+            self.total_jobs,
+            self.error_count
+        )
     }
 }
 
@@ -69,7 +74,13 @@ impl SchedulerService {
 
     /// 构建策略任务唯一标识
     pub fn build_task_key(inst_id: &str, time: &str, strategy_type: &str) -> String {
-        format!("{}_{}_{}_{}", strategy_type.to_lowercase(), inst_id, time, "task")
+        format!(
+            "{}_{}_{}_{}",
+            strategy_type.to_lowercase(),
+            inst_id,
+            time,
+            "task"
+        )
     }
 
     /// 创建定时任务
@@ -106,21 +117,24 @@ impl SchedulerService {
         } else {
             cron_expression
         };
-
         debug!(
             "创建定时任务: inst_id={}, time={}, strategy_type={}, cron={}",
             inst_id, time, strategy_type, final_cron_expression
         );
-
         let job = Job::new_async(final_cron_expression.as_str(), move |_uuid, _lock| {
             let inst_id = inst_id.clone();
             let time = time.clone();
             let strategy_type = strategy_type.clone();
             let strategy_cfg_handle: Arc<RwLock<StrategyConfig>> = Arc::clone(&strategy_cfg_handle);
 
-
             Box::pin(async move {
-                info!("job tick started: inst_id={}, time={}", inst_id, time);
+             let after=time_util::get_period_start_timestamp(&time).to_string();
+             //判断是已处理过最新的数据
+            let is_processed = Self::is_processed_latest_data(&inst_id, &time,&after).await;
+            if is_processed {
+                info!("已处理过当前时间戳的数据: deal_confirm_candle:{}:{}:{}", inst_id, time,after);
+                return;
+            }
                 // 每次触发时读取最新配置（支持热更新）
                 let current_cfg = {
                     let guard = strategy_cfg_handle.read().await;
@@ -130,7 +144,6 @@ impl SchedulerService {
                 let okx = OkxMarket::from_env();
                 match okx {
                     Ok(okx) => {
-                        let after=time_util::get_period_start_timestamp(&time).to_string();
                         match okx
                             .get_candles(&inst_id, &time, Some(&after), None, Some("1"))
                             .await
@@ -149,6 +162,8 @@ impl SchedulerService {
                                 {
                                     Ok(_) => {
                                         debug!("策略任务执行成功: {}_{}", inst_id, time);
+                                        //记录到redis，当前k线路已被处理过
+                                        Self::mark_processed_latest_data(&inst_id, &time, &new_candle_data.ts.to_string()).await;
                                     }
                                     Err(e) => {
                                         error!("策略任务执行失败: {}_{}, 错误: {}", inst_id, time, e);
@@ -166,6 +181,7 @@ impl SchedulerService {
                     }
                 }
             })
+
         })
         .map_err(|e| SchedulerServiceError::JobCreationFailed {
             reason: format!("创建定时任务失败: {}", e),
@@ -175,10 +191,36 @@ impl SchedulerService {
         Ok(job)
     }
 
+    async fn is_processed_latest_data(inst_id: &str, time: &str, ts_str: &str) -> bool {
+        let ts = time_util::ts_reduce_n_period(ts_str.parse::<i64>().unwrap(), time, 1).unwrap();
+        let ts_str = ts.to_string();
+        //从redis中获取数据
+        let rkey = format!("deal_confirm_candle:{}:{}:{}", inst_id, time, ts_str);
+        println!("get rkey:{}", rkey);
+        let multi_connection = crate::app_config::redis_config::get_redis_connection().await;
+        if let Err(e) = multi_connection {
+            error!("获取Redis连接失败: {:?}", e);
+            return false;
+        }
+        if let Ok(mut conn) = multi_connection {
+            if let Ok(s) = conn.get::<_, String>(&rkey).await {
+                return true;
+            }
+            return false;
+        }
+        return false;
+    }
+    async fn mark_processed_latest_data(inst_id: &str, time: &str, ts_str: &str) {
+        let rkey = format!("deal_confirm_candle:{}:{}:{}", inst_id, time, ts_str);
+        println!("set rkey:{}", rkey);
+        let multi_connection = crate::app_config::redis_config::get_redis_connection().await;
+        if let Ok(mut conn) = multi_connection {
+            conn.set_ex::<_, _, ()>(&rkey, "1", 86400 * 7).await;
+        }
+    }
     /// 注册任务到调度器（带重试机制）
     pub async fn register_job(job: Job) -> Result<Uuid, SchedulerServiceError> {
         let job_id = job.guid();
-
         for attempt in 1..=Self::MAX_RETRY_ATTEMPTS {
             match Self::try_register_job(job.clone()).await {
                 Ok(_) => {
@@ -187,7 +229,10 @@ impl SchedulerService {
                 }
                 Err(e) if attempt < Self::MAX_RETRY_ATTEMPTS => {
                     warn!("任务注册失败，第{}次重试: {}", attempt, e);
-                    tokio::time::sleep(Duration::from_millis(Self::RETRY_DELAY_MS * attempt as u64)).await;
+                    tokio::time::sleep(Duration::from_millis(
+                        Self::RETRY_DELAY_MS * attempt as u64,
+                    ))
+                    .await;
                 }
                 Err(e) => {
                     error!("任务注册最终失败: {}", e);
@@ -237,7 +282,8 @@ impl SchedulerService {
             Err(_) => {
                 warn!(
                     "移除调度器任务超时 ({}s)，任务可能仍在运行: {}",
-                    Self::OPERATION_TIMEOUT_SECS, job_id
+                    Self::OPERATION_TIMEOUT_SECS,
+                    job_id
                 );
                 // 超时也不返回错误，允许系统继续运行
                 Ok(())
@@ -278,7 +324,11 @@ impl SchedulerService {
             warn!("部分任务移除失败: {:?}", failed_jobs);
         }
 
-        info!("批量移除任务完成: 成功 {}, 失败 {}", removed_count, failed_jobs.len());
+        info!(
+            "批量移除任务完成: 成功 {}, 失败 {}",
+            removed_count,
+            failed_jobs.len()
+        );
         Ok(removed_count)
     }
 
@@ -301,7 +351,7 @@ impl SchedulerService {
                 total_jobs: 0,
                 last_check_time: chrono::Utc::now().timestamp_millis(),
                 error_count: 1,
-            }
+            },
         }
     }
 

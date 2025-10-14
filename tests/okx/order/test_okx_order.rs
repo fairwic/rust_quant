@@ -20,11 +20,9 @@ async fn test_okx_order() {
     // builder.filter_module("rust_quant", Level::Debug);
     // builder.default_format();
     // builder.init();
-
     app_init().await;
-
-    let inst_id = "BTC-USDT-SWAP";
-    let period = "1H";
+    let inst_id = "ETH-USDT-SWAP";
+    let period = "4H";
 
     println!("🧪 开始测试OKX订单功能");
     println!("📋 测试参数:");

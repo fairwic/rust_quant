@@ -1,4 +1,4 @@
-use rust_quant::app_config::{log, redis};
+use rust_quant::app_config::{log, redis_config};
 use rust_quant::trading::task::basic::{
     RandomStrategyConfig, StrategyProgressManager, StrategyTestProgress,
     test_random_strategy_with_config
@@ -14,7 +14,7 @@ async fn test_strategy_resume_functionality() {
     std::env::set_var("REDIS_URL", "redis://127.0.0.1:6379");
 
     // 初始化 Redis 连接池
-    redis::init_redis_pool().await.expect("Failed to initialize Redis pool");
+    redis_config::init_redis_pool().await.expect("Failed to initialize Redis pool");
 
     // 初始化日志
     log::setup_logging().await.expect("Failed to initialize log config");
@@ -115,7 +115,7 @@ async fn test_strategy_resume_integration() {
     std::env::set_var("REDIS_URL", "redis://127.0.0.1:6379");
 
     // 初始化 Redis 连接池
-    redis::init_redis_pool().await.expect("Failed to initialize Redis pool");
+    redis_config::init_redis_pool().await.expect("Failed to initialize Redis pool");
 
     // 初始化日志
     log::setup_logging().await.expect("Failed to initialize log config");

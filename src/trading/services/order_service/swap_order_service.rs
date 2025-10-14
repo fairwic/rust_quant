@@ -182,6 +182,7 @@ impl SwapOrderService {
             AppError::OkxApiError(e.to_string())
         })?;
         let cross = TdModeEnum::CROSS.as_str().to_owned();
+        //后续考虑极端情况下，当多个产品都出现信号，此处是否会触发交易所的api请求限制
         let (position_list, max_avail_size) = tokio::try_join!(
             account.get_account_positions(Some("SWAP"), Some(inst_id), None),
             account.get_max_size(inst_id, &cross, None, None, None)
@@ -209,14 +210,18 @@ impl SwapOrderService {
             warn!("pos_size is 0, skip placing order");
             return Ok(());
         }
-
         // if pos_size.parse::<f64>().unwrap() < 1.0 {
         //     error!("pos_size is  small than 1.0, not enough to place order");
         //     return Err(AppError::BizError(
         //         "pos_size is  small than 1.0, not enough to place order".to_string(),
         //     ));
         // }
-        let pos_size = "2.0".to_string();
+        //避免极端情况下又其他仓位的情况下，导致下单数量减少，下单数量超过最大可用数量
+        let pos_size = {
+            let raw = pos_size.parse::<f64>().unwrap();
+            let adjusted = ((raw / 1.01) * 100.0).floor() / 100.0; // 向下取整到两位小数
+            adjusted.to_string()
+        };
         info!("ready to place order size: {:?}", pos_size);
         //平掉现有的已经存在的反向仓位
         let pos_side = match signal.should_buy {

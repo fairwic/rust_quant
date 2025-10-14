@@ -3,7 +3,7 @@ use redis::aio::MultiplexedConnection;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use crate::app_config::redis as app_redis;
+use crate::app_config::redis_config as app_redis;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RedisCandle {

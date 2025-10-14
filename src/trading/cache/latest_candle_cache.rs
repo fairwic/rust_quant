@@ -6,7 +6,7 @@ use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use redis::AsyncCommands;
 
-use crate::app_config::redis::{self as app_redis, RedisConnectionPool};
+use crate::app_config::redis_config::{self as app_redis, RedisConnectionPool};
 use crate::trading::model::entity::candles::entity::CandlesEntity;
 
 fn make_key(inst_id: &str, period: &str) -> String {

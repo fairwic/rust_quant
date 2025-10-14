@@ -1,4 +1,4 @@
-use rust_quant::app_config::{log, redis};
+use rust_quant::app_config::{log, redis_config};
 use rust_quant::trading::task::basic::{
     RandomStrategyConfig, StrategyProgressManager,
     test_random_strategy_with_config, vegas_back_test_with_config, VegasBackTestConfig
@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("REDIS_URL", "redis://127.0.0.1:6379");
 
     // 初始化 Redis 连接池
-    redis::init_redis_pool().await?;
+    redis_config::init_redis_pool().await?;
 
     // 初始化日志
     log::setup_logging().await?;

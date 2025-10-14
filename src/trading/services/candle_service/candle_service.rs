@@ -47,8 +47,9 @@ impl CandleService {
             Some(cache_candle) => {
                 //只有当新数据的时间戳大于等于缓存中的时间戳，并且新数据的成交量大于等于缓存中的成交量时，才更新缓存
                 if new_ts > cache_candle.ts
-                   ||(new_ts == cache_candle.ts && first.vol_ccy.parse::<f64>().unwrap_or(0.0)
-                        >= cache_candle.vol_ccy.parse::<f64>().unwrap_or(0.0))
+                    || (new_ts == cache_candle.ts
+                        && first.vol_ccy.parse::<f64>().unwrap_or(0.0)
+                            >= cache_candle.vol_ccy.parse::<f64>().unwrap_or(0.0))
                 {
                     if_update_db = true;
                     if_update_cache = true;
@@ -73,17 +74,24 @@ impl CandleService {
                 tokio::spawn(async move {
                     let strategy_manager = get_strategy_manager();
                     if let Err(e) = strategy_manager
-                        .run_ready_to_order_with_manager(&inst_id_owned, &time_interval_owned,Some(snap))
+                        .run_ready_to_order_with_manager(
+                            &inst_id_owned,
+                            &time_interval_owned,
+                            Some(snap),
+                        )
                         .await
                     {
                         tracing::error!(
                             "❌ 策略执行失败: inst_id={}, time_interval={}, error={}",
-                            inst_id_owned, time_interval_owned, e
+                            inst_id_owned,
+                            time_interval_owned,
+                            e
                         );
                     } else {
                         tracing::info!(
                             "✅ 策略执行完成: inst_id={}, time_interval={}",
-                            inst_id_owned, time_interval_owned
+                            inst_id_owned,
+                            time_interval_owned
                         );
                     }
                 });
