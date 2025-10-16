@@ -2,28 +2,25 @@ use anyhow::anyhow;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
+use crate::app_config::env::{env_is_true, env_or_default};
 use crate::job::RiskBalanceWithLevelJob;
 use crate::socket;
 use crate::trading::indicator::vegas_indicator::VegasStrategy;
 use crate::trading::model::strategy::strategy_config::StrategyConfigEntityModel;
 use crate::trading::strategy::{
-    order::strategy_config::StrategyConfig,
-    strategy_common::BasicRiskStrategyConfig,
-    strategy_manager::get_strategy_manager,
-    StrategyType,
+    order::strategy_config::StrategyConfig, strategy_common::BasicRiskStrategyConfig,
+    strategy_manager::get_strategy_manager, StrategyType,
 };
 use crate::trading::task::{self, tickets_job};
 use okx::dto::EnumToStrTrait;
-use crate::app_config::env::{env_is_true, env_or_default};
 
 /// 运行基于环境变量控制的各个模式（数据同步、回测、WebSocket、实盘策略）
 pub async fn run_modes() -> anyhow::Result<()> {
     // 可根据需要从环境加载，当前保持项目的默认值
     // let inst_ids = Some(vec!["ETH-USDT-SWAP","BTC-USDT-SWAP","SOL-USDT-SWAP"]);
     // let period = Some(vec!["1H","4H","1Dutc"]);
-
-    let inst_ids = Some(vec!["ETH-USDT-SWAP"]);
-    let period = Some(vec!["4H"]);
+    let inst_ids = Some(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
+    let period = Some(vec!["1Dutc", "4H"]);
 
     // 1) 初始化需要同步的数据
     if env_is_true("IS_RUN_SYNC_DATA_JOB", false) {
@@ -52,12 +49,7 @@ pub async fn run_modes() -> anyhow::Result<()> {
                 for time in times.iter() {
                     let time = time.to_string();
                     if let Err(error) = task::basic::vegas_back_test(inst_id, &time).await {
-                        error!(
-                            "run strategy error: {} {} {}",
-                            error,
-                            inst_id,
-                            time
-                        );
+                        error!("run strategy error: {} {} {}", error, inst_id, time);
                     }
                 }
             }
@@ -105,11 +97,15 @@ pub async fn run_modes() -> anyhow::Result<()> {
                 let strategy_type = strategy.strategy_type;
 
                 if &strategy_type == StrategyType::Vegas.as_str() {
-                    let strategy_config: VegasStrategy = serde_json::from_str::<VegasStrategy>(&*strategy.value)
-                        .map_err(|e| anyhow!("Failed to parse VegasStrategy config: {}", e))?;
+                    let strategy_config: VegasStrategy =
+                        serde_json::from_str::<VegasStrategy>(&*strategy.value)
+                            .map_err(|e| anyhow!("Failed to parse VegasStrategy config: {}", e))?;
 
-                    let risk_config: BasicRiskStrategyConfig = serde_json::from_str::<BasicRiskStrategyConfig>(&*strategy.risk_config)
-                        .map_err(|e| anyhow!("Failed to parse BasicRiskStrategyConfig config: {}", e))?;
+                    let risk_config: BasicRiskStrategyConfig =
+                        serde_json::from_str::<BasicRiskStrategyConfig>(&*strategy.risk_config)
+                            .map_err(|e| {
+                                anyhow!("Failed to parse BasicRiskStrategyConfig config: {}", e)
+                            })?;
 
                     let _strategy_config = StrategyConfig {
                         strategy_config_id: strategy.id,
@@ -117,7 +113,10 @@ pub async fn run_modes() -> anyhow::Result<()> {
                         risk_config: serde_json::to_string(&risk_config)?,
                     };
 
-                    if let Err(e) = strategy_manager.start_strategy(strategy.id, inst_id.clone(), time.clone()).await {
+                    if let Err(e) = strategy_manager
+                        .start_strategy(strategy.id, inst_id.clone(), time.clone())
+                        .await
+                    {
                         error!("启动策略失败: 策略ID={}, 错误: {}", strategy.id, e);
                     }
                 }
@@ -127,7 +126,6 @@ pub async fn run_modes() -> anyhow::Result<()> {
 
     Ok(())
 }
-
 
 /// 应用入口总编排：初始化/校时/运行模式/心跳/信号/优雅关闭
 pub async fn run() -> anyhow::Result<()> {
@@ -152,7 +150,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     // 启动心跳任务，定期输出程序运行状态
     let heartbeat_handle = tokio::spawn(async {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
         loop {
             interval.tick().await;
             info!("💓 程序正在运行中，策略任务正常执行...");
@@ -185,13 +183,17 @@ pub async fn run() -> anyhow::Result<()> {
     let strategy_manager = get_strategy_manager();
     let strategy_stop_result = tokio::time::timeout(
         tokio::time::Duration::from_secs(shutdown_config.strategy_stop_timeout_secs),
-        strategy_manager.stop_all_strategies()
-    ).await;
+        strategy_manager.stop_all_strategies(),
+    )
+    .await;
 
     match strategy_stop_result {
         Ok(Ok(count)) => info!("已停止 {} 个策略任务", count),
         Ok(Err(e)) => error!("停止策略任务失败: {}", e),
-        Err(_) => error!("停止策略任务超时 ({}秒)", shutdown_config.strategy_stop_timeout_secs),
+        Err(_) => error!(
+            "停止策略任务超时 ({}秒)",
+            shutdown_config.strategy_stop_timeout_secs
+        ),
     }
 
     // 2. 执行优雅关闭
