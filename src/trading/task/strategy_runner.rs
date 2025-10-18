@@ -30,7 +30,7 @@ use crate::trading::task::backtest_executor::{
 use crate::trading::task::job_param_generator::ParamGenerator;
 use crate::trading::task::progress_manager::{RandomStrategyConfig, StrategyProgressManager};
 use crate::trading::task::strategy_config::{
-    get_strategy_config_from_db, test_specified_strategy_with_config, VegasBackTestConfig,
+    get_strategy_config_from_db, test_specified_strategy_with_config, BackTestConfig,
 };
 use crate::CandleItem;
 
@@ -279,7 +279,7 @@ pub async fn vegas_back_test(inst_id: &str, time: &str) -> Result<()> {
         inst_id, time
     );
 
-    let result = vegas_back_test_with_config(inst_id, time, VegasBackTestConfig::default()).await;
+    let result = back_test_with_config(inst_id, time, BackTestConfig::default()).await;
 
     let duration = start_time.elapsed();
     info!(
@@ -290,15 +290,14 @@ pub async fn vegas_back_test(inst_id: &str, time: &str) -> Result<()> {
     result
 }
 
-/// 带配置的 Vegas 策略回测
-pub async fn vegas_back_test_with_config(
+pub async fn back_test_with_config(
     inst_id: &str,
     time: &str,
-    config: VegasBackTestConfig,
+    config: BackTestConfig,
 ) -> Result<()> {
     let start_time = Instant::now();
     info!(
-        "[性能跟踪] vegas_back_test_with_config 开始 - inst_id={}, time={}, config={:?}",
+        "[性能跟踪] back_test_with_config 开始 - inst_id={}, time={}, config={:?}",
         inst_id, time, config
     );
 

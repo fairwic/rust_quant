@@ -6,6 +6,7 @@ pub mod back_test;
 pub mod okx;
 pub mod test_predicting;
 pub mod email;
+pub mod test_nwe;
 #[tokio::test]
 async fn test_mspc_job() -> anyhow::Result<()> {
     // 创建一个mpsc通道

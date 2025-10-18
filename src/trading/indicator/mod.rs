@@ -27,3 +27,5 @@ pub mod fair_value_gap_indicator;
 pub mod leg_detection_indicator;
 pub mod market_structure_indicator;
 pub mod premium_discount_indicator;
+pub mod nwe_indicator;
+pub mod atr_stop_loos;

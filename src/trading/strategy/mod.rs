@@ -11,6 +11,7 @@ pub mod strategy_manager;
 pub mod support_resistance;
 pub mod top_contract_strategy;
 pub mod ut_boot_strategy;
+pub mod nwe_strategy;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use log::{error, trace};

@@ -10,7 +10,7 @@ use crate::trading::indicator::vegas_indicator::VegasStrategy;
 
 /// Vegas 策略回测配置
 #[derive(Debug, Clone)]
-pub struct VegasBackTestConfig {
+pub struct BackTestConfig {
     /// 最大并发数
     pub max_concurrent: usize,
     /// K线数据限制
@@ -21,7 +21,7 @@ pub struct VegasBackTestConfig {
     pub enable_specified_test: bool,
 }
 
-impl Default for VegasBackTestConfig {
+impl Default for BackTestConfig {
     fn default() -> Self {
         Self {
             max_concurrent: 30,

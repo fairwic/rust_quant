@@ -7,3 +7,6 @@
 /log_files
 /okx
 .augment
+.cursor
+.specify
+/specs

@@ -1,7 +1,7 @@
 use rust_quant::app_config::{log, redis_config};
 use rust_quant::trading::task::basic::{
     RandomStrategyConfig, StrategyProgressManager,
-    test_random_strategy_with_config, vegas_back_test_with_config, VegasBackTestConfig
+    test_random_strategy_with_config, back_test_with_config, BackTestConfig
 };
 use tokio::sync::Semaphore;
 use std::sync::Arc;
