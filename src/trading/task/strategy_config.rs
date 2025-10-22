@@ -7,6 +7,7 @@ use crate::trading::model::strategy::strategy_config::{StrategyConfigEntity, Str
 use crate::trading::task::job_param_generator::ParamMergeBuilder;
 use crate::trading::strategy::strategy_common::BasicRiskStrategyConfig;
 use crate::trading::indicator::vegas_indicator::VegasStrategy;
+use crate::trading::strategy::nwe_strategy::NweStrategyConfig;
 
 /// Vegas 策略回测配置
 #[derive(Debug, Clone)]
@@ -15,10 +16,16 @@ pub struct BackTestConfig {
     pub max_concurrent: usize,
     /// K线数据限制
     pub candle_limit: usize,
-    /// 是否启用随机策略测试
     pub enable_random_test: bool,
+
+    /// 是否启用随机策略测试
+    pub enable_random_test_vegas: bool,
     /// 是否启用指定策略测试
-    pub enable_specified_test: bool,
+    pub enable_specified_test_vegas: bool,
+    /// 是否启用NWE随机回测
+    pub enable_random_test_nwe: bool,
+    /// 是否启用NWE指定配置回测
+    pub enable_specified_test_nwe: bool,
 }
 
 impl Default for BackTestConfig {
@@ -27,7 +34,11 @@ impl Default for BackTestConfig {
             max_concurrent: 30,
             candle_limit: 20000,
             enable_random_test: env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true",
-            enable_specified_test: env::var("ENABLE_SPECIFIED_TEST").unwrap_or_default() == "true",
+            enable_random_test_vegas: env::var("ENABLE_RANDOM_TEST_VEGAS").unwrap_or_default() == "true",
+            enable_specified_test_vegas: env::var("ENABLE_SPECIFIED_TEST_VEGAS").unwrap_or_default() == "true",
+
+            enable_random_test_nwe: env::var("ENABLE_RANDOM_TEST_NWE").unwrap_or_default() == "true",
+            enable_specified_test_nwe: env::var("ENABLE_SPECIFIED_TEST_NWE").unwrap_or_default() == "true",
         }
     }
 }
@@ -92,7 +103,7 @@ pub async fn test_specified_strategy_with_config(
         .rsi_overbought(90.0)
         .rsi_oversold(20.0)
         .max_loss_percent(0.03)
-        .is_take_profit(true)
+        .take_profit_ratio(1.5)
         .is_move_stop_loss(true)
         .is_used_signal_k_line_stop_loss(true)];
     //1H
@@ -108,7 +119,7 @@ pub async fn test_specified_strategy_with_config(
         .rsi_overbought(85.0)
         .rsi_oversold(15.0)
         .max_loss_percent(0.02)
-        .is_take_profit(true)
+        .take_profit_ratio(1.5)
         .is_move_stop_loss(false)
         .is_used_signal_k_line_stop_loss(true)];
     Ok(params_batch)
@@ -160,7 +171,7 @@ fn convert_strategy_config_to_param(
         .kline_end_time(config.kline_end_time)
         //risk
         .max_loss_percent(risk_config.max_loss_percent)
-        .is_take_profit(risk_config.is_take_profit)
+        .take_profit_ratio(risk_config.take_profit_ratio)
         .is_move_stop_loss(risk_config.is_one_k_line_diff_stop_loss)
         .is_used_signal_k_line_stop_loss(risk_config.is_used_signal_k_line_stop_loss);
 

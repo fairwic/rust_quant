@@ -21,7 +21,7 @@ async fn test_okx_order() {
     // builder.default_format();
     // builder.init();
     app_init().await;
-    let inst_id = "ETH-USDT-SWAP";
+    let inst_id = "BTC-USDT-SWAP";
     let period = "4H";
 
     println!("🧪 开始测试OKX订单功能");
@@ -32,8 +32,8 @@ async fn test_okx_order() {
     let signal_result = SignalResult {
         should_buy: false,
         should_sell: true,
-        open_price: 110838.0,
-        signal_kline_stop_loss_price: Some(130921.0),
+        open_price: 108097.0,
+        signal_kline_stop_loss_price: Some(110921.0),
         best_open_price: None,
         best_take_profit_price: None,
         ts: 0,

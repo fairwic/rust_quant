@@ -42,20 +42,43 @@ pub async fn run_modes() -> anyhow::Result<()> {
         // }
     }
 
-    // 2) 本地环境下执行回测任务
+    // 2) 本地环境下执行回测任务（Vegas）
     if env_is_true("IS_BACK_TEST", false) {
         info!("IS_BACK_TEST 已启用");
         if let (Some(inst_id), Some(times)) = (inst_ids.clone(), period.clone()) {
             for inst_id in inst_id {
                 for time in times.iter() {
                     let time = time.to_string();
-                    if let Err(error) = task::basic::vegas_back_test(inst_id, &time).await {
+                    if let Err(error) = task::basic::back_test(inst_id, &time).await {
                         error!("run strategy error: {} {} {}", error, inst_id, time);
                     }
                 }
             }
         } else {
             warn!("跳过回测：未设置 inst_ids 或 period");
+        }
+    }
+
+    // 2.1) 本地环境下执行 NWE 回测开关（与 Vegas 同步入口，开关在 BackTestConfig 内）
+    if env_is_true("IS_BACK_TEST_NWE", false) {
+        info!("IS_BACK_TEST_NWE 已启用");
+        if let (Some(inst_id), Some(times)) = (inst_ids.clone(), period.clone()) {
+            for inst_id in inst_id {
+                for time in times.iter() {
+                    let time = time.to_string();
+                    if let Err(error) = task::basic::back_test_with_config(
+                        inst_id,
+                        &time,
+                        crate::trading::task::strategy_config::BackTestConfig::default(),
+                    )
+                    .await
+                    {
+                        error!("run NWE backtest error: {} {} {}", error, inst_id, time);
+                    }
+                }
+            }
+        } else {
+            warn!("跳过NWE回测：未设置 inst_ids 或 period");
         }
     }
 

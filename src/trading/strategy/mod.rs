@@ -60,6 +60,7 @@ pub enum StrategyType {
     Engulfing,
     TopContract,
     Vegas,
+    Nwe,
 }
 impl EnumToStrTrait for StrategyType {
     fn as_str(&self) -> &'static str {
@@ -75,6 +76,7 @@ impl EnumToStrTrait for StrategyType {
             StrategyType::Engulfing => "Engulfing",
             StrategyType::TopContract => "TopContract",
             StrategyType::Vegas => "Vegas",
+            StrategyType::Nwe => "Nwe",
         }
     }
 }

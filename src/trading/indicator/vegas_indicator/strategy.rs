@@ -7,6 +7,7 @@ use crate::trading::indicator::signal_weight::{
 use crate::trading::strategy::strategy_common::{
     BackTestResult, BasicRiskStrategyConfig, SignalResult,
 };
+use crate::trading::strategy::Strategy;
 use crate::{time_util, CandleItem};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -60,6 +61,11 @@ impl VegasStrategy {
             kline_hammer_signal: Some(KlineHammerConfig::default()),
         }
     }
+
+    pub fn get_strategy_name() -> String {
+        "vegas".to_string()
+    }
+
     /// 获取最小数据长度
     pub fn get_min_data_length(&mut self) -> usize {
         self.min_k_line_num

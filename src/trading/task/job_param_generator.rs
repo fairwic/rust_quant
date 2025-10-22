@@ -21,7 +21,7 @@ pub struct ParamMergeBuilder {
     pub kline_end_time: Option<i64>,
     //risk
     pub max_loss_percent: f64,                 // 最大止损百分比
-    pub is_take_profit: bool,                 // 盈利阈值，用于动态止盈
+    pub take_profit_ratio: f64,                  // 盈利阈值，用于动态止盈
     pub is_move_stop_loss: bool,               //是否使用移动止损,当盈利之后,止损价格变成开仓价
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
 }
@@ -83,8 +83,8 @@ impl ParamMergeBuilder {
         self.max_loss_percent = max_loss_percent;
         self
     }
-    pub fn is_take_profit(mut self, profit_threshold: bool) -> Self {
-        self.is_take_profit = profit_threshold;
+    pub fn take_profit_ratio(mut self, take_profit_ratio: f64) -> Self {
+        self.take_profit_ratio = take_profit_ratio;
         self
     }
     pub fn is_move_stop_loss(mut self, is_move_stop_loss: bool) -> Self {
@@ -110,12 +110,12 @@ pub struct ParamGenerator {
     volume_ratios: Vec<f64>,
     breakthrough_thresholds: Vec<f64>,
     rsi_periods: Vec<usize>,
-    rsi_over_buy_sell: Vec<(f64,f64)>,
+    rsi_over_buy_sell: Vec<(f64, f64)>,
     current_index: usize,
     total_count: usize,
     //risk
     max_loss_percent: Vec<f64>,
-    is_take_profit: Vec<bool>,
+    take_profit_ratios: Vec<f64>,
     is_move_stop_loss: Vec<bool>,
     is_used_signal_k_line_stop_loss: Vec<bool>,
 }
@@ -129,9 +129,9 @@ impl ParamGenerator {
         volume_ratios: Vec<f64>,
         breakthrough_thresholds: Vec<f64>,
         rsi_periods: Vec<usize>,
-        rsi_over_buy_sell: Vec<(f64,f64)>,
+        rsi_over_buy_sell: Vec<(f64, f64)>,
         max_loss_percent: Vec<f64>,
-        is_take_profit: Vec<bool>,
+        take_profit_ratios: Vec<f64>,
         is_move_stop_loss: Vec<bool>,
         is_used_signal_k_line_stop_loss: Vec<bool>,
     ) -> Self {
@@ -144,7 +144,7 @@ impl ParamGenerator {
             * rsi_periods.len()
             * rsi_over_buy_sell.len()
             * max_loss_percent.len()
-            * is_take_profit.len()
+            * take_profit_ratios.len()
             * is_move_stop_loss.len()
             * is_used_signal_k_line_stop_loss.len();
 
@@ -160,7 +160,7 @@ impl ParamGenerator {
             current_index: 0,
             total_count,
             max_loss_percent,
-            is_take_profit,
+            take_profit_ratios,
             is_move_stop_loss,
             is_used_signal_k_line_stop_loss,
         }
@@ -184,7 +184,7 @@ impl ParamGenerator {
             let rob_size = self.rsi_over_buy_sell.len();
 
             let mlp_size = self.max_loss_percent.len();
-            let pt_size = self.is_take_profit.len();
+            let pt_size = self.take_profit_ratios.len();
             let mst_size = self.is_move_stop_loss.len();
             let usklsl_size = self.is_used_signal_k_line_stop_loss.len();
 
@@ -218,8 +218,8 @@ impl ParamGenerator {
             let i_mlp = index % self.max_loss_percent.len();
             index /= self.max_loss_percent.len();
 
-            let i_pt = index % self.is_take_profit.len();
-            index /= self.is_take_profit.len();
+            let i_pt = index % self.take_profit_ratios.len();
+            index /= self.take_profit_ratios.len();
 
             let i_mst = index % self.is_move_stop_loss.len();
             index /= self.is_move_stop_loss.len();
@@ -242,7 +242,7 @@ impl ParamGenerator {
                 kline_start_time: None,
                 kline_end_time: None,
                 max_loss_percent: self.max_loss_percent[i_mlp],
-                is_take_profit: self.is_take_profit[i_pt],
+                take_profit_ratio: self.take_profit_ratios[i_pt],
                 is_move_stop_loss: self.is_move_stop_loss[i_mst],
                 is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
             };
@@ -280,5 +280,170 @@ impl ParamGenerator {
         } else {
             self.total_count - self.current_index
         }
+    }
+}
+
+// ================================
+// NWE 参数生成器（网格/顺序遍历）
+// ================================
+#[derive(Clone)]
+pub struct NweParamGenerator {
+    rsi_periods: Vec<usize>,
+    rsi_over_buy_sell: Vec<(f64, f64)>,
+
+    atr_periods: Vec<usize>,
+    atr_multipliers: Vec<f64>,
+
+    volume_bar_nums: Vec<usize>,
+    volume_ratios: Vec<f64>,
+
+    nwe_periods: Vec<usize>,
+    nwe_multi: Vec<f64>,
+
+    // 风险参数空间
+    max_loss_percent: Vec<f64>,
+    take_profit_ratios: Vec<f64>,
+    is_move_stop_loss: Vec<bool>,
+    is_used_signal_k_line_stop_loss: Vec<bool>,
+
+    current_index: usize,
+    total_count: usize,
+}
+
+impl NweParamGenerator {
+    pub fn new(
+        rsi_periods: Vec<usize>,
+        rsi_over_buy_sell: Vec<(f64, f64)>,
+        atr_periods: Vec<usize>,
+        atr_multipliers: Vec<f64>,
+        volume_bar_nums: Vec<usize>,
+        volume_ratios: Vec<f64>,
+        nwe_periods: Vec<usize>,
+        nwe_multi: Vec<f64>,
+        // 风险参数
+        max_loss_percent: Vec<f64>,
+        take_profit_ratios: Vec<f64>,
+        is_move_stop_loss: Vec<bool>,
+        is_used_signal_k_line_stop_loss: Vec<bool>,
+    ) -> Self {
+        let total_count = rsi_periods.len()
+            * rsi_over_buy_sell.len()
+            * atr_periods.len()
+            * atr_multipliers.len()
+            * volume_bar_nums.len()
+            * volume_ratios.len()
+            * nwe_periods.len()
+            * nwe_multi.len()
+            * max_loss_percent.len()
+            * take_profit_ratios.len()
+            * is_move_stop_loss.len()
+            * is_used_signal_k_line_stop_loss.len();
+        Self {
+            rsi_periods,
+            rsi_over_buy_sell,
+            atr_periods,
+            atr_multipliers,
+            volume_bar_nums,
+            volume_ratios,
+            nwe_periods,
+            nwe_multi,
+            max_loss_percent,
+            take_profit_ratios,
+            is_move_stop_loss,
+            is_used_signal_k_line_stop_loss,
+            current_index: 0,
+            total_count,
+        }
+    }
+
+    pub fn get_next_batch(
+        &mut self,
+        batch_size: usize,
+    ) -> Vec<(
+        crate::trading::strategy::nwe_strategy::NweStrategyConfig,
+        crate::trading::strategy::strategy_common::BasicRiskStrategyConfig,
+    )> {
+        let mut batch = Vec::with_capacity(batch_size);
+        while batch.len() < batch_size && self.current_index < self.total_count {
+            let mut idx = self.current_index;
+            let rp_len = self.rsi_periods.len();
+            let rob_len = self.rsi_over_buy_sell.len();
+            let ap_len = self.atr_periods.len();
+            let am_len = self.atr_multipliers.len();
+            let vbn_len = self.volume_bar_nums.len();
+            let vr_len = self.volume_ratios.len();
+            let nwe_p_len = self.nwe_periods.len();
+            let nwe_m_len = self.nwe_multi.len();
+            let mlp_len = self.max_loss_percent.len();
+            let tpr_len = self.take_profit_ratios.len();
+            let msl_len = self.is_move_stop_loss.len();
+            let usklsl_len = self.is_used_signal_k_line_stop_loss.len();
+
+            // 按维度展开索引（顺序需与 total_count 维度相同）
+            let i_rp = idx % rp_len;
+            idx /= rp_len;
+            let i_rob = idx % rob_len;
+            idx /= rob_len;
+            let i_ap = idx % ap_len;
+            idx /= ap_len;
+            let i_am = idx % am_len;
+            idx /= am_len;
+            let i_vbn = idx % vbn_len;
+            idx /= vbn_len;
+            let i_vr = idx % vr_len;
+            idx /= vr_len;
+            let i_nwe_p = idx % nwe_p_len;
+            idx /= nwe_p_len;
+            let i_nwe_m = idx % nwe_m_len;
+            idx /= nwe_m_len;
+
+            let i_mlp = idx % mlp_len;
+            idx /= mlp_len;
+            let i_tpr = idx % tpr_len;
+            idx /= tpr_len;
+            let i_msl = idx % msl_len;
+            idx /= msl_len;
+            let i_usklsl = idx % usklsl_len; // 最后一维无需再除
+
+            let cfg = crate::trading::strategy::nwe_strategy::NweStrategyConfig {
+                period: "5m".to_string(),
+                rsi_period: self.rsi_periods[i_rp],
+                rsi_overbought: self.rsi_over_buy_sell[i_rob].0,
+                rsi_oversold: self.rsi_over_buy_sell[i_rob].1,
+                atr_period: self.atr_periods[i_ap],
+                atr_multiplier: self.atr_multipliers[i_am],
+                nwe_period: self.nwe_periods[i_nwe_p],
+                nwe_multi: self.nwe_multi[i_nwe_m],
+                volume_bar_num: self.volume_bar_nums[i_vbn],
+                volume_ratio: self.volume_ratios[i_vr],
+                // 使用 NWE 周期作为最小数据长度的基线，确保指标有足够数据
+                min_k_line_num: self.nwe_periods[i_nwe_p].max(200),
+            };
+            let risk = crate::trading::strategy::strategy_common::BasicRiskStrategyConfig {
+                is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
+                max_loss_percent: self.max_loss_percent[i_mlp],
+                take_profit_ratio: self.take_profit_ratios[i_tpr],
+                is_one_k_line_diff_stop_loss: self.is_move_stop_loss[i_msl],
+            };
+            batch.push((cfg, risk));
+            self.current_index += 1;
+        }
+        batch
+    }
+
+    pub fn progress(&self) -> (usize, usize) {
+        (self.current_index, self.total_count)
+    }
+    pub fn set_current_index(&mut self, index: usize) {
+        self.current_index = index.min(self.total_count);
+    }
+    pub fn reset(&mut self) {
+        self.current_index = 0;
+    }
+    pub fn is_completed(&self) -> bool {
+        self.current_index >= self.total_count
+    }
+    pub fn remaining_count(&self) -> usize {
+        self.total_count.saturating_sub(self.current_index)
     }
 }

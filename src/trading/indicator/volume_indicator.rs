@@ -50,7 +50,12 @@ impl VolumeRatioIndicator {
 
             self.prev_volumes.remove(0);
         }
-        let volume_ratio = current_volume / self.avg_volume();
+        let denom = self.avg_volume();
+        let volume_ratio = if denom == 0.0 || denom.is_nan() {
+            0.0
+        } else {
+            current_volume / denom
+        };
         self.prev_volumes.push(current_volume);
 
         volume_ratio

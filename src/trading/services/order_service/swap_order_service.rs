@@ -167,7 +167,7 @@ impl SwapOrderService {
                 AppError::DbError(e.to_string())
             })?;
         if exists.len() > 0 {
-            info!(
+            warn!(
                 "same period same inst_id same side already exists, skip order: inst_id={}, period={}, side={}, pos_side={}",
                 inst_id,
                 period,

@@ -23,6 +23,8 @@ use crate::trading::model::strategy::back_test_log::{BackTestLog, BackTestLogMod
 use crate::trading::model::strategy::{back_test_detail, back_test_log};
 use crate::trading::strategy::strategy_common::{BackTestResult, BasicRiskStrategyConfig, TradeRecord};
 use crate::trading::strategy::{StrategyType, Strategy};
+use crate::trading::strategy::nwe_strategy::NweStrategyConfig;
+use crate::trading::strategy::nwe_strategy::NweStrategy;
 use crate::trading::task::data_validator;
 use crate::trading::task::job_param_generator::ParamMergeBuilder;
 use crate::CandleItem;
@@ -51,10 +53,42 @@ pub async fn run_vegas_test(
         res,
         mysql_candles,
         risk_strategy_config,
+        StrategyType::Vegas.as_str(),
     )
     .await?;
 
     // 返回 back_test_id
+    Ok(back_test_id)
+}
+
+/// 运行 NWE 策略测试
+pub async fn run_nwe_test(
+    inst_id: &str,
+    time: &str,
+    mut strategy: NweStrategy,
+    risk_strategy_config: BasicRiskStrategyConfig,
+    mysql_candles: Arc<Vec<CandleItem>>,
+) -> Result<i64> {
+    let start_time = Instant::now();
+
+    // 策略测试阶段
+    let res = strategy.run_test(&mysql_candles, risk_strategy_config);
+
+    // 配置描述构建阶段
+    let config_desc = serde_json::to_string(&strategy.config).ok();
+
+    // 保存测试日志并获取 back_test_id
+    let back_test_id = save_log(
+        inst_id,
+        time,
+        config_desc,
+        res,
+        mysql_candles,
+        risk_strategy_config,
+        &StrategyType::Nwe.as_str(),
+    )
+    .await?;
+
     Ok(back_test_id)
 }
 
@@ -66,11 +100,12 @@ pub async fn save_log(
     back_test_result: BackTestResult,
     mysql_candles: Arc<Vec<CandleItem>>,
     risk_strategy_config: BasicRiskStrategyConfig,
+    strategy_name: &str,
 ) -> Result<i64> {
     // 构建日志对象阶段
     let back_test_log = BackTestLog {
         // 需要确定策略类型，这里使用参数传入或推断
-        strategy_type: "vegas".to_string(),
+        strategy_type: strategy_name.to_string(),
         inst_type: inst_id.parse().unwrap(),
         time: time.parse().unwrap(),
         final_fund: back_test_result.funds.to_string(), // 确保字段名称正确
@@ -111,6 +146,9 @@ pub async fn save_log(
     }
     Ok(back_test_id)
 }
+
+/// 通用保存函数，允许指定策略类型
+// 通用保存函数移除，统一使用 save_log
 
 /// 保存测试详情
 pub async fn save_test_detail(
@@ -296,7 +334,7 @@ pub async fn run_back_test_strategy(
 
         let risk_strategy_config = BasicRiskStrategyConfig {
             max_loss_percent: param.max_loss_percent,
-            is_take_profit: param.is_take_profit,
+            take_profit_ratio: param.take_profit_ratio,
             is_one_k_line_diff_stop_loss: param.is_move_stop_loss,
             is_used_signal_k_line_stop_loss: param.is_used_signal_k_line_stop_loss,
         };
@@ -363,6 +401,46 @@ pub async fn run_back_test_strategy(
                 Ok(back_test_id) => Some(back_test_id),
                 Err(e) => {
                     error!("Vegas test failed: {:?}", e);
+                    None
+                }
+            }
+        }));
+    }
+
+    // 等待当前批次完成
+    join_all(batch_tasks).await;
+}
+
+/// 运行一组 NWE 策略（随机/网格参数）回测，复用与 Vegas 相同的并发调度思路
+pub async fn run_nwe_random_batch(
+    params_batch: Vec<(NweStrategyConfig, crate::trading::strategy::strategy_common::BasicRiskStrategyConfig)>,
+    inst_id: &str,
+    time: &str,
+    arc_candle_item_clone: Arc<Vec<CandleItem>>,
+    semaphore: Arc<Semaphore>,
+) {
+    let mut batch_tasks = Vec::with_capacity(params_batch.len());
+    for (cfg, risk_cfg) in params_batch {
+        let strategy = NweStrategy::new(cfg);
+        let inst_id = inst_id.to_string();
+        let time = time.to_string();
+        let mysql_candles = Arc::clone(&arc_candle_item_clone);
+        let permit = Arc::clone(&semaphore);
+
+        batch_tasks.push(tokio::spawn(async move {
+            let _permit: tokio::sync::SemaphorePermit<'_> = permit.acquire().await.unwrap();
+            match run_nwe_test(
+                &inst_id,
+                &time,
+                strategy,
+                risk_cfg,
+                mysql_candles,
+            )
+            .await
+            {
+                Ok(back_test_id) => Some(back_test_id),
+                Err(e) => {
+                    error!("NWE test failed: {:?}", e);
                     None
                 }
             }

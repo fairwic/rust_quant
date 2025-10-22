@@ -13,6 +13,7 @@ use crate::trading::indicator::vegas_indicator::{
 };
 use crate::trading::indicator::volume_indicator::VolumeRatioIndicator;
 use crate::trading::model::entity::candles::entity::CandlesEntity;
+use crate::trading::strategy::nwe_strategy::NweStrategy;
 use crate::trading::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
 use crate::trading::utils::fibonacci::FIBONACCI_ONE_POINT_TWO_THREE_SIX;
 use crate::{time_util, CandleItem};
@@ -36,6 +37,53 @@ use tracing::Level;
 use tracing::{error, info};
 use tracing::{span, warn};
 
+/// 通用回测策略能力接口，便于不同策略复用统一回测与落库流程
+pub trait BackTestAbleStrategyTrait {
+    fn strategy_type(&self) -> crate::trading::strategy::StrategyType;
+    fn config_json(&self) -> Option<String>;
+    fn run_test(
+        &mut self,
+        candles: &Vec<CandleItem>,
+        risk_strategy_config: BasicRiskStrategyConfig,
+    ) -> BackTestResult;
+}
+
+impl BackTestAbleStrategyTrait for VegasStrategy {
+    fn strategy_type(&self) -> crate::trading::strategy::StrategyType {
+        crate::trading::strategy::StrategyType::Vegas
+    }
+
+    fn config_json(&self) -> Option<String> {
+        serde_json::to_string(self).ok()
+    }
+
+    fn run_test(
+        &mut self,
+        candles: &Vec<CandleItem>,
+        risk_strategy_config: BasicRiskStrategyConfig,
+    ) -> BackTestResult {
+        VegasStrategy::run_test(self, candles, risk_strategy_config)
+    }
+}
+
+impl BackTestAbleStrategyTrait for NweStrategy {
+    fn strategy_type(&self) -> crate::trading::strategy::StrategyType {
+        crate::trading::strategy::StrategyType::Nwe
+    }
+
+    fn config_json(&self) -> Option<String> {
+        // 仅记录配置内容
+        serde_json::to_string(&self.config).ok()
+    }
+
+    fn run_test(
+        &mut self,
+        candles: &Vec<CandleItem>,
+        risk_strategy_config: BasicRiskStrategyConfig,
+    ) -> BackTestResult {
+        NweStrategy::run_test(self, candles, risk_strategy_config)
+    }
+}
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BackTestResult {
     pub funds: f64,
@@ -305,7 +353,7 @@ pub struct BasicRiskStrategyConfig {
     pub is_used_signal_k_line_stop_loss: bool, //(开仓K线止盈止损),多单时,当价格低于入场k线的最低价时,止损;空单时,
     // 价格高于入场k线的最高价时,止损
     pub max_loss_percent: f64, // 最大止损百分比(避免当k线振幅过大，使用k线最低/高价止损时候，造成太大的亏损)
-    pub is_take_profit: bool,  // 是否设置止盈，比如当盈利超过1:1时，开始启用动态止盈,
+    pub take_profit_ratio: f64, // 止盈比例，比如当盈利超过1.5:1时，直接止盈，适用短线策略
     // 1:1时候设置止损价格为开仓价格(保本)，价格到达赢利点1:2的时候，设置止损价格为开仓价格+1:1(保证本金+1:1的利润),当赢利点达到1：3的时候，设置止损价格为开仓价格+1:2(保证本金+1:2的利润)
     pub is_one_k_line_diff_stop_loss: bool, // 是否使用固定止损最大止损为1:1开多+(当前k线的最高价-最低价) 开空-
                                             // (当前k线的最高价-最低价)
@@ -316,7 +364,7 @@ impl Default for BasicRiskStrategyConfig {
         Self {
             is_used_signal_k_line_stop_loss: true,
             max_loss_percent: 0.02,              // 默认3%止损
-            is_take_profit: false,               // 默认1%盈利开始启用动态止盈
+            take_profit_ratio: 0.00,             // 默认1%盈利开始启用动态止盈
             is_one_k_line_diff_stop_loss: false, // 默认不使用移动止损
         }
     }
@@ -374,8 +422,12 @@ pub fn get_multi_indicator_values(
     if let Some(volume_indicator) = &mut indicator_combine.volume_indicator {
         vegas_indicator_signal_value.volume_value.volume_value = volume;
         vegas_indicator_signal_value.volume_value.volume_ratio = volume_indicator.next(volume);
-        vegas_indicator_signal_value.volume_value.is_increasing_than_pre = volume_indicator.is_increasing_than_pre();
-        vegas_indicator_signal_value.volume_value.is_decreasing_than_pre = volume_indicator.is_decreasing_than_pre();
+        vegas_indicator_signal_value
+            .volume_value
+            .is_increasing_than_pre = volume_indicator.is_increasing_than_pre();
+        vegas_indicator_signal_value
+            .volume_value
+            .is_decreasing_than_pre = volume_indicator.is_decreasing_than_pre();
     }
     if volume_start.elapsed().as_millis() > 10 {
         warn!(
@@ -595,6 +647,64 @@ pub fn run_back_test(
     result
 }
 
+/// 通用回测引擎：支持自定义指标组合与指标值结构
+pub fn run_back_test_generic<IC, IV>(
+    mut strategy: impl FnMut(&[CandleItem], &mut IV) -> SignalResult,
+    candles_list: &Vec<CandleItem>,
+    basic_risk_config: BasicRiskStrategyConfig,
+    min_data_length: usize,
+    indicator_combine: &mut IC,
+    mut build_values: impl FnMut(&mut IC, &CandleItem) -> IV,
+) -> BackTestResult {
+    use tracing::{info, warn};
+    let mut trading_state = TradingState::default();
+    use std::collections::VecDeque;
+    let mut candle_item_list: VecDeque<CandleItem> = VecDeque::with_capacity(candles_list.len());
+    // 由调用方控制所需窗口，这里仅保证最小长度
+    let dynamic_lookback = min_data_length;
+
+    for (i, candle) in candles_list.iter().enumerate() {
+        // 计算自定义指标
+        let mut multi_indicator_values = build_values(indicator_combine, &candle);
+
+        candle_item_list.push_back(candle.clone());
+        if candle_item_list.len() > dynamic_lookback {
+            let _ = candle_item_list.pop_front();
+        }
+        if candle_item_list.len() < dynamic_lookback {
+            continue;
+        }
+
+        let mut signal = strategy(
+            candle_item_list.make_contiguous(),
+            &mut multi_indicator_values,
+        );
+
+        let should_process_signal = signal.should_buy
+            || signal.should_sell
+            || trading_state.trade_position.is_some()
+            || trading_state.last_signal_result.is_some();
+
+        if should_process_signal {
+            trading_state = deal_signal(
+                trading_state,
+                &mut signal,
+                candle,
+                basic_risk_config,
+                &candle_item_list,
+                i,
+            );
+        }
+    }
+    finalize_trading_state(&mut trading_state, &candle_item_list);
+    BackTestResult {
+        funds: trading_state.funds,
+        win_rate: calculate_win_rate(trading_state.wins, trading_state.losses),
+        open_trades: trading_state.open_position_times,
+        trade_records: trading_state.trade_records,
+    }
+}
+
 pub fn parse_candle_to_data_item(candle: &CandlesEntity) -> CandleItem {
     CandleItem::builder()
         .c(candle.c.parse::<f64>().unwrap())
@@ -732,21 +842,49 @@ pub fn check_risk_config(
         }
     }
 
-    //检查移动止损
-    if risk_config.is_take_profit {
+    //检查按收益比例止盈
+    if risk_config.take_profit_ratio > 0.0 {
         match trade_position.trade_side {
             TradeSide::Long => {
-                if current_close_price >= trade_position.touch_take_profit_price.unwrap() {
+                if current_high_price >= trade_position.touch_take_profit_price.unwrap() {
                     trade_position.signal_kline_stop_close_price = Some(trade_position.open_price);
                     //重新赋值
                     trading_state.trade_position = Some(trade_position.clone());
+
+                    let profit = (current_high_price - trade_position.touch_take_profit_price.unwrap()) * trade_position.position_nums;
+                    trade_position.close_price =
+                        Some(trade_position.touch_take_profit_price.unwrap());
+                    //重新赋值
+                    trading_state.trade_position = Some(trade_position);
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "按收益比例止盈",
+                        profit,
+                    );
+                    return trading_state;
                 }
             }
             TradeSide::Short => {
-                if current_close_price <= trade_position.touch_take_profit_price.unwrap() {
+                if current_low_price <= trade_position.touch_take_profit_price.unwrap() {
                     trade_position.signal_kline_stop_close_price = Some(trade_position.open_price);
                     //重新赋值
                     trading_state.trade_position = Some(trade_position.clone());
+                    let profit = (entry_price - trade_position.touch_take_profit_price.unwrap())
+                        * trade_position.position_nums;
+                    trade_position.close_price =
+                        Some(trade_position.touch_take_profit_price.unwrap());
+                    //重新赋值
+                    trading_state.trade_position = Some(trade_position);
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "按收益比例止盈",
+                        profit,
+                    );
+                    return trading_state;
                 }
             }
             _ => {}
@@ -1115,10 +1253,12 @@ fn open_long_position(
     }
 
     // 如果启用了移动止盈,则设置移动止盈价格为当前k线的最高价
-    if risk_config.is_take_profit {
+    if risk_config.take_profit_ratio > 0.0 {
         temp_trade_position.signal_high_low_diff = candle.h - candle.l;
-        temp_trade_position.touch_take_profit_price =
-            Some(signal.open_price + temp_trade_position.signal_high_low_diff);
+        temp_trade_position.touch_take_profit_price = Some(
+            signal.open_price
+                + temp_trade_position.signal_high_low_diff * risk_config.take_profit_ratio,
+        );
     }
 
     state.trade_position = Some(temp_trade_position);
@@ -1165,10 +1305,11 @@ fn open_short_position(
         trade_position.signal_kline_stop_close_price = signal.signal_kline_stop_loss_price;
     }
     //如果启用了移动止盈,则设置移动止盈价格为当前k线的最低价-当前k线的最高价-当前k线的最低价
-    if risk_config.is_take_profit {
+    if risk_config.take_profit_ratio > 0.0 {
         trade_position.signal_high_low_diff = candle.h - candle.l;
-        trade_position.touch_take_profit_price =
-            Some(signal.open_price - trade_position.signal_high_low_diff);
+        trade_position.touch_take_profit_price = Some(
+            signal.open_price - trade_position.signal_high_low_diff * risk_config.take_profit_ratio,
+        );
         if signal.ts == 1755446400000 {
             log::info!(
                 "移动止盈价格:{}",

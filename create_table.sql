@@ -28,7 +28,7 @@ CREATE TABLE `strategy_job_signal_log` (
   `inst_id` varchar(50) CHARACTER SET utf8mb4   NOT NULL COMMENT '交易产品id',
   `time` varchar(10) CHARACTER SET utf8mb4   NOT NULL COMMENT '交易周期',
   `strategy_type` varchar(50) CHARACTER SET utf8mb4   NOT NULL COMMENT '策略类型',
-  `strategy_result` varchar(3000) CHARACTER SET utf8mb4   NOT NULL COMMENT '策略结果',
+  `strategy_result` varchar(4000) CHARACTER SET utf8mb4   NOT NULL COMMENT '策略结果',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)

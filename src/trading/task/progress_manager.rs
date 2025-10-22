@@ -18,6 +18,51 @@ pub struct StrategyTestProgress {
     pub status: String,                // 状态：running, completed, paused, error
 }
 
+/// NWE 随机策略测试配置
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NweRandomStrategyConfig {
+    pub rsi_periods: Vec<usize>,
+    pub rsi_over_buy_sell: Vec<(f64, f64)>,
+    pub atr_periods: Vec<usize>,
+    pub atr_multipliers: Vec<f64>,
+    pub volume_bar_nums: Vec<usize>,
+    pub volume_ratios: Vec<f64>,
+    pub nwe_periods: Vec<usize>,
+    pub nwe_multi: Vec<f64>,
+    pub batch_size: usize,
+    // 风险参数（对齐 Vegas 随机参数生成）
+    pub max_loss_percent: Vec<f64>,
+    pub take_profit_ratios: Vec<f64>,
+    pub is_move_stop_loss: Vec<bool>,
+    pub is_used_signal_k_line_stop_loss: Vec<bool>,
+}
+
+impl NweRandomStrategyConfig {
+    /// 计算配置的哈希值
+    pub fn calculate_hash(&self) -> String {
+        let config_json = serde_json::to_string(self).unwrap_or_default();
+        let mut hasher = DefaultHasher::new();
+        config_json.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
+
+    /// 计算总的参数组合数
+    pub fn calculate_total_combinations(&self) -> usize {
+        self.rsi_periods.len()
+            * self.rsi_over_buy_sell.len()
+            * self.atr_periods.len()
+            * self.atr_multipliers.len()
+            * self.volume_bar_nums.len()
+            * self.volume_ratios.len()
+            * self.nwe_periods.len()
+            * self.nwe_multi.len()
+            * self.max_loss_percent.len()
+            * self.take_profit_ratios.len()
+            * self.is_move_stop_loss.len()
+            * self.is_used_signal_k_line_stop_loss.len()
+    }
+}
+
 /// 随机策略测试配置
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RandomStrategyConfig {
@@ -32,7 +77,7 @@ pub struct RandomStrategyConfig {
     pub batch_size: usize,
     //risk
     pub max_loss_percent: Vec<f64>,
-    pub is_take_profit: Vec<bool>,
+    pub take_profit_ratios: Vec<f64>,
     pub is_move_stop_loss: Vec<bool>,
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
 }
@@ -51,7 +96,7 @@ impl Default for RandomStrategyConfig {
             batch_size: 100,
             //risk
             max_loss_percent: vec![0.03, 0.04, 0.05],
-            is_take_profit: vec![true, false],
+            take_profit_ratios: vec![0.0, 1.0, 1.5, 1.8, 2.0, 2.2, 2.4],
             is_move_stop_loss: vec![false, true],
             is_used_signal_k_line_stop_loss: vec![true, false],
         }
@@ -78,7 +123,7 @@ impl RandomStrategyConfig {
             * self.rsi_periods.len()
             * self.rsi_over_buy_sell.len()
             * self.max_loss_percent.len()
-            * self.is_take_profit.len()
+            * self.take_profit_ratios.len()
             * self.is_move_stop_loss.len()
             * self.is_used_signal_k_line_stop_loss.len()
     }
@@ -134,11 +179,38 @@ impl StrategyProgressManager {
         current_hash != saved_progress.config_hash
     }
 
+    /// 检查 NWE 配置是否变化
+    pub fn is_config_changed_nwe(
+        current_config: &NweRandomStrategyConfig,
+        saved_progress: &StrategyTestProgress,
+    ) -> bool {
+        let current_hash = current_config.calculate_hash();
+        current_hash != saved_progress.config_hash
+    }
+
     /// 创建新的进度记录
     pub fn create_new_progress(
         inst_id: &str,
         time: &str,
         config: &RandomStrategyConfig,
+    ) -> StrategyTestProgress {
+        StrategyTestProgress {
+            inst_id: inst_id.to_string(),
+            time: time.to_string(),
+            config_hash: config.calculate_hash(),
+            total_combinations: config.calculate_total_combinations(),
+            completed_combinations: 0,
+            current_index: 0,
+            last_update_time: chrono::Utc::now().timestamp_millis(),
+            status: "running".to_string(),
+        }
+    }
+
+    /// 创建新的进度记录（NWE）
+    pub fn create_new_progress_nwe(
+        inst_id: &str,
+        time: &str,
+        config: &NweRandomStrategyConfig,
     ) -> StrategyTestProgress {
         StrategyTestProgress {
             inst_id: inst_id.to_string(),

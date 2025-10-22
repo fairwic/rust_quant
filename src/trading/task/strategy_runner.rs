@@ -19,6 +19,7 @@ use crate::trading::services::order_service::swap_order_service::SwapOrderServic
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::{
     self, get_hash_key, ArcVegasIndicatorValues,
 };
+use crate::trading::strategy::nwe_strategy::{NweStrategy, NweStrategyConfig};
 use crate::trading::strategy::order::strategy_config::StrategyConfig;
 use crate::trading::strategy::strategy_common::{
     get_multi_indicator_values, parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
@@ -187,7 +188,7 @@ pub async fn test_random_strategy_with_config(
         config.rsi_periods.clone(),
         config.rsi_over_buy_sell.clone(),
         config.max_loss_percent.clone(),
-        config.is_take_profit.clone(),
+        config.take_profit_ratios.clone(),
         config.is_move_stop_loss.clone(),
         config.is_used_signal_k_line_stop_loss.clone(),
     );
@@ -272,7 +273,7 @@ pub async fn test_random_strategy_with_config(
 }
 
 /// 主函数，执行所有策略测试
-pub async fn vegas_back_test(inst_id: &str, time: &str) -> Result<()> {
+pub async fn back_test(inst_id: &str, time: &str) -> Result<()> {
     let start_time = Instant::now();
     info!(
         "[性能跟踪] vegas_back_test 开始 - inst_id: {}, time: {}",
@@ -316,7 +317,7 @@ pub async fn back_test_with_config(
     // 执行不同类型的测试
     let mut test_results = Vec::new();
 
-    if config.enable_random_test {
+    if config.enable_random_test_vegas {
         let random_start = Instant::now();
         info!("[性能跟踪] 开始执行随机策略测试");
         if let Err(e) = test_random_strategy(inst_id, time, semaphore.clone()).await {
@@ -332,12 +333,179 @@ pub async fn back_test_with_config(
         );
     }
 
-    if config.enable_specified_test {
+    if config.enable_specified_test_vegas {
         if let Err(e) = test_specified_strategy(inst_id, time, semaphore.clone()).await {
             error!("指定策略测试失败: {}", e);
             test_results.push(("specified", false));
         } else {
             test_results.push(("specified", true));
+        }
+    }
+
+    // 新增：NWE 策略单独回测（通过环境变量开启）
+    // NWE 随机回测
+    if config.enable_random_test_nwe {
+        let arc_candle_data =
+            load_and_convert_candle_data(inst_id, time, config.candle_limit).await?;
+        let mut risk_strategy_config = BasicRiskStrategyConfig::default();
+        risk_strategy_config.take_profit_ratio = 1.5;
+
+        // 断点续传：构建 NWE 随机配置
+        use crate::trading::task::progress_manager::{
+            NweRandomStrategyConfig, StrategyProgressManager,
+        };
+        let nwe_random_config = NweRandomStrategyConfig {
+            rsi_periods: vec![11, 12, 13, 14, 15, 16],
+            rsi_over_buy_sell: vec![
+                (65.0, 35.0),
+                (70.0, 30.0),
+                (75.0, 25.0),
+                (80.0, 20.0),
+                (85.0, 15.0),
+                (90.0, 10.0),
+            ],
+            atr_periods: vec![6, 8, 10],
+            atr_multipliers: vec![2.5, 3.0, 3.5],
+            volume_bar_nums: vec![3, 4, 5, 6],
+            volume_ratios: vec![0.8, 0.9, 1.0],
+            nwe_periods: vec![7, 8, 9, 10],
+            nwe_multi: vec![1.0, 1.3, 1.5, 1.8, 2.0, 2.2, 2.4],
+            batch_size: config.max_concurrent,
+            // 风险参数空间（参考 Vegas）
+            max_loss_percent: vec![0.01, 0.02, 0.03],
+            take_profit_ratios: vec![0.0, 0.5, 1.0, 1.5, 1.8, 2.0, 2.5],
+            is_move_stop_loss: vec![false],
+            is_used_signal_k_line_stop_loss: vec![false],
+        };
+
+        // 加载或初始化进度
+        let progress_key_check = Instant::now();
+        let mut current_progress = match StrategyProgressManager::load_progress(inst_id, time).await
+        {
+            Ok(Some(saved)) => {
+                if StrategyProgressManager::is_config_changed_nwe(&nwe_random_config, &saved) {
+                    warn!(
+                        "[NWE 断点续传] 配置变更，重置进度: inst_id={}, time={}, 旧哈希={}, 新哈希={}",
+                        inst_id,
+                        time,
+                        saved.config_hash,
+                        nwe_random_config.calculate_hash()
+                    );
+                    StrategyProgressManager::create_new_progress_nwe(
+                        inst_id,
+                        time,
+                        &nwe_random_config,
+                    )
+                } else {
+                    info!(
+                        "[NWE 断点续传] 载入进度: {}/{}",
+                        saved.completed_combinations, saved.total_combinations
+                    );
+                    saved
+                }
+            }
+            Ok(None) => {
+                info!("[NWE 断点续传] 未发现进度，创建新记录");
+                StrategyProgressManager::create_new_progress_nwe(inst_id, time, &nwe_random_config)
+            }
+            Err(e) => {
+                warn!("[NWE 断点续传] 读取进度失败，创建新记录: {}", e);
+                StrategyProgressManager::create_new_progress_nwe(inst_id, time, &nwe_random_config)
+            }
+        };
+        info!(
+            "[NWE 断点续传] 进度检查耗时: {}ms",
+            progress_key_check.elapsed().as_millis()
+        );
+        StrategyProgressManager::save_progress(&current_progress).await?;
+
+        // 参数生成器并设置断点索引
+        use crate::trading::task::job_param_generator::NweParamGenerator;
+        let mut gen = NweParamGenerator::new(
+            nwe_random_config.rsi_periods.clone(),
+            nwe_random_config.rsi_over_buy_sell.clone(),
+            nwe_random_config.atr_periods.clone(),
+            nwe_random_config.atr_multipliers.clone(),
+            nwe_random_config.volume_bar_nums.clone(),
+            nwe_random_config.volume_ratios.clone(),
+            nwe_random_config.nwe_periods.clone(),
+            nwe_random_config.nwe_multi.clone(),
+            nwe_random_config.max_loss_percent.clone(),
+            nwe_random_config.take_profit_ratios.clone(),
+            nwe_random_config.is_move_stop_loss.clone(),
+            nwe_random_config.is_used_signal_k_line_stop_loss.clone(),
+        );
+        gen.set_current_index(current_progress.current_index);
+
+        // 遍历所有组合（分批），并更新进度
+        let mut processed = current_progress.completed_combinations;
+        loop {
+            let get_batch_start = Instant::now();
+            let batch = gen.get_next_batch(nwe_random_config.batch_size);
+            let get_batch_elapsed = get_batch_start.elapsed();
+            if batch.is_empty() {
+                break;
+            }
+            info!(
+                "[NWE 断点续传] 获取批次: {} 条, 耗时: {}ms",
+                batch.len(),
+                get_batch_elapsed.as_millis()
+            );
+
+            let run_start = Instant::now();
+            crate::trading::task::backtest_executor::run_nwe_random_batch(
+                batch,
+                inst_id,
+                time,
+                arc_candle_data.clone(),
+                semaphore.clone(),
+            )
+            .await;
+            let run_elapsed = run_start.elapsed();
+
+            processed += nwe_random_config
+                .batch_size
+                .min(current_progress.total_combinations);
+            let (current_index, total) = gen.progress();
+            StrategyProgressManager::update_progress(
+                inst_id,
+                time,
+                processed.min(total),
+                current_index,
+            )
+            .await?;
+            info!(
+                "[NWE 断点续传] 批次完成: 进度 {}/{}, 批次耗时: {}ms",
+                processed.min(total),
+                total,
+                run_elapsed.as_millis()
+            );
+        }
+
+        StrategyProgressManager::mark_completed(inst_id, time).await?;
+        info!("[NWE] 随机参数遍历完成，总回测组合: {}", processed);
+        test_results.push(("nwe_random", true));
+    }
+
+    // NWE 指定配置回测（从DB或内置指定）
+    if config.enable_specified_test_nwe {
+        let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
+        let risk_strategy_config = BasicRiskStrategyConfig::default();
+        //指定策略
+        let nwe_strategy = NweStrategy::new(NweStrategyConfig::default());
+        if let Err(e) = crate::trading::task::backtest_executor::run_nwe_test(
+            inst_id,
+            time,
+            nwe_strategy,
+            risk_strategy_config,
+            arc_candle_data,
+        )
+        .await
+        {
+            error!("NWE 指定策略测试失败: {}", e);
+            test_results.push(("nwe_specified", false));
+        } else {
+            test_results.push(("nwe_specified", true));
         }
     }
 
@@ -526,8 +694,7 @@ pub async fn run_ready_to_order_with_manager(
         save_signal_log(inst_id, period, &signal_result);
         //执行交易
         let risk_config = strategy.risk_config.clone();
-
-        SwapOrderService::new()
+        let res = SwapOrderService::new()
             .ready_to_order(
                 &StrategyType::Vegas,
                 inst_id,
@@ -538,7 +705,15 @@ pub async fn run_ready_to_order_with_manager(
                 >(&strategy.risk_config)?,
                 strategy.strategy_config_id,
             )
-            .await?;
+            .await;
+        match res {
+            Ok(_) => {
+                println!("执行ready_to_order成功");
+            }
+            Err(e) => {
+                println!("{}", e.to_string())
+            }
+        }
     } else {
         debug!(
             "signal_result:{:?},ts:{}",
