@@ -16,7 +16,7 @@ pub async fn get_ticket(ins_type: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn init_all_ticker(inst_ids: Option<Vec<&str>>) -> anyhow::Result<()> {
+pub async fn init_all_ticker(inst_ids: &Vec<String>) -> anyhow::Result<()> {
     info!("开始同步ticker...");
     //同步合约产品
     let ins_type = "SWAP";
@@ -28,7 +28,7 @@ pub async fn init_all_ticker(inst_ids: Option<Vec<&str>>) -> anyhow::Result<()> 
 
 pub async fn update_ticker(
     tickers: Vec<TickerOkxResDto>,
-    inst_ids: Option<Vec<&str>>,
+    inst_ids: &Vec<String>,
 ) -> anyhow::Result<()> {
     if tickers.len() > 0 {
         let model = TicketsModel::new().await;
@@ -36,9 +36,7 @@ pub async fn update_ticker(
             //判断是否在inst_ids中
             let is_valid = true;
             let inst_id = ticker.inst_id.clone();
-            if !is_valid
-                || (inst_ids.is_some() && inst_ids.as_deref().unwrap().contains(&inst_id.as_str()))
-            {
+            if !is_valid || (inst_ids.contains(&inst_id)) {
                 //判断数据库是否有
                 let res = model.find_one(&ticker.inst_id).await?;
                 if res.len() > 0 {

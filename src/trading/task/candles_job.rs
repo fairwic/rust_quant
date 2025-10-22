@@ -30,16 +30,13 @@ fn get_period_back_test_candle_nums(period: &str) -> i32 {
 }
 
 //初始化创建表
-pub async fn init_create_table(
-    inst_ids: Option<Vec<&str>>,
-    times: Option<&Vec<&str>>,
-) -> anyhow::Result<()> {
+pub async fn init_create_table(inst_ids: &Vec<String>, times: &Vec<String>) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
     let res = res.get_all(inst_ids).await.unwrap();
     //获取获取数据更旧的数据
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
-        for time in times.clone().unwrap() {
+        for time in times {
             //获取当前数据最旧的数据
             let res = CandlesModel::new()
                 .await
@@ -53,16 +50,16 @@ pub async fn init_create_table(
 
 /** 同步所有更旧的蜡烛图**/
 pub async fn init_all_candles(
-    inst_ids: Option<Vec<&str>>,
-    times: Option<&Vec<&str>>,
+    inst_ids: &Vec<String>,
+    times: &Vec<String>,
 ) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
-    let res = res.get_all(inst_ids).await.unwrap();
+    let res = res.get_all(inst_ids).await?;
     //选择并发操作
     //获取获取数据更旧的数据
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
-        for time in times.clone().unwrap() {
+        for time in times {
             //删除可能的异常数据(有可能中间某个未confirm==1)
             let res = CandlesModel::new()
                 .await
@@ -171,8 +168,8 @@ async fn get_sync_begin_with_end(
 }
 /** 同步所有更新的蜡烛图**/
 pub async fn init_before_candles(
-    inst_ids: Option<Vec<&str>>,
-    times: Option<Vec<&str>>,
+    inst_ids: &Vec<String>,
+    times: &Vec<String>,
 ) -> anyhow::Result<()> {
     let res = TicketsModel::new().await;
     let res = res.get_all(inst_ids).await.unwrap();
@@ -180,7 +177,7 @@ pub async fn init_before_candles(
     //获取获取数据更新的数据
     for ticker in res {
         //获取当前交易产品的历史蜡烛图数据
-        for time in times.clone().unwrap() {
+        for time in times {
             let res = CandlesModel::new()
                 .await
                 .get_new_data(ticker.inst_id.as_str(), time)

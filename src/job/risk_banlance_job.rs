@@ -38,7 +38,7 @@ impl RiskBalanceWithLevelJob {
         }
     }
 
-    pub async fn run(&self, inst_ids: &Vec<&str>) -> Result<(), anyhow::Error> {
+    pub async fn run(&self, inst_ids: &Vec<String>) -> Result<(), anyhow::Error> {
         //1. 控制交易资金
         match self.control_trade_amount().await {
             Ok(_) => info!("风险管理任务成功完成"),
@@ -61,7 +61,7 @@ impl RiskBalanceWithLevelJob {
     }
 
     /// risk 2 设置杠杆
-    pub async fn run_set_leverage(&self, inst_ids: &Vec<&str>) -> Result<(), anyhow::Error> {
+    pub async fn run_set_leverage(&self, inst_ids: &Vec<String>) -> Result<(), anyhow::Error> {
         let span = span!(Level::DEBUG, "run_set_leverage");
         let _enter = span.enter();
 

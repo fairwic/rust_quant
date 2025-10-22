@@ -58,7 +58,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     Ok(())
 }
 
-pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
+pub async fn run_socket(inst_ids: &Vec<String>, times: &Vec<String>) {
     let span = span!(Level::DEBUG, "socket_logic");
     let _enter = span.enter();
     // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
@@ -152,7 +152,7 @@ pub async fn run_socket(inst_ids: Vec<&str>, times: Vec<&str>) {
                 let ticker = res.unwrap();
                 // info!("ticketOkxResWsDto数据: {:?}", ticker);
                 let res =
-                    update_ticker(ticker.data, Some(vec![&ticker.arg.inst_id.as_str()])).await;
+                    update_ticker(ticker.data, &vec![ticker.arg.inst_id]).await;
                 if res.is_ok() {
                     // info!("更新ticker成功: {:?}", res.unwrap());
                 } else {

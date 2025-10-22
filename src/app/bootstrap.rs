@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use std::sync::Arc;
+use std::vec;
 use tracing::{error, info, warn};
 
 use crate::app_config::env::{env_is_true, env_or_default};
@@ -17,19 +18,52 @@ use okx::dto::EnumToStrTrait;
 /// 运行基于环境变量控制的各个模式（数据同步、回测、WebSocket、实盘策略）
 pub async fn run_modes() -> anyhow::Result<()> {
     // 可根据需要从环境加载，当前保持项目的默认值
+
+    let mut inst_ids = Vec::with_capacity(100);
+    let mut period = Vec::with_capacity(10);
+    let env = std::env::var("APP_ENV").unwrap();
+    if env == "prod" {
+        //生产环境只按配置的策略的数据去获取
+        let strategy_list = StrategyConfigEntityModel::new().await.get_list().await;
+        let strategy_list = match strategy_list {
+            Ok(list) => {
+                info!("获取策略配置数量{:?}", list.len());
+                list
+            }
+            Err(e) => {
+                error!("获取策略配置失败: {:?}", e);
+                return Err(anyhow!("获取策略配置失败: {:?}", e));
+            }
+        };
+        strategy_list
+            .iter()
+            .for_each(|f| inst_ids.push(f.inst_id.clone()));
+        strategy_list
+            .iter()
+            .for_each(|f| period.push(f.time.clone()));
+        info!(
+            "生产环境策略配置为空: inst_ids={:?}, period={:?}",
+            inst_ids, period
+        );
+        return Ok(());
+    } else {
+        inst_ids = vec!["BTC-USDT-SWAP".to_string(), "ETH-USDT-SWAP".to_string()];
+        period = vec!["1Dutc".to_string(), "4H".to_string()];
+    }
+
     // let inst_ids = Some(vec!["ETH-USDT-SWAP","BTC-USDT-SWAP","SOL-USDT-SWAP"]);
     // let period = Some(vec!["1H","4H","1Dutc"]);
-    let inst_ids = Some(vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"]);
-    let period = Some(vec!["1Dutc", "4H"]);
 
+    let inst_ids = inst_ids;
+    let period = period;
     // 1) 初始化需要同步的数据
     if env_is_true("IS_RUN_SYNC_DATA_JOB", false) {
-        if let Err(error) = tickets_job::init_all_ticker(inst_ids.clone()).await {
+        if let Err(error) = tickets_job::init_all_ticker(&inst_ids).await {
             error!("init all tickers error: {}", error);
         }
         match (&inst_ids, &period) {
-            (Some(ids), Some(times)) => {
-                if let Err(error) = task::basic::run_sync_data_job(Some(ids.clone()), times).await {
+            (ids, times) => {
+                if let Err(error) = task::basic::run_sync_data_job(&ids, &times).await {
                     error!("run sync [tickets] data job error: {}", error);
                 }
             }
@@ -44,11 +78,10 @@ pub async fn run_modes() -> anyhow::Result<()> {
     // 2) 本地环境下执行回测任务（Vegas）
     if env_is_true("IS_BACK_TEST", false) {
         info!("IS_BACK_TEST 已启用");
-        if let (Some(inst_id), Some(times)) = (inst_ids.clone(), period.clone()) {
-            for inst_id in inst_id {
+        if let (inst_id, times) = (&inst_ids, &period) {
+            for inst_id in inst_id.iter() {
                 for time in times.iter() {
-                    let time = time.to_string();
-                    if let Err(error) = task::basic::back_test(inst_id, &time).await {
+                    if let Err(error) = task::basic::back_test(inst_id, time).await {
                         error!("run strategy error: {} {} {}", error, inst_id, time);
                     }
                 }
@@ -61,13 +94,12 @@ pub async fn run_modes() -> anyhow::Result<()> {
     // 2.1) 本地环境下执行 NWE 回测开关（与 Vegas 同步入口，开关在 BackTestConfig 内）
     if env_is_true("IS_BACK_TEST_NWE", false) {
         info!("IS_BACK_TEST_NWE 已启用");
-        if let (Some(inst_id), Some(times)) = (inst_ids.clone(), period.clone()) {
-            for inst_id in inst_id {
+        if let (inst_id, times) = (&inst_ids, &period) {
+            for inst_id in inst_id.iter() {
                 for time in times.iter() {
-                    let time = time.to_string();
                     if let Err(error) = task::basic::back_test_with_config(
                         inst_id,
-                        &time,
+                        time,
                         crate::trading::task::strategy_config::BackTestConfig::default(),
                     )
                     .await
@@ -83,8 +115,8 @@ pub async fn run_modes() -> anyhow::Result<()> {
 
     // 3) WebSocket 实时数据
     if env_is_true("IS_OPEN_SOCKET", false) {
-        match (inst_ids.clone(), period.clone()) {
-            (Some(inst_id), Some(times)) => {
+        match (&inst_ids, &period) {
+            (inst_id, times) => {
                 socket::websocket_service::run_socket(inst_id, times).await;
             }
             _ => warn!("无法启动WebSocket：未设置 inst_ids 或 period"),
@@ -94,10 +126,10 @@ pub async fn run_modes() -> anyhow::Result<()> {
     // 4) 实盘策略
     if env_is_true("IS_RUN_REAL_STRATEGY", false) {
         info!("run real strategy job");
-        if let Some(inst_ids) = inst_ids.clone() {
+        if let (inst_id, times) = (&inst_ids, &period) {
             // 风险控制初始化
             let risk_job = RiskBalanceWithLevelJob::new();
-            if let Err(e) = risk_job.run(&inst_ids).await {
+            if let Err(e) = risk_job.run(inst_id).await {
                 error!("风险控制初始化失败: {}", e);
             }
 
