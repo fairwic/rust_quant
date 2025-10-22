@@ -35,17 +35,21 @@ pub async fn run_modes() -> anyhow::Result<()> {
                 return Err(anyhow!("获取策略配置失败: {:?}", e));
             }
         };
-        strategy_list
-            .iter()
-            .for_each(|f| inst_ids.push(f.inst_id.clone()));
-        strategy_list
-            .iter()
-            .for_each(|f| period.push(f.time.clone()));
-        info!(
-            "生产环境策略配置为空: inst_ids={:?}, period={:?}",
-            inst_ids, period
-        );
-        return Ok(());
+        strategy_list.iter().for_each(|f| {
+            inst_ids.push(f.inst_id.clone());
+            period.push(f.time.clone());
+        });
+        if strategy_list.len() == 0 || period.len() == 0 {
+            error!(
+                "生产环境策略配置为空: inst_ids={:?}, period={:?}",
+                inst_ids, period
+            );
+            return Err(anyhow!(
+                "生产环境策略配置为空: inst_ids={:?}, period={:?}",
+                inst_ids,
+                period
+            ));
+        }
     } else {
         inst_ids = vec!["BTC-USDT-SWAP".to_string(), "ETH-USDT-SWAP".to_string()];
         period = vec!["1Dutc".to_string(), "4H".to_string()];
