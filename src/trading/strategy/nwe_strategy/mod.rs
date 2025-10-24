@@ -1,7 +1,9 @@
 pub mod indicator_combine;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::trading::indicator::atr::ATR;
+use crate::trading::indicator::atr_stop_loos::ATRStopLoos;
 use crate::trading::indicator::nwe_indicator::NweIndicator;
 use crate::trading::indicator::rsi_rma_indicator::RsiIndicator;
 use crate::trading::indicator::volume_indicator::VolumeRatioIndicator;
@@ -157,21 +159,30 @@ impl NweStrategy {
 
         //检查nwe是否超卖或超买
         let (is_nwe_buy, is_nwe_sell) = Self::check_nwe(candles, values);
-        //检查rsi是否超卖或超买
-        let (is_rsi_buy, is_rsi_sell) =
-            Self::check_rsi(rsi, self.config.rsi_oversold, self.config.rsi_overbought);
-        //检查成交量比率是否超卖或超买
-        let (is_volume_ratio_buy, is_volume_ratio_sell) =
-            Self::check_volume_ratio(volume_ratio, self.config.volume_ratio);
-        //如果上一根k线路的的收盘价格小于nwe的lower,且最新k线的收盘价大于nwe，且rsi超卖区间，则进行买入
-        if is_nwe_buy && is_rsi_buy {
-            signal_result.should_buy = true;
-        }
-        if is_nwe_sell && is_rsi_sell {
-            signal_result.should_sell = true;
+        if is_nwe_buy || is_nwe_sell {
+            //检查rsi是否超卖或超买
+            let (is_rsi_buy, is_rsi_sell) =
+                Self::check_rsi(rsi, self.config.rsi_oversold, self.config.rsi_overbought);
+
+            //检查成交量比率是否超卖或超买
+            let (is_volume_ratio_buy, is_volume_ratio_sell) =
+                Self::check_volume_ratio(volume_ratio, self.config.volume_ratio);
+
+            //如果上一根k线路的的收盘价格小于nwe的lower,且最新k线的收盘价大于nwe，且rsi超卖区间，则进行买入
+            if is_nwe_buy && is_rsi_buy {
+                signal_result.should_buy = true;
+            }
+            if is_nwe_sell && is_rsi_sell {
+                signal_result.should_sell = true;
+            }
+            //记录信号值
+            signal_result.signal_kline_stop_loss_price = Some(values.atr_short_stop);
         }
         signal_result.ts = candles.last().unwrap().ts;
         signal_result.open_price = candles.last().unwrap().c;
+
+        signal_result.single_value = Some(json!(signal_result.clone()).to_string());
+        signal_result.single_result = Some(json!(signal_result.clone()).to_string());
 
         signal_result
     }
@@ -194,7 +205,10 @@ impl NweStrategy {
             self.config.nwe_multi,
             500,
         ));
-        ic.atr_indicator = Some(ATR::new(self.config.atr_period).expect("ATR period must be > 0"));
+        ic.atr_indicator = Some(
+            ATRStopLoos::new(self.config.atr_period, self.config.atr_multiplier)
+                .expect("ATR period must be > 0"),
+        );
 
         let min_len = self.get_min_data_length();
 
@@ -216,10 +230,12 @@ impl NweStrategy {
                 } else {
                     0.0
                 };
-                let atr = if let Some(a) = &mut ic.atr_indicator {
-                    a.next(data_item.h, data_item.l, data_item.c)
+                let (short_stop, long_stop, atr_value) = if let Some(a) = &mut ic.atr_indicator {
+                    let (short_stop, long_stop, atr_value) =
+                        a.next(data_item.h, data_item.l, data_item.c);
+                    (short_stop, long_stop, atr_value)
                 } else {
-                    0.0
+                    (0.0, 0.0, 0.0)
                 };
                 let (upper, lower) = if let Some(n) = &mut ic.nwe_indicator {
                     n.next(data_item.c)
@@ -229,7 +245,9 @@ impl NweStrategy {
                 NweSignalValues {
                     rsi_value: rsi,
                     volume_ratio: volume_ratio,
-                    atr_value: atr,
+                    atr_value: atr_value,
+                    atr_short_stop: short_stop,
+                    atr_long_stop: long_stop,
                     nwe_upper: upper,
                     nwe_lower: lower,
                 }
@@ -242,7 +260,10 @@ pub struct NweSignalValues {
     pub rsi_value: f64,
 
     pub volume_ratio: f64,
+
     pub atr_value: f64,
+    pub atr_short_stop: f64,
+    pub atr_long_stop: f64,
 
     pub nwe_upper: f64,
     pub nwe_lower: f64,

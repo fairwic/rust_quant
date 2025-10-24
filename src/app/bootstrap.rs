@@ -18,7 +18,6 @@ use okx::dto::EnumToStrTrait;
 /// 运行基于环境变量控制的各个模式（数据同步、回测、WebSocket、实盘策略）
 pub async fn run_modes() -> anyhow::Result<()> {
     // 可根据需要从环境加载，当前保持项目的默认值
-
     let mut inst_ids = Vec::with_capacity(100);
     let mut period = Vec::with_capacity(10);
     let env = std::env::var("APP_ENV").unwrap();
@@ -51,8 +50,8 @@ pub async fn run_modes() -> anyhow::Result<()> {
             ));
         }
     } else {
-        inst_ids = vec!["BTC-USDT-SWAP".to_string(), "ETH-USDT-SWAP".to_string()];
-        period = vec!["1Dutc".to_string(), "4H".to_string()];
+        inst_ids = vec!["ETH-USDT-SWAP".to_string()];
+        period = vec!["5m".to_string()];
     }
 
     // let inst_ids = Some(vec!["ETH-USDT-SWAP","BTC-USDT-SWAP","SOL-USDT-SWAP"]);

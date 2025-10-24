@@ -21,7 +21,7 @@ pub struct ParamMergeBuilder {
     pub kline_end_time: Option<i64>,
     //risk
     pub max_loss_percent: f64,                 // 最大止损百分比
-    pub take_profit_ratio: f64,                  // 盈利阈值，用于动态止盈
+    pub take_profit_ratio: f64,                // 盈利阈值，用于动态止盈
     pub is_move_stop_loss: bool,               //是否使用移动止损,当盈利之后,止损价格变成开仓价
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
 }
@@ -417,7 +417,7 @@ impl NweParamGenerator {
                 volume_bar_num: self.volume_bar_nums[i_vbn],
                 volume_ratio: self.volume_ratios[i_vr],
                 // 使用 NWE 周期作为最小数据长度的基线，确保指标有足够数据
-                min_k_line_num: self.nwe_periods[i_nwe_p].max(200),
+                min_k_line_num: 500,
             };
             let risk = crate::trading::strategy::strategy_common::BasicRiskStrategyConfig {
                 is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],

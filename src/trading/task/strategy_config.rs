@@ -44,11 +44,15 @@ impl Default for BackTestConfig {
 }
 
 /// 获取指定的产品策略配置
-pub async fn get_strate_config(inst_id: &str, time: &str) -> Result<Vec<StrategyConfigEntity>> {
+pub async fn get_strate_config(
+    inst_id: &str,
+    time: &str,
+    strategy_type: Option<&str>,
+) -> Result<Vec<StrategyConfigEntity>> {
     //从策略配置中获取到对应的产品配置
     let strategy_config = StrategyConfigEntityModel::new()
         .await
-        .get_config(None, inst_id, time)
+        .get_config(strategy_type, inst_id, time)
         .await?;
     if strategy_config.len() < 1 {
         warn!("策略配置为空inst_id:{:?} time:{:?}", inst_id, time);
@@ -63,7 +67,7 @@ pub async fn get_strategy_config_from_db(
     time: &str,
 ) -> Result<Vec<ParamMergeBuilder>> {
     // 从数据库获取策略配置
-    let strategy_configs = get_strate_config(inst_id, time)
+    let strategy_configs = get_strate_config(inst_id, time, Some("vegas"))
         .await
         .map_err(|e| anyhow!("获取策略配置失败: {}", e))?;
 
@@ -176,4 +180,40 @@ fn convert_strategy_config_to_param(
         .is_used_signal_k_line_stop_loss(risk_config.is_used_signal_k_line_stop_loss);
 
     Ok(param)
+}
+
+/// 将数据库中的策略配置转换为 NWE 策略配置与风险配置
+pub fn convert_strategy_config_to_nwe(
+    config: &StrategyConfigEntity,
+) -> Result<(NweStrategyConfig, BasicRiskStrategyConfig)> {
+    let nwe_cfg = serde_json::from_str::<NweStrategyConfig>(&config.value)
+        .map_err(|e| anyhow!("解析NWE策略配置JSON失败: {}", e))?;
+    let risk_cfg = serde_json::from_str::<BasicRiskStrategyConfig>(&config.risk_config)
+        .map_err(|e| anyhow!("解析风险配置JSON失败: {}", e))?;
+    Ok((nwe_cfg, risk_cfg))
+}
+
+/// 从数据库获取 NWE 指定策略配置
+pub async fn get_nwe_strategy_config_from_db(
+    inst_id: &str,
+    time: &str,
+) -> Result<Vec<(NweStrategyConfig, BasicRiskStrategyConfig)>> {
+    let strategy_configs = get_strate_config(inst_id, time, Some("nwe"))
+        .await
+        .map_err(|e| anyhow!("获取策略配置失败: {}", e))?;
+
+    if strategy_configs.is_empty() {
+        warn!("未找到NWE策略配置: inst_id={}, time={}", inst_id, time);
+        return Ok(vec![]);
+    }
+
+    let mut result = Vec::with_capacity(strategy_configs.len());
+    tracing::info!("找到 {} 个NWE策略配置", strategy_configs.len());
+    for cfg in strategy_configs.iter() {
+        match convert_strategy_config_to_nwe(cfg) {
+            Ok(pair) => result.push(pair),
+            Err(e) => tracing::error!("转换NWE策略配置失败: {}, config_id: {:?}", e, cfg.id),
+        }
+    }
+    Ok(result)
 }

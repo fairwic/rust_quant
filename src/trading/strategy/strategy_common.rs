@@ -679,6 +679,9 @@ pub fn run_back_test_generic<IC, IV>(
             candle_item_list.make_contiguous(),
             &mut multi_indicator_values,
         );
+        if i < 500 {
+            continue;
+        }
 
         let should_process_signal = signal.should_buy
             || signal.should_sell
@@ -850,8 +853,9 @@ pub fn check_risk_config(
                     trade_position.signal_kline_stop_close_price = Some(trade_position.open_price);
                     //重新赋值
                     trading_state.trade_position = Some(trade_position.clone());
+                    let profit = (trade_position.touch_take_profit_price.unwrap() - entry_price)
+                        * trade_position.position_nums;
 
-                    let profit = (current_high_price - trade_position.touch_take_profit_price.unwrap()) * trade_position.position_nums;
                     trade_position.close_price =
                         Some(trade_position.touch_take_profit_price.unwrap());
                     //重新赋值

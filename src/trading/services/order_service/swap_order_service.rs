@@ -1,8 +1,6 @@
 use crate::trading::constants;
 use crate::trading::model::order::swap_order::{SwapOrderEntity, SwapOrderEntityModel};
 use crate::trading::strategy::StrategyType;
-use log::{error, warn};
-
 use std::cmp::PartialEq;
 
 use crate::time_util::{self, now_timestamp_mills};
@@ -28,7 +26,7 @@ use okx::dto::PositionSide;
 use okx::{Error, OkxAccount, OkxClient, OkxTrade};
 use serde::de;
 use serde_json::json;
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 pub struct SwapOrderService {}
 impl SwapOrderService {
     pub fn new() -> Self {
@@ -204,10 +202,11 @@ impl SwapOrderService {
             "max_avail_size(inst_id={}): max_buy={}",
             inst_id, trad_swap_nums.max_buy
         );
+
         // 处理下单数量
         let pos_size = self.get_place_order_num(&trad_swap_nums);
         if pos_size == "0" {
-            warn!("pos_size is 0, skip placing order");
+            info!("pos_size is 0, skip placing order");
             return Ok(());
         }
         // if pos_size.parse::<f64>().unwrap() < 1.0 {

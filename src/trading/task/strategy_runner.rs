@@ -355,7 +355,7 @@ pub async fn back_test_with_config(
             NweRandomStrategyConfig, StrategyProgressManager,
         };
         let nwe_random_config = NweRandomStrategyConfig {
-            rsi_periods: vec![11, 12, 13, 14, 15, 16],
+            rsi_periods: vec![0,5, 4, 6, 7, 8, 9, 10],
             rsi_over_buy_sell: vec![
                 (65.0, 35.0),
                 (70.0, 30.0),
@@ -364,16 +364,18 @@ pub async fn back_test_with_config(
                 (85.0, 15.0),
                 (90.0, 10.0),
             ],
-            atr_periods: vec![6, 8, 10],
-            atr_multipliers: vec![2.5, 3.0, 3.5],
+            atr_periods: vec![14, 10, 12, 14, 16, 18],
+            atr_multipliers: vec![0.2, 0.5, 1.0, 1.5, 2.0],
+
             volume_bar_nums: vec![3, 4, 5, 6],
             volume_ratios: vec![0.8, 0.9, 1.0],
-            nwe_periods: vec![7, 8, 9, 10],
-            nwe_multi: vec![1.0, 1.3, 1.5, 1.8, 2.0, 2.2, 2.4],
+
+            nwe_periods: vec![8, 6, 10, 12, 14],
+            nwe_multi: vec![3.0,1.0,2.0,4.0,5.0],
             batch_size: config.max_concurrent,
             // 风险参数空间（参考 Vegas）
-            max_loss_percent: vec![0.01, 0.02, 0.03],
-            take_profit_ratios: vec![0.0, 0.5, 1.0, 1.5, 1.8, 2.0, 2.5],
+            max_loss_percent: vec![0.03],
+            take_profit_ratios: vec![0.5, 1.0, 1.5, 1.8, 2.0, 2.5],
             is_move_stop_loss: vec![false],
             is_used_signal_k_line_stop_loss: vec![false],
         };
@@ -487,25 +489,30 @@ pub async fn back_test_with_config(
         test_results.push(("nwe_random", true));
     }
 
-    // NWE 指定配置回测（从DB或内置指定）
+    // NWE 指定配置回测（从DB获取）
     if config.enable_specified_test_nwe {
+        use crate::trading::task::strategy_config::get_nwe_strategy_config_from_db;
         let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
-        let risk_strategy_config = BasicRiskStrategyConfig::default();
-        //指定策略
-        let nwe_strategy = NweStrategy::new(NweStrategyConfig::default());
-        if let Err(e) = crate::trading::task::backtest_executor::run_nwe_test(
-            inst_id,
-            time,
-            nwe_strategy,
-            risk_strategy_config,
-            arc_candle_data,
-        )
-        .await
-        {
-            error!("NWE 指定策略测试失败: {}", e);
-            test_results.push(("nwe_specified", false));
-        } else {
-            test_results.push(("nwe_specified", true));
+        let pairs = get_nwe_strategy_config_from_db(inst_id, time).await?;
+        if pairs.is_empty() {
+            warn!("NWE 指定策略配置为空，跳过执行");
+        }
+        for (nwe_cfg, risk_cfg) in pairs.into_iter() {
+            let nwe_strategy = NweStrategy::new(nwe_cfg);
+            if let Err(e) = crate::trading::task::backtest_executor::run_nwe_test(
+                inst_id,
+                time,
+                nwe_strategy,
+                risk_cfg,
+                arc_candle_data.clone(),
+            )
+            .await
+            {
+                error!("NWE 指定策略测试失败: {}", e);
+                test_results.push(("nwe_specified", false));
+            } else {
+                test_results.push(("nwe_specified", true));
+            }
         }
     }
 
