@@ -10,6 +10,7 @@ services:
       IS_RUN_SYNC_DATA_JOB: 'true'
       IS_RUN_REAL_STRATEGY: 'true'
       IS_OPEN_SOCKET: 'true'
+      RUN_STRATEGY_PERIOD: "4H"
       OKX_API_KEY:
       OKX_API_SECRET:
       OKX_PASSPHRASE:

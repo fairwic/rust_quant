@@ -158,51 +158,11 @@ pub async fn run_modes() -> anyhow::Result<()> {
             let time = strategy.time;
             let strategy_type = strategy.strategy_type;
 
-            if &strategy_type == StrategyType::Vegas.as_str() {
-                let strategy_config: VegasStrategy =
-                    serde_json::from_str::<VegasStrategy>(&*strategy.value)
-                        .map_err(|e| anyhow!("Failed to parse VegasStrategy config: {}", e))?;
-
-                let risk_config: BasicRiskStrategyConfig = serde_json::from_str::<
-                    BasicRiskStrategyConfig,
-                >(&*strategy.risk_config)
-                .map_err(|e| anyhow!("Failed to parse BasicRiskStrategyConfig config: {}", e))?;
-
-                let _strategy_config = StrategyConfig {
-                    strategy_config_id: strategy.id,
-                    strategy_config: serde_json::to_string(&strategy_config)?,
-                    risk_config: serde_json::to_string(&risk_config)?,
-                };
-
-                if let Err(e) = strategy_manager
-                    .start_strategy(strategy.id, inst_id.clone(), time.clone())
-                    .await
-                {
-                    error!("启动策略失败: 策略ID={}, 错误: {}", strategy.id, e);
-                }
-            }
-            if &strategy_type == StrategyType::Nwe.as_str() {
-                let strategy_config: NweStrategyConfig =
-                    serde_json::from_str::<NweStrategyConfig>(&*strategy.value)
-                        .map_err(|e| anyhow!("Failed to parse NweStrategy config: {}", e))?;
-
-                let risk_config: BasicRiskStrategyConfig = serde_json::from_str::<
-                    BasicRiskStrategyConfig,
-                >(&*strategy.risk_config)
-                .map_err(|e| anyhow!("Failed to parse BasicRiskStrategyConfig config: {}", e))?;
-
-                let _strategy_config = StrategyConfig {
-                    strategy_config_id: strategy.id,
-                    strategy_config: serde_json::to_string(&strategy_config)?,
-                    risk_config: serde_json::to_string(&risk_config)?,
-                };
-
-                if let Err(e) = strategy_manager
-                    .start_strategy(strategy.id, inst_id.clone(), time.clone())
-                    .await
-                {
-                    error!("启动策略失败: 策略ID={}, 错误: {}", strategy.id, e);
-                }
+            if let Err(e) = strategy_manager
+                .start_strategy(strategy.id, inst_id.clone(), time.clone())
+                .await
+            {
+                error!("启动策略失败: 策略ID={}, 错误: {}", strategy.id, e);
             }
         }
     }

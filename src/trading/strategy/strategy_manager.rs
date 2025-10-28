@@ -507,6 +507,9 @@ impl StrategyManager {
         let strategy_type_enum = StrategyType::from_str(&config_entity.strategy_type)
             .ok_or_else(|| anyhow!("未知的策略类型: {}", config_entity.strategy_type))?;
 
+        // 3.5. 按需注册策略（首次使用时自动注册）✨
+        crate::trading::strategy::strategy_registry::register_strategy_on_demand(&strategy_type_enum);
+
         // 4. 根据策略类型执行具体的启动逻辑
         match strategy_type_enum {
             StrategyType::Vegas | StrategyType::Nwe => {
