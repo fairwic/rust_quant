@@ -17,6 +17,7 @@ use once_cell::sync::Lazy;
 use tracing::{info, error};
 
 pub async fn app_init() -> anyhow::Result<()> {
+    env_logger::init();
     //设置env
     dotenv().ok();
     // 设置日志

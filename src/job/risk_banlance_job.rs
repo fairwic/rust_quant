@@ -40,13 +40,13 @@ impl RiskBalanceWithLevelJob {
     pub async fn run(&self, inst_ids: &Vec<String>) -> Result<(), anyhow::Error> {
         //1. 控制交易资金
         match self.control_trade_amount().await {
-            Ok(_) => info!("风险管理任务成功完成!"),
-            Err(e) => error!("风险管理任务失败: {:?}", e),
+            Ok(_) => info!("资金账户与交易账户平衡完成!"),
+            Err(e) => error!("资金账户与交易账户平衡失败: {:?}", e),
         }
         //2. 控制合约杠杆
         match self.run_set_leverage(inst_ids).await {
             Ok(_) => info!("设置最大杠杆完成!"),
-            Err(e) => error!("风险管理任务失败: {:?}", e),
+            Err(e) => error!("设置最大杠杆失败: {:?}", e),
         }
         Ok(())
     }
