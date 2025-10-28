@@ -64,7 +64,7 @@ impl Supertrend {
                 1
             }
         } else {
-            if (close > final_upper) {
+            if close > final_upper {
                 1
             } else {
                 -1

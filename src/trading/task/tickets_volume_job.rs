@@ -39,7 +39,7 @@ pub async fn init_all_ticker_volume(inst_ids: &str, period: &str) -> anyhow::Res
         for ticker in items.iter() {
             //判断是否在inst_ids中
             let list = TickersVolume {
-                inst_id: inst_id.clone().parse().unwrap(),
+                inst_id: inst_id.parse().unwrap(),
                 period: period.parse()?,
                 ts: ticker.ts.parse().unwrap(),
                 vol: ticker.vol.clone(),

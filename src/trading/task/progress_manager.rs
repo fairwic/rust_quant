@@ -144,7 +144,7 @@ impl StrategyProgressManager {
         let key = Self::get_progress_key(&progress.inst_id, &progress.time);
         let progress_json = serde_json::to_string(progress)?;
 
-        redis_conn.set_ex(&key, progress_json, 86400 * 7).await?; // 保存7天
+        redis_conn.set_ex::<_, _, ()>(&key, progress_json, 86400 * 7).await?; // 保存7天
         info!(
             "进度已保存: {} - {}/{}",
             key, progress.completed_combinations, progress.total_combinations
@@ -257,7 +257,7 @@ impl StrategyProgressManager {
     pub async fn clear_progress(inst_id: &str, time: &str) -> Result<()> {
         let mut redis_conn = crate::app_config::redis_config::get_redis_connection().await?;
         let key = Self::get_progress_key(inst_id, time);
-        redis_conn.del(&key).await?;
+        redis_conn.del::<_, ()>(&key).await?;
         info!("[断点续传] 进度已清除: {}", key);
         Ok(())
     }

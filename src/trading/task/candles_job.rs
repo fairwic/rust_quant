@@ -78,7 +78,7 @@ pub async fn init_all_candles(
                 .await
                 .get_new_count(ticker.inst_id.as_str(), time, Some(limit))
                 .await?;
-            if (res > limit as u64) {
+            if res > limit as u64 {
                 debug!("达到最新的{}条,跳过", limit);
                 continue;
             }
@@ -133,7 +133,7 @@ pub async fn init_all_candles(
                     .await
                     .get_new_count(ticker.inst_id.as_str(), time, Some(limit))
                     .await?;
-                if (count > limit as u64) {
+                if count > limit as u64 {
                     info!("已达到所需数据的{}条,跳过", limit);
                     break;
                 }

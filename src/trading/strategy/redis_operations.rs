@@ -26,7 +26,7 @@ impl RedisOperations {
             let close_price: f64 = candle.c.parse().unwrap_or(0.0);
             pipe.zadd(key, timestamp, close_price).ignore();
         }
-        pipe.query_async(con).await?;
+        pipe.query_async::<_, ()>(con).await?;
         info!("Saved {} candles to Redis", candles.len());
         Ok(())
     }

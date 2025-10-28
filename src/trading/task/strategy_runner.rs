@@ -611,7 +611,7 @@ pub fn check_new_time(
     is_close_confim: bool,
     just_check_confim: bool,
 ) -> Result<bool> {
-    if (new_time < old_time) {
+    if new_time < old_time {
         return Err(anyhow!(
             "K线时间戳异常: 上一时间戳 {}, 当前时间戳 {}, 预期时间戳 {}",
             old_time,
@@ -619,7 +619,7 @@ pub fn check_new_time(
             period
         ));
     }
-    if (is_close_confim) {
+    if is_close_confim {
         return Ok(true);
     }
     //优先判断
@@ -629,7 +629,7 @@ pub fn check_new_time(
     }
 
     //如果必须要在收盘价确认
-    if (just_check_confim && !is_close_confim) {
+    if just_check_confim && !is_close_confim {
         info!("k线未确认，跳过策略执行: {:?}", period);
         return Ok(false);
     }

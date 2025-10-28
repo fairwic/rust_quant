@@ -22,15 +22,15 @@ pub async fn run_modes() -> anyhow::Result<()> {
     let mut inst_ids = Vec::with_capacity(100);
     let mut periods = Vec::with_capacity(10);
     let env = std::env::var("APP_ENV").unwrap();
+    let period = std::env::var("RUN_STRATEGY_PERIOD").unwrap();
+    let strategy_list = StrategyConfigEntityModel::new()
+        .await
+        .get_list_by_period(&period)
+        .await;
+    info!("获取策略配置: {:?}", strategy_list);
     if env == "prod" {
         //生产环境只按配置的策略的数据去获取
-        let period = std::env::var("RUN_STRATEGY_PERIOD").unwrap();
-        let strategy_list = StrategyConfigEntityModel::new()
-            .await
-            .get_list_by_period(&period)
-            .await;
-        info!("获取策略配置: {:?}", strategy_list);
-        let strategy_list = match strategy_list {
+        let strategy_list = match &strategy_list {
             Ok(list) => {
                 info!("获取策略配置数量{:?}", list.len());
                 list
@@ -137,23 +137,12 @@ pub async fn run_modes() -> anyhow::Result<()> {
         // 风险控制初始化
         let risk_job = RiskBalanceWithLevelJob::new();
         if let Err(e) = risk_job.run(&inst_ids).await {
-            error!("风险控制初始化失败: {}", e);
+            return Err(anyhow!("风险控制初始化失败: {}", e));
         }
 
-        let strategy_list = StrategyConfigEntityModel::new().await.get_list().await;
-        let strategy_list = match strategy_list {
-            Ok(list) => {
-                info!("获取策略配置数量{:?}", list.len());
-                list
-            }
-            Err(e) => {
-                error!("获取策略配置失败: {:?}", e);
-                return Err(anyhow!("获取策略配置失败: {:?}", e));
-            }
-        };
         let strategy_manager = get_strategy_manager();
 
-        for strategy in strategy_list.into_iter() {
+        for strategy in strategy_list.unwrap().into_iter() {
             let inst_id = strategy.inst_id;
             let time = strategy.time;
             let strategy_type = strategy.strategy_type;
