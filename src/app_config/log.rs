@@ -176,9 +176,16 @@ impl EmailSender {
 
     fn generate_error_key(error_message: &str) -> String {
         // 简单的错误分类：提取关键信息用于去重
-        // 可以根据需要实现更复杂的分类逻辑
-        if error_message.len() > 100 {
-            error_message[..100].to_string()
+        // 使用 Unicode 字符边界安全截断，避免在多字节字符中间截断
+        const MAX_LEN: usize = 100;
+        
+        if error_message.len() > MAX_LEN {
+            // 找到安全的截断点（不在字符中间）
+            let mut end = MAX_LEN;
+            while end > 0 && !error_message.is_char_boundary(end) {
+                end -= 1;
+            }
+            error_message[..end].to_string()
         } else {
             error_message.to_string()
         }

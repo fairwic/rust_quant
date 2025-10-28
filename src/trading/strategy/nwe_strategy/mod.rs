@@ -1,4 +1,6 @@
 pub mod indicator_combine;
+use std::thread::current;
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -61,10 +63,11 @@ pub struct NweStrategy {
 }
 
 impl NweStrategy {
+    /// 创建 Nwe 策略实例（零 clone 优化）✨
     pub fn new(config: NweStrategyConfig) -> Self {
         Self {
-            config: config.clone(),
-            combine_indicator: NweIndicatorCombine::new(config),
+            combine_indicator: NweIndicatorCombine::new(&config),  // 传引用
+            config,  // 直接 move，无需 clone
         }
     }
     pub fn get_strategy_name() -> String {
@@ -83,17 +86,22 @@ impl NweStrategy {
         let mut is_sell = false;
 
         let middle = (values.nwe_upper + values.nwe_lower) / 2.0;
-        let last_candle = &candles[candles.len() - 1];
+        let previous_candle = &candles[candles.len() - 2];
+        let current_candle = candles.last().unwrap();
 
         //如果上一根k线路的的收盘价格小于nwe的lower,且最新k线的收盘价大于nwe,且不超过中轨，则进行买入
-        if candles[candles.len() - 2].c < values.nwe_lower
-            && last_candle.c > values.nwe_lower
-            && last_candle.c < middle
+        if previous_candle.c < values.nwe_lower &&
+        //前一根k线是下跌的
+            previous_candle.c < previous_candle.o
+            && current_candle.c > values.nwe_lower
+            && current_candle.c < middle
         {
             is_buy = true;
-        } else if candles[candles.len() - 2].c > values.nwe_upper
-            && last_candle.c < values.nwe_upper
-            && last_candle.c > middle
+        } else if previous_candle.c > values.nwe_upper
+        //前一根k线是上涨的
+            && previous_candle.c > previous_candle.o
+            && current_candle.c < values.nwe_upper
+            && current_candle.c > middle
         {
             //如果上一根k线路的的收盘价格大于nwe的upper,且最新k线的收盘价小于nwe，且不超过中轨，则进行卖出
             is_sell = true;
@@ -160,22 +168,26 @@ impl NweStrategy {
         //检查nwe是否超卖或超买
         let (is_nwe_buy, is_nwe_sell) = Self::check_nwe(candles, values);
         if is_nwe_buy || is_nwe_sell {
-            //检查rsi是否超卖或超买
-            let (is_rsi_buy, is_rsi_sell) =
-                Self::check_rsi(rsi, self.config.rsi_oversold, self.config.rsi_overbought);
+            // //检查rsi是否超卖或超买
+            // let (is_rsi_buy, is_rsi_sell) =
+            //     Self::check_rsi(rsi, self.config.rsi_oversold, self.config.rsi_overbought);
 
-            //检查成交量比率是否超卖或超买
-            let (is_volume_ratio_buy, is_volume_ratio_sell) =
-                Self::check_volume_ratio(volume_ratio, self.config.volume_ratio);
+            // //检查成交量比率是否超卖或超买
+            // let (is_volume_ratio_buy, is_volume_ratio_sell) =
+            //     Self::check_volume_ratio(volume_ratio, self.config.volume_ratio);
 
             //如果上一根k线路的的收盘价格小于nwe的lower,且最新k线的收盘价大于nwe，且rsi超卖区间，则进行买入
-            if is_nwe_buy && is_rsi_buy {
+            if is_nwe_buy {
                 signal_result.should_buy = true;
+                //设置止损价格,信号k止损
+                // signal_result.signal_kline_stop_loss_price = Some(candles.last().unwrap().l);
             }
-            if is_nwe_sell && is_rsi_sell {
+            if is_nwe_sell {
                 signal_result.should_sell = true;
+                //设置止损价格,信号k止损
+                // signal_result.signal_kline_stop_loss_price = Some(candles.last().unwrap().h);
             }
-            //记录信号值
+            //设置止损价格,atr止损
             signal_result.signal_kline_stop_loss_price = Some(values.atr_short_stop);
         }
         signal_result.ts = candles.last().unwrap().ts;

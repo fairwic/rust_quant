@@ -13,6 +13,13 @@ pub mod top_contract_strategy;
 pub mod ut_boot_strategy;
 pub mod nwe_strategy;
 
+// 🆕 策略可扩展性框架
+pub mod strategy_trait;
+pub mod strategy_registry;
+pub mod executor_common;
+pub mod vegas_executor;
+pub mod nwe_executor;
+
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use log::{error, trace};
 use serde::{Deserialize, Serialize};
@@ -62,6 +69,28 @@ pub enum StrategyType {
     Vegas,
     Nwe,
 }
+
+impl StrategyType {
+    /// 从字符串解析为策略类型
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "BreakoutUp" => Some(StrategyType::BreakoutUp),
+            "BreakoutDown" => Some(StrategyType::BreakoutDown),
+            "Macd" => Some(StrategyType::Macd),
+            "MacdWithKdj" => Some(StrategyType::MacdWithKdj),
+            "MacdWithEma" => Some(StrategyType::MacdWithEma),
+            "Boll" => Some(StrategyType::Boll),
+            "UtBoot" => Some(StrategyType::UtBoot),
+            "UtBootShort" => Some(StrategyType::UtBootShort),
+            "Engulfing" => Some(StrategyType::Engulfing),
+            "TopContract" => Some(StrategyType::TopContract),
+            "Vegas" => Some(StrategyType::Vegas),
+            "Nwe" => Some(StrategyType::Nwe),
+            _ => None,
+        }
+    }
+}
+
 impl EnumToStrTrait for StrategyType {
     fn as_str(&self) -> &'static str {
         match self {

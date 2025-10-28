@@ -17,11 +17,12 @@ use crate::trading::model::strategy::strategy_config::{
 };
 use crate::trading::services::scheduler_service::SchedulerService;
 use crate::trading::services::strategy_data_service::StrategyDataService;
-use crate::trading::services::strategy_system_error::{
-    StrategySystemError, StrategyConfigError, BusinessLogicError, ErrorHandler, ErrorSeverity
-};
 use crate::trading::services::strategy_metrics::{get_strategy_metrics, StrategyMetrics};
+use crate::trading::services::strategy_system_error::{
+    BusinessLogicError, ErrorHandler, ErrorSeverity, StrategyConfigError, StrategySystemError,
+};
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values;
+use crate::trading::strategy::nwe_strategy::NweStrategyConfig;
 use crate::trading::strategy::order::strategy_config::StrategyConfig;
 use crate::trading::strategy::strategy_common::BasicRiskStrategyConfig;
 use crate::trading::strategy::StrategyType;
@@ -152,7 +153,14 @@ impl StrategyRuntimeInfo {
         strategy_type: String,
         config: Arc<StrategyConfig>,
     ) -> Self {
-        Self::new_with_job_uuid(strategy_config_id, inst_id, period, strategy_type, Arc::new(RwLock::new((*config).clone())), None)
+        Self::new_with_job_uuid(
+            strategy_config_id,
+            inst_id,
+            period,
+            strategy_type,
+            Arc::new(RwLock::new((*config).clone())),
+            None,
+        )
     }
 
     /// 创建新的运行时信息（指定job_uuid）
@@ -215,7 +223,10 @@ impl StrategyRuntimeInfo {
 
     /// 检查策略是否可以更新
     pub fn can_update(&self) -> bool {
-        matches!(self.status, StrategyStatus::Running | StrategyStatus::Paused)
+        matches!(
+            self.status,
+            StrategyStatus::Running | StrategyStatus::Paused
+        )
     }
 
     /// 获取用于序列化的包装器
@@ -280,13 +291,17 @@ impl StrategyManager {
     }
 
     /// 创建共享配置对象（统一配置管理）
-    fn create_shared_config(&self, strategy_config: &StrategyConfig) -> Arc<RwLock<StrategyConfig>> {
+    fn create_shared_config(
+        &self,
+        strategy_config: &StrategyConfig,
+    ) -> Arc<RwLock<StrategyConfig>> {
         Arc::new(RwLock::new(strategy_config.clone()))
     }
 
     /// 生成下一个配置版本号
     fn next_config_version(&self) -> u64 {
-        self.config_version_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.config_version_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
     /// 注册策略运行时信息
@@ -317,7 +332,8 @@ impl StrategyManager {
         );
 
         // 存储运行时信息
-        self.running_strategies.insert(strategy_key.clone(), runtime_info);
+        self.running_strategies
+            .insert(strategy_key.clone(), runtime_info);
 
         debug!("策略运行时信息已注册: {}", strategy_key);
         Ok(())
@@ -350,7 +366,10 @@ impl StrategyManager {
 
     /// 构建策略唯一标识
     fn build_strategy_key(inst_id: &str, period: &str, strategy_type: &str) -> String {
-        format!("{}{}{}{}{}", strategy_type, STRATEGY_KEY_SEPARATOR, inst_id, STRATEGY_KEY_SEPARATOR, period)
+        format!(
+            "{}{}{}{}{}",
+            strategy_type, STRATEGY_KEY_SEPARATOR, inst_id, STRATEGY_KEY_SEPARATOR, period
+        )
     }
 
     /// 检查策略是否正在运行
@@ -364,7 +383,10 @@ impl StrategyManager {
     }
 
     /// 异步加载和解析策略配置
-    async fn load_strategy_config(&self, strategy_config_id: i64) -> Result<(StrategyConfigEntity, Arc<StrategyConfig>)> {
+    async fn load_strategy_config(
+        &self,
+        strategy_config_id: i64,
+    ) -> Result<(StrategyConfigEntity, Arc<StrategyConfig>)> {
         debug!("加载策略配置: config_id={}", strategy_config_id);
 
         // 设置超时
@@ -373,37 +395,77 @@ impl StrategyManager {
             async {
                 let config_model = StrategyConfigEntityModel::new().await;
                 config_model.get_config_by_id(strategy_config_id).await
-            }
-        ).await
+            },
+        )
+        .await
         .map_err(|_| anyhow!("配置加载超时"))?
         .map_err(|e| StrategyManagerError::DatabaseError {
-            operation: format!("获取策略配置失败: {}", e)
+            operation: format!("获取策略配置失败: {}", e),
         })?;
 
         if config_result.is_none() {
-            return Err(StrategyManagerError::ConfigNotFound { config_id: strategy_config_id }.into());
+            return Err(StrategyManagerError::ConfigNotFound {
+                config_id: strategy_config_id,
+            }
+            .into());
         }
 
         let config_entity = &config_result.unwrap();
 
+        // 解析策略类型
+        let strategy_type = StrategyType::from_str(&config_entity.strategy_type)
+            .ok_or_else(|| StrategyManagerError::ConfigParseError {
+                field: format!("Unknown strategy type: {}", config_entity.strategy_type),
+            })?;
+
         // 解析策略配置
-        let vegas_strategy: VegasStrategy = serde_json::from_str(&config_entity.value)
-            .map_err(|e| StrategyManagerError::ConfigParseError {
-                field: format!("VegasStrategy: {}", e)
-            })?;
+        match strategy_type {
+            StrategyType::Vegas => {
+                let vegas_strategy: VegasStrategy = serde_json::from_str(&config_entity.value)
+                    .map_err(|e| StrategyManagerError::ConfigParseError {
+                        field: format!("VegasStrategy: {}", e),
+                    })?;
+                let risk_config: BasicRiskStrategyConfig =
+                    serde_json::from_str(&config_entity.risk_config).map_err(|e| {
+                        StrategyManagerError::ConfigParseError {
+                            field: format!("BasicRiskStrategyConfig: {}", e),
+                        }
+                    })?;
 
-        let risk_config: BasicRiskStrategyConfig = serde_json::from_str(&config_entity.risk_config)
-            .map_err(|e| StrategyManagerError::ConfigParseError {
-                field: format!("BasicRiskStrategyConfig: {}", e)
-            })?;
+                let strategy_config = Arc::new(StrategyConfig {
+                    strategy_config_id: strategy_config_id.try_into().unwrap(),
+                    strategy_config: serde_json::to_string(&vegas_strategy).unwrap(),
+                    risk_config: serde_json::to_string(&risk_config).unwrap(),
+                });
+                Ok((config_entity.clone(), strategy_config))
+            }
+            StrategyType::Nwe => {
+                let nwe_strategy: NweStrategyConfig = serde_json::from_str(&config_entity.value)
+                    .map_err(|e| StrategyManagerError::ConfigParseError {
+                        field: format!("NweStrategyConfig: {}", e),
+                    })?;
+                let risk_config: BasicRiskStrategyConfig =
+                    serde_json::from_str(&config_entity.risk_config).map_err(|e| {
+                        StrategyManagerError::ConfigParseError {
+                            field: format!("BasicRiskStrategyConfig: {}", e),
+                        }
+                    })?;
 
-        let strategy_config = Arc::new(StrategyConfig {
-            strategy_config_id: strategy_config_id.try_into().unwrap(),
-            strategy_config: serde_json::to_string(&vegas_strategy).unwrap(),
-            risk_config: serde_json::to_string(&risk_config).unwrap(),
-        });
+                let strategy_config = Arc::new(StrategyConfig {
+                    strategy_config_id: strategy_config_id.try_into().unwrap(),
+                    strategy_config: serde_json::to_string(&nwe_strategy).unwrap(),
+                    risk_config: serde_json::to_string(&risk_config).unwrap(),
+                });
 
-        Ok((config_entity.clone(), strategy_config))
+                Ok((config_entity.clone(), strategy_config))
+            }
+            _ => {
+                return Err(StrategyManagerError::ConfigParseError {
+                    field: format!("Unsupported strategy type: {:?}", strategy_type),
+                }
+                .into());
+            }
+        }
     }
 
     /// 启动策略
@@ -427,10 +489,12 @@ impl StrategyManager {
         );
 
         // 1. 加载策略配置
-        let (config_entity, strategy_config) = self.load_strategy_config(strategy_config_id).await?;
+        let (config_entity, strategy_config) =
+            self.load_strategy_config(strategy_config_id).await?;
 
         // 2. 检查策略是否已在运行
-        let strategy_key = Self::build_strategy_key(&inst_id, &period, &config_entity.strategy_type);
+        let strategy_key =
+            Self::build_strategy_key(&inst_id, &period, &config_entity.strategy_type);
         if self.is_strategy_running(&strategy_key) {
             let error = StrategySystemError::Business(BusinessLogicError::StrategyAlreadyRunning {
                 strategy_key: strategy_key.clone(),
@@ -439,9 +503,13 @@ impl StrategyManager {
             return Err(anyhow!("策略已在运行: {}", strategy_key));
         }
 
+        // 3. 解析策略类型
+        let strategy_type_enum = StrategyType::from_str(&config_entity.strategy_type)
+            .ok_or_else(|| anyhow!("未知的策略类型: {}", config_entity.strategy_type))?;
+
         // 4. 根据策略类型执行具体的启动逻辑
-        match config_entity.strategy_type.as_str() {
-            "Vegas" => {
+        match strategy_type_enum {
+            StrategyType::Vegas | StrategyType::Nwe => {
                 let strategy_config_for_init = StrategyConfig {
                     strategy_config_id: strategy_config.strategy_config_id,
                     strategy_config: strategy_config.strategy_config.clone(),
@@ -453,10 +521,14 @@ impl StrategyManager {
                     &strategy_config_for_init,
                     &inst_id,
                     &period,
-                ).await
+                )
+                .await
                 .map_err(|e| {
                     let error = StrategySystemError::Data(e);
-                    ErrorHandler::handle_error(&error, &format!("启动策略-数据初始化: {}", strategy_key));
+                    ErrorHandler::handle_error(
+                        &error,
+                        &format!("启动策略-数据初始化: {}", strategy_key),
+                    );
                     anyhow!("策略数据初始化失败: {}", error)
                 })?;
 
@@ -469,9 +541,13 @@ impl StrategyManager {
                     period.clone(),
                     config_entity.strategy_type.clone(),
                     shared_config.clone(),
-                ).map_err(|e| {
+                )
+                .map_err(|e| {
                     let error = StrategySystemError::Scheduler(e);
-                    ErrorHandler::handle_error(&error, &format!("启动策略-创建任务: {}", strategy_key));
+                    ErrorHandler::handle_error(
+                        &error,
+                        &format!("启动策略-创建任务: {}", strategy_key),
+                    );
                     anyhow!("创建定时任务失败: {}", error)
                 })?;
 
@@ -480,7 +556,10 @@ impl StrategyManager {
                     .await
                     .map_err(|e| {
                         let error = StrategySystemError::Scheduler(e);
-                        ErrorHandler::handle_error(&error, &format!("启动策略-注册任务: {}", strategy_key));
+                        ErrorHandler::handle_error(
+                            &error,
+                            &format!("启动策略-注册任务: {}", strategy_key),
+                        );
                         anyhow!("注册任务失败: {}", error)
                     })?;
 
@@ -494,20 +573,24 @@ impl StrategyManager {
                     Some(job_id),
                 );
 
-                self.running_strategies.insert(strategy_key.clone(), runtime_info);
+                self.running_strategies
+                    .insert(strategy_key.clone(), runtime_info);
             }
             _ => {
-                let error = StrategySystemError::Business(BusinessLogicError::UnsupportedStrategyType {
-                    strategy_type: config_entity.strategy_type.clone(),
-                });
+                let error =
+                    StrategySystemError::Business(BusinessLogicError::UnsupportedStrategyType {
+                        strategy_type: config_entity.strategy_type.clone(),
+                    });
                 ErrorHandler::handle_error(&error, &format!("启动策略: {}", strategy_key));
-                return Err(anyhow!("不支持的策略类型: {}", config_entity.strategy_type));
+                return Err(anyhow!("不支持的策略类型: {:?}", strategy_type_enum));
             }
         }
 
         // 记录启动性能指标
         let metrics = get_strategy_metrics();
-        metrics.record_strategy_start_time(&strategy_key, start_time.elapsed()).await;
+        metrics
+            .record_strategy_start_time(&strategy_key, start_time.elapsed())
+            .await;
 
         info!("策略启动成功: {}", strategy_key);
         Ok(())
@@ -538,7 +621,7 @@ impl StrategyManager {
                 });
                 ErrorHandler::handle_error(&error, &format!("停止策略: {}", strategy_key));
                 StrategyManagerError::StrategyNotRunning {
-                    strategy_key: strategy_key.clone()
+                    strategy_key: strategy_key.clone(),
                 }
             })?;
 
@@ -555,12 +638,13 @@ impl StrategyManager {
 
         // 记录停止性能指标
         let metrics = get_strategy_metrics();
-        metrics.record_strategy_stop_time(&strategy_key, stop_start_time.elapsed()).await;
+        metrics
+            .record_strategy_stop_time(&strategy_key, stop_start_time.elapsed())
+            .await;
 
         info!("策略已停止: {}", strategy_key);
         Ok(())
     }
-
 
     /// 更新运行中的策略配置
     pub async fn update_strategy_config(
@@ -691,15 +775,17 @@ impl StrategyManager {
         let strategy_key = Self::build_strategy_key(inst_id, period, strategy_type);
 
         // 1. 检查策略是否处于暂停状态
-        let runtime_info = self.get_running_strategy(&strategy_key)
-            .ok_or_else(|| StrategyManagerError::StrategyNotRunning {
-                strategy_key: strategy_key.clone()
-            })?;
+        let runtime_info = self.get_running_strategy(&strategy_key).ok_or_else(|| {
+            StrategyManagerError::StrategyNotRunning {
+                strategy_key: strategy_key.clone(),
+            }
+        })?;
 
         if !matches!(runtime_info.status, StrategyStatus::Paused) {
             return Err(StrategyManagerError::StrategyNotPaused {
-                strategy_key: strategy_key.clone()
-            }.into());
+                strategy_key: strategy_key.clone(),
+            }
+            .into());
         }
 
         let strategy_config_id = runtime_info.strategy_config_id;
@@ -734,7 +820,7 @@ impl StrategyManager {
         &self,
         inst_id: &str,
         period: &str,
-        snap:Option<CandlesEntity>
+        snap: Option<CandlesEntity>,
     ) -> Result<()> {
         // 参数验证
         self.validate_strategy_params(inst_id, period)?;
@@ -755,17 +841,15 @@ impl StrategyManager {
                 inst_id,
                 period,
                 &current_config,
-                snap
-            ).await?;
+                snap,
+            )
+            .await?;
             debug!(
                 "策略执行完成: inst_id={}, period={}, strategy_type={}",
                 inst_id, period, runtime_info.strategy_type
             );
         } else {
-            warn!(
-                "未找到运行中的策略: inst_id={}, period={}",
-                inst_id, period
-            );
+            warn!("未找到运行中的策略: inst_id={}, period={}", inst_id, period);
         }
 
         Ok(())
@@ -900,20 +984,22 @@ impl StrategyManager {
         }
 
         // 并行停止策略，提升关闭速度；即使个别失败也继续
-        let futures = strategies.into_iter().map(|(inst_id, period, strategy_type)| {
-            async move {
+        let futures = strategies
+            .into_iter()
+            .map(|(inst_id, period, strategy_type)| async move {
                 if let Err(e) = self.stop_strategy(&inst_id, &period, &strategy_type).await {
                     error!("停止策略失败: {}", e);
                 }
-            }
-        });
+            });
         futures::future::join_all(futures).await;
 
         Ok(count)
     }
 
     /// 获取系统健康状态
-    pub async fn get_system_health(&self) -> crate::trading::services::strategy_metrics::SystemHealth {
+    pub async fn get_system_health(
+        &self,
+    ) -> crate::trading::services::strategy_metrics::SystemHealth {
         let metrics = get_strategy_metrics();
         metrics.get_system_health(self).await
     }

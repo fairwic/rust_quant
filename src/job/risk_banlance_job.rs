@@ -1,7 +1,6 @@
 // 风险监控任务
 
 use anyhow::{anyhow, Context, Result};
-use log::{debug, error, info};
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::SetLeverageRequest;
 use okx::dto::asset_dto::{AssetBalance, TransferOkxReqDto};
@@ -11,15 +10,15 @@ use okx::dto::PositionSide;
 use okx::enums::account_enums::AccountType;
 use okx::{OkxAccount, OkxAsset};
 use std::str::FromStr;
-use tracing::{span, Level};
+use tracing::{Level, error, info, span};
 
 // 常量定义
 const DEFAULT_CURRENCY: &str = "USDT";
 const BALANCE_RATIO: f64 = 2.0; // 资金账户与交易账户的比例
 
-const BTC_LEVEL: i32 = 20;
-const ETH_LEVEL: i32 = 15;
-const OTHER_LEVEL: i32 = 10;
+const BTC_LEVEL: i32 = 8;
+const ETH_LEVEL: i32 = 5;
+const OTHER_LEVEL: i32 = 3;
 
 /// 风险管理任务，负责在资金账户和交易账户之间平衡资金
 pub struct RiskBalanceWithLevelJob {
@@ -41,12 +40,12 @@ impl RiskBalanceWithLevelJob {
     pub async fn run(&self, inst_ids: &Vec<String>) -> Result<(), anyhow::Error> {
         //1. 控制交易资金
         match self.control_trade_amount().await {
-            Ok(_) => info!("风险管理任务成功完成"),
+            Ok(_) => info!("风险管理任务成功完成!"),
             Err(e) => error!("风险管理任务失败: {:?}", e),
         }
         //2. 控制合约杠杆
         match self.run_set_leverage(inst_ids).await {
-            Ok(_) => info!("风险管理任务成功完成"),
+            Ok(_) => info!("设置最大杠杆完成!"),
             Err(e) => error!("风险管理任务失败: {:?}", e),
         }
         Ok(())
@@ -66,7 +65,7 @@ impl RiskBalanceWithLevelJob {
         let _enter = span.enter();
 
         for inst_id in inst_ids.iter() {
-            let mut level = 10;
+            let mut level = 3;
             if inst_id == &"BTC-USDT-SWAP" {
                 level = BTC_LEVEL;
             } else if inst_id == &"ETH-USDT-SWAP" {
@@ -126,7 +125,7 @@ impl RiskBalanceWithLevelJob {
             .first()
             .ok_or_else(|| anyhow!("未找到资金账户中的{}余额", self.currency))?;
 
-        debug!("资金账户余额: {:?}", asset_balance);
+        info!("资金账户余额: {:?}", asset_balance);
 
         // 获取交易账户资产
         let account = OkxAccount::from_env().context("无法从环境变量创建交易账户客户端")?;
@@ -140,7 +139,7 @@ impl RiskBalanceWithLevelJob {
             .first()
             .ok_or_else(|| anyhow!("未找到交易账户中的{}余额", self.currency))?;
 
-        debug!("交易账户余额: {:?}", trade_balance);
+        info!("交易账户余额: {:?}", trade_balance);
 
         Ok((
             asset_balance.avail_bal.clone(),

@@ -196,7 +196,6 @@ impl SchedulerService {
         let ts_str = ts.to_string();
         //从redis中获取数据
         let rkey = format!("deal_confirm_candle:{}:{}:{}", inst_id, time, ts_str);
-        println!("get rkey:{}", rkey);
         let multi_connection = crate::app_config::redis_config::get_redis_connection().await;
         if let Err(e) = multi_connection {
             error!("获取Redis连接失败: {:?}", e);
@@ -212,7 +211,6 @@ impl SchedulerService {
     }
     async fn mark_processed_latest_data(inst_id: &str, time: &str, ts_str: &str) {
         let rkey = format!("deal_confirm_candle:{}:{}:{}", inst_id, time, ts_str);
-        println!("set rkey:{}", rkey);
         let multi_connection = crate::app_config::redis_config::get_redis_connection().await;
         if let Ok(mut conn) = multi_connection {
             conn.set_ex::<_, _, ()>(&rkey, "1", 86400 * 7).await;

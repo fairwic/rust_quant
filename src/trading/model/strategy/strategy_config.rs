@@ -26,6 +26,7 @@ pub struct StrategyConfigEntity {
 crud!(StrategyConfigEntity {}, "strategy_config");
 impl_select!(StrategyConfigEntity{select_by_id(id:i64) -> Option => "`where id = #{id} limit 1`"},"strategy_config");
 impl_select!(StrategyConfigEntity{get_all() => "`where is_deleted=0`"},"strategy_config");
+impl_select!(StrategyConfigEntity{get_all_by_period(period:&str) => "`where is_deleted=0 and time = #{period}`"},"strategy_config");
 // impl_update!(StrategyConfigEntity{update_by_name(name:&str) => "`where id = '2'`"},"strategy_config");
 
 impl_update!(StrategyConfigEntity{update_by_name(name:&str) => "`where id = '2'`"},"strategy_config");
@@ -80,7 +81,14 @@ impl StrategyConfigEntityModel {
 
     pub async fn get_list(&self) -> anyhow::Result<Vec<StrategyConfigEntity>> {
         let data = StrategyConfigEntity::get_all(self.db).await?;
-        debug!("query strategy_config result:{}", json!(data));
+        Ok(data)
+    }
+
+    pub async fn get_list_by_period(
+        &self,
+        period: &str,
+    ) -> anyhow::Result<Vec<StrategyConfigEntity>> {
+        let data = StrategyConfigEntity::get_all_by_period(self.db, period).await?;
         Ok(data)
     }
 

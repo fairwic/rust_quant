@@ -897,9 +897,9 @@ pub fn check_risk_config(
 
     // 计算盈亏率
     let profit_pct = match trade_position.trade_side {
-        TradeSide::Long => (current_close_price - entry_price) / entry_price,
+        TradeSide::Long => (current_low_price - entry_price) / entry_price,
         TradeSide::Short => {
-            (entry_price - current_close_price) / entry_price // 做空的盈亏计算
+            (entry_price - current_high_price) / entry_price // 做空的盈亏计算
         }
         _ => 0.0,
     };
@@ -1258,7 +1258,10 @@ fn open_long_position(
 
     // 如果启用了移动止盈,则设置移动止盈价格为当前k线的最高价
     if risk_config.take_profit_ratio > 0.0 {
-        temp_trade_position.signal_high_low_diff = candle.h - candle.l;
+        if signal.signal_kline_stop_loss_price.is_none() {
+            error!("signal_kline_stop_loss_price is none");
+        }
+        temp_trade_position.signal_high_low_diff = (signal.signal_kline_stop_loss_price.unwrap() - signal.open_price).abs();
         temp_trade_position.touch_take_profit_price = Some(
             signal.open_price
                 + temp_trade_position.signal_high_low_diff * risk_config.take_profit_ratio,
@@ -1308,18 +1311,16 @@ fn open_short_position(
     if risk_config.is_used_signal_k_line_stop_loss {
         trade_position.signal_kline_stop_close_price = signal.signal_kline_stop_loss_price;
     }
-    //如果启用了移动止盈,则设置移动止盈价格为当前k线的最低价-当前k线的最高价-当前k线的最低价
+    //如果启用了按比例止盈,（开仓价格-止损价格）*比例
     if risk_config.take_profit_ratio > 0.0 {
-        trade_position.signal_high_low_diff = candle.h - candle.l;
+        if signal.signal_kline_stop_loss_price.is_none() {
+            error!("signal_kline_stop_loss_price is none");
+        }
+        trade_position.signal_high_low_diff =
+            (signal.signal_kline_stop_loss_price.unwrap() - signal.open_price).abs();
         trade_position.touch_take_profit_price = Some(
             signal.open_price - trade_position.signal_high_low_diff * risk_config.take_profit_ratio,
         );
-        if signal.ts == 1755446400000 {
-            log::info!(
-                "移动止盈价格:{}",
-                trade_position.touch_take_profit_price.unwrap()
-            );
-        }
     }
 
     state.trade_position = Some(trade_position);

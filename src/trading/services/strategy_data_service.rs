@@ -8,13 +8,13 @@ use anyhow::{anyhow, Result};
 use tracing::{debug, info};
 
 use crate::trading::domain_service::candle_domain_service::CandleDomainService;
-use crate::trading::indicator::vegas_indicator::VegasStrategy;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values;
 use crate::trading::strategy::order::strategy_config::StrategyConfig;
-use crate::trading::strategy::strategy_common::{parse_candle_to_data_item, BasicRiskStrategyConfig};
-use crate::trading::strategy::{strategy_common, StrategyType};
+use crate::trading::strategy::strategy_common::parse_candle_to_data_item;
 use crate::CandleItem;
-use okx::dto::EnumToStrTrait;
+
+// 保留用于向后兼容（仅用于 validate_data_storage）
+use crate::trading::indicator::vegas_indicator::IndicatorCombine;
+use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values;
 
 /// 策略数据服务错误类型
 #[derive(thiserror::Error, Debug)]
@@ -46,7 +46,7 @@ pub struct StrategyDataService;
 
 impl StrategyDataService {
     /// 常量定义
-    const MAX_CANDLE_HISTORY: usize = 7000;
+    const MAX_CANDLE_HISTORY: usize = 4000;
     const DATA_FETCH_TIMEOUT_SECS: u64 = 30;
 
     /// 验证策略参数
@@ -73,12 +73,16 @@ impl StrategyDataService {
         Ok(())
     }
 
-    /// 初始化策略数据并确保全局状态同步
+    /// 初始化策略数据并确保全局状态同步 - 使用策略注册中心（重构版）✨
+    /// 
+    /// 新增策略时，只需在 strategy_registry.rs 中注册即可，无需修改此函数！
     pub async fn initialize_strategy_data(
         strategy: &StrategyConfig,
         inst_id: &str,
         time: &str,
     ) -> Result<StrategyDataSnapshot, StrategyDataError> {
+        use crate::trading::strategy::strategy_registry::get_strategy_registry;
+        
         debug!("开始初始化策略数据: {}_{}", inst_id, time);
 
         // 参数验证
@@ -105,66 +109,45 @@ impl StrategyDataService {
             });
         }
 
-        // 初始化指标计算
-        // 解析策略配置
-        let vegas_strategy: crate::trading::indicator::vegas_indicator::VegasStrategy = 
-            serde_json::from_str(&strategy.strategy_config)
-                .map_err(|e| StrategyDataError::DataValidationFailed {
-                    reason: format!("解析策略配置失败: {}", e)
-                })?;
-        let mut multi_strategy_indicators = vegas_strategy.get_indicator_combine();
+        // 1. 从注册中心获取策略（自动检测类型）
+        let strategy_executor = get_strategy_registry()
+            .detect_strategy(&strategy.strategy_config)
+            .map_err(|e| StrategyDataError::ValidationError {
+                field: format!("策略类型识别失败: {}", e),
+            })?;
+
+        info!(
+            "🎯 初始化策略: {} (inst_id={}, period={}, candles={})",
+            strategy_executor.name(),
+            inst_id,
+            time,
+            candles.len()
+        );
+
+        // 2. 初始化数据（无需 match，无需新增代码）
+        let result = strategy_executor
+            .initialize_data(strategy, inst_id, time, candles.clone())
+            .await
+            .map_err(|e| StrategyDataError::DataInitializationFailed {
+                reason: format!("策略数据初始化失败: {}", e),
+            })?;
+
+        // 3. 转换K线数据用于快照
         let mut candle_items = VecDeque::with_capacity(candles.len());
-
-        // 计算所有指标值
         for candle in &candles {
-            let data_item = parse_candle_to_data_item(candle);
-            strategy_common::get_multi_indicator_values(&mut multi_strategy_indicators, &data_item);
-            candle_items.push_back(data_item);
+            candle_items.push_back(parse_candle_to_data_item(candle));
         }
 
-        // 验证数据完整性
-        if candle_items.is_empty() {
-            return Err(StrategyDataError::DataInitializationFailed {
-                reason: "K线数据转换失败".to_string(),
-            });
-        }
-
-        // 生成存储键并保存数据
-        let hash_key = arc_vegas_indicator_values::get_hash_key(inst_id, time, StrategyType::Vegas.as_str());
-
-        // 保存到全局存储
-        let last_timestamp = candles
-            .last()
-            .ok_or_else(|| StrategyDataError::DataInitializationFailed {
-                reason: "无法获取最新K线时间戳".to_string(),
-            })?
-            .ts;
-
-        arc_vegas_indicator_values::set_strategy_indicator_values(
-            inst_id.to_string(),
-            time.to_string(),
-            last_timestamp,
-            hash_key.clone(),
-            candle_items.clone(),
-            multi_strategy_indicators.clone(),
-        )
-        .await;
-
-        // 验证数据保存成功
-        Self::validate_data_storage(&hash_key).await?;
-
-        let snapshot = StrategyDataSnapshot {
-            hash_key: hash_key.clone(),
+        // 4. 返回快照
+        Ok(StrategyDataSnapshot {
+            hash_key: result.hash_key,
             candle_items,
-            indicator_values: multi_strategy_indicators,
-            last_timestamp,
-        };
-
-        info!("策略数据初始化完成: {}", hash_key);
-        Ok(snapshot)
+            indicator_values: Default::default(), // 使用默认值，实际数据在各自的缓存中
+            last_timestamp: result.last_timestamp,
+        })
     }
 
-    /// 验证数据存储是否成功
+    /// 验证数据存储是否成功（仅用于 Vegas 策略）
     async fn validate_data_storage(hash_key: &str) -> Result<(), StrategyDataError> {
         // 验证数据是否保存成功
         if arc_vegas_indicator_values::get_vegas_indicator_values_by_inst_id_with_period(hash_key.to_string())

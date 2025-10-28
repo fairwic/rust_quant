@@ -7,34 +7,37 @@ services:
       dockerfile: Dockerfile
     environment:
       IS_BACK_TEST: 'false'
-      IS_RUN_SYNC_DATA_JOB : 'true'
+      IS_RUN_SYNC_DATA_JOB: 'true'
       IS_RUN_REAL_STRATEGY: 'true'
       IS_OPEN_SOCKET: 'true'
+      OKX_API_KEY:
+      OKX_API_SECRET:
+      OKX_PASSPHRASE:
     volumes:
       - .:/usr/src/rust_quant
     command: sh -c "cargo build --release && ./target/release/rust_quant"
   mysql:
-      image: mysql:8.0
-      container_name: mysql
-      restart: always
-      environment:
-        MYSQL_ROOT_PASSWORD: example   # root 用户密码
-        MYSQL_DATABASE: test                 # 默认创建的数据库
-        MYSQL_PASSWORD: example           # 普通用户密码
-      ports:
-        - "33306:3306"
-      volumes:
-        - ~/onions/docker-volumes/mysql_data:/var/lib/mysql        # 本地路径映射到 MySQL 数据目录
-      command: --max_connections=1000
+    image: mysql:8.0
+    container_name: mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: example # root 用户密码
+      MYSQL_DATABASE: test # 默认创建的数据库
+      MYSQL_PASSWORD: example # 普通用户密码
+    ports:
+      - "33306:3306"
+    volumes:
+      - ~/onions/docker-volumes/mysql_data:/var/lib/mysql # 本地路径映射到 MySQL 数据目录
+    command: --max_connections=1000
   redis:
     image: redis:6.2
     container_name: redis
     restart: always
     ports:
-      - "6379:6379"   # 映射端口：宿主机6379 -> 容器6379
+      - "6379:6379" # 映射端口：宿主机6379 -> 容器6379
     volumes:
       - ~/onions/docker-volumes/redis/redis_data:/data
       - ~/onions/docker-volumes/redis/redis.conf:/usr/local/etc/redis/redis.conf
-    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    command: [ "redis-server", "/usr/local/etc/redis/redis.conf" ]
 networks:
   default:

@@ -13,7 +13,8 @@ pub struct NweIndicatorCombine {
 }
 
 impl NweIndicatorCombine {
-    pub fn new(config: NweStrategyConfig) -> Self {
+    /// 创建指标组合（接受引用，避免不必要的 clone）✨
+    pub fn new(config: &NweStrategyConfig) -> Self {
         Self {
             rsi_indicator: Some(RsiIndicator::new(config.rsi_period)),
             volume_indicator: Some(VolumeRatioIndicator::new(config.volume_bar_num, true)),
@@ -23,7 +24,10 @@ impl NweIndicatorCombine {
                 config.nwe_multi,
                 500,
             )),
-            atr_indicator: Some(ATRStopLoos::new(config.atr_period, config.atr_multiplier).expect("ATR period must be > 0")),
+            atr_indicator: Some(
+                ATRStopLoos::new(config.atr_period, config.atr_multiplier)
+                    .expect("ATR period must be > 0"),
+            ),
         }
     }
 
@@ -39,10 +43,47 @@ impl NweIndicatorCombine {
         nwe_signal_values.nwe_lower = nwe_lower;
         *nwe_signal_values
     }
+
+    /// 推进所有指标并返回当前值（用于实盘策略）
+    pub fn next(&mut self, candle: &CandleItem) -> NweSignalValues {
+        let rsi = if let Some(r) = &mut self.rsi_indicator {
+            r.next(candle.c)
+        } else {
+            0.0
+        };
+        
+        let volume_ratio = if let Some(v) = &mut self.volume_indicator {
+            v.next(candle.v)
+        } else {
+            0.0
+        };
+        
+        let (short_stop, long_stop, atr_value) = if let Some(a) = &mut self.atr_indicator {
+            a.next(candle.h, candle.l, candle.c)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
+        
+        let (upper, lower) = if let Some(n) = &mut self.nwe_indicator {
+            n.next(candle.c)
+        } else {
+            (0.0, 0.0)
+        };
+        
+        NweSignalValues {
+            rsi_value: rsi,
+            volume_ratio,
+            atr_value,
+            atr_short_stop: short_stop,
+            atr_long_stop: long_stop,
+            nwe_upper: upper,
+            nwe_lower: lower,
+        }
+    }
 }
 
 impl Default for NweIndicatorCombine {
     fn default() -> Self {
-        Self::new(NweStrategyConfig::default())
+        Self::new(&NweStrategyConfig::default())
     }
 }

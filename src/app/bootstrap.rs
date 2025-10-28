@@ -8,6 +8,7 @@ use crate::job::RiskBalanceWithLevelJob;
 use crate::socket;
 use crate::trading::indicator::vegas_indicator::VegasStrategy;
 use crate::trading::model::strategy::strategy_config::StrategyConfigEntityModel;
+use crate::trading::strategy::nwe_strategy::{NweStrategy, NweStrategyConfig};
 use crate::trading::strategy::{
     order::strategy_config::StrategyConfig, strategy_common::BasicRiskStrategyConfig,
     strategy_manager::get_strategy_manager, StrategyType,
@@ -19,11 +20,16 @@ use okx::dto::EnumToStrTrait;
 pub async fn run_modes() -> anyhow::Result<()> {
     // 可根据需要从环境加载，当前保持项目的默认值
     let mut inst_ids = Vec::with_capacity(100);
-    let mut period = Vec::with_capacity(10);
+    let mut periods = Vec::with_capacity(10);
     let env = std::env::var("APP_ENV").unwrap();
     if env == "prod" {
         //生产环境只按配置的策略的数据去获取
-        let strategy_list = StrategyConfigEntityModel::new().await.get_list().await;
+        let period = std::env::var("RUN_STRATEGY_PERIOD").unwrap();
+        let strategy_list = StrategyConfigEntityModel::new()
+            .await
+            .get_list_by_period(&period)
+            .await;
+        info!("获取策略配置: {:?}", strategy_list);
         let strategy_list = match strategy_list {
             Ok(list) => {
                 info!("获取策略配置数量{:?}", list.len());
@@ -36,7 +42,7 @@ pub async fn run_modes() -> anyhow::Result<()> {
         };
         strategy_list.iter().for_each(|f| {
             inst_ids.push(f.inst_id.clone());
-            period.push(f.time.clone());
+            periods.push(f.time.clone());
         });
         if strategy_list.len() == 0 || period.len() == 0 {
             error!(
@@ -50,21 +56,19 @@ pub async fn run_modes() -> anyhow::Result<()> {
             ));
         }
     } else {
-        inst_ids = vec!["ETH-USDT-SWAP".to_string()];
-        period = vec!["5m".to_string()];
+        inst_ids = vec!["SOL-USDT-SWAP".to_string()];
+        periods = vec!["5m".to_string()];
     }
 
     // let inst_ids = Some(vec!["ETH-USDT-SWAP","BTC-USDT-SWAP","SOL-USDT-SWAP"]);
     // let period = Some(vec!["1H","4H","1Dutc"]);
 
-    let inst_ids = inst_ids;
-    let period = period;
     // 1) 初始化需要同步的数据
     if env_is_true("IS_RUN_SYNC_DATA_JOB", false) {
         if let Err(error) = tickets_job::init_all_ticker(&inst_ids).await {
             error!("init all tickers error: {}", error);
         }
-        match (&inst_ids, &period) {
+        match (&inst_ids, &periods) {
             (ids, times) => {
                 if let Err(error) = task::basic::run_sync_data_job(&ids, &times).await {
                     error!("run sync [tickets] data job error: {}", error);
@@ -81,7 +85,7 @@ pub async fn run_modes() -> anyhow::Result<()> {
     // 2) 本地环境下执行回测任务（Vegas）
     if env_is_true("IS_BACK_TEST", false) {
         info!("IS_BACK_TEST 已启用");
-        if let (inst_id, times) = (&inst_ids, &period) {
+        if let (inst_id, times) = (&inst_ids, &periods) {
             for inst_id in inst_id.iter() {
                 for time in times.iter() {
                     if let Err(error) = task::basic::back_test(inst_id, time).await {
@@ -97,7 +101,7 @@ pub async fn run_modes() -> anyhow::Result<()> {
     // 2.1) 本地环境下执行 NWE 回测开关（与 Vegas 同步入口，开关在 BackTestConfig 内）
     if env_is_true("IS_BACK_TEST_NWE", false) {
         info!("IS_BACK_TEST_NWE 已启用");
-        if let (inst_id, times) = (&inst_ids, &period) {
+        if let (inst_id, times) = (&inst_ids, &periods) {
             for inst_id in inst_id.iter() {
                 for time in times.iter() {
                     if let Err(error) = task::basic::back_test_with_config(
@@ -118,7 +122,7 @@ pub async fn run_modes() -> anyhow::Result<()> {
 
     // 3) WebSocket 实时数据
     if env_is_true("IS_OPEN_SOCKET", false) {
-        match (&inst_ids, &period) {
+        match (&inst_ids, &periods) {
             (inst_id, times) => {
                 socket::websocket_service::run_socket(inst_id, times).await;
             }
@@ -129,54 +133,75 @@ pub async fn run_modes() -> anyhow::Result<()> {
     // 4) 实盘策略
     if env_is_true("IS_RUN_REAL_STRATEGY", false) {
         info!("run real strategy job");
-        if let (inst_id, times) = (&inst_ids, &period) {
-            // 风险控制初始化
-            let risk_job = RiskBalanceWithLevelJob::new();
-            if let Err(e) = risk_job.run(inst_id).await {
-                error!("风险控制初始化失败: {}", e);
+
+        // 风险控制初始化
+        let risk_job = RiskBalanceWithLevelJob::new();
+        if let Err(e) = risk_job.run(&inst_ids).await {
+            error!("风险控制初始化失败: {}", e);
+        }
+
+        let strategy_list = StrategyConfigEntityModel::new().await.get_list().await;
+        let strategy_list = match strategy_list {
+            Ok(list) => {
+                info!("获取策略配置数量{:?}", list.len());
+                list
             }
+            Err(e) => {
+                error!("获取策略配置失败: {:?}", e);
+                return Err(anyhow!("获取策略配置失败: {:?}", e));
+            }
+        };
+        let strategy_manager = get_strategy_manager();
 
-            let strategy_list = StrategyConfigEntityModel::new().await.get_list().await;
-            let strategy_list = match strategy_list {
-                Ok(list) => {
-                    info!("获取策略配置数量{:?}", list.len());
-                    list
+        for strategy in strategy_list.into_iter() {
+            let inst_id = strategy.inst_id;
+            let time = strategy.time;
+            let strategy_type = strategy.strategy_type;
+
+            if &strategy_type == StrategyType::Vegas.as_str() {
+                let strategy_config: VegasStrategy =
+                    serde_json::from_str::<VegasStrategy>(&*strategy.value)
+                        .map_err(|e| anyhow!("Failed to parse VegasStrategy config: {}", e))?;
+
+                let risk_config: BasicRiskStrategyConfig = serde_json::from_str::<
+                    BasicRiskStrategyConfig,
+                >(&*strategy.risk_config)
+                .map_err(|e| anyhow!("Failed to parse BasicRiskStrategyConfig config: {}", e))?;
+
+                let _strategy_config = StrategyConfig {
+                    strategy_config_id: strategy.id,
+                    strategy_config: serde_json::to_string(&strategy_config)?,
+                    risk_config: serde_json::to_string(&risk_config)?,
+                };
+
+                if let Err(e) = strategy_manager
+                    .start_strategy(strategy.id, inst_id.clone(), time.clone())
+                    .await
+                {
+                    error!("启动策略失败: 策略ID={}, 错误: {}", strategy.id, e);
                 }
-                Err(e) => {
-                    error!("获取策略配置失败: {:?}", e);
-                    return Err(anyhow!("获取策略配置失败: {:?}", e));
-                }
-            };
-            let strategy_manager = get_strategy_manager();
+            }
+            if &strategy_type == StrategyType::Nwe.as_str() {
+                let strategy_config: NweStrategyConfig =
+                    serde_json::from_str::<NweStrategyConfig>(&*strategy.value)
+                        .map_err(|e| anyhow!("Failed to parse NweStrategy config: {}", e))?;
 
-            for strategy in strategy_list.into_iter() {
-                let inst_id = strategy.inst_id;
-                let time = strategy.time;
-                let strategy_type = strategy.strategy_type;
+                let risk_config: BasicRiskStrategyConfig = serde_json::from_str::<
+                    BasicRiskStrategyConfig,
+                >(&*strategy.risk_config)
+                .map_err(|e| anyhow!("Failed to parse BasicRiskStrategyConfig config: {}", e))?;
 
-                if &strategy_type == StrategyType::Vegas.as_str() {
-                    let strategy_config: VegasStrategy =
-                        serde_json::from_str::<VegasStrategy>(&*strategy.value)
-                            .map_err(|e| anyhow!("Failed to parse VegasStrategy config: {}", e))?;
+                let _strategy_config = StrategyConfig {
+                    strategy_config_id: strategy.id,
+                    strategy_config: serde_json::to_string(&strategy_config)?,
+                    risk_config: serde_json::to_string(&risk_config)?,
+                };
 
-                    let risk_config: BasicRiskStrategyConfig =
-                        serde_json::from_str::<BasicRiskStrategyConfig>(&*strategy.risk_config)
-                            .map_err(|e| {
-                                anyhow!("Failed to parse BasicRiskStrategyConfig config: {}", e)
-                            })?;
-
-                    let _strategy_config = StrategyConfig {
-                        strategy_config_id: strategy.id,
-                        strategy_config: serde_json::to_string(&strategy_config)?,
-                        risk_config: serde_json::to_string(&risk_config)?,
-                    };
-
-                    if let Err(e) = strategy_manager
-                        .start_strategy(strategy.id, inst_id.clone(), time.clone())
-                        .await
-                    {
-                        error!("启动策略失败: 策略ID={}, 错误: {}", strategy.id, e);
-                    }
+                if let Err(e) = strategy_manager
+                    .start_strategy(strategy.id, inst_id.clone(), time.clone())
+                    .await
+                {
+                    error!("启动策略失败: 策略ID={}, 错误: {}", strategy.id, e);
                 }
             }
         }
@@ -208,7 +233,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     // 启动心跳任务，定期输出程序运行状态
     let heartbeat_handle = tokio::spawn(async {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(600));
         loop {
             interval.tick().await;
             info!("💓 程序正在运行中，策略任务正常执行...");

@@ -19,7 +19,11 @@ use crate::trading::services::order_service::swap_order_service::SwapOrderServic
 use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::{
     self, get_hash_key, ArcVegasIndicatorValues,
 };
-use crate::trading::strategy::nwe_strategy::{NweStrategy, NweStrategyConfig};
+use crate::trading::strategy::arc::indicator_values::arc_nwe_indicator_values::{
+    self as arc_nwe, get_nwe_hash_key, get_nwe_indicator_manager,
+};
+use crate::trading::indicator::vegas_indicator::VegasStrategy;
+use crate::trading::strategy::nwe_strategy::{NweStrategy, NweStrategyConfig, NweSignalValues};
 use crate::trading::strategy::order::strategy_config::StrategyConfig;
 use crate::trading::strategy::strategy_common::{
     get_multi_indicator_values, parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
@@ -355,29 +359,23 @@ pub async fn back_test_with_config(
             NweRandomStrategyConfig, StrategyProgressManager,
         };
         let nwe_random_config = NweRandomStrategyConfig {
-            rsi_periods: vec![0,5, 4, 6, 7, 8, 9, 10],
-            rsi_over_buy_sell: vec![
-                (65.0, 35.0),
-                (70.0, 30.0),
-                (75.0, 25.0),
-                (80.0, 20.0),
-                (85.0, 15.0),
-                (90.0, 10.0),
-            ],
-            atr_periods: vec![14, 10, 12, 14, 16, 18],
-            atr_multipliers: vec![0.2, 0.5, 1.0, 1.5, 2.0],
+            rsi_periods: vec![8],
+            rsi_over_buy_sell: vec![(70.0, 30.0)],
 
-            volume_bar_nums: vec![3, 4, 5, 6],
-            volume_ratios: vec![0.8, 0.9, 1.0],
+            atr_periods: vec![8, 10, 14, 12],
+            atr_multipliers: vec![0.2, 0.3, 0.4, 0.5, 0.6],
 
-            nwe_periods: vec![8, 6, 10, 12, 14],
-            nwe_multi: vec![3.0,1.0,2.0,4.0,5.0],
+            volume_bar_nums: vec![3],
+            volume_ratios: vec![0.8],
+
+            nwe_periods: vec![8, 10, 12, 14],
+            nwe_multi: vec![3.0, 2.0, 2.5, 3.5, 4.0],
             batch_size: config.max_concurrent,
             // 风险参数空间（参考 Vegas）
-            max_loss_percent: vec![0.03],
+            max_loss_percent: vec![0.03, 0.01, 0.02, 0.005],
             take_profit_ratios: vec![0.5, 1.0, 1.5, 1.8, 2.0, 2.5],
             is_move_stop_loss: vec![false],
-            is_used_signal_k_line_stop_loss: vec![false],
+            is_used_signal_k_line_stop_loss: vec![false, true],
         };
 
         // 加载或初始化进度
@@ -492,7 +490,7 @@ pub async fn back_test_with_config(
     // NWE 指定配置回测（从DB获取）
     if config.enable_specified_test_nwe {
         use crate::trading::task::strategy_config::get_nwe_strategy_config_from_db;
-        let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
+        let arc_candle_data = load_and_convert_candle_data(inst_id, time, 30000).await?;
         let pairs = get_nwe_strategy_config_from_db(inst_id, time).await?;
         if pairs.is_empty() {
             warn!("NWE 指定策略配置为空，跳过执行");
@@ -576,163 +574,33 @@ pub async fn test_specified_strategy(
     Ok(())
 }
 
-/// 运行准备好的订单函数 - 使用新的管理器
+/// 运行准备好的订单函数 - 使用策略注册中心（重构版）✨
+/// 
+/// 新增策略时，只需在 strategy_registry.rs 中注册即可，无需修改此函数！
 pub async fn run_ready_to_order_with_manager(
     inst_id: &str,
     period: &str,
     strategy: &StrategyConfig,
     snap: Option<CandlesEntity>,
 ) -> Result<()> {
-    // 常量定义
-    const MAX_HISTORY_SIZE: usize = 10000;
-    // 1. 预处理：获取哈希键和管理器
-    let strategy_type = StrategyType::Vegas.as_str().to_owned();
-    let key = get_hash_key(inst_id, period, &strategy_type);
-    let manager = arc_vegas_indicator_values::get_indicator_manager();
-    let mut new_candle_data: Option<CandlesEntity> = None;
-    if snap.is_none() {
-        // 2. 获取最新K线数据
-        new_candle_data = CandleDomainService::new_default()
-            .await
-            .get_new_one_candle_fresh(inst_id, period, None)
-            .await
-            .map_err(|e| anyhow!("获取最新K线数据失败: {}", e))?;
-    } else {
-        //直接从传过来的数据中获取，传过来的参数默认是认为最新的
-        new_candle_data = snap;
-    }
-    if new_candle_data.is_none() {
-        warn!(
-            "获取的最新K线数据为空,跳过本次策略执行: {:?}, {:?}",
-            inst_id, period
-        );
-        return Ok(()); // 改为返回Ok，避免阻塞策略执行
-    }
-    let new_candle_data = new_candle_data.unwrap();
-    let new_candle_item = parse_candle_to_data_item(&new_candle_data);
-
-    // 3. 同键互斥，读取快照并验证
-    let key_mutex = manager.acquire_key_mutex(&key).await;
-    let _guard = key_mutex.lock().await;
-
-    /// 获取缓存，快照
-    let (mut last_candles_vec, mut old_indicator_combines, old_time) =
-        match manager.get_snapshot_last_n(&key, MAX_HISTORY_SIZE).await {
-            Some((v, indicators, ts)) => (v, indicators, ts),
-            None => {
-                return Err(anyhow!("没有找到对应的策略值: {}", key));
-            }
-        };
-    // 转为 VecDeque 以保持原逻辑（并保证后续 push/pop_front 性能）
-    let mut new_candle_items: VecDeque<CandleItem> = last_candles_vec.into_iter().collect();
-
-    // 4. 验证时间戳，检查是否有新数据
-    let new_time = new_candle_item.ts;
-    let is_update = new_candle_item.confirm == 1;
-
-    let is_new_time = check_new_time(old_time, new_time, period, is_update, true)?;
-    if !is_new_time {
-        info!(
-            "跳过策略执行: inst_id:{:?} period:{:?} new_candle_data:{:?}",
-            inst_id, period, new_candle_data
-        );
-        return Ok(());
-    }
-
-    // 6. 计算最新指标值
-    let new_indicator_values =
-        get_multi_indicator_values(&mut old_indicator_combines, &new_candle_item);
-
-    // 5. 准备更新数据
-    new_candle_items.push_back(new_candle_item.clone());
-
-    // 限制历史数据大小 - 使用VecDeque的高效操作
-    if new_candle_items.len() > MAX_HISTORY_SIZE {
-        let excess = new_candle_items.len() - MAX_HISTORY_SIZE;
-        for _ in 0..excess {
-            new_candle_items.pop_front();
-        }
-    }
-
-    // 7-8. 原子更新：同时写入K线与指标，避免中间态
-    if let Err(e) = manager
-        .update_both(
-            &key,
-            new_candle_items.clone(),
-            old_indicator_combines.clone(),
-            new_candle_item.ts,
-        )
-        .await
-    {
-        return Err(anyhow!("原子更新指标与K线失败: {}", e));
-    }
-
-    // 10. 计算交易信号
-    // 将VecDeque转换为Vec,为了增加性能和部分场景需要，最后n根k线的情况，取最后N根,并保留原始排序，以供策略使用,
-    let candle_vec: Vec<CandleItem> = new_candle_items
-        .iter()
-        .rev()
-        .take(10)
-        .cloned()
-        .rev()
-        .collect();
-
-    // 解析策略配置
-    let vegas_strategy: crate::trading::indicator::vegas_indicator::VegasStrategy =
-        serde_json::from_str(&strategy.strategy_config)?;
-    let signal_result = vegas_strategy.get_trade_signal(
-        &candle_vec,
-        &mut new_indicator_values.clone(),
-        &SignalWeightsConfig::default(),
-        &serde_json::from_str::<crate::trading::strategy::strategy_common::BasicRiskStrategyConfig>(
-            &strategy.risk_config,
-        )?,
-    );
+    use crate::trading::strategy::strategy_registry::get_strategy_registry;
+    
+    // 1. 从注册中心获取策略（自动检测类型）
+    let strategy_executor = get_strategy_registry()
+        .detect_strategy(&strategy.strategy_config)
+        .map_err(|e| anyhow!("策略类型检测失败: {}", e))?;
+    
     info!(
-            "出现买入或者卖出信号！inst_id:{:?} period:{:?},signal_result:should_buy:{},should_sell:{},ts:{}",
-            inst_id,
-            period,
-            signal_result.should_buy,
-            signal_result.should_sell,
-            new_candle_item.ts
-        );
-    if signal_result.should_buy || signal_result.should_sell {
-        //异步记录日志
-        save_signal_log(inst_id, period, &signal_result);
-        //执行交易
-        let risk_config = strategy.risk_config.clone();
-        let res = SwapOrderService::new()
-            .ready_to_order(
-                &StrategyType::Vegas,
-                inst_id,
-                period,
-                &signal_result,
-                &serde_json::from_str::<
-                    crate::trading::strategy::strategy_common::BasicRiskStrategyConfig,
-                >(&strategy.risk_config)?,
-                strategy.strategy_config_id,
-            )
-            .await;
-        match res {
-            Ok(_) => {
-                println!("执行ready_to_order成功");
-            }
-            Err(e) => {
-                println!("{}", e.to_string())
-            }
-        }
-    } else {
-        debug!(
-            "signal_result:{:?},ts:{}",
-            signal_result,
-            new_candle_items.back().unwrap().ts
-        );
-    }
-
-    // 🧹 **清理执行状态** - 标记策略执行完成
-    StrategyExecutionStateManager::mark_completed(&key, new_candle_item.ts);
-
-    Ok(())
+        "🎯 执行策略: {} (inst_id={}, period={})",
+        strategy_executor.name(),
+        inst_id,
+        period
+    );
+    
+    // 2. 执行策略（无需 match，无需新增代码）
+    strategy_executor
+        .execute(inst_id, period, strategy, snap)
+        .await
 }
 
 /// 检查新时间
