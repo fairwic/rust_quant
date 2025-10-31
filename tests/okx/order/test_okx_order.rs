@@ -13,15 +13,14 @@ use tracing::error;
 async fn test_okx_order() {
     // 启用详细日志
     std::env::set_var("RUST_LOG", "debug");
-    env_logger::init();
+    app_init().await;
     // let mut builder = Builder::from_default_env();
     // builder.target(Target::Stdout);
     // builder.filter_level(Level::Debug);
     // builder.filter_module("rust_quant", Level::Debug);
     // builder.default_format();
     // builder.init();
-    app_init().await;
-    let inst_id = "BTC-USDT-SWAP";
+    let inst_id = "ETH-USDT-SWAP";
     let period = "4H";
 
     println!("🧪 开始测试OKX订单功能");
@@ -30,10 +29,10 @@ async fn test_okx_order() {
     println!("   - 周期: {}", period);
 
     let signal_result = SignalResult {
-        should_buy: false,
-        should_sell: true,
-        open_price: 108097.0,
-        signal_kline_stop_loss_price: Some(110921.0),
+        should_buy: true,
+        should_sell: false,
+        open_price: 3831.0,
+        signal_kline_stop_loss_price: Some(3700.0),
         best_open_price: None,
         best_take_profit_price: None,
         ts: 0,
