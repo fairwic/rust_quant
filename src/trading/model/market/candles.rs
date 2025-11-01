@@ -168,7 +168,7 @@ impl CandlesModel {
         inst_id: &str,
         time_interval: &str,
     ) -> anyhow::Result<u64> {
-        let table_name = format!("{}_candles_{}", inst_id, time_interval);
+        let table_name = Self::get_table_name(inst_id, time_interval);
         let query = format!(
             "UPDATE `{}` SET o = ?, h = ?, l = ?, c = ?, vol = ?, vol_ccy = ?, confirm = ? WHERE ts = ?",
             table_name

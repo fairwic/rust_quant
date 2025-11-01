@@ -5,7 +5,7 @@ use crate::trading::model::entity::candles::entity::CandlesEntity;
 use crate::trading::model::market::candles::CandlesModel;
 use crate::trading::strategy::strategy_manager::get_strategy_manager;
 use okx::dto::market_dto::CandleOkxRespDto;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 pub struct CandleService {
     cache: Arc<dyn LatestCandleCacheProvider>,
@@ -106,13 +106,21 @@ impl CandleService {
             let new_ts_captured = new_ts;
             tokio::spawn(async move {
                 let model = CandlesModel::new().await;
-                let _ = model.update_or_create(&first_clone, &inst, &per).await;
-                // if let Ok(opt) = model.get_one_by_ts(&inst, &per, new_ts_captured).await {
-                // if let Some(mut c) = opt {
-                // if c.updated_at.is_none() { c.updated_at = Some(rbatis::rbdc::DateTime::now()); }
-                // cache.set_both(&inst, &per, &c).await;
-                // }
-                // }
+                let res = model.update_or_create(&first_clone, &inst, &per).await;
+                if res.is_ok() {
+                    debug!(
+                        "更新蜡烛图成功: inst_id={}, time_interval={}, ts={}",
+                        inst, per, new_ts_captured
+                    );
+                } else {
+                    error!(
+                        "更新蜡烛图失败: inst_id={}, time_interval={}, ts={}, error={:?}",
+                        inst,
+                        per,
+                        new_ts_captured,
+                        res.err()
+                    );
+                }
             });
         }
         Ok(())

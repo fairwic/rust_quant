@@ -1986,9 +1986,9 @@ dependencies = [
 
 [[package]]
 name = "okx"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1df7e779efbec9e049928d1b066ecab2d558ea45c71ca103d5665d6af21b3f"
+checksum = "1f080ffccfa7ea18c89d94751152c6ec501457b82b2afe5a9eb7400e5919e330"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
