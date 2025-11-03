@@ -27,6 +27,30 @@ use okx::{Error, OkxAccount, OkxClient, OkxTrade};
 use serde::de;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
+
+/// [已优化] 配置化的风控参数
+pub struct OrderSizeConfig {
+    /// 安全系数：实际使用最大可用量的百分比
+    /// 默认 0.9 表示使用 90%
+    pub safety_factor: f64,
+
+    /// 最小下单量
+    pub min_order_size: f64,
+
+    /// 精度（小数位数）
+    pub precision: u32,
+}
+
+impl Default for OrderSizeConfig {
+    fn default() -> Self {
+        Self {
+            safety_factor: 0.9,  // 90% 安全边际
+            min_order_size: 1.0, // 最小1张
+            precision: 2,        // 保留2位小数
+        }
+    }
+}
+
 pub struct SwapOrderService {}
 impl SwapOrderService {
     pub fn new() -> Self {
@@ -129,12 +153,45 @@ impl SwapOrderService {
         Ok(have_another_position)
     }
 
-    /// 获取下单数量
-    pub fn get_place_order_num(&self, valid_num: &TradingSwapNumResponseData) -> String {
-        match valid_num.max_buy.parse::<f64>() {
-            Ok(v) if v.is_finite() => ((v / 1.1).floor().max(0.0)).to_string(),
-            _ => "0".to_string(),
+    /// [已优化] 获取下单数量 - 统一风控策略
+    ///
+    /// 风控策略：使用最大可用量的指定百分比（默认90%）
+    /// - 安全边际：避免因市场波动导致下单失败
+    /// - 精度保留：直接使用f64计算，减少字符串转换
+    pub fn get_place_order_num_optimized(
+        &self,
+        valid_num: &TradingSwapNumResponseData,
+        safety_factor: f64, // 安全系数 0.0-1.0，默认0.9
+    ) -> Result<String, AppError> {
+        // 1. 解析并验证
+        let max_buy = valid_num.max_buy.parse::<f64>().map_err(|e| {
+            error!("解析max_buy失败: value={}, error={}", valid_num.max_buy, e);
+            AppError::BizError(format!("Invalid max_buy: {}", valid_num.max_buy))
+        })?;
+
+        // 2. 验证有效性
+        if !max_buy.is_finite() {
+            warn!("max_buy非有限值: {}", max_buy);
+            return Ok("0".to_string());
         }
+
+        if max_buy < 0.0 {
+            warn!("max_buy为负数: {}", max_buy);
+            return Ok("0".to_string());
+        }
+
+        // 3. 应用安全系数（一次性计算）
+        let order_size = max_buy * safety_factor;
+
+        // 4. 向下取整到交易所要求的精度（2位小数）
+        let order_size_rounded = (order_size * 100.0).floor() / 100.0;
+
+        info!(
+            "计算下单量: max_buy={}, safety_factor={}, result={}",
+            max_buy, safety_factor, order_size_rounded
+        );
+
+        Ok(order_size_rounded.to_string())
     }
     /// 准备下单
     pub async fn ready_to_order(
@@ -204,7 +261,9 @@ impl SwapOrderService {
         );
 
         // 处理下单数量
-        let pos_size = self.get_place_order_num(&trad_swap_nums);
+        let pos_size = self
+            .get_place_order_num_optimized(&trad_swap_nums, 0.9)
+            .unwrap();
         if pos_size == "0" {
             info!("pos_size is 0, skip placing order");
             return Ok(());
@@ -216,11 +275,6 @@ impl SwapOrderService {
         //     ));
         // }
         //避免极端情况下又其他仓位的情况下，导致下单数量减少，下单数量超过最大可用数量
-        let pos_size = {
-            let raw = pos_size.parse::<f64>().unwrap();
-            let adjusted = ((raw / 1.01) * 100.0).floor() / 100.0; // 向下取整到两位小数
-            adjusted.to_string()
-        };
         info!("ready to place order size: {:?}", pos_size);
         //平掉现有的已经存在的反向仓位
         let pos_side = match signal.should_buy {
@@ -545,5 +599,21 @@ impl SwapOrderService {
         // {"code":"0","data":[{"clOrdId":"","ordId":"1570389280202194944","sCode":"0","sMsg":"Order placed","tag":"","ts":"1719303647602"}],"inTime":"1719303647601726","msg":"","outTime":"1719303647603880"}
         info!("send order request okx result: {:?}", result);
         Ok(result)
+    }
+}
+
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_get_place_order_num_optimized() {
+        let valid_num = TradingSwapNumResponseData {
+            inst_id: "BTC-USDT-SWAP".to_string(),
+            ccy: "USDT".to_string(),
+            max_sell: "0.22222".to_string(),
+            max_buy: "0.211111".to_string(),
+        };
+        let pos_size = SwapOrderService::new().get_place_order_num_optimized(&valid_num, 0.9).unwrap();
+        println!("pos_size: {:?}", pos_size);
     }
 }
