@@ -236,7 +236,7 @@ impl SwapOrderService {
             error!("create okx account client error: {:?}", e);
             AppError::OkxApiError(e.to_string())
         })?;
-        let cross = TdModeEnum::CROSS.as_str().to_owned();
+        let cross = TdModeEnum::ISOLATED.as_str().to_owned();
         //后续考虑极端情况下，当多个产品都出现信号，此处是否会触发交易所的api请求限制
         let (position_list, max_avail_size) = tokio::try_join!(
             account.get_account_positions(Some("SWAP"), Some(inst_id), None),
