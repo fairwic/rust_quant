@@ -545,13 +545,13 @@ impl SwapOrderService {
         //valid 如果是做空，开仓价格要<止损价格,否则不进行下单
         //valid 如果是做多，开仓价格要>止损价格,否则不进行下单
         if pos_side == PositionSide::Short && entry_price > stop_loss_price {
-            error!("entry_price > stop_loss_price, not place order");
+            error!("entry_price > stop_loss_price, not place order, entry_price: {}, stop_loss_price: {}", entry_price, stop_loss_price);
             return Err(AppError::BizError(
                 "entry_price > stop_loss_price, not place order".to_string(),
             ));
         }
         if pos_side == PositionSide::Long && entry_price < stop_loss_price {
-            error!("entry_price < stop_loss_price, not place order");
+            error!("entry_price < stop_loss_price, not place order, entry_price: {}, stop_loss_price: {}", entry_price, stop_loss_price);
             return Err(AppError::BizError(
                 "entry_price < stop_loss_price, not place order".to_string(),
             ));
