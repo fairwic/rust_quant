@@ -17,6 +17,8 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
+log.workspace = true
+fast_log.workspace = true
 chrono.workspace = true
 dotenv.workspace = true
 once_cell.workspace = true
@@ -27,3 +29,6 @@ sqlx.workspace = true
 # 缓存
 redis.workspace = true
 dashmap.workspace = true
+
+# 邮件服务
+lettre.workspace = true
