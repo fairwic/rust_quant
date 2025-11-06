@@ -3,6 +3,7 @@ use std::thread::current;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::info;
 
 use crate::trading::indicator::atr::ATR;
 use crate::trading::indicator::atr_stop_loos::ATRStopLoos;
@@ -193,6 +194,7 @@ impl NweStrategy {
         signal_result.ts = candles.last().unwrap().ts;
         signal_result.open_price = candles.last().unwrap().c;
 
+        info!("NWE signal values: {:#?}", values);
         signal_result.single_value = Some(json!(values.clone()).to_string());
         signal_result.single_result = Some(json!(signal_result.clone()).to_string());
 
