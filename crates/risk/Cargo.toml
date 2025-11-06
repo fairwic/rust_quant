@@ -1,0 +1,20 @@
+[package]
+name = "rust-quant-risk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Workspace 内部依赖
+rust-quant-common.workspace = true
+rust-quant-core.workspace = true
+rust-quant-market.workspace = true
+
+# 外部依赖
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+chrono.workspace = true

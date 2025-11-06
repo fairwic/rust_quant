@@ -1,0 +1,26 @@
+[package]
+name = "rust-quant-ai-analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Workspace 内部依赖
+rust-quant-common.workspace = true
+rust-quant-core.workspace = true
+rust-quant-market.workspace = true
+
+# 外部依赖
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+
+# AI 和 NLP
+async-openai.workspace = true
+

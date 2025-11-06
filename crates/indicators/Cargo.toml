@@ -1,0 +1,23 @@
+[package]
+name = "rust-quant-indicators"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Workspace 内部依赖
+rust-quant-common.workspace = true
+
+# 外部依赖
+serde.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+
+# 技术分析库
+ta.workspace = true
+
+# 数值计算
+ndarray.workspace = true
+linregress.workspace = true
+approx.workspace = true
+float-cmp.workspace = true

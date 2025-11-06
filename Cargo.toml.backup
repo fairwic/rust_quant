@@ -9,7 +9,6 @@ members = [
     "crates/execution",
     "crates/orchestration",
     "crates/analytics",
-    "crates/ai-analysis",
     "rust-quant-cli",
 ]
 
@@ -36,20 +35,24 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3.0", features = ["env-filter", "json"] }
 tracing-appender = "0.2.3"
 log = "0.4"
+fast_log = "1.6"
+flexi_logger = "0.28.3"
 env_logger = "0.11.3"
 
-# === 数据库（使用 sqlx 替代 rbatis）===
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql", "chrono", "json", "migrate"] }
+# === 数据库 ===
+rbatis = "4.5"
+rbdc-mysql = { version = "4.5", default-features = false, features = ["tls-native-tls"] }
+rbs = "4.5"
 
 # === 缓存 ===
 redis = { version = "0.25.3", features = ["aio", "tokio-comp"] }
 dashmap = "6.1.0"
 
 # === 时间处理 ===
-chrono = { version = "0.4.38", features = ["serde"] }
+chrono = "0.4.38"
 
 # === 网络通信 ===
-reqwest = { version = "0.11.27", features = ["json"] }
+reqwest = "0.11.27"
 tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
 futures = "0.3.30"
 futures-channel = "0.3.30"
@@ -60,6 +63,7 @@ hmac = "0.12.1"
 sha2 = "0.10.8"
 hex = "0.4.3"
 base64 = "0.21.7"
+hmac-sha256 = "0.1"
 
 # === 配置管理 ===
 dotenv = "0.15.0"
@@ -71,6 +75,9 @@ tokio-retry = "0.3.0"
 
 # === 技术分析库 ===
 ta = "0.5.0"
+technical_indicators = "0.5.0"
+tech_analysis = "0.1.1"
+simple_moving_average = "1.0.2"
 
 # === 数值计算 ===
 ndarray = "0.15"
@@ -86,11 +93,8 @@ clap = { version = "4.5.4", features = ["derive"] }
 # === 交易所 SDK ===
 okx = { version = "0.1.9" }
 
-# === AI 和 NLP（新增）===
-# OpenAI API 客户端
-async-openai = "0.20"
-# HTTP 客户端（用于新闻API调用）
-# 已包含在 reqwest 中
+# === 邮件服务（可选）===
+lettre = "0.11"
 
 # === Workspace 内部依赖 ===
 rust-quant-common = { path = "crates/common" }
@@ -102,4 +106,3 @@ rust-quant-risk = { path = "crates/risk" }
 rust-quant-execution = { path = "crates/execution" }
 rust-quant-orchestration = { path = "crates/orchestration" }
 rust-quant-analytics = { path = "crates/analytics" }
-rust-quant-ai-analysis = { path = "crates/ai-analysis" }

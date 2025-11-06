@@ -1,0 +1,29 @@
+[package]
+name = "rust-quant-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Workspace 内部依赖
+rust-quant-common.workspace = true
+
+# 外部依赖
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+chrono.workspace = true
+dotenv.workspace = true
+once_cell.workspace = true
+
+# 数据库（使用 sqlx 替代 rbatis）
+sqlx.workspace = true
+
+# 缓存
+redis.workspace = true
+dashmap.workspace = true
