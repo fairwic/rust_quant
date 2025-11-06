@@ -14,7 +14,7 @@ use crate::trading::strategy::nwe_strategy::indicator_combine::NweIndicatorCombi
 use crate::trading::strategy::strategy_common::{
     BackTestResult, BasicRiskStrategyConfig, SignalResult,
 };
-use crate::CandleItem;
+use crate::{CandleItem, time_util};
 
 /// NWE 策略配置与执行器
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,6 +195,7 @@ impl NweStrategy {
         signal_result.open_price = candles.last().unwrap().c;
 
         info!("NWE signal values: {:#?}", values);
+        info!("ts : {:#?}", time_util::mill_time_to_datetime_shanghai(signal_result.ts));
         signal_result.single_value = Some(json!(values.clone()).to_string());
         signal_result.single_result = Some(json!(signal_result.clone()).to_string());
 

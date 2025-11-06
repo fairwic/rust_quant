@@ -250,7 +250,7 @@ mod tests {
         env_logger::init();
         let risk_job = RiskBalanceWithLevelJob::new();
         risk_job
-            .run(&vec!["BTC-USDT-SWAP", "ETH-USDT-SWAP"])
+            .run(&vec!["BTC-USDT-SWAP".to_string(), "ETH-USDT-SWAP".to_string()])
             .await
             .unwrap();
     }

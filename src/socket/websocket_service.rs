@@ -9,10 +9,13 @@ use okx::websocket::ChannelType;
 use okx::websocket::OkxWebsocketClient;
 use serde_json::json;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
 use tracing::{info, span, Level};
 
+use crate::trading::cache::latest_candle_cache::default_provider;
 use crate::trading::services::candle_service::candle_service::CandleService;
+use crate::trading::services::candle_service::persist_worker::{CandlePersistWorker, PersistTask};
 use crate::trading::task::tickets_job::update_ticker;
 use okx::api::api_trait::OkxApiTrait;
 use okx::config::Credentials;
@@ -66,10 +69,23 @@ pub async fn run_socket(inst_ids: &Vec<String>, times: &Vec<String>) {
     let api_secret = env::var("OKX_API_SECRET").expect("未配置OKX_API_SECRET");
     let passphrase = env::var("OKX_PASSPHRASE").expect("未配置OKX_PASSPHRASE");
     let sim_trading = env::var("OKX_SIMULATED_TRADING").expect("未配置OKX_SIMULATED_TRADING");
-    // println!("sim_trading: {:?}", sim_trading);
-    // println!("api_key: {:?}", api_key);
-    // println!("api_secret: {:?}", api_secret);
-    // println!("passphrase: {:?}", passphrase);
+
+    // 🚀 [已优化] 创建批处理Worker
+    info!("🚀 初始化批处理Worker...");
+    let (persist_tx, persist_rx) = mpsc::unbounded_channel::<PersistTask>();
+    let worker = CandlePersistWorker::new(persist_rx)
+        .with_config(100, std::time::Duration::from_millis(500));
+    
+    // 启动Worker
+    tokio::spawn(async move {
+        worker.run().await;
+    });
+
+    // 🚀 [已优化] 创建共享的CandleService实例
+    let candle_service = Arc::new(
+        CandleService::new_with_persist_worker(default_provider(), persist_tx)
+    );
+    info!("✅ CandleService实例已创建并启用批处理");
 
     // 创建自动重连客户端
     info!("📡 创建自动重连客户端...");
@@ -172,44 +188,38 @@ pub async fn run_socket(inst_ids: &Vec<String>, times: &Vec<String>) {
             // println!("ticker.data: {:?}", ticker.data);
         }
     });
+    // 🚀 [已优化] 复用service实例 + 消除二次序列化
+    let candle_service_clone = Arc::clone(&candle_service);
     tokio::spawn(async move {
         while let Some(msg) = private_message_receiver.recv().await {
-            // debug!("收到私有频道消息: {:?}", msg);
-            // Object {"arg": Object {"channel": String("candle1D"), "instId": String("BTC-USDT")}, "data": Array [Array [String("1747065600000"), String("102520.1"), String("103834.1"),
-            // String("100733"), String("103807.9"), String("5492.76982429"), String("562452565.494063325"), String("562452565.494063325"), String("0")]]}
-            // 这里可以根据业务需求进一步处理消息
-            // let candle = serde_json::from_str::<CandleOkxWsResDto>(msg.as_str().unwrap()).unwrap();
-            // println!("candle.data: {:?}", candle.data);
-            let msg_str = msg.to_string();
-            let res = serde_json::from_str::<CandleOkxWsResDto>(&msg_str);
-            if res.is_ok() {
-                let candle = res.unwrap();
-                debug!("candleOkxResWsDto数据: {:?}", candle);
-                //candle2h 处理成 2h
-                let period = candle.arg.channel.as_str().replace("candle", "");
-                // 更新candle
-                let candle_data = candle
+            // 🚀 [已优化] 直接从 Value 解析，避免 to_string() 序列化
+            if let Ok(candle) = serde_json::from_value::<CandleOkxWsResDto>(msg.clone()) {
+                debug!("收到K线数据: inst_id={}, channel={}", 
+                    candle.arg.inst_id, candle.arg.channel);
+                
+                // 提取周期：candle2h -> 2h
+                let period = candle.arg.channel.replace("candle", "");
+                
+                // 🚀 [已优化] 处理全部数据（而非只取last），使用into_iter避免clone
+                let candle_data: Vec<CandleOkxRespDto> = candle
                     .data
-                    .iter()
-                    .map(|v| CandleOkxRespDto::from_vec(v.clone()))
+                    .into_iter()
+                    .map(CandleOkxRespDto::from_vec)
                     .collect();
-                let res = CandleService::new()
-                    .update_candle(candle_data, candle.arg.inst_id.as_str(), period.as_str())
-                    .await;
-                if res.is_ok() {
-                    debug!("更新candle成功: {:?}", res.unwrap());
-                } else {
-                    error!("更新candle失败: {:?}", res.err());
+                
+                // 🚀 [已优化] 使用共享实例，批量处理
+                if let Err(e) = candle_service_clone
+                    .update_candles_batch(candle_data, &candle.arg.inst_id, &period)
+                    .await
+                {
+                    error!("批量更新K线失败: inst_id={}, period={}, error={:?}", 
+                        candle.arg.inst_id, period, e);
                 }
-            } else {
-                let res = serde_json::from_str::<CommonOkxWsResDto>(&msg_str);
-                if res.is_ok() {
-                    let dto = res.unwrap();
-                    if dto.code == "0" {
-                        debug!("get a message from common okx ws : {:?}", dto);
-                    } else {
-                        error!("get a message from common okx ws error : {:?}", dto);
-                    }
+            } else if let Ok(dto) = serde_json::from_value::<CommonOkxWsResDto>(msg) {
+                if dto.code != "0" {
+                    error!("收到错误消息: code={}, msg={}", dto.code, dto.msg);
+                } else {
+                    debug!("收到确认消息: {:?}", dto);
                 }
             }
         }

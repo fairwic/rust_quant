@@ -214,7 +214,7 @@ pub async fn test_random_strategy_with_config(
     StrategyProgressManager::save_progress(&current_progress).await?;
 
     // 📊 **步骤3: 获取并转换K线数据**
-    let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
+    let arc_candle_data = load_and_convert_candle_data(inst_id, time, 40000).await?;
 
     // 🔄 **步骤4: 批量处理参数组合（支持断点续传）**
     let mut processed_count = current_progress.completed_combinations;
@@ -490,7 +490,7 @@ pub async fn back_test_with_config(
     // NWE 指定配置回测（从DB获取）
     if config.enable_specified_test_nwe {
         use crate::trading::task::strategy_config::get_nwe_strategy_config_from_db;
-        let arc_candle_data = load_and_convert_candle_data(inst_id, time, 30000).await?;
+        let arc_candle_data = load_and_convert_candle_data(inst_id, time, config.candle_limit).await?;
         let pairs = get_nwe_strategy_config_from_db(inst_id, time).await?;
         if pairs.is_empty() {
             warn!("NWE 指定策略配置为空，跳过执行");
@@ -557,7 +557,7 @@ pub async fn test_specified_strategy(
     );
 
     // 加载K线数据阶段
-    let arc_candle_data = load_and_convert_candle_data(inst_id, time, 20000).await?;
+    let arc_candle_data = load_and_convert_candle_data(inst_id, time, 40000).await?;
 
     // 执行回测阶段
     let backtest_start = Instant::now();

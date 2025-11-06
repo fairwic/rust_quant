@@ -174,7 +174,7 @@ impl StrategyDataService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trading::indicator::vegas_indicator::VegasStrategy;
+    use crate::trading::{indicator::vegas_indicator::VegasStrategy, strategy::strategy_common::BasicRiskStrategyConfig};
 
     #[tokio::test]
     async fn test_validate_strategy_params() {
