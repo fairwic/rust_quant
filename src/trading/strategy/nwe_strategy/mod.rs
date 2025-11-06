@@ -193,7 +193,7 @@ impl NweStrategy {
         signal_result.ts = candles.last().unwrap().ts;
         signal_result.open_price = candles.last().unwrap().c;
 
-        signal_result.single_value = Some(json!(signal_result.clone()).to_string());
+        signal_result.single_value = Some(json!(values.clone()).to_string());
         signal_result.single_result = Some(json!(signal_result.clone()).to_string());
 
         signal_result
@@ -267,7 +267,7 @@ impl NweStrategy {
         )
     }
 }
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct NweSignalValues {
     pub rsi_value: f64,
 
