@@ -1,25 +1,18 @@
-extern crate rbatis;
-
 use anyhow::Result;
 use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
-use clap::builder::TypedValueParser;
-use rbatis::impl_select;
-use rbatis::rbdc::db::ExecResult;
-use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use tracing::debug;
+use sqlx::{FromRow, MySql, QueryBuilder};
 use std::collections::HashMap;
-use rbs::value;
-use crate::app_config::db::get_db_client;
+use tracing::debug;
+use rust_quant_core::database::get_db_pool;
 use okx::dto::market_dto::TickerOkxResDto;
-// use okx::dto::market_model::TickersData;
 
-/// table
-#[derive(Serialize, Deserialize, Debug)]
-// #[serde(rename_all = "camelCase")]
+/// Tickers 数据表实体
+#[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 #[serde(rename_all = "snake_case")]
 pub struct TickersDataEntity {
+    #[sqlx(default)]
+    pub id: Option<i64>,
     pub inst_type: String,
     pub inst_id: String,
     pub last: String,
@@ -37,154 +30,187 @@ pub struct TickersDataEntity {
     pub sod_utc8: String,
     pub ts: i64,
 }
-#[derive(Serialize, Deserialize, Debug)]
+
+/// 查询结果辅助结构
+#[derive(Serialize, Deserialize, Debug, FromRow)]
 pub struct TickersDataQueryResult {
     pub inst_id: String,
-    // pub ts: i64,    // 存储 Unix 时间戳
-    pub daily_vol: f64, // 存储 24小时交易量
+    pub daily_vol: f64,
     pub ts: i64,
 }
 
 impl TickersDataQueryResult {
-    // 将 ts 转换为 NaiveDate
-    // 将时间戳转换为 NaiveDate（按日期分组）
+    /// 将时间戳转换为 NaiveDate
     pub fn get_date(&self) -> NaiveDate {
-        // 转换时间戳为 NaiveDate
-        NaiveDateTime::from_timestamp(self.ts / 1000, 0).date() // /1000 是将毫秒转换为秒
+        #[allow(deprecated)]
+        NaiveDateTime::from_timestamp_opt(self.ts / 1000, 0)
+            .unwrap()
+            .date()
     }
 
-    // 将 vol24h 转换为 f64
+    /// 获取 24h 交易量
     pub fn get_vol24h(&self) -> f64 {
         self.daily_vol
     }
 }
 
-crud!(TickersDataEntity {}, "tickers_data"); //crud = insert+select_by_column+update_by_column+delete_by_column
-
-impl_update!(TickersDataEntity{update_by_name(name:String) => "`where id = '2'`"},"tickers_data");
-impl_select!(TickersDataEntity{fetch_list() => "`where inst_id = 'BTC-USDT-SWAP' ORDER BY id DESC` "},"tickers_data");
-
 impl TickersDataEntity {
-    // 将 ts 字段转换为 NaiveDate
+    /// 将 ts 字段转换为 NaiveDate
     pub fn get_date(&self) -> NaiveDate {
-        let naive_datetime = Utc.timestamp_millis(self.ts).naive_utc();
+        let naive_datetime = Utc.timestamp_millis_opt(self.ts).unwrap().naive_utc();
         naive_datetime.date()
     }
 }
-pub struct TicketsModel {
-    db: &'static RBatis,
-}
+
+pub struct TicketsModel;
 
 impl TicketsModel {
-    pub async fn new() -> Self {
-        Self {
-            db: get_db_client(),
-        }
+    pub fn new() -> Self {
+        Self
     }
 
-    pub async fn add(&self, list: Vec<TickerOkxResDto>) -> anyhow::Result<ExecResult> {
-        let tickers_db: Vec<TickersDataEntity> = list
-            .iter()
-            .map(|ticker| TickersDataEntity {
-                inst_type: ticker.inst_type.clone(),
-                inst_id: ticker.inst_id.clone(),
-                last: ticker.last.clone(),
-                last_sz: ticker.last_sz.clone(),
-                ask_px: ticker.ask_px.clone(),
-                ask_sz: ticker.ask_sz.clone(),
-                bid_px: ticker.bid_px.clone(),
-                bid_sz: ticker.bid_sz.clone(),
-                open24h: ticker.open24h.clone(),
-                high24h: ticker.high24h.clone(),
-                low24h: ticker.low24h.clone(),
-                vol_ccy24h: ticker.vol_ccy24h.clone(),
-                vol24h: ticker.vol24h.clone(),
-                sod_utc0: ticker.sod_utc0.clone(),
-                sod_utc8: ticker.sod_utc8.clone(),
-                ts: ticker.ts.parse().unwrap(),
-            })
-            .collect();
-        let data = TickersDataEntity::insert_batch(self.db, &tickers_db, list.len() as u64).await?;
-        debug!("insert_batch = {}", json!(data));
-        Ok(data)
-    }
-    pub async fn update(&self, ticker: &TickerOkxResDto) -> anyhow::Result<()> {
-        let tickets_data = TickersDataEntity {
-            inst_type: ticker.inst_type.clone(),
-            inst_id: ticker.inst_id.clone(),
-            last: ticker.last.clone(),
-            last_sz: ticker.last_sz.clone(),
-            ask_px: ticker.ask_px.clone(),
-            ask_sz: ticker.ask_sz.clone(),
-            bid_px: ticker.bid_px.clone(),
-            bid_sz: ticker.bid_sz.clone(),
-            open24h: ticker.open24h.clone(),
-            high24h: ticker.high24h.clone(),
-            low24h: ticker.low24h.clone(),
-            vol_ccy24h: ticker.vol_ccy24h.clone(),
-            vol24h: ticker.vol24h.clone(),
-            sod_utc0: ticker.sod_utc0.clone(),
-            sod_utc8: ticker.sod_utc8.clone(),
-            ts: ticker.ts.parse().unwrap(),
-        };
-        let data = TickersDataEntity::update_by_map(self.db, &tickets_data,value! {"inst_id":&tickets_data.inst_id}).await;
-        // println!("update_by_column = {}", json!(data));
-        // let data = TickersDataDb::update_by_name(&self.db, &tickets_data, ticker.inst_id.clone()).await;
-        // println!("update_by_name = {}", json!(data));
-        Ok(())
-    }
-    /*获取全部*/
-    pub async fn get_all(&self, inst_ids: &Vec<String>) -> Result<Vec<TickersDataEntity>> {
-        let sql = format!(
-            "SELECT * FROM tickers_data WHERE inst_id IN ({}) and inst_type='SWAP' ORDER BY id DESC",
-            inst_ids.iter().map(|id| format!("'{}'", id)).collect::<Vec<String>>().join(", ")
+    /// 批量插入 Ticker 数据
+    pub async fn add(&self, list: Vec<TickerOkxResDto>) -> Result<u64> {
+        if list.is_empty() {
+            return Ok(0);
+        }
+
+        let pool = get_db_pool();
+        let mut query_builder: QueryBuilder<MySql> = QueryBuilder::new(
+            "INSERT INTO tickers_data (inst_type, inst_id, last, last_sz, ask_px, ask_sz, \
+             bid_px, bid_sz, open24h, high24h, low24h, vol_ccy24h, vol24h, sod_utc0, sod_utc8, ts) "
         );
 
-        let results: Vec<TickersDataEntity> = self.db.query_decode(sql.as_str(), vec![]).await?;
+        query_builder.push_values(list.iter(), |mut b, ticker| {
+            b.push_bind(&ticker.inst_type)
+                .push_bind(&ticker.inst_id)
+                .push_bind(&ticker.last)
+                .push_bind(&ticker.last_sz)
+                .push_bind(&ticker.ask_px)
+                .push_bind(&ticker.ask_sz)
+                .push_bind(&ticker.bid_px)
+                .push_bind(&ticker.bid_sz)
+                .push_bind(&ticker.open24h)
+                .push_bind(&ticker.high24h)
+                .push_bind(&ticker.low24h)
+                .push_bind(&ticker.vol_ccy24h)
+                .push_bind(&ticker.vol24h)
+                .push_bind(&ticker.sod_utc0)
+                .push_bind(&ticker.sod_utc8)
+                .push_bind(ticker.ts.parse::<i64>().unwrap_or(0));
+        });
+
+        let result = query_builder.build().execute(pool).await?;
+        debug!("批量插入 Ticker 数据，影响行数: {}", result.rows_affected());
+        
+        Ok(result.rows_affected())
+    }
+
+    /// 更新单个 Ticker 数据
+    pub async fn update(&self, ticker: &TickerOkxResDto) -> Result<()> {
+        let pool = get_db_pool();
+        
+        sqlx::query(
+            "UPDATE tickers_data SET inst_type = ?, last = ?, last_sz = ?, ask_px = ?, \
+             ask_sz = ?, bid_px = ?, bid_sz = ?, open24h = ?, high24h = ?, low24h = ?, \
+             vol_ccy24h = ?, vol24h = ?, sod_utc0 = ?, sod_utc8 = ?, ts = ? \
+             WHERE inst_id = ?"
+        )
+        .bind(&ticker.inst_type)
+        .bind(&ticker.last)
+        .bind(&ticker.last_sz)
+        .bind(&ticker.ask_px)
+        .bind(&ticker.ask_sz)
+        .bind(&ticker.bid_px)
+        .bind(&ticker.bid_sz)
+        .bind(&ticker.open24h)
+        .bind(&ticker.high24h)
+        .bind(&ticker.low24h)
+        .bind(&ticker.vol_ccy24h)
+        .bind(&ticker.vol24h)
+        .bind(&ticker.sod_utc0)
+        .bind(&ticker.sod_utc8)
+        .bind(ticker.ts.parse::<i64>().unwrap_or(0))
+        .bind(&ticker.inst_id)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// 获取指定合约的全部数据
+    pub async fn get_all(&self, inst_ids: &Vec<String>) -> Result<Vec<TickersDataEntity>> {
+        if inst_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let pool = get_db_pool();
+        let placeholders = inst_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "SELECT * FROM tickers_data WHERE inst_id IN ({}) AND inst_type='SWAP' ORDER BY id DESC",
+            placeholders
+        );
+
+        let mut query = sqlx::query_as::<_, TickersDataEntity>(&sql);
+        for inst_id in inst_ids {
+            query = query.bind(inst_id);
+        }
+
+        let results = query.fetch_all(pool).await?;
         Ok(results)
     }
 
+    /// 查找单个合约数据
     pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersDataEntity>> {
-        let results: Vec<TickersDataEntity> =
-            TickersDataEntity::select_by_map(self.db, value! {"inst_id":inst_id}).await?;
+        let pool = get_db_pool();
+        let results = sqlx::query_as::<_, TickersDataEntity>(
+            "SELECT * FROM tickers_data WHERE inst_id = ?"
+        )
+        .bind(inst_id)
+        .fetch_all(pool)
+        .await?;
+
         Ok(results)
     }
 
+    /// 获取每日交易量
     pub async fn get_daily_volumes(
         &self,
         inst_ids: Option<Vec<&str>>,
     ) -> Result<Vec<(String, NaiveDate, f64)>> {
-        // 构造查询
-        let sql = if let Some(inst_ids) = inst_ids {
-            format!(
-                "SELECT inst_id, MAX(ts) AS ts, SUM(vol24h) AS daily_vol
-                 FROM tickers_data
-                 WHERE inst_id IN ({})
-                 GROUP BY inst_id, DATE(FROM_UNIXTIME(ts / 1000))
+        let pool = get_db_pool();
+
+        let (sql, params): (String, Vec<&str>) = if let Some(inst_ids) = inst_ids {
+            let placeholders = inst_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let sql = format!(
+                "SELECT inst_id, MAX(ts) AS ts, SUM(vol24h) AS daily_vol \
+                 FROM tickers_data \
+                 WHERE inst_id IN ({}) \
+                 GROUP BY inst_id, DATE(FROM_UNIXTIME(ts / 1000)) \
                  ORDER BY ts DESC",
-                inst_ids
-                    .iter()
-                    .map(|id| format!("'{}'", id))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            )
+                placeholders
+            );
+            (sql, inst_ids)
         } else {
-            "SELECT inst_id, MAX(ts) AS ts, SUM(vol24h) AS daily_vol
-             FROM tickers_data
-             GROUP BY inst_id, DATE(FROM_UNIXTIME(ts / 1000))
-             ORDER BY ts DESC"
-                .to_string()
+            let sql = "SELECT inst_id, MAX(ts) AS ts, SUM(vol24h) AS daily_vol \
+                       FROM tickers_data \
+                       GROUP BY inst_id, DATE(FROM_UNIXTIME(ts / 1000)) \
+                       ORDER BY ts DESC".to_string();
+            (sql, vec![])
         };
 
-        // 查询并反序列化到中间结构体
-        let results: Vec<TickersDataQueryResult> =
-            self.db.query_decode(sql.as_str(), vec![]).await?;
+        let mut query = sqlx::query_as::<_, TickersDataQueryResult>(&sql);
+        for param in params {
+            query = query.bind(param);
+        }
 
-        // 将查询结果转换为包含日期和交易量的元组
+        let results = query.fetch_all(pool).await?;
+
+        // 转换为包含日期和交易量的元组
         let daily_volumes = results
             .into_iter()
             .map(|entry| {
-                let date = entry.get_date(); // 将 ts 转换为 NaiveDate
+                let date = entry.get_date();
                 (entry.inst_id.clone(), date, entry.get_vol24h())
             })
             .collect();
@@ -192,14 +218,14 @@ impl TicketsModel {
         Ok(daily_volumes)
     }
 
-    // 计算过去7天的平均交易量
+    /// 计算过去7天的平均交易量
     pub fn calculate_7_day_avg_volume(
         &self,
         daily_volumes: Vec<(String, NaiveDate, f64)>,
     ) -> HashMap<String, f64> {
         let mut daily_vol_map: HashMap<String, Vec<(NaiveDate, f64)>> = HashMap::new();
 
-        // 将交易量数据按 inst_id 和日期分组
+        // 按 inst_id 和日期分组
         for (inst_id, date, vol) in daily_volumes {
             daily_vol_map
                 .entry(inst_id.clone())
@@ -207,13 +233,13 @@ impl TicketsModel {
                 .push((date, vol));
         }
 
-        // 计算每个板块的7天平均交易量
+        // 计算每个合约的7天平均交易量
         let mut avg_volumes: HashMap<String, f64> = HashMap::new();
         for (inst_id, volumes) in daily_vol_map {
             let last_7_days = volumes
                 .iter()
                 .rev()
-                .take(7) // 取最近7天的交易量
+                .take(7)
                 .map(|(_, vol)| *vol)
                 .collect::<Vec<f64>>();
 
@@ -226,7 +252,7 @@ impl TicketsModel {
         avg_volumes
     }
 
-    // 判断是否拉升的板块
+    /// 判断是否拉升的板块
     pub fn check_for_possible_lift(
         &self,
         daily_volumes: Vec<(String, NaiveDate, f64)>,
@@ -235,7 +261,6 @@ impl TicketsModel {
     ) -> Vec<String> {
         let mut lifted_assets = Vec::new();
 
-        // 遍历每个板块的交易量数据
         for (inst_id, _, current_vol) in daily_volumes {
             if let Some(avg_vol) = avg_volumes.get(&inst_id) {
                 if current_vol > *avg_vol * threshold {
@@ -245,5 +270,11 @@ impl TicketsModel {
         }
 
         lifted_assets
+    }
+}
+
+impl Default for TicketsModel {
+    fn default() -> Self {
+        Self::new()
     }
 }

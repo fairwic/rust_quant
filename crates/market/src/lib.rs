@@ -4,9 +4,9 @@
 
 pub mod exchanges;
 pub mod models;
-pub mod streams;
-pub mod repositories;
+// TODO: 暂时注释，等待依赖模块迁移完成
+// pub mod streams;
+// pub mod repositories;
 
 // 重新导出常用类型
-// pub use exchanges::{Exchange, ExchangeClient};
-// pub use models::{Candle, Ticker};
+pub use models::*;
