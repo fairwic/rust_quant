@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use ta::indicators::BollingerBands;
 
-use crate::trading::indicator::sma::Sma;
+use crate::trend::sma::Sma;
 use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::CandleItem;
+use rust_quant_common::types::CandleItem;
 use ta::{DataItem, High, Low, Next};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

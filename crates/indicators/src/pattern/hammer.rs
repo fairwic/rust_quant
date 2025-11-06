@@ -1,4 +1,4 @@
-use crate::{trading::indicator::rma::Rma, CandleItem};
+use rust_quant_common::CandleItem;
 use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergence};
 
 /// 锤子/上吊线形态指标

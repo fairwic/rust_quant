@@ -2685,6 +2685,7 @@ dependencies = [
  "linregress",
  "ndarray",
  "rust-quant-common",
+ "rust-quant-market",
  "serde",
  "ta",
  "thiserror 1.0.69",

@@ -1,4 +1,4 @@
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_market::models::candles::CandlesEntity;
 use ta::{Close, High, Low};
 
 pub struct KDJ {

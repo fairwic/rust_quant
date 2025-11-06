@@ -1,8 +1,7 @@
-use crate::time_util;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_common::utils::time as time_util;
+use rust_quant_market::models::candles::CandlesEntity;
 use ta::indicators::MovingAverageConvergenceDivergence;
 use ta::Next;
-use tracing::warn;
 
 pub struct MacdSimpleIndicator {}
 

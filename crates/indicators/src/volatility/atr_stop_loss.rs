@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::fmt;
 use thiserror::Error;
 
-use crate::trading::indicator::atr::ATR;
+use crate::volatility::atr::ATR;
 
 #[derive(Debug, Error)]
 pub enum AtrError {

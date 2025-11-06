@@ -6,6 +6,6 @@ pub mod framework;
 pub mod implementations;
 pub mod backtesting;
 
-// 重新导出核心 Trait
-// pub use framework::strategy_trait::Strategy;
-// pub use framework::strategy_registry::StrategyRegistry;
+// 重新导出核心类型
+pub use framework::*;
+pub use implementations::*;

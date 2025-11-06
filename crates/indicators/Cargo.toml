@@ -7,6 +7,7 @@ rust-version.workspace = true
 [dependencies]
 # Workspace 内部依赖
 rust-quant-common.workspace = true
+rust-quant-market.workspace = true
 
 # 外部依赖
 serde.workspace = true

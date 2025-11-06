@@ -1,4 +1,3 @@
-use crate::trading::indicator::rma::Rma;
 use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergence};
 
 /// 成交量比率指标

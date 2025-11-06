@@ -1,0 +1,34 @@
+[package]
+name = "rust-quant-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rust-quant"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace 内部依赖 - 引入所有子包
+rust-quant-common.workspace = true
+rust-quant-core.workspace = true
+rust-quant-market.workspace = true
+rust-quant-indicators.workspace = true
+rust-quant-strategies.workspace = true
+rust-quant-risk.workspace = true
+rust-quant-execution.workspace = true
+rust-quant-orchestration.workspace = true
+
+# 外部依赖
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["full"] }
+serde.workspace = true
+
+# 应用相关
+dotenv.workspace = true
+env_logger.workspace = true
+once_cell.workspace = true
+tokio-cron-scheduler.workspace = true
+

@@ -1,4 +1,4 @@
-use crate::trading::indicator::sma::Sma;
+use crate::trend::sma::Sma;
 
 /// RMA (Relative Moving Average) implementation matching TradingView's ta.rma()
 #[derive(Debug, Clone)]
