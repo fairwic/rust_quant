@@ -48,7 +48,7 @@ impl BackTestAnalysisModel {
 
     // 查询指定回测的持仓记录
     pub async fn find_positions(&self, back_test_id: i32) -> anyhow::Result<Vec<BackTestDetail>> {
-        let positions = BackTestDetail::select_positions(self.db, back_test_id).await?;
+        let positions = BackTestDetail::select_positions(self.db, back_test_id).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         Ok(positions)
     }
 
@@ -82,7 +82,7 @@ impl BackTestAnalysisModel {
 
         // 移除最后一个逗号
         query.pop();
-        let result = self.db.exec(&query, params).await?;
+        let result = self.db.exec(&query, params).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         debug!("batch_insert_analysis_result = {}", json!(result));
         Ok(result.rows_affected)
     }
@@ -94,42 +94,42 @@ impl BackTestAnalysisModel {
     ) -> anyhow::Result<PositionStats> {
         debug!("计算 back_test_id {} 的K线后胜率统计", back_test_id);
         // 计算1根K线后的胜率
-        let one_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 1).await?;
+        let one_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 1).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         debug!(
             "back_test_id {} 的1K后胜率: {:.4}",
             back_test_id, one_bar_stats
         );
 
         // 计算2根K线后的胜率
-        let two_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 2).await?;
+        let two_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 2).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         debug!(
             "back_test_id {} 的2K后胜率: {:.4}",
             back_test_id, two_bar_stats
         );
 
         // 计算3根K线后的胜率
-        let three_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 3).await?;
+        let three_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 3).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         debug!(
             "back_test_id {} 的3K后胜率: {:.4}",
             back_test_id, three_bar_stats
         );
 
         // 计算4根K线后的胜率
-        let four_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 4).await?;
+        let four_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 4).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         debug!(
             "back_test_id {} 的4K后胜率: {:.4}",
             back_test_id, four_bar_stats
         );
 
         // 计算5根K线后的胜率
-        let five_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 5).await?;
+        let five_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 5).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         debug!(
             "back_test_id {} 的5K后胜率: {:.4}",
             back_test_id, five_bar_stats
         );
 
         // 计算10根K线后的胜率
-        let ten_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 10).await?;
+        let ten_bar_stats = self.calculate_win_rate_after_bars(back_test_id, 10).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         debug!(
             "back_test_id {} 的10K后胜率: {:.4}",
             back_test_id, ten_bar_stats
@@ -164,7 +164,7 @@ impl BackTestAnalysisModel {
         let result = self
             .db
             .query_decode::<Vec<serde_json::Value>>(sql, params)
-            .await?;
+            .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
 
         if result.is_empty() {
             debug!("back_test_id {} 的{}K后统计数据为空", back_test_id, bars);

@@ -275,7 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_leg_detection_real_data() -> anyhow::Result<()> {
-        use rust_quant_core::database::init_db;
+        use rust_quant_core::database::get_db_pool;
         use rust_quant_core::logger::setup_logging;
         use dotenv;
         use rust_quant_common;

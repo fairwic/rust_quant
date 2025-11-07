@@ -1,9 +1,9 @@
 // 风险监控任务
 
-use crate::trading::services::announcement_service::AnnouncementService;
+use rust_quant_common::services::announcement_service::AnnouncementService;
 use rust_quant_execution::order_manager::order_service::OrderService;
 use rust_quant_risk::position::position_service::PositionService;
-use crate::trading::utils::common::PLATFORM;
+use rust_quant_common::utils::common::PLATFORM;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, error, info};
 use okx::api::announcements::announcements_api::OkxAnnouncements;

@@ -16,7 +16,7 @@ impl PositionService {
         let account = OkxAccount::from_env()?; //获取合约持仓信息
         let position_list = account
             .get_account_positions(Some("SWAP"), None, None)
-            .await?;
+            .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         info!(
             "get current okx position_list: {:?}",
             json!(position_list).to_string()

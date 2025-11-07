@@ -1,8 +1,8 @@
 use rust_quant_market::models::CandlesEntity;
-use crate::trading::services::big_data::big_data_service::BigDataContractService;
-use crate::trading::services::big_data::big_data_top_contract_service::BigDataTopContractService;
-use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
-use crate::trading::services::big_data::{big_data_service, big_data_top_contract_service};
+use rust_quant_common::services::big_data::big_data_service::BigDataContractService;
+use rust_quant_common::services::big_data::big_data_top_contract_service::BigDataTopContractService;
+use rust_quant_common::services::big_data::big_data_top_position_service::BigDataTopPositionService;
+use rust_quant_common::services::big_data::{big_data_service, big_data_top_contract_service};
 use rust_quant_strategies::profit_stop_loss::ProfitStopLoss;
 use rust_quant_strategies::ut_boot_strategy::UtBootStrategy;
 use rust_quant_strategies::StrategyType;

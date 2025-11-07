@@ -9,10 +9,10 @@ use tokio::sync::Semaphore;
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
-use crate::trading::domain_service::candle_domain_service::CandleDomainService;
+use rust_quant_common::domain_service::candle_domain_service::CandleDomainService;
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_market::models::CandlesEntity;
-use crate::trading::model::strategy::strategy_job_signal_log::{
+use rust_quant_common::model::strategy::strategy_job_signal_log::{
     StrategyJobSignalLog, StrategyJobSignalLogModel,
 };
 use rust_quant_execution::order_manager::swap_order_service::SwapOrderService;
@@ -22,8 +22,8 @@ use rust_quant_strategies::arc::indicator_values::arc_vegas_indicator_values::{
 use rust_quant_strategies::arc::indicator_values::arc_nwe_indicator_values::{
     self as arc_nwe, get_nwe_hash_key, get_nwe_indicator_manager,
 };
-use rust_quant_indicators::vegas_indicator::VegasStrategy;
-use rust_quant_strategies::nwe_strategy::{NweStrategy, NweStrategyConfig, NweSignalValues};
+use rust_quant_indicators::trend::vegas::VegasStrategy;
+use rust_quant_strategies::implementations::nwe_strategy::{NweStrategy, NweStrategyConfig, NweSignalValues};
 use rust_quant_strategies::order::strategy_config::StrategyConfig;
 use rust_quant_strategies::strategy_common::{
     get_multi_indicator_values, parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
@@ -37,7 +37,7 @@ use rust_quant_orchestration::workflow::progress_manager::{RandomStrategyConfig,
 use rust_quant_orchestration::workflow::strategy_config::{
     get_strategy_config_from_db, test_specified_strategy_with_config, BackTestConfig,
 };
-use crate::CandleItem;
+use rust_quant_common::CandleItem;
 
 /// 策略执行状态跟踪 - 用于时间戳去重
 #[derive(Debug, Clone)]

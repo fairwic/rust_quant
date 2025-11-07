@@ -1,10 +1,10 @@
 use rust_quant_core::database;
 use rust_quant_common::utils::time;
 use rust_quant_market::models::CandlesEntity;
-use rust_quant_market::models::strategy::back_test_analysis::{
+use rust_quant_risk::backtest::back_test_analysis::{
     BackTestAnalysis, BackTestAnalysisModel,
 };
-use rust_quant_market::models::strategy::back_test_log::BackTestLogModel;
+use rust_quant_risk::backtest::back_test_log::BackTestLogModel;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::future::join_all;

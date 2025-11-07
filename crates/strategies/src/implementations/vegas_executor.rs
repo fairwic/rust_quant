@@ -12,8 +12,8 @@ use super::executor_common::{
     should_execute_strategy, update_candle_queue, validate_candles,
 };
 use super::strategy_trait::{StrategyDataResult, StrategyExecutor};
-use rust_quant_indicators::signal_weight::SignalWeightsConfig;
-use rust_quant_indicators::vegas_indicator::VegasStrategy;
+use rust_quant_indicators::trend::signal_weight::SignalWeightsConfig;
+use rust_quant_indicators::trend::vegas::VegasStrategy;
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_indicators::trend::vegas::{
     self, get_hash_key, get_indicator_manager,

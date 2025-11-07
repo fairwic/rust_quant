@@ -10,7 +10,7 @@ use tracing::{error, info, warn};
 
 use rust_quant_indicators::bollings::BollingBandsSignalConfig;
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
-use rust_quant_indicators::vegas_indicator::{
+use rust_quant_indicators::trend::vegas::{
     EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, KlineHammerConfig,
     RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
 };
@@ -18,16 +18,16 @@ use rust_quant_market::models::SelectCandleReqDto;
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_market::models::SelectTime;
 use rust_quant_market::models::CandlesModel;
-use crate::trading::model::strategy::back_test_detail::BackTestDetail;
-use crate::trading::model::strategy::back_test_log::{BackTestLog, BackTestLogModel};
-use crate::trading::model::strategy::{back_test_detail, back_test_log};
+use rust_quant_common::model::strategy::back_test_detail::BackTestDetail;
+use rust_quant_common::model::strategy::back_test_log::{BackTestLog, BackTestLogModel};
+use rust_quant_common::model::strategy::{back_test_detail, back_test_log};
 use rust_quant_strategies::strategy_common::{BackTestResult, BasicRiskStrategyConfig, TradeRecord};
 use rust_quant_strategies::{StrategyType, Strategy};
-use rust_quant_strategies::nwe_strategy::NweStrategyConfig;
-use rust_quant_strategies::nwe_strategy::NweStrategy;
+use rust_quant_strategies::implementations::nwe_strategy::NweStrategyConfig;
+use rust_quant_strategies::implementations::nwe_strategy::NweStrategy;
 use rust_quant_orchestration::workflow::data_validator;
 use rust_quant_orchestration::workflow::job_param_generator::ParamMergeBuilder;
-use crate::CandleItem;
+use rust_quant_common::CandleItem;
 
 /// 运行 Vegas 策略测试
 pub async fn run_vegas_test(

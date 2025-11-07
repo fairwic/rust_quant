@@ -10,7 +10,7 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use rust_quant_indicators::vegas_indicator::VegasStrategy;
+use rust_quant_indicators::trend::vegas::VegasStrategy;
 use rust_quant_market::models::CandlesEntity;
 use crate::framework::config::strategy_config::{
     StrategyConfigEntity, StrategyConfigEntityModel,

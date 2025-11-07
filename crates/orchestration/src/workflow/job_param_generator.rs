@@ -360,7 +360,7 @@ impl NweParamGenerator {
         &mut self,
         batch_size: usize,
     ) -> Vec<(
-        rust_quant_strategies::nwe_strategy::NweStrategyConfig,
+        rust_quant_strategies::implementations::nwe_strategy::NweStrategyConfig,
         rust_quant_strategies::strategy_common::BasicRiskStrategyConfig,
     )> {
         let mut batch = Vec::with_capacity(batch_size);
@@ -405,7 +405,7 @@ impl NweParamGenerator {
             idx /= msl_len;
             let i_usklsl = idx % usklsl_len; // 最后一维无需再除
 
-            let cfg = rust_quant_strategies::nwe_strategy::NweStrategyConfig {
+            let cfg = rust_quant_strategies::implementations::nwe_strategy::NweStrategyConfig {
                 period: "5m".to_string(),
                 rsi_period: self.rsi_periods[i_rp],
                 rsi_overbought: self.rsi_over_buy_sell[i_rob].0,

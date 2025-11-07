@@ -70,7 +70,7 @@ impl SwapOrderEntity {
         .bind(&self.detail)
         .bind(&self.platform_type)
         .execute(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         info!("订单已插入数据库: in_order_id={}", self.in_order_id);
         Ok(result.last_insert_id())
@@ -85,7 +85,7 @@ impl SwapOrderEntity {
         )
         .bind(in_order_id)
         .fetch_all(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         Ok(orders)
     }
@@ -99,7 +99,7 @@ impl SwapOrderEntity {
         )
         .bind(strategy_id)
         .fetch_all(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         Ok(orders)
     }
@@ -112,7 +112,7 @@ impl SwapOrderEntity {
             "SELECT * FROM swap_order"
         )
         .fetch_all(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         Ok(orders)
     }
@@ -140,7 +140,7 @@ impl SwapOrderEntity {
         .bind(&self.platform_type)
         .bind(&self.in_order_id)
         .execute(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         Ok(result.rows_affected())
     }

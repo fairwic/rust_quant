@@ -57,7 +57,7 @@ impl BackTestDetailModel {
         Ok(data.unwrap().last_insert_id.as_i64().unwrap())
     }
     pub async fn batch_add(&self, list: Vec<BackTestDetail>) -> anyhow::Result<u64> {
-        let data = BackTestDetail::insert_batch(self.db, &list, list.len() as u64).await?;
+        let data = BackTestDetail::insert_batch(self.db, &list, list.len() as u64).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         debug!("insert_back_test_log_result = {}", json!(data));
         Ok(data.rows_affected)
 
@@ -95,7 +95,7 @@ impl BackTestDetailModel {
         // // 移除最后一个逗号
         // query.pop();
         // let time = Local::now();
-        // let data = self.db.exec(&query, params).await?;
+        // let data = self.db.exec(&query, params).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         // //记录执行所的时间
         // let duration = Local::now().signed_duration_since(time);
         // let duration_ms = duration.num_milliseconds();

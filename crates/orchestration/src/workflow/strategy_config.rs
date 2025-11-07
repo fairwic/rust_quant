@@ -3,11 +3,11 @@ use std::env;
 use anyhow::{anyhow, Result};
 use tracing::warn;
 
-use crate::trading::model::strategy::strategy_config::{StrategyConfigEntity, StrategyConfigEntityModel};
+use rust_quant_common::model::strategy::strategy_config::{StrategyConfigEntity, StrategyConfigEntityModel};
 use rust_quant_orchestration::workflow::job_param_generator::ParamMergeBuilder;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
-use rust_quant_indicators::vegas_indicator::VegasStrategy;
-use rust_quant_strategies::nwe_strategy::NweStrategyConfig;
+use rust_quant_indicators::trend::vegas::VegasStrategy;
+use rust_quant_strategies::implementations::nwe_strategy::NweStrategyConfig;
 
 /// Vegas 策略回测配置
 #[derive(Debug, Clone)]

@@ -70,7 +70,7 @@ impl SwapOrdersDetailEntity {
         .bind(&self.platform_type)
         .bind(&self.status)
         .execute(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         info!("订单详情已插入: in_order_id={}", self.in_order_id);
         Ok(result.last_insert_id())
@@ -85,7 +85,7 @@ impl SwapOrdersDetailEntity {
         )
         .bind(in_order_id)
         .fetch_all(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         Ok(orders)
     }
@@ -103,7 +103,7 @@ impl SwapOrdersDetailEntity {
         .bind(strategy_id)
         .bind(status)
         .fetch_all(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         Ok(orders)
     }
@@ -119,7 +119,7 @@ impl SwapOrdersDetailEntity {
              LIMIT 100"
         )
         .fetch_all(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         Ok(orders.into_iter().map(|r| r.0).collect())
     }
@@ -136,7 +136,7 @@ impl SwapOrdersDetailEntity {
         .bind(status)
         .bind(&self.in_order_id)
         .execute(pool)
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         
         Ok(result.rows_affected())
     }
@@ -174,7 +174,7 @@ impl SwapOrdersDetailEntity {
         }
         query = query.bind(in_order_id);
         
-        let result = query.execute(pool).await?;
+        let result = query.execute(pool).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         Ok(result.rows_affected())
     }
 }

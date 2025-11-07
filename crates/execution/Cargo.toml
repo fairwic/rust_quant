@@ -9,7 +9,7 @@ rust-version.workspace = true
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
 rust-quant-market.workspace = true
-rust-quant-risk.workspace = true
+rust-quant-risk.workspace = true  # 新增: 使用risk的backtest模型
 
 # 外部依赖
 tokio.workspace = true

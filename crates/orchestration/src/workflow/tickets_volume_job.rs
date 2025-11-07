@@ -1,5 +1,5 @@
-use crate::trading::model::market::tickers::TicketsModel;
-use crate::trading::model::market::tickers_volume::{TickersVolume, TickersVolumeModel};
+use rust_quant_common::model::market::tickers::TicketsModel;
+use rust_quant_common::model::market::tickers_volume::{TickersVolume, TickersVolumeModel};
 use okx::api::account::OkxContracts;
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::market::OkxMarket;

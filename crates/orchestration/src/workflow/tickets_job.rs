@@ -1,4 +1,4 @@
-use crate::trading::model::market::tickers::TicketsModel;
+use rust_quant_common::model::market::tickers::TicketsModel;
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::market::OkxMarket;
 use okx::dto::market_dto::TickerOkxResDto;

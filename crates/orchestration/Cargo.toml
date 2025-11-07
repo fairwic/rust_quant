@@ -8,6 +8,8 @@ rust-version.workspace = true
 # Workspace 内部依赖
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
+rust-quant-domain.workspace = true          # 新增: 使用领域模型
+rust-quant-infrastructure.workspace = true  # 新增: 使用基础设施
 rust-quant-market.workspace = true
 rust-quant-strategies.workspace = true
 rust-quant-risk.workspace = true

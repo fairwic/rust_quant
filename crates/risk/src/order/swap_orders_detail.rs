@@ -144,7 +144,7 @@ impl SwapOrderDetailEntityModel {
         &self,
         swap_order_entity: &SwapOrderDetailEntity,
     ) -> anyhow::Result<ExecResult> {
-        let data = SwapOrderDetailEntity::insert(self.db, &swap_order_entity).await?;
+        let data = SwapOrderDetailEntity::insert(self.db, &swap_order_entity).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         println!("insert_batch = {}", json!(data));
         Ok(data)
     }
@@ -159,7 +159,7 @@ impl SwapOrderDetailEntityModel {
     //         "in_order_id",
     //         1,
     //     )
-    //     .await?;
+    //     .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
     //     println!("update_batch = {}", json!(data));
     //     Ok(data)
     // }
@@ -172,13 +172,13 @@ impl SwapOrderDetailEntityModel {
             &swap_order_entity,
             value! {"in_order_id":&swap_order_entity.in_ord_id},
         )
-        .await?;
+        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         println!("update_batch = {}", json!(data));
         Ok(data)
     }
 
     pub async fn get_new_update_order_id(&self) -> anyhow::Result<Option<SwapOrderDetailEntity>> {
-        let res = SwapOrderDetailEntity::get_new_update_order_id(self.db).await?;
+        let res = SwapOrderDetailEntity::get_new_update_order_id(self.db).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         Ok(res)
     }
 }

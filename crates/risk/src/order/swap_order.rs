@@ -95,7 +95,7 @@ impl SwapOrderEntityModel {
     }
 
     pub async fn add(&self, swap_order_entity: &SwapOrderEntity) -> anyhow::Result<ExecResult> {
-        let data = SwapOrderEntity::insert(self.db, &swap_order_entity).await?;
+        let data = SwapOrderEntity::insert(self.db, &swap_order_entity).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         info!("insert_batch = {}", json!(data));
         Ok(data)
     }
@@ -107,7 +107,7 @@ impl SwapOrderEntityModel {
         pos_side: &str,
     ) -> anyhow::Result<Vec<SwapOrderEntity>> {
         let in_ord_id = SwapOrderEntity::gen_order_id(inst_id, time, side, pos_side);
-        let data = SwapOrderEntity::select_by_in_order_id(self.db, in_ord_id).await?;
+        let data = SwapOrderEntity::select_by_in_order_id(self.db, in_ord_id).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         Ok(data)
     }
     //
@@ -147,7 +147,7 @@ impl SwapOrderEntityModel {
     //         "SELECT * FROM tickers_data ORDER BY id DESC".to_string()
     //     };
     //
-    //     let results: Vec<SwapOrderEntity> = self.db.query_decode(sql.as_str(), vec![]).await?;
+    //     let results: Vec<SwapOrderEntity> = self.db.query_decode(sql.as_str(), vec![]).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
     //     Ok(results)
     // }
 }

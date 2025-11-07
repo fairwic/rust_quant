@@ -53,7 +53,7 @@ impl BackTestLogModel {
         let mut v1 = vec::Vec::new();
         v1.push(list.clone());
 
-        // let data = BackTestLog::insert_batch(&self.db, &v1, 1).await?;
+        // let data = BackTestLog::insert_batch(&self.db, &v1, 1).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         let table_name = format!("{}", "back_test_log");
         // 构建批量插入的 SQL 语句
         let mut query = format!("INSERT INTO `{}` (strategy_type, inst_type, time, win_rate, final_fund, open_positions_num, strategy_detail, risk_config_detail, profit, three_bar_after_win_rate, five_bar_after_win_rate, ten_bar_after_win_rate, kline_start_time, kline_end_time, kline_nums) VALUES ", table_name);
@@ -89,7 +89,7 @@ impl BackTestLogModel {
 
         // info!("insert_back_test_log_quey = {}", query);
         let start_time = Instant::now();
-        let data = self.db.exec(&query, params).await?;
+        let data = self.db.exec(&query, params).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         let duration = start_time.elapsed();
         // let res = format!("insert_back_test_log_result = 执行时间{}毫秒 影响行数{}", duration.as_millis(), data.rows_affected);
         // info!("{}", res);
@@ -124,7 +124,7 @@ impl BackTestLogModel {
             back_test_id.to_string().into(),
         ];
 
-        let result = self.db.exec(sql, params).await?;
+        let result = self.db.exec(sql, params).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         debug!(
             "更新 back_test_log id {} 的统计数据结果: 影响行数 {}",
             back_test_id, result.rows_affected

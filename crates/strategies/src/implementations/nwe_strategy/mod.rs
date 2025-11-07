@@ -7,7 +7,7 @@ use tracing::info;
 
 use rust_quant_indicators::volatility::atr::ATR;
 use rust_quant_indicators::volatility::atr::ATRStopLoos;
-use rust_quant_indicators::nwe_indicator::NweIndicator;
+use rust_quant_indicators::trend::nwe_indicator::NweIndicator;
 use rust_quant_indicators::momentum::rsi::RsiIndicator;
 use rust_quant_indicators::volume_indicator::VolumeRatioIndicator;
 use crate::nwe_strategy::indicator_combine::NweIndicatorCombine;

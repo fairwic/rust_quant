@@ -1,4 +1,4 @@
-use rust_quant_indicators::ema_indicator::EmaIndicator;
+use rust_quant_indicators::trend::ema_indicator::EmaIndicator;
 use rust_quant_indicators::enums::common_enums::TradeSide;
 use rust_quant_indicators::equal_high_low_indicator::EqualHighLowValue;
 use rust_quant_indicators::fair_value_gap_indicator::FairValueGapValue;
@@ -6,8 +6,8 @@ use rust_quant_indicators::leg_detection_indicator::LegDetectionValue;
 use rust_quant_indicators::market_structure_indicator::MarketStructureValue;
 use rust_quant_indicators::premium_discount_indicator::PremiumDiscountValue;
 use rust_quant_indicators::rsi_rma_indicator::RsiIndicator;
-use rust_quant_indicators::signal_weight::SignalWeightsConfig;
-use rust_quant_indicators::vegas_indicator::{
+use rust_quant_indicators::trend::signal_weight::SignalWeightsConfig;
+use rust_quant_indicators::trend::vegas::{
     EmaSignalValue, IndicatorCombine, KlineHammerSignalValue, VegasIndicatorSignalValue,
     VegasStrategy,
 };

@@ -1,5 +1,5 @@
 use crate::volatility::atr::ATR;
-use rust_quant_core::database::init_db;
+use rust_quant_core::database::get_db_pool;
 use rust_quant_core::logger::setup_logging;
 use dotenv;
 use crate::vegas_indicator::VegasStrategy;
