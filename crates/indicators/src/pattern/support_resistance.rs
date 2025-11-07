@@ -1,4 +1,4 @@
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_common::types::CandlesEntity;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rbatis::rbatis_codegen::ops::AsProxy;
 use serde::{Deserialize, Serialize};

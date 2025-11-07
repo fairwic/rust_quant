@@ -3,7 +3,7 @@ use redis::aio::MultiplexedConnection;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use crate::app_config::redis_config as app_redis;
+// use rust_quant_core::config::redis_config as app_redis; // TODO: 确认redis_config位置
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RedisCandle {

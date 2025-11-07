@@ -1,10 +1,10 @@
 use rust_quant_core::database;
 use rust_quant_common::utils::time;
 use rust_quant_market::models::CandlesEntity;
-use crate::trading::model::strategy::back_test_analysis::{
+use rust_quant_market::models::strategy::back_test_analysis::{
     BackTestAnalysis, BackTestAnalysisModel,
 };
-use crate::trading::model::strategy::back_test_log::BackTestLogModel;
+use rust_quant_market::models::strategy::back_test_log::BackTestLogModel;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
@@ -183,7 +183,7 @@ impl PositionAnalysis {
 // 查找K线索引的辅助函数
 fn find_candle_index(candles: &[CandlesEntity], position_time: &str) -> Option<usize> {
     candles.iter().position(|c| {
-        let candle_time = time_util::mill_time_to_datetime_shanghai(c.ts).unwrap();
+        let candle_time = rust_quant_common::utils::time::mill_time_to_datetime_shanghai(c.ts).unwrap();
         let formatted_position_time = position_time
             .split('+')
             .next()

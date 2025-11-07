@@ -13,11 +13,11 @@ use super::executor_common::{
 };
 use super::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use rust_quant_market::models::CandlesEntity;
-use crate::arc::indicator_values::arc_nwe_indicator_values::{
+use rust_quant_indicators::trend::nwe_indicator::{
     self as arc_nwe, get_nwe_hash_key, get_nwe_indicator_manager,
 };
 use crate::nwe_strategy::{NweStrategy, NweStrategyConfig};
-use crate::order::strategy_config::StrategyConfig;
+use crate::framework::config::strategy_config::StrategyConfig;
 use crate::strategy_common::parse_candle_to_data_item;
 use crate::StrategyType;
 use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;

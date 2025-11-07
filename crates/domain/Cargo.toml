@@ -1,0 +1,33 @@
+[package]
+name = "rust-quant-domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# 序列化
+serde.workspace = true
+serde_json.workspace = true
+
+# 错误处理
+thiserror.workspace = true
+anyhow.workspace = true
+
+# 时间处理
+chrono.workspace = true
+
+# 异步支持
+async-trait.workspace = true
+
+# 数值计算 (仅用于业务规则验证)
+approx.workspace = true
+
+# 注意: domain 层不依赖任何框架
+# - 不依赖 sqlx (数据库)
+# - 不依赖 redis (缓存)
+# - 不依赖 tokio (异步运行时已通过 async-trait 间接引入)
+# 这保证了领域模型的纯粹性和可测试性
+
+

@@ -15,10 +15,10 @@ use super::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::vegas_indicator::VegasStrategy;
 use rust_quant_market::models::CandlesEntity;
-use crate::arc::indicator_values::arc_vegas_indicator_values::{
+use rust_quant_indicators::trend::vegas::{
     self, get_hash_key, get_indicator_manager,
 };
-use crate::order::strategy_config::StrategyConfig;
+use crate::framework::config::strategy_config::StrategyConfig;
 use crate::strategy_common::{
     get_multi_indicator_values, parse_candle_to_data_item,
 };

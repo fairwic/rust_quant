@@ -5,9 +5,9 @@ use ta::indicators::{AverageTrueRange, ExponentialMovingAverage};
 use ta::Next;
 use tracing::{debug, error, info, warn};
 use rust_quant_common::utils::time;
-use crate::trading::model::market::candles::CandlesEntity;
-use rust_quant_indicators::kdj_simple_indicator::KdjCandle;
-use rust_quant_indicators::atr::ATR;
+use rust_quant_market::models::candles::CandlesEntity;
+use rust_quant_indicators::momentum::kdj::KdjCandle;
+use rust_quant_indicators::volatility::atr::ATR;
 use crate::strategy_common::{run_test, SignalResult};
 #[derive(Deserialize, Serialize, Debug)]
 pub enum  MultCombineStartegy {

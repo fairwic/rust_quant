@@ -7,7 +7,7 @@ use anyhow::Result;
 use std::collections::VecDeque;
 
 use rust_quant_market::models::CandlesEntity;
-use crate::order::strategy_config::StrategyConfig;
+use crate::framework::config::strategy_config::StrategyConfig;
 use crate::strategy_common::SignalResult;
 use crate::StrategyType;
 use rust_quant_common::CandleItem;

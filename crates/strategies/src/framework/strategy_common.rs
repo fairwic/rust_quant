@@ -1,21 +1,21 @@
-use crate::trading::indicator::ema_indicator::EmaIndicator;
-use crate::trading::indicator::enums::common_enums::TradeSide;
-use crate::trading::indicator::equal_high_low_indicator::EqualHighLowValue;
-use crate::trading::indicator::fair_value_gap_indicator::FairValueGapValue;
-use crate::trading::indicator::leg_detection_indicator::LegDetectionValue;
-use crate::trading::indicator::market_structure_indicator::MarketStructureValue;
-use crate::trading::indicator::premium_discount_indicator::PremiumDiscountValue;
-use crate::trading::indicator::rsi_rma_indicator::RsiIndicator;
-use crate::trading::indicator::signal_weight::SignalWeightsConfig;
-use crate::trading::indicator::vegas_indicator::{
+use rust_quant_indicators::ema_indicator::EmaIndicator;
+use rust_quant_indicators::enums::common_enums::TradeSide;
+use rust_quant_indicators::equal_high_low_indicator::EqualHighLowValue;
+use rust_quant_indicators::fair_value_gap_indicator::FairValueGapValue;
+use rust_quant_indicators::leg_detection_indicator::LegDetectionValue;
+use rust_quant_indicators::market_structure_indicator::MarketStructureValue;
+use rust_quant_indicators::premium_discount_indicator::PremiumDiscountValue;
+use rust_quant_indicators::rsi_rma_indicator::RsiIndicator;
+use rust_quant_indicators::signal_weight::SignalWeightsConfig;
+use rust_quant_indicators::vegas_indicator::{
     EmaSignalValue, IndicatorCombine, KlineHammerSignalValue, VegasIndicatorSignalValue,
     VegasStrategy,
 };
-use crate::trading::indicator::volume_indicator::VolumeRatioIndicator;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::nwe_strategy::NweStrategy;
-use crate::trading::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
-use crate::trading::utils::fibonacci::FIBONACCI_ONE_POINT_TWO_THREE_SIX;
+use rust_quant_indicators::volume_indicator::VolumeRatioIndicator;
+use rust_quant_market::models::CandleEntity;
+use rust_quant_common::strategy::nwe_strategy::NweStrategy;
+use rust_quant_common::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
+use rust_quant_common::utils::fibonacci::FIBONACCI_ONE_POINT_TWO_THREE_SIX;
 use crate::{time_util, CandleItem};
 use chrono::{DateTime, Utc};
 use hmac::digest::typenum::Min;

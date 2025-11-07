@@ -1,4 +1,4 @@
-use rust_quant_core::error::app_error::AppError;
+use rust_quant_core::error::AppError;
 use anyhow::Result;
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::Position;

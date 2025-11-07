@@ -12,21 +12,21 @@ use uuid::Uuid;
 
 use rust_quant_indicators::vegas_indicator::VegasStrategy;
 use rust_quant_market::models::CandlesEntity;
-use crate::trading::model::strategy::strategy_config::{
+use crate::framework::config::strategy_config::{
     StrategyConfigEntity, StrategyConfigEntityModel,
 };
-use crate::trading::services::scheduler_service::SchedulerService;
-use crate::trading::services::strategy_data_service::StrategyDataService;
+use crate::framework::scheduler_service::SchedulerService;
+use crate::framework::strategy_data_service::StrategyDataService;
 use crate::framework::{get_strategy_metrics, StrategyMetrics};
-use crate::trading::services::strategy_system_error::{
+use crate::framework::strategy_system_error::{
     BusinessLogicError, ErrorHandler, ErrorSeverity, StrategyConfigError, StrategySystemError,
 };
-use crate::arc::indicator_values::arc_vegas_indicator_values;
+use rust_quant_indicators::trend::vegas;
 use crate::nwe_strategy::NweStrategyConfig;
-use crate::order::strategy_config::StrategyConfig;
+use crate::framework::config::strategy_config::StrategyConfig;
 use crate::strategy_common::BasicRiskStrategyConfig;
 use crate::StrategyType;
-use crate::SCHEDULER;
+// use crate::SCHEDULER // TODO: 定义全局SCHEDULER;
 use okx::dto::EnumToStrTrait;
 
 /// 策略管理器错误类型

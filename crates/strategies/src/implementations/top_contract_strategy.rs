@@ -11,11 +11,11 @@ use tracing::{error, warn};
 
 // 使用 async_trait 宏 use crate::trading;
 // Import necessary crates and modules
-use crate::trading::model::big_data::top_contract_account_ratio::TopContractAccountRatioEntity;
-use crate::trading::model::big_data::top_contract_position_ratio::TopContractPositionRatioEntity;
+use rust_quant_market::models::top_contract_account_ratio::TopContractAccountRatioEntity;
+use rust_quant_market::models::top_contract_position_ratio::TopContractPositionRatioEntity;
 use rust_quant_market::models::CandlesEntity;
-use crate::trading::services::big_data::big_data_top_contract_service::BigDataTopContractService;
-use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
+use crate::framework::big_data::big_data_top_contract_service::BigDataTopContractService;
+use crate::framework::big_data::big_data_top_position_service::BigDataTopPositionService;
 use crate::strategy_common::{
     run_back_test, BackTestResult, SignalResult, TradeRecord,
 };

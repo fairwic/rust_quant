@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
 
-use rust_quant_indicators::atr::ATR;
-use rust_quant_indicators::atr_stop_loos::ATRStopLoos;
+use rust_quant_indicators::volatility::atr::ATR;
+use rust_quant_indicators::volatility::atr::ATRStopLoos;
 use rust_quant_indicators::nwe_indicator::NweIndicator;
-use rust_quant_indicators::rsi_rma_indicator::RsiIndicator;
+use rust_quant_indicators::momentum::rsi::RsiIndicator;
 use rust_quant_indicators::volume_indicator::VolumeRatioIndicator;
 use crate::nwe_strategy::indicator_combine::NweIndicatorCombine;
 use crate::strategy_common::{

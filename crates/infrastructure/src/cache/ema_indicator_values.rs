@@ -1,6 +1,6 @@
-use crate::trading::indicator::vegas_indicator::EmaSignalValue;
-use once_cell::sync::OnceCell;
-use rbatis::RBatis;
+use rust_quant_indicators::vegas_indicator::EmaSignalValue;
+use once_cell::OnceCell;
+RBatis;
 use rbdc_mysql::MysqlDriver;
 use std::collections::HashMap;
 use std::env;

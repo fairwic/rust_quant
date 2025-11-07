@@ -47,7 +47,7 @@ pub struct SwapOrderEntity {
 impl SwapOrderEntity {
     // 生成订单id
     pub fn gen_order_id(inst_id: &str, period: &str, side: &str, pos_side: &str) -> String {
-        let time = time_util::format_to_period_str(period);
+        let time = rust_quant_common::utils::time::format_to_period_str(period);
         //btc-1d-buy-l-20250710000000
         //eth-1h-sell-s-20250710150000
         //nxpc-1s-buy-s-20250710150101

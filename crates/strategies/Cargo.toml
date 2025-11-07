@@ -8,11 +8,14 @@ rust-version.workspace = true
 # Workspace 内部依赖
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
+rust-quant-domain.workspace = true           # 新增: 领域模型
+rust-quant-infrastructure.workspace = true   # 新增: 基础设施
 rust-quant-market.workspace = true
 rust-quant-indicators.workspace = true
-rust-quant-risk.workspace = true
-rust-quant-execution.workspace = true
-rust-quant-orchestration.workspace = true
+# 移除循环依赖: strategies 不应该依赖这些包
+# rust-quant-risk.workspace = true
+# rust-quant-execution.workspace = true
+# rust-quant-orchestration.workspace = true
 
 # 外部依赖
 tokio.workspace = true

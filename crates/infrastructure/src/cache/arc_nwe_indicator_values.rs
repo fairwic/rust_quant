@@ -1,10 +1,10 @@
 //! Nwe 策略指标值缓存管理器
 //! 参考 arc_vegas_indicator_values.rs 的设计
 
-use crate::trading::strategy::nwe_strategy::indicator_combine::NweIndicatorCombine;
+use rust_quant_domain::nwe_strategy::indicator_combine::NweIndicatorCombine;
 use rust_quant_common::CandleItem;
 use dashmap::DashMap;
-use once_cell::sync::OnceCell;
+use once_cell::OnceCell;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;

@@ -6,10 +6,10 @@ use anyhow::{anyhow, Result};
 use std::collections::VecDeque;
 use tracing::{debug, info, warn};
 
-use crate::trading::domain_service::candle_domain_service::CandleDomainService;
+use rust_quant_market::repositories::candle_domain_service::CandleDomainService;
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_execution::order_manager::swap_order_service::SwapOrderService;
-use crate::order::strategy_config::StrategyConfig;
+use crate::framework::config::strategy_config::StrategyConfig;
 use crate::strategy_common::{
     parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
 };

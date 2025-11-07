@@ -1,4 +1,4 @@
-use rust_quant_indicators::atr::ATR;
+use rust_quant_indicators::volatility::atr::ATR;
 use rust_quant_market::models::CandlesEntity;
 use crate::strategy_common::{
     run_back_test, BackTestResult, SignalResult, TradeRecord,

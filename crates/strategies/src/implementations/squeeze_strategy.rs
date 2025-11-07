@@ -1,6 +1,6 @@
 use rust_quant_common::utils::time;
-use rust_quant_indicators::atr::ATR;
-use rust_quant_indicators::kdj_simple_indicator::KdjCandle;
+use rust_quant_indicators::volatility::atr::ATR;
+use rust_quant_indicators::momentum::kdj::KdjCandle;
 use rust_quant_market::models::CandlesEntity;
 use crate::strategy_common::SignalResult;
 use clap::builder::Str;

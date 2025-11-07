@@ -7,6 +7,8 @@ rust-version.workspace = true
 [dependencies]
 # Workspace 内部依赖
 rust-quant-common.workspace = true
+rust-quant-core.workspace = true  # 某些indicator需要config
+rust-quant-domain.workspace = true  # 某些indicator使用domain类型
 rust-quant-market.workspace = true
 
 # 外部依赖
@@ -16,6 +18,19 @@ anyhow.workspace = true
 
 # 技术分析库
 ta.workspace = true
+
+# 日志
+tracing.workspace = true
+
+# 序列化
+serde_json.workspace = true
+
+# 加密
+hmac.workspace = true
+sha2.workspace = true
+
+# 环境变量
+dotenv.workspace = true
 
 # 数值计算
 ndarray.workspace = true

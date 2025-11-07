@@ -2,6 +2,8 @@
 members = [
     "crates/common",
     "crates/core",
+    "crates/domain",           # 新增: 领域模型层
+    "crates/infrastructure",   # 新增: 基础设施层
     "crates/market",
     "crates/indicators",
     "crates/strategies",
@@ -99,6 +101,8 @@ async-openai = "0.20"
 # === Workspace 内部依赖 ===
 rust-quant-common = { path = "crates/common" }
 rust-quant-core = { path = "crates/core" }
+rust-quant-domain = { path = "crates/domain" }              # 新增
+rust-quant-infrastructure = { path = "crates/infrastructure" }  # 新增
 rust-quant-market = { path = "crates/market" }
 rust-quant-indicators = { path = "crates/indicators" }
 rust-quant-strategies = { path = "crates/strategies" }
