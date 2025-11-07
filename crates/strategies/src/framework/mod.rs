@@ -5,6 +5,7 @@ pub mod strategy_manager;
 pub mod strategy_common;
 pub mod config;
 pub mod types;  // ⭐ 新增: 框架类型定义
+pub mod execution_traits;  // ⭐ 新增: 执行接口定义（解耦循环依赖）
 
 // 重新导出核心类型
 pub use strategy_trait::*;
@@ -13,4 +14,5 @@ pub use strategy_manager::*;
 pub use strategy_common::*;
 pub use config::*;
 pub use types::*;  // ⭐ 导出TradeSide等类型
+pub use execution_traits::*;  // ⭐ 导出执行接口
 

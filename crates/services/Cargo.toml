@@ -36,3 +36,6 @@ tracing.workspace = true
 # 时间
 chrono.workspace = true
 
+# 数据库
+sqlx.workspace = true
+

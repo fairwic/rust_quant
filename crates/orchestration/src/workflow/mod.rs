@@ -5,7 +5,8 @@ pub mod basic;
 // TODO: strategy_config 有依赖问题，暂时禁用
 // pub mod strategy_config;
 // TODO: 以下模块有依赖问题，暂时禁用
-// pub mod strategy_runner;
+pub mod strategy_runner;  // ✅ strategy_runner 已解耦，可以使用
+pub mod strategy_execution_context;  // ✅ 新增: trait 实现
 // pub mod progress_manager;
 // pub mod data_validator;
 // pub mod data_sync;
@@ -37,7 +38,8 @@ pub mod basic;
 // 重新导出核心类型
 pub use basic::*;
 // pub use strategy_config::*;
-// pub use strategy_runner::*;
+pub use strategy_runner::*;  // ✅ 导出 strategy_runner
+pub use strategy_execution_context::*;  // ✅ 导出执行上下文
 // pub use progress_manager::*;
 
 // 导出风控任务

@@ -1,18 +1,14 @@
-// TODO: ORM 迁移 - 暂时注释整个模块，等待 backtest Model 迁移到 sqlx
-/*
-use rust_quant_core::database;
 use rust_quant_common::utils::time;
 use rust_quant_market::models::CandlesEntity;
-use crate::backtest::back_test_analysis::{
-    BackTestAnalysis, BackTestAnalysisModel,
+use crate::backtest::{
+    BackTestAnalysis, BackTestAnalysisModel, BackTestDetail, BackTestDetailModel, BackTestLogModel,
 };
-use crate::backtest::back_test_log::BackTestLogModel;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use std::sync::Arc;
 use tokio::task;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 #[derive(Debug, Clone)]
 pub struct PositionAnalysis {
@@ -35,12 +31,13 @@ impl PositionAnalysis {
             back_test_id
         );
 
-        // 创建分析模型
-        let analysis_model = BackTestAnalysisModel::new().await;
+        // 创建模型实例
+        let detail_model = BackTestDetailModel;
+        let analysis_model = BackTestAnalysisModel;
 
         // 查询需要分析的持仓记录
-        let positions = analysis_model
-            .find_positions(back_test_id)
+        let positions = detail_model
+            .find_by_back_test_id(back_test_id as i64)
             .await
             .context("Failed to fetch positions for analysis")?;
 
@@ -71,9 +68,12 @@ impl PositionAnalysis {
                 for position in positions_chunk {
                     match position.open_price.parse::<f64>() {
                         Ok(open_price) => {
+                            // 将 NaiveDateTime 转换为字符串用于查找
+                            let open_time_str = position.open_position_time.format("%Y-%m-%d %H:%M:%S").to_string();
+                            
                             // 查找开仓时间对应的K线索引
                             if let Some(open_index) =
-                                find_candle_index(&candles, &position.open_position_time)
+                                find_candle_index(&candles, &open_time_str)
                             {
                                 // 分析不同K线数量后的价格变化
                                 for bars in &bars_to_analyze {
@@ -97,7 +97,7 @@ impl PositionAnalysis {
                                             inst_id: position.inst_id.clone(),
                                             time: position.time.clone(),
                                             option_type: position.option_type.clone(),
-                                            open_position_time: position.open_position_time.clone(),
+                                            open_position_time: Some(open_time_str.clone()),
                                             open_price: open_price.to_string(),
                                             bars_after: *bars,
                                             price_after: future_price.to_string(),
@@ -161,7 +161,7 @@ impl PositionAnalysis {
             );
 
             // 更新 back_test_log 表
-            let log_model = BackTestLogModel::new().await;
+            let log_model = BackTestLogModel;
             let updated = log_model
                 .update_position_stats(back_test_id as i64, stats)
                 .await
@@ -203,4 +203,3 @@ fn calculate_price_change(option_type: &str, open_price: f64, future_price: f64)
         _ => 0.0,
     }
 }
-*/
