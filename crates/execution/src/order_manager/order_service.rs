@@ -1,7 +1,5 @@
-use rust_quant_core::error::app_error::AppError;
-use rust_quant_risk::order::swap_orders_detail::{
-    SwapOrderDetailEntity, SwapOrderDetailEntityModel,
-};
+use rust_quant_common::AppError;
+use rust_quant_risk::order::SwapOrdersDetailEntity;
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::trade::OkxTrade;
 use okx::dto::trade::trade_dto::OrderPendingRespDto;
@@ -20,11 +18,13 @@ impl OrderService {
     pub async fn get_pending_orders(
         &self,
         inst_id: Option<&str>,
-    ) -> Result<Vec<OrderPendingRespDto>, Error> {
-        let trade_client = OkxTrade::from_env()?;
+    ) -> Result<Vec<OrderPendingRespDto>, AppError> {
+        let trade_client = OkxTrade::from_env()
+            .map_err(|e| AppError::OkxApiError(format!("OKX初始化失败: {:?}", e)))?;
         let position_list = trade_client
             .get_pending_orders(Some("SWAP"), None, None, None, None, None, None)
-            .await?;
+            .await
+            .map_err(|e| AppError::OkxApiError(e.to_string()))?;
         info!("get pending orders: {:?}", json!(position_list).to_string());
         Ok(position_list)
     }
@@ -34,11 +34,13 @@ impl OrderService {
         inst_id: &str,
         order_id: Option<&str>,
         client_order_id: Option<&str>,
-    ) -> Result<Vec<OrderDetailRespDto>, Error> {
-        let trade_client = OkxTrade::from_env()?;
+    ) -> Result<Vec<OrderDetailRespDto>, AppError> {
+        let trade_client = OkxTrade::from_env()
+            .map_err(|e| AppError::OkxApiError(format!("OKX初始化失败: {:?}", e)))?;
         let order_list = trade_client
             .get_order_details(inst_id, order_id, client_order_id)
-            .await?;
+            .await
+            .map_err(|e| AppError::OkxApiError(e.to_string()))?;
         info!("get order detail: {:?}", json!(order_list).to_string());
         Ok(order_list)
     }
@@ -60,10 +62,11 @@ impl OrderService {
         Ok(())
     }
 
-    pub async fn update_order_detail(&self, order_detail: OrderDetailRespDto) -> Result<(), Error> {
-        let order_detail = SwapOrderDetailEntity::from(order_detail);
-        let model = SwapOrderDetailEntityModel::new().await;
-        model.add(&order_detail).await;
+    pub async fn update_order_detail(&self, order_detail: OrderDetailRespDto) -> Result<(), AppError> {
+        // TODO: 实现 OrderDetailRespDto 到 SwapOrdersDetailEntity 的转换
+        // let entity = SwapOrdersDetailEntity::from(order_detail);
+        // entity.insert().await?;
+        warn!("update_order_detail 暂未实现");
         Ok(())
     }
 
@@ -86,7 +89,8 @@ impl OrderService {
         // if last_update_info.is_some() && before.is_none() {
         //     before = Some(last_update_info.unwrap().update_at.unwrap().as_str());
         // }
-        let model = OkxTrade::from_env()?;
+        let model = OkxTrade::from_env()
+            .map_err(|e| AppError::OkxApiError(e.to_string()))?;
         let order_list = model
             .get_order_history(OrdListReqDto {
                 inst_type: inst_type.to_string(),
@@ -99,7 +103,8 @@ impl OrderService {
                 after: after.map(|s| s.to_string()),
                 before: before.map(|s| s.to_string()),
             })
-            .await?;
+            .await
+            .map_err(|e| AppError::OkxApiError(e.to_string()))?;
         // for order in order_list {
         //     let order_detail = SwapOrderDetailEntity::from(order);
         //     let model = SwapOrderDetailEntityModel::new().await;
@@ -117,7 +122,8 @@ impl OrderService {
         before: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<OrderDetailRespDto>, AppError> {
-        let model = OkxTrade::from_env()?;
+        let model = OkxTrade::from_env()
+            .map_err(|e| AppError::OkxApiError(e.to_string()))?;
         let order_list = model
             .get_order_history_archive(OrdListReqDto {
                 inst_type: inst_type.to_string(),
@@ -128,7 +134,8 @@ impl OrderService {
                 before: before.map(|s| s.to_string()),
                 limit: limit,
             })
-            .await?;
+            .await
+            .map_err(|e| AppError::OkxApiError(e.to_string()))?;
         // for order in order_list {
         //     let order_detail = SwapOrderDetailEntity::from(order);
         //     let model = SwapOrderDetailEntityModel::new().await;

@@ -1,6 +1,6 @@
 use rust_quant_core::database;
 use chrono::Local;
-// TODO: 迁移到 sqlx 后移除 rbatis 宏
+// TODO: 迁移到 sqlx 后移除 rbatis 宏和 Model 实现
 // use rbdc::db::ExecResult;
 // use rbdc::{Date, DateTime};
 // use rbatis::{crud, impl_insert, impl_update, RBatis};
@@ -9,6 +9,9 @@ use serde_json::json;
 use std::sync::Arc;
 use tracing::{debug, info};
 
+/// 回测详情记录
+/// TODO: 迁移说明 - 这是数据结构定义，需要保留
+/// Model 部分已暂时注释，等待 sqlx 迁移
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BackTestDetail {
     pub option_type: String,
@@ -34,11 +37,12 @@ pub struct BackTestDetail {
     pub signal_result: String,
 }
 
-impl_insert!(BackTestDetail {});
-// rbatis::// ORM迁移TODO
-// ORM迁移TODO
-// ORM迁移TODO
+// TODO: ORM 迁移 - 暂时注释掉 rbatis 宏
+// impl_insert!(BackTestDetail {});
 
+// TODO: ORM 迁移 - 需要迁移到 sqlx
+// 当前暂时注释掉整个 Model 实现，等待 sqlx 迁移
+/*
 pub struct BackTestDetailModel {
     db: &'static RBatis,
 }
@@ -103,3 +107,4 @@ impl BackTestDetailModel {
         // Ok(data.rows_affected)
     }
 }
+*/

@@ -13,7 +13,7 @@ use okx::enums::account_enums::AccountType;
 use okx::{OkxAccount, OkxAsset};
 use std::str::FromStr;
 use tracing::{span, Level};
-use rust_quant_core::error::app_error::AppError;
+use rust_quant_common::AppError;
 
 // 常量定义
 

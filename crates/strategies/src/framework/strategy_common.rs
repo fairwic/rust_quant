@@ -1,24 +1,25 @@
 use rust_quant_indicators::trend::ema_indicator::EmaIndicator;
-use rust_quant_indicators::enums::common_enums::TradeSide;
-use rust_quant_indicators::equal_high_low_indicator::EqualHighLowValue;
-use rust_quant_indicators::fair_value_gap_indicator::FairValueGapValue;
-use rust_quant_indicators::leg_detection_indicator::LegDetectionValue;
-use rust_quant_indicators::market_structure_indicator::MarketStructureValue;
-use rust_quant_indicators::premium_discount_indicator::PremiumDiscountValue;
-use rust_quant_indicators::rsi_rma_indicator::RsiIndicator;
+// ⭐ TradeSide 已移到 framework::types
+use crate::TradeSide;
+// TODO: EqualHighLowValue 依赖旧结构，待重构后恢复
+// use rust_quant_indicators::pattern::EqualHighLowValue;
+use rust_quant_indicators::momentum::RsiIndicator;  // ⭐ 正确路径
 use rust_quant_indicators::trend::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
     EmaSignalValue, IndicatorCombine, KlineHammerSignalValue, VegasIndicatorSignalValue,
     VegasStrategy,
 };
-use rust_quant_indicators::volume_indicator::VolumeRatioIndicator;
-use rust_quant_market::models::CandleEntity;
-use rust_quant_common::strategy::nwe_strategy::NweStrategy;
-use rust_quant_common::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
+use rust_quant_indicators::volume::VolumeRatioIndicator;  // ⭐ 正确路径
+// ⭐ CandleEntity已重命名为CandlesEntity
+use rust_quant_market::models::CandlesEntity;
+// ⭐ 从本地导入，不是从common
+use crate::nwe_strategy::NweStrategy;
+// TODO: TopContractData 可能需要从其他地方导入或注释
+// use rust_quant_common::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
 use rust_quant_common::utils::fibonacci::FIBONACCI_ONE_POINT_TWO_THREE_SIX;
 use crate::{time_util, CandleItem};
 use chrono::{DateTime, Utc};
-use hmac::digest::typenum::Min;
+// use hmac::digest::typenum::Min;  // TODO: 可能不需要
 use okx::dto::common::PositionSide;
 use okx::dto::EnumToStrTrait;
 use serde::{Deserialize, Serialize};
@@ -39,7 +40,7 @@ use tracing::{span, warn};
 
 /// 通用回测策略能力接口，便于不同策略复用统一回测与落库流程
 pub trait BackTestAbleStrategyTrait {
-    fn strategy_type(&self) -> crate::trading::strategy::StrategyType;
+    fn strategy_type(&self) -> crate::StrategyType;  // ⭐ 使用本地导出的StrategyType
     fn config_json(&self) -> Option<String>;
     fn run_test(
         &mut self,
@@ -48,27 +49,29 @@ pub trait BackTestAbleStrategyTrait {
     ) -> BackTestResult;
 }
 
-impl BackTestAbleStrategyTrait for VegasStrategy {
-    fn strategy_type(&self) -> crate::trading::strategy::StrategyType {
-        crate::trading::strategy::StrategyType::Vegas
-    }
-
-    fn config_json(&self) -> Option<String> {
-        serde_json::to_string(self).ok()
-    }
-
-    fn run_test(
-        &mut self,
-        candles: &Vec<CandleItem>,
-        risk_strategy_config: BasicRiskStrategyConfig,
-    ) -> BackTestResult {
-        VegasStrategy::run_test(self, candles, risk_strategy_config)
-    }
-}
+// TODO: VegasStrategy 的 run_test 在 indicators 包中是 unimplemented!，暂时注释
+// impl BackTestAbleStrategyTrait for VegasStrategy {
+//     fn strategy_type(&self) -> crate::StrategyType {
+//         crate::StrategyType::Vegas
+//     }
+//
+//     fn config_json(&self) -> Option<String> {
+//         serde_json::to_string(self).ok()
+//     }
+//
+//     fn run_test(
+//         &mut self,
+//         candles: &Vec<CandleItem>,
+//         risk_strategy_config: BasicRiskStrategyConfig,
+//     ) -> BackTestResult {
+//         // VegasStrategy::run_test 返回 domain::BacktestResult，需要类型转换
+//         unimplemented!("需要实现类型转换")
+//     }
+// }
 
 impl BackTestAbleStrategyTrait for NweStrategy {
-    fn strategy_type(&self) -> crate::trading::strategy::StrategyType {
-        crate::trading::strategy::StrategyType::Nwe
+    fn strategy_type(&self) -> crate::StrategyType {
+        crate::StrategyType::Nwe  // ⭐ 使用本地导出的StrategyType
     }
 
     fn config_json(&self) -> Option<String> {
@@ -550,18 +553,19 @@ pub fn get_multi_indicator_values(
         );
     }
 
-    // 等高/等低点
-    let ehl_start = Instant::now();
-    if let Some(equal_high_low_indicator) = &mut indicator_combine.equal_high_low_indicator {
-        vegas_indicator_signal_value.equal_high_low_value =
-            equal_high_low_indicator.next(data_item);
-    }
-    if ehl_start.elapsed().as_millis() > 10 {
-        info!(
-            duration_ms = ehl_start.elapsed().as_millis(),
-            "计算等高/等低点"
-        );
-    }
+    // TODO: equal_high_low_indicator 字段不存在于 IndicatorCombine，暂时注释
+    // // 等高/等低点
+    // let ehl_start = Instant::now();
+    // if let Some(equal_high_low_indicator) = &mut indicator_combine.equal_high_low_indicator {
+    //     vegas_indicator_signal_value.equal_high_low_value =
+    //         equal_high_low_indicator.next(data_item);
+    // }
+    // if ehl_start.elapsed().as_millis() > 10 {
+    //     info!(
+    //         duration_ms = ehl_start.elapsed().as_millis(),
+    //         "计算等高/等低点"
+    //     );
+    // }
 
     // 溢价/折扣区域
     let pd_start = Instant::now();

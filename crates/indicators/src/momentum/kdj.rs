@@ -7,6 +7,23 @@ pub struct KDJ {
     pub(crate) j: f64,
 }
 
+impl KDJ {
+    /// 获取K值
+    pub fn k(&self) -> f64 {
+        self.k
+    }
+
+    /// 获取D值
+    pub fn d(&self) -> f64 {
+        self.d
+    }
+
+    /// 获取J值
+    pub fn j(&self) -> f64 {
+        self.j
+    }
+}
+
 pub struct KdjCandle {
     pub(crate) high: f64,
     pub(crate) low: f64,

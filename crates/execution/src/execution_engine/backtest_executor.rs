@@ -220,7 +220,6 @@ pub async fn get_candle_data_confirm(
 
     let db_query_start = Instant::now();
     let mysql_candles_5m = CandlesModel::new()
-        .await
         .fetch_candles_from_mysql(dto)
         .await?;
     let db_query_duration = db_query_start.elapsed();

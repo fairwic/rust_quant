@@ -5,10 +5,12 @@ use crate::signal_weight::{
     SignalCondition, SignalDirect, SignalType, SignalWeightsConfig,
 };
 use rust_quant_domain::{
-    BackTestResult, BasicRiskStrategyConfig, SignalResult,
+    BacktestResult, BasicRiskStrategyConfig, SignalResult,
 };
 use rust_quant_domain::Strategy;
-use crate::{time_util, CandleItem};
+use rust_quant_common::CandleItem;
+use rust_quant_common::utils::time as time_util;
+use rust_quant_common::enums::common::{EnumAsStrTrait, PeriodEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::debug;
@@ -18,8 +20,6 @@ use super::indicator_combine::IndicatorCombine;
 use super::signal::*;
 use super::trend;
 use super::utils;
-use crate::enums::common::EnumAsStrTrait;
-use crate::enums::common::PeriodEnum;
 
 /// Vegas综合策略配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -83,15 +83,26 @@ impl VegasStrategy {
         // 输入验证
         if data_items.is_empty() {
             return SignalResult {
-                should_buy: false,
-                should_sell: false,
-                open_price: 0.0,
+                should_buy: Some(false),
+                should_sell: Some(false),
+                open_price: Some(0.0),
                 best_open_price: None,
                 best_take_profit_price: None,
                 signal_kline_stop_loss_price: None,
-                ts: 0,
+                ts: Some(0),
                 single_value: None,
                 single_result: None,
+                // 填充新字段
+                direction: rust_quant_domain::SignalDirection::None,
+                strength: rust_quant_domain::SignalStrength::new(0.0),
+                signals: vec![],
+                can_open: false,
+                should_close: false,
+                entry_price: None,
+                stop_loss_price: None,
+                take_profit_price: None,
+                position_time: None,
+                signal_kline: None,
             };
         }
 
@@ -99,30 +110,52 @@ impl VegasStrategy {
             Some(item) => item,
             None => {
                 return SignalResult {
-                    should_buy: false,
-                    should_sell: false,
-                    open_price: 0.0,
+                    should_buy: Some(false),
+                    should_sell: Some(false),
+                    open_price: Some(0.0),
                     best_open_price: None,
                     best_take_profit_price: None,
                     signal_kline_stop_loss_price: None,
-                    ts: 0,
+                    ts: Some(0),
                     single_value: None,
                     single_result: None,
+                    // 填充新字段
+                    direction: rust_quant_domain::SignalDirection::None,
+                    strength: rust_quant_domain::SignalStrength::new(0.0),
+                    signals: vec![],
+                    can_open: false,
+                    should_close: false,
+                    entry_price: None,
+                    stop_loss_price: None,
+                    take_profit_price: None,
+                    position_time: None,
+                    signal_kline: None,
                 }
             }
         };
 
         // 初始化交易信号
         let mut signal_result = SignalResult {
-            should_buy: false,
-            should_sell: false,
-            open_price: last_data_item.c,
+            should_buy: Some(false),
+            should_sell: Some(false),
+            open_price: Some(last_data_item.c),
             best_open_price: None,
             best_take_profit_price: None,
             signal_kline_stop_loss_price: None,
-            ts: last_data_item.ts,
+            ts: Some(last_data_item.ts),
             single_value: None,
             single_result: None,
+            // 填充新字段
+            direction: rust_quant_domain::SignalDirection::None,
+            strength: rust_quant_domain::SignalStrength::new(0.0),
+            signals: vec![],
+            can_open: false,
+            should_close: false,
+            entry_price: None,
+            stop_loss_price: None,
+            take_profit_price: None,
+            position_time: None,
+            signal_kline: None,
         };
 
         let mut conditions = Vec::with_capacity(10);
@@ -230,10 +263,10 @@ impl VegasStrategy {
         if let Some(signal_direction) = weights.is_signal_valid(&score) {
             match signal_direction {
                 SignalDirect::IsLong => {
-                    signal_result.should_buy = true;
+                    signal_result.should_buy = Some(true);
                 }
                 SignalDirect::IsShort => {
-                    signal_result.should_sell = true;
+                    signal_result.should_sell = Some(true);
                 }
             }
         }
@@ -257,8 +290,8 @@ impl VegasStrategy {
         // }
 
         // 可选：添加详细信息到结果中
-        if signal_result.should_buy
-            || signal_result.should_sell
+        if signal_result.should_buy.unwrap_or(false)
+            || signal_result.should_sell.unwrap_or(false)
                 && env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true"
         {
             //如果有使用信号k线路止盈止损
@@ -269,8 +302,9 @@ impl VegasStrategy {
                     &conditions,
                 );
             }
-            signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
-            signal_result.single_result = Some(json!(conditions).to_string());
+            // TODO: 这些字段原本用于调试，现在类型不匹配，暂时注释
+            // signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
+            // signal_result.single_result = Some(json!(conditions).to_string());
         }
 
         signal_result
@@ -339,11 +373,17 @@ impl VegasStrategy {
     }
 
     /// 运行回测
+    /// TODO: 迁移后需要重新实现，strategy_common 在 strategies 包中
     pub fn run_test(
         &mut self,
-        candles: &Vec<CandleItem>,
-        risk_strategy_config: BasicRiskStrategyConfig,
-    ) -> BackTestResult {
+        _candles: &Vec<CandleItem>,
+        _risk_strategy_config: BasicRiskStrategyConfig,
+    ) -> BacktestResult {
+        // TODO: 暂时返回空结果，等待 strategies 包修复后重新实现
+        // 原实现需要 strategy_common，暂时注释掉整个函数体
+        unimplemented!("run_test 需要在 strategies 包修复后重新实现")
+        
+        /* 原实现代码 - 暂时保留作为参考
         use rust_quant_domain;
 
         let min_length = self.get_min_data_length();
@@ -369,6 +409,7 @@ impl VegasStrategy {
             min_length,
             &mut indicator_combine,
         )
+        */  // 结束注释块
     }
 
     // 私有辅助方法
@@ -594,8 +635,8 @@ impl VegasStrategy {
         // 使用工具函数计算止损价格
         if let Some(stop_loss_price) = utils::calculate_best_stop_loss_price(
             last_data_item,
-            signal_result.should_buy,
-            signal_result.should_sell,
+            signal_result.should_buy.unwrap_or(false),
+            signal_result.should_sell.unwrap_or(false),
         ) {
             signal_result.signal_kline_stop_loss_price = Some(stop_loss_price);
         }

@@ -18,6 +18,7 @@
 pub mod framework;
 pub mod implementations;
 pub mod backtesting;
+pub mod adapters;  // 新增: 适配器模块
 
 // 重新导出核心类型
 pub use framework::*;
@@ -30,7 +31,10 @@ pub use rust_quant_domain::{
 };
 
 // 重新导出 common 类型
-pub use rust_quant_common::{CandleItem, TradeSide};
+pub use rust_quant_common::CandleItem;
+
+// ⭐ TradeSide 在本地定义（framework::types）
+// pub use rust_quant_domain::OrderSide as TradeSide;
 
 // 工具函数重导出
 pub mod time_util {

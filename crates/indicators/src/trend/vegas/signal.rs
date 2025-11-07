@@ -1,10 +1,18 @@
-use crate::equal_high_low_indicator::EqualHighLowValue;
+// TODO: equal_high_low_indicator 需要重构，暂时注释
+// use crate::equal_high_low_indicator::EqualHighLowValue;
 use crate::fair_value_gap_indicator::FairValueGapValue;
 use crate::leg_detection_indicator::LegDetectionValue;
 use crate::market_structure_indicator::MarketStructureValue;
 use crate::premium_discount_indicator::PremiumDiscountValue;
 use crate::signal_weight::SignalWeightsConfig;
 use serde::{Deserialize, Serialize};
+
+// 占位类型，等待 equal_high_low_indicator 重构完成
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct EqualHighLowValue {
+    pub has_equal_high: bool,
+    pub has_equal_low: bool,
+}
 
 /// 锤子形态信号值
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]

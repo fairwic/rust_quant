@@ -1,12 +1,7 @@
 use rust_quant_indicators::vegas_indicator::EmaSignalValue;
-use once_cell::OnceCell;
-RBatis;
-use rbdc_mysql::MysqlDriver;
+use once_cell::sync::OnceCell;
 use std::collections::HashMap;
-use std::env;
 use std::sync::Mutex;
-use std::time::Duration;
-use tracing::{error, info};
 
 static EMA_INDICATOR_VALUES: OnceCell<Mutex<HashMap<String, EmaSignalValue>>> = OnceCell::new();
 

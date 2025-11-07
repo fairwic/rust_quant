@@ -5,6 +5,7 @@ use ta::indicators::{
     BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex, SimpleMovingAverage, TrueRange,
 };
 use ta::{Close, High, Low, Next};
+use crate::adapters::candle_adapter;
 
 /// Squeeze 结构体
 struct Squeeze {
@@ -82,23 +83,9 @@ pub struct ComprehensiveStrategy {
     pub stop_loss_percent: f64,
 }
 
-impl High for CandlesEntity {
-    fn high(&self) -> f64 {
-        self.h.parse().unwrap_or(0.0)
-    }
-}
-
-impl Low for CandlesEntity {
-    fn low(&self) -> f64 {
-        self.l.parse().unwrap_or(0.0)
-    }
-}
-
-impl Close for CandlesEntity {
-    fn close(&self) -> f64 {
-        self.c.parse().unwrap_or(0.0)
-    }
-}
+// ❌ 移除：违反孤儿规则的trait实现
+// 不能为外部类型 CandlesEntity 实现外部 trait (High, Low, Close)
+// ✅ 新方案：使用 adapters::candle_adapter 模块的适配器
 
 impl ComprehensiveStrategy {
     /// 综合策略函数，执行交易策略并返回最终资金、胜率和开仓次数
@@ -268,9 +255,11 @@ impl ComprehensiveStrategy {
         let mut tr = vec![0.0; candles.len()];
 
         for (i, candle) in candles.iter().enumerate() {
-            let high = candle.high();
-            let low = candle.low();
-            let close = candle.close();
+            // 使用适配器访问K线数据
+            let adapter = candle_adapter::adapt(candle);
+            let high = adapter.high();
+            let low = adapter.low();
+            let close = adapter.close();
 
             if i > 0 {
                 let up = high - prev_high;
@@ -279,7 +268,7 @@ impl ComprehensiveStrategy {
                 minus_dm[i] = if down > up && down > 0.0 { down } else { 0.0 };
             }
 
-            tr[i] = TrueRange::new().next(candle);
+            tr[i] = TrueRange::new().next(&adapter);
             prev_high = high;
             prev_low = low;
         }

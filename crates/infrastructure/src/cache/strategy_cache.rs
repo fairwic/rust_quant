@@ -3,7 +3,7 @@ use redis::aio::MultiplexedConnection;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-// use rust_quant_core::config::redis_config as app_redis; // TODO: 确认redis_config位置
+use rust_quant_core::cache::redis_client;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RedisCandle {
@@ -59,7 +59,7 @@ impl RedisOperations {
         key: &str,
         candles: &[RedisCandle],
     ) -> Result<()> {
-        let mut con = app_redis::get_redis_connection().await?;
+        let mut con = redis_client::get_redis_connection().await?;
         Self::save_candles_to_redis(&mut con, key, candles).await
     }
 
@@ -67,7 +67,7 @@ impl RedisOperations {
     pub async fn fetch_candles_from_redis_with_pool(
         key: &str,
     ) -> Result<Vec<RedisCandle>> {
-        let mut con = app_redis::get_redis_connection().await?;
+        let mut con = redis_client::get_redis_connection().await?;
         Self::fetch_candles_from_redis(&mut con, key).await
     }
 }

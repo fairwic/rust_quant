@@ -11,7 +11,7 @@ use ta::indicators::ExponentialMovingAverage;
 use ta::Next;
 use tracing::warn;
 
-use super::strategy_common::BasicRiskStrategyConfig;
+use crate::framework::strategy_common::BasicRiskStrategyConfig;  // ⭐ 正确路径
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct UtBootStrategy {

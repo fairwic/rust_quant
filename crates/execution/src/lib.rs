@@ -5,3 +5,6 @@
 pub mod order_manager;
 pub mod execution_engine;
 pub mod position_manager;
+
+// ⭐ 不能在这里实现From<okx::Error>，因为违反孤儿规则
+// 已添加 OkxApiError 变体到 AppError，使用 .map_err() 转换

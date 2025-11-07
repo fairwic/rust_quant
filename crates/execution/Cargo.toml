@@ -10,15 +10,19 @@ rust-quant-common.workspace = true
 rust-quant-core.workspace = true
 rust-quant-market.workspace = true
 rust-quant-risk.workspace = true  # 新增: 使用risk的backtest模型
+rust-quant-strategies.workspace = true  # 新增: 策略定义
+rust-quant-indicators.workspace = true  # 新增: 指标依赖
 
 # 外部依赖
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+futures.workspace = true
 
 # 交易所 SDK
 okx.workspace = true

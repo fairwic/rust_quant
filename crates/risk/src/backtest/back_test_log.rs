@@ -8,11 +8,11 @@ use std::vec;
 use tracing::{debug, info, warn};
 
 // use rust_quant_core::config::db;
-// TODO: 需要将 PositionStats 迁移到新位置
-// use rust_quant_common::model::strategy::back_test_analysis::PositionStats;
+use crate::backtest::PositionStats;
 use std::time::Instant;
 
-/// table
+/// 回测日志表
+/// TODO: 迁移说明 - 数据结构保留
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BackTestLog {
     pub strategy_type: String,
@@ -37,8 +37,9 @@ pub struct BackTestLog {
     pub kline_end_time: i64,
     pub kline_nums: i32,
 }
-// ORM迁移TODO
 
+// TODO: ORM 迁移 - 暂时注释掉整个 Model，等待 sqlx 迁移
+/*
 pub struct BackTestLogModel {
     db: &'static RBatis,
 }
@@ -146,3 +147,4 @@ impl BackTestLogModel {
         Ok(result.rows_affected)
     }
 }
+*/

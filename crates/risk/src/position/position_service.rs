@@ -12,7 +12,7 @@ impl PositionService {
     pub fn new() -> Self {
         Self {}
     }
-    pub async fn get_position_list(&self) -> Result<Vec<Position>, AppError> {
+    pub async fn get_position_list(&self) -> Result<Vec<Position>> {
         let account = OkxAccount::from_env()?; //获取合约持仓信息
         let position_list = account
             .get_account_positions(Some("SWAP"), None, None)

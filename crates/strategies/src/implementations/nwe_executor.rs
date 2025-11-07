@@ -14,8 +14,10 @@ use super::executor_common::{
 use super::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_indicators::trend::nwe_indicator::{
-    self as arc_nwe, get_nwe_hash_key, get_nwe_indicator_manager,
+    get_nwe_hash_key, get_nwe_indicator_manager,
 };
+// TODO: 暂时注释，等待 NweIndicatorCombine 移到 indicators 包后恢复
+// use rust_quant_infrastructure::cache::arc_nwe_indicator_values;
 use crate::nwe_strategy::{NweStrategy, NweStrategyConfig};
 use crate::framework::config::strategy_config::StrategyConfig;
 use crate::strategy_common::parse_candle_to_data_item;
@@ -75,21 +77,23 @@ impl StrategyExecutor for NweStrategyExecutor {
         // 4. 生成存储键并保存数据
         let hash_key = get_nwe_hash_key(inst_id, period, StrategyType::Nwe.as_str());
 
-        arc_nwe::set_nwe_strategy_indicator_values(
-            inst_id.to_string(),
-            period.to_string(),
-            last_timestamp,
-            hash_key.clone(),
-            candle_items,
-            indicator_combine,
-        )
-        .await;
+        // TODO: 暂时注释，等待 NweIndicatorCombine 移到 indicators 包后恢复
+        // arc_nwe_indicator_values::set_nwe_strategy_indicator_values(
+        //     inst_id.to_string(),
+        //     period.to_string(),
+        //     last_timestamp,
+        //     hash_key.clone(),
+        //     candle_items,
+        //     indicator_combine,
+        // )
+        // .await;
 
         // 5. 验证数据保存成功
-        let manager = get_nwe_indicator_manager();
-        if !manager.key_exists(&hash_key).await {
-            return Err(anyhow!("Nwe 策略数据保存验证失败: {}", hash_key));
-        }
+        // TODO: 暂时注释，等待 NweIndicatorCombine 移到 indicators 包后恢复
+        // let manager = get_nwe_indicator_manager();
+        // if !manager.key_exists(&hash_key).await {
+        //     return Err(anyhow!("Nwe 策略数据保存验证失败: {}", hash_key));
+        // }
 
         info!("✅ Nwe 策略数据初始化完成: {}", hash_key);
 

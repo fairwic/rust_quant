@@ -1,10 +1,12 @@
+// TODO: ORM 迁移 - 暂时注释整个模块，等待 backtest Model 迁移到 sqlx
+/*
 use rust_quant_core::database;
 use rust_quant_common::utils::time;
 use rust_quant_market::models::CandlesEntity;
-use rust_quant_risk::backtest::back_test_analysis::{
+use crate::backtest::back_test_analysis::{
     BackTestAnalysis, BackTestAnalysisModel,
 };
-use rust_quant_risk::backtest::back_test_log::BackTestLogModel;
+use crate::backtest::back_test_log::BackTestLogModel;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
@@ -201,3 +203,4 @@ fn calculate_price_change(option_type: &str, open_price: f64, future_price: f64)
         _ => 0.0,
     }
 }
+*/

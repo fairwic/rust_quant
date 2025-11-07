@@ -6,5 +6,6 @@ pub mod bollinger;
 
 // 重新导出
 pub use atr::*;
+pub use atr_stop_loss::*;  // ⭐ 导出 ATR Stop Loss
 pub use bollinger::*;
 

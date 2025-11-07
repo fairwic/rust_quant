@@ -1,16 +1,20 @@
-pub mod indicator_combine;
-use std::thread::current;
+// ⭐ 指标组合已移至 indicators 包
+// pub mod indicator_combine;  // 已废弃
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
 
-use rust_quant_indicators::volatility::atr::ATR;
-use rust_quant_indicators::volatility::atr::ATRStopLoos;
+use rust_quant_indicators::volatility::ATRStopLoos;
 use rust_quant_indicators::trend::nwe_indicator::NweIndicator;
-use rust_quant_indicators::momentum::rsi::RsiIndicator;
-use rust_quant_indicators::volume_indicator::VolumeRatioIndicator;
-use crate::nwe_strategy::indicator_combine::NweIndicatorCombine;
+use rust_quant_indicators::momentum::RsiIndicator;
+use rust_quant_indicators::volume::VolumeRatioIndicator;
+// ⭐ 使用新的 indicators::nwe 模块
+use rust_quant_indicators::trend::nwe::{
+    NweIndicatorCombine,
+    NweIndicatorConfig,
+    NweIndicatorValues,
+};
 use crate::strategy_common::{
     BackTestResult, BasicRiskStrategyConfig, SignalResult,
 };
@@ -66,9 +70,19 @@ pub struct NweStrategy {
 impl NweStrategy {
     /// 创建 Nwe 策略实例（零 clone 优化）✨
     pub fn new(config: NweStrategyConfig) -> Self {
+        // ⭐ 转换为 NweIndicatorConfig
+        let indicator_config = NweIndicatorConfig {
+            rsi_period: config.rsi_period,
+            volume_bar_num: config.volume_bar_num,
+            nwe_period: config.nwe_period,
+            nwe_multi: config.nwe_multi,
+            atr_period: config.atr_period,
+            atr_multiplier: config.atr_multiplier,
+        };
+        
         Self {
-            combine_indicator: NweIndicatorCombine::new(&config),  // 传引用
-            config,  // 直接 move，无需 clone
+            combine_indicator: NweIndicatorCombine::new(&indicator_config),
+            config,
         }
     }
     pub fn get_strategy_name() -> String {
@@ -210,20 +224,16 @@ impl NweStrategy {
     ) -> BackTestResult {
         use crate::strategy_common::{self, run_back_test_generic};
 
-        // 复用自定义的 indicator_combine 容器
-        let mut ic = NweIndicatorCombine::default();
-        // 懒初始化指标
-        ic.rsi_indicator = Some(RsiIndicator::new(self.config.rsi_period));
-        ic.volume_indicator = Some(VolumeRatioIndicator::new(self.config.volume_bar_num, true));
-        ic.nwe_indicator = Some(NweIndicator::new(
-            self.config.nwe_period as f64,
-            self.config.nwe_multi,
-            500,
-        ));
-        ic.atr_indicator = Some(
-            ATRStopLoos::new(self.config.atr_period, self.config.atr_multiplier)
-                .expect("ATR period must be > 0"),
-        );
+        // ⭐ 使用新的 indicators::nwe::NweIndicatorCombine
+        let indicator_config = NweIndicatorConfig {
+            rsi_period: self.config.rsi_period,
+            volume_bar_num: self.config.volume_bar_num,
+            nwe_period: self.config.nwe_period,
+            nwe_multi: self.config.nwe_multi,
+            atr_period: self.config.atr_period,
+            atr_multiplier: self.config.atr_multiplier,
+        };
+        let mut ic = NweIndicatorCombine::new(&indicator_config);
 
         let min_len = self.get_min_data_length();
 
@@ -234,37 +244,18 @@ impl NweStrategy {
             min_len,
             &mut ic,
             |ic, data_item| {
-                // 推进指标并返回当前值集合
-                let rsi = if let Some(r) = &mut ic.rsi_indicator {
-                    r.next(data_item.c)
-                } else {
-                    00.0
-                };
-                let volume_ratio = if let Some(v) = &mut ic.volume_indicator {
-                    v.next(data_item.v)
-                } else {
-                    0.0
-                };
-                let (short_stop, long_stop, atr_value) = if let Some(a) = &mut ic.atr_indicator {
-                    let (short_stop, long_stop, atr_value) =
-                        a.next(data_item.h, data_item.l, data_item.c);
-                    (short_stop, long_stop, atr_value)
-                } else {
-                    (0.0, 0.0, 0.0)
-                };
-                let (upper, lower) = if let Some(n) = &mut ic.nwe_indicator {
-                    n.next(data_item.c)
-                } else {
-                    (0.0, 0.0)
-                };
+                // ⭐ 使用新的 next() 方法，返回 NweIndicatorValues
+                let indicator_values = ic.next(data_item);
+                
+                // 转换为策略层的 NweSignalValues
                 NweSignalValues {
-                    rsi_value: rsi,
-                    volume_ratio: volume_ratio,
-                    atr_value: atr_value,
-                    atr_short_stop: short_stop,
-                    atr_long_stop: long_stop,
-                    nwe_upper: upper,
-                    nwe_lower: lower,
+                    rsi_value: indicator_values.rsi_value,
+                    volume_ratio: indicator_values.volume_ratio,
+                    atr_value: indicator_values.atr_value,
+                    atr_short_stop: indicator_values.atr_short_stop,
+                    atr_long_stop: indicator_values.atr_long_stop,
+                    nwe_upper: indicator_values.nwe_upper,
+                    nwe_lower: indicator_values.nwe_lower,
                 }
             },
         )

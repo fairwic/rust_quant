@@ -75,7 +75,8 @@ impl LatestCandleCacheProvider for InMemoryRedisLatestCandleCache {
             }
             if let Ok(mut conn) = get_redis_connection().await {
                 let rkey = latest_candle_key(inst_id, period);
-                if let Ok(s) = conn.get::<_, String>(&rkey).await {
+                let result: redis::RedisResult<String> = conn.get(&rkey).await;
+                if let Ok(s) = result {
                     if let Ok(c) = serde_json::from_str::<CandlesEntity>(&s) {
                         map.insert(key, c.clone());
                         return Some(c);
@@ -111,4 +112,6 @@ pub static DEFAULT_PROVIDER: Lazy<Arc<dyn LatestCandleCacheProvider>> =
 pub fn default_provider() -> Arc<dyn LatestCandleCacheProvider> {
     Arc::clone(&DEFAULT_PROVIDER)
 }
+
+
 

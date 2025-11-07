@@ -7,7 +7,7 @@ use crate::strategy_common::{
     run_back_test, BackTestResult, SignalResult, TradeRecord,
 };
 
-use super::strategy_common::BasicRiskStrategyConfig;
+use crate::framework::strategy_common::BasicRiskStrategyConfig;  // ⭐ 正确路径
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct EngulfingStrategy {

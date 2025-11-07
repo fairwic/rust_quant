@@ -1,5 +1,6 @@
-use rust_quant_core::config::db;
-use rust_quant_common::model::strategy::back_test_detail::BackTestDetail;
+// TODO: 迁移到 sqlx
+// use rust_quant_core::config::db;
+use crate::backtest::BackTestDetail;
 // TODO: 迁移到 sqlx 后移除 rbatis 宏
 // impl_select;
 // RBatis;
@@ -24,7 +25,8 @@ pub struct BackTestAnalysis {
 }
 // TODO: ORM迁移 - 迁移到 sqlx 后恢复
 
-// 持仓统计结果
+/// 持仓统计结果
+/// TODO: 迁移说明 - 数据结构保留
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct PositionStats {
     pub one_bar_after_win_rate: f32,
@@ -35,6 +37,8 @@ pub struct PositionStats {
     pub ten_bar_after_win_rate: f32,
 }
 
+// TODO: ORM 迁移 - 暂时注释掉整个 Model，等待 sqlx 迁移
+/*
 // 分析模型，处理查询和插入
 // TODO: 迁移到 sqlx
 pub struct BackTestAnalysisModel {
@@ -213,3 +217,4 @@ impl BackTestAnalysisModel {
         Ok(win_rate)
     }
 }
+*/

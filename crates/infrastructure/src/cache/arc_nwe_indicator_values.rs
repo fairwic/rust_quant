@@ -4,7 +4,7 @@
 use rust_quant_domain::nwe_strategy::indicator_combine::NweIndicatorCombine;
 use rust_quant_common::CandleItem;
 use dashmap::DashMap;
-use once_cell::OnceCell;
+use once_cell::sync::OnceCell;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;

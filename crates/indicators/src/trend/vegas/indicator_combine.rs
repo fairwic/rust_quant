@@ -1,6 +1,7 @@
 use crate::volatility::bollinger::BollingBandsPlusIndicator;
 use crate::ema_indicator::EmaIndicator;
-use crate::equal_high_low_indicator::EqualHighLowIndicator;
+// TODO: equal_high_low_indicator 需要重构，暂时注释
+// use crate::equal_high_low_indicator::EqualHighLowIndicator;
 use crate::fair_value_gap_indicator::FairValueGapIndicator;
 use crate::pattern::engulfing::KlineEngulfingIndicator;
 use crate::pattern::hammer::KlineHammerIndicator;
@@ -23,7 +24,8 @@ pub struct IndicatorCombine {
     pub leg_detection_indicator: Option<LegDetectionIndicator>,
     pub market_structure_indicator: Option<MarketStructureIndicator>,
     pub fair_value_gap_indicator: Option<FairValueGapIndicator>,
-    pub equal_high_low_indicator: Option<EqualHighLowIndicator>,
+    // TODO: equal_high_low_indicator 需要重构，暂时注释
+    // pub equal_high_low_indicator: Option<EqualHighLowIndicator>,
     pub premium_discount_indicator: Option<PremiumDiscountIndicator>,
 }
 
@@ -40,7 +42,8 @@ impl Default for IndicatorCombine {
             leg_detection_indicator: None,
             market_structure_indicator: None,
             fair_value_gap_indicator: None,
-            equal_high_low_indicator: None,
+            // TODO: equal_high_low_indicator 需要重构，暂时注释
+            // equal_high_low_indicator: None,
             premium_discount_indicator: None,
         }
     }

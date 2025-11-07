@@ -18,6 +18,7 @@ use rust_quant_market::models::CandlesEntity;
 use rust_quant_indicators::trend::vegas::{
     self, get_hash_key, get_indicator_manager,
 };
+use rust_quant_infrastructure::cache::arc_vegas_indicator_values;
 use crate::framework::config::strategy_config::StrategyConfig;
 use crate::strategy_common::{
     get_multi_indicator_values, parse_candle_to_data_item,

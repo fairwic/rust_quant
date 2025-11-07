@@ -22,9 +22,10 @@
 //! ```
 
 // 重新导出主要的公共接口，保持向后兼容
-pub use rust_quant_orchestration::workflow::data_sync::*;
-pub use rust_quant_orchestration::workflow::data_validator::*;
-pub use rust_quant_orchestration::workflow::progress_manager::*;
-pub use rust_quant_orchestration::workflow::strategy_config::*;
-pub use rust_quant_orchestration::workflow::backtest_executor::*;
-pub use rust_quant_orchestration::workflow::strategy_runner::*;
+// TODO: 这些模块暂时被禁用
+// pub use crate::workflow::data_sync::*;
+// pub use crate::workflow::data_validator::*;
+// pub use crate::workflow::progress_manager::*;
+// pub use crate::workflow::strategy_config::*;
+// pub use crate::workflow::backtest_executor::*;
+// pub use crate::workflow::strategy_runner::*;

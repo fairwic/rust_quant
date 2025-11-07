@@ -118,10 +118,10 @@ impl MacdKdjStrategy {
         let kdj = &kdjs[last_index];
 
         let macd_above_zero = macd_value > 0.0 && signal_value > 0.0;
-        let macd_golden_cross = macd_value > signal_value && kdj.k > kdj.d;
-        let kdj_golden_cross = kdj.k > kdj.d;
+        let macd_golden_cross = macd_value > signal_value && kdj.k() > kdj.d();
+        let kdj_golden_cross = kdj.k() > kdj.d();
         let macd_death_cross = macd_value < signal_value;
-        let kdj_death_cross = kdj.k < kdj.d;
+        let kdj_death_cross = kdj.k() < kdj.d();
 
         info!("macd_value: {}, signal_value: {}", macd_value, signal_value);
         info!("ts:{:?},macd_golden_cross: {},macd_death_cross{}, kdj_golden_cross: {},kdj_death_cross:{}",

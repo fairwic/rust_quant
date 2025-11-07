@@ -1,6 +1,7 @@
 use super::config::EmaTouchTrendSignalConfig;
 use super::signal::{EmaSignalValue, EmaTouchTrendSignalValue};
-use rust_quant_common::utils::common::IsBigKLineIndicator;
+// TODO: 迁移后需要重新实现 IsBigKLineIndicator
+// use rust_quant_common::utils::common::IsBigKLineIndicator;
 use rust_quant_common::CandleItem;
 
 /// 检查EMA趋势
@@ -260,14 +261,22 @@ pub fn calculate_dynamic_pullback_threshold(_data_items: &[CandleItem]) -> f64 {
 }
 
 /// 获取有效的RSI
-pub fn get_valid_rsi(data_items: &[CandleItem], rsi_value: f64, ema_value: EmaSignalValue) -> f64 {
+pub fn get_valid_rsi(data_items: &[CandleItem], rsi_value: f64, _ema_value: EmaSignalValue) -> f64 {
     // 如果当前k线价格波动比较大，且k线的实体部分占比大于80%,
     // 表明当前k线为大阳线或者大阴线，则不使用rsi指标,因为大概率趋势还会继续
-    let is_big_k_line =
-        IsBigKLineIndicator::new(70.0).is_big_k_line(data_items.last().expect("数据不能为空"));
-
-    if is_big_k_line {
-        50.0
+    
+    // TODO: 迁移后需要重新实现 IsBigKLineIndicator
+    // 暂时简化处理：检查实体占比
+    if let Some(last_candle) = data_items.last() {
+        let body = (last_candle.c() - last_candle.o()).abs();
+        let total = last_candle.h() - last_candle.l();
+        let body_ratio = if total > 0.0 { body / total } else { 0.0 };
+        
+        if body_ratio > 0.8 {
+            50.0  // 大阳线/大阴线，不使用RSI
+        } else {
+            rsi_value
+        }
     } else {
         rsi_value
     }
