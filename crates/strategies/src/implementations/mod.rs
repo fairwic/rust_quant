@@ -1,8 +1,10 @@
 // 具体策略实现模块
 
-// 通用执行器
+// 通用执行器和辅助模块
 pub mod executor_common;
 pub mod profit_stop_loss;
+pub mod redis_operations;
+pub mod support_resistance;
 
 // 具体策略实现
 pub mod comprehensive_strategy;

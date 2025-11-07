@@ -13,15 +13,15 @@ use super::executor_common::{
 };
 use super::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use rust_quant_market::models::CandlesEntity;
-use rust_quant_strategies::arc::indicator_values::arc_nwe_indicator_values::{
+use crate::arc::indicator_values::arc_nwe_indicator_values::{
     self as arc_nwe, get_nwe_hash_key, get_nwe_indicator_manager,
 };
-use rust_quant_strategies::nwe_strategy::{NweStrategy, NweStrategyConfig};
-use rust_quant_strategies::order::strategy_config::StrategyConfig;
-use rust_quant_strategies::strategy_common::parse_candle_to_data_item;
-use rust_quant_strategies::StrategyType;
+use crate::nwe_strategy::{NweStrategy, NweStrategyConfig};
+use crate::order::strategy_config::StrategyConfig;
+use crate::strategy_common::parse_candle_to_data_item;
+use crate::StrategyType;
 use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;
-use crate::CandleItem;
+use rust_quant_common::CandleItem;
 use okx::dto::EnumToStrTrait;
 
 /// Nwe 策略执行器

@@ -15,16 +15,16 @@ use super::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::vegas_indicator::VegasStrategy;
 use rust_quant_market::models::CandlesEntity;
-use rust_quant_strategies::arc::indicator_values::arc_vegas_indicator_values::{
+use crate::arc::indicator_values::arc_vegas_indicator_values::{
     self, get_hash_key, get_indicator_manager,
 };
-use rust_quant_strategies::order::strategy_config::StrategyConfig;
-use rust_quant_strategies::strategy_common::{
+use crate::order::strategy_config::StrategyConfig;
+use crate::strategy_common::{
     get_multi_indicator_values, parse_candle_to_data_item,
 };
-use rust_quant_strategies::StrategyType;
+use crate::StrategyType;
 use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;
-use crate::CandleItem;
+use rust_quant_common::CandleItem;
 use okx::dto::EnumToStrTrait;
 
 /// Vegas 策略执行器

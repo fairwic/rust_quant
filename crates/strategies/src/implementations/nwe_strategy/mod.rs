@@ -10,8 +10,8 @@ use rust_quant_indicators::atr_stop_loos::ATRStopLoos;
 use rust_quant_indicators::nwe_indicator::NweIndicator;
 use rust_quant_indicators::rsi_rma_indicator::RsiIndicator;
 use rust_quant_indicators::volume_indicator::VolumeRatioIndicator;
-use rust_quant_strategies::nwe_strategy::indicator_combine::NweIndicatorCombine;
-use rust_quant_strategies::strategy_common::{
+use crate::nwe_strategy::indicator_combine::NweIndicatorCombine;
+use crate::strategy_common::{
     BackTestResult, BasicRiskStrategyConfig, SignalResult,
 };
 use crate::{CandleItem, time_util};
@@ -195,7 +195,7 @@ impl NweStrategy {
         signal_result.open_price = candles.last().unwrap().c;
 
         info!("NWE signal values: {:#?}", values);
-        info!("ts : {:#?}", time_util::mill_time_to_datetime_shanghai(signal_result.ts));
+        info!("ts : {:#?}", rust_quant_common::utils::time::mill_time_to_datetime_shanghai(signal_result.ts));
         signal_result.single_value = Some(json!(values.clone()).to_string());
         signal_result.single_result = Some(json!(signal_result.clone()).to_string());
 
@@ -208,7 +208,7 @@ impl NweStrategy {
         candles: &Vec<CandleItem>,
         risk: BasicRiskStrategyConfig,
     ) -> BackTestResult {
-        use rust_quant_strategies::strategy_common::{self, run_back_test_generic};
+        use crate::strategy_common::{self, run_back_test_generic};
 
         // 复用自定义的 indicator_combine 容器
         let mut ic = NweIndicatorCombine::default();

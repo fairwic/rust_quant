@@ -181,7 +181,7 @@ impl ComprehensiveStrategy {
 
             // 添加日志记录
             println!("Time: {:?}, ADX: {}, Bull: {}, Bear: {}, Signal: {}, MOM: {}, Low Squeeze: {}, Mid Squeeze: {}, No Squeeze: {}",
-                     time_util::mill_time_to_datetime_shanghai(candle.ts), adx_value, bull, bear, signal, mom, low_squeeze, mid_squeeze, no_squeeze);
+                     rust_quant_common::utils::time::mill_time_to_datetime_shanghai(candle.ts), adx_value, bull, bear, signal, mom, low_squeeze, mid_squeeze, no_squeeze);
 
             if buy_condition && position.abs() < f64::EPSILON {
                 // 当满足买入条件时开多仓

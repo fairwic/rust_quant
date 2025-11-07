@@ -10,6 +10,9 @@ rust-quant-common.workspace = true
 rust-quant-core.workspace = true
 rust-quant-market.workspace = true
 rust-quant-indicators.workspace = true
+rust-quant-risk.workspace = true
+rust-quant-execution.workspace = true
+rust-quant-orchestration.workspace = true
 
 # 外部依赖
 tokio.workspace = true
@@ -25,3 +28,15 @@ once_cell.workspace = true
 
 # 交易所 SDK
 okx.workspace = true
+
+# 技术分析库
+ta.workspace = true
+
+# 工具库
+uuid.workspace = true
+futures.workspace = true
+futures-util.workspace = true
+ndarray.workspace = true
+redis.workspace = true
+clap.workspace = true
+log.workspace = true

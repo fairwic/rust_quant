@@ -5,7 +5,9 @@
 pub mod framework;
 pub mod implementations;
 pub mod backtesting;
+pub mod cache;
 
 // 重新导出核心类型
 pub use framework::*;
 pub use implementations::*;
+pub use cache::*;

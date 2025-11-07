@@ -2,7 +2,7 @@ use rust_quant_common::utils::time;
 use rust_quant_indicators::atr::ATR;
 use rust_quant_indicators::kdj_simple_indicator::KdjCandle;
 use rust_quant_market::models::CandlesEntity;
-use rust_quant_strategies::strategy_common::SignalResult;
+use crate::strategy_common::SignalResult;
 use clap::builder::Str;
 use ndarray::{s, Array1};
 use serde::{Deserialize, Serialize};
@@ -219,7 +219,7 @@ impl SqueezeMomentumIndicator {
                 }
                 println!("time:{:?},current_atr:{},prev_xatr_trailing_stop:{},ema:{},current_price:{}\
                 ,xatr_trailing_stop:{},above:{},below:{},pre_ema_value:{},prev_xatr_trailing_stop{}",
-                         time_util::mill_time_to_datetime_shanghai(candle.ts), current_atr, prev_xatr_trailing_stop, ema_value, current_price, xatr_trailing_stop, above, below, prev_ema_value, prev_xatr_trailing_stop);
+                         rust_quant_common::utils::time::mill_time_to_datetime_shanghai(candle.ts), current_atr, prev_xatr_trailing_stop, ema_value, current_price, xatr_trailing_stop, above, below, prev_ema_value, prev_xatr_trailing_stop);
 
                 // 记录开仓价格或卖出价格
                 price = current_price;

@@ -1,9 +1,9 @@
-use log::error;
+use tracing::error;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use rust_quant_market::models::CandlesEntity;
-use rust_quant_strategies::strategy_common::{
+use crate::strategy_common::{
     run_back_test, BackTestResult, SignalResult, TradeRecord,
 };
 

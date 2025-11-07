@@ -172,10 +172,10 @@ pub fn get_strategy_registry() -> &'static StrategyRegistry {
 /// register_strategy_on_demand(&StrategyType::Vegas);
 /// register_strategy_on_demand(&StrategyType::Nwe);
 /// ```
-pub fn register_strategy_on_demand(strategy_type: &rust_quant_strategies::StrategyType) {
+pub fn register_strategy_on_demand(strategy_type: &crate::StrategyType) {
     use super::vegas_executor::VegasStrategyExecutor;
     use super::nwe_executor::NweStrategyExecutor;
-    use rust_quant_strategies::StrategyType;
+    use crate::StrategyType;
     use okx::dto::EnumToStrTrait;
     
     let registry = get_strategy_registry();
@@ -208,7 +208,7 @@ pub fn register_strategy_on_demand(strategy_type: &rust_quant_strategies::Strate
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_quant_strategies::StrategyType;
+    use crate::StrategyType;
 
     #[test]
     fn test_registry_singleton() {

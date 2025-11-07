@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use log::info;
+use tracing::info;
 use redis::Commands;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use crate::trading::model::big_data::top_contract_position_ratio::TopContractPos
 use rust_quant_market::models::CandlesEntity;
 use crate::trading::services::big_data::big_data_top_contract_service::BigDataTopContractService;
 use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
-use rust_quant_strategies::strategy_common::{
+use crate::strategy_common::{
     run_back_test, BackTestResult, SignalResult, TradeRecord,
 };
 use rust_quant_orchestration::workflow::basic;

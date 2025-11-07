@@ -8,7 +8,7 @@ use rust_quant_common::utils::time;
 use crate::trading::model::market::candles::CandlesEntity;
 use rust_quant_indicators::kdj_simple_indicator::KdjCandle;
 use rust_quant_indicators::atr::ATR;
-use rust_quant_strategies::strategy_common::{run_test, SignalResult};
+use crate::strategy_common::{run_test, SignalResult};
 #[derive(Deserialize, Serialize, Debug)]
 pub enum  MultCombineStartegy {
     UT_BOOT,

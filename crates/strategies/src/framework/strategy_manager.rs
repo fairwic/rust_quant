@@ -17,15 +17,15 @@ use crate::trading::model::strategy::strategy_config::{
 };
 use crate::trading::services::scheduler_service::SchedulerService;
 use crate::trading::services::strategy_data_service::StrategyDataService;
-use rust_quant_strategies::framework::{get_strategy_metrics, StrategyMetrics};
+use crate::framework::{get_strategy_metrics, StrategyMetrics};
 use crate::trading::services::strategy_system_error::{
     BusinessLogicError, ErrorHandler, ErrorSeverity, StrategyConfigError, StrategySystemError,
 };
-use rust_quant_strategies::arc::indicator_values::arc_vegas_indicator_values;
-use rust_quant_strategies::nwe_strategy::NweStrategyConfig;
-use rust_quant_strategies::order::strategy_config::StrategyConfig;
-use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
-use rust_quant_strategies::StrategyType;
+use crate::arc::indicator_values::arc_vegas_indicator_values;
+use crate::nwe_strategy::NweStrategyConfig;
+use crate::order::strategy_config::StrategyConfig;
+use crate::strategy_common::BasicRiskStrategyConfig;
+use crate::StrategyType;
 use crate::SCHEDULER;
 use okx::dto::EnumToStrTrait;
 
@@ -508,7 +508,7 @@ impl StrategyManager {
             .ok_or_else(|| anyhow!("未知的策略类型: {}", config_entity.strategy_type))?;
 
         // 3.5. 按需注册策略（首次使用时自动注册）✨
-        rust_quant_strategies::strategy_registry::register_strategy_on_demand(&strategy_type_enum);
+        crate::strategy_registry::register_strategy_on_demand(&strategy_type_enum);
 
         // 4. 根据策略类型执行具体的启动逻辑
         match strategy_type_enum {
@@ -1002,7 +1002,7 @@ impl StrategyManager {
     /// 获取系统健康状态
     pub async fn get_system_health(
         &self,
-    ) -> rust_quant_strategies::framework::SystemHealth {
+    ) -> crate::framework::SystemHealth {
         let metrics = get_strategy_metrics();
         metrics.get_system_health(self).await
     }

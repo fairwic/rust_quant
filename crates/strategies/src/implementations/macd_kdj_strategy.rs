@@ -2,7 +2,7 @@ use rust_quant_common::utils::time;
 use rust_quant_indicators::kdj_simple_indicator::{KdjSimpleIndicator, KDJ};
 use rust_quant_indicators::macd_simple_indicator::MacdSimpleIndicator;
 use rust_quant_market::models::CandlesEntity;
-use rust_quant_strategies::profit_stop_loss::ProfitStopLoss;
+use crate::profit_stop_loss::ProfitStopLoss;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -125,7 +125,7 @@ impl MacdKdjStrategy {
 
         info!("macd_value: {}, signal_value: {}", macd_value, signal_value);
         info!("ts:{:?},macd_golden_cross: {},macd_death_cross{}, kdj_golden_cross: {},kdj_death_cross:{}",
-           time_util::mill_time_to_datetime(ts), macd_golden_cross, macd_death_cross, kdj_golden_cross,kdj_death_cross);
+           rust_quant_common::utils::time::mill_time_to_datetime(ts), macd_golden_cross, macd_death_cross, kdj_golden_cross,kdj_death_cross);
 
         let should_buy = is_long
             && ((macd_golden_cross && kdj_golden_cross)
@@ -175,7 +175,7 @@ impl MacdKdjStrategy {
             *trades += 1;
             info!(
                 "Buy at time: {:?}, price: {}, position: {}",
-                time_util::mill_time_to_datetime(timestamp),
+                rust_quant_common::utils::time::mill_time_to_datetime(timestamp),
                 current_price,
                 *position
             );
@@ -188,7 +188,7 @@ impl MacdKdjStrategy {
             *position = 0.0;
             info!(
                 "Sell at time: {:?}, price: {}, funds: {}, profit: {}",
-                time_util::mill_time_to_datetime(timestamp),
+                rust_quant_common::utils::time::mill_time_to_datetime(timestamp),
                 current_price,
                 *funds,
                 profit
@@ -206,7 +206,7 @@ impl MacdKdjStrategy {
             *trades += 1;
             info!(
                 "Short at time: {:?}, price: {}, position: {}",
-                time_util::mill_time_to_datetime(timestamp),
+                rust_quant_common::utils::time::mill_time_to_datetime(timestamp),
                 current_price,
                 *position
             );
@@ -219,7 +219,7 @@ impl MacdKdjStrategy {
             *position = 0.0;
             info!(
                 "Cover at time: {:?}, price: {}, funds: {}, profit: {}",
-                time_util::mill_time_to_datetime(timestamp),
+                rust_quant_common::utils::time::mill_time_to_datetime(timestamp),
                 current_price,
                 *funds,
                 profit
@@ -241,12 +241,12 @@ impl MacdKdjStrategy {
                     let sell_amount = *position * 0.1;
                     *funds += sell_amount * current_price;
                     *position -= sell_amount;
-                    info!("Fibonacci level reached. Partial sell at time: {:?}, price: {}, amount: {}, funds: {}, position: {}",  time_util::mill_time_to_datetime(timestamp), current_price, sell_amount, *funds, *position);
+                    info!("Fibonacci level reached. Partial sell at time: {:?}, price: {}, amount: {}, funds: {}, position: {}",  rust_quant_common::utils::time::mill_time_to_datetime(timestamp), current_price, sell_amount, *funds, *position);
                 } else if !*is_long && current_price <= original_entry_price * (1.0 - level) {
                     let cover_amount = *position * 0.1;
                     *funds += cover_amount * (2.0 * original_entry_price - current_price);
                     *position -= cover_amount;
-                    info!("Fibonacci level reached. Partial cover at time: {:?}, price: {}, amount: {}, funds: {}, position: {}",  time_util::mill_time_to_datetime(timestamp), current_price, cover_amount, *funds, *position);
+                    info!("Fibonacci level reached. Partial cover at time: {:?}, price: {}, amount: {}, funds: {}, position: {}",  rust_quant_common::utils::time::mill_time_to_datetime(timestamp), current_price, cover_amount, *funds, *position);
                 }
             }
             debug!("Hold position (possible shakeout) at time: {}", timestamp);

@@ -9,15 +9,15 @@ use tracing::{debug, info, warn};
 use crate::trading::domain_service::candle_domain_service::CandleDomainService;
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_execution::order_manager::swap_order_service::SwapOrderService;
-use rust_quant_strategies::order::strategy_config::StrategyConfig;
-use rust_quant_strategies::strategy_common::{
+use crate::order::strategy_config::StrategyConfig;
+use crate::strategy_common::{
     parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
 };
-use rust_quant_strategies::StrategyType;
+use crate::StrategyType;
 use rust_quant_orchestration::workflow::strategy_runner::{
     check_new_time, save_signal_log, StrategyExecutionStateManager,
 };
-use crate::CandleItem;
+use rust_quant_common::CandleItem;
 use okx::dto::EnumToStrTrait;
 
 /// 执行上下文 - 封装策略执行的公共数据

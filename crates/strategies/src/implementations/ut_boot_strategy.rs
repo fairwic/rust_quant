@@ -1,6 +1,6 @@
 use rust_quant_indicators::atr::ATR;
 use rust_quant_market::models::CandlesEntity;
-use rust_quant_strategies::strategy_common::{
+use crate::strategy_common::{
     run_back_test, BackTestResult, SignalResult, TradeRecord,
 };
 use serde::{Deserialize, Serialize};
@@ -173,7 +173,7 @@ impl UtBootStrategy {
                 should_sell = current_price < xatr_trailing_stop && below;
                 // println!("time:{:?},current_atr:{},prev_xatr_trailing_stop:{},ema:{},current_price:{}\
                 // ,xatr_trailing_stop:{},above:{},below:{},pre_ema_value:{},prev_xatr_trailing_stop{}",
-                //   time_util::mill_time_to_datetime_shanghai(candle.ts),  current_atr,prev_xatr_trailing_stop,ema_value, current_price, xatr_trailing_stop, above, below,prev_ema_value,prev_xatr_trailing_stop);
+                //   rust_quant_common::utils::time::mill_time_to_datetime_shanghai(candle.ts),  current_atr,prev_xatr_trailing_stop,ema_value, current_price, xatr_trailing_stop, above, below,prev_ema_value,prev_xatr_trailing_stop);
                 // 记录开仓价格或卖出价格
                 price = current_price;
                 //记录时间

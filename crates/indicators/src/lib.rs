@@ -8,6 +8,13 @@ pub mod volatility;
 pub mod volume;
 pub mod pattern;
 
+// 重新导出所有子模块的类型
+pub use trend::*;
+pub use momentum::*;
+pub use volatility::*;
+pub use volume::*;
+pub use pattern::*;
+
 // 统一指标接口
 pub trait Indicator {
     type Input;
