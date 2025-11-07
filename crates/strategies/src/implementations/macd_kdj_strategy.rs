@@ -1,8 +1,8 @@
-use crate::time_util;
-use crate::trading::indicator::kdj_simple_indicator::{KdjSimpleIndicator, KDJ};
-use crate::trading::indicator::macd_simple_indicator::MacdSimpleIndicator;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
+use rust_quant_common::utils::time;
+use rust_quant_indicators::kdj_simple_indicator::{KdjSimpleIndicator, KDJ};
+use rust_quant_indicators::macd_simple_indicator::MacdSimpleIndicator;
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_strategies::profit_stop_loss::ProfitStopLoss;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 

@@ -1,6 +1,6 @@
-use crate::app_config::db;
-use crate::time_util;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_core::database;
+use rust_quant_common::utils::time;
+use rust_quant_market::models::CandlesEntity;
 use crate::trading::model::strategy::back_test_analysis::{
     BackTestAnalysis, BackTestAnalysisModel,
 };

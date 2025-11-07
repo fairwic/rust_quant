@@ -1,6 +1,6 @@
-use crate::trading::indicator::atr::ATR;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::strategy_common::{
+use rust_quant_indicators::atr::ATR;
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_strategies::strategy_common::{
     run_back_test, BackTestResult, SignalResult, TradeRecord,
 };
 use serde::{Deserialize, Serialize};

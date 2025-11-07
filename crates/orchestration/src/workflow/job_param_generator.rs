@@ -360,8 +360,8 @@ impl NweParamGenerator {
         &mut self,
         batch_size: usize,
     ) -> Vec<(
-        crate::trading::strategy::nwe_strategy::NweStrategyConfig,
-        crate::trading::strategy::strategy_common::BasicRiskStrategyConfig,
+        rust_quant_strategies::nwe_strategy::NweStrategyConfig,
+        rust_quant_strategies::strategy_common::BasicRiskStrategyConfig,
     )> {
         let mut batch = Vec::with_capacity(batch_size);
         while batch.len() < batch_size && self.current_index < self.total_count {
@@ -405,7 +405,7 @@ impl NweParamGenerator {
             idx /= msl_len;
             let i_usklsl = idx % usklsl_len; // 最后一维无需再除
 
-            let cfg = crate::trading::strategy::nwe_strategy::NweStrategyConfig {
+            let cfg = rust_quant_strategies::nwe_strategy::NweStrategyConfig {
                 period: "5m".to_string(),
                 rsi_period: self.rsi_periods[i_rp],
                 rsi_overbought: self.rsi_over_buy_sell[i_rob].0,
@@ -419,7 +419,7 @@ impl NweParamGenerator {
                 // 使用 NWE 周期作为最小数据长度的基线，确保指标有足够数据
                 min_k_line_num: 500,
             };
-            let risk = crate::trading::strategy::strategy_common::BasicRiskStrategyConfig {
+            let risk = rust_quant_strategies::strategy_common::BasicRiskStrategyConfig {
                 is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
                 max_loss_percent: self.max_loss_percent[i_mlp],
                 take_profit_ratio: self.take_profit_ratios[i_tpr],

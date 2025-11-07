@@ -3,7 +3,7 @@ use crate::trading::services::big_data::big_data_top_contract_service::BigDataTo
 use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
 use crate::trading::services::big_data::top_contract_service_trait::TopContractServiceTrait;
 use crate::trading::services::big_data::{big_data_service, big_data_top_contract_service};
-use crate::trading::task::big_data_job;
+use rust_quant_orchestration::workflow::big_data_job;
 use tracing::{span, Level};
 
 /** 同步数据 任务**/

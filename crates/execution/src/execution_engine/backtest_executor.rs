@@ -8,25 +8,25 @@ use tokio::sync::Semaphore;
 use tokio::time::Instant;
 use tracing::{error, info, warn};
 
-use crate::trading::indicator::bollings::BollingBandsSignalConfig;
-use crate::trading::indicator::signal_weight::SignalWeightsConfig;
-use crate::trading::indicator::vegas_indicator::{
+use rust_quant_indicators::bollings::BollingBandsSignalConfig;
+use rust_quant_indicators::signal_weight::SignalWeightsConfig;
+use rust_quant_indicators::vegas_indicator::{
     EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, KlineHammerConfig,
     RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
 };
-use crate::trading::model::entity::candles::dto::SelectCandleReqDto;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::model::entity::candles::enums::SelectTime;
-use crate::trading::model::market::candles::CandlesModel;
+use rust_quant_market::models::SelectCandleReqDto;
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_market::models::SelectTime;
+use rust_quant_market::models::CandlesModel;
 use crate::trading::model::strategy::back_test_detail::BackTestDetail;
 use crate::trading::model::strategy::back_test_log::{BackTestLog, BackTestLogModel};
 use crate::trading::model::strategy::{back_test_detail, back_test_log};
-use crate::trading::strategy::strategy_common::{BackTestResult, BasicRiskStrategyConfig, TradeRecord};
-use crate::trading::strategy::{StrategyType, Strategy};
-use crate::trading::strategy::nwe_strategy::NweStrategyConfig;
-use crate::trading::strategy::nwe_strategy::NweStrategy;
-use crate::trading::task::data_validator;
-use crate::trading::task::job_param_generator::ParamMergeBuilder;
+use rust_quant_strategies::strategy_common::{BackTestResult, BasicRiskStrategyConfig, TradeRecord};
+use rust_quant_strategies::{StrategyType, Strategy};
+use rust_quant_strategies::nwe_strategy::NweStrategyConfig;
+use rust_quant_strategies::nwe_strategy::NweStrategy;
+use rust_quant_orchestration::workflow::data_validator;
+use rust_quant_orchestration::workflow::job_param_generator::ParamMergeBuilder;
 use crate::CandleItem;
 
 /// 运行 Vegas 策略测试
@@ -413,7 +413,7 @@ pub async fn run_back_test_strategy(
 
 /// 运行一组 NWE 策略（随机/网格参数）回测，复用与 Vegas 相同的并发调度思路
 pub async fn run_nwe_random_batch(
-    params_batch: Vec<(NweStrategyConfig, crate::trading::strategy::strategy_common::BasicRiskStrategyConfig)>,
+    params_batch: Vec<(NweStrategyConfig, rust_quant_strategies::strategy_common::BasicRiskStrategyConfig)>,
     inst_id: &str,
     time: &str,
     arc_candle_item_clone: Arc<Vec<CandleItem>>,

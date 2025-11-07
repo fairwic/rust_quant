@@ -31,3 +31,6 @@ okx.workspace = true
 
 # 数据库（使用 sqlx）
 sqlx.workspace = true
+
+[dev-dependencies]
+dotenv.workspace = true

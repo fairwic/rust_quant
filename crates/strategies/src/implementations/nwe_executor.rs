@@ -12,15 +12,15 @@ use super::executor_common::{
     should_execute_strategy, update_candle_queue, validate_candles,
 };
 use super::strategy_trait::{StrategyDataResult, StrategyExecutor};
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::arc::indicator_values::arc_nwe_indicator_values::{
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_strategies::arc::indicator_values::arc_nwe_indicator_values::{
     self as arc_nwe, get_nwe_hash_key, get_nwe_indicator_manager,
 };
-use crate::trading::strategy::nwe_strategy::{NweStrategy, NweStrategyConfig};
-use crate::trading::strategy::order::strategy_config::StrategyConfig;
-use crate::trading::strategy::strategy_common::parse_candle_to_data_item;
-use crate::trading::strategy::StrategyType;
-use crate::trading::task::strategy_runner::StrategyExecutionStateManager;
+use rust_quant_strategies::nwe_strategy::{NweStrategy, NweStrategyConfig};
+use rust_quant_strategies::order::strategy_config::StrategyConfig;
+use rust_quant_strategies::strategy_common::parse_candle_to_data_item;
+use rust_quant_strategies::StrategyType;
+use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;
 use crate::CandleItem;
 use okx::dto::EnumToStrTrait;
 

@@ -21,3 +21,7 @@ async-trait.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 dashmap.workspace = true
+once_cell.workspace = true
+
+# 交易所 SDK
+okx.workspace = true

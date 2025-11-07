@@ -111,7 +111,7 @@
 //                                 info!("获取到最新K线数据: {}_{}", inst_id, time);
 //                                 if let Some(new_candle_data) = candle_data.first() {
 //                                     // 这里可以处理新的K线数据
-//                                    match crate::trading::task::basic::run_ready_to_order_with_manager(
+//                                    match rust_quant_orchestration::workflow::basic::run_ready_to_order_with_manager(
 //                                     &inst_id,
 //                                     &time,
 //                                     &current_cfg,

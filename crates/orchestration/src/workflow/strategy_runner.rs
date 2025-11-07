@@ -10,31 +10,31 @@ use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
 use crate::trading::domain_service::candle_domain_service::CandleDomainService;
-use crate::trading::indicator::signal_weight::SignalWeightsConfig;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_indicators::signal_weight::SignalWeightsConfig;
+use rust_quant_market::models::CandlesEntity;
 use crate::trading::model::strategy::strategy_job_signal_log::{
     StrategyJobSignalLog, StrategyJobSignalLogModel,
 };
-use crate::trading::services::order_service::swap_order_service::SwapOrderService;
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values::{
+use rust_quant_execution::order_manager::swap_order_service::SwapOrderService;
+use rust_quant_strategies::arc::indicator_values::arc_vegas_indicator_values::{
     self, get_hash_key, ArcVegasIndicatorValues,
 };
-use crate::trading::strategy::arc::indicator_values::arc_nwe_indicator_values::{
+use rust_quant_strategies::arc::indicator_values::arc_nwe_indicator_values::{
     self as arc_nwe, get_nwe_hash_key, get_nwe_indicator_manager,
 };
-use crate::trading::indicator::vegas_indicator::VegasStrategy;
-use crate::trading::strategy::nwe_strategy::{NweStrategy, NweStrategyConfig, NweSignalValues};
-use crate::trading::strategy::order::strategy_config::StrategyConfig;
-use crate::trading::strategy::strategy_common::{
+use rust_quant_indicators::vegas_indicator::VegasStrategy;
+use rust_quant_strategies::nwe_strategy::{NweStrategy, NweStrategyConfig, NweSignalValues};
+use rust_quant_strategies::order::strategy_config::StrategyConfig;
+use rust_quant_strategies::strategy_common::{
     get_multi_indicator_values, parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
 };
-use crate::trading::strategy::{Strategy, StrategyType};
-use crate::trading::task::backtest_executor::{
+use rust_quant_strategies::{Strategy, StrategyType};
+use rust_quant_orchestration::workflow::backtest_executor::{
     load_and_convert_candle_data, run_back_test_strategy,
 };
-use crate::trading::task::job_param_generator::ParamGenerator;
-use crate::trading::task::progress_manager::{RandomStrategyConfig, StrategyProgressManager};
-use crate::trading::task::strategy_config::{
+use rust_quant_orchestration::workflow::job_param_generator::ParamGenerator;
+use rust_quant_orchestration::workflow::progress_manager::{RandomStrategyConfig, StrategyProgressManager};
+use rust_quant_orchestration::workflow::strategy_config::{
     get_strategy_config_from_db, test_specified_strategy_with_config, BackTestConfig,
 };
 use crate::CandleItem;
@@ -355,7 +355,7 @@ pub async fn back_test_with_config(
         risk_strategy_config.take_profit_ratio = 1.5;
 
         // 断点续传：构建 NWE 随机配置
-        use crate::trading::task::progress_manager::{
+        use rust_quant_orchestration::workflow::progress_manager::{
             NweRandomStrategyConfig, StrategyProgressManager,
         };
         let nwe_random_config = NweRandomStrategyConfig {
@@ -420,7 +420,7 @@ pub async fn back_test_with_config(
         StrategyProgressManager::save_progress(&current_progress).await?;
 
         // 参数生成器并设置断点索引
-        use crate::trading::task::job_param_generator::NweParamGenerator;
+        use rust_quant_orchestration::workflow::job_param_generator::NweParamGenerator;
         let mut gen = NweParamGenerator::new(
             nwe_random_config.rsi_periods.clone(),
             nwe_random_config.rsi_over_buy_sell.clone(),
@@ -453,7 +453,7 @@ pub async fn back_test_with_config(
             );
 
             let run_start = Instant::now();
-            crate::trading::task::backtest_executor::run_nwe_random_batch(
+            rust_quant_orchestration::workflow::backtest_executor::run_nwe_random_batch(
                 batch,
                 inst_id,
                 time,
@@ -489,7 +489,7 @@ pub async fn back_test_with_config(
 
     // NWE 指定配置回测（从DB获取）
     if config.enable_specified_test_nwe {
-        use crate::trading::task::strategy_config::get_nwe_strategy_config_from_db;
+        use rust_quant_orchestration::workflow::strategy_config::get_nwe_strategy_config_from_db;
         let arc_candle_data = load_and_convert_candle_data(inst_id, time, config.candle_limit).await?;
         let pairs = get_nwe_strategy_config_from_db(inst_id, time).await?;
         if pairs.is_empty() {
@@ -497,7 +497,7 @@ pub async fn back_test_with_config(
         }
         for (nwe_cfg, risk_cfg) in pairs.into_iter() {
             let nwe_strategy = NweStrategy::new(nwe_cfg);
-            if let Err(e) = crate::trading::task::backtest_executor::run_nwe_test(
+            if let Err(e) = rust_quant_orchestration::workflow::backtest_executor::run_nwe_test(
                 inst_id,
                 time,
                 nwe_strategy,
@@ -583,7 +583,7 @@ pub async fn run_ready_to_order_with_manager(
     strategy: &StrategyConfig,
     snap: Option<CandlesEntity>,
 ) -> Result<()> {
-    use crate::trading::strategy::strategy_registry::get_strategy_registry;
+    use rust_quant_strategies::strategy_registry::get_strategy_registry;
     
     // 1. 从注册中心获取策略（自动检测类型）
     let strategy_executor = get_strategy_registry()

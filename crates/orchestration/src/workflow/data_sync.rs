@@ -2,7 +2,7 @@ use anyhow::Result;
 use tracing::{info, Level};
 use tracing::span;
 
-use crate::trading::task::candles_job;
+use rust_quant_orchestration::workflow::candles_job;
 
 /// 同步数据任务
 pub async fn run_sync_data_job(

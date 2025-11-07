@@ -1,5 +1,5 @@
 use rust_quant_common::utils::time as time_util;
-use rust_quant_market::models::candles::CandlesEntity;
+use rust_quant_market::models::CandlesEntity;
 use ta::indicators::MovingAverageConvergenceDivergence;
 use ta::Next;
 

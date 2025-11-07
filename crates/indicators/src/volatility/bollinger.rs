@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ta::indicators::BollingerBands;
 
 use crate::trend::sma::Sma;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_market::models::CandlesEntity;
 use rust_quant_common::types::CandleItem;
 use ta::{DataItem, High, Low, Next};
 

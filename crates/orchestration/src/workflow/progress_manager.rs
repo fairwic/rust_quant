@@ -140,7 +140,7 @@ impl StrategyProgressManager {
 
     /// 保存进度到 Redis
     pub async fn save_progress(progress: &StrategyTestProgress) -> Result<()> {
-        let mut redis_conn = crate::app_config::redis_config::get_redis_connection().await?;
+        let mut redis_conn = rust_quant_core::cache::get_redis_connection().await?;
         let key = Self::get_progress_key(&progress.inst_id, &progress.time);
         let progress_json = serde_json::to_string(progress)?;
 
@@ -154,7 +154,7 @@ impl StrategyProgressManager {
 
     /// 从 Redis 加载进度
     pub async fn load_progress(inst_id: &str, time: &str) -> Result<Option<StrategyTestProgress>> {
-        let mut redis_conn = crate::app_config::redis_config::get_redis_connection().await?;
+        let mut redis_conn = rust_quant_core::cache::get_redis_connection().await?;
         let key = Self::get_progress_key(inst_id, time);
 
         let progress_json: Option<String> = redis_conn.get(&key).await?;
@@ -255,7 +255,7 @@ impl StrategyProgressManager {
 
     /// 清除进度（重新开始）
     pub async fn clear_progress(inst_id: &str, time: &str) -> Result<()> {
-        let mut redis_conn = crate::app_config::redis_config::get_redis_connection().await?;
+        let mut redis_conn = rust_quant_core::cache::get_redis_connection().await?;
         let key = Self::get_progress_key(inst_id, time);
         redis_conn.del::<_, ()>(&key).await?;
         info!("[断点续传] 进度已清除: {}", key);

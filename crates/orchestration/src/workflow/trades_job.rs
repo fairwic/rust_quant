@@ -1,9 +1,9 @@
 // 交易量任务
 use crate::trading::model::asset::AssetModel;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::model::market::candles::CandlesModel;
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_market::models::CandlesModel;
 use crate::trading::model::market::tickers::{TickersDataEntity, TicketsModel};
-use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
+use rust_quant_strategies::redis_operations::{RedisCandle, RedisOperations};
 use chrono::Utc;
 use hmac::digest::typenum::op;
 use okx::api::market::OkxMarket;

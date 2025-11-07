@@ -15,6 +15,13 @@ tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+
+# 交易所 SDK
+okx.workspace = true
+
+# 数据库（使用 sqlx）
+sqlx.workspace = true

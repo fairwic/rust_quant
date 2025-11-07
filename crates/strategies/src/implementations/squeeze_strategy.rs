@@ -1,8 +1,8 @@
-use crate::time_util;
-use crate::trading::indicator::atr::ATR;
-use crate::trading::indicator::kdj_simple_indicator::KdjCandle;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::strategy_common::SignalResult;
+use rust_quant_common::utils::time;
+use rust_quant_indicators::atr::ATR;
+use rust_quant_indicators::kdj_simple_indicator::KdjCandle;
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_strategies::strategy_common::SignalResult;
 use clap::builder::Str;
 use ndarray::{s, Array1};
 use serde::{Deserialize, Serialize};

@@ -2,10 +2,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::trading::cache::latest_candle_cache::{default_provider, LatestCandleCacheProvider};
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::model::market::candles::CandlesModel;
-use crate::trading::strategy::strategy_manager::get_strategy_manager;
-use crate::trading::services::candle_service::persist_worker::PersistTask;
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_market::models::CandlesModel;
+use rust_quant_strategies::strategy_manager::get_strategy_manager;
+use rust_quant_market::repositories::persist_worker::PersistTask;
 use okx::dto::market_dto::CandleOkxRespDto;
 use tracing::{debug, error, info};
 

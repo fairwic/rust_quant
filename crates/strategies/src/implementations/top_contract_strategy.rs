@@ -13,14 +13,14 @@ use tracing::{error, warn};
 // Import necessary crates and modules
 use crate::trading::model::big_data::top_contract_account_ratio::TopContractAccountRatioEntity;
 use crate::trading::model::big_data::top_contract_position_ratio::TopContractPositionRatioEntity;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_market::models::CandlesEntity;
 use crate::trading::services::big_data::big_data_top_contract_service::BigDataTopContractService;
 use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
-use crate::trading::strategy::strategy_common::{
+use rust_quant_strategies::strategy_common::{
     run_back_test, BackTestResult, SignalResult, TradeRecord,
 };
-use crate::trading::task::basic;
-use crate::trading::task::basic::save_log;
+use rust_quant_orchestration::workflow::basic;
+use rust_quant_orchestration::workflow::basic::save_log;
 
 use super::strategy_common::BasicRiskStrategyConfig;
 
@@ -171,7 +171,7 @@ impl TopContractStrategy {
             // 若这些“大资金”在市场上有更强的定价影响力，一般可视为“主力在看多”，但并不一定马上就会涨，
             // 需要结合市场行情、成交量、情绪面等更多信息来综合判断。
             should_buy = true;
-            println!("ts: {}仓位比大于1，但是人数比小于1，主力看多,散户情绪偏空{} acc_ratio:{} position_ratio:{}", crate::time_util::mill_time_to_local_datetime(ts), ratio, acct_ratio.long_short_acct_ratio, postion_ratio.long_short_pos_ratio);
+            println!("ts: {}仓位比大于1，但是人数比小于1，主力看多,散户情绪偏空{} acc_ratio:{} position_ratio:{}", rust_quant_common::utils::time::mill_time_to_local_datetime(ts), ratio, acct_ratio.long_short_acct_ratio, postion_ratio.long_short_pos_ratio);
         }
 
         if !is_more_acct {
@@ -181,7 +181,7 @@ impl TopContractStrategy {
             should_sell = true;
             println!(
                 "ts: {}仓位比<1，但是人数比>1，主力看空,散户看多{} acc_ratio:{} position_ratio:{}",
-                crate::time_util::mill_time_to_local_datetime(ts),
+                rust_quant_common::utils::time::mill_time_to_local_datetime(ts),
                 ratio,
                 acct_ratio.long_short_acct_ratio,
                 postion_ratio.long_short_pos_ratio

@@ -2,8 +2,8 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 use tracing::error;
 
-use crate::time_util;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_common::utils::time;
+use rust_quant_market::models::CandlesEntity;
 
 /// 判断最新得数据是否所在当前时间的周期
 pub fn valid_newest_candle_data(mysql_candles_5m: CandlesEntity, time: &str) -> bool {

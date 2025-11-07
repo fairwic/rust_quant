@@ -1,8 +1,8 @@
 use crate::trading::model::asset::AssetModel;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::model::market::candles::CandlesModel;
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_market::models::CandlesModel;
 use crate::trading::model::market::tickers::{TickersDataEntity, TicketsModel};
-use crate::trading::strategy::redis_operations::{RedisCandle, RedisOperations};
+use rust_quant_strategies::redis_operations::{RedisCandle, RedisOperations};
 use chrono::Utc;
 use hmac::digest::typenum::op;
 use okx::api::api_trait::OkxApiTrait;
@@ -160,7 +160,7 @@ async fn get_sync_begin_with_end(
     match res {
         Some(t) => {
             let begin = t.ts;
-            let end = crate::time_util::ts_add_n_period(t.ts, period, 100)?;
+            let end = rust_quant_common::utils::time::ts_add_n_period(t.ts, period, 100)?;
             Ok((Some(begin.to_string()), Some(end.to_string())))
         }
         None => Ok((None, None)),

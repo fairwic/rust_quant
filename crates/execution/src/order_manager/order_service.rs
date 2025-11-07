@@ -1,5 +1,5 @@
-use crate::error::app_error::AppError;
-use crate::trading::model::order::swap_orders_detail::{
+use rust_quant_core::error::app_error::AppError;
+use rust_quant_risk::order::swap_orders_detail::{
     SwapOrderDetailEntity, SwapOrderDetailEntityModel,
 };
 use okx::api::api_trait::OkxApiTrait;

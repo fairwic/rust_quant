@@ -29,3 +29,13 @@ tokio-retry.workspace = true
 # 缓存
 redis.workspace = true
 dashmap.workspace = true
+
+# 交易所 SDK
+okx.workspace = true
+
+# 数据库（使用 sqlx）
+sqlx.workspace = true
+
+# 序列化
+serde_json.workspace = true
+futures.workspace = true

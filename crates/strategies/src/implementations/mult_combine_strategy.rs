@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use ta::indicators::{AverageTrueRange, ExponentialMovingAverage};
 use ta::Next;
 use tracing::{debug, error, info, warn};
-use crate::time_util;
+use rust_quant_common::utils::time;
 use crate::trading::model::market::candles::CandlesEntity;
-use crate::trading::indicator::kdj_simple_indicator::KdjCandle;
-use crate::trading::indicator::atr::ATR;
-use crate::trading::strategy::strategy_common::{run_test, SignalResult};
+use rust_quant_indicators::kdj_simple_indicator::KdjCandle;
+use rust_quant_indicators::atr::ATR;
+use rust_quant_strategies::strategy_common::{run_test, SignalResult};
 #[derive(Deserialize, Serialize, Debug)]
 pub enum  MultCombineStartegy {
     UT_BOOT,

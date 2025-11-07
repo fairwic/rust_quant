@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CandleItem {
-    pub(crate) o: f64,
-    pub(crate) h: f64,
-    pub(crate) l: f64,
-    pub(crate) c: f64,
-    pub(crate) v: f64,
-    pub(crate) ts: i64,
-    pub(crate) confirm: i32,
+    pub o: f64,
+    pub h: f64,
+    pub l: f64,
+    pub c: f64,
+    pub v: f64,
+    pub ts: i64,
+    pub confirm: i32,
 }
 
 impl CandleItem {

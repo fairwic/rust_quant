@@ -1,6 +1,6 @@
 extern crate rbatis;
 
-use crate::app_config::db;
+use rust_quant_core::database;
 use okx::dto::trade_dto::OrderDetailRespDto;
 use rbatis::impl_select;
 use rbatis::rbdc::db::ExecResult;

@@ -3,8 +3,8 @@ extern crate rbatis;
 use std::convert::TryInto;
 use std::sync::Arc;
 
-use crate::app_config::db;
-use crate::time_util;
+use rust_quant_core::database;
+use rust_quant_common::utils::time;
 use chrono::{DateTime, Utc};
 use rbatis::impl_select;
 use rbatis::rbdc::db::ExecResult;

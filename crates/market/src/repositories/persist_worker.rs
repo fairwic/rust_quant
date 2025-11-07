@@ -3,7 +3,7 @@ use std::time::Duration;
 use std::collections::HashMap;
 use tracing::{debug, error, info};
 use okx::dto::market_dto::CandleOkxRespDto;
-use crate::trading::model::market::candles::CandlesModel;
+use rust_quant_market::models::CandlesModel;
 
 /// K线持久化任务
 #[derive(Debug, Clone)]

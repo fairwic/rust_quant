@@ -7,6 +7,7 @@ pub mod database;
 pub mod cache;
 pub mod logger;
 pub mod time;
+pub mod error;
 
 // 重新导出常用类型
 // pub use config::AppConfig;

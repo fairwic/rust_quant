@@ -13,8 +13,8 @@
 //! ## 使用示例
 //!
 //! ```rust
-//! use crate::trading::task::strategy_runner::test_random_strategy_with_config;
-//! use crate::trading::task::progress_manager::RandomStrategyConfig;
+//! use rust_quant_orchestration::workflow::strategy_runner::test_random_strategy_with_config;
+//! use rust_quant_orchestration::workflow::progress_manager::RandomStrategyConfig;
 //!
 //! // 执行带断点续传的策略测试
 //! let config = RandomStrategyConfig::default();
@@ -22,9 +22,9 @@
 //! ```
 
 // 重新导出主要的公共接口，保持向后兼容
-pub use crate::trading::task::data_sync::*;
-pub use crate::trading::task::data_validator::*;
-pub use crate::trading::task::progress_manager::*;
-pub use crate::trading::task::strategy_config::*;
-pub use crate::trading::task::backtest_executor::*;
-pub use crate::trading::task::strategy_runner::*;
+pub use rust_quant_orchestration::workflow::data_sync::*;
+pub use rust_quant_orchestration::workflow::data_validator::*;
+pub use rust_quant_orchestration::workflow::progress_manager::*;
+pub use rust_quant_orchestration::workflow::strategy_config::*;
+pub use rust_quant_orchestration::workflow::backtest_executor::*;
+pub use rust_quant_orchestration::workflow::strategy_runner::*;

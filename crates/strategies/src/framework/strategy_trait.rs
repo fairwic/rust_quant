@@ -6,10 +6,10 @@ use async_trait::async_trait;
 use anyhow::Result;
 use std::collections::VecDeque;
 
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::order::strategy_config::StrategyConfig;
-use crate::trading::strategy::strategy_common::SignalResult;
-use crate::trading::strategy::StrategyType;
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_strategies::order::strategy_config::StrategyConfig;
+use rust_quant_strategies::strategy_common::SignalResult;
+use rust_quant_strategies::StrategyType;
 use crate::CandleItem;
 
 /// 策略数据快照（通用）

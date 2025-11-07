@@ -10,22 +10,22 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::trading::indicator::vegas_indicator::VegasStrategy;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_indicators::vegas_indicator::VegasStrategy;
+use rust_quant_market::models::CandlesEntity;
 use crate::trading::model::strategy::strategy_config::{
     StrategyConfigEntity, StrategyConfigEntityModel,
 };
 use crate::trading::services::scheduler_service::SchedulerService;
 use crate::trading::services::strategy_data_service::StrategyDataService;
-use crate::trading::services::strategy_metrics::{get_strategy_metrics, StrategyMetrics};
+use rust_quant_strategies::framework::{get_strategy_metrics, StrategyMetrics};
 use crate::trading::services::strategy_system_error::{
     BusinessLogicError, ErrorHandler, ErrorSeverity, StrategyConfigError, StrategySystemError,
 };
-use crate::trading::strategy::arc::indicator_values::arc_vegas_indicator_values;
-use crate::trading::strategy::nwe_strategy::NweStrategyConfig;
-use crate::trading::strategy::order::strategy_config::StrategyConfig;
-use crate::trading::strategy::strategy_common::BasicRiskStrategyConfig;
-use crate::trading::strategy::StrategyType;
+use rust_quant_strategies::arc::indicator_values::arc_vegas_indicator_values;
+use rust_quant_strategies::nwe_strategy::NweStrategyConfig;
+use rust_quant_strategies::order::strategy_config::StrategyConfig;
+use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
+use rust_quant_strategies::StrategyType;
 use crate::SCHEDULER;
 use okx::dto::EnumToStrTrait;
 
@@ -508,7 +508,7 @@ impl StrategyManager {
             .ok_or_else(|| anyhow!("未知的策略类型: {}", config_entity.strategy_type))?;
 
         // 3.5. 按需注册策略（首次使用时自动注册）✨
-        crate::trading::strategy::strategy_registry::register_strategy_on_demand(&strategy_type_enum);
+        rust_quant_strategies::strategy_registry::register_strategy_on_demand(&strategy_type_enum);
 
         // 4. 根据策略类型执行具体的启动逻辑
         match strategy_type_enum {
@@ -840,7 +840,7 @@ impl StrategyManager {
             // 获取当前策略配置
             let current_config = runtime_info.get_current_config().await;
             // 调用策略执行函数
-            crate::trading::task::basic::run_ready_to_order_with_manager(
+            rust_quant_orchestration::workflow::basic::run_ready_to_order_with_manager(
                 inst_id,
                 period,
                 &current_config,
@@ -1002,7 +1002,7 @@ impl StrategyManager {
     /// 获取系统健康状态
     pub async fn get_system_health(
         &self,
-    ) -> crate::trading::services::strategy_metrics::SystemHealth {
+    ) -> rust_quant_strategies::framework::SystemHealth {
         let metrics = get_strategy_metrics();
         metrics.get_system_health(self).await
     }

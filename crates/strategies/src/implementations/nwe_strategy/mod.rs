@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
 
-use crate::trading::indicator::atr::ATR;
-use crate::trading::indicator::atr_stop_loos::ATRStopLoos;
-use crate::trading::indicator::nwe_indicator::NweIndicator;
-use crate::trading::indicator::rsi_rma_indicator::RsiIndicator;
-use crate::trading::indicator::volume_indicator::VolumeRatioIndicator;
-use crate::trading::strategy::nwe_strategy::indicator_combine::NweIndicatorCombine;
-use crate::trading::strategy::strategy_common::{
+use rust_quant_indicators::atr::ATR;
+use rust_quant_indicators::atr_stop_loos::ATRStopLoos;
+use rust_quant_indicators::nwe_indicator::NweIndicator;
+use rust_quant_indicators::rsi_rma_indicator::RsiIndicator;
+use rust_quant_indicators::volume_indicator::VolumeRatioIndicator;
+use rust_quant_strategies::nwe_strategy::indicator_combine::NweIndicatorCombine;
+use rust_quant_strategies::strategy_common::{
     BackTestResult, BasicRiskStrategyConfig, SignalResult,
 };
 use crate::{CandleItem, time_util};
@@ -208,7 +208,7 @@ impl NweStrategy {
         candles: &Vec<CandleItem>,
         risk: BasicRiskStrategyConfig,
     ) -> BackTestResult {
-        use crate::trading::strategy::strategy_common::{self, run_back_test_generic};
+        use rust_quant_strategies::strategy_common::{self, run_back_test_generic};
 
         // 复用自定义的 indicator_combine 容器
         let mut ic = NweIndicatorCombine::default();

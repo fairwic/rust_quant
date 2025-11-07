@@ -7,14 +7,14 @@ use std::collections::VecDeque;
 use tracing::{debug, info, warn};
 
 use crate::trading::domain_service::candle_domain_service::CandleDomainService;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::services::order_service::swap_order_service::SwapOrderService;
-use crate::trading::strategy::order::strategy_config::StrategyConfig;
-use crate::trading::strategy::strategy_common::{
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_execution::order_manager::swap_order_service::SwapOrderService;
+use rust_quant_strategies::order::strategy_config::StrategyConfig;
+use rust_quant_strategies::strategy_common::{
     parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
 };
-use crate::trading::strategy::StrategyType;
-use crate::trading::task::strategy_runner::{
+use rust_quant_strategies::StrategyType;
+use rust_quant_orchestration::workflow::strategy_runner::{
     check_new_time, save_signal_log, StrategyExecutionStateManager,
 };
 use crate::CandleItem;

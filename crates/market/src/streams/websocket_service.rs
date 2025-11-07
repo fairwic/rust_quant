@@ -14,9 +14,9 @@ use tokio_tungstenite::tungstenite;
 use tracing::{info, span, Level};
 
 use crate::trading::cache::latest_candle_cache::default_provider;
-use crate::trading::services::candle_service::candle_service::CandleService;
-use crate::trading::services::candle_service::persist_worker::{CandlePersistWorker, PersistTask};
-use crate::trading::task::tickets_job::update_ticker;
+use rust_quant_market::repositories::candle_service::CandleService;
+use rust_quant_market::repositories::persist_worker::{CandlePersistWorker, PersistTask};
+use rust_quant_orchestration::workflow::tickets_job::update_ticker;
 use okx::api::api_trait::OkxApiTrait;
 use okx::config::Credentials;
 use okx::dto::market_dto::CandleOkxRespDto;

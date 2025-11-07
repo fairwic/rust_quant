@@ -1,17 +1,17 @@
 use crate::trading::constants;
-use crate::trading::model::order::swap_order::{SwapOrderEntity, SwapOrderEntityModel};
-use crate::trading::strategy::StrategyType;
+use rust_quant_risk::order::swap_order::{SwapOrderEntity, SwapOrderEntityModel};
+use rust_quant_strategies::StrategyType;
 use std::cmp::PartialEq;
 
-use crate::time_util::{self, now_timestamp_mills};
+use rust_quant_common::utils::time::{self, now_timestamp_mills};
 
 pub struct OrderSignal {
     pub inst_id: String,
     pub should_sell: bool,
     pub price: f64,
 }
-use crate::error::app_error::AppError;
-use crate::trading::strategy::strategy_common::{BasicRiskStrategyConfig, SignalResult};
+use rust_quant_core::error::app_error::AppError;
+use rust_quant_strategies::strategy_common::{BasicRiskStrategyConfig, SignalResult};
 use chrono::Local;
 use core::time;
 use okx::api::api_trait::OkxApiTrait;

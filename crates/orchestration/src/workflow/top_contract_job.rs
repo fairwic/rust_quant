@@ -1,12 +1,12 @@
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_market::models::CandlesEntity;
 use crate::trading::services::big_data::big_data_service::BigDataContractService;
 use crate::trading::services::big_data::big_data_top_contract_service::BigDataTopContractService;
 use crate::trading::services::big_data::big_data_top_position_service::BigDataTopPositionService;
 use crate::trading::services::big_data::{big_data_service, big_data_top_contract_service};
-use crate::trading::strategy::profit_stop_loss::ProfitStopLoss;
-use crate::trading::strategy::ut_boot_strategy::UtBootStrategy;
-use crate::trading::strategy::StrategyType;
-use crate::trading::task::{basic, big_data_job};
+use rust_quant_strategies::profit_stop_loss::ProfitStopLoss;
+use rust_quant_strategies::ut_boot_strategy::UtBootStrategy;
+use rust_quant_strategies::StrategyType;
+use rust_quant_orchestration::workflow::{basic, big_data_job};
 use futures_util::future::join_all;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -123,7 +123,7 @@ impl TopContractJob {
     //
     //                     async move {
     //                         // 执行策略测试并处理结果
-    //                         if let Err(e) = crate::trading::task::basic::run_test_strategy(
+    //                         if let Err(e) = rust_quant_orchestration::workflow::basic::run_test_strategy(
     //                             &inst_id_clone,
     //                             &time_clone,
     //                             key_value,

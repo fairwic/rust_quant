@@ -14,11 +14,11 @@ use tokio_cron_scheduler::Job;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::app_config::redis_config;
-use crate::time_util;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
-use crate::trading::strategy::order::strategy_config::StrategyConfig;
-use crate::trading::task::basic;
+use rust_quant_core::cache;
+use rust_quant_common::utils::time;
+use rust_quant_market::models::CandlesEntity;
+use rust_quant_strategies::order::strategy_config::StrategyConfig;
+use rust_quant_orchestration::workflow::basic;
 
 /// 调度器服务错误类型
 #[derive(thiserror::Error, Debug)]
@@ -152,7 +152,7 @@ impl SchedulerService {
                                 info!("获取到最新K线数据: {}_{}", inst_id, time);
                                 if let Some(new_candle_data) = candle_data.first() {
                                     // 这里可以处理新的K线数据
-                                   match crate::trading::task::basic::run_ready_to_order_with_manager(
+                                   match rust_quant_orchestration::workflow::basic::run_ready_to_order_with_manager(
                                     &inst_id,
                                     &time,
                                     &current_cfg,
@@ -196,7 +196,7 @@ impl SchedulerService {
         let ts_str = ts.to_string();
         //从redis中获取数据
         let rkey = format!("deal_confirm_candle:{}:{}:{}", inst_id, time, ts_str);
-        let multi_connection = crate::app_config::redis_config::get_redis_connection().await;
+        let multi_connection = rust_quant_core::cache::get_redis_connection().await;
         if let Err(e) = multi_connection {
             error!("获取Redis连接失败: {:?}", e);
             return false;
@@ -211,7 +211,7 @@ impl SchedulerService {
     }
     async fn mark_processed_latest_data(inst_id: &str, time: &str, ts_str: &str) {
         let rkey = format!("deal_confirm_candle:{}:{}:{}", inst_id, time, ts_str);
-        let multi_connection = crate::app_config::redis_config::get_redis_connection().await;
+        let multi_connection = rust_quant_core::cache::get_redis_connection().await;
         if let Ok(mut conn) = multi_connection {
             conn.set_ex::<_, _, ()>(&rkey, "1", 86400 * 7).await;
         }

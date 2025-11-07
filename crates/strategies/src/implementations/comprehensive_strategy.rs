@@ -1,5 +1,5 @@
-use crate::time_util;
-use crate::trading::model::entity::candles::entity::CandlesEntity;
+use rust_quant_common::utils::time;
+use rust_quant_market::models::CandlesEntity;
 use ta::indicators::KeltnerChannel;
 use ta::indicators::{
     BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex, SimpleMovingAverage, TrueRange,
