@@ -1,5 +1,5 @@
 [package]
-name = "rust-quant-infrastructure"
+name = "rust-quant-services"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,12 +7,16 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-# Workspace 内部依赖
+# Workspace 内部依赖 - 应用服务层可以依赖所有业务包
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
-rust-quant-domain.workspace = true  # 实现 domain 中定义的接口
-rust-quant-indicators.workspace = true  # 缓存中需要indicator类型
-rust-quant-market.workspace = true  # 缓存中需要CandlesEntity类型
+rust-quant-domain.workspace = true           # 使用领域模型
+rust-quant-infrastructure.workspace = true   # 使用基础设施
+rust-quant-market.workspace = true
+rust-quant-indicators.workspace = true
+rust-quant-strategies.workspace = true
+rust-quant-risk.workspace = true
+rust-quant-execution.workspace = true
 
 # 异步运行时
 tokio.workspace = true
@@ -26,20 +30,9 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-# 数据库
-sqlx.workspace = true
-
-# 缓存
-redis.workspace = true
-dashmap.workspace = true
-
 # 日志
 tracing.workspace = true
 
-# 时间处理
+# 时间
 chrono.workspace = true
-
-# 工具库
-once_cell.workspace = true
-
 

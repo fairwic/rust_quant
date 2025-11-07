@@ -3,7 +3,8 @@
 use async_trait::async_trait;
 use anyhow::Result;
 
-use crate::entities::{Candle, Order, StrategyConfig};
+use crate::entities::{Candle, Order, StrategyConfig, Position};
+use crate::{PositionStatus};
 use crate::enums::Timeframe;
 
 /// K线仓储接口
@@ -67,6 +68,31 @@ pub trait StrategyConfigRepository: Send + Sync {
     
     /// 删除配置
     async fn delete(&self, id: i64) -> Result<()>;
+}
+
+/// 持仓仓储接口
+#[async_trait]
+pub trait PositionRepository: Send + Sync {
+    /// 根据ID查询持仓
+    async fn find_by_id(&self, id: &str) -> Result<Option<Position>>;
+    
+    /// 查询交易对的所有持仓
+    async fn find_by_symbol(&self, symbol: &str) -> Result<Vec<Position>>;
+    
+    /// 查询所有未平仓持仓
+    async fn find_open_positions(&self) -> Result<Vec<Position>>;
+    
+    /// 查询特定状态的持仓
+    async fn find_by_status(&self, status: PositionStatus) -> Result<Vec<Position>>;
+    
+    /// 保存持仓
+    async fn save(&self, position: &Position) -> Result<()>;
+    
+    /// 更新持仓
+    async fn update(&self, position: &Position) -> Result<()>;
+    
+    /// 删除持仓
+    async fn delete(&self, id: &str) -> Result<()>;
 }
 
 

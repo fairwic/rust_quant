@@ -8,6 +8,7 @@ rust-version.workspace = true
 # Workspace 内部依赖
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
+rust-quant-domain.workspace = true
 rust-quant-market.workspace = true
 
 # 外部依赖

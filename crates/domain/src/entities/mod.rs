@@ -5,9 +5,11 @@
 pub mod candle;
 pub mod order;
 pub mod strategy_config;
+pub mod position;
 
 pub use candle::Candle;
 pub use order::{Order, OrderError};
 pub use strategy_config::{StrategyConfig, BasicRiskConfig};
+pub use position::{Position, PositionError, MarginMode, PositionStatus};
 
 

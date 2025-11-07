@@ -34,3 +34,12 @@ pub use basic::*;
 pub use strategy_config::*;
 pub use strategy_runner::*;
 pub use progress_manager::*;
+
+// 导出风控任务
+pub use risk_banlance_job::*;
+pub use risk_order_job::*;
+pub use risk_positon_job::*;
+
+// 导出数据同步任务
+pub use candles_job::*;
+pub use tickets_job::*;

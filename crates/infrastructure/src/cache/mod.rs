@@ -4,6 +4,7 @@
 //! TODO: 迁移完成后取消注释
 
 pub mod indicator_cache;
+pub mod latest_candle_cache;
 // pub mod strategy_cache;  // TODO: 依赖 redis_config
 
 // 暂时注释，等待indicator迁移完成
@@ -12,4 +13,5 @@ pub mod indicator_cache;
 // pub mod ema_indicator_values;
 
 pub use indicator_cache::*;
+pub use latest_candle_cache::*;
 

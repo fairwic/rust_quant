@@ -9,7 +9,8 @@ pub use strategy_trait::{Strategy, Backtestable, BacktestResult};
 pub use repository_trait::{
     CandleRepository, 
     OrderRepository, 
-    StrategyConfigRepository
+    StrategyConfigRepository,
+    PositionRepository,
 };
 
 

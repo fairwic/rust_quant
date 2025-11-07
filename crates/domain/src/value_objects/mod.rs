@@ -6,6 +6,9 @@
 pub mod price;
 pub mod volume;
 pub mod signal;
+pub mod symbol;
+pub mod leverage;
+pub mod percentage;
 
 pub use price::{Price, PriceError};
 pub use volume::{Volume, VolumeError};
@@ -15,5 +18,8 @@ pub use signal::{
     TradingSignal, 
     SignalResult
 };
+pub use symbol::{Symbol, SymbolError};
+pub use leverage::{Leverage, LeverageError};
+pub use percentage::{Percentage, PercentageError};
 
 

@@ -1,7 +1,8 @@
 use rust_quant_core::config::db;
 use rust_quant_common::model::strategy::back_test_detail::BackTestDetail;
-impl_select;
-RBatis;
+// TODO: 迁移到 sqlx 后移除 rbatis 宏
+// impl_select;
+// RBatis;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::debug;
@@ -21,10 +22,10 @@ pub struct BackTestAnalysis {
     pub is_profitable: i32,
     pub created_at: Option<String>,
 }
-rbatis::// ORM迁移TODO
+// TODO: ORM迁移 - 迁移到 sqlx 后恢复
 
 // 持仓统计结果
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct PositionStats {
     pub one_bar_after_win_rate: f32,
     pub two_bar_after_win_rate: f32,
@@ -35,14 +36,15 @@ pub struct PositionStats {
 }
 
 // 分析模型，处理查询和插入
+// TODO: 迁移到 sqlx
 pub struct BackTestAnalysisModel {
-    db: &'static RBatis,
+    // db: &'static RBatis,
 }
 
 impl BackTestAnalysisModel {
     pub async fn new() -> Self {
         Self {
-            db: db::get_db_client(),
+            // db: db::get_db_client(),
         }
     }
 

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use crate::trading::cache::latest_candle_cache::{default_provider, LatestCandleCacheProvider};
+use rust_quant_infrastructure::cache::{default_provider, LatestCandleCacheProvider};
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_market::models::CandlesModel;
 use rust_quant_strategies::strategy_manager::get_strategy_manager;

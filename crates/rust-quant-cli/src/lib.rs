@@ -2,6 +2,8 @@
 //! 
 //! 量化交易系统主程序入口
 
+pub mod app;
+
 use anyhow::Result;
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
@@ -59,24 +61,9 @@ pub async fn init_scheduler() -> Result<Arc<JobScheduler>> {
     Ok(Arc::clone(scheduler_opt.as_ref().unwrap()))
 }
 
-/// 运行主程序
+/// 运行主程序 - 委托给 app::bootstrap
 pub async fn run() -> Result<()> {
-    info!("启动 Rust Quant CLI...");
-    
-    // TODO: 实现主业务逻辑
-    // - 启动 WebSocket 连接
-    // - 启动策略任务
-    // - 启动风控监控
-    // - 等等...
-    
-    // 等待关闭信号
-    tokio::signal::ctrl_c().await?;
-    info!("收到关闭信号");
-    
-    // 优雅关闭
-    graceful_shutdown().await?;
-    
-    Ok(())
+    app::bootstrap::run().await
 }
 
 /// 优雅关闭配置

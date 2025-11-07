@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
 use tracing::{info, span, Level};
 
-use crate::trading::cache::latest_candle_cache::default_provider;
+use rust_quant_infrastructure::cache::default_provider;
 use rust_quant_market::repositories::candle_service::CandleService;
 use rust_quant_market::repositories::persist_worker::{CandlePersistWorker, PersistTask};
 use rust_quant_orchestration::workflow::tickets_job::update_ticker;

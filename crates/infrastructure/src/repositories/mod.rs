@@ -4,6 +4,7 @@
 
 pub mod candle_repository;
 pub mod strategy_config_repository;
+pub mod position_repository;
 
 pub use candle_repository::SqlxCandleRepository;
 pub use strategy_config_repository::{
@@ -11,9 +12,13 @@ pub use strategy_config_repository::{
     StrategyConfigEntity,
     StrategyConfigEntityModel,
 };
+pub use position_repository::{
+    SqlxPositionRepository,
+    PositionEntity,
+};
 
 // TODO: 添加其他 Repository 实现
-// - OrderRepository
-// - PositionRepository
+// - OrderRepository (待添加)
+// - AccountRepository (待添加)
 
 

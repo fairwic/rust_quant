@@ -1,12 +1,10 @@
-
-
-use rust_quant_core::config::db;
+use rust_quant_core::database;
 use chrono::Local;
-impl_select;
-rbdc::db::ExecResult;
-rbdc::{Date, DateTime};
-{crud, impl_insert, impl_update, RBatis};
-use rbs::Value;
+// TODO: 迁移到 sqlx 后移除 rbatis 宏
+// use rbdc::db::ExecResult;
+// use rbdc::{Date, DateTime};
+// use rbatis::{crud, impl_insert, impl_update, RBatis};
+// use rbs::Value;
 use serde_json::json;
 use std::sync::Arc;
 use tracing::{debug, info};

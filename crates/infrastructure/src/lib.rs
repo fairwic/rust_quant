@@ -38,6 +38,8 @@ pub use repositories::{
     SqlxStrategyConfigRepository,
     StrategyConfigEntity,
     StrategyConfigEntityModel,
+    SqlxPositionRepository,
+    PositionEntity,
 };
 pub use cache::*;
 

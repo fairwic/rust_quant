@@ -43,16 +43,32 @@ pub mod enums;
 pub mod traits;
 
 // 重新导出核心类型
-pub use entities::{Candle, Order, OrderError, StrategyConfig, BasicRiskConfig};
+
+// 实体
+pub use entities::{
+    Candle, 
+    Order, OrderError, 
+    StrategyConfig, BasicRiskConfig,
+    Position, PositionError, MarginMode, PositionStatus,
+};
+
+// 值对象
 pub use value_objects::{
     Price, PriceError,
     Volume, VolumeError,
     SignalDirection, SignalStrength, TradingSignal, SignalResult,
+    Symbol, SymbolError,
+    Leverage, LeverageError,
+    Percentage, PercentageError,
 };
+
+// 枚举
 pub use enums::{
     OrderSide, OrderType, OrderStatus, PositionSide,
     StrategyType, StrategyStatus, Timeframe,
 };
+
+// 接口
 pub use traits::{
     Strategy, Backtestable, BacktestResult,
     CandleRepository, OrderRepository, StrategyConfigRepository,
