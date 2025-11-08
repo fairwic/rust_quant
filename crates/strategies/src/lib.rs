@@ -11,14 +11,18 @@
 //! 
 //! ## 已移出的模块
 //! 
-//! - `cache` → `infrastructure::cache` (缓存由基础设施层管理)
 //! - `redis_operations` → `infrastructure::cache::strategy_cache`
 //! - `support_resistance` → `indicators::pattern::support_resistance`
+//! 
+//! ## 新增模块
+//! 
+//! - `cache` - 策略相关的业务特定缓存（从infrastructure迁移）
 
 pub mod framework;
 pub mod implementations;
 pub mod backtesting;
-pub mod adapters;  // 新增: 适配器模块
+pub mod adapters;  // 适配器模块
+pub mod cache;     // 策略缓存模块
 
 // 重新导出核心类型
 pub use framework::*;

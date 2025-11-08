@@ -37,3 +37,6 @@ ndarray.workspace = true
 linregress.workspace = true
 approx.workspace = true
 float-cmp.workspace = true
+
+# 缓存依赖（ema_indicator_values需要）
+once_cell.workspace = true

@@ -9,20 +9,7 @@ use std::time::{Duration, SystemTime};
 use tracing::{debug, error, info};
 
 use rust_quant_domain::{Timeframe, StrategyType};
-
-// ⭐ Services层集成
-// 当前状态：骨架已建立，待完善具体集成
-// 集成计划：
-// 1. 构建 StrategyConfig from config_id
-// 2. 准备 CandlesEntity snapshot
-// 3. 调用 StrategyExecutionService.execute_strategy()
-// 4. 处理返回的 SignalResult
-// 5. 触发订单创建流程
-// 
-// 参考实现：
-// use rust_quant_services::strategy::StrategyExecutionService;
-// let service = StrategyExecutionService::new();
-// let result = service.execute_strategy(inst_id, period, config, snap).await?;
+use rust_quant_services::strategy::StrategyExecutionService;
 
 /// 策略执行状态跟踪 - 用于时间戳去重
 #[derive(Debug, Clone)]
@@ -107,104 +94,60 @@ impl StrategyExecutionStateManager {
 
 /// 执行策略 - 简化版接口
 /// 
-/// # Architecture
-/// 这是orchestration层的核心策略执行入口。
-/// 职责：编排和协调，不包含业务逻辑。
-/// 
-/// # Integration Status
-/// ⏳ 骨架完成，services层集成待完善
-/// 
-/// ## 当前实现
-/// - ✅ 状态管理（去重、跟踪）
-/// - ✅ 时间戳转换
-/// - ✅ 执行流程编排
-/// - ⏳ Services层调用（待完善）
-/// 
-/// ## 待集成步骤
-/// 1. 从config_id加载StrategyConfig（或使用默认配置）
-/// 2. 准备市场数据快照 CandlesEntity
-/// 3. 调用 StrategyExecutionService.execute_strategy()
-/// 4. 处理返回的 SignalResult
-/// 5. 根据信号触发订单创建（调用OrderCreationService）
-/// 
 /// # Arguments
 /// * `inst_id` - 交易对（如 "BTC-USDT"）
 /// * `timeframe` - 时间周期
 /// * `strategy_type` - 策略类型
-/// * `_config_id` - 策略配置ID（可选，当前未使用）
+/// * `config_id` - 策略配置ID（可选）
 /// 
 /// # Returns
-/// 执行结果
-/// 
-/// # Example
-/// ```rust,ignore
-/// use rust_quant_orchestration::workflow::execute_strategy;
-/// use rust_quant_domain::{Timeframe, StrategyType};
-/// 
-/// execute_strategy("BTC-USDT", Timeframe::H1, StrategyType::Vegas, None).await?;
-/// ```
+/// 返回策略信号结果
 pub async fn execute_strategy(
     inst_id: &str,
     timeframe: Timeframe,
     strategy_type: StrategyType,
-    _config_id: Option<i64>,
+    config_id: Option<i64>,
 ) -> Result<()> {
-    let period = timeframe_to_period(timeframe);
     let key = format!("{}_{:?}_{:?}", inst_id, timeframe, strategy_type);
     
     info!(
-        "🚀 开始执行策略: inst_id={}, period={}, strategy={:?}",
-        inst_id, period, strategy_type
+        "🚀 开始执行策略: inst_id={}, timeframe={:?}, strategy={:?}",
+        inst_id, timeframe, strategy_type
     );
 
-    // 1. 检查是否应该跳过（去重机制）
+    // 检查是否应该跳过（去重）
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs() as i64;
     
     if !StrategyExecutionStateManager::try_mark_processing(&key, timestamp) {
-        debug!("策略正在执行中，跳过重复请求: {}", key);
+        debug!("策略正在执行中，跳过: {}", key);
         return Ok(());
     }
 
-    // 2. 执行策略（当前占位实现）
-    // 
-    // ⏳ 完整实现示例：
-    // 
-    // // 2.1 加载配置
-    // use rust_quant_services::strategy::StrategyConfigService;
-    // let config_service = StrategyConfigService::new();
-    // let config = if let Some(id) = config_id {
-    //     config_service.get_config(id).await?
-    // } else {
-    //     config_service.get_default_config(strategy_type).await?
-    // };
-    // 
-    // // 2.2 准备市场数据
-    // use rust_quant_services::market::MarketDataService;
-    // let market_service = MarketDataService::new();
-    // let snap = market_service.get_latest_candle(inst_id, period).await?;
-    // 
-    // // 2.3 执行策略
-    // use rust_quant_services::strategy::StrategyExecutionService;
-    // let strategy_service = StrategyExecutionService::new();
-    // let signal = strategy_service
-    //     .execute_strategy(inst_id, period, &config, Some(snap))
-    //     .await?;
-    // 
-    // // 2.4 处理信号
-    // if signal.has_signal() {
-    //     use rust_quant_services::trading::OrderCreationService;
-    //     let order_service = OrderCreationService::new();
-    //     order_service.create_order_from_signal(&signal, &config).await?;
-    // }
+    // 通过 StrategyExecutionService 执行策略
+    let service = StrategyExecutionService::new();
     
-    info!("✅ 策略执行完成 (当前为简化实现，详见代码注释): {}", key);
-    
-    // 3. 标记完成
+    let result = service
+        .execute_strategy(inst_id, timeframe, strategy_type, config_id)
+        .await;
+
+    // 标记完成
     StrategyExecutionStateManager::mark_completed(&key, timestamp);
-    
-    Ok(())
+
+    match result {
+        Ok(signal_result) => {
+            info!(
+                "✅ 策略执行成功: {} - {:?}",
+                key, signal_result.signal
+            );
+            Ok(())
+        }
+        Err(e) => {
+            error!("❌ 策略执行失败: {} - {:?}", key, e);
+            Err(e)
+        }
+    }
 }
 
 /// 批量执行多个策略
@@ -255,25 +198,6 @@ pub async fn test_specified_strategy(
     let timeframe = parse_period_to_timeframe(&period)?;
     
     execute_strategy(&inst_id, timeframe, strategy_type, config_id).await
-}
-
-/// 辅助函数：Timeframe 转为 period 字符串
-fn timeframe_to_period(timeframe: Timeframe) -> &'static str {
-    match timeframe {
-        Timeframe::M1 => "1m",
-        Timeframe::M3 => "3m",
-        Timeframe::M5 => "5m",
-        Timeframe::M15 => "15m",
-        Timeframe::M30 => "30m",
-        Timeframe::H1 => "1H",
-        Timeframe::H2 => "2H",
-        Timeframe::H4 => "4H",
-        Timeframe::H6 => "6H",
-        Timeframe::H12 => "12H",
-        Timeframe::D1 => "1D",
-        Timeframe::W1 => "1W",
-        Timeframe::MN1 => "1M",
-    }
 }
 
 /// 辅助函数：解析 period 字符串到 Timeframe

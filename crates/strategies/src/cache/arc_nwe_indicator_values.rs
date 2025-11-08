@@ -1,7 +1,8 @@
 //! Nwe 策略指标值缓存管理器
 //! 参考 arc_vegas_indicator_values.rs 的设计
 
-use rust_quant_domain::nwe_strategy::indicator_combine::NweIndicatorCombine;
+// NweIndicatorCombine 在 indicators 包中
+use rust_quant_indicators::nwe::indicator_combine::NweIndicatorCombine;
 use rust_quant_common::CandleItem;
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;

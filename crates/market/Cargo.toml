@@ -32,5 +32,10 @@ okx.workspace = true
 # 数据库（使用 sqlx）
 sqlx.workspace = true
 
+# 缓存依赖（latest_candle_cache需要）
+redis.workspace = true
+dashmap.workspace = true
+once_cell.workspace = true
+
 [dev-dependencies]
 dotenv.workspace = true

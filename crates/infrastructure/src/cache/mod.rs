@@ -1,15 +1,18 @@
-//! 指标值缓存模块
+//! 缓存模块
+//! 
+//! 提供通用缓存能力，不包含业务特定逻辑
 
+pub mod generic_cache;
 pub mod indicator_cache;
-pub mod latest_candle_cache;
 pub mod strategy_cache;
 
-// 策略指标值缓存模块
-pub mod arc_vegas_indicator_values;
-// TODO: arc_nwe_indicator_values 依赖 NweIndicatorCombine，需要先将其移到indicators包
-// pub mod arc_nwe_indicator_values;
-pub mod ema_indicator_values;
-
+pub use generic_cache::*;
 pub use indicator_cache::*;
-pub use latest_candle_cache::*;
+pub use strategy_cache::*;
+
+// 业务特定缓存已移动到对应的包：
+// - arc_vegas_indicator_values -> strategies包
+// - ema_indicator_values -> indicators包  
+// - arc_nwe_indicator_values -> strategies包
+// - latest_candle_cache -> market包
 

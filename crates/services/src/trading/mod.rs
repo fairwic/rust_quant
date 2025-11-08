@@ -2,6 +2,10 @@
 //! 
 //! 提供交易操作的统一接口，协调订单、持仓、账户管理
 
+pub mod order_creation_service;
+
+pub use order_creation_service::OrderCreationService;
+
 use anyhow::Result;
 use rust_quant_domain::{Order, OrderError};
 

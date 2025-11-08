@@ -49,5 +49,6 @@ pub mod market;
 pub mod risk;
 
 // 重新导出常用服务
-pub use strategy::StrategyConfigService;
+pub use strategy::{StrategyConfigService, StrategyExecutionService};
+pub use trading::OrderCreationService;
 

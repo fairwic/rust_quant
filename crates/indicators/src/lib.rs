@@ -7,6 +7,7 @@ pub mod momentum;
 pub mod volatility;
 pub mod volume;
 pub mod pattern;
+pub mod cache;  // 指标缓存模块
 
 // 重新导出所有子模块的类型
 pub use trend::*;

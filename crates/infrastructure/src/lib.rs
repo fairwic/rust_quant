@@ -41,6 +41,13 @@ pub use repositories::{
     SqlxPositionRepository,
     PositionEntity,
 };
-pub use cache::*;
+
+// 导出通用缓存接口（泛型，不依赖业务类型）
+pub use cache::{
+    CacheProvider,
+    InMemoryCache,
+    RedisCache,
+    TwoLevelCache,
+};
 
 

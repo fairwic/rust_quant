@@ -4,6 +4,7 @@
 
 pub mod exchanges;
 pub mod models;
+pub mod cache;  // 市场数据缓存模块
 // TODO: 暂时注释，等待依赖模块迁移完成
 // pub mod streams;
 // pub mod repositories;

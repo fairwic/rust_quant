@@ -7,8 +7,8 @@ use once_cell::sync::Lazy;
 use redis::AsyncCommands;
 use rust_quant_core::cache::{get_redis_connection, latest_candle_key, latest_candle_ttl_secs};
 
-// 需要从 market 包引入 CandlesEntity
-use rust_quant_market::models::CandlesEntity;
+// 从当前包引入 CandlesEntity
+use crate::models::CandlesEntity;
 
 fn make_key(inst_id: &str, period: &str) -> String {
     format!("{}:{}", inst_id, period)
@@ -68,7 +68,7 @@ impl LatestCandleCacheProvider for InMemoryRedisLatestCandleCache {
         -> Pin<Box<dyn Future<Output = Option<CandlesEntity>> + Send + 'a>>
     {
         let key = make_key(inst_id, period);
-        let map = Arc::clone(&self.map);
+        let map: Arc<DashMap<String, CandlesEntity>> = Arc::clone(&self.map);
         Box::pin(async move {
             if let Some(c) = map.get(&key).map(|v| v.clone()) {
                 return Some(c);
@@ -91,7 +91,7 @@ impl LatestCandleCacheProvider for InMemoryRedisLatestCandleCache {
         -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
     {
         let key = make_key(inst_id, period);
-        let map = Arc::clone(&self.map);
+        let map: Arc<DashMap<String, CandlesEntity>> = Arc::clone(&self.map);
         Box::pin(async move {
             map.insert(key, candle.clone());
             if let Ok(mut conn) = get_redis_connection().await {

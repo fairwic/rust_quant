@@ -11,8 +11,9 @@ license.workspace = true
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
 rust-quant-domain.workspace = true  # 实现 domain 中定义的接口
-rust-quant-indicators.workspace = true  # 缓存中需要indicator类型
-rust-quant-market.workspace = true  # 缓存中需要CandlesEntity类型
+# ✅ 已移除违规依赖:
+# - rust-quant-indicators (业务特定缓存已移至indicators包)
+# - rust-quant-market (业务特定缓存已移至market包)
 
 # 异步运行时
 tokio.workspace = true

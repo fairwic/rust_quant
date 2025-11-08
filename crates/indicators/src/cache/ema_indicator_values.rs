@@ -1,4 +1,5 @@
-use rust_quant_indicators::vegas_indicator::EmaSignalValue;
+// 从当前包引入 EmaSignalValue
+use crate::vegas_indicator::EmaSignalValue;
 use once_cell::sync::OnceCell;
 use std::collections::HashMap;
 use std::sync::Mutex;
