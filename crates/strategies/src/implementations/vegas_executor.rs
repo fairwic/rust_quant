@@ -24,7 +24,9 @@ use crate::strategy_common::{
     get_multi_indicator_values, parse_candle_to_data_item,
 };
 use crate::StrategyType;
-use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;
+// ⏳ 移除orchestration依赖，避免循环依赖
+// 使用 ExecutionContext trait 替代直接依赖
+// use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;
 use rust_quant_common::CandleItem;
 use okx::dto::EnumToStrTrait;
 
@@ -186,7 +188,9 @@ impl StrategyExecutor for VegasStrategyExecutor {
         .await?;
 
         // 11. 清理执行状态
-        StrategyExecutionStateManager::mark_completed(&key, new_candle_item.ts);
+        // ⏳ 状态管理已解耦到ExecutionContext
+        // StrategyExecutionStateManager::mark_completed(&key, new_candle_item.ts);
+        info!("策略执行完成标记: key={}", key);
 
         Ok(())
     }

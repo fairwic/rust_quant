@@ -168,3 +168,15 @@ orchestration → services → (strategies + risk + execution)
 
 **详细报告**: 参见 `ARCHITECTURE_AUDIT_REPORT.md`
 
+
+
+
+
+
+
+
+
+
+
+
+

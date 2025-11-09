@@ -8,7 +8,8 @@ use rust_quant_orchestration::workflow::{
     tickets_job,
     basic,
 };
-use rust_quant_strategies::strategy_manager::get_strategy_manager;
+// TODO: strategy_manager待适配
+// use rust_quant_strategies::strategy_manager::get_strategy_manager;
 use rust_quant_infrastructure::repositories::strategy_config_repository::StrategyConfigRepository;
 
 /// 运行基于环境变量控制的各个模式（数据同步、回测、WebSocket、实盘策略）

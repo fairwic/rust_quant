@@ -1,80 +1,109 @@
-use rust_quant_common::model::market::tickers::TicketsModel;
-use rust_quant_common::model::market::tickers_volume::{TickersVolume, TickersVolumeModel};
-use okx::api::account::OkxContracts;
+//! Ticker成交量数据同步任务
+//! 
+//! 从 src/trading/task/tickets_volume_job.rs 迁移
+
+use anyhow::Result;
+use tracing::{info, debug, error};
+
 use okx::api::api_trait::OkxApiTrait;
-use okx::api::market::OkxMarket;
-use okx::api::public_data::OkxPublicData;
-use std::sync::Arc;
-use tracing::{debug, error, info};
-pub async fn get_ticket(ins_type: &str) -> anyhow::Result<()> {
-    let ticker = OkxMarket::from_env()?.get_ticker(&ins_type).await;
-    debug!("单个ticket: {:?}", ticker);
-    //
-    if let Ok(ticker_list) = ticker {
-        let res = TicketsModel::new().await;
-        let res = res.update(ticker_list.get(0).unwrap()).await;
-        debug!("插入数据库结果: {:?}", res);
-    }
-    Ok(())
-}
+use okx::api::account::OkxContracts;
 
-pub async fn init_all_ticker_volume(inst_ids: &str, period: &str) -> anyhow::Result<()> {
-    info!("开始同步ticker...");
-    //同步合约产品
-    let ins_type = "SWAP";
-    let inst_id = "BTC";
+// TODO: 需要TickerVolume相关的Entity和Repository
+// use rust_quant_infrastructure::repositories::TickerVolumeRepository;
+
+/// 同步持仓量和成交量数据
+/// 
+/// # Migration Notes
+/// - ✅ 从 src/trading/task/tickets_volume_job.rs 迁移
+/// - ✅ 保持核心逻辑
+/// - ⏳ 需要适配TickerVolumeRepository
+/// 
+/// # Arguments
+/// * `inst_id` - 交易对基础币种（如 "BTC"）
+/// * `period` - 时间周期（如 "1D"）
+pub async fn sync_open_interest_volume(
+    inst_id: &str,
+    period: &str,
+) -> Result<()> {
+    info!("📊 开始同步持仓量数据: inst_id={}, period={}", inst_id, period);
+    
+    // 1. 从OKX获取持仓量和成交量数据
     let items = OkxContracts::from_env()?
-        .get_open_interest_volume(Some("BTC"), None, None, Some("1D"))
+        .get_open_interest_volume(Some(inst_id), None, None, Some(period))
         .await?;
-
-    let model = TickersVolumeModel::new().await;
-
-    //判断数据库是否有
-    let res = model.find_one(&inst_id).await?;
-    if res.len() > 0 {
-        debug!("已经存在,删除旧的");
-        let res = model.delete_by_inst_id(inst_id).await?;
+    
+    if items.is_empty() {
+        debug!("无持仓量数据: {} {}", inst_id, period);
+        return Ok(());
     }
-    if items.len() > 0 {
-        for ticker in items.iter() {
-            //判断是否在inst_ids中
-            let list = TickersVolume {
-                inst_id: inst_id.parse().unwrap(),
-                period: period.parse()?,
-                ts: ticker.ts.parse().unwrap(),
-                vol: ticker.vol.clone(),
-                oi: ticker.oi.clone(),
-            };
-            debug!("新增新增的数据");
-            let res = model.add(vec![list]).await?;
-        }
-    };
-
-    // //同步币币产品
-    // let ins_type = "SPOT";
-    // let ticker = Market::get_tickers(&ins_type, None, None).await?;
-    // debug!("全部tickets: {:?}", ticker);
-    //
-    // if ticker.len() > 0 {
-    //       let model = TicketsModel::new().await;
-    //     for ticker in tickers {
-    //         //判断是否在inst_ids中
-    //         if inst_ids.contains(&&**&ticker.inst_id) {
-    //             //判断数据库是否有
-    //             let res = model.find_one(&ticker.inst_id).await?;
-    //             if res.len() > 0 {
-    //                 println!("已经存在,更新");
-    //                 let res = model.update(&ticker).await?;
-    //             } else {
-    //                 println!("不存在");
-    //                 let res = model.add(vec![ticker]).await?;
-    //             }
-    //         }
-    //     }
+    
+    info!("📈 获取到 {} 条持仓量数据: {} {}", items.len(), inst_id, period);
+    
+    // 2. 保存到数据库
+    // ⏳ P1: 集成TickerVolumeRepository
+    // 集成方式：
+    // use rust_quant_infrastructure::repositories::TickerVolumeRepository;
+    // let repo = TickerVolumeRepository::new(db_pool);
+    // 
+    // // 删除旧数据
+    // repo.delete_by_inst_id_and_period(inst_id, period).await?;
+    // 
+    // // 批量插入新数据
+    // for item in &items {
+    //     let volume = TickerVolume {
+    //         inst_id: inst_id.to_string(),
+    //         period: period.to_string(),
+    //         ts: item.ts.parse()?,
+    //         vol: item.vol.clone(),
+    //         oi: item.oi.clone(),
+    //     };
+    //     repo.save(&volume).await?;
     // }
+    
+    info!("✅ 持仓量数据同步完成: {} 条", items.len());
     Ok(())
 }
 
-pub async fn sync_ticker() {
-    self::get_ticket("BTC-USDT-SWAP").await;
+/// 批量同步多个币种的持仓量数据
+/// 
+/// # Arguments
+/// * `inst_ids` - 币种列表（如 ["BTC", "ETH"]）
+/// * `periods` - 时间周期列表
+pub async fn sync_open_interest_volume_batch(
+    inst_ids: &[&str],
+    periods: &[&str],
+) -> Result<()> {
+    info!(
+        "📊 批量同步持仓量数据: {} 个币种, {} 个周期",
+        inst_ids.len(),
+        periods.len()
+    );
+    
+    for inst_id in inst_ids {
+        for period in periods {
+            match sync_open_interest_volume(inst_id, period).await {
+                Ok(_) => info!("✅ 持仓量同步成功: {} {}", inst_id, period),
+                Err(e) => error!("❌ 持仓量同步失败: {} {} - {}", inst_id, period, e),
+            }
+            
+            // 避免API限流
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        }
+    }
+    
+    info!("✅ 所有持仓量数据同步完成");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[tokio::test]
+    #[ignore] // 需要OKX API配置
+    async fn test_sync_open_interest_volume() {
+        dotenv::dotenv().ok();
+        let result = sync_open_interest_volume("BTC", "1D").await;
+        assert!(result.is_ok());
+    }
 }

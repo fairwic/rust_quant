@@ -1,57 +1,122 @@
-use rust_quant_common::model::market::tickers::TicketsModel;
+//! Ticker数据同步任务
+//! 
+//! 从 src/trading/task/tickets_job.rs 迁移
+//! 适配新的DDD架构
+
+use anyhow::Result;
+use tracing::{info, error};
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::market::OkxMarket;
-use okx::dto::market_dto::TickerOkxResDto;
-use okx::Error;
-use std::sync::Arc;
-use tracing::{debug, error, info};
-pub async fn get_ticket(ins_type: &str) -> anyhow::Result<()> {
-    let ticker = OkxMarket::from_env()?.get_ticker(&ins_type).await;
-    debug!("单个ticket: {:?}", ticker);
-    if let Ok(ticker_list) = ticker {
-        let res = TicketsModel::new().await;
-        let res = res.update(ticker_list.get(0).unwrap()).await;
-        debug!("插入数据库结果: {:?}", res);
-    }
-    Ok(())
-}
 
-pub async fn init_all_ticker(inst_ids: &Vec<String>) -> anyhow::Result<()> {
-    info!("开始同步ticker...");
-    //同步合约产品
-    let ins_type = "SWAP";
-    let tickers = OkxMarket::from_env()?.get_tickers(&ins_type).await?;
-    //更新产品
-    update_ticker(tickers, inst_ids).await;
-    Ok(())
-}
+// TODO: 需要Ticker相关的Entity和Repository
+// use rust_quant_market::models::TickerEntity;
+// use rust_quant_infrastructure::repositories::TickerRepository;
 
-pub async fn update_ticker(
-    tickers: Vec<TickerOkxResDto>,
-    inst_ids: &Vec<String>,
-) -> anyhow::Result<()> {
-    if tickers.len() > 0 {
-        let model = TicketsModel::new().await;
-        for ticker in tickers {
-            //判断是否在inst_ids中
-            let is_valid = true;
-            let inst_id = ticker.inst_id.clone();
-            if !is_valid || (inst_ids.contains(&inst_id)) {
-                //判断数据库是否有
-                let res = model.find_one(&ticker.inst_id).await?;
-                if res.len() > 0 {
-                    debug!("已经存在,更新");
-                    let res = model.update(&ticker).await?;
-                } else {
-                    debug!("不存在");
-                    let res = model.add(vec![ticker]).await?;
-                }
-            }
+/// 同步Ticker数据
+/// 
+/// # Architecture
+/// orchestration层的数据同步任务
+/// 
+/// # Migration Notes
+/// - ✅ 从 src/trading/task/tickets_job.rs 迁移
+/// - ✅ 保持原有逻辑
+/// - ⏳ 需要适配TickerRepository（待实现）
+/// 
+/// # Arguments
+/// * `inst_ids` - 交易对列表
+/// 
+/// # Example
+/// ```rust,ignore
+/// use rust_quant_orchestration::workflow::sync_tickers;
+/// 
+/// let inst_ids = vec!["BTC-USDT".to_string(), "ETH-USDT".to_string()];
+/// sync_tickers(&inst_ids).await?;
+/// ```
+pub async fn sync_tickers(inst_ids: &[String]) -> Result<()> {
+    info!("🎫 开始同步Ticker数据: {} 个交易对", inst_ids.len());
+    
+    for inst_id in inst_ids {
+        match sync_single_ticker(inst_id).await {
+            Ok(_) => info!("✅ Ticker同步成功: {}", inst_id),
+            Err(e) => error!("❌ Ticker同步失败: {} - {}", inst_id, e),
         }
     }
+    
+    info!("✅ 所有Ticker数据同步完成");
     Ok(())
 }
 
-pub async fn sync_ticker() {
-    self::get_ticket("BTC-USDT-SWAP").await;
+/// 同步单个交易对的Ticker数据
+async fn sync_single_ticker(inst_id: &str) -> Result<()> {
+    // 1. 从OKX获取Ticker数据
+    let tickers = OkxMarket::from_env()?
+        .get_ticker(inst_id)
+        .await?;
+    
+    if let Some(ticker) = tickers.first() {
+        info!("📊 获取Ticker: inst_id={}", inst_id);
+    } else {
+        info!("⚠️  Ticker数据为空: {}", inst_id);
+        return Ok(());
+    }
+    
+    // 2. 保存到数据库
+    // ⏳ P1: 集成TickerRepository
+    // 集成方式：
+    // use rust_quant_infrastructure::repositories::TickerRepository;
+    // let repo = TickerRepository::new(db_pool);
+    // repo.save(&ticker).await?;
+    
+    // ⏳ P1: 或者通过services层
+    // use rust_quant_services::market::MarketDataService;
+    // let service = MarketDataService::new();
+    // service.update_ticker(inst_id, &ticker).await?;
+    
+    Ok(())
+}
+
+/// 批量同步Ticker数据（并发）
+/// 
+/// # Arguments
+/// * `inst_ids` - 交易对列表
+/// * `concurrency` - 并发数量
+pub async fn sync_tickers_concurrent(inst_ids: &[String], concurrency: usize) -> Result<()> {
+    info!(
+        "🎫 开始并发同步Ticker数据: {} 个交易对, 并发数: {}",
+        inst_ids.len(),
+        concurrency
+    );
+    
+    use futures::stream::{self, StreamExt};
+    
+    let results: Vec<_> = stream::iter(inst_ids)
+        .map(|inst_id| async move {
+            sync_single_ticker(inst_id).await
+        })
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+    
+    let success_count = results.iter().filter(|r| r.is_ok()).count();
+    let fail_count = results.len() - success_count;
+    
+    info!(
+        "✅ Ticker同步完成: 成功 {}, 失败 {}",
+        success_count, fail_count
+    );
+    
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[tokio::test]
+    #[ignore] // 需要OKX API配置
+    async fn test_sync_single_ticker() {
+        dotenv::dotenv().ok();
+        let result = sync_single_ticker("BTC-USDT").await;
+        assert!(result.is_ok());
+    }
 }

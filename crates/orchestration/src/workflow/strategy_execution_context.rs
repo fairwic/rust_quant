@@ -16,8 +16,9 @@ use rust_quant_strategies::StrategyType;
 
 use crate::workflow::strategy_runner::{
     StrategyExecutionStateManager as InternalStateManager,
-    // check_new_time已移除，下面直接实现
 };
+use crate::workflow::time_checker::check_new_time as internal_check_new_time;
+use crate::workflow::signal_logger::save_signal_log_async;
 
 // TODO: StrategyJobSignalLog 需要迁移到新的位置
 // 暂时使用简化的日志记录
@@ -55,15 +56,15 @@ pub struct OrchestrationTimeChecker;
 impl TimeChecker for OrchestrationTimeChecker {
     fn check_new_time(
         &self,
-        _old_time: i64,
-        _new_time: i64,
-        _period: &str,
-        _is_update: bool,
-        _force: bool,
+        old_time: i64,
+        new_time: i64,
+        period: &str,
+        is_update: bool,
+        force: bool,
     ) -> Result<bool> {
-        // TODO: 实现check_new_time逻辑或从旧代码迁移
-        // 暂时返回true，允许所有时间更新
-        Ok(true)
+        // 使用独立的time_checker模块实现
+        // 参数映射：is_update -> is_close_confirm, force -> just_check_confirm
+        internal_check_new_time(old_time, new_time, period, is_update, force)
     }
 }
 
@@ -80,37 +81,13 @@ impl OrchestrationSignalLogger {
 
 impl SignalLogger for OrchestrationSignalLogger {
     fn save_signal_log(&self, inst_id: &str, period: &str, signal: &SignalResult) {
-        // TODO: 实现数据库持久化
-        // 暂时只记录日志到 tracing
-        let strategy_result_str = match serde_json::to_string(&signal) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("序列化 signal_result 失败: {}", e);
-                format!("{:?}", signal)
-            }
-        };
-        
-        tracing::info!(
-            strategy_type = self.strategy_type.as_str(),
-            inst_id = inst_id,
-            period = period,
-            signal = %strategy_result_str,
-            "策略信号记录"
+        // 使用独立的signal_logger模块实现异步保存
+        save_signal_log_async(
+            inst_id.to_string(),
+            period.to_string(),
+            self.strategy_type,
+            signal.clone(),
         );
-        
-        // TODO: 实现异步保存到数据库
-        // let signal_record = StrategyJobSignalLog {
-        //     inst_id: inst_id.to_string(),
-        //     time: period.to_string(),
-        //     strategy_type: self.strategy_type.as_str().to_owned(),
-        //     strategy_result: strategy_result_str,
-        // };
-        // 
-        // tokio::spawn(async move {
-        //     if let Err(e) = StrategyJobSignalLogModel::save_signal(&signal_record).await {
-        //         error!("保存信号日志失败: {}", e);
-        //     }
-        // });
     }
 }
 

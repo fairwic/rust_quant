@@ -21,9 +21,9 @@ pub mod squeeze_strategy;
 // pub mod top_contract_strategy;
 pub mod ut_boot_strategy;
 
-// 执行器 - TODO: 这两个执行器依赖orchestration，暂时注释
-// pub mod nwe_executor;
-// pub mod vegas_executor;
+// 执行器 - TODO: 需要适配新架构后才能启用
+// pub mod nwe_executor;  // TODO: NweIndicatorCombine待迁移
+// pub mod vegas_executor;  // TODO: 需要适配executor_common接口变化
 
 // NWE 策略子模块
 pub mod nwe_strategy;
@@ -40,5 +40,5 @@ pub use squeeze_strategy::*;
 // pub use top_contract_strategy::*;
 pub use ut_boot_strategy::*;
 // pub use nwe_executor::*;
-// pub use vegas_executor::*;
+// pub use vegas_executor::*;  // TODO: 适配后导出
 

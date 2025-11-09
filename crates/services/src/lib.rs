@@ -51,4 +51,5 @@ pub mod risk;
 // 重新导出常用服务
 pub use strategy::{StrategyConfigService, StrategyExecutionService};
 pub use trading::OrderCreationService;
+pub use risk::RiskManagementService;
 
