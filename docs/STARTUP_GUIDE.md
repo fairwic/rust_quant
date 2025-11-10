@@ -1,7 +1,9 @@
 # 🚀 服务启动指南
 
 **生成时间**: 2025-11-10  
-**架构版本**: DDD 新架构
+**最后更新**: 2025-11-10  
+**架构版本**: DDD Workspace 架构 (14个crate包)  
+**项目版本**: v0.2.0
 
 ---
 
@@ -13,7 +15,8 @@
 Finished `release` profile [optimized] target(s) in 1m 17s
 ```
 
-**可执行文件位置**: `./target/release/rust_quant`
+**可执行文件位置**: `./target/release/rust-quant`  
+**入口文件**: `crates/rust-quant-cli/src/main.rs`
 
 ---
 
@@ -103,7 +106,7 @@ RUN_STRATEGY_PERIOD=5m           # 策略运行周期
 
 ```bash
 cd /Users/mac2/onions/rust_quant
-./target/release/rust_quant
+./target/release/rust-quant
 ```
 
 ### 方式 2: 使用 cargo run (开发模式)
@@ -119,19 +122,19 @@ cargo run --release
 IS_RUN_SYNC_DATA_JOB=true \
 IS_BACK_TEST=false \
 IS_RUN_REAL_STRATEGY=false \
-./target/release/rust_quant
+./target/release/rust-quant
 
 # 只运行回测
 IS_RUN_SYNC_DATA_JOB=false \
 IS_BACK_TEST=true \
 IS_RUN_REAL_STRATEGY=false \
-./target/release/rust_quant
+./target/release/rust-quant
 
 # 运行实盘策略
 IS_RUN_SYNC_DATA_JOB=false \
 IS_BACK_TEST=false \
 IS_RUN_REAL_STRATEGY=true \
-./target/release/rust_quant
+./target/release/rust-quant
 ```
 
 ---
@@ -410,32 +413,38 @@ IS_RUN_REAL_STRATEGY=false \
 ## 🎯 当前架构启动流程
 
 ```
-1. main() 入口
+1. main() 入口 (crates/rust-quant-cli/src/main.rs)
    ↓
 2. rust_quant_cli::app_init()
-   ├─ 初始化日志系统
-   ├─ 连接数据库 (MySQL)
-   ├─ 连接 Redis
+   ├─ 初始化日志系统 (env_logger + tracing)
+   ├─ 加载环境变量 (dotenv)
+   ├─ 连接数据库 (MySQL via sqlx)
+   ├─ 连接 Redis (连接池)
    └─ 初始化完成
    ↓
-3. rust_quant_cli::run()
-   ├─ 初始化任务调度器
-   ├─ 校验系统时间 (非 local 环境)
+3. rust_quant_cli::run() (crates/rust-quant-cli/src/app/bootstrap.rs)
+   ├─ 初始化任务调度器 (tokio-cron-scheduler)
+   ├─ 校验系统时间 (非 local 环境，与 OKX 时间同步)
    └─ 运行 run_modes()
        ├─ 数据同步模式 (if IS_RUN_SYNC_DATA_JOB)
+       │   └─ tickets_job::sync_tickers()
        ├─ 回测模式 (if IS_BACK_TEST)
+       │   └─ TODO: 回测逻辑待实现
        ├─ WebSocket 模式 (if IS_OPEN_SOCKET)
+       │   └─ TODO: WebSocket 逻辑待实现
        └─ 实盘策略 (if IS_RUN_REAL_STRATEGY)
+           └─ TODO: 实盘策略逻辑待实现
    ↓
 4. 启动心跳任务 (每 10 分钟)
    ↓
-5. 等待退出信号 (SIGINT/SIGTERM)
+5. 等待退出信号 (SIGINT/SIGTERM/SIGQUIT)
    ↓
 6. 优雅关闭
-   ├─ 停止所有策略
+   ├─ 停止心跳任务
+   ├─ 停止所有策略 (如果有运行)
    ├─ 关闭调度器
-   ├─ 关闭数据库连接
-   └─ 关闭 Redis 连接
+   ├─ 关闭数据库连接池
+   └─ 关闭 Redis 连接池
 ```
 
 ---
@@ -470,7 +479,7 @@ RUST_LOG=debug ./target/release/rust_quant
 
 **启用 backtrace**:
 ```bash
-RUST_BACKTRACE=1 ./target/release/rust_quant
+RUST_BACKTRACE=1 ./target/release/rust-quant
 ```
 
 **完整调试模式**:
@@ -478,7 +487,7 @@ RUST_BACKTRACE=1 ./target/release/rust_quant
 RUST_LOG=debug \
 RUST_BACKTRACE=1 \
 IS_BACK_TEST=true \
-./target/release/rust_quant 2>&1 | tee startup.log
+./target/release/rust-quant 2>&1 | tee startup.log
 ```
 
 ---
