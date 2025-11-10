@@ -1,16 +1,16 @@
 //! 策略执行器公共逻辑（轻量级版本）
 //!
 //! 提取不依赖 orchestration 的通用逻辑，避免循环依赖
-//! 
+//!
 //! 注意：本模块不包含数据库访问逻辑，调用方需要自行获取数据
 
 use anyhow::{anyhow, Result};
 use std::collections::VecDeque;
 use tracing::debug;
 
-use rust_quant_market::models::CandlesEntity;
 use crate::strategy_common::parse_candle_to_data_item;
 use rust_quant_common::CandleItem;
+use rust_quant_market::models::CandlesEntity;
 
 /// 执行上下文 - 封装策略执行的公共数据
 pub struct ExecutionContext {
@@ -54,13 +54,17 @@ pub fn validate_candles(candles: &[CandlesEntity]) -> Result<i64> {
     if candles.is_empty() {
         return Err(anyhow!("K线数据为空"));
     }
-    
+
     let last_ts = candles
         .last()
         .ok_or_else(|| anyhow!("无法获取最后一根K线"))?
         .ts;
-    
-    debug!("K线数据验证通过，共 {} 根，最后时间戳: {}", candles.len(), last_ts);
+
+    debug!(
+        "K线数据验证通过，共 {} 根，最后时间戳: {}",
+        candles.len(),
+        last_ts
+    );
     Ok(last_ts)
 }
 
@@ -72,4 +76,3 @@ pub fn is_new_timestamp(old_time: i64, new_time: i64) -> bool {
     }
     true
 }
-

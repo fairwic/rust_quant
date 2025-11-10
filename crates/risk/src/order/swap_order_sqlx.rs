@@ -46,16 +46,16 @@ impl SwapOrderEntity {
         let order_id = format!("{}_{}_{}_{}_{}", inst_id, period, side, pos_side, time);
         order_id
     }
-    
+
     /// 插入订单到数据库
     pub async fn insert(&self) -> Result<u64> {
         let pool = get_db_pool();
-        
+
         let result = sqlx::query(
             "INSERT INTO swap_order 
              (in_order_id, out_order_id, strategy_id, strategy_type, period, 
               inst_id, side, pos_size, pos_side, tag, detail, platform_type)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&self.in_order_id)
         .bind(&self.out_order_id)
@@ -70,63 +70,61 @@ impl SwapOrderEntity {
         .bind(&self.detail)
         .bind(&self.platform_type)
         .execute(pool)
-        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-        
+        .await
+        .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
+
         info!("订单已插入数据库: in_order_id={}", self.in_order_id);
         Ok(result.last_insert_id())
     }
-    
+
     /// 根据内部订单ID查询
     pub async fn select_by_in_order_id(in_order_id: &str) -> Result<Vec<Self>> {
         let pool = get_db_pool();
-        
-        let orders = sqlx::query_as::<_, Self>(
-            "SELECT * FROM swap_order WHERE in_order_id = ?"
-        )
-        .bind(in_order_id)
-        .fetch_all(pool)
-        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-        
+
+        let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order WHERE in_order_id = ?")
+            .bind(in_order_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
+
         Ok(orders)
     }
-    
+
     /// 根据策略ID查询
     pub async fn select_by_strategy_id(strategy_id: i64) -> Result<Vec<Self>> {
         let pool = get_db_pool();
-        
-        let orders = sqlx::query_as::<_, Self>(
-            "SELECT * FROM swap_order WHERE strategy_id = ?"
-        )
-        .bind(strategy_id)
-        .fetch_all(pool)
-        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-        
+
+        let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order WHERE strategy_id = ?")
+            .bind(strategy_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
+
         Ok(orders)
     }
-    
+
     /// 查询所有订单
     pub async fn select_all() -> Result<Vec<Self>> {
         let pool = get_db_pool();
-        
-        let orders = sqlx::query_as::<_, Self>(
-            "SELECT * FROM swap_order"
-        )
-        .fetch_all(pool)
-        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-        
+
+        let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
+
         Ok(orders)
     }
-    
+
     /// 更新订单
     pub async fn update(&self) -> Result<u64> {
         let pool = get_db_pool();
-        
+
         let result = sqlx::query(
             "UPDATE swap_order 
              SET out_order_id = ?, strategy_type = ?, period = ?, 
                  inst_id = ?, side = ?, pos_size = ?, pos_side = ?, 
                  tag = ?, detail = ?, platform_type = ?
-             WHERE in_order_id = ?"
+             WHERE in_order_id = ?",
         )
         .bind(&self.out_order_id)
         .bind(&self.strategy_type)
@@ -140,9 +138,9 @@ impl SwapOrderEntity {
         .bind(&self.platform_type)
         .bind(&self.in_order_id)
         .execute(pool)
-        .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-        
+        .await
+        .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
+
         Ok(result.rows_affected())
     }
 }
-

@@ -1,7 +1,7 @@
 //! 策略管理器 - 简化版
-//! 
+//!
 //! 保留核心功能，移除对不存在模块的依赖
-//! 
+//!
 //! TODO: 完整版本见 strategy_manager.rs.backup
 
 use anyhow::{anyhow, Result};
@@ -13,12 +13,10 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use rust_quant_domain::{StrategyConfig, StrategyType, Timeframe, StrategyStatus};
-use rust_quant_infrastructure::{
-    StrategyConfigEntity, StrategyConfigEntityModel,
-};
 use crate::nwe_strategy::NweStrategyConfig;
 use crate::strategy_common::BasicRiskStrategyConfig;
+use rust_quant_domain::{StrategyConfig, StrategyStatus, StrategyType, Timeframe};
+use rust_quant_infrastructure::{StrategyConfigEntity, StrategyConfigEntityModel};
 
 /// 策略管理器错误类型
 #[derive(Error, Debug)]
@@ -109,7 +107,7 @@ impl StrategyManager {
 
         // 2. 使用 to_domain() 转换
         let strategy_config = config_entity.to_domain()?;
-        
+
         Ok((config_entity, Arc::new(strategy_config)))
     }
 
@@ -125,7 +123,8 @@ impl StrategyManager {
             return Err(anyhow!("策略配置ID必须大于0"));
         }
 
-        info!("启动策略: config_id={}, inst_id={}, period={}", 
+        info!(
+            "启动策略: config_id={}, inst_id={}, period={}",
             strategy_config_id, inst_id, period
         );
 
@@ -139,7 +138,8 @@ impl StrategyManager {
         // 注册策略
         crate::strategy_registry::register_strategy_on_demand(&strategy_type_enum);
 
-        let strategy_key = Self::build_strategy_key(&inst_id, &period, &config_entity.strategy_type);
+        let strategy_key =
+            Self::build_strategy_key(&inst_id, &period, &config_entity.strategy_type);
 
         // 创建运行时信息
         let runtime_info = StrategyRuntimeInfo {
@@ -151,7 +151,8 @@ impl StrategyManager {
             current_config: Arc::new(RwLock::new((*strategy_config).clone())),
         };
 
-        self.running_strategies.insert(strategy_key.clone(), runtime_info);
+        self.running_strategies
+            .insert(strategy_key.clone(), runtime_info);
 
         info!("策略启动成功: {}", strategy_key);
         Ok(())
@@ -212,4 +213,3 @@ mod tests {
         assert_eq!(manager.get_running_strategies().len(), 0);
     }
 }
-

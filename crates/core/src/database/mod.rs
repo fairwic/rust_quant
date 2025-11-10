@@ -3,5 +3,4 @@
 pub mod sqlx_pool;
 
 // 重新导出
-pub use sqlx_pool::{init_db_pool, get_db_pool, close_db_pool, health_check};
-
+pub use sqlx_pool::{close_db_pool, get_db_pool, health_check, init_db_pool};

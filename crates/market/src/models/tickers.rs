@@ -1,11 +1,11 @@
 use anyhow::Result;
 use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
+use okx::dto::market_dto::TickerOkxResDto;
+use rust_quant_core::database::get_db_pool;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, MySql, QueryBuilder};
 use std::collections::HashMap;
 use tracing::debug;
-use rust_quant_core::database::get_db_pool;
-use okx::dto::market_dto::TickerOkxResDto;
 
 /// Tickers 数据表实体
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
@@ -102,19 +102,19 @@ impl TicketsModel {
 
         let result = query_builder.build().execute(pool).await?;
         debug!("批量插入 Ticker 数据，影响行数: {}", result.rows_affected());
-        
+
         Ok(result.rows_affected())
     }
 
     /// 更新单个 Ticker 数据
     pub async fn update(&self, ticker: &TickerOkxResDto) -> Result<()> {
         let pool = get_db_pool();
-        
+
         sqlx::query(
             "UPDATE tickers_data SET inst_type = ?, last = ?, last_sz = ?, ask_px = ?, \
              ask_sz = ?, bid_px = ?, bid_sz = ?, open24h = ?, high24h = ?, low24h = ?, \
              vol_ccy24h = ?, vol24h = ?, sod_utc0 = ?, sod_utc8 = ?, ts = ? \
-             WHERE inst_id = ?"
+             WHERE inst_id = ?",
         )
         .bind(&ticker.inst_type)
         .bind(&ticker.last)
@@ -163,12 +163,11 @@ impl TicketsModel {
     /// 查找单个合约数据
     pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersDataEntity>> {
         let pool = get_db_pool();
-        let results = sqlx::query_as::<_, TickersDataEntity>(
-            "SELECT * FROM tickers_data WHERE inst_id = ?"
-        )
-        .bind(inst_id)
-        .fetch_all(pool)
-        .await?;
+        let results =
+            sqlx::query_as::<_, TickersDataEntity>("SELECT * FROM tickers_data WHERE inst_id = ?")
+                .bind(inst_id)
+                .fetch_all(pool)
+                .await?;
 
         Ok(results)
     }
@@ -195,7 +194,8 @@ impl TicketsModel {
             let sql = "SELECT inst_id, MAX(ts) AS ts, SUM(vol24h) AS daily_vol \
                        FROM tickers_data \
                        GROUP BY inst_id, DATE(FROM_UNIXTIME(ts / 1000)) \
-                       ORDER BY ts DESC".to_string();
+                       ORDER BY ts DESC"
+                .to_string();
             (sql, vec![])
         };
 

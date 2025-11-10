@@ -1,3 +1,4 @@
+use crate::adapters::candle_adapter;
 use rust_quant_common::utils::time;
 use rust_quant_market::models::CandlesEntity;
 use ta::indicators::KeltnerChannel;
@@ -5,7 +6,6 @@ use ta::indicators::{
     BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex, SimpleMovingAverage, TrueRange,
 };
 use ta::{Close, High, Low, Next};
-use crate::adapters::candle_adapter;
 
 /// Squeeze 结构体
 struct Squeeze {

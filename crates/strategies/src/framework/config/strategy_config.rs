@@ -3,7 +3,4 @@
 
 // 重新导出供内部使用
 pub use rust_quant_domain::StrategyConfig;
-pub use rust_quant_infrastructure::{
-    StrategyConfigEntity,
-    StrategyConfigEntityModel,
-};
+pub use rust_quant_infrastructure::{StrategyConfigEntity, StrategyConfigEntityModel};

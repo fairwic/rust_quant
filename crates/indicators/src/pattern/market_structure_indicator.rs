@@ -1,6 +1,4 @@
-use crate::leg_detection_indicator::{
-    LegDetectionIndicator, LegDetectionValue,
-};
+use crate::leg_detection_indicator::{LegDetectionIndicator, LegDetectionValue};
 use rust_quant_common::CandleItem;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;

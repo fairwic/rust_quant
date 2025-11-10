@@ -1,10 +1,10 @@
-use rust_quant_common::AppError;
-use rust_quant_risk::order::SwapOrdersDetailEntity;
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::trade::OkxTrade;
 use okx::dto::trade::trade_dto::OrderPendingRespDto;
 use okx::dto::trade_dto::{OrdListReqDto, OrderDetailRespDto};
 use okx::error::Error;
+use rust_quant_common::AppError;
+use rust_quant_risk::order::SwapOrdersDetailEntity;
 use serde_json::json;
 use tracing::{info, warn};
 
@@ -62,7 +62,10 @@ impl OrderService {
         Ok(())
     }
 
-    pub async fn update_order_detail(&self, order_detail: OrderDetailRespDto) -> Result<(), AppError> {
+    pub async fn update_order_detail(
+        &self,
+        order_detail: OrderDetailRespDto,
+    ) -> Result<(), AppError> {
         // TODO: 实现 OrderDetailRespDto 到 SwapOrdersDetailEntity 的转换
         // let entity = SwapOrdersDetailEntity::from(order_detail);
         // entity.insert().await?;
@@ -89,8 +92,7 @@ impl OrderService {
         // if last_update_info.is_some() && before.is_none() {
         //     before = Some(last_update_info.unwrap().update_at.unwrap().as_str());
         // }
-        let model = OkxTrade::from_env()
-            .map_err(|e| AppError::OkxApiError(e.to_string()))?;
+        let model = OkxTrade::from_env().map_err(|e| AppError::OkxApiError(e.to_string()))?;
         let order_list = model
             .get_order_history(OrdListReqDto {
                 inst_type: inst_type.to_string(),
@@ -122,8 +124,7 @@ impl OrderService {
         before: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<OrderDetailRespDto>, AppError> {
-        let model = OkxTrade::from_env()
-            .map_err(|e| AppError::OkxApiError(e.to_string()))?;
+        let model = OkxTrade::from_env().map_err(|e| AppError::OkxApiError(e.to_string()))?;
         let order_list = model
             .get_order_history_archive(OrdListReqDto {
                 inst_type: inst_type.to_string(),

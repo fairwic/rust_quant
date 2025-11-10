@@ -19,8 +19,6 @@ pub fn env_or_default(key: &str, default: &str) -> String {
     }
 }
 
-
-
 /// 读取 i64 环境变量，不存在或解析失败返回默认值
 pub fn env_i64(key: &str, default: i64) -> i64 {
     match env::var(key) {
@@ -36,6 +34,8 @@ pub fn env_i64(key: &str, default: i64) -> i64 {
 pub fn candle_cache_staleness_ms(period: &str, default_ms: i64) -> i64 {
     let sp_key = format!("CANDLE_CACHE_STALENESS_{}_MS", period.to_uppercase());
     let sp = env_i64(&sp_key, -1);
-    if sp >= 0 { return sp; }
+    if sp >= 0 {
+        return sp;
+    }
     env_i64("CANDLE_CACHE_STALENESS_MS", default_ms)
 }

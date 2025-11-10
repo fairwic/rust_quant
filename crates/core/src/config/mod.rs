@@ -1,8 +1,8 @@
 //! 配置管理模块
 
+pub mod email;
 pub mod environment;
 pub mod shutdown_manager;
-pub mod email;
 
 // 重新导出
 pub use environment::*;

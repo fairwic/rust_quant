@@ -1,14 +1,16 @@
 //! 订单创建服务
-//! 
+//!
 //! 根据交易信号创建订单，协调风控检查和订单执行
 
 use anyhow::{anyhow, Result};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
-use rust_quant_domain::{SignalResult, SignalDirection, Order, OrderSide, OrderType, Price, Volume};
+use rust_quant_domain::{
+    Order, OrderSide, OrderType, Price, SignalDirection, SignalResult, Volume,
+};
 
 /// 订单创建服务
-/// 
+///
 /// 职责：
 /// 1. 根据信号创建订单
 /// 2. 协调风控检查
@@ -28,9 +30,9 @@ impl OrderCreationService {
             // TODO: 注入依赖
         }
     }
-    
+
     /// 根据信号创建订单
-    /// 
+    ///
     /// 流程：
     /// 1. 验证信号有效性
     /// 2. 风控检查
@@ -48,12 +50,12 @@ impl OrderCreationService {
             "根据信号创建订单: symbol={}, direction={:?}",
             inst_id, signal.direction
         );
-        
+
         // 1. 验证信号
         if !self.validate_signal(signal) {
             return Err(anyhow!("信号无效"));
         }
-        
+
         // 2. 风控检查
         // TODO: 调用 RiskManagementService
         // let can_trade = self.risk_service.check_can_open(inst_id, signal).await?;
@@ -61,36 +63,31 @@ impl OrderCreationService {
         //     warn!("风控检查未通过");
         //     return Err(anyhow!("风控检查未通过"));
         // }
-        
+
         // 3. 计算订单参数
         let order_params = self.calculate_order_params(inst_id, signal)?;
-        
+
         info!(
             "订单参数: price={}, size={}, stop_loss={:?}",
             order_params.price, order_params.size, order_params.stop_loss
         );
-        
+
         // 4. 创建订单对象
-        let order = self.build_order(
-            inst_id,
-            signal,
-            strategy_id,
-            &order_params,
-        )?;
-        
+        let order = self.build_order(inst_id, signal, strategy_id, &order_params)?;
+
         // 5. 保存订单
         // TODO: 通过 OrderRepository 保存
         // let order_id = self.order_repository.save(&order).await?;
         let order_id = format!("ORDER-{}", chrono::Utc::now().timestamp_millis());
-        
+
         // 6. 提交到执行引擎
         // TODO: 调用 ExecutionService
         // self.execution_service.submit_order(&order).await?;
-        
+
         info!("订单创建成功: order_id={}", order_id);
         Ok(order_id)
     }
-    
+
     /// 批量创建订单
     pub async fn create_multiple_orders(
         &self,
@@ -99,9 +96,12 @@ impl OrderCreationService {
         strategy_id: i64,
     ) -> Result<Vec<String>> {
         let mut order_ids = Vec::new();
-        
+
         for signal in signals {
-            match self.create_order_from_signal(inst_id, &signal, strategy_id).await {
+            match self
+                .create_order_from_signal(inst_id, &signal, strategy_id)
+                .await
+            {
                 Ok(order_id) => order_ids.push(order_id),
                 Err(e) => {
                     error!("订单创建失败: {}", e);
@@ -109,10 +109,10 @@ impl OrderCreationService {
                 }
             }
         }
-        
+
         Ok(order_ids)
     }
-    
+
     /// 平仓服务
     pub async fn close_position(
         &self,
@@ -120,62 +120,60 @@ impl OrderCreationService {
         position_side: OrderSide,
         reason: &str,
     ) -> Result<String> {
-        info!("平仓: symbol={}, side={:?}, reason={}", inst_id, position_side, reason);
-        
+        info!(
+            "平仓: symbol={}, side={:?}, reason={}",
+            inst_id, position_side, reason
+        );
+
         // TODO: 实现平仓逻辑
         // 1. 获取持仓信息
         // 2. 计算平仓数量
         // 3. 创建平仓订单
         // 4. 提交执行
-        
+
         let order_id = format!("CLOSE-{}", chrono::Utc::now().timestamp_millis());
         Ok(order_id)
     }
-    
+
     // ========================================================================
     // 内部辅助方法
     // ========================================================================
-    
+
     /// 验证信号有效性
     fn validate_signal(&self, signal: &SignalResult) -> bool {
         // 检查方向
         if signal.direction == SignalDirection::None {
             return false;
         }
-        
+
         // 检查开仓标志
         if !signal.can_open {
             return false;
         }
-        
+
         // 检查价格
         if signal.entry_price.is_none() {
             warn!("信号缺少入场价格");
             return false;
         }
-        
+
         true
     }
-    
+
     /// 计算订单参数
-    fn calculate_order_params(
-        &self,
-        inst_id: &str,
-        signal: &SignalResult,
-    ) -> Result<OrderParams> {
-        let price = signal.entry_price
-            .ok_or_else(|| anyhow!("缺少入场价格"))?;
-        
+    fn calculate_order_params(&self, inst_id: &str, signal: &SignalResult) -> Result<OrderParams> {
+        let price = signal.entry_price.ok_or_else(|| anyhow!("缺少入场价格"))?;
+
         // 计算下单数量
         // TODO: 根据风控配置计算
         let size = 0.1; // 暂时固定
-        
+
         // 止损价格
         let stop_loss = signal.stop_loss_price;
-        
+
         // 止盈价格
         let take_profit = signal.take_profit_price;
-        
+
         Ok(OrderParams {
             price,
             size,
@@ -183,7 +181,7 @@ impl OrderCreationService {
             take_profit,
         })
     }
-    
+
     /// 构建订单对象
     fn build_order(
         &self,
@@ -198,7 +196,7 @@ impl OrderCreationService {
             SignalDirection::Short => OrderSide::Sell,
             _ => return Err(anyhow!("无效的信号方向")),
         };
-        
+
         // 创建订单
         let order = Order::new(
             format!("ORDER-{}", chrono::Utc::now().timestamp_millis()),
@@ -208,7 +206,7 @@ impl OrderCreationService {
             Price::new(params.price)?,
             Volume::new(params.size)?,
         )?;
-        
+
         Ok(order)
     }
 }
@@ -242,17 +240,17 @@ struct OrderParams {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_service_creation() {
         let service = OrderCreationService::new();
         // 验证服务可以创建
     }
-    
+
     #[test]
     fn test_validate_signal() {
         let service = OrderCreationService::new();
-        
+
         // 有效信号
         let valid_signal = SignalResult {
             direction: SignalDirection::Long,
@@ -275,18 +273,17 @@ mod tests {
             best_take_profit_price: None,
             best_open_price: None,
         };
-        
+
         assert!(service.validate_signal(&valid_signal));
-        
+
         // 无效信号（无方向）
         let mut invalid_signal = valid_signal.clone();
         invalid_signal.direction = SignalDirection::None;
         assert!(!service.validate_signal(&invalid_signal));
-        
+
         // 无效信号（不可开仓）
         let mut invalid_signal = valid_signal.clone();
         invalid_signal.can_open = false;
         assert!(!service.validate_signal(&invalid_signal));
     }
 }
-

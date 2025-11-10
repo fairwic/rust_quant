@@ -15,7 +15,6 @@ members = [
     "crates/ai-analysis",
     "crates/rust-quant-cli",
 ]
-
 resolver = "2"
 
 [workspace.package]

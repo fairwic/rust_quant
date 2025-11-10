@@ -1,5 +1,5 @@
 //! # Rust Quant CLI
-//! 
+//!
 //! 量化交易系统主程序入口
 
 pub mod app;
@@ -13,37 +13,37 @@ use tokio_cron_scheduler::JobScheduler;
 use tracing::{error, info};
 
 // 重新导出核心依赖
-pub use rust_quant_core::*;
 pub use rust_quant_common::*;
-pub use rust_quant_market::*;
-pub use rust_quant_indicators::*;
-pub use rust_quant_strategies::*;
-pub use rust_quant_risk::*;
+pub use rust_quant_core::*;
 pub use rust_quant_execution::*;
+pub use rust_quant_indicators::*;
+pub use rust_quant_market::*;
 pub use rust_quant_orchestration::*;
+pub use rust_quant_risk::*;
+pub use rust_quant_strategies::*;
 
 /// 应用初始化
 pub async fn app_init() -> Result<()> {
     env_logger::init();
-    
+
     // 加载环境变量
     dotenv().ok();
-    
+
     // 设置日志
     rust_quant_core::logger::setup_logging().await?;
-    
+
     // 初始化数据库连接
     rust_quant_core::database::init_db_pool().await?;
-    
+
     // 初始化 Redis 连接池
     rust_quant_core::cache::init_redis_pool().await?;
-    
+
     info!("应用初始化完成");
     Ok(())
 }
 
 /// 全局调度器
-pub static SCHEDULER: Lazy<Arc<Mutex<Option<Arc<JobScheduler>>>>> = 
+pub static SCHEDULER: Lazy<Arc<Mutex<Option<Arc<JobScheduler>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
 
 /// 初始化并启动调度器
@@ -95,8 +95,8 @@ pub async fn graceful_shutdown() -> Result<()> {
 pub async fn graceful_shutdown_with_config(config: GracefulShutdownConfig) -> Result<()> {
     info!("开始优雅关闭... 总超时: {}秒", config.total_timeout_secs);
 
-    let manager = rust_quant_core::shutdown::ShutdownManager::new(
-        rust_quant_core::shutdown::ShutdownConfig {
+    let manager = rust_quant_core::config::shutdown_manager::ShutdownManager::new(
+        rust_quant_core::config::shutdown_manager::ShutdownConfig {
             total_timeout: std::time::Duration::from_secs(config.total_timeout_secs),
             hook_timeout: std::time::Duration::from_secs(config.total_timeout_secs),
             force_exit_on_timeout: false,
@@ -124,7 +124,8 @@ pub async fn graceful_shutdown_with_config(config: GracefulShutdownConfig) -> Re
     manager
         .register_shutdown_hook("db_cleanup".to_string(), move || async move {
             let dur = tokio::time::Duration::from_secs(db_secs);
-            let result = tokio::time::timeout(dur, rust_quant_core::database::close_db_pool()).await;
+            let result =
+                tokio::time::timeout(dur, rust_quant_core::database::close_db_pool()).await;
             match result {
                 Ok(_) => Ok(()),
                 Err(_) => {
@@ -152,7 +153,7 @@ pub async fn graceful_shutdown_with_config(config: GracefulShutdownConfig) -> Re
 /// 关闭调度器
 async fn shutdown_scheduler() -> Result<()> {
     info!("正在关闭调度器...");
-    
+
     let scheduler_guard = SCHEDULER.lock().await;
     if let Some(scheduler) = scheduler_guard.as_ref() {
         info!("调度器引用计数: {}", Arc::strong_count(scheduler));
@@ -162,7 +163,6 @@ async fn shutdown_scheduler() -> Result<()> {
     } else {
         info!("调度器未初始化，跳过关闭");
     }
-    
+
     Ok(())
 }
-

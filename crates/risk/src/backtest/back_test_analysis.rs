@@ -148,10 +148,7 @@ impl BackTestAnalysisModel {
         .await?;
 
         if stats.total_positions == 0 {
-            debug!(
-                "back_test_id {} 的{}K后无持仓数据",
-                back_test_id, bars
-            );
+            debug!("back_test_id {} 的{}K后无持仓数据", back_test_id, bars);
             return Ok(0.0);
         }
 

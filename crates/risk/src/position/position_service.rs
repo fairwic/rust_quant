@@ -1,8 +1,8 @@
-use rust_quant_core::error::AppError;
 use anyhow::Result;
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::Position;
 use okx::OkxAccount;
+use rust_quant_core::error::AppError;
 use serde_json::json;
 use tracing::{error, info};
 
@@ -16,7 +16,8 @@ impl PositionService {
         let account = OkxAccount::from_env()?; //获取合约持仓信息
         let position_list = account
             .get_account_positions(Some("SWAP"), None, None)
-            .await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
+            .await
+            .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         info!(
             "get current okx position_list: {:?}",
             json!(position_list).to_string()

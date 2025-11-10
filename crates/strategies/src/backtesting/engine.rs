@@ -1,17 +1,17 @@
 //! 回测引擎
 
 use anyhow::Result;
-use rust_quant_domain::{Candle, SignalResult, Position, Price};
+use rust_quant_domain::{Candle, Position, Price, SignalResult};
 
 /// 回测配置
 #[derive(Debug, Clone)]
 pub struct BacktestConfig {
     /// 初始资金
     pub initial_balance: f64,
-    
+
     /// 手续费率
     pub fee_rate: f64,
-    
+
     /// 滑点 (百分比)
     pub slippage: f64,
 }
@@ -35,7 +35,7 @@ impl BacktestEngine {
     pub fn new(config: BacktestConfig) -> Self {
         Self { config }
     }
-    
+
     /// 执行回测
     pub async fn run(
         &self,
@@ -57,4 +57,3 @@ pub struct BacktestReport {
     pub win_rate: f64,
     pub max_drawdown: f64,
 }
-

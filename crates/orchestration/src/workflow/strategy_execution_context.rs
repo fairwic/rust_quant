@@ -1,24 +1,22 @@
 //! 策略执行上下文实现
-//! 
+//!
 //! 实现 rust_quant_strategies 定义的 trait 接口，解决循环依赖问题
-//! 
+//!
 //! 依赖关系：orchestration → strategies (单向)
 
 use anyhow::Result;
-use tracing::{error, info};
 use serde_json;
+use tracing::{error, info};
 
 use rust_quant_strategies::framework::execution_traits::{
-    ExecutionStateManager, TimeChecker, SignalLogger, StrategyExecutionContext,
+    ExecutionStateManager, SignalLogger, StrategyExecutionContext, TimeChecker,
 };
 use rust_quant_strategies::strategy_common::SignalResult;
 use rust_quant_strategies::StrategyType;
 
-use crate::workflow::strategy_runner::{
-    StrategyExecutionStateManager as InternalStateManager,
-};
-use crate::workflow::time_checker::check_new_time as internal_check_new_time;
 use crate::workflow::signal_logger::save_signal_log_async;
+use crate::workflow::strategy_runner::StrategyExecutionStateManager as InternalStateManager;
+use crate::workflow::time_checker::check_new_time as internal_check_new_time;
 
 // TODO: StrategyJobSignalLog 需要迁移到新的位置
 // 暂时使用简化的日志记录
@@ -33,14 +31,14 @@ impl ExecutionStateManager for OrchestrationStateManager {
     fn try_mark_processing(&self, key: &str, timestamp: i64) -> bool {
         InternalStateManager::try_mark_processing(key, timestamp)
     }
-    
+
     fn clear_processing(&self, key: &str) {
         // InternalStateManager 没有直接的清除方法，使用 mark_completed
         // 这里需要时间戳，但 trait 接口没有，暂时忽略
         // 在实际使用中，应该保存时间戳或者改进 trait 设计
         let _ = key; // 避免警告
     }
-    
+
     fn is_processing(&self, key: &str) -> bool {
         // InternalStateManager 没有直接的检查方法
         // 可以通过尝试标记来检查（副作用：会插入记录）
@@ -112,11 +110,11 @@ impl StrategyExecutionContext for OrchestrationExecutionContext {
     fn state_manager(&self) -> &dyn ExecutionStateManager {
         &self.state_manager
     }
-    
+
     fn time_checker(&self) -> &dyn TimeChecker {
         &self.time_checker
     }
-    
+
     fn signal_logger(&self) -> &dyn SignalLogger {
         &self.signal_logger
     }
@@ -125,11 +123,10 @@ impl StrategyExecutionContext for OrchestrationExecutionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_context_creation() {
         let context = OrchestrationExecutionContext::new(StrategyType::Vegas);
         assert!(context.state_manager().try_mark_processing("test:1H", 1000));
     }
 }
-

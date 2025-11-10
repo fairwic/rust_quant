@@ -1,16 +1,12 @@
 use std::env;
 
+use crate::signal_weight::{SignalCondition, SignalDirect, SignalType, SignalWeightsConfig};
 use crate::volatility::bollinger::BollingBandsSignalConfig;
-use crate::signal_weight::{
-    SignalCondition, SignalDirect, SignalType, SignalWeightsConfig,
-};
-use rust_quant_domain::{
-    BacktestResult, BasicRiskStrategyConfig, SignalResult,
-};
-use rust_quant_domain::Strategy;
-use rust_quant_common::CandleItem;
-use rust_quant_common::utils::time as time_util;
 use rust_quant_common::enums::common::{EnumAsStrTrait, PeriodEnum};
+use rust_quant_common::utils::time as time_util;
+use rust_quant_common::CandleItem;
+use rust_quant_domain::Strategy;
+use rust_quant_domain::{BacktestResult, BasicRiskStrategyConfig, SignalResult};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::debug;
@@ -130,7 +126,7 @@ impl VegasStrategy {
                     take_profit_price: None,
                     position_time: None,
                     signal_kline: None,
-                }
+                };
             }
         };
 
@@ -312,11 +308,11 @@ impl VegasStrategy {
 
     /// 获取指标组合
     pub fn get_indicator_combine(&self) -> IndicatorCombine {
-        use crate::volatility::bollinger::BollingBandsPlusIndicator;
         use crate::ema_indicator::EmaIndicator;
+        use crate::momentum::rsi::RsiIndicator;
         use crate::pattern::engulfing::KlineEngulfingIndicator;
         use crate::pattern::hammer::KlineHammerIndicator;
-        use crate::momentum::rsi::RsiIndicator;
+        use crate::volatility::bollinger::BollingBandsPlusIndicator;
         use crate::volume_indicator::VolumeRatioIndicator;
 
         let mut indicator_combine = IndicatorCombine::default();
@@ -382,7 +378,7 @@ impl VegasStrategy {
         // TODO: 暂时返回空结果，等待 strategies 包修复后重新实现
         // 原实现需要 strategy_common，暂时注释掉整个函数体
         unimplemented!("run_test 需要在 strategies 包修复后重新实现")
-        
+
         /* 原实现代码 - 暂时保留作为参考
         use rust_quant_domain;
 
@@ -409,7 +405,7 @@ impl VegasStrategy {
             min_length,
             &mut indicator_combine,
         )
-        */  // 结束注释块
+        */ // 结束注释块
     }
 
     // 私有辅助方法

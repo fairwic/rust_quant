@@ -79,7 +79,7 @@ impl BackTestLogModel {
 
         let duration = start_time.elapsed();
         let last_id = result.last_insert_id() as i64;
-        
+
         info!(
             "insert_back_test_log: id={}, 耗时={}ms",
             last_id,
@@ -90,7 +90,11 @@ impl BackTestLogModel {
     }
 
     /// 更新持仓统计数据
-    pub async fn update_position_stats(&self, back_test_id: i64, stats: PositionStats) -> Result<u64> {
+    pub async fn update_position_stats(
+        &self,
+        back_test_id: i64,
+        stats: PositionStats,
+    ) -> Result<u64> {
         let pool = get_db_pool();
 
         let result = sqlx::query(

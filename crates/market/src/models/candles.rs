@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::{MySql, QueryBuilder};
 use tracing::{debug, error, info};
 
-use rust_quant_core::database::get_db_pool;
 use super::{CandlesEntity, SelectCandleReqDto, SelectTime, TimeDirect};
 use okx::dto::market_dto::CandleOkxRespDto;
+use rust_quant_core::database::get_db_pool;
 
 #[derive(Debug)]
 enum TimeInterval {
@@ -102,12 +102,7 @@ impl CandlesModel {
     }
 
     /// 删除大于等于指定时间的数据
-    pub async fn delete_lg_time(
-        &self,
-        inst_id: &str,
-        time_interval: &str,
-        ts: i64,
-    ) -> Result<u64> {
+    pub async fn delete_lg_time(&self, inst_id: &str, time_interval: &str, ts: i64) -> Result<u64> {
         let table_name = Self::get_table_name(inst_id, time_interval);
         let pool = get_db_pool();
 
@@ -116,7 +111,11 @@ impl CandlesModel {
             .execute(pool)
             .await?;
 
-        debug!("删除大于等于 {} 的数据，影响行数: {}", ts, result.rows_affected());
+        debug!(
+            "删除大于等于 {} 的数据，影响行数: {}",
+            ts,
+            result.rows_affected()
+        );
         Ok(result.rows_affected())
     }
 
@@ -230,7 +229,10 @@ impl CandlesModel {
             table_name
         );
 
-        let placeholders: Vec<String> = candles.iter().map(|_| "(?, ?, ?, ?, ?, ?, ?, ?)".to_string()).collect();
+        let placeholders: Vec<String> = candles
+            .iter()
+            .map(|_| "(?, ?, ?, ?, ?, ?, ?, ?)".to_string())
+            .collect();
         query.push_str(&placeholders.join(", "));
 
         query.push_str(
@@ -259,7 +261,11 @@ impl CandlesModel {
         }
 
         let result = sql_query.execute(pool).await?;
-        debug!("批量 upsert {} 条 K线数据，影响行数: {}", candles.len(), result.rows_affected());
+        debug!(
+            "批量 upsert {} 条 K线数据，影响行数: {}",
+            candles.len(),
+            result.rows_affected()
+        );
         Ok(result.rows_affected())
     }
 

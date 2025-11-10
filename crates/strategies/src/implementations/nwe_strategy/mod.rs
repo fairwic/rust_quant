@@ -5,20 +5,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
 
-use rust_quant_indicators::volatility::ATRStopLoos;
-use rust_quant_indicators::trend::nwe_indicator::NweIndicator;
 use rust_quant_indicators::momentum::RsiIndicator;
+use rust_quant_indicators::trend::nwe_indicator::NweIndicator;
+use rust_quant_indicators::volatility::ATRStopLoos;
 use rust_quant_indicators::volume::VolumeRatioIndicator;
 // ⭐ 使用新的 indicators::nwe 模块
+use crate::strategy_common::{BackTestResult, BasicRiskStrategyConfig, SignalResult};
+use crate::{time_util, CandleItem};
 use rust_quant_indicators::trend::nwe::{
-    NweIndicatorCombine,
-    NweIndicatorConfig,
-    NweIndicatorValues,
+    NweIndicatorCombine, NweIndicatorConfig, NweIndicatorValues,
 };
-use crate::strategy_common::{
-    BackTestResult, BasicRiskStrategyConfig, SignalResult,
-};
-use crate::{CandleItem, time_util};
 
 /// NWE 策略配置与执行器
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,7 +75,7 @@ impl NweStrategy {
             atr_period: config.atr_period,
             atr_multiplier: config.atr_multiplier,
         };
-        
+
         Self {
             combine_indicator: NweIndicatorCombine::new(&indicator_config),
             config,
@@ -209,7 +205,10 @@ impl NweStrategy {
         signal_result.open_price = candles.last().unwrap().c;
 
         info!("NWE signal values: {:#?}", values);
-        info!("ts : {:#?}", rust_quant_common::utils::time::mill_time_to_datetime_shanghai(signal_result.ts));
+        info!(
+            "ts : {:#?}",
+            rust_quant_common::utils::time::mill_time_to_datetime_shanghai(signal_result.ts)
+        );
         signal_result.single_value = Some(json!(values.clone()).to_string());
         signal_result.single_result = Some(json!(signal_result.clone()).to_string());
 
@@ -246,7 +245,7 @@ impl NweStrategy {
             |ic, data_item| {
                 // ⭐ 使用新的 next() 方法，返回 NweIndicatorValues
                 let indicator_values = ic.next(data_item);
-                
+
                 // 转换为策略层的 NweSignalValues
                 NweSignalValues {
                     rsi_value: indicator_values.rsi_value,

@@ -1,8 +1,8 @@
+use crate::profit_stop_loss::ProfitStopLoss;
 use rust_quant_common::utils::time;
 use rust_quant_indicators::momentum::kdj::{KdjSimpleIndicator, KDJ};
 use rust_quant_indicators::momentum::macd::MacdSimpleIndicator;
 use rust_quant_market::models::CandlesEntity;
-use crate::profit_stop_loss::ProfitStopLoss;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 

@@ -40,4 +40,3 @@ impl From<&CandleOkxRespDto> for CandlesEntity {
         }
     }
 }
-

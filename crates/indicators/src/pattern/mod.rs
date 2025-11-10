@@ -20,4 +20,3 @@ pub use fair_value_gap_indicator::*;
 pub use leg_detection_indicator::*;
 pub use market_structure_indicator::*;
 pub use premium_discount_indicator::*;
-

@@ -1,7 +1,7 @@
 use anyhow::Result;
+use rust_quant_core::database::get_db_pool;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, MySql, QueryBuilder};
-use rust_quant_core::database::get_db_pool;
 
 /// Tickers Volume 数据表实体
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
@@ -26,13 +26,12 @@ impl TickersVolumeModel {
     /// 根据 inst_id 查询
     pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersVolume>> {
         let pool = get_db_pool();
-        let results = sqlx::query_as::<_, TickersVolume>(
-            "SELECT * FROM tickers_volume WHERE inst_id = ?"
-        )
-        .bind(inst_id)
-        .fetch_all(pool)
-        .await?;
-        
+        let results =
+            sqlx::query_as::<_, TickersVolume>("SELECT * FROM tickers_volume WHERE inst_id = ?")
+                .bind(inst_id)
+                .fetch_all(pool)
+                .await?;
+
         Ok(results)
     }
 
@@ -43,7 +42,7 @@ impl TickersVolumeModel {
             .bind(inst_id)
             .execute(pool)
             .await?;
-        
+
         Ok(result.rows_affected())
     }
 
@@ -54,9 +53,8 @@ impl TickersVolumeModel {
         }
 
         let pool = get_db_pool();
-        let mut query_builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO tickers_volume (inst_id, period, ts, oi, vol) "
-        );
+        let mut query_builder: QueryBuilder<MySql> =
+            QueryBuilder::new("INSERT INTO tickers_volume (inst_id, period, ts, oi, vol) ");
 
         query_builder.push_values(list.iter(), |mut b, ticker| {
             b.push_bind(&ticker.inst_id)
@@ -67,7 +65,7 @@ impl TickersVolumeModel {
         });
 
         let result = query_builder.build().execute(pool).await?;
-        
+
         Ok(result.rows_affected())
     }
 }

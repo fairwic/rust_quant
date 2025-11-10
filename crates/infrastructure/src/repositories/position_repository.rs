@@ -1,20 +1,20 @@
 //! 持仓仓储实现
 
-use async_trait::async_trait;
 use anyhow::Result;
-use sqlx::{MySql, Pool, FromRow};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use sqlx::{FromRow, MySql, Pool};
 
-use rust_quant_domain::{Position, PositionStatus, PositionSide, MarginMode};
-use rust_quant_domain::{Price, Volume};
 use rust_quant_domain::traits::PositionRepository;
+use rust_quant_domain::{MarginMode, Position, PositionSide, PositionStatus};
+use rust_quant_domain::{Price, Volume};
 
 /// 持仓数据库实体
 #[derive(Debug, Clone, FromRow, serde::Serialize, serde::Deserialize)]
 pub struct PositionEntity {
     pub id: String,
     pub symbol: String,
-    pub side: String,  // long/short/both
+    pub side: String, // long/short/both
     pub quantity: f64,
     pub available_quantity: f64,
     pub entry_price: f64,
@@ -23,9 +23,9 @@ pub struct PositionEntity {
     pub realized_pnl: f64,
     pub unrealized_pnl_ratio: f64,
     pub leverage: f64,
-    pub margin_mode: String,  // cross/isolated
+    pub margin_mode: String, // cross/isolated
     pub margin: f64,
-    pub status: String,  // open/closed/partial_closed
+    pub status: String, // open/closed/partial_closed
     pub opened_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub closed_at: Option<DateTime<Utc>>,
@@ -40,20 +40,20 @@ impl PositionEntity {
             "both" => PositionSide::Both,
             _ => PositionSide::Long,
         };
-        
+
         let margin_mode = match self.margin_mode.as_str() {
             "cross" => MarginMode::Cross,
             "isolated" => MarginMode::Isolated,
             _ => MarginMode::Cross,
         };
-        
+
         let status = match self.status.as_str() {
             "open" => PositionStatus::Open,
             "closed" => PositionStatus::Closed,
             "partial_closed" => PositionStatus::PartialClosed,
             _ => PositionStatus::Open,
         };
-        
+
         let mut position = Position::new(
             self.id.clone(),
             self.symbol.clone(),
@@ -63,7 +63,7 @@ impl PositionEntity {
             self.leverage,
             margin_mode,
         )?;
-        
+
         // 更新其他字段
         position.available_quantity = Volume::new(self.available_quantity)?;
         position.current_price = Price::new(self.current_price)?;
@@ -73,10 +73,10 @@ impl PositionEntity {
         position.status = status;
         position.updated_at = self.updated_at;
         position.closed_at = self.closed_at;
-        
+
         Ok(position)
     }
-    
+
     /// 从领域实体转换
     pub fn from_domain(position: &Position) -> Self {
         Self {
@@ -122,72 +122,61 @@ impl SqlxPositionRepository {
 #[async_trait]
 impl PositionRepository for SqlxPositionRepository {
     async fn find_by_id(&self, id: &str) -> Result<Option<Position>> {
-        let entity = sqlx::query_as::<_, PositionEntity>(
-            "SELECT * FROM positions WHERE id = ?"
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
-        
+        let entity = sqlx::query_as::<_, PositionEntity>("SELECT * FROM positions WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+
         match entity {
             Some(e) => Ok(Some(e.to_domain()?)),
             None => Ok(None),
         }
     }
-    
+
     async fn find_by_symbol(&self, symbol: &str) -> Result<Vec<Position>> {
-        let entities = sqlx::query_as::<_, PositionEntity>(
-            "SELECT * FROM positions WHERE symbol = ?"
-        )
-        .bind(symbol)
-        .fetch_all(&self.pool)
-        .await?;
-        
-        entities.into_iter()
-            .map(|e| e.to_domain())
-            .collect()
+        let entities =
+            sqlx::query_as::<_, PositionEntity>("SELECT * FROM positions WHERE symbol = ?")
+                .bind(symbol)
+                .fetch_all(&self.pool)
+                .await?;
+
+        entities.into_iter().map(|e| e.to_domain()).collect()
     }
-    
+
     async fn find_open_positions(&self) -> Result<Vec<Position>> {
-        let entities = sqlx::query_as::<_, PositionEntity>(
-            "SELECT * FROM positions WHERE status = 'open'"
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        
-        entities.into_iter()
-            .map(|e| e.to_domain())
-            .collect()
+        let entities =
+            sqlx::query_as::<_, PositionEntity>("SELECT * FROM positions WHERE status = 'open'")
+                .fetch_all(&self.pool)
+                .await?;
+
+        entities.into_iter().map(|e| e.to_domain()).collect()
     }
-    
+
     async fn find_by_status(&self, status: PositionStatus) -> Result<Vec<Position>> {
         let status_str = match status {
             PositionStatus::Open => "open",
             PositionStatus::Closed => "closed",
             PositionStatus::PartialClosed => "partial_closed",
         };
-        
-        let entities = sqlx::query_as::<_, PositionEntity>(
-            "SELECT * FROM positions WHERE status = ?"
-        )
-        .bind(status_str)
-        .fetch_all(&self.pool)
-        .await?;
-        
-        entities.into_iter()
-            .map(|e| e.to_domain())
-            .collect()
+
+        let entities =
+            sqlx::query_as::<_, PositionEntity>("SELECT * FROM positions WHERE status = ?")
+                .bind(status_str)
+                .fetch_all(&self.pool)
+                .await?;
+
+        entities.into_iter().map(|e| e.to_domain()).collect()
     }
-    
+
     async fn save(&self, position: &Position) -> Result<()> {
         let entity = PositionEntity::from_domain(position);
-        
+
         sqlx::query(
             "INSERT INTO positions 
              (id, symbol, side, quantity, available_quantity, entry_price, 
               current_price, unrealized_pnl, realized_pnl, unrealized_pnl_ratio,
               leverage, margin_mode, margin, status, opened_at, updated_at, closed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&entity.id)
         .bind(&entity.symbol)
@@ -208,20 +197,20 @@ impl PositionRepository for SqlxPositionRepository {
         .bind(entity.closed_at)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
+
     async fn update(&self, position: &Position) -> Result<()> {
         let entity = PositionEntity::from_domain(position);
-        
+
         sqlx::query(
             "UPDATE positions 
              SET symbol = ?, side = ?, quantity = ?, available_quantity = ?,
                  entry_price = ?, current_price = ?, unrealized_pnl = ?, 
                  realized_pnl = ?, unrealized_pnl_ratio = ?, leverage = ?,
                  margin_mode = ?, margin = ?, status = ?, updated_at = ?, closed_at = ?
-             WHERE id = ?"
+             WHERE id = ?",
         )
         .bind(&entity.symbol)
         .bind(&entity.side)
@@ -241,17 +230,16 @@ impl PositionRepository for SqlxPositionRepository {
         .bind(&entity.id)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
+
     async fn delete(&self, id: &str) -> Result<()> {
         sqlx::query("DELETE FROM positions WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;
-        
+
         Ok(())
     }
 }
-

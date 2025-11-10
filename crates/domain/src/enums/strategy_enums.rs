@@ -42,7 +42,7 @@ impl StrategyType {
             StrategyType::Custom(_) => "custom",
         }
     }
-    
+
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "vegas" => Some(StrategyType::Vegas),
@@ -132,7 +132,7 @@ impl Timeframe {
             Timeframe::MN1 => "1M",
         }
     }
-    
+
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "1m" => Some(Timeframe::M1),
@@ -151,7 +151,7 @@ impl Timeframe {
             _ => None,
         }
     }
-    
+
     /// 获取时间周期对应的分钟数
     pub fn to_minutes(&self) -> i64 {
         match self {
@@ -175,14 +175,14 @@ impl Timeframe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_strategy_type_from_str() {
         assert_eq!(StrategyType::from_str("vegas"), Some(StrategyType::Vegas));
         assert_eq!(StrategyType::from_str("NWE"), Some(StrategyType::Nwe));
         assert_eq!(StrategyType::from_str("unknown"), None);
     }
-    
+
     #[test]
     fn test_timeframe_conversion() {
         assert_eq!(Timeframe::from_str("1H"), Some(Timeframe::H1));
@@ -190,5 +190,3 @@ mod tests {
         assert_eq!(Timeframe::D1.to_minutes(), 1440);
     }
 }
-
-

@@ -1,16 +1,16 @@
 //! K线数据适配器
-//! 
+//!
 //! 解决孤儿规则问题：为外部类型(CandlesEntity)实现外部trait(ta库的High/Low/Close)
-//! 
+//!
 //! ## 设计模式
-//! 
+//!
 //! 使用Newtype模式创建本地wrapper，然后为wrapper实现trait
 
 use rust_quant_market::models::CandlesEntity;
-use ta::{High, Low, Close, Open, Volume};
+use ta::{Close, High, Low, Open, Volume};
 
 /// K线数据的适配器包装器
-/// 
+///
 /// 用于为 `CandlesEntity` 实现 `ta` 库的 trait
 #[derive(Debug, Clone)]
 pub struct CandleAdapter {
@@ -115,5 +115,3 @@ mod tests {
         assert_eq!(adapters[0].close(), 50500.0);
     }
 }
-
-

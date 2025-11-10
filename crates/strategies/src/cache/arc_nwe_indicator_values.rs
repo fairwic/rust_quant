@@ -2,10 +2,10 @@
 //! 参考 arc_vegas_indicator_values.rs 的设计
 
 // NweIndicatorCombine 在 indicators 包中
-use rust_quant_indicators::nwe::indicator_combine::NweIndicatorCombine;
-use rust_quant_common::CandleItem;
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;
+use rust_quant_common::CandleItem;
+use rust_quant_indicators::nwe::indicator_combine::NweIndicatorCombine;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
@@ -220,16 +220,17 @@ impl NweIndicatorValuesManager {
 
     /// 记录性能指标
     async fn record_metrics(&self, key: &str, is_read: bool, time_ms: u64) {
-        let mut entry = self.metrics.entry(key.to_string()).or_insert_with(|| {
-            IndicatorMetrics {
+        let mut entry = self
+            .metrics
+            .entry(key.to_string())
+            .or_insert_with(|| IndicatorMetrics {
                 read_count: 0,
                 write_count: 0,
                 last_read_time_ms: 0,
                 last_write_time_ms: 0,
                 max_read_time_ms: 0,
                 max_write_time_ms: 0,
-            }
-        });
+            });
 
         let metrics = entry.value_mut();
         if is_read {
@@ -308,4 +309,3 @@ pub async fn update_nwe_indicator_values(
         .update_indicator_values(hash_key, indicators)
         .await
 }
-

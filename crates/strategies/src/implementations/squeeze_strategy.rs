@@ -1,10 +1,10 @@
-use rust_quant_common::utils::time;
-use rust_quant_indicators::volatility::atr::ATR;
-use rust_quant_indicators::momentum::kdj::KdjCandle;
-use rust_quant_market::models::CandlesEntity;
 use crate::strategy_common::SignalResult;
 use clap::builder::Str;
 use ndarray::{s, Array1};
+use rust_quant_common::utils::time;
+use rust_quant_indicators::momentum::kdj::KdjCandle;
+use rust_quant_indicators::volatility::atr::ATR;
+use rust_quant_market::models::CandlesEntity;
 use serde::{Deserialize, Serialize};
 use std::env;
 use ta::indicators::{AverageTrueRange, ExponentialMovingAverage, SimpleMovingAverage};

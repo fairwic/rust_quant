@@ -1,5 +1,5 @@
 //! 市场影响预测器
-//! 
+//!
 //! 基于 AI 分析新闻和事件对市场的潜在影响
 
 use async_trait::async_trait;
@@ -10,19 +10,19 @@ use serde::{Deserialize, Serialize};
 pub struct MarketImpactPrediction {
     /// 资产代码（如 "BTC-USDT"）
     pub asset: String,
-    
+
     /// 预测影响分数（-1.0 到 1.0）
     /// -1.0: 极度利空
     ///  0.0: 中性
     ///  1.0: 极度利好
     pub impact_score: f64,
-    
+
     /// 时间窗口（小时）
     pub time_horizon_hours: u32,
-    
+
     /// 预测置信度（0.0 到 1.0）
     pub confidence: f64,
-    
+
     /// 影响因素
     pub factors: Vec<String>,
 }
@@ -61,7 +61,7 @@ impl MarketImpactPredictor for AIPredictorEngine {
         //  事件: {event.title}
         //  描述: {event.description}
         //  请给出：1) 影响分数（-1到1）2) 时间窗口 3) 置信度"
-        
+
         Ok(MarketImpactPrediction {
             asset: asset.to_string(),
             impact_score: 0.0,
@@ -71,4 +71,3 @@ impl MarketImpactPredictor for AIPredictorEngine {
         })
     }
 }
-

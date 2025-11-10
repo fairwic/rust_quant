@@ -1,8 +1,6 @@
+use crate::strategy_common::{run_back_test, BackTestResult, SignalResult, TradeRecord};
 use rust_quant_indicators::volatility::atr::ATR;
 use rust_quant_market::models::CandlesEntity;
-use crate::strategy_common::{
-    run_back_test, BackTestResult, SignalResult, TradeRecord,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cmp::{max, min};
@@ -11,7 +9,7 @@ use ta::indicators::ExponentialMovingAverage;
 use ta::Next;
 use tracing::warn;
 
-use crate::framework::strategy_common::BasicRiskStrategyConfig;  // ⭐ 正确路径
+use crate::framework::strategy_common::BasicRiskStrategyConfig; // ⭐ 正确路径
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct UtBootStrategy {

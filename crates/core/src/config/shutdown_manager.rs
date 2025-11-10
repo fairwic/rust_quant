@@ -1,9 +1,9 @@
+use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
-use anyhow::Result;
 
 /// 优雅停止管理器 - 标准实现
 pub struct ShutdownManager {
@@ -16,7 +16,11 @@ pub struct ShutdownManager {
 }
 
 /// 关闭回调函数
-pub type ShutdownHook = Box<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> + Send + Sync>;
+pub type ShutdownHook = Box<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// 关闭配置
 #[derive(Debug, Clone)]
@@ -65,15 +69,13 @@ impl ShutdownManager {
     }
 
     /// 注册关闭回调
-    pub async fn register_shutdown_hook<F, Fut>(&self, name: String, hook: F) 
+    pub async fn register_shutdown_hook<F, Fut>(&self, name: String, hook: F)
     where
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<()>> + Send + 'static,
     {
-        let boxed_hook: ShutdownHook = Box::new(move || {
-            Box::pin(hook())
-        });
-        
+        let boxed_hook: ShutdownHook = Box::new(move || Box::pin(hook()));
+
         let mut hooks = self.shutdown_hooks.write().await;
         hooks.push(boxed_hook);
         info!("注册关闭回调: {}", name);
@@ -82,7 +84,11 @@ impl ShutdownManager {
     /// 执行优雅关闭
     pub async fn shutdown(&self) -> Result<()> {
         // 设置关闭标志
-        if self.is_shutting_down.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        if self
+            .is_shutting_down
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
             warn!("关闭已在进行中");
             return Ok(());
         }
@@ -91,7 +97,8 @@ impl ShutdownManager {
         let start_time = std::time::Instant::now();
 
         // 使用总超时包装整个关闭过程
-        let shutdown_result = tokio::time::timeout(self.config.total_timeout, self.execute_shutdown_hooks()).await;
+        let shutdown_result =
+            tokio::time::timeout(self.config.total_timeout, self.execute_shutdown_hooks()).await;
 
         match shutdown_result {
             Ok(Ok(())) => {
@@ -121,7 +128,7 @@ impl ShutdownManager {
     async fn execute_shutdown_hooks(&self) -> Result<()> {
         let hooks = self.shutdown_hooks.read().await;
         let hook_count = hooks.len();
-        
+
         if hook_count == 0 {
             info!("没有注册的关闭回调");
             return Ok(());
@@ -131,23 +138,33 @@ impl ShutdownManager {
 
         for (index, hook) in hooks.iter().enumerate() {
             let hook_start = std::time::Instant::now();
-            
+
             info!("执行关闭回调 {}/{}", index + 1, hook_count);
-            
+
             // 为每个钩子设置超时
             let hook_result = tokio::time::timeout(self.config.hook_timeout, hook()).await;
-            
+
             match hook_result {
                 Ok(Ok(())) => {
                     let elapsed = hook_start.elapsed();
-                    info!("关闭回调 {}/{} 完成，耗时: {:?}", index + 1, hook_count, elapsed);
+                    info!(
+                        "关闭回调 {}/{} 完成，耗时: {:?}",
+                        index + 1,
+                        hook_count,
+                        elapsed
+                    );
                 }
                 Ok(Err(e)) => {
                     error!("关闭回调 {}/{} 失败: {}", index + 1, hook_count, e);
                     // 继续执行其他回调，不中断整个关闭过程
                 }
                 Err(_) => {
-                    error!("关闭回调 {}/{} 超时 ({:?})", index + 1, hook_count, self.config.hook_timeout);
+                    error!(
+                        "关闭回调 {}/{} 超时 ({:?})",
+                        index + 1,
+                        hook_count,
+                        self.config.hook_timeout
+                    );
                     // 继续执行其他回调
                 }
             }
@@ -162,42 +179,45 @@ impl ShutdownManager {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            
-            let mut sigterm = signal(SignalKind::terminate())
-                .expect("Failed to register SIGTERM handler");
-            let mut sigint = signal(SignalKind::interrupt())
-                .expect("Failed to register SIGINT handler");
-            let mut sigquit = signal(SignalKind::quit())
-                .expect("Failed to register SIGQUIT handler");
-            
+
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to register SIGTERM handler");
+            let mut sigint =
+                signal(SignalKind::interrupt()).expect("Failed to register SIGINT handler");
+            let mut sigquit =
+                signal(SignalKind::quit()).expect("Failed to register SIGQUIT handler");
+
             tokio::select! {
                 _ = sigterm.recv() => "SIGTERM",
-                _ = sigint.recv() => "SIGINT", 
+                _ = sigint.recv() => "SIGINT",
                 _ = sigquit.recv() => "SIGQUIT",
             }
         }
-        
+
         #[cfg(not(unix))]
         {
-            tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
+            tokio::signal::ctrl_c()
+                .await
+                .expect("Failed to listen for ctrl-c");
             "CTRL+C"
         }
     }
 }
 
 /// 全局关闭管理器实例
-static SHUTDOWN_MANAGER: once_cell::sync::OnceCell<ShutdownManager> = once_cell::sync::OnceCell::new();
+static SHUTDOWN_MANAGER: once_cell::sync::OnceCell<ShutdownManager> =
+    once_cell::sync::OnceCell::new();
 
 /// 初始化全局关闭管理器
 pub fn init_shutdown_manager(config: Option<ShutdownConfig>) -> &'static ShutdownManager {
-    SHUTDOWN_MANAGER.get_or_init(|| {
-        ShutdownManager::new(config.unwrap_or_default())
-    })
+    SHUTDOWN_MANAGER.get_or_init(|| ShutdownManager::new(config.unwrap_or_default()))
 }
 
 /// 获取全局关闭管理器
 pub fn get_shutdown_manager() -> &'static ShutdownManager {
-    SHUTDOWN_MANAGER.get().expect("ShutdownManager not initialized")
+    SHUTDOWN_MANAGER
+        .get()
+        .expect("ShutdownManager not initialized")
 }
 
 #[cfg(test)]
@@ -212,16 +232,18 @@ mod tests {
             hook_timeout: Duration::from_secs(2),
             force_exit_on_timeout: false,
         };
-        
+
         let manager = ShutdownManager::new(config);
-        
+
         // 注册测试回调
-        manager.register_shutdown_hook("test_hook".to_string(), || async {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            info!("测试回调执行完成");
-            Ok(())
-        }).await;
-        
+        manager
+            .register_shutdown_hook("test_hook".to_string(), || async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                info!("测试回调执行完成");
+                Ok(())
+            })
+            .await;
+
         // 执行关闭
         let result = manager.shutdown().await;
         assert!(result.is_ok());

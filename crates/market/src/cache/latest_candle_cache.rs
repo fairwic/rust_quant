@@ -41,32 +41,36 @@ pub struct InMemoryRedisLatestCandleCache {
 
 impl InMemoryRedisLatestCandleCache {
     pub fn new() -> Self {
-        Self { map: Arc::new(DashMap::new()) }
+        Self {
+            map: Arc::new(DashMap::new()),
+        }
     }
 }
 
-impl Default for InMemoryRedisLatestCandleCache { 
-    fn default() -> Self { 
-        Self::new() 
-    } 
+impl Default for InMemoryRedisLatestCandleCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LatestCandleCacheProvider for InMemoryRedisLatestCandleCache {
     fn get(&self, inst_id: &str, period: &str) -> Option<CandlesEntity> {
         self.map.get(&make_key(inst_id, period)).map(|v| v.clone())
     }
-    
+
     fn set(&self, inst_id: &str, period: &str, candle: CandlesEntity) {
         self.map.insert(make_key(inst_id, period), candle);
     }
-    
+
     fn remove(&self, inst_id: &str, period: &str) {
         self.map.remove(&make_key(inst_id, period));
     }
 
-    fn get_or_fetch<'a>(&'a self, inst_id: &'a str, period: &'a str)
-        -> Pin<Box<dyn Future<Output = Option<CandlesEntity>> + Send + 'a>>
-    {
+    fn get_or_fetch<'a>(
+        &'a self,
+        inst_id: &'a str,
+        period: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Option<CandlesEntity>> + Send + 'a>> {
         let key = make_key(inst_id, period);
         let map: Arc<DashMap<String, CandlesEntity>> = Arc::clone(&self.map);
         Box::pin(async move {
@@ -87,9 +91,12 @@ impl LatestCandleCacheProvider for InMemoryRedisLatestCandleCache {
         })
     }
 
-    fn set_both<'a>(&'a self, inst_id: &'a str, period: &'a str, candle: &'a CandlesEntity)
-        -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
-    {
+    fn set_both<'a>(
+        &'a self,
+        inst_id: &'a str,
+        period: &'a str,
+        candle: &'a CandlesEntity,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         let key = make_key(inst_id, period);
         let map: Arc<DashMap<String, CandlesEntity>> = Arc::clone(&self.map);
         Box::pin(async move {
@@ -98,7 +105,7 @@ impl LatestCandleCacheProvider for InMemoryRedisLatestCandleCache {
                 let rkey = latest_candle_key(inst_id, period);
                 let ttl = latest_candle_ttl_secs();
                 let payload = serde_json::to_string(candle).unwrap();
-                let _ : redis::RedisResult<()> = conn.set_ex::<_,_,()>(rkey, payload, ttl).await;
+                let _: redis::RedisResult<()> = conn.set_ex::<_, _, ()>(rkey, payload, ttl).await;
             }
         })
     }
@@ -112,6 +119,3 @@ pub static DEFAULT_PROVIDER: Lazy<Arc<dyn LatestCandleCacheProvider>> =
 pub fn default_provider() -> Arc<dyn LatestCandleCacheProvider> {
     Arc::clone(&DEFAULT_PROVIDER)
 }
-
-
-

@@ -6,7 +6,7 @@ use rust_quant_domain::value_objects::Percentage;
 pub struct DrawdownPolicy {
     /// 最大回撤限制
     pub max_drawdown: Percentage,
-    
+
     /// 警告回撤阈值
     pub warning_drawdown: Percentage,
 }
@@ -16,12 +16,12 @@ impl DrawdownPolicy {
     pub fn is_drawdown_exceeded(&self, current_drawdown: f64) -> bool {
         current_drawdown > self.max_drawdown.value()
     }
-    
+
     /// 是否达到警告阈值
     pub fn is_warning_level(&self, current_drawdown: f64) -> bool {
         current_drawdown > self.warning_drawdown.value()
     }
-    
+
     /// 获取建议动作
     pub fn get_action(&self, current_drawdown: f64) -> DrawdownAction {
         if self.is_drawdown_exceeded(current_drawdown) {
@@ -47,9 +47,8 @@ pub enum DrawdownAction {
 impl Default for DrawdownPolicy {
     fn default() -> Self {
         Self {
-            max_drawdown: Percentage::new(20.0).unwrap(),      // 最大20%回撤
-            warning_drawdown: Percentage::new(15.0).unwrap(),  // 15%警告
+            max_drawdown: Percentage::new(20.0).unwrap(), // 最大20%回撤
+            warning_drawdown: Percentage::new(15.0).unwrap(), // 15%警告
         }
     }
 }
-

@@ -1,28 +1,26 @@
 //! 策略执行器公共逻辑
 //!
 //! 使用 trait 接口解耦 strategies 和 orchestration 的循环依赖
-//! 
+//!
 //! 架构设计：
 //! - strategies 定义 trait 接口（framework::execution_traits）
 //! - orchestration 实现 trait 接口
 //! - executor_common 依赖 trait 而非具体实现
-//! 
+//!
 //! 这样实现单向依赖：orchestration → strategies
 
 use anyhow::{anyhow, Result};
 use std::collections::VecDeque;
 use tracing::{debug, info, warn};
 
-use rust_quant_market::models::CandlesEntity;
 use crate::framework::config::strategy_config::StrategyConfig;
 use crate::framework::execution_traits::{
-    ExecutionStateManager, TimeChecker, SignalLogger, StrategyExecutionContext,
+    ExecutionStateManager, SignalLogger, StrategyExecutionContext, TimeChecker,
 };
-use crate::strategy_common::{
-    parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult,
-};
+use crate::strategy_common::{parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult};
 use crate::StrategyType;
 use rust_quant_common::CandleItem;
+use rust_quant_market::models::CandlesEntity;
 
 /// 执行上下文 - 封装策略执行的公共数据
 pub struct ExecutionContext {
@@ -81,7 +79,7 @@ pub fn get_recent_candles(candle_items: &VecDeque<CandleItem>, n: usize) -> Vec<
 }
 
 /// 处理策略信号（仅记录日志）
-/// 
+///
 /// 注意：实际的订单执行应该由 orchestration 或 execution 层负责
 /// strategies 层只负责产生信号，不负责执行订单
 pub fn process_signal(
@@ -99,7 +97,7 @@ pub fn process_signal(
         );
         return Ok(());
     }
-    
+
     warn!(
         "{} 策略信号！inst_id={}, period={}, should_buy={}, should_sell={}, ts={}",
         strategy_type.as_str(),
@@ -148,13 +146,17 @@ pub fn validate_candles(candles: &[CandlesEntity]) -> Result<i64> {
     if candles.is_empty() {
         return Err(anyhow!("K线数据为空"));
     }
-    
+
     let last_ts = candles
         .last()
         .ok_or_else(|| anyhow!("无法获取最后一根K线"))?
         .ts;
-    
-    debug!("K线数据验证通过，共 {} 根，最后时间戳: {}", candles.len(), last_ts);
+
+    debug!(
+        "K线数据验证通过，共 {} 根，最后时间戳: {}",
+        candles.len(),
+        last_ts
+    );
     Ok(last_ts)
 }
 
@@ -184,7 +186,7 @@ mod tests {
             v: 1000.0,
             confirm: 1,
         };
-        
+
         update_candle_queue(&mut queue, candle, 3);
         assert_eq!(queue.len(), 1);
     }
@@ -199,14 +201,7 @@ mod tests {
     #[tokio::test]
     async fn test_should_execute_strategy_with_noop() {
         let context = DefaultExecutionContext::new();
-        let result = should_execute_strategy(
-            "BTC-USDT:1H",
-            1000,
-            2000,
-            "1H",
-            false,
-            &context,
-        );
+        let result = should_execute_strategy("BTC-USDT:1H", 1000, 2000, "1H", false, &context);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), true);
     }

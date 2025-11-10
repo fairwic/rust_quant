@@ -12,8 +12,8 @@ pub(crate) fn is_within_business_hours(ts: i64) -> bool {
     let now_utc: DateTime<Utc> = DateTime::from_timestamp_millis(ts).unwrap();
     // 定义美国东部时间的偏移量
     // EST（标准时间）为UTC-5，EDT（夏令时）为UTC-4
-    let est_offset = FixedOffset::west(3 * 3600); // 偏移量为-5小时
-    let edt_offset = FixedOffset::west(3 * 3600); // 偏移量为-4小时
+    let est_offset = FixedOffset::west_opt(3 * 3600).unwrap(); // 偏移量为-5小时
+    let edt_offset = FixedOffset::west_opt(3 * 3600).unwrap(); // 偏移量为-4小时
 
     // 判断当前时间是否在夏令时范围内
     let now_local: DateTime<Local> = Local::now();
@@ -150,14 +150,16 @@ pub fn format_to_period(period: &str, mut dt: Option<DateTime<Local>>) -> String
 
 // 将时间戳（秒）转换为指定格式的字符串
 pub fn timestamp_to_string(timestamp: i64, format: &str) -> String {
-    let naive = NaiveDateTime::from_timestamp_opt(timestamp, 0).unwrap();
+    let naive = DateTime::from_timestamp(timestamp, 0).unwrap().naive_utc();
     let datetime: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, Utc);
     datetime.format(format).to_string()
 }
 
 // 将时间戳（毫秒）转换为指定格式的字符串
 pub fn timestamp_ms_to_string(timestamp_ms: i64, format: &str) -> String {
-    let naive = NaiveDateTime::from_timestamp_millis(timestamp_ms).unwrap();
+    let naive = DateTime::from_timestamp_millis(timestamp_ms)
+        .unwrap()
+        .naive_utc();
     let datetime: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, Utc);
     datetime.format(format).to_string()
 }
@@ -241,10 +243,20 @@ pub fn get_period_start_timestamp(period: &str) -> i64 {
             .unwrap()
             .with_nanosecond(0)
             .unwrap(),
-        "1D" | "1Dutc" => now.date().and_hms(0, 0, 0).with_nanosecond(0).unwrap(),
+        "1D" | "1Dutc" => now
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap(),
         "4D" => now
-            .date()
-            .and_hms(0, 0, 0)
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap()
             .with_day(now.day() / 4 * 4)
             .unwrap()
             .with_nanosecond(0)
@@ -294,7 +306,7 @@ pub fn mill_time_to_datetime_shanghai(timestamp_ms: i64) -> Result<String, Strin
     match Utc.timestamp_millis_opt(timestamp_ms) {
         chrono::LocalResult::Single(datetime) => {
             // 假设时间戳是UTC时间，转换为东八区时间
-            let offset = FixedOffset::east(8 * 3600);
+            let offset = FixedOffset::east_opt(8 * 3600).unwrap();
             let local_datetime = datetime.with_timezone(&offset);
 
             // 格式化时间为字符串

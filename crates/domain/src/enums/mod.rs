@@ -3,7 +3,5 @@
 pub mod order_enums;
 pub mod strategy_enums;
 
-pub use order_enums::{OrderSide, OrderType, OrderStatus, PositionSide};
-pub use strategy_enums::{StrategyType, StrategyStatus, Timeframe};
-
-
+pub use order_enums::{OrderSide, OrderStatus, OrderType, PositionSide};
+pub use strategy_enums::{StrategyStatus, StrategyType, Timeframe};

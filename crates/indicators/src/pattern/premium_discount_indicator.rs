@@ -1,6 +1,4 @@
-use crate::market_structure_indicator::{
-    MarketStructureIndicator, MarketStructureValue,
-};
+use crate::market_structure_indicator::{MarketStructureIndicator, MarketStructureValue};
 use rust_quant_common::CandleItem;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;

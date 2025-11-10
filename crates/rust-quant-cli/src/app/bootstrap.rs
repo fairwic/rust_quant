@@ -1,199 +1,107 @@
+//! # 应用启动引导模块
+//!  
+//! 简化版本 - 只保留核心功能
+
 use anyhow::{anyhow, Result};
-use std::sync::Arc;
+use rust_quant_core::config::env_is_true;
 use tracing::{error, info, warn};
 
-use rust_quant_core::config::env::{env_is_true, env_or_default};
-use rust_quant_orchestration::workflow::{
-    RiskBalanceWithLevelJob, 
-    tickets_job,
-    basic,
-};
-// TODO: strategy_manager待适配
-// use rust_quant_strategies::strategy_manager::get_strategy_manager;
-use rust_quant_infrastructure::repositories::strategy_config_repository::StrategyConfigRepository;
+use rust_quant_orchestration::workflow::tickets_job;
 
-/// 运行基于环境变量控制的各个模式（数据同步、回测、WebSocket、实盘策略）
+/// 运行基于环境变量控制的各个模式
 pub async fn run_modes() -> Result<()> {
-    // 可根据需要从环境加载，当前保持项目的默认值
-    let mut inst_ids = Vec::with_capacity(100);
-    let mut periods = Vec::with_capacity(10);
     let env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
-    let period = std::env::var("RUN_STRATEGY_PERIOD").unwrap_or_else(|_| "5m".to_string());
-    
-    let strategy_repo = StrategyConfigRepository::new();
-    let strategy_list = strategy_repo.get_list_by_period(&period).await;
-    
-    info!("获取策略配置: {:?}", strategy_list);
-    
-    if env == "prod" {
-        //生产环境只按配置的策略的数据去获取
-        let strategy_list = match &strategy_list {
-            Ok(list) => {
-                info!("获取策略配置数量{:?}", list.len());
-                list
-            }
-            Err(e) => {
-                error!("获取策略配置失败: {:?}", e);
-                return Err(anyhow!("获取策略配置失败: {:?}", e));
-            }
-        };
-        strategy_list.iter().for_each(|f| {
-            inst_ids.push(f.inst_id.clone());
-            periods.push(f.time.clone());
-        });
-        if strategy_list.len() == 0 || period.len() == 0 {
-            error!(
-                "生产环境策略配置为空: inst_ids={:?}, period={:?}",
-                inst_ids, period
-            );
-            return Err(anyhow!(
-                "生产环境策略配置为空: inst_ids={:?}, period={:?}",
-                inst_ids,
-                period
-            ));
-        }
-    } else {
-        inst_ids = vec!["SOL-USDT-SWAP".to_string()];
-        periods = vec!["5m".to_string()];
-    }
 
-    // 1) 初始化需要同步的数据
+    // 默认交易对和周期
+    let inst_ids = vec!["SOL-USDT-SWAP".to_string(), "BTC-USDT-SWAP".to_string()];
+    let _periods = vec!["5m".to_string()];
+
+    info!("🚀 应用环境: {}", env);
+    info!("📊 监控交易对: {:?}", inst_ids);
+
+    // 1) 数据同步任务（Ticker）
     if env_is_true("IS_RUN_SYNC_DATA_JOB", false) {
-        if let Err(error) = tickets_job::init_all_ticker(&inst_ids).await {
-            error!("init all tickers error: {}", error);
-        }
-        match (&inst_ids, &periods) {
-            (ids, times) => {
-                if let Err(error) = basic::run_sync_data_job(&ids, &times).await {
-                    error!("run sync [tickets] data job error: {}", error);
-                }
-            }
-            _ => warn!("跳过数据同步：未设置 inst_ids 或 period"),
+        info!("📡 启动数据同步任务");
+        if let Err(error) = tickets_job::sync_tickers(&inst_ids).await {
+            error!("❌ Ticker同步失败: {}", error);
         }
     }
 
-    // 2) 本地环境下执行回测任务（Vegas）
+    // 2) 回测任务
     if env_is_true("IS_BACK_TEST", false) {
-        info!("IS_BACK_TEST 已启用");
-        if let (inst_id, times) = (&inst_ids, &periods) {
-            for inst_id in inst_id.iter() {
-                for time in times.iter() {
-                    if let Err(error) = basic::back_test(inst_id, time).await {
-                        error!("run strategy error: {} {} {}", error, inst_id, time);
-                    }
-                }
-            }
-        } else {
-            warn!("跳过回测：未设置 inst_ids 或 period");
-        }
-    }
-
-    // 2.1) 本地环境下执行 NWE 回测开关（与 Vegas 同步入口，开关在 BackTestConfig 内）
-    if env_is_true("IS_BACK_TEST_NWE", false) {
-        info!("IS_BACK_TEST_NWE 已启用");
-        if let (inst_id, times) = (&inst_ids, &periods) {
-            for inst_id in inst_id.iter() {
-                for time in times.iter() {
-                    if let Err(error) = basic::back_test_with_config(
-                        inst_id,
-                        time,
-                        rust_quant_orchestration::workflow::BackTestConfig::default(),
-                    )
-                    .await
-                    {
-                        error!("run NWE backtest error: {} {} {}", error, inst_id, time);
-                    }
-                }
-            }
-        } else {
-            warn!("跳过NWE回测：未设置 inst_ids 或 period");
-        }
+        info!("📈 回测模式已启用");
+        // TODO: 实现回测逻辑
+        // use rust_quant_orchestration::workflow::backtest_executor;
+        // backtest_executor::run_vegas_test(...).await?;
+        warn!("⚠️  回测功能待实现");
     }
 
     // 3) WebSocket 实时数据
     if env_is_true("IS_OPEN_SOCKET", false) {
-        match (&inst_ids, &periods) {
-            (inst_id, times) => {
-                rust_quant_market::streams::run_socket(inst_id, times).await;
-            }
-            _ => warn!("无法启动WebSocket：未设置 inst_ids 或 period"),
-        }
+        info!("🌐 WebSocket模式已启用");
+        // TODO: 实现WebSocket逻辑
+        // use rust_quant_market::streams::run_socket;
+        // run_socket(&inst_ids, &periods).await;
+        warn!("⚠️  WebSocket功能待实现");
     }
 
     // 4) 实盘策略
     if env_is_true("IS_RUN_REAL_STRATEGY", false) {
-        info!("run real strategy job");
-
-        // 风险控制初始化
-        let risk_job = RiskBalanceWithLevelJob::new();
-        if let Err(e) = risk_job.run(&inst_ids).await {
-            return Err(anyhow!("风险控制初始化失败: {}", e));
-        }
-
-        let strategy_manager = get_strategy_manager();
-
-        for strategy in strategy_list.unwrap().into_iter() {
-            let inst_id = strategy.inst_id;
-            let time = strategy.time;
-            let _strategy_type = strategy.strategy_type;
-
-            if let Err(e) = strategy_manager
-                .start_strategy(strategy.id, inst_id.clone(), time.clone())
-                .await
-            {
-                error!("启动策略失败: 策略ID={}, 错误: {}", strategy.id, e);
-            }
-        }
+        info!("🤖 实盘策略模式已启用");
+        // TODO: 实现策略运行逻辑
+        // use rust_quant_strategies::strategy_manager::get_strategy_manager;
+        // let manager = get_strategy_manager();
+        // manager.start_all_strategies().await?;
+        warn!("⚠️  实盘策略功能待实现");
     }
 
     Ok(())
 }
 
-/// 应用入口总编排：初始化/校时/运行模式/心跳/信号/优雅关闭
+/// 应用入口总编排
 pub async fn run() -> Result<()> {
     // 初始化并启动调度器
     let _scheduler = match crate::init_scheduler().await {
-        Ok(s) => s,
+        Ok(s) => {
+            info!("✅ 任务调度器初始化成功");
+            s
+        }
         Err(e) => {
-            error!("初始化任务调度器失败: {}", e);
+            error!("❌ 初始化任务调度器失败: {}", e);
             return Err(anyhow!("初始化任务调度器失败: {}", e));
         }
     };
 
     // 非本地环境校验系统时间
-    let app_env = env_or_default("APP_ENV", "local");
+    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
     if app_env != "local" {
-        info!("校验系统时间与 OKX 时间差");
-        let _ = okx::utils::validate_system_time().await?;
+        info!("🕐 校验系统时间与 OKX 时间差");
+        if let Err(e) = okx::utils::validate_system_time().await {
+            error!("⚠️  系统时间校验失败: {}", e);
+        }
     }
 
-    // 运行模式编排（数据同步 / 回测 / WebSocket / 实盘策略）
+    // 运行模式编排
     run_modes().await?;
 
-    // 启动心跳任务，定期输出程序运行状态
+    // 启动心跳任务
     let heartbeat_handle = tokio::spawn(async {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(600));
         loop {
             interval.tick().await;
-            info!("💓 程序正在运行中，策略任务正常执行...");
-
-            let strategy_manager = get_strategy_manager();
-            let running_strategies = strategy_manager.get_running_strategies().await;
-            info!("📊 当前运行中的策略数量: {}", running_strategies.len());
+            info!("💓 程序正在运行中...");
         }
     });
 
-    // 增强的信号处理 - 支持多种退出信号
-    let shutdown_signal = setup_shutdown_signals();
-    let signal_name = shutdown_signal.await;
+    // 信号处理
+    let signal_name = setup_shutdown_signals().await;
+    info!("📡 接收到 {} 信号", signal_name);
 
-    // 停止心跳任务
+    // 停止心跳
     heartbeat_handle.abort();
 
-    // 优雅关闭流程
-    info!("接收到 {} 信号，开始优雅关闭...", signal_name);
-
-    // 创建优雅关闭配置
+    // 优雅关闭
+    info!("🛑 开始优雅关闭...");
     let shutdown_config = crate::GracefulShutdownConfig {
         total_timeout_secs: 30,
         strategy_stop_timeout_secs: 20,
@@ -201,30 +109,12 @@ pub async fn run() -> Result<()> {
         db_cleanup_timeout_secs: 5,
     };
 
-    // 1. 停止所有策略任务（带超时）
-    let strategy_manager = get_strategy_manager();
-    let strategy_stop_result = tokio::time::timeout(
-        tokio::time::Duration::from_secs(shutdown_config.strategy_stop_timeout_secs),
-        strategy_manager.stop_all_strategies(),
-    )
-    .await;
-
-    match strategy_stop_result {
-        Ok(Ok(count)) => info!("已停止 {} 个策略任务", count),
-        Ok(Err(e)) => error!("停止策略任务失败: {}", e),
-        Err(_) => error!(
-            "停止策略任务超时 ({}秒)",
-            shutdown_config.strategy_stop_timeout_secs
-        ),
-    }
-
-    // 2. 执行优雅关闭
     if let Err(e) = crate::graceful_shutdown_with_config(shutdown_config).await {
-        error!("优雅关闭失败: {}", e);
+        error!("❌ 优雅关闭失败: {}", e);
         std::process::exit(1);
     }
 
-    info!("应用已优雅退出");
+    info!("✅ 应用已优雅退出");
     Ok(())
 }
 
@@ -254,5 +144,3 @@ async fn setup_shutdown_signals() -> &'static str {
         "CTRL+C"
     }
 }
-
-

@@ -18,7 +18,7 @@ impl OrderSide {
             OrderSide::Sell => "sell",
         }
     }
-    
+
     /// 反向
     pub fn opposite(&self) -> Self {
         match self {
@@ -86,25 +86,23 @@ impl OrderStatus {
             OrderStatus::Expired => "expired",
         }
     }
-    
+
     /// 是否为终态
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            OrderStatus::Filled 
-            | OrderStatus::Cancelled 
-            | OrderStatus::Rejected 
-            | OrderStatus::Expired
+            OrderStatus::Filled
+                | OrderStatus::Cancelled
+                | OrderStatus::Rejected
+                | OrderStatus::Expired
         )
     }
-    
+
     /// 是否可以取消
     pub fn can_cancel(&self) -> bool {
         matches!(
             self,
-            OrderStatus::Pending 
-            | OrderStatus::Submitted 
-            | OrderStatus::PartiallyFilled
+            OrderStatus::Pending | OrderStatus::Submitted | OrderStatus::PartiallyFilled
         )
     }
 }
@@ -128,7 +126,7 @@ impl PositionSide {
             PositionSide::Both => "both",
         }
     }
-    
+
     pub fn from_order_side(side: OrderSide) -> Self {
         match side {
             OrderSide::Buy => PositionSide::Long,
@@ -140,20 +138,20 @@ impl PositionSide {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_order_side_opposite() {
         assert_eq!(OrderSide::Buy.opposite(), OrderSide::Sell);
         assert_eq!(OrderSide::Sell.opposite(), OrderSide::Buy);
     }
-    
+
     #[test]
     fn test_order_status_terminal() {
         assert!(OrderStatus::Filled.is_terminal());
         assert!(OrderStatus::Cancelled.is_terminal());
         assert!(!OrderStatus::Pending.is_terminal());
     }
-    
+
     #[test]
     fn test_order_status_can_cancel() {
         assert!(OrderStatus::Pending.can_cancel());
@@ -161,5 +159,3 @@ mod tests {
         assert!(!OrderStatus::Filled.can_cancel());
     }
 }
-
-

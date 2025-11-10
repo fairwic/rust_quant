@@ -1,34 +1,34 @@
 //! 风险持仓监控任务
-//! 
+//!
 //! 从 src/job/risk_positon_job.rs 迁移
 //! 适配新的DDD架构
 
 use anyhow::Result;
-use tracing::{info, error};
+use tracing::{error, info};
 
 // TODO: 需要PositionService和OrderService
 // use rust_quant_services::trading::{PositionService, OrderService};
 
 /// 风险持仓监控任务
-/// 
+///
 /// # Architecture
 /// orchestration层的风控任务
-/// 
+///
 /// # Responsibilities
 /// 1. 获取当前持仓
 /// 2. 检查止损价格设置
 /// 3. 检查未成交订单
 /// 4. 告警和自动处理
-/// 
+///
 /// # Migration Notes
 /// - ✅ 从 src/job/risk_positon_job.rs 迁移
 /// - ✅ 保持核心逻辑
 /// - ⏳ 需要集成PositionService
-/// 
+///
 /// # Example
 /// ```rust,ignore
 /// use rust_quant_orchestration::workflow::RiskPositionJob;
-/// 
+///
 /// let job = RiskPositionJob::new();
 /// job.run().await?;
 /// ```
@@ -38,17 +38,17 @@ impl RiskPositionJob {
     pub fn new() -> Self {
         Self
     }
-    
+
     /// 执行风险监控任务
-    /// 
+    ///
     /// # Current Implementation
     /// ⏳ 框架已建立，详细逻辑待完善
-    /// 
+    ///
     /// # Full Implementation (P1)
     /// ```rust,ignore
     /// // 1. 获取现有持仓
     /// let position_list = position_service.get_positions().await?;
-    /// 
+    ///
     /// // 2. 遍历检查
     /// for position in position_list {
     ///     // 2.1 检查止损价格
@@ -72,44 +72,44 @@ impl RiskPositionJob {
     /// ```
     pub async fn run(&self) -> Result<()> {
         info!("🔍 开始风险持仓监控...");
-        
+
         // ⏳ P1: 集成PositionService
         // 集成方式：
         // use rust_quant_services::trading::PositionService;
         // let position_service = PositionService::new();
         // let position_list = position_service.get_positions().await?;
-        
+
         // ⏳ P1: 持仓检查逻辑
         // for position in position_list {
         //     self.check_stop_loss(&position).await?;
         //     self.check_pending_orders(&position).await?;
         //     self.check_risk_threshold(&position).await?;
         // }
-        
+
         info!("✅ 风险持仓监控完成 (当前为框架实现)");
         Ok(())
     }
-    
+
     /// 检查止损价格设置
-    /// 
+    ///
     /// ⏳ P1: 待实现
     async fn check_stop_loss(&self, _position: &()) -> Result<()> {
         // TODO: 检查持仓是否设置止损
         // TODO: 如果未设置，计算并设置默认止损
         Ok(())
     }
-    
+
     /// 检查未成交订单
-    /// 
+    ///
     /// ⏳ P1: 待实现
     async fn check_pending_orders(&self, _position: &()) -> Result<()> {
         // TODO: 获取持仓相关的未成交订单
         // TODO: 检查订单合理性
         Ok(())
     }
-    
+
     /// 检查风险阈值
-    /// 
+    ///
     /// ⏳ P1: 待实现
     async fn check_risk_threshold(&self, _position: &()) -> Result<()> {
         // TODO: 检查持仓盈亏
@@ -127,7 +127,7 @@ impl Default for RiskPositionJob {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_risk_position_job() {
         let job = RiskPositionJob::new();

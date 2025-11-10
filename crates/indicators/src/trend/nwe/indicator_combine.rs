@@ -1,14 +1,14 @@
 //! NWE 指标组合
-//! 
+//!
 //! 将 RSI、Volume、NWE、ATR 等指标组合在一起计算
-//! 
+//!
 //! 注意：这是纯粹的计算逻辑，不包含交易决策
 
-use rust_quant_common::CandleItem;
 use crate::momentum::rsi::RsiIndicator;
-use crate::volume::VolumeRatioIndicator;
 use crate::trend::nwe_indicator::NweIndicator;
 use crate::volatility::atr_stop_loss::ATRStopLoos;
+use crate::volume::VolumeRatioIndicator;
+use rust_quant_common::CandleItem;
 
 /// NWE 指标组合配置
 #[derive(Debug, Clone)]
@@ -47,7 +47,7 @@ pub struct NweIndicatorValues {
 }
 
 /// NWE 指标组合
-/// 
+///
 /// 组合多个技术指标进行计算
 #[derive(Debug, Clone)]
 pub struct NweIndicatorCombine {
@@ -76,10 +76,10 @@ impl NweIndicatorCombine {
     }
 
     /// 推进所有指标并返回当前值
-    /// 
+    ///
     /// # 参数
     /// * `candle` - 当前K线数据
-    /// 
+    ///
     /// # 返回
     /// * `NweIndicatorValues` - 所有指标的当前值
     pub fn next(&mut self, candle: &CandleItem) -> NweIndicatorValues {
@@ -88,25 +88,25 @@ impl NweIndicatorCombine {
         } else {
             0.0
         };
-        
+
         let volume_ratio = if let Some(v) = &mut self.volume_indicator {
             v.next(candle.v)
         } else {
             0.0
         };
-        
+
         let (short_stop, long_stop, atr_value) = if let Some(a) = &mut self.atr_indicator {
             a.next(candle.h, candle.l, candle.c)
         } else {
             (0.0, 0.0, 0.0)
         };
-        
+
         let (upper, lower) = if let Some(n) = &mut self.nwe_indicator {
             n.next(candle.c)
         } else {
             (0.0, 0.0)
         };
-        
+
         NweIndicatorValues {
             rsi_value: rsi,
             volume_ratio,
@@ -119,7 +119,7 @@ impl NweIndicatorCombine {
     }
 
     /// 计算指标值（不修改内部状态的版本）
-    /// 
+    ///
     /// 用于批量计算历史数据
     pub fn get_indicator_values(&mut self, data_item: &CandleItem) -> NweIndicatorValues {
         self.next(data_item)
@@ -140,7 +140,7 @@ mod tests {
     fn test_nwe_indicator_combine_creation() {
         let config = NweIndicatorConfig::default();
         let combine = NweIndicatorCombine::new(&config);
-        
+
         assert!(combine.rsi_indicator.is_some());
         assert!(combine.volume_indicator.is_some());
         assert!(combine.nwe_indicator.is_some());
@@ -160,12 +160,10 @@ mod tests {
         };
 
         let values = combine.next(&candle);
-        
+
         // 基本验证：返回值应该是有效的数字
         assert!(values.rsi_value.is_finite());
         assert!(values.volume_ratio.is_finite());
         assert!(values.atr_value.is_finite());
     }
 }
-
-

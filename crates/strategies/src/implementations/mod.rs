@@ -29,16 +29,15 @@ pub mod ut_boot_strategy;
 pub mod nwe_strategy;
 
 // 重新导出
-pub use executor_common::*;
-pub use executor_common_lite::ExecutionContext as LiteExecutionContext;  // 避免冲突
-pub use profit_stop_loss::*;
-pub use comprehensive_strategy::*;  // ✅ 已恢复
+pub use comprehensive_strategy::*; // ✅ 已恢复
 pub use engulfing_strategy::*;
+pub use executor_common::*;
+pub use executor_common_lite::ExecutionContext as LiteExecutionContext; // 避免冲突
 pub use macd_kdj_strategy::*;
+pub use profit_stop_loss::*;
 // pub use mult_combine_strategy::*;
 pub use squeeze_strategy::*;
 // pub use top_contract_strategy::*;
 pub use ut_boot_strategy::*;
 // pub use nwe_executor::*;
 // pub use vegas_executor::*;  // TODO: 适配后导出
-

@@ -42,7 +42,7 @@ impl BackTestDetailModel {
     /// 添加单条回测详情记录
     pub async fn add(&self, detail: &BackTestDetail) -> Result<i64> {
         let pool = get_db_pool();
-        
+
         let result = sqlx::query(
             r#"
             INSERT INTO back_test_detail (
@@ -51,7 +51,7 @@ impl BackTestDetailModel {
                 open_price, close_price, fee, profit_loss, quantity, full_close,
                 close_type, signal_status, signal_value, signal_result, win_nums, loss_nums
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#
+            "#,
         )
         .bind(&detail.back_test_id)
         .bind(&detail.inst_id)
@@ -75,22 +75,25 @@ impl BackTestDetailModel {
         .bind(&detail.loss_nums)
         .execute(pool)
         .await?;
-        
+
         let last_id = result.last_insert_id() as i64;
-        debug!("insert_back_test_detail_result = {}", json!({"id": last_id}));
+        debug!(
+            "insert_back_test_detail_result = {}",
+            json!({"id": last_id})
+        );
         Ok(last_id)
     }
-    
+
     /// 批量添加回测详情记录
     pub async fn batch_add(&self, details: Vec<BackTestDetail>) -> Result<u64> {
         if details.is_empty() {
             return Ok(0);
         }
-        
+
         let pool = get_db_pool();
         let start_time = Local::now();
         let mut total_affected = 0u64;
-        
+
         // 分批插入，每批 100 条
         const BATCH_SIZE: usize = 100;
         for chunk in details.chunks(BATCH_SIZE) {
@@ -100,9 +103,9 @@ impl BackTestDetailModel {
                     signal_open_position_time, open_position_time, close_position_time,
                     open_price, close_price, fee, profit_loss, quantity, full_close,
                     close_type, signal_status, signal_value, signal_result, win_nums, loss_nums
-                ) "#
+                ) "#,
             );
-            
+
             query_builder.push_values(chunk, |mut b, detail| {
                 b.push_bind(&detail.back_test_id)
                     .push_bind(&detail.inst_id)
@@ -125,47 +128,47 @@ impl BackTestDetailModel {
                     .push_bind(&detail.win_nums)
                     .push_bind(&detail.loss_nums);
             });
-            
+
             let result = query_builder.build().execute(pool).await?;
             total_affected += result.rows_affected();
         }
-        
+
         let duration = Local::now().signed_duration_since(start_time);
         let duration_ms = duration.num_milliseconds();
-        
+
         info!(
             "batch_insert_back_test_detail: 总数={}, 影响行数={}, 耗时={}ms",
             details.len(),
             total_affected,
             duration_ms
         );
-        
+
         Ok(total_affected)
     }
-    
+
     /// 根据 back_test_id 查询详情
     pub async fn find_by_back_test_id(&self, back_test_id: i64) -> Result<Vec<BackTestDetail>> {
         let pool = get_db_pool();
-        
+
         let details = sqlx::query_as::<_, BackTestDetail>(
-            "SELECT * FROM back_test_detail WHERE back_test_id = ? ORDER BY open_position_time ASC"
+            "SELECT * FROM back_test_detail WHERE back_test_id = ? ORDER BY open_position_time ASC",
         )
         .bind(back_test_id)
         .fetch_all(pool)
         .await?;
-        
+
         Ok(details)
     }
-    
+
     /// 删除指定 back_test_id 的详情
     pub async fn delete_by_back_test_id(&self, back_test_id: i64) -> Result<u64> {
         let pool = get_db_pool();
-        
+
         let result = sqlx::query("DELETE FROM back_test_detail WHERE back_test_id = ?")
             .bind(back_test_id)
             .execute(pool)
             .await?;
-        
+
         Ok(result.rows_affected())
     }
 }

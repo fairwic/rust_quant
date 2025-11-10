@@ -1,24 +1,24 @@
 use rust_quant_indicators::trend::ema_indicator::EmaIndicator;
 // ⭐ TradeSide 已移到 framework::types
-use crate::TradeSide;
+use super::types::TradeSide;
 // TODO: EqualHighLowValue 依赖旧结构，待重构后恢复
 // use rust_quant_indicators::pattern::EqualHighLowValue;
-use rust_quant_indicators::momentum::RsiIndicator;  // ⭐ 正确路径
+use rust_quant_indicators::momentum::RsiIndicator; // ⭐ 正确路径
 use rust_quant_indicators::trend::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
     EmaSignalValue, IndicatorCombine, KlineHammerSignalValue, VegasIndicatorSignalValue,
     VegasStrategy,
 };
-use rust_quant_indicators::volume::VolumeRatioIndicator;  // ⭐ 正确路径
-// ⭐ CandleEntity已重命名为CandlesEntity
+use rust_quant_indicators::volume::VolumeRatioIndicator; // ⭐ 正确路径
+                                                         // ⭐ CandleEntity已重命名为CandlesEntity
 use rust_quant_market::models::CandlesEntity;
 // ⭐ 从本地导入，不是从common
 use crate::nwe_strategy::NweStrategy;
 // TODO: TopContractData 可能需要从其他地方导入或注释
 // use rust_quant_common::strategy::top_contract_strategy::{TopContractData, TopContractSingleData};
-use rust_quant_common::utils::fibonacci::FIBONACCI_ONE_POINT_TWO_THREE_SIX;
 use crate::{time_util, CandleItem};
 use chrono::{DateTime, Utc};
+use rust_quant_common::utils::fibonacci::FIBONACCI_ONE_POINT_TWO_THREE_SIX;
 // use hmac::digest::typenum::Min;  // TODO: 可能不需要
 use okx::dto::common::PositionSide;
 use okx::dto::EnumToStrTrait;
@@ -40,7 +40,7 @@ use tracing::{span, warn};
 
 /// 通用回测策略能力接口，便于不同策略复用统一回测与落库流程
 pub trait BackTestAbleStrategyTrait {
-    fn strategy_type(&self) -> crate::StrategyType;  // ⭐ 使用本地导出的StrategyType
+    fn strategy_type(&self) -> crate::StrategyType; // ⭐ 使用本地导出的StrategyType
     fn config_json(&self) -> Option<String>;
     fn run_test(
         &mut self,
@@ -71,7 +71,7 @@ pub trait BackTestAbleStrategyTrait {
 
 impl BackTestAbleStrategyTrait for NweStrategy {
     fn strategy_type(&self) -> crate::StrategyType {
-        crate::StrategyType::Nwe  // ⭐ 使用本地导出的StrategyType
+        crate::StrategyType::Nwe // ⭐ 使用本地导出的StrategyType
     }
 
     fn config_json(&self) -> Option<String> {
@@ -300,7 +300,8 @@ pub fn close_remaining_position(
     is_long: bool,                             // 是否为做多
 ) {
     let last_price = current_candle.c;
-    let exit_time = rust_quant_common::utils::time::mill_time_to_datetime(current_candle.ts).unwrap();
+    let exit_time =
+        rust_quant_common::utils::time::mill_time_to_datetime(current_candle.ts).unwrap();
 
     let current_profit_loss = if is_long {
         *position * (last_price - *entry_price) // 做多情况下计算当前价值
@@ -940,9 +941,6 @@ pub fn check_risk_config(
                     return trading_state;
                 }
             }
-            _ => {
-                // do nothing
-            }
         }
     }
 
@@ -982,9 +980,6 @@ pub fn check_risk_config(
                     );
                     return trading_state;
                 }
-            }
-            _ => {
-                // do nothing
             }
         }
     }
@@ -1065,8 +1060,12 @@ pub fn deal_signal(
                         signal.single_result = last_signal_result.single_result;
 
                         trading_state.last_signal_result = None;
-                        let signal_open_position_time =
-                            Some(rust_quant_common::utils::time::mill_time_to_datetime(last_signal_result.ts).unwrap());
+                        let signal_open_position_time = Some(
+                            rust_quant_common::utils::time::mill_time_to_datetime(
+                                last_signal_result.ts,
+                            )
+                            .unwrap(),
+                        );
                         open_long_position(
                             risk_config,
                             &mut trading_state,
@@ -1086,8 +1085,12 @@ pub fn deal_signal(
                         signal.single_result = last_signal_result.single_result;
 
                         trading_state.last_signal_result = None;
-                        let signal_open_position_time =
-                            Some(rust_quant_common::utils::time::mill_time_to_datetime(last_signal_result.ts).unwrap());
+                        let signal_open_position_time = Some(
+                            rust_quant_common::utils::time::mill_time_to_datetime(
+                                last_signal_result.ts,
+                            )
+                            .unwrap(),
+                        );
                         open_short_position(
                             risk_config,
                             &mut trading_state,
@@ -1245,7 +1248,8 @@ fn open_long_position(
     let mut temp_trade_position = TradePosition {
         position_nums: state.funds / signal.open_price,
         open_price: signal.open_price,
-        open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts).unwrap(),
+        open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
+            .unwrap(),
         signal_open_position_time: signal_open_time,
         trade_side: TradeSide::Long,
         ..Default::default()
@@ -1265,7 +1269,8 @@ fn open_long_position(
         if signal.signal_kline_stop_loss_price.is_none() {
             error!("signal_kline_stop_loss_price is none");
         }
-        temp_trade_position.signal_high_low_diff = (signal.signal_kline_stop_loss_price.unwrap() - signal.open_price).abs();
+        temp_trade_position.signal_high_low_diff =
+            (signal.signal_kline_stop_loss_price.unwrap() - signal.open_price).abs();
         temp_trade_position.touch_take_profit_price = Some(
             signal.open_price
                 + temp_trade_position.signal_high_low_diff * risk_config.take_profit_ratio,
@@ -1302,7 +1307,8 @@ fn open_short_position(
     let mut trade_position = TradePosition {
         position_nums: state.funds / signal.open_price,
         open_price: signal.open_price,
-        open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts).unwrap(),
+        open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
+            .unwrap(),
         signal_open_position_time: signal_open_time,
         trade_side: TradeSide::Short,
         ..Default::default()

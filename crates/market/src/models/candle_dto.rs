@@ -32,4 +32,3 @@ pub struct SelectCandleReqDto {
     /// 是否确认
     pub confirm: Option<i8>,
 }
-

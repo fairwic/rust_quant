@@ -1,11 +1,11 @@
-use rust_quant_common::utils::time;
-use rust_quant_market::models::CandlesEntity;
 use crate::backtest::{
     BackTestAnalysis, BackTestAnalysisModel, BackTestDetail, BackTestDetailModel, BackTestLogModel,
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
+use rust_quant_common::utils::time;
+use rust_quant_market::models::CandlesEntity;
 use std::sync::Arc;
 use tokio::task;
 use tracing::{error, info};
@@ -69,12 +69,13 @@ impl PositionAnalysis {
                     match position.open_price.parse::<f64>() {
                         Ok(open_price) => {
                             // 将 NaiveDateTime 转换为字符串用于查找
-                            let open_time_str = position.open_position_time.format("%Y-%m-%d %H:%M:%S").to_string();
-                            
+                            let open_time_str = position
+                                .open_position_time
+                                .format("%Y-%m-%d %H:%M:%S")
+                                .to_string();
+
                             // 查找开仓时间对应的K线索引
-                            if let Some(open_index) =
-                                find_candle_index(&candles, &open_time_str)
-                            {
+                            if let Some(open_index) = find_candle_index(&candles, &open_time_str) {
                                 // 分析不同K线数量后的价格变化
                                 for bars in &bars_to_analyze {
                                     if open_index + *bars as usize >= candles.len() {
@@ -185,7 +186,8 @@ impl PositionAnalysis {
 // 查找K线索引的辅助函数
 fn find_candle_index(candles: &[CandlesEntity], position_time: &str) -> Option<usize> {
     candles.iter().position(|c| {
-        let candle_time = rust_quant_common::utils::time::mill_time_to_datetime_shanghai(c.ts).unwrap();
+        let candle_time =
+            rust_quant_common::utils::time::mill_time_to_datetime_shanghai(c.ts).unwrap();
         let formatted_position_time = position_time
             .split('+')
             .next()

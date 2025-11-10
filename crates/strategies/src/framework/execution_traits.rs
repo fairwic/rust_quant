@@ -1,7 +1,7 @@
 //! 策略执行相关接口定义
 //!
 //! 通过 trait 解耦 strategies 和 orchestration 的循环依赖
-//! 
+//!
 //! 依赖关系：
 //! - strategies 定义 trait（本文件）
 //! - orchestration 实现 trait
@@ -13,42 +13,42 @@ use async_trait::async_trait;
 use crate::strategy_common::SignalResult;
 
 /// 策略执行状态管理器接口
-/// 
+///
 /// 负责去重、状态跟踪等功能
 #[async_trait]
 pub trait ExecutionStateManager: Send + Sync {
     /// 尝试标记为处理中（去重检查）
-    /// 
+    ///
     /// # 参数
     /// - `key`: 唯一标识符（通常是 inst_id:period）
     /// - `timestamp`: K线时间戳
-    /// 
+    ///
     /// # 返回
     /// - `true`: 可以执行（未重复）
     /// - `false`: 重复执行，应跳过
     fn try_mark_processing(&self, key: &str, timestamp: i64) -> bool;
-    
+
     /// 清除执行状态
     fn clear_processing(&self, key: &str);
-    
+
     /// 检查是否正在处理
     fn is_processing(&self, key: &str) -> bool;
 }
 
 /// 时间检查器接口
-/// 
+///
 /// 负责验证时间戳是否应该触发策略执行
 #[async_trait]
 pub trait TimeChecker: Send + Sync {
     /// 检查是否是新的时间
-    /// 
+    ///
     /// # 参数
     /// - `old_time`: 上一次执行的时间戳
     /// - `new_time`: 当前K线时间戳
     /// - `period`: 时间周期（如 "1H", "4H"）
     /// - `is_update`: 是否是更新模式
     /// - `force`: 是否强制检查
-    /// 
+    ///
     /// # 返回
     /// - `Ok(true)`: 是新时间，应该执行
     /// - `Ok(false)`: 不是新时间，跳过
@@ -64,18 +64,18 @@ pub trait TimeChecker: Send + Sync {
 }
 
 /// 信号日志记录器接口
-/// 
+///
 /// 负责记录策略产生的交易信号
 #[async_trait]
 pub trait SignalLogger: Send + Sync {
     /// 保存信号日志
-    /// 
+    ///
     /// # 参数
     /// - `inst_id`: 交易对标识
     /// - `period`: 时间周期
     /// - `signal`: 信号结果
     fn save_signal_log(&self, inst_id: &str, period: &str, signal: &SignalResult);
-    
+
     /// 查询最近的信号日志（可选）
     async fn get_recent_signals(
         &self,
@@ -90,16 +90,16 @@ pub trait SignalLogger: Send + Sync {
 }
 
 /// 策略执行上下文接口
-/// 
+///
 /// 组合所有必需的执行依赖
 #[async_trait]
 pub trait StrategyExecutionContext: Send + Sync {
     /// 获取状态管理器
     fn state_manager(&self) -> &dyn ExecutionStateManager;
-    
+
     /// 获取时间检查器
     fn time_checker(&self) -> &dyn TimeChecker;
-    
+
     /// 获取信号日志记录器
     fn signal_logger(&self) -> &dyn SignalLogger;
 }
@@ -111,9 +111,9 @@ impl ExecutionStateManager for NoOpStateManager {
     fn try_mark_processing(&self, _key: &str, _timestamp: i64) -> bool {
         true // 总是允许执行
     }
-    
+
     fn clear_processing(&self, _key: &str) {}
-    
+
     fn is_processing(&self, _key: &str) -> bool {
         false
     }
@@ -169,13 +169,12 @@ impl StrategyExecutionContext for DefaultExecutionContext {
     fn state_manager(&self) -> &dyn ExecutionStateManager {
         &self.state_manager
     }
-    
+
     fn time_checker(&self) -> &dyn TimeChecker {
         &self.time_checker
     }
-    
+
     fn signal_logger(&self) -> &dyn SignalLogger {
         &self.signal_logger
     }
 }
-

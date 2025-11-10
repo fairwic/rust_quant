@@ -1,12 +1,11 @@
 /// Market 包集成测试
-/// 
+///
 /// 测试 ORM 迁移后的功能一致性
-/// 
+///
 /// 运行前请确保：
 /// 1. DATABASE_URL 环境变量已设置
 /// 2. MySQL 数据库正在运行
 /// 3. 相关表已创建
-
 use rust_quant_market::models::*;
 
 #[cfg(test)]
@@ -19,7 +18,9 @@ mod tickers_volume_tests {
     async fn test_tickers_volume_crud() {
         // 初始化数据库连接
         dotenv::dotenv().ok();
-        rust_quant_core::database::init_db_pool().await.expect("Failed to init DB pool");
+        rust_quant_core::database::init_db_pool()
+            .await
+            .expect("Failed to init DB pool");
 
         let model = TickersVolumeModel::new();
 
@@ -40,7 +41,7 @@ mod tickers_volume_tests {
         // 2. 测试查询
         let query_result = model.find_one("BTC-USDT-SWAP-TEST").await;
         assert!(query_result.is_ok(), "查询失败: {:?}", query_result.err());
-        
+
         let records = query_result.unwrap();
         assert!(!records.is_empty(), "查询结果为空");
         assert_eq!(records[0].inst_id, "BTC-USDT-SWAP-TEST");
@@ -63,7 +64,9 @@ mod tickers_volume_tests {
     #[ignore]
     async fn test_tickers_volume_batch_insert() {
         dotenv::dotenv().ok();
-        rust_quant_core::database::init_db_pool().await.expect("Failed to init DB pool");
+        rust_quant_core::database::init_db_pool()
+            .await
+            .expect("Failed to init DB pool");
 
         let model = TickersVolumeModel::new();
 
@@ -103,15 +106,17 @@ mod tickers_tests {
     #[ignore]
     async fn test_tickers_crud() {
         dotenv::dotenv().ok();
-        rust_quant_core::database::init_db_pool().await.expect("Failed to init DB pool");
+        rust_quant_core::database::init_db_pool()
+            .await
+            .expect("Failed to init DB pool");
 
         let model = TicketsModel::new();
 
         // 注意：这里需要实际的 OKX DTO 结构
         // 由于 TickerOkxResDto 来自 okx 包，这里使用模拟数据
-        
+
         println!("✅ Tickers 模型已就绪");
-        
+
         // TODO: 添加更多测试用例
         // 1. 测试批量插入（add）
         // 2. 测试更新（update）
@@ -124,7 +129,9 @@ mod tickers_tests {
     #[ignore]
     async fn test_daily_volumes_calculation() {
         dotenv::dotenv().ok();
-        rust_quant_core::database::init_db_pool().await.expect("Failed to init DB pool");
+        rust_quant_core::database::init_db_pool()
+            .await
+            .expect("Failed to init DB pool");
 
         let model = TicketsModel::new();
 
@@ -150,7 +157,9 @@ mod candles_tests {
     #[ignore]
     async fn test_candles_create_table() {
         dotenv::dotenv().ok();
-        rust_quant_core::database::init_db_pool().await.expect("Failed to init DB pool");
+        rust_quant_core::database::init_db_pool()
+            .await
+            .expect("Failed to init DB pool");
 
         let model = CandlesModel::new();
 
@@ -168,7 +177,9 @@ mod candles_tests {
     #[ignore]
     async fn test_candles_crud() {
         dotenv::dotenv().ok();
-        rust_quant_core::database::init_db_pool().await.expect("Failed to init DB pool");
+        rust_quant_core::database::init_db_pool()
+            .await
+            .expect("Failed to init DB pool");
 
         let model = CandlesModel::new();
         let inst_id = "btc-usdt-swap-test";
@@ -183,7 +194,7 @@ mod candles_tests {
         // 3. 测试查询（get_all, get_new_data, get_one_by_ts）
         // 4. 测试更新（update_one）
         // 5. 测试删除（delete_lg_time）
-        
+
         println!("✅ Candles 模型测试框架已就绪");
     }
 
@@ -192,7 +203,9 @@ mod candles_tests {
     #[ignore]
     async fn test_candles_upsert() {
         dotenv::dotenv().ok();
-        rust_quant_core::database::init_db_pool().await.expect("Failed to init DB pool");
+        rust_quant_core::database::init_db_pool()
+            .await
+            .expect("Failed to init DB pool");
 
         let model = CandlesModel::new();
         let inst_id = "btc-usdt-swap-test";
@@ -203,7 +216,7 @@ mod candles_tests {
 
         // 由于需要 CandleOkxRespDto，这里先验证模型可用
         println!("✅ UPSERT 测试框架已就绪");
-        
+
         // TODO: 使用真实的 OKX DTO 测试
     }
 
@@ -212,7 +225,9 @@ mod candles_tests {
     #[ignore]
     async fn test_candles_complex_query() {
         dotenv::dotenv().ok();
-        rust_quant_core::database::init_db_pool().await.expect("Failed to init DB pool");
+        rust_quant_core::database::init_db_pool()
+            .await
+            .expect("Failed to init DB pool");
 
         let model = CandlesModel::new();
 
@@ -247,7 +262,7 @@ mod functionality_comparison_tests {
     use super::*;
 
     /// 对比新旧实现的功能一致性
-    /// 
+    ///
     /// 验证点：
     /// 1. 数据结构是否一致
     /// 2. CRUD 操作是否保持相同的语义
@@ -264,7 +279,7 @@ mod functionality_comparison_tests {
             oi: "1000".to_string(),
             vol: "5000".to_string(),
         };
-        
+
         assert_eq!(volume.inst_id, "test");
         println!("✅ TickersVolume 结构兼容");
 
@@ -288,7 +303,7 @@ mod functionality_comparison_tests {
             sod_utc8: "49800".to_string(),
             ts: 1699999999000,
         };
-        
+
         assert_eq!(ticker.inst_id, "BTC-USDT-SWAP");
         println!("✅ TickersDataEntity 结构兼容");
 
@@ -306,7 +321,7 @@ mod functionality_comparison_tests {
             created_at: None,
             updated_at: None,
         };
-        
+
         assert_eq!(candle.ts, 1699999999000);
         println!("✅ CandlesEntity 结构兼容");
     }
@@ -343,7 +358,9 @@ mod performance_tests {
     #[ignore]
     async fn benchmark_batch_insert() {
         dotenv::dotenv().ok();
-        rust_quant_core::database::init_db_pool().await.expect("Failed to init DB pool");
+        rust_quant_core::database::init_db_pool()
+            .await
+            .expect("Failed to init DB pool");
 
         let model = TickersVolumeModel::new();
 
@@ -365,8 +382,12 @@ mod performance_tests {
             let _ = model.add(test_data).await;
             let duration = start.elapsed();
 
-            println!("批量大小: {}, 耗时: {:?}, 平均: {:?}/条", 
-                batch_size, duration, duration / batch_size as u32);
+            println!(
+                "批量大小: {}, 耗时: {:?}, 平均: {:?}/条",
+                batch_size,
+                duration,
+                duration / batch_size as u32
+            );
 
             // 清理
             for i in 0..batch_size {
@@ -375,4 +396,3 @@ mod performance_tests {
         }
     }
 }
-

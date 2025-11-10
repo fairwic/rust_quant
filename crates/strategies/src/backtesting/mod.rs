@@ -3,6 +3,5 @@
 pub mod engine;
 pub mod metrics;
 
-pub use engine::{BacktestEngine, BacktestConfig, BacktestReport};
+pub use engine::{BacktestConfig, BacktestEngine, BacktestReport};
 pub use metrics::*;
-

@@ -1,0 +1,165 @@
+   0.268384875s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust_quant_cli"}: cargo::core::compiler::fingerprint: stale: changed "/Users/mac2/onions/rust_quant/crates/orchestration/src/workflow/tickets_job.rs"
+   0.268398916s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust_quant_cli"}: cargo::core::compiler::fingerprint:           (vs) "/Users/mac2/onions/rust_quant/target/debug/.fingerprint/rust-quant-orchestration-2ce705a930f52f92/dep-lib-rust_quant_orchestration"
+   0.268401333s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust_quant_cli"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 1762658620, nanos: 473425849 } < FileTime { seconds: 1762658694, nanos: 987974301 }
+   0.268475958s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust_quant_cli"}: cargo::core::compiler::fingerprint: fingerprint error for rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("rust_quant_cli", ["lib"], "/Users/mac2/onions/rust_quant/crates/rust-quant-cli/src/lib.rs", Edition2021) }
+   0.268485000s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust_quant_cli"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/mac2/onions/rust_quant/target/debug/.fingerprint/rust-quant-cli-a11b04a8d24ea434/lib-rust_quant_cli`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: <std::io::error::Error as anyhow::context::ext::StdError>::ext_context::<alloc::string::String>
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::cli::main
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.272890958s  INFO prepare_target{force=false package_id=rust-quant-orchestration v0.2.0 (/Users/mac2/onions/rust_quant/crates/orchestration) target="rust_quant_orchestration"}: cargo::core::compiler::fingerprint: fingerprint dirty for rust-quant-orchestration v0.2.0 (/Users/mac2/onions/rust_quant/crates/orchestration)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("rust_quant_orchestration", ["lib"], "/Users/mac2/onions/rust_quant/crates/orchestration/src/lib.rs", Edition2021) }
+   0.272899500s  INFO prepare_target{force=false package_id=rust-quant-orchestration v0.2.0 (/Users/mac2/onions/rust_quant/crates/orchestration) target="rust_quant_orchestration"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "/Users/mac2/onions/rust_quant/target/debug/.fingerprint/rust-quant-orchestration-2ce705a930f52f92/dep-lib-rust_quant_orchestration", reference_mtime: FileTime { seconds: 1762658620, nanos: 473425849 }, stale: "/Users/mac2/onions/rust_quant/crates/orchestration/src/workflow/tickets_job.rs", stale_mtime: FileTime { seconds: 1762658694, nanos: 987974301 } }))
+   0.274543708s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust_quant_cli"}: cargo::core::compiler::fingerprint: fingerprint error for rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("rust_quant_cli", ["lib"], "/Users/mac2/onions/rust_quant/crates/rust-quant-cli/src/lib.rs", Edition2021) }
+   0.274550708s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust_quant_cli"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/mac2/onions/rust_quant/target/debug/.fingerprint/rust-quant-cli-d932f0d345dd310d/test-lib-rust_quant_cli`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: <std::io::error::Error as anyhow::context::ext::StdError>::ext_context::<alloc::string::String>
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::cli::main
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.275914166s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust-quant"}: cargo::core::compiler::fingerprint: fingerprint error for rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli)/Check { test: false }/TargetInner { name: "rust-quant", doc: true, ..: with_path("/Users/mac2/onions/rust_quant/crates/rust-quant-cli/src/main.rs", Edition2021) }
+   0.275925250s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust-quant"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/mac2/onions/rust_quant/target/debug/.fingerprint/rust-quant-cli-cd8896292b8e0de1/bin-rust-quant`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: <std::io::error::Error as anyhow::context::ext::StdError>::ext_context::<alloc::string::String>
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::cli::main
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.277072375s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust-quant"}: cargo::core::compiler::fingerprint: fingerprint error for rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli)/Check { test: true }/TargetInner { name: "rust-quant", doc: true, ..: with_path("/Users/mac2/onions/rust_quant/crates/rust-quant-cli/src/main.rs", Edition2021) }
+   0.277077625s  INFO prepare_target{force=false package_id=rust-quant-cli v0.2.0 (/Users/mac2/onions/rust_quant/crates/rust-quant-cli) target="rust-quant"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/mac2/onions/rust_quant/target/debug/.fingerprint/rust-quant-cli-5987395c2706e39e/test-bin-rust-quant`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: <std::io::error::Error as anyhow::context::ext::StdError>::ext_context::<alloc::string::String>
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::cli::main
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.278669750s  INFO prepare_target{force=false package_id=rust-quant-execution v0.2.0 (/Users/mac2/onions/rust_quant/crates/execution) target="rust_quant_execution"}: cargo::core::compiler::fingerprint: fingerprint error for rust-quant-execution v0.2.0 (/Users/mac2/onions/rust_quant/crates/execution)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("rust_quant_execution", ["lib"], "/Users/mac2/onions/rust_quant/crates/execution/src/lib.rs", Edition2021) }
+   0.278678708s  INFO prepare_target{force=false package_id=rust-quant-execution v0.2.0 (/Users/mac2/onions/rust_quant/crates/execution) target="rust_quant_execution"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/mac2/onions/rust_quant/target/debug/.fingerprint/rust-quant-execution-4e83c1cc59974c37/test-lib-rust_quant_execution`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: <std::io::error::Error as anyhow::context::ext::StdError>::ext_context::<alloc::string::String>
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::cli::main
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.279774750s  INFO prepare_target{force=false package_id=rust-quant-indicators v0.2.0 (/Users/mac2/onions/rust_quant/crates/indicators) target="rust_quant_indicators"}: cargo::core::compiler::fingerprint: fingerprint error for rust-quant-indicators v0.2.0 (/Users/mac2/onions/rust_quant/crates/indicators)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("rust_quant_indicators", ["lib"], "/Users/mac2/onions/rust_quant/crates/indicators/src/lib.rs", Edition2021) }
+   0.279778833s  INFO prepare_target{force=false package_id=rust-quant-indicators v0.2.0 (/Users/mac2/onions/rust_quant/crates/indicators) target="rust_quant_indicators"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/mac2/onions/rust_quant/target/debug/.fingerprint/rust-quant-indicators-7fd2545ef6029f03/test-lib-rust_quant_indicators`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: <std::io::error::Error as anyhow::context::ext::StdError>::ext_context::<alloc::string::String>
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::cli::main
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.281698125s  INFO prepare_target{force=false package_id=rust-quant-orchestration v0.2.0 (/Users/mac2/onions/rust_quant/crates/orchestration) target="rust_quant_orchestration"}: cargo::core::compiler::fingerprint: dependency on `rust_quant_infrastructure` is newer than we are 1762655894.331426822s > 1762578939.240524733s "/Users/mac2/onions/rust_quant/crates/orchestration"
+   0.281795125s  INFO prepare_target{force=false package_id=rust-quant-orchestration v0.2.0 (/Users/mac2/onions/rust_quant/crates/orchestration) target="rust_quant_orchestration"}: cargo::core::compiler::fingerprint: fingerprint dirty for rust-quant-orchestration v0.2.0 (/Users/mac2/onions/rust_quant/crates/orchestration)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("rust_quant_orchestration", ["lib"], "/Users/mac2/onions/rust_quant/crates/orchestration/src/lib.rs", Edition2021) }
+   0.281800916s  INFO prepare_target{force=false package_id=rust-quant-orchestration v0.2.0 (/Users/mac2/onions/rust_quant/crates/orchestration) target="rust_quant_orchestration"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDependency { name: "rust_quant_infrastructure", dep_mtime: FileTime { seconds: 1762655894, nanos: 331426822 }, max_mtime: FileTime { seconds: 1762578939, nanos: 240524733 } })
+   0.283293916s  INFO prepare_target{force=false package_id=rust-quant-services v0.2.0 (/Users/mac2/onions/rust_quant/crates/services) target="rust_quant_services"}: cargo::core::compiler::fingerprint: dependency on `rust_quant_infrastructure` is newer than we are 1762655894.331426822s > 1762578802.972303630s "/Users/mac2/onions/rust_quant/crates/services"
+   0.283381833s  INFO prepare_target{force=false package_id=rust-quant-services v0.2.0 (/Users/mac2/onions/rust_quant/crates/services) target="rust_quant_services"}: cargo::core::compiler::fingerprint: fingerprint dirty for rust-quant-services v0.2.0 (/Users/mac2/onions/rust_quant/crates/services)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("rust_quant_services", ["lib"], "/Users/mac2/onions/rust_quant/crates/services/src/lib.rs", Edition2021) }
+   0.283387125s  INFO prepare_target{force=false package_id=rust-quant-services v0.2.0 (/Users/mac2/onions/rust_quant/crates/services) target="rust_quant_services"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDependency { name: "rust_quant_infrastructure", dep_mtime: FileTime { seconds: 1762655894, nanos: 331426822 }, max_mtime: FileTime { seconds: 1762578802, nanos: 972303630 } })
+[1m[32m    Checking[0m rust-quant-orchestration v0.2.0 (/Users/mac2/onions/rust_quant/crates/orchestration)
+[1m[32m    Checking[0m rust-quant-services v0.2.0 (/Users/mac2/onions/rust_quant/crates/services)
+[1m[32m    Checking[0m rust-quant-execution v0.2.0 (/Users/mac2/onions/rust_quant/crates/execution)
+[1m[32m    Checking[0m rust-quant-indicators v0.2.0 (/Users/mac2/onions/rust_quant/crates/indicators)
+[1m[31merror[0m[1m:[0m could not compile `rust-quant-services` (lib test) due to 1 previous error
+[1m[33mwarning[0m[1m:[0m build failed, waiting for other jobs to finish...
+[1m[31merror[0m[1m:[0m could not compile `rust-quant-execution` (lib test) due to 3 previous errors
+[1m[31merror[0m[1m:[0m could not compile `rust-quant-orchestration` (lib) due to 2 previous errors
+[1m[31merror[0m[1m:[0m could not compile `rust-quant-orchestration` (lib test) due to 22 previous errors
+[1m[31merror[0m[1m:[0m could not compile `rust-quant-indicators` (lib test) due to 11 previous errors; 2 warnings emitted

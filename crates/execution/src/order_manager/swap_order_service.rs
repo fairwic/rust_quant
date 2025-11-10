@@ -1,5 +1,5 @@
 use rust_quant_common::constants;
-use rust_quant_risk::order::{SwapOrderEntity};
+use rust_quant_risk::order::SwapOrderEntity;
 use rust_quant_strategies::StrategyType;
 use std::cmp::PartialEq;
 
@@ -10,9 +10,9 @@ pub struct OrderSignal {
     pub should_sell: bool,
     pub price: f64,
 }
+use chrono::Local;
 use rust_quant_common::AppError;
 use rust_quant_strategies::strategy_common::{BasicRiskStrategyConfig, SignalResult};
-use chrono::Local;
 // use core::time; // ⭐ 注释掉，与time模块冲突
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::{Position, TradingSwapNumResponseData};
@@ -226,7 +226,7 @@ impl SwapOrderService {
             return Ok(vec![]);
         }
         */
-        
+
         // 临时跳过幂等校验
         // warn!("幂等校验暂时禁用");
         // 获取当前仓位状态与可开仓数量（并发请求，降低总时延）
@@ -614,7 +614,9 @@ mod test {
             max_sell: "0.22222".to_string(),
             max_buy: "0.211111".to_string(),
         };
-        let pos_size = SwapOrderService::new().get_place_order_num_optimized(&valid_num, 0.9).unwrap();
+        let pos_size = SwapOrderService::new()
+            .get_place_order_num_optimized(&valid_num, 0.9)
+            .unwrap();
         println!("pos_size: {:?}", pos_size);
     }
 }

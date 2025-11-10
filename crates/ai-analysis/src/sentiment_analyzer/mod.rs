@@ -1,5 +1,5 @@
 //! 情绪分析器
-//! 
+//!
 //! 使用 OpenAI GPT-4 或本地模型分析市场新闻情绪
 
 use async_trait::async_trait;
@@ -13,13 +13,13 @@ pub struct SentimentResult {
     ///  0.0: 中性
     ///  1.0: 极度乐观
     pub score: f64,
-    
+
     /// 置信度（0.0 到 1.0）
     pub confidence: f64,
-    
+
     /// 关键实体（如 "BTC", "ETH", "美联储"）
     pub entities: Vec<String>,
-    
+
     /// 情绪标签（如 "bullish", "bearish", "neutral"）
     pub labels: Vec<String>,
 }
@@ -54,10 +54,9 @@ impl SentimentAnalyzer for OpenAISentimentAnalyzer {
             labels: vec![],
         })
     }
-    
+
     async fn batch_analyze(&self, texts: &[String]) -> anyhow::Result<Vec<SentimentResult>> {
         // TODO: 批量分析（使用并发）
         Ok(vec![])
     }
 }
-

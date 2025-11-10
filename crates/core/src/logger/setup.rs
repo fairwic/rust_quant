@@ -1,9 +1,9 @@
+use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{mpsc, Mutex};
 use tracing::{info, Event, Level, Subscriber};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::layer::SubscriberExt;
@@ -30,10 +30,10 @@ struct EmailConfig {
 impl Default for EmailConfig {
     fn default() -> Self {
         Self {
-            batch_interval_secs: 60,    // 1分钟批量发送一次
-            max_batch_size: 10,         // 最多10个错误合并发送
-            dedup_window_secs: 300,     // 5分钟内相同错误去重
-            max_queue_size: 1000,       // 最大队列1000个
+            batch_interval_secs: 60, // 1分钟批量发送一次
+            max_batch_size: 10,      // 最多10个错误合并发送
+            dedup_window_secs: 300,  // 5分钟内相同错误去重
+            max_queue_size: 1000,    // 最大队列1000个
         }
     }
 }
@@ -63,7 +63,8 @@ impl EmailSender {
 
         // 启动批量发送任务
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(config_clone.batch_interval_secs));
+            let mut interval =
+                tokio::time::interval(Duration::from_secs(config_clone.batch_interval_secs));
 
             loop {
                 tokio::select! {
@@ -94,9 +95,11 @@ impl EmailSender {
         // 检查队列大小
         if queue_guard.len() >= config.max_queue_size {
             // 移除最旧的条目
-            if let Some(oldest_key) = queue_guard.iter()
+            if let Some(oldest_key) = queue_guard
+                .iter()
                 .min_by_key(|(_, entry)| entry.timestamp)
-                .map(|(k, _)| k.clone()) {
+                .map(|(k, _)| k.clone())
+            {
                 queue_guard.remove(&oldest_key);
             }
         }
@@ -112,11 +115,14 @@ impl EmailSender {
             }
             None => {
                 // 添加新条目
-                queue_guard.insert(error_key, ErrorLogEntry {
-                    message: error_message,
-                    timestamp: Instant::now(),
-                    count: 1,
-                });
+                queue_guard.insert(
+                    error_key,
+                    ErrorLogEntry {
+                        message: error_message,
+                        timestamp: Instant::now(),
+                        count: 1,
+                    },
+                );
             }
         }
     }
@@ -179,7 +185,7 @@ impl EmailSender {
         // 简单的错误分类：提取关键信息用于去重
         // 使用 Unicode 字符边界安全截断，避免在多字节字符中间截断
         const MAX_LEN: usize = 100;
-        
+
         if error_message.len() > MAX_LEN {
             // 找到安全的截断点（不在字符中间）
             let mut end = MAX_LEN;
@@ -203,9 +209,9 @@ impl EmailSender {
 static EMAIL_SENDER: tokio::sync::OnceCell<EmailSender> = tokio::sync::OnceCell::const_new();
 
 async fn get_email_sender() -> &'static EmailSender {
-    EMAIL_SENDER.get_or_init(|| async {
-        EmailSender::new(EmailConfig::default())
-    }).await
+    EMAIL_SENDER
+        .get_or_init(|| async { EmailSender::new(EmailConfig::default()) })
+        .await
 }
 
 // 定义一个自定义的 Layer
@@ -268,7 +274,8 @@ impl LogConfig {
         let log_dir = env::var("LOG_DIR").unwrap_or_else(|_| "log_files".to_string());
         let log_rotation = env::var("LOG_ROTATION").unwrap_or_else(|_| "daily".to_string());
         let info_file_name = env::var("LOG_INFO_FILE").unwrap_or_else(|_| "info.log".to_string());
-        let error_file_name = env::var("LOG_ERROR_FILE").unwrap_or_else(|_| "error.log".to_string());
+        let error_file_name =
+            env::var("LOG_ERROR_FILE").unwrap_or_else(|_| "error.log".to_string());
         let enable_file_logging = env::var("ENABLE_FILE_LOGGING")
             .unwrap_or_else(|_| "true".to_string())
             .parse()
@@ -321,24 +328,27 @@ pub async fn setup_logging() -> anyhow::Result<()> {
     let config = LogConfig::from_env()?;
 
     let custom_layer_opt = if config.enable_email_notification {
-        Some(CustomLayer { event_count: Arc::new(Mutex::new(0)) })
-    } else { None };
+        Some(CustomLayer {
+            event_count: Arc::new(Mutex::new(0)),
+        })
+    } else {
+        None
+    };
 
     // 本地环境：仅控制台输出
     if config.app_env == "local" {
-        let base = Registry::default()
-            .with(
-                fmt::layer()
-                    .with_ansi(true)
-                    .with_target(false)
-                    .with_thread_ids(true)
-                    .with_thread_names(true)
-                    .with_file(true)
-                    .with_line_number(true)
-                    .with_level(true)
-                    .with_writer(std::io::stdout)
-                    .with_filter(EnvFilter::new(&config.log_level)),
-            );
+        let base = Registry::default().with(
+            fmt::layer()
+                .with_ansi(true)
+                .with_target(false)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_level(true)
+                .with_writer(std::io::stdout)
+                .with_filter(EnvFilter::new(&config.log_level)),
+        );
 
         if let Some(custom) = custom_layer_opt {
             tracing::subscriber::set_global_default(base.with(custom))?;
@@ -347,27 +357,36 @@ pub async fn setup_logging() -> anyhow::Result<()> {
         }
 
         info!("Log configuration setup successfully!");
-        info!("Environment: {}, Log Level: {}, File Logging: {}, Console Logging: {}",
-              config.app_env, config.log_level, false, true);
+        info!(
+            "Environment: {}, Log Level: {}, File Logging: {}, Console Logging: {}",
+            config.app_env, config.log_level, false, true
+        );
         return Ok(());
     }
 
     // 非本地环境：文件输出（可选控制台）
-    std::fs::create_dir_all(&config.log_dir)
-        .map_err(|e| anyhow::anyhow!("Failed to create log directory '{}': {}", config.log_dir, e))?;
+    std::fs::create_dir_all(&config.log_dir).map_err(|e| {
+        anyhow::anyhow!("Failed to create log directory '{}': {}", config.log_dir, e)
+    })?;
 
     let rotation_info = parse_rotation(&config.log_rotation);
     let rotation_error = parse_rotation(&config.log_rotation);
 
-    let info_file = RollingFileAppender::new(rotation_info, &config.log_dir, &config.info_file_name);
-    let error_file = RollingFileAppender::new(rotation_error, &config.log_dir, &config.error_file_name);
+    let info_file =
+        RollingFileAppender::new(rotation_info, &config.log_dir, &config.info_file_name);
+    let error_file =
+        RollingFileAppender::new(rotation_error, &config.log_dir, &config.error_file_name);
 
     let (info_non_blocking, info_guard) = tracing_appender::non_blocking(info_file);
     let (error_non_blocking, error_guard) = tracing_appender::non_blocking(error_file);
 
     // 保存guard到全局，防止被丢弃
-    INFO_GUARD.set(info_guard).map_err(|_| anyhow::anyhow!("Failed to set INFO_GUARD"))?;
-    ERROR_GUARD.set(error_guard).map_err(|_| anyhow::anyhow!("Failed to set ERROR_GUARD"))?;
+    INFO_GUARD
+        .set(info_guard)
+        .map_err(|_| anyhow::anyhow!("Failed to set INFO_GUARD"))?;
+    ERROR_GUARD
+        .set(error_guard)
+        .map_err(|_| anyhow::anyhow!("Failed to set ERROR_GUARD"))?;
 
     let base = Registry::default()
         .with(
@@ -423,7 +442,9 @@ pub async fn setup_logging() -> anyhow::Result<()> {
     }
 
     info!("Log configuration setup successfully!");
-    info!("Environment: {}, Log Level: {}, File Logging: {}, Console Logging: {}",
-          config.app_env, config.log_level, true, config.enable_console_logging);
+    info!(
+        "Environment: {}, Log Level: {}, File Logging: {}, Console Logging: {}",
+        config.app_env, config.log_level, true, config.enable_console_logging
+    );
     Ok(())
 }

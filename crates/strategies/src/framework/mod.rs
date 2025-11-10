@@ -1,18 +1,17 @@
 // 策略框架核心模块
-pub mod strategy_trait;
-pub mod strategy_registry;
-pub mod strategy_manager;
-pub mod strategy_common;
 pub mod config;
-pub mod types;  // ⭐ 新增: 框架类型定义
-pub mod execution_traits;  // ⭐ 新增: 执行接口定义（解耦循环依赖）
+pub mod execution_traits;
+pub mod strategy_common;
+pub mod strategy_manager;
+pub mod strategy_registry;
+pub mod strategy_trait;
+pub mod types; // ⭐ 新增: 框架类型定义 // ⭐ 新增: 执行接口定义（解耦循环依赖）
 
 // 重新导出核心类型
-pub use strategy_trait::*;
-pub use strategy_registry::*;
-pub use strategy_manager::*;
-pub use strategy_common::*;
 pub use config::*;
-pub use types::*;  // ⭐ 导出TradeSide等类型
-pub use execution_traits::*;  // ⭐ 导出执行接口
-
+pub use strategy_common::*;
+pub use strategy_manager::*;
+pub use strategy_registry::*;
+pub use strategy_trait::*;
+// types 的内容已在 strategy_common 中定义，避免重复导出
+pub use execution_traits::*; // ⭐ 导出执行接口

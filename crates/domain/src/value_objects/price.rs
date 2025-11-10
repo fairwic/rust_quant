@@ -8,16 +8,16 @@ use thiserror::Error;
 pub enum PriceError {
     #[error("价格不能为负: {0}")]
     NegativePrice(f64),
-    
+
     #[error("价格不能为零")]
     ZeroPrice,
-    
+
     #[error("价格无效: {0}")]
     InvalidPrice(String),
 }
 
 /// 价格值对象
-/// 
+///
 /// 业务规则:
 /// - 价格必须为正数
 /// - 价格精度最多8位小数
@@ -30,38 +30,38 @@ impl Price {
         if value < 0.0 {
             return Err(PriceError::NegativePrice(value));
         }
-        
+
         if value == 0.0 {
             return Err(PriceError::ZeroPrice);
         }
-        
+
         if !value.is_finite() {
             return Err(PriceError::InvalidPrice("价格必须是有限数".to_string()));
         }
-        
+
         Ok(Self(value))
     }
-    
+
     /// 创建零价格 (用于特殊场景,如市价单)
     pub fn zero() -> Self {
         Self(0.0)
     }
-    
+
     /// 获取价格值
     pub fn value(&self) -> f64 {
         self.0
     }
-    
+
     /// 价格相加
     pub fn add(&self, other: &Price) -> Result<Price, PriceError> {
         Price::new(self.0 + other.0)
     }
-    
+
     /// 价格相减
     pub fn subtract(&self, other: &Price) -> Result<Price, PriceError> {
         Price::new(self.0 - other.0)
     }
-    
+
     /// 计算价格变化百分比
     pub fn percentage_change(&self, other: &Price) -> f64 {
         if self.0 == 0.0 {
@@ -69,7 +69,7 @@ impl Price {
         }
         ((other.0 - self.0) / self.0) * 100.0
     }
-    
+
     /// 判断是否为零
     pub fn is_zero(&self) -> bool {
         self.0 == 0.0
@@ -91,48 +91,46 @@ impl PartialOrd for Price {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_valid_price() {
         let price = Price::new(100.5).unwrap();
         assert_eq!(price.value(), 100.5);
     }
-    
+
     #[test]
     fn test_negative_price() {
         let result = Price::new(-10.0);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn test_zero_price() {
         let result = Price::new(0.0);
         assert!(result.is_err());
-        
+
         let zero = Price::zero();
         assert!(zero.is_zero());
     }
-    
+
     #[test]
     fn test_price_operations() {
         let p1 = Price::new(100.0).unwrap();
         let p2 = Price::new(50.0).unwrap();
-        
+
         let sum = p1.add(&p2).unwrap();
         assert_eq!(sum.value(), 150.0);
-        
+
         let diff = p1.subtract(&p2).unwrap();
         assert_eq!(diff.value(), 50.0);
     }
-    
+
     #[test]
     fn test_percentage_change() {
         let p1 = Price::new(100.0).unwrap();
         let p2 = Price::new(110.0).unwrap();
-        
+
         let change = p1.percentage_change(&p2);
         assert!((change - 10.0).abs() < 0.001);
     }
 }
-
-

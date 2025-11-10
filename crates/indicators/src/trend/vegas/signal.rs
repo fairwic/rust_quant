@@ -59,7 +59,6 @@ pub struct VolumeTrendSignalValue {
     pub volume_value: f64,
 }
 
-
 /// EMA信号值
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct EmaSignalValue {
