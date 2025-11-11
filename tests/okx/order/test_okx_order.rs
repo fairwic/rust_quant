@@ -29,12 +29,12 @@ async fn test_okx_order() {
     println!("   - 周期: {}", period);
 
     let signal_result = SignalResult {
-        should_buy: true,
-        should_sell: false,
-        open_price: 3831.0,
+        should_buy: false,
+        should_sell: true,
+        open_price: 3581.0,
         signal_kline_stop_loss_price: Some(3700.0),
         best_open_price: None,
-        best_take_profit_price: None,
+        best_take_profit_price: Some(3500.2),
         ts: 0,
         single_value: None,
         single_result: None,
