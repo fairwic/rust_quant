@@ -5,5 +5,3 @@
 pub mod arc_nwe_indicator_values;
 pub mod arc_vegas_indicator_values;
 
-pub use arc_nwe_indicator_values::*;
-pub use arc_vegas_indicator_values::*;

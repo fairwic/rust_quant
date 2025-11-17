@@ -3,7 +3,10 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::entities::{Candle, Order, Position, StrategyConfig};
+use crate::entities::{
+    BacktestDetail, BacktestLog, BacktestWinRateStats, Candle, ExchangeApiConfig, Order, Position,
+    StrategyApiConfig, StrategyConfig,
+};
 use crate::enums::Timeframe;
 use crate::PositionStatus;
 
@@ -50,6 +53,9 @@ pub trait StrategyConfigRepository: Send + Sync {
     /// 根据ID查询配置
     async fn find_by_id(&self, id: i64) -> Result<Option<StrategyConfig>>;
 
+    /// 查询所有启用的配置
+    async fn find_all_enabled(&self) -> Result<Vec<StrategyConfig>>;
+
     /// 查询交易对和周期的配置
     async fn find_by_symbol_and_timeframe(
         &self,
@@ -90,4 +96,72 @@ pub trait PositionRepository: Send + Sync {
 
     /// 删除持仓
     async fn delete(&self, id: &str) -> Result<()>;
+}
+
+/// 回测日志仓储接口
+#[async_trait]
+pub trait BacktestLogRepository: Send + Sync {
+    /// 写入回测日志，返回自增ID
+    async fn insert_log(&self, log: &BacktestLog) -> Result<i64>;
+
+    /// 批量写入回测详情
+    async fn insert_details(&self, details: &[BacktestDetail]) -> Result<u64>;
+
+    /// 更新回测胜率统计
+    async fn update_win_rate_stats(
+        &self,
+        backtest_id: i64,
+        stats: &BacktestWinRateStats,
+    ) -> Result<u64>;
+}
+
+/// 交易所API配置仓储接口
+#[async_trait]
+pub trait ExchangeApiConfigRepository: Send + Sync {
+    /// 根据ID查询API配置
+    async fn find_by_id(&self, id: i32) -> Result<Option<ExchangeApiConfig>>;
+
+    /// 查询所有启用的API配置
+    async fn find_all_enabled(&self) -> Result<Vec<ExchangeApiConfig>>;
+
+    /// 根据交易所名称查询启用的API配置
+    async fn find_by_exchange(&self, exchange_name: &str) -> Result<Vec<ExchangeApiConfig>>;
+
+    /// 保存API配置
+    async fn save(&self, config: &ExchangeApiConfig) -> Result<i32>;
+
+    /// 更新API配置
+    async fn update(&self, config: &ExchangeApiConfig) -> Result<()>;
+
+    /// 删除API配置
+    async fn delete(&self, id: i32) -> Result<()>;
+}
+
+/// 策略与API配置关联仓储接口
+#[async_trait]
+pub trait StrategyApiConfigRepository: Send + Sync {
+    /// 根据策略配置ID查询关联的API配置（按优先级排序）
+    async fn find_by_strategy_config_id(
+        &self,
+        strategy_config_id: i32,
+    ) -> Result<Vec<ExchangeApiConfig>>;
+
+    /// 创建策略与API配置的关联
+    async fn create_association(
+        &self,
+        strategy_config_id: i32,
+        api_config_id: i32,
+        priority: i32,
+    ) -> Result<i32>;
+
+    /// 删除关联
+    async fn delete_association(&self, id: i32) -> Result<()>;
+
+    /// 更新关联优先级
+    async fn update_priority(
+        &self,
+        id: i32,
+        priority: i32,
+        is_enabled: bool,
+    ) -> Result<()>;
 }

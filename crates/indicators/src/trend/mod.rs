@@ -15,4 +15,4 @@ pub use nwe_indicator::*;
 pub use signal_weight::*;
 pub use sma::*;
 pub use vegas as vegas_indicator; // 兼容旧路径
-// ema_indicator 与 ema 冲突，不再导出（已被 ema 替代）
+                                  // ema_indicator 与 ema 冲突，不再导出（已被 ema 替代）

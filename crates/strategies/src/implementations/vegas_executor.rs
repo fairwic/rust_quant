@@ -8,27 +8,24 @@ use std::collections::VecDeque;
 use tracing::{debug, info};
 
 use super::executor_common::{
-    convert_candles_to_items, execute_order, get_latest_candle, get_recent_candles,
-    should_execute_strategy, update_candle_queue, validate_candles,
+    convert_candles_to_items, get_latest_candle, get_recent_candles, is_new_timestamp,
+    update_candle_queue, validate_candles,
 };
-use super::strategy_trait::{StrategyDataResult, StrategyExecutor};
+use crate::cache::arc_vegas_indicator_values::{
+    get_hash_key, get_indicator_manager, set_strategy_indicator_values,
+};
+use crate::framework::config::strategy_config::StrategyConfig;
+use crate::framework::strategy_trait::{StrategyDataResult, StrategyExecutor};
+use crate::strategy_common::{get_multi_indicator_values, parse_candle_to_data_item, SignalResult};
+use crate::StrategyType;
 use rust_quant_indicators::trend::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::VegasStrategy;
 use rust_quant_market::models::CandlesEntity;
-use rust_quant_indicators::trend::vegas::{
-    self, get_hash_key, get_indicator_manager,
-};
-use rust_quant_infrastructure::cache::arc_vegas_indicator_values;
-use crate::framework::config::strategy_config::StrategyConfig;
-use crate::strategy_common::{
-    get_multi_indicator_values, parse_candle_to_data_item,
-};
-use crate::StrategyType;
 // ⏳ 移除orchestration依赖，避免循环依赖
 // 使用 ExecutionContext trait 替代直接依赖
 // use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;
-use rust_quant_common::CandleItem;
 use okx::dto::EnumToStrTrait;
+use rust_quant_common::CandleItem;
 
 /// Vegas 策略执行器
 pub struct VegasStrategyExecutor;
@@ -66,8 +63,9 @@ impl StrategyExecutor for VegasStrategyExecutor {
         let last_timestamp = validate_candles(&candles)?;
 
         // 2. 解析策略配置
-        let vegas_strategy: VegasStrategy = serde_json::from_str(&strategy_config.strategy_config)
-            .map_err(|e| anyhow!("解析 Vegas 策略配置失败: {}", e))?;
+        let vegas_strategy: VegasStrategy =
+            serde_json::from_value(strategy_config.parameters.clone())
+                .map_err(|e| anyhow!("解析 Vegas 策略配置失败: {}", e))?;
 
         // 3. 转换K线数据并计算指标
         let mut multi_strategy_indicators = vegas_strategy.get_indicator_combine();
@@ -80,7 +78,7 @@ impl StrategyExecutor for VegasStrategyExecutor {
         // 4. 生成存储键并保存数据
         let hash_key = get_hash_key(inst_id, period, StrategyType::Vegas.as_str());
 
-        arc_vegas_indicator_values::set_strategy_indicator_values(
+        set_strategy_indicator_values(
             inst_id.to_string(),
             period.to_string(),
             last_timestamp,
@@ -110,10 +108,10 @@ impl StrategyExecutor for VegasStrategyExecutor {
         period: &str,
         strategy_config: &StrategyConfig,
         snap: Option<CandlesEntity>,
-    ) -> Result<()> {
+    ) -> Result<SignalResult> {
         const MAX_HISTORY_SIZE: usize = 4000;
 
-        // 1. 获取哈希键和管理器
+        // 1. 获取哈希键和管理n
         let key = get_hash_key(inst_id, period, StrategyType::Vegas.as_str());
         let manager = get_indicator_manager();
 
@@ -132,15 +130,25 @@ impl StrategyExecutor for VegasStrategyExecutor {
 
         let mut new_candle_items: VecDeque<CandleItem> = last_candles_vec.into_iter().collect();
 
-        // 4. 检查是否应该执行（使用公共函数）
-        if !should_execute_strategy(
-            &key,
-            old_time,
-            new_candle_item.ts,
-            period,
-            new_candle_item.confirm == 1,
-        )? {
-            return Ok(());
+        // 4. 检查是否应该执行（使用简化版本，只检查时间戳）
+        if !is_new_timestamp(old_time, new_candle_item.ts) {
+            debug!(
+                "时间未更新，跳过策略执行: old_time={}, new_time={}",
+                old_time, new_candle_item.ts
+            );
+            // 返回空的信号结果
+            return Ok(SignalResult {
+                should_buy: false,
+                should_sell: false,
+                open_price: new_candle_item.c,
+                best_open_price: None,
+                best_take_profit_price: None,
+                move_stop_open_price_when_touch_price: None,
+                ts: new_candle_item.ts,
+                single_value: None,
+                single_result: None,
+                signal_kline_stop_loss_price: None,
+            });
         }
 
         // 5. 更新指标值
@@ -169,29 +177,34 @@ impl StrategyExecutor for VegasStrategyExecutor {
         let candle_vec = get_recent_candles(&new_candle_items, 30);
 
         // 9. 生成交易信号
-        let vegas_strategy: VegasStrategy = serde_json::from_str(&strategy_config.strategy_config)?;
+        let vegas_strategy: VegasStrategy =
+            serde_json::from_value(strategy_config.parameters.clone())
+                .map_err(|e| anyhow!("解析 Vegas 策略配置失败: {}", e))?;
         let signal_result = vegas_strategy.get_trade_signal(
             &candle_vec,
             &mut new_indicator_values.clone(),
             &SignalWeightsConfig::default(),
-            &serde_json::from_str(&strategy_config.risk_config)?,
+            &serde_json::from_value(strategy_config.risk_config.clone())
+                .map_err(|e| anyhow!("解析风险配置失败: {}", e))?,
         );
 
-        // 10. 执行下单（使用公共函数）
-        execute_order(
-            &StrategyType::Vegas,
-            inst_id,
-            period,
-            &signal_result,
-            strategy_config,
-        )
-        .await?;
+        info!("✅ Vegas策略信号生成完成: key={}", key);
 
-        // 11. 清理执行状态
-        // ⏳ 状态管理已解耦到ExecutionContext
-        // StrategyExecutionStateManager::mark_completed(&key, new_candle_item.ts);
-        info!("策略执行完成标记: key={}", key);
+        // 10. 转换 domain::SignalResult 到 strategy_common::SignalResult
+        let strategy_signal = SignalResult {
+            should_buy: signal_result.should_buy.unwrap_or(false),
+            should_sell: signal_result.should_sell.unwrap_or(false),
+            open_price: signal_result.open_price.unwrap_or(0.0),
+            signal_kline_stop_loss_price: signal_result.signal_kline_stop_loss_price,
+            best_open_price: signal_result.best_open_price,
+            best_take_profit_price: signal_result.best_take_profit_price,
+            move_stop_open_price_when_touch_price: None,
+            ts: signal_result.ts.unwrap_or(new_candle_item.ts),
+            single_value: signal_result.single_value.map(|v| v.to_string()),
+            single_result: signal_result.single_result.map(|v| v.to_string()),
+        };
 
-        Ok(())
+        // 11. 返回信号（下单逻辑由services层统一处理）
+        Ok(strategy_signal)
     }
 }

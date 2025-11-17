@@ -64,13 +64,12 @@ pub trait StrategyExecutor: Send + Sync {
         candles: Vec<CandlesEntity>,
     ) -> Result<StrategyDataResult>;
 
-    /// 执行策略（生成交易信号并下单）
+    /// 执行策略（生成交易信号）
     ///
     /// 当K线确认时调用，用于：
     /// - 获取最新K线
     /// - 更新指标值
     /// - 生成交易信号
-    /// - 执行下单（如有信号）
     ///
     /// # 参数
     /// * `inst_id` - 产品ID
@@ -79,15 +78,19 @@ pub trait StrategyExecutor: Send + Sync {
     /// * `snap` - 最新K线快照（可选）
     ///
     /// # 返回
-    /// * `Ok(())` - 执行成功
+    /// * `Ok(SignalResult)` - 执行成功，返回信号
     /// * `Err` - 执行失败
+    ///
+    /// # 架构原则
+    /// 策略层只负责信号生成，不负责下单
+    /// 下单逻辑由services层统一处理
     async fn execute(
         &self,
         inst_id: &str,
         period: &str,
         strategy_config: &StrategyConfig,
         snap: Option<CandlesEntity>,
-    ) -> Result<()>;
+    ) -> Result<SignalResult>;
 }
 
 /// 策略执行器工厂

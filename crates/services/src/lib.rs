@@ -43,12 +43,14 @@
 //! service.start_strategy(config_id).await?;
 //! ```
 
+pub mod exchange;
 pub mod market;
 pub mod risk;
 pub mod strategy;
 pub mod trading;
 
 // 重新导出常用服务
+pub use exchange::ExchangeApiService;
 pub use risk::RiskManagementService;
 pub use strategy::{StrategyConfigService, StrategyExecutionService};
 pub use trading::OrderCreationService;

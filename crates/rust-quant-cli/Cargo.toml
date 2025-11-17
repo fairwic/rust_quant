@@ -12,13 +12,15 @@ path = "src/main.rs"
 # Workspace 内部依赖 - 引入所有子包
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
+rust-quant-domain.workspace = true
+rust-quant-infrastructure.workspace = true
+rust-quant-services.workspace = true
 rust-quant-market.workspace = true
 rust-quant-indicators.workspace = true
 rust-quant-strategies.workspace = true
 rust-quant-risk.workspace = true
 rust-quant-execution.workspace = true
 rust-quant-orchestration.workspace = true
-rust-quant-infrastructure.workspace = true
 
 # 外部依赖
 anyhow.workspace = true

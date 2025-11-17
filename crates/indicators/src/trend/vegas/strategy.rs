@@ -85,6 +85,7 @@ impl VegasStrategy {
                 best_open_price: None,
                 best_take_profit_price: None,
                 signal_kline_stop_loss_price: None,
+                move_stop_open_price_when_touch_price: None,
                 ts: Some(0),
                 single_value: None,
                 single_result: None,
@@ -112,6 +113,7 @@ impl VegasStrategy {
                     best_open_price: None,
                     best_take_profit_price: None,
                     signal_kline_stop_loss_price: None,
+                    move_stop_open_price_when_touch_price: None,
                     ts: Some(0),
                     single_value: None,
                     single_result: None,
@@ -152,6 +154,7 @@ impl VegasStrategy {
             take_profit_price: None,
             position_time: None,
             signal_kline: None,
+            move_stop_open_price_when_touch_price: None,
         };
 
         let mut conditions = Vec::with_capacity(10);
@@ -369,43 +372,20 @@ impl VegasStrategy {
     }
 
     /// 运行回测
-    /// TODO: 迁移后需要重新实现，strategy_common 在 strategies 包中
+    /// 
+    /// 注意：此方法不能在 indicators 包中完整实现，因为 BacktestResult 在不同包中定义不同
+    /// 实际回测逻辑应在 strategies 或 orchestration 包中调用，使用 get_indicator_combine() 和 get_trade_signal()
     pub fn run_test(
         &mut self,
         _candles: &Vec<CandleItem>,
         _risk_strategy_config: BasicRiskStrategyConfig,
     ) -> BacktestResult {
-        // TODO: 暂时返回空结果，等待 strategies 包修复后重新实现
-        // 原实现需要 strategy_common，暂时注释掉整个函数体
-        unimplemented!("run_test 需要在 strategies 包修复后重新实现")
-
-        /* 原实现代码 - 暂时保留作为参考
-        use rust_quant_domain;
-
-        let min_length = self.get_min_data_length();
-        let mut indicator_combine = self.get_indicator_combine();
-        strategy_common::run_back_test(
-            {
-                let signal_weights = self
-                    .signal_weights
-                    .as_ref()
-                    .expect("信号权重配置不能为空")
-                    .clone();
-                move |candles, multi_indicator_values| {
-                    self.get_trade_signal(
-                        candles,
-                        multi_indicator_values,
-                        &signal_weights,
-                        &risk_strategy_config,
-                    )
-                }
-            },
-            candles,
-            risk_strategy_config,
-            min_length,
-            &mut indicator_combine,
+        // 由于架构分层，indicators 包的 BacktestResult 与 strategies 包不同
+        // 此方法仅作占位，实际回测在 orchestration/backtest_executor.rs 中实现
+        unimplemented!(
+            "VegasStrategy::run_test 应在 orchestration 包中调用，\
+            使用 get_indicator_combine() 和 get_trade_signal() 方法"
         )
-        */ // 结束注释块
     }
 
     // 私有辅助方法

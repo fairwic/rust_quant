@@ -169,6 +169,21 @@ pub fn is_new_timestamp(old_time: i64, new_time: i64) -> bool {
     true
 }
 
+/// 获取最新K线数据（公共逻辑）
+///
+/// 优先使用传入的 snap，如果没有则返回错误（需要调用方自行获取）
+pub async fn get_latest_candle(
+    _inst_id: &str,
+    _period: &str,
+    snap: Option<CandlesEntity>,
+) -> Result<CandlesEntity> {
+    if let Some(snap) = snap {
+        Ok(snap)
+    } else {
+        Err(anyhow!("需要提供 K 线快照数据，或通过其他方式获取最新K线"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,13 +13,7 @@ use tokio_cron_scheduler::JobScheduler;
 use tracing::{error, info};
 
 // 重新导出核心依赖
-pub use rust_quant_common::*;
-pub use rust_quant_core::*;
 pub use rust_quant_execution::*;
-pub use rust_quant_indicators::*;
-pub use rust_quant_market::*;
-pub use rust_quant_orchestration::*;
-pub use rust_quant_risk::*;
 pub use rust_quant_strategies::*;
 
 /// 应用初始化

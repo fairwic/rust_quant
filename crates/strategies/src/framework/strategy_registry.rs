@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
 
 use super::strategy_trait::StrategyExecutor;
+use crate::implementations::{NweStrategyExecutor, VegasStrategyExecutor};
 
 /// 策略注册中心
 ///
@@ -170,9 +171,6 @@ pub fn get_strategy_registry() -> &'static StrategyRegistry {
 /// register_strategy_on_demand(&StrategyType::Nwe);
 /// ```
 pub fn register_strategy_on_demand(strategy_type: &crate::StrategyType) {
-    // TODO: vegas_executor依赖orchestration，暂时注释
-    // use super::vegas_executor::VegasStrategyExecutor;
-    // use super::nwe_executor::NweStrategyExecutor;
     use crate::StrategyType;
     use okx::dto::EnumToStrTrait;
 
@@ -184,26 +182,20 @@ pub fn register_strategy_on_demand(strategy_type: &crate::StrategyType) {
         return;
     }
 
-    // TODO: executor模块待恢复，暂时注释
     // 根据策略类型创建并注册执行器
-    // match strategy_type {
-    //     StrategyType::Vegas => {
-    //         registry.register(Arc::new(VegasStrategyExecutor::new()));
-    //         info!("✅ 按需注册策略: Vegas");
-    //     }
-    //     StrategyType::Nwe => {
-    //         registry.register(Arc::new(NweStrategyExecutor::new()));
-    //         info!("✅ 按需注册策略: Nwe");
-    //     }
-    //     _ => {
-    //         warn!(
-    //             "⚠️  策略类型 {:?} 暂未实现执行器，跳过注册",
-    //             strategy_type
-    //         );
-    //     }
-    // }
-
-    warn!("⚠️ executor模块待恢复，策略 {} 暂未自动注册", strategy_name);
+    match strategy_type {
+        StrategyType::Vegas => {
+            registry.register(Arc::new(VegasStrategyExecutor::new()));
+            info!("✅ 按需注册策略: Vegas");
+        }
+        StrategyType::Nwe => {
+            registry.register(Arc::new(NweStrategyExecutor::new()));
+            info!("✅ 按需注册策略: Nwe");
+        }
+        _ => {
+            warn!("⚠️  策略类型 {:?} 暂未实现执行器，跳过注册", strategy_type);
+        }
+    }
 }
 
 #[cfg(test)]

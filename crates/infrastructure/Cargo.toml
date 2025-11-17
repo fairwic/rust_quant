@@ -43,4 +43,7 @@ chrono.workspace = true
 # 工具库
 once_cell.workspace = true
 
+# 交易所 SDK（用于adapter实现）
+okx.workspace = true
+
 

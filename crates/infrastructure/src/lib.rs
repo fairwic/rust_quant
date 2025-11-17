@@ -29,12 +29,15 @@
 //! ```
 
 pub mod cache;
+pub mod exchanges;
 pub mod messaging;
 pub mod repositories;
 
 // 重新导出常用类型
+pub use exchanges::*;
 pub use repositories::{
-    PositionEntity, SqlxCandleRepository, SqlxPositionRepository, SqlxStrategyConfigRepository,
+    PositionEntity, SignalLogEntity, SignalLogRepository, SqlxBacktestRepository,
+    SqlxCandleRepository, SqlxPositionRepository, SqlxStrategyConfigRepository,
     StrategyConfigEntity, StrategyConfigEntityModel,
 };
 

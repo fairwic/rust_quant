@@ -89,6 +89,7 @@ impl EngulfingStrategy {
             signal_kline_stop_loss_price: None,
             best_open_price: None,
             best_take_profit_price: None,
+            move_stop_open_price_when_touch_price: None,
         }
     }
 

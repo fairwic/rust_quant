@@ -8,13 +8,15 @@ rust-version.workspace = true
 # Workspace 内部依赖
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
-rust-quant-domain.workspace = true          # 使用领域模型
-rust-quant-infrastructure.workspace = true  # 使用基础设施
+rust-quant-domain.workspace = true          # 添加domain依赖
+rust-quant-infrastructure.workspace = true  # 用于创建服务实例（依赖注入）
 rust-quant-services.workspace = true        # ⭐ 新增: 通过services协调业务
 rust-quant-market.workspace = true
 rust-quant-strategies.workspace = true
+rust-quant-indicators.workspace = true
 rust-quant-risk.workspace = true
 rust-quant-execution.workspace = true
+okx.workspace = true
 
 # 外部依赖
 tokio.workspace = true
@@ -34,12 +36,7 @@ redis.workspace = true
 dashmap.workspace = true
 once_cell.workspace = true
 
-# 交易所 SDK
-okx.workspace = true
-
-# 数据库（使用 sqlx）
-sqlx.workspace = true
-
 # 序列化
 serde_json.workspace = true
 futures.workspace = true
+

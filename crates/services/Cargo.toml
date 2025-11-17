@@ -39,3 +39,9 @@ chrono.workspace = true
 # 数据库
 sqlx.workspace = true
 
+# 交易所 SDK
+okx.workspace = true
+
+# 缓存
+redis.workspace = true
+

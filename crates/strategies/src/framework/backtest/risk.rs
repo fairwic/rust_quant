@@ -1,0 +1,218 @@
+use super::super::types::TradeSide;
+use super::position::close_position;
+use super::types::{BasicRiskStrategyConfig, SignalResult, TradingState};
+use crate::CandleItem;
+use std::collections::VecDeque;
+
+/// 风险管理，检查止盈止损配置
+pub fn check_risk_config(
+    risk_config: &BasicRiskStrategyConfig,
+    mut trading_state: TradingState,
+    signal: &SignalResult,
+    candle: &CandleItem,
+    candle_item_list: &VecDeque<CandleItem>,
+    _i: usize,
+) -> TradingState {
+    let current_open_price = signal.open_price;
+    let current_low_price = candle.l;
+    let current_high_price = candle.h;
+    let current_close_price = candle.c;
+
+    let mut trade_position = trading_state.trade_position.clone().unwrap();
+    let entry_price = trade_position.open_price;
+    let position_nums = trade_position.position_nums.clone();
+
+    // 检查移动止盈
+    if risk_config.is_move_stop_open_price_when_touch_price {
+        if let Some(move_stop_loss_price) = trade_position.move_stop_open_price {
+            match trade_position.trade_side {
+                TradeSide::Long => {
+                    if current_low_price <= move_stop_loss_price {
+                        trade_position.close_price = Some(move_stop_loss_price);
+                        trading_state.trade_position = Some(trade_position.clone());
+                        close_position(
+                            &mut trading_state,
+                            candle,
+                            &signal,
+                            "移动(开仓价格止损)",
+                            0.00,
+                        );
+                        return trading_state;
+                    }
+                }
+                TradeSide::Short => {
+                    if current_high_price >= move_stop_loss_price {
+                        trade_position.close_price = Some(move_stop_loss_price);
+                        trading_state.trade_position = Some(trade_position.clone());
+                        close_position(
+                            &mut trading_state,
+                            candle,
+                            &signal,
+                            "移动(开仓价格止损)",
+                            0.00,
+                        );
+                        return trading_state;
+                    }
+                }
+            }
+        } else {
+            // 如果启用了移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
+            if trade_position
+                .move_stop_open_price_when_touch_price
+                .is_some()
+            {
+                match trade_position.trade_side {
+                    TradeSide::Long => {
+                        if current_high_price
+                            >= trade_position
+                                .move_stop_open_price_when_touch_price
+                                .unwrap()
+                        {
+                            trade_position.move_stop_open_price = Some(entry_price);
+                            trading_state.trade_position = Some(trade_position.clone());
+                        }
+                    }
+                    TradeSide::Short => {
+                        if current_low_price
+                            <= trade_position
+                                .move_stop_open_price_when_touch_price
+                                .unwrap()
+                        {
+                            trade_position.move_stop_open_price = Some(entry_price);
+                            trading_state.trade_position = Some(trade_position.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 检查按收益比例止盈
+    if risk_config.take_profit_ratio > 0.0 {
+        match trade_position.trade_side {
+            TradeSide::Long => {
+                if let Some(touch_price) = trade_position.touch_take_ratio_profit_price {
+                    if current_high_price >= touch_price {
+                        trade_position.signal_kline_stop_close_price =
+                            Some(trade_position.open_price);
+                        trading_state.trade_position = Some(trade_position.clone());
+                        let profit = (touch_price - entry_price) * trade_position.position_nums;
+                        trade_position.close_price = Some(touch_price);
+                        trading_state.trade_position = Some(trade_position);
+                        close_position(
+                            &mut trading_state,
+                            candle,
+                            &signal,
+                            "按收益比例止盈",
+                            profit,
+                        );
+                        return trading_state;
+                    }
+                }
+            }
+            TradeSide::Short => {
+                if let Some(touch_price) = trade_position.touch_take_ratio_profit_price {
+                    if current_low_price <= touch_price {
+                        trade_position.signal_kline_stop_close_price =
+                            Some(trade_position.open_price);
+                        trading_state.trade_position = Some(trade_position.clone());
+                        let profit = (entry_price - touch_price) * trade_position.position_nums;
+                        trade_position.close_price = Some(touch_price);
+                        trading_state.trade_position = Some(trade_position);
+                        close_position(
+                            &mut trading_state,
+                            candle,
+                            &signal,
+                            "按收益比例止盈",
+                            profit,
+                        );
+                        return trading_state;
+                    }
+                }
+            }
+        }
+    }
+
+    // 计算盈亏率
+    let profit_pct = match trade_position.trade_side {
+        TradeSide::Long => (current_low_price - entry_price) / entry_price,
+        TradeSide::Short => (entry_price - current_high_price) / entry_price,
+    };
+
+    // 计算盈亏
+    let profit = match trade_position.trade_side {
+        TradeSide::Long => (current_close_price - entry_price) * trade_position.position_nums,
+        TradeSide::Short => (entry_price - current_close_price) * trade_position.position_nums,
+    };
+
+    // 检查是否设置了最优止盈价格
+    if let Some(best_take_profit_price) = trade_position.best_take_profit_price {
+        match trade_position.trade_side {
+            TradeSide::Long => {
+                if current_high_price > best_take_profit_price {
+                    let profit =
+                        (best_take_profit_price - entry_price) * trade_position.position_nums;
+                    trade_position.close_price = Some(best_take_profit_price);
+                    trading_state.trade_position = Some(trade_position);
+                    close_position(&mut trading_state, candle, &signal, "最优止盈", profit);
+                    return trading_state;
+                }
+            }
+            TradeSide::Short => {
+                if current_low_price < best_take_profit_price {
+                    let profit =
+                        (entry_price - best_take_profit_price) * trade_position.position_nums;
+                    trade_position.close_price = Some(best_take_profit_price);
+                    trading_state.trade_position = Some(trade_position);
+                    close_position(&mut trading_state, candle, &signal, "最优止盈", profit);
+                    return trading_state;
+                }
+            }
+        }
+    }
+
+    // 先检查设置了是否预止损价格
+    if let Some(signal_kline_stop_close_price) = trade_position.signal_kline_stop_close_price {
+        match trade_position.trade_side.clone() {
+            TradeSide::Long => {
+                if current_low_price <= signal_kline_stop_close_price {
+                    trade_position.close_price = Some(signal_kline_stop_close_price);
+                    let profit = (signal_kline_stop_close_price - entry_price) * position_nums;
+                    trading_state.trade_position = Some(trade_position);
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "预止损-信号线失效",
+                        profit,
+                    );
+                    return trading_state;
+                }
+            }
+            TradeSide::Short => {
+                if current_high_price >= signal_kline_stop_close_price {
+                    trade_position.close_price = Some(signal_kline_stop_close_price);
+                    let profit = (entry_price - signal_kline_stop_close_price) * position_nums;
+                    trading_state.trade_position = Some(trade_position);
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "预止损-信号线失效",
+                        profit,
+                    );
+                    return trading_state;
+                }
+            }
+        }
+    }
+
+    // 最后再检查最大止损
+    if profit_pct < -risk_config.max_loss_percent {
+        trade_position.close_price = Some(current_open_price);
+        trading_state.trade_position = Some(trade_position);
+        close_position(&mut trading_state, candle, &signal, "最大亏损止损", profit);
+        return trading_state;
+    }
+    trading_state
+}

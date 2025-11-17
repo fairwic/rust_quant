@@ -127,7 +127,7 @@ impl Timeframe {
             Timeframe::H4 => "4H",
             Timeframe::H6 => "6H",
             Timeframe::H12 => "12H",
-            Timeframe::D1 => "1D",
+            Timeframe::D1 => "1Dutc",
             Timeframe::W1 => "1W",
             Timeframe::MN1 => "1M",
         }
@@ -145,7 +145,7 @@ impl Timeframe {
             "4H" | "4h" => Some(Timeframe::H4),
             "6H" | "6h" => Some(Timeframe::H6),
             "12H" | "12h" => Some(Timeframe::H12),
-            "1D" | "1d" => Some(Timeframe::D1),
+            "1Dutc" | "1d" => Some(Timeframe::D1),
             "1W" | "1w" => Some(Timeframe::W1),
             "1M" => Some(Timeframe::MN1),
             _ => None,

@@ -1,9 +1,9 @@
-use tokio::sync::mpsc;
-use std::time::Duration;
-use std::collections::HashMap;
-use tracing::{debug, error, info};
+use crate::models::CandlesModel;
 use okx::dto::market_dto::CandleOkxRespDto;
-use rust_quant_market::models::CandlesModel;
+use std::collections::HashMap;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tracing::{debug, error, info};
 
 /// K线持久化任务
 #[derive(Debug, Clone)]
@@ -25,41 +25,43 @@ impl CandlePersistWorker {
     pub fn new(receiver: mpsc::UnboundedReceiver<PersistTask>) -> Self {
         Self {
             receiver,
-            batch_size: 100,  // 批量大小
-            flush_interval: Duration::from_millis(500),  // 最大等待时间500ms
+            batch_size: 100,                            // 批量大小
+            flush_interval: Duration::from_millis(500), // 最大等待时间500ms
         }
     }
-    
+
     /// 配置批量大小和刷新间隔
     pub fn with_config(mut self, batch_size: usize, flush_interval: Duration) -> Self {
         self.batch_size = batch_size;
         self.flush_interval = flush_interval;
         self
     }
-    
+
     /// 启动Worker运行
     pub async fn run(mut self) {
-        info!("🚀 批处理Worker已启动: batch_size={}, flush_interval={:?}", 
-            self.batch_size, self.flush_interval);
-        
+        info!(
+            "🚀 批处理Worker已启动: batch_size={}, flush_interval={:?}",
+            self.batch_size, self.flush_interval
+        );
+
         // 按 inst_id + time_interval 分组缓冲
         let mut buffer: HashMap<String, Vec<CandleOkxRespDto>> = HashMap::new();
         let mut last_flush = tokio::time::Instant::now();
-        
+
         loop {
             tokio::select! {
                 Some(task) = self.receiver.recv() => {
                     // 按 inst_id + time_interval 分组
                     let key = format!("{}_{}", task.inst_id, task.time_interval);
                     buffer.entry(key).or_insert_with(Vec::new).extend(task.candles);
-                    
+
                     // 计算总数据量
                     let total_size: usize = buffer.values().map(|v| v.len()).sum();
-                    
+
                     // 达到批量大小或超时则刷新
-                    if total_size >= self.batch_size 
+                    if total_size >= self.batch_size
                         || last_flush.elapsed() >= self.flush_interval {
-                        debug!("触发批量刷新: total_size={}, elapsed={:?}", 
+                        debug!("触发批量刷新: total_size={}, elapsed={:?}",
                             total_size, last_flush.elapsed());
                         self.flush_buffer(&mut buffer).await;
                         last_flush = tokio::time::Instant::now();
@@ -76,7 +78,7 @@ impl CandlePersistWorker {
             }
         }
     }
-    
+
     /// 刷新缓冲区，批量写入数据库
     async fn flush_buffer(&self, buffer: &mut HashMap<String, Vec<CandleOkxRespDto>>) {
         for (key, candles) in buffer.drain() {
@@ -85,25 +87,30 @@ impl CandlePersistWorker {
                 error!("无效的key格式: {}", key);
                 continue;
             }
-            
+
             // 重新拼接inst_id（可能包含下划线）
             let time_interval = parts.last().unwrap();
-            let inst_id = parts[..parts.len()-1].join("_");
-            
-            debug!("批量写入K线: inst_id={}, time_interval={}, count={}", 
-                inst_id, time_interval, candles.len());
-            
-            let model = CandlesModel::new().await;
+            let inst_id = parts[..parts.len() - 1].join("_");
+
+            debug!(
+                "批量写入K线: inst_id={}, time_interval={}, count={}",
+                inst_id,
+                time_interval,
+                candles.len()
+            );
+
+            let model = CandlesModel::new();
             match model.upsert_batch(candles, &inst_id, time_interval).await {
                 Ok(rows) => {
                     debug!("✅ 批量写入成功: {} rows affected", rows);
                 }
                 Err(e) => {
-                    error!("❌ 批量写入失败: inst_id={}, time_interval={}, error={:?}", 
-                        inst_id, time_interval, e);
+                    error!(
+                        "❌ 批量写入失败: inst_id={}, time_interval={}, error={:?}",
+                        inst_id, time_interval, e
+                    );
                 }
             }
         }
     }
 }
-

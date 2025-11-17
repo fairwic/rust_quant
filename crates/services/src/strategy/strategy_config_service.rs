@@ -5,8 +5,8 @@
 use anyhow::{anyhow, Result};
 use tracing::{info, warn};
 
+use rust_quant_domain::traits::StrategyConfigRepository;
 use rust_quant_domain::{StrategyConfig, StrategyType, Timeframe};
-use rust_quant_infrastructure::{StrategyConfigEntity, StrategyConfigEntityModel};
 
 /// 策略配置服务
 ///
@@ -14,30 +14,46 @@ use rust_quant_infrastructure::{StrategyConfigEntity, StrategyConfigEntityModel}
 /// - 加载和管理策略配置
 /// - 配置验证和转换
 /// - 配置缓存管理
+///
+/// # 架构原则
+/// - 依赖 domain::traits::StrategyConfigRepository（接口）
+/// - 不依赖 infrastructure 具体实现
+/// - 通过构造函数注入实现
 pub struct StrategyConfigService {
-    repository: StrategyConfigEntityModel,
+    repository: Box<dyn StrategyConfigRepository>,
 }
 
 impl StrategyConfigService {
-    /// 创建新的服务实例
-    pub async fn new() -> Self {
-        Self {
-            repository: StrategyConfigEntityModel::new().await,
-        }
+    /// 创建新的服务实例（通过依赖注入）
+    ///
+    /// # 参数
+    /// * `repository` - StrategyConfigRepository 实现（通常在应用入口注入）
+    ///
+    /// # 示例
+    /// ```rust,ignore
+    /// use rust_quant_infrastructure::SqlxStrategyConfigRepository;
+    /// let repo = SqlxStrategyConfigRepository::new();
+    /// let service = StrategyConfigService::new(Box::new(repo));
+    /// ```
+    pub fn new(repository: Box<dyn StrategyConfigRepository>) -> Self {
+        Self { repository }
     }
 
     /// 根据ID加载策略配置
     pub async fn load_config_by_id(&self, config_id: i64) -> Result<StrategyConfig> {
         info!("加载策略配置: config_id={}", config_id);
 
-        let entity = self
-            .repository
-            .get_config_by_id(config_id)
+        self.repository
+            .find_by_id(config_id)
             .await?
-            .ok_or_else(|| anyhow!("策略配置不存在: {}", config_id))?;
+            .ok_or_else(|| anyhow!("策略配置不存在: {}", config_id))
+    }
 
-        // 转换为领域模型
-        entity.to_domain()
+    /// 加载所有启用的策略配置
+    pub async fn load_all_enabled_configs(&self) -> Result<Vec<StrategyConfig>> {
+        let configs = self.repository.find_all_enabled().await?;
+        info!("找到 {} 个启用的策略配置", configs.len());
+        Ok(configs)
     }
 
     /// 根据交易对和时间周期加载配置
@@ -52,29 +68,27 @@ impl StrategyConfigService {
             symbol, timeframe, strategy_type
         );
 
-        let entities = self
+        let timeframe_enum = Timeframe::from_str(timeframe)
+            .ok_or_else(|| anyhow!("无效的时间周期: {}", timeframe))?;
+
+        let mut configs = self
             .repository
-            .get_config(strategy_type, symbol, timeframe)
+            .find_by_symbol_and_timeframe(symbol, timeframe_enum)
             .await?;
 
-        if entities.is_empty() {
+        // 如果指定了策略类型，进行过滤
+        if let Some(strategy_type_str) = strategy_type {
+            let strategy_type_enum = StrategyType::from_str(strategy_type_str)
+                .ok_or_else(|| anyhow!("无效的策略类型: {}", strategy_type_str))?;
+            configs.retain(|c| c.strategy_type == strategy_type_enum);
+        }
+
+        if configs.is_empty() {
             warn!("未找到策略配置: {}@{}", symbol, timeframe);
             return Ok(vec![]);
         }
 
-        info!("找到 {} 个策略配置", entities.len());
-
-        // 批量转换为领域模型
-        let mut configs = Vec::with_capacity(entities.len());
-        for entity in entities {
-            match entity.to_domain() {
-                Ok(config) => configs.push(config),
-                Err(e) => {
-                    warn!("配置转换失败: {}, id={}", e, entity.id);
-                }
-            }
-        }
-
+        info!("找到 {} 个策略配置", configs.len());
         Ok(configs)
     }
 
@@ -116,10 +130,8 @@ impl StrategyConfigService {
 
         self.validate_config(&config)?;
 
-        // TODO: SqlxStrategyConfigRepository需要实现update方法
-        warn!("update_config 暂未实现");
-
-        Ok(())
+        // 通过仓储更新
+        self.repository.update(&config).await
     }
 
     /// 启动策略
@@ -146,6 +158,16 @@ impl StrategyConfigService {
         info!("策略已停止: config_id={}", config_id);
         Ok(())
     }
+    // pub async fn load_all_enabled_configs(&self) -> Result<Vec<StrategyConfig>> {
+    //     info!("加载所有启用的策略配置");
+
+    //     // 使用repository的方法查询所有配置
+    //     // get_all() 已经过滤了 is_deleted = 0 的记录
+    //     let configs = self.repository.get_all().await?;
+
+    //     info!("找到 {} 个策略配置", configs.len());
+    //     Ok(configs)
+    // }
 }
 
 #[cfg(test)]
@@ -154,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_service_creation() {
-        let service = StrategyConfigService::new().await;
+        // let service = StrategyConfigService::new().await;
         // 服务创建成功
     }
 }

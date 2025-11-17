@@ -2,10 +2,15 @@
 //!
 //! 定义领域层的抽象接口，由基础设施层实现
 
+pub mod exchange_trait;
 pub mod repository_trait;
 pub mod strategy_trait;
 
+pub use exchange_trait::{
+    ExchangeAccount, ExchangeContracts, ExchangeMarketData, ExchangePublicData,
+};
 pub use repository_trait::{
-    CandleRepository, OrderRepository, PositionRepository, StrategyConfigRepository,
+    BacktestLogRepository, CandleRepository, ExchangeApiConfigRepository, OrderRepository,
+    PositionRepository, StrategyApiConfigRepository, StrategyConfigRepository,
 };
 pub use strategy_trait::{BacktestResult, Backtestable, Strategy};

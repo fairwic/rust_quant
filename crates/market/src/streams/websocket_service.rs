@@ -1,67 +1,49 @@
 use futures_util::{SinkExt, StreamExt};
 use okx::websocket::auto_reconnect_client::AutoReconnectWebsocketClient;
-use okx::websocket::auto_reconnect_client::ReconnectConfig;
 use std::env;
-use std::net::SocketAddr;
 use std::sync::Arc;
-// use log::{debug, error, warn};
-use okx::websocket::ChannelType;
-use okx::websocket::OkxWebsocketClient;
-use serde_json::json;
-use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite;
 use tracing::{info, span, Level};
 
-use rust_quant_infrastructure::cache::default_provider;
-use rust_quant_market::repositories::candle_service::CandleService;
-use rust_quant_market::repositories::persist_worker::{CandlePersistWorker, PersistTask};
-use rust_quant_orchestration::workflow::tickets_job::update_ticker;
-use okx::api::api_trait::OkxApiTrait;
+use crate::cache::default_provider;
+use crate::models::CandlesEntity;
+use crate::repositories::candle_service::CandleService;
+use crate::repositories::persist_worker::{CandlePersistWorker, PersistTask};
+use crate::repositories::ticker_service::TickerService;
 use okx::config::Credentials;
 use okx::dto::market_dto::CandleOkxRespDto;
-use okx::dto::market_dto::TickerOkxResDto;
 use okx::dto::CandleOkxWsResDto;
 use okx::dto::CommonOkxWsResDto;
 use okx::dto::TickerOkxResWsDto;
-use okx::websocket::Args;
-use serde::de;
-use tokio_tungstenite::tungstenite::protocol::Message;
-use tokio_tungstenite::{
-    accept_async,
-    tungstenite::{Error, Result},
-};
+use okx::websocket::{Args, ChannelType};
 use tracing::debug;
 use tracing::error;
-async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
-    if let Err(e) = handle_connection(peer, stream).await {
-        match e {
-            tungstenite::Error::ConnectionClosed
-            | tungstenite::Error::Protocol(_)
-            | tungstenite::Error::Utf8 => (),
-            err => error!("Error processing connection: {}", err),
-        }
-    }
-}
 
-async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
-    let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
-
-    info!("New WebSocket connection: {}", peer);
-
-    while let Some(msg) = ws_stream.next().await {
-        let msg = msg?;
-        info!("New Message : {}", msg);
-        if msg.is_text() || msg.is_binary() {
-            let response = "hhhh";
-            ws_stream.send(Message::from(response)).await?;
-        }
-    }
-
-    Ok(())
-}
-
+/// WebSocket 服务入口
+/// 
+/// # 参数
+/// * `inst_ids` - 交易对列表
+/// * `times` - 时间周期列表
+/// * `strategy_trigger` - 可选的策略触发回调函数
+/// 
+/// # 架构说明
+/// - 如果提供 strategy_trigger，则 K线确认时会自动触发策略执行
+/// - 如果不提供，则仅处理 K线数据存储和缓存
 pub async fn run_socket(inst_ids: &Vec<String>, times: &Vec<String>) {
+    run_socket_with_strategy_trigger(inst_ids, times, None).await;
+}
+
+/// 带策略触发的 WebSocket 服务
+/// 
+/// # 参数
+/// * `inst_ids` - 交易对列表
+/// * `times` - 时间周期列表
+/// * `strategy_trigger` - 策略触发回调函数
+pub async fn run_socket_with_strategy_trigger(
+    inst_ids: &Vec<String>,
+    times: &Vec<String>,
+    strategy_trigger: Option<Arc<dyn Fn(String, String, CandlesEntity) + Send + Sync>>,
+) {
     let span = span!(Level::DEBUG, "socket_logic");
     let _enter = span.enter();
     // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
@@ -75,16 +57,27 @@ pub async fn run_socket(inst_ids: &Vec<String>, times: &Vec<String>) {
     let (persist_tx, persist_rx) = mpsc::unbounded_channel::<PersistTask>();
     let worker = CandlePersistWorker::new(persist_rx)
         .with_config(100, std::time::Duration::from_millis(500));
-    
+
     // 启动Worker
     tokio::spawn(async move {
         worker.run().await;
     });
 
-    // 🚀 [已优化] 创建共享的CandleService实例
-    let candle_service = Arc::new(
-        CandleService::new_with_persist_worker(default_provider(), persist_tx)
-    );
+    // 🚀 [已优化] 创建共享的CandleService实例（带策略触发）
+    let candle_service = if let Some(trigger) = strategy_trigger {
+        info!("✅ 创建 CandleService 实例（启用策略触发）");
+        Arc::new(CandleService::new_with_strategy_trigger(
+            default_provider(),
+            Some(persist_tx),
+            trigger,
+        ))
+    } else {
+        info!("✅ 创建 CandleService 实例（未启用策略触发）");
+        Arc::new(CandleService::new_with_persist_worker(
+            default_provider(),
+            persist_tx,
+        ))
+    };
     info!("✅ CandleService实例已创建并启用批处理");
 
     // 创建自动重连客户端
@@ -154,66 +147,62 @@ pub async fn run_socket(inst_ids: &Vec<String>, times: &Vec<String>) {
         }
     }
 
-    // 持续监听并处理 websocket 消息
-    tokio::spawn(async move {
-        while let Some(msg) = public_receiver.recv().await {
-            // info!("收到公共频道消息: {:?}", msg);
-            // Object {"arg": Object {"channel": String("tickers"), "instId": String("BTC-USDT")}, "data": Array [Object {"askPx": String("103808"), "askSz": String("0.42913987"), "bidPx": String("103807.9"), "bidSz": String("0.75111858"), "high24h": String("104651.8"), "instId": String("BTC-USDT"), "instType": String("SPOT"), "last": String("103807.9"), "lastSz": String("0.00015066"), "low24h": String("100733"), "open24h": String("104016.9"), "sodUtc0": String("102790.1"), "sodUtc8": String("102520.1"), "ts": String("1747136969082"), "vol24h": String("8547.16177946"), "volCcy24h": String("878595784.826748153")}]}
-            // 这里可以根据业务需求进一步处理消息
-            //  todo 更新tickets
-            let msg_str = msg.to_string();
-            debug!("msg_str: {:?}", msg_str);
-            let res = serde_json::from_str::<TickerOkxResWsDto>(&msg_str);
-            if res.is_ok() {
-                let ticker = res.unwrap();
-                // info!("ticketOkxResWsDto数据: {:?}", ticker);
-                let res =
-                    update_ticker(ticker.data, &vec![ticker.arg.inst_id]).await;
-                if res.is_ok() {
-                    // info!("更新ticker成功: {:?}", res.unwrap());
-                } else {
-                    error!("更新ticker失败: {:?}", res.err());
-                }
-            } else {
-                let res = serde_json::from_str::<CommonOkxWsResDto>(&msg_str);
-                if res.is_ok() {
-                    let dto = res.unwrap();
-                    if dto.code == "0" {
-                        debug!("get a message from common okx ws : {:?}", dto);
+    let inst_filters = Arc::new(inst_ids.clone());
+    let ticker_service = Arc::new(TickerService::new());
+
+    // 持续监听并处理 ticker 消息
+    {
+        let inst_filters = Arc::clone(&inst_filters);
+        let ticker_service = Arc::clone(&ticker_service);
+        tokio::spawn(async move {
+            while let Some(msg) = public_receiver.recv().await {
+                if let Ok(ticker) = serde_json::from_value::<TickerOkxResWsDto>(msg.clone()) {
+                    if let Err(e) = ticker_service
+                        .upsert_tickers(ticker.data, inst_filters.as_ref())
+                        .await
+                    {
+                        error!("更新ticker失败: {:?}", e);
+                    }
+                } else if let Ok(dto) = serde_json::from_value::<CommonOkxWsResDto>(msg) {
+                    if dto.code != "0" {
+                        error!("收到ticker错误消息: code={}, msg={}", dto.code, dto.msg);
                     } else {
-                        error!("get a message from common okx ws error : {:?}", dto);
+                        debug!("收到ticker确认消息: {:?}", dto);
                     }
                 }
             }
-            // println!("ticker.data: {:?}", ticker.data);
-        }
-    });
+        });
+    }
     // 🚀 [已优化] 复用service实例 + 消除二次序列化
     let candle_service_clone = Arc::clone(&candle_service);
     tokio::spawn(async move {
         while let Some(msg) = private_message_receiver.recv().await {
             // 🚀 [已优化] 直接从 Value 解析，避免 to_string() 序列化
             if let Ok(candle) = serde_json::from_value::<CandleOkxWsResDto>(msg.clone()) {
-                debug!("收到K线数据: inst_id={}, channel={}", 
-                    candle.arg.inst_id, candle.arg.channel);
-                
+                debug!(
+                    "收到K线数据: inst_id={}, channel={}",
+                    candle.arg.inst_id, candle.arg.channel
+                );
+
                 // 提取周期：candle2h -> 2h
                 let period = candle.arg.channel.replace("candle", "");
-                
+
                 // 🚀 [已优化] 处理全部数据（而非只取last），使用into_iter避免clone
                 let candle_data: Vec<CandleOkxRespDto> = candle
                     .data
                     .into_iter()
                     .map(CandleOkxRespDto::from_vec)
                     .collect();
-                
+
                 // 🚀 [已优化] 使用共享实例，批量处理
                 if let Err(e) = candle_service_clone
                     .update_candles_batch(candle_data, &candle.arg.inst_id, &period)
                     .await
                 {
-                    error!("批量更新K线失败: inst_id={}, period={}, error={:?}", 
-                        candle.arg.inst_id, period, e);
+                    error!(
+                        "批量更新K线失败: inst_id={}, period={}, error={:?}",
+                        candle.arg.inst_id, period, e
+                    );
                 }
             } else if let Ok(dto) = serde_json::from_value::<CommonOkxWsResDto>(msg) {
                 if dto.code != "0" {

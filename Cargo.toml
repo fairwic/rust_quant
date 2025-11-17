@@ -45,7 +45,7 @@ env_logger = "0.11.3"
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql", "chrono", "json", "migrate"] }
 
 # === 缓存 ===
-redis = { version = "0.25.3", features = ["aio", "tokio-comp"] }
+redis = { version = "0.25.4", features = ["aio", "tokio-comp"] }
 dashmap = "6.1.0"
 
 # === 时间处理 ===

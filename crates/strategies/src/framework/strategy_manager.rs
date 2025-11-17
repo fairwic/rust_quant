@@ -13,8 +13,6 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::nwe_strategy::NweStrategyConfig;
-use crate::strategy_common::BasicRiskStrategyConfig;
 use rust_quant_domain::{StrategyConfig, StrategyStatus, StrategyType, Timeframe};
 use rust_quant_infrastructure::{StrategyConfigEntity, StrategyConfigEntityModel};
 
@@ -97,8 +95,11 @@ impl StrategyManager {
         debug!("加载策略配置: config_id={}", strategy_config_id);
 
         // 1. 从数据库加载配置
+        // 注意：策略层通过 get_db_pool() 获取 pool 是特殊情况
+        // 理想情况下应该通过依赖注入传递 repository，但考虑到 StrategyManager 是全局单例，暂时允许这种方式
         let config_entity = {
-            let config_model = StrategyConfigEntityModel::new().await;
+            let pool = rust_quant_core::database::get_db_pool().clone();
+            let config_model = StrategyConfigEntityModel::new(pool);
             let result = config_model.get_config_by_id(strategy_config_id).await?;
             result.ok_or_else(|| StrategyManagerError::ConfigNotFound {
                 config_id: strategy_config_id,
@@ -135,8 +136,26 @@ impl StrategyManager {
         let strategy_type_enum = StrategyType::from_str(&config_entity.strategy_type)
             .ok_or_else(|| anyhow!("未知的策略类型: {}", config_entity.strategy_type))?;
 
-        // 注册策略
-        crate::strategy_registry::register_strategy_on_demand(&strategy_type_enum);
+        // 注册策略：根据strategy_type_enum创建对应的策略执行器
+        use crate::framework::strategy_registry::get_strategy_registry;
+        use crate::implementations::{NweStrategyExecutor, VegasStrategyExecutor};
+
+        let registry = get_strategy_registry();
+        match strategy_type_enum {
+            StrategyType::Vegas => {
+                registry.register(Arc::new(VegasStrategyExecutor::new()));
+            }
+            StrategyType::Nwe => {
+                registry.register(Arc::new(NweStrategyExecutor::new()));
+            }
+            _ => {
+                // 其他策略类型暂不支持自动注册，需要手动注册
+                debug!(
+                    "策略类型 {:?} 暂不支持自动注册，跳过注册",
+                    strategy_type_enum
+                );
+            }
+        }
 
         let strategy_key =
             Self::build_strategy_key(&inst_id, &period, &config_entity.strategy_type);

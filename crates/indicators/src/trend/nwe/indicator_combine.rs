@@ -19,6 +19,8 @@ pub struct NweIndicatorConfig {
     pub nwe_multi: f64,
     pub atr_period: usize,
     pub atr_multiplier: f64,
+    pub k_line_hammer_shadow_ratio: f64,
+    pub min_k_line_num: usize,
 }
 
 impl Default for NweIndicatorConfig {
@@ -30,6 +32,8 @@ impl Default for NweIndicatorConfig {
             nwe_multi: 3.0,
             atr_period: 14,
             atr_multiplier: 0.5,
+            k_line_hammer_shadow_ratio: 0.45,
+            min_k_line_num: 500,
         }
     }
 }
@@ -157,6 +161,7 @@ mod tests {
             l: 49000.0,
             c: 50500.0,
             v: 100.5,
+            confirm: 0,
         };
 
         let values = combine.next(&candle);
