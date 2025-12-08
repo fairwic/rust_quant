@@ -21,6 +21,12 @@ pub struct StrategyTestProgress {
 /// NWE 随机策略测试配置
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NweRandomStrategyConfig {
+    pub stc_fast_length: Vec<usize>,
+    pub stc_slow_length: Vec<usize>,
+    pub stc_cycle_length: Vec<usize>,
+    pub stc_d1_length: Vec<usize>,
+    pub stc_d2_length: Vec<usize>,
+
     pub rsi_periods: Vec<usize>,
     pub rsi_over_buy_sell: Vec<(f64, f64)>,
     pub atr_periods: Vec<usize>,
@@ -36,7 +42,8 @@ pub struct NweRandomStrategyConfig {
     pub is_move_stop_loss: Vec<bool>,
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
     pub is_move_stop_open_price_when_touch_price: Vec<bool>,
-    pub k_line_hammer_shadow_ratios:Vec<f64>,
+    pub k_line_hammer_shadow_ratios: Vec<f64>,
+    pub is_counter_trend_pullback_take_profit: Vec<bool>,
 }
 
 impl NweRandomStrategyConfig {
@@ -86,27 +93,35 @@ pub struct RandomStrategyConfig {
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
     pub is_move_stop_open_price_when_touch_price: Vec<bool>,
     pub k_line_hammer_shadow_ratios: Vec<f64>,
+    pub fix_signal_kline_take_profit_ratios: Vec<f64>,
+    pub is_counter_trend_pullback_take_profit: Vec<bool>,
 }
 
 impl Default for RandomStrategyConfig {
     fn default() -> Self {
         Self {
-            bb_periods: vec![10, 11, 12, 13, 14, 15, 16],
-            bb_multipliers: vec![2.0, 2.5, 3.0, 3.1, 3.2],
-            shadow_ratios: vec![0.65, 0.7, 0.75, 0.8, 0.85, 0.9],
-            volume_bar_nums: vec![4, 5, 6, 7],
-            volume_ratios: (16..=25).map(|x| x as f64 * 0.1).collect(),
+            bb_periods: vec![10, 11, 12, 13, 14],
+            bb_multipliers: vec![2.0, 2.5, 3.0],
+
+            shadow_ratios: vec![0.65, 0.7, 0.75],
+
+            volume_bar_nums: vec![4, 5, 6],
+            volume_ratios: (15..=24).map(|x| x as f64 * 0.1).collect(),
+
             breakthrough_thresholds: vec![0.003],
             rsi_periods: vec![8, 9, 10, 11, 12, 13, 14, 15, 16],
             rsi_over_buy_sell: vec![(75.0, 25.0), (80.0, 20.0), (85.0, 15.0), (90.0, 10.0)],
             batch_size: 100,
             //risk
             max_loss_percent: vec![0.03, 0.04, 0.05],
-            take_profit_ratios: vec![0.0, 1.0, 1.5, 1.8, 2.0, 2.2, 2.4],
+            take_profit_ratios: vec![0.0],
             is_move_stop_loss: vec![false, true],
             is_used_signal_k_line_stop_loss: vec![true, false],
-            is_move_stop_open_price_when_touch_price: vec![true,false],
-            k_line_hammer_shadow_ratios: vec![0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75],
+            is_move_stop_open_price_when_touch_price: vec![true, false],
+
+            k_line_hammer_shadow_ratios: vec![0.62, 0.65, 0.7, 0.75],
+            fix_signal_kline_take_profit_ratios: vec![0.0],
+            is_counter_trend_pullback_take_profit: vec![true],
         }
     }
 }

@@ -1,8 +1,6 @@
-//! 策略管理器 - 简化版
+//! 策略管理器（运行/停止/状态查询）
 //!
-//! 保留核心功能，移除对不存在模块的依赖
-//!
-//! TODO: 完整版本见 strategy_manager.rs.backup
+//! 从 strategies 包迁移至 orchestration，以便统一管理数据库访问和任务编排。
 
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
@@ -10,11 +8,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
-use uuid::Uuid;
+use tracing::{debug, info};
 
-use rust_quant_domain::{StrategyConfig, StrategyStatus, StrategyType, Timeframe};
+use rust_quant_core::database;
+use rust_quant_domain::{StrategyConfig, StrategyType};
 use rust_quant_infrastructure::{StrategyConfigEntity, StrategyConfigEntityModel};
+use rust_quant_strategies::strategy_registry::register_strategy_on_demand;
 
 /// 策略管理器错误类型
 #[derive(Error, Debug)]
@@ -38,7 +37,7 @@ pub enum StrategyManagerError {
 /// 策略运行时信息（简化版）
 #[derive(Debug, Clone)]
 pub struct StrategyRuntimeInfo {
-    /// 策略配置ID  
+    /// 策略配置ID
     pub config_id: i64,
     /// 产品ID
     pub inst_id: String,
@@ -94,11 +93,8 @@ impl StrategyManager {
     ) -> Result<(StrategyConfigEntity, Arc<StrategyConfig>)> {
         debug!("加载策略配置: config_id={}", strategy_config_id);
 
-        // 1. 从数据库加载配置
-        // 注意：策略层通过 get_db_pool() 获取 pool 是特殊情况
-        // 理想情况下应该通过依赖注入传递 repository，但考虑到 StrategyManager 是全局单例，暂时允许这种方式
         let config_entity = {
-            let pool = rust_quant_core::database::get_db_pool().clone();
+            let pool = database::get_db_pool().clone();
             let config_model = StrategyConfigEntityModel::new(pool);
             let result = config_model.get_config_by_id(strategy_config_id).await?;
             result.ok_or_else(|| StrategyManagerError::ConfigNotFound {
@@ -106,7 +102,6 @@ impl StrategyManager {
             })?
         };
 
-        // 2. 使用 to_domain() 转换
         let strategy_config = config_entity.to_domain()?;
 
         Ok((config_entity, Arc::new(strategy_config)))
@@ -119,7 +114,6 @@ impl StrategyManager {
         inst_id: String,
         period: String,
     ) -> Result<()> {
-        // 参数验证
         if strategy_config_id <= 0 {
             return Err(anyhow!("策略配置ID必须大于0"));
         }
@@ -129,38 +123,18 @@ impl StrategyManager {
             strategy_config_id, inst_id, period
         );
 
-        // 加载配置
         let (config_entity, strategy_config) =
             self.load_strategy_config(strategy_config_id).await?;
 
         let strategy_type_enum = StrategyType::from_str(&config_entity.strategy_type)
             .ok_or_else(|| anyhow!("未知的策略类型: {}", config_entity.strategy_type))?;
 
-        // 注册策略：根据strategy_type_enum创建对应的策略执行器
-        use crate::framework::strategy_registry::get_strategy_registry;
-        use crate::implementations::{NweStrategyExecutor, VegasStrategyExecutor};
-
-        let registry = get_strategy_registry();
-        match strategy_type_enum {
-            StrategyType::Vegas => {
-                registry.register(Arc::new(VegasStrategyExecutor::new()));
-            }
-            StrategyType::Nwe => {
-                registry.register(Arc::new(NweStrategyExecutor::new()));
-            }
-            _ => {
-                // 其他策略类型暂不支持自动注册，需要手动注册
-                debug!(
-                    "策略类型 {:?} 暂不支持自动注册，跳过注册",
-                    strategy_type_enum
-                );
-            }
-        }
+        // 按需注册对应策略
+        register_strategy_on_demand(&strategy_type_enum);
 
         let strategy_key =
             Self::build_strategy_key(&inst_id, &period, &config_entity.strategy_type);
 
-        // 创建运行时信息
         let runtime_info = StrategyRuntimeInfo {
             config_id: strategy_config_id,
             inst_id: inst_id.clone(),
@@ -186,7 +160,6 @@ impl StrategyManager {
     ) -> Result<()> {
         let strategy_key = Self::build_strategy_key(inst_id, period, strategy_type);
 
-        // 移除运行时信息
         if self.running_strategies.remove(&strategy_key).is_some() {
             info!("策略停止成功: {}", strategy_key);
             Ok(())
@@ -232,3 +205,4 @@ mod tests {
         assert_eq!(manager.get_running_strategies().len(), 0);
     }
 }
+

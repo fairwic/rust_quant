@@ -1,5 +1,7 @@
 use ta::indicators::ExponentialMovingAverage;
 
+use crate::trend::vegas::signal::EmaSignalValue;
+
 #[derive(Debug, Clone)]
 pub struct EmaIndicator {
     pub ema1_indicator: ExponentialMovingAverage,
@@ -17,6 +19,8 @@ pub struct EmaIndicator {
     pub ema5_length: usize,
     pub ema6_length: usize,
     pub ema7_length: usize,
+    /// 上一根K线的EMA数值，供交叉检测使用
+    pub last_signal_value: Option<EmaSignalValue>,
 }
 impl EmaIndicator {
     pub fn new(
@@ -43,6 +47,7 @@ impl EmaIndicator {
             ema5_length: ema5,
             ema6_length: ema6,
             ema7_length: ema7,
+            last_signal_value: None,
         }
     }
 

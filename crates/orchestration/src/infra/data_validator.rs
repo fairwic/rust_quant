@@ -96,26 +96,30 @@ mod tests {
         // 测试不连续的数据应该返回错误
         let candles = vec![
             CandlesEntity {
+                id: None,
                 ts: 1000,
-                open: "100".to_string(),
-                high: "110".to_string(),
-                low: "90".to_string(),
-                close: "105".to_string(),
+                o: "100".to_string(),
+                h: "110".to_string(),
+                l: "90".to_string(),
+                c: "105".to_string(),
                 vol: "1000".to_string(),
                 vol_ccy: "1000".to_string(),
-                vol_ccy_quote: "1000".to_string(),
                 confirm: "1".to_string(),
+                created_at: None,
+                updated_at: None,
             },
             CandlesEntity {
+                id: None,
                 ts: 2000, // 应该是 1000 + 60000 (1分钟)
-                open: "105".to_string(),
-                high: "115".to_string(),
-                low: "95".to_string(),
-                close: "110".to_string(),
+                o: "105".to_string(),
+                h: "115".to_string(),
+                l: "95".to_string(),
+                c: "110".to_string(),
                 vol: "1000".to_string(),
                 vol_ccy: "1000".to_string(),
-                vol_ccy_quote: "1000".to_string(),
                 confirm: "1".to_string(),
+                created_at: None,
+                updated_at: None,
             },
         ];
 

@@ -126,7 +126,25 @@ mod tests {
 
     #[test]
     fn test_signal_log_entry_creation() {
-        let signal = SignalResult::empty();
+        // 使用strategies包的SignalResult
+        let signal = SignalResult {
+            should_buy: false,
+            should_sell: false,
+            open_price: 0.0,
+            signal_kline_stop_loss_price: None,
+            best_open_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
+            move_stop_open_price_when_touch_price: None,
+            ts: 0,
+            single_value: None,
+            single_result: None,
+            counter_trend_pullback_take_profit_price: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
+        };
         let entry = SignalLogEntry::new("BTC-USDT", "1H", StrategyType::Vegas, &signal);
 
         assert_eq!(entry.inst_id, "BTC-USDT");
@@ -135,8 +153,27 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // 需要完整环境才能运行
     async fn test_save_signal_log() {
-        let signal = SignalResult::empty();
+        // 使用strategies包的SignalResult
+        let signal = SignalResult {
+            should_buy: false,
+            should_sell: false,
+            open_price: 0.0,
+            signal_kline_stop_loss_price: None,
+            best_open_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
+            move_stop_open_price_when_touch_price: None,
+            ts: 0,
+            single_value: None,
+            single_result: None,
+            counter_trend_pullback_take_profit_price: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
+        };
         let result = save_signal_log("BTC-USDT", "1H", StrategyType::Vegas, &signal).await;
 
         assert!(result.is_ok());

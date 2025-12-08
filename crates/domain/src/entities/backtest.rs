@@ -46,6 +46,16 @@ pub struct BacktestLog {
     pub kline_end_time: i64,
     /// K 线数量
     pub kline_nums: i32,
+    /// 夏普比率
+    pub sharpe_ratio: Option<f64>,
+    /// 年化收益率
+    pub annual_return: Option<f64>,
+    /// 绝对收益率
+    pub total_return: Option<f64>,
+    /// 最大回撤
+    pub max_drawdown: Option<f64>,
+    /// 波动率(年化)
+    pub volatility: Option<f64>,
 }
 
 impl BacktestLog {
@@ -83,6 +93,11 @@ impl BacktestLog {
             kline_start_time,
             kline_end_time,
             kline_nums,
+            sharpe_ratio: None,
+            annual_return: None,
+            total_return: None,
+            max_drawdown: None,
+            volatility: None,
         }
     }
 }
@@ -170,4 +185,27 @@ pub struct BacktestWinRateStats {
     pub four_bar_after_win_rate: f32,
     pub five_bar_after_win_rate: f32,
     pub ten_bar_after_win_rate: f32,
+}
+
+/// 回测绩效指标
+/// 
+/// 包含夏普比率、年化收益率、最大回撤、波动率等核心风险收益指标
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub struct BacktestPerformanceMetrics {
+    /// 夏普比率 (Sharpe Ratio)
+    /// 计算公式: (年化收益率 - 无风险利率) / 年化波动率
+    /// 无风险利率默认使用 2%
+    pub sharpe_ratio: f64,
+    /// 年化收益率 (Annualized Return)
+    /// 计算公式: (期末资金/期初资金)^(365/交易天数) - 1
+    pub annual_return: f64,
+    /// 绝对收益率 (Total Return)
+    /// 计算公式: (期末资金 - 期初资金) / 期初资金
+    pub total_return: f64,
+    /// 最大回撤 (Maximum Drawdown)
+    /// 计算公式: (峰值 - 谷值) / 峰值
+    pub max_drawdown: f64,
+    /// 波动率 (Annualized Volatility)
+    /// 计算公式: 日收益率标准差 * sqrt(365)
+    pub volatility: f64,
 }

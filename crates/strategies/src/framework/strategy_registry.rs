@@ -10,6 +10,7 @@ use tracing::{info, warn};
 
 use super::strategy_trait::StrategyExecutor;
 use crate::implementations::{NweStrategyExecutor, VegasStrategyExecutor};
+use crate::StrategyType;
 
 /// 策略注册中心
 ///
@@ -133,9 +134,11 @@ impl StrategyRegistry {
 /// 策略将在首次使用时自动注册，而不是预先注册所有策略
 fn initialize_registry() -> StrategyRegistry {
     let registry = StrategyRegistry::new();
-
-    info!("🎯 策略注册中心初始化完成（按需加载模式）");
-
+    register_builtin_strategies(&registry);
+    info!(
+        "🎯 策略注册中心初始化完成，当前已注册 {} 个策略",
+        registry.count()
+    );
     registry
 }
 
@@ -170,30 +173,48 @@ pub fn get_strategy_registry() -> &'static StrategyRegistry {
 /// register_strategy_on_demand(&StrategyType::Vegas);
 /// register_strategy_on_demand(&StrategyType::Nwe);
 /// ```
-pub fn register_strategy_on_demand(strategy_type: &crate::StrategyType) {
-    use crate::StrategyType;
-    use okx::dto::EnumToStrTrait;
-
+pub fn register_strategy_on_demand(strategy_type: &StrategyType) {
     let registry = get_strategy_registry();
-    let strategy_name = strategy_type.as_str();
+    register_executor_for_type(registry, strategy_type);
+}
 
-    // 检查是否已注册（避免重复注册）
-    if registry.contains(strategy_name) {
+/// 注册框架内置的策略执行器（可多次调用，幂等）
+pub fn register_default_strategies() {
+    let registry = get_strategy_registry();
+    register_builtin_strategies(registry);
+}
+
+fn register_builtin_strategies(registry: &StrategyRegistry) {
+    const DEFAULT_TYPES: [StrategyType; 2] = [StrategyType::Vegas, StrategyType::Nwe];
+    for strategy_type in DEFAULT_TYPES.iter() {
+        register_executor_for_type(registry, strategy_type);
+    }
+}
+
+fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &StrategyType) {
+    let key = match strategy_type {
+        StrategyType::Vegas => "Vegas",
+        StrategyType::Nwe => "Nwe",
+        _ => strategy_type.as_str(),
+    };
+    if registry.contains(key) {
         return;
     }
 
-    // 根据策略类型创建并注册执行器
     match strategy_type {
         StrategyType::Vegas => {
             registry.register(Arc::new(VegasStrategyExecutor::new()));
-            info!("✅ 按需注册策略: Vegas");
+            info!("✅ 注册策略: Vegas");
         }
         StrategyType::Nwe => {
             registry.register(Arc::new(NweStrategyExecutor::new()));
-            info!("✅ 按需注册策略: Nwe");
+            info!("✅ 注册策略: Nwe");
         }
         _ => {
-            warn!("⚠️  策略类型 {:?} 暂未实现执行器，跳过注册", strategy_type);
+            warn!(
+                "⚠️  策略类型 {:?} 暂未实现执行器，跳过注册",
+                strategy_type
+            );
         }
     }
 }
@@ -213,39 +234,33 @@ mod tests {
     }
 
     #[test]
-    fn test_on_demand_registration() {
+    fn test_on_demand_registration_is_idempotent() {
         let registry = get_strategy_registry();
-
-        // 初始应该为空（按需加载模式）
         let initial_count = registry.count();
 
-        // 按需注册 Vegas
         register_strategy_on_demand(&StrategyType::Vegas);
-        assert_eq!(registry.count(), initial_count + 1);
+        register_strategy_on_demand(&StrategyType::Vegas);
+
         assert!(registry.contains("Vegas"));
-
-        // 重复注册应该被忽略
-        register_strategy_on_demand(&StrategyType::Vegas);
-        assert_eq!(registry.count(), initial_count + 1);
-
-        // 注册 Nwe
-        register_strategy_on_demand(&StrategyType::Nwe);
-        assert_eq!(registry.count(), initial_count + 2);
-        assert!(registry.contains("Nwe"));
+        assert_eq!(registry.count(), initial_count);
     }
 
     #[test]
-    fn test_list_strategies() {
+    fn test_register_executor_for_type_new_registry() {
+        let registry = StrategyRegistry::new();
+        super::register_executor_for_type(&registry, &StrategyType::Vegas);
+        assert!(registry.contains("Vegas"));
+
+        super::register_executor_for_type(&registry, &StrategyType::Nwe);
+        assert!(registry.contains("Nwe"));
+        assert_eq!(registry.count(), 2);
+    }
+
+    #[test]
+    fn test_list_strategies_contains_defaults() {
         let registry = get_strategy_registry();
-
-        // 按需注册
-        register_strategy_on_demand(&StrategyType::Vegas);
-        register_strategy_on_demand(&StrategyType::Nwe);
-
         let strategies = registry.list_strategies();
-
-        // 应该包含 Vegas 和 Nwe
-        assert!(strategies.contains(&"Vegas".to_string()));
-        assert!(strategies.contains(&"Nwe".to_string()));
+        assert!(strategies.iter().any(|s| s == "Vegas"));
+        assert!(strategies.iter().any(|s| s == "Nwe"));
     }
 }

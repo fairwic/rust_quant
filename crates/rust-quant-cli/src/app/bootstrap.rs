@@ -86,15 +86,18 @@ pub async fn run_modes() -> Result<()> {
 
 fn default_backtest_targets() -> Vec<(String, String)> {
     vec![
+        // ("ETH-USDT-SWAP".to_string(), "15m".to_string()),
         ("ETH-USDT-SWAP".to_string(), "5m".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "1H".to_string()),
-        ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
-        ("ETH-USDT-SWAP".to_string(), "1Dutc".to_string()),
+        // ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
+        // ("ETH-USDT-SWAP".to_string(), "1Dutc".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "5m".to_string()),
+        // ("BTC-USDT-SWAP".to_string(), "15m".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "1H".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "4H".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "1Dutc".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "5m".to_string()),
+        // ("SOL-USDT-SWAP".to_string(), "15m".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "1H".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "1Dutc".to_string()),
@@ -138,7 +141,7 @@ async fn load_backtest_targets_from_db() -> Result<Vec<(String, String)>> {
 /// WebSocket数据监听
 ///
 /// 启动WebSocket连接，监听实时行情和K线数据
-/// 
+///
 /// # 架构说明
 /// - 创建策略触发回调函数
 /// - 注入到 CandleService 中
@@ -163,86 +166,20 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
 
     // 🚀 创建策略触发回调函数
     let strategy_trigger = {
-        let config_service = std::sync::Arc::clone(&config_service);
-        let execution_service = std::sync::Arc::clone(&execution_service);
+        let handler = std::sync::Arc::new(
+            rust_quant_orchestration::workflow::websocket_handler::WebsocketStrategyHandler::new(
+                config_service,
+                execution_service,
+            ),
+        );
 
         std::sync::Arc::new(
-            move |inst_id: String, time_interval: String, snap: rust_quant_market::models::CandlesEntity| {
-                let config_service = std::sync::Arc::clone(&config_service);
-                let execution_service = std::sync::Arc::clone(&execution_service);
-
-                info!(
-                    "🎯 K线确认触发策略检查: inst_id={}, time_interval={}, ts={}",
-                    inst_id, time_interval, snap.ts
-                );
-
+            move |inst_id: String,
+                  time_interval: String,
+                  snap: rust_quant_market::models::CandlesEntity| {
+                let handler = handler.clone();
                 tokio::spawn(async move {
-                    use rust_quant_domain::{StrategyType, Timeframe};
-                    use rust_quant_orchestration::workflow::strategy_runner;
-
-                    // 解析时间周期
-                    let timeframe = match Timeframe::from_str(&time_interval) {
-                        Some(tf) => tf,
-                        None => {
-                            error!("❌ 无效的时间周期: {}", time_interval);
-                            return;
-                        }
-                    };
-
-                    // 查询该交易对和时间周期的所有启用策略
-                    let configs = match config_service
-                        .load_configs(&inst_id, &time_interval, None)
-                        .await
-                    {
-                        Ok(configs) => configs,
-                        Err(e) => {
-                            error!(
-                                "❌ 加载策略配置失败: inst_id={}, time_interval={}, error={}",
-                                inst_id, time_interval, e
-                            );
-                            return;
-                        }
-                    };
-
-                    if configs.is_empty() {
-                        info!(
-                            "⚠️  未找到启用的策略配置: inst_id={}, time_interval={}",
-                            inst_id, time_interval
-                        );
-                        return;
-                    }
-
-                    info!(
-                        "✅ 找到 {} 个策略配置，开始执行",
-                        configs.len()
-                    );
-
-                    // 执行每个策略
-                    for config in configs {
-                        let strategy_type = config.strategy_type;
-                        let config_id = config.id;
-
-                        if let Err(e) = strategy_runner::execute_strategy(
-                            &inst_id,
-                            timeframe,
-                            strategy_type,
-                            Some(config_id),
-                            &config_service,
-                            &execution_service,
-                        )
-                        .await
-                        {
-                            error!(
-                                "❌ 策略执行失败: inst_id={}, time_interval={}, strategy={:?}, error={}",
-                                inst_id, time_interval, strategy_type, e
-                            );
-                        } else {
-                            info!(
-                                "✅ 策略执行完成: inst_id={}, time_interval={}, strategy={:?}",
-                                inst_id, time_interval, strategy_type
-                            );
-                        }
-                    }
+                    handler.handle(inst_id, time_interval, snap).await;
                 });
             },
         )

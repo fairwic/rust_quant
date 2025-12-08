@@ -9,6 +9,7 @@ use tracing::{info, warn};
 
 /// 计算多个EMA值
 pub fn calculate_ema(data: &CandleItem, ema_indicator: &mut EmaIndicator) -> EmaSignalValue {
+    let prev_signal_value = ema_indicator.last_signal_value;
     let mut ema_signal_value = EmaSignalValue::default();
     ema_signal_value.ema1_value = ema_indicator.ema1_indicator.next(data.c());
     ema_signal_value.ema2_value = ema_indicator.ema2_indicator.next(data.c());
@@ -28,7 +29,49 @@ pub fn calculate_ema(data: &CandleItem, ema_indicator: &mut EmaIndicator) -> Ema
         && ema_signal_value.ema2_value < ema_signal_value.ema3_value
         && ema_signal_value.ema3_value < ema_signal_value.ema4_value;
 
+    if let Some(prev) = prev_signal_value {
+        let (is_golden_cross, is_death_cross) = detect_ema_crosses(&ema_signal_value, &prev);
+        ema_signal_value.is_golden_cross = is_golden_cross;
+        ema_signal_value.is_death_cross = is_death_cross;
+    }
+
+    ema_indicator.last_signal_value = Some(ema_signal_value);
+
     ema_signal_value
+}
+
+fn detect_ema_crosses(
+    current: &EmaSignalValue,
+    previous: &EmaSignalValue,
+) -> (bool, bool) {
+    let mut is_golden_cross =
+        previous.ema1_value < previous.ema2_value && current.ema1_value > current.ema2_value;
+    let mut is_death_cross =
+        previous.ema1_value > previous.ema2_value && current.ema1_value < current.ema2_value;
+
+    if !is_death_cross {
+        let ema1_below = current.ema1_value < current.ema2_value
+            && current.ema2_value < current.ema3_value
+            && current.ema3_value < current.ema4_value;
+        let ema1_cross_ema4 =
+            previous.ema1_value >= previous.ema4_value && current.ema1_value < current.ema4_value;
+        if ema1_below && ema1_cross_ema4 {
+            is_death_cross = true;
+        }
+    }
+
+    if !is_golden_cross {
+        let ema1_above = current.ema1_value > current.ema2_value
+            && current.ema2_value > current.ema3_value
+            && current.ema3_value > current.ema4_value;
+        let ema1_cross_ema4 =
+            previous.ema1_value <= previous.ema4_value && current.ema1_value > current.ema4_value;
+        if ema1_above && ema1_cross_ema4 {
+            is_golden_cross = true;
+        }
+    }
+
+    (is_golden_cross, is_death_cross)
 }
 
 /// 获取多个指标值
@@ -187,4 +230,3 @@ pub fn get_multi_indicator_values(
 
     vegas_indicator_signal_value
 }
-

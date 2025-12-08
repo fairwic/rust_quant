@@ -36,6 +36,38 @@ impl CandleItem {
     pub fn confirm(&self) -> i32 {
         self.confirm
     }
+
+    pub fn body_ratio(&self) -> f64 {
+        let body = (self.c - self.o).abs();
+        let range = self.h - self.l;
+        body / range
+    }
+    pub fn up_shadow_ratio(&self) -> f64 {
+        if self.c < self.o {
+            //下跌
+            (self.h - self.o) / (self.h - self.l)
+        } else {
+            //上涨
+            (self.h - self.c) / (self.h - self.l)
+        }
+    }
+    pub fn down_shadow_ratio(&self) -> f64 {
+        if self.c < self.o {
+            //下跌
+            (self.c - self.l) / (self.h - self.l)
+        } else {
+            //上涨
+            (self.o - self.l) / (self.h - self.l)
+        }
+    }
+    //如果上影线,和下影线 都占比总高度超过30%,则说明k线实体部分占比非常小(20%)
+    pub fn is_small_body_and_big_up_down_shadow(&self) -> bool {
+        // if self.ts == 1760860800000 {
+        //     println!("up_shadow_ratio: {:?}", self.up_shadow_ratio());
+        //     println!("down_shadow_ratio: {:?}", self.down_shadow_ratio());
+        // }
+        self.up_shadow_ratio() > 0.3 && self.down_shadow_ratio() > 0.3
+    }
 }
 
 pub struct CandleItemBuilder {

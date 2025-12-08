@@ -4,6 +4,7 @@
 
 pub mod scheduler;
 pub mod strategy;
+pub mod strategy_runner;
 pub mod backtest;
 pub mod jobs;
 pub mod infra;

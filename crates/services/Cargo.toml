@@ -17,6 +17,7 @@ rust-quant-indicators.workspace = true
 rust-quant-strategies.workspace = true
 rust-quant-risk.workspace = true
 rust-quant-execution.workspace = true
+rust-quant-analytics.workspace = true        # 绩效分析
 
 # 异步运行时
 tokio.workspace = true

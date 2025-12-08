@@ -4,3 +4,5 @@
 
 pub mod performance;
 pub mod reporting;
+
+pub use performance::{calculate_performance_metrics, PerformanceCalculator};

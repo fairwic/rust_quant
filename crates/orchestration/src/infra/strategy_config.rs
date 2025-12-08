@@ -50,7 +50,7 @@ impl Default for BackTestConfig {
 }
 
 /// 获取指定的产品策略配置
-/// 
+///
 /// # 架构说明
 /// - 通过 services 层获取配置，不直接调用基础设施层
 /// - 返回 domain 层的 StrategyConfig，而不是 infrastructure 层的 StrategyConfigEntity
@@ -60,7 +60,9 @@ pub async fn get_strate_config(
     time: &str,
     strategy_type: Option<&str>,
 ) -> Result<Vec<StrategyConfig>> {
-    let strategy_configs = config_service.load_configs(inst_id, time, strategy_type).await?;
+    let strategy_configs = config_service
+        .load_configs(inst_id, time, strategy_type)
+        .await?;
     if strategy_configs.is_empty() {
         warn!("策略配置为空inst_id:{:?} time:{:?}", inst_id, time);
         return Ok(vec![]);
@@ -69,7 +71,7 @@ pub async fn get_strate_config(
 }
 
 /// 从数据库获取策略配置
-/// 
+///
 /// # 架构说明
 /// - 通过 services 层获取配置，不直接调用基础设施层
 pub async fn get_strategy_config_from_db(
@@ -140,7 +142,7 @@ pub async fn test_specified_strategy_with_config(
 }
 
 /// 转换策略配置为参数的辅助函数
-/// 
+///
 /// # 架构说明
 /// - 接受 domain 层的 StrategyConfig，而不是 infrastructure 层的 StrategyConfigEntity
 fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMergeBuilder> {
@@ -150,10 +152,10 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     let vegas_strategy = serde_json::from_str::<VegasStrategy>(&value_str)
         .map_err(|e| anyhow!("解析策略配置JSON失败: {}", e))?;
 
-    let risk_config_str = serde_json::to_string(&config.risk_config)
-        .map_err(|e| anyhow!("序列化风险配置JSON失败: {}", e))?;
-    let risk_config = serde_json::from_str::<BasicRiskStrategyConfig>(&risk_config_str)
+    println!("config.risk_config: {:#?}", config.risk_config);
+    let risk_config = serde_json::from_value::<BasicRiskStrategyConfig>(config.risk_config.clone())
         .map_err(|e| anyhow!("解析风险配置JSON失败: {}", e))?;
+    println!("risk_config: {:#?}", risk_config);
 
     // 安全地提取配置值，避免unwrap
     let kline_hammer = vegas_strategy
@@ -192,15 +194,27 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
         .kline_end_time(config.backtest_end.unwrap_or(0))
         //risk
         .max_loss_percent(risk_config.max_loss_percent)
-        .take_profit_ratio(risk_config.take_profit_ratio)
-        .is_move_stop_loss(risk_config.is_one_k_line_diff_stop_loss)
-        .is_used_signal_k_line_stop_loss(risk_config.is_used_signal_k_line_stop_loss);
+        .take_profit_ratio(risk_config.atr_take_profit_ratio.unwrap_or(0.0))
+        .is_move_stop_loss(risk_config.is_one_k_line_diff_stop_loss.unwrap_or(false))
+        .is_move_stop_open_price_when_touch_price(
+            risk_config
+                .is_move_stop_open_price_when_touch_price
+                .unwrap_or(false),
+        )
+        .is_used_signal_k_line_stop_loss(
+            risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false),
+        )
+        .is_counter_trend_pullback_take_profit(
+            risk_config
+                .is_counter_trend_pullback_take_profit
+                .unwrap_or(false),
+        );
 
     Ok(param)
 }
 
 /// 将数据库中的策略配置转换为 NWE 策略配置与风险配置
-/// 
+///
 /// # 架构说明
 /// - 接受 domain 层的 StrategyConfig，而不是 infrastructure 层的 StrategyConfigEntity
 pub fn convert_strategy_config_to_nwe(
@@ -209,18 +223,25 @@ pub fn convert_strategy_config_to_nwe(
     // parameters 是 JsonValue，需要转换为字符串再解析
     let value_str = serde_json::to_string(&config.parameters)
         .map_err(|e| anyhow!("序列化策略配置JSON失败: {}", e))?;
-    let nwe_cfg = serde_json::from_str::<NweStrategyConfig>(&value_str)
-        .map_err(|e| anyhow!("解析NWE策略配置JSON失败: {}", e))?;
-    
-    let risk_config_str = serde_json::to_string(&config.risk_config)
-        .map_err(|e| anyhow!("序列化风险配置JSON失败: {}", e))?;
-    let risk_cfg = serde_json::from_str::<BasicRiskStrategyConfig>(&risk_config_str)
+
+    let nwe_cfg = serde_json::from_str::<NweStrategyConfig>(&value_str).map_err(|e| {
+        // 输出详细错误信息便于调试
+        tracing::error!(
+            "解析NWE策略配置JSON失败: config_id={:?}, error={}, json_preview={}",
+            config.id,
+            e,
+            &value_str[..value_str.len().min(300)]
+        );
+        anyhow!("{}", e)
+    })?;
+
+    let risk_cfg = serde_json::from_value::<BasicRiskStrategyConfig>(config.risk_config.clone())
         .map_err(|e| anyhow!("解析风险配置JSON失败: {}", e))?;
     Ok((nwe_cfg, risk_cfg))
 }
 
 /// 从数据库获取 NWE 指定策略配置
-/// 
+///
 /// # 架构说明
 /// - 通过 services 层获取配置，不直接调用基础设施层
 pub async fn get_nwe_strategy_config_from_db(

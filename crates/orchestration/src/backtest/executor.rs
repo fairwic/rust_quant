@@ -11,16 +11,13 @@ use tracing::{error, info, warn};
 
 use rust_quant_common::CandleItem;
 use rust_quant_domain::StrategyType;
-use rust_quant_indicators::volatility::BollingBandsSignalConfig;
-use rust_quant_indicators::signal_weight::SignalWeightsConfig;
-use rust_quant_indicators::trend::vegas::{
-    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, KlineHammerConfig,
-    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
-};
+use rust_quant_indicators::trend::vegas::VegasStrategy;
 use rust_quant_market::models::SelectTime;
 use rust_quant_services::market::CandleService;
 use rust_quant_services::strategy::BacktestService;
+use rust_quant_strategies::framework::backtest::BackTestAbleStrategyTrait;
 use rust_quant_strategies::implementations::nwe_strategy::{NweStrategy, NweStrategyConfig};
+use rust_quant_strategies::implementations::vegas_backtest::VegasBacktestAdapter;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
 
 use crate::infra::data_validator;
@@ -62,85 +59,19 @@ impl BacktestExecutor {
         &self,
         inst_id: &str,
         time: &str,
-        mut strategy: VegasStrategy,
+        strategy: VegasStrategy,
         risk_strategy_config: BasicRiskStrategyConfig,
         mysql_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64> {
-        let start_time = Instant::now();
-
-        // 获取信号权重配置
-        let signal_weights = strategy
-            .signal_weights
-            .as_ref()
-            .cloned()
-            .unwrap_or_default();
-
-        // 类型转换：strategies::BasicRiskStrategyConfig -> domain::BasicRiskConfig
-        let domain_risk_config = rust_quant_domain::BasicRiskConfig {
-            max_loss_percent: risk_strategy_config.max_loss_percent,
-            take_profit_ratio: risk_strategy_config.take_profit_ratio,
-            is_used_signal_k_line_stop_loss: risk_strategy_config.is_used_signal_k_line_stop_loss,
-            is_move_stop_loss: risk_strategy_config.is_one_k_line_diff_stop_loss,
-            max_hold_time: None,
-            max_leverage: None,
-        };
-
-        // 获取最小数据长度和指标组合
-        let min_len = strategy.get_min_data_length();
-        let mut indicator_combine = strategy.get_indicator_combine();
-
-        // 使用通用回测引擎
-        let res = rust_quant_strategies::strategy_common::run_back_test_generic(
-            |candles, values: &mut rust_quant_indicators::trend::vegas::VegasIndicatorSignalValue| {
-                // VegasStrategy::get_trade_signal 返回 domain::SignalResult
-                // 需要转换为 strategies::SignalResult
-                let domain_signal = strategy.get_trade_signal(
-                    candles,
-                    values,
-                    &signal_weights,
-                    &domain_risk_config,
-                );
-
-                // 转换信号类型：domain::SignalResult -> strategies::SignalResult
-                convert_domain_signal_to_strategies_signal(domain_signal)
-            },
-            &mysql_candles,
-            risk_strategy_config.clone(),
-            min_len,
-            &mut indicator_combine,
-            |ic, data_item| {
-                // 计算 Vegas 指标值
-                rust_quant_strategies::strategy_common::get_multi_indicator_values(ic, data_item)
-            },
-        );
-
-        // 配置序列化
-        let config_desc = serde_json::to_string(&strategy).ok();
-
-        // 保存测试日志并获取 back_test_id
-        let back_test_id = self
-            .backtest_service
-            .save_backtest_log(
-                inst_id,
-                time,
-                config_desc,
-                res,
-                &mysql_candles,
-                risk_strategy_config,
-                &StrategyType::Vegas.as_str(),
-            )
-            .await?;
-
-        let elapsed = start_time.elapsed();
-        info!(
-            "[Vegas 回测] 完成 inst_id={}, period={}, back_test_id={}, 耗时={}ms",
+        let adapter = VegasBacktestAdapter::new(strategy);
+        self.run_strategy_backtest(
             inst_id,
             time,
-            back_test_id,
-            elapsed.as_millis()
-        );
-
-        Ok(back_test_id)
+            adapter,
+            risk_strategy_config,
+            mysql_candles,
+        )
+        .await
     }
 
     /// 运行 NWE 策略测试
@@ -152,38 +83,14 @@ impl BacktestExecutor {
         risk_strategy_config: BasicRiskStrategyConfig,
         mysql_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64> {
-        let start_time = Instant::now();
-
-        // 策略测试阶段
-        let res = strategy.run_test(&mysql_candles, risk_strategy_config.clone());
-
-        // 配置描述构建阶段
-        let config_desc = serde_json::to_string(&strategy.config).ok();
-
-        // 保存测试日志并获取 back_test_id
-        let back_test_id = self
-            .backtest_service
-            .save_backtest_log(
-                inst_id,
-                time,
-                config_desc,
-                res,
-                &mysql_candles,
-                risk_strategy_config,
-                &StrategyType::Nwe.as_str(),
-            )
-            .await?;
-
-        let elapsed = start_time.elapsed();
-        info!(
-            "[NWE 回测] 完成 inst_id={}, period={}, back_test_id={}, 耗时={}ms",
+        self.run_strategy_backtest(
             inst_id,
             time,
-            back_test_id,
-            elapsed.as_millis()
-        );
-
-        Ok(back_test_id)
+            strategy,
+            risk_strategy_config,
+            mysql_candles,
+        )
+        .await
     }
 
     /// 获取K线数据并确认
@@ -271,92 +178,36 @@ impl BacktestExecutor {
     ) {
         let mut batch_tasks = Vec::with_capacity(params_batch.len());
         for param in params_batch {
-        let bb_period = param.bb_period;
-        let shadow_ratio = param.hammer_shadow_ratio;
-        let bb_multiplier = param.bb_multiplier;
-        let volume_bar_num = param.volume_bar_num;
-        let volume_increase_ratio = param.volume_increase_ratio;
-        let volume_decrease_ratio = param.volume_decrease_ratio;
-        let rsi_period = param.rsi_period;
-        let rsi_overbought = param.rsi_overbought;
-        let rsi_oversold = param.rsi_oversold;
+            let risk_strategy_config = param.to_risk_config();
+            let strategy = param.to_vegas_strategy(time.to_string());
 
-        let risk_strategy_config = BasicRiskStrategyConfig {
-            max_loss_percent: param.max_loss_percent,
-            take_profit_ratio: param.take_profit_ratio,
-            is_one_k_line_diff_stop_loss: param.is_move_stop_loss,
-            is_used_signal_k_line_stop_loss: param.is_used_signal_k_line_stop_loss,
-            is_move_stop_open_price_when_touch_price: param.is_move_stop_open_price_when_touch_price,
-        };
+            let inst_id = inst_id.to_string();
+            let time = time.to_string();
+            let mysql_candles = Arc::clone(&arc_candle_item_clone);
+            let permit = Arc::clone(&semaphore);
 
-        let volume_signal = VolumeSignalConfig {
-            volume_bar_num,
-            volume_increase_ratio,
-            volume_decrease_ratio,
-            is_open: true,
-        };
-
-        let rsi_signal = RsiSignalConfig {
-            rsi_length: rsi_period,
-            rsi_oversold,
-            rsi_overbought,
-            is_open: true,
-        };
-
-        let ema_touch_trend_signal = EmaTouchTrendSignalConfig {
-            is_open: true,
-            ..Default::default()
-        };
-
-        let kline_hammer_signal = KlineHammerConfig {
-            up_shadow_ratio: shadow_ratio,
-            down_shadow_ratio: shadow_ratio,
-        };
-
-        let strategy = VegasStrategy {
-            period: time.to_string(),
-            min_k_line_num: 3600,
-            engulfing_signal: Some(EngulfingSignalConfig::default()),
-            ema_signal: Some(EmaSignalConfig::default()),
-            signal_weights: Some(SignalWeightsConfig::default()),
-            volume_signal: Some(volume_signal),
-            ema_touch_trend_signal: Some(ema_touch_trend_signal),
-            rsi_signal: Some(rsi_signal),
-            bolling_signal: Some(BollingBandsSignalConfig {
-                period: bb_period as usize,
-                multiplier: bb_multiplier,
-                is_open: true,
-                consecutive_touch_times: 4,
-            }),
-            kline_hammer_signal: Some(kline_hammer_signal),
-        };
-
-        let inst_id = inst_id.to_string();
-        let time = time.to_string();
-        let mysql_candles = Arc::clone(&arc_candle_item_clone);
-        let permit = Arc::clone(&semaphore);
-
-        // 创建任务
-        let executor = self.clone_for_spawn();
-        batch_tasks.push(tokio::spawn(async move {
-            let _permit: tokio::sync::SemaphorePermit<'_> = permit.acquire().await.unwrap();
-            match executor.run_vegas_test(
-                &inst_id,
-                &time,
-                strategy,
-                risk_strategy_config,
-                mysql_candles,
-            )
-            .await
-            {
-                Ok(back_test_id) => Some(back_test_id),
-                Err(e) => {
-                    error!("Vegas test failed: {:?}", e);
-                    None
+            // 创建任务
+            let executor = self.clone_for_spawn();
+            batch_tasks.push(tokio::spawn(async move {
+                let _permit: tokio::sync::SemaphorePermit<'_> = permit.acquire().await.unwrap();
+                match executor
+                    .run_vegas_test(
+                        &inst_id,
+                        &time,
+                        strategy,
+                        risk_strategy_config,
+                        mysql_candles,
+                    )
+                    .await
+                {
+                    Ok(back_test_id) => Some(back_test_id),
+                    Err(e) => {
+                        error!("Vegas test failed: {:?}", e);
+                        None
+                    }
                 }
-            }
-        }));
-    }
+            }));
+        }
 
         // 等待当前批次完成
         join_all(batch_tasks).await;
@@ -409,22 +260,45 @@ impl BacktestExecutor {
             candle_service: Arc::clone(&self.candle_service),
         })
     }
-}
 
-/// 类型转换：domain::SignalResult -> strategies::SignalResult
-fn convert_domain_signal_to_strategies_signal(
-    domain_signal: rust_quant_domain::SignalResult,
-) -> rust_quant_strategies::strategy_common::SignalResult {
-    rust_quant_strategies::strategy_common::SignalResult {
-        should_buy: domain_signal.should_buy.unwrap_or(false),
-        should_sell: domain_signal.should_sell.unwrap_or(false),
-        open_price: domain_signal.open_price.unwrap_or(0.0),
-        best_open_price: domain_signal.best_open_price,
-        best_take_profit_price: domain_signal.best_take_profit_price,
-        signal_kline_stop_loss_price: domain_signal.signal_kline_stop_loss_price,
-        move_stop_open_price_when_touch_price: domain_signal.move_stop_open_price_when_touch_price.clone(),
-        ts: domain_signal.ts.unwrap_or(0),
-        single_value: domain_signal.single_value.map(|v| v.to_string()),
-        single_result: domain_signal.single_result.map(|v| v.to_string()),
+    async fn run_strategy_backtest<S>(
+        &self,
+        inst_id: &str,
+        period: &str,
+        mut strategy: S,
+        risk_strategy_config: BasicRiskStrategyConfig,
+        mysql_candles: Arc<Vec<CandleItem>>,
+    ) -> Result<i64>
+    where
+        S: BackTestAbleStrategyTrait + Send + 'static,
+    {
+        let start_time = Instant::now();
+        let strategy_type = strategy.strategy_type();
+        let res = strategy.run_test(&mysql_candles, risk_strategy_config.clone());
+        let config_desc = strategy.config_json();
+
+        let back_test_id = self
+            .backtest_service
+            .save_backtest_log(
+                inst_id,
+                period,
+                config_desc,
+                res,
+                &mysql_candles,
+                risk_strategy_config,
+                &strategy_type.as_str(),
+            )
+            .await?;
+
+        let elapsed = start_time.elapsed();
+        info!(
+            "[{} 回测] 完成 inst_id={}, period={}, back_test_id={}, 耗时={}ms",
+            strategy_type.as_str(),
+            inst_id,
+            period,
+            back_test_id,
+            elapsed.as_millis()
+        );
+        Ok(back_test_id)
     }
 }

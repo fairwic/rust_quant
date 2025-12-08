@@ -44,6 +44,7 @@ pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
         "1M" => 60,
         "3M" => 3 * 60,
         "5M" => 5 * 60,
+        "15M" => 15 * 60,
         "1H" => 3600,
         "4H" => 4 * 3600,
         "1D" => 24 * 3600,

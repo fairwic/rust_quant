@@ -2,6 +2,7 @@ use super::config::EmaTouchTrendSignalConfig;
 use super::signal::{EmaSignalValue, EmaTouchTrendSignalValue};
 // TODO: 迁移后需要重新实现 IsBigKLineIndicator
 // use rust_quant_common::utils::common::IsBigKLineIndicator;
+use rust_quant_common::utils::time;
 use rust_quant_common::CandleItem;
 
 /// 检查EMA趋势
@@ -13,30 +14,70 @@ pub fn check_ema_touch_trend(
     let mut ema_touch_trend_value = EmaTouchTrendSignalValue::default();
     let last_data_item = data_items.last().expect("数据不能为空");
 
+    // if data_items.last().unwrap().ts == 1762128000000 {
+    //     println!("last_data_item: {:?}", data_items.last().unwrap());
+    // }
     // 判断多头排列
     if is_bullish_trend(&ema_value) {
         ema_touch_trend_value.is_uptrend = true;
         check_bullish_signals(data_items, &ema_value, config, &mut ema_touch_trend_value);
-    }
-    // 判断空头排列
-    else if is_bearish_trend(&ema_value) {
+    } else if is_bearish_trend(&ema_value) {
+        // 判断空头排列
         ema_touch_trend_value.is_downtrend = true;
         check_bearish_signals(data_items, &ema_value, config, &mut ema_touch_trend_value);
+        // if data_items.last().unwrap().ts == 1762128000000 {
+        //     println!("ema_touch_trend_value: {:?}", ema_touch_trend_value);
+        // }
+    }
+
+    // 判断ema刚好进入死叉(比如当前k线或者前面1～2根k线触发了死叉)，不能开多
+    // 判断ema刚好进入金叉，不能开空
+    // 使用当前的ema_value来检测交叉
+    let (has_recent_golden_cross, has_recent_death_cross) = check_recent_ema_crossover(&ema_value);
+
+    // 如果刚发生死叉，禁止开多
+    if has_recent_death_cross && ema_touch_trend_value.is_long_signal {
+        // println!("刚发生死叉，禁止开多");
+        // println!("ema_value: {:?}", ema_value);
+        // println!("ema_touch_trend_value: {:?}", ema_touch_trend_value);
+        // println!(
+        //     "time: {:?}",
+        //     time::mill_time_to_datetime_shanghai(last_data_item.ts())
+        // );
+        ema_touch_trend_value.is_long_signal = false;
+    }
+
+    // 如果刚发生金叉，禁止开空
+    if has_recent_golden_cross && ema_touch_trend_value.is_short_signal {
+        // println!("刚发生金叉，禁止开空");
+        // println!("ema_value: {:?}", ema_value);
+        // println!("ema_touch_trend_value: {:?}", ema_touch_trend_value);
+        // println!(
+        //     "time: {:?}",
+        //     time::mill_time_to_datetime_shanghai(last_data_item.ts())
+        // );
+        ema_touch_trend_value.is_short_signal = false;
     }
 
     ema_touch_trend_value
 }
 
+/// 检查近期EMA交叉（当前或前1～2根K线是否发生了金叉或死叉）
+/// 返回: (是否发生金叉, 是否发生死叉)
+///
+/// 交叉结果在构建 `EmaSignalValue` 时计算并缓存，这里直接读取
+fn check_recent_ema_crossover(current_ema: &EmaSignalValue) -> (bool, bool) {
+    (current_ema.is_golden_cross, current_ema.is_death_cross)
+}
+
 /// 判断是否为多头趋势
 fn is_bullish_trend(ema_value: &EmaSignalValue) -> bool {
-    ema_value.ema2_value > ema_value.ema3_value && ema_value.ema3_value > ema_value.ema4_value
+    ema_value.ema1_value < ema_value.ema2_value && ema_value.ema2_value > ema_value.ema3_value
 }
 
 /// 判断是否为空头趋势
 fn is_bearish_trend(ema_value: &EmaSignalValue) -> bool {
-    ema_value.ema1_value < ema_value.ema2_value
-        && ema_value.ema2_value < ema_value.ema3_value
-        && ema_value.ema3_value < ema_value.ema4_value
+    ema_value.ema1_value < ema_value.ema2_value && ema_value.ema2_value < ema_value.ema3_value
 }
 
 /// 检查多头信号
@@ -73,6 +114,10 @@ fn check_bullish_signals(
         trend_value.is_short_signal = true;
         trend_value.is_long_signal = false;
     }
+    //如果k线是大实体阳线，则做多
+    if last_item.body_ratio() > 0.8 && last_item.o() < last_item.c() {
+        trend_value.is_long_signal = true;
+    }
 }
 
 /// 检查空头信号
@@ -88,7 +133,6 @@ fn check_bearish_signals(
     if check_ema2_touch_signal_bearish(last_item, ema_value, config) {
         trend_value.is_short_signal = true;
         trend_value.is_touch_ema2 = true;
-        return;
     }
 
     // 检查EMA4/EMA5触碰信号
@@ -103,12 +147,22 @@ fn check_bearish_signals(
         trend_value.is_short_signal = true;
     }
 
-    // 检查EMA7触碰信号（短期空头vs长期多头）
-    if check_ema7_touch_signal_bearish(last_item, ema_value, config) {
-        trend_value.is_touch_ema7_nums += 1;
-        trend_value.is_touch_ema7 = true;
-        trend_value.is_long_signal = true;
-        trend_value.is_short_signal = false;
+    // // 检查EMA7触碰信号（短期空头vs长期多头）
+    // if check_ema7_touch_signal_bearish(last_item, ema_value, config) {
+    //     trend_value.is_touch_ema7_nums += 1;
+    //     trend_value.is_touch_ema7 = true;
+    //     trend_value.is_long_signal = true;
+    //     trend_value.is_short_signal = false;
+    // }
+    //如果k线是大实体阴线，则做空
+    if data_items.last().unwrap().ts == 1763049600000 {
+        println!("last_item: {:?}", last_item);
+        println!("body_ratio: {:?}", last_item.body_ratio());
+        println!("o: {:?}", last_item.o());
+        println!("c: {:?}", last_item.c());
+    }
+    if last_item.body_ratio() > 0.8 && last_item.o() > last_item.c() {
+        trend_value.is_short_signal = true;
     }
 }
 

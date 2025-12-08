@@ -8,6 +8,7 @@ pub mod test_predicting;
 pub mod email;
 pub mod test_nwe;
 pub mod test_nwe_strategy;
+pub mod test_id;
 
 #[tokio::test]
 async fn test_mspc_job() -> anyhow::Result<()> {

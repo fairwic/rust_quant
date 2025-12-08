@@ -83,12 +83,16 @@ impl VegasStrategy {
                 should_sell: Some(false),
                 open_price: Some(0.0),
                 best_open_price: None,
-                best_take_profit_price: None,
+                atr_take_profit_ratio_price: None,
+                atr_stop_loss_price: None,
+                long_signal_take_profit_price: None,
+                short_signal_take_profit_price: None,
                 signal_kline_stop_loss_price: None,
                 move_stop_open_price_when_touch_price: None,
                 ts: Some(0),
                 single_value: None,
                 single_result: None,
+                counter_trend_pullback_take_profit_price: None,
                 // 填充新字段
                 direction: rust_quant_domain::SignalDirection::None,
                 strength: rust_quant_domain::SignalStrength::new(0.0),
@@ -111,9 +115,13 @@ impl VegasStrategy {
                     should_sell: Some(false),
                     open_price: Some(0.0),
                     best_open_price: None,
-                    best_take_profit_price: None,
+                    atr_take_profit_ratio_price: None,
+                    atr_stop_loss_price: None,
+                    long_signal_take_profit_price: None,
+                    short_signal_take_profit_price: None,
                     signal_kline_stop_loss_price: None,
                     move_stop_open_price_when_touch_price: None,
+                    counter_trend_pullback_take_profit_price: None,
                     ts: Some(0),
                     single_value: None,
                     single_result: None,
@@ -138,11 +146,15 @@ impl VegasStrategy {
             should_sell: Some(false),
             open_price: Some(last_data_item.c),
             best_open_price: None,
-            best_take_profit_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
             signal_kline_stop_loss_price: None,
             ts: Some(last_data_item.ts),
             single_value: None,
             single_result: None,
+            counter_trend_pullback_take_profit_price: None,
             // 填充新字段
             direction: rust_quant_domain::SignalDirection::None,
             strength: rust_quant_domain::SignalStrength::new(0.0),
@@ -256,7 +268,12 @@ impl VegasStrategy {
             vegas_indicator_signal_values.ema_values,
         );
 
+        // if data_items.last().unwrap().ts == 1760688000000 {
+        //     println!("last_data_item: {:?}", data_items.last().unwrap());
+        //     println!("conditions: {:?}", conditions);
+        // }
         // 计算得分
+        //todo 2025-11-18 00:00:00,2025-11-20 00:00:00,2025-11-25 00:00:00
         let score = weights.calculate_score(conditions.clone());
         // 计算分数到达指定值
         if let Some(signal_direction) = weights.is_signal_valid(&score) {
@@ -269,7 +286,6 @@ impl VegasStrategy {
                 }
             }
         }
-        // todo 如果出现信号，但是成交量小于要求的比例，且比上一更k线的成交量还要小，则认为信号无效
         // if signal_result.should_buy || signal_result.should_sell {
         //     if let Some(volume_signal) = &self.volume_signal {
         //         if vegas_indicator_signal_values.volume_value.volume_ratio
@@ -293,17 +309,29 @@ impl VegasStrategy {
             || signal_result.should_sell.unwrap_or(false)
                 && env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true"
         {
-            //如果有使用信号k线路止盈止损
-            if risk_config.is_used_signal_k_line_stop_loss {
+            //如果有使用信号k线止损
+            if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
                 self.calculate_best_stop_loss_price(
                     last_data_item,
                     &mut signal_result,
                     &conditions,
                 );
             }
+            //如果有使用逆势回调止盈
+            if risk_config
+                .is_counter_trend_pullback_take_profit
+                .unwrap_or(false)
+            {
+                self.calculate_counter_trend_pullback_take_profit_price(
+                    &data_items,
+                    &mut signal_result,
+                    &conditions,
+                    &vegas_indicator_signal_values.ema_values,
+                );
+            }
             // TODO: 这些字段原本用于调试，现在类型不匹配，暂时注释
-            // signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
-            // signal_result.single_result = Some(json!(conditions).to_string());
+            signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
+            signal_result.single_result = Some(json!(conditions).to_string());
         }
 
         signal_result
@@ -372,7 +400,7 @@ impl VegasStrategy {
     }
 
     /// 运行回测
-    /// 
+    ///
     /// 注意：此方法不能在 indicators 包中完整实现，因为 BacktestResult 在不同包中定义不同
     /// 实际回测逻辑应在 strategies 或 orchestration 包中调用，使用 get_indicator_combine() 和 get_trade_signal()
     pub fn run_test(
@@ -474,6 +502,57 @@ impl VegasStrategy {
                 {
                     bolling_bands.is_short_signal = false;
                     bolling_bands.is_force_filter_signal = true;
+                }
+            }
+            //todo 加入过滤逻辑，如果出发点了布林带低点或者高点，但是k线是大阳线或者大阴线(实体站百分60以上)&&且刚开始形成死叉或者金叉的 表示很强势，不能直接做多，或者做空
+            //todo 如何收盘价在支撑位置的下方，则不能做多，反之不能做空
+            //todo 当均线空头排列时候。止盈 eth止盈为之前n根下跌k线的30%的位置，而且从最低点到最高点不能超过12%的收益
+            //todo 如果上下引线都大于实体部分，说明此时不能开仓，因为此时趋势不明显，而且容易亏损
+            //如果价格
+            //判断k线的实体部分占比是否大于60%
+
+            let body_ratio = data_items.last().expect("数据不能为空").body_ratio();
+            if bolling_bands.is_long_signal || bolling_bands.is_short_signal {
+                // if data_items.last().unwrap().ts == 1763049600000 {
+                //     println!("data_items: {:?}", data_items.last().unwrap());
+                //    println!("body_ratio: {:?}", data_items.last().unwrap().body_ratio());
+                // }
+                // if body_ratio > 0.8 {
+                //     bolling_bands.is_force_filter_signal = true;
+                //     bolling_bands.is_long_signal = false;
+                //     bolling_bands.is_short_signal = false;
+                // }
+                if data_items
+                    .last()
+                    .expect("数据不能为空")
+                    .is_small_body_and_big_up_down_shadow()
+                {
+                    println!(
+                        "k线实体很小，up_shadow_ratio:{}",
+                        data_items.last().expect("数据不能为空").up_shadow_ratio()
+                    );
+                    println!(
+                        "k线实体很小，down_shadow_ratio:{}",
+                        data_items.last().expect("数据不能为空").down_shadow_ratio()
+                    );
+                    println!(
+                        "上线影线都很长 time:{}",
+                        time_util::mill_time_to_datetime_shanghai(
+                            data_items.last().expect("数据不能为空").ts
+                        )
+                        .unwrap()
+                    );
+                    println!(
+                        "bolling_bands.is_long_signal:{}",
+                        bolling_bands.is_long_signal
+                    );
+                    println!(
+                        "bolling_bands.is_short_signal:{}",
+                        bolling_bands.is_short_signal
+                    );
+                    bolling_bands.is_force_filter_signal = true;
+                    bolling_bands.is_long_signal = false;
+                    bolling_bands.is_short_signal = false;
                 }
             }
         }

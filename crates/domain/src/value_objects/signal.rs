@@ -150,10 +150,10 @@ pub struct SignalResult {
     pub ts: Option<i64>,
 
     /// 单一值
-    pub single_value: Option<f64>,
+    pub single_value: Option<String>,
 
     /// 单一结果
-    pub single_result: Option<bool>,
+    pub single_result: Option<String>,
 
     /// 是否应该卖出
     pub should_sell: Option<bool>,
@@ -164,8 +164,16 @@ pub struct SignalResult {
     /// 开仓价格
     pub open_price: Option<f64>,
 
-    /// 最佳止盈价格
-    pub best_take_profit_price: Option<f64>,
+    /// ATR止盈价格(通常设置为信号线的价差的2倍率) 1:2 1:3 1:4 1:5
+    pub atr_take_profit_ratio_price: Option<f64>,
+    /// ATR止损价格
+    pub atr_stop_loss_price: Option<f64>,
+    /// 指标动态止盈价格，比如当触发nwe突破信号线的时候。或者价格到达布林带的时候
+    pub long_signal_take_profit_price: Option<f64>,
+    /// 做空指标动态止盈价格，比如当触发nwe突破信号线的时候。或者价格到达布林带的时候
+    pub short_signal_take_profit_price: Option<f64>,
+    /// 逆势回调止盈价格
+    pub counter_trend_pullback_take_profit_price: Option<f64>,
 
     /// 最佳开仓价格
     pub best_open_price: Option<f64>,
@@ -193,8 +201,12 @@ impl SignalResult {
             should_sell: None,
             should_buy: None,
             open_price: None,
-            best_take_profit_price: None,
             best_open_price: None,
+            atr_take_profit_ratio_price: None,  
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
+            counter_trend_pullback_take_profit_price: None,
         }
     }
 
@@ -251,8 +263,12 @@ impl SignalResult {
             should_sell: None,
             should_buy: None,
             open_price: None,
-            best_take_profit_price: None,
             best_open_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
+            counter_trend_pullback_take_profit_price: None,
         }
     }
 }

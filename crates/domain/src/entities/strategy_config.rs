@@ -136,15 +136,18 @@ impl StrategyConfig {
 pub struct BasicRiskConfig {
     /// 最大损失百分比
     pub max_loss_percent: f64,
-
-    /// 止盈比率
-    pub take_profit_ratio: f64,
+    /// atr止盈比例
+    pub atr_take_profit_ratio: Option<f64>,
+    /// 固定信号线的止盈比例
+    pub fix_signal_kline_take_profit_ratio: Option<f64>,
+    /// 是否使用逆势回调止盈
+    pub is_counter_trend_pullback_take_profit: Option<bool>,
 
     /// 是否启用移动止损
-    pub is_move_stop_loss: bool,
+    pub is_move_stop_loss: Option<bool>,
 
     /// 是否使用信号K线作为止损
-    pub is_used_signal_k_line_stop_loss: bool,
+    pub is_used_signal_k_line_stop_loss: Option<bool>,
 
     /// 最大持仓时间 (秒，可选)
     pub max_hold_time: Option<i64>,
@@ -156,10 +159,12 @@ pub struct BasicRiskConfig {
 impl Default for BasicRiskConfig {
     fn default() -> Self {
         Self {
-            max_loss_percent: 0.02, // 默认2%止损
-            take_profit_ratio: 1.5, // 默认1.5倍止盈
-            is_move_stop_loss: false,
-            is_used_signal_k_line_stop_loss: true,
+            max_loss_percent: 0.02,                   // 默认2%止损
+            atr_take_profit_ratio: None, // 默认不使用atr止盈
+            fix_signal_kline_take_profit_ratio: None, // 默认不使用固定信号线的止盈
+            is_counter_trend_pullback_take_profit: None, // 默认不使用逆势回调止盈
+            is_move_stop_loss: None,
+            is_used_signal_k_line_stop_loss: None,
             max_hold_time: None,
             max_leverage: None,
         }

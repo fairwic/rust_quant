@@ -537,10 +537,12 @@ impl SwapOrderService {
             Side::Buy => entry_price * (1.0 - max_loss_percent),
         };
         //如果使用信号k线止盈，则使用信号k线止盈
-        if risk_config.is_used_signal_k_line_stop_loss
-            && signal.signal_kline_stop_loss_price.is_some()
-        {
-            stop_loss_price = signal.signal_kline_stop_loss_price.unwrap();
+        if let Some(is_used_signal_k_line_stop_loss) = risk_config.is_used_signal_k_line_stop_loss {
+            if is_used_signal_k_line_stop_loss {
+                if signal.signal_kline_stop_loss_price.is_some() {
+                    stop_loss_price = signal.signal_kline_stop_loss_price.unwrap();
+                }
+            }
         }
         //valid 如果是做空，开仓价格要<止损价格,否则不进行下单
         //valid 如果是做多，开仓价格要>止损价格,否则不进行下单

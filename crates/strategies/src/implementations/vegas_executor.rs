@@ -142,12 +142,18 @@ impl StrategyExecutor for VegasStrategyExecutor {
                 should_sell: false,
                 open_price: new_candle_item.c,
                 best_open_price: None,
-                best_take_profit_price: None,
+                atr_take_profit_ratio_price: None,
+                atr_stop_loss_price: None,
+                long_signal_take_profit_price: None,
+                short_signal_take_profit_price: None,
                 move_stop_open_price_when_touch_price: None,
                 ts: new_candle_item.ts,
                 single_value: None,
                 single_result: None,
                 signal_kline_stop_loss_price: None,
+                counter_trend_pullback_take_profit_price: None,
+                is_ema_short_trend: None,
+                is_ema_long_trend: None,
             });
         }
 
@@ -197,11 +203,17 @@ impl StrategyExecutor for VegasStrategyExecutor {
             open_price: signal_result.open_price.unwrap_or(0.0),
             signal_kline_stop_loss_price: signal_result.signal_kline_stop_loss_price,
             best_open_price: signal_result.best_open_price,
-            best_take_profit_price: signal_result.best_take_profit_price,
+            atr_take_profit_ratio_price: signal_result.atr_take_profit_ratio_price,
+            atr_stop_loss_price: signal_result.atr_stop_loss_price,
+            long_signal_take_profit_price: signal_result.long_signal_take_profit_price,
+            short_signal_take_profit_price: signal_result.short_signal_take_profit_price,
             move_stop_open_price_when_touch_price: None,
             ts: signal_result.ts.unwrap_or(new_candle_item.ts),
             single_value: signal_result.single_value.map(|v| v.to_string()),
             single_result: signal_result.single_result.map(|v| v.to_string()),
+            counter_trend_pullback_take_profit_price: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
         };
 
         // 11. 返回信号（下单逻辑由services层统一处理）

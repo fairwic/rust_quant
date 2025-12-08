@@ -1,21 +1,26 @@
-use std::collections::VecDeque;
+use rust_quant_domain::entities::position;
+
 use crate::CandleItem;
 use super::super::types::TradeSide;
 use super::types::{BasicRiskStrategyConfig, SignalResult, TradingState};
 use super::risk::check_risk_config;
-use super::position::{open_long_position, open_short_position, close_position};
-
+use super::position::{open_long_position, open_short_position, close_position, set_long_stop_close_price, set_short_stop_close_price};
 /// 处理交易信号
 pub fn deal_signal(
     mut trading_state: TradingState,
     signal: &mut SignalResult,
     candle: &CandleItem,
     risk_config: BasicRiskStrategyConfig,
-    candle_item_list: &VecDeque<CandleItem>,
+    candle_item_list: &[CandleItem],
     i: usize,
 ) -> TradingState {
+    //先检查设置了是否预止损价格
+    // if signal.ts == 1762747200000 {
+    //     println!("signal: {:#?}", signal);
+    //     println!("trading_state: {:#?}", trading_state.trade_position);
+    // }
     if signal.should_buy || signal.should_sell {
-        if let Some(trade_position) = trading_state.trade_position.clone() {
+        if let Some(mut trade_position) = trading_state.trade_position.clone() {
             // 如是反向仓位，优先判断一下止盈止损
             if (trade_position.trade_side == TradeSide::Long && signal.should_sell)
                 || (trade_position.trade_side == TradeSide::Short && signal.should_buy)
@@ -28,6 +33,16 @@ pub fn deal_signal(
                     candle_item_list,
                     i,
                 );
+            }else {
+                //如果再一次出发点了相同的信号方向，则进行止盈止损的信号更新
+                if signal.should_buy {
+                    // println!("出现连续的多头信号{}",rust_quant_common::utils::time::mill_time_to_datetime(signal.ts).unwrap());
+                    set_long_stop_close_price(risk_config, signal, &mut trade_position);
+                } else if signal.should_sell {
+                    // println!("出现连续的空头信号{}",rust_quant_common::utils::time::mill_time_to_datetime(signal.ts).unwrap());
+                    set_short_stop_close_price(risk_config, signal, &mut trade_position);
+                }
+                trading_state.trade_position = Some(trade_position);
             }
         }
 
@@ -120,7 +135,7 @@ pub fn deal_signal(
     trading_state
 }
 
-/// 处理买入信号的逻辑
+/// 处理买入信号的逻
 fn handle_buy_signal_logic(
     risk_config: BasicRiskStrategyConfig,
     trading_state: &mut TradingState,

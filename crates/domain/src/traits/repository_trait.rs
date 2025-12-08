@@ -4,8 +4,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::entities::{
-    BacktestDetail, BacktestLog, BacktestWinRateStats, Candle, ExchangeApiConfig, Order, Position,
-    StrategyApiConfig, StrategyConfig,
+    BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats, Candle,
+    ExchangeApiConfig, Order, Position, StrategyApiConfig, StrategyConfig,
 };
 use crate::enums::Timeframe;
 use crate::PositionStatus;
@@ -112,6 +112,15 @@ pub trait BacktestLogRepository: Send + Sync {
         &self,
         backtest_id: i64,
         stats: &BacktestWinRateStats,
+    ) -> Result<u64>;
+
+    /// 更新回测绩效指标
+    /// 
+    /// 包含夏普比率、年化收益率、最大回撤、波动率等
+    async fn update_performance_metrics(
+        &self,
+        backtest_id: i64,
+        metrics: &BacktestPerformanceMetrics,
     ) -> Result<u64>;
 }
 

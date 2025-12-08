@@ -102,11 +102,7 @@ impl StrategyExecutionService {
             serde_json::from_value(config.risk_config.clone())
                 .map_err(|e| anyhow!("解析风险配置失败: {}", e))?;
 
-        info!(
-            "风险配置: max_loss={:.2}%, take_profit_ratio={:.2}",
-            risk_config.max_loss_percent * 100.0,
-            risk_config.take_profit_ratio
-        );
+        info!("风险配置: risk_config:{:#?}", risk_config);
 
         // 8. 执行下单（参考：executor_common.rs:131-152）
         if let Err(e) = self
@@ -284,7 +280,11 @@ impl StrategyExecutionService {
             anyhow!("获取账户数据失败: {}", e)
         })?;
 
-        info!("当前持仓数量: {}, 最大可用数量: {}", positions.len(), max_size.max_buy);
+        info!(
+            "当前持仓数量: {}, 最大可用数量: {}",
+            positions.len(),
+            max_size.max_buy
+        );
 
         // 5. 计算下单数量（使用90%的安全系数）
         let safety_factor = 0.9;
@@ -313,10 +313,16 @@ impl StrategyExecutionService {
         };
 
         // 如果使用信号K线止损
-        let final_stop_loss = if risk_config.is_used_signal_k_line_stop_loss {
-            signal
-                .signal_kline_stop_loss_price
-                .unwrap_or(stop_loss_price)
+        let final_stop_loss = if let Some(is_used_signal_k_line_stop_loss) =
+            risk_config.is_used_signal_k_line_stop_loss
+        {
+            if is_used_signal_k_line_stop_loss {
+                signal
+                    .signal_kline_stop_loss_price
+                    .unwrap_or(stop_loss_price)
+            } else {
+                stop_loss_price
+            }
         } else {
             stop_loss_price
         };

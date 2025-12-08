@@ -73,6 +73,12 @@ pub struct EmaSignalValue {
     pub is_long_trend: bool,
     /// 是否空头排列
     pub is_short_trend: bool,
+    /// 最近是否发生金叉
+    #[serde(default)]
+    pub is_golden_cross: bool,
+    /// 最近是否发生死叉
+    #[serde(default)]
+    pub is_death_cross: bool,
 }
 
 /// 布林带信号值

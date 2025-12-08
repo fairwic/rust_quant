@@ -262,6 +262,7 @@ mod tests {
             stop_loss_price: Some(49000.0),
             take_profit_price: Some(52000.0),
             signal_kline_stop_loss_price: None,
+            move_stop_open_price_when_touch_price: None,
             position_time: None,
             signal_kline: None,
             ts: None,
@@ -270,8 +271,11 @@ mod tests {
             should_sell: None,
             should_buy: None,
             open_price: None,
-            best_take_profit_price: None,
             best_open_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
         };
 
         assert!(service.validate_signal(&valid_signal));

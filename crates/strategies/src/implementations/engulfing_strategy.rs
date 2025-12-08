@@ -79,7 +79,7 @@ impl EngulfingStrategy {
         }
         // ts = candles_5m.last().unwrap().ts;
 
-        SignalResult {
+            SignalResult {
             should_buy,
             should_sell,
             open_price: price,
@@ -87,9 +87,15 @@ impl EngulfingStrategy {
             single_value: None,
             single_result: None,
             signal_kline_stop_loss_price: None,
+            atr_stop_loss_price: None,
             best_open_price: None,
-            best_take_profit_price: None,
+            atr_take_profit_ratio_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
             move_stop_open_price_when_touch_price: None,
+            counter_trend_pullback_take_profit_price: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
         }
     }
 

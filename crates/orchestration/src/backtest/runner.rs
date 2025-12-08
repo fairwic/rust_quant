@@ -211,6 +211,11 @@ impl BacktestRunner {
         StrategyProgressManager::save_progress(&progress).await?;
 
         let mut generator = NweParamGenerator::new(
+            random_config.stc_fast_length.clone(),
+            random_config.stc_slow_length.clone(),
+            random_config.stc_cycle_length.clone(),
+            random_config.stc_d1_length.clone(),
+            random_config.stc_d2_length.clone(),
             random_config.rsi_periods.clone(),
             random_config.rsi_over_buy_sell.clone(),
             random_config.atr_periods.clone(),
@@ -227,6 +232,7 @@ impl BacktestRunner {
                 .is_move_stop_open_price_when_touch_price
                 .clone(),
             random_config.k_line_hammer_shadow_ratios.clone(),
+            random_config.is_counter_trend_pullback_take_profit.clone(),
         );
 
         generator.set_current_index(progress.current_index);
@@ -417,6 +423,8 @@ impl BacktestRunner {
             random_config
                 .is_move_stop_open_price_when_touch_price
                 .clone(),
+            random_config.fix_signal_kline_take_profit_ratios.clone(),
+            random_config.is_counter_trend_pullback_take_profit.clone(),
         );
 
         generator.set_current_index(progress.current_index);
@@ -522,20 +530,28 @@ impl BacktestRunner {
 /// 构建默认的 NWE 随机配置
 fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig {
     NweRandomStrategyConfig {
-        rsi_periods: vec![6, 8, 10, 12, 14],
-        rsi_over_buy_sell: vec![(70.0, 30.0), (65.0, 35.0), (60.0, 40.0), (75.0, 25.0)],
-        atr_periods: vec![6, 8, 10],
+        rsi_periods: vec![6],
+        rsi_over_buy_sell: vec![(70.0, 30.0)],
+
+        stc_fast_length: vec![23],
+        stc_slow_length: vec![50],
+        stc_cycle_length: vec![10],
+        stc_d1_length: vec![3],
+        stc_d2_length: vec![3],
+
+        atr_periods: vec![6, 7, 8, 9, 10, 11, 12],
         atr_multipliers: vec![0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0],
         volume_bar_num: vec![3],
         volume_ratios: vec![0.8],
-        nwe_periods: vec![4, 6, 8, 10],
-        nwe_multi: vec![2.0, 2.5, 3.0, 3.5, 4.0, 4.2, 4.5],
+        nwe_periods: vec![4, 6, 8, 10, 12],
+        nwe_multi: vec![1.8, 2.0, 2.2, 2.6, 3.0],
         batch_size,
-        max_loss_percent: vec![0.03, 0.02, 0.01, 0.005],
-        take_profit_ratios: vec![0.5, 1.0, 1.5, 1.8, 2.0, 2.5, 3.0],
+        max_loss_percent: vec![0.03, 0.02, 0.01],
+        take_profit_ratios: vec![0.5, 1.0, 1.5, 1.8, 2.0, 2.5, 3.0, 3.5],
         is_move_stop_loss: vec![false],
         k_line_hammer_shadow_ratios: vec![0.65],
         is_used_signal_k_line_stop_loss: vec![false, true],
-        is_move_stop_open_price_when_touch_price: vec![true, false],
+        is_move_stop_open_price_when_touch_price: vec![false],
+        is_counter_trend_pullback_take_profit: vec![false],
     }
 }

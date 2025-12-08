@@ -1,3 +1,11 @@
+use rust_quant_indicators::signal_weight::SignalWeightsConfig;
+use rust_quant_indicators::trend::vegas::{
+    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, KlineHammerConfig,
+    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
+};
+use rust_quant_indicators::volatility::BollingBandsSignalConfig;
+use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
+
 #[derive(Default, Clone)]
 pub struct ParamMergeBuilder {
     //bolling
@@ -18,11 +26,14 @@ pub struct ParamMergeBuilder {
     pub kline_start_time: Option<i64>,
     pub kline_end_time: Option<i64>,
     //risk
-    pub max_loss_percent: f64,                          // 最大止损百分比
-    pub take_profit_ratio: f64,                         // 盈利阈值，用于动态止盈
-    pub is_move_stop_loss: bool, //是否使用移动止损,当盈利之后,止损价格变成开仓价
+    pub max_loss_percent: f64,  // 最大止损百分比
+    pub take_profit_ratio: f64, // 盈利阈值，用于动态止盈
+    // 固定信号线的止盈比例
+    pub fix_signal_kline_take_profit_ratio: Option<f64>, // 固定信号线的止盈比例，比如当盈利超过 k线路的长度的 n 倍时，直接止盈，适用短线策略
+    pub is_move_stop_loss: bool,                 //是否使用移动止损,当盈利之后,止损价格变成开仓价
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
     pub is_move_stop_open_price_when_touch_price: bool, //是否使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
+    pub is_counter_trend_pullback_take_profit: bool, //是否使用逆势回调止盈
 }
 impl ParamMergeBuilder {
     //使用构造器
@@ -104,6 +115,75 @@ impl ParamMergeBuilder {
         self.is_move_stop_open_price_when_touch_price = is_move_stop_open_price_when_touch_price;
         self
     }
+    pub fn fix_signal_kline_take_profit_ratio(
+        mut self,
+        fix_signal_kline_take_profit_ratio: f64,
+    ) -> Self {
+        self.fix_signal_kline_take_profit_ratio = Some(fix_signal_kline_take_profit_ratio);
+        self
+    }
+    pub fn is_counter_trend_pullback_take_profit(mut self, is_counter_trend_pullback_take_profit: bool) -> Self {
+        self.is_counter_trend_pullback_take_profit = is_counter_trend_pullback_take_profit;
+        self
+    }
+
+    /// 转换为风控配置
+    pub fn to_risk_config(&self) -> BasicRiskStrategyConfig {
+        BasicRiskStrategyConfig {
+            max_loss_percent: self.max_loss_percent,
+            atr_take_profit_ratio: Some(self.take_profit_ratio),
+            fixed_signal_kline_take_profit_ratio: self.fix_signal_kline_take_profit_ratio,
+            is_one_k_line_diff_stop_loss: Some(self.is_move_stop_loss),
+            is_used_signal_k_line_stop_loss: Some(self.is_used_signal_k_line_stop_loss),
+            is_move_stop_open_price_when_touch_price: Some(self.is_move_stop_open_price_when_touch_price),
+            is_counter_trend_pullback_take_profit: Some(self.is_counter_trend_pullback_take_profit),
+        }
+    }
+
+    /// 转换为 Vegas 策略配置
+    pub fn to_vegas_strategy(&self, period: String) -> VegasStrategy {
+        let volume_signal = VolumeSignalConfig {
+            volume_bar_num: self.volume_bar_num,
+            volume_increase_ratio: self.volume_increase_ratio,
+            volume_decrease_ratio: self.volume_decrease_ratio,
+            is_open: true,
+        };
+
+        let rsi_signal = RsiSignalConfig {
+            rsi_length: self.rsi_period,
+            rsi_oversold: self.rsi_oversold,
+            rsi_overbought: self.rsi_overbought,
+            is_open: true,
+        };
+
+        let ema_touch_trend_signal = EmaTouchTrendSignalConfig {
+            is_open: true,
+            ..Default::default()
+        };
+
+        let kline_hammer_signal = KlineHammerConfig {
+            up_shadow_ratio: self.hammer_shadow_ratio,
+            down_shadow_ratio: self.hammer_shadow_ratio,
+        };
+
+        VegasStrategy {
+            period,
+            min_k_line_num: 3600,
+            engulfing_signal: Some(EngulfingSignalConfig::default()),
+            ema_signal: Some(EmaSignalConfig::default()),
+            signal_weights: Some(SignalWeightsConfig::default()),
+            volume_signal: Some(volume_signal),
+            ema_touch_trend_signal: Some(ema_touch_trend_signal),
+            rsi_signal: Some(rsi_signal),
+            bolling_signal: Some(BollingBandsSignalConfig {
+                period: self.bb_period as usize,
+                multiplier: self.bb_multiplier,
+                is_open: true,
+                consecutive_touch_times: 4,
+            }),
+            kline_hammer_signal: Some(kline_hammer_signal),
+        }
+    }
 }
 //使用构造器
 
@@ -125,6 +205,8 @@ pub struct ParamGenerator {
     is_move_stop_loss: Vec<bool>,
     is_used_signal_k_line_stop_loss: Vec<bool>,
     is_move_stop_open_price_when_touch_price: Vec<bool>,
+    fix_signal_kline_take_profit_ratios: Vec<f64>,
+    is_counter_trend_pullback_take_profit: Vec<bool>,
 }
 
 impl ParamGenerator {
@@ -142,6 +224,8 @@ impl ParamGenerator {
         is_move_stop_loss: Vec<bool>,
         is_used_signal_k_line_stop_loss: Vec<bool>,
         is_move_stop_open_price_when_touch_price: Vec<bool>,
+        fix_signal_kline_take_profit_ratios: Vec<f64>,
+        is_counter_trend_pullback_take_profit: Vec<bool>,
     ) -> Self {
         let total_count = bb_periods.len()
             * shadow_ratios.len()
@@ -155,7 +239,9 @@ impl ParamGenerator {
             * take_profit_ratios.len()
             * is_move_stop_loss.len()
             * is_used_signal_k_line_stop_loss.len()
-            * is_move_stop_open_price_when_touch_price.len();
+            * is_move_stop_open_price_when_touch_price.len()
+            * fix_signal_kline_take_profit_ratios.len()
+            * is_counter_trend_pullback_take_profit.len();
 
         Self {
             bb_periods,
@@ -173,6 +259,8 @@ impl ParamGenerator {
             is_move_stop_loss,
             is_used_signal_k_line_stop_loss,
             is_move_stop_open_price_when_touch_price,
+            fix_signal_kline_take_profit_ratios,
+            is_counter_trend_pullback_take_profit,
         }
     }
 
@@ -198,6 +286,8 @@ impl ParamGenerator {
             let mst_size = self.is_move_stop_loss.len();
             let usklsl_size = self.is_used_signal_k_line_stop_loss.len();
             let mstoptp_size = self.is_move_stop_open_price_when_touch_price.len();
+            let fsktpr_size = self.fix_signal_kline_take_profit_ratios.len();
+            index /= fsktpr_size;
             let i_bb_p = index % bb_p_size;
             index /= bb_p_size;
 
@@ -237,9 +327,9 @@ impl ParamGenerator {
             let i_usklsl = index % self.is_used_signal_k_line_stop_loss.len();
             index /= self.is_used_signal_k_line_stop_loss.len();
             let i_mstoptp = index % self.is_move_stop_open_price_when_touch_price.len();
-            index /= self.is_move_stop_open_price_when_touch_price.len();
+            let i_fsktpr = index % self.fix_signal_kline_take_profit_ratios.len();
+            let i_cctpt = index % self.is_counter_trend_pullback_take_profit.len();
             // 最后一个维度，无需再除
-            // index /= self.is_used_signal_k_line_stop_loss.len();
 
             // 获取参数值
             let param = ParamMergeBuilder {
@@ -261,6 +351,9 @@ impl ParamGenerator {
                 is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
                 is_move_stop_open_price_when_touch_price: self
                     .is_move_stop_open_price_when_touch_price[i_mstoptp],
+                fix_signal_kline_take_profit_ratio: Some(self.fix_signal_kline_take_profit_ratios
+                    [i_fsktpr]),
+                is_counter_trend_pullback_take_profit: self.is_counter_trend_pullback_take_profit[i_cctpt],
             };
 
             batch.push(param);
@@ -304,6 +397,11 @@ impl ParamGenerator {
 // ================================
 #[derive(Clone)]
 pub struct NweParamGenerator {
+    stc_fast_length: Vec<usize>,
+    stc_slow_length: Vec<usize>,
+    stc_cycle_length: Vec<usize>,
+    stc_d1_length: Vec<usize>,
+    stc_d2_length: Vec<usize>,
     rsi_periods: Vec<usize>,
     rsi_over_buy_sell: Vec<(f64, f64)>,
     k_line_hammer_shadow_ratios: Vec<f64>,
@@ -322,13 +420,18 @@ pub struct NweParamGenerator {
     is_move_stop_loss: Vec<bool>,
     is_used_signal_k_line_stop_loss: Vec<bool>,
     is_move_stop_open_price_when_touch_price: Vec<bool>,
-
+    is_counter_trend_pullback_take_profit: Vec<bool>,
     current_index: usize,
     total_count: usize,
 }
 
 impl NweParamGenerator {
     pub fn new(
+        stc_fast_length: Vec<usize>,
+        stc_slow_length: Vec<usize>,
+        stc_cycle_length: Vec<usize>,
+        stc_d1_length: Vec<usize>,
+        stc_d2_length: Vec<usize>,
         rsi_periods: Vec<usize>,
         rsi_over_buy_sell: Vec<(f64, f64)>,
         atr_periods: Vec<usize>,
@@ -344,8 +447,14 @@ impl NweParamGenerator {
         is_used_signal_k_line_stop_loss: Vec<bool>,
         is_move_stop_open_price_when_touch_price: Vec<bool>,
         k_line_hammer_shadow_ratios: Vec<f64>,
+        is_counter_trend_pullback_take_profit: Vec<bool>,
     ) -> Self {
-        let total_count = rsi_periods.len()
+        let total_count = stc_fast_length.len()
+            * stc_slow_length.len()
+            * stc_cycle_length.len()
+            * stc_d1_length.len()
+            * stc_d2_length.len()
+            * rsi_periods.len()
             * rsi_over_buy_sell.len()
             * atr_periods.len()
             * atr_multipliers.len()
@@ -358,14 +467,20 @@ impl NweParamGenerator {
             * is_move_stop_loss.len()
             * is_used_signal_k_line_stop_loss.len()
             * is_move_stop_open_price_when_touch_price.len()
-            * k_line_hammer_shadow_ratios.len();
+            * k_line_hammer_shadow_ratios.len()
+            * is_counter_trend_pullback_take_profit.len();
         Self {
+            stc_fast_length,
+            stc_slow_length,
+            stc_cycle_length,
+            stc_d1_length,
+            stc_d2_length,
             rsi_periods,
             rsi_over_buy_sell,
             k_line_hammer_shadow_ratios,
             atr_periods,
             atr_multipliers,
-            volume_bar_num: volume_bar_nums,
+            volume_bar_num: volume_bar_nums,    
             volume_ratios,
             nwe_periods,
             nwe_multi,
@@ -374,6 +489,7 @@ impl NweParamGenerator {
             is_move_stop_loss,
             is_used_signal_k_line_stop_loss,
             is_move_stop_open_price_when_touch_price,
+            is_counter_trend_pullback_take_profit,
             current_index: 0,
             total_count,
         }
@@ -389,6 +505,11 @@ impl NweParamGenerator {
         let mut batch = Vec::with_capacity(batch_size);
         while batch.len() < batch_size && self.current_index < self.total_count {
             let mut idx = self.current_index;
+            let stc_fast_length_len = self.stc_fast_length.len();
+            let stc_slow_length_len = self.stc_slow_length.len();
+            let stc_cycle_length_len = self.stc_cycle_length.len();
+            let stc_d1_length_len = self.stc_d1_length.len();
+            let stc_d2_length_len = self.stc_d2_length.len();
             let rp_len = self.rsi_periods.len();
             let rob_len = self.rsi_over_buy_sell.len();
             let ap_len = self.atr_periods.len();
@@ -403,7 +524,18 @@ impl NweParamGenerator {
             let usklsl_len = self.is_used_signal_k_line_stop_loss.len();
             let mstoptp_len = self.is_move_stop_open_price_when_touch_price.len();
             let kh_sr_len = self.k_line_hammer_shadow_ratios.len();
+            let cctpt_len = self.is_counter_trend_pullback_take_profit.len();
             // 按维度展开索引（顺序需与 total_count 维度相同）
+            let i_stc_fast_length = idx % stc_fast_length_len;
+            idx /= stc_fast_length_len;
+            let i_stc_slow_length = idx % stc_slow_length_len;
+            idx /= stc_slow_length_len;
+            let i_stc_cycle_length = idx % stc_cycle_length_len;
+            idx /= stc_cycle_length_len;
+            let i_stc_d1_length = idx % stc_d1_length_len;
+            idx /= stc_d1_length_len;
+            let i_stc_d2_length = idx % stc_d2_length_len;
+            idx /= stc_d2_length_len;
             let i_rp = idx % rp_len;
             idx /= rp_len;
             let i_rob = idx % rob_len;
@@ -428,34 +560,37 @@ impl NweParamGenerator {
             let i_msl = idx % msl_len;
             idx /= msl_len;
             let i_usklsl = idx % usklsl_len; // 最后一维无需再除
-            idx /= usklsl_len;
             let i_mstoptp = idx % mstoptp_len;
-            idx /= mstoptp_len;
             let i_kh_sr = idx % kh_sr_len;
-            idx /= kh_sr_len;
-
-            let cfg = rust_quant_strategies::implementations::nwe_strategy::NweStrategyConfig {
+            let i_cctpt = idx % cctpt_len;
+            let mut cfg = rust_quant_strategies::implementations::nwe_strategy::NweStrategyConfig {
                 period: "5m".to_string(),
-                rsi_period: self.rsi_periods[i_rp],
-                rsi_overbought: self.rsi_over_buy_sell[i_rob].0,
-                rsi_oversold: self.rsi_over_buy_sell[i_rob].1,
-                atr_period: self.atr_periods[i_ap],
-                atr_multiplier: self.atr_multipliers[i_am],
-                nwe_period: self.nwe_periods[i_nwe_p],
-                nwe_multi: self.nwe_multi[i_nwe_m],
-                volume_bar_num: self.volume_bar_num[i_vbn],
-                volume_ratio: self.volume_ratios[i_vr],
-                // 使用 NWE 周期作为最小数据长度的基线，确保指标有足够数据
-                min_k_line_num: 500,
-                k_line_hammer_shadow_ratio: self.k_line_hammer_shadow_ratios[i_kh_sr],
+                ..Default::default()
             };
+            cfg.stc_fast_length = self.stc_fast_length[i_stc_fast_length];
+            cfg.stc_slow_length = self.stc_slow_length[i_stc_slow_length];
+            cfg.stc_cycle_length = self.stc_cycle_length[i_stc_cycle_length];
+            cfg.stc_d1_length = self.stc_d1_length[i_stc_d1_length];
+            cfg.stc_d2_length = self.stc_d2_length[i_stc_d2_length];
+            cfg.atr_period = self.atr_periods[i_ap];
+            cfg.atr_multiplier = self.atr_multipliers[i_am];
+            cfg.nwe_period = self.nwe_periods[i_nwe_p];
+            cfg.nwe_multi = self.nwe_multi[i_nwe_m];
+            cfg.volume_bar_num = self.volume_bar_num[i_vbn];
+            cfg.volume_ratio = self.volume_ratios[i_vr];
+            // 使用 NWE 周期作为最小数据长度的基线，确保指标有足够数据
+            cfg.min_k_line_num = 500;
+            cfg.k_line_hammer_shadow_ratio = self.k_line_hammer_shadow_ratios[i_kh_sr];
+
             let risk = rust_quant_strategies::strategy_common::BasicRiskStrategyConfig {
-                is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
+                is_used_signal_k_line_stop_loss: Some(self.is_used_signal_k_line_stop_loss[i_usklsl]),
                 max_loss_percent: self.max_loss_percent[i_mlp],
-                take_profit_ratio: self.take_profit_ratios[i_tpr],
-                is_one_k_line_diff_stop_loss: self.is_move_stop_loss[i_msl],
-                is_move_stop_open_price_when_touch_price: self
-                    .is_move_stop_open_price_when_touch_price[i_mstoptp],
+                atr_take_profit_ratio: Some(self.take_profit_ratios[i_tpr]),
+                is_one_k_line_diff_stop_loss: Some(self.is_move_stop_loss[i_msl]),
+                is_move_stop_open_price_when_touch_price: Some(self
+                    .is_move_stop_open_price_when_touch_price[i_mstoptp]),
+                fixed_signal_kline_take_profit_ratio: None,
+                is_counter_trend_pullback_take_profit: Some(self.is_counter_trend_pullback_take_profit[i_cctpt]),
             };
             batch.push((cfg, risk));
             self.current_index += 1;

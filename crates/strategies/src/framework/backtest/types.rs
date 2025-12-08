@@ -1,6 +1,6 @@
+use super::super::types::TradeSide;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use super::super::types::TradeSide;
 
 /// 回测结果
 #[derive(Debug, Deserialize, Serialize)]
@@ -64,17 +64,37 @@ pub struct SignalResult {
     pub should_sell: bool,
     //开仓价格
     pub open_price: f64,
-    //止损价格
+    //信号k线最高价或者最低价止损
     pub signal_kline_stop_loss_price: Option<f64>,
     //最优开仓价格(通常设置为信号线的0.382位置出开仓)
     pub best_open_price: Option<f64>,
-    //最优止盈价格(通常设置为信号线的价差的2倍率) 1:2 1:3 1:4 1:5
-    pub best_take_profit_price: Option<f64>,
+
+    //ATR止盈价格(通常设置为信号线的价差的2倍率) 1:2 1:3 1:4 1:5
+    pub atr_take_profit_ratio_price: Option<f64>,
+    pub atr_stop_loss_price: Option<f64>,
+
+    //做多指标动态止盈价格，比如当触发nwe突破信号线的时候。或者价格到达布林带的时候
+    pub long_signal_take_profit_price: Option<f64>,
+
+    //做空指标动态止盈价格，比如当触发nwe突破信号线的时候。或者价格到达布林带的时候
+    pub short_signal_take_profit_price: Option<f64>,
+
     //移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
     pub move_stop_open_price_when_touch_price: Option<f64>,
     pub ts: i64,
     pub single_value: Option<String>,
     pub single_result: Option<String>,
+    
+    /// 逆势回调止盈价格
+    /// 做多时：连续下跌K线起点最高价的回调位置
+    /// 做空时：连续上涨K线起点最低价的回调位置
+    pub counter_trend_pullback_take_profit_price: Option<f64>,
+    
+    /// 是否均线空头排列（用于判断是否逆势做多）
+    pub is_ema_short_trend: Option<bool>,
+    
+    /// 是否均线多头排列（用于判断是否逆势做空）
+    pub is_ema_long_trend: Option<bool>,
 }
 
 /// 持仓信息
@@ -98,13 +118,14 @@ pub struct TradePosition {
     pub signal_open_position_time: Option<String>,
     //实际开仓时间
     pub open_position_time: String,
-    //最优止盈价格
-    pub best_take_profit_price: Option<f64>,
+    //固定比例止盈价格
+    pub fixed_take_profit_price: Option<f64>,
     //信号线止损价格
     pub signal_kline_stop_close_price: Option<f64>,
-
-    //触发K线固定比例止盈价格
-    pub touch_take_ratio_profit_price: Option<f64>,
+    //atr止损价格
+    pub atr_stop_loss_price: Option<f64>,
+    //触发atr 盈亏比止盈
+    pub atr_take_ratio_profit_price: Option<f64>,
 
     //触发K线开仓价格止损(当达到一个特定的价格位置的时候，移动止损线到开仓价格)
     pub move_stop_open_price: Option<f64>,
@@ -114,6 +135,11 @@ pub struct TradePosition {
     pub signal_status: i32,
     //信号线最高最低价差
     pub signal_high_low_diff: f64,
+    
+    /// 逆势回调止盈价格
+    /// 做多时：连续下跌K线起点最高价的回调位置
+    /// 做空时：连续上涨K线起点最低价的回调位置
+    pub counter_trend_pullback_take_profit_price: Option<f64>,
 }
 
 /// 交易状态
@@ -155,24 +181,41 @@ impl Default for TradingState {
 /// 止盈止损策略配置
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct BasicRiskStrategyConfig {
-    pub is_used_signal_k_line_stop_loss: bool, //(开仓K线止盈止损),多单时,当价格低于入场k线的最低价时,止损;空单时,
-    // 价格高于入场k线的最高价时,止损
-    pub max_loss_percent: f64, // 最大止损百分比(避免当k线振幅过大，使用k线最低/高价止损时候，造成太大的亏损)
-    pub take_profit_ratio: f64, // 止盈比例，比如当盈利超过1.5:1时，直接止盈，适用短线策略
-    // 1:1时候设置止损价格为开仓价格(保本)，价格到达赢利点1:2的时候，设置止损价格为开仓价格+1:1(保证本金+1:1的利润),当赢利点达到1：3的时候，设置止损价格为开仓价格+1:2(保证本金+1:2的利润)
-    pub is_one_k_line_diff_stop_loss: bool, // 是否使用固定止损最大止损为1:1开多+(当前k线的最高价-最低价) 开空-
-    pub is_move_stop_open_price_when_touch_price: bool, // 是否使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
-    // (当前k线的最高价-最低价)
+    // 最大止损百分比(避免当k线振幅过大，使用k线最低/高价止损时候，造成太大的亏损)
+    pub max_loss_percent: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    //(开仓K线止盈止损),多单时,当价格低于入场k线的最低价时,止损;空单时,价格高于入场k线的最高价时,止损
+    pub is_used_signal_k_line_stop_loss: Option<bool>,
+    //atr止盈比例
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub atr_take_profit_ratio: Option<f64>, // atr止盈比例，比如当盈利超过1.5:1时，直接止盈，适用短线策略
+    //固定信号线的止盈比例
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed_signal_kline_take_profit_ratio: Option<f64>, //固定信号线的止盈比例，比如当盈利超过 k线路的长度的 n 倍时，直接止盈，适用短线策略
+    //是否使用固定止损最大止损为1:1开多+(当前k线的最高价-最低价) 开空-
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_one_k_line_diff_stop_loss: Option<bool>, // 是否使用固定止损最大止损为1:1开多+(当前k线的最高价-最低价) 开空-
+    //是否使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_move_stop_open_price_when_touch_price: Option<bool>, // 是否使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
+    
+    /// 逆势回调止盈开关
+    /// 当均线空头排列时做多，设置止盈价格为连续下跌K线起点最高价的回调位置
+    /// 当均线多头排列时做空，设置止盈价格为连续上涨K线起点最低价的回调位置
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_counter_trend_pullback_take_profit: Option<bool>,
 }
 
 impl Default for BasicRiskStrategyConfig {
     fn default() -> Self {
         Self {
-            is_used_signal_k_line_stop_loss: true,
-            max_loss_percent: 0.02,              // 默认3%止损
-            take_profit_ratio: 0.00,             // 默认1%盈利开始启用动态止盈
-            is_one_k_line_diff_stop_loss: false, // 默认不使用移动止损(移动止损价格到信号线的开仓价格)
-            is_move_stop_open_price_when_touch_price: false, // 默认不使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
+            max_loss_percent: 0.02, // 默认2%止损
+            is_used_signal_k_line_stop_loss: Some(true),
+            atr_take_profit_ratio: Some(0.00), // 默认1%盈利开始启用动态止盈
+            fixed_signal_kline_take_profit_ratio: Some(0.00), // 默认不使用固定信号线的止盈
+            is_one_k_line_diff_stop_loss: Some(false), // 默认不使用移动止损(移动止损价格到信号线的开仓价格)
+            is_move_stop_open_price_when_touch_price: Some(false), // 默认不使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
+            is_counter_trend_pullback_take_profit: Some(false), // 默认不使用逆势回调止盈
         }
     }
 }
@@ -183,4 +226,3 @@ pub struct MoveStopLoss {
     pub is_short: bool,
     pub price: f64,
 }
-

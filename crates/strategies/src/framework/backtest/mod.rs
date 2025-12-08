@@ -1,3 +1,5 @@
+pub mod adapter;
+pub mod conversions;
 pub mod types;
 pub mod utils;
 pub mod fibonacci;
@@ -10,6 +12,8 @@ pub mod recording;
 pub mod trait_impl;
 
 // 重新导出常用类型
+pub use adapter::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
+pub use conversions::{convert_domain_signal, to_domain_basic_risk_config};
 pub use types::{
     BackTestResult, BasicRiskStrategyConfig, MoveStopLoss, SignalResult, TradePosition,
     TradeRecord, TradingState,

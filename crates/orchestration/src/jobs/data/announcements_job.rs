@@ -91,9 +91,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // 需要OKX API配置
+    #[ignore] // 需要OKX API配置和完整环境
     async fn test_sync_announcements() {
-        dotenv::dotenv().ok();
+        // 注意：此测试需要完整的应用环境初始化
+        // 包括OKX API配置、数据库连接等
         let result = sync_latest_announcements().await;
         assert!(result.is_ok());
     }

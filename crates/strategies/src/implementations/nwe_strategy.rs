@@ -1,20 +1,22 @@
 // ⭐ 指标组合已移至 indicators 包
 // pub mod indicator_combine;  // 已废弃
 
+use core::time;
+
 use rust_quant_indicators::KlineHammerIndicator;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
 
-use rust_quant_indicators::momentum::RsiIndicator;
 use rust_quant_indicators::trend::ema_indicator::EmaIndicator;
 use rust_quant_indicators::trend::nwe_indicator::NweIndicator;
 use rust_quant_indicators::volatility::ATRStopLoos;
 use rust_quant_indicators::volume::VolumeRatioIndicator;
 use ta::Next;
 // ⭐ 使用新的 indicators::nwe 模块
+use crate::framework::backtest::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
 use crate::strategy_common::{BackTestResult, BasicRiskStrategyConfig, SignalResult};
-use crate::{time_util, CandleItem};
+use crate::{CandleItem, risk, time_util};
 use rust_quant_indicators::trend::nwe::{
     NweIndicatorCombine, NweIndicatorConfig, NweIndicatorValues,
 };
@@ -24,9 +26,27 @@ use rust_quant_indicators::trend::nwe::{
 pub struct NweStrategyConfig {
     pub period: String,
 
-    pub rsi_period: usize,
-    pub rsi_overbought: f64,
-    pub rsi_oversold: f64,
+    #[serde(default = "default_stc_fast_length")]
+    pub stc_fast_length: usize,
+    #[serde(
+        default = "default_stc_slow_length",
+        alias = "stc_period",
+        alias = "rsi_period"
+    )]
+    pub stc_slow_length: usize,
+    #[serde(default = "default_stc_cycle_length")]
+    pub stc_cycle_length: usize,
+    #[serde(default = "default_stc_d1_length")]
+    pub stc_d1_length: usize,
+    #[serde(default = "default_stc_d2_length")]
+    pub stc_d2_length: usize,
+
+    /// STC 超买阈值（兼容 rsi_overbought 字段）
+    #[serde(default = "default_stc_overbought", alias = "stc_overbought")]
+    pub stc_overbought: f64,
+    /// STC 超卖阈值（兼容 rsi_oversold 字段）
+    #[serde(default = "default_stc_oversold", alias = "stc_oversold")]
+    pub stc_oversold: f64,
 
     pub atr_period: usize,
     pub atr_multiplier: f64,
@@ -37,15 +57,63 @@ pub struct NweStrategyConfig {
     pub volume_ratio: f64,
     pub min_k_line_num: usize,
     pub k_line_hammer_shadow_ratio: f64,
+
+    /// 是否启用动态波动率调整 (根据近期波动率自动调整带宽和止损)
+    /// 波动率敏感度 (0.0 ~ 2.0)，建议 0.5。值越大，通道随波动率变化越剧烈
+    #[serde(default = "default_use_dynamic_adjustment")]
+    pub use_dynamic_adjustment: bool,
+    /// 波动率敏感度 (0.0 ~ 2.0)，建议 0.5。值越大，通道随波动率变化越剧烈
+    #[serde(default = "default_sensitivity")]
+    pub volatility_sensitivity: f64,
+}
+
+fn default_sensitivity() -> f64 {
+    2.0
+}
+
+fn default_use_dynamic_adjustment() -> bool {
+    false
+}
+
+fn default_stc_fast_length() -> usize {
+    23
+}
+
+fn default_stc_slow_length() -> usize {
+    50
+}
+
+fn default_stc_cycle_length() -> usize {
+    10
+}
+
+fn default_stc_d1_length() -> usize {
+    3
+}
+
+fn default_stc_d2_length() -> usize {
+    3
+}
+
+fn default_stc_overbought() -> f64 {
+    75.0
+}
+
+fn default_stc_oversold() -> f64 {
+    25.0
 }
 
 impl Default for NweStrategyConfig {
     fn default() -> Self {
         Self {
             period: "5m".to_string(),
-            rsi_period: 14,
-            rsi_overbought: 75.0,
-            rsi_oversold: 25.0,
+            stc_fast_length: default_stc_fast_length(),
+            stc_slow_length: default_stc_slow_length(),
+            stc_cycle_length: default_stc_cycle_length(),
+            stc_d1_length: default_stc_d1_length(),
+            stc_d2_length: default_stc_d2_length(),
+            stc_overbought: default_stc_overbought(),
+            stc_oversold: default_stc_oversold(),
 
             atr_period: 14,
             atr_multiplier: 0.5,
@@ -58,6 +126,9 @@ impl Default for NweStrategyConfig {
 
             min_k_line_num: 500,
             k_line_hammer_shadow_ratio: 0.45,
+
+            use_dynamic_adjustment: false,
+            volatility_sensitivity: default_sensitivity(),
         }
     }
 }
@@ -76,7 +147,11 @@ impl NweStrategy {
     pub fn new(config: NweStrategyConfig) -> Self {
         // ⭐ 转换为 NweIndicatorConfig
         let indicator_config = NweIndicatorConfig {
-            rsi_period: config.rsi_period,
+            stc_fast_length: config.stc_fast_length,
+            stc_slow_length: config.stc_slow_length,
+            stc_cycle_length: config.stc_cycle_length,
+            stc_d1_length: config.stc_d1_length,
+            stc_d2_length: config.stc_d2_length,
             volume_bar_num: config.volume_bar_num,
             nwe_period: config.nwe_period,
             nwe_multi: config.nwe_multi,
@@ -89,7 +164,7 @@ impl NweStrategy {
         Self {
             combine_indicator: NweIndicatorCombine::new(&indicator_config),
             // Vegas EMA 默认使用 12,144,169，其余周期按 Vegas 典型配置占位
-            vegas_ema_indicator: Some(EmaIndicator::new(12, 144, 169, 576, 676, 2304, 2704)),
+            vegas_ema_indicator: Some(EmaIndicator::new(169, 576, 676, 2304, 2704, 2704, 2704)),
             config,
         }
     }
@@ -99,6 +174,66 @@ impl NweStrategy {
 
     pub fn get_min_data_length(&self) -> usize {
         self.config.min_k_line_num.max(self.config.nwe_period)
+    }
+
+    /// 根据市场波动率动态调整 ATR 和 NWE 带宽
+    fn calculate_dynamic_values(
+        &self,
+        candles: &[CandleItem],
+        base_values: &NweSignalValues,
+    ) -> NweSignalValues {
+        if !self.config.use_dynamic_adjustment {
+            return *base_values;
+        }
+
+        let len = candles.len();
+        // 取过去 20 根 K 线计算近期波动率
+        let lookback = 20;
+        if len < lookback {
+            return *base_values;
+        }
+
+        let current_candle = candles.last().unwrap();
+        let current_price = current_candle.c;
+
+        // 1. 计算过去 N 根 K 线的平均波动范围 (High - Low)
+        let sum_range: f64 = candles[len - lookback..].iter().map(|c| c.h - c.l).sum();
+        let avg_range = sum_range / lookback as f64;
+
+        // 2. 计算波动率比率 (当前 ATR / 历史平均 Range)
+        // 如果当前 ATR 远大于历史平均 Range，说明波动率放大
+        let volatility_ratio = if avg_range > 0.0 {
+            base_values.atr_value / avg_range
+        } else {
+            1.0
+        };
+
+        // 3. 计算缩放系数 (Scalar)
+        // 限制在 0.6 ~ 2.0 之间，防止极端变形
+        // Scalar > 1.0 代表波动率放大，需要放宽通道
+        let scalar = (1.0 + (volatility_ratio - 1.0) * self.config.volatility_sensitivity)
+            .clamp(0.6, 2.0);
+
+        // 4. 调整 NWE 带宽
+        let nwe_middle = (base_values.nwe_upper + base_values.nwe_lower) / 2.0;
+        let original_half_width = (base_values.nwe_upper - base_values.nwe_lower) / 2.0;
+        let new_half_width = original_half_width * scalar;
+
+        // 5. 调整 ATR 值和止损位
+        let adjusted_atr = base_values.atr_value * scalar;
+        // 重新计算止损位 (假设基于当前收盘价和调整后的 ATR)
+        let new_long_stop = current_price - (adjusted_atr * self.config.atr_multiplier);
+        let new_short_stop = current_price + (adjusted_atr * self.config.atr_multiplier);
+
+        NweSignalValues {
+            stc_value: base_values.stc_value,
+            volume_ratio: base_values.volume_ratio,
+            atr_value: adjusted_atr,
+            atr_short_stop: new_short_stop,
+            atr_long_stop: new_long_stop,
+            nwe_upper: nwe_middle + new_half_width,
+            nwe_lower: nwe_middle - new_half_width,
+        }
     }
 
     /**
@@ -119,7 +254,12 @@ impl NweStrategy {
 
         let is_hanging_man = kline_hammer_indicator_output.is_hanging_man;
         let is_hammer = kline_hammer_indicator_output.is_hammer;
-        //检查rsi
+        // 使用 STC 值进行过滤
+        let (is_stc_buy, is_stc_sell) = Self::check_stc(
+            values.stc_value,
+            self.config.stc_oversold,
+            self.config.stc_overbought,
+        );
 
         //如果上一根k线路的的收盘价格小于nwe的lower,且最新k线的收盘价大于nwe,且不超过中轨，且没有长的上影线，则进行买入
         if previous_candle.c < values.nwe_lower &&
@@ -127,9 +267,10 @@ impl NweStrategy {
             previous_candle.c < previous_candle.o
             && current_candle.c > values.nwe_lower
             && current_candle.c < middle
-        && !is_hanging_man
-        //rsi超卖区间
-        && values.rsi_value < self.config.rsi_oversold
+        // && !is_hanging_man
+        // STC 处于超卖区间
+        // && values.rsi_value < self.config.stc_oversold
+        && is_stc_buy
         {
             is_buy = true;
         } else if previous_candle.c > values.nwe_upper
@@ -137,8 +278,9 @@ impl NweStrategy {
             && previous_candle.c > previous_candle.o
             && current_candle.c < values.nwe_upper
             && current_candle.c > middle
-        && !is_hammer
-        && values.rsi_value > self.config.rsi_overbought
+        // && !is_hammer
+        // STC 处于超买区间
+        && is_stc_sell
         {
             //如果上一根k线路的的收盘价格大于nwe的upper,且最新k线的收盘价小于nwe，且不超过中轨，则进行卖出
             is_sell = true;
@@ -222,6 +364,16 @@ impl NweStrategy {
         (is_buy, is_sell)
     }
 
+    fn check_stc(stc: f64, stc_oversold: f64, stc_overbought: f64) -> (bool, bool) {
+        let mut is_buy = false;
+        let mut is_sell = false;
+        if stc < stc_oversold {
+            is_buy = true;
+        } else if stc > stc_overbought {
+            is_sell = true;
+        }
+        (is_buy, is_sell)
+    }
     pub fn get_indicator_combine(&self) -> NweIndicatorCombine {
         self.combine_indicator.clone()
     }
@@ -232,28 +384,38 @@ impl NweStrategy {
     pub fn get_trade_signal(
         &mut self,
         candles: &[CandleItem],
-        values: &NweSignalValues,
+        raw_values: &NweSignalValues,
+        risk_config: &BasicRiskStrategyConfig,
     ) -> SignalResult {
+        // ⭐ 动态调整：根据波动率重新计算阈值
+        let values = self.calculate_dynamic_values(candles, raw_values);
+
         let mut signal_result = SignalResult {
             should_buy: false,
             should_sell: false,
             open_price: 0.0,
             best_open_price: None,
-            best_take_profit_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
             ts: 0,
             single_value: None,
             single_result: None,
             signal_kline_stop_loss_price: None,
             move_stop_open_price_when_touch_price: None,
+            counter_trend_pullback_take_profit_price: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
         };
-        let rsi = values.rsi_value;
+        let stc_value = values.stc_value;
         let volume_ratio = values.volume_ratio;
         let atr = values.atr_value;
         let upper = values.nwe_upper;
         let lower = values.nwe_lower;
 
         //检查nwe是否超卖或超买
-        let (is_nwe_buy, is_nwe_sell) = self.check_nwe(candles, values);
+        let (is_nwe_buy, is_nwe_sell) = self.check_nwe(candles, &values);
         if is_nwe_buy || is_nwe_sell {
             // //检查rsi是否超卖或超买
             // let (is_rsi_buy, is_rsi_sell) =
@@ -265,23 +427,38 @@ impl NweStrategy {
             if is_nwe_buy {
                 signal_result.should_buy = true;
                 //设置止损价格,信号k止损
-                // signal_result.signal_kline_stop_loss_price = Some(candles.last().unwrap().l);
-                signal_result.signal_kline_stop_loss_price = Some(values.atr_long_stop);
+                signal_result.atr_stop_loss_price = Some(values.atr_long_stop);
                 //设置移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
                 signal_result.move_stop_open_price_when_touch_price =
                     Some(lower + (upper - lower) * 0.5);
             }
             if is_nwe_sell {
                 signal_result.should_sell = true;
-                signal_result.signal_kline_stop_loss_price = Some(values.atr_short_stop);
+                signal_result.atr_stop_loss_price = Some(values.atr_short_stop);
                 //设置移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
                 signal_result.move_stop_open_price_when_touch_price =
                     Some(upper - (upper - lower) * 0.5);
                 //设置止损价格,信号k止损
                 // signal_result.signal_kline_stop_loss_price = Some(candles.last().unwrap().h);
             }
-            //设置止损价格,atr止损
+            if let Some(is_counter_trend_pullback_take_profit) = risk_config.is_counter_trend_pullback_take_profit {
+                //设置止损价格,atr止损
+                if  is_counter_trend_pullback_take_profit{
+                    signal_result.counter_trend_pullback_take_profit_price = calculate_dynamic_pullback_threshold(data_items)
+                }
+            }
         }
+
+        //计算是否k线的高点
+        // let is_kline_high_point = Self::check_kline_high_point(candles, values);
+        // if is_kline_high_point {
+        //     signal_result.long_signal_take_profit_price = Some(candles.last().unwrap().c);
+        // }
+        // //计算是否k线的低点
+        // let is_kline_low_point = Self::check_kline_low_point(candles, values);
+        // if is_kline_low_point {
+        //     signal_result.short_signal_take_profit_price = Some(candles.last().unwrap().c);
+        // }
 
         // 使用 Vegas EMA 排列进行方向过滤
         self.apply_vegas_trend_filter(candles, &mut signal_result);
@@ -300,57 +477,31 @@ impl NweStrategy {
         signal_result
     }
 
+    fn check_kline_high_point(candles: &[CandleItem], values: &NweSignalValues) -> bool {
+        let last_candle = candles.last().unwrap();
+        let is_kline_high_point = last_candle.h > values.nwe_upper;
+        is_kline_high_point
+    }
+
+    fn check_kline_low_point(candles: &[CandleItem], values: &NweSignalValues) -> bool {
+        let last_candle = candles.last().unwrap();
+        let is_kline_low_point = last_candle.l < values.nwe_lower;
+        is_kline_low_point
+    }
+
     /// 运行回测：仅使用 RSI、Volume、NWE、ATR 指标（复用可插拔的 indicator_combine）
     pub fn run_test(
         &mut self,
         candles: &Vec<CandleItem>,
         risk: BasicRiskStrategyConfig,
     ) -> BackTestResult {
-        use crate::strategy_common::{self, run_back_test_generic};
-
-        // ⭐ 使用新的 indicators::nwe::NweIndicatorCombine
-        let indicator_config = NweIndicatorConfig {
-            rsi_period: self.config.rsi_period,
-            volume_bar_num: self.config.volume_bar_num,
-            nwe_period: self.config.nwe_period,
-            nwe_multi: self.config.nwe_multi,
-            atr_period: self.config.atr_period,
-            atr_multiplier: self.config.atr_multiplier,
-            k_line_hammer_shadow_ratio: self.config.k_line_hammer_shadow_ratio,
-            min_k_line_num: self.config.min_k_line_num,
-        };
-        let mut ic = NweIndicatorCombine::new(&indicator_config);
-
-        let min_len = self.get_min_data_length();
-
-        run_back_test_generic(
-            |candles, values: &mut NweSignalValues| self.get_trade_signal(candles, values),
-            candles,
-            risk,
-            min_len,
-            &mut ic,
-            |ic, data_item| {
-                // ⭐ 使用新的 next() 方法，返回 NweIndicatorValues
-                let indicator_values = ic.next(data_item);
-
-                // 转换为策略层的 NweSignalValues
-                NweSignalValues {
-                    rsi_value: indicator_values.rsi_value,
-                    volume_ratio: indicator_values.volume_ratio,
-                    atr_value: indicator_values.atr_value,
-                    atr_short_stop: indicator_values.atr_short_stop,
-                    atr_long_stop: indicator_values.atr_long_stop,
-                    nwe_upper: indicator_values.nwe_upper,
-                    nwe_lower: indicator_values.nwe_lower,
-                }
-            },
-        )
+        run_indicator_strategy_backtest(self, candles, risk)
     }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct NweSignalValues {
-    pub rsi_value: f64,
+    pub stc_value: f64,
 
     pub volume_ratio: f64,
 
@@ -360,4 +511,47 @@ pub struct NweSignalValues {
 
     pub nwe_upper: f64,
     pub nwe_lower: f64,
+}
+
+impl From<NweIndicatorValues> for NweSignalValues {
+    fn from(value: NweIndicatorValues) -> Self {
+        Self {
+            stc_value: value.stc_value,
+            volume_ratio: value.volume_ratio,
+            atr_value: value.atr_value,
+            atr_short_stop: value.atr_short_stop,
+            atr_long_stop: value.atr_long_stop,
+            nwe_upper: value.nwe_upper,
+            nwe_lower: value.nwe_lower,
+        }
+    }
+}
+
+impl IndicatorStrategyBacktest for NweStrategy {
+    type IndicatorCombine = NweIndicatorCombine;
+    type IndicatorValues = NweSignalValues;
+
+    fn min_data_length(&self) -> usize {
+        self.get_min_data_length()
+    }
+
+    fn init_indicator_combine(&self) -> Self::IndicatorCombine {
+        self.combine_indicator.clone()
+    }
+
+    fn build_indicator_values(
+        indicator_combine: &mut Self::IndicatorCombine,
+        candle: &CandleItem,
+    ) -> Self::IndicatorValues {
+        indicator_combine.next(candle).into()
+    }
+
+    fn generate_signal(
+        &mut self,
+        candles: &[CandleItem],
+        values: &mut Self::IndicatorValues,
+        risk_config: &BasicRiskStrategyConfig,
+    ) -> SignalResult {
+        self.get_trade_signal(candles, values,risk_config)
+    }
 }

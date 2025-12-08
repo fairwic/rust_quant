@@ -9,7 +9,7 @@ pub mod order;
 pub mod position;
 pub mod strategy_config;
 
-pub use backtest::{BacktestDetail, BacktestLog, BacktestWinRateStats};
+pub use backtest::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats};
 pub use candle::Candle;
 pub use exchange_api_config::{ExchangeApiConfig, StrategyApiConfig};
 pub use order::{Order, OrderError};

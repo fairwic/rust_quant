@@ -2,13 +2,14 @@
 //!
 //! 负责回测日志和详情的保存，协调 BacktestLogRepository
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use serde_json::json;
 use std::env;
 use tracing::info;
 
+use rust_quant_analytics::calculate_performance_metrics;
 use rust_quant_common::CandleItem;
-use rust_quant_domain::entities::{BacktestDetail, BacktestLog};
+use rust_quant_domain::entities::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics};
 use rust_quant_domain::traits::BacktestLogRepository;
 use rust_quant_domain::StrategyType;
 use rust_quant_strategies::strategy_common::{BackTestResult, BasicRiskStrategyConfig, TradeRecord};
@@ -83,16 +84,31 @@ impl BacktestService {
 
         let back_test_id = self.repository.insert_log(&log_entity).await?;
 
-        // 如果启用了随机测试，则不保存详情
+        // 如果启用了随机测试，则不保存详情和绩效指标
         if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true"
             && !back_test_result.trade_records.is_empty()
         {
+            // 保存回测详情
             self.save_backtest_details(
                 back_test_id,
                 StrategyType::from_str(strategy_name).unwrap_or(StrategyType::Vegas),
                 inst_id,
                 time,
-                back_test_result.trade_records,
+                back_test_result.trade_records.clone(),
+            )
+            .await?;
+
+            // 计算并更新绩效指标
+            let start_time = mysql_candles.first().map(|c| c.ts).unwrap_or_default();
+            let end_time = mysql_candles.last().map(|c| c.ts).unwrap_or_default();
+
+            self.update_performance_metrics(
+                back_test_id,
+                100.0, // 初始资金
+                back_test_result.funds,
+                &back_test_result.trade_records,
+                start_time,
+                end_time,
             )
             .await?;
         }
@@ -163,6 +179,63 @@ impl BacktestService {
             back_test_id, count
         );
         Ok(count)
+    }
+
+    /// 计算并更新绩效指标
+    ///
+    /// # 参数
+    /// * `back_test_id` - 回测日志 ID
+    /// * `initial_fund` - 期初资金
+    /// * `final_fund` - 期末资金
+    /// * `trade_records` - 交易记录列表
+    /// * `start_time` - 回测开始时间 (毫秒时间戳)
+    /// * `end_time` - 回测结束时间 (毫秒时间戳)
+    ///
+    /// # 返回
+    /// * 更新的行数
+    pub async fn update_performance_metrics(
+        &self,
+        back_test_id: i64,
+        initial_fund: f64,
+        final_fund: f64,
+        trade_records: &[TradeRecord],
+        start_time: i64,
+        end_time: i64,
+    ) -> Result<u64> {
+        // 计算绩效指标
+        let metrics = calculate_performance_metrics(
+            initial_fund,
+            final_fund,
+            trade_records,
+            start_time,
+            end_time,
+        );
+
+        // 转换为领域模型
+        let domain_metrics = BacktestPerformanceMetrics {
+            sharpe_ratio: metrics.sharpe_ratio,
+            annual_return: metrics.annual_return,
+            total_return: metrics.total_return,
+            max_drawdown: metrics.max_drawdown,
+            volatility: metrics.volatility,
+        };
+
+        // 更新数据库
+        let affected = self
+            .repository
+            .update_performance_metrics(back_test_id, &domain_metrics)
+            .await?;
+
+        info!(
+            "绩效指标更新成功: back_test_id={}, sharpe={:.4}, annual_return={:.2}%, max_drawdown={:.2}%, volatility={:.2}%",
+            back_test_id,
+            metrics.sharpe_ratio,
+            metrics.annual_return * 100.0,
+            metrics.max_drawdown * 100.0,
+            metrics.volatility * 100.0
+        );
+
+        Ok(affected)
     }
 }
 

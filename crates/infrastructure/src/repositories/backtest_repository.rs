@@ -2,7 +2,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::{mysql::MySqlQueryResult, MySql, Pool, QueryBuilder};
 
-use rust_quant_domain::entities::{BacktestDetail, BacktestLog, BacktestWinRateStats};
+use rust_quant_domain::entities::{
+    BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats,
+};
 use rust_quant_domain::traits::BacktestLogRepository;
 
 /// 基于 SQLx 的回测日志仓储实现
@@ -128,6 +130,34 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         .bind(stats.four_bar_after_win_rate)
         .bind(stats.five_bar_after_win_rate)
         .bind(stats.ten_bar_after_win_rate)
+        .bind(backtest_id)
+        .execute(self.pool())
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn update_performance_metrics(
+        &self,
+        backtest_id: i64,
+        metrics: &BacktestPerformanceMetrics,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE back_test_log SET
+                sharpe_ratio = ?,
+                annual_return = ?,
+                total_return = ?,
+                max_drawdown = ?,
+                volatility = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(metrics.sharpe_ratio)
+        .bind(metrics.annual_return)
+        .bind(metrics.total_return)
+        .bind(metrics.max_drawdown)
+        .bind(metrics.volatility)
         .bind(backtest_id)
         .execute(self.pool())
         .await?;

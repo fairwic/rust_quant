@@ -108,9 +108,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_signal_risk_no_signal() {
+        use rust_quant_domain::enums::{StrategyType, Timeframe};
+        use serde_json::json;
+        
         let service = RiskManagementService::new();
         let signal = SignalResult::empty();
-        let config = StrategyConfig::default();
+        let config = StrategyConfig::new(
+            1,
+            StrategyType::Vegas,
+            "BTC-USDT".to_string(),
+            Timeframe::H1,
+            json!({}),
+            json!({}),
+        );
 
         let result = service
             .check_signal_risk("BTC-USDT", &signal, &config)

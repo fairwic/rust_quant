@@ -2,6 +2,8 @@
 
 // 基础任务（兼容层）
 pub mod basic;
+pub mod websocket_handler;
+
 pub use crate::backtest::{executor as backtest_executor, runner as backtest_runner};
 pub use crate::infra::{
     job_param_generator, progress_manager, strategy_config, signal_logger,
