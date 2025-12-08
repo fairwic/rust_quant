@@ -2,12 +2,10 @@
 .env
 .vcs.xml
 .idea
-.vscode
 .cargo
 /log_files
 /okx
 .augment
-.cursor
 .specify
 /specs
 
