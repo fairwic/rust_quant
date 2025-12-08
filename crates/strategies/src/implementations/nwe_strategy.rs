@@ -16,7 +16,8 @@ use ta::Next;
 // ⭐ 使用新的 indicators::nwe 模块
 use crate::framework::backtest::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
 use crate::strategy_common::{BackTestResult, BasicRiskStrategyConfig, SignalResult};
-use crate::{CandleItem, risk, time_util};
+use crate::{risk, time_util, CandleItem};
+use rust_quant_indicators::trend::counter_trend;
 use rust_quant_indicators::trend::nwe::{
     NweIndicatorCombine, NweIndicatorConfig, NweIndicatorValues,
 };
@@ -211,8 +212,8 @@ impl NweStrategy {
         // 3. 计算缩放系数 (Scalar)
         // 限制在 0.6 ~ 2.0 之间，防止极端变形
         // Scalar > 1.0 代表波动率放大，需要放宽通道
-        let scalar = (1.0 + (volatility_ratio - 1.0) * self.config.volatility_sensitivity)
-            .clamp(0.6, 2.0);
+        let scalar =
+            (1.0 + (volatility_ratio - 1.0) * self.config.volatility_sensitivity).clamp(0.6, 2.0);
 
         // 4. 调整 NWE 带宽
         let nwe_middle = (base_values.nwe_upper + base_values.nwe_lower) / 2.0;
@@ -296,18 +297,18 @@ impl NweStrategy {
         &mut self,
         candles: &[CandleItem],
         signal_result: &mut SignalResult,
-    ) {
+    ) -> Option<f64> {
         let ema_indicator = match self.vegas_ema_indicator.as_mut() {
             Some(indicator) => indicator,
             None => {
-                return;
+                return None;
             }
         };
 
         let last_candle = match candles.last() {
             Some(candle) => candle,
             None => {
-                return;
+                return None;
             }
         };
 
@@ -322,7 +323,7 @@ impl NweStrategy {
 
         if !is_bull_trend && !is_bear_trend {
             // 其他情况：不启用 Vegas 过滤
-            return;
+            return Some(ema12);
         }
 
         // 只在已有 NWE 信号的基础上做方向过滤
@@ -335,6 +336,7 @@ impl NweStrategy {
                 signal_result.should_buy = false;
             }
         }
+        Some(ema12)
     }
 
     /**
@@ -441,12 +443,12 @@ impl NweStrategy {
                 //设置止损价格,信号k止损
                 // signal_result.signal_kline_stop_loss_price = Some(candles.last().unwrap().h);
             }
-            if let Some(is_counter_trend_pullback_take_profit) = risk_config.is_counter_trend_pullback_take_profit {
-                //设置止损价格,atr止损
-                if  is_counter_trend_pullback_take_profit{
-                    signal_result.counter_trend_pullback_take_profit_price = calculate_dynamic_pullback_threshold(data_items)
-                }
-            }
+            // if let Some(is_counter_trend_pullback_take_profit) = risk_config.is_counter_trend_pullback_take_profit {
+            //     //设置止损价格,atr止损
+            //     if  is_counter_trend_pullback_take_profit{
+            //         signal_result.counter_trend_pullback_take_profit_price = calculate_dynamic_pullback_threshold(data_items)
+            //     }
+            // }
         }
 
         //计算是否k线的高点
@@ -461,7 +463,21 @@ impl NweStrategy {
         // }
 
         // 使用 Vegas EMA 排列进行方向过滤
-        self.apply_vegas_trend_filter(candles, &mut signal_result);
+        let ema1_value = self.apply_vegas_trend_filter(candles, &mut signal_result);
+
+        if risk_config
+            .is_counter_trend_pullback_take_profit
+            .unwrap_or(false)
+        {
+            if let Some(ema1) = ema1_value {
+                counter_trend::calculate_counter_trend_pullback_take_profit_price(
+                    candles,
+                    &mut signal_result,
+                    &[],
+                    ema1,
+                );
+            }
+        }
 
         signal_result.ts = candles.last().unwrap().ts;
         signal_result.open_price = candles.last().unwrap().c;
@@ -552,6 +568,6 @@ impl IndicatorStrategyBacktest for NweStrategy {
         values: &mut Self::IndicatorValues,
         risk_config: &BasicRiskStrategyConfig,
     ) -> SignalResult {
-        self.get_trade_signal(candles, values,risk_config)
+        self.get_trade_signal(candles, values, risk_config)
     }
 }

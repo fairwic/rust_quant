@@ -16,6 +16,7 @@ use super::indicator_combine::IndicatorCombine;
 use super::signal::*;
 use super::trend;
 use super::utils;
+use crate::trend::counter_trend;
 
 /// Vegas综合策略配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -322,11 +323,11 @@ impl VegasStrategy {
                 .is_counter_trend_pullback_take_profit
                 .unwrap_or(false)
             {
-                self.calculate_counter_trend_pullback_take_profit_price(
+                counter_trend::calculate_counter_trend_pullback_take_profit_price(
                     &data_items,
                     &mut signal_result,
                     &conditions,
-                    &vegas_indicator_signal_values.ema_values,
+                    vegas_indicator_signal_values.ema_values.ema1_value,
                 );
             }
             // TODO: 这些字段原本用于调试，现在类型不匹配，暂时注释
