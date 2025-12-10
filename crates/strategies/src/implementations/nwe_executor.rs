@@ -8,8 +8,8 @@ use std::collections::VecDeque;
 use tracing::{debug, info};
 
 use super::executor_common::{
-    convert_candles_to_items, get_latest_candle, get_recent_candles, is_new_timestamp,
-    update_candle_queue, validate_candles,
+    convert_candles_to_items, extract_risk_config, get_latest_candle, get_recent_candles,
+    is_new_timestamp, update_candle_queue, validate_candles,
 };
 use crate::cache::arc_nwe_indicator_values::{get_nwe_hash_key, get_nwe_indicator_manager};
 use crate::framework::strategy_trait::{StrategyDataResult, StrategyExecutor};
@@ -197,8 +197,9 @@ impl StrategyExecutor for NweStrategyExecutor {
         let nwe_config: NweStrategyConfig =
             serde_json::from_value(strategy_config.parameters.clone())
                 .map_err(|e| anyhow!("解析 NweStrategyConfig 失败: {}", e))?;
+        let risk_config = extract_risk_config(strategy_config)?;
         let mut nwe_strategy = NweStrategy::new(nwe_config);
-        let signal_result = nwe_strategy.get_trade_signal(&candle_vec, &nwe_signal_values);
+        let signal_result = nwe_strategy.get_trade_signal(&candle_vec, &nwe_signal_values, &risk_config);
 
         info!("✅ Nwe策略信号生成完成: key={}", key);
 
