@@ -84,10 +84,27 @@ impl NweIndicator {
             return (0.0, 0.0);
         }
 
+        // MAE = 平均绝对误差 × 倍数（对齐 PineScript: ta.sma(abs(src - out), 499) * mult）
         let mae = (self.abs_err_sum / self.mae_period as f64) * self.mult;
         let upper = out + mae;
         let lower = out - mae;
         (upper, lower)
+    }
+
+    /// 获取当前状态的调试信息
+    pub fn debug_info(&self) -> NweDebugInfo {
+        NweDebugInfo {
+            bandwidth_h: self.bandwidth_h,
+            mult: self.mult,
+            window: self.window,
+            mae_period: self.mae_period,
+            values_len: self.values.len(),
+            abs_errs_len: self.abs_errs.len(),
+            abs_err_sum: self.abs_err_sum,
+            first_weight: self.weights.first().copied().unwrap_or(0.0),
+            last_weight: self.weights.last().copied().unwrap_or(0.0),
+            weights_sum: self.weights.iter().sum(),
+        }
     }
 
     fn kernel_mean(&self, available: usize) -> (f64, bool) {
@@ -99,9 +116,10 @@ impl NweIndicator {
         let mut sum = 0.0;
         let mut sumw = 0.0;
 
-        // Iterate lag j from 0..available-1
+        // Iterate lag j from 0..available
+        // 对齐 PineScript: src[j] × weights[j], j=0 是最新
         for j in 0..available {
-            let price = self.values[available - 1 - j];
+            let price = self.values[available - 1 - j]; // newest first
             let w = self.weights[j];
             sum += price * w;
             sumw += w;
@@ -118,6 +136,21 @@ impl NweIndicator {
         self.abs_errs.clear();
         self.abs_err_sum = 0.0;
     }
+}
+
+/// NWE 指标调试信息
+#[derive(Debug, Clone)]
+pub struct NweDebugInfo {
+    pub bandwidth_h: f64,
+    pub mult: f64,
+    pub window: usize,
+    pub mae_period: usize,
+    pub values_len: usize,
+    pub abs_errs_len: usize,
+    pub abs_err_sum: f64,
+    pub first_weight: f64,
+    pub last_weight: f64,
+    pub weights_sum: f64,
 }
 
 #[cfg(test)]

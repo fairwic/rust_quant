@@ -198,7 +198,8 @@ impl StrategyExecutor for NweStrategyExecutor {
             serde_json::from_value(strategy_config.parameters.clone())
                 .map_err(|e| anyhow!("解析 NweStrategyConfig 失败: {}", e))?;
         let mut nwe_strategy = NweStrategy::new(nwe_config);
-        let signal_result = nwe_strategy.get_trade_signal(&candle_vec, &nwe_signal_values);
+        let signal_result = nwe_strategy.get_trade_signal(&candle_vec, &nwe_signal_values,&serde_json::from_value(strategy_config.risk_config.clone())
+                .map_err(|e| anyhow!("解析风险配置失败: {}", e))?);
 
         info!("✅ Nwe策略信号生成完成: key={}", key);
 

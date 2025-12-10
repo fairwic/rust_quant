@@ -543,14 +543,14 @@ impl VegasStrategy {
                         )
                         .unwrap()
                     );
-                    println!(
-                        "bolling_bands.is_long_signal:{}",
-                        bolling_bands.is_long_signal
-                    );
-                    println!(
-                        "bolling_bands.is_short_signal:{}",
-                        bolling_bands.is_short_signal
-                    );
+                    // println!(
+                    //     "bolling_bands.is_long_signal:{}",
+                    //     bolling_bands.is_long_signal
+                    // );
+                    // println!(
+                    //     "bolling_bands.is_short_signal:{}",
+                    //     bolling_bands.is_short_signal
+                    // );
                     bolling_bands.is_force_filter_signal = true;
                     bolling_bands.is_long_signal = false;
                     bolling_bands.is_short_signal = false;

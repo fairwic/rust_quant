@@ -214,6 +214,7 @@ impl NweStrategy {
         // Scalar > 1.0 代表波动率放大，需要放宽通道
         let scalar =
             (1.0 + (volatility_ratio - 1.0) * self.config.volatility_sensitivity).clamp(0.6, 2.0);
+        // let scalar = 1.0;
 
         // 4. 调整 NWE 带宽
         let nwe_middle = (base_values.nwe_upper + base_values.nwe_lower) / 2.0;
@@ -226,14 +227,18 @@ impl NweStrategy {
         let new_long_stop = current_price - (adjusted_atr * self.config.atr_multiplier);
         let new_short_stop = current_price + (adjusted_atr * self.config.atr_multiplier);
 
+        // 6. 使用动态调整后的带宽重新计算上下轨
+        let adjusted_nwe_upper = nwe_middle + new_half_width;
+        let adjusted_nwe_lower = nwe_middle - new_half_width;
+
         NweSignalValues {
             stc_value: base_values.stc_value,
             volume_ratio: base_values.volume_ratio,
             atr_value: adjusted_atr,
             atr_short_stop: new_short_stop,
             atr_long_stop: new_long_stop,
-            nwe_upper: nwe_middle + new_half_width,
-            nwe_lower: nwe_middle - new_half_width,
+            nwe_upper: adjusted_nwe_upper,
+            nwe_lower: adjusted_nwe_lower,
         }
     }
 
@@ -261,6 +266,18 @@ impl NweStrategy {
             self.config.stc_oversold,
             self.config.stc_overbought,
         );
+
+        // if candles.last().unwrap().ts == 1765143000000 {
+        //     println!("last_candle.c: {}", candles.last().unwrap().c);
+        //     println!("previous_candle.c: {}", previous_candle.c);
+        //     println!("values: {:#?}", values);
+        //     println!("current_candle.c: {}", current_candle.c);
+        //     println!("middle: {}", middle);
+        //     println!("is_hanging_man: {}", is_hanging_man);
+        //     println!("is_hammer: {}", is_hammer);
+        //     println!("is_stc_buy: {}", is_stc_buy);
+        //     println!("is_stc_sell: {}", is_stc_sell);
+        // }
 
         //如果上一根k线路的的收盘价格小于nwe的lower,且最新k线的收盘价大于nwe,且不超过中轨，且没有长的上影线，则进行买入
         if previous_candle.c < values.nwe_lower &&

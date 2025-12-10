@@ -17,10 +17,10 @@ pub fn check_risk_config(
     //     println!("signal: {:#?}", signal);
     //     println!("trading_state: {:#?}", trading_state.trade_position);
     // }
-    if signal.ts == 1763395200000 || signal.ts == 1763481600000 {
-        println!("signal: {:#?}", signal);
-        println!("trading_state: {:#?}", trading_state.trade_position);
-    }
+    // if signal.ts == 1763395200000 || signal.ts == 1763481600000 {
+    //     println!("signal: {:#?}", signal);
+    //     println!("trading_state: {:#?}", trading_state.trade_position);
+    // }
     let current_open_price = signal.open_price;
     let current_low_price = candle.l;
     let current_high_price = candle.h;

@@ -543,7 +543,7 @@ fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig
         atr_multipliers: vec![0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0],
         volume_bar_num: vec![3],
         volume_ratios: vec![0.8],
-        nwe_periods: vec![4, 6, 8, 10, 12],
+        nwe_periods: vec![4, 6, 8, 10, 20, 30, 50, 100],
         nwe_multi: vec![1.8, 2.0, 2.2, 2.6, 3.0],
         batch_size,
         max_loss_percent: vec![0.03, 0.02, 0.01],
