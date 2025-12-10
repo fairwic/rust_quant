@@ -154,6 +154,9 @@ impl StrategyExecutor for VegasStrategyExecutor {
                 counter_trend_pullback_take_profit_price: None,
                 is_ema_short_trend: None,
                 is_ema_long_trend: None,
+                atr_take_profit_level_1: None,
+                atr_take_profit_level_2: None,
+                atr_take_profit_level_3: None,
             });
         }
 
@@ -214,6 +217,9 @@ impl StrategyExecutor for VegasStrategyExecutor {
             counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
         };
 
         // 11. 返回信号（下单逻辑由services层统一处理）

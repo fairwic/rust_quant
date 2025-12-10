@@ -66,6 +66,18 @@ pub struct NweStrategyConfig {
     /// 波动率敏感度 (0.0 ~ 2.0)，建议 0.5。值越大，通道随波动率变化越剧烈
     #[serde(default = "default_sensitivity")]
     pub volatility_sensitivity: f64,
+
+    /// 是否启用放宽入场条件（移除前一根K线方向限制）
+    #[serde(default = "default_relax_entry")]
+    pub relax_entry_conditions: bool,
+
+    /// 动态STC阈值调整系数 (0.5 ~ 2.0)，1.0表示不调整
+    #[serde(default = "default_dynamic_stc_adjustment")]
+    pub dynamic_stc_adjustment: f64,
+
+    /// 动态ATR倍数调整系数 (0.5 ~ 3.0)，1.0表示不调整
+    #[serde(default = "default_dynamic_atr_adjustment")]
+    pub dynamic_atr_adjustment: f64,
 }
 
 fn default_sensitivity() -> f64 {
@@ -76,6 +88,17 @@ fn default_use_dynamic_adjustment() -> bool {
     false
 }
 
+fn default_relax_entry() -> bool {
+    true
+}
+
+fn default_dynamic_stc_adjustment() -> f64 {
+    1.0
+}
+
+fn default_dynamic_atr_adjustment() -> f64 {
+    1.0
+}
 fn default_stc_fast_length() -> usize {
     23
 }
@@ -130,6 +153,9 @@ impl Default for NweStrategyConfig {
 
             use_dynamic_adjustment: false,
             volatility_sensitivity: default_sensitivity(),
+            relax_entry_conditions: default_relax_entry(),
+            dynamic_stc_adjustment: default_dynamic_stc_adjustment(),
+            dynamic_atr_adjustment: default_dynamic_atr_adjustment(),
         }
     }
 }
@@ -177,32 +203,153 @@ impl NweStrategy {
         self.config.min_k_line_num.max(self.config.nwe_period)
     }
 
+    /// 根据市场趋势动态调整STC超卖阈值
+    /// 在强势市场中，降低超卖阈值（更容易触发做多）
+    /// 在弱势市场中，提高超卖阈值（更谨慎做多）
+    fn calculate_dynamic_stc_oversold(&self, candles: &[CandleItem]) -> f64 {
+        if self.config.dynamic_stc_adjustment == 1.0 {
+            return self.config.stc_oversold;
+        }
+
+        let len = candles.len();
+        if len < 20 {
+            return self.config.stc_oversold;
+        }
+
+        // 计算近期价格趋势
+        let recent_candles = &candles[len - 20..];
+        let first_price = recent_candles.first().map(|c| c.c).unwrap_or(0.0);
+        let last_price = recent_candles.last().map(|c| c.c).unwrap_or(0.0);
+
+        if first_price == 0.0 {
+            return self.config.stc_oversold;
+        }
+
+        let trend_ratio = (last_price - first_price) / first_price;
+
+        // 上涨趋势：降低超卖阈值（更容易触发）
+        // 下跌趋势：提高超卖阈值（更谨慎）
+        let adjustment = trend_ratio * 10.0 * self.config.dynamic_stc_adjustment;
+        let adjusted = self.config.stc_oversold - adjustment;
+
+        // 限制范围在 15-35 之间
+        adjusted.clamp(15.0, 35.0)
+    }
+
+    /// 根据市场趋势动态调整STC超买阈值
+    fn calculate_dynamic_stc_overbought(&self, candles: &[CandleItem]) -> f64 {
+        if self.config.dynamic_stc_adjustment == 1.0 {
+            return self.config.stc_overbought;
+        }
+
+        let len = candles.len();
+        if len < 20 {
+            return self.config.stc_overbought;
+        }
+
+        let recent_candles = &candles[len - 20..];
+        let first_price = recent_candles.first().map(|c| c.c).unwrap_or(0.0);
+        let last_price = recent_candles.last().map(|c| c.c).unwrap_or(0.0);
+
+        if first_price == 0.0 {
+            return self.config.stc_overbought;
+        }
+
+        let trend_ratio = (last_price - first_price) / first_price;
+
+        // 下跌趋势：降低超买阈值（更容易触发做空）
+        // 上涨趋势：提高超买阈值（更谨慎做空）
+        let adjustment = trend_ratio * 10.0 * self.config.dynamic_stc_adjustment;
+        let adjusted = self.config.stc_overbought + adjustment;
+
+        // 限制范围在 65-85 之间
+        adjusted.clamp(65.0, 85.0)
+    }
+
+    /// 根据市场波动率动态调整ATR倍数
+    fn calculate_dynamic_atr_multiplier(&self, candles: &[CandleItem]) -> f64 {
+        if self.config.dynamic_atr_adjustment == 1.0 {
+            return self.config.atr_multiplier;
+        }
+
+        let len = candles.len();
+        let lookback = 20;
+        if len < lookback {
+            return self.config.atr_multiplier;
+        }
+
+        // 计算近期波动率
+        let recent_candles = &candles[len - lookback..];
+        let avg_range: f64 = recent_candles
+            .iter()
+            .map(|c| (c.h - c.l) / c.c)
+            .sum::<f64>()
+            / lookback as f64;
+
+        // 计算历史波动率（更长周期）
+        let historical_lookback = 100.min(len);
+        let historical_candles = &candles[len - historical_lookback..];
+        let historical_avg_range: f64 = historical_candles
+            .iter()
+            .map(|c| (c.h - c.l) / c.c)
+            .sum::<f64>()
+            / historical_lookback as f64;
+
+        if historical_avg_range == 0.0 {
+            return self.config.atr_multiplier;
+        }
+
+        // 波动率比率：当前波动率 / 历史波动率
+        let volatility_ratio = avg_range / historical_avg_range;
+
+        // 波动率高时，增加ATR倍数（放宽止损）
+        // 波动率低时，降低ATR倍数（收紧止损）
+        let adjusted_multiplier = self.config.atr_multiplier
+            * (1.0 + (volatility_ratio - 1.0) * self.config.dynamic_atr_adjustment);
+
+        // 限制范围在 0.3-3.0 之间
+        adjusted_multiplier.clamp(0.3, 3.0)
+    }
+
     /// 根据市场波动率动态调整 ATR 和 NWE 带宽
     fn calculate_dynamic_values(
         &self,
         candles: &[CandleItem],
         base_values: &NweSignalValues,
     ) -> NweSignalValues {
+        let current_candle = candles.last().unwrap();
+        let current_price = current_candle.c;
+
+        // 计算动态ATR倍数
+        let dynamic_atr_multiplier = self.calculate_dynamic_atr_multiplier(candles);
+
+        // 如果不启用动态调整，只应用动态ATR倍数
         if !self.config.use_dynamic_adjustment {
-            return *base_values;
+            let new_long_stop = current_price - (base_values.atr_value * dynamic_atr_multiplier);
+            let new_short_stop = current_price + (base_values.atr_value * dynamic_atr_multiplier);
+
+            return NweSignalValues {
+                stc_value: base_values.stc_value,
+                volume_ratio: base_values.volume_ratio,
+                atr_value: base_values.atr_value,
+                atr_short_stop: new_short_stop,
+                atr_long_stop: new_long_stop,
+                nwe_upper: base_values.nwe_upper,
+                nwe_lower: base_values.nwe_lower,
+            };
         }
 
         let len = candles.len();
-        // 取过去 20 根 K 线计算近期波动率
         let lookback = 20;
         if len < lookback {
             return *base_values;
         }
-
-        let current_candle = candles.last().unwrap();
-        let current_price = current_candle.c;
 
         // 1. 计算过去 N 根 K 线的平均波动范围 (High - Low)
         let sum_range: f64 = candles[len - lookback..].iter().map(|c| c.h - c.l).sum();
         let avg_range = sum_range / lookback as f64;
 
         // 2. 计算波动率比率 (当前 ATR / 历史平均 Range)
-        // 如果当前 ATR 远大于历史平均 Range，说明波动率放大
         let volatility_ratio = if avg_range > 0.0 {
             base_values.atr_value / avg_range
         } else {
@@ -211,7 +358,6 @@ impl NweStrategy {
 
         // 3. 计算缩放系数 (Scalar)
         // 限制在 0.6 ~ 2.0 之间，防止极端变形
-        // Scalar > 1.0 代表波动率放大，需要放宽通道
         let scalar =
             (1.0 + (volatility_ratio - 1.0) * self.config.volatility_sensitivity).clamp(0.6, 2.0);
         // let scalar = 1.0;
@@ -221,11 +367,14 @@ impl NweStrategy {
         let original_half_width = (base_values.nwe_upper - base_values.nwe_lower) / 2.0;
         let new_half_width = original_half_width * scalar;
 
-        // 5. 调整 ATR 值和止损位
+        // 5. 调整 ATR 值和止损位（同时应用波动率调整和动态ATR倍数）
         let adjusted_atr = base_values.atr_value * scalar;
-        // 重新计算止损位 (假设基于当前收盘价和调整后的 ATR)
-        let new_long_stop = current_price - (adjusted_atr * self.config.atr_multiplier);
-        let new_short_stop = current_price + (adjusted_atr * self.config.atr_multiplier);
+        let new_long_stop = current_price - (adjusted_atr * dynamic_atr_multiplier);
+        let new_short_stop = current_price + (adjusted_atr * dynamic_atr_multiplier);
+
+        // 6. 使用动态调整后的带宽重新计算上下轨
+        let adjusted_nwe_upper = nwe_middle + new_half_width;
+        let adjusted_nwe_lower = nwe_middle - new_half_width;
 
         // 6. 使用动态调整后的带宽重新计算上下轨
         let adjusted_nwe_upper = nwe_middle + new_half_width;
@@ -242,9 +391,11 @@ impl NweStrategy {
         }
     }
 
-    /**
-     *
-     */
+    /// 检查NWE通道突破信号
+    ///
+    /// 优化后的入场条件：
+    /// 1. 如果启用relax_entry_conditions，移除前一根K线方向限制
+    /// 2. 使用动态调整的STC阈值
     pub fn check_nwe(&self, candles: &[CandleItem], values: &NweSignalValues) -> (bool, bool) {
         let mut is_buy = false;
         let mut is_sell = false;
@@ -252,6 +403,8 @@ impl NweStrategy {
         let middle = (values.nwe_upper + values.nwe_lower) / 2.0;
         let previous_candle = &candles[candles.len() - 2];
         let current_candle = candles.last().unwrap();
+
+        // K线形态过滤（可选）
         let kline_hammer_indicator_output = KlineHammerIndicator::new(
             self.config.k_line_hammer_shadow_ratio,
             self.config.k_line_hammer_shadow_ratio,
@@ -260,49 +413,49 @@ impl NweStrategy {
 
         let is_hanging_man = kline_hammer_indicator_output.is_hanging_man;
         let is_hammer = kline_hammer_indicator_output.is_hammer;
-        // 使用 STC 值进行过滤
-        let (is_stc_buy, is_stc_sell) = Self::check_stc(
-            values.stc_value,
-            self.config.stc_oversold,
-            self.config.stc_overbought,
-        );
 
-        // if candles.last().unwrap().ts == 1765143000000 {
-        //     println!("last_candle.c: {}", candles.last().unwrap().c);
-        //     println!("previous_candle.c: {}", previous_candle.c);
-        //     println!("values: {:#?}", values);
-        //     println!("current_candle.c: {}", current_candle.c);
-        //     println!("middle: {}", middle);
-        //     println!("is_hanging_man: {}", is_hanging_man);
-        //     println!("is_hammer: {}", is_hammer);
-        //     println!("is_stc_buy: {}", is_stc_buy);
-        //     println!("is_stc_sell: {}", is_stc_sell);
-        // }
+        // 使用动态调整的STC阈值
+        let adjusted_oversold = self.calculate_dynamic_stc_oversold(candles);
+        let adjusted_overbought = self.calculate_dynamic_stc_overbought(candles);
 
-        //如果上一根k线路的的收盘价格小于nwe的lower,且最新k线的收盘价大于nwe,且不超过中轨，且没有长的上影线，则进行买入
-        if previous_candle.c < values.nwe_lower &&
-        //前一根k线是下跌的
-            previous_candle.c < previous_candle.o
+        let (is_stc_buy, is_stc_sell) =
+            Self::check_stc(values.stc_value, adjusted_oversold, adjusted_overbought);
+
+        // 做多信号判断
+        //todo 如果出现最低价格低于下轨道且收盘价大于也进行买入。
+        if previous_candle.c < values.nwe_lower
             && current_candle.c > values.nwe_lower
             && current_candle.c < middle
-        // && !is_hanging_man
-        // STC 处于超卖区间
-        // && values.rsi_value < self.config.stc_oversold
-        && is_stc_buy
+            && is_stc_buy
         {
-            is_buy = true;
-        } else if previous_candle.c > values.nwe_upper
-        //前一根k线是上涨的
-            && previous_candle.c > previous_candle.o
+            // 如果不启用放宽条件，需要额外检查前一根K线是下跌的
+            if !self.config.relax_entry_conditions {
+                if previous_candle.c < previous_candle.o {
+                    is_buy = true;
+                }
+            } else {
+                // 放宽条件：不要求前一根K线方向
+                is_buy = true;
+            }
+        }
+
+        // 做空信号判断
+        if previous_candle.c > values.nwe_upper
             && current_candle.c < values.nwe_upper
             && current_candle.c > middle
-        // && !is_hammer
-        // STC 处于超买区间
-        && is_stc_sell
+            && is_stc_sell
         {
-            //如果上一根k线路的的收盘价格大于nwe的upper,且最新k线的收盘价小于nwe，且不超过中轨，则进行卖出
-            is_sell = true;
+            // 如果不启用放宽条件，需要额外检查前一根K线是上涨的
+            if !self.config.relax_entry_conditions {
+                if previous_candle.c > previous_candle.o {
+                    is_sell = true;
+                }
+            } else {
+                // 放宽条件：不要求前一根K线方向
+                is_sell = true;
+            }
         }
+
         (is_buy, is_sell)
     }
 
@@ -398,8 +551,13 @@ impl NweStrategy {
     }
 
     /// 生成信号：
-    /// - close 下穿 lower → 做多（结合 RSI/Volume/ATR 过滤）
-    /// - close 上穿 upper → 做空（结合 RSI/Volume/ATR 过滤）
+    /// - close 下穿 lower → 做多（结合 STC/Volume/ATR 过滤）
+    /// - close 上穿 upper → 做空（结合 STC/Volume/ATR 过滤）
+    ///
+    /// 优化点：
+    /// 1. 动态调整止损和通道宽度
+    /// 2. 多级止盈机制
+    /// 3. 改进的移动止损逻辑
     pub fn get_trade_signal(
         &mut self,
         candles: &[CandleItem],
@@ -426,46 +584,99 @@ impl NweStrategy {
             counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
         };
-        let stc_value = values.stc_value;
-        let volume_ratio = values.volume_ratio;
+
+        let current_price = candles.last().unwrap().c;
+        let o = candles.last().unwrap().o;
         let atr = values.atr_value;
         let upper = values.nwe_upper;
         let lower = values.nwe_lower;
 
         //检查nwe是否超卖或超买
         let (is_nwe_buy, is_nwe_sell) = self.check_nwe(candles, &values);
+
         if is_nwe_buy || is_nwe_sell {
-            // //检查rsi是否超卖或超买
-            // let (is_rsi_buy, is_rsi_sell) =
-            //     Self::check_rsi(rsi, self.config.rsi_oversold, self.config.rsi_overbought);
-            // //检查成交量比率是否超卖或超买
-            // let (is_volume_ratio_buy, is_volume_ratio_sell) =
-            //     Self::check_volume_ratio(volume_ratio, self.config.volume_ratio);
-            //如果上一根k线路的的收盘价格小于nwe的lower,且最新k线的收盘价大于nwe，且rsi超卖区间，则进行买入
             if is_nwe_buy {
                 signal_result.should_buy = true;
-                //设置止损价格,信号k止损
+
+                // 基于ATR的止损
                 signal_result.atr_stop_loss_price = Some(values.atr_long_stop);
-                //设置移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
-                signal_result.move_stop_open_price_when_touch_price =
-                    Some(lower + (upper - lower) * 0.5);
+
+                let stop_distance = current_price - values.atr_long_stop;
+
+                // 三级止盈系统
+                if let Some(atr_ratio) = risk_config.atr_take_profit_ratio {
+                    if atr_ratio > 0.0 {
+                        // 第一级：1.5倍ATR
+                        let level_1 = current_price + stop_distance * 1.5;
+                        signal_result.atr_take_profit_level_1 = Some(level_1);
+
+                        // 第二级：2倍ATR
+                        let level_2 = current_price + stop_distance * 2.0;
+                        signal_result.atr_take_profit_level_2 = Some(level_2);
+
+                        // 第三级：5倍ATR
+                        let level_3 = current_price + stop_distance * 5.0;
+                        signal_result.atr_take_profit_level_3 = Some(level_3);
+                    }
+                } else {
+                    // 传统单级止盈
+                    if let Some(atr_ratio) = risk_config.atr_take_profit_ratio {
+                        if atr_ratio > 0.0 {
+                            let atr_take_profit = current_price + stop_distance * atr_ratio;
+                            signal_result.atr_take_profit_ratio_price = Some(atr_take_profit);
+                        }
+                    }
+
+                    // 设置移动止损触发价
+                    signal_result.move_stop_open_price_when_touch_price =
+                        Some(current_price + stop_distance * 1.0);
+                }
+                if let Some(is_used_signal_k_line_stop_loss) =
+                    risk_config.is_used_signal_k_line_stop_loss
+                {
+                    if is_used_signal_k_line_stop_loss {
+                        signal_result.signal_kline_stop_loss_price = Some(o);
+                    }
+                }
             }
+
             if is_nwe_sell {
                 signal_result.should_sell = true;
+
+                // 基于ATR的止损
                 signal_result.atr_stop_loss_price = Some(values.atr_short_stop);
-                //设置移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
-                signal_result.move_stop_open_price_when_touch_price =
-                    Some(upper - (upper - lower) * 0.5);
-                //设置止损价格,信号k止损
-                // signal_result.signal_kline_stop_loss_price = Some(candles.last().unwrap().h);
+
+                let stop_distance = values.atr_short_stop - current_price;
+
+                // 三级止盈系统
+                if let Some(atr_ratio) = risk_config.atr_take_profit_ratio {
+                    if atr_ratio > 0.0 {
+                        let level_1 = current_price - stop_distance * 1.5;
+                        signal_result.atr_take_profit_level_1 = Some(level_1);
+
+                        let level_2 = current_price - stop_distance * 2.0;
+                        signal_result.atr_take_profit_level_2 = Some(level_2);
+
+                        let level_3 = current_price - stop_distance * 5.0;
+                        signal_result.atr_take_profit_level_3 = Some(level_3);
+                    }
+                } else {
+                    // 传统单级止盈
+                    if let Some(atr_ratio) = risk_config.atr_take_profit_ratio {
+                        if atr_ratio > 0.0 {
+                            let atr_take_profit = current_price - stop_distance * atr_ratio;
+                            signal_result.atr_take_profit_ratio_price = Some(atr_take_profit);
+                        }
+                    }
+
+                    signal_result.move_stop_open_price_when_touch_price =
+                        Some(current_price - stop_distance * 1.0);
+                }
             }
-            // if let Some(is_counter_trend_pullback_take_profit) = risk_config.is_counter_trend_pullback_take_profit {
-            //     //设置止损价格,atr止损
-            //     if  is_counter_trend_pullback_take_profit{
-            //         signal_result.counter_trend_pullback_take_profit_price = calculate_dynamic_pullback_threshold(data_items)
-            //     }
-            // }
         }
 
         //计算是否k线的高点

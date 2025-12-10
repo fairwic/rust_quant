@@ -96,6 +96,14 @@ pub struct SignalResult {
 
     /// 是否均线多头排列（用于判断是否逆势做空）
     pub is_ema_long_trend: Option<bool>,
+
+    /// 三级止盈价格（基于ATR倍数）
+    /// 第一级：1.5倍ATR，触达后移动止损到开仓价
+    pub atr_take_profit_level_1: Option<f64>,
+    /// 第二级：2倍ATR，触达后移动止损到第一级止盈价
+    pub atr_take_profit_level_2: Option<f64>,
+    /// 第三级：5倍ATR，完全平仓
+    pub atr_take_profit_level_3: Option<f64>,
 }
 
 impl Default for SignalResult {
@@ -117,6 +125,9 @@ impl Default for SignalResult {
             counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
         }
     }
 }
@@ -176,6 +187,14 @@ pub struct TradePosition {
     /// 做多时：连续下跌K线起点最高价的回调位置
     /// 做空时：连续上涨K线起点最低价的回调位置
     pub counter_trend_pullback_take_profit_price: Option<f64>,
+
+    /// 三级止盈价格
+    pub atr_take_profit_level_1: Option<f64>,
+    pub atr_take_profit_level_2: Option<f64>,
+    pub atr_take_profit_level_3: Option<f64>,
+
+    /// 已触达的止盈级别（用于跟踪止盈进度）
+    pub reached_take_profit_level: u8,
 }
 
 /// 交易状态

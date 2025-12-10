@@ -539,15 +539,17 @@ fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig
         stc_d1_length: vec![3],
         stc_d2_length: vec![3],
 
-        atr_periods: vec![6, 7, 8, 9, 10, 11, 12],
-        atr_multipliers: vec![0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0],
+        atr_periods: vec![6, 12, 24, 36, 48, 60],
+        atr_multipliers: vec![2.0, 2.2, 2.5, 2.6, 2.7, 2.8, 3.0],
+
+        nwe_periods: vec![8],
+        nwe_multi: vec![1.6],
+
         volume_bar_num: vec![3],
         volume_ratios: vec![0.8],
-        nwe_periods: vec![4, 6, 8, 10, 20, 30, 50, 100],
-        nwe_multi: vec![1.8, 2.0, 2.2, 2.6, 3.0],
         batch_size,
-        max_loss_percent: vec![0.03, 0.02, 0.01],
-        take_profit_ratios: vec![0.5, 1.0, 1.5, 1.8, 2.0, 2.5, 3.0, 3.5],
+        max_loss_percent: vec![0.02, 0.01],
+        take_profit_ratios: vec![1.8],
         is_move_stop_loss: vec![false],
         k_line_hammer_shadow_ratios: vec![0.65],
         is_used_signal_k_line_stop_loss: vec![false, true],
