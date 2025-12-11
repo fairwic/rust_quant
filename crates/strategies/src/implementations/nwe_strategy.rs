@@ -3,6 +3,7 @@
 
 use core::time;
 
+use rust_quant_domain::entities::candle;
 use rust_quant_indicators::KlineHammerIndicator;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -81,7 +82,7 @@ pub struct NweStrategyConfig {
 }
 
 fn default_sensitivity() -> f64 {
-    2.0
+    0.5
 }
 
 fn default_use_dynamic_adjustment() -> bool {
@@ -266,46 +267,65 @@ impl NweStrategy {
         adjusted.clamp(65.0, 85.0)
     }
 
-    /// 根据市场波动率动态调整ATR倍数
+    /// Parkinson 波动率：利用高低点信息，比收盘价波动率更高效
+    /// σ = sqrt(1/(4*n*ln(2)) * Σ(ln(H/L))²)
+    fn calculate_parkinson_volatility(candles: &[CandleItem]) -> f64 {
+        let n = candles.len() as f64;
+        if n < 2.0 {
+            return 0.0;
+        }
+
+        let sum_sq: f64 = candles
+            .iter()
+            .filter(|c| c.l > 0.0)
+            .map(|c| {
+                let ln_hl = (c.h / c.l).ln();
+                ln_hl * ln_hl
+            })
+            .sum();
+
+        let coefficient = 1.0 / (4.0 * n * 2.0_f64.ln());
+        (coefficient * sum_sq).sqrt()
+    }
+
+    /// 根据市场波动率动态调整ATR倍数（使用 Parkinson 波动率）
+    /// 5分钟级别优化：近期4小时（48根），历史24小时（288根）
     fn calculate_dynamic_atr_multiplier(&self, candles: &[CandleItem]) -> f64 {
         if self.config.dynamic_atr_adjustment == 1.0 {
             return self.config.atr_multiplier;
         }
 
         let len = candles.len();
-        let lookback = 20;
-        if len < lookback {
+        // 5分钟级别：近期4小时（48根），历史24小时（288根）
+        let short_lookback = 48;
+        let long_lookback = 288.min(len);
+
+        if len < short_lookback {
             return self.config.atr_multiplier;
         }
 
-        // 计算近期波动率
-        let recent_candles = &candles[len - lookback..];
-        let avg_range: f64 = recent_candles
-            .iter()
-            .map(|c| (c.h - c.l) / c.c)
-            .sum::<f64>()
-            / lookback as f64;
+        // 使用 Parkinson 波动率计算近期波动率
+        let recent_candles = &candles[len - short_lookback..];
+        let recent_vol = Self::calculate_parkinson_volatility(recent_candles);
 
-        // 计算历史波动率（更长周期）
-        let historical_lookback = 100.min(len);
-        let historical_candles = &candles[len - historical_lookback..];
-        let historical_avg_range: f64 = historical_candles
-            .iter()
-            .map(|c| (c.h - c.l) / c.c)
-            .sum::<f64>()
-            / historical_lookback as f64;
+        // 计算历史波动率
+        let historical_candles = &candles[len - long_lookback..];
+        let historical_vol = Self::calculate_parkinson_volatility(historical_candles);
 
-        if historical_avg_range == 0.0 {
+        if historical_vol == 0.0 {
             return self.config.atr_multiplier;
         }
 
-        // 波动率比率：当前波动率 / 历史波动率
-        let volatility_ratio = avg_range / historical_avg_range;
+        // 波动率比率
+        let volatility_ratio = recent_vol / historical_vol;
+
+        // 使用 tanh 平滑因子避免剧烈跳变
+        let smoothed_ratio =
+            1.0 + (volatility_ratio - 1.0).tanh() * self.config.dynamic_atr_adjustment;
 
         // 波动率高时，增加ATR倍数（放宽止损）
         // 波动率低时，降低ATR倍数（收紧止损）
-        let adjusted_multiplier = self.config.atr_multiplier
-            * (1.0 + (volatility_ratio - 1.0) * self.config.dynamic_atr_adjustment);
+        let adjusted_multiplier = self.config.atr_multiplier * smoothed_ratio;
 
         // 限制范围在 0.3-3.0 之间
         adjusted_multiplier.clamp(0.3, 3.0)
@@ -422,38 +442,20 @@ impl NweStrategy {
             Self::check_stc(values.stc_value, adjusted_oversold, adjusted_overbought);
 
         // 做多信号判断
-        //todo 如果出现最低价格低于下轨道且收盘价大于也进行买入。
-        if previous_candle.c < values.nwe_lower
-            && current_candle.c > values.nwe_lower
+        if (previous_candle.c < values.nwe_lower || current_candle.l < values.nwe_lower)
+            && current_candle.c >= values.nwe_lower
             && current_candle.c < middle
-            && is_stc_buy
         {
-            // 如果不启用放宽条件，需要额外检查前一根K线是下跌的
-            if !self.config.relax_entry_conditions {
-                if previous_candle.c < previous_candle.o {
-                    is_buy = true;
-                }
-            } else {
-                // 放宽条件：不要求前一根K线方向
-                is_buy = true;
-            }
+            // 放宽条件：不要求前一根K线方向
+            is_buy = true;
         }
 
         // 做空信号判断
-        if previous_candle.c > values.nwe_upper
+        if (previous_candle.c > values.nwe_upper || current_candle.h > values.nwe_upper)
             && current_candle.c < values.nwe_upper
             && current_candle.c > middle
-            && is_stc_sell
         {
-            // 如果不启用放宽条件，需要额外检查前一根K线是上涨的
-            if !self.config.relax_entry_conditions {
-                if previous_candle.c > previous_candle.o {
-                    is_sell = true;
-                }
-            } else {
-                // 放宽条件：不要求前一根K线方向
-                is_sell = true;
-            }
+            is_sell = true;
         }
 
         (is_buy, is_sell)
@@ -591,6 +593,7 @@ impl NweStrategy {
 
         let current_price = candles.last().unwrap().c;
         let o = candles.last().unwrap().o;
+        let l = candles.last().unwrap().l;
         let atr = values.atr_value;
         let upper = values.nwe_upper;
         let lower = values.nwe_lower;

@@ -11,6 +11,6 @@ pub use exchange_trait::{
 };
 pub use repository_trait::{
     BacktestLogRepository, CandleRepository, ExchangeApiConfigRepository, OrderRepository,
-    PositionRepository, StrategyApiConfigRepository, StrategyConfigRepository,
+    PositionRepository, StrategyApiConfigRepository, StrategyConfigRepository, SwapOrderRepository,
 };
 pub use strategy_trait::{BacktestResult, Backtestable, Strategy};

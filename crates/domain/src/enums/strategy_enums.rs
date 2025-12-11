@@ -72,6 +72,12 @@ pub enum StrategyStatus {
     Error,
 }
 
+impl Default for StrategyStatus {
+    fn default() -> Self {
+        StrategyStatus::Running
+    }
+}
+
 impl StrategyStatus {
     pub fn as_str(&self) -> &'static str {
         match self {

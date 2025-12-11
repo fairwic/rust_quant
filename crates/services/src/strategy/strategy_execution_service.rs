@@ -2,9 +2,13 @@
 //!
 //! 协调策略分析、风控检查、订单创建的完整业务流程
 
+use std::sync::Arc;
+
 use anyhow::{anyhow, Result};
 use tracing::{error, info, warn};
 
+use rust_quant_domain::entities::SwapOrder;
+use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_strategies::strategy_common::SignalResult;
@@ -19,16 +23,20 @@ use rust_quant_strategies::strategy_common::SignalResult;
 ///
 /// 依赖：
 /// - StrategyRegistry: 获取策略实现
+/// - SwapOrderRepository: 订单持久化
 /// - TradingService: 创建订单（待实现）
 /// - RiskService: 风控检查（待实现）
 pub struct StrategyExecutionService {
-    // 策略注册表暂时不存储，每次使用时通过get_strategy_registry()获取
+    /// 合约订单仓储（依赖注入）
+    swap_order_repository: Arc<dyn SwapOrderRepository>,
 }
 
 impl StrategyExecutionService {
-    /// 创建新的策略执行服务
-    pub fn new() -> Self {
-        Self {}
+    /// 创建新的策略执行服务（依赖注入）
+    pub fn new(swap_order_repository: Arc<dyn SwapOrderRepository>) -> Self {
+        Self {
+            swap_order_repository,
+        }
     }
 
     /// 执行策略分析和交易流程
@@ -97,16 +105,16 @@ impl StrategyExecutionService {
         // 6. 异步记录信号日志（不阻塞下单）
         self.save_signal_log_async(inst_id, period, &signal, config);
 
-        // 7. 解析风险配置（参考：executor_common.rs:128）
+        // 7. 解析风险配置
         let risk_config: rust_quant_domain::BasicRiskConfig =
             serde_json::from_value(config.risk_config.clone())
                 .map_err(|e| anyhow!("解析风险配置失败: {}", e))?;
 
         info!("风险配置: risk_config:{:#?}", risk_config);
 
-        // 8. 执行下单（参考：executor_common.rs:131-152）
+        // 8. 执行下单
         if let Err(e) = self
-            .execute_order_internal(inst_id, period, &signal, &risk_config, config.id)
+            .execute_order_internal(inst_id, period, &signal, &risk_config, config.id, config.strategy_type.as_str())
             .await
         {
             error!("❌ {:?} 策略下单失败: {}", config.strategy_type, e);
@@ -218,6 +226,7 @@ impl StrategyExecutionService {
         signal: &SignalResult,
         risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
+        strategy_type: &str,
     ) -> Result<()> {
         info!(
             "准备下单: inst_id={}, period={}, config_id={}",
@@ -234,21 +243,6 @@ impl StrategyExecutionService {
         };
 
         info!("交易方向: side={}, pos_side={}", side, pos_side);
-
-        // 2. 幂等性检查（参考：swap_order_service.rs:210-233）
-        // TODO: 实现OrderRepository后取消注释
-        // use rust_quant_infrastructure::repositories::OrderRepository;
-        // let order_repo = OrderRepository::new();
-        // let existing = order_repo
-        //     .find_pending_order(inst_id, period, side, pos_side)
-        //     .await?;
-        // if !existing.is_empty() {
-        //     warn!(
-        //         "已存在相同订单，跳过下单: inst_id={}, period={}, side={}, pos_side={}",
-        //         inst_id, period, side, pos_side
-        //     );
-        //     return Ok(());
-        // }
 
         // 3. 获取API配置（从Redis缓存或数据库）
         use crate::exchange::create_exchange_api_service;
@@ -363,17 +357,53 @@ impl StrategyExecutionService {
                 anyhow!("下单失败: {}", e)
             })?;
 
+        // 获取交易所返回的订单ID
+        let out_order_id = order_result
+            .first()
+            .map(|o| o.ord_id.clone())
+            .unwrap_or_default();
+
         info!(
-            "✅ 下单成功: inst_id={}, order_id={:?}, size={}",
-            inst_id,
-            order_result.first().map(|o| &o.ord_id),
-            order_size
+            "✅ 下单成功: inst_id={}, order_id={}, size={}",
+            inst_id, out_order_id, order_size
         );
 
-        // TODO: 保存订单记录到数据库（需要OrderRepository）
-        // use rust_quant_infrastructure::repositories::OrderRepository;
-        // let order_repo = OrderRepository::new();
-        // order_repo.save(&order).await?;
+        // 8. 保存订单记录到数据库
+        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        let order_detail = serde_json::json!({
+            "entry_price": entry_price,
+            "stop_loss": final_stop_loss,
+            "signal": {
+                "should_buy": signal.should_buy,
+                "should_sell": signal.should_sell,
+                "atr_stop_loss_price": signal.atr_stop_loss_price,
+                "atr_take_profit_ratio_price": signal.atr_take_profit_ratio_price,
+            }
+        });
+
+        let swap_order = SwapOrder::from_signal(
+            config_id as i32,
+            inst_id,
+            period,
+            strategy_type,
+            side,
+            pos_side,
+            &order_size,
+            &in_order_id,
+            &out_order_id,
+            "okx",
+            &order_detail.to_string(),
+        );
+
+        match self.swap_order_repository.save(&swap_order).await {
+            Ok(order_id) => {
+                info!("✅ 订单记录已保存: db_id={}, in_order_id={}", order_id, in_order_id);
+            }
+            Err(e) => {
+                // 订单已提交到交易所,保存失败只记录警告,不返回错误
+                error!("⚠️ 保存订单记录失败(订单已提交): {}", e);
+            }
+        }
 
         Ok(())
     }
@@ -447,11 +477,8 @@ impl StrategyExecutionService {
     }
 }
 
-impl Default for StrategyExecutionService {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// 注意：由于 StrategyExecutionService 需要依赖注入，不再实现 Default
+// 调用方需要通过 new() 方法并提供 SwapOrderRepository 实例
 
 // ============================================================================
 // 辅助函数
@@ -467,10 +494,61 @@ impl Default for StrategyExecutionService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+
+    /// Mock SwapOrderRepository 用于测试
+    struct MockSwapOrderRepository;
+
+    #[async_trait]
+    impl SwapOrderRepository for MockSwapOrderRepository {
+        async fn find_by_id(&self, _id: i32) -> Result<Option<SwapOrder>> {
+            Ok(None)
+        }
+        async fn find_by_in_order_id(&self, _in_order_id: &str) -> Result<Option<SwapOrder>> {
+            Ok(None)
+        }
+        async fn find_by_out_order_id(&self, _out_order_id: &str) -> Result<Option<SwapOrder>> {
+            Ok(None)
+        }
+        async fn find_by_inst_id(
+            &self,
+            _inst_id: &str,
+            _limit: Option<i32>,
+        ) -> Result<Vec<SwapOrder>> {
+            Ok(vec![])
+        }
+        async fn find_pending_order(
+            &self,
+            _inst_id: &str,
+            _period: &str,
+            _side: &str,
+            _pos_side: &str,
+        ) -> Result<Vec<SwapOrder>> {
+            Ok(vec![])
+        }
+        async fn save(&self, _order: &SwapOrder) -> Result<i32> {
+            Ok(1)
+        }
+        async fn update(&self, _order: &SwapOrder) -> Result<()> {
+            Ok(())
+        }
+        async fn find_by_strategy_and_time(
+            &self,
+            _strategy_id: i32,
+            _start_time: i64,
+            _end_time: i64,
+        ) -> Result<Vec<SwapOrder>> {
+            Ok(vec![])
+        }
+    }
+
+    fn create_test_service() -> StrategyExecutionService {
+        StrategyExecutionService::new(Arc::new(MockSwapOrderRepository))
+    }
 
     #[test]
     fn test_service_creation() {
-        let service = StrategyExecutionService::new();
+        let _service = create_test_service();
         // 验证服务可以创建
     }
 
@@ -478,7 +556,7 @@ mod tests {
     fn test_min_execution_interval() {
         use rust_quant_domain::Timeframe;
 
-        let service = StrategyExecutionService::new();
+        let service = create_test_service();
 
         assert_eq!(service.get_min_execution_interval(&Timeframe::M1), 60);
         assert_eq!(service.get_min_execution_interval(&Timeframe::M5), 300);
@@ -491,7 +569,7 @@ mod tests {
         use chrono::Utc;
         use rust_quant_domain::{StrategyStatus, StrategyType, Timeframe};
 
-        let service = StrategyExecutionService::new();
+        let service = create_test_service();
 
         let config = StrategyConfig {
             id: 1,

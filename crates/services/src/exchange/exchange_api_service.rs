@@ -68,7 +68,6 @@ impl ExchangeApiService {
                     warn!("缓存API配置到Redis失败: {}", e);
                 });
         }
-
         info!(
             "从数据库获取API配置: strategy_config_id={}, count={}",
             strategy_config_id,
@@ -91,7 +90,6 @@ impl ExchangeApiService {
                 strategy_config_id
             ));
         }
-
         // 按优先级排序后返回第一个
         Ok(configs[0].clone())
     }

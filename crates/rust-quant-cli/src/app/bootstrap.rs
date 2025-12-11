@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use rust_quant_core::config::env_is_true;
 use rust_quant_core::database::get_db_pool;
 use rust_quant_domain::StrategyType;
-use rust_quant_infrastructure::repositories::SqlxStrategyConfigRepository;
+use rust_quant_infrastructure::repositories::{SqlxStrategyConfigRepository, SqlxSwapOrderRepository};
 use tracing::{error, info, warn};
 
 use rust_quant_market::streams;
@@ -146,6 +146,10 @@ async fn load_backtest_targets_from_db() -> Result<Vec<(String, String)>> {
 /// - 创建策略触发回调函数
 /// - 注入到 CandleService 中
 /// - K线确认时自动触发策略执行
+///
+/// # 注意
+/// WebSocket 模式下策略预热由 `start_strategies_from_db` 统一处理
+/// 确保 `IS_RUN_REAL_STRATEGY=true` 时先完成预热再启动 WebSocket
 async fn run_websocket(inst_ids: &[String], periods: &[String]) {
     if inst_ids.is_empty() || periods.is_empty() {
         warn!(
@@ -162,7 +166,8 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
 
     // 创建服务实例
     let config_service = std::sync::Arc::new(create_strategy_config_service());
-    let execution_service = std::sync::Arc::new(StrategyExecutionService::new());
+    let swap_order_repo = std::sync::Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
+    let execution_service = std::sync::Arc::new(StrategyExecutionService::new(swap_order_repo));
 
     // 🚀 创建策略触发回调函数
     let strategy_trigger = {
@@ -196,16 +201,23 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
 /// 从数据库加载策略配置并启动
 ///
 /// 通过services层加载配置，使用orchestration层启动策略
+///
+/// # 启动流程
+/// 1. 加载启用的策略配置
+/// 2. **预热策略数据**（加载历史K线到指标缓存）
+/// 3. 启动策略定时任务
 async fn start_strategies_from_db() -> Result<()> {
     use rust_quant_domain::StrategyType;
     use rust_quant_domain::Timeframe;
     use rust_quant_orchestration::workflow::strategy_runner;
+    use rust_quant_services::strategy::StrategyDataService;
 
     info!("📚 从数据库加载策略配置");
 
     // 1. 通过服务层加载启用的策略配置
     let config_service = create_strategy_config_service();
-    let execution_service = StrategyExecutionService::new();
+    let swap_order_repo = std::sync::Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
+    let execution_service = StrategyExecutionService::new(swap_order_repo);
 
     let configs = config_service.load_all_enabled_configs().await?;
 
@@ -216,8 +228,33 @@ async fn start_strategies_from_db() -> Result<()> {
 
     info!("✅ 加载了 {} 个策略配置", configs.len());
 
-    // 2. 启动每个策略
-    for config in configs.iter() {
+    // 2. 预热策略数据（关键步骤！）
+    info!("🔥 开始预热策略数据...");
+    let warmup_results = StrategyDataService::initialize_multiple_strategies(&configs).await;
+
+    let warmup_success_count = warmup_results.iter().filter(|r| r.is_ok()).count();
+    let warmup_fail_count = warmup_results.len() - warmup_success_count;
+
+    if warmup_fail_count > 0 {
+        warn!(
+            "⚠️  预热部分失败: 成功 {}, 失败 {}",
+            warmup_success_count, warmup_fail_count
+        );
+    } else {
+        info!("✅ 预热完成: 成功 {} 个策略", warmup_success_count);
+    }
+
+    // 3. 启动每个策略
+    for (idx, config) in configs.iter().enumerate() {
+        // 检查预热是否成功
+        if warmup_results.get(idx).map(|r| r.is_err()).unwrap_or(true) {
+            warn!(
+                "⚠️  策略预热失败，跳过启动: id={}, symbol={}",
+                config.id, config.symbol
+            );
+            continue;
+        }
+
         if let Err(e) = config_service.validate_config(config) {
             warn!("⚠️  策略配置校验失败，跳过: id={}, error={}", config.id, e);
             continue;
@@ -235,7 +272,7 @@ async fn start_strategies_from_db() -> Result<()> {
             strategy_type
         );
 
-        // 3. 调用 orchestration 层启动策略
+        // 4. 调用 orchestration 层启动策略
         if let Err(e) = strategy_runner::execute_strategy(
             &inst_id,
             timeframe,

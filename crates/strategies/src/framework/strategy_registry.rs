@@ -75,21 +75,31 @@ impl StrategyRegistry {
         ))
     }
 
-    /// 根据名称获取策略
+    /// 根据名称获取策略（大小写不敏感）
     ///
     /// # 参数
-    /// * `name` - 策略名称（如 "Vegas", "Nwe"）
+    /// * `name` - 策略名称（如 "Vegas", "vegas", "Nwe", "nwe"）
     ///
     /// # 返回
     /// * `Ok(Arc<dyn StrategyExecutor>)` - 找到策略
     /// * `Err` - 策略未注册
     pub fn get(&self, name: &str) -> Result<Arc<dyn StrategyExecutor>> {
-        self.strategies
-            .read()
-            .expect("RwLock poisoned")
-            .get(name)
-            .cloned()
-            .ok_or_else(|| anyhow!("策略未注册: {}", name))
+        let strategies = self.strategies.read().expect("RwLock poisoned");
+
+        // 先尝试精确匹配
+        if let Some(strategy) = strategies.get(name) {
+            return Ok(strategy.clone());
+        }
+
+        // 大小写不敏感查找
+        let name_lower = name.to_lowercase();
+        for (key, strategy) in strategies.iter() {
+            if key.to_lowercase() == name_lower {
+                return Ok(strategy.clone());
+            }
+        }
+
+        Err(anyhow!("策略未注册: {}", name))
     }
 
     /// 列出所有已注册策略

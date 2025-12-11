@@ -165,29 +165,32 @@ pub async fn execute_strategy(
         );
         StrategyExecutionStateManager::mark_completed(&key, timestamp);
         return Err(e);
+    } else {
+        info!("✅ 策略配置验证成功: key={}, config_id={}", key, config.id);
     }
+    Ok(())
 
-    // 3. 执行策略
-    let exec_result = execution_service
-        .execute_strategy(inst_id, timeframe_str, &config, None)
-        .await;
+    // // 3. 执行策略
+    // let exec_result = execution_service
+    //     .execute_strategy(inst_id, timeframe_str, &config, None)
+    //     .await;
 
-    // 标记完成
-    StrategyExecutionStateManager::mark_completed(&key, timestamp);
+    // // 标记完成
+    // StrategyExecutionStateManager::mark_completed(&key, timestamp);
 
-    match exec_result {
-        Ok(signal_result) => {
-            info!(
-                "✅ 策略执行成功: {} - buy={}, sell={}",
-                key, signal_result.should_buy, signal_result.should_sell
-            );
-            Ok(())
-        }
-        Err(e) => {
-            error!("❌ 策略执行失败: {} - {:?}", key, e);
-            Err(e)
-        }
-    }
+    // match exec_result {
+    //     Ok(signal_result) => {
+    //         info!(
+    //             "✅ 策略执行成功: {} - buy={}, sell={}",
+    //             key, signal_result.should_buy, signal_result.should_sell
+    //         );
+    //         Ok(())
+    //     }
+    //     Err(e) => {
+    //         error!("❌ 策略执行失败: {} - {:?}", key, e);
+    //         Err(e)
+    //     }
+    // }
 }
 
 /// 批量执行多个策略

@@ -10,7 +10,7 @@ use rust_quant_domain::traits::{ExchangeApiConfigRepository, StrategyApiConfigRe
 
 /// 交易所API配置数据库实体
 #[derive(Debug, Clone, FromRow)]
-pub struct ExchangeApiConfigEntity {
+pub struct ExchangeAppkeyConfigEntity {
     pub id: i32,
     pub exchange_name: String,
     pub api_key: String,
@@ -21,7 +21,7 @@ pub struct ExchangeApiConfigEntity {
     pub description: Option<String>,
 }
 
-impl ExchangeApiConfigEntity {
+impl ExchangeAppkeyConfigEntity {
     /// 转换为领域实体
     pub fn to_domain(&self) -> ExchangeApiConfig {
         ExchangeApiConfig::new(
@@ -53,7 +53,7 @@ impl ExchangeApiConfigEntity {
 
 /// 策略与API配置关联数据库实体
 #[derive(Debug, Clone, FromRow)]
-pub struct StrategyApiConfigEntity {
+pub struct ExchangeApiStrategyRelationEntity {
     pub id: i32,
     pub strategy_config_id: i32,
     pub api_config_id: i32,
@@ -77,10 +77,10 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     async fn find_by_id(&self, id: i32) -> Result<Option<ExchangeApiConfig>> {
         debug!("查询API配置: id={}", id);
 
-        let entity = sqlx::query_as::<_, ExchangeApiConfigEntity>(
+        let entity = sqlx::query_as::<_, ExchangeAppkeyConfigEntity>(
             "SELECT id, exchange_name, api_key, api_secret, passphrase, 
                     is_sandbox, is_enabled, description
-             FROM exchange_api_config 
+             FROM exchange_apikey_config 
              WHERE id = ? AND is_deleted = 0 LIMIT 1",
         )
         .bind(id)
@@ -91,10 +91,10 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     }
 
     async fn find_all_enabled(&self) -> Result<Vec<ExchangeApiConfig>> {
-        let entities = sqlx::query_as::<_, ExchangeApiConfigEntity>(
+        let entities = sqlx::query_as::<_, ExchangeAppkeyConfigEntity>(
             "SELECT id, exchange_name, api_key, api_secret, passphrase, 
                     is_sandbox, is_enabled, description
-             FROM exchange_api_config 
+             FROM exchange_apikey_config 
              WHERE is_enabled = 1 AND is_deleted = 0
              ORDER BY id",
         )
@@ -105,10 +105,10 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     }
 
     async fn find_by_exchange(&self, exchange_name: &str) -> Result<Vec<ExchangeApiConfig>> {
-        let entities = sqlx::query_as::<_, ExchangeApiConfigEntity>(
+        let entities = sqlx::query_as::<_, ExchangeAppkeyConfigEntity>(
             "SELECT id, exchange_name, api_key, api_secret, passphrase, 
                     is_sandbox, is_enabled, description
-             FROM exchange_api_config 
+             FROM exchange_apikey_config 
              WHERE exchange_name = ? AND is_enabled = 1 AND is_deleted = 0
              ORDER BY id",
         )
@@ -120,10 +120,10 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     }
 
     async fn save(&self, config: &ExchangeApiConfig) -> Result<i32> {
-        let entity = ExchangeApiConfigEntity::from_domain(config);
+        let entity = ExchangeAppkeyConfigEntity::from_domain(config);
         
         let result = sqlx::query(
-            "INSERT INTO exchange_api_config 
+            "INSERT INTO exchange_apikey_config 
              (exchange_name, api_key, api_secret, passphrase, is_sandbox, is_enabled, description)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
@@ -141,10 +141,10 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     }
 
     async fn update(&self, config: &ExchangeApiConfig) -> Result<()> {
-        let entity = ExchangeApiConfigEntity::from_domain(config);
+        let entity = ExchangeAppkeyConfigEntity::from_domain(config);
         
         sqlx::query(
-            "UPDATE exchange_api_config 
+            "UPDATE exchange_apikey_config 
              SET exchange_name = ?, api_key = ?, api_secret = ?, passphrase = ?, 
                  is_sandbox = ?, is_enabled = ?, description = ?
              WHERE id = ?",
@@ -164,7 +164,7 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     }
 
     async fn delete(&self, id: i32) -> Result<()> {
-        sqlx::query("UPDATE exchange_api_config SET is_deleted = 1 WHERE id = ?")
+        sqlx::query("UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -193,11 +193,11 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
         debug!("查询策略关联的API配置: strategy_config_id={}", strategy_config_id);
 
         // 联表查询，按优先级排序
-        let entities = sqlx::query_as::<_, ExchangeApiConfigEntity>(
+        let entities = sqlx::query_as::<_, ExchangeAppkeyConfigEntity>(
             "SELECT e.id, e.exchange_name, e.api_key, e.api_secret, e.passphrase, 
                     e.is_sandbox, e.is_enabled, e.description
-             FROM exchange_api_config e
-             INNER JOIN strategy_api_config s ON e.id = s.api_config_id
+             FROM exchange_apikey_config e
+             INNER JOIN exchange_apikey_strategy_relation s ON e.id = s.api_config_id
              WHERE s.strategy_config_id = ? 
                AND s.is_enabled = 1 
                AND s.is_deleted = 0
@@ -219,7 +219,7 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
         priority: i32,
     ) -> Result<i32> {
         let result = sqlx::query(
-            "INSERT INTO strategy_api_config 
+            "INSERT INTO exchange_apikey_config 
              (strategy_config_id, api_config_id, priority, is_enabled)
              VALUES (?, ?, ?, 1)
              ON DUPLICATE KEY UPDATE priority = ?, is_enabled = 1, is_deleted = 0",
@@ -235,7 +235,7 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
     }
 
     async fn delete_association(&self, id: i32) -> Result<()> {
-        sqlx::query("UPDATE strategy_api_config SET is_deleted = 1 WHERE id = ?")
+        sqlx::query("UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;

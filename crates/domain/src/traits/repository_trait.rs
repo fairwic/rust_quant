@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::entities::{
     BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats, Candle,
-    ExchangeApiConfig, Order, Position, StrategyApiConfig, StrategyConfig,
+    ExchangeApiConfig, Order, Position, StrategyApiConfig, StrategyConfig, SwapOrder,
 };
 use crate::enums::Timeframe;
 use crate::PositionStatus;
@@ -173,4 +173,43 @@ pub trait StrategyApiConfigRepository: Send + Sync {
         priority: i32,
         is_enabled: bool,
     ) -> Result<()>;
+}
+
+/// 合约订单仓储接口
+#[async_trait]
+pub trait SwapOrderRepository: Send + Sync {
+    /// 根据ID查询订单
+    async fn find_by_id(&self, id: i32) -> Result<Option<SwapOrder>>;
+
+    /// 根据内部订单ID查询
+    async fn find_by_in_order_id(&self, in_order_id: &str) -> Result<Option<SwapOrder>>;
+
+    /// 根据外部订单ID查询
+    async fn find_by_out_order_id(&self, out_order_id: &str) -> Result<Option<SwapOrder>>;
+
+    /// 查询指定交易对的订单
+    async fn find_by_inst_id(&self, inst_id: &str, limit: Option<i32>) -> Result<Vec<SwapOrder>>;
+
+    /// 查询待处理订单（用于幂等性检查）
+    async fn find_pending_order(
+        &self,
+        inst_id: &str,
+        period: &str,
+        side: &str,
+        pos_side: &str,
+    ) -> Result<Vec<SwapOrder>>;
+
+    /// 保存订单
+    async fn save(&self, order: &SwapOrder) -> Result<i32>;
+
+    /// 更新订单
+    async fn update(&self, order: &SwapOrder) -> Result<()>;
+
+    /// 根据策略ID和时间范围查询订单
+    async fn find_by_strategy_and_time(
+        &self,
+        strategy_id: i32,
+        start_time: i64,
+        end_time: i64,
+    ) -> Result<Vec<SwapOrder>>;
 }

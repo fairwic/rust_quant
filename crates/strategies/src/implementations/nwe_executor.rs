@@ -8,14 +8,14 @@ use std::collections::VecDeque;
 use tracing::{debug, info};
 
 use super::executor_common::{
-    convert_candles_to_items, extract_risk_config, get_latest_candle, get_recent_candles,
-    is_new_timestamp, update_candle_queue, validate_candles,
+    convert_candles_to_items, get_latest_candle, get_recent_candles, is_new_timestamp,
+    update_candle_queue, validate_candles,
 };
-use crate::cache::arc_nwe_indicator_values::{get_nwe_hash_key, get_nwe_indicator_manager};
+use crate::cache::arc_nwe_indicator_values::{
+    get_nwe_hash_key, get_nwe_indicator_manager, set_nwe_strategy_indicator_values,
+};
 use crate::framework::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use rust_quant_market::models::CandlesEntity;
-// TODO: 暂时注释，等待 NweIndicatorCombine 移到 indicators 包后恢复
-// use rust_quant_infrastructure::cache::arc_nwe_indicator_values;
 use crate::framework::config::strategy_config::StrategyConfig;
 use crate::implementations::nwe_strategy::{NweSignalValues, NweStrategy, NweStrategyConfig};
 use crate::strategy_common::{parse_candle_to_data_item, SignalResult};
@@ -76,23 +76,21 @@ impl StrategyExecutor for NweStrategyExecutor {
         // 4. 生成存储键并保存数据
         let hash_key = get_nwe_hash_key(inst_id, period, StrategyType::Nwe.as_str());
 
-        // TODO: 暂时注释，等待 NweIndicatorCombine 移到 indicators 包后恢复
-        // arc_nwe_indicator_values::set_nwe_strategy_indicator_values(
-        //     inst_id.to_string(),
-        //     period.to_string(),
-        //     last_timestamp,
-        //     hash_key.clone(),
-        //     candle_items,
-        //     indicator_combine,
-        // )
-        // .await;
+        set_nwe_strategy_indicator_values(
+            inst_id.to_string(),
+            period.to_string(),
+            last_timestamp,
+            hash_key.clone(),
+            candle_items,
+            indicator_combine,
+        )
+        .await;
 
         // 5. 验证数据保存成功
-        // TODO: 暂时注释，等待 NweIndicatorCombine 移到 indicators 包后恢复
-        // let manager = get_nwe_indicator_manager();
-        // if !manager.key_exists(&hash_key).await {
-        //     return Err(anyhow!("Nwe 策略数据保存验证失败: {}", hash_key));
-        // }
+        let manager = get_nwe_indicator_manager();
+        if !manager.key_exists(&hash_key).await {
+            return Err(anyhow!("Nwe 策略数据保存验证失败: {}", hash_key));
+        }
 
         info!("✅ Nwe 策略数据初始化完成: {}", hash_key);
 
@@ -109,7 +107,7 @@ impl StrategyExecutor for NweStrategyExecutor {
         strategy_config: &StrategyConfig,
         snap: Option<CandlesEntity>,
     ) -> Result<SignalResult> {
-        const MAX_HISTORY_SIZE: usize = 10000;
+        const MAX_HISTORY_SIZE: usize = 500;
 
         // 1. 获取哈希键和管理器
         let key = get_nwe_hash_key(inst_id, period, StrategyType::Nwe.as_str());
@@ -193,21 +191,34 @@ impl StrategyExecutor for NweStrategyExecutor {
             .await
             .map_err(|e| anyhow!("原子更新 Nwe 指标与K线失败: {}", e))?;
 
-        // 9. 获取最近10根K线（使用公共函数）
-        let candle_vec = get_recent_candles(&new_candle_items, 10);
+        // 9. 获取最近K线用于信号计算（需要足够的历史数据用于动态波动率计算）
+        // 5分钟级别：近期48根+历史288根 = 336根，取500根确保足够
+        let candle_vec = get_recent_candles(&new_candle_items, MAX_HISTORY_SIZE);
 
         // 10. 生成交易信号
         let nwe_config: NweStrategyConfig =
             serde_json::from_value(strategy_config.parameters.clone())
                 .map_err(|e| anyhow!("解析 NweStrategyConfig 失败: {}", e))?;
-        let risk_config = extract_risk_config(strategy_config)?;
         let mut nwe_strategy = NweStrategy::new(nwe_config);
-        let signal_result = nwe_strategy.get_trade_signal(&candle_vec, &nwe_signal_values,&serde_json::from_value(strategy_config.risk_config.clone())
-                .map_err(|e| anyhow!("解析风险配置失败: {}", e))?);
+        let risk_config = serde_json::from_value(strategy_config.risk_config.clone())
+            .map_err(|e| anyhow!("解析风险配置失败: {}", e))?;
+        let signal_result = nwe_strategy.get_trade_signal(&candle_vec, &nwe_signal_values, &risk_config);
 
-        info!("✅ Nwe策略信号生成完成: key={}", key);
+        // 11. 记录信号生成结果
+        if signal_result.should_buy || signal_result.should_sell {
+            info!(
+                "🎯 Nwe策略信号: key={}, buy={}, sell={}, price={:.4}, ts={}",
+                key,
+                signal_result.should_buy,
+                signal_result.should_sell,
+                signal_result.open_price,
+                signal_result.ts
+            );
+        } else {
+            debug!("Nwe策略无信号: key={}", key);
+        }
 
-        // 11. 返回信号（下单逻辑由services层统一处理）
+        // 12. 返回信号（下单逻辑由 StrategyExecutionService 统一处理）
         Ok(signal_result)
     }
 }
