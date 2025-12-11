@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
 use redis::aio::MultiplexedConnection;
 use redis::Client;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Redis连接池管理器
 pub struct RedisConnectionPool {
@@ -21,7 +21,10 @@ impl RedisConnectionPool {
         let _test_conn = client
             .get_multiplexed_async_connection()
             .await
-            .map_err(|e| anyhow!("Failed to test Redis connection: {}", e))?;
+            .map_err(|e| {
+                {error!("Redis connection test failed: {}", redis_url);
+                anyhow!("Failed to test Redis connection: {}", e)}
+                })?;
 
         debug!("Redis连接池初始化成功");
 

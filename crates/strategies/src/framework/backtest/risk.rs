@@ -17,10 +17,10 @@ pub fn check_risk_config(
     //     println!("signal: {:#?}", signal);
     //     println!("trading_state: {:#?}", trading_state.trade_position);
     // }
-    if signal.ts == 1763395200000 || signal.ts == 1763481600000 {
-        println!("signal: {:#?}", signal);
-        println!("trading_state: {:#?}", trading_state.trade_position);
-    }
+    // if signal.ts == 1763395200000 || signal.ts == 1763481600000 {
+    //     println!("signal: {:#?}", signal);
+    //     println!("trading_state: {:#?}", trading_state.trade_position);
+    // }
     let current_open_price = signal.open_price;
     let current_low_price = candle.l;
     let current_high_price = candle.h;
@@ -30,72 +30,187 @@ pub fn check_risk_config(
     let entry_price = trade_position.open_price;
     let position_nums = trade_position.position_nums.clone();
 
-    // 检查移动止盈
-    if let Some(is_move_stop_open_price_when_touch_price) =
-        risk_config.is_move_stop_open_price_when_touch_price
-    {
-        if let Some(move_stop_loss_price) = trade_position.move_stop_open_price {
-            match trade_position.trade_side {
-                TradeSide::Long => {
-                    if current_low_price <= move_stop_loss_price {
-                        trade_position.close_price = Some(move_stop_loss_price);
-                        trading_state.trade_position = Some(trade_position.clone());
+    // 检查三级止盈系统
+    if trade_position.atr_take_profit_level_1.is_some() {
+        let level_1 = trade_position.atr_take_profit_level_1.unwrap();
+        let level_2 = trade_position.atr_take_profit_level_2.unwrap();
+        let level_3 = trade_position.atr_take_profit_level_3.unwrap();
+        let current_level = trade_position.reached_take_profit_level;
+
+        match trade_position.trade_side {
+            TradeSide::Long => {
+                // 先检查移动止损是否触发（在检查新级别之前）
+                if let Some(move_stop_price) = trade_position.move_stop_open_price {
+                    if current_low_price <= move_stop_price {
+                        let profit = (move_stop_price - entry_price) * position_nums;
+                        trade_position.close_price = Some(move_stop_price);
+                        let close_type = format!(
+                            "移动止损(触发级别:{})",
+                            current_level
+                        );
+                        trading_state.trade_position = Some(trade_position);
                         close_position(
                             &mut trading_state,
                             candle,
                             &signal,
-                            "移动(开仓价格止损)",
-                            0.00,
+                            &close_type,
+                            profit,
                         );
                         return trading_state;
                     }
                 }
-                TradeSide::Short => {
-                    if current_high_price >= move_stop_loss_price {
-                        trade_position.close_price = Some(move_stop_loss_price);
-                        trading_state.trade_position = Some(trade_position.clone());
-                        close_position(
-                            &mut trading_state,
-                            candle,
-                            &signal,
-                            "移动(开仓价格止损)",
-                            0.00,
-                        );
-                        return trading_state;
-                    }
+
+                // 第三级：5倍ATR，完全平仓
+                if current_level < 3 && current_high_price >= level_3 {
+                    let profit = (level_3 - entry_price) * position_nums;
+                    trade_position.close_price = Some(level_3);
+                    trading_state.trade_position = Some(trade_position);
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "三级止盈(5倍ATR)-完全平仓",
+                        profit,
+                    );
+                    return trading_state;
+                }
+
+                // 第二级：2倍ATR，移动止损到第一级止盈价
+                if current_level < 2 && current_high_price >= level_2 {
+                    trade_position.reached_take_profit_level = 2;
+                    // 移动止损到第一级止盈价（保护利润）
+                    trade_position.move_stop_open_price = Some(level_1);
+                    trading_state.trade_position = Some(trade_position.clone());
+                }
+
+                // 第一级：1.5倍ATR，移动止损到开仓价
+                if current_level < 1 && current_high_price >= level_1 {
+                    trade_position.reached_take_profit_level = 1;
+                    // 移动止损到开仓价（保本）
+                    trade_position.move_stop_open_price = Some(entry_price);
+                    trading_state.trade_position = Some(trade_position.clone());
                 }
             }
-        } else {
-            // 如果启用了移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
-            if trade_position
-                .move_stop_open_price_when_touch_price
-                .is_some()
-            {
-                match trade_position.trade_side {
-                    TradeSide::Long => {
-                        if current_high_price
-                            >= trade_position
-                                .move_stop_open_price_when_touch_price
-                                .unwrap()
-                        {
-                            trade_position.move_stop_open_price = Some(entry_price);
-                            trading_state.trade_position = Some(trade_position.clone());
-                        }
+            TradeSide::Short => {
+                // 先检查移动止损是否触发（在检查新级别之前）
+                if let Some(move_stop_price) = trade_position.move_stop_open_price {
+                    if current_high_price >= move_stop_price {
+                        let profit = (entry_price - move_stop_price) * position_nums;
+                        trade_position.close_price = Some(move_stop_price);
+                        let close_type = format!(
+                            "移动止损(触发级别:{})",
+                            current_level
+                        );
+                        trading_state.trade_position = Some(trade_position);
+                        close_position(
+                            &mut trading_state,
+                            candle,
+                            &signal,
+                            &close_type,
+                            profit,
+                        );
+                        return trading_state;
                     }
-                    TradeSide::Short => {
-                        if current_low_price
-                            <= trade_position
-                                .move_stop_open_price_when_touch_price
-                                .unwrap()
-                        {
-                            trade_position.move_stop_open_price = Some(entry_price);
-                            trading_state.trade_position = Some(trade_position.clone());
-                        }
-                    }
+                }
+
+                // 第三级：5倍ATR，完全平仓
+                if current_level < 3 && current_low_price <= level_3 {
+                    let profit = (entry_price - level_3) * position_nums;
+                    trade_position.close_price = Some(level_3);
+                    trading_state.trade_position = Some(trade_position);
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        &signal,
+                        "三级止盈(5倍ATR)-完全平仓",
+                        profit,
+                    );
+                    return trading_state;
+                }
+
+                // 第二级：2倍ATR，移动止损到第一级止盈价
+                if current_level < 2 && current_low_price <= level_2 {
+                    trade_position.reached_take_profit_level = 2;
+                    trade_position.move_stop_open_price = Some(level_1);
+                    trading_state.trade_position = Some(trade_position.clone());
+                }
+
+                // 第一级：1.5倍ATR，移动止损到开仓价
+                if current_level < 1 && current_low_price <= level_1 {
+                    trade_position.reached_take_profit_level = 1;
+                    trade_position.move_stop_open_price = Some(entry_price);
+                    trading_state.trade_position = Some(trade_position.clone());
                 }
             }
         }
     }
+
+    // 检查移动止盈
+    // if let Some(is_move_stop_open_price_when_touch_price) =
+    //     risk_config.is_move_stop_open_price_when_touch_price
+    // {
+    //     if let Some(move_stop_loss_price) = trade_position.move_stop_open_price {
+    //         match trade_position.trade_side {
+    //             TradeSide::Long => {
+    //                 if current_low_price <= move_stop_loss_price {
+    //                     trade_position.close_price = Some(move_stop_loss_price);
+    //                     trading_state.trade_position = Some(trade_position.clone());
+    //                     close_position(
+    //                         &mut trading_state,
+    //                         candle,
+    //                         &signal,
+    //                         "移动(开仓价格止损)",
+    //                         0.00,
+    //                     );
+    //                     return trading_state;
+    //                 }
+    //             }
+    //             TradeSide::Short => {
+    //                 if current_high_price >= move_stop_loss_price {
+    //                     trade_position.close_price = Some(move_stop_loss_price);
+    //                     trading_state.trade_position = Some(trade_position.clone());
+    //                     close_position(
+    //                         &mut trading_state,
+    //                         candle,
+    //                         &signal,
+    //                         "移动(开仓价格止损)",
+    //                         0.00,
+    //                     );
+    //                     return trading_state;
+    //                 }
+    //             }
+    //         }
+    //     } else {
+    //         // 如果启用了移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
+    //         if trade_position
+    //             .move_stop_open_price_when_touch_price
+    //             .is_some()
+    //         {
+    //             match trade_position.trade_side {
+    //                 TradeSide::Long => {
+    //                     if current_high_price
+    //                         >= trade_position
+    //                             .move_stop_open_price_when_touch_price
+    //                             .unwrap()
+    //                     {
+    //                         trade_position.move_stop_open_price = Some(entry_price);
+    //                         trading_state.trade_position = Some(trade_position.clone());
+    //                     }
+    //                 }
+    //                 TradeSide::Short => {
+    //                     if current_low_price
+    //                         <= trade_position
+    //                             .move_stop_open_price_when_touch_price
+    //                             .unwrap()
+    //                     {
+    //                         trade_position.move_stop_open_price = Some(entry_price);
+    //                         trading_state.trade_position = Some(trade_position.clone());
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     // 检查按atr收益比例止盈
     if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {

@@ -123,7 +123,9 @@ impl NweIndicatorCombine {
         };
 
         let (upper, lower) = if let Some(n) = &mut self.nwe_indicator {
-            n.next(candle.c)
+            let result = n.next(candle.c);
+            // 调试特定时间戳的 NWE 计算
+            result
         } else {
             (0.0, 0.0)
         };

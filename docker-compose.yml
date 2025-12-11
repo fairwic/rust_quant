@@ -27,7 +27,7 @@ services:
     ports:
       - "33306:3306"
     volumes:
-      - ~/onions/docker-volumes/mysql_data:/var/lib/mysql # 本地路径映射到 MySQL 数据目录
+      - ~/docker-volumes/mysql_data:/var/lib/mysql # 本地路径映射到 MySQL 数据目录
     command: --max_connections=1000
   redis:
     image: redis:6.2
@@ -36,8 +36,8 @@ services:
     ports:
       - "6379:6379" # 映射端口：宿主机6379 -> 容器6379
     volumes:
-      - ~/onions/docker-volumes/redis/redis_data:/data
-      - ~/onions/docker-volumes/redis/redis.conf:/usr/local/etc/redis/redis.conf
+      - ~/docker-volumes/redis/redis_data:/data
+      - ~/docker-volumes/redis/redis.conf:/usr/local/etc/redis/redis.conf
     command: [ "redis-server", "/usr/local/etc/redis/redis.conf" ]
 networks:
   default:

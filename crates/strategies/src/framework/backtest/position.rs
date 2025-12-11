@@ -43,6 +43,9 @@ pub fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list
                 counter_trend_pullback_take_profit_price: None,
                 is_ema_short_trend: None,
                 is_ema_long_trend: None,
+                atr_take_profit_level_1: None,
+                atr_take_profit_level_2: None,
+                atr_take_profit_level_3: None,
             },
             "结束平仓",
             profit,
@@ -94,18 +97,18 @@ pub fn set_long_stop_close_price(
     }
     // 如果atr止盈，则使用atr盈亏比止盈
     // 如果启用了atr止盈
-    if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {
-        if atr_take_profit_ratio > 0.0 {
-            if signal.atr_stop_loss_price.is_none() {
-                error!("atr_stop_loss_price is none");
-            }
-            let atr_stop_loss_price = signal.atr_stop_loss_price.unwrap();
-            let diff_price = (atr_stop_loss_price - signal.open_price).abs();
+    // if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {
+    //     if atr_take_profit_ratio > 0.0 {
+    //         if signal.atr_stop_loss_price.is_none() {
+    //             error!("atr_stop_loss_price is none");
+    //         }
+    //         let atr_stop_loss_price = signal.atr_stop_loss_price.unwrap();
+    //         let diff_price = (atr_stop_loss_price - signal.open_price).abs();
 
-            temp_trade_position.atr_take_ratio_profit_price =
-                Some(signal.open_price + (diff_price * atr_take_profit_ratio));
-        }
-    }
+    //         temp_trade_position.atr_take_ratio_profit_price =
+    //             Some(signal.open_price + (diff_price * atr_take_profit_ratio));
+    //     }
+    // }
     //atr止损
     if signal.atr_stop_loss_price.is_some() {
         temp_trade_position.atr_stop_loss_price = Some(signal.atr_stop_loss_price.unwrap());
@@ -143,6 +146,14 @@ pub fn set_long_stop_close_price(
             temp_trade_position.counter_trend_pullback_take_profit_price =
                 signal.counter_trend_pullback_take_profit_price;
         }
+    }
+
+    // 设置三级止盈价格
+    if signal.atr_take_profit_level_1.is_some() {
+        temp_trade_position.atr_take_profit_level_1 = signal.atr_take_profit_level_1;
+        temp_trade_position.atr_take_profit_level_2 = signal.atr_take_profit_level_2;
+        temp_trade_position.atr_take_profit_level_3 = signal.atr_take_profit_level_3;
+        temp_trade_position.reached_take_profit_level = 0;
     }
 }
 
@@ -218,19 +229,19 @@ pub fn set_short_stop_close_price(
     }
 
     // 如果启用了按比例止盈,（开仓价格-止损价格）*比例
-    if let Some(fixe_take_profit_ratio) = risk_config.fixed_signal_kline_take_profit_ratio {
-        if fixe_take_profit_ratio > 0.0 {
-            if signal.signal_kline_stop_loss_price.is_none() {
-                temp_trade_position.signal_high_low_diff =
-                    (signal.signal_kline_stop_loss_price.unwrap() - signal.open_price).abs();
-                temp_trade_position.atr_take_ratio_profit_price = Some(
-                    signal.open_price
-                        - temp_trade_position.signal_high_low_diff * fixe_take_profit_ratio,
-                );
-            }
-            error!("signal_kline_stop_loss_price is none");
-        }
-    }
+    // if let Some(fixe_take_profit_ratio) = risk_config.fixed_signal_kline_take_profit_ratio {
+    //     if fixe_take_profit_ratio > 0.0 {
+    //         if signal.signal_kline_stop_loss_price.is_none() {
+    //             temp_trade_position.signal_high_low_diff =
+    //                 (signal.signal_kline_stop_loss_price.unwrap() - signal.open_price).abs();
+    //             temp_trade_position.atr_take_ratio_profit_price = Some(
+    //                 signal.open_price
+    //                     - temp_trade_position.signal_high_low_diff * fixe_take_profit_ratio,
+    //             );
+    //         }
+    //         error!("signal_kline_stop_loss_price is none");
+    //     }
+    // }
 
     // 如果启用了逆势回调止盈，且均线是多头排列时做空
     if let Some(is_counter_trend) = risk_config.is_counter_trend_pullback_take_profit {
@@ -240,6 +251,14 @@ pub fn set_short_stop_close_price(
             temp_trade_position.counter_trend_pullback_take_profit_price =
                 signal.counter_trend_pullback_take_profit_price;
         }
+    }
+
+    // 设置三级止盈价格
+    if signal.atr_take_profit_level_1.is_some() {
+        temp_trade_position.atr_take_profit_level_1 = signal.atr_take_profit_level_1;
+        temp_trade_position.atr_take_profit_level_2 = signal.atr_take_profit_level_2;
+        temp_trade_position.atr_take_profit_level_3 = signal.atr_take_profit_level_3;
+        temp_trade_position.reached_take_profit_level = 0;
     }
 }
 
