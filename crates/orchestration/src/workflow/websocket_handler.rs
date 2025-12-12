@@ -32,10 +32,11 @@ impl WebsocketStrategyHandler {
     pub async fn handle(&self, inst_id: String, time_interval: String, snap: CandlesEntity) {
         let config_service = self.config_service.clone();
         let execution_service = self.execution_service.clone();
+        let candle_ts = snap.ts;
 
         info!(
             "🎯 K线确认触发策略检查: inst_id={}, time_interval={}, ts={}",
-            inst_id, time_interval, snap.ts
+            inst_id, time_interval, candle_ts
         );
 
         // 异步执行策略检查，避免阻塞 WebSocket 线程
@@ -84,6 +85,8 @@ impl WebsocketStrategyHandler {
                     timeframe,
                     strategy_type,
                     Some(config_id),
+                    None,
+                    Some(snap.clone()),
                     &config_service,
                     &execution_service,
                 )

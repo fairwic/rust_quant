@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime};
 use tracing::{debug, error, info, warn};
 
 use rust_quant_domain::{StrategyType, Timeframe};
+use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 
 /// 策略执行状态跟踪 - 用于时间戳去重
@@ -52,9 +53,10 @@ impl StrategyExecutionStateManager {
     pub fn mark_completed(key: &str, timestamp: i64) {
         let state_key = format!("{}_{}", key, timestamp);
         if let Some((_, state)) = STRATEGY_EXECUTION_STATES.remove(&state_key) {
-            let duration = SystemTime::now()
-                .duration_since(state.start_time)
-                .unwrap_or(Duration::from_millis(0));
+            let duration = match SystemTime::now().duration_since(state.start_time) {
+                Ok(d) => d,
+                Err(_) => Duration::from_millis(0),
+            };
             info!(
                 "策略执行完成: key={}, timestamp={}, 耗时={:?}",
                 key, timestamp, duration
@@ -114,6 +116,8 @@ pub async fn execute_strategy(
     timeframe: Timeframe,
     strategy_type: StrategyType,
     config_id: Option<i64>,
+    trigger_ts: Option<i64>,
+    snap: Option<CandlesEntity>,
     config_service: &StrategyConfigService,
     execution_service: &StrategyExecutionService,
 ) -> Result<()> {
@@ -125,9 +129,16 @@ pub async fn execute_strategy(
     );
 
     // 检查是否应该跳过（去重）
-    let timestamp = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)?
-        .as_secs() as i64;
+    // - WebSocket 触发：用“确认K线的 ts”（毫秒）作为去重维度，避免重复消息/重连导致重复执行
+    // - 定时/手动触发：退化为“当前时间秒”作为并发保护（同秒重复触发会被合并）
+    let timestamp = match trigger_ts.or_else(|| snap.as_ref().map(|s| s.ts)) {
+        Some(ts) => ts,
+        None => {
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_secs() as i64
+        }
+    };
 
     if !StrategyExecutionStateManager::try_mark_processing(&key, timestamp) {
         debug!("策略正在执行中，跳过: {}", key);
@@ -168,29 +179,28 @@ pub async fn execute_strategy(
     } else {
         info!("✅ 策略配置验证成功: key={}, config_id={}", key, config.id);
     }
-    Ok(())
 
-    // // 3. 执行策略
-    // let exec_result = execution_service
-    //     .execute_strategy(inst_id, timeframe_str, &config, None)
-    //     .await;
+    // 3. 执行策略
+    let exec_result = execution_service
+        .execute_strategy(inst_id, timeframe_str, &config, snap)
+        .await;
 
-    // // 标记完成
-    // StrategyExecutionStateManager::mark_completed(&key, timestamp);
+    // 标记完成
+    StrategyExecutionStateManager::mark_completed(&key, timestamp);
 
-    // match exec_result {
-    //     Ok(signal_result) => {
-    //         info!(
-    //             "✅ 策略执行成功: {} - buy={}, sell={}",
-    //             key, signal_result.should_buy, signal_result.should_sell
-    //         );
-    //         Ok(())
-    //     }
-    //     Err(e) => {
-    //         error!("❌ 策略执行失败: {} - {:?}", key, e);
-    //         Err(e)
-    //     }
-    // }
+    match exec_result {
+        Ok(signal_result) => {
+            info!(
+                "✅ 策略执行成功: {} - buy={}, sell={}",
+                key, signal_result.should_buy, signal_result.should_sell
+            );
+            Ok(())
+        }
+        Err(e) => {
+            error!("❌ 策略执行失败: {} - {:?}", key, e);
+            Err(e)
+        }
+    }
 }
 
 /// 批量执行多个策略
@@ -209,6 +219,8 @@ pub async fn execute_multiple_strategies(
             timeframe,
             strategy_type,
             config_id,
+            None,
+            None,
             config_service,
             execution_service,
         )
@@ -239,6 +251,8 @@ pub async fn test_random_strategy(
         timeframe,
         StrategyType::Vegas,
         None,
+        None,
+        None,
         config_service,
         execution_service,
     )
@@ -267,6 +281,8 @@ pub async fn test_specified_strategy(
         timeframe,
         strategy_type,
         config_id,
+        None,
+        None,
         config_service,
         execution_service,
     )
@@ -297,14 +313,14 @@ mod tests {
 
     #[test]
     fn test_parse_period() {
-        assert!(matches!(
-            parse_period_to_timeframe("1H").unwrap(),
-            Timeframe::H1
-        ));
-        assert!(matches!(
-            parse_period_to_timeframe("1D").unwrap(),
-            Timeframe::D1
-        ));
+        match parse_period_to_timeframe("1H") {
+            Ok(tf) => assert!(matches!(tf, Timeframe::H1)),
+            Err(e) => panic!("解析 1H 失败: {}", e),
+        }
+        match parse_period_to_timeframe("1D") {
+            Ok(tf) => assert!(matches!(tf, Timeframe::D1)),
+            Err(e) => panic!("解析 1D 失败: {}", e),
+        }
     }
 
     #[test]

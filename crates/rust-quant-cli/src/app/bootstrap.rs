@@ -16,7 +16,10 @@ use std::collections::BTreeSet;
 
 /// 运行基于环境变量控制的各个模式
 pub async fn run_modes() -> Result<()> {
-    let env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+    let env = match std::env::var("APP_ENV") {
+        Ok(v) if !v.is_empty() => v,
+        _ => "local".to_string(),
+    };
 
     let mut backtest_targets = default_backtest_targets();
 
@@ -62,23 +65,23 @@ pub async fn run_modes() -> Result<()> {
         }
     }
 
-    // 3) WebSocket 实时数据
-    if env_is_true("IS_OPEN_SOCKET", false) {
-        info!("🌐 WebSocket模式已启用");
-        info!("📡 启动WebSocket监听: {:?}", inst_ids);
-
-        // 调用WebSocket服务
-        // 注意：这是一个长期运行的任务，会阻塞当前执行流
-        run_websocket(&inst_ids, &periods).await;
-    }
-
-    // 4) 实盘策略
+    // 3) 实盘策略（包含预热）
     if env_is_true("IS_RUN_REAL_STRATEGY", false) {
         info!("🤖 实盘策略模式已启用");
         // 从数据库加载策略配置并启动
         if let Err(e) = start_strategies_from_db().await {
             error!("❌ 启动策略失败: {}", e);
         }
+    }
+
+    // 4) WebSocket 实时数据（长期运行：必须后台启动，避免阻塞 run() 后续心跳/信号处理）
+    if env_is_true("IS_OPEN_SOCKET", false) {
+        info!("🌐 WebSocket模式已启用");
+        info!("📡 启动WebSocket监听: {:?}", inst_ids);
+
+        // 注意：WebSocket 客户端内部包含 !Send 的锁卫（okx crate），不能用 tokio::spawn
+        // 长期运行逻辑由 run() 通过 select! 方式与信号处理并行编排
+        run_websocket(&inst_ids, &periods).await;
     }
 
     Ok(())
@@ -210,6 +213,7 @@ async fn start_strategies_from_db() -> Result<()> {
     use rust_quant_domain::StrategyType;
     use rust_quant_domain::Timeframe;
     use rust_quant_orchestration::workflow::strategy_runner;
+    use rust_quant_market::models::{CandlesEntity, CandlesModel, SelectCandleReqDto};
     use rust_quant_services::strategy::StrategyDataService;
 
     info!("📚 从数据库加载策略配置");
@@ -247,7 +251,11 @@ async fn start_strategies_from_db() -> Result<()> {
     // 3. 启动每个策略
     for (idx, config) in configs.iter().enumerate() {
         // 检查预热是否成功
-        if warmup_results.get(idx).map(|r| r.is_err()).unwrap_or(true) {
+        let warmup_failed = match warmup_results.get(idx) {
+            Some(r) => r.is_err(),
+            None => true,
+        };
+        if warmup_failed {
             warn!(
                 "⚠️  策略预热失败，跳过启动: id={}, symbol={}",
                 config.id, config.symbol
@@ -272,12 +280,53 @@ async fn start_strategies_from_db() -> Result<()> {
             strategy_type
         );
 
-        // 4. 调用 orchestration 层启动策略
+        // 4. 启动策略执行：
+        // - WebSocket 模式：启动阶段没有 snap，不执行一次性分析，等待 WebSocket 的确认K线触发
+        // - 非 WebSocket 模式：尝试从DB取最新确认K线作为 snap 触发一次执行（避免 “需要提供K线快照”）
+        if env_is_true("IS_OPEN_SOCKET", false) {
+            info!(
+                "✅ 策略已预热并进入等待：{} - {} - {:?}（等待WebSocket确认K线触发）",
+                inst_id,
+                timeframe.as_str(),
+                strategy_type
+            );
+            continue;
+        }
+
+        let snap: Option<CandlesEntity> = {
+            let candles_model = CandlesModel::new();
+            let dto = SelectCandleReqDto {
+                inst_id: inst_id.clone(),
+                time_interval: timeframe.as_str().to_string(),
+                limit: 1,
+                select_time: None,
+                confirm: Some(1),
+            };
+            let mut candles = candles_model
+                .get_all(dto)
+                .await
+                .map_err(|e| anyhow!("加载最新确认K线失败: {}", e))?;
+            candles.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+            candles.pop()
+        };
+
+        if snap.is_none() {
+            warn!(
+                "⚠️  未找到最新确认K线，跳过首次执行: {} - {} - {:?}",
+                inst_id,
+                timeframe.as_str(),
+                strategy_type
+            );
+            continue;
+        }
+
         if let Err(e) = strategy_runner::execute_strategy(
             &inst_id,
             timeframe,
             strategy_type,
             Some(config_id),
+            None,
+            snap,
             &config_service,
             &execution_service,
         )
@@ -319,7 +368,10 @@ pub async fn run() -> Result<()> {
     };
 
     // 非本地环境校验系统时间
-    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "local".to_string());
+    let app_env = match std::env::var("APP_ENV") {
+        Ok(v) if !v.is_empty() => v,
+        _ => "local".to_string(),
+    };
     info!("🕐 应用环境: {}", app_env);
     if app_env != "local" {
         info!("校验系统时间与 OKX 时间差");
@@ -327,9 +379,6 @@ pub async fn run() -> Result<()> {
             error!("⚠️  系统时间校验失败: {}", e);
         }
     }
-
-    // 运行模式编排
-    run_modes().await?;
 
     // 启动心跳任务
     let heartbeat_handle = tokio::spawn(async {
@@ -340,9 +389,41 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    // 信号处理
-    let signal_name = setup_shutdown_signals().await;
-    info!("📡 接收到 {} 信号", signal_name);
+    // 运行模式编排：
+    // - 若开启 WebSocket：run_modes() 会长期阻塞，因此必须与信号处理并行 select!
+    // - 若未开启 WebSocket：先跑完 run_modes()，再进入信号等待
+    let open_socket = env_is_true("IS_OPEN_SOCKET", false);
+    if open_socket {
+        // 注意：run_modes() 在 WebSocket 场景可能“阻塞”也可能“快速返回”（内部可能 spawn 任务后返回）。
+        // 目标：无论 run_modes 是否返回，都必须持续等待退出信号。
+        let mut run_modes_fut = Box::pin(run_modes());
+        let mut signal_fut = Box::pin(setup_shutdown_signals());
+
+        let mut signal_name_opt: Option<&'static str> = None;
+
+        tokio::select! {
+            res = &mut run_modes_fut => {
+                if let Err(e) = res {
+                    error!("❌ 运行模式执行失败: {}", e);
+                }
+            }
+            signal_name = &mut signal_fut => {
+                signal_name_opt = Some(signal_name);
+            }
+        }
+
+        let signal_name = match signal_name_opt {
+            Some(name) => name,
+            None => signal_fut.await,
+        };
+        info!("📡 接收到 {} 信号", signal_name);
+    } else {
+        run_modes().await?;
+
+        // 信号处理
+        let signal_name = setup_shutdown_signals().await;
+        info!("📡 接收到 {} 信号", signal_name);
+    }
 
     // 停止心跳
     heartbeat_handle.abort();
@@ -371,23 +452,60 @@ async fn setup_shutdown_signals() -> &'static str {
 
     #[cfg(unix)]
     {
-        let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("Failed to register SIGTERM handler");
-        let mut sigint = signal::unix::signal(signal::unix::SignalKind::interrupt())
-            .expect("Failed to register SIGINT handler");
-        let mut sigquit = signal::unix::signal(signal::unix::SignalKind::quit())
-            .expect("Failed to register SIGQUIT handler");
+        let mut sigterm = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("❌ 注册 SIGTERM 失败: {}", e);
+                return "SIGNAL_SETUP_FAILED";
+            }
+        };
+        let mut sigint = match signal::unix::signal(signal::unix::SignalKind::interrupt()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("❌ 注册 SIGINT 失败: {}", e);
+                return "SIGNAL_SETUP_FAILED";
+            }
+        };
+        let mut sigquit = match signal::unix::signal(signal::unix::SignalKind::quit()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("❌ 注册 SIGQUIT 失败: {}", e);
+                return "SIGNAL_SETUP_FAILED";
+            }
+        };
 
-        tokio::select! {
-            _ = sigterm.recv() => "SIGTERM",
-            _ = sigint.recv() => "SIGINT",
-            _ = sigquit.recv() => "SIGQUIT",
+        // 注意：tokio 的 unix Signal::recv() 返回 Option<()>。
+        // 在极少数情况下（底层 stream 被关闭）会立刻返回 None，如果不处理会导致程序“无信号也退出”。
+        loop {
+            tokio::select! {
+                v = sigterm.recv() => {
+                    if v.is_some() {
+                        break "SIGTERM";
+                    }
+                    warn!("⚠️ SIGTERM 信号流已关闭，继续等待其他信号");
+                }
+                v = sigint.recv() => {
+                    if v.is_some() {
+                        break "SIGINT";
+                    }
+                    warn!("⚠️ SIGINT 信号流已关闭，继续等待其他信号");
+                }
+                v = sigquit.recv() => {
+                    if v.is_some() {
+                        break "SIGQUIT";
+                    }
+                    warn!("⚠️ SIGQUIT 信号流已关闭，继续等待其他信号");
+                }
+            }
         }
     }
 
     #[cfg(not(unix))]
     {
-        signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
+        if let Err(e) = signal::ctrl_c().await {
+            error!("❌ 监听 CTRL+C 失败: {}", e);
+            return "SIGNAL_SETUP_FAILED";
+        }
         "CTRL+C"
     }
 }
