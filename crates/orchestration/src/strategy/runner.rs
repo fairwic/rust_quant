@@ -121,7 +121,14 @@ pub async fn execute_strategy(
     config_service: &StrategyConfigService,
     execution_service: &StrategyExecutionService,
 ) -> Result<()> {
-    let key = format!("{}_{:?}_{:?}", inst_id, timeframe, strategy_type);
+    // 去重 key 必须包含 config_id：
+    // - 同一 symbol+timeframe+strategy_type 下可能存在多条配置（不同参数/风控）
+    // - 不包含 config_id 会导致多配置互相“误去重”，只有第一条能执行
+    let cfg_part = match config_id {
+        Some(id) => id.to_string(),
+        None => "none".to_string(),
+    };
+    let key = format!("{}_{:?}_{:?}_{}", inst_id, timeframe, strategy_type, cfg_part);
 
     info!(
         "🚀 开始执行策略: inst_id={}, timeframe={:?}, strategy={:?}",

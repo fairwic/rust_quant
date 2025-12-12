@@ -233,6 +233,26 @@ impl StrategyExecutionService {
             inst_id, period, config_id
         );
 
+        // 0) 幂等性：同一策略配置 + 同一信号时间戳 + 同一方向，只允许下单一次
+        // 说明：
+        // - WS 重连/重复推送、系统重启、上游重复触发都会导致重复进入下单逻辑
+        // - in_order_id 用作幂等键（同时可作为业务追踪ID）
+        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        match self.swap_order_repository.find_by_in_order_id(&in_order_id).await? {
+            Some(existing) => {
+                warn!(
+                    "⚠️ 幂等命中，跳过重复下单: inst_id={}, period={}, config_id={}, in_order_id={}, out_order_id={:?}",
+                    inst_id,
+                    period,
+                    config_id,
+                    in_order_id,
+                    existing.out_order_id
+                );
+                return Ok(());
+            }
+            None => {}
+        }
+
         // 1. 确定交易方向
         let (side, pos_side) = if signal.should_buy {
             ("buy", "long")
@@ -282,7 +302,17 @@ impl StrategyExecutionService {
 
         // 5. 计算下单数量（使用90%的安全系数）
         let safety_factor = 0.9;
-        let order_size_f64 = max_size.max_buy.parse::<f64>().unwrap_or(0.0) * safety_factor;
+        let max_buy = match max_size.max_buy.parse::<f64>() {
+            Ok(v) => v,
+            Err(e) => {
+                error!(
+                    "解析 max_buy 失败: inst_id={}, max_buy={}, error={}",
+                    inst_id, max_size.max_buy, e
+                );
+                return Err(anyhow!("解析最大可用下单量失败"));
+            }
+        };
+        let order_size_f64 = max_buy * safety_factor;
         let order_size = if order_size_f64 < 1.0 {
             "0".to_string()
         } else {
@@ -369,7 +399,6 @@ impl StrategyExecutionService {
         );
 
         // 8. 保存订单记录到数据库
-        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
         let order_detail = serde_json::json!({
             "entry_price": entry_price,
             "stop_loss": final_stop_loss,

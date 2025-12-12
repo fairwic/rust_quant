@@ -14,11 +14,11 @@ pub struct SignalLogEntity {
     #[sqlx(default)]
     pub id: Option<i64>,
     pub inst_id: String,
-    pub period: String,
+    pub time: String,
     pub strategy_type: String,
-    pub signal_result: String, // JSON格式
-    #[sqlx(default)]
-    pub created_at: Option<chrono::NaiveDateTime>,
+    pub strategy_result: String,
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: Option<chrono::NaiveDateTime>,
 }
 
 /// 信号日志仓储
@@ -33,7 +33,7 @@ impl SignalLogRepository {
     ///
     /// # Arguments
     /// * `inst_id` - 交易对
-    /// * `period` - 周期
+    /// * `period` - 周期（写入表字段：`time`）
     /// * `strategy_type` - 策略类型
     /// * `signal_json` - 信号JSON字符串
     pub async fn save_signal_log(
@@ -46,7 +46,7 @@ impl SignalLogRepository {
         let pool = get_db_pool();
 
         let result = sqlx::query(
-            "INSERT INTO strategy_signal_log (inst_id, period, strategy_type, signal_result) 
+            "INSERT INTO strategy_job_signal_log (inst_id, time, strategy_type, strategy_result) 
              VALUES (?, ?, ?, ?)",
         )
         .bind(inst_id)
@@ -57,7 +57,7 @@ impl SignalLogRepository {
         .await?;
 
         debug!(
-            "保存信号日志: inst_id={}, period={}, rows={}",
+            "保存信号日志: inst_id={}, time={}, rows={}",
             inst_id,
             period,
             result.rows_affected()
@@ -70,7 +70,7 @@ impl SignalLogRepository {
     ///
     /// # Arguments
     /// * `inst_id` - 交易对
-    /// * `period` - 周期
+    /// * `period` - 周期（查询表字段：`time`）
     /// * `limit` - 数量限制
     pub async fn find_recent_signals(
         &self,
@@ -81,8 +81,8 @@ impl SignalLogRepository {
         let pool = get_db_pool();
 
         let signals = sqlx::query_as::<_, SignalLogEntity>(
-            "SELECT * FROM strategy_signal_log 
-             WHERE inst_id = ? AND period = ? 
+            "SELECT * FROM strategy_job_signal_log 
+             WHERE inst_id = ? AND time = ? 
              ORDER BY created_at DESC 
              LIMIT ?",
         )
@@ -99,9 +99,12 @@ impl SignalLogRepository {
     pub async fn find_all(&self, limit: Option<usize>) -> Result<Vec<SignalLogEntity>> {
         let pool = get_db_pool();
 
-        let limit = limit.unwrap_or(100);
+        let limit = match limit {
+            Some(v) => v,
+            None => 100,
+        };
         let signals = sqlx::query_as::<_, SignalLogEntity>(
-            "SELECT * FROM strategy_signal_log 
+            "SELECT * FROM strategy_job_signal_log 
              ORDER BY created_at DESC 
              LIMIT ?",
         )
@@ -117,7 +120,7 @@ impl SignalLogRepository {
         let pool = get_db_pool();
 
         let result = sqlx::query(
-            "DELETE FROM strategy_signal_log 
+            "DELETE FROM strategy_job_signal_log 
              WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)",
         )
         .bind(days)

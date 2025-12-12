@@ -8,6 +8,8 @@ use tracing::{debug, error, info, warn};
 use crate::cache::{default_provider, LatestCandleCacheProvider};
 use crate::models::{CandlesEntity, CandlesModel};
 use crate::repositories::persist_worker::PersistTask;
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
 
 pub struct CandleService {
     cache: Arc<dyn LatestCandleCacheProvider>,
@@ -20,6 +22,10 @@ pub struct CandleService {
     /// - 由上层（orchestration/services）注入策略触发逻辑
     strategy_trigger: Option<Arc<dyn Fn(String, String, CandlesEntity) + Send + Sync>>,
 }
+
+/// 确认K线触发去重：确保同一 (inst_id, time_interval) 的同一根确认K线只触发一次
+/// key = "{inst_id}:{time_interval}" -> last_triggered_confirmed_ts(ms)
+static LAST_TRIGGERED_CONFIRMED_TS: Lazy<DashMap<String, i64>> = Lazy::new(|| DashMap::new());
 
 impl CandleService {
     pub fn new() -> Self {
@@ -83,16 +89,37 @@ impl CandleService {
             return Ok(());
         }
         // 取最后一条作为缓存（最新数据）
-        let latest = candles.last().unwrap();
-        let new_ts = latest.ts.parse::<i64>().unwrap_or(0);
+        let latest = match candles.last() {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let new_ts = match latest.ts.parse::<i64>() {
+            Ok(v) => v,
+            Err(e) => {
+                error!(
+                    "❌ 解析K线 ts 失败: inst_id={}, time_interval={}, ts={}, error={}",
+                    inst_id, time_interval, latest.ts, e
+                );
+                return Ok(());
+            }
+        };
 
         // 检查是否需要更新
         let should_update = match self.cache.get_or_fetch(inst_id, time_interval).await {
             Some(cache_candle) => {
                 new_ts > cache_candle.ts
                     || (new_ts == cache_candle.ts
-                        && latest.vol_ccy.parse::<f64>().unwrap_or(0.0)
-                            >= cache_candle.vol_ccy.parse::<f64>().unwrap_or(0.0))
+                        && {
+                            let new_vol = match latest.vol_ccy.parse::<f64>() {
+                                Ok(v) => v,
+                                Err(_) => 0.0,
+                            };
+                            let old_vol = match cache_candle.vol_ccy.parse::<f64>() {
+                                Ok(v) => v,
+                                Err(_) => 0.0,
+                            };
+                            new_vol >= old_vol
+                        })
             }
             None => true,
         };
@@ -118,6 +145,24 @@ impl CandleService {
 
             // 🚀 K线确认时触发策略执行
             if snap.confirm == "1" {
+                // 只触发一次：同 ts 的确认K线重复推送（重连/补发）会被抑制
+                let trigger_key = format!("{}:{}", inst_id, time_interval);
+                let last_ts = LAST_TRIGGERED_CONFIRMED_TS
+                    .get(&trigger_key)
+                    .map(|v| *v.value());
+
+                let should_trigger = match last_ts {
+                    Some(old) => new_ts > old,
+                    None => true,
+                };
+
+                if !should_trigger {
+                    debug!(
+                        "跳过重复确认K线触发: inst_id={}, time_interval={}, ts={}, last_ts={:?}",
+                        inst_id, time_interval, new_ts, last_ts
+                    );
+                } else {
+                    LAST_TRIGGERED_CONFIRMED_TS.insert(trigger_key, new_ts);
                 info!(
                     "📈 K线确认，触发策略执行: inst_id={}, time_interval={}, ts={}",
                     inst_id, time_interval, new_ts
@@ -139,12 +184,13 @@ impl CandleService {
                         inst_id, time_interval
                     );
                 }
+                }
             }
 
             // 🚀 发送到批处理队列（如果启用）或直接写库
             if let Some(sender) = &self.persist_sender {
                 let task = PersistTask {
-                    candles: candles.clone(),
+                    candles,
                     inst_id: inst_id.to_string(),
                     time_interval: time_interval.to_string(),
                 };

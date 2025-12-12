@@ -191,7 +191,7 @@ INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message
 INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (38, 'asset_db_asset_classficiation_desc_others', 0, '其他分类', 'asset_db_text_others', 'Others', NULL);
 INSERT INTO `test`.`asset_classification` (`id`, `contentKey`, `isNew`, `message`, `nameKey`, `type`, `created_at`) VALUES (39, 'asset_db_asset_classficiation_desc_yieldfarm', 0, '流动性挖矿', 'asset_db_text_yieldfarm', 'Yield Farming', NULL);
 
-CREATE TABLE `exchange_api_config` (
+CREATE TABLE `exchange_apikey_config` (
   `id` int NOT NULL AUTO_INCREMENT,
   `exchange_name` varchar(20) NOT NULL COMMENT '交易所类型',
   `api_key` varchar(100) NOT NULL COMMENT 'apikey',
@@ -199,12 +199,25 @@ CREATE TABLE `exchange_api_config` (
   `passphrase` varchar(100) NOT NULL COMMENT 'passphrase',
   `is_sandbox` tinyint NOT NULL COMMENT '是否模拟交易 0非 1是',
   `is_enabled` tinyint NOT NULL COMMENT '是否启用 0非 1是',
-  `description` varchar(255) NOT NULL COMMENT '描述',
+  `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '描述',
   `create_user_id` int NOT NULL DEFAULT '0' COMMENT '创建者',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `update_time` datetime NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='各交易所api key 配置';
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='各交易所api key 配置';
+
+
+
+CREATE TABLE `exchange_apikey_strategy_relation` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `strategy_config_id` int NOT NULL,
+  `api_key_config_id` int NOT NULL,
+  `priority` tinyint NOT NULL DEFAULT '0' COMMENT '优先级',
+  `is_enabled` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '0' COMMENT '是否启用',
+  PRIMARY KEY (`id`),
+  KEY `strategy_config_id` (`strategy_config_id`,`priority`,`is_enabled`),
+  KEY `api_key_config_id` (`api_key_config_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
 
