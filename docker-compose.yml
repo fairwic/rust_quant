@@ -1,21 +1,77 @@
 version: '3.0'
 services:
-  prod-rust-quant:
-    container_name: prod-rust-quant-job
+  quant_5m:
+    container_name: quant_5m
     build:
       context: .
       dockerfile: Dockerfile
+    working_dir: /usr/src/rust_quant
     environment:
       IS_BACK_TEST: 'false'
       IS_RUN_SYNC_DATA_JOB: 'true'
       IS_RUN_REAL_STRATEGY: 'true'
       IS_OPEN_SOCKET: 'true'
-      OKX_API_KEY:
-      OKX_API_SECRET:
-      OKX_PASSPHRASE:
+      RUN_STRATEGY_PERIOD: "5m"
+      OKX_API_KEY: 
+      OKX_API_SECRET: 
+      OKX_PASSPHRASE: 
     volumes:
       - .:/usr/src/rust_quant
-    command: sh -c "cargo build --release && ./target/release/rust_quant"
+    command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
+  quant_1h:
+    container_name: quant_1h  
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /usr/src/rust_quant
+    environment:
+      IS_BACK_TEST: 'false'
+      IS_RUN_SYNC_DATA_JOB: 'true'
+      IS_RUN_REAL_STRATEGY: 'true'
+      IS_OPEN_SOCKET: 'true'
+      RUN_STRATEGY_PERIOD: "1H"
+      OKX_API_KEY: 
+      OKX_API_SECRET: 
+      OKX_PASSPHRASE: 
+    volumes:
+      - .:/usr/src/rust_quant
+    command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
+  quant_4h:
+    container_name: quant_4h
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /usr/src/rust_quant
+    environment:
+      IS_BACK_TEST: 'false'
+      IS_RUN_SYNC_DATA_JOB: 'true'
+      IS_RUN_REAL_STRATEGY: 'true'
+      IS_OPEN_SOCKET: 'true'
+      RUN_STRATEGY_PERIOD: "4H"
+      OKX_API_KEY: 
+      OKX_API_SECRET: 
+      OKX_PASSPHRASE: 
+    volumes:
+      - .:/usr/src/rust_quant
+    command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust-quant"
+  quant_1d:
+    container_name: quant_1d  
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /usr/src/rust_quant
+    environment:
+      IS_BACK_TEST: 'false'
+      IS_RUN_SYNC_DATA_JOB: 'true'
+      IS_RUN_REAL_STRATEGY: 'true'
+      IS_OPEN_SOCKET: 'true'
+      RUN_STRATEGY_PERIOD: "1Dutc"
+      OKX_API_KEY: 
+      OKX_API_SECRET: 
+      OKX_PASSPHRASE: 
+    volumes:
+      - .:/usr/src/rust_quant
+    command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
   mysql:
     image: mysql:8.0
     container_name: mysql
