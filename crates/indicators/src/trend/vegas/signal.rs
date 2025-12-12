@@ -1,5 +1,3 @@
-// TODO: equal_high_low_indicator 需要重构，暂时注释
-// use crate::equal_high_low_indicator::EqualHighLowValue;
 use crate::fair_value_gap_indicator::FairValueGapValue;
 use crate::leg_detection_indicator::LegDetectionValue;
 use crate::market_structure_indicator::MarketStructureValue;

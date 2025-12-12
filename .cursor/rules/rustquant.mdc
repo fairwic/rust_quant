@@ -26,6 +26,35 @@ crates/
 
 ---
 
+## ✅ 推荐目录规范 V3（更少层级/更少重复名词/依赖更硬）
+
+目标：让“放哪里”只看 **职责 + 是否 I/O** 就能决定，不用记一堆 service/repository/model 的重复词。
+
+### 核心思想：Ports / Adapters
+- **Port（端口）**：抽象接口，放在稳定的一侧（`domain` 或 `services`）
+- **Adapter（适配器）**：具体实现，放在 I/O 一侧（`infrastructure` 或 `market`）
+
+### 强制命名去重（减少认知噪音）
+- **services 层不再到处出现 `*_service.rs`**
+  - ✅ 推荐：`services/src/usecases/<bounded_context>/<verb>.rs`
+  - ✅ 例：`services/src/usecases/strategy/execute.rs`
+- **infrastructure 层不再到处出现 `*_repository.rs` 作为唯一形态**
+  - ✅ 推荐：`infrastructure/src/storage/<db|redis>/<aggregate>.rs`
+  - ✅ 推荐：`infrastructure/src/adapters/<exchange|email|notify>/<name>.rs`
+- **market 层只保留“接入”语义**
+  - ✅ 推荐：`market/src/ingest/<exchange>/...`、`market/src/streams/...`、`market/src/dto/...`
+  - ❌ 禁止出现 `sqlx::FromRow` / `Sqlx*Repository`（持久化全部在 infrastructure）
+
+### 两种落地策略（你可以二选一）
+1) **保留 `market` crate（推荐短期）**
+   - `market`：只负责拉取/解码/归一化（DTO）
+   - `infrastructure`：负责落库/缓存/消息/交易所签名等 I/O
+2) **合并 `market` → `infrastructure`（推荐长期）**
+   - 把 `market` 作为 `infrastructure/src/adapters/market_ingest/...` 子模块
+   - 好处：减少 crate 数、减少“exchanges/repositories”重复名词
+
+---
+
 ## 🎯 代码放置决策树
 
 ### Q1: 这是业务逻辑还是基础设施？
@@ -92,10 +121,8 @@ crates/
 **职责**: 协调多个领域对象，实现复杂业务流程
 
 **放置规则**:
-- ✅ 策略服务 → `services/src/strategy/xxx_service.rs`
-- ✅ 交易服务 → `services/src/trading/xxx_service.rs`
-- ✅ 市场服务 → `services/src/market/xxx_service.rs`
-- ✅ 风控服务 → `services/src/risk/xxx_service.rs`
+- ✅ 用例（推荐）→ `services/src/usecases/<bounded_context>/<verb>.rs`
+- ✅ 领域分组（兼容现状）→ `services/src/{strategy,market,risk,trading}/...`
 
 **要求**:
 - ✅ **依赖domain接口**: 使用 `domain::traits::XxxRepository` (trait)，而不是infrastructure的具体实现
@@ -328,6 +355,11 @@ market     → domain (+ common/core)   # 仅接入与转换；不落库
 infrastructure → domain + core + common
 services       → domain + (strategies/risk/execution/market) + infrastructure
 ```
+
+### 硬边界检查（可执行标准）
+- **strategies**：不得出现 `sqlx`/`redis`/`reqwest`/`okx`/`tokio_tungstenite`；不得引用 `market`/`infrastructure`
+- **market**：不得出现 `sqlx::FromRow`；不得出现 `*Repository`；不得引用 `infrastructure`
+- **services**：可以引用 `infrastructure`，但字段类型必须是 `domain` 的 trait（端口），禁止持有具体实现类型
 
 ### 依赖倒置原则 (DIP)
 **services层访问infrastructure的正确方式**:

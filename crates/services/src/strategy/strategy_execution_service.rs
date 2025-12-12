@@ -124,6 +124,7 @@ impl StrategyExecutionService {
         let has_signal = signal.should_buy || signal.should_sell;
 
         if !has_signal {
+            info!("signal: {:?}", signal);
             info!(
                 "无交易信号，跳过下单 - 策略类型：{:?}, 交易周期：{}",
                 config.strategy_type, period

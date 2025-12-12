@@ -1,7 +1,5 @@
 use super::config::EmaTouchTrendSignalConfig;
 use super::signal::{EmaSignalValue, EmaTouchTrendSignalValue};
-// TODO: 迁移后需要重新实现 IsBigKLineIndicator
-// use rust_quant_common::utils::common::IsBigKLineIndicator;
 use rust_quant_common::utils::time;
 use rust_quant_common::CandleItem;
 
