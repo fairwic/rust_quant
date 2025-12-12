@@ -8,9 +8,7 @@ use anyhow::{anyhow, Result};
 use std::collections::VecDeque;
 use tracing::debug;
 
-use crate::strategy_common::parse_candle_to_data_item;
 use rust_quant_common::CandleItem;
-use rust_quant_market::models::CandlesEntity;
 
 /// 执行上下文 - 封装策略执行的公共数据
 pub struct ExecutionContext {
@@ -42,15 +40,12 @@ pub fn get_recent_candles(candle_items: &VecDeque<CandleItem>, n: usize) -> Vec<
 }
 
 /// 转换K线数据
-pub fn convert_candles_to_items(candles: &[CandlesEntity]) -> VecDeque<CandleItem> {
-    candles
-        .iter()
-        .map(|candle| parse_candle_to_data_item(candle))
-        .collect()
+pub fn convert_candles_to_items(candles: &[CandleItem]) -> VecDeque<CandleItem> {
+    candles.iter().cloned().collect()
 }
 
 /// 验证K线数据
-pub fn validate_candles(candles: &[CandlesEntity]) -> Result<i64> {
+pub fn validate_candles(candles: &[CandleItem]) -> Result<i64> {
     if candles.is_empty() {
         return Err(anyhow!("K线数据为空"));
     }

@@ -10,6 +10,7 @@ use tracing::{debug, error, info, warn};
 use rust_quant_domain::StrategyConfig;
 use rust_quant_market::models::{CandlesModel, SelectCandleReqDto};
 use rust_quant_strategies::framework::strategy_registry::get_strategy_registry;
+use rust_quant_common::CandleItem;
 
 /// 策略数据服务
 ///
@@ -20,6 +21,28 @@ use rust_quant_strategies::framework::strategy_registry::get_strategy_registry;
 pub struct StrategyDataService;
 
 impl StrategyDataService {
+    fn candle_entity_to_item(c: &rust_quant_market::models::CandlesEntity) -> Result<CandleItem> {
+        let o = c.o.parse::<f64>().map_err(|e| anyhow!("解析开盘价失败: {}", e))?;
+        let h = c.h.parse::<f64>().map_err(|e| anyhow!("解析最高价失败: {}", e))?;
+        let l = c.l.parse::<f64>().map_err(|e| anyhow!("解析最低价失败: {}", e))?;
+        let close = c.c.parse::<f64>().map_err(|e| anyhow!("解析收盘价失败: {}", e))?;
+        let v = c.vol_ccy.parse::<f64>().map_err(|e| anyhow!("解析成交量失败: {}", e))?;
+        let confirm = c
+            .confirm
+            .parse::<i32>()
+            .map_err(|e| anyhow!("解析 confirm 失败: {}", e))?;
+
+        Ok(CandleItem {
+            o,
+            h,
+            l,
+            c: close,
+            v,
+            ts: c.ts,
+            confirm,
+        })
+    }
+
     /// 初始化单个策略数据
     ///
     /// # 参数
@@ -70,6 +93,11 @@ impl StrategyDataService {
         // 按时间升序排列
         candles.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
 
+        let candle_items = candles
+            .iter()
+            .map(Self::candle_entity_to_item)
+            .collect::<Result<Vec<_>>>()?;
+
         info!(
             "✅ 加载 {} 根历史K线: inst_id={}, period={}",
             candles.len(),
@@ -89,7 +117,7 @@ impl StrategyDataService {
         );
 
         let result = executor
-            .initialize_data(&strategy_config, inst_id, period, candles)
+            .initialize_data(&strategy_config, inst_id, period, candle_items)
             .await?;
 
         info!(

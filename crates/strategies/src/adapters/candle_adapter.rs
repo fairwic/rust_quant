@@ -1,17 +1,17 @@
 //! K线数据适配器
 //!
-//! 解决孤儿规则问题：为外部类型(CandlesEntity)实现外部trait(ta库的High/Low/Close)
+//! 解决孤儿规则问题：为外部类型(CandleItem)实现外部trait(ta库的High/Low/Close)
 //!
 //! ## 设计模式
 //!
 //! 使用Newtype模式创建本地wrapper，然后为wrapper实现trait
 
-use rust_quant_market::models::CandlesEntity;
+use rust_quant_common::CandleItem;
 use ta::{Close, High, Low, Open, Volume};
 
 /// K线数据的适配器包装器
 ///
-/// 用于为 `CandlesEntity` 实现 `ta` 库的 trait
+/// 用于为 `CandleItem` 实现 `ta` 库的 trait
 #[derive(Debug, Clone)]
 pub struct CandleAdapter {
     pub open: f64,
@@ -21,14 +21,14 @@ pub struct CandleAdapter {
     pub volume: f64,
 }
 
-impl From<&CandlesEntity> for CandleAdapter {
-    fn from(candle: &CandlesEntity) -> Self {
+impl From<&CandleItem> for CandleAdapter {
+    fn from(candle: &CandleItem) -> Self {
         Self {
-            open: candle.o.parse().unwrap_or(0.0),
-            high: candle.h.parse().unwrap_or(0.0),
-            low: candle.l.parse().unwrap_or(0.0),
-            close: candle.c.parse().unwrap_or(0.0),
-            volume: candle.vol.parse().unwrap_or(0.0),
+            open: candle.o,
+            high: candle.h,
+            low: candle.l,
+            close: candle.c,
+            volume: candle.v,
         }
     }
 }
@@ -64,33 +64,28 @@ impl Volume for CandleAdapter {
 }
 
 /// 便捷转换函数
-pub fn adapt(candle: &CandlesEntity) -> CandleAdapter {
+pub fn adapt(candle: &CandleItem) -> CandleAdapter {
     CandleAdapter::from(candle)
 }
 
 /// 批量转换
-pub fn adapt_many(candles: &[CandlesEntity]) -> Vec<CandleAdapter> {
+pub fn adapt_many(candles: &[CandleItem]) -> Vec<CandleAdapter> {
     candles.iter().map(adapt).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_quant_market::models::CandlesEntity;
 
-    fn create_test_candle() -> CandlesEntity {
-        CandlesEntity {
-            id: Some(1),
+    fn create_test_candle() -> CandleItem {
+        CandleItem {
+            o: 50000.0,
+            h: 51000.0,
+            l: 49000.0,
+            c: 50500.0,
+            v: 100.5,
             ts: 1609459200000,
-            o: "50000.0".to_string(),
-            h: "51000.0".to_string(),
-            l: "49000.0".to_string(),
-            c: "50500.0".to_string(),
-            vol: "100.5".to_string(),
-            vol_ccy: "5050000.0".to_string(),
-            confirm: "1".to_string(),
-            created_at: None,
-            updated_at: None,
+            confirm: 1,
         }
     }
 

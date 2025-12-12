@@ -20,11 +20,9 @@ use crate::strategy_common::{get_multi_indicator_values, parse_candle_to_data_it
 use crate::StrategyType;
 use rust_quant_indicators::trend::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::VegasStrategy;
-use rust_quant_market::models::CandlesEntity;
 // ⏳ 移除orchestration依赖，避免循环依赖
 // 使用 ExecutionContext trait 替代直接依赖
 // use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;
-use okx::dto::EnumToStrTrait;
 use rust_quant_common::CandleItem;
 
 /// Vegas 策略执行器
@@ -55,7 +53,7 @@ impl StrategyExecutor for VegasStrategyExecutor {
         strategy_config: &StrategyConfig,
         inst_id: &str,
         period: &str,
-        candles: Vec<CandlesEntity>,
+        candles: Vec<CandleItem>,
     ) -> Result<StrategyDataResult> {
         debug!("初始化 Vegas 策略数据: {}_{}", inst_id, period);
 
@@ -107,7 +105,7 @@ impl StrategyExecutor for VegasStrategyExecutor {
         inst_id: &str,
         period: &str,
         strategy_config: &StrategyConfig,
-        snap: Option<CandlesEntity>,
+        snap: Option<CandleItem>,
     ) -> Result<SignalResult> {
         const MAX_HISTORY_SIZE: usize = 4000;
 

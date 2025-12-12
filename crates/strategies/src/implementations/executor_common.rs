@@ -17,10 +17,9 @@ use crate::framework::config::strategy_config::StrategyConfig;
 use crate::framework::execution_traits::{
     ExecutionStateManager, SignalLogger, StrategyExecutionContext, TimeChecker,
 };
-use crate::strategy_common::{parse_candle_to_data_item, BasicRiskStrategyConfig, SignalResult};
+use crate::strategy_common::{BasicRiskStrategyConfig, SignalResult};
 use crate::StrategyType;
 use rust_quant_common::CandleItem;
-use rust_quant_market::models::CandlesEntity;
 
 /// 执行上下文 - 封装策略执行的公共数据
 pub struct ExecutionContext {
@@ -122,11 +121,8 @@ pub fn extract_risk_config(strategy_config: &StrategyConfig) -> Result<BasicRisk
 }
 
 /// 转换K线数据为 CandleItem
-pub fn convert_candles_to_items(candles: &[CandlesEntity]) -> VecDeque<CandleItem> {
-    candles
-        .iter()
-        .map(|candle| parse_candle_to_data_item(candle))
-        .collect()
+pub fn convert_candles_to_items(candles: &[CandleItem]) -> VecDeque<CandleItem> {
+    candles.iter().cloned().collect()
 }
 
 /// 获取最近的 N 根 K 线数据
@@ -134,7 +130,7 @@ pub async fn get_recent_candles_from_db(
     inst_id: &str,
     period: &str,
     limit: usize,
-) -> Result<Vec<CandlesEntity>> {
+) -> Result<Vec<CandleItem>> {
     // TODO: 这里需要使用 infrastructure::repositories::CandleRepository
     // 暂时返回空，调用方应该自己获取数据
     let _ = (inst_id, period, limit);
@@ -142,7 +138,7 @@ pub async fn get_recent_candles_from_db(
 }
 
 /// 验证K线数据
-pub fn validate_candles(candles: &[CandlesEntity]) -> Result<i64> {
+pub fn validate_candles(candles: &[CandleItem]) -> Result<i64> {
     if candles.is_empty() {
         return Err(anyhow!("K线数据为空"));
     }
@@ -175,8 +171,8 @@ pub fn is_new_timestamp(old_time: i64, new_time: i64) -> bool {
 pub async fn get_latest_candle(
     _inst_id: &str,
     _period: &str,
-    snap: Option<CandlesEntity>,
-) -> Result<CandlesEntity> {
+    snap: Option<CandleItem>,
+) -> Result<CandleItem> {
     if let Some(snap) = snap {
         Ok(snap)
     } else {
@@ -218,6 +214,9 @@ mod tests {
         let context = DefaultExecutionContext::new();
         let result = should_execute_strategy("BTC-USDT:1H", 1000, 2000, "1H", false, &context);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        match result {
+            Ok(v) => assert_eq!(v, true),
+            Err(e) => panic!("should_execute_strategy 返回错误: {}", e),
+        }
     }
 }

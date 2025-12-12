@@ -4,13 +4,11 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use std::collections::VecDeque;
 
 use crate::framework::config::strategy_config::StrategyConfig;
 use crate::strategy_common::SignalResult;
 use crate::StrategyType;
 use rust_quant_common::CandleItem;
-use rust_quant_market::models::CandlesEntity;
 
 /// 策略数据快照（通用）
 #[derive(Debug, Clone)]
@@ -61,7 +59,7 @@ pub trait StrategyExecutor: Send + Sync {
         strategy_config: &StrategyConfig,
         inst_id: &str,
         period: &str,
-        candles: Vec<CandlesEntity>,
+        candles: Vec<CandleItem>,
     ) -> Result<StrategyDataResult>;
 
     /// 执行策略（生成交易信号）
@@ -89,7 +87,7 @@ pub trait StrategyExecutor: Send + Sync {
         inst_id: &str,
         period: &str,
         strategy_config: &StrategyConfig,
-        snap: Option<CandlesEntity>,
+        snap: Option<CandleItem>,
     ) -> Result<SignalResult>;
 }
 

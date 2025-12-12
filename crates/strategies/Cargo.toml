@@ -9,8 +9,6 @@ rust-version.workspace = true
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
 rust-quant-domain.workspace = true           # 新增: 领域模型
-rust-quant-infrastructure.workspace = true   # 新增: 基础设施
-rust-quant-market.workspace = true
 rust-quant-indicators.workspace = true
 # 移除循环依赖: strategies 不应该依赖这些包
 # rust-quant-risk.workspace = true
@@ -29,9 +27,6 @@ chrono.workspace = true
 dashmap.workspace = true
 once_cell.workspace = true
 
-# 交易所 SDK
-okx.workspace = true
-
 # 技术分析库
 ta.workspace = true
 
@@ -40,6 +35,3 @@ uuid.workspace = true
 futures.workspace = true
 futures-util.workspace = true
 ndarray.workspace = true
-redis.workspace = true
-clap.workspace = true
-log.workspace = true

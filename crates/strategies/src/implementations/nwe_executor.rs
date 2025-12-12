@@ -15,12 +15,10 @@ use crate::cache::arc_nwe_indicator_values::{
     get_nwe_hash_key, get_nwe_indicator_manager, set_nwe_strategy_indicator_values,
 };
 use crate::framework::strategy_trait::{StrategyDataResult, StrategyExecutor};
-use rust_quant_market::models::CandlesEntity;
 use crate::framework::config::strategy_config::StrategyConfig;
 use crate::implementations::nwe_strategy::{NweSignalValues, NweStrategy, NweStrategyConfig};
 use crate::strategy_common::{parse_candle_to_data_item, SignalResult};
 use crate::StrategyType;
-use okx::dto::EnumToStrTrait;
 use rust_quant_common::CandleItem;
 use rust_quant_indicators::trend::nwe::NweIndicatorValues;
 
@@ -52,7 +50,7 @@ impl StrategyExecutor for NweStrategyExecutor {
         strategy_config: &StrategyConfig,
         inst_id: &str,
         period: &str,
-        candles: Vec<CandlesEntity>,
+        candles: Vec<CandleItem>,
     ) -> Result<StrategyDataResult> {
         debug!("初始化 Nwe 策略数据: {}_{}", inst_id, period);
 
@@ -105,7 +103,7 @@ impl StrategyExecutor for NweStrategyExecutor {
         inst_id: &str,
         period: &str,
         strategy_config: &StrategyConfig,
-        snap: Option<CandlesEntity>,
+        snap: Option<CandleItem>,
     ) -> Result<SignalResult> {
         const MAX_HISTORY_SIZE: usize = 500;
 

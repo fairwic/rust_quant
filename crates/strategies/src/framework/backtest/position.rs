@@ -2,55 +2,56 @@ use super::super::types::TradeSide;
 use super::recording::record_trade_entry;
 use super::types::{BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState};
 use crate::CandleItem;
-use okx::dto::common::PositionSide;
-use okx::dto::EnumToStrTrait;
+use rust_quant_domain::enums::PositionSide;
 use tracing::error;
 
 /// 最终平仓处理
 pub fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list: &[CandleItem]) {
-    if trading_state.trade_position.is_some() {
-        let mut trade_position = trading_state.trade_position.clone().unwrap();
-        let last_candle = candle_item_list.last().unwrap();
-        let last_price = last_candle.c;
-        trade_position.close_price = Some(last_price);
+    let mut trade_position = match trading_state.trade_position.clone() {
+        Some(p) => p,
+        None => return,
+    };
 
-        let profit = match trade_position.trade_side {
-            TradeSide::Long => {
-                (last_price - trade_position.open_price) * trade_position.position_nums
-            }
-            TradeSide::Short => {
-                (trade_position.open_price - last_price) * trade_position.position_nums
-            }
-        };
+    let last_candle = match candle_item_list.last() {
+        Some(c) => c,
+        None => return,
+    };
 
-        close_position(
-            trading_state,
-            last_candle,
-            &SignalResult {
-                should_buy: false,
-                should_sell: true,
-                open_price: last_price,
-                best_open_price: None,
-                atr_take_profit_ratio_price: None,
-                atr_stop_loss_price: None,
-                long_signal_take_profit_price: None,
-                short_signal_take_profit_price: None,
-                signal_kline_stop_loss_price: None,
-                ts: last_candle.ts,
-                single_value: Some("结束平仓".to_string()),
-                single_result: Some("结束平仓".to_string()),
-                move_stop_open_price_when_touch_price: None,
-                counter_trend_pullback_take_profit_price: None,
-                is_ema_short_trend: None,
-                is_ema_long_trend: None,
-                atr_take_profit_level_1: None,
-                atr_take_profit_level_2: None,
-                atr_take_profit_level_3: None,
-            },
-            "结束平仓",
-            profit,
-        );
-    }
+    let last_price = last_candle.c;
+    trade_position.close_price = Some(last_price);
+
+    let profit = match trade_position.trade_side {
+        TradeSide::Long => (last_price - trade_position.open_price) * trade_position.position_nums,
+        TradeSide::Short => (trade_position.open_price - last_price) * trade_position.position_nums,
+    };
+
+    close_position(
+        trading_state,
+        last_candle,
+        &SignalResult {
+            should_buy: false,
+            should_sell: true,
+            open_price: last_price,
+            best_open_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
+            signal_kline_stop_loss_price: None,
+            ts: last_candle.ts,
+            single_value: Some("结束平仓".to_string()),
+            single_result: Some("结束平仓".to_string()),
+            move_stop_open_price_when_touch_price: None,
+            counter_trend_pullback_take_profit_price: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
+        },
+        "结束平仓",
+        profit,
+    );
 }
 
 /// 开多仓
@@ -68,8 +69,10 @@ pub fn open_long_position(
     let mut temp_trade_position = TradePosition {
         position_nums: state.funds / signal.open_price,
         open_price: signal.open_price,
-        open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
-            .unwrap(),
+        open_position_time: match rust_quant_common::utils::time::mill_time_to_datetime(candle.ts) {
+            Ok(s) => s,
+            Err(_) => String::new(),
+        },
         signal_open_position_time: signal_open_time,
         trade_side: TradeSide::Long,
         ..Default::default()
@@ -110,8 +113,8 @@ pub fn set_long_stop_close_price(
     //     }
     // }
     //atr止损
-    if signal.atr_stop_loss_price.is_some() {
-        temp_trade_position.atr_stop_loss_price = Some(signal.atr_stop_loss_price.unwrap());
+    if let Some(p) = signal.atr_stop_loss_price {
+        temp_trade_position.atr_stop_loss_price = Some(p);
     }
     // 如果启用了移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近,则设置移动止损价格
     if let Some(is_move_stop_open_price_when_touch_price) =
@@ -129,8 +132,11 @@ pub fn set_long_stop_close_price(
             if signal.signal_kline_stop_loss_price.is_none() {
                 error!("signal_kline_stop_loss_price is none");
             }
-            temp_trade_position.signal_high_low_diff =
-                (signal.signal_kline_stop_loss_price.unwrap() - signal.open_price).abs();
+            if let Some(p) = signal.signal_kline_stop_loss_price {
+                temp_trade_position.signal_high_low_diff = (p - signal.open_price).abs();
+            } else {
+                error!("signal_kline_stop_loss_price is none");
+            }
 
             temp_trade_position.atr_take_ratio_profit_price = Some(
                 signal.open_price
@@ -171,8 +177,10 @@ pub fn open_short_position(
     let mut temp_trade_position = TradePosition {
         position_nums: state.funds / signal.open_price,
         open_price: signal.open_price,
-        open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
-            .unwrap(),
+        open_position_time: match rust_quant_common::utils::time::mill_time_to_datetime(candle.ts) {
+            Ok(s) => s,
+            Err(_) => String::new(),
+        },
         signal_open_position_time: signal_open_time,
         trade_side: TradeSide::Short,
         ..Default::default()
@@ -199,17 +207,20 @@ pub fn set_short_stop_close_price(
             if signal.atr_stop_loss_price.is_none() {
                 error!("atr_stop_loss_price is none");
             }
-            let atr_stop_loss_price = signal.atr_stop_loss_price.unwrap();
-            let diff_price = (atr_stop_loss_price - signal.open_price).abs();
+            if let Some(atr_stop_loss_price) = signal.atr_stop_loss_price {
+                let diff_price = (atr_stop_loss_price - signal.open_price).abs();
 
-            temp_trade_position.atr_take_ratio_profit_price =
-                Some(signal.open_price - (diff_price * atr_take_profit_ratio));
+                temp_trade_position.atr_take_ratio_profit_price =
+                    Some(signal.open_price - (diff_price * atr_take_profit_ratio));
+            } else {
+                error!("atr_stop_loss_price is none");
+            }
         }
     }
 
     //atr止损
-    if let Some(_atr_stop_loss_price) = signal.atr_stop_loss_price {
-        temp_trade_position.atr_stop_loss_price = Some(signal.atr_stop_loss_price.unwrap());
+    if let Some(p) = signal.atr_stop_loss_price {
+        temp_trade_position.atr_stop_loss_price = Some(p);
     }
 
     // 如果启用了设置预止损价格,则根据开仓方向设置预止损价格
@@ -272,8 +283,15 @@ pub fn close_position(
 ) {
     use super::recording::record_trade_exit;
 
-    let exit_time = rust_quant_common::utils::time::mill_time_to_datetime(candle.ts).unwrap();
-    let mut trade_position = state.trade_position.clone().unwrap();
+    let exit_time = match rust_quant_common::utils::time::mill_time_to_datetime(candle.ts) {
+        Ok(s) => s,
+        Err(_) => String::new(),
+    };
+
+    let mut trade_position = match state.trade_position.clone() {
+        Some(p) => p,
+        None => return,
+    };
     let quantity = trade_position.position_nums;
 
     // 手续费设定0.007,假设开仓平仓各收一次 (数量*价格 *0.07%)

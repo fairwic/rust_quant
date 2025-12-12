@@ -1,12 +1,8 @@
-use rust_quant_market::models::CandlesEntity;
 use crate::CandleItem;
 
 /// 解析价格
-pub fn parse_price(candle: &CandlesEntity) -> f64 {
-    candle.c.parse::<f64>().unwrap_or_else(|e| {
-        tracing::error!("Failed to parse price: {}", e);
-        0.0
-    })
+pub fn parse_price(candle: &CandleItem) -> f64 {
+    candle.c
 }
 
 /// 计算盈亏
@@ -18,18 +14,9 @@ pub fn calculate_profit_loss(is_long: bool, position: f64, entry_price: f64, exi
     }
 }
 
-/// 将CandlesEntity转换为CandleItem
-pub fn parse_candle_to_data_item(candle: &CandlesEntity) -> CandleItem {
-    CandleItem::builder()
-        .c(candle.c.parse::<f64>().unwrap())
-        .v(candle.vol_ccy.parse::<f64>().unwrap())
-        .h(candle.h.parse::<f64>().unwrap())
-        .l(candle.l.parse::<f64>().unwrap())
-        .o(candle.o.parse::<f64>().unwrap())
-        .confirm(candle.confirm.parse::<i32>().unwrap())
-        .ts(candle.ts)
-        .build()
-        .unwrap()
+/// CandleItem 在策略层即为标准输入，保持接口名仅为向后兼容
+pub fn parse_candle_to_data_item(candle: &CandleItem) -> CandleItem {
+    candle.clone()
 }
 
 /// 计算胜率

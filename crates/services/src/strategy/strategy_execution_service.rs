@@ -10,7 +10,7 @@ use tracing::{error, info, warn};
 use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
-use rust_quant_market::models::CandlesEntity;
+use rust_quant_common::CandleItem;
 use rust_quant_strategies::strategy_common::SignalResult;
 
 /// 策略执行服务
@@ -39,6 +39,28 @@ impl StrategyExecutionService {
         }
     }
 
+    fn candle_entity_to_item(c: &rust_quant_market::models::CandlesEntity) -> Result<CandleItem> {
+        let o = c.o.parse::<f64>().map_err(|e| anyhow!("解析开盘价失败: {}", e))?;
+        let h = c.h.parse::<f64>().map_err(|e| anyhow!("解析最高价失败: {}", e))?;
+        let l = c.l.parse::<f64>().map_err(|e| anyhow!("解析最低价失败: {}", e))?;
+        let close = c.c.parse::<f64>().map_err(|e| anyhow!("解析收盘价失败: {}", e))?;
+        let v = c.vol_ccy.parse::<f64>().map_err(|e| anyhow!("解析成交量失败: {}", e))?;
+        let confirm = c
+            .confirm
+            .parse::<i32>()
+            .map_err(|e| anyhow!("解析 confirm 失败: {}", e))?;
+
+        Ok(CandleItem {
+            o,
+            h,
+            l,
+            c: close,
+            v,
+            ts: c.ts,
+            confirm,
+        })
+    }
+
     /// 执行策略分析和交易流程
     ///
     /// 参考原始业务逻辑：src/trading/strategy/executor_common.rs::execute_order
@@ -55,7 +77,7 @@ impl StrategyExecutionService {
         inst_id: &str,
         period: &str,
         config: &StrategyConfig,
-        snap: Option<CandlesEntity>,
+        snap: Option<rust_quant_market::models::CandlesEntity>,
     ) -> Result<SignalResult> {
         info!(
             "开始执行策略: type={:?}, symbol={}, period={}",
@@ -83,8 +105,13 @@ impl StrategyExecutionService {
         );
 
         // 3. 执行策略分析，获取交易信号
+        let snap_item = match snap.as_ref() {
+            Some(c) => Some(Self::candle_entity_to_item(c)?),
+            None => None,
+        };
+
         let signal = strategy_executor
-            .execute(inst_id, period, config, snap)
+            .execute(inst_id, period, config, snap_item)
             .await
             .map_err(|e| {
                 error!("策略执行失败: {}", e);
