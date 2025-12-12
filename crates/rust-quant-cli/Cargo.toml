@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "rust-quant"
+name = "rust_quant"
 path = "src/main.rs"
 
 [dependencies]
