@@ -12,6 +12,10 @@ use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
 use rust_quant_common::CandleItem;
 use rust_quant_strategies::strategy_common::SignalResult;
+use tokio::sync::mpsc;
+
+use rust_quant_risk::realtime::{PositionSnapshot, RealtimeRiskEvent, StrategyRiskConfigSnapshot};
+use rust_quant_domain::enums::PositionSide as DomainPositionSide;
 
 /// 策略执行服务
 ///
@@ -29,6 +33,9 @@ use rust_quant_strategies::strategy_common::SignalResult;
 pub struct StrategyExecutionService {
     /// 合约订单仓储（依赖注入）
     swap_order_repository: Arc<dyn SwapOrderRepository>,
+
+    /// 实盘实时风控事件通道（可选）
+    realtime_risk_tx: Option<mpsc::Sender<RealtimeRiskEvent>>,
 }
 
 impl StrategyExecutionService {
@@ -36,7 +43,14 @@ impl StrategyExecutionService {
     pub fn new(swap_order_repository: Arc<dyn SwapOrderRepository>) -> Self {
         Self {
             swap_order_repository,
+            realtime_risk_tx: None,
         }
+    }
+
+    /// 注入实时风控事件通道（用于实盘动态风控）
+    pub fn with_realtime_risk_sender(mut self, tx: mpsc::Sender<RealtimeRiskEvent>) -> Self {
+        self.realtime_risk_tx = Some(tx);
+        self
     }
 
     fn candle_entity_to_item(c: &rust_quant_market::models::CandlesEntity) -> Result<CandleItem> {
@@ -147,6 +161,18 @@ impl StrategyExecutionService {
                 .map_err(|e| anyhow!("解析风险配置失败: {}", e))?;
 
         info!("风险配置: risk_config:{:#?}", risk_config);
+
+        // 7.1 推送风险配置到实时风控（若启用）
+        if let Some(tx) = self.realtime_risk_tx.clone() {
+            let snap = StrategyRiskConfigSnapshot {
+                strategy_config_id: config.id,
+                inst_id: inst_id.to_string(),
+                risk: risk_config.clone(),
+            };
+            tokio::spawn(async move {
+                let _ = tx.send(RealtimeRiskEvent::RiskConfig(snap)).await;
+            });
+        }
 
         // 8. 执行下单
         if let Err(e) = self
@@ -410,6 +436,7 @@ impl StrategyExecutionService {
                 signal,
                 order_size.clone(),
                 Some(entry_price),
+                Some(final_stop_loss),
             )
             .await
             .map_err(|e| {
@@ -433,6 +460,32 @@ impl StrategyExecutionService {
             "✅ 下单成功: inst_id={}, order_id={}, size={}",
             inst_id, out_order_id, order_size
         );
+
+        // 7.1 下单成功后推送 PositionSnapshot（用于“1.5R 触发保本移动止损”）
+        if let (Some(tx), true) = (self.realtime_risk_tx.clone(), !out_order_id.is_empty()) {
+            let size_f64 = match order_size.parse::<f64>() {
+                Ok(v) => v,
+                Err(_) => 0.0,
+            };
+            let pos_side_domain = if side == "buy" {
+                DomainPositionSide::Long
+            } else {
+                DomainPositionSide::Short
+            };
+            let pos = PositionSnapshot {
+                strategy_config_id: config_id,
+                inst_id: inst_id.to_string(),
+                pos_side: pos_side_domain,
+                entry_price,
+                size: size_f64,
+                initial_stop_loss: Some(final_stop_loss),
+                ord_id: Some(out_order_id.clone()),
+                is_open: true,
+            };
+            tokio::spawn(async move {
+                let _ = tx.send(RealtimeRiskEvent::Position(pos)).await;
+            });
+        }
 
         // 8. 保存订单记录到数据库
         let order_detail = serde_json::json!({

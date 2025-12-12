@@ -5,7 +5,7 @@ use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::{Position, TradingSwapNumResponseData};
 use okx::dto::common::EnumToStrTrait;
 use okx::dto::common::Side;
-use okx::dto::trade::trade_dto::{OrderReqDto, OrderResDto, TdModeEnum};
+use okx::dto::trade::trade_dto::{AttachAlgoOrdReqDto, OrderReqDto, OrderResDto, TdModeEnum};
 use okx::dto::trade_dto::OrdTypeEnum;
 use okx::dto::PositionSide;
 use okx::{Error, OkxAccount, OkxClient, OkxTrade};
@@ -91,6 +91,65 @@ impl OkxOrderService {
         Ok(result)
     }
 
+    /// 下单并附带止损（attachAlgoOrds），用于后续“移动止损到开仓价”的改单能力
+    pub async fn place_order_with_stop_loss(
+        &self,
+        api_config: &ExchangeApiConfig,
+        inst_id: &str,
+        side: Side,
+        pos_side: PositionSide,
+        size: String,
+        price: Option<f64>,
+        stop_loss_trigger_px: f64,
+    ) -> Result<Vec<OrderResDto>> {
+        info!(
+            "执行下单(附带止损): exchange={}, inst_id={}, side={:?}, pos_side={:?}, size={}, sl={}",
+            api_config.exchange_name, inst_id, side, pos_side, size, stop_loss_trigger_px
+        );
+
+        let client = Self::create_okx_client(api_config)?;
+        let trade = OkxTrade::new(client.clone());
+
+        // 使用 okx dto 的构造函数：tp None, sl = stop_loss, sl_ord = -1(市价)
+        let attach_algo_ords = vec![AttachAlgoOrdReqDto::new(
+            None,
+            None,
+            Some(format!("{:.8}", stop_loss_trigger_px)),
+            Some("-1".to_string()),
+            size.clone(),
+        )];
+
+        let order_req = OrderReqDto {
+            inst_id: inst_id.to_string(),
+            td_mode: TdModeEnum::ISOLATED.as_str().to_owned(),
+            side: side.as_str().to_string(),
+            ord_type: OrdTypeEnum::LIMIT.as_str().to_owned(),
+            sz: size,
+            px: price.map(|p| p.to_string()),
+            reduce_only: Some(false),
+            pos_side: Some(pos_side.as_str().to_string()),
+            stp_mode: Some("cancel_maker".to_string()),
+            attach_algo_ords: Some(attach_algo_ords),
+            ban_amend: Some(false),
+            tgt_ccy: None,
+            ccy: None,
+            cl_ord_id: None,
+            tag: None,
+            px_usd: None,
+            px_vol: None,
+            quick_mgn_type: None,
+            stp_id: None,
+        };
+
+        let result = trade.place_order(order_req).await.map_err(|e| {
+            error!("下单失败(附带止损): {}", e);
+            anyhow!("下单失败(附带止损): {}", e)
+        })?;
+
+        info!("下单成功(附带止损): {:?}", result);
+        Ok(result)
+    }
+
     /// 获取账户持仓
     pub async fn get_positions(
         &self,
@@ -142,6 +201,7 @@ impl OkxOrderService {
         signal: &SignalResult,
         size: String,
         price: Option<f64>,
+        stop_loss_trigger_px: Option<f64>,
     ) -> Result<Vec<OrderResDto>> {
         let (side, pos_side) = if signal.should_buy {
             (Side::Buy, PositionSide::Long)
@@ -151,8 +211,13 @@ impl OkxOrderService {
             return Err(anyhow!("信号无效，无交易方向"));
         };
 
-        self.place_order(api_config, inst_id, side, pos_side, size, price)
-            .await
+        match stop_loss_trigger_px {
+            Some(sl) => {
+                self.place_order_with_stop_loss(api_config, inst_id, side, pos_side, size, price, sl)
+                    .await
+            }
+            None => self.place_order(api_config, inst_id, side, pos_side, size, price).await,
+        }
     }
 }
 

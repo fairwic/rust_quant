@@ -2840,6 +2840,7 @@ dependencies = [
  "chrono",
  "futures",
  "okx",
+ "reqwest 0.11.27",
  "rust-quant-common",
  "rust-quant-core",
  "rust-quant-domain",

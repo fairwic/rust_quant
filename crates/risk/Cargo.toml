@@ -21,6 +21,7 @@ async-trait.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 futures.workspace = true  # 添加futures依赖
+reqwest.workspace = true
 
 # 交易所 SDK
 okx.workspace = true

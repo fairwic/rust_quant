@@ -25,7 +25,7 @@ use tracing::{debug, error, info};
 /// * `period` - 时间周期（如 "1D"）
 pub async fn sync_open_interest_volume(inst_id: &str, period: &str) -> Result<()> {
     info!(
-        "📊 开始同步持仓量数据: inst_id={}, period={}",
+        "开始同步持仓量数据: inst_id={}, period={}",
         inst_id, period
     );
 
@@ -36,15 +36,18 @@ pub async fn sync_open_interest_volume(inst_id: &str, period: &str) -> Result<()
         .await?;
 
     // 检查返回的数据
-    let items_array = items.as_array();
-    if items_array.is_none() || items_array.unwrap().is_empty() {
+    let Some(items_array) = items.as_array() else {
+        debug!("无持仓量数据(返回非数组): {} {}", inst_id, period);
+        return Ok(());
+    };
+    if items_array.is_empty() {
         debug!("无持仓量数据: {} {}", inst_id, period);
         return Ok(());
     }
 
     info!(
-        "📈 获取到 {} 条持仓量数据: {} {}",
-        items_array.unwrap().len(),
+        "获取到 {} 条持仓量数据: {} {}",
+        items_array.len(),
         inst_id,
         period
     );
@@ -70,7 +73,7 @@ pub async fn sync_open_interest_volume(inst_id: &str, period: &str) -> Result<()
     //     repo.save(&volume).await?;
     // }
 
-    info!("✅ 持仓量数据同步完成");
+    info!("持仓量数据同步完成");
     Ok(())
 }
 
@@ -81,7 +84,7 @@ pub async fn sync_open_interest_volume(inst_id: &str, period: &str) -> Result<()
 /// * `periods` - 时间周期列表
 pub async fn sync_open_interest_volume_batch(inst_ids: &[&str], periods: &[&str]) -> Result<()> {
     info!(
-        "📊 批量同步持仓量数据: {} 个币种, {} 个周期",
+        "批量同步持仓量数据: {} 个币种, {} 个周期",
         inst_ids.len(),
         periods.len()
     );
@@ -89,8 +92,8 @@ pub async fn sync_open_interest_volume_batch(inst_ids: &[&str], periods: &[&str]
     for inst_id in inst_ids {
         for period in periods {
             match sync_open_interest_volume(inst_id, period).await {
-                Ok(_) => info!("✅ 持仓量同步成功: {} {}", inst_id, period),
-                Err(e) => error!("❌ 持仓量同步失败: {} {} - {}", inst_id, period, e),
+                Ok(_) => info!("持仓量同步成功: {} {}", inst_id, period),
+                Err(e) => error!("持仓量同步失败: {} {} - {}", inst_id, period, e),
             }
 
             // 避免API限流
@@ -98,7 +101,7 @@ pub async fn sync_open_interest_volume_batch(inst_ids: &[&str], periods: &[&str]
         }
     }
 
-    info!("✅ 所有持仓量数据同步完成");
+    info!("所有持仓量数据同步完成");
     Ok(())
 }
 
