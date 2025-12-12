@@ -10,4 +10,4 @@ COPY . .
 # Install necessary runtime dependencies
 
 # The command to build and run the Rust application
-CMD ["sh", "-c", "cargo build --release && ./target/release/rust-quant"]
+CMD ["sh", "-c", "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"]
