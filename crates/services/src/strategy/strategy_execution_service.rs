@@ -49,7 +49,7 @@ impl StrategyExecutionService {
     /// 3. 检查信号有效性
     /// 4. 记录信号日志（异步，不阻塞）
     /// 5. 解析风险配置
-    /// 6. 执行下单（待完整实现）
+    /// 6. 执行下单
     pub async fn execute_strategy(
         &self,
         inst_id: &str,
@@ -66,13 +66,21 @@ impl StrategyExecutionService {
         self.validate_config(config)?;
 
         // 2. 获取策略实现
-        use rust_quant_strategies::strategy_registry::get_strategy_registry;
+        // 必须严格使用配置中的 strategy_type 路由执行器：
+        // - detect_strategy 基于参数“猜策略”，在参数为空/通用字段时会误判
+        // - 误判会导致读取错误的策略缓存 key，直接失败
+        use rust_quant_strategies::strategy_registry::{get_strategy_registry, register_strategy_on_demand};
 
+        register_strategy_on_demand(&config.strategy_type);
         let strategy_executor = get_strategy_registry()
-            .detect_strategy(&config.parameters.to_string())
-            .map_err(|e| anyhow!("策略类型检测失败: {}", e))?;
+            .get(config.strategy_type.as_str())
+            .map_err(|e| anyhow!("获取策略执行器失败: {}", e))?;
 
-        info!("使用策略: {}", strategy_executor.name());
+        info!(
+            "使用策略: {} (config.strategy_type={:?})",
+            strategy_executor.name(),
+            config.strategy_type
+        );
 
         // 3. 执行策略分析，获取交易信号
         let signal = strategy_executor
@@ -85,7 +93,7 @@ impl StrategyExecutionService {
 
         info!("策略分析完成");
 
-        // 4. 检查信号有效性（参考：executor_common.rs:106-112）
+        // 4. 检查信号有效性
         let has_signal = signal.should_buy || signal.should_sell;
 
         if !has_signal {
@@ -96,7 +104,7 @@ impl StrategyExecutionService {
             return Ok(signal);
         }
 
-        // 5. 记录信号（参考：executor_common.rs:114-122）
+        // 5. 记录信号
         warn!(
             "{:?} 策略信号！inst_id={}, period={}, should_buy={:?}, should_sell={:?}, ts={:?}",
             config.strategy_type, inst_id, period, signal.should_buy, signal.should_sell, signal.ts
@@ -114,7 +122,14 @@ impl StrategyExecutionService {
 
         // 8. 执行下单
         if let Err(e) = self
-            .execute_order_internal(inst_id, period, &signal, &risk_config, config.id, config.strategy_type.as_str())
+            .execute_order_internal(
+                inst_id,
+                period,
+                &signal,
+                &risk_config,
+                config.id,
+                config.strategy_type.as_str(),
+            )
             .await
         {
             error!("❌ {:?} 策略下单失败: {}", config.strategy_type, e);
@@ -160,14 +175,10 @@ impl StrategyExecutionService {
         _period: &str,
         _limit: usize,
     ) -> Result<Vec<rust_quant_domain::Candle>> {
-        // TODO: 通过market服务获取数据
-        // 暂时返回错误
         Err(anyhow!("get_candles 暂未实现"))
     }
 
     /// 异步记录信号日志（不阻塞主流程）
-    ///
-    /// 参考原始逻辑：src/trading/task/strategy_runner.rs::save_signal_log (641-669行)
     fn save_signal_log_async(
         &self,
         inst_id: &str,
@@ -187,7 +198,6 @@ impl StrategyExecutionService {
         let period = period.to_string();
         let strategy_type = config.strategy_type.as_str().to_string();
 
-        // 异步记录，不阻塞下单流程
         tokio::spawn(async move {
             use rust_quant_infrastructure::SignalLogRepository;
 
@@ -208,17 +218,6 @@ impl StrategyExecutionService {
     }
 
     /// 执行下单（内部方法）
-    ///
-    /// 参考原始逻辑：
-    /// - src/trading/strategy/executor_common.rs::execute_order (99-153行)
-    /// - src/trading/services/order_service/swap_order_service.rs::ready_to_order (197-560行)
-    ///
-    /// 完整业务流程：
-    /// 1. 幂等性检查（避免重复下单）
-    /// 2. 获取当前持仓和可用资金
-    /// 3. 计算下单数量
-    /// 4. 风控检查（止损止盈价格验证）
-    /// 5. 实际下单到交易所
     async fn execute_order_internal(
         &self,
         inst_id: &str,
@@ -233,12 +232,13 @@ impl StrategyExecutionService {
             inst_id, period, config_id
         );
 
-        // 0) 幂等性：同一策略配置 + 同一信号时间戳 + 同一方向，只允许下单一次
-        // 说明：
-        // - WS 重连/重复推送、系统重启、上游重复触发都会导致重复进入下单逻辑
-        // - in_order_id 用作幂等键（同时可作为业务追踪ID）
+        // 0) 幂等性：同一策略配置 + 同一信号时间戳，只允许下单一次
         let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
-        match self.swap_order_repository.find_by_in_order_id(&in_order_id).await? {
+        match self
+            .swap_order_repository
+            .find_by_in_order_id(&in_order_id)
+            .await?
+        {
             Some(existing) => {
                 warn!(
                     "⚠️ 幂等命中，跳过重复下单: inst_id={}, period={}, config_id={}, in_order_id={}, out_order_id={:?}",
@@ -294,25 +294,33 @@ impl StrategyExecutionService {
             anyhow!("获取账户数据失败: {}", e)
         })?;
 
-        info!(
-            "当前持仓数量: {}, 最大可用数量: {}",
-            positions.len(),
-            max_size.max_buy
-        );
+        info!("当前持仓数量: {}", positions.len());
 
         // 5. 计算下单数量（使用90%的安全系数）
         let safety_factor = 0.9;
-        let max_buy = match max_size.max_buy.parse::<f64>() {
+        let max_size_str = if side == "buy" {
+            max_size.max_buy.as_str()
+        } else {
+            max_size.max_sell.as_str()
+        };
+
+        let max_available = match max_size_str.parse::<f64>() {
             Ok(v) => v,
             Err(e) => {
                 error!(
-                    "解析 max_buy 失败: inst_id={}, max_buy={}, error={}",
-                    inst_id, max_size.max_buy, e
+                    "解析最大可用下单量失败: inst_id={}, side={}, raw={}, error={}",
+                    inst_id, side, max_size_str, e
                 );
                 return Err(anyhow!("解析最大可用下单量失败"));
             }
         };
-        let order_size_f64 = max_buy * safety_factor;
+
+        info!(
+            "最大可用数量: side={}, max_available={}, safety_factor={}",
+            side, max_available, safety_factor
+        );
+
+        let order_size_f64 = max_available * safety_factor;
         let order_size = if order_size_f64 < 1.0 {
             "0".to_string()
         } else {
@@ -337,21 +345,15 @@ impl StrategyExecutionService {
         };
 
         // 如果使用信号K线止损
-        let final_stop_loss = if let Some(is_used_signal_k_line_stop_loss) =
-            risk_config.is_used_signal_k_line_stop_loss
-        {
-            if is_used_signal_k_line_stop_loss {
-                signal
-                    .signal_kline_stop_loss_price
-                    .unwrap_or(stop_loss_price)
-            } else {
-                stop_loss_price
-            }
-        } else {
-            stop_loss_price
+        let final_stop_loss = match risk_config.is_used_signal_k_line_stop_loss {
+            Some(true) => match signal.signal_kline_stop_loss_price {
+                Some(v) => v,
+                None => stop_loss_price,
+            },
+            _ => stop_loss_price,
         };
 
-        // 6. 验证止损价格合理性（参考：swap_order_service.rs:547-558）
+        // 验证止损价格合理性
         if pos_side == "short" && entry_price > final_stop_loss {
             error!(
                 "做空开仓价 > 止损价，不下单: entry={}, stop_loss={}",
@@ -388,10 +390,16 @@ impl StrategyExecutionService {
             })?;
 
         // 获取交易所返回的订单ID
-        let out_order_id = order_result
-            .first()
-            .map(|o| o.ord_id.clone())
-            .unwrap_or_default();
+        let out_order_id = match order_result.first() {
+            Some(o) => o.ord_id.clone(),
+            None => {
+                warn!(
+                    "⚠️ 下单返回为空: inst_id={}, period={}, config_id={}",
+                    inst_id, period, config_id
+                );
+                String::new()
+            }
+        };
 
         info!(
             "✅ 下单成功: inst_id={}, order_id={}, size={}",
@@ -455,23 +463,16 @@ impl StrategyExecutionService {
     }
 
     /// 检查是否应该执行策略
-    ///
-    /// 考虑因素：
-    /// - 策略状态
-    /// - 时间窗口
-    /// - 执行间隔
     pub fn should_execute(
         &self,
         config: &StrategyConfig,
         last_execution_time: Option<i64>,
         current_time: i64,
     ) -> bool {
-        // 1. 检查策略状态
         if !config.is_running() {
             return false;
         }
 
-        // 2. 检查执行间隔
         if let Some(last_time) = last_execution_time {
             let interval = current_time - last_time;
             let min_interval = self.get_min_execution_interval(&config.timeframe);
@@ -501,31 +502,16 @@ impl StrategyExecutionService {
             Timeframe::H12 => 43200,
             Timeframe::D1 => 86400,
             Timeframe::W1 => 604800,
-            Timeframe::MN1 => 2592000, // 30天
+            Timeframe::MN1 => 2592000,
         }
     }
 }
-
-// 注意：由于 StrategyExecutionService 需要依赖注入，不再实现 Default
-// 调用方需要通过 new() 方法并提供 SwapOrderRepository 实例
-
-// ============================================================================
-// 辅助函数
-// ============================================================================
-
-// TODO: 数据转换逻辑待实现
-// 当market包依赖稳定后，实现CandlesEntity到Candle的转换
-
-// ============================================================================
-// 测试
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
 
-    /// Mock SwapOrderRepository 用于测试
     struct MockSwapOrderRepository;
 
     #[async_trait]
@@ -539,11 +525,7 @@ mod tests {
         async fn find_by_out_order_id(&self, _out_order_id: &str) -> Result<Option<SwapOrder>> {
             Ok(None)
         }
-        async fn find_by_inst_id(
-            &self,
-            _inst_id: &str,
-            _limit: Option<i32>,
-        ) -> Result<Vec<SwapOrder>> {
+        async fn find_by_inst_id(&self, _inst_id: &str, _limit: Option<i32>) -> Result<Vec<SwapOrder>> {
             Ok(vec![])
         }
         async fn find_pending_order(
@@ -578,7 +560,6 @@ mod tests {
     #[test]
     fn test_service_creation() {
         let _service = create_test_service();
-        // 验证服务可以创建
     }
 
     #[test]
@@ -615,13 +596,8 @@ mod tests {
             description: None,
         };
 
-        // 第一次执行（无上次执行时间）
         assert!(service.should_execute(&config, None, 1000));
-
-        // 间隔太短
         assert!(!service.should_execute(&config, Some(1000), 1500));
-
-        // 间隔足够
         assert!(service.should_execute(&config, Some(1000), 5000));
     }
 }

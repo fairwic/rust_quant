@@ -11,11 +11,11 @@ crates/
 ├── common/          # 通用工具 (3+包使用)
 ├── core/            # 核心基础设施 (配置、日志、数据库连接池)
 ├── domain/          # 领域模型 (实体、值对象、枚举、接口)
-├── infrastructure/  # 基础设施实现 (Repository、缓存)
-├── services/        # 应用服务层 (业务协调)
-├── market/          # 市场数据 (WebSocket、数据存储)
+├── infrastructure/  # 基础设施实现 (DB/Redis/消息/交易所适配/Repository)
+├── services/        # 应用服务层 (UseCase：编排业务流程)
+├── market/          # 行情接入(Adapter)：REST/WS 拉取、归一化、DTO（不负责持久化）
 ├── indicators/      # 技术指标计算 (纯函数)
-├── strategies/      # 策略引擎 (策略实现、回测)
+├── strategies/      # 策略算法与框架 (纯业务：不做I/O、不依赖基础设施)
 ├── risk/            # 风险管理 (仓位、订单、账户风控)
 ├── execution/       # 订单执行 (订单创建、提交、跟踪)
 ├── orchestration/   # 任务调度 (定时任务、工作流)
@@ -79,6 +79,7 @@ crates/
 - ✅ 数据库Entity (FromRow) → `infrastructure/src/repositories/xxx_repository.rs`
 - ✅ 缓存实现 → `infrastructure/src/cache/xxx_cache.rs`
 - ✅ 消息传递 → `infrastructure/src/messaging/xxx.rs`
+- ✅ 交易所适配(REST/WS底层) → `infrastructure/src/exchanges/xxx_adapter.rs`
 
 **要求**:
 - ✅ 必须实现 `domain::traits` 中的接口
@@ -141,8 +142,8 @@ pub struct CandleService {
 - ✅ 返回 `domain::SignalResult`
 
 **禁止**:
-- ❌ 直接数据库操作 (使用infrastructure)
-- ❌ 直接Redis操作 (使用infrastructure)
+- ❌ 任何数据库/缓存/网络I/O（包括 sqlx/redis/okx/reqwest/tokio-tungstenite）
+- ❌ 依赖 `infrastructure/`、`market/`、`services/`、`orchestration/`
 
 ---
 
@@ -178,8 +179,8 @@ pub struct CandleService {
 - ✅ 回测模型 → `risk/src/backtest/xxx.rs`
 
 **要求**:
-- ✅ 使用sqlx (FromRow)
-- ✅ 风控规则集中在 `policies/`
+- ✅ 风控规则集中在 `policies/`（纯规则优先：可测、可复用）
+- ✅ 若需要持久化/查询：放到 `infrastructure/` 实现对应 repository（risk 不直接写 sqlx）
 
 **禁止**:
 - ❌ 策略信号生成 (属于strategies)
@@ -195,8 +196,9 @@ pub struct CandleService {
 - ✅ 持仓管理 → `execution/src/position_manager/xxx.rs`
 
 **要求**:
-- ✅ 调用交易所API (okx SDK)
-- ✅ 使用risk包的订单模型
+- ✅ 只定义“执行流程/状态机/重试策略”等业务规则
+- ✅ 调用交易所 API / SDK 属于基础设施：通过 `domain::traits::ExchangeClient`（或类似 trait）注入 `infrastructure` 实现
+- ✅ 使用 risk 的订单/仓位/风控输出（但不实现风控规则）
 
 **禁止**:
 - ❌ 策略决策 (属于strategies)
@@ -204,22 +206,21 @@ pub struct CandleService {
 
 ---
 
-### `market/` - 市场数据
-**职责**: WebSocket数据流、市场数据持久化
+### `market/` - 行情接入（Adapter）
+**职责**: REST/WS 数据拉取、归一化、DTO；不负责持久化/Repository
 
 **放置规则**:
-- ✅ 数据模型 → `market/src/models/xxx_entity.rs` (FromRow) 或 `xxx_dto.rs`
-- ✅ 数据访问 → `market/src/repositories/xxx_service.rs`
-- ✅ WebSocket流 → `market/src/streams/websocket_service.rs`
-- ✅ 交易所适配 → `market/src/exchanges/xxx.rs`
+- ✅ 网络DTO/归一化模型 → `market/src/models/xxx_dto.rs`
+- ✅ WebSocket流（只负责连接与解码，不落库）→ `market/src/streams/websocket_service.rs`
+- ✅ 交易所行情适配（到 DTO/Domain 的映射）→ `market/src/exchanges/xxx.rs`
 
 **要求**:
-- ✅ Entity使用FromRow
-- ✅ DTO用于网络传输
-- ✅ 统一使用sqlx
+- ✅ 只做“接入与转换”，不做业务编排（编排在 services）
+- ✅ 不出现 `sqlx::FromRow` / `Sqlx*Repository`（持久化在 infrastructure）
 
 **禁止**:
-- ❌ 策略逻辑、风险控制逻辑
+- ❌ 直接数据库操作、缓存操作（落库/缓存属于 infrastructure）
+- ❌ 策略逻辑、风险控制逻辑、下单逻辑
 
 ---
 
@@ -315,13 +316,17 @@ pub struct CandleService {
 
 ### 依赖方向 (单向，从上到下)
 ```
-cli → orchestration → services → domain (接口) + infrastructure (实现)
-                              ↓
-                    strategies/risk/execution
-                              ↓
-                    market/indicators
-                              ↓
-                    core/common
+cli → orchestration → services → domain
+                          ↘
+                           infrastructure
+
+strategies → domain + indicators (+ common/core)
+risk       → domain (+ common/core)
+execution  → domain (+ common/core)
+market     → domain (+ common/core)   # 仅接入与转换；不落库
+
+infrastructure → domain + core + common
+services       → domain + (strategies/risk/execution/market) + infrastructure
 ```
 
 ### 依赖倒置原则 (DIP)
@@ -338,12 +343,13 @@ cli → orchestration → services → domain (接口) + infrastructure (实现)
 
 ### 禁止依赖
 - ❌ domain 不能依赖任何业务包或基础设施
-- ❌ infrastructure 不能依赖 strategies/risk/execution/services
+- ❌ infrastructure 不能依赖 strategies/risk/execution/services/orchestration
 - ❌ indicators 不能依赖 strategies/risk/execution/services
-- ❌ strategies 不能依赖 risk/execution/orchestration/services
-- ❌ risk 不能依赖 strategies/execution/orchestration/services
-- ❌ execution 不能依赖 strategies/orchestration/services
-- ❌ services 不能直接依赖infrastructure的具体类型（应依赖domain接口）
+- ❌ strategies 不能依赖 risk/execution/market/infrastructure/services/orchestration
+- ❌ risk 不能依赖 strategies/execution/market/infrastructure/services/orchestration
+- ❌ execution 不能依赖 strategies/risk/market/infrastructure/services/orchestration
+- ❌ market 不能依赖 services/orchestration/infrastructure（防止“接入层”反向污染）
+- ❌ services 不能把 `infrastructure` 的具体类型当成字段类型（字段应为 domain trait：`Arc<dyn Xxx>`/`Box<dyn Xxx>`）
 
 ---
 
