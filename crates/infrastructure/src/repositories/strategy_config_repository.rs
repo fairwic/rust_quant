@@ -71,12 +71,13 @@ impl SqlxStrategyConfigRepository {
     pub async fn get_config_by_id(&self, id: i64) -> Result<Option<StrategyConfigEntity>> {
         debug!("查询策略配置: id={}", id);
 
-        let entity = sqlx::query_as::<_, StrategyConfigEntity>(
-            "SELECT id, strategy_type, inst_id, time, value, risk_config, 
+        let entity = sqlx::query_as!(
+            StrategyConfigEntity,
+            "SELECT id, strategy_type, inst_id, time, value, risk_config,
                     kline_start_time, kline_end_time, final_fund, is_deleted
              FROM strategy_config WHERE id = ? LIMIT 1",
+            id as i32
         )
-        .bind(id as i32)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -85,10 +86,11 @@ impl SqlxStrategyConfigRepository {
 
     /// 获取所有未删除的配置
     pub async fn get_all(&self) -> Result<Vec<StrategyConfigEntity>> {
-        let entities = sqlx::query_as::<_, StrategyConfigEntity>(
-            "SELECT id, strategy_type, inst_id, time, value, risk_config, 
+        let entities = sqlx::query_as!(
+            StrategyConfigEntity,
+            "SELECT id, strategy_type, inst_id, time, value, risk_config,
                     kline_start_time, kline_end_time, final_fund, is_deleted
-             FROM strategy_config WHERE is_deleted = 0",
+             FROM strategy_config WHERE is_deleted = 0"
         )
         .fetch_all(&self.pool)
         .await?;
@@ -98,12 +100,13 @@ impl SqlxStrategyConfigRepository {
 
     /// 按周期查询配置
     pub async fn get_all_by_period(&self, period: &str) -> Result<Vec<StrategyConfigEntity>> {
-        let entities = sqlx::query_as::<_, StrategyConfigEntity>(
-            "SELECT id, strategy_type, inst_id, time, value, risk_config, 
+        let entities = sqlx::query_as!(
+            StrategyConfigEntity,
+            "SELECT id, strategy_type, inst_id, time, value, risk_config,
                     kline_start_time, kline_end_time, final_fund, is_deleted
              FROM strategy_config WHERE is_deleted = 0 AND time = ?",
+            period
         )
-        .bind(period)
         .fetch_all(&self.pool)
         .await?;
 
@@ -119,32 +122,34 @@ impl SqlxStrategyConfigRepository {
     ) -> Result<Vec<StrategyConfigEntity>> {
         let entities = match strategy_type {
             Some(st) => {
-                sqlx::query_as::<_, StrategyConfigEntity>(
-                    "SELECT id, strategy_type, inst_id, time, value, risk_config, 
+                sqlx::query_as!(
+                    StrategyConfigEntity,
+                    "SELECT id, strategy_type, inst_id, time, value, risk_config,
                             kline_start_time, kline_end_time, final_fund, is_deleted
-                     FROM strategy_config 
-                     WHERE is_deleted = 0 
-                       AND strategy_type = ? 
-                       AND inst_id = ? 
+                     FROM strategy_config
+                     WHERE is_deleted = 0
+                       AND strategy_type = ?
+                       AND inst_id = ?
                        AND time = ?",
+                    st,
+                    inst_id,
+                    time
                 )
-                .bind(st)
-                .bind(inst_id)
-                .bind(time)
                 .fetch_all(&self.pool)
                 .await?
             }
             None => {
-                sqlx::query_as::<_, StrategyConfigEntity>(
-                    "SELECT id, strategy_type, inst_id, time, value, risk_config, 
+                sqlx::query_as!(
+                    StrategyConfigEntity,
+                    "SELECT id, strategy_type, inst_id, time, value, risk_config,
                             kline_start_time, kline_end_time, final_fund, is_deleted
-                     FROM strategy_config 
-                     WHERE is_deleted = 0 
-                       AND inst_id = ? 
+                     FROM strategy_config
+                     WHERE is_deleted = 0
+                       AND inst_id = ?
                        AND time = ?",
+                    inst_id,
+                    time
                 )
-                .bind(inst_id)
-                .bind(time)
                 .fetch_all(&self.pool)
                 .await?
             }
@@ -162,21 +167,21 @@ impl SqlxStrategyConfigRepository {
 
     /// 插入新配置
     pub async fn insert(&self, entity: &StrategyConfigEntity) -> Result<u64> {
-        let result = sqlx::query(
-            "INSERT INTO strategy_config 
-             (strategy_type, inst_id, time, value, risk_config, 
+        let result = sqlx::query!(
+            "INSERT INTO strategy_config
+             (strategy_type, inst_id, time, value, risk_config,
               kline_start_time, kline_end_time, final_fund, is_deleted)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            entity.strategy_type,
+            entity.inst_id,
+            entity.time,
+            entity.value,
+            entity.risk_config,
+            entity.kline_start_time,
+            entity.kline_end_time,
+            entity.final_fund as f64, // f32 -> f64 转换
+            entity.is_deleted as i32  // i16 -> i32 转换
         )
-        .bind(&entity.strategy_type)
-        .bind(&entity.inst_id)
-        .bind(&entity.time)
-        .bind(&entity.value)
-        .bind(&entity.risk_config)
-        .bind(entity.kline_start_time)
-        .bind(entity.kline_end_time)
-        .bind(entity.final_fund as f64) // f32 -> f64 转换
-        .bind(entity.is_deleted as i32) // i16 -> i32 转换
         .execute(&self.pool)
         .await?;
 
@@ -185,22 +190,22 @@ impl SqlxStrategyConfigRepository {
 
     /// 更新配置
     pub async fn update(&self, id: i32, entity: &StrategyConfigEntity) -> Result<u64> {
-        let result = sqlx::query(
-            "UPDATE strategy_config 
-             SET strategy_type = ?, inst_id = ?, time = ?, value = ?, 
-                 risk_config = ?, kline_start_time = ?, kline_end_time = ?, 
+        let result = sqlx::query!(
+            "UPDATE strategy_config
+             SET strategy_type = ?, inst_id = ?, time = ?, value = ?,
+                 risk_config = ?, kline_start_time = ?, kline_end_time = ?,
                  final_fund = ?
              WHERE id = ?",
+            entity.strategy_type,
+            entity.inst_id,
+            entity.time,
+            entity.value,
+            entity.risk_config,
+            entity.kline_start_time,
+            entity.kline_end_time,
+            entity.final_fund as f64, // f32 -> f64 转换
+            id
         )
-        .bind(&entity.strategy_type)
-        .bind(&entity.inst_id)
-        .bind(&entity.time)
-        .bind(&entity.value)
-        .bind(&entity.risk_config)
-        .bind(entity.kline_start_time)
-        .bind(entity.kline_end_time)
-        .bind(entity.final_fund as f64) // f32 -> f64 转换
-        .bind(id)
         .execute(&self.pool)
         .await?;
 
@@ -268,8 +273,7 @@ impl StrategyConfigRepository for SqlxStrategyConfigRepository {
     }
 
     async fn delete(&self, id: i64) -> Result<()> {
-        sqlx::query("UPDATE strategy_config SET is_deleted = 1 WHERE id = ?")
-            .bind(id as i32)
+        sqlx::query!("UPDATE strategy_config SET is_deleted = 1 WHERE id = ?", id as i32)
             .execute(&self.pool)
             .await?;
 

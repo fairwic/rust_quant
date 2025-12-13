@@ -15,7 +15,7 @@ pub use candle_repository::SqlxCandleRepository;
 pub use exchange_api_config_repository::{
     ExchangeAppkeyConfigEntity, SqlxExchangeApiConfigRepository, SqlxStrategyApiConfigRepository,
 };
-pub use position_repository::{PositionEntity, SqlxPositionRepository};
+// pub use position_repository::{PositionEntity, SqlxPositionRepository};
 pub use signal_log_repository::{SignalLogEntity, SignalLogRepository};
 pub use strategy_config_repository::{
     SqlxStrategyConfigRepository, StrategyConfigEntity, StrategyConfigEntityModel,

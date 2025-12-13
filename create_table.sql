@@ -203,9 +203,9 @@ CREATE TABLE `exchange_apikey_config` (
   `create_user_id` int NOT NULL DEFAULT '0' COMMENT '创建者',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `is_deleted` tinyint NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='各交易所api key 配置';
-
 
 
 CREATE TABLE `exchange_apikey_strategy_relation` (

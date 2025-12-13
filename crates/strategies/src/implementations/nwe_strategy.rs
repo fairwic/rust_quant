@@ -712,9 +712,10 @@ impl NweStrategy {
 
         signal_result.ts = candles.last().unwrap().ts;
         signal_result.open_price = candles.last().unwrap().c;
-        if candles.last().unwrap().ts == 1765524300000 {
-            println!("values: {:#?}", values);
-        }
+        // if candles.last().unwrap().ts == 1765566000000 {
+        //     println!("values: {:#?}", values);
+        //     println!("signal_result: {:#?}", signal_result);
+        // }
 
         // info!("NWE signal values: {:#?}", values);
         // info!(

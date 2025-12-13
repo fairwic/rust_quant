@@ -25,7 +25,7 @@ impl SqlxBacktestRepository {
 #[async_trait]
 impl BacktestLogRepository for SqlxBacktestRepository {
     async fn insert_log(&self, log: &BacktestLog) -> Result<i64> {
-        let result: MySqlQueryResult = sqlx::query(
+        let result: MySqlQueryResult = sqlx::query!(
             r#"
             INSERT INTO back_test_log (
                 strategy_type,
@@ -48,25 +48,25 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 kline_nums
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
+            log.strategy_type,
+            log.inst_id,
+            log.timeframe,
+            log.win_rate,
+            log.final_fund,
+            log.open_positions_num,
+            log.strategy_detail,
+            log.risk_config_detail,
+            log.profit,
+            log.one_bar_after_win_rate,
+            log.two_bar_after_win_rate,
+            log.three_bar_after_win_rate,
+            log.four_bar_after_win_rate,
+            log.five_bar_after_win_rate,
+            log.ten_bar_after_win_rate,
+            log.kline_start_time,
+            log.kline_end_time,
+            log.kline_nums
         )
-        .bind(&log.strategy_type)
-        .bind(&log.inst_id)
-        .bind(&log.timeframe)
-        .bind(&log.win_rate)
-        .bind(&log.final_fund)
-        .bind(log.open_positions_num)
-        .bind(&log.strategy_detail)
-        .bind(&log.risk_config_detail)
-        .bind(&log.profit)
-        .bind(log.one_bar_after_win_rate)
-        .bind(log.two_bar_after_win_rate)
-        .bind(log.three_bar_after_win_rate)
-        .bind(log.four_bar_after_win_rate)
-        .bind(log.five_bar_after_win_rate)
-        .bind(log.ten_bar_after_win_rate)
-        .bind(log.kline_start_time)
-        .bind(log.kline_end_time)
-        .bind(log.kline_nums)
         .execute(self.pool())
         .await?;
 
@@ -112,7 +112,7 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         backtest_id: i64,
         stats: &BacktestWinRateStats,
     ) -> Result<u64> {
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r#"
             UPDATE back_test_log SET
                 one_bar_after_win_rate = ?,
@@ -123,14 +123,14 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 ten_bar_after_win_rate = ?
             WHERE id = ?
             "#,
+            stats.one_bar_after_win_rate,
+            stats.two_bar_after_win_rate,
+            stats.three_bar_after_win_rate,
+            stats.four_bar_after_win_rate,
+            stats.five_bar_after_win_rate,
+            stats.ten_bar_after_win_rate,
+            backtest_id
         )
-        .bind(stats.one_bar_after_win_rate)
-        .bind(stats.two_bar_after_win_rate)
-        .bind(stats.three_bar_after_win_rate)
-        .bind(stats.four_bar_after_win_rate)
-        .bind(stats.five_bar_after_win_rate)
-        .bind(stats.ten_bar_after_win_rate)
-        .bind(backtest_id)
         .execute(self.pool())
         .await?;
 
@@ -142,7 +142,7 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         backtest_id: i64,
         metrics: &BacktestPerformanceMetrics,
     ) -> Result<u64> {
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r#"
             UPDATE back_test_log SET
                 sharpe_ratio = ?,
@@ -152,13 +152,13 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 volatility = ?
             WHERE id = ?
             "#,
+            metrics.sharpe_ratio,
+            metrics.annual_return,
+            metrics.total_return,
+            metrics.max_drawdown,
+            metrics.volatility,
+            backtest_id
         )
-        .bind(metrics.sharpe_ratio)
-        .bind(metrics.annual_return)
-        .bind(metrics.total_return)
-        .bind(metrics.max_drawdown)
-        .bind(metrics.volatility)
-        .bind(backtest_id)
         .execute(self.pool())
         .await?;
 

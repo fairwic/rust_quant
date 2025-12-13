@@ -77,13 +77,14 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     async fn find_by_id(&self, id: i32) -> Result<Option<ExchangeApiConfig>> {
         debug!("查询API配置: id={}", id);
 
-        let entity = sqlx::query_as::<_, ExchangeAppkeyConfigEntity>(
-            "SELECT id, exchange_name, api_key, api_secret, passphrase, 
+        let entity = sqlx::query_as!(
+            ExchangeAppkeyConfigEntity,
+            "SELECT id, exchange_name, api_key, api_secret, passphrase,
                     is_sandbox, is_enabled, description
-             FROM exchange_apikey_config 
+             FROM exchange_apikey_config
              WHERE id = ? AND is_deleted = 0 LIMIT 1",
+            id
         )
-        .bind(id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -91,12 +92,13 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     }
 
     async fn find_all_enabled(&self) -> Result<Vec<ExchangeApiConfig>> {
-        let entities = sqlx::query_as::<_, ExchangeAppkeyConfigEntity>(
-            "SELECT id, exchange_name, api_key, api_secret, passphrase, 
+        let entities = sqlx::query_as!(
+            ExchangeAppkeyConfigEntity,
+            "SELECT id, exchange_name, api_key, api_secret, passphrase,
                     is_sandbox, is_enabled, description
-             FROM exchange_apikey_config 
+             FROM exchange_apikey_config
              WHERE is_enabled = 1 AND is_deleted = 0
-             ORDER BY id",
+             ORDER BY id"
         )
         .fetch_all(&self.pool)
         .await?;
@@ -105,14 +107,15 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     }
 
     async fn find_by_exchange(&self, exchange_name: &str) -> Result<Vec<ExchangeApiConfig>> {
-        let entities = sqlx::query_as::<_, ExchangeAppkeyConfigEntity>(
-            "SELECT id, exchange_name, api_key, api_secret, passphrase, 
+        let entities = sqlx::query_as!(
+            ExchangeAppkeyConfigEntity,
+            "SELECT id, exchange_name, api_key, api_secret, passphrase,
                     is_sandbox, is_enabled, description
-             FROM exchange_apikey_config 
+             FROM exchange_apikey_config
              WHERE exchange_name = ? AND is_enabled = 1 AND is_deleted = 0
              ORDER BY id",
+            exchange_name
         )
-        .bind(exchange_name)
         .fetch_all(&self.pool)
         .await?;
 
@@ -121,19 +124,19 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
 
     async fn save(&self, config: &ExchangeApiConfig) -> Result<i32> {
         let entity = ExchangeAppkeyConfigEntity::from_domain(config);
-        
-        let result = sqlx::query(
-            "INSERT INTO exchange_apikey_config 
+
+        let result = sqlx::query!(
+            "INSERT INTO exchange_apikey_config
              (exchange_name, api_key, api_secret, passphrase, is_sandbox, is_enabled, description)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
+            entity.exchange_name,
+            entity.api_key,
+            entity.api_secret,
+            entity.passphrase,
+            entity.is_sandbox,
+            entity.is_enabled,
+            entity.description
         )
-        .bind(&entity.exchange_name)
-        .bind(&entity.api_key)
-        .bind(&entity.api_secret)
-        .bind(&entity.passphrase)
-        .bind(entity.is_sandbox)
-        .bind(entity.is_enabled)
-        .bind(&entity.description)
         .execute(&self.pool)
         .await?;
 
@@ -142,21 +145,21 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
 
     async fn update(&self, config: &ExchangeApiConfig) -> Result<()> {
         let entity = ExchangeAppkeyConfigEntity::from_domain(config);
-        
-        sqlx::query(
-            "UPDATE exchange_apikey_config 
-             SET exchange_name = ?, api_key = ?, api_secret = ?, passphrase = ?, 
+
+        sqlx::query!(
+            "UPDATE exchange_apikey_config
+             SET exchange_name = ?, api_key = ?, api_secret = ?, passphrase = ?,
                  is_sandbox = ?, is_enabled = ?, description = ?
              WHERE id = ?",
+            entity.exchange_name,
+            entity.api_key,
+            entity.api_secret,
+            entity.passphrase,
+            entity.is_sandbox,
+            entity.is_enabled,
+            entity.description,
+            entity.id
         )
-        .bind(&entity.exchange_name)
-        .bind(&entity.api_key)
-        .bind(&entity.api_secret)
-        .bind(&entity.passphrase)
-        .bind(entity.is_sandbox)
-        .bind(entity.is_enabled)
-        .bind(&entity.description)
-        .bind(entity.id)
         .execute(&self.pool)
         .await?;
 
@@ -164,8 +167,7 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     }
 
     async fn delete(&self, id: i32) -> Result<()> {
-        sqlx::query("UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = ?")
-            .bind(id)
+        sqlx::query!("UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = ?", id)
             .execute(&self.pool)
             .await?;
 
@@ -193,19 +195,20 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
         debug!("查询策略关联的API配置: strategy_config_id={}", strategy_config_id);
 
         // 联表查询，按优先级排序
-        let entities = sqlx::query_as::<_, ExchangeAppkeyConfigEntity>(
-            "SELECT e.id, e.exchange_name, e.api_key, e.api_secret, e.passphrase, 
+        let entities = sqlx::query_as!(
+            ExchangeAppkeyConfigEntity,
+            "SELECT e.id, e.exchange_name, e.api_key, e.api_secret, e.passphrase,
                     e.is_sandbox, e.is_enabled, e.description
              FROM exchange_apikey_config e
              INNER JOIN exchange_apikey_strategy_relation s ON e.id = s.api_config_id
-             WHERE s.strategy_config_id = ? 
-               AND s.is_enabled = 1 
+             WHERE s.strategy_config_id = ?
+               AND s.is_enabled = 1
                AND s.is_deleted = 0
-               AND e.is_enabled = 1 
+               AND e.is_enabled = 1
                AND e.is_deleted = 0
              ORDER BY s.priority ASC, e.id ASC",
+            strategy_config_id
         )
-        .bind(strategy_config_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -218,16 +221,16 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
         api_config_id: i32,
         priority: i32,
     ) -> Result<i32> {
-        let result = sqlx::query(
-            "INSERT INTO exchange_apikey_config 
+        let result = sqlx::query!(
+            "INSERT INTO exchange_apikey_strategy_relation
              (strategy_config_id, api_config_id, priority, is_enabled)
              VALUES (?, ?, ?, 1)
              ON DUPLICATE KEY UPDATE priority = ?, is_enabled = 1, is_deleted = 0",
+            strategy_config_id,
+            api_config_id,
+            priority,
+            priority
         )
-        .bind(strategy_config_id)
-        .bind(api_config_id)
-        .bind(priority)
-        .bind(priority)
         .execute(&self.pool)
         .await?;
 
@@ -235,8 +238,7 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
     }
 
     async fn delete_association(&self, id: i32) -> Result<()> {
-        sqlx::query("UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = ?")
-            .bind(id)
+        sqlx::query!("UPDATE exchange_apikey_strategy_relation SET is_deleted = 1 WHERE id = ?", id)
             .execute(&self.pool)
             .await?;
 
@@ -249,14 +251,14 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
         priority: i32,
         is_enabled: bool,
     ) -> Result<()> {
-        sqlx::query(
-            "UPDATE strategy_api_config 
+        sqlx::query!(
+            "UPDATE exchange_apikey_strategy_relation
              SET priority = ?, is_enabled = ?
              WHERE id = ?",
+            priority,
+            if is_enabled { 1i8 } else { 0i8 },
+            id
         )
-        .bind(priority)
-        .bind(if is_enabled { 1i8 } else { 0i8 })
-        .bind(id)
         .execute(&self.pool)
         .await?;
 

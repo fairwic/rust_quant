@@ -36,8 +36,8 @@ pub mod repositories;
 // 重新导出常用类型
 pub use exchanges::*;
 pub use repositories::{
-    PositionEntity, SignalLogEntity, SignalLogRepository, SqlxBacktestRepository,
-    SqlxCandleRepository, SqlxPositionRepository, SqlxStrategyConfigRepository,
+    SignalLogEntity, SignalLogRepository, SqlxBacktestRepository,
+    SqlxCandleRepository, SqlxStrategyConfigRepository,
     StrategyConfigEntity, StrategyConfigEntityModel,
 };
 

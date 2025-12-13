@@ -146,6 +146,7 @@ impl StrategyExecutionService {
             return Ok(signal);
         }
 
+        info!("signal: {:?}", serde_json::to_string(&signal).unwrap());
         // 5. 记录信号
         warn!(
             "{:?} 策略信号！inst_id={}, period={}, should_buy={:?}, should_sell={:?}, ts={:?}",

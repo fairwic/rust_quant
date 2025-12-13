@@ -1,18 +1,20 @@
 {
     "version": "0.2.0",
     "configurations": [
+        
+
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug rust-quant",
+            "name": "Debug rust_quant",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=rust-quant",
+                    "--bin=rust_quant",
                     "--package=rust-quant-cli"
                 ],
                 "filter": {
-                    "name": "rust-quant",
+                    "name": "rust_quant",
                     "kind": "bin"
                 }
             },
@@ -29,52 +31,5 @@
                 "rust"
             ]
         },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Release rust-quant",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--release",
-                    "--bin=rust-quant",
-                    "--package=rust-quant-cli"
-                ],
-                "filter": {
-                    "name": "rust-quant",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "RUST_LOG": "info",
-                "APP_ENV": "local",
-                "LOG_LEVEL": "info"
-            },
-            "envFile": "${workspaceFolder}/.env",
-            "console": "integratedTerminal",
-            "sourceLanguages": [
-                "rust"
-            ]
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug rust-quant (attach)",
-            "program": "${workspaceFolder}/target/debug/rust-quant",
-            "args": [],
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "RUST_LOG": "debug",
-                "APP_ENV": "local",
-                "LOG_LEVEL": "debug"
-            },
-            "envFile": "${workspaceFolder}/.env",
-            "console": "integratedTerminal",
-            "sourceLanguages": [
-                "rust"
-            ]
-        }
     ]
 }

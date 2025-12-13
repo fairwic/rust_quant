@@ -8,6 +8,7 @@
 .augment
 .specify
 /specs
+.sqlx/
 
 # 备份文件
 *.bak

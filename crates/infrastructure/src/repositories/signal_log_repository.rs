@@ -12,7 +12,7 @@ use tracing::{debug, info};
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct SignalLogEntity {
     #[sqlx(default)]
-    pub id: Option<i64>,
+    pub id: Option<i32>,
     pub inst_id: String,
     pub time: String,
     pub strategy_type: String,
@@ -45,14 +45,14 @@ impl SignalLogRepository {
     ) -> Result<u64> {
         let pool = get_db_pool();
 
-        let result = sqlx::query(
-            "INSERT INTO strategy_job_signal_log (inst_id, time, strategy_type, strategy_result) 
+        let result = sqlx::query!(
+            "INSERT INTO strategy_job_signal_log (inst_id, time, strategy_type, strategy_result)
              VALUES (?, ?, ?, ?)",
+            inst_id,
+            period,
+            strategy_type,
+            signal_json
         )
-        .bind(inst_id)
-        .bind(period)
-        .bind(strategy_type)
-        .bind(signal_json)
         .execute(pool)
         .await?;
 
@@ -80,15 +80,16 @@ impl SignalLogRepository {
     ) -> Result<Vec<SignalLogEntity>> {
         let pool = get_db_pool();
 
-        let signals = sqlx::query_as::<_, SignalLogEntity>(
-            "SELECT * FROM strategy_job_signal_log 
-             WHERE inst_id = ? AND time = ? 
-             ORDER BY created_at DESC 
+        let signals = sqlx::query_as!(
+            SignalLogEntity,
+            "SELECT * FROM strategy_job_signal_log
+             WHERE inst_id = ? AND time = ?
+             ORDER BY created_at DESC
              LIMIT ?",
+            inst_id,
+            period,
+            limit as i64
         )
-        .bind(inst_id)
-        .bind(period)
-        .bind(limit as i64)
         .fetch_all(pool)
         .await?;
 
@@ -103,12 +104,13 @@ impl SignalLogRepository {
             Some(v) => v,
             None => 100,
         };
-        let signals = sqlx::query_as::<_, SignalLogEntity>(
-            "SELECT * FROM strategy_job_signal_log 
-             ORDER BY created_at DESC 
+        let signals = sqlx::query_as!(
+            SignalLogEntity,
+            "SELECT * FROM strategy_job_signal_log
+             ORDER BY created_at DESC
              LIMIT ?",
+            limit as i64
         )
-        .bind(limit as i64)
         .fetch_all(pool)
         .await?;
 
@@ -119,11 +121,11 @@ impl SignalLogRepository {
     pub async fn cleanup_old_logs(&self, days: i64) -> Result<u64> {
         let pool = get_db_pool();
 
-        let result = sqlx::query(
-            "DELETE FROM strategy_job_signal_log 
+        let result = sqlx::query!(
+            "DELETE FROM strategy_job_signal_log
              WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)",
+            days
         )
-        .bind(days)
         .execute(pool)
         .await?;
 
