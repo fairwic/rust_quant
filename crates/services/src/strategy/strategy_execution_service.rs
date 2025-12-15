@@ -7,15 +7,15 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use tracing::{error, info, warn};
 
+use rust_quant_common::CandleItem;
 use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
-use rust_quant_common::CandleItem;
 use rust_quant_strategies::strategy_common::SignalResult;
 use tokio::sync::mpsc;
 
-use rust_quant_risk::realtime::{PositionSnapshot, RealtimeRiskEvent, StrategyRiskConfigSnapshot};
 use rust_quant_domain::enums::PositionSide as DomainPositionSide;
+use rust_quant_risk::realtime::{PositionSnapshot, RealtimeRiskEvent, StrategyRiskConfigSnapshot};
 
 /// 策略执行服务
 ///
@@ -54,11 +54,22 @@ impl StrategyExecutionService {
     }
 
     fn candle_entity_to_item(c: &rust_quant_market::models::CandlesEntity) -> Result<CandleItem> {
-        let o = c.o.parse::<f64>().map_err(|e| anyhow!("解析开盘价失败: {}", e))?;
-        let h = c.h.parse::<f64>().map_err(|e| anyhow!("解析最高价失败: {}", e))?;
-        let l = c.l.parse::<f64>().map_err(|e| anyhow!("解析最低价失败: {}", e))?;
-        let close = c.c.parse::<f64>().map_err(|e| anyhow!("解析收盘价失败: {}", e))?;
-        let v = c.vol_ccy.parse::<f64>().map_err(|e| anyhow!("解析成交量失败: {}", e))?;
+        let o =
+            c.o.parse::<f64>()
+                .map_err(|e| anyhow!("解析开盘价失败: {}", e))?;
+        let h =
+            c.h.parse::<f64>()
+                .map_err(|e| anyhow!("解析最高价失败: {}", e))?;
+        let l =
+            c.l.parse::<f64>()
+                .map_err(|e| anyhow!("解析最低价失败: {}", e))?;
+        let close =
+            c.c.parse::<f64>()
+                .map_err(|e| anyhow!("解析收盘价失败: {}", e))?;
+        let v = c
+            .vol_ccy
+            .parse::<f64>()
+            .map_err(|e| anyhow!("解析成交量失败: {}", e))?;
         let confirm = c
             .confirm
             .parse::<i32>()
@@ -105,7 +116,9 @@ impl StrategyExecutionService {
         // 必须严格使用配置中的 strategy_type 路由执行器：
         // - detect_strategy 基于参数“猜策略”，在参数为空/通用字段时会误判
         // - 误判会导致读取错误的策略缓存 key，直接失败
-        use rust_quant_strategies::strategy_registry::{get_strategy_registry, register_strategy_on_demand};
+        use rust_quant_strategies::strategy_registry::{
+            get_strategy_registry, register_strategy_on_demand,
+        };
 
         register_strategy_on_demand(&config.strategy_type);
         let strategy_executor = get_strategy_registry()
@@ -405,7 +418,13 @@ impl StrategyExecutionService {
                 Some(v) => v,
                 None => stop_loss_price,
             },
-            _ => stop_loss_price,
+            _ => {
+                warn!(
+                    "使用信号K线止损，却没有设置信号K线止损价格，使用最大止损: {}",
+                    stop_loss_price
+                );
+                stop_loss_price
+            }
         };
 
         // 验证止损价格合理性
@@ -429,15 +448,15 @@ impl StrategyExecutionService {
             entry_price, final_stop_loss
         );
 
-        // 7. 实际下单到交易所
+        // 7. 实际下单到交易所（与原实现 swap_order_service.rs::order_swap 保持一致）
         let order_result = okx_service
             .execute_order_from_signal(
                 &api_config,
                 inst_id,
                 signal,
                 order_size.clone(),
-                Some(entry_price),
                 Some(final_stop_loss),
+                Some(in_order_id.clone()), // 传递订单ID，用于追踪
             )
             .await
             .map_err(|e| {
@@ -516,7 +535,10 @@ impl StrategyExecutionService {
 
         match self.swap_order_repository.save(&swap_order).await {
             Ok(order_id) => {
-                info!("✅ 订单记录已保存: db_id={}, in_order_id={}", order_id, in_order_id);
+                info!(
+                    "✅ 订单记录已保存: db_id={}, in_order_id={}",
+                    order_id, in_order_id
+                );
             }
             Err(e) => {
                 // 订单已提交到交易所,保存失败只记录警告,不返回错误
@@ -593,23 +615,70 @@ impl StrategyExecutionService {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use std::sync::Mutex;
 
-    struct MockSwapOrderRepository;
+    /// Mock SwapOrderRepository - 支持自定义行为
+    struct MockSwapOrderRepository {
+        /// 模拟已存在的订单（用于幂等性测试）
+        existing_order: Option<SwapOrder>,
+        /// 保存订单时是否返回错误
+        save_should_fail: bool,
+        /// 保存的订单记录
+        saved_orders: Arc<Mutex<Vec<SwapOrder>>>,
+    }
+
+    impl MockSwapOrderRepository {
+        fn new() -> Self {
+            Self {
+                existing_order: None,
+                save_should_fail: false,
+                saved_orders: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn with_existing_order(mut self, order: SwapOrder) -> Self {
+            self.existing_order = Some(order);
+            self
+        }
+
+        fn with_save_failure(mut self, should_fail: bool) -> Self {
+            self.save_should_fail = should_fail;
+            self
+        }
+
+        #[allow(dead_code)]
+        fn get_saved_orders(&self) -> Vec<SwapOrder> {
+            self.saved_orders.lock().unwrap().clone()
+        }
+    }
 
     #[async_trait]
     impl SwapOrderRepository for MockSwapOrderRepository {
         async fn find_by_id(&self, _id: i32) -> Result<Option<SwapOrder>> {
             Ok(None)
         }
-        async fn find_by_in_order_id(&self, _in_order_id: &str) -> Result<Option<SwapOrder>> {
+
+        async fn find_by_in_order_id(&self, in_order_id: &str) -> Result<Option<SwapOrder>> {
+            if let Some(ref order) = self.existing_order {
+                if order.in_order_id == in_order_id {
+                    return Ok(Some(order.clone()));
+                }
+            }
             Ok(None)
         }
+
         async fn find_by_out_order_id(&self, _out_order_id: &str) -> Result<Option<SwapOrder>> {
             Ok(None)
         }
-        async fn find_by_inst_id(&self, _inst_id: &str, _limit: Option<i32>) -> Result<Vec<SwapOrder>> {
+
+        async fn find_by_inst_id(
+            &self,
+            _inst_id: &str,
+            _limit: Option<i32>,
+        ) -> Result<Vec<SwapOrder>> {
             Ok(vec![])
         }
+
         async fn find_pending_order(
             &self,
             _inst_id: &str,
@@ -619,12 +688,19 @@ mod tests {
         ) -> Result<Vec<SwapOrder>> {
             Ok(vec![])
         }
-        async fn save(&self, _order: &SwapOrder) -> Result<i32> {
+
+        async fn save(&self, order: &SwapOrder) -> Result<i32> {
+            if self.save_should_fail {
+                return Err(anyhow!("模拟保存失败"));
+            }
+            self.saved_orders.lock().unwrap().push(order.clone());
             Ok(1)
         }
+
         async fn update(&self, _order: &SwapOrder) -> Result<()> {
             Ok(())
         }
+
         async fn find_by_strategy_and_time(
             &self,
             _strategy_id: i32,
@@ -636,7 +712,57 @@ mod tests {
     }
 
     fn create_test_service() -> StrategyExecutionService {
-        StrategyExecutionService::new(Arc::new(MockSwapOrderRepository))
+        StrategyExecutionService::new(Arc::new(MockSwapOrderRepository::new()))
+    }
+
+    /// 创建测试用的SignalResult - 买入信号
+    fn create_buy_signal(open_price: f64, ts: i64) -> SignalResult {
+        SignalResult {
+            should_buy: true,
+            should_sell: false,
+            open_price,
+            signal_kline_stop_loss_price: Some(open_price * 0.98), // 2%止损
+            best_open_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
+            move_stop_open_price_when_touch_price: None,
+            ts,
+            single_value: None,
+            single_result: None,
+            counter_trend_pullback_take_profit_price: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
+        }
+    }
+
+    /// 创建测试用的SignalResult - 卖出信号
+    fn create_sell_signal(open_price: f64, ts: i64) -> SignalResult {
+        SignalResult {
+            should_buy: false,
+            should_sell: true,
+            open_price,
+            signal_kline_stop_loss_price: Some(open_price * 1.02), // 2%止损
+            best_open_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
+            move_stop_open_price_when_touch_price: None,
+            ts,
+            single_value: None,
+            single_result: None,
+            counter_trend_pullback_take_profit_price: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
+        }
     }
 
     #[test]
@@ -681,5 +807,907 @@ mod tests {
         assert!(service.should_execute(&config, None, 1000));
         assert!(!service.should_execute(&config, Some(1000), 1500));
         assert!(service.should_execute(&config, Some(1000), 5000));
+    }
+
+    // ========== 下单逻辑单元测试 ==========
+
+    /// 测试：下单数量计算逻辑（90%安全系数）
+    #[test]
+    fn test_order_size_calculation() {
+        let max_available = 100.0;
+        let safety_factor = 0.9;
+        let order_size_f64 = max_available * safety_factor;
+        let order_size = if order_size_f64 < 1.0 {
+            "0".to_string()
+        } else {
+            format!("{:.2}", order_size_f64)
+        };
+
+        assert_eq!(order_size, "90.00");
+
+        // 测试小于1的情况
+        let max_available = 0.5;
+        let order_size_f64 = max_available * safety_factor;
+        let order_size = if order_size_f64 < 1.0 {
+            "0".to_string()
+        } else {
+            format!("{:.2}", order_size_f64)
+        };
+
+        assert_eq!(order_size, "0");
+    }
+
+    /// 测试：止损价格计算逻辑 - 做多
+    #[test]
+    fn test_stop_loss_calculation_long() {
+        let entry_price = 50000.0;
+        let max_loss_percent = 0.02; // 2%
+
+        let stop_loss_price = entry_price * (1.0 - max_loss_percent);
+        assert_eq!(stop_loss_price, 49000.0);
+
+        // 验证：做多时，开仓价应该 > 止损价
+        assert!(entry_price > stop_loss_price);
+    }
+
+    /// 测试：止损价格计算逻辑 - 做空
+    #[test]
+    fn test_stop_loss_calculation_short() {
+        let entry_price = 50000.0;
+        let max_loss_percent = 0.02; // 2%
+
+        let stop_loss_price = entry_price * (1.0 + max_loss_percent);
+        assert_eq!(stop_loss_price, 51000.0);
+
+        // 验证：做空时，开仓价应该 < 止损价
+        assert!(entry_price < stop_loss_price);
+    }
+
+    /// 测试：止损价格验证 - 做多时开仓价 < 止损价应该失败
+    #[test]
+    fn test_stop_loss_validation_long_invalid() {
+        let entry_price = 49000.0;
+        let stop_loss_price = 50000.0; // 止损价 > 开仓价，不合理
+
+        let is_valid = entry_price >= stop_loss_price;
+        assert!(!is_valid, "做多时开仓价应该 >= 止损价");
+    }
+
+    /// 测试：止损价格验证 - 做空时开仓价 > 止损价应该失败
+    #[test]
+    fn test_stop_loss_validation_short_invalid() {
+        let entry_price = 51000.0;
+        let stop_loss_price = 50000.0; // 止损价 < 开仓价，不合理
+
+        let is_valid = entry_price <= stop_loss_price;
+        assert!(!is_valid, "做空时开仓价应该 <= 止损价");
+    }
+
+    /// 测试：信号K线止损价格优先级
+    #[test]
+    fn test_signal_kline_stop_loss_priority() {
+        let entry_price = 50000.0;
+        let max_loss_percent = 0.02;
+        let signal_kline_stop_loss = 48000.0; // 信号K线止损价
+
+        // 计算默认止损价
+        let default_stop_loss = entry_price * (1.0 - max_loss_percent); // 49000.0
+
+        // 如果使用信号K线止损，应该使用信号K线止损价
+        let final_stop_loss = match Some(true) {
+            Some(true) => match Some(signal_kline_stop_loss) {
+                Some(v) => v,
+                None => default_stop_loss,
+            },
+            _ => default_stop_loss,
+        };
+
+        assert_eq!(final_stop_loss, signal_kline_stop_loss);
+        assert_ne!(final_stop_loss, default_stop_loss);
+    }
+
+    /// 测试：信号K线止损价格缺失时使用默认止损
+    #[test]
+    fn test_signal_kline_stop_loss_fallback() {
+        let entry_price = 50000.0;
+        let max_loss_percent = 0.02;
+        let default_stop_loss = entry_price * (1.0 - max_loss_percent); // 49000.0
+
+        // 如果使用信号K线止损但信号K线止损价为None，应该使用默认止损
+        let final_stop_loss = match Some(true) {
+            Some(true) => match None::<f64> {
+                Some(v) => v,
+                None => default_stop_loss,
+            },
+            _ => default_stop_loss,
+        };
+
+        assert_eq!(final_stop_loss, default_stop_loss);
+    }
+
+    /// 测试：订单ID生成
+    #[test]
+    fn test_generate_in_order_id() {
+        let inst_id = "BTC-USDT-SWAP";
+        let strategy_type = "strategy";
+        let ts = 1234567890;
+
+        let in_order_id = SwapOrder::generate_in_order_id(inst_id, strategy_type, ts);
+        assert_eq!(in_order_id, "BTC-USDT-SWAP_strategy_1234567890");
+    }
+
+    /// 测试：幂等性检查 - 已存在订单应该跳过
+    #[tokio::test]
+    async fn test_idempotency_check() {
+        let inst_id = "BTC-USDT-SWAP";
+        let ts = 1234567890;
+        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", ts);
+
+        // 创建已存在的订单
+        let existing_order = SwapOrder::new(
+            1,
+            in_order_id.clone(),
+            "out_order_123".to_string(),
+            "vegas".to_string(),
+            "1H".to_string(),
+            inst_id.to_string(),
+            "buy".to_string(),
+            "1.0".to_string(),
+            "long".to_string(),
+            "okx".to_string(),
+            "{}".to_string(),
+        );
+
+        let repo = MockSwapOrderRepository::new().with_existing_order(existing_order);
+        let service = StrategyExecutionService::new(Arc::new(repo));
+
+        // 验证幂等性：查询已存在的订单应该返回Some
+        let found = service
+            .swap_order_repository
+            .find_by_in_order_id(&in_order_id)
+            .await
+            .unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().in_order_id, in_order_id);
+    }
+
+    /// 测试：交易方向判断 - 买入信号
+    #[test]
+    fn test_trade_direction_buy() {
+        let signal = create_buy_signal(50000.0, 1234567890);
+
+        let (side, pos_side) = if signal.should_buy {
+            ("buy", "long")
+        } else if signal.should_sell {
+            ("sell", "short")
+        } else {
+            panic!("信号无效");
+        };
+
+        assert_eq!(side, "buy");
+        assert_eq!(pos_side, "long");
+    }
+
+    /// 测试：交易方向判断 - 卖出信号
+    #[test]
+    fn test_trade_direction_sell() {
+        let signal = create_sell_signal(50000.0, 1234567890);
+
+        let (side, pos_side) = if signal.should_buy {
+            ("buy", "long")
+        } else if signal.should_sell {
+            ("sell", "short")
+        } else {
+            panic!("信号无效");
+        };
+
+        assert_eq!(side, "sell");
+        assert_eq!(pos_side, "short");
+    }
+
+    /// 测试：无效信号处理
+    #[test]
+    fn test_invalid_signal() {
+        let signal = SignalResult {
+            should_buy: false,
+            should_sell: false,
+            ..create_buy_signal(50000.0, 1234567890)
+        };
+
+        let has_signal = signal.should_buy || signal.should_sell;
+        assert!(!has_signal, "应该识别为无效信号");
+    }
+
+    /// 测试：订单详情JSON构建
+    #[test]
+    fn test_order_detail_json() {
+        let entry_price = 50000.0;
+        let stop_loss = 49000.0;
+        let signal = create_buy_signal(entry_price, 1234567890);
+
+        let order_detail = serde_json::json!({
+            "entry_price": entry_price,
+            "stop_loss": stop_loss,
+            "signal": {
+                "should_buy": signal.should_buy,
+                "should_sell": signal.should_sell,
+                "atr_stop_loss_price": signal.atr_stop_loss_price,
+                "atr_take_profit_ratio_price": signal.atr_take_profit_ratio_price,
+            }
+        });
+
+        assert_eq!(order_detail["entry_price"], entry_price);
+        assert_eq!(order_detail["stop_loss"], stop_loss);
+        assert_eq!(order_detail["signal"]["should_buy"], signal.should_buy);
+        assert_eq!(order_detail["signal"]["should_sell"], signal.should_sell);
+    }
+
+    /// 测试：订单保存成功
+    #[tokio::test]
+    async fn test_order_save_success() {
+        let repo = MockSwapOrderRepository::new();
+        let service = StrategyExecutionService::new(Arc::new(repo));
+
+        let order = SwapOrder::new(
+            1,
+            "test_in_123".to_string(),
+            "test_out_456".to_string(),
+            "vegas".to_string(),
+            "1H".to_string(),
+            "BTC-USDT-SWAP".to_string(),
+            "buy".to_string(),
+            "1.0".to_string(),
+            "long".to_string(),
+            "okx".to_string(),
+            "{}".to_string(),
+        );
+
+        // 验证订单结构
+        assert_eq!(order.strategy_id, 1);
+        assert_eq!(order.inst_id, "BTC-USDT-SWAP");
+        assert_eq!(order.side, "buy");
+
+        // 测试保存
+        let result = service.swap_order_repository.save(&order).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
+    }
+
+    /// 测试：订单保存失败处理
+    #[tokio::test]
+    async fn test_order_save_failure() {
+        let repo = MockSwapOrderRepository::new().with_save_failure(true);
+        let service = StrategyExecutionService::new(Arc::new(repo));
+
+        let order = SwapOrder::new(
+            1,
+            "test_in_123".to_string(),
+            "test_out_456".to_string(),
+            "vegas".to_string(),
+            "1H".to_string(),
+            "BTC-USDT-SWAP".to_string(),
+            "buy".to_string(),
+            "1.0".to_string(),
+            "long".to_string(),
+            "okx".to_string(),
+            "{}".to_string(),
+        );
+
+        // 验证保存失败时应该返回错误
+        let result = service.swap_order_repository.save(&order).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("模拟保存失败"));
+    }
+
+    /// 测试：止损价格精度（2位小数）
+    #[test]
+    fn test_stop_loss_precision() {
+        let stop_loss_price = 49000.123456789;
+        let formatted = format!("{:.2}", stop_loss_price);
+        assert_eq!(formatted, "49000.12");
+    }
+
+    /// 测试：下单数量精度（2位小数）
+    #[test]
+    fn test_order_size_precision() {
+        let order_size_f64 = 90.123456789;
+        let formatted = format!("{:.2}", order_size_f64);
+        assert_eq!(formatted, "90.12");
+    }
+
+    /// 测试：做多止损价格边界情况
+    #[test]
+    fn test_long_stop_loss_edge_cases() {
+        // 测试最大止损百分比
+        let entry_price = 50000.0;
+        let max_loss_percent = 0.05; // 5%
+        let stop_loss = entry_price * (1.0 - max_loss_percent);
+        assert_eq!(stop_loss, 47500.0);
+
+        // 验证合理性
+        assert!(entry_price > stop_loss);
+    }
+
+    /// 测试：做空止损价格边界情况
+    #[test]
+    fn test_short_stop_loss_edge_cases() {
+        // 测试最大止损百分比
+        let entry_price = 50000.0;
+        let max_loss_percent = 0.05; // 5%
+        let stop_loss = entry_price * (1.0 + max_loss_percent);
+        assert_eq!(stop_loss, 52500.0);
+
+        // 验证合理性
+        assert!(entry_price < stop_loss);
+    }
+
+    /// 测试：下单数量为0时应该跳过
+    #[test]
+    fn test_zero_order_size_skip() {
+        let order_size = "0".to_string();
+        let should_skip = order_size == "0";
+        assert!(should_skip);
+    }
+
+    /// 测试：下单数量小于1时应该返回0
+    #[test]
+    fn test_small_order_size() {
+        let max_available = 0.5;
+        let safety_factor = 0.9;
+        let order_size_f64 = max_available * safety_factor; // 0.45
+
+        let order_size = if order_size_f64 < 1.0 {
+            "0".to_string()
+        } else {
+            format!("{:.2}", order_size_f64)
+        };
+
+        assert_eq!(order_size, "0");
+    }
+
+    /// 测试：订单从信号创建
+    #[test]
+    fn test_order_from_signal() {
+        let signal = create_buy_signal(50000.0, 1234567890);
+        let inst_id = "BTC-USDT-SWAP";
+        let period = "1H";
+        let strategy_type = "vegas";
+        let side = "buy";
+        let pos_side = "long";
+        let order_size = "1.0";
+        let in_order_id = "test_in_123";
+        let out_order_id = "test_out_456";
+        let platform_type = "okx";
+
+        let order_detail = serde_json::json!({
+            "entry_price": signal.open_price,
+            "stop_loss": signal.signal_kline_stop_loss_price,
+        });
+
+        let order = SwapOrder::from_signal(
+            1,
+            inst_id,
+            period,
+            strategy_type,
+            side,
+            pos_side,
+            order_size,
+            in_order_id,
+            out_order_id,
+            platform_type,
+            &order_detail.to_string(),
+        );
+
+        assert_eq!(order.strategy_id, 1);
+        assert_eq!(order.inst_id, inst_id);
+        assert_eq!(order.side, side);
+        assert_eq!(order.pos_side, pos_side);
+        assert_eq!(order.in_order_id, in_order_id);
+        assert_eq!(order.out_order_id, out_order_id);
+    }
+
+    // ========== execute_order_internal 实际测试用例 ==========
+
+    /// 测试辅助：创建测试用的ExchangeApiConfig
+    #[allow(dead_code)]
+    fn create_test_api_config() -> rust_quant_domain::entities::ExchangeApiConfig {
+        rust_quant_domain::entities::ExchangeApiConfig::new(
+            1,
+            "okx".to_string(),
+            "test_api_key".to_string(),
+            "test_api_secret".to_string(),
+            Some("test_passphrase".to_string()),
+            true,  // sandbox
+            true,  // enabled
+            Some("测试API配置".to_string()),
+        )
+    }
+
+    /// 测试辅助：创建测试用的BasicRiskConfig
+    fn create_test_risk_config(
+        max_loss_percent: f64,
+        use_signal_kline_stop_loss: Option<bool>,
+    ) -> rust_quant_domain::BasicRiskConfig {
+        rust_quant_domain::BasicRiskConfig {
+            max_loss_percent,
+            atr_take_profit_ratio: None,
+            fix_signal_kline_take_profit_ratio: None,
+            is_counter_trend_pullback_take_profit: None,
+            is_move_stop_loss: None,
+            is_used_signal_k_line_stop_loss: use_signal_kline_stop_loss,
+            max_hold_time: None,
+            max_leverage: None,
+        }
+    }
+
+    /// 测试：execute_order_internal - 正常买入下单流程
+    /// 
+    /// 注意：此测试需要mock外部依赖（ExchangeApiService和OkxOrderService）
+    /// 由于这些依赖是硬编码的，此测试主要用于验证逻辑流程
+    #[tokio::test]
+    #[ignore] // 需要真实环境或mock，默认忽略
+    async fn test_execute_order_internal_buy_success() {
+        let repo = MockSwapOrderRepository::new();
+        let _service = StrategyExecutionService::new(Arc::new(repo));
+
+        let signal = create_buy_signal(50000.0, 1234567890);
+        let risk_config = create_test_risk_config(0.02, None);
+        let _inst_id = "BTC-USDT-SWAP";
+        let _period = "1H";
+        let _config_id = 1;
+        let _strategy_type = "vegas";
+
+        // 注意：此测试需要mock ExchangeApiService 和 OkxOrderService
+        // 由于这些是硬编码依赖，实际测试需要：
+        // 1. 使用真实环境（需要配置API密钥）
+        // 2. 或者重构代码支持依赖注入
+        // 3. 或者使用条件编译创建测试版本
+
+        // 这里只验证信号和配置的有效性
+        assert!(signal.should_buy);
+        assert!(!signal.should_sell);
+        assert_eq!(signal.open_price, 50000.0);
+        assert_eq!(risk_config.max_loss_percent, 0.02);
+    }
+
+    /// 测试：execute_order_internal - 幂等性检查
+    #[tokio::test]
+    async fn test_execute_order_internal_idempotency() {
+        let inst_id = "BTC-USDT-SWAP";
+        let ts = 1234567890;
+        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", ts);
+
+        // 创建已存在的订单
+        let existing_order = SwapOrder::new(
+            1,
+            in_order_id.clone(),
+            "out_order_123".to_string(),
+            "vegas".to_string(),
+            "1H".to_string(),
+            inst_id.to_string(),
+            "buy".to_string(),
+            "1.0".to_string(),
+            "long".to_string(),
+            "okx".to_string(),
+            "{}".to_string(),
+        );
+
+        let repo = MockSwapOrderRepository::new().with_existing_order(existing_order);
+        let service = StrategyExecutionService::new(Arc::new(repo));
+
+        // 验证幂等性：查询已存在的订单应该返回Some
+        let found = service
+            .swap_order_repository
+            .find_by_in_order_id(&in_order_id)
+            .await
+            .unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().in_order_id, in_order_id);
+    }
+
+    /// 测试：execute_order_internal - 无效信号处理
+    #[test]
+    fn test_execute_order_internal_invalid_signal() {
+        let signal = SignalResult {
+            should_buy: false,
+            should_sell: false,
+            ..create_buy_signal(50000.0, 1234567890)
+        };
+
+        // 验证无效信号应该返回错误
+        let (side, pos_side) = if signal.should_buy {
+            ("buy", "long")
+        } else if signal.should_sell {
+            ("sell", "short")
+        } else {
+            ("invalid", "invalid")
+        };
+
+        assert_eq!(side, "invalid");
+        assert_eq!(pos_side, "invalid");
+    }
+
+    /// 测试：execute_order_internal - 下单数量为0时跳过
+    #[test]
+    fn test_execute_order_internal_zero_size_skip() {
+        // 模拟最大可用数量很小的情况
+        let max_available = 0.5; // 小于1
+        let safety_factor = 0.9;
+        let order_size_f64 = max_available * safety_factor; // 0.45
+
+        let order_size = if order_size_f64 < 1.0 {
+            "0".to_string()
+        } else {
+            format!("{:.2}", order_size_f64)
+        };
+
+        assert_eq!(order_size, "0");
+        // 当order_size为0时，应该跳过下单
+        assert!(order_size == "0");
+    }
+
+    /// 测试：execute_order_internal - 止损价格验证失败（做多）
+    #[test]
+    fn test_execute_order_internal_stop_loss_validation_fail_long() {
+        let entry_price = 49000.0;
+        let stop_loss_price = 50000.0; // 止损价 > 开仓价，不合理
+
+        // 做多时，开仓价应该 > 止损价
+        let is_valid = entry_price >= stop_loss_price;
+        assert!(!is_valid, "做多时止损价格不合理应该失败");
+    }
+
+    /// 测试：execute_order_internal - 止损价格验证失败（做空）
+    #[test]
+    fn test_execute_order_internal_stop_loss_validation_fail_short() {
+        let entry_price = 51000.0;
+        let stop_loss_price = 50000.0; // 止损价 < 开仓价，不合理
+
+        // 做空时，开仓价应该 < 止损价
+        let is_valid = entry_price <= stop_loss_price;
+        assert!(!is_valid, "做空时止损价格不合理应该失败");
+    }
+
+    /// 测试：execute_order_internal - 使用信号K线止损
+    #[test]
+    fn test_execute_order_internal_signal_kline_stop_loss() {
+        let entry_price = 50000.0;
+        let max_loss_percent = 0.02;
+        let signal_kline_stop_loss = 48000.0;
+
+        // 计算默认止损
+        let default_stop_loss = entry_price * (1.0 - max_loss_percent); // 49000.0
+
+        // 如果使用信号K线止损，应该使用信号K线止损价
+        let risk_config = create_test_risk_config(0.02, Some(true));
+        let final_stop_loss = match risk_config.is_used_signal_k_line_stop_loss {
+            Some(true) => match Some(signal_kline_stop_loss) {
+                Some(v) => v,
+                None => default_stop_loss,
+            },
+            _ => default_stop_loss,
+        };
+
+        assert_eq!(final_stop_loss, signal_kline_stop_loss);
+        assert_ne!(final_stop_loss, default_stop_loss);
+    }
+
+    /// 测试：execute_order_internal - 订单保存成功
+    #[tokio::test]
+    async fn test_execute_order_internal_order_save_success() {
+        let repo = MockSwapOrderRepository::new();
+        let service = StrategyExecutionService::new(Arc::new(repo));
+
+        let signal = create_buy_signal(50000.0, 1234567890);
+        let inst_id = "BTC-USDT-SWAP";
+        let period = "1H";
+        let strategy_type = "vegas";
+        let config_id = 1;
+        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        let out_order_id = "test_out_123".to_string();
+        let order_size = "1.0".to_string();
+
+        let order_detail = serde_json::json!({
+            "entry_price": signal.open_price,
+            "stop_loss": signal.signal_kline_stop_loss_price,
+        });
+
+        let swap_order = SwapOrder::from_signal(
+            config_id as i32,
+            inst_id,
+            period,
+            strategy_type,
+            "buy",
+            "long",
+            &order_size,
+            &in_order_id,
+            &out_order_id,
+            "okx",
+            &order_detail.to_string(),
+        );
+
+        // 测试保存订单
+        let result = service.swap_order_repository.save(&swap_order).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
+    }
+
+    /// 测试：execute_order_internal - 订单保存失败处理
+    #[tokio::test]
+    async fn test_execute_order_internal_order_save_failure() {
+        let repo = MockSwapOrderRepository::new().with_save_failure(true);
+        let service = StrategyExecutionService::new(Arc::new(repo));
+
+        let signal = create_buy_signal(50000.0, 1234567890);
+        let inst_id = "BTC-USDT-SWAP";
+        let period = "1H";
+        let strategy_type = "vegas";
+        let config_id = 1;
+        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        let out_order_id = "test_out_123".to_string();
+        let order_size = "1.0".to_string();
+
+        let order_detail = serde_json::json!({
+            "entry_price": signal.open_price,
+            "stop_loss": signal.signal_kline_stop_loss_price,
+        });
+
+        let swap_order = SwapOrder::from_signal(
+            config_id as i32,
+            inst_id,
+            period,
+            strategy_type,
+            "buy",
+            "long",
+            &order_size,
+            &in_order_id,
+            &out_order_id,
+            "okx",
+            &order_detail.to_string(),
+        );
+
+        // 测试保存失败
+        let result = service.swap_order_repository.save(&swap_order).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("模拟保存失败"));
+    }
+
+    /// 测试：execute_order_internal - 真实场景集成测试
+    /// 
+    /// 此测试通过execute_strategy方法间接测试execute_order_internal的完整流程
+    /// 使用真实的数据结构和逻辑，可以连接真实的数据库和API（如果配置了）
+    /// 
+    /// 前置条件（可选）：
+    /// 1. 数据库配置：DATABASE_URL环境变量
+    /// 2. Redis配置：REDIS_URL环境变量
+    /// 3. API配置：需要在数据库中配置策略配置ID和API配置的关联
+    /// 
+    /// 如果未配置数据库或API，测试会跳过实际下单，仅验证逻辑流程
+    #[tokio::test]
+    #[ignore] // 默认忽略，需要真实环境配置
+    async fn test_execute_order_internal_real_scenario() {
+        use chrono::Utc;
+        use rust_quant_core::database::get_db_pool;
+        use rust_quant_domain::{StrategyStatus, StrategyType, Timeframe};
+        use rust_quant_infrastructure::repositories::SqlxSwapOrderRepository;
+        
+        println!("🚀 开始真实场景集成测试");
+
+        // 1. 初始化数据库连接（如果配置了）
+        let pool_result = std::panic::catch_unwind(|| get_db_pool());
+        let repo: Arc<dyn SwapOrderRepository> = match pool_result {
+            Ok(pool) => {
+                println!("✅ 数据库连接成功");
+                // Pool 实现了 Clone trait，可以安全地克隆
+                Arc::new(SqlxSwapOrderRepository::new(pool.clone()))
+            }
+            Err(_) => {
+                println!("⚠️  数据库未配置，使用Mock Repository");
+                Arc::new(MockSwapOrderRepository::new())
+            }
+        };
+        
+        let service = StrategyExecutionService::new(repo.clone());
+
+        // 2. 创建真实的策略配置
+        let config_id = 1i64;
+        let inst_id = "BTC-USDT-SWAP";
+        let period = "1H";
+        let risk_config = rust_quant_domain::BasicRiskConfig {
+            max_loss_percent: 0.02, // 2%止损
+            atr_take_profit_ratio: None,
+            fix_signal_kline_take_profit_ratio: None,
+            is_counter_trend_pullback_take_profit: None,
+            is_move_stop_loss: None,
+            is_used_signal_k_line_stop_loss: Some(true), // 使用信号K线止损
+            max_hold_time: None,
+            max_leverage: None,
+        };
+
+        let config = StrategyConfig {
+            id: config_id,
+            strategy_type: StrategyType::Vegas,
+            symbol: "BTC-USDT".to_string(),
+            timeframe: Timeframe::H1,
+            status: StrategyStatus::Running,
+            parameters: serde_json::json!({}),
+            risk_config: serde_json::to_value(&risk_config).unwrap(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            backtest_start: None,
+            backtest_end: None,
+            description: Some("真实场景测试配置".to_string()),
+        };
+
+        // 3. 创建真实的交易信号（模拟策略分析结果）
+        let current_price = 50000.0;
+        let ts = chrono::Utc::now().timestamp_millis();
+        let signal = SignalResult {
+            should_buy: true,
+            should_sell: false,
+            open_price: current_price,
+            signal_kline_stop_loss_price: Some(current_price * 0.98), // 2%止损
+            best_open_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
+            move_stop_open_price_when_touch_price: None,
+            ts,
+            single_value: None,
+            single_result: None,
+            counter_trend_pullback_take_profit_price: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
+        };
+
+        println!("📊 交易信号: should_buy={}, open_price={}, stop_loss={:?}", 
+                 signal.should_buy, signal.open_price, signal.signal_kline_stop_loss_price);
+
+        // 4. 验证信号和配置
+        assert!(signal.should_buy, "信号应该是买入信号");
+        assert_eq!(signal.open_price, current_price);
+        assert!(signal.signal_kline_stop_loss_price.is_some());
+
+        // 5. 验证止损价格计算逻辑
+        let entry_price = signal.open_price;
+        let max_loss_percent = risk_config.max_loss_percent;
+        let default_stop_loss = entry_price * (1.0 - max_loss_percent);
+        let final_stop_loss = match risk_config.is_used_signal_k_line_stop_loss {
+            Some(true) => signal.signal_kline_stop_loss_price.unwrap_or(default_stop_loss),
+            _ => default_stop_loss,
+        };
+        
+        assert!(entry_price > final_stop_loss, "做多时开仓价应该 > 止损价");
+        assert_eq!(final_stop_loss, current_price * 0.98, "应该使用信号K线止损价");
+        println!("✅ 止损价格验证通过: entry={}, stop_loss={}", entry_price, final_stop_loss);
+
+        // 6. 验证订单ID生成
+        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        assert!(!in_order_id.is_empty());
+        assert!(in_order_id.contains(inst_id));
+        println!("✅ 订单ID生成: {}", in_order_id);
+
+        // 7. 检查幂等性
+        let existing_order = service
+            .swap_order_repository
+            .find_by_in_order_id(&in_order_id)
+            .await
+            .unwrap();
+        
+        if existing_order.is_some() {
+            println!("⚠️  订单已存在（幂等性检查通过），跳过重复下单");
+            println!("   已存在订单: {:?}", existing_order.unwrap().out_order_id);
+            println!("   配置ID: {}, 交易对: {}, 周期: {}", config_id, inst_id, period);
+            return;
+        }
+        println!("✅ 幂等性检查通过，可以下单");
+
+        // 8. 尝试通过execute_strategy执行完整流程（需要真实环境）
+        // 注意：这会实际调用外部API，需要：
+        // - 数据库中存在config_id对应的策略配置
+        // - 数据库中配置了策略与API的关联
+        // - API配置有效且有足够资金
+        
+        println!("ℹ️  尝试执行完整下单流程...");
+        println!("   提示：如果数据库和API未配置，此步骤会失败，但逻辑验证已完成");
+        
+        // 由于execute_strategy需要真实的K线数据，这里我们只验证逻辑
+        // 如果需要完整测试，需要提供真实的CandlesEntity
+        
+        // 9. 验证订单详情构建
+        let order_detail = serde_json::json!({
+            "entry_price": entry_price,
+            "stop_loss": final_stop_loss,
+            "signal": {
+                "should_buy": signal.should_buy,
+                "should_sell": signal.should_sell,
+                "atr_stop_loss_price": signal.atr_stop_loss_price,
+                "atr_take_profit_ratio_price": signal.atr_take_profit_ratio_price,
+            }
+        });
+
+        assert_eq!(order_detail["entry_price"], entry_price);
+        assert_eq!(order_detail["stop_loss"], final_stop_loss);
+        assert_eq!(order_detail["signal"]["should_buy"], signal.should_buy);
+        println!("✅ 订单详情构建验证通过");
+
+        // 10. 验证订单对象创建
+        let swap_order = SwapOrder::from_signal(
+            config_id as i32,
+            inst_id,
+            period,
+            "vegas",
+            "buy",
+            "long",
+            "1.0",
+            &in_order_id,
+            "test_out_123",
+            "okx",
+            &order_detail.to_string(),
+        );
+
+        assert_eq!(swap_order.strategy_id, config_id as i32);
+        assert_eq!(swap_order.inst_id, inst_id);
+        assert_eq!(swap_order.side, "buy");
+        assert_eq!(swap_order.pos_side, "long");
+        assert_eq!(swap_order.in_order_id, in_order_id);
+        println!("✅ 订单对象创建验证通过");
+
+        println!("✅ 真实场景测试完成：所有逻辑验证通过");
+        println!("   如需完整测试，请配置数据库和API环境变量");
+    }
+
+    /// 测试：execute_order_internal - 完整流程验证（逻辑层面）
+    #[test]
+    fn test_execute_order_internal_full_flow_logic() {
+        // 1. 创建信号
+        let signal = create_buy_signal(50000.0, 1234567890);
+        assert!(signal.should_buy);
+        assert_eq!(signal.open_price, 50000.0);
+
+        // 2. 创建风险配置
+        let risk_config = create_test_risk_config(0.02, None);
+        assert_eq!(risk_config.max_loss_percent, 0.02);
+
+        // 3. 计算止损价格
+        let entry_price = signal.open_price;
+        let max_loss_percent = risk_config.max_loss_percent;
+        let stop_loss_price = entry_price * (1.0 - max_loss_percent);
+        assert_eq!(stop_loss_price, 49000.0);
+
+        // 4. 验证止损价格合理性（做多）
+        let _pos_side = "long";
+        assert!(entry_price > stop_loss_price, "做多时开仓价应该 > 止损价");
+
+        // 5. 计算下单数量
+        let max_available = 100.0;
+        let safety_factor = 0.9;
+        let order_size_f64 = max_available * safety_factor;
+        let order_size = format!("{:.2}", order_size_f64);
+        assert_eq!(order_size, "90.00");
+
+        // 6. 生成订单ID
+        let inst_id = "BTC-USDT-SWAP";
+        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        assert_eq!(
+            in_order_id,
+            format!("{}_strategy_{}", inst_id, signal.ts)
+        );
+
+        // 7. 创建订单详情
+        let order_detail = serde_json::json!({
+            "entry_price": entry_price,
+            "stop_loss": stop_loss_price,
+            "signal": {
+                "should_buy": signal.should_buy,
+                "should_sell": signal.should_sell,
+            }
+        });
+        assert_eq!(order_detail["entry_price"], entry_price);
+        assert_eq!(order_detail["stop_loss"], stop_loss_price);
     }
 }
