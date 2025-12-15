@@ -1,414 +1,395 @@
 use super::super::types::TradeSide;
 use super::position::close_position;
-use super::types::{BasicRiskStrategyConfig, SignalResult, TradingState};
+use super::types::{BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState};
 use crate::CandleItem;
 
-/// 风险管理，检查止盈止损配置
+// ============================================================================
+// 出场上下文结构（减少参数传递和重复计算）
+// ============================================================================
+
+/// 出场检查上下文，封装常用数据避免重复计算
+struct ExitContext {
+    side: TradeSide,
+    entry: f64,
+    qty: f64,
+    /// 不利价格（触发止损用）：Long=low, Short=high
+    adverse_price: f64,
+    /// 有利价格（触发止盈用）：Long=high, Short=low
+    favorable_price: f64,
+}
+
+impl ExitContext {
+    fn new(position: &TradePosition, candle: &CandleItem) -> Self {
+        let side = position.trade_side.clone();
+        Self {
+            entry: position.open_price,
+            qty: position.position_nums,
+            adverse_price: match side {
+                TradeSide::Long => candle.l,
+                TradeSide::Short => candle.h,
+            },
+            favorable_price: match side {
+                TradeSide::Long => candle.h,
+                TradeSide::Short => candle.l,
+            },
+            side,
+        }
+    }
+
+    /// 计算利润
+    #[inline]
+    fn profit(&self, exit_price: f64) -> f64 {
+        match self.side {
+            TradeSide::Long => (exit_price - self.entry) * self.qty,
+            TradeSide::Short => (self.entry - exit_price) * self.qty,
+        }
+    }
+
+    /// 检查止盈是否触发
+    #[inline]
+    fn is_take_profit_hit(&self, target: f64) -> bool {
+        match self.side {
+            TradeSide::Long => self.favorable_price >= target,
+            TradeSide::Short => self.favorable_price <= target,
+        }
+    }
+
+    /// 检查止盈是否触发（严格模式，用于某些需要 > 而非 >= 的场景）
+    #[inline]
+    fn is_take_profit_hit_strict(&self, target: f64) -> bool {
+        match self.side {
+            TradeSide::Long => self.favorable_price > target,
+            TradeSide::Short => self.favorable_price < target,
+        }
+    }
+
+    /// 检查止损是否触发
+    #[inline]
+    fn is_stop_loss_hit(&self, target: f64) -> bool {
+        match self.side {
+            TradeSide::Long => self.adverse_price <= target,
+            TradeSide::Short => self.adverse_price >= target,
+        }
+    }
+
+    /// 计算止损价格
+    #[inline]
+    fn stop_loss_price(&self, loss_pct: f64) -> f64 {
+        match self.side {
+            TradeSide::Long => self.entry * (1.0 - loss_pct),
+            TradeSide::Short => self.entry * (1.0 + loss_pct),
+        }
+    }
+
+    /// 计算收益率
+    #[inline]
+    fn profit_pct(&self) -> f64 {
+        self.profit(self.adverse_price) / self.entry
+    }
+}
+
+// ============================================================================
+// 出场结果
+// ============================================================================
+
+/// 出场检查结果
+enum ExitResult {
+    /// 触发出场，返回平仓价格和原因
+    Exit { price: f64, reason: &'static str },
+    /// 触发出场，返回平仓价格和动态原因
+    ExitDynamic { price: f64, reason: String },
+    /// 未触发
+    None,
+}
+
+// ============================================================================
+// 止损检查函数
+// ============================================================================
+
+/// 检查最大损失止损
+fn check_max_loss_stop(ctx: &ExitContext, max_loss_pct: f64) -> ExitResult {
+    if ctx.profit_pct() < -max_loss_pct {
+        let stop_price = ctx.stop_loss_price(max_loss_pct);
+        ExitResult::Exit {
+            price: stop_price,
+            reason: "最大亏损止损",
+        }
+    } else {
+        ExitResult::None
+    }
+}
+
+/// 检查信号K线止损
+fn check_signal_kline_stop(ctx: &ExitContext, stop_price: Option<f64>) -> ExitResult {
+    match stop_price {
+        Some(price) if ctx.is_stop_loss_hit(price) => ExitResult::Exit {
+            price,
+            reason: "预止损-信号线失效",
+        },
+        _ => ExitResult::None,
+    }
+}
+
+/// 检查三级ATR系统的移动止损
+fn check_atr_trailing_stop(
+    ctx: &ExitContext,
+    position: &TradePosition,
+) -> ExitResult {
+    // 必须有三级止盈配置才有移动止损
+    if position.atr_take_profit_level_1.is_none() {
+        return ExitResult::None;
+    }
+
+    match position.move_stop_open_price {
+        Some(stop_price) if ctx.is_stop_loss_hit(stop_price) => ExitResult::ExitDynamic {
+            price: stop_price,
+            reason: format!("移动止损(触发级别:{})", position.reached_take_profit_level),
+        },
+        _ => ExitResult::None,
+    }
+}
+
+// ============================================================================
+// 三级止盈系统
+// ============================================================================
+
+/// 更新三级ATR止盈系统的级别和移动止损线
+/// 返回是否触发第三级完全平仓
+fn update_atr_tiered_levels(
+    ctx: &ExitContext,
+    position: &mut TradePosition,
+) -> ExitResult {
+    let (level_1, level_2, level_3) = match (
+        position.atr_take_profit_level_1,
+        position.atr_take_profit_level_2,
+        position.atr_take_profit_level_3,
+    ) {
+        (Some(l1), Some(l2), Some(l3)) => (l1, l2, l3),
+        _ => return ExitResult::None,
+    };
+
+    let current_level = position.reached_take_profit_level;
+
+    // 第三级：5倍ATR，完全平仓
+    if current_level < 3 && ctx.is_take_profit_hit(level_3) {
+        return ExitResult::Exit {
+            price: level_3,
+            reason: "三级止盈(5倍ATR)-完全平仓",
+        };
+    }
+
+    // 第二级：2倍ATR，移动止损到第一级止盈价
+    if current_level < 2 && ctx.is_take_profit_hit(level_2) {
+        position.reached_take_profit_level = 2;
+        position.move_stop_open_price = Some(level_1);
+    }
+
+    // 第一级：1.5倍ATR，移动止损到开仓价
+    if current_level < 1 && ctx.is_take_profit_hit(level_1) {
+        position.reached_take_profit_level = 1;
+        position.move_stop_open_price = Some(ctx.entry);
+    }
+
+    ExitResult::None
+}
+
+// ============================================================================
+// 止盈检查函数
+// ============================================================================
+
+/// 检查ATR比例止盈
+fn check_atr_ratio_take_profit(
+    ctx: &ExitContext,
+    ratio: Option<f64>,
+    target_price: Option<f64>,
+) -> ExitResult {
+    let ratio = match ratio {
+        Some(r) if r > 0.0 => r,
+        _ => return ExitResult::None,
+    };
+
+    match target_price {
+        Some(price) if ctx.is_take_profit_hit(price) => ExitResult::Exit {
+            price,
+            reason: "atr按收益比例止盈",
+        },
+        _ => ExitResult::None,
+    }
+}
+
+/// 检查固定信号线比例止盈
+fn check_fixed_take_profit(ctx: &ExitContext, target: Option<f64>) -> ExitResult {
+    match target {
+        // 使用严格模式 (> 而非 >=)，保持原有行为
+        Some(price) if ctx.is_take_profit_hit_strict(price) => ExitResult::Exit {
+            price,
+            reason: "固定信号线比例止盈",
+        },
+        _ => ExitResult::None,
+    }
+}
+
+/// 检查动态止盈（做多/做空通用）
+fn check_dynamic_take_profit(
+    ctx: &ExitContext,
+    long_target: Option<f64>,
+    short_target: Option<f64>,
+) -> ExitResult {
+    let (target, reason) = match ctx.side {
+        TradeSide::Long => match long_target {
+            Some(t) if ctx.favorable_price > t => (t, "做多触达指标动态止盈"),
+            _ => return ExitResult::None,
+        },
+        TradeSide::Short => match short_target {
+            Some(t) if ctx.favorable_price < t => (t, "做空触达指标动态止盈"),
+            _ => return ExitResult::None,
+        },
+    };
+
+    ExitResult::Exit {
+        price: target,
+        reason,
+    }
+}
+
+/// 检查逆势回调止盈
+fn check_counter_trend_take_profit(ctx: &ExitContext, target: Option<f64>) -> ExitResult {
+    match target {
+        Some(price) if ctx.is_take_profit_hit(price) => ExitResult::Exit {
+            price,
+            reason: "逆势回调止盈",
+        },
+        _ => ExitResult::None,
+    }
+}
+
+// ============================================================================
+// 主函数
+// ============================================================================
+
+/// 风险管理检查入口
+///
+/// # 优先级原则
+/// **同一K线内，止损永远优先于止盈**
+///
+/// ## 检查顺序
+/// ### 止损（优先级高）
+/// 1. 最大损失止损 - 资金保护
+/// 2. 移动止损 - 三级ATR系统的移动止损
+/// 3. 信号K线止损 - 技术止损
+///
+/// ### 止盈
+/// 4. 三级ATR止盈 - 5倍ATR完全平仓
+/// 5. ATR比例止盈
+/// 6. 固定信号线比例止盈
+/// 7. 动态止盈 - 指标动态止盈
+/// 8. 逆势回调止盈
 pub fn check_risk_config(
     risk_config: &BasicRiskStrategyConfig,
     mut trading_state: TradingState,
     signal: &SignalResult,
     candle: &CandleItem,
-    candle_item_list: &[CandleItem],
-    _i: usize,
 ) -> TradingState {
-
-    // if signal.ts == 1762819200000 {
-    //     println!("signal: {:#?}", signal);
-    //     println!("trading_state: {:#?}", trading_state.trade_position);
-    // }
-    // if signal.ts == 1763395200000 || signal.ts == 1763481600000 {
-    //     println!("signal: {:#?}", signal);
-    //     println!("trading_state: {:#?}", trading_state.trade_position);
-    // }
-    let current_open_price = signal.open_price;
-    let current_low_price = candle.l;
-    let current_high_price = candle.h;
-    let current_close_price = candle.c;
-
-    let mut trade_position = trading_state.trade_position.clone().unwrap();
-    let entry_price = trade_position.open_price;
-    let position_nums = trade_position.position_nums.clone();
-
-    // 检查三级止盈系统
-    if trade_position.atr_take_profit_level_1.is_some() {
-        let level_1 = trade_position.atr_take_profit_level_1.unwrap();
-        let level_2 = trade_position.atr_take_profit_level_2.unwrap();
-        let level_3 = trade_position.atr_take_profit_level_3.unwrap();
-        let current_level = trade_position.reached_take_profit_level;
-
-        match trade_position.trade_side {
-            TradeSide::Long => {
-                // 先检查移动止损是否触发（在检查新级别之前）
-                if let Some(move_stop_price) = trade_position.move_stop_open_price {
-                    if current_low_price <= move_stop_price {
-                        let profit = (move_stop_price - entry_price) * position_nums;
-                        trade_position.close_price = Some(move_stop_price);
-                        let close_type = format!(
-                            "移动止损(触发级别:{})",
-                            current_level
-                        );
-                        trading_state.trade_position = Some(trade_position);
-                        close_position(
-                            &mut trading_state,
-                            candle,
-                            &signal,
-                            &close_type,
-                            profit,
-                        );
-                        return trading_state;
-                    }
-                }
-
-                // 第三级：5倍ATR，完全平仓
-                if current_level < 3 && current_high_price >= level_3 {
-                    let profit = (level_3 - entry_price) * position_nums;
-                    trade_position.close_price = Some(level_3);
-                    trading_state.trade_position = Some(trade_position);
-                    close_position(
-                        &mut trading_state,
-                        candle,
-                        &signal,
-                        "三级止盈(5倍ATR)-完全平仓",
-                        profit,
-                    );
-                    return trading_state;
-                }
-
-                // 第二级：2倍ATR，移动止损到第一级止盈价
-                if current_level < 2 && current_high_price >= level_2 {
-                    trade_position.reached_take_profit_level = 2;
-                    // 移动止损到第一级止盈价（保护利润）
-                    trade_position.move_stop_open_price = Some(level_1);
-                    trading_state.trade_position = Some(trade_position.clone());
-                }
-
-                // 第一级：1.5倍ATR，移动止损到开仓价
-                if current_level < 1 && current_high_price >= level_1 {
-                    trade_position.reached_take_profit_level = 1;
-                    // 移动止损到开仓价（保本）
-                    trade_position.move_stop_open_price = Some(entry_price);
-                    trading_state.trade_position = Some(trade_position.clone());
-                }
-            }
-            TradeSide::Short => {
-                // 先检查移动止损是否触发（在检查新级别之前）
-                if let Some(move_stop_price) = trade_position.move_stop_open_price {
-                    if current_high_price >= move_stop_price {
-                        let profit = (entry_price - move_stop_price) * position_nums;
-                        trade_position.close_price = Some(move_stop_price);
-                        let close_type = format!(
-                            "移动止损(触发级别:{})",
-                            current_level
-                        );
-                        trading_state.trade_position = Some(trade_position);
-                        close_position(
-                            &mut trading_state,
-                            candle,
-                            &signal,
-                            &close_type,
-                            profit,
-                        );
-                        return trading_state;
-                    }
-                }
-
-                // 第三级：5倍ATR，完全平仓
-                if current_level < 3 && current_low_price <= level_3 {
-                    let profit = (entry_price - level_3) * position_nums;
-                    trade_position.close_price = Some(level_3);
-                    trading_state.trade_position = Some(trade_position);
-                    close_position(
-                        &mut trading_state,
-                        candle,
-                        &signal,
-                        "三级止盈(5倍ATR)-完全平仓",
-                        profit,
-                    );
-                    return trading_state;
-                }
-
-                // 第二级：2倍ATR，移动止损到第一级止盈价
-                if current_level < 2 && current_low_price <= level_2 {
-                    trade_position.reached_take_profit_level = 2;
-                    trade_position.move_stop_open_price = Some(level_1);
-                    trading_state.trade_position = Some(trade_position.clone());
-                }
-
-                // 第一级：1.5倍ATR，移动止损到开仓价
-                if current_level < 1 && current_low_price <= level_1 {
-                    trade_position.reached_take_profit_level = 1;
-                    trade_position.move_stop_open_price = Some(entry_price);
-                    trading_state.trade_position = Some(trade_position.clone());
-                }
-            }
-        }
-    }
-
-    // 检查移动止盈
-    // if let Some(is_move_stop_open_price_when_touch_price) =
-    //     risk_config.is_move_stop_open_price_when_touch_price
-    // {
-    //     if let Some(move_stop_loss_price) = trade_position.move_stop_open_price {
-    //         match trade_position.trade_side {
-    //             TradeSide::Long => {
-    //                 if current_low_price <= move_stop_loss_price {
-    //                     trade_position.close_price = Some(move_stop_loss_price);
-    //                     trading_state.trade_position = Some(trade_position.clone());
-    //                     close_position(
-    //                         &mut trading_state,
-    //                         candle,
-    //                         &signal,
-    //                         "移动(开仓价格止损)",
-    //                         0.00,
-    //                     );
-    //                     return trading_state;
-    //                 }
-    //             }
-    //             TradeSide::Short => {
-    //                 if current_high_price >= move_stop_loss_price {
-    //                     trade_position.close_price = Some(move_stop_loss_price);
-    //                     trading_state.trade_position = Some(trade_position.clone());
-    //                     close_position(
-    //                         &mut trading_state,
-    //                         candle,
-    //                         &signal,
-    //                         "移动(开仓价格止损)",
-    //                         0.00,
-    //                     );
-    //                     return trading_state;
-    //                 }
-    //             }
-    //         }
-    //     } else {
-    //         // 如果启用了移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
-    //         if trade_position
-    //             .move_stop_open_price_when_touch_price
-    //             .is_some()
-    //         {
-    //             match trade_position.trade_side {
-    //                 TradeSide::Long => {
-    //                     if current_high_price
-    //                         >= trade_position
-    //                             .move_stop_open_price_when_touch_price
-    //                             .unwrap()
-    //                     {
-    //                         trade_position.move_stop_open_price = Some(entry_price);
-    //                         trading_state.trade_position = Some(trade_position.clone());
-    //                     }
-    //                 }
-    //                 TradeSide::Short => {
-    //                     if current_low_price
-    //                         <= trade_position
-    //                             .move_stop_open_price_when_touch_price
-    //                             .unwrap()
-    //                     {
-    //                         trade_position.move_stop_open_price = Some(entry_price);
-    //                         trading_state.trade_position = Some(trade_position.clone());
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    // 检查按atr收益比例止盈
-    if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {
-        if atr_take_profit_ratio > 0.0 {
-            match trade_position.trade_side {
-                TradeSide::Long => {
-                    if let Some(touch_price) = trade_position.atr_take_ratio_profit_price {
-                        if current_high_price >= touch_price {
-                            let profit = (touch_price - entry_price) * trade_position.position_nums;
-                            trade_position.close_price = Some(touch_price);
-                            //
-                            trading_state.trade_position = Some(trade_position);
-                            close_position(
-                                &mut trading_state,
-                                candle,
-                                &signal,
-                                "atr按收益比例止盈",
-                                profit,
-                            );
-                            return trading_state;
-                        }
-                    }
-                }
-                TradeSide::Short => {
-                    if let Some(touch_price) = trade_position.atr_take_ratio_profit_price {
-                        if current_low_price <= touch_price {
-                            let profit = (entry_price - touch_price) * trade_position.position_nums;
-                            trade_position.close_price = Some(touch_price);
-                            //
-                            trading_state.trade_position = Some(trade_position);
-                            close_position(
-                                &mut trading_state,
-                                candle,
-                                &signal,
-                                "atr按收益比例止盈",
-                                profit,
-                            );
-                            return trading_state;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // 计算盈亏率
-    let profit_pct = match trade_position.trade_side {
-        TradeSide::Long => (current_low_price - entry_price) / entry_price,
-        TradeSide::Short => (entry_price - current_high_price) / entry_price,
-    };
-
-    // 计算盈亏
-    let profit = match trade_position.trade_side {
-        TradeSide::Long => (current_close_price - entry_price) * trade_position.position_nums,
-        TradeSide::Short => (entry_price - current_close_price) * trade_position.position_nums,
-    };
-
-    // 检查是否设置了固定信号线比例止盈价格
-    if let Some(fixed_take_profit_price) = trade_position.fixed_take_profit_price {
-        match trade_position.trade_side {
-            TradeSide::Long => {
-                if current_high_price > fixed_take_profit_price {
-                    let profit =
-                        (fixed_take_profit_price - entry_price) * trade_position.position_nums;
-                    trade_position.close_price = Some(fixed_take_profit_price);
-                    trading_state.trade_position = Some(trade_position);
-                    close_position(&mut trading_state, candle, &signal, "固定信号线比例止盈", profit);
-                    return trading_state;
-                }
-            }
-            TradeSide::Short => {
-                if current_low_price < fixed_take_profit_price {
-                    let profit =
-                        (entry_price - fixed_take_profit_price) * trade_position.position_nums;
-                    trade_position.close_price = Some(fixed_take_profit_price);
-                    trading_state.trade_position = Some(trade_position);
-                    close_position(&mut trading_state, candle, &signal, "固定信号线比例止盈", profit);
-                    return trading_state;
-                }
-            }
-        }
-    }
-
-    //是否设置了做多止盈价格
-    if let Some(long_signal_take_profit_price) = signal.long_signal_take_profit_price {
-        if current_high_price > long_signal_take_profit_price
-            && trade_position.trade_side == TradeSide::Long
-        {
-            trade_position.close_price = Some(long_signal_take_profit_price);
-            trading_state.trade_position = Some(trade_position);
-            close_position(
-                &mut trading_state,
-                candle,
-                &signal,
-                "做多触达指标动态止盈",
-                profit,
-            );
-            return trading_state;
-        }
-    }
-
-    //是否设置做空止盈价格
-    if let Some(short_signal_take_profit_price) = signal.short_signal_take_profit_price {
-        if current_low_price < short_signal_take_profit_price
-            && trade_position.trade_side == TradeSide::Short
-        {
-            trade_position.close_price = Some(short_signal_take_profit_price);
-            trading_state.trade_position = Some(trade_position);
-            close_position(
-                &mut trading_state,
-                candle,
-                &signal,
-                "做空触达指标动态止盈",
-                profit,
-            );
-            return trading_state;
-        }
-    }
-    
-    
-    // 检查逆势回调止盈
-    if let Some(counter_trend_take_profit_price) = trade_position.counter_trend_pullback_take_profit_price {
-        match trade_position.trade_side {
-            TradeSide::Long => {
-                // 做多时，价格达到回调止盈价格（高于止盈价格）
-                if current_high_price >= counter_trend_take_profit_price {
-                    let profit = (counter_trend_take_profit_price - entry_price) * position_nums;
-                    trade_position.close_price = Some(counter_trend_take_profit_price);
-                    trading_state.trade_position = Some(trade_position);
-                    close_position(
-                        &mut trading_state,
-                        candle,
-                        &signal,
-                        "逆势回调止盈",
-                        profit,
-                    );
-                    return trading_state;
-                }
-            }
-            TradeSide::Short => {
-                // 做空时，价格达到回调止盈价格（低于止盈价格）
-                if current_low_price <= counter_trend_take_profit_price {
-                    let profit = (entry_price - counter_trend_take_profit_price) * position_nums;
-                    trade_position.close_price = Some(counter_trend_take_profit_price);
-                    trading_state.trade_position = Some(trade_position);
-                    close_position(
-                        &mut trading_state,
-                        candle,
-                        &signal,
-                        "逆势回调止盈",
-                        profit,
-                    );
-                    return trading_state;
-                }
-            }
-        }
-    }
-    // 先检查设置了信号k线路的价格
-    if let Some(signal_kline_stop_close_price) = trade_position.signal_kline_stop_close_price {
-        match trade_position.trade_side.clone() {
-            TradeSide::Long => {
-                if current_close_price <= signal_kline_stop_close_price {
-                    trade_position.close_price = Some(signal_kline_stop_close_price);
-                    let profit = (signal_kline_stop_close_price - entry_price) * position_nums;
-                    trading_state.trade_position = Some(trade_position);
-                    close_position(
-                        &mut trading_state,
-                        candle,
-                        &signal,
-                        "预止损-信号线失效",
-                        profit,
-                    );
-                    return trading_state;
-                }
-            }
-            TradeSide::Short => {
-                if current_close_price >= signal_kline_stop_close_price {
-                    trade_position.close_price = Some(signal_kline_stop_close_price);
-                    let profit = (entry_price - signal_kline_stop_close_price) * position_nums;
-                    trading_state.trade_position = Some(trade_position);
-                    close_position(
-                        &mut trading_state,
-                        candle,
-                        &signal,
-                        "预止损-信号线失效",
-                        profit,
-                    );
-                    return trading_state;
-                }
-            }
-        }
-    }
-    // 最后再检查最大止损
-    if profit_pct < -risk_config.max_loss_percent {
-        trade_position.close_price = Some(current_open_price);
-        trading_state.trade_position = Some(trade_position);
-        close_position(&mut trading_state, candle, &signal, "最大亏损止损", profit);
+    let Some(ref position) = trading_state.trade_position else {
         return trading_state;
+    };
+
+    let mut trade_position = position.clone();
+    let ctx = ExitContext::new(&trade_position, candle);
+
+
+
+    // ========================================================================
+    // 止损检查（优先级最高）
+    // ========================================================================
+
+    // 1. 最大损失止损
+    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
+        check_max_loss_stop(&ctx, risk_config.max_loss_percent)
+    {
+        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
     }
+
+    // 2. 移动止损（三级ATR系统）
+    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
+        check_atr_trailing_stop(&ctx, &trade_position)
+    {
+        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+    }
+
+    // 3. 信号K线止损
+    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
+        check_signal_kline_stop(&ctx, trade_position.signal_kline_stop_close_price)
+    {
+        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+    }
+
+    // ========================================================================
+    // 止盈检查
+    // ========================================================================
+
+    // 4. 三级ATR止盈（同时更新级别）
+    if let result @ ExitResult::Exit { .. } = update_atr_tiered_levels(&ctx, &mut trade_position) {
+        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+    }
+
+    // 5. ATR比例止盈
+    if let result @ ExitResult::Exit { .. } = check_atr_ratio_take_profit(
+        &ctx,
+        risk_config.atr_take_profit_ratio,
+        trade_position.atr_take_ratio_profit_price,
+    ) {
+        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+    }
+
+    // 6. 固定信号线比例止盈
+    if let result @ ExitResult::Exit { .. } =
+        check_fixed_take_profit(&ctx, trade_position.fixed_take_profit_price)
+    {
+        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+    }
+
+    // 7. 动态止盈（做多/做空）
+    if let result @ ExitResult::Exit { .. } = check_dynamic_take_profit(
+        &ctx,
+        signal.long_signal_take_profit_price,
+        signal.short_signal_take_profit_price,
+    ) {
+        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+    }
+
+    // 8. 逆势回调止盈
+    if let result @ ExitResult::Exit { .. } =
+        check_counter_trend_take_profit(&ctx, trade_position.counter_trend_pullback_take_profit_price)
+    {
+        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+    }
+
+    // 更新仓位状态（三级止盈系统可能修改了级别和移动止损）
+    trading_state.trade_position = Some(trade_position);
     trading_state
 }
+
+/// 执行平仓并返回最终状态
+fn finalize_exit(
+    mut trading_state: TradingState,
+    mut trade_position: TradePosition,
+    candle: &CandleItem,
+    signal: &SignalResult,
+    ctx: &ExitContext,
+    result: ExitResult,
+) -> TradingState {
+    let (price, reason) = match result {
+        ExitResult::Exit { price, reason } => (price, reason.to_string()),
+        ExitResult::ExitDynamic { price, reason } => (price, reason),
+        ExitResult::None => return trading_state,
+    };
+
+    trade_position.close_price = Some(price);
+    trading_state.trade_position = Some(trade_position);
+
+    let profit = ctx.profit(price);
+    close_position(&mut trading_state, candle, signal, &reason, profit);
+    trading_state
+}
+

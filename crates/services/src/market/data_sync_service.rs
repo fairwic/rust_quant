@@ -105,7 +105,7 @@ impl DataSyncService {
                     .unwrap_or_else(|| Utc::now().timestamp_millis());
 
                 loop {
-                    sleep(Duration::from_millis(50)).await;
+                    sleep(Duration::from_millis(100)).await;
                     let raw = match exchange
                         .fetch_candles(ticker.inst_id.as_str(), period, Some(after), None, None)
                         .await

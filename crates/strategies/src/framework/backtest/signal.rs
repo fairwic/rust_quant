@@ -30,8 +30,6 @@ pub fn deal_signal(
                     trading_state,
                     signal,
                     candle,
-                    candle_item_list,
-                    i,
                 );
             }else {
                 //如果再一次出发点了相同的信号方向，则进行止盈止损的信号更新
@@ -67,8 +65,6 @@ pub fn deal_signal(
                 trading_state,
                 signal,
                 candle,
-                candle_item_list,
-                i,
             );
         } else if trading_state.last_signal_result.is_some() {
             // 要确保大于信号的开仓时间
