@@ -549,7 +549,8 @@ fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig
         volume_ratios: vec![0.8],
         batch_size,
         max_loss_percent: vec![0.02, 0.01],
-        take_profit_ratios: vec![1.8],
+
+        take_profit_ratios: vec![1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0],
 
         is_move_stop_loss: vec![false, true],
         k_line_hammer_shadow_ratios: vec![0.65],

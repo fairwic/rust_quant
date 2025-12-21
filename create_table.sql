@@ -207,18 +207,17 @@ CREATE TABLE `exchange_apikey_config` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='各交易所api key 配置';
 
-
 CREATE TABLE `exchange_apikey_strategy_relation` (
   `id` int NOT NULL AUTO_INCREMENT,
   `strategy_config_id` int NOT NULL,
-  `api_key_config_id` int NOT NULL,
+  `api_config_id` int NOT NULL,
   `priority` tinyint NOT NULL DEFAULT '0' COMMENT '优先级',
   `is_enabled` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '0' COMMENT '是否启用',
+  `is_deleted` tinyint NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   KEY `strategy_config_id` (`strategy_config_id`,`priority`,`is_enabled`),
-  KEY `api_key_config_id` (`api_key_config_id`)
+  KEY `api_key_config_id` (`api_config_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 
 
 INSERT INTO `test`.`strategy_config` (`id`, `strategy_type`, `inst_id`, `value`, `risk_config`, `time`, `created_at`, `updated_at`, `kline_start_time`, `kline_end_time`, `final_fund`, `is_deleted`) VALUES (1, 'Vegas', 'BTC-USDT-SWAP', '{\"bolling_signal\":{\"consecutive_touch_times\":4,\"is_open\":true,\"multiplier\":2.5,\"period\":13},\"ema_signal\":{\"ema1_length\":12,\"ema2_length\":144,\"ema3_length\":169,\"ema4_length\":576,\"ema5_length\":676,\"ema6_length\":2304,\"ema7_length\":2704,\"ema_breakthrough_threshold\":0.003,\"is_open\":true},\"ema_touch_trend_signal\":{\"ema1_with_ema2_ratio\":1.01,\"ema2_with_ema3_ratio\":1.012,\"ema3_with_ema4_ratio\":1.006,\"ema4_with_ema5_ratio\":1.006,\"ema5_with_ema7_ratio\":1.022,\"is_open\":true,\"price_with_ema_high_ratio\":1.002,\"price_with_ema_low_ratio\":0.995},\"engulfing_signal\":{\"body_ratio\":0.4,\"is_engulfing\":true,\"is_open\":true},\"kline_hammer_signal\":{\"down_shadow_ratio\":0.6,\"up_shadow_ratio\":0.6},\"min_k_line_num\":3600,\"rsi_signal\":{\"is_open\":true,\"rsi_length\":9,\"rsi_overbought\":85.0,\"rsi_oversold\":15.0},\"signal_weights\":{\"min_total_weight\":2.0,\"weights\":[[\"SimpleBreakEma2through\",1.0],[\"VolumeTrend\",2.0],[\"Rsi\",1.0],[\"TrendStrength\",1.0],[\"EmaDivergence\",1.0],[\"PriceLevel\",1.0],[\"EmaTrend\",1.0],[\"Bolling\",1.0],[\"Engulfing\",1.0],[\"KlineHammer\",1.0],[\"LegDetection\",1.2],[\"MarketStructure\",1.8],[\"FairValueGap\",1.5],[\"EqualHighLow\",1.2],[\"PremiumDiscount\",1.3]]},\"volume_signal\":{\"is_force_dependent\":false,\"is_open\":true,\"volume_bar_num\":6,\"volume_decrease_ratio\":2.0,\"volume_increase_ratio\":2.4},\"period\":\"1H\"}', '{\"is_one_k_line_diff_stop_loss\":false,\"is_used_signal_k_line_stop_loss\":true,\"max_loss_percent\":0.02,\"is_take_profit\":true}', '1H', '2025-04-05 17:23:36', '2025-09-19 01:24:42', 1679000400000, 1750996800000, 1230.93, 1);

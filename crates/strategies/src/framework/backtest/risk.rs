@@ -84,7 +84,10 @@ impl ExitContext {
     /// 计算收益率
     #[inline]
     fn profit_pct(&self) -> f64 {
-        self.profit(self.adverse_price) / self.entry
+        match self.side {
+            TradeSide::Long => (self.adverse_price - self.entry) / self.entry,
+            TradeSide::Short => (self.entry - self.adverse_price) / self.entry,
+        }
     }
 }
 
@@ -131,10 +134,7 @@ fn check_signal_kline_stop(ctx: &ExitContext, stop_price: Option<f64>) -> ExitRe
 }
 
 /// 检查三级ATR系统的移动止损
-fn check_atr_trailing_stop(
-    ctx: &ExitContext,
-    position: &TradePosition,
-) -> ExitResult {
+fn check_atr_trailing_stop(ctx: &ExitContext, position: &TradePosition) -> ExitResult {
     // 必须有三级止盈配置才有移动止损
     if position.atr_take_profit_level_1.is_none() {
         return ExitResult::None;
@@ -155,10 +155,7 @@ fn check_atr_trailing_stop(
 
 /// 更新三级ATR止盈系统的级别和移动止损线
 /// 返回是否触发第三级完全平仓
-fn update_atr_tiered_levels(
-    ctx: &ExitContext,
-    position: &mut TradePosition,
-) -> ExitResult {
+fn update_atr_tiered_levels(ctx: &ExitContext, position: &mut TradePosition) -> ExitResult {
     let (level_1, level_2, level_3) = match (
         position.atr_take_profit_level_1,
         position.atr_take_profit_level_2,
@@ -297,8 +294,6 @@ pub fn check_risk_config(
     let mut trade_position = position.clone();
     let ctx = ExitContext::new(&trade_position, candle);
 
-
-
     // ========================================================================
     // 止损检查（优先级最高）
     // ========================================================================
@@ -359,9 +354,10 @@ pub fn check_risk_config(
     }
 
     // 8. 逆势回调止盈
-    if let result @ ExitResult::Exit { .. } =
-        check_counter_trend_take_profit(&ctx, trade_position.counter_trend_pullback_take_profit_price)
-    {
+    if let result @ ExitResult::Exit { .. } = check_counter_trend_take_profit(
+        &ctx,
+        trade_position.counter_trend_pullback_take_profit_price,
+    ) {
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
     }
 
@@ -392,4 +388,3 @@ fn finalize_exit(
     close_position(&mut trading_state, candle, signal, &reason, profit);
     trading_state
 }
-

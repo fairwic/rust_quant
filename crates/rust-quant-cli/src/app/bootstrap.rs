@@ -6,7 +6,9 @@ use anyhow::{anyhow, Result};
 use rust_quant_core::config::env_is_true;
 use rust_quant_core::database::get_db_pool;
 use rust_quant_domain::StrategyType;
-use rust_quant_infrastructure::repositories::{SqlxStrategyConfigRepository, SqlxSwapOrderRepository};
+use rust_quant_infrastructure::repositories::{
+    SqlxStrategyConfigRepository, SqlxSwapOrderRepository,
+};
 use tracing::{error, info, warn};
 
 use rust_quant_market::streams;
@@ -90,7 +92,7 @@ pub async fn run_modes() -> Result<()> {
 fn default_backtest_targets() -> Vec<(String, String)> {
     vec![
         // ("ETH-USDT-SWAP".to_string(), "15m".to_string()),
-        ("ETH-USDT-SWAP".to_string(), "5m".to_string()),
+        ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "1H".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "1Dutc".to_string()),
@@ -171,13 +173,15 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
     let config_service = std::sync::Arc::new(create_strategy_config_service());
     let swap_order_repo = std::sync::Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
     // 启动实时风控引擎（事件驱动）
-    let (risk_tx, risk_rx) = tokio::sync::mpsc::channel::<rust_quant_risk::realtime::RealtimeRiskEvent>(4096);
+    let (risk_tx, risk_rx) =
+        tokio::sync::mpsc::channel::<rust_quant_risk::realtime::RealtimeRiskEvent>(4096);
     let amender = match rust_quant_risk::realtime::OkxStopLossAmender::from_env() {
         Ok(a) => std::sync::Arc::new(a),
         Err(e) => {
             error!("❌ 初始化 OKX 止损改单器失败（实时风控禁用）: {}", e);
             // 退化：不给 execution/handler 注入 risk_tx
-            let execution_service = std::sync::Arc::new(StrategyExecutionService::new(swap_order_repo));
+            let execution_service =
+                std::sync::Arc::new(StrategyExecutionService::new(swap_order_repo));
             // 🚀 创建策略触发回调函数
             let strategy_trigger = {
                 let handler = std::sync::Arc::new(
@@ -202,7 +206,12 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
             let inst_ids_vec: Vec<String> = inst_ids.to_vec();
             let periods_vec: Vec<String> = periods.to_vec();
 
-            streams::run_socket_with_strategy_trigger(&inst_ids_vec, &periods_vec, Some(strategy_trigger)).await;
+            streams::run_socket_with_strategy_trigger(
+                &inst_ids_vec,
+                &periods_vec,
+                Some(strategy_trigger),
+            )
+            .await;
             return;
         }
     };
@@ -260,8 +269,8 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
 async fn start_strategies_from_db() -> Result<()> {
     use rust_quant_domain::StrategyType;
     use rust_quant_domain::Timeframe;
-    use rust_quant_orchestration::workflow::strategy_runner;
     use rust_quant_market::models::{CandlesEntity, CandlesModel, SelectCandleReqDto};
+    use rust_quant_orchestration::workflow::strategy_runner;
     use rust_quant_services::strategy::StrategyDataService;
 
     info!("📚 从数据库加载策略配置");
