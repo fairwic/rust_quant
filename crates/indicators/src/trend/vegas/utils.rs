@@ -59,11 +59,13 @@ pub fn calculate_best_stop_loss_price(
     should_sell: bool,
 ) -> Option<f64> {
     if should_buy {
-        let amplitude = last_data_item.h() - last_data_item.l();
-        Some(last_data_item.l() + (amplitude * FIBONACCI_ZERO_POINT_TWO_THREE_SIX))
+        // let amplitude = last_data_item.h() - last_data_item.l();
+        // Some(last_data_item.l() + (amplitude * FIBONACCI_ZERO_POINT_TWO_THREE_SIX))
+        Some(last_data_item.l())
     } else if should_sell {
-        let amplitude = last_data_item.h() - last_data_item.l();
-        Some(last_data_item.h() - (amplitude * FIBONACCI_ZERO_POINT_TWO_THREE_SIX))
+        // let amplitude = last_data_item.h() - last_data_item.l();
+        // Some(last_data_item.h() - (amplitude * FIBONACCI_ZERO_POINT_TWO_THREE_SIX))
+        Some(last_data_item.h())
     } else {
         None
     }

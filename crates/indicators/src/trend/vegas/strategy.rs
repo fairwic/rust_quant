@@ -216,11 +216,21 @@ impl VegasStrategy {
 
         // 计算RSI
         if let Some(rsi_signal) = &self.rsi_signal {
-            let current_rsi = self.get_valid_rsi(
+            let current_rsi_opt = self.get_valid_rsi(
                 data_items,
                 &vegas_indicator_signal_values.rsi_value,
                 vegas_indicator_signal_values.ema_values,
             );
+
+            // 如果返回 None，表示检测到极端行情（大利空/利多消息），跳过后续交易信号判断
+            let current_rsi = match current_rsi_opt {
+                Some(rsi) => rsi,
+                None => {
+                    // 极端行情，直接返回不交易的信号
+                    return signal_result;
+                }
+            };
+
             conditions.push((
                 SignalType::Rsi,
                 SignalCondition::RsiLevel {
@@ -334,7 +344,6 @@ impl VegasStrategy {
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
             signal_result.single_result = Some(json!(conditions).to_string());
         }
-
         signal_result
     }
 
@@ -458,7 +467,7 @@ impl VegasStrategy {
         data_items: &[CandleItem],
         rsi_value: &RsiSignalValue,
         ema_value: EmaSignalValue,
-    ) -> f64 {
+    ) -> Option<f64> {
         trend::get_valid_rsi(data_items, rsi_value.rsi_value, ema_value)
     }
 
@@ -528,29 +537,6 @@ impl VegasStrategy {
                     .expect("数据不能为空")
                     .is_small_body_and_big_up_down_shadow()
                 {
-                    println!(
-                        "k线实体很小，up_shadow_ratio:{}",
-                        data_items.last().expect("数据不能为空").up_shadow_ratio()
-                    );
-                    println!(
-                        "k线实体很小，down_shadow_ratio:{}",
-                        data_items.last().expect("数据不能为空").down_shadow_ratio()
-                    );
-                    println!(
-                        "上线影线都很长 time:{}",
-                        time_util::mill_time_to_datetime_shanghai(
-                            data_items.last().expect("数据不能为空").ts
-                        )
-                        .unwrap()
-                    );
-                    // println!(
-                    //     "bolling_bands.is_long_signal:{}",
-                    //     bolling_bands.is_long_signal
-                    // );
-                    // println!(
-                    //     "bolling_bands.is_short_signal:{}",
-                    //     bolling_bands.is_short_signal
-                    // );
                     bolling_bands.is_force_filter_signal = true;
                     bolling_bands.is_long_signal = false;
                     bolling_bands.is_short_signal = false;
@@ -686,9 +672,20 @@ impl VegasStrategy {
         &self,
         last_data_item: &CandleItem,
         signal_result: &mut SignalResult,
-        _conditions: &Vec<(SignalType, SignalCondition)>,
+        conditions: &Vec<(SignalType, SignalCondition)>,
     ) {
-        // 使用工具函数计算止损价格
+        // 检查是否有吞没形态信号
+        let has_engulfing_signal = conditions
+            .iter()
+            .any(|(signal_type, _)| matches!(signal_type, SignalType::Engulfing));
+
+        // 如果是吞没形态信号，使用开盘价作为止损价格
+        if has_engulfing_signal {
+            signal_result.signal_kline_stop_loss_price = Some(last_data_item.o());
+            return;
+        }
+
+        // 其他情况使用工具函数计算止损价格
         if let Some(stop_loss_price) = utils::calculate_best_stop_loss_price(
             last_data_item,
             signal_result.should_buy.unwrap_or(false),

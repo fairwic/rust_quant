@@ -92,7 +92,7 @@ pub fn set_long_stop_close_price(
     signal: &SignalResult,
     temp_trade_position: &mut TradePosition,
 ) {
-    // 如果启用了设置预止损价格,则根据开仓方向设置预止损价格
+    // 如果信号k线路止损
     if let Some(is_used_signal_k_line_stop_loss) = risk_config.is_used_signal_k_line_stop_loss {
         if is_used_signal_k_line_stop_loss {
             temp_trade_position.signal_kline_stop_close_price = signal.signal_kline_stop_loss_price;

@@ -100,13 +100,13 @@ pub struct RandomStrategyConfig {
 impl Default for RandomStrategyConfig {
     fn default() -> Self {
         Self {
-            bb_periods: vec![10, 11, 12, 13, 14],
-            bb_multipliers: vec![2.0, 2.5, 3.0],
+            bb_periods: vec![14, 16, 18, 20],
+            bb_multipliers: vec![2.0, 2.2, 2.3, 2.5, 3.0],
 
             shadow_ratios: vec![0.65, 0.7, 0.75],
 
             volume_bar_nums: vec![4, 5, 6],
-            volume_ratios: (15..=24).map(|x| x as f64 * 0.1).collect(),
+            volume_ratios: (20..=24).map(|x| x as f64 * 0.1).collect(),
 
             breakthrough_thresholds: vec![0.003],
             rsi_periods: vec![8, 9, 10, 11, 12, 13, 14, 15, 16],

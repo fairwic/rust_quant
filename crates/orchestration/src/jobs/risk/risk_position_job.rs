@@ -83,7 +83,8 @@ impl RiskPositionJob {
         // for position in position_list {
         //     self.check_stop_loss(&position).await?;
         //     self.check_pending_orders(&position).await?;
-        //     self.check_risk_threshold(&position).await?;
+        //     self.
+        // _threshold(&position).await?;
         // }
 
         info!("✅ 风险持仓监控完成 (当前为框架实现)");

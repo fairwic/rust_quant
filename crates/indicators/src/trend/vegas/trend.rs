@@ -313,23 +313,67 @@ pub fn calculate_dynamic_pullback_threshold(_data_items: &[CandleItem]) -> f64 {
 }
 
 /// 获取有效的RSI
-pub fn get_valid_rsi(data_items: &[CandleItem], rsi_value: f64, _ema_value: EmaSignalValue) -> f64 {
+/// 返回 None 表示检测到极端行情（大利空/利多消息），应跳过后续交易信号判断
+/// 返回 Some(rsi) 为正常 RSI 值
+pub fn get_valid_rsi(
+    data_items: &[CandleItem],
+    rsi_value: f64,
+    _ema_value: EmaSignalValue,
+) -> Option<f64> {
     // 如果当前k线价格波动比较大，且k线的实体部分占比大于80%,
     // 表明当前k线为大阳线或者大阴线，则不使用rsi指标,因为大概率趋势还会继续
-
-    // TODO: 迁移后需要重新实现 IsBigKLineIndicator
-    // 暂时简化处理：检查实体占比
     if let Some(last_candle) = data_items.last() {
         let body = (last_candle.c() - last_candle.o()).abs();
         let total = last_candle.h() - last_candle.l();
         let body_ratio = if total > 0.0 { body / total } else { 0.0 };
 
+        // RSI<30 且前一根K线跌幅>5% 且当前K线是阴线时，判断为大利空消息
+        // 跳过后续交易信号判断，直接返回 None
+        if rsi_value < 30.0 && data_items.len() >= 2 {
+            let prev_candle = &data_items[data_items.len() - 2];
+            if prev_candle.h() > 0.0 {
+                let drop_ratio = (prev_candle.c() - prev_candle.h()) / prev_candle.h();
+                let is_bearish = last_candle.c() < last_candle.o(); // 阴线
+                if drop_ratio < -0.05 && is_bearish {
+                    println!(
+                        "[极端行情-利空] ts: {}, 前K跌幅: {:.2}%, 跳过交易信号",
+                        time::mill_time_to_datetime_shanghai(last_candle.ts)
+                            .unwrap()
+                            .to_string(),
+                        drop_ratio * 100.0
+                    );
+                    return None; // 极端行情，跳过交易
+                }
+            }
+        }
+
+        // RSI>70 且前一根K线涨幅>5% 且当前K线是阳线时，判断为大利多消息
+        // 跳过后续交易信号判断，直接返回 None（不做空）
+        if rsi_value > 70.0 && data_items.len() >= 2 {
+            let prev_candle = &data_items[data_items.len() - 2];
+            if prev_candle.l() > 0.0 {
+                // 涨幅计算: (prev_close - prev_low) / prev_low
+                let rise_ratio = (prev_candle.c() - prev_candle.l()) / prev_candle.l();
+                let is_bullish = last_candle.c() > last_candle.o(); // 阳线
+                if rise_ratio > 0.05 && is_bullish {
+                    println!(
+                        "[极端行情-利多] ts: {}, 前K涨幅: {:.2}%, 跳过交易信号",
+                        time::mill_time_to_datetime_shanghai(last_candle.ts)
+                            .unwrap()
+                            .to_string(),
+                        rise_ratio * 100.0
+                    );
+                    return None; // 极端行情，跳过交易
+                }
+            }
+        }
+
         if body_ratio > 0.8 {
-            50.0 // 大阳线/大阴线，不使用RSI
+            Some(50.0) // 大阳线/大阴线，不使用RSI（返回中性值）
         } else {
-            rsi_value
+            Some(rsi_value)
         }
     } else {
-        rsi_value
+        Some(rsi_value)
     }
 }
