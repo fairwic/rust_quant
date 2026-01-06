@@ -9,7 +9,9 @@
 .specify
 /specs
 .sqlx/
-
+node_modules/
+npm-debug.log*
+.claude
 # 备份文件
 *.bak
 *.bak[0-9]

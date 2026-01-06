@@ -12,6 +12,8 @@ use serde_json::json;
 use tracing::debug;
 
 use super::config::*;
+use super::ema_filter::{self, EmaDistanceConfig, EmaDistanceState};
+use super::fake_breakout::{self, FakeBreakoutConfig};
 use super::indicator_combine::IndicatorCombine;
 use super::signal::*;
 use super::trend;
@@ -279,13 +281,41 @@ impl VegasStrategy {
             vegas_indicator_signal_values.ema_values,
         );
 
-        // if data_items.last().unwrap().ts == 1760688000000 {
-        //     println!("last_data_item: {:?}", data_items.last().unwrap());
-        //     println!("conditions: {:?}", conditions);
-        // }
+        // ================================================================
+        // 【新增】假突破信号检测
+        // ================================================================
+        let fake_breakout_config = FakeBreakoutConfig::default();
+        let fake_breakout_signal = fake_breakout::detect_fake_breakout(data_items, &fake_breakout_config);
+        vegas_indicator_signal_values.fake_breakout_value = fake_breakout_signal;
+
+        // 假突破信号加入conditions
+        if fake_breakout_signal.has_signal() {
+            conditions.push((
+                SignalType::FakeBreakout,
+                SignalCondition::FakeBreakout {
+                    is_bullish: fake_breakout_signal.is_bullish_fake_breakout,
+                    is_bearish: fake_breakout_signal.is_bearish_fake_breakout,
+                    strength: fake_breakout_signal.strength,
+                },
+            ));
+        }
+
+        // ================================================================
+        // 【新增】EMA距离过滤
+        // ================================================================
+        let ema_distance_config = EmaDistanceConfig::default();
+        let ema_distance_filter = ema_filter::apply_ema_distance_filter(
+            last_data_item.c,
+            &vegas_indicator_signal_values.ema_values,
+            &ema_distance_config,
+        );
+        vegas_indicator_signal_values.ema_distance_filter = ema_distance_filter;
+
+        // ================================================================
         // 计算得分
-        //todo 2025-11-18 00:00:00,2025-11-20 00:00:00,2025-11-25 00:00:00
+        // ================================================================
         let score = weights.calculate_score(conditions.clone());
+
         // 计算分数到达指定值
         if let Some(signal_direction) = weights.is_signal_valid(&score) {
             match signal_direction {
@@ -297,21 +327,55 @@ impl VegasStrategy {
                 }
             }
         }
-        // if signal_result.should_buy || signal_result.should_sell {
-        //     if let Some(volume_signal) = &self.volume_signal {
-        //         if vegas_indicator_signal_values.volume_value.volume_ratio
-        //             < volume_signal.volume_increase_ratio
-        //             && vegas_indicator_signal_values
-        //                 .volume_value
-        //                 .is_decreasing_than_pre
-        //         {
-        //             println!("成交量小于要求的比例，且比上一更k线的成交量还要小，则认为信号无效");
-        //             println!("信号buy:{}",signal_result.should_buy);
-        //             println!("信号buy:{}",signal_result.should_buy);
-        //             println!("time:{}",time_util::mill_time_to_datetime_shanghai(last_data_item.ts).unwrap());
-        //             signal_result.should_buy = false;
-        //             signal_result.should_sell = false;
-        //         }
+
+        // ================================================================
+        // 【新增】假突破直接开仓逻辑（暂时禁用，改为权重计算）
+        // 根据第一性原理：假突破信号直接市价开仓
+        // 注意：此逻辑过于激进，导致盈利下降，暂时禁用
+        // 假突破信号已经加入了权重计算，会影响最终得分
+        // ================================================================
+        // TODO: 需要更精细的假突破确认条件后再启用
+        // if fake_breakout_signal.is_bullish_fake_breakout && fake_breakout_signal.volume_confirmed {
+        //     signal_result.should_buy = Some(true);
+        //     signal_result.should_sell = Some(false);
+        // }
+        // if fake_breakout_signal.is_bearish_fake_breakout && fake_breakout_signal.volume_confirmed {
+        //     signal_result.should_sell = Some(true);
+        //     signal_result.should_buy = Some(false);
+        // }
+
+        // ================================================================
+        // 【新增】应用EMA距离过滤（暂时禁用）
+        // 规则：
+        // - 空头排列 + 距离过远 + 收盘价 > ema3 → 不做多
+        // - 多头排列 + 距离过远 + 收盘价 < ema3 → 不做空
+        // 注意：此过滤器可能过滤掉有效信号，暂时禁用
+        // ================================================================
+        // TODO: 调整EMA距离阈值后再启用
+        // if ema_distance_filter.should_filter_long && signal_result.should_buy.unwrap_or(false) {
+        //     if !fake_breakout_signal.is_bullish_fake_breakout {
+        //         signal_result.should_buy = Some(false);
+        //     }
+        // }
+        // if ema_distance_filter.should_filter_short && signal_result.should_sell.unwrap_or(false) {
+        //     if !fake_breakout_signal.is_bearish_fake_breakout {
+        //         signal_result.should_sell = Some(false);
+        //     }
+        // }
+
+        // ================================================================
+        // 【新增】成交量递减过滤（暂时禁用）
+        // 规则：近3根K线成交量递减 Vol(n-2) > Vol(n-1) > Vol(n) → 忽略信号
+        // 注意：此过滤器可能过于严格，暂时禁用以观察效果
+        // ================================================================
+        // TODO: 需要更精细的成交量过滤条件
+        // let recent_volumes = ema_filter::extract_recent_volumes(data_items, 3);
+        // if ema_filter::check_volume_decreasing_filter(&recent_volumes) {
+        //     if signal_result.should_buy.unwrap_or(false) && !fake_breakout_signal.is_bullish_fake_breakout {
+        //         signal_result.should_buy = Some(false);
+        //     }
+        //     if signal_result.should_sell.unwrap_or(false) && !fake_breakout_signal.is_bearish_fake_breakout {
+        //         signal_result.should_sell = Some(false);
         //     }
         // }
 

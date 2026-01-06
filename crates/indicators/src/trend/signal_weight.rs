@@ -20,6 +20,8 @@ pub enum SignalType {
     FairValueGap,    // 公平价值缺口
     EqualHighLow,    // 等高/等低点
     PremiumDiscount, // 溢价/折扣区域
+    // 新增第一性原理信号类型
+    FakeBreakout,    // 假突破信号
 }
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub enum SignalDirect {
@@ -93,6 +95,12 @@ pub enum SignalCondition {
         in_premium_zone: bool,
         in_discount_zone: bool,
     },
+    // 新增第一性原理信号条件
+    FakeBreakout {
+        is_bullish: bool,  // 看跌假突破 → 做多
+        is_bearish: bool,  // 看涨假突破 → 做空
+        strength: f64,     // 信号强度 0.0-1.0
+    },
 }
 
 // 权重配置结构体
@@ -130,6 +138,9 @@ impl Default for SignalWeightsConfig {
                 (SignalType::FairValueGap, 1.5),
                 (SignalType::EqualHighLow, 1.2),
                 (SignalType::PremiumDiscount, 1.3),
+                // 新增第一性原理信号权重
+                // 注意：权重=0表示仅采集数据，不参与得分计算
+                (SignalType::FakeBreakout, 0.0),
             ],
             min_total_weight: 2.0,
         }
@@ -480,6 +491,34 @@ impl SignalWeightsConfig {
                     Some(CheckConditionResult {
                         signal_type,
                         score: base_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsShort),
+                    })
+                } else {
+                    None
+                }
+            }
+            // 新增假突破信号评估
+            SignalCondition::FakeBreakout {
+                is_bullish,
+                is_bearish,
+                strength,
+            } => {
+                // 假突破信号权重加成（基于信号强度）
+                let adjusted_weight = base_weight * (1.0 + strength * 0.5);
+                if is_bullish {
+                    // 看跌假突破 → 做多信号
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: adjusted_weight,
+                        detail: condition,
+                        signal_result: Some(SignalDirect::IsLong),
+                    })
+                } else if is_bearish {
+                    // 看涨假突破 → 做空信号
+                    Some(CheckConditionResult {
+                        signal_type,
+                        score: adjusted_weight,
                         detail: condition,
                         signal_result: Some(SignalDirect::IsShort),
                     })

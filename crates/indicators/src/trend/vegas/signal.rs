@@ -201,6 +201,12 @@ pub struct VegasIndicatorSignalValue {
     pub equal_high_low_value: EqualHighLowValue,
     /// 溢价/折扣区域
     pub premium_discount_value: PremiumDiscountValue,
+    /// 假突破信号（新增）
+    #[serde(default)]
+    pub fake_breakout_value: super::fake_breakout::FakeBreakoutSignal,
+    /// EMA距离过滤（新增）
+    #[serde(default)]
+    pub ema_distance_filter: super::ema_filter::EmaDistanceFilter,
 }
 
 /// 检查均线交叉

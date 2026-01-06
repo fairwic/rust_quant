@@ -1,5 +1,7 @@
 // Vegas指标模块
 pub mod config;
+pub mod ema_filter;
+pub mod fake_breakout;
 pub mod indicator_combine;
 pub mod signal;
 pub mod strategy;
@@ -8,6 +10,8 @@ pub mod utils;
 
 // 重新导出主要类型
 pub use config::*;
+pub use ema_filter::*;
+pub use fake_breakout::*;
 pub use indicator_combine::*;
 pub use signal::*;
 pub use strategy::*;

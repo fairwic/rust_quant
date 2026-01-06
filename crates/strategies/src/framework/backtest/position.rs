@@ -77,6 +77,16 @@ pub fn open_long_position(
         trade_side: TradeSide::Long,
         ..Default::default()
     };
+    // 记录入场K线振幅，用于1R固定止损与保本触发
+    let k_range = (candle.h - candle.l).abs().max(signal.open_price * 0.001);
+    temp_trade_position.signal_high_low_diff = k_range;
+    if risk_config
+        .is_move_stop_open_price_when_touch_price
+        .unwrap_or(false)
+    {
+        temp_trade_position.move_stop_open_price_when_touch_price =
+            Some(signal.open_price + k_range);
+    }
     //设置止盈止损价格
     set_long_stop_close_price(risk_config, signal, &mut temp_trade_position);
 
@@ -185,6 +195,16 @@ pub fn open_short_position(
         trade_side: TradeSide::Short,
         ..Default::default()
     };
+    // 记录入场K线振幅，用于1R固定止损与保本触发
+    let k_range = (candle.h - candle.l).abs().max(signal.open_price * 0.001);
+    temp_trade_position.signal_high_low_diff = k_range;
+    if risk_config
+        .is_move_stop_open_price_when_touch_price
+        .unwrap_or(false)
+    {
+        temp_trade_position.move_stop_open_price_when_touch_price =
+            Some(signal.open_price - k_range);
+    }
     //设置止盈止损价格
     set_short_stop_close_price(risk_config, signal, &mut temp_trade_position);
 

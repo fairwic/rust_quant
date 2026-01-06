@@ -63,6 +63,7 @@ impl BacktestExecutor {
         risk_strategy_config: BasicRiskStrategyConfig,
         mysql_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64> {
+        let risk_strategy_config = tighten_vegas_risk(risk_strategy_config);
         let adapter = VegasBacktestAdapter::new(strategy);
         self.run_strategy_backtest(
             inst_id,
@@ -301,4 +302,40 @@ impl BacktestExecutor {
         );
         Ok(back_test_id)
     }
+}
+
+/// 针对 Vegas 的统一风控收紧：默认开启信号K线与单K振幅止损，并限制单笔最大亏损
+fn tighten_vegas_risk(mut risk: BasicRiskStrategyConfig) -> BasicRiskStrategyConfig {
+    // 允许通过环境变量关闭收紧，便于回归原始风控对照
+    // TIGHTEN_VEGAS_RISK=0/false 时不做收紧
+    if std::env::var("TIGHTEN_VEGAS_RISK")
+        .map(|v| matches!(v.to_lowercase().as_str(), "0" | "false" | "no"))
+        .unwrap_or(false)
+    {
+        return risk;
+    }
+
+    // 收紧单笔亏损上限，避免大振幅穿透
+    risk.max_loss_percent = risk.max_loss_percent.min(0.05);
+
+    // 启用信号K线止损
+    if risk.is_used_signal_k_line_stop_loss.unwrap_or(false) == false {
+        risk.is_used_signal_k_line_stop_loss = Some(true);
+    }
+
+    // 启用单K振幅固定止损（1R）
+    if risk.is_one_k_line_diff_stop_loss.unwrap_or(false) == false {
+        risk.is_one_k_line_diff_stop_loss = Some(true);
+    }
+
+    // 启用触及目标后的保本移动止损
+    if risk
+        .is_move_stop_open_price_when_touch_price
+        .unwrap_or(false)
+        == false
+    {
+        risk.is_move_stop_open_price_when_touch_price = Some(true);
+    }
+
+    risk
 }

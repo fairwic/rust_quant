@@ -9,5 +9,6 @@
         "lookback",
         "macd",
         "sqlx"
-    ]
+    ],
+    "python.languageServer": "None"
 }
