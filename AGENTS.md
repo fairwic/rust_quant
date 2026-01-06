@@ -106,12 +106,6 @@ Usage notes:
 </skill>
 
 <skill>
-<name>vegas-backtest-optimizer</name>
-<description>Optimize the Vegas 4H backtest loop (cargo run + MySQL back_test_log/strategy_config) by iteratively tweaking strategy_config/risk_config parameters, rerunning cargo, and selecting configs with win_rate at least 50 percent and positive profit. Use when automating Vegas backtest tuning in this repo with the provided MySQL docker and cargo run entrypoint.</description>
-<location>project</location>
-</skill>
-
-<skill>
 <name>web-artifacts-builder</name>
 <description>Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts requiring state management, routing, or shadcn/ui components - not for simple single-file HTML/JSX artifacts.</description>
 <location>project</location>
