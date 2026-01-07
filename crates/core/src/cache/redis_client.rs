@@ -22,9 +22,9 @@ impl RedisConnectionPool {
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| {
-                {error!("Redis connection test failed: {}", redis_url);
-                anyhow!("Failed to test Redis connection: {}", e)}
-                })?;
+                error!("Redis connection test failed: {}", redis_url);
+                anyhow!("Failed to test Redis connection: {}", e)
+            })?;
 
         debug!("Redis连接池初始化成功");
 

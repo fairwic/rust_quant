@@ -43,6 +43,18 @@ pub struct VegasStrategy {
     pub engulfing_signal: Option<EngulfingSignalConfig>,
     /// 锤子形态指标
     pub kline_hammer_signal: Option<KlineHammerConfig>,
+    /// 腿部识别配置
+    pub leg_detection_signal: Option<LegDetectionConfig>,
+    /// 市场结构配置
+    pub market_structure_signal: Option<MarketStructureConfig>,
+    /// 公平价值缺口配置
+    pub fair_value_gap_signal: Option<FairValueGapConfig>,
+    /// 溢价/折扣区域配置
+    pub premium_discount_signal: Option<PremiumDiscountConfig>,
+    /// 假突破配置
+    pub fake_breakout_signal: Option<FakeBreakoutConfig>,
+    /// 震荡过滤配置
+    pub range_filter_signal: Option<RangeFilterConfig>,
 }
 
 impl VegasStrategy {
@@ -58,6 +70,24 @@ impl VegasStrategy {
             signal_weights: Some(SignalWeightsConfig::default()),
             engulfing_signal: Some(EngulfingSignalConfig::default()),
             kline_hammer_signal: Some(KlineHammerConfig::default()),
+            leg_detection_signal: Some(LegDetectionConfig {
+                is_open: false,
+                ..LegDetectionConfig::default()
+            }),
+            market_structure_signal: Some(MarketStructureConfig {
+                is_open: false,
+                ..MarketStructureConfig::default()
+            }),
+            fair_value_gap_signal: Some(FairValueGapConfig {
+                is_open: false,
+                ..FairValueGapConfig::default()
+            }),
+            premium_discount_signal: Some(PremiumDiscountConfig {
+                is_open: false,
+                ..PremiumDiscountConfig::default()
+            }),
+            fake_breakout_signal: None,
+            range_filter_signal: Some(RangeFilterConfig::default()),
         }
     }
 
@@ -284,20 +314,120 @@ impl VegasStrategy {
         // ================================================================
         // 【新增】假突破信号检测
         // ================================================================
-        let fake_breakout_config = FakeBreakoutConfig::default();
-        let fake_breakout_signal = fake_breakout::detect_fake_breakout(data_items, &fake_breakout_config);
-        vegas_indicator_signal_values.fake_breakout_value = fake_breakout_signal;
+        if let Some(fake_breakout_config) = &self.fake_breakout_signal {
+            let fake_breakout_signal =
+                fake_breakout::detect_fake_breakout(data_items, fake_breakout_config);
+            vegas_indicator_signal_values.fake_breakout_value = fake_breakout_signal;
 
-        // 假突破信号加入conditions
-        if fake_breakout_signal.has_signal() {
-            conditions.push((
-                SignalType::FakeBreakout,
-                SignalCondition::FakeBreakout {
-                    is_bullish: fake_breakout_signal.is_bullish_fake_breakout,
-                    is_bearish: fake_breakout_signal.is_bearish_fake_breakout,
-                    strength: fake_breakout_signal.strength,
-                },
-            ));
+            // 假突破信号加入conditions
+            if fake_breakout_signal.has_signal() {
+                conditions.push((
+                    SignalType::FakeBreakout,
+                    SignalCondition::FakeBreakout {
+                        is_bullish: fake_breakout_signal.is_bullish_fake_breakout,
+                        is_bearish: fake_breakout_signal.is_bearish_fake_breakout,
+                        strength: fake_breakout_signal.strength,
+                    },
+                ));
+            }
+        }
+
+        // ================================================================
+        // 【新增】结构突破/腿部识别/缺口/溢价折扣
+        // ================================================================
+        if let Some(leg_detection_signal) = &self.leg_detection_signal {
+            if leg_detection_signal.is_open {
+                let leg_value = vegas_indicator_signal_values.leg_detection_value;
+                if leg_value.is_bullish_leg || leg_value.is_bearish_leg {
+                    conditions.push((
+                        SignalType::LegDetection,
+                        SignalCondition::LegDetection {
+                            is_bullish_leg: leg_value.is_bullish_leg,
+                            is_bearish_leg: leg_value.is_bearish_leg,
+                            is_new_leg: leg_value.is_new_leg,
+                        },
+                    ));
+                }
+            }
+        }
+
+        if let Some(market_structure_signal) = &self.market_structure_signal {
+            if market_structure_signal.is_open {
+                let structure_value = &vegas_indicator_signal_values.market_structure_value;
+                let has_swing_signal = structure_value.swing_bullish_bos
+                    || structure_value.swing_bearish_bos
+                    || structure_value.swing_bullish_choch
+                    || structure_value.swing_bearish_choch;
+                let has_internal_signal = structure_value.internal_bullish_bos
+                    || structure_value.internal_bearish_bos
+                    || structure_value.internal_bullish_choch
+                    || structure_value.internal_bearish_choch;
+
+                let can_use_swing = market_structure_signal.enable_swing_signal && has_swing_signal;
+                let can_use_internal = market_structure_signal.enable_internal_signal
+                    && has_internal_signal
+                    && (!market_structure_signal.enable_swing_signal || !has_swing_signal);
+
+                if can_use_swing || can_use_internal {
+                    let use_internal = !can_use_swing && can_use_internal;
+                    let (bullish_bos, bearish_bos, bullish_choch, bearish_choch) = if use_internal {
+                        (
+                            structure_value.internal_bullish_bos,
+                            structure_value.internal_bearish_bos,
+                            structure_value.internal_bullish_choch,
+                            structure_value.internal_bearish_choch,
+                        )
+                    } else {
+                        (
+                            structure_value.swing_bullish_bos,
+                            structure_value.swing_bearish_bos,
+                            structure_value.swing_bullish_choch,
+                            structure_value.swing_bearish_choch,
+                        )
+                    };
+
+                    conditions.push((
+                        SignalType::MarketStructure,
+                        SignalCondition::MarketStructure {
+                            is_bullish_bos: bullish_bos,
+                            is_bearish_bos: bearish_bos,
+                            is_bullish_choch: bullish_choch,
+                            is_bearish_choch: bearish_choch,
+                            is_internal: use_internal,
+                        },
+                    ));
+                }
+            }
+        }
+
+        if let Some(fair_value_gap_signal) = &self.fair_value_gap_signal {
+            if fair_value_gap_signal.is_open {
+                let fvg_value = &vegas_indicator_signal_values.fair_value_gap_value;
+                if fvg_value.current_bullish_fvg || fvg_value.current_bearish_fvg {
+                    conditions.push((
+                        SignalType::FairValueGap,
+                        SignalCondition::FairValueGap {
+                            is_bullish_fvg: fvg_value.current_bullish_fvg,
+                            is_bearish_fvg: fvg_value.current_bearish_fvg,
+                        },
+                    ));
+                }
+            }
+        }
+
+        if let Some(premium_discount_signal) = &self.premium_discount_signal {
+            if premium_discount_signal.is_open {
+                let pd_value = &vegas_indicator_signal_values.premium_discount_value;
+                if pd_value.in_premium_zone || pd_value.in_discount_zone {
+                    conditions.push((
+                        SignalType::PremiumDiscount,
+                        SignalCondition::PremiumDiscount {
+                            in_premium_zone: pd_value.in_premium_zone,
+                            in_discount_zone: pd_value.in_discount_zone,
+                        },
+                    ));
+                }
+            }
         }
 
         // ================================================================
@@ -324,6 +454,102 @@ impl VegasStrategy {
                 }
                 SignalDirect::IsShort => {
                     signal_result.should_sell = Some(true);
+                }
+            }
+        }
+
+        // ================================================================
+        // 趋势/波动过滤：
+        // - 仅在EMA多头/空头排列时放行同向信号，避免逆势追单
+        // - 极端波动（布林带宽度过大）时拒绝开仓，降低大幅回撤概率
+        // ================================================================
+        let ema_values = &vegas_indicator_signal_values.ema_values;
+        if signal_result.should_buy.unwrap_or(false) && !ema_values.is_long_trend {
+            signal_result.should_buy = Some(false);
+        }
+        if signal_result.should_sell.unwrap_or(false) && !ema_values.is_short_trend {
+            signal_result.should_sell = Some(false);
+        }
+
+        // 使用布林带宽度作为波动指标
+        if let Some(bb) = self.bolling_signal.as_ref() {
+            let bb_val = &vegas_indicator_signal_values.bollinger_value;
+            if bb_val.middle > 0.0 {
+                let width_ratio = (bb_val.upper - bb_val.lower) / bb_val.middle;
+                // 0.08 相当于 ±8% 布林扩张，视为高波动
+                if width_ratio > 0.08 {
+                    if signal_result.should_buy.unwrap_or(false) {
+                        signal_result.should_buy = Some(false);
+                    }
+                    if signal_result.should_sell.unwrap_or(false) {
+                        signal_result.should_sell = Some(false);
+                    }
+                }
+            }
+        }
+
+        // ================================================================
+        // 应用EMA距离过滤 + 长均线附近收紧止损
+        // - 过远状态且空头排列：拒绝做多（避免类似 5984352 的假多）
+        // - 价格贴近长周期均线（ema4）且仍要做多：自动给出极小止损位
+        // ================================================================
+        let ema4 = vegas_indicator_signal_values.ema_values.ema4_value;
+        let mut price_to_ema4: Option<f64> = None;
+        if ema4 > 0.0 {
+            price_to_ema4 = Some((last_data_item.c - ema4) / ema4);
+        }
+
+        if let Some(dist) = price_to_ema4 {
+            // 只有“贴线”且 should_filter_long 时才拦截，避免过度过滤
+            if ema_distance_filter.should_filter_long
+                && signal_result.should_buy.unwrap_or(false)
+                && dist >= 0.0
+                && dist <= 0.0025
+            {
+                signal_result.should_buy = Some(false);
+            }
+        }
+
+        if ema_distance_filter.should_filter_short && signal_result.should_sell.unwrap_or(false) {
+            signal_result.should_sell = Some(false);
+        }
+
+        if signal_result.should_buy.unwrap_or(false) {
+            if let Some(dist) = price_to_ema4 {
+                // 价格在 ema4 上方且距离 ≤0.25% 视为贴线追多 → 给极小止损
+                if dist >= 0.0 && dist <= 0.0025 {
+                    let tight_sl = ema4 * 0.998; // 约 0.2% 保护
+                    signal_result.signal_kline_stop_loss_price =
+                        Some(tight_sl.min(last_data_item.c * 0.999));
+                }
+            }
+        }
+
+        // ================================================================
+        // 【新增】震荡过滤：震荡时降低止盈目标
+        // ================================================================
+        if let Some(range_filter_signal) = &self.range_filter_signal {
+            if range_filter_signal.is_open && self.bolling_signal.is_some() {
+                let bb_value = &vegas_indicator_signal_values.bollinger_value;
+                let mid = bb_value.middle;
+                let width = bb_value.upper - bb_value.lower;
+                if mid > 0.0 && width > 0.0 {
+                    let bb_width_ratio = width / mid;
+                    if bb_width_ratio <= range_filter_signal.bb_width_threshold {
+                        let k_range = (last_data_item.h - last_data_item.l)
+                            .abs()
+                            .max(last_data_item.c * 0.001);
+                        let tp_ratio = range_filter_signal.tp_kline_ratio.max(0.0);
+
+                        if signal_result.should_buy.unwrap_or(false) {
+                            signal_result.long_signal_take_profit_price =
+                                Some(last_data_item.c + k_range * tp_ratio);
+                        }
+                        if signal_result.should_sell.unwrap_or(false) {
+                            signal_result.short_signal_take_profit_price =
+                                Some(last_data_item.c - k_range * tp_ratio);
+                        }
+                    }
                 }
             }
         }
@@ -414,9 +640,13 @@ impl VegasStrategy {
     /// 获取指标组合
     pub fn get_indicator_combine(&self) -> IndicatorCombine {
         use crate::ema_indicator::EmaIndicator;
+        use crate::fair_value_gap_indicator::FairValueGapIndicator;
+        use crate::leg_detection_indicator::LegDetectionIndicator;
+        use crate::market_structure_indicator::MarketStructureIndicator;
         use crate::momentum::rsi::RsiIndicator;
         use crate::pattern::engulfing::KlineEngulfingIndicator;
         use crate::pattern::hammer::KlineHammerIndicator;
+        use crate::premium_discount_indicator::PremiumDiscountIndicator;
         use crate::volatility::bollinger::BollingBandsPlusIndicator;
         use crate::volume_indicator::VolumeRatioIndicator;
 
@@ -468,6 +698,48 @@ impl VegasStrategy {
                 kline_hammer_signal.up_shadow_ratio,
                 kline_hammer_signal.down_shadow_ratio,
             ));
+        }
+
+        // 添加腿部识别
+        if let Some(leg_detection_signal) = &self.leg_detection_signal {
+            if leg_detection_signal.is_open {
+                indicator_combine.leg_detection_indicator =
+                    Some(LegDetectionIndicator::new(leg_detection_signal.size));
+            }
+        }
+
+        // 添加市场结构
+        if let Some(market_structure_signal) = &self.market_structure_signal {
+            if market_structure_signal.is_open {
+                indicator_combine.market_structure_indicator =
+                    Some(MarketStructureIndicator::new_with_thresholds(
+                        market_structure_signal.swing_length,
+                        market_structure_signal.internal_length,
+                        market_structure_signal.swing_threshold,
+                        market_structure_signal.internal_threshold,
+                    ));
+            }
+        }
+
+        // 添加公平价值缺口
+        if let Some(fair_value_gap_signal) = &self.fair_value_gap_signal {
+            if fair_value_gap_signal.is_open {
+                indicator_combine.fair_value_gap_indicator = Some(FairValueGapIndicator::new(
+                    fair_value_gap_signal.threshold_multiplier,
+                    fair_value_gap_signal.auto_threshold,
+                ));
+            }
+        }
+
+        // 添加溢价/折扣区域
+        if let Some(premium_discount_signal) = &self.premium_discount_signal {
+            if premium_discount_signal.is_open {
+                let internal_length = (premium_discount_signal.lookback / 4).max(1);
+                indicator_combine.premium_discount_indicator = Some(PremiumDiscountIndicator::new(
+                    premium_discount_signal.lookback,
+                    internal_length,
+                ));
+            }
         }
 
         indicator_combine

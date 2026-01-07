@@ -52,9 +52,7 @@ impl EngulfingStrategy {
             // println!("all_previous_bullish= {:#?}", all_previous_bullish);
             // 牛市吞没形态条件
             if all_previous_bearish
-                && current_close
-                    > previous_candles[previous_candles.len() - 1]
-                        .o
+                && current_close > previous_candles[previous_candles.len() - 1].o
             // &&current_
             {
                 should_buy = true;
@@ -62,9 +60,7 @@ impl EngulfingStrategy {
 
             // 熊市吞没形态条件
             if all_previous_bullish
-                && current_close
-                    < previous_candles[previous_candles.len() - 1]
-                        .o
+                && current_close < previous_candles[previous_candles.len() - 1].o
             {
                 should_sell = true;
             }

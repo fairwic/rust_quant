@@ -4,9 +4,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use rust_quant_domain::BasicRiskConfig;
-use rust_quant_domain::enums::PositionSide;
 use rust_quant_common::CandleItem;
+use rust_quant_domain::enums::PositionSide;
+use rust_quant_domain::BasicRiskConfig;
 
 use super::{MarketCandle, PositionSnapshot, StopLossAmender, StrategyRiskConfigSnapshot};
 
@@ -32,7 +32,10 @@ struct StrategyKey {
 
 impl StrategyKey {
     fn new(strategy_config_id: i64, inst_id: String) -> Self {
-        Self { strategy_config_id, inst_id }
+        Self {
+            strategy_config_id,
+            inst_id,
+        }
     }
 }
 
@@ -132,7 +135,9 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
             guard
                 .positions
                 .iter()
-                .filter(|(k, st)| k.inst_id == inst_id && st.snapshot.is_open && !st.moved_to_breakeven)
+                .filter(|(k, st)| {
+                    k.inst_id == inst_id && st.snapshot.is_open && !st.moved_to_breakeven
+                })
                 .map(|(k, st)| (k.clone(), st.clone()))
                 .collect::<Vec<_>>()
         };
@@ -240,4 +245,3 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
         }
     }
 }
-

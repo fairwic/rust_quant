@@ -168,4 +168,3 @@ mod tests {
         assert_eq!(id, "BTC-USDT-SWAP_nwe_1234567890");
     }
 }
-

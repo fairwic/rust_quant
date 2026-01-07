@@ -1,5 +1,4 @@
 use crate::ema_indicator::EmaIndicator;
-use crate::volatility::bollinger::BollingBandsPlusIndicator;
 use crate::fair_value_gap_indicator::FairValueGapIndicator;
 use crate::leg_detection_indicator::LegDetectionIndicator;
 use crate::market_structure_indicator::MarketStructureIndicator;
@@ -7,6 +6,7 @@ use crate::momentum::rsi::RsiIndicator;
 use crate::pattern::engulfing::KlineEngulfingIndicator;
 use crate::pattern::hammer::KlineHammerIndicator;
 use crate::premium_discount_indicator::PremiumDiscountIndicator;
+use crate::volatility::bollinger::BollingBandsPlusIndicator;
 use crate::volume_indicator::VolumeRatioIndicator;
 
 /// 指标组合结构体

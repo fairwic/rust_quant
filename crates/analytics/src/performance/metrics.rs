@@ -110,7 +110,7 @@ impl PerformanceCalculator {
     }
 
     /// 计算实际交易周期（从第一笔开仓到最后一笔平仓）
-    /// 
+    ///
     /// 这比使用K线数据范围更准确，因为：
     /// 1. K线数据可能包含没有交易信号的时段
     /// 2. 实际资金运作时间应该从第一笔交易开始算起
@@ -120,13 +120,16 @@ impl PerformanceCalculator {
         }
 
         // 解析第一笔交易的开仓时间
-        let first_open_time = self.trade_records.first().and_then(|r| {
-            Self::parse_datetime(&r.open_position_time)
-        });
+        let first_open_time = self
+            .trade_records
+            .first()
+            .and_then(|r| Self::parse_datetime(&r.open_position_time));
 
         // 解析最后一笔交易的平仓时间
         let last_close_time = self.trade_records.last().and_then(|r| {
-            r.close_position_time.as_ref().and_then(|t| Self::parse_datetime(t))
+            r.close_position_time
+                .as_ref()
+                .and_then(|t| Self::parse_datetime(t))
         });
 
         match (first_open_time, last_close_time) {
@@ -169,10 +172,10 @@ impl PerformanceCalculator {
 
     /// 计算最大回撤
     /// 返回 (最大回撤, 权益曲线)
-    /// 
+    ///
     /// 注意：当前实现基于每笔交易结算后的权益点计算。
     /// 这意味着持仓期间的浮动亏损不会被捕捉。
-    /// 
+    ///
     /// 改进方案：同时考虑持仓期间的潜在最大亏损
     /// 通过 open_price 和 close_price 估算持仓期间的最大浮亏
     fn calculate_max_drawdown(&self) -> (f64, Vec<f64>) {
@@ -194,7 +197,7 @@ impl PerformanceCalculator {
                 let estimated_worst = current_equity + record.profit_loss * 1.5;
                 equity_curve.push(estimated_worst.max(0.0));
             }
-            
+
             // 记录平仓后的权益
             current_equity += record.profit_loss;
             equity_curve.push(current_equity);
@@ -220,7 +223,7 @@ impl PerformanceCalculator {
     }
 
     /// 计算波动率 (年化)
-    /// 
+    ///
     /// 基于交易收益率计算，然后年化
     /// 公式: 交易收益率标准差 * sqrt(每年交易次数)
     fn calculate_volatility(&self, equity_curve: &[f64], actual_trading_days: f64) -> f64 {
@@ -232,7 +235,7 @@ impl PerformanceCalculator {
         // 这样可以避免估算浮亏点带来的噪声
         let mut returns: Vec<f64> = Vec::with_capacity(self.trade_records.len());
         let mut running_equity = self.initial_fund;
-        
+
         for record in &self.trade_records {
             if running_equity > 0.0 {
                 let ret = record.profit_loss / running_equity;
@@ -363,9 +366,9 @@ mod tests {
     fn test_max_drawdown_with_floating_loss() {
         // 测试包含浮亏估算的最大回撤
         let trades = vec![
-            create_test_trade_record_with_time(20.0, "2024-01-01", "2024-01-10"),  // 100 -> 120
+            create_test_trade_record_with_time(20.0, "2024-01-01", "2024-01-10"), // 100 -> 120
             create_test_trade_record_with_time(-30.0, "2024-01-15", "2024-01-20"), // 120 -> 90
-            create_test_trade_record_with_time(10.0, "2024-01-25", "2024-01-30"),  // 90 -> 100
+            create_test_trade_record_with_time(10.0, "2024-01-25", "2024-01-30"), // 90 -> 100
         ];
 
         let start_time = 0i64;
@@ -397,7 +400,7 @@ mod tests {
 
         // 绝对收益率 = 20%
         assert!((metrics.total_return - 0.2).abs() < 0.001);
-        
+
         // 年化收益率应该基于29天（6月1日到6月30日），而非365天
         // 如果用365天：(1.2)^(365/365) - 1 = 0.2 = 20%
         // 如果用29天：(1.2)^(365/29) - 1 ≈ 8.68 = 868%
@@ -417,4 +420,3 @@ mod tests {
         assert_eq!(metrics.max_drawdown, 0.0);
     }
 }
-

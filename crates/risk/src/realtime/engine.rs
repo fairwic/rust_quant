@@ -6,7 +6,10 @@ use tracing::debug;
 
 use rust_quant_domain::BasicRiskConfig;
 
-use super::{BreakevenStopLossService, MarketCandle, PositionSnapshot, RealtimeRiskEvent, StopLossAmender, StrategyRiskConfigSnapshot};
+use super::{
+    BreakevenStopLossService, MarketCandle, PositionSnapshot, RealtimeRiskEvent, StopLossAmender,
+    StrategyRiskConfigSnapshot,
+};
 
 /// 实时风控引擎（事件驱动）
 ///
@@ -45,7 +48,10 @@ impl<A: StopLossAmender> RealtimeRiskEngine<A> {
     async fn on_risk_config(&self, cfg: StrategyRiskConfigSnapshot) {
         {
             let mut guard = self.risk_cache.write().await;
-            guard.insert((cfg.strategy_config_id, cfg.inst_id.clone()), cfg.risk.clone());
+            guard.insert(
+                (cfg.strategy_config_id, cfg.inst_id.clone()),
+                cfg.risk.clone(),
+            );
         }
         self.breakeven.upsert_risk_config(cfg).await;
     }
@@ -71,4 +77,3 @@ impl<A: StopLossAmender> RealtimeRiskEngine<A> {
         self.breakeven.on_candle(candle).await;
     }
 }
-

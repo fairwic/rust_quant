@@ -14,8 +14,8 @@ use super::executor_common::{
 use crate::cache::arc_nwe_indicator_values::{
     get_nwe_hash_key, get_nwe_indicator_manager, set_nwe_strategy_indicator_values,
 };
-use crate::framework::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use crate::framework::config::strategy_config::StrategyConfig;
+use crate::framework::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use crate::implementations::nwe_strategy::{NweSignalValues, NweStrategy, NweStrategyConfig};
 use crate::strategy_common::{parse_candle_to_data_item, SignalResult};
 use crate::StrategyType;
@@ -200,7 +200,8 @@ impl StrategyExecutor for NweStrategyExecutor {
         let mut nwe_strategy = NweStrategy::new(nwe_config);
         let risk_config = serde_json::from_value(strategy_config.risk_config.clone())
             .map_err(|e| anyhow!("解析风险配置失败: {}", e))?;
-        let signal_result = nwe_strategy.get_trade_signal(&candle_vec, &nwe_signal_values, &risk_config);
+        let signal_result =
+            nwe_strategy.get_trade_signal(&candle_vec, &nwe_signal_values, &risk_config);
 
         // 11. 记录信号生成结果
         if signal_result.should_buy || signal_result.should_sell {

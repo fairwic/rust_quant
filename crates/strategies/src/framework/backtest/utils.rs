@@ -6,7 +6,12 @@ pub fn parse_price(candle: &CandleItem) -> f64 {
 }
 
 /// 计算盈亏
-pub fn calculate_profit_loss(is_long: bool, position: f64, entry_price: f64, exit_price: f64) -> f64 {
+pub fn calculate_profit_loss(
+    is_long: bool,
+    position: f64,
+    entry_price: f64,
+    exit_price: f64,
+) -> f64 {
     if is_long {
         position * (exit_price - entry_price)
     } else {
@@ -27,4 +32,3 @@ pub fn calculate_win_rate(wins: i64, losses: i64) -> f64 {
         0.0
     }
 }
-

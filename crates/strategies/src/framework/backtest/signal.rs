@@ -1,10 +1,13 @@
 use rust_quant_domain::entities::position;
 
-use crate::CandleItem;
 use super::super::types::TradeSide;
-use super::types::{BasicRiskStrategyConfig, SignalResult, TradingState};
+use super::position::{
+    close_position, open_long_position, open_short_position, set_long_stop_close_price,
+    set_short_stop_close_price,
+};
 use super::risk::check_risk_config;
-use super::position::{open_long_position, open_short_position, close_position, set_long_stop_close_price, set_short_stop_close_price};
+use super::types::{BasicRiskStrategyConfig, SignalResult, TradingState};
+use crate::CandleItem;
 /// 处理交易信号
 pub fn deal_signal(
     mut trading_state: TradingState,
@@ -25,13 +28,8 @@ pub fn deal_signal(
             if (trade_position.trade_side == TradeSide::Long && signal.should_sell)
                 || (trade_position.trade_side == TradeSide::Short && signal.should_buy)
             {
-                trading_state = check_risk_config(
-                    &risk_config,
-                    trading_state,
-                    signal,
-                    candle,
-                );
-            }else {
+                trading_state = check_risk_config(&risk_config, trading_state, signal, candle);
+            } else {
                 //如果再一次出发点了相同的信号方向，则进行止盈止损的信号更新
                 if signal.should_buy {
                     // println!("出现连续的多头信号{}",rust_quant_common::utils::time::mill_time_to_datetime(signal.ts).unwrap());
@@ -60,12 +58,7 @@ pub fn deal_signal(
     } else {
         // 如果有持仓, 先进行风险检查
         if trading_state.trade_position.is_some() {
-            trading_state = check_risk_config(
-                &risk_config,
-                trading_state,
-                signal,
-                candle,
-            );
+            trading_state = check_risk_config(&risk_config, trading_state, signal, candle);
         } else if trading_state.last_signal_result.is_some() {
             // 要确保大于信号的开仓时间
             if candle.ts >= trading_state.last_signal_result.clone().unwrap().ts {
@@ -170,7 +163,8 @@ fn handle_sell_signal_logic(
     } else if let Some(trade_position) = trading_state.trade_position.clone() {
         if trade_position.trade_side == TradeSide::Long {
             // 持有多单，先平多单
-            let profit = (signal.open_price - trade_position.open_price) * trade_position.position_nums;
+            let profit =
+                (signal.open_price - trade_position.open_price) * trade_position.position_nums;
             let mut pos = trade_position;
             pos.close_price = Some(signal.open_price);
             trading_state.trade_position = Some(pos);
@@ -181,4 +175,3 @@ fn handle_sell_signal_logic(
         }
     }
 }
-

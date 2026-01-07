@@ -1217,8 +1217,8 @@ mod tests {
             "test_api_key".to_string(),
             "test_api_secret".to_string(),
             Some("test_passphrase".to_string()),
-            true,  // sandbox
-            true,  // enabled
+            true, // sandbox
+            true, // enabled
             Some("测试API配置".to_string()),
         )
     }
@@ -1241,7 +1241,7 @@ mod tests {
     }
 
     /// 测试：execute_order_internal - 正常买入下单流程
-    /// 
+    ///
     /// 注意：此测试需要mock外部依赖（ExchangeApiService和OkxOrderService）
     /// 由于这些依赖是硬编码的，此测试主要用于验证逻辑流程
     #[tokio::test]
@@ -1473,15 +1473,15 @@ mod tests {
     }
 
     /// 测试：execute_order_internal - 真实场景集成测试
-    /// 
+    ///
     /// 此测试通过execute_strategy方法间接测试execute_order_internal的完整流程
     /// 使用真实的数据结构和逻辑，可以连接真实的数据库和API（如果配置了）
-    /// 
+    ///
     /// 前置条件（可选）：
     /// 1. 数据库配置：DATABASE_URL环境变量
     /// 2. Redis配置：REDIS_URL环境变量
     /// 3. API配置：需要在数据库中配置策略配置ID和API配置的关联
-    /// 
+    ///
     /// 如果未配置数据库或API，测试会跳过实际下单，仅验证逻辑流程
     #[tokio::test]
     #[ignore] // 默认忽略，需要真实环境配置
@@ -1490,7 +1490,7 @@ mod tests {
         use rust_quant_core::database::get_db_pool;
         use rust_quant_domain::{StrategyStatus, StrategyType, Timeframe};
         use rust_quant_infrastructure::repositories::SqlxSwapOrderRepository;
-        
+
         println!("🚀 开始真实场景集成测试");
 
         // 1. 初始化数据库连接（如果配置了）
@@ -1506,7 +1506,7 @@ mod tests {
                 Arc::new(MockSwapOrderRepository::new())
             }
         };
-        
+
         let service = StrategyExecutionService::new(repo.clone());
 
         // 2. 创建真实的策略配置
@@ -1564,8 +1564,10 @@ mod tests {
             atr_take_profit_level_3: None,
         };
 
-        println!("📊 交易信号: should_buy={}, open_price={}, stop_loss={:?}", 
-                 signal.should_buy, signal.open_price, signal.signal_kline_stop_loss_price);
+        println!(
+            "📊 交易信号: should_buy={}, open_price={}, stop_loss={:?}",
+            signal.should_buy, signal.open_price, signal.signal_kline_stop_loss_price
+        );
 
         // 4. 验证信号和配置
         assert!(signal.should_buy, "信号应该是买入信号");
@@ -1577,13 +1579,22 @@ mod tests {
         let max_loss_percent = risk_config.max_loss_percent;
         let default_stop_loss = entry_price * (1.0 - max_loss_percent);
         let final_stop_loss = match risk_config.is_used_signal_k_line_stop_loss {
-            Some(true) => signal.signal_kline_stop_loss_price.unwrap_or(default_stop_loss),
+            Some(true) => signal
+                .signal_kline_stop_loss_price
+                .unwrap_or(default_stop_loss),
             _ => default_stop_loss,
         };
-        
+
         assert!(entry_price > final_stop_loss, "做多时开仓价应该 > 止损价");
-        assert_eq!(final_stop_loss, current_price * 0.98, "应该使用信号K线止损价");
-        println!("✅ 止损价格验证通过: entry={}, stop_loss={}", entry_price, final_stop_loss);
+        assert_eq!(
+            final_stop_loss,
+            current_price * 0.98,
+            "应该使用信号K线止损价"
+        );
+        println!(
+            "✅ 止损价格验证通过: entry={}, stop_loss={}",
+            entry_price, final_stop_loss
+        );
 
         // 6. 验证订单ID生成
         let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
@@ -1597,11 +1608,14 @@ mod tests {
             .find_by_in_order_id(&in_order_id)
             .await
             .unwrap();
-        
+
         if existing_order.is_some() {
             println!("⚠️  订单已存在（幂等性检查通过），跳过重复下单");
             println!("   已存在订单: {:?}", existing_order.unwrap().out_order_id);
-            println!("   配置ID: {}, 交易对: {}, 周期: {}", config_id, inst_id, period);
+            println!(
+                "   配置ID: {}, 交易对: {}, 周期: {}",
+                config_id, inst_id, period
+            );
             return;
         }
         println!("✅ 幂等性检查通过，可以下单");
@@ -1611,13 +1625,13 @@ mod tests {
         // - 数据库中存在config_id对应的策略配置
         // - 数据库中配置了策略与API的关联
         // - API配置有效且有足够资金
-        
+
         println!("ℹ️  尝试执行完整下单流程...");
         println!("   提示：如果数据库和API未配置，此步骤会失败，但逻辑验证已完成");
-        
+
         // 由于execute_strategy需要真实的K线数据，这里我们只验证逻辑
         // 如果需要完整测试，需要提供真实的CandlesEntity
-        
+
         // 9. 验证订单详情构建
         let order_detail = serde_json::json!({
             "entry_price": entry_price,
@@ -1693,10 +1707,7 @@ mod tests {
         // 6. 生成订单ID
         let inst_id = "BTC-USDT-SWAP";
         let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
-        assert_eq!(
-            in_order_id,
-            format!("{}_strategy_{}", inst_id, signal.ts)
-        );
+        assert_eq!(in_order_id, format!("{}_strategy_{}", inst_id, signal.ts));
 
         // 7. 创建订单详情
         let order_detail = serde_json::json!({

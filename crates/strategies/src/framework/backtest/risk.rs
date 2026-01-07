@@ -374,7 +374,11 @@ pub fn check_risk_config(
 
     // 3. 单K振幅固定止损（1R）
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_one_k_line_diff_stop(&ctx, &trade_position, risk_config.is_one_k_line_diff_stop_loss)
+        check_one_k_line_diff_stop(
+            &ctx,
+            &trade_position,
+            risk_config.is_one_k_line_diff_stop_loss,
+        )
     {
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
     }
@@ -421,8 +425,8 @@ pub fn check_risk_config(
     // 9. 动态止盈（做多/做空）
     if let result @ ExitResult::Exit { .. } = check_dynamic_take_profit(
         &ctx,
-        signal.long_signal_take_profit_price,
-        signal.short_signal_take_profit_price,
+        trade_position.long_signal_take_profit_price,
+        trade_position.short_signal_take_profit_price,
     ) {
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
     }
@@ -614,7 +618,11 @@ pub fn check_risk_config_with_r_system(
 
     // 5. 单K振幅固定止损（1R）
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_one_k_line_diff_stop(&ctx, &trade_position, risk_config.is_one_k_line_diff_stop_loss)
+        check_one_k_line_diff_stop(
+            &ctx,
+            &trade_position,
+            risk_config.is_one_k_line_diff_stop_loss,
+        )
     {
         r_runtime.r_state = None;
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
@@ -667,8 +675,8 @@ pub fn check_risk_config_with_r_system(
     // 11. 动态止盈（做多/做空）
     if let result @ ExitResult::Exit { .. } = check_dynamic_take_profit(
         &ctx,
-        signal.long_signal_take_profit_price,
-        signal.short_signal_take_profit_price,
+        trade_position.long_signal_take_profit_price,
+        trade_position.short_signal_take_profit_price,
     ) {
         r_runtime.r_state = None;
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);

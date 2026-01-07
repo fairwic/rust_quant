@@ -82,7 +82,7 @@ mod tests {
         let inst_id = Some("BTC-USDT-SWAP");
         let _order_id = Some("2752618588464259072");
         let _client_order_id = Some("btc1Hbs20250807110000");
-        
+
         // 测试代码已注释，需要完整环境才能运行
         // let risk_job = RiskOrderJob::new()
         //     .run(inst_id, order_id, client_order_id)
@@ -99,7 +99,7 @@ mod tests {
         let _before: Option<&str> = None;
         let _limit: Option<u32> = None;
         let _order_type: Option<&str> = None;
-        
+
         // 测试代码已注释，需要完整环境才能运行
         // let risk_job = RiskOrderJob::new()
         //     .sync_order_list("SWAP", inst_id, order_type, state, after, before, limit)

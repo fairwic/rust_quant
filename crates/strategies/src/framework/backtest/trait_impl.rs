@@ -1,8 +1,8 @@
+use super::adapter::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
+use super::types::{BackTestResult, BasicRiskStrategyConfig};
 use crate::implementations::nwe_strategy::NweStrategy;
 use crate::implementations::vegas_backtest::VegasBacktestAdapter;
 use crate::CandleItem;
-use super::adapter::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
-use super::types::{BackTestResult, BasicRiskStrategyConfig};
 
 /// 通用回测策略能力接口，便于不同策略复用统一回测与落库流程
 pub trait BackTestAbleStrategyTrait: IndicatorStrategyBacktest + Sized {
@@ -36,4 +36,3 @@ impl BackTestAbleStrategyTrait for VegasBacktestAdapter {
         serde_json::to_string(self.strategy()).ok()
     }
 }
-

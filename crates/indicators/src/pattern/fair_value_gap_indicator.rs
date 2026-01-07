@@ -351,14 +351,14 @@ mod tests {
         // 注意：此测试需要完整的应用环境初始化
         // 包括数据库连接、配置加载等
         // 在实际测试中需要先初始化这些依赖
-        
+
         // 示例：如何使用此测试
         // 1. 初始化数据库连接
         // 2. 获取K线数据
         // 3. 使用FairValueGapIndicator进行检测
-        
+
         let _indicator = FairValueGapIndicator::new(1.0, true);
-        
+
         // 示例代码已注释
         /*
         // 将candles转换为CandleItem

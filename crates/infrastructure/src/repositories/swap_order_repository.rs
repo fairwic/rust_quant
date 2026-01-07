@@ -316,4 +316,3 @@ mod tests {
         assert_eq!(domain.inst_id, "BTC-USDT-SWAP");
     }
 }
-

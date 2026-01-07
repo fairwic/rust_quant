@@ -202,7 +202,7 @@ impl SignalResult {
             should_buy: None,
             open_price: None,
             best_open_price: None,
-            atr_take_profit_ratio_price: None,  
+            atr_take_profit_ratio_price: None,
             atr_stop_loss_price: None,
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,

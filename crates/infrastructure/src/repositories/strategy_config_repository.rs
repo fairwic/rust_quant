@@ -273,9 +273,12 @@ impl StrategyConfigRepository for SqlxStrategyConfigRepository {
     }
 
     async fn delete(&self, id: i64) -> Result<()> {
-        sqlx::query!("UPDATE strategy_config SET is_deleted = 1 WHERE id = ?", id as i32)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query!(
+            "UPDATE strategy_config SET is_deleted = 1 WHERE id = ?",
+            id as i32
+        )
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }

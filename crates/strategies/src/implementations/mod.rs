@@ -12,8 +12,8 @@ pub mod engulfing_strategy;
 
 // 执行器
 pub mod nwe_executor;
-pub mod vegas_executor;
 pub mod vegas_backtest;
+pub mod vegas_executor;
 
 // NWE 策略子模块
 pub mod nwe_strategy;
@@ -22,7 +22,7 @@ pub mod nwe_strategy;
 pub use engulfing_strategy::*;
 pub use executor_common::*;
 pub use executor_common_lite::ExecutionContext as LiteExecutionContext; // 避免冲突
-pub use profit_stop_loss::*;
 pub use nwe_executor::*;
-pub use vegas_executor::*;
+pub use profit_stop_loss::*;
 pub use vegas_backtest::*;
+pub use vegas_executor::*;

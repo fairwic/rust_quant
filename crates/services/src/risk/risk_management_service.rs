@@ -110,7 +110,7 @@ mod tests {
     async fn test_check_signal_risk_no_signal() {
         use rust_quant_domain::enums::{StrategyType, Timeframe};
         use serde_json::json;
-        
+
         let service = RiskManagementService::new();
         let signal = SignalResult::empty();
         let config = StrategyConfig::new(

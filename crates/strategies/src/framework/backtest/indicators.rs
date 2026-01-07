@@ -1,9 +1,9 @@
-use std::time::Instant;
+use crate::CandleItem;
 use rust_quant_indicators::trend::ema_indicator::EmaIndicator;
 use rust_quant_indicators::trend::vegas::{
     EmaSignalValue, IndicatorCombine, KlineHammerSignalValue, VegasIndicatorSignalValue,
 };
-use crate::CandleItem;
+use std::time::Instant;
 use ta::Next; // ⭐ 需要导入Next trait才能使用next方法
 use tracing::{info, warn};
 
@@ -23,7 +23,7 @@ pub fn calculate_ema(data: &CandleItem, ema_indicator: &mut EmaIndicator) -> Ema
     ema_signal_value.is_long_trend = ema_signal_value.ema1_value > ema_signal_value.ema2_value
         && ema_signal_value.ema2_value > ema_signal_value.ema3_value
         && ema_signal_value.ema3_value > ema_signal_value.ema4_value;
-    
+
     // 判断是否空头排列
     ema_signal_value.is_short_trend = ema_signal_value.ema1_value < ema_signal_value.ema2_value
         && ema_signal_value.ema2_value < ema_signal_value.ema3_value
@@ -40,10 +40,7 @@ pub fn calculate_ema(data: &CandleItem, ema_indicator: &mut EmaIndicator) -> Ema
     ema_signal_value
 }
 
-fn detect_ema_crosses(
-    current: &EmaSignalValue,
-    previous: &EmaSignalValue,
-) -> (bool, bool) {
+fn detect_ema_crosses(current: &EmaSignalValue, previous: &EmaSignalValue) -> (bool, bool) {
     let mut is_golden_cross =
         previous.ema1_value < previous.ema2_value && current.ema1_value > current.ema2_value;
     let mut is_death_cross =

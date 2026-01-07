@@ -205,4 +205,3 @@ mod tests {
         assert_eq!(manager.get_running_strategies().len(), 0);
     }
 }
-

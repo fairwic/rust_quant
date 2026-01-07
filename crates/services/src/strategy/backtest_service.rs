@@ -12,7 +12,9 @@ use rust_quant_common::CandleItem;
 use rust_quant_domain::entities::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics};
 use rust_quant_domain::traits::BacktestLogRepository;
 use rust_quant_domain::StrategyType;
-use rust_quant_strategies::strategy_common::{BackTestResult, BasicRiskStrategyConfig, TradeRecord};
+use rust_quant_strategies::strategy_common::{
+    BackTestResult, BasicRiskStrategyConfig, TradeRecord,
+};
 
 /// 回测服务
 ///
@@ -238,4 +240,3 @@ impl BacktestService {
         Ok(affected)
     }
 }
-

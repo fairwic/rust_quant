@@ -188,7 +188,7 @@ pub struct BacktestWinRateStats {
 }
 
 /// 回测绩效指标
-/// 
+///
 /// 包含夏普比率、年化收益率、最大回撤、波动率等核心风险收益指标
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct BacktestPerformanceMetrics {

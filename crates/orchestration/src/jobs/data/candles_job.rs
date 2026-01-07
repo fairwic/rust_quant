@@ -10,10 +10,7 @@ use tracing::{error, info};
 
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use rust_quant_infrastructure::repositories::SqlxCandleRepository;
-use rust_quant_services::market::{
-    CandleService as CandleMarketService, DataSyncService,
-};
-
+use rust_quant_services::market::{CandleService as CandleMarketService, DataSyncService};
 
 /// K线数据同步任务
 ///
@@ -68,7 +65,10 @@ impl CandlesJob {
 
         for inst_id in inst_ids {
             for period in periods {
-                match self.sync_single_candle_latest(&service, inst_id, period).await {
+                match self
+                    .sync_single_candle_latest(&service, inst_id, period)
+                    .await
+                {
                     Ok(count) => info!("✅ K线同步成功: {} {} - {} 条", inst_id, period, count),
                     Err(e) => error!("❌ K线同步失败: {} {} - {}", inst_id, period, e),
                 }
@@ -135,44 +135,45 @@ impl CandlesJob {
         symbol: &str,
         timeframe: Timeframe,
     ) -> Result<Candle> {
-        let timestamp = dto.ts.parse::<i64>().map_err(|e| {
-            anyhow::anyhow!("解析时间戳失败: ts={}, err={}", dto.ts, e)
-        })?;
+        let timestamp = dto
+            .ts
+            .parse::<i64>()
+            .map_err(|e| anyhow::anyhow!("解析时间戳失败: ts={}, err={}", dto.ts, e))?;
 
-        let open = dto.o.parse::<f64>().map_err(|e| {
-            anyhow::anyhow!("解析开盘价失败: o={}, err={}", dto.o, e)
-        })?;
-        let open = Price::new(open).map_err(|e| {
-            anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.o, e)
-        })?;
+        let open = dto
+            .o
+            .parse::<f64>()
+            .map_err(|e| anyhow::anyhow!("解析开盘价失败: o={}, err={}", dto.o, e))?;
+        let open = Price::new(open)
+            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.o, e))?;
 
-        let high = dto.h.parse::<f64>().map_err(|e| {
-            anyhow::anyhow!("解析最高价失败: h={}, err={}", dto.h, e)
-        })?;
-        let high = Price::new(high).map_err(|e| {
-            anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.h, e)
-        })?;
+        let high = dto
+            .h
+            .parse::<f64>()
+            .map_err(|e| anyhow::anyhow!("解析最高价失败: h={}, err={}", dto.h, e))?;
+        let high = Price::new(high)
+            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.h, e))?;
 
-        let low = dto.l.parse::<f64>().map_err(|e| {
-            anyhow::anyhow!("解析最低价失败: l={}, err={}", dto.l, e)
-        })?;
-        let low = Price::new(low).map_err(|e| {
-            anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.l, e)
-        })?;
+        let low = dto
+            .l
+            .parse::<f64>()
+            .map_err(|e| anyhow::anyhow!("解析最低价失败: l={}, err={}", dto.l, e))?;
+        let low = Price::new(low)
+            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.l, e))?;
 
-        let close = dto.c.parse::<f64>().map_err(|e| {
-            anyhow::anyhow!("解析收盘价失败: c={}, err={}", dto.c, e)
-        })?;
-        let close = Price::new(close).map_err(|e| {
-            anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.c, e)
-        })?;
+        let close = dto
+            .c
+            .parse::<f64>()
+            .map_err(|e| anyhow::anyhow!("解析收盘价失败: c={}, err={}", dto.c, e))?;
+        let close = Price::new(close)
+            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.c, e))?;
 
-        let volume = dto.vol_ccy.parse::<f64>().map_err(|e| {
-            anyhow::anyhow!("解析成交量失败: vol_ccy={}, err={}", dto.vol_ccy, e)
-        })?;
-        let volume = Volume::new(volume).map_err(|e| {
-            anyhow::anyhow!("创建Volume失败: value={}, err={:?}", dto.vol_ccy, e)
-        })?;
+        let volume = dto
+            .vol_ccy
+            .parse::<f64>()
+            .map_err(|e| anyhow::anyhow!("解析成交量失败: vol_ccy={}, err={}", dto.vol_ccy, e))?;
+        let volume = Volume::new(volume)
+            .map_err(|e| anyhow::anyhow!("创建Volume失败: value={}, err={:?}", dto.vol_ccy, e))?;
 
         let mut candle = Candle::new(
             symbol.to_string(),
@@ -192,8 +193,6 @@ impl CandlesJob {
 
         Ok(candle)
     }
-
-
 
     /// 全量执行数据同步（三步：建表、补历史、补增量）
     ///
@@ -216,9 +215,6 @@ impl CandlesJob {
         info!("✅ 完整数据同步完成");
         Ok(())
     }
-
-
-
 }
 
 impl Default for CandlesJob {
@@ -288,7 +284,6 @@ pub async fn sync_candles_concurrent(
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[tokio::test]
     #[ignore] // 需要OKX API和数据库配置

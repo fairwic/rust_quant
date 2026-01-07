@@ -111,10 +111,10 @@ impl OkxOrderService {
         let trade = OkxTrade::new(client.clone());
 
         let attach_algo_ords = vec![AttachAlgoOrdReqDto::new(
-            None, // 止盈触发价
-            None, // 止盈委托价 -1 表示市价
+            None,                                         // 止盈触发价
+            None,                                         // 止盈委托价 -1 表示市价
             Some(format!("{:.2}", stop_loss_trigger_px)), // 止损触发价，保留2位小数
-            Some("-1".to_string()), // 止损委托价 -1 表示市价
+            Some("-1".to_string()),                       // 止损委托价 -1 表示市价
             size.clone(),
         )];
 
@@ -214,11 +214,15 @@ impl OkxOrderService {
 
         match stop_loss_trigger_px {
             Some(sl) => {
-                self.place_order_with_stop_loss(api_config, inst_id, side, pos_side, size, sl, cl_ord_id)
+                self.place_order_with_stop_loss(
+                    api_config, inst_id, side, pos_side, size, sl, cl_ord_id,
+                )
+                .await
+            }
+            None => {
+                self.place_order(api_config, inst_id, side, pos_side, size, cl_ord_id)
                     .await
             }
-            None => self.place_order(api_config, inst_id, side, pos_side, size, cl_ord_id).await,
         }
     }
 }
-

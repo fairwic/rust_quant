@@ -1,10 +1,10 @@
-use rust_quant_indicators::trend::vegas::{IndicatorCombine, VegasIndicatorSignalValue};
-use crate::CandleItem;
-use super::types::{BackTestResult, BasicRiskStrategyConfig, SignalResult, TradingState};
 use super::indicators::get_multi_indicator_values;
-use super::signal::deal_signal;
 use super::position::finalize_trading_state;
+use super::signal::deal_signal;
+use super::types::{BackTestResult, BasicRiskStrategyConfig, SignalResult, TradingState};
 use super::utils::calculate_win_rate;
+use crate::CandleItem;
+use rust_quant_indicators::trend::vegas::{IndicatorCombine, VegasIndicatorSignalValue};
 
 /// 回测引擎：支持Vegas策略（内部转调通用引擎保持向后兼容）
 pub fn run_back_test(
@@ -34,7 +34,7 @@ pub fn run_back_test_generic<IC, IV>(
     mut build_values: impl FnMut(&mut IC, &CandleItem) -> IV,
 ) -> BackTestResult {
     let mut trading_state = TradingState::default();
-    
+
     // Optimization: Use a Vec with amortized O(1) shifting instead of VecDeque::make_contiguous
     let window_size = min_data_length;
     // Ensure reasonable capacity. If window_size is huge, we double it.
@@ -51,18 +51,15 @@ pub fn run_back_test_generic<IC, IV>(
         let mut multi_indicator_values = build_values(indicator_combine, &candle);
 
         candle_buffer.push(candle.clone());
-        
+
         if candle_buffer.len() < window_size {
             continue;
         }
-        
+
         // Get the view of the sliding window
         let current_slice = &candle_buffer[candle_buffer.len() - window_size..];
 
-        let mut signal = strategy(
-            current_slice,
-            &mut multi_indicator_values,
-        );
+        let mut signal = strategy(current_slice, &mut multi_indicator_values);
         if i < 500 {
             continue;
         }
@@ -82,18 +79,18 @@ pub fn run_back_test_generic<IC, IV>(
                 i,
             );
         }
-        
+
         // Maintenance: Shift buffer if full
         if candle_buffer.len() >= capacity {
-             let remove_count = candle_buffer.len() - window_size;
-             candle_buffer.drain(0..remove_count);
+            let remove_count = candle_buffer.len() - window_size;
+            candle_buffer.drain(0..remove_count);
         }
     }
-    
+
     if !candle_buffer.is_empty() {
         finalize_trading_state(&mut trading_state, &candle_buffer);
     }
-    
+
     BackTestResult {
         funds: trading_state.funds,
         win_rate: calculate_win_rate(trading_state.wins, trading_state.losses),

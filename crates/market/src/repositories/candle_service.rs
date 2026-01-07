@@ -15,7 +15,7 @@ pub struct CandleService {
     cache: Arc<dyn LatestCandleCacheProvider>,
     persist_sender: Option<mpsc::UnboundedSender<PersistTask>>,
     /// 策略触发回调函数
-    /// 
+    ///
     /// # 架构说明
     /// - market层不应直接依赖strategies层
     /// - 通过回调函数实现解耦
@@ -57,12 +57,12 @@ impl CandleService {
     }
 
     /// 创建带策略触发回调的服务实例
-    /// 
+    ///
     /// # 参数
     /// * `cache` - K线缓存
     /// * `persist_sender` - 持久化任务发送器
     /// * `strategy_trigger` - 策略触发回调函数
-    /// 
+    ///
     /// # 架构说明
     /// - 通过依赖注入方式传入策略触发逻辑
     /// - 避免market层直接依赖strategies层
@@ -108,18 +108,17 @@ impl CandleService {
         let should_update = match self.cache.get_or_fetch(inst_id, time_interval).await {
             Some(cache_candle) => {
                 new_ts > cache_candle.ts
-                    || (new_ts == cache_candle.ts
-                        && {
-                            let new_vol = match latest.vol_ccy.parse::<f64>() {
-                                Ok(v) => v,
-                                Err(_) => 0.0,
-                            };
-                            let old_vol = match cache_candle.vol_ccy.parse::<f64>() {
-                                Ok(v) => v,
-                                Err(_) => 0.0,
-                            };
-                            new_vol >= old_vol
-                        })
+                    || (new_ts == cache_candle.ts && {
+                        let new_vol = match latest.vol_ccy.parse::<f64>() {
+                            Ok(v) => v,
+                            Err(_) => 0.0,
+                        };
+                        let old_vol = match cache_candle.vol_ccy.parse::<f64>() {
+                            Ok(v) => v,
+                            Err(_) => 0.0,
+                        };
+                        new_vol >= old_vol
+                    })
             }
             None => true,
         };
@@ -163,27 +162,27 @@ impl CandleService {
                     );
                 } else {
                     LAST_TRIGGERED_CONFIRMED_TS.insert(trigger_key, new_ts);
-                info!(
-                    "📈 K线确认，触发策略执行: inst_id={}, time_interval={}, ts={}",
-                    inst_id, time_interval, new_ts
-                );
-
-                // 如果注入了策略触发回调，则异步触发
-                if let Some(trigger) = &self.strategy_trigger {
-                    let inst_id_owned = inst_id.to_string();
-                    let time_interval_owned = time_interval.to_string();
-                    let snap_clone = snap.clone();
-                    let trigger_clone = Arc::clone(trigger);
-
-                    tokio::spawn(async move {
-                        trigger_clone(inst_id_owned, time_interval_owned, snap_clone);
-                    });
-                } else {
-                    warn!(
-                        "⚠️  未注入策略触发回调，跳过策略执行: inst_id={}, time_interval={}",
-                        inst_id, time_interval
+                    info!(
+                        "📈 K线确认，触发策略执行: inst_id={}, time_interval={}, ts={}",
+                        inst_id, time_interval, new_ts
                     );
-                }
+
+                    // 如果注入了策略触发回调，则异步触发
+                    if let Some(trigger) = &self.strategy_trigger {
+                        let inst_id_owned = inst_id.to_string();
+                        let time_interval_owned = time_interval.to_string();
+                        let snap_clone = snap.clone();
+                        let trigger_clone = Arc::clone(trigger);
+
+                        tokio::spawn(async move {
+                            trigger_clone(inst_id_owned, time_interval_owned, snap_clone);
+                        });
+                    } else {
+                        warn!(
+                            "⚠️  未注入策略触发回调，跳过策略执行: inst_id={}, time_interval={}",
+                            inst_id, time_interval
+                        );
+                    }
                 }
             }
 

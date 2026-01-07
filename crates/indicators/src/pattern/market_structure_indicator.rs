@@ -35,8 +35,10 @@ pub struct MarketStructureValue {
 /// 市场结构识别指标
 #[derive(Debug, Clone)]
 pub struct MarketStructureIndicator {
-    swing_length: usize,                          // 摆动结构长度
-    internal_length: usize,                       // 内部结构长度
+    swing_length: usize,    // 摆动结构长度
+    internal_length: usize, // 内部结构长度
+    swing_threshold: f64,
+    internal_threshold: f64,
     leg_detector: LegDetectionIndicator,          // 腿部识别器
     internal_leg_detector: LegDetectionIndicator, // 内部腿部识别器
     previous_value: Option<MarketStructureValue>, // 上一次的信号值
@@ -46,19 +48,30 @@ pub struct MarketStructureIndicator {
 }
 
 impl MarketStructureIndicator {
-    pub fn new(swing_length: usize, internal_length: usize) -> Self {
+    pub fn new_with_thresholds(
+        swing_length: usize,
+        internal_length: usize,
+        swing_threshold: f64,
+        internal_threshold: f64,
+    ) -> Self {
         // 需要保存足够的K线来计算结构
         let max_buffer_size = swing_length.max(internal_length) * 3;
 
         Self {
             swing_length,
             internal_length,
+            swing_threshold,
+            internal_threshold,
             leg_detector: LegDetectionIndicator::new(swing_length),
             internal_leg_detector: LegDetectionIndicator::new(internal_length),
             previous_value: None,
             candle_buffer: VecDeque::with_capacity(max_buffer_size),
             max_buffer_size,
         }
+    }
+
+    pub fn new(swing_length: usize, internal_length: usize) -> Self {
+        Self::new_with_thresholds(swing_length, internal_length, 0.0, 0.0)
     }
 
     /// 批量初始化历史K线数据
@@ -244,65 +257,95 @@ impl MarketStructureIndicator {
 
         // 检查摆动结构信号
         if let Some(ref mut swing_high) = structure_value.swing_high {
-            if !swing_high.crossed && last_close > swing_high.price {
-                // 价格突破摆动高点
+            if !swing_high.crossed
+                && Self::meets_threshold(last_close, swing_high.price, self.swing_threshold, true)
+            {
                 if structure_value.swing_trend == -1 {
-                    // 如果之前是空头趋势，那么这是一个CHoCH
                     structure_value.swing_bullish_choch = true;
                 } else {
-                    // 否则是一个BOS
                     structure_value.swing_bullish_bos = true;
                 }
                 swing_high.crossed = true;
-                structure_value.swing_trend = 1; // 更新为多头趋势
+                structure_value.swing_trend = 1;
             }
         }
 
         if let Some(ref mut swing_low) = structure_value.swing_low {
-            if !swing_low.crossed && last_close < swing_low.price {
-                // 价格突破摆动低点
+            if !swing_low.crossed
+                && Self::meets_threshold(last_close, swing_low.price, self.swing_threshold, false)
+            {
                 if structure_value.swing_trend == 1 {
-                    // 如果之前是多头趋势，那么这是一个CHoCH
                     structure_value.swing_bearish_choch = true;
                 } else {
-                    // 否则是一个BOS
                     structure_value.swing_bearish_bos = true;
                 }
                 swing_low.crossed = true;
-                structure_value.swing_trend = -1; // 更新为空头趋势
+                structure_value.swing_trend = -1;
             }
         }
 
         // 检查内部结构信号
         if let Some(ref mut internal_high) = structure_value.internal_high {
-            if !internal_high.crossed && last_close > internal_high.price {
-                // 价格突破内部高点
+            if !internal_high.crossed
+                && Self::meets_threshold(
+                    last_close,
+                    internal_high.price,
+                    self.internal_threshold,
+                    true,
+                )
+            {
                 if structure_value.internal_trend == -1 {
-                    // 如果之前是空头趋势，那么这是一个CHoCH
                     structure_value.internal_bullish_choch = true;
                 } else {
-                    // 否则是一个BOS
                     structure_value.internal_bullish_bos = true;
                 }
                 internal_high.crossed = true;
-                structure_value.internal_trend = 1; // 更新为多头趋势
+                structure_value.internal_trend = 1;
             }
         }
 
         if let Some(ref mut internal_low) = structure_value.internal_low {
-            if !internal_low.crossed && last_close < internal_low.price {
-                // 价格突破内部低点
+            if !internal_low.crossed
+                && Self::meets_threshold(
+                    last_close,
+                    internal_low.price,
+                    self.internal_threshold,
+                    false,
+                )
+            {
                 if structure_value.internal_trend == 1 {
-                    // 如果之前是多头趋势，那么这是一个CHoCH
                     structure_value.internal_bearish_choch = true;
                 } else {
-                    // 否则是一个BOS
                     structure_value.internal_bearish_bos = true;
                 }
                 internal_low.crossed = true;
-                structure_value.internal_trend = -1; // 更新为空头趋势
+                structure_value.internal_trend = -1;
             }
         }
+    }
+
+    fn meets_threshold(last_close: f64, pivot_price: f64, threshold: f64, bullish: bool) -> bool {
+        if bullish && last_close <= pivot_price {
+            return false;
+        }
+        if !bullish && last_close >= pivot_price {
+            return false;
+        }
+        if threshold <= 0.0 || pivot_price == 0.0 {
+            return true;
+        }
+
+        let delta = if bullish {
+            last_close - pivot_price
+        } else {
+            pivot_price - last_close
+        };
+
+        if delta <= 0.0 {
+            return false;
+        }
+
+        delta / pivot_price.abs() >= threshold
     }
 
     /// 处理新的K线数据

@@ -1,5 +1,5 @@
-use std::env;
 use super::types::{SignalResult, TradeRecord, TradingState};
+use std::env;
 
 /// 记录交易入场
 pub fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
@@ -59,4 +59,3 @@ pub fn record_trade_exit(
         signal_result: signal.single_result.clone(),
     });
 }
-

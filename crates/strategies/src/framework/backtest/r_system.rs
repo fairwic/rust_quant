@@ -255,7 +255,8 @@ pub fn update_r_system_trailing_stop(
     }
 
     // 根据盈利R倍数计算新止损
-    let new_stop = calculate_new_stop_price(state, current_profit_r, atr_value, favorable_price, config);
+    let new_stop =
+        calculate_new_stop_price(state, current_profit_r, atr_value, favorable_price, config);
 
     // 只能上调止损（多头）或下调止损（空头）
     let should_update = match state.side {
@@ -282,10 +283,20 @@ fn calculate_new_stop_price(
 ) -> f64 {
     if profit_r >= config.level_4_trigger {
         // ≥3R: ATR×0.8收紧跟踪
-        calculate_atr_trailing_stop(state.side, favorable_price, atr_value, config.atr_multiplier_level_4)
+        calculate_atr_trailing_stop(
+            state.side,
+            favorable_price,
+            atr_value,
+            config.atr_multiplier_level_4,
+        )
     } else if profit_r >= config.level_3_trigger {
         // ≥2R: ATR×1.0跟踪
-        calculate_atr_trailing_stop(state.side, favorable_price, atr_value, config.atr_multiplier_level_3)
+        calculate_atr_trailing_stop(
+            state.side,
+            favorable_price,
+            atr_value,
+            config.atr_multiplier_level_3,
+        )
     } else if profit_r >= config.level_2_trigger {
         // ≥1.5R: 止损移至+0.5R
         state.calculate_price_at_r(0.5)
@@ -598,10 +609,7 @@ pub fn create_r_state_from_position(
 }
 
 /// 更新TradePosition的止损价格
-pub fn update_position_stop_from_r_state(
-    position: &mut TradePosition,
-    r_state: &RSystemState,
-) {
+pub fn update_position_stop_from_r_state(position: &mut TradePosition, r_state: &RSystemState) {
     // 更新移动止损价格
     position.move_stop_open_price = Some(r_state.current_stop_price);
 
@@ -626,8 +634,14 @@ mod tests {
         assert_eq!(StopLossLevel::from_profit_r(0.5), StopLossLevel::Initial);
         assert_eq!(StopLossLevel::from_profit_r(1.0), StopLossLevel::BreakEven);
         assert_eq!(StopLossLevel::from_profit_r(1.5), StopLossLevel::HalfR);
-        assert_eq!(StopLossLevel::from_profit_r(2.5), StopLossLevel::AtrTrailing1x);
-        assert_eq!(StopLossLevel::from_profit_r(3.5), StopLossLevel::AtrTrailing08x);
+        assert_eq!(
+            StopLossLevel::from_profit_r(2.5),
+            StopLossLevel::AtrTrailing1x
+        );
+        assert_eq!(
+            StopLossLevel::from_profit_r(3.5),
+            StopLossLevel::AtrTrailing08x
+        );
     }
 
     #[test]
@@ -687,4 +701,3 @@ mod tests {
         assert!(state.current_stop_price < 102.0); // 空头止损下移
     }
 }
-

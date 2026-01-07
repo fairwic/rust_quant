@@ -172,12 +172,21 @@ impl Default for LegDetectionConfig {
 
 /// 市场结构识别配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
 pub struct MarketStructureConfig {
     /// 摆动结构长度
     pub swing_length: usize,
     /// 内部结构长度
     pub internal_length: usize,
-    /// 是否启用
+    /// 触发摆动突破所需的相对幅度
+    pub swing_threshold: f64,
+    /// 触发内部突破所需的相对幅度
+    pub internal_threshold: f64,
+    /// 是否启用摆动结构信号
+    pub enable_swing_signal: bool,
+    /// 是否启用内部结构信号
+    pub enable_internal_signal: bool,
+    /// 是否开启整个市场结构信号
     pub is_open: bool,
 }
 
@@ -186,6 +195,10 @@ impl Default for MarketStructureConfig {
         Self {
             swing_length: 20,
             internal_length: 5,
+            swing_threshold: 0.0,
+            internal_threshold: 0.0,
+            enable_swing_signal: true,
+            enable_internal_signal: true,
             is_open: true,
         }
     }
@@ -253,6 +266,27 @@ impl Default for PremiumDiscountConfig {
             discount_threshold: 0.05,
             lookback: 20,
             is_open: true,
+        }
+    }
+}
+
+/// 震荡/区间判断配置
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct RangeFilterConfig {
+    /// 布林带宽度阈值 (upper-lower)/middle
+    pub bb_width_threshold: f64,
+    /// 震荡时使用的止盈倍数 (相对开仓K线振幅)
+    pub tp_kline_ratio: f64,
+    /// 是否启用
+    pub is_open: bool,
+}
+
+impl Default for RangeFilterConfig {
+    fn default() -> Self {
+        Self {
+            bb_width_threshold: 0.02,
+            tp_kline_ratio: 0.6,
+            is_open: false,
         }
     }
 }

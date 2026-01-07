@@ -221,10 +221,7 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
             info!("✅ 注册策略: Nwe");
         }
         _ => {
-            warn!(
-                "⚠️  策略类型 {:?} 暂未实现执行器，跳过注册",
-                strategy_type
-            );
+            warn!("⚠️  策略类型 {:?} 暂未实现执行器，跳过注册", strategy_type);
         }
     }
 }

@@ -20,12 +20,12 @@ use tracing::debug;
 use tracing::error;
 
 /// WebSocket 服务入口
-/// 
+///
 /// # 参数
 /// * `inst_ids` - 交易对列表
 /// * `times` - 时间周期列表
 /// * `strategy_trigger` - 可选的策略触发回调函数
-/// 
+///
 /// # 架构说明
 /// - 如果提供 strategy_trigger，则 K线确认时会自动触发策略执行
 /// - 如果不提供，则仅处理 K线数据存储和缓存
@@ -34,7 +34,7 @@ pub async fn run_socket(inst_ids: &Vec<String>, times: &Vec<String>) {
 }
 
 /// 带策略触发的 WebSocket 服务
-/// 
+///
 /// # 参数
 /// * `inst_ids` - 交易对列表
 /// * `times` - 时间周期列表

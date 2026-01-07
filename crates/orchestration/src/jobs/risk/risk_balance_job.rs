@@ -10,7 +10,7 @@ use okx::dto::PositionSide;
 use okx::enums::account_enums::AccountType;
 use okx::{OkxAccount, OkxAsset};
 use std::str::FromStr;
-use tracing::{Level, error, info, span};
+use tracing::{error, info, span, Level};
 
 // 常量定义
 const DEFAULT_CURRENCY: &str = "USDT";
@@ -250,7 +250,10 @@ mod tests {
         // env_logger::init();
         let risk_job = RiskBalanceWithLevelJob::new();
         risk_job
-            .run(&vec!["BTC-USDT-SWAP".to_string(), "ETH-USDT-SWAP".to_string()])
+            .run(&vec![
+                "BTC-USDT-SWAP".to_string(),
+                "ETH-USDT-SWAP".to_string(),
+            ])
             .await
             .unwrap();
     }

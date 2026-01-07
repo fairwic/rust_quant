@@ -31,12 +31,23 @@ impl OkxStopLossAmender {
         Ok(Self { trade })
     }
 
-    async fn fetch_first_attach_algo_id(&self, inst_id: &str, ord_id: &str) -> anyhow::Result<String> {
+    async fn fetch_first_attach_algo_id(
+        &self,
+        inst_id: &str,
+        ord_id: &str,
+    ) -> anyhow::Result<String> {
         let details = self
             .trade
             .get_order_details(inst_id, Some(ord_id), None)
             .await
-            .map_err(|e| anyhow!("获取订单详情失败: inst_id={}, ord_id={}, err={}", inst_id, ord_id, e))?;
+            .map_err(|e| {
+                anyhow!(
+                    "获取订单详情失败: inst_id={}, ord_id={}, err={}",
+                    inst_id,
+                    ord_id,
+                    e
+                )
+            })?;
 
         let first = details
             .get(0)
@@ -59,7 +70,13 @@ impl OkxStopLossAmender {
             .attach_algo_ords
             .get(0)
             .map(|a| a.attach_algo_id.clone())
-            .ok_or_else(|| anyhow!("订单未包含 attach_algo_ords: inst_id={}, ord_id={}", inst_id, ord_id))
+            .ok_or_else(|| {
+                anyhow!(
+                    "订单未包含 attach_algo_ords: inst_id={}, ord_id={}",
+                    inst_id,
+                    ord_id
+                )
+            })
     }
 }
 
@@ -90,7 +107,8 @@ impl StopLossAmender for OkxStopLossAmender {
             }]
         });
 
-        let body_str = serde_json::to_string(&body).map_err(|e| anyhow!("序列化请求失败: {}", e))?;
+        let body_str =
+            serde_json::to_string(&body).map_err(|e| anyhow!("序列化请求失败: {}", e))?;
         let path = "/api/v5/trade/amend-order";
 
         info!(
@@ -103,12 +121,26 @@ impl StopLossAmender for OkxStopLossAmender {
             .client()
             .send_request(Method::POST, path, &body_str)
             .await
-            .map_err(|e| anyhow!("OKX改单失败: inst_id={}, ord_id={}, err={}", inst_id, ord_id, e))?;
+            .map_err(|e| {
+                anyhow!(
+                    "OKX改单失败: inst_id={}, ord_id={}, err={}",
+                    inst_id,
+                    ord_id,
+                    e
+                )
+            })?;
 
         // resp 形态依赖 OKX 返回，这里只做日志记录
-        if let Some(code) = resp.get(0).and_then(|v| v.get("sCode")).and_then(|v| v.as_str()) {
+        if let Some(code) = resp
+            .get(0)
+            .and_then(|v| v.get("sCode"))
+            .and_then(|v| v.as_str())
+        {
             if code != "0" {
-                warn!("OKX改单返回非0: inst_id={}, ord_id={}, resp={}", inst_id, ord_id, resp);
+                warn!(
+                    "OKX改单返回非0: inst_id={}, ord_id={}, resp={}",
+                    inst_id, ord_id, resp
+                );
             }
         }
 
@@ -116,4 +148,3 @@ impl StopLossAmender for OkxStopLossAmender {
         Ok(())
     }
 }
-

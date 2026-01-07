@@ -1,6 +1,6 @@
-use std::collections::HashSet;
-use crate::CandleItem;
 use super::types::{SignalResult, TradeRecord};
+use crate::CandleItem;
+use std::collections::HashSet;
 
 /// 处理斐波那契部分止盈逻辑
 pub fn process_fibonacci_levels(
@@ -21,12 +21,12 @@ pub fn process_fibonacci_levels(
     losses: &mut i64,
 ) -> f64 {
     let mut remaining_position = *position;
-    
+
     for (idx, &level) in fib_levels.iter().enumerate() {
         if triggered_fib_levels.contains(&idx) {
             continue;
         }
-        
+
         let fib_price = if is_long {
             entry_price * (1.0 + level)
         } else {
@@ -37,19 +37,19 @@ pub fn process_fibonacci_levels(
             || (!is_long && signal.open_price <= fib_price)
         {
             let sell_amount = *position * feibon_profil_levels[idx];
-            
+
             if sell_amount < 1e-8 {
                 continue;
             }
-            
+
             if is_long {
                 *funds += sell_amount * (fib_price - entry_price);
             } else {
                 *funds += sell_amount * (entry_price - fib_price);
             }
-            
+
             remaining_position -= sell_amount;
-            
+
             if remaining_position <= 1e-8 {
                 close_remaining_position(
                     &entry_price,
@@ -160,4 +160,3 @@ pub fn close_remaining_position(
     *position = 0.0;
     triggered_fib_levels.clear();
 }
-

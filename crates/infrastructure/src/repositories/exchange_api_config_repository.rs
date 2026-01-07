@@ -167,9 +167,12 @@ impl ExchangeApiConfigRepository for SqlxExchangeApiConfigRepository {
     }
 
     async fn delete(&self, id: i32) -> Result<()> {
-        sqlx::query!("UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = ?", id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query!(
+            "UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = ?",
+            id
+        )
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
@@ -192,7 +195,10 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
         &self,
         strategy_config_id: i32,
     ) -> Result<Vec<ExchangeApiConfig>> {
-        debug!("查询策略关联的API配置: strategy_config_id={}", strategy_config_id);
+        debug!(
+            "查询策略关联的API配置: strategy_config_id={}",
+            strategy_config_id
+        );
 
         // 联表查询，按优先级排序
         let entities = sqlx::query_as!(
@@ -238,19 +244,17 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
     }
 
     async fn delete_association(&self, id: i32) -> Result<()> {
-        sqlx::query!("UPDATE exchange_apikey_strategy_relation SET is_deleted = 1 WHERE id = ?", id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query!(
+            "UPDATE exchange_apikey_strategy_relation SET is_deleted = 1 WHERE id = ?",
+            id
+        )
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
 
-    async fn update_priority(
-        &self,
-        id: i32,
-        priority: i32,
-        is_enabled: bool,
-    ) -> Result<()> {
+    async fn update_priority(&self, id: i32, priority: i32, is_enabled: bool) -> Result<()> {
         sqlx::query!(
             "UPDATE exchange_apikey_strategy_relation
              SET priority = ?, is_enabled = ?
@@ -265,4 +269,3 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
         Ok(())
     }
 }
-

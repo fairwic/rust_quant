@@ -72,6 +72,15 @@ IS_OPEN_SOCKET=false             # WebSocket
 IS_RUN_REAL_STRATEGY=false       # 实盘策略
 ```
 
+### 🎛️ 随机调参流程（后续启用）
+
+如果要启动 Vegas 的随机批量调参，请遵循：
+
+1. 保持 `.env` 中 `ENABLE_RANDOM_TEST=false`、`ENABLE_RANDOM_TEST_VEGAS=false`、`ENABLE_SPECIFIED_TEST_VEGAS=true`，先用当前 `back_test_log` 的基线配置（比如 `id=5039`）跑一次回测并确认基础指标。  
+2. 修改 `strategy_config` 中尚未明确的信号（如 `leg_detection_signal`/`market_structure_signal`），先手工打开 `is_open=true` 并调节阈值。用 `skills/vegas-backtest-analysis/scripts/analyze_backtest_detail.py` 与 `visualize_backtest_detail.py` 验证生成的 signal 分布与持仓行为。  
+3. 若要批量测试这些新信号，先把 `.env` 改为 `ENABLE_RANDOM_TEST=true`、`ENABLE_RANDOM_TEST_VEGAS=true`、`ENABLE_SPECIFIED_TEST_VEGAS=false`，随机任务会避开写 `back_test_detail`（依赖 `.env` 的 `ENABLE_RANDOM_TEST` 逻辑）。  
+4. 找到更优结果后，再恢复 `.env`：关闭随机选项、开启 `ENABLE_SPECIFIED_TEST_VEGAS=true`，用新的参数重跑指定回测，以便生成 `back_test_detail` 供最终分析对比基线。
+
 详见: [启动指南](docs/STARTUP_GUIDE.md)
 
 ### 使用示例

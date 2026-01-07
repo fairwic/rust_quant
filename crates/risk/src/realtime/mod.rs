@@ -9,13 +9,12 @@
 //! - 本模块不直接依赖 services/execution 的具体实现，采用“事件输入 + 执行器注入”的方式。
 //! - 真实接入时，上层（runner / service / job）负责把K线与持仓变更事件推送进来。
 
-pub mod types;
 pub mod breakeven_stop_loss;
-pub mod okx_stop_loss_amender;
 pub mod engine;
+pub mod okx_stop_loss_amender;
+pub mod types;
 
 pub use breakeven_stop_loss::*;
-pub use okx_stop_loss_amender::*;
 pub use engine::*;
+pub use okx_stop_loss_amender::*;
 pub use types::*;
-

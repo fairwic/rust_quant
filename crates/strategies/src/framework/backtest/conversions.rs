@@ -1,9 +1,7 @@
 use crate::framework::backtest::types::{BasicRiskStrategyConfig, SignalResult};
 
 /// 将 domain 层的 `SignalResult` 转换为 strategies 可用的 `SignalResult`
-pub fn convert_domain_signal(
-    domain_signal: rust_quant_domain::SignalResult,
-) -> SignalResult {
+pub fn convert_domain_signal(domain_signal: rust_quant_domain::SignalResult) -> SignalResult {
     SignalResult {
         should_buy: domain_signal.should_buy.unwrap_or(false),
         should_sell: domain_signal.should_sell.unwrap_or(false),
@@ -20,7 +18,8 @@ pub fn convert_domain_signal(
         ts: domain_signal.ts.unwrap_or(0),
         single_value: domain_signal.single_value.map(|v| v.to_string()),
         single_result: domain_signal.single_result.map(|v| v.to_string()),
-        counter_trend_pullback_take_profit_price: domain_signal.counter_trend_pullback_take_profit_price,
+        counter_trend_pullback_take_profit_price: domain_signal
+            .counter_trend_pullback_take_profit_price,
         is_ema_short_trend: None,
         is_ema_long_trend: None,
         atr_take_profit_level_1: None,
@@ -44,4 +43,3 @@ pub fn to_domain_basic_risk_config(
         max_leverage: None,
     }
 }
-

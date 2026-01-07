@@ -30,8 +30,6 @@ pub trait IndicatorStrategyBacktest {
         values: &mut Self::IndicatorValues,
         risk_config: &BasicRiskStrategyConfig,
     ) -> SignalResult;
-
-
 }
 
 /// 针对实现了 [`IndicatorStrategyBacktest`] 的策略，统一执行回测
@@ -51,4 +49,3 @@ pub fn run_indicator_strategy_backtest<S: IndicatorStrategyBacktest>(
         |ic, candle| S::build_indicator_values(ic, candle),
     )
 }
-

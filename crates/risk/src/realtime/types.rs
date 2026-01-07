@@ -80,4 +80,3 @@ pub struct PositionSnapshot {
     /// 是否仍在持仓（false 表示已平仓，应当清理状态）
     pub is_open: bool,
 }
-

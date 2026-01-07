@@ -8,8 +8,8 @@ use crate::framework::backtest::conversions::{convert_domain_signal, to_domain_b
 use crate::framework::backtest::trait_impl::BackTestAbleStrategyTrait;
 use crate::framework::backtest::types::{BasicRiskStrategyConfig, SignalResult};
 use crate::strategy_common::get_multi_indicator_values;
-use crate::StrategyType;
 use crate::CandleItem;
+use crate::StrategyType;
 
 /// Vegas 策略回测适配器
 ///
@@ -23,10 +23,7 @@ pub struct VegasBacktestAdapter {
 
 impl VegasBacktestAdapter {
     pub fn new(strategy: VegasStrategy) -> Self {
-        let signal_weights = strategy
-            .signal_weights
-            .clone()
-            .unwrap_or_default();
+        let signal_weights = strategy.signal_weights.clone().unwrap_or_default();
         Self {
             strategy,
             signal_weights,
@@ -68,13 +65,9 @@ impl IndicatorStrategyBacktest for VegasBacktestAdapter {
         risk_config: &BasicRiskStrategyConfig,
     ) -> SignalResult {
         let domain_risk = to_domain_basic_risk_config(risk_config);
-        let domain_signal = self.strategy.get_trade_signal(
-            candles,
-            values,
-            &self.signal_weights,
-            &domain_risk,
-        );
+        let domain_signal =
+            self.strategy
+                .get_trade_signal(candles, values, &self.signal_weights, &domain_risk);
         convert_domain_signal(domain_signal)
     }
 }
-

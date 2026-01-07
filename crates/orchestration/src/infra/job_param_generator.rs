@@ -1,7 +1,8 @@
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
-    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, KlineHammerConfig,
-    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
+    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, FairValueGapConfig,
+    FakeBreakoutConfig, KlineHammerConfig, LegDetectionConfig, MarketStructureConfig,
+    PremiumDiscountConfig, RangeFilterConfig, RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
 };
 use rust_quant_indicators::volatility::BollingBandsSignalConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
@@ -30,10 +31,18 @@ pub struct ParamMergeBuilder {
     pub take_profit_ratio: f64, // 盈利阈值，用于动态止盈
     // 固定信号线的止盈比例
     pub fix_signal_kline_take_profit_ratio: Option<f64>, // 固定信号线的止盈比例，比如当盈利超过 k线路的长度的 n 倍时，直接止盈，适用短线策略
-    pub is_move_stop_loss: bool,                 //是否使用移动止损,当盈利之后,止损价格变成开仓价
+    pub is_move_stop_loss: bool, //是否使用移动止损,当盈利之后,止损价格变成开仓价
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
     pub is_move_stop_open_price_when_touch_price: bool, //是否使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
-    pub is_counter_trend_pullback_take_profit: bool, //是否使用逆势回调止盈
+    pub is_counter_trend_pullback_take_profit: bool,    //是否使用逆势回调止盈
+    // strategy extensions
+    pub signal_weights: Option<SignalWeightsConfig>,
+    pub leg_detection_signal: Option<LegDetectionConfig>,
+    pub market_structure_signal: Option<MarketStructureConfig>,
+    pub fair_value_gap_signal: Option<FairValueGapConfig>,
+    pub premium_discount_signal: Option<PremiumDiscountConfig>,
+    pub fake_breakout_signal: Option<FakeBreakoutConfig>,
+    pub range_filter_signal: Option<RangeFilterConfig>,
 }
 impl ParamMergeBuilder {
     //使用构造器
@@ -122,7 +131,10 @@ impl ParamMergeBuilder {
         self.fix_signal_kline_take_profit_ratio = Some(fix_signal_kline_take_profit_ratio);
         self
     }
-    pub fn is_counter_trend_pullback_take_profit(mut self, is_counter_trend_pullback_take_profit: bool) -> Self {
+    pub fn is_counter_trend_pullback_take_profit(
+        mut self,
+        is_counter_trend_pullback_take_profit: bool,
+    ) -> Self {
         self.is_counter_trend_pullback_take_profit = is_counter_trend_pullback_take_profit;
         self
     }
@@ -135,7 +147,9 @@ impl ParamMergeBuilder {
             fixed_signal_kline_take_profit_ratio: self.fix_signal_kline_take_profit_ratio,
             is_one_k_line_diff_stop_loss: Some(self.is_move_stop_loss),
             is_used_signal_k_line_stop_loss: Some(self.is_used_signal_k_line_stop_loss),
-            is_move_stop_open_price_when_touch_price: Some(self.is_move_stop_open_price_when_touch_price),
+            is_move_stop_open_price_when_touch_price: Some(
+                self.is_move_stop_open_price_when_touch_price,
+            ),
             is_counter_trend_pullback_take_profit: Some(self.is_counter_trend_pullback_take_profit),
         }
     }
@@ -166,12 +180,17 @@ impl ParamMergeBuilder {
             down_shadow_ratio: self.hammer_shadow_ratio,
         };
 
+        let signal_weights = self
+            .signal_weights
+            .clone()
+            .or_else(|| Some(SignalWeightsConfig::default()));
+
         VegasStrategy {
             period,
             min_k_line_num: 3600,
             engulfing_signal: Some(EngulfingSignalConfig::default()),
             ema_signal: Some(EmaSignalConfig::default()),
-            signal_weights: Some(SignalWeightsConfig::default()),
+            signal_weights,
             volume_signal: Some(volume_signal),
             ema_touch_trend_signal: Some(ema_touch_trend_signal),
             rsi_signal: Some(rsi_signal),
@@ -182,6 +201,12 @@ impl ParamMergeBuilder {
                 consecutive_touch_times: 4,
             }),
             kline_hammer_signal: Some(kline_hammer_signal),
+            leg_detection_signal: self.leg_detection_signal,
+            market_structure_signal: self.market_structure_signal,
+            fair_value_gap_signal: self.fair_value_gap_signal,
+            premium_discount_signal: self.premium_discount_signal,
+            fake_breakout_signal: self.fake_breakout_signal,
+            range_filter_signal: self.range_filter_signal,
         }
     }
 }
@@ -351,9 +376,18 @@ impl ParamGenerator {
                 is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
                 is_move_stop_open_price_when_touch_price: self
                     .is_move_stop_open_price_when_touch_price[i_mstoptp],
-                fix_signal_kline_take_profit_ratio: Some(self.fix_signal_kline_take_profit_ratios
-                    [i_fsktpr]),
-                is_counter_trend_pullback_take_profit: self.is_counter_trend_pullback_take_profit[i_cctpt],
+                fix_signal_kline_take_profit_ratio: Some(
+                    self.fix_signal_kline_take_profit_ratios[i_fsktpr],
+                ),
+                is_counter_trend_pullback_take_profit: self.is_counter_trend_pullback_take_profit
+                    [i_cctpt],
+                signal_weights: None,
+                leg_detection_signal: None,
+                market_structure_signal: None,
+                fair_value_gap_signal: None,
+                premium_discount_signal: None,
+                fake_breakout_signal: None,
+                range_filter_signal: None,
             };
 
             batch.push(param);
@@ -480,7 +514,7 @@ impl NweParamGenerator {
             k_line_hammer_shadow_ratios,
             atr_periods,
             atr_multipliers,
-            volume_bar_num: volume_bar_nums,    
+            volume_bar_num: volume_bar_nums,
             volume_ratios,
             nwe_periods,
             nwe_multi,
@@ -583,14 +617,19 @@ impl NweParamGenerator {
             cfg.k_line_hammer_shadow_ratio = self.k_line_hammer_shadow_ratios[i_kh_sr];
 
             let risk = rust_quant_strategies::strategy_common::BasicRiskStrategyConfig {
-                is_used_signal_k_line_stop_loss: Some(self.is_used_signal_k_line_stop_loss[i_usklsl]),
+                is_used_signal_k_line_stop_loss: Some(
+                    self.is_used_signal_k_line_stop_loss[i_usklsl],
+                ),
                 max_loss_percent: self.max_loss_percent[i_mlp],
                 atr_take_profit_ratio: Some(self.take_profit_ratios[i_tpr]),
                 is_one_k_line_diff_stop_loss: Some(self.is_move_stop_loss[i_msl]),
-                is_move_stop_open_price_when_touch_price: Some(self
-                    .is_move_stop_open_price_when_touch_price[i_mstoptp]),
+                is_move_stop_open_price_when_touch_price: Some(
+                    self.is_move_stop_open_price_when_touch_price[i_mstoptp],
+                ),
                 fixed_signal_kline_take_profit_ratio: None,
-                is_counter_trend_pullback_take_profit: Some(self.is_counter_trend_pullback_take_profit[i_cctpt]),
+                is_counter_trend_pullback_take_profit: Some(
+                    self.is_counter_trend_pullback_take_profit[i_cctpt],
+                ),
             };
             batch.push((cfg, risk));
             self.current_index += 1;

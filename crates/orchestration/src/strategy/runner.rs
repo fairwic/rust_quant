@@ -128,7 +128,10 @@ pub async fn execute_strategy(
         Some(id) => id.to_string(),
         None => "none".to_string(),
     };
-    let key = format!("{}_{:?}_{:?}_{}", inst_id, timeframe, strategy_type, cfg_part);
+    let key = format!(
+        "{}_{:?}_{:?}_{}",
+        inst_id, timeframe, strategy_type, cfg_part
+    );
 
     info!(
         "🚀 开始执行策略: inst_id={}, timeframe={:?}, strategy={:?}",
@@ -140,11 +143,9 @@ pub async fn execute_strategy(
     // - 定时/手动触发：退化为“当前时间秒”作为并发保护（同秒重复触发会被合并）
     let timestamp = match trigger_ts.or_else(|| snap.as_ref().map(|s| s.ts)) {
         Some(ts) => ts,
-        None => {
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)?
-                .as_secs() as i64
-        }
+        None => SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs() as i64,
     };
 
     if !StrategyExecutionStateManager::try_mark_processing(&key, timestamp) {

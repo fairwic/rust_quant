@@ -75,9 +75,11 @@ impl StcIndicator {
             return 0.0;
         }
         let last = *values.back().unwrap_or(&0.0);
-        let (min, max) = values.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
-            (acc.0.min(v), acc.1.max(v))
-        });
+        let (min, max) = values
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
+                (acc.0.min(v), acc.1.max(v))
+            });
         let range = max - min;
         if range.abs() < f64::EPSILON {
             0.0
@@ -114,5 +116,3 @@ mod tests {
         }
     }
 }
-
-

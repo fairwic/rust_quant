@@ -24,10 +24,7 @@ use tracing::{debug, error, info};
 /// * `inst_id` - 交易对基础币种（如 "BTC"）
 /// * `period` - 时间周期（如 "1D"）
 pub async fn sync_open_interest_volume(inst_id: &str, period: &str) -> Result<()> {
-    info!(
-        "开始同步持仓量数据: inst_id={}, period={}",
-        inst_id, period
-    );
+    info!("开始同步持仓量数据: inst_id={}, period={}", inst_id, period);
 
     // 1. 通过service层获取持仓量和成交量数据
     let service = ContractsService::new();

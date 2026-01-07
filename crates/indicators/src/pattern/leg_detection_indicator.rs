@@ -279,20 +279,20 @@ mod tests {
         // 注意：此测试需要完整的应用环境初始化
         // 包括数据库连接、配置加载等
         // 在实际测试中需要先初始化这些依赖
-        
+
         // 示例：如何使用此测试
         // 1. 初始化数据库连接
         // 2. 获取K线数据
         // 3. 转换为CandleItem
         // 4. 使用LegDetectionIndicator进行检测
     }
-    
+
     #[test]
     #[ignore] // 完整的测试实现，需要真实数据
     fn test_leg_detection_with_real_data_template() {
         // 此测试展示如何使用LegDetectionIndicator
         // 实际使用时需要提供真实的K线数据
-        
+
         /*
         let candles = vec![]; // 从数据库或API获取
 

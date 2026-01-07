@@ -97,7 +97,10 @@ impl FakeBreakoutSignal {
 ///     // 执行做多逻辑
 /// }
 /// ```
-pub fn detect_fake_breakout(candles: &[CandleItem], config: &FakeBreakoutConfig) -> FakeBreakoutSignal {
+pub fn detect_fake_breakout(
+    candles: &[CandleItem],
+    config: &FakeBreakoutConfig,
+) -> FakeBreakoutSignal {
     let mut result = FakeBreakoutSignal::default();
 
     // 数据量不足
@@ -126,7 +129,11 @@ pub fn detect_fake_breakout(candles: &[CandleItem], config: &FakeBreakoutConfig)
     if check_bearish_fake_breakout(current, prev_high, body, upper_shadow, config) {
         result.is_bearish_fake_breakout = true;
         result.breakout_level = prev_high;
-        result.shadow_ratio = if body > 0.0 { upper_shadow / body } else { f64::MAX };
+        result.shadow_ratio = if body > 0.0 {
+            upper_shadow / body
+        } else {
+            f64::MAX
+        };
         result.strength = calculate_signal_strength(
             result.shadow_ratio,
             volume_ratio,
@@ -139,7 +146,11 @@ pub fn detect_fake_breakout(candles: &[CandleItem], config: &FakeBreakoutConfig)
     if check_bullish_fake_breakout(current, prev_low, body, lower_shadow, config) {
         result.is_bullish_fake_breakout = true;
         result.breakout_level = prev_low;
-        result.shadow_ratio = if body > 0.0 { lower_shadow / body } else { f64::MAX };
+        result.shadow_ratio = if body > 0.0 {
+            lower_shadow / body
+        } else {
+            f64::MAX
+        };
         result.strength = calculate_signal_strength(
             result.shadow_ratio,
             volume_ratio,
@@ -401,4 +412,3 @@ mod tests {
         assert!(!signal.is_bullish_fake_breakout);
     }
 }
-

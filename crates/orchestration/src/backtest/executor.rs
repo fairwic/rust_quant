@@ -44,10 +44,7 @@ impl BacktestExecutor {
     /// # 参数
     /// * `backtest_service` - 回测服务
     /// * `candle_service` - K线服务
-    pub fn new(
-        backtest_service: Arc<BacktestService>,
-        candle_service: Arc<CandleService>,
-    ) -> Self {
+    pub fn new(backtest_service: Arc<BacktestService>, candle_service: Arc<CandleService>) -> Self {
         Self {
             backtest_service,
             candle_service,
@@ -65,14 +62,8 @@ impl BacktestExecutor {
     ) -> Result<i64> {
         let risk_strategy_config = tighten_vegas_risk(risk_strategy_config);
         let adapter = VegasBacktestAdapter::new(strategy);
-        self.run_strategy_backtest(
-            inst_id,
-            time,
-            adapter,
-            risk_strategy_config,
-            mysql_candles,
-        )
-        .await
+        self.run_strategy_backtest(inst_id, time, adapter, risk_strategy_config, mysql_candles)
+            .await
     }
 
     /// 运行 NWE 策略测试
@@ -84,14 +75,8 @@ impl BacktestExecutor {
         risk_strategy_config: BasicRiskStrategyConfig,
         mysql_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64> {
-        self.run_strategy_backtest(
-            inst_id,
-            time,
-            strategy,
-            risk_strategy_config,
-            mysql_candles,
-        )
-        .await
+        self.run_strategy_backtest(inst_id, time, strategy, risk_strategy_config, mysql_candles)
+            .await
     }
 
     /// 获取K线数据并确认
@@ -152,9 +137,7 @@ impl BacktestExecutor {
         }
 
         let data_convert_start = Instant::now();
-        let candle_item_vec = self
-            .candle_service
-            .convert_candles_to_items(&mysql_candles);
+        let candle_item_vec = self.candle_service.convert_candles_to_items(&mysql_candles);
         let data_convert_duration = data_convert_start.elapsed();
 
         let total_duration = start_time.elapsed();
@@ -228,26 +211,26 @@ impl BacktestExecutor {
     ) {
         let mut batch_tasks = Vec::with_capacity(params_batch.len());
         for (cfg, risk_cfg) in params_batch {
-        let strategy = NweStrategy::new(cfg);
-        let inst_id = inst_id.to_string();
-        let time = time.to_string();
-        let mysql_candles = Arc::clone(&arc_candle_item_clone);
-        let permit = Arc::clone(&semaphore);
+            let strategy = NweStrategy::new(cfg);
+            let inst_id = inst_id.to_string();
+            let time = time.to_string();
+            let mysql_candles = Arc::clone(&arc_candle_item_clone);
+            let permit = Arc::clone(&semaphore);
 
-        let executor = self.clone_for_spawn();
-        batch_tasks.push(tokio::spawn(async move {
-            let _permit: tokio::sync::SemaphorePermit<'_> = permit.acquire().await.unwrap();
-            match executor
-                .run_nwe_test(&inst_id, &time, strategy, risk_cfg, mysql_candles)
-                .await
-            {
-                Ok(back_test_id) => Some(back_test_id),
-                Err(e) => {
-                    error!("NWE test failed: {:?}", e);
-                    None
+            let executor = self.clone_for_spawn();
+            batch_tasks.push(tokio::spawn(async move {
+                let _permit: tokio::sync::SemaphorePermit<'_> = permit.acquire().await.unwrap();
+                match executor
+                    .run_nwe_test(&inst_id, &time, strategy, risk_cfg, mysql_candles)
+                    .await
+                {
+                    Ok(back_test_id) => Some(back_test_id),
+                    Err(e) => {
+                        error!("NWE test failed: {:?}", e);
+                        None
+                    }
                 }
-            }
-        }));
+            }));
         }
 
         // 等待当前批次完成
@@ -306,12 +289,11 @@ impl BacktestExecutor {
 
 /// 针对 Vegas 的统一风控收紧：默认开启信号K线与单K振幅止损，并限制单笔最大亏损
 fn tighten_vegas_risk(mut risk: BasicRiskStrategyConfig) -> BasicRiskStrategyConfig {
-    // 允许通过环境变量关闭收紧，便于回归原始风控对照
-    // TIGHTEN_VEGAS_RISK=0/false 时不做收紧
-    if std::env::var("TIGHTEN_VEGAS_RISK")
-        .map(|v| matches!(v.to_lowercase().as_str(), "0" | "false" | "no"))
-        .unwrap_or(false)
-    {
+    // 只在显式设置为 1/true/yes 时才收紧，默认不收紧（TIGHTEN_VEGAS_RISK=0）。
+    let tighten = std::env::var("TIGHTEN_VEGAS_RISK")
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if !tighten {
         return risk;
     }
 

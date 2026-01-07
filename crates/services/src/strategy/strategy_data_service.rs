@@ -7,10 +7,10 @@
 use anyhow::{anyhow, Result};
 use tracing::{debug, error, info, warn};
 
+use rust_quant_common::CandleItem;
 use rust_quant_domain::StrategyConfig;
 use rust_quant_market::models::{CandlesModel, SelectCandleReqDto};
 use rust_quant_strategies::framework::strategy_registry::get_strategy_registry;
-use rust_quant_common::CandleItem;
 
 /// 策略数据服务
 ///
@@ -22,11 +22,22 @@ pub struct StrategyDataService;
 
 impl StrategyDataService {
     fn candle_entity_to_item(c: &rust_quant_market::models::CandlesEntity) -> Result<CandleItem> {
-        let o = c.o.parse::<f64>().map_err(|e| anyhow!("解析开盘价失败: {}", e))?;
-        let h = c.h.parse::<f64>().map_err(|e| anyhow!("解析最高价失败: {}", e))?;
-        let l = c.l.parse::<f64>().map_err(|e| anyhow!("解析最低价失败: {}", e))?;
-        let close = c.c.parse::<f64>().map_err(|e| anyhow!("解析收盘价失败: {}", e))?;
-        let v = c.vol_ccy.parse::<f64>().map_err(|e| anyhow!("解析成交量失败: {}", e))?;
+        let o =
+            c.o.parse::<f64>()
+                .map_err(|e| anyhow!("解析开盘价失败: {}", e))?;
+        let h =
+            c.h.parse::<f64>()
+                .map_err(|e| anyhow!("解析最高价失败: {}", e))?;
+        let l =
+            c.l.parse::<f64>()
+                .map_err(|e| anyhow!("解析最低价失败: {}", e))?;
+        let close =
+            c.c.parse::<f64>()
+                .map_err(|e| anyhow!("解析收盘价失败: {}", e))?;
+        let v = c
+            .vol_ccy
+            .parse::<f64>()
+            .map_err(|e| anyhow!("解析成交量失败: {}", e))?;
         let confirm = c
             .confirm
             .parse::<i32>()
@@ -107,14 +118,15 @@ impl StrategyDataService {
 
         // 3. 调用策略执行器初始化数据
         // strategies::StrategyConfig 就是 domain::StrategyConfig 的重导出
-        let strategy_config = rust_quant_strategies::framework::config::strategy_config::StrategyConfig::new(
-            config.id,
-            config.strategy_type,
-            config.symbol.clone(),
-            config.timeframe,
-            config.parameters.clone(),
-            config.risk_config.clone(),
-        );
+        let strategy_config =
+            rust_quant_strategies::framework::config::strategy_config::StrategyConfig::new(
+                config.id,
+                config.strategy_type,
+                config.symbol.clone(),
+                config.timeframe,
+                config.parameters.clone(),
+                config.risk_config.clone(),
+            );
 
         let result = executor
             .initialize_data(&strategy_config, inst_id, period, candle_items)
@@ -171,4 +183,3 @@ impl StrategyDataService {
         results
     }
 }
-

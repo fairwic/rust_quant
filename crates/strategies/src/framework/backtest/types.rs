@@ -173,6 +173,9 @@ pub struct TradePosition {
     pub atr_stop_loss_price: Option<f64>,
     //触发atr 盈亏比止盈
     pub atr_take_ratio_profit_price: Option<f64>,
+    /// 动态止盈价格（来自策略信号）
+    pub long_signal_take_profit_price: Option<f64>,
+    pub short_signal_take_profit_price: Option<f64>,
 
     //触发K线开仓价格止损(当达到一个特定的价格位置的时候，移动止损线到开仓价格)
     pub move_stop_open_price: Option<f64>,

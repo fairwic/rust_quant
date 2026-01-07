@@ -182,7 +182,11 @@ impl CandleService {
         let candles = model.fetch_candles_from_mysql(dto).await?;
 
         if candles.is_empty() {
-            return Err(anyhow::anyhow!("K线数据为空: inst_id={}, period={}", inst_id, period));
+            return Err(anyhow::anyhow!(
+                "K线数据为空: inst_id={}, period={}",
+                inst_id,
+                period
+            ));
         }
 
         Ok(candles)

@@ -7,9 +7,7 @@ use tracing::{debug, info, warn};
 
 use rust_quant_core::cache::get_redis_connection;
 use rust_quant_domain::entities::ExchangeApiConfig;
-use rust_quant_domain::traits::{
-    ExchangeApiConfigRepository, StrategyApiConfigRepository,
-};
+use rust_quant_domain::traits::{ExchangeApiConfigRepository, StrategyApiConfigRepository};
 use rust_quant_infrastructure::repositories::{
     SqlxExchangeApiConfigRepository, SqlxStrategyApiConfigRepository,
 };
@@ -41,7 +39,10 @@ impl ExchangeApiService {
         // 1. 尝试从Redis获取
         let mut redis_conn = get_redis_connection().await?;
         let cache_key_str: String = cache_key.clone();
-        if let Ok(Some(cached_json)) = redis_conn.get::<String, Option<String>>(cache_key_str).await {
+        if let Ok(Some(cached_json)) = redis_conn
+            .get::<String, Option<String>>(cache_key_str)
+            .await
+        {
             if let Ok(configs) = serde_json::from_str::<Vec<ExchangeApiConfig>>(&cached_json) {
                 debug!(
                     "从Redis缓存获取API配置: strategy_config_id={}, count={}",
@@ -78,17 +79,13 @@ impl ExchangeApiService {
     }
 
     /// 获取第一个可用的API配置（按优先级）
-    pub async fn get_first_api_config(
-        &self,
-        strategy_config_id: i32,
-    ) -> Result<ExchangeApiConfig> {
-        let configs = self.get_api_configs_for_strategy(strategy_config_id).await?;
+    pub async fn get_first_api_config(&self, strategy_config_id: i32) -> Result<ExchangeApiConfig> {
+        let configs = self
+            .get_api_configs_for_strategy(strategy_config_id)
+            .await?;
 
         if configs.is_empty() {
-            return Err(anyhow!(
-                "策略配置 {} 未关联任何API配置",
-                strategy_config_id
-            ));
+            return Err(anyhow!("策略配置 {} 未关联任何API配置", strategy_config_id));
         }
         // 按优先级排序后返回第一个
         Ok(configs[0].clone())
@@ -132,13 +129,10 @@ pub fn create_exchange_api_service() -> ExchangeApiService {
     use rust_quant_core::database::get_db_pool;
     let pool = get_db_pool();
 
-    let api_repo: Arc<dyn ExchangeApiConfigRepository> = Arc::new(
-        SqlxExchangeApiConfigRepository::new(pool.clone()),
-    );
-    let strategy_api_repo: Arc<dyn StrategyApiConfigRepository> = Arc::new(
-        SqlxStrategyApiConfigRepository::new(pool.clone()),
-    );
+    let api_repo: Arc<dyn ExchangeApiConfigRepository> =
+        Arc::new(SqlxExchangeApiConfigRepository::new(pool.clone()));
+    let strategy_api_repo: Arc<dyn StrategyApiConfigRepository> =
+        Arc::new(SqlxStrategyApiConfigRepository::new(pool.clone()));
 
     ExchangeApiService::new(api_repo, strategy_api_repo)
 }
-

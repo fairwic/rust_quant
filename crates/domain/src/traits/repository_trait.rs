@@ -115,7 +115,7 @@ pub trait BacktestLogRepository: Send + Sync {
     ) -> Result<u64>;
 
     /// 更新回测绩效指标
-    /// 
+    ///
     /// 包含夏普比率、年化收益率、最大回撤、波动率等
     async fn update_performance_metrics(
         &self,
@@ -167,12 +167,7 @@ pub trait StrategyApiConfigRepository: Send + Sync {
     async fn delete_association(&self, id: i32) -> Result<()>;
 
     /// 更新关联优先级
-    async fn update_priority(
-        &self,
-        id: i32,
-        priority: i32,
-        is_enabled: bool,
-    ) -> Result<()>;
+    async fn update_priority(&self, id: i32, priority: i32, is_enabled: bool) -> Result<()>;
 }
 
 /// 合约订单仓储接口

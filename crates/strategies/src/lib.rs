@@ -27,7 +27,9 @@ pub mod implementations; // 策略缓存模块
 pub use framework::*;
 
 // 重新导出 domain 类型供内部使用
-pub use rust_quant_domain::{SignalResult as DomainSignalResult, StrategyStatus, StrategyType, Timeframe, TradingSignal};
+pub use rust_quant_domain::{
+    SignalResult as DomainSignalResult, StrategyStatus, StrategyType, Timeframe, TradingSignal,
+};
 
 // 重新导出 common 类型
 pub use rust_quant_common::CandleItem;

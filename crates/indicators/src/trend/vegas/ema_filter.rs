@@ -28,9 +28,9 @@ pub struct EmaDistanceConfig {
 impl Default for EmaDistanceConfig {
     fn default() -> Self {
         Self {
-            too_far_threshold: 0.05,   // 5%
-            ranging_threshold: 0.02,   // 2%
-            tangled_threshold: 0.01,   // 1%
+            too_far_threshold: 0.05, // 5%
+            ranging_threshold: 0.02, // 2%
+            tangled_threshold: 0.01, // 1%
         }
     }
 }
@@ -389,15 +389,20 @@ mod tests {
     fn test_ema_alignment() {
         // 多头排列
         let bullish = create_ema_values(110.0, 105.0, 100.0, 95.0, 90.0);
-        assert_eq!(get_ema_alignment(&bullish, 0.001), EmaTrendAlignment::Bullish);
+        assert_eq!(
+            get_ema_alignment(&bullish, 0.001),
+            EmaTrendAlignment::Bullish
+        );
 
         // 空头排列
         let bearish = create_ema_values(90.0, 95.0, 100.0, 105.0, 110.0);
-        assert_eq!(get_ema_alignment(&bearish, 0.001), EmaTrendAlignment::Bearish);
+        assert_eq!(
+            get_ema_alignment(&bearish, 0.001),
+            EmaTrendAlignment::Bearish
+        );
 
         // 混乱
         let mixed = create_ema_values(100.0, 105.0, 100.0, 103.0, 98.0);
         assert_eq!(get_ema_alignment(&mixed, 0.001), EmaTrendAlignment::Mixed);
     }
 }
-
