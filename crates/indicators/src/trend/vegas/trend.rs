@@ -335,13 +335,6 @@ pub fn get_valid_rsi(
                 let drop_ratio = (prev_candle.c() - prev_candle.h()) / prev_candle.h();
                 let is_bearish = last_candle.c() < last_candle.o(); // 阴线
                 if drop_ratio < -0.05 && is_bearish {
-                    println!(
-                        "[极端行情-利空] ts: {}, 前K跌幅: {:.2}%, 跳过交易信号",
-                        time::mill_time_to_datetime_shanghai(last_candle.ts)
-                            .unwrap()
-                            .to_string(),
-                        drop_ratio * 100.0
-                    );
                     return None; // 极端行情，跳过交易
                 }
             }
@@ -356,13 +349,6 @@ pub fn get_valid_rsi(
                 let rise_ratio = (prev_candle.c() - prev_candle.l()) / prev_candle.l();
                 let is_bullish = last_candle.c() > last_candle.o(); // 阳线
                 if rise_ratio > 0.05 && is_bullish {
-                    println!(
-                        "[极端行情-利多] ts: {}, 前K涨幅: {:.2}%, 跳过交易信号",
-                        time::mill_time_to_datetime_shanghai(last_candle.ts)
-                            .unwrap()
-                            .to_string(),
-                        rise_ratio * 100.0
-                    );
                     return None; // 极端行情，跳过交易
                 }
             }

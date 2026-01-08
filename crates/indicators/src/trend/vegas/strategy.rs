@@ -501,6 +501,78 @@ impl VegasStrategy {
         }
 
         // ================================================================
+        // 【追涨/追跌确认K线条件】
+        // 当价格远离EMA144时，要求额外的确认条件才能开仓
+        // CHASE_CONFIRM_FILTER=1 启用（默认开启）
+        // CHASE_LONG_THRESHOLD=0.18  追涨阈值（价格高于EMA144的18%）
+        // CHASE_SHORT_THRESHOLD=0.10 追跌阈值（价格低于EMA144的10%）
+        // 回测验证: ID 5988, profit +57%, sharpe 1.53→1.89, max_dd 57.7%→55.5%
+        // ================================================================
+        let chase_confirm_enabled =
+            env::var("CHASE_CONFIRM_FILTER").unwrap_or_else(|_| "1".to_string()) == "1";
+        if chase_confirm_enabled {
+            let ema144 = vegas_indicator_signal_values.ema_values.ema2_value;
+            if ema144 > 0.0 {
+                let price_vs_ema144 = (last_data_item.c - ema144) / ema144;
+
+                let chase_long_threshold = env::var("CHASE_LONG_THRESHOLD")
+                    .ok()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.18);
+                let chase_short_threshold = env::var("CHASE_SHORT_THRESHOLD")
+                    .ok()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.10);
+
+                // 追涨确认：price > EMA144*(1+threshold) 时要求额外确认
+                if price_vs_ema144 > chase_long_threshold
+                    && signal_result.should_buy.unwrap_or(false)
+                {
+                    let body_ratio = last_data_item.body_ratio();
+                    let is_bullish = last_data_item.c > last_data_item.o;
+
+                    // 确认条件（任一满足）
+                    let pullback_touch = {
+                        // 回调触碰：K线low在EMA144附近（±5%）
+                        let low_vs_ema144 = (last_data_item.l - ema144) / ema144;
+                        low_vs_ema144.abs() <= 0.05
+                    };
+                    let bullish_close = is_bullish && body_ratio > 0.5;
+                    let has_engulfing =
+                        vegas_indicator_signal_values.engulfing_value.is_valid_engulfing;
+
+                    let confirmed = pullback_touch || bullish_close || has_engulfing;
+                    if !confirmed {
+                        signal_result.should_buy = Some(false);
+                    }
+                }
+
+                // 追跌确认：price < EMA144*(1-threshold) 时要求额外确认
+                if price_vs_ema144 < -chase_short_threshold
+                    && signal_result.should_sell.unwrap_or(false)
+                {
+                    let body_ratio = last_data_item.body_ratio();
+                    let is_bearish = last_data_item.c < last_data_item.o;
+
+                    // 确认条件（任一满足）
+                    let bounce_touch = {
+                        // 反弹触碰：K线high在EMA144附近（±5%）
+                        let high_vs_ema144 = (last_data_item.h - ema144) / ema144;
+                        high_vs_ema144.abs() <= 0.05
+                    };
+                    let bearish_close = is_bearish && body_ratio > 0.5;
+                    let has_engulfing =
+                        vegas_indicator_signal_values.engulfing_value.is_valid_engulfing;
+
+                    let confirmed = bounce_touch || bearish_close || has_engulfing;
+                    if !confirmed {
+                        signal_result.should_sell = Some(false);
+                    }
+                }
+            }
+        }
+
+        // ================================================================
         // 【实验结论】追涨/追跌/逆势过滤均会"用收益换回撤"，净效果不佳
         // - 追涨追跌(-10%/+20%): profit 1433, dd 54%
         // - 追涨追跌(-8%/+15%): profit 1080, dd 52%

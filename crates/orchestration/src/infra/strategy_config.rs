@@ -160,10 +160,10 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     let fake_breakout_signal = vegas_strategy.fake_breakout_signal;
     let range_filter_signal = vegas_strategy.range_filter_signal;
 
-    println!("config.risk_config: {:#?}", config.risk_config);
+    // println!("config.risk_config: {:#?}", config.risk_config);
     let risk_config = serde_json::from_value::<BasicRiskStrategyConfig>(config.risk_config.clone())
         .map_err(|e| anyhow!("解析风险配置JSON失败: {}", e))?;
-    println!("risk_config: {:#?}", risk_config);
+    // println!("risk_config: {:#?}", risk_config);
 
     // 安全地提取配置值，避免unwrap
     let kline_hammer = vegas_strategy
