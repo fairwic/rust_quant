@@ -13,6 +13,15 @@ cd /Users/mac2/onions/rust_quant && TIGHTEN_VEGAS_RISK=0 DB_HOST='mysql://root:e
 ```
 - `TIGHTEN_VEGAS_RISK=0`：禁用代码层强制风控收紧（推荐）
 - 等待 ~8–20s，每隔5秒查看终端日志
+- 回测完成后可用分析脚本输出指标与收益曲线：
+```bash
+cd /Users/mac2/onions/rust_quant
+source .venv/bin/activate
+python scripts/vegas-backtest-analysis/scripts/visualize_backtest_detail.py \
+  --db-host 127.0.0.1 --db-port 33306 --db-user root --db-password example \
+  --db-name test --back-test-id <ID> --with-equity
+# 生成 dist/vegas_backtest_detail_<ID>.png 和 dist/vegas_equity_<ID>.png
+```
 
 ### 2) 查询最新回测结果
 ```bash
@@ -47,19 +56,20 @@ docker exec -i mysql mysql -uroot -pexample test -e 'UPDATE strategy_config SET 
 
 ## 已验证的最佳配置
 
-### 🏆 当前最优（2026-01-06，第一性原理v1）
+### 🏆 当前默认（2026-01-08，宽松极端K + 高波动降损）
 
-**回测ID**: 5001  
-**性能**: win_rate≈55.1%, profit≈+99.68, Sharpe≈0.264, max_dd≈65.4%, 年化≈17.1%
+**回测ID**: 5593（复现 5595）  
+**性能**: win_rate≈57.3%, profit≈1752.6, Sharpe≈1.534, max_dd≈57.7%
 
-**代码状态**:
-- `fake_breakout.rs`: ✅ 启用检测，权重=0（仅数据采集）
-- `ema_filter.rs`: ⏸️ 模块存在，过滤逻辑禁用
-- `r_system.rs`: ⏸️ 模块存在，待集成
+**代码/开关**:
+- ExtremeKFilter 默认宽松：实体≥0.65、波动≥1%、跨≥2 EMA。
+- 高波动动态降损默认开启（振幅>5% 时 max_loss_percent 临时降至 0.045，可用 `DYNAMIC_MAX_LOSS=0` 关闭）。
+- 其他保持基线：stop_loss 关，max_loss_percent=0.05。
 
-### 历史配置（组合E）
+### 历史配置
 
-**性能**: win_rate≈54.7%, profit≈+52.77, Sharpe≈0.14, max_dd≈73.5%
+- 第一性原理v1（5001）：win_rate≈55.1%, profit≈+99.68, Sharpe≈0.264, max_dd≈65.4%
+- 组合E：win_rate≈54.7%, profit≈+52.77, Sharpe≈0.14, max_dd≈73.5%
 
 ### 信号参数（value JSON）
 ```json
