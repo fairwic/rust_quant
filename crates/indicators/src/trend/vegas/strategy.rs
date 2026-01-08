@@ -55,6 +55,9 @@ pub struct VegasStrategy {
     pub fake_breakout_signal: Option<FakeBreakoutConfig>,
     /// 震荡过滤配置
     pub range_filter_signal: Option<RangeFilterConfig>,
+    /// 极端K线过滤/放行配置
+    #[serde(default = "default_extreme_k_filter")]
+    pub extreme_k_filter_signal: Option<ExtremeKFilterConfig>,
 }
 
 impl VegasStrategy {
@@ -88,6 +91,7 @@ impl VegasStrategy {
             }),
             fake_breakout_signal: None,
             range_filter_signal: Some(RangeFilterConfig::default()),
+            extreme_k_filter_signal: default_extreme_k_filter(),
         }
     }
 
@@ -441,6 +445,18 @@ impl VegasStrategy {
         );
         vegas_indicator_signal_values.ema_distance_filter = ema_distance_filter;
 
+        // 允许通过环境变量切换极端K过滤阈值（宽松档）
+        let mut extreme_cfg_override = self.extreme_k_filter_signal.clone();
+        if let Ok(val) = env::var("EXTREME_K_FILTER_LOOSE") {
+            if val == "1" {
+                if let Some(cfg) = extreme_cfg_override.as_mut() {
+                    cfg.min_body_ratio = 0.65;
+                    cfg.min_move_pct = 0.010;
+                    cfg.min_cross_ema_count = 2;
+                }
+            }
+        }
+
         // ================================================================
         // 计算得分
         // ================================================================
@@ -454,36 +470,6 @@ impl VegasStrategy {
                 }
                 SignalDirect::IsShort => {
                     signal_result.should_sell = Some(true);
-                }
-            }
-        }
-
-        // ================================================================
-        // 趋势/波动过滤：
-        // - 仅在EMA多头/空头排列时放行同向信号，避免逆势追单
-        // - 极端波动（布林带宽度过大）时拒绝开仓，降低大幅回撤概率
-        // ================================================================
-        let ema_values = &vegas_indicator_signal_values.ema_values;
-        if signal_result.should_buy.unwrap_or(false) && !ema_values.is_long_trend {
-            signal_result.should_buy = Some(false);
-        }
-        if signal_result.should_sell.unwrap_or(false) && !ema_values.is_short_trend {
-            signal_result.should_sell = Some(false);
-        }
-
-        // 使用布林带宽度作为波动指标
-        if let Some(bb) = self.bolling_signal.as_ref() {
-            let bb_val = &vegas_indicator_signal_values.bollinger_value;
-            if bb_val.middle > 0.0 {
-                let width_ratio = (bb_val.upper - bb_val.lower) / bb_val.middle;
-                // 0.08 相当于 ±8% 布林扩张，视为高波动
-                if width_ratio > 0.08 {
-                    if signal_result.should_buy.unwrap_or(false) {
-                        signal_result.should_buy = Some(false);
-                    }
-                    if signal_result.should_sell.unwrap_or(false) {
-                        signal_result.should_sell = Some(false);
-                    }
                 }
             }
         }
@@ -521,6 +507,94 @@ impl VegasStrategy {
                     let tight_sl = ema4 * 0.998; // 约 0.2% 保护
                     signal_result.signal_kline_stop_loss_price =
                         Some(tight_sl.min(last_data_item.c * 0.999));
+                }
+            }
+        }
+
+        // ================================================================
+        // 【新增】极端K线过滤/放行：
+        // - 大实体且一次跨越多条EMA时，仅顺势放行；反向信号直接过滤
+        // - 方向冲突时撤销信号，避免追入假突破
+        // ================================================================
+        if let Some(extreme_cfg) = extreme_cfg_override.as_ref().or(self.extreme_k_filter_signal.as_ref()) {
+            if extreme_cfg.is_open {
+                let body_ratio = last_data_item.body_ratio();
+                let body_move_pct =
+                    ((last_data_item.c - last_data_item.o).abs()) / last_data_item.o.max(1e-9);
+                let cross_count = Self::count_crossed_emas(
+                    last_data_item.o,
+                    last_data_item.c,
+                    &vegas_indicator_signal_values.ema_values,
+                );
+
+                let is_extreme = body_ratio >= extreme_cfg.min_body_ratio
+                    && body_move_pct >= extreme_cfg.min_move_pct
+                    && cross_count >= extreme_cfg.min_cross_ema_count;
+
+                if is_extreme {
+                    let is_bull = last_data_item.c > last_data_item.o;
+                    let is_bear = last_data_item.c < last_data_item.o;
+
+                    if is_bull && signal_result.should_sell.unwrap_or(false) {
+                        signal_result.should_sell = Some(false);
+                    }
+                    if is_bear && signal_result.should_buy.unwrap_or(false) {
+                        signal_result.should_buy = Some(false);
+                    }
+
+                    // 仅顺势放行，逆势则拦截
+                    if signal_result.should_buy.unwrap_or(false)
+                        && !vegas_indicator_signal_values.ema_values.is_long_trend
+                    {
+                        signal_result.should_buy = Some(false);
+                    }
+                    if signal_result.should_sell.unwrap_or(false)
+                        && !vegas_indicator_signal_values.ema_values.is_short_trend
+                    {
+                        signal_result.should_sell = Some(false);
+                    }
+                }
+            }
+        }
+
+        // ================================================================
+        // 趋势爆发行放行：盘整后大实体多EMA穿越，顺势则强制放行
+        // 环境变量 VEGAS_TREND_BREAKOUT=1 开启
+        // ================================================================
+        if env::var("VEGAS_TREND_BREAKOUT").unwrap_or_default() == "1" {
+            if let Some(extreme_cfg) = extreme_cfg_override.as_ref().or(self.extreme_k_filter_signal.as_ref()) {
+                let body_ratio = last_data_item.body_ratio();
+                let body_move_pct =
+                    ((last_data_item.c - last_data_item.o).abs()) / last_data_item.o.max(1e-9);
+                let cross_count = Self::count_crossed_emas(
+                    last_data_item.o,
+                    last_data_item.c,
+                    &vegas_indicator_signal_values.ema_values,
+                );
+                // 盘整判定：布林带宽度 < 2.5%
+                let mut width_ok = true;
+                if let Some(bb) = self.bolling_signal.as_ref() {
+                    let bb_val = &vegas_indicator_signal_values.bollinger_value;
+                    if bb_val.middle > 0.0 {
+                        let width_ratio = (bb_val.upper - bb_val.lower) / bb_val.middle;
+                        width_ok = width_ratio < 0.025;
+                    }
+                }
+                let is_extreme = body_ratio >= extreme_cfg.min_body_ratio
+                    && body_move_pct >= extreme_cfg.min_move_pct
+                    && cross_count >= extreme_cfg.min_cross_ema_count
+                    && width_ok;
+                if is_extreme {
+                    let is_bull = last_data_item.c > last_data_item.o;
+                    let is_bear = last_data_item.c < last_data_item.o;
+                    if is_bull && vegas_indicator_signal_values.ema_values.is_long_trend {
+                        signal_result.should_buy = Some(true);
+                        signal_result.should_sell = Some(false);
+                    }
+                    if is_bear && vegas_indicator_signal_values.ema_values.is_short_trend {
+                        signal_result.should_sell = Some(true);
+                        signal_result.should_buy = Some(false);
+                    }
                 }
             }
         }
@@ -633,6 +707,39 @@ impl VegasStrategy {
             // TODO: 这些字段原本用于调试，现在类型不匹配，暂时注释
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
             signal_result.single_result = Some(json!(conditions).to_string());
+        }
+
+        // 轻量日线确认（使用长周期均线近似日线方向）：只有同向才放行
+        if env::var("VEGAS_DAILY_CONFIRM").unwrap_or_default() == "1" {
+            let htf_long = vegas_indicator_signal_values.ema_values.ema6_value
+                > vegas_indicator_signal_values.ema_values.ema7_value;
+            let htf_short = vegas_indicator_signal_values.ema_values.ema6_value
+                < vegas_indicator_signal_values.ema_values.ema7_value;
+            if signal_result.should_buy.unwrap_or(false) && !htf_long {
+                signal_result.should_buy = Some(false);
+            }
+            if signal_result.should_sell.unwrap_or(false) && !htf_short {
+                signal_result.should_sell = Some(false);
+            }
+        }
+
+        // 分层止盈：1R/1.5R/3R，启用 VEGAS_LAYER_TP=1
+        if env::var("VEGAS_LAYER_TP").unwrap_or_default() == "1" {
+            if signal_result.should_buy.unwrap_or(false) || signal_result.should_sell.unwrap_or(false)
+            {
+                let k_range = (last_data_item.h - last_data_item.l)
+                    .abs()
+                    .max(last_data_item.c * 0.001);
+                let tp = k_range * 1.5;
+                if signal_result.should_buy.unwrap_or(false) {
+                    signal_result.long_signal_take_profit_price = Some(last_data_item.c + tp);
+                    signal_result.move_stop_open_price_when_touch_price = Some(last_data_item.c);
+                }
+                if signal_result.should_sell.unwrap_or(false) {
+                    signal_result.short_signal_take_profit_price = Some(last_data_item.c - tp);
+                    signal_result.move_stop_open_price_when_touch_price = Some(last_data_item.c);
+                }
+            }
         }
         signal_result
     }
@@ -1002,6 +1109,21 @@ impl VegasStrategy {
                 },
             ));
         }
+    }
+
+    /// 统计极端K线一次跨越的EMA条数（开盘价与收盘价之间包含的EMA数量）
+    fn count_crossed_emas(open: f64, close: f64, ema_values: &EmaSignalValue) -> usize {
+        let (low, high) = if open < close { (open, close) } else { (close, open) };
+        let emas = [
+            ema_values.ema1_value,
+            ema_values.ema2_value,
+            ema_values.ema3_value,
+            ema_values.ema4_value,
+            ema_values.ema5_value,
+        ];
+        emas.iter()
+            .filter(|ema| **ema >= low && **ema <= high)
+            .count()
     }
 
     fn calculate_best_stop_loss_price(

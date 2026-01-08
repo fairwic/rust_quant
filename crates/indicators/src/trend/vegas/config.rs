@@ -290,3 +290,32 @@ impl Default for RangeFilterConfig {
         }
     }
 }
+
+/// 极端K线过滤/放行配置
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct ExtremeKFilterConfig {
+    /// 是否启用
+    pub is_open: bool,
+    /// 极端K线最小实体占比（实体/整根振幅）
+    pub min_body_ratio: f64,
+    /// 极端K线最小实体涨跌幅（|收-开|/开）
+    pub min_move_pct: f64,
+    /// 至少跨越的EMA条数（例如同时穿过ema2/ema3/ema4）
+    pub min_cross_ema_count: usize,
+}
+
+impl Default for ExtremeKFilterConfig {
+    fn default() -> Self {
+        Self {
+            is_open: true,
+            // 默认采用“宽松档”（5593方案）
+            min_body_ratio: 0.65,
+            min_move_pct: 0.010,
+            min_cross_ema_count: 2,
+        }
+    }
+}
+
+pub fn default_extreme_k_filter() -> Option<ExtremeKFilterConfig> {
+    Some(ExtremeKFilterConfig::default())
+}

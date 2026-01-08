@@ -65,6 +65,12 @@ pub async fn run_modes() -> Result<()> {
         if let Err(error) = backtest_runner::run_backtest_runner(&backtest_targets).await {
             error!("❌ 回测执行失败: {}", error);
         }
+        // 回测专用流程：若未开启实时策略/Socket，则直接返回，避免主程序挂起等待信号
+        let open_socket = env_is_true("IS_OPEN_SOCKET", false);
+        let run_real = env_is_true("IS_RUN_REAL_STRATEGY", false);
+        if !open_socket && !run_real {
+            return Ok(());
+        }
     }
 
     // 3) 实盘策略（包含预热）
@@ -476,6 +482,26 @@ pub async fn run() -> Result<()> {
         info!("📡 接收到 {} 信号", signal_name);
     } else {
         run_modes().await?;
+
+        // 回测-only 场景直接退出（不等待信号），避免进程挂起
+        let backtest_only = env_is_true("IS_BACK_TEST", false)
+            && !env_is_true("IS_OPEN_SOCKET", false)
+            && !env_is_true("IS_RUN_REAL_STRATEGY", false);
+        if backtest_only {
+            heartbeat_handle.abort();
+            info!("📈 回测模式已完成，未启用实时/Socket，直接优雅退出");
+            let shutdown_config = crate::GracefulShutdownConfig {
+                total_timeout_secs: 30,
+                strategy_stop_timeout_secs: 20,
+                scheduler_shutdown_timeout_secs: 5,
+                db_cleanup_timeout_secs: 5,
+            };
+            if let Err(e) = crate::graceful_shutdown_with_config(shutdown_config).await {
+                error!("❌ 优雅关闭失败: {}", e);
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
 
         // 信号处理
         let signal_name = setup_shutdown_signals().await;

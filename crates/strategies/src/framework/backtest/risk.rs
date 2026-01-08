@@ -111,8 +111,18 @@ enum ExitResult {
 
 /// 检查最大损失止损
 fn check_max_loss_stop(ctx: &ExitContext, max_loss_pct: f64) -> ExitResult {
-    if ctx.profit_pct() < -max_loss_pct {
-        let stop_price = ctx.stop_loss_price(max_loss_pct);
+    // 高波动动态降损：当K线振幅大于5%且启用 DYNAMIC_MAX_LOSS=1 时，使用更紧的 4.5%
+    let mut effective_max_loss = max_loss_pct;
+    // 默认启用；设置 DYNAMIC_MAX_LOSS=0 可关闭
+    if std::env::var("DYNAMIC_MAX_LOSS").unwrap_or_else(|_| "1".to_string()) != "0" {
+        let range_pct = (ctx.favorable_price - ctx.adverse_price).abs() / ctx.entry.max(1e-9);
+        if range_pct > 0.05 {
+            effective_max_loss = effective_max_loss.min(0.045);
+        }
+    }
+
+    if ctx.profit_pct() < -effective_max_loss {
+        let stop_price = ctx.stop_loss_price(effective_max_loss);
         ExitResult::Exit {
             price: stop_price,
             reason: "最大亏损止损",
