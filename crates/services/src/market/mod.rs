@@ -7,6 +7,7 @@ mod asset_service;
 mod contracts_service;
 mod data_sync_service;
 pub mod funding_rate_sync_service;
+pub mod economic_calendar_sync_service;
 mod public_data_service;
 
 use anyhow::Result;
@@ -20,6 +21,7 @@ pub use asset_service::AssetService;
 pub use contracts_service::ContractsService;
 pub use data_sync_service::DataSyncService;
 pub use public_data_service::PublicDataService;
+pub use economic_calendar_sync_service::{EconomicCalendarSyncService, EconomicEventQueryService};
 
 /// K线数据服务
 ///

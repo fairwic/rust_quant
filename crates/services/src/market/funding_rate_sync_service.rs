@@ -106,6 +106,7 @@ impl FundingRateSyncService {
 
         loop {
             // 获取比 after_ts 更旧的数据
+            tokio::time::sleep(Duration::from_millis(5000)).await;
             let rates = self.api.get_funding_rate_history(inst_id, None, after_ts, Some(100)).await?;
             
             if rates.is_empty() {
@@ -123,8 +124,6 @@ impl FundingRateSyncService {
             info!("回填保存 {} 条, cursor updated to {}", count, last_ts);
             after_ts = Some(last_ts);
 
-            // 简单频率限制
-            tokio::time::sleep(Duration::from_millis(200)).await;
         }
 
         Ok(())

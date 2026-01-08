@@ -12,7 +12,7 @@ use rust_quant_infrastructure::repositories::{
 use tracing::{error, info, warn};
 
 use rust_quant_market::streams;
-use rust_quant_orchestration::workflow::{backtest_runner, data_sync, tickets_job};
+use rust_quant_orchestration::workflow::{backtest_runner, data_sync, tickets_job, economic_calendar_job};
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use std::collections::BTreeSet;
 
@@ -63,6 +63,11 @@ pub async fn run_modes() -> Result<()> {
         use rust_quant_orchestration::workflow::funding_rate_job;
         if let Err(e) = funding_rate_job::FundingRateJob::sync_funding_rates(&inst_ids).await {
                 tracing::error!("资金费率历史同步失败: {}", e);
+        }
+        
+        // 新增：同步经济日历数据
+        if let Err(e) = economic_calendar_job::EconomicCalendarJob::sync_economic_calendar().await {
+            tracing::error!("❌ 经济日历同步失败: {}", e);
         }
     }
 

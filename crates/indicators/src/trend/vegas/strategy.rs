@@ -500,6 +500,33 @@ impl VegasStrategy {
             signal_result.should_sell = Some(false);
         }
 
+        // ================================================================
+        // 【实验结论】追涨/追跌/逆势过滤均会"用收益换回撤"，净效果不佳
+        // - 追涨追跌(-10%/+20%): profit 1433, dd 54%
+        // - 追涨追跌(-8%/+15%): profit 1080, dd 52%
+        // - 逆势过滤: profit 903, dd 51%
+        // - 基线: profit 1753, dd 57.7%
+        // 当前默认关闭，保持基线收益；需要时可通过环境变量启用
+        // COUNTER_TREND_FILTER=1 启用逆势过滤（空头趋势禁止做多，多头趋势禁止做空）
+        // ================================================================
+        let counter_trend_filter_enabled =
+            env::var("COUNTER_TREND_FILTER").unwrap_or_else(|_| "0".to_string()) == "1";
+        if counter_trend_filter_enabled {
+            // 空头趋势中禁止做多
+            if vegas_indicator_signal_values.ema_values.is_short_trend
+                && signal_result.should_buy.unwrap_or(false)
+            {
+                signal_result.should_buy = Some(false);
+            }
+
+            // 多头趋势中禁止做空
+            if vegas_indicator_signal_values.ema_values.is_long_trend
+                && signal_result.should_sell.unwrap_or(false)
+            {
+                signal_result.should_sell = Some(false);
+            }
+        }
+
         if signal_result.should_buy.unwrap_or(false) {
             if let Some(dist) = price_to_ema4 {
                 // 价格在 ema4 上方且距离 ≤0.25% 视为贴线追多 → 给极小止损

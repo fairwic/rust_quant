@@ -10,6 +10,7 @@ pub mod signal_log_repository;
 pub mod strategy_config_repository;
 pub mod swap_order_repository;
 pub mod funding_rate_repository;
+pub mod economic_event_repository;
 
 pub use backtest_repository::SqlxBacktestRepository;
 pub use candle_repository::SqlxCandleRepository;
@@ -23,6 +24,4 @@ pub use strategy_config_repository::{
 };
 pub use swap_order_repository::{SqlxSwapOrderRepository, SwapOrderEntity};
 pub use funding_rate_repository::SqlxFundingRateRepository;
-
-// TODO: 添加其他 Repository 实现
-// - AccountRepository (待添加)
+pub use economic_event_repository::SqlxEconomicEventRepository;

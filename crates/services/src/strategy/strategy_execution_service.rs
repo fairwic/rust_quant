@@ -188,6 +188,22 @@ impl StrategyExecutionService {
             });
         }
 
+        // 7.2 经济事件窗口检查（高重要性事件前后暂停追涨追跌）
+        // 通过环境变量控制是否启用：ECONOMIC_EVENT_FILTER=1
+        let econ_filter_enabled =
+            std::env::var("ECONOMIC_EVENT_FILTER").unwrap_or_else(|_| "0".to_string()) == "1";
+        if econ_filter_enabled {
+            if let Ok(should_wait) = self.check_economic_event_window().await {
+                if should_wait {
+                    warn!(
+                        "⚠️ 当前处于高重要性经济事件窗口，跳过下单: inst_id={}, period={}, 等待回调后再入场",
+                        inst_id, period
+                    );
+                    return Ok(signal);
+                }
+            }
+        }
+
         // 8. 执行下单
         if let Err(e) = self
             .execute_order_internal(
@@ -283,6 +299,62 @@ impl StrategyExecutionService {
                 }
             }
         });
+    }
+
+    /// 检查当前是否处于高重要性经济事件窗口
+    ///
+    /// 在经济事件发布前后的时间窗口内，市场波动剧烈，
+    /// 不适合追涨追跌，应等待回调后再入场。
+    ///
+    /// # 默认窗口
+    /// - 事件前 30 分钟开始生效
+    /// - 事件后 60 分钟仍在影响中
+    ///
+    /// # 返回
+    /// - `Ok(true)` - 当前处于经济事件窗口，建议等待
+    /// - `Ok(false)` - 当前无活跃经济事件，可正常交易
+    /// - `Err(_)` - 查询失败（建议忽略错误，继续交易）
+    async fn check_economic_event_window(&self) -> Result<bool> {
+        use crate::market::EconomicEventQueryService;
+
+        let query_service = EconomicEventQueryService::new();
+        let current_time_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        // 从环境变量读取窗口配置（单位：分钟）
+        let window_before_min: i64 = std::env::var("ECON_EVENT_WINDOW_BEFORE_MIN")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(30);
+        let window_after_min: i64 = std::env::var("ECON_EVENT_WINDOW_AFTER_MIN")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60);
+
+        let window_before_ms = window_before_min * 60 * 1000;
+        let window_after_ms = window_after_min * 60 * 1000;
+
+        let events = query_service
+            .get_active_high_importance_events(
+                current_time_ms,
+                Some(window_before_ms),
+                Some(window_after_ms),
+            )
+            .await?;
+
+        if !events.is_empty() {
+            for event in &events {
+                info!(
+                    "📅 检测到活跃经济事件: {} - {} ({}), importance={}, event_time={}",
+                    event.region, event.event, event.category, event.importance, event.event_time
+                );
+            }
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     /// 执行下单（内部方法）

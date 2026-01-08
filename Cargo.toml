@@ -2,9 +2,9 @@
 members = [
     "crates/common",
     "crates/core",
-    "crates/domain",           # 领域模型层
-    "crates/infrastructure",   # 基础设施层
-    "crates/services",         # 新增: 应用服务层
+    "crates/domain",         # 领域模型层
+    "crates/infrastructure", # 基础设施层
+    "crates/services",       # 新增: 应用服务层
     "crates/market",
     "crates/indicators",
     "crates/strategies",
@@ -26,7 +26,12 @@ license = "MIT"
 
 [workspace.dependencies]
 # === 核心依赖 ===
-tokio = { version = "1.37.0", features = ["rt", "rt-multi-thread", "macros", "full"] }
+tokio = { version = "1.37.0", features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "full",
+] }
 anyhow = "1.0.86"
 thiserror = "1.0.61"
 serde = { version = "1.0.202", features = ["derive"] }
@@ -42,7 +47,13 @@ fast_log = "1.6"
 env_logger = "0.11.3"
 
 # === 数据库（使用 sqlx 替代 rbatis）===
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "mysql", "chrono", "json", "migrate"] }
+sqlx = { version = "0.7", features = [
+    "runtime-tokio-native-tls",
+    "mysql",
+    "chrono",
+    "json",
+    "migrate",
+] }
 
 # === 缓存 ===
 redis = { version = "0.25.4", features = ["aio", "tokio-comp"] }
@@ -103,7 +114,7 @@ rust-quant-common = { path = "crates/common" }
 rust-quant-core = { path = "crates/core" }
 rust-quant-domain = { path = "crates/domain" }
 rust-quant-infrastructure = { path = "crates/infrastructure" }
-rust-quant-services = { path = "crates/services" }          # 新增: 应用服务层
+rust-quant-services = { path = "crates/services" }             # 新增: 应用服务层
 rust-quant-market = { path = "crates/market" }
 rust-quant-indicators = { path = "crates/indicators" }
 rust-quant-strategies = { path = "crates/strategies" }
@@ -115,4 +126,4 @@ rust-quant-ai-analysis = { path = "crates/ai-analysis" }
 rust-quant-cli = { path = "crates/rust-quant-cli" }
 
 [patch.crates-io]
-okx = { path = "okx" }
+okx = { path = "okx_rs" }

@@ -2,6 +2,7 @@
 //!
 //! 定义领域层的抽象接口，由基础设施层实现
 pub mod funding_rate_repository;
+pub mod economic_event_repository;
 
 pub mod exchange_trait;
 pub mod repository_trait;
