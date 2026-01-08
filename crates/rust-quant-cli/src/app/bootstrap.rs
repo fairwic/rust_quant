@@ -48,7 +48,7 @@ pub async fn run_modes() -> Result<()> {
     info!("🕒 监控周期: {:?}", periods);
     info!("🎯 回测目标: {:?}", backtest_targets);
 
-    // 1) 数据同步任务（Ticker）
+    // 1) 数据同步任务（Ticker & Funding Rate）
     if env_is_true("IS_RUN_SYNC_DATA_JOB", false) {
         info!("📡 启动数据同步任务");
         if let Err(error) = tickets_job::sync_tickers(&inst_ids).await {
@@ -56,6 +56,13 @@ pub async fn run_modes() -> Result<()> {
         }
         if let Err(error) = data_sync::sync_market_data(&inst_ids, &periods).await {
             error!("❌ K线数据同步失败: {}", error);
+        }
+        
+        // 新增：同步资金费率历史
+        // 执行资金费率同步任务
+        use rust_quant_orchestration::workflow::funding_rate_job;
+        if let Err(e) = funding_rate_job::FundingRateJob::sync_funding_rates(&inst_ids).await {
+                tracing::error!("资金费率历史同步失败: {}", e);
         }
     }
 

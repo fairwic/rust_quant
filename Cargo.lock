@@ -2645,6 +2645,7 @@ dependencies = [
  "rust-quant-services",
  "rust-quant-strategies",
  "serde",
+ "sqlx",
  "thiserror 1.0.69",
  "tokio",
  "tokio-cron-scheduler",

@@ -9,6 +9,7 @@ pub mod order;
 pub mod position;
 pub mod strategy_config;
 pub mod swap_order;
+pub mod funding_rate;
 
 pub use backtest::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats};
 pub use candle::Candle;
@@ -17,3 +18,4 @@ pub use order::{Order, OrderError};
 pub use position::{MarginMode, Position, PositionError, PositionStatus};
 pub use strategy_config::{BasicRiskConfig, StrategyConfig};
 pub use swap_order::SwapOrder;
+pub use funding_rate::FundingRate;

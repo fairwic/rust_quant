@@ -38,3 +38,6 @@ tokio-cron-scheduler.workspace = true
 # OKX SDK
 okx.workspace = true
 
+
+[dev-dependencies]
+sqlx = { workspace = true }

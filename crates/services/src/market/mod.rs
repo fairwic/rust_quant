@@ -6,6 +6,7 @@ mod account_service;
 mod asset_service;
 mod contracts_service;
 mod data_sync_service;
+pub mod funding_rate_sync_service;
 mod public_data_service;
 
 use anyhow::Result;
