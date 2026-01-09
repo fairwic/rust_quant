@@ -1,6 +1,7 @@
 use std::env;
 
 use crate::signal_weight::{SignalCondition, SignalDirect, SignalType, SignalWeightsConfig};
+use crate::volatility::atr::ATR;
 use crate::volatility::bollinger::BollingBandsSignalConfig;
 use rust_quant_common::enums::common::{EnumAsStrTrait, PeriodEnum};
 use rust_quant_common::utils::time as time_util;
@@ -532,14 +533,30 @@ impl VegasStrategy {
 
         // 计算分数到达指定值
         if let Some(signal_direction) = weights.is_signal_valid(&score) {
+            // 计算 ATR 用于止损价格
+            let mut atr = ATR::new(14).unwrap();
+            for item in data_items.iter() {
+                atr.next(item.h, item.l, item.c);
+            }
+            let atr_value = atr.value();
+            let atr_multiplier = 1.5; // 1.5倍ATR作为止损距离
+            
             match signal_direction {
                 SignalDirect::IsLong => {
                     signal_result.should_buy = Some(true);
                     signal_result.direction = rust_quant_domain::SignalDirection::Long;
+                    // 做多止损: 入场价 - ATR * multiplier
+                    if atr_value > 0.0 {
+                        signal_result.atr_stop_loss_price = Some(last_data_item.c - atr_value * atr_multiplier);
+                    }
                 }
                 SignalDirect::IsShort => {
                     signal_result.should_sell = Some(true);
                     signal_result.direction = rust_quant_domain::SignalDirection::Short;
+                    // 做空止损: 入场价 + ATR * multiplier
+                    if atr_value > 0.0 {
+                        signal_result.atr_stop_loss_price = Some(last_data_item.c + atr_value * atr_multiplier);
+                    }
                 }
             }
         }
