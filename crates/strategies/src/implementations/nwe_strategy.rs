@@ -589,6 +589,8 @@ impl NweStrategy {
             atr_take_profit_level_1: None,
             atr_take_profit_level_2: None,
             atr_take_profit_level_3: None,
+            filter_reasons: vec![],
+            direction: rust_quant_domain::SignalDirection::None,
         };
 
         let current_price = candles.last().unwrap().c;
@@ -743,10 +745,11 @@ impl NweStrategy {
     /// 运行回测：仅使用 RSI、Volume、NWE、ATR 指标（复用可插拔的 indicator_combine）
     pub fn run_test(
         &mut self,
+        inst_id: &str,
         candles: &Vec<CandleItem>,
         risk: BasicRiskStrategyConfig,
     ) -> BackTestResult {
-        run_indicator_strategy_backtest(self, candles, risk)
+        run_indicator_strategy_backtest(inst_id, self, candles, risk)
     }
 }
 

@@ -113,6 +113,17 @@ impl BacktestService {
                 end_time,
             )
             .await?;
+
+            // 保存过滤信号记录 (新增)
+            if !back_test_result.filtered_signals.is_empty() {
+                self.save_filtered_signals(
+                    back_test_id,
+                    inst_id,
+                    time,
+                    &back_test_result.filtered_signals,
+                )
+                .await?;
+            }
         }
 
         info!(
@@ -121,6 +132,43 @@ impl BacktestService {
         );
 
         Ok(back_test_id)
+    }
+
+    /// 保存过滤信号记录
+    pub async fn save_filtered_signals(
+        &self,
+        back_test_id: i64,
+        inst_id: &str,
+        time: &str,
+        filtered_signals: &[rust_quant_strategies::framework::backtest::types::FilteredSignal],
+    ) -> Result<u64> {
+        let entities: Vec<rust_quant_domain::entities::FilteredSignalLog> = filtered_signals
+            .iter()
+            .map(|s| rust_quant_domain::entities::FilteredSignalLog {
+                backtest_id: back_test_id,
+                inst_id: inst_id.to_string(),
+                period: time.to_string(),
+                signal_time: chrono::NaiveDateTime::from_timestamp(s.ts / 1000, 0),
+                direction: s.direction.clone(),
+                filter_reasons: serde_json::to_string(&s.filter_reasons).unwrap_or_default(),
+                signal_price: s.signal_price,
+                indicator_snapshot: Some(s.indicator_snapshot.clone()),
+                theoretical_profit: Some(s.theoretical_profit),
+                theoretical_loss: Some(s.theoretical_loss),
+                final_pnl: Some(s.final_pnl),
+                trade_result: Some(s.trade_result.clone()),
+            })
+            .collect();
+
+        // 需要在 Repository 中实现批量插入
+        // 这里假设已经有 insert_filtered_signals 方法
+        let count = self.repository.insert_filtered_signals(&entities).await?;
+        
+        info!(
+            "过滤信号记录保存成功: back_test_id={}, count={}",
+            back_test_id, count
+        );
+        Ok(count)
     }
 
     /// 保存回测详情

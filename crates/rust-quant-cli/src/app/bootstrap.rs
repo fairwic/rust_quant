@@ -58,17 +58,17 @@ pub async fn run_modes() -> Result<()> {
             error!("❌ K线数据同步失败: {}", error);
         }
         
-        // 新增：同步资金费率历史
-        // 执行资金费率同步任务
-        use rust_quant_orchestration::workflow::funding_rate_job;
-        if let Err(e) = funding_rate_job::FundingRateJob::sync_funding_rates(&inst_ids).await {
-                tracing::error!("资金费率历史同步失败: {}", e);
-        }
+        // // 新增：同步资金费率历史
+        // // 执行资金费率同步任务
+        // use rust_quant_orchestration::workflow::funding_rate_job;
+        // if let Err(e) = funding_rate_job::FundingRateJob::sync_funding_rates(&inst_ids).await {
+        //         tracing::error!("资金费率历史同步失败: {}", e);
+        // }
         
-        // 新增：同步经济日历数据
-        if let Err(e) = economic_calendar_job::EconomicCalendarJob::sync_economic_calendar().await {
-            tracing::error!("❌ 经济日历同步失败: {}", e);
-        }
+        // // 新增：同步经济日历数据
+        // if let Err(e) = economic_calendar_job::EconomicCalendarJob::sync_economic_calendar().await {
+        //     tracing::error!("❌ 经济日历同步失败: {}", e);
+        // }
     }
 
     // 2) 回测任务
@@ -112,7 +112,6 @@ fn default_backtest_targets() -> Vec<(String, String)> {
         // ("ETH-USDT-SWAP".to_string(), "15m".to_string()),
         ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "1H".to_string()),
-        // ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "1Dutc".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "5m".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "15m".to_string()),

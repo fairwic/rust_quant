@@ -11,10 +11,12 @@ pub mod strategy_config;
 pub mod swap_order;
 pub mod funding_rate;
 pub mod economic_event;
+pub mod filtered_signal_log;
 
 pub use backtest::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats};
 pub use candle::Candle;
 pub use exchange_api_config::{ExchangeApiConfig, StrategyApiConfig};
+pub use filtered_signal_log::FilteredSignalLog;
 pub use order::{Order, OrderError};
 pub use position::{MarginMode, Position, PositionError, PositionStatus};
 pub use strategy_config::{BasicRiskConfig, StrategyConfig};

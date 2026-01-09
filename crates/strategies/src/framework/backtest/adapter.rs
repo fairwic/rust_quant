@@ -34,6 +34,7 @@ pub trait IndicatorStrategyBacktest {
 
 /// 针对实现了 [`IndicatorStrategyBacktest`] 的策略，统一执行回测
 pub fn run_indicator_strategy_backtest<S: IndicatorStrategyBacktest>(
+    inst_id: &str,
     strategy: &mut S,
     candles_list: &Vec<CandleItem>,
     risk_config: BasicRiskStrategyConfig,
@@ -41,6 +42,7 @@ pub fn run_indicator_strategy_backtest<S: IndicatorStrategyBacktest>(
     let min_len = strategy.min_data_length();
     let mut indicator_combine = strategy.init_indicator_combine();
     run_back_test_generic(
+        inst_id,
         |candles, values| strategy.generate_signal(candles, values, &risk_config),
         candles_list,
         risk_config,

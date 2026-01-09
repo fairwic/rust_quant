@@ -319,3 +319,85 @@ impl Default for ExtremeKFilterConfig {
 pub fn default_extreme_k_filter() -> Option<ExtremeKFilterConfig> {
     Some(ExtremeKFilterConfig::default())
 }
+
+/// 追涨追跌确认配置
+/// 当价格远离EMA144时，要求额外的确认条件才能开仓
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct ChaseConfirmConfig {
+    /// 是否启用追涨追跌确认
+    pub enabled: bool,
+    /// 追涨阈值（价格高于EMA144的百分比，如0.18表示18%）
+    pub long_threshold: f64,
+    /// 追跌阈值（价格低于EMA144的百分比，如0.10表示10%）
+    pub short_threshold: f64,
+    /// 回调/反弹触碰阈值（K线high/low距离EMA144的百分比）
+    pub pullback_touch_threshold: f64,
+    /// 确认K线最小实体比
+    pub min_body_ratio: f64,
+    /// 贴线距离阈值（价格距离EMA4的百分比，如0.0025表示0.25%）
+    pub close_to_ema_threshold: f64,
+    /// 贴线止损系数（如0.998表示EMA4 * 0.998）
+    pub tight_stop_loss_ratio: f64,
+}
+
+impl Default for ChaseConfirmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            long_threshold: 0.18,
+            short_threshold: 0.10,
+            pullback_touch_threshold: 0.05,
+            min_body_ratio: 0.5,
+            close_to_ema_threshold: 0.0025,
+            tight_stop_loss_ratio: 0.998,
+        }
+    }
+}
+
+pub fn default_chase_confirm_config() -> Option<ChaseConfirmConfig> {
+    Some(ChaseConfirmConfig::default())
+}
+
+/// MACD 信号配置
+/// 用于过滤逆势交易，减少动量冲突的亏损
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct MacdSignalConfig {
+    /// 是否启用 MACD 过滤
+    pub is_open: bool,
+    /// 快线周期（默认12）
+    pub fast_period: usize,
+    /// 慢线周期（默认26）
+    pub slow_period: usize,
+    /// 信号线周期（默认9）
+    pub signal_period: usize,
+    /// 是否仅作为过滤器（true: 仅过滤信号, false: 可作为独立信号）
+    pub as_filter_only: bool,
+    /// 是否要求动量确认（柱状图连续递增/递减）
+    pub require_momentum_confirm: bool,
+    /// 动量确认周期数（连续N根柱状图同向）
+    pub momentum_confirm_bars: usize,
+    /// 是否启用"接飞刀"保护 (默认 true)
+    /// 当 MACD 与交易方向相反时，如果动量还在恶化则过滤；如果动量改善则放行（允许抄底）
+    pub filter_falling_knife: bool,
+}
+
+impl Default for MacdSignalConfig {
+    fn default() -> Self {
+        Self {
+            is_open: true,  // 默认开启，使用新的智能过滤逻辑
+            fast_period: 6,   // 加速：12 -> 6
+            slow_period: 13,  // 加速：26 -> 13
+            signal_period: 4, // 加速：9 -> 4
+            as_filter_only: true,
+            require_momentum_confirm: false,  // 默认关闭，由 filter_falling_knife 接管主要的动量判断
+            momentum_confirm_bars: 2,
+            filter_falling_knife: true,
+        }
+    }
+}
+
+pub fn default_macd_signal_config() -> Option<MacdSignalConfig> {
+    Some(MacdSignalConfig::default())
+}

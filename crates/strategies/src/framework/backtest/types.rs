@@ -10,6 +10,7 @@ pub struct BackTestResult {
     pub win_rate: f64,
     pub open_trades: usize,
     pub trade_records: Vec<TradeRecord>,
+    pub filtered_signals: Vec<FilteredSignal>,
 }
 
 impl Default for BackTestResult {
@@ -19,6 +20,7 @@ impl Default for BackTestResult {
             win_rate: 0.0,
             open_trades: 0,
             trade_records: vec![],
+            filtered_signals: vec![],
         }
     }
 }
@@ -104,6 +106,58 @@ pub struct SignalResult {
     pub atr_take_profit_level_2: Option<f64>,
     /// 第三级：5倍ATR，完全平仓
     pub atr_take_profit_level_3: Option<f64>,
+
+    /// 过滤原因（如 MACD_FALLING_KNIFE, RSI_OVERBOUGHT 等）
+    pub filter_reasons: Vec<String>,
+
+    /// 信号方向
+    pub direction: rust_quant_domain::SignalDirection,
+}
+
+/// 被过滤的信号记录（用于分析验证）
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FilteredSignal {
+    /// 信号生成时间戳
+    pub ts: i64,
+    /// 交易对
+    pub inst_id: String,
+    /// 信号方向
+    pub direction: String,
+    /// 信号价格
+    pub signal_price: f64,
+    /// 过滤原因
+    pub filter_reasons: Vec<String>,
+    /// 指标快照 (JSON 字符串)
+    pub indicator_snapshot: String,
+    /// 理论最大盈利
+    pub theoretical_profit: f64,
+    /// 理论最大亏损
+    pub theoretical_loss: f64,
+    /// 最终模拟盈亏
+    pub final_pnl: f64,
+    /// 交易结果 (WIN, LOSS, BREAK_EVEN)
+    pub trade_result: String,
+}
+
+/// 影子交易状态（用于模拟被过滤信号的理论盈亏）
+#[derive(Debug, Clone)]
+pub struct ShadowTrade {
+    /// 对应的 filtered_signals 索引
+    pub signal_index: usize,
+    /// 入场价格
+    pub entry_price: f64,
+    /// 交易方向
+    pub direction: TradeSide,
+    /// 止损价格
+    pub sl_price: Option<f64>,
+    /// 止盈价格
+    pub tp_price: Option<f64>,
+    /// 入场时间
+    pub entry_time: i64,
+    /// 最大浮盈
+    pub max_unrealized_profit: f64,
+    /// 最大浮亏
+    pub max_unrealized_loss: f64,
 }
 
 impl Default for SignalResult {
@@ -128,6 +182,8 @@ impl Default for SignalResult {
             atr_take_profit_level_1: None,
             atr_take_profit_level_2: None,
             atr_take_profit_level_3: None,
+            filter_reasons: vec![],
+            direction: rust_quant_domain::SignalDirection::None,
         }
     }
 }

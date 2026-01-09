@@ -155,6 +155,8 @@ impl StrategyExecutor for VegasStrategyExecutor {
                 atr_take_profit_level_1: None,
                 atr_take_profit_level_2: None,
                 atr_take_profit_level_3: None,
+                filter_reasons: vec![],
+                direction: rust_quant_domain::SignalDirection::None,
             });
         }
 
@@ -218,6 +220,8 @@ impl StrategyExecutor for VegasStrategyExecutor {
             atr_take_profit_level_1: None,
             atr_take_profit_level_2: None,
             atr_take_profit_level_3: None,
+            filter_reasons: signal_result.filter_reasons,
+            direction: signal_result.direction,
         };
 
         // 11. 返回信号（下单逻辑由services层统一处理）

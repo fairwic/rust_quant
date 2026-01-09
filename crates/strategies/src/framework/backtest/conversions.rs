@@ -25,6 +25,8 @@ pub fn convert_domain_signal(domain_signal: rust_quant_domain::SignalResult) -> 
         atr_take_profit_level_1: None,
         atr_take_profit_level_2: None,
         atr_take_profit_level_3: None,
+        filter_reasons: domain_signal.filter_reasons,
+        direction: domain_signal.direction,
     }
 }
 

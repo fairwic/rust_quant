@@ -114,13 +114,16 @@ pub trait BacktestLogRepository: Send + Sync {
         stats: &BacktestWinRateStats,
     ) -> Result<u64>;
 
-    /// 更新回测绩效指标
-    ///
-    /// 包含夏普比率、年化收益率、最大回撤、波动率等
     async fn update_performance_metrics(
         &self,
         backtest_id: i64,
         metrics: &BacktestPerformanceMetrics,
+    ) -> Result<u64>;
+
+    /// 批量写入过滤信号记录
+    async fn insert_filtered_signals(
+        &self,
+        signals: &[crate::entities::FilteredSignalLog],
     ) -> Result<u64>;
 }
 

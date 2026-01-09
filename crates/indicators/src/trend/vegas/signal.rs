@@ -105,6 +105,34 @@ pub struct RsiSignalValue {
     pub is_overbought: bool,
 }
 
+/// MACD 信号值
+/// 用于判断动量方向和过滤逆势交易
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
+pub struct MacdSignalValue {
+    /// MACD 线值 (DIF)
+    pub macd_line: f64,
+    /// 信号线值 (DEA)
+    pub signal_line: f64,
+    /// 柱状图值 (MACD - Signal)
+    pub histogram: f64,
+    /// 是否金叉 (MACD 上穿 Signal)
+    pub is_golden_cross: bool,
+    /// 是否死叉 (MACD 下穿 Signal)
+    pub is_death_cross: bool,
+    /// 柱状图是否递增
+    pub histogram_increasing: bool,
+    /// 柱状图是否递减
+    pub histogram_decreasing: bool,
+    /// MACD 线是否在零轴上方
+    pub above_zero: bool,
+    /// 前一根柱状图值（用于判断趋势）
+    pub prev_histogram: f64,
+    /// 柱状图是否正在改善（企稳）
+    /// 对于做多：histogram > prev_histogram（负值变小）
+    /// 用于识别触底反弹信号
+    pub histogram_improving: bool,
+}
+
 /// EMA趋势信号值
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct EmaTouchTrendSignalValue {
@@ -207,6 +235,9 @@ pub struct VegasIndicatorSignalValue {
     /// EMA距离过滤（新增）
     #[serde(default)]
     pub ema_distance_filter: super::ema_filter::EmaDistanceFilter,
+    /// MACD 信号值（新增）
+    #[serde(default)]
+    pub macd_value: MacdSignalValue,
 }
 
 /// 检查均线交叉

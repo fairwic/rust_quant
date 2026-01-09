@@ -58,6 +58,12 @@ pub struct VegasStrategy {
     /// 极端K线过滤/放行配置
     #[serde(default = "default_extreme_k_filter")]
     pub extreme_k_filter_signal: Option<ExtremeKFilterConfig>,
+    /// 追涨追跌确认配置
+    #[serde(default = "default_chase_confirm_config")]
+    pub chase_confirm_config: Option<ChaseConfirmConfig>,
+    /// MACD 信号配置
+    #[serde(default = "default_macd_signal_config")]
+    pub macd_signal: Option<MacdSignalConfig>,
 }
 
 impl VegasStrategy {
@@ -92,6 +98,8 @@ impl VegasStrategy {
             fake_breakout_signal: None,
             range_filter_signal: Some(RangeFilterConfig::default()),
             extreme_k_filter_signal: default_extreme_k_filter(),
+            chase_confirm_config: default_chase_confirm_config(),
+            macd_signal: default_macd_signal_config(),
         }
     }
 
@@ -141,6 +149,7 @@ impl VegasStrategy {
                 take_profit_price: None,
                 position_time: None,
                 signal_kline: None,
+                filter_reasons: vec![],
             };
         }
 
@@ -173,6 +182,7 @@ impl VegasStrategy {
                     take_profit_price: None,
                     position_time: None,
                     signal_kline: None,
+                    filter_reasons: vec![],
                 };
             }
         };
@@ -204,6 +214,7 @@ impl VegasStrategy {
             position_time: None,
             signal_kline: None,
             move_stop_open_price_when_touch_price: None,
+            filter_reasons: vec![],
         };
 
         let mut conditions = Vec::with_capacity(10);
@@ -263,6 +274,7 @@ impl VegasStrategy {
                 Some(rsi) => rsi,
                 None => {
                     // 极端行情，直接返回不交易的信号
+                    signal_result.filter_reasons.push("RSI_EXTREME_EVENT".to_string());
                     return signal_result;
                 }
             };
@@ -445,6 +457,62 @@ impl VegasStrategy {
         );
         vegas_indicator_signal_values.ema_distance_filter = ema_distance_filter;
 
+        // ================================================================
+        // 【新增】MACD 计算
+        // ================================================================
+        if let Some(macd_cfg) = &self.macd_signal {
+            if macd_cfg.is_open && data_items.len() > macd_cfg.slow_period + macd_cfg.signal_period {
+                use ta::indicators::MovingAverageConvergenceDivergence;
+                use ta::Next;
+                
+                let mut macd = MovingAverageConvergenceDivergence::new(
+                    macd_cfg.fast_period,
+                    macd_cfg.slow_period,
+                    macd_cfg.signal_period,
+                ).unwrap();
+                
+                let mut prev_macd = 0.0f64;
+                let mut prev_signal = 0.0f64;
+                let mut prev_histogram = 0.0f64;
+                let mut prev_prev_histogram = 0.0f64;
+                
+                // 计算所有 K 线的 MACD
+                for item in data_items.iter() {
+                    let macd_output = macd.next(item.c);
+                    prev_prev_histogram = prev_histogram;
+                    prev_histogram = macd_output.macd - macd_output.signal;
+                    prev_signal = macd_output.signal;
+                    prev_macd = macd_output.macd;
+                }
+                
+                let histogram = prev_macd - prev_signal;
+                
+                // 判断金叉死叉：当前 histogram > 0 且前一根 < 0
+                let is_golden_cross = histogram > 0.0 && prev_prev_histogram <= 0.0;
+                let is_death_cross = histogram < 0.0 && prev_prev_histogram >= 0.0;
+                
+                // 判断柱状图趋势
+                let histogram_increasing = histogram > prev_prev_histogram;
+                let histogram_decreasing = histogram < prev_prev_histogram;
+                // 判断动量是否正在改善（用于识别触底反弹）
+                // 对于负区域：histogram > prev_histogram 表示负值在变小，动量改善
+                let histogram_improving = histogram > prev_histogram;
+                
+                vegas_indicator_signal_values.macd_value = super::signal::MacdSignalValue {
+                    macd_line: prev_macd,
+                    signal_line: prev_signal,
+                    histogram,
+                    is_golden_cross,
+                    is_death_cross,
+                    histogram_increasing,
+                    histogram_decreasing,
+                    above_zero: prev_macd > 0.0,
+                    prev_histogram: prev_prev_histogram,
+                    histogram_improving,
+                };
+            }
+        }
+
         // 允许通过环境变量切换极端K过滤阈值（宽松档）
         let mut extreme_cfg_override = self.extreme_k_filter_signal.clone();
         if let Ok(val) = env::var("EXTREME_K_FILTER_LOOSE") {
@@ -467,9 +535,11 @@ impl VegasStrategy {
             match signal_direction {
                 SignalDirect::IsLong => {
                     signal_result.should_buy = Some(true);
+                    signal_result.direction = rust_quant_domain::SignalDirection::Long;
                 }
                 SignalDirect::IsShort => {
                     signal_result.should_sell = Some(true);
+                    signal_result.direction = rust_quant_domain::SignalDirection::Short;
                 }
             }
         }
@@ -493,23 +563,26 @@ impl VegasStrategy {
                 && dist <= 0.0025
             {
                 signal_result.should_buy = Some(false);
+                signal_result.filter_reasons.push("EMA_DISTANCE_FILTER_LONG".to_string());
             }
         }
 
         if ema_distance_filter.should_filter_short && signal_result.should_sell.unwrap_or(false) {
             signal_result.should_sell = Some(false);
+            signal_result.filter_reasons.push("EMA_DISTANCE_FILTER_SHORT".to_string());
         }
 
         // ================================================================
         // 【追涨/追跌确认K线条件】
         // 当价格远离EMA144时，要求额外的确认条件才能开仓
-        // CHASE_CONFIRM_FILTER=1 启用（默认开启）
-        // CHASE_LONG_THRESHOLD=0.18  追涨阈值（价格高于EMA144的18%）
-        // CHASE_SHORT_THRESHOLD=0.10 追跌阈值（价格低于EMA144的10%）
+        // 参数从 chase_confirm_config 读取，环境变量可覆盖
         // 回测验证: ID 5988, profit +57%, sharpe 1.53→1.89, max_dd 57.7%→55.5%
         // ================================================================
-        let chase_confirm_enabled =
-            env::var("CHASE_CONFIRM_FILTER").unwrap_or_else(|_| "1".to_string()) == "1";
+        let chase_cfg = self.chase_confirm_config.clone().unwrap_or_default();
+        // 环境变量优先覆盖配置值（向后兼容）
+        let chase_confirm_enabled = env::var("CHASE_CONFIRM_FILTER")
+            .map(|v| v == "1")
+            .unwrap_or(chase_cfg.enabled);
         if chase_confirm_enabled {
             let ema144 = vegas_indicator_signal_values.ema_values.ema2_value;
             if ema144 > 0.0 {
@@ -518,11 +591,11 @@ impl VegasStrategy {
                 let chase_long_threshold = env::var("CHASE_LONG_THRESHOLD")
                     .ok()
                     .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(0.18);
+                    .unwrap_or(chase_cfg.long_threshold);
                 let chase_short_threshold = env::var("CHASE_SHORT_THRESHOLD")
                     .ok()
                     .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(0.10);
+                    .unwrap_or(chase_cfg.short_threshold);
 
                 // 追涨确认：price > EMA144*(1+threshold) 时要求额外确认
                 if price_vs_ema144 > chase_long_threshold
@@ -533,17 +606,17 @@ impl VegasStrategy {
 
                     // 确认条件（任一满足）
                     let pullback_touch = {
-                        // 回调触碰：K线low在EMA144附近（±5%）
                         let low_vs_ema144 = (last_data_item.l - ema144) / ema144;
-                        low_vs_ema144.abs() <= 0.05
+                        low_vs_ema144.abs() <= chase_cfg.pullback_touch_threshold
                     };
-                    let bullish_close = is_bullish && body_ratio > 0.5;
+                    let bullish_close = is_bullish && body_ratio > chase_cfg.min_body_ratio;
                     let has_engulfing =
                         vegas_indicator_signal_values.engulfing_value.is_valid_engulfing;
 
                     let confirmed = pullback_touch || bullish_close || has_engulfing;
                     if !confirmed {
                         signal_result.should_buy = Some(false);
+                        signal_result.filter_reasons.push("CHASE_CONFIRM_FILTER_LONG".to_string());
                     }
                 }
 
@@ -556,54 +629,28 @@ impl VegasStrategy {
 
                     // 确认条件（任一满足）
                     let bounce_touch = {
-                        // 反弹触碰：K线high在EMA144附近（±5%）
                         let high_vs_ema144 = (last_data_item.h - ema144) / ema144;
-                        high_vs_ema144.abs() <= 0.05
+                        high_vs_ema144.abs() <= chase_cfg.pullback_touch_threshold
                     };
-                    let bearish_close = is_bearish && body_ratio > 0.5;
+                    let bearish_close = is_bearish && body_ratio > chase_cfg.min_body_ratio;
                     let has_engulfing =
                         vegas_indicator_signal_values.engulfing_value.is_valid_engulfing;
 
                     let confirmed = bounce_touch || bearish_close || has_engulfing;
                     if !confirmed {
                         signal_result.should_sell = Some(false);
+                        signal_result.filter_reasons.push("CHASE_CONFIRM_FILTER_SHORT".to_string());
                     }
                 }
             }
         }
 
-        // ================================================================
-        // 【实验结论】追涨/追跌/逆势过滤均会"用收益换回撤"，净效果不佳
-        // - 追涨追跌(-10%/+20%): profit 1433, dd 54%
-        // - 追涨追跌(-8%/+15%): profit 1080, dd 52%
-        // - 逆势过滤: profit 903, dd 51%
-        // - 基线: profit 1753, dd 57.7%
-        // 当前默认关闭，保持基线收益；需要时可通过环境变量启用
-        // COUNTER_TREND_FILTER=1 启用逆势过滤（空头趋势禁止做多，多头趋势禁止做空）
-        // ================================================================
-        let counter_trend_filter_enabled =
-            env::var("COUNTER_TREND_FILTER").unwrap_or_else(|_| "0".to_string()) == "1";
-        if counter_trend_filter_enabled {
-            // 空头趋势中禁止做多
-            if vegas_indicator_signal_values.ema_values.is_short_trend
-                && signal_result.should_buy.unwrap_or(false)
-            {
-                signal_result.should_buy = Some(false);
-            }
-
-            // 多头趋势中禁止做空
-            if vegas_indicator_signal_values.ema_values.is_long_trend
-                && signal_result.should_sell.unwrap_or(false)
-            {
-                signal_result.should_sell = Some(false);
-            }
-        }
-
+        // 贴线追多止损逻辑
         if signal_result.should_buy.unwrap_or(false) {
             if let Some(dist) = price_to_ema4 {
-                // 价格在 ema4 上方且距离 ≤0.25% 视为贴线追多 → 给极小止损
-                if dist >= 0.0 && dist <= 0.0025 {
-                    let tight_sl = ema4 * 0.998; // 约 0.2% 保护
+                // 价格在 ema4 上方且距离小于阈值视为贴线追多 → 给极小止损
+                if dist >= 0.0 && dist <= chase_cfg.close_to_ema_threshold {
+                    let tight_sl = ema4 * chase_cfg.tight_stop_loss_ratio;
                     signal_result.signal_kline_stop_loss_price =
                         Some(tight_sl.min(last_data_item.c * 0.999));
                 }
@@ -636,9 +683,11 @@ impl VegasStrategy {
 
                     if is_bull && signal_result.should_sell.unwrap_or(false) {
                         signal_result.should_sell = Some(false);
+                        signal_result.filter_reasons.push("EXTREME_K_FILTER_CONFLICT_SHORT".to_string());
                     }
                     if is_bear && signal_result.should_buy.unwrap_or(false) {
                         signal_result.should_buy = Some(false);
+                        signal_result.filter_reasons.push("EXTREME_K_FILTER_CONFLICT_LONG".to_string());
                     }
 
                     // 仅顺势放行，逆势则拦截
@@ -646,57 +695,19 @@ impl VegasStrategy {
                         && !vegas_indicator_signal_values.ema_values.is_long_trend
                     {
                         signal_result.should_buy = Some(false);
+                        signal_result.filter_reasons.push("EXTREME_K_FILTER_TREND_LONG".to_string());
                     }
                     if signal_result.should_sell.unwrap_or(false)
                         && !vegas_indicator_signal_values.ema_values.is_short_trend
                     {
                         signal_result.should_sell = Some(false);
+                        signal_result.filter_reasons.push("EXTREME_K_FILTER_TREND_SHORT".to_string());
                     }
                 }
             }
         }
 
-        // ================================================================
-        // 趋势爆发行放行：盘整后大实体多EMA穿越，顺势则强制放行
-        // 环境变量 VEGAS_TREND_BREAKOUT=1 开启
-        // ================================================================
-        if env::var("VEGAS_TREND_BREAKOUT").unwrap_or_default() == "1" {
-            if let Some(extreme_cfg) = extreme_cfg_override.as_ref().or(self.extreme_k_filter_signal.as_ref()) {
-                let body_ratio = last_data_item.body_ratio();
-                let body_move_pct =
-                    ((last_data_item.c - last_data_item.o).abs()) / last_data_item.o.max(1e-9);
-                let cross_count = Self::count_crossed_emas(
-                    last_data_item.o,
-                    last_data_item.c,
-                    &vegas_indicator_signal_values.ema_values,
-                );
-                // 盘整判定：布林带宽度 < 2.5%
-                let mut width_ok = true;
-                if let Some(bb) = self.bolling_signal.as_ref() {
-                    let bb_val = &vegas_indicator_signal_values.bollinger_value;
-                    if bb_val.middle > 0.0 {
-                        let width_ratio = (bb_val.upper - bb_val.lower) / bb_val.middle;
-                        width_ok = width_ratio < 0.025;
-                    }
-                }
-                let is_extreme = body_ratio >= extreme_cfg.min_body_ratio
-                    && body_move_pct >= extreme_cfg.min_move_pct
-                    && cross_count >= extreme_cfg.min_cross_ema_count
-                    && width_ok;
-                if is_extreme {
-                    let is_bull = last_data_item.c > last_data_item.o;
-                    let is_bear = last_data_item.c < last_data_item.o;
-                    if is_bull && vegas_indicator_signal_values.ema_values.is_long_trend {
-                        signal_result.should_buy = Some(true);
-                        signal_result.should_sell = Some(false);
-                    }
-                    if is_bear && vegas_indicator_signal_values.ema_values.is_short_trend {
-                        signal_result.should_sell = Some(true);
-                        signal_result.should_buy = Some(false);
-                    }
-                }
-            }
-        }
+
 
         // ================================================================
         // 【新增】震荡过滤：震荡时降低止盈目标
@@ -727,56 +738,77 @@ impl VegasStrategy {
             }
         }
 
-        // ================================================================
-        // 【新增】假突破直接开仓逻辑（暂时禁用，改为权重计算）
-        // 根据第一性原理：假突破信号直接市价开仓
-        // 注意：此逻辑过于激进，导致盈利下降，暂时禁用
-        // 假突破信号已经加入了权重计算，会影响最终得分
-        // ================================================================
-        // TODO: 需要更精细的假突破确认条件后再启用
-        // if fake_breakout_signal.is_bullish_fake_breakout && fake_breakout_signal.volume_confirmed {
-        //     signal_result.should_buy = Some(true);
-        //     signal_result.should_sell = Some(false);
-        // }
-        // if fake_breakout_signal.is_bearish_fake_breakout && fake_breakout_signal.volume_confirmed {
-        //     signal_result.should_sell = Some(true);
-        //     signal_result.should_buy = Some(false);
-        // }
+
 
         // ================================================================
-        // 【新增】应用EMA距离过滤（暂时禁用）
-        // 规则：
-        // - 空头排列 + 距离过远 + 收盘价 > ema3 → 不做多
-        // - 多头排列 + 距离过远 + 收盘价 < ema3 → 不做空
-        // 注意：此过滤器可能过滤掉有效信号，暂时禁用
+        // 【新增】MACD 动量反转过滤 (Momentum Turn Filter)
+        // 核心逻辑：允许 MACD 反向入场（抄底/摸顶），但要求动量必须改善（拐点已现）
+        // 1. 如果 MACD 与交易方向一致 -> 放行（顺势）
+        // 2. 如果 MACD 与交易方向相反（逆势）：
+        //    - 柱状图继续恶化（接飞刀） -> 过滤
+        //    - 柱状图开始改善（企稳） -> 放行
         // ================================================================
-        // TODO: 调整EMA距离阈值后再启用
-        // if ema_distance_filter.should_filter_long && signal_result.should_buy.unwrap_or(false) {
-        //     if !fake_breakout_signal.is_bullish_fake_breakout {
-        //         signal_result.should_buy = Some(false);
-        //     }
-        // }
-        // if ema_distance_filter.should_filter_short && signal_result.should_sell.unwrap_or(false) {
-        //     if !fake_breakout_signal.is_bearish_fake_breakout {
-        //         signal_result.should_sell = Some(false);
-        //     }
-        // }
+        if let Some(macd_cfg) = &self.macd_signal {
+            if macd_cfg.is_open {
+                let macd_val = &vegas_indicator_signal_values.macd_value;
+                
+                // 做多过滤
+                if signal_result.should_buy.unwrap_or(false) {
+                    let mut should_filter = false;
+                    
+                    if macd_cfg.filter_falling_knife {
+                        // 如果 MACD 柱状图为负（处于空头动量区）
+                        if macd_val.histogram < 0.0 {
+                            // 且 柱状图在递减（负值变更大，动量加速向下）
+                            if macd_val.histogram_decreasing {
+                                should_filter = true; // 正在接飞刀，过滤
+                                signal_result.filter_reasons.push("MACD_FALLING_KNIFE_LONG".to_string());
+                            }
+                        }
+                    }
 
-        // ================================================================
-        // 【新增】成交量递减过滤（暂时禁用）
-        // 规则：近3根K线成交量递减 Vol(n-2) > Vol(n-1) > Vol(n) → 忽略信号
-        // 注意：此过滤器可能过于严格，暂时禁用以观察效果
-        // ================================================================
-        // TODO: 需要更精细的成交量过滤条件
-        // let recent_volumes = ema_filter::extract_recent_volumes(data_items, 3);
-        // if ema_filter::check_volume_decreasing_filter(&recent_volumes) {
-        //     if signal_result.should_buy.unwrap_or(false) && !fake_breakout_signal.is_bullish_fake_breakout {
-        //         signal_result.should_buy = Some(false);
-        //     }
-        //     if signal_result.should_sell.unwrap_or(false) && !fake_breakout_signal.is_bearish_fake_breakout {
-        //         signal_result.should_sell = Some(false);
-        //     }
-        // }
+                    // 额外的动量确认（可选，默认关闭）
+                    if macd_cfg.require_momentum_confirm {
+                        if macd_val.histogram_decreasing {
+                            should_filter = true;
+                            signal_result.filter_reasons.push("MACD_MOMENTUM_WEAK_LONG".to_string());
+                        }
+                    }
+                    
+                    if should_filter {
+                        signal_result.should_buy = Some(false);
+                    }
+                }
+                
+                // 做空过滤
+                if signal_result.should_sell.unwrap_or(false) {
+                    let mut should_filter = false;
+                    
+                    if macd_cfg.filter_falling_knife {
+                        // 如果 MACD 柱状图为正（处于多头动量区）
+                        if macd_val.histogram > 0.0 {
+                            // 且 柱状图在递增（正值变更大，动量加速向上）
+                            if macd_val.histogram_increasing {
+                                should_filter = true; // 正在逆势摸顶（涨势未尽），过滤
+                                signal_result.filter_reasons.push("MACD_FALLING_KNIFE_SHORT".to_string());
+                            }
+                        }
+                    }
+
+                    // 额外的动量确认（可选，默认关闭）
+                    if macd_cfg.require_momentum_confirm {
+                        if macd_val.histogram_increasing {
+                            should_filter = true;
+                            signal_result.filter_reasons.push("MACD_MOMENTUM_WEAK_SHORT".to_string());
+                        }
+                    }
+                    
+                    if should_filter {
+                        signal_result.should_sell = Some(false);
+                    }
+                }
+            }
+        }
 
         // 可选：添加详细信息到结果中
         if signal_result.should_buy.unwrap_or(false)
@@ -808,38 +840,7 @@ impl VegasStrategy {
             signal_result.single_result = Some(json!(conditions).to_string());
         }
 
-        // 轻量日线确认（使用长周期均线近似日线方向）：只有同向才放行
-        if env::var("VEGAS_DAILY_CONFIRM").unwrap_or_default() == "1" {
-            let htf_long = vegas_indicator_signal_values.ema_values.ema6_value
-                > vegas_indicator_signal_values.ema_values.ema7_value;
-            let htf_short = vegas_indicator_signal_values.ema_values.ema6_value
-                < vegas_indicator_signal_values.ema_values.ema7_value;
-            if signal_result.should_buy.unwrap_or(false) && !htf_long {
-                signal_result.should_buy = Some(false);
-            }
-            if signal_result.should_sell.unwrap_or(false) && !htf_short {
-                signal_result.should_sell = Some(false);
-            }
-        }
 
-        // 分层止盈：1R/1.5R/3R，启用 VEGAS_LAYER_TP=1
-        if env::var("VEGAS_LAYER_TP").unwrap_or_default() == "1" {
-            if signal_result.should_buy.unwrap_or(false) || signal_result.should_sell.unwrap_or(false)
-            {
-                let k_range = (last_data_item.h - last_data_item.l)
-                    .abs()
-                    .max(last_data_item.c * 0.001);
-                let tp = k_range * 1.5;
-                if signal_result.should_buy.unwrap_or(false) {
-                    signal_result.long_signal_take_profit_price = Some(last_data_item.c + tp);
-                    signal_result.move_stop_open_price_when_touch_price = Some(last_data_item.c);
-                }
-                if signal_result.should_sell.unwrap_or(false) {
-                    signal_result.short_signal_take_profit_price = Some(last_data_item.c - tp);
-                    signal_result.move_stop_open_price_when_touch_price = Some(last_data_item.c);
-                }
-            }
-        }
         signal_result
     }
 

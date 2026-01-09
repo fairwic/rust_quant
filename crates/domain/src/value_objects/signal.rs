@@ -177,6 +177,9 @@ pub struct SignalResult {
 
     /// 最佳开仓价格
     pub best_open_price: Option<f64>,
+
+    /// 过滤原因（如 MACD_FALLING_KNIFE, RSI_OVERBOUGHT 等）
+    pub filter_reasons: Vec<String>,
 }
 
 impl SignalResult {
@@ -207,6 +210,7 @@ impl SignalResult {
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
             counter_trend_pullback_take_profit_price: None,
+            filter_reasons: vec![],
         }
     }
 
@@ -269,6 +273,7 @@ impl SignalResult {
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
             counter_trend_pullback_take_profit_price: None,
+            filter_reasons: vec![],
         }
     }
 }

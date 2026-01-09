@@ -153,6 +153,8 @@ impl StrategyExecutor for NweStrategyExecutor {
                 atr_take_profit_level_1: None,
                 atr_take_profit_level_2: None,
                 atr_take_profit_level_3: None,
+                filter_reasons: vec![],
+                direction: rust_quant_domain::SignalDirection::None,
             });
         }
 

@@ -10,10 +10,11 @@ pub trait BackTestAbleStrategyTrait: IndicatorStrategyBacktest + Sized {
     fn config_json(&self) -> Option<String>;
     fn run_test(
         &mut self,
+        inst_id: &str,
         candles: &Vec<CandleItem>,
         risk_strategy_config: BasicRiskStrategyConfig,
     ) -> BackTestResult {
-        run_indicator_strategy_backtest(self, candles, risk_strategy_config)
+        run_indicator_strategy_backtest(inst_id, self, candles, risk_strategy_config)
     }
 }
 

@@ -1,9 +1,10 @@
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
-    default_extreme_k_filter, EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig,
+    default_extreme_k_filter, default_chase_confirm_config, default_macd_signal_config,
+    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig,
     ExtremeKFilterConfig, FairValueGapConfig, FakeBreakoutConfig, KlineHammerConfig,
     LegDetectionConfig, MarketStructureConfig, PremiumDiscountConfig, RangeFilterConfig,
-    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
+    RsiSignalConfig, VegasStrategy, VolumeSignalConfig, MacdSignalConfig,
 };
 use rust_quant_indicators::volatility::BollingBandsSignalConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
@@ -45,6 +46,7 @@ pub struct ParamMergeBuilder {
     pub fake_breakout_signal: Option<FakeBreakoutConfig>,
     pub range_filter_signal: Option<RangeFilterConfig>,
     pub extreme_k_filter_signal: Option<ExtremeKFilterConfig>,
+    pub macd_signal: Option<MacdSignalConfig>,
 }
 impl ParamMergeBuilder {
     //使用构造器
@@ -212,6 +214,8 @@ impl ParamMergeBuilder {
             extreme_k_filter_signal: self
                 .extreme_k_filter_signal
                 .or_else(default_extreme_k_filter),
+            chase_confirm_config: default_chase_confirm_config(),
+            macd_signal: self.macd_signal.clone().or_else(default_macd_signal_config),
         }
     }
 }
@@ -394,6 +398,7 @@ impl ParamGenerator {
                 fake_breakout_signal: None,
                 range_filter_signal: None,
                 extreme_k_filter_signal: None,
+                macd_signal: None,
             };
 
             batch.push(param);

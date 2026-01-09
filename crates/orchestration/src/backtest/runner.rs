@@ -511,6 +511,8 @@ impl BacktestRunner {
             params_batch.len()
         );
 
+
+        
         self.executor
             .run_back_test_strategy(params_batch, inst_id, period, arc_candle_data, semaphore)
             .await;

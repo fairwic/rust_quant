@@ -164,4 +164,63 @@ impl BacktestLogRepository for SqlxBacktestRepository {
 
         Ok(result.rows_affected())
     }
+
+    async fn insert_filtered_signals(
+        &self,
+        signals: &[rust_quant_domain::entities::FilteredSignalLog],
+    ) -> Result<u64> {
+        if signals.is_empty() {
+            tracing::info!("insert_filtered_signals being called with empty list");
+            return Ok(0);
+        }
+        tracing::info!("insert_filtered_signals inserting {} signals", signals.len());
+
+        // 确保表存在 (仅开发阶段便利措施，生产环境应使用 migrate)
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS filtered_signal_log (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                backtest_id BIGINT NOT NULL,
+                inst_id VARCHAR(32) NOT NULL,
+                period VARCHAR(10) NOT NULL,
+                signal_time DATETIME NOT NULL,
+                direction VARCHAR(10) NOT NULL,
+                filter_reasons JSON NOT NULL,
+                signal_price DECIMAL(20, 8) NOT NULL,
+                indicator_snapshot JSON,
+                theoretical_profit DECIMAL(20, 8),
+                theoretical_loss DECIMAL(20, 8),
+                final_pnl DECIMAL(20, 8),
+                trade_result VARCHAR(10),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_backtest (backtest_id),
+                INDEX idx_inst_period (inst_id, period)
+            )
+            "#,
+        )
+        .execute(self.pool())
+        .await?;
+
+        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+            "INSERT INTO filtered_signal_log (backtest_id, inst_id, period, signal_time, direction, filter_reasons, signal_price, indicator_snapshot, theoretical_profit, theoretical_loss, final_pnl, trade_result) ",
+        );
+
+        builder.push_values(signals.iter(), |mut b, signal| {
+            b.push_bind(signal.backtest_id)
+                .push_bind(&signal.inst_id)
+                .push_bind(&signal.period)
+                .push_bind(signal.signal_time)
+                .push_bind(&signal.direction)
+                .push_bind(&signal.filter_reasons)
+                .push_bind(signal.signal_price)
+                .push_bind(&signal.indicator_snapshot)
+                .push_bind(signal.theoretical_profit)
+                .push_bind(signal.theoretical_loss)
+                .push_bind(signal.final_pnl)
+                .push_bind(&signal.trade_result);
+        });
+
+        let result = builder.build().execute(self.pool()).await?;
+        Ok(result.rows_affected())
+    }
 }

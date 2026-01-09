@@ -258,7 +258,7 @@ impl BacktestExecutor {
     {
         let start_time = Instant::now();
         let strategy_type = strategy.strategy_type();
-        let res = strategy.run_test(&mysql_candles, risk_strategy_config.clone());
+        let res = strategy.run_test(inst_id, &mysql_candles, risk_strategy_config.clone());
         let config_desc = strategy.config_json();
 
         let back_test_id = self

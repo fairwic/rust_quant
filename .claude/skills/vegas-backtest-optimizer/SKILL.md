@@ -12,7 +12,6 @@ description: Optimize the Vegas 4H backtest loop (cargo run + MySQL back_test_lo
 cd /Users/mac2/onions/rust_quant && TIGHTEN_VEGAS_RISK=0 DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' cargo run
 ```
 - `TIGHTEN_VEGAS_RISK=0`：禁用代码层强制风控收紧（推荐）
-- 等待 ~8–20s，每隔5秒查看终端日志
 - 回测完成后可用分析脚本输出指标与收益曲线：
 ```bash
 cd /Users/mac2/onions/rust_quant

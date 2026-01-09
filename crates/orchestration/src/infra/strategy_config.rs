@@ -224,7 +224,9 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     param.fair_value_gap_signal = fair_value_gap_signal;
     param.premium_discount_signal = premium_discount_signal;
     param.fake_breakout_signal = fake_breakout_signal;
+    param.fake_breakout_signal = fake_breakout_signal;
     param.range_filter_signal = range_filter_signal;
+    param.macd_signal = vegas_strategy.macd_signal;
 
     Ok(param)
 }
