@@ -21,11 +21,13 @@ rust-quant-strategies.workspace = true
 rust-quant-risk.workspace = true
 rust-quant-execution.workspace = true
 rust-quant-orchestration.workspace = true
+rust-quant-analytics.workspace = true
 
 # 外部依赖
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["full"] }
 serde.workspace = true
 

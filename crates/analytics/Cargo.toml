@@ -19,3 +19,6 @@ chrono.workspace = true
 
 # 数据库（使用 sqlx）
 sqlx.workspace = true
+
+# 随机数
+rand = "0.8.5"

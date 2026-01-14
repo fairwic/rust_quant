@@ -2615,6 +2615,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "rand 0.8.5",
  "rust-quant-common",
  "rust-quant-core",
  "rust-quant-strategies",
@@ -2633,6 +2634,7 @@ dependencies = [
  "env_logger",
  "okx",
  "once_cell",
+ "rust-quant-analytics",
  "rust-quant-common",
  "rust-quant-core",
  "rust-quant-domain",
@@ -2650,6 +2652,7 @@ dependencies = [
  "tokio",
  "tokio-cron-scheduler",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

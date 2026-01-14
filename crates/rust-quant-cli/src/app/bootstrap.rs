@@ -112,6 +112,7 @@ fn default_backtest_targets() -> Vec<(String, String)> {
         // ("ETH-USDT-SWAP".to_string(), "15m".to_string()),
         ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "1H".to_string()),
+        // ("ETH-USDT-SWAP".to_string(), "5m".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "1Dutc".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "5m".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "15m".to_string()),
