@@ -1,7 +1,10 @@
 use anyhow::anyhow;
 use okx::api::api_trait::OkxApiTrait;
+use okx::config::Credentials;
+use okx::OkxClient;
 use okx::OkxTrade;
 use reqwest::Method;
+use rust_quant_domain::entities::ExchangeApiConfig;
 use serde_json::json;
 use tracing::{info, warn};
 
@@ -27,8 +30,55 @@ pub struct OkxStopLossAmender {
 
 impl OkxStopLossAmender {
     pub fn from_env() -> anyhow::Result<Self> {
-        let trade = OkxTrade::from_env().map_err(|e| anyhow!("创建OKX Trade客户端失败: {}", e))?;
+        let is_prod = std::env::var("APP_ENV")
+            .unwrap_or_else(|_| "local".to_string())
+            .eq_ignore_ascii_case("prod");
+        let mut client = if is_prod {
+            OkxClient::from_env()
+        } else {
+            OkxClient::from_env_with_simulated_trading()
+        }
+        .map_err(|e| anyhow!("创建OKX客户端失败: {}", e))?;
+
+        Self::apply_request_expiration_override(&mut client);
+        let trade = OkxTrade::new(client);
         Ok(Self { trade })
+    }
+
+    pub fn from_exchange_api_config(config: &ExchangeApiConfig) -> anyhow::Result<Self> {
+        if config.exchange_name.to_lowercase() != "okx" {
+            return Err(anyhow!("不支持的交易所: {}", config.exchange_name));
+        }
+
+        let passphrase = config
+            .passphrase
+            .as_ref()
+            .ok_or_else(|| anyhow!("OKX需要Passphrase"))?;
+
+        let credentials = Credentials::new(
+            &config.api_key,
+            &config.api_secret,
+            passphrase,
+            if config.is_sandbox { "1" } else { "0" },
+        );
+
+        let mut client =
+            OkxClient::new(credentials).map_err(|e| anyhow!("创建OKX客户端失败: {}", e))?;
+        Self::apply_request_expiration_override(&mut client);
+
+        Ok(Self {
+            trade: OkxTrade::new(client),
+        })
+    }
+
+    fn apply_request_expiration_override(client: &mut OkxClient) {
+        if let Ok(expiration_ms) = std::env::var("OKX_REQUEST_EXPIRATION_MS") {
+            if let Ok(expiration_ms) = expiration_ms.parse::<i64>() {
+                if expiration_ms > 0 {
+                    client.set_request_expiration(expiration_ms);
+                }
+            }
+        }
     }
 
     async fn fetch_first_attach_algo_id(

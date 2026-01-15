@@ -46,3 +46,7 @@ okx.workspace = true
 # 缓存
 redis.workspace = true
 
+[dev-dependencies]
+dotenv.workspace = true
+once_cell.workspace = true
+reqwest.workspace = true

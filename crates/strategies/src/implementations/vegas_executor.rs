@@ -189,10 +189,15 @@ impl StrategyExecutor for VegasStrategyExecutor {
         let vegas_strategy: VegasStrategy =
             serde_json::from_value(strategy_config.parameters.clone())
                 .map_err(|e| anyhow!("解析 Vegas 策略配置失败: {}", e))?;
+        let default_weights = SignalWeightsConfig::default();
+        let weights = vegas_strategy
+            .signal_weights
+            .as_ref()
+            .unwrap_or(&default_weights);
         let signal_result = vegas_strategy.get_trade_signal(
             &candle_vec,
             &mut new_indicator_values.clone(),
-            &SignalWeightsConfig::default(),
+            weights,
             &serde_json::from_value(strategy_config.risk_config.clone())
                 .map_err(|e| anyhow!("解析风险配置失败: {}", e))?,
         );

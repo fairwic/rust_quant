@@ -96,14 +96,13 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
     async fn find_by_id(&self, id: i32) -> Result<Option<SwapOrder>> {
         debug!("查询合约订单: id={}", id);
 
-        let entity = sqlx::query_as!(
-            SwapOrderEntity,
+        let entity = sqlx::query_as::<_, SwapOrderEntity>(
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
                FROM swap_orders WHERE id = ? LIMIT 1"#,
-            id
         )
+        .bind(id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -113,14 +112,13 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
     async fn find_by_in_order_id(&self, in_order_id: &str) -> Result<Option<SwapOrder>> {
         debug!("根据内部订单ID查询: in_order_id={}", in_order_id);
 
-        let entity = sqlx::query_as!(
-            SwapOrderEntity,
+        let entity = sqlx::query_as::<_, SwapOrderEntity>(
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
                FROM swap_orders WHERE in_order_id = ? LIMIT 1"#,
-            in_order_id
         )
+        .bind(in_order_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -130,14 +128,13 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
     async fn find_by_out_order_id(&self, out_order_id: &str) -> Result<Option<SwapOrder>> {
         debug!("根据外部订单ID查询: out_order_id={}", out_order_id);
 
-        let entity = sqlx::query_as!(
-            SwapOrderEntity,
+        let entity = sqlx::query_as::<_, SwapOrderEntity>(
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
                FROM swap_orders WHERE out_order_id = ? LIMIT 1"#,
-            out_order_id
         )
+        .bind(out_order_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -148,15 +145,14 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
         debug!("查询交易对订单: inst_id={}, limit={:?}", inst_id, limit);
 
         let limit = limit.unwrap_or(100);
-        let entities = sqlx::query_as!(
-            SwapOrderEntity,
+        let entities = sqlx::query_as::<_, SwapOrderEntity>(
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
                FROM swap_orders WHERE inst_id = ? ORDER BY created_at DESC LIMIT ?"#,
-            inst_id,
-            limit
         )
+        .bind(inst_id)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await?;
 
@@ -176,8 +172,7 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
         );
 
         // 查询最近5分钟内相同条件的订单（用于幂等性检查）
-        let entities = sqlx::query_as!(
-            SwapOrderEntity,
+        let entities = sqlx::query_as::<_, SwapOrderEntity>(
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
@@ -185,11 +180,11 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
                WHERE inst_id = ? AND period = ? AND side = ? AND pos_side = ?
                  AND created_at > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
                ORDER BY created_at DESC"#,
-            inst_id,
-            period,
-            side,
-            pos_side
         )
+        .bind(inst_id)
+        .bind(period)
+        .bind(side)
+        .bind(pos_side)
         .fetch_all(&self.pool)
         .await?;
 
@@ -202,24 +197,24 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
             order.in_order_id, order.inst_id, order.side, order.pos_side
         );
 
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"INSERT INTO swap_orders
                (strategy_id, in_order_id, out_order_id, strategy_type, period,
                 inst_id, side, pos_size, pos_side, tag, platform_type, detail)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-            order.strategy_id,
-            order.in_order_id,
-            order.out_order_id,
-            order.strategy_type,
-            order.period,
-            order.inst_id,
-            order.side,
-            order.pos_size,
-            order.pos_side,
-            order.tag,
-            order.platform_type,
-            order.detail
         )
+        .bind(&order.strategy_id)
+        .bind(&order.in_order_id)
+        .bind(&order.out_order_id)
+        .bind(&order.strategy_type)
+        .bind(&order.period)
+        .bind(&order.inst_id)
+        .bind(&order.side)
+        .bind(&order.pos_size)
+        .bind(&order.pos_side)
+        .bind(&order.tag)
+        .bind(&order.platform_type)
+        .bind(&order.detail)
         .execute(&self.pool)
         .await?;
 
@@ -234,15 +229,15 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
 
         debug!("更新合约订单: id={}", id);
 
-        sqlx::query!(
+        sqlx::query(
             r#"UPDATE swap_orders SET
                out_order_id = ?, pos_size = ?, detail = ?, update_at = NOW()
                WHERE id = ?"#,
-            order.out_order_id,
-            order.pos_size,
-            order.detail,
-            id
         )
+        .bind(&order.out_order_id)
+        .bind(&order.pos_size)
+        .bind(&order.detail)
+        .bind(id)
         .execute(&self.pool)
         .await?;
 
@@ -267,18 +262,17 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
             .unwrap_or_else(|| Utc::now())
             .naive_utc();
 
-        let entities = sqlx::query_as!(
-            SwapOrderEntity,
+        let entities = sqlx::query_as::<_, SwapOrderEntity>(
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
                FROM swap_orders
                WHERE strategy_id = ? AND created_at BETWEEN ? AND ?
                ORDER BY created_at DESC"#,
-            strategy_id,
-            start_dt,
-            end_dt
         )
+        .bind(strategy_id)
+        .bind(start_dt)
+        .bind(end_dt)
         .fetch_all(&self.pool)
         .await?;
 

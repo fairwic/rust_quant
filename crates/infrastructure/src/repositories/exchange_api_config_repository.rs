@@ -56,7 +56,7 @@ impl ExchangeAppkeyConfigEntity {
 pub struct ExchangeApiStrategyRelationEntity {
     pub id: i32,
     pub strategy_config_id: i32,
-    pub api_config_id: i32,
+    pub api_key_config_id: i32,
     pub priority: i32,
     pub is_enabled: i8,
 }
@@ -206,10 +206,9 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
             "SELECT e.id, e.exchange_name, e.api_key, e.api_secret, e.passphrase,
                     e.is_sandbox, e.is_enabled, e.description
              FROM exchange_apikey_config e
-             INNER JOIN exchange_apikey_strategy_relation s ON e.id = s.api_config_id
+             INNER JOIN exchange_apikey_strategy_relation s ON e.id = s.api_key_config_id
              WHERE s.strategy_config_id = ?
                AND s.is_enabled = 1
-               AND s.is_deleted = 0
                AND e.is_enabled = 1
                AND e.is_deleted = 0
              ORDER BY s.priority ASC, e.id ASC",
@@ -227,13 +226,14 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
         api_config_id: i32,
         priority: i32,
     ) -> Result<i32> {
+        let api_key_config_id = api_config_id;
         let result = sqlx::query!(
             "INSERT INTO exchange_apikey_strategy_relation
-             (strategy_config_id, api_config_id, priority, is_enabled)
+             (strategy_config_id, api_key_config_id, priority, is_enabled)
              VALUES (?, ?, ?, 1)
-             ON DUPLICATE KEY UPDATE priority = ?, is_enabled = 1, is_deleted = 0",
+             ON DUPLICATE KEY UPDATE priority = ?, is_enabled = 1",
             strategy_config_id,
-            api_config_id,
+            api_key_config_id,
             priority,
             priority
         )
@@ -245,7 +245,7 @@ impl StrategyApiConfigRepository for SqlxStrategyApiConfigRepository {
 
     async fn delete_association(&self, id: i32) -> Result<()> {
         sqlx::query!(
-            "UPDATE exchange_apikey_strategy_relation SET is_deleted = 1 WHERE id = ?",
+            "DELETE FROM exchange_apikey_strategy_relation WHERE id = ?",
             id
         )
         .execute(&self.pool)

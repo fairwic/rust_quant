@@ -86,6 +86,29 @@ impl StrategyExecutionService {
         })
     }
 
+    fn env_enabled(key: &str) -> bool {
+        match std::env::var(key) {
+            Ok(v) => matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "y" | "on"
+            ),
+            Err(_) => false,
+        }
+    }
+
+    fn select_take_profit_trigger_px(side: &str, signal: &SignalResult) -> Option<f64> {
+        if let Some(tp) = signal.atr_take_profit_ratio_price {
+            return Some(tp);
+        }
+
+        match side {
+            "buy" => signal.long_signal_take_profit_price,
+            "sell" => signal.short_signal_take_profit_price,
+            _ => None,
+        }
+        .or(signal.counter_trend_pullback_take_profit_price)
+    }
+
     /// 执行策略分析和交易流程
     ///
     /// 参考原始业务逻辑：src/trading/strategy/executor_common.rs::execute_order
@@ -436,6 +459,47 @@ impl StrategyExecutionService {
 
         info!("当前持仓数量: {}", positions.len());
 
+        // 4.1 实盘仓位治理（可选）：同向不加仓/反向先平仓
+        let skip_same_side = Self::env_enabled("LIVE_SKIP_IF_SAME_SIDE_POSITION");
+        let close_opposite_side = Self::env_enabled("LIVE_CLOSE_OPPOSITE_POSITION");
+        let opposite_pos_side = if pos_side == "long" { "short" } else { "long" };
+
+        let same_side_exists = positions.iter().any(|p| {
+            p.inst_id == inst_id
+                && p.pos_side.eq_ignore_ascii_case(pos_side)
+                && p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12
+        });
+        if skip_same_side && same_side_exists {
+            warn!(
+                "⚠️ 已有同向持仓，跳过开新仓: inst_id={}, pos_side={}",
+                inst_id, pos_side
+            );
+            return Ok(());
+        }
+
+        if close_opposite_side {
+            if let Some(p) = positions.iter().find(|p| {
+                p.inst_id == inst_id
+                    && p.pos_side.eq_ignore_ascii_case(opposite_pos_side)
+                    && p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12
+            }) {
+                let mgn_mode = p.mgn_mode.clone();
+                let close_pos_side = if opposite_pos_side == "long" {
+                    okx::dto::PositionSide::Long
+                } else {
+                    okx::dto::PositionSide::Short
+                };
+                warn!(
+                    "⚠️ 检测到反向持仓，先平仓再开仓: inst_id={}, close_pos_side={:?}, mgn_mode={}",
+                    inst_id, close_pos_side, mgn_mode
+                );
+                okx_service
+                    .close_position(&api_config, inst_id, close_pos_side, &mgn_mode)
+                    .await
+                    .map_err(|e| anyhow!("平仓失败: {}", e))?;
+            }
+        }
+
         // 5. 计算下单数量（使用90%的安全系数）
         let safety_factor = 0.9;
         let max_size_str = if side == "buy" {
@@ -485,19 +549,42 @@ impl StrategyExecutionService {
         };
 
         // 如果使用信号K线止损
-        let final_stop_loss = match risk_config.is_used_signal_k_line_stop_loss {
-            Some(true) => match signal.signal_kline_stop_loss_price {
+        let final_stop_loss = if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
+            match signal.signal_kline_stop_loss_price {
                 Some(v) => v,
-                None => stop_loss_price,
-            },
-            _ => {
-                warn!(
-                    "使用信号K线止损，却没有设置信号K线止损价格，使用最大止损: {}",
+                None => {
+                    warn!(
+                        "启用了信号K线止损，但信号未提供止损价，回退到最大止损: {}",
+                        stop_loss_price
+                    );
                     stop_loss_price
-                );
-                stop_loss_price
+                }
             }
+        } else {
+            stop_loss_price
         };
+
+        // 可选：下单时附带止盈（实盘开关）
+        let attach_tp = Self::env_enabled("LIVE_ATTACH_TP");
+        let mut take_profit_trigger_px = if attach_tp {
+            Self::select_take_profit_trigger_px(side, signal)
+        } else {
+            None
+        };
+        if let Some(tp) = take_profit_trigger_px {
+            let tp_valid = if pos_side == "long" {
+                tp > entry_price
+            } else {
+                tp < entry_price
+            };
+            if !tp_valid {
+                warn!(
+                    "止盈价不合理，忽略止盈: inst_id={}, side={}, entry={:.8}, tp={:.8}",
+                    inst_id, side, entry_price, tp
+                );
+                take_profit_trigger_px = None;
+            }
+        }
 
         // 验证止损价格合理性
         if pos_side == "short" && entry_price > final_stop_loss {
@@ -516,8 +603,8 @@ impl StrategyExecutionService {
         }
 
         info!(
-            "下单参数: entry_price={:.2}, stop_loss={:.2}",
-            entry_price, final_stop_loss
+            "下单参数: entry_price={:.2}, stop_loss={:.2}, take_profit={:?}",
+            entry_price, final_stop_loss, take_profit_trigger_px
         );
 
         // 7. 实际下单到交易所（与原实现 swap_order_service.rs::order_swap 保持一致）
@@ -528,6 +615,7 @@ impl StrategyExecutionService {
                 signal,
                 order_size.clone(),
                 Some(final_stop_loss),
+                take_profit_trigger_px,
                 Some(in_order_id.clone()), // 传递订单ID，用于追踪
             )
             .await
@@ -583,6 +671,7 @@ impl StrategyExecutionService {
         let order_detail = serde_json::json!({
             "entry_price": entry_price,
             "stop_loss": final_stop_loss,
+            "take_profit": take_profit_trigger_px,
             "signal": {
                 "should_buy": signal.should_buy,
                 "should_sell": signal.should_sell,
@@ -809,6 +898,8 @@ mod tests {
             atr_take_profit_level_1: None,
             atr_take_profit_level_2: None,
             atr_take_profit_level_3: None,
+            filter_reasons: vec![],
+            direction: rust_quant_domain::SignalDirection::Long,
         }
     }
 
@@ -834,6 +925,8 @@ mod tests {
             atr_take_profit_level_1: None,
             atr_take_profit_level_2: None,
             atr_take_profit_level_3: None,
+            filter_reasons: vec![],
+            direction: rust_quant_domain::SignalDirection::Short,
         }
     }
 
@@ -1100,6 +1193,7 @@ mod tests {
         let order_detail = serde_json::json!({
             "entry_price": entry_price,
             "stop_loss": stop_loss,
+            "take_profit": null,
             "signal": {
                 "should_buy": signal.should_buy,
                 "should_sell": signal.should_sell,
@@ -1177,6 +1271,41 @@ mod tests {
         let stop_loss_price = 49000.123456789;
         let formatted = format!("{:.2}", stop_loss_price);
         assert_eq!(formatted, "49000.12");
+    }
+
+    #[test]
+    fn test_take_profit_priority_atr_then_signal_then_counter_long() {
+        let mut signal = create_buy_signal(100.0, 1);
+        signal.atr_take_profit_ratio_price = Some(130.0);
+        signal.long_signal_take_profit_price = Some(120.0);
+        signal.counter_trend_pullback_take_profit_price = Some(110.0);
+        assert_eq!(
+            StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
+            Some(130.0)
+        );
+
+        signal.atr_take_profit_ratio_price = None;
+        assert_eq!(
+            StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
+            Some(120.0)
+        );
+
+        signal.long_signal_take_profit_price = None;
+        assert_eq!(
+            StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
+            Some(110.0)
+        );
+    }
+
+    #[test]
+    fn test_take_profit_priority_short_uses_short_signal_price() {
+        let mut signal = create_sell_signal(100.0, 1);
+        signal.short_signal_take_profit_price = Some(90.0);
+        signal.counter_trend_pullback_take_profit_price = Some(95.0);
+        assert_eq!(
+            StrategyExecutionService::select_take_profit_trigger_px("sell", &signal),
+            Some(90.0)
+        );
     }
 
     /// 测试：下单数量精度（2位小数）
@@ -1634,6 +1763,8 @@ mod tests {
             atr_take_profit_level_1: None,
             atr_take_profit_level_2: None,
             atr_take_profit_level_3: None,
+            filter_reasons: vec![],
+            direction: rust_quant_domain::SignalDirection::Long,
         };
 
         println!(

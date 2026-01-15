@@ -139,6 +139,7 @@ pub struct BasicRiskConfig {
     /// atr止盈比例
     pub atr_take_profit_ratio: Option<f64>,
     /// 固定信号线的止盈比例
+    #[serde(alias = "fixed_signal_kline_take_profit_ratio")]
     pub fix_signal_kline_take_profit_ratio: Option<f64>,
     /// 是否使用逆势回调止盈
     pub is_counter_trend_pullback_take_profit: Option<bool>,
@@ -188,7 +189,7 @@ mod tests {
         );
 
         assert_eq!(config.strategy_type, StrategyType::Vegas);
-        assert_eq!(config.status, StrategyStatus::Stopped);
+        assert_eq!(config.status, StrategyStatus::Running);
     }
 
     #[test]
@@ -202,15 +203,15 @@ mod tests {
             json!({}),
         );
 
+        assert!(config.is_running());
+        assert!(!config.can_start());
+
+        config.pause();
         assert!(!config.is_running());
         assert!(config.can_start());
 
         config.start();
         assert!(config.is_running());
-
-        config.pause();
-        assert!(!config.is_running());
-        assert!(config.can_start());
 
         config.stop();
         assert_eq!(config.status, StrategyStatus::Stopped);

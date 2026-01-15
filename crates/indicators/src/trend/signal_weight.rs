@@ -568,3 +568,42 @@ impl SignalWeightsConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn market_structure_vote_applies_even_with_zero_weight() {
+        let weights = SignalWeightsConfig {
+            weights: vec![
+                (SignalType::VolumeTrend, 2.0),      // 提供足够的总分，触发阈值
+                (SignalType::MarketStructure, 0.0), // 仅方向投票（不贡献权重）
+            ],
+            min_total_weight: 2.0,
+        };
+
+        let score = weights.calculate_score(vec![
+            (
+                SignalType::VolumeTrend,
+                SignalCondition::Volume {
+                    is_increasing: true,
+                    ratio: 2.0,
+                },
+            ),
+            (
+                SignalType::MarketStructure,
+                SignalCondition::MarketStructure {
+                    is_bullish_bos: true,
+                    is_bearish_bos: false,
+                    is_bullish_choch: false,
+                    is_bearish_choch: false,
+                    is_internal: true,
+                },
+            ),
+        ]);
+
+        assert!((score.total_weight - 2.0).abs() < 1e-12);
+        assert_eq!(weights.is_signal_valid(&score), Some(SignalDirect::IsLong));
+    }
+}

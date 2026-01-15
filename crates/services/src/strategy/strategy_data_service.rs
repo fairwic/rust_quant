@@ -21,6 +21,27 @@ use rust_quant_strategies::framework::strategy_registry::get_strategy_registry;
 pub struct StrategyDataService;
 
 impl StrategyDataService {
+    fn read_env_usize(key: &str) -> Option<usize> {
+        std::env::var(key).ok().and_then(|v| v.parse::<usize>().ok())
+    }
+
+    fn determine_warmup_limit(parameters: &serde_json::Value) -> usize {
+        const DEFAULT_WARMUP_LIMIT: usize = 500;
+        const DEFAULT_WARMUP_LIMIT_MAX: usize = 10_000;
+
+        let base_limit = Self::read_env_usize("STRATEGY_WARMUP_LIMIT").unwrap_or(DEFAULT_WARMUP_LIMIT);
+        let max_limit =
+            Self::read_env_usize("STRATEGY_WARMUP_LIMIT_MAX").unwrap_or(DEFAULT_WARMUP_LIMIT_MAX);
+
+        let min_k_line_num = parameters
+            .get("min_k_line_num")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(0);
+
+        base_limit.max(min_k_line_num).min(max_limit)
+    }
+
     fn candle_entity_to_item(c: &rust_quant_market::models::CandlesEntity) -> Result<CandleItem> {
         let o =
             c.o.parse::<f64>()
@@ -80,13 +101,18 @@ impl StrategyDataService {
 
         // 2. 加载历史K线数据
         let candles_model = CandlesModel::new();
+        let warmup_limit = Self::determine_warmup_limit(&config.parameters);
         let dto = SelectCandleReqDto {
             inst_id: inst_id.clone(),
             time_interval: period.to_string(),
-            limit: 500, // 加载500根K线用于预热
+            limit: warmup_limit,
             select_time: None,
             confirm: Some(1), // 只获取已确认的K线
         };
+        info!(
+            "预热K线数量: inst_id={}, period={}, limit={}",
+            inst_id, period, warmup_limit
+        );
 
         let mut candles = candles_model
             .get_all(dto)
@@ -181,5 +207,55 @@ impl StrategyDataService {
         }
 
         results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use once_cell::sync::Lazy;
+    use std::sync::Mutex;
+
+    static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    fn set_env(key: &str, value: Option<&str>) {
+        match value {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
+
+    #[test]
+    fn warmup_limit_defaults_to_max_of_base_and_min_k_line_num() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
+        let old_base = std::env::var("STRATEGY_WARMUP_LIMIT").ok();
+        let old_max = std::env::var("STRATEGY_WARMUP_LIMIT_MAX").ok();
+        set_env("STRATEGY_WARMUP_LIMIT", None);
+        set_env("STRATEGY_WARMUP_LIMIT_MAX", None);
+
+        let params = serde_json::json!({"min_k_line_num": 3600});
+        let limit = StrategyDataService::determine_warmup_limit(&params);
+        assert_eq!(limit, 3600);
+
+        set_env("STRATEGY_WARMUP_LIMIT", old_base.as_deref());
+        set_env("STRATEGY_WARMUP_LIMIT_MAX", old_max.as_deref());
+    }
+
+    #[test]
+    fn warmup_limit_is_capped_by_max() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
+        let old_base = std::env::var("STRATEGY_WARMUP_LIMIT").ok();
+        let old_max = std::env::var("STRATEGY_WARMUP_LIMIT_MAX").ok();
+        set_env("STRATEGY_WARMUP_LIMIT", Some("500"));
+        set_env("STRATEGY_WARMUP_LIMIT_MAX", Some("2000"));
+
+        let params = serde_json::json!({"min_k_line_num": 3600});
+        let limit = StrategyDataService::determine_warmup_limit(&params);
+        assert_eq!(limit, 2000);
+
+        set_env("STRATEGY_WARMUP_LIMIT", old_base.as_deref());
+        set_env("STRATEGY_WARMUP_LIMIT_MAX", old_max.as_deref());
     }
 }
