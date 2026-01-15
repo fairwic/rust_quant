@@ -332,6 +332,107 @@ fn check_counter_trend_take_profit(ctx: &ExitContext, target: Option<f64>) -> Ex
 }
 
 // ============================================================================
+// 公共检查链（供 check_risk_config 和 check_risk_config_with_r_system 复用）
+// ============================================================================
+
+/// 止损检查链（优先级从高到低）
+///
+/// 检查顺序：
+/// 1. 最大损失止损
+/// 2. 单K振幅固定止损(1R)
+/// 3. 移动止损（三级ATR系统/保本止损）
+/// 4. 信号K线止损
+fn run_stop_loss_checks(
+    ctx: &ExitContext,
+    risk_config: &BasicRiskStrategyConfig,
+    position: &TradePosition,
+) -> ExitResult {
+    // 1. 最大损失止损
+    let result = check_max_loss_stop(
+        ctx,
+        risk_config.max_loss_percent,
+        risk_config.dynamic_max_loss.unwrap_or(true),
+    );
+    if matches!(
+        result,
+        ExitResult::Exit { .. } | ExitResult::ExitDynamic { .. }
+    ) {
+        return result;
+    }
+
+    // 2. 单K振幅固定止损（1R）
+    let result =
+        check_one_k_line_diff_stop(ctx, position, risk_config.is_one_k_line_diff_stop_loss);
+    if matches!(
+        result,
+        ExitResult::Exit { .. } | ExitResult::ExitDynamic { .. }
+    ) {
+        return result;
+    }
+
+    // 3. 移动止损（三级ATR系统/保本止损）
+    let result = check_atr_trailing_stop(ctx, position);
+    if matches!(
+        result,
+        ExitResult::Exit { .. } | ExitResult::ExitDynamic { .. }
+    ) {
+        return result;
+    }
+
+    // 4. 信号K线止损
+    check_signal_kline_stop(ctx, position.signal_kline_stop_close_price)
+}
+
+/// 止盈检查链（优先级从高到低）
+///
+/// 检查顺序：
+/// 1. 三级ATR止盈
+/// 2. ATR比例止盈
+/// 3. 固定信号线比例止盈
+/// 4. 动态止盈
+/// 5. 逆势回调止盈
+fn run_take_profit_checks(
+    ctx: &ExitContext,
+    risk_config: &BasicRiskStrategyConfig,
+    position: &mut TradePosition,
+) -> ExitResult {
+    // 1. 三级ATR止盈（同时更新级别）
+    let result = update_atr_tiered_levels(ctx, position);
+    if matches!(result, ExitResult::Exit { .. }) {
+        return result;
+    }
+
+    // 2. ATR比例止盈
+    let result = check_atr_ratio_take_profit(
+        ctx,
+        risk_config.atr_take_profit_ratio,
+        position.atr_take_ratio_profit_price,
+    );
+    if matches!(result, ExitResult::Exit { .. }) {
+        return result;
+    }
+
+    // 3. 固定信号线比例止盈
+    let result = check_fixed_take_profit(ctx, position.fixed_take_profit_price);
+    if matches!(result, ExitResult::Exit { .. }) {
+        return result;
+    }
+
+    // 4. 动态止盈（做多/做空）
+    let result = check_dynamic_take_profit(
+        ctx,
+        position.long_signal_take_profit_price,
+        position.short_signal_take_profit_price,
+    );
+    if matches!(result, ExitResult::Exit { .. }) {
+        return result;
+    }
+
+    // 5. 逆势回调止盈
+    check_counter_trend_take_profit(ctx, position.counter_trend_pullback_take_profit_price)
+}
+
+// ============================================================================
 // 主函数
 // ============================================================================
 
@@ -367,89 +468,36 @@ pub fn check_risk_config(
     let mut trade_position = position.clone();
     let ctx = ExitContext::new(&trade_position, candle);
 
-    // ========================================================================
-    // 止损检查（优先级最高）
-    // ========================================================================
-
-    // 1. 最大损失止损
-    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_max_loss_stop(
-            &ctx,
-            risk_config.max_loss_percent,
-            risk_config.dynamic_max_loss.unwrap_or(true),
-        )
-    {
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 2. 保本移动止损激活（非立即出场，更新止损线）
+    // 保本移动止损激活（在止损检查前更新）
     activate_break_even_stop(risk_config, &ctx, &mut trade_position);
 
-    // 3. 单K振幅固定止损（1R）
-    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_one_k_line_diff_stop(
+    // 止损检查（优先级最高）
+    let stop_result = run_stop_loss_checks(&ctx, risk_config, &trade_position);
+    if matches!(
+        stop_result,
+        ExitResult::Exit { .. } | ExitResult::ExitDynamic { .. }
+    ) {
+        return finalize_exit(
+            trading_state,
+            trade_position,
+            candle,
+            signal,
             &ctx,
-            &trade_position,
-            risk_config.is_one_k_line_diff_stop_loss,
-        )
-    {
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+            stop_result,
+        );
     }
 
-    // 4. 移动止损（三级ATR系统/保本止损）
-    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_atr_trailing_stop(&ctx, &trade_position)
-    {
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 5. 信号K线止损
-    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_signal_kline_stop(&ctx, trade_position.signal_kline_stop_close_price)
-    {
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // ========================================================================
     // 止盈检查
-    // ========================================================================
-
-    // 6. 三级ATR止盈（同时更新级别）
-    if let result @ ExitResult::Exit { .. } = update_atr_tiered_levels(&ctx, &mut trade_position) {
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 7. ATR比例止盈
-    if let result @ ExitResult::Exit { .. } = check_atr_ratio_take_profit(
-        &ctx,
-        risk_config.atr_take_profit_ratio,
-        trade_position.atr_take_ratio_profit_price,
-    ) {
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 8. 固定信号线比例止盈
-    if let result @ ExitResult::Exit { .. } =
-        check_fixed_take_profit(&ctx, trade_position.fixed_take_profit_price)
-    {
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 9. 动态止盈（做多/做空）
-    if let result @ ExitResult::Exit { .. } = check_dynamic_take_profit(
-        &ctx,
-        trade_position.long_signal_take_profit_price,
-        trade_position.short_signal_take_profit_price,
-    ) {
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 10. 逆势回调止盈
-    if let result @ ExitResult::Exit { .. } = check_counter_trend_take_profit(
-        &ctx,
-        trade_position.counter_trend_pullback_take_profit_price,
-    ) {
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+    let tp_result = run_take_profit_checks(&ctx, risk_config, &mut trade_position);
+    if matches!(tp_result, ExitResult::Exit { .. }) {
+        return finalize_exit(
+            trading_state,
+            trade_position,
+            candle,
+            signal,
+            &ctx,
+            tp_result,
+        );
     }
 
     // 更新仓位状态（三级止盈系统可能修改了级别和移动止损）
@@ -662,50 +710,20 @@ pub fn check_risk_config_with_r_system(
     }
 
     // ========================================================================
-    // 止盈检查
+    // 止盈检查（复用公共检查链）
     // ========================================================================
 
-    // 8. 三级ATR止盈（同时更新级别）
-    if let result @ ExitResult::Exit { .. } = update_atr_tiered_levels(&ctx, &mut trade_position) {
+    let tp_result = run_take_profit_checks(&ctx, risk_config, &mut trade_position);
+    if matches!(tp_result, ExitResult::Exit { .. }) {
         r_runtime.r_state = None;
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 9. ATR比例止盈
-    if let result @ ExitResult::Exit { .. } = check_atr_ratio_take_profit(
-        &ctx,
-        risk_config.atr_take_profit_ratio,
-        trade_position.atr_take_ratio_profit_price,
-    ) {
-        r_runtime.r_state = None;
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 10. 固定信号线比例止盈
-    if let result @ ExitResult::Exit { .. } =
-        check_fixed_take_profit(&ctx, trade_position.fixed_take_profit_price)
-    {
-        r_runtime.r_state = None;
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 11. 动态止盈（做多/做空）
-    if let result @ ExitResult::Exit { .. } = check_dynamic_take_profit(
-        &ctx,
-        trade_position.long_signal_take_profit_price,
-        trade_position.short_signal_take_profit_price,
-    ) {
-        r_runtime.r_state = None;
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 12. 逆势回调止盈
-    if let result @ ExitResult::Exit { .. } = check_counter_trend_take_profit(
-        &ctx,
-        trade_position.counter_trend_pullback_take_profit_price,
-    ) {
-        r_runtime.r_state = None;
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
+        return finalize_exit(
+            trading_state,
+            trade_position,
+            candle,
+            signal,
+            &ctx,
+            tp_result,
+        );
     }
 
     // 更新仓位状态

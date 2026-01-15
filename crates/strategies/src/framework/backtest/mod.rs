@@ -7,6 +7,7 @@ pub mod position;
 pub mod r_system;
 pub mod recording;
 pub mod risk;
+pub mod shadow_trading;
 pub mod signal;
 pub mod trait_impl;
 pub mod types;

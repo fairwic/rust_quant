@@ -1,7 +1,32 @@
+//! # 回测框架核心类型
+//!
+//! 该模块定义了回测系统所需的核心数据结构，按功能分为以下几组：
+//!
+//! ## 结果类型
+//! - [`BackTestResult`] - 回测整体结果
+//! - [`TradeRecord`] - 单笔交易记录
+//! - [`FilteredSignal`] - 被过滤信号记录
+//!
+//! ## 信号类型
+//! - [`SignalResult`] - 策略信号输出
+//! - [`ShadowTrade`] - 影子交易状态
+//!
+//! ## 仓位类型
+//! - [`TradePosition`] - 持仓详情
+//! - [`TradingState`] - 回测交易状态
+//!
+//! ## 配置类型
+//! - [`BasicRiskStrategyConfig`] - 风控配置
+//! - [`MoveStopLoss`] - 移动止损
+
 use super::super::types::TradeSide;
 use rust_quant_indicators::trend::counter_trend::CounterTrendSignalResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+// ============================================================================
+// 回测结果类型
+// ============================================================================
 
 /// 回测结果
 #[derive(Debug, Deserialize, Serialize)]
@@ -60,6 +85,10 @@ pub struct TradeRecord {
     pub signal_result: Option<String>,
 }
 
+// ============================================================================
+// 信号类型
+// ============================================================================
+
 /// 信号结果
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SignalResult {
@@ -113,6 +142,10 @@ pub struct SignalResult {
     /// 信号方向
     pub direction: rust_quant_domain::SignalDirection,
 }
+
+// ============================================================================
+// 过滤信号与影子交易类型
+// ============================================================================
 
 /// 被过滤的信号记录（用于分析验证）
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -199,6 +232,10 @@ impl CounterTrendSignalResult for SignalResult {
         self.counter_trend_pullback_take_profit_price = price;
     }
 }
+
+// ============================================================================
+// 仓位与状态类型
+// ============================================================================
 
 /// 持仓信息
 #[derive(Debug, Clone, Default)]
@@ -291,6 +328,10 @@ impl Default for TradingState {
         }
     }
 }
+
+// ============================================================================
+// 配置类型
+// ============================================================================
 
 /// 止盈止损策略配置
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]

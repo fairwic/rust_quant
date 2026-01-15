@@ -99,14 +99,69 @@ pub fn open_long_position(
     record_trade_entry(state, PositionSide::Long.as_str().to_owned(), signal);
 }
 
+// ============================================================================
+// 止盈止损设置 - 公共逻辑
+// ============================================================================
+
+/// 设置止盈止损价格的公共逻辑（Long/Short共用）
+///
+/// 处理：信号K线止损、ATR止损、移动止损、逆势回调止盈、三级止盈价格
+fn set_stop_close_price_common(
+    risk_config: &BasicRiskStrategyConfig,
+    signal: &SignalResult,
+    position: &mut TradePosition,
+) {
+    // 1. 信号K线止损
+    if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
+        position.signal_kline_stop_close_price = signal.signal_kline_stop_loss_price;
+    }
+
+    // 2. ATR止损
+    if let Some(p) = signal.atr_stop_loss_price {
+        position.atr_stop_loss_price = Some(p);
+    }
+
+    // 3. 移动止损触发价格
+    if risk_config
+        .is_move_stop_open_price_when_touch_price
+        .unwrap_or(false)
+    {
+        position.move_stop_open_price_when_touch_price =
+            signal.move_stop_open_price_when_touch_price;
+    }
+
+    // 4. 逆势回调止盈
+    if risk_config
+        .is_counter_trend_pullback_take_profit
+        .unwrap_or(false)
+        && signal.counter_trend_pullback_take_profit_price.is_some()
+    {
+        position.counter_trend_pullback_take_profit_price =
+            signal.counter_trend_pullback_take_profit_price;
+    }
+
+    // 5. 三级止盈价格
+    if signal.atr_take_profit_level_1.is_some() {
+        position.atr_take_profit_level_1 = signal.atr_take_profit_level_1;
+        position.atr_take_profit_level_2 = signal.atr_take_profit_level_2;
+        position.atr_take_profit_level_3 = signal.atr_take_profit_level_3;
+        position.reached_take_profit_level = 0;
+    }
+}
+
+// ============================================================================
+// 止盈止损设置 - Long/Short 特定逻辑
+// ============================================================================
+
 pub fn set_long_stop_close_price(
     risk_config: BasicRiskStrategyConfig,
     signal: &SignalResult,
     temp_trade_position: &mut TradePosition,
 ) {
-    // 默认兼容旧行为；启用后要求止盈方向正确，避免触发“止盈”但实际亏损
+    // ============ Long特有逻辑 ============
+
+    // 1. 止盈方向验证（做多止盈价格必须高于开仓价）
     if risk_config.validate_signal_tp.unwrap_or(false) {
-        // 做多止盈价格必须高于开仓价，否则触发"止盈"但实际亏损
         if let Some(tp_price) = signal.long_signal_take_profit_price {
             if tp_price > temp_trade_position.open_price {
                 temp_trade_position.long_signal_take_profit_price = Some(tp_price);
@@ -115,75 +170,24 @@ pub fn set_long_stop_close_price(
     } else {
         temp_trade_position.long_signal_take_profit_price = signal.long_signal_take_profit_price;
     }
-    // 如果信号k线路止损
-    if let Some(is_used_signal_k_line_stop_loss) = risk_config.is_used_signal_k_line_stop_loss {
-        if is_used_signal_k_line_stop_loss {
-            temp_trade_position.signal_kline_stop_close_price = signal.signal_kline_stop_loss_price;
-        }
-    }
-    // 如果atr止盈，则使用atr盈亏比止盈
-    // 如果启用了atr止盈
-    // if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {
-    //     if atr_take_profit_ratio > 0.0 {
-    //         if signal.atr_stop_loss_price.is_none() {
-    //             error!("atr_stop_loss_price is none");
-    //         }
-    //         let atr_stop_loss_price = signal.atr_stop_loss_price.unwrap();
-    //         let diff_price = (atr_stop_loss_price - signal.open_price).abs();
 
-    //         temp_trade_position.atr_take_ratio_profit_price =
-    //             Some(signal.open_price + (diff_price * atr_take_profit_ratio));
-    //     }
-    // }
-    //atr止损
-    if let Some(p) = signal.atr_stop_loss_price {
-        temp_trade_position.atr_stop_loss_price = Some(p);
-    }
-    // 如果启用了移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近,则设置移动止损价格
-    if let Some(is_move_stop_open_price_when_touch_price) =
-        risk_config.is_move_stop_open_price_when_touch_price
-    {
-        if is_move_stop_open_price_when_touch_price {
-            temp_trade_position.move_stop_open_price_when_touch_price =
-                signal.move_stop_open_price_when_touch_price;
-        }
-    }
-
-    // 如果启用了固定比例止盈,则设置固定比例止盈价格
+    // 2. 固定比例止盈（Long: open_price + diff * ratio）
     if let Some(fixed_take_profit_ratio) = risk_config.fixed_signal_kline_take_profit_ratio {
         if fixed_take_profit_ratio > 0.0 {
-            if signal.signal_kline_stop_loss_price.is_none() {
-                error!("signal_kline_stop_loss_price is none");
-            }
             if let Some(p) = signal.signal_kline_stop_loss_price {
                 temp_trade_position.signal_high_low_diff = (p - signal.open_price).abs();
+                temp_trade_position.atr_take_ratio_profit_price = Some(
+                    signal.open_price
+                        + temp_trade_position.signal_high_low_diff * fixed_take_profit_ratio,
+                );
             } else {
                 error!("signal_kline_stop_loss_price is none");
             }
-
-            temp_trade_position.atr_take_ratio_profit_price = Some(
-                signal.open_price
-                    + temp_trade_position.signal_high_low_diff * fixed_take_profit_ratio,
-            );
-        }
-    }
-    // 如果启用了逆势回调止盈，且均线是空头排列时做多
-    if let Some(is_counter_trend) = risk_config.is_counter_trend_pullback_take_profit {
-        if is_counter_trend && signal.counter_trend_pullback_take_profit_price.is_some() {
-            // 检查是否是空头排列（逆势做多）
-            // 设置逆势回调止盈价格
-            temp_trade_position.counter_trend_pullback_take_profit_price =
-                signal.counter_trend_pullback_take_profit_price;
         }
     }
 
-    // 设置三级止盈价格
-    if signal.atr_take_profit_level_1.is_some() {
-        temp_trade_position.atr_take_profit_level_1 = signal.atr_take_profit_level_1;
-        temp_trade_position.atr_take_profit_level_2 = signal.atr_take_profit_level_2;
-        temp_trade_position.atr_take_profit_level_3 = signal.atr_take_profit_level_3;
-        temp_trade_position.reached_take_profit_level = 0;
-    }
+    // ============ 公共逻辑 ============
+    set_stop_close_price_common(&risk_config, signal, temp_trade_position);
 }
 
 /// 开空仓
@@ -233,9 +237,10 @@ pub fn set_short_stop_close_price(
     signal: &SignalResult,
     temp_trade_position: &mut TradePosition,
 ) {
-    // 默认兼容旧行为；启用后要求止盈方向正确，避免触发“止盈”但实际亏损
+    // ============ Short特有逻辑 ============
+
+    // 1. 止盈方向验证（做空止盈价格必须低于开仓价）
     if risk_config.validate_signal_tp.unwrap_or(false) {
-        // 做空止盈价格必须低于开仓价，否则触发"止盈"但实际亏损
         if let Some(tp_price) = signal.short_signal_take_profit_price {
             if tp_price < temp_trade_position.open_price {
                 temp_trade_position.short_signal_take_profit_price = Some(tp_price);
@@ -244,16 +249,12 @@ pub fn set_short_stop_close_price(
     } else {
         temp_trade_position.short_signal_take_profit_price = signal.short_signal_take_profit_price;
     }
-    //atr比例止盈
-    // 如果启用了atr止盈
+
+    // 2. ATR比例止盈（Short: open_price - diff * ratio）
     if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {
         if atr_take_profit_ratio > 0.0 {
-            if signal.atr_stop_loss_price.is_none() {
-                error!("atr_stop_loss_price is none");
-            }
             if let Some(atr_stop_loss_price) = signal.atr_stop_loss_price {
                 let diff_price = (atr_stop_loss_price - signal.open_price).abs();
-
                 temp_trade_position.atr_take_ratio_profit_price =
                     Some(signal.open_price - (diff_price * atr_take_profit_ratio));
             } else {
@@ -262,59 +263,8 @@ pub fn set_short_stop_close_price(
         }
     }
 
-    //atr止损
-    if let Some(p) = signal.atr_stop_loss_price {
-        temp_trade_position.atr_stop_loss_price = Some(p);
-    }
-
-    // 如果启用了设置预止损价格,则根据开仓方向设置预止损价格
-    if let Some(is_used_signal_k_line_stop_loss) = risk_config.is_used_signal_k_line_stop_loss {
-        if is_used_signal_k_line_stop_loss {
-            temp_trade_position.signal_kline_stop_close_price = signal.signal_kline_stop_loss_price;
-        }
-    }
-    // 如果启用了移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近,则设置移动止损价格
-    if let Some(is_move_stop_open_price_when_touch_price) =
-        risk_config.is_move_stop_open_price_when_touch_price
-    {
-        if is_move_stop_open_price_when_touch_price {
-            temp_trade_position.move_stop_open_price_when_touch_price =
-                signal.move_stop_open_price_when_touch_price;
-        }
-    }
-
-    // 如果启用了按比例止盈,（开仓价格-止损价格）*比例
-    // if let Some(fixe_take_profit_ratio) = risk_config.fixed_signal_kline_take_profit_ratio {
-    //     if fixe_take_profit_ratio > 0.0 {
-    //         if signal.signal_kline_stop_loss_price.is_none() {
-    //             temp_trade_position.signal_high_low_diff =
-    //                 (signal.signal_kline_stop_loss_price.unwrap() - signal.open_price).abs();
-    //             temp_trade_position.atr_take_ratio_profit_price = Some(
-    //                 signal.open_price
-    //                     - temp_trade_position.signal_high_low_diff * fixe_take_profit_ratio,
-    //             );
-    //         }
-    //         error!("signal_kline_stop_loss_price is none");
-    //     }
-    // }
-
-    // 如果启用了逆势回调止盈，且均线是多头排列时做空
-    if let Some(is_counter_trend) = risk_config.is_counter_trend_pullback_take_profit {
-        if is_counter_trend && signal.counter_trend_pullback_take_profit_price.is_some() {
-            // 检查是否是多头排列（逆势做空）
-            // 设置逆势回调止盈价格
-            temp_trade_position.counter_trend_pullback_take_profit_price =
-                signal.counter_trend_pullback_take_profit_price;
-        }
-    }
-
-    // 设置三级止盈价格
-    if signal.atr_take_profit_level_1.is_some() {
-        temp_trade_position.atr_take_profit_level_1 = signal.atr_take_profit_level_1;
-        temp_trade_position.atr_take_profit_level_2 = signal.atr_take_profit_level_2;
-        temp_trade_position.atr_take_profit_level_3 = signal.atr_take_profit_level_3;
-        temp_trade_position.reached_take_profit_level = 0;
-    }
+    // ============ 公共逻辑 ============
+    set_stop_close_price_common(&risk_config, signal, temp_trade_position);
 }
 
 /// 平仓

@@ -126,4 +126,4 @@ rust-quant-ai-analysis = { path = "crates/ai-analysis" }
 rust-quant-cli = { path = "crates/rust-quant-cli" }
 
 [patch.crates-io]
-okx = { path = "okx" }
+okx = { path = "okx_rs" }
