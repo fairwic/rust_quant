@@ -2,9 +2,8 @@ use anyhow::Result;
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::Position;
 use okx::OkxAccount;
-use rust_quant_core::error::AppError;
 use serde_json::json;
-use tracing::{error, info};
+use tracing::info;
 
 pub struct PositionService {}
 

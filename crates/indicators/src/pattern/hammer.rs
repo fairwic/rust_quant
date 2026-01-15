@@ -1,5 +1,4 @@
 use rust_quant_common::CandleItem;
-use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergence};
 
 /// 锤子/上吊线形态指标
 #[derive(Debug, Clone)]

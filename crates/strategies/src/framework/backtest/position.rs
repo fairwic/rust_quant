@@ -104,7 +104,13 @@ pub fn set_long_stop_close_price(
     signal: &SignalResult,
     temp_trade_position: &mut TradePosition,
 ) {
-    temp_trade_position.long_signal_take_profit_price = signal.long_signal_take_profit_price;
+    // 做多止盈价格必须高于开仓价，否则触发"止盈"但实际亏损
+    if let Some(tp_price) = signal.long_signal_take_profit_price {
+        if tp_price > temp_trade_position.open_price {
+            temp_trade_position.long_signal_take_profit_price = Some(tp_price);
+        }
+        // 如果止盈价 <= 开仓价，忽略这个无效的止盈价格
+    }
     // 如果信号k线路止损
     if let Some(is_used_signal_k_line_stop_loss) = risk_config.is_used_signal_k_line_stop_loss {
         if is_used_signal_k_line_stop_loss {
@@ -223,7 +229,13 @@ pub fn set_short_stop_close_price(
     signal: &SignalResult,
     temp_trade_position: &mut TradePosition,
 ) {
-    temp_trade_position.short_signal_take_profit_price = signal.short_signal_take_profit_price;
+    // 做空止盈价格必须低于开仓价，否则触发"止盈"但实际亏损
+    if let Some(tp_price) = signal.short_signal_take_profit_price {
+        if tp_price < temp_trade_position.open_price {
+            temp_trade_position.short_signal_take_profit_price = Some(tp_price);
+        }
+        // 如果止盈价 >= 开仓价，忽略这个无效的止盈价格
+    }
     //atr比例止盈
     // 如果启用了atr止盈
     if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {

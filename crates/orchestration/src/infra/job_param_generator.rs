@@ -1,10 +1,10 @@
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
-    default_extreme_k_filter, default_chase_confirm_config, default_macd_signal_config,
-    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig,
-    ExtremeKFilterConfig, FairValueGapConfig, FakeBreakoutConfig, KlineHammerConfig,
-    LegDetectionConfig, MarketStructureConfig, PremiumDiscountConfig, RangeFilterConfig,
-    RsiSignalConfig, VegasStrategy, VolumeSignalConfig, MacdSignalConfig,
+    default_chase_confirm_config, default_extreme_k_filter, default_macd_signal_config,
+    EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, ExtremeKFilterConfig,
+    FairValueGapConfig, FakeBreakoutConfig, KlineHammerConfig, LegDetectionConfig,
+    MacdSignalConfig, MarketStructureConfig, PremiumDiscountConfig, RangeFilterConfig,
+    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
 };
 use rust_quant_indicators::volatility::BollingBandsSignalConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
@@ -315,11 +315,11 @@ impl ParamGenerator {
             let rp_size = self.rsi_periods.len();
             let rob_size = self.rsi_over_buy_sell.len();
 
-            let mlp_size = self.max_loss_percent.len();
-            let pt_size = self.take_profit_ratios.len();
-            let mst_size = self.is_move_stop_loss.len();
-            let usklsl_size = self.is_used_signal_k_line_stop_loss.len();
-            let mstoptp_size = self.is_move_stop_open_price_when_touch_price.len();
+            let _mlp_size = self.max_loss_percent.len();
+            let _pt_size = self.take_profit_ratios.len();
+            let _mst_size = self.is_move_stop_loss.len();
+            let _usklsl_size = self.is_used_signal_k_line_stop_loss.len();
+            let _mstoptp_size = self.is_move_stop_open_price_when_touch_price.len();
             let fsktpr_size = self.fix_signal_kline_take_profit_ratios.len();
             index /= fsktpr_size;
             let i_bb_p = index % bb_p_size;
@@ -581,9 +581,9 @@ impl NweParamGenerator {
             idx /= stc_d1_length_len;
             let i_stc_d2_length = idx % stc_d2_length_len;
             idx /= stc_d2_length_len;
-            let i_rp = idx % rp_len;
+            let _i_rp = idx % rp_len;
             idx /= rp_len;
-            let i_rob = idx % rob_len;
+            let _i_rob = idx % rob_len;
             idx /= rob_len;
             let i_ap = idx % ap_len;
             idx /= ap_len;

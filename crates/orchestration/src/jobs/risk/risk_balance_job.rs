@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Context, Result};
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::SetLeverageRequest;
-use okx::dto::asset_dto::{AssetBalance, TransferOkxReqDto};
+use okx::dto::asset_dto::TransferOkxReqDto;
 use okx::dto::trade_dto::TdModeEnum;
 use okx::dto::EnumToStrTrait;
 use okx::dto::PositionSide;

@@ -3,7 +3,7 @@
 //! 负责策略执行前后的风控检查
 
 use anyhow::Result;
-use tracing::{info, warn};
+use tracing::info;
 
 use rust_quant_domain::SignalResult;
 use rust_quant_strategies::framework::config::StrategyConfig;
@@ -65,6 +65,7 @@ impl RiskManagementService {
     /// 检查持仓限制
     ///
     /// ⏳ P1: 待实现
+    #[allow(dead_code)]
     async fn check_position_limit(&self, inst_id: &str, _signal: &SignalResult) -> Result<bool> {
         // TODO: 查询当前持仓
         // TODO: 检查最大持仓限制
@@ -76,6 +77,7 @@ impl RiskManagementService {
     /// 检查账户风险
     ///
     /// ⏳ P1: 待实现
+    #[allow(dead_code)]
     async fn check_account_risk(&self, _signal: &SignalResult) -> Result<bool> {
         // TODO: 查询账户余额
         // TODO: 检查保证金充足性
@@ -87,6 +89,7 @@ impl RiskManagementService {
     /// 检查交易频率
     ///
     /// ⏳ P1: 待实现
+    #[allow(dead_code)]
     async fn check_trading_frequency(&self, inst_id: &str) -> Result<bool> {
         // TODO: 查询最近交易记录
         // TODO: 检查交易频率限制

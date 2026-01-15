@@ -4,7 +4,7 @@ use rust_quant_core::database::get_db_pool;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::backtest::PositionStats;
 

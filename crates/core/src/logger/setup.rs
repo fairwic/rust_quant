@@ -8,11 +8,10 @@ use tracing::{info, Event, Level, Subscriber};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::{fmt, EnvFilter, FmtSubscriber, Layer, Registry};
+use tracing_subscriber::{fmt, EnvFilter, Layer, Registry};
 
 // 修改导入路径
 use crate::config::email;
-use fast_log::Config;
 
 // 邮件发送配置
 #[derive(Debug, Clone)]

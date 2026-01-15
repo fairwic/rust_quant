@@ -78,6 +78,7 @@ pub async fn sync_latest_announcements() -> Result<()> {
 /// 检查是否是重要公告
 ///
 /// ⏳ P1: 实现公告重要性判断逻辑
+#[allow(dead_code)]
 fn is_important(_announcement: &()) -> bool {
     // TODO: 实现判断逻辑
     // - 检查关键词（上线、下线、维护）

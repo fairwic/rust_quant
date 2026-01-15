@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-use std::fmt;
 use thiserror::Error;
 
 use crate::volatility::atr::ATR;

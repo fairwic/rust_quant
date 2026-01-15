@@ -1,7 +1,4 @@
-use dotenv;
 use rust_quant_common::CandleItem;
-use rust_quant_core::database::get_db_pool;
-use rust_quant_core::logger::setup_logging;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 /// 公平价值缺口数据

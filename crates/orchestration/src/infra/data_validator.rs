@@ -4,7 +4,7 @@
 //! 用于验证K线数据的完整性和正确性
 
 use anyhow::{anyhow, Result};
-use tracing::{debug, error};
+use tracing::debug;
 
 use rust_quant_market::models::CandlesEntity;
 // time工具函数需要从common导入
@@ -43,7 +43,7 @@ pub fn valid_newest_candle_data(candle: &CandlesEntity, period: &str) -> bool {
 /// # Returns
 /// - `Ok(())` - 数据连续
 /// - `Err` - 数据不连续，返回缺失的时间戳
-pub fn valid_candles_continuity(candles: &[CandlesEntity], period: &str) -> Result<()> {
+pub fn valid_candles_continuity(candles: &[CandlesEntity], _period: &str) -> Result<()> {
     if candles.len() < 2 {
         return Ok(());
     }
@@ -51,7 +51,7 @@ pub fn valid_candles_continuity(candles: &[CandlesEntity], period: &str) -> Resu
     // 验证头尾数据正确性
     let first_timestamp = candles.first().unwrap().ts;
     let last_timestamp = candles.last().unwrap().ts;
-    let difference = last_timestamp - first_timestamp;
+    let _difference = last_timestamp - first_timestamp;
 
     // ⏳ P1: 时间解析函数待实现
     // let period_milliseconds = time::parse_period_to_mill(period)?;
@@ -63,7 +63,7 @@ pub fn valid_candles_continuity(candles: &[CandlesEntity], period: &str) -> Resu
     // 验证数量是否匹配
     if expected_length != (candles.len() - 1) as i64 {
         // 找出不连续的点
-        let mut discontinuities: Vec<i64> = Vec::new();
+        let discontinuities: Vec<i64> = Vec::new();
 
         // for window in candles.windows(2) {
         //     let current = &window[0];

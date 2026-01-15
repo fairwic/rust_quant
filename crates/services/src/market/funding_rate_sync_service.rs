@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::public_data::OkxPublicData;
 use rust_quant_core::database::get_db_pool;
@@ -7,7 +7,7 @@ use rust_quant_infrastructure::repositories::funding_rate_repository::SqlxFundin
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// 资金费率数据同步服务
 ///
@@ -60,17 +60,17 @@ impl FundingRateSyncService {
         // 列表按时间倒序排列 (最新在前)
         // after = time, 返回 < time 的数据 (更旧) -> 向后翻页
         // before = time, 返回 > time 的数据 (更新) -> 向前翻页
-        
+
         // 增量策略：
         // 如果 DB 有数据，取最新的 time，请求 > time 的数据 (before = latest_time)
         // 如果 DB 无数据，不用做增量，直接等下一次 loop 或留给 historical 初始化
-        
+
         let target_ts = latest.map(|r| r.funding_time).unwrap_or(0);
-        
+
         // 如果没有数据，增量部分其实就是拉取最新的几条，可以复用历史逻辑的第一次 fetch
         if target_ts == 0 {
-             info!("🆕 初始化同步 (无历史记录): {}", inst_id);
-             return self.fetch_and_save(inst_id, None, None).await.map(|_| ());
+            info!("🆕 初始化同步 (无历史记录): {}", inst_id);
+            return self.fetch_and_save(inst_id, None, None).await.map(|_| ());
         }
 
         info!("⏩ 增量同步: {}, last_time={}", inst_id, target_ts);
@@ -78,17 +78,20 @@ impl FundingRateSyncService {
         // 尝试获取比 target_ts 更新的数据
         // 使用 before 参数: 返回 > target_ts 的数据
         let limit = Some(100);
-        let mut has_more = true;
-        let mut min_ts_in_batch = 0; // 用于分页，但在向前同步中，通常不需要持续翻页，因为资金费率8小时一次，差距不会太大
-        
+        let _has_more = true;
+        let _min_ts_in_batch = 0; // 用于分页，但在向前同步中，通常不需要持续翻页，因为资金费率8小时一次，差距不会太大
+
         // 注意：get_funding_rate_history API 签名: before, after, limit
         // 假设 API 实现正确映射了 query param
         // before: < timestamp ? NO, check docs.
         // OKX Docs: "Pagination of data to return records newer than the requested fundingTime." (for before?)
         // Let's assume standard cursor pagination: before -> newer, after -> older.
-        
-        let rates = self.api.get_funding_rate_history(inst_id, Some(target_ts), None, limit).await?;
-        
+
+        let rates = self
+            .api
+            .get_funding_rate_history(inst_id, Some(target_ts), None, limit)
+            .await?;
+
         if !rates.is_empty() {
             info!("增量更新: 获取到 {} 条数据", rates.len());
             self.save_batch(rates).await?;
@@ -107,8 +110,11 @@ impl FundingRateSyncService {
         loop {
             // 获取比 after_ts 更旧的数据
             tokio::time::sleep(Duration::from_millis(5000)).await;
-            let rates = self.api.get_funding_rate_history(inst_id, None, after_ts, Some(100)).await?;
-            
+            let rates = self
+                .api
+                .get_funding_rate_history(inst_id, None, after_ts, Some(100))
+                .await?;
+
             if rates.is_empty() {
                 info!("历史回填完成: {} (无更多数据)", inst_id);
                 break;
@@ -123,14 +129,21 @@ impl FundingRateSyncService {
 
             info!("回填保存 {} 条, cursor updated to {}", count, last_ts);
             after_ts = Some(last_ts);
-
         }
 
         Ok(())
     }
 
-    async fn fetch_and_save(&self, inst_id: &str, before: Option<i64>, after: Option<i64>) -> Result<usize> {
-        let rates = self.api.get_funding_rate_history(inst_id, before, after, Some(100)).await?;
+    async fn fetch_and_save(
+        &self,
+        inst_id: &str,
+        before: Option<i64>,
+        after: Option<i64>,
+    ) -> Result<usize> {
+        let rates = self
+            .api
+            .get_funding_rate_history(inst_id, before, after, Some(100))
+            .await?;
         let count = rates.len();
         if count > 0 {
             self.save_batch(rates).await?;
@@ -138,11 +151,14 @@ impl FundingRateSyncService {
         Ok(count)
     }
 
-    async fn save_batch(&self, rates: Vec<okx::dto::public_data::public_data_dto::FundingRateHistoryOkxRespDto>) -> Result<()> {
+    async fn save_batch(
+        &self,
+        rates: Vec<okx::dto::public_data::public_data_dto::FundingRateHistoryOkxRespDto>,
+    ) -> Result<()> {
         use rust_quant_domain::entities::funding_rate::FundingRate;
-        
+
         for rate_dto in rates {
-             let entity = FundingRate {
+            let entity = FundingRate {
                 id: None,
                 inst_id: rate_dto.inst_id.clone(),
                 funding_rate: f64::from_str(&rate_dto.funding_rate).unwrap_or(0.0),
@@ -155,11 +171,11 @@ impl FundingRateSyncService {
                 sett_funding_rate: None,
                 sett_state: None,
                 premium: None,
-                ts: 0, 
+                ts: 0,
                 realized_rate: Some(f64::from_str(&rate_dto.realized_rate).unwrap_or(0.0)),
                 interest_rate: None,
             };
-            
+
             // 忽略重复键错误 (insert ignore 语义通过 save 的 on duplicate updates 实现)
             if let Err(e) = self.repo.save(entity).await {
                 error!("保存资金费率失败: {}", e);

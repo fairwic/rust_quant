@@ -4,7 +4,7 @@
 //! 适配新的DDD架构
 
 use anyhow::Result;
-use tracing::{error, info};
+use tracing::info;
 
 // TODO: 需要PositionService和OrderService
 // use rust_quant_services::trading::{PositionService, OrderService};
@@ -94,6 +94,7 @@ impl RiskPositionJob {
     /// 检查止损价格设置
     ///
     /// ⏳ P1: 待实现
+    #[allow(dead_code)]
     async fn check_stop_loss(&self, _position: &()) -> Result<()> {
         // TODO: 检查持仓是否设置止损
         // TODO: 如果未设置，计算并设置默认止损
@@ -103,6 +104,7 @@ impl RiskPositionJob {
     /// 检查未成交订单
     ///
     /// ⏳ P1: 待实现
+    #[allow(dead_code)]
     async fn check_pending_orders(&self, _position: &()) -> Result<()> {
         // TODO: 获取持仓相关的未成交订单
         // TODO: 检查订单合理性
@@ -112,6 +114,7 @@ impl RiskPositionJob {
     /// 检查风险阈值
     ///
     /// ⏳ P1: 待实现
+    #[allow(dead_code)]
     async fn check_risk_threshold(&self, _position: &()) -> Result<()> {
         // TODO: 检查持仓盈亏
         // TODO: 超过阈值告警

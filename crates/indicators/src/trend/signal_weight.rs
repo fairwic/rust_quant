@@ -1,4 +1,3 @@
-use hmac::digest::typenum::Min;
 use serde::{Deserialize, Serialize};
 
 // 信号类型枚举
@@ -359,7 +358,7 @@ impl SignalWeightsConfig {
             }
             SignalCondition::Volume {
                 is_increasing,
-                ratio,
+                ratio: _,
             } => {
                 if is_increasing {
                     Some(CheckConditionResult {
@@ -376,7 +375,7 @@ impl SignalWeightsConfig {
                 current,
                 oversold,
                 overbought,
-                is_valid,
+                is_valid: _,
             } => {
                 if current < oversold {
                     Some(CheckConditionResult {

@@ -1,16 +1,13 @@
 use rust_quant_common::constants;
 use rust_quant_risk::order::SwapOrderEntity;
 use rust_quant_strategies::StrategyType;
-use std::cmp::PartialEq;
 
-use rust_quant_common::utils::time::{self, now_timestamp_mills};
 
 pub struct OrderSignal {
     pub inst_id: String,
     pub should_sell: bool,
     pub price: f64,
 }
-use chrono::Local;
 use rust_quant_common::AppError;
 use rust_quant_strategies::strategy_common::{BasicRiskStrategyConfig, SignalResult};
 // use core::time; // ⭐ 注释掉，与time模块冲突
@@ -23,8 +20,7 @@ use okx::dto::trade::trade_dto::{
 };
 use okx::dto::trade_dto::{CloseOrderReqDto, OrdTypeEnum};
 use okx::dto::PositionSide;
-use okx::{Error, OkxAccount, OkxClient, OkxTrade};
-use serde::de;
+use okx::{Error, OkxAccount, OkxTrade};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
@@ -606,7 +602,7 @@ impl SwapOrderService {
 }
 
 mod test {
-    use super::*;
+    
 
     #[tokio::test]
     async fn test_get_place_order_num_optimized() {

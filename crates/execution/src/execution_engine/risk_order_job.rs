@@ -1,19 +1,10 @@
 // 风险监控任务
 
 use crate::order_manager::order_service::OrderService;
-use anyhow::anyhow;
 use okx::api::api_trait::OkxApiTrait;
-use okx::dto::account_dto::SetLeverageRequest;
-use okx::dto::asset_dto::{AssetBalance, TransferOkxReqDto};
-use okx::dto::trade_dto::{OrderDetailRespDto, TdModeEnum};
-use okx::dto::PositionSide;
-use okx::enums::account_enums::AccountType;
-use okx::{OkxAccount, OkxAsset};
+use okx::dto::trade_dto::OrderDetailRespDto;
 use rust_quant_common::AppError;
-use rust_quant_risk::position::position_service::PositionService;
-use std::str::FromStr;
-use tracing::{debug, error, info};
-use tracing::{span, Level};
+use tracing::info;
 
 // 常量定义
 

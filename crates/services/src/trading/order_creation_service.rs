@@ -73,7 +73,7 @@ impl OrderCreationService {
         );
 
         // 4. 创建订单对象
-        let order = self.build_order(inst_id, signal, strategy_id, &order_params)?;
+        let _order = self.build_order(inst_id, signal, strategy_id, &order_params)?;
 
         // 5. 保存订单
         // TODO: 通过 OrderRepository 保存
@@ -161,7 +161,7 @@ impl OrderCreationService {
     }
 
     /// 计算订单参数
-    fn calculate_order_params(&self, inst_id: &str, signal: &SignalResult) -> Result<OrderParams> {
+    fn calculate_order_params(&self, _inst_id: &str, signal: &SignalResult) -> Result<OrderParams> {
         let price = signal.entry_price.ok_or_else(|| anyhow!("缺少入场价格"))?;
 
         // 计算下单数量
@@ -187,7 +187,7 @@ impl OrderCreationService {
         &self,
         inst_id: &str,
         signal: &SignalResult,
-        strategy_id: i64,
+        _strategy_id: i64,
         params: &OrderParams,
     ) -> Result<Order> {
         // 转换信号方向为订单方向
@@ -222,6 +222,7 @@ impl Default for OrderCreationService {
 // ============================================================================
 
 /// 订单参数
+#[allow(dead_code)]
 struct OrderParams {
     /// 入场价格
     price: f64,

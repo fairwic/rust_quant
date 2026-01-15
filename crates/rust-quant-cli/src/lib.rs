@@ -45,7 +45,7 @@ pub async fn init_scheduler() -> Result<Arc<JobScheduler>> {
     let mut scheduler_opt = SCHEDULER.lock().await;
 
     if scheduler_opt.is_none() {
-        let mut scheduler = JobScheduler::new().await?;
+        let scheduler = JobScheduler::new().await?;
         scheduler.start().await?;
         let arc_scheduler = Arc::new(scheduler);
         *scheduler_opt = Some(Arc::clone(&arc_scheduler));

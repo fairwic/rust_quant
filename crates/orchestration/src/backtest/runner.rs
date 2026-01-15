@@ -181,7 +181,7 @@ impl BacktestRunner {
 
         let random_config = build_default_nwe_random_config(config.max_concurrent);
 
-        let mut progress = match StrategyProgressManager::load_progress(inst_id, period).await? {
+        let progress = match StrategyProgressManager::load_progress(inst_id, period).await? {
             Some(saved) => {
                 if StrategyProgressManager::is_config_changed_nwe(&random_config, &saved) {
                     warn!(
@@ -384,7 +384,7 @@ impl BacktestRunner {
 
         let random_config = RandomStrategyConfig::default();
 
-        let mut progress = match StrategyProgressManager::load_progress(inst_id, period).await? {
+        let progress = match StrategyProgressManager::load_progress(inst_id, period).await? {
             Some(saved) => {
                 if StrategyProgressManager::is_config_changed(&random_config, &saved) {
                     warn!(

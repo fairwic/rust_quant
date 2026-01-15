@@ -14,6 +14,7 @@ use rust_quant_infrastructure::repositories::{
 
 /// 交易所API配置服务
 pub struct ExchangeApiService {
+    #[allow(dead_code)]
     api_repo: Arc<dyn ExchangeApiConfigRepository>,
     strategy_api_repo: Arc<dyn StrategyApiConfigRepository>,
 }

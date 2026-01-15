@@ -4,16 +4,13 @@ use crate::signal_weight::{SignalCondition, SignalDirect, SignalType, SignalWeig
 use crate::volatility::atr::ATR;
 use crate::volatility::bollinger::BollingBandsSignalConfig;
 use rust_quant_common::enums::common::{EnumAsStrTrait, PeriodEnum};
-use rust_quant_common::utils::time as time_util;
 use rust_quant_common::CandleItem;
-use rust_quant_domain::Strategy;
 use rust_quant_domain::{BacktestResult, BasicRiskStrategyConfig, SignalResult};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::debug;
 
 use super::config::*;
-use super::ema_filter::{self, EmaDistanceConfig, EmaDistanceState};
+use super::ema_filter::{self, EmaDistanceConfig};
 use super::fake_breakout::{self, FakeBreakoutConfig};
 use super::indicator_combine::IndicatorCombine;
 use super::signal::*;
@@ -658,6 +655,105 @@ impl VegasStrategy {
                         signal_result.should_sell = Some(false);
                         signal_result.filter_reasons.push("CHASE_CONFIRM_FILTER_SHORT".to_string());
                     }
+                }
+            }
+        }
+
+        // ================================================================
+        // 【新增】TooFar gating：当 EMA 距离过远且波动偏大时，禁止无趋势/逆势开仓（压最大止损）
+        // - 默认开启；设置 TOO_FAR_GATING=0 可关闭
+        // - 默认拦截两类最易吃止损的场景：
+        //   1) 严格规则（来自 ema_distance_filter.should_filter_*）：空头排列 TooFar 且 close>ema3 禁做多；多头排列 TooFar 且 close<ema3 禁做空
+        //   2) 挤压区反向（低布林宽 + 吊人线/锤子线）容易出现“假反转”→ 过滤
+        // - 额外可选拦截“极端 TooFar”：distance_ratio>=0.15 且 bb_width>=0.07
+        //   可用环境变量覆盖：
+        //   - TOO_FAR_GATING_MIN_DISTANCE_RATIO（默认0.15）
+        //   - TOO_FAR_GATING_MIN_BB_WIDTH（默认0.07）
+        //   - TOO_FAR_GATING_SQUEEZE_BB_WIDTH（默认0.02）
+        // ================================================================
+        let too_far_gating_enabled = env::var("TOO_FAR_GATING").map(|v| v != "0").unwrap_or(true);
+        if too_far_gating_enabled && ema_distance_filter.state == ema_filter::EmaDistanceState::TooFar
+        {
+            let min_dist_ratio = env::var("TOO_FAR_GATING_MIN_DISTANCE_RATIO")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.15);
+            let min_bb_width = env::var("TOO_FAR_GATING_MIN_BB_WIDTH")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.07);
+
+            // 1) 严格 TooFar 规则：用于你指出的 “2026-01-07 04:00 不应该做多” 这类场景
+            if signal_result.should_buy.unwrap_or(false) && ema_distance_filter.should_filter_long {
+                signal_result.should_buy = Some(false);
+                signal_result
+                    .filter_reasons
+                    .push("EMA_DISTANCE_TOO_FAR_STRICT_LONG".to_string());
+            }
+            if signal_result.should_sell.unwrap_or(false) && ema_distance_filter.should_filter_short
+            {
+                signal_result.should_sell = Some(false);
+                signal_result
+                    .filter_reasons
+                    .push("EMA_DISTANCE_TOO_FAR_STRICT_SHORT".to_string());
+            }
+
+            let dist_ratio = ema_distance_filter.distance_ratio;
+            let bb_mid = vegas_indicator_signal_values.bollinger_value.middle;
+            let bb_width = if bb_mid > 0.0 {
+                (vegas_indicator_signal_values.bollinger_value.upper
+                    - vegas_indicator_signal_values.bollinger_value.lower)
+                    / bb_mid
+            } else {
+                0.0
+            };
+
+            // 2) 挤压区反向过滤：用于你指出的 “2026-01-13 12:00 不应该做空（吊人线假反转）”
+            let squeeze_bb_width = env::var("TOO_FAR_GATING_SQUEEZE_BB_WIDTH")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.02);
+            let no_trend = !vegas_indicator_signal_values.ema_values.is_long_trend
+                && !vegas_indicator_signal_values.ema_values.is_short_trend;
+            if no_trend && bb_width > 0.0 && bb_width <= squeeze_bb_width {
+                // 挤压区出现“吊人线/短线反转形态”经常是假信号 → 不做空（等待放量/趋势确认）
+                if signal_result.should_sell.unwrap_or(false)
+                    && vegas_indicator_signal_values.kline_hammer_value.is_hanging_man
+                {
+                    signal_result.should_sell = Some(false);
+                    signal_result
+                        .filter_reasons
+                        .push("SQUEEZE_HANGING_MAN_NO_SHORT".to_string());
+                }
+                // 对称：挤压区“锤子线”也容易是假信号 → 不做多
+                if signal_result.should_buy.unwrap_or(false)
+                    && vegas_indicator_signal_values.kline_hammer_value.is_hammer
+                {
+                    signal_result.should_buy = Some(false);
+                    signal_result
+                        .filter_reasons
+                        .push("SQUEEZE_HAMMER_NO_LONG".to_string());
+                }
+            }
+
+            // 3) 极端 TooFar：大幅偏离 + 高波动时，只允许顺势开仓
+            let is_extreme = dist_ratio >= min_dist_ratio && bb_width >= min_bb_width;
+            if is_extreme {
+                let is_long_trend = vegas_indicator_signal_values.ema_values.is_long_trend;
+                let is_short_trend = vegas_indicator_signal_values.ema_values.is_short_trend;
+
+                if signal_result.should_buy.unwrap_or(false) && !is_long_trend {
+                    signal_result.should_buy = Some(false);
+                    signal_result
+                        .filter_reasons
+                        .push("EMA_DISTANCE_TOO_FAR_GATING_LONG".to_string());
+                }
+
+                if signal_result.should_sell.unwrap_or(false) && !is_short_trend {
+                    signal_result.should_sell = Some(false);
+                    signal_result
+                        .filter_reasons
+                        .push("EMA_DISTANCE_TOO_FAR_GATING_SHORT".to_string());
                 }
             }
         }

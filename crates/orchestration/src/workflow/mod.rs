@@ -23,4 +23,3 @@ pub use crate::jobs::data::{
 pub use crate::jobs::risk::{risk_balance_job, risk_position_job};
 
 // 重新导出本地核心类型
-pub use basic::*;

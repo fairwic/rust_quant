@@ -53,12 +53,12 @@ impl IndicatorCombine {
         if let Some(bb) = &self.bollinger_indicator {
             max_period = max_period.max(bb.period);
         }
-        if let Some(rsi) = &self.rsi_indicator {
+        if let Some(_rsi) = &self.rsi_indicator {
             // RsiIndicator 的 length 字段是私有，这里按常规默认使用 14 作为保守值
             // 如果需要精确，请将 RsiIndicator 暴露 length 或提供 getter
             max_period = max_period.max(14);
         }
-        if let Some(vol) = &self.volume_indicator {
+        if let Some(_vol) = &self.volume_indicator {
             // VolumeRatioIndicator 未暴露窗口，采用保守值，或在其结构体中暴露 length/getter
             max_period = max_period.max(20);
         }

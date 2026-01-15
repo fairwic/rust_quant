@@ -12,7 +12,7 @@ use rust_quant_infrastructure::repositories::{
 use tracing::{error, info, warn};
 
 use rust_quant_market::streams;
-use rust_quant_orchestration::workflow::{backtest_runner, data_sync, tickets_job, economic_calendar_job};
+use rust_quant_orchestration::workflow::{backtest_runner, data_sync, tickets_job};
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use std::collections::BTreeSet;
 
@@ -37,6 +37,33 @@ pub async fn run_modes() -> Result<()> {
             .map(|(inst, _)| inst.clone())
             .collect(),
     );
+    // 可选：额外同步的交易对（只影响 IS_RUN_SYNC_DATA_JOB 的数据同步，不影响回测 targets）
+    // 用于 BTC 作为大盘参考等场景：SYNC_EXTRA_INST_IDS="BTC-USDT-SWAP,SOL-USDT-SWAP"
+    let inst_ids = {
+        let mut merged = inst_ids.clone();
+        if let Ok(v) = std::env::var("SYNC_EXTRA_INST_IDS") {
+            let extra: Vec<String> = v
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+            merged.extend(extra);
+        }
+        dedup_strings(merged)
+    };
+    // 可选：仅同步指定交易对（覆盖 inst_ids）
+    // 例：SYNC_ONLY_INST_IDS="BTC-USDT-SWAP"
+    let inst_ids = match std::env::var("SYNC_ONLY_INST_IDS") {
+        Ok(v) if !v.trim().is_empty() => dedup_strings(
+            v.split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect(),
+        ),
+        _ => inst_ids,
+    };
     let periods = dedup_strings(
         backtest_targets
             .iter()
@@ -51,20 +78,23 @@ pub async fn run_modes() -> Result<()> {
     // 1) 数据同步任务（Ticker & Funding Rate）
     if env_is_true("IS_RUN_SYNC_DATA_JOB", false) {
         info!("📡 启动数据同步任务");
-        if let Err(error) = tickets_job::sync_tickers(&inst_ids).await {
-            error!("❌ Ticker同步失败: {}", error);
+        // 快速同步场景可跳过 tickers（例如只想补齐 BTC 4H）
+        if !env_is_true("SYNC_SKIP_TICKERS", false) {
+            if let Err(error) = tickets_job::sync_tickers(&inst_ids).await {
+                error!("❌ Ticker同步失败: {}", error);
+            }
         }
         if let Err(error) = data_sync::sync_market_data(&inst_ids, &periods).await {
             error!("❌ K线数据同步失败: {}", error);
         }
-        
+
         // // 新增：同步资金费率历史
         // // 执行资金费率同步任务
         // use rust_quant_orchestration::workflow::funding_rate_job;
         // if let Err(e) = funding_rate_job::FundingRateJob::sync_funding_rates(&inst_ids).await {
         //         tracing::error!("资金费率历史同步失败: {}", e);
         // }
-        
+
         // // 新增：同步经济日历数据
         // if let Err(e) = economic_calendar_job::EconomicCalendarJob::sync_economic_calendar().await {
         //     tracing::error!("❌ 经济日历同步失败: {}", e);
@@ -117,7 +147,7 @@ fn default_backtest_targets() -> Vec<(String, String)> {
         // ("BTC-USDT-SWAP".to_string(), "5m".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "15m".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "1H".to_string()),
-        // ("BTC-USDT-SWAP".to_string(), "4H".to_string()),
+        ("BTC-USDT-SWAP".to_string(), "4H".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "1Dutc".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "5m".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "15m".to_string()),
@@ -148,7 +178,7 @@ async fn load_backtest_targets_from_db() -> Result<Vec<(String, String)>> {
     let service = create_strategy_config_service();
     let configs = service.load_all_enabled_configs().await?;
 
-    let mut targets: Vec<(String, String)> = configs
+    let targets: Vec<(String, String)> = configs
         .into_iter()
         .filter(|cfg| cfg.strategy_type == StrategyType::Nwe)
         .map(|cfg| (cfg.symbol.clone(), cfg.timeframe.as_str().to_string()))
@@ -494,6 +524,31 @@ pub async fn run() -> Result<()> {
         info!("📡 接收到 {} 信号", signal_name);
     } else {
         run_modes().await?;
+
+        // 数据同步-only 场景可直接退出（避免本地一键 sync 后进程挂起等待信号）
+        // - local 环境默认退出；prod 如需退出可设置 EXIT_AFTER_SYNC=1
+        let sync_only = env_is_true("IS_RUN_SYNC_DATA_JOB", false)
+            && !env_is_true("IS_BACK_TEST", false)
+            && !env_is_true("IS_OPEN_SOCKET", false)
+            && !env_is_true("IS_RUN_REAL_STRATEGY", false);
+        if sync_only {
+            let exit_after_sync = env_is_true("EXIT_AFTER_SYNC", app_env == "local");
+            if exit_after_sync {
+                heartbeat_handle.abort();
+                info!("📡 数据同步已完成，未启用实时/Socket/回测，直接优雅退出");
+                let shutdown_config = crate::GracefulShutdownConfig {
+                    total_timeout_secs: 30,
+                    strategy_stop_timeout_secs: 20,
+                    scheduler_shutdown_timeout_secs: 5,
+                    db_cleanup_timeout_secs: 5,
+                };
+                if let Err(e) = crate::graceful_shutdown_with_config(shutdown_config).await {
+                    error!("❌ 优雅关闭失败: {}", e);
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+        }
 
         // 回测-only 场景直接退出（不等待信号），避免进程挂起
         let backtest_only = env_is_true("IS_BACK_TEST", false)

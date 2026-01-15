@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ta::indicators::BollingerBands;
 
-use crate::trend::sma::Sma;
 use rust_quant_common::types::CandleItem;
-use rust_quant_market::models::CandlesEntity;
-use ta::{DataItem, High, Low, Next};
+use ta::Next;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BollingBandsSignalConfig {
@@ -76,7 +74,7 @@ impl Next<&CandleItem> for BollingBandsPlusIndicator {
             self.consecutive_touch_down_times = 0;
         }
 
-        let mut output = BollingBandsPlusIndicatorOutput {
+        let output = BollingBandsPlusIndicatorOutput {
             upper: bollinger_bands_output.upper,
             lower: bollinger_bands_output.lower,
             average: bollinger_bands_output.average,

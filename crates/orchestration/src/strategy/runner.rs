@@ -15,6 +15,7 @@ use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionServ
 /// 策略执行状态跟踪 - 用于时间戳去重
 #[derive(Debug, Clone)]
 struct StrategyExecutionState {
+    #[allow(dead_code)]
     timestamp: i64,
     start_time: SystemTime,
 }

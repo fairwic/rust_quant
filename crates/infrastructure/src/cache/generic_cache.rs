@@ -2,7 +2,6 @@
 //!
 //! 提供内存和Redis双层缓存能力，支持任意可序列化类型
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

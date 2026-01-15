@@ -49,9 +49,15 @@ pub async fn sync_all_data(inst_ids: &[String], periods: &[String]) -> Result<()
 pub async fn sync_market_data(inst_ids: &[String], periods: &[String]) -> Result<()> {
     info!("📈 同步市场数据...");
 
-    // 调用candles_job完成完整的数据同步（建表、历史回填、增量回填）
     let job = CandlesJob::new();
-    job.sync_all_data(inst_ids, periods).await?;
+    // 默认走全量三段式同步（建表/回填历史/回填增量），但这个流程在已有表时可能很慢。
+    // 设置 SYNC_LATEST_ONLY=1 可只做“增量同步”（用于快速补齐 BTC 大盘数据等场景）。
+    if rust_quant_core::config::env_is_true("SYNC_LATEST_ONLY", false) {
+        job.sync_latest_candles(inst_ids, periods).await?;
+    } else {
+        // 调用candles_job完成完整的数据同步（建表、补历史、补增量）
+        job.sync_all_data(inst_ids, periods).await?;
+    }
 
     Ok(())
 }

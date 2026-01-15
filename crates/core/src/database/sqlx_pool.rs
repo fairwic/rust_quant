@@ -4,8 +4,7 @@
 
 use once_cell::sync::OnceCell;
 use sqlx::{MySql, MySqlPool, Pool};
-use std::time::Duration;
-use tracing::{error, info};
+use tracing::info;
 
 static DB_POOL: OnceCell<Pool<MySql>> = OnceCell::new();
 

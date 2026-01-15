@@ -70,7 +70,7 @@ pub fn save_signal_log_async(
     // 创建日志条目
     let log_entry = SignalLogEntry::new(&inst_id, &period, strategy_type, &signal_result);
 
-    let inst_id_clone = inst_id.clone();
+    let _inst_id_clone = inst_id.clone();
 
     // 异步保存（不阻塞主流程）
     tokio::spawn(async move {

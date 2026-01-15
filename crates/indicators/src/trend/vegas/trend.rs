@@ -1,6 +1,5 @@
 use super::config::EmaTouchTrendSignalConfig;
 use super::signal::{EmaSignalValue, EmaTouchTrendSignalValue};
-use rust_quant_common::utils::time;
 use rust_quant_common::CandleItem;
 
 /// 检查EMA趋势

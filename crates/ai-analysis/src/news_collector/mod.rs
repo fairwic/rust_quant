@@ -36,6 +36,7 @@ pub trait NewsCollector: Send + Sync {
 
 /// CoinDesk 新闻采集器
 pub struct CoinDeskCollector {
+    #[allow(dead_code)]
     api_key: Option<String>,
 }
 
@@ -47,15 +48,15 @@ impl CoinDeskCollector {
 
 #[async_trait]
 impl NewsCollector for CoinDeskCollector {
-    async fn collect_latest(&self, limit: usize) -> anyhow::Result<Vec<NewsArticle>> {
+    async fn collect_latest(&self, _limit: usize) -> anyhow::Result<Vec<NewsArticle>> {
         // TODO: 实现 CoinDesk API 调用
         Ok(vec![])
     }
 
     async fn collect_by_keywords(
         &self,
-        keywords: &[String],
-        limit: usize,
+        _keywords: &[String],
+        _limit: usize,
     ) -> anyhow::Result<Vec<NewsArticle>> {
         // TODO: 实现关键词搜索
         Ok(vec![])

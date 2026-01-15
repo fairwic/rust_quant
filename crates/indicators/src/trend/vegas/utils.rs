@@ -1,6 +1,4 @@
-use rust_quant_common::utils::fibonacci::{
-    FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO, FIBONACCI_ZERO_POINT_TWO_THREE_SIX,
-};
+use rust_quant_common::utils::fibonacci::FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO;
 use rust_quant_common::CandleItem;
 use tracing::debug;
 

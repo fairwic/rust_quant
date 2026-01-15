@@ -4,7 +4,7 @@
 //! 同步精英交易员的多空持仓比和人数比数据
 
 use anyhow::Result;
-use tracing::{error, info};
+use tracing::info;
 
 // TODO: 需要BigData相关的Service
 // use rust_quant_services::market::BigDataService;
@@ -28,7 +28,7 @@ pub async fn init_top_contract(
 ) -> Result<()> {
     info!("🏆 开始初始化精英交易员数据...");
 
-    if let (Some(inst_ids), Some(periods)) = (inst_ids, periods) {
+    if let (Some(_inst_ids), Some(_periods)) = (inst_ids, periods) {
         // ⏳ P1: 集成BigDataTopContractService
         // BigDataTopContractService::init(inst_ids.clone(), periods.clone()).await?;
         // tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -55,7 +55,7 @@ pub async fn sync_top_contract(
 ) -> Result<()> {
     info!("🏆 开始同步精英交易员数据...");
 
-    if let (Some(inst_ids), Some(periods)) = (inst_ids, periods) {
+    if let (Some(_inst_ids), Some(_periods)) = (inst_ids, periods) {
         // ⏳ P1: 集成BigDataTopContractService
         // 同步精英交易员合约多空持仓人数比
         // BigDataTopContractService::sync(inst_ids.clone(), periods.clone()).await?;

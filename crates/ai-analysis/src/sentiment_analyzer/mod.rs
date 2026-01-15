@@ -33,6 +33,7 @@ pub trait SentimentAnalyzer: Send + Sync {
 
 /// OpenAI GPT-4 情绪分析器
 pub struct OpenAISentimentAnalyzer {
+    #[allow(dead_code)]
     api_key: String,
 }
 
@@ -44,7 +45,7 @@ impl OpenAISentimentAnalyzer {
 
 #[async_trait]
 impl SentimentAnalyzer for OpenAISentimentAnalyzer {
-    async fn analyze(&self, text: &str) -> anyhow::Result<SentimentResult> {
+    async fn analyze(&self, _text: &str) -> anyhow::Result<SentimentResult> {
         // TODO: 实现 OpenAI API 调用
         // 使用 GPT-4 分析文本情绪
         Ok(SentimentResult {
@@ -55,7 +56,7 @@ impl SentimentAnalyzer for OpenAISentimentAnalyzer {
         })
     }
 
-    async fn batch_analyze(&self, texts: &[String]) -> anyhow::Result<Vec<SentimentResult>> {
+    async fn batch_analyze(&self, _texts: &[String]) -> anyhow::Result<Vec<SentimentResult>> {
         // TODO: 批量分析（使用并发）
         Ok(vec![])
     }

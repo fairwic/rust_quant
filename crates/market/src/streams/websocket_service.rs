@@ -1,4 +1,4 @@
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use okx::websocket::auto_reconnect_client::AutoReconnectWebsocketClient;
 use std::env;
 use std::sync::Arc;
@@ -96,7 +96,7 @@ pub async fn run_socket_with_strategy_trigger(
     };
     let credentials = Credentials::new(api_key, api_secret, passphrase, sim_trading);
 
-    let mut okx_websocket_client_business = AutoReconnectWebsocketClient::new_business(credentials);
+    let okx_websocket_client_business = AutoReconnectWebsocketClient::new_business(credentials);
 
     let mut private_message_receiver = match okx_websocket_client_business.start().await {
         Ok(rx) => {
@@ -112,7 +112,7 @@ pub async fn run_socket_with_strategy_trigger(
     // 订阅多个k线频道
     for inst_id in inst_ids.iter() {
         for time in times.iter() {
-            let mut args = Args::new()
+            let args = Args::new()
                 .with_inst_id(inst_id.to_string())
                 .with_param("period".to_string(), time.to_string());
             // 用私有client订阅k线频道

@@ -2,9 +2,7 @@ use okx::api::api_trait::OkxApiTrait;
 use okx::api::trade::OkxTrade;
 use okx::dto::trade::trade_dto::OrderPendingRespDto;
 use okx::dto::trade_dto::{OrdListReqDto, OrderDetailRespDto};
-use okx::error::Error;
 use rust_quant_common::AppError;
-use rust_quant_risk::order::SwapOrdersDetailEntity;
 use serde_json::json;
 use tracing::{info, warn};
 

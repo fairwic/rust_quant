@@ -8,7 +8,7 @@
 //! - services层：封装业务逻辑和外部API调用（待实现TradeService）
 
 use anyhow::Result;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 // TODO: 需要Trade相关的Entity和Repository
 // use rust_quant_infrastructure::repositories::TradeRepository;

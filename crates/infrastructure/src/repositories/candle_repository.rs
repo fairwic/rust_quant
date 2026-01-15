@@ -84,7 +84,9 @@ impl SqlxCandleRepository {
 
     /// 获取表名（根据交易对和时间周期）
     fn get_table_name(symbol: &str, timeframe: &Timeframe) -> String {
-        let inst_id = symbol.replace("-", "_").to_lowercase();
+        // 表名与历史 CandlesModel 保持一致：使用 inst_id 原样（仅小写），允许 `-`，并用反引号包裹执行 SQL。
+        // 例：BTC-USDT-SWAP + 4H => `btc-usdt-swap_candles_4h`
+        let inst_id = symbol.to_ascii_lowercase();
         let time_interval = match timeframe {
             Timeframe::M1 => "1m",
             Timeframe::M3 => "3m",

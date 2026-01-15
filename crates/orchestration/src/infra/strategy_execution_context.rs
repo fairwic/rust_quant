@@ -5,8 +5,6 @@
 //! 依赖关系：orchestration → strategies (单向)
 
 use anyhow::Result;
-use serde_json;
-use tracing::{error, info};
 
 use rust_quant_strategies::framework::execution_traits::{
     ExecutionStateManager, SignalLogger, StrategyExecutionContext, TimeChecker,

@@ -22,7 +22,7 @@ impl OrderService {
     }
 
     /// 创建订单
-    pub async fn create_order(&self, order: Order) -> Result<String, OrderError> {
+    pub async fn create_order(&self, _order: Order) -> Result<String, OrderError> {
         // TODO: 实现订单创建逻辑
         // 1. 验证订单参数
         // 2. 风控检查
@@ -32,19 +32,19 @@ impl OrderService {
     }
 
     /// 查询订单
-    pub async fn get_order(&self, order_id: &str) -> Result<Option<Order>> {
+    pub async fn get_order(&self, _order_id: &str) -> Result<Option<Order>> {
         // TODO: 实现订单查询
         Ok(None)
     }
 
     /// 取消订单
-    pub async fn cancel_order(&self, order_id: &str) -> Result<()> {
+    pub async fn cancel_order(&self, _order_id: &str) -> Result<()> {
         // TODO: 实现订单取消
         Ok(())
     }
 
     /// 查询用户所有订单
-    pub async fn get_user_orders(&self, user_id: &str) -> Result<Vec<Order>> {
+    pub async fn get_user_orders(&self, _user_id: &str) -> Result<Vec<Order>> {
         // TODO: 实现订单列表查询
         Ok(vec![])
     }
@@ -63,19 +63,19 @@ impl PositionService {
     }
 
     /// 获取当前持仓
-    pub async fn get_positions(&self, symbol: Option<&str>) -> Result<()> {
+    pub async fn get_positions(&self, _symbol: Option<&str>) -> Result<()> {
         // TODO: 实现持仓查询
         Ok(())
     }
 
     /// 平仓
-    pub async fn close_position(&self, symbol: &str, size: f64) -> Result<()> {
+    pub async fn close_position(&self, _symbol: &str, _size: f64) -> Result<()> {
         // TODO: 实现平仓操作
         Ok(())
     }
 
     /// 计算持仓盈亏
-    pub async fn calculate_pnl(&self, symbol: &str) -> Result<f64> {
+    pub async fn calculate_pnl(&self, _symbol: &str) -> Result<f64> {
         // TODO: 实现盈亏计算
         Ok(0.0)
     }
@@ -92,7 +92,7 @@ impl TradeService {
     }
 
     /// 获取成交记录
-    pub async fn get_trades(&self, symbol: Option<&str>, limit: usize) -> Result<()> {
+    pub async fn get_trades(&self, _symbol: Option<&str>, _limit: usize) -> Result<()> {
         // TODO: 实现成交记录查询
         Ok(())
     }
@@ -121,7 +121,7 @@ impl AccountService {
     }
 
     /// 资金划转
-    pub async fn transfer(&self, from: &str, to: &str, amount: f64) -> Result<()> {
+    pub async fn transfer(&self, _from: &str, _to: &str, _amount: f64) -> Result<()> {
         // TODO: 实现资金划转
         Ok(())
     }

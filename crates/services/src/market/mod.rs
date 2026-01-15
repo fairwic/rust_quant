@@ -6,8 +6,8 @@ mod account_service;
 mod asset_service;
 mod contracts_service;
 mod data_sync_service;
-pub mod funding_rate_sync_service;
 pub mod economic_calendar_sync_service;
+pub mod funding_rate_sync_service;
 mod public_data_service;
 
 use anyhow::Result;
@@ -20,8 +20,8 @@ pub use account_service::AccountService;
 pub use asset_service::AssetService;
 pub use contracts_service::ContractsService;
 pub use data_sync_service::DataSyncService;
-pub use public_data_service::PublicDataService;
 pub use economic_calendar_sync_service::{EconomicCalendarSyncService, EconomicEventQueryService};
+pub use public_data_service::PublicDataService;
 
 /// K线数据服务
 ///
@@ -504,7 +504,7 @@ impl MarketDepthService {
     }
 
     /// 获取市场深度数据
-    pub async fn get_depth(&self, symbol: &str, depth: usize) -> Result<()> {
+    pub async fn get_depth(&self, _symbol: &str, _depth: usize) -> Result<()> {
         // TODO: 实现市场深度查询
         Ok(())
     }

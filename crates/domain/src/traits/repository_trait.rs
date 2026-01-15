@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::entities::{
     BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats, Candle,
-    ExchangeApiConfig, Order, Position, StrategyApiConfig, StrategyConfig, SwapOrder,
+    ExchangeApiConfig, Order, Position, StrategyConfig, SwapOrder,
 };
 use crate::enums::Timeframe;
 use crate::PositionStatus;

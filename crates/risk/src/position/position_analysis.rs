@@ -1,10 +1,9 @@
 use crate::backtest::{
-    BackTestAnalysis, BackTestAnalysisModel, BackTestDetail, BackTestDetailModel, BackTestLogModel,
+    BackTestAnalysis, BackTestAnalysisModel, BackTestDetailModel, BackTestLogModel,
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
-use rust_quant_common::utils::time;
 use rust_quant_market::models::CandlesEntity;
 use std::sync::Arc;
 use tokio::task;

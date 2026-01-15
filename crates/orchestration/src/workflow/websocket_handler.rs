@@ -1,8 +1,7 @@
-use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{error, info};
 
-use rust_quant_domain::{StrategyType, Timeframe};
+use rust_quant_domain::Timeframe;
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use tokio::sync::mpsc;

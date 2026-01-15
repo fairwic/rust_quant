@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{Local, NaiveDateTime};
 use rust_quant_core::database::get_db_pool;
 use serde_json::json;
-use sqlx::{FromRow, MySql, Pool};
+use sqlx::{FromRow, MySql};
 use tracing::{debug, info};
 
 /// 回测详情记录

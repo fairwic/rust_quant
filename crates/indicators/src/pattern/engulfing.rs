@@ -1,5 +1,4 @@
 use rust_quant_common::CandleItem;
-use ta::indicators::{ExponentialMovingAverage, MovingAverageConvergenceDivergence};
 
 /// 成交量比率指标
 /// 计算当前成交量与历史n根K线的平均值的比值

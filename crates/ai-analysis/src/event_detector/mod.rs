@@ -59,6 +59,7 @@ pub trait EventDetector: Send + Sync {
 
 /// AI 驱动的事件检测器
 pub struct AIEventDetector {
+    #[allow(dead_code)]
     openai_api_key: String,
 }
 
@@ -70,12 +71,12 @@ impl AIEventDetector {
 
 #[async_trait]
 impl EventDetector for AIEventDetector {
-    async fn detect_events(&self, news: &[NewsArticle]) -> anyhow::Result<Vec<MarketEvent>> {
+    async fn detect_events(&self, _news: &[NewsArticle]) -> anyhow::Result<Vec<MarketEvent>> {
         // TODO: 使用 GPT-4 分析新闻，检测重要事件
         Ok(vec![])
     }
 
-    async fn get_trending_events(&self, hours: u32) -> anyhow::Result<Vec<MarketEvent>> {
+    async fn get_trending_events(&self, _hours: u32) -> anyhow::Result<Vec<MarketEvent>> {
         // TODO: 从向量数据库检索热点事件
         Ok(vec![])
     }

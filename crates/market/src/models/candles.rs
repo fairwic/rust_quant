@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
 use sqlx::{MySql, QueryBuilder};
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use super::{CandlesEntity, SelectCandleReqDto, SelectTime, TimeDirect};
 use okx::dto::market_dto::CandleOkxRespDto;

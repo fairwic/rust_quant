@@ -39,6 +39,7 @@ pub trait MarketImpactPredictor: Send + Sync {
 
 /// AI 驱动的影响预测器
 pub struct AIPredictorEngine {
+    #[allow(dead_code)]
     openai_api_key: String,
 }
 
@@ -52,7 +53,7 @@ impl AIPredictorEngine {
 impl MarketImpactPredictor for AIPredictorEngine {
     async fn predict_impact(
         &self,
-        event: &super::event_detector::MarketEvent,
+        _event: &super::event_detector::MarketEvent,
         asset: &str,
     ) -> anyhow::Result<MarketImpactPrediction> {
         // TODO: 使用 GPT-4 预测市场影响

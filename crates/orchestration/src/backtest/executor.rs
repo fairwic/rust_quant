@@ -7,10 +7,9 @@ use futures::future::join_all;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use rust_quant_common::CandleItem;
-use rust_quant_domain::StrategyType;
 use rust_quant_indicators::trend::vegas::VegasStrategy;
 use rust_quant_market::models::SelectTime;
 use rust_quant_services::market::CandleService;
@@ -59,9 +58,13 @@ impl BacktestExecutor {
         strategy: VegasStrategy,
         risk_strategy_config: BasicRiskStrategyConfig,
         mysql_candles: Arc<Vec<CandleItem>>,
+        btc_macro_candles: Option<Arc<Vec<CandleItem>>>,
     ) -> Result<i64> {
         let risk_strategy_config = tighten_vegas_risk(risk_strategy_config);
-        let adapter = VegasBacktestAdapter::new(strategy);
+        let mut adapter = VegasBacktestAdapter::new(strategy);
+        if let Some(btc) = btc_macro_candles {
+            adapter = adapter.with_btc_macro_candles(btc);
+        }
         self.run_strategy_backtest(inst_id, time, adapter, risk_strategy_config, mysql_candles)
             .await
     }
@@ -71,7 +74,7 @@ impl BacktestExecutor {
         &self,
         inst_id: &str,
         time: &str,
-        mut strategy: NweStrategy,
+        strategy: NweStrategy,
         risk_strategy_config: BasicRiskStrategyConfig,
         mysql_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64> {
@@ -160,6 +163,27 @@ impl BacktestExecutor {
         arc_candle_item_clone: Arc<Vec<CandleItem>>,
         semaphore: Arc<Semaphore>,
     ) {
+        let macro_enabled = std::env::var("BTC_MACRO_FILTER")
+            .map(|v| v != "0")
+            .unwrap_or(true);
+        let btc_macro_candles = if macro_enabled
+            && inst_id == "ETH-USDT-SWAP"
+            && time.eq_ignore_ascii_case("4H")
+        {
+            match self
+                .load_and_convert_candle_data("BTC-USDT-SWAP", time, arc_candle_item_clone.len())
+                .await
+            {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    error!("加载 BTC 宏观过滤数据失败，将跳过宏观过滤: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let mut batch_tasks = Vec::with_capacity(params_batch.len());
         for param in params_batch {
             let risk_strategy_config = param.to_risk_config();
@@ -168,6 +192,7 @@ impl BacktestExecutor {
             let inst_id = inst_id.to_string();
             let time = time.to_string();
             let mysql_candles = Arc::clone(&arc_candle_item_clone);
+            let btc_macro_candles = btc_macro_candles.clone();
             let permit = Arc::clone(&semaphore);
 
             // 创建任务
@@ -181,6 +206,7 @@ impl BacktestExecutor {
                         strategy,
                         risk_strategy_config,
                         mysql_candles,
+                        btc_macro_candles,
                     )
                     .await
                 {

@@ -2,7 +2,6 @@
 //! 从 swap_order.rs 迁移 (rbatis → sqlx)
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use rust_quant_common::utils::time;
 use rust_quant_core::database::get_db_pool;
 use serde::{Deserialize, Serialize};

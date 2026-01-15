@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::{FromRow, MySql, Pool};
-use tracing::{debug, error};
+use tracing::error;
 
 use rust_quant_domain::entities::funding_rate::FundingRate;
 use rust_quant_domain::traits::funding_rate_repository::FundingRateRepository;
