@@ -110,11 +110,10 @@ enum ExitResult {
 // ============================================================================
 
 /// 检查最大损失止损
-fn check_max_loss_stop(ctx: &ExitContext, max_loss_pct: f64) -> ExitResult {
+fn check_max_loss_stop(ctx: &ExitContext, max_loss_pct: f64, dynamic_max_loss: bool) -> ExitResult {
     // 高波动动态降损：当K线振幅大于5%且启用 DYNAMIC_MAX_LOSS=1 时，使用更紧的 4.5%
     let mut effective_max_loss = max_loss_pct;
-    // 默认启用；设置 DYNAMIC_MAX_LOSS=0 可关闭
-    if std::env::var("DYNAMIC_MAX_LOSS").unwrap_or_else(|_| "1".to_string()) != "0" {
+    if dynamic_max_loss {
         let range_pct = (ctx.favorable_price - ctx.adverse_price).abs() / ctx.entry.max(1e-9);
         if range_pct > 0.05 {
             effective_max_loss = effective_max_loss.min(0.045);
@@ -374,7 +373,11 @@ pub fn check_risk_config(
 
     // 1. 最大损失止损
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_max_loss_stop(&ctx, risk_config.max_loss_percent)
+        check_max_loss_stop(
+            &ctx,
+            risk_config.max_loss_percent,
+            risk_config.dynamic_max_loss.unwrap_or(true),
+        )
     {
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
     }
@@ -535,7 +538,11 @@ pub fn check_risk_config_with_r_system(
 
     // 1. 最大损失止损（最高优先级）
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_max_loss_stop(&ctx, risk_config.max_loss_percent)
+        check_max_loss_stop(
+            &ctx,
+            risk_config.max_loss_percent,
+            risk_config.dynamic_max_loss.unwrap_or(true),
+        )
     {
         r_runtime.r_state = None; // 平仓后清除R系统状态
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);

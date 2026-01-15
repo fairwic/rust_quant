@@ -98,7 +98,7 @@ lazy_static = "1.4.0"
 clap = { version = "4.5.4", features = ["derive"] }
 
 # === 交易所 SDK ===
-okx = { version = "0.1.9" }
+okx = { version = "0.2.0" }
 
 # === 邮件服务 ===
 lettre = "0.11"
@@ -126,4 +126,4 @@ rust-quant-ai-analysis = { path = "crates/ai-analysis" }
 rust-quant-cli = { path = "crates/rust-quant-cli" }
 
 [patch.crates-io]
-okx = { path = "okx_rs" }
+okx = { path = "okx" }

@@ -156,10 +156,12 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     let signal_weights = vegas_strategy.signal_weights.clone();
     let leg_detection_signal = vegas_strategy.leg_detection_signal;
     let market_structure_signal = vegas_strategy.market_structure_signal;
-    let fair_value_gap_signal = vegas_strategy.fair_value_gap_signal;
-    let premium_discount_signal = vegas_strategy.premium_discount_signal;
-    let fake_breakout_signal = vegas_strategy.fake_breakout_signal;
     let range_filter_signal = vegas_strategy.range_filter_signal;
+    let chase_confirm_config = vegas_strategy.chase_confirm_config;
+    let extreme_k_filter_signal = vegas_strategy.extreme_k_filter_signal;
+    let ema_distance_config = vegas_strategy.ema_distance_config;
+    let atr_stop_loss_multiplier = vegas_strategy.atr_stop_loss_multiplier;
+    let emit_debug = vegas_strategy.emit_debug;
 
     // println!("config.risk_config: {:#?}", config.risk_config);
     let risk_config = serde_json::from_value::<BasicRiskStrategyConfig>(config.risk_config.clone())
@@ -222,11 +224,12 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     param.signal_weights = signal_weights;
     param.leg_detection_signal = leg_detection_signal;
     param.market_structure_signal = market_structure_signal;
-    param.fair_value_gap_signal = fair_value_gap_signal;
-    param.premium_discount_signal = premium_discount_signal;
-    param.fake_breakout_signal = fake_breakout_signal;
-    param.fake_breakout_signal = fake_breakout_signal;
     param.range_filter_signal = range_filter_signal;
+    param.chase_confirm_config = chase_confirm_config;
+    param.extreme_k_filter_signal = extreme_k_filter_signal;
+    param.ema_distance_config = Some(ema_distance_config);
+    param.atr_stop_loss_multiplier = Some(atr_stop_loss_multiplier);
+    param.emit_debug = Some(emit_debug);
     param.macd_signal = vegas_strategy.macd_signal;
 
     Ok(param)

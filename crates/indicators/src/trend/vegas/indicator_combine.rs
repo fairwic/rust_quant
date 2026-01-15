@@ -1,11 +1,9 @@
 use crate::ema_indicator::EmaIndicator;
-use crate::fair_value_gap_indicator::FairValueGapIndicator;
 use crate::leg_detection_indicator::LegDetectionIndicator;
 use crate::market_structure_indicator::MarketStructureIndicator;
 use crate::momentum::rsi::RsiIndicator;
 use crate::pattern::engulfing::KlineEngulfingIndicator;
 use crate::pattern::hammer::KlineHammerIndicator;
-use crate::premium_discount_indicator::PremiumDiscountIndicator;
 use crate::volatility::bollinger::BollingBandsPlusIndicator;
 use crate::volume_indicator::VolumeRatioIndicator;
 
@@ -18,11 +16,8 @@ pub struct IndicatorCombine {
     pub bollinger_indicator: Option<BollingBandsPlusIndicator>,
     pub engulfing_indicator: Option<KlineEngulfingIndicator>,
     pub kline_hammer_indicator: Option<KlineHammerIndicator>,
-    // Smart Money Concepts相关指标
     pub leg_detection_indicator: Option<LegDetectionIndicator>,
     pub market_structure_indicator: Option<MarketStructureIndicator>,
-    pub fair_value_gap_indicator: Option<FairValueGapIndicator>,
-    pub premium_discount_indicator: Option<PremiumDiscountIndicator>,
 }
 
 impl Default for IndicatorCombine {
@@ -34,11 +29,8 @@ impl Default for IndicatorCombine {
             bollinger_indicator: None,
             engulfing_indicator: None,
             kline_hammer_indicator: None,
-            // Smart Money Concepts相关指标
             leg_detection_indicator: None,
             market_structure_indicator: None,
-            fair_value_gap_indicator: None,
-            premium_discount_indicator: None,
         }
     }
 }

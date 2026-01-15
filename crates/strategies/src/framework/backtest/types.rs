@@ -318,6 +318,20 @@ pub struct BasicRiskStrategyConfig {
     /// 当均线多头排列时做空，设置止盈价格为连续上涨K线起点最低价的回调位置
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_counter_trend_pullback_take_profit: Option<bool>,
+
+    /// 高波动动态降损开关（原先由环境变量 DYNAMIC_MAX_LOSS 控制）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_max_loss: Option<bool>,
+
+    /// 止盈价有效性校验（原先由环境变量 VALIDATE_SIGNAL_TP 控制）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validate_signal_tp: Option<bool>,
+
+    /// Vegas 风控收紧开关（原先由环境变量 TIGHTEN_VEGAS_RISK 控制）
+    /// - `true`：强制收紧 max_loss_percent，并开启信号K线止损/单K止损/触价保本
+    /// - `false/None`：不额外收紧
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tighten_vegas_risk: Option<bool>,
 }
 
 impl Default for BasicRiskStrategyConfig {
@@ -330,6 +344,9 @@ impl Default for BasicRiskStrategyConfig {
             is_one_k_line_diff_stop_loss: Some(false), // 默认不使用移动止损(移动止损价格到信号线的开仓价格)
             is_move_stop_open_price_when_touch_price: Some(false), // 默认不使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
             is_counter_trend_pullback_take_profit: Some(false),    // 默认不使用逆势回调止盈
+            dynamic_max_loss: Some(true),
+            validate_signal_tp: Some(false),
+            tighten_vegas_risk: Some(false),
         }
     }
 }

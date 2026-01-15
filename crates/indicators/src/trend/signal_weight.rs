@@ -124,22 +124,11 @@ impl Default for SignalWeightsConfig {
                 (SignalType::SimpleBreakEma2through, 1.0),
                 (SignalType::VolumeTrend, 1.0),
                 (SignalType::Rsi, 1.0),
-                (SignalType::TrendStrength, 1.0),
-                (SignalType::EmaDivergence, 1.0),
-                (SignalType::PriceLevel, 1.0),
                 (SignalType::EmaTrend, 1.0),
                 (SignalType::Bolling, 1.0),
                 (SignalType::Engulfing, 1.0),
                 (SignalType::KlineHammer, 1.0),
-                // 新增Smart Money Concepts相关权重
                 (SignalType::LegDetection, 1.2),
-                (SignalType::MarketStructure, 1.8),
-                (SignalType::FairValueGap, 1.5),
-                (SignalType::EqualHighLow, 1.2),
-                (SignalType::PremiumDiscount, 1.3),
-                // 新增第一性原理信号权重
-                // 注意：权重=0表示仅采集数据，不参与得分计算
-                (SignalType::FakeBreakout, 0.0),
             ],
             min_total_weight: 2.0,
         }

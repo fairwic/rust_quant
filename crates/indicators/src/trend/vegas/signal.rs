@@ -1,16 +1,6 @@
-use crate::fair_value_gap_indicator::FairValueGapValue;
 use crate::leg_detection_indicator::LegDetectionValue;
 use crate::market_structure_indicator::MarketStructureValue;
-use crate::premium_discount_indicator::PremiumDiscountValue;
-use crate::signal_weight::SignalWeightsConfig;
 use serde::{Deserialize, Serialize};
-
-// 占位类型，等待 equal_high_low_indicator 重构完成
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct EqualHighLowValue {
-    pub has_equal_high: bool,
-    pub has_equal_low: bool,
-}
 
 /// 锤子形态信号值
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
@@ -212,26 +202,16 @@ pub struct VegasIndicatorSignalValue {
     pub rsi_value: RsiSignalValue,
     /// 布林带信号配置
     pub bollinger_value: BollingerSignalValue,
-    /// 权重配置
-    pub signal_weights_value: SignalWeightsConfig,
     /// 吞没形态指标
     pub engulfing_value: EngulfingSignalValue,
     /// 锤子形态指标
     pub kline_hammer_value: KlineHammerSignalValue,
-    /// Smart Money Concepts相关字段
     /// 腿部识别
+    #[serde(default)]
     pub leg_detection_value: LegDetectionValue,
     /// 市场结构
-    pub market_structure_value: MarketStructureValue,
-    /// 公平价值缺口
-    pub fair_value_gap_value: FairValueGapValue,
-    /// 等高/等低点
-    pub equal_high_low_value: EqualHighLowValue,
-    /// 溢价/折扣区域
-    pub premium_discount_value: PremiumDiscountValue,
-    /// 假突破信号（新增）
     #[serde(default)]
-    pub fake_breakout_value: super::fake_breakout::FakeBreakoutSignal,
+    pub market_structure_value: MarketStructureValue,
     /// EMA距离过滤（新增）
     #[serde(default)]
     pub ema_distance_filter: super::ema_filter::EmaDistanceFilter,

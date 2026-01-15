@@ -2,9 +2,8 @@ use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
     default_chase_confirm_config, default_extreme_k_filter, default_macd_signal_config,
     EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig, ExtremeKFilterConfig,
-    FairValueGapConfig, FakeBreakoutConfig, KlineHammerConfig, LegDetectionConfig,
-    MacdSignalConfig, MarketStructureConfig, PremiumDiscountConfig, RangeFilterConfig,
-    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
+    KlineHammerConfig, MacdSignalConfig, RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
+    ChaseConfirmConfig, EmaDistanceConfig, LegDetectionConfig, MarketStructureConfig, RangeFilterConfig,
 };
 use rust_quant_indicators::volatility::BollingBandsSignalConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
@@ -41,11 +40,12 @@ pub struct ParamMergeBuilder {
     pub signal_weights: Option<SignalWeightsConfig>,
     pub leg_detection_signal: Option<LegDetectionConfig>,
     pub market_structure_signal: Option<MarketStructureConfig>,
-    pub fair_value_gap_signal: Option<FairValueGapConfig>,
-    pub premium_discount_signal: Option<PremiumDiscountConfig>,
-    pub fake_breakout_signal: Option<FakeBreakoutConfig>,
     pub range_filter_signal: Option<RangeFilterConfig>,
+    pub chase_confirm_config: Option<ChaseConfirmConfig>,
     pub extreme_k_filter_signal: Option<ExtremeKFilterConfig>,
+    pub ema_distance_config: Option<EmaDistanceConfig>,
+    pub atr_stop_loss_multiplier: Option<f64>,
+    pub emit_debug: Option<bool>,
     pub macd_signal: Option<MacdSignalConfig>,
 }
 impl ParamMergeBuilder {
@@ -155,6 +155,9 @@ impl ParamMergeBuilder {
                 self.is_move_stop_open_price_when_touch_price,
             ),
             is_counter_trend_pullback_take_profit: Some(self.is_counter_trend_pullback_take_profit),
+            dynamic_max_loss: Some(true),
+            validate_signal_tp: Some(false),
+            tighten_vegas_risk: Some(false),
         }
     }
 
@@ -193,7 +196,10 @@ impl ParamMergeBuilder {
             period,
             min_k_line_num: 3600,
             engulfing_signal: Some(EngulfingSignalConfig::default()),
-            ema_signal: Some(EmaSignalConfig::default()),
+            ema_signal: Some(EmaSignalConfig {
+                ema_breakthrough_threshold: self.breakthrough_threshold,
+                ..EmaSignalConfig::default()
+            }),
             signal_weights,
             volume_signal: Some(volume_signal),
             ema_touch_trend_signal: Some(ema_touch_trend_signal),
@@ -207,15 +213,19 @@ impl ParamMergeBuilder {
             kline_hammer_signal: Some(kline_hammer_signal),
             leg_detection_signal: self.leg_detection_signal,
             market_structure_signal: self.market_structure_signal,
-            fair_value_gap_signal: self.fair_value_gap_signal,
-            premium_discount_signal: self.premium_discount_signal,
-            fake_breakout_signal: self.fake_breakout_signal,
-            range_filter_signal: self.range_filter_signal,
+            range_filter_signal: self
+                .range_filter_signal
+                .or_else(|| Some(RangeFilterConfig::default())),
             extreme_k_filter_signal: self
                 .extreme_k_filter_signal
                 .or_else(default_extreme_k_filter),
-            chase_confirm_config: default_chase_confirm_config(),
+            chase_confirm_config: self
+                .chase_confirm_config
+                .or_else(default_chase_confirm_config),
             macd_signal: self.macd_signal.clone().or_else(default_macd_signal_config),
+            ema_distance_config: self.ema_distance_config.unwrap_or_default(),
+            atr_stop_loss_multiplier: self.atr_stop_loss_multiplier.unwrap_or(1.5),
+            emit_debug: self.emit_debug.unwrap_or(true),
         }
     }
 }
@@ -393,11 +403,12 @@ impl ParamGenerator {
                 signal_weights: None,
                 leg_detection_signal: None,
                 market_structure_signal: None,
-                fair_value_gap_signal: None,
-                premium_discount_signal: None,
-                fake_breakout_signal: None,
                 range_filter_signal: None,
+                chase_confirm_config: None,
                 extreme_k_filter_signal: None,
+                ema_distance_config: None,
+                atr_stop_loss_multiplier: None,
+                emit_debug: None,
                 macd_signal: None,
             };
 
@@ -641,6 +652,9 @@ impl NweParamGenerator {
                 is_counter_trend_pullback_take_profit: Some(
                     self.is_counter_trend_pullback_take_profit[i_cctpt],
                 ),
+                dynamic_max_loss: Some(true),
+                validate_signal_tp: Some(false),
+                tighten_vegas_risk: Some(false),
             };
             batch.push((cfg, risk));
             self.current_index += 1;

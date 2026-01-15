@@ -170,101 +170,34 @@ impl Default for LegDetectionConfig {
     }
 }
 
-/// 市场结构识别配置
+/// 市场结构配置（SMC）
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-#[serde(default)]
 pub struct MarketStructureConfig {
     /// 摆动结构长度
     pub swing_length: usize,
     /// 内部结构长度
     pub internal_length: usize,
-    /// 触发摆动突破所需的相对幅度
+    /// 摆动突破阈值（相对 pivot 的百分比）
     pub swing_threshold: f64,
-    /// 触发内部突破所需的相对幅度
+    /// 内部突破阈值（相对 pivot 的百分比）
     pub internal_threshold: f64,
     /// 是否启用摆动结构信号
     pub enable_swing_signal: bool,
     /// 是否启用内部结构信号
     pub enable_internal_signal: bool,
-    /// 是否开启整个市场结构信号
+    /// 是否启用
     pub is_open: bool,
 }
 
 impl Default for MarketStructureConfig {
     fn default() -> Self {
         Self {
-            swing_length: 20,
-            internal_length: 5,
-            swing_threshold: 0.0,
-            internal_threshold: 0.0,
-            enable_swing_signal: true,
+            swing_length: 12,
+            internal_length: 2,
+            swing_threshold: 0.015,
+            internal_threshold: 0.015,
+            enable_swing_signal: false,
             enable_internal_signal: true,
-            is_open: true,
-        }
-    }
-}
-
-/// 公平价值缺口配置
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub struct FairValueGapConfig {
-    /// 阈值乘数
-    pub threshold_multiplier: f64,
-    /// 是否使用自动阈值
-    pub auto_threshold: bool,
-    /// 是否启用
-    pub is_open: bool,
-}
-
-impl Default for FairValueGapConfig {
-    fn default() -> Self {
-        Self {
-            threshold_multiplier: 1.0,
-            auto_threshold: true,
-            is_open: true,
-        }
-    }
-}
-
-/// 等高/等低点识别配置
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub struct EqualHighLowConfig {
-    /// 回看K线数量
-    pub lookback: usize,
-    /// 阈值百分比
-    pub threshold_pct: f64,
-    /// 是否启用
-    pub is_open: bool,
-}
-
-impl Default for EqualHighLowConfig {
-    fn default() -> Self {
-        Self {
-            lookback: 10,
-            threshold_pct: 0.1,
-            is_open: true,
-        }
-    }
-}
-
-/// 溢价/折扣区域配置
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub struct PremiumDiscountConfig {
-    /// 溢价阈值
-    pub premium_threshold: f64,
-    /// 折扣阈值
-    pub discount_threshold: f64,
-    /// 回看K线数量
-    pub lookback: usize,
-    /// 是否启用
-    pub is_open: bool,
-}
-
-impl Default for PremiumDiscountConfig {
-    fn default() -> Self {
-        Self {
-            premium_threshold: 0.05,
-            discount_threshold: 0.05,
-            lookback: 20,
             is_open: true,
         }
     }
@@ -284,9 +217,9 @@ pub struct RangeFilterConfig {
 impl Default for RangeFilterConfig {
     fn default() -> Self {
         Self {
-            bb_width_threshold: 0.02,
+            bb_width_threshold: 0.03,
             tp_kline_ratio: 0.6,
-            is_open: false,
+            is_open: true,
         }
     }
 }
@@ -372,12 +305,8 @@ pub struct MacdSignalConfig {
     pub slow_period: usize,
     /// 信号线周期（默认9）
     pub signal_period: usize,
-    /// 是否仅作为过滤器（true: 仅过滤信号, false: 可作为独立信号）
-    pub as_filter_only: bool,
     /// 是否要求动量确认（柱状图连续递增/递减）
     pub require_momentum_confirm: bool,
-    /// 动量确认周期数（连续N根柱状图同向）
-    pub momentum_confirm_bars: usize,
     /// 是否启用"接飞刀"保护 (默认 true)
     /// 当 MACD 与交易方向相反时，如果动量还在恶化则过滤；如果动量改善则放行（允许抄底）
     pub filter_falling_knife: bool,
@@ -390,9 +319,7 @@ impl Default for MacdSignalConfig {
             fast_period: 6,   // 加速：12 -> 6
             slow_period: 13,  // 加速：26 -> 13
             signal_period: 4, // 加速：9 -> 4
-            as_filter_only: true,
             require_momentum_confirm: false,  // 默认关闭，由 filter_falling_knife 接管主要的动量判断
-            momentum_confirm_bars: 2,
             filter_falling_knife: true,
         }
     }

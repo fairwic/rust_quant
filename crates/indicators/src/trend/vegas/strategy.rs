@@ -1,5 +1,3 @@
-use std::env;
-
 use crate::signal_weight::{SignalCondition, SignalDirect, SignalType, SignalWeightsConfig};
 use crate::volatility::atr::ATR;
 use crate::volatility::bollinger::BollingBandsSignalConfig;
@@ -11,7 +9,6 @@ use serde_json::json;
 
 use super::config::*;
 use super::ema_filter::{self, EmaDistanceConfig};
-use super::fake_breakout::{self, FakeBreakoutConfig};
 use super::indicator_combine::IndicatorCombine;
 use super::signal::*;
 use super::trend;
@@ -45,13 +42,7 @@ pub struct VegasStrategy {
     pub leg_detection_signal: Option<LegDetectionConfig>,
     /// 市场结构配置
     pub market_structure_signal: Option<MarketStructureConfig>,
-    /// 公平价值缺口配置
-    pub fair_value_gap_signal: Option<FairValueGapConfig>,
-    /// 溢价/折扣区域配置
-    pub premium_discount_signal: Option<PremiumDiscountConfig>,
-    /// 假突破配置
-    pub fake_breakout_signal: Option<FakeBreakoutConfig>,
-    /// 震荡过滤配置
+    /// 震荡过滤配置（仅调整止盈目标，不作为开仓信号）
     pub range_filter_signal: Option<RangeFilterConfig>,
     /// 极端K线过滤/放行配置
     #[serde(default = "default_extreme_k_filter")]
@@ -62,6 +53,27 @@ pub struct VegasStrategy {
     /// MACD 信号配置
     #[serde(default = "default_macd_signal_config")]
     pub macd_signal: Option<MacdSignalConfig>,
+    /// EMA 距离过滤配置（控制 TooFar/Ranging 等阈值）
+    #[serde(default = "default_ema_distance_config")]
+    pub ema_distance_config: EmaDistanceConfig,
+    /// ATR 止损倍数（默认 1.5xATR）
+    #[serde(default = "default_atr_stop_loss_multiplier")]
+    pub atr_stop_loss_multiplier: f64,
+    /// 是否输出信号调试信息（single_value/single_result）
+    #[serde(default = "default_emit_debug")]
+    pub emit_debug: bool,
+}
+
+fn default_ema_distance_config() -> EmaDistanceConfig {
+    EmaDistanceConfig::default()
+}
+
+fn default_atr_stop_loss_multiplier() -> f64 {
+    1.5
+}
+
+fn default_emit_debug() -> bool {
+    true
 }
 
 impl VegasStrategy {
@@ -85,19 +97,13 @@ impl VegasStrategy {
                 is_open: false,
                 ..MarketStructureConfig::default()
             }),
-            fair_value_gap_signal: Some(FairValueGapConfig {
-                is_open: false,
-                ..FairValueGapConfig::default()
-            }),
-            premium_discount_signal: Some(PremiumDiscountConfig {
-                is_open: false,
-                ..PremiumDiscountConfig::default()
-            }),
-            fake_breakout_signal: None,
             range_filter_signal: Some(RangeFilterConfig::default()),
             extreme_k_filter_signal: default_extreme_k_filter(),
             chase_confirm_config: default_chase_confirm_config(),
             macd_signal: default_macd_signal_config(),
+            ema_distance_config: default_ema_distance_config(),
+            atr_stop_loss_multiplier: default_atr_stop_loss_multiplier(),
+            emit_debug: default_emit_debug(),
         }
     }
 
@@ -325,30 +331,7 @@ impl VegasStrategy {
             vegas_indicator_signal_values.ema_values,
         );
 
-        // ================================================================
-        // 【新增】假突破信号检测
-        // ================================================================
-        if let Some(fake_breakout_config) = &self.fake_breakout_signal {
-            let fake_breakout_signal =
-                fake_breakout::detect_fake_breakout(data_items, fake_breakout_config);
-            vegas_indicator_signal_values.fake_breakout_value = fake_breakout_signal;
-
-            // 假突破信号加入conditions
-            if fake_breakout_signal.has_signal() {
-                conditions.push((
-                    SignalType::FakeBreakout,
-                    SignalCondition::FakeBreakout {
-                        is_bullish: fake_breakout_signal.is_bullish_fake_breakout,
-                        is_bearish: fake_breakout_signal.is_bearish_fake_breakout,
-                        strength: fake_breakout_signal.strength,
-                    },
-                ));
-            }
-        }
-
-        // ================================================================
-        // 【新增】结构突破/腿部识别/缺口/溢价折扣
-        // ================================================================
+        // 腿部识别（可选）：只在 is_open 时参与条件打分
         if let Some(leg_detection_signal) = &self.leg_detection_signal {
             if leg_detection_signal.is_open {
                 let leg_value = vegas_indicator_signal_values.leg_detection_value;
@@ -414,40 +397,10 @@ impl VegasStrategy {
             }
         }
 
-        if let Some(fair_value_gap_signal) = &self.fair_value_gap_signal {
-            if fair_value_gap_signal.is_open {
-                let fvg_value = &vegas_indicator_signal_values.fair_value_gap_value;
-                if fvg_value.current_bullish_fvg || fvg_value.current_bearish_fvg {
-                    conditions.push((
-                        SignalType::FairValueGap,
-                        SignalCondition::FairValueGap {
-                            is_bullish_fvg: fvg_value.current_bullish_fvg,
-                            is_bearish_fvg: fvg_value.current_bearish_fvg,
-                        },
-                    ));
-                }
-            }
-        }
-
-        if let Some(premium_discount_signal) = &self.premium_discount_signal {
-            if premium_discount_signal.is_open {
-                let pd_value = &vegas_indicator_signal_values.premium_discount_value;
-                if pd_value.in_premium_zone || pd_value.in_discount_zone {
-                    conditions.push((
-                        SignalType::PremiumDiscount,
-                        SignalCondition::PremiumDiscount {
-                            in_premium_zone: pd_value.in_premium_zone,
-                            in_discount_zone: pd_value.in_discount_zone,
-                        },
-                    ));
-                }
-            }
-        }
-
         // ================================================================
         // 【新增】EMA距离过滤
         // ================================================================
-        let ema_distance_config = EmaDistanceConfig::default();
+        let ema_distance_config = self.ema_distance_config;
         let ema_distance_filter = ema_filter::apply_ema_distance_filter(
             last_data_item.c,
             &vegas_indicator_signal_values.ema_values,
@@ -511,18 +464,6 @@ impl VegasStrategy {
             }
         }
 
-        // 允许通过环境变量切换极端K过滤阈值（宽松档）
-        let mut extreme_cfg_override = self.extreme_k_filter_signal.clone();
-        if let Ok(val) = env::var("EXTREME_K_FILTER_LOOSE") {
-            if val == "1" {
-                if let Some(cfg) = extreme_cfg_override.as_mut() {
-                    cfg.min_body_ratio = 0.65;
-                    cfg.min_move_pct = 0.010;
-                    cfg.min_cross_ema_count = 2;
-                }
-            }
-        }
-
         // ================================================================
         // 计算得分
         // ================================================================
@@ -536,7 +477,7 @@ impl VegasStrategy {
                 atr.next(item.h, item.l, item.c);
             }
             let atr_value = atr.value();
-            let atr_multiplier = 1.5; // 1.5倍ATR作为止损距离
+            let atr_multiplier = self.atr_stop_loss_multiplier.max(0.0);
             
             match signal_direction {
                 SignalDirect::IsLong => {
@@ -589,30 +530,16 @@ impl VegasStrategy {
         // ================================================================
         // 【追涨/追跌确认K线条件】
         // 当价格远离EMA144时，要求额外的确认条件才能开仓
-        // 参数从 chase_confirm_config 读取，环境变量可覆盖
         // 回测验证: ID 5988, profit +57%, sharpe 1.53→1.89, max_dd 57.7%→55.5%
         // ================================================================
         let chase_cfg = self.chase_confirm_config.clone().unwrap_or_default();
-        // 环境变量优先覆盖配置值（向后兼容）
-        let chase_confirm_enabled = env::var("CHASE_CONFIRM_FILTER")
-            .map(|v| v == "1")
-            .unwrap_or(chase_cfg.enabled);
-        if chase_confirm_enabled {
+        if chase_cfg.enabled {
             let ema144 = vegas_indicator_signal_values.ema_values.ema2_value;
             if ema144 > 0.0 {
                 let price_vs_ema144 = (last_data_item.c - ema144) / ema144;
 
-                let chase_long_threshold = env::var("CHASE_LONG_THRESHOLD")
-                    .ok()
-                    .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(chase_cfg.long_threshold);
-                let chase_short_threshold = env::var("CHASE_SHORT_THRESHOLD")
-                    .ok()
-                    .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(chase_cfg.short_threshold);
-
                 // 追涨确认：price > EMA144*(1+threshold) 时要求额外确认
-                if price_vs_ema144 > chase_long_threshold
+                if price_vs_ema144 > chase_cfg.long_threshold
                     && signal_result.should_buy.unwrap_or(false)
                 {
                     let body_ratio = last_data_item.body_ratio();
@@ -635,7 +562,7 @@ impl VegasStrategy {
                 }
 
                 // 追跌确认：price < EMA144*(1-threshold) 时要求额外确认
-                if price_vs_ema144 < -chase_short_threshold
+                if price_vs_ema144 < -chase_cfg.short_threshold
                     && signal_result.should_sell.unwrap_or(false)
                 {
                     let body_ratio = last_data_item.body_ratio();
@@ -659,105 +586,6 @@ impl VegasStrategy {
             }
         }
 
-        // ================================================================
-        // 【新增】TooFar gating：当 EMA 距离过远且波动偏大时，禁止无趋势/逆势开仓（压最大止损）
-        // - 默认开启；设置 TOO_FAR_GATING=0 可关闭
-        // - 默认拦截两类最易吃止损的场景：
-        //   1) 严格规则（来自 ema_distance_filter.should_filter_*）：空头排列 TooFar 且 close>ema3 禁做多；多头排列 TooFar 且 close<ema3 禁做空
-        //   2) 挤压区反向（低布林宽 + 吊人线/锤子线）容易出现“假反转”→ 过滤
-        // - 额外可选拦截“极端 TooFar”：distance_ratio>=0.15 且 bb_width>=0.07
-        //   可用环境变量覆盖：
-        //   - TOO_FAR_GATING_MIN_DISTANCE_RATIO（默认0.15）
-        //   - TOO_FAR_GATING_MIN_BB_WIDTH（默认0.07）
-        //   - TOO_FAR_GATING_SQUEEZE_BB_WIDTH（默认0.02）
-        // ================================================================
-        let too_far_gating_enabled = env::var("TOO_FAR_GATING").map(|v| v != "0").unwrap_or(true);
-        if too_far_gating_enabled && ema_distance_filter.state == ema_filter::EmaDistanceState::TooFar
-        {
-            let min_dist_ratio = env::var("TOO_FAR_GATING_MIN_DISTANCE_RATIO")
-                .ok()
-                .and_then(|s| s.parse::<f64>().ok())
-                .unwrap_or(0.15);
-            let min_bb_width = env::var("TOO_FAR_GATING_MIN_BB_WIDTH")
-                .ok()
-                .and_then(|s| s.parse::<f64>().ok())
-                .unwrap_or(0.07);
-
-            // 1) 严格 TooFar 规则：用于你指出的 “2026-01-07 04:00 不应该做多” 这类场景
-            if signal_result.should_buy.unwrap_or(false) && ema_distance_filter.should_filter_long {
-                signal_result.should_buy = Some(false);
-                signal_result
-                    .filter_reasons
-                    .push("EMA_DISTANCE_TOO_FAR_STRICT_LONG".to_string());
-            }
-            if signal_result.should_sell.unwrap_or(false) && ema_distance_filter.should_filter_short
-            {
-                signal_result.should_sell = Some(false);
-                signal_result
-                    .filter_reasons
-                    .push("EMA_DISTANCE_TOO_FAR_STRICT_SHORT".to_string());
-            }
-
-            let dist_ratio = ema_distance_filter.distance_ratio;
-            let bb_mid = vegas_indicator_signal_values.bollinger_value.middle;
-            let bb_width = if bb_mid > 0.0 {
-                (vegas_indicator_signal_values.bollinger_value.upper
-                    - vegas_indicator_signal_values.bollinger_value.lower)
-                    / bb_mid
-            } else {
-                0.0
-            };
-
-            // 2) 挤压区反向过滤：用于你指出的 “2026-01-13 12:00 不应该做空（吊人线假反转）”
-            let squeeze_bb_width = env::var("TOO_FAR_GATING_SQUEEZE_BB_WIDTH")
-                .ok()
-                .and_then(|s| s.parse::<f64>().ok())
-                .unwrap_or(0.02);
-            let no_trend = !vegas_indicator_signal_values.ema_values.is_long_trend
-                && !vegas_indicator_signal_values.ema_values.is_short_trend;
-            if no_trend && bb_width > 0.0 && bb_width <= squeeze_bb_width {
-                // 挤压区出现“吊人线/短线反转形态”经常是假信号 → 不做空（等待放量/趋势确认）
-                if signal_result.should_sell.unwrap_or(false)
-                    && vegas_indicator_signal_values.kline_hammer_value.is_hanging_man
-                {
-                    signal_result.should_sell = Some(false);
-                    signal_result
-                        .filter_reasons
-                        .push("SQUEEZE_HANGING_MAN_NO_SHORT".to_string());
-                }
-                // 对称：挤压区“锤子线”也容易是假信号 → 不做多
-                if signal_result.should_buy.unwrap_or(false)
-                    && vegas_indicator_signal_values.kline_hammer_value.is_hammer
-                {
-                    signal_result.should_buy = Some(false);
-                    signal_result
-                        .filter_reasons
-                        .push("SQUEEZE_HAMMER_NO_LONG".to_string());
-                }
-            }
-
-            // 3) 极端 TooFar：大幅偏离 + 高波动时，只允许顺势开仓
-            let is_extreme = dist_ratio >= min_dist_ratio && bb_width >= min_bb_width;
-            if is_extreme {
-                let is_long_trend = vegas_indicator_signal_values.ema_values.is_long_trend;
-                let is_short_trend = vegas_indicator_signal_values.ema_values.is_short_trend;
-
-                if signal_result.should_buy.unwrap_or(false) && !is_long_trend {
-                    signal_result.should_buy = Some(false);
-                    signal_result
-                        .filter_reasons
-                        .push("EMA_DISTANCE_TOO_FAR_GATING_LONG".to_string());
-                }
-
-                if signal_result.should_sell.unwrap_or(false) && !is_short_trend {
-                    signal_result.should_sell = Some(false);
-                    signal_result
-                        .filter_reasons
-                        .push("EMA_DISTANCE_TOO_FAR_GATING_SHORT".to_string());
-                }
-            }
-        }
-
         // 贴线追多止损逻辑
         if signal_result.should_buy.unwrap_or(false) {
             if let Some(dist) = price_to_ema4 {
@@ -775,7 +603,7 @@ impl VegasStrategy {
         // - 大实体且一次跨越多条EMA时，仅顺势放行；反向信号直接过滤
         // - 方向冲突时撤销信号，避免追入假突破
         // ================================================================
-        if let Some(extreme_cfg) = extreme_cfg_override.as_ref().or(self.extreme_k_filter_signal.as_ref()) {
+        if let Some(extreme_cfg) = self.extreme_k_filter_signal.as_ref() {
             if extreme_cfg.is_open {
                 let body_ratio = last_data_item.body_ratio();
                 let body_move_pct =
@@ -820,10 +648,8 @@ impl VegasStrategy {
             }
         }
 
-
-
         // ================================================================
-        // 【新增】震荡过滤：震荡时降低止盈目标
+        // 震荡过滤：震荡时降低止盈目标（不影响开仓，只影响 TP）
         // ================================================================
         if let Some(range_filter_signal) = &self.range_filter_signal {
             if range_filter_signal.is_open && self.bolling_signal.is_some() {
@@ -850,8 +676,6 @@ impl VegasStrategy {
                 }
             }
         }
-
-
 
         // ================================================================
         // 【新增】MACD 动量反转过滤 (Momentum Turn Filter)
@@ -924,9 +748,8 @@ impl VegasStrategy {
         }
 
         // 可选：添加详细信息到结果中
-        if signal_result.should_buy.unwrap_or(false)
-            || signal_result.should_sell.unwrap_or(false)
-                && env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true"
+        if self.emit_debug
+            && (signal_result.should_buy.unwrap_or(false) || signal_result.should_sell.unwrap_or(false))
         {
             //如果有使用信号k线止损
             if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
@@ -960,13 +783,11 @@ impl VegasStrategy {
     /// 获取指标组合
     pub fn get_indicator_combine(&self) -> IndicatorCombine {
         use crate::ema_indicator::EmaIndicator;
-        use crate::fair_value_gap_indicator::FairValueGapIndicator;
         use crate::leg_detection_indicator::LegDetectionIndicator;
         use crate::market_structure_indicator::MarketStructureIndicator;
         use crate::momentum::rsi::RsiIndicator;
         use crate::pattern::engulfing::KlineEngulfingIndicator;
         use crate::pattern::hammer::KlineHammerIndicator;
-        use crate::premium_discount_indicator::PremiumDiscountIndicator;
         use crate::volatility::bollinger::BollingBandsPlusIndicator;
         use crate::volume_indicator::VolumeRatioIndicator;
 
@@ -1020,7 +841,7 @@ impl VegasStrategy {
             ));
         }
 
-        // 添加腿部识别
+        // 添加腿部识别（可选）
         if let Some(leg_detection_signal) = &self.leg_detection_signal {
             if leg_detection_signal.is_open {
                 indicator_combine.leg_detection_indicator =
@@ -1028,7 +849,7 @@ impl VegasStrategy {
             }
         }
 
-        // 添加市场结构
+        // 添加市场结构（可选）
         if let Some(market_structure_signal) = &self.market_structure_signal {
             if market_structure_signal.is_open {
                 indicator_combine.market_structure_indicator =
@@ -1038,27 +859,6 @@ impl VegasStrategy {
                         market_structure_signal.swing_threshold,
                         market_structure_signal.internal_threshold,
                     ));
-            }
-        }
-
-        // 添加公平价值缺口
-        if let Some(fair_value_gap_signal) = &self.fair_value_gap_signal {
-            if fair_value_gap_signal.is_open {
-                indicator_combine.fair_value_gap_indicator = Some(FairValueGapIndicator::new(
-                    fair_value_gap_signal.threshold_multiplier,
-                    fair_value_gap_signal.auto_threshold,
-                ));
-            }
-        }
-
-        // 添加溢价/折扣区域
-        if let Some(premium_discount_signal) = &self.premium_discount_signal {
-            if premium_discount_signal.is_open {
-                let internal_length = (premium_discount_signal.lookback / 4).max(1);
-                indicator_combine.premium_discount_indicator = Some(PremiumDiscountIndicator::new(
-                    premium_discount_signal.lookback,
-                    internal_length,
-                ));
             }
         }
 

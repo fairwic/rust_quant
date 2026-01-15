@@ -64,14 +64,6 @@ pub fn deal_signal(
             if candle.ts >= trading_state.last_signal_result.clone().unwrap().ts {
                 let last_signal_result = trading_state.last_signal_result.clone().unwrap();
                 if last_signal_result.should_buy {
-                    if last_signal_result
-                        .filter_reasons
-                        .iter()
-                        .any(|r| r == "BTC_MACRO_VETO_LONG")
-                    {
-                        trading_state.last_signal_result = None;
-                        return trading_state;
-                    }
                     // 如果信号是买，但是当前价格低于信号的最优开仓价格，则使用信号的最优开仓价格
                     if let Some(best_price) = last_signal_result.best_open_price {
                         if candle.l <= best_price {
@@ -99,14 +91,6 @@ pub fn deal_signal(
                         }
                     }
                 } else if last_signal_result.should_sell {
-                    if last_signal_result
-                        .filter_reasons
-                        .iter()
-                        .any(|r| r == "BTC_MACRO_VETO_SHORT")
-                    {
-                        trading_state.last_signal_result = None;
-                        return trading_state;
-                    }
                     // 如果信号是卖，但是当前价格高于信号的最优开仓价格，则使用信号的最优开仓价格
                     if let Some(best_price) = last_signal_result.best_open_price {
                         if candle.h > best_price {
@@ -147,15 +131,7 @@ fn handle_buy_signal_logic(
     signal: &SignalResult,
     candle: &CandleItem,
 ) {
-    let veto_open_long = signal
-        .filter_reasons
-        .iter()
-        .any(|r| r == "BTC_MACRO_VETO_LONG");
-
     if trading_state.trade_position.is_none() {
-        if veto_open_long {
-            return;
-        }
         // 不使用最优开仓价格，直接开多仓
         open_long_position(risk_config, trading_state, candle, signal, None);
     } else if let Some(trade_position) = trading_state.trade_position.clone() {
@@ -169,9 +145,7 @@ fn handle_buy_signal_logic(
             close_position(trading_state, candle, signal, "反向信号触发平仓", profit);
 
             // 然后开多仓
-            if !veto_open_long {
-                open_long_position(risk_config, trading_state, candle, signal, None);
-            }
+            open_long_position(risk_config, trading_state, candle, signal, None);
         }
     }
 }
@@ -183,15 +157,7 @@ fn handle_sell_signal_logic(
     signal: &SignalResult,
     candle: &CandleItem,
 ) {
-    let veto_open_short = signal
-        .filter_reasons
-        .iter()
-        .any(|r| r == "BTC_MACRO_VETO_SHORT");
-
     if trading_state.trade_position.is_none() {
-        if veto_open_short {
-            return;
-        }
         // 不使用最优开仓价格，直接开空仓
         open_short_position(risk_config, trading_state, candle, signal, None);
     } else if let Some(trade_position) = trading_state.trade_position.clone() {
@@ -205,9 +171,7 @@ fn handle_sell_signal_logic(
             close_position(trading_state, candle, signal, "反向信号平仓", profit);
 
             // 然后开空仓
-            if !veto_open_short {
-                open_short_position(risk_config, trading_state, candle, signal, None);
-            }
+            open_short_position(risk_config, trading_state, candle, signal, None);
         }
     }
 }

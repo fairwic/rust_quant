@@ -173,7 +173,6 @@ pub fn get_multi_indicator_values(
         );
     }
 
-    // 计算Smart Money Concepts相关指标
     // 腿部识别
     let leg_start = Instant::now();
     if let Some(leg_detection_indicator) = &mut indicator_combine.leg_detection_indicator {
@@ -187,41 +186,15 @@ pub fn get_multi_indicator_values(
     }
 
     // 市场结构
-    let structure_start = Instant::now();
+    let ms_start = Instant::now();
     if let Some(market_structure_indicator) = &mut indicator_combine.market_structure_indicator {
         vegas_indicator_signal_value.market_structure_value =
             market_structure_indicator.next(data_item);
     }
-    if structure_start.elapsed().as_millis() > 10 {
+    if ms_start.elapsed().as_millis() > 10 {
         info!(
-            duration_ms = structure_start.elapsed().as_millis(),
+            duration_ms = ms_start.elapsed().as_millis(),
             "计算市场结构"
-        );
-    }
-
-    // 公平价值缺口
-    let fvg_start = Instant::now();
-    if let Some(fair_value_gap_indicator) = &mut indicator_combine.fair_value_gap_indicator {
-        vegas_indicator_signal_value.fair_value_gap_value =
-            fair_value_gap_indicator.next(data_item);
-    }
-    if fvg_start.elapsed().as_millis() > 10 {
-        info!(
-            duration_ms = fvg_start.elapsed().as_millis(),
-            "计算公平价值缺口"
-        );
-    }
-
-    // 溢价/折扣区域
-    let pd_start = Instant::now();
-    if let Some(premium_discount_indicator) = &mut indicator_combine.premium_discount_indicator {
-        vegas_indicator_signal_value.premium_discount_value =
-            premium_discount_indicator.next(data_item);
-    }
-    if pd_start.elapsed().as_millis() > 10 {
-        info!(
-            duration_ms = pd_start.elapsed().as_millis(),
-            "计算溢价/折扣区域"
         );
     }
 
