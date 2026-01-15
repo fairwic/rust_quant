@@ -44,6 +44,10 @@ docker exec -i mysql mysql -uroot -pexample test -e 'UPDATE strategy_config SET 
 - 基线通常指 `back_test_log` 中 **同市场、同周期、当前策略配置**的最优记录。
 - 常用排序：`Sharpe ↓ → MaxDD ↑ → Profit ↓`（如果更偏收益，则用 `Profit ↓ → win_rate ↓`）。
 
+### 代码改动守则（避免破坏基线）
+- 只要“基线回测”的 `strategy_detail`（即策略配置 JSON）里 **出现某模块且 `is_open=true`**，就 **不允许删除该模块/字段/指标链路**（否则回放/复现会因反序列化丢字段而劣化）。
+- 需要下线模块时，只能通过配置把它 **关闭**（例如 `is_open=false`、或权重设为 `0.0`），并保留最小实现以兼容旧配置。
+
 ### 自动化扫描流程（示意）
 1. 更新 `strategy_config` 的 `value`（例如 LegDetection size/weight、MarketStructure 权重等）。
 2. 启动回测：`cargo run`。
