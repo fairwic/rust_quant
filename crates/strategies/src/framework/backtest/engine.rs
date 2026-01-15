@@ -119,3 +119,54 @@ pub fn run_back_test_generic<IC, IV>(
         filtered_signals: shadow_manager.into_filtered_signals(),
     }
 }
+
+// ============================================================================
+// Pipeline架构回测引擎
+// ============================================================================
+
+use super::adapter::IndicatorStrategyBacktest;
+use super::pipeline::stages::{FilterStage, PositionStage, RiskStage, SignalStage};
+use super::pipeline::PipelineRunner;
+
+/// 使用Pipeline架构执行回测
+///
+/// 相比`run_back_test_generic`，Pipeline架构提供：
+/// - 更清晰的阶段划分
+/// - 更易于调试和扩展
+/// - 统一的状态管理
+///
+/// # 类型参数
+/// - `S`: 实现`IndicatorStrategyBacktest` trait的策略
+///
+/// # 示例
+/// ```ignore
+/// let result = run_back_test_pipeline(
+///     "BTC-USDT-SWAP",
+///     VegasBacktestAdapter::new(strategy),
+///     &candles,
+///     risk_config,
+/// );
+/// ```
+pub fn run_back_test_pipeline<S>(
+    inst_id: &str,
+    strategy: S,
+    candles_list: &[CandleItem],
+    basic_risk_config: BasicRiskStrategyConfig,
+) -> BackTestResult
+where
+    S: IndicatorStrategyBacktest + Send + Sync + 'static,
+    S::IndicatorCombine: Send + Sync + 'static,
+    S::IndicatorValues: Send + Sync + 'static,
+{
+    let min_data_length = strategy.min_data_length();
+
+    // 构建Pipeline
+    let mut pipeline = PipelineRunner::new()
+        .add_stage(SignalStage::new(strategy))
+        .add_stage(FilterStage::new())
+        .add_stage(PositionStage::new())
+        .add_stage(RiskStage::new());
+
+    // 执行回测
+    pipeline.run(candles_list, inst_id, basic_risk_config, min_data_length)
+}

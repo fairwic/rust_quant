@@ -51,3 +51,26 @@ pub fn run_indicator_strategy_backtest<S: IndicatorStrategyBacktest>(
         |ic, candle| S::build_indicator_values(ic, candle),
     )
 }
+
+// ============================================================================
+// Pipeline版本适配器（用于对比测试）
+// ============================================================================
+
+use super::engine::run_back_test_pipeline;
+
+/// 使用Pipeline架构执行回测（适配IndicatorStrategyBacktest trait）
+///
+/// 与`run_indicator_strategy_backtest`功能相同，但使用Pipeline架构
+pub fn run_indicator_strategy_backtest_pipeline<S>(
+    inst_id: &str,
+    strategy: S,
+    candles_list: &[CandleItem],
+    risk_config: BasicRiskStrategyConfig,
+) -> BackTestResult
+where
+    S: IndicatorStrategyBacktest + Send + Sync + 'static,
+    S::IndicatorCombine: Send + Sync + 'static,
+    S::IndicatorValues: Send + Sync + 'static,
+{
+    run_back_test_pipeline(inst_id, strategy, candles_list, risk_config)
+}

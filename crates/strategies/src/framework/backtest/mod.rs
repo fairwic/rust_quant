@@ -3,6 +3,7 @@ pub mod conversions;
 pub mod engine;
 pub mod fibonacci;
 pub mod indicators;
+pub mod pipeline;
 pub mod position;
 pub mod r_system;
 pub mod recording;
@@ -14,9 +15,12 @@ pub mod types;
 pub mod utils;
 
 // 重新导出常用类型
-pub use adapter::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
+pub use adapter::{
+    run_indicator_strategy_backtest, run_indicator_strategy_backtest_pipeline,
+    IndicatorStrategyBacktest,
+};
 pub use conversions::{convert_domain_signal, to_domain_basic_risk_config};
-pub use engine::{run_back_test, run_back_test_generic};
+pub use engine::{run_back_test, run_back_test_generic, run_back_test_pipeline};
 pub use indicators::{calculate_ema, get_multi_indicator_values};
 pub use position::{
     close_position, finalize_trading_state, open_long_position, open_short_position,

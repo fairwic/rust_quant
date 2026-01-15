@@ -15,7 +15,9 @@ use rust_quant_indicators::volatility::ATRStopLoos;
 use rust_quant_indicators::volume::VolumeRatioIndicator;
 use ta::Next;
 // ⭐ 使用新的 indicators::nwe 模块
-use crate::framework::backtest::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
+use crate::framework::backtest::{
+    run_indicator_strategy_backtest_pipeline, IndicatorStrategyBacktest,
+};
 use crate::strategy_common::{BackTestResult, BasicRiskStrategyConfig, SignalResult};
 use crate::{risk, time_util, CandleItem};
 use rust_quant_indicators::trend::counter_trend;
@@ -744,12 +746,12 @@ impl NweStrategy {
 
     /// 运行回测：仅使用 RSI、Volume、NWE、ATR 指标（复用可插拔的 indicator_combine）
     pub fn run_test(
-        &mut self,
+        mut self,
         inst_id: &str,
         candles: &Vec<CandleItem>,
         risk: BasicRiskStrategyConfig,
     ) -> BackTestResult {
-        run_indicator_strategy_backtest(inst_id, self, candles, risk)
+        run_indicator_strategy_backtest_pipeline(inst_id, self, candles, risk)
     }
 }
 
