@@ -7,6 +7,15 @@ description: Optimize the Vegas 4H backtest loop (cargo run + MySQL back_test_lo
 
 ## 快速流程（默认命令）
 
+### 0) 常用环境变量（回测/实盘一致性）
+- **回测入口**：`DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' cargo run`
+- **预热K线数量（实盘预热对齐回测）**
+  - `STRATEGY_WARMUP_LIMIT=500`：预热最小根数（默认 500）
+  - `STRATEGY_WARMUP_LIMIT_MAX=10000`：预热最大上限（默认 10000）
+  - 真实预热根数 = `max(STRATEGY_WARMUP_LIMIT, strategy.value.min_k_line_num)`，并受 MAX 限制
+- **OKX 请求过期窗口（修复 expTime 过期）**
+  - `OKX_REQUEST_EXPIRATION_MS=300000`（建议模拟盘/联调用 5 分钟）
+
 ### 1) 运行回测
 ```bash
 cd /Users/mac2/onions/rust_quant && TIGHTEN_VEGAS_RISK=0 DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' cargo run
@@ -25,6 +34,11 @@ python scripts/vegas-backtest-analysis/scripts/visualize_backtest_detail.py \
 ### 2) 查询最新回测结果
 ```bash
 docker exec -i mysql mysql -uroot -pexample test -e "select id,win_rate,profit,final_fund,sharpe_ratio,annual_return,max_drawdown,volatility,created_at from back_test_log order by id desc limit 1\G"
+```
+
+### 2.1) 查询指定回测ID（例如基线 5692）
+```bash
+docker exec -i mysql mysql -uroot -pexample test -e "select id,strategy_type,inst_type,time,win_rate,profit,final_fund,sharpe_ratio,annual_return,max_drawdown,volatility,created_at from back_test_log where id=5692\\G"
 ```
 
 ### 3) 查看/更新策略配置（vegas 4H，id=11）
@@ -205,6 +219,11 @@ docker exec -i mysql mysql -uroot -pexample test -e 'UPDATE strategy_config SET 
 
 ## JSON 配置坑
 
+### 实盘一致性开关（services 层）
+- `LIVE_ATTACH_TP=1`：下单时附带止盈（默认不附带）
+- `LIVE_CLOSE_OPPOSITE_POSITION=1`：反向持仓先平仓再开仓
+- `LIVE_SKIP_IF_SAME_SIDE_POSITION=1`：已有同向持仓则跳过开新仓
+
 ### 必须包含的字段
 - `kline_hammer_signal`：必须存在，否则解析失败
 
@@ -227,6 +246,28 @@ atr_take_profit_ratio: Option<f64>,
 fixed_signal_kline_take_profit_ratio: Option<f64>,
 is_counter_trend_pullback_take_profit: Option<bool>,
 ```
+
+---
+
+## 🧪 OKX 模拟盘下单联调（E2E 流程）
+
+### 运行方式（默认 ignore，需要显式开启）
+```bash
+cd /Users/mac2/onions/rust_quant
+RUN_OKX_SIMULATED_E2E=1 OKX_REQUEST_EXPIRATION_MS=300000 \
+  cargo test -p rust-quant-services --test okx_simulated_order_flow -- --ignored --nocapture
+```
+
+### 需要的环境变量（模拟盘 APIKey）
+- `OKX_SIMULATED_API_KEY`
+- `OKX_SIMULATED_API_SECRET`
+- `OKX_SIMULATED_PASSPHRASE`
+
+### 可调参数
+- `OKX_TEST_INST_ID`（默认 `ETH-USDT-SWAP`）
+- `OKX_TEST_SIDE`（默认 `buy`，可选 `sell`）
+- `OKX_TEST_ORDER_SIZE`（默认 `1`）
+- `OKX_TEST_TP_PCT` / `OKX_TEST_SL_PCT`（默认 `0.10`，测试用远离触发价，避免立即成交）
 
 ---
 

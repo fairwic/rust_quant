@@ -4,6 +4,36 @@
 
 ---
 
+### 2026-01-15: 从回测切到实盘（基线 5692）- 信号/止盈止损/交易所链路对齐
+
+#### 目标
+- 基线回测：`back_test_log.id = 5692`（Vegas / ETH-USDT-SWAP / 4H）。
+- 开始实盘前，把“回测→实盘”关键差异收敛到可控开关，并补齐 OKX 真实下单路径（含止盈止损/改单/平仓）。
+
+#### 本次落地（代码侧）
+- **Vegas 参数一致性**：实盘执行器使用配置中的 `signal_weights`（不再强制 default），避免回测/实盘权重不一致导致信号偏移。
+- **MarketStructure 是否可禁用**：补了回归用例验证 MarketStructure 即使权重=0 也会参与方向投票（只是不加权），因此“禁用=删除逻辑”会改变行为；需要通过配置控制而不是删链路。
+- **实盘下单开关（灰度上线）**：
+  - `LIVE_ATTACH_TP=1`：下单时附带 TP（默认关）。
+  - `LIVE_CLOSE_OPPOSITE_POSITION=1`：反向持仓先平仓再开仓（默认关）。
+  - `LIVE_SKIP_IF_SAME_SIDE_POSITION=1`：已有同向持仓则跳过开新仓（默认关）。
+- **止盈价格优先级对齐**：`ATR TP → 信号 TP → 逆势回调 TP`（并做方向合理性校验，不合理则忽略 TP）。
+- **预热K线数量对齐回测**：预热数量改为 `max(STRATEGY_WARMUP_LIMIT, min_k_line_num)` 并受 `STRATEGY_WARMUP_LIMIT_MAX` 上限控制，避免实盘预热不够导致指标冷启动偏差。
+- **OKX 下单链路补全**：
+  - 下单支持 attachAlgoOrds 同时附带 `TP+SL`。
+  - 支持 `close_position` 市价平仓。
+  - `OKX_REQUEST_EXPIRATION_MS` 可覆盖请求有效期（修复 `expTime can't be earlier...`）。
+  - `OkxStopLossAmender` 支持基于 `ExchangeApiConfig` 创建，且同样支持 `OKX_REQUEST_EXPIRATION_MS` 覆盖。
+- **risk_config 字段兼容**：`fix_signal_kline_take_profit_ratio` 增加 `serde(alias="fixed_signal_kline_take_profit_ratio")`，避免历史配置字段名不一致造成解析差异。
+
+#### 联调与验证
+- `cargo test -p rust-quant-services --lib`
+- OKX 模拟盘 E2E（默认 ignore）：
+  - `RUN_OKX_SIMULATED_E2E=1 cargo test -p rust-quant-services --test okx_simulated_order_flow -- --ignored --nocapture`
+  - 测试内会设置 `OKX_REQUEST_EXPIRATION_MS=300000`，降低本地时间与服务器时间漂移导致的过期风险。
+
+---
+
 ### 2026-01-09: Shadow Trading + 风控优化 + ATR止盈修复
 
 #### 实验概览
