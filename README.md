@@ -63,6 +63,14 @@ cargo run --package rust-quant-cli --release
 > 基线（Vegas 4H）默认无止盈，仅按 `max_loss_percent` 止损；实盘下单的初始止损已对齐回测（信号K线/1R/最大亏损取更紧者）。
 ```
 
+### 🗄️ 初始化数据库（表结构）
+
+项目自带迁移文件，推荐用 `migrations/` 直接初始化：
+
+```bash
+cargo sqlx migrate run
+```
+
 ### 环境配置
 
 创建 `.env` 文件并配置：
@@ -78,10 +86,10 @@ DATABASE_URL=mysql://root:password@127.0.0.1:3306/rust_quant
 REDIS_URL=redis://127.0.0.1:6379
 
 # 功能开关
-IS_RUN_SYNC_DATA_JOB=false      # 数据同步
-IS_BACK_TEST=false               # 回测
-IS_OPEN_SOCKET=false             # WebSocket
-IS_RUN_REAL_STRATEGY=false       # 实盘策略
+IS_RUN_SYNC_DATA_JOB=true     # 数据同步
+IS_BACK_TEST=true   # 回测
+IS_OPEN_SOCKET=true # WebSocket 实盘启动
+IS_RUN_REAL_STRATEGY=false  # 实盘策略 实盘启动
 ```
 
 ### 🎛️ 随机调参流程（后续启用）
@@ -111,22 +119,6 @@ let service = StrategyExecutionService::new();
 // 风控检查
 let risk = RiskManagementService::new();
 ```
-
----
-
-## 📊 项目状态
-
-### 完成度: 85%
-
-- 架构设计: **100%** ✅ (DDD Workspace)
-- 核心功能: **85%** ✅
-- 数据同步: **95%** ✅
-- 编译通过: **100%** ✅
-- 回测功能: **框架已实现**
-- WebSocket: **框架已实现**
-- 实盘策略: **框架已实现**
-
----
 
 ## 🏗️ 架构
 
