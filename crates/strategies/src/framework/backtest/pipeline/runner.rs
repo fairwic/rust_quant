@@ -2,7 +2,9 @@
 
 use super::context::BacktestContext;
 use super::stage::{BacktestStage, StageResult};
+use crate::framework::backtest::position::finalize_trading_state;
 use crate::framework::backtest::types::{BackTestResult, BasicRiskStrategyConfig, TradingState};
+use crate::framework::backtest::utils::calculate_win_rate;
 use crate::CandleItem;
 
 /// Pipeline执行器
@@ -56,40 +58,49 @@ impl PipelineRunner {
         risk_config: BasicRiskStrategyConfig,
         min_data_length: usize,
     ) -> BackTestResult {
-        let mut trading_state = TradingState::default();
+        let _ = min_data_length;
 
-        // 我们需要从头开始遍历，以便 SignalStage 可以构建完整的 K 线缓冲区
-        // 具体的预热逻辑 (min_data_length 和 i < 500) 由 SignalStage 内部控制
-        for (i, candle) in candles.iter().enumerate() {
-            // 创建/更新上下文
-            let mut ctx = BacktestContext::new(
-                candle.clone(),
-                i,
-                inst_id.to_string(),
-                risk_config.clone(),
-                trading_state.clone(),
-            );
-
-            // 执行Pipeline
-            let _result = self.process_candle(&mut ctx);
-
-            // 同步状态
-            trading_state = ctx.trading_state;
+        if candles.is_empty() {
+            return BackTestResult::default();
         }
 
-        // 生成结果
-        let win_rate = if trading_state.wins + trading_state.losses > 0 {
-            trading_state.wins as f64 / (trading_state.wins + trading_state.losses) as f64
-        } else {
-            0.0
-        };
+        let mut ctx = BacktestContext::new(
+            candles[0].clone(),
+            0,
+            inst_id.to_string(),
+            risk_config,
+            TradingState::default(),
+        );
+
+        // 从头遍历：SignalStage 负责管理 warm-up (min_data_length) 和 i < 500 的对齐逻辑
+        for (i, candle) in candles.iter().enumerate() {
+            if i > 0 {
+                ctx.reset_for_next_candle(candle.clone(), i);
+            }
+            let _result = self.process_candle(&mut ctx);
+        }
+
+        // --- Finalize: 对齐 legacy engine 的收尾逻辑 ---
+        if let Some(last_candle) = candles.last() {
+            ctx.shadow_manager.finalize(last_candle);
+        }
+        finalize_trading_state(&mut ctx.trading_state, candles);
+
+        let win_rate = calculate_win_rate(ctx.trading_state.wins, ctx.trading_state.losses);
+
+        // move out of ctx
+        let BacktestContext {
+            trading_state,
+            shadow_manager,
+            ..
+        } = ctx;
 
         BackTestResult {
             funds: trading_state.funds,
             win_rate,
             open_trades: trading_state.open_position_times,
             trade_records: trading_state.trade_records,
-            filtered_signals: Vec::new(), // TODO: 从FilterStage收集
+            filtered_signals: shadow_manager.into_filtered_signals(),
         }
     }
 }

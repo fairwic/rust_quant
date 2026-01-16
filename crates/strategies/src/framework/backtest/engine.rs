@@ -125,7 +125,7 @@ pub fn run_back_test_generic<IC, IV>(
 // ============================================================================
 
 use super::adapter::IndicatorStrategyBacktest;
-use super::pipeline::stages::{FilterStage, PositionStage, RiskStage, SignalStage};
+use super::pipeline::stages::{FilterStage, PositionStage, SignalStage};
 use super::pipeline::PipelineRunner;
 
 /// 使用Pipeline架构执行回测
@@ -164,8 +164,7 @@ where
     let mut pipeline = PipelineRunner::new()
         .add_stage(SignalStage::new(strategy))
         .add_stage(FilterStage::new())
-        .add_stage(PositionStage::new())
-        .add_stage(RiskStage::new());
+        .add_stage(PositionStage::new());
 
     // 执行回测
     pipeline.run(candles_list, inst_id, basic_risk_config, min_data_length)

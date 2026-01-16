@@ -12,17 +12,25 @@ pub struct SignalStage<S: IndicatorStrategyBacktest> {
     indicator_combine: S::IndicatorCombine,
     candle_buffer: Vec<CandleItem>,
     min_data_length: usize,
+    capacity: usize,
 }
 
 impl<S: IndicatorStrategyBacktest> SignalStage<S> {
     pub fn new(strategy: S) -> Self {
         let indicator_combine = strategy.init_indicator_combine();
         let min_data_length = strategy.min_data_length();
+        let window_size = min_data_length;
+        let capacity = if window_size > 0 {
+            (window_size * 2).max(1024)
+        } else {
+            1024
+        };
         Self {
             strategy,
             indicator_combine,
-            candle_buffer: Vec::with_capacity(min_data_length + 100),
+            candle_buffer: Vec::with_capacity(capacity),
             min_data_length,
+            capacity,
         }
     }
 }
@@ -45,24 +53,17 @@ where
             S::build_indicator_values(&mut self.indicator_combine, &ctx.candle);
 
         // ⚠️ 严格对齐 engine.rs 的逻辑：
-        // 1. 先缓冲数据 (calculate indicators)
-        // 2. 检查全局索引是否满足预热要求 (i < 500)
-        // 3. 检查缓冲区是否满足最小长度
+        // 1) 先缓冲数据并计算指标
+        // 2) 缓冲不足直接跳过
+        // 3) 缓冲满足后调用策略（即使 i < 500 也会调用，但结果会被丢弃）
+        // 4) i < 500 时跳过后续阶段（不产生信号、不记录过滤原因）
 
-        // 预热期跳过 (engine.rs line 74: if i < 500 { continue; })
-        if ctx.candle_index < 500 {
-            return StageResult::Skip;
-        }
-
-        // 检查是否有足够数据
+        // 检查是否有足够数据（engine.rs: if candle_buffer.len() < window_size { continue; }）
         if self.candle_buffer.len() < self.min_data_length {
             return StageResult::Skip;
         }
 
-        // 生成信号
-        // ⚠️ 严格对齐 engine.rs logic:
-        // let current_slice = &candle_buffer[candle_buffer.len() - window_size..];
-        // 必须只传递最后 min_data_length 个 K 线，因为策略可能对输入长度敏感
+        // 必须只传递最后 min_data_length 个 K 线（engine.rs: current_slice = last window_size）
         let start_index = self
             .candle_buffer
             .len()
@@ -73,7 +74,22 @@ where
             self.strategy
                 .generate_signal(current_slice, &mut indicator_values, &ctx.risk_config);
 
-        // 保存信号和过滤原因
+        // 预热期跳过（engine.rs: if i < 500 { continue; }）
+        if ctx.candle_index < 500 {
+            // 管理缓冲区大小对齐 legacy 行为
+            if self.candle_buffer.len() >= self.capacity {
+                let remove_count = self
+                    .candle_buffer
+                    .len()
+                    .saturating_sub(self.min_data_length);
+                if remove_count > 0 {
+                    self.candle_buffer.drain(0..remove_count);
+                }
+            }
+            return StageResult::Skip;
+        }
+
+        // 保存信号和过滤原因（i >= 500 才会进入后续阶段）
         if !signal.filter_reasons.is_empty() {
             ctx.is_signal_filtered = true;
             ctx.filter_reasons = signal.filter_reasons.clone();
@@ -82,14 +98,8 @@ where
         ctx.signal = Some(signal);
 
         // 管理缓冲区大小 (Sliding Window)
-        // 保持缓冲区大小为 min_data_length
-        // 逻辑对齐 engine.rs line 99-102
-        if self.candle_buffer.len() >= self.candle_buffer.capacity() {
-            // engine.rs 使用：
-            // let remove_count = candle_buffer.len() - window_size;
-            // candle_buffer.drain(0..remove_count);
-            // 这里稍微放宽一些容量检查，避免频繁内存操作，但为了逻辑严格一致，
-            // 我们应当始终保持传给 strategy 的是最后 min_data_length 个
+        // 对齐 engine.rs：当缓冲达到 capacity 时，剔除最前面多余部分，保留 window_size
+        if self.candle_buffer.len() >= self.capacity {
             let remove_count = self
                 .candle_buffer
                 .len()

@@ -5,12 +5,13 @@
 use crate::framework::backtest::types::{
     BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState,
 };
+use crate::framework::backtest::shadow_trading::ShadowTradeManager;
 use crate::CandleItem;
 
 /// 回测Pipeline上下文
 ///
 /// 统一状态容器，各Stage通过修改Context实现状态传递
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BacktestContext {
     // ========================================================================
     // 输入数据
@@ -51,6 +52,9 @@ pub struct BacktestContext {
     /// 当前仓位（从trading_state同步）
     pub current_position: Option<TradePosition>,
 
+    /// Shadow Trading 管理器（用于收集 filtered_signals 且对齐 legacy engine 行为）
+    pub shadow_manager: ShadowTradeManager,
+
     // ========================================================================
     // 控制标志
     // ========================================================================
@@ -84,6 +88,7 @@ impl BacktestContext {
             filter_reasons: Vec::new(),
             trading_state,
             current_position,
+            shadow_manager: ShadowTradeManager::new(),
             opened_position: false,
             closed_position: false,
             close_reason: None,

@@ -18,6 +18,7 @@ use crate::CandleItem;
 /// Shadow Trading 管理器
 ///
 /// 管理影子交易的创建、更新和结算
+#[derive(Debug)]
 pub struct ShadowTradeManager {
     /// 活跃的影子交易
     trades: Vec<ShadowTrade>,
