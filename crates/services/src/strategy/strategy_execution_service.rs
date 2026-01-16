@@ -109,6 +109,65 @@ impl StrategyExecutionService {
         .or(signal.counter_trend_pullback_take_profit_price)
     }
 
+    /// 计算“初始止损价”（用于下单时挂止损单）
+    ///
+    /// 目标：尽量对齐回测 `check_risk_config` 的“最先触发止损”效果：
+    /// - 同时存在多条止损规则时，选择更“紧”的那条（Long: 更高的止损；Short: 更低的止损）
+    /// - 目前覆盖：max_loss_percent、信号K线止损、单K振幅(1R)止损（domain: is_move_stop_loss）
+    fn compute_initial_stop_loss(
+        side: &str,
+        signal: &SignalResult,
+        risk_config: &rust_quant_domain::BasicRiskConfig,
+        trigger_candle: Option<&CandleItem>,
+    ) -> f64 {
+        let entry_price = signal.open_price;
+        let max_loss_percent = risk_config.max_loss_percent;
+        let max_loss_stop = if side == "sell" {
+            entry_price * (1.0 + max_loss_percent)
+        } else {
+            entry_price * (1.0 - max_loss_percent)
+        };
+
+        let mut candidates: Vec<f64> = vec![max_loss_stop];
+
+        // 信号K线止损（若启用且信号提供）
+        if risk_config
+            .is_used_signal_k_line_stop_loss
+            .unwrap_or(false)
+        {
+            if let Some(px) = signal.signal_kline_stop_loss_price {
+                candidates.push(px);
+            }
+        }
+
+        // 单K振幅固定止损（1R，domain: is_move_stop_loss）
+        if risk_config.is_move_stop_loss.unwrap_or(false) {
+            let k_range = trigger_candle
+                .map(|c| (c.h - c.l).abs().max(entry_price * 0.001))
+                .unwrap_or(entry_price * 0.001);
+            let one_r_stop = if side == "sell" {
+                entry_price + k_range
+            } else {
+                entry_price - k_range
+            };
+            candidates.push(one_r_stop);
+        }
+
+        match side {
+            // Long：止损应 < entry，越接近 entry 越“紧”
+            "buy" => candidates
+                .into_iter()
+                .filter(|px| *px < entry_price)
+                .fold(max_loss_stop, |acc, px| acc.max(px)),
+            // Short：止损应 > entry，越接近 entry 越“紧”
+            "sell" => candidates
+                .into_iter()
+                .filter(|px| *px > entry_price)
+                .fold(max_loss_stop, |acc, px| acc.min(px)),
+            _ => max_loss_stop,
+        }
+    }
+
     /// 执行策略分析和交易流程
     ///
     /// 参考原始业务逻辑：src/trading/strategy/executor_common.rs::execute_order
@@ -160,8 +219,11 @@ impl StrategyExecutionService {
             None => None,
         };
 
+        // execute() 需要所有权；后续止损计算也需要引用，因此这里保留一份副本
+        let snap_item_for_execute = snap_item.clone();
+
         let signal = strategy_executor
-            .execute(inst_id, period, config, snap_item)
+            .execute(inst_id, period, config, snap_item_for_execute)
             .await
             .map_err(|e| {
                 error!("策略执行失败: {}", e);
@@ -236,6 +298,7 @@ impl StrategyExecutionService {
                 &risk_config,
                 config.id,
                 config.strategy_type.as_str(),
+                snap_item.as_ref(),
             )
             .await
         {
@@ -389,6 +452,7 @@ impl StrategyExecutionService {
         risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
         strategy_type: &str,
+        trigger_candle: Option<&CandleItem>,
     ) -> Result<()> {
         info!(
             "准备下单: inst_id={}, period={}, config_id={}",
@@ -540,29 +604,8 @@ impl StrategyExecutionService {
 
         // 6. 计算止损止盈价格
         let entry_price = signal.open_price;
-        let max_loss_percent = risk_config.max_loss_percent;
-
-        let stop_loss_price = if side == "sell" {
-            entry_price * (1.0 + max_loss_percent)
-        } else {
-            entry_price * (1.0 - max_loss_percent)
-        };
-
-        // 如果使用信号K线止损
-        let final_stop_loss = if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
-            match signal.signal_kline_stop_loss_price {
-                Some(v) => v,
-                None => {
-                    warn!(
-                        "启用了信号K线止损，但信号未提供止损价，回退到最大止损: {}",
-                        stop_loss_price
-                    );
-                    stop_loss_price
-                }
-            }
-        } else {
-            stop_loss_price
-        };
+        let final_stop_loss =
+            Self::compute_initial_stop_loss(side, signal, risk_config, trigger_candle);
 
         // 可选：下单时附带止盈（实盘开关）
         let attach_tp = Self::env_enabled("LIVE_ATTACH_TP");

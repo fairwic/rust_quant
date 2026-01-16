@@ -15,6 +15,7 @@ use crate::cache::arc_vegas_indicator_values::{
     get_hash_key, get_indicator_manager, set_strategy_indicator_values,
 };
 use crate::framework::config::strategy_config::StrategyConfig;
+use crate::framework::backtest::conversions::convert_domain_signal;
 use crate::framework::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use crate::strategy_common::{get_multi_indicator_values, parse_candle_to_data_item, SignalResult};
 use crate::StrategyType;
@@ -183,18 +184,19 @@ impl StrategyExecutor for VegasStrategyExecutor {
             .map_err(|e| anyhow!("原子更新 Vegas 指标与K线失败: {}", e))?;
 
         // 8. 获取最近30根K线（使用公共函数）
-        let candle_vec = get_recent_candles(&new_candle_items, 30);
-
         // 9. 生成交易信号
         let vegas_strategy: VegasStrategy =
             serde_json::from_value(strategy_config.parameters.clone())
                 .map_err(|e| anyhow!("解析 Vegas 策略配置失败: {}", e))?;
+        // ⚠️ 对齐回测：传入策略的窗口长度使用 min_k_line_num（而不是固定 30）
+        let window_size = vegas_strategy.min_k_line_num.max(1).min(MAX_HISTORY_SIZE);
+        let candle_vec = get_recent_candles(&new_candle_items, window_size);
         let default_weights = SignalWeightsConfig::default();
         let weights = vegas_strategy
             .signal_weights
             .as_ref()
             .unwrap_or(&default_weights);
-        let signal_result = vegas_strategy.get_trade_signal(
+        let domain_signal = vegas_strategy.get_trade_signal(
             &candle_vec,
             &mut new_indicator_values.clone(),
             weights,
@@ -204,30 +206,14 @@ impl StrategyExecutor for VegasStrategyExecutor {
 
         info!("✅ Vegas策略信号生成完成: key={}", key);
 
-        // 10. 转换 domain::SignalResult 到 strategy_common::SignalResult
-        let strategy_signal = SignalResult {
-            should_buy: signal_result.should_buy.unwrap_or(false),
-            should_sell: signal_result.should_sell.unwrap_or(false),
-            open_price: signal_result.open_price.unwrap_or(0.0),
-            signal_kline_stop_loss_price: signal_result.signal_kline_stop_loss_price,
-            best_open_price: signal_result.best_open_price,
-            atr_take_profit_ratio_price: signal_result.atr_take_profit_ratio_price,
-            atr_stop_loss_price: signal_result.atr_stop_loss_price,
-            long_signal_take_profit_price: signal_result.long_signal_take_profit_price,
-            short_signal_take_profit_price: signal_result.short_signal_take_profit_price,
-            move_stop_open_price_when_touch_price: None,
-            ts: signal_result.ts.unwrap_or(new_candle_item.ts),
-            single_value: signal_result.single_value.map(|v| v.to_string()),
-            single_result: signal_result.single_result.map(|v| v.to_string()),
-            counter_trend_pullback_take_profit_price: None,
-            is_ema_short_trend: None,
-            is_ema_long_trend: None,
-            atr_take_profit_level_1: None,
-            atr_take_profit_level_2: None,
-            atr_take_profit_level_3: None,
-            filter_reasons: signal_result.filter_reasons,
-            direction: signal_result.direction,
-        };
+        // 10. 转换 domain::SignalResult 到策略层 SignalResult（复用回测同一转换，避免字段丢失）
+        let mut strategy_signal = convert_domain_signal(domain_signal);
+        if strategy_signal.ts == 0 {
+            strategy_signal.ts = new_candle_item.ts;
+        }
+        if strategy_signal.open_price == 0.0 {
+            strategy_signal.open_price = new_candle_item.c;
+        }
 
         // 11. 返回信号（下单逻辑由services层统一处理）
         Ok(strategy_signal)

@@ -98,7 +98,7 @@ impl OkxStopLossAmender {
                     e
                 )
             })?;
-
+        println!("details: {:#?}", details);
         let first = details
             .get(0)
             .ok_or_else(|| anyhow!("订单详情为空: inst_id={}, ord_id={}", inst_id, ord_id))?;
@@ -139,7 +139,7 @@ impl StopLossAmender for OkxStopLossAmender {
         new_sl_trigger_px: f64,
     ) -> anyhow::Result<()> {
         let attach_algo_id = self.fetch_first_attach_algo_id(inst_id, ord_id).await?;
-
+        println!("attach_algo_id: {}", attach_algo_id);
         // OKX: /api/v5/trade/amend-order
         // 当原始订单下单时带了 attachAlgoOrds，则改单也需要带 attachAlgoOrds（否则会报 51538）
         //
@@ -179,6 +179,7 @@ impl StopLossAmender for OkxStopLossAmender {
                     e
                 )
             })?;
+        println!("resp: {:#?}", resp);
 
         // resp 形态依赖 OKX 返回，这里只做日志记录
         if let Some(code) = resp
