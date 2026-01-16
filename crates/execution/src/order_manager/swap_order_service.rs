@@ -475,11 +475,11 @@ impl SwapOrderService {
         &self,
         entry_price: f64,
         stop_loss_price: f64,
+        tp_price: Option<f64>,
         size: &str,
         side: &Side,
     ) -> Vec<AttachAlgoOrdReqDto> {
         let mut orders = Vec::new();
-
         //止盈
         // for level in fib_levels {
         //     let tp_trigger_px: f64 = match side {
@@ -498,13 +498,18 @@ impl SwapOrderService {
 
         // }
         //-1 表示市价
-        let order = AttachAlgoOrdReqDto::new(
+        let mut order = AttachAlgoOrdReqDto::new(
             None,                                    // 止盈触发价
             None,                                    // 止盈委托价 -1 表示市价
             Some(format!("{:.2}", stop_loss_price)), // 止损触发价
             Some("-1".to_string()),                  // 止损委托价 -1 表示市价
             size.to_string(),
         );
+        if tp_price.is_some() {
+            order.tp_ord_px = Some("-1".to_string());
+            order.tp_trigger_px = Some(tp_price.unwrap().to_string());
+        }
+
         orders.push(order);
         orders
     }
@@ -526,8 +531,9 @@ impl SwapOrderService {
         signal: &SignalResult,
         risk_config: &BasicRiskStrategyConfig,
     ) -> Result<Vec<OrderResDto>, AppError> {
-        //最大止盈
+        //最大止损
         let max_loss_percent = risk_config.max_loss_percent;
+        let tp_price = signal.best_take_profit_price;
         let mut stop_loss_price: f64 = match side {
             Side::Sell => entry_price * (1.0 + max_loss_percent),
             Side::Buy => entry_price * (1.0 - max_loss_percent),
@@ -558,6 +564,7 @@ impl SwapOrderService {
         let attach_algo_ords = SwapOrderService::new().generate_fibonacci_take_profit_orders(
             entry_price,
             stop_loss_price,
+            tp_price,
             &size,
             &side,
         );
