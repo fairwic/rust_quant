@@ -5,17 +5,17 @@
 [![Workspace](https://img.shields.io/badge/workspace-14%20crates-blue.svg)]()
 [![Status](https://img.shields.io/badge/status-active--development-yellow.svg)]()
 
-> **企业级DDD Workspace架构 | 完整数据同步 | 持续开发中**
+> **企业级 DDD Workspace 架构 | 完整数据同步 | 持续开发中**
 
 ---
 
 ## 🎯 项目简介
 
-Rust Quant是一个基于**领域驱动设计(DDD)**的企业级量化交易系统，使用Rust语言实现。
+Rust Quant 是一个基于**领域驱动设计(DDD)**的企业级量化交易系统，使用 Rust 语言实现。
 
-采用 **Rust Workspace** 模式，包含 **14个独立的crate包**，遵循严格的分层架构：
+采用 **Rust Workspace** 模式，包含 **14 个独立的 crate 包**，遵循严格的分层架构：
 
-- ✅ **DDD Workspace架构** - 14个crate包，职责清晰
+- ✅ **DDD Workspace 架构** - 14 个 crate 包，职责清晰
 - ✅ **完整的数据同步** - 数据同步任务已实现
 - ✅ **服务层框架** - 策略、订单、风控服务
 - ✅ **泛型基础设施** - 缓存、Repository、工具
@@ -49,6 +49,18 @@ cargo run --package rust-quant-cli --release
 
 # 或直接运行编译后的可执行文件
 ./target/release/rust-quant
+
+### 🚦 实盘/模拟验证快捷流程
+
+- 使用模拟盘：`OKX_SIMULATED_TRADING=1`，填写 `OKX_SIMULATED_API_KEY/SECRET/PASSPHRASE`。
+- 关闭回测直奔实盘链路：`IS_BACK_TEST=false IS_OPEN_SOCKET=true IS_RUN_REAL_STRATEGY=true`（按需设置 `RUN_STRATEGY_PERIOD` 确保订阅周期与策略一致）。
+- 启动：`OKX_SIMULATED_TRADING=1 cargo run -p rust-quant-cli`。
+- 端到端下单/平仓自测（模拟盘）：
+  `RUN_OKX_SIMULATED_E2E=1 OKX_TEST_INST_ID=ETH-USDT-SWAP OKX_TEST_SIDE=buy OKX_TEST_ORDER_SIZE=1 cargo test -p rust-quant-services --test okx_simulated_order_flow -- --ignored --nocapture`
+  - 会下单（附带 TP/SL）、等待持仓出现、尝试改单到保本、平仓并校验持仓消失。
+  - 若订单瞬时成交导致改单返回 “already filled or canceled”，测试已容错。
+
+> 基线（Vegas 4H）默认无止盈，仅按 `max_loss_percent` 止损；实盘下单的初始止损已对齐回测（信号K线/1R/最大亏损取更紧者）。
 ```
 
 ### 环境配置
@@ -76,9 +88,9 @@ IS_RUN_REAL_STRATEGY=false       # 实盘策略
 
 如果要启动 Vegas 的随机批量调参，请遵循：
 
-1. 保持 `.env` 中 `ENABLE_RANDOM_TEST=false`、`ENABLE_RANDOM_TEST_VEGAS=false`、`ENABLE_SPECIFIED_TEST_VEGAS=true`，先用当前 `back_test_log` 的基线配置（比如 `id=5039`）跑一次回测并确认基础指标。  
-2. 修改 `strategy_config` 中尚未明确的信号（如 `leg_detection_signal`/`market_structure_signal`），先手工打开 `is_open=true` 并调节阈值。用 `skills/vegas-backtest-analysis/scripts/analyze_backtest_detail.py` 与 `visualize_backtest_detail.py` 验证生成的 signal 分布与持仓行为。  
-3. 若要批量测试这些新信号，先把 `.env` 改为 `ENABLE_RANDOM_TEST=true`、`ENABLE_RANDOM_TEST_VEGAS=true`、`ENABLE_SPECIFIED_TEST_VEGAS=false`，随机任务会避开写 `back_test_detail`（依赖 `.env` 的 `ENABLE_RANDOM_TEST` 逻辑）。  
+1. 保持 `.env` 中 `ENABLE_RANDOM_TEST=false`、`ENABLE_RANDOM_TEST_VEGAS=false`、`ENABLE_SPECIFIED_TEST_VEGAS=true`，先用当前 `back_test_log` 的基线配置（比如 `id=5039`）跑一次回测并确认基础指标。
+2. 修改 `strategy_config` 中尚未明确的信号（如 `leg_detection_signal`/`market_structure_signal`），先手工打开 `is_open=true` 并调节阈值。用 `skills/vegas-backtest-analysis/scripts/analyze_backtest_detail.py` 与 `visualize_backtest_detail.py` 验证生成的 signal 分布与持仓行为。
+3. 若要批量测试这些新信号，先把 `.env` 改为 `ENABLE_RANDOM_TEST=true`、`ENABLE_RANDOM_TEST_VEGAS=true`、`ENABLE_SPECIFIED_TEST_VEGAS=false`，随机任务会避开写 `back_test_detail`（依赖 `.env` 的 `ENABLE_RANDOM_TEST` 逻辑）。
 4. 找到更优结果后，再恢复 `.env`：关闭随机选项、开启 `ENABLE_SPECIFIED_TEST_VEGAS=true`，用新的参数重跑指定回测，以便生成 `back_test_detail` 供最终分析对比基线。
 
 详见: [启动指南](docs/STARTUP_GUIDE.md)
@@ -109,22 +121,16 @@ let risk = RiskManagementService::new();
 - 架构设计: **100%** ✅ (DDD Workspace)
 - 核心功能: **85%** ✅
 - 数据同步: **95%** ✅
-- 编译通过: **100%** ✅ (有少量警告)
-- 回测功能: **框架已实现，待完善** ⚠️
-- WebSocket: **框架已实现，待完善** ⚠️
-- 实盘策略: **框架已实现，待完善** ⚠️
-
-### 质量评分
-
-**DDD架构**: ⭐⭐⭐⭐⭐ (5/5) **优秀！**  
-**代码质量**: ⭐⭐⭐⭐☆ (4/5) **良好**  
-**文档完整**: ⭐⭐⭐⭐☆ (4/5) **良好**
+- 编译通过: **100%** ✅
+- 回测功能: **框架已实现**
+- WebSocket: **框架已实现**
+- 实盘策略: **框架已实现**
 
 ---
 
 ## 🏗️ 架构
 
-### Workspace 结构 (14个crate包)
+### Workspace 结构 (14 个 crate 包)
 
 ```
 crates/
@@ -144,7 +150,7 @@ crates/
 └── common/          # 通用工具层
 ```
 
-### DDD分层依赖
+### DDD 分层依赖
 
 ```
 rust-quant-cli (CLI入口)
@@ -162,57 +168,6 @@ core/common (核心基础设施)
 
 详见: [架构设计文档](docs/quant_system_architecture_redesign.md)
 
----
-
-## ✅ 已实现功能
-
-### 数据同步系统 ✅
-
-- `tickets_job` - Ticker数据同步 ✅
-- `candles_job` - K线数据同步 ✅
-- `account_job` - 账户数据同步 ✅
-- `asset_job` - 资产数据同步 ✅
-- `trades_job` - 成交数据同步 ✅
-- `announcements_job` - 公告数据同步 ✅
-- `risk_positon_job` - 持仓风控数据 ✅
-- `data_validator` - 数据验证工具 ✅
-
-### Services层 ✅
-
-- `StrategyExecutionService` - 策略执行服务 ✅
-- `OrderCreationService` - 订单创建服务 ✅
-- `RiskManagementService` - 风控管理服务 ✅
-
-### 技术指标库 ✅
-
-- 趋势指标: EMA, SMA, Vegas, NWE ✅
-- 动量指标: RSI, MACD, KDJ ✅
-- 波动率指标: ATR, Bollinger Bands ✅
-- 形态识别: Engulfing, Hammer, Support/Resistance ✅
-
-### 策略引擎 ✅
-
-- Vegas策略执行器 ✅
-- NWE策略执行器 ✅
-- 综合策略框架 ✅
-- 回测引擎框架 ⚠️ (待完善)
-
-### 基础设施 ✅
-
-- 泛型缓存（InMemory/Redis/TwoLevel）✅
-- Repository接口 ✅
-- 时间检查器 ✅
-- 信号日志器 ✅
-- 优雅关闭 ✅
-
-### 待完善功能 ⚠️
-
-- 回测功能完整实现
-- WebSocket实时数据流
-- 实盘策略完整实现
-
----
-
 ## 📚 文档
 
 - **启动指南**: [docs/STARTUP_GUIDE.md](docs/STARTUP_GUIDE.md) - 详细的启动和配置说明
@@ -223,8 +178,9 @@ core/common (核心基础设施)
 ## 🤝 贡献
 
 欢迎贡献！请遵循：
-- DDD架构规范
-- Rust最佳实践
+
+- DDD 架构规范
+- Rust 最佳实践
 - 完整的测试覆盖
 
 ---
@@ -237,21 +193,7 @@ MIT License
 
 ## 🎉 致谢
 
-感谢所有为Rust Quant DDD架构重构做出贡献的开发者！
+感谢所有为 Rust Quant DDD 架构重构做出贡献的开发者！
 
-**项目成就**:
-- 🏆 企业级DDD Workspace架构 (14个crate包)
-- 🏆 清晰的分层架构和依赖关系
-- 🏆 完整的数据同步系统
-- 🏆 丰富的技术指标库
-- 🏆 策略引擎框架
-- 🏆 编译通过 (有少量警告)
-
----
-
-**版本**: v0.2.0  
-**架构**: DDD Workspace (14个crate包)  
 **状态**: ✅ 持续开发中  
-**更新**: 2025-11-10
-
-*架构正确的系统，是长期成功的基础！* 🚀
+**更新**: 2026-01-16

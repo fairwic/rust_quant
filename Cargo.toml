@@ -125,5 +125,5 @@ rust-quant-analytics = { path = "crates/analytics" }
 rust-quant-ai-analysis = { path = "crates/ai-analysis" }
 rust-quant-cli = { path = "crates/rust-quant-cli" }
 
-[patch.crates-io]
-okx = { path = "okx" }
+# [patch.crates-io]
+# okx = { path = "okx" }
