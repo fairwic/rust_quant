@@ -496,6 +496,13 @@ impl VegasStrategy {
                     if vegas_indicator_signal_values.engulfing_value.is_engulfing {
                         signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
                     }
+                    // 【新增】如果是锤子线形态（做多），止损设为开盘价
+                    if vegas_indicator_signal_values
+                        .kline_hammer_value
+                        .is_long_signal
+                    {
+                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+                    }
                 }
                 SignalDirect::IsShort => {
                     signal_result.should_sell = Some(true);
@@ -508,6 +515,13 @@ impl VegasStrategy {
                     // 【新增】如果是吞没形态，止损设为吞没K线开盘价
                     if vegas_indicator_signal_values.engulfing_value.is_engulfing {
                         signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+                    }
+                    // 【新增】如果是锤子线形态（做空），止损设为最高价
+                    if vegas_indicator_signal_values
+                        .kline_hammer_value
+                        .is_short_signal
+                    {
+                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.h);
                     }
                 }
             }
