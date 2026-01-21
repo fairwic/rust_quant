@@ -91,6 +91,7 @@ pub fn process_fibonacci_levels(
                     loss_num: 0,
                     signal_value: signal.single_value.clone(),
                     signal_result: signal.single_result.clone(),
+                    stop_loss_source: None,
                 });
                 triggered_fib_levels.insert(idx);
                 tracing::info!(
@@ -156,6 +157,7 @@ pub fn close_remaining_position(
         loss_num: *losses,
         signal_value: None,
         signal_result: None,
+        stop_loss_source: None,
     });
     *position = 0.0;
     triggered_fib_levels.clear();

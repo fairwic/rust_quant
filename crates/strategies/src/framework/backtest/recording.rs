@@ -25,6 +25,7 @@ pub fn record_trade_entry(state: &mut TradingState, option_type: String, signal:
         loss_num: 0,
         signal_value: signal.single_value.clone(),
         signal_result: signal.single_result.clone(),
+        stop_loss_source: signal.stop_loss_source.clone(),
     });
 }
 
@@ -57,5 +58,6 @@ pub fn record_trade_exit(
         loss_num: state.losses,
         signal_value: signal.single_value.clone(),
         signal_result: signal.single_result.clone(),
+        stop_loss_source: signal.stop_loss_source.clone(),
     });
 }

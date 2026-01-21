@@ -126,6 +126,8 @@ pub struct BacktestDetail {
     pub loss_nums: i64,
     pub signal_value: String,
     pub signal_result: String,
+    /// 止损来源（如 "Engulfing", "KlineHammer" 等）
+    pub stop_loss_source: Option<String>,
 }
 
 impl BacktestDetail {
@@ -150,6 +152,7 @@ impl BacktestDetail {
         loss_nums: i64,
         signal_value: String,
         signal_result: String,
+        stop_loss_source: Option<String>,
     ) -> Self {
         Self {
             id: None,
@@ -172,6 +175,7 @@ impl BacktestDetail {
             loss_nums,
             signal_value,
             signal_result,
+            stop_loss_source,
         }
     }
 }

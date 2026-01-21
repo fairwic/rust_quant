@@ -79,7 +79,7 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         }
 
         let mut builder: QueryBuilder<MySql> =
-            QueryBuilder::new("INSERT INTO back_test_detail (option_type, strategy_type, inst_id, time, back_test_id, open_position_time, signal_open_position_time, signal_status, close_position_time, open_price, close_price, profit_loss, quantity, full_close, close_type, win_nums, loss_nums, signal_value, signal_result) ");
+            QueryBuilder::new("INSERT INTO back_test_detail (option_type, strategy_type, inst_id, time, back_test_id, open_position_time, signal_open_position_time, signal_status, close_position_time, open_price, close_price, profit_loss, quantity, full_close, close_type, win_nums, loss_nums, signal_value, signal_result, stop_loss_source) ");
 
         builder.push_values(details.iter(), |mut b, detail| {
             b.push_bind(&detail.option_type)
@@ -100,7 +100,8 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 .push_bind(detail.win_nums)
                 .push_bind(detail.loss_nums)
                 .push_bind(&detail.signal_value)
-                .push_bind(&detail.signal_result);
+                .push_bind(&detail.signal_result)
+                .push_bind(&detail.stop_loss_source);
         });
 
         let result = builder.build().execute(self.pool()).await?;

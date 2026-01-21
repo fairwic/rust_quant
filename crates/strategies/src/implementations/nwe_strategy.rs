@@ -584,6 +584,7 @@ impl NweStrategy {
             single_value: None,
             single_result: None,
             signal_kline_stop_loss_price: None,
+            stop_loss_source: None,
             move_stop_open_price_when_touch_price: None,
             counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,

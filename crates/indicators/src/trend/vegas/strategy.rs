@@ -137,6 +137,7 @@ impl VegasStrategy {
                 long_signal_take_profit_price: None,
                 short_signal_take_profit_price: None,
                 signal_kline_stop_loss_price: None,
+                stop_loss_source: None,
                 move_stop_open_price_when_touch_price: None,
                 ts: Some(0),
                 single_value: None,
@@ -170,6 +171,7 @@ impl VegasStrategy {
                     long_signal_take_profit_price: None,
                     short_signal_take_profit_price: None,
                     signal_kline_stop_loss_price: None,
+                    stop_loss_source: None,
                     move_stop_open_price_when_touch_price: None,
                     counter_trend_pullback_take_profit_price: None,
                     ts: Some(0),
@@ -202,6 +204,7 @@ impl VegasStrategy {
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
             signal_kline_stop_loss_price: None,
+            stop_loss_source: None,
             ts: Some(last_data_item.ts),
             single_value: None,
             single_result: None,
@@ -495,6 +498,7 @@ impl VegasStrategy {
                     // 【新增】如果是吞没形态，止损设为吞没K线开盘价
                     if vegas_indicator_signal_values.engulfing_value.is_engulfing {
                         signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+                        signal_result.stop_loss_source = Some("Engulfing".to_string());
                     }
                     // 【新增】如果是锤子线形态（做多），止损设为开盘价
                     if vegas_indicator_signal_values
@@ -502,6 +506,7 @@ impl VegasStrategy {
                         .is_long_signal
                     {
                         signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+                        signal_result.stop_loss_source = Some("KlineHammer".to_string());
                     }
                 }
                 SignalDirect::IsShort => {
@@ -515,6 +520,7 @@ impl VegasStrategy {
                     // 【新增】如果是吞没形态，止损设为吞没K线开盘价
                     if vegas_indicator_signal_values.engulfing_value.is_engulfing {
                         signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+                        signal_result.stop_loss_source = Some("Engulfing".to_string());
                     }
                     // 【新增】如果是锤子线形态（做空），止损设为最高价
                     if vegas_indicator_signal_values
@@ -522,6 +528,7 @@ impl VegasStrategy {
                         .is_short_signal
                     {
                         signal_result.signal_kline_stop_loss_price = Some(last_data_item.h);
+                        signal_result.stop_loss_source = Some("KlineHammer".to_string());
                     }
                 }
             }

@@ -38,6 +38,7 @@ pub fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
             signal_kline_stop_loss_price: None,
+            stop_loss_source: None,
             ts: last_candle.ts,
             single_value: Some("结束平仓".to_string()),
             single_result: Some("结束平仓".to_string()),

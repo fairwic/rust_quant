@@ -83,6 +83,8 @@ pub struct TradeRecord {
     pub signal_value: Option<String>,
     //信号结果
     pub signal_result: Option<String>,
+    //止损来源（如 "Engulfing", "KlineHammer" 等）
+    pub stop_loss_source: Option<String>,
 }
 
 // ============================================================================
@@ -98,7 +100,8 @@ pub struct SignalResult {
     pub open_price: f64,
     //信号k线最高价或者最低价止损
     pub signal_kline_stop_loss_price: Option<f64>,
-    //最优开仓价格(通常设置为信号线的0.382位置出开仓)
+    /// 止损来源标记（如 "Engulfing", "KlineHammer" 等）
+    pub stop_loss_source: Option<String>,
     pub best_open_price: Option<f64>,
 
     //ATR止盈价格(通常设置为信号线的价差的2倍率) 1:2 1:3 1:4 1:5
@@ -202,6 +205,7 @@ impl Default for SignalResult {
             should_sell: false,
             open_price: 0.0,
             signal_kline_stop_loss_price: None,
+            stop_loss_source: None,
             best_open_price: None,
             atr_take_profit_ratio_price: None,
             atr_stop_loss_price: None,

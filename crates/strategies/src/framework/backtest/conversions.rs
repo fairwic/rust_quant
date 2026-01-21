@@ -7,6 +7,7 @@ pub fn convert_domain_signal(domain_signal: rust_quant_domain::SignalResult) -> 
         should_sell: domain_signal.should_sell.unwrap_or(false),
         open_price: domain_signal.open_price.unwrap_or(0.0),
         signal_kline_stop_loss_price: domain_signal.signal_kline_stop_loss_price,
+        stop_loss_source: domain_signal.stop_loss_source,
         best_open_price: domain_signal.best_open_price,
         atr_take_profit_ratio_price: domain_signal.atr_take_profit_ratio_price,
         atr_stop_loss_price: domain_signal.atr_stop_loss_price,

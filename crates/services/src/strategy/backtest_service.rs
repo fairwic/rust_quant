@@ -221,6 +221,7 @@ impl BacktestService {
                     trade_record.loss_num,
                     trade_record.signal_value.unwrap_or_default(),
                     trade_record.signal_result.unwrap_or_default(),
+                    trade_record.stop_loss_source,
                 )
             })
             .collect();

@@ -84,6 +84,7 @@ impl EngulfingStrategy {
             single_value: None,
             single_result: None,
             signal_kline_stop_loss_price: None,
+            stop_loss_source: None,
             atr_stop_loss_price: None,
             best_open_price: None,
             atr_take_profit_ratio_price: None,

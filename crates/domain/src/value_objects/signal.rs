@@ -136,6 +136,9 @@ pub struct SignalResult {
     /// 信号K线的止损价格
     pub signal_kline_stop_loss_price: Option<f64>,
 
+    /// 止损来源标记（如 "Engulfing", "KlineHammer" 等）
+    pub stop_loss_source: Option<String>,
+
     /// 移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
     pub move_stop_open_price_when_touch_price: Option<f64>,
 
@@ -195,6 +198,7 @@ impl SignalResult {
             stop_loss_price: None,
             take_profit_price: None,
             signal_kline_stop_loss_price: None,
+            stop_loss_source: None,
             move_stop_open_price_when_touch_price: None,
             position_time: None,
             signal_kline: None,
@@ -258,6 +262,7 @@ impl SignalResult {
             stop_loss_price: None,
             take_profit_price: None,
             signal_kline_stop_loss_price: None,
+            stop_loss_source: None,
             move_stop_open_price_when_touch_price: None,
             position_time: None,
             signal_kline: None,
