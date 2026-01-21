@@ -170,6 +170,8 @@ pub struct FilteredSignal {
     pub final_pnl: f64,
     /// 交易结果 (WIN, LOSS, BREAK_EVEN)
     pub trade_result: String,
+    /// 信号详情 (各指标值的JSON快照)
+    pub signal_value: Option<String>,
 }
 
 /// 影子交易状态（用于模拟被过滤信号的理论盈亏）

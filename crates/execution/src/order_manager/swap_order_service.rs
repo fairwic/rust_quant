@@ -2,7 +2,6 @@ use rust_quant_common::constants;
 use rust_quant_risk::order::SwapOrderEntity;
 use rust_quant_strategies::StrategyType;
 
-
 pub struct OrderSignal {
     pub inst_id: String,
     pub should_sell: bool,
@@ -533,7 +532,7 @@ impl SwapOrderService {
     ) -> Result<Vec<OrderResDto>, AppError> {
         //最大止损
         let max_loss_percent = risk_config.max_loss_percent;
-        let tp_price = signal.best_take_profit_price;
+        let tp_price = signal.atr_take_profit_level_1;
         let mut stop_loss_price: f64 = match side {
             Side::Sell => entry_price * (1.0 + max_loss_percent),
             Side::Buy => entry_price * (1.0 - max_loss_percent),
@@ -605,23 +604,5 @@ impl SwapOrderService {
         // {"code":"0","data":[{"clOrdId":"","ordId":"1570389280202194944","sCode":"0","sMsg":"Order placed","tag":"","ts":"1719303647602"}],"inTime":"1719303647601726","msg":"","outTime":"1719303647603880"}
         info!("send order request okx result: {:?}", result);
         Ok(result)
-    }
-}
-
-mod test {
-    
-
-    #[tokio::test]
-    async fn test_get_place_order_num_optimized() {
-        let valid_num = TradingSwapNumResponseData {
-            inst_id: "BTC-USDT-SWAP".to_string(),
-            ccy: "USDT".to_string(),
-            max_sell: "0.22222".to_string(),
-            max_buy: "0.211111".to_string(),
-        };
-        let pos_size = SwapOrderService::new()
-            .get_place_order_num_optimized(&valid_num, 0.9)
-            .unwrap();
-        println!("pos_size: {:?}", pos_size);
     }
 }

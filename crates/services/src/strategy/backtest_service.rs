@@ -3,6 +3,7 @@
 //! 负责回测日志和详情的保存，协调 BacktestLogRepository
 
 use anyhow::Result;
+use rust_quant_common::utils::time;
 use serde_json::json;
 use std::env;
 use tracing::info;
@@ -148,7 +149,7 @@ impl BacktestService {
                 backtest_id: back_test_id,
                 inst_id: inst_id.to_string(),
                 period: time.to_string(),
-                signal_time: chrono::NaiveDateTime::from_timestamp(s.ts / 1000, 0),
+                signal_time: time::mill_time_to_datetime_shanghai(s.ts).unwrap(),
                 direction: s.direction.clone(),
                 filter_reasons: serde_json::to_string(&s.filter_reasons).unwrap_or_default(),
                 signal_price: s.signal_price,
@@ -157,13 +158,14 @@ impl BacktestService {
                 theoretical_loss: Some(s.theoretical_loss),
                 final_pnl: Some(s.final_pnl),
                 trade_result: Some(s.trade_result.clone()),
+                signal_value: s.signal_value.clone(),
             })
             .collect();
 
         // 需要在 Repository 中实现批量插入
         // 这里假设已经有 insert_filtered_signals 方法
         let count = self.repository.insert_filtered_signals(&entities).await?;
-        
+
         info!(
             "过滤信号记录保存成功: back_test_id={}, count={}",
             back_test_id, count

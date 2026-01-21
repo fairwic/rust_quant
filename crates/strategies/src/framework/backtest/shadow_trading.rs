@@ -86,6 +86,7 @@ impl ShadowTradeManager {
             theoretical_loss: 0.0,
             final_pnl: 0.0,
             trade_result: "RUNNING".to_string(),
+            signal_value: signal.single_value.clone(),
         });
 
         // 创建 ShadowTrade

@@ -173,7 +173,10 @@ impl BacktestLogRepository for SqlxBacktestRepository {
             tracing::info!("insert_filtered_signals being called with empty list");
             return Ok(0);
         }
-        tracing::info!("insert_filtered_signals inserting {} signals", signals.len());
+        tracing::info!(
+            "insert_filtered_signals inserting {} signals",
+            signals.len()
+        );
 
         // 确保表存在 (仅开发阶段便利措施，生产环境应使用 migrate)
         sqlx::query(
@@ -192,6 +195,7 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 theoretical_loss DECIMAL(20, 8),
                 final_pnl DECIMAL(20, 8),
                 trade_result VARCHAR(10),
+                signal_value JSON,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_backtest (backtest_id),
                 INDEX idx_inst_period (inst_id, period)
@@ -202,14 +206,14 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         .await?;
 
         let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO filtered_signal_log (backtest_id, inst_id, period, signal_time, direction, filter_reasons, signal_price, indicator_snapshot, theoretical_profit, theoretical_loss, final_pnl, trade_result) ",
+            "INSERT INTO filtered_signal_log (backtest_id, inst_id, period, signal_time, direction, filter_reasons, signal_price, indicator_snapshot, theoretical_profit, theoretical_loss, final_pnl, trade_result, signal_value) ",
         );
 
         builder.push_values(signals.iter(), |mut b, signal| {
             b.push_bind(signal.backtest_id)
                 .push_bind(&signal.inst_id)
                 .push_bind(&signal.period)
-                .push_bind(signal.signal_time)
+                .push_bind(&signal.signal_time)
                 .push_bind(&signal.direction)
                 .push_bind(&signal.filter_reasons)
                 .push_bind(signal.signal_price)
@@ -217,7 +221,8 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 .push_bind(signal.theoretical_profit)
                 .push_bind(signal.theoretical_loss)
                 .push_bind(signal.final_pnl)
-                .push_bind(&signal.trade_result);
+                .push_bind(&signal.trade_result)
+                .push_bind(&signal.signal_value);
         });
 
         let result = builder.build().execute(self.pool()).await?;

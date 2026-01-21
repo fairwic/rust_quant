@@ -11,7 +11,7 @@ pub struct FilteredSignalLog {
     /// 周期
     pub period: String,
     /// 信号时间
-    pub signal_time: NaiveDateTime,
+    pub signal_time: String,
     /// 信号方向 (LONG, SHORT)
     pub direction: String,
     /// 过滤原因JSON
@@ -28,6 +28,8 @@ pub struct FilteredSignalLog {
     pub final_pnl: Option<f64>,
     /// 交易结果
     pub trade_result: Option<String>,
+    /// 信号详情 (各指标值的JSON快照)
+    pub signal_value: Option<String>,
 }
 
 impl FilteredSignalLog {
@@ -36,7 +38,7 @@ impl FilteredSignalLog {
         backtest_id: i64,
         inst_id: String,
         period: String,
-        signal_time: NaiveDateTime,
+        signal_time: String,
         direction: String,
         filter_reasons: String,
         signal_price: f64,
@@ -54,6 +56,7 @@ impl FilteredSignalLog {
             theoretical_loss: None,
             final_pnl: None,
             trade_result: None,
+            signal_value: None,
         }
     }
 }

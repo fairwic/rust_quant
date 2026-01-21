@@ -278,7 +278,9 @@ impl VegasStrategy {
                 Some(rsi) => rsi,
                 None => {
                     // 极端行情，直接返回不交易的信号
-                    signal_result.filter_reasons.push("RSI_EXTREME_EVENT".to_string());
+                    signal_result
+                        .filter_reasons
+                        .push("RSI_EXTREME_EVENT".to_string());
                     return signal_result;
                 }
             };
@@ -412,21 +414,23 @@ impl VegasStrategy {
         // 【新增】MACD 计算
         // ================================================================
         if let Some(macd_cfg) = &self.macd_signal {
-            if macd_cfg.is_open && data_items.len() > macd_cfg.slow_period + macd_cfg.signal_period {
+            if macd_cfg.is_open && data_items.len() > macd_cfg.slow_period + macd_cfg.signal_period
+            {
                 use ta::indicators::MovingAverageConvergenceDivergence;
                 use ta::Next;
-                
+
                 let mut macd = MovingAverageConvergenceDivergence::new(
                     macd_cfg.fast_period,
                     macd_cfg.slow_period,
                     macd_cfg.signal_period,
-                ).unwrap();
-                
+                )
+                .unwrap();
+
                 let mut prev_macd = 0.0f64;
                 let mut prev_signal = 0.0f64;
                 let mut prev_histogram = 0.0f64;
                 let mut prev_prev_histogram = 0.0f64;
-                
+
                 // 计算所有 K 线的 MACD
                 for item in data_items.iter() {
                     let macd_output = macd.next(item.c);
@@ -435,20 +439,20 @@ impl VegasStrategy {
                     prev_signal = macd_output.signal;
                     prev_macd = macd_output.macd;
                 }
-                
+
                 let histogram = prev_macd - prev_signal;
-                
+
                 // 判断金叉死叉：当前 histogram > 0 且前一根 < 0
                 let is_golden_cross = histogram > 0.0 && prev_prev_histogram <= 0.0;
                 let is_death_cross = histogram < 0.0 && prev_prev_histogram >= 0.0;
-                
+
                 // 判断柱状图趋势
                 let histogram_increasing = histogram > prev_prev_histogram;
                 let histogram_decreasing = histogram < prev_prev_histogram;
                 // 判断动量是否正在改善（用于识别触底反弹）
                 // 对于负区域：histogram > prev_histogram 表示负值在变小，动量改善
                 let histogram_improving = histogram > prev_histogram;
-                
+
                 vegas_indicator_signal_values.macd_value = super::signal::MacdSignalValue {
                     macd_line: prev_macd,
                     signal_line: prev_signal,
@@ -478,14 +482,15 @@ impl VegasStrategy {
             }
             let atr_value = atr.value();
             let atr_multiplier = self.atr_stop_loss_multiplier.max(0.0);
-            
+
             match signal_direction {
                 SignalDirect::IsLong => {
                     signal_result.should_buy = Some(true);
                     signal_result.direction = rust_quant_domain::SignalDirection::Long;
                     // 做多止损: 入场价 - ATR * multiplier
                     if atr_value > 0.0 {
-                        signal_result.atr_stop_loss_price = Some(last_data_item.c - atr_value * atr_multiplier);
+                        signal_result.atr_stop_loss_price =
+                            Some(last_data_item.c - atr_value * atr_multiplier);
                     }
                 }
                 SignalDirect::IsShort => {
@@ -493,10 +498,17 @@ impl VegasStrategy {
                     signal_result.direction = rust_quant_domain::SignalDirection::Short;
                     // 做空止损: 入场价 + ATR * multiplier
                     if atr_value > 0.0 {
-                        signal_result.atr_stop_loss_price = Some(last_data_item.c + atr_value * atr_multiplier);
+                        signal_result.atr_stop_loss_price =
+                            Some(last_data_item.c + atr_value * atr_multiplier);
                     }
                 }
             }
+
+            // 信号产生时立即记录指标快照（在过滤逻辑之前）
+            // 这样即使信号后续被过滤，filtered_signal_log 也能记录当时的指标状态
+
+            signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
+            signal_result.single_result = Some(json!(conditions).to_string());
         }
 
         // ================================================================
@@ -518,13 +530,17 @@ impl VegasStrategy {
                 && dist <= 0.0025
             {
                 signal_result.should_buy = Some(false);
-                signal_result.filter_reasons.push("EMA_DISTANCE_FILTER_LONG".to_string());
+                signal_result
+                    .filter_reasons
+                    .push("EMA_DISTANCE_FILTER_LONG".to_string());
             }
         }
 
         if ema_distance_filter.should_filter_short && signal_result.should_sell.unwrap_or(false) {
             signal_result.should_sell = Some(false);
-            signal_result.filter_reasons.push("EMA_DISTANCE_FILTER_SHORT".to_string());
+            signal_result
+                .filter_reasons
+                .push("EMA_DISTANCE_FILTER_SHORT".to_string());
         }
 
         // ================================================================
@@ -551,13 +567,16 @@ impl VegasStrategy {
                         low_vs_ema144.abs() <= chase_cfg.pullback_touch_threshold
                     };
                     let bullish_close = is_bullish && body_ratio > chase_cfg.min_body_ratio;
-                    let has_engulfing =
-                        vegas_indicator_signal_values.engulfing_value.is_valid_engulfing;
+                    let has_engulfing = vegas_indicator_signal_values
+                        .engulfing_value
+                        .is_valid_engulfing;
 
                     let confirmed = pullback_touch || bullish_close || has_engulfing;
                     if !confirmed {
                         signal_result.should_buy = Some(false);
-                        signal_result.filter_reasons.push("CHASE_CONFIRM_FILTER_LONG".to_string());
+                        signal_result
+                            .filter_reasons
+                            .push("CHASE_CONFIRM_FILTER_LONG".to_string());
                     }
                 }
 
@@ -574,13 +593,16 @@ impl VegasStrategy {
                         high_vs_ema144.abs() <= chase_cfg.pullback_touch_threshold
                     };
                     let bearish_close = is_bearish && body_ratio > chase_cfg.min_body_ratio;
-                    let has_engulfing =
-                        vegas_indicator_signal_values.engulfing_value.is_valid_engulfing;
+                    let has_engulfing = vegas_indicator_signal_values
+                        .engulfing_value
+                        .is_valid_engulfing;
 
                     let confirmed = bounce_touch || bearish_close || has_engulfing;
                     if !confirmed {
                         signal_result.should_sell = Some(false);
-                        signal_result.filter_reasons.push("CHASE_CONFIRM_FILTER_SHORT".to_string());
+                        signal_result
+                            .filter_reasons
+                            .push("CHASE_CONFIRM_FILTER_SHORT".to_string());
                     }
                 }
             }
@@ -624,11 +646,15 @@ impl VegasStrategy {
 
                     if is_bull && signal_result.should_sell.unwrap_or(false) {
                         signal_result.should_sell = Some(false);
-                        signal_result.filter_reasons.push("EXTREME_K_FILTER_CONFLICT_SHORT".to_string());
+                        signal_result
+                            .filter_reasons
+                            .push("EXTREME_K_FILTER_CONFLICT_SHORT".to_string());
                     }
                     if is_bear && signal_result.should_buy.unwrap_or(false) {
                         signal_result.should_buy = Some(false);
-                        signal_result.filter_reasons.push("EXTREME_K_FILTER_CONFLICT_LONG".to_string());
+                        signal_result
+                            .filter_reasons
+                            .push("EXTREME_K_FILTER_CONFLICT_LONG".to_string());
                     }
 
                     // 仅顺势放行，逆势则拦截
@@ -636,13 +662,17 @@ impl VegasStrategy {
                         && !vegas_indicator_signal_values.ema_values.is_long_trend
                     {
                         signal_result.should_buy = Some(false);
-                        signal_result.filter_reasons.push("EXTREME_K_FILTER_TREND_LONG".to_string());
+                        signal_result
+                            .filter_reasons
+                            .push("EXTREME_K_FILTER_TREND_LONG".to_string());
                     }
                     if signal_result.should_sell.unwrap_or(false)
                         && !vegas_indicator_signal_values.ema_values.is_short_trend
                     {
                         signal_result.should_sell = Some(false);
-                        signal_result.filter_reasons.push("EXTREME_K_FILTER_TREND_SHORT".to_string());
+                        signal_result
+                            .filter_reasons
+                            .push("EXTREME_K_FILTER_TREND_SHORT".to_string());
                     }
                 }
             }
@@ -688,18 +718,20 @@ impl VegasStrategy {
         if let Some(macd_cfg) = &self.macd_signal {
             if macd_cfg.is_open {
                 let macd_val = &vegas_indicator_signal_values.macd_value;
-                
+
                 // 做多过滤
                 if signal_result.should_buy.unwrap_or(false) {
                     let mut should_filter = false;
-                    
+
                     if macd_cfg.filter_falling_knife {
                         // 如果 MACD 柱状图为负（处于空头动量区）
                         if macd_val.histogram < 0.0 {
                             // 且 柱状图在递减（负值变更大，动量加速向下）
                             if macd_val.histogram_decreasing {
                                 should_filter = true; // 正在接飞刀，过滤
-                                signal_result.filter_reasons.push("MACD_FALLING_KNIFE_LONG".to_string());
+                                signal_result
+                                    .filter_reasons
+                                    .push("MACD_FALLING_KNIFE_LONG".to_string());
                             }
                         }
                     }
@@ -708,26 +740,30 @@ impl VegasStrategy {
                     if macd_cfg.require_momentum_confirm {
                         if macd_val.histogram_decreasing {
                             should_filter = true;
-                            signal_result.filter_reasons.push("MACD_MOMENTUM_WEAK_LONG".to_string());
+                            signal_result
+                                .filter_reasons
+                                .push("MACD_MOMENTUM_WEAK_LONG".to_string());
                         }
                     }
-                    
+
                     if should_filter {
                         signal_result.should_buy = Some(false);
                     }
                 }
-                
+
                 // 做空过滤
                 if signal_result.should_sell.unwrap_or(false) {
                     let mut should_filter = false;
-                    
+
                     if macd_cfg.filter_falling_knife {
                         // 如果 MACD 柱状图为正（处于多头动量区）
                         if macd_val.histogram > 0.0 {
                             // 且 柱状图在递增（正值变更大，动量加速向上）
                             if macd_val.histogram_increasing {
                                 should_filter = true; // 正在逆势摸顶（涨势未尽），过滤
-                                signal_result.filter_reasons.push("MACD_FALLING_KNIFE_SHORT".to_string());
+                                signal_result
+                                    .filter_reasons
+                                    .push("MACD_FALLING_KNIFE_SHORT".to_string());
                             }
                         }
                     }
@@ -736,10 +772,12 @@ impl VegasStrategy {
                     if macd_cfg.require_momentum_confirm {
                         if macd_val.histogram_increasing {
                             should_filter = true;
-                            signal_result.filter_reasons.push("MACD_MOMENTUM_WEAK_SHORT".to_string());
+                            signal_result
+                                .filter_reasons
+                                .push("MACD_MOMENTUM_WEAK_SHORT".to_string());
                         }
                     }
-                    
+
                     if should_filter {
                         signal_result.should_sell = Some(false);
                     }
@@ -749,7 +787,8 @@ impl VegasStrategy {
 
         // 可选：添加详细信息到结果中
         if self.emit_debug
-            && (signal_result.should_buy.unwrap_or(false) || signal_result.should_sell.unwrap_or(false))
+            && (signal_result.should_buy.unwrap_or(false)
+                || signal_result.should_sell.unwrap_or(false))
         {
             //如果有使用信号k线止损
             if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
@@ -775,7 +814,6 @@ impl VegasStrategy {
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
             signal_result.single_result = Some(json!(conditions).to_string());
         }
-
 
         signal_result
     }
@@ -1126,7 +1164,11 @@ impl VegasStrategy {
 
     /// 统计极端K线一次跨越的EMA条数（开盘价与收盘价之间包含的EMA数量）
     fn count_crossed_emas(open: f64, close: f64, ema_values: &EmaSignalValue) -> usize {
-        let (low, high) = if open < close { (open, close) } else { (close, open) };
+        let (low, high) = if open < close {
+            (open, close)
+        } else {
+            (close, open)
+        };
         let emas = [
             ema_values.ema1_value,
             ema_values.ema2_value,
@@ -1137,6 +1179,63 @@ impl VegasStrategy {
         emas.iter()
             .filter(|ema| **ema >= low && **ema <= high)
             .count()
+    }
+
+    /// 检测“连续吞没前 N 根实体”的强吞没形态（近似 Three-Line Strike）
+    ///
+    /// - 当前K线实体必须完全覆盖前 N 根K线实体区间（按 open/close 计算实体）
+    /// - 且前 N 根K线方向必须与当前K线相反（避免杂乱K线误判）
+    fn detect_multi_body_engulfing(data_items: &[CandleItem], n: usize) -> (bool, bool) {
+        if n == 0 || data_items.len() < n + 1 {
+            return (false, false);
+        }
+
+        let current = data_items.last().expect("数据不能为空");
+        let current_is_bull = current.c() > current.o();
+        let current_is_bear = current.c() < current.o();
+
+        // Doji / 无方向不参与
+        if !current_is_bull && !current_is_bear {
+            return (false, false);
+        }
+
+        let (cur_low, cur_high) = {
+            let o = current.o();
+            let c = current.c();
+            if o < c {
+                (o, c)
+            } else {
+                (c, o)
+            }
+        };
+
+        let prev_slice = &data_items[data_items.len() - (n + 1)..data_items.len() - 1];
+        for prev in prev_slice {
+            // 方向必须相反
+            if current_is_bull && !(prev.c() < prev.o()) {
+                return (false, false);
+            }
+            if current_is_bear && !(prev.c() > prev.o()) {
+                return (false, false);
+            }
+
+            let (p_low, p_high) = {
+                let o = prev.o();
+                let c = prev.c();
+                if o < c {
+                    (o, c)
+                } else {
+                    (c, o)
+                }
+            };
+
+            // 当前实体需要完全覆盖前K线实体
+            if !(cur_low <= p_low && cur_high >= p_high) {
+                return (false, false);
+            }
+        }
+
+        (current_is_bull, current_is_bear)
     }
 
     fn calculate_best_stop_loss_price(
@@ -1164,5 +1263,105 @@ impl VegasStrategy {
         ) {
             signal_result.signal_kline_stop_loss_price = Some(stop_loss_price);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VegasStrategy;
+    use rust_quant_common::CandleItem;
+
+    #[test]
+    fn detect_multi_body_engulfing_bearish_three_line_strike() {
+        // 三根阳线后，一根大阴线实体完全吞没前三根实体（上海 2026-01-19 04:00 的结构）
+        let data = vec![
+            CandleItem {
+                o: 3305.64,
+                h: 3324.58,
+                l: 3301.62,
+                c: 3320.62,
+                ts: 1,
+                v: 1.0,
+                confirm: 1,
+            },
+            CandleItem {
+                o: 3320.62,
+                h: 3346.99,
+                l: 3312.50,
+                c: 3332.34,
+                ts: 2,
+                v: 1.0,
+                confirm: 1,
+            },
+            CandleItem {
+                o: 3332.33,
+                h: 3368.80,
+                l: 3328.19,
+                c: 3345.82,
+                ts: 3,
+                v: 1.0,
+                confirm: 1,
+            },
+            CandleItem {
+                o: 3345.82,
+                h: 3355.85,
+                l: 3277.18,
+                c: 3282.91,
+                ts: 4,
+                v: 1.0,
+                confirm: 1,
+            },
+        ];
+
+        let (bull, bear) = VegasStrategy::detect_multi_body_engulfing(&data, 3);
+        assert!(!bull);
+        assert!(bear);
+    }
+
+    #[test]
+    fn detect_multi_body_engulfing_bullish_three_line_strike() {
+        // 三根阴线后，一根大阳线实体完全吞没前三根实体
+        let data = vec![
+            CandleItem {
+                o: 100.0,
+                h: 101.0,
+                l: 94.0,
+                c: 95.0,
+                ts: 1,
+                v: 1.0,
+                confirm: 1,
+            },
+            CandleItem {
+                o: 95.0,
+                h: 96.0,
+                l: 90.0,
+                c: 91.0,
+                ts: 2,
+                v: 1.0,
+                confirm: 1,
+            },
+            CandleItem {
+                o: 91.0,
+                h: 92.0,
+                l: 88.0,
+                c: 89.0,
+                ts: 3,
+                v: 1.0,
+                confirm: 1,
+            },
+            CandleItem {
+                o: 88.0,
+                h: 106.0,
+                l: 87.0,
+                c: 105.0,
+                ts: 4,
+                v: 1.0,
+                confirm: 1,
+            },
+        ];
+
+        let (bull, bear) = VegasStrategy::detect_multi_body_engulfing(&data, 3);
+        assert!(bull);
+        assert!(!bear);
     }
 }
