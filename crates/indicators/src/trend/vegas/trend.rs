@@ -67,14 +67,28 @@ fn check_recent_ema_crossover(current_ema: &EmaSignalValue) -> (bool, bool) {
     (current_ema.is_golden_cross, current_ema.is_death_cross)
 }
 
-/// 判断是否为多头趋势
-fn is_bullish_trend(ema_value: &EmaSignalValue) -> bool {
-    ema_value.ema1_value < ema_value.ema2_value && ema_value.ema2_value > ema_value.ema3_value
+/// 判断是否为多头趋势 (短趋势)
+/// 规则: ema1 > ema2 > ema3
+pub fn is_bullish_trend(ema_value: &EmaSignalValue) -> bool {
+    ema_value.ema1_value > ema_value.ema2_value && ema_value.ema2_value > ema_value.ema3_value
 }
 
-/// 判断是否为空头趋势
-fn is_bearish_trend(ema_value: &EmaSignalValue) -> bool {
+/// 判断是否为空头趋势 (短趋势)
+/// 规则: ema1 < ema2 < ema3
+pub fn is_bearish_trend(ema_value: &EmaSignalValue) -> bool {
     ema_value.ema1_value < ema_value.ema2_value && ema_value.ema2_value < ema_value.ema3_value
+}
+
+/// 判断是否为大趋势多头
+/// 规则: ema2 > ema4 && ema3 > ema4
+pub fn is_major_bullish_trend(ema_value: &EmaSignalValue) -> bool {
+    ema_value.ema2_value > ema_value.ema4_value && ema_value.ema3_value > ema_value.ema4_value
+}
+
+/// 判断是否为大趋势空头
+/// 规则: ema2 < ema4 && ema3 < ema4
+pub fn is_major_bearish_trend(ema_value: &EmaSignalValue) -> bool {
+    ema_value.ema2_value < ema_value.ema4_value && ema_value.ema3_value < ema_value.ema4_value
 }
 
 /// 检查多头信号

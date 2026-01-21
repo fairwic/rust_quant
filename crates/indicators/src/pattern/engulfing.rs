@@ -4,9 +4,11 @@ use rust_quant_common::CandleItem;
 /// 计算当前成交量与历史n根K线的平均值的比值
 #[derive(Debug, Clone)]
 pub struct KlineEngulfingIndicator {
-    //吞没形态指标值
+    // 吞没形态指标值
     last_kline: Option<CandleItem>,
-    //看涨||看跌吞没
+    // 前前一根K线（用于过滤）
+    prev_prev_kline: Option<CandleItem>,
+    // 看涨||看跌吞没
     is_bullish: bool,
 }
 
@@ -20,6 +22,7 @@ impl KlineEngulfingIndicator {
     pub fn new() -> Self {
         Self {
             last_kline: None,
+            prev_prev_kline: None,
             is_bullish: false,
         }
     }
@@ -33,29 +36,72 @@ impl KlineEngulfingIndicator {
         }
         let last_kline = self.last_kline.as_ref().unwrap();
 
-        //看涨吞没 ,当前k线的开盘价小于前一根k线的开盘价，且当前k线的收盘价大于前一根k线的收盘价,且当前k线的收盘价大于前一根k线的最高价
-        let is_bullish = (current_kline.o <= last_kline.o || current_kline.l < last_kline.l)
+        //看涨吞没 ,当前k线的开盘价小于前一根k线的开盘价，且当前k线的收盘价大于前一根k线的收盘价
+        let mut is_bullish = (current_kline.o <= last_kline.o || current_kline.l < last_kline.l)
             && current_kline.c >= last_kline.o
-           && (current_kline.c >= last_kline.h || current_kline.c >= current_kline.h*1.005)
+            && (current_kline.c >= last_kline.h || current_kline.c >= current_kline.h * 1.005)
             //要求上一个根k线是阴线
             && last_kline.c < last_kline.o;
 
-        //看跌吞没，当前k线的开盘价大于前一根k线的开盘价，且当前k线的收盘价小于前一根k线的开盘价,且当前k线的收盘价小于前一根k线的最低价
-        let is_bearish = (current_kline.o >= last_kline.o || current_kline.h > last_kline.h)
+        // 【新增过滤逻辑】
+        // 如果前前根K线是大阴线（实体>2.0%），且当前反转没有吞没它，则视为无效
+        if is_bullish {
+            if let Some(prev_a) = &self.prev_prev_kline {
+                let is_bear_a = prev_a.c < prev_a.o;
+                if is_bear_a {
+                    let a_body_pct = (prev_a.o - prev_a.c).abs() / prev_a.o;
+                    // 此处阈值定为 2.0%
+                    if a_body_pct > 0.02 {
+                        // 如果当前收盘价没能超过A的开盘价，则视为多头力量不足以扭转大跌趋势
+                        if current_kline.c < prev_a.o {
+                            is_bullish = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        //看跌吞没，当前k线的开盘价大于前一根k线的开盘价，且当前k线的收盘价小于前一根k线的开盘价
+        let mut is_bearish = (current_kline.o >= last_kline.o || current_kline.h > last_kline.h)
             && current_kline.c <= last_kline.o
-            && (current_kline.c <= last_kline.l || current_kline.c <= last_kline.l*1.005)
+            && (current_kline.c <= last_kline.l || current_kline.c <= last_kline.l * 1.005)
             //要求上一个根k线是阳线
             && last_kline.c > last_kline.o;
+
+        // 【新增过滤逻辑】
+        // 如果前前根K线是大阳线（实体>2.0%），且当前反转没有吞没它，则视为无效
+        if is_bearish {
+            if let Some(prev_a) = &self.prev_prev_kline {
+                let is_bull_a = prev_a.c > prev_a.o;
+                if is_bull_a {
+                    let a_body_pct = (prev_a.c - prev_a.o).abs() / prev_a.o;
+                    if a_body_pct > 0.02 {
+                        // 如果当前收盘价没能低于A的开盘价，则视为空头力量不足
+                        if current_kline.c > prev_a.o {
+                            is_bearish = false;
+                        }
+                    }
+                }
+            }
+        }
 
         let body_ratio = if is_bullish || is_bearish {
             //计算实体比例,当前k线实体部分与当前k线路的上下影线部分的比例
             let body_size = (current_kline.c - current_kline.o).abs();
             let shadow_size = current_kline.h - current_kline.l;
-            body_size / shadow_size
+            if shadow_size == 0.0 {
+                0.0
+            } else {
+                body_size / shadow_size
+            }
         } else {
             0.0
         };
+
+        // 更新历史
+        self.prev_prev_kline = self.last_kline.clone();
         self.last_kline = Some(current_kline.clone());
+
         KlineEngulfingOutput {
             is_engulfing: is_bullish || is_bearish,
             body_ratio,

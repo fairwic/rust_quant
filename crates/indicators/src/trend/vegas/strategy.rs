@@ -658,21 +658,38 @@ impl VegasStrategy {
                     }
 
                     // 仅顺势放行，逆势则拦截
-                    if signal_result.should_buy.unwrap_or(false)
-                        && !vegas_indicator_signal_values.ema_values.is_long_trend
-                    {
-                        signal_result.should_buy = Some(false);
-                        signal_result
-                            .filter_reasons
-                            .push("EXTREME_K_FILTER_TREND_LONG".to_string());
+                    if signal_result.should_buy.unwrap_or(false) {
+                        // 如果是大趋势多头且极端K线也是多头，则放行（忽略小趋势）
+                        let allow_by_major = trend::is_major_bullish_trend(
+                            &vegas_indicator_signal_values.ema_values,
+                        ) && is_bull;
+
+                        if !allow_by_major {
+                            // 否则必须满足小趋势多头
+                            if !trend::is_bullish_trend(&vegas_indicator_signal_values.ema_values) {
+                                signal_result.should_buy = Some(false);
+                                signal_result
+                                    .filter_reasons
+                                    .push("EXTREME_K_FILTER_TREND_LONG".to_string());
+                            }
+                        }
                     }
-                    if signal_result.should_sell.unwrap_or(false)
-                        && !vegas_indicator_signal_values.ema_values.is_short_trend
-                    {
-                        signal_result.should_sell = Some(false);
-                        signal_result
-                            .filter_reasons
-                            .push("EXTREME_K_FILTER_TREND_SHORT".to_string());
+
+                    if signal_result.should_sell.unwrap_or(false) {
+                        // 如果是大趋势空头且极端K线也是空头，则放行（忽略小趋势）
+                        let allow_by_major = trend::is_major_bearish_trend(
+                            &vegas_indicator_signal_values.ema_values,
+                        ) && is_bear;
+
+                        if !allow_by_major {
+                            // 否则必须满足小趋势空头
+                            if !trend::is_bearish_trend(&vegas_indicator_signal_values.ema_values) {
+                                signal_result.should_sell = Some(false);
+                                signal_result
+                                    .filter_reasons
+                                    .push("EXTREME_K_FILTER_TREND_SHORT".to_string());
+                            }
+                        }
                     }
                 }
             }
