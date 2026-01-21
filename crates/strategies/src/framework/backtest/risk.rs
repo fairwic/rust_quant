@@ -16,6 +16,10 @@ struct ExitContext {
     adverse_price: f64,
     /// 有利价格（触发止盈用）：Long=high, Short=low
     favorable_price: f64,
+    /// 当前价格 (Close)
+    current_price: f64,
+    /// K线时间戳
+    candle_ts: i64,
 }
 
 impl ExitContext {
@@ -32,6 +36,8 @@ impl ExitContext {
                 TradeSide::Long => candle.h,
                 TradeSide::Short => candle.l,
             },
+            current_price: candle.c,
+            candle_ts: candle.ts,
             side,
         }
     }
@@ -162,10 +168,46 @@ fn check_one_k_line_diff_stop(
 
 /// 检查信号K线止损
 fn check_signal_kline_stop(ctx: &ExitContext, stop_price: Option<f64>) -> ExitResult {
+    if ctx.candle_ts >= 1766952000000 && ctx.candle_ts <= 1767052800000 {
+        println!(
+            "RISK_CK_CLOSE: Side={:?}, StopPrice={:?}, CandleClose={:?}, Start={:?}",
+            ctx.side, stop_price, ctx.current_price, ctx.entry
+        );
+    }
+    if let Some(price) = stop_price {
+        // Debug Log
+        if ctx.candle_ts >= 1766952000000 && ctx.candle_ts <= 1767052800000 {
+            println!(
+                "RISK_CK_CLOSE: Side={:?}, StopPrice={:?}, CandleClose={:?}, Start={:?}",
+                ctx.side, price, ctx.current_price, ctx.entry
+            );
+        }
+    }
+
     match stop_price {
-        Some(price) if ctx.is_stop_loss_hit(price) => ExitResult::Exit {
-            price,
-            reason: "预止损-信号线失效",
+        Some(price) => match ctx.side {
+            TradeSide::Long => {
+                // Check Low price (Standard)
+                if ctx.adverse_price <= price {
+                    ExitResult::Exit {
+                        price,
+                        reason: "Signal_Kline_Stop_Loss",
+                    }
+                } else {
+                    ExitResult::None
+                }
+            }
+            TradeSide::Short => {
+                // Check High price (Standard)
+                if ctx.adverse_price >= price {
+                    ExitResult::Exit {
+                        price,
+                        reason: "Signal_Kline_Stop_Loss",
+                    }
+                } else {
+                    ExitResult::None
+                }
+            }
         },
         _ => ExitResult::None,
     }
@@ -347,7 +389,14 @@ fn run_stop_loss_checks(
     risk_config: &BasicRiskStrategyConfig,
     position: &TradePosition,
 ) -> ExitResult {
-    // 1. 最大损失止损
+    // 1. 信号K线止损 (最高优先级：优先遵从各策略的特定止损逻辑)
+    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
+        check_signal_kline_stop(ctx, position.signal_kline_stop_close_price)
+    {
+        return result;
+    }
+
+    // 2. 最大损失止损
     let result = check_max_loss_stop(
         ctx,
         risk_config.max_loss_percent,
@@ -360,7 +409,7 @@ fn run_stop_loss_checks(
         return result;
     }
 
-    // 2. 单K振幅固定止损（1R）
+    // 3. 单K振幅固定止损（1R）
     let result =
         check_one_k_line_diff_stop(ctx, position, risk_config.is_one_k_line_diff_stop_loss);
     if matches!(
@@ -370,17 +419,8 @@ fn run_stop_loss_checks(
         return result;
     }
 
-    // 3. 移动止损（三级ATR系统/保本止损）
-    let result = check_atr_trailing_stop(ctx, position);
-    if matches!(
-        result,
-        ExitResult::Exit { .. } | ExitResult::ExitDynamic { .. }
-    ) {
-        return result;
-    }
-
-    // 4. 信号K线止损
-    check_signal_kline_stop(ctx, position.signal_kline_stop_close_price)
+    // 4. 移动止损（三级ATR系统/保本止损）
+    check_atr_trailing_stop(ctx, position)
 }
 
 /// 止盈检查链（优先级从高到低）

@@ -492,6 +492,10 @@ impl VegasStrategy {
                         signal_result.atr_stop_loss_price =
                             Some(last_data_item.c - atr_value * atr_multiplier);
                     }
+                    // 【新增】如果是吞没形态，止损设为吞没K线开盘价
+                    if vegas_indicator_signal_values.engulfing_value.is_engulfing {
+                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+                    }
                 }
                 SignalDirect::IsShort => {
                     signal_result.should_sell = Some(true);
@@ -500,6 +504,10 @@ impl VegasStrategy {
                     if atr_value > 0.0 {
                         signal_result.atr_stop_loss_price =
                             Some(last_data_item.c + atr_value * atr_multiplier);
+                    }
+                    // 【新增】如果是吞没形态，止损设为吞没K线开盘价
+                    if vegas_indicator_signal_values.engulfing_value.is_engulfing {
+                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
                     }
                 }
             }
@@ -612,11 +620,12 @@ impl VegasStrategy {
         if signal_result.should_buy.unwrap_or(false) {
             if let Some(dist) = price_to_ema4 {
                 // 价格在 ema4 上方且距离小于阈值视为贴线追多 → 给极小止损
-                if dist >= 0.0 && dist <= chase_cfg.close_to_ema_threshold {
-                    let tight_sl = ema4 * chase_cfg.tight_stop_loss_ratio;
-                    signal_result.signal_kline_stop_loss_price =
-                        Some(tight_sl.min(last_data_item.c * 0.999));
-                }
+                // 【已禁用】只保留吞没形态止损
+                // if dist >= 0.0 && dist <= chase_cfg.close_to_ema_threshold {
+                //     let tight_sl = ema4 * chase_cfg.tight_stop_loss_ratio;
+                //     signal_result.signal_kline_stop_loss_price =
+                //         Some(tight_sl.min(last_data_item.c * 0.999));
+                // }
             }
         }
 
@@ -1272,14 +1281,14 @@ impl VegasStrategy {
             return;
         }
 
-        // 其他情况使用工具函数计算止损价格
-        if let Some(stop_loss_price) = utils::calculate_best_stop_loss_price(
-            last_data_item,
-            signal_result.should_buy.unwrap_or(false),
-            signal_result.should_sell.unwrap_or(false),
-        ) {
-            signal_result.signal_kline_stop_loss_price = Some(stop_loss_price);
-        }
+        // 【已禁用】只保留吞没形态止损，其他情况不设置信号线止损
+        // if let Some(stop_loss_price) = utils::calculate_best_stop_loss_price(
+        //     last_data_item,
+        //     signal_result.should_buy.unwrap_or(false),
+        //     signal_result.should_sell.unwrap_or(false),
+        // ) {
+        //     signal_result.signal_kline_stop_loss_price = Some(stop_loss_price);
+        // }
     }
 }
 

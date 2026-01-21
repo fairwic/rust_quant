@@ -22,6 +22,12 @@ pub fn deal_signal(
     //     println!("signal: {:#?}", signal);
     //     println!("trading_state: {:#?}", trading_state.trade_position);
     // }
+    // 1. 优先进行风控检查 (确保每根K线的最高/最低价都能触发止损/止盈)
+    // 即使当前K线产生了新信号，也必须先检查由于K线波动导致的止损
+    if trading_state.trade_position.is_some() {
+        trading_state = check_risk_config(&risk_config, trading_state, signal, candle);
+    }
+
     if signal.should_buy || signal.should_sell {
         if let Some(mut trade_position) = trading_state.trade_position.clone() {
             // 如是反向仓位，优先判断一下止盈止损
@@ -56,9 +62,9 @@ pub fn deal_signal(
             handle_sell_signal_logic(risk_config, &mut trading_state, signal, candle);
         }
     } else {
-        // 如果有持仓, 先进行风险检查
+        // 如果没有新信号
         if trading_state.trade_position.is_some() {
-            trading_state = check_risk_config(&risk_config, trading_state, signal, candle);
+            // 风控已在顶部检查过，此处无需再次检查
         } else if trading_state.last_signal_result.is_some() {
             // 要确保大于信号的开仓时间
             if candle.ts >= trading_state.last_signal_result.clone().unwrap().ts {
