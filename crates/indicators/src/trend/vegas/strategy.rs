@@ -495,18 +495,36 @@ impl VegasStrategy {
                         signal_result.atr_stop_loss_price =
                             Some(last_data_item.c - atr_value * atr_multiplier);
                     }
-                    // 【新增】如果是吞没形态，止损设为吞没K线开盘价
+
+                    // 【成交量确认形态止损】只在成交量放大时启用形态止损
+                    let volume_confirmed =
+                        vegas_indicator_signal_values.volume_value.volume_ratio > 1.5;
+
+                    // 吞没形态 + 成交量确认
                     if vegas_indicator_signal_values.engulfing_value.is_engulfing {
-                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
-                        signal_result.stop_loss_source = Some("Engulfing".to_string());
+                        if volume_confirmed {
+                            signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+                            signal_result.stop_loss_source =
+                                Some("Engulfing_Volume_Confirmed".to_string());
+                        } else {
+                            signal_result.stop_loss_source =
+                                Some("Engulfing_Volume_Rejected".to_string());
+                        }
                     }
-                    // 【新增】如果是锤子线形态（做多），止损设为开盘价
+
+                    // 锤子线形态 + 成交量确认
                     if vegas_indicator_signal_values
                         .kline_hammer_value
                         .is_long_signal
                     {
-                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.l);
-                        signal_result.stop_loss_source = Some("KlineHammer".to_string());
+                        if volume_confirmed {
+                            signal_result.signal_kline_stop_loss_price = Some(last_data_item.l);
+                            signal_result.stop_loss_source =
+                                Some("KlineHammer_Volume_Confirmed".to_string());
+                        } else {
+                            signal_result.stop_loss_source =
+                                Some("KlineHammer_Volume_Rejected".to_string());
+                        }
                     }
                 }
                 SignalDirect::IsShort => {
@@ -517,18 +535,36 @@ impl VegasStrategy {
                         signal_result.atr_stop_loss_price =
                             Some(last_data_item.c + atr_value * atr_multiplier);
                     }
-                    // 【新增】如果是吞没形态，止损设为吞没K线开盘价
+
+                    // 【成交量确认形态止损】只在成交量放大时启用形态止损
+                    let volume_confirmed =
+                        vegas_indicator_signal_values.volume_value.volume_ratio > 1.5;
+
+                    // 吞没形态 + 成交量确认
                     if vegas_indicator_signal_values.engulfing_value.is_engulfing {
-                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
-                        signal_result.stop_loss_source = Some("Engulfing".to_string());
+                        if volume_confirmed {
+                            signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+                            signal_result.stop_loss_source =
+                                Some("Engulfing_Volume_Confirmed".to_string());
+                        } else {
+                            signal_result.stop_loss_source =
+                                Some("Engulfing_Volume_Rejected".to_string());
+                        }
                     }
-                    // 【新增】如果是锤子线形态（做空），止损设为最高价
+
+                    // 锤子线形态 + 成交量确认
                     if vegas_indicator_signal_values
                         .kline_hammer_value
                         .is_short_signal
                     {
-                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.h);
-                        signal_result.stop_loss_source = Some("KlineHammer".to_string());
+                        if volume_confirmed {
+                            signal_result.signal_kline_stop_loss_price = Some(last_data_item.h);
+                            signal_result.stop_loss_source =
+                                Some("KlineHammer_Volume_Confirmed".to_string());
+                        } else {
+                            signal_result.stop_loss_source =
+                                Some("KlineHammer_Volume_Rejected".to_string());
+                        }
                     }
                 }
             }
