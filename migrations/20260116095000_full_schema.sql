@@ -270,32 +270,32 @@ CREATE TABLE IF NOT EXISTS `eth-usdt-swap_candles_5m` LIKE `btc-usdt-swap_candle
 
 CREATE TABLE IF NOT EXISTS `sol-usdt-swap_candles_4h` LIKE `btc-usdt-swap_candles_4h`;
 
-INSERT INTO
-    `test`.`strategy_config` (
-        `id`,
-        `strategy_type`,
-        `inst_id`,
-        `value`,
-        `risk_config`,
-        `time`,
-        `created_at`,
-        `updated_at`,
-        `kline_start_time`,
-        `kline_end_time`,
-        `final_fund`,
-        `is_deleted`
-    )
-VALUES (
-        1,
-        'Vegas',
-        'ETH-USDT-SWAP',
-        '{\"period\":\"4H\",\"min_k_line_num\":3600,\"ema_signal\":{\"ema1_length\":12,\"ema2_length\":144,\"ema3_length\":169,\"ema4_length\":576,\"ema5_length\":676,\"ema6_length\":2304,\"ema7_length\":2704,\"ema_breakthrough_threshold\":0.003,\"is_open\":true},\"volume_signal\":{\"volume_bar_num\":4,\"volume_increase_ratio\":2.5,\"volume_decrease_ratio\":2.5,\"is_open\":true},\"ema_touch_trend_signal\":{\"ema1_with_ema2_ratio\":1.01,\"ema2_with_ema3_ratio\":1.012,\"ema3_with_ema4_ratio\":1.006,\"ema4_with_ema5_ratio\":1.006,\"ema5_with_ema7_ratio\":1.022,\"price_with_ema_high_ratio\":1.002,\"price_with_ema_low_ratio\":0.995,\"is_open\":true},\"rsi_signal\":{\"rsi_length\":16,\"rsi_oversold\":14.0,\"rsi_overbought\":86.0,\"is_open\":true},\"bolling_signal\":{\"period\":12,\"multiplier\":2.0,\"is_open\":true,\"consecutive_touch_times\":4},\"signal_weights\":{\"weights\":[[\"SimpleBreakEma2through\",1.0],[\"VolumeTrend\",1.0],[\"Rsi\",1.0],[\"TrendStrength\",1.0],[\"EmaDivergence\",1.0],[\"PriceLevel\",1.0],[\"EmaTrend\",1.0],[\"Bolling\",1.0],[\"Engulfing\",1.0],[\"KlineHammer\",1.0],[\"LegDetection\",0.9],[\"MarketStructure\",0.0],[\"FairValueGap\",1.5],[\"EqualHighLow\",1.2],[\"PremiumDiscount\",1.3],[\"FakeBreakout\",0.0]],\"min_total_weight\":2.0},\"engulfing_signal\":{\"is_engulfing\":true,\"body_ratio\":0.4,\"is_open\":true},\"kline_hammer_signal\":{\"up_shadow_ratio\":0.6,\"down_shadow_ratio\":0.6},\"leg_detection_signal\":{\"size\":7,\"is_open\":true},\"market_structure_signal\":{\"swing_length\":12,\"internal_length\":2,\"swing_threshold\":0.015,\"internal_threshold\":0.015,\"enable_swing_signal\":false,\"enable_internal_signal\":true,\"is_open\":true},\"fair_value_gap_signal\":{\"threshold_multiplier\":1.0,\"auto_threshold\":true,\"is_open\":false},\"premium_discount_signal\":{\"premium_threshold\":0.05,\"discount_threshold\":0.05,\"lookback\":20,\"is_open\":false},\"fake_breakout_signal\":null,\"range_filter_signal\":{\"bb_width_threshold\":0.03,\"tp_kline_ratio\":0.6,\"is_open\":true},\"extreme_k_filter_signal\":{\"is_open\":true,\"min_body_ratio\":0.65,\"min_move_pct\":0.01,\"min_cross_ema_count\":2},\"chase_confirm_config\":{\"enabled\":true,\"long_threshold\":0.18,\"short_threshold\":0.10,\"pullback_touch_threshold\":0.05,\"min_body_ratio\":0.5,\"close_to_ema_threshold\":0.0025,\"tight_stop_loss_ratio\":0.998}}',
-        '{\"max_loss_percent\": 0.04, \"atr_take_profit_ratio\": 3.0, \"is_one_k_line_diff_stop_loss\": false, \"is_used_signal_k_line_stop_loss\": false, \"is_counter_trend_pullback_take_profit\": false, \"is_move_stop_open_price_when_touch_price\": false}',
-        '4H',
-        '2025-10-10 18:04:33',
-        '2026-01-09 09:35:05',
-        1577232000000,
-        1760083200000,
-        4352010,
-        0
-    );
+-- INSERT INTO
+--     `test`.`strategy_config` (
+--         `id`,
+--         `strategy_type`,
+--         `inst_id`,
+--         `value`,
+--         `risk_config`,
+--         `time`,
+--         `created_at`,
+--         `updated_at`,
+--         `kline_start_time`,
+--         `kline_end_time`,
+--         `final_fund`,
+--         `is_deleted`
+--     )
+-- VALUES (
+--         1,
+--         'Vegas',
+--         'ETH-USDT-SWAP',
+--         '{\"period\":\"4H\",\"min_k_line_num\":3600,\"ema_signal\":{\"ema1_length\":12,\"ema2_length\":144,\"ema3_length\":169,\"ema4_length\":576,\"ema5_length\":676,\"ema6_length\":2304,\"ema7_length\":2704,\"ema_breakthrough_threshold\":0.003,\"is_open\":true},\"volume_signal\":{\"volume_bar_num\":4,\"volume_increase_ratio\":2.5,\"volume_decrease_ratio\":2.5,\"is_open\":true},\"ema_touch_trend_signal\":{\"ema1_with_ema2_ratio\":1.01,\"ema2_with_ema3_ratio\":1.012,\"ema3_with_ema4_ratio\":1.006,\"ema4_with_ema5_ratio\":1.006,\"ema5_with_ema7_ratio\":1.022,\"price_with_ema_high_ratio\":1.002,\"price_with_ema_low_ratio\":0.995,\"is_open\":true},\"rsi_signal\":{\"rsi_length\":16,\"rsi_oversold\":14.0,\"rsi_overbought\":86.0,\"is_open\":true},\"bolling_signal\":{\"period\":12,\"multiplier\":2.0,\"is_open\":true,\"consecutive_touch_times\":4},\"signal_weights\":{\"weights\":[[\"SimpleBreakEma2through\",1.0],[\"VolumeTrend\",1.0],[\"Rsi\",1.0],[\"TrendStrength\",1.0],[\"EmaDivergence\",1.0],[\"PriceLevel\",1.0],[\"EmaTrend\",1.0],[\"Bolling\",1.0],[\"Engulfing\",1.0],[\"KlineHammer\",1.0],[\"LegDetection\",0.9],[\"MarketStructure\",0.0],[\"FairValueGap\",1.5],[\"EqualHighLow\",1.2],[\"PremiumDiscount\",1.3],[\"FakeBreakout\",0.0]],\"min_total_weight\":2.0},\"engulfing_signal\":{\"is_engulfing\":true,\"body_ratio\":0.4,\"is_open\":true},\"kline_hammer_signal\":{\"up_shadow_ratio\":0.6,\"down_shadow_ratio\":0.6},\"leg_detection_signal\":{\"size\":7,\"is_open\":true},\"market_structure_signal\":{\"swing_length\":12,\"internal_length\":2,\"swing_threshold\":0.015,\"internal_threshold\":0.015,\"enable_swing_signal\":false,\"enable_internal_signal\":true,\"is_open\":true},\"fair_value_gap_signal\":{\"threshold_multiplier\":1.0,\"auto_threshold\":true,\"is_open\":false},\"premium_discount_signal\":{\"premium_threshold\":0.05,\"discount_threshold\":0.05,\"lookback\":20,\"is_open\":false},\"fake_breakout_signal\":null,\"range_filter_signal\":{\"bb_width_threshold\":0.03,\"tp_kline_ratio\":0.6,\"is_open\":true},\"extreme_k_filter_signal\":{\"is_open\":true,\"min_body_ratio\":0.65,\"min_move_pct\":0.01,\"min_cross_ema_count\":2},\"chase_confirm_config\":{\"enabled\":true,\"long_threshold\":0.18,\"short_threshold\":0.10,\"pullback_touch_threshold\":0.05,\"min_body_ratio\":0.5,\"close_to_ema_threshold\":0.0025,\"tight_stop_loss_ratio\":0.998}}',
+--         '{\"max_loss_percent\": 0.04, \"atr_take_profit_ratio\": 3.0, \"is_one_k_line_diff_stop_loss\": false, \"is_used_signal_k_line_stop_loss\": false, \"is_counter_trend_pullback_take_profit\": false, \"is_move_stop_open_price_when_touch_price\": false}',
+--         '4H',
+--         '2025-10-10 18:04:33',
+--         '2026-01-09 09:35:05',
+--         1577232000000,
+--         1760083200000,
+--         4352010,
+--         0
+--     );

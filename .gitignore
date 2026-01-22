@@ -16,6 +16,6 @@ npm-debug.log*
 *.bak3
 *.backup
 *~
-runt_quant_old
+runt_quant_old/
 ./okx
 ./okx_rs

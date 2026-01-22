@@ -25,7 +25,12 @@ pub fn record_trade_entry(state: &mut TradingState, option_type: String, signal:
         loss_num: 0,
         signal_value: signal.single_value.clone(),
         signal_result: signal.single_result.clone(),
-        stop_loss_source: signal.stop_loss_source.clone(),
+        stop_loss_source: trade_position.stop_loss_source.clone(),
+        stop_loss_update_history: if trade_position.stop_loss_updates.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&trade_position.stop_loss_updates).unwrap_or_default())
+        },
     });
 }
 
@@ -58,6 +63,11 @@ pub fn record_trade_exit(
         loss_num: state.losses,
         signal_value: signal.single_value.clone(),
         signal_result: signal.single_result.clone(),
-        stop_loss_source: signal.stop_loss_source.clone(),
+        stop_loss_source: trade_position.stop_loss_source.clone(),
+        stop_loss_update_history: if trade_position.stop_loss_updates.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&trade_position.stop_loss_updates).unwrap_or_default())
+        },
     });
 }

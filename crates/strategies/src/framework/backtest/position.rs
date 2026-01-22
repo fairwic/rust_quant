@@ -112,9 +112,40 @@ fn set_stop_close_price_common(
     signal: &SignalResult,
     position: &mut TradePosition,
 ) {
-    // 1. 信号K线止损
+    // 1. 信号K线止损 + 更新历史记录
     if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
-        position.signal_kline_stop_close_price = signal.signal_kline_stop_loss_price;
+        if let Some(new_price) = signal.signal_kline_stop_loss_price {
+            let source = signal
+                .stop_loss_source
+                .clone()
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            if let Some(old_price) = position.signal_kline_stop_close_price {
+                // 这是更新操作
+                let sequence = position.stop_loss_updates.len() as i32;
+                let update = rust_quant_domain::value_objects::StopLossUpdate::update(
+                    sequence,
+                    signal.ts,
+                    signal.ts, // 使用信号时间作为K线时间
+                    source.clone(),
+                    old_price,
+                    new_price,
+                );
+                position.stop_loss_updates.push(update);
+            } else {
+                // 首次设置
+                let update = rust_quant_domain::value_objects::StopLossUpdate::initial(
+                    signal.ts,
+                    signal.ts,
+                    source.clone(),
+                    new_price,
+                );
+                position.stop_loss_updates.push(update);
+            }
+
+            position.signal_kline_stop_close_price = Some(new_price);
+            position.stop_loss_source = Some(source);
+        }
     }
 
     // 2. ATR止损

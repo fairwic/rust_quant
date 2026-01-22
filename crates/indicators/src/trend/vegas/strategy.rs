@@ -505,7 +505,7 @@ impl VegasStrategy {
                         .kline_hammer_value
                         .is_long_signal
                     {
-                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
+                        signal_result.signal_kline_stop_loss_price = Some(last_data_item.l);
                         signal_result.stop_loss_source = Some("KlineHammer".to_string());
                     }
                 }

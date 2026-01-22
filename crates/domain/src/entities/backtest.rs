@@ -128,6 +128,8 @@ pub struct BacktestDetail {
     pub signal_result: String,
     /// 止损来源（如 "Engulfing", "KlineHammer" 等）
     pub stop_loss_source: Option<String>,
+    /// 止损更新历史(JSON序列化的Vec<StopLossUpdate>)
+    pub stop_loss_update_history: Option<String>,
 }
 
 impl BacktestDetail {
@@ -153,6 +155,7 @@ impl BacktestDetail {
         signal_value: String,
         signal_result: String,
         stop_loss_source: Option<String>,
+        stop_loss_update_history: Option<String>,
     ) -> Self {
         Self {
             id: None,
@@ -176,6 +179,7 @@ impl BacktestDetail {
             signal_value,
             signal_result,
             stop_loss_source,
+            stop_loss_update_history,
         }
     }
 }

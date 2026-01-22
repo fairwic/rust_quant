@@ -85,6 +85,8 @@ pub struct TradeRecord {
     pub signal_result: Option<String>,
     //止损来源（如 "Engulfing", "KlineHammer" 等）
     pub stop_loss_source: Option<String>,
+    //止损更新历史(JSON序列化的Vec<StopLossUpdate>)
+    pub stop_loss_update_history: Option<String>,
 }
 
 // ============================================================================
@@ -297,6 +299,12 @@ pub struct TradePosition {
 
     /// 已触达的止盈级别（用于跟踪止盈进度）
     pub reached_take_profit_level: u8,
+
+    /// 止损来源（如 "Engulfing", "KlineHammer" 等）
+    pub stop_loss_source: Option<String>,
+
+    /// 止损更新历史
+    pub stop_loss_updates: Vec<rust_quant_domain::value_objects::StopLossUpdate>,
 }
 
 /// 交易状态

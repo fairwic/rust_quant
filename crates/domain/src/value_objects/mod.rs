@@ -7,6 +7,7 @@ pub mod leverage;
 pub mod percentage;
 pub mod price;
 pub mod signal;
+pub mod stop_loss;
 pub mod symbol;
 pub mod volume;
 
@@ -14,5 +15,6 @@ pub use leverage::{Leverage, LeverageError};
 pub use percentage::{Percentage, PercentageError};
 pub use price::{Price, PriceError};
 pub use signal::{SignalDirection, SignalResult, SignalStrength, TradingSignal};
+pub use stop_loss::StopLossUpdate;
 pub use symbol::{Symbol, SymbolError};
 pub use volume::{Volume, VolumeError};
