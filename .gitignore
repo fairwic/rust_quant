@@ -1,4 +1,5 @@
 /target
+.worktrees/
 .env
 .vcs.xml
 .idea
