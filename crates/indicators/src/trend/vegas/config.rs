@@ -316,9 +316,9 @@ impl Default for MacdSignalConfig {
     fn default() -> Self {
         Self {
             is_open: true,  // 默认开启，使用新的智能过滤逻辑
-            fast_period: 6,   // 加速：12 -> 6
-            slow_period: 13,  // 加速：26 -> 13
-            signal_period: 4, // 加速：9 -> 4
+            fast_period: 12,  // 标准 12
+            slow_period: 26,  // 标准 26
+            signal_period: 9, // 标准 9
             require_momentum_confirm: false,  // 默认关闭，由 filter_falling_knife 接管主要的动量判断
             filter_falling_knife: true,
         }

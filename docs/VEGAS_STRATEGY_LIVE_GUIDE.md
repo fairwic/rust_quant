@@ -92,7 +92,7 @@ flowchart TD
 | `贴线极小止损` | 做多且非常贴近 EMA4（默认 EMA576）时，给一个“极小止损” | 由 `chase_confirm_config` 控制（`close_to_ema_threshold=0.0025` 等） |
 | `EXTREME_K_FILTER_*` | 大实体跨多条 EMA：只允许顺势；反向信号直接撤销 | `extreme_k_filter_signal.is_open=true`（阈值见配置） |
 | `RANGE_TP` | 震荡时压缩 TP（仅调整止盈目标） | `range_filter_signal.is_open=true` 且有 Bolling |
-| `MACD_*` | 允许逆势，但禁止“接飞刀/摸顶”：动量还在恶化就撤销 | `macd_signal.is_open=true`（默认加速版 `6/13/4` + `filter_falling_knife=true`） |
+| `MACD_*` | 允许逆势，但禁止“接飞刀/摸顶”：动量还在恶化就撤销 | `macd_signal.is_open=true`（默认 `fast=12、slow=26、signal=9`，`filter_falling_knife=true`; 可选 `require_momentum_confirm=true` 强制柱状图改善时才放行） |
 
 ---
 
