@@ -131,10 +131,7 @@ impl StrategyExecutionService {
         let mut candidates: Vec<f64> = vec![max_loss_stop];
 
         // 信号K线止损（若启用且信号提供）
-        if risk_config
-            .is_used_signal_k_line_stop_loss
-            .unwrap_or(false)
-        {
+        if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
             if let Some(px) = signal.signal_kline_stop_loss_price {
                 candidates.push(px);
             }
@@ -941,6 +938,7 @@ mod tests {
             atr_take_profit_level_1: None,
             atr_take_profit_level_2: None,
             atr_take_profit_level_3: None,
+            stop_loss_source: None,
             filter_reasons: vec![],
             direction: rust_quant_domain::SignalDirection::Long,
         }
@@ -968,6 +966,7 @@ mod tests {
             atr_take_profit_level_1: None,
             atr_take_profit_level_2: None,
             atr_take_profit_level_3: None,
+            stop_loss_source: None,
             filter_reasons: vec![],
             direction: rust_quant_domain::SignalDirection::Short,
         }
@@ -1797,6 +1796,7 @@ mod tests {
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
             move_stop_open_price_when_touch_price: None,
+            stop_loss_source: None,
             ts,
             single_value: None,
             single_result: None,

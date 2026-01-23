@@ -279,6 +279,7 @@ mod tests {
             short_signal_take_profit_price: None,
             counter_trend_pullback_take_profit_price: None,
             filter_reasons: vec![],
+            stop_loss_source: None,
         };
 
         assert!(service.validate_signal(&valid_signal));

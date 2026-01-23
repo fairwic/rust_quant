@@ -315,11 +315,11 @@ pub struct MacdSignalConfig {
 impl Default for MacdSignalConfig {
     fn default() -> Self {
         Self {
-            is_open: true,  // 默认开启，使用新的智能过滤逻辑
-            fast_period: 12,  // 标准 12
-            slow_period: 26,  // 标准 26
-            signal_period: 9, // 标准 9
-            require_momentum_confirm: false,  // 默认关闭，由 filter_falling_knife 接管主要的动量判断
+            is_open: true,                   // 默认开启，使用新的智能过滤逻辑
+            fast_period: 12,                 // 标准 12
+            slow_period: 26,                 // 标准 26
+            signal_period: 9,                // 标准 9
+            require_momentum_confirm: false, // 默认关闭，由 filter_falling_knife 接管主要的动量判断
             filter_falling_knife: true,
         }
     }
@@ -327,4 +327,35 @@ impl Default for MacdSignalConfig {
 
 pub fn default_macd_signal_config() -> Option<MacdSignalConfig> {
     Some(MacdSignalConfig::default())
+}
+
+/// 大实体止损配置
+/// 当K线为大实体（强趋势）时，使用更紧的止损（假设回调不深）
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct LargeEntityStopLossConfig {
+    /// 是否启用
+    pub is_open: bool,
+    /// 最小实体占比（实体/整根振幅），例如 0.6 表示实体占60%
+    pub min_body_ratio: f64,
+    /// 最小实体涨跌幅（|收-开|/开），例如 0.005 表示0.5%
+    pub min_move_pct: f64,
+    /// 回调比例阈值（Fibonacci），例如 0.382
+    /// 做多止损 = High - (High - Low) * ratio
+    /// 做空止损 = Low + (High - Low) * ratio
+    pub retracement_ratio: f64,
+}
+
+impl Default for LargeEntityStopLossConfig {
+    fn default() -> Self {
+        Self {
+            is_open: true,
+            min_body_ratio: 0.6,
+            min_move_pct: 0.005,    // 0.5%
+            retracement_ratio: 0.5, // 允许回撤 50%
+        }
+    }
+}
+
+pub fn default_large_entity_stop_loss_config() -> Option<LargeEntityStopLossConfig> {
+    Some(LargeEntityStopLossConfig::default())
 }
