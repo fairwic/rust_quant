@@ -1,10 +1,11 @@
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
-    default_chase_confirm_config, default_extreme_k_filter, default_large_entity_stop_loss_config,
-    default_macd_signal_config, ChaseConfirmConfig, EmaDistanceConfig, EmaSignalConfig,
-    EmaTouchTrendSignalConfig, EngulfingSignalConfig, ExtremeKFilterConfig, KlineHammerConfig,
-    LegDetectionConfig, MacdSignalConfig, MarketStructureConfig, RangeFilterConfig,
-    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
+    default_chase_confirm_config, default_extreme_k_filter, default_fib_retracement_signal_config,
+    default_large_entity_stop_loss_config, default_macd_signal_config, ChaseConfirmConfig,
+    EmaDistanceConfig, EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig,
+    ExtremeKFilterConfig, FibRetracementSignalConfig, KlineHammerConfig, LegDetectionConfig,
+    MacdSignalConfig, MarketStructureConfig, RangeFilterConfig, RsiSignalConfig, VegasStrategy,
+    VolumeSignalConfig,
 };
 use rust_quant_indicators::volatility::BollingBandsSignalConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
@@ -48,6 +49,7 @@ pub struct ParamMergeBuilder {
     pub atr_stop_loss_multiplier: Option<f64>,
     pub emit_debug: Option<bool>,
     pub macd_signal: Option<MacdSignalConfig>,
+    pub fib_retracement_signal: Option<FibRetracementSignalConfig>,
 }
 impl ParamMergeBuilder {
     //使用构造器
@@ -224,6 +226,9 @@ impl ParamMergeBuilder {
                 .chase_confirm_config
                 .or_else(default_chase_confirm_config),
             macd_signal: self.macd_signal.clone().or_else(default_macd_signal_config),
+            fib_retracement_signal: self
+                .fib_retracement_signal
+                .or_else(default_fib_retracement_signal_config),
             ema_distance_config: self.ema_distance_config.unwrap_or_default(),
             atr_stop_loss_multiplier: self.atr_stop_loss_multiplier.unwrap_or(1.5),
             emit_debug: self.emit_debug.unwrap_or(true),
@@ -412,6 +417,7 @@ impl ParamGenerator {
                 atr_stop_loss_multiplier: None,
                 emit_debug: None,
                 macd_signal: None,
+                fib_retracement_signal: None,
             };
 
             batch.push(param);
