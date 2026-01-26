@@ -19,6 +19,5 @@ npm-debug.log*
 *~
 runt_quant_old/
 okx/
-okx_rs
-/
+okx_rs/
 dist/
