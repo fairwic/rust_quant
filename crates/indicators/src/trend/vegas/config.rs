@@ -357,6 +357,9 @@ pub struct FibRetracementSignalConfig {
     pub stop_loss_buffer_ratio: f64,
     /// 是否使用 Swing 结构止损
     pub use_swing_stop_loss: bool,
+    /// 最小趋势波动幅度阈值（只有当 swing 范围 (high - low) / low 超过该阈值时，才应用 strict_major_trend 过滤）
+    #[serde(default = "default_min_trend_move_pct")]
+    pub min_trend_move_pct: f64,
 }
 
 impl Default for FibRetracementSignalConfig {
@@ -372,12 +375,17 @@ impl Default for FibRetracementSignalConfig {
             strict_major_trend: true,
             stop_loss_buffer_ratio: 0.01,
             use_swing_stop_loss: true,
+            min_trend_move_pct: 0.08,
         }
     }
 }
 
 pub fn default_fib_retracement_signal_config() -> Option<FibRetracementSignalConfig> {
     Some(FibRetracementSignalConfig::default())
+}
+
+fn default_min_trend_move_pct() -> f64 {
+    0.08
 }
 
 /// 大实体止损配置

@@ -494,8 +494,9 @@ impl VegasStrategy {
                     &fib_cfg,
                 );
         } else {
-            vegas_indicator_signal_values.fib_retracement_value.volume_ratio =
-                vegas_indicator_signal_values.volume_value.volume_ratio;
+            vegas_indicator_signal_values
+                .fib_retracement_value
+                .volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
         }
 
         // ================================================================
@@ -723,6 +724,7 @@ impl VegasStrategy {
 
         // ================================================================
         // Fib 严格大趋势过滤：禁开反向仓
+        // 只有当 swing 波动幅度足够大时，才应用此过滤，避免窄幅震荡中过度过滤
         // ================================================================
         if fib_cfg.is_open && fib_cfg.strict_major_trend {
             let major_bull =
@@ -730,17 +732,42 @@ impl VegasStrategy {
             let major_bear =
                 trend::is_major_bearish_trend(&vegas_indicator_signal_values.ema_values);
 
-            // 注意：这里仅记录“禁止开仓”的原因，不直接清空 should_buy/should_sell。
-            // 这样回测/实盘可以在 backtest/position 层实现“反向信号仅平仓，不反手开仓”的行为。
-            if major_bear && signal_result.should_buy.unwrap_or(false) {
-                signal_result
-                    .filter_reasons
-                    .push("FIB_STRICT_MAJOR_BEAR_BLOCK_LONG".to_string());
-            }
-            if major_bull && signal_result.should_sell.unwrap_or(false) {
-                signal_result
-                    .filter_reasons
-                    .push("FIB_STRICT_MAJOR_BULL_BLOCK_SHORT".to_string());
+            // 计算 swing 波动幅度
+            let swing_high = vegas_indicator_signal_values
+                .fib_retracement_value
+                .swing_high;
+            let swing_low = vegas_indicator_signal_values
+                .fib_retracement_value
+                .swing_low;
+            let swing_move_pct = if swing_low > 0.0 {
+                (swing_high - swing_low) / swing_low
+            } else {
+                0.0
+            };
+
+            // 只有在 swing 数据有效且波动幅度足够大时才应用过滤
+            let is_trend_move_significant =
+                swing_low > 0.0 && swing_move_pct >= fib_cfg.min_trend_move_pct;
+
+            // 注意：这里仅记录"禁止开仓"的原因，不直接清空 should_buy/should_sell。
+            // 这样回测/实盘可以在 backtest/position 层实现"反向信号仅平仓，不反手开仓"的行为。
+            if is_trend_move_significant {
+                if major_bear && signal_result.should_buy.unwrap_or(false) {
+                    signal_result
+                        .filter_reasons
+                        .push(format!(
+                            "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
+                            swing_move_pct * 100.0
+                        ));
+                }
+                if major_bull && signal_result.should_sell.unwrap_or(false) {
+                    signal_result
+                        .filter_reasons
+                        .push(format!(
+                            "FIB_STRICT_MAJOR_BULL_BLOCK_SHORT(swing_pct={:.2}%)",
+                            swing_move_pct * 100.0
+                        ));
+                }
             }
         }
 
@@ -1519,8 +1546,24 @@ impl VegasStrategy {
 
 #[cfg(test)]
 mod tests {
-    use super::VegasStrategy;
+    use super::{
+        EmaSignalValue, FibRetracementSignalConfig, RsiSignalConfig, SignalType,
+        SignalWeightsConfig, VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
+    };
     use rust_quant_common::CandleItem;
+    use rust_quant_domain::BasicRiskStrategyConfig;
+
+    fn candle(o: f64, h: f64, l: f64, c: f64, ts: i64) -> CandleItem {
+        CandleItem {
+            o,
+            h,
+            l,
+            c,
+            ts,
+            v: 1.0,
+            confirm: 1,
+        }
+    }
 
     #[test]
     fn detect_multi_body_engulfing_bearish_three_line_strike() {
@@ -1614,5 +1657,80 @@ mod tests {
         let (bull, bear) = VegasStrategy::detect_multi_body_engulfing(&data, 3);
         assert!(bull);
         assert!(!bear);
+    }
+
+    #[test]
+    fn fib_strict_reason_includes_swing_pct_suffix() {
+        let mut strategy = VegasStrategy {
+            period: "4H".to_string(),
+            volume_signal: Some(VolumeSignalConfig {
+                volume_bar_num: 4,
+                volume_increase_ratio: 2.0,
+                volume_decrease_ratio: 2.0,
+                is_open: true,
+            }),
+            rsi_signal: Some(RsiSignalConfig {
+                rsi_length: 14,
+                rsi_oversold: 15.0,
+                rsi_overbought: 85.0,
+                is_open: true,
+            }),
+            fib_retracement_signal: Some(FibRetracementSignalConfig {
+                is_open: true,
+                only_on_fib: false,
+                swing_lookback: 5,
+                fib_trigger_low: 0.328,
+                fib_trigger_high: 0.618,
+                min_volume_ratio: 10.0,
+                require_leg_confirmation: false,
+                strict_major_trend: true,
+                stop_loss_buffer_ratio: 0.01,
+                use_swing_stop_loss: false,
+                min_trend_move_pct: 0.1,
+            }),
+            ..VegasStrategy::default()
+        };
+
+        let candles = vec![
+            candle(10.0, 10.0, 9.0, 9.5, 1),
+            candle(9.5, 9.7, 8.5, 9.0, 2),
+            candle(9.0, 9.2, 8.0, 8.4, 3),
+            candle(8.4, 8.8, 8.2, 8.6, 4),
+            candle(8.6, 9.0, 8.4, 8.8, 5),
+        ];
+
+        let mut indicator_values = VegasIndicatorSignalValue::default();
+        indicator_values.ema_values = EmaSignalValue {
+            ema1_value: 90.0,
+            ema2_value: 95.0,
+            ema3_value: 96.0,
+            ema4_value: 100.0,
+            ..EmaSignalValue::default()
+        };
+        indicator_values.volume_value.volume_ratio = 3.0;
+        indicator_values.rsi_value.rsi_value = 10.0;
+
+        let weights = SignalWeightsConfig {
+            weights: vec![(SignalType::VolumeTrend, 1.0), (SignalType::Rsi, 1.0)],
+            min_total_weight: 2.0,
+        };
+
+        let result = strategy.get_trade_signal(
+            &candles,
+            &mut indicator_values,
+            &weights,
+            &BasicRiskStrategyConfig::default(),
+        );
+
+        let reason = result
+            .filter_reasons
+            .iter()
+            .find(|r| r.starts_with("FIB_STRICT_MAJOR_BEAR_BLOCK_LONG"))
+            .expect("expected fib strict reason");
+        assert!(
+            reason.contains("swing_pct="),
+            "reason should include swing_pct suffix, got: {}",
+            reason
+        );
     }
 }
