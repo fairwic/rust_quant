@@ -4,6 +4,22 @@
 
 ---
 
+### 2026-01-26: strict_major_trend=false A/B（验证收益是否变差）
+
+#### 实验记录（ETH-USDT-SWAP 4H, min_trend_move_pct=0.2）
+
+| Backtest ID | strict_major_trend | 胜率   | 利润     | Sharpe | 最大回撤 |
+| ----------- | ------------------ | ------ | -------- | ------ | -------- |
+| 111         | true               | 47.44% | $1801.49 | 1.626  | 38.03%   |
+| 114         | false              | 47.44% | $1787.18 | 1.620  | 38.03%   |
+
+#### 结论
+
+- strict_major_trend=false 利润小幅下降（-14.31），当前仍以 strict_major_trend=true 为优先。
+- 已将 DB 配置恢复为 `strict_major_trend=true`。
+
+---
+
 ### 2026-01-26: Fib 大趋势过滤波动阈值优化（修复 ID 71 逆势做多）
 
 #### 背景
