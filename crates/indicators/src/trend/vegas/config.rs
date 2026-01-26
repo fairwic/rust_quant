@@ -315,11 +315,11 @@ pub struct MacdSignalConfig {
 impl Default for MacdSignalConfig {
     fn default() -> Self {
         Self {
-            is_open: true,  // 默认开启，使用新的智能过滤逻辑
-            fast_period: 12,  // 标准 12
-            slow_period: 26,  // 标准 26
-            signal_period: 9, // 标准 9
-            require_momentum_confirm: false,  // 默认关闭，由 filter_falling_knife 接管主要的动量判断
+            is_open: true,                   // 默认开启，使用新的智能过滤逻辑
+            fast_period: 12,                 // 标准 12
+            slow_period: 26,                 // 标准 26
+            signal_period: 9,                // 标准 9
+            require_momentum_confirm: false, // 默认关闭，由 filter_falling_knife 接管主要的动量判断
             filter_falling_knife: true,
         }
     }
@@ -327,4 +327,86 @@ impl Default for MacdSignalConfig {
 
 pub fn default_macd_signal_config() -> Option<MacdSignalConfig> {
     Some(MacdSignalConfig::default())
+}
+
+/// Fib 回撤入场配置（趋势回调/反弹入场）
+///
+/// 目标：只在“大小趋势一致 + 发生回撤/反弹 + 触达 Fib 区间 + 放量”时入场
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct FibRetracementSignalConfig {
+    /// 是否启用
+    pub is_open: bool,
+    /// 是否只在 Fib 条件触发时才允许开仓
+    /// - true: 只做 Fib 回撤入场（推荐用于严格顺势）
+    /// - false: 作为过滤/辅助信号（保留原有入场）
+    pub only_on_fib: bool,
+    /// Swing 回看窗口（根数）
+    pub swing_lookback: usize,
+    /// 触发区间下边界（例如 0.328/0.382）
+    pub fib_trigger_low: f64,
+    /// 触发区间上边界（例如 0.618）
+    pub fib_trigger_high: f64,
+    /// 放量阈值（volume_ratio >= min_volume_ratio）
+    pub min_volume_ratio: f64,
+    /// 是否要求腿部方向确认（LegDetection）
+    pub require_leg_confirmation: bool,
+    /// 是否严格按大趋势方向过滤反向信号
+    pub strict_major_trend: bool,
+    /// Swing 止损缓冲（例如 0.01=1%）
+    pub stop_loss_buffer_ratio: f64,
+    /// 是否使用 Swing 结构止损
+    pub use_swing_stop_loss: bool,
+}
+
+impl Default for FibRetracementSignalConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            only_on_fib: true,
+            swing_lookback: 96,      // 4H≈16天
+            fib_trigger_low: 0.328,  // 兼容用户口径（常见也可改为0.382）
+            fib_trigger_high: 0.618, // 黄金分割区
+            min_volume_ratio: 1.5,   // 放量确认
+            require_leg_confirmation: true,
+            strict_major_trend: true,
+            stop_loss_buffer_ratio: 0.01,
+            use_swing_stop_loss: true,
+        }
+    }
+}
+
+pub fn default_fib_retracement_signal_config() -> Option<FibRetracementSignalConfig> {
+    Some(FibRetracementSignalConfig::default())
+}
+
+/// 大实体止损配置
+/// 当K线为大实体（强趋势）时，使用更紧的止损（假设回调不深）
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct LargeEntityStopLossConfig {
+    /// 是否启用
+    pub is_open: bool,
+    /// 最小实体占比（实体/整根振幅），例如 0.6 表示实体占60%
+    pub min_body_ratio: f64,
+    /// 最小实体涨跌幅（|收-开|/开），例如 0.005 表示0.5%
+    pub min_move_pct: f64,
+    /// 回调比例阈值（Fibonacci），例如 0.382
+    /// 做多止损 = High - (High - Low) * ratio
+    /// 做空止损 = Low + (High - Low) * ratio
+    pub retracement_ratio: f64,
+}
+
+impl Default for LargeEntityStopLossConfig {
+    fn default() -> Self {
+        Self {
+            is_open: true,
+            min_body_ratio: 0.6,
+            min_move_pct: 0.005,    // 0.5%
+            retracement_ratio: 0.5, // 允许回撤 50%
+        }
+    }
+}
+
+pub fn default_large_entity_stop_loss_config() -> Option<LargeEntityStopLossConfig> {
+    Some(LargeEntityStopLossConfig::default())
 }

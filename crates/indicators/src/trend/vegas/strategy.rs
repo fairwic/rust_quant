@@ -47,12 +47,18 @@ pub struct VegasStrategy {
     /// 极端K线过滤/放行配置
     #[serde(default = "default_extreme_k_filter")]
     pub extreme_k_filter_signal: Option<ExtremeKFilterConfig>,
+    /// 大实体止损配置
+    #[serde(default = "default_large_entity_stop_loss_config")]
+    pub large_entity_stop_loss_config: Option<LargeEntityStopLossConfig>,
     /// 追涨追跌确认配置
     #[serde(default = "default_chase_confirm_config")]
     pub chase_confirm_config: Option<ChaseConfirmConfig>,
     /// MACD 信号配置
     #[serde(default = "default_macd_signal_config")]
     pub macd_signal: Option<MacdSignalConfig>,
+    /// Fib 回撤入场配置（趋势回调/反弹入场）
+    #[serde(default = "default_fib_retracement_signal_config")]
+    pub fib_retracement_signal: Option<FibRetracementSignalConfig>,
     /// EMA 距离过滤配置（控制 TooFar/Ranging 等阈值）
     #[serde(default = "default_ema_distance_config")]
     pub ema_distance_config: EmaDistanceConfig,
@@ -98,9 +104,12 @@ impl VegasStrategy {
                 ..MarketStructureConfig::default()
             }),
             range_filter_signal: Some(RangeFilterConfig::default()),
+
             extreme_k_filter_signal: default_extreme_k_filter(),
+            large_entity_stop_loss_config: default_large_entity_stop_loss_config(),
             chase_confirm_config: default_chase_confirm_config(),
             macd_signal: default_macd_signal_config(),
+            fib_retracement_signal: default_fib_retracement_signal_config(),
             ema_distance_config: default_ema_distance_config(),
             atr_stop_loss_multiplier: default_atr_stop_loss_multiplier(),
             emit_debug: default_emit_debug(),
@@ -472,12 +481,51 @@ impl VegasStrategy {
         }
 
         // ================================================================
+        // 【新增】Fib 回撤入场信号（Swing + Fib + 放量）
+        // ================================================================
+        let fib_cfg = self.fib_retracement_signal.unwrap_or_default();
+        if fib_cfg.is_open {
+            vegas_indicator_signal_values.fib_retracement_value =
+                super::swing_fib::generate_fib_retracement_signal(
+                    data_items,
+                    &vegas_indicator_signal_values.ema_values,
+                    &vegas_indicator_signal_values.leg_detection_value,
+                    vegas_indicator_signal_values.volume_value.volume_ratio,
+                    &fib_cfg,
+                );
+        } else {
+            vegas_indicator_signal_values.fib_retracement_value.volume_ratio =
+                vegas_indicator_signal_values.volume_value.volume_ratio;
+        }
+
+        // ================================================================
         // 计算得分
         // ================================================================
         let score = weights.calculate_score(conditions.clone());
 
         // 计算分数到达指定值
-        if let Some(signal_direction) = weights.is_signal_valid(&score) {
+        // 计算分数到达指定值
+        let mut signal_direction = weights.is_signal_valid(&score);
+        if fib_cfg.is_open {
+            let fib_val = vegas_indicator_signal_values.fib_retracement_value;
+            let fib_direction = if fib_val.is_long_signal {
+                Some(SignalDirect::IsLong)
+            } else if fib_val.is_short_signal {
+                Some(SignalDirect::IsShort)
+            } else {
+                None
+            };
+
+            // Fib 触发时优先使用 Fib 方向（即使原权重系统没有达到阈值）
+            if fib_direction.is_some() {
+                signal_direction = fib_direction;
+            } else if fib_cfg.only_on_fib {
+                // 仅Fib模式：未触发Fib则不允许开仓
+                signal_direction = None;
+            }
+        }
+
+        if let Some(signal_direction) = signal_direction {
             // 计算 ATR 用于止损价格
             let mut atr = ATR::new(14).unwrap();
             for item in data_items.iter() {
@@ -485,6 +533,43 @@ impl VegasStrategy {
             }
             let atr_value = atr.value();
             let atr_multiplier = self.atr_stop_loss_multiplier.max(0.0);
+
+            // 检查大实体（Large Entity）状态
+            let mut is_large_entity = false;
+            let mut large_entity_retracement_sl: Option<f64> = None;
+
+            if let Some(large_entity_cfg) = &self.large_entity_stop_loss_config {
+                if large_entity_cfg.is_open {
+                    let body_ratio = last_data_item.body_ratio();
+                    let move_pct =
+                        (last_data_item.c - last_data_item.o).abs() / last_data_item.o.max(1e-9);
+                    let range = last_data_item.h - last_data_item.l;
+
+                    if body_ratio >= large_entity_cfg.min_body_ratio
+                        && move_pct >= large_entity_cfg.min_move_pct
+                    {
+                        is_large_entity = true;
+                        // 计算基于回撤比例的止损
+                        match signal_direction {
+                            SignalDirect::IsLong => {
+                                // 做多：High - Range * ratio (容忍从高点回撤一定比例)
+                                let sl =
+                                    last_data_item.h - range * large_entity_cfg.retracement_ratio;
+                                // 确保止损不高于入场价(Close) - 保护性
+                                large_entity_retracement_sl = Some(sl.min(last_data_item.c));
+                            }
+                            SignalDirect::IsShort => {
+                                // 做空：Low + Range * ratio (容忍从低点反弹一定比例)
+                                let sl =
+                                    last_data_item.l + range * large_entity_cfg.retracement_ratio;
+                                // 确保止损不低于入场价(Close) - 保护性
+                                large_entity_retracement_sl = Some(sl.max(last_data_item.c));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
 
             match signal_direction {
                 SignalDirect::IsLong => {
@@ -496,12 +581,44 @@ impl VegasStrategy {
                             Some(last_data_item.c - atr_value * atr_multiplier);
                     }
 
+                    // Fib 回撤入场：优先写入 swing 止损（可配置）
+                    if fib_cfg.is_open
+                        && fib_cfg.use_swing_stop_loss
+                        && vegas_indicator_signal_values
+                            .fib_retracement_value
+                            .is_long_signal
+                        && signal_result.signal_kline_stop_loss_price.is_none()
+                    {
+                        let sl = vegas_indicator_signal_values
+                            .fib_retracement_value
+                            .suggested_stop_loss;
+                        if sl > 0.0 {
+                            signal_result.signal_kline_stop_loss_price =
+                                Some(sl.min(last_data_item.c));
+                            signal_result.stop_loss_source = Some("FibRetracement".to_string());
+                        }
+                    }
+
                     // 【成交量确认形态止损】只在成交量放大时启用形态止损
                     let volume_confirmed =
                         vegas_indicator_signal_values.volume_value.volume_ratio > 1.5;
 
-                    // 吞没形态 + 成交量确认
-                    if vegas_indicator_signal_values.engulfing_value.is_engulfing {
+                    // 1. 优先检查大实体止损（强趋势保护）
+                    // 用户规则优化：如果macd是绿柱（histogram > 0），且快线大于慢线（macd > signal），就不启用大实体止损
+                    let macd_val = &vegas_indicator_signal_values.macd_value;
+                    let macd_strong_bullish =
+                        macd_val.histogram > 0.0 && macd_val.macd_line > macd_val.signal_line;
+
+                    if is_large_entity
+                        && large_entity_retracement_sl.is_some()
+                        && !macd_strong_bullish
+                    {
+                        signal_result.signal_kline_stop_loss_price = large_entity_retracement_sl;
+                        signal_result.stop_loss_source =
+                            Some("LargeEntity_Retracement".to_string());
+                    }
+                    // 2. 其次检查吞没形态 + 成交量确认
+                    else if vegas_indicator_signal_values.engulfing_value.is_engulfing {
                         if volume_confirmed {
                             signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
                             signal_result.stop_loss_source =
@@ -512,18 +629,20 @@ impl VegasStrategy {
                         }
                     }
 
-                    // 锤子线形态 + 成交量确认
-                    if vegas_indicator_signal_values
-                        .kline_hammer_value
-                        .is_long_signal
-                    {
-                        if volume_confirmed {
-                            signal_result.signal_kline_stop_loss_price = Some(last_data_item.l);
-                            signal_result.stop_loss_source =
-                                Some("KlineHammer_Volume_Confirmed".to_string());
-                        } else {
-                            signal_result.stop_loss_source =
-                                Some("KlineHammer_Volume_Rejected".to_string());
+                    // 3. 最后检查锤子线形态 + 成交量确认(如果还没有设置止损)
+                    if signal_result.signal_kline_stop_loss_price.is_none() {
+                        if vegas_indicator_signal_values
+                            .kline_hammer_value
+                            .is_long_signal
+                        {
+                            if volume_confirmed {
+                                signal_result.signal_kline_stop_loss_price = Some(last_data_item.l);
+                                signal_result.stop_loss_source =
+                                    Some("KlineHammer_Volume_Confirmed".to_string());
+                            } else {
+                                signal_result.stop_loss_source =
+                                    Some("KlineHammer_Volume_Rejected".to_string());
+                            }
                         }
                     }
                 }
@@ -536,11 +655,35 @@ impl VegasStrategy {
                             Some(last_data_item.c + atr_value * atr_multiplier);
                     }
 
+                    // Fib 回撤入场：优先写入 swing 止损（可配置）
+                    if fib_cfg.is_open
+                        && fib_cfg.use_swing_stop_loss
+                        && vegas_indicator_signal_values
+                            .fib_retracement_value
+                            .is_short_signal
+                        && signal_result.signal_kline_stop_loss_price.is_none()
+                    {
+                        let sl = vegas_indicator_signal_values
+                            .fib_retracement_value
+                            .suggested_stop_loss;
+                        if sl > 0.0 {
+                            signal_result.signal_kline_stop_loss_price =
+                                Some(sl.max(last_data_item.c));
+                            signal_result.stop_loss_source = Some("FibRetracement".to_string());
+                        }
+                    }
+
                     // 【成交量确认形态止损】只在成交量放大时启用形态止损
                     let volume_confirmed =
                         vegas_indicator_signal_values.volume_value.volume_ratio > 1.5;
 
-                    // 吞没形态 + 成交量确认
+                    // 1. 优先检查大实体止损（强趋势保护）
+                    // if is_large_entity && large_entity_retracement_sl.is_some() {
+                    //    signal_result.signal_kline_stop_loss_price = large_entity_retracement_sl;
+                    //    signal_result.stop_loss_source =
+                    //        Some("LargeEntity_Retracement".to_string());
+                    // }
+                    // 2. 其次检查吞没形态 + 成交量确认
                     if vegas_indicator_signal_values.engulfing_value.is_engulfing {
                         if volume_confirmed {
                             signal_result.signal_kline_stop_loss_price = Some(last_data_item.o);
@@ -552,18 +695,20 @@ impl VegasStrategy {
                         }
                     }
 
-                    // 锤子线形态 + 成交量确认
-                    if vegas_indicator_signal_values
-                        .kline_hammer_value
-                        .is_short_signal
-                    {
-                        if volume_confirmed {
-                            signal_result.signal_kline_stop_loss_price = Some(last_data_item.h);
-                            signal_result.stop_loss_source =
-                                Some("KlineHammer_Volume_Confirmed".to_string());
-                        } else {
-                            signal_result.stop_loss_source =
-                                Some("KlineHammer_Volume_Rejected".to_string());
+                    // 3. 最后检查锤子线形态 + 成交量确认(如果还没有设置止损)
+                    if signal_result.signal_kline_stop_loss_price.is_none() {
+                        if vegas_indicator_signal_values
+                            .kline_hammer_value
+                            .is_short_signal
+                        {
+                            if volume_confirmed {
+                                signal_result.signal_kline_stop_loss_price = Some(last_data_item.h);
+                                signal_result.stop_loss_source =
+                                    Some("KlineHammer_Volume_Confirmed".to_string());
+                            } else {
+                                signal_result.stop_loss_source =
+                                    Some("KlineHammer_Volume_Rejected".to_string());
+                            }
                         }
                     }
                 }
@@ -574,6 +719,29 @@ impl VegasStrategy {
 
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
             signal_result.single_result = Some(json!(conditions).to_string());
+        }
+
+        // ================================================================
+        // Fib 严格大趋势过滤：禁开反向仓
+        // ================================================================
+        if fib_cfg.is_open && fib_cfg.strict_major_trend {
+            let major_bull =
+                trend::is_major_bullish_trend(&vegas_indicator_signal_values.ema_values);
+            let major_bear =
+                trend::is_major_bearish_trend(&vegas_indicator_signal_values.ema_values);
+
+            // 注意：这里仅记录“禁止开仓”的原因，不直接清空 should_buy/should_sell。
+            // 这样回测/实盘可以在 backtest/position 层实现“反向信号仅平仓，不反手开仓”的行为。
+            if major_bear && signal_result.should_buy.unwrap_or(false) {
+                signal_result
+                    .filter_reasons
+                    .push("FIB_STRICT_MAJOR_BEAR_BLOCK_LONG".to_string());
+            }
+            if major_bull && signal_result.should_sell.unwrap_or(false) {
+                signal_result
+                    .filter_reasons
+                    .push("FIB_STRICT_MAJOR_BULL_BLOCK_SHORT".to_string());
+            }
         }
 
         // ================================================================

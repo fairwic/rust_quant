@@ -341,6 +341,8 @@ mod tests {
             loss_num: if profit_loss < 0.0 { 1 } else { 0 },
             signal_value: None,
             signal_result: None,
+            stop_loss_source: None,
+            stop_loss_update_history: None,
         }
     }
 

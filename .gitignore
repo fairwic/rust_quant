@@ -18,5 +18,7 @@ npm-debug.log*
 *.backup
 *~
 runt_quant_old/
-./okx
-./okx_rs
+okx/
+okx_rs
+/
+dist/

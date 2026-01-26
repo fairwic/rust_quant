@@ -144,6 +144,12 @@ mod tests {
             counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
+            stop_loss_source: None,
+            filter_reasons: vec![],
+            direction: rust_quant_domain::SignalDirection::None,
         };
         let entry = SignalLogEntry::new("BTC-USDT", "1H", StrategyType::Vegas, &signal);
 
@@ -173,6 +179,12 @@ mod tests {
             counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
+            stop_loss_source: None,
+            filter_reasons: vec![],
+            direction: rust_quant_domain::SignalDirection::None,
         };
         let result = save_signal_log("BTC-USDT", "1H", StrategyType::Vegas, &signal).await;
 

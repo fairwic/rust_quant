@@ -123,6 +123,35 @@ pub struct MacdSignalValue {
     pub histogram_improving: bool,
 }
 
+/// Fib 回撤入场信号值（趋势回调/反弹入场）
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
+pub struct FibRetracementSignalValue {
+    pub is_long_signal: bool,
+    pub is_short_signal: bool,
+    pub swing_high: f64,
+    pub swing_low: f64,
+    /// 当前价格相对于 swing 区间的位置（0=Low, 1=High）
+    pub retracement_ratio: f64,
+    /// 是否处于触发区间
+    pub in_zone: bool,
+    /// 触发区间对应的价格下/上界
+    pub fib_price_low: f64,
+    pub fib_price_high: f64,
+    /// 成交量比值（当前/均量）
+    pub volume_ratio: f64,
+    pub volume_confirmed: bool,
+    /// 大趋势方向
+    pub major_bullish: bool,
+    pub major_bearish: bool,
+    /// 小趋势（腿部）方向
+    pub leg_bullish: bool,
+    pub leg_bearish: bool,
+    /// swing 是否为上涨波段（true=上涨波段后回调, false=下跌波段后反弹）
+    pub swing_is_upswing: bool,
+    /// 建议止损位（基于 swing high/low + buffer）
+    pub suggested_stop_loss: f64,
+}
+
 /// EMA趋势信号值
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct EmaTouchTrendSignalValue {
@@ -218,6 +247,9 @@ pub struct VegasIndicatorSignalValue {
     /// MACD 信号值（新增）
     #[serde(default)]
     pub macd_value: MacdSignalValue,
+    /// Fib 回撤入场信号值（新增）
+    #[serde(default)]
+    pub fib_retracement_value: FibRetracementSignalValue,
 }
 
 /// 检查均线交叉
