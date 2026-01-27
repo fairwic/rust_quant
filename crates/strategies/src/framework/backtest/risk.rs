@@ -116,13 +116,39 @@ enum ExitResult {
 // ============================================================================
 
 /// 检查最大损失止损
-fn check_max_loss_stop(ctx: &ExitContext, max_loss_pct: f64, dynamic_max_loss: bool) -> ExitResult {
-    // 高波动动态降损：当K线振幅大于5%且启用 DYNAMIC_MAX_LOSS=1 时，使用更紧的 4.5%
+fn check_max_loss_stop(
+    ctx: &ExitContext,
+    position: &TradePosition,
+    max_loss_pct: f64,
+    dynamic_max_loss: bool,
+) -> ExitResult {
+    // 高波动动态降损：
+    // - 入场K线振幅 > 3% 且方向不利时，收紧到 3%
+    // - 否则沿用原逻辑：K线振幅 > 5% 时收紧到 4.5%
     let mut effective_max_loss = max_loss_pct;
     if dynamic_max_loss {
-        let range_pct = (ctx.favorable_price - ctx.adverse_price).abs() / ctx.entry.max(1e-9);
-        if range_pct > 0.05 {
-            effective_max_loss = effective_max_loss.min(0.045);
+        let mut tightened_by_entry = false;
+        if let (Some(entry_amp), Some(entry_close_pos)) = (
+            position.entry_kline_amplitude,
+            position.entry_kline_close_pos,
+        ) {
+            if entry_amp > 0.03 {
+                let dir_mismatch = match ctx.side {
+                    TradeSide::Long => entry_close_pos < 0.5,
+                    TradeSide::Short => entry_close_pos > 0.5,
+                };
+                if dir_mismatch {
+                    effective_max_loss = effective_max_loss.min(0.03);
+                    tightened_by_entry = true;
+                }
+            }
+        }
+
+        if !tightened_by_entry {
+            let range_pct = (ctx.favorable_price - ctx.adverse_price).abs() / ctx.entry.max(1e-9);
+            if range_pct > 0.05 {
+                effective_max_loss = effective_max_loss.min(0.045);
+            }
         }
     }
 
@@ -399,6 +425,7 @@ fn run_stop_loss_checks(
     // 2. 最大损失止损
     let result = check_max_loss_stop(
         ctx,
+        position,
         risk_config.max_loss_percent,
         risk_config.dynamic_max_loss.unwrap_or(true),
     );
@@ -628,6 +655,7 @@ pub fn check_risk_config_with_r_system(
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
         check_max_loss_stop(
             &ctx,
+            &trade_position,
             risk_config.max_loss_percent,
             risk_config.dynamic_max_loss.unwrap_or(true),
         )
