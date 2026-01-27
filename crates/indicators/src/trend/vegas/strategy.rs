@@ -772,30 +772,9 @@ impl VegasStrategy {
         }
 
         // ================================================================
-        // 应用EMA距离过滤 + 长均线附近收紧止损
-        // - 过远状态且空头排列：拒绝做多（避免类似 5984352 的假多）
-        // - 价格贴近长周期均线（ema4）且仍要做多：自动给出极小止损位
+        // 应用EMA距离过滤（仅空头分支）
+        // - 过远状态且空头排列：拒绝做空
         // ================================================================
-        let ema4 = vegas_indicator_signal_values.ema_values.ema4_value;
-        let mut price_to_ema4: Option<f64> = None;
-        if ema4 > 0.0 {
-            price_to_ema4 = Some((last_data_item.c - ema4) / ema4);
-        }
-
-        if let Some(dist) = price_to_ema4 {
-            // 只有“贴线”且 should_filter_long 时才拦截，避免过度过滤
-            if ema_distance_filter.should_filter_long
-                && signal_result.should_buy.unwrap_or(false)
-                && dist >= 0.0
-                && dist <= 0.0025
-            {
-                signal_result.should_buy = Some(false);
-                signal_result
-                    .filter_reasons
-                    .push("EMA_DISTANCE_FILTER_LONG".to_string());
-            }
-        }
-
         if ema_distance_filter.should_filter_short && signal_result.should_sell.unwrap_or(false) {
             signal_result.should_sell = Some(false);
             signal_result
@@ -865,19 +844,6 @@ impl VegasStrategy {
                             .push("CHASE_CONFIRM_FILTER_SHORT".to_string());
                     }
                 }
-            }
-        }
-
-        // 贴线追多止损逻辑
-        if signal_result.should_buy.unwrap_or(false) {
-            if let Some(dist) = price_to_ema4 {
-                // 价格在 ema4 上方且距离小于阈值视为贴线追多 → 给极小止损
-                // 【已禁用】只保留吞没形态止损
-                // if dist >= 0.0 && dist <= chase_cfg.close_to_ema_threshold {
-                //     let tight_sl = ema4 * chase_cfg.tight_stop_loss_ratio;
-                //     signal_result.signal_kline_stop_loss_price =
-                //         Some(tight_sl.min(last_data_item.c * 0.999));
-                // }
             }
         }
 
@@ -1014,16 +980,6 @@ impl VegasStrategy {
                         }
                     }
 
-                    // 额外的动量确认（可选，默认关闭）
-                    if macd_cfg.require_momentum_confirm {
-                        if macd_val.histogram_decreasing {
-                            should_filter = true;
-                            signal_result
-                                .filter_reasons
-                                .push("MACD_MOMENTUM_WEAK_LONG".to_string());
-                        }
-                    }
-
                     if should_filter {
                         signal_result.should_buy = Some(false);
                     }
@@ -1043,16 +999,6 @@ impl VegasStrategy {
                                     .filter_reasons
                                     .push("MACD_FALLING_KNIFE_SHORT".to_string());
                             }
-                        }
-                    }
-
-                    // 额外的动量确认（可选，默认关闭）
-                    if macd_cfg.require_momentum_confirm {
-                        if macd_val.histogram_increasing {
-                            should_filter = true;
-                            signal_result
-                                .filter_reasons
-                                .push("MACD_MOMENTUM_WEAK_SHORT".to_string());
                         }
                     }
 
@@ -1459,63 +1405,6 @@ impl VegasStrategy {
             .count()
     }
 
-    /// 检测“连续吞没前 N 根实体”的强吞没形态（近似 Three-Line Strike）
-    ///
-    /// - 当前K线实体必须完全覆盖前 N 根K线实体区间（按 open/close 计算实体）
-    /// - 且前 N 根K线方向必须与当前K线相反（避免杂乱K线误判）
-    fn detect_multi_body_engulfing(data_items: &[CandleItem], n: usize) -> (bool, bool) {
-        if n == 0 || data_items.len() < n + 1 {
-            return (false, false);
-        }
-
-        let current = data_items.last().expect("数据不能为空");
-        let current_is_bull = current.c() > current.o();
-        let current_is_bear = current.c() < current.o();
-
-        // Doji / 无方向不参与
-        if !current_is_bull && !current_is_bear {
-            return (false, false);
-        }
-
-        let (cur_low, cur_high) = {
-            let o = current.o();
-            let c = current.c();
-            if o < c {
-                (o, c)
-            } else {
-                (c, o)
-            }
-        };
-
-        let prev_slice = &data_items[data_items.len() - (n + 1)..data_items.len() - 1];
-        for prev in prev_slice {
-            // 方向必须相反
-            if current_is_bull && !(prev.c() < prev.o()) {
-                return (false, false);
-            }
-            if current_is_bear && !(prev.c() > prev.o()) {
-                return (false, false);
-            }
-
-            let (p_low, p_high) = {
-                let o = prev.o();
-                let c = prev.c();
-                if o < c {
-                    (o, c)
-                } else {
-                    (c, o)
-                }
-            };
-
-            // 当前实体需要完全覆盖前K线实体
-            if !(cur_low <= p_low && cur_high >= p_high) {
-                return (false, false);
-            }
-        }
-
-        (current_is_bull, current_is_bear)
-    }
-
     fn calculate_best_stop_loss_price(
         &self,
         last_data_item: &CandleItem,
@@ -1563,100 +1452,6 @@ mod tests {
             v: 1.0,
             confirm: 1,
         }
-    }
-
-    #[test]
-    fn detect_multi_body_engulfing_bearish_three_line_strike() {
-        // 三根阳线后，一根大阴线实体完全吞没前三根实体（上海 2026-01-19 04:00 的结构）
-        let data = vec![
-            CandleItem {
-                o: 3305.64,
-                h: 3324.58,
-                l: 3301.62,
-                c: 3320.62,
-                ts: 1,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 3320.62,
-                h: 3346.99,
-                l: 3312.50,
-                c: 3332.34,
-                ts: 2,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 3332.33,
-                h: 3368.80,
-                l: 3328.19,
-                c: 3345.82,
-                ts: 3,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 3345.82,
-                h: 3355.85,
-                l: 3277.18,
-                c: 3282.91,
-                ts: 4,
-                v: 1.0,
-                confirm: 1,
-            },
-        ];
-
-        let (bull, bear) = VegasStrategy::detect_multi_body_engulfing(&data, 3);
-        assert!(!bull);
-        assert!(bear);
-    }
-
-    #[test]
-    fn detect_multi_body_engulfing_bullish_three_line_strike() {
-        // 三根阴线后，一根大阳线实体完全吞没前三根实体
-        let data = vec![
-            CandleItem {
-                o: 100.0,
-                h: 101.0,
-                l: 94.0,
-                c: 95.0,
-                ts: 1,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 95.0,
-                h: 96.0,
-                l: 90.0,
-                c: 91.0,
-                ts: 2,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 91.0,
-                h: 92.0,
-                l: 88.0,
-                c: 89.0,
-                ts: 3,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 88.0,
-                h: 106.0,
-                l: 87.0,
-                c: 105.0,
-                ts: 4,
-                v: 1.0,
-                confirm: 1,
-            },
-        ];
-
-        let (bull, bear) = VegasStrategy::detect_multi_body_engulfing(&data, 3);
-        assert!(bull);
-        assert!(!bear);
     }
 
     #[test]
