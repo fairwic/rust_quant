@@ -4,6 +4,7 @@ use sqlx::{mysql::MySqlQueryResult, MySql, Pool, QueryBuilder};
 
 use rust_quant_domain::entities::{
     BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats,
+    DynamicConfigLog,
 };
 use rust_quant_domain::traits::BacktestLogRepository;
 
@@ -225,6 +226,54 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 .push_bind(signal.final_pnl)
                 .push_bind(&signal.trade_result)
                 .push_bind(&signal.signal_value);
+        });
+
+        let result = builder.build().execute(self.pool()).await?;
+        Ok(result.rows_affected())
+    }
+
+    async fn insert_dynamic_config_logs(&self, logs: &[DynamicConfigLog]) -> Result<u64> {
+        if logs.is_empty() {
+            tracing::info!("insert_dynamic_config_logs being called with empty list");
+            return Ok(0);
+        }
+
+        tracing::info!(
+            "insert_dynamic_config_logs inserting {} logs",
+            logs.len()
+        );
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS dynamic_config_log (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                backtest_id BIGINT NOT NULL,
+                inst_id VARCHAR(32) NOT NULL,
+                period VARCHAR(10) NOT NULL,
+                kline_time DATETIME NOT NULL,
+                adjustments JSON NOT NULL,
+                config_snapshot JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_backtest (backtest_id),
+                INDEX idx_inst_period (inst_id, period),
+                INDEX idx_kline_time (kline_time)
+            )
+            "#,
+        )
+        .execute(self.pool())
+        .await?;
+
+        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+            "INSERT INTO dynamic_config_log (backtest_id, inst_id, period, kline_time, adjustments, config_snapshot) ",
+        );
+
+        builder.push_values(logs.iter(), |mut b, log| {
+            b.push_bind(log.backtest_id)
+                .push_bind(&log.inst_id)
+                .push_bind(&log.period)
+                .push_bind(&log.kline_time)
+                .push_bind(&log.adjustments)
+                .push_bind(&log.config_snapshot);
         });
 
         let result = builder.build().execute(self.pool()).await?;

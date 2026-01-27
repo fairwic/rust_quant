@@ -36,6 +36,7 @@ pub struct BackTestResult {
     pub open_trades: usize,
     pub trade_records: Vec<TradeRecord>,
     pub filtered_signals: Vec<FilteredSignal>,
+    pub dynamic_config_logs: Vec<DynamicConfigLog>,
 }
 
 impl Default for BackTestResult {
@@ -46,6 +47,7 @@ impl Default for BackTestResult {
             open_trades: 0,
             trade_records: vec![],
             filtered_signals: vec![],
+            dynamic_config_logs: vec![],
         }
     }
 }
@@ -144,6 +146,11 @@ pub struct SignalResult {
     /// 过滤原因（如 MACD_FALLING_KNIFE, RSI_OVERBOUGHT 等）
     pub filter_reasons: Vec<String>,
 
+    /// 动态配置调整标签（如 RANGE_TP_ONE_TO_ONE）
+    pub dynamic_adjustments: Vec<String>,
+    /// 动态配置快照(JSON)
+    pub dynamic_config_snapshot: Option<String>,
+
     /// 信号方向
     pub direction: rust_quant_domain::SignalDirection,
 }
@@ -177,6 +184,17 @@ pub struct FilteredSignal {
     pub trade_result: String,
     /// 信号详情 (各指标值的JSON快照)
     pub signal_value: Option<String>,
+}
+
+/// 动态配置调整记录（每根K线一次）
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DynamicConfigLog {
+    /// K线时间戳
+    pub ts: i64,
+    /// 动态调整标签
+    pub adjustments: Vec<String>,
+    /// 动态配置快照(JSON)
+    pub config_snapshot: Option<String>,
 }
 
 /// 影子交易状态（用于模拟被过滤信号的理论盈亏）
@@ -224,6 +242,8 @@ impl Default for SignalResult {
             atr_take_profit_level_2: None,
             atr_take_profit_level_3: None,
             filter_reasons: vec![],
+            dynamic_adjustments: vec![],
+            dynamic_config_snapshot: None,
             direction: rust_quant_domain::SignalDirection::None,
         }
     }

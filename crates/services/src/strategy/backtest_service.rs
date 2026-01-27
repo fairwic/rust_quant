@@ -88,32 +88,32 @@ impl BacktestService {
         let back_test_id = self.repository.insert_log(&log_entity).await?;
 
         // 如果启用了随机测试，则不保存详情和绩效指标
-        if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true"
-            && !back_test_result.trade_records.is_empty()
-        {
-            // 保存回测详情
-            self.save_backtest_details(
-                back_test_id,
-                StrategyType::from_str(strategy_name).unwrap_or(StrategyType::Vegas),
-                inst_id,
-                time,
-                back_test_result.trade_records.clone(),
-            )
-            .await?;
+        if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true" {
+            if !back_test_result.trade_records.is_empty() {
+                // 保存回测详情
+                self.save_backtest_details(
+                    back_test_id,
+                    StrategyType::from_str(strategy_name).unwrap_or(StrategyType::Vegas),
+                    inst_id,
+                    time,
+                    back_test_result.trade_records.clone(),
+                )
+                .await?;
 
-            // 计算并更新绩效指标
-            let start_time = mysql_candles.first().map(|c| c.ts).unwrap_or_default();
-            let end_time = mysql_candles.last().map(|c| c.ts).unwrap_or_default();
+                // 计算并更新绩效指标
+                let start_time = mysql_candles.first().map(|c| c.ts).unwrap_or_default();
+                let end_time = mysql_candles.last().map(|c| c.ts).unwrap_or_default();
 
-            self.update_performance_metrics(
-                back_test_id,
-                100.0, // 初始资金
-                back_test_result.funds,
-                &back_test_result.trade_records,
-                start_time,
-                end_time,
-            )
-            .await?;
+                self.update_performance_metrics(
+                    back_test_id,
+                    100.0, // 初始资金
+                    back_test_result.funds,
+                    &back_test_result.trade_records,
+                    start_time,
+                    end_time,
+                )
+                .await?;
+            }
 
             // 保存过滤信号记录 (新增)
             if !back_test_result.filtered_signals.is_empty() {
@@ -122,6 +122,16 @@ impl BacktestService {
                     inst_id,
                     time,
                     &back_test_result.filtered_signals,
+                )
+                .await?;
+            }
+
+            if !back_test_result.dynamic_config_logs.is_empty() {
+                self.save_dynamic_config_logs(
+                    back_test_id,
+                    inst_id,
+                    time,
+                    &back_test_result.dynamic_config_logs,
                 )
                 .await?;
             }
@@ -168,6 +178,34 @@ impl BacktestService {
 
         info!(
             "过滤信号记录保存成功: back_test_id={}, count={}",
+            back_test_id, count
+        );
+        Ok(count)
+    }
+
+    /// 保存动态配置调整记录
+    pub async fn save_dynamic_config_logs(
+        &self,
+        back_test_id: i64,
+        inst_id: &str,
+        time: &str,
+        logs: &[rust_quant_strategies::framework::backtest::types::DynamicConfigLog],
+    ) -> Result<u64> {
+        let entities: Vec<rust_quant_domain::entities::DynamicConfigLog> = logs
+            .iter()
+            .map(|log| rust_quant_domain::entities::DynamicConfigLog {
+                backtest_id: back_test_id,
+                inst_id: inst_id.to_string(),
+                period: time.to_string(),
+                kline_time: time::mill_time_to_datetime_shanghai(log.ts).unwrap(),
+                adjustments: serde_json::to_string(&log.adjustments).unwrap_or_default(),
+                config_snapshot: log.config_snapshot.clone(),
+            })
+            .collect();
+
+        let count = self.repository.insert_dynamic_config_logs(&entities).await?;
+        info!(
+            "动态配置记录保存成功: back_test_id={}, count={}",
             back_test_id, count
         );
         Ok(count)

@@ -3,7 +3,9 @@
 use super::context::BacktestContext;
 use super::stage::{BacktestStage, StageResult};
 use crate::framework::backtest::position::finalize_trading_state;
-use crate::framework::backtest::types::{BackTestResult, BasicRiskStrategyConfig, TradingState};
+use crate::framework::backtest::types::{
+    BackTestResult, BasicRiskStrategyConfig, DynamicConfigLog, TradingState,
+};
 use crate::framework::backtest::utils::calculate_win_rate;
 use crate::CandleItem;
 
@@ -72,12 +74,26 @@ impl PipelineRunner {
             TradingState::default(),
         );
 
+        let mut dynamic_config_logs: Vec<DynamicConfigLog> = Vec::new();
+
         // 从头遍历：SignalStage 负责管理 warm-up (min_data_length) 和 i < 500 的对齐逻辑
         for (i, candle) in candles.iter().enumerate() {
             if i > 0 {
                 ctx.reset_for_next_candle(candle.clone(), i);
             }
             let _result = self.process_candle(&mut ctx);
+
+            if let Some(signal) = &ctx.signal {
+                if signal.dynamic_config_snapshot.is_some()
+                    || !signal.dynamic_adjustments.is_empty()
+                {
+                    dynamic_config_logs.push(DynamicConfigLog {
+                        ts: ctx.candle.ts,
+                        adjustments: signal.dynamic_adjustments.clone(),
+                        config_snapshot: signal.dynamic_config_snapshot.clone(),
+                    });
+                }
+            }
         }
 
         // --- Finalize: 对齐 legacy engine 的收尾逻辑 ---
@@ -101,6 +117,7 @@ impl PipelineRunner {
             open_trades: trading_state.open_position_times,
             trade_records: trading_state.trade_records,
             filtered_signals: shadow_manager.into_filtered_signals(),
+            dynamic_config_logs,
         }
     }
 }

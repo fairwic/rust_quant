@@ -164,6 +164,8 @@ impl VegasStrategy {
                 position_time: None,
                 signal_kline: None,
                 filter_reasons: vec![],
+                dynamic_adjustments: vec![],
+                dynamic_config_snapshot: None,
             };
         }
 
@@ -198,6 +200,8 @@ impl VegasStrategy {
                     position_time: None,
                     signal_kline: None,
                     filter_reasons: vec![],
+                    dynamic_adjustments: vec![],
+                    dynamic_config_snapshot: None,
                 };
             }
         };
@@ -231,9 +235,14 @@ impl VegasStrategy {
             signal_kline: None,
             move_stop_open_price_when_touch_price: None,
             filter_reasons: vec![],
+            dynamic_adjustments: vec![],
+            dynamic_config_snapshot: None,
         };
 
         let mut conditions = Vec::with_capacity(10);
+        let mut valid_rsi_value: Option<f64> = None;
+        let mut dynamic_adjustments: Vec<String> = Vec::new();
+        let mut range_snapshot: Option<serde_json::Value> = None;
 
         // 优先判断成交量
         if let Some(volume_signal) = &self.volume_signal {
@@ -293,9 +302,20 @@ impl VegasStrategy {
                     signal_result
                         .filter_reasons
                         .push("RSI_EXTREME_EVENT".to_string());
+                    dynamic_adjustments.push("RSI_EXTREME_EVENT".to_string());
+                    signal_result.dynamic_adjustments = dynamic_adjustments.clone();
+                    signal_result.dynamic_config_snapshot = Some(
+                        json!({
+                            "kline_ts": last_data_item.ts,
+                            "adjustments": dynamic_adjustments,
+                        })
+                        .to_string(),
+                    );
                     return signal_result;
                 }
             };
+
+            valid_rsi_value = Some(current_rsi);
 
             conditions.push((
                 SignalType::Rsi,
@@ -753,49 +773,24 @@ impl VegasStrategy {
             // 这样回测/实盘可以在 backtest/position 层实现"反向信号仅平仓，不反手开仓"的行为。
             if is_trend_move_significant {
                 if major_bear && signal_result.should_buy.unwrap_or(false) {
-                    signal_result
-                        .filter_reasons
-                        .push(format!(
-                            "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
-                            swing_move_pct * 100.0
-                        ));
+                    signal_result.filter_reasons.push(format!(
+                        "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
+                        swing_move_pct * 100.0
+                    ));
                 }
                 if major_bull && signal_result.should_sell.unwrap_or(false) {
-                    signal_result
-                        .filter_reasons
-                        .push(format!(
-                            "FIB_STRICT_MAJOR_BULL_BLOCK_SHORT(swing_pct={:.2}%)",
-                            swing_move_pct * 100.0
-                        ));
+                    signal_result.filter_reasons.push(format!(
+                        "FIB_STRICT_MAJOR_BULL_BLOCK_SHORT(swing_pct={:.2}%)",
+                        swing_move_pct * 100.0
+                    ));
                 }
             }
         }
 
         // ================================================================
-        // 应用EMA距离过滤 + 长均线附近收紧止损
-        // - 过远状态且空头排列：拒绝做多（避免类似 5984352 的假多）
-        // - 价格贴近长周期均线（ema4）且仍要做多：自动给出极小止损位
+        // 应用EMA距离过滤（仅空头分支）
+        // - 过远状态且空头排列：拒绝做空
         // ================================================================
-        let ema4 = vegas_indicator_signal_values.ema_values.ema4_value;
-        let mut price_to_ema4: Option<f64> = None;
-        if ema4 > 0.0 {
-            price_to_ema4 = Some((last_data_item.c - ema4) / ema4);
-        }
-
-        if let Some(dist) = price_to_ema4 {
-            // 只有“贴线”且 should_filter_long 时才拦截，避免过度过滤
-            if ema_distance_filter.should_filter_long
-                && signal_result.should_buy.unwrap_or(false)
-                && dist >= 0.0
-                && dist <= 0.0025
-            {
-                signal_result.should_buy = Some(false);
-                signal_result
-                    .filter_reasons
-                    .push("EMA_DISTANCE_FILTER_LONG".to_string());
-            }
-        }
-
         if ema_distance_filter.should_filter_short && signal_result.should_sell.unwrap_or(false) {
             signal_result.should_sell = Some(false);
             signal_result
@@ -865,19 +860,6 @@ impl VegasStrategy {
                             .push("CHASE_CONFIRM_FILTER_SHORT".to_string());
                     }
                 }
-            }
-        }
-
-        // 贴线追多止损逻辑
-        if signal_result.should_buy.unwrap_or(false) {
-            if let Some(dist) = price_to_ema4 {
-                // 价格在 ema4 上方且距离小于阈值视为贴线追多 → 给极小止损
-                // 【已禁用】只保留吞没形态止损
-                // if dist >= 0.0 && dist <= chase_cfg.close_to_ema_threshold {
-                //     let tight_sl = ema4 * chase_cfg.tight_stop_loss_ratio;
-                //     signal_result.signal_kline_stop_loss_price =
-                //         Some(tight_sl.min(last_data_item.c * 0.999));
-                // }
             }
         }
 
@@ -958,6 +940,7 @@ impl VegasStrategy {
 
         // ================================================================
         // 震荡过滤：震荡时降低止盈目标（不影响开仓，只影响 TP）
+        // 震荡区间: RSI 中性 + 缩量或 MACD 近零轴 -> 1:1 止盈
         // ================================================================
         if let Some(range_filter_signal) = &self.range_filter_signal {
             if range_filter_signal.is_open && self.bolling_signal.is_some() {
@@ -971,14 +954,64 @@ impl VegasStrategy {
                             .abs()
                             .max(last_data_item.c * 0.001);
                         let tp_ratio = range_filter_signal.tp_kline_ratio.max(0.0);
+                        let entry_price = signal_result.open_price.unwrap_or(last_data_item.c);
+                        let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
+                        let rsi_in_range = valid_rsi_value
+                            .map(|rsi| rsi >= 46.0 && rsi <= 54.0)
+                            .unwrap_or(false);
+                        let macd_near_zero = self.macd_signal.as_ref().map_or(false, |macd_cfg| {
+                            if !macd_cfg.is_open {
+                                return false;
+                            }
+                            let macd_val = &vegas_indicator_signal_values.macd_value;
+                            macd_val.macd_line.abs() <= entry_price * 0.001
+                        });
+                        let is_ultra_narrow =
+                            bb_width_ratio <= range_filter_signal.bb_width_threshold * 0.85;
+                        let is_indecision = last_data_item.is_small_body_and_big_up_down_shadow();
+                        let use_one_to_one = rsi_in_range
+                            && (volume_ratio < 1.05 || macd_near_zero || is_indecision)
+                            && is_ultra_narrow;
+                        range_snapshot = Some(json!({
+                            "enabled": true,
+                            "bb_width_ratio": bb_width_ratio,
+                            "bb_width_threshold": range_filter_signal.bb_width_threshold,
+                            "tp_ratio": tp_ratio,
+                            "use_one_to_one": use_one_to_one,
+                            "volume_ratio": volume_ratio,
+                            "rsi": valid_rsi_value,
+                            "macd_near_zero": macd_near_zero,
+                            "is_indecision": is_indecision,
+                        }));
+                        if use_one_to_one {
+                            dynamic_adjustments.push("RANGE_TP_ONE_TO_ONE".to_string());
+                        } else {
+                            dynamic_adjustments.push("RANGE_TP_RATIO".to_string());
+                        }
+
+                        let take_profit_diff = if use_one_to_one {
+                            let stop_price = signal_result
+                                .signal_kline_stop_loss_price
+                                .or(signal_result.atr_stop_loss_price);
+                            let diff = stop_price
+                                .map(|price| (entry_price - price).abs())
+                                .unwrap_or(0.0);
+                            if diff > 0.0 {
+                                diff
+                            } else {
+                                k_range * tp_ratio
+                            }
+                        } else {
+                            k_range * tp_ratio
+                        };
 
                         if signal_result.should_buy.unwrap_or(false) {
                             signal_result.long_signal_take_profit_price =
-                                Some(last_data_item.c + k_range * tp_ratio);
+                                Some(entry_price + take_profit_diff);
                         }
                         if signal_result.should_sell.unwrap_or(false) {
                             signal_result.short_signal_take_profit_price =
-                                Some(last_data_item.c - k_range * tp_ratio);
+                                Some(entry_price - take_profit_diff);
                         }
                     }
                 }
@@ -1014,16 +1047,6 @@ impl VegasStrategy {
                         }
                     }
 
-                    // 额外的动量确认（可选，默认关闭）
-                    if macd_cfg.require_momentum_confirm {
-                        if macd_val.histogram_decreasing {
-                            should_filter = true;
-                            signal_result
-                                .filter_reasons
-                                .push("MACD_MOMENTUM_WEAK_LONG".to_string());
-                        }
-                    }
-
                     if should_filter {
                         signal_result.should_buy = Some(false);
                     }
@@ -1046,22 +1069,52 @@ impl VegasStrategy {
                         }
                     }
 
-                    // 额外的动量确认（可选，默认关闭）
-                    if macd_cfg.require_momentum_confirm {
-                        if macd_val.histogram_increasing {
-                            should_filter = true;
-                            signal_result
-                                .filter_reasons
-                                .push("MACD_MOMENTUM_WEAK_SHORT".to_string());
-                        }
-                    }
-
                     if should_filter {
                         signal_result.should_sell = Some(false);
                     }
                 }
             }
         }
+
+        if signal_result.signal_kline_stop_loss_price.is_some() {
+            dynamic_adjustments.push("STOP_LOSS_SIGNAL_KLINE".to_string());
+        }
+        if signal_result.atr_stop_loss_price.is_some() {
+            dynamic_adjustments.push("STOP_LOSS_ATR".to_string());
+        }
+        if signal_result.long_signal_take_profit_price.is_some() {
+            dynamic_adjustments.push("TP_DYNAMIC_LONG".to_string());
+        }
+        if signal_result.short_signal_take_profit_price.is_some() {
+            dynamic_adjustments.push("TP_DYNAMIC_SHORT".to_string());
+        }
+        if signal_result
+            .counter_trend_pullback_take_profit_price
+            .is_some()
+        {
+            dynamic_adjustments.push("TP_COUNTER_TREND".to_string());
+        }
+
+        signal_result.dynamic_adjustments = dynamic_adjustments.clone();
+        signal_result.dynamic_config_snapshot = Some(
+            json!({
+                "kline_ts": last_data_item.ts,
+                "adjustments": dynamic_adjustments,
+                "range_tp": range_snapshot,
+                "stop_loss": {
+                    "signal_kline": signal_result.signal_kline_stop_loss_price,
+                    "atr": signal_result.atr_stop_loss_price,
+                    "source": signal_result.stop_loss_source.clone(),
+                },
+                "take_profit": {
+                    "long": signal_result.long_signal_take_profit_price,
+                    "short": signal_result.short_signal_take_profit_price,
+                    "atr_ratio": signal_result.atr_take_profit_ratio_price,
+                    "counter_trend": signal_result.counter_trend_pullback_take_profit_price,
+                }
+            })
+            .to_string(),
+        );
 
         // 可选：添加详细信息到结果中
         if self.emit_debug
@@ -1459,63 +1512,6 @@ impl VegasStrategy {
             .count()
     }
 
-    /// 检测“连续吞没前 N 根实体”的强吞没形态（近似 Three-Line Strike）
-    ///
-    /// - 当前K线实体必须完全覆盖前 N 根K线实体区间（按 open/close 计算实体）
-    /// - 且前 N 根K线方向必须与当前K线相反（避免杂乱K线误判）
-    fn detect_multi_body_engulfing(data_items: &[CandleItem], n: usize) -> (bool, bool) {
-        if n == 0 || data_items.len() < n + 1 {
-            return (false, false);
-        }
-
-        let current = data_items.last().expect("数据不能为空");
-        let current_is_bull = current.c() > current.o();
-        let current_is_bear = current.c() < current.o();
-
-        // Doji / 无方向不参与
-        if !current_is_bull && !current_is_bear {
-            return (false, false);
-        }
-
-        let (cur_low, cur_high) = {
-            let o = current.o();
-            let c = current.c();
-            if o < c {
-                (o, c)
-            } else {
-                (c, o)
-            }
-        };
-
-        let prev_slice = &data_items[data_items.len() - (n + 1)..data_items.len() - 1];
-        for prev in prev_slice {
-            // 方向必须相反
-            if current_is_bull && !(prev.c() < prev.o()) {
-                return (false, false);
-            }
-            if current_is_bear && !(prev.c() > prev.o()) {
-                return (false, false);
-            }
-
-            let (p_low, p_high) = {
-                let o = prev.o();
-                let c = prev.c();
-                if o < c {
-                    (o, c)
-                } else {
-                    (c, o)
-                }
-            };
-
-            // 当前实体需要完全覆盖前K线实体
-            if !(cur_low <= p_low && cur_high >= p_high) {
-                return (false, false);
-            }
-        }
-
-        (current_is_bull, current_is_bear)
-    }
-
     fn calculate_best_stop_loss_price(
         &self,
         last_data_item: &CandleItem,
@@ -1563,100 +1559,6 @@ mod tests {
             v: 1.0,
             confirm: 1,
         }
-    }
-
-    #[test]
-    fn detect_multi_body_engulfing_bearish_three_line_strike() {
-        // 三根阳线后，一根大阴线实体完全吞没前三根实体（上海 2026-01-19 04:00 的结构）
-        let data = vec![
-            CandleItem {
-                o: 3305.64,
-                h: 3324.58,
-                l: 3301.62,
-                c: 3320.62,
-                ts: 1,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 3320.62,
-                h: 3346.99,
-                l: 3312.50,
-                c: 3332.34,
-                ts: 2,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 3332.33,
-                h: 3368.80,
-                l: 3328.19,
-                c: 3345.82,
-                ts: 3,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 3345.82,
-                h: 3355.85,
-                l: 3277.18,
-                c: 3282.91,
-                ts: 4,
-                v: 1.0,
-                confirm: 1,
-            },
-        ];
-
-        let (bull, bear) = VegasStrategy::detect_multi_body_engulfing(&data, 3);
-        assert!(!bull);
-        assert!(bear);
-    }
-
-    #[test]
-    fn detect_multi_body_engulfing_bullish_three_line_strike() {
-        // 三根阴线后，一根大阳线实体完全吞没前三根实体
-        let data = vec![
-            CandleItem {
-                o: 100.0,
-                h: 101.0,
-                l: 94.0,
-                c: 95.0,
-                ts: 1,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 95.0,
-                h: 96.0,
-                l: 90.0,
-                c: 91.0,
-                ts: 2,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 91.0,
-                h: 92.0,
-                l: 88.0,
-                c: 89.0,
-                ts: 3,
-                v: 1.0,
-                confirm: 1,
-            },
-            CandleItem {
-                o: 88.0,
-                h: 106.0,
-                l: 87.0,
-                c: 105.0,
-                ts: 4,
-                v: 1.0,
-                confirm: 1,
-            },
-        ];
-
-        let (bull, bear) = VegasStrategy::detect_multi_body_engulfing(&data, 3);
-        assert!(bull);
-        assert!(!bear);
     }
 
     #[test]

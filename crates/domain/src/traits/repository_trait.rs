@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::entities::{
     BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats, Candle,
-    ExchangeApiConfig, Order, Position, StrategyConfig, SwapOrder,
+    DynamicConfigLog, ExchangeApiConfig, Order, Position, StrategyConfig, SwapOrder,
 };
 use crate::enums::Timeframe;
 use crate::PositionStatus;
@@ -124,6 +124,12 @@ pub trait BacktestLogRepository: Send + Sync {
     async fn insert_filtered_signals(
         &self,
         signals: &[crate::entities::FilteredSignalLog],
+    ) -> Result<u64>;
+
+    /// 批量写入动态配置调整记录
+    async fn insert_dynamic_config_logs(
+        &self,
+        logs: &[DynamicConfigLog],
     ) -> Result<u64>;
 }
 

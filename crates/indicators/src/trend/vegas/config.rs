@@ -305,8 +305,6 @@ pub struct MacdSignalConfig {
     pub slow_period: usize,
     /// 信号线周期（默认9）
     pub signal_period: usize,
-    /// 是否要求动量确认（柱状图连续递增/递减）
-    pub require_momentum_confirm: bool,
     /// 是否启用"接飞刀"保护 (默认 true)
     /// 当 MACD 与交易方向相反时，如果动量还在恶化则过滤；如果动量改善则放行（允许抄底）
     pub filter_falling_knife: bool,
@@ -319,7 +317,6 @@ impl Default for MacdSignalConfig {
             fast_period: 12,                 // 标准 12
             slow_period: 26,                 // 标准 26
             signal_period: 9,                // 标准 9
-            require_momentum_confirm: false, // 默认关闭，由 filter_falling_knife 接管主要的动量判断
             filter_falling_knife: true,
         }
     }
