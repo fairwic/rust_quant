@@ -307,6 +307,12 @@ pub struct TradePosition {
     //信号线最高最低价差
     pub signal_high_low_diff: f64,
 
+    /// 入场K线振幅比例 (high-low / low)
+    pub entry_kline_amplitude: Option<f64>,
+
+    /// 入场K线收盘位置 (0-1)
+    pub entry_kline_close_pos: Option<f64>,
+
     /// 逆势回调止盈价格
     /// 做多时：连续下跌K线起点最高价的回调位置
     /// 做空时：连续上涨K线起点最低价的回调位置

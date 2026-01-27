@@ -83,8 +83,13 @@ pub fn open_long_position(
         ..Default::default()
     };
     // 记录入场K线振幅，用于1R固定止损与保本触发
-    let k_range = (candle.h - candle.l).abs().max(signal.open_price * 0.001);
+    let raw_range = (candle.h - candle.l).abs();
+    let k_range = raw_range.max(signal.open_price * 0.001);
     temp_trade_position.signal_high_low_diff = k_range;
+    if raw_range > 0.0 && candle.l > 0.0 {
+        temp_trade_position.entry_kline_amplitude = Some(raw_range / candle.l.max(1e-9));
+        temp_trade_position.entry_kline_close_pos = Some((candle.c - candle.l) / raw_range);
+    }
     if risk_config
         .is_move_stop_open_price_when_touch_price
         .unwrap_or(false)
@@ -247,8 +252,13 @@ pub fn open_short_position(
         ..Default::default()
     };
     // 记录入场K线振幅，用于1R固定止损与保本触发
-    let k_range = (candle.h - candle.l).abs().max(signal.open_price * 0.001);
+    let raw_range = (candle.h - candle.l).abs();
+    let k_range = raw_range.max(signal.open_price * 0.001);
     temp_trade_position.signal_high_low_diff = k_range;
+    if raw_range > 0.0 && candle.l > 0.0 {
+        temp_trade_position.entry_kline_amplitude = Some(raw_range / candle.l.max(1e-9));
+        temp_trade_position.entry_kline_close_pos = Some((candle.c - candle.l) / raw_range);
+    }
     if risk_config
         .is_move_stop_open_price_when_touch_price
         .unwrap_or(false)
