@@ -234,6 +234,7 @@ impl VegasStrategy {
         };
 
         let mut conditions = Vec::with_capacity(10);
+        let mut valid_rsi_value: Option<f64> = None;
 
         // 优先判断成交量
         if let Some(volume_signal) = &self.volume_signal {
@@ -296,6 +297,8 @@ impl VegasStrategy {
                     return signal_result;
                 }
             };
+
+            valid_rsi_value = Some(current_rsi);
 
             conditions.push((
                 SignalType::Rsi,
@@ -753,20 +756,16 @@ impl VegasStrategy {
             // 这样回测/实盘可以在 backtest/position 层实现"反向信号仅平仓，不反手开仓"的行为。
             if is_trend_move_significant {
                 if major_bear && signal_result.should_buy.unwrap_or(false) {
-                    signal_result
-                        .filter_reasons
-                        .push(format!(
-                            "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
-                            swing_move_pct * 100.0
-                        ));
+                    signal_result.filter_reasons.push(format!(
+                        "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
+                        swing_move_pct * 100.0
+                    ));
                 }
                 if major_bull && signal_result.should_sell.unwrap_or(false) {
-                    signal_result
-                        .filter_reasons
-                        .push(format!(
-                            "FIB_STRICT_MAJOR_BULL_BLOCK_SHORT(swing_pct={:.2}%)",
-                            swing_move_pct * 100.0
-                        ));
+                    signal_result.filter_reasons.push(format!(
+                        "FIB_STRICT_MAJOR_BULL_BLOCK_SHORT(swing_pct={:.2}%)",
+                        swing_move_pct * 100.0
+                    ));
                 }
             }
         }
@@ -924,6 +923,7 @@ impl VegasStrategy {
 
         // ================================================================
         // 震荡过滤：震荡时降低止盈目标（不影响开仓，只影响 TP）
+        // 震荡区间: RSI 中性 + 缩量或 MACD 近零轴 -> 1:1 止盈
         // ================================================================
         if let Some(range_filter_signal) = &self.range_filter_signal {
             if range_filter_signal.is_open && self.bolling_signal.is_some() {
@@ -937,14 +937,48 @@ impl VegasStrategy {
                             .abs()
                             .max(last_data_item.c * 0.001);
                         let tp_ratio = range_filter_signal.tp_kline_ratio.max(0.0);
+                        let entry_price = signal_result.open_price.unwrap_or(last_data_item.c);
+                        let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
+                        let rsi_in_range = valid_rsi_value
+                            .map(|rsi| rsi >= 46.0 && rsi <= 54.0)
+                            .unwrap_or(false);
+                        let macd_near_zero = self.macd_signal.as_ref().map_or(false, |macd_cfg| {
+                            if !macd_cfg.is_open {
+                                return false;
+                            }
+                            let macd_val = &vegas_indicator_signal_values.macd_value;
+                            macd_val.macd_line.abs() <= entry_price * 0.001
+                        });
+                        let is_ultra_narrow =
+                            bb_width_ratio <= range_filter_signal.bb_width_threshold * 0.85;
+                        let is_indecision = last_data_item.is_small_body_and_big_up_down_shadow();
+                        let use_one_to_one = rsi_in_range
+                            && (volume_ratio < 1.05 || macd_near_zero || is_indecision)
+                            && is_ultra_narrow;
+
+                        let take_profit_diff = if use_one_to_one {
+                            let stop_price = signal_result
+                                .signal_kline_stop_loss_price
+                                .or(signal_result.atr_stop_loss_price);
+                            let diff = stop_price
+                                .map(|price| (entry_price - price).abs())
+                                .unwrap_or(0.0);
+                            if diff > 0.0 {
+                                diff
+                            } else {
+                                k_range * tp_ratio
+                            }
+                        } else {
+                            k_range * tp_ratio
+                        };
 
                         if signal_result.should_buy.unwrap_or(false) {
                             signal_result.long_signal_take_profit_price =
-                                Some(last_data_item.c + k_range * tp_ratio);
+                                Some(entry_price + take_profit_diff);
                         }
                         if signal_result.should_sell.unwrap_or(false) {
                             signal_result.short_signal_take_profit_price =
-                                Some(last_data_item.c - k_range * tp_ratio);
+                                Some(entry_price - take_profit_diff);
                         }
                     }
                 }
