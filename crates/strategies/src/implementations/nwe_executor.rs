@@ -155,6 +155,8 @@ impl StrategyExecutor for NweStrategyExecutor {
                 atr_take_profit_level_2: None,
                 atr_take_profit_level_3: None,
                 filter_reasons: vec![],
+                dynamic_adjustments: vec![],
+                dynamic_config_snapshot: None,
                 direction: rust_quant_domain::SignalDirection::None,
             });
         }

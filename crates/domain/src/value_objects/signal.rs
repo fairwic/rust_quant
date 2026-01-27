@@ -183,6 +183,11 @@ pub struct SignalResult {
 
     /// 过滤原因（如 MACD_FALLING_KNIFE, RSI_OVERBOUGHT 等）
     pub filter_reasons: Vec<String>,
+
+    /// 动态配置调整标签（如 RANGE_TP_ONE_TO_ONE）
+    pub dynamic_adjustments: Vec<String>,
+    /// 动态配置快照(JSON)
+    pub dynamic_config_snapshot: Option<String>,
 }
 
 impl SignalResult {
@@ -215,6 +220,8 @@ impl SignalResult {
             short_signal_take_profit_price: None,
             counter_trend_pullback_take_profit_price: None,
             filter_reasons: vec![],
+            dynamic_adjustments: vec![],
+            dynamic_config_snapshot: None,
         }
     }
 
@@ -279,6 +286,8 @@ impl SignalResult {
             short_signal_take_profit_price: None,
             counter_trend_pullback_take_profit_price: None,
             filter_reasons: vec![],
+            dynamic_adjustments: vec![],
+            dynamic_config_snapshot: None,
         }
     }
 }

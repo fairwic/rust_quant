@@ -279,6 +279,8 @@ mod tests {
             short_signal_take_profit_price: None,
             counter_trend_pullback_take_profit_price: None,
             filter_reasons: vec![],
+            dynamic_adjustments: vec![],
+            dynamic_config_snapshot: None,
             stop_loss_source: None,
         };
 

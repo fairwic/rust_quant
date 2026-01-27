@@ -2,7 +2,9 @@ use super::indicators::get_multi_indicator_values;
 use super::position::finalize_trading_state;
 use super::shadow_trading::ShadowTradeManager;
 use super::signal::deal_signal;
-use super::types::{BackTestResult, BasicRiskStrategyConfig, SignalResult, TradingState};
+use super::types::{
+    BackTestResult, BasicRiskStrategyConfig, DynamicConfigLog, SignalResult, TradingState,
+};
 use super::utils::calculate_win_rate;
 use crate::CandleItem;
 use rust_quant_indicators::trend::vegas::{IndicatorCombine, VegasIndicatorSignalValue};
@@ -53,6 +55,7 @@ pub fn run_back_test_generic<IC, IV>(
 
     // 使用 ShadowTradeManager 管理影子交易
     let mut shadow_manager = ShadowTradeManager::new();
+    let mut dynamic_config_logs: Vec<DynamicConfigLog> = Vec::new();
 
     for (i, candle) in candles_list.iter().enumerate() {
         // 计算自定义指标
@@ -73,6 +76,14 @@ pub fn run_back_test_generic<IC, IV>(
         let mut signal = strategy(current_slice, &mut multi_indicator_values);
         if i < 500 {
             continue;
+        }
+
+        if signal.dynamic_config_snapshot.is_some() || !signal.dynamic_adjustments.is_empty() {
+            dynamic_config_logs.push(DynamicConfigLog {
+                ts: candle.ts,
+                adjustments: signal.dynamic_adjustments.clone(),
+                config_snapshot: signal.dynamic_config_snapshot.clone(),
+            });
         }
 
         // 处理过滤信号记录（使用 ShadowTradeManager）
@@ -117,6 +128,7 @@ pub fn run_back_test_generic<IC, IV>(
         open_trades: trading_state.open_position_times,
         trade_records: trading_state.trade_records,
         filtered_signals: shadow_manager.into_filtered_signals(),
+        dynamic_config_logs,
     }
 }
 

@@ -27,6 +27,8 @@ pub fn convert_domain_signal(domain_signal: rust_quant_domain::SignalResult) -> 
         atr_take_profit_level_2: None,
         atr_take_profit_level_3: None,
         filter_reasons: domain_signal.filter_reasons,
+        dynamic_adjustments: domain_signal.dynamic_adjustments,
+        dynamic_config_snapshot: domain_signal.dynamic_config_snapshot,
         direction: domain_signal.direction,
     }
 }

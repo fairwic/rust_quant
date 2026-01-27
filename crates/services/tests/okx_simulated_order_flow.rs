@@ -87,6 +87,8 @@ fn build_signal(side: &str, open_price: f64) -> SignalResult {
         atr_take_profit_level_2: None,
         atr_take_profit_level_3: None,
         filter_reasons: vec![],
+        dynamic_adjustments: vec![],
+        dynamic_config_snapshot: None,
         stop_loss_source: None,
         direction,
     }

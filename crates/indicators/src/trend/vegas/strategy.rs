@@ -164,6 +164,8 @@ impl VegasStrategy {
                 position_time: None,
                 signal_kline: None,
                 filter_reasons: vec![],
+                dynamic_adjustments: vec![],
+                dynamic_config_snapshot: None,
             };
         }
 
@@ -198,6 +200,8 @@ impl VegasStrategy {
                     position_time: None,
                     signal_kline: None,
                     filter_reasons: vec![],
+                    dynamic_adjustments: vec![],
+                    dynamic_config_snapshot: None,
                 };
             }
         };
@@ -231,10 +235,14 @@ impl VegasStrategy {
             signal_kline: None,
             move_stop_open_price_when_touch_price: None,
             filter_reasons: vec![],
+            dynamic_adjustments: vec![],
+            dynamic_config_snapshot: None,
         };
 
         let mut conditions = Vec::with_capacity(10);
         let mut valid_rsi_value: Option<f64> = None;
+        let mut dynamic_adjustments: Vec<String> = Vec::new();
+        let mut range_snapshot: Option<serde_json::Value> = None;
 
         // 优先判断成交量
         if let Some(volume_signal) = &self.volume_signal {
@@ -294,6 +302,15 @@ impl VegasStrategy {
                     signal_result
                         .filter_reasons
                         .push("RSI_EXTREME_EVENT".to_string());
+                    dynamic_adjustments.push("RSI_EXTREME_EVENT".to_string());
+                    signal_result.dynamic_adjustments = dynamic_adjustments.clone();
+                    signal_result.dynamic_config_snapshot = Some(
+                        json!({
+                            "kline_ts": last_data_item.ts,
+                            "adjustments": dynamic_adjustments,
+                        })
+                        .to_string(),
+                    );
                     return signal_result;
                 }
             };
@@ -955,6 +972,22 @@ impl VegasStrategy {
                         let use_one_to_one = rsi_in_range
                             && (volume_ratio < 1.05 || macd_near_zero || is_indecision)
                             && is_ultra_narrow;
+                        range_snapshot = Some(json!({
+                            "enabled": true,
+                            "bb_width_ratio": bb_width_ratio,
+                            "bb_width_threshold": range_filter_signal.bb_width_threshold,
+                            "tp_ratio": tp_ratio,
+                            "use_one_to_one": use_one_to_one,
+                            "volume_ratio": volume_ratio,
+                            "rsi": valid_rsi_value,
+                            "macd_near_zero": macd_near_zero,
+                            "is_indecision": is_indecision,
+                        }));
+                        if use_one_to_one {
+                            dynamic_adjustments.push("RANGE_TP_ONE_TO_ONE".to_string());
+                        } else {
+                            dynamic_adjustments.push("RANGE_TP_RATIO".to_string());
+                        }
 
                         let take_profit_diff = if use_one_to_one {
                             let stop_price = signal_result
@@ -1042,6 +1075,46 @@ impl VegasStrategy {
                 }
             }
         }
+
+        if signal_result.signal_kline_stop_loss_price.is_some() {
+            dynamic_adjustments.push("STOP_LOSS_SIGNAL_KLINE".to_string());
+        }
+        if signal_result.atr_stop_loss_price.is_some() {
+            dynamic_adjustments.push("STOP_LOSS_ATR".to_string());
+        }
+        if signal_result.long_signal_take_profit_price.is_some() {
+            dynamic_adjustments.push("TP_DYNAMIC_LONG".to_string());
+        }
+        if signal_result.short_signal_take_profit_price.is_some() {
+            dynamic_adjustments.push("TP_DYNAMIC_SHORT".to_string());
+        }
+        if signal_result
+            .counter_trend_pullback_take_profit_price
+            .is_some()
+        {
+            dynamic_adjustments.push("TP_COUNTER_TREND".to_string());
+        }
+
+        signal_result.dynamic_adjustments = dynamic_adjustments.clone();
+        signal_result.dynamic_config_snapshot = Some(
+            json!({
+                "kline_ts": last_data_item.ts,
+                "adjustments": dynamic_adjustments,
+                "range_tp": range_snapshot,
+                "stop_loss": {
+                    "signal_kline": signal_result.signal_kline_stop_loss_price,
+                    "atr": signal_result.atr_stop_loss_price,
+                    "source": signal_result.stop_loss_source.clone(),
+                },
+                "take_profit": {
+                    "long": signal_result.long_signal_take_profit_price,
+                    "short": signal_result.short_signal_take_profit_price,
+                    "atr_ratio": signal_result.atr_take_profit_ratio_price,
+                    "counter_trend": signal_result.counter_trend_pullback_take_profit_price,
+                }
+            })
+            .to_string(),
+        );
 
         // 可选：添加详细信息到结果中
         if self.emit_debug

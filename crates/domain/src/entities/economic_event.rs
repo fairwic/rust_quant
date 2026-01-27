@@ -116,13 +116,25 @@ impl EconomicEvent {
         // 高重要性 USD 相关事件对加密货币影响最大
         let relevant_currencies = ["USD", "EUR", "CNY"];
         let relevant_events = [
-            "CPI", "PPI", "GDP", "NFP", "Unemployment", 
-            "Interest Rate", "FOMC", "Fed", "Powell",
-            "Retail Sales", "PCE", "ISM",
+            "CPI",
+            "PPI",
+            "GDP",
+            "NFP",
+            "Unemployment",
+            "Interest Rate",
+            "FOMC",
+            "Fed",
+            "Powell",
+            "Retail Sales",
+            "PCE",
+            "ISM",
         ];
-        
+
         // 货币相关
-        if relevant_currencies.iter().any(|c| self.currency.contains(c)) {
+        if relevant_currencies
+            .iter()
+            .any(|c| self.currency.contains(c))
+        {
             // 如果是高重要性，直接认为相关
             if self.importance >= 3 {
                 return true;
@@ -136,12 +148,17 @@ impl EconomicEvent {
     }
 
     /// 检查事件是否在指定时间窗口内
-    /// 
+    ///
     /// # Arguments
     /// * `current_time_ms` - 当前时间戳 (毫秒)
     /// * `window_before_ms` - 事件前多少毫秒开始生效
     /// * `window_after_ms` - 事件后多少毫秒仍生效
-    pub fn is_within_window(&self, current_time_ms: i64, window_before_ms: i64, window_after_ms: i64) -> bool {
+    pub fn is_within_window(
+        &self,
+        current_time_ms: i64,
+        window_before_ms: i64,
+        window_after_ms: i64,
+    ) -> bool {
         let start = self.event_time - window_before_ms;
         let end = self.event_time + window_after_ms;
         current_time_ms >= start && current_time_ms <= end
@@ -182,4 +199,3 @@ mod tests {
         assert!(event.is_crypto_relevant());
     }
 }
-
