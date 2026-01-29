@@ -28,6 +28,8 @@ pub struct ScannerService {
     telegram: Option<TelegramNotifier>,
     /// 通知冷却期: (symbol, timeframe) -> 上次通知时间
     notification_cooldown: HashMap<String, DateTime<Utc>>,
+    /// 是否为首次扫描 (跳过初始化时的 Entry 通知)
+    is_first_scan: bool,
 }
 
 /// 排名剧变通知阈值
@@ -64,6 +66,7 @@ impl ScannerService {
             last_top_150: HashSet::new(),
             telegram,
             notification_cooldown: HashMap::new(),
+            is_first_scan: true,
         })
     }
 
@@ -184,13 +187,17 @@ impl ScannerService {
         let rank_4h = self.get_historical_rank(Duration::hours(4));
         let rank_24h = self.get_historical_rank(Duration::hours(24));
 
-        // 4. 处理 Top 150 Entry/Exit
+        // 4. 处理 Top 150 Entry/Exit (首次扫描时跳过通知，避免刷屏)
         for symbol in &current_top_150 {
             if !self.last_top_150.contains(symbol) {
                 let rank = *current_ranks.get(symbol).unwrap_or(&0);
-                info!("🔔 [TOP 150 ENTRY] {}: Entered at rank {}", symbol, rank);
-                self.send_list_change_notification(symbol, true, rank, now)
-                    .await;
+                if self.is_first_scan {
+                    // 首次扫描只记录日志，不发送通知
+                } else {
+                    info!("🔔 [TOP 150 ENTRY] {}: Entered at rank {}", symbol, rank);
+                    self.send_list_change_notification(symbol, true, rank, now)
+                        .await;
+                }
             }
         }
         //跌出Top150
@@ -286,6 +293,12 @@ impl ScannerService {
         for snapshot in current_snapshots {
             self.last_snapshots
                 .insert(snapshot.symbol.clone(), snapshot);
+        }
+
+        // 首次扫描完成后，后续扫描可以正常发送通知
+        if self.is_first_scan {
+            info!("First scan completed, enabling notifications for subsequent scans");
+            self.is_first_scan = false;
         }
 
         Ok(vec![])
