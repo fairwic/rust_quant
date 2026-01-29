@@ -8,6 +8,8 @@ rust-version.workspace = true
 # Workspace 内部依赖
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
+rust-quant-domain.workspace = true
+
 
 # 外部依赖
 tokio.workspace = true
@@ -18,6 +20,8 @@ serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+rust_decimal.workspace = true
+
 
 # 网络通信
 reqwest.workspace = true

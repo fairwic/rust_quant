@@ -25,3 +25,6 @@ pub use order::{Order, OrderError};
 pub use position::{MarginMode, Position, PositionError, PositionStatus};
 pub use strategy_config::{BasicRiskConfig, StrategyConfig};
 pub use swap_order::SwapOrder;
+
+pub mod fund_flow;
+pub use fund_flow::{FundFlow, FundFlowAlert, FundFlowSide, MarketAnomaly, TickerSnapshot};

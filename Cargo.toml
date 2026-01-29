@@ -53,6 +53,7 @@ sqlx = { version = "0.7", features = [
     "chrono",
     "json",
     "migrate",
+    "rust_decimal",
 ] }
 
 # === 缓存 ===
@@ -91,6 +92,8 @@ ndarray = "0.15"
 linregress = "0.5.4"
 approx = "0.5.1"
 float-cmp = "0.10.0"
+rust_decimal = "1.33"
+
 
 # === 工具库 ===
 uuid = { version = "1.4.1", features = ["v4"] }
@@ -125,5 +128,6 @@ rust-quant-analytics = { path = "crates/analytics" }
 rust-quant-ai-analysis = { path = "crates/ai-analysis" }
 rust-quant-cli = { path = "crates/rust-quant-cli" }
 
-# [patch.crates-io]
-# okx = { path = "okx" }
+[patch.crates-io]
+okx = { path = "okx" }
+

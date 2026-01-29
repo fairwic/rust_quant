@@ -6,6 +6,7 @@ pub mod cache;
 pub mod exchanges;
 pub mod models;
 pub mod repositories;
+pub mod scanners;
 pub mod streams;
 
 // 重新导出常用类型

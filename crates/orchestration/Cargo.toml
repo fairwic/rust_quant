@@ -39,4 +39,11 @@ once_cell.workspace = true
 # 序列化
 serde_json.workspace = true
 futures.workspace = true
+sqlx.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
+dotenv.workspace = true
+rustls = { version = "0.23", features = ["ring"] }
+
 

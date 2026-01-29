@@ -23,6 +23,8 @@ async-trait.workspace = true
 
 # 数值计算 (仅用于业务规则验证)
 approx.workspace = true
+rust_decimal.workspace = true
+
 
 # 注意: domain 层不依赖任何框架
 # - 不依赖 sqlx (数据库)

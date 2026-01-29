@@ -23,7 +23,14 @@ pub use data_sync_service::DataSyncService;
 pub use economic_calendar_sync_service::{EconomicCalendarSyncService, EconomicEventQueryService};
 pub use public_data_service::PublicDataService;
 
+mod scanner_service;
+pub use scanner_service::ScannerService;
+
+mod flow_analyzer;
+pub use flow_analyzer::FlowAnalyzer;
+
 /// K线数据服务
+
 ///
 /// 协调 infrastructure 和业务逻辑，提供统一的K线数据访问接口
 ///
