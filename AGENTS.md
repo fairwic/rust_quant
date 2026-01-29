@@ -112,6 +112,12 @@ Usage notes:
 </skill>
 
 <skill>
+<name>vegas-backtest-runbook</name>
+<description>Runbook for iterating the Vegas strategy in this repo. Use when running Vegas 4H backtests, querying back_test_log metrics, updating strategy_config/risk_config (typically id=11), and consulting iteration history.</description>
+<location>project</location>
+</skill>
+
+<skill>
 <name>web-artifacts-builder</name>
 <description>Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts requiring state management, routing, or shadcn/ui components - not for simple single-file HTML/JSX artifacts.</description>
 <location>project</location>
