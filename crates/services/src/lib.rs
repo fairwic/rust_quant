@@ -45,6 +45,7 @@
 
 pub mod exchange;
 pub mod market;
+pub mod notification;
 pub mod risk;
 pub mod strategy;
 pub mod trading;

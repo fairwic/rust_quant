@@ -41,17 +41,17 @@ impl OkxScanner {
         }
 
         // 2. 获取现货 (SPOT)
-        match self.client.get_tickers("SPOT").await {
-            Ok(tickers) => {
-                debug!("Fetched {} SPOT tickers", tickers.len());
-                for t in tickers {
-                    if let Ok(snapshot) = self.map_to_snapshot(t) {
-                        all_tickers.push(snapshot);
-                    }
-                }
-            }
-            Err(e) => error!("Failed to fetch SPOT tickers: {:?}", e),
-        }
+        // match self.client.get_tickers("SPOT").await {
+        //     Ok(tickers) => {
+        //         debug!("Fetched {} SPOT tickers", tickers.len());
+        //         for t in tickers {
+        //             if let Ok(snapshot) = self.map_to_snapshot(t) {
+        //                 all_tickers.push(snapshot);
+        //             }
+        //         }
+        //     }
+        //     Err(e) => error!("Failed to fetch SPOT tickers: {:?}", e),
+        // }
 
         Ok(all_tickers)
     }

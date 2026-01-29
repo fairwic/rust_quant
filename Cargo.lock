@@ -2987,6 +2987,7 @@ dependencies = [
  "rust-quant-common",
  "rust-quant-core",
  "rust-quant-domain",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sqlx",

@@ -53,6 +53,11 @@ impl FundMonitorJob {
             self.interval_secs
         );
 
+        // 初始化：从数据库恢复状态
+        if let Err(e) = self.scanner_service.initialize().await {
+            error!("Failed to initialize scanner service: {:?}", e);
+        }
+
         loop {
             // 1. 执行扫描
             match self.scanner_service.scan_and_analyze().await {

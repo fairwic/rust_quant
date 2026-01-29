@@ -40,6 +40,9 @@ tracing.workspace = true
 # 时间处理
 chrono.workspace = true
 
+# 数值处理
+rust_decimal.workspace = true
+
 # 工具库
 once_cell.workspace = true
 
