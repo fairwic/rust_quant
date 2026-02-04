@@ -11,7 +11,7 @@
 //!
 //! ## 架构位置
 //!
-//! ```
+//! ```text
 //! orchestration (调度) → services (业务协调) → domain + infrastructure
 //! ```
 //!
