@@ -10,14 +10,14 @@ license.workspace = true
 # Workspace 内部依赖 - 应用服务层可以依赖所有业务包
 rust-quant-common.workspace = true
 rust-quant-core.workspace = true
-rust-quant-domain.workspace = true           # 使用领域模型
-rust-quant-infrastructure.workspace = true   # 使用基础设施
+rust-quant-domain.workspace = true         # 使用领域模型
+rust-quant-infrastructure.workspace = true # 使用基础设施
 rust-quant-market.workspace = true
 rust-quant-indicators.workspace = true
 rust-quant-strategies.workspace = true
 rust-quant-risk.workspace = true
 rust-quant-execution.workspace = true
-rust-quant-analytics.workspace = true        # 绩效分析
+rust-quant-analytics.workspace = true      # 绩效分析
 
 # 异步运行时
 tokio.workspace = true
@@ -26,6 +26,7 @@ async-trait.workspace = true
 # 错误处理
 anyhow.workspace = true
 thiserror.workspace = true
+reqwest.workspace = true
 
 # 序列化
 serde.workspace = true
