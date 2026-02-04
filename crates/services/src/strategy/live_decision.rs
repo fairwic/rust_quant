@@ -82,4 +82,41 @@ mod tests {
         assert!(outcome.opened_side.is_none());
         assert!(state.trade_position.is_none());
     }
+
+    #[test]
+    fn stop_loss_triggers_close() {
+        let mut state = TradingState::default();
+        state.trade_position = Some(rust_quant_strategies::framework::backtest::TradePosition {
+            trade_side: TradeSide::Long,
+            open_price: 100.0,
+            position_nums: 1.0,
+            signal_high_low_diff: 1.0,
+            ..Default::default()
+        });
+
+        let mut signal = SignalResult {
+            should_buy: false,
+            should_sell: false,
+            open_price: 100.0,
+            ..SignalResult::default()
+        };
+        let candle = CandleItem {
+            o: 100.0,
+            h: 101.0,
+            l: 97.0,
+            c: 98.0,
+            v: 1.0,
+            ts: 2,
+            confirm: 1,
+        };
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            ..Default::default()
+        };
+
+        let outcome = apply_live_decision(&mut state, &mut signal, &candle, risk);
+
+        assert!(outcome.closed);
+        assert!(state.trade_position.is_none());
+    }
 }
