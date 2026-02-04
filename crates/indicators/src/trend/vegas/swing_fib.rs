@@ -86,8 +86,8 @@ pub fn generate_fib_retracement_signal(
     }
 
     let retracement_ratio = calculate_retracement_ratio(current_price, swing_high, swing_low);
-    let in_zone = retracement_ratio >= config.fib_trigger_low
-        && retracement_ratio <= config.fib_trigger_high;
+    let in_zone =
+        retracement_ratio >= config.fib_trigger_low && retracement_ratio <= config.fib_trigger_high;
     let volume_confirmed = volume_ratio >= config.min_volume_ratio;
 
     out.swing_high = swing_high;
@@ -157,4 +157,3 @@ mod tests {
         assert!(ratio > 0.0 && ratio < 1.0);
     }
 }
-

@@ -156,13 +156,19 @@ mod tests {
         risk.is_move_stop_open_price_when_touch_price = Some(false);
 
         let mut legacy = StatefulStrategy::default();
-        let legacy_result =
-            run_indicator_strategy_backtest("TEST", &mut legacy, &candles, risk);
+        let legacy_result = run_indicator_strategy_backtest("TEST", &mut legacy, &candles, risk);
 
-        let pipeline_result =
-            run_indicator_strategy_backtest_pipeline("TEST", StatefulStrategy::default(), &candles, risk);
+        let pipeline_result = run_indicator_strategy_backtest_pipeline(
+            "TEST",
+            StatefulStrategy::default(),
+            &candles,
+            risk,
+        );
 
-        assert_eq!(legacy_result.trade_records.len(), pipeline_result.trade_records.len());
+        assert_eq!(
+            legacy_result.trade_records.len(),
+            pipeline_result.trade_records.len()
+        );
         assert!((legacy_result.funds - pipeline_result.funds).abs() < 1e-9);
         assert!((legacy_result.win_rate - pipeline_result.win_rate).abs() < 1e-12);
     }

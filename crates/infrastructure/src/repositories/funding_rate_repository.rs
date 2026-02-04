@@ -37,16 +37,37 @@ impl FundingRateEntity {
             funding_rate: f64::from_str(&self.funding_rate).unwrap_or(0.0),
             funding_time: self.funding_time,
             method: self.method.clone(),
-            next_funding_rate: self.next_funding_rate.as_ref().map(|v| f64::from_str(v).unwrap_or(0.0)),
+            next_funding_rate: self
+                .next_funding_rate
+                .as_ref()
+                .map(|v| f64::from_str(v).unwrap_or(0.0)),
             next_funding_time: self.next_funding_time,
-            min_funding_rate: self.min_funding_rate.as_ref().map(|v| f64::from_str(v).unwrap_or(0.0)),
-            max_funding_rate: self.max_funding_rate.as_ref().map(|v| f64::from_str(v).unwrap_or(0.0)),
-            sett_funding_rate: self.sett_funding_rate.as_ref().map(|v| f64::from_str(v).unwrap_or(0.0)),
+            min_funding_rate: self
+                .min_funding_rate
+                .as_ref()
+                .map(|v| f64::from_str(v).unwrap_or(0.0)),
+            max_funding_rate: self
+                .max_funding_rate
+                .as_ref()
+                .map(|v| f64::from_str(v).unwrap_or(0.0)),
+            sett_funding_rate: self
+                .sett_funding_rate
+                .as_ref()
+                .map(|v| f64::from_str(v).unwrap_or(0.0)),
             sett_state: self.sett_state.clone(),
-            premium: self.premium.as_ref().map(|v| f64::from_str(v).unwrap_or(0.0)),
+            premium: self
+                .premium
+                .as_ref()
+                .map(|v| f64::from_str(v).unwrap_or(0.0)),
             ts: self.ts,
-            realized_rate: self.realized_rate.as_ref().map(|v| f64::from_str(v).unwrap_or(0.0)),
-            interest_rate: self.interest_rate.as_ref().map(|v| f64::from_str(v).unwrap_or(0.0)),
+            realized_rate: self
+                .realized_rate
+                .as_ref()
+                .map(|v| f64::from_str(v).unwrap_or(0.0)),
+            interest_rate: self
+                .interest_rate
+                .as_ref()
+                .map(|v| f64::from_str(v).unwrap_or(0.0)),
         })
     }
 }

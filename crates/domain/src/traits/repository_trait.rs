@@ -127,10 +127,7 @@ pub trait BacktestLogRepository: Send + Sync {
     ) -> Result<u64>;
 
     /// 批量写入动态配置调整记录
-    async fn insert_dynamic_config_logs(
-        &self,
-        logs: &[DynamicConfigLog],
-    ) -> Result<u64>;
+    async fn insert_dynamic_config_logs(&self, logs: &[DynamicConfigLog]) -> Result<u64>;
 }
 
 /// 交易所API配置仓储接口

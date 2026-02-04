@@ -313,10 +313,10 @@ pub struct MacdSignalConfig {
 impl Default for MacdSignalConfig {
     fn default() -> Self {
         Self {
-            is_open: true,                   // 默认开启，使用新的智能过滤逻辑
-            fast_period: 12,                 // 标准 12
-            slow_period: 26,                 // 标准 26
-            signal_period: 9,                // 标准 9
+            is_open: true,    // 默认开启，使用新的智能过滤逻辑
+            fast_period: 12,  // 标准 12
+            slow_period: 26,  // 标准 26
+            signal_period: 9, // 标准 9
             filter_falling_knife: true,
         }
     }

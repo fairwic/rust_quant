@@ -38,7 +38,7 @@ impl EconomicCalendarSyncService {
     }
 
     /// 执行完整同步（增量 + 历史回填）
-    /// 
+    ///
     /// 只同步 importance=3 的高重要性事件
     pub async fn sync_all(&self) -> Result<()> {
         info!("📅 开始经济日历同步 (仅高重要性事件)");
@@ -90,7 +90,7 @@ impl EconomicCalendarSyncService {
     }
 
     /// 历史回填：获取历史高重要性经济日历数据 (importance=3)
-    /// 
+    ///
     /// OKX API 分页惯例：
     /// - after: 返回 date < after 的数据（更旧）-> 向后翻页
     /// - before: 返回 date > before 的数据（更新）-> 向前翻页
@@ -189,7 +189,9 @@ impl EconomicCalendarSyncService {
             }
         }
 
-        Err(anyhow!(last_error.unwrap_or_else(|| "API 调用失败".to_string())))
+        Err(anyhow!(
+            last_error.unwrap_or_else(|| "API 调用失败".to_string())
+        ))
     }
 
     /// 同步指定区域的经济日历
@@ -309,4 +311,3 @@ impl EconomicEventQueryService {
             .await
     }
 }
-

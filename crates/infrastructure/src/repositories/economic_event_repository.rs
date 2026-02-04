@@ -71,14 +71,34 @@ impl SqlxEconomicEventRepository {
             category: dto.category.clone(),
             event: dto.event.clone(),
             ref_date: dto.ref_date.clone(),
-            actual: if dto.actual.is_empty() { None } else { Some(dto.actual.clone()) },
-            previous: if dto.previous.is_empty() { None } else { Some(dto.previous.clone()) },
-            forecast: if dto.forecast.is_empty() { None } else { Some(dto.forecast.clone()) },
+            actual: if dto.actual.is_empty() {
+                None
+            } else {
+                Some(dto.actual.clone())
+            },
+            previous: if dto.previous.is_empty() {
+                None
+            } else {
+                Some(dto.previous.clone())
+            },
+            forecast: if dto.forecast.is_empty() {
+                None
+            } else {
+                Some(dto.forecast.clone())
+            },
             importance: dto.importance.parse().unwrap_or(1),
             updated_time: dto.u_time.parse().unwrap_or(0),
-            prev_initial: if dto.prev_initial.is_empty() { None } else { Some(dto.prev_initial.clone()) },
+            prev_initial: if dto.prev_initial.is_empty() {
+                None
+            } else {
+                Some(dto.prev_initial.clone())
+            },
             currency: dto.ccy.clone(),
-            unit: if dto.unit.is_empty() { None } else { Some(dto.unit.clone()) },
+            unit: if dto.unit.is_empty() {
+                None
+            } else {
+                Some(dto.unit.clone())
+            },
             created_at: None,
         }
     }
@@ -244,7 +264,7 @@ impl EconomicEventRepository for SqlxEconomicEventRepository {
         // 如果当前是 event_time - y，那么 y < window_before 时事件即将发生
         let start = current_time - window_after_ms;
         let end = current_time + window_before_ms;
-        
+
         let query = "
             SELECT * FROM economic_events 
             WHERE event_time >= ? AND event_time <= ? AND importance >= ?
@@ -265,11 +285,7 @@ impl EconomicEventRepository for SqlxEconomicEventRepository {
         Ok(entities.into_iter().map(|e| e.to_domain()).collect())
     }
 
-    async fn count_by_importance(
-        &self,
-        start_time: i64,
-        end_time: i64,
-    ) -> Result<Vec<(i32, i64)>> {
+    async fn count_by_importance(&self, start_time: i64, end_time: i64) -> Result<Vec<(i32, i64)>> {
         let query = "
             SELECT importance, COUNT(*) as cnt 
             FROM economic_events 
@@ -288,4 +304,3 @@ impl EconomicEventRepository for SqlxEconomicEventRepository {
         Ok(rows)
     }
 }
-

@@ -2,10 +2,10 @@
 //!
 //! 集中管理回测过程中的所有状态，避免状态在函数间隐式传递
 
+use crate::framework::backtest::shadow_trading::ShadowTradeManager;
 use crate::framework::backtest::types::{
     BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState,
 };
-use crate::framework::backtest::shadow_trading::ShadowTradeManager;
 use crate::CandleItem;
 
 /// 回测Pipeline上下文

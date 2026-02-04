@@ -22,14 +22,17 @@ pub struct StrategyDataService;
 
 impl StrategyDataService {
     fn read_env_usize(key: &str) -> Option<usize> {
-        std::env::var(key).ok().and_then(|v| v.parse::<usize>().ok())
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
     }
 
     fn determine_warmup_limit(parameters: &serde_json::Value) -> usize {
         const DEFAULT_WARMUP_LIMIT: usize = 500;
         const DEFAULT_WARMUP_LIMIT_MAX: usize = 10_000;
 
-        let base_limit = Self::read_env_usize("STRATEGY_WARMUP_LIMIT").unwrap_or(DEFAULT_WARMUP_LIMIT);
+        let base_limit =
+            Self::read_env_usize("STRATEGY_WARMUP_LIMIT").unwrap_or(DEFAULT_WARMUP_LIMIT);
         let max_limit =
             Self::read_env_usize("STRATEGY_WARMUP_LIMIT_MAX").unwrap_or(DEFAULT_WARMUP_LIMIT_MAX);
 

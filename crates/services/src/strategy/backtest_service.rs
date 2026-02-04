@@ -203,7 +203,10 @@ impl BacktestService {
             })
             .collect();
 
-        let count = self.repository.insert_dynamic_config_logs(&entities).await?;
+        let count = self
+            .repository
+            .insert_dynamic_config_logs(&entities)
+            .await?;
         info!(
             "动态配置记录保存成功: back_test_id={}, count={}",
             back_test_id, count

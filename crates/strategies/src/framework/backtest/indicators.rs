@@ -192,10 +192,7 @@ pub fn get_multi_indicator_values(
             market_structure_indicator.next(data_item);
     }
     if ms_start.elapsed().as_millis() > 10 {
-        info!(
-            duration_ms = ms_start.elapsed().as_millis(),
-            "计算市场结构"
-        );
+        info!(duration_ms = ms_start.elapsed().as_millis(), "计算市场结构");
     }
 
     vegas_indicator_signal_value

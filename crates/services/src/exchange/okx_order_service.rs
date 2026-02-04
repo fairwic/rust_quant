@@ -47,7 +47,8 @@ impl OkxOrderService {
             if config.is_sandbox { "1" } else { "0" },
         );
 
-        let mut client = OkxClient::new(credentials).map_err(|e| anyhow!("创建OKX客户端失败: {}", e))?;
+        let mut client =
+            OkxClient::new(credentials).map_err(|e| anyhow!("创建OKX客户端失败: {}", e))?;
         Self::apply_request_expiration_override(&mut client);
         Ok(client)
     }

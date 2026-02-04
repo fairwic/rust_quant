@@ -14,8 +14,8 @@ use super::executor_common::{
 use crate::cache::arc_vegas_indicator_values::{
     get_hash_key, get_indicator_manager, set_strategy_indicator_values,
 };
-use crate::framework::config::strategy_config::StrategyConfig;
 use crate::framework::backtest::conversions::convert_domain_signal;
+use crate::framework::config::strategy_config::StrategyConfig;
 use crate::framework::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use crate::strategy_common::{get_multi_indicator_values, parse_candle_to_data_item, SignalResult};
 use crate::StrategyType;
@@ -150,7 +150,7 @@ impl StrategyExecutor for VegasStrategyExecutor {
                 single_value: None,
                 single_result: None,
                 signal_kline_stop_loss_price: None,
-            stop_loss_source: None,
+                stop_loss_source: None,
                 counter_trend_pullback_take_profit_price: None,
                 is_ema_short_trend: None,
                 is_ema_long_trend: None,

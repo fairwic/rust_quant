@@ -577,7 +577,7 @@ mod tests {
     fn market_structure_vote_applies_even_with_zero_weight() {
         let weights = SignalWeightsConfig {
             weights: vec![
-                (SignalType::VolumeTrend, 2.0),      // 提供足够的总分，触发阈值
+                (SignalType::VolumeTrend, 2.0),     // 提供足够的总分，触发阈值
                 (SignalType::MarketStructure, 0.0), // 仅方向投票（不贡献权重）
             ],
             min_total_weight: 2.0,

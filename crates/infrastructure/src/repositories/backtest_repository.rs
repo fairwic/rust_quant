@@ -3,8 +3,7 @@ use async_trait::async_trait;
 use sqlx::{mysql::MySqlQueryResult, MySql, Pool, QueryBuilder};
 
 use rust_quant_domain::entities::{
-    BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats,
-    DynamicConfigLog,
+    BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats, DynamicConfigLog,
 };
 use rust_quant_domain::traits::BacktestLogRepository;
 
@@ -238,10 +237,7 @@ impl BacktestLogRepository for SqlxBacktestRepository {
             return Ok(0);
         }
 
-        tracing::info!(
-            "insert_dynamic_config_logs inserting {} logs",
-            logs.len()
-        );
+        tracing::info!("insert_dynamic_config_logs inserting {} logs", logs.len());
 
         sqlx::query(
             r#"

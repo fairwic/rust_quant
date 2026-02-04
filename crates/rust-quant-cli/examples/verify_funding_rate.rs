@@ -1,10 +1,10 @@
 use anyhow::Result;
 use dotenv::dotenv;
 
+use okx::api::api_trait::OkxApiTrait;
+use okx::api::public_data::OkxPublicData;
 use rust_quant_domain::traits::funding_rate_repository::FundingRateRepository;
 use rust_quant_infrastructure::repositories::funding_rate_repository::SqlxFundingRateRepository;
-use okx::api::public_data::OkxPublicData;
-use okx::api::api_trait::OkxApiTrait;
 use std::env;
 use tracing::info;
 
@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
     // 1. 初始化环境和日志
     dotenv().ok();
     env_logger::init();
-    
+
     info!("开始验证资金费率功能...");
 
     // 2. 连接数据库
@@ -55,20 +55,30 @@ CREATE TABLE `funding_rates` (
     // 4. 调用 FundingRateJob 执行同步
     info!("调用 FundingRateJob 执行同步 (BTC-USDT-SWAP)...");
     let inst_id = "BTC-USDT-SWAP";
-    
+
     // 需要 mock 环境变量 or ensure .env is loaded
-    match rust_quant_orchestration::workflow::funding_rate_job::FundingRateJob::sync_funding_rates(&[inst_id.to_string()]).await {
+    match rust_quant_orchestration::workflow::funding_rate_job::FundingRateJob::sync_funding_rates(
+        &[inst_id.to_string()],
+    )
+    .await
+    {
         Ok(_) => info!("同步任务执行成功"),
-        Err(e) => info!("同步任务执行返回 (可能是网络问题，但在验证脚本中这是预期的调用): {}", e),
+        Err(e) => info!(
+            "同步任务执行返回 (可能是网络问题，但在验证脚本中这是预期的调用): {}",
+            e
+        ),
     }
 
     // 5. 验证数据保存
     info!("验证数据库数据...");
     let repo = SqlxFundingRateRepository::new(db_pool.clone());
     let saved_rate = repo.find_latest(inst_id).await?;
-    
+
     if let Some(saved) = saved_rate {
-        info!("从数据库读取最新记录: id={:?}, inst_id={}, funding_rate={}, time={}", saved.id, saved.inst_id, saved.funding_rate, saved.funding_time);
+        info!(
+            "从数据库读取最新记录: id={:?}, inst_id={}, funding_rate={}, time={}",
+            saved.id, saved.inst_id, saved.funding_rate, saved.funding_time
+        );
         assert!(saved.id.is_some(), "ID generated successfully");
         assert_eq!(saved.inst_id, inst_id);
         info!("验证通过！");
