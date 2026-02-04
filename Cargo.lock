@@ -3091,6 +3091,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "dashmap",
  "dotenv",
  "okx",
  "once_cell",

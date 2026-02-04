@@ -5,17 +5,21 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use dashmap::DashMap;
 use tracing::{error, info, warn};
 
 use rust_quant_common::CandleItem;
 use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
+use rust_quant_strategies::framework::backtest::{BasicRiskStrategyConfig, TradingState};
+use rust_quant_strategies::framework::types::TradeSide;
 use rust_quant_strategies::strategy_common::SignalResult;
 use tokio::sync::mpsc;
 
 use rust_quant_domain::enums::PositionSide as DomainPositionSide;
 use rust_quant_risk::realtime::{PositionSnapshot, RealtimeRiskEvent, StrategyRiskConfigSnapshot};
+use super::live_decision::apply_live_decision;
 
 /// 策略执行服务
 ///
@@ -36,6 +40,9 @@ pub struct StrategyExecutionService {
 
     /// 实盘实时风控事件通道（可选）
     realtime_risk_tx: Option<mpsc::Sender<RealtimeRiskEvent>>,
+
+    /// 实盘交易状态（每个策略配置一份）
+    live_states: DashMap<i64, TradingState>,
 }
 
 impl StrategyExecutionService {
@@ -44,6 +51,7 @@ impl StrategyExecutionService {
         Self {
             swap_order_repository,
             realtime_risk_tx: None,
+            live_states: DashMap::new(),
         }
     }
 
@@ -219,7 +227,7 @@ impl StrategyExecutionService {
         // execute() 需要所有权；后续止损计算也需要引用，因此这里保留一份副本
         let snap_item_for_execute = snap_item.clone();
 
-        let signal = strategy_executor
+        let mut signal = strategy_executor
             .execute(inst_id, period, config, snap_item_for_execute)
             .await
             .map_err(|e| {
@@ -229,32 +237,33 @@ impl StrategyExecutionService {
 
         info!("策略分析完成");
 
-        // 4. 检查信号有效性
-        let has_signal = signal.should_buy || signal.should_sell;
+        let raw_has_signal = signal.should_buy || signal.should_sell;
 
-        if !has_signal {
-            info!("signal: {:?}", signal);
-            info!(
-                "无交易信号，跳过下单 - 策略类型：{:?}, 交易周期：{}",
-                config.strategy_type, period
+        if raw_has_signal {
+            info!("signal: {:?}", serde_json::to_string(&signal).unwrap());
+            // 5. 记录信号
+            warn!(
+                "{:?} 策略信号！inst_id={}, period={}, should_buy={:?}, should_sell={:?}, ts={:?}",
+                config.strategy_type,
+                inst_id,
+                period,
+                signal.should_buy,
+                signal.should_sell,
+                signal.ts
             );
-            return Ok(signal);
+
+            // 6. 异步记录信号日志（不阻塞下单）
+            self.save_signal_log_async(inst_id, period, &signal, config);
         }
-
-        info!("signal: {:?}", serde_json::to_string(&signal).unwrap());
-        // 5. 记录信号
-        warn!(
-            "{:?} 策略信号！inst_id={}, period={}, should_buy={:?}, should_sell={:?}, ts={:?}",
-            config.strategy_type, inst_id, period, signal.should_buy, signal.should_sell, signal.ts
-        );
-
-        // 6. 异步记录信号日志（不阻塞下单）
-        self.save_signal_log_async(inst_id, period, &signal, config);
 
         // 7. 解析风险配置
         let risk_config: rust_quant_domain::BasicRiskConfig =
             serde_json::from_value(config.risk_config.clone())
                 .map_err(|e| anyhow!("解析风险配置失败: {}", e))?;
+
+        let decision_risk: BasicRiskStrategyConfig =
+            serde_json::from_value(config.risk_config.clone())
+                .map_err(|e| anyhow!("解析风控配置失败: {}", e))?;
 
         info!("风险配置: risk_config:{:#?}", risk_config);
 
@@ -270,41 +279,162 @@ impl StrategyExecutionService {
             });
         }
 
-        // 7.2 经济事件窗口检查（高重要性事件前后暂停追涨追跌）
-        // 通过环境变量控制是否启用：ECONOMIC_EVENT_FILTER=1
-        let econ_filter_enabled =
-            std::env::var("ECONOMIC_EVENT_FILTER").unwrap_or_else(|_| "0".to_string()) == "1";
-        if econ_filter_enabled {
-            if let Ok(should_wait) = self.check_economic_event_window().await {
-                if should_wait {
-                    warn!(
-                        "⚠️ 当前处于高重要性经济事件窗口，跳过下单: inst_id={}, period={}, 等待回调后再入场",
-                        inst_id, period
-                    );
-                    return Ok(signal);
-                }
-            }
-        }
+        let Some(trigger_candle) = snap_item.as_ref() else {
+            warn!(
+                "⚠️ 无K线快照，跳过执行: inst_id={}, period={}, strategy={:?}",
+                inst_id, period, config.strategy_type
+            );
+            return Ok(signal);
+        };
 
-        // 8. 执行下单
-        if let Err(e) = self
-            .execute_order_internal(
+        let outcome = self
+            .handle_live_decision(
                 inst_id,
                 period,
-                &signal,
+                config,
+                &mut signal,
+                trigger_candle,
+                decision_risk,
                 &risk_config,
-                config.id,
-                config.strategy_type.as_str(),
-                snap_item.as_ref(),
             )
-            .await
-        {
-            error!("❌ {:?} 策略下单失败: {}", config.strategy_type, e);
-            return Err(e);
+            .await?;
+
+        if !raw_has_signal && !outcome.closed && outcome.opened_side.is_none() {
+            info!(
+                "无交易信号，跳过下单 - 策略类型：{:?}, 交易周期：{}",
+                config.strategy_type, period
+            );
+            return Ok(signal);
         }
 
         info!("✅ {:?} 策略执行完成", config.strategy_type);
         Ok(signal)
+    }
+
+    async fn handle_live_decision(
+        &self,
+        inst_id: &str,
+        period: &str,
+        config: &StrategyConfig,
+        signal: &mut SignalResult,
+        trigger_candle: &CandleItem,
+        decision_risk: BasicRiskStrategyConfig,
+        order_risk: &rust_quant_domain::BasicRiskConfig,
+    ) -> Result<super::LiveDecisionOutcome> {
+        let mut state = self
+            .live_states
+            .get(&config.id)
+            .map(|s| s.clone())
+            .unwrap_or_default();
+
+        let outcome = apply_live_decision(&mut state, signal, trigger_candle, decision_risk);
+        self.live_states.insert(config.id, state);
+
+        if outcome.closed {
+            if let Some(side) = outcome.closed_side {
+                self.close_position_internal(inst_id, period, config.id, side)
+                    .await?;
+            }
+        }
+
+        if outcome.opened_side.is_some() {
+            // 经济事件窗口检查（高重要性事件前后暂停追涨追跌）
+            // 通过环境变量控制是否启用：ECONOMIC_EVENT_FILTER=1
+            let econ_filter_enabled =
+                std::env::var("ECONOMIC_EVENT_FILTER").unwrap_or_else(|_| "0".to_string())
+                    == "1";
+            if econ_filter_enabled {
+                if let Ok(should_wait) = self.check_economic_event_window().await {
+                    if should_wait {
+                        warn!(
+                            "⚠️ 当前处于高重要性经济事件窗口，跳过下单: inst_id={}, period={}, 等待回调后再入场",
+                            inst_id, period
+                        );
+                        return Ok(outcome);
+                    }
+                }
+            }
+
+            if let Err(e) = self
+                .execute_order_internal(
+                    inst_id,
+                    period,
+                    signal,
+                    order_risk,
+                    config.id,
+                    config.strategy_type.as_str(),
+                    Some(trigger_candle),
+                )
+                .await
+            {
+                error!("❌ {:?} 策略下单失败: {}", config.strategy_type, e);
+                return Err(e);
+            }
+        }
+
+        Ok(outcome)
+    }
+
+    async fn close_position_internal(
+        &self,
+        inst_id: &str,
+        period: &str,
+        config_id: i64,
+        close_side: TradeSide,
+    ) -> Result<()> {
+        use crate::exchange::create_exchange_api_service;
+        use crate::exchange::OkxOrderService;
+
+        let api_service = create_exchange_api_service();
+        let api_config = api_service
+            .get_first_api_config(config_id as i32)
+            .await
+            .map_err(|e| {
+                error!("获取API配置失败: config_id={}, error={}", config_id, e);
+                anyhow!("获取API配置失败: {}", e)
+            })?;
+
+        let okx_service = OkxOrderService;
+        let positions = okx_service
+            .get_positions(&api_config, Some("SWAP"), Some(inst_id))
+            .await
+            .map_err(|e| {
+                error!("获取账户数据失败: {}", e);
+                anyhow!("获取账户数据失败: {}", e)
+            })?;
+
+        let close_pos_side_str = match close_side {
+            TradeSide::Long => "long",
+            TradeSide::Short => "short",
+        };
+
+        if let Some(p) = positions.iter().find(|p| {
+            p.inst_id == inst_id
+                && p.pos_side.eq_ignore_ascii_case(close_pos_side_str)
+                && p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12
+        }) {
+            let mgn_mode = p.mgn_mode.clone();
+            let close_pos_side = if close_pos_side_str == "long" {
+                okx::dto::PositionSide::Long
+            } else {
+                okx::dto::PositionSide::Short
+            };
+            warn!(
+                "⚠️ 信号平仓: inst_id={}, period={}, close_pos_side={:?}, mgn_mode={}",
+                inst_id, period, close_pos_side, mgn_mode
+            );
+            okx_service
+                .close_position(&api_config, inst_id, close_pos_side, &mgn_mode)
+                .await
+                .map_err(|e| anyhow!("平仓失败: {}", e))?;
+        } else {
+            warn!(
+                "⚠️ 未找到可平仓位: inst_id={}, period={}, close_side={:?}",
+                inst_id, period, close_side
+            );
+        }
+
+        Ok(())
     }
 
     /// 批量执行多个策略
@@ -1018,6 +1148,71 @@ mod tests {
         assert!(service.should_execute(&config, None, 1000));
         assert!(!service.should_execute(&config, Some(1000), 1500));
         assert!(service.should_execute(&config, Some(1000), 5000));
+    }
+
+    #[tokio::test]
+    async fn execution_respects_filter_block() {
+        use chrono::Utc;
+        use rust_quant_domain::{StrategyStatus, StrategyType, Timeframe};
+        use rust_quant_strategies::framework::backtest::BasicRiskStrategyConfig;
+
+        let repo = Arc::new(MockSwapOrderRepository::new());
+        let service = StrategyExecutionService::new(repo.clone());
+
+        let config = StrategyConfig {
+            id: 42,
+            strategy_type: StrategyType::Vegas,
+            symbol: "BTC-USDT".to_string(),
+            timeframe: Timeframe::H1,
+            status: StrategyStatus::Running,
+            parameters: serde_json::json!({}),
+            risk_config: serde_json::json!({ "max_loss_percent": 0.02 }),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            backtest_start: None,
+            backtest_end: None,
+            description: None,
+        };
+
+        let mut signal = create_buy_signal(100.0, 1);
+        signal
+            .filter_reasons
+            .push("FIB_STRICT_MAJOR_BEAR_BLOCK_LONG".to_string());
+
+        let candle = CandleItem {
+            o: 100.0,
+            h: 101.0,
+            l: 99.0,
+            c: 100.0,
+            v: 1.0,
+            ts: 1,
+            confirm: 1,
+        };
+
+        let decision_risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            ..Default::default()
+        };
+        let order_risk = rust_quant_domain::BasicRiskConfig {
+            max_loss_percent: 0.02,
+            ..Default::default()
+        };
+
+        let outcome = service
+            .handle_live_decision(
+                &config.symbol,
+                config.timeframe.as_str(),
+                &config,
+                &mut signal,
+                &candle,
+                decision_risk,
+                &order_risk,
+            )
+            .await
+            .expect("handle_live_decision should succeed");
+
+        assert!(outcome.opened_side.is_none());
+        assert!(repo.get_saved_orders().is_empty());
     }
 
     // ========== 下单逻辑单元测试 ==========

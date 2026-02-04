@@ -38,6 +38,9 @@ tracing.workspace = true
 # 时间
 chrono.workspace = true
 
+# 并发容器
+dashmap.workspace = true
+
 # 数据库
 sqlx.workspace = true
 
