@@ -5,7 +5,7 @@ use tokio::time::Instant;
 use tracing::{error, info, warn};
 
 use crate::backtest::executor::BacktestExecutor;
-use crate::workflow::job_param_generator::{NweParamGenerator, ParamGenerator};
+use crate::workflow::job_param_generator::{NweParamGenerator, ParamGenerator, ParamMergeBuilder};
 use crate::workflow::progress_manager::{
     NweRandomStrategyConfig, RandomStrategyConfig, StrategyProgressManager,
 };
@@ -20,6 +20,7 @@ use rust_quant_infrastructure::repositories::{
 use rust_quant_services::market::CandleService;
 use rust_quant_services::strategy::{BacktestService, StrategyConfigService};
 use rust_quant_strategies::implementations::nwe_strategy::NweStrategy;
+use rust_quant_market::models::{SelectTime, TimeDirect};
 
 /// 回测运行器
 ///
@@ -176,7 +177,7 @@ impl BacktestRunner {
 
         let arc_candle_data = self
             .executor
-            .load_and_convert_candle_data(inst_id, period, config.candle_limit)
+            .load_and_convert_candle_data(inst_id, period, config.candle_limit, None)
             .await?;
 
         let random_config = build_default_nwe_random_config(config.max_concurrent);
@@ -296,7 +297,7 @@ impl BacktestRunner {
 
         let arc_candle_data = self
             .executor
-            .load_and_convert_candle_data(inst_id, period, config.candle_limit)
+            .load_and_convert_candle_data(inst_id, period, config.candle_limit, None)
             .await?;
 
         let pairs = get_nwe_strategy_config_from_db(&self.config_service, inst_id, period).await?;
@@ -374,7 +375,7 @@ impl BacktestRunner {
 
         let arc_candle_data = self
             .executor
-            .load_and_convert_candle_data(inst_id, period, config.candle_limit)
+            .load_and_convert_candle_data(inst_id, period, config.candle_limit, None)
             .await?;
 
         let random_config = RandomStrategyConfig::default();
@@ -481,11 +482,6 @@ impl BacktestRunner {
             inst_id, period
         );
 
-        let arc_candle_data = self
-            .executor
-            .load_and_convert_candle_data(inst_id, period, config.candle_limit)
-            .await?;
-
         let params_batch =
             get_strategy_config_from_db(&self.config_service, inst_id, period).await?;
         if params_batch.is_empty() {
@@ -495,6 +491,12 @@ impl BacktestRunner {
             );
             return Ok(());
         }
+
+        let select_time = derive_select_time(&params_batch);
+        let arc_candle_data = self
+            .executor
+            .load_and_convert_candle_data(inst_id, period, config.candle_limit, select_time)
+            .await?;
 
         info!(
             "[Vegas 指定] 找到 {} 个策略配置，开始执行回测",
@@ -514,6 +516,39 @@ impl BacktestRunner {
         );
 
         Ok(())
+    }
+}
+
+fn derive_select_time(params: &[ParamMergeBuilder]) -> Option<SelectTime> {
+    let mut min_start: Option<i64> = None;
+    let mut max_end: Option<i64> = None;
+
+    for param in params {
+        if let Some(start) = param.kline_start_time.filter(|value| *value > 0) {
+            min_start = Some(min_start.map_or(start, |current| current.min(start)));
+        }
+        if let Some(end) = param.kline_end_time.filter(|value| *value > 0) {
+            max_end = Some(max_end.map_or(end, |current| current.max(end)));
+        }
+    }
+
+    match (min_start, max_end) {
+        (Some(start), Some(end)) => Some(SelectTime {
+            start_time: start,
+            end_time: Some(end),
+            direct: TimeDirect::AFTER,
+        }),
+        (Some(start), None) => Some(SelectTime {
+            start_time: start,
+            end_time: None,
+            direct: TimeDirect::AFTER,
+        }),
+        (None, Some(end)) => Some(SelectTime {
+            start_time: end,
+            end_time: None,
+            direct: TimeDirect::BEFORE,
+        }),
+        (None, None) => None,
     }
 }
 
@@ -544,5 +579,32 @@ fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig
 
         k_line_hammer_shadow_ratios: vec![0.65],
         is_used_signal_k_line_stop_loss: vec![false, true],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::derive_select_time;
+    use crate::workflow::job_param_generator::ParamMergeBuilder;
+    use rust_quant_market::models::TimeDirect;
+
+    #[test]
+    fn derive_select_time_uses_min_start_and_max_end() {
+        let params = vec![
+            ParamMergeBuilder::build().kline_start_time(100).kline_end_time(200),
+            ParamMergeBuilder::build().kline_start_time(50).kline_end_time(300),
+        ];
+
+        let select_time = derive_select_time(&params).expect("select_time should exist");
+
+        assert_eq!(select_time.start_time, 50);
+        assert_eq!(select_time.end_time, Some(300));
+        assert!(matches!(select_time.direct, TimeDirect::AFTER));
+    }
+
+    #[test]
+    fn derive_select_time_returns_none_when_unset() {
+        let params = vec![ParamMergeBuilder::build()];
+        assert!(derive_select_time(&params).is_none());
     }
 }

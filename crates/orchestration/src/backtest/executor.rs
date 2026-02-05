@@ -116,6 +116,7 @@ impl BacktestExecutor {
         inst_id: &str,
         time: &str,
         limit: usize,
+        select_time: Option<SelectTime>,
     ) -> Result<Arc<Vec<CandleItem>>> {
         let start_time = Instant::now();
         info!(
@@ -125,7 +126,7 @@ impl BacktestExecutor {
 
         let data_fetch_start = Instant::now();
         let mysql_candles = self
-            .get_candle_data_confirm(inst_id, time, limit, None)
+            .get_candle_data_confirm(inst_id, time, limit, select_time)
             .await
             .map_err(|e| anyhow!("获取K线数据失败: {}", e))?;
         let data_fetch_duration = data_fetch_start.elapsed();
