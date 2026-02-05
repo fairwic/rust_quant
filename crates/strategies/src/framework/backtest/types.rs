@@ -362,15 +362,6 @@ pub struct BasicRiskStrategyConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_max_loss: Option<bool>,
 
-    /// 止盈价有效性校验（原先由环境变量 VALIDATE_SIGNAL_TP 控制）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub validate_signal_tp: Option<bool>,
-
-    /// Vegas 风控收紧开关（原先由环境变量 TIGHTEN_VEGAS_RISK 控制）
-    /// - `true`：强制收紧 max_loss_percent，并开启信号K线止损/单K止损/触价保本
-    /// - `false/None`：不额外收紧
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tighten_vegas_risk: Option<bool>,
 }
 
 impl Default for BasicRiskStrategyConfig {
@@ -381,8 +372,6 @@ impl Default for BasicRiskStrategyConfig {
             atr_take_profit_ratio: Some(0.00), // 默认1%盈利开始启用动态止盈
             fixed_signal_kline_take_profit_ratio: Some(0.00), // 默认不使用固定信号线的止盈
             dynamic_max_loss: Some(true),
-            validate_signal_tp: Some(false),
-            tighten_vegas_risk: Some(false),
         }
     }
 }
@@ -415,5 +404,13 @@ mod tests {
         assert!(value
             .get("is_move_stop_open_price_when_touch_price")
             .is_none());
+    }
+
+    #[test]
+    fn risk_config_has_no_validate_or_tighten_flags() {
+        let value = serde_json::to_value(BasicRiskStrategyConfig::default())
+            .expect("serialize BasicRiskStrategyConfig");
+        assert!(value.get("validate_signal_tp").is_none());
+        assert!(value.get("tighten_vegas_risk").is_none());
     }
 }

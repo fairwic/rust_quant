@@ -169,16 +169,8 @@ pub fn set_long_stop_close_price(
 ) {
     // ============ Long特有逻辑 ============
 
-    // 1. 止盈方向验证（做多止盈价格必须高于开仓价）
-    if risk_config.validate_signal_tp.unwrap_or(false) {
-        if let Some(tp_price) = signal.long_signal_take_profit_price {
-            if tp_price > temp_trade_position.open_price {
-                temp_trade_position.long_signal_take_profit_price = Some(tp_price);
-            }
-        }
-    } else {
-        temp_trade_position.long_signal_take_profit_price = signal.long_signal_take_profit_price;
-    }
+    // 1. 信号止盈价格（做多）
+    temp_trade_position.long_signal_take_profit_price = signal.long_signal_take_profit_price;
 
     // 2. 固定比例止盈（Long: open_price + diff * ratio）
     if let Some(fixed_take_profit_ratio) = risk_config.fixed_signal_kline_take_profit_ratio {
@@ -244,16 +236,8 @@ pub fn set_short_stop_close_price(
 ) {
     // ============ Short特有逻辑 ============
 
-    // 1. 止盈方向验证（做空止盈价格必须低于开仓价）
-    if risk_config.validate_signal_tp.unwrap_or(false) {
-        if let Some(tp_price) = signal.short_signal_take_profit_price {
-            if tp_price < temp_trade_position.open_price {
-                temp_trade_position.short_signal_take_profit_price = Some(tp_price);
-            }
-        }
-    } else {
-        temp_trade_position.short_signal_take_profit_price = signal.short_signal_take_profit_price;
-    }
+    // 1. 信号止盈价格（做空）
+    temp_trade_position.short_signal_take_profit_price = signal.short_signal_take_profit_price;
 
     // 2. ATR比例止盈（Short: open_price - diff * ratio）
     if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {

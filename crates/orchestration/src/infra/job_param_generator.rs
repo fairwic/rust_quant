@@ -131,8 +131,6 @@ impl ParamMergeBuilder {
             fixed_signal_kline_take_profit_ratio: self.fix_signal_kline_take_profit_ratio,
             is_used_signal_k_line_stop_loss: Some(self.is_used_signal_k_line_stop_loss),
             dynamic_max_loss: Some(true),
-            validate_signal_tp: Some(false),
-            tighten_vegas_risk: Some(false),
         }
     }
 
@@ -580,8 +578,6 @@ impl NweParamGenerator {
                 atr_take_profit_ratio: Some(self.take_profit_ratios[i_tpr]),
                 fixed_signal_kline_take_profit_ratio: None,
                 dynamic_max_loss: Some(true),
-                validate_signal_tp: Some(false),
-                tighten_vegas_risk: Some(false),
             };
             batch.push((cfg, risk));
             self.current_index += 1;

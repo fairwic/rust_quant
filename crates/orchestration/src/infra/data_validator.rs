@@ -7,8 +7,7 @@ use anyhow::{anyhow, Result};
 use tracing::debug;
 
 use rust_quant_market::models::CandlesEntity;
-// time工具函数需要从common导入
-// use rust_quant_common::utils::time;
+use rust_quant_common::utils::time;
 
 /// 验证最新K线数据是否在当前时间周期
 ///
@@ -43,38 +42,25 @@ pub fn valid_newest_candle_data(candle: &CandlesEntity, period: &str) -> bool {
 /// # Returns
 /// - `Ok(())` - 数据连续
 /// - `Err` - 数据不连续，返回缺失的时间戳
-pub fn valid_candles_continuity(candles: &[CandlesEntity], _period: &str) -> Result<()> {
+pub fn valid_candles_continuity(candles: &[CandlesEntity], period: &str) -> Result<()> {
     if candles.len() < 2 {
         return Ok(());
     }
 
-    // 验证头尾数据正确性
+    let period_milliseconds = time::parse_period_to_mill(period)?;
     let first_timestamp = candles.first().unwrap().ts;
     let last_timestamp = candles.last().unwrap().ts;
-    let _difference = last_timestamp - first_timestamp;
+    let expected_length = (last_timestamp - first_timestamp) / period_milliseconds;
 
-    // ⏳ P1: 时间解析函数待实现
-    // let period_milliseconds = time::parse_period_to_mill(period)?;
-    // let expected_length = difference / period_milliseconds;
+    let mut discontinuities = Vec::new();
+    for window in candles.windows(2) {
+        let expected_next_ts = window[0].ts + period_milliseconds;
+        if window[1].ts != expected_next_ts {
+            discontinuities.push(expected_next_ts);
+        }
+    }
 
-    // 简化实现：基本的数量验证
-    let expected_length = (candles.len() - 1) as i64;
-
-    // 验证数量是否匹配
-    if expected_length != (candles.len() - 1) as i64 {
-        // 找出不连续的点
-        let discontinuities: Vec<i64> = Vec::new();
-
-        // for window in candles.windows(2) {
-        //     let current = &window[0];
-        //     let next = &window[1];
-        //     let expected_next_ts = current.ts + period_milliseconds;
-        //
-        //     if next.ts != expected_next_ts {
-        //         discontinuities.push(expected_next_ts);
-        //     }
-        // }
-
+    if !discontinuities.is_empty() || expected_length != (candles.len() - 1) as i64 {
         return Err(anyhow!(
             "K线数据不连续: 期望长度={}, 实际长度={}, 缺失时间戳={:?}",
             expected_length,

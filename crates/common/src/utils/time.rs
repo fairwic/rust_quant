@@ -36,7 +36,7 @@ pub(crate) fn is_within_business_hours(ts: i64) -> bool {
 }
 
 /// 解析周期字符串为毫秒数
-pub(crate) fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
+pub fn parse_period_to_mill(period: &str) -> anyhow::Result<i64> {
     let duration = match &period.to_uppercase()[..] {
         "1S" => 1,
         "1M" => 60,

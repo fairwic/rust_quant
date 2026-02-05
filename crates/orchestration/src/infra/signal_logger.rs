@@ -147,6 +147,8 @@ mod tests {
             atr_take_profit_level_3: None,
             stop_loss_source: None,
             filter_reasons: vec![],
+            dynamic_adjustments: vec![],
+            dynamic_config_snapshot: None,
             direction: rust_quant_domain::SignalDirection::None,
         };
         let entry = SignalLogEntry::new("BTC-USDT", "1H", StrategyType::Vegas, &signal);
@@ -180,6 +182,8 @@ mod tests {
             atr_take_profit_level_3: None,
             stop_loss_source: None,
             filter_reasons: vec![],
+            dynamic_adjustments: vec![],
+            dynamic_config_snapshot: None,
             direction: rust_quant_domain::SignalDirection::None,
         };
         let result = save_signal_log("BTC-USDT", "1H", StrategyType::Vegas, &signal).await;
