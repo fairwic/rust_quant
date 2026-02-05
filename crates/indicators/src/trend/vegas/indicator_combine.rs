@@ -1,6 +1,5 @@
 use crate::ema_indicator::EmaIndicator;
 use crate::leg_detection_indicator::LegDetectionIndicator;
-use crate::market_structure_indicator::MarketStructureIndicator;
 use crate::momentum::rsi::RsiIndicator;
 use crate::pattern::engulfing::KlineEngulfingIndicator;
 use crate::pattern::hammer::KlineHammerIndicator;
@@ -17,7 +16,6 @@ pub struct IndicatorCombine {
     pub engulfing_indicator: Option<KlineEngulfingIndicator>,
     pub kline_hammer_indicator: Option<KlineHammerIndicator>,
     pub leg_detection_indicator: Option<LegDetectionIndicator>,
-    pub market_structure_indicator: Option<MarketStructureIndicator>,
 }
 
 impl IndicatorCombine {

@@ -155,7 +155,6 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
 
     let signal_weights = vegas_strategy.signal_weights.clone();
     let leg_detection_signal = vegas_strategy.leg_detection_signal;
-    let market_structure_signal = vegas_strategy.market_structure_signal;
     let range_filter_signal = vegas_strategy.range_filter_signal;
     let chase_confirm_config = vegas_strategy.chase_confirm_config;
     let extreme_k_filter_signal = vegas_strategy.extreme_k_filter_signal;
@@ -224,7 +223,6 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
 
     param.signal_weights = signal_weights;
     param.leg_detection_signal = leg_detection_signal;
-    param.market_structure_signal = market_structure_signal;
     param.range_filter_signal = range_filter_signal;
     param.chase_confirm_config = chase_confirm_config;
     param.extreme_k_filter_signal = extreme_k_filter_signal;

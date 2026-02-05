@@ -1,5 +1,4 @@
 use crate::leg_detection_indicator::LegDetectionValue;
-use crate::market_structure_indicator::MarketStructureValue;
 use serde::{Deserialize, Serialize};
 
 /// 锤子形态信号值
@@ -213,9 +212,6 @@ pub struct VegasIndicatorSignalValue {
     /// 腿部识别
     #[serde(default)]
     pub leg_detection_value: LegDetectionValue,
-    /// 市场结构
-    #[serde(default)]
-    pub market_structure_value: MarketStructureValue,
     /// EMA距离过滤（新增）
     #[serde(default)]
     pub ema_distance_filter: super::ema_filter::EmaDistanceFilter,
@@ -231,4 +227,16 @@ pub struct VegasIndicatorSignalValue {
 pub struct EmaCross {
     pub is_golden_cross: bool,
     pub is_death_cross: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VegasIndicatorSignalValue;
+
+    #[test]
+    fn vegas_signal_value_excludes_market_structure() {
+        let value = VegasIndicatorSignalValue::default();
+        let json = serde_json::to_value(&value).expect("serialize vegas signal value");
+        assert!(json.get("market_structure_value").is_none());
+    }
 }
