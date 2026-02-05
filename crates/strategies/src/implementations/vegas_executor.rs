@@ -157,7 +157,6 @@ impl StrategyExecutor for VegasStrategyExecutor {
                 single_result: None,
                 signal_kline_stop_loss_price: None,
                 stop_loss_source: None,
-                counter_trend_pullback_take_profit_price: None,
                 is_ema_short_trend: None,
                 is_ema_long_trend: None,
                 atr_take_profit_level_1: None,

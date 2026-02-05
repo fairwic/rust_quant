@@ -80,7 +80,6 @@ fn build_signal(side: &str, open_price: f64) -> SignalResult {
         ts,
         single_value: None,
         single_result: None,
-        counter_trend_pullback_take_profit_price: None,
         is_ema_short_trend: None,
         is_ema_long_trend: None,
         atr_take_profit_level_1: None,

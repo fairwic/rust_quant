@@ -141,8 +141,6 @@ pub struct BasicRiskConfig {
     /// 固定信号线的止盈比例
     #[serde(alias = "fixed_signal_kline_take_profit_ratio")]
     pub fix_signal_kline_take_profit_ratio: Option<f64>,
-    /// 是否使用逆势回调止盈
-    pub is_counter_trend_pullback_take_profit: Option<bool>,
 
     /// 是否启用移动止损
     pub is_move_stop_loss: Option<bool>,
@@ -163,7 +161,6 @@ impl Default for BasicRiskConfig {
             max_loss_percent: 0.02,                      // 默认2%止损
             atr_take_profit_ratio: None,                 // 默认不使用atr止盈
             fix_signal_kline_take_profit_ratio: None,    // 默认不使用固定信号线的止盈
-            is_counter_trend_pullback_take_profit: None, // 默认不使用逆势回调止盈
             is_move_stop_loss: None,
             is_used_signal_k_line_stop_loss: None,
             max_hold_time: None,

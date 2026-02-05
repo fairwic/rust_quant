@@ -43,7 +43,6 @@ pub struct NweRandomStrategyConfig {
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
     pub is_move_stop_open_price_when_touch_price: Vec<bool>,
     pub k_line_hammer_shadow_ratios: Vec<f64>,
-    pub is_counter_trend_pullback_take_profit: Vec<bool>,
 }
 
 impl NweRandomStrategyConfig {
@@ -94,7 +93,6 @@ pub struct RandomStrategyConfig {
     pub is_move_stop_open_price_when_touch_price: Vec<bool>,
     pub k_line_hammer_shadow_ratios: Vec<f64>,
     pub fix_signal_kline_take_profit_ratios: Vec<f64>,
-    pub is_counter_trend_pullback_take_profit: Vec<bool>,
 }
 
 impl Default for RandomStrategyConfig {
@@ -121,7 +119,6 @@ impl Default for RandomStrategyConfig {
 
             k_line_hammer_shadow_ratios: vec![0.62, 0.65, 0.7, 0.75],
             fix_signal_kline_take_profit_ratios: vec![0.0],
-            is_counter_trend_pullback_take_profit: vec![true],
         }
     }
 }

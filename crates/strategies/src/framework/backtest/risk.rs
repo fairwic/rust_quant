@@ -387,17 +387,6 @@ fn check_dynamic_take_profit(
     }
 }
 
-/// 检查逆势回调止盈
-fn check_counter_trend_take_profit(ctx: &ExitContext, target: Option<f64>) -> ExitResult {
-    match target {
-        Some(price) if ctx.is_take_profit_hit(price) => ExitResult::Exit {
-            price,
-            reason: "逆势回调止盈",
-        },
-        _ => ExitResult::None,
-    }
-}
-
 // ============================================================================
 // 公共检查链（供 check_risk_config 和 check_risk_config_with_r_system 复用）
 // ============================================================================
@@ -456,7 +445,6 @@ fn run_stop_loss_checks(
 /// 2. ATR比例止盈
 /// 3. 固定信号线比例止盈
 /// 4. 动态止盈
-/// 5. 逆势回调止盈
 fn run_take_profit_checks(
     ctx: &ExitContext,
     risk_config: &BasicRiskStrategyConfig,
@@ -494,8 +482,7 @@ fn run_take_profit_checks(
         return result;
     }
 
-    // 5. 逆势回调止盈
-    check_counter_trend_take_profit(ctx, position.counter_trend_pullback_take_profit_price)
+    ExitResult::None
 }
 
 // ============================================================================

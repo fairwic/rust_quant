@@ -43,7 +43,6 @@ pub fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list
             single_value: Some("结束平仓".to_string()),
             single_result: Some("结束平仓".to_string()),
             move_stop_open_price_when_touch_price: None,
-            counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
             atr_take_profit_level_1: None,
@@ -167,17 +166,7 @@ fn set_stop_close_price_common(
             signal.move_stop_open_price_when_touch_price;
     }
 
-    // 4. 逆势回调止盈
-    if risk_config
-        .is_counter_trend_pullback_take_profit
-        .unwrap_or(false)
-        && signal.counter_trend_pullback_take_profit_price.is_some()
-    {
-        position.counter_trend_pullback_take_profit_price =
-            signal.counter_trend_pullback_take_profit_price;
-    }
-
-    // 5. 三级止盈价格
+    // 4. 三级止盈价格
     if signal.atr_take_profit_level_1.is_some() {
         position.atr_take_profit_level_1 = signal.atr_take_profit_level_1;
         position.atr_take_profit_level_2 = signal.atr_take_profit_level_2;

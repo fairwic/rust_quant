@@ -114,7 +114,6 @@ impl StrategyExecutionService {
             "sell" => signal.short_signal_take_profit_price,
             _ => None,
         }
-        .or(signal.counter_trend_pullback_take_profit_price)
     }
 
     /// 计算“初始止损价”（用于下单时挂止损单）
@@ -1053,7 +1052,6 @@ mod tests {
             ts,
             single_value: None,
             single_result: None,
-            counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
             atr_take_profit_level_1: None,
@@ -1083,7 +1081,6 @@ mod tests {
             ts,
             single_value: None,
             single_result: None,
-            counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
             atr_take_profit_level_1: None,
@@ -1510,7 +1507,6 @@ mod tests {
         let mut signal = create_buy_signal(100.0, 1);
         signal.atr_take_profit_ratio_price = Some(130.0);
         signal.long_signal_take_profit_price = Some(120.0);
-        signal.counter_trend_pullback_take_profit_price = Some(110.0);
         assert_eq!(
             StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
             Some(130.0)
@@ -1525,7 +1521,7 @@ mod tests {
         signal.long_signal_take_profit_price = None;
         assert_eq!(
             StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
-            Some(110.0)
+            None
         );
     }
 
@@ -1533,7 +1529,6 @@ mod tests {
     fn test_take_profit_priority_short_uses_short_signal_price() {
         let mut signal = create_sell_signal(100.0, 1);
         signal.short_signal_take_profit_price = Some(90.0);
-        signal.counter_trend_pullback_take_profit_price = Some(95.0);
         assert_eq!(
             StrategyExecutionService::select_take_profit_trigger_px("sell", &signal),
             Some(90.0)
@@ -1665,7 +1660,6 @@ mod tests {
             max_loss_percent,
             atr_take_profit_ratio: None,
             fix_signal_kline_take_profit_ratio: None,
-            is_counter_trend_pullback_take_profit: None,
             is_move_stop_loss: None,
             is_used_signal_k_line_stop_loss: use_signal_kline_stop_loss,
             max_hold_time: None,
@@ -1950,7 +1944,6 @@ mod tests {
             max_loss_percent: 0.02, // 2%止损
             atr_take_profit_ratio: None,
             fix_signal_kline_take_profit_ratio: None,
-            is_counter_trend_pullback_take_profit: None,
             is_move_stop_loss: None,
             is_used_signal_k_line_stop_loss: Some(true), // 使用信号K线止损
             max_hold_time: None,
@@ -1990,7 +1983,6 @@ mod tests {
             ts,
             single_value: None,
             single_result: None,
-            counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
             atr_take_profit_level_1: None,

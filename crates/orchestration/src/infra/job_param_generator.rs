@@ -36,7 +36,6 @@ pub struct ParamMergeBuilder {
     pub is_move_stop_loss: bool, //是否使用移动止损,当盈利之后,止损价格变成开仓价
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
     pub is_move_stop_open_price_when_touch_price: bool, //是否使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
-    pub is_counter_trend_pullback_take_profit: bool,    //是否使用逆势回调止盈
     // strategy extensions
     pub signal_weights: Option<SignalWeightsConfig>,
     pub leg_detection_signal: Option<LegDetectionConfig>,
@@ -136,13 +135,6 @@ impl ParamMergeBuilder {
         self.fix_signal_kline_take_profit_ratio = Some(fix_signal_kline_take_profit_ratio);
         self
     }
-    pub fn is_counter_trend_pullback_take_profit(
-        mut self,
-        is_counter_trend_pullback_take_profit: bool,
-    ) -> Self {
-        self.is_counter_trend_pullback_take_profit = is_counter_trend_pullback_take_profit;
-        self
-    }
 
     /// 转换为风控配置
     pub fn to_risk_config(&self) -> BasicRiskStrategyConfig {
@@ -155,7 +147,6 @@ impl ParamMergeBuilder {
             is_move_stop_open_price_when_touch_price: Some(
                 self.is_move_stop_open_price_when_touch_price,
             ),
-            is_counter_trend_pullback_take_profit: Some(self.is_counter_trend_pullback_take_profit),
             dynamic_max_loss: Some(true),
             validate_signal_tp: Some(false),
             tighten_vegas_risk: Some(false),
@@ -254,7 +245,6 @@ pub struct ParamGenerator {
     is_used_signal_k_line_stop_loss: Vec<bool>,
     is_move_stop_open_price_when_touch_price: Vec<bool>,
     fix_signal_kline_take_profit_ratios: Vec<f64>,
-    is_counter_trend_pullback_take_profit: Vec<bool>,
 }
 
 impl ParamGenerator {
@@ -274,7 +264,6 @@ impl ParamGenerator {
         is_used_signal_k_line_stop_loss: Vec<bool>,
         is_move_stop_open_price_when_touch_price: Vec<bool>,
         fix_signal_kline_take_profit_ratios: Vec<f64>,
-        is_counter_trend_pullback_take_profit: Vec<bool>,
     ) -> Self {
         let total_count = bb_periods.len()
             * shadow_ratios.len()
@@ -289,8 +278,7 @@ impl ParamGenerator {
             * is_move_stop_loss.len()
             * is_used_signal_k_line_stop_loss.len()
             * is_move_stop_open_price_when_touch_price.len()
-            * fix_signal_kline_take_profit_ratios.len()
-            * is_counter_trend_pullback_take_profit.len();
+            * fix_signal_kline_take_profit_ratios.len();
 
         Self {
             bb_periods,
@@ -309,7 +297,6 @@ impl ParamGenerator {
             is_used_signal_k_line_stop_loss,
             is_move_stop_open_price_when_touch_price,
             fix_signal_kline_take_profit_ratios,
-            is_counter_trend_pullback_take_profit,
         }
     }
 
@@ -377,7 +364,6 @@ impl ParamGenerator {
             index /= self.is_used_signal_k_line_stop_loss.len();
             let i_mstoptp = index % self.is_move_stop_open_price_when_touch_price.len();
             let i_fsktpr = index % self.fix_signal_kline_take_profit_ratios.len();
-            let i_cctpt = index % self.is_counter_trend_pullback_take_profit.len();
             // 最后一个维度，无需再除
 
             // 获取参数值
@@ -403,8 +389,6 @@ impl ParamGenerator {
                 fix_signal_kline_take_profit_ratio: Some(
                     self.fix_signal_kline_take_profit_ratios[i_fsktpr],
                 ),
-                is_counter_trend_pullback_take_profit: self.is_counter_trend_pullback_take_profit
-                    [i_cctpt],
                 signal_weights: None,
                 leg_detection_signal: None,
                 range_filter_signal: None,
@@ -477,7 +461,6 @@ pub struct NweParamGenerator {
     is_move_stop_loss: Vec<bool>,
     is_used_signal_k_line_stop_loss: Vec<bool>,
     is_move_stop_open_price_when_touch_price: Vec<bool>,
-    is_counter_trend_pullback_take_profit: Vec<bool>,
     current_index: usize,
     total_count: usize,
 }
@@ -505,7 +488,6 @@ impl NweParamGenerator {
         is_used_signal_k_line_stop_loss: Vec<bool>,
         is_move_stop_open_price_when_touch_price: Vec<bool>,
         k_line_hammer_shadow_ratios: Vec<f64>,
-        is_counter_trend_pullback_take_profit: Vec<bool>,
     ) -> Self {
         let total_count = stc_fast_length.len()
             * stc_slow_length.len()
@@ -525,8 +507,7 @@ impl NweParamGenerator {
             * is_move_stop_loss.len()
             * is_used_signal_k_line_stop_loss.len()
             * is_move_stop_open_price_when_touch_price.len()
-            * k_line_hammer_shadow_ratios.len()
-            * is_counter_trend_pullback_take_profit.len();
+            * k_line_hammer_shadow_ratios.len();
         Self {
             stc_fast_length,
             stc_slow_length,
@@ -547,7 +528,6 @@ impl NweParamGenerator {
             is_move_stop_loss,
             is_used_signal_k_line_stop_loss,
             is_move_stop_open_price_when_touch_price,
-            is_counter_trend_pullback_take_profit,
             current_index: 0,
             total_count,
         }
@@ -582,7 +562,6 @@ impl NweParamGenerator {
             let usklsl_len = self.is_used_signal_k_line_stop_loss.len();
             let mstoptp_len = self.is_move_stop_open_price_when_touch_price.len();
             let kh_sr_len = self.k_line_hammer_shadow_ratios.len();
-            let cctpt_len = self.is_counter_trend_pullback_take_profit.len();
             // 按维度展开索引（顺序需与 total_count 维度相同）
             let i_stc_fast_length = idx % stc_fast_length_len;
             idx /= stc_fast_length_len;
@@ -620,7 +599,6 @@ impl NweParamGenerator {
             let i_usklsl = idx % usklsl_len; // 最后一维无需再除
             let i_mstoptp = idx % mstoptp_len;
             let i_kh_sr = idx % kh_sr_len;
-            let i_cctpt = idx % cctpt_len;
             let mut cfg = rust_quant_strategies::implementations::nwe_strategy::NweStrategyConfig {
                 period: "5m".to_string(),
                 ..Default::default()
@@ -651,9 +629,6 @@ impl NweParamGenerator {
                     self.is_move_stop_open_price_when_touch_price[i_mstoptp],
                 ),
                 fixed_signal_kline_take_profit_ratio: None,
-                is_counter_trend_pullback_take_profit: Some(
-                    self.is_counter_trend_pullback_take_profit[i_cctpt],
-                ),
                 dynamic_max_loss: Some(true),
                 validate_signal_tp: Some(false),
                 tighten_vegas_risk: Some(false),

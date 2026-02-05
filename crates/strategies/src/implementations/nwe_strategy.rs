@@ -18,7 +18,6 @@ use ta::Next;
 use crate::framework::backtest::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
 use crate::strategy_common::{BackTestResult, BasicRiskStrategyConfig, SignalResult};
 use crate::{risk, time_util, CandleItem};
-use rust_quant_indicators::trend::counter_trend;
 use rust_quant_indicators::trend::nwe::{
     NweIndicatorCombine, NweIndicatorConfig, NweIndicatorValues,
 };
@@ -582,7 +581,6 @@ impl NweStrategy {
             signal_kline_stop_loss_price: None,
             stop_loss_source: None,
             move_stop_open_price_when_touch_price: None,
-            counter_trend_pullback_take_profit_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
             atr_take_profit_level_1: None,
@@ -698,20 +696,6 @@ impl NweStrategy {
 
         // 使用 Vegas EMA 排列进行方向过滤
         let ema1_value = self.apply_vegas_trend_filter(candles, &mut signal_result);
-
-        if risk_config
-            .is_counter_trend_pullback_take_profit
-            .unwrap_or(false)
-        {
-            if let Some(ema1) = ema1_value {
-                counter_trend::calculate_counter_trend_pullback_take_profit_price(
-                    candles,
-                    &mut signal_result,
-                    &[],
-                    ema1,
-                );
-            }
-        }
 
         signal_result.ts = candles.last().unwrap().ts;
         signal_result.open_price = candles.last().unwrap().c;

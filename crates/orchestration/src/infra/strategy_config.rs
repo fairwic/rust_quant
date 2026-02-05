@@ -214,11 +214,6 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
         )
         .is_used_signal_k_line_stop_loss(
             risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false),
-        )
-        .is_counter_trend_pullback_take_profit(
-            risk_config
-                .is_counter_trend_pullback_take_profit
-                .unwrap_or(false),
         );
 
     param.signal_weights = signal_weights;

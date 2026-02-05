@@ -13,7 +13,6 @@ use super::indicator_combine::IndicatorCombine;
 use super::signal::*;
 use super::trend;
 use super::utils;
-use crate::trend::counter_trend;
 
 /// Vegas综合策略配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -145,7 +144,6 @@ impl VegasStrategy {
                 ts: Some(0),
                 single_value: None,
                 single_result: None,
-                counter_trend_pullback_take_profit_price: None,
                 // 填充新字段
                 direction: rust_quant_domain::SignalDirection::None,
                 strength: rust_quant_domain::SignalStrength::new(0.0),
@@ -178,7 +176,6 @@ impl VegasStrategy {
                     signal_kline_stop_loss_price: None,
                     stop_loss_source: None,
                     move_stop_open_price_when_touch_price: None,
-                    counter_trend_pullback_take_profit_price: None,
                     ts: Some(0),
                     single_value: None,
                     single_result: None,
@@ -215,7 +212,6 @@ impl VegasStrategy {
             ts: Some(last_data_item.ts),
             single_value: None,
             single_result: None,
-            counter_trend_pullback_take_profit_price: None,
             // 填充新字段
             direction: rust_quant_domain::SignalDirection::None,
             strength: rust_quant_domain::SignalStrength::new(0.0),
@@ -1030,13 +1026,6 @@ impl VegasStrategy {
         if signal_result.short_signal_take_profit_price.is_some() {
             dynamic_adjustments.push("TP_DYNAMIC_SHORT".to_string());
         }
-        if signal_result
-            .counter_trend_pullback_take_profit_price
-            .is_some()
-        {
-            dynamic_adjustments.push("TP_COUNTER_TREND".to_string());
-        }
-
         signal_result.dynamic_adjustments = dynamic_adjustments.clone();
         signal_result.dynamic_config_snapshot = Some(
             json!({
@@ -1051,8 +1040,7 @@ impl VegasStrategy {
                 "take_profit": {
                     "long": signal_result.long_signal_take_profit_price,
                     "short": signal_result.short_signal_take_profit_price,
-                    "atr_ratio": signal_result.atr_take_profit_ratio_price,
-                    "counter_trend": signal_result.counter_trend_pullback_take_profit_price,
+                    "atr_ratio": signal_result.atr_take_profit_ratio_price
                 }
             })
             .to_string(),
@@ -1069,18 +1057,6 @@ impl VegasStrategy {
                     last_data_item,
                     &mut signal_result,
                     &conditions,
-                );
-            }
-            //如果有使用逆势回调止盈
-            if risk_config
-                .is_counter_trend_pullback_take_profit
-                .unwrap_or(false)
-            {
-                counter_trend::calculate_counter_trend_pullback_take_profit_price(
-                    data_items,
-                    &mut signal_result,
-                    &conditions,
-                    vegas_indicator_signal_values.ema_values.ema1_value,
                 );
             }
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());

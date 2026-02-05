@@ -232,7 +232,6 @@ impl BacktestRunner {
                 .is_move_stop_open_price_when_touch_price
                 .clone(),
             random_config.k_line_hammer_shadow_ratios.clone(),
-            random_config.is_counter_trend_pullback_take_profit.clone(),
         );
 
         generator.set_current_index(progress.current_index);
@@ -424,7 +423,6 @@ impl BacktestRunner {
                 .is_move_stop_open_price_when_touch_price
                 .clone(),
             random_config.fix_signal_kline_take_profit_ratios.clone(),
-            random_config.is_counter_trend_pullback_take_profit.clone(),
         );
 
         generator.set_current_index(progress.current_index);
@@ -556,6 +554,5 @@ fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig
         k_line_hammer_shadow_ratios: vec![0.65],
         is_used_signal_k_line_stop_loss: vec![false, true],
         is_move_stop_open_price_when_touch_price: vec![false, true],
-        is_counter_trend_pullback_take_profit: vec![false, true],
     }
 }

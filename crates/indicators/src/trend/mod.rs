@@ -1,6 +1,5 @@
 //! 趋势指标
 
-pub mod counter_trend;
 pub mod ema;
 pub mod ema_indicator;
 pub mod nwe; // ⭐ NWE 指标模块（包含indicator_combine）

@@ -175,8 +175,6 @@ pub struct SignalResult {
     pub long_signal_take_profit_price: Option<f64>,
     /// 做空指标动态止盈价格，比如当触发nwe突破信号线的时候。或者价格到达布林带的时候
     pub short_signal_take_profit_price: Option<f64>,
-    /// 逆势回调止盈价格
-    pub counter_trend_pullback_take_profit_price: Option<f64>,
 
     /// 最佳开仓价格
     pub best_open_price: Option<f64>,
@@ -218,7 +216,6 @@ impl SignalResult {
             atr_stop_loss_price: None,
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
-            counter_trend_pullback_take_profit_price: None,
             filter_reasons: vec![],
             dynamic_adjustments: vec![],
             dynamic_config_snapshot: None,
@@ -284,7 +281,6 @@ impl SignalResult {
             atr_stop_loss_price: None,
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
-            counter_trend_pullback_take_profit_price: None,
             filter_reasons: vec![],
             dynamic_adjustments: vec![],
             dynamic_config_snapshot: None,
