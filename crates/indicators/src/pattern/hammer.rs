@@ -91,12 +91,11 @@ mod tests {
     #[test]
     fn test_kline_hammer_indicator() {
         let mut indicator = KlineHammerIndicator::new(0.7, 0.7);
-        // 109623	110360	109582	109829.5
         let kline = CandleItem {
-            o: 103687.2,
-            h: 104171.4,
-            l: 103571.4,
-            c: 103640.2,
+            o: 100.0,
+            h: 102.0,
+            l: 70.0,
+            c: 101.0,
             v: 100.0,
             ts: 1749650400000,
             confirm: 0,
@@ -104,105 +103,79 @@ mod tests {
         let output = indicator.next(&kline);
         println!("indicator: {:?}", output);
         assert!(output.is_hammer);
+        assert!(!output.is_hanging_man);
     }
     #[test]
     fn test_engulfing_indicator() {
-        println!("创建一个锤子形态指标");
         let mut indicator = KlineHammerIndicator::new(0.7, 0.7);
-        println!("创建一个价格下跌，一个锤子形态");
-        // 创建价格是下跌的，一个锤子形态
+
+        // 价格下跌，一个锤子形态（长下影线）
         let kline = CandleItem {
             o: 100.0,
-            h: 100.1,
-            l: 50.0,
-            c: 90.0,
+            h: 102.0,
+            l: 70.0,
+            c: 95.0,
             v: 100.0,
             ts: 1000,
             confirm: 0,
         };
         let output = indicator.next(&kline);
-        println!("indicator: {:?}", output);
         assert!(output.is_hammer);
         assert!(!output.is_hanging_man);
 
-        println!("创建一个价格上涨，一个锤子形态");
-        //价格上涨的，一个锤子形态
+        // 价格上涨，一个锤子形态（长下影线）
         let kline = CandleItem {
             o: 100.0,
-            h: 100.1,
-            l: 90.0,
+            h: 101.0,
+            l: 80.0,
             c: 100.5,
             v: 100.0,
-            ts: 1000,
+            ts: 1001,
             confirm: 0,
         };
-        indicator.next(&kline);
-        println!("indicator: {:?}", indicator);
+        let output = indicator.next(&kline);
         assert!(output.is_hammer);
         assert!(!output.is_hanging_man);
 
-        println!("创建一个价格上涨，上吊线形态");
-        // 创建一个价格上涨，上吊线形态
+        // 价格上涨，上吊线形态（长上影线）
         let kline = CandleItem {
             o: 100.0,
-            h: 110.0,
-            l: 99.9,
-            c: 101.0,
-            v: 100.0,
-            ts: 1000,
-            confirm: 0,
-        };
-        indicator.next(&kline);
-        println!("indicator: {:?}", indicator);
-        assert!(!output.is_hammer);
-        assert!(output.is_hanging_man);
-
-        println!("创建一个价格下跌，上吊线路");
-        // 创建一个价格下跌，上吊线路
-        let kline = CandleItem {
-            o: 100.0,
-            h: 110.0,
-            l: 99.8,
+            h: 130.0,
+            l: 98.0,
             c: 99.0,
             v: 100.0,
-            ts: 1000,
+            ts: 1002,
             confirm: 0,
         };
-
-        indicator.next(&kline);
-        println!("indicator: {:?}", output);
+        let output = indicator.next(&kline);
         assert!(!output.is_hammer);
         assert!(output.is_hanging_man);
 
-        println!("创建一个价格上涨，长上影线，和下影线长度相等");
-        // 创建一个价格上涨，长上影线，和下影线长度相等
+        // 上下影线都不够长：非锤子/上吊线
         let kline = CandleItem {
             o: 100.0,
             h: 110.0,
             l: 90.0,
             c: 101.0,
             v: 100.0,
-            ts: 1000,
+            ts: 1003,
             confirm: 0,
         };
-        indicator.next(&kline);
-        println!("indicator: {:?}", indicator);
+        let output = indicator.next(&kline);
         assert!(!output.is_hammer);
         assert!(!output.is_hanging_man);
 
-        // 创建平头上涨锤子形态
-        println!("创建平头上涨锤子形态");
+        // 平头上涨锤子形态
         let kline = CandleItem {
             o: 100.0,
             h: 101.0,
             l: 50.0,
             c: 101.0,
             v: 100.0,
-            ts: 1000,
+            ts: 1004,
             confirm: 0,
         };
         let output = indicator.next(&kline);
-        println!("indicator: {:?}", output);
         assert!(output.is_hammer);
         assert!(!output.is_hanging_man);
     }

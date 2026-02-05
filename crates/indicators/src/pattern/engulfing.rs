@@ -134,9 +134,9 @@ mod tests {
         };
         let kline2 = CandleItem {
             o: 90.0,
-            h: 105.0,
+            h: 116.0,
             l: 85.0,
-            c: 100.0,
+            c: 112.0,
             ts: 1,
             v: 0.00,
             confirm: 0,
@@ -158,10 +158,10 @@ mod tests {
             confirm: 0,
         };
         let kline4 = CandleItem {
-            o: 110.0,
+            o: 112.0,
             h: 115.0,
-            l: 95.0,
-            c: 100.0,
+            l: 85.0,
+            c: 88.0,
             ts: 3,
             v: 0.00,
             confirm: 0,

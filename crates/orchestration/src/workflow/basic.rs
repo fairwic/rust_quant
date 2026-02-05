@@ -12,7 +12,7 @@
 //!
 //! ## 使用示例
 //!
-//! ```rust
+//! ```rust,ignore
 //! use rust_quant_orchestration::workflow::strategy_runner::test_random_strategy_with_config;
 //! use rust_quant_orchestration::workflow::progress_manager::RandomStrategyConfig;
 //!

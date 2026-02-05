@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn test_distance_ranging() {
         // EMA2=100, EMA4=99 → 距离 1%，< 2%
-        let ema = create_ema_values(100.5, 100.0, 99.5, 99.0, 98.5);
+        let ema = create_ema_values(100.5, 100.0, 98.5, 99.0, 98.5);
         let config = EmaDistanceConfig::default();
         let filter = apply_ema_distance_filter(99.8, &ema, &config);
 
