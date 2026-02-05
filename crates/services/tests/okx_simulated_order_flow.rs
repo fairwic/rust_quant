@@ -70,25 +70,9 @@ fn build_signal(side: &str, open_price: f64) -> SignalResult {
         should_buy,
         should_sell,
         open_price,
-        signal_kline_stop_loss_price: None,
-        best_open_price: None,
-        atr_take_profit_ratio_price: None,
-        atr_stop_loss_price: None,
-        long_signal_take_profit_price: None,
-        short_signal_take_profit_price: None,
         ts,
-        single_value: None,
-        single_result: None,
-        is_ema_short_trend: None,
-        is_ema_long_trend: None,
-        atr_take_profit_level_1: None,
-        atr_take_profit_level_2: None,
-        atr_take_profit_level_3: None,
-        filter_reasons: vec![],
-        dynamic_adjustments: vec![],
-        dynamic_config_snapshot: None,
-        stop_loss_source: None,
         direction,
+        ..Default::default()
     }
 }
 

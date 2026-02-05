@@ -34,7 +34,7 @@ impl StrategyRegistry {
     /// * `strategy` - 策略执行器实例
     ///
     /// # 示例
-    /// ```
+    /// ```rust,ignore
     /// registry.register(Arc::new(VegasStrategyExecutor::new()));
     /// ```
     pub fn register(&self, strategy: Arc<dyn StrategyExecutor>) {
@@ -161,7 +161,7 @@ pub static STRATEGY_REGISTRY: Lazy<StrategyRegistry> = Lazy::new(initialize_regi
 /// * 策略注册中心的静态引用
 ///
 /// # 示例
-/// ```
+/// ```rust,ignore
 /// let registry = get_strategy_registry();
 /// let strategy = registry.detect_strategy(config)?;
 /// strategy.execute(...).await?;
@@ -179,7 +179,7 @@ pub fn get_strategy_registry() -> &'static StrategyRegistry {
 /// * `strategy_type` - 策略类型枚举
 ///
 /// # 示例
-/// ```
+/// ```rust,ignore
 /// register_strategy_on_demand(&StrategyType::Vegas);
 /// register_strategy_on_demand(&StrategyType::Nwe);
 /// ```

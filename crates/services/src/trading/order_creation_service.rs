@@ -262,24 +262,7 @@ mod tests {
             entry_price: Some(50000.0),
             stop_loss_price: Some(49000.0),
             take_profit_price: Some(52000.0),
-            signal_kline_stop_loss_price: None,
-            position_time: None,
-            signal_kline: None,
-            ts: None,
-            single_value: None,
-            single_result: None,
-            should_sell: None,
-            should_buy: None,
-            open_price: None,
-            best_open_price: None,
-            atr_take_profit_ratio_price: None,
-            atr_stop_loss_price: None,
-            long_signal_take_profit_price: None,
-            short_signal_take_profit_price: None,
-            filter_reasons: vec![],
-            dynamic_adjustments: vec![],
-            dynamic_config_snapshot: None,
-            stop_loss_source: None,
+            ..SignalResult::empty()
         };
 
         assert!(service.validate_signal(&valid_signal));
