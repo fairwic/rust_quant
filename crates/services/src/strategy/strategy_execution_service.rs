@@ -237,10 +237,10 @@ impl StrategyExecutionService {
 
         info!("策略分析完成");
 
+        info!("signal: {:?}", serde_json::to_string(&signal).unwrap());
         let raw_has_signal = signal.should_buy || signal.should_sell;
 
         if raw_has_signal {
-            info!("signal: {:?}", serde_json::to_string(&signal).unwrap());
             // 5. 记录信号
             warn!(
                 "{:?} 策略信号！inst_id={}, period={}, should_buy={:?}, should_sell={:?}, ts={:?}",
