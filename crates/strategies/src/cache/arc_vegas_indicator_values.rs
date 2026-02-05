@@ -69,7 +69,15 @@ impl IndicatorValuesManager {
             key_mutex: Arc::new(DashMap::new()),
         }
     }
+}
 
+impl Default for IndicatorValuesManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl IndicatorValuesManager {
     /// 获取指定键的指标值
     pub async fn get(&self, key: &str) -> Option<ArcVegasIndicatorValues> {
         let start = Instant::now();
@@ -221,10 +229,7 @@ impl IndicatorValuesManager {
     }
     /// 记录性能指标
     async fn record_metrics(&self, key: &str, is_read: bool, elapsed_ms: u64) {
-        let mut entry = self
-            .metrics
-            .entry(key.to_string())
-            .or_insert_with(IndicatorMetrics::default);
+        let mut entry = self.metrics.entry(key.to_string()).or_default();
         if is_read {
             entry.read_count += 1;
             entry.last_read_time_ms = elapsed_ms;
@@ -267,7 +272,7 @@ pub static INDICATOR_MANAGER: OnceCell<IndicatorValuesManager> = OnceCell::new()
 
 // 获取全局管理器实例
 pub fn get_indicator_manager() -> &'static IndicatorValuesManager {
-    INDICATOR_MANAGER.get_or_init(|| IndicatorValuesManager::new())
+    INDICATOR_MANAGER.get_or_init(IndicatorValuesManager::new)
 }
 
 // // 为了向后兼容，保留原来的全局变量，但改为从管理器获取数据

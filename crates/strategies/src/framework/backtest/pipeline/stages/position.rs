@@ -42,10 +42,11 @@ impl BacktestStage for PositionStage {
         // 如果没有信号（None），构建一个空信号供 deal_signal 做风控/挂单处理
         let mut signal = ctx.signal.clone().unwrap_or_else(|| {
             use crate::strategy_common::SignalResult;
-            let mut s = SignalResult::default();
-            s.ts = ctx.candle.ts;
-            s.open_price = ctx.candle.c;
-            s
+            SignalResult {
+                ts: ctx.candle.ts,
+                open_price: ctx.candle.c,
+                ..Default::default()
+            }
         });
 
         // 统一委托给 deal_signal 处理

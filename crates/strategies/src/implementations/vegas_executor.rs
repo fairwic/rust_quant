@@ -29,6 +29,12 @@ use rust_quant_common::CandleItem;
 /// Vegas 策略执行器
 pub struct VegasStrategyExecutor;
 
+impl Default for VegasStrategyExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VegasStrategyExecutor {
     pub fn new() -> Self {
         Self
@@ -192,7 +198,7 @@ impl StrategyExecutor for VegasStrategyExecutor {
             serde_json::from_value(strategy_config.parameters.clone())
                 .map_err(|e| anyhow!("解析 Vegas 策略配置失败: {}", e))?;
         // ⚠️ 对齐回测：传入策略的窗口长度使用 min_k_line_num（而不是固定 30）
-        let window_size = vegas_strategy.min_k_line_num.max(1).min(MAX_HISTORY_SIZE);
+        let window_size = vegas_strategy.min_k_line_num.clamp(1, MAX_HISTORY_SIZE);
         let candle_vec = get_recent_candles(&new_candle_items, window_size);
         let default_weights = SignalWeightsConfig::default();
         let weights = vegas_strategy

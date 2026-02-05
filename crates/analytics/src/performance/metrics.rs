@@ -155,7 +155,7 @@ impl PerformanceCalculator {
         }
         // 尝试日期格式
         if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-            return Some(date.and_hms_opt(0, 0, 0)?);
+            return date.and_hms_opt(0, 0, 0);
         }
         None
     }

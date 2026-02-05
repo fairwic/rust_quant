@@ -126,7 +126,7 @@ impl FlowAnalyzer {
         let symbol = flow.symbol.clone();
         let now = Utc::now();
 
-        let window = self.history.entry(symbol).or_insert_with(VecDeque::new);
+        let window = self.history.entry(symbol).or_default();
         window.push_back(flow);
 
         // 清理超过 60 秒的数据

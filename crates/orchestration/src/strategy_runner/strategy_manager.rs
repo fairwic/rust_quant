@@ -14,6 +14,7 @@ use rust_quant_core::database;
 use rust_quant_domain::{StrategyConfig, StrategyType};
 use rust_quant_infrastructure::{StrategyConfigEntity, StrategyConfigEntityModel};
 use rust_quant_strategies::strategy_registry::register_strategy_on_demand;
+use std::str::FromStr;
 
 /// 策略管理器错误类型
 #[derive(Error, Debug)]
@@ -78,7 +79,7 @@ impl StrategyManager {
     pub fn global() -> &'static StrategyManager {
         use once_cell::sync::OnceCell;
         static INSTANCE: OnceCell<StrategyManager> = OnceCell::new();
-        INSTANCE.get_or_init(|| StrategyManager::new())
+        INSTANCE.get_or_init(StrategyManager::new)
     }
 
     /// 构建策略键
@@ -97,7 +98,7 @@ impl StrategyManager {
             let pool = database::get_db_pool().clone();
             let config_model = StrategyConfigEntityModel::new(pool);
             let result = config_model.get_config_by_id(strategy_config_id).await?;
-            result.ok_or_else(|| StrategyManagerError::ConfigNotFound {
+            result.ok_or(StrategyManagerError::ConfigNotFound {
                 config_id: strategy_config_id,
             })?
         };
@@ -127,7 +128,7 @@ impl StrategyManager {
             self.load_strategy_config(strategy_config_id).await?;
 
         let strategy_type_enum = StrategyType::from_str(&config_entity.strategy_type)
-            .ok_or_else(|| anyhow!("未知的策略类型: {}", config_entity.strategy_type))?;
+            .map_err(|_| anyhow!("未知的策略类型: {}", config_entity.strategy_type))?;
 
         // 按需注册对应策略
         register_strategy_on_demand(&strategy_type_enum);

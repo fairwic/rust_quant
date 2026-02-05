@@ -74,10 +74,8 @@ pub fn open_long_position(
     let mut temp_trade_position = TradePosition {
         position_nums: state.funds / signal.open_price,
         open_price: signal.open_price,
-        open_position_time: match rust_quant_common::utils::time::mill_time_to_datetime(candle.ts) {
-            Ok(s) => s,
-            Err(_) => String::new(),
-        },
+        open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
+            .unwrap_or_default(),
         signal_open_position_time: signal_open_time,
         trade_side: TradeSide::Long,
         ..Default::default()
@@ -243,10 +241,8 @@ pub fn open_short_position(
     let mut temp_trade_position = TradePosition {
         position_nums: state.funds / signal.open_price,
         open_price: signal.open_price,
-        open_position_time: match rust_quant_common::utils::time::mill_time_to_datetime(candle.ts) {
-            Ok(s) => s,
-            Err(_) => String::new(),
-        },
+        open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
+            .unwrap_or_default(),
         signal_open_position_time: signal_open_time,
         trade_side: TradeSide::Short,
         ..Default::default()
@@ -321,10 +317,8 @@ pub fn close_position(
 ) {
     use super::recording::record_trade_exit;
 
-    let exit_time = match rust_quant_common::utils::time::mill_time_to_datetime(candle.ts) {
-        Ok(s) => s,
-        Err(_) => String::new(),
-    };
+    let exit_time =
+        rust_quant_common::utils::time::mill_time_to_datetime(candle.ts).unwrap_or_default();
 
     let mut trade_position = match state.trade_position.clone() {
         Some(p) => p,

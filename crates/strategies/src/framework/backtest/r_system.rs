@@ -603,7 +603,7 @@ pub fn create_r_state_from_position(
     Some(RSystemState::new(
         position.open_price,
         stop_price,
-        position.trade_side.clone(),
+        position.trade_side,
         entry_bar_index,
     ))
 }

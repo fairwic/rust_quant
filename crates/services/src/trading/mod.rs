@@ -20,7 +20,15 @@ impl OrderService {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for OrderService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OrderService {
     /// 创建订单
     pub async fn create_order(&self, _order: Order) -> Result<String, OrderError> {
         // TODO: 实现订单创建逻辑
@@ -61,7 +69,15 @@ impl PositionService {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for PositionService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PositionService {
     /// 获取当前持仓
     pub async fn get_positions(&self, _symbol: Option<&str>) -> Result<()> {
         // TODO: 实现持仓查询
@@ -90,7 +106,15 @@ impl TradeService {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for TradeService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TradeService {
     /// 获取成交记录
     pub async fn get_trades(&self, _symbol: Option<&str>, _limit: usize) -> Result<()> {
         // TODO: 实现成交记录查询
@@ -107,7 +131,15 @@ impl AccountService {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for AccountService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AccountService {
     /// 获取账户余额
     pub async fn get_balance(&self) -> Result<f64> {
         // TODO: 实现余额查询

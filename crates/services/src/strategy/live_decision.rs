@@ -18,27 +18,23 @@ pub fn apply_live_decision(
     risk: BasicRiskStrategyConfig,
 ) -> LiveDecisionOutcome {
     let before = state.trade_position.clone();
-    let before_side = before.as_ref().map(|p| p.trade_side.clone());
+    let before_side = before.as_ref().map(|p| p.trade_side);
 
     let updated = deal_signal(state.clone(), signal, candle, risk, &[], 0);
     let after = updated.trade_position.clone();
-    let after_side = after.as_ref().map(|p| p.trade_side.clone());
+    let after_side = after.as_ref().map(|p| p.trade_side);
 
     *state = updated;
 
     let opened_side = match (&before, &after) {
-        (None, Some(pos)) => Some(pos.trade_side.clone()),
-        (Some(prev), Some(curr)) if prev.trade_side != curr.trade_side => {
-            Some(curr.trade_side.clone())
-        }
+        (None, Some(pos)) => Some(pos.trade_side),
+        (Some(prev), Some(curr)) if prev.trade_side != curr.trade_side => Some(curr.trade_side),
         _ => None,
     };
 
     let closed_side = match (&before, &after) {
-        (Some(prev), None) => Some(prev.trade_side.clone()),
-        (Some(prev), Some(curr)) if prev.trade_side != curr.trade_side => {
-            Some(prev.trade_side.clone())
-        }
+        (Some(prev), None) => Some(prev.trade_side),
+        (Some(prev), Some(curr)) if prev.trade_side != curr.trade_side => Some(prev.trade_side),
         _ => None,
     };
 

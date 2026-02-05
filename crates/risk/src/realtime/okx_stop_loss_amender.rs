@@ -118,7 +118,7 @@ impl OkxStopLossAmender {
         // 兜底：取第一条
         first
             .attach_algo_ords
-            .get(0)
+            .first()
             .map(|a| a.attach_algo_id.clone())
             .ok_or_else(|| {
                 anyhow!(

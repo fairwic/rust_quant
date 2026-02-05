@@ -12,7 +12,15 @@ impl FundingRateJob {
     pub fn new() -> Self {
         Self
     }
+}
 
+impl Default for FundingRateJob {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FundingRateJob {
     /// 执行资金费率同步（增量 + 历史）
     ///
     /// # Arguments

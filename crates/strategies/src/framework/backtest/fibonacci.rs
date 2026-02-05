@@ -3,6 +3,7 @@ use crate::CandleItem;
 use std::collections::HashSet;
 
 /// 处理斐波那契部分止盈逻辑
+#[allow(clippy::too_many_arguments)]
 pub fn process_fibonacci_levels(
     current_candle: &CandleItem,
     funds: &mut f64,
@@ -106,6 +107,7 @@ pub fn process_fibonacci_levels(
 }
 
 /// 平仓剩余仓位
+#[allow(clippy::too_many_arguments)]
 pub fn close_remaining_position(
     entry_price: &f64,
     funds: &mut f64,

@@ -21,6 +21,7 @@ fn parse_i32(row: &sqlx::mysql::MySqlRow, col: &str) -> Result<i32> {
         .map_err(|e| anyhow!("failed to parse {}='{}': {}", col, raw, e))
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_args() -> Result<(i64, String, Option<String>, Option<String>, Option<usize>)> {
     let mut back_test_id: Option<i64> = None;
     let mut time_str: Option<String> = None;

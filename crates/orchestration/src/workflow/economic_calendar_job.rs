@@ -14,7 +14,15 @@ impl EconomicCalendarJob {
     pub fn new() -> Self {
         Self
     }
+}
 
+impl Default for EconomicCalendarJob {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EconomicCalendarJob {
     /// 执行经济日历同步（增量 + 历史回填）
     pub async fn sync_economic_calendar() -> Result<()> {
         let service = EconomicCalendarSyncService::new()?;

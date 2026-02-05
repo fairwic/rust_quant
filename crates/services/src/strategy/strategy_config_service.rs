@@ -3,6 +3,7 @@
 //! 从 orchestration/workflow/strategy_config.rs 提取业务逻辑
 
 use anyhow::{anyhow, Result};
+use std::str::FromStr;
 use tracing::{info, warn};
 
 use rust_quant_domain::traits::StrategyConfigRepository;
@@ -68,8 +69,8 @@ impl StrategyConfigService {
             symbol, timeframe, strategy_type
         );
 
-        let timeframe_enum = Timeframe::from_str(timeframe)
-            .ok_or_else(|| anyhow!("无效的时间周期: {}", timeframe))?;
+        let timeframe_enum =
+            Timeframe::from_str(timeframe).map_err(|_| anyhow!("无效的时间周期: {}", timeframe))?;
 
         let mut configs = self
             .repository
@@ -79,7 +80,7 @@ impl StrategyConfigService {
         // 如果指定了策略类型，进行过滤
         if let Some(strategy_type_str) = strategy_type {
             let strategy_type_enum = StrategyType::from_str(strategy_type_str)
-                .ok_or_else(|| anyhow!("无效的策略类型: {}", strategy_type_str))?;
+                .map_err(|_| anyhow!("无效的策略类型: {}", strategy_type_str))?;
             configs.retain(|c| c.strategy_type == strategy_type_enum);
         }
 

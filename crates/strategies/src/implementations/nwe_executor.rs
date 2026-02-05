@@ -25,6 +25,12 @@ use rust_quant_indicators::trend::nwe::NweIndicatorValues;
 /// Nwe 策略执行器
 pub struct NweStrategyExecutor;
 
+impl Default for NweStrategyExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NweStrategyExecutor {
     pub fn new() -> Self {
         Self

@@ -225,7 +225,7 @@ impl ParamMergeBuilder {
             chase_confirm_config: self
                 .chase_confirm_config
                 .or_else(default_chase_confirm_config),
-            macd_signal: self.macd_signal.clone().or_else(default_macd_signal_config),
+            macd_signal: self.macd_signal.or_else(default_macd_signal_config),
             fib_retracement_signal: self
                 .fib_retracement_signal
                 .or_else(default_fib_retracement_signal_config),
@@ -261,6 +261,7 @@ pub struct ParamGenerator {
 }
 
 impl ParamGenerator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         bb_periods: Vec<i32>,
         shadow_ratios: Vec<f64>,
@@ -448,11 +449,7 @@ impl ParamGenerator {
 
     /// 获取剩余组合数
     pub fn remaining_count(&self) -> usize {
-        if self.current_index >= self.total_count {
-            0
-        } else {
-            self.total_count - self.current_index
-        }
+        self.total_count.saturating_sub(self.current_index)
     }
 }
 
@@ -490,6 +487,7 @@ pub struct NweParamGenerator {
 }
 
 impl NweParamGenerator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         stc_fast_length: Vec<usize>,
         stc_slow_length: Vec<usize>,

@@ -14,7 +14,7 @@ use rust_quant_indicators::trend::vegas::{IndicatorCombine, VegasIndicatorSignal
 pub fn run_back_test(
     inst_id: &str,
     strategy: impl FnMut(&[CandleItem], &mut VegasIndicatorSignalValue) -> SignalResult,
-    candles_list: &Vec<CandleItem>,
+    candles_list: &[CandleItem],
     basic_risk_config: BasicRiskStrategyConfig,
     min_data_length: usize,
     indicator_combine: &mut IndicatorCombine,
@@ -26,7 +26,7 @@ pub fn run_back_test(
         basic_risk_config,
         min_data_length,
         indicator_combine,
-        |ic, candle| get_multi_indicator_values(ic, candle),
+        get_multi_indicator_values,
     )
 }
 
@@ -34,7 +34,7 @@ pub fn run_back_test(
 pub fn run_back_test_generic<IC, IV>(
     inst_id: &str,
     mut strategy: impl FnMut(&[CandleItem], &mut IV) -> SignalResult,
-    candles_list: &Vec<CandleItem>,
+    candles_list: &[CandleItem],
     basic_risk_config: BasicRiskStrategyConfig,
     min_data_length: usize,
     indicator_combine: &mut IC,
@@ -59,7 +59,7 @@ pub fn run_back_test_generic<IC, IV>(
 
     for (i, candle) in candles_list.iter().enumerate() {
         // 计算自定义指标
-        let mut multi_indicator_values = build_values(indicator_combine, &candle);
+        let mut multi_indicator_values = build_values(indicator_combine, candle);
 
         candle_buffer.push(candle.clone());
 

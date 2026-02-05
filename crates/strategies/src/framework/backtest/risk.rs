@@ -24,7 +24,7 @@ struct ExitContext {
 
 impl ExitContext {
     fn new(position: &TradePosition, candle: &CandleItem) -> Self {
-        let side = position.trade_side.clone();
+        let side = position.trade_side;
         Self {
             entry: position.open_price,
             qty: position.position_nums,
@@ -169,7 +169,7 @@ fn check_one_k_line_diff_stop(
     position: &TradePosition,
     enabled: Option<bool>,
 ) -> ExitResult {
-    if enabled.unwrap_or(false) == false {
+    if !enabled.unwrap_or(false) {
         return ExitResult::None;
     }
     let diff = position.signal_high_low_diff;
@@ -302,10 +302,9 @@ fn activate_break_even_stop(
     ctx: &ExitContext,
     trade_position: &mut TradePosition,
 ) {
-    if risk_config
+    if !risk_config
         .is_move_stop_open_price_when_touch_price
         .unwrap_or(false)
-        == false
     {
         return;
     }

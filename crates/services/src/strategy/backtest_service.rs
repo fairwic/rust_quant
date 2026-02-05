@@ -6,6 +6,7 @@ use anyhow::Result;
 use rust_quant_common::utils::time;
 use serde_json::json;
 use std::env;
+use std::str::FromStr;
 use tracing::info;
 
 use rust_quant_analytics::calculate_performance_metrics;
@@ -52,6 +53,7 @@ impl BacktestService {
     ///
     /// # 返回
     /// * 回测日志 ID
+    #[allow(clippy::too_many_arguments)]
     pub async fn save_backtest_log(
         &self,
         inst_id: &str,
@@ -249,9 +251,7 @@ impl BacktestService {
                     trade_record.open_position_time,
                     trade_record.signal_open_position_time,
                     trade_record.signal_status,
-                    trade_record
-                        .close_position_time
-                        .unwrap_or_else(|| "".to_string()),
+                    trade_record.close_position_time.unwrap_or_default(),
                     trade_record.open_price.to_string(),
                     trade_record.close_price.map(|p| p.to_string()),
                     trade_record.profit_loss.to_string(),

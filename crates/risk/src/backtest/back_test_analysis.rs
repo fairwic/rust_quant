@@ -60,16 +60,16 @@ impl BackTestAnalysisModel {
             );
 
             query_builder.push_values(chunk, |mut b, analysis| {
-                b.push_bind(&analysis.back_test_id)
-                    .push_bind(&analysis.inst_id)
-                    .push_bind(&analysis.time)
-                    .push_bind(&analysis.option_type)
-                    .push_bind(&analysis.open_position_time)
-                    .push_bind(&analysis.open_price)
-                    .push_bind(&analysis.bars_after)
-                    .push_bind(&analysis.price_after)
-                    .push_bind(&analysis.price_change_percent)
-                    .push_bind(&analysis.is_profitable);
+                b.push_bind(analysis.back_test_id)
+                    .push_bind(analysis.inst_id.clone())
+                    .push_bind(analysis.time.clone())
+                    .push_bind(analysis.option_type.clone())
+                    .push_bind(analysis.open_position_time.clone())
+                    .push_bind(analysis.open_price.clone())
+                    .push_bind(analysis.bars_after)
+                    .push_bind(analysis.price_after.clone())
+                    .push_bind(analysis.price_change_percent.clone())
+                    .push_bind(analysis.is_profitable);
             });
 
             let result = query_builder.build().execute(pool).await?;

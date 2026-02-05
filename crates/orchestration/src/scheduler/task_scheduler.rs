@@ -19,7 +19,15 @@ impl TaskScheduler {
             shutdown_sender,
         }
     }
+}
 
+impl Default for TaskScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TaskScheduler {
     pub fn add_periodic_task<F, Fut>(&mut self, name: String, every_n_millis: u64, task_fn: F)
     where
         F: Fn() -> Fut + Send + 'static,

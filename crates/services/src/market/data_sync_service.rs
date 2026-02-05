@@ -19,7 +19,15 @@ impl DataSyncService {
     pub fn new() -> Self {
         Self
     }
+}
 
+impl Default for DataSyncService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DataSyncService {
     /// 全量执行数据同步（三步：建表、补历史、补增量）
     pub async fn run_sync_data_job(&self, inst_ids: &[String], periods: &[String]) -> Result<()> {
         info!(

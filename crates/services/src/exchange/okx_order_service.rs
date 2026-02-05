@@ -106,6 +106,8 @@ impl OkxOrderService {
     }
 
     /// 下单并附带止盈/止损（attachAlgoOrds）
+    /// 下单并附带止盈/止损（attachAlgoOrds）
+    #[allow(clippy::too_many_arguments)]
     pub async fn place_order_with_algo_orders(
         &self,
         api_config: &ExchangeApiConfig,
@@ -177,6 +179,7 @@ impl OkxOrderService {
     }
 
     /// 下单并附带止损（attachAlgoOrds），用于后续“移动止损到开仓价”的改单能力
+    #[allow(clippy::too_many_arguments)]
     pub async fn place_order_with_stop_loss(
         &self,
         api_config: &ExchangeApiConfig,
@@ -280,6 +283,7 @@ impl OkxOrderService {
 
     /// 根据信号执行订单
     /// 与原实现 swap_order_service.rs::order_swap 保持一致
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_order_from_signal(
         &self,
         api_config: &ExchangeApiConfig,

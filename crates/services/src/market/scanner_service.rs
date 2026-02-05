@@ -305,6 +305,7 @@ impl ScannerService {
     }
 
     /// 检查并发送排名变化通知 (带冷却期)
+    #[allow(clippy::too_many_arguments)]
     async fn check_and_notify_rank_change(
         &mut self,
         symbol: &str,

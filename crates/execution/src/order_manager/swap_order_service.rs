@@ -51,6 +51,15 @@ impl SwapOrderService {
     pub fn new() -> Self {
         Self {}
     }
+}
+
+impl Default for SwapOrderService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SwapOrderService {
     //下单现货
     pub async fn place_order_spot(
         &self,
@@ -109,16 +118,16 @@ impl SwapOrderService {
     /// 平仓
     pub async fn close_position(
         &self,
-        position_list: &Vec<Position>,
+        position_list: &[Position],
         inst_id: &str,
         pos_side: &PositionSide,
     ) -> Result<bool, Error> {
-        let already_have_position = position_list.len() > 0;
+        let already_have_position = !position_list.is_empty();
         //是否已经有反向仓位
         let mut have_another_position = false;
         if already_have_position {
             // let position = position_list.get(0).unwrap();
-            for position in position_list.into_iter() {
+            for position in position_list.iter() {
                 //且持仓量不为0
                 if position.inst_id == inst_id && position.pos != "0" {
                     //如果当前仓位是反向仓位，则平仓
@@ -241,7 +250,7 @@ impl SwapOrderService {
         })?;
         info!("current okx position_count: {}", position_list.len());
 
-        if max_avail_size.len() == 0 || max_avail_size[0].inst_id != inst_id.to_string() {
+        if max_avail_size.is_empty() || max_avail_size[0].inst_id != inst_id {
             error!("max_avail_size is empty or inst_id not match");
             return Err(AppError::BizError(
                 "max_avail_size is empty or inst_id not match".to_string(),
@@ -353,13 +362,13 @@ impl SwapOrderService {
         &self,
         inst_id: &str,
         time: &str,
-        position_list: &Vec<Position>,
+        position_list: &[Position],
         close_pos_side: &PositionSide,
     ) -> Result<(), AppError> {
         // 开启异步去平掉现有的已经存在的反向仓位（移动 owned 数据进入任务，满足 'static）
         let inst_id_owned = inst_id.to_string();
-        let close_pos_side_owned = close_pos_side.clone();
-        let position_list_owned = position_list.clone();
+        let close_pos_side_owned = *close_pos_side;
+        let position_list_owned = position_list.to_owned();
         tokio::spawn(async move {
             let res = SwapOrderService::new()
                 .close_position(
@@ -377,6 +386,7 @@ impl SwapOrderService {
         Ok(())
     }
     /// 开始下单
+    #[allow(clippy::too_many_arguments)]
     pub async fn start_to_order(
         &self,
         inst_id: &str,
@@ -431,6 +441,7 @@ impl SwapOrderService {
         Ok(order_result)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_order(
         &self,
         strategy_type: &StrategyType,
@@ -504,9 +515,9 @@ impl SwapOrderService {
             Some("-1".to_string()),                  // 止损委托价 -1 表示市价
             size.to_string(),
         );
-        if tp_price.is_some() {
+        if let Some(price) = tp_price {
             order.tp_ord_px = Some("-1".to_string());
-            order.tp_trigger_px = Some(tp_price.unwrap().to_string());
+            order.tp_trigger_px = Some(price.to_string());
         }
 
         orders.push(order);
@@ -519,6 +530,7 @@ impl SwapOrderService {
     }
 
     //下单合约
+    #[allow(clippy::too_many_arguments)]
     pub async fn order_swap(
         &self,
         inst_id: &str,
@@ -540,8 +552,8 @@ impl SwapOrderService {
         //如果使用信号k线止盈，则使用信号k线止盈
         if let Some(is_used_signal_k_line_stop_loss) = risk_config.is_used_signal_k_line_stop_loss {
             if is_used_signal_k_line_stop_loss {
-                if signal.signal_kline_stop_loss_price.is_some() {
-                    stop_loss_price = signal.signal_kline_stop_loss_price.unwrap();
+                if let Some(signal_stop_loss) = signal.signal_kline_stop_loss_price {
+                    stop_loss_price = signal_stop_loss;
                 }
             }
         }

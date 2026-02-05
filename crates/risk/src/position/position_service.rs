@@ -7,6 +7,12 @@ use tracing::info;
 
 pub struct PositionService {}
 
+impl Default for PositionService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PositionService {
     pub fn new() -> Self {
         Self {}

@@ -30,7 +30,6 @@ mod flow_analyzer;
 pub use flow_analyzer::FlowAnalyzer;
 
 /// K线数据服务
-
 ///
 /// 协调 infrastructure 和业务逻辑，提供统一的K线数据访问接口
 ///
@@ -246,7 +245,15 @@ impl TickerService {
     pub fn new() -> Self {
         Self
     }
+}
 
+impl Default for TickerService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TickerService {
     /// 保存或更新单个Ticker数据
     ///
     /// 如果数据库中已存在该inst_id的记录，则更新；否则插入新记录
@@ -509,7 +516,15 @@ impl MarketDepthService {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for MarketDepthService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MarketDepthService {
     /// 获取市场深度数据
     pub async fn get_depth(&self, _symbol: &str, _depth: usize) -> Result<()> {
         // TODO: 实现市场深度查询

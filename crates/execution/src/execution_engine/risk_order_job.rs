@@ -15,7 +15,15 @@ impl RiskOrderJob {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for RiskOrderJob {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RiskOrderJob {
     pub async fn run(
         &self,
         inst_id: Option<&str>,
@@ -24,7 +32,7 @@ impl RiskOrderJob {
     ) -> Result<(), AppError> {
         //1. 获取未成交的订单
         let pending_orders = OrderService::new().get_pending_orders(inst_id).await?;
-        if pending_orders.len() == 0 {
+        if pending_orders.is_empty() {
             info!("获取未成交订单为空");
             return Ok(());
         }
@@ -39,6 +47,7 @@ impl RiskOrderJob {
     }
 
     ///同步订单列表
+    #[allow(clippy::too_many_arguments)]
     pub async fn sync_order_list(
         &self,
         inst_type: &str,
@@ -52,7 +61,7 @@ impl RiskOrderJob {
         let order_list = OrderService::new()
             .sync_order_history(inst_type, inst_id, order_type, state, after, before, limit)
             .await?;
-        if order_list.len() == 0 {
+        if order_list.is_empty() {
             info!("获取历史已完成的订单列表为空");
             return Ok(vec![]);
         }

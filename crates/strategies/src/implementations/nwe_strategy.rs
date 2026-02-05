@@ -505,10 +505,8 @@ impl NweStrategy {
             if !signal_result.should_buy {
                 signal_result.should_sell = false;
             }
-        } else if is_bear_trend && !is_bull_trend {
-            if !signal_result.should_sell {
-                signal_result.should_buy = false;
-            }
+        } else if is_bear_trend && !is_bull_trend && !signal_result.should_sell {
+            signal_result.should_buy = false;
         }
         Some(ema12)
     }
@@ -737,21 +735,19 @@ impl NweStrategy {
 
     fn check_kline_high_point(candles: &[CandleItem], values: &NweSignalValues) -> bool {
         let last_candle = candles.last().unwrap();
-        let is_kline_high_point = last_candle.h > values.nwe_upper;
-        is_kline_high_point
+        last_candle.h > values.nwe_upper
     }
 
     fn check_kline_low_point(candles: &[CandleItem], values: &NweSignalValues) -> bool {
         let last_candle = candles.last().unwrap();
-        let is_kline_low_point = last_candle.l < values.nwe_lower;
-        is_kline_low_point
+        last_candle.l < values.nwe_lower
     }
 
     /// 运行回测：仅使用 RSI、Volume、NWE、ATR 指标（复用可插拔的 indicator_combine）
     pub fn run_test(
         mut self,
         inst_id: &str,
-        candles: &Vec<CandleItem>,
+        candles: &[CandleItem],
         risk: BasicRiskStrategyConfig,
     ) -> BackTestResult {
         run_indicator_strategy_backtest_pipeline(inst_id, self, candles, risk)

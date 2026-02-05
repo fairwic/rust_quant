@@ -16,25 +16,13 @@ use tracing::{error, info};
 const MAX_CANDLE_ITEMS: usize = 100;
 
 /// Nwe 策略指标值结构
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ArcNweIndicatorValues {
     pub timestamp: i64,
     pub inst_id: String,
     pub period: String,
     pub candle_item: VecDeque<CandleItem>,
     pub indicator_combines: NweIndicatorCombine,
-}
-
-impl Default for ArcNweIndicatorValues {
-    fn default() -> Self {
-        Self {
-            timestamp: 0,
-            inst_id: String::new(),
-            period: String::new(),
-            candle_item: VecDeque::new(),
-            indicator_combines: NweIndicatorCombine::default(),
-        }
-    }
 }
 
 /// 获取 hash key
@@ -70,7 +58,15 @@ impl NweIndicatorValuesManager {
             key_mutex: Arc::new(DashMap::new()),
         }
     }
+}
 
+impl Default for NweIndicatorValuesManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NweIndicatorValuesManager {
     /// 获取指定键的指标值
     pub async fn get(&self, key: &str) -> Option<ArcNweIndicatorValues> {
         let start = Instant::now();
@@ -220,17 +216,7 @@ impl NweIndicatorValuesManager {
 
     /// 记录性能指标
     async fn record_metrics(&self, key: &str, is_read: bool, time_ms: u64) {
-        let mut entry = self
-            .metrics
-            .entry(key.to_string())
-            .or_insert_with(|| IndicatorMetrics {
-                read_count: 0,
-                write_count: 0,
-                last_read_time_ms: 0,
-                last_write_time_ms: 0,
-                max_read_time_ms: 0,
-                max_write_time_ms: 0,
-            });
+        let mut entry = self.metrics.entry(key.to_string()).or_default();
 
         let metrics = entry.value_mut();
         if is_read {
@@ -255,7 +241,7 @@ pub static NWE_INDICATOR_MANAGER: OnceCell<NweIndicatorValuesManager> = OnceCell
 
 /// 获取全局 Nwe 管理器实例
 pub fn get_nwe_indicator_manager() -> &'static NweIndicatorValuesManager {
-    NWE_INDICATOR_MANAGER.get_or_init(|| NweIndicatorValuesManager::new())
+    NWE_INDICATOR_MANAGER.get_or_init(NweIndicatorValuesManager::new)
 }
 
 /// 设置 Nwe 策略指标值

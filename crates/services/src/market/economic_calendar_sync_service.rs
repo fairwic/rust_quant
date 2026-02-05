@@ -234,7 +234,15 @@ impl EconomicEventQueryService {
         let repo = Arc::new(SqlxEconomicEventRepository::new(pool));
         Self { repo }
     }
+}
 
+impl Default for EconomicEventQueryService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EconomicEventQueryService {
     /// 使用自定义 Repository 创建（用于测试）
     pub fn with_repo(repo: Arc<dyn EconomicEventRepository>) -> Self {
         Self { repo }

@@ -11,6 +11,7 @@ use tracing::{error, info};
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use rust_quant_infrastructure::repositories::SqlxCandleRepository;
 use rust_quant_services::market::{CandleService as CandleMarketService, DataSyncService};
+use std::str::FromStr;
 
 /// K线数据同步任务
 ///
@@ -91,7 +92,7 @@ impl CandlesJob {
     ) -> Result<usize> {
         // 1. 解析时间周期
         let timeframe = Timeframe::from_str(period)
-            .ok_or_else(|| anyhow::anyhow!("无效的时间周期: {}", period))?;
+            .map_err(|_| anyhow::anyhow!("无效的时间周期: {}", period))?;
 
         // 2. 获取数据库中最新的K线时间戳
         let latest_candle = service.get_latest_candle(inst_id, timeframe).await?;

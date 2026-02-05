@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -54,8 +55,8 @@ impl WebsocketStrategyHandler {
         tokio::spawn(async move {
             // 解析时间周期
             let timeframe = match Timeframe::from_str(&time_interval) {
-                Some(tf) => tf,
-                None => {
+                Ok(tf) => tf,
+                Err(_) => {
                     error!("❌ 无效的时间周期: {}", time_interval);
                     return;
                 }

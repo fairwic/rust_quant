@@ -311,6 +311,7 @@ impl StrategyExecutionService {
         Ok(signal)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_live_decision(
         &self,
         inst_id: &str,
@@ -570,6 +571,7 @@ impl StrategyExecutionService {
     }
 
     /// 执行下单（内部方法）
+    #[allow(clippy::too_many_arguments)]
     async fn execute_order_internal(
         &self,
         inst_id: &str,
@@ -587,23 +589,16 @@ impl StrategyExecutionService {
 
         // 0) 幂等性：同一策略配置 + 同一信号时间戳，只允许下单一次
         let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
-        match self
+        if let Some(existing) = self
             .swap_order_repository
             .find_by_in_order_id(&in_order_id)
             .await?
         {
-            Some(existing) => {
-                warn!(
-                    "⚠️ 幂等命中，跳过重复下单: inst_id={}, period={}, config_id={}, in_order_id={}, out_order_id={:?}",
-                    inst_id,
-                    period,
-                    config_id,
-                    in_order_id,
-                    existing.out_order_id
-                );
-                return Ok(());
-            }
-            None => {}
+            warn!(
+                "⚠️ 幂等命中，跳过重复下单: inst_id={}, period={}, config_id={}, in_order_id={}, out_order_id={:?}",
+                inst_id, period, config_id, in_order_id, existing.out_order_id
+            );
+            return Ok(());
         }
 
         // 1. 确定交易方向
@@ -812,10 +807,7 @@ impl StrategyExecutionService {
 
         // 7.1 下单成功后推送 PositionSnapshot（用于“1.5R 触发保本移动止损”）
         if let (Some(tx), true) = (self.realtime_risk_tx.clone(), !out_order_id.is_empty()) {
-            let size_f64 = match order_size.parse::<f64>() {
-                Ok(v) => v,
-                Err(_) => 0.0,
-            };
+            let size_f64 = order_size.parse::<f64>().unwrap_or(0.0);
             let pos_side_domain = if side == "buy" {
                 DomainPositionSide::Long
             } else {

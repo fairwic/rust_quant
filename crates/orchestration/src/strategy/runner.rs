@@ -22,7 +22,7 @@ struct StrategyExecutionState {
 
 /// 全局策略执行状态管理器 - 防止重复处理相同时间戳的K线
 static STRATEGY_EXECUTION_STATES: Lazy<DashMap<String, StrategyExecutionState>> =
-    Lazy::new(|| DashMap::new());
+    Lazy::new(DashMap::new);
 
 /// 策略执行状态管理器
 pub struct StrategyExecutionStateManager;
@@ -112,6 +112,7 @@ impl StrategyExecutionStateManager {
 /// 2. 通过参数传入或使用全局单例模式
 /// 3. Orchestration 层只做任务调度，不创建 service 实例
 ///
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_strategy(
     inst_id: &str,
     timeframe: Timeframe,

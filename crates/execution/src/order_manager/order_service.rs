@@ -12,7 +12,15 @@ impl OrderService {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for OrderService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OrderService {
     pub async fn get_pending_orders(
         &self,
         inst_id: Option<&str>,
@@ -42,7 +50,7 @@ impl OrderService {
         info!("get order detail: {:?}", json!(order_list).to_string());
         Ok(order_list)
     }
-    ///
+    /// 同步订单详情
     pub async fn sync_order_detail(
         &self,
         inst_id: &str,
@@ -52,7 +60,7 @@ impl OrderService {
         let detail = self
             .get_order_detail(inst_id, order_id, client_order_id)
             .await?;
-        if detail.len() == 0 {
+        if detail.is_empty() {
             warn!("get order detail is empty");
             return Ok(());
         }
@@ -71,6 +79,7 @@ impl OrderService {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn sync_order_history(
         &self,
         inst_type: &str,
@@ -99,7 +108,7 @@ impl OrderService {
                 state: state.map(|s| s.to_string()),
                 // after: after.map(|s| s.to_string()),
                 // before: before.map(|s| s.to_string()),
-                limit: limit,
+                limit,
                 after: after.map(|s| s.to_string()),
                 before: before.map(|s| s.to_string()),
             })
@@ -112,6 +121,7 @@ impl OrderService {
         // }
         Ok(order_list)
     }
+    #[allow(clippy::too_many_arguments)]
     pub async fn sync_order_history_archive(
         &self,
         inst_type: &str,
@@ -131,7 +141,7 @@ impl OrderService {
                 state: state.map(|s| s.to_string()),
                 after: after.map(|s| s.to_string()),
                 before: before.map(|s| s.to_string()),
-                limit: limit,
+                limit,
             })
             .await
             .map_err(|e| AppError::OkxApiError(e.to_string()))?;

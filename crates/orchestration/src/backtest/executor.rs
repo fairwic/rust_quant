@@ -260,7 +260,7 @@ impl BacktestExecutor {
         let start_time = Instant::now();
         let strategy_type = strategy.strategy_type();
         let config_desc = strategy.config_json();
-        let res = strategy.run_test(inst_id, &mysql_candles, risk_strategy_config.clone());
+        let res = strategy.run_test(inst_id, &mysql_candles, risk_strategy_config);
 
         let back_test_id = self
             .backtest_service
@@ -271,7 +271,7 @@ impl BacktestExecutor {
                 res,
                 &mysql_candles,
                 risk_strategy_config,
-                &strategy_type.as_str(),
+                strategy_type.as_str(),
             )
             .await?;
 
@@ -299,20 +299,19 @@ fn tighten_vegas_risk(mut risk: BasicRiskStrategyConfig) -> BasicRiskStrategyCon
     risk.max_loss_percent = risk.max_loss_percent.min(0.05);
 
     // 启用信号K线止损
-    if risk.is_used_signal_k_line_stop_loss.unwrap_or(false) == false {
+    if !risk.is_used_signal_k_line_stop_loss.unwrap_or(false) {
         risk.is_used_signal_k_line_stop_loss = Some(true);
     }
 
     // 启用单K振幅固定止损（1R）
-    if risk.is_one_k_line_diff_stop_loss.unwrap_or(false) == false {
+    if !risk.is_one_k_line_diff_stop_loss.unwrap_or(false) {
         risk.is_one_k_line_diff_stop_loss = Some(true);
     }
 
     // 启用触及目标后的保本移动止损
-    if risk
+    if !risk
         .is_move_stop_open_price_when_touch_price
         .unwrap_or(false)
-        == false
     {
         risk.is_move_stop_open_price_when_touch_price = Some(true);
     }

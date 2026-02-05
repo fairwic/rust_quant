@@ -36,7 +36,7 @@ pub trait IndicatorStrategyBacktest {
 pub fn run_indicator_strategy_backtest<S: IndicatorStrategyBacktest>(
     inst_id: &str,
     strategy: &mut S,
-    candles_list: &Vec<CandleItem>,
+    candles_list: &[CandleItem],
     risk_config: BasicRiskStrategyConfig,
 ) -> BackTestResult {
     let min_len = strategy.min_data_length();

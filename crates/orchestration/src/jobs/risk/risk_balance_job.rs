@@ -36,8 +36,16 @@ impl RiskBalanceWithLevelJob {
             balance_ratio: BALANCE_RATIO,
         }
     }
+}
 
-    pub async fn run(&self, inst_ids: &Vec<String>) -> Result<(), anyhow::Error> {
+impl Default for RiskBalanceWithLevelJob {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RiskBalanceWithLevelJob {
+    pub async fn run(&self, inst_ids: &[String]) -> Result<(), anyhow::Error> {
         //1. 控制交易资金
         // match self.control_trade_amount().await {
         //     Ok(_) => info!("资金账户与交易账户平衡完成!"),
@@ -60,15 +68,15 @@ impl RiskBalanceWithLevelJob {
     }
 
     /// risk 2 设置杠杆
-    pub async fn run_set_leverage(&self, inst_ids: &Vec<String>) -> Result<(), anyhow::Error> {
+    pub async fn run_set_leverage(&self, inst_ids: &[String]) -> Result<(), anyhow::Error> {
         let span = span!(Level::DEBUG, "run_set_leverage");
         let _enter = span.enter();
 
         for inst_id in inst_ids.iter() {
             let level: i32;
-            if inst_id == &"BTC-USDT-SWAP" {
+            if inst_id == "BTC-USDT-SWAP" {
                 level = BTC_LEVEL;
-            } else if inst_id == &"ETH-USDT-SWAP" {
+            } else if inst_id == "ETH-USDT-SWAP" {
                 level = ETH_LEVEL;
             } else {
                 level = OTHER_LEVEL;
