@@ -163,35 +163,6 @@ fn check_max_loss_stop(
     }
 }
 
-/// 检查单K振幅固定止损（1R）
-fn check_one_k_line_diff_stop(
-    ctx: &ExitContext,
-    position: &TradePosition,
-    enabled: Option<bool>,
-) -> ExitResult {
-    if !enabled.unwrap_or(false) {
-        return ExitResult::None;
-    }
-    let diff = position.signal_high_low_diff;
-    if diff <= 0.0 {
-        return ExitResult::None;
-    }
-
-    let stop_price = match ctx.side {
-        TradeSide::Long => ctx.entry - diff,
-        TradeSide::Short => ctx.entry + diff,
-    };
-
-    if ctx.is_stop_loss_hit(stop_price) {
-        ExitResult::Exit {
-            price: stop_price,
-            reason: "单K振幅止损(1R)",
-        }
-    } else {
-        ExitResult::None
-    }
-}
-
 /// 检查信号K线止损
 fn check_signal_kline_stop(ctx: &ExitContext, stop_price: Option<f64>) -> ExitResult {
     if ctx.candle_ts >= 1766952000000 && ctx.candle_ts <= 1767052800000 {
@@ -296,38 +267,6 @@ fn update_atr_tiered_levels(ctx: &ExitContext, position: &mut TradePosition) -> 
     ExitResult::None
 }
 
-/// 触发保本移动止损：价格到达预设触发价后，将止损抬到开仓价
-fn activate_break_even_stop(
-    risk_config: &BasicRiskStrategyConfig,
-    ctx: &ExitContext,
-    trade_position: &mut TradePosition,
-) {
-    if !risk_config
-        .is_move_stop_open_price_when_touch_price
-        .unwrap_or(false)
-    {
-        return;
-    }
-
-    let Some(trigger_price) = trade_position.move_stop_open_price_when_touch_price else {
-        return;
-    };
-
-    // 已经激活过
-    if trade_position.move_stop_open_price.is_some() {
-        return;
-    }
-
-    let is_hit = match ctx.side {
-        TradeSide::Long => ctx.favorable_price >= trigger_price,
-        TradeSide::Short => ctx.favorable_price <= trigger_price,
-    };
-
-    if is_hit {
-        trade_position.move_stop_open_price = Some(trade_position.open_price);
-    }
-}
-
 // ============================================================================
 // 止盈检查函数
 // ============================================================================
@@ -424,17 +363,7 @@ fn run_stop_loss_checks(
         return result;
     }
 
-    // 3. 单K振幅固定止损（1R）
-    let result =
-        check_one_k_line_diff_stop(ctx, position, risk_config.is_one_k_line_diff_stop_loss);
-    if matches!(
-        result,
-        ExitResult::Exit { .. } | ExitResult::ExitDynamic { .. }
-    ) {
-        return result;
-    }
-
-    // 4. 移动止损（三级ATR系统/保本止损）
+    // 3. 移动止损（三级ATR系统）
     check_atr_trailing_stop(ctx, position)
 }
 
@@ -497,17 +426,15 @@ fn run_take_profit_checks(
 /// ## 检查顺序
 /// ### 止损（优先级高）
 /// 1. 最大损失止损 - 资金保护
-/// 2. 保本移动止损激活 - 触及触发价后将止损抬到开仓价
-/// 3. 单K振幅固定止损(1R) - 开仓K线振幅对称止损
-/// 4. 移动止损 - 三级ATR系统/保本止损
-/// 5. 信号K线止损 - 技术止损
+/// 2. 移动止损 - 三级ATR系统
+/// 3. 信号K线止损 - 技术止损
 ///
 /// ### 止盈
-/// 6. 三级ATR止盈 - 5倍ATR完全平仓
-/// 7. ATR比例止盈
-/// 8. 固定信号线比例止盈
-/// 9. 动态止盈 - 指标动态止盈
-/// 10. 逆势回调止盈
+/// 4. 三级ATR止盈 - 5倍ATR完全平仓
+/// 5. ATR比例止盈
+/// 6. 固定信号线比例止盈
+/// 7. 动态止盈 - 指标动态止盈
+/// 8. 逆势回调止盈
 pub fn check_risk_config(
     risk_config: &BasicRiskStrategyConfig,
     mut trading_state: TradingState,
@@ -520,9 +447,6 @@ pub fn check_risk_config(
 
     let mut trade_position = position.clone();
     let ctx = ExitContext::new(&trade_position, candle);
-
-    // 保本移动止损激活（在止损检查前更新）
-    activate_break_even_stop(risk_config, &ctx, &mut trade_position);
 
     // 止损检查（优先级最高）
     let stop_result = run_stop_loss_checks(&ctx, risk_config, &trade_position);
@@ -732,22 +656,7 @@ pub fn check_risk_config_with_r_system(
         }
     }
 
-    // 4. 保本移动止损激活（原有逻辑）
-    activate_break_even_stop(risk_config, &ctx, &mut trade_position);
-
-    // 5. 单K振幅固定止损（1R）
-    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_one_k_line_diff_stop(
-            &ctx,
-            &trade_position,
-            risk_config.is_one_k_line_diff_stop_loss,
-        )
-    {
-        r_runtime.r_state = None;
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-
-    // 6. 移动止损（三级ATR系统/保本止损）
+    // 4. 移动止损（三级ATR系统）
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
         check_atr_trailing_stop(&ctx, &trade_position)
     {
@@ -755,7 +664,7 @@ pub fn check_risk_config_with_r_system(
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
     }
 
-    // 7. 信号K线止损
+    // 5. 信号K线止损
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
         check_signal_kline_stop(&ctx, trade_position.signal_kline_stop_close_price)
     {

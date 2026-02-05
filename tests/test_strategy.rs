@@ -11,7 +11,6 @@ async fn test_strategy_signals() -> Result<()> {
     let strategy_config = BasicRiskStrategyConfig {
         max_loss_percent: 0.02,
         take_profit_ratio: true,
-        is_one_k_line_diff_stop_loss: false,
         is_used_signal_k_line_stop_loss: false,
     };
 
@@ -95,7 +94,6 @@ async fn verify_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result
     println!("\n测试场景: {}", name);
 
     let strategy_config = BasicRiskStrategyConfig {
-        is_one_k_line_diff_stop_loss: false,
         is_used_signal_k_line_stop_loss: false,
         max_loss_percent: 0.02, // 2%止损
         take_profit_ratio: true, // 1%启用动态止盈
@@ -123,7 +121,6 @@ async fn verify_short_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> 
 
     let strategy_config = BasicRiskStrategyConfig {
         take_profit_ratio: true,
-        is_one_k_line_diff_stop_loss: false,
         is_used_signal_k_line_stop_loss: false,
         max_loss_percent: 0.02, // 2%止损
     };

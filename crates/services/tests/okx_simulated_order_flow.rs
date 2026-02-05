@@ -76,7 +76,6 @@ fn build_signal(side: &str, open_price: f64) -> SignalResult {
         atr_stop_loss_price: None,
         long_signal_take_profit_price: None,
         short_signal_take_profit_price: None,
-        move_stop_open_price_when_touch_price: None,
         ts,
         single_value: None,
         single_result: None,

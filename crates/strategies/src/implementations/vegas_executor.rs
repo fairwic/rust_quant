@@ -151,7 +151,6 @@ impl StrategyExecutor for VegasStrategyExecutor {
                 atr_stop_loss_price: None,
                 long_signal_take_profit_price: None,
                 short_signal_take_profit_price: None,
-                move_stop_open_price_when_touch_price: None,
                 ts: new_candle_item.ts,
                 single_value: None,
                 single_result: None,

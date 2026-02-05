@@ -52,10 +52,7 @@ async fn test_nwe_strategy() -> Result<()> {
         // 获取指标的值
         data_items.push(data_item.clone());
 
-        let risk_strategy_config = BasicRiskStrategyConfig {
-            is_one_k_line_diff_stop_loss: true,
-            ..Default::default()
-        };
+        let risk_strategy_config = BasicRiskStrategyConfig::default();
         indicator_combine.get_indicator_values(&mut nwe_signal_values, &data_item);
         if data_items.len() < 500 {
             continue;

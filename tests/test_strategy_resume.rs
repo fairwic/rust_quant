@@ -31,16 +31,15 @@ async fn test_strategy_resume_functionality() {
         shadow_ratios: vec![0.7, 0.8],
         volume_bar_nums: vec![4, 5],
         volume_ratios: vec![1.6, 1.7],
-        volume_decrease_ratios: vec![1.6, 1.7],
         breakthrough_thresholds: vec![0.003],
         rsi_periods: vec![8, 9],
-        rsi_over_buy_sell: vec![85.0, 86.0],
-        rsi_over_sold: vec![15.0, 16.0],
+        rsi_over_buy_sell: vec![(85.0, 15.0), (86.0, 14.0)],
         batch_size: 2, // 小批次，便于测试
         max_loss_percent: vec![0.03, 0.04],
-        is_take_profit: vec![true],
-        is_move_stop_loss: vec![false],
+        take_profit_ratios: vec![0.0],
         is_used_signal_k_line_stop_loss: vec![true],
+        k_line_hammer_shadow_ratios: vec![0.65],
+        fix_signal_kline_take_profit_ratios: vec![0.0],
     };
 
     let total_combinations = small_config.calculate_total_combinations();
@@ -132,16 +131,15 @@ async fn test_strategy_resume_integration() {
         shadow_ratios: vec![0.7],
         volume_bar_nums: vec![4],
         volume_ratios: vec![1.6],
-        volume_decrease_ratios: vec![1.6],
         breakthrough_thresholds: vec![0.003],
         rsi_periods: vec![8],
-        rsi_over_buy_sell: vec![85.0],
-        rsi_over_sold: vec![15.0],
+        rsi_over_buy_sell: vec![(85.0, 15.0)],
         batch_size: 1,
         max_loss_percent: vec![0.03],
-        is_take_profit: vec![true],
-        is_move_stop_loss: vec![false],
+        take_profit_ratios: vec![0.0],
         is_used_signal_k_line_stop_loss: vec![true],
+        k_line_hammer_shadow_ratios: vec![0.65],
+        fix_signal_kline_take_profit_ratios: vec![0.0],
     };
 
     info!("📊 集成测试配置总组合数: {}", tiny_config.calculate_total_combinations());
@@ -175,15 +173,12 @@ async fn test_param_generator_resume() {
         vec![2.0, 2.5],
         vec![4, 5],
         vec![1.6, 1.7],
-        vec![1.6, 1.7],
         vec![0.003],
         vec![8, 9],
-        vec![85.0, 86.0],
-        vec![15.0, 16.0],
+        vec![(85.0, 15.0), (86.0, 14.0)],
         vec![0.03, 0.04],
         vec![true],
-        vec![false],
-        vec![true],
+        vec![0.0],
     );
 
     let (initial_index, total) = generator.progress();

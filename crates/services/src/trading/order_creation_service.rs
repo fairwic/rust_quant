@@ -263,7 +263,6 @@ mod tests {
             stop_loss_price: Some(49000.0),
             take_profit_price: Some(52000.0),
             signal_kline_stop_loss_price: None,
-            move_stop_open_price_when_touch_price: None,
             position_time: None,
             signal_kline: None,
             ts: None,

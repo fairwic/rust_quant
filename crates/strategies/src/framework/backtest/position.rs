@@ -42,7 +42,6 @@ pub fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list
             ts: last_candle.ts,
             single_value: Some("结束平仓".to_string()),
             single_result: Some("结束平仓".to_string()),
-            move_stop_open_price_when_touch_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
             atr_take_profit_level_1: None,
@@ -79,20 +78,13 @@ pub fn open_long_position(
         trade_side: TradeSide::Long,
         ..Default::default()
     };
-    // 记录入场K线振幅，用于1R固定止损与保本触发
+    // 记录入场K线振幅，用于固定比例止盈计算
     let raw_range = (candle.h - candle.l).abs();
     let k_range = raw_range.max(signal.open_price * 0.001);
     temp_trade_position.signal_high_low_diff = k_range;
     if raw_range > 0.0 && candle.l > 0.0 {
         temp_trade_position.entry_kline_amplitude = Some(raw_range / candle.l.max(1e-9));
         temp_trade_position.entry_kline_close_pos = Some((candle.c - candle.l) / raw_range);
-    }
-    if risk_config
-        .is_move_stop_open_price_when_touch_price
-        .unwrap_or(false)
-    {
-        temp_trade_position.move_stop_open_price_when_touch_price =
-            Some(signal.open_price + k_range);
     }
     //设置止盈止损价格
     set_long_stop_close_price(risk_config, signal, &mut temp_trade_position);
@@ -157,16 +149,7 @@ fn set_stop_close_price_common(
         position.atr_stop_loss_price = Some(p);
     }
 
-    // 3. 移动止损触发价格
-    if risk_config
-        .is_move_stop_open_price_when_touch_price
-        .unwrap_or(false)
-    {
-        position.move_stop_open_price_when_touch_price =
-            signal.move_stop_open_price_when_touch_price;
-    }
-
-    // 4. 三级止盈价格
+    // 3. 三级止盈价格
     if signal.atr_take_profit_level_1.is_some() {
         position.atr_take_profit_level_1 = signal.atr_take_profit_level_1;
         position.atr_take_profit_level_2 = signal.atr_take_profit_level_2;
@@ -236,20 +219,13 @@ pub fn open_short_position(
         trade_side: TradeSide::Short,
         ..Default::default()
     };
-    // 记录入场K线振幅，用于1R固定止损与保本触发
+    // 记录入场K线振幅，用于固定比例止盈计算
     let raw_range = (candle.h - candle.l).abs();
     let k_range = raw_range.max(signal.open_price * 0.001);
     temp_trade_position.signal_high_low_diff = k_range;
     if raw_range > 0.0 && candle.l > 0.0 {
         temp_trade_position.entry_kline_amplitude = Some(raw_range / candle.l.max(1e-9));
         temp_trade_position.entry_kline_close_pos = Some((candle.c - candle.l) / raw_range);
-    }
-    if risk_config
-        .is_move_stop_open_price_when_touch_price
-        .unwrap_or(false)
-    {
-        temp_trade_position.move_stop_open_price_when_touch_price =
-            Some(signal.open_price - k_range);
     }
     //设置止盈止损价格
     set_short_stop_close_price(risk_config, signal, &mut temp_trade_position);

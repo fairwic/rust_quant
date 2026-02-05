@@ -90,7 +90,6 @@ impl EngulfingStrategy {
             atr_take_profit_ratio_price: None,
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
-            move_stop_open_price_when_touch_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
             atr_take_profit_level_1: None,

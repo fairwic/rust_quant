@@ -57,16 +57,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         shadow_ratios: vec![0.7, 0.8, 0.9],
         volume_bar_nums: vec![4, 5, 6],
         volume_ratios: vec![1.6, 1.8, 2.0],
-        volume_decrease_ratios: vec![1.6, 1.8, 2.0],
         breakthrough_thresholds: vec![0.003],
         rsi_periods: vec![8, 10, 12],
-        rsi_over_buy_sell: vec![85.0, 90.0],
-        rsi_over_sold: vec![15.0, 20.0],
+        rsi_over_buy_sell: vec![(85.0, 15.0), (90.0, 10.0)],
         batch_size: 50, // 批量大小，可根据系统性能调整
         max_loss_percent: vec![0.03, 0.05, 0.08],
-        is_take_profit: vec![true, false],
-        is_move_stop_loss: vec![false, true],
+        take_profit_ratios: vec![0.0],
         is_used_signal_k_line_stop_loss: vec![true, false],
+        k_line_hammer_shadow_ratios: vec![0.65, 0.75],
+        fix_signal_kline_take_profit_ratios: vec![0.0],
     };
 
     let total_combinations = config.calculate_total_combinations();

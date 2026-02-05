@@ -116,9 +116,6 @@ pub struct SignalResult {
 
     //做空指标动态止盈价格，比如当触发nwe突破信号线的时候。或者价格到达布林带的时候
     pub short_signal_take_profit_price: Option<f64>,
-
-    //移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
-    pub move_stop_open_price_when_touch_price: Option<f64>,
     pub ts: i64,
     pub single_value: Option<String>,
     pub single_result: Option<String>,
@@ -225,7 +222,6 @@ impl Default for SignalResult {
             atr_stop_loss_price: None,
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
-            move_stop_open_price_when_touch_price: None,
             ts: 0,
             single_value: None,
             single_result: None,
@@ -281,8 +277,6 @@ pub struct TradePosition {
 
     //触发K线开仓价格止损(当达到一个特定的价格位置的时候，移动止损线到开仓价格)
     pub move_stop_open_price: Option<f64>,
-    //触发K线开仓价格止损(当达到一个特定的价格位置的时候，移动止损线到开仓价格)
-    pub move_stop_open_price_when_touch_price: Option<f64>,
     //信号状态
     pub signal_status: i32,
     //信号线最高最低价差
@@ -363,12 +357,6 @@ pub struct BasicRiskStrategyConfig {
     //固定信号线的止盈比例
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fixed_signal_kline_take_profit_ratio: Option<f64>, //固定信号线的止盈比例，比如当盈利超过 k线路的长度的 n 倍时，直接止盈，适用短线策略
-    //是否使用固定止损最大止损为1:1开多+(当前k线的最高价-最低价) 开空-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_one_k_line_diff_stop_loss: Option<bool>, // 是否使用固定止损最大止损为1:1开多+(当前k线的最高价-最低价) 开空-
-    //是否使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_move_stop_open_price_when_touch_price: Option<bool>, // 是否使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
 
     /// 高波动动态降损开关（原先由环境变量 DYNAMIC_MAX_LOSS 控制）
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -392,8 +380,6 @@ impl Default for BasicRiskStrategyConfig {
             is_used_signal_k_line_stop_loss: Some(true),
             atr_take_profit_ratio: Some(0.00), // 默认1%盈利开始启用动态止盈
             fixed_signal_kline_take_profit_ratio: Some(0.00), // 默认不使用固定信号线的止盈
-            is_one_k_line_diff_stop_loss: Some(false), // 默认不使用移动止损(移动止损价格到信号线的开仓价格)
-            is_move_stop_open_price_when_touch_price: Some(false), // 默认不使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
             dynamic_max_loss: Some(true),
             validate_signal_tp: Some(false),
             tighten_vegas_risk: Some(false),
@@ -410,7 +396,7 @@ pub struct MoveStopLoss {
 
 #[cfg(test)]
 mod tests {
-    use super::SignalResult;
+    use super::{BasicRiskStrategyConfig, SignalResult};
 
     #[test]
     fn signal_result_has_no_counter_trend_field() {
@@ -418,6 +404,16 @@ mod tests {
             serde_json::to_value(SignalResult::default()).expect("serialize SignalResult");
         assert!(value
             .get("counter_trend_pullback_take_profit_price")
+            .is_none());
+    }
+
+    #[test]
+    fn risk_config_has_no_move_or_one_k_flags() {
+        let value = serde_json::to_value(BasicRiskStrategyConfig::default())
+            .expect("serialize BasicRiskStrategyConfig");
+        assert!(value.get("is_one_k_line_diff_stop_loss").is_none());
+        assert!(value
+            .get("is_move_stop_open_price_when_touch_price")
             .is_none());
     }
 }

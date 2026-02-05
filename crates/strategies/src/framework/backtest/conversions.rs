@@ -13,7 +13,6 @@ pub fn convert_domain_signal(domain_signal: rust_quant_domain::SignalResult) -> 
         atr_stop_loss_price: domain_signal.atr_stop_loss_price,
         long_signal_take_profit_price: domain_signal.long_signal_take_profit_price,
         short_signal_take_profit_price: domain_signal.short_signal_take_profit_price,
-        move_stop_open_price_when_touch_price: domain_signal.move_stop_open_price_when_touch_price,
         ts: domain_signal.ts.unwrap_or(0),
         single_value: domain_signal.single_value.map(|v| v.to_string()),
         single_result: domain_signal.single_result.map(|v| v.to_string()),
@@ -38,7 +37,7 @@ pub fn to_domain_basic_risk_config(
         atr_take_profit_ratio: cfg.atr_take_profit_ratio,
         fix_signal_kline_take_profit_ratio: cfg.fixed_signal_kline_take_profit_ratio,
         is_used_signal_k_line_stop_loss: cfg.is_used_signal_k_line_stop_loss,
-        is_move_stop_loss: cfg.is_one_k_line_diff_stop_loss,
+        is_move_stop_loss: None,
         max_hold_time: None,
         max_leverage: None,
     }

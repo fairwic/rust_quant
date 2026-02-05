@@ -39,9 +39,7 @@ pub struct NweRandomStrategyConfig {
     // 风险参数（对齐 Vegas 随机参数生成）
     pub max_loss_percent: Vec<f64>,
     pub take_profit_ratios: Vec<f64>,
-    pub is_move_stop_loss: Vec<bool>,
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
-    pub is_move_stop_open_price_when_touch_price: Vec<bool>,
     pub k_line_hammer_shadow_ratios: Vec<f64>,
 }
 
@@ -66,9 +64,7 @@ impl NweRandomStrategyConfig {
             * self.nwe_multi.len()
             * self.max_loss_percent.len()
             * self.take_profit_ratios.len()
-            * self.is_move_stop_loss.len()
             * self.is_used_signal_k_line_stop_loss.len()
-            * self.is_move_stop_open_price_when_touch_price.len()
             * self.k_line_hammer_shadow_ratios.len()
     }
 }
@@ -88,9 +84,7 @@ pub struct RandomStrategyConfig {
     //risk
     pub max_loss_percent: Vec<f64>,
     pub take_profit_ratios: Vec<f64>,
-    pub is_move_stop_loss: Vec<bool>,
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
-    pub is_move_stop_open_price_when_touch_price: Vec<bool>,
     pub k_line_hammer_shadow_ratios: Vec<f64>,
     pub fix_signal_kline_take_profit_ratios: Vec<f64>,
 }
@@ -113,9 +107,7 @@ impl Default for RandomStrategyConfig {
             //risk
             max_loss_percent: vec![0.03, 0.04, 0.05],
             take_profit_ratios: vec![0.0],
-            is_move_stop_loss: vec![false, true],
             is_used_signal_k_line_stop_loss: vec![true, false],
-            is_move_stop_open_price_when_touch_price: vec![true, false],
 
             k_line_hammer_shadow_ratios: vec![0.62, 0.65, 0.7, 0.75],
             fix_signal_kline_take_profit_ratios: vec![0.0],
@@ -144,9 +136,7 @@ impl RandomStrategyConfig {
             * self.rsi_over_buy_sell.len()
             * self.max_loss_percent.len()
             * self.take_profit_ratios.len()
-            * self.is_move_stop_loss.len()
             * self.is_used_signal_k_line_stop_loss.len()
-            * self.is_move_stop_open_price_when_touch_price.len()
             * self.k_line_hammer_shadow_ratios.len()
     }
 }

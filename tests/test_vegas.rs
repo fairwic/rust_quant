@@ -94,10 +94,7 @@ async fn test_vegas() -> Result<()> {
             );
         }
 
-        let risk_strategy_config = BasicRiskStrategyConfig {
-            is_one_k_line_diff_stop_loss: true,
-            ..Default::default()
-        };
+        let risk_strategy_config = BasicRiskStrategyConfig::default();
 
         let result = strategy.get_trade_signal(
             &data_items,

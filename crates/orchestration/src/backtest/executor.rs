@@ -303,18 +303,5 @@ fn tighten_vegas_risk(mut risk: BasicRiskStrategyConfig) -> BasicRiskStrategyCon
         risk.is_used_signal_k_line_stop_loss = Some(true);
     }
 
-    // 启用单K振幅固定止损（1R）
-    if !risk.is_one_k_line_diff_stop_loss.unwrap_or(false) {
-        risk.is_one_k_line_diff_stop_loss = Some(true);
-    }
-
-    // 启用触及目标后的保本移动止损
-    if !risk
-        .is_move_stop_open_price_when_touch_price
-        .unwrap_or(false)
-    {
-        risk.is_move_stop_open_price_when_touch_price = Some(true);
-    }
-
     risk
 }

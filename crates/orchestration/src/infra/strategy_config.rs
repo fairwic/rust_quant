@@ -121,7 +121,6 @@ pub async fn test_specified_strategy_with_config(
         .rsi_oversold(20.0)
         .max_loss_percent(0.03)
         .take_profit_ratio(1.5)
-        .is_move_stop_loss(true)
         .is_used_signal_k_line_stop_loss(true)];
     //1H
     let params_batch = vec![ParamMergeBuilder::build()
@@ -137,7 +136,6 @@ pub async fn test_specified_strategy_with_config(
         .rsi_oversold(15.0)
         .max_loss_percent(0.02)
         .take_profit_ratio(1.5)
-        .is_move_stop_loss(false)
         .is_used_signal_k_line_stop_loss(true)];
     Ok(params_batch)
 }
@@ -206,12 +204,6 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
         //risk
         .max_loss_percent(risk_config.max_loss_percent)
         .take_profit_ratio(risk_config.atr_take_profit_ratio.unwrap_or(0.0))
-        .is_move_stop_loss(risk_config.is_one_k_line_diff_stop_loss.unwrap_or(false))
-        .is_move_stop_open_price_when_touch_price(
-            risk_config
-                .is_move_stop_open_price_when_touch_price
-                .unwrap_or(false),
-        )
         .is_used_signal_k_line_stop_loss(
             risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false),
         );

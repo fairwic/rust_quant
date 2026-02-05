@@ -33,9 +33,7 @@ pub struct ParamMergeBuilder {
     pub take_profit_ratio: f64, // 盈利阈值，用于动态止盈
     // 固定信号线的止盈比例
     pub fix_signal_kline_take_profit_ratio: Option<f64>, // 固定信号线的止盈比例，比如当盈利超过 k线路的长度的 n 倍时，直接止盈，适用短线策略
-    pub is_move_stop_loss: bool, //是否使用移动止损,当盈利之后,止损价格变成开仓价
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
-    pub is_move_stop_open_price_when_touch_price: bool, //是否使用移动止损当达到一个特定的价格位置的时候，移动止损线到开仓价格附近
     // strategy extensions
     pub signal_weights: Option<SignalWeightsConfig>,
     pub leg_detection_signal: Option<LegDetectionConfig>,
@@ -110,22 +108,11 @@ impl ParamMergeBuilder {
         self.take_profit_ratio = take_profit_ratio;
         self
     }
-    pub fn is_move_stop_loss(mut self, is_move_stop_loss: bool) -> Self {
-        self.is_move_stop_loss = is_move_stop_loss;
-        self
-    }
     pub fn is_used_signal_k_line_stop_loss(
         mut self,
         is_used_signal_k_line_stop_loss: bool,
     ) -> Self {
         self.is_used_signal_k_line_stop_loss = is_used_signal_k_line_stop_loss;
-        self
-    }
-    pub fn is_move_stop_open_price_when_touch_price(
-        mut self,
-        is_move_stop_open_price_when_touch_price: bool,
-    ) -> Self {
-        self.is_move_stop_open_price_when_touch_price = is_move_stop_open_price_when_touch_price;
         self
     }
     pub fn fix_signal_kline_take_profit_ratio(
@@ -142,11 +129,7 @@ impl ParamMergeBuilder {
             max_loss_percent: self.max_loss_percent,
             atr_take_profit_ratio: Some(self.take_profit_ratio),
             fixed_signal_kline_take_profit_ratio: self.fix_signal_kline_take_profit_ratio,
-            is_one_k_line_diff_stop_loss: Some(self.is_move_stop_loss),
             is_used_signal_k_line_stop_loss: Some(self.is_used_signal_k_line_stop_loss),
-            is_move_stop_open_price_when_touch_price: Some(
-                self.is_move_stop_open_price_when_touch_price,
-            ),
             dynamic_max_loss: Some(true),
             validate_signal_tp: Some(false),
             tighten_vegas_risk: Some(false),
@@ -241,9 +224,7 @@ pub struct ParamGenerator {
     //risk
     max_loss_percent: Vec<f64>,
     take_profit_ratios: Vec<f64>,
-    is_move_stop_loss: Vec<bool>,
     is_used_signal_k_line_stop_loss: Vec<bool>,
-    is_move_stop_open_price_when_touch_price: Vec<bool>,
     fix_signal_kline_take_profit_ratios: Vec<f64>,
 }
 
@@ -260,9 +241,7 @@ impl ParamGenerator {
         rsi_over_buy_sell: Vec<(f64, f64)>,
         max_loss_percent: Vec<f64>,
         take_profit_ratios: Vec<f64>,
-        is_move_stop_loss: Vec<bool>,
         is_used_signal_k_line_stop_loss: Vec<bool>,
-        is_move_stop_open_price_when_touch_price: Vec<bool>,
         fix_signal_kline_take_profit_ratios: Vec<f64>,
     ) -> Self {
         let total_count = bb_periods.len()
@@ -275,9 +254,7 @@ impl ParamGenerator {
             * rsi_over_buy_sell.len()
             * max_loss_percent.len()
             * take_profit_ratios.len()
-            * is_move_stop_loss.len()
             * is_used_signal_k_line_stop_loss.len()
-            * is_move_stop_open_price_when_touch_price.len()
             * fix_signal_kline_take_profit_ratios.len();
 
         Self {
@@ -293,9 +270,7 @@ impl ParamGenerator {
             total_count,
             max_loss_percent,
             take_profit_ratios,
-            is_move_stop_loss,
             is_used_signal_k_line_stop_loss,
-            is_move_stop_open_price_when_touch_price,
             fix_signal_kline_take_profit_ratios,
         }
     }
@@ -319,9 +294,7 @@ impl ParamGenerator {
 
             let _mlp_size = self.max_loss_percent.len();
             let _pt_size = self.take_profit_ratios.len();
-            let _mst_size = self.is_move_stop_loss.len();
             let _usklsl_size = self.is_used_signal_k_line_stop_loss.len();
-            let _mstoptp_size = self.is_move_stop_open_price_when_touch_price.len();
             let fsktpr_size = self.fix_signal_kline_take_profit_ratios.len();
             index /= fsktpr_size;
             let i_bb_p = index % bb_p_size;
@@ -357,12 +330,8 @@ impl ParamGenerator {
             let i_pt = index % self.take_profit_ratios.len();
             index /= self.take_profit_ratios.len();
 
-            let i_mst = index % self.is_move_stop_loss.len();
-            index /= self.is_move_stop_loss.len();
-
             let i_usklsl = index % self.is_used_signal_k_line_stop_loss.len();
             index /= self.is_used_signal_k_line_stop_loss.len();
-            let i_mstoptp = index % self.is_move_stop_open_price_when_touch_price.len();
             let i_fsktpr = index % self.fix_signal_kline_take_profit_ratios.len();
             // 最后一个维度，无需再除
 
@@ -382,10 +351,7 @@ impl ParamGenerator {
                 kline_end_time: None,
                 max_loss_percent: self.max_loss_percent[i_mlp],
                 take_profit_ratio: self.take_profit_ratios[i_pt],
-                is_move_stop_loss: self.is_move_stop_loss[i_mst],
                 is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
-                is_move_stop_open_price_when_touch_price: self
-                    .is_move_stop_open_price_when_touch_price[i_mstoptp],
                 fix_signal_kline_take_profit_ratio: Some(
                     self.fix_signal_kline_take_profit_ratios[i_fsktpr],
                 ),
@@ -458,9 +424,7 @@ pub struct NweParamGenerator {
     // 风险参数空间
     max_loss_percent: Vec<f64>,
     take_profit_ratios: Vec<f64>,
-    is_move_stop_loss: Vec<bool>,
     is_used_signal_k_line_stop_loss: Vec<bool>,
-    is_move_stop_open_price_when_touch_price: Vec<bool>,
     current_index: usize,
     total_count: usize,
 }
@@ -484,9 +448,7 @@ impl NweParamGenerator {
         // 风险参数
         max_loss_percent: Vec<f64>,
         take_profit_ratios: Vec<f64>,
-        is_move_stop_loss: Vec<bool>,
         is_used_signal_k_line_stop_loss: Vec<bool>,
-        is_move_stop_open_price_when_touch_price: Vec<bool>,
         k_line_hammer_shadow_ratios: Vec<f64>,
     ) -> Self {
         let total_count = stc_fast_length.len()
@@ -504,9 +466,7 @@ impl NweParamGenerator {
             * nwe_multi.len()
             * max_loss_percent.len()
             * take_profit_ratios.len()
-            * is_move_stop_loss.len()
             * is_used_signal_k_line_stop_loss.len()
-            * is_move_stop_open_price_when_touch_price.len()
             * k_line_hammer_shadow_ratios.len();
         Self {
             stc_fast_length,
@@ -525,9 +485,7 @@ impl NweParamGenerator {
             nwe_multi,
             max_loss_percent,
             take_profit_ratios,
-            is_move_stop_loss,
             is_used_signal_k_line_stop_loss,
-            is_move_stop_open_price_when_touch_price,
             current_index: 0,
             total_count,
         }
@@ -558,9 +516,7 @@ impl NweParamGenerator {
             let nwe_m_len = self.nwe_multi.len();
             let mlp_len = self.max_loss_percent.len();
             let tpr_len = self.take_profit_ratios.len();
-            let msl_len = self.is_move_stop_loss.len();
             let usklsl_len = self.is_used_signal_k_line_stop_loss.len();
-            let mstoptp_len = self.is_move_stop_open_price_when_touch_price.len();
             let kh_sr_len = self.k_line_hammer_shadow_ratios.len();
             // 按维度展开索引（顺序需与 total_count 维度相同）
             let i_stc_fast_length = idx % stc_fast_length_len;
@@ -594,10 +550,8 @@ impl NweParamGenerator {
             idx /= mlp_len;
             let i_tpr = idx % tpr_len;
             idx /= tpr_len;
-            let i_msl = idx % msl_len;
-            idx /= msl_len;
-            let i_usklsl = idx % usklsl_len; // 最后一维无需再除
-            let i_mstoptp = idx % mstoptp_len;
+            let i_usklsl = idx % usklsl_len;
+            idx /= usklsl_len;
             let i_kh_sr = idx % kh_sr_len;
             let mut cfg = rust_quant_strategies::implementations::nwe_strategy::NweStrategyConfig {
                 period: "5m".to_string(),
@@ -624,10 +578,6 @@ impl NweParamGenerator {
                 ),
                 max_loss_percent: self.max_loss_percent[i_mlp],
                 atr_take_profit_ratio: Some(self.take_profit_ratios[i_tpr]),
-                is_one_k_line_diff_stop_loss: Some(self.is_move_stop_loss[i_msl]),
-                is_move_stop_open_price_when_touch_price: Some(
-                    self.is_move_stop_open_price_when_touch_price[i_mstoptp],
-                ),
                 fixed_signal_kline_take_profit_ratio: None,
                 dynamic_max_loss: Some(true),
                 validate_signal_tp: Some(false),

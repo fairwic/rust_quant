@@ -120,7 +120,7 @@ impl StrategyExecutionService {
     ///
     /// 目标：尽量对齐回测 `check_risk_config` 的“最先触发止损”效果：
     /// - 同时存在多条止损规则时，选择更“紧”的那条（Long: 更高的止损；Short: 更低的止损）
-    /// - 目前覆盖：max_loss_percent、信号K线止损、单K振幅(1R)止损（domain: is_move_stop_loss）
+    /// - 目前覆盖：max_loss_percent、信号K线止损
     fn compute_initial_stop_loss(
         side: &str,
         signal: &SignalResult,
@@ -142,19 +142,6 @@ impl StrategyExecutionService {
             if let Some(px) = signal.signal_kline_stop_loss_price {
                 candidates.push(px);
             }
-        }
-
-        // 单K振幅固定止损（1R，domain: is_move_stop_loss）
-        if risk_config.is_move_stop_loss.unwrap_or(false) {
-            let k_range = trigger_candle
-                .map(|c| (c.h - c.l).abs().max(entry_price * 0.001))
-                .unwrap_or(entry_price * 0.001);
-            let one_r_stop = if side == "sell" {
-                entry_price + k_range
-            } else {
-                entry_price - k_range
-            };
-            candidates.push(one_r_stop);
         }
 
         match side {
@@ -1048,7 +1035,6 @@ mod tests {
             atr_stop_loss_price: None,
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
-            move_stop_open_price_when_touch_price: None,
             ts,
             single_value: None,
             single_result: None,
@@ -1077,7 +1063,6 @@ mod tests {
             atr_stop_loss_price: None,
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
-            move_stop_open_price_when_touch_price: None,
             ts,
             single_value: None,
             single_result: None,
@@ -1978,7 +1963,6 @@ mod tests {
             atr_stop_loss_price: None,
             long_signal_take_profit_price: None,
             short_signal_take_profit_price: None,
-            move_stop_open_price_when_touch_price: None,
             stop_loss_source: None,
             ts,
             single_value: None,

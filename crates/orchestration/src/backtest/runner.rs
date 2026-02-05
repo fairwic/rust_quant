@@ -226,11 +226,7 @@ impl BacktestRunner {
             random_config.nwe_multi.clone(),
             random_config.max_loss_percent.clone(),
             random_config.take_profit_ratios.clone(),
-            random_config.is_move_stop_loss.clone(),
             random_config.is_used_signal_k_line_stop_loss.clone(),
-            random_config
-                .is_move_stop_open_price_when_touch_price
-                .clone(),
             random_config.k_line_hammer_shadow_ratios.clone(),
         );
 
@@ -417,11 +413,7 @@ impl BacktestRunner {
             random_config.rsi_over_buy_sell.clone(),
             random_config.max_loss_percent.clone(),
             random_config.take_profit_ratios.clone(),
-            random_config.is_move_stop_loss.clone(),
             random_config.is_used_signal_k_line_stop_loss.clone(),
-            random_config
-                .is_move_stop_open_price_when_touch_price
-                .clone(),
             random_config.fix_signal_kline_take_profit_ratios.clone(),
         );
 
@@ -550,9 +542,7 @@ fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig
 
         take_profit_ratios: vec![1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0],
 
-        is_move_stop_loss: vec![false, true],
         k_line_hammer_shadow_ratios: vec![0.65],
         is_used_signal_k_line_stop_loss: vec![false, true],
-        is_move_stop_open_price_when_touch_price: vec![false, true],
     }
 }

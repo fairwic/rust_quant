@@ -580,7 +580,6 @@ impl NweStrategy {
             single_result: None,
             signal_kline_stop_loss_price: None,
             stop_loss_source: None,
-            move_stop_open_price_when_touch_price: None,
             is_ema_short_trend: None,
             is_ema_long_trend: None,
             atr_take_profit_level_1: None,
@@ -635,9 +634,6 @@ impl NweStrategy {
                         }
                     }
 
-                    // 设置移动止损触发价
-                    signal_result.move_stop_open_price_when_touch_price =
-                        Some(current_price + stop_distance * 1.0);
                 }
                 if let Some(is_used_signal_k_line_stop_loss) =
                     risk_config.is_used_signal_k_line_stop_loss
@@ -677,8 +673,6 @@ impl NweStrategy {
                         }
                     }
 
-                    signal_result.move_stop_open_price_when_touch_price =
-                        Some(current_price - stop_distance * 1.0);
                 }
             }
         }
