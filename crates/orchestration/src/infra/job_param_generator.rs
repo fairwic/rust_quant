@@ -4,7 +4,8 @@ use rust_quant_indicators::trend::vegas::{
     default_large_entity_stop_loss_config, default_macd_signal_config, ChaseConfirmConfig,
     EmaDistanceConfig, EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig,
     ExtremeKFilterConfig, FibRetracementSignalConfig, KlineHammerConfig, LegDetectionConfig,
-    MacdSignalConfig, RangeFilterConfig, RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
+    MacdSignalConfig, MarketStructureConfig, RangeFilterConfig, RsiSignalConfig, VegasStrategy,
+    VolumeSignalConfig,
 };
 use rust_quant_indicators::volatility::BollingBandsSignalConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
@@ -37,6 +38,7 @@ pub struct ParamMergeBuilder {
     // strategy extensions
     pub signal_weights: Option<SignalWeightsConfig>,
     pub leg_detection_signal: Option<LegDetectionConfig>,
+    pub market_structure_signal: Option<MarketStructureConfig>,
     pub range_filter_signal: Option<RangeFilterConfig>,
     pub chase_confirm_config: Option<ChaseConfirmConfig>,
     pub extreme_k_filter_signal: Option<ExtremeKFilterConfig>,
@@ -185,6 +187,7 @@ impl ParamMergeBuilder {
             }),
             kline_hammer_signal: Some(kline_hammer_signal),
             leg_detection_signal: self.leg_detection_signal,
+            market_structure_signal: self.market_structure_signal,
             range_filter_signal: self
                 .range_filter_signal
                 .or_else(|| Some(RangeFilterConfig::default())),
@@ -355,6 +358,7 @@ impl ParamGenerator {
                 ),
                 signal_weights: None,
                 leg_detection_signal: None,
+                market_structure_signal: None,
                 range_filter_signal: None,
                 chase_confirm_config: None,
                 extreme_k_filter_signal: None,

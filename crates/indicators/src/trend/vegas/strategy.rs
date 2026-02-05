@@ -39,6 +39,8 @@ pub struct VegasStrategy {
     pub kline_hammer_signal: Option<KlineHammerConfig>,
     /// 腿部识别配置
     pub leg_detection_signal: Option<LegDetectionConfig>,
+    /// 市场结构配置
+    pub market_structure_signal: Option<MarketStructureConfig>,
     /// 震荡过滤配置（仅调整止盈目标，不作为开仓信号）
     pub range_filter_signal: Option<RangeFilterConfig>,
     /// 极端K线过滤/放行配置
@@ -95,6 +97,10 @@ impl VegasStrategy {
             leg_detection_signal: Some(LegDetectionConfig {
                 is_open: false,
                 ..LegDetectionConfig::default()
+            }),
+            market_structure_signal: Some(MarketStructureConfig {
+                is_open: false,
+                ..MarketStructureConfig::default()
             }),
             range_filter_signal: Some(RangeFilterConfig::default()),
 
@@ -363,6 +369,55 @@ impl VegasStrategy {
                             is_bullish_leg: leg_value.is_bullish_leg,
                             is_bearish_leg: leg_value.is_bearish_leg,
                             is_new_leg: leg_value.is_new_leg,
+                        },
+                    ));
+                }
+            }
+        }
+
+        if let Some(market_structure_signal) = &self.market_structure_signal {
+            if market_structure_signal.is_open {
+                let structure_value = &vegas_indicator_signal_values.market_structure_value;
+                let has_swing_signal = structure_value.swing_bullish_bos
+                    || structure_value.swing_bearish_bos
+                    || structure_value.swing_bullish_choch
+                    || structure_value.swing_bearish_choch;
+                let has_internal_signal = structure_value.internal_bullish_bos
+                    || structure_value.internal_bearish_bos
+                    || structure_value.internal_bullish_choch
+                    || structure_value.internal_bearish_choch;
+
+                let can_use_swing = market_structure_signal.enable_swing_signal && has_swing_signal;
+                let can_use_internal = market_structure_signal.enable_internal_signal
+                    && has_internal_signal
+                    && (!market_structure_signal.enable_swing_signal || !has_swing_signal);
+
+                if can_use_swing || can_use_internal {
+                    let use_internal = !can_use_swing && can_use_internal;
+                    let (bullish_bos, bearish_bos, bullish_choch, bearish_choch) = if use_internal {
+                        (
+                            structure_value.internal_bullish_bos,
+                            structure_value.internal_bearish_bos,
+                            structure_value.internal_bullish_choch,
+                            structure_value.internal_bearish_choch,
+                        )
+                    } else {
+                        (
+                            structure_value.swing_bullish_bos,
+                            structure_value.swing_bearish_bos,
+                            structure_value.swing_bullish_choch,
+                            structure_value.swing_bearish_choch,
+                        )
+                    };
+
+                    conditions.push((
+                        SignalType::MarketStructure,
+                        SignalCondition::MarketStructure {
+                            is_bullish_bos: bullish_bos,
+                            is_bearish_bos: bearish_bos,
+                            is_bullish_choch: bullish_choch,
+                            is_bearish_choch: bearish_choch,
+                            is_internal: use_internal,
                         },
                     ));
                 }
@@ -1067,6 +1122,7 @@ impl VegasStrategy {
     pub fn get_indicator_combine(&self) -> IndicatorCombine {
         use crate::ema_indicator::EmaIndicator;
         use crate::leg_detection_indicator::LegDetectionIndicator;
+        use crate::market_structure_indicator::MarketStructureIndicator;
         use crate::momentum::rsi::RsiIndicator;
         use crate::pattern::engulfing::KlineEngulfingIndicator;
         use crate::pattern::hammer::KlineHammerIndicator;
@@ -1128,6 +1184,19 @@ impl VegasStrategy {
             if leg_detection_signal.is_open {
                 indicator_combine.leg_detection_indicator =
                     Some(LegDetectionIndicator::new(leg_detection_signal.size));
+            }
+        }
+
+        // 添加市场结构（可选）
+        if let Some(market_structure_signal) = &self.market_structure_signal {
+            if market_structure_signal.is_open {
+                indicator_combine.market_structure_indicator =
+                    Some(MarketStructureIndicator::new_with_thresholds(
+                        market_structure_signal.swing_length,
+                        market_structure_signal.internal_length,
+                        market_structure_signal.swing_threshold,
+                        market_structure_signal.internal_threshold,
+                    ));
             }
         }
 

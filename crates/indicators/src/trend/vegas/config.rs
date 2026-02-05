@@ -170,6 +170,39 @@ impl Default for LegDetectionConfig {
     }
 }
 
+/// 市场结构配置（SMC）
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct MarketStructureConfig {
+    /// 摆动结构长度
+    pub swing_length: usize,
+    /// 内部结构长度
+    pub internal_length: usize,
+    /// 摆动突破阈值（相对 pivot 的百分比）
+    pub swing_threshold: f64,
+    /// 内部突破阈值（相对 pivot 的百分比）
+    pub internal_threshold: f64,
+    /// 是否启用摆动结构信号
+    pub enable_swing_signal: bool,
+    /// 是否启用内部结构信号
+    pub enable_internal_signal: bool,
+    /// 是否启用
+    pub is_open: bool,
+}
+
+impl Default for MarketStructureConfig {
+    fn default() -> Self {
+        Self {
+            swing_length: 12,
+            internal_length: 2,
+            swing_threshold: 0.015,
+            internal_threshold: 0.015,
+            enable_swing_signal: false,
+            enable_internal_signal: true,
+            is_open: true,
+        }
+    }
+}
+
 /// 震荡/区间判断配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct RangeFilterConfig {

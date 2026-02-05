@@ -185,5 +185,15 @@ pub fn get_multi_indicator_values(
         );
     }
 
+    // 市场结构
+    let ms_start = Instant::now();
+    if let Some(market_structure_indicator) = &mut indicator_combine.market_structure_indicator {
+        vegas_indicator_signal_value.market_structure_value =
+            market_structure_indicator.next(data_item);
+    }
+    if ms_start.elapsed().as_millis() > 10 {
+        info!(duration_ms = ms_start.elapsed().as_millis(), "计算市场结构");
+    }
+
     vegas_indicator_signal_value
 }

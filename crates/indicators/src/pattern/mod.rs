@@ -8,9 +8,11 @@ pub mod hammer;
 // TODO: equal_high_low_indicator 有旧的导入依赖，需要重构后恢复
 // pub mod equal_high_low_indicator;
 pub mod leg_detection_indicator;
+pub mod market_structure_indicator;
 
 // 重新导出
 pub use engulfing::*;
 pub use hammer::*;
 // pub use equal_high_low_indicator::*;  // TODO: 待重构后恢复
 pub use leg_detection_indicator::*;
+pub use market_structure_indicator::*;
