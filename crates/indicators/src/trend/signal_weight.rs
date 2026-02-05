@@ -20,7 +20,8 @@ pub enum SignalType {
     EqualHighLow,    // 等高/等低点
     PremiumDiscount, // 溢价/折扣区域
     // 新增第一性原理信号类型
-    FakeBreakout, // 假突破信号
+    FakeBreakout,         // 假突破信号
+    IctStructureBreakout, // ICT 结构突破信号
 }
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub enum SignalDirect {
