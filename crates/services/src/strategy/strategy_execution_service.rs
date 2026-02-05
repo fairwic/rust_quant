@@ -17,9 +17,9 @@ use rust_quant_strategies::framework::types::TradeSide;
 use rust_quant_strategies::strategy_common::SignalResult;
 use tokio::sync::mpsc;
 
+use super::live_decision::apply_live_decision;
 use rust_quant_domain::enums::PositionSide as DomainPositionSide;
 use rust_quant_risk::realtime::{PositionSnapshot, RealtimeRiskEvent, StrategyRiskConfigSnapshot};
-use super::live_decision::apply_live_decision;
 
 /// 策略执行服务
 ///
@@ -341,8 +341,7 @@ impl StrategyExecutionService {
             // 经济事件窗口检查（高重要性事件前后暂停追涨追跌）
             // 通过环境变量控制是否启用：ECONOMIC_EVENT_FILTER=1
             let econ_filter_enabled =
-                std::env::var("ECONOMIC_EVENT_FILTER").unwrap_or_else(|_| "0".to_string())
-                    == "1";
+                std::env::var("ECONOMIC_EVENT_FILTER").unwrap_or_else(|_| "0".to_string()) == "1";
             if econ_filter_enabled {
                 if let Ok(should_wait) = self.check_economic_event_window().await {
                     if should_wait {
