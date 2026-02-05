@@ -18,7 +18,7 @@ impl VolumeRatioIndicator {
     pub fn new(length: usize, is_fitler_last_volume: bool) -> Self {
         let mut length = length;
         if is_fitler_last_volume {
-            length = length + 1;
+            length += 1;
         }
         Self {
             prev_volumes: vec![],

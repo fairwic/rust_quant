@@ -26,7 +26,7 @@ impl Percentage {
     ///
     /// 参数: 0-100的值 (如 50.0 表示50%)
     pub fn new(value: f64) -> Result<Self, PercentageError> {
-        if value < 0.0 || value > 100.0 {
+        if !(0.0..=100.0).contains(&value) {
             return Err(PercentageError::OutOfRange(value));
         }
 

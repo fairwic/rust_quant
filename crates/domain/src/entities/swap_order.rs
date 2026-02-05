@@ -101,6 +101,7 @@ impl SwapOrder {
     }
 
     /// 从信号结果创建订单
+    #[allow(clippy::too_many_arguments)]
     pub fn from_signal(
         strategy_id: i32,
         inst_id: &str,

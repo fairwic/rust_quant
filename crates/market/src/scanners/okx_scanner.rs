@@ -65,28 +65,21 @@ impl OkxScanner {
         // SPOT: vol24h = Base Vol, volCcy24h = Quote Vol
         // SWAP/FUTURES: vol24h = Contract Vol, volCcy24h = Base Vol (Underlying)
 
-        let mut volume_24h_base = Decimal::ZERO;
-        let mut volume_24h_quote = Decimal::ZERO;
-
         let vol_ccy = Decimal::from_str(&t.vol_ccy24h).unwrap_or(Decimal::ZERO);
         let vol_raw = Decimal::from_str(&t.vol24h).unwrap_or(Decimal::ZERO);
 
-        match t.inst_type.as_str() {
-            "SPOT" => {
-                volume_24h_base = vol_raw; // Base Volume (e.g. BTC)
-                volume_24h_quote = vol_ccy; // Quote Volume (e.g. USDT)
-            }
+        let (volume_24h_base, volume_24h_quote) = match t.inst_type.as_str() {
+            "SPOT" => (vol_raw, vol_ccy),
             "SWAP" | "FUTURES" => {
-                volume_24h_base = vol_ccy; // Base Volume (e.g. BTC)
-                                           // Need to calculate Quote Volume manually: Base Vol * Price
-                volume_24h_quote = volume_24h_base * price;
+                let base = vol_ccy; // Base Volume (e.g. BTC)
+                                    // Need to calculate Quote Volume manually: Base Vol * Price
+                (base, base * price)
             }
             _ => {
                 // Default fallback
-                volume_24h_base = vol_raw;
-                volume_24h_quote = vol_ccy;
+                (vol_raw, vol_ccy)
             }
-        }
+        };
 
         let ts_str = t.ts;
         let ts_millis = ts_str.parse::<i64>().unwrap_or(0);

@@ -8,7 +8,7 @@ use crate::volatility::bollinger::BollingBandsPlusIndicator;
 use crate::volume_indicator::VolumeRatioIndicator;
 
 /// 指标组合结构体
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct IndicatorCombine {
     pub ema_indicator: Option<EmaIndicator>,
     pub rsi_indicator: Option<RsiIndicator>,
@@ -18,21 +18,6 @@ pub struct IndicatorCombine {
     pub kline_hammer_indicator: Option<KlineHammerIndicator>,
     pub leg_detection_indicator: Option<LegDetectionIndicator>,
     pub market_structure_indicator: Option<MarketStructureIndicator>,
-}
-
-impl Default for IndicatorCombine {
-    fn default() -> Self {
-        Self {
-            ema_indicator: None,
-            rsi_indicator: None,
-            volume_indicator: None,
-            bollinger_indicator: None,
-            engulfing_indicator: None,
-            kline_hammer_indicator: None,
-            leg_detection_indicator: None,
-            market_structure_indicator: None,
-        }
-    }
 }
 
 impl IndicatorCombine {

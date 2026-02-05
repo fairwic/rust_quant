@@ -129,13 +129,13 @@ impl MarketStructureIndicator {
                 if low_idx + i < self.candle_buffer.len()
                     && self.candle_buffer[low_idx + i].l < low_price
                 {
-                    low_idx = low_idx + i;
+                    low_idx += i;
                     low_price = self.candle_buffer[low_idx].l;
                 }
             }
 
             // 更新摆动低点
-            let last_low = structure_value.swing_low.clone().unwrap_or_default();
+            let last_low = structure_value.swing_low.unwrap_or_default();
             structure_value.swing_low = Some(PivotPoint {
                 price: low_price,
                 last_price: last_low.price,
@@ -155,13 +155,13 @@ impl MarketStructureIndicator {
                 if high_idx + i < self.candle_buffer.len()
                     && self.candle_buffer[high_idx + i].h > high_price
                 {
-                    high_idx = high_idx + i;
+                    high_idx += i;
                     high_price = self.candle_buffer[high_idx + i].h;
                 }
             }
 
             // 更新摆动高点
-            let last_high = structure_value.swing_high.clone().unwrap_or_default();
+            let last_high = structure_value.swing_high.unwrap_or_default();
             structure_value.swing_high = Some(PivotPoint {
                 price: high_price,
                 last_price: last_high.price,
@@ -194,13 +194,13 @@ impl MarketStructureIndicator {
                 if low_idx + i < self.candle_buffer.len()
                     && self.candle_buffer[low_idx + i].l < low_price
                 {
-                    low_idx = low_idx + i;
+                    low_idx += i;
                     low_price = self.candle_buffer[low_idx].l;
                 }
             }
 
             // 更新内部低点
-            let last_low = structure_value.internal_low.clone().unwrap_or_default();
+            let last_low = structure_value.internal_low.unwrap_or_default();
             structure_value.internal_low = Some(PivotPoint {
                 price: low_price,
                 last_price: last_low.price,
@@ -220,13 +220,13 @@ impl MarketStructureIndicator {
                 if high_idx + i < self.candle_buffer.len()
                     && self.candle_buffer[high_idx + i].h > high_price
                 {
-                    high_idx = high_idx + i;
+                    high_idx += i;
                     high_price = self.candle_buffer[high_idx + i].h;
                 }
             }
 
             // 更新内部高点
-            let last_high = structure_value.internal_high.clone().unwrap_or_default();
+            let last_high = structure_value.internal_high.unwrap_or_default();
             structure_value.internal_high = Some(PivotPoint {
                 price: high_price,
                 last_price: last_high.price,

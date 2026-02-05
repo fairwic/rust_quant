@@ -13,7 +13,7 @@ pub struct CandleItem {
 
 impl CandleItem {
     pub fn builder() -> CandleItemBuilder {
-        CandleItemBuilder::new()
+        CandleItemBuilder::default()
     }
     pub fn ts(&self) -> i64 {
         self.ts
@@ -69,7 +69,7 @@ impl CandleItem {
         self.up_shadow_ratio() > 0.3 && self.down_shadow_ratio() > 0.3
     }
 }
-
+#[derive(Default)]
 pub struct CandleItemBuilder {
     o: Option<f64>,
     h: Option<f64>,
@@ -81,17 +81,6 @@ pub struct CandleItemBuilder {
 }
 
 impl CandleItemBuilder {
-    pub fn new() -> Self {
-        Self {
-            o: None,
-            h: None,
-            l: None,
-            c: None,
-            v: None,
-            ts: None,
-            confirm: None,
-        }
-    }
     pub fn ts(mut self, val: i64) -> Self {
         self.ts = Some(val);
         self

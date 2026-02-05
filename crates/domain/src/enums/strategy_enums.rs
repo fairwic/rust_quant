@@ -42,40 +42,39 @@ impl StrategyType {
             StrategyType::Custom(_) => "custom",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for StrategyType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "vegas" => Some(StrategyType::Vegas),
-            "nwe" => Some(StrategyType::Nwe),
-            "macd_kdj" => Some(StrategyType::MacdKdj),
-            "engulfing" => Some(StrategyType::Engulfing),
-            "comprehensive" => Some(StrategyType::Comprehensive),
-            "mult_combine" => Some(StrategyType::MultCombine),
-            "squeeze" => Some(StrategyType::Squeeze),
-            "ut_boot" => Some(StrategyType::UtBoot),
-            "top_contract" => Some(StrategyType::TopContract),
-            _ => None,
+            "vegas" => Ok(StrategyType::Vegas),
+            "nwe" => Ok(StrategyType::Nwe),
+            "macd_kdj" => Ok(StrategyType::MacdKdj),
+            "engulfing" => Ok(StrategyType::Engulfing),
+            "comprehensive" => Ok(StrategyType::Comprehensive),
+            "mult_combine" => Ok(StrategyType::MultCombine),
+            "squeeze" => Ok(StrategyType::Squeeze),
+            "ut_boot" => Ok(StrategyType::UtBoot),
+            "top_contract" => Ok(StrategyType::TopContract),
+            _ => Err(format!("Unknown strategy type: {}", s)),
         }
     }
 }
 
 /// 策略状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum StrategyStatus {
     /// 未启动
     Stopped,
     /// 运行中
+    #[default]
     Running,
     /// 暂停
     Paused,
     /// 错误
     Error,
-}
-
-impl Default for StrategyStatus {
-    fn default() -> Self {
-        StrategyStatus::Running
-    }
 }
 
 impl StrategyStatus {
@@ -139,25 +138,6 @@ impl Timeframe {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "1m" => Some(Timeframe::M1),
-            "3m" => Some(Timeframe::M3),
-            "5m" => Some(Timeframe::M5),
-            "15m" => Some(Timeframe::M15),
-            "30m" => Some(Timeframe::M30),
-            "1H" | "1h" => Some(Timeframe::H1),
-            "2H" | "2h" => Some(Timeframe::H2),
-            "4H" | "4h" => Some(Timeframe::H4),
-            "6H" | "6h" => Some(Timeframe::H6),
-            "12H" | "12h" => Some(Timeframe::H12),
-            "1Dutc" | "1d" => Some(Timeframe::D1),
-            "1W" | "1w" => Some(Timeframe::W1),
-            "1M" => Some(Timeframe::MN1),
-            _ => None,
-        }
-    }
-
     /// 获取时间周期对应的分钟数
     pub fn to_minutes(&self) -> i64 {
         match self {
@@ -178,20 +158,45 @@ impl Timeframe {
     }
 }
 
+impl std::str::FromStr for Timeframe {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "1m" => Ok(Timeframe::M1),
+            "3m" => Ok(Timeframe::M3),
+            "5m" => Ok(Timeframe::M5),
+            "15m" => Ok(Timeframe::M15),
+            "30m" => Ok(Timeframe::M30),
+            "1H" | "1h" => Ok(Timeframe::H1),
+            "2H" | "2h" => Ok(Timeframe::H2),
+            "4H" | "4h" => Ok(Timeframe::H4),
+            "6H" | "6h" => Ok(Timeframe::H6),
+            "12H" | "12h" => Ok(Timeframe::H12),
+            "1Dutc" | "1d" => Ok(Timeframe::D1),
+            "1W" | "1w" => Ok(Timeframe::W1),
+            "1M" => Ok(Timeframe::MN1),
+            _ => Err(format!("Unknown timeframe: {}", s)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_strategy_type_from_str() {
-        assert_eq!(StrategyType::from_str("vegas"), Some(StrategyType::Vegas));
-        assert_eq!(StrategyType::from_str("NWE"), Some(StrategyType::Nwe));
-        assert_eq!(StrategyType::from_str("unknown"), None);
+        use std::str::FromStr;
+        assert_eq!(StrategyType::from_str("vegas"), Ok(StrategyType::Vegas));
+        assert_eq!(StrategyType::from_str("NWE"), Ok(StrategyType::Nwe));
+        assert!(StrategyType::from_str("unknown").is_err());
     }
 
     #[test]
     fn test_timeframe_conversion() {
-        assert_eq!(Timeframe::from_str("1H"), Some(Timeframe::H1));
+        use std::str::FromStr;
+        assert_eq!(Timeframe::from_str("1H"), Ok(Timeframe::H1));
         assert_eq!(Timeframe::H1.to_minutes(), 60);
         assert_eq!(Timeframe::D1.to_minutes(), 1440);
     }

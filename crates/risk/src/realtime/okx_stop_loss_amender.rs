@@ -100,7 +100,7 @@ impl OkxStopLossAmender {
             })?;
         println!("details: {:#?}", details);
         let first = details
-            .get(0)
+            .first()
             .ok_or_else(|| anyhow!("订单详情为空: inst_id={}, ord_id={}", inst_id, ord_id))?;
 
         // 优先取包含止损信息的那条 attachAlgo

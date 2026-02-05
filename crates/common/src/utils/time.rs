@@ -23,7 +23,7 @@ pub(crate) fn is_within_business_hours(ts: i64) -> bool {
     let now_washington_time = now_utc.with_timezone(&est_or_edt_offset);
     // 判断转换后的时间是否在早上7点到晚上22点之间
     let hour = now_washington_time.hour();
-    let in_with_hour = hour >= 7 && hour < 22;
+    let in_with_hour = (7..22).contains(&hour);
     let day_week = now_washington_time.weekday().number_from_monday();
     let is_saturday = day_week == 5;
     if is_saturday {
@@ -69,7 +69,7 @@ pub fn ts_add_n_period(ts: i64, period: &str, n: usize) -> anyhow::Result<i64> {
     Ok(ts + mill)
 }
 
-///
+/// 将周期字符串格式化为字符串
 pub fn format_to_period_str(period: &str) -> String {
     let dt = Local::now();
     let (num, unit) = period.split_at(period.chars().take_while(|c| c.is_numeric()).count());

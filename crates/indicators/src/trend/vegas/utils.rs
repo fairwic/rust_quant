@@ -118,10 +118,10 @@ pub fn check_key_price_level_sell(
     };
 
     let next_key_level = if *interval >= 1.0 {
-        let magnitude = 10f64.powi((*interval as f64).log10().floor() as i32);
+        let magnitude = 10f64.powi((*interval).log10().floor() as i32);
         (*interval / magnitude).floor() * magnitude
     } else {
-        let magnitude = 10f64.powi((1.0 / *interval as f64).log10().ceil() as i32);
+        let magnitude = 10f64.powi((1.0 / *interval).log10().ceil() as i32);
         (*interval * magnitude).floor() / magnitude
     };
 

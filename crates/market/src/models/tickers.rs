@@ -229,7 +229,7 @@ impl TicketsModel {
         for (inst_id, date, vol) in daily_volumes {
             daily_vol_map
                 .entry(inst_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((date, vol));
         }
 

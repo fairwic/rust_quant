@@ -44,6 +44,7 @@ pub struct Candle {
 
 impl Candle {
     /// 创建新的K线
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         symbol: String,
         timeframe: Timeframe,
@@ -54,7 +55,7 @@ impl Candle {
         close: Price,
         volume: Volume,
     ) -> Self {
-        let datetime = DateTime::from_timestamp_millis(timestamp).unwrap_or_else(|| Utc::now());
+        let datetime = DateTime::from_timestamp_millis(timestamp).unwrap_or_else(Utc::now);
 
         Self {
             symbol,

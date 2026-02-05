@@ -53,7 +53,7 @@ impl CandlePersistWorker {
                 Some(task) = self.receiver.recv() => {
                     // 按 inst_id + time_interval 分组
                     let key = format!("{}_{}", task.inst_id, task.time_interval);
-                    buffer.entry(key).or_insert_with(Vec::new).extend(task.candles);
+                    buffer.entry(key).or_default().extend(task.candles);
 
                     // 计算总数据量
                     let total_size: usize = buffer.values().map(|v| v.len()).sum();

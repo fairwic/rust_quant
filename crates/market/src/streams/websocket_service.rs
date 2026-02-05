@@ -7,7 +7,7 @@ use tracing::{info, span, Level};
 
 use crate::cache::default_provider;
 use crate::models::CandlesEntity;
-use crate::repositories::candle_service::CandleService;
+use crate::repositories::candle_service::{CandleService, StrategyTrigger};
 use crate::repositories::persist_worker::{CandlePersistWorker, PersistTask};
 use crate::repositories::ticker_service::TickerService;
 use okx::config::Credentials;
@@ -29,7 +29,7 @@ use tracing::error;
 /// # 架构说明
 /// - 如果提供 strategy_trigger，则 K线确认时会自动触发策略执行
 /// - 如果不提供，则仅处理 K线数据存储和缓存
-pub async fn run_socket(inst_ids: &Vec<String>, times: &Vec<String>) {
+pub async fn run_socket(inst_ids: &[String], times: &[String]) {
     run_socket_with_strategy_trigger(inst_ids, times, None).await;
 }
 
@@ -40,9 +40,9 @@ pub async fn run_socket(inst_ids: &Vec<String>, times: &Vec<String>) {
 /// * `times` - 时间周期列表
 /// * `strategy_trigger` - 策略触发回调函数
 pub async fn run_socket_with_strategy_trigger(
-    inst_ids: &Vec<String>,
-    times: &Vec<String>,
-    strategy_trigger: Option<Arc<dyn Fn(String, String, CandlesEntity) + Send + Sync>>,
+    inst_ids: &[String],
+    times: &[String],
+    strategy_trigger: Option<StrategyTrigger>,
 ) {
     let span = span!(Level::DEBUG, "socket_logic");
     let _enter = span.enter();
@@ -147,7 +147,7 @@ pub async fn run_socket_with_strategy_trigger(
         }
     }
 
-    let inst_filters = Arc::new(inst_ids.clone());
+    let inst_filters = Arc::new(inst_ids.to_vec());
     let ticker_service = Arc::new(TickerService::new());
 
     // 持续监听并处理 ticker 消息

@@ -85,7 +85,7 @@ fn default_emit_debug() -> bool {
 impl VegasStrategy {
     pub fn new(period: String) -> Self {
         Self {
-            period: period,
+            period,
             min_k_line_num: 7000,
             ema_signal: Some(EmaSignalConfig::default()),
             volume_signal: Some(VolumeSignalConfig::default()),
@@ -586,7 +586,6 @@ impl VegasStrategy {
                                 // 确保止损不低于入场价(Close) - 保护性
                                 large_entity_retracement_sl = Some(sl.max(last_data_item.c));
                             }
-                            _ => {}
                         }
                     }
                 }
@@ -651,19 +650,18 @@ impl VegasStrategy {
                     }
 
                     // 3. 最后检查锤子线形态 + 成交量确认(如果还没有设置止损)
-                    if signal_result.signal_kline_stop_loss_price.is_none() {
-                        if vegas_indicator_signal_values
+                    if signal_result.signal_kline_stop_loss_price.is_none()
+                        && vegas_indicator_signal_values
                             .kline_hammer_value
                             .is_long_signal
-                        {
-                            if volume_confirmed {
-                                signal_result.signal_kline_stop_loss_price = Some(last_data_item.l);
-                                signal_result.stop_loss_source =
-                                    Some("KlineHammer_Volume_Confirmed".to_string());
-                            } else {
-                                signal_result.stop_loss_source =
-                                    Some("KlineHammer_Volume_Rejected".to_string());
-                            }
+                    {
+                        if volume_confirmed {
+                            signal_result.signal_kline_stop_loss_price = Some(last_data_item.l);
+                            signal_result.stop_loss_source =
+                                Some("KlineHammer_Volume_Confirmed".to_string());
+                        } else {
+                            signal_result.stop_loss_source =
+                                Some("KlineHammer_Volume_Rejected".to_string());
                         }
                     }
                 }
@@ -717,19 +715,18 @@ impl VegasStrategy {
                     }
 
                     // 3. 最后检查锤子线形态 + 成交量确认(如果还没有设置止损)
-                    if signal_result.signal_kline_stop_loss_price.is_none() {
-                        if vegas_indicator_signal_values
+                    if signal_result.signal_kline_stop_loss_price.is_none()
+                        && vegas_indicator_signal_values
                             .kline_hammer_value
                             .is_short_signal
-                        {
-                            if volume_confirmed {
-                                signal_result.signal_kline_stop_loss_price = Some(last_data_item.h);
-                                signal_result.stop_loss_source =
-                                    Some("KlineHammer_Volume_Confirmed".to_string());
-                            } else {
-                                signal_result.stop_loss_source =
-                                    Some("KlineHammer_Volume_Rejected".to_string());
-                            }
+                    {
+                        if volume_confirmed {
+                            signal_result.signal_kline_stop_loss_price = Some(last_data_item.h);
+                            signal_result.stop_loss_source =
+                                Some("KlineHammer_Volume_Confirmed".to_string());
+                        } else {
+                            signal_result.stop_loss_source =
+                                Some("KlineHammer_Volume_Rejected".to_string());
                         }
                     }
                 }
@@ -803,7 +800,7 @@ impl VegasStrategy {
         // 当价格远离EMA144时，要求额外的确认条件才能开仓
         // 回测验证: ID 5988, profit +57%, sharpe 1.53→1.89, max_dd 57.7%→55.5%
         // ================================================================
-        let chase_cfg = self.chase_confirm_config.clone().unwrap_or_default();
+        let chase_cfg = self.chase_confirm_config.unwrap_or_default();
         if chase_cfg.enabled {
             let ema144 = vegas_indicator_signal_values.ema_values.ema2_value;
             if ema144 > 0.0 {
@@ -957,9 +954,9 @@ impl VegasStrategy {
                         let entry_price = signal_result.open_price.unwrap_or(last_data_item.c);
                         let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
                         let rsi_in_range = valid_rsi_value
-                            .map(|rsi| rsi >= 46.0 && rsi <= 54.0)
+                            .map(|rsi| (46.0..=54.0).contains(&rsi))
                             .unwrap_or(false);
-                        let macd_near_zero = self.macd_signal.as_ref().map_or(false, |macd_cfg| {
+                        let macd_near_zero = self.macd_signal.as_ref().is_some_and(|macd_cfg| {
                             if !macd_cfg.is_open {
                                 return false;
                             }
@@ -1135,13 +1132,12 @@ impl VegasStrategy {
                 .unwrap_or(false)
             {
                 counter_trend::calculate_counter_trend_pullback_take_profit_price(
-                    &data_items,
+                    data_items,
                     &mut signal_result,
                     &conditions,
                     vegas_indicator_signal_values.ema_values.ema1_value,
                 );
             }
-            // TODO: 这些字段原本用于调试，现在类型不匹配，暂时注释
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
             signal_result.single_result = Some(json!(conditions).to_string());
         }
@@ -1240,7 +1236,7 @@ impl VegasStrategy {
     /// 实际回测逻辑应在 strategies 或 orchestration 包中调用，使用 get_indicator_combine() 和 get_trade_signal()
     pub fn run_test(
         &mut self,
-        _candles: &Vec<CandleItem>,
+        _candles: &[CandleItem],
         _risk_strategy_config: BasicRiskStrategyConfig,
     ) -> BacktestResult {
         // 由于架构分层，indicators 包的 BacktestResult 与 strategies 包不同
@@ -1256,7 +1252,7 @@ impl VegasStrategy {
         if let Some(volume_signal_config) = &self.volume_signal {
             return volume_trend.volume_ratio > volume_signal_config.volume_increase_ratio;
         }
-        return false;
+        false
     }
 
     fn check_breakthrough_conditions(
@@ -1516,7 +1512,7 @@ impl VegasStrategy {
         &self,
         last_data_item: &CandleItem,
         signal_result: &mut SignalResult,
-        conditions: &Vec<(SignalType, SignalCondition)>,
+        conditions: &[(SignalType, SignalCondition)],
     ) {
         // 检查是否有吞没形态信号
         let has_engulfing_signal = conditions
@@ -1526,7 +1522,6 @@ impl VegasStrategy {
         // 如果是吞没形态信号，使用开盘价作为止损价格
         if has_engulfing_signal {
             signal_result.signal_kline_stop_loss_price = Some(last_data_item.o());
-            return;
         }
 
         // 【已禁用】只保留吞没形态止损，其他情况不设置信号线止损

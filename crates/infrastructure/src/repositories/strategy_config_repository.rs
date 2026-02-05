@@ -3,6 +3,8 @@
 //! 从 src/trading/model/strategy/strategy_config.rs 迁移
 //! rbatis → sqlx
 
+use std::str::FromStr;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::{FromRow, MySql, Pool};

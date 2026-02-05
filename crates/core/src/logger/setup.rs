@@ -198,7 +198,7 @@ impl EmailSender {
     }
 
     async fn send_error(&self, error_message: String) {
-        if let Err(_) = self.sender.send(error_message) {
+        if self.sender.send(error_message).is_err() {
             eprintln!("Failed to send error to email queue");
         }
     }
@@ -432,12 +432,10 @@ pub async fn setup_logging() -> anyhow::Result<()> {
         } else {
             tracing::subscriber::set_global_default(with_console)?;
         }
+    } else if let Some(custom) = custom_layer_opt {
+        tracing::subscriber::set_global_default(base.with(custom))?;
     } else {
-        if let Some(custom) = custom_layer_opt {
-            tracing::subscriber::set_global_default(base.with(custom))?;
-        } else {
-            tracing::subscriber::set_global_default(base)?;
-        }
+        tracing::subscriber::set_global_default(base)?;
     }
 
     info!("Log configuration setup successfully!");

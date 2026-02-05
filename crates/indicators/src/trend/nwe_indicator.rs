@@ -23,7 +23,7 @@ pub struct NweIndicator {
 
 impl NweIndicator {
     pub fn new(bandwidth_h: f64, mult: f64, window: usize) -> Self {
-        let win = window.max(2).min(500);
+        let win = window.clamp(2, 500);
         let mae_period = (win - 1).max(1);
         let weights = Self::precompute_weights(bandwidth_h, win);
 

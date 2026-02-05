@@ -59,6 +59,7 @@ pub struct BacktestLog {
 }
 
 impl BacktestLog {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         strategy_type: String,
         inst_id: String,

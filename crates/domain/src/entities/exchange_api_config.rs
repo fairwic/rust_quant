@@ -32,6 +32,7 @@ pub struct ExchangeApiConfig {
 
 impl ExchangeApiConfig {
     /// 创建新的API配置
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: i32,
         exchange_name: String,

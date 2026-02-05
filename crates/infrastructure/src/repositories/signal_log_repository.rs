@@ -100,10 +100,7 @@ impl SignalLogRepository {
     pub async fn find_all(&self, limit: Option<usize>) -> Result<Vec<SignalLogEntity>> {
         let pool = get_db_pool();
 
-        let limit = match limit {
-            Some(v) => v,
-            None => 100,
-        };
+        let limit = limit.unwrap_or(100);
         let signals = sqlx::query_as!(
             SignalLogEntity,
             "SELECT * FROM strategy_job_signal_log

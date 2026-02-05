@@ -48,3 +48,9 @@ impl TickerService {
         Ok(())
     }
 }
+
+impl Default for TickerService {
+    fn default() -> Self {
+        Self::new()
+    }
+}

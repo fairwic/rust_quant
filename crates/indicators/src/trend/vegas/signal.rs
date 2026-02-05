@@ -153,7 +153,7 @@ pub struct FibRetracementSignalValue {
 }
 
 /// EMA趋势信号值
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
 pub struct EmaTouchTrendSignalValue {
     /// 是否多头趋势
     pub is_uptrend: bool,
@@ -191,31 +191,6 @@ pub struct EmaTouchTrendSignalValue {
     pub is_long_signal: bool,
     /// 是否空头开仓
     pub is_short_signal: bool,
-}
-
-impl Default for EmaTouchTrendSignalValue {
-    fn default() -> Self {
-        Self {
-            is_uptrend: false,
-            is_downtrend: false,
-            is_in_uptrend_touch_ema2: false,
-            is_in_uptrend_touch_ema3: false,
-            is_in_uptrend_touch_ema2_ema3_nums: 0,
-            is_in_uptrend_touch_ema4: false,
-            is_in_uptrend_touch_ema5: false,
-            is_in_uptrend_touch_ema4_ema5_nums: 0,
-            is_touch_ema2: false,
-            is_touch_ema3: false,
-            is_ema2_ema3_nums: 0,
-            is_touch_ema4: false,
-            is_touch_ema5: false,
-            is_touch_ema4_ema5_nums: 0,
-            is_touch_ema7: false,
-            is_touch_ema7_nums: 0,
-            is_long_signal: false,
-            is_short_signal: false,
-        }
-    }
 }
 
 /// Vegas指标综合信号值

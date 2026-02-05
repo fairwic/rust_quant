@@ -203,7 +203,7 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
                 inst_id, side, pos_size, pos_side, tag, platform_type, detail)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
-        .bind(&order.strategy_id)
+        .bind(order.strategy_id)
         .bind(&order.in_order_id)
         .bind(&order.out_order_id)
         .bind(&order.strategy_type)
@@ -256,10 +256,10 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
         );
 
         let start_dt = DateTime::from_timestamp_millis(start_time)
-            .unwrap_or_else(|| Utc::now())
+            .unwrap_or_else(Utc::now)
             .naive_utc();
         let end_dt = DateTime::from_timestamp_millis(end_time)
-            .unwrap_or_else(|| Utc::now())
+            .unwrap_or_else(Utc::now)
             .naive_utc();
 
         let entities = sqlx::query_as::<_, SwapOrderEntity>(

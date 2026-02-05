@@ -11,6 +11,9 @@ use crate::repositories::persist_worker::PersistTask;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 
+/// 策略触发回调类型
+pub type StrategyTrigger = Arc<dyn Fn(String, String, CandlesEntity) + Send + Sync>;
+
 pub struct CandleService {
     cache: Arc<dyn LatestCandleCacheProvider>,
     persist_sender: Option<mpsc::UnboundedSender<PersistTask>>,
@@ -20,12 +23,12 @@ pub struct CandleService {
     /// - market层不应直接依赖strategies层
     /// - 通过回调函数实现解耦
     /// - 由上层（orchestration/services）注入策略触发逻辑
-    strategy_trigger: Option<Arc<dyn Fn(String, String, CandlesEntity) + Send + Sync>>,
+    strategy_trigger: Option<StrategyTrigger>,
 }
 
 /// 确认K线触发去重：确保同一 (inst_id, time_interval) 的同一根确认K线只触发一次
 /// key = "{inst_id}:{time_interval}" -> last_triggered_confirmed_ts(ms)
-static LAST_TRIGGERED_CONFIRMED_TS: Lazy<DashMap<String, i64>> = Lazy::new(|| DashMap::new());
+static LAST_TRIGGERED_CONFIRMED_TS: Lazy<DashMap<String, i64>> = Lazy::new(DashMap::new);
 
 impl CandleService {
     pub fn new() -> Self {
@@ -69,7 +72,7 @@ impl CandleService {
     pub fn new_with_strategy_trigger(
         cache: Arc<dyn LatestCandleCacheProvider>,
         persist_sender: Option<mpsc::UnboundedSender<PersistTask>>,
-        strategy_trigger: Arc<dyn Fn(String, String, CandlesEntity) + Send + Sync>,
+        strategy_trigger: StrategyTrigger,
     ) -> Self {
         Self {
             cache,
@@ -109,14 +112,8 @@ impl CandleService {
             Some(cache_candle) => {
                 new_ts > cache_candle.ts
                     || (new_ts == cache_candle.ts && {
-                        let new_vol = match latest.vol_ccy.parse::<f64>() {
-                            Ok(v) => v,
-                            Err(_) => 0.0,
-                        };
-                        let old_vol = match cache_candle.vol_ccy.parse::<f64>() {
-                            Ok(v) => v,
-                            Err(_) => 0.0,
-                        };
+                        let new_vol = latest.vol_ccy.parse::<f64>().unwrap_or(0.0);
+                        let old_vol = cache_candle.vol_ccy.parse::<f64>().unwrap_or(0.0);
                         new_vol >= old_vol
                     })
             }
@@ -233,5 +230,11 @@ impl CandleService {
     ) -> anyhow::Result<()> {
         self.update_candles_batch(candle, inst_id, time_interval)
             .await
+    }
+}
+
+impl Default for CandleService {
+    fn default() -> Self {
+        Self::new()
     }
 }

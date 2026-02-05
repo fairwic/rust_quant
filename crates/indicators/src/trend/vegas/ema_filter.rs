@@ -36,11 +36,12 @@ impl Default for EmaDistanceConfig {
 }
 
 /// EMA距离状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EmaDistanceState {
     /// 距离过远（>5%）
     TooFar,
     /// 距离适中（2%-5%）
+    #[default]
     Normal,
     /// 距离过近/震荡（<2%）
     Ranging,
@@ -67,12 +68,6 @@ pub struct EmaDistanceFilter {
     pub is_ranging_market: bool,
     /// 是否三线缠绕
     pub is_tangled: bool,
-}
-
-impl Default for EmaDistanceState {
-    fn default() -> Self {
-        EmaDistanceState::Normal
-    }
 }
 
 /// 计算EMA距离过滤

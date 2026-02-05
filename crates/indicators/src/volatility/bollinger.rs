@@ -74,12 +74,11 @@ impl Next<&CandleItem> for BollingBandsPlusIndicator {
             self.consecutive_touch_down_times = 0;
         }
 
-        let output = BollingBandsPlusIndicatorOutput {
+        BollingBandsPlusIndicatorOutput {
             upper: bollinger_bands_output.upper,
             lower: bollinger_bands_output.lower,
             average: bollinger_bands_output.average,
             consecutive_touch_times: self.consecutive_touch_up_times,
-        };
-        output
+        }
     }
 }
