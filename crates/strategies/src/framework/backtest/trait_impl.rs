@@ -1,7 +1,4 @@
-use super::adapter::{
-    run_indicator_strategy_backtest, run_indicator_strategy_backtest_pipeline,
-    IndicatorStrategyBacktest,
-};
+use super::adapter::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
 use super::types::{BackTestResult, BasicRiskStrategyConfig};
 use crate::implementations::nwe_strategy::NweStrategy;
 use crate::implementations::vegas_backtest::VegasBacktestAdapter;
@@ -22,7 +19,7 @@ where
         candles: &[CandleItem],
         risk_strategy_config: BasicRiskStrategyConfig,
     ) -> BackTestResult {
-        run_indicator_strategy_backtest_pipeline(inst_id, self, candles, risk_strategy_config)
+        run_indicator_strategy_backtest(inst_id, self, candles, risk_strategy_config)
     }
 }
 

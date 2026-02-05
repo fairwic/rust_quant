@@ -1,12 +1,11 @@
 use crate::CandleItem;
 
-use super::engine::run_back_test_generic;
+use super::engine::run_back_test;
 use super::types::{BackTestResult, BasicRiskStrategyConfig, SignalResult};
 
 /// 通用的“指标驱动”策略回测适配器接口
 ///
-/// 新增策略只需实现该 trait，即可自动复用 run_back_test_generic
-/// 的全部交易撮合/风险处理逻辑
+/// 新增策略只需实现该 trait，即可复用 pipeline 回测流程。
 pub trait IndicatorStrategyBacktest {
     type IndicatorCombine;
     type IndicatorValues;
@@ -33,35 +32,7 @@ pub trait IndicatorStrategyBacktest {
 }
 
 /// 针对实现了 [`IndicatorStrategyBacktest`] 的策略，统一执行回测
-pub fn run_indicator_strategy_backtest<S: IndicatorStrategyBacktest>(
-    inst_id: &str,
-    strategy: &mut S,
-    candles_list: &[CandleItem],
-    risk_config: BasicRiskStrategyConfig,
-) -> BackTestResult {
-    let min_len = strategy.min_data_length();
-    let mut indicator_combine = strategy.init_indicator_combine();
-    run_back_test_generic(
-        inst_id,
-        |candles, values| strategy.generate_signal(candles, values, &risk_config),
-        candles_list,
-        risk_config,
-        min_len,
-        &mut indicator_combine,
-        |ic, candle| S::build_indicator_values(ic, candle),
-    )
-}
-
-// ============================================================================
-// Pipeline版本适配器（用于对比测试）
-// ============================================================================
-
-use super::engine::run_back_test_pipeline;
-
-/// 使用Pipeline架构执行回测（适配IndicatorStrategyBacktest trait）
-///
-/// 与`run_indicator_strategy_backtest`功能相同，但使用Pipeline架构
-pub fn run_indicator_strategy_backtest_pipeline<S>(
+pub fn run_indicator_strategy_backtest<S>(
     inst_id: &str,
     strategy: S,
     candles_list: &[CandleItem],
@@ -72,104 +43,66 @@ where
     S::IndicatorCombine: Send + Sync + 'static,
     S::IndicatorValues: Send + Sync + 'static,
 {
-    run_back_test_pipeline(inst_id, strategy, candles_list, risk_config)
+    run_back_test(inst_id, strategy, candles_list, risk_config)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[derive(Debug, Clone, Default)]
-    struct StatefulStrategy {
-        calls: usize,
-    }
-
-    impl IndicatorStrategyBacktest for StatefulStrategy {
-        type IndicatorCombine = ();
-        type IndicatorValues = ();
-
-        fn min_data_length(&self) -> usize {
-            3
-        }
-
-        fn init_indicator_combine(&self) -> Self::IndicatorCombine {
-            ()
-        }
-
-        fn build_indicator_values(
-            _indicator_combine: &mut Self::IndicatorCombine,
-            _candle: &CandleItem,
-        ) -> Self::IndicatorValues {
-            ()
-        }
-
-        fn generate_signal(
-            &mut self,
-            candles: &[CandleItem],
-            _values: &mut Self::IndicatorValues,
-            _risk_config: &BasicRiskStrategyConfig,
-        ) -> SignalResult {
-            self.calls += 1;
-
-            let last = candles.last().expect("candles window is non-empty");
-            let mut signal = SignalResult::default();
-            signal.ts = last.ts;
-            signal.open_price = last.c;
-
-            // 依赖调用次数的状态机：用于验证 pipeline 在 i < 500 期间仍会调用策略但丢弃信号，
-            // 从而与 legacy engine 的行为保持一致。
-            if self.calls % 100 == 0 {
-                signal.should_buy = true;
-            }
-            if self.calls % 100 == 50 {
-                signal.should_sell = true;
-            }
-
-            signal
-        }
-    }
-
-    fn build_candles(n: usize) -> Vec<CandleItem> {
-        (0..n)
-            .map(|i| {
-                let base = 100.0 + i as f64 * 0.01;
-                CandleItem {
-                    o: base,
-                    h: base * 1.001,
-                    l: base * 0.999,
-                    c: base,
-                    v: 1.0,
-                    ts: i as i64 * 60_000,
-                    confirm: 1,
-                }
-            })
-            .collect()
-    }
-
     #[test]
-    fn pipeline_matches_generic_engine() {
-        let candles = build_candles(800);
+    fn pipeline_backtest_runs_and_records_trades() {
+        use crate::framework::backtest::adapter::run_indicator_strategy_backtest;
+        use crate::framework::backtest::types::BasicRiskStrategyConfig;
+
+        #[derive(Debug, Clone, Default)]
+        struct Strategy;
+        impl crate::framework::backtest::adapter::IndicatorStrategyBacktest for Strategy {
+            type IndicatorCombine = ();
+            type IndicatorValues = ();
+            fn min_data_length(&self) -> usize {
+                3
+            }
+            fn init_indicator_combine(&self) -> Self::IndicatorCombine {
+                ()
+            }
+            fn build_indicator_values(
+                _: &mut Self::IndicatorCombine,
+                _: &crate::CandleItem,
+            ) -> Self::IndicatorValues {
+                ()
+            }
+            fn generate_signal(
+                &mut self,
+                candles: &[crate::CandleItem],
+                _: &mut Self::IndicatorValues,
+                _: &BasicRiskStrategyConfig,
+            ) -> crate::framework::backtest::types::SignalResult {
+                let mut s = crate::framework::backtest::types::SignalResult::default();
+                s.ts = candles.last().unwrap().ts;
+                s.open_price = candles.last().unwrap().c;
+                if s.ts % 2 == 0 {
+                    s.should_buy = true;
+                }
+                s
+            }
+        }
+
+        let candles: Vec<crate::CandleItem> = (0..800)
+            .map(|i| crate::CandleItem {
+                o: 100.0,
+                h: 101.0,
+                l: 99.0,
+                c: 100.0,
+                v: 1.0,
+                ts: i,
+                confirm: 1,
+            })
+            .collect();
         let mut risk = BasicRiskStrategyConfig::default();
         risk.max_loss_percent = 1.0;
-        risk.is_used_signal_k_line_stop_loss = Some(false);
-        risk.is_one_k_line_diff_stop_loss = Some(false);
-        risk.is_move_stop_open_price_when_touch_price = Some(false);
 
-        let mut legacy = StatefulStrategy::default();
-        let legacy_result = run_indicator_strategy_backtest("TEST", &mut legacy, &candles, risk);
-
-        let pipeline_result = run_indicator_strategy_backtest_pipeline(
-            "TEST",
-            StatefulStrategy::default(),
-            &candles,
-            risk,
-        );
-
-        assert_eq!(
-            legacy_result.trade_records.len(),
-            pipeline_result.trade_records.len()
-        );
-        assert!((legacy_result.funds - pipeline_result.funds).abs() < 1e-9);
-        assert!((legacy_result.win_rate - pipeline_result.win_rate).abs() < 1e-12);
+        let result = run_indicator_strategy_backtest("TEST", Strategy::default(), &candles, risk);
+        assert!(result.open_trades > 0);
     }
 }
