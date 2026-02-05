@@ -15,12 +15,10 @@ pub enum SignalType {
     KlineHammer,            // 锤子形态
     // 新增Smart Money Concepts相关信号类型
     LegDetection,    // 腿部识别
-    MarketStructure, // 市场结构
     FairValueGap,    // 公平价值缺口
     EqualHighLow,    // 等高/等低点
     PremiumDiscount, // 溢价/折扣区域
     // 新增第一性原理信号类型
-    FakeBreakout,         // 假突破信号
     IctStructureBreakout, // ICT 结构突破信号
 }
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
@@ -76,13 +74,6 @@ pub enum SignalCondition {
         is_bearish_leg: bool,
         is_new_leg: bool,
     },
-    MarketStructure {
-        is_bullish_bos: bool,
-        is_bearish_bos: bool,
-        is_bullish_choch: bool,
-        is_bearish_choch: bool,
-        is_internal: bool,
-    },
     FairValueGap {
         is_bullish_fvg: bool,
         is_bearish_fvg: bool,
@@ -94,12 +85,6 @@ pub enum SignalCondition {
     PremiumDiscount {
         in_premium_zone: bool,
         in_discount_zone: bool,
-    },
-    // 新增第一性原理信号条件
-    FakeBreakout {
-        is_bullish: bool, // 看跌假突破 → 做多
-        is_bearish: bool, // 看涨假突破 → 做空
-        strength: f64,    // 信号强度 0.0-1.0
     },
 }
 
@@ -200,35 +185,6 @@ impl SignalWeightsConfig {
                     Some(CheckConditionResult {
                         signal_type,
                         score: base_weight,
-                        detail: condition,
-                        signal_result: Some(SignalDirect::IsShort),
-                    })
-                } else {
-                    None
-                }
-            }
-            SignalCondition::MarketStructure {
-                is_bullish_bos,
-                is_bearish_bos,
-                is_bullish_choch,
-                is_bearish_choch,
-                is_internal,
-            } => {
-                let multiplier = if is_internal { 1.0 } else { 1.5 }; // 摆动结构比内部结构更重要
-
-                if is_bullish_bos || is_bullish_choch {
-                    let score = base_weight * multiplier * if is_bullish_choch { 1.2 } else { 1.0 };
-                    Some(CheckConditionResult {
-                        signal_type,
-                        score,
-                        detail: condition,
-                        signal_result: Some(SignalDirect::IsLong),
-                    })
-                } else if is_bearish_bos || is_bearish_choch {
-                    let score = base_weight * multiplier * if is_bearish_choch { 1.2 } else { 1.0 };
-                    Some(CheckConditionResult {
-                        signal_type,
-                        score,
                         detail: condition,
                         signal_result: Some(SignalDirect::IsShort),
                     })
@@ -487,34 +443,6 @@ impl SignalWeightsConfig {
                     None
                 }
             }
-            // 新增假突破信号评估
-            SignalCondition::FakeBreakout {
-                is_bullish,
-                is_bearish,
-                strength,
-            } => {
-                // 假突破信号权重加成（基于信号强度）
-                let adjusted_weight = base_weight * (1.0 + strength * 0.5);
-                if is_bullish {
-                    // 看跌假突破 → 做多信号
-                    Some(CheckConditionResult {
-                        signal_type,
-                        score: adjusted_weight,
-                        detail: condition,
-                        signal_result: Some(SignalDirect::IsLong),
-                    })
-                } else if is_bearish {
-                    // 看涨假突破 → 做空信号
-                    Some(CheckConditionResult {
-                        signal_type,
-                        score: adjusted_weight,
-                        detail: condition,
-                        signal_result: Some(SignalDirect::IsShort),
-                    })
-                } else {
-                    None
-                }
-            }
         }
     }
 
@@ -575,36 +503,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn market_structure_vote_applies_even_with_zero_weight() {
-        let weights = SignalWeightsConfig {
-            weights: vec![
-                (SignalType::VolumeTrend, 2.0),     // 提供足够的总分，触发阈值
-                (SignalType::MarketStructure, 0.0), // 仅方向投票（不贡献权重）
-            ],
-            min_total_weight: 2.0,
-        };
-
-        let score = weights.calculate_score(vec![
-            (
-                SignalType::VolumeTrend,
-                SignalCondition::Volume {
-                    is_increasing: true,
-                    ratio: 2.0,
-                },
-            ),
-            (
-                SignalType::MarketStructure,
-                SignalCondition::MarketStructure {
-                    is_bullish_bos: true,
-                    is_bearish_bos: false,
-                    is_bullish_choch: false,
-                    is_bearish_choch: false,
-                    is_internal: true,
-                },
-            ),
-        ]);
-
-        assert!((score.total_weight - 2.0).abs() < 1e-12);
-        assert_eq!(weights.is_signal_valid(&score), Some(SignalDirect::IsLong));
+    fn default_weights_exclude_removed_signals() {
+        let market_structure = serde_json::from_str::<SignalType>("\"MarketStructure\"");
+        let fake_breakout = serde_json::from_str::<SignalType>("\"FakeBreakout\"");
+        assert!(market_structure.is_err());
+        assert!(fake_breakout.is_err());
     }
 }
