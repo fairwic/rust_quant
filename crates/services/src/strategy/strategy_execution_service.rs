@@ -13,6 +13,7 @@ use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
 use rust_quant_strategies::framework::backtest::{BasicRiskStrategyConfig, TradingState};
+use rust_quant_strategies::framework::risk::{StopLossCalculator, StopLossSide};
 use rust_quant_strategies::framework::types::TradeSide;
 use rust_quant_strategies::strategy_common::SignalResult;
 
@@ -92,17 +93,12 @@ impl StrategyExecutionService {
         }
     }
 
-    /// 计算“初始止损价”（用于下单时挂止损单）
-    ///
-    /// 目标：尽量对齐回测 `check_risk_config` 的“最先触发止损”效果：
-    /// - 同时存在多条止损规则时，选择更“紧”的那条（Long: 更高的止损；Short: 更低的止损）
-    /// - 目前覆盖：max_loss_percent、信号K线止损
-    fn compute_initial_stop_loss(
+    /// 构建止损候选价列表（由上层选择最紧止损）
+    fn build_stop_loss_candidates(
         side: &str,
         signal: &SignalResult,
         risk_config: &rust_quant_domain::BasicRiskConfig,
-        trigger_candle: Option<&CandleItem>,
-    ) -> f64 {
+    ) -> Vec<f64> {
         let entry_price = signal.open_price;
         let max_loss_percent = risk_config.max_loss_percent;
         let max_loss_stop = if side == "sell" {
@@ -120,19 +116,7 @@ impl StrategyExecutionService {
             }
         }
 
-        match side {
-            // Long：止损应 < entry，越接近 entry 越“紧”
-            "buy" => candidates
-                .into_iter()
-                .filter(|px| *px < entry_price)
-                .fold(max_loss_stop, |acc, px| acc.max(px)),
-            // Short：止损应 > entry，越接近 entry 越“紧”
-            "sell" => candidates
-                .into_iter()
-                .filter(|px| *px > entry_price)
-                .fold(max_loss_stop, |acc, px| acc.min(px)),
-            _ => max_loss_stop,
-        }
+        candidates
     }
 
     /// 执行策略分析和交易流程
@@ -314,7 +298,6 @@ impl StrategyExecutionService {
                     order_risk,
                     config.id,
                     config.strategy_type.as_str(),
-                    Some(trigger_candle),
                 )
                 .await
             {
@@ -531,7 +514,6 @@ impl StrategyExecutionService {
         risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
         strategy_type: &str,
-        trigger_candle: Option<&CandleItem>,
     ) -> Result<()> {
         info!(
             "准备下单: inst_id={}, period={}, config_id={}",
@@ -676,8 +658,14 @@ impl StrategyExecutionService {
 
         // 6. 计算止损止盈价格
         let entry_price = signal.open_price;
-        let final_stop_loss =
-            Self::compute_initial_stop_loss(side, signal, risk_config, trigger_candle);
+        let stop_candidates = Self::build_stop_loss_candidates(side, signal, risk_config);
+        let stop_side = if side == "sell" {
+            StopLossSide::Short
+        } else {
+            StopLossSide::Long
+        };
+        let final_stop_loss = StopLossCalculator::select(stop_side, entry_price, &stop_candidates)
+            .ok_or_else(|| anyhow!("无有效止损价"))?;
 
         let take_profit_trigger_px: Option<f64> = None;
 
