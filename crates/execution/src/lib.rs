@@ -1,8 +1,6 @@
 //! # Rust Quant Execution
 //!
-//! 订单执行：订单管理、执行引擎、持仓管理
-
-pub mod execution_engine;
+//! 订单执行：订单管理、持仓管理
 pub mod order_manager;
 pub mod position_manager;
 
