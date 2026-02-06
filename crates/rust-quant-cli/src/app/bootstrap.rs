@@ -220,61 +220,8 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
     // 创建服务实例
     let config_service = std::sync::Arc::new(create_strategy_config_service());
     let swap_order_repo = std::sync::Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
-    // 启动实时风控引擎（事件驱动）
-    let (risk_tx, risk_rx) =
-        tokio::sync::mpsc::channel::<rust_quant_risk::realtime::RealtimeRiskEvent>(4096);
-    let amender = match rust_quant_risk::realtime::OkxStopLossAmender::from_env() {
-        Ok(a) => std::sync::Arc::new(a),
-        Err(e) => {
-            error!("❌ 初始化 OKX 止损改单器失败（实时风控禁用）: {}", e);
-            // 退化：不给 execution/handler 注入 risk_tx
-            let execution_service =
-                std::sync::Arc::new(StrategyExecutionService::new(swap_order_repo));
-            // 🚀 创建策略触发回调函数
-            let strategy_trigger = {
-                let handler = std::sync::Arc::new(
-                    rust_quant_orchestration::workflow::websocket_handler::WebsocketStrategyHandler::new(
-                        config_service,
-                        execution_service,
-                    ),
-                );
-
-                std::sync::Arc::new(
-                    move |inst_id: String,
-                          time_interval: String,
-                          snap: rust_quant_market::models::CandlesEntity| {
-                        let handler = handler.clone();
-                        tokio::spawn(async move {
-                            handler.handle(inst_id, time_interval, snap).await;
-                        });
-                    },
-                )
-            };
-
-            let inst_ids_vec: Vec<String> = inst_ids.to_vec();
-            let periods_vec: Vec<String> = periods.to_vec();
-
-            streams::run_socket_with_strategy_trigger(
-                &inst_ids_vec,
-                &periods_vec,
-                Some(strategy_trigger),
-            )
-            .await;
-            return;
-        }
-    };
-
-    let engine = std::sync::Arc::new(rust_quant_risk::realtime::RealtimeRiskEngine::new(amender));
-    tokio::spawn({
-        let engine = engine.clone();
-        async move {
-            engine.run(risk_rx).await;
-        }
-    });
-
-    let execution_service = std::sync::Arc::new(
-        StrategyExecutionService::new(swap_order_repo).with_realtime_risk_sender(risk_tx.clone()),
-    );
+    let execution_service =
+        std::sync::Arc::new(StrategyExecutionService::new(swap_order_repo));
 
     // 🚀 创建策略触发回调函数
     let strategy_trigger = {
@@ -282,8 +229,7 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
             rust_quant_orchestration::workflow::websocket_handler::WebsocketStrategyHandler::new(
                 config_service,
                 execution_service,
-            )
-            .with_realtime_risk_sender(risk_tx.clone()),
+            ),
         );
 
         std::sync::Arc::new(

@@ -5,9 +5,6 @@ use tracing::{error, info};
 use rust_quant_domain::Timeframe;
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
-use tokio::sync::mpsc;
-
-use rust_quant_risk::realtime::{MarketCandle, RealtimeRiskEvent};
 
 use super::strategy_runner;
 
@@ -17,7 +14,6 @@ use super::strategy_runner;
 pub struct WebsocketStrategyHandler {
     config_service: Arc<StrategyConfigService>,
     execution_service: Arc<StrategyExecutionService>,
-    realtime_risk_tx: Option<mpsc::Sender<RealtimeRiskEvent>>,
 }
 
 impl WebsocketStrategyHandler {
@@ -29,21 +25,13 @@ impl WebsocketStrategyHandler {
         Self {
             config_service,
             execution_service,
-            realtime_risk_tx: None,
         }
-    }
-
-    /// 注入实时风控事件通道（用于推送确认K线）
-    pub fn with_realtime_risk_sender(mut self, tx: mpsc::Sender<RealtimeRiskEvent>) -> Self {
-        self.realtime_risk_tx = Some(tx);
-        self
     }
 
     /// 处理 K 线数据
     pub async fn handle(&self, inst_id: String, time_interval: String, snap: CandlesEntity) {
         let config_service = self.config_service.clone();
         let execution_service = self.execution_service.clone();
-        let realtime_risk_tx = self.realtime_risk_tx.clone();
         let candle_ts = snap.ts;
 
         info!(
@@ -61,18 +49,6 @@ impl WebsocketStrategyHandler {
                     return;
                 }
             };
-
-            // 推送确认K线给实时风控（全局只需一次：在 handler 入口层做）
-            if let Some(tx) = realtime_risk_tx {
-                match MarketCandle::try_from_entity(inst_id.clone(), &snap) {
-                    Ok(mc) => {
-                        let _ = tx.send(RealtimeRiskEvent::Candle(mc)).await;
-                    }
-                    Err(e) => {
-                        error!("❌ 转换 MarketCandle 失败: inst_id={}, err={}", inst_id, e);
-                    }
-                }
-            }
 
             // 查询该交易对和时间周期的所有启用策略
             let configs = match config_service

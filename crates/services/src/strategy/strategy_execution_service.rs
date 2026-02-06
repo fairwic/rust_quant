@@ -15,11 +15,8 @@ use rust_quant_domain::StrategyConfig;
 use rust_quant_strategies::framework::backtest::{BasicRiskStrategyConfig, TradingState};
 use rust_quant_strategies::framework::types::TradeSide;
 use rust_quant_strategies::strategy_common::SignalResult;
-use tokio::sync::mpsc;
 
 use super::live_decision::apply_live_decision;
-use rust_quant_domain::enums::PositionSide as DomainPositionSide;
-use rust_quant_risk::realtime::{PositionSnapshot, RealtimeRiskEvent, StrategyRiskConfigSnapshot};
 
 /// 策略执行服务
 ///
@@ -38,8 +35,6 @@ pub struct StrategyExecutionService {
     /// 合约订单仓储（依赖注入）
     swap_order_repository: Arc<dyn SwapOrderRepository>,
 
-    /// 实盘实时风控事件通道（可选）
-    realtime_risk_tx: Option<mpsc::Sender<RealtimeRiskEvent>>,
 
     /// 实盘交易状态（每个策略配置一份）
     live_states: DashMap<i64, TradingState>,
@@ -50,15 +45,8 @@ impl StrategyExecutionService {
     pub fn new(swap_order_repository: Arc<dyn SwapOrderRepository>) -> Self {
         Self {
             swap_order_repository,
-            realtime_risk_tx: None,
             live_states: DashMap::new(),
         }
-    }
-
-    /// 注入实时风控事件通道（用于实盘动态风控）
-    pub fn with_realtime_risk_sender(mut self, tx: mpsc::Sender<RealtimeRiskEvent>) -> Self {
-        self.realtime_risk_tx = Some(tx);
-        self
     }
 
     fn candle_entity_to_item(c: &rust_quant_market::models::CandlesEntity) -> Result<CandleItem> {
@@ -101,18 +89,6 @@ impl StrategyExecutionService {
                 "1" | "true" | "yes" | "y" | "on"
             ),
             Err(_) => false,
-        }
-    }
-
-    fn select_take_profit_trigger_px(side: &str, signal: &SignalResult) -> Option<f64> {
-        if let Some(tp) = signal.atr_take_profit_ratio_price {
-            return Some(tp);
-        }
-
-        match side {
-            "buy" => signal.long_signal_take_profit_price,
-            "sell" => signal.short_signal_take_profit_price,
-            _ => None,
         }
     }
 
@@ -253,17 +229,6 @@ impl StrategyExecutionService {
 
         info!("风险配置: risk_config:{:#?}", risk_config);
 
-        // 7.1 推送风险配置到实时风控（若启用）
-        if let Some(tx) = self.realtime_risk_tx.clone() {
-            let snap = StrategyRiskConfigSnapshot {
-                strategy_config_id: config.id,
-                inst_id: inst_id.to_string(),
-                risk: risk_config.clone(),
-            };
-            tokio::spawn(async move {
-                let _ = tx.send(RealtimeRiskEvent::RiskConfig(snap)).await;
-            });
-        }
 
         let Some(trigger_candle) = snap_item.as_ref() else {
             warn!(
@@ -714,27 +679,7 @@ impl StrategyExecutionService {
         let final_stop_loss =
             Self::compute_initial_stop_loss(side, signal, risk_config, trigger_candle);
 
-        // 可选：下单时附带止盈（实盘开关）
-        let attach_tp = Self::env_enabled("LIVE_ATTACH_TP");
-        let mut take_profit_trigger_px = if attach_tp {
-            Self::select_take_profit_trigger_px(side, signal)
-        } else {
-            None
-        };
-        if let Some(tp) = take_profit_trigger_px {
-            let tp_valid = if pos_side == "long" {
-                tp > entry_price
-            } else {
-                tp < entry_price
-            };
-            if !tp_valid {
-                warn!(
-                    "止盈价不合理，忽略止盈: inst_id={}, side={}, entry={:.8}, tp={:.8}",
-                    inst_id, side, entry_price, tp
-                );
-                take_profit_trigger_px = None;
-            }
-        }
+        let take_profit_trigger_px: Option<f64> = None;
 
         // 验证止损价格合理性
         if pos_side == "short" && entry_price > final_stop_loss {
@@ -791,28 +736,6 @@ impl StrategyExecutionService {
             inst_id, out_order_id, order_size
         );
 
-        // 7.1 下单成功后推送 PositionSnapshot（用于“1.5R 触发保本移动止损”）
-        if let (Some(tx), true) = (self.realtime_risk_tx.clone(), !out_order_id.is_empty()) {
-            let size_f64 = order_size.parse::<f64>().unwrap_or(0.0);
-            let pos_side_domain = if side == "buy" {
-                DomainPositionSide::Long
-            } else {
-                DomainPositionSide::Short
-            };
-            let pos = PositionSnapshot {
-                strategy_config_id: config_id,
-                inst_id: inst_id.to_string(),
-                pos_side: pos_side_domain,
-                entry_price,
-                size: size_f64,
-                initial_stop_loss: Some(final_stop_loss),
-                ord_id: Some(out_order_id.clone()),
-                is_open: true,
-            };
-            tokio::spawn(async move {
-                let _ = tx.send(RealtimeRiskEvent::Position(pos)).await;
-            });
-        }
 
         // 8. 保存订单记录到数据库
         let order_detail = serde_json::json!({
@@ -1485,39 +1408,6 @@ mod tests {
         let stop_loss_price = 49000.123456789;
         let formatted = format!("{:.2}", stop_loss_price);
         assert_eq!(formatted, "49000.12");
-    }
-
-    #[test]
-    fn test_take_profit_priority_atr_then_signal_then_counter_long() {
-        let mut signal = create_buy_signal(100.0, 1);
-        signal.atr_take_profit_ratio_price = Some(130.0);
-        signal.long_signal_take_profit_price = Some(120.0);
-        assert_eq!(
-            StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
-            Some(130.0)
-        );
-
-        signal.atr_take_profit_ratio_price = None;
-        assert_eq!(
-            StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
-            Some(120.0)
-        );
-
-        signal.long_signal_take_profit_price = None;
-        assert_eq!(
-            StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
-            None
-        );
-    }
-
-    #[test]
-    fn test_take_profit_priority_short_uses_short_signal_price() {
-        let mut signal = create_sell_signal(100.0, 1);
-        signal.short_signal_take_profit_price = Some(90.0);
-        assert_eq!(
-            StrategyExecutionService::select_take_profit_trigger_px("sell", &signal),
-            Some(90.0)
-        );
     }
 
     /// 测试：下单数量精度（2位小数）
