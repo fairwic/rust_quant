@@ -6,8 +6,8 @@ use crate::framework::backtest::shadow_trading::ShadowTradeManager;
 use crate::framework::backtest::types::{
     BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState,
 };
-use rust_quant_trading::audit::AuditTrail;
 use crate::CandleItem;
+use rust_quant_trading::audit::AuditTrail;
 
 /// 回测Pipeline上下文
 ///

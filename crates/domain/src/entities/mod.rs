@@ -2,8 +2,8 @@
 //!
 //! 实体是具有唯一标识的领域对象，通常作为聚合根
 
-pub mod backtest;
 pub mod audit;
+pub mod backtest;
 pub mod candle;
 pub mod dynamic_config_log;
 pub mod economic_event;
@@ -15,11 +15,11 @@ pub mod position;
 pub mod strategy_config;
 pub mod swap_order;
 
-pub use backtest::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats};
 pub use audit::{
     OrderDecisionLog, OrderStateLog, PortfolioSnapshot, PositionSnapshot, RiskDecisionLog,
     SignalSnapshotLog, StrategyRun,
 };
+pub use backtest::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats};
 pub use candle::Candle;
 pub use dynamic_config_log::DynamicConfigLog;
 pub use economic_event::{EconomicEvent, EventImportance};

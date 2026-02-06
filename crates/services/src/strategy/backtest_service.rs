@@ -173,7 +173,9 @@ impl BacktestService {
         strategy_name: &str,
         audit_trail: &rust_quant_trading::audit::AuditTrail,
     ) -> Result<()> {
-        use rust_quant_domain::entities::{OrderDecisionLog, RiskDecisionLog, SignalSnapshotLog, StrategyRun};
+        use rust_quant_domain::entities::{
+            OrderDecisionLog, RiskDecisionLog, SignalSnapshotLog, StrategyRun,
+        };
 
         let run_id = audit_trail.run_id.clone();
 

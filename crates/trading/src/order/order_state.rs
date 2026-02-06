@@ -15,7 +15,9 @@ pub struct OrderStateMachine {
 
 impl OrderStateMachine {
     pub fn new() -> Self {
-        Self { state: OrderState::New }
+        Self {
+            state: OrderState::New,
+        }
     }
 
     pub fn state(&self) -> OrderState {
