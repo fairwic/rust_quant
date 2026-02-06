@@ -33,6 +33,7 @@ pub use risk::{
     check_risk_config, check_risk_config_with_r_system, init_r_system_state, RSystemRiskConfig,
     RSystemRuntime,
 };
+pub use crate::framework::risk::{StopLossCalculator, StopLossSide};
 pub use signal::deal_signal;
 pub use trait_impl::BackTestAbleStrategyTrait;
 pub use types::{

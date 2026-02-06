@@ -2,6 +2,7 @@
 pub mod backtest;
 pub mod config;
 pub mod execution_traits;
+pub mod risk;
 pub mod strategy_common;
 pub mod strategy_registry;
 pub mod strategy_trait;
