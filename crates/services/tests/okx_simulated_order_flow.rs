@@ -93,6 +93,55 @@ fn compute_tp_sl(last: f64, side: &str) -> (Option<f64>, Option<f64>) {
     }
 }
 
+#[test]
+fn build_cancel_close_algo_body_contains_ids() {
+    let body = OkxOrderService::build_cancel_close_algo_body(
+        "BTC-USDT-SWAP",
+        &vec!["1".to_string(), "2".to_string()],
+    );
+    assert_eq!(body["instId"], "BTC-USDT-SWAP");
+    assert_eq!(body["algoIds"][0], "1");
+    assert_eq!(body["algoIds"][1], "2");
+}
+
+#[test]
+fn build_place_close_algo_body_includes_tp_sl_when_present() {
+    let body = OkxOrderService::build_place_close_algo_body(
+        "BTC-USDT-SWAP",
+        "isolated",
+        "sell",
+        "long",
+        Some(110.0),
+        Some(90.0),
+    );
+    assert_eq!(body["instId"], "BTC-USDT-SWAP");
+    assert_eq!(body["tdMode"], "isolated");
+    assert_eq!(body["side"], "sell");
+    assert_eq!(body["posSide"], "long");
+    assert_eq!(body["algoType"], "conditional");
+    assert_eq!(body["closeFraction"], "1");
+    assert_eq!(body["tpTriggerPx"], "110.00000000");
+    assert_eq!(body["tpOrdPx"], "-1");
+    assert_eq!(body["tpTriggerPxType"], "last");
+    assert_eq!(body["slTriggerPx"], "90.00000000");
+    assert_eq!(body["slOrdPx"], "-1");
+    assert_eq!(body["slTriggerPxType"], "last");
+}
+
+#[test]
+fn build_place_close_algo_body_omits_tp_sl_when_none() {
+    let body = OkxOrderService::build_place_close_algo_body(
+        "BTC-USDT-SWAP",
+        "isolated",
+        "buy",
+        "short",
+        None,
+        None,
+    );
+    assert!(body.get("tpTriggerPx").is_none());
+    assert!(body.get("slTriggerPx").is_none());
+}
+
 async fn get_position_mgn_mode(
     okx: &OkxOrderService,
     api: &ExchangeApiConfig,

@@ -10,6 +10,7 @@ use okx::dto::trade_dto::CloseOrderReqDto;
 use okx::dto::trade_dto::OrdTypeEnum;
 use okx::dto::PositionSide;
 use okx::{OkxAccount, OkxClient, OkxTrade};
+use reqwest::Method;
 use rust_quant_domain::entities::ExchangeApiConfig;
 use rust_quant_strategies::strategy_common::SignalResult;
 use tracing::{error, info};
@@ -51,6 +52,50 @@ impl OkxOrderService {
             OkxClient::new(credentials).map_err(|e| anyhow!("创建OKX客户端失败: {}", e))?;
         Self::apply_request_expiration_override(&mut client);
         Ok(client)
+    }
+
+    pub fn build_cancel_close_algo_body(inst_id: &str, algo_ids: &[String]) -> serde_json::Value {
+        serde_json::json!({
+            "instId": inst_id,
+            "algoIds": algo_ids,
+        })
+    }
+
+    pub fn build_place_close_algo_body(
+        inst_id: &str,
+        mgn_mode: &str,
+        side: &str,
+        pos_side: &str,
+        take_profit_trigger_px: Option<f64>,
+        stop_loss_trigger_px: Option<f64>,
+    ) -> serde_json::Value {
+        let mut body = serde_json::Map::new();
+        body.insert("instId".to_string(), serde_json::json!(inst_id));
+        body.insert("tdMode".to_string(), serde_json::json!(mgn_mode));
+        body.insert("side".to_string(), serde_json::json!(side));
+        body.insert("posSide".to_string(), serde_json::json!(pos_side));
+        body.insert("algoType".to_string(), serde_json::json!("conditional"));
+        body.insert("closeFraction".to_string(), serde_json::json!("1"));
+
+        if let Some(tp) = take_profit_trigger_px {
+            body.insert(
+                "tpTriggerPx".to_string(),
+                serde_json::json!(format!("{:.8}", tp)),
+            );
+            body.insert("tpOrdPx".to_string(), serde_json::json!("-1"));
+            body.insert("tpTriggerPxType".to_string(), serde_json::json!("last"));
+        }
+
+        if let Some(sl) = stop_loss_trigger_px {
+            body.insert(
+                "slTriggerPx".to_string(),
+                serde_json::json!(format!("{:.8}", sl)),
+            );
+            body.insert("slOrdPx".to_string(), serde_json::json!("-1"));
+            body.insert("slTriggerPxType".to_string(), serde_json::json!("last"));
+        }
+
+        serde_json::Value::Object(body)
     }
 
     /// 执行下单操作（市价单）
@@ -235,6 +280,68 @@ impl OkxOrderService {
         })?;
 
         info!("平仓请求已提交: {:?}", resp);
+        Ok(())
+    }
+
+    /// 撤销平仓策略委托（止盈/止损）
+    pub async fn cancel_close_algos(
+        &self,
+        api_config: &ExchangeApiConfig,
+        inst_id: &str,
+        algo_ids: &[String],
+    ) -> Result<()> {
+        if algo_ids.is_empty() {
+            return Ok(());
+        }
+
+        let client = Self::create_okx_client(api_config)?;
+        let trade = OkxTrade::new(client);
+        let body = Self::build_cancel_close_algo_body(inst_id, algo_ids);
+        let body_str = serde_json::to_string(&body).map_err(|e| anyhow!("序列化撤单请求失败: {}", e))?;
+        let path = "/api/v5/trade/cancel-algos";
+
+        let resp: serde_json::Value = trade
+            .client()
+            .send_request(Method::POST, path, &body_str)
+            .await
+            .map_err(|e| anyhow!("撤销平仓策略委托失败: {}", e))?;
+
+        info!("撤销平仓策略委托返回: {}", resp);
+        Ok(())
+    }
+
+    /// 下达平仓策略委托（止盈/止损）
+    #[allow(clippy::too_many_arguments)]
+    pub async fn place_close_algo(
+        &self,
+        api_config: &ExchangeApiConfig,
+        inst_id: &str,
+        mgn_mode: &str,
+        side: &str,
+        pos_side: &str,
+        take_profit_trigger_px: Option<f64>,
+        stop_loss_trigger_px: Option<f64>,
+    ) -> Result<()> {
+        let client = Self::create_okx_client(api_config)?;
+        let trade = OkxTrade::new(client);
+        let body = Self::build_place_close_algo_body(
+            inst_id,
+            mgn_mode,
+            side,
+            pos_side,
+            take_profit_trigger_px,
+            stop_loss_trigger_px,
+        );
+        let body_str = serde_json::to_string(&body).map_err(|e| anyhow!("序列化下单请求失败: {}", e))?;
+        let path = "/api/v5/trade/order-algo";
+
+        let resp: serde_json::Value = trade
+            .client()
+            .send_request(Method::POST, path, &body_str)
+            .await
+            .map_err(|e| anyhow!("下达平仓策略委托失败: {}", e))?;
+
+        info!("下达平仓策略委托返回: {}", resp);
         Ok(())
     }
 
