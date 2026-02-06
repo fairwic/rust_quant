@@ -15,6 +15,7 @@ pub mod types;
 pub mod utils;
 
 // 重新导出常用类型
+pub use crate::framework::risk::{StopLossCalculator, StopLossSide};
 pub use adapter::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
 pub use conversions::{convert_domain_signal, to_domain_basic_risk_config};
 pub use engine::run_back_test;
@@ -30,10 +31,9 @@ pub use r_system::{
 };
 pub use recording::{record_trade_entry, record_trade_exit};
 pub use risk::{
-    check_risk_config, check_risk_config_with_r_system, compute_current_targets, init_r_system_state,
-    ExitTargets, RSystemRiskConfig, RSystemRuntime,
+    check_risk_config, check_risk_config_with_r_system, compute_current_targets,
+    init_r_system_state, ExitTargets, RSystemRiskConfig, RSystemRuntime,
 };
-pub use crate::framework::risk::{StopLossCalculator, StopLossSide};
 pub use signal::deal_signal;
 pub use trait_impl::BackTestAbleStrategyTrait;
 pub use types::{

@@ -573,10 +573,8 @@ impl SwapOrderService {
             Side::Sell => StopLossSide::Short,
             Side::Buy => StopLossSide::Long,
         };
-        let stop_loss_price =
-            StopLossCalculator::select(sl_side, entry_price, &candidates).ok_or_else(|| {
-                AppError::BizError("no valid stop_loss candidate".to_string())
-            })?;
+        let stop_loss_price = StopLossCalculator::select(sl_side, entry_price, &candidates)
+            .ok_or_else(|| AppError::BizError("no valid stop_loss candidate".to_string()))?;
         //valid 如果是做空，开仓价格要<止损价格,否则不进行下单
         //valid 如果是做多，开仓价格要>止损价格,否则不进行下单
         if pos_side == PositionSide::Short && entry_price > stop_loss_price {

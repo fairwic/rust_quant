@@ -53,7 +53,6 @@ pub struct StrategyExecutionService {
     /// 合约订单仓储（依赖注入）
     swap_order_repository: Arc<dyn SwapOrderRepository>,
 
-
     /// 实盘交易状态（每个策略配置一份）
     live_states: DashMap<i64, TradingState>,
     /// 实盘止盈止损目标缓存
@@ -126,11 +125,7 @@ impl StrategyExecutionService {
     }
 
     fn build_close_algo_cl_ord_id(config_id: i64) -> String {
-        format!(
-            "rq-{}-{}",
-            config_id,
-            chrono::Utc::now().timestamp_millis()
-        )
+        format!("rq-{}-{}", config_id, chrono::Utc::now().timestamp_millis())
     }
 
     fn parse_detail_object(detail: &str) -> serde_json::Map<String, serde_json::Value> {
@@ -207,7 +202,10 @@ impl StrategyExecutionService {
                 .map(serde_json::Value::Number)
                 .unwrap_or(serde_json::Value::Null),
         );
-        map.insert("close_algo".to_string(), serde_json::Value::Object(close_algo));
+        map.insert(
+            "close_algo".to_string(),
+            serde_json::Value::Object(close_algo),
+        );
         serde_json::Value::Object(map).to_string()
     }
 
@@ -232,9 +230,7 @@ impl StrategyExecutionService {
         let Some(close_algo) = value.get("close_algo") else {
             return (None, None);
         };
-        let stop_loss = close_algo
-            .get("stop_loss")
-            .and_then(Self::parse_f64_value);
+        let stop_loss = close_algo.get("stop_loss").and_then(Self::parse_f64_value);
         let take_profit = close_algo
             .get("take_profit")
             .and_then(Self::parse_f64_value);
@@ -365,7 +361,6 @@ impl StrategyExecutionService {
                 .map_err(|e| anyhow!("解析风控配置失败: {}", e))?;
 
         info!("风险配置: risk_config:{:#?}", risk_config);
-
 
         let Some(trigger_candle) = snap_item.as_ref() else {
             warn!(
@@ -1393,7 +1388,6 @@ impl StrategyExecutionService {
             "✅ 下单成功: inst_id={}, order_id={}, size={}",
             inst_id, out_order_id, order_size
         );
-
 
         // 8. 保存订单记录到数据库
         let order_detail = serde_json::json!({

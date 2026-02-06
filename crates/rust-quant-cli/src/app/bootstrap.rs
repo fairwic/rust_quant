@@ -220,8 +220,7 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
     // 创建服务实例
     let config_service = std::sync::Arc::new(create_strategy_config_service());
     let swap_order_repo = std::sync::Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
-    let execution_service =
-        std::sync::Arc::new(StrategyExecutionService::new(swap_order_repo));
+    let execution_service = std::sync::Arc::new(StrategyExecutionService::new(swap_order_repo));
 
     // 🚀 创建策略触发回调函数
     let strategy_trigger = {

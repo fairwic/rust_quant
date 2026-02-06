@@ -163,7 +163,11 @@ fn compute_effective_max_loss(
 }
 
 fn select_tightest_stop(side: TradeSide, candidates: &[f64]) -> Option<f64> {
-    let values: Vec<f64> = candidates.iter().copied().filter(|v| v.is_finite()).collect();
+    let values: Vec<f64> = candidates
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .collect();
     if values.is_empty() {
         return None;
     }
@@ -210,8 +214,12 @@ pub fn compute_current_targets(
     risk: &BasicRiskStrategyConfig,
 ) -> ExitTargets {
     let ctx = ExitContext::new(position, candle);
-    let effective_max_loss =
-        compute_effective_max_loss(position, &ctx, risk.max_loss_percent, risk.dynamic_max_loss.unwrap_or(true));
+    let effective_max_loss = compute_effective_max_loss(
+        position,
+        &ctx,
+        risk.max_loss_percent,
+        risk.dynamic_max_loss.unwrap_or(true),
+    );
     let max_loss_stop = ctx.stop_loss_price(effective_max_loss);
 
     let mut stop_candidates = vec![max_loss_stop];
@@ -266,7 +274,8 @@ fn check_max_loss_stop(
     max_loss_pct: f64,
     dynamic_max_loss: bool,
 ) -> ExitResult {
-    let effective_max_loss = compute_effective_max_loss(position, ctx, max_loss_pct, dynamic_max_loss);
+    let effective_max_loss =
+        compute_effective_max_loss(position, ctx, max_loss_pct, dynamic_max_loss);
 
     if ctx.profit_pct() < -effective_max_loss {
         let stop_price = ctx.stop_loss_price(effective_max_loss);

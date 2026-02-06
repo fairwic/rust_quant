@@ -305,7 +305,8 @@ impl OkxOrderService {
         let client = Self::create_okx_client(api_config)?;
         let trade = OkxTrade::new(client);
         let body = Self::build_cancel_close_algo_body(inst_id, algo_ids);
-        let body_str = serde_json::to_string(&body).map_err(|e| anyhow!("序列化撤单请求失败: {}", e))?;
+        let body_str =
+            serde_json::to_string(&body).map_err(|e| anyhow!("序列化撤单请求失败: {}", e))?;
         let path = "/api/v5/trade/cancel-algos";
 
         let resp: serde_json::Value = trade
@@ -344,7 +345,8 @@ impl OkxOrderService {
             algo_cl_ord_id,
             tag,
         );
-        let body_str = serde_json::to_string(&body).map_err(|e| anyhow!("序列化下单请求失败: {}", e))?;
+        let body_str =
+            serde_json::to_string(&body).map_err(|e| anyhow!("序列化下单请求失败: {}", e))?;
         let path = "/api/v5/trade/order-algo";
 
         let resp: serde_json::Value = trade
