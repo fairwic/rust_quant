@@ -108,6 +108,7 @@ impl PipelineRunner {
         let BacktestContext {
             trading_state,
             shadow_manager,
+            audit_trail,
             ..
         } = ctx;
 
@@ -118,6 +119,7 @@ impl PipelineRunner {
             trade_records: trading_state.trade_records,
             filtered_signals: shadow_manager.into_filtered_signals(),
             dynamic_config_logs,
+            audit_trail,
         }
     }
 }

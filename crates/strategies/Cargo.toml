@@ -10,6 +10,7 @@ rust-quant-common.workspace = true
 rust-quant-core.workspace = true
 rust-quant-domain.workspace = true           # 新增: 领域模型
 rust-quant-indicators.workspace = true
+rust-quant-trading.workspace = true
 # 移除循环依赖: strategies 不应该依赖这些包
 # rust-quant-risk.workspace = true
 # rust-quant-execution.workspace = true

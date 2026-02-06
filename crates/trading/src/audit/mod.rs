@@ -1,4 +1,6 @@
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalSnapshot {
     pub ts: i64,
     pub payload: String,
@@ -6,7 +8,7 @@ pub struct SignalSnapshot {
     pub filter_reasons: Vec<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AuditTrail {
     pub run_id: String,
     pub signal_snapshots: Vec<SignalSnapshot>,

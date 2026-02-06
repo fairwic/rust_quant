@@ -104,5 +104,6 @@ mod tests {
 
         let result = run_indicator_strategy_backtest("TEST", Strategy::default(), &candles, risk);
         assert!(result.open_trades > 0);
+        assert!(!result.audit_trail.signal_snapshots.is_empty());
     }
 }

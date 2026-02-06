@@ -6,6 +6,7 @@ use crate::framework::backtest::shadow_trading::ShadowTradeManager;
 use crate::framework::backtest::types::{
     BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState,
 };
+use rust_quant_trading::audit::AuditTrail;
 use crate::CandleItem;
 
 /// 回测Pipeline上下文
@@ -55,6 +56,9 @@ pub struct BacktestContext {
     /// Shadow Trading 管理器（用于收集 filtered_signals 且对齐 legacy engine 行为）
     pub shadow_manager: ShadowTradeManager,
 
+    /// 审计链路（信号/风控/订单/持仓）
+    pub audit_trail: AuditTrail,
+
     // ========================================================================
     // 控制标志
     // ========================================================================
@@ -78,6 +82,7 @@ impl BacktestContext {
         trading_state: TradingState,
     ) -> Self {
         let current_position = trading_state.trade_position.clone();
+        let run_id = format!("backtest-{}-{}", inst_id, candle.ts);
         Self {
             candle,
             candle_index,
@@ -89,6 +94,7 @@ impl BacktestContext {
             trading_state,
             current_position,
             shadow_manager: ShadowTradeManager::new(),
+            audit_trail: AuditTrail::new(run_id),
             opened_position: false,
             closed_position: false,
             close_reason: None,

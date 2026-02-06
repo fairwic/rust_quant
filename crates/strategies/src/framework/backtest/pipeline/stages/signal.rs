@@ -3,6 +3,7 @@
 use crate::framework::backtest::adapter::IndicatorStrategyBacktest;
 use crate::framework::backtest::pipeline::{BacktestContext, BacktestStage, StageResult};
 use crate::CandleItem;
+use rust_quant_trading::audit::SignalSnapshot;
 
 /// 信号生成阶段
 ///
@@ -96,6 +97,16 @@ where
         }
 
         ctx.signal = Some(signal);
+
+        if let Some(ref signal) = ctx.signal {
+            let snapshot = SignalSnapshot {
+                ts: ctx.candle.ts,
+                payload: serde_json::to_string(signal).unwrap_or_default(),
+                filtered: ctx.is_signal_filtered,
+                filter_reasons: ctx.filter_reasons.clone(),
+            };
+            ctx.audit_trail.record_signal(snapshot);
+        }
 
         // 管理缓冲区大小 (Sliding Window)
         // 对齐 engine.rs：当缓冲达到 capacity 时，剔除最前面多余部分，保留 window_size

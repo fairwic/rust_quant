@@ -20,6 +20,7 @@
 //! - [`MoveStopLoss`] - 移动止损
 
 use super::super::types::TradeSide;
+use rust_quant_trading::audit::AuditTrail;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -36,6 +37,7 @@ pub struct BackTestResult {
     pub trade_records: Vec<TradeRecord>,
     pub filtered_signals: Vec<FilteredSignal>,
     pub dynamic_config_logs: Vec<DynamicConfigLog>,
+    pub audit_trail: AuditTrail,
 }
 
 impl Default for BackTestResult {
@@ -47,6 +49,7 @@ impl Default for BackTestResult {
             trade_records: vec![],
             filtered_signals: vec![],
             dynamic_config_logs: vec![],
+            audit_trail: AuditTrail::default(),
         }
     }
 }
