@@ -15,15 +15,27 @@
 ```
 crates/signal_engine/
   lib.rs
-  signal_engine.rs
-  risk_engine.rs
-  engine_types.rs
+  engine.rs            // SignalEngine 主流程（直线链路）
+  risk_engine.rs       // RiskEngine 主流程（直线链路）
+  types.rs             // SignalDecision / ExitDecision / Snapshot
   components/
-    ema.rs
-    rsi.rs
-    market_structure.rs
-    leg_detection.rs
-    ...
+    mod.rs             // 统一注册与枚举分发
+    trend/
+      ema.rs
+      ema_distance.rs
+      macd.rs
+    momentum/
+      rsi.rs
+    pattern/
+      market_structure.rs
+      leg_detection.rs
+      engulfing.rs
+      hammer.rs
+  risk/
+    mod.rs              // enum RiskComponent + match 分发
+    stop_loss.rs        // max_loss_percent / signal-kline stop
+    take_profit.rs      // atr_take_profit_ratio / fixed_signal_kline
+    trailing.rs         // 如有动态止损
 ```
 
 ### SignalEngine（核心）
@@ -64,6 +76,20 @@ impl SignalComponent {
 }
 ```
 - 组件为普通 `struct`，只暴露 `update` 与 `conditions`，无 trait 继承链。
+
+## Risk 引擎组件化（不使用多层 trait）
+- `RiskEngine` 内部维护 `Vec<RiskComponent>`，统一分发：
+```rust
+enum RiskComponent {
+  StopLoss(StopLossComponent),
+  TakeProfit(TakeProfitComponent),
+  TrailingStop(TrailingStopComponent),
+}
+impl RiskComponent {
+  fn evaluate(&self, ctx: &RiskContext) -> Option<ExitDecision> { ... }
+}
+```
+- RiskEngine 主流程保持直线：`update_position -> evaluate_components -> merge_exit_decision`。
 
 ## 回测/实盘接入
 ### 回测链路
