@@ -633,7 +633,6 @@ impl NweStrategy {
                             signal_result.atr_take_profit_ratio_price = Some(atr_take_profit);
                         }
                     }
-
                 }
                 if let Some(is_used_signal_k_line_stop_loss) =
                     risk_config.is_used_signal_k_line_stop_loss
@@ -672,7 +671,6 @@ impl NweStrategy {
                             signal_result.atr_take_profit_ratio_price = Some(atr_take_profit);
                         }
                     }
-
                 }
             }
         }

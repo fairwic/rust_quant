@@ -6,8 +6,8 @@
 use anyhow::{anyhow, Result};
 use tracing::debug;
 
-use rust_quant_market::models::CandlesEntity;
 use rust_quant_common::utils::time;
+use rust_quant_market::models::CandlesEntity;
 
 /// 验证最新K线数据是否在当前时间周期
 ///

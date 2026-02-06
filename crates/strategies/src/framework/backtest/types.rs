@@ -361,7 +361,6 @@ pub struct BasicRiskStrategyConfig {
     /// 高波动动态降损开关（原先由环境变量 DYNAMIC_MAX_LOSS 控制）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_max_loss: Option<bool>,
-
 }
 
 impl Default for BasicRiskStrategyConfig {
@@ -389,8 +388,7 @@ mod tests {
 
     #[test]
     fn signal_result_has_no_counter_trend_field() {
-        let value =
-            serde_json::to_value(SignalResult::default()).expect("serialize SignalResult");
+        let value = serde_json::to_value(SignalResult::default()).expect("serialize SignalResult");
         assert!(value
             .get("counter_trend_pullback_take_profit_price")
             .is_none());

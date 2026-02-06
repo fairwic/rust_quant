@@ -17,10 +17,10 @@ use rust_quant_core::database::get_db_pool;
 use rust_quant_infrastructure::repositories::{
     SqlxBacktestRepository, SqlxCandleRepository, SqlxStrategyConfigRepository,
 };
+use rust_quant_market::models::{SelectTime, TimeDirect};
 use rust_quant_services::market::CandleService;
 use rust_quant_services::strategy::{BacktestService, StrategyConfigService};
 use rust_quant_strategies::implementations::nwe_strategy::NweStrategy;
-use rust_quant_market::models::{SelectTime, TimeDirect};
 
 /// 回测运行器
 ///
@@ -591,8 +591,12 @@ mod tests {
     #[test]
     fn derive_select_time_uses_min_start_and_max_end() {
         let params = vec![
-            ParamMergeBuilder::build().kline_start_time(100).kline_end_time(200),
-            ParamMergeBuilder::build().kline_start_time(50).kline_end_time(300),
+            ParamMergeBuilder::build()
+                .kline_start_time(100)
+                .kline_end_time(200),
+            ParamMergeBuilder::build()
+                .kline_start_time(50)
+                .kline_end_time(300),
         ];
 
         let select_time = derive_select_time(&params).expect("select_time should exist");

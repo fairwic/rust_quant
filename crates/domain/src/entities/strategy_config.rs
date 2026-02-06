@@ -158,9 +158,9 @@ pub struct BasicRiskConfig {
 impl Default for BasicRiskConfig {
     fn default() -> Self {
         Self {
-            max_loss_percent: 0.02,                      // 默认2%止损
-            atr_take_profit_ratio: None,                 // 默认不使用atr止盈
-            fix_signal_kline_take_profit_ratio: None,    // 默认不使用固定信号线的止盈
+            max_loss_percent: 0.02,                   // 默认2%止损
+            atr_take_profit_ratio: None,              // 默认不使用atr止盈
+            fix_signal_kline_take_profit_ratio: None, // 默认不使用固定信号线的止盈
             is_move_stop_loss: None,
             is_used_signal_k_line_stop_loss: None,
             max_hold_time: None,

@@ -15,9 +15,7 @@ pub mod types;
 pub mod utils;
 
 // 重新导出常用类型
-pub use adapter::{
-    run_indicator_strategy_backtest, IndicatorStrategyBacktest,
-};
+pub use adapter::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
 pub use conversions::{convert_domain_signal, to_domain_basic_risk_config};
 pub use engine::run_back_test;
 pub use indicators::{calculate_ema, get_multi_indicator_values};
