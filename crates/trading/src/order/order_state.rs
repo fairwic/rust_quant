@@ -1,5 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OrderState {
+    #[default]
     New,
     Submitted,
     PartiallyFilled,
@@ -8,7 +9,7 @@ pub enum OrderState {
     Canceled,
     Rejected,
 }
-
+#[derive(Default)]
 pub struct OrderStateMachine {
     state: OrderState,
 }

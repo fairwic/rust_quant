@@ -61,6 +61,7 @@ impl OkxOrderService {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn build_place_close_algo_body(
         inst_id: &str,
         mgn_mode: &str,

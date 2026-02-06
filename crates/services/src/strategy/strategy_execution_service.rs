@@ -636,6 +636,7 @@ impl StrategyExecutionService {
         Ok(CloseAlgoSyncResult::Placed(algo_ids))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn persist_close_algos(
         &self,
         config_id: i64,
