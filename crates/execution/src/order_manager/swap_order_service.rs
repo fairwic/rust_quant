@@ -8,6 +8,7 @@ pub struct OrderSignal {
     pub price: f64,
 }
 use rust_quant_common::AppError;
+use rust_quant_strategies::framework::risk::{StopLossCalculator, StopLossSide};
 use rust_quant_strategies::strategy_common::{BasicRiskStrategyConfig, SignalResult};
 // use core::time; // ⭐ 注释掉，与time模块冲突
 use okx::api::api_trait::OkxApiTrait;
@@ -50,6 +51,19 @@ pub struct SwapOrderService {}
 impl SwapOrderService {
     pub fn new() -> Self {
         Self {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StopLossCalculator, StopLossSide};
+
+    #[test]
+    fn select_tightest_short_stop() {
+        let entry = 100.0;
+        let candidates = vec![105.0, 103.0, 110.0];
+        let selected = StopLossCalculator::select(StopLossSide::Short, entry, &candidates);
+        assert_eq!(selected, Some(103.0));
     }
 }
 
@@ -545,18 +559,24 @@ impl SwapOrderService {
         //最大止损
         let max_loss_percent = risk_config.max_loss_percent;
         let tp_price = signal.atr_take_profit_level_1;
-        let mut stop_loss_price: f64 = match side {
+        let max_loss_stop: f64 = match side {
             Side::Sell => entry_price * (1.0 + max_loss_percent),
             Side::Buy => entry_price * (1.0 - max_loss_percent),
         };
-        //如果使用信号k线止盈，则使用信号k线止盈
-        if let Some(is_used_signal_k_line_stop_loss) = risk_config.is_used_signal_k_line_stop_loss {
-            if is_used_signal_k_line_stop_loss {
-                if let Some(signal_stop_loss) = signal.signal_kline_stop_loss_price {
-                    stop_loss_price = signal_stop_loss;
-                }
+        let mut candidates = vec![max_loss_stop];
+        if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
+            if let Some(signal_stop_loss) = signal.signal_kline_stop_loss_price {
+                candidates.push(signal_stop_loss);
             }
         }
+        let sl_side = match side {
+            Side::Sell => StopLossSide::Short,
+            Side::Buy => StopLossSide::Long,
+        };
+        let stop_loss_price =
+            StopLossCalculator::select(sl_side, entry_price, &candidates).ok_or_else(|| {
+                AppError::BizError("no valid stop_loss candidate".to_string())
+            })?;
         //valid 如果是做空，开仓价格要<止损价格,否则不进行下单
         //valid 如果是做多，开仓价格要>止损价格,否则不进行下单
         if pos_side == PositionSide::Short && entry_price > stop_loss_price {

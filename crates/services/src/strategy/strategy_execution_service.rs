@@ -13,13 +13,11 @@ use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
 use rust_quant_strategies::framework::backtest::{BasicRiskStrategyConfig, TradingState};
+use rust_quant_strategies::framework::risk::{StopLossCalculator, StopLossSide};
 use rust_quant_strategies::framework::types::TradeSide;
 use rust_quant_strategies::strategy_common::SignalResult;
-use tokio::sync::mpsc;
 
 use super::live_decision::apply_live_decision;
-use rust_quant_domain::enums::PositionSide as DomainPositionSide;
-use rust_quant_risk::realtime::{PositionSnapshot, RealtimeRiskEvent, StrategyRiskConfigSnapshot};
 
 /// 策略执行服务
 ///
@@ -38,8 +36,6 @@ pub struct StrategyExecutionService {
     /// 合约订单仓储（依赖注入）
     swap_order_repository: Arc<dyn SwapOrderRepository>,
 
-    /// 实盘实时风控事件通道（可选）
-    realtime_risk_tx: Option<mpsc::Sender<RealtimeRiskEvent>>,
 
     /// 实盘交易状态（每个策略配置一份）
     live_states: DashMap<i64, TradingState>,
@@ -50,15 +46,8 @@ impl StrategyExecutionService {
     pub fn new(swap_order_repository: Arc<dyn SwapOrderRepository>) -> Self {
         Self {
             swap_order_repository,
-            realtime_risk_tx: None,
             live_states: DashMap::new(),
         }
-    }
-
-    /// 注入实时风控事件通道（用于实盘动态风控）
-    pub fn with_realtime_risk_sender(mut self, tx: mpsc::Sender<RealtimeRiskEvent>) -> Self {
-        self.realtime_risk_tx = Some(tx);
-        self
     }
 
     fn candle_entity_to_item(c: &rust_quant_market::models::CandlesEntity) -> Result<CandleItem> {
@@ -104,29 +93,12 @@ impl StrategyExecutionService {
         }
     }
 
-    fn select_take_profit_trigger_px(side: &str, signal: &SignalResult) -> Option<f64> {
-        if let Some(tp) = signal.atr_take_profit_ratio_price {
-            return Some(tp);
-        }
-
-        match side {
-            "buy" => signal.long_signal_take_profit_price,
-            "sell" => signal.short_signal_take_profit_price,
-            _ => None,
-        }
-    }
-
-    /// 计算“初始止损价”（用于下单时挂止损单）
-    ///
-    /// 目标：尽量对齐回测 `check_risk_config` 的“最先触发止损”效果：
-    /// - 同时存在多条止损规则时，选择更“紧”的那条（Long: 更高的止损；Short: 更低的止损）
-    /// - 目前覆盖：max_loss_percent、信号K线止损
-    fn compute_initial_stop_loss(
+    /// 构建止损候选价列表（由上层选择最紧止损）
+    fn build_stop_loss_candidates(
         side: &str,
         signal: &SignalResult,
         risk_config: &rust_quant_domain::BasicRiskConfig,
-        trigger_candle: Option<&CandleItem>,
-    ) -> f64 {
+    ) -> Vec<f64> {
         let entry_price = signal.open_price;
         let max_loss_percent = risk_config.max_loss_percent;
         let max_loss_stop = if side == "sell" {
@@ -144,19 +116,7 @@ impl StrategyExecutionService {
             }
         }
 
-        match side {
-            // Long：止损应 < entry，越接近 entry 越“紧”
-            "buy" => candidates
-                .into_iter()
-                .filter(|px| *px < entry_price)
-                .fold(max_loss_stop, |acc, px| acc.max(px)),
-            // Short：止损应 > entry，越接近 entry 越“紧”
-            "sell" => candidates
-                .into_iter()
-                .filter(|px| *px > entry_price)
-                .fold(max_loss_stop, |acc, px| acc.min(px)),
-            _ => max_loss_stop,
-        }
+        candidates
     }
 
     /// 执行策略分析和交易流程
@@ -253,17 +213,6 @@ impl StrategyExecutionService {
 
         info!("风险配置: risk_config:{:#?}", risk_config);
 
-        // 7.1 推送风险配置到实时风控（若启用）
-        if let Some(tx) = self.realtime_risk_tx.clone() {
-            let snap = StrategyRiskConfigSnapshot {
-                strategy_config_id: config.id,
-                inst_id: inst_id.to_string(),
-                risk: risk_config.clone(),
-            };
-            tokio::spawn(async move {
-                let _ = tx.send(RealtimeRiskEvent::RiskConfig(snap)).await;
-            });
-        }
 
         let Some(trigger_candle) = snap_item.as_ref() else {
             warn!(
@@ -333,7 +282,6 @@ impl StrategyExecutionService {
                     order_risk,
                     config.id,
                     config.strategy_type.as_str(),
-                    Some(trigger_candle),
                 )
                 .await
             {
@@ -550,7 +498,6 @@ impl StrategyExecutionService {
         risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
         strategy_type: &str,
-        trigger_candle: Option<&CandleItem>,
     ) -> Result<()> {
         info!(
             "准备下单: inst_id={}, period={}, config_id={}",
@@ -694,30 +641,16 @@ impl StrategyExecutionService {
 
         // 6. 计算止损止盈价格
         let entry_price = signal.open_price;
-        let final_stop_loss =
-            Self::compute_initial_stop_loss(side, signal, risk_config, trigger_candle);
-
-        // 可选：下单时附带止盈（实盘开关）
-        let attach_tp = Self::env_enabled("LIVE_ATTACH_TP");
-        let mut take_profit_trigger_px = if attach_tp {
-            Self::select_take_profit_trigger_px(side, signal)
+        let stop_candidates = Self::build_stop_loss_candidates(side, signal, risk_config);
+        let stop_side = if side == "sell" {
+            StopLossSide::Short
         } else {
-            None
+            StopLossSide::Long
         };
-        if let Some(tp) = take_profit_trigger_px {
-            let tp_valid = if pos_side == "long" {
-                tp > entry_price
-            } else {
-                tp < entry_price
-            };
-            if !tp_valid {
-                warn!(
-                    "止盈价不合理，忽略止盈: inst_id={}, side={}, entry={:.8}, tp={:.8}",
-                    inst_id, side, entry_price, tp
-                );
-                take_profit_trigger_px = None;
-            }
-        }
+        let final_stop_loss = StopLossCalculator::select(stop_side, entry_price, &stop_candidates)
+            .ok_or_else(|| anyhow!("无有效止损价"))?;
+
+        let take_profit_trigger_px: Option<f64> = None;
 
         // 验证止损价格合理性
         if pos_side == "short" && entry_price > final_stop_loss {
@@ -774,28 +707,6 @@ impl StrategyExecutionService {
             inst_id, out_order_id, order_size
         );
 
-        // 7.1 下单成功后推送 PositionSnapshot（用于“1.5R 触发保本移动止损”）
-        if let (Some(tx), true) = (self.realtime_risk_tx.clone(), !out_order_id.is_empty()) {
-            let size_f64 = order_size.parse::<f64>().unwrap_or(0.0);
-            let pos_side_domain = if side == "buy" {
-                DomainPositionSide::Long
-            } else {
-                DomainPositionSide::Short
-            };
-            let pos = PositionSnapshot {
-                strategy_config_id: config_id,
-                inst_id: inst_id.to_string(),
-                pos_side: pos_side_domain,
-                entry_price,
-                size: size_f64,
-                initial_stop_loss: Some(final_stop_loss),
-                ord_id: Some(out_order_id.clone()),
-                is_open: true,
-            };
-            tokio::spawn(async move {
-                let _ = tx.send(RealtimeRiskEvent::Position(pos)).await;
-            });
-        }
 
         // 8. 保存订单记录到数据库
         let order_detail = serde_json::json!({
@@ -1468,39 +1379,6 @@ mod tests {
         let stop_loss_price = 49000.123456789;
         let formatted = format!("{:.2}", stop_loss_price);
         assert_eq!(formatted, "49000.12");
-    }
-
-    #[test]
-    fn test_take_profit_priority_atr_then_signal_then_counter_long() {
-        let mut signal = create_buy_signal(100.0, 1);
-        signal.atr_take_profit_ratio_price = Some(130.0);
-        signal.long_signal_take_profit_price = Some(120.0);
-        assert_eq!(
-            StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
-            Some(130.0)
-        );
-
-        signal.atr_take_profit_ratio_price = None;
-        assert_eq!(
-            StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
-            Some(120.0)
-        );
-
-        signal.long_signal_take_profit_price = None;
-        assert_eq!(
-            StrategyExecutionService::select_take_profit_trigger_px("buy", &signal),
-            None
-        );
-    }
-
-    #[test]
-    fn test_take_profit_priority_short_uses_short_signal_price() {
-        let mut signal = create_sell_signal(100.0, 1);
-        signal.short_signal_take_profit_price = Some(90.0);
-        assert_eq!(
-            StrategyExecutionService::select_take_profit_trigger_px("sell", &signal),
-            Some(90.0)
-        );
     }
 
     /// 测试：下单数量精度（2位小数）
