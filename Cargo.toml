@@ -5,6 +5,7 @@ members = [
     "crates/domain",         # 领域模型层
     "crates/infrastructure", # 基础设施层
     "crates/services",       # 新增: 应用服务层
+    "crates/trading",
     "crates/market",
     "crates/indicators",
     "crates/strategies",
@@ -118,6 +119,7 @@ rust-quant-core = { path = "crates/core" }
 rust-quant-domain = { path = "crates/domain" }
 rust-quant-infrastructure = { path = "crates/infrastructure" }
 rust-quant-services = { path = "crates/services" }             # 新增: 应用服务层
+rust-quant-trading = { path = "crates/trading" }
 rust-quant-market = { path = "crates/market" }
 rust-quant-indicators = { path = "crates/indicators" }
 rust-quant-strategies = { path = "crates/strategies" }
@@ -130,4 +132,3 @@ rust-quant-cli = { path = "crates/rust-quant-cli" }
 
 [patch.crates-io]
 okx = { path = "okx" }
-
