@@ -16,7 +16,8 @@ pub use exchange_trait::{
     ExchangeAccount, ExchangeContracts, ExchangeMarketData, ExchangePublicData,
 };
 pub use repository_trait::{
-    BacktestLogRepository, CandleRepository, ExchangeApiConfigRepository, OrderRepository,
-    PositionRepository, StrategyApiConfigRepository, StrategyConfigRepository, SwapOrderRepository,
+    AuditLogRepository, BacktestLogRepository, CandleRepository, ExchangeApiConfigRepository,
+    OrderRepository, PositionRepository, StrategyApiConfigRepository, StrategyConfigRepository,
+    SwapOrderRepository,
 };
 pub use strategy_trait::{BacktestResult, Backtestable, Strategy};

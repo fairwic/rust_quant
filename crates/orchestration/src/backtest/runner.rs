@@ -15,7 +15,7 @@ use crate::workflow::strategy_config::{
 
 use rust_quant_core::database::get_db_pool;
 use rust_quant_infrastructure::repositories::{
-    SqlxBacktestRepository, SqlxCandleRepository, SqlxStrategyConfigRepository,
+    SqlxAuditRepository, SqlxBacktestRepository, SqlxCandleRepository, SqlxStrategyConfigRepository,
 };
 use rust_quant_market::models::{SelectTime, TimeDirect};
 use rust_quant_services::market::CandleService;
@@ -42,7 +42,11 @@ impl BacktestRunner {
     pub fn new() -> Result<Self> {
         let pool = get_db_pool().clone();
         let backtest_repo = SqlxBacktestRepository::new(pool.clone());
-        let backtest_service = Arc::new(BacktestService::new(Box::new(backtest_repo)));
+        let audit_repo = SqlxAuditRepository::new(pool.clone());
+        let backtest_service = Arc::new(BacktestService::new(
+            Box::new(backtest_repo),
+            Some(Box::new(audit_repo)),
+        ));
 
         let candle_repo = SqlxCandleRepository::new(pool.clone());
         let candle_service = Arc::new(CandleService::new(Box::new(candle_repo)));

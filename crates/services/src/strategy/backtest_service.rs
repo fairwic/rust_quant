@@ -12,7 +12,7 @@ use tracing::info;
 use rust_quant_analytics::calculate_performance_metrics;
 use rust_quant_common::CandleItem;
 use rust_quant_domain::entities::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics};
-use rust_quant_domain::traits::BacktestLogRepository;
+use rust_quant_domain::traits::{AuditLogRepository, BacktestLogRepository};
 use rust_quant_domain::StrategyType;
 use rust_quant_strategies::strategy_common::{
     BackTestResult, BasicRiskStrategyConfig, TradeRecord,
@@ -29,6 +29,7 @@ use rust_quant_strategies::strategy_common::{
 /// - BacktestLogRepository: 回测数据访问接口
 pub struct BacktestService {
     repository: Box<dyn BacktestLogRepository>,
+    audit_repository: Option<Box<dyn AuditLogRepository>>,
 }
 
 impl BacktestService {
@@ -36,8 +37,14 @@ impl BacktestService {
     ///
     /// # 参数
     /// * `repository` - BacktestLogRepository 实现（通过依赖注入）
-    pub fn new(repository: Box<dyn BacktestLogRepository>) -> Self {
-        Self { repository }
+    pub fn new(
+        repository: Box<dyn BacktestLogRepository>,
+        audit_repository: Option<Box<dyn AuditLogRepository>>,
+    ) -> Self {
+        Self {
+            repository,
+            audit_repository,
+        }
     }
 
     /// 保存回测日志和详情
@@ -137,6 +144,17 @@ impl BacktestService {
                 )
                 .await?;
             }
+
+            if let Some(audit_repo) = self.audit_repository.as_ref() {
+                self.save_audit_trail(
+                    audit_repo.as_ref(),
+                    inst_id,
+                    time,
+                    strategy_name,
+                    &back_test_result.audit_trail,
+                )
+                .await?;
+            }
         }
 
         info!(
@@ -145,6 +163,78 @@ impl BacktestService {
         );
 
         Ok(back_test_id)
+    }
+
+    async fn save_audit_trail(
+        &self,
+        audit_repo: &dyn AuditLogRepository,
+        inst_id: &str,
+        period: &str,
+        strategy_name: &str,
+        audit_trail: &rust_quant_trading::audit::AuditTrail,
+    ) -> Result<()> {
+        use rust_quant_domain::entities::{OrderDecisionLog, RiskDecisionLog, SignalSnapshotLog, StrategyRun};
+
+        let run_id = audit_trail.run_id.clone();
+
+        let run = StrategyRun {
+            run_id: run_id.clone(),
+            strategy_id: strategy_name.to_string(),
+            inst_id: inst_id.to_string(),
+            period: period.to_string(),
+            status: "COMPLETED".to_string(),
+            start_at: None,
+            end_at: None,
+        };
+
+        audit_repo.insert_strategy_run(&run).await?;
+
+        let snapshots: Vec<SignalSnapshotLog> = audit_trail
+            .signal_snapshots
+            .iter()
+            .map(|s| SignalSnapshotLog {
+                run_id: run_id.clone(),
+                kline_ts: s.ts,
+                filtered: s.filtered,
+                filter_reasons: if s.filter_reasons.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::to_string(&s.filter_reasons).unwrap_or_default())
+                },
+                signal_json: s.payload.clone(),
+            })
+            .collect();
+
+        audit_repo.insert_signal_snapshots(&snapshots).await?;
+
+        let risk_decisions: Vec<RiskDecisionLog> = audit_trail
+            .risk_decisions
+            .iter()
+            .map(|d| RiskDecisionLog {
+                run_id: run_id.clone(),
+                kline_ts: d.ts,
+                decision: d.decision.clone(),
+                reason: d.reason.clone(),
+                risk_json: d.risk_json.clone(),
+            })
+            .collect();
+        audit_repo.insert_risk_decisions(&risk_decisions).await?;
+
+        let order_decisions: Vec<OrderDecisionLog> = audit_trail
+            .order_decisions
+            .iter()
+            .map(|d| OrderDecisionLog {
+                run_id: run_id.clone(),
+                kline_ts: d.ts,
+                side: d.side.clone(),
+                size: d.size,
+                price: d.price,
+                decision_json: d.decision_json.clone(),
+            })
+            .collect();
+        audit_repo.insert_order_decisions(&order_decisions).await?;
+
+        Ok(())
     }
 
     /// 保存过滤信号记录

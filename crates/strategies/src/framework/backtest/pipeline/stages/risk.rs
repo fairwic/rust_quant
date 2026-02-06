@@ -3,6 +3,7 @@
 use crate::framework::backtest::pipeline::{BacktestContext, BacktestStage, StageResult};
 use crate::framework::backtest::risk::check_risk_config;
 use crate::framework::backtest::types::SignalResult;
+use rust_quant_trading::audit::RiskDecision;
 
 /// 风控检查阶段
 ///
@@ -52,6 +53,20 @@ impl BacktestStage for RiskStage {
         } else {
             ctx.current_position = ctx.trading_state.trade_position.clone();
         }
+
+        let decision = if !prev_position {
+            "SKIP"
+        } else if curr_position {
+            "HOLD"
+        } else {
+            "CLOSE"
+        };
+        ctx.audit_trail.record_risk_decision(RiskDecision {
+            ts: ctx.candle.ts,
+            decision: decision.to_string(),
+            reason: ctx.close_reason.clone(),
+            risk_json: None,
+        });
 
         StageResult::Continue
     }

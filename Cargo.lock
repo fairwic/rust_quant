@@ -3107,6 +3107,7 @@ dependencies = [
  "rust-quant-market",
  "rust-quant-risk",
  "rust-quant-strategies",
+ "rust-quant-trading",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -3132,12 +3133,25 @@ dependencies = [
  "rust-quant-core",
  "rust-quant-domain",
  "rust-quant-indicators",
+ "rust-quant-trading",
  "serde",
  "serde_json",
  "ta",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rust-quant-trading"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "rust-quant-domain",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
  "uuid",
 ]
 

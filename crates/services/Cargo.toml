@@ -15,6 +15,7 @@ rust-quant-infrastructure.workspace = true # 使用基础设施
 rust-quant-market.workspace = true
 rust-quant-indicators.workspace = true
 rust-quant-strategies.workspace = true
+rust-quant-trading.workspace = true
 rust-quant-risk.workspace = true
 rust-quant-execution.workspace = true
 rust-quant-analytics.workspace = true      # 绩效分析

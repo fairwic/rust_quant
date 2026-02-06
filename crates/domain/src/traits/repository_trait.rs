@@ -5,7 +5,9 @@ use async_trait::async_trait;
 
 use crate::entities::{
     BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats, Candle,
-    DynamicConfigLog, ExchangeApiConfig, Order, Position, StrategyConfig, SwapOrder,
+    DynamicConfigLog, ExchangeApiConfig, Order, OrderDecisionLog, OrderStateLog, PortfolioSnapshot,
+    Position, PositionSnapshot, RiskDecisionLog, SignalSnapshotLog, StrategyConfig, StrategyRun,
+    SwapOrder,
 };
 use crate::enums::Timeframe;
 use crate::PositionStatus;
@@ -128,6 +130,18 @@ pub trait BacktestLogRepository: Send + Sync {
 
     /// 批量写入动态配置调整记录
     async fn insert_dynamic_config_logs(&self, logs: &[DynamicConfigLog]) -> Result<u64>;
+}
+
+/// 审计链路仓储接口
+#[async_trait]
+pub trait AuditLogRepository: Send + Sync {
+    async fn insert_strategy_run(&self, run: &StrategyRun) -> Result<u64>;
+    async fn insert_signal_snapshots(&self, snapshots: &[SignalSnapshotLog]) -> Result<u64>;
+    async fn insert_risk_decisions(&self, decisions: &[RiskDecisionLog]) -> Result<u64>;
+    async fn insert_order_decisions(&self, decisions: &[OrderDecisionLog]) -> Result<u64>;
+    async fn insert_order_state_logs(&self, states: &[OrderStateLog]) -> Result<u64>;
+    async fn insert_position_snapshots(&self, positions: &[PositionSnapshot]) -> Result<u64>;
+    async fn insert_portfolio_snapshots(&self, snapshots: &[PortfolioSnapshot]) -> Result<u64>;
 }
 
 /// 交易所API配置仓储接口

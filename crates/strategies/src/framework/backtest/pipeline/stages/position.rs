@@ -2,6 +2,8 @@
 
 use crate::framework::backtest::pipeline::{BacktestContext, BacktestStage, StageResult};
 use crate::framework::backtest::signal::deal_signal;
+use crate::framework::types::TradeSide;
+use rust_quant_trading::audit::{OrderDecision, RiskDecision};
 
 /// 仓位管理阶段
 ///
@@ -56,6 +58,7 @@ impl BacktestStage for PositionStage {
         // 3. 挂单触发 (Limit Orders / last_signal_result)
         // 4. 风控检查 (Risk Management via check_risk_config)
         // 5. 止盈止损更新 (Stop Loss / Take Profit updates)
+        let prev_position = ctx.trading_state.trade_position.clone();
         let trading_state = std::mem::take(&mut ctx.trading_state);
         ctx.trading_state = deal_signal(
             trading_state,
@@ -68,6 +71,45 @@ impl BacktestStage for PositionStage {
 
         // 更新 Context 中的状态以供后续 Stage 使用（虽然 RiskStage 主要依赖 context check，但保持状态同步是个好习惯）
         ctx.current_position = ctx.trading_state.trade_position.clone();
+
+        let curr_position = ctx.trading_state.trade_position.clone();
+        match (prev_position, curr_position) {
+            (None, Some(pos)) => {
+                let side = match pos.trade_side {
+                    TradeSide::Long => "OPEN_LONG",
+                    TradeSide::Short => "OPEN_SHORT",
+                };
+                ctx.audit_trail.record_order_decision(OrderDecision {
+                    ts: ctx.candle.ts,
+                    side: side.to_string(),
+                    size: pos.position_nums,
+                    price: pos.open_price,
+                    decision_json: None,
+                });
+                ctx.audit_trail.record_risk_decision(RiskDecision {
+                    ts: ctx.candle.ts,
+                    decision: "ALLOW".to_string(),
+                    reason: None,
+                    risk_json: None,
+                });
+            }
+            (Some(pos), None) => {
+                ctx.audit_trail.record_order_decision(OrderDecision {
+                    ts: ctx.candle.ts,
+                    side: "CLOSE".to_string(),
+                    size: pos.position_nums,
+                    price: ctx.candle.c,
+                    decision_json: None,
+                });
+                ctx.audit_trail.record_risk_decision(RiskDecision {
+                    ts: ctx.candle.ts,
+                    decision: "CLOSE".to_string(),
+                    reason: None,
+                    risk_json: None,
+                });
+            }
+            _ => {}
+        }
 
         StageResult::Continue
     }
