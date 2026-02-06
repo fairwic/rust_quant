@@ -112,16 +112,23 @@ enum ExitResult {
 }
 
 // ============================================================================
-// 止损检查函数
+// 出场目标计算（供实盘同步）
 // ============================================================================
 
-/// 检查最大损失止损
-fn check_max_loss_stop(
-    ctx: &ExitContext,
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExitTargets {
+    pub stop_loss: Option<f64>,
+    pub take_profit: Option<f64>,
+    pub stop_reason: Option<String>,
+    pub take_reason: Option<String>,
+}
+
+fn compute_effective_max_loss(
     position: &TradePosition,
+    ctx: &ExitContext,
     max_loss_pct: f64,
     dynamic_max_loss: bool,
-) -> ExitResult {
+) -> f64 {
     // 高波动动态降损：
     // - 入场K线振幅 > 3% 且方向不利时，收紧到 3%
     // - 否则沿用原逻辑：K线振幅 > 5% 时收紧到 4.5%
@@ -151,6 +158,115 @@ fn check_max_loss_stop(
             }
         }
     }
+
+    effective_max_loss
+}
+
+fn select_tightest_stop(side: TradeSide, candidates: &[f64]) -> Option<f64> {
+    let values: Vec<f64> = candidates.iter().copied().filter(|v| v.is_finite()).collect();
+    if values.is_empty() {
+        return None;
+    }
+    Some(match side {
+        TradeSide::Long => *values
+            .iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap(),
+        TradeSide::Short => *values
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap(),
+    })
+}
+
+fn select_nearest_tp(side: TradeSide, entry: f64, candidates: &[f64]) -> Option<f64> {
+    let values: Vec<f64> = candidates
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .filter(|v| match side {
+            TradeSide::Long => *v > entry,
+            TradeSide::Short => *v < entry,
+        })
+        .collect();
+    if values.is_empty() {
+        return None;
+    }
+    Some(match side {
+        TradeSide::Long => *values
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap(),
+        TradeSide::Short => *values
+            .iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap(),
+    })
+}
+
+pub fn compute_current_targets(
+    position: &TradePosition,
+    candle: &CandleItem,
+    risk: &BasicRiskStrategyConfig,
+) -> ExitTargets {
+    let ctx = ExitContext::new(position, candle);
+    let effective_max_loss =
+        compute_effective_max_loss(position, &ctx, risk.max_loss_percent, risk.dynamic_max_loss.unwrap_or(true));
+    let max_loss_stop = ctx.stop_loss_price(effective_max_loss);
+
+    let mut stop_candidates = vec![max_loss_stop];
+    if let Some(px) = position.signal_kline_stop_close_price {
+        stop_candidates.push(px);
+    }
+    if let Some(px) = position.move_stop_open_price {
+        stop_candidates.push(px);
+    }
+    let stop_loss = select_tightest_stop(ctx.side, &stop_candidates);
+
+    let mut tp_candidates = Vec::new();
+    if let Some(px) = position.atr_take_profit_level_3 {
+        tp_candidates.push(px);
+    }
+    if let Some(px) = position.atr_take_ratio_profit_price {
+        tp_candidates.push(px);
+    }
+    if let Some(px) = position.fixed_take_profit_price {
+        tp_candidates.push(px);
+    }
+    match ctx.side {
+        TradeSide::Long => {
+            if let Some(px) = position.long_signal_take_profit_price {
+                tp_candidates.push(px);
+            }
+        }
+        TradeSide::Short => {
+            if let Some(px) = position.short_signal_take_profit_price {
+                tp_candidates.push(px);
+            }
+        }
+    }
+    let take_profit = select_nearest_tp(ctx.side, ctx.entry, &tp_candidates);
+
+    ExitTargets {
+        stop_loss,
+        take_profit,
+        stop_reason: None,
+        take_reason: None,
+    }
+}
+
+// ============================================================================
+// 止损检查函数
+// ============================================================================
+
+/// 检查最大损失止损
+fn check_max_loss_stop(
+    ctx: &ExitContext,
+    position: &TradePosition,
+    max_loss_pct: f64,
+    dynamic_max_loss: bool,
+) -> ExitResult {
+    let effective_max_loss = compute_effective_max_loss(position, ctx, max_loss_pct, dynamic_max_loss);
 
     if ctx.profit_pct() < -effective_max_loss {
         let stop_price = ctx.stop_loss_price(effective_max_loss);
@@ -727,4 +843,69 @@ fn finalize_exit(
     let profit = ctx.profit(price);
     close_position(&mut trading_state, candle, signal, &reason, profit);
     trading_state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_long() {
+        let mut position = TradePosition::default();
+        position.trade_side = TradeSide::Long;
+        position.open_price = 100.0;
+        position.position_nums = 1.0;
+        position.signal_kline_stop_close_price = Some(95.0);
+        position.move_stop_open_price = Some(98.0);
+        position.atr_take_ratio_profit_price = Some(120.0);
+        position.long_signal_take_profit_price = Some(110.0);
+
+        let candle = CandleItem {
+            o: 100.0,
+            h: 105.0,
+            l: 99.0,
+            c: 102.0,
+            v: 1.0,
+            ts: 1,
+            confirm: 1,
+        };
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.05,
+            ..Default::default()
+        };
+
+        let targets = compute_current_targets(&position, &candle, &risk);
+        assert_eq!(targets.stop_loss, Some(98.0));
+        assert_eq!(targets.take_profit, Some(110.0));
+    }
+
+    #[test]
+    fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_short() {
+        let mut position = TradePosition::default();
+        position.trade_side = TradeSide::Short;
+        position.open_price = 100.0;
+        position.position_nums = 1.0;
+        position.signal_kline_stop_close_price = Some(106.0);
+        position.move_stop_open_price = Some(103.0);
+        position.atr_take_ratio_profit_price = Some(80.0);
+        position.short_signal_take_profit_price = Some(90.0);
+
+        let candle = CandleItem {
+            o: 100.0,
+            h: 101.0,
+            l: 95.0,
+            c: 97.0,
+            v: 1.0,
+            ts: 1,
+            confirm: 1,
+        };
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.05,
+            ..Default::default()
+        };
+
+        let targets = compute_current_targets(&position, &candle, &risk);
+        assert_eq!(targets.stop_loss, Some(103.0));
+        assert_eq!(targets.take_profit, Some(90.0));
+    }
 }

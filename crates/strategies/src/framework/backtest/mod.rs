@@ -30,8 +30,8 @@ pub use r_system::{
 };
 pub use recording::{record_trade_entry, record_trade_exit};
 pub use risk::{
-    check_risk_config, check_risk_config_with_r_system, init_r_system_state, RSystemRiskConfig,
-    RSystemRuntime,
+    check_risk_config, check_risk_config_with_r_system, compute_current_targets, init_r_system_state,
+    ExitTargets, RSystemRiskConfig, RSystemRuntime,
 };
 pub use crate::framework::risk::{StopLossCalculator, StopLossSide};
 pub use signal::deal_signal;
