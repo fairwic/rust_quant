@@ -8,6 +8,7 @@ use crate::framework::backtest::types::{
 };
 use crate::CandleItem;
 use rust_quant_trading::audit::AuditTrail;
+use uuid::Uuid;
 
 /// 回测Pipeline上下文
 ///
@@ -82,7 +83,7 @@ impl BacktestContext {
         trading_state: TradingState,
     ) -> Self {
         let current_position = trading_state.trade_position.clone();
-        let run_id = format!("backtest-{}-{}", inst_id, candle.ts);
+        let run_id = format!("backtest-{}-{}-{}", inst_id, candle.ts, Uuid::new_v4());
         Self {
             candle,
             candle_index,

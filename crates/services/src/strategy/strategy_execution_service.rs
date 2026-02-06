@@ -325,22 +325,6 @@ impl StrategyExecutionService {
         }
 
         if outcome.opened_side.is_some() {
-            // 经济事件窗口检查（高重要性事件前后暂停追涨追跌）
-            // 通过环境变量控制是否启用：ECONOMIC_EVENT_FILTER=1
-            let econ_filter_enabled =
-                std::env::var("ECONOMIC_EVENT_FILTER").unwrap_or_else(|_| "0".to_string()) == "1";
-            if econ_filter_enabled {
-                if let Ok(should_wait) = self.check_economic_event_window().await {
-                    if should_wait {
-                        warn!(
-                            "⚠️ 当前处于高重要性经济事件窗口，跳过下单: inst_id={}, period={}, 等待回调后再入场",
-                            inst_id, period
-                        );
-                        return Ok(outcome);
-                    }
-                }
-            }
-
             if let Err(e) = self
                 .execute_order_internal(
                     inst_id,
@@ -629,7 +613,6 @@ impl StrategyExecutionService {
         })?;
 
         info!("当前持仓数量: {}", positions.len());
-
         // 4.1 实盘仓位治理（可选）：同向不加仓/反向先平仓
         let skip_same_side = Self::env_enabled("LIVE_SKIP_IF_SAME_SIDE_POSITION");
         let close_opposite_side = Self::env_enabled("LIVE_CLOSE_OPPOSITE_POSITION");
