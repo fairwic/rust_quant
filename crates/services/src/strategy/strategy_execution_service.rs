@@ -290,6 +290,8 @@ impl StrategyExecutionService {
 
         let outcome = apply_live_decision(&mut state, signal, trigger_candle, decision_risk);
         let epsilon = Self::live_tp_sl_epsilon();
+        let mut pending_targets: Option<ExitTargets> = None;
+        let mut pending_side: Option<TradeSide> = None;
         if let Some(position) = state.trade_position.as_ref() {
             let targets = compute_current_targets(position, trigger_candle, &decision_risk);
             let prev = self
@@ -298,14 +300,8 @@ impl StrategyExecutionService {
                 .map(|v| v.clone())
                 .unwrap_or_default();
             if Self::targets_changed(&prev, &targets, epsilon) {
-                self.live_exit_targets.insert(
-                    config.id,
-                    LiveExitTargets {
-                        stop_loss: targets.stop_loss,
-                        take_profit: targets.take_profit,
-                        algo_ids: prev.algo_ids,
-                    },
-                );
+                pending_targets = Some(targets);
+                pending_side = Some(position.trade_side);
             }
         } else {
             self.live_exit_targets.remove(&config.id);
@@ -336,7 +332,106 @@ impl StrategyExecutionService {
             }
         }
 
+        if let (Some(targets), Some(side)) = (pending_targets, pending_side) {
+            if let Err(e) = self
+                .sync_close_algos(inst_id, config.id, side, &targets)
+                .await
+            {
+                warn!(
+                    "⚠️ 同步止盈止损失败: inst_id={}, config_id={}, err={}",
+                    inst_id, config.id, e
+                );
+            } else {
+                self.live_exit_targets.insert(
+                    config.id,
+                    LiveExitTargets {
+                        stop_loss: targets.stop_loss,
+                        take_profit: targets.take_profit,
+                        algo_ids: Vec::new(),
+                    },
+                );
+            }
+        }
+
         Ok(outcome)
+    }
+
+    async fn sync_close_algos(
+        &self,
+        inst_id: &str,
+        config_id: i64,
+        side: TradeSide,
+        targets: &ExitTargets,
+    ) -> Result<()> {
+        use crate::exchange::create_exchange_api_service;
+        use crate::exchange::OkxOrderService;
+
+        let api_service = create_exchange_api_service();
+        let api_config = api_service
+            .get_first_api_config(config_id as i32)
+            .await
+            .map_err(|e| anyhow!("获取API配置失败: {}", e))?;
+
+        let okx_service = OkxOrderService;
+        let positions = okx_service
+            .get_positions(&api_config, Some("SWAP"), Some(inst_id))
+            .await
+            .map_err(|e| anyhow!("获取账户数据失败: {}", e))?;
+
+        let pos_side_str = match side {
+            TradeSide::Long => "long",
+            TradeSide::Short => "short",
+        };
+
+        let position = positions.iter().find(|p| {
+            p.inst_id == inst_id
+                && p.pos_side.eq_ignore_ascii_case(pos_side_str)
+                && p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12
+        });
+
+        let Some(position) = position else {
+            warn!(
+                "⚠️ 未找到可同步的持仓: inst_id={}, pos_side={}",
+                inst_id, pos_side_str
+            );
+            return Ok(());
+        };
+
+        let mgn_mode = position.mgn_mode.clone();
+        let algo_ids: Vec<String> = position
+            .close_order_algo
+            .as_ref()
+            .map(|list| list.iter().map(|a| a.algo_id.clone()).collect())
+            .unwrap_or_default();
+
+        if !algo_ids.is_empty() {
+            okx_service
+                .cancel_close_algos(&api_config, inst_id, &algo_ids)
+                .await?;
+        }
+
+        if targets.stop_loss.is_none() && targets.take_profit.is_none() {
+            return Ok(());
+        }
+
+        let close_side = match side {
+            TradeSide::Long => "sell",
+            TradeSide::Short => "buy",
+        };
+
+        okx_service
+            .place_close_algo(
+                &api_config,
+                inst_id,
+                &mgn_mode,
+                close_side,
+                pos_side_str,
+                targets.take_profit,
+                targets.stop_loss,
+            )
+            .await?;
+
+        Ok(())
     }
 
     async fn close_position_internal(
