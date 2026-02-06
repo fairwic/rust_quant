@@ -12,12 +12,21 @@ use rust_quant_common::CandleItem;
 use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
-use rust_quant_strategies::framework::backtest::{BasicRiskStrategyConfig, TradingState};
+use rust_quant_strategies::framework::backtest::{
+    compute_current_targets, BasicRiskStrategyConfig, ExitTargets, TradingState,
+};
 use rust_quant_strategies::framework::risk::{StopLossCalculator, StopLossSide};
 use rust_quant_strategies::framework::types::TradeSide;
 use rust_quant_strategies::strategy_common::SignalResult;
 
-use super::live_decision::apply_live_decision;
+use super::live_decision::{apply_live_decision, approx_eq_opt};
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct LiveExitTargets {
+    stop_loss: Option<f64>,
+    take_profit: Option<f64>,
+    algo_ids: Vec<String>,
+}
 
 /// 策略执行服务
 ///
@@ -39,6 +48,8 @@ pub struct StrategyExecutionService {
 
     /// 实盘交易状态（每个策略配置一份）
     live_states: DashMap<i64, TradingState>,
+    /// 实盘止盈止损目标缓存
+    live_exit_targets: DashMap<i64, LiveExitTargets>,
 }
 
 impl StrategyExecutionService {
@@ -47,6 +58,7 @@ impl StrategyExecutionService {
         Self {
             swap_order_repository,
             live_states: DashMap::new(),
+            live_exit_targets: DashMap::new(),
         }
     }
 
@@ -91,6 +103,19 @@ impl StrategyExecutionService {
             ),
             Err(_) => false,
         }
+    }
+
+    fn live_tp_sl_epsilon() -> f64 {
+        std::env::var("LIVE_TP_SL_EPSILON")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(1e-6)
+    }
+
+    fn targets_changed(prev: &LiveExitTargets, next: &ExitTargets, eps: f64) -> bool {
+        !approx_eq_opt(prev.stop_loss, next.stop_loss, eps)
+            || !approx_eq_opt(prev.take_profit, next.take_profit, eps)
     }
 
     /// 构建止损候选价列表（由上层选择最紧止损）
@@ -264,6 +289,27 @@ impl StrategyExecutionService {
             .unwrap_or_default();
 
         let outcome = apply_live_decision(&mut state, signal, trigger_candle, decision_risk);
+        let epsilon = Self::live_tp_sl_epsilon();
+        if let Some(position) = state.trade_position.as_ref() {
+            let targets = compute_current_targets(position, trigger_candle, &decision_risk);
+            let prev = self
+                .live_exit_targets
+                .get(&config.id)
+                .map(|v| v.clone())
+                .unwrap_or_default();
+            if Self::targets_changed(&prev, &targets, epsilon) {
+                self.live_exit_targets.insert(
+                    config.id,
+                    LiveExitTargets {
+                        stop_loss: targets.stop_loss,
+                        take_profit: targets.take_profit,
+                        algo_ids: prev.algo_ids,
+                    },
+                );
+            }
+        } else {
+            self.live_exit_targets.remove(&config.id);
+        }
         self.live_states.insert(config.id, state);
 
         if outcome.closed {

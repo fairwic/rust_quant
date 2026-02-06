@@ -4,6 +4,14 @@ use rust_quant_strategies::framework::backtest::{
 };
 use rust_quant_strategies::framework::types::TradeSide;
 
+pub(crate) fn approx_eq_opt(a: Option<f64>, b: Option<f64>, eps: f64) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(left), Some(right)) => (left - right).abs() <= eps,
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LiveDecisionOutcome {
     pub opened_side: Option<TradeSide>,
@@ -114,5 +122,13 @@ mod tests {
 
         assert!(outcome.closed);
         assert!(state.trade_position.is_none());
+    }
+
+    #[test]
+    fn approx_eq_opt_handles_none_and_epsilon() {
+        assert!(approx_eq_opt(None, None, 1e-6));
+        assert!(!approx_eq_opt(Some(1.0), None, 1e-6));
+        assert!(approx_eq_opt(Some(1.0000001), Some(1.0), 1e-3));
+        assert!(!approx_eq_opt(Some(1.01), Some(1.0), 1e-3));
     }
 }
