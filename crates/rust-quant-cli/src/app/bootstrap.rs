@@ -283,6 +283,18 @@ async fn start_strategies_from_db() -> Result<()> {
 
     info!("✅ 加载了 {} 个策略配置", configs.len());
 
+    for config in &configs {
+        if let Err(e) = execution_service
+            .compensate_close_algos_on_start(config)
+            .await
+        {
+            warn!(
+                "⚠️ 启动补偿撤单失败: id={}, symbol={}, err={}",
+                config.id, config.symbol, e
+            );
+        }
+    }
+
     // 2. 预热策略数据（关键步骤！）
     info!("🔥 开始预热策略数据...");
     let warmup_results = StrategyDataService::initialize_multiple_strategies(&configs).await;

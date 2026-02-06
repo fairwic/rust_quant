@@ -26,6 +26,14 @@ struct LiveExitTargets {
     stop_loss: Option<f64>,
     take_profit: Option<f64>,
     algo_ids: Vec<String>,
+    trade_side: Option<TradeSide>,
+}
+
+#[derive(Debug)]
+enum CloseAlgoSyncResult {
+    Placed(Vec<String>),
+    Cleared,
+    SkippedNoPosition,
 }
 
 /// 策略执行服务
@@ -111,6 +119,126 @@ impl StrategyExecutionService {
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|v| v.is_finite() && *v > 0.0)
             .unwrap_or(1e-6)
+    }
+
+    fn build_close_algo_tag(config_id: i64) -> String {
+        format!("rq-{}", config_id)
+    }
+
+    fn build_close_algo_cl_ord_id(config_id: i64) -> String {
+        format!(
+            "rq-{}-{}",
+            config_id,
+            chrono::Utc::now().timestamp_millis()
+        )
+    }
+
+    fn parse_detail_object(detail: &str) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::from_str::<serde_json::Value>(detail) {
+            Ok(serde_json::Value::Object(map)) => map,
+            Ok(other) => {
+                let mut map = serde_json::Map::new();
+                map.insert("raw_detail".to_string(), other);
+                map
+            }
+            Err(_) => {
+                let mut map = serde_json::Map::new();
+                map.insert(
+                    "raw_detail".to_string(),
+                    serde_json::Value::String(detail.to_string()),
+                );
+                map
+            }
+        }
+    }
+
+    fn extract_close_algo_ids(detail: &str) -> Vec<String> {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(detail) else {
+            return Vec::new();
+        };
+        let Some(ids) = value
+            .get("close_algo")
+            .and_then(|v| v.get("ids"))
+            .and_then(|v| v.as_array())
+        else {
+            return Vec::new();
+        };
+        ids.iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect()
+    }
+
+    fn upsert_close_algo_detail(
+        detail: &str,
+        algo_ids: &[String],
+        tag: &str,
+        stop_loss: Option<f64>,
+        take_profit: Option<f64>,
+    ) -> String {
+        let mut map = Self::parse_detail_object(detail);
+        let mut close_algo = serde_json::Map::new();
+        let ids = algo_ids
+            .iter()
+            .cloned()
+            .map(serde_json::Value::String)
+            .collect::<Vec<_>>();
+        close_algo.insert("ids".to_string(), serde_json::Value::Array(ids));
+        close_algo.insert(
+            "updated_at".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                chrono::Utc::now().timestamp_millis(),
+            )),
+        );
+        close_algo.insert(
+            "tag".to_string(),
+            serde_json::Value::String(tag.to_string()),
+        );
+        close_algo.insert(
+            "stop_loss".to_string(),
+            stop_loss
+                .and_then(serde_json::Number::from_f64)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        close_algo.insert(
+            "take_profit".to_string(),
+            take_profit
+                .and_then(serde_json::Number::from_f64)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        map.insert("close_algo".to_string(), serde_json::Value::Object(close_algo));
+        serde_json::Value::Object(map).to_string()
+    }
+
+    fn remove_close_algo_detail(detail: &str) -> String {
+        let mut map = Self::parse_detail_object(detail);
+        map.remove("close_algo");
+        serde_json::Value::Object(map).to_string()
+    }
+
+    fn parse_f64_value(value: &serde_json::Value) -> Option<f64> {
+        match value {
+            serde_json::Value::Number(n) => n.as_f64(),
+            serde_json::Value::String(s) => s.parse::<f64>().ok(),
+            _ => None,
+        }
+    }
+
+    fn extract_close_algo_targets(detail: &str) -> (Option<f64>, Option<f64>) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(detail) else {
+            return (None, None);
+        };
+        let Some(close_algo) = value.get("close_algo") else {
+            return (None, None);
+        };
+        let stop_loss = close_algo
+            .get("stop_loss")
+            .and_then(Self::parse_f64_value);
+        let take_profit = close_algo
+            .get("take_profit")
+            .and_then(Self::parse_f64_value);
+        (stop_loss, take_profit)
     }
 
     fn targets_changed(prev: &LiveExitTargets, next: &ExitTargets, eps: f64) -> bool {
@@ -290,21 +418,19 @@ impl StrategyExecutionService {
 
         let outcome = apply_live_decision(&mut state, signal, trigger_candle, decision_risk);
         let epsilon = Self::live_tp_sl_epsilon();
+        let prev_exit = self.live_exit_targets.get(&config.id).map(|v| v.clone());
+        let prev_snapshot = prev_exit.clone().unwrap_or_default();
         let mut pending_targets: Option<ExitTargets> = None;
         let mut pending_side: Option<TradeSide> = None;
+        let mut clear_exit_cache = false;
         if let Some(position) = state.trade_position.as_ref() {
             let targets = compute_current_targets(position, trigger_candle, &decision_risk);
-            let prev = self
-                .live_exit_targets
-                .get(&config.id)
-                .map(|v| v.clone())
-                .unwrap_or_default();
-            if Self::targets_changed(&prev, &targets, epsilon) {
+            if Self::targets_changed(&prev_snapshot, &targets, epsilon) {
                 pending_targets = Some(targets);
                 pending_side = Some(position.trade_side);
             }
         } else {
-            self.live_exit_targets.remove(&config.id);
+            clear_exit_cache = true;
         }
         self.live_states.insert(config.id, state);
 
@@ -333,23 +459,66 @@ impl StrategyExecutionService {
         }
 
         if let (Some(targets), Some(side)) = (pending_targets, pending_side) {
-            if let Err(e) = self
-                .sync_close_algos(inst_id, config.id, side, &targets)
+            match self
+                .sync_close_algos(
+                    inst_id,
+                    period,
+                    config.id,
+                    side,
+                    &targets,
+                    prev_snapshot.algo_ids.as_slice(),
+                )
                 .await
             {
-                warn!(
-                    "⚠️ 同步止盈止损失败: inst_id={}, config_id={}, err={}",
-                    inst_id, config.id, e
-                );
+                Ok(CloseAlgoSyncResult::Placed(algo_ids)) => {
+                    self.live_exit_targets.insert(
+                        config.id,
+                        LiveExitTargets {
+                            stop_loss: targets.stop_loss,
+                            take_profit: targets.take_profit,
+                            algo_ids,
+                            trade_side: Some(side),
+                        },
+                    );
+                }
+                Ok(CloseAlgoSyncResult::Cleared) => {
+                    self.live_exit_targets.remove(&config.id);
+                }
+                Ok(CloseAlgoSyncResult::SkippedNoPosition) => {}
+                Err(e) => {
+                    warn!(
+                        "⚠️ 同步止盈止损失败: inst_id={}, config_id={}, err={}",
+                        inst_id, config.id, e
+                    );
+                }
+            }
+        }
+
+        if clear_exit_cache {
+            if let Some(prev_exit) = prev_exit.as_ref() {
+                if !prev_exit.algo_ids.is_empty() {
+                    if let Err(e) = self
+                        .cancel_cached_close_algos(
+                            inst_id,
+                            period,
+                            config.id,
+                            prev_exit.trade_side,
+                            &prev_exit.algo_ids,
+                        )
+                        .await
+                    {
+                        warn!(
+                            "⚠️ 平仓后撤销止盈止损失败: inst_id={}, config_id={}, err={}",
+                            inst_id, config.id, e
+                        );
+                    } else {
+                        self.live_exit_targets.remove(&config.id);
+                    }
+                } else {
+                    self.live_exit_targets.remove(&config.id);
+                }
             } else {
-                self.live_exit_targets.insert(
-                    config.id,
-                    LiveExitTargets {
-                        stop_loss: targets.stop_loss,
-                        take_profit: targets.take_profit,
-                        algo_ids: Vec::new(),
-                    },
-                );
+                self.live_exit_targets.remove(&config.id);
             }
         }
 
@@ -359,10 +528,12 @@ impl StrategyExecutionService {
     async fn sync_close_algos(
         &self,
         inst_id: &str,
+        period: &str,
         config_id: i64,
         side: TradeSide,
         targets: &ExitTargets,
-    ) -> Result<()> {
+        prev_algo_ids: &[String],
+    ) -> Result<CloseAlgoSyncResult> {
         use crate::exchange::create_exchange_api_service;
         use crate::exchange::OkxOrderService;
 
@@ -394,24 +565,28 @@ impl StrategyExecutionService {
                 "⚠️ 未找到可同步的持仓: inst_id={}, pos_side={}",
                 inst_id, pos_side_str
             );
-            return Ok(());
+            return Ok(CloseAlgoSyncResult::SkippedNoPosition);
         };
 
         let mgn_mode = position.mgn_mode.clone();
-        let algo_ids: Vec<String> = position
-            .close_order_algo
-            .as_ref()
-            .map(|list| list.iter().map(|a| a.algo_id.clone()).collect())
-            .unwrap_or_default();
 
-        if !algo_ids.is_empty() {
+        if !prev_algo_ids.is_empty() {
             okx_service
-                .cancel_close_algos(&api_config, inst_id, &algo_ids)
+                .cancel_close_algos(&api_config, inst_id, prev_algo_ids)
                 .await?;
         }
 
         if targets.stop_loss.is_none() && targets.take_profit.is_none() {
-            return Ok(());
+            if let Err(e) = self
+                .clear_persisted_close_algos(config_id, inst_id, period, pos_side_str)
+                .await
+            {
+                warn!(
+                    "⚠️ 清理持久化止盈止损失败: inst_id={}, config_id={}, err={}",
+                    inst_id, config_id, e
+                );
+            }
+            return Ok(CloseAlgoSyncResult::Cleared);
         }
 
         let close_side = match side {
@@ -419,7 +594,9 @@ impl StrategyExecutionService {
             TradeSide::Short => "buy",
         };
 
-        okx_service
+        let algo_cl_ord_id = Self::build_close_algo_cl_ord_id(config_id);
+        let tag = Self::build_close_algo_tag(config_id);
+        let algo_ids = okx_service
             .place_close_algo(
                 &api_config,
                 inst_id,
@@ -428,8 +605,377 @@ impl StrategyExecutionService {
                 pos_side_str,
                 targets.take_profit,
                 targets.stop_loss,
+                Some(algo_cl_ord_id.as_str()),
+                Some(tag.as_str()),
             )
             .await?;
+
+        if algo_ids.is_empty() {
+            return Err(anyhow!(
+                "下达平仓策略委托未返回algoId: inst_id={}, period={}, config_id={}",
+                inst_id,
+                period,
+                config_id
+            ));
+        }
+
+        if let Err(e) = self
+            .persist_close_algos(
+                config_id,
+                inst_id,
+                period,
+                pos_side_str,
+                &algo_ids,
+                &tag,
+                targets.stop_loss,
+                targets.take_profit,
+            )
+            .await
+        {
+            warn!(
+                "⚠️ 持久化止盈止损失败: inst_id={}, config_id={}, err={}",
+                inst_id, config_id, e
+            );
+        }
+
+        Ok(CloseAlgoSyncResult::Placed(algo_ids))
+    }
+
+    async fn persist_close_algos(
+        &self,
+        config_id: i64,
+        inst_id: &str,
+        period: &str,
+        pos_side: &str,
+        algo_ids: &[String],
+        tag: &str,
+        stop_loss: Option<f64>,
+        take_profit: Option<f64>,
+    ) -> Result<()> {
+        let Some(mut order) = self
+            .swap_order_repository
+            .find_latest_by_strategy_inst_period_pos_side(
+                config_id as i32,
+                inst_id,
+                period,
+                pos_side,
+            )
+            .await?
+        else {
+            warn!(
+                "⚠️ 未找到订单记录，跳过持久化止盈止损: inst_id={}, period={}, config_id={}, pos_side={}",
+                inst_id, period, config_id, pos_side
+            );
+            return Ok(());
+        };
+
+        order.detail =
+            Self::upsert_close_algo_detail(&order.detail, algo_ids, tag, stop_loss, take_profit);
+        self.swap_order_repository.update(&order).await?;
+        Ok(())
+    }
+
+    async fn clear_persisted_close_algos(
+        &self,
+        config_id: i64,
+        inst_id: &str,
+        period: &str,
+        pos_side: &str,
+    ) -> Result<()> {
+        let Some(mut order) = self
+            .swap_order_repository
+            .find_latest_by_strategy_inst_period_pos_side(
+                config_id as i32,
+                inst_id,
+                period,
+                pos_side,
+            )
+            .await?
+        else {
+            return Ok(());
+        };
+
+        order.detail = Self::remove_close_algo_detail(&order.detail);
+        self.swap_order_repository.update(&order).await?;
+        Ok(())
+    }
+
+    async fn load_persisted_close_algos(
+        &self,
+        config_id: i64,
+        inst_id: &str,
+        period: &str,
+        pos_side: &str,
+    ) -> Result<Option<SwapOrder>> {
+        self.swap_order_repository
+            .find_latest_by_strategy_inst_period_pos_side(
+                config_id as i32,
+                inst_id,
+                period,
+                pos_side,
+            )
+            .await
+    }
+
+    async fn cancel_cached_close_algos(
+        &self,
+        inst_id: &str,
+        period: &str,
+        config_id: i64,
+        trade_side: Option<TradeSide>,
+        algo_ids: &[String],
+    ) -> Result<()> {
+        if algo_ids.is_empty() {
+            return Ok(());
+        }
+
+        use crate::exchange::create_exchange_api_service;
+        use crate::exchange::OkxOrderService;
+
+        let api_service = create_exchange_api_service();
+        let api_config = api_service
+            .get_first_api_config(config_id as i32)
+            .await
+            .map_err(|e| anyhow!("获取API配置失败: {}", e))?;
+
+        let okx_service = OkxOrderService;
+        okx_service
+            .cancel_close_algos(&api_config, inst_id, algo_ids)
+            .await?;
+
+        let pos_side_str = match trade_side {
+            Some(TradeSide::Long) => Some("long"),
+            Some(TradeSide::Short) => Some("short"),
+            None => None,
+        };
+
+        if let Some(pos_side_str) = pos_side_str {
+            if let Err(e) = self
+                .clear_persisted_close_algos(config_id, inst_id, period, pos_side_str)
+                .await
+            {
+                warn!(
+                    "⚠️ 清理持久化止盈止损失败: inst_id={}, config_id={}, err={}",
+                    inst_id, config_id, e
+                );
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn compensate_close_algos_on_start(&self, config: &StrategyConfig) -> Result<()> {
+        use crate::exchange::create_exchange_api_service;
+        use crate::exchange::OkxOrderService;
+
+        let inst_id = config.symbol.as_str();
+        let period = config.timeframe.as_str();
+        let pos_sides = ["long", "short"];
+
+        let api_service = create_exchange_api_service();
+        let api_config = match api_service.get_first_api_config(config.id as i32).await {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                warn!(
+                    "⚠️ 启动补偿撤单获取API配置失败: inst_id={}, config_id={}, err={}",
+                    inst_id, config.id, e
+                );
+                return Ok(());
+            }
+        };
+
+        let okx_service = OkxOrderService;
+        let positions = okx_service
+            .get_positions(&api_config, Some("SWAP"), Some(inst_id))
+            .await
+            .map_err(|e| anyhow!("获取账户数据失败: {}", e))?;
+
+        for pos_side in pos_sides {
+            let position = positions.iter().find(|p| {
+                p.inst_id == inst_id
+                    && p.pos_side.eq_ignore_ascii_case(pos_side)
+                    && p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12
+            });
+
+            if position.is_none() {
+                if let Some(order) = self
+                    .load_persisted_close_algos(config.id, inst_id, period, pos_side)
+                    .await?
+                {
+                    let algo_ids = Self::extract_close_algo_ids(&order.detail);
+                    if !algo_ids.is_empty() {
+                        if let Err(e) = okx_service
+                            .cancel_close_algos(&api_config, inst_id, &algo_ids)
+                            .await
+                        {
+                            warn!(
+                                "⚠️ 启动补偿撤单失败: inst_id={}, config_id={}, pos_side={}, err={}",
+                                inst_id, config.id, pos_side, e
+                            );
+                        } else {
+                            let mut updated = order;
+                            updated.detail = Self::remove_close_algo_detail(&updated.detail);
+                            if let Err(e) = self.swap_order_repository.update(&updated).await {
+                                warn!(
+                                    "⚠️ 启动补偿撤单后清理持久化失败: inst_id={}, config_id={}, pos_side={}, err={}",
+                                    inst_id, config.id, pos_side, e
+                                );
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+
+            let position = position.unwrap();
+            let mut has_tp_sl = false;
+            let mut exchange_algo_ids: Vec<String> = Vec::new();
+            let mut exchange_stop_loss: Option<f64> = None;
+            let mut exchange_take_profit: Option<f64> = None;
+
+            if let Some(close_algos) = position.close_order_algo.as_ref() {
+                for algo in close_algos {
+                    let sl = algo
+                        .sl_trigger_px
+                        .as_ref()
+                        .and_then(|v| v.parse::<f64>().ok());
+                    let tp = algo
+                        .tp_trigger_px
+                        .as_ref()
+                        .and_then(|v| v.parse::<f64>().ok());
+                    if sl.is_some() || tp.is_some() {
+                        has_tp_sl = true;
+                    }
+                    if !algo.algo_id.is_empty() {
+                        exchange_algo_ids.push(algo.algo_id.clone());
+                    }
+                    if exchange_stop_loss.is_none() {
+                        exchange_stop_loss = sl;
+                    }
+                    if exchange_take_profit.is_none() {
+                        exchange_take_profit = tp;
+                    }
+                }
+            }
+
+            if has_tp_sl {
+                let tag = Self::build_close_algo_tag(config.id);
+                if let Some(order) = self
+                    .load_persisted_close_algos(config.id, inst_id, period, pos_side)
+                    .await?
+                {
+                    if !exchange_algo_ids.is_empty() {
+                        let mut updated = order;
+                        updated.detail = Self::upsert_close_algo_detail(
+                            &updated.detail,
+                            &exchange_algo_ids,
+                            &tag,
+                            exchange_stop_loss,
+                            exchange_take_profit,
+                        );
+                        if let Err(e) = self.swap_order_repository.update(&updated).await {
+                            warn!(
+                                "⚠️ 同步持久化止盈止损失败: inst_id={}, config_id={}, pos_side={}, err={}",
+                                inst_id, config.id, pos_side, e
+                            );
+                        }
+                    }
+                }
+
+                let trade_side = if pos_side.eq_ignore_ascii_case("long") {
+                    TradeSide::Long
+                } else {
+                    TradeSide::Short
+                };
+                if !exchange_algo_ids.is_empty() {
+                    self.live_exit_targets.insert(
+                        config.id,
+                        LiveExitTargets {
+                            stop_loss: exchange_stop_loss,
+                            take_profit: exchange_take_profit,
+                            algo_ids: exchange_algo_ids,
+                            trade_side: Some(trade_side),
+                        },
+                    );
+                }
+                continue;
+            }
+
+            let Some(order) = self
+                .load_persisted_close_algos(config.id, inst_id, period, pos_side)
+                .await?
+            else {
+                warn!(
+                    "⚠️ 持仓无止盈止损且无持久化记录: inst_id={}, config_id={}, pos_side={}",
+                    inst_id, config.id, pos_side
+                );
+                continue;
+            };
+
+            let (stop_loss, take_profit) = Self::extract_close_algo_targets(&order.detail);
+            if stop_loss.is_none() && take_profit.is_none() {
+                warn!(
+                    "⚠️ 持仓无止盈止损且无可用目标: inst_id={}, config_id={}, pos_side={}",
+                    inst_id, config.id, pos_side
+                );
+                continue;
+            }
+
+            let close_side = if pos_side.eq_ignore_ascii_case("long") {
+                "sell"
+            } else {
+                "buy"
+            };
+            let algo_cl_ord_id = Self::build_close_algo_cl_ord_id(config.id);
+            let tag = Self::build_close_algo_tag(config.id);
+            let algo_ids = okx_service
+                .place_close_algo(
+                    &api_config,
+                    inst_id,
+                    &position.mgn_mode,
+                    close_side,
+                    pos_side,
+                    take_profit,
+                    stop_loss,
+                    Some(algo_cl_ord_id.as_str()),
+                    Some(tag.as_str()),
+                )
+                .await?;
+
+            if !algo_ids.is_empty() {
+                if let Err(e) = self
+                    .persist_close_algos(
+                        config.id,
+                        inst_id,
+                        period,
+                        pos_side,
+                        &algo_ids,
+                        &tag,
+                        stop_loss,
+                        take_profit,
+                    )
+                    .await
+                {
+                    warn!(
+                        "⚠️ 启动补偿挂单持久化失败: inst_id={}, config_id={}, pos_side={}, err={}",
+                        inst_id, config.id, pos_side, e
+                    );
+                }
+                let trade_side = if pos_side.eq_ignore_ascii_case("long") {
+                    TradeSide::Long
+                } else {
+                    TradeSide::Short
+                };
+                self.live_exit_targets.insert(
+                    config.id,
+                    LiveExitTargets {
+                        stop_loss,
+                        take_profit,
+                        algo_ids,
+                        trade_side: Some(trade_side),
+                    },
+                );
+            }
+        }
 
         Ok(())
     }
@@ -1032,6 +1578,39 @@ mod tests {
             Ok(vec![])
         }
 
+        async fn find_latest_by_strategy_inst_period_pos_side(
+            &self,
+            strategy_id: i32,
+            inst_id: &str,
+            period: &str,
+            pos_side: &str,
+        ) -> Result<Option<SwapOrder>> {
+            if let Some(ref order) = self.existing_order {
+                if order.strategy_id == strategy_id
+                    && order.inst_id == inst_id
+                    && order.period == period
+                    && order.pos_side == pos_side
+                {
+                    return Ok(Some(order.clone()));
+                }
+            }
+
+            let orders = self.saved_orders.lock().unwrap();
+            let mut candidates: Vec<SwapOrder> = orders
+                .iter()
+                .filter(|order| {
+                    order.strategy_id == strategy_id
+                        && order.inst_id == inst_id
+                        && order.period == period
+                        && order.pos_side == pos_side
+                })
+                .cloned()
+                .collect();
+
+            candidates.sort_by_key(|order| order.created_at);
+            Ok(candidates.pop())
+        }
+
         async fn save(&self, order: &SwapOrder) -> Result<i32> {
             if self.save_should_fail {
                 return Err(anyhow!("模拟保存失败"));
@@ -1040,7 +1619,13 @@ mod tests {
             Ok(1)
         }
 
-        async fn update(&self, _order: &SwapOrder) -> Result<()> {
+        async fn update(&self, order: &SwapOrder) -> Result<()> {
+            let mut orders = self.saved_orders.lock().unwrap();
+            if let Some(existing) = orders.iter_mut().find(|o| {
+                (order.id.is_some() && o.id == order.id) || o.in_order_id == order.in_order_id
+            }) {
+                *existing = order.clone();
+            }
             Ok(())
         }
 
@@ -1117,6 +1702,30 @@ mod tests {
     #[test]
     fn test_service_creation() {
         let _service = create_test_service();
+    }
+
+    #[test]
+    fn test_close_algo_detail_roundtrip() {
+        let detail = serde_json::json!({
+            "entry_price": 100.0,
+            "stop_loss": 95.0,
+        })
+        .to_string();
+        let algo_ids = vec!["a1".to_string(), "a2".to_string()];
+        let updated = StrategyExecutionService::upsert_close_algo_detail(
+            &detail,
+            &algo_ids,
+            "rq-1",
+            Some(95.0),
+            Some(110.0),
+        );
+
+        let extracted = StrategyExecutionService::extract_close_algo_ids(&updated);
+        assert_eq!(extracted, algo_ids);
+
+        let cleared = StrategyExecutionService::remove_close_algo_detail(&updated);
+        let extracted_after_clear = StrategyExecutionService::extract_close_algo_ids(&cleared);
+        assert!(extracted_after_clear.is_empty());
     }
 
     #[test]

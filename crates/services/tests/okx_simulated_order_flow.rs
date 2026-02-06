@@ -113,6 +113,8 @@ fn build_place_close_algo_body_includes_tp_sl_when_present() {
         "long",
         Some(110.0),
         Some(90.0),
+        Some("rq-1-123"),
+        Some("rq-1"),
     );
     assert_eq!(body["instId"], "BTC-USDT-SWAP");
     assert_eq!(body["tdMode"], "isolated");
@@ -126,6 +128,8 @@ fn build_place_close_algo_body_includes_tp_sl_when_present() {
     assert_eq!(body["slTriggerPx"], "90.00000000");
     assert_eq!(body["slOrdPx"], "-1");
     assert_eq!(body["slTriggerPxType"], "last");
+    assert_eq!(body["algoClOrdId"], "rq-1-123");
+    assert_eq!(body["tag"], "rq-1");
 }
 
 #[test]
@@ -135,6 +139,8 @@ fn build_place_close_algo_body_omits_tp_sl_when_none() {
         "isolated",
         "buy",
         "short",
+        None,
+        None,
         None,
         None,
     );

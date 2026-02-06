@@ -214,6 +214,15 @@ pub trait SwapOrderRepository: Send + Sync {
         pos_side: &str,
     ) -> Result<Vec<SwapOrder>>;
 
+    /// 查询策略下最新订单（用于同步止盈止损）
+    async fn find_latest_by_strategy_inst_period_pos_side(
+        &self,
+        strategy_id: i32,
+        inst_id: &str,
+        period: &str,
+        pos_side: &str,
+    ) -> Result<Option<SwapOrder>>;
+
     /// 保存订单
     async fn save(&self, order: &SwapOrder) -> Result<i32>;
 

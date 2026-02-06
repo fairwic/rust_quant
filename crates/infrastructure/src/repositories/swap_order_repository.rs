@@ -191,6 +191,37 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
         Ok(entities.into_iter().map(|e| e.to_domain()).collect())
     }
 
+    async fn find_latest_by_strategy_inst_period_pos_side(
+        &self,
+        strategy_id: i32,
+        inst_id: &str,
+        period: &str,
+        pos_side: &str,
+    ) -> Result<Option<SwapOrder>> {
+        debug!(
+            "查询策略最新订单: strategy_id={}, inst_id={}, period={}, pos_side={}",
+            strategy_id, inst_id, period, pos_side
+        );
+
+        let entity = sqlx::query_as::<_, SwapOrderEntity>(
+            r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
+                      period, inst_id, side, pos_size, pos_side, tag,
+                      platform_type, detail, created_at, update_at
+               FROM swap_orders
+               WHERE strategy_id = ? AND inst_id = ? AND period = ? AND pos_side = ?
+               ORDER BY created_at DESC
+               LIMIT 1"#,
+        )
+        .bind(strategy_id)
+        .bind(inst_id)
+        .bind(period)
+        .bind(pos_side)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(entity.map(|e| e.to_domain()))
+    }
+
     async fn save(&self, order: &SwapOrder) -> Result<i32> {
         info!(
             "保存合约订单: in_order_id={}, inst_id={}, side={}, pos_side={}",

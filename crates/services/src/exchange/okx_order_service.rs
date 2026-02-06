@@ -68,6 +68,8 @@ impl OkxOrderService {
         pos_side: &str,
         take_profit_trigger_px: Option<f64>,
         stop_loss_trigger_px: Option<f64>,
+        algo_cl_ord_id: Option<&str>,
+        tag: Option<&str>,
     ) -> serde_json::Value {
         let mut body = serde_json::Map::new();
         body.insert("instId".to_string(), serde_json::json!(inst_id));
@@ -76,6 +78,12 @@ impl OkxOrderService {
         body.insert("posSide".to_string(), serde_json::json!(pos_side));
         body.insert("algoType".to_string(), serde_json::json!("conditional"));
         body.insert("closeFraction".to_string(), serde_json::json!("1"));
+        if let Some(cl_ord_id) = algo_cl_ord_id {
+            body.insert("algoClOrdId".to_string(), serde_json::json!(cl_ord_id));
+        }
+        if let Some(tag) = tag {
+            body.insert("tag".to_string(), serde_json::json!(tag));
+        }
 
         if let Some(tp) = take_profit_trigger_px {
             body.insert(
@@ -321,7 +329,9 @@ impl OkxOrderService {
         pos_side: &str,
         take_profit_trigger_px: Option<f64>,
         stop_loss_trigger_px: Option<f64>,
-    ) -> Result<()> {
+        algo_cl_ord_id: Option<&str>,
+        tag: Option<&str>,
+    ) -> Result<Vec<String>> {
         let client = Self::create_okx_client(api_config)?;
         let trade = OkxTrade::new(client);
         let body = Self::build_place_close_algo_body(
@@ -331,6 +341,8 @@ impl OkxOrderService {
             pos_side,
             take_profit_trigger_px,
             stop_loss_trigger_px,
+            algo_cl_ord_id,
+            tag,
         );
         let body_str = serde_json::to_string(&body).map_err(|e| anyhow!("序列化下单请求失败: {}", e))?;
         let path = "/api/v5/trade/order-algo";
@@ -342,7 +354,19 @@ impl OkxOrderService {
             .map_err(|e| anyhow!("下达平仓策略委托失败: {}", e))?;
 
         info!("下达平仓策略委托返回: {}", resp);
-        Ok(())
+        let mut algo_ids = Vec::new();
+        if let Some(items) = resp.get("data").and_then(|v| v.as_array()) {
+            for item in items {
+                if let Some(id) = item
+                    .get("algoId")
+                    .and_then(|v| v.as_str())
+                    .filter(|v| !v.is_empty())
+                {
+                    algo_ids.push(id.to_string());
+                }
+            }
+        }
+        Ok(algo_ids)
     }
 
     /// 获取账户持仓
