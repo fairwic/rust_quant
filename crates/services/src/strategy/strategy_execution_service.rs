@@ -2,10 +2,13 @@
 //!
 //! 协调策略分析、风控检查、订单创建的完整业务流程
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
+use okx::dto::account_dto::Position as OkxPosition;
 use tracing::{error, info, warn};
 
 use rust_quant_common::CandleItem;
@@ -13,7 +16,7 @@ use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
 use rust_quant_strategies::framework::backtest::{
-    compute_current_targets, BasicRiskStrategyConfig, ExitTargets, TradingState,
+    compute_current_targets, BasicRiskStrategyConfig, ExitTargets, TradePosition, TradingState,
 };
 use rust_quant_strategies::framework::risk::{StopLossCalculator, StopLossSide};
 use rust_quant_strategies::framework::types::TradeSide;
@@ -34,6 +37,16 @@ enum CloseAlgoSyncResult {
     Placed(Vec<String>),
     Cleared,
     SkippedNoPosition,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct GuardTestState {
+    compensate_fail: AtomicBool,
+    has_algo_after_compensate: AtomicBool,
+    close_fail: AtomicBool,
+    compensate_calls: AtomicUsize,
+    close_calls: AtomicUsize,
 }
 
 /// 策略执行服务
@@ -57,6 +70,8 @@ pub struct StrategyExecutionService {
     live_states: DashMap<i64, TradingState>,
     /// 实盘止盈止损目标缓存
     live_exit_targets: DashMap<i64, LiveExitTargets>,
+    #[cfg(test)]
+    guard_test_state: Arc<GuardTestState>,
 }
 
 impl StrategyExecutionService {
@@ -66,6 +81,8 @@ impl StrategyExecutionService {
             swap_order_repository,
             live_states: DashMap::new(),
             live_exit_targets: DashMap::new(),
+            #[cfg(test)]
+            guard_test_state: Arc::new(GuardTestState::default()),
         }
     }
 
@@ -235,6 +252,280 @@ impl StrategyExecutionService {
             .get("take_profit")
             .and_then(Self::parse_f64_value);
         (stop_loss, take_profit)
+    }
+
+    fn extract_entry_price(detail: &str) -> Option<f64> {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(detail) else {
+            return None;
+        };
+        value.get("entry_price").and_then(Self::parse_f64_value)
+    }
+
+    fn parse_opt_f64(input: Option<&str>) -> Option<f64> {
+        input.and_then(|v| v.parse::<f64>().ok())
+    }
+
+    fn format_open_position_time(position: &OkxPosition) -> String {
+        let millis = position
+            .c_time
+            .as_deref()
+            .and_then(|v| v.parse::<i64>().ok())
+            .or_else(|| {
+                position
+                    .u_time
+                    .as_deref()
+                    .and_then(|v| v.parse::<i64>().ok())
+            })
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+        chrono::DateTime::<chrono::Utc>::from_timestamp_millis(millis)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string())
+    }
+
+    fn has_live_algo_for_side(&self, config_id: i64, side: TradeSide) -> bool {
+        self.live_exit_targets
+            .get(&config_id)
+            .map(|target| target.trade_side == Some(side) && !target.algo_ids.is_empty())
+            .unwrap_or(false)
+    }
+
+    fn emit_guard_audit_log(
+        stage: &str,
+        inst_id: &str,
+        period: &str,
+        config_id: i64,
+        side: TradeSide,
+        trigger_ts: i64,
+        message: Option<String>,
+    ) {
+        let payload = serde_json::json!({
+            "event": "live_guard",
+            "stage": stage,
+            "inst_id": inst_id,
+            "period": period,
+            "config_id": config_id,
+            "side": format!("{:?}", side),
+            "trigger_ts": trigger_ts,
+            "message": message,
+            "logged_at": chrono::Utc::now().timestamp_millis(),
+        });
+        warn!("LIVE_GUARD {}", payload);
+    }
+
+    #[cfg(not(test))]
+    async fn compensate_for_guard(&self, config: &StrategyConfig, _side: TradeSide) -> Result<()> {
+        self.compensate_close_algos_on_start(config).await
+    }
+
+    #[cfg(test)]
+    async fn compensate_for_guard(&self, config: &StrategyConfig, side: TradeSide) -> Result<()> {
+        self.guard_test_state
+            .compensate_calls
+            .fetch_add(1, Ordering::SeqCst);
+        if self.guard_test_state.compensate_fail.load(Ordering::SeqCst) {
+            return Err(anyhow!("mock compensate failed"));
+        }
+        if self
+            .guard_test_state
+            .has_algo_after_compensate
+            .load(Ordering::SeqCst)
+        {
+            self.live_exit_targets.insert(
+                config.id,
+                LiveExitTargets {
+                    stop_loss: Some(1.0),
+                    take_profit: None,
+                    algo_ids: vec!["mock-algo".to_string()],
+                    trade_side: Some(side),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    #[cfg(not(test))]
+    async fn close_for_guard(
+        &self,
+        inst_id: &str,
+        period: &str,
+        config_id: i64,
+        side: TradeSide,
+    ) -> Result<()> {
+        self.close_position_internal(inst_id, period, config_id, side)
+            .await
+    }
+
+    #[cfg(test)]
+    async fn close_for_guard(
+        &self,
+        _inst_id: &str,
+        _period: &str,
+        _config_id: i64,
+        _side: TradeSide,
+    ) -> Result<()> {
+        self.guard_test_state
+            .close_calls
+            .fetch_add(1, Ordering::SeqCst);
+        if self.guard_test_state.close_fail.load(Ordering::SeqCst) {
+            return Err(anyhow!("mock close failed"));
+        }
+        Ok(())
+    }
+
+    async fn enforce_opened_position_guard(
+        &self,
+        inst_id: &str,
+        period: &str,
+        config: &StrategyConfig,
+        side: TradeSide,
+        trigger_ts: i64,
+    ) -> Result<()> {
+        Self::emit_guard_audit_log(
+            "sync_failed_after_open",
+            inst_id,
+            period,
+            config.id,
+            side,
+            trigger_ts,
+            Some("open succeeded but tp/sl sync failed".to_string()),
+        );
+        if let Err(comp_err) = self.compensate_for_guard(config, side).await {
+            Self::emit_guard_audit_log(
+                "compensate_failed",
+                inst_id,
+                period,
+                config.id,
+                side,
+                trigger_ts,
+                Some(comp_err.to_string()),
+            );
+        }
+
+        if !self.has_live_algo_for_side(config.id, side) {
+            Self::emit_guard_audit_log(
+                "force_close_start",
+                inst_id,
+                period,
+                config.id,
+                side,
+                trigger_ts,
+                Some("compensation did not restore tp/sl".to_string()),
+            );
+            if let Err(close_err) = self.close_for_guard(inst_id, period, config.id, side).await {
+                Self::emit_guard_audit_log(
+                    "force_close_failed",
+                    inst_id,
+                    period,
+                    config.id,
+                    side,
+                    trigger_ts,
+                    Some(close_err.to_string()),
+                );
+                return Err(close_err);
+            }
+            Self::emit_guard_audit_log(
+                "force_close_done",
+                inst_id,
+                period,
+                config.id,
+                side,
+                trigger_ts,
+                None,
+            );
+            self.live_exit_targets.remove(&config.id);
+            self.live_states.insert(config.id, TradingState::default());
+            return Err(anyhow!(
+                "开仓后止盈止损同步失败，补偿未成功，已触发主动平仓"
+            ));
+        }
+
+        Self::emit_guard_audit_log(
+            "guard_resolved_by_compensate",
+            inst_id,
+            period,
+            config.id,
+            side,
+            trigger_ts,
+            Some("tp/sl restored after compensation".to_string()),
+        );
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn configure_guard_test_state(
+        &self,
+        compensate_fail: bool,
+        has_algo_after_compensate: bool,
+        close_fail: bool,
+    ) {
+        self.guard_test_state
+            .compensate_fail
+            .store(compensate_fail, Ordering::SeqCst);
+        self.guard_test_state
+            .has_algo_after_compensate
+            .store(has_algo_after_compensate, Ordering::SeqCst);
+        self.guard_test_state
+            .close_fail
+            .store(close_fail, Ordering::SeqCst);
+        self.guard_test_state
+            .compensate_calls
+            .store(0, Ordering::SeqCst);
+        self.guard_test_state.close_calls.store(0, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    fn guard_test_calls(&self) -> (usize, usize) {
+        (
+            self.guard_test_state
+                .compensate_calls
+                .load(Ordering::SeqCst),
+            self.guard_test_state.close_calls.load(Ordering::SeqCst),
+        )
+    }
+
+    fn rehydrate_live_state_from_position(
+        &self,
+        config_id: i64,
+        position: &OkxPosition,
+        trade_side: TradeSide,
+        detail: Option<&str>,
+        stop_loss: Option<f64>,
+        take_profit: Option<f64>,
+    ) {
+        let position_nums = position
+            .pos
+            .parse::<f64>()
+            .ok()
+            .map(f64::abs)
+            .unwrap_or(0.0);
+        let avg_px = Self::parse_opt_f64(position.avg_px.as_deref());
+        let open_price = detail
+            .and_then(Self::extract_entry_price)
+            .or(avg_px)
+            .unwrap_or(0.0);
+
+        let mut state = self
+            .live_states
+            .get(&config_id)
+            .map(|v| v.clone())
+            .unwrap_or_default();
+
+        let mut trade_position = state.trade_position.unwrap_or_else(TradePosition::default);
+        trade_position.trade_side = trade_side;
+        trade_position.position_nums = position_nums;
+        trade_position.open_price = open_price;
+        trade_position.open_position_time = Self::format_open_position_time(position);
+        trade_position.signal_high_low_diff = trade_position.signal_high_low_diff.max(1e-8);
+        trade_position.signal_kline_stop_close_price = stop_loss;
+        trade_position.atr_stop_loss_price = stop_loss;
+        trade_position.atr_take_ratio_profit_price = take_profit;
+        if trade_side == TradeSide::Long {
+            trade_position.long_signal_take_profit_price = take_profit;
+        } else {
+            trade_position.short_signal_take_profit_price = take_profit;
+        }
+        state.trade_position = Some(trade_position);
+        self.live_states.insert(config_id, state);
     }
 
     fn targets_changed(prev: &LiveExitTargets, next: &ExitTargets, eps: f64) -> bool {
@@ -453,6 +744,7 @@ impl StrategyExecutionService {
             }
         }
 
+        let opened_side = outcome.opened_side;
         if let (Some(targets), Some(side)) = (pending_targets, pending_side) {
             match self
                 .sync_close_algos(
@@ -485,6 +777,17 @@ impl StrategyExecutionService {
                         "⚠️ 同步止盈止损失败: inst_id={}, config_id={}, err={}",
                         inst_id, config.id, e
                     );
+
+                    if opened_side == Some(side) {
+                        self.enforce_opened_position_guard(
+                            inst_id,
+                            period,
+                            config,
+                            side,
+                            trigger_candle.ts,
+                        )
+                        .await?;
+                    }
                 }
             }
         }
@@ -791,12 +1094,12 @@ impl StrategyExecutionService {
                     && p.pos_side.eq_ignore_ascii_case(pos_side)
                     && p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12
             });
+            let persisted_order = self
+                .load_persisted_close_algos(config.id, inst_id, period, pos_side)
+                .await?;
 
             if position.is_none() {
-                if let Some(order) = self
-                    .load_persisted_close_algos(config.id, inst_id, period, pos_side)
-                    .await?
-                {
+                if let Some(order) = persisted_order {
                     let algo_ids = Self::extract_close_algo_ids(&order.detail);
                     if !algo_ids.is_empty() {
                         if let Err(e) = okx_service
@@ -823,6 +1126,12 @@ impl StrategyExecutionService {
             }
 
             let position = position.unwrap();
+            let trade_side = if pos_side.eq_ignore_ascii_case("long") {
+                TradeSide::Long
+            } else {
+                TradeSide::Short
+            };
+
             let mut has_tp_sl = false;
             let mut exchange_algo_ids: Vec<String> = Vec::new();
             let mut exchange_stop_loss: Option<f64> = None;
@@ -855,12 +1164,9 @@ impl StrategyExecutionService {
 
             if has_tp_sl {
                 let tag = Self::build_close_algo_tag(config.id);
-                if let Some(order) = self
-                    .load_persisted_close_algos(config.id, inst_id, period, pos_side)
-                    .await?
-                {
+                if let Some(order) = persisted_order.as_ref() {
                     if !exchange_algo_ids.is_empty() {
-                        let mut updated = order;
+                        let mut updated = order.clone();
                         updated.detail = Self::upsert_close_algo_detail(
                             &updated.detail,
                             &exchange_algo_ids,
@@ -877,11 +1183,15 @@ impl StrategyExecutionService {
                     }
                 }
 
-                let trade_side = if pos_side.eq_ignore_ascii_case("long") {
-                    TradeSide::Long
-                } else {
-                    TradeSide::Short
-                };
+                self.rehydrate_live_state_from_position(
+                    config.id,
+                    position,
+                    trade_side,
+                    persisted_order.as_ref().map(|order| order.detail.as_str()),
+                    exchange_stop_loss,
+                    exchange_take_profit,
+                );
+
                 if !exchange_algo_ids.is_empty() {
                     self.live_exit_targets.insert(
                         config.id,
@@ -896,10 +1206,10 @@ impl StrategyExecutionService {
                 continue;
             }
 
-            let Some(order) = self
-                .load_persisted_close_algos(config.id, inst_id, period, pos_side)
-                .await?
-            else {
+            let Some(order) = persisted_order.as_ref() else {
+                self.rehydrate_live_state_from_position(
+                    config.id, position, trade_side, None, None, None,
+                );
                 warn!(
                     "⚠️ 持仓无止盈止损且无持久化记录: inst_id={}, config_id={}, pos_side={}",
                     inst_id, config.id, pos_side
@@ -908,6 +1218,15 @@ impl StrategyExecutionService {
             };
 
             let (stop_loss, take_profit) = Self::extract_close_algo_targets(&order.detail);
+            self.rehydrate_live_state_from_position(
+                config.id,
+                position,
+                trade_side,
+                Some(order.detail.as_str()),
+                stop_loss,
+                take_profit,
+            );
+
             if stop_loss.is_none() && take_profit.is_none() {
                 warn!(
                     "⚠️ 持仓无止盈止损且无可用目标: inst_id={}, config_id={}, pos_side={}",
@@ -956,11 +1275,6 @@ impl StrategyExecutionService {
                         inst_id, config.id, pos_side, e
                     );
                 }
-                let trade_side = if pos_side.eq_ignore_ascii_case("long") {
-                    TradeSide::Long
-                } else {
-                    TradeSide::Short
-                };
                 self.live_exit_targets.insert(
                     config.id,
                     LiveExitTargets {
@@ -1008,6 +1322,13 @@ impl StrategyExecutionService {
             TradeSide::Long => "long",
             TradeSide::Short => "short",
         };
+        let persisted_order = self
+            .load_persisted_close_algos(config_id, inst_id, period, close_pos_side_str)
+            .await?;
+        let persisted_algo_ids = persisted_order
+            .as_ref()
+            .map(|order| Self::extract_close_algo_ids(&order.detail))
+            .unwrap_or_default();
 
         if let Some(p) = positions.iter().find(|p| {
             p.inst_id == inst_id
@@ -1033,6 +1354,34 @@ impl StrategyExecutionService {
                 "⚠️ 未找到可平仓位: inst_id={}, period={}, close_side={:?}",
                 inst_id, period, close_side
             );
+        }
+
+        if !persisted_algo_ids.is_empty() {
+            if let Err(e) = okx_service
+                .cancel_close_algos(&api_config, inst_id, &persisted_algo_ids)
+                .await
+            {
+                warn!(
+                    "⚠️ 平仓后撤销持久化保护单失败: inst_id={}, period={}, config_id={}, err={}",
+                    inst_id, period, config_id, e
+                );
+            }
+        }
+
+        if let Err(e) = self
+            .clear_persisted_close_algos(config_id, inst_id, period, close_pos_side_str)
+            .await
+        {
+            warn!(
+                "⚠️ 平仓后清理持久化保护单失败: inst_id={}, period={}, config_id={}, err={}",
+                inst_id, period, config_id, e
+            );
+        }
+
+        if let Some(prev_exit) = self.live_exit_targets.get(&config_id) {
+            if prev_exit.trade_side == Some(close_side) {
+                self.live_exit_targets.remove(&config_id);
+            }
         }
 
         Ok(())
@@ -1187,8 +1536,14 @@ impl StrategyExecutionService {
             inst_id, period, config_id
         );
 
-        // 0) 幂等性：同一策略配置 + 同一信号时间戳，只允许下单一次
-        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        // 0) 幂等性：同一策略配置 + 同一周期 + 同一信号时间戳，只允许下单一次
+        let in_order_id = SwapOrder::generate_live_in_order_id(
+            inst_id,
+            strategy_type,
+            config_id,
+            period,
+            signal.ts,
+        );
         if let Some(existing) = self
             .swap_order_repository
             .find_by_in_order_id(&in_order_id)
@@ -1827,6 +2182,105 @@ mod tests {
         assert!(repo.get_saved_orders().is_empty());
     }
 
+    #[tokio::test]
+    async fn opened_sync_failure_forces_close_when_compensation_cannot_restore_tpsl() {
+        use chrono::Utc;
+        use rust_quant_domain::{StrategyStatus, StrategyType, Timeframe};
+
+        let service = create_test_service();
+        let config = StrategyConfig {
+            id: 999,
+            strategy_type: StrategyType::Vegas,
+            symbol: "BTC-USDT-SWAP".to_string(),
+            timeframe: Timeframe::H4,
+            status: StrategyStatus::Running,
+            parameters: serde_json::json!({}),
+            risk_config: serde_json::json!({"max_loss_percent": 0.02}),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            backtest_start: None,
+            backtest_end: None,
+            description: None,
+        };
+
+        let mut state = TradingState::default();
+        state.trade_position = Some(TradePosition {
+            trade_side: TradeSide::Long,
+            position_nums: 1.0,
+            open_price: 100.0,
+            open_position_time: "2026-01-01 00:00:00".to_string(),
+            signal_high_low_diff: 1.0,
+            ..Default::default()
+        });
+        service.live_states.insert(config.id, state);
+        service.configure_guard_test_state(true, false, false);
+
+        let err = service
+            .enforce_opened_position_guard(
+                &config.symbol,
+                config.timeframe.as_str(),
+                &config,
+                TradeSide::Long,
+                1_738_454_400_000,
+            )
+            .await
+            .expect_err("guard should force close when no tp/sl can be restored");
+        assert!(err
+            .to_string()
+            .contains("开仓后止盈止损同步失败，补偿未成功，已触发主动平仓"));
+
+        let (compensate_calls, close_calls) = service.guard_test_calls();
+        assert_eq!(compensate_calls, 1);
+        assert_eq!(close_calls, 1);
+
+        let reloaded = service
+            .live_states
+            .get(&config.id)
+            .map(|v| v.clone())
+            .unwrap_or_default();
+        assert!(reloaded.trade_position.is_none());
+        assert!(!service.has_live_algo_for_side(config.id, TradeSide::Long));
+    }
+
+    #[tokio::test]
+    async fn opened_sync_failure_keeps_position_when_compensation_restores_tpsl() {
+        use chrono::Utc;
+        use rust_quant_domain::{StrategyStatus, StrategyType, Timeframe};
+
+        let service = create_test_service();
+        let config = StrategyConfig {
+            id: 1000,
+            strategy_type: StrategyType::Vegas,
+            symbol: "BTC-USDT-SWAP".to_string(),
+            timeframe: Timeframe::H4,
+            status: StrategyStatus::Running,
+            parameters: serde_json::json!({}),
+            risk_config: serde_json::json!({"max_loss_percent": 0.02}),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            backtest_start: None,
+            backtest_end: None,
+            description: None,
+        };
+        service.configure_guard_test_state(false, true, false);
+
+        let result = service
+            .enforce_opened_position_guard(
+                &config.symbol,
+                config.timeframe.as_str(),
+                &config,
+                TradeSide::Long,
+                1_738_454_400_000,
+            )
+            .await;
+        assert!(result.is_ok());
+
+        let (compensate_calls, close_calls) = service.guard_test_calls();
+        assert_eq!(compensate_calls, 1);
+        assert_eq!(close_calls, 0);
+        assert!(service.has_live_algo_for_side(config.id, TradeSide::Long));
+    }
+
     // ========== 下单逻辑单元测试 ==========
 
     /// 测试：下单数量计算逻辑（90%安全系数）
@@ -1947,11 +2401,14 @@ mod tests {
     #[test]
     fn test_generate_in_order_id() {
         let inst_id = "BTC-USDT-SWAP";
-        let strategy_type = "strategy";
+        let strategy_type = "vegas";
+        let config_id = 11;
+        let period = "4H";
         let ts = 1234567890;
 
-        let in_order_id = SwapOrder::generate_in_order_id(inst_id, strategy_type, ts);
-        assert_eq!(in_order_id, "BTC-USDT-SWAP_strategy_1234567890");
+        let in_order_id =
+            SwapOrder::generate_live_in_order_id(inst_id, strategy_type, config_id, period, ts);
+        assert_eq!(in_order_id, "BTC-USDT-SWAP_vegas_11_4H_1234567890");
     }
 
     /// 测试：幂等性检查 - 已存在订单应该跳过
@@ -1959,7 +2416,7 @@ mod tests {
     async fn test_idempotency_check() {
         let inst_id = "BTC-USDT-SWAP";
         let ts = 1234567890;
-        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", ts);
+        let in_order_id = SwapOrder::generate_live_in_order_id(inst_id, "vegas", 1, "1H", ts);
 
         // 创建已存在的订单
         let existing_order = SwapOrder::new(
@@ -2293,7 +2750,7 @@ mod tests {
     async fn test_execute_order_internal_idempotency() {
         let inst_id = "BTC-USDT-SWAP";
         let ts = 1234567890;
-        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", ts);
+        let in_order_id = SwapOrder::generate_live_in_order_id(inst_id, "vegas", 1, "1H", ts);
 
         // 创建已存在的订单
         let existing_order = SwapOrder::new(
@@ -2421,7 +2878,13 @@ mod tests {
         let period = "1H";
         let strategy_type = "vegas";
         let config_id = 1;
-        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        let in_order_id = SwapOrder::generate_live_in_order_id(
+            inst_id,
+            strategy_type,
+            config_id,
+            period,
+            signal.ts,
+        );
         let out_order_id = "test_out_123".to_string();
         let order_size = "1.0".to_string();
 
@@ -2461,7 +2924,13 @@ mod tests {
         let period = "1H";
         let strategy_type = "vegas";
         let config_id = 1;
-        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        let in_order_id = SwapOrder::generate_live_in_order_id(
+            inst_id,
+            strategy_type,
+            config_id,
+            period,
+            signal.ts,
+        );
         let out_order_id = "test_out_123".to_string();
         let order_size = "1.0".to_string();
 
@@ -2617,7 +3086,8 @@ mod tests {
         );
 
         // 6. 验证订单ID生成
-        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
+        let in_order_id =
+            SwapOrder::generate_live_in_order_id(inst_id, "vegas", config_id, period, signal.ts);
         assert!(!in_order_id.is_empty());
         assert!(in_order_id.contains(inst_id));
         println!("✅ 订单ID生成: {}", in_order_id);
@@ -2726,8 +3196,17 @@ mod tests {
 
         // 6. 生成订单ID
         let inst_id = "BTC-USDT-SWAP";
-        let in_order_id = SwapOrder::generate_in_order_id(inst_id, "strategy", signal.ts);
-        assert_eq!(in_order_id, format!("{}_strategy_{}", inst_id, signal.ts));
+        let config_id = 1i64;
+        let period = "1H";
+        let in_order_id =
+            SwapOrder::generate_live_in_order_id(inst_id, "vegas", config_id, period, signal.ts);
+        assert_eq!(
+            in_order_id,
+            format!(
+                "{}_{}_{}_{}_{}",
+                inst_id, "vegas", config_id, period, signal.ts
+            )
+        );
 
         // 7. 创建订单详情
         let order_detail = serde_json::json!({

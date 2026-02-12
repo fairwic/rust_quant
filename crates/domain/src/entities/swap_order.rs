@@ -134,6 +134,20 @@ impl SwapOrder {
     pub fn generate_in_order_id(inst_id: &str, strategy_type: &str, ts: i64) -> String {
         format!("{}_{}_{}", inst_id, strategy_type, ts)
     }
+
+    /// 生成实盘内部订单ID（更细粒度幂等键）
+    pub fn generate_live_in_order_id(
+        inst_id: &str,
+        strategy_type: &str,
+        config_id: i64,
+        period: &str,
+        ts: i64,
+    ) -> String {
+        format!(
+            "{}_{}_{}_{}_{}",
+            inst_id, strategy_type, config_id, period, ts
+        )
+    }
 }
 
 #[cfg(test)]
@@ -167,5 +181,12 @@ mod tests {
     fn test_generate_in_order_id() {
         let id = SwapOrder::generate_in_order_id("BTC-USDT-SWAP", "nwe", 1234567890);
         assert_eq!(id, "BTC-USDT-SWAP_nwe_1234567890");
+    }
+
+    #[test]
+    fn test_generate_live_in_order_id() {
+        let id =
+            SwapOrder::generate_live_in_order_id("BTC-USDT-SWAP", "vegas", 11, "4H", 1234567890);
+        assert_eq!(id, "BTC-USDT-SWAP_vegas_11_4H_1234567890");
     }
 }

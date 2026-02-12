@@ -5,10 +5,11 @@
 use anyhow::{anyhow, Result};
 use rust_quant_core::config::env_is_true;
 use rust_quant_core::database::get_db_pool;
-use rust_quant_domain::StrategyType;
+use rust_quant_domain::{StrategyConfig, StrategyType};
 use rust_quant_infrastructure::repositories::{
     SqlxStrategyConfigRepository, SqlxSwapOrderRepository,
 };
+use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use rust_quant_market::streams;
@@ -116,22 +117,53 @@ pub async fn run_modes() -> Result<()> {
     }
 
     // 3) 实盘策略（包含预热）
+    let mut live_runtime_configs: Vec<StrategyConfig> = Vec::new();
+    let mut live_runtime_services: Option<(
+        Arc<StrategyConfigService>,
+        Arc<StrategyExecutionService>,
+    )> = None;
     if env_is_true("IS_RUN_REAL_STRATEGY", false) {
         info!("🤖 实盘策略模式已启用");
-        // 从数据库加载策略配置并启动
-        if let Err(e) = start_strategies_from_db().await {
-            error!("❌ 启动策略失败: {}", e);
+
+        let config_service = Arc::new(create_strategy_config_service());
+        let swap_order_repo = Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
+        let execution_service = Arc::new(StrategyExecutionService::new(swap_order_repo));
+
+        match start_strategies_from_db(config_service.clone(), execution_service.clone()).await {
+            Ok(started_configs) => {
+                live_runtime_configs = started_configs;
+                live_runtime_services = Some((config_service, execution_service));
+            }
+            Err(e) => {
+                error!("❌ 启动策略失败: {}", e);
+            }
         }
     }
 
     // 4) WebSocket 实时数据（长期运行：必须后台启动，避免阻塞 run() 后续心跳/信号处理）
     if env_is_true("IS_OPEN_SOCKET", false) {
+        let (ws_inst_ids, ws_periods) = if !live_runtime_configs.is_empty() {
+            derive_ws_targets_from_configs(&live_runtime_configs)
+        } else {
+            (inst_ids.clone(), periods.clone())
+        };
+
         info!("🌐 WebSocket模式已启用");
-        info!("📡 启动WebSocket监听: {:?}", inst_ids);
+        info!("📡 启动WebSocket监听: {:?}", ws_inst_ids);
+
+        let (config_service, execution_service) = match live_runtime_services {
+            Some((config_service, execution_service)) => (config_service, execution_service),
+            None => {
+                let config_service = Arc::new(create_strategy_config_service());
+                let swap_order_repo = Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
+                let execution_service = Arc::new(StrategyExecutionService::new(swap_order_repo));
+                (config_service, execution_service)
+            }
+        };
 
         // 注意：WebSocket 客户端内部包含 !Send 的锁卫（okx crate），不能用 tokio::spawn
         // 长期运行逻辑由 run() 通过 select! 方式与信号处理并行编排
-        run_websocket(&inst_ids, &periods).await;
+        run_websocket(&ws_inst_ids, &ws_periods, config_service, execution_service).await;
     }
 
     Ok(())
@@ -165,6 +197,17 @@ fn dedup_strings(values: Vec<String>) -> Vec<String> {
         }
     }
     set.into_iter().collect()
+}
+
+fn derive_ws_targets_from_configs(configs: &[StrategyConfig]) -> (Vec<String>, Vec<String>) {
+    let inst_ids = dedup_strings(configs.iter().map(|cfg| cfg.symbol.clone()).collect());
+    let periods = dedup_strings(
+        configs
+            .iter()
+            .map(|cfg| cfg.timeframe.as_str().to_string())
+            .collect(),
+    );
+    (inst_ids, periods)
 }
 
 /// 创建策略配置服务实例（依赖注入）
@@ -203,7 +246,12 @@ async fn load_backtest_targets_from_db() -> Result<Vec<(String, String)>> {
 /// # 注意
 /// WebSocket 模式下策略预热由 `start_strategies_from_db` 统一处理
 /// 确保 `IS_RUN_REAL_STRATEGY=true` 时先完成预热再启动 WebSocket
-async fn run_websocket(inst_ids: &[String], periods: &[String]) {
+async fn run_websocket(
+    inst_ids: &[String],
+    periods: &[String],
+    config_service: Arc<StrategyConfigService>,
+    execution_service: Arc<StrategyExecutionService>,
+) {
     if inst_ids.is_empty() || periods.is_empty() {
         warn!(
             "⚠️  WebSocket启动参数为空，跳过启动: inst_ids={:?}, periods={:?}",
@@ -217,21 +265,16 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
         inst_ids, periods
     );
 
-    // 创建服务实例
-    let config_service = std::sync::Arc::new(create_strategy_config_service());
-    let swap_order_repo = std::sync::Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
-    let execution_service = std::sync::Arc::new(StrategyExecutionService::new(swap_order_repo));
-
     // 🚀 创建策略触发回调函数
     let strategy_trigger = {
-        let handler = std::sync::Arc::new(
+        let handler = Arc::new(
             rust_quant_orchestration::workflow::websocket_handler::WebsocketStrategyHandler::new(
                 config_service,
                 execution_service,
             ),
         );
 
-        std::sync::Arc::new(
+        Arc::new(
             move |inst_id: String,
                   time_interval: String,
                   snap: rust_quant_market::models::CandlesEntity| {
@@ -259,7 +302,10 @@ async fn run_websocket(inst_ids: &[String], periods: &[String]) {
 /// 1. 加载启用的策略配置
 /// 2. **预热策略数据**（加载历史K线到指标缓存）
 /// 3. 启动策略定时任务
-async fn start_strategies_from_db() -> Result<()> {
+async fn start_strategies_from_db(
+    config_service: Arc<StrategyConfigService>,
+    execution_service: Arc<StrategyExecutionService>,
+) -> Result<Vec<StrategyConfig>> {
     use rust_quant_domain::StrategyType;
     use rust_quant_domain::Timeframe;
     use rust_quant_market::models::{CandlesEntity, CandlesModel, SelectCandleReqDto};
@@ -269,15 +315,11 @@ async fn start_strategies_from_db() -> Result<()> {
     info!("📚 从数据库加载策略配置");
 
     // 1. 通过服务层加载启用的策略配置
-    let config_service = create_strategy_config_service();
-    let swap_order_repo = std::sync::Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
-    let execution_service = StrategyExecutionService::new(swap_order_repo);
-
     let configs = config_service.load_all_enabled_configs().await?;
 
     if configs.is_empty() {
         warn!("⚠️  未找到启用的策略配置");
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     info!("✅ 加载了 {} 个策略配置", configs.len());
@@ -311,6 +353,7 @@ async fn start_strategies_from_db() -> Result<()> {
     }
 
     // 3. 启动每个策略
+    let mut started_configs: Vec<StrategyConfig> = Vec::new();
     for (idx, config) in configs.iter().enumerate() {
         // 检查预热是否成功
         let warmup_failed = match warmup_results.get(idx) {
@@ -389,8 +432,8 @@ async fn start_strategies_from_db() -> Result<()> {
             Some(config_id),
             None,
             snap,
-            &config_service,
-            &execution_service,
+            config_service.as_ref(),
+            execution_service.as_ref(),
         )
         .await
         {
@@ -408,11 +451,12 @@ async fn start_strategies_from_db() -> Result<()> {
                 timeframe.as_str(),
                 strategy_type
             );
+            started_configs.push(config.clone());
         }
     }
 
     info!("✅ 策略启动完成");
-    Ok(())
+    Ok(started_configs)
 }
 
 /// 应用入口总编排
@@ -614,5 +658,53 @@ async fn setup_shutdown_signals() -> &'static str {
             return "SIGNAL_SETUP_FAILED";
         }
         "CTRL+C"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use rust_quant_domain::{StrategyConfig, StrategyStatus, Timeframe};
+
+    fn test_config(id: i64, symbol: &str, timeframe: Timeframe) -> StrategyConfig {
+        StrategyConfig {
+            id,
+            strategy_type: StrategyType::Vegas,
+            symbol: symbol.to_string(),
+            timeframe,
+            status: StrategyStatus::Running,
+            parameters: serde_json::json!({}),
+            risk_config: serde_json::json!({}),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            backtest_start: None,
+            backtest_end: None,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn test_derive_ws_targets_from_configs_dedup() {
+        let configs = vec![
+            test_config(1, "BTC-USDT-SWAP", Timeframe::H4),
+            test_config(2, "BTC-USDT-SWAP", Timeframe::H4),
+            test_config(3, "ETH-USDT-SWAP", Timeframe::H1),
+        ];
+
+        let (inst_ids, periods) = derive_ws_targets_from_configs(&configs);
+        assert_eq!(
+            inst_ids,
+            vec!["BTC-USDT-SWAP".to_string(), "ETH-USDT-SWAP".to_string()]
+        );
+        assert_eq!(periods, vec!["1H".to_string(), "4H".to_string()]);
+    }
+
+    #[test]
+    fn test_derive_ws_targets_from_configs_empty() {
+        let configs = vec![];
+        let (inst_ids, periods) = derive_ws_targets_from_configs(&configs);
+        assert!(inst_ids.is_empty());
+        assert!(periods.is_empty());
     }
 }

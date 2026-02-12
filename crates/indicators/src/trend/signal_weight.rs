@@ -3,16 +3,17 @@ use serde::{Deserialize, Serialize};
 // 信号类型枚举
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub enum SignalType {
+    #[serde(alias = "FakeBreakout")]
     SimpleBreakEma2through, // 突破信号
-    VolumeTrend,            // 成交量趋势
-    EmaTrend,               // ema趋势
-    Rsi,                    // RSI指标
-    TrendStrength,          // 趋势强度
-    EmaDivergence,          // 均线发散
-    PriceLevel,             // 关键价位
-    Bolling,                // 布林带
-    Engulfing,              // 吞没形态
-    KlineHammer,            // 锤子形态
+    VolumeTrend,   // 成交量趋势
+    EmaTrend,      // ema趋势
+    Rsi,           // RSI指标
+    TrendStrength, // 趋势强度
+    EmaDivergence, // 均线发散
+    PriceLevel,    // 关键价位
+    Bolling,       // 布林带
+    Engulfing,     // 吞没形态
+    KlineHammer,   // 锤子形态
     // 新增Smart Money Concepts相关信号类型
     LegDetection,    // 腿部识别
     MarketStructure, // 市场结构
