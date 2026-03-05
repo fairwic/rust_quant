@@ -483,6 +483,7 @@ impl StrategyExecutionService {
         )
     }
 
+    /// 从持仓信息重新恢复交易状态
     fn rehydrate_live_state_from_position(
         &self,
         config_id: i64,
@@ -510,7 +511,7 @@ impl StrategyExecutionService {
             .map(|v| v.clone())
             .unwrap_or_default();
 
-        let mut trade_position = state.trade_position.unwrap_or_else(TradePosition::default);
+        let mut trade_position = state.trade_position.unwrap_or_default();
         trade_position.trade_side = trade_side;
         trade_position.position_nums = position_nums;
         trade_position.open_price = open_price;
@@ -528,6 +529,7 @@ impl StrategyExecutionService {
         self.live_states.insert(config_id, state);
     }
 
+    /// 判断止损止盈目标是否发生变化
     fn targets_changed(prev: &LiveExitTargets, next: &ExitTargets, eps: f64) -> bool {
         !approx_eq_opt(prev.stop_loss, next.stop_loss, eps)
             || !approx_eq_opt(prev.take_profit, next.take_profit, eps)
@@ -2203,15 +2205,17 @@ mod tests {
             description: None,
         };
 
-        let mut state = TradingState::default();
-        state.trade_position = Some(TradePosition {
-            trade_side: TradeSide::Long,
-            position_nums: 1.0,
-            open_price: 100.0,
-            open_position_time: "2026-01-01 00:00:00".to_string(),
-            signal_high_low_diff: 1.0,
-            ..Default::default()
-        });
+        let state = TradingState {
+            trade_position: Some(TradePosition {
+                trade_side: TradeSide::Long,
+                position_nums: 1.0,
+                open_price: 100.0,
+                open_position_time: "2026-01-01 00:00:00".to_string(),
+                signal_high_low_diff: 1.0,
+                ..Default::default()
+            }),
+            ..TradingState::default()
+        };
         service.live_states.insert(config.id, state);
         service.configure_guard_test_state(true, false, false);
 
@@ -2981,7 +2985,7 @@ mod tests {
         println!("🚀 开始真实场景集成测试");
 
         // 1. 初始化数据库连接（如果配置了）
-        let pool_result = std::panic::catch_unwind(|| get_db_pool());
+        let pool_result = std::panic::catch_unwind(get_db_pool);
         let repo: Arc<dyn SwapOrderRepository> = match pool_result {
             Ok(pool) => {
                 println!("✅ 数据库连接成功");

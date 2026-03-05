@@ -167,8 +167,10 @@ pub async fn replay_live_with_warmup(
         .initialize_data(&strategy_cfg, inst_id, period, warmup_items)
         .await?;
 
-    let mut state = TradingState::default();
-    state.funds = initial_funds;
+    let mut state = TradingState {
+        funds: initial_funds,
+        ..TradingState::default()
+    };
     let mut paper_orders = Vec::new();
     let mut order_seq: usize = 0;
 
@@ -429,12 +431,11 @@ pub fn compare_parity_rows(
                 &mut differences,
             );
         }
-        if left
+        if !left
             .close_price
             .zip(right.close_price)
             .map(|(a, b)| approx_eq(a, b, price_eps))
             .unwrap_or(left.close_price == right.close_price)
-            == false
         {
             row_ok = false;
             push_diff(

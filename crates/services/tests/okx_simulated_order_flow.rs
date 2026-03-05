@@ -34,7 +34,7 @@ async fn fetch_last_price(inst_id: &str) -> anyhow::Result<f64> {
     let data: OkxTickerResponse = resp.json().await?;
     let last_str = data
         .data
-        .get(0)
+        .first()
         .ok_or_else(|| anyhow::anyhow!("empty ticker response"))?
         .last
         .trim()
@@ -97,7 +97,7 @@ fn compute_tp_sl(last: f64, side: &str) -> (Option<f64>, Option<f64>) {
 fn build_cancel_close_algo_body_contains_ids() {
     let body = OkxOrderService::build_cancel_close_algo_body(
         "BTC-USDT-SWAP",
-        &vec!["1".to_string(), "2".to_string()],
+        &["1".to_string(), "2".to_string()],
     );
     assert_eq!(body["instId"], "BTC-USDT-SWAP");
     assert_eq!(body["algoIds"][0], "1");

@@ -129,6 +129,6 @@ mod tests {
             .check_signal_risk("BTC-USDT", &signal, &config)
             .await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 }

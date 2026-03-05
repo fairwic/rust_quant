@@ -89,14 +89,16 @@ mod tests {
 
     #[test]
     fn stop_loss_triggers_close() {
-        let mut state = TradingState::default();
-        state.trade_position = Some(rust_quant_strategies::framework::backtest::TradePosition {
-            trade_side: TradeSide::Long,
-            open_price: 100.0,
-            position_nums: 1.0,
-            signal_high_low_diff: 1.0,
-            ..Default::default()
-        });
+        let mut state = TradingState {
+            trade_position: Some(rust_quant_strategies::framework::backtest::TradePosition {
+                trade_side: TradeSide::Long,
+                open_price: 100.0,
+                position_nums: 1.0,
+                signal_high_low_diff: 1.0,
+                ..Default::default()
+            }),
+            ..TradingState::default()
+        };
 
         let mut signal = SignalResult {
             should_buy: false,
