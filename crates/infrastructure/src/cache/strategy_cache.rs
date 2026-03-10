@@ -47,7 +47,7 @@ impl RedisOperations {
             .collect();
 
         // Sort the candles by timestamp to ensure they are ordered correctly
-        candles.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+        candles.sort_unstable_by_key(|a| a.ts);
         println!("candles: {:?}", candles);
 
         info!("Retrieved {} candles from Redis", candles.len());

@@ -427,7 +427,7 @@ impl CandlesModel {
         dto: SelectCandleReqDto,
     ) -> Result<Vec<CandlesEntity>> {
         let mut candles = self.get_all(dto).await?;
-        candles.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+        candles.sort_unstable_by_key(|a| a.ts);
         Ok(candles)
     }
 }
