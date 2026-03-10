@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::config::*;
-use super::ema_filter::{self, EmaDistanceConfig};
+use super::ema_filter::{self, EmaDistanceConfig, EmaDistanceState};
 use super::indicator_combine::IndicatorCombine;
 use super::signal::*;
 use super::trend;
@@ -775,6 +775,20 @@ impl VegasStrategy {
                     ));
                 }
             }
+        }
+
+        // 高波动下跌阶段容易出现"低位追空"，
+        // 当空头排列已经显著远离均线且不在 Fib 回撤区间时，直接拦截做空。
+        let fib_val = vegas_indicator_signal_values.fib_retracement_value;
+        if signal_result.should_sell.unwrap_or(false)
+            && vegas_indicator_signal_values.ema_values.is_short_trend
+            && ema_distance_filter.state == EmaDistanceState::TooFar
+            && !fib_val.in_zone
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("EMA_TOO_FAR_OUTSIDE_FIB_ZONE_BLOCK_SHORT".to_string());
         }
 
         // ================================================================
