@@ -63,14 +63,11 @@ mod tests {
             fn min_data_length(&self) -> usize {
                 3
             }
-            fn init_indicator_combine(&self) -> Self::IndicatorCombine {
-                ()
-            }
+            fn init_indicator_combine(&self) -> Self::IndicatorCombine {}
             fn build_indicator_values(
                 _: &mut Self::IndicatorCombine,
                 _: &crate::CandleItem,
             ) -> Self::IndicatorValues {
-                ()
             }
             fn generate_signal(
                 &mut self,
@@ -78,9 +75,12 @@ mod tests {
                 _: &mut Self::IndicatorValues,
                 _: &BasicRiskStrategyConfig,
             ) -> crate::framework::backtest::types::SignalResult {
-                let mut s = crate::framework::backtest::types::SignalResult::default();
-                s.ts = candles.last().unwrap().ts;
-                s.open_price = candles.last().unwrap().c;
+                let last = candles.last().unwrap();
+                let mut s = crate::framework::backtest::types::SignalResult {
+                    ts: last.ts,
+                    open_price: last.c,
+                    ..crate::framework::backtest::types::SignalResult::default()
+                };
                 if s.ts % 2 == 0 {
                     s.should_buy = true;
                 }
@@ -99,10 +99,12 @@ mod tests {
                 confirm: 1,
             })
             .collect();
-        let mut risk = BasicRiskStrategyConfig::default();
-        risk.max_loss_percent = 1.0;
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 1.0,
+            ..BasicRiskStrategyConfig::default()
+        };
 
-        let result = run_indicator_strategy_backtest("TEST", Strategy::default(), &candles, risk);
+        let result = run_indicator_strategy_backtest("TEST", Strategy, &candles, risk);
         assert!(result.open_trades > 0);
         assert!(!result.audit_trail.signal_snapshots.is_empty());
     }

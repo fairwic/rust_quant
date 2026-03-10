@@ -1569,13 +1569,15 @@ mod tests {
             candle(8.6, 9.0, 8.4, 8.8, 5),
         ];
 
-        let mut indicator_values = VegasIndicatorSignalValue::default();
-        indicator_values.ema_values = EmaSignalValue {
-            ema1_value: 90.0,
-            ema2_value: 95.0,
-            ema3_value: 96.0,
-            ema4_value: 100.0,
-            ..EmaSignalValue::default()
+        let mut indicator_values = VegasIndicatorSignalValue {
+            ema_values: EmaSignalValue {
+                ema1_value: 90.0,
+                ema2_value: 95.0,
+                ema3_value: 96.0,
+                ema4_value: 100.0,
+                ..EmaSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
         };
         indicator_values.volume_value.volume_ratio = 3.0;
         indicator_values.rsi_value.rsi_value = 10.0;

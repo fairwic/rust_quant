@@ -78,7 +78,7 @@ mod tests {
         // 正常情况：新时间 > 旧时间
         let result = check_new_time(1000, 2000, "1H", false, false);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 
     #[test]
@@ -86,7 +86,7 @@ mod tests {
         // 时间戳相同，应该跳过
         let result = check_new_time(1000, 1000, "1H", false, false);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[test]
@@ -101,7 +101,7 @@ mod tests {
         // 已收盘确认，应该执行
         let result = check_new_time(1000, 1000, "1H", true, false);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 
     #[test]
@@ -109,7 +109,7 @@ mod tests {
         // 要求收盘确认但未确认，应该跳过
         let result = check_new_time(1000, 2000, "1H", false, true);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[test]
@@ -117,6 +117,6 @@ mod tests {
         // 要求收盘确认且已确认，应该执行
         let result = check_new_time(1000, 2000, "1H", true, true);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 }

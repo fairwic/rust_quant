@@ -860,14 +860,16 @@ mod tests {
 
     #[test]
     fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_long() {
-        let mut position = TradePosition::default();
-        position.trade_side = TradeSide::Long;
-        position.open_price = 100.0;
-        position.position_nums = 1.0;
-        position.signal_kline_stop_close_price = Some(95.0);
-        position.move_stop_open_price = Some(98.0);
-        position.atr_take_ratio_profit_price = Some(120.0);
-        position.long_signal_take_profit_price = Some(110.0);
+        let position = TradePosition {
+            trade_side: TradeSide::Long,
+            open_price: 100.0,
+            position_nums: 1.0,
+            signal_kline_stop_close_price: Some(95.0),
+            move_stop_open_price: Some(98.0),
+            atr_take_ratio_profit_price: Some(120.0),
+            long_signal_take_profit_price: Some(110.0),
+            ..TradePosition::default()
+        };
 
         let candle = CandleItem {
             o: 100.0,
@@ -890,14 +892,16 @@ mod tests {
 
     #[test]
     fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_short() {
-        let mut position = TradePosition::default();
-        position.trade_side = TradeSide::Short;
-        position.open_price = 100.0;
-        position.position_nums = 1.0;
-        position.signal_kline_stop_close_price = Some(106.0);
-        position.move_stop_open_price = Some(103.0);
-        position.atr_take_ratio_profit_price = Some(80.0);
-        position.short_signal_take_profit_price = Some(90.0);
+        let position = TradePosition {
+            trade_side: TradeSide::Short,
+            open_price: 100.0,
+            position_nums: 1.0,
+            signal_kline_stop_close_price: Some(106.0),
+            move_stop_open_price: Some(103.0),
+            atr_take_ratio_profit_price: Some(80.0),
+            short_signal_take_profit_price: Some(90.0),
+            ..TradePosition::default()
+        };
 
         let candle = CandleItem {
             o: 100.0,

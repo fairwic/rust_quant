@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_full_calculation() {
-        let test_data = vec![
+        let test_data = [
             // (high, low, close, expected)
             (10.0, 8.0, 9.0, 0.0),                               // Bar 1
             (11.0, 9.0, 10.0, 0.0),                              // Bar 2

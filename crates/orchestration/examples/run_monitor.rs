@@ -1,6 +1,5 @@
 use anyhow::Result;
 use rust_quant_orchestration::jobs::data::fund_monitor_job::FundMonitorJob;
-use rustls;
 use tracing::info;
 
 use rust_quant_infrastructure::repositories::fund_monitoring_repository::{

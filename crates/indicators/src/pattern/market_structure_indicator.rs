@@ -469,10 +469,10 @@ mod tests {
 
         // 逐步测试市场结构变化
         println!("=== 市场结构测试 ===");
-        for i in 15..candles.len() {
+        for (i, candle) in candles.iter().enumerate().skip(15) {
             if i % 5 == 0 {
                 // 每5根K线测试一次
-                let value = indicator.next(&candles[i]);
+                let value = indicator.next(candle);
 
                 println!(
                     "K线 {}: 摆动趋势={}, 内部趋势={}",

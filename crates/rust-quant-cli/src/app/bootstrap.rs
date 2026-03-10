@@ -411,7 +411,7 @@ async fn start_strategies_from_db(
                 .get_all(dto)
                 .await
                 .map_err(|e| anyhow!("加载最新确认K线失败: {}", e))?;
-            candles.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+            candles.sort_unstable_by_key(|a| a.ts);
             candles.pop()
         };
 

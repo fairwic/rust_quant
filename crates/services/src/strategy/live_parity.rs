@@ -155,7 +155,7 @@ pub async fn replay_live_with_warmup(
         );
 
     let mut sorted = candles.to_vec();
-    sorted.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+    sorted.sort_unstable_by_key(|a| a.ts);
 
     let warmup_items = sorted
         .iter()

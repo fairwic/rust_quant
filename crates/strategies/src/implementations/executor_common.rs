@@ -204,9 +204,9 @@ mod tests {
 
     #[test]
     fn test_is_new_timestamp() {
-        assert_eq!(is_new_timestamp(1000, 2000), true);
-        assert_eq!(is_new_timestamp(2000, 1000), false);
-        assert_eq!(is_new_timestamp(1000, 1000), false);
+        assert!(is_new_timestamp(1000, 2000));
+        assert!(!is_new_timestamp(2000, 1000));
+        assert!(!is_new_timestamp(1000, 1000));
     }
 
     #[tokio::test]
@@ -215,7 +215,7 @@ mod tests {
         let result = should_execute_strategy("BTC-USDT:1H", 1000, 2000, "1H", false, &context);
         assert!(result.is_ok());
         match result {
-            Ok(v) => assert_eq!(v, true),
+            Ok(v) => assert!(v),
             Err(e) => panic!("should_execute_strategy 返回错误: {}", e),
         }
     }

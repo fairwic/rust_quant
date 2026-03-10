@@ -54,19 +54,6 @@ impl SwapOrderService {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{StopLossCalculator, StopLossSide};
-
-    #[test]
-    fn select_tightest_short_stop() {
-        let entry = 100.0;
-        let candidates = vec![105.0, 103.0, 110.0];
-        let selected = StopLossCalculator::select(StopLossSide::Short, entry, &candidates);
-        assert_eq!(selected, Some(103.0));
-    }
-}
-
 impl Default for SwapOrderService {
     fn default() -> Self {
         Self::new()
@@ -634,5 +621,18 @@ impl SwapOrderService {
         // {"code":"0","data":[{"clOrdId":"","ordId":"1570389280202194944","sCode":"0","sMsg":"Order placed","tag":"","ts":"1719303647602"}],"inTime":"1719303647601726","msg":"","outTime":"1719303647603880"}
         info!("send order request okx result: {:?}", result);
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StopLossCalculator, StopLossSide};
+
+    #[test]
+    fn select_tightest_short_stop() {
+        let entry = 100.0;
+        let candidates = vec![105.0, 103.0, 110.0];
+        let selected = StopLossCalculator::select(StopLossSide::Short, entry, &candidates);
+        assert_eq!(selected, Some(103.0));
     }
 }

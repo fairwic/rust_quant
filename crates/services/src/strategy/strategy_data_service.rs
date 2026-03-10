@@ -131,7 +131,7 @@ impl StrategyDataService {
         }
 
         // 按时间升序排列
-        candles.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+        candles.sort_unstable_by_key(|a| a.ts);
 
         let candle_items = candles
             .iter()

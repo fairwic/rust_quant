@@ -108,7 +108,7 @@ pub async fn test_specified_strategy_with_config(
 ) -> Result<Vec<ParamMergeBuilder>> {
     //1Dutc
     #[allow(unused)]
-    let params_batch = vec![ParamMergeBuilder::build()
+    let params_batch = [ParamMergeBuilder::build()
         .bb_multiplier(2.0)
         .bb_periods(10)
         .hammer_shadow_ratio(0.9)

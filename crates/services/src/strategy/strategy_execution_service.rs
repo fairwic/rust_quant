@@ -3103,9 +3103,9 @@ mod tests {
             .await
             .unwrap();
 
-        if existing_order.is_some() {
+        if let Some(existing_order) = existing_order {
             println!("⚠️  订单已存在（幂等性检查通过），跳过重复下单");
-            println!("   已存在订单: {:?}", existing_order.unwrap().out_order_id);
+            println!("   已存在订单: {:?}", existing_order.out_order_id);
             println!(
                 "   配置ID: {}, 交易对: {}, 周期: {}",
                 config_id, inst_id, period

@@ -188,7 +188,7 @@ async fn load_confirmed_candles(
             confirm: Some(1),
         })
         .await?;
-    candles.sort_unstable_by(|a, b| a.ts.cmp(&b.ts));
+    candles.sort_unstable_by_key(|a| a.ts);
     Ok(candles)
 }
 

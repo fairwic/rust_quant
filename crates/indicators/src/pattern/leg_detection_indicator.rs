@@ -204,8 +204,8 @@ mod tests {
         }
 
         // 逐步测试腿部检测
-        for i in 6..candles.len() {
-            let value = indicator.next(&candles[i]);
+        for (i, candle) in candles.iter().enumerate().skip(6) {
+            let value = indicator.next(candle);
 
             println!(
                 "K线 {}: 腿部={}, 新腿部={}, 多头腿={}, 空头腿={}",
@@ -218,11 +218,11 @@ mod tests {
         }
 
         // 最终测试 - 处理最后一根K线
-        let final_value = indicator.next(&candles.last().unwrap());
+        let final_value = indicator.next(candles.last().unwrap());
         println!("\n最终腿部信号值: {:?}", final_value);
 
         // 验证最后应该是多头腿（因为最后一段是上升的）
-        assert_eq!(final_value.is_bullish_leg, true);
+        assert!(final_value.is_bullish_leg);
         println!("✅ 最终确认为多头腿");
     }
 
@@ -261,7 +261,7 @@ mod tests {
         indicator.init_with_history(&candles[..candles.len() - 1]);
 
         // 处理最后一根K线
-        let value = indicator.next(&candles.last().unwrap());
+        let value = indicator.next(candles.last().unwrap());
 
         println!("腿部转换测试:");
         println!("  突破高点后的腿部: {}", value.current_leg);
@@ -269,7 +269,7 @@ mod tests {
         println!("  是否为新腿部: {}", value.is_new_leg);
 
         // 根据Pine Script逻辑，突破高点应该是空头腿
-        assert_eq!(value.is_bearish_leg, true);
+        assert!(value.is_bearish_leg);
         println!("✅ 突破高点正确识别为空头腿");
     }
 
