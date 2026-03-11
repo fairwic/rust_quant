@@ -779,11 +779,17 @@ impl VegasStrategy {
 
         // 高波动下跌阶段容易出现"低位追空"，
         // 当空头排列已经显著远离均线且不在 Fib 回撤区间时，直接拦截做空。
+        // 但对极少数"放量新腿破位延续"场景保留例外，避免错杀有效突破空单。
         let fib_val = vegas_indicator_signal_values.fib_retracement_value;
+        let allow_breakdown_short = vegas_indicator_signal_values.leg_detection_value.is_new_leg
+            && fib_val.retracement_ratio <= 0.10
+            && fib_val.volume_ratio >= 3.0
+            && vegas_indicator_signal_values.macd_value.histogram < 0.0;
         if signal_result.should_sell.unwrap_or(false)
             && vegas_indicator_signal_values.ema_values.is_short_trend
             && ema_distance_filter.state == EmaDistanceState::TooFar
             && !fib_val.in_zone
+            && !allow_breakdown_short
         {
             signal_result.should_sell = Some(false);
             signal_result
