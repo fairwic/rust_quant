@@ -940,7 +940,8 @@ if fake_breakout_signal.has_signal() {
 | 15683 | 关闭 `Signal_Kline_Stop_Loss` | 51.92% | 836.41 | 1.014 | 36.66% | 明显退化，不能直接关闭 |
 | 15684 | `TooFar short` 且 `fib` 不在区间且无确认时拦截 | 47.58% | 2364.94 | 1.829 | 38.73% | 明显优于 15682 |
 | 15685 | `TooFar short` 必须在 `fib zone` 内，否则直接拦截 | 48.19% | 2588.84 | 1.963 | 38.73% | 阶段最优 |
-| 15686 | 在 `15685` 基础上放行“放量新腿破位延续”例外 | 48.20% | 2787.85 | 2.013 | 38.73% | 当前最优 |
+| 15686 | 在 `15685` 基础上放行“放量新腿破位延续”例外 | 48.20% | 2787.85 | 2.013 | 38.73% | 已确认基线 |
+| 15687 | 在 `15686` 基础上拦截 `TooFar` 反趋势锤子线 long（`short_trend + !fib_in_zone + RSI<45`） | 48.31% | 3338.00 | 2.160 | 38.73% | 待确认候选 |
 
 ### 2026-02 修复效果
 
@@ -983,3 +984,34 @@ if fake_breakout_signal.has_signal() {
   - `crates/indicators/src/trend/vegas/strategy.rs`
 - 当前工作基线：
   - `back_test_id=15686`
+
+### 2026-03-11 补充优化：收紧 `TooFar` 反趋势锤子线 long
+
+- 基于 `15686` 继续检查 long 侧 `Signal_Kline_Stop_Loss` 后发现：
+  - long 侧 `Signal_Kline_Stop_Loss` 整体不是误伤，汇总仍为正贡献：`165` 笔，`+244.43`
+  - `TooFar long` 整体也不是坏信号，汇总仍为正贡献：`281` 笔，`+1474.24`
+  - 真正明显偏差的是一小类反趋势抄底单：
+    `TooFar + is_short_trend=true + is_long_trend=false + is_uptrend=false + !fib_in_zone + KlineHammer long`
+- 在 `15686` 中，这组单共有 `24` 笔，合计 `-285.20`；若再要求 `RSI<45`，则收敛为 `18` 笔，合计 `-422.76`。
+- 因此新增极窄过滤：
+  - `ema_distance_filter.state == TooFar`
+  - `ema_touch_value.is_uptrend == false`
+  - `ema_values.is_long_trend == false`
+  - `ema_values.is_short_trend == true`
+  - `fib_retracement_value.in_zone == false`
+  - `kline_hammer_value.is_long_signal == true`
+  - `RSI < 45`
+  - 满足时拦截做多，记录原因：`EMA_TOO_FAR_COUNTER_TREND_HAMMER_LONG`
+- 结果得到 `back_test_id=15687`：
+  - `profit`: `2787.85 -> 3338.00`
+  - `sharpe`: `2.013 -> 2.160`
+  - `win_rate`: `48.20% -> 48.31%`
+  - `2026-01`: `203.00 -> 551.24`
+  - `2026-02`: `-79.88 -> 42.50`
+- 新过滤在 `15687` 中命中 `42` 次，其中直接移除的原有平仓交易 `18` 笔，合计 `-422.76`。
+- 代表性坏样本：
+  - `2026-01-31 00:00:00` long：`TooFar + short_trend + !fib_in_zone + KlineHammer long + RSI=32.54`，在 `15686` 亏损 `-117.88`，在 `15687` 被过滤
+  - `2026-02-05 00:00:00` long：同类模式，在 `15686` 亏损 `-115.58`，在 `15687` 被过滤
+- 结论：
+  - 暂不建议动 long 侧 `Signal_Kline_Stop_Loss` 总开关
+  - 更有效的优化点是收紧这类 `TooFar` 反趋势锤子线 long

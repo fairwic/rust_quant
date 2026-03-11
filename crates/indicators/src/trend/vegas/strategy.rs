@@ -621,8 +621,26 @@ impl VegasStrategy {
                     let macd_val = &vegas_indicator_signal_values.macd_value;
                     let macd_strong_bullish =
                         macd_val.histogram > 0.0 && macd_val.macd_line > macd_val.signal_line;
+                    let is_repair_long = ema_distance_filter.state == EmaDistanceState::TooFar
+                        && !vegas_indicator_signal_values.ema_touch_value.is_uptrend
+                        && !vegas_indicator_signal_values.ema_values.is_long_trend
+                        && vegas_indicator_signal_values.ema_values.is_short_trend
+                        && !vegas_indicator_signal_values.fib_retracement_value.in_zone
+                        && vegas_indicator_signal_values
+                            .kline_hammer_value
+                            .is_long_signal
+                        && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
+                        && macd_val.histogram < 0.0
+                        && macd_val.histogram_increasing
+                        && vegas_indicator_signal_values.volume_value.volume_ratio <= 1.6;
 
-                    if is_large_entity
+                    if is_repair_long {
+                        // 暴跌后的修复 long 更容易被后续信号止损过早打掉，
+                        // 用标记交给持仓层忽略后续信号止损更新，保留 ATR/最大亏损止损。
+                        signal_result.signal_kline_stop_loss_price = None;
+                        signal_result.stop_loss_source =
+                            Some("RepairLong_NoSignalKline".to_string());
+                    } else if is_large_entity
                         && large_entity_retracement_sl.is_some()
                         && !macd_strong_bullish
                     {
@@ -795,6 +813,62 @@ impl VegasStrategy {
             signal_result
                 .filter_reasons
                 .push("EMA_TOO_FAR_OUTSIDE_FIB_ZONE_BLOCK_SHORT".to_string());
+        }
+
+        let allow_repair_long = signal_result.should_buy.unwrap_or(false)
+            && ema_distance_filter.state == EmaDistanceState::TooFar
+            && !vegas_indicator_signal_values.ema_touch_value.is_uptrend
+            && !vegas_indicator_signal_values.ema_values.is_long_trend
+            && vegas_indicator_signal_values.ema_values.is_short_trend
+            && !fib_val.in_zone
+            && vegas_indicator_signal_values
+                .kline_hammer_value
+                .is_long_signal
+            && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
+            && vegas_indicator_signal_values.macd_value.histogram < 0.0
+            && vegas_indicator_signal_values
+                .macd_value
+                .histogram_increasing
+            && fib_val.volume_ratio <= 1.6;
+
+        // TooFar 反趋势做多里，锤子线抄底在空头排列且 Fib 未回到理想区间时表现较差。
+        // 这类单常由局部反转信号触发，但仍处于空头主导阶段，优先拦截低 RSI 的接飞刀做多。
+        let should_block_counter_trend_hammer_long = signal_result.should_buy.unwrap_or(false)
+            && ema_distance_filter.state == EmaDistanceState::TooFar
+            && !vegas_indicator_signal_values.ema_touch_value.is_uptrend
+            && !vegas_indicator_signal_values.ema_values.is_long_trend
+            && vegas_indicator_signal_values.ema_values.is_short_trend
+            && !fib_val.in_zone
+            && vegas_indicator_signal_values
+                .kline_hammer_value
+                .is_long_signal
+            && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
+            && !allow_repair_long;
+        if should_block_counter_trend_hammer_long {
+            signal_result.should_buy = Some(false);
+            signal_result
+                .filter_reasons
+                .push("EMA_TOO_FAR_COUNTER_TREND_HAMMER_LONG".to_string());
+        }
+
+        let should_block_counter_trend_chase_long = signal_result.should_buy.unwrap_or(false)
+            && ema_distance_filter.state == EmaDistanceState::TooFar
+            && !vegas_indicator_signal_values.ema_touch_value.is_uptrend
+            && !vegas_indicator_signal_values.ema_values.is_long_trend
+            && vegas_indicator_signal_values.ema_values.is_short_trend
+            && !fib_val.in_zone
+            && (vegas_indicator_signal_values
+                .engulfing_value
+                .is_valid_engulfing
+                || vegas_indicator_signal_values.bollinger_value.is_long_signal)
+            && valid_rsi_value.is_some_and(|rsi| rsi >= 50.0)
+            && fib_val.volume_ratio >= 2.5
+            && vegas_indicator_signal_values.macd_value.histogram >= 0.0;
+        if should_block_counter_trend_chase_long {
+            signal_result.should_buy = Some(false);
+            signal_result
+                .filter_reasons
+                .push("EMA_TOO_FAR_COUNTER_TREND_CHASE_LONG".to_string());
         }
 
         // ================================================================

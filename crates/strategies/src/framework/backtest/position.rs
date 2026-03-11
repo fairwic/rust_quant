@@ -88,6 +88,11 @@ pub fn open_long_position(
     }
     //设置止盈止损价格
     set_long_stop_close_price(risk_config, signal, &mut temp_trade_position);
+    if signal.signal_kline_stop_loss_price.is_none()
+        && signal.stop_loss_source.as_deref() == Some("RepairLong_NoSignalKline")
+    {
+        temp_trade_position.stop_loss_source = signal.stop_loss_source.clone();
+    }
 
     state.trade_position = Some(temp_trade_position);
     state.open_position_times += 1;
@@ -108,8 +113,12 @@ fn set_stop_close_price_common(
     signal: &SignalResult,
     position: &mut TradePosition,
 ) {
+    let disable_signal_kline_updates = position.trade_side == TradeSide::Long
+        && position.stop_loss_source.as_deref() == Some("RepairLong_NoSignalKline");
+
     // 1. 信号K线止损 + 更新历史记录
-    if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) {
+    if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) && !disable_signal_kline_updates
+    {
         if let Some(new_price) = signal.signal_kline_stop_loss_price {
             let source = signal
                 .stop_loss_source
