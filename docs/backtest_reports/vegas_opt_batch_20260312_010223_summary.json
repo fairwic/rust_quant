@@ -1,0 +1,156 @@
+{
+  "seed": 20260312,
+  "baseline_backtest_id": 15690,
+  "baseline_metrics": {
+    "backtest_id": 15690,
+    "win_rate": 0.485273492286115,
+    "profit": 3282.29,
+    "sharpe_ratio": 2.16306,
+    "max_drawdown": 0.387286,
+    "volatility": 0.528824,
+    "open_positions_num": 714,
+    "created_at": "2026-03-11 16:55:06"
+  },
+  "total_iterations": 84,
+  "strict_dominator_count": 26,
+  "best_result": {
+    "iteration": 57,
+    "phase": 2,
+    "backtest_id": 15747,
+    "profit": 6899.7,
+    "win_rate": 0.501618,
+    "sharpe_ratio": 2.83248,
+    "max_drawdown": 0.310947,
+    "volatility": 0.536397,
+    "open_positions_num": 618,
+    "score": 105886.0372,
+    "strict_dominator": true
+  },
+  "strict_best_result": {
+    "iteration": 57,
+    "phase": 2,
+    "backtest_id": 15747,
+    "profit": 6899.7,
+    "win_rate": 0.501618,
+    "sharpe_ratio": 2.83248,
+    "max_drawdown": 0.310947,
+    "volatility": 0.536397,
+    "open_positions_num": 618,
+    "score": 105886.0372,
+    "strict_dominator": true
+  },
+  "report_tsv": "/Users/xu/onions/rust_quant/docs/backtest_reports/vegas_opt_batch_20260312_010223.tsv",
+  "report_jsonl": "/Users/xu/onions/rust_quant/docs/backtest_reports/vegas_opt_batch_20260312_010223.jsonl",
+  "top_10": [
+    {
+      "iteration": 57,
+      "phase": 2,
+      "backtest_id": 15747,
+      "profit": 6899.7,
+      "win_rate": 0.501618,
+      "sharpe_ratio": 2.83248,
+      "max_drawdown": 0.310947,
+      "score": 105886.0372,
+      "strict_dominator": true
+    },
+    {
+      "iteration": 67,
+      "phase": 2,
+      "backtest_id": 15757,
+      "profit": 5979.53,
+      "win_rate": 0.503226,
+      "sharpe_ratio": 2.70215,
+      "max_drawdown": 0.284586,
+      "score": 105045.5676,
+      "strict_dominator": true
+    },
+    {
+      "iteration": 50,
+      "phase": 2,
+      "backtest_id": 15740,
+      "profit": 5733.5,
+      "win_rate": 0.502463,
+      "sharpe_ratio": 2.72087,
+      "max_drawdown": 0.263726,
+      "score": 104963.9875,
+      "strict_dominator": true
+    },
+    {
+      "iteration": 23,
+      "phase": 1,
+      "backtest_id": 15713,
+      "profit": 5656.98,
+      "win_rate": 0.501618,
+      "sharpe_ratio": 2.70272,
+      "max_drawdown": 0.291692,
+      "score": 104602.7172,
+      "strict_dominator": true
+    },
+    {
+      "iteration": 82,
+      "phase": 2,
+      "backtest_id": 15772,
+      "profit": 5284.82,
+      "win_rate": 0.504078,
+      "sharpe_ratio": 2.63716,
+      "max_drawdown": 0.26559,
+      "score": 104439.4404,
+      "strict_dominator": true
+    },
+    {
+      "iteration": 71,
+      "phase": 2,
+      "backtest_id": 15761,
+      "profit": 5227.98,
+      "win_rate": 0.49835,
+      "sharpe_ratio": 2.6342,
+      "max_drawdown": 0.264826,
+      "score": 104155.1337,
+      "strict_dominator": true
+    },
+    {
+      "iteration": 52,
+      "phase": 2,
+      "backtest_id": 15742,
+      "profit": 4860.0,
+      "win_rate": 0.507246,
+      "sharpe_ratio": 2.54204,
+      "max_drawdown": 0.256899,
+      "score": 104068.1914,
+      "strict_dominator": true
+    },
+    {
+      "iteration": 76,
+      "phase": 2,
+      "backtest_id": 15766,
+      "profit": 4911.35,
+      "win_rate": 0.503322,
+      "sharpe_ratio": 2.5751,
+      "max_drawdown": 0.268003,
+      "score": 103923.3347,
+      "strict_dominator": true
+    },
+    {
+      "iteration": 73,
+      "phase": 2,
+      "backtest_id": 15763,
+      "profit": 4937.28,
+      "win_rate": 0.490849,
+      "sharpe_ratio": 2.55336,
+      "max_drawdown": 0.263398,
+      "score": 103454.5477,
+      "strict_dominator": true
+    },
+    {
+      "iteration": 74,
+      "phase": 2,
+      "backtest_id": 15764,
+      "profit": 4845.59,
+      "win_rate": 0.498392,
+      "sharpe_ratio": 2.5202,
+      "max_drawdown": 0.286185,
+      "score": 103432.5696,
+      "strict_dominator": true
+    }
+  ]
+}

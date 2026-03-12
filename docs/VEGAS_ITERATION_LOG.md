@@ -1015,3 +1015,97 @@ if fake_breakout_signal.has_signal() {
 - 结论：
   - 暂不建议动 long 侧 `Signal_Kline_Stop_Loss` 总开关
   - 更有效的优化点是收紧这类 `TooFar` 反趋势锤子线 long
+
+## 2026-03-12 批量优化记录：基于 15690 的 84 轮自动搜索
+
+### 批次说明
+
+- 代码基线：保留 `15688/15690` 已验证有效的窄规则，不启用全局 `post-drop consolidation` 状态过滤。
+- 自动化脚本：`scripts/optimize_vegas_batch.py`
+- 全量结果：
+  - `docs/backtest_reports/vegas_opt_batch_20260312_010223.tsv`
+  - `docs/backtest_reports/vegas_opt_batch_20260312_010223.jsonl`
+  - `docs/backtest_reports/vegas_opt_batch_20260312_010223_summary.json`
+- 搜索方式：
+  - phase 1：`48` 轮随机广撒点
+  - phase 2：`36` 轮围绕头部候选做局部细化
+- 总轮次：`84`
+- 随机种子：`20260312`
+
+### 基线
+
+| 回测 ID | 胜率 | 盈利 | Sharpe | MaxDD | 备注 |
+| ------- | ---- | ---- | ------ | ----- | ---- |
+| 15690 | 48.53% | 3282.29 | 2.163 | 38.73% | 自动搜索起点 |
+
+### 批量搜索结果
+
+- 严格支配 `15690`（胜率更高、利润更高、回撤更低）的候选共 `26` 个。
+- batch-best 为 `back_test_id=15747`：
+  - `profit`: `3282.29 -> 6899.70`
+  - `win_rate`: `48.53% -> 50.16%`
+  - `sharpe`: `2.163 -> 2.832`
+  - `max_drawdown`: `38.73% -> 31.09%`
+- 当前 `strategy_config.id=11` 已自动更新为 `15747` 对应参数。
+
+### 头部候选
+
+| 回测 ID | 胜率 | 盈利 | Sharpe | MaxDD | 说明 |
+| ------- | ---- | ---- | ------ | ----- | ---- |
+| 15747 | 50.16% | 6899.70 | 2.832 | 31.09% | batch-best，利润最强 |
+| 15757 | 50.32% | 5979.53 | 2.702 | 28.46% | 更低回撤的高利润解 |
+| 15740 | 50.25% | 5733.50 | 2.721 | 26.37% | 利润 / 回撤平衡最强之一 |
+| 15772 | 50.41% | 5284.82 | 2.637 | 26.56% | 胜率最高的一档 |
+| 15742 | 50.72% | 4860.00 | 2.542 | 25.69% | 稳定性最强的一档 |
+
+### batch-best（15747）参数变化
+
+相对 `15690` / 原 `id=11`，`15747` 的主要变化是：
+
+- `volume_signal.volume_increase_ratio`: `2.5 -> 3.1`
+- `rsi_signal.rsi_oversold`: `14.0 -> 15.5`
+- `rsi_signal.rsi_overbought`: `86.0 -> 87.0`
+- `signal_weights.min_total_weight`: `2.0 -> 2.16`
+- `leg_detection_signal.size`: `7 -> 8`
+- `signal_weights.LegDetection`: `0.90 -> 0.83`
+- `signal_weights.Bolling`: `1.00 -> 0.87`
+- `signal_weights.Engulfing`: `1.00 -> 0.91`
+- `signal_weights.KlineHammer`: `1.00 -> 0.92`
+- `signal_weights.FairValueGap`: `1.50 -> 1.22`
+- `range_filter_signal.bb_width_threshold`: `0.03 -> 0.029`
+- `range_filter_signal.tp_kline_ratio`: `0.60 -> 0.56`
+- `chase_confirm_config.long_threshold`: `0.18 -> 0.187`
+- `chase_confirm_config.short_threshold`: `0.10 -> 0.132`
+- `chase_confirm_config.pullback_touch_threshold`: `0.05 -> 0.053`
+- `chase_confirm_config.min_body_ratio`: `0.50 -> 0.47`
+- `fib_retracement_signal.fib_trigger_low`: `0.328 -> 0.29`
+- `fib_retracement_signal.fib_trigger_high`: `0.618 -> 0.639`
+- `fib_retracement_signal.min_volume_ratio`: `2.0 -> 1.73`
+- `fib_retracement_signal.stop_loss_buffer_ratio`: `0.01 -> 0.006`
+- `extreme_k_filter_signal.min_body_ratio`: `0.65 -> 0.62`
+- `extreme_k_filter_signal.min_move_pct`: `0.01 -> 0.011`
+- `risk.max_loss_percent`: 维持 `0.04`
+- `risk.atr_take_profit_ratio`: `3.0 -> 3.44`
+- `risk.fixed_profit_percent_take_profit`: `0.05 -> 0.057`
+
+### 自我分析
+
+- 这批结果不是单点偶然。`84` 轮里出现了 `26` 个 strict dominator，说明当前代码基线下存在一片稳定优于 `15690` 的参数区域。
+- 严格优于 `15690` 的头部候选有明显共性：
+  - `leg_size` 往 `8/9` 走；
+  - `volume_increase_ratio` 提高到接近 `3.0`；
+  - `min_total_weight` 往 `2.1+` 收紧；
+  - `Bolling / Engulfing / KlineHammer / LegDetection / FairValueGap` 权重整体下调；
+  - `fib_trigger_low` 下移、`fib_trigger_high` 上移，Fib 区间变宽；
+  - `fib_min_volume_ratio` 和 `stop_loss_buffer_ratio` 下降，Fib 入场更容易但止损缓冲更紧；
+  - `ATR take profit` 上调到 `3.2~3.4` 左右。
+- 这说明当前最有效的方向不是再加新规则，而是：
+  - 提高入场确认强度，减少低质量形态堆分；
+  - 放宽 Fib 区间，保留更多中继回撤；
+  - 同时用更高的 TP 和稍紧的结构约束，拉长能跑出的趋势单。
+
+### 当前结论
+
+- `15690` 已被稳定超越。
+- 当前批次最优是 `15747`，且已经同步到 `strategy_config.id=11`。
+- 下一步若继续优化，不建议再做大范围盲扫，应该围绕 `15747 / 15757 / 15740 / 15772 / 15742` 这组前沿点做更窄的局部搜索或分月鲁棒性分析。
