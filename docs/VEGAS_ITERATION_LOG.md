@@ -1433,3 +1433,81 @@ if fake_breakout_signal.has_signal() {
   - 图形上已经进入“死叉状态”
   - 当前代码原有 `is_death_cross` 更偏“事件定义”，只认刚跨过零轴的那一根
   - 本次新规则改为接受“死叉状态 + 柱子继续走弱”，因此能在这一根提前开空
+
+### Near-miss 复盘
+
+为了判断这条 short 规则是否还能继续放宽，额外检查了基线 `15788` 中多笔“下一根才开空”的前一根 K 线。
+
+核心对照样本：
+
+- `2025-10-28 20:00:00`
+  - `volume_ratio = 2.136`
+  - `fib.volume_confirmed = true`
+  - `fib_ratio = 0.6165`
+  - `swing_high.crossed = true`
+  - `bear_leg = true`
+  - `new_leg = true`
+  - `hang_short = true`
+  - `up_shadow = 0.6008`
+  - `macd_line = 49.31 < signal_line = 55.71`
+  - `histogram = -6.40`
+  - 这是一笔标准的“高位假突破回落 short”
+
+对照 near-miss：
+
+- `2025-11-03 04:00:00`
+  - `volume_ratio = 0.841`
+  - `fib.volume_confirmed = false`
+  - `swing_high.crossed = false`
+  - `bear_leg = false`
+  - `hang_short = false`
+  - `histogram = +8.17`
+  - 这类不属于假突破回落，继续提前开空不合理
+
+- `2025-11-12 16:00:00`
+  - `volume_ratio = 1.346`
+  - `fib.volume_confirmed = false`
+  - `swing_high.crossed = false`
+  - `bear_leg = true`
+  - `hang_short = false`
+  - `up_shadow = 0.150`
+  - `histogram = -9.95`
+  - MACD 虽然转弱，但量能、结构、上影线都不够，不属于同一类
+
+- `2025-12-15 16:00:00`
+  - `volume_ratio = 0.883`
+  - `fib.volume_confirmed = false`
+  - `swing_high.crossed = false`
+  - `bear_leg = true`
+  - `hang_short = false`
+  - `up_shadow = 0.426`
+  - `histogram = +5.28`
+  - 这里甚至不是空头柱，不能提前打成假突破 short
+
+- `2026-01-20 08:00:00`
+  - `volume_ratio = 1.275`
+  - `fib.volume_confirmed = false`
+  - `swing_high.crossed = false`
+  - `bear_leg = true`
+  - `new_leg = true`
+  - `hang_short = false`
+  - `up_shadow = 0.459`
+  - `macd_line/signal_line` 都在零轴下方
+  - 这更像低位继续走弱，不是高位假突破
+
+- `2026-03-06 16:00:00`
+  - `volume_ratio = 0.799`
+  - `fib.volume_confirmed = false`
+  - `swing_high.crossed = false`
+  - `bear_leg = true`
+  - `hang_short = false`
+  - `up_shadow ≈ 0`
+  - `histogram = -6.17`
+  - 也不是 `2025-10-28 20:00:00` 那类冲高失败
+
+结论：
+
+- `FAKE_BREAKOUT_REVERSAL_SHORT` 当前有效，但本质上仍是非常窄的高置信度规则
+- 尝试两次 broadening 后，`15792 / 15793` 与 `15790` 完全一致，没有新增命中
+- 说明继续盲目放宽条件没有意义
+- 后续如果还要扩这条规则，应先继续筛选“高位冲高失败 + MACD 零轴上方转弱”的真近似样本，而不是直接放宽量能、腿部或 Fib 条件
