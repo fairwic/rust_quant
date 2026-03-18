@@ -81,7 +81,118 @@ fn default_emit_debug() -> bool {
     true
 }
 
+fn env_flag(name: &str) -> bool {
+    matches!(
+        std::env::var(name)
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 impl VegasStrategy {
+    fn is_expansion_continuation_long_candidate(
+        data_items: &[CandleItem],
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+        valid_rsi_value: Option<f64>,
+    ) -> bool {
+        let Some(last) = data_items.last() else {
+            return false;
+        };
+
+        let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
+        let macd_val = &vegas_indicator_signal_values.macd_value;
+        let leg_val = &vegas_indicator_signal_values.leg_detection_value;
+        let structure_val = &vegas_indicator_signal_values.market_structure_value;
+        let fib_val = &vegas_indicator_signal_values.fib_retracement_value;
+
+        last.c > last.o
+            && last.body_ratio() >= 0.65
+            && volume_ratio >= 3.0
+            && valid_rsi_value.is_some_and(|rsi| (55.0..=72.0).contains(&rsi))
+            && macd_val.macd_line > 0.0
+            && macd_val.signal_line > 0.0
+            && macd_val.macd_line > macd_val.signal_line
+            && macd_val.histogram > 0.0
+            && macd_val.histogram_increasing
+            && !vegas_indicator_signal_values.ema_values.is_short_trend
+            && fib_val.in_zone
+            && fib_val.volume_confirmed
+            && (leg_val.is_bullish_leg || structure_val.internal_bullish_bos)
+    }
+
+    fn is_fake_breakout_reversal_short_candidate(
+        data_items: &[CandleItem],
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let Some(last) = data_items.last() else {
+            return false;
+        };
+
+        let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
+        let macd_val = &vegas_indicator_signal_values.macd_value;
+        let leg_val = &vegas_indicator_signal_values.leg_detection_value;
+        let structure_val = &vegas_indicator_signal_values.market_structure_value;
+        let fib_val = &vegas_indicator_signal_values.fib_retracement_value;
+        let hammer_val = &vegas_indicator_signal_values.kline_hammer_value;
+
+        last.c < last.o
+            && volume_ratio >= 1.8
+            && (hammer_val.is_short_signal || hammer_val.up_shadow_ratio >= 0.5)
+            && leg_val.is_bearish_leg
+            && leg_val.is_new_leg
+            && fib_val.in_zone
+            && fib_val.volume_confirmed
+            && structure_val
+                .swing_high
+                .map(|pivot| pivot.crossed)
+                .unwrap_or(false)
+            && !vegas_indicator_signal_values.ema_values.is_long_trend
+            && macd_val.macd_line > 0.0
+            && macd_val.signal_line > 0.0
+            && macd_val.macd_line < macd_val.signal_line
+            && macd_val.histogram < 0.0
+            && macd_val.histogram_decreasing
+    }
+
+    fn is_rebound_protect_long_candidate(
+        data_items: &[CandleItem],
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let Some(last) = data_items.last() else {
+            return false;
+        };
+
+        let hammer = &vegas_indicator_signal_values.kline_hammer_value;
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        if !hammer.is_hammer || !hammer.is_long_signal || !boll.is_long_signal || last.c <= last.o {
+            return false;
+        }
+
+        let strong_hammer = hammer.down_shadow_ratio >= 0.70 && hammer.body_ratio <= 0.12;
+        if !strong_hammer {
+            return false;
+        }
+
+        let recent_high = data_items
+            .iter()
+            .rev()
+            .skip(1)
+            .take(6)
+            .map(|c| c.h)
+            .fold(last.h, f64::max);
+        let pullback_pct = if recent_high > 0.0 {
+            (recent_high - last.l) / recent_high
+        } else {
+            0.0
+        };
+        if pullback_pct < 0.01 {
+            return false;
+        }
+        true
+    }
+
     pub fn new(period: String) -> Self {
         Self {
             period,
@@ -537,6 +648,29 @@ impl VegasStrategy {
                 // 仅Fib模式：未触发Fib则不允许开仓
                 signal_direction = None;
             }
+        }
+
+        if signal_direction.is_none()
+            && env_flag("VEGAS_EXPERIMENT_EXPANSION_CONTINUATION_LONG")
+            && Self::is_expansion_continuation_long_candidate(
+                data_items,
+                vegas_indicator_signal_values,
+                valid_rsi_value,
+            )
+        {
+            signal_direction = Some(SignalDirect::IsLong);
+            dynamic_adjustments.push("EXPANSION_CONTINUATION_LONG".to_string());
+        }
+
+        if signal_direction.is_none()
+            && env_flag("VEGAS_EXPERIMENT_FAKE_BREAKOUT_REVERSAL_SHORT")
+            && Self::is_fake_breakout_reversal_short_candidate(
+                data_items,
+                vegas_indicator_signal_values,
+            )
+        {
+            signal_direction = Some(SignalDirect::IsShort);
+            dynamic_adjustments.push("FAKE_BREAKOUT_REVERSAL_SHORT".to_string());
         }
 
         if let Some(signal_direction) = signal_direction {
@@ -1117,6 +1251,10 @@ impl VegasStrategy {
                 // 做多过滤
                 if signal_result.should_buy.unwrap_or(false) {
                     let mut should_filter = false;
+                    let rebound_protect_long = Self::is_rebound_protect_long_candidate(
+                        data_items,
+                        vegas_indicator_signal_values,
+                    );
 
                     if macd_cfg.filter_falling_knife {
                         // 如果 MACD 柱状图为负（处于空头动量区）
@@ -1124,6 +1262,11 @@ impl VegasStrategy {
                             // 且 柱状图在递减（负值变更大，动量加速向下）
                             if macd_val.histogram_decreasing {
                                 should_filter = true; // 正在接飞刀，过滤
+                                if rebound_protect_long {
+                                    signal_result
+                                        .filter_reasons
+                                        .push("REBOUND_HAMMER_LONG_PROTECT".to_string());
+                                }
                                 signal_result
                                     .filter_reasons
                                     .push("MACD_FALLING_KNIFE_LONG".to_string());
@@ -1157,6 +1300,48 @@ impl VegasStrategy {
                         signal_result.should_sell = Some(false);
                     }
                 }
+            }
+        }
+
+        // 缩量 + RSI 中性 + MACD 零轴下方修复时，避免过早反手做空。
+        // 典型场景是大跌后的修复反抽，趋势仍偏空，但动量和参与度都不支持立即追空。
+        if signal_result.should_sell.unwrap_or(false) {
+            let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
+            let macd_val = &vegas_indicator_signal_values.macd_value;
+            let rsi_is_neutral = valid_rsi_value
+                .map(|rsi| (47.0..=53.0).contains(&rsi))
+                .unwrap_or(false);
+            let macd_recovering_below_zero = macd_val.macd_line < 0.0
+                && macd_val.signal_line < 0.0
+                && macd_val.macd_line > macd_val.signal_line
+                && macd_val.histogram > 0.0;
+
+            if volume_ratio < 1.0 && rsi_is_neutral && macd_recovering_below_zero {
+                signal_result.should_sell = Some(false);
+                signal_result
+                    .filter_reasons
+                    .push("LOW_VOLUME_NEUTRAL_RSI_MACD_RECOVERY_BLOCK_SHORT".to_string());
+            }
+        }
+
+        // 缩量 + RSI 中性 + MACD 零轴上方转弱时，避免过早逆势做多。
+        // 典型场景是上涨后的回落修复，参与度不足且死叉刚开始，不适合抢多。
+        if signal_result.should_buy.unwrap_or(false) {
+            let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
+            let macd_val = &vegas_indicator_signal_values.macd_value;
+            let rsi_is_neutral = valid_rsi_value
+                .map(|rsi| (47.0..=53.0).contains(&rsi))
+                .unwrap_or(false);
+            let macd_weakening_above_zero = macd_val.macd_line > 0.0
+                && macd_val.signal_line > 0.0
+                && macd_val.macd_line < macd_val.signal_line
+                && macd_val.histogram < 0.0;
+
+            if volume_ratio < 1.0 && rsi_is_neutral && macd_weakening_above_zero {
+                signal_result.should_buy = Some(false);
+                signal_result
+                    .filter_reasons
+                    .push("LOW_VOLUME_NEUTRAL_RSI_MACD_WEAKENING_BLOCK_LONG".to_string());
             }
         }
 

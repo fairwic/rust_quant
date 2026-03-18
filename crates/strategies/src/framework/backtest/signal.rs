@@ -11,6 +11,26 @@ use crate::CandleItem;
 
 const BLOCK_LONG_ENTRY_REASON: &str = "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG";
 const BLOCK_SHORT_ENTRY_REASON: &str = "FIB_STRICT_MAJOR_BULL_BLOCK_SHORT";
+const REBOUND_HAMMER_LONG_PROTECT_REASON: &str = "REBOUND_HAMMER_LONG_PROTECT";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReboundShortProtectMode {
+    Off,
+    TakeProfit,
+    Breakeven,
+}
+
+fn rebound_short_protect_mode() -> ReboundShortProtectMode {
+    match std::env::var("VEGAS_REBOUND_SHORT_PROTECT_MODE")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "tp" | "take_profit" => ReboundShortProtectMode::TakeProfit,
+        "breakeven" | "move_to_entry" => ReboundShortProtectMode::Breakeven,
+        _ => ReboundShortProtectMode::Off,
+    }
+}
 
 fn should_block_long_entry(signal: &SignalResult) -> bool {
     signal
@@ -24,6 +44,13 @@ fn should_block_short_entry(signal: &SignalResult) -> bool {
         .filter_reasons
         .iter()
         .any(|r| r == BLOCK_SHORT_ENTRY_REASON)
+}
+
+fn has_rebound_hammer_long_protect(signal: &SignalResult) -> bool {
+    signal
+        .filter_reasons
+        .iter()
+        .any(|r| r == REBOUND_HAMMER_LONG_PROTECT_REASON)
 }
 
 /// 处理交易信号
@@ -44,6 +71,58 @@ pub fn deal_signal(
     // 即使当前K线产生了新信号，也必须先检查由于K线波动导致的止损
     if trading_state.trade_position.is_some() {
         trading_state = check_risk_config(&risk_config, trading_state, signal, candle);
+    }
+
+    if let Some(mut trade_position) = trading_state.trade_position.clone() {
+        if trade_position.trade_side == TradeSide::Short && has_rebound_hammer_long_protect(signal)
+        {
+            match rebound_short_protect_mode() {
+                ReboundShortProtectMode::TakeProfit => {
+                    let profit = (trade_position.open_price - signal.open_price)
+                        * trade_position.position_nums;
+                    trade_position.close_price = Some(signal.open_price);
+                    trading_state.trade_position = Some(trade_position);
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        signal,
+                        "反弹锤子线保护止盈",
+                        profit,
+                    );
+                    return trading_state;
+                }
+                ReboundShortProtectMode::Breakeven => {
+                    let new_stop = trade_position.open_price;
+                    let source = "ReboundHammer_Long_Breakeven".to_string();
+                    if let Some(old_price) = trade_position.signal_kline_stop_close_price {
+                        let sequence = trade_position.stop_loss_updates.len() as i32;
+                        trade_position.stop_loss_updates.push(
+                            rust_quant_domain::value_objects::StopLossUpdate::update(
+                                sequence,
+                                signal.ts,
+                                signal.ts,
+                                source.clone(),
+                                old_price,
+                                new_stop,
+                            ),
+                        );
+                    } else {
+                        trade_position.stop_loss_updates.push(
+                            rust_quant_domain::value_objects::StopLossUpdate::initial(
+                                signal.ts,
+                                signal.ts,
+                                source.clone(),
+                                new_stop,
+                            ),
+                        );
+                    }
+                    trade_position.signal_kline_stop_close_price = Some(new_stop);
+                    trade_position.stop_loss_source = Some(source);
+                    trading_state.trade_position = Some(trade_position);
+                }
+                ReboundShortProtectMode::Off => {}
+            }
+        }
     }
 
     let block_long_entry = signal.should_buy && should_block_long_entry(signal);
