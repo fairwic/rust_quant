@@ -184,8 +184,11 @@ fn default_backtest_targets() -> Vec<(String, String)> {
         // ("SOL-USDT-SWAP".to_string(), "5m".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "15m".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "1H".to_string()),
-        // ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
+        ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "1Dutc".to_string()),
+        // BCH & LTC
+        ("BCH-USDT-SWAP".to_string(), "4H".to_string()),
+        ("LTC-USDT-SWAP".to_string(), "4H".to_string()),
     ]
 }
 
