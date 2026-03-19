@@ -186,9 +186,6 @@ fn default_backtest_targets() -> Vec<(String, String)> {
         // ("SOL-USDT-SWAP".to_string(), "1H".to_string()),
         ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "1Dutc".to_string()),
-        // BCH & LTC
-        ("BCH-USDT-SWAP".to_string(), "4H".to_string()),
-        ("LTC-USDT-SWAP".to_string(), "4H".to_string()),
     ]
 }
 
@@ -709,5 +706,18 @@ mod tests {
         let (inst_ids, periods) = derive_ws_targets_from_configs(&configs);
         assert!(inst_ids.is_empty());
         assert!(periods.is_empty());
+    }
+
+    #[test]
+    fn test_default_backtest_targets_only_keep_eth_btc_sol_for_4h() {
+        let targets = default_backtest_targets();
+        assert_eq!(
+            targets,
+            vec![
+                ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
+                ("BTC-USDT-SWAP".to_string(), "4H".to_string()),
+                ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
+            ]
+        );
     }
 }

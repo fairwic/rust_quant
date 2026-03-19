@@ -156,6 +156,9 @@ impl SignalWeightsConfig {
     ) -> Option<CheckConditionResult> {
         // 获取权重
         let base_weight = self.get_weight(signal_type);
+        if base_weight <= 0.0 {
+            return None;
+        }
 
         match condition {
             // 新增Smart Money Concepts相关条件评估
@@ -547,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn market_structure_vote_applies_even_with_zero_weight() {
+    fn zero_weight_signal_does_not_affect_direction_vote() {
         let weights = SignalWeightsConfig {
             weights: vec![
                 (SignalType::VolumeTrend, 2.0),
@@ -577,6 +580,6 @@ mod tests {
         ]);
 
         assert!((score.total_weight - 2.0).abs() < 1e-12);
-        assert_eq!(weights.is_signal_valid(&score), Some(SignalDirect::IsLong));
+        assert_eq!(weights.is_signal_valid(&score), None);
     }
 }
