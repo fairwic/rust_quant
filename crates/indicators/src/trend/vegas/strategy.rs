@@ -156,6 +156,58 @@ impl VegasStrategy {
             && macd_val.histogram_decreasing
     }
 
+    fn should_block_exhaustion_short(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let volume = &vegas_indicator_signal_values.volume_value;
+        let fib = &vegas_indicator_signal_values.fib_retracement_value;
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        let ema_touch = &vegas_indicator_signal_values.ema_touch_value;
+        let ema_values = &vegas_indicator_signal_values.ema_values;
+        let leg = &vegas_indicator_signal_values.leg_detection_value;
+        let macd = &vegas_indicator_signal_values.macd_value;
+        let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
+
+        rsi < 25.0
+            && volume.volume_ratio >= 5.0
+            && !fib.in_zone
+            && fib.retracement_ratio <= 0.05
+            && boll.is_long_signal
+            && ema_touch.is_short_signal
+            && ema_values.is_short_trend
+            && !leg.is_new_leg
+            && macd.macd_line < 0.0
+            && macd.signal_line < 0.0
+    }
+
+    fn should_block_bullish_leg_mean_reversion_short(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let volume = &vegas_indicator_signal_values.volume_value;
+        let fib = &vegas_indicator_signal_values.fib_retracement_value;
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        let ema_touch = &vegas_indicator_signal_values.ema_touch_value;
+        let ema_values = &vegas_indicator_signal_values.ema_values;
+        let leg = &vegas_indicator_signal_values.leg_detection_value;
+        let macd = &vegas_indicator_signal_values.macd_value;
+        let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
+
+        volume.volume_ratio >= 1.8
+            && !ema_values.is_short_trend
+            && leg.is_bullish_leg
+            && !leg.is_new_leg
+            && fib.in_zone
+            && fib.volume_confirmed
+            && fib.leg_bullish
+            && boll.is_short_signal
+            && !ema_touch.is_short_signal
+            && (45.0..=50.0).contains(&rsi)
+            && macd.macd_line < 0.0
+            && macd.signal_line < 0.0
+            && macd.histogram > 0.0
+            && macd.histogram_decreasing
+    }
+
     fn is_rebound_protect_long_candidate(
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
@@ -1322,6 +1374,25 @@ impl VegasStrategy {
                     .filter_reasons
                     .push("LOW_VOLUME_NEUTRAL_RSI_MACD_RECOVERY_BLOCK_SHORT".to_string());
             }
+        }
+
+        // 极端低位放量砸盘时，避免在旧空头腿末端继续追空。
+        if signal_result.should_sell.unwrap_or(false)
+            && Self::should_block_exhaustion_short(vegas_indicator_signal_values)
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("EXHAUSTION_SHORT_NEAR_SWING_LOW_BLOCK".to_string());
+        }
+
+        if signal_result.should_sell.unwrap_or(false)
+            && Self::should_block_bullish_leg_mean_reversion_short(vegas_indicator_signal_values)
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("BULLISH_LEG_MEAN_REVERSION_SHORT_BLOCK".to_string());
         }
 
         // 缩量 + RSI 中性 + MACD 零轴上方转弱时，避免过早逆势做多。

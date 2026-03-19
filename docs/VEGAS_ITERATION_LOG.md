@@ -1511,3 +1511,129 @@ if fake_breakout_signal.has_signal() {
 - 尝试两次 broadening 后，`15792 / 15793` 与 `15790` 完全一致，没有新增命中
 - 说明继续盲目放宽条件没有意义
 - 后续如果还要扩这条规则，应先继续筛选“高位冲高失败 + MACD 零轴上方转弱”的真近似样本，而不是直接放宽量能、腿部或 Fib 条件
+
+## 2026-03-19 新一轮窄过滤优化：15790 -> 15797 -> 15798
+
+本轮继续以“当前代码 + `strategy_config.id=11` 参数”为联合起点，在 `15790` 之上只做两条 short 侧窄过滤，不改参数。
+
+### 第一步：过滤极端低位放量追空，得到 15797
+
+目标样本是 `2026-01-26 00:00:00 short`。这笔是 `15790` 最大亏损，开仓特征非常集中：
+
+- `volume_ratio = 8.958`
+- `rsi = 22.10`
+- `fib.in_zone = false`
+- `fib_ratio = 0.0273`
+- `bollinger.is_long_signal = true`
+- `ema_touch.is_short_signal = true`
+- `ema_values.is_short_trend = true`
+- `leg.is_new_leg = false`
+- `macd_line/signal_line < 0`
+
+这更像“旧空头腿末端的最后一脚放量砸盘”，而不是值得继续追的 short。
+
+新增过滤：
+
+- `EXHAUSTION_SHORT_NEAR_SWING_LOW_BLOCK`
+
+条件：
+
+- `rsi < 25`
+- `volume_ratio >= 5.0`
+- `!fib.in_zone`
+- `fib_ratio <= 0.05`
+- `bollinger.long_signal = true`
+- `ema_touch.short_signal = true`
+- `ema_values.is_short_trend = true`
+- `!leg.is_new_leg`
+- `macd_line < 0 && signal_line < 0`
+
+结果：
+
+- `15790`: `win_rate 50.6557%`, `profit 9140.40`, `sharpe 3.10179`, `max_dd 31.09%`, `open_positions 614`
+- `15797`: `win_rate 50.7389%`, `profit 9532.44`, `sharpe 3.14978`, `max_dd 31.09%`, `open_positions 613`
+
+验证：
+
+- `filtered_signal_log` 中这条新规则只命中 `1` 次
+- 命中时间正是 `2026-01-26 00:00:00`
+- 原来的那笔 `short` 在 `15797` 中已不再开仓
+
+结论：
+
+- 这条规则足够窄，不是大面积压缩 short
+- 它直接修掉了联合基线里最大的 exhaustion short
+
+### 第二步：过滤 bullish leg 下的反向均值回归 short，得到 15798
+
+继续看 `15797` 的大亏损 short，`2025-10-24 20:00:00` 仍然很差。它和 `2024-10-28 20:00:00` 有高度一致的结构：
+
+- `ema_values.is_short_trend = false`
+- `leg_detection.is_bullish_leg = true`
+- `fib.in_zone = true`
+- `fib.volume_confirmed = true`
+- `fib.leg_bullish = true`
+- `bollinger.is_short_signal = true`
+- `ema_touch.is_short_signal = false`
+- `rsi` 处于中性偏弱区间（约 `47~49`）
+- `macd_line/signal_line < 0`，但 `histogram > 0` 且在回落
+
+这类单不是顺势做空，更像“bullish leg 里的布林回落 short”，方向和腿部状态冲突。
+
+新增过滤：
+
+- `BULLISH_LEG_MEAN_REVERSION_SHORT_BLOCK`
+
+条件：
+
+- `volume_ratio >= 1.8`
+- `!ema_values.is_short_trend`
+- `leg.is_bullish_leg && !leg.is_new_leg`
+- `fib.in_zone && fib.volume_confirmed && fib.leg_bullish`
+- `bollinger.is_short_signal`
+- `!ema_touch.is_short_signal`
+- `rsi in [45, 50]`
+- `macd_line < 0 && signal_line < 0`
+- `histogram > 0 && histogram_decreasing`
+
+结果：
+
+- `15797`: `win_rate 50.7389%`, `profit 9532.44`, `sharpe 3.14978`, `max_dd 31.09%`, `open_positions 613`
+- `15798`: `win_rate 50.9061%`, `profit 10055.90`, `sharpe 3.21124`, `max_dd 31.09%`, `open_positions 611`
+
+验证：
+
+- `filtered_signal_log` 中这条规则只命中 `2` 次
+- 命中时间：
+  - `2024-10-28 20:00:00`
+  - `2025-10-24 20:00:00`
+- 两笔在基线中都是亏损 short：
+  - `2024-10-28 20:00:00`: `-19.24`
+  - `2025-10-24 20:00:00`: 原本也是明显亏损 short
+- 在 `15798` 中这两笔都不再开仓
+
+结论：
+
+- 这条规则仍然足够窄，只过滤了两笔冲突结构的 short
+- `15798` 是当前这轮最新最优候选，且比 `15797` 继续同步提高了 `profit / win_rate / sharpe`
+
+### 当前状态
+
+本轮新增两条有效 short 过滤都保留在代码中：
+
+- `EXHAUSTION_SHORT_NEAR_SWING_LOW_BLOCK`
+- `BULLISH_LEG_MEAN_REVERSION_SHORT_BLOCK`
+
+到 `15798` 为止，指标已经提升到：
+
+- `win_rate = 50.9061%`
+- `profit = 10055.90`
+- `sharpe = 3.21124`
+- `max_drawdown = 31.09%`
+
+下一步如果继续优化，优先目标应转向 long 侧坏单：
+
+- `2025-10-10 00:00:00 long`
+- `2026-01-07 04:00:00 long`
+
+因为当前剩余最大亏损已经不再是 short exhaustion，而是 long 侧的 falling-knife / chase-long 类样本。
