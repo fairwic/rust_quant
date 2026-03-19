@@ -1811,10 +1811,7 @@ impl VegasStrategy {
             .count()
     }
 
-    fn has_signal_type(
-        conditions: &[(SignalType, SignalCondition)],
-        target: SignalType,
-    ) -> bool {
+    fn has_signal_type(conditions: &[(SignalType, SignalCondition)], target: SignalType) -> bool {
         conditions
             .iter()
             .any(|(signal_type, _)| *signal_type == target)
@@ -2269,10 +2266,12 @@ mod tests {
             ),
         ];
 
-        assert!(VegasStrategy::should_block_conflicting_structure_breakout_short(
-            &conditions,
-            EmaDistanceState::TooFar,
-        ));
+        assert!(
+            VegasStrategy::should_block_conflicting_structure_breakout_short(
+                &conditions,
+                EmaDistanceState::TooFar,
+            )
+        );
     }
 
     #[test]
@@ -2305,10 +2304,12 @@ mod tests {
             ),
         ];
 
-        assert!(!VegasStrategy::should_block_conflicting_structure_breakout_short(
-            &conditions,
-            EmaDistanceState::Normal,
-        ));
+        assert!(
+            !VegasStrategy::should_block_conflicting_structure_breakout_short(
+                &conditions,
+                EmaDistanceState::Normal,
+            )
+        );
     }
 
     #[test]
