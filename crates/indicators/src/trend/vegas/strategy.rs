@@ -91,6 +91,16 @@ fn env_flag(name: &str) -> bool {
     )
 }
 
+fn env_string(name: &str) -> Option<String> {
+    let value = std::env::var(name).ok()?;
+    let trimmed = value.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
 impl VegasStrategy {
     fn is_expansion_continuation_long_candidate(
         data_items: &[CandleItem],
@@ -206,6 +216,198 @@ impl VegasStrategy {
             && macd.signal_line < 0.0
             && macd.histogram > 0.0
             && macd.histogram_decreasing
+    }
+
+    fn should_block_deep_negative_macd_recovery_short(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let volume = &vegas_indicator_signal_values.volume_value;
+        let fib = &vegas_indicator_signal_values.fib_retracement_value;
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        let ema_touch = &vegas_indicator_signal_values.ema_touch_value;
+        let ema_values = &vegas_indicator_signal_values.ema_values;
+        let engulfing = &vegas_indicator_signal_values.engulfing_value;
+        let leg = &vegas_indicator_signal_values.leg_detection_value;
+        let macd = &vegas_indicator_signal_values.macd_value;
+        let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
+
+        let mode = env_string("VEGAS_DEEP_NEGATIVE_MACD_SHORT_BLOCK_MODE")
+            .unwrap_or_else(|| "v1".to_string());
+
+        let macd_recovery_core =
+            !ema_touch.is_short_signal && macd.histogram > 0.0 && macd.histogram_decreasing;
+
+        match mode.as_str() {
+            "off" => false,
+            "v2" => {
+                macd_recovery_core
+                    && ema_values.is_short_trend
+                    && boll.is_long_signal
+                    && (engulfing.is_valid_engulfing || leg.is_bearish_leg)
+                    && (!fib.in_zone || !fib.volume_confirmed)
+                    && volume.volume_ratio < 2.0
+                    && rsi < 42.0
+                    && macd.macd_line < -60.0
+                    && macd.signal_line < -60.0
+            }
+            "v3" => {
+                macd_recovery_core
+                    && engulfing.is_valid_engulfing
+                    && !fib.volume_confirmed
+                    && volume.volume_ratio < 2.2
+                    && rsi < 45.0
+                    && macd.macd_line < -50.0
+                    && macd.signal_line < -50.0
+            }
+            "v5" => {
+                macd_recovery_core
+                    && engulfing.is_valid_engulfing
+                    && !fib.volume_confirmed
+                    && volume.volume_ratio < 2.2
+                    && rsi < 50.0
+                    && macd.macd_line < -50.0
+                    && macd.signal_line < -50.0
+            }
+            "v6" => {
+                engulfing.is_valid_engulfing
+                    && !fib.volume_confirmed
+                    && volume.volume_ratio < 2.2
+                    && rsi < 45.0
+                    && macd.macd_line < -50.0
+                    && macd.signal_line < -50.0
+                    && macd.histogram > 0.0
+                    && macd.histogram_decreasing
+            }
+            _ => {
+                ema_values.is_short_trend
+                    && engulfing.is_valid_engulfing
+                    && boll.is_long_signal
+                    && !fib.in_zone
+                    && !fib.volume_confirmed
+                    && (1.0..=1.5).contains(&volume.volume_ratio)
+                    && (30.0..=38.0).contains(&rsi)
+                    && macd.macd_line < -80.0
+                    && macd.signal_line < -80.0
+                    && macd_recovery_core
+            }
+        }
+    }
+
+    fn should_block_high_level_sideways_chase_long(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let mode =
+            env_string("VEGAS_HIGH_LEVEL_SIDEWAYS_LONG_BLOCK").unwrap_or_else(|| "off".to_string());
+        if mode == "off" {
+            return false;
+        }
+
+        let volume = &vegas_indicator_signal_values.volume_value;
+        let fib = &vegas_indicator_signal_values.fib_retracement_value;
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        let ema_touch = &vegas_indicator_signal_values.ema_touch_value;
+        let ema_values = &vegas_indicator_signal_values.ema_values;
+        let engulfing = &vegas_indicator_signal_values.engulfing_value;
+        let hammer = &vegas_indicator_signal_values.kline_hammer_value;
+        let leg = &vegas_indicator_signal_values.leg_detection_value;
+        let macd = &vegas_indicator_signal_values.macd_value;
+        let market = &vegas_indicator_signal_values.market_structure_value;
+        let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
+
+        ema_values.is_long_trend
+            && !ema_values.is_short_trend
+            && !ema_touch.is_long_signal
+            && engulfing.is_valid_engulfing
+            && leg.is_bullish_leg
+            && !leg.is_new_leg
+            && !fib.in_zone
+            && !fib.volume_confirmed
+            && fib.retracement_ratio >= 0.75
+            && volume.volume_ratio < 1.6
+            && hammer.body_ratio < 0.55
+            && boll.is_short_signal
+            && !boll.is_long_signal
+            && macd.above_zero
+            && macd.histogram > 0.0
+            && rsi < 60.0
+            && !market.internal_bullish_bos
+            && !market.swing_bullish_bos
+            && !market
+                .internal_high
+                .as_ref()
+                .is_some_and(|pivot| pivot.crossed)
+            && !market
+                .swing_high
+                .as_ref()
+                .is_some_and(|pivot| pivot.crossed)
+    }
+
+    fn should_block_recent_upper_shadow_pressure_long(
+        data_items: &[CandleItem],
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let mode =
+            env_string("VEGAS_RECENT_UPPER_SHADOW_LONG_BLOCK").unwrap_or_else(|| "off".to_string());
+        if mode == "off" || data_items.len() < 4 {
+            return false;
+        }
+
+        let current = data_items.last().expect("数据不能为空");
+        let prev_1 = &data_items[data_items.len() - 2];
+        let prev_2 = &data_items[data_items.len() - 3];
+        let prev_3 = &data_items[data_items.len() - 4];
+
+        let has_recent_upper_shadow_pressure = [(prev_2, prev_3), (prev_1, prev_2)]
+            .into_iter()
+            .any(|(candidate, prev)| {
+                candidate.up_shadow_ratio() >= 0.18
+                    && candidate.v > prev.v * 1.2
+                    && candidate.body_ratio() < 0.75
+            });
+
+        if !has_recent_upper_shadow_pressure {
+            return false;
+        }
+
+        let current_is_strong_breakout = current.c > current.o
+            && current.body_ratio() >= 0.65
+            && current.v > prev_1.v.max(prev_2.v);
+
+        let fib = &vegas_indicator_signal_values.fib_retracement_value;
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        let ema_distance = &vegas_indicator_signal_values.ema_distance_filter;
+        let ema_values = &vegas_indicator_signal_values.ema_values;
+        let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
+
+        match mode.as_str() {
+            "v3" => {
+                has_recent_upper_shadow_pressure
+                    && !current_is_strong_breakout
+                    && current.v < prev_1.v.max(prev_2.v)
+                    && !ema_values.is_long_trend
+                    && ema_distance.should_filter_long
+                    && boll.is_short_signal
+                    && !fib.in_zone
+                    && !fib.volume_confirmed
+                    && fib.retracement_ratio > 0.90
+                    && rsi > 60.0
+            }
+            "v2" => {
+                has_recent_upper_shadow_pressure
+                    && !current_is_strong_breakout
+                    && current.v < prev_1.v.max(prev_2.v)
+                    && !ema_values.is_long_trend
+                    && ema_distance.should_filter_long
+                    && boll.is_short_signal
+                    && !fib.in_zone
+                    && !fib.volume_confirmed
+                    && rsi > 60.0
+            }
+            _ => {
+                !current_is_strong_breakout
+                    && (boll.is_short_signal || !fib.in_zone || !fib.volume_confirmed)
+            }
+        }
     }
 
     fn is_rebound_protect_long_candidate(
@@ -1446,6 +1648,15 @@ impl VegasStrategy {
                 .push("BULLISH_LEG_MEAN_REVERSION_SHORT_BLOCK".to_string());
         }
 
+        if signal_result.should_sell.unwrap_or(false)
+            && Self::should_block_deep_negative_macd_recovery_short(vegas_indicator_signal_values)
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("DEEP_NEGATIVE_MACD_RECOVERY_SHORT_BLOCK".to_string());
+        }
+
         // 缩量 + RSI 中性 + MACD 零轴上方转弱时，避免过早逆势做多。
         // 典型场景是上涨后的回落修复，参与度不足且死叉刚开始，不适合抢多。
         if signal_result.should_buy.unwrap_or(false) {
@@ -1465,6 +1676,27 @@ impl VegasStrategy {
                     .filter_reasons
                     .push("LOW_VOLUME_NEUTRAL_RSI_MACD_WEAKENING_BLOCK_LONG".to_string());
             }
+        }
+
+        if signal_result.should_buy.unwrap_or(false)
+            && Self::should_block_recent_upper_shadow_pressure_long(
+                data_items,
+                vegas_indicator_signal_values,
+            )
+        {
+            signal_result.should_buy = Some(false);
+            signal_result
+                .filter_reasons
+                .push("RECENT_UPPER_SHADOW_PRESSURE_LONG_BLOCK".to_string());
+        }
+
+        if signal_result.should_buy.unwrap_or(false)
+            && Self::should_block_high_level_sideways_chase_long(vegas_indicator_signal_values)
+        {
+            signal_result.should_buy = Some(false);
+            signal_result
+                .filter_reasons
+                .push("HIGH_LEVEL_SIDEWAYS_CHASE_LONG_BLOCK".to_string());
         }
 
         if signal_result.signal_kline_stop_loss_price.is_some() {
