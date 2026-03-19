@@ -83,7 +83,8 @@ impl BacktestContext {
         trading_state: TradingState,
     ) -> Self {
         let current_position = trading_state.trade_position.clone();
-        let run_id = format!("backtest-{}-{}-{}", inst_id, candle.ts, Uuid::new_v4());
+        // 审计表 run_id 为 VARCHAR(64)，保持短格式避免回测写库失败。
+        let run_id = format!("bt-{}-{}", candle.ts, Uuid::new_v4().simple());
         Self {
             candle,
             candle_index,
@@ -129,5 +130,42 @@ impl BacktestContext {
             .as_ref()
             .map(|s| s.should_buy || s.should_sell)
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BacktestContext;
+    use crate::framework::backtest::types::{BasicRiskStrategyConfig, TradingState};
+    use crate::CandleItem;
+
+    fn sample_candle(ts: i64) -> CandleItem {
+        CandleItem {
+            o: 100.0,
+            h: 110.0,
+            l: 90.0,
+            c: 105.0,
+            v: 1_000.0,
+            ts,
+            confirm: 1,
+        }
+    }
+
+    #[test]
+    fn backtest_context_run_id_fits_audit_column_limit() {
+        let ctx = BacktestContext::new(
+            sample_candle(1_763_049_600_000),
+            0,
+            "ETH-USDT-SWAP".to_string(),
+            BasicRiskStrategyConfig::default(),
+            TradingState::default(),
+        );
+
+        assert!(
+            ctx.audit_trail.run_id.len() <= 64,
+            "run_id should fit VARCHAR(64), got {}: {}",
+            ctx.audit_trail.run_id.len(),
+            ctx.audit_trail.run_id
+        );
     }
 }

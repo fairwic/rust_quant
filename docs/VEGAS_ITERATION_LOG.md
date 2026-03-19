@@ -1511,3 +1511,80 @@ if fake_breakout_signal.has_signal() {
 - 尝试两次 broadening 后，`15792 / 15793` 与 `15790` 完全一致，没有新增命中
 - 说明继续盲目放宽条件没有意义
 - 后续如果还要扩这条规则，应先继续筛选“高位冲高失败 + MACD 零轴上方转弱”的真近似样本，而不是直接放宽量能、腿部或 Fib 条件
+
+## 2026-03-19 当前工作基线：ETH/BTC/SOL 4H 代码层窄过滤
+
+### 本轮目标
+
+- 从默认 4H 篮子中移除 `BCH/LTC`，先把基线收敛到 `ETH/BTC/SOL`
+- 修复 `MarketStructure weight=0` 仍参与方向投票的评分耦合
+- 在不显著伤害利润的前提下，继续清理 `ETH` 与 `SOL` 的坏 short / 坏 long 样本
+
+### 当前代码层基线
+
+- 默认 4H 回测篮子仅保留：
+  - `ETH-USDT-SWAP`
+  - `BTC-USDT-SWAP`
+  - `SOL-USDT-SWAP`
+- `run_id` 缩短为 `bt-{ts}-{uuid_simple}`，避免审计表 `VARCHAR(64)` 写库失败
+- `weight <= 0` 的信号现在真正不参与打分，也不参与方向投票
+- 已保留的窄过滤：
+  - `EMA_TREND_NO_PATTERN_BELOW_FIB_MIDLINE_LONG/SHORT`
+  - `SIMPLE_BREAK_CHOCH_NO_BOS_LONG`
+  - `SIMPLE_BREAK_BULLISH_STRUCTURE_SHORT`
+  - `SIMPLE_BREAK_TOO_FAR_SHALLOW_FIB_SHORT`
+
+### 当前数据库参数基线（4H）
+
+- `ETH`
+  - `MarketStructure = 0.2`
+  - `min_total_weight = 2.3`
+  - `bb_width_threshold = 0.029`
+  - `short_threshold = 0.132`
+  - `max_loss_percent = 0.04`
+- `BTC`
+  - `MarketStructure = 0.0`
+  - `min_total_weight = 2.23`
+  - `bb_width_threshold = 0.04`
+  - `short_threshold = 0.148`
+  - `max_loss_percent = 0.05`
+- `SOL`
+  - `MarketStructure = 0.0`
+  - `min_total_weight = 2.66`
+  - `bb_width_threshold = 0.029`
+  - `short_threshold = 0.176`
+  - `max_loss_percent = 0.048`
+
+### 基线回测结果
+
+| Backtest ID | 标的 | 胜率 | 利润 | Sharpe | MaxDD |
+| ----------- | ---- | ---- | ---- | ------ | ----- |
+| 1216 | ETH-USDT-SWAP | 52.72% | 13176.80 | 3.57768 | 34.95% |
+| 1217 | BTC-USDT-SWAP | 54.40% | 334.79 | 1.03208 | 36.83% |
+| 1218 | SOL-USDT-SWAP | 43.54% | 479.04 | 1.12446 | 41.76% |
+
+对比前一轮代码基线 `1184 / 1185 / 1186`：
+
+- `ETH`: `12636.5 -> 13176.8`，`Sharpe 3.52485 -> 3.57768`
+- `BTC`: 基本不变
+- `SOL`: `448.229 -> 479.041`，`win_rate 43.39% -> 43.54%`，`MaxDD 42.22% -> 41.76%`
+
+### 关键结论
+
+- `SOL` 上“适当放宽 `bb_width_threshold`”只能小幅抬胜率，但会压利润，不作为当前主方向
+- 真正有效的是 short 侧窄过滤，而不是继续全局调 `min_total_weight` 或直接放宽布林带
+- `SIMPLE_BREAK_TOO_FAR_SHALLOW_FIB_SHORT` 在 `1218` 的 shadow 结果为：
+  - `4` 笔
+  - `shadow_pnl = -0.6256`
+- `SIMPLE_BREAK_BULLISH_STRUCTURE_SHORT` 在 `1218` 的 shadow 结果为：
+  - `4` 笔
+  - `shadow_pnl = -0.4356`
+- 两条新 short 过滤在 `ETH` 上也带来了正向改善，`BTC` 基本未受影响
+
+### 当前决策
+
+- 将 `1216 / 1217 / 1218` 记录为当前工作基线
+- 后续继续优化时：
+  - 不再把 `BCH/LTC` 放回默认 4H 篮子
+  - 不再把“放宽布林带宽度”作为 `SOL` 的首要方向
+  - 下一步优先复盘 `SOL` 剩余的 `Tangled` 背景 short，尤其是仍然走到 `Engulfing` 止损链的样本

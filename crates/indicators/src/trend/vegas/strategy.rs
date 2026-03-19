@@ -1005,6 +1005,57 @@ impl VegasStrategy {
                 .push("EMA_TOO_FAR_COUNTER_TREND_CHASE_LONG".to_string());
         }
 
+        let should_block_weak_ema_trend_entry =
+            Self::should_block_weak_ema_trend_entry(&conditions, &fib_val, fib_cfg.is_open);
+        if signal_result.should_buy.unwrap_or(false) && should_block_weak_ema_trend_entry {
+            signal_result.should_buy = Some(false);
+            signal_result
+                .filter_reasons
+                .push("EMA_TREND_NO_PATTERN_BELOW_FIB_MIDLINE_LONG".to_string());
+        }
+        if signal_result.should_sell.unwrap_or(false) && should_block_weak_ema_trend_entry {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("EMA_TREND_NO_PATTERN_BELOW_FIB_MIDLINE_SHORT".to_string());
+        }
+
+        let should_block_weak_structure_breakout_long =
+            Self::should_block_weak_structure_breakout_long(&conditions, valid_rsi_value);
+        if signal_result.should_buy.unwrap_or(false) && should_block_weak_structure_breakout_long {
+            signal_result.should_buy = Some(false);
+            signal_result
+                .filter_reasons
+                .push("SIMPLE_BREAK_CHOCH_NO_BOS_LONG".to_string());
+        }
+
+        let should_block_conflicting_structure_breakout_short =
+            Self::should_block_conflicting_structure_breakout_short(
+                &conditions,
+                ema_distance_filter.state,
+            );
+        if signal_result.should_sell.unwrap_or(false)
+            && should_block_conflicting_structure_breakout_short
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("SIMPLE_BREAK_BULLISH_STRUCTURE_SHORT".to_string());
+        }
+
+        let should_block_shallow_fib_breakdown_short =
+            Self::should_block_shallow_fib_breakdown_short(
+                &conditions,
+                ema_distance_filter.state,
+                &fib_val,
+            );
+        if signal_result.should_sell.unwrap_or(false) && should_block_shallow_fib_breakdown_short {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("SIMPLE_BREAK_TOO_FAR_SHALLOW_FIB_SHORT".to_string());
+        }
+
         // ================================================================
         // 应用EMA距离过滤（仅空头分支）
         // - 过远状态且空头排列：拒绝做空
@@ -1760,6 +1811,144 @@ impl VegasStrategy {
             .count()
     }
 
+    fn has_signal_type(
+        conditions: &[(SignalType, SignalCondition)],
+        target: SignalType,
+    ) -> bool {
+        conditions
+            .iter()
+            .any(|(signal_type, _)| *signal_type == target)
+    }
+
+    fn should_block_weak_ema_trend_entry(
+        conditions: &[(SignalType, SignalCondition)],
+        fib_value: &FibRetracementSignalValue,
+        fib_enabled: bool,
+    ) -> bool {
+        fib_enabled
+            && fib_value.swing_high > 0.0
+            && fib_value.swing_low > 0.0
+            && fib_value.retracement_ratio <= 0.5
+            && Self::has_signal_type(conditions, SignalType::EmaTrend)
+            && !Self::has_signal_type(conditions, SignalType::Engulfing)
+            && !Self::has_signal_type(conditions, SignalType::KlineHammer)
+    }
+
+    fn should_block_weak_structure_breakout_long(
+        conditions: &[(SignalType, SignalCondition)],
+        valid_rsi_value: Option<f64>,
+    ) -> bool {
+        let Some(rsi) = valid_rsi_value else {
+            return false;
+        };
+
+        if rsi >= 60.0
+            || !Self::has_signal_type(conditions, SignalType::SimpleBreakEma2through)
+            || !Self::has_signal_type(conditions, SignalType::LegDetection)
+            || !Self::has_signal_type(conditions, SignalType::MarketStructure)
+            || Self::has_signal_type(conditions, SignalType::EmaTrend)
+        {
+            return false;
+        }
+
+        conditions.iter().any(|(signal_type, condition)| {
+            *signal_type == SignalType::MarketStructure
+                && matches!(
+                    condition,
+                    SignalCondition::MarketStructure {
+                        is_bullish_bos: false,
+                        is_bullish_choch: true,
+                        ..
+                    }
+                )
+        })
+    }
+
+    fn should_block_conflicting_structure_breakout_short(
+        conditions: &[(SignalType, SignalCondition)],
+        ema_distance_state: EmaDistanceState,
+    ) -> bool {
+        if ema_distance_state != EmaDistanceState::TooFar
+            || !Self::has_signal_type(conditions, SignalType::SimpleBreakEma2through)
+            || !Self::has_signal_type(conditions, SignalType::LegDetection)
+            || !Self::has_signal_type(conditions, SignalType::MarketStructure)
+            || Self::has_signal_type(conditions, SignalType::EmaTrend)
+        {
+            return false;
+        }
+
+        let has_upside_breakout = conditions.iter().any(|(signal_type, condition)| {
+            *signal_type == SignalType::SimpleBreakEma2through
+                && matches!(
+                    condition,
+                    SignalCondition::PriceBreakout {
+                        price_above: true,
+                        price_below: false,
+                    }
+                )
+        });
+
+        let has_bullish_structure = conditions.iter().any(|(signal_type, condition)| {
+            *signal_type == SignalType::MarketStructure
+                && matches!(
+                    condition,
+                    SignalCondition::MarketStructure {
+                        is_bullish_bos: true,
+                        ..
+                    } | SignalCondition::MarketStructure {
+                        is_bullish_choch: true,
+                        ..
+                    }
+                )
+        });
+
+        has_upside_breakout && has_bullish_structure
+    }
+
+    fn should_block_shallow_fib_breakdown_short(
+        conditions: &[(SignalType, SignalCondition)],
+        ema_distance_state: EmaDistanceState,
+        fib_value: &FibRetracementSignalValue,
+    ) -> bool {
+        if ema_distance_state != EmaDistanceState::TooFar
+            || fib_value.in_zone
+            || fib_value.retracement_ratio > 0.3
+            || !Self::has_signal_type(conditions, SignalType::SimpleBreakEma2through)
+            || !Self::has_signal_type(conditions, SignalType::LegDetection)
+            || !Self::has_signal_type(conditions, SignalType::MarketStructure)
+            || Self::has_signal_type(conditions, SignalType::EmaTrend)
+        {
+            return false;
+        }
+
+        let has_downside_breakout = conditions.iter().any(|(signal_type, condition)| {
+            *signal_type == SignalType::SimpleBreakEma2through
+                && matches!(
+                    condition,
+                    SignalCondition::PriceBreakout {
+                        price_above: false,
+                        price_below: true,
+                    }
+                )
+        });
+
+        let has_bearish_structure = conditions.iter().any(|(signal_type, condition)| {
+            *signal_type == SignalType::MarketStructure
+                && matches!(
+                    condition,
+                    SignalCondition::MarketStructure {
+                        is_bearish_bos: true,
+                        ..
+                    } | SignalCondition::MarketStructure {
+                        is_bearish_choch: true,
+                        ..
+                    }
+                )
+        });
+
+        has_downside_breakout && has_bearish_structure
+    }
+
     fn calculate_best_stop_loss_price(
         &self,
         last_data_item: &CandleItem,
@@ -1767,9 +1956,7 @@ impl VegasStrategy {
         conditions: &[(SignalType, SignalCondition)],
     ) {
         // 检查是否有吞没形态信号
-        let has_engulfing_signal = conditions
-            .iter()
-            .any(|(signal_type, _)| matches!(signal_type, SignalType::Engulfing));
+        let has_engulfing_signal = Self::has_signal_type(conditions, SignalType::Engulfing);
 
         // 如果是吞没形态信号，使用开盘价作为止损价格
         if has_engulfing_signal {
@@ -1790,8 +1977,9 @@ impl VegasStrategy {
 #[cfg(test)]
 mod tests {
     use super::{
-        EmaSignalValue, FibRetracementSignalConfig, RsiSignalConfig, SignalType,
-        SignalWeightsConfig, VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
+        EmaDistanceState, EmaSignalValue, FibRetracementSignalConfig, FibRetracementSignalValue,
+        RsiSignalConfig, SignalCondition, SignalType, SignalWeightsConfig,
+        VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
     };
     use rust_quant_common::CandleItem;
     use rust_quant_domain::BasicRiskStrategyConfig;
@@ -1883,5 +2071,331 @@ mod tests {
             "reason should include swing_pct suffix, got: {}",
             reason
         );
+    }
+
+    #[test]
+    fn weak_ema_trend_entry_without_pattern_below_fib_midline_should_be_blocked() {
+        let conditions = vec![
+            (
+                SignalType::VolumeTrend,
+                SignalCondition::Volume {
+                    is_increasing: true,
+                    ratio: 2.8,
+                },
+            ),
+            (
+                SignalType::EmaTrend,
+                SignalCondition::EmaTouchTrend {
+                    is_long_signal: true,
+                    is_short_signal: false,
+                },
+            ),
+            (
+                SignalType::Rsi,
+                SignalCondition::RsiLevel {
+                    current: 48.0,
+                    oversold: 15.0,
+                    overbought: 85.0,
+                    is_valid: true,
+                },
+            ),
+            (
+                SignalType::LegDetection,
+                SignalCondition::LegDetection {
+                    is_bullish_leg: true,
+                    is_bearish_leg: false,
+                    is_new_leg: false,
+                },
+            ),
+        ];
+        let fib_value = FibRetracementSignalValue {
+            is_long_signal: true,
+            in_zone: true,
+            retracement_ratio: 0.49,
+            swing_high: 120.0,
+            swing_low: 100.0,
+            ..FibRetracementSignalValue::default()
+        };
+
+        assert!(VegasStrategy::should_block_weak_ema_trend_entry(
+            &conditions,
+            &fib_value,
+            true,
+        ));
+    }
+
+    #[test]
+    fn weak_ema_trend_entry_with_engulfing_confirmation_should_stay_allowed() {
+        let conditions = vec![
+            (
+                SignalType::EmaTrend,
+                SignalCondition::EmaTouchTrend {
+                    is_long_signal: true,
+                    is_short_signal: false,
+                },
+            ),
+            (
+                SignalType::Engulfing,
+                SignalCondition::Engulfing {
+                    is_long_signal: true,
+                    is_short_signal: false,
+                },
+            ),
+        ];
+        let fib_value = FibRetracementSignalValue {
+            is_long_signal: true,
+            in_zone: true,
+            retracement_ratio: 0.42,
+            swing_high: 120.0,
+            swing_low: 100.0,
+            ..FibRetracementSignalValue::default()
+        };
+
+        assert!(!VegasStrategy::should_block_weak_ema_trend_entry(
+            &conditions,
+            &fib_value,
+            true,
+        ));
+    }
+
+    #[test]
+    fn weak_structure_breakout_long_without_bos_should_be_blocked() {
+        let conditions = vec![
+            (
+                SignalType::SimpleBreakEma2through,
+                SignalCondition::PriceBreakout {
+                    price_above: true,
+                    price_below: false,
+                },
+            ),
+            (
+                SignalType::Rsi,
+                SignalCondition::RsiLevel {
+                    current: 55.0,
+                    oversold: 15.0,
+                    overbought: 85.0,
+                    is_valid: true,
+                },
+            ),
+            (
+                SignalType::LegDetection,
+                SignalCondition::LegDetection {
+                    is_bullish_leg: true,
+                    is_bearish_leg: false,
+                    is_new_leg: false,
+                },
+            ),
+            (
+                SignalType::MarketStructure,
+                SignalCondition::MarketStructure {
+                    is_bullish_bos: false,
+                    is_bearish_bos: false,
+                    is_bullish_choch: true,
+                    is_bearish_choch: false,
+                    is_internal: true,
+                },
+            ),
+        ];
+
+        assert!(VegasStrategy::should_block_weak_structure_breakout_long(
+            &conditions,
+            Some(55.0),
+        ));
+    }
+
+    #[test]
+    fn weak_structure_breakout_long_with_bos_should_stay_allowed() {
+        let conditions = vec![
+            (
+                SignalType::SimpleBreakEma2through,
+                SignalCondition::PriceBreakout {
+                    price_above: true,
+                    price_below: false,
+                },
+            ),
+            (
+                SignalType::LegDetection,
+                SignalCondition::LegDetection {
+                    is_bullish_leg: true,
+                    is_bearish_leg: false,
+                    is_new_leg: false,
+                },
+            ),
+            (
+                SignalType::MarketStructure,
+                SignalCondition::MarketStructure {
+                    is_bullish_bos: true,
+                    is_bearish_bos: false,
+                    is_bullish_choch: true,
+                    is_bearish_choch: false,
+                    is_internal: true,
+                },
+            ),
+        ];
+
+        assert!(!VegasStrategy::should_block_weak_structure_breakout_long(
+            &conditions,
+            Some(58.0),
+        ));
+    }
+
+    #[test]
+    fn conflicting_bullish_structure_short_should_be_blocked_when_too_far() {
+        let conditions = vec![
+            (
+                SignalType::SimpleBreakEma2through,
+                SignalCondition::PriceBreakout {
+                    price_above: true,
+                    price_below: false,
+                },
+            ),
+            (
+                SignalType::LegDetection,
+                SignalCondition::LegDetection {
+                    is_bullish_leg: false,
+                    is_bearish_leg: true,
+                    is_new_leg: false,
+                },
+            ),
+            (
+                SignalType::MarketStructure,
+                SignalCondition::MarketStructure {
+                    is_bullish_bos: false,
+                    is_bearish_bos: false,
+                    is_bullish_choch: true,
+                    is_bearish_choch: false,
+                    is_internal: true,
+                },
+            ),
+        ];
+
+        assert!(VegasStrategy::should_block_conflicting_structure_breakout_short(
+            &conditions,
+            EmaDistanceState::TooFar,
+        ));
+    }
+
+    #[test]
+    fn conflicting_bullish_structure_short_should_stay_allowed_when_not_too_far() {
+        let conditions = vec![
+            (
+                SignalType::SimpleBreakEma2through,
+                SignalCondition::PriceBreakout {
+                    price_above: true,
+                    price_below: false,
+                },
+            ),
+            (
+                SignalType::LegDetection,
+                SignalCondition::LegDetection {
+                    is_bullish_leg: false,
+                    is_bearish_leg: true,
+                    is_new_leg: false,
+                },
+            ),
+            (
+                SignalType::MarketStructure,
+                SignalCondition::MarketStructure {
+                    is_bullish_bos: true,
+                    is_bearish_bos: false,
+                    is_bullish_choch: false,
+                    is_bearish_choch: false,
+                    is_internal: true,
+                },
+            ),
+        ];
+
+        assert!(!VegasStrategy::should_block_conflicting_structure_breakout_short(
+            &conditions,
+            EmaDistanceState::Normal,
+        ));
+    }
+
+    #[test]
+    fn shallow_fib_breakdown_short_should_be_blocked_when_too_far() {
+        let conditions = vec![
+            (
+                SignalType::SimpleBreakEma2through,
+                SignalCondition::PriceBreakout {
+                    price_above: false,
+                    price_below: true,
+                },
+            ),
+            (
+                SignalType::LegDetection,
+                SignalCondition::LegDetection {
+                    is_bullish_leg: false,
+                    is_bearish_leg: true,
+                    is_new_leg: false,
+                },
+            ),
+            (
+                SignalType::MarketStructure,
+                SignalCondition::MarketStructure {
+                    is_bullish_bos: false,
+                    is_bearish_bos: true,
+                    is_bullish_choch: false,
+                    is_bearish_choch: false,
+                    is_internal: true,
+                },
+            ),
+        ];
+        let fib_value = FibRetracementSignalValue {
+            in_zone: false,
+            retracement_ratio: 0.26,
+            swing_high: 120.0,
+            swing_low: 100.0,
+            ..FibRetracementSignalValue::default()
+        };
+
+        assert!(VegasStrategy::should_block_shallow_fib_breakdown_short(
+            &conditions,
+            EmaDistanceState::TooFar,
+            &fib_value,
+        ));
+    }
+
+    #[test]
+    fn shallow_fib_breakdown_short_should_stay_allowed_in_fib_zone() {
+        let conditions = vec![
+            (
+                SignalType::SimpleBreakEma2through,
+                SignalCondition::PriceBreakout {
+                    price_above: false,
+                    price_below: true,
+                },
+            ),
+            (
+                SignalType::LegDetection,
+                SignalCondition::LegDetection {
+                    is_bullish_leg: false,
+                    is_bearish_leg: true,
+                    is_new_leg: false,
+                },
+            ),
+            (
+                SignalType::MarketStructure,
+                SignalCondition::MarketStructure {
+                    is_bullish_bos: false,
+                    is_bearish_bos: false,
+                    is_bullish_choch: false,
+                    is_bearish_choch: true,
+                    is_internal: true,
+                },
+            ),
+        ];
+        let fib_value = FibRetracementSignalValue {
+            in_zone: true,
+            retracement_ratio: 0.26,
+            swing_high: 120.0,
+            swing_low: 100.0,
+            ..FibRetracementSignalValue::default()
+        };
+
+        assert!(!VegasStrategy::should_block_shallow_fib_breakdown_short(
+            &conditions,
+            EmaDistanceState::TooFar,
+            &fib_value,
+        ));
     }
 }
