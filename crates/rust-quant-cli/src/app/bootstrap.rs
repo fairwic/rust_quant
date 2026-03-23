@@ -32,6 +32,20 @@ pub async fn run_modes() -> Result<()> {
             .map_err(|e| anyhow!("加载回测配置失败: {}", e))?;
     }
 
+    // 可选：仅回测指定交易对（不影响数据同步 inst_ids 的覆盖逻辑）
+    // 例：BACKTEST_ONLY_INST_IDS="ETH-USDT-SWAP"
+    if let Ok(v) = std::env::var("BACKTEST_ONLY_INST_IDS") {
+        let selected: BTreeSet<String> = v
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        if !selected.is_empty() {
+            backtest_targets.retain(|(inst, _)| selected.contains(inst));
+        }
+    }
+
     let inst_ids = dedup_strings(
         backtest_targets
             .iter()
@@ -186,6 +200,7 @@ fn default_backtest_targets() -> Vec<(String, String)> {
         // ("SOL-USDT-SWAP".to_string(), "1H".to_string()),
         ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "1Dutc".to_string()),
+        ("BCH-USDT-SWAP".to_string(), "4H".to_string()),
     ]
 }
 

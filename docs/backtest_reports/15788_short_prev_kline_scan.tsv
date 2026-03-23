@@ -1,0 +1,2 @@
+prev_kline	next_short	next_pnl	should_sell	direction	volume_ratio	fib_vol_confirm	fib_ratio	swing_high_crossed	short_trend	bear_leg	new_leg	hang_short	up_shadow	macd_line	signal_line	histogram	hist_dec	rsi	bearish_candle
+2025-10-16 20:00:00	2025-10-17 00:00:00	102.46	false	Long	2.5768698325365724	true	0.3931248883330355	false	false	false	false	false	0.1414141414141414	-32.6086142633053	-24.299712228014865	-8.308902035290433	true	40.49331779196769	true

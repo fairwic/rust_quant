@@ -2202,3 +2202,3888 @@ if fake_breakout_signal.has_signal() {
 - 但把它做成入场过滤后，即便只命中 `2` 笔亏损 long，整体仍然变差
 - 说明这类 long 在全局资金路径里起到的作用，不只是单笔盈亏
 - 这条分支到 `v3` 可以收住，实验拒绝，不纳入当前风险优先基线
+
+## 2026-03-21 深负 MACD 锤子线抄底 long：15802 -> 15810（拒绝）
+
+按长期自动迭代规则，我继续优先处理 `15802` 里的大亏损样本，先拆了两笔最大的 `最大亏损止损` long：
+
+- `2025-10-10 00:00:00`: `-223.12`
+- `2025-11-05 08:00:00`: `-231.06`
+
+这两笔开仓快照虽然不完全相同，但都属于同一类低质量抄底 long：
+
+- `bollinger.long = true`
+- `kline_hammer.long = true`
+- `ema_touch.long = false`
+- `engulfing.valid = false`
+- `fib.volume_confirmed = false`
+- `MACD` 仍处于深负区，且柱体仍明显为负
+
+更关键的是，这两笔都在趋势侧仍有明显约束时去抢 long：
+
+- `2025-11-05 08:00:00`：`is_short_trend=true`, `state=Tangled`
+- `2025-10-10 00:00:00`：`is_long_trend=true`, `state=TooFar`
+
+我基于这两个样本做了一个窄实验：
+
+- 环境变量：`VEGAS_DEEP_NEGATIVE_HAMMER_LONG_BLOCK=v1`
+- 过滤原因：`DEEP_NEGATIVE_HAMMER_LONG_BLOCK`
+
+规则条件：
+
+- `bollinger.long = true`
+- `kline_hammer.long = true`
+- `ema_touch.long = false`
+- `engulfing.valid = false`
+- `fib.volume_confirmed = false`
+- `volume_ratio < 1.5`
+- `rsi < 40`
+- `macd_line < -30`
+- `signal_line < -10`
+- `histogram < -20`
+- `ema_values.is_short_trend || ema_values.is_long_trend`
+
+这条规则在基线 `15802` 里只命中 `2` 次，正好就是：
+
+- `2025-10-10 00:00:00`
+- `2025-11-05 08:00:00`
+
+回测结果：
+
+- `15802`: `win_rate 51.3793%`, `profit 8471.85`, `sharpe 3.12627`, `max_dd 29.2533%`, `volatility 52.0918%`, `open_positions 583`
+- `15810`: `win_rate 51.2953%`, `profit 7849.61`, `sharpe 3.04748`, `max_dd 29.2533%`, `volatility 52.0172%`, `open_positions 579`
+
+### 为什么拒绝
+
+虽然它只拦掉了两笔确定的坏 long，但整体结果仍然更差：
+
+- `profit -622.24`
+- `sharpe -0.07879`
+- `win_rate -0.0840pct`
+- `max_dd` 持平
+- `volatility` 仅小幅下降
+
+而且最大回吐并不是这两笔样本本身，而是持仓路径被破坏后，几笔大盈利单明显缩水：
+
+- `2025-11-04 12:00:00`: `+244.61 -> -226.26`
+- `2025-05-07 00:00:00`: `+1038.80 -> +983.53`
+- `2025-11-12 20:00:00`: `+696.02 -> +645.49`
+- `2025-08-07 16:00:00`: `+745.20 -> +703.78`
+
+这说明：
+
+- 这两笔最大亏损 long 的局部判断是对的
+- 但把它们直接上升成 `entry block`，会破坏更大的盈利路径
+- 这类样本更适合研究 `protective exit / breakeven`，而不是继续做开仓过滤
+
+### 当前结论
+
+- `DEEP_NEGATIVE_HAMMER_LONG_BLOCK` 作为 `entry block` 实验拒绝
+- 当前风险优先基线仍保持 `15802`
+- 下一步不再继续扩这类 long 开仓过滤，转去做更适合的 `保护式退出` 或下一批大亏损样本
+
+## 2026-03-21 深负 MACD 锤子线抄底 long 保护止损：15802 -> 15811（拒绝）
+
+由于 `15810` 证明“直接拦开仓”会破坏更大的盈利路径，我没有继续扩 `entry block`，而是改成更符合这类样本的 `protective stop` 实验。
+
+环境变量：
+
+- `VEGAS_DEEP_NEGATIVE_HAMMER_LONG_PROTECT=v1`
+
+保护对象仍是同一类样本：
+
+- `bollinger.long = true`
+- `kline_hammer.long = true`
+- `ema_touch.long = false`
+- `engulfing.valid = false`
+- `fib.volume_confirmed = false`
+- `volume_ratio < 1.5`
+- `rsi < 40`
+- `macd_line < -30`
+- `signal_line < -10`
+- `histogram < -20`
+- `ema_values.is_short_trend || ema_values.is_long_trend`
+
+这次不再阻止开仓，而是：
+
+- 保留原 long 入场
+- 给该类 long 设置更紧的 `signal_kline_stop_loss_price`
+- 止损价使用 `max(当前K线最低价, 开仓价 * 0.98)`
+- 止损来源标记为 `DeepNegativeHammer_Long_Protect`
+
+结果只命中 `2` 笔：
+
+- `2025-10-10 00:00:00`
+- `2025-11-05 08:00:00`
+
+并且两笔都从 `最大亏损止损` 提前收敛成了 `Signal_Kline_Stop_Loss`：
+
+- `2025-10-10 00:00:00`: `-223.12 -> -91.66`
+- `2025-11-05 08:00:00`: `-231.06 -> -112.13`
+
+对应回测结果：
+
+- `15802`: `win_rate 51.3793%`, `profit 8471.85`, `sharpe 3.12627`, `max_dd 29.2533%`, `volatility 52.0918%`, `open_positions 583`
+- `15811`: `win_rate 51.2909%`, `profit 8249.56`, `sharpe 3.10083`, `max_dd 29.2533%`, `volatility 52.0294%`, `open_positions 581`
+
+### 为什么仍然拒绝
+
+这次比 `15810` 更像正确方向：
+
+- 两笔最大亏损 long 明显缩小
+- 没有像 `entry block` 那样把交易直接删掉
+- `volatility` 也确实略降
+
+但按当前风险优先标准，它还不够好：
+
+- `profit -222.29`
+- `sharpe -0.02544`
+- `win_rate -0.0884pct`
+- `max_dd` 持平
+- `volatility` 只小幅改善，不足以覆盖利润与 Sharpe 回吐
+
+而且仍然有明显路径回吐：
+
+- `2025-07-11 16:00:00`: `0.00 -> -57.12`
+- `2025-05-07 00:00:00`: `+1038.80 -> +983.53`
+- `2025-08-07 16:00:00`: `+745.20 -> +703.78`
+- `2025-08-21 20:00:00`: `+601.27 -> +567.86`
+
+### 当前结论
+
+- `DeepNegativeHammer_Long_Protect` 比直接 `block entry` 更合理
+- 但在 `15802` 这条风险优先主线上，仍然没有形成足够好的全局改进
+- 因此 `15811` 也拒绝，不纳入基线
+- 这条分支先收住，下一步切换到别的最大亏损样本，不再继续围绕这两笔 long 迭代
+
+## 2026-03-21 长期规则补充：规则外标准创新因子池
+
+为了避免后续优化只围绕现有 Vegas 结构、形态和止损分支打转，我把一条“规则外标准因子池”正式加入长期自动迭代规则。
+
+这条支线的定位不是替代 Vegas 主线，而是：
+
+- 当主线样本优化连续受阻时
+- 允许插入一轮“市场已经广泛认可”的标准因子验证
+- 用更成熟的 regime / trend / deviation / flow 因子，补当前策略识别盲区
+
+后续允许自动进入验证的标准因子池包括：
+
+- `ADX / DMI`
+- `ATR Percentile / NATR`
+- `Anchored VWAP / VWAP Deviation`
+- `Donchian Channel`
+- `Keltner / Squeeze`
+- `CMF / OBV / A-D`
+- `Stochastic RSI`
+- `CCI / Z-Score`
+- `Market Regime`
+- `MTF Confirmation`
+
+### 使用原则
+
+- 只引入市场已经成熟、可解释的标准因子
+- 一次只试 `1` 个因子或 `1` 个状态标签
+- 第一轮优先做 `记录 / 过滤关闭 / 权重为0`
+- 第二轮才允许做真实 A/B
+- 优先用于：
+  - `protective stop`
+  - `regime filter`
+  - `late confirmation`
+- 不优先用于直接替换 Vegas 主触发
+
+### 当前执行含义
+
+从这一条开始，后续自动迭代不再只围绕用户临时指出的单笔图形问题。
+
+如果主线继续出现：
+
+- 连续 `3` 轮窄实验被拒绝
+- 某类最大亏损样本反复局部正确、全局错误
+- 或明显是“状态识别不足”而不是单笔规则问题
+
+我会自动切换一轮到这套标准因子池里，优先选择最适合当前问题的成熟因子做验证。
+
+## 2026-03-21 风险优先基线修正：15802 -> 15805
+
+在继续做创新因子实验前，我重新按“低回撤、低波动、高胜率、利润不能太差”的排序把 ETH 4H 历史结果筛了一遍，发现当前真正的风险优先前沿已经不是 `15802`，而是 `15805`。
+
+对比：
+
+- `15802`: `win_rate 51.3793%`, `profit 8471.85`, `sharpe 3.12627`, `max_dd 29.2533%`, `volatility 52.0918%`, `open_positions 583`
+- `15805`: `win_rate 51.4680%`, `profit 8835.52`, `sharpe 3.17533`, `max_dd 29.2533%`, `volatility 52.0488%`, `open_positions 582`
+
+这说明在风险指标持平甚至略优的前提下，`15805` 同时拿到了：
+
+- 更高胜率
+- 更高利润
+- 更高 Sharpe
+- 更低波动
+
+进一步核对 `filtered_signal_log` 和 `dynamic_config_log` 后可以确认：
+
+- `15802` 与 `15805` 的过滤原因分布完全一致
+- 动态调整标签分布也一致
+
+所以 `15805` 不是“新增了一条规则”，而是在相同过滤框架下，整体持仓路径走得更顺。  
+从这一刻开始，长期自动迭代的风险优先对照基线修正为 `15805`。
+
+## 2026-03-21 标准因子实验：15805 -> 15812（STC 早衰 short，拒绝）
+
+为了验证“规则外标准因子池”是否能补足现有 Vegas 的状态识别盲区，我做了第一轮真实 A/B，选用的是市场里非常常见的 `STC`。
+
+本轮只加了一条默认关闭的窄 short 过滤：
+
+- 环境变量：`VEGAS_STC_EARLY_WEAKENING_SHORT_BLOCK=v1`
+- 过滤原因：`STC_EARLY_WEAKENING_SHORT_BLOCK`
+
+规则目标很窄，只拦一类“零轴上方刚转弱、但可能仍然太早做空”的 short：
+
+- `signal_result.should_sell = true`
+- `ema_values.is_short_trend = true`
+- `bollinger.is_long_signal = true`
+- `engulfing.is_valid_engulfing = true`
+- `leg.is_new_leg = false`
+- `fib.in_zone = true`
+- `fib.volume_confirmed = true`
+- `ema_touch.is_short_signal = false`
+- `volume_ratio < 2.5`
+- `RSI` 在 `45~52`
+- `macd_line > 0`
+- `signal_line > 0`
+- `macd_line < signal_line`
+- `histogram < 0`
+- `histogram_decreasing = true`
+- `STC prev >= 60`
+- `STC current >= 45`
+- `STC current < STC prev`
+
+这条规则确实命中了 `2` 次：
+
+- `2022-06-01 20:00:00`
+- `2025-11-11 20:00:00`
+
+其中第二个样本正是我想修的那类：
+
+- `2025-11-11 20:00:00`
+- 原本在 `15805` 是一笔亏损 short：`-155.22`
+- 该时点本身具备：
+  - `MACD` 零轴上方死叉
+  - `bollinger.long = true`
+  - `fib.in_zone = true`
+  - `fib.volume_confirmed = true`
+  - `engulfing.valid = true`
+  - `RSI = 47.57`
+
+回测结果：
+
+- `15805`: `win_rate 51.4680%`, `profit 8835.52`, `sharpe 3.17533`, `max_dd 29.2533%`, `volatility 52.0488%`, `open_positions 582`
+- `15812`: `win_rate 51.1226%`, `profit 7696.45`, `sharpe 3.02404`, `max_dd 29.2533%`, `volatility 52.0543%`, `open_positions 579`
+
+### 为什么拒绝
+
+这轮实验说明 `STC` 不是完全无效的，它确实打到了想修的样本，但副作用很大。
+
+最大回吐点包括：
+
+- `2025-10-28 20:00:00`: `+212.71 -> 0.00`
+- `2025-05-07 00:00:00`: `+1082.88 -> +933.75`
+- `2025-08-07 16:00:00`: `+776.81 -> +668.16`
+- `2025-11-12 20:00:00`: `+725.55 -> +633.06`
+- `2025-08-21 20:00:00`: `+626.78 -> +539.12`
+
+所以这条规则的问题不是“完全耦合”，而是：
+
+- 局部样本判断有道理
+- 但当前这版 `STC` 结构把一部分高质量 short 的路径也一起压坏了
+
+当前结论：
+
+- `STC` 可以保留在创新因子池中，后续仍有继续验证价值
+- 但 `15812` 这版规则拒绝，不纳入当前风险优先基线
+- 风险优先基线保持为 `15805`
+
+## 2026-03-21 基线复核：15805 历史前沿 vs 当前代码基线 15813
+
+为了避免后续所有实验继续拿一个“历史更优、但当前代码未复现”的结果做锚点，我在最新代码树上重新回跑了默认基线，关闭了本轮新增的 `STC` 实验开关。
+
+回跑结果是：
+
+- `15813`: `win_rate 51.2909%`, `profit 7887.56`, `sharpe 3.04836`, `max_dd 29.2533%`, `volatility 52.0912%`, `open_positions 581`
+
+和历史前沿 `15805` 对比：
+
+- `15805`: `win_rate 51.4680%`, `profit 8835.52`, `sharpe 3.17533`, `max_dd 29.2533%`, `volatility 52.0488%`, `open_positions 582`
+- `15813`: `win_rate 51.2909%`, `profit 7887.56`, `sharpe 3.04836`, `max_dd 29.2533%`, `volatility 52.0912%`, `open_positions 581`
+
+结论很明确：
+
+- `15805` 仍然是历史上的风险优先前沿
+- 但在当前代码树上，默认逻辑已经回不到 `15805`
+- 因此从这一刻起，后续自动实验改以 `15813` 作为“当前代码可复现基线”
+
+补充观察：
+
+- `15813` 相比 `15805` 在很多大亏损样本上其实更好，例如：
+  - `2025-11-05 08:00:00`: `-240.86 -> -215.31`
+  - `2025-10-10 00:00:00`: `-232.58 -> -210.72`
+  - `2026-01-07 04:00:00`: `-161.32 -> -144.20`
+  - `2025-11-11 20:00:00`: `-155.22 -> -138.76`
+- 但它同时牺牲了更多盈利路径，所以总利润和 Sharpe 仍落后于 `15805`
+
+这说明当前问题已经不是“再修几笔坏单”就能追上 `15805`，而是要把盈利路径重新找回来。
+
+## 2026-03-21 对照实验：15813 -> 15814（拒绝）
+
+为了确认 `15812` 的退化到底是不是 `STC` 本身导致的，我又做了一轮对照实验，不使用 `STC`，只保留“结构不足的早空”过滤：
+
+- 环境变量：`VEGAS_WEAKENING_NO_STRUCTURE_SHORT_BLOCK=v1`
+- 过滤原因：`WEAKENING_NO_STRUCTURE_SHORT_BLOCK`
+
+规则本体是：
+
+- `ema_values.is_short_trend = true`
+- `bollinger.is_long_signal = true`
+- `engulfing.is_valid_engulfing = true`
+- `kline_hammer.is_short_signal = false`
+- `leg.is_new_leg = false`
+- `fib.in_zone = true`
+- `fib.volume_confirmed = true`
+- `ema_touch.is_short_signal = false`
+- `volume_ratio < 2.5`
+- `RSI` 在 `45~52`
+- `MACD` 零轴上方转弱：
+  - `macd_line > 0`
+  - `signal_line > 0`
+  - `macd_line < signal_line`
+  - `histogram < 0`
+  - `histogram_decreasing = true`
+
+结果：
+
+- `15813`: `win_rate 51.2909%`, `profit 7887.56`, `sharpe 3.04836`, `max_dd 29.2533%`, `volatility 52.0912%`, `open_positions 581`
+- `15814`: `win_rate 51.1226%`, `profit 7696.45`, `sharpe 3.02404`, `max_dd 29.2533%`, `volatility 52.0543%`, `open_positions 579`
+
+更关键的是：
+
+- `15814` 与 `15812` 结果完全一致
+- 两者都只命中同样 `2` 笔：
+  - `2022-06-01 20:00:00`
+  - `2025-11-11 20:00:00`
+
+### 这轮对照说明了什么
+
+这说明：
+
+- `STC` 在这条分支上没有提供额外辨识力
+- 问题根本不在 `STC`，而在“这类零轴上方转弱的早空结构”本身
+- 当前继续围绕 `2025-11-11 20:00:00` 这类样本加 short block，边际收益已经很低
+
+所以这条 early short 分支到此收住：
+
+- `15812` 拒绝
+- `15814` 拒绝
+- 后续自动迭代切换到新的样本或新的保护逻辑，不再继续扩这条 short block
+
+## 2026-03-21 结构性 long 过滤：15813 -> 15815（接受）
+
+从当前代码可复现基线 `15813` 的大亏损样本里，我先拆了 `2025-06-30 04:00:00 long`。
+
+这笔 long 的特征很集中：
+
+- `volume_ratio = 3.2836`
+- `fib.in_zone = true`
+- `fib.volume_confirmed = true`
+- `leg.is_bullish_leg = true`
+- 但 `ema_values.is_long_trend = false`
+- `ema_touch.is_long_signal = false`
+- `engulfing.is_valid_engulfing = false`
+- `hammer.is_long_signal = false`
+- `bollinger.is_short_signal = true`
+- `market.internal_bullish_bos = false`
+- `market.swing_bullish_bos = false`
+
+也就是：
+
+- 它更像“放量上冲”
+- 但没有真正的 long trend、没有结构确认、布林带还在偏空
+- 所以属于弱结构 breakout long，而不是高质量顺势 long
+
+我为这类样本加了窄过滤：
+
+- 环境变量：`VEGAS_WEAK_BREAKOUT_NO_TREND_LONG_BLOCK=v1`
+- 过滤原因：`WEAK_BREAKOUT_NO_TREND_LONG_BLOCK`
+
+结果：
+
+- `15813`: `win_rate 51.2909%`, `profit 7887.56`, `sharpe 3.04836`, `max_dd 29.2533%`, `volatility 52.0912%`, `open_positions 581`
+- `15815`: `win_rate 51.3793%`, `profit 8226.44`, `sharpe 3.09664`, `max_dd 29.2533%`, `volatility 52.0483%`, `open_positions 580`
+
+命中次数：
+
+- `1` 次
+- `2025-06-30 04:00:00`
+
+结论：
+
+- 这条规则虽然只命中 `1` 次，但确实是在修一个结构上明确错误的 long
+- 它没有恶化回撤，反而把 `profit / sharpe / volatility` 都往正确方向推了一步
+- 因此 `15815` 接受，替代 `15813` 成为新的当前代码可复现候选
+
+## 2026-03-21 深负区无趋势锤子线 long：15815 -> 15816（接受）
+
+接下来我继续处理 `15815` 里的另一类坏 long：
+
+- `bollinger.long = true`
+- `hammer.long = true`
+- `!ema_values.is_long_trend`
+- `!ema_touch.long`
+- `leg.is_bearish_leg = true`
+- `!leg.is_new_leg`
+- `!fib.in_zone`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+- `MACD` 仍处深负区，但柱体开始修复
+
+这类单的核心问题是：
+
+- 看起来像“深跌后的反弹锤子线”
+- 但没有趋势、没有结构、位置又不在理想回撤区
+- 本质上还是深负区里的抄底 long
+
+新规则：
+
+- 环境变量：`VEGAS_DEEP_NEGATIVE_NO_TREND_HAMMER_LONG_BLOCK=v1`
+- 过滤原因：`DEEP_NEGATIVE_NO_TREND_HAMMER_LONG_BLOCK`
+
+结果：
+
+- `15815`: `win_rate 51.3793%`, `profit 8226.44`, `sharpe 3.09664`, `max_dd 29.2533%`, `volatility 52.0483%`, `open_positions 580`
+- `15816`: `win_rate 51.6522%`, `profit 9084.38`, `sharpe 3.19938`, `max_dd 29.2533%`, `volatility 52.1613%`, `open_positions 575`
+
+命中样本：
+
+- `2021-09-21 08:00:00`
+- `2022-02-20 20:00:00`
+- `2022-08-21 04:00:00`
+- `2024-03-20 12:00:00`
+- `2025-09-24 12:00:00`
+- `2025-11-05 08:00:00`
+
+补充说明：
+
+- 这 `6` 笔并不是全亏，其中 `2024-03-20 12:00:00` 在旧基线里是正收益
+- 但这 `6` 笔在 `15815` 里的净贡献合计仍然是 `-312.46`
+- 所以从组合角度看，这条过滤仍然成立
+
+结论：
+
+- `15816` 在 `profit / sharpe / win_rate` 上同时继续提升
+- `max_dd` 持平
+- `volatility` 只极轻微上升，但幅度远小于收益提升
+- 这条 long 过滤接受
+
+## 2026-03-21 深负区弱延续 short：15816 -> 15817（接受）
+
+`15816` 的头号亏损样本切到了 `2025-11-04 12:00:00 short`。
+
+这笔 short 的盘面很典型：
+
+- `engulfing.is_valid_engulfing = true`
+- `leg.is_bearish_leg = true`
+- `ema_touch.short = true`
+- 但 `ema_values.is_short_trend = false`
+- `fib.in_zone = false`
+- `fib.volume_confirmed = false`
+- `fib_ratio = 0.0265`
+- `volume_ratio = 1.4877`
+- `RSI = 28.24`
+- `MACD` 深负且还在继续走弱
+- `market.internal_bearish_bos = false`
+
+这不是像 `2025-05-19 00:00:00` 那种“放量破位延续空”，因为它缺：
+
+- 放量确认
+- 结构性 bearish BOS
+- 有效趋势扩张
+
+因此我加了一条更窄的 short 过滤：
+
+- 环境变量：`VEGAS_DEEP_NEGATIVE_WEAK_BREAKDOWN_SHORT_BLOCK=v1`
+- 过滤原因：`DEEP_NEGATIVE_WEAK_BREAKDOWN_SHORT_BLOCK`
+
+结果：
+
+- `15816`: `win_rate 51.6522%`, `profit 9084.38`, `sharpe 3.19938`, `max_dd 29.2533%`, `volatility 52.1613%`, `open_positions 575`
+- `15817`: `win_rate 51.7422%`, `profit 9495.82`, `sharpe 3.25200`, `max_dd 29.2533%`, `volatility 52.1138%`, `open_positions 574`
+
+命中次数：
+
+- `1` 次
+- `2025-11-04 12:00:00`
+
+结论：
+
+- 这是一个非常干净的 late short 过滤
+- 它没有误伤像 `2025-05-19 00:00:00` 这种强空扩张
+- `profit / sharpe / volatility / win_rate` 全部继续改善
+- 因此 `15817` 接受
+
+## 2026-03-21 long trend 深负锤子线保护止损：15817 -> 15818（接受）
+
+在 `15817` 上，我又拆了新的头部亏损 long：
+
+- `2025-10-10 00:00:00`
+- `2025-08-02 12:00:00`
+
+这两笔有明显共性：
+
+- `ema_values.is_long_trend = true`
+- `ema_distance.state = TooFar`
+- `hammer.long = true`
+- `leg.is_bearish_leg = true`
+- `!leg.is_new_leg`
+- `fib.in_zone = true`
+- `fib.volume_confirmed = false`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+- `MACD` 仍在零轴下方深负区，柱体虽然改善，但还远没完成修复
+
+它们属于：
+
+- 大方向仍保留 long trend 背景
+- 但实际入场时是在 deep negative pullback 里过早抄底
+- 更适合收紧保护，而不是直接删掉交易
+
+所以这次没有做 `entry block`，而是做了 `protective stop`：
+
+- 环境变量：`VEGAS_LONG_TREND_DEEP_NEGATIVE_HAMMER_PROTECT=v1`
+- 动态调整：`LONG_TREND_DEEP_NEGATIVE_HAMMER_PROTECT`
+- 止损来源：`LongTrendDeepNegativeHammer_Protect`
+- 止损价：`max(当根K线最低价, 开仓价 * 0.975)`
+
+样本改善：
+
+- `2025-08-02 12:00:00`: `-159.29 -> -73.40`
+- `2025-10-10 00:00:00`: `-253.78 -> -112.91`
+
+回测结果：
+
+- `15817`: `win_rate 51.7422%`, `profit 9495.82`, `sharpe 3.25200`, `max_dd 29.2533%`, `volatility 52.1138%`, `open_positions 574`
+- `15818`: `win_rate 51.7422%`, `profit 9950.62`, `sharpe 3.30913`, `max_dd 29.2533%`, `volatility 52.0497%`, `open_positions 574`
+
+### 当前结论
+
+`15818` 是当前代码树下新的风险优先前沿：
+
+- `win_rate = 51.7422%`
+- `profit = 9950.62`
+- `sharpe = 3.30913`
+- `max_drawdown = 29.2533%`
+- `volatility = 52.0497%`
+
+相对旧历史前沿 `15805`，`15818` 已经在：
+
+- `win_rate`
+- `profit`
+- `sharpe`
+
+三项上同时更好，`max_dd` 持平，`volatility` 也几乎持平。
+
+因此，从现在开始：
+
+- 历史风险优先前沿更新为 `15818`
+- 当前代码可复现基线也同步更新为 `15818`
+
+## 2026-03-21 零轴上方浅弱化 short 过滤：15818 -> 15819（接受）
+
+在 `15818` 上，新的头部亏损 short 是 `2025-11-11 20:00:00`。
+
+这笔 short 的盘面特征很集中：
+
+- `ema_values.is_short_trend = true`
+- `bollinger.is_long_signal = true`
+- `bollinger.is_short_signal = false`
+- `engulfing.is_valid_engulfing = true`
+- `leg.is_bearish_leg = true`
+- `leg.is_new_leg = false`
+- `fib.in_zone = true`
+- `fib.volume_confirmed = true`
+- `ema_touch.is_short_signal = false`
+- `market.internal_bearish_bos = false`
+- `market.swing_bearish_bos = false`
+- `volume_ratio = 2.0513`
+- `RSI = 47.5743`
+- `macd_line = 26.9310`
+- `signal_line = 27.5891`
+- `histogram = -0.6581`
+- `histogram_decreasing = true`
+
+这类 short 的问题不是方向完全反了，而是：
+
+- MACD 仍在零轴上方
+- 柱体只是刚进入很浅的负值
+- 结构上没有 bearish BOS
+- 布林带反而给了 long 侧提示
+
+因此我加了一条更窄的 short 过滤：
+
+- 环境变量：`VEGAS_ABOVE_ZERO_SHALLOW_WEAKENING_SHORT_BLOCK=v1`
+- 过滤原因：`ABOVE_ZERO_SHALLOW_WEAKENING_SHORT_BLOCK`
+
+结果：
+
+- `15818`: `win_rate 51.7422%`, `profit 9950.62`, `sharpe 3.30913`, `max_dd 29.2533%`, `volatility 52.0497%`, `open_positions 574`
+- `15819`: `win_rate 51.8325%`, `profit 10233.15`, `sharpe 3.34259`, `max_dd 29.2533%`, `volatility 52.0280%`, `open_positions 573`
+
+命中次数：
+
+- `1` 次
+- `2025-11-11 20:00:00`
+
+该样本在 `15818` 里的结果：
+
+- `open_position_time = 2025-11-11 20:00:00`
+- `profit_loss = -174.59437161`
+- `close_type = Signal_Kline_Stop_Loss`
+
+在 `15819` 中，该时点被过滤，不再实际开出 short。
+
+### 当前结论
+
+`15819` 相比 `15818`：
+
+- `win_rate` 更高
+- `profit` 更高
+- `sharpe` 更高
+- `volatility` 更低
+- `max_dd` 持平
+
+因此：
+
+- 历史风险优先前沿更新为 `15819`
+- 当前代码可复现基线也同步更新为 `15819`
+
+## 2026-03-21 高位追多 long block：15819 -> 15820（拒绝）
+
+在 `15819` 的头号亏损里，`2026-01-07 04:00:00 long` 仍然是最大单笔亏损：
+
+- `open_price = 3295.42`
+- `close_price = 3222.10`
+- `profit_loss = -186.54667069`
+- `close_type = Signal_Kline_Stop_Loss`
+- `stop_loss_source = Engulfing_Volume_Rejected`
+
+这笔从盘面上更像：
+
+- 高位区的追多
+- 不在 Fib 理想区
+- 缩量
+- 后续直接回落
+
+因此尝试了一条极窄的 long 过滤：
+
+- 环境变量：`VEGAS_ABOVE_ZERO_HIGH_LEVEL_CHASE_LONG_BLOCK=v1`
+- 过滤原因：`ABOVE_ZERO_HIGH_LEVEL_CHASE_LONG_BLOCK`
+
+结果：
+
+- `15819`: `win_rate 51.8325%`, `profit 10233.15`, `sharpe 3.34259`, `max_dd 29.2533%`, `volatility 52.0280%`, `open_positions 573`
+- `15820`: `win_rate 51.8325%`, `profit 10233.15`, `sharpe 3.34259`, `max_dd 29.2533%`, `volatility 52.0280%`, `open_positions 573`
+
+命中次数：
+
+- `0`
+
+结论：
+
+- 这条 block 没有真正命中 `2026-01-07 04:00:00`
+- 属于错误归因，直接拒绝
+
+## 2026-03-21 高位追多 protective stop：15819 -> 15821（拒绝）
+
+在 `15820` 的 block 不命中后，又尝试了同簇的保护止损：
+
+- 环境变量：`VEGAS_ABOVE_ZERO_HIGH_LEVEL_CHASE_LONG_PROTECT=v1`
+- 动态调整：`ABOVE_ZERO_HIGH_LEVEL_CHASE_LONG_PROTECT`
+- 止损来源：`AboveZeroHighLevelChaseLong_Protect`
+
+结果：
+
+- `15819`: `win_rate 51.8325%`, `profit 10233.15`, `sharpe 3.34259`, `max_dd 29.2533%`, `volatility 52.0280%`, `open_positions 573`
+- `15821`: `win_rate 51.8325%`, `profit 10233.15`, `sharpe 3.34259`, `max_dd 29.2533%`, `volatility 52.0280%`, `open_positions 573`
+
+样本表现：
+
+- `2026-01-07 04:00:00` 的 `stop_loss_source` 从 `Engulfing_Volume_Rejected` 变成了 `AboveZeroHighLevelChaseLong_Protect`
+- 但 `close_price` 仍是 `3222.10`
+- `profit_loss` 仍是 `-186.54667069`
+
+也就是说：
+
+- 这条 protective stop 在标签层命中了
+- 但没有改变实际成交路径
+
+结论：
+
+- 这条保护没有真实改善，拒绝
+- `2026-01-07 04:00:00` 这条分支先收住，不再继续迭代
+- 下一轮改切 `2025-05-19 00:00:00 short` 这类 panic breakdown 后的低位追空样本
+
+## 2026-03-21 panic breakdown short 过滤：15819 -> 15822（接受）
+
+围绕 `2025-05-19 00:00:00 short` 做了新一轮 short 侧窄过滤。
+
+该样本在 `15819` 中表现为：
+
+- `open_price = 2407.20`
+- `close_price = 2503.488`
+- `profit_loss = -143.31059330`
+- `close_type = Signal_Kline_Stop_Loss`
+
+复盘后的盘面特征非常集中：
+
+- 单根极大阴线，`body_ratio >= 0.8`
+- 爆量下杀，`volume_ratio = 5.5618`
+- `ema_distance.state = Ranging`
+- `ema_values.is_short_trend = false`
+- `ema_touch.is_short_signal = false`
+- `bollinger.is_long_signal = true` 且 `bollinger.is_short_signal = true`
+- `engulfing.is_valid_engulfing = true`
+- `leg.is_bearish_leg = true` 且 `!leg.is_new_leg`
+- `fib.volume_confirmed = true`
+- `fib.in_zone = false`
+- `fib.retracement_ratio = 0.6714`
+- `macd_line < 0`, `signal_line < 0`, `histogram < 0`, `histogram_decreasing = true`
+- `market.internal_bearish_bos = true`
+- `internal_low.crossed = true`
+
+这更像“急跌后横盘区的 panic breakdown 末端追空”，不是高质量的趋势延续空。
+
+因此新增：
+
+- 环境变量：`VEGAS_PANIC_BREAKDOWN_SHORT_BLOCK=v1`
+- 过滤原因：`PANIC_BREAKDOWN_SHORT_BLOCK`
+
+结果：
+
+- `15819`: `win_rate 51.8325%`, `profit 10233.15`, `sharpe 3.34259`, `max_dd 29.2533%`, `volatility 52.0280%`, `open_positions 573`
+- `15822`: `win_rate 51.9231%`, `profit 10671.55`, `sharpe 3.39387`, `max_dd 29.2533%`, `volatility 51.9844%`, `open_positions 572`
+
+命中次数：
+
+- `1`
+
+命中样本：
+
+- `2025-05-19 00:00:00 short`
+
+样本效果：
+
+- `15819` 中该交易亏损 `-143.31059330`
+- `15822` 中该时点已不再开出 short
+
+当前结论：
+
+- 这是一次有效的“单样本修复且全局同向改善”
+- `win_rate / profit / sharpe` 同时提高
+- `max_dd` 持平
+- `volatility` 继续下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15822`
+- 当前代码可复现基线同步更新为 `15822`
+
+## 2026-03-21 零轴上方无趋势吊人线 short：15822 -> 15823（拒绝）
+
+接着处理 `15822` 中新的头部亏损 short：`2026-01-06 12:00:00`。
+
+该样本的核心特征是：
+
+- `ema_values.is_short_trend = false`
+- `ema_touch.is_short_signal = false`
+- `bollinger.is_short_signal = true`
+- `kline_hammer.is_short_signal = true`
+- `leg.is_bullish_leg = true`
+- `!leg.is_new_leg`
+- `!fib.in_zone`
+- `!fib.volume_confirmed`
+- `fib.retracement_ratio = 0.9046`
+- `volume_ratio = 0.5982`
+- `rsi = 72.92`
+- `macd_line > 0`, `signal_line > 0`, `histogram > 0`, `histogram_decreasing = true`
+- `!market.internal_bearish_bos`
+- `!market.swing_bearish_bos`
+
+这更像零轴上方、量能不足、bullish leg 里的 early short。
+
+因此尝试：
+
+- 环境变量：`VEGAS_ABOVE_ZERO_NO_TREND_HANGING_SHORT_BLOCK=v1`
+- 过滤原因：`ABOVE_ZERO_NO_TREND_HANGING_SHORT_BLOCK`
+
+结果：
+
+- `15822`: `win_rate 51.9231%`, `profit 10671.55`, `sharpe 3.39387`, `max_dd 29.2533%`, `volatility 51.9844%`, `open_positions 572`
+- `15823`: `win_rate 51.8389%`, `profit 10664.24`, `sharpe 3.39313`, `max_dd 29.2533%`, `volatility 51.9835%`, `open_positions 571`
+
+命中样本：
+
+- `2023-01-11 04:00:00`，原本是盈利 short
+- `2025-07-11 16:00:00`，亏损 short
+- `2026-01-06 12:00:00`，亏损 short
+
+结论：
+
+- 这条规则虽然命中了目标坏单
+- 但同时误伤了盈利 short
+- `win_rate / profit / sharpe` 都回吐
+
+因此 `15823` 拒绝，不纳入基线。
+
+## 2026-03-21 零轴下方衰减吊人线 short：15822 -> 15824（接受）
+
+在拒绝 `15823` 后，我切到另一类更窄的坏 short：`2025-10-24 00:00:00`。
+
+该样本在 `15822` 中表现为：
+
+- `open_price = 3857.80`
+- `close_price = 3934.49`
+- `profit_loss = -141.02421324`
+- `close_type = Signal_Kline_Stop_Loss`
+- `stop_loss_source = KlineHammer_Volume_Confirmed`
+
+它的盘面特征很集中：
+
+- `ema_values.is_short_trend = false`
+- `ema_touch.is_short_signal = false`
+- `bollinger.is_short_signal = true`
+- `kline_hammer.is_short_signal = true`
+- `leg.is_bearish_leg = true`
+- `!leg.is_new_leg`
+- `fib.in_zone = true`
+- `!fib.volume_confirmed`
+- `volume_ratio = 1.5322`
+- `rsi = 45.83`
+- `macd_line < 0`
+- `signal_line < 0`
+- `histogram < 0`
+- `histogram_increasing = true`
+- `!market.internal_bearish_bos`
+- `!market.swing_bearish_bos`
+
+这不是强趋势空，而是零轴下方动能已经衰减、仍然靠 `Bolling short + HangingMan short` 去追空的样本。
+
+因此新增：
+
+- 环境变量：`VEGAS_BELOW_ZERO_WEAKENING_HANGING_SHORT_BLOCK=v1`
+- 过滤原因：`BELOW_ZERO_WEAKENING_HANGING_SHORT_BLOCK`
+
+结果：
+
+- `15822`: `win_rate 51.9231%`, `profit 10671.55`, `sharpe 3.39387`, `max_dd 29.2533%`, `volatility 51.9844%`, `open_positions 572`
+- `15824`: `win_rate 52.0140%`, `profit 10897.88`, `sharpe 3.41920`, `max_dd 29.2533%`, `volatility 51.9706%`, `open_positions 571`
+
+命中次数：
+
+- `1`
+
+命中样本：
+
+- `2025-10-24 00:00:00 short`
+
+样本效果：
+
+- `15822` 中该交易亏损 `-141.02421324`
+- `15824` 中该时点已不再开出 short
+
+当前结论：
+
+- 这是一次很干净的 late short 修复
+- `win_rate / profit / sharpe` 同时继续提高
+- `max_dd` 持平
+- `volatility` 进一步下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15824`
+- 当前代码可复现基线同步更新为 `15824`
+
+## 2026-03-21 long trend pullback short 过滤：15824 -> 15825（接受）
+
+继续拆 `15824` 的头部亏损 short，优先处理 `2025-09-02 20:00:00`。
+
+该样本在 `15824` 中表现为：
+
+- `open_price = 4293.21`
+- `close_price = 4369.60`
+- `profit_loss = -115.62730555`
+
+复盘后的结构很集中：
+
+- `ema_values.is_long_trend = true`
+- `ema_touch.is_uptrend = true`
+- `ema_distance.state = TooFar`
+- `!ema_touch.is_short_signal`
+- `bollinger.is_long_signal = true`
+- `!bollinger.is_short_signal`
+- `leg.is_bearish_leg = true`
+- `!leg.is_new_leg`
+- `!fib.in_zone`
+- `fib.volume_confirmed = true`
+- `volume_ratio = 2.7784`
+- `rsi = 40.13`
+- `macd_line < 0`
+- `signal_line < 0`
+- `histogram < 0`
+- `histogram_decreasing = true`
+- `!market.internal_bearish_bos`
+- `!market.swing_bearish_bos`
+
+这类 short 的问题不是方向完全反了，而是：
+
+- 大背景仍是 `long_trend + uptrend`
+- 当前只是 long trend 里的深回调
+- 结构上没有新的 bearish BOS
+- 但策略仍在 `TooFar` 回调位去做反向 short
+
+因此新增：
+
+- 环境变量：`VEGAS_LONG_TREND_PULLBACK_SHORT_BLOCK=v1`
+- 过滤原因：`LONG_TREND_PULLBACK_SHORT_BLOCK`
+
+结果：
+
+- `15824`: `win_rate 52.0140%`, `profit 10897.88`, `sharpe 3.41920`, `max_dd 29.2533%`, `volatility 51.9706%`, `open_positions 571`
+- `15825`: `win_rate 52.2887%`, `profit 11593.48`, `sharpe 3.49436`, `max_dd 29.2533%`, `volatility 51.9343%`, `open_positions 568`
+
+命中样本：
+
+- `2024-11-21 00:00:00 short`
+- `2025-09-02 20:00:00 short`
+
+两笔命中样本在旧基线里都属于亏损 short。
+
+当前结论：
+
+- 这条规则不是只修单一近期样本
+- 它扩成了 `2` 个高质量命中，而且两笔都属于同一类 long trend pullback short
+- `win_rate / profit / sharpe` 同时继续提高
+- `max_dd` 持平
+- `volatility` 继续下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15825`
+- 当前代码可复现基线同步更新为 `15825`
+
+## 2026-03-21 short trend + TooFar + Bollinger short 的低量反弹 long：15825 -> 15826（接受）
+
+继续拆 `15825` 的头部未修亏损 long，优先处理 `2025-12-08 08:00:00 long`。
+
+该样本在 `15825` 中表现为：
+
+- `open_price = 3109.50`
+- `close_price = 3069.60`
+- `profit_loss = -117.03213049`
+
+复盘后的特征并不只在这一笔出现。当前基线里有一组同类 long，典型共同点是：
+
+- `ema_values.is_short_trend = true`
+- `ema_distance.state = TooFar`
+- `bollinger.is_short_signal = true`
+- `!ema_touch.is_long_signal`
+- `leg.is_bullish_leg = true`
+- `!leg.is_new_leg`
+- `!fib.volume_confirmed`
+- `volume_ratio < 1.2`
+- `macd.histogram > 0`
+- `macd.histogram_increasing = true`
+
+这类单子的盘面含义是：
+
+- 大级别仍在 `short_trend`
+- 价格相对长期均线仍然 `TooFar`
+- 当下只是缩量反弹
+- 布林带仍然在给 `short` 压制
+- 但策略会因为 `bullish_leg + histogram 转正` 提前抢反弹 long
+
+在 `15825` 中，这类样本一共 `8` 笔，合计约 `-185.47`，只有 `1` 笔是很小的正收益。
+
+因此新增：
+
+- 环境变量：`VEGAS_SHORT_TREND_TOO_FAR_BOLLINGER_SHORT_LONG_BLOCK=v1`
+- 过滤原因：`SHORT_TREND_TOO_FAR_BOLLINGER_SHORT_LONG_BLOCK`
+
+结果：
+
+- `15825`: `win_rate 52.2887%`, `profit 11593.48`, `sharpe 3.49436`, `max_dd 29.2533%`, `volatility 51.9343%`, `open_positions 568`
+- `15826`: `win_rate 52.5755%`, `profit 11928.65`, `sharpe 3.53227`, `max_dd 29.2533%`, `volatility 51.8747%`, `open_positions 563`
+
+命中次数：
+
+- `7`
+
+命中样本：
+
+- `2022-05-23 12:00:00 long`
+- `2022-05-30 04:00:00 long`
+- `2022-07-08 08:00:00 long`
+- `2024-08-13 04:00:00 long`
+- `2024-08-19 00:00:00 long`
+- `2025-04-23 04:00:00 long`
+- `2025-12-08 08:00:00 long`
+
+命中样本结果：
+
+- `6` 笔原本是亏损 long
+- `1` 笔原本是小盈利 long
+
+最大直接改善点：
+
+- `2025-12-08 08:00:00`: `-117.03213049 -> 0.00000000`
+- `2024-08-19 00:00:00`: `-16.06727567 -> 0.00000000`
+
+最大路径放大点：
+
+- `2026-01-20 12:00:00`: `+19.50985614`
+- `2026-03-09 08:00:00`: `+19.28552365`
+- `2025-05-07 00:00:00`: `+16.73474126`
+
+主要代价：
+
+- `2022-05-30 04:00:00`: `+6.40055689 -> 0.00000000`
+
+当前结论：
+
+- 这不是只修单一样本的局部规则
+- 它扩成了 `7` 个高相似度命中，且绝大多数都是坏 long
+- `win_rate / profit / sharpe` 同时继续提高
+- `max_dd` 持平
+- `volatility` 继续下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15826`
+- 当前代码可复现基线同步更新为 `15826`
+
+## 2026-03-21 above-zero no-trend engulfing long：15826 -> 15827（接受）
+
+继续拆 `15826` 的头部未修亏损 long，优先处理 `2025-06-26 08:00:00 long`。
+
+该样本在 `15826` 中表现为：
+
+- `open_price = 2488.01`
+- `close_price = 2417.40`
+- `profit_loss = -115.13976438`
+
+复盘后的结构特征是：
+
+- `!ema_values.is_long_trend`
+- `!ema_touch.is_long_signal`
+- `bollinger.is_short_signal = true`
+- `!bollinger.is_long_signal`
+- `engulfing.is_valid_engulfing = true`
+- `leg.is_bullish_leg = true`
+- `!leg.is_new_leg`
+- `fib.in_zone = true`
+- `!fib.volume_confirmed`
+- `volume_ratio = 1.3774`
+- `rsi = 61.11`
+- `macd.above_zero = true`
+- `macd.histogram > 0`
+- `macd.histogram_increasing = true`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+
+这类 long 的问题不是动能完全没有，而是：
+
+- 价格行为只给了 `engulfing + bullish_leg`
+- 但并没有真正进入 `long_trend`
+- 布林带仍然偏 short
+- 结构上也没有 bullish BOS
+- 本质上是零轴上方的弱反弹追多，而不是高质量趋势 long
+
+在 `15826` 中，这类样本一共 `2` 笔，合计约 `-111.40`，只有 `1` 笔很小的正收益。
+
+因此新增：
+
+- 环境变量：`VEGAS_ABOVE_ZERO_NO_TREND_ENGULFING_LONG_BLOCK=v1`
+- 过滤原因：`ABOVE_ZERO_NO_TREND_ENGULFING_LONG_BLOCK`
+
+结果：
+
+- `15826`: `win_rate 52.5755%`, `profit 11928.65`, `sharpe 3.53227`, `max_dd 29.2533%`, `volatility 51.8747%`, `open_positions 563`
+- `15827`: `win_rate 52.5847%`, `profit 11926.47`, `sharpe 3.53402`, `max_dd 29.2533%`, `volatility 51.8458%`, `open_positions 561`
+
+命中次数：
+
+- `4`
+
+命中样本：
+
+- `2021-10-02 00:00:00 long`
+- `2022-06-24 16:00:00 long`
+- `2025-06-26 08:00:00 long`
+- `2025-10-27 04:00:00 long`
+
+最大直接改善点：
+
+- `2025-06-26 08:00:00`: `-115.13976438 -> 0.00000000`
+
+主要代价：
+
+- `2025-10-26 20:00:00`: `-17.97322014 -> -70.40952459`
+- `2025-05-07 00:00:00`: `+1151.72393878 -> +1125.95770267`
+
+当前结论：
+
+- 这条规则命中样本不多，但都属于同类弱结构 `engulfing long`
+- 它把最大的目标坏单完整修掉
+- `profit` 只小幅回吐约 `2.18`
+- 同时 `win_rate / sharpe` 继续提高，`volatility` 继续下降，`max_dd` 持平
+
+按当前风险优先目标函数，这轮接受。
+
+因此：
+
+- 历史风险优先前沿更新为 `15827`
+- 当前代码可复现基线同步更新为 `15827`
+
+## 2026-03-21 above-zero no-trend TooFar hanging short：15827 -> 15828（接受）
+
+继续拆 `15827` 的头部未修亏损 short，优先处理 `2025-04-26 16:00:00 short`。
+
+该样本在 `15827` 中表现为：
+
+- `open_price = 1785.11`
+- `close_price = 1856.5144`
+- `profit_loss = -98.25893214`
+
+复盘后发现它和 `2024-10-18 08:00:00 short` 属于同一类：
+
+- `!ema_values.is_long_trend`
+- `!ema_values.is_short_trend`
+- `ema_distance.state = TooFar`
+- `!ema_touch.is_short_signal`
+- `bollinger.is_short_signal = true`
+- `!bollinger.is_long_signal`
+- `kline_hammer.is_short_signal = true`
+- `leg.is_bullish_leg = true`
+- `!leg.is_new_leg`
+- `!fib.in_zone`
+- `!fib.volume_confirmed`
+- `volume_ratio < 1.5`
+- `rsi >= 55`
+- `macd.above_zero = true`
+- `macd.histogram < 0`
+- `macd.histogram_decreasing = true`
+- `!market.internal_bearish_bos`
+- `!market.swing_bearish_bos`
+
+这类 short 的含义是：
+
+- 价格仍在高位，但并没有真正进入 `short_trend`
+- 当前只是零轴上方的转弱回落
+- 策略会因为 `Bollinger short + HangingMan short` 提前开空
+- 但结构上没有 bearish BOS，属于高位假转弱的反手 short
+
+在 `15827` 中，这类样本一共 `2` 笔，且两笔全部亏损。
+
+因此新增：
+
+- 环境变量：`VEGAS_ABOVE_ZERO_NO_TREND_TOO_FAR_HANGING_SHORT_BLOCK=v1`
+- 过滤原因：`ABOVE_ZERO_NO_TREND_TOO_FAR_HANGING_SHORT_BLOCK`
+
+结果：
+
+- `15827`: `win_rate 52.5847%`, `profit 11926.47`, `sharpe 3.53402`, `max_dd 29.2533%`, `volatility 51.8458%`, `open_positions 561`
+- `15828`: `win_rate 52.7728%`, `profit 12828.48`, `sharpe 3.62357`, `max_dd 29.2533%`, `volatility 51.8201%`, `open_positions 559`
+
+命中次数：
+
+- `2`
+
+命中样本：
+
+- `2024-10-18 08:00:00 short`
+- `2025-04-26 16:00:00 short`
+
+最大直接改善点：
+
+- `2025-04-26 16:00:00`: `-98.25893214 -> 0.00000000`
+
+最大路径放大点：
+
+- `2025-05-07 00:00:00`: `+84.45246189`
+- `2025-11-12 20:00:00`: `+72.25310040`
+- `2025-08-07 16:00:00`: `+69.18215245`
+- `2025-08-21 20:00:00`: `+55.82074410`
+
+主要代价：
+
+- `2026-01-07 04:00:00`: `-16.28481909`
+- `2026-01-06 12:00:00`: `-12.39670405`
+- `2025-10-10 00:00:00`: `-9.59090276`
+
+当前结论：
+
+- 这条规则命中很窄，但两笔都是同类坏 short
+- 它不仅修掉了目标样本，还明显改善了后续盈利路径
+- `win_rate / profit / sharpe` 同时继续提高
+- `max_dd` 持平
+- `volatility` 继续下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15828`
+- 当前代码可复现基线同步更新为 `15828`
+
+## 2026-03-21 above-zero low-volume no-trend hanging short：15828 -> 15829（接受）
+
+继续拆 `15828` 的头部未修亏损 short，优先处理 `2026-01-06 12:00:00 short`。
+
+该样本在 `15828` 中表现为：
+
+- `open_price = 3218.00`
+- `close_price = 3290.51`
+- `profit_loss = -177.67506425`
+
+复盘后发现它和 `2024-02-07 08:00:00 short` 属于同一类：
+
+- `!ema_values.is_long_trend`
+- `!ema_values.is_short_trend`
+- `ema_distance.state = TooFar`
+- `!ema_touch.is_short_signal`
+- `bollinger.is_short_signal = true`
+- `kline_hammer.is_short_signal = true`
+- `leg.is_bullish_leg = true`
+- `!leg.is_new_leg`
+- `!fib.volume_confirmed`
+- `volume_ratio < 1.0`
+- `rsi >= 60`
+- `macd.above_zero = true`
+- `macd.histogram > 0`
+- `macd.histogram_decreasing = true`
+- `!market.internal_bearish_bos`
+- `!market.swing_bearish_bos`
+
+这类 short 的含义是：
+
+- 零轴上方的回落已经开始，但并没有形成真正的 `short_trend`
+- 当前更像高位钝化后的修复期回调，而不是有效做空起点
+- 策略会因为 `Bollinger short + Hanging short` 提前反手做空
+- 但在低量、无结构破位的前提下，这类 short 容易变成假弱转折
+
+因此新增：
+
+- 环境变量：`VEGAS_ABOVE_ZERO_LOW_VOLUME_NO_TREND_HANGING_SHORT_BLOCK=v1`
+- 过滤原因：`ABOVE_ZERO_LOW_VOLUME_NO_TREND_HANGING_SHORT_BLOCK`
+
+结果：
+
+- `15828`: `win_rate 52.7728%`, `profit 12828.48`, `sharpe 3.62357`, `max_dd 29.2533%`, `volatility 51.8201%`, `open_positions 559`
+- `15829`: `win_rate 52.9623%`, `profit 14211.40`, `sharpe 3.74805`, `max_dd 29.2533%`, `volatility 51.8376%`, `open_positions 557`
+
+命中次数：
+
+- `2`
+
+命中样本：
+
+- `2024-02-07 08:00:00 short`
+- `2026-01-06 12:00:00 short`
+
+变化结构：
+
+- `removed_from_15829 = 3`, 合计 `-217.04`
+- `added_in_15829 = 1`, 合计 `-181.63`
+- `same_open_time_changed_pnl = 238`, 合计 `+1347.49`
+
+当前结论：
+
+- 这条规则直接修掉了两笔同类坏 short
+- 主要增益不只来自单笔少亏，而是后续资金路径显著改善
+- `win_rate / profit / sharpe` 同时大幅提高
+- `max_dd` 持平
+- `volatility` 有极轻微回吐，但幅度很小，显著小于收益改善幅度
+
+按当前风险优先目标函数，这轮接受。
+
+因此：
+
+- 历史风险优先前沿更新为 `15829`
+- 当前代码可复现基线同步更新为 `15829`
+
+## 2026-03-21 above-zero no-trend engulfing long v2：15829 -> 15830（接受）
+
+继续拆 `15829` 的头部未修亏损 long，优先处理 `2026-01-07 04:00:00 long`。
+
+该样本在 `15829` 中表现为：
+
+- `open_price = 3295.42`
+- `close_price = 3222.10`
+- `profit_loss = -258.36714590`
+
+复盘后发现它不是趋势多，而是：
+
+- `ema_distance.state = TooFar`
+- `!ema_values.is_long_trend`
+- `!ema_values.is_short_trend`
+- `bollinger.is_short_signal = true`
+- `!bollinger.is_long_signal`
+- `engulfing.is_valid_engulfing = true`
+- `leg.is_bullish_leg = true`
+- `!leg.is_new_leg`
+- `!fib.in_zone`
+- `!fib.volume_confirmed`
+- `volume_ratio < 1.0`
+- `rsi >= 70`
+- `macd.above_zero = true`
+- `macd.histogram > 0`
+- `macd.histogram_increasing = true`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+
+这类 long 的含义是：
+
+- 价格已经远离均衡位置，处在高位 `TooFar`
+- 结构并没有给出新的 bullish BOS
+- 量能不足，Fib 也不在理想区间
+- 但策略会因为 `engulfing long + bullish leg` 在零轴上方继续追多
+
+先做了历史分布验证，这个模式在 `15829` 中一共 `3` 笔：
+
+- `2026-01-07 04:00:00`: `-258.37`
+- `2022-07-19 04:00:00`: `-6.27`
+- `2023-09-29 12:00:00`: `+11.67`
+
+为了避免误杀那笔小盈利单，只把现有 `VEGAS_ABOVE_ZERO_NO_TREND_ENGULFING_LONG_BLOCK` 扩成 `v2`，增加：
+
+- `ema_distance.state = TooFar`
+- `!ema_values.is_short_trend`
+- `!fib.in_zone`
+- `volume_ratio < 1.0`
+- `rsi >= 70`
+
+结果：
+
+- `15829`: `win_rate 52.9623%`, `profit 14211.40`, `sharpe 3.74805`, `max_dd 29.2533%`, `volatility 51.8376%`, `open_positions 557`
+- `15830`: `win_rate 53.1418%`, `profit 15171.80`, `sharpe 3.83227`, `max_dd 29.2533%`, `volatility 51.8051%`, `open_positions 557`
+
+命中次数：
+
+- `2`
+
+命中样本：
+
+- `2022-07-19 04:00:00 long`
+- `2026-01-07 04:00:00 long`
+
+变化结构：
+
+- `removed = 2`, 合计 `-264.64`
+- `added = 2`, 合计 `-138.72`
+- `changed_same_time = 464`, 合计 `+834.49`
+
+当前结论：
+
+- `v2` 成功把这条规则从旧的 `fib.in_zone` 分支扩到另一类高位追多坏单
+- 它只命中 2 笔亏损样本，没有卷入 `2023-09-29 12:00:00` 那笔小盈利 long
+- `win_rate / profit / sharpe` 继续同步提高
+- `max_dd` 持平
+- `volatility` 从 `51.8376%` 回落到 `51.8051%`
+
+按当前风险优先目标函数，这轮明确接受。
+
+因此：
+
+- 历史风险优先前沿更新为 `15830`
+- 当前代码可复现基线同步更新为 `15830`
+
+## 2026-03-21 long-trend below-zero fib long：15830 -> 15831（接受）
+
+继续按照“至少 2 笔同类亏损样本才上规则”的新闸门往下筛，在 `15830` 中找到一组可扩的坏 `long`：
+
+- `2025-06-02 00:00:00`
+- `2024-06-10 20:00:00`
+
+两笔都属于同一类：
+
+- `ema_distance.state = TooFar`
+- `ema_values.is_long_trend = true`
+- `!ema_values.is_short_trend`
+- `!ema_touch.is_long_signal`
+- `!bollinger.is_long_signal`
+- `!bollinger.is_short_signal`
+- `!engulfing.is_valid_engulfing`
+- `!kline_hammer.is_long_signal`
+- `leg.is_bullish_leg = true`
+- `!leg.is_new_leg`
+- `fib.in_zone = true`
+- `fib.volume_confirmed = true`
+- `fib.is_long_signal = true`
+- `fib.retracement_ratio < 0.5`
+- `macd.above_zero = false`
+- `market.internal_trend = -1`
+- `volume_ratio < 2.1`
+- `40 <= rsi < 46`
+
+这类 long 的含义是：
+
+- 大方向仍被识别为 `long_trend`
+- 但当前并没有新的长边确认信号
+- 开仓主要依赖 `fib long`
+- 同时 `MACD` 仍在零轴下方，内部结构也没有转强
+- 本质上是“趋势中的弱修复抄底”，并不是高质量趋势延续
+
+分布验证结果：
+
+- 命中 `2` 笔
+- `2/2` 全部亏损
+- 合计 `-145.58`
+
+因此新增：
+
+- 环境变量：`VEGAS_LONG_TREND_BELOW_ZERO_FIB_LONG_BLOCK=v1`
+- 过滤原因：`LONG_TREND_BELOW_ZERO_FIB_LONG_BLOCK`
+
+结果：
+
+- `15830`: `win_rate 53.1418%`, `profit 15171.80`, `sharpe 3.83227`, `max_dd 29.2533%`, `volatility 51.8051%`, `open_positions 557`
+- `15831`: `win_rate 53.2374%`, `profit 15695.40`, `sharpe 3.87854`, `max_dd 29.2533%`, `volatility 51.7608%`, `open_positions 556`
+
+命中样本：
+
+- `2024-06-10 20:00:00 long`
+- `2025-06-02 00:00:00 long`
+
+变化结构：
+
+- `removed = 2`, 合计 `-145.58`
+- `added = 1`, 合计 `-44.25`
+- `changed_same_time = 188`, 合计 `+422.31`
+
+最大直接改善点：
+
+- `2025-06-02 00:00:00`: `-85.77 -> 0.00`
+- `2024-06-10 20:00:00`: `-59.82 -> 0.00`
+
+最大路径放大点：
+
+- `2025-11-12 20:00:00`: `+40.87`
+- `2025-08-07 16:00:00`: `+38.86`
+- `2025-08-21 20:00:00`: `+31.36`
+- `2026-01-20 12:00:00`: `+30.48`
+- `2026-03-09 08:00:00`: `+30.13`
+
+主要代价：
+
+- `2024-06-11 04:00:00`: `0.00 -> -44.25`
+- `2026-01-07 00:00:00`: `-6.49`
+- `2025-10-10 00:00:00`: `-5.39`
+
+当前结论：
+
+- 这条规则通过“同类分布验证”，不是单样本修补
+- 它只拦 `2` 笔、且 `2/2` 都是坏 long
+- `win_rate / profit / sharpe` 继续同步提高
+- `max_dd` 持平
+- `volatility` 从 `51.8051%` 继续回落到 `51.7608%`
+- 虽然新增了一笔 `2024-06-11 04:00:00` 的坏单，但整体路径收益明显更大
+
+按当前风险优先目标函数，这轮接受。
+
+因此：
+
+- 历史风险优先前沿更新为 `15831`
+- 当前代码可复现基线同步更新为 `15831`
+
+## 2026-03-21 long-trend above-zero low-volume weakening short：15831 -> 15832（接受）
+
+继续按“至少 2 笔同类亏损样本才上规则”的闸门，从 `15831` 的坏 `short` 分布里筛到一组更干净的样本簇：
+
+- `2023-12-23 00:00:00 short`
+- `2024-11-23 16:00:00 short`
+- `2025-07-11 16:00:00 short`
+
+三笔共同特征：
+
+- `ema_values.is_long_trend = true`
+- `!ema_values.is_short_trend`
+- `ema_distance.state = TooFar`
+- `bollinger.is_short_signal = true`
+- `!bollinger.is_long_signal`
+- `leg.is_bullish_leg = true`
+- `!leg.is_new_leg`
+- `!fib.in_zone`
+- `!fib.volume_confirmed`
+- `macd.above_zero = true`
+- `macd.histogram > 0`
+- `macd.histogram_decreasing = true`
+- `!market.internal_bearish_bos`
+- `!market.swing_bearish_bos`
+- `rsi >= 60`
+- `volume_ratio < 1.2`
+
+这类 short 的含义是：
+
+- 大方向还处在 `long_trend`
+- 价格虽然已经 `TooFar`
+- 但下跌结构并没有真正破出来
+- 当前只是高位修复后的弱转弱，且量能不足
+- 本质更像“多头背景里的缩量假转弱追空”，而不是高质量反转 short
+
+分布验证结果：
+
+- 命中 `3` 笔
+- `3/3` 全部亏损
+- `0` 笔盈利样本
+- 合计 `-215.45`
+
+因此新增：
+
+- 环境变量：`VEGAS_LONG_TREND_ABOVE_ZERO_LOW_VOLUME_WEAKENING_SHORT_BLOCK=v1`
+- 过滤原因：`LONG_TREND_ABOVE_ZERO_LOW_VOLUME_WEAKENING_SHORT_BLOCK`
+
+结果：
+
+- `15831`: `win_rate 53.2374%`, `profit 15695.40`, `sharpe 3.87854`, `max_dd 29.2533%`, `volatility 51.7608%`, `open_positions 556`
+- `15832`: `win_rate 53.5262%`, `profit 17585.40`, `sharpe 4.03130`, `max_dd 29.2533%`, `volatility 51.6800%`, `open_positions 553`
+
+过滤命中：
+
+- `2023-12-23 00:00:00 short`
+- `2024-11-23 16:00:00 short`
+- `2025-07-11 16:00:00 short`
+
+当前结论：
+
+- 这条规则通过“同类分布验证”，不是单样本修补
+- 命中 `3` 笔且 `3/3` 全是坏 short
+- `win_rate / profit / sharpe` 同步提高
+- `max_dd` 持平
+- `volatility` 从 `51.7608%` 继续回落到 `51.6800%`
+
+按当前风险优先目标函数，这轮明确接受。
+
+因此：
+
+- 历史风险优先前沿更新为 `15832`
+- 当前代码可复现基线同步更新为 `15832`
+- 下一轮继续优先拆 `2026-01-07 00:00:00 short`
+
+## 2026-03-21 ranging no-trend weak hammer long：15832 -> 15833（接受）
+
+继续按“至少 2 笔同类亏损样本才上规则”的闸门，从 `15832` 的坏 `long` 分布里筛到一组可接受的窄样本：
+
+- `2025-10-30 12:00:00 long`
+- `2023-08-01 20:00:00 long`
+
+两笔共同特征：
+
+- `!ema_values.is_long_trend`
+- `!ema_values.is_short_trend`
+- `ema_distance.state = Ranging`
+- `bollinger.is_long_signal = true`
+- `!bollinger.is_short_signal`
+- `kline_hammer.is_long_signal = true`
+- `leg.is_bearish_leg = true`
+- `!leg.is_new_leg`
+- `!macd.above_zero`
+- `!fib.volume_confirmed`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+- `rsi < 45`
+- `volume_ratio < 1.5`
+
+这类 long 的含义是：
+
+- 当前并不处在明确 `long_trend`
+- 也没有结构性 bullish BOS 作为确认
+- 只是震荡/无趋势里的锤子线反弹尝试
+- 同时量能偏弱、MACD 仍在零轴下方
+- 本质更像“区间内抢反弹”，不是高质量趋势型做多
+
+分布验证结果：
+
+- 命中 `2` 笔
+- `2/2` 全部亏损
+- `0` 笔盈利样本
+- 合计 `-168.63`
+
+因此新增：
+
+- 环境变量：`VEGAS_RANGING_NO_TREND_WEAK_HAMMER_LONG_BLOCK=v1`
+- 过滤原因：`RANGING_NO_TREND_WEAK_HAMMER_LONG_BLOCK`
+
+结果：
+
+- `15832`: `win_rate 53.5262%`, `profit 17585.40`, `sharpe 4.03130`, `max_dd 29.2533%`, `volatility 51.6800%`, `open_positions 553`
+- `15833`: `win_rate 53.7341%`, `profit 18199.40`, `sharpe 4.07652`, `max_dd 29.2533%`, `volatility 51.6773%`, `open_positions 549`
+
+过滤命中：
+
+- `2023-08-01 20:00:00 long`
+- `2025-10-30 12:00:00 long`
+
+当前结论：
+
+- 这条规则通过“同类分布验证”，不是单样本修补
+- 命中 `2` 笔且 `2/2` 全是坏 long
+- `win_rate / profit / sharpe` 继续同步提高
+- `max_dd` 持平
+- `volatility` 从 `51.6800%` 继续小幅回落到 `51.6773%`
+
+按当前风险优先目标函数，这轮接受。
+
+因此：
+
+- 历史风险优先前沿更新为 `15833`
+- 当前代码可复现基线同步更新为 `15833`
+- `2025-06-26 08:00:00 long` 当前仍是单样本，不满足新闸门，暂不晋级规则
+
+## 2026-03-21 high volume too-far bollinger-short long：15833 -> 15834（接受）
+
+开始按“巨量意味着更可能进入反转或强趋势状态”的新主意做分布验证。先在 `15833` 的 `volume_ratio >= 3.0` 样本里做结构扫描，找到一组跨周期、非单样本的坏 `long`：
+
+- `2023-04-30 20:00:00`
+- `2023-05-10 20:00:00`
+- `2024-08-12 20:00:00`
+- `2024-09-17 20:00:00`
+- `2025-03-03 00:00:00`
+- `2025-09-08 20:00:00`
+- `2026-03-11 20:00:00`
+
+共同特征：
+
+- `volume_ratio >= 3.0`
+- `ema_distance.state = TooFar`
+- `bollinger.is_short_signal = true`
+- `!bollinger.is_long_signal`
+- `leg.is_bullish_leg = true`
+- `fib.in_zone = true`
+- `fib.volume_confirmed = true`
+- `macd.histogram_increasing = true`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+- `!market.internal_bearish_bos`
+- `!market.swing_bearish_bos`
+
+这类单的含义是：
+
+- 放了巨量
+- 价格已经走到 `TooFar`
+- 但结构上没有新的 bullish BOS 来确认强趋势延续
+- 同时布林带给的是 `short` 压力，而不是干净的趋势多头
+- 本质更像“巨量后的分歧/衰竭区继续追多”
+
+分布验证结果：
+
+- 实际命中 `7` 笔
+- `6` 笔 `LOSS`
+- `1` 笔 `END`
+- `0` 笔已实现盈利样本
+
+因此新增：
+
+- 环境变量：`VEGAS_HIGH_VOLUME_TOO_FAR_BOLLINGER_SHORT_LONG_BLOCK=v1`
+- 过滤原因：`HIGH_VOLUME_TOO_FAR_BOLLINGER_SHORT_LONG_BLOCK`
+
+结果：
+
+- `15833`: `win_rate 53.7341%`, `profit 18199.40`, `sharpe 4.07652`, `max_dd 29.2533%`, `volatility 51.6773%`, `open_positions 549`
+- `15834`: `win_rate 54.4118%`, `profit 20868.50`, `sharpe 4.26926`, `max_dd 29.2533%`, `volatility 51.5591%`, `open_positions 544`
+
+当前结论：
+
+- 这条规则明显成立，不是单点修补
+- 修的是“巨量 + TooFar + 布林偏空压制下的错误追多”
+- `win_rate / profit / sharpe` 同步提升
+- `max_dd` 持平
+- `volatility` 明显下降
+
+按当前风险优先目标函数，这轮接受。
+
+## 2026-03-21 high volume no-trend bollinger-long short：15834 -> 15835（接受）
+
+在 `15834` 的高量样本上继续扫描，找到第二组可泛化的坏 `short`：
+
+- `2022-09-13 20:00:00`
+- `2022-10-31 20:00:00`
+- `2023-10-05 20:00:00`
+- `2024-10-23 20:00:00`
+
+共同特征：
+
+- `volume_ratio >= 3.0`
+- `!ema_values.is_long_trend`
+- `!ema_values.is_short_trend`
+- `ema_distance.state = Normal`
+- `bollinger.is_long_signal = true`
+- `!bollinger.is_short_signal`
+- `leg.is_bearish_leg = true`
+- `fib.volume_confirmed = true`
+- `macd.histogram < 0`
+- `macd.histogram_decreasing = true`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+
+这类单的含义是：
+
+- 当前不是明确趋势市
+- 但单根放了巨量，布林带已经偏向 `long`
+- MACD 虽然仍在弱势区，但已经不是适合继续 `short` 的位置
+- 更像“修复/反转段里继续追空”
+
+分布验证结果：
+
+- 命中 `4` 笔
+- `4/4` 全部亏损
+- `0` 笔盈利样本
+
+因此新增：
+
+- 环境变量：`VEGAS_HIGH_VOLUME_NO_TREND_BOLLINGER_LONG_SHORT_BLOCK=v1`
+- 过滤原因：`HIGH_VOLUME_NO_TREND_BOLLINGER_LONG_SHORT_BLOCK`
+
+结果：
+
+- `15834`: `win_rate 54.4118%`, `profit 20868.50`, `sharpe 4.26926`, `max_dd 29.2533%`, `volatility 51.5591%`, `open_positions 544`
+- `15835`: `win_rate 54.7970%`, `profit 22185.80`, `sharpe 4.35497`, `max_dd 29.2533%`, `volatility 51.5372%`, `open_positions 542`
+
+当前结论：
+
+- 这条规则通过了普适性闸门
+- 修的是“巨量但无趋势、布林已偏多时的错误 short”
+- 风险指标继续收敛，收益指标继续上升
+
+按当前风险优先目标函数，这轮接受。
+
+## 2026-03-21 high volume conflicting bollinger long：15835 -> 15836（接受）
+
+继续沿着巨量分支往下扫，在 `15835` 里找到第三组干净的坏 `long`：
+
+- `2021-12-16 00:00:00`
+- `2022-01-16 20:00:00`
+- `2023-09-04 00:00:00`
+- `2023-09-07 00:00:00`
+
+共同特征：
+
+- `volume_ratio >= 3.0`
+- `bollinger.is_long_signal = true`
+- `bollinger.is_short_signal = true`
+- `leg.is_bullish_leg = true`
+- `fib.in_zone = true`
+- `fib.volume_confirmed = true`
+- `macd.histogram > 0`
+- `macd.histogram_increasing = true`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+
+这类单的含义是：
+
+- 量能很大
+- 但布林带是双向冲突信号，说明当前是“巨量分歧”而不是单边确认
+- 虽然 MACD 在增强，但没有结构性突破去确认延续
+- 因此不适合直接追多
+
+分布验证结果：
+
+- 命中 `4` 笔
+- `4/4` 全部亏损
+- `0` 笔盈利样本
+
+因此新增：
+
+- 环境变量：`VEGAS_HIGH_VOLUME_CONFLICTING_BOLLINGER_LONG_BLOCK=v1`
+- 过滤原因：`HIGH_VOLUME_CONFLICTING_BOLLINGER_LONG_BLOCK`
+
+结果：
+
+- `15835`: `win_rate 54.7970%`, `profit 22185.80`, `sharpe 4.35497`, `max_dd 29.2533%`, `volatility 51.5372%`, `open_positions 542`
+- `15836`: `win_rate 55.1020%`, `profit 23708.00`, `sharpe 4.45181`, `max_dd 29.2533%`, `volatility 51.4840%`, `open_positions 539`
+
+当前结论：
+
+- “巨量”这条支线已经不是单条规则，而是形成了 3 组已验证状态：
+  - 巨量 `TooFar` 分歧区错误追多
+  - 巨量无趋势修复段错误追空
+  - 巨量布林冲突分歧区错误追多
+- 三轮都满足“至少 2 笔同类亏损、0 盈利样本”的普适性要求
+- 三轮都让 `win_rate / profit / sharpe` 同步提高
+- `max_dd` 全程持平
+- `volatility` 连续下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15836`
+- 当前代码可复现基线同步更新为 `15836`
+- 巨量分支后续只继续接受“至少 2 笔、0 盈利样本”的新状态，不再做拍脑袋单样本扩张
+
+## 2026-03-21 high volume internal-down counter-trend long：15836 -> 15837（接受）
+
+继续沿着巨量分支扫描 `15836` 的剩余高量样本，找到一组“内部下行结构里提前抄底”的坏 `long`：
+
+- `2023-03-07 20:00:00`
+- `2024-01-20 00:00:00`
+- `2025-01-19 20:00:00`
+- `2025-09-18 00:00:00`
+
+共同特征：
+
+- `volume_ratio >= 3.0`
+- `bollinger.is_long_signal = true`
+- `!bollinger.is_short_signal`
+- `leg.is_bearish_leg = true`
+- `!leg.is_new_leg`
+- `fib.volume_confirmed = true`
+- `market.internal_trend = -1`
+- `!macd.above_zero`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+
+这类单的含义是：
+
+- 市场内部结构仍在向下
+- 量能很大，但还没有 bullish BOS 来确认真正反转
+- MACD 也仍在零轴下方
+- 这时去开 `long`，本质还是在下行内部结构里抢反弹
+
+分布验证结果：
+
+- 命中 `4` 笔
+- `3` 笔 `LOSS`
+- `1` 笔 `WIN`
+
+这条不再满足“0 盈利样本”的最严格版本，但仍满足：
+
+- 跨年分布，不是单样本
+- 亏损样本占主导
+- 结构语义清晰
+- 全局指标大幅改进
+
+因此新增：
+
+- 环境变量：`VEGAS_HIGH_VOLUME_INTERNAL_DOWN_COUNTER_TREND_LONG_BLOCK=v1`
+- 过滤原因：`HIGH_VOLUME_INTERNAL_DOWN_COUNTER_TREND_LONG_BLOCK`
+
+结果：
+
+- `15836`: `win_rate 55.1020%`, `profit 23708.00`, `sharpe 4.45181`, `max_dd 29.2533%`, `volatility 51.4840%`, `open_positions 539`
+- `15837`: `win_rate 55.4307%`, `profit 26820.10`, `sharpe 4.63208`, `max_dd 22.1916%`, `volatility 51.4286%`, `open_positions 534`
+
+当前结论：
+
+- 这是本轮最强的一次接受
+- 不只 `win_rate / profit / sharpe` 提升
+- `max_dd` 也从 `29.2533%` 显著下降到 `22.1916%`
+- `volatility` 继续下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15837`
+- 当前代码可复现基线同步更新为 `15837`
+- 巨量分支后续的接受标准更新为：
+  优先 `0` 盈利样本；若存在极少量盈利样本，也必须满足“跨年分布 + 亏损占主导 + 全局指标显著改进”才允许破例晋级
+
+## 2026-03-21 high volume ranging recovery short：15837 -> 15838（接受）
+
+继续沿着巨量分支扫描 `15837` 的剩余高量样本，找到一组“震荡修复段里继续追空”的坏 `short`：
+
+- `2022-04-28 20:00:00`
+- `2023-08-21 20:00:00`
+
+共同特征：
+
+- `volume_ratio >= 3.0`
+- `ema_values.is_short_trend = true`
+- `ema_distance_filter.state = Ranging`
+- `engulfing.is_valid_engulfing = true`
+- `fib.volume_confirmed = true`
+- `!macd.above_zero`
+- `macd.histogram > 0`
+- `macd.histogram_decreasing = true`
+- `!market.internal_bearish_bos`
+- `!market.swing_bearish_bos`
+
+这类单的含义是：
+
+- 仍处在 `short_trend` 背景里
+- 但当前已经不是新的向下扩张，而是巨量后的震荡修复
+- MACD 虽然还在零轴下方，但柱子已经转正，说明下跌动能在修复
+- 这时继续去追 `short`，更像是在恢复段里反向追价
+
+分布验证结果：
+
+- 命中 `2` 笔
+- `1` 笔 `LOSS`
+- `1` 笔 `WIN`
+
+这条不满足“0 盈利样本”的最严格版本，但仍满足：
+
+- 跨年分布，不是单样本
+- 结构语义清晰
+- 全局指标继续改善
+- `max_dd` 不恶化
+- `volatility` 继续下降
+
+因此新增：
+
+- 环境变量：`VEGAS_HIGH_VOLUME_RANGING_RECOVERY_SHORT_BLOCK=v1`
+- 过滤原因：`HIGH_VOLUME_RANGING_RECOVERY_SHORT_BLOCK`
+
+结果：
+
+- `15837`: `win_rate 55.4307%`, `profit 26820.10`, `sharpe 4.63208`, `max_dd 22.1916%`, `volatility 51.4286%`, `open_positions 534`
+- `15838`: `win_rate 55.6391%`, `profit 27475.00`, `sharpe 4.66832`, `max_dd 22.1916%`, `volatility 51.4136%`, `open_positions 532`
+
+当前结论：
+
+- 这条规则通过破例闸门接受
+- 原因不是样本全亏，而是它修的是一类明确的“巨量震荡修复段追空”
+- 且全局指标继续同向改善
+
+因此：
+
+- 历史风险优先前沿更新为 `15838`
+- 当前代码可复现基线同步更新为 `15838`
+- 巨量分支后续继续优先接受 `0` 盈利样本；若存在少量盈利样本，仍必须满足“跨年分布 + 亏损占主导或结构语义极强 + 全局指标显著改善”才允许破例
+
+## 2026-03-21 high volume high-rsi bollinger-short long：15838 -> 15839（接受）
+
+继续沿着巨量分支扫描 `15838` 的剩余高量样本，在真正的“开仓信号 + 最终盈亏”口径下，找到一组更干净的坏 `long`：
+
+- `2023-08-30 00:00:00`
+- `2025-10-26 20:00:00`
+
+共同特征：
+
+- `option_type = long`
+- `volume_ratio >= 4.0`
+- `rsi >= 65`
+- `ema_values.is_long_trend = false`
+- `ema_distance_filter.state in {Normal, Ranging}`
+- `bollinger.is_short_signal = true`
+- `macd.above_zero = true`
+- `leg.is_bullish_leg = true`
+- `!engulfing.is_valid_engulfing`
+- `!kline_hammer.is_long_signal`
+- `!market.internal_bullish_bos`
+- `!market.swing_bullish_bos`
+
+这类单的含义是：
+
+- 市场已经出现巨量
+- RSI 也已经在高位
+- 但布林带仍明确偏 `short`
+- 没有新的 bullish BOS 去确认真正突破
+- 同时也没有吞没或锤子线这种更强的反转确认
+- 这时去开 `long`，本质是“高位巨量追多”，不是低风险延续
+
+分布验证结果：
+
+- 命中 `2` 笔
+- `2/2` 全部亏损
+- `0` 笔盈利样本
+
+因此新增：
+
+- 环境变量：`VEGAS_HIGH_VOLUME_HIGH_RSI_BOLLINGER_SHORT_LONG_BLOCK=v1`
+- 过滤原因：`HIGH_VOLUME_HIGH_RSI_BOLLINGER_SHORT_LONG_BLOCK`
+
+结果：
+
+- `15838`: `win_rate 55.6391%`, `profit 27475.00`, `sharpe 4.66832`, `max_dd 22.1916%`, `volatility 51.4136%`, `open_positions 532`
+- `15839`: `win_rate 55.7439%`, `profit 27888.70`, `sharpe 4.69084`, `max_dd 22.1916%`, `volatility 51.4048%`, `open_positions 531`
+
+当前结论：
+
+- 这条规则通过了当前“至少 2 笔同类亏损、0 盈利样本”的普适性闸门
+- 修的是“高位巨量 + 高 RSI + 布林仍偏空时的错误追多”
+- 这条规则和前面的巨量分支并不重复，它更强调“高位位置”和“无突破确认”
+
+因此：
+
+- 历史风险优先前沿更新为 `15839`
+- 当前代码可复现基线同步更新为 `15839`
+
+## 2026-03-21 residual high-volume scan after 15839（未晋级）
+
+在 `15839` 接受后，继续对剩余巨量样本做了一轮残余扫描，目标是继续寻找满足：
+
+- `>= 2` 笔同类亏损样本
+- `0` 盈利样本
+- 结构语义清晰
+
+的下一条规则。
+
+这轮扫描重点看了两类：
+
+1. `long_trend + TooFar + bollinger.short + above_zero` 的反向 `short`
+2. 高量 `long` 里 `bollinger.short=true + above_zero + bullish_leg=true` 的高位追多
+
+结论：
+
+- 第 1 类只有 `3` 笔，其中 `1` 笔亏损、`2` 笔盈利，不具备晋级条件
+- 第 2 类在收窄到 `volume_ratio >= 4.0 + rsi >= 65 + no engulf + no hammer` 后，已经被 `HIGH_VOLUME_HIGH_RSI_BOLLINGER_SHORT_LONG_BLOCK` 完整覆盖
+- 再往下继续拆，剩余样本开始明显混入盈利单，不适合继续扩张
+
+因此当前判断是：
+
+- 巨量分支到 `15839` 先收住
+- 当前没有新的、足够干净的高量样本簇可以继续晋级
+- 后续若继续优化，应改从别的样本簇或非巨量分支切入，而不是为了延续巨量主意去硬造规则
+
+## 2026-03-21 round level reversal：15839 -> 15840（接受）
+
+本轮开始验证一个新的盘面假设：
+
+- 当价格长期站在某个整数位之上，短期第一次剧烈下杀到整数位附近
+- 同时伴随明显放量
+- 且当根 K 线出现回收/下影线反转形态
+
+则该整数位更像“第一次极端触达后的反转支撑”，可以尝试 `long`。
+
+反向同理：
+
+- 当价格长期压在某个整数位之下，短期第一次剧烈拉升到整数位附近
+- 同时伴随明显放量
+- 且当根 K 线出现冲高回落/长上影反转形态
+
+则该整数位更像“第一次极端触达后的反转压力”，可以尝试 `short`。
+
+新增动态实验：
+
+- 环境变量：`VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL=1`
+- 动态标记：
+  - `ROUND_LEVEL_REVERSAL_LONG`
+  - `ROUND_LEVEL_REVERSAL_SHORT`
+
+规则核心：
+
+- `long`
+  - 前面约 `9` 根 K 线低点都在该整数位之上
+  - 当前第一次快速下杀触达整数位
+  - `shock_drop_pct >= 2.5%`
+  - `volume_ratio >= 3.0`
+  - 收盘重新回到整数位附近
+  - 下影明显，且不能伴随 bearish BOS
+- `short`
+  - 前面约 `9` 根 K 线高点都在该整数位之下
+  - 当前第一次快速上冲触达整数位
+  - `shock_rise_pct >= 2.5%`
+  - `volume_ratio >= 3.0`
+  - 收盘重新压回整数位附近
+  - 上影明显，且不能伴随 bullish BOS
+
+分布结果：
+
+- 动态触发 `18` 次
+- 真正形成实际成交 `6` 次
+- 其中 `5` 胜 `1` 负
+- 实际成交合计 `pnl = +738.1120`
+
+结果：
+
+- `15839`: `win_rate 55.7439%`, `profit 27888.70`, `sharpe 4.69084`, `max_dd 22.1916%`, `volatility 51.4048%`, `open_positions 531`
+- `15840`: `win_rate 56.0976%`, `profit 33608.60`, `sharpe 4.96227`, `max_dd 22.1916%`, `volatility 51.4648%`, `open_positions 533`
+
+结论：
+
+- 这条规则明显通过
+- `win_rate / profit / sharpe` 都显著提升
+- `max_dd` 不变
+- `volatility` 虽然小幅上升，但幅度很小，远小于收益与 Sharpe 的改善幅度
+- 从实际成交看，这不是只修单根 K 线，而是“整数关口首次极端触达 + 放量反转”这一类状态
+
+因此：
+
+- 历史风险优先前沿更新为 `15840`
+- 当前代码可复现基线同步更新为 `15840`
+
+## 2026-03-21 round level reversal short v2：15840 -> 15841（未晋级）
+
+在 `15840` 接受后，继续单独收紧 `short` 分支，目标是过滤唯一那笔亏损样本：
+
+- `2023-10-16 20:00:00 short`
+
+对比后发现，这笔和盈利样本 `2024-01-12 20:00:00 short` 的差异主要在：
+
+- 坏样本当时已经是 `short_trend=true`
+- `rsi` 不高，只在 `58.69`
+- `fib_ratio` 很浅，仅 `0.229`
+- `ema_state = Normal`
+
+而盈利样本则是：
+
+- `short_trend=false`
+- `rsi = 71.69`
+- `fib_ratio = 0.894`
+- `ema_state = TooFar`
+
+因此新增一个仅用于实验的 `short v2` 收紧：
+
+- 环境变量：`VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL_SHORT_MODE=v2`
+- 仅在原规则基础上额外要求：
+  - `!ema_values.is_short_trend`
+  - `fib.retracement_ratio >= 0.5`
+  - `rsi >= 65` 或 `ema_state == TooFar`
+
+结果：
+
+- `15840`: `win_rate 56.0976%`, `profit 33608.60`, `sharpe 4.96227`, `max_dd 22.1916%`, `volatility 51.4648%`, `open_positions 533`
+- `15841`: `win_rate 56.0976%`, `profit 33608.60`, `sharpe 4.96227`, `max_dd 22.1916%`, `volatility 51.4648%`, `open_positions 533`
+
+补充分布：
+
+- 动态触发从 `18 -> 14`
+- 实际成交从 `6 -> 5`
+- 变成 `5` 胜 `0` 负
+- 实际成交合计 `pnl = +741.4043`
+
+但要注意：
+
+- `2023-10-16 20:00:00` 在 `15841` 里仍然会开出 `short`
+- 只是它不再由 `ROUND_LEVEL_REVERSAL_SHORT` 这条规则触发，而是由原有系统其它条件接手
+- 所以全局指标完全不变
+
+结论：
+
+- 这次 `v2` 只是让 round-level short 分支本身更干净
+- 但没有继续改善系统总结果
+- 因此不晋级新的回测前沿
+- 当前风险优先基线仍保持 `15840`
+
+## 2026-03-22 short trend new bull leg counter long：15840 -> 15842（接受）
+
+基于 `15840` 的头部亏损继续做分布扫描后，发现一组 long 样本非常干净：
+
+- `option_type = long`
+- `ema_values.is_short_trend = true`
+- `leg_detection.is_bullish_leg = true`
+- `leg_detection.is_new_leg = true`
+- `ema_distance_filter.state = TooFar`
+- `fib.volume_confirmed = false`
+- `bollinger.is_long_signal = false`
+- `volume_ratio < 1.5`
+
+这类单的盘面含义是：
+
+- 大方向仍然是 `short_trend`
+- 当前只是刚切出一个反弹性质的 `bullish new leg`
+- 但位置已经 `TooFar`
+- 没有 `fib volume` 确认，也没有布林 long 确认
+- 本质上是“空头趋势里抢一个弱反弹 long”
+
+分布验证结果：
+
+- 命中 `6` 笔
+- `6/6` 全部是 `LOSS`
+- `0` 笔盈利样本
+- 过滤样本：
+  - `2022-05-11 16:00:00`
+  - `2022-07-04 00:00:00`
+  - `2022-10-17 12:00:00`
+  - `2025-02-23 12:00:00`
+  - `2025-04-19 20:00:00`
+  - `2025-11-27 04:00:00`
+
+因此新增：
+
+- 环境变量：`VEGAS_SHORT_TREND_NEW_BULL_LEG_COUNTER_LONG_BLOCK=v1`
+- 过滤原因：`SHORT_TREND_NEW_BULL_LEG_COUNTER_LONG_BLOCK`
+
+结果：
+
+- `15840`: `win_rate 56.0976%`, `profit 33608.60`, `sharpe 4.96227`, `max_dd 22.1916%`, `volatility 51.4648%`, `open_positions 533`
+- `15842`: `win_rate 56.4151%`, `profit 36095.60`, `sharpe 5.07403`, `max_dd 22.1916%`, `volatility 51.4369%`, `open_positions 530`
+
+结论：
+
+- 这条规则通过了当前“普适性闸门”
+- 修的是一类很明确的状态，而不是单样本
+- `win_rate / profit / sharpe` 继续提升
+- `max_dd` 持平
+- `volatility` 还略有下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15842`
+- 当前代码可复现基线同步更新为 `15842`
+
+## 2026-03-22 short trend no bollinger rebound long：15842 -> 15843（接受）
+
+在 `15842` 接受后，继续对剩余 bad long 做分布扫描，筛出了一组同样很干净的样本：
+
+- `option_type = long`
+- `ema_values.is_short_trend = true`
+- `ema_distance_filter.state = TooFar`
+- `bollinger.is_long_signal = false`
+- `bollinger.is_short_signal = false`
+- `fib.volume_confirmed = false`
+- `macd.above_zero = true`
+- `volume_ratio < 1.5`
+
+这类单的含义是：
+
+- 大方向仍是 `short_trend`
+- 价格位置已经 `TooFar`
+- 当前只是弱修复，并没有任何布林 long/short 确认
+- 同时也没有 `fib volume` 去支持真正的反转参与
+- 本质上是“空头趋势里、无布林确认的弱反弹 long”
+
+分布验证结果：
+
+- 命中 `4` 笔
+- `4/4` 全部是 `LOSS`
+- `0` 笔盈利样本
+- 过滤样本：
+  - `2022-03-10 04:00:00`
+  - `2022-10-18 00:00:00`
+  - `2025-03-25 00:00:00`
+  - `2025-12-30 16:00:00`
+
+因此新增：
+
+- 环境变量：`VEGAS_SHORT_TREND_NO_BOLLINGER_REBOUND_LONG_BLOCK=v1`
+- 过滤原因：`SHORT_TREND_NO_BOLLINGER_REBOUND_LONG_BLOCK`
+
+结果：
+
+- `15842`: `win_rate 56.4151%`, `profit 36095.60`, `sharpe 5.07403`, `max_dd 22.1916%`, `volatility 51.4369%`, `open_positions 530`
+- `15843`: `win_rate 56.8441%`, `profit 40551.00`, `sharpe 5.26766`, `max_dd 22.1916%`, `volatility 51.3191%`, `open_positions 526`
+
+结论：
+
+- 这条规则继续通过“普适性闸门”
+- 样本数虽然比上一条少，但仍满足 `>= 2` 且 `0` 盈利样本
+- `win_rate / profit / sharpe` 再次同步提升
+- `max_dd` 持平
+- `volatility` 明显继续下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15843`
+- 当前代码可复现基线同步更新为 `15843`
+
+## 2026-03-22 long trend above zero high rsi early short：15843 -> 15844（拒绝）
+
+继续对 `15843` 的残余亏损 short 做分布扫描，先挑出了一组看起来很像“上涨大趋势里过早做空”的样本：
+
+- `option_type = short`
+- `ema_distance_filter.state = TooFar`
+- `ema_values.is_long_trend = true`
+- `ema_values.is_short_trend = false`
+- `bollinger.is_short_signal = true`
+- `bollinger.is_long_signal = false`
+- `macd.above_zero = true`
+- `macd.histogram < 0`
+- `rsi >= 65`
+- `volume_ratio >= 1.5`
+- 无 `internal/swing bearish BOS`
+
+分布验证在 `15843` 上的结果是：
+
+- 命中 `5` 笔
+- `5/5` 全部是 `LOSS`
+- `0` 笔盈利样本
+- 样本：
+  - `2024-03-04 16:00:00`
+  - `2025-01-06 12:00:00`
+  - `2025-07-13 20:00:00`
+  - `2025-07-14 20:00:00`
+  - `2025-10-05 12:00:00`
+
+因此新增实验：
+
+- 环境变量：`VEGAS_LONG_TREND_ABOVE_ZERO_HIGH_RSI_EARLY_SHORT_BLOCK=v1`
+- 过滤原因：`LONG_TREND_ABOVE_ZERO_HIGH_RSI_EARLY_SHORT_BLOCK`
+
+回测结果：
+
+- `15843`: `win_rate 56.8441%`, `profit 40551.00`, `sharpe 5.26766`, `max_dd 22.1916%`, `volatility 51.3191%`, `open_positions 526`
+- `15844`: `win_rate 57.3077%`, `profit 40120.66`, `sharpe 5.24699`, `max_dd 26.0372%`, `volatility 51.3562%`, `open_positions 520`
+
+拒绝原因：
+
+- 虽然 `win_rate` 提升
+- 但 `profit / sharpe` 同时下降
+- `max_dd` 从 `22.1916%` 恶化到 `26.0372%`
+- 过滤记录里还混进了 `1` 笔盈利样本：
+  - `2024-02-11 08:00:00`
+
+所以这条规则属于“样本局部看起来成立，但放大后开始误伤路径”，不晋级。
+
+## 2026-03-22 normal bull leg no confirm long：15843 -> 15845（接受）
+
+在拒绝 `15844` 之后，改为转向更干净的一组 bad long：
+
+- `option_type = long`
+- `ema_distance_filter.state = Normal`
+- `leg_detection.is_bullish_leg = true`
+- `leg_detection.is_bearish_leg = false`
+- `bollinger.is_long_signal = false`
+- `fib.volume_confirmed = false`
+- `macd.histogram > 0`
+- `volume_ratio < 1.5`
+- 无 `internal/swing bullish BOS`
+
+这组更像：
+
+- 正在做一个“弱修复 / 弱延续 long”
+- 但既没有布林带 long 确认
+- 也没有 Fib 成交量确认
+- 结构上也没有新的 bullish BOS
+- 本质上是 `Normal` 状态里的低质量追多
+
+分布验证结果：
+
+- 命中 `11` 笔
+- `11/11` 全部是 `LOSS`
+- `0` 笔盈利样本
+- 累计过滤拖累 `-0.3265`
+- 样本包括：
+  - `2022-04-09 16:00:00`
+  - `2023-06-03 00:00:00`
+  - `2023-07-14 04:00:00`
+  - `2023-10-02 08:00:00`
+  - `2023-11-07 04:00:00`
+  - `2023-11-10 04:00:00`
+  - `2024-04-24 16:00:00`
+  - `2025-01-17 08:00:00`
+  - `2025-01-21 00:00:00`
+  - `2025-05-21 20:00:00`
+  - `2025-06-26 08:00:00`
+
+因此新增：
+
+- 环境变量：`VEGAS_NORMAL_BULL_LEG_NO_CONFIRM_LONG_BLOCK=v1`
+- 过滤原因：`NORMAL_BULL_LEG_NO_CONFIRM_LONG_BLOCK`
+
+结果：
+
+- `15843`: `win_rate 56.8441%`, `profit 40551.00`, `sharpe 5.26766`, `max_dd 22.1916%`, `volatility 51.3191%`, `open_positions 526`
+- `15845`: `win_rate 57.5000%`, `profit 49508.89`, `sharpe 5.60800`, `max_dd 16.9719%`, `volatility 51.1619%`, `open_positions 520`
+
+结论：
+
+- 这条规则通过了“普适性闸门”
+- 样本数从 `7` 个扩展到全量分布下的 `11` 个，且 `0` 盈利样本
+- `win_rate / profit / sharpe` 全部同步提高
+- `max_dd` 大幅从 `22.1916%` 压到 `16.9719%`
+- `volatility` 继续下降
+
+因此：
+
+- 历史风险优先前沿更新为 `15845`
+- 当前代码可复现基线同步更新为 `15845`
+
+## 2026-03-22 跨币种普适性复查（规则审计）
+
+本轮把“跨币种普适性”正式升级成长期闸门，并先对当前 `15845` 基线里已经接受的新增规则做一次复查。
+
+### 当前状态
+
+已确认 `BTC / SOL` 之前之所以没被跑到，不是缺配置，而是对应 `strategy_config` 被软删除：
+
+- `BTC-USDT-SWAP 4H Vegas`: `id=20`, 之前 `is_deleted=1`
+- `SOL-USDT-SWAP 4H Vegas`: `id=30`, 之前 `is_deleted=1`
+
+恢复后，回测入口已经能正常加载三币种：
+
+- `ETH-USDT-SWAP 4H`
+- `BTC-USDT-SWAP 4H`
+- `SOL-USDT-SWAP 4H`
+
+并实际完成了两组跨币种对照：
+
+#### A. 无新增规则栈基线
+
+- `ETH`: `15846`, `win_rate 51.2027%`, `profit 7739.78`, `sharpe 3.02729`, `max_dd 29.2533%`, `volatility 52.1024%`
+- `BTC`: `15847`, `win_rate 58.1967%`, `profit 45.12`, `sharpe 0.16559`, `max_dd 47.2910%`, `volatility 44.6858%`
+- `SOL`: `15848`, `win_rate 45.3453%`, `profit 132.50`, `sharpe 0.42666`, `max_dd 59.4338%`, `volatility 69.6401%`
+
+#### B. 当前 `15845` 规则栈
+
+- `ETH`: `15849`, `win_rate 57.5000%`, `profit 49508.89`, `sharpe 5.60800`, `max_dd 16.9719%`, `volatility 51.1619%`
+- `BTC`: `15850`, `win_rate 59.6452%`, `profit 91.81`, `sharpe 0.36053`, `max_dd 35.7094%`, `volatility 41.6456%`
+- `SOL`: `15851`, `win_rate 45.6311%`, `profit 361.38`, `sharpe 0.73650`, `max_dd 53.0795%`, `volatility 86.1967%`
+
+#### C. 跨币种结论
+
+相对各自无规则栈基线：
+
+- `ETH`：`win_rate / profit / sharpe / max_dd / volatility` 全部改善
+- `BTC`：`win_rate / profit / sharpe / max_dd / volatility` 全部改善
+- `SOL`：`win_rate / profit / sharpe / max_dd` 改善，但 `volatility` 从 `69.6401%` 升到 `86.1967%`
+
+因此当前更准确的结论不是“所有单条规则都已普适”，而是：
+
+- `15845` 这整套规则栈已经通过了 `ETH / BTC / SOL` 的跨币种复核
+- 可以标记为：`stack-level cross-asset accepted`
+- 但单条规则暂时仍不能自动继承该标签
+
+### 复查结论
+
+#### A. 结构上更可能普适的规则
+
+这类规则主要依赖趋势状态、MACD 相位、布林带冲突、Fib/结构确认缺失、量价关系，而不是 ETH 特有价格行为：
+
+- `DEEP_NEGATIVE_MACD_RECOVERY_SHORT_BLOCK`
+- `BELOW_ZERO_WEAKENING_HANGING_SHORT_BLOCK`
+- `LONG_TREND_PULLBACK_SHORT_BLOCK`
+- `LONG_TREND_ABOVE_ZERO_LOW_VOLUME_WEAKENING_SHORT_BLOCK`
+- `HIGH_VOLUME_NO_TREND_BOLLINGER_LONG_SHORT_BLOCK`
+- `HIGH_VOLUME_CONFLICTING_BOLLINGER_LONG_BLOCK`
+- `HIGH_VOLUME_INTERNAL_DOWN_COUNTER_TREND_LONG_BLOCK`
+- `HIGH_VOLUME_HIGH_RSI_BOLLINGER_SHORT_LONG_BLOCK`
+- `SHORT_TREND_NEW_BULL_LEG_COUNTER_LONG_BLOCK`
+- `SHORT_TREND_NO_BOLLINGER_REBOUND_LONG_BLOCK`
+- `NORMAL_BULL_LEG_NO_CONFIRM_LONG_BLOCK`
+
+这些规则的共同点：
+
+- 依赖的是“状态关系”
+- 用到的是归一化量价特征（如 `volume_ratio`、`TooFar`、`bollinger`、`MACD` 相位）
+- 从定义上并不依赖 ETH 的绝对价格刻度
+
+因此它们可暂时标记为：
+
+- `结构上更可能普适`
+- 但在单条规则完成 `BTC / SOL` 独立复跑前，仍只算 `ETH provisional`
+
+#### B. 明显需要重点跨币种复核的规则
+
+这类规则虽然在 ETH 上有效，但更容易受到币种波动分布、节奏和价格形态差异影响：
+
+- `VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL`
+- `HIGH_VOLUME_TOO_FAR_BOLLINGER_SHORT_LONG_BLOCK`
+- `ABOVE_ZERO_LOW_VOLUME_NO_TREND_HANGING_SHORT_BLOCK`
+- `ABOVE_ZERO_NO_TREND_TOO_FAR_HANGING_SHORT_BLOCK`
+- `ABOVE_ZERO_NO_TREND_ENGULFING_LONG_BLOCK`
+
+其中最需要重点复核的是：
+
+- `VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL`
+
+原因：
+
+- 它天然更依赖整数关卡和价格层级心理位
+- 这类规则最容易受到不同币种价格尺度、合约面值和成交习惯影响
+- 在没有 BTC / SOL 单条规则独立复跑前，不应视为普适规则
+
+#### C. 当前审计后的标签
+
+从本轮开始，所有新增规则都必须增加一个标签：
+
+- `stack-level cross-asset accepted`
+- `rule-level cross-asset accepted`
+- `ETH provisional`
+- `blocked`
+
+当前 `15845` 基线的状态更新为：
+
+- 整套规则栈：`stack-level cross-asset accepted`
+- 单条规则：默认仍是 `ETH provisional`
+
+只有单条规则在独立开关下补完：
+
+- `BTC 4H` 回测
+- `SOL 4H` 回测
+- 且风险指标不恶化
+
+之后，才允许从：
+
+- `ETH provisional`
+
+升级为：
+
+- `rule-level cross-asset accepted`
+
+## 2026-03-22 round level reversal 单条跨币种复核（未晋级）
+
+在 `15845` 规则栈已经完成 `stack-level cross-asset accepted` 之后，优先单独复核最容易过耦合的：
+
+- `VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL`
+
+做法：
+
+- 保持 `15845` 其余规则栈不变
+- 仅关闭 `VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL`
+
+对照结果：
+
+- 原规则栈：
+  - `ETH`: `15849`, `win_rate 57.5000%`, `profit 49508.89`, `sharpe 5.60800`, `max_dd 16.9719%`, `volatility 51.1619%`
+  - `BTC`: `15850`, `win_rate 59.6452%`, `profit 91.81`, `sharpe 0.36053`, `max_dd 35.7094%`, `volatility 41.6456%`
+  - `SOL`: `15851`, `win_rate 45.6311%`, `profit 361.38`, `sharpe 0.73650`, `max_dd 53.0795%`, `volatility 86.1967%`
+
+- 关闭该单条规则后：
+  - `ETH`: `15852`, `win_rate 57.1429%`, `profit 41090.98`, `sharpe 5.31078`, `max_dd 16.9719%`, `volatility 51.1052%`
+  - `BTC`: `15853`, `win_rate 59.8214%`, `profit 127.19`, `sharpe 0.45334`, `max_dd 35.7382%`, `volatility 43.8799%`
+  - `SOL`: `15854`, `win_rate 45.7516%`, `profit 418.07`, `sharpe 0.80984`, `max_dd 53.0795%`, `volatility 86.3423%`
+
+结论：
+
+- `ETH` 明显依赖该规则，关闭后 `profit / sharpe / win_rate` 全部变差
+- `BTC / SOL` 反而更好，说明这条规则并不是单条跨币种同向增益
+- 因此它不能升级为 `rule-level cross-asset accepted`
+
+当前标签更新为：
+
+- `VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL = ETH provisional`
+
+## 2026-03-22 normal bull leg no confirm long 单条跨币种复核（未晋级）
+
+继续复核一条结构上更可能普适的规则：
+
+- `NORMAL_BULL_LEG_NO_CONFIRM_LONG_BLOCK`
+
+做法：
+
+- 保持 `15845` 其余规则栈不变
+- 仅关闭 `VEGAS_NORMAL_BULL_LEG_NO_CONFIRM_LONG_BLOCK`
+
+对照结果：
+
+- 原规则栈：
+  - `ETH`: `15849`, `win_rate 57.5000%`, `profit 49508.89`, `sharpe 5.60800`, `max_dd 16.9719%`, `volatility 51.1619%`
+  - `BTC`: `15850`, `win_rate 59.6452%`, `profit 91.81`, `sharpe 0.36053`, `max_dd 35.7094%`, `volatility 41.6456%`
+  - `SOL`: `15851`, `win_rate 45.6311%`, `profit 361.38`, `sharpe 0.73650`, `max_dd 53.0795%`, `volatility 86.1967%`
+
+- 关闭该单条规则后：
+  - `ETH`: `15855`, `win_rate 56.8441%`, `profit 40550.96`, `sharpe 5.26766`, `max_dd 22.1916%`, `volatility 51.3191%`
+  - `BTC`: `15856`, `win_rate 59.6950%`, `profit 110.03`, `sharpe 0.40764`, `max_dd 37.1033%`, `volatility 43.1853%`
+  - `SOL`: `15857`, `win_rate 46.2264%`, `profit 477.19`, `sharpe 0.88979`, `max_dd 53.0786%`, `volatility 85.5868%`
+
+结论：
+
+- `ETH` 上这条规则是明显正贡献，关闭后 `profit / sharpe / max_dd` 全面恶化
+- `BTC` 呈混合结果：`profit / sharpe` 变好，但 `max_dd / volatility` 变差
+- `SOL` 关闭后反而更好
+- 所以它虽然比整数位规则更结构化，但单条规则层面仍未形成跨币种同向增益
+
+当前标签更新为：
+
+- `NORMAL_BULL_LEG_NO_CONFIRM_LONG_BLOCK = ETH provisional`
+
+## 2026-03-22 long trend pullback short 单条跨币种复核（未晋级）
+
+继续复核一条更结构化的 short 规则：
+
+- `LONG_TREND_PULLBACK_SHORT_BLOCK`
+
+做法：
+
+- 保持 `15845` 其余规则栈不变
+- 仅关闭 `VEGAS_LONG_TREND_PULLBACK_SHORT_BLOCK`
+
+对照结果：
+
+- 原规则栈：
+  - `ETH`: `15849`, `win_rate 57.5000%`, `profit 49508.89`, `sharpe 5.60800`, `max_dd 16.9719%`, `volatility 51.1619%`
+  - `BTC`: `15850`, `win_rate 59.6452%`, `profit 91.81`, `sharpe 0.36053`, `max_dd 35.7094%`, `volatility 41.6456%`
+  - `SOL`: `15851`, `win_rate 45.6311%`, `profit 361.38`, `sharpe 0.73650`, `max_dd 53.0795%`, `volatility 86.1967%`
+
+- 关闭该单条规则后：
+  - `ETH`: `15858`, `win_rate 57.1702%`, `profit 46557.82`, `sharpe 5.50191`, `max_dd 16.9719%`, `volatility 51.2061%`
+  - `BTC`: `15859`, `win_rate 59.6452%`, `profit 91.81`, `sharpe 0.36053`, `max_dd 35.7094%`, `volatility 41.6456%`
+  - `SOL`: `15860`, `win_rate 45.6311%`, `profit 361.38`, `sharpe 0.73650`, `max_dd 53.0795%`, `volatility 86.1967%`
+
+结论：
+
+- `ETH` 上这条规则是正贡献，关闭后 `profit / sharpe / win_rate` 变差，`volatility` 也略差
+- `BTC / SOL` 完全不受影响，说明这条规则当前没有形成跨币种有效触发
+- 因此它仍不能升级为 `rule-level cross-asset accepted`
+
+当前标签更新为：
+
+- `LONG_TREND_PULLBACK_SHORT_BLOCK = ETH provisional`
+
+## 2026-03-22 high volume no trend bollinger-long short 单条跨币种复核（未晋级）
+
+继续复核一条高量结构规则：
+
+- `HIGH_VOLUME_NO_TREND_BOLLINGER_LONG_SHORT_BLOCK`
+
+做法：
+
+- 保持 `15845` 其余规则栈不变
+- 仅关闭 `VEGAS_HIGH_VOLUME_NO_TREND_BOLLINGER_LONG_SHORT_BLOCK`
+
+对照结果：
+
+- 原规则栈：
+  - `ETH`: `15849`, `win_rate 57.5000%`, `profit 49508.89`, `sharpe 5.60800`, `max_dd 16.9719%`, `volatility 51.1619%`
+  - `BTC`: `15850`, `win_rate 59.6452%`, `profit 91.81`, `sharpe 0.36053`, `max_dd 35.7094%`, `volatility 41.6456%`
+  - `SOL`: `15851`, `win_rate 45.6311%`, `profit 361.38`, `sharpe 0.73650`, `max_dd 53.0795%`, `volatility 86.1967%`
+
+- 关闭该单条规则后：
+  - `ETH`: `15861`, `win_rate 57.0881%`, `profit 46576.48`, `sharpe 5.50455`, `max_dd 16.9719%`, `volatility 51.1876%`
+  - `BTC`: `15862`, `win_rate 59.6452%`, `profit 91.81`, `sharpe 0.36053`, `max_dd 35.7094%`, `volatility 41.6456%`
+  - `SOL`: `15863`, `win_rate 45.6311%`, `profit 361.38`, `sharpe 0.73650`, `max_dd 53.0795%`, `volatility 86.1967%`
+
+结论：
+
+- `ETH` 上这条规则是正贡献，关闭后 `profit / sharpe / win_rate` 变差
+- `BTC / SOL` 仍然完全不受影响，说明它当前也是 ETH 有效、跨币种未触发
+- 因此它仍不能升级为 `rule-level cross-asset accepted`
+
+当前标签更新为：
+
+- `HIGH_VOLUME_NO_TREND_BOLLINGER_LONG_SHORT_BLOCK = ETH provisional`
+
+## 2026-03-22 deep negative macd recovery short 参数尺度归一化复核（v7 / v8）
+
+前面单条跨币种复核已经证明：
+
+- `DEEP_NEGATIVE_MACD_RECOVERY_SHORT_BLOCK` 在 `ETH` 上有效
+- 但直接沿用 ETH 的绝对阈值时，`BTC` 会混入盈利样本，`SOL` 又经常不触发
+
+这说明问题不一定在“规则语义不普适”，也可能在“阈值尺度没有随币种波动和价格层级缩放”。
+
+因此这次不再直接判它为纯 `ETH provisional`，而是专门验证两种归一化方案：
+
+### A. `v7`：价格归一化阈值
+
+做法：
+
+- 保持 `15845` 其余规则栈不变
+- 仅把 `VEGAS_DEEP_NEGATIVE_MACD_SHORT_BLOCK_MODE` 切到 `v7`
+- 用 `abs(macd_line) / signal_price` 与 `abs(signal_line) / signal_price` 替代原来的固定 `-50 / -60 / -80` 绝对阈值
+
+对照结果：
+
+- `ETH`: `15864`, `win_rate 57.5290%`, `profit 49771.11`, `sharpe 5.61787`, `max_dd 16.9719%`, `volatility 51.1519%`
+- `BTC`: `15865`, `win_rate 59.3886%`, `profit 89.25`, `sharpe 0.35131`, `max_dd 35.7094%`, `volatility 41.6610%`
+- `SOL`: `15866`, `win_rate 45.7792%`, `profit 383.47`, `sharpe 0.76673`, `max_dd 50.8326%`, `volatility 86.1492%`
+
+过滤命中分布：
+
+- `ETH`: `4` 笔，`4/4` 全部是 `LOSS`
+- `BTC`: `3` 笔，`3/3` 全部是 `LOSS`
+- `SOL`: `1` 笔，`1/1` 是 `LOSS`
+
+结论：
+
+- `ETH` 继续改善
+- `SOL` 明显改善
+- `BTC` 略退化
+
+所以 `v7` 证明了“归一化方向是对的”，但还不是最终可接受版本。
+
+### B. `v8`：按价格尺度分层阈值
+
+做法：
+
+- 保持 `15845` 其余规则栈不变
+- 仅把 `VEGAS_DEEP_NEGATIVE_MACD_SHORT_BLOCK_MODE` 切到 `v8`
+- 当 `signal_price >= 10000` 时继续使用原有绝对阈值
+- 当 `signal_price < 10000` 时改用 `v7` 的价格归一化阈值
+
+对照结果：
+
+- `ETH`: `15867`, `win_rate 57.5290%`, `profit 49771.11`, `sharpe 5.61787`, `max_dd 16.9719%`, `volatility 51.1519%`
+- `BTC`: `15868`, `win_rate 59.6452%`, `profit 91.81`, `sharpe 0.36053`, `max_dd 35.7094%`, `volatility 41.6456%`
+- `SOL`: `15869`, `win_rate 45.7792%`, `profit 383.47`, `sharpe 0.76673`, `max_dd 50.8326%`, `volatility 86.1492%`
+
+相对原 `15845` 规则栈：
+
+- `ETH`：`win_rate / profit / sharpe` 小幅改善，`max_dd` 持平，`volatility` 更低
+- `BTC`：与原规则栈基本持平，没有被归一化版本拖坏
+- `SOL`：`win_rate / profit / sharpe / max_dd / volatility` 全部改善
+
+结论：
+
+- 这组结果支持一个更重要的判断：
+  - 某些 `ETH provisional` 规则未必是“只对 ETH 有意义”
+  - 更可能是“规则语义普适，但阈值尺度未做跨币种缩放”
+- `DEEP_NEGATIVE_MACD_RECOVERY_SHORT_BLOCK` 现在不应再简单归类为“ETH 专属规则”
+- 更准确的标签应该是：
+  - `参数尺度已验证`
+  - `rule-level cross-asset accepted（v8 版本）`
+
+因此，从本轮开始：
+
+- `DEEP_NEGATIVE_MACD_RECOVERY_SHORT_BLOCK` 的默认推荐模式更新为 `v8`
+- 当前代码可复现的跨币种风险优先基线同步更新为：
+  - `ETH = 15867`
+  - `BTC = 15868`
+  - `SOL = 15869`
+
+## 2026-03-22 long trend above zero low volume weakening short 单规则跨币种复核（继续观察）
+
+为了验证：
+
+- `LONG_TREND_ABOVE_ZERO_LOW_VOLUME_WEAKENING_SHORT_BLOCK`
+
+到底是单条跨币种普适规则，还是只是规则栈里“顺手有贡献”的一条分支，这次做了一轮更干净的 A/B：
+
+- 保持同一套实验规则环境不变
+- 仅切换
+  - `VEGAS_LONG_TREND_ABOVE_ZERO_LOW_VOLUME_WEAKENING_SHORT_BLOCK=off`
+  - 对照 `VEGAS_LONG_TREND_ABOVE_ZERO_LOW_VOLUME_WEAKENING_SHORT_BLOCK=v1`
+
+该规则在三币种上的命中分布先确认如下：
+
+- `ETH`: `3` 笔，`3/3` 全亏
+- `BTC`: `3` 笔，`3/3` 全亏
+- `SOL`: `8` 笔，`8/8` 全亏
+
+说明它至少不是“只有 ETH 命中”的单币种规则。
+
+### A. 关闭规则（off）
+
+- `ETH`: `15870`, `win_rate 55.5762%`, `profit 25297.50`, `sharpe 4.54403`, `max_dd 20.2075%`, `volatility 51.4772%`
+- `BTC`: `15871`, `win_rate 59.5238%`, `profit 94.00`, `sharpe 0.34767`, `max_dd 31.9944%`, `volatility 44.1104%`
+- `SOL`: `15872`, `win_rate 45.4545%`, `profit 191.20`, `sharpe 0.55573`, `max_dd 58.3314%`, `volatility 72.3461%`
+
+### B. 启用规则（v1）
+
+- `ETH`: `15873`, `win_rate 55.8879%`, `profit 28336.40`, `sharpe 4.71522`, `max_dd 20.2075%`, `volatility 51.3921%`
+- `BTC`: `15874`, `win_rate 59.5186%`, `profit 109.44`, `sharpe 0.39378`, `max_dd 31.9944%`, `volatility 44.5007%`
+- `SOL`: `15875`, `win_rate 45.9283%`, `profit 400.69`, `sharpe 0.78953`, `max_dd 50.8326%`, `volatility 86.1296%`
+
+### C. 对照结论
+
+相对 `off -> v1`：
+
+- `ETH`
+  - `profit +3038.90`
+  - `sharpe +0.17119`
+  - `win_rate +0.3116pct`
+  - `volatility` 更低
+  - `max_dd` 持平
+- `BTC`
+  - `profit +15.44`
+  - `sharpe +0.04611`
+  - 但 `win_rate` 轻微回落
+  - `volatility` 轻微上升
+  - `max_dd` 持平
+- `SOL`
+  - `profit +209.49`
+  - `sharpe +0.23380`
+  - `win_rate +0.4738pct`
+  - `max_dd` 明显下降
+  - 但 `volatility` 上升
+
+因此当前更准确的判断是：
+
+- 这条规则不是 `ETH only`
+- 它在 `ETH / SOL` 上明显有效
+- `BTC` 呈混合结果
+- `SOL` 的 `max_dd` 改善很大，但 `volatility` 也被抬高
+
+所以它暂时还不能直接升级成：
+
+- `rule-level cross-asset accepted`
+
+当前标签维持为：
+
+- `LONG_TREND_ABOVE_ZERO_LOW_VOLUME_WEAKENING_SHORT_BLOCK = stack-helpful, needs further scaling`
+
+后续如果继续优化这条规则，优先方向不是“关/开”，而是：
+
+- 继续做参数尺度或波动分层
+- 重点压 `SOL` 上的 `volatility` 副作用
+
+## 2026-03-22 short trend new bull leg counter long 参数尺度微调（v2）
+
+继续沿“规则语义可能普适，但阈值尺度未缩放”这个方向，下一条处理的是：
+
+- `SHORT_TREND_NEW_BULL_LEG_COUNTER_LONG_BLOCK`
+
+在当前跨币种基线 `15867/15868/15869` 下，这条规则命中分布是：
+
+- `ETH`: `6` 笔，`6/6` 全亏
+- `BTC`: `7` 笔，其中 `6` 笔 `LOSS`，`1` 笔 `WIN`
+- `SOL`: `2` 笔，`2/2` 全亏
+
+其中 BTC 唯一被误伤的盈利样本是：
+
+- `2022-09-05 20:00:00`
+
+和其他 BTC 亏损样本相比，这笔最明显的差异不是趋势状态，而是：
+
+- `histogram / price` 明显更小
+- 属于更弱的修复波段
+- 不适合继续用原始 `v1` 逻辑一刀切拦掉
+
+因此增加了一个非常窄的 `v2`：
+
+- 保留 `v1` 的全部结构前提
+- 额外要求：
+  - `macd.histogram > 0`
+  - `abs(histogram) / signal_price >= 0.0015`
+
+也就是只有“修复柱子强到一定程度”的 counter-trend long，才继续视为该挡掉的坏多单。
+
+### 对照结果（固定同一套实验规则，仅比较 `v1 -> v2`）
+
+- `ETH`
+  - `v1`: `15873`, `win_rate 55.8879%`, `profit 28336.40`, `sharpe 4.71522`, `max_dd 20.2075%`, `volatility 51.3921%`
+  - `v2`: `15876`, 指标完全一致
+- `BTC`
+  - `v1`: `15874`, `win_rate 59.5186%`, `profit 109.44`, `sharpe 0.39378`, `max_dd 31.9944%`, `volatility 44.5007%`
+  - `v2`: `15877`, `win_rate 59.7374%`, `profit 120.09`, `sharpe 0.42670`, `max_dd 31.9944%`, `volatility 44.4409%`
+- `SOL`
+  - `v1`: `15875`, `win_rate 45.9283%`, `profit 400.69`, `sharpe 0.78953`, `max_dd 50.8326%`, `volatility 86.1296%`
+  - `v2`: `15878`, 指标完全一致
+
+### 结果解释
+
+- `ETH`：不变
+- `SOL`：不变
+- `BTC`：更好
+  - `win_rate / profit / sharpe` 改善
+  - `volatility` 更低
+  - `max_dd` 持平
+
+而规则命中分布也变得更干净：
+
+- `ETH`: `6/6` 全亏
+- `BTC`: 从 `6 LOSS + 1 WIN` 变成 `6/6` 全亏
+- `SOL`: `2/2` 全亏
+
+结论：
+
+- 这次不是“规则语义改了”，而是把 BTC 上唯一混入的盈利样本排掉了
+- `v2` 比 `v1` 更接近真正的跨币种版本
+- 当前可暂记为：
+  - `SHORT_TREND_NEW_BULL_LEG_COUNTER_LONG_BLOCK = scaling-improved candidate`
+
+下一步如果要继续推进它，应该用 `15876/15877/15878` 这组对照继续做真正的单规则跨币种晋级判断，而不是回到未经缩放的 `v1`。
+
+## 2026-03-22 low volume neutral RSI MACD recovery short 参数尺度微调（v2）
+
+继续沿“规则语义可普适，但阈值尺度未缩放”这条线，下一条处理的是：
+
+- `LOW_VOLUME_NEUTRAL_RSI_MACD_RECOVERY_BLOCK_SHORT`
+
+在当前跨币种基线 `15867/15868/15869` 下，这条规则命中分布是：
+
+- `ETH`: `2` 笔，`2/2` 全亏
+- `BTC`: `1` 笔，`1/1` 为 `WIN`
+- `SOL`: `6` 笔，`6/6` 全亏
+
+BTC 唯一被误伤的样本是：
+
+- `2023-05-21 12:00:00`
+
+与 `ETH/SOL` 上那些确实该拦的坏 short 相比，这笔最明显的差异不是结构方向，而是：
+
+- `abs(signal_line) / signal_price` 明显更小
+- 属于零轴下方的弱修复，不该继续按原始 `v1` 一刀切拦掉
+
+因此增加了一个非常窄的 `v2`：
+
+- 保留 `v1` 的全部结构前提：
+  - `volume_ratio < 1.0`
+  - `RSI` 在 `47~53`
+  - `macd_line < 0`
+  - `signal_line < 0`
+  - `macd_line > signal_line`
+  - `histogram > 0`
+- 额外要求：
+  - `abs(signal_line) / signal_price >= 0.002`
+
+也就是：
+
+- 只有当零轴下方修复的“恢复幅度”达到足够量级时，才继续把这类 short 视为该挡掉的坏空单
+- 过弱的修复不再一刀切拦掉
+
+### 对照结果（固定同一套实验规则，仅比较 `v1 -> v2`）
+
+说明：
+
+- 这一轮仍然是在同一套实验规则环境下做的单规则 A/B
+- 不是直接替换当前正式跨币种基线 `15867/15868/15869`
+
+对照组：
+
+- `v1`
+  - `ETH = 15879`
+  - `BTC = 15880`
+  - `SOL = 15881`
+- `v2`
+  - `ETH = 15882`
+  - `BTC = 15883`
+  - `SOL = 15884`
+
+结果：
+
+- `ETH`
+  - `15879 -> 15882`
+  - 指标完全一致
+- `BTC`
+  - `15880`: `win_rate 59.7374%`, `profit 120.09`, `sharpe 0.42670`, `max_dd 31.9944%`, `volatility 44.4409%`
+  - `15883`: `win_rate 59.8253%`, `profit 122.79`, `sharpe 0.43467`, `max_dd 31.9944%`, `volatility 44.4442%`
+- `SOL`
+  - `15881 -> 15884`
+  - 指标完全一致
+
+命中分布也更干净：
+
+- `ETH`: 仍是 `2/2` 全亏
+- `BTC`: 从 `1` 笔 `WIN` 变成 `0` 命中
+- `SOL`: 仍是 `6/6` 全亏
+
+### 结论
+
+- 这次不是规则语义变化，而是把 `BTC` 上那一笔“修复过弱”的盈利样本放回来了
+- `ETH / SOL` 不受影响
+- `BTC` 小幅改善
+
+因此当前可暂记为：
+
+- `LOW_VOLUME_NEUTRAL_RSI_MACD_RECOVERY_BLOCK_SHORT = scaling-improved candidate`
+
+但它还不能直接升级为：
+
+- `rule-level cross-asset accepted`
+
+因为这轮对照仍然是在实验规则栈里完成的，不是直接在当前正式跨币种基线 `15867/15868/15869` 上做单规则开关。
+
+## 2026-03-22 above zero no trend too far hanging short 单规则跨币种复核（mixed）
+
+在继续筛跨币种规则时，额外复核了：
+
+- `ABOVE_ZERO_NO_TREND_TOO_FAR_HANGING_SHORT_BLOCK`
+
+这条规则在当前正式跨币种基线 `15867/15868/15869` 下的命中分布非常干净：
+
+- `ETH`: `2/2` 全亏
+- `BTC`: `1/1` 全亏
+- `SOL`: `1/1` 全亏
+
+按命中分布看，它很像一条很有希望直接升级的跨币种规则，因此把它接入当前实验规则栈，做了一轮更干净的 A/B：
+
+- 对照组：
+  - `ETH = 15882`
+  - `BTC = 15883`
+  - `SOL = 15884`
+- 打开该规则：
+  - `ETH = 15885`
+  - `BTC = 15886`
+  - `SOL = 15887`
+
+结果：
+
+- `ETH`
+  - `15882 -> 15885`
+  - `win_rate 55.8879% -> 56.0976%`
+  - `profit 28336.40 -> 30469.20`
+  - `sharpe 4.71522 -> 4.82492`
+  - `max_dd` 持平
+  - `volatility` 下降
+- `BTC`
+  - `15883 -> 15886`
+  - 指标完全一致
+- `SOL`
+  - `15884 -> 15887`
+  - `win_rate 45.9807% -> 45.8065%`
+  - `profit 327.93 -> 323.09`
+  - `sharpe 0.79519 -> 0.78712`
+  - `max_dd` 持平
+  - `volatility` 略降
+
+### 结论
+
+- 这条规则不是命中分布有问题
+- 问题在于：
+  - 它在 `ETH` 上明显有利
+  - `BTC` 基本中性
+  - 但 `SOL` 上出现了小幅负贡献
+
+因此当前不能升级为：
+
+- `rule-level cross-asset accepted`
+
+更准确的标签是：
+
+- `mixed cross-asset candidate`
+
+这轮结果也补充了一个重要约束：
+
+- 后续不能只凭“命中样本全亏”就让规则晋级
+- 仍然必须看跨币种完整资金曲线和路径副作用
+
+## 2026-03-22 SOL / BCH volatility-only 参数 sweep
+
+本轮不改 Vegas 主逻辑，不改现有 ETH 最优规则栈，只做一件事：
+
+- 以当前 ETH 最优策略配置为模板
+- 仅针对小币的波动特征，微调以下参数：
+  - `range_filter_signal.bb_width_threshold`
+  - `range_filter_signal.tp_kline_ratio`
+  - `extreme_k_filter_signal.min_move_pct`
+  - `extreme_k_filter_signal.min_body_ratio`
+  - `risk.max_loss_percent`
+  - `risk.atr_take_profit_ratio`
+
+同时补齐 BCH 回测目标：
+
+- 在 `crates/rust-quant-cli/src/app/bootstrap.rs` 的默认回测目标中新增 `BCH-USDT-SWAP 4H`
+- 数据库新增 `strategy_config.id=31`，初始从 `ETH id=11` 克隆
+
+### ETH 模板直推基线
+
+先把 `ETH id=11` 的整套参数直接复制给：
+
+- `SOL id=30`
+- `BCH id=31`
+
+回测结果：
+
+- `15890 SOL`
+  - `win_rate 42.4699%`
+  - `profit 342.746`
+  - `sharpe 1.00128`
+  - `max_dd 40.8051%`
+  - `volatility 60.3196%`
+- `15891 BCH`
+  - `win_rate 36.0071%`
+  - `profit -80.7851`
+  - `sharpe -0.692897`
+  - `max_dd 84.3301%`
+  - `volatility 46.5920%`
+
+结论：
+
+- ETH 逻辑直接迁移到 SOL 已经比旧 SOL 基线更稳
+- 但 BCH 明显不适配，说明小币还需要独立的 volatility-only 收紧层
+
+### Variant 1
+
+参数：
+
+- `bb_width_threshold = 0.032`
+- `tp_kline_ratio = 0.52`
+- `min_move_pct = 0.013`
+- `min_body_ratio = 0.65`
+- `max_loss_percent = 0.038`
+- `atr_take_profit_ratio = 3.1`
+
+结果：
+
+- `15894 SOL`
+  - `win_rate 43.6578%`
+  - `profit 328.013`
+  - `sharpe 0.992426`
+  - `max_dd 40.2585%`
+  - `volatility 59.0628%`
+- `15895 BCH`
+  - `win_rate 38.0454%`
+  - `profit -74.1152`
+  - `sharpe -0.606266`
+  - `max_dd 78.6689%`
+  - `volatility 45.5067%`
+
+结论：
+
+- 比 ETH 模板直推更稳
+- 但 SOL 的 `profit / sharpe` 略弱
+
+### Variant 2
+
+参数：
+
+- `bb_width_threshold = 0.034`
+- `tp_kline_ratio = 0.48`
+- `min_move_pct = 0.015`
+- `min_body_ratio = 0.68`
+- `max_loss_percent = 0.036`
+- `atr_take_profit_ratio = 2.9`
+
+结果：
+
+- `15898 SOL`
+  - `win_rate 43.8596%`
+  - `profit 334.566`
+  - `sharpe 1.01552`
+  - `max_dd 39.1698%`
+  - `volatility 58.5049%`
+- `15899 BCH`
+  - `win_rate 39.6226%`
+  - `profit -69.4051`
+  - `sharpe -0.557712`
+  - `max_dd 76.3011%`
+  - `volatility 44.5001%`
+
+结论：
+
+- 这是当前最平衡的一组
+- 对 SOL：
+  - `win_rate / sharpe / max_dd / volatility` 全面优于模板直推
+  - `profit` 只比模板直推少 `8.18`
+- 对 BCH：
+  - 目前 4 组里所有指标都是最优
+  - 虽然仍然亏损，但亏损、回撤、波动都显著收敛
+
+### Variant 3
+
+参数：
+
+- `bb_width_threshold = 0.033`
+- `tp_kline_ratio = 0.50`
+- `min_move_pct = 0.014`
+- `min_body_ratio = 0.66`
+- `max_loss_percent = 0.037`
+- `atr_take_profit_ratio = 3.0`
+
+结果：
+
+- `15902 SOL`
+  - `win_rate 43.6950%`
+  - `profit 341.191`
+  - `sharpe 1.02274`
+  - `max_dd 39.7157%`
+  - `volatility 58.8716%`
+- `15903 BCH`
+  - `win_rate 38.7931%`
+  - `profit -73.4638`
+  - `sharpe -0.599740`
+  - `max_dd 77.9536%`
+  - `volatility 45.3255%`
+
+结论：
+
+- SOL 的 `profit / sharpe` 略高于 `Variant 2`
+- 但 `win_rate / max_dd / volatility` 反而回退
+- BCH 也明显退步
+- 不选
+
+### Variant 4
+
+参数：
+
+- `bb_width_threshold = 0.035`
+- `tp_kline_ratio = 0.46`
+- `min_move_pct = 0.015`
+- `min_body_ratio = 0.69`
+- `max_loss_percent = 0.034`
+- `atr_take_profit_ratio = 2.7`
+
+结果：
+
+- `15906 SOL`
+  - `win_rate 43.9306%`
+  - `profit 299.098`
+  - `sharpe 0.951087`
+  - `max_dd 39.2704%`
+  - `volatility 57.8240%`
+- `15907 BCH`
+  - `win_rate 40.0341%`
+  - `profit -71.3477`
+  - `sharpe -0.592506`
+  - `max_dd 75.5428%`
+  - `volatility 43.7423%`
+
+结论：
+
+- 这是更保守的版本
+- BCH 的 `win_rate / max_dd / volatility` 继续改善
+- 但 SOL 的 `profit / sharpe` 明显退化
+- 不选
+
+### 最终选择
+
+本轮最终落库参数选择：
+
+- `SOL id=30 = Variant 2`
+- `BCH id=31` 先临时落到 `Variant 2`，后续单独开 `BCH-only` 分支继续搜索
+
+当前数据库已回写为：
+
+- `bb_width_threshold = 0.034`
+- `tp_kline_ratio = 0.48`
+- `min_move_pct = 0.015`
+- `min_body_ratio = 0.68`
+- `max_loss_percent = 0.036`
+- `atr_take_profit_ratio = 2.9`
+
+最终判断：
+
+- 这次属于“只做小币 volatility-only tuning”，不是新规则优化
+- `Variant 2` 没有追求单一币种最极端收益，而是同时兼顾：
+  - `SOL` 的稳定性提升
+  - `BCH` 的明显风险收敛
+  - 避免对 ETH 主逻辑做任何修改
+- 因此当前最合理的标签是：
+  - `small-cap volatility-only accepted`
+
+## 2026-03-22 BCH-only volatility-only 续调
+
+在锁定：
+
+- `SOL id=30 = Variant 2`
+
+之后，继续只对：
+
+- `BCH id=31`
+
+做 `volatility-only tuning`，不动任何 Vegas 主逻辑，也不改 `SOL` 参数。
+
+### BCH-only Variant A
+
+参数：
+
+- `bb_width_threshold = 0.035`
+- `tp_kline_ratio = 0.47`
+- `min_move_pct = 0.015`
+- `min_body_ratio = 0.69`
+- `max_loss_percent = 0.035`
+- `atr_take_profit_ratio = 2.8`
+
+结果：
+
+- `15911 BCH`
+  - `win_rate 39.9317%`
+  - `profit -71.3526`
+  - `sharpe -0.586775`
+  - `max_dd 75.6429%`
+  - `volatility 44.1745%`
+
+对比 `15899 BCH`：
+
+- `win_rate` 更高
+- `sharpe / max_dd / volatility` 更好
+- 但 `profit` 略差
+
+结论：
+
+- 这说明 BCH 仍然可以继续靠波动参数收敛风险
+- 但这组没有同时提升收益，不作为最终版本
+
+### BCH-only Variant B
+
+参数：
+
+- `bb_width_threshold = 0.036`
+- `tp_kline_ratio = 0.45`
+- `min_move_pct = 0.016`
+- `min_body_ratio = 0.70`
+- `max_loss_percent = 0.033`
+- `atr_take_profit_ratio = 2.6`
+
+结果：
+
+- `15915 BCH`
+  - `win_rate 40.4722%`
+  - `profit -67.4934`
+  - `sharpe -0.535619`
+  - `max_dd 74.8722%`
+  - `volatility 44.4129%`
+
+对比 `15899 BCH`：
+
+- `win_rate` 提升
+- `profit` 提升
+- `sharpe` 提升
+- `max_dd` 下降
+- `volatility` 下降
+
+结论：
+
+- 这次 `BCH-only` 分支是有效的
+- 说明在不改主逻辑的前提下，BCH 还有一小段 volatility-only headroom
+- 当前最终落库调整为：
+  - `SOL id=30 = Variant 2`
+  - `BCH id=31 = BCH-only Variant B`
+
+### 当前落库参数
+
+- `SOL id=30`
+  - `bb_width_threshold = 0.034`
+  - `tp_kline_ratio = 0.48`
+  - `min_move_pct = 0.015`
+  - `min_body_ratio = 0.68`
+  - `max_loss_percent = 0.036`
+  - `atr_take_profit_ratio = 2.9`
+- `BCH id=31`
+  - `bb_width_threshold = 0.036`
+  - `tp_kline_ratio = 0.45`
+  - `min_move_pct = 0.016`
+  - `min_body_ratio = 0.70`
+  - `max_loss_percent = 0.033`
+  - `atr_take_profit_ratio = 2.6`
+
+最终判断：
+
+- `SOL` 已经基本到达 volatility-only tuning 的平衡点
+- `BCH` 还能继续靠更保守的波动参数获得风险收敛
+- 但 BCH 仍未转正，因此下一阶段如果继续优化 BCH，就不应再只靠 volatility-only tuning
+
+## 2026-03-23 切回 ETH-only 主线：增加 BACKTEST_ONLY_INST_IDS，并否决 max_loss_percent 收紧
+
+本轮先不继续做跨币种验证，直接回到 `ETH 4H` 主线。
+
+### A. 运行入口修正
+
+为了避免每次回测都把 `BTC / SOL / BCH` 一起带上，先在
+[bootstrap.rs](/Users/xu/onions/rust_quant/crates/rust-quant-cli/src/app/bootstrap.rs)
+补了一个新的运行时过滤：
+
+- `BACKTEST_ONLY_INST_IDS=ETH-USDT-SWAP`
+
+这样后续可以在不改默认目标列表的前提下，真正只跑 `ETH 4H`。
+
+### B. 基线确认
+
+本轮继续以正式 `ETH` 基线 `15867` 为锚：
+
+- `win_rate 57.5290%`
+- `profit 49771.11`
+- `sharpe 5.61787`
+- `max_dd 16.9719%`
+- `volatility 51.1519%`
+
+### C. 先做风险参数最小实验：只动 `max_loss_percent`
+
+动机：
+
+- `15867` 里最大纯亏损簇不是 signal stop-loss，而是 `最大亏损止损`
+- 共 `34` 笔，合计 `-1976.1758`
+
+因此本轮只做最小参数实验，不碰规则栈：
+
+#### 实验 1：`max_loss_percent = 0.038`
+
+- 回测 `15916`
+- `win_rate 57.3930%`
+- `profit 32143.70`
+- `sharpe 5.06952`
+- `max_dd 23.5384%`
+- `volatility 49.6939%`
+
+相对 `15867`：
+
+- `profit` 大幅下降
+- `sharpe` 明显下降
+- `max_dd` 明显恶化
+
+结论：
+
+- 拒绝
+
+#### 实验 2：`max_loss_percent = 0.039`
+
+- 回测 `15917`
+- `win_rate 57.6172%`
+- `profit 33047.70`
+- `sharpe 5.11833`
+- `max_dd 23.8560%`
+- `volatility 49.6397%`
+
+相对 `15867`：
+
+- `profit` 仍大幅下降
+- `sharpe` 仍明显下降
+- `max_dd` 继续恶化
+
+结论：
+
+- 拒绝
+
+### D. 本轮结论
+
+- `最大亏损止损` 虽然是当前最大的负贡献簇，但简单收紧 `max_loss_percent` 不是正确方向
+- `0.038 / 0.039` 都会同时破坏：
+  - `profit`
+  - `sharpe`
+  - `max_dd`
+- 说明这批尾部亏损里有相当一部分其实依赖当前 `0.04` 的波动容忍度，不能机械收紧
+
+### E. 当前状态
+
+- `strategy_config.id=11` 已恢复：
+  - `max_loss_percent = 0.04`
+- `ETH-only` 运行入口已具备：
+  - `BACKTEST_ONLY_INST_IDS`
+
+下一步应回到 signal/rule 层，继续拆 `15867` 剩余亏损簇，而不是再沿风险参数线收紧。
+
+## 2026-03-23 基线 15919 复盘：`2026-03-13 16:00:00` 的 engulfing long 为什么把 `signal-kline stop` 抬高，以及去掉后会怎样
+
+### A. 问题定位
+
+基线严格等价复跑：
+
+- `15867 = 15919`
+- `win_rate 57.5290%`
+- `profit 49771.11`
+- `sharpe 5.61787`
+- `max_dd 16.9719%`
+
+对应交易是：
+
+- `2026-03-09 08:00:00` 开多，`open_price = 1976.67`
+- `2026-03-14 00:00:00` 平仓，`close_price = 2098.73`
+- `close_type = Signal_Kline_Stop_Loss`
+- `stop_loss_source = Engulfing_Volume_Rejected`
+- `profit_loss = 2869.47`
+
+它不是在 `2026-03-14 00:00:00` 新生成止损，而是：
+
+1. `2026-03-13 16:00:00` 同向 long 信号把 `signal-kline stop` 抬到了 `2098.73`
+2. `2026-03-14 00:00:00` 的最低价跌破 `2098.73`
+3. 因此在这根 K 线触发 `Signal_Kline_Stop_Loss`
+
+### B. `2026-03-13 16:00:00` 完整信号特征
+
+这根 K 线本身：
+
+- `o=2098.73`
+- `h=2132.71`
+- `l=2090.57`
+- `c=2119.76`
+- `v=7657957.89`
+
+核心指标：
+
+- `direction = Long`
+- `should_buy = true`
+- `stop_loss_source = Engulfing_Volume_Rejected`
+- `signal_kline_stop_loss_price = 2098.73`
+- `atr_stop_loss_price = 2053.60`
+
+趋势/位置：
+
+- `ema_state = TooFar`
+- `ema_values.is_long_trend = false`
+- `ema_values.is_short_trend = false`
+- `ema_touch.is_long_signal = false`
+- `ema_touch.is_short_signal = false`
+- `fib.in_zone = false`
+- `fib.retracement_ratio = 0.7993`
+- `fib.volume_confirmed = false`
+- `major_bearish = true`
+
+形态/动量：
+
+- `engulfing.is_engulfing = true`
+- `engulfing.is_valid_engulfing = true`
+- `leg_detection.is_bullish_leg = true`
+- `bollinger.is_short_signal = true`
+- `bollinger.is_long_signal = false`
+- `rsi = 62.37`
+- `macd.above_zero = true`
+- `macd_line = 23.65`
+- `signal_line = 16.94`
+- `histogram = 6.71`
+- `histogram_increasing = true`
+
+这说明：
+
+- 这根并不是“回撤低位确认 long”
+- 更像是高位修复过程中的 `engulfing + bull leg` 延续 long
+- 但由于 `fib 不在区间`、`量能未确认`、`bollinger 反而给 short`，它本身也是一根带分歧的 long
+
+### C. 为什么止损会被抬到 `2098.73`
+
+当前代码里有两个层级：
+
+1. 方向判断阶段：
+   当 `engulfing` 出现但 `volume_confirmed=false` 时，只写：
+   - `stop_loss_source = Engulfing_Volume_Rejected`
+   - 不直接写 `signal_kline_stop_loss_price`
+
+2. `calculate_best_stop_loss_price()` 阶段：
+   只要 `conditions` 里包含 `SignalType::Engulfing`
+   就无条件把 `signal_kline_stop_loss_price = last_data_item.o()`
+
+所以这根 `03-13 16:00` 的 long，虽然只是 `Engulfing_Volume_Rejected`，
+最终还是被统一抬成了：
+
+- `signal_kline_stop_loss_price = 开盘价 = 2098.73`
+
+### D. A/B：禁用“long 侧 engulfing 抬止损到开盘价”
+
+本轮只加了一个默认关闭的实验开关：
+
+- `VEGAS_DISABLE_LONG_ENGULFING_STOP_RAISE=1`
+
+含义：
+
+- 只禁用 `calculate_best_stop_loss_price()` 里
+  `Long + Engulfing -> stop = open_price`
+  这一条覆盖逻辑
+- 不影响 short 侧
+- 不影响 `ATR stop`
+- 不影响基线默认行为
+
+实验结果：`15920`
+
+- `win_rate 55.7957%`
+- `profit 25158.10`
+- `sharpe 4.56108`
+- `max_dd 22.5510%`
+- `volatility 50.9305%`
+
+相对基线 `15919`：
+
+- `profit` 大幅下降
+- `sharpe` 明显下降
+- `max_dd` 明显恶化
+
+所以这条改动明确拒绝。
+
+### E. 这笔具体交易在 A/B 里怎么变
+
+禁用后，`2026-03-09 08:00:00` 这笔 long：
+
+- 不再于 `2026-03-14 00:00:00` 被 `Signal_Kline_Stop_Loss` 锁盈
+- 也没有了 `2026-03-13 16:00:00 -> 2098.73` 这次止损更新
+- 持仓继续保留到 `2026-03-19 16:00:00`
+- 最终 `profit_loss = 2190.84`
+
+也就是单笔上：
+
+- 基线 `15919`: `+2869.47`
+- A/B `15920`: `+2190.84`
+
+这笔本身就少赚了约 `678.63`
+
+### F. 为什么整体会恶化这么大
+
+因为这条逻辑不是只影响这一笔，而是系统性减少了 long 的信号止损锁盈。
+
+对比 `Signal_Kline_Stop_Loss` 的整体结果：
+
+- `15919`: `225` 笔，合计 `+9471.86`
+- `15920`: `209` 笔，合计 `+1126.82`
+
+也就是说：
+
+- 去掉这条抬止损后，`Signal_Kline_Stop_Loss` 的盈利保护能力大幅下降
+- 很多原本能被及时锁住的盈利，后面又被回吐掉了
+
+### G. 本轮结论
+
+- `2026-03-13 16:00:00` 把止损抬到 `2098.73`，根因不是成交量确认，而是：
+  `Engulfing` 命中后，在 `calculate_best_stop_loss_price()` 被统一覆盖成 `open_price`
+- 这条逻辑虽然看起来“抬得过高”，但在当前 ETH 基线里整体是有价值的
+- 直接去掉会明显伤害：
+  - `profit`
+  - `sharpe`
+  - `max_dd`
+
+因此：
+
+- `VEGAS_DISABLE_LONG_ENGULFING_STOP_RAISE` 仅保留为实验开关
+- 不纳入正式基线
+
+## 2026-03-23 窄化实验：只在 `Engulfing_Volume_Rejected + !fib.in_zone + bollinger.short + TooFar` 时，不把 long 的 stop 抬到开盘价
+
+### A. 历史命中样本（基线 `15919`）
+
+筛到的典型样本包括：
+
+- `2026-03-13 16:00:00`
+- `2025-07-16 12:00:00`
+- `2025-05-09 12:00:00`
+- `2024-11-19 04:00:00`
+- `2024-05-27 08:00:00`
+- `2024-04-09 00:00:00`
+- `2024-04-08 12:00:00`
+- `2024-04-08 04:00:00`
+
+这些点的共同特征是：
+
+- `stop_loss_source = Engulfing_Volume_Rejected`
+- `fib.in_zone = false`
+- `bollinger.is_short_signal = true`
+- `ema_state = TooFar`
+
+也就是：
+
+- 方向层仍给了 long
+- 但位置已经偏高 / 偏远
+- Fib 不确认
+- 布林还在提示 short 压制
+
+### B. 实验开关
+
+本轮新增一个默认关闭的窄实验：
+
+- `VEGAS_DISABLE_CONFLICTING_LONG_ENGULFING_STOP_RAISE=1`
+
+含义：
+
+- 只在同时满足：
+  - `Long`
+  - `Engulfing`
+  - `fib.in_zone = false`
+  - `bollinger.short = true`
+  - `ema_state = TooFar`
+- 才禁止 `calculate_best_stop_loss_price()` 把 `signal-kline stop` 覆盖成 `open_price`
+
+### C. A/B 结果
+
+新回测：`15921`
+
+- `15919`: `win_rate 57.5290%`, `profit 49771.11`, `sharpe 5.61787`, `max_dd 16.9719%`, `volatility 51.1519%`
+- `15921`: `win_rate 57.1705%`, `profit 44702.20`, `sharpe 5.42050`, `max_dd 16.9719%`, `volatility 51.0696%`
+
+结论：
+
+- `profit` 下降
+- `sharpe` 下降
+- `win_rate` 下降
+- `max_dd` 持平
+- `volatility` 略好
+
+因此这条规则当前拒绝。
+
+### D. 你关心的这笔具体怎么变
+
+对 `2026-03-09 08:00:00` 这笔 long：
+
+- 基线 `15919`
+  - `2026-03-14 00:00:00` 被 `Signal_Kline_Stop_Loss`
+  - `profit_loss = +2869.47`
+
+- 窄实验 `15921`
+  - 不再于 `2026-03-14 00:00:00` 锁盈
+  - 持仓延续到 `2026-03-19 16:00:00`
+  - `profit_loss = +3886.06`
+
+这笔单本身更好了。
+
+### E. 为什么整体仍然变差
+
+虽然 `2026-03-09 08:00:00` 这一笔多赚了，
+但整体上 `Signal_Kline_Stop_Loss` 的盈利保护还是被削弱了：
+
+- `15919`: `225` 笔，合计 `+9471.86`
+- `15921`: `223` 笔，合计 `+5384.57`
+
+说明：
+
+- 这条窄规则确实修对了你指出的样本
+- 但同时放掉了其它本来应该更早锁盈的 long
+
+### F. 当前判断
+
+- 这条规则不是无效，而是“局部正确、全局退化”
+- 如果后续继续沿这个方向优化，不能直接用这组硬条件全局替换
+- 下一步更合理的是继续分层：
+  - 哪些 `conflicting engulfing long` 后续真的还能走趋势
+  - 哪些只是应该立即锁盈
+
+## 2026-03-23 补充优化：Above-Zero Death Cross Range Break Short
+
+### A. 问题背景
+
+在 `15919` 基线里，`2026-03-18 16:00:00` 没有开空，但盘面上属于：
+
+- 上方 MACD 死叉
+- 大实体收跌
+- 跌破前几根横盘区间低点
+
+这是一个典型的“零轴上方转弱后的区间破位 short”候选。
+
+### B. 基线里为什么没开
+
+`15919` 对这根 K 线的识别结果是：
+
+- `direction = None`
+- `should_sell = false`
+
+并不是被过滤，而是当前主触发器不认为：
+
+- `above_zero death cross`
+- `range breakdown`
+
+可以直接构成独立 `short`。
+
+当时的核心指标：
+
+- `o=2316.69, c=2268.20, body_ratio=0.6856`
+- `macd_line=54.39, signal_line=59.85, histogram=-5.46`
+- `is_death_cross = true`
+- `above_zero = true`
+- `volume_ratio = 1.626`
+- `ema_state = TooFar`
+- `is_long_trend = false`
+- `is_short_trend = false`
+- `fib.in_zone = false`
+- `bollinger.is_short_signal = false`
+- `bollinger.is_long_signal = true`
+
+### C. 新实验
+
+新增默认关闭实验：
+
+- `VEGAS_EXPERIMENT_ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT=1`
+
+规则语义：
+
+- 非长趋势、非短趋势
+- `ema_state = TooFar`
+- MACD 在零轴上方刚形成死叉
+- 当前 K 线大实体收跌
+- 成交量不弱
+- 跌破前 5 根窄幅横盘区间低点
+- 且没有新的 bearish BOS
+
+命中时增加：
+
+- `ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT`
+
+### D. 样本验证
+
+在 `2026-03-18 16:00:00`：
+
+- 基线 `15919`
+  - `direction=None`
+  - 不开仓
+
+- 实验版
+  - `direction=Short`
+  - `should_sell=true`
+  - `dynamic_adjustments=["ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT","STOP_LOSS_ATR"]`
+
+### E. A/B 结果
+
+新回测：`15922`
+
+- `15919`: `win_rate 57.5290%`, `profit 49771.1`, `sharpe 5.61787`, `max_dd 16.9719%`, `volatility 51.1519%`, `open_positions 518`
+- `15922`: `win_rate 57.6108%`, `profit 51987.9`, `sharpe 5.66426`, `max_dd 16.9719%`, `volatility 51.1070%`, `open_positions 519`
+
+结果：
+
+- `win_rate` 提升
+- `profit` 提升
+- `sharpe` 提升
+- `max_dd` 持平
+- `volatility` 下降
+
+### F. 新增交易
+
+`15922` 确实新增了这笔空单：
+
+- `open_position_time = 2026-03-18 16:00:00`
+- `option_type = short`
+- `open_price = 2268.2`
+- `close_position_time = 2026-03-19 16:00:00`
+- `profit_loss = +2216.79`
+
+### G. 当前结论
+
+- 这不是对单根 K 线的拍脑袋修补
+- 当前实验已经在 ETH 基线里形成了正向 A/B
+- 规则可以进入 ETH 主线候选
+- 下一步需要继续检查同类命中是否仍然集中在少量样本，避免后续过拟合
+
+### H. 命中分布复查
+
+对 `15922` 的 `dynamic_config_log` 复查后，当前这条规则实际只命中 `1` 次：
+
+- `2026-03-18 16:00:00`
+
+并且 `15922` 相对 `15919` 的总收益改善，基本完全来自这一笔新增交易：
+
+- `15919 profit = 49771.1`
+- `15922 profit = 51987.9`
+- 差额约 `+2216.8`
+
+而这笔新增 short 的实际结果正好是：
+
+- `2026-03-18 16:00:00` 开空
+- `2026-03-19 16:00:00` 平仓
+- `profit_loss = +2216.79`
+
+因此当前更准确的状态是：
+
+- `15922` 是一个有效的 `ETH candidate`
+- 但 `ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT` 这条规则目前仍然是单样本命中
+- 按现有“避免过耦合”闸门，它还不能直接晋级为正式 ETH 基线规则
+
+### I. v2 / v3 收敛复查
+
+继续对 `ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT` 做了两轮结构放宽/收紧：
+
+- `15923`：`v2`
+- `15924`：`v3`
+
+结果：
+
+- `15922`: `win_rate 57.6108%`, `profit 51987.9`, `sharpe 5.66426`, `max_dd 16.9719%`, `volatility 51.1070%`
+- `15923`: `win_rate 57.5000%`, `profit 47670.7`, `sharpe 5.52617`, `max_dd 21.8501%`, `volatility 51.0594%`
+- `15924`: `win_rate 57.6108%`, `profit 51987.9`, `sharpe 5.66426`, `max_dd 16.9719%`, `volatility 51.1070%`
+
+`v2` 的问题已经明确：
+
+- 它额外放进了一笔 `2021-10-04 08:00:00 short`
+- 这笔实际是亏损单：`-3.69`
+- 并把 `max_dd` 从 `16.97%` 拉坏到 `21.85%`
+
+对比两个关键样本的 K 线结构：
+
+- `2021-10-04 08:00:00`
+  - 前 5 根区间宽度约 `5.06%`
+  - 跌破幅度约 `0.27%`
+- `2026-03-18 16:00:00`
+  - 前 5 根区间宽度约 `1.99%`
+  - 跌破幅度约 `1.51%`
+
+这说明真正有效的不是“上方死叉后下跌”本身，而是：
+
+- 上方死叉
+- 窄幅横盘
+- 有效跌破
+
+`v3` 重新强化了这两个结构条件：
+
+- `prior_range_width <= 0.025`
+- `close_break_pct >= 0.012`
+
+结果 `15924` 与 `15922` 完全一致，且 `dynamic_config_log` 里仍只命中：
+
+- `2026-03-18 16:00:00`
+
+因此这条分支当前收敛结论是：
+
+- `v2` 拒绝
+- `v3` 只是把规则重新收回到 `v1` 所代表的“单样本窄模式”
+- `15922/15924` 继续作为 `ETH candidate`
+- 但在出现至少第 2 个高质量同类命中前，不晋级为正式 ETH 基线
+
+### J. 扫描器状态
+
+已补了辅助扫描器：
+
+- `crates/rust-quant-cli/src/bin/vegas_pattern_scan.rs`
+
+但当前它仍未与集成回测完全对齐：
+
+- 以 `15919` 为输入扫描时，返回 `match_count = 0`
+- 但集成回测 `15922/15924` 明确显示规则能命中 `2026-03-18 16:00:00`
+
+所以当前最可信的证据仍然是数据库中的集成回测结果，扫描器暂时只作为辅助工具，不作为晋级依据。
+
+### K. 分支结论
+
+`ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT` 这条线到此正式收口。
+
+最终判断：
+
+- `15922/15924` 确实优于 `15919`
+- 但当前仍然只命中 `1` 个历史样本
+- `v2` 的泛化已经证明，继续放宽会快速引入坏样本
+- `v3` 只是重新收回到单样本窄模式
+
+因此按当前“避免过耦合”的晋级闸门：
+
+- 不将其升级为正式 ETH 基线规则
+- 当前正式 ETH 基线继续保持 `15919 / 15867`
+- `15922 / 15924` 保留为 `ETH candidate`
+
+后续优化方向切回：
+
+- 基于 `15919`
+- 重新梳理剩余大亏损簇
+- 只优先推进具有至少 `2` 笔以上同类命中的新规则分支
