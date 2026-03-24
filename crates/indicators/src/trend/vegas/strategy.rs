@@ -232,7 +232,10 @@ impl VegasStrategy {
                     && volume_ratio >= 1.3
                     && !ema_values.is_long_trend
                     && !ema_values.is_short_trend
-                    && matches!(ema_distance.state, EmaDistanceState::TooFar | EmaDistanceState::Normal)
+                    && matches!(
+                        ema_distance.state,
+                        EmaDistanceState::TooFar | EmaDistanceState::Normal
+                    )
                     && prior_range_width <= 0.025
                     && close_break_pct >= 0.012
             }
@@ -291,8 +294,8 @@ impl VegasStrategy {
         let held_above = prior.iter().all(|item| item.l() > level + touch_tol);
         let first_touch = prev.l() > level + touch_tol && current.l() <= level + touch_tol;
         let reclaim_close = current.c() >= level - touch_tol;
-        let reversal_shape =
-            current.down_shadow_ratio() >= 0.45 && (current.c() >= current.o() || current.body_ratio() <= 0.45);
+        let reversal_shape = current.down_shadow_ratio() >= 0.45
+            && (current.c() >= current.o() || current.body_ratio() <= 0.45);
 
         held_above
             && first_touch
@@ -300,8 +303,12 @@ impl VegasStrategy {
             && volume_ratio >= 3.0
             && reclaim_close
             && reversal_shape
-            && !vegas_indicator_signal_values.market_structure_value.internal_bearish_bos
-            && !vegas_indicator_signal_values.market_structure_value.swing_bearish_bos
+            && !vegas_indicator_signal_values
+                .market_structure_value
+                .internal_bearish_bos
+            && !vegas_indicator_signal_values
+                .market_structure_value
+                .swing_bearish_bos
     }
 
     fn is_round_level_reversal_short_candidate(
@@ -330,8 +337,8 @@ impl VegasStrategy {
         let held_below = prior.iter().all(|item| item.h() < level - touch_tol);
         let first_touch = prev.h() < level - touch_tol && current.h() >= level - touch_tol;
         let reject_close = current.c() <= level + touch_tol;
-        let reversal_shape =
-            current.up_shadow_ratio() >= 0.45 && (current.c() <= current.o() || current.body_ratio() <= 0.45);
+        let reversal_shape = current.up_shadow_ratio() >= 0.45
+            && (current.c() <= current.o() || current.body_ratio() <= 0.45);
 
         let base_match = held_below
             && first_touch
@@ -339,8 +346,12 @@ impl VegasStrategy {
             && volume_ratio >= 3.0
             && reject_close
             && reversal_shape
-            && !vegas_indicator_signal_values.market_structure_value.internal_bullish_bos
-            && !vegas_indicator_signal_values.market_structure_value.swing_bullish_bos;
+            && !vegas_indicator_signal_values
+                .market_structure_value
+                .internal_bullish_bos
+            && !vegas_indicator_signal_values
+                .market_structure_value
+                .swing_bullish_bos;
 
         match mode.as_str() {
             "v2" => {
@@ -2581,10 +2592,14 @@ impl VegasStrategy {
         }
 
         if env_flag("VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL") {
-            let round_level_long_candidate =
-                Self::is_round_level_reversal_long_candidate(data_items, vegas_indicator_signal_values);
-            let round_level_short_candidate =
-                Self::is_round_level_reversal_short_candidate(data_items, vegas_indicator_signal_values);
+            let round_level_long_candidate = Self::is_round_level_reversal_long_candidate(
+                data_items,
+                vegas_indicator_signal_values,
+            );
+            let round_level_short_candidate = Self::is_round_level_reversal_short_candidate(
+                data_items,
+                vegas_indicator_signal_values,
+            );
 
             if round_level_long_candidate && !round_level_short_candidate {
                 signal_direction = Some(SignalDirect::IsLong);
@@ -3454,9 +3469,7 @@ impl VegasStrategy {
         }
 
         if signal_result.should_sell.unwrap_or(false)
-            && Self::should_block_high_volume_ranging_recovery_short(
-                vegas_indicator_signal_values,
-            )
+            && Self::should_block_high_volume_ranging_recovery_short(vegas_indicator_signal_values)
         {
             signal_result.should_sell = Some(false);
             signal_result
@@ -4278,7 +4291,9 @@ impl VegasStrategy {
         let conflicting_long_engulfing_stop_raise = disable_conflicting_long_engulfing_stop_raise
             && signal_result.direction == rust_quant_domain::SignalDirection::Long
             && !vegas_indicator_signal_values.fib_retracement_value.in_zone
-            && vegas_indicator_signal_values.bollinger_value.is_short_signal
+            && vegas_indicator_signal_values
+                .bollinger_value
+                .is_short_signal
             && vegas_indicator_signal_values.ema_distance_filter.state == EmaDistanceState::TooFar;
 
         // 如果是吞没形态信号，使用开盘价作为止损价格

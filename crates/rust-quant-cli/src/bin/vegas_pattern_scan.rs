@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use rust_quant_core::database::{get_db_pool, init_db_pool};
-use rust_quant_indicators::trend::vegas::{VegasIndicatorSignalValue, VegasStrategy};
 use rust_quant_indicators::trend::vegas::ema_filter::EmaDistanceState;
+use rust_quant_indicators::trend::vegas::{VegasIndicatorSignalValue, VegasStrategy};
 use rust_quant_strategies::framework::backtest::types::BasicRiskStrategyConfig;
 use rust_quant_strategies::implementations::vegas_backtest::VegasBacktestAdapter;
 use rust_quant_strategies::{get_multi_indicator_values, CandleItem, IndicatorStrategyBacktest};
@@ -174,8 +174,14 @@ async fn main() -> Result<()> {
                 })
                 .unwrap_or_else(|| candle.ts.to_string());
             let prior_window = &window[window.len() - 6..window.len() - 1];
-            let prior_high = prior_window.iter().map(|item| item.h).fold(f64::MIN, f64::max);
-            let prior_low = prior_window.iter().map(|item| item.l).fold(f64::MAX, f64::min);
+            let prior_high = prior_window
+                .iter()
+                .map(|item| item.h)
+                .fold(f64::MIN, f64::max);
+            let prior_low = prior_window
+                .iter()
+                .map(|item| item.l)
+                .fold(f64::MAX, f64::min);
             let prior_range_width = (prior_high - prior_low) / candle.c.max(1e-9);
             let close_break_pct = (prior_low - candle.c).max(0.0) / candle.c.max(1e-9);
 
