@@ -49,6 +49,7 @@ cargo run --package rust-quant-cli --release
 
 # 或直接运行编译后的可执行文件
 ./target/release/rust-quant
+```
 
 ### 🚦 实盘/模拟验证快捷流程
 
@@ -61,7 +62,6 @@ cargo run --package rust-quant-cli --release
   - 若订单瞬时成交导致改单返回 “already filled or canceled”，测试已容错。
 
 > 基线（Vegas 4H）默认无止盈，仅按 `max_loss_percent` 止损；实盘下单的初始止损已对齐回测（信号K线/1R/最大亏损取更紧者）。
-```
 
 ### 🗄️ 初始化数据库（表结构）
 
@@ -160,10 +160,60 @@ core/common (核心基础设施)
 
 详见: [架构设计文档](docs/quant_system_architecture_redesign.md)
 
+## 📈 Vegas 策略流程图
+
+这组图只描述 **Vegas 策略本身** 的信号判断、后置过滤以及最终交易结果，不包含前置的数据准备、K 线加载、回测任务编排等流程。
+
+### 阅读顺序
+
+1. [总览导航图 PNG](uml/image/vegas_signal_to_trade_detailed.png) / [PlantUML 源文件](uml/vegas_signal_to_trade_detailed.puml)
+2. [方向判断详图 PNG](uml/image/vegas_signal_direction_detailed.png) / [PlantUML 源文件](uml/vegas_signal_direction_detailed.puml)
+3. [后置过滤详图 PNG](uml/image/vegas_post_filters_detailed.png) / [PlantUML 源文件](uml/vegas_post_filters_detailed.puml)
+4. [交易结果详图 PNG](uml/image/vegas_trade_outcomes_detailed.png) / [PlantUML 源文件](uml/vegas_trade_outcomes_detailed.puml)
+
+### 图的范围
+
+- **方向判断**：展示指标计算后的方向候选、权重判断、Fib 大趋势覆盖、实验型方向覆盖，以及初步止损/止盈来源。
+- **后置过滤**：细化 `get_trade_signal()` 内的后置过滤逻辑，包括 `Fib` 严格趋势过滤、`EMA/Fib` 区间过滤、结构突破质量过滤、追涨追跌确认、Extreme K、Range Filter、MACD Falling Knife，以及多空专属过滤。
+- **交易结果**：展示最终 `SignalResult` 如何映射到直接开仓、等待更优价格、持仓中更新止损止盈、反向信号平仓/反手，以及风控平仓结果。
+
+### 总览预览
+
+[![Vegas 策略流程总览](uml/image/vegas_signal_to_trade_detailed.png)](uml/image/vegas_signal_to_trade_detailed.png)
+
+### 详细图片入口
+
+- [方向判断详图 PNG](uml/image/vegas_signal_direction_detailed.png) / [方向判断详图 PlantUML](uml/vegas_signal_direction_detailed.puml)
+- [后置过滤详图 PNG](uml/image/vegas_post_filters_detailed.png) / [后置过滤详图 PlantUML](uml/vegas_post_filters_detailed.puml)
+- [交易结果详图 PNG](uml/image/vegas_trade_outcomes_detailed.png) / [交易结果详图 PlantUML](uml/vegas_trade_outcomes_detailed.puml)
+
+### 为什么拆成多张图
+
+原始“详细版”单图内容过长，导出后的高度超过 `10000px`，部分 Markdown / IDE 预览器无法正常显示。现在保留：
+
+- [总览导航图](uml/vegas_signal_to_trade_detailed.puml)：用于总览和跳转
+- 3 张分图：用于阅读完整细节
+- 4 张对应 PNG：用于不支持 PlantUML 渲染的查看环境
+
+详细图高度仍然较大，因此 README 只内嵌总览图；其余 3 张建议点击 PNG 单独查看。
+
+如果需要重新导出图片，可执行：
+
+```bash
+plantuml -tpng -o image uml/vegas_signal_to_trade_detailed.puml
+plantuml -tpng -o image uml/vegas_signal_direction_detailed.puml
+plantuml -tpng -o image uml/vegas_post_filters_detailed.puml
+plantuml -tpng -o image uml/vegas_trade_outcomes_detailed.puml
+```
+
 ## 📚 文档
 
 - **启动指南**: [docs/STARTUP_GUIDE.md](docs/STARTUP_GUIDE.md) - 详细的启动和配置说明
 - **架构设计**: [docs/quant_system_architecture_redesign.md](docs/quant_system_architecture_redesign.md) - 完整的架构设计文档
+- **Vegas 策略流程图总览**: [uml/image/vegas_signal_to_trade_detailed.png](uml/image/vegas_signal_to_trade_detailed.png) - 指标与策略视角的导航图
+- **Vegas 方向判断详图**: [uml/image/vegas_signal_direction_detailed.png](uml/image/vegas_signal_direction_detailed.png) - 指标计算到方向结论
+- **Vegas 后置过滤详图**: [uml/image/vegas_post_filters_detailed.png](uml/image/vegas_post_filters_detailed.png) - 各类过滤条件与拦截原因
+- **Vegas 交易结果详图**: [uml/image/vegas_trade_outcomes_detailed.png](uml/image/vegas_trade_outcomes_detailed.png) - 最终信号到开平仓结果
 
 ---
 

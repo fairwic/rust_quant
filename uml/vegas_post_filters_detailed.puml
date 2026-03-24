@@ -1,0 +1,187 @@
+@startuml
+title Vegas 后置过滤详细流程
+
+skinparam backgroundColor white
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam activityDiamondBackgroundColor #FEF9E7
+skinparam noteBackgroundColor #EAF2F8
+skinparam noteBorderColor #5DADE2
+
+start
+
+:已有初步方向信号 should_buy / should_sell;
+
+if (Fib 严格大趋势过滤命中?) then (是)
+  :只追加 block reason;
+  note right
+    前提:
+    fib_cfg.is_open 且 strict_major_trend = true
+    swing_move_pct >= min_trend_move_pct
+
+    逻辑:
+    - major_bear + Long
+      -> 禁止逆势开多
+      (FIB_STRICT_MAJOR_BEAR_BLOCK_LONG)
+    - major_bull + Short
+      -> 禁止逆势开空
+      (FIB_STRICT_MAJOR_BULL_BLOCK_SHORT)
+
+    注意:
+    这里只打标记, 不直接清空方向
+  end note
+endif
+
+if (EMA 距离 / Fib 区间 / 反趋势做单过滤命中?) then (是)
+  :关闭方向;
+  note right
+    核心语义:
+    价格离均线太远, Fib 位置也不理想,
+    当前更像逆势摸底/追空
+
+    典型 Short:
+    EMA_TOO_FAR_OUTSIDE_FIB_ZONE_BLOCK_SHORT
+
+    典型 Long:
+    EMA_TOO_FAR_COUNTER_TREND_HAMMER_LONG
+    EMA_TOO_FAR_COUNTER_TREND_CHASE_LONG
+  end note
+endif
+
+if (结构突破质量过滤命中?) then (是)
+  :关闭方向;
+  note right
+    典型含义:
+    - EMA 趋势存在, 但没有形态确认,
+      且位置落在 Fib 中线弱势区
+      (EMA_TREND_NO_PATTERN_BELOW_FIB_MIDLINE_LONG/SHORT)
+
+    - 只有 CHOCH / 简单突破,
+      没有更强 BOS 结构确认的做多
+      (SIMPLE_BREAK_CHOCH_NO_BOS_LONG)
+
+    - 想做空, 但结构仍偏多头
+      (SIMPLE_BREAK_BULLISH_STRUCTURE_SHORT)
+
+    - 想做空, 但 Fib 回撤过浅且离均线太远,
+      不像高质量破位空单
+      (SIMPLE_BREAK_TOO_FAR_SHALLOW_FIB_SHORT)
+  end note
+endif
+
+if (Chase Confirm 追涨追跌确认失败?) then (是)
+  :关闭方向;
+  note right
+    Long:
+    已明显高于 EMA144, 但没有
+    回踩确认 / 强阳确认 / 吞没确认
+    (CHASE_CONFIRM_FILTER_LONG)
+
+    Short:
+    已明显低于 EMA144, 但没有
+    反抽确认 / 强阴确认 / 吞没确认
+    (CHASE_CONFIRM_FILTER_SHORT)
+  end note
+endif
+
+if (Extreme K 方向冲突或趋势不匹配?) then (是)
+  :关闭方向;
+  note right
+    先判定是否属于大实体且跨越多条 EMA 的 Extreme K
+
+    - 极端大阳线与做空方向冲突
+      (EXTREME_K_FILTER_CONFLICT_SHORT)
+    - 极端大阴线与做多方向冲突
+      (EXTREME_K_FILTER_CONFLICT_LONG)
+    - 极端K线做多, 但趋势站不住
+      (EXTREME_K_FILTER_TREND_LONG)
+    - 极端K线做空, 但趋势站不住
+      (EXTREME_K_FILTER_TREND_SHORT)
+  end note
+endif
+
+if (Range Filter 命中?) then (是)
+  :不关闭方向;
+  :只调整 take profit;
+  note right
+    这是震荡保护, 不是取消信号
+
+    - 震荡极强, 止盈改成 1:1
+      (RANGE_TP_ONE_TO_ONE)
+    - 震荡存在, 按区间比例收紧止盈
+      (RANGE_TP_RATIO)
+  end note
+endif
+
+if (MACD Falling Knife / Momentum Turn 命中?) then (是)
+  :关闭方向;
+  note right
+    Long:
+    逆势做多时仍在“接下跌飞刀”
+    (MACD_FALLING_KNIFE_LONG)
+
+    Short:
+    逆势做空时仍在“摸上涨顶部飞刀”
+    (MACD_FALLING_KNIFE_SHORT)
+  end note
+endif
+
+if (Short 专属后置过滤命中?) then (是)
+  :关闭 should_sell;
+  note right
+    共同语义:
+    这笔空单更像跌势尾声、修复反抽、
+    趋势背离或位置不合适
+
+    典型:
+    - 修复反抽, 不适合立刻追空
+      (LOW_VOLUME_NEUTRAL_RSI_MACD_RECOVERY_BLOCK_SHORT)
+    - 靠近 swing low 的空头衰竭
+      (EXHAUSTION_SHORT_NEAR_SWING_LOW_BLOCK)
+    - 长趋势里的正常回调, 不是高质量空点
+      (LONG_TREND_PULLBACK_SHORT_BLOCK)
+    - 动量转弱但没有结构确认, 空单悬空
+      (WEAKENING_NO_STRUCTURE_SHORT_BLOCK)
+  end note
+endif
+
+if (Long 专属后置过滤命中?) then (是)
+  :关闭 should_buy;
+  note right
+    共同语义:
+    这笔多单更像逆势抢反弹、
+    上方压力未消化或高位追多
+
+    典型:
+    - 深负动量里的锤子线抄底过早
+      (DEEP_NEGATIVE_HAMMER_LONG_BLOCK)
+    - 突破存在, 但没有趋势配合
+      (WEAK_BREAKOUT_NO_TREND_LONG_BLOCK)
+    - 空头趋势里刚出现新多头腿就逆势抢多
+      (SHORT_TREND_NEW_BULL_LEG_COUNTER_LONG_BLOCK)
+    - 高位横盘里继续追多
+      (HIGH_LEVEL_SIDEWAYS_CHASE_LONG_BLOCK)
+  end note
+endif
+
+if (Long 保护性规则命中?) then (是)
+  :不关闭 should_buy;
+  :只上调保护性止损;
+  note right
+    允许做多, 但必须收紧止损
+
+    典型:
+    - 深负动量锤子线反弹保护
+      (DEEP_NEGATIVE_HAMMER_LONG_PROTECT)
+    - Long trend 下深负动量反弹保护
+      (LONG_TREND_DEEP_NEGATIVE_HAMMER_PROTECT)
+    - 高位追多时的保护性收紧止损
+      (ABOVE_ZERO_HIGH_LEVEL_CHASE_LONG_PROTECT)
+  end note
+endif
+
+:写入最终 filter_reasons / dynamic_adjustments;
+
+stop
+
+@enduml

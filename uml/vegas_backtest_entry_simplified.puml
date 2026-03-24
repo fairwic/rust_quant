@@ -1,0 +1,105 @@
+@startuml
+title Vegas 回测主流程（精简版）
+
+skinparam backgroundColor white
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam activityDiamondBackgroundColor #FEF9E7
+skinparam noteBackgroundColor #EAF2F8
+skinparam noteBorderColor #5DADE2
+
+start
+
+:启动 CLI;
+if (IS_BACK_TEST=true?) then (是)
+  :进入 run_backtest_runner;
+else (否)
+  stop
+endif
+
+:BacktestRunner::run_backtest_for_pair;
+if (ENABLE_SPECIFIED_TEST_VEGAS=true?) then (是)
+  :从 strategy_config 读取 Vegas 配置;
+  :转换为 VegasStrategy + BasicRiskStrategyConfig;
+  :加载并校验历史K线;
+  :run_vegas_test;
+else (否)
+  stop
+endif
+
+:进入通用回测 Pipeline;
+note right
+  SignalStage
+  -> FilterStage
+  -> PositionStage
+end note
+
+repeat
+  :读取当前K线;
+  :SignalStage 追加到 candle_buffer;
+
+  if (达到 min_k_line_num?) then (否)
+    :继续下一根K线;
+  else (是)
+    :计算指标;
+    :调用 VegasStrategy.get_trade_signal;
+
+    if (candle_index < 500?) then (是)
+      :预热阶段, 丢弃信号;
+    else (否)
+      :得到 SignalResult;
+      note right
+        should_buy / should_sell
+        open_price
+        best_open_price
+        signal_kline_stop_loss_price
+        atr_stop_loss_price
+        take_profit prices
+        filter_reasons
+      end note
+
+      if (有 filter_reasons?) then (是)
+        :FilterStage 记录 shadow trade;
+      endif
+
+      if (有持仓 or 有信号 or 有挂起的 best_open_price?) then (是)
+        :PositionStage -> deal_signal;
+
+        if (当前已有持仓?) then (是)
+          :先执行 check_risk_config;
+          if (触发止损/止盈?) then (是)
+            :close_position;
+          else (否)
+            if (出现反向信号?) then (是)
+              :先平仓;
+              if (未被趋势过滤?) then (是)
+                :按 signal.open_price 反手开仓;
+              endif
+            endif
+          endif
+        else (否)
+          if (signal.best_open_price 存在?) then (是)
+            :保存到 last_signal_result;
+            if (后续K线触到 best_open_price?) then (是)
+              :按 best_open_price 开仓;
+              :signal_open_position_time = 原始信号时间;
+            endif
+          else (否)
+            :按 signal.open_price 直接开仓;
+          endif
+        endif
+      endif
+    endif
+  endif
+repeat while (还有下一根K线?) is (是)
+
+if (最后仍有持仓?) then (是)
+  :finalize_trading_state;
+  :按最后一根K线收盘价强平;
+endif
+
+:生成 BackTestResult;
+:保存 back_test_log / back_test_detail;
+stop
+
+@enduml

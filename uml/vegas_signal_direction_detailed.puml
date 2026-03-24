@@ -1,0 +1,117 @@
+@startuml
+title Vegas 方向判断详细流程
+
+skinparam backgroundColor white
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam activityDiamondBackgroundColor #FEF9E7
+skinparam noteBackgroundColor #EAF2F8
+skinparam noteBorderColor #5DADE2
+
+start
+
+:输入当前窗口 K线 data_items;
+:更新 indicator_combine;
+:生成 VegasIndicatorSignalValue;
+
+partition "指标层" {
+  :Volume Trend;
+  :EMA Breakthrough;
+  :EMA Touch Trend;
+  :RSI;
+  :Bollinger;
+  :Engulfing;
+  :Kline Hammer;
+  :Leg Detection;
+  :Market Structure;
+  :EMA Distance;
+  :MACD;
+  :Fib Retracement;
+}
+
+:进入 get_trade_signal;
+:初始化 SignalResult;
+note right
+  should_buy = false
+  should_sell = false
+  open_price = last_data_item.c
+  best_open_price = None
+end note
+
+:把各指标结果转成 SignalCondition;
+:收集到 conditions[];
+
+partition "第一层方向来源" {
+  :score = weights.calculate_score(conditions);
+  :signal_direction = weights.is_signal_valid(score);
+  note right
+    权重系统先根据 conditions
+    得出 Long / Short / None
+  end note
+}
+
+partition "方向覆盖逻辑" {
+  if (Fib 开启?) then (是)
+    if (Fib long / short 已触发?) then (是)
+      :Fib 方向优先覆盖权重方向;
+    else (否)
+      if (only_on_fib?) then (是)
+        :signal_direction = None;
+      endif
+    endif
+  endif
+
+  if (实验型方向覆盖命中?) then (是)
+    :覆盖 signal_direction;
+    note right
+      当前源码里的典型覆盖:
+      EXPANSION_CONTINUATION_LONG
+      FAKE_BREAKOUT_REVERSAL_SHORT
+      ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT
+      ROUND_LEVEL_REVERSAL_LONG/SHORT
+    end note
+  endif
+}
+
+partition "写入方向结果" {
+  if (signal_direction = Long?) then (是)
+    :should_buy = true;
+    :direction = Long;
+    :计算 ATR 止损;
+    :选择 Long 信号止损来源;
+    :设置 Long 动态止盈;
+  elseif (signal_direction = Short?) then (是)
+    :should_sell = true;
+    :direction = Short;
+    :计算 ATR 止损;
+    :选择 Short 信号止损来源;
+    :设置 Short 动态止盈;
+  else (否)
+    :保持无方向信号;
+  endif
+}
+
+partition "方向后的价格与风控补充" {
+  if (已有方向信号?) then (是)
+    :计算 ATR;
+    :选择 signal_kline_stop_loss_price;
+    :写入 stop_loss_source;
+    :写入 single_value / single_result 初稿;
+    note right
+      Long 常见止损来源:
+      FibRetracement
+      LargeEntity_Retracement
+      Engulfing_Volume_Confirmed
+      KlineHammer_Volume_Confirmed
+
+      Short 常见止损来源:
+      FibRetracement
+      Engulfing_Volume_Confirmed
+      KlineHammer_Volume_Confirmed
+    end note
+  endif
+}
+
+stop
+
+@enduml

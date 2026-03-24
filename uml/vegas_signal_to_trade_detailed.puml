@@ -1,0 +1,79 @@
+@startuml
+title Vegas 指标与策略详细流程（总览导航版）
+
+skinparam backgroundColor white
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam activityDiamondBackgroundColor #FEF9E7
+skinparam noteBackgroundColor #EAF2F8
+skinparam noteBorderColor #5DADE2
+
+start
+
+:Vegas 信号主链总览;
+
+partition "第 1 张图" {
+  :方向判断;
+  note right
+    文件:
+    uml/vegas_signal_direction_detailed.puml
+
+    内容:
+    - 指标层
+    - 条件采集
+    - 权重方向判断
+    - Fib / 实验型方向覆盖
+    - 初步止损止盈写入
+  end note
+}
+
+partition "第 2 张图" {
+  :后置过滤;
+  note right
+    文件:
+    uml/vegas_post_filters_detailed.puml
+
+    内容:
+    - Fib 严格大趋势过滤
+    - EMA 距离 / Fib 区间过滤
+    - 结构突破质量过滤
+    - Chase Confirm
+    - Extreme K
+    - Range Filter
+    - MACD Falling Knife
+    - Long / Short 专属过滤
+    - Long 保护性规则
+  end note
+}
+
+partition "第 3 张图" {
+  :交易结果;
+  note right
+    文件:
+    uml/vegas_trade_outcomes_detailed.puml
+
+    内容:
+    - 最终 SignalResult
+    - 直接开仓 / 挂起等待更优价
+    - 持仓中更新止损止盈
+    - 反向信号平仓 / 反手
+    - 风控平仓结果
+  end note
+}
+
+:推荐阅读顺序;
+note right
+  1. 方向判断图
+  2. 后置过滤图
+  3. 交易结果图
+
+  说明:
+  原始大图内容过长,
+  单图渲染高度超过 10000px,
+  部分查看器无法正常展示。
+  因此改为总览导航版。
+end note
+
+stop
+
+@enduml

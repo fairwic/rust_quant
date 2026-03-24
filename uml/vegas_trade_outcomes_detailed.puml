@@ -1,0 +1,74 @@
+@startuml
+title Vegas 最终信号到开平仓结果
+
+skinparam backgroundColor white
+skinparam activityBorderColor #2C3E50
+skinparam activityBackgroundColor #ECF0F1
+skinparam activityDiamondBackgroundColor #FEF9E7
+skinparam noteBackgroundColor #EAF2F8
+skinparam noteBorderColor #5DADE2
+
+start
+
+:得到最终 SignalResult;
+note right
+  包括:
+  方向
+  开仓价
+  止损价
+  止盈价
+  filter_reasons
+  dynamic_adjustments
+end note
+
+if (should_buy 或 should_sell 仍为 true?) then (是)
+  if (当前无持仓?) then (是)
+    if (best_open_price 存在?) then (是)
+      :结果 = 挂起等待更优开仓价;
+    else (否)
+      :结果 = 直接开仓;
+      note right
+        Long -> 开多
+        Short -> 开空
+      end note
+    endif
+  else (否)
+    if (当前持仓与新方向相反?) then (是)
+      if (仅有 block reason 禁止反手?) then (是)
+        :结果 = 只平仓, 不反手;
+      else (否)
+        :结果 = 先平仓, 再反手开仓;
+      endif
+    else (否)
+      :结果 = 保持持仓;
+      :只更新止损 / 止盈;
+    endif
+  endif
+else (否)
+  if (当前已有持仓?) then (是)
+    :结果 = 本轮不开新仓;
+    :仅等待后续止损/止盈/反向信号;
+  else (否)
+    :结果 = 无交易;
+  endif
+endif
+
+if (后续价格触发风控?) then (是)
+  :结果 = 止损或止盈平仓;
+  note right
+    常见来源:
+    Signal Kline Stop
+    Max Loss Stop
+    ATR Trailing Stop
+    ATR Ratio TP
+    Dynamic TP
+  end note
+endif
+
+if (后续出现反向最终信号?) then (是)
+  :结果 = 反向信号平仓;
+endif
+
+stop
+
+@enduml
