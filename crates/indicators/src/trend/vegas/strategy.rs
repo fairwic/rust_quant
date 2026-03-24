@@ -1986,10 +1986,14 @@ impl VegasStrategy {
             && !vegas_indicator_signal_values.ema_values.is_long_trend
             && vegas_indicator_signal_values.ema_values.is_short_trend
             && !vegas_indicator_signal_values.fib_retracement_value.in_zone
-            && vegas_indicator_signal_values.kline_hammer_value.is_long_signal
+            && vegas_indicator_signal_values
+                .kline_hammer_value
+                .is_long_signal
             && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
             && vegas_indicator_signal_values.macd_value.histogram < 0.0
-            && vegas_indicator_signal_values.macd_value.histogram_increasing
+            && vegas_indicator_signal_values
+                .macd_value
+                .histogram_increasing
             && vegas_indicator_signal_values.volume_value.volume_ratio <= 1.6
     }
 
@@ -2689,8 +2693,10 @@ impl VegasStrategy {
                     let macd_val = &vegas_indicator_signal_values.macd_value;
                     let macd_strong_bullish =
                         macd_val.histogram > 0.0 && macd_val.macd_line > macd_val.signal_line;
-                    let is_repair_long =
-                        Self::is_repair_long_candidate(vegas_indicator_signal_values, valid_rsi_value);
+                    let is_repair_long = Self::is_repair_long_candidate(
+                        vegas_indicator_signal_values,
+                        valid_rsi_value,
+                    );
 
                     if is_repair_long {
                         // 暴跌后的修复 long 更容易被后续信号止损过早打掉，
@@ -4292,15 +4298,15 @@ impl VegasStrategy {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        EmaDistanceState, EmaSignalValue, FibRetracementSignalConfig, FibRetracementSignalValue,
-        RsiSignalConfig, SignalCondition, SignalType, SignalWeightsConfig,
-        VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
-    };
     use super::super::ema_filter::EmaDistanceFilter;
     use super::super::signal::{
         BollingerSignalValue, KlineHammerSignalValue, MacdSignalValue, RsiSignalValue,
         VolumeTrendSignalValue,
+    };
+    use super::{
+        EmaDistanceState, EmaSignalValue, FibRetracementSignalConfig, FibRetracementSignalValue,
+        RsiSignalConfig, SignalCondition, SignalType, SignalWeightsConfig,
+        VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
     };
     use rust_quant_common::CandleItem;
     use rust_quant_domain::BasicRiskStrategyConfig;
@@ -4426,7 +4432,9 @@ mod tests {
             ..VegasIndicatorSignalValue::default()
         };
 
-        assert!(VegasStrategy::is_deep_negative_hammer_long_candidate(&values));
+        assert!(VegasStrategy::is_deep_negative_hammer_long_candidate(
+            &values
+        ));
     }
 
     #[test]
@@ -4457,7 +4465,10 @@ mod tests {
         };
 
         assert!(VegasStrategy::is_repair_long_candidate(&values, Some(44.0)));
-        assert!(!VegasStrategy::is_repair_long_candidate(&values, Some(46.0)));
+        assert!(!VegasStrategy::is_repair_long_candidate(
+            &values,
+            Some(46.0)
+        ));
     }
 
     #[test]

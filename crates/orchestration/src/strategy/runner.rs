@@ -5,9 +5,11 @@
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
+use redis::AsyncCommands;
 use std::time::{Duration, SystemTime};
 use tracing::{debug, error, info, warn};
 
+use rust_quant_core::cache::get_redis_connection;
 use rust_quant_domain::{StrategyType, Timeframe};
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
@@ -28,6 +30,50 @@ static STRATEGY_EXECUTION_STATES: Lazy<DashMap<String, StrategyExecutionState>> 
 pub struct StrategyExecutionStateManager;
 
 impl StrategyExecutionStateManager {
+    const PERSIST_TTL_SECS: u64 = 86400 * 14;
+
+    fn persistent_key(key: &str, timestamp: i64) -> String {
+        format!("live_confirm_candle_processed:{}:{}", key, timestamp)
+    }
+
+    pub async fn is_persisted_processed(key: &str, timestamp: i64) -> bool {
+        let rkey = Self::persistent_key(key, timestamp);
+        let mut conn = match get_redis_connection().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                warn!("获取Redis连接失败，跳过持久化去重检查: {}", e);
+                return false;
+            }
+        };
+
+        match conn.get::<_, Option<String>>(&rkey).await {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(e) => {
+                warn!("读取持久化去重键失败: key={}, err={}", rkey, e);
+                false
+            }
+        }
+    }
+
+    pub async fn mark_persisted_completed(key: &str, timestamp: i64) {
+        let rkey = Self::persistent_key(key, timestamp);
+        let mut conn = match get_redis_connection().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                warn!("获取Redis连接失败，跳过持久化完成标记: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = conn
+            .set_ex::<_, _, ()>(&rkey, "1", Self::PERSIST_TTL_SECS)
+            .await
+        {
+            warn!("写入持久化去重键失败: key={}, err={}", rkey, e);
+        }
+    }
+
     /// 检查并标记策略执行状态
     /// 返回 true 表示可以执行，false 表示应该跳过（正在处理或已处理）
     pub fn try_mark_processing(key: &str, timestamp: i64) -> bool {
@@ -150,6 +196,14 @@ pub async fn execute_strategy(
             .as_secs() as i64,
     };
 
+    if StrategyExecutionStateManager::is_persisted_processed(&key, timestamp).await {
+        info!(
+            "⏭️ 跳过已持久化处理的确认K线: key={}, timestamp={}",
+            key, timestamp
+        );
+        return Ok(());
+    }
+
     if !StrategyExecutionStateManager::try_mark_processing(&key, timestamp) {
         debug!("策略正在执行中，跳过: {}", key);
         return Ok(());
@@ -200,6 +254,7 @@ pub async fn execute_strategy(
 
     match exec_result {
         Ok(signal_result) => {
+            StrategyExecutionStateManager::mark_persisted_completed(&key, timestamp).await;
             info!(
                 "✅ 策略执行成功: {} - buy={}, sell={}",
                 key, signal_result.should_buy, signal_result.should_sell
@@ -320,6 +375,8 @@ fn parse_period_to_timeframe(period: &str) -> Result<Timeframe> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use redis::AsyncCommands;
+    use rust_quant_core::cache::{get_redis_connection, init_redis_pool};
 
     #[test]
     fn test_parse_period() {
@@ -349,5 +406,36 @@ mod tests {
 
         // 清理后应该又可以执行
         assert!(StrategyExecutionStateManager::try_mark_processing(key, ts));
+    }
+
+    #[tokio::test]
+    async fn test_persisted_state_manager_roundtrip() {
+        if std::env::var("REDIS_HOST").is_err() {
+            std::env::set_var("REDIS_HOST", "redis://127.0.0.1:6379/");
+        }
+        if init_redis_pool().await.is_err() {
+            eprintln!("skip test_persisted_state_manager_roundtrip: redis unavailable");
+            return;
+        }
+
+        let key = "persisted_test_key";
+        let ts = 67890;
+        let redis_key = StrategyExecutionStateManager::persistent_key(key, ts);
+
+        let mut conn = match get_redis_connection().await {
+            Ok(conn) => conn,
+            Err(_) => {
+                eprintln!("skip test_persisted_state_manager_roundtrip: redis unavailable");
+                return;
+            }
+        };
+        let _: redis::RedisResult<()> = conn.del(&redis_key).await;
+
+        assert!(!StrategyExecutionStateManager::is_persisted_processed(key, ts).await);
+
+        StrategyExecutionStateManager::mark_persisted_completed(key, ts).await;
+        assert!(StrategyExecutionStateManager::is_persisted_processed(key, ts).await);
+
+        let _: redis::RedisResult<()> = conn.del(&redis_key).await;
     }
 }
