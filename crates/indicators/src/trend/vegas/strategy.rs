@@ -1775,8 +1775,7 @@ impl VegasStrategy {
                     && !macd.above_zero
                     && market.internal_trend < 0
                     && volume.volume_ratio < 2.1
-                    && rsi >= 40.0
-                    && rsi < 46.0
+                    && (40.0..46.0).contains(&rsi)
             }
             _ => false,
         }
