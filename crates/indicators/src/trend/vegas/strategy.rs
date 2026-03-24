@@ -1921,15 +1921,9 @@ impl VegasStrategy {
         }
     }
 
-    fn should_block_deep_negative_hammer_long(
+    fn is_deep_negative_hammer_long_candidate(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
-        let mode = env_string("VEGAS_DEEP_NEGATIVE_HAMMER_LONG_BLOCK")
-            .unwrap_or_else(|| "off".to_string());
-        if mode == "off" {
-            return false;
-        }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -1940,20 +1934,30 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
 
+        boll.is_long_signal
+            && hammer.is_long_signal
+            && !ema_touch.is_long_signal
+            && !engulfing.is_valid_engulfing
+            && !fib.volume_confirmed
+            && volume.volume_ratio < 1.5
+            && rsi < 40.0
+            && macd.macd_line < -30.0
+            && macd.signal_line < -10.0
+            && macd.histogram < -20.0
+            && (ema_values.is_short_trend || ema_values.is_long_trend)
+    }
+
+    fn should_block_deep_negative_hammer_long(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let mode = env_string("VEGAS_DEEP_NEGATIVE_HAMMER_LONG_BLOCK")
+            .unwrap_or_else(|| "off".to_string());
+        if mode == "off" {
+            return false;
+        }
+
         match mode.as_str() {
-            "v1" => {
-                boll.is_long_signal
-                    && hammer.is_long_signal
-                    && !ema_touch.is_long_signal
-                    && !engulfing.is_valid_engulfing
-                    && !fib.volume_confirmed
-                    && volume.volume_ratio < 1.5
-                    && rsi < 40.0
-                    && macd.macd_line < -30.0
-                    && macd.signal_line < -10.0
-                    && macd.histogram < -20.0
-                    && (ema_values.is_short_trend || ema_values.is_long_trend)
-            }
+            "v1" => Self::is_deep_negative_hammer_long_candidate(vegas_indicator_signal_values),
             _ => false,
         }
     }
@@ -1967,32 +1971,26 @@ impl VegasStrategy {
             return false;
         }
 
-        let volume = &vegas_indicator_signal_values.volume_value;
-        let fib = &vegas_indicator_signal_values.fib_retracement_value;
-        let boll = &vegas_indicator_signal_values.bollinger_value;
-        let ema_touch = &vegas_indicator_signal_values.ema_touch_value;
-        let ema_values = &vegas_indicator_signal_values.ema_values;
-        let engulfing = &vegas_indicator_signal_values.engulfing_value;
-        let hammer = &vegas_indicator_signal_values.kline_hammer_value;
-        let macd = &vegas_indicator_signal_values.macd_value;
-        let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
-            "v1" => {
-                boll.is_long_signal
-                    && hammer.is_long_signal
-                    && !ema_touch.is_long_signal
-                    && !engulfing.is_valid_engulfing
-                    && !fib.volume_confirmed
-                    && volume.volume_ratio < 1.5
-                    && rsi < 40.0
-                    && macd.macd_line < -30.0
-                    && macd.signal_line < -10.0
-                    && macd.histogram < -20.0
-                    && (ema_values.is_short_trend || ema_values.is_long_trend)
-            }
+            "v1" => Self::is_deep_negative_hammer_long_candidate(vegas_indicator_signal_values),
             _ => false,
         }
+    }
+
+    fn is_repair_long_candidate(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+        valid_rsi_value: Option<f64>,
+    ) -> bool {
+        vegas_indicator_signal_values.ema_distance_filter.state == EmaDistanceState::TooFar
+            && !vegas_indicator_signal_values.ema_touch_value.is_uptrend
+            && !vegas_indicator_signal_values.ema_values.is_long_trend
+            && vegas_indicator_signal_values.ema_values.is_short_trend
+            && !vegas_indicator_signal_values.fib_retracement_value.in_zone
+            && vegas_indicator_signal_values.kline_hammer_value.is_long_signal
+            && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
+            && vegas_indicator_signal_values.macd_value.histogram < 0.0
+            && vegas_indicator_signal_values.macd_value.histogram_increasing
+            && vegas_indicator_signal_values.volume_value.volume_ratio <= 1.6
     }
 
     fn should_block_recent_upper_shadow_pressure_long(
@@ -2691,18 +2689,8 @@ impl VegasStrategy {
                     let macd_val = &vegas_indicator_signal_values.macd_value;
                     let macd_strong_bullish =
                         macd_val.histogram > 0.0 && macd_val.macd_line > macd_val.signal_line;
-                    let is_repair_long = ema_distance_filter.state == EmaDistanceState::TooFar
-                        && !vegas_indicator_signal_values.ema_touch_value.is_uptrend
-                        && !vegas_indicator_signal_values.ema_values.is_long_trend
-                        && vegas_indicator_signal_values.ema_values.is_short_trend
-                        && !vegas_indicator_signal_values.fib_retracement_value.in_zone
-                        && vegas_indicator_signal_values
-                            .kline_hammer_value
-                            .is_long_signal
-                        && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
-                        && macd_val.histogram < 0.0
-                        && macd_val.histogram_increasing
-                        && vegas_indicator_signal_values.volume_value.volume_ratio <= 1.6;
+                    let is_repair_long =
+                        Self::is_repair_long_candidate(vegas_indicator_signal_values, valid_rsi_value);
 
                     if is_repair_long {
                         // 暴跌后的修复 long 更容易被后续信号止损过早打掉，
@@ -2886,20 +2874,7 @@ impl VegasStrategy {
         }
 
         let allow_repair_long = signal_result.should_buy.unwrap_or(false)
-            && ema_distance_filter.state == EmaDistanceState::TooFar
-            && !vegas_indicator_signal_values.ema_touch_value.is_uptrend
-            && !vegas_indicator_signal_values.ema_values.is_long_trend
-            && vegas_indicator_signal_values.ema_values.is_short_trend
-            && !fib_val.in_zone
-            && vegas_indicator_signal_values
-                .kline_hammer_value
-                .is_long_signal
-            && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
-            && vegas_indicator_signal_values.macd_value.histogram < 0.0
-            && vegas_indicator_signal_values
-                .macd_value
-                .histogram_increasing
-            && fib_val.volume_ratio <= 1.6;
+            && Self::is_repair_long_candidate(vegas_indicator_signal_values, valid_rsi_value);
 
         // TooFar 反趋势做多里，锤子线抄底在空头排列且 Fib 未回到理想区间时表现较差。
         // 这类单常由局部反转信号触发，但仍处于空头主导阶段，优先拦截低 RSI 的接飞刀做多。
@@ -4322,6 +4297,11 @@ mod tests {
         RsiSignalConfig, SignalCondition, SignalType, SignalWeightsConfig,
         VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
     };
+    use super::super::ema_filter::EmaDistanceFilter;
+    use super::super::signal::{
+        BollingerSignalValue, KlineHammerSignalValue, MacdSignalValue, RsiSignalValue,
+        VolumeTrendSignalValue,
+    };
     use rust_quant_common::CandleItem;
     use rust_quant_domain::BasicRiskStrategyConfig;
 
@@ -4412,6 +4392,72 @@ mod tests {
             "reason should include swing_pct suffix, got: {}",
             reason
         );
+    }
+
+    #[test]
+    fn deep_negative_hammer_long_candidate_helper_matches_expected_shape() {
+        let values = VegasIndicatorSignalValue {
+            bollinger_value: BollingerSignalValue {
+                is_long_signal: true,
+                ..BollingerSignalValue::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_long_signal: true,
+                ..KlineHammerSignalValue::default()
+            },
+            ema_values: EmaSignalValue {
+                is_short_trend: true,
+                ..EmaSignalValue::default()
+            },
+            volume_value: VolumeTrendSignalValue {
+                volume_ratio: 1.4,
+                ..VolumeTrendSignalValue::default()
+            },
+            rsi_value: RsiSignalValue {
+                rsi_value: 39.0,
+                ..RsiSignalValue::default()
+            },
+            macd_value: MacdSignalValue {
+                macd_line: -31.0,
+                signal_line: -11.0,
+                histogram: -21.0,
+                ..MacdSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(VegasStrategy::is_deep_negative_hammer_long_candidate(&values));
+    }
+
+    #[test]
+    fn repair_long_candidate_helper_matches_expected_shape() {
+        let values = VegasIndicatorSignalValue {
+            ema_values: EmaSignalValue {
+                is_short_trend: true,
+                ..EmaSignalValue::default()
+            },
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_long_signal: true,
+                ..KlineHammerSignalValue::default()
+            },
+            volume_value: VolumeTrendSignalValue {
+                volume_ratio: 1.6,
+                ..VolumeTrendSignalValue::default()
+            },
+            macd_value: MacdSignalValue {
+                histogram: -1.0,
+                histogram_increasing: true,
+                ..MacdSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(VegasStrategy::is_repair_long_candidate(&values, Some(44.0)));
+        assert!(!VegasStrategy::is_repair_long_candidate(&values, Some(46.0)));
     }
 
     #[test]
