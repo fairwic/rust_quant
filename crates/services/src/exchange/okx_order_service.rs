@@ -3,22 +3,136 @@
 use anyhow::{anyhow, Result};
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::{Position, TradingSwapNumResponseData};
+use okx::dto::asset::asset_dto::TransferOkxReqDto;
 use okx::dto::common::EnumToStrTrait;
 use okx::dto::common::Side;
 use okx::dto::trade::trade_dto::{AttachAlgoOrdReqDto, OrderReqDto, OrderResDto, TdModeEnum};
 use okx::dto::trade_dto::CloseOrderReqDto;
 use okx::dto::trade_dto::OrdTypeEnum;
 use okx::dto::PositionSide;
-use okx::{OkxAccount, OkxClient, OkxTrade};
+use okx::enums::account_enums::AccountType;
+use okx::{OkxAccount, OkxAsset, OkxClient, OkxTrade};
 use reqwest::Method;
 use rust_quant_domain::entities::ExchangeApiConfig;
+use serde::{Deserialize, Serialize};
 use rust_quant_strategies::strategy_common::SignalResult;
 use tracing::{error, info};
 
 /// OKX订单执行服务
 pub struct OkxOrderService;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AutoCloseInspection {
+    pub inst_id: String,
+    pub ord_id: Option<String>,
+    pub cl_ord_id: Option<String>,
+    pub order_found: bool,
+    pub order_state: Option<String>,
+    pub order_source: Option<String>,
+    pub pos_side: Option<String>,
+    pub attach_algo_ids: Vec<String>,
+    pub attach_algo_cl_ord_id: Option<String>,
+    pub pending_algo_ids: Vec<String>,
+    pub history_algo_ids: Vec<String>,
+    pub has_open_position: bool,
+    pub position_closed: bool,
+    pub auto_close_likely: bool,
+}
+
 impl OkxOrderService {
+    fn collect_related_algo_ids(
+        order: &okx::dto::trade_dto::OrderDetailRespDto,
+    ) -> (Vec<String>, Option<String>) {
+        let mut ids = Vec::new();
+        for algo in &order.attach_algo_ords {
+            if !algo.attach_algo_id.trim().is_empty() {
+                ids.push(algo.attach_algo_id.clone());
+            }
+        }
+        ids.sort();
+        ids.dedup();
+        let attach_algo_cl_ord_id = if order.attach_algo_cl_ord_id.trim().is_empty() {
+            None
+        } else {
+            Some(order.attach_algo_cl_ord_id.clone())
+        };
+        (ids, attach_algo_cl_ord_id)
+    }
+
+    fn extract_matching_algo_ids(
+        raw: &serde_json::Value,
+        target_algo_ids: &[String],
+        target_algo_cl_ord_id: Option<&str>,
+    ) -> Vec<String> {
+        let mut result = Vec::new();
+        let Some(items) = raw.get("data").and_then(|v| v.as_array()) else {
+            return result;
+        };
+
+        for item in items {
+            let algo_id = item
+                .get("algoId")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let algo_cl_ord_id = item
+                .get("algoClOrdId")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+
+            let matched = (!algo_id.is_empty() && target_algo_ids.iter().any(|id| id == &algo_id))
+                || (!algo_cl_ord_id.is_empty()
+                    && target_algo_cl_ord_id
+                        .map(|target| target == algo_cl_ord_id)
+                        .unwrap_or(false));
+            if matched && !algo_id.is_empty() {
+                result.push(algo_id);
+            }
+        }
+
+        result.sort();
+        result.dedup();
+        result
+    }
+
+    async fn get_algo_orders_raw(
+        &self,
+        api_config: &ExchangeApiConfig,
+        inst_id: &str,
+        history: bool,
+        algo_id: &str,
+    ) -> Result<serde_json::Value> {
+        let client = Self::create_okx_client(api_config)?;
+        let trade = OkxTrade::new(client);
+        let path = if history {
+            format!(
+                "/api/v5/trade/orders-algo-history?ordType=conditional&instId={}&algoId={}",
+                inst_id, algo_id
+            )
+        } else {
+            format!(
+                "/api/v5/trade/orders-algo-pending?ordType=conditional&instId={}&algoId={}",
+                inst_id, algo_id
+            )
+        };
+
+        trade
+            .client()
+            .send_request::<serde_json::Value>(Method::GET, &path, "")
+            .await
+            .or_else(|e| {
+                let msg = format!("{e}");
+                if msg.contains("51603") || msg.contains("Order does not exist") {
+                    Ok(serde_json::json!({ "data": [] }))
+                } else {
+                    Err(anyhow!("获取策略委托订单失败: {}", e))
+                }
+            })
+    }
+
     fn apply_request_expiration_override(client: &mut OkxClient) {
         if let Ok(expiration_ms) = std::env::var("OKX_REQUEST_EXPIRATION_MS") {
             if let Ok(expiration_ms) = expiration_ms.parse::<i64>() {
@@ -413,6 +527,194 @@ impl OkxOrderService {
         }
 
         Ok(result[0].clone())
+    }
+
+    pub async fn get_order_details(
+        &self,
+        api_config: &ExchangeApiConfig,
+        inst_id: &str,
+        ord_id: Option<&str>,
+        cl_ord_id: Option<&str>,
+    ) -> Result<Vec<okx::dto::trade_dto::OrderDetailRespDto>> {
+        let client = Self::create_okx_client(api_config)?;
+        let trade = OkxTrade::new(client);
+        trade
+            .get_order_details(inst_id, ord_id, cl_ord_id)
+            .await
+            .map_err(|e| anyhow!("获取订单详情失败: {}", e))
+    }
+
+    pub async fn inspect_auto_close_by_order(
+        &self,
+        api_config: &ExchangeApiConfig,
+        inst_id: &str,
+        ord_id: Option<&str>,
+        cl_ord_id: Option<&str>,
+    ) -> Result<AutoCloseInspection> {
+        let order_details = self
+            .get_order_details(api_config, inst_id, ord_id, cl_ord_id)
+            .await?;
+        let order = order_details.first();
+
+        let (attach_algo_ids, attach_algo_cl_ord_id) = match order {
+            Some(order) => Self::collect_related_algo_ids(order),
+            None => (Vec::new(), None),
+        };
+
+        let mut pending_algos = Vec::new();
+        let mut history_algos = Vec::new();
+        for algo_id in &attach_algo_ids {
+            let pending_raw = self
+                .get_algo_orders_raw(api_config, inst_id, false, algo_id)
+                .await?;
+            pending_algos.extend(Self::extract_matching_algo_ids(
+                &pending_raw,
+                std::slice::from_ref(algo_id),
+                attach_algo_cl_ord_id.as_deref(),
+            ));
+
+            let history_raw = self
+                .get_algo_orders_raw(api_config, inst_id, true, algo_id)
+                .await?;
+            history_algos.extend(Self::extract_matching_algo_ids(
+                &history_raw,
+                std::slice::from_ref(algo_id),
+                attach_algo_cl_ord_id.as_deref(),
+            ));
+        }
+        pending_algos.sort();
+        pending_algos.dedup();
+        history_algos.sort();
+        history_algos.dedup();
+
+        let positions = self.get_positions(api_config, Some("SWAP"), Some(inst_id)).await?;
+        let has_open_position = match order {
+            Some(order) => positions.iter().any(|position| {
+                let qty = position.pos.parse::<f64>().unwrap_or(0.0).abs();
+                qty > 1e-12
+                    && (order.pos_side.trim().is_empty()
+                        || position.pos_side.eq_ignore_ascii_case(&order.pos_side))
+            }),
+            None => positions
+                .iter()
+                .any(|position| position.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12),
+        };
+
+        let position_closed = !has_open_position;
+        let auto_close_likely = position_closed
+            && (!history_algos.is_empty()
+                || (order.is_some()
+                    && (!attach_algo_ids.is_empty() || attach_algo_cl_ord_id.is_some())));
+
+        Ok(AutoCloseInspection {
+            inst_id: inst_id.to_string(),
+            ord_id: ord_id.map(|v| v.to_string()),
+            cl_ord_id: cl_ord_id.map(|v| v.to_string()),
+            order_found: order.is_some(),
+            order_state: order.map(|o| o.state.clone()),
+            order_source: order.map(|o| o.source.clone()),
+            pos_side: order.map(|o| o.pos_side.clone()),
+            attach_algo_ids,
+            attach_algo_cl_ord_id,
+            pending_algo_ids: pending_algos,
+            history_algo_ids: history_algos,
+            has_open_position,
+            position_closed,
+            auto_close_likely,
+        })
+    }
+
+    pub async fn get_trade_available_equity(
+        &self,
+        api_config: &ExchangeApiConfig,
+        currency: &str,
+    ) -> Result<f64> {
+        let client = Self::create_okx_client(api_config)?;
+        let account = OkxAccount::new(client.clone());
+
+        let balances = account
+            .get_balance(Some(currency))
+            .await
+            .map_err(|e| anyhow!("获取交易账户余额失败: {}", e))?;
+
+        let balance = balances
+            .first()
+            .ok_or_else(|| anyhow!("未找到交易账户中的{}余额", currency))?;
+
+        if let Ok(value) = balance.avail_eq.parse::<f64>() {
+            return Ok(value);
+        }
+
+        if let Some(detail) = balance
+            .details
+            .iter()
+            .find(|detail| detail.ccy.eq_ignore_ascii_case(currency))
+        {
+            if let Ok(value) = detail.avail_bal.parse::<f64>() {
+                return Ok(value);
+            }
+            if let Ok(value) = detail.cash_bal.parse::<f64>() {
+                return Ok(value);
+            }
+            if let Ok(value) = detail.eq.parse::<f64>() {
+                return Ok(value);
+            }
+        }
+
+        Err(anyhow!(
+            "解析交易账户余额失败: availEq={}, currency={}",
+            balance.avail_eq,
+            currency
+        ))
+    }
+
+    pub async fn get_funding_available_balance(
+        &self,
+        api_config: &ExchangeApiConfig,
+        currency: &str,
+    ) -> Result<f64> {
+        let client = Self::create_okx_client(api_config)?;
+        let asset = OkxAsset::new(client);
+        let currencies = vec![currency.to_string()];
+
+        let balances = asset
+            .get_balances(Some(&currencies))
+            .await
+            .map_err(|e| anyhow!("获取资金账户余额失败: {}", e))?;
+
+        let balance = balances
+            .first()
+            .ok_or_else(|| anyhow!("未找到资金账户中的{}余额", currency))?;
+
+        balance
+            .avail_bal
+            .parse::<f64>()
+            .map_err(|e| anyhow!("解析资金账户余额失败: {}", e))
+    }
+
+    pub async fn transfer_between_accounts(
+        &self,
+        api_config: &ExchangeApiConfig,
+        currency: &str,
+        amount: f64,
+        from: AccountType,
+        to: AccountType,
+    ) -> Result<serde_json::Value> {
+        let client = Self::create_okx_client(api_config)?;
+        let asset = OkxAsset::new(client);
+        let transfer_req = TransferOkxReqDto {
+            transfer_type: Some("0".to_string()),
+            ccy: currency.to_string(),
+            amt: format!("{:.8}", amount),
+            from,
+            to,
+            sub_acct: None,
+        };
+
+        asset
+            .transfer(&transfer_req)
+            .await
+            .map_err(|e| anyhow!("执行账户划转失败: {}", e))
     }
 
     /// 根据信号执行订单

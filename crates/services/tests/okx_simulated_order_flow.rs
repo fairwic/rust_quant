@@ -324,5 +324,14 @@ async fn okx_simulated_order_flow_place_amend_close() -> anyhow::Result<()> {
     // Wait until position disappears
     wait_for_position(&okx, &api, &inst_id, pos_side, false).await?;
 
+    let inspection = okx
+        .inspect_auto_close_by_order(&api, &inst_id, Some(&order.ord_id), None)
+        .await?;
+    println!("inspection: {:?}", inspection);
+    anyhow::ensure!(
+        inspection.position_closed,
+        "expected position to be closed after close_position"
+    );
+
     Ok(())
 }

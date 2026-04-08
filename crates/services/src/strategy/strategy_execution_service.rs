@@ -9,14 +9,17 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
 use okx::dto::account_dto::Position as OkxPosition;
+use okx::enums::account_enums::AccountType;
+use redis::AsyncCommands;
 use tracing::{error, info, warn};
 
+use rust_quant_core::cache::get_redis_connection;
 use rust_quant_common::CandleItem;
 use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
 use rust_quant_strategies::framework::backtest::{
-    compute_current_targets, BasicRiskStrategyConfig, ExitTargets, TradePosition, TradingState,
+    compute_current_targets, BasicRiskStrategyConfig, ExitTargets, TradingState,
 };
 use rust_quant_strategies::framework::risk::{StopLossCalculator, StopLossSide};
 use rust_quant_strategies::framework::types::TradeSide;
@@ -37,6 +40,25 @@ enum CloseAlgoSyncResult {
     Placed(Vec<String>),
     Cleared,
     SkippedNoPosition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TradeBucketTransferDirection {
+    FundToTrade,
+    TradeToFund,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExternalFlatDecision {
+    Skip,
+    Confirmed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LiveTradeBucketRebalanceConfig {
+    target_trade_ratio: f64,
+    min_transfer: f64,
+    transfer_epsilon: f64,
 }
 
 #[cfg(test)]
@@ -75,6 +97,8 @@ pub struct StrategyExecutionService {
 }
 
 impl StrategyExecutionService {
+    const EXTERNAL_FLAT_PROBE_TTL_SECS: u64 = 60 * 60 * 6;
+
     /// 创建新的策略执行服务（依赖注入）
     pub fn new(swap_order_repository: Arc<dyn SwapOrderRepository>) -> Self {
         Self {
@@ -137,12 +161,86 @@ impl StrategyExecutionService {
             .unwrap_or(1e-6)
     }
 
+    fn env_positive_f64(key: &str) -> Option<f64> {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+    }
+
+    fn live_trade_bucket_rebalance_config() -> Option<LiveTradeBucketRebalanceConfig> {
+        if !Self::env_enabled("LIVE_ENABLE_TRADE_BUCKET_REBALANCE") {
+            return None;
+        }
+
+        let target_trade_ratio = std::env::var("LIVE_TARGET_TRADE_RATIO")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0 && *v < 1.0)
+            .unwrap_or(0.30);
+        let min_transfer =
+            Self::env_positive_f64("LIVE_TRADE_BUCKET_MIN_TRANSFER_USDT").unwrap_or(1.0);
+        let transfer_epsilon =
+            Self::env_positive_f64("LIVE_TRADE_BUCKET_EPSILON_USDT").unwrap_or(0.5);
+
+        Some(LiveTradeBucketRebalanceConfig {
+            target_trade_ratio,
+            min_transfer,
+            transfer_epsilon,
+        })
+    }
+
+    fn calculate_trade_bucket_transfer(
+        trade_balance: f64,
+        funding_balance: f64,
+        config: LiveTradeBucketRebalanceConfig,
+    ) -> Option<(f64, TradeBucketTransferDirection)> {
+        if !trade_balance.is_finite()
+            || !funding_balance.is_finite()
+            || trade_balance < 0.0
+            || funding_balance < 0.0
+        {
+            return None;
+        }
+
+        let total_balance = trade_balance + funding_balance;
+        if total_balance <= 0.0 {
+            return None;
+        }
+
+        let target_trade_balance = total_balance * config.target_trade_ratio;
+        let diff = target_trade_balance - trade_balance;
+        if diff.abs() < config.transfer_epsilon {
+            return None;
+        }
+
+        if diff > 0.0 {
+            let amount = diff;
+            if amount >= config.min_transfer {
+                return Some((amount, TradeBucketTransferDirection::FundToTrade));
+            }
+        }
+
+        if diff < 0.0 {
+            let amount = -diff;
+            if amount >= config.min_transfer {
+                return Some((amount, TradeBucketTransferDirection::TradeToFund));
+            }
+        }
+
+        None
+    }
+
     fn build_close_algo_tag(config_id: i64) -> String {
         format!("rq-{}", config_id)
     }
 
     fn build_close_algo_cl_ord_id(config_id: i64) -> String {
         format!("rq-{}-{}", config_id, chrono::Utc::now().timestamp_millis())
+    }
+
+    fn build_entry_cl_ord_id(config_id: i64, ts: i64) -> String {
+        format!("rq{}{}", config_id, ts)
     }
 
     fn parse_detail_object(detail: &str) -> serde_json::Map<String, serde_json::Value> {
@@ -587,6 +685,10 @@ impl StrategyExecutionService {
         // 1. 验证配置
         self.validate_config(config)?;
 
+        // 1.1 对账：如果交易所已经通过止损/止盈把仓位关掉，本地先清状态并回补交易桶。
+        self.reconcile_external_flat_close(config, inst_id, period)
+            .await?;
+
         // 2. 获取策略实现
         // 必须严格使用配置中的 strategy_type 路由执行器：
         // - detect_strategy 基于参数“猜策略”，在参数为空/通用字段时会误判
@@ -698,6 +800,11 @@ impl StrategyExecutionService {
         decision_risk: BasicRiskStrategyConfig,
         order_risk: &rust_quant_domain::BasicRiskConfig,
     ) -> Result<super::LiveDecisionOutcome> {
+        let previous_state = self
+            .live_states
+            .get(&config.id)
+            .map(|s| s.clone())
+            .unwrap_or_default();
         let mut state = self
             .live_states
             .get(&config.id)
@@ -720,7 +827,6 @@ impl StrategyExecutionService {
         } else {
             clear_exit_cache = true;
         }
-        self.live_states.insert(config.id, state);
 
         if outcome.closed {
             if let Some(side) = outcome.closed_side {
@@ -742,9 +848,19 @@ impl StrategyExecutionService {
                 .await
             {
                 error!("❌ {:?} 策略下单失败: {}", config.strategy_type, e);
+                let rollback_state = if outcome.closed {
+                    let mut closed_state = state.clone();
+                    closed_state.trade_position = None;
+                    closed_state
+                } else {
+                    previous_state
+                };
+                self.live_states.insert(config.id, rollback_state);
                 return Err(e);
             }
         }
+
+        self.live_states.insert(config.id, state);
 
         let opened_side = outcome.opened_side;
         if let (Some(targets), Some(side)) = (pending_targets, pending_side) {
@@ -1292,6 +1408,341 @@ impl StrategyExecutionService {
         Ok(())
     }
 
+    async fn reconcile_external_flat_close(
+        &self,
+        config: &StrategyConfig,
+        inst_id: &str,
+        period: &str,
+    ) -> Result<()> {
+        use crate::exchange::create_exchange_api_service;
+        use crate::exchange::OkxOrderService;
+
+        let has_local_state = self
+            .live_states
+            .get(&config.id)
+            .map(|state| state.trade_position.is_some())
+            .unwrap_or(false);
+        let has_live_exit_cache = self
+            .live_exit_targets
+            .get(&config.id)
+            .map(|targets| !targets.algo_ids.is_empty() || targets.trade_side.is_some())
+            .unwrap_or(false);
+
+        let persisted_long = self
+            .load_persisted_close_algos(config.id, inst_id, period, "long")
+            .await?;
+        let persisted_short = self
+            .load_persisted_close_algos(config.id, inst_id, period, "short")
+            .await?;
+        let has_persisted_close_algo = persisted_long
+            .as_ref()
+            .map(|order| !Self::extract_close_algo_ids(&order.detail).is_empty())
+            .unwrap_or(false)
+            || persisted_short
+                .as_ref()
+                .map(|order| !Self::extract_close_algo_ids(&order.detail).is_empty())
+                .unwrap_or(false);
+
+        if !has_local_state && !has_live_exit_cache && !has_persisted_close_algo {
+            return Ok(());
+        }
+
+        let api_service = create_exchange_api_service();
+        let api_config = api_service
+            .get_first_api_config(config.id as i32)
+            .await
+            .map_err(|e| anyhow!("获取API配置失败: {}", e))?;
+
+        let okx_service = OkxOrderService;
+        let positions = okx_service
+            .get_positions(&api_config, Some("SWAP"), Some(inst_id))
+            .await
+            .map_err(|e| anyhow!("获取账户数据失败: {}", e))?;
+
+        let has_exchange_position = positions
+            .iter()
+            .any(|p| p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12);
+
+        if has_exchange_position {
+            if let Err(e) = self
+                .clear_external_flat_probe(config.id, inst_id, period)
+                .await
+            {
+                warn!(
+                    "⚠️ 清理外部平仓探测标记失败: inst_id={}, period={}, config_id={}, err={}",
+                    inst_id, period, config.id, e
+                );
+            }
+            return Ok(());
+        }
+
+        let mut inspection_confirms_close = false;
+        for order in [&persisted_long, &persisted_short].into_iter().flatten() {
+            if order.out_order_id.trim().is_empty() {
+                continue;
+            }
+            match okx_service
+                .inspect_auto_close_by_order(
+                    &api_config,
+                    inst_id,
+                    Some(order.out_order_id.as_str()),
+                    None,
+                )
+                .await
+            {
+                Ok(inspection) => {
+                    inspection_confirms_close |= inspection.position_closed
+                        && (inspection.auto_close_likely
+                            || !inspection.pending_algo_ids.is_empty()
+                            || !inspection.history_algo_ids.is_empty());
+                    info!(
+                        "🔎 外部平仓 inspection: config_id={}, inst_id={}, period={}, out_order_id={}, inspection={:?}",
+                        config.id, inst_id, period, order.out_order_id, inspection
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "⚠️ 外部平仓 inspection 失败: config_id={}, inst_id={}, period={}, out_order_id={}, err={}",
+                        config.id, inst_id, period, order.out_order_id, e
+                    );
+                }
+            }
+        }
+
+        match self
+            .confirm_external_flat_close(
+                config.id,
+                inst_id,
+                period,
+                inspection_confirms_close,
+            )
+            .await?
+        {
+            ExternalFlatDecision::Skip => return Ok(()),
+            ExternalFlatDecision::Confirmed => {}
+        }
+
+        info!(
+            "🔄 检测到外部平仓完成，清理本地状态并执行交易桶回补: config_id={}, inst_id={}, period={}",
+            config.id, inst_id, period
+        );
+
+        if let Err(e) = self
+            .clear_persisted_close_algos(config.id, inst_id, period, "long")
+            .await
+        {
+            warn!(
+                "⚠️ 外部平仓后清理 long 持久化保护单失败: inst_id={}, config_id={}, err={}",
+                inst_id, config.id, e
+            );
+        }
+        if let Err(e) = self
+            .clear_persisted_close_algos(config.id, inst_id, period, "short")
+            .await
+        {
+            warn!(
+                "⚠️ 外部平仓后清理 short 持久化保护单失败: inst_id={}, config_id={}, err={}",
+                inst_id, config.id, e
+            );
+        }
+
+        self.live_exit_targets.remove(&config.id);
+        self.live_states.insert(config.id, TradingState::default());
+
+        if let Err(e) = self
+            .clear_external_flat_probe(config.id, inst_id, period)
+            .await
+        {
+            warn!(
+                "⚠️ 清理外部平仓探测标记失败: inst_id={}, period={}, config_id={}, err={}",
+                inst_id, period, config.id, e
+            );
+        }
+
+        if let Err(e) = self
+            .rebalance_trade_bucket_after_close(&api_config, config.id, inst_id)
+            .await
+        {
+            warn!(
+                "⚠️ 外部平仓后交易桶自动划转失败: inst_id={}, period={}, config_id={}, err={}",
+                inst_id, period, config.id, e
+            );
+        }
+
+        Ok(())
+    }
+
+    fn external_flat_probe_key(config_id: i64, inst_id: &str, period: &str) -> String {
+        format!("live_external_flat_probe:{}:{}:{}", config_id, inst_id, period)
+    }
+
+    async fn clear_external_flat_probe(
+        &self,
+        config_id: i64,
+        inst_id: &str,
+        period: &str,
+    ) -> Result<()> {
+        let rkey = Self::external_flat_probe_key(config_id, inst_id, period);
+        let mut conn = match get_redis_connection().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                warn!(
+                    "⚠️ 获取Redis连接失败，跳过清理外部平仓探测标记: config_id={}, inst_id={}, period={}, err={}",
+                    config_id, inst_id, period, e
+                );
+                return Ok(());
+            }
+        };
+        if let Err(e) = conn.del::<_, ()>(&rkey).await {
+            warn!(
+                "⚠️ 删除外部平仓探测标记失败: config_id={}, inst_id={}, period={}, err={}",
+                config_id, inst_id, period, e
+            );
+        }
+        Ok(())
+    }
+
+    async fn confirm_external_flat_close(
+        &self,
+        config_id: i64,
+        inst_id: &str,
+        period: &str,
+        inspection_confirms_close: bool,
+    ) -> Result<ExternalFlatDecision> {
+        if inspection_confirms_close {
+            return Ok(ExternalFlatDecision::Confirmed);
+        }
+
+        let rkey = Self::external_flat_probe_key(config_id, inst_id, period);
+        let mut conn = match get_redis_connection().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                warn!(
+                    "⚠️ 获取Redis连接失败，外部平仓缺少确认时保守跳过: config_id={}, inst_id={}, period={}, err={}",
+                    config_id, inst_id, period, e
+                );
+                return Ok(ExternalFlatDecision::Skip);
+            }
+        };
+        let seen_once = conn.get::<_, Option<String>>(&rkey).await?.is_some();
+
+        if !seen_once {
+            conn.set_ex::<_, _, ()>(&rkey, "1", Self::EXTERNAL_FLAT_PROBE_TTL_SECS)
+                .await?;
+            warn!(
+                "⚠️ 首次观测到交易所无持仓但缺少自动平仓证据，暂不清理本地状态: config_id={}, inst_id={}, period={}",
+                config_id, inst_id, period
+            );
+            return Ok(ExternalFlatDecision::Skip);
+        }
+
+        warn!(
+            "⚠️ 二次观测到交易所无持仓，按外部平仓处理: config_id={}, inst_id={}, period={}",
+            config_id, inst_id, period
+        );
+        Ok(ExternalFlatDecision::Confirmed)
+    }
+
+    async fn rebalance_trade_bucket_after_close(
+        &self,
+        api_config: &rust_quant_domain::entities::ExchangeApiConfig,
+        config_id: i64,
+        inst_id: &str,
+    ) -> Result<()> {
+        let Some(rebalance_config) = Self::live_trade_bucket_rebalance_config() else {
+            return Ok(());
+        };
+
+        use crate::exchange::OkxOrderService;
+
+        let okx_service = OkxOrderService;
+        let positions = okx_service
+            .get_positions(api_config, Some("SWAP"), None)
+            .await
+            .map_err(|e| anyhow!("获取持仓失败: {}", e))?;
+
+        let has_open_swap_positions = positions
+            .iter()
+            .any(|p| p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12);
+
+        if has_open_swap_positions {
+            info!(
+                "⏭️ 跳过交易桶回补: 当前仍有未平 SWAP 持仓, config_id={}, inst_id={}",
+                config_id, inst_id
+            );
+            return Ok(());
+        }
+
+        let currency = std::env::var("LIVE_TRADE_BUCKET_CURRENCY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "USDT".to_string());
+
+        let funding_balance = okx_service
+            .get_funding_available_balance(api_config, &currency)
+            .await?;
+        let trade_balance = okx_service
+            .get_trade_available_equity(api_config, &currency)
+            .await?;
+        let target_trade_balance =
+            (trade_balance + funding_balance) * rebalance_config.target_trade_ratio;
+
+        let Some((transfer_amount, direction)) =
+            Self::calculate_trade_bucket_transfer(trade_balance, funding_balance, rebalance_config)
+        else {
+            info!(
+                "⏭️ 交易桶余额接近动态目标或低于最小划转金额，无需划转: config_id={}, inst_id={}, trade_balance={:.4}, funding_balance={:.4}, total_balance={:.4}, target={:.4}, ratio={:.4}, min_transfer={:.4}, epsilon={:.4}",
+                config_id,
+                inst_id,
+                trade_balance,
+                funding_balance,
+                trade_balance + funding_balance,
+                target_trade_balance,
+                rebalance_config.target_trade_ratio,
+                rebalance_config.min_transfer,
+                rebalance_config.transfer_epsilon
+            );
+            return Ok(());
+        };
+
+        let (from, to, direction_label) = match direction {
+            TradeBucketTransferDirection::FundToTrade => {
+                (AccountType::FOUND, AccountType::TRADE, "fund_to_trade")
+            }
+            TradeBucketTransferDirection::TradeToFund => {
+                (AccountType::TRADE, AccountType::FOUND, "trade_to_fund")
+            }
+        };
+
+        if matches!(direction, TradeBucketTransferDirection::FundToTrade) {
+            if funding_balance + 1e-9 < transfer_amount {
+                warn!(
+                    "⚠️ 交易桶回补跳过: 资金账户余额不足, config_id={}, inst_id={}, need={:.4}, funding_balance={:.4}",
+                    config_id, inst_id, transfer_amount, funding_balance
+                );
+                return Ok(());
+            }
+        }
+
+        okx_service
+            .transfer_between_accounts(api_config, &currency, transfer_amount, from, to)
+            .await?;
+
+        info!(
+            "💸 交易桶自动划转完成: config_id={}, inst_id={}, direction={}, amount={:.4}, currency={}, total_balance={:.4}, target={:.4}, ratio={:.4}",
+            config_id,
+            inst_id,
+            direction_label,
+            transfer_amount,
+            currency,
+            trade_balance + funding_balance,
+            target_trade_balance,
+            rebalance_config.target_trade_ratio
+        );
+
+        Ok(())
+    }
+
     async fn close_position_internal(
         &self,
         inst_id: &str,
@@ -1384,6 +1835,16 @@ impl StrategyExecutionService {
             if prev_exit.trade_side == Some(close_side) {
                 self.live_exit_targets.remove(&config_id);
             }
+        }
+
+        if let Err(e) = self
+            .rebalance_trade_bucket_after_close(&api_config, config_id, inst_id)
+            .await
+        {
+            warn!(
+                "⚠️ 平仓后交易桶自动划转失败: inst_id={}, period={}, config_id={}, err={}",
+                inst_id, period, config_id, e
+            );
         }
 
         Ok(())
@@ -1546,6 +2007,7 @@ impl StrategyExecutionService {
             period,
             signal.ts,
         );
+        let client_order_id = Self::build_entry_cl_ord_id(config_id, signal.ts);
         if let Some(existing) = self
             .swap_order_repository
             .find_by_in_order_id(&in_order_id)
@@ -1722,7 +2184,7 @@ impl StrategyExecutionService {
                 order_size.clone(),
                 Some(final_stop_loss),
                 take_profit_trigger_px,
-                Some(in_order_id.clone()), // 传递订单ID，用于追踪
+                Some(client_order_id), // 交易所 client order id，避免超长/非法格式
             )
             .await
             .map_err(|e| {
@@ -1856,6 +2318,9 @@ impl StrategyExecutionService {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use rust_quant_core::cache::init_redis_pool;
+    use rust_quant_core::database::init_db_pool;
+    use rust_quant_strategies::TradePosition;
     use std::sync::Mutex;
 
     /// Mock SwapOrderRepository - 支持自定义行为
@@ -2182,6 +2647,143 @@ mod tests {
 
         assert!(outcome.opened_side.is_none());
         assert!(repo.get_saved_orders().is_empty());
+    }
+
+    #[tokio::test]
+    async fn handle_live_decision_rolls_back_state_when_open_fails() {
+        use chrono::Utc;
+        use rust_quant_domain::{StrategyStatus, StrategyType, Timeframe};
+        use rust_quant_strategies::framework::backtest::BasicRiskStrategyConfig;
+
+        if std::env::var("DB_HOST").is_err() {
+            std::env::set_var(
+                "DB_HOST",
+                "mysql://root:example@127.0.0.1:33306/test?ssl-mode=DISABLED",
+            );
+        }
+        let _ = init_db_pool().await;
+
+        let repo = Arc::new(MockSwapOrderRepository::new());
+        let service = StrategyExecutionService::new(repo);
+
+        let config = StrategyConfig {
+            id: 4200,
+            strategy_type: StrategyType::Vegas,
+            symbol: "BTC-USDT-SWAP".to_string(),
+            timeframe: Timeframe::H4,
+            status: StrategyStatus::Running,
+            parameters: serde_json::json!({}),
+            risk_config: serde_json::json!({ "max_loss_percent": 0.02 }),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            backtest_start: None,
+            backtest_end: None,
+            description: None,
+        };
+
+        let mut signal = create_buy_signal(100.0, 1_700_000_000_000);
+        let candle = CandleItem {
+            o: 100.0,
+            h: 101.0,
+            l: 99.0,
+            c: 100.0,
+            v: 1.0,
+            ts: 1_700_000_000_000,
+            confirm: 1,
+        };
+        let decision_risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            ..Default::default()
+        };
+        let order_risk = rust_quant_domain::BasicRiskConfig {
+            max_loss_percent: 0.02,
+            ..Default::default()
+        };
+
+        let err = service
+            .handle_live_decision(
+                &config.symbol,
+                config.timeframe.as_str(),
+                &config,
+                &mut signal,
+                &candle,
+                decision_risk,
+                &order_risk,
+            )
+            .await
+            .expect_err("missing api config should make order placement fail");
+        assert!(err.to_string().contains("获取API配置失败"));
+
+        let reloaded = service
+            .live_states
+            .get(&config.id)
+            .map(|v| v.clone())
+            .unwrap_or_default();
+        assert!(reloaded.trade_position.is_none());
+    }
+
+    #[tokio::test]
+    async fn confirm_external_flat_close_requires_second_observation_without_inspection() {
+        if std::env::var("REDIS_HOST").is_err() {
+            std::env::set_var("REDIS_HOST", "redis://127.0.0.1:6379/");
+        }
+        let _ = init_redis_pool().await;
+
+        let service = create_test_service();
+        let config_id = 5200;
+        let inst_id = "ETH-USDT-SWAP";
+        let period = "4H";
+
+        service
+            .clear_external_flat_probe(config_id, inst_id, period)
+            .await
+            .expect("probe cleanup should succeed");
+
+        let first = service
+            .confirm_external_flat_close(config_id, inst_id, period, false)
+            .await
+            .expect("first observation should succeed");
+        assert!(matches!(first, ExternalFlatDecision::Skip));
+
+        let second = service
+            .confirm_external_flat_close(config_id, inst_id, period, false)
+            .await
+            .expect("second observation should succeed");
+        assert!(matches!(second, ExternalFlatDecision::Confirmed));
+
+        service
+            .clear_external_flat_probe(config_id, inst_id, period)
+            .await
+            .expect("probe cleanup should succeed");
+    }
+
+    #[tokio::test]
+    async fn confirm_external_flat_close_confirms_immediately_with_inspection() {
+        if std::env::var("REDIS_HOST").is_err() {
+            std::env::set_var("REDIS_HOST", "redis://127.0.0.1:6379/");
+        }
+        let _ = init_redis_pool().await;
+
+        let service = create_test_service();
+        let config_id = 5300;
+        let inst_id = "ETH-USDT-SWAP";
+        let period = "4H";
+
+        service
+            .clear_external_flat_probe(config_id, inst_id, period)
+            .await
+            .expect("probe cleanup should succeed");
+
+        let decision = service
+            .confirm_external_flat_close(config_id, inst_id, period, true)
+            .await
+            .expect("inspection-backed observation should succeed");
+        assert!(matches!(decision, ExternalFlatDecision::Confirmed));
+
+        service
+            .clear_external_flat_probe(config_id, inst_id, period)
+            .await
+            .expect("probe cleanup should succeed");
     }
 
     #[tokio::test]
@@ -3169,6 +3771,257 @@ mod tests {
         println!("   如需完整测试，请配置数据库和API环境变量");
     }
 
+    #[tokio::test]
+    #[ignore]
+    async fn test_execute_order_internal_simulated_service_e2e_persists_swap_order() -> anyhow::Result<()>
+    {
+        use rust_quant_core::cache::init_redis_pool;
+        use rust_quant_core::database::{get_db_pool, init_db_pool};
+        use rust_quant_domain::entities::ExchangeApiConfig;
+        use rust_quant_domain::traits::{ExchangeApiConfigRepository, StrategyApiConfigRepository};
+        use rust_quant_infrastructure::repositories::{
+            SqlxExchangeApiConfigRepository, SqlxStrategyApiConfigRepository,
+            SqlxSwapOrderRepository,
+        };
+
+        fn env_or_default(key: &str, default: &str) -> String {
+            std::env::var(key).unwrap_or_else(|_| default.to_string())
+        }
+
+        fn env_required(key: &str) -> anyhow::Result<String> {
+            std::env::var(key).map_err(|_| anyhow::anyhow!("missing env var: {}", key))
+        }
+
+        async fn get_position_mgn_mode(
+            okx: &crate::exchange::OkxOrderService,
+            api: &ExchangeApiConfig,
+            inst_id: &str,
+            pos_side: &str,
+        ) -> anyhow::Result<Option<String>> {
+            let positions = okx.get_positions(api, Some("SWAP"), Some(inst_id)).await?;
+            for p in positions {
+                if p.inst_id != inst_id || p.pos_side != pos_side {
+                    continue;
+                }
+                let qty = p.pos.parse::<f64>().unwrap_or(0.0);
+                if qty.abs() < 1e-12 {
+                    continue;
+                }
+                return Ok(Some(p.mgn_mode));
+            }
+            Ok(None)
+        }
+
+        async fn wait_for_position(
+            okx: &crate::exchange::OkxOrderService,
+            api: &ExchangeApiConfig,
+            inst_id: &str,
+            pos_side: &str,
+            should_exist: bool,
+        ) -> anyhow::Result<()> {
+            let max_tries: usize = env_or_default("OKX_TEST_RETRY", "20").parse().unwrap_or(20);
+            let sleep_ms: u64 = env_or_default("OKX_TEST_RETRY_SLEEP_MS", "500")
+                .parse()
+                .unwrap_or(500);
+
+            for _ in 0..max_tries {
+                let exists = get_position_mgn_mode(okx, api, inst_id, pos_side)
+                    .await?
+                    .is_some();
+                if exists == should_exist {
+                    return Ok(());
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms)).await;
+            }
+
+            anyhow::bail!(
+                "position state did not converge: inst_id={}, pos_side={}, expected_exist={}",
+                inst_id,
+                pos_side,
+                should_exist
+            );
+        }
+
+        dotenv::dotenv().ok();
+        if env_or_default("RUN_OKX_SIMULATED_SERVICE_E2E", "0") != "1" {
+            eprintln!(
+                "skip test_execute_order_internal_simulated_service_e2e_persists_swap_order: RUN_OKX_SIMULATED_SERVICE_E2E!=1"
+            );
+            return Ok(());
+        }
+
+        std::env::set_var("APP_ENV", "local");
+        std::env::set_var("OKX_SIMULATED_TRADING", "1");
+        std::env::set_var("OKX_REQUEST_EXPIRATION_MS", "300000");
+        if std::env::var("DB_HOST").is_err() {
+            std::env::set_var(
+                "DB_HOST",
+                "mysql://root:example@127.0.0.1:33306/test?ssl-mode=DISABLED",
+            );
+        }
+        if std::env::var("REDIS_HOST").is_err() {
+            std::env::set_var("REDIS_HOST", "redis://127.0.0.1:6379/");
+        }
+        let _ = init_db_pool().await;
+        let _ = init_redis_pool().await;
+        let pool = get_db_pool().clone();
+
+        let api_key = env_required("OKX_SIMULATED_API_KEY")?;
+        let api_secret = env_required("OKX_SIMULATED_API_SECRET")?;
+        let passphrase = env_required("OKX_SIMULATED_PASSPHRASE")?;
+        let inst_id = env_or_default("OKX_TEST_INST_ID", "ETH-USDT-SWAP");
+        let period = "4H";
+        let strategy_type = "vegas";
+        let config_id = env_or_default("OKX_SIMULATED_SERVICE_STRATEGY_CONFIG_ID", "990011")
+            .parse::<i64>()
+            .unwrap_or(990011);
+
+        let api_repo = SqlxExchangeApiConfigRepository::new(pool.clone());
+        let relation_repo = SqlxStrategyApiConfigRepository::new(pool.clone());
+        let swap_repo = Arc::new(SqlxSwapOrderRepository::new(pool.clone()));
+        let service = StrategyExecutionService::new(swap_repo.clone());
+
+        let api_config = ExchangeApiConfig::new(
+            0,
+            "okx".to_string(),
+            api_key.clone(),
+            api_secret,
+            Some(passphrase.clone()),
+            true,
+            true,
+            Some("simulated-service-e2e".to_string()),
+        );
+
+        let api_config_id = api_repo.save(&api_config).await?;
+        relation_repo
+            .create_association(config_id as i32, api_config_id, 1)
+            .await?;
+
+        let okx_service = crate::exchange::OkxOrderService;
+        let db_api_config = api_repo
+            .find_by_id(api_config_id)
+            .await?
+            .ok_or_else(|| anyhow!("saved api config not found"))?;
+
+        if let Some(mgn_mode) =
+            get_position_mgn_mode(&okx_service, &db_api_config, &inst_id, "long").await?
+        {
+            okx_service
+                .close_position(
+                    &db_api_config,
+                    &inst_id,
+                    okx::dto::PositionSide::Long,
+                    &mgn_mode,
+                )
+                .await?;
+            wait_for_position(&okx_service, &db_api_config, &inst_id, "long", false).await?;
+        }
+
+        let open_price = {
+            #[derive(serde::Deserialize)]
+            struct OkxTickerResponse {
+                data: Vec<OkxTickerData>,
+            }
+            #[derive(serde::Deserialize)]
+            struct OkxTickerData {
+                last: String,
+            }
+            let url = format!(
+                "https://www.okx.com/api/v5/market/ticker?instId={}",
+                inst_id
+            );
+            let resp = reqwest::get(url).await?.error_for_status()?;
+            let data: OkxTickerResponse = resp.json().await?;
+            data.data
+                .first()
+                .ok_or_else(|| anyhow!("empty ticker response"))?
+                .last
+                .parse::<f64>()?
+        };
+
+        let signal = SignalResult {
+            should_buy: true,
+            should_sell: false,
+            open_price,
+            signal_kline_stop_loss_price: Some(open_price * 0.98),
+            best_open_price: None,
+            atr_take_profit_ratio_price: None,
+            atr_stop_loss_price: None,
+            long_signal_take_profit_price: None,
+            short_signal_take_profit_price: None,
+            stop_loss_source: None,
+            ts: chrono::Utc::now().timestamp_millis(),
+            single_value: None,
+            single_result: None,
+            is_ema_short_trend: None,
+            is_ema_long_trend: None,
+            atr_take_profit_level_1: None,
+            atr_take_profit_level_2: None,
+            atr_take_profit_level_3: None,
+            filter_reasons: vec![],
+            dynamic_adjustments: vec![],
+            dynamic_config_snapshot: None,
+            direction: rust_quant_domain::SignalDirection::Long,
+        };
+        let risk_config = create_test_risk_config(0.02, Some(true));
+
+        service
+            .execute_order_internal(
+                &inst_id,
+                period,
+                &signal,
+                &risk_config,
+                config_id,
+                strategy_type,
+            )
+            .await?;
+
+        let in_order_id = SwapOrder::generate_live_in_order_id(
+            &inst_id,
+            strategy_type,
+            config_id,
+            period,
+            signal.ts,
+        );
+        let saved = swap_repo
+            .find_by_in_order_id(&in_order_id)
+            .await?
+            .ok_or_else(|| anyhow!("swap_orders did not persist in_order_id={}", in_order_id))?;
+        assert_eq!(saved.strategy_id, config_id as i32);
+        assert_eq!(saved.inst_id, inst_id);
+        assert_eq!(saved.period, period);
+        assert_eq!(saved.side, "buy");
+        assert_eq!(saved.pos_side, "long");
+        assert!(!saved.out_order_id.trim().is_empty());
+
+        wait_for_position(&okx_service, &db_api_config, &inst_id, "long", true).await?;
+
+        if let Some(mgn_mode) =
+            get_position_mgn_mode(&okx_service, &db_api_config, &inst_id, "long").await?
+        {
+            okx_service
+                .close_position(
+                    &db_api_config,
+                    &inst_id,
+                    okx::dto::PositionSide::Long,
+                    &mgn_mode,
+                )
+                .await?;
+            wait_for_position(&okx_service, &db_api_config, &inst_id, "long", false).await?;
+        }
+
+        sqlx::query("DELETE FROM exchange_apikey_strategy_relation WHERE strategy_config_id = ?")
+            .bind(config_id as i32)
+            .execute(&pool)
+            .await?;
+        sqlx::query("UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = ?")
+            .bind(api_config_id)
+            .execute(&pool)
+            .await?;
+
+        Ok(())
+    }
+
     /// 测试：execute_order_internal - 完整流程验证（逻辑层面）
     #[test]
     fn test_execute_order_internal_full_flow_logic() {
@@ -3223,5 +4076,87 @@ mod tests {
         });
         assert_eq!(order_detail["entry_price"], entry_price);
         assert_eq!(order_detail["stop_loss"], stop_loss_price);
+    }
+
+    #[test]
+    fn test_calculate_trade_bucket_transfer_in_band() {
+        let config = LiveTradeBucketRebalanceConfig {
+            target_trade_ratio: 0.30,
+            min_transfer: 1.0,
+            transfer_epsilon: 0.5,
+        };
+
+        let result =
+            StrategyExecutionService::calculate_trade_bucket_transfer(300.2, 699.8, config);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_calculate_trade_bucket_transfer_fund_to_trade() {
+        let config = LiveTradeBucketRebalanceConfig {
+            target_trade_ratio: 0.30,
+            min_transfer: 1.0,
+            transfer_epsilon: 0.5,
+        };
+
+        let result =
+            StrategyExecutionService::calculate_trade_bucket_transfer(250.0, 750.0, config);
+        assert_eq!(
+            result,
+            Some((50.0, TradeBucketTransferDirection::FundToTrade))
+        );
+    }
+
+    #[test]
+    fn test_calculate_trade_bucket_transfer_trade_to_fund() {
+        let config = LiveTradeBucketRebalanceConfig {
+            target_trade_ratio: 0.30,
+            min_transfer: 1.0,
+            transfer_epsilon: 0.5,
+        };
+
+        let result =
+            StrategyExecutionService::calculate_trade_bucket_transfer(350.0, 650.0, config);
+        assert_eq!(
+            result,
+            Some((50.0, TradeBucketTransferDirection::TradeToFund))
+        );
+    }
+
+    #[test]
+    fn test_calculate_trade_bucket_transfer_exact_difference_inside_old_band() {
+        let config = LiveTradeBucketRebalanceConfig {
+            target_trade_ratio: 0.30,
+            min_transfer: 1.0,
+            transfer_epsilon: 0.5,
+        };
+
+        let lower = StrategyExecutionService::calculate_trade_bucket_transfer(290.0, 710.0, config);
+        let upper = StrategyExecutionService::calculate_trade_bucket_transfer(310.0, 690.0, config);
+
+        assert_eq!(
+            lower,
+            Some((10.0, TradeBucketTransferDirection::FundToTrade))
+        );
+        assert_eq!(
+            upper,
+            Some((10.0, TradeBucketTransferDirection::TradeToFund))
+        );
+    }
+
+    #[test]
+    fn test_calculate_trade_bucket_transfer_dynamic_ratio_growth() {
+        let config = LiveTradeBucketRebalanceConfig {
+            target_trade_ratio: 0.30,
+            min_transfer: 1.0,
+            transfer_epsilon: 0.5,
+        };
+
+        let result =
+            StrategyExecutionService::calculate_trade_bucket_transfer(500.0, 1500.0, config);
+        assert_eq!(
+            result,
+            Some((100.0, TradeBucketTransferDirection::FundToTrade))
+        );
     }
 }
