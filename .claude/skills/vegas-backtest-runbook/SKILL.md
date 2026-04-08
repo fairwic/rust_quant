@@ -53,6 +53,9 @@ docker exec -i mysql mysql -uroot -pexample test -e 'UPDATE strategy_config SET 
 - **跨币种晋级闸门**：只有在 `ETH` 正向且其他币种未被明显拖坏后，才允许更新正式基线、默认 DB 配置和迭代日志中的“推荐基线/已确认基线”。
 - **禁止事项**：不允许“ETH 尚未确认正向，就先扩到其他币种继续调”；也不允许“只修正单个案例，就直接升级为正式基线”。
 - **文档落地要求**：完成一次有效实验后，默认同步更新技能 runbook 和迭代日志；只有在结果不确定、需要保留多个候选方向时，才暂缓写入“基线/推荐”类结论。
+- **目标样本命中校验**：若规则是从某一笔具体交易倒推出来的，必须先确认新规则确实命中了该样本；若目标样本未命中，即便规则逻辑合理，也按“已验证但拒绝晋级”处理，并撤销实验代码。
+- **止损归因校验**：分析“为什么在某个时点止损”时，必须先查询 close 行的 `stop_loss_update_history`，确认 `signal_ts/source/new_price`；不能只看开仓行 `signal_value`，否则会把止损来源误判成错误的 K 线或错误的信号链。
+- **明细字段口径校验**：`back_test_detail` 的 close 行 `signal_value` 可能为空；分析入场形态、信号快照、指标组合时，必须改查同笔交易的 open/long/short 行。close 行只用于查看 `close_type`、`stop_loss_source` 和 `stop_loss_update_history`。
 
 ### 5) 配置/兼容守则（避免破坏历史回放）
 - 只要“基线回测”的 `strategy_detail` 里出现某模块且 `is_open=true`，就不要删除该模块/字段/指标链路；下线只能通过配置关闭（例如 `is_open=false` 或权重设为 `0.0`），并保留最小实现兼容旧配置。

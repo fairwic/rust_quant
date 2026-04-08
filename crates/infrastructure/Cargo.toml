@@ -26,6 +26,7 @@ thiserror.workspace = true
 # 序列化
 serde.workspace = true
 serde_json.workspace = true
+reqwest.workspace = true
 
 # 数据库
 sqlx.workspace = true

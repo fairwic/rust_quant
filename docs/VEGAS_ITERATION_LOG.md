@@ -95,7 +95,118 @@
 - 因此本轮结论是：
   - **不升级为 ETH 正式基线**
   - **不进入跨币种晋级流程**
-  - **保留为已验证但拒绝晋级的候选规则**
+- **保留为已验证但拒绝晋级的候选规则**
+
+---
+
+### 2026-04-08: 吞没缩量 50% 不作为止损信号（已验证，拒绝晋级）
+
+#### 背景
+
+- 在撤销上一轮 `body/range < 0.5` 非吞没规则后，本轮只测试一个更窄的止损条件：
+  - **吞没形态本身仍然保留**
+  - **只有当当前吞没 K 线成交量相对前一根 K 线缩到 50% 或以下时，不允许把它作为 `Engulfing_*` 止损信号**
+- 这条规则只影响 `Engulfing_Volume_Confirmed` / `Engulfing_Volume_Rejected` 止损分支，不影响吞没入场识别和加分链路。
+
+#### 代码范围
+
+- [volume_indicator.rs](/Users/mac2/onions/rust_quant/crates/indicators/src/volume/volume_indicator.rs)
+- [signal.rs](/Users/mac2/onions/rust_quant/crates/indicators/src/trend/vegas/signal.rs)
+- [indicators.rs](/Users/mac2/onions/rust_quant/crates/strategies/src/framework/backtest/indicators.rs)
+- [strategy.rs](/Users/mac2/onions/rust_quant/crates/indicators/src/trend/vegas/strategy.rs)
+
+#### 验证
+
+- `cargo test -p rust-quant-indicators engulfing_stop_loss_should -- --nocapture`
+- `cargo test -p rust-quant-indicators test_volume_ratio_indicator_tracks_ratio_to_previous_bar -- --nocapture`
+- `cargo test -p rust-quant-indicators pattern::engulfing -- --nocapture`
+- `cargo test -p rust-quant-indicators trend::vegas::strategy::tests -- --nocapture`
+- `cargo build --bin rust_quant`
+- `IS_BACK_TEST=1 IS_RUN_SYNC_DATA_JOB=0 TIGHTEN_VEGAS_RISK=0 DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' ./target/debug/rust_quant`
+
+#### 结果（ETH 先行）
+
+| Backtest ID | 版本 | 胜率 | 利润 | Sharpe | 最大回撤 |
+| ----------- | ---- | ---- | ---- | ------ | -------- |
+| 1279 | 原基线 | 52.39% | 7127.48 | 2.9465 | 35.77% |
+| 1306 | 吞没缩量 50% 不作为止损信号 | 52.39% | 7127.48 | 2.9465 | 35.77% |
+
+#### 观察
+
+- 目标样本东八区 `2026-03-25 20:00:00` 的 ETH short **没有变化**：
+  - 仍然在 `2026-03-26 00:00:00` 以 `Signal_Kline_Stop_Loss / Engulfing_Volume_Confirmed` 出场
+  - `profit_loss=-84.49`
+- 根因是这条规则实际**没有命中该样本**。在 K 线原始表中，与该样本对应的吞没 K 线成交量并没有较前一根缩到 50% 以下，因此止损资格不受影响。
+- 新规则在 `1306` 里只命中了 **1** 笔交易：
+  - `2024-07-22 04:00:00 -> 2024-07-22 08:00:00`
+  - `stop_loss_source=Engulfing_Volume_Shrunk`
+  - `profit_loss=+16.36`
+- 因为命中样本太少且没有覆盖目标问题单，所以 `1306` 和 `1279` 的 ETH/BTC/SOL/BCH 指标完全一致。
+
+#### 结论
+
+- 这条规则逻辑上自洽，但当前没有修到目标样本，也没有带来 ETH 净正向优化。
+- 因此本轮结论是：
+  - **撤销实验代码，回到原基线实现**
+  - **不升级为 ETH 正式基线**
+  - **不进入跨币种晋级流程**
+  - **仅保留实验记录，作为后续继续拆吞没止损链时的证据**
+
+---
+
+### 2026-04-08: 吞没缩量超过 40% 不作为止损信号（已验证，拒绝晋级）
+
+#### 背景
+
+- 在 `吞没缩量 50%` 规则未命中目标样本后，本轮把阈值放宽为：
+  - **当前吞没 K 线成交量相对前一根 K 线缩量超过 40%**
+  - 即 `current_volume / prev_volume <= 0.6`
+- 目标仍然不变：只影响 `Engulfing_*` 止损资格，不碰吞没入场识别。
+
+#### 代码范围
+
+- [volume_indicator.rs](/Users/mac2/onions/rust_quant/crates/indicators/src/volume/volume_indicator.rs)
+- [signal.rs](/Users/mac2/onions/rust_quant/crates/indicators/src/trend/vegas/signal.rs)
+- [indicators.rs](/Users/mac2/onions/rust_quant/crates/strategies/src/framework/backtest/indicators.rs)
+- [strategy.rs](/Users/mac2/onions/rust_quant/crates/indicators/src/trend/vegas/strategy.rs)
+
+#### 验证
+
+- `cargo test -p rust-quant-indicators engulfing_stop_loss_should -- --nocapture`
+- `cargo test -p rust-quant-indicators test_volume_ratio_indicator_tracks_ratio_to_previous_bar -- --nocapture`
+- `cargo test -p rust-quant-indicators pattern::engulfing -- --nocapture`
+- `cargo test -p rust-quant-indicators trend::vegas::strategy::tests -- --nocapture`
+- `cargo build --bin rust_quant`
+- `IS_BACK_TEST=1 IS_RUN_SYNC_DATA_JOB=0 TIGHTEN_VEGAS_RISK=0 DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' ./target/debug/rust_quant`
+
+#### 结果（ETH 先行）
+
+| Backtest ID | 版本 | 胜率 | 利润 | Sharpe | 最大回撤 |
+| ----------- | ---- | ---- | ---- | ------ | -------- |
+| 1279 | 原基线 | 52.39% | 7127.48 | 2.9465 | 35.77% |
+| 1310 | 吞没缩量 >40% 不作为止损信号 | 52.39% | 7127.48 | 2.9465 | 35.77% |
+
+#### 观察
+
+- 目标样本东八区 `2026-03-25 20:00:00` 的 ETH short 仍然**没有变化**：
+  - 仍在 `2026-03-26 00:00:00` 以 `Signal_Kline_Stop_Loss / Engulfing_Volume_Confirmed` 出场
+  - `profit_loss=-84.49`
+- 放宽到 `0.6` 后，ETH 里新增命中的仍然只有 **1** 笔：
+  - `2024-07-22 04:00:00 -> 2024-07-22 08:00:00`
+  - `stop_loss_source=Engulfing_Volume_Shrunk40`
+  - `profit_loss=+16.36`
+- 由于目标样本仍未命中，ETH/BTC/SOL 与基线完全一致；`BCH 1313` 还比 `1282` 轻微变差：
+  - `win_rate 36.13% -> 36.02%`
+  - `profit -75.39 -> -75.51`
+
+#### 结论
+
+- `>40%` 阈值相较 `>50%` 没有带来新的有效命中，仍然没有修到目标样本。
+- 因此本轮结论是：
+  - **撤销实验代码，回到原基线实现**
+  - **不升级为 ETH 正式基线**
+  - **不进入跨币种晋级流程**
+  - **只保留实验记录，不保留代码**
 
 ---
 
@@ -6182,3 +6293,220 @@ BTC 唯一被误伤的样本是：
 - 基于 `15919`
 - 重新梳理剩余大亏损簇
 - 只优先推进具有至少 `2` 笔以上同类命中的新规则分支
+
+### 2026-04-08: 低 body 吞没仅禁止止损资格（已验证，拒绝晋级）
+
+目标样本：
+
+- `ETH 1279`
+- 东八区开仓时间：`2026-03-25 20:00:00 short`
+- 东八区平仓时间：`2026-03-26 00:00:00`
+- `close_type=Signal_Kline_Stop_Loss`
+- `stop_loss_source=Engulfing_Volume_Confirmed`
+
+先前误区已纠正：
+
+- 这类问题不能只看开仓行 `signal_value`
+- 必须先看 close 行 `stop_loss_update_history`
+- 该样本的 close 行明确记录：
+  - `sequence=0`
+  - `signal_ts=1774440000000`
+  - 东八区换算后正好是 `2026-03-25 20:00:00`
+  - 说明这笔单是在开仓当根就挂上了第一道 `Engulfing_Volume_Confirmed` 止损，不是 `2026-03-26 00:00:00` 才被后续信号重新抬止损
+
+实验内容：
+
+- 只修改 `Engulfing` 的止损资格，不改 `Engulfing` 入场识别
+- 要求 `body_ratio > max(config.body_ratio, 0.5)` 才允许挂 `Engulfing_Volume_Confirmed`
+- 目标是保留低 body 吞没入场，但不让其初始化 engulfing 信号止损
+
+TDD：
+
+- 新增测试 `low_body_engulfing_should_not_arm_engulfing_stop_loss`
+- 先红灯，确认当前 `calculate_best_stop_loss_price` 会直接把开盘价挂成止损
+- 最小实现后绿灯，再跑 `trend::vegas::strategy::tests`
+
+回测结果：
+
+- 基线 `1279`：
+  - `win_rate 52.3901%`
+  - `profit 7127.48`
+  - `sharpe 2.94653`
+  - `max_dd 35.7654%`
+- 实验版 `1314`：
+  - `win_rate 52.6419%`
+  - `profit 5166.46`
+  - `sharpe 2.58425`
+  - `max_dd 34.6838%`
+
+目标样本变化：
+
+- `1279`：东八区 `2026-03-26 00:00:00` 止损，`profit_loss=-84.49`
+- `1314`：持有到东八区 `2026-03-27 04:00:00`，`profit_loss=+199.13`
+- 说明这条规则确实命中了目标样本，而且局部方向是对的
+
+但 ETH 闸门结论：
+
+- `win_rate` 小幅上升
+- `max_dd` 小幅改善
+- 但 `profit` 和 `sharpe` 明显下降
+- 不满足 ETH 单币种“净正向”要求，因此拒绝晋级
+
+附加发现：
+
+- 这轮实验虽然命中了目标样本，但整体仍说明“低 body 吞没全部不允许挂 engulfing 止损”过于粗糙
+- 目标单是坏样本，但同类低 body 样本里也有不少本来依赖这条止损链实现了正收益
+
+结论：
+
+- 实验代码已撤回
+- 不更新正式基线
+- 后续继续沿 ETH 线分析，但下一步必须先从 close 行 `stop_loss_update_history` 追溯止损来源，而不是只看开仓快照
+
+---
+
+### 2026-04-08: TooFar 弱实体吞没 short 过滤（ETH 通过，跨币种拒绝晋级）
+
+#### 背景
+
+- 基于 `1279` 的 ETH 问题单继续反推：
+  - 东八区 `2026-03-25 20:00:00`
+  - `Signal_Kline_Stop_Loss / Engulfing_Volume_Confirmed`
+  - `profit_loss=-84.49`
+- 本轮不再改吞没定义与止损链，而是只加一条窄过滤：
+  - `TooFar`
+  - `Bolling short`
+  - `Engulfing`
+  - `LegDetection`
+  - `VolumeTrend`
+  - `RSI`
+  - `engulfing body_ratio < 0.48`
+  - `fib retracement_ratio >= 0.5`
+  - `volume is increasing`
+
+#### 验证
+
+- `cargo test -p rust-quant-indicators weak_too_far_engulfing_short_should_be_blocked -- --nocapture`
+- `cargo test -p rust-quant-indicators strong_body_too_far_engulfing_short_should_stay_allowed -- --nocapture`
+- `cargo test -p rust-quant-indicators trend::vegas::strategy::tests -- --nocapture`
+- `cargo build --bin rust_quant`
+- `IS_BACK_TEST=1 IS_RUN_SYNC_DATA_JOB=0 TIGHTEN_VEGAS_RISK=0 DB_HOST='mysql://root:example@127.0.0.1:33306/test?ssl-mode=DISABLED' ./target/debug/rust_quant`
+
+#### 结果
+
+| Backtest ID | 币种 | 胜率 | 利润 | Sharpe | 最大回撤 |
+| ----------- | ---- | ---- | ---- | ------ | -------- |
+| 1279 | ETH | 52.39% | 7127.48 | 2.94653 | 35.77% |
+| 1318 | ETH | 52.59% | 7311.66 | 2.97433 | 35.77% |
+| 1280 | BTC | 54.40% | 334.79 | 1.03208 | 36.83% |
+| 1319 | BTC | 54.34% | 328.23 | 1.01394 | 36.83% |
+| 1281 | SOL | 43.69% | 500.31 | 1.15575 | 41.76% |
+| 1320 | SOL | 43.15% | 444.84 | 1.07612 | 41.76% |
+| 1282 | BCH | 36.13% | -75.39 | -0.53237 | 79.76% |
+| 1321 | BCH | 35.97% | -77.74 | -0.56373 | 81.70% |
+
+#### 命中情况
+
+- ETH 目标问题单已被成功拿掉：
+  - `back_test_id=1318`
+  - `open_position_time='2026-03-25 20:00:00'`
+  - `target_trade_count=0`
+- 新过滤理由 `WEAK_TOO_FAR_ENGULFING_SHORT` 在各币种命中：
+  - `ETH 1318`: `2` 笔，`final_pnl_sum=-0.0709`
+  - `BTC 1319`: `2` 笔，`final_pnl_sum=-0.0710`
+  - `SOL 1320`: `2` 笔，`final_pnl_sum=-0.2187`
+  - `BCH 1321`: `3` 笔，`final_pnl_sum=-0.1100`
+
+#### 结论
+
+- 按 ETH 单币种闸门，这条规则是正向的：
+  - 胜率、利润、Sharpe 略升
+  - 目标问题单被准确拦截
+- 但按跨币种晋级闸门，这条规则不能升级：
+  - `BTC/SOL/BCH` 指标整体变差
+  - 尤其 `SOL` 的利润与 Sharpe 下滑更明显
+- 因此本轮结论是：
+  - **撤销实验代码，回到原基线实现**
+  - **不升级为正式基线**
+  - **保留实验记录，作为继续收窄 ETH 吞没 short 过滤的证据**
+
+#### 下一步
+
+- 继续沿 ETH 线拆，但不再用单条粗阈值推进
+- 先核对 `back_test_detail.signal_value` 与 `filtered_signal_log.signal_value` 的字段口径，再决定下一条 ETH-only 子模式
+- 已确认：
+  - `back_test_detail` 的 close 行 `signal_value` 为空是常态，不是个别脏数据
+  - 入场形态和指标快照必须查同笔的 open/long/short 行
+  - close 行只用于追 `close_type / stop_loss_source / stop_loss_update_history`
+
+---
+
+### 2026-04-08: TooFar 放量锤子线 + MACD 多头状态豁免（已验证，拒绝晋级）
+
+#### 背景
+
+- 目标样本：
+  - `ETH 1279`
+  - 东八区 `2026-03-30 04:00:00`
+  - 当时没有开多，但在 `filtered_signal_log` 里存在一条 `LONG`
+  - 过滤原因是 `EMA_TOO_FAR_COUNTER_TREND_HAMMER_LONG`
+- 样本快照显示：
+  - `ema_distance_state=TooFar`
+  - `is_short_trend=true`
+  - `fib_in_zone=false`
+  - `hammer_long=true`
+  - `rsi=36.06`
+  - `volume_ratio=2.8554`
+  - `macd_line=-27.91 > signal_line=-29.87`
+  - `histogram=1.9538`
+- 注意：这根的 `is_golden_cross=false`，所以本轮实验没有硬用“单根金叉事件”，而是用更稳定的“`macd_line > signal_line` 且 `histogram > 0`”来代表 `MACD` 已转入多头状态。
+
+#### 实验
+
+- 只在 `EMA_TOO_FAR_COUNTER_TREND_HAMMER_LONG` 这条过滤前增加一个窄豁免：
+  - `TooFar`
+  - `!is_uptrend`
+  - `!is_long_trend`
+  - `is_short_trend`
+  - `!fib.in_zone`
+  - `hammer long`
+  - `rsi < 40`
+  - `volume_ratio >= 2.5`
+  - `macd_line > signal_line`
+  - `histogram > 0`
+- 不改锤子线定义，不改 `repair_long` 原逻辑，不改止损链。
+
+#### 验证
+
+- `cargo test -p rust-quant-indicators high_volume_macd_reversal_hammer_long_candidate_matches_expected_shape -- --nocapture`
+- `cargo test -p rust-quant-indicators trend::vegas::strategy::tests -- --nocapture`
+- `cargo build --bin rust_quant`
+- `IS_BACK_TEST=1 IS_RUN_SYNC_DATA_JOB=0 TIGHTEN_VEGAS_RISK=0 DB_HOST='mysql://root:example@127.0.0.1:33306/test?ssl-mode=DISABLED' ./target/debug/rust_quant`
+
+#### 结果（ETH）
+
+| Backtest ID | 胜率 | 利润 | Sharpe | 最大回撤 |
+| ----------- | ---- | ---- | ------ | -------- |
+| 1279 | 52.3901% | 7127.48 | 2.94653 | 35.7654% |
+| 1326 | 52.1822% | 6661.46 | 2.86132 | 35.7654% |
+
+#### 目标样本变化
+
+- `1279`：东八区 `2026-03-30 04:00:00` 未开多
+- `1326`：这根成功开多
+  - open 行：`2026-03-30 04:00:00`
+  - close 行：`2026-03-30 08:00:00`
+  - `close_type=Signal_Kline_Stop_Loss`
+  - `stop_loss_source=Engulfing_Volume_Confirmed`
+  - `profit_loss=+34.8004`
+
+#### 结论
+
+- 这条豁免确实修到了目标样本，而且目标单本身是盈利的。
+- 但 ETH 总体：
+  - 胜率下降
+  - 利润下降约 `466.02`
+  - Sharpe 下降
+  - 回撤没有改善
+- 因此按 ETH 单币种闸门，本轮实验仍然 **拒绝晋级**。
+- 实验代码已撤回，回到原基线实现。

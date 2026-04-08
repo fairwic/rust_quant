@@ -1,35 +1,34 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        
-
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug rust_quant",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=rust_quant",
-                    "--package=rust-quant-cli"
-                ],
-                "filter": {
-                    "name": "rust_quant",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "RUST_LOG": "info",
-                "APP_ENV": "local",
-                "LOG_LEVEL": "info"
-            },
-            "envFile": "${workspaceFolder}/.env",
-            "console": "integratedTerminal",
-            "sourceLanguages": [
-                "rust"
-            ]
-        },
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug rust_quant",
+      "program": "${workspaceFolder}/target/debug/rust_quant",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=rust_quant",
+          "--package=rust-quant-cli"
+        ],
+        "filter": {
+          "name": "rust_quant",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_LOG": "info",
+        "APP_ENV": "local",
+        "LOG_LEVEL": "info"
+      },
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "sourceLanguages": [
+        "rust"
+      ]
+    }
+  ]
 }
