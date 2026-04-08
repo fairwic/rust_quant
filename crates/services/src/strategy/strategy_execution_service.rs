@@ -13,8 +13,8 @@ use okx::enums::account_enums::AccountType;
 use redis::AsyncCommands;
 use tracing::{error, info, warn};
 
-use rust_quant_core::cache::get_redis_connection;
 use rust_quant_common::CandleItem;
+use rust_quant_core::cache::get_redis_connection;
 use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
 use rust_quant_domain::StrategyConfig;
@@ -1510,12 +1510,7 @@ impl StrategyExecutionService {
         }
 
         match self
-            .confirm_external_flat_close(
-                config.id,
-                inst_id,
-                period,
-                inspection_confirms_close,
-            )
+            .confirm_external_flat_close(config.id, inst_id, period, inspection_confirms_close)
             .await?
         {
             ExternalFlatDecision::Skip => return Ok(()),
@@ -1573,7 +1568,10 @@ impl StrategyExecutionService {
     }
 
     fn external_flat_probe_key(config_id: i64, inst_id: &str, period: &str) -> String {
-        format!("live_external_flat_probe:{}:{}:{}", config_id, inst_id, period)
+        format!(
+            "live_external_flat_probe:{}:{}:{}",
+            config_id, inst_id, period
+        )
     }
 
     async fn clear_external_flat_probe(
@@ -3773,8 +3771,8 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn test_execute_order_internal_simulated_service_e2e_persists_swap_order() -> anyhow::Result<()>
-    {
+    async fn test_execute_order_internal_simulated_service_e2e_persists_swap_order(
+    ) -> anyhow::Result<()> {
         use rust_quant_core::cache::init_redis_pool;
         use rust_quant_core::database::{get_db_pool, init_db_pool};
         use rust_quant_domain::entities::ExchangeApiConfig;

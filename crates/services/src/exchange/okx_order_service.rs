@@ -14,8 +14,8 @@ use okx::enums::account_enums::AccountType;
 use okx::{OkxAccount, OkxAsset, OkxClient, OkxTrade};
 use reqwest::Method;
 use rust_quant_domain::entities::ExchangeApiConfig;
-use serde::{Deserialize, Serialize};
 use rust_quant_strategies::strategy_common::SignalResult;
+use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
 /// OKX订单执行服务
@@ -587,7 +587,9 @@ impl OkxOrderService {
         history_algos.sort();
         history_algos.dedup();
 
-        let positions = self.get_positions(api_config, Some("SWAP"), Some(inst_id)).await?;
+        let positions = self
+            .get_positions(api_config, Some("SWAP"), Some(inst_id))
+            .await?;
         let has_open_position = match order {
             Some(order) => positions.iter().any(|position| {
                 let qty = position.pos.parse::<f64>().unwrap_or(0.0).abs();

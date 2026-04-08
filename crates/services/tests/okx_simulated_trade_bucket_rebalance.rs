@@ -165,7 +165,10 @@ async fn okx_simulated_trade_bucket_rebalance_flow() -> Result<()> {
     let transfer_res = okx
         .transfer_between_accounts(&api, &currency, amount, from, to)
         .await?;
-    println!("transfer_res={}", serde_json::to_string_pretty(&transfer_res)?);
+    println!(
+        "transfer_res={}",
+        serde_json::to_string_pretty(&transfer_res)?
+    );
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
