@@ -1712,14 +1712,14 @@ impl StrategyExecutionService {
             }
         };
 
-        if matches!(direction, TradeBucketTransferDirection::FundToTrade) {
-            if funding_balance + 1e-9 < transfer_amount {
-                warn!(
-                    "⚠️ 交易桶回补跳过: 资金账户余额不足, config_id={}, inst_id={}, need={:.4}, funding_balance={:.4}",
-                    config_id, inst_id, transfer_amount, funding_balance
-                );
-                return Ok(());
-            }
+        if matches!(direction, TradeBucketTransferDirection::FundToTrade)
+            && funding_balance + 1e-9 < transfer_amount
+        {
+            warn!(
+                "⚠️ 交易桶回补跳过: 资金账户余额不足, config_id={}, inst_id={}, need={:.4}, funding_balance={:.4}",
+                config_id, inst_id, transfer_amount, funding_balance
+            );
+            return Ok(());
         }
 
         okx_service
