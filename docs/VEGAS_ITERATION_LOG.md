@@ -219,6 +219,79 @@
 
 #### 方案
 
+---
+
+### 2026-04-09: TooFar 非横盘非破位下跌放量锤子线 long 豁免（ETH 通过，跨币种拒绝晋级）
+
+#### 背景
+
+- 目标样本是 `ETH 1279` 东八区 `2026-03-30 04:00:00`。
+- 该样本当时具备：
+  - `ema_distance=TooFar`
+  - `is_ranging_market=false`
+  - `kline_hammer.is_long_signal=true`
+  - `volume_ratio=2.8554`
+  - `macd_line > signal_line`
+  - `histogram > 0`
+  - `leg_detection.is_new_leg=true`
+  - `internal/swing bearish BOS/CHOCH` 全为 `false`
+- 原基线中它被 `EMA_TOO_FAR_COUNTER_TREND_HAMMER_LONG` 拦掉。
+
+#### 实验内容
+
+- 只对 `TooFar` 反趋势锤子线 long 增加一个极窄豁免：
+  - 非横盘
+  - 新腿下跌
+  - 无 bearish `BOS/CHOCH`
+  - 放量 `>= 2.5`
+  - `MACD` 处于多头状态（`macd_line > signal_line && histogram > 0`）
+- 先做 TDD：
+  - 新增 helper 失败测试
+  - 验证红灯后补最小实现
+  - 跑 `strategy` 单测、编译、ETH 回测，再做跨币种复核
+
+#### 验证
+
+- `cargo test -p rust-quant-indicators high_volume_non_breakdown_hammer_long_candidate_matches_target_shape -- --nocapture`
+- `cargo test -p rust-quant-indicators trend::vegas::strategy::tests -- --nocapture`
+- `cargo build --bin rust_quant`
+- `IS_BACK_TEST=1 IS_RUN_SYNC_DATA_JOB=0 TIGHTEN_VEGAS_RISK=0 DB_HOST='mysql://root:example@127.0.0.1:33306/test?ssl-mode=DISABLED' ./target/debug/rust_quant`
+
+#### 结果
+
+| Backtest ID | 币种 | 胜率 | 利润 | Sharpe | 最大回撤 |
+| ----------- | ---- | ---- | ---- | ------ | -------- |
+| 1279 | ETH | 52.39% | 7127.48 | 2.94653 | 35.77% |
+| 1327 | ETH | 52.48% | 7164.95 | 2.95204 | 35.77% |
+| 1280 | BTC | 54.40% | 334.79 | 1.03208 | 36.83% |
+| 1328 | BTC | 54.31% | 314.92 | 0.98976 | 39.72% |
+| 1281 | SOL | 43.69% | 500.31 | 1.15575 | 41.76% |
+| 1329 | SOL | 43.69% | 500.31 | 1.15575 | 41.76% |
+| 1282 | BCH | 36.13% | -75.39 | -0.53237 | 79.76% |
+| 1330 | BCH | 36.07% | -75.80 | -0.53746 | 80.11% |
+
+#### 目标样本变化
+
+- `1279`：未开多
+- `1327`：在东八区 `2026-03-30 04:00:00` 开多，并在 `2026-03-30 08:00:00` 以 `Signal_Kline_Stop_Loss / Engulfing_Volume_Confirmed` 出场，`profit_loss=+37.39`
+- 对应 `filtered_signal_log 1327` 中，`2026-03-30 04:00:00 LONG` 已不再出现 `EMA_TOO_FAR_COUNTER_TREND_HAMMER_LONG`
+
+#### 结论
+
+- 这条规则 **命中了目标样本**，并且 **ETH 单币种闸门通过**：
+  - `win_rate +0.09` 个百分点
+  - `profit +37.47`
+  - `sharpe +0.0055`
+  - `max_drawdown` 持平
+- 但 **跨币种晋级闸门不通过**：
+  - `BTC` 出现轻微退化，`profit/sharpe/max_drawdown` 都更差
+  - `SOL` 完全不变
+  - `BCH` 轻微更差
+- 因此本轮结论是：
+  - **实验代码已撤回**
+  - **不更新正式跨币种基线**
+  - **保留为 ETH 有效、但不具备跨币种可推广性的候选模式**
+
 - 仅在布林带宽度 <= 阈值 * 0.85 时触发“震荡收紧”。
 - RSI 中性区间：46~54。
 - 条件满足（缩量或 MACD 近零轴或上下影线并存）时，将止盈距离设为 1:1（使用止损距离）。
