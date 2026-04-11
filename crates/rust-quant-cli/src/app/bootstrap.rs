@@ -120,7 +120,8 @@ pub async fn run_modes() -> Result<()> {
         }
 
         if should_run_funding_rate_sync_from_map(&envs) {
-            if let Err(error) = funding_rate_job::FundingRateJob::sync_funding_rates(&inst_ids).await
+            if let Err(error) =
+                funding_rate_job::FundingRateJob::sync_funding_rates(&inst_ids).await
             {
                 error!("❌ 资金费率历史同步失败: {}", error);
             }
@@ -236,14 +237,24 @@ async fn run_dune_sync_jobs_from_env() -> Result<()> {
     Ok(())
 }
 
-fn parse_dune_sync_requests_from_map(envs: &HashMap<String, String>) -> Result<Vec<DuneSyncRequest>> {
+fn parse_dune_sync_requests_from_map(
+    envs: &HashMap<String, String>,
+) -> Result<Vec<DuneSyncRequest>> {
     if !env_flag_is_true(envs, "IS_RUN_DUNE_SYNC_JOB") {
         return Ok(Vec::new());
     }
 
-    if let Some(raw_jobs) = envs.get("DUNE_TEMPLATE_JOBS").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    if let Some(raw_jobs) = envs
+        .get("DUNE_TEMPLATE_JOBS")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         let mut requests = Vec::new();
-        for job in raw_jobs.split(';').map(|item| item.trim()).filter(|item| !item.is_empty()) {
+        for job in raw_jobs
+            .split(';')
+            .map(|item| item.trim())
+            .filter(|item| !item.is_empty())
+        {
             let parts: Vec<&str> = job.split('|').map(|item| item.trim()).collect();
             if parts.len() < 6 || parts.len() > 7 {
                 return Err(anyhow!(
@@ -253,13 +264,7 @@ fn parse_dune_sync_requests_from_map(envs: &HashMap<String, String>) -> Result<V
             }
             let min_usd = parts.get(6).copied().unwrap_or("100000");
             requests.push(build_dune_sync_request(
-                parts[0],
-                parts[1],
-                parts[2],
-                parts[3],
-                parts[4],
-                parts[5],
-                min_usd,
+                parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], min_usd,
             )?);
         }
         return Ok(requests);
@@ -271,8 +276,12 @@ fn parse_dune_sync_requests_from_map(envs: &HashMap<String, String>) -> Result<V
         env_required(envs, "DUNE_TEMPLATE_PATH")?.as_str(),
         env_required(envs, "DUNE_START_TIME")?.as_str(),
         env_required(envs, "DUNE_END_TIME")?.as_str(),
-        envs.get("DUNE_PERFORMANCE").map(String::as_str).unwrap_or("medium"),
-        envs.get("DUNE_MIN_USD").map(String::as_str).unwrap_or("100000"),
+        envs.get("DUNE_PERFORMANCE")
+            .map(String::as_str)
+            .unwrap_or("medium"),
+        envs.get("DUNE_MIN_USD")
+            .map(String::as_str)
+            .unwrap_or("100000"),
     )?])
 }
 
@@ -317,7 +326,12 @@ fn env_required(envs: &HashMap<String, String>, key: &str) -> Result<String> {
 
 fn env_flag_is_true(envs: &HashMap<String, String>, key: &str) -> bool {
     envs.get(key)
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -899,10 +913,14 @@ mod tests {
             "DUNE_TEMPLATE_PATH".to_string(),
             "docs/external_market_data/dune/hyperliquid_funding_basis.sql".to_string(),
         );
-        envs.insert("DUNE_METRIC_TYPE".to_string(), "hyperliquid_basis".to_string());
+        envs.insert(
+            "DUNE_METRIC_TYPE".to_string(),
+            "hyperliquid_basis".to_string(),
+        );
         envs.insert("DUNE_MIN_USD".to_string(), "100000".to_string());
 
-        let requests = parse_dune_sync_requests_from_map(&envs).expect("should parse dune sync env");
+        let requests =
+            parse_dune_sync_requests_from_map(&envs).expect("should parse dune sync env");
 
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].metric_type, "hyperliquid_basis");

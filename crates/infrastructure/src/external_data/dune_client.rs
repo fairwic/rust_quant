@@ -35,7 +35,11 @@ impl DuneExecutionState {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::CompletedPartial | Self::Failed | Self::Canceled | Self::Expired
+            Self::Completed
+                | Self::CompletedPartial
+                | Self::Failed
+                | Self::Canceled
+                | Self::Expired
         )
     }
 }
@@ -134,7 +138,10 @@ impl DuneApiClient {
     ) -> Result<DuneExecutionStatusResponse> {
         let value = self
             .client
-            .get(format!("{}/execution/{}/status", self.base_url, execution_id))
+            .get(format!(
+                "{}/execution/{}/status",
+                self.base_url, execution_id
+            ))
             .header("X-Dune-Api-Key", &self.api_key)
             .send()
             .await?
@@ -152,7 +159,10 @@ impl DuneApiClient {
     ) -> Result<DuneExecutionResultsResponse> {
         let value = self
             .client
-            .get(format!("{}/execution/{}/results", self.base_url, execution_id))
+            .get(format!(
+                "{}/execution/{}/results",
+                self.base_url, execution_id
+            ))
             .query(&[("allow_partial_results", allow_partial_results)])
             .header("X-Dune-Api-Key", &self.api_key)
             .send()
@@ -177,7 +187,10 @@ impl DuneApiClient {
         for _ in 0..max_polls {
             let status = self.get_execution_status(&execution_id).await?;
             if status.state.is_terminal() {
-                if matches!(status.state, DuneExecutionState::Completed | DuneExecutionState::CompletedPartial) {
+                if matches!(
+                    status.state,
+                    DuneExecutionState::Completed | DuneExecutionState::CompletedPartial
+                ) {
                     return self.get_execution_results(&execution_id, true).await;
                 }
                 return Err(anyhow!(
@@ -189,7 +202,10 @@ impl DuneApiClient {
             tokio::time::sleep(poll_interval).await;
         }
 
-        Err(anyhow!("dune execution {} did not finish in time", execution_id))
+        Err(anyhow!(
+            "dune execution {} did not finish in time",
+            execution_id
+        ))
     }
 
     pub fn parse_execute_sql_response(value: &Value) -> Result<DuneExecutionResponse> {
@@ -200,7 +216,8 @@ impl DuneApiClient {
                 .ok_or_else(|| anyhow!("missing execution_id"))?
                 .to_string(),
             state: DuneExecutionState::from_api(
-                value.get("state")
+                value
+                    .get("state")
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow!("missing state"))?,
             ),
@@ -223,7 +240,8 @@ impl DuneApiClient {
                 .and_then(Value::as_bool)
                 .ok_or_else(|| anyhow!("missing is_execution_finished"))?,
             state: DuneExecutionState::from_api(
-                value.get("state")
+                value
+                    .get("state")
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow!("missing state"))?,
             ),
@@ -250,7 +268,8 @@ impl DuneApiClient {
                 .and_then(Value::as_bool)
                 .ok_or_else(|| anyhow!("missing is_execution_finished"))?,
             state: DuneExecutionState::from_api(
-                value.get("state")
+                value
+                    .get("state")
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow!("missing state"))?,
             ),

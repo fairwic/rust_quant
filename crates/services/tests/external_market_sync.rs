@@ -114,13 +114,23 @@ async fn sync_hyperliquid_coin_converts_and_deduplicates_snapshots() {
     let service = ExternalMarketSyncService::with_repo_and_provider(repo.clone(), provider);
 
     let saved = service
-        .sync_hyperliquid_coin("ETH", 1774800000000_i64, 1774814400062_i64, 1774814400062_i64)
+        .sync_hyperliquid_coin(
+            "ETH",
+            1774800000000_i64,
+            1774814400062_i64,
+            1774814400062_i64,
+        )
         .await
         .expect("sync should succeed");
     assert_eq!(saved, 2);
 
     let saved_again = service
-        .sync_hyperliquid_coin("ETH", 1774800000000_i64, 1774814400062_i64, 1774814400062_i64)
+        .sync_hyperliquid_coin(
+            "ETH",
+            1774800000000_i64,
+            1774814400062_i64,
+            1774814400062_i64,
+        )
         .await
         .expect("repeat sync should also succeed");
     assert_eq!(saved_again, 2);

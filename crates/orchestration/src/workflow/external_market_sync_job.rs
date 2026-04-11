@@ -30,8 +30,8 @@ impl ExternalMarketSyncJob {
         log_sync_result(
             format!("coin={}", coin),
             service
-            .sync_hyperliquid_coin(coin, start_time, end_time, snapshot_time)
-            .await,
+                .sync_hyperliquid_coin(coin, start_time, end_time, snapshot_time)
+                .await,
             "外部市场快照同步",
         )
     }
@@ -48,14 +48,14 @@ impl ExternalMarketSyncJob {
         log_sync_result(
             format!("metric_type={}, symbol={}", metric_type, symbol),
             service
-            .sync_template_file(
-                metric_type.to_string(),
-                symbol.to_string(),
-                template_path,
-                params,
-                performance,
-            )
-            .await,
+                .sync_template_file(
+                    metric_type.to_string(),
+                    symbol.to_string(),
+                    template_path,
+                    params,
+                    performance,
+                )
+                .await,
             "Dune 外部市场快照同步",
         )
     }
@@ -81,7 +81,11 @@ mod tests {
 
     #[test]
     fn log_sync_result_propagates_error() {
-        let result = log_sync_result("metric_type=test, symbol=ETH".to_string(), Err(anyhow!("boom")), "Dune");
+        let result = log_sync_result(
+            "metric_type=test, symbol=ETH".to_string(),
+            Err(anyhow!("boom")),
+            "Dune",
+        );
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "boom");
     }

@@ -16,8 +16,7 @@ async fn main() -> Result<()> {
     let symbol = env::var("DUNE_SYMBOL").unwrap_or_else(|_| "ETH".to_string());
     let start_time =
         env::var("DUNE_START_TIME").unwrap_or_else(|_| "2026-03-30T00:00:00Z".to_string());
-    let end_time =
-        env::var("DUNE_END_TIME").unwrap_or_else(|_| "2026-03-30T08:00:00Z".to_string());
+    let end_time = env::var("DUNE_END_TIME").unwrap_or_else(|_| "2026-03-30T08:00:00Z".to_string());
     let min_usd = env::var("DUNE_MIN_USD").unwrap_or_else(|_| "100000".to_string());
     let metric_type =
         env::var("DUNE_METRIC_TYPE").unwrap_or_else(|_| "hyperliquid_basis".to_string());

@@ -78,15 +78,13 @@ impl DuneSqlRunner for FakeDuneSqlRunner {
         assert!(sql.contains("2026-03-30T08:00:00Z"));
         assert!(sql.contains("100000"));
 
-        Ok(vec![
-            json!({
-                "hour_bucket": "2026-03-30T04:00:00Z",
-                "funding_rate": 0.0000123,
-                "open_interest_usd": 456789.0,
-                "premium_bps": -4.156042,
-                "netflow_usd": 123456.78
-            })
-        ])
+        Ok(vec![json!({
+            "hour_bucket": "2026-03-30T04:00:00Z",
+            "funding_rate": 0.0000123,
+            "open_interest_usd": 456789.0,
+            "premium_bps": -4.156042,
+            "netflow_usd": 123456.78
+        })])
     }
 }
 

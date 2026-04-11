@@ -18,20 +18,12 @@ const DUNE_SOURCE: &str = "dune";
 
 #[async_trait]
 pub trait DuneSqlRunner: Send + Sync {
-    async fn run_sql(
-        &self,
-        sql: &str,
-        performance: DuneQueryPerformance,
-    ) -> Result<Vec<Value>>;
+    async fn run_sql(&self, sql: &str, performance: DuneQueryPerformance) -> Result<Vec<Value>>;
 }
 
 #[async_trait]
 impl DuneSqlRunner for DuneApiClient {
-    async fn run_sql(
-        &self,
-        sql: &str,
-        performance: DuneQueryPerformance,
-    ) -> Result<Vec<Value>> {
+    async fn run_sql(&self, sql: &str, performance: DuneQueryPerformance) -> Result<Vec<Value>> {
         let poll_interval = std::env::var("DUNE_SQL_POLL_INTERVAL_MS")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
@@ -42,7 +34,12 @@ impl DuneSqlRunner for DuneApiClient {
             .unwrap_or(40);
 
         let response = self
-            .run_sql(sql, performance, Duration::from_millis(poll_interval), max_polls)
+            .run_sql(
+                sql,
+                performance,
+                Duration::from_millis(poll_interval),
+                max_polls,
+            )
             .await?;
         Ok(response.rows)
     }
@@ -69,9 +66,11 @@ impl DuneMarketSyncService {
     }
 
     pub fn render_sql_template(template: &str, params: &HashMap<String, String>) -> String {
-        params.iter().fold(template.to_string(), |sql, (key, value)| {
-            sql.replace(&format!("{{{{{}}}}}", key), value)
-        })
+        params
+            .iter()
+            .fold(template.to_string(), |sql, (key, value)| {
+                sql.replace(&format!("{{{{{}}}}}", key), value)
+            })
     }
 
     pub async fn sync_template_file(
@@ -114,7 +113,11 @@ impl DuneMarketSyncService {
             .collect()
     }
 
-    fn dune_row_to_snapshot(metric_type: &str, symbol: &str, row: Value) -> Result<ExternalMarketSnapshot> {
+    fn dune_row_to_snapshot(
+        metric_type: &str,
+        symbol: &str,
+        row: Value,
+    ) -> Result<ExternalMarketSnapshot> {
         let metric_time = parse_metric_time(&row)?;
         let mut snapshot = ExternalMarketSnapshot::new(
             DUNE_SOURCE.to_string(),
