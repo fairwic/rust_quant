@@ -139,10 +139,7 @@ impl ExternalMarketSnapshotRepository for SqlxExternalMarketSnapshotRepository {
                 anyhow!("查询外部市场快照失败: {}", e)
             })?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| row.to_domain())
-            .collect())
+        Ok(rows.into_iter().map(|row| row.to_domain()).collect())
     }
 }
 
