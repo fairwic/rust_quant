@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use rust_quant_core::config::env_is_true;
 use rust_quant_core::database::get_db_pool;
 use rust_quant_domain::{StrategyConfig, StrategyType};
+use rust_quant_infrastructure::external_data::DuneQueryPerformance;
 use rust_quant_infrastructure::repositories::{
     SqlxStrategyConfigRepository, SqlxSwapOrderRepository,
 };
@@ -13,9 +14,21 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use rust_quant_market::streams;
-use rust_quant_orchestration::workflow::{backtest_runner, data_sync, tickets_job};
+use rust_quant_orchestration::workflow::{
+    backtest_runner, data_sync, external_market_sync_job::ExternalMarketSyncJob, funding_rate_job,
+    tickets_job,
+};
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DuneSyncRequest {
+    metric_type: String,
+    symbol: String,
+    template_path: String,
+    params: HashMap<String, String>,
+    performance: DuneQueryPerformance,
+}
 
 /// 运行基于环境变量控制的各个模式
 pub async fn run_modes() -> Result<()> {
@@ -99,8 +112,22 @@ pub async fn run_modes() -> Result<()> {
                 error!("❌ Ticker同步失败: {}", error);
             }
         }
-        if let Err(error) = data_sync::sync_market_data(&inst_ids, &periods).await {
+        let envs: HashMap<String, String> = std::env::vars().collect();
+        if should_skip_market_data_sync_from_map(&envs) {
+            info!("⏭️ 跳过市场数据同步（SYNC_SKIP_MARKET_DATA=true）");
+        } else if let Err(error) = data_sync::sync_market_data(&inst_ids, &periods).await {
             error!("❌ K线数据同步失败: {}", error);
+        }
+
+        if should_run_funding_rate_sync_from_map(&envs) {
+            if let Err(error) = funding_rate_job::FundingRateJob::sync_funding_rates(&inst_ids).await
+            {
+                error!("❌ 资金费率历史同步失败: {}", error);
+            }
+        }
+
+        if let Err(error) = run_dune_sync_jobs_from_env().await {
+            error!("❌ Dune外部市场数据同步失败: {}", error);
         }
 
         // // 新增：同步资金费率历史
@@ -181,6 +208,125 @@ pub async fn run_modes() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn run_dune_sync_jobs_from_env() -> Result<()> {
+    let envs: HashMap<String, String> = std::env::vars().collect();
+    let requests = parse_dune_sync_requests_from_map(&envs)?;
+
+    if requests.is_empty() {
+        return Ok(());
+    }
+
+    for request in requests {
+        info!(
+            "📊 执行Dune模板同步: metric_type={}, symbol={}, template_path={}",
+            request.metric_type, request.symbol, request.template_path
+        );
+        ExternalMarketSyncJob::sync_dune_template(
+            &request.metric_type,
+            &request.symbol,
+            &request.template_path,
+            request.params,
+            request.performance,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+fn parse_dune_sync_requests_from_map(envs: &HashMap<String, String>) -> Result<Vec<DuneSyncRequest>> {
+    if !env_flag_is_true(envs, "IS_RUN_DUNE_SYNC_JOB") {
+        return Ok(Vec::new());
+    }
+
+    if let Some(raw_jobs) = envs.get("DUNE_TEMPLATE_JOBS").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let mut requests = Vec::new();
+        for job in raw_jobs.split(';').map(|item| item.trim()).filter(|item| !item.is_empty()) {
+            let parts: Vec<&str> = job.split('|').map(|item| item.trim()).collect();
+            if parts.len() < 6 || parts.len() > 7 {
+                return Err(anyhow!(
+                    "DUNE_TEMPLATE_JOBS 格式错误，期望 metric_type|symbol|template_path|start_time|end_time|performance|[min_usd]: {}",
+                    job
+                ));
+            }
+            let min_usd = parts.get(6).copied().unwrap_or("100000");
+            requests.push(build_dune_sync_request(
+                parts[0],
+                parts[1],
+                parts[2],
+                parts[3],
+                parts[4],
+                parts[5],
+                min_usd,
+            )?);
+        }
+        return Ok(requests);
+    }
+
+    Ok(vec![build_dune_sync_request(
+        env_required(envs, "DUNE_METRIC_TYPE")?.as_str(),
+        env_required(envs, "DUNE_SYMBOL")?.as_str(),
+        env_required(envs, "DUNE_TEMPLATE_PATH")?.as_str(),
+        env_required(envs, "DUNE_START_TIME")?.as_str(),
+        env_required(envs, "DUNE_END_TIME")?.as_str(),
+        envs.get("DUNE_PERFORMANCE").map(String::as_str).unwrap_or("medium"),
+        envs.get("DUNE_MIN_USD").map(String::as_str).unwrap_or("100000"),
+    )?])
+}
+
+fn build_dune_sync_request(
+    metric_type: &str,
+    symbol: &str,
+    template_path: &str,
+    start_time: &str,
+    end_time: &str,
+    performance: &str,
+    min_usd: &str,
+) -> Result<DuneSyncRequest> {
+    let mut params = HashMap::new();
+    params.insert("symbol".to_string(), symbol.to_string());
+    params.insert("start_time".to_string(), start_time.to_string());
+    params.insert("end_time".to_string(), end_time.to_string());
+    params.insert("min_usd".to_string(), min_usd.to_string());
+
+    Ok(DuneSyncRequest {
+        metric_type: metric_type.to_string(),
+        symbol: symbol.to_string(),
+        template_path: template_path.to_string(),
+        params,
+        performance: parse_dune_performance(performance)?,
+    })
+}
+
+fn parse_dune_performance(value: &str) -> Result<DuneQueryPerformance> {
+    match value.to_ascii_lowercase().as_str() {
+        "medium" => Ok(DuneQueryPerformance::Medium),
+        "large" => Ok(DuneQueryPerformance::Large),
+        other => Err(anyhow!("不支持的 Dune performance: {}", other)),
+    }
+}
+
+fn env_required(envs: &HashMap<String, String>, key: &str) -> Result<String> {
+    envs.get(key)
+        .cloned()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("缺少环境变量 {}", key))
+}
+
+fn env_flag_is_true(envs: &HashMap<String, String>, key: &str) -> bool {
+    envs.get(key)
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
+fn should_skip_market_data_sync_from_map(envs: &HashMap<String, String>) -> bool {
+    env_flag_is_true(envs, "SYNC_SKIP_MARKET_DATA")
+}
+
+fn should_run_funding_rate_sync_from_map(envs: &HashMap<String, String>) -> bool {
+    env_flag_is_true(envs, "IS_RUN_FUNDING_RATE_JOB")
 }
 
 fn default_backtest_targets() -> Vec<(String, String)> {
@@ -734,5 +880,98 @@ mod tests {
                 ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn test_parse_dune_sync_requests_from_map_single_job_env() {
+        let mut envs = std::collections::HashMap::new();
+        envs.insert("IS_RUN_DUNE_SYNC_JOB".to_string(), "true".to_string());
+        envs.insert("DUNE_SYMBOL".to_string(), "ETH".to_string());
+        envs.insert(
+            "DUNE_START_TIME".to_string(),
+            "2026-02-21T20:00:00Z".to_string(),
+        );
+        envs.insert(
+            "DUNE_END_TIME".to_string(),
+            "2026-02-22T00:00:00Z".to_string(),
+        );
+        envs.insert(
+            "DUNE_TEMPLATE_PATH".to_string(),
+            "docs/external_market_data/dune/hyperliquid_funding_basis.sql".to_string(),
+        );
+        envs.insert("DUNE_METRIC_TYPE".to_string(), "hyperliquid_basis".to_string());
+        envs.insert("DUNE_MIN_USD".to_string(), "100000".to_string());
+
+        let requests = parse_dune_sync_requests_from_map(&envs).expect("should parse dune sync env");
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].metric_type, "hyperliquid_basis");
+        assert_eq!(requests[0].symbol, "ETH");
+        assert_eq!(
+            requests[0].template_path,
+            "docs/external_market_data/dune/hyperliquid_funding_basis.sql"
+        );
+        assert_eq!(
+            requests[0].params.get("start_time"),
+            Some(&"2026-02-21T20:00:00Z".to_string())
+        );
+        assert_eq!(
+            requests[0].params.get("min_usd"),
+            Some(&"100000".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_dune_sync_requests_from_map_batch_jobs() {
+        let mut envs = std::collections::HashMap::new();
+        envs.insert("IS_RUN_DUNE_SYNC_JOB".to_string(), "true".to_string());
+        envs.insert(
+            "DUNE_TEMPLATE_JOBS".to_string(),
+            "hyperliquid_basis|ETH|docs/external_market_data/dune/hyperliquid_funding_basis.sql|2026-02-21T20:00:00Z|2026-02-22T00:00:00Z|medium|100000;\
+eth_whale_transfer|ETH|docs/external_market_data/dune/eth_whale_transfer.sql|2026-02-21T20:00:00Z|2026-02-22T00:00:00Z|large|250000"
+                .to_string(),
+        );
+
+        let requests = parse_dune_sync_requests_from_map(&envs).expect("should parse batch jobs");
+
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].metric_type, "hyperliquid_basis");
+        assert_eq!(requests[0].performance, DuneQueryPerformance::Medium);
+        assert_eq!(requests[1].metric_type, "eth_whale_transfer");
+        assert_eq!(requests[1].performance, DuneQueryPerformance::Large);
+        assert_eq!(
+            requests[1].params.get("min_usd"),
+            Some(&"250000".to_string())
+        );
+    }
+
+    #[test]
+    fn test_should_skip_market_data_sync_from_map_enabled() {
+        let mut envs = std::collections::HashMap::new();
+        envs.insert("SYNC_SKIP_MARKET_DATA".to_string(), "true".to_string());
+
+        assert!(should_skip_market_data_sync_from_map(&envs));
+    }
+
+    #[test]
+    fn test_should_skip_market_data_sync_from_map_disabled_by_default() {
+        let envs = std::collections::HashMap::new();
+
+        assert!(!should_skip_market_data_sync_from_map(&envs));
+    }
+
+    #[test]
+    fn test_should_run_funding_rate_sync_from_map_enabled() {
+        let mut envs = std::collections::HashMap::new();
+        envs.insert("IS_RUN_FUNDING_RATE_JOB".to_string(), "true".to_string());
+
+        assert!(should_run_funding_rate_sync_from_map(&envs));
+    }
+
+    #[test]
+    fn test_should_run_funding_rate_sync_from_map_disabled_by_default() {
+        let envs = std::collections::HashMap::new();
+
+        assert!(!should_run_funding_rate_sync_from_map(&envs));
     }
 }

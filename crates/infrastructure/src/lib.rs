@@ -30,11 +30,13 @@
 
 pub mod cache;
 pub mod exchanges;
+pub mod external_data;
 pub mod messaging;
 pub mod repositories;
 
 // 重新导出常用类型
 pub use exchanges::*;
+pub use external_data::*;
 pub use repositories::{
     SignalLogEntity, SignalLogRepository, SqlxBacktestRepository, SqlxCandleRepository,
     SqlxStrategyConfigRepository, StrategyConfigEntity, StrategyConfigEntityModel,

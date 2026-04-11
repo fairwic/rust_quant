@@ -3,6 +3,7 @@
 // 基础任务（兼容层）
 pub mod basic;
 pub mod economic_calendar_job;
+pub mod external_market_sync_job;
 pub mod funding_rate_job;
 pub mod websocket_handler;
 

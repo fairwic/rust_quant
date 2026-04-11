@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS `external_market_snapshots` (
+    `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    `source` varchar(32) NOT NULL COMMENT '数据来源，如 hyperliquid / okx / binance / dune',
+    `symbol` varchar(32) NOT NULL COMMENT '基础币符号，如 ETH / BTC',
+    `metric_type` varchar(32) NOT NULL COMMENT '指标类型，如 funding / meta / open_interest',
+    `metric_time` bigint NOT NULL COMMENT '指标时间戳（毫秒）',
+    `funding_rate` varchar(32) DEFAULT NULL COMMENT '资金费率',
+    `premium` varchar(32) DEFAULT NULL COMMENT '溢价',
+    `open_interest` varchar(64) DEFAULT NULL COMMENT '持仓量',
+    `oracle_price` varchar(64) DEFAULT NULL COMMENT '预言机价格',
+    `mark_price` varchar(64) DEFAULT NULL COMMENT '标记价格',
+    `long_short_ratio` varchar(32) DEFAULT NULL COMMENT '多空比',
+    `raw_payload` json DEFAULT NULL COMMENT '原始响应',
+    `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_source_symbol_metric_time` (`source`, `symbol`, `metric_type`, `metric_time`),
+    KEY `idx_symbol_metric_time` (`symbol`, `metric_type`, `metric_time`),
+    KEY `idx_source_metric_time` (`source`, `metric_type`, `metric_time`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '外部市场数据快照表';

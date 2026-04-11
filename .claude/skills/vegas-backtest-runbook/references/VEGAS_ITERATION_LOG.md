@@ -394,3 +394,89 @@ if is_engulfing {
   - 跨币种晋级闸门不通过
   - 实验代码已撤回，不更新正式基线
   - 保留为 ETH 有效但不可直接跨币种推广的候选模式
+
+---
+
+### 2026-04-09: 外部市场数据接入基础设施第一阶段落地
+
+- 目标：
+  - 先把策略外部特征的数据底座搭起来
+  - 优先 Hyperliquid funding/meta，其次 Dune 模板，再预留 OKX/Binance
+- 已落地：
+  - `ExternalMarketSnapshot` 领域实体与仓储抽象
+  - `external_market_snapshots` 表，唯一键 `(source, symbol, metric_type, metric_time)`
+  - `HyperliquidPublicAdapter`
+  - `SqlxExternalMarketSnapshotRepository`
+  - `ExternalMarketSyncService`
+  - `ExternalMarketDataProvider`
+  - `ExternalMarketSource`
+  - `normalize_external_market_symbol`
+  - `ExternalMarketSyncJob`
+  - `docs/external_market_data/README.md` 与 3 个 Dune SQL 模板
+- 验证：
+  - `cargo test -p rust-quant-domain external_market_snapshot -- --nocapture`
+  - `cargo test -p rust-quant-infrastructure --test hyperliquid_adapter -- --nocapture`
+  - `cargo test -p rust-quant-services --test external_market_sync -- --nocapture`
+  - `cargo build --bin rust_quant`
+- 当前边界：
+  - Hyperliquid 已经能抓、能转、能存
+  - Dune 已有模板和最小 API 执行链，但尚未挂到调度入口
+  - OKX/Binance 目前只保留扩展点，尚未实现 provider
+  - Hyperliquid 已切到官方 Rust SDK；当前使用官方 GitHub 仓库版本而不是 crates.io `0.6.0`，因为发布版还缺 `metaAndAssetCtxs`
+
+### 2026-04-09: Dune 真实执行链打通并确认数据边界
+
+- 已用真实 `DUNE_API_KEY` 跑通 `run_dune_external_sync`
+- 修复项：
+  - `hyperliquid_funding_basis.sql` 改为基于 `hyperliquid.market_data`
+  - `results` 解析兼容缺失 `query_id`
+  - 时间过滤改为 `from_iso8601_timestamp`
+  - 服务层兼容 `2026-02-21 20:00:00.000 UTC` 格式
+  - orchestration job 失败时不再吞错，CLI 会返回非 0
+- 验证：
+  - `cargo test -p rust-quant-infrastructure --test dune_client -- --nocapture`
+  - `cargo test -p rust-quant-services --test dune_market_sync -- --nocapture`
+  - `cargo test -p rust-quant-orchestration external_market_sync_job -- --nocapture`
+  - `cargo build -p rust-quant-cli --example run_dune_external_sync`
+- 实际入库：
+  - `external_market_snapshots` 中新增 `4` 条 `source=dune, symbol=ETH, metric_type=hyperliquid_basis`
+  - 小时点为 `2026-02-21 20:00:00 UTC` 到 `2026-02-21 23:00:00 UTC`
+- 数据边界：
+  - `hyperliquid.market_data` 当前 `ETH` 最晚只到 `2026-02-21 23:59:00 UTC`
+  - 所以 `2026-03-30` 这类窗口返回 0 行是数据覆盖问题，不是程序问题
+
+### 2026-04-09: Dune 模板同步已挂入主程序数据同步入口
+
+- 新入口位于 `rust_quant_cli::app::bootstrap::run_modes`
+- 开关：
+  - `IS_RUN_SYNC_DATA_JOB=1`
+  - `IS_RUN_DUNE_SYNC_JOB=1`
+- 新增：
+  - `SYNC_SKIP_MARKET_DATA=1`，仅跑外部数据同步
+- 配置：
+  - 单任务环境变量，或
+  - `DUNE_TEMPLATE_JOBS=metric_type|symbol|template_path|start_time|end_time|performance|[min_usd]`
+- 当前验证：
+  - `cargo test -p rust-quant-cli parse_dune_sync_requests_from_map -- --nocapture`
+  - `cargo test -p rust-quant-cli should_skip_market_data_sync_from_map -- --nocapture`
+  - 主程序日志已确认会在市场数据同步后执行 `📊 执行Dune模板同步`
+  - 开启 `SYNC_SKIP_MARKET_DATA=1` 后，主程序日志已确认会输出 `⏭️ 跳过市场数据同步（SYNC_SKIP_MARKET_DATA=true）`
+## 2026-04-09 资金费率同步入口与一年窗口校验
+
+- 在主程序同步入口增加 `IS_RUN_FUNDING_RATE_JOB=1`
+- 支持与 `SYNC_SKIP_TICKERS=1`、`SYNC_SKIP_MARKET_DATA=1` 组合，只跑资金费率同步
+- 实跑命令：
+  - `IS_RUN_SYNC_DATA_JOB=1`
+  - `IS_RUN_FUNDING_RATE_JOB=1`
+  - `IS_RUN_DUNE_SYNC_JOB=0`
+  - `SYNC_SKIP_TICKERS=1`
+  - `SYNC_SKIP_MARKET_DATA=1`
+  - `EXIT_AFTER_SYNC=1`
+  - `SYNC_ONLY_INST_IDS='ETH-USDT-SWAP,BTC-USDT-SWAP,SOL-USDT-SWAP,BCH-USDT-SWAP'`
+- 结果：
+  - `ETH / BTC / SOL / BCH` 全部同步成功
+  - `funding_rates` 每个交易对落库 `273` 条
+  - 东八区时间范围统一为 `2026-01-08 16:00:00` 到 `2026-04-09 08:00:00`
+- 结论：
+  - 当前 OKX `funding-rate-history` 实际只拿到近 `91` 天
+  - “最近一年资金费率” 不能只依赖当前 OKX 历史接口，需要后续用 Hyperliquid / Binance / Dune 补齐

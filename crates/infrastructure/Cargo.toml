@@ -49,5 +49,5 @@ once_cell.workspace = true
 
 # 交易所 SDK（用于adapter实现）
 okx.workspace = true
-
+hyperliquid_rust_sdk.workspace = true
 

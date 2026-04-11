@@ -6,7 +6,9 @@ mod account_service;
 mod asset_service;
 mod contracts_service;
 mod data_sync_service;
+pub mod dune_market_sync_service;
 pub mod economic_calendar_sync_service;
+pub mod external_market_sync_service;
 pub mod funding_rate_sync_service;
 mod public_data_service;
 
@@ -20,7 +22,12 @@ pub use account_service::AccountService;
 pub use asset_service::AssetService;
 pub use contracts_service::ContractsService;
 pub use data_sync_service::DataSyncService;
+pub use dune_market_sync_service::{DuneMarketSyncService, DuneSqlRunner};
 pub use economic_calendar_sync_service::{EconomicCalendarSyncService, EconomicEventQueryService};
+pub use external_market_sync_service::{
+    normalize_external_market_symbol, ExternalMarketDataProvider, ExternalMarketSource,
+    ExternalMarketSyncService, HyperliquidExternalMarketDataProvider,
+};
 pub use public_data_service::PublicDataService;
 
 mod scanner_service;

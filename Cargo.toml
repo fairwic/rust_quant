@@ -103,6 +103,7 @@ clap = { version = "4.5.4", features = ["derive"] }
 
 # === 交易所 SDK ===
 okx = { version = "0.2.0" }
+hyperliquid_rust_sdk = { git = "https://github.com/hyperliquid-dex/hyperliquid-rust-sdk" }
 
 # === 邮件服务 ===
 lettre = "0.11"

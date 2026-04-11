@@ -7,6 +7,7 @@ pub mod backtest_repository;
 pub mod candle_repository;
 pub mod economic_event_repository;
 pub mod exchange_api_config_repository;
+pub mod external_market_snapshot_repository;
 pub mod fund_monitoring_repository;
 pub mod funding_rate_repository;
 pub mod position_repository;
@@ -22,6 +23,7 @@ pub use exchange_api_config_repository::{
 };
 // pub use position_repository::{PositionEntity, SqlxPositionRepository};
 pub use economic_event_repository::SqlxEconomicEventRepository;
+pub use external_market_snapshot_repository::SqlxExternalMarketSnapshotRepository;
 pub use funding_rate_repository::SqlxFundingRateRepository;
 pub use signal_log_repository::{SignalLogEntity, SignalLogRepository};
 pub use strategy_config_repository::{
