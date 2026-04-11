@@ -25,12 +25,12 @@ struct ExternalMarketSnapshotEntity {
 }
 
 impl ExternalMarketSnapshotEntity {
-    fn to_domain(self) -> ExternalMarketSnapshot {
+    fn to_domain(&self) -> ExternalMarketSnapshot {
         ExternalMarketSnapshot {
             id: Some(self.id),
-            source: self.source,
-            symbol: self.symbol,
-            metric_type: self.metric_type,
+            source: self.source.clone(),
+            symbol: self.symbol.clone(),
+            metric_type: self.metric_type.clone(),
             metric_time: self.metric_time,
             funding_rate: self.funding_rate,
             premium: self.premium,
@@ -38,7 +38,7 @@ impl ExternalMarketSnapshotEntity {
             oracle_price: self.oracle_price,
             mark_price: self.mark_price,
             long_short_ratio: self.long_short_ratio,
-            raw_payload: self.raw_payload.map(|json| json.0),
+            raw_payload: self.raw_payload.clone().map(|json| json.0),
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -143,5 +143,40 @@ impl ExternalMarketSnapshotRepository for SqlxExternalMarketSnapshotRepository {
             .into_iter()
             .map(ExternalMarketSnapshotEntity::to_domain)
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_entity_to_domain_can_be_called_without_consuming_entity() {
+        let entity = ExternalMarketSnapshotEntity {
+            id: 1,
+            source: "hyperliquid".to_string(),
+            symbol: "ETH".to_string(),
+            metric_type: "funding".to_string(),
+            metric_time: 1_744_000_000_000,
+            funding_rate: Some(0.0001),
+            premium: Some(0.001),
+            open_interest: Some(1234.0),
+            oracle_price: Some(2000.0),
+            mark_price: Some(2001.0),
+            long_short_ratio: Some(1.2),
+            raw_payload: Some(Json(json!({"key": "value"}))),
+            created_at: None,
+            updated_at: None,
+        };
+
+        let first = entity.to_domain();
+        let second = entity.to_domain();
+
+        assert_eq!(first.id, Some(1));
+        assert_eq!(first.source, "hyperliquid");
+        assert_eq!(first.symbol, "ETH");
+        assert_eq!(second.metric_type, "funding");
+        assert_eq!(second.raw_payload, Some(json!({"key": "value"})));
     }
 }
