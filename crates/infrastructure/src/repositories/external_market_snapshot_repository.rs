@@ -141,7 +141,7 @@ impl ExternalMarketSnapshotRepository for SqlxExternalMarketSnapshotRepository {
 
         Ok(rows
             .into_iter()
-            .map(ExternalMarketSnapshotEntity::to_domain)
+            .map(|row| row.to_domain())
             .collect())
     }
 }
