@@ -1153,3 +1153,70 @@ if is_engulfing {
     - `BTC 1429`
     - `SOL 1430`
     - `BCH 1431`
+
+## 2026-04-15 继续迭代：TooFar 无趋势反向 Bollinger short 过滤（ETH 闸门失败）
+
+- 假设：
+  - 当前正式基线 `1428 / 1429 / 1430 / 1431` 中，一类 short 坏簇可能不该开：
+    - `ema_distance.state == TooFar`
+    - `!ema_touch.is_uptrend`
+    - `!ema_values.is_long_trend`
+    - `!ema_values.is_short_trend`
+    - `fib.in_zone == true`
+    - `bollinger.is_long_signal == true`
+    - `!bollinger.is_short_signal`
+    - `!engulfing.is_valid_engulfing`
+    - `!kline_hammer.is_long_signal`
+    - `!kline_hammer.is_short_signal`
+    - `!leg.is_new_leg`
+    - `RSI < 40`
+- 全样本聚合：
+  - `ETH` `2` 笔，`-401.7055`
+  - `BTC` `1` 笔，`-3.8841`
+  - `BCH` `1` 笔，`-2.1233`
+  - `SOL` `0` 笔
+- 实现：
+  - 新增过滤：
+    - `TOO_FAR_NO_TREND_COUNTER_BOLL_SHORT_BLOCK`
+- 验证：
+  - `cargo test -p rust-quant-indicators too_far_no_trend_counter_boll_short_should -- --nocapture`
+  - `cargo test -p rust-quant-indicators trend::vegas::strategy::tests -- --nocapture`
+  - `cargo build --bin rust_quant`
+  - `IS_BACK_TEST=1 IS_RUN_SYNC_DATA_JOB=0 TIGHTEN_VEGAS_RISK=0 BACKTEST_ONLY_INST_IDS='ETH-USDT-SWAP,BTC-USDT-SWAP,SOL-USDT-SWAP,BCH-USDT-SWAP' DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' ./target/debug/rust_quant`
+- ETH 先行结果：
+  - `ETH 1428 -> 1447`：`52.9183% / 8047.17 / 3.14525 / 32.3410%` -> `52.6112% / 7975.32 / 3.09563 / 32.3410%`
+- 结论：
+  - `ETH` 未过闸门，直接判 `已验证但无效`。
+  - 代码已回滚，正式基线保持：
+    - `ETH 1428`
+    - `BTC 1429`
+    - `SOL 1430`
+    - `BCH 1431`
+
+## 2026-04-15 落地：Vegas 外部因子研究系统最小版
+
+- 新增只读研究服务：
+  - `crates/services/src/strategy/vegas_factor_research/`
+- 新增 CLI 入口：
+  - `cargo run -p rust-quant-cli --example run_vegas_factor_research`
+- 当前能力：
+  - 从正式基线 `1428 / 1429 / 1430 / 1431` 提取已成交交易样本
+  - 从同一批正式基线提取 `filtered_signal_log` 的过滤候选样本
+  - 对齐最近 `4H` 外部快照
+  - 输出 3 类因子家族报告：
+    - `funding_premium_divergence`
+    - `price_oi_state`
+    - `flow_proxy`
+  - 默认按 `BTC / ETH / 其他币种` 三层展示
+  - 分桶结果显式区分 `已成交样本 / 过滤候选`
+- 当前真实执行：
+  - `funding_premium_divergence` 已输出有效桶
+  - `funding_premium_divergence` 已能比较 `已成交样本 / 过滤候选` 的 funding 正负分桶差异
+  - `price_oi_state`、`flow_proxy` 当前历史覆盖不足，显示为 `no_data`
+- 验证：
+  - `cargo test -p rust-quant-services --test vegas_factor_research -- --nocapture`
+  - `cargo build -p rust-quant-cli --example run_vegas_factor_research`
+  - `DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' cargo run -p rust-quant-cli --example run_vegas_factor_research`
+- 结论：
+  - 这是研究系统基础设施，不是基线升级。
+  - 下一步用它筛 ETH 上提升 Sharpe 的外部上下文因子，再进入分层策略实验。

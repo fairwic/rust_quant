@@ -7542,3 +7542,85 @@ TDD：
     - `BTC 1429`
     - `SOL 1430`
     - `BCH 1431`
+
+## 2026-04-15 继续迭代：TooFar 无趋势反向 Bollinger short 过滤（ETH 闸门失败）
+
+- 假设：
+  - 当前正式基线 `1428 / 1429 / 1430 / 1431` 中，一类 short 坏簇可能不该开：
+    - `ema_distance.state == TooFar`
+    - `!ema_touch.is_uptrend`
+    - `!ema_values.is_long_trend`
+    - `!ema_values.is_short_trend`
+    - `fib.in_zone == true`
+    - `bollinger.is_long_signal == true`
+    - `!bollinger.is_short_signal`
+    - `!engulfing.is_valid_engulfing`
+    - `!kline_hammer.is_long_signal`
+    - `!kline_hammer.is_short_signal`
+    - `!leg.is_new_leg`
+    - `RSI < 40`
+- 全样本聚合：
+  - `ETH` `2` 笔，`-401.7055`
+  - `BTC` `1` 笔，`-3.8841`
+  - `BCH` `1` 笔，`-2.1233`
+  - `SOL` `0` 笔
+- 实现：
+  - 新增过滤：
+    - `TOO_FAR_NO_TREND_COUNTER_BOLL_SHORT_BLOCK`
+- TDD / 验证：
+  - `cargo test -p rust-quant-indicators too_far_no_trend_counter_boll_short_should -- --nocapture`
+  - `cargo test -p rust-quant-indicators trend::vegas::strategy::tests -- --nocapture`
+  - `cargo build --bin rust_quant`
+  - `IS_BACK_TEST=1 IS_RUN_SYNC_DATA_JOB=0 TIGHTEN_VEGAS_RISK=0 BACKTEST_ONLY_INST_IDS='ETH-USDT-SWAP,BTC-USDT-SWAP,SOL-USDT-SWAP,BCH-USDT-SWAP' DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' ./target/debug/rust_quant`
+- ETH 先行结果：
+  - `ETH 1428 -> 1447`：`52.9183% / 8047.17 / 3.14525 / 32.3410%` -> `52.6112% / 7975.32 / 3.09563 / 32.3410%`
+- 结论：
+  - `ETH` 利润和 Sharpe 同时回落，未通过单币种闸门。
+  - 按当前协议不再等待后续分层复核，直接判定为 `已验证但无效`。
+  - 代码已回滚，正式基线保持：
+    - `ETH 1428`
+    - `BTC 1429`
+    - `SOL 1430`
+    - `BCH 1431`
+
+## 2026-04-15 落地：Vegas 外部因子研究系统最小版
+
+- 背景：
+  - 现有迭代长期围绕局部坏簇和窄过滤，策略实验速度快于研究方法，导致频繁出现“局部看起来对、整轮回测退化”的情况。
+  - 决定先补研究系统，再把通过研究的外部因子回注到 Vegas。
+- 本次实现：
+  - 新增只读研究服务：
+    - `crates/services/src/strategy/vegas_factor_research/`
+  - 新增 CLI 入口：
+    - `cargo run -p rust-quant-cli --example run_vegas_factor_research`
+  - 新增计划文档：
+    - `docs/plans/2026-04-15-vegas-factor-research-system.md`
+  - README 增加使用说明：
+    - `docs/external_market_data/README.md`
+- 当前能力：
+  - 基于正式基线 `1428 / 1429 / 1430 / 1431` 读取已成交交易样本
+  - 基于同一批正式基线读取 `filtered_signal_log` 的过滤候选样本
+  - 将交易样本与最近 `4H` 外部快照对齐
+  - 优先分析 3 类因子：
+    - `funding_premium_divergence`
+    - `price_oi_state`
+    - `flow_proxy`
+  - 报告按 `BTC / ETH / 其他币种` 三层输出，并给出：
+    - `可回注`
+    - `仅观察`
+    - `拒绝`
+  - 报告中的分桶结果已显式区分：
+    - `已成交样本`
+    - `过滤候选`
+- 当前真实执行结果：
+  - 研究入口已跑通
+  - 当前正式基线在历史覆盖上，已产出有效结果的是 `funding_premium_divergence`
+  - 研究系统已经能看到 `funding_positive / funding_negative` 在 `已成交样本` 与 `过滤候选` 上的差异
+  - `price_oi_state`、`flow_proxy` 当前落库历史覆盖不足，暂以 `no_data` 显式输出，不再隐式消失
+- 验证：
+  - `cargo test -p rust-quant-services --test vegas_factor_research -- --nocapture`
+  - `cargo build -p rust-quant-cli --example run_vegas_factor_research`
+  - `DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' cargo run -p rust-quant-cli --example run_vegas_factor_research`
+- 结论：
+  - 这是研究基础设施，不是策略基线升级。
+  - 下一步应先用研究系统筛出 ETH 上真正能提升 Sharpe 的上下文因子，再按 `BTC / ETH / 其他币种` 做分层复核。

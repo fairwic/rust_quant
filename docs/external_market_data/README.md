@@ -260,3 +260,45 @@ SQL 模板统一使用 Dune 命名参数，不硬编码 query id：
 
 - 这台机器对 Hyperliquid 公共接口连通正常
 - OKX/Binance 公共 REST 目前网络不稳定，先保留扩展接口，不阻塞 Hyperliquid/Dune 先落地
+
+## Vegas 因子研究入口
+
+当前仓库已经提供一个最小可用的研究入口，用于把正式基线回测样本和 `external_market_snapshots` 对齐，输出文本研究报告。
+
+运行方式：
+
+```bash
+DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' \
+cargo run -p rust-quant-cli --example run_vegas_factor_research
+```
+
+默认读取正式基线：
+
+- `1428`
+- `1429`
+- `1430`
+- `1431`
+
+可选环境变量：
+
+- `VEGAS_RESEARCH_BASELINE_IDS=1428,1429,1430,1431`
+- `VEGAS_RESEARCH_TIMEFRAME=4H`
+- `VEGAS_RESEARCH_OUTPUT_PATH=/absolute/path/report.md`
+
+第一版报告会输出：
+
+- 因子概览表
+- 分桶统计表
+- `BTC / ETH / 其他币种` 三层分组结果
+- 结论标签：`可回注 / 仅观察 / 拒绝`
+- 同时区分：
+  - `已成交样本`
+  - `过滤候选`
+
+注意：
+
+- 当前研究系统已同时读取：
+  - `back_test_detail` 中的已成交开仓样本
+  - `filtered_signal_log` 中的过滤候选样本
+- 当前有历史覆盖并能产出有效统计的外部因子家族主要是 `funding_premium_divergence`。
+- `price_oi_state`、`flow_proxy` 若历史快照覆盖不足，会显式显示为 `no_data`。

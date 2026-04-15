@@ -2919,11 +2919,11 @@ impl VegasStrategy {
 
             // 注意：这里仅记录"禁止开仓"的原因，不直接清空 should_buy/should_sell。
             // 这样回测/实盘可以在 backtest/position 层实现"反向信号仅平仓，不反手开仓"的行为。
-        if is_trend_move_significant {
-            if major_bear && signal_result.should_buy.unwrap_or(false) {
-                signal_result.filter_reasons.push(format!(
-                    "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
-                    swing_move_pct * 100.0
+            if is_trend_move_significant {
+                if major_bear && signal_result.should_buy.unwrap_or(false) {
+                    signal_result.filter_reasons.push(format!(
+                        "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
+                        swing_move_pct * 100.0
                     ));
                 }
                 if major_bull && signal_result.should_sell.unwrap_or(false) {
@@ -3071,9 +3071,7 @@ impl VegasStrategy {
         }
 
         if signal_result.should_sell.unwrap_or(false)
-            && Self::should_block_macd_near_zero_weak_hammer_short(
-                vegas_indicator_signal_values,
-            )
+            && Self::should_block_macd_near_zero_weak_hammer_short(vegas_indicator_signal_values)
         {
             signal_result.should_sell = Some(false);
             signal_result
@@ -3866,19 +3864,16 @@ impl VegasStrategy {
                 if signal_result.direction == rust_quant_domain::SignalDirection::Short
                     && matches!(
                         signal_result.stop_loss_source.as_deref(),
-                        Some("Engulfing_Volume_Confirmed")
-                            | Some("KlineHammer_Volume_Confirmed")
+                        Some("Engulfing_Volume_Confirmed") | Some("KlineHammer_Volume_Confirmed")
                     )
                 {
                     if let Some(current_stop) = signal_result.signal_kline_stop_loss_price {
                         let entry_price = signal_result.open_price.unwrap_or(last_data_item.c);
-                        if let Some(tightened_stop) =
-                            Self::tighten_short_signal_stop_near_zero_macd(
-                                entry_price,
-                                current_stop,
-                                &vegas_indicator_signal_values.macd_value,
-                            )
-                        {
+                        if let Some(tightened_stop) = Self::tighten_short_signal_stop_near_zero_macd(
+                            entry_price,
+                            current_stop,
+                            &vegas_indicator_signal_values.macd_value,
+                        ) {
                             signal_result.signal_kline_stop_loss_price = Some(tightened_stop);
                             signal_result
                                 .dynamic_adjustments
@@ -4708,15 +4703,16 @@ mod tests {
             ..VegasIndicatorSignalValue::default()
         };
 
-        assert!(VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
-            &values,
-            Some(36.0)
-        ));
+        assert!(
+            VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+                &values,
+                Some(36.0)
+            )
+        );
     }
 
     #[test]
-    fn counter_trend_hammer_long_new_leg_positive_macd_candidate_requires_non_negative_histogram()
-    {
+    fn counter_trend_hammer_long_new_leg_positive_macd_candidate_requires_non_negative_histogram() {
         let values = VegasIndicatorSignalValue {
             ema_values: EmaSignalValue {
                 is_short_trend: true,
@@ -4742,15 +4738,17 @@ mod tests {
             ..VegasIndicatorSignalValue::default()
         };
 
-        assert!(!VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
-            &values,
-            Some(36.0)
-        ));
+        assert!(
+            !VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+                &values,
+                Some(36.0)
+            )
+        );
     }
 
     #[test]
-    fn counter_trend_hammer_long_new_leg_positive_macd_candidate_rejects_extreme_histogram_or_weak_body()
-    {
+    fn counter_trend_hammer_long_new_leg_positive_macd_candidate_rejects_extreme_histogram_or_weak_body(
+    ) {
         let extreme_hist_values = VegasIndicatorSignalValue {
             ema_values: EmaSignalValue {
                 is_short_trend: true,
@@ -4781,10 +4779,12 @@ mod tests {
             ..VegasIndicatorSignalValue::default()
         };
 
-        assert!(!VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
-            &extreme_hist_values,
-            Some(36.0)
-        ));
+        assert!(
+            !VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+                &extreme_hist_values,
+                Some(36.0)
+            )
+        );
 
         let weak_body_values = VegasIndicatorSignalValue {
             kline_hammer_value: KlineHammerSignalValue {
@@ -4798,10 +4798,12 @@ mod tests {
             ..extreme_hist_values
         };
 
-        assert!(!VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
-            &weak_body_values,
-            Some(36.0)
-        ));
+        assert!(
+            !VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+                &weak_body_values,
+                Some(36.0)
+            )
+        );
 
         let extreme_volume_values = VegasIndicatorSignalValue {
             ema_values: EmaSignalValue {
@@ -4833,12 +4835,13 @@ mod tests {
             ..VegasIndicatorSignalValue::default()
         };
 
-        assert!(!VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
-            &extreme_volume_values,
-            Some(36.0)
-        ));
+        assert!(
+            !VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+                &extreme_volume_values,
+                Some(36.0)
+            )
+        );
     }
-
 
     #[test]
     fn weak_ema_trend_entry_without_pattern_below_fib_midline_should_be_blocked() {
@@ -5213,10 +5216,12 @@ mod tests {
             ..VegasIndicatorSignalValue::default()
         };
 
-        assert!(VegasStrategy::should_block_conflicting_too_far_new_bear_leg_short(
-            &conditions,
-            &signal_values,
-        ));
+        assert!(
+            VegasStrategy::should_block_conflicting_too_far_new_bear_leg_short(
+                &conditions,
+                &signal_values,
+            )
+        );
     }
 
     #[test]
@@ -5322,9 +5327,7 @@ mod tests {
             ..VegasIndicatorSignalValue::default()
         };
 
-        assert!(VegasStrategy::should_block_macd_near_zero_weak_hammer_short(
-            &signal_values
-        ));
+        assert!(VegasStrategy::should_block_macd_near_zero_weak_hammer_short(&signal_values));
     }
 
     #[test]
@@ -5353,9 +5356,7 @@ mod tests {
             ..VegasIndicatorSignalValue::default()
         };
 
-        assert!(!VegasStrategy::should_block_macd_near_zero_weak_hammer_short(
-            &signal_values
-        ));
+        assert!(!VegasStrategy::should_block_macd_near_zero_weak_hammer_short(&signal_values));
     }
 
     #[test]
@@ -5408,9 +5409,7 @@ mod tests {
             ..VegasIndicatorSignalValue::default()
         };
 
-        assert!(VegasStrategy::should_block_too_far_uptrend_opposing_hammer_short(
-            &signal_values
-        ));
+        assert!(VegasStrategy::should_block_too_far_uptrend_opposing_hammer_short(&signal_values));
     }
 
     #[test]
@@ -5464,9 +5463,7 @@ mod tests {
         };
 
         assert!(
-            !VegasStrategy::should_block_too_far_uptrend_opposing_hammer_short(
-                &signal_values,
-            )
+            !VegasStrategy::should_block_too_far_uptrend_opposing_hammer_short(&signal_values,)
         );
     }
 
