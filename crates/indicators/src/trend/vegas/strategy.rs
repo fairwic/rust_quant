@@ -2066,11 +2066,9 @@ impl VegasStrategy {
                 .is_bearish_leg
             && vegas_indicator_signal_values.leg_detection_value.is_new_leg
             && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
-            && histogram >= 0.0
-            && histogram <= 3.0
+            && (0.0..=3.0).contains(&histogram)
             && hammer_body_ratio >= 0.15
-            && volume_ratio >= 1.5
-            && volume_ratio <= 3.0
+            && (1.5..=3.0).contains(&volume_ratio)
     }
 
     fn should_block_recent_upper_shadow_pressure_long(
