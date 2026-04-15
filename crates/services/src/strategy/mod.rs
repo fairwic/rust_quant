@@ -21,5 +21,6 @@ pub use strategy_execution_service::StrategyExecutionService;
 pub use vegas_factor_research::{
     render_report, FactorBucketReport, FactorConclusion, PriceOiState,
     ResearchFilteredSignalSample, ResearchSampleKind, ResearchTradeSample,
-    VegasFactorResearchQuery, VegasFactorResearchReport, VegasFactorResearchService, VolatilityTier,
+    VegasFactorResearchQuery, VegasFactorResearchReport, VegasFactorResearchService,
+    VolatilityTier,
 };

@@ -29,9 +29,18 @@ fn snapshot(
 
 #[test]
 fn maps_symbol_to_expected_volatility_tier() {
-    assert_eq!(VolatilityTier::from_symbol("BTC-USDT-SWAP"), VolatilityTier::Btc);
-    assert_eq!(VolatilityTier::from_symbol("ETH-USDT-SWAP"), VolatilityTier::Eth);
-    assert_eq!(VolatilityTier::from_symbol("SOL-USDT-SWAP"), VolatilityTier::Alt);
+    assert_eq!(
+        VolatilityTier::from_symbol("BTC-USDT-SWAP"),
+        VolatilityTier::Btc
+    );
+    assert_eq!(
+        VolatilityTier::from_symbol("ETH-USDT-SWAP"),
+        VolatilityTier::Eth
+    );
+    assert_eq!(
+        VolatilityTier::from_symbol("SOL-USDT-SWAP"),
+        VolatilityTier::Alt
+    );
 }
 
 #[test]

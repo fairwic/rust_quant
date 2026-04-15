@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use super::report::render_report;
 use super::types::{
     FactorBucketReport, FactorConclusion, PriceOiState, ResearchFilteredSignalSample,
-    ResearchSampleKind, ResearchTradeSample, VegasFactorResearchQuery,
-    VegasFactorResearchReport, VolatilityTier,
+    ResearchSampleKind, ResearchTradeSample, VegasFactorResearchQuery, VegasFactorResearchReport,
+    VolatilityTier,
 };
 
 const FOUR_HOURS_MS: i64 = 4 * 60 * 60 * 1000;
@@ -90,11 +90,8 @@ pub struct VegasFactorResearchService {
 }
 
 impl VegasFactorResearchService {
-    const SUPPORTED_FACTORS: [&'static str; 3] = [
-        "funding_premium_divergence",
-        "price_oi_state",
-        "flow_proxy",
-    ];
+    const SUPPORTED_FACTORS: [&'static str; 3] =
+        ["funding_premium_divergence", "price_oi_state", "flow_proxy"];
 
     pub fn new() -> Result<Self> {
         Ok(Self {
@@ -112,7 +109,9 @@ impl VegasFactorResearchService {
     ) -> Option<&ExternalMarketSnapshot> {
         snapshots
             .iter()
-            .filter(|row| row.metric_time <= event_time && event_time - row.metric_time <= FOUR_HOURS_MS)
+            .filter(|row| {
+                row.metric_time <= event_time && event_time - row.metric_time <= FOUR_HOURS_MS
+            })
             .max_by_key(|row| row.metric_time)
     }
 
@@ -157,7 +156,10 @@ impl VegasFactorResearchService {
         render_report(trades, filtered_signals, buckets)
     }
 
-    pub async fn run_report(&self, query: VegasFactorResearchQuery) -> Result<VegasFactorResearchReport> {
+    pub async fn run_report(
+        &self,
+        query: VegasFactorResearchQuery,
+    ) -> Result<VegasFactorResearchReport> {
         let trades = self.load_trade_samples(&query).await?;
         let filtered_signal_samples = self.load_filtered_signal_samples(&query).await?;
         let snapshots = self
@@ -183,7 +185,10 @@ impl VegasFactorResearchService {
         ))
     }
 
-    async fn load_trade_samples(&self, query: &VegasFactorResearchQuery) -> Result<Vec<ResearchTradeSample>> {
+    async fn load_trade_samples(
+        &self,
+        query: &VegasFactorResearchQuery,
+    ) -> Result<Vec<ResearchTradeSample>> {
         if query.baseline_ids.is_empty() {
             return Err(anyhow!("baseline ids 不能为空"));
         }
@@ -207,7 +212,10 @@ impl VegasFactorResearchService {
         }
         separated.push_unseparated(")");
 
-        let rows = builder.build_query_as::<TradeSampleRow>().fetch_all(&self.pool).await?;
+        let rows = builder
+            .build_query_as::<TradeSampleRow>()
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows.into_iter().map(Self::row_to_trade_sample).collect())
     }
 
@@ -264,12 +272,20 @@ impl VegasFactorResearchService {
 
         let symbols: Vec<_> = trades
             .iter()
-            .map(|row| row.inst_id.split('-').next().unwrap_or(&row.inst_id).to_string())
-            .chain(
-                filtered_signals
-                    .iter()
-                    .map(|row| row.inst_id.split('-').next().unwrap_or(&row.inst_id).to_string()),
-            )
+            .map(|row| {
+                row.inst_id
+                    .split('-')
+                    .next()
+                    .unwrap_or(&row.inst_id)
+                    .to_string()
+            })
+            .chain(filtered_signals.iter().map(|row| {
+                row.inst_id
+                    .split('-')
+                    .next()
+                    .unwrap_or(&row.inst_id)
+                    .to_string()
+            }))
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
@@ -315,7 +331,10 @@ impl VegasFactorResearchService {
             .into_iter()
             .map(Self::row_to_snapshot)
             .collect();
-        snapshots.extend(self.load_funding_rate_snapshots(&symbols, min_time, max_time).await?);
+        snapshots.extend(
+            self.load_funding_rate_snapshots(&symbols, min_time, max_time)
+                .await?,
+        );
         Ok(snapshots)
     }
 
@@ -352,7 +371,11 @@ impl VegasFactorResearchService {
             .map(|row| {
                 let mut snapshot = ExternalMarketSnapshot::new(
                     "okx".to_string(),
-                    row.inst_id.split('-').next().unwrap_or(&row.inst_id).to_string(),
+                    row.inst_id
+                        .split('-')
+                        .next()
+                        .unwrap_or(&row.inst_id)
+                        .to_string(),
                     "funding_rate".to_string(),
                     row.funding_time,
                 );
@@ -370,7 +393,9 @@ impl VegasFactorResearchService {
             timeframe: row.timeframe,
             side: row.side,
             open_time_ms: row.open_time.and_utc().timestamp_millis(),
-            close_time_ms: row.close_time.map(|value| value.and_utc().timestamp_millis()),
+            close_time_ms: row
+                .close_time
+                .map(|value| value.and_utc().timestamp_millis()),
             pnl: row.pnl,
             close_type: row.close_type,
             stop_loss_source: row.stop_loss_source,
@@ -427,7 +452,12 @@ impl VegasFactorResearchService {
         trade: ResearchTradeSample,
         grouped: &HashMap<String, Vec<ExternalMarketSnapshot>>,
     ) -> EnrichedTradeSample {
-        let symbol = trade.inst_id.split('-').next().unwrap_or(&trade.inst_id).to_string();
+        let symbol = trade
+            .inst_id
+            .split('-')
+            .next()
+            .unwrap_or(&trade.inst_id)
+            .to_string();
         let funding_snapshot = grouped.get(&symbol).and_then(|rows| {
             Self::latest_matching_snapshot(trade.open_time_ms, rows, |row| {
                 row.funding_rate.is_some() || row.premium.is_some()
@@ -551,7 +581,9 @@ impl VegasFactorResearchService {
         snapshots
             .iter()
             .filter(|row| predicate(row))
-            .filter(|row| row.metric_time <= event_time && event_time - row.metric_time <= FOUR_HOURS_MS)
+            .filter(|row| {
+                row.metric_time <= event_time && event_time - row.metric_time <= FOUR_HOURS_MS
+            })
             .max_by_key(|row| row.metric_time)
     }
 
@@ -566,7 +598,9 @@ impl VegasFactorResearchService {
         snapshots
             .iter()
             .filter(|row| predicate(row))
-            .filter(|row| row.metric_time < event_time && event_time - row.metric_time <= FOUR_HOURS_MS * 2)
+            .filter(|row| {
+                row.metric_time < event_time && event_time - row.metric_time <= FOUR_HOURS_MS * 2
+            })
             .max_by_key(|row| row.metric_time)
     }
 
@@ -613,9 +647,14 @@ impl VegasFactorResearchService {
     }
 
     fn extract_flow_value(payload: &serde_json::Value) -> Option<f64> {
-        ["netflow_usd", "transfer_value_usd", "amount_usd", "value_usd"]
-            .iter()
-            .find_map(|key| payload.get(*key).and_then(|value| value.as_f64()))
+        [
+            "netflow_usd",
+            "transfer_value_usd",
+            "amount_usd",
+            "value_usd",
+        ]
+        .iter()
+        .find_map(|key| payload.get(*key).and_then(|value| value.as_f64()))
     }
 
     fn build_bucket_reports(
@@ -642,7 +681,11 @@ impl VegasFactorResearchService {
             if let Some(price_oi_state) = sample.price_oi_state {
                 grouped
                     .entry((
-                        format!("{}::{}", ResearchSampleKind::Traded.label(), "price_oi_state"),
+                        format!(
+                            "{}::{}",
+                            ResearchSampleKind::Traded.label(),
+                            "price_oi_state"
+                        ),
                         price_oi_state.label().to_string(),
                         sample.tier,
                     ))
@@ -679,7 +722,11 @@ impl VegasFactorResearchService {
             if let Some(price_oi_state) = sample.price_oi_state {
                 grouped
                     .entry((
-                        format!("{}::{}", ResearchSampleKind::Filtered.label(), "price_oi_state"),
+                        format!(
+                            "{}::{}",
+                            ResearchSampleKind::Filtered.label(),
+                            "price_oi_state"
+                        ),
                         price_oi_state.label().to_string(),
                         sample.tier,
                     ))
@@ -700,12 +747,20 @@ impl VegasFactorResearchService {
 
         let mut rows = Vec::new();
         for ((factor_name, bucket_name, tier), pnls) in grouped {
-            rows.push(Self::build_bucket_row(factor_name, bucket_name, tier, &pnls));
+            rows.push(Self::build_bucket_row(
+                factor_name,
+                bucket_name,
+                tier,
+                &pnls,
+            ));
         }
 
         let mut by_factor: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, row) in rows.iter().enumerate() {
-            by_factor.entry(row.factor_name.clone()).or_default().push(idx);
+            by_factor
+                .entry(row.factor_name.clone())
+                .or_default()
+                .push(idx);
         }
         for indexes in by_factor.values() {
             let clone_rows: Vec<_> = indexes.iter().map(|idx| rows[*idx].clone()).collect();
@@ -718,12 +773,17 @@ impl VegasFactorResearchService {
         for sample_kind in [ResearchSampleKind::Traded, ResearchSampleKind::Filtered] {
             for factor_name in Self::SUPPORTED_FACTORS {
                 let factor_key = format!("{}::{}", sample_kind.label(), factor_name);
-                if rows.iter().any(|row| {
-                    row.factor_name == factor_name && row.sample_kind == sample_kind
-                }) {
+                if rows
+                    .iter()
+                    .any(|row| row.factor_name == factor_name && row.sample_kind == sample_kind)
+                {
                     continue;
                 }
-                for tier in [VolatilityTier::Btc, VolatilityTier::Eth, VolatilityTier::Alt] {
+                for tier in [
+                    VolatilityTier::Btc,
+                    VolatilityTier::Eth,
+                    VolatilityTier::Alt,
+                ] {
                     rows.push(FactorBucketReport {
                         factor_name: factor_name.to_string(),
                         bucket_name: "no_data".to_string(),
@@ -745,7 +805,11 @@ impl VegasFactorResearchService {
             left.factor_name
                 .cmp(&right.factor_name)
                 .then(left.bucket_name.cmp(&right.bucket_name))
-                .then(left.volatility_tier.label().cmp(right.volatility_tier.label()))
+                .then(
+                    left.volatility_tier
+                        .label()
+                        .cmp(right.volatility_tier.label()),
+                )
         });
         rows
     }
@@ -756,18 +820,23 @@ impl VegasFactorResearchService {
         tier: VolatilityTier,
         pnls: &[f64],
     ) -> FactorBucketReport {
-        let (sample_kind, clean_factor_name) = if let Some((kind_label, name)) = factor_name.split_once("::") {
-            let kind = if kind_label == ResearchSampleKind::Filtered.label() {
-                ResearchSampleKind::Filtered
+        let (sample_kind, clean_factor_name) =
+            if let Some((kind_label, name)) = factor_name.split_once("::") {
+                let kind = if kind_label == ResearchSampleKind::Filtered.label() {
+                    ResearchSampleKind::Filtered
+                } else {
+                    ResearchSampleKind::Traded
+                };
+                (kind, name.to_string())
             } else {
-                ResearchSampleKind::Traded
+                (ResearchSampleKind::Traded, factor_name)
             };
-            (kind, name.to_string())
-        } else {
-            (ResearchSampleKind::Traded, factor_name)
-        };
         let sample_count = pnls.len();
-        let avg_pnl = if sample_count == 0 { 0.0 } else { pnls.iter().sum::<f64>() / sample_count as f64 };
+        let avg_pnl = if sample_count == 0 {
+            0.0
+        } else {
+            pnls.iter().sum::<f64>() / sample_count as f64
+        };
         let variance = if sample_count <= 1 {
             0.0
         } else {
@@ -788,11 +857,23 @@ impl VegasFactorResearchService {
             sample_kind,
             volatility_tier: tier,
             sample_count,
-            win_rate: if sample_count == 0 { 0.0 } else { pnls.iter().filter(|row| **row > 0.0).count() as f64 / sample_count as f64 },
+            win_rate: if sample_count == 0 {
+                0.0
+            } else {
+                pnls.iter().filter(|row| **row > 0.0).count() as f64 / sample_count as f64
+            },
             avg_pnl,
             sharpe_proxy,
-            avg_mfe: if sample_count == 0 { 0.0 } else { pnls.iter().copied().filter(|row| *row > 0.0).sum::<f64>() / sample_count as f64 },
-            avg_mae: if sample_count == 0 { 0.0 } else { pnls.iter().copied().filter(|row| *row < 0.0).sum::<f64>() / sample_count as f64 },
+            avg_mfe: if sample_count == 0 {
+                0.0
+            } else {
+                pnls.iter().copied().filter(|row| *row > 0.0).sum::<f64>() / sample_count as f64
+            },
+            avg_mae: if sample_count == 0 {
+                0.0
+            } else {
+                pnls.iter().copied().filter(|row| *row < 0.0).sum::<f64>() / sample_count as f64
+            },
             conclusion: FactorConclusion::Observe,
         }
     }

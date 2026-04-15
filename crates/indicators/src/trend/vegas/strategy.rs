@@ -5466,5 +5466,4 @@ mod tests {
             !VegasStrategy::should_block_too_far_uptrend_opposing_hammer_short(&signal_values,)
         );
     }
-
 }
