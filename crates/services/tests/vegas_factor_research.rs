@@ -4,15 +4,19 @@ use rust_quant_services::strategy::{
     ResearchSampleKind, ResearchTradeSample, VegasFactorResearchService, VolatilityTier,
 };
 
+struct SnapshotMetrics {
+    funding_rate: Option<f64>,
+    premium: Option<f64>,
+    open_interest: Option<f64>,
+    mark_price: Option<f64>,
+}
+
 fn snapshot(
     source: &str,
     symbol: &str,
     metric_type: &str,
     metric_time: i64,
-    funding_rate: Option<f64>,
-    premium: Option<f64>,
-    open_interest: Option<f64>,
-    mark_price: Option<f64>,
+    metrics: SnapshotMetrics,
 ) -> ExternalMarketSnapshot {
     let mut row = ExternalMarketSnapshot::new(
         source.to_string(),
@@ -20,10 +24,10 @@ fn snapshot(
         metric_type.to_string(),
         metric_time,
     );
-    row.funding_rate = funding_rate;
-    row.premium = premium;
-    row.open_interest = open_interest;
-    row.mark_price = mark_price;
+    row.funding_rate = metrics.funding_rate;
+    row.premium = metrics.premium;
+    row.open_interest = metrics.open_interest;
+    row.mark_price = metrics.mark_price;
     row
 }
 
@@ -52,20 +56,24 @@ fn aligns_latest_snapshot_within_four_hour_window() {
             "ETH",
             "meta",
             event_time - 4 * 60 * 60 * 1000 - 1,
-            Some(0.0001),
-            Some(0.001),
-            Some(1_000.0),
-            Some(2_000.0),
+            SnapshotMetrics {
+                funding_rate: Some(0.0001),
+                premium: Some(0.001),
+                open_interest: Some(1_000.0),
+                mark_price: Some(2_000.0),
+            },
         ),
         snapshot(
             "hyperliquid",
             "ETH",
             "meta",
             event_time - 30 * 60 * 1000,
-            Some(0.0002),
-            Some(0.002),
-            Some(1_100.0),
-            Some(2_010.0),
+            SnapshotMetrics {
+                funding_rate: Some(0.0002),
+                premium: Some(0.002),
+                open_interest: Some(1_100.0),
+                mark_price: Some(2_010.0),
+            },
         ),
     ];
 
