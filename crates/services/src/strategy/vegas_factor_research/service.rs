@@ -616,7 +616,7 @@ impl VegasFactorResearchService {
     }
 
     fn funding_bucket(snapshot: Option<&ExternalMarketSnapshot>) -> Option<String> {
-        match snapshot.and_then(|row| Some((row.funding_rate, row.premium))) {
+        match snapshot.map(|row| (row.funding_rate, row.premium)) {
             Some((Some(funding), Some(premium))) if funding > 0.0 && premium > 0.0 => {
                 Some("long_crowded".to_string())
             }
