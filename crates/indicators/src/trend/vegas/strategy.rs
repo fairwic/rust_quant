@@ -1251,6 +1251,54 @@ impl VegasStrategy {
         }
     }
 
+    fn should_block_macd_near_zero_weak_hammer_short(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let ema_distance = &vegas_indicator_signal_values.ema_distance_filter;
+        let ema_values = &vegas_indicator_signal_values.ema_values;
+        let hammer = &vegas_indicator_signal_values.kline_hammer_value;
+        let volume = &vegas_indicator_signal_values.volume_value;
+        let macd = &vegas_indicator_signal_values.macd_value;
+        let engulfing = &vegas_indicator_signal_values.engulfing_value;
+
+        ema_distance.state == EmaDistanceState::TooFar
+            && ema_values.is_short_trend
+            && hammer.is_short_signal
+            && !engulfing.is_valid_engulfing
+            && macd.histogram.abs() < 2.0
+            && volume.volume_ratio < 1.0
+    }
+
+    fn should_block_too_far_uptrend_opposing_hammer_short(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let ema_distance = &vegas_indicator_signal_values.ema_distance_filter;
+        let ema_touch = &vegas_indicator_signal_values.ema_touch_value;
+        let ema_values = &vegas_indicator_signal_values.ema_values;
+        let fib = &vegas_indicator_signal_values.fib_retracement_value;
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        let leg = &vegas_indicator_signal_values.leg_detection_value;
+        let hammer = &vegas_indicator_signal_values.kline_hammer_value;
+        let engulfing = &vegas_indicator_signal_values.engulfing_value;
+        let macd = &vegas_indicator_signal_values.macd_value;
+        let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
+
+        ema_distance.state == EmaDistanceState::TooFar
+            && ema_touch.is_uptrend
+            && ema_values.is_long_trend
+            && !ema_values.is_short_trend
+            && !fib.in_zone
+            && boll.is_short_signal
+            && !boll.is_long_signal
+            && leg.is_bullish_leg
+            && !leg.is_bearish_leg
+            && !leg.is_new_leg
+            && hammer.is_short_signal
+            && !engulfing.is_valid_engulfing
+            && macd.histogram > 0.0
+            && rsi >= 55.0
+    }
+
     fn should_block_high_volume_no_trend_bollinger_long_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -1995,6 +2043,34 @@ impl VegasStrategy {
                 .macd_value
                 .histogram_increasing
             && vegas_indicator_signal_values.volume_value.volume_ratio <= 1.6
+    }
+
+    fn is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+        valid_rsi_value: Option<f64>,
+    ) -> bool {
+        let histogram = vegas_indicator_signal_values.macd_value.histogram;
+        let hammer_body_ratio = vegas_indicator_signal_values.kline_hammer_value.body_ratio;
+        let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
+
+        vegas_indicator_signal_values.ema_distance_filter.state == EmaDistanceState::TooFar
+            && !vegas_indicator_signal_values.ema_touch_value.is_uptrend
+            && !vegas_indicator_signal_values.ema_values.is_long_trend
+            && vegas_indicator_signal_values.ema_values.is_short_trend
+            && !vegas_indicator_signal_values.fib_retracement_value.in_zone
+            && vegas_indicator_signal_values
+                .kline_hammer_value
+                .is_long_signal
+            && vegas_indicator_signal_values
+                .leg_detection_value
+                .is_bearish_leg
+            && vegas_indicator_signal_values.leg_detection_value.is_new_leg
+            && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
+            && histogram >= 0.0
+            && histogram <= 3.0
+            && hammer_body_ratio >= 0.15
+            && volume_ratio >= 1.5
+            && volume_ratio <= 3.0
     }
 
     fn should_block_recent_upper_shadow_pressure_long(
@@ -2843,11 +2919,11 @@ impl VegasStrategy {
 
             // 注意：这里仅记录"禁止开仓"的原因，不直接清空 should_buy/should_sell。
             // 这样回测/实盘可以在 backtest/position 层实现"反向信号仅平仓，不反手开仓"的行为。
-            if is_trend_move_significant {
-                if major_bear && signal_result.should_buy.unwrap_or(false) {
-                    signal_result.filter_reasons.push(format!(
-                        "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
-                        swing_move_pct * 100.0
+        if is_trend_move_significant {
+            if major_bear && signal_result.should_buy.unwrap_or(false) {
+                signal_result.filter_reasons.push(format!(
+                    "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
+                    swing_move_pct * 100.0
                     ));
                 }
                 if major_bull && signal_result.should_sell.unwrap_or(false) {
@@ -2881,6 +2957,11 @@ impl VegasStrategy {
 
         let allow_repair_long = signal_result.should_buy.unwrap_or(false)
             && Self::is_repair_long_candidate(vegas_indicator_signal_values, valid_rsi_value);
+        let allow_new_leg_positive_macd_long = signal_result.should_buy.unwrap_or(false)
+            && Self::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+                vegas_indicator_signal_values,
+                valid_rsi_value,
+            );
 
         // TooFar 反趋势做多里，锤子线抄底在空头排列且 Fib 未回到理想区间时表现较差。
         // 这类单常由局部反转信号触发，但仍处于空头主导阶段，优先拦截低 RSI 的接飞刀做多。
@@ -2895,6 +2976,8 @@ impl VegasStrategy {
                 .is_long_signal
             && valid_rsi_value.is_some_and(|rsi| rsi < 45.0)
             && !allow_repair_long;
+        let should_block_counter_trend_hammer_long =
+            should_block_counter_trend_hammer_long && !allow_new_leg_positive_macd_long;
         if should_block_counter_trend_hammer_long {
             signal_result.should_buy = Some(false);
             signal_result
@@ -2971,6 +3054,42 @@ impl VegasStrategy {
             signal_result
                 .filter_reasons
                 .push("SIMPLE_BREAK_TOO_FAR_SHALLOW_FIB_SHORT".to_string());
+        }
+
+        let should_block_conflicting_too_far_new_bear_leg_short =
+            Self::should_block_conflicting_too_far_new_bear_leg_short(
+                &conditions,
+                vegas_indicator_signal_values,
+            );
+        if signal_result.should_sell.unwrap_or(false)
+            && should_block_conflicting_too_far_new_bear_leg_short
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("CONFLICTING_TOO_FAR_NEW_BEAR_LEG_SHORT".to_string());
+        }
+
+        if signal_result.should_sell.unwrap_or(false)
+            && Self::should_block_macd_near_zero_weak_hammer_short(
+                vegas_indicator_signal_values,
+            )
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("MACD_NEAR_ZERO_WEAK_HAMMER_SHORT_BLOCK".to_string());
+        }
+
+        if signal_result.should_sell.unwrap_or(false)
+            && Self::should_block_too_far_uptrend_opposing_hammer_short(
+                vegas_indicator_signal_values,
+            )
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("TOO_FAR_UPTREND_OPPOSING_HAMMER_SHORT_BLOCK".to_string());
         }
 
         // ================================================================
@@ -3743,6 +3862,30 @@ impl VegasStrategy {
                     &conditions,
                     vegas_indicator_signal_values,
                 );
+
+                if signal_result.direction == rust_quant_domain::SignalDirection::Short
+                    && matches!(
+                        signal_result.stop_loss_source.as_deref(),
+                        Some("Engulfing_Volume_Confirmed")
+                            | Some("KlineHammer_Volume_Confirmed")
+                    )
+                {
+                    if let Some(current_stop) = signal_result.signal_kline_stop_loss_price {
+                        let entry_price = signal_result.open_price.unwrap_or(last_data_item.c);
+                        if let Some(tightened_stop) =
+                            Self::tighten_short_signal_stop_near_zero_macd(
+                                entry_price,
+                                current_stop,
+                                &vegas_indicator_signal_values.macd_value,
+                            )
+                        {
+                            signal_result.signal_kline_stop_loss_price = Some(tightened_stop);
+                            signal_result
+                                .dynamic_adjustments
+                                .push("MACD_NEAR_ZERO_TIGHTEN_SHORT_STOP".to_string());
+                        }
+                    }
+                }
             }
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
             signal_result.single_result = Some(json!(conditions).to_string());
@@ -4249,6 +4392,67 @@ impl VegasStrategy {
         has_downside_breakout && has_bearish_structure
     }
 
+    fn should_block_conflicting_too_far_new_bear_leg_short(
+        conditions: &[(SignalType, SignalCondition)],
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        if vegas_indicator_signal_values.ema_distance_filter.state != EmaDistanceState::TooFar
+            || !vegas_indicator_signal_values.fib_retracement_value.in_zone
+            || vegas_indicator_signal_values.volume_value.volume_ratio >= 1.5
+        {
+            return false;
+        }
+
+        let has_bolling_long = conditions.iter().any(|(signal_type, condition)| {
+            *signal_type == SignalType::Bolling
+                && matches!(
+                    condition,
+                    SignalCondition::Bolling {
+                        is_long_signal: true,
+                        is_short_signal: false,
+                        ..
+                    }
+                )
+        });
+
+        let has_engulfing_short = conditions.iter().any(|(signal_type, condition)| {
+            *signal_type == SignalType::Engulfing
+                && matches!(
+                    condition,
+                    SignalCondition::Engulfing {
+                        is_long_signal: false,
+                        is_short_signal: true,
+                    }
+                )
+        });
+
+        let has_new_bearish_leg = conditions.iter().any(|(signal_type, condition)| {
+            *signal_type == SignalType::LegDetection
+                && matches!(
+                    condition,
+                    SignalCondition::LegDetection {
+                        is_bullish_leg: false,
+                        is_bearish_leg: true,
+                        is_new_leg: true,
+                    }
+                )
+        });
+
+        has_bolling_long && has_engulfing_short && has_new_bearish_leg
+    }
+
+    fn tighten_short_signal_stop_near_zero_macd(
+        entry_price: f64,
+        current_stop: f64,
+        macd_value: &MacdSignalValue,
+    ) -> Option<f64> {
+        if current_stop <= entry_price || macd_value.histogram.abs() >= 2.0 {
+            return None;
+        }
+
+        Some(entry_price + (current_stop - entry_price) * 0.5)
+    }
+
     fn calculate_best_stop_loss_price(
         &self,
         last_data_item: &CandleItem,
@@ -4300,14 +4504,15 @@ impl VegasStrategy {
 mod tests {
     use super::super::ema_filter::EmaDistanceFilter;
     use super::super::signal::{
-        BollingerSignalValue, KlineHammerSignalValue, MacdSignalValue, RsiSignalValue,
-        VolumeTrendSignalValue,
+        BollingerSignalValue, EmaTouchTrendSignalValue, EngulfingSignalValue,
+        KlineHammerSignalValue, MacdSignalValue, RsiSignalValue, VolumeTrendSignalValue,
     };
     use super::{
         EmaDistanceState, EmaSignalValue, FibRetracementSignalConfig, FibRetracementSignalValue,
         RsiSignalConfig, SignalCondition, SignalType, SignalWeightsConfig,
         VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
     };
+    use crate::leg_detection_indicator::LegDetectionValue;
     use rust_quant_common::CandleItem;
     use rust_quant_domain::BasicRiskStrategyConfig;
 
@@ -4470,6 +4675,170 @@ mod tests {
             Some(46.0)
         ));
     }
+
+    #[test]
+    fn counter_trend_hammer_long_new_leg_positive_macd_candidate_matches_expected_shape() {
+        let values = VegasIndicatorSignalValue {
+            ema_values: EmaSignalValue {
+                is_short_trend: true,
+                ..EmaSignalValue::default()
+            },
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_long_signal: true,
+                body_ratio: 0.16,
+                ..KlineHammerSignalValue::default()
+            },
+            volume_value: VolumeTrendSignalValue {
+                volume_ratio: 2.86,
+                ..VolumeTrendSignalValue::default()
+            },
+            leg_detection_value: crate::leg_detection_indicator::LegDetectionValue {
+                is_bearish_leg: true,
+                is_new_leg: true,
+                ..crate::leg_detection_indicator::LegDetectionValue::default()
+            },
+            macd_value: MacdSignalValue {
+                histogram: 1.95,
+                ..MacdSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+            &values,
+            Some(36.0)
+        ));
+    }
+
+    #[test]
+    fn counter_trend_hammer_long_new_leg_positive_macd_candidate_requires_non_negative_histogram()
+    {
+        let values = VegasIndicatorSignalValue {
+            ema_values: EmaSignalValue {
+                is_short_trend: true,
+                ..EmaSignalValue::default()
+            },
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_long_signal: true,
+                ..KlineHammerSignalValue::default()
+            },
+            leg_detection_value: crate::leg_detection_indicator::LegDetectionValue {
+                is_bearish_leg: true,
+                is_new_leg: true,
+                ..crate::leg_detection_indicator::LegDetectionValue::default()
+            },
+            macd_value: MacdSignalValue {
+                histogram: -0.1,
+                ..MacdSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(!VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+            &values,
+            Some(36.0)
+        ));
+    }
+
+    #[test]
+    fn counter_trend_hammer_long_new_leg_positive_macd_candidate_rejects_extreme_histogram_or_weak_body()
+    {
+        let extreme_hist_values = VegasIndicatorSignalValue {
+            ema_values: EmaSignalValue {
+                is_short_trend: true,
+                ..EmaSignalValue::default()
+            },
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_long_signal: true,
+                body_ratio: 0.18,
+                ..KlineHammerSignalValue::default()
+            },
+            volume_value: VolumeTrendSignalValue {
+                volume_ratio: 2.0,
+                ..VolumeTrendSignalValue::default()
+            },
+            leg_detection_value: crate::leg_detection_indicator::LegDetectionValue {
+                is_bearish_leg: true,
+                is_new_leg: true,
+                ..crate::leg_detection_indicator::LegDetectionValue::default()
+            },
+            macd_value: MacdSignalValue {
+                histogram: 12.0,
+                ..MacdSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(!VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+            &extreme_hist_values,
+            Some(36.0)
+        ));
+
+        let weak_body_values = VegasIndicatorSignalValue {
+            kline_hammer_value: KlineHammerSignalValue {
+                body_ratio: 0.08,
+                ..extreme_hist_values.kline_hammer_value
+            },
+            macd_value: MacdSignalValue {
+                histogram: 1.5,
+                ..MacdSignalValue::default()
+            },
+            ..extreme_hist_values
+        };
+
+        assert!(!VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+            &weak_body_values,
+            Some(36.0)
+        ));
+
+        let extreme_volume_values = VegasIndicatorSignalValue {
+            ema_values: EmaSignalValue {
+                is_short_trend: true,
+                ..EmaSignalValue::default()
+            },
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_long_signal: true,
+                body_ratio: 0.18,
+                ..KlineHammerSignalValue::default()
+            },
+            volume_value: VolumeTrendSignalValue {
+                volume_ratio: 4.2,
+                ..VolumeTrendSignalValue::default()
+            },
+            leg_detection_value: crate::leg_detection_indicator::LegDetectionValue {
+                is_bearish_leg: true,
+                is_new_leg: true,
+                ..crate::leg_detection_indicator::LegDetectionValue::default()
+            },
+            macd_value: MacdSignalValue {
+                histogram: 1.5,
+                ..MacdSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(!VegasStrategy::is_counter_trend_hammer_long_new_leg_positive_macd_candidate(
+            &extreme_volume_values,
+            Some(36.0)
+        ));
+    }
+
 
     #[test]
     fn weak_ema_trend_entry_without_pattern_below_fib_midline_should_be_blocked() {
@@ -4800,4 +5169,305 @@ mod tests {
             &fib_value,
         ));
     }
+
+    #[test]
+    fn conflicting_too_far_new_bear_leg_short_should_be_blocked_with_low_volume() {
+        let conditions = vec![
+            (
+                SignalType::Bolling,
+                SignalCondition::Bolling {
+                    is_long_signal: true,
+                    is_short_signal: false,
+                    is_close_signal: false,
+                },
+            ),
+            (
+                SignalType::Engulfing,
+                SignalCondition::Engulfing {
+                    is_long_signal: false,
+                    is_short_signal: true,
+                },
+            ),
+            (
+                SignalType::LegDetection,
+                SignalCondition::LegDetection {
+                    is_bullish_leg: false,
+                    is_bearish_leg: true,
+                    is_new_leg: true,
+                },
+            ),
+        ];
+        let signal_values = VegasIndicatorSignalValue {
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            fib_retracement_value: FibRetracementSignalValue {
+                in_zone: true,
+                ..FibRetracementSignalValue::default()
+            },
+            volume_value: VolumeTrendSignalValue {
+                volume_ratio: 1.06,
+                ..VolumeTrendSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(VegasStrategy::should_block_conflicting_too_far_new_bear_leg_short(
+            &conditions,
+            &signal_values,
+        ));
+    }
+
+    #[test]
+    fn conflicting_too_far_new_bear_leg_short_should_stay_allowed_with_high_volume() {
+        let conditions = vec![
+            (
+                SignalType::Bolling,
+                SignalCondition::Bolling {
+                    is_long_signal: true,
+                    is_short_signal: false,
+                    is_close_signal: false,
+                },
+            ),
+            (
+                SignalType::Engulfing,
+                SignalCondition::Engulfing {
+                    is_long_signal: false,
+                    is_short_signal: true,
+                },
+            ),
+            (
+                SignalType::LegDetection,
+                SignalCondition::LegDetection {
+                    is_bullish_leg: false,
+                    is_bearish_leg: true,
+                    is_new_leg: true,
+                },
+            ),
+        ];
+        let signal_values = VegasIndicatorSignalValue {
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            fib_retracement_value: FibRetracementSignalValue {
+                in_zone: true,
+                ..FibRetracementSignalValue::default()
+            },
+            volume_value: VolumeTrendSignalValue {
+                volume_ratio: 2.3,
+                ..VolumeTrendSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(
+            !VegasStrategy::should_block_conflicting_too_far_new_bear_leg_short(
+                &conditions,
+                &signal_values,
+            )
+        );
+    }
+
+    #[test]
+    fn macd_near_zero_short_stop_should_tighten_to_midpoint() {
+        let macd = MacdSignalValue {
+            histogram: 1.2,
+            ..MacdSignalValue::default()
+        };
+
+        let tightened =
+            VegasStrategy::tighten_short_signal_stop_near_zero_macd(100.0, 110.0, &macd);
+
+        assert_eq!(Some(105.0), tightened);
+    }
+
+    #[test]
+    fn macd_far_from_zero_short_stop_should_stay_unadjusted() {
+        let macd = MacdSignalValue {
+            histogram: 3.5,
+            ..MacdSignalValue::default()
+        };
+
+        let tightened =
+            VegasStrategy::tighten_short_signal_stop_near_zero_macd(100.0, 110.0, &macd);
+
+        assert_eq!(None, tightened);
+    }
+
+    #[test]
+    fn macd_near_zero_weak_hammer_short_should_be_blocked_when_too_far_and_low_volume() {
+        let signal_values = VegasIndicatorSignalValue {
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            ema_values: EmaSignalValue {
+                is_short_trend: true,
+                ..EmaSignalValue::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_short_signal: true,
+                ..KlineHammerSignalValue::default()
+            },
+            volume_value: VolumeTrendSignalValue {
+                volume_ratio: 0.85,
+                ..VolumeTrendSignalValue::default()
+            },
+            macd_value: MacdSignalValue {
+                histogram: 0.63,
+                ..MacdSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(VegasStrategy::should_block_macd_near_zero_weak_hammer_short(
+            &signal_values
+        ));
+    }
+
+    #[test]
+    fn macd_near_zero_weak_hammer_short_should_stay_allowed_with_higher_volume() {
+        let signal_values = VegasIndicatorSignalValue {
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            ema_values: EmaSignalValue {
+                is_short_trend: true,
+                ..EmaSignalValue::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_short_signal: true,
+                ..KlineHammerSignalValue::default()
+            },
+            volume_value: VolumeTrendSignalValue {
+                volume_ratio: 1.05,
+                ..VolumeTrendSignalValue::default()
+            },
+            macd_value: MacdSignalValue {
+                histogram: 0.63,
+                ..MacdSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(!VegasStrategy::should_block_macd_near_zero_weak_hammer_short(
+            &signal_values
+        ));
+    }
+
+    #[test]
+    fn too_far_uptrend_opposing_hammer_short_should_be_blocked() {
+        let signal_values = VegasIndicatorSignalValue {
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            ema_touch_value: EmaTouchTrendSignalValue {
+                is_uptrend: true,
+                ..EmaTouchTrendSignalValue::default()
+            },
+            ema_values: EmaSignalValue {
+                is_long_trend: true,
+                is_short_trend: false,
+                ..EmaSignalValue::default()
+            },
+            fib_retracement_value: FibRetracementSignalValue {
+                in_zone: false,
+                ..FibRetracementSignalValue::default()
+            },
+            bollinger_value: BollingerSignalValue {
+                is_long_signal: false,
+                is_short_signal: true,
+                ..BollingerSignalValue::default()
+            },
+            leg_detection_value: LegDetectionValue {
+                is_bullish_leg: true,
+                is_bearish_leg: false,
+                is_new_leg: false,
+                ..LegDetectionValue::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_short_signal: true,
+                ..KlineHammerSignalValue::default()
+            },
+            engulfing_value: EngulfingSignalValue {
+                is_valid_engulfing: false,
+                ..EngulfingSignalValue::default()
+            },
+            macd_value: MacdSignalValue {
+                histogram: 2.4,
+                ..MacdSignalValue::default()
+            },
+            rsi_value: RsiSignalValue {
+                rsi_value: 62.0,
+                ..RsiSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(VegasStrategy::should_block_too_far_uptrend_opposing_hammer_short(
+            &signal_values
+        ));
+    }
+
+    #[test]
+    fn too_far_uptrend_opposing_hammer_short_should_stay_allowed_in_fib_zone() {
+        let signal_values = VegasIndicatorSignalValue {
+            ema_distance_filter: EmaDistanceFilter {
+                state: EmaDistanceState::TooFar,
+                ..EmaDistanceFilter::default()
+            },
+            ema_touch_value: EmaTouchTrendSignalValue {
+                is_uptrend: true,
+                ..EmaTouchTrendSignalValue::default()
+            },
+            ema_values: EmaSignalValue {
+                is_long_trend: true,
+                is_short_trend: false,
+                ..EmaSignalValue::default()
+            },
+            fib_retracement_value: FibRetracementSignalValue {
+                in_zone: true,
+                ..FibRetracementSignalValue::default()
+            },
+            bollinger_value: BollingerSignalValue {
+                is_long_signal: false,
+                is_short_signal: true,
+                ..BollingerSignalValue::default()
+            },
+            leg_detection_value: LegDetectionValue {
+                is_bullish_leg: true,
+                is_bearish_leg: false,
+                is_new_leg: false,
+                ..LegDetectionValue::default()
+            },
+            kline_hammer_value: KlineHammerSignalValue {
+                is_short_signal: true,
+                ..KlineHammerSignalValue::default()
+            },
+            engulfing_value: EngulfingSignalValue {
+                is_valid_engulfing: false,
+                ..EngulfingSignalValue::default()
+            },
+            macd_value: MacdSignalValue {
+                histogram: 2.4,
+                ..MacdSignalValue::default()
+            },
+            rsi_value: RsiSignalValue {
+                rsi_value: 62.0,
+                ..RsiSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(
+            !VegasStrategy::should_block_too_far_uptrend_opposing_hammer_short(
+                &signal_values,
+            )
+        );
+    }
+
 }
