@@ -27,21 +27,21 @@ cargo run
 
 ### 2) 查询最新回测结果（back_test_log）
 ```bash
-docker exec -i mysql mysql -uroot -pexample test -e "select id,win_rate,profit,final_fund,sharpe_ratio,annual_return,max_drawdown,volatility,created_at from back_test_log order by id desc limit 1\\G"
+podman exec -i mysql mysql -uroot -pexample test -e "select id,win_rate,profit,final_fund,sharpe_ratio,annual_return,max_drawdown,volatility,created_at from back_test_log order by id desc limit 1\\G"
 ```
 
 ### 2.1) 查询指定回测 ID
 ```bash
-docker exec -i mysql mysql -uroot -pexample test -e "select id,strategy_type,inst_type,time,win_rate,profit,final_fund,sharpe_ratio,annual_return,max_drawdown,volatility,created_at from back_test_log where id=<ID>\\G"
+podman exec -i mysql mysql -uroot -pexample test -e "select id,strategy_type,inst_type,time,win_rate,profit,final_fund,sharpe_ratio,annual_return,max_drawdown,volatility,created_at from back_test_log where id=<ID>\\G"
 ```
 
 ### 3) 查看/更新策略配置（通常：vegas 4H，strategy_config.id=11）
 ```bash
 # 查看当前配置
-docker exec -i mysql mysql -uroot -pexample test -e "select value,risk_config from strategy_config where id=11\\G"
+podman exec -i mysql mysql -uroot -pexample test -e "select value,risk_config from strategy_config where id=11\\G"
 
 # 更新配置（建议使用 JSON_OBJECT 避免转义地狱）
-docker exec -i mysql mysql -uroot -pexample test -e 'UPDATE strategy_config SET value=JSON_OBJECT(...), risk_config=JSON_OBJECT(...) WHERE id=11;'
+podman exec -i mysql mysql -uroot -pexample test -e 'UPDATE strategy_config SET value=JSON_OBJECT(...), risk_config=JSON_OBJECT(...) WHERE id=11;'
 ```
 
 ### 4) 迭代标准（判优/回退）
@@ -60,6 +60,11 @@ docker exec -i mysql mysql -uroot -pexample test -e 'UPDATE strategy_config SET 
 - **禁止事项**：不允许“ETH 尚未确认正向，就先扩到其他币种继续调”；也不允许“只修正单个案例，就直接升级为正式基线”。
 - **文档落地要求**：完成一次有效实验后，默认同步更新技能 runbook 和迭代日志；只有在结果不确定、需要保留多个候选方向时，才暂缓写入“基线/推荐”类结论。
 - **目标样本命中校验**：若规则是从某一笔具体交易倒推出来的，必须先确认新规则确实命中了该样本；若目标样本未命中，即便规则逻辑合理，也按“已验证但拒绝晋级”处理，并撤销实验代码。
+- **路径影响评估门禁**：过滤/放行类规则即使命中目标样本，也必须比较 `基线 vs 实验` 的缺失交易、新增交易、共同交易 PnL delta；若总路径 delta 为负，不能仅凭 shadow pnl 或局部坏单改善升级。
+- **低 Sharpe 候选去重**：研究报告中的低 Sharpe 候选只用于排序下一轮实验；若候选与已拒绝实验的条件高度重叠，必须先判定为“已覆盖拒绝”，不要重复回测同一方向。
+- **低 Sharpe 候选门槛**：未覆盖候选还必须满足最小总影响门槛（当前 `TotalPnL <= -10`）才允许进入下一轮实验；低于门槛的候选只进入观察区。
+- **其他币种候选拆分**：`其他币种` 不作为可执行整体结论，必须按具体标的（如 `SOL` / `BCH`）拆分后再判断样本数、TotalPnL 与是否进入实验。
+- **研究分桶字段口径**：MACD 0 轴分桶优先使用 `histogram` 数值正负；仅当 histogram 缺失时才回退到 `above_zero` 布尔字段，避免历史快照中派生布尔值与数值不一致污染候选。
 - **止损归因校验**：分析“为什么在某个时点止损”时，必须先查询 close 行的 `stop_loss_update_history`，确认 `signal_ts/source/new_price`；不能只看开仓行 `signal_value`，否则会把止损来源误判成错误的 K 线或错误的信号链。
 - **明细字段口径校验**：`back_test_detail` 的 close 行 `signal_value` 可能为空；分析入场形态、信号快照、指标组合时，必须改查同笔交易的 open/long/short 行。close 行只用于查看 `close_type`、`stop_loss_source` 和 `stop_loss_update_history`。
 

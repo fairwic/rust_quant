@@ -158,6 +158,7 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     let chase_confirm_config = vegas_strategy.chase_confirm_config;
     let extreme_k_filter_signal = vegas_strategy.extreme_k_filter_signal;
     let fib_retracement_signal = vegas_strategy.fib_retracement_signal;
+    let entry_block_config = vegas_strategy.entry_block_config;
     let ema_distance_config = vegas_strategy.ema_distance_config;
     let atr_stop_loss_multiplier = vegas_strategy.atr_stop_loss_multiplier;
     let emit_debug = vegas_strategy.emit_debug;
@@ -216,10 +217,17 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     param.chase_confirm_config = chase_confirm_config;
     param.extreme_k_filter_signal = extreme_k_filter_signal;
     param.fib_retracement_signal = fib_retracement_signal;
+    param.entry_block_config = Some(entry_block_config);
     param.ema_distance_config = Some(ema_distance_config);
     param.atr_stop_loss_multiplier = Some(atr_stop_loss_multiplier);
     param.emit_debug = Some(emit_debug);
     param.macd_signal = vegas_strategy.macd_signal;
+    param.dynamic_entry_amp_threshold = risk_config.dynamic_entry_amp_threshold;
+    param.dynamic_entry_loss_percent = risk_config.dynamic_entry_loss_percent;
+    param.dynamic_entry_require_direction_mismatch =
+        risk_config.dynamic_entry_require_direction_mismatch;
+    param.dynamic_range_threshold = risk_config.dynamic_range_threshold;
+    param.dynamic_range_loss_percent = risk_config.dynamic_range_loss_percent;
 
     Ok(param)
 }

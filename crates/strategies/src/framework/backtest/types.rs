@@ -364,6 +364,21 @@ pub struct BasicRiskStrategyConfig {
     /// 高波动动态降损开关（原先由环境变量 DYNAMIC_MAX_LOSS 控制）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_max_loss: Option<bool>,
+    /// 入场K线振幅超过该阈值时，允许动态收紧最大止损
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_entry_amp_threshold: Option<f64>,
+    /// 入场K线振幅规则触发后的最大止损比例
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_entry_loss_percent: Option<f64>,
+    /// 是否要求入场K线收盘位置与开仓方向不利才触发入场振幅动态降损
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_entry_require_direction_mismatch: Option<bool>,
+    /// 运行中K线振幅超过该阈值时，允许动态收紧最大止损
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_range_threshold: Option<f64>,
+    /// 运行中K线振幅规则触发后的最大止损比例
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_range_loss_percent: Option<f64>,
 }
 
 impl Default for BasicRiskStrategyConfig {
@@ -374,6 +389,11 @@ impl Default for BasicRiskStrategyConfig {
             atr_take_profit_ratio: Some(0.00), // 默认1%盈利开始启用动态止盈
             fixed_signal_kline_take_profit_ratio: Some(0.00), // 默认不使用固定信号线的止盈
             dynamic_max_loss: Some(true),
+            dynamic_entry_amp_threshold: None,
+            dynamic_entry_loss_percent: None,
+            dynamic_entry_require_direction_mismatch: None,
+            dynamic_range_threshold: None,
+            dynamic_range_loss_percent: None,
         }
     }
 }

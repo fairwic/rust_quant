@@ -2,10 +2,10 @@ mod report;
 mod service;
 mod types;
 
-pub use report::render_report;
+pub use report::{render_path_impact_report, render_report};
 pub use service::VegasFactorResearchService;
 pub use types::{
-    FactorBucketReport, FactorConclusion, PriceOiState, ResearchFilteredSignalSample,
-    ResearchSampleKind, ResearchTradeSample, VegasFactorResearchQuery, VegasFactorResearchReport,
-    VolatilityTier,
+    FactorBucketReport, FactorConclusion, PathImpactQuery, PathImpactReport, PathImpactSummary,
+    PathImpactTradeChange, PriceOiState, ResearchFilteredSignalSample, ResearchSampleKind,
+    ResearchTradeSample, VegasFactorResearchQuery, VegasFactorResearchReport, VolatilityTier,
 };

@@ -7624,3 +7624,553 @@ TDD：
 - 结论：
   - 这是研究基础设施，不是策略基线升级。
   - 下一步应先用研究系统筛出 ETH 上真正能提升 Sharpe 的上下文因子，再按 `BTC / ETH / 其他币种` 做分层复核。
+
+## 2026-04-16 继续迭代：研究系统锁定首个候选环境因子
+
+- 背景：
+  - 研究系统第一版已经能同时对比 `已成交样本` 与 `过滤候选`，但结论层之前按整个因子家族汇总，容易把真正有效的单桶环境稀释掉。
+- 本次实现：
+  - 将研究系统的结论判定从“按因子家族”改成“按 `因子 + 桶 + 波动层`”逐桶判断。
+  - 当前会把真正满足 `ETH 先行闸门` 且明显优于过滤候选的具体环境桶标记为 `可回注`。
+- 验证：
+  - `cargo test -p rust-quant-services --test vegas_factor_research -- --nocapture`
+  - `DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' cargo run -p rust-quant-cli --example run_vegas_factor_research`
+- 真实结果：
+  - 当前正式基线 `1428 / 1429 / 1430 / 1431` 下，首个被研究系统明确筛出的候选环境是：
+    - `funding_premium_divergence / funding_positive / ETH`
+  - 分桶表现：
+    - `已成交样本`：`10` 笔，`win_rate=80.00%`，`avg_pnl=134.25`，`SharpeProxy=0.70`
+    - `过滤候选`：`20` 笔，`win_rate=35.00%`，`avg_pnl=0.01`，`SharpeProxy=0.12`
+- 下钻结论：
+  - 这不是“所有 funding positive 都该放开”，而是一个方向性环境：
+    - 已成交样本中 `ETH funding_positive` 下：
+      - `long`：`8` 笔，`pnl=749.6918`，`avg_pnl=93.7115`，`win_rate=75.00%`
+      - `short`：`2` 笔，`pnl=592.7788`，`avg_pnl=296.3894`，`win_rate=100.00%`
+    - 过滤候选中：
+      - `LONG`：`8` 笔，`avg_pnl=0.0328`，`win_rate=50.00%`
+      - `SHORT`：`12` 笔，`avg_pnl=-0.0071`，`win_rate=25.00%`
+  - 过滤理由分布显示：
+    - 被拦 `LONG` 里，`MACD_FALLING_KNIFE_LONG` 在 funding positive 环境下反而整体为正
+    - 被拦 `SHORT` 里，`EMA_TOO_FAR_OUTSIDE_FIB_ZONE_BLOCK_SHORT`、`CONFLICTING_TOO_FAR_NEW_BEAR_LEG_SHORT` 等在 funding positive 环境下整体为负
+- 结论：
+  - 第一条外部因子候选已经出现，但它更像：
+    - `ETH only`
+    - `方向性上下文`
+    - 优先尝试“压 short / 放 long”的开仓过滤微调
+  - 暂不直接回注策略；下一步先围绕 `ETH funding_positive` 做最小实验，再按 `BTC / ETH / 其他币种` 分层复核。
+
+## 2026-04-16 拒绝实验：ETH funding positive 直接放开 MACD_FALLING_KNIFE_LONG
+
+- 假设：
+  - 在 `ETH funding_positive` 环境下，单原因 `MACD_FALLING_KNIFE_LONG` 过滤可能过严，尝试只放开这一类 long。
+- 实现方式：
+  - 代码层读取最近 `4H` funding context。
+  - 仅当 `ETH`、`funding_rate >= 0`、`filter_reasons = ["MACD_FALLING_KNIFE_LONG"]` 且无 short 冲突时，强制恢复 long 入场。
+- ETH 回测：
+  - 基线：`1428`
+  - 实验：`1448`
+  - `win_rate`：`52.9183% -> 52.0992%`
+  - `profit`：`8047.17 -> 6946.88`
+  - `Sharpe`：`3.14525 -> 2.93979`
+  - `max_drawdown`：`32.3410% -> 32.3410%`
+- 命中结果：
+  - `MACD_FALLING_KNIFE_LONG` 单原因过滤从 `245` 降到 `237`，实际放开 `8` 个过滤点。
+  - 路径变化后新增 `12` 笔 long，合计 `-1245.4224`，仅 `2` 笔盈利。
+  - 少了一笔原基线盈利 long，`+35.0824` 未再出现。
+  - 同时间同方向交易的净变化只有小幅正向，主要损失来自新增 long 的尾部亏损。
+- 结论：
+  - ETH 先行闸门失败，判定 `已验证但无效`。
+  - 失败原因不是研究因子无价值，而是“funding positive + 单原因 MACD filter”仍过粗，放出了多笔历史负样本，且改变交易路径后尾部亏损放大。
+  - 不进入 `BTC / SOL / BCH` 分层复核。
+  - 策略回注代码已撤销，正式基线保持：
+    - `ETH 1428`
+    - `BTC 1429`
+    - `SOL 1430`
+    - `BCH 1431`
+- 下一步：
+  - 继续保留研究系统结论，但下一轮应先在研究层增加二级分桶，例如 `funding_positive + trend_state / macd_histogram / volatility`，不要直接从 funding 单桶放开入场。
+
+## 2026-04-16 研究系统增强：funding 二级上下文与过滤原因分桶
+
+- 背景：
+  - 第一轮直接放开 `funding_positive + MACD_FALLING_KNIFE_LONG` 失败，说明 funding 单桶仍过粗。
+  - 需要先在研究系统里拆出更细的环境，而不是继续硬写策略规则。
+- 本次实现：
+  - 新增 funding 二级上下文因子：
+    - `funding_direction_context`
+    - `funding_trend_context`
+    - `funding_macd_context`
+    - `funding_volume_context`
+  - 新增过滤候选专用因子：
+    - `funding_filter_context`
+  - `funding_filter_context` 桶结构：
+    - `funding_bucket + direction + primary_filter_reason + ema_distance_state + leg_state`
+  - 对 filtered-only 的 ETH 强正桶增加候选判定：
+    - `sample_count >= 4`
+    - `win_rate >= 70%`
+    - `avg_pnl > 0.02`
+    - `SharpeProxy >= 0.5`
+- 验证：
+  - `cargo test -p rust-quant-services --test vegas_factor_research -- --nocapture`
+  - `DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' cargo run -p rust-quant-cli --example run_vegas_factor_research`
+- 研究输出：
+  - 新增候选桶：
+    - `funding_filter_context / funding_positive_long_macd_falling_knife_long_distance_too_far_bullish_leg / ETH`
+  - 表现：
+    - `4` 笔
+    - `win_rate=75.00%`
+    - `avg_pnl=0.07`
+    - `SharpeProxy=0.86`
+  - 跨层对照：
+    - 同桶 `BTC`：`1` 笔，亏损
+    - 同桶 `其他币种`：`2` 笔，均亏损
+- 结论：
+  - 该桶只允许作为 `仅 ETH 有效` 的回注实验候选。
+  - 不能写成跨币种通用规则。
+
+## 2026-04-16 拒绝实验：ETH funding positive + TooFar bullish_leg 放开 MACD_FALLING_KNIFE_LONG
+
+- 假设：
+  - 只放开研究系统筛出的窄桶：
+    - `ETH`
+    - `funding_rate >= 0`
+    - `filter_reasons = ["MACD_FALLING_KNIFE_LONG"]`
+    - `ema_distance_filter.state = TooFar`
+    - `leg_detection_value.is_bullish_leg = true`
+- ETH 回测：
+  - 基线：`1428`
+  - 实验：`1449`
+  - `win_rate`：`52.9183% -> 52.6012%`
+  - `profit`：`8047.17 -> 7898.77`
+  - `Sharpe`：`3.14525 -> 3.08462`
+  - `max_drawdown`：`32.3410% -> 32.3410%`
+- 命中结果：
+  - 新增 `6` 笔 long，合计 `-307.9102`，仅 `2` 笔盈利。
+  - 少了一笔原基线盈利 long，`+35.0824` 未再出现。
+  - 虽然比上一轮粗放规则亏损收敛很多，但仍未通过 ETH 先行闸门。
+- 结论：
+  - 判定 `已验证但无效`。
+  - 不进入 `BTC / SOL / BCH` 分层复核。
+  - 策略回注代码已撤销，正式基线保持：
+    - `ETH 1428`
+    - `BTC 1429`
+    - `SOL 1430`
+    - `BCH 1431`
+- 下一步：
+  - 不再继续尝试“放开 MACD_FALLING_KNIFE_LONG”方向。
+  - 研究系统应转向寻找“过滤掉低 Sharpe 开仓环境”，优先从 `funding_positive_short` 的负样本和 `funding_negative` 的保护性过滤出发。
+
+## 2026-04-16 拒绝实验：ETH funding negative + MACD weakening short 过滤
+
+- 假设：
+  - `ETH funding_negative_short` 是已成交低 Sharpe 坏桶。
+  - 进一步拆分后，`funding_rate < 0` 且 `MACD histogram_decreasing` 的 short 可能属于“动能仍在恶化却追空”的低质量开仓环境。
+- 目标样本：
+  - `2026-03-22 04:00:00` short：`-352.8743`
+  - `2026-03-25 20:00:00` short：`-95.2396`
+  - 同类中 `2026-01-22 00:00:00` short 的 `histogram_decreasing=false`，不应被命中。
+- ETH 回测：
+  - 基线：`1428`
+  - 实验：`1450`
+  - `win_rate`：`52.9183% -> 52.6214%`
+  - `profit`：`8047.17 -> 7520.69`
+  - `Sharpe`：`3.14525 -> 3.03821`
+  - `max_drawdown`：`32.3410% -> 32.3410%`
+- 命中/路径结果：
+  - 实验后少了 `3` 笔基线交易，净 `+444.5043`，其中包含一笔 `2026-01-20 12:00:00` 的大盈利 short：`+504.6616`。
+  - 新增 `4` 笔交易，净 `-230.0946`。
+  - 过滤确实减少了部分亏损 short，但路径副作用更差，且误伤了盈利更大的 short 环境。
+- 结论：
+  - ETH 先行闸门失败，判定 `已验证但无效`。
+  - 不进入 `BTC / SOL / BCH` 分层复核。
+  - 策略回注代码已撤销，正式基线保持：
+    - `ETH 1428`
+    - `BTC 1429`
+    - `SOL 1430`
+    - `BCH 1431`
+- 下一步：
+  - 不再直接按 funding 正负 + MACD 单条件做策略回注。
+  - 研究系统需要先支持“命中交易路径影响”的候选评估，或优先研究不改变入场顺序的权重/止损观测，不再只看单笔 shadow pnl。
+
+## 2026-04-16 研究系统增强：路径影响评估报告
+
+- 背景：
+  - `1448 / 1449 / 1450` 都出现了同一个问题：研究分桶或目标坏单看起来有价值，但实际回测利润和 Sharpe 变差。
+  - 原因是过滤/放行类规则会改变后续持仓路径，不能只看 shadow pnl、目标样本或单个桶的平均收益。
+- 本次实现：
+  - 研究系统新增路径影响评估模式。
+  - CLI 使用环境变量切换：
+    - `VEGAS_RESEARCH_PATH_BASELINE_ID`
+    - `VEGAS_RESEARCH_PATH_EXPERIMENT_IDS`
+    - `VEGAS_RESEARCH_PATH_INST_ID`
+    - `VEGAS_RESEARCH_PATH_TOP_LIMIT`
+  - 输出维度：
+    - 基线有但实验缺失的交易数量 / PnL / 胜笔
+    - 实验新增交易数量 / PnL / 胜笔
+    - 同标的 + 同方向 + 同开仓时间的共同交易 PnL delta
+    - `total_path_delta = new_pnl - missing_pnl + common_delta`
+    - `path_improved / path_degraded / neutral`
+    - Top changed trades
+- 验证命令：
+  - `cargo test -p rust-quant-services --test vegas_factor_research -- --nocapture`
+  - `DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' VEGAS_RESEARCH_PATH_BASELINE_ID=1428 VEGAS_RESEARCH_PATH_EXPERIMENT_IDS=1448,1449,1450 VEGAS_RESEARCH_PATH_INST_ID=ETH-USDT-SWAP cargo run -p rust-quant-cli --example run_vegas_factor_research`
+- ETH 路径影响结果：
+  - `1428 -> 1448`：`total_path_delta=-1100.29`，`path_degraded`
+    - 缺失 `1` 笔，`+35.08`
+    - 新增 `12` 笔，`-1245.42`
+    - 共同交易 delta `+180.22`
+  - `1428 -> 1449`：`total_path_delta=-148.40`，`path_degraded`
+    - 缺失 `1` 笔，`+35.08`
+    - 新增 `6` 笔，`-307.91`
+    - 共同交易 delta `+194.59`
+  - `1428 -> 1450`：`total_path_delta=-526.48`，`path_degraded`
+    - 缺失 `3` 笔，`+444.50`
+    - 新增 `4` 笔，`-230.09`
+    - 共同交易 delta `+148.12`
+- 结论：
+  - 路径影响报告解释了为什么这些实验“局部看似合理，但整体变差”。
+  - `1448 / 1449 / 1450` 再次确认拒绝，不升级基线。
+  - 正式基线保持：
+    - `ETH 1428`
+    - `BTC 1429`
+    - `SOL 1430`
+    - `BCH 1431`
+- 新增迭代规则：
+  - 过滤/放行类规则必须在回测后做路径影响评估。
+  - 若 `total_path_delta < 0`，即使命中目标坏单或某个分桶 shadow pnl 正向，也不能升级为正式基线。
+  - 下一步优先寻找“不明显改变入场顺序但能改善低 Sharpe 环境”的开仓过滤或权重削弱候选。
+
+## 2026-04-16 研究系统修正：候选语义降级与 Podman 命令对齐
+
+- 背景：
+  - 路径影响评估证明 `1448 / 1449 / 1450` 都是 `path_degraded`，但研究报告仍把部分桶标为 `可回注`，语义过强。
+  - 本机容器运行环境使用 Podman，不再使用 Docker 命令。
+- 本次修正：
+  - 将研究报告中的 `FactorConclusion::Candidate` 展示文案从 `可回注` 改为 `可实验`。
+  - 在研究报告概览区增加说明：
+    - `可实验` 仅代表研究候选；
+    - 回注 Vegas 前必须通过路径影响评估。
+  - 将 Vegas runbook 和启动指南中的当前容器命令切换为 `podman`。
+- 验证：
+  - `podman ps` 确认 `mysql` 容器运行。
+  - `podman exec -i mysql mysql -uroot -pexample test -e "select ..."` 成功读取 `1428 / 1429 / 1430 / 1431 / 1448 / 1449 / 1450`。
+  - `DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' cargo run -p rust-quant-cli --example run_vegas_factor_research` 输出 `可实验` 和路径影响评估说明。
+- 结论：
+  - 当前研究系统输出不再暗示“可直接回注”。
+  - 后续流程固定为：
+    - `可实验候选 -> 单假设策略实验 -> 路径影响评估 -> ETH delta -> 分层复核 -> 是否升级基线`。
+
+## 2026-04-16 研究系统增强：低 Sharpe 开仓环境候选摘要
+
+- 背景：
+  - 研究报告长表过大，容易继续人工扫桶并重复尝试已拒绝方向。
+  - 下一步需要先把“最差的已成交环境”自动排出来，再判断是否进入单假设实验。
+- 本次实现：
+  - 在研究报告新增 `低 Sharpe 开仓环境候选` 摘要区。
+  - 入选规则：
+    - 只看 `已成交样本`
+    - `sample_count >= 3`
+    - `avg_pnl < 0` 或 `SharpeProxy < 0`
+  - 排序规则：
+    - `ETH` 优先
+    - `SharpeProxy` 更差优先
+    - `AvgPnL` 更差优先
+    - 样本更多优先
+- 真实输出首位：
+  - `funding_direction_context / funding_negative_short / ETH`
+  - `3` 笔，`win_rate=33.33%`
+  - `AvgPnL=-66.56`
+  - `SharpeProxy=-0.27`
+- 下钻明细：
+  - `2026-01-22 00:00:00` short：`+248.4479`
+    - `funding_rate=-0.0000115112548794`
+    - `histogram_decreasing=false`
+    - `volume_ratio=4.4827`
+  - `2026-03-22 04:00:00` short：`-352.8743`
+    - `funding_rate=-0.0000218352682131`
+    - `histogram_decreasing=true`
+    - `volume_ratio=2.6118`
+  - `2026-03-25 20:00:00` short：`-95.2396`
+    - `funding_rate=-0.0000129269154443`
+    - `histogram_decreasing=true`
+    - `volume_ratio=2.0552`
+- 判断：
+  - 这个候选与 `1450` 已拒绝实验高度重叠。
+  - 虽然局部仍显示 `histogram_decreasing=true` 可分离坏单，但 `1450` 已证明路径影响为 `-526.48`，不能重复回测同一方向。
+- 新增迭代规则：
+  - 低 Sharpe 候选只用于排序下一轮实验。
+  - 若候选与已拒绝实验条件高度重叠，必须标记为“已覆盖拒绝”，不重复进入策略回测。
+- 下一步：
+  - 跳过 `funding_negative_short + histogram_decreasing` 方向。
+  - 继续寻找没有被路径影响拒绝覆盖的候选，优先考虑样本不改变入场顺序的权重削弱或止损观测。
+
+## 2026-04-16 研究系统修正：候选覆盖分离、分层样本门槛与 MACD 分桶口径
+
+- 背景：
+  - 上一轮低 Sharpe 摘要首位 ETH 候选已被 `1450` 覆盖拒绝，但仍出现在候选列表顶部。
+  - 剔除已覆盖候选后，BTC 首位候选只有 `3` 笔，且主要由单笔尾部亏损驱动，样本量不足。
+  - 下钻 BTC 候选时发现一个数据口径问题：
+    - `macd_value.above_zero=false`
+    - 但 `macd_value.histogram=731.72`
+    - 研究系统原先优先信任 `above_zero`，导致样本被误分进 `macd_below_zero` 桶。
+- 本次实现：
+  - 低 Sharpe 摘要拆分为：
+    - `下一轮未覆盖低 Sharpe 开仓环境候选`
+    - `已覆盖拒绝候选`
+  - 已覆盖规则：
+    - `ETH + funding_negative_short`
+    - `ETH + funding_negative_short_mixed_trend`
+    - `ETH + funding_negative_short_*macd*`
+    - 标记为 `covered_by_1450`
+  - 分层最小样本门槛：
+    - `ETH >= 3`
+    - `BTC >= 5`
+    - `其他币种 >= 6`
+  - 摘要新增 `TotalPnL = AvgPnL * sample_count`。
+  - 同层候选排序改为优先看 `TotalPnL` 影响，再看 `SharpeProxy / AvgPnL`。
+  - MACD 分桶修正：
+    - 优先使用 `histogram` 数值正负判断 `macd_above_zero / macd_below_zero`
+    - 仅当 `histogram` 缺失时才回退到 `above_zero` 布尔字段
+- 真实研究输出变化：
+  - `BTC funding_positive_long_volume_normal` 因样本数只有 `3`，被剔除。
+  - 修正前的 `BTC funding_positive_long_macd_below_zero_hist_flat` 首位候选消失，说明它是 `above_zero` 布尔字段污染造成的假候选。
+  - 当前首位未覆盖候选：
+    - `funding_trend_context / funding_positive_long_mixed_trend / BTC`
+    - `5` 笔
+    - `win_rate=40.00%`
+    - `AvgPnL=-0.66`
+    - `TotalPnL=-3.31`
+    - `SharpeProxy=-0.32`
+- 下钻 BTC 首位候选：
+  - `2026-01-08 20:00:00`：`-2.6275`
+  - `2026-01-09 16:00:00`：`+2.8034`
+  - `2026-01-12 20:00:00`：`-1.8544`
+  - `2026-01-22 00:00:00`：`+0.6346`
+  - `2026-01-25 16:00:00`：`-2.2613`
+  - 净影响只有约 `-3.31`，不值得立即进入策略实验。
+- 结论：
+  - 本轮不做策略回注。
+  - 研究报告排序更稳健，已避免重复选择 `1450` 覆盖方向，也避免小样本和 MACD 布尔污染造成假候选。
+  - 下一步应继续寻找 `TotalPnL` 更大、未被拒绝覆盖、且不依赖可疑派生字段的候选。
+
+## 2026-04-16 研究系统修正：最小影响门槛与其他币种按标的拆分
+
+- 背景：
+  - 修正 MACD 分桶后，首位未覆盖候选变成：
+    - `funding_trend_context / funding_positive_long_mixed_trend / BTC`
+    - `5` 笔
+    - `TotalPnL=-3.31`
+  - 下钻后发现只是低影响噪音，不值得进入策略回测。
+  - 同时，`其他币种 funding_positive` 的 `TotalPnL=-27.86` 看似可执行，但按 `SOL / BCH` 拆分后发现：
+    - 主要亏损来自 `SOL funding_positive short` 单笔 `-25.6197`
+    - `BCH` 只是多笔小额低影响亏损
+  - 因此 `其他币种` 不能作为整体可执行结论。
+- 本次实现：
+  - `FactorBucketReport` 新增 `scope_label`。
+  - BTC/ETH 报告范围保持 `BTC / ETH`。
+  - `其他币种` 按具体标的拆为 `SOL / BCH`。
+  - 下一轮候选增加最小影响门槛：
+    - `TotalPnL <= -10` 才进入 `下一轮未覆盖低 Sharpe 开仓环境候选`
+    - 未达门槛的候选进入 `低影响观察候选`
+- 真实研究输出：
+  - `下一轮未覆盖低 Sharpe 开仓环境候选` 当前为空。
+  - `低影响观察候选` 包含：
+    - `BTC funding_positive_long_mixed_trend`：`TotalPnL=-3.31`
+    - `BCH funding_positive`：`TotalPnL=-2.24`
+    - `BCH funding_positive_long`：`TotalPnL=-2.05`
+    - `BCH funding_positive_long_macd_above_zero_hist_decreasing`：`TotalPnL=-2.02`
+  - `ETH funding_negative_short*` 继续标记为 `covered_by_1450`。
+- 结论：
+  - 当前没有满足门槛、未被拒绝覆盖、样本数足够的低 Sharpe 开仓环境候选。
+  - 本轮不做策略回注。
+  - 下一步应扩大研究维度，而不是强行从低影响候选里写规则：
+    - 观察止损/出场调节候选
+    - 引入 price + OI 或 flow 数据覆盖后再筛
+    - 或放宽到“权重削弱”而不是硬过滤
+
+## 2026-04-16 出场侧分析：止损坏桶与 ETH-only 混合趋势候选
+
+- 背景：
+  - 低 Sharpe 开仓环境候选已无满足 `TotalPnL <= -10`、未覆盖拒绝、样本足够的可实验项。
+  - 本轮不继续扩大开仓过滤，改查正式基线 `1428 / 1429 / 1430 / 1431` 的出场/止损贡献。
+- close_type 聚合结果：
+  - `ETH long 最大亏损止损`：`28` 笔，`TotalPnL=-1672.6317`
+  - `ETH short Signal_Kline_Stop_Loss`：`107` 笔，`TotalPnL=-1149.5493`
+  - `ETH short 最大亏损止损`：`19` 笔，`TotalPnL=-1043.8109`
+  - `SOL long 最大亏损止损`：`17` 笔，`TotalPnL=-246.7525`
+  - `BTC long Signal_Kline_Stop_Loss`：`141` 笔，`TotalPnL=-231.9845`
+- stop_loss_source 拆分：
+  - `Signal_Kline_Stop_Loss` 不能整体视为坏逻辑：
+    - `ETH long Engulfing_Volume_Confirmed`：`54` 笔，`TotalPnL=+2027.2386`
+    - `ETH long Engulfing_Volume_Rejected`：`37` 笔，`TotalPnL=+310.7198`
+  - 真正拖累集中在：
+    - `ETH short KlineHammer_Volume_Confirmed`：`14` 笔，`TotalPnL=-417.6606`
+    - `ETH short Engulfing_Volume_Confirmed`：`56` 笔，`TotalPnL=-370.8297`
+    - `ETH short Engulfing_Volume_Rejected`：`37` 笔，`TotalPnL=-361.0590`
+    - `ETH long KlineHammer_Volume_Confirmed`：`14` 笔，`TotalPnL=-358.0516`
+    - `ETH long LargeEntity_Retracement`：`12` 笔，`TotalPnL=-220.9504`
+- 降维后的内部环境候选：
+  - 条件：`mixed_trend + MACD 反向 + EMA TooFar + volume_ratio 1.5-2.5`
+  - `ETH`：`8` 笔，`TotalPnL=-270.3590`，`win_rate=25.00%`
+  - `BTC`：`6` 笔，`TotalPnL=-2.6243`
+  - `BCH`：`3` 笔，`TotalPnL=+0.4785`
+  - `SOL`：`2` 笔，`TotalPnL=+16.3779`
+- 关键样本：
+  - `2026-03-25 20:00:00` ETH short，`2026-03-26 00:00:00` 由 `Engulfing_Volume_Confirmed` 触发 `Signal_Kline_Stop_Loss`，`PnL=-95.2396`
+  - 同桶最大亏损为 `2025-09-24 12:00:00` ETH long，`KlineHammer_Volume_Confirmed` 止损，`PnL=-149.6078`
+- 结论：
+  - 该候选具备 ETH 研究价值，但当前只能标记为 `仅 ETH 有效候选`。
+  - 不能写成跨币种通用规则，因为 BTC 影响接近噪音，BCH/SOL 不坏。
+  - 下一步若继续，应把该条件纳入研究系统的“内部环境/出场侧候选”报告，再做 ETH 单假设策略实验与路径影响评估；不能直接粗暴关闭 `Signal_Kline_Stop_Loss` 或全部吞没/锤子止损。
+
+## 2026-04-16 研究系统增强：出场/止损环境候选摘要
+
+- 背景：
+  - 手工 SQL 已确认低 Sharpe 开仓候选为空，但出场/止损侧存在更大的 ETH 拖累。
+  - 如果继续靠人工 SQL 查止损坏桶，容易再次把单笔样本写成策略规则。
+  - 因此先把内部出场环境纳入研究系统，让报告自动排序，不直接改 Vegas 交易逻辑。
+- 本次实现：
+  - 新增 `exit_environment_context` 因子。
+  - 仅对 `已成交样本` 生成出场环境分桶。
+  - 分桶结构：
+    - `close_type_family`
+    - `trend_alignment`
+    - `macd_alignment`
+    - `ema_distance_state`
+    - `volume_bucket`
+  - `close_type_family` 当前包括：
+    - `signal_stop`
+    - `max_loss_stop`
+    - `opposite_signal_close`
+    - `take_profit`
+  - 报告新增独立区块：
+    - `出场/止损环境候选`
+  - `下一轮未覆盖低 Sharpe 开仓环境候选` 明确排除 `exit_environment_context`，避免把出场候选误当开仓过滤候选。
+- TDD 验证：
+  - 先新增失败测试：
+    - `classifies_internal_exit_environment_context_buckets`
+    - `renders_report_with_required_sections`
+  - 再实现最小代码通过。
+- 验证命令：
+  - `cargo fmt --all`
+  - `cargo test -p rust-quant-services --test vegas_factor_research -- --nocapture`
+  - `DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' cargo run -p rust-quant-cli --example run_vegas_factor_research`
+  - `cargo clippy -- -D warnings`
+- 真实报告结果：
+  - `下一轮未覆盖低 Sharpe 开仓环境候选`：为空。
+  - `出场/止损环境候选` 首位：
+    - `exit_environment_context / max_loss_stop_mixed_trend_macd_align_distance_too_far_volume_extreme / ETH`
+    - `6` 笔
+    - `win_rate=0.00%`
+    - `AvgPnL=-106.79`
+    - `TotalPnL=-640.75`
+    - `SharpeProxy=-0.78`
+  - 其他 ETH 高影响候选：
+    - `max_loss_stop_with_trend_macd_align_distance_too_far_volume_expansion`：`5` 笔，`TotalPnL=-361.29`
+    - `signal_stop_mixed_trend_macd_align_distance_too_far_volume_expansion`：`16` 笔，`TotalPnL=-297.45`
+    - `signal_stop_mixed_trend_macd_against_distance_too_far_volume_expansion`：`6` 笔，`TotalPnL=-281.92`
+- 结论：
+  - 研究系统现在可以自动输出出场/止损侧候选。
+  - 当前最值得继续的不是吞没/锤子单点规则，而是 `max_loss_stop` 在 ETH 的特定内部环境。
+  - 下一步应先下钻首位候选的交易明细，判断它是：
+    - 入场质量问题
+    - 最大止损过宽问题
+    - 还是需要动态提前止损/减仓的问题
+  - 未完成明细下钻和路径影响评估前，不升级基线。
+
+## 2026-04-16 BTC 动态最大止损分层验证：3%-5% 入场振幅温和降损有效
+
+- 背景：
+  - 前一轮固定止损扫描显示：
+    - BTC 直接把 `max_loss_percent` 从 `0.05` 降到 `0.045 / 0.04 / 0.035` 均未优于基线。
+    - SOL 放大止损会降低 profit / Sharpe，不应继续全局放大。
+    - BCH 放大止损仍为负，问题不是止损太窄。
+  - 因此本轮不再粗暴改固定止损，而是只验证一个假设：
+    - BTC 的坏簇可能集中在 `入场 K 线振幅 3%-5%` 的中等高波动段；
+    - 该段需要温和收紧动态最大止损，而不是全局降低固定止损。
+- 本次代码改动：
+  - `BasicRiskStrategyConfig` 新增动态最大止损分层字段：
+    - `dynamic_entry_amp_threshold`
+    - `dynamic_entry_loss_percent`
+    - `dynamic_entry_require_direction_mismatch`
+    - `dynamic_range_threshold`
+    - `dynamic_range_loss_percent`
+  - `compute_effective_max_loss` 保持默认兼容：
+    - 默认 `entry_amp > 0.03`
+    - 默认要求方向不利才触发
+    - 默认触发后收紧到 `0.03`
+    - 默认运行中振幅 `> 0.05` 收紧到 `0.045`
+  - 新增配置化入口 `compute_effective_max_loss_with_config`。
+  - `compute_current_targets / check_max_loss_stop / check_risk_config_with_r_system` 统一使用配置化动态止损。
+  - 修复 DB 配置链路：
+    - `strategy_config.risk_config -> BasicRiskStrategyConfig -> ParamMergeBuilder -> 回测执行`
+    - 避免新增字段在 `ParamMergeBuilder::to_risk_config` 中被丢弃。
+- TDD / 验证：
+  - 新增测试：
+    - `effective_max_loss_keeps_default_entry_mismatch_tightening`
+    - `effective_max_loss_can_tighten_entry_amplitude_without_direction_mismatch`
+    - `to_risk_config_preserves_dynamic_max_loss_thresholds`
+  - 验证命令：
+    - `cargo fmt --all`
+    - `cargo clippy -p rust-quant-strategies -p rust-quant-orchestration -- -D warnings`
+    - `cargo test -p rust-quant-orchestration to_risk_config_preserves_dynamic_max_loss_thresholds -- --nocapture`
+    - `cargo test -p rust-quant-strategies effective_max_loss -- --nocapture`
+- BTC 实验结果：
+  - 基线 `1483`：
+    - `win_rate=0.560732`
+    - `profit=372.253`
+    - `sharpe=1.13633`
+    - `max_drawdown=0.383762`
+  - `1501`：`entry_amp > 0.03`，不要求方向不利，收紧到 `0.03`
+    - `win_rate=0.553542`
+    - `profit=290.235`
+    - `sharpe=0.992148`
+    - `max_drawdown=0.373088`
+    - 结论：止损过紧，拒绝。
+  - `1502`：`entry_amp > 0.03`，不要求方向不利，收紧到 `0.035`
+    - `win_rate=0.561258`
+    - `profit=399.423`
+    - `sharpe=1.19698`
+    - `max_drawdown=0.355666`
+    - 结论：接受，BTC 当前最佳分层动态止损候选。
+  - `1503`：`entry_amp > 0.05`，不要求方向不利，收紧到 `0.035`
+    - `win_rate=0.560531`
+    - `profit=372.190`
+    - `sharpe=1.13960`
+    - `max_drawdown=0.362347`
+    - 结论：改善主要来自 `3%-5%` 入场振幅段，而不是 `5%+` 极端段。
+- BCH 复核结果：
+  - 基线 `1485`：
+    - `win_rate=0.393496`
+    - `profit=-56.4274`
+    - `sharpe=-0.338972`
+    - `max_drawdown=0.655402`
+  - `1504`：`entry_amp > 0.08`，不要求方向不利，收紧到 `0.03`
+    - `win_rate=0.396411`
+    - `profit=-50.367`
+    - `sharpe=-0.294636`
+    - `max_drawdown=0.662556`
+    - 结论：略减亏但回撤变差，拒绝。
+  - `1505`：`entry_amp > 0.05`，不要求方向不利，收紧到 `0.03`
+    - `win_rate=0.389338`
+    - `profit=-55.1833`
+    - `sharpe=-0.332208`
+    - `max_drawdown=0.631929`
+    - 结论：回撤改善但收益/胜率仍弱，拒绝。
+- 最终 DB 配置：
+  - BTC `strategy_config.id=15` 保留：
+    - `dynamic_entry_amp_threshold=0.03`
+    - `dynamic_entry_loss_percent=0.035`
+    - `dynamic_entry_require_direction_mismatch=false`
+  - BCH `strategy_config.id=13` 已移除实验字段，恢复原风险配置。
+  - SOL 本轮不动，因为分桶显示高波动桶不是主要坏簇。
+- 底层原因判断：
+  - BTC 属于低波动、高趋势连续性的层级，`3%-5%` 入场振幅已经代表风险状态抬升。
+  - 直接把固定止损降到 `3%-4.5%` 会误杀正常趋势回撤；但只在入场振幅超过 `3%` 时温和收紧到 `3.5%`，能减少中等异常波动下的尾部亏损，同时保留趋势单的呼吸空间。
+  - `1501` 证明 `3%` 太紧会砍掉收益；`1503` 证明只处理 `5%+` 太晚，无法捕获主要改善段；`1502` 位于两者之间，因此 profit / Sharpe / maxDD 同时改善。
+  - BCH 未通过说明该因子不是单参数通用；BCH 的主要问题更接近入场分布本身无正期望，不能靠单一止损参数修复。
+- 分类结论：
+  - `BTC`：接受，分层参数有效。
+  - `BCH`：拒绝，恢复原配置。
+  - `SOL`：未参与本轮，保持原配置。
+  - 本轮结论：`分层参数通用候选`，但当前仅 BTC 正式接受；不能写成跨币种单参数通用。

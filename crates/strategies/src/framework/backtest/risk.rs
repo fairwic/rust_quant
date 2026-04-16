@@ -129,6 +129,22 @@ fn compute_effective_max_loss(
     max_loss_pct: f64,
     dynamic_max_loss: bool,
 ) -> f64 {
+    compute_effective_max_loss_with_config(
+        position,
+        ctx,
+        max_loss_pct,
+        dynamic_max_loss,
+        &BasicRiskStrategyConfig::default(),
+    )
+}
+
+fn compute_effective_max_loss_with_config(
+    position: &TradePosition,
+    ctx: &ExitContext,
+    max_loss_pct: f64,
+    dynamic_max_loss: bool,
+    risk_config: &BasicRiskStrategyConfig,
+) -> f64 {
     // 高波动动态降损：
     // - 入场K线振幅 > 3% 且方向不利时，收紧到 3%
     // - 否则沿用原逻辑：K线振幅 > 5% 时收紧到 4.5%
@@ -139,13 +155,18 @@ fn compute_effective_max_loss(
             position.entry_kline_amplitude,
             position.entry_kline_close_pos,
         ) {
-            if entry_amp > 0.03 {
+            let entry_amp_threshold = risk_config.dynamic_entry_amp_threshold.unwrap_or(0.03);
+            let entry_loss_percent = risk_config.dynamic_entry_loss_percent.unwrap_or(0.03);
+            if entry_amp > entry_amp_threshold {
                 let dir_mismatch = match ctx.side {
                     TradeSide::Long => entry_close_pos < 0.5,
                     TradeSide::Short => entry_close_pos > 0.5,
                 };
-                if dir_mismatch {
-                    effective_max_loss = effective_max_loss.min(0.03);
+                let require_mismatch = risk_config
+                    .dynamic_entry_require_direction_mismatch
+                    .unwrap_or(true);
+                if !require_mismatch || dir_mismatch {
+                    effective_max_loss = effective_max_loss.min(entry_loss_percent);
                     tightened_by_entry = true;
                 }
             }
@@ -153,8 +174,10 @@ fn compute_effective_max_loss(
 
         if !tightened_by_entry {
             let range_pct = (ctx.favorable_price - ctx.adverse_price).abs() / ctx.entry.max(1e-9);
-            if range_pct > 0.05 {
-                effective_max_loss = effective_max_loss.min(0.045);
+            let range_threshold = risk_config.dynamic_range_threshold.unwrap_or(0.05);
+            let range_loss_percent = risk_config.dynamic_range_loss_percent.unwrap_or(0.045);
+            if range_pct > range_threshold {
+                effective_max_loss = effective_max_loss.min(range_loss_percent);
             }
         }
     }
@@ -214,11 +237,12 @@ pub fn compute_current_targets(
     risk: &BasicRiskStrategyConfig,
 ) -> ExitTargets {
     let ctx = ExitContext::new(position, candle);
-    let effective_max_loss = compute_effective_max_loss(
+    let effective_max_loss = compute_effective_max_loss_with_config(
         position,
         &ctx,
         risk.max_loss_percent,
         risk.dynamic_max_loss.unwrap_or(true),
+        risk,
     );
     let max_loss_stop = ctx.stop_loss_price(effective_max_loss);
 
@@ -271,11 +295,15 @@ pub fn compute_current_targets(
 fn check_max_loss_stop(
     ctx: &ExitContext,
     position: &TradePosition,
-    max_loss_pct: f64,
-    dynamic_max_loss: bool,
+    risk_config: &BasicRiskStrategyConfig,
 ) -> ExitResult {
-    let effective_max_loss =
-        compute_effective_max_loss(position, ctx, max_loss_pct, dynamic_max_loss);
+    let effective_max_loss = compute_effective_max_loss_with_config(
+        position,
+        ctx,
+        risk_config.max_loss_percent,
+        risk_config.dynamic_max_loss.unwrap_or(true),
+        risk_config,
+    );
 
     if ctx.profit_pct() < -effective_max_loss {
         let stop_price = ctx.stop_loss_price(effective_max_loss);
@@ -475,12 +503,7 @@ fn run_stop_loss_checks(
     }
 
     // 2. 最大损失止损
-    let result = check_max_loss_stop(
-        ctx,
-        position,
-        risk_config.max_loss_percent,
-        risk_config.dynamic_max_loss.unwrap_or(true),
-    );
+    let result = check_max_loss_stop(ctx, position, risk_config);
     if matches!(
         result,
         ExitResult::Exit { .. } | ExitResult::ExitDynamic { .. }
@@ -688,12 +711,7 @@ pub fn check_risk_config_with_r_system(
 
     // 1. 最大损失止损（最高优先级）
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_max_loss_stop(
-            &ctx,
-            &trade_position,
-            risk_config.max_loss_percent,
-            risk_config.dynamic_max_loss.unwrap_or(true),
-        )
+        check_max_loss_stop(&ctx, &trade_position, risk_config)
     {
         r_runtime.r_state = None; // 平仓后清除R系统状态
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
@@ -920,5 +938,70 @@ mod tests {
         let targets = compute_current_targets(&position, &candle, &risk);
         assert_eq!(targets.stop_loss, Some(103.0));
         assert_eq!(targets.take_profit, Some(90.0));
+    }
+
+    #[test]
+    fn effective_max_loss_keeps_default_entry_mismatch_tightening() {
+        let position = TradePosition {
+            trade_side: TradeSide::Long,
+            open_price: 100.0,
+            entry_kline_amplitude: Some(0.04),
+            entry_kline_close_pos: Some(0.4),
+            ..TradePosition::default()
+        };
+        let candle = CandleItem {
+            o: 100.0,
+            h: 101.0,
+            l: 99.0,
+            c: 100.0,
+            v: 1.0,
+            ts: 1,
+            confirm: 1,
+        };
+        let ctx = ExitContext::new(&position, &candle);
+
+        assert_eq!(
+            compute_effective_max_loss(&position, &ctx, 0.05, true),
+            0.03
+        );
+    }
+
+    #[test]
+    fn effective_max_loss_can_tighten_entry_amplitude_without_direction_mismatch() {
+        let position = TradePosition {
+            trade_side: TradeSide::Long,
+            open_price: 100.0,
+            entry_kline_amplitude: Some(0.04),
+            entry_kline_close_pos: Some(0.8),
+            ..TradePosition::default()
+        };
+        let candle = CandleItem {
+            o: 100.0,
+            h: 101.0,
+            l: 99.0,
+            c: 100.0,
+            v: 1.0,
+            ts: 1,
+            confirm: 1,
+        };
+        let ctx = ExitContext::new(&position, &candle);
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.05,
+            dynamic_entry_require_direction_mismatch: Some(false),
+            dynamic_entry_amp_threshold: Some(0.03),
+            dynamic_entry_loss_percent: Some(0.035),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            compute_effective_max_loss_with_config(
+                &position,
+                &ctx,
+                risk.max_loss_percent,
+                risk.dynamic_max_loss.unwrap_or(true),
+                &risk,
+            ),
+            0.035
+        );
     }
 }

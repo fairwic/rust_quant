@@ -4,11 +4,11 @@ use rust_quant_domain::entities::ExternalMarketSnapshot;
 use sqlx::{FromRow, MySql, Pool, QueryBuilder};
 use std::collections::HashMap;
 
-use super::report::render_report;
+use super::report::{render_path_impact_report, render_report};
 use super::types::{
-    FactorBucketReport, FactorConclusion, PriceOiState, ResearchFilteredSignalSample,
-    ResearchSampleKind, ResearchTradeSample, VegasFactorResearchQuery, VegasFactorResearchReport,
-    VolatilityTier,
+    FactorBucketReport, FactorConclusion, PathImpactQuery, PathImpactReport, PathImpactSummary,
+    PathImpactTradeChange, PriceOiState, ResearchFilteredSignalSample, ResearchSampleKind,
+    ResearchTradeSample, VegasFactorResearchQuery, VegasFactorResearchReport, VolatilityTier,
 };
 
 const FOUR_HOURS_MS: i64 = 4 * 60 * 60 * 1000;
@@ -90,8 +90,17 @@ pub struct VegasFactorResearchService {
 }
 
 impl VegasFactorResearchService {
-    const SUPPORTED_FACTORS: [&'static str; 3] =
-        ["funding_premium_divergence", "price_oi_state", "flow_proxy"];
+    const SUPPORTED_FACTORS: [&'static str; 9] = [
+        "exit_environment_context",
+        "flow_proxy",
+        "funding_direction_context",
+        "funding_filter_context",
+        "funding_macd_context",
+        "funding_premium_divergence",
+        "funding_trend_context",
+        "funding_volume_context",
+        "price_oi_state",
+    ];
 
     pub fn new() -> Result<Self> {
         Ok(Self {
@@ -128,24 +137,145 @@ impl VegasFactorResearchService {
         }
     }
 
+    pub fn classify_funding_signal_contexts(
+        funding_bucket: Option<&str>,
+        side: &str,
+        signal_value: Option<&str>,
+    ) -> Vec<(&'static str, String)> {
+        let Some(funding_bucket) = funding_bucket else {
+            return Vec::new();
+        };
+        let side = Self::normalize_side(side);
+        let mut contexts = vec![(
+            "funding_direction_context",
+            format!("{funding_bucket}_{side}"),
+        )];
+
+        let Some(signal_json) = signal_value.and_then(Self::parse_signal_json) else {
+            return contexts;
+        };
+
+        if let Some(trend_bucket) = Self::trend_bucket(&signal_json) {
+            contexts.push((
+                "funding_trend_context",
+                format!("{funding_bucket}_{side}_{trend_bucket}"),
+            ));
+        }
+        if let Some(macd_bucket) = Self::macd_bucket(&signal_json) {
+            contexts.push((
+                "funding_macd_context",
+                format!("{funding_bucket}_{side}_{macd_bucket}"),
+            ));
+        }
+        if let Some(volume_bucket) = Self::volume_bucket(&signal_json) {
+            contexts.push((
+                "funding_volume_context",
+                format!("{funding_bucket}_{side}_{volume_bucket}"),
+            ));
+        }
+
+        contexts
+    }
+
+    pub fn classify_funding_filter_contexts(
+        funding_bucket: Option<&str>,
+        direction: &str,
+        filter_reasons: Option<&str>,
+        signal_value: Option<&str>,
+    ) -> Vec<(&'static str, String)> {
+        let Some(funding_bucket) = funding_bucket else {
+            return Vec::new();
+        };
+        let Some(primary_reason) = filter_reasons.and_then(Self::primary_filter_reason) else {
+            return Vec::new();
+        };
+        let side = Self::normalize_side(direction);
+        let Some(signal_json) = signal_value.and_then(Self::parse_signal_json) else {
+            return vec![(
+                "funding_filter_context",
+                format!("{funding_bucket}_{side}_{primary_reason}"),
+            )];
+        };
+
+        let distance = Self::distance_bucket(&signal_json).unwrap_or("distance_unknown");
+        let leg = Self::leg_bucket(&signal_json).unwrap_or("leg_unknown");
+        vec![(
+            "funding_filter_context",
+            format!("{funding_bucket}_{side}_{primary_reason}_{distance}_{leg}"),
+        )]
+    }
+
+    pub fn classify_internal_exit_contexts(
+        side: &str,
+        close_type: Option<&str>,
+        _stop_loss_source: Option<&str>,
+        signal_value: Option<&str>,
+    ) -> Vec<(&'static str, String)> {
+        let Some(exit_bucket) = close_type.and_then(Self::exit_bucket) else {
+            return Vec::new();
+        };
+        let Some(signal_json) = signal_value.and_then(Self::parse_signal_json) else {
+            return Vec::new();
+        };
+        let Some(trend_alignment) = Self::trend_alignment_bucket(&signal_json, side) else {
+            return Vec::new();
+        };
+        let Some(macd_alignment) = Self::macd_alignment_bucket(&signal_json, side) else {
+            return Vec::new();
+        };
+        let distance = Self::distance_bucket(&signal_json).unwrap_or("distance_unknown");
+        let volume = Self::volume_bucket(&signal_json).unwrap_or("volume_unknown");
+
+        vec![(
+            "exit_environment_context",
+            format!("{exit_bucket}_{trend_alignment}_{macd_alignment}_{distance}_{volume}"),
+        )]
+    }
+
     pub fn evaluate_factor_conclusion(reports: &[FactorBucketReport]) -> FactorConclusion {
-        let eth_rows: Vec<_> = reports
+        let traded = reports
             .iter()
-            .filter(|row| row.volatility_tier == VolatilityTier::Eth)
-            .collect();
-        if eth_rows
+            .find(|row| row.sample_kind == ResearchSampleKind::Traded);
+        let filtered = reports
             .iter()
-            .any(|row| row.sample_count >= 3 && row.sharpe_proxy > 1.0 && row.avg_pnl > 0.0)
-        {
-            return FactorConclusion::Candidate;
+            .find(|row| row.sample_kind == ResearchSampleKind::Filtered);
+
+        match (traded, filtered) {
+            (Some(traded), Some(filtered))
+                if traded.volatility_tier == VolatilityTier::Eth
+                    && traded.sample_count >= 5
+                    && traded.avg_pnl > 0.0
+                    && traded.sharpe_proxy >= 0.5
+                    && traded.avg_pnl > filtered.avg_pnl
+                    && traded.sharpe_proxy > filtered.sharpe_proxy + 0.3 =>
+            {
+                FactorConclusion::Candidate
+            }
+            (Some(traded), _)
+                if traded.volatility_tier == VolatilityTier::Eth
+                    && traded.sample_count >= 3
+                    && (traded.avg_pnl > 0.0 || traded.sharpe_proxy > 0.0) =>
+            {
+                FactorConclusion::Observe
+            }
+            (Some(traded), Some(filtered))
+                if traded.sample_count >= 3
+                    && traded.avg_pnl > filtered.avg_pnl
+                    && traded.sharpe_proxy >= filtered.sharpe_proxy =>
+            {
+                FactorConclusion::Observe
+            }
+            (None, Some(filtered))
+                if filtered.volatility_tier == VolatilityTier::Eth
+                    && filtered.sample_count >= 4
+                    && filtered.win_rate >= 0.7
+                    && filtered.avg_pnl > 0.02
+                    && filtered.sharpe_proxy >= 0.5 =>
+            {
+                FactorConclusion::Candidate
+            }
+            _ => FactorConclusion::Reject,
         }
-        if eth_rows
-            .iter()
-            .any(|row| row.sample_count >= 3 && (row.sharpe_proxy > 0.0 || row.avg_pnl > 0.0))
-        {
-            return FactorConclusion::Observe;
-        }
-        FactorConclusion::Reject
     }
 
     pub fn render_report(
@@ -154,6 +284,111 @@ impl VegasFactorResearchService {
         buckets: &[FactorBucketReport],
     ) -> String {
         render_report(trades, filtered_signals, buckets)
+    }
+
+    pub fn render_path_impact_report(summaries: &[PathImpactSummary]) -> String {
+        render_path_impact_report(summaries)
+    }
+
+    pub fn summarize_path_impact(
+        baseline_id: i64,
+        experiment_id: i64,
+        baseline: &[ResearchTradeSample],
+        experiment: &[ResearchTradeSample],
+        top_changed_limit: usize,
+    ) -> PathImpactSummary {
+        let baseline_map = Self::trade_map(baseline);
+        let experiment_map = Self::trade_map(experiment);
+        let mut missing_pnls = Vec::new();
+        let mut new_pnls = Vec::new();
+        let mut common_deltas = Vec::new();
+        let mut changes = Vec::new();
+
+        for (key, baseline_trade) in &baseline_map {
+            if let Some(experiment_trade) = experiment_map.get(key) {
+                let pnl_delta = experiment_trade.pnl - baseline_trade.pnl;
+                common_deltas.push(pnl_delta);
+                changes.push(PathImpactTradeChange {
+                    change_type: "common_changed".to_string(),
+                    inst_id: baseline_trade.inst_id.clone(),
+                    side: baseline_trade.side.clone(),
+                    open_time_ms: baseline_trade.open_time_ms,
+                    baseline_pnl: Some(baseline_trade.pnl),
+                    experiment_pnl: Some(experiment_trade.pnl),
+                    pnl_delta,
+                    close_type: experiment_trade.close_type.clone(),
+                });
+            } else {
+                missing_pnls.push(baseline_trade.pnl);
+                changes.push(PathImpactTradeChange {
+                    change_type: "missing_from_experiment".to_string(),
+                    inst_id: baseline_trade.inst_id.clone(),
+                    side: baseline_trade.side.clone(),
+                    open_time_ms: baseline_trade.open_time_ms,
+                    baseline_pnl: Some(baseline_trade.pnl),
+                    experiment_pnl: None,
+                    pnl_delta: -baseline_trade.pnl,
+                    close_type: baseline_trade.close_type.clone(),
+                });
+            }
+        }
+
+        for (key, experiment_trade) in &experiment_map {
+            if !baseline_map.contains_key(key) {
+                new_pnls.push(experiment_trade.pnl);
+                changes.push(PathImpactTradeChange {
+                    change_type: "new_in_experiment".to_string(),
+                    inst_id: experiment_trade.inst_id.clone(),
+                    side: experiment_trade.side.clone(),
+                    open_time_ms: experiment_trade.open_time_ms,
+                    baseline_pnl: None,
+                    experiment_pnl: Some(experiment_trade.pnl),
+                    pnl_delta: experiment_trade.pnl,
+                    close_type: experiment_trade.close_type.clone(),
+                });
+            }
+        }
+
+        changes.sort_by(|left, right| {
+            right
+                .pnl_delta
+                .abs()
+                .total_cmp(&left.pnl_delta.abs())
+                .then(left.open_time_ms.cmp(&right.open_time_ms))
+        });
+        changes.truncate(top_changed_limit);
+
+        let missing_pnl = missing_pnls.iter().sum::<f64>();
+        let new_pnl = new_pnls.iter().sum::<f64>();
+        let common_pnl_delta = common_deltas.iter().sum::<f64>();
+        let total_path_delta = new_pnl - missing_pnl + common_pnl_delta;
+        let verdict = if total_path_delta > 1e-6 {
+            "path_improved"
+        } else if total_path_delta < -1e-6 {
+            "path_degraded"
+        } else {
+            "neutral"
+        };
+
+        PathImpactSummary {
+            baseline_id,
+            experiment_id,
+            inst_id: Self::unique_inst_id(baseline, experiment),
+            missing_count: missing_pnls.len(),
+            missing_pnl,
+            missing_wins: missing_pnls.iter().filter(|pnl| **pnl > 0.0).count(),
+            missing_avg_pnl: Self::avg(&missing_pnls),
+            new_count: new_pnls.len(),
+            new_pnl,
+            new_wins: new_pnls.iter().filter(|pnl| **pnl > 0.0).count(),
+            new_avg_pnl: Self::avg(&new_pnls),
+            common_count: common_deltas.len(),
+            common_pnl_delta,
+            common_improved_count: common_deltas.iter().filter(|delta| **delta > 0.0).count(),
+            total_path_delta,
+            verdict: verdict.to_string(),
+            top_changes: changes,
+        }
     }
 
     pub async fn run_report(
@@ -185,6 +420,49 @@ impl VegasFactorResearchService {
         ))
     }
 
+    pub async fn run_path_impact_report(&self, query: PathImpactQuery) -> Result<PathImpactReport> {
+        if query.experiment_ids.is_empty() {
+            return Err(anyhow!("experiment ids 不能为空"));
+        }
+
+        let mut ids = vec![query.baseline_id];
+        ids.extend(query.experiment_ids.iter().copied());
+        let samples = self
+            .load_trade_samples_by_ids(&ids, &query.timeframe, query.inst_id.as_deref())
+            .await?;
+        let baseline: Vec<_> = samples
+            .iter()
+            .filter(|row| row.backtest_id == query.baseline_id)
+            .cloned()
+            .collect();
+        let mut summaries = Vec::new();
+        for experiment_id in query.experiment_ids {
+            let experiment: Vec<_> = samples
+                .iter()
+                .filter(|row| row.backtest_id == experiment_id)
+                .cloned()
+                .collect();
+            let mut summary = Self::summarize_path_impact(
+                query.baseline_id,
+                experiment_id,
+                &baseline,
+                &experiment,
+                query.top_changed_limit,
+            );
+            if query.inst_id.is_some() {
+                summary.inst_id = query.inst_id.clone();
+            }
+            summaries.push(summary);
+        }
+
+        Ok(PathImpactReport { summaries })
+    }
+
+    pub async fn run_path_impact_report_text(&self, query: PathImpactQuery) -> Result<String> {
+        let report = self.run_path_impact_report(query).await?;
+        Ok(render_path_impact_report(&report.summaries))
+    }
+
     async fn load_trade_samples(
         &self,
         query: &VegasFactorResearchQuery,
@@ -193,6 +471,19 @@ impl VegasFactorResearchService {
             return Err(anyhow!("baseline ids 不能为空"));
         }
 
+        self.load_trade_samples_by_ids(&query.baseline_ids, &query.timeframe, None)
+            .await
+    }
+
+    async fn load_trade_samples_by_ids(
+        &self,
+        backtest_ids: &[i64],
+        timeframe: &str,
+        inst_id: Option<&str>,
+    ) -> Result<Vec<ResearchTradeSample>> {
+        if backtest_ids.is_empty() {
+            return Err(anyhow!("backtest ids 不能为空"));
+        }
         let mut builder = QueryBuilder::<MySql>::new(
             "SELECT o.back_test_id as backtest_id, o.inst_id, o.time as timeframe, o.option_type as side, \
              o.open_position_time as open_time, c.close_position_time as close_time, \
@@ -204,13 +495,17 @@ impl VegasFactorResearchService {
              AND c.option_type = 'close' AND c.open_position_time = o.open_position_time \
              WHERE o.option_type IN ('long','short') AND o.time = "
         );
-        builder.push_bind(&query.timeframe);
+        builder.push_bind(timeframe);
         builder.push(" AND o.back_test_id IN (");
         let mut separated = builder.separated(", ");
-        for id in &query.baseline_ids {
+        for id in backtest_ids {
             separated.push_bind(id);
         }
         separated.push_unseparated(")");
+        if let Some(inst_id) = inst_id {
+            builder.push(" AND o.inst_id = ");
+            builder.push_bind(inst_id);
+        }
 
         let rows = builder
             .build_query_as::<TradeSampleRow>()
@@ -401,6 +696,50 @@ impl VegasFactorResearchService {
             stop_loss_source: row.stop_loss_source,
             signal_value: row.signal_value,
             signal_result: row.signal_result,
+        }
+    }
+
+    fn trade_map(
+        trades: &[ResearchTradeSample],
+    ) -> HashMap<(String, String, i64), &ResearchTradeSample> {
+        trades
+            .iter()
+            .map(|trade| {
+                (
+                    (
+                        trade.inst_id.clone(),
+                        trade.side.to_ascii_lowercase(),
+                        trade.open_time_ms,
+                    ),
+                    trade,
+                )
+            })
+            .collect()
+    }
+
+    fn unique_inst_id(
+        baseline: &[ResearchTradeSample],
+        experiment: &[ResearchTradeSample],
+    ) -> Option<String> {
+        let ids: Vec<_> = baseline
+            .iter()
+            .chain(experiment.iter())
+            .map(|row| row.inst_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if ids.len() == 1 {
+            Some(ids[0].to_string())
+        } else {
+            None
+        }
+    }
+
+    fn avg(values: &[f64]) -> f64 {
+        if values.is_empty() {
+            0.0
+        } else {
+            values.iter().sum::<f64>() / values.len() as f64
         }
     }
 
@@ -646,6 +985,160 @@ impl VegasFactorResearchService {
         }
     }
 
+    fn parse_signal_json(signal_value: &str) -> Option<serde_json::Value> {
+        serde_json::from_str(signal_value).ok()
+    }
+
+    fn normalize_side(side: &str) -> &'static str {
+        match side.to_ascii_lowercase().as_str() {
+            "long" => "long",
+            "short" => "short",
+            "buy" => "long",
+            "sell" => "short",
+            value if value.contains("long") => "long",
+            value if value.contains("short") => "short",
+            _ => "unknown",
+        }
+    }
+
+    fn trend_bucket(signal: &serde_json::Value) -> Option<&'static str> {
+        let ema = signal.get("ema_values")?;
+        match (
+            ema.get("is_long_trend").and_then(|value| value.as_bool()),
+            ema.get("is_short_trend").and_then(|value| value.as_bool()),
+        ) {
+            (Some(true), _) => Some("long_trend"),
+            (_, Some(true)) => Some("short_trend"),
+            (Some(false), Some(false)) => Some("mixed_trend"),
+            _ => None,
+        }
+    }
+
+    fn macd_bucket(signal: &serde_json::Value) -> Option<String> {
+        let macd = signal.get("macd_value")?;
+        let histogram = macd.get("histogram").and_then(|value| value.as_f64());
+        let zone = match histogram {
+            Some(value) if value >= 0.0 => "macd_above_zero",
+            Some(_) => "macd_below_zero",
+            None => match macd.get("above_zero").and_then(|value| value.as_bool()) {
+                Some(true) => "macd_above_zero",
+                Some(false) => "macd_below_zero",
+                None => return None,
+            },
+        };
+        let momentum = if macd
+            .get("histogram_improving")
+            .or_else(|| macd.get("histogram_increasing"))
+            .and_then(|value| value.as_bool())
+            == Some(true)
+        {
+            "hist_improving"
+        } else if macd
+            .get("histogram_decreasing")
+            .and_then(|value| value.as_bool())
+            == Some(true)
+        {
+            "hist_decreasing"
+        } else {
+            "hist_flat"
+        };
+
+        Some(format!("{zone}_{momentum}"))
+    }
+
+    fn volume_bucket(signal: &serde_json::Value) -> Option<&'static str> {
+        let ratio = signal
+            .get("volume_value")
+            .and_then(|value| value.get("volume_ratio"))
+            .and_then(|value| value.as_f64())?;
+        if ratio >= 2.5 {
+            Some("volume_extreme")
+        } else if ratio >= 1.5 {
+            Some("volume_expansion")
+        } else if ratio < 0.8 {
+            Some("volume_contract")
+        } else {
+            Some("volume_normal")
+        }
+    }
+
+    fn exit_bucket(close_type: &str) -> Option<&'static str> {
+        let lower = close_type.to_ascii_lowercase();
+        if close_type.contains("Signal_Kline_Stop_Loss") || lower.contains("signal_kline_stop_loss")
+        {
+            Some("signal_stop")
+        } else if close_type.contains("最大亏损止损") || lower.contains("max_loss") {
+            Some("max_loss_stop")
+        } else if close_type.contains("反向信号") || lower.contains("opposite") {
+            Some("opposite_signal_close")
+        } else if close_type.contains("止盈")
+            || lower.contains("take_profit")
+            || lower.contains("atr")
+        {
+            Some("take_profit")
+        } else {
+            None
+        }
+    }
+
+    fn trend_alignment_bucket(signal: &serde_json::Value, side: &str) -> Option<&'static str> {
+        match (Self::normalize_side(side), Self::trend_bucket(signal)?) {
+            (_, "mixed_trend") => Some("mixed_trend"),
+            ("long", "long_trend") | ("short", "short_trend") => Some("with_trend"),
+            ("long", "short_trend") | ("short", "long_trend") => Some("counter_trend"),
+            _ => Some("trend_unknown"),
+        }
+    }
+
+    fn macd_alignment_bucket(signal: &serde_json::Value, side: &str) -> Option<&'static str> {
+        let histogram = signal
+            .get("macd_value")?
+            .get("histogram")
+            .and_then(|value| value.as_f64())?;
+        match Self::normalize_side(side) {
+            "long" if histogram >= 0.0 => Some("macd_align"),
+            "long" => Some("macd_against"),
+            "short" if histogram < 0.0 => Some("macd_align"),
+            "short" => Some("macd_against"),
+            _ => Some("macd_unknown"),
+        }
+    }
+
+    fn distance_bucket(signal: &serde_json::Value) -> Option<&'static str> {
+        match signal
+            .get("ema_distance_filter")?
+            .get("state")?
+            .as_str()?
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "toofar" => Some("distance_too_far"),
+            "normal" => Some("distance_normal"),
+            "tangled" => Some("distance_tangled"),
+            _ => Some("distance_other"),
+        }
+    }
+
+    fn leg_bucket(signal: &serde_json::Value) -> Option<&'static str> {
+        let leg = signal.get("leg_detection_value")?;
+        match (
+            leg.get("is_bullish_leg").and_then(|value| value.as_bool()),
+            leg.get("is_bearish_leg").and_then(|value| value.as_bool()),
+        ) {
+            (Some(true), _) => Some("bullish_leg"),
+            (_, Some(true)) => Some("bearish_leg"),
+            (Some(false), Some(false)) => Some("mixed_leg"),
+            _ => None,
+        }
+    }
+
+    fn primary_filter_reason(filter_reasons: &str) -> Option<String> {
+        serde_json::from_str::<Vec<String>>(filter_reasons)
+            .ok()
+            .and_then(|values| values.into_iter().next())
+            .map(|value| value.to_ascii_lowercase())
+    }
+
     fn extract_flow_value(payload: &serde_json::Value) -> Option<f64> {
         [
             "netflow_usd",
@@ -662,8 +1155,10 @@ impl VegasFactorResearchService {
         traded_samples: &[EnrichedTradeSample],
         filtered_samples: &[EnrichedFilteredSignalSample],
     ) -> Vec<FactorBucketReport> {
-        let mut grouped: HashMap<(String, String, VolatilityTier), Vec<f64>> = HashMap::new();
+        let mut grouped: HashMap<(String, String, VolatilityTier, String), Vec<f64>> =
+            HashMap::new();
         for sample in traded_samples {
+            let scope_label = Self::bucket_scope_label(&sample.trade.inst_id, sample.tier);
             if let Some(bucket_name) = &sample.funding_bucket {
                 grouped
                     .entry((
@@ -674,6 +1169,38 @@ impl VegasFactorResearchService {
                         ),
                         bucket_name.clone(),
                         sample.tier,
+                        scope_label.clone(),
+                    ))
+                    .or_default()
+                    .push(sample.trade.pnl);
+            }
+            for (factor_name, bucket_name) in Self::classify_funding_signal_contexts(
+                sample.funding_bucket.as_deref(),
+                &sample.trade.side,
+                sample.trade.signal_value.as_deref(),
+            ) {
+                grouped
+                    .entry((
+                        format!("{}::{}", ResearchSampleKind::Traded.label(), factor_name),
+                        bucket_name,
+                        sample.tier,
+                        scope_label.clone(),
+                    ))
+                    .or_default()
+                    .push(sample.trade.pnl);
+            }
+            for (factor_name, bucket_name) in Self::classify_internal_exit_contexts(
+                &sample.trade.side,
+                sample.trade.close_type.as_deref(),
+                sample.trade.stop_loss_source.as_deref(),
+                sample.trade.signal_value.as_deref(),
+            ) {
+                grouped
+                    .entry((
+                        format!("{}::{}", ResearchSampleKind::Traded.label(), factor_name),
+                        bucket_name,
+                        sample.tier,
+                        scope_label.clone(),
                     ))
                     .or_default()
                     .push(sample.trade.pnl);
@@ -688,6 +1215,7 @@ impl VegasFactorResearchService {
                         ),
                         price_oi_state.label().to_string(),
                         sample.tier,
+                        scope_label.clone(),
                     ))
                     .or_default()
                     .push(sample.trade.pnl);
@@ -698,6 +1226,7 @@ impl VegasFactorResearchService {
                         format!("{}::{}", ResearchSampleKind::Traded.label(), "flow_proxy"),
                         bucket_name.clone(),
                         sample.tier,
+                        scope_label.clone(),
                     ))
                     .or_default()
                     .push(sample.trade.pnl);
@@ -705,6 +1234,7 @@ impl VegasFactorResearchService {
         }
         for sample in filtered_samples {
             let pnl = sample.signal.theoretical_pnl.unwrap_or_default();
+            let scope_label = Self::bucket_scope_label(&sample.signal.inst_id, sample.tier);
             if let Some(bucket_name) = &sample.funding_bucket {
                 grouped
                     .entry((
@@ -715,6 +1245,38 @@ impl VegasFactorResearchService {
                         ),
                         bucket_name.clone(),
                         sample.tier,
+                        scope_label.clone(),
+                    ))
+                    .or_default()
+                    .push(pnl);
+            }
+            for (factor_name, bucket_name) in Self::classify_funding_signal_contexts(
+                sample.funding_bucket.as_deref(),
+                &sample.signal.direction,
+                sample.signal.signal_value.as_deref(),
+            ) {
+                grouped
+                    .entry((
+                        format!("{}::{}", ResearchSampleKind::Filtered.label(), factor_name),
+                        bucket_name,
+                        sample.tier,
+                        scope_label.clone(),
+                    ))
+                    .or_default()
+                    .push(pnl);
+            }
+            for (factor_name, bucket_name) in Self::classify_funding_filter_contexts(
+                sample.funding_bucket.as_deref(),
+                &sample.signal.direction,
+                sample.signal.filter_reasons.as_deref(),
+                sample.signal.signal_value.as_deref(),
+            ) {
+                grouped
+                    .entry((
+                        format!("{}::{}", ResearchSampleKind::Filtered.label(), factor_name),
+                        bucket_name,
+                        sample.tier,
+                        scope_label.clone(),
                     ))
                     .or_default()
                     .push(pnl);
@@ -729,6 +1291,7 @@ impl VegasFactorResearchService {
                         ),
                         price_oi_state.label().to_string(),
                         sample.tier,
+                        scope_label.clone(),
                     ))
                     .or_default()
                     .push(pnl);
@@ -739,6 +1302,7 @@ impl VegasFactorResearchService {
                         format!("{}::{}", ResearchSampleKind::Filtered.label(), "flow_proxy"),
                         bucket_name.clone(),
                         sample.tier,
+                        scope_label.clone(),
                     ))
                     .or_default()
                     .push(pnl);
@@ -746,23 +1310,30 @@ impl VegasFactorResearchService {
         }
 
         let mut rows = Vec::new();
-        for ((factor_name, bucket_name, tier), pnls) in grouped {
+        for ((factor_name, bucket_name, tier, scope_label), pnls) in grouped {
             rows.push(Self::build_bucket_row(
                 factor_name,
                 bucket_name,
                 tier,
+                scope_label,
                 &pnls,
             ));
         }
 
-        let mut by_factor: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut by_bucket: HashMap<(String, String, VolatilityTier, String), Vec<usize>> =
+            HashMap::new();
         for (idx, row) in rows.iter().enumerate() {
-            by_factor
-                .entry(row.factor_name.clone())
+            by_bucket
+                .entry((
+                    row.factor_name.clone(),
+                    row.bucket_name.clone(),
+                    row.volatility_tier,
+                    row.scope_label.clone(),
+                ))
                 .or_default()
                 .push(idx);
         }
-        for indexes in by_factor.values() {
+        for indexes in by_bucket.values() {
             let clone_rows: Vec<_> = indexes.iter().map(|idx| rows[*idx].clone()).collect();
             let conclusion = Self::evaluate_factor_conclusion(&clone_rows);
             for idx in indexes {
@@ -789,6 +1360,7 @@ impl VegasFactorResearchService {
                         bucket_name: "no_data".to_string(),
                         sample_kind,
                         volatility_tier: tier,
+                        scope_label: tier.label().to_string(),
                         sample_count: 0,
                         win_rate: 0.0,
                         avg_pnl: 0.0,
@@ -810,6 +1382,7 @@ impl VegasFactorResearchService {
                         .label()
                         .cmp(right.volatility_tier.label()),
                 )
+                .then(left.scope_label.cmp(&right.scope_label))
         });
         rows
     }
@@ -818,6 +1391,7 @@ impl VegasFactorResearchService {
         factor_name: String,
         bucket_name: String,
         tier: VolatilityTier,
+        scope_label: String,
         pnls: &[f64],
     ) -> FactorBucketReport {
         let (sample_kind, clean_factor_name) =
@@ -856,6 +1430,7 @@ impl VegasFactorResearchService {
             bucket_name,
             sample_kind,
             volatility_tier: tier,
+            scope_label,
             sample_count,
             win_rate: if sample_count == 0 {
                 0.0
@@ -875,6 +1450,13 @@ impl VegasFactorResearchService {
                 pnls.iter().copied().filter(|row| *row < 0.0).sum::<f64>() / sample_count as f64
             },
             conclusion: FactorConclusion::Observe,
+        }
+    }
+
+    fn bucket_scope_label(inst_id: &str, tier: VolatilityTier) -> String {
+        match tier {
+            VolatilityTier::Alt => inst_id.split('-').next().unwrap_or(inst_id).to_string(),
+            _ => tier.label().to_string(),
         }
     }
 }

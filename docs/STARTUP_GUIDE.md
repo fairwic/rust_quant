@@ -29,8 +29,8 @@ Finished `release` profile [optimized] target(s) in 1m 17s
 # 启动 MySQL (macOS with Homebrew)
 brew services start mysql
 
-# 或使用 Docker
-docker run -d \
+# 或使用 Podman
+podman run -d \
   --name rust-quant-mysql \
   -p 3306:3306 \
   -e MYSQL_ROOT_PASSWORD=your_password \
@@ -50,8 +50,8 @@ mysql -h 127.0.0.1 -P 3306 -u root -p
 # macOS with Homebrew
 brew services start redis
 
-# 或使用 Docker
-docker run -d \
+# 或使用 Podman
+podman run -d \
   --name rust-quant-redis \
   -p 6379:6379 \
   redis:alpine
@@ -525,4 +525,3 @@ cargo run -- --help  # (如果实现了 CLI 参数)
 - ⚠️ **配置**: 需要检查 `.env` 文件
 
 **下一步**: 启动 MySQL 和 Redis，然后重新运行程序
-

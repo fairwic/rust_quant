@@ -59,6 +59,9 @@ pub struct VegasStrategy {
     /// Fib 回撤入场配置（趋势回调/反弹入场）
     #[serde(default = "default_fib_retracement_signal_config")]
     pub fib_retracement_signal: Option<FibRetracementSignalConfig>,
+    /// 入场硬拦截配置（默认全开，保持旧行为）
+    #[serde(default = "default_entry_block_config")]
+    pub entry_block_config: EntryBlockConfig,
     /// EMA 距离过滤配置（控制 TooFar/Ranging 等阈值）
     #[serde(default = "default_ema_distance_config")]
     pub ema_distance_config: EmaDistanceConfig,
@@ -2203,6 +2206,7 @@ impl VegasStrategy {
             chase_confirm_config: default_chase_confirm_config(),
             macd_signal: default_macd_signal_config(),
             fib_retracement_signal: default_fib_retracement_signal_config(),
+            entry_block_config: default_entry_block_config(),
             ema_distance_config: default_ema_distance_config(),
             atr_stop_loss_multiplier: default_atr_stop_loss_multiplier(),
             emit_debug: default_emit_debug(),
@@ -2941,7 +2945,8 @@ impl VegasStrategy {
             && fib_val.retracement_ratio <= 0.10
             && fib_val.volume_ratio >= 3.0
             && vegas_indicator_signal_values.macd_value.histogram < 0.0;
-        if signal_result.should_sell.unwrap_or(false)
+        if self.entry_block_config.block_too_far_outside_fib_short
+            && signal_result.should_sell.unwrap_or(false)
             && vegas_indicator_signal_values.ema_values.is_short_trend
             && ema_distance_filter.state == EmaDistanceState::TooFar
             && !fib_val.in_zone
@@ -2976,7 +2981,9 @@ impl VegasStrategy {
             && !allow_repair_long;
         let should_block_counter_trend_hammer_long =
             should_block_counter_trend_hammer_long && !allow_new_leg_positive_macd_long;
-        if should_block_counter_trend_hammer_long {
+        if self.entry_block_config.block_counter_trend_hammer_long
+            && should_block_counter_trend_hammer_long
+        {
             signal_result.should_buy = Some(false);
             signal_result
                 .filter_reasons
@@ -3005,13 +3012,19 @@ impl VegasStrategy {
 
         let should_block_weak_ema_trend_entry =
             Self::should_block_weak_ema_trend_entry(&conditions, &fib_val, fib_cfg.is_open);
-        if signal_result.should_buy.unwrap_or(false) && should_block_weak_ema_trend_entry {
+        if self.entry_block_config.block_weak_ema_trend_entry
+            && signal_result.should_buy.unwrap_or(false)
+            && should_block_weak_ema_trend_entry
+        {
             signal_result.should_buy = Some(false);
             signal_result
                 .filter_reasons
                 .push("EMA_TREND_NO_PATTERN_BELOW_FIB_MIDLINE_LONG".to_string());
         }
-        if signal_result.should_sell.unwrap_or(false) && should_block_weak_ema_trend_entry {
+        if self.entry_block_config.block_weak_ema_trend_entry
+            && signal_result.should_sell.unwrap_or(false)
+            && should_block_weak_ema_trend_entry
+        {
             signal_result.should_sell = Some(false);
             signal_result
                 .filter_reasons
@@ -3059,7 +3072,10 @@ impl VegasStrategy {
                 &conditions,
                 vegas_indicator_signal_values,
             );
-        if signal_result.should_sell.unwrap_or(false)
+        if self
+            .entry_block_config
+            .block_conflicting_too_far_new_bear_leg_short
+            && signal_result.should_sell.unwrap_or(false)
             && should_block_conflicting_too_far_new_bear_leg_short
         {
             signal_result.should_sell = Some(false);
@@ -3092,7 +3108,10 @@ impl VegasStrategy {
         // 应用EMA距离过滤（仅空头分支）
         // - 过远状态且空头排列：拒绝做空
         // ================================================================
-        if ema_distance_filter.should_filter_short && signal_result.should_sell.unwrap_or(false) {
+        if self.entry_block_config.block_ema_distance_short
+            && ema_distance_filter.should_filter_short
+            && signal_result.should_sell.unwrap_or(false)
+        {
             signal_result.should_sell = Some(false);
             signal_result
                 .filter_reasons
@@ -3339,7 +3358,7 @@ impl VegasStrategy {
                         vegas_indicator_signal_values,
                     );
 
-                    if macd_cfg.filter_falling_knife {
+                    if macd_cfg.filter_falling_knife && macd_cfg.filter_falling_knife_long {
                         // 如果 MACD 柱状图为负（处于空头动量区）
                         if macd_val.histogram < 0.0 {
                             // 且 柱状图在递减（负值变更大，动量加速向下）
@@ -3366,7 +3385,7 @@ impl VegasStrategy {
                 if signal_result.should_sell.unwrap_or(false) {
                     let mut should_filter = false;
 
-                    if macd_cfg.filter_falling_knife {
+                    if macd_cfg.filter_falling_knife && macd_cfg.filter_falling_knife_short {
                         // 如果 MACD 柱状图为正（处于多头动量区）
                         if macd_val.histogram > 0.0 {
                             // 且 柱状图在递增（正值变更大，动量加速向上）
@@ -3574,7 +3593,11 @@ impl VegasStrategy {
 
         // 缩量 + RSI 中性 + MACD 零轴上方转弱时，避免过早逆势做多。
         // 典型场景是上涨后的回落修复，参与度不足且死叉刚开始，不适合抢多。
-        if signal_result.should_buy.unwrap_or(false) {
+        if self
+            .entry_block_config
+            .block_low_volume_neutral_rsi_macd_weakening_long
+            && signal_result.should_buy.unwrap_or(false)
+        {
             let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
             let macd_val = &vegas_indicator_signal_values.macd_value;
             let rsi_is_neutral = valid_rsi_value

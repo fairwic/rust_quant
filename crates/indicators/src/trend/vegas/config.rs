@@ -308,6 +308,10 @@ pub struct MacdSignalConfig {
     /// 是否启用"接飞刀"保护 (默认 true)
     /// 当 MACD 与交易方向相反时，如果动量还在恶化则过滤；如果动量改善则放行（允许抄底）
     pub filter_falling_knife: bool,
+    /// 是否启用做多接飞刀保护
+    pub filter_falling_knife_long: bool,
+    /// 是否启用做空接飞刀保护
+    pub filter_falling_knife_short: bool,
 }
 
 impl Default for MacdSignalConfig {
@@ -318,6 +322,8 @@ impl Default for MacdSignalConfig {
             slow_period: 26,  // 标准 26
             signal_period: 9, // 标准 9
             filter_falling_knife: true,
+            filter_falling_knife_long: true,
+            filter_falling_knife_short: true,
         }
     }
 }
@@ -385,6 +391,43 @@ fn default_min_trend_move_pct() -> f64 {
     0.08
 }
 
+/// 入场硬拦截配置
+///
+/// 默认全部开启，保证旧配置行为不变；不同波动层可按标的单独关闭部分拦截做回测验证。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct EntryBlockConfig {
+    /// TooFar 空头且不在 Fib 区间时拦截追空
+    pub block_too_far_outside_fib_short: bool,
+    /// TooFar 空头趋势下反趋势锤子线做多拦截
+    pub block_counter_trend_hammer_long: bool,
+    /// 弱 EMA 趋势且缺少形态确认时拦截入场
+    pub block_weak_ema_trend_entry: bool,
+    /// TooFar + Fib 区间 + 低量冲突新空腿时拦截做空
+    pub block_conflicting_too_far_new_bear_leg_short: bool,
+    /// 缩量 + RSI 中性 + MACD 零轴上方转弱时拦截做多
+    pub block_low_volume_neutral_rsi_macd_weakening_long: bool,
+    /// EMA 距离过滤的空头分支
+    pub block_ema_distance_short: bool,
+}
+
+impl Default for EntryBlockConfig {
+    fn default() -> Self {
+        Self {
+            block_too_far_outside_fib_short: true,
+            block_counter_trend_hammer_long: true,
+            block_weak_ema_trend_entry: true,
+            block_conflicting_too_far_new_bear_leg_short: true,
+            block_low_volume_neutral_rsi_macd_weakening_long: true,
+            block_ema_distance_short: true,
+        }
+    }
+}
+
+pub fn default_entry_block_config() -> EntryBlockConfig {
+    EntryBlockConfig::default()
+}
+
 /// 大实体止损配置
 /// 当K线为大实体（强趋势）时，使用更紧的止损（假设回调不深）
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -414,4 +457,60 @@ impl Default for LargeEntityStopLossConfig {
 
 pub fn default_large_entity_stop_loss_config() -> Option<LargeEntityStopLossConfig> {
     Some(LargeEntityStopLossConfig::default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EntryBlockConfig, MacdSignalConfig};
+
+    #[test]
+    fn entry_block_config_defaults_keep_existing_filters_enabled() {
+        let config = EntryBlockConfig::default();
+
+        assert!(config.block_ema_distance_short);
+        assert!(config.block_too_far_outside_fib_short);
+        assert!(config.block_counter_trend_hammer_long);
+        assert!(config.block_conflicting_too_far_new_bear_leg_short);
+        assert!(config.block_low_volume_neutral_rsi_macd_weakening_long);
+        assert!(config.block_weak_ema_trend_entry);
+    }
+
+    #[test]
+    fn entry_block_config_can_disable_specific_filter_from_json() {
+        let config: EntryBlockConfig = serde_json::from_value(serde_json::json!({
+            "block_ema_distance_short": false,
+            "block_counter_trend_hammer_long": false,
+            "block_low_volume_neutral_rsi_macd_weakening_long": false
+        }))
+        .expect("entry block config should deserialize");
+
+        assert!(!config.block_ema_distance_short);
+        assert!(!config.block_counter_trend_hammer_long);
+        assert!(!config.block_low_volume_neutral_rsi_macd_weakening_long);
+        assert!(config.block_too_far_outside_fib_short);
+        assert!(config.block_conflicting_too_far_new_bear_leg_short);
+        assert!(config.block_weak_ema_trend_entry);
+    }
+
+    #[test]
+    fn macd_signal_config_defaults_keep_directional_falling_knife_filters_enabled() {
+        let config = MacdSignalConfig::default();
+
+        assert!(config.filter_falling_knife);
+        assert!(config.filter_falling_knife_long);
+        assert!(config.filter_falling_knife_short);
+    }
+
+    #[test]
+    fn macd_signal_config_can_disable_only_long_falling_knife_filter_from_json() {
+        let config: MacdSignalConfig = serde_json::from_value(serde_json::json!({
+            "filter_falling_knife": true,
+            "filter_falling_knife_long": false
+        }))
+        .expect("macd signal config should deserialize");
+
+        assert!(config.filter_falling_knife);
+        assert!(!config.filter_falling_knife_long);
+        assert!(config.filter_falling_knife_short);
+    }
 }

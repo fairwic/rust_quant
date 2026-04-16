@@ -10,7 +10,6 @@ use crate::framework::backtest::types::{BasicRiskStrategyConfig, SignalResult};
 use crate::strategy_common::get_multi_indicator_values;
 use crate::CandleItem;
 use crate::StrategyType;
-use std::sync::Arc;
 
 /// Vegas 策略回测适配器
 ///

@@ -3,9 +3,9 @@ use rust_quant_indicators::trend::vegas::{
     default_chase_confirm_config, default_extreme_k_filter, default_fib_retracement_signal_config,
     default_large_entity_stop_loss_config, default_macd_signal_config, ChaseConfirmConfig,
     EmaDistanceConfig, EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig,
-    ExtremeKFilterConfig, FibRetracementSignalConfig, KlineHammerConfig, LegDetectionConfig,
-    MacdSignalConfig, MarketStructureConfig, RangeFilterConfig, RsiSignalConfig, VegasStrategy,
-    VolumeSignalConfig,
+    EntryBlockConfig, ExtremeKFilterConfig, FibRetracementSignalConfig, KlineHammerConfig,
+    LegDetectionConfig, MacdSignalConfig, MarketStructureConfig, RangeFilterConfig,
+    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
 };
 use rust_quant_indicators::volatility::BollingBandsSignalConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
@@ -35,6 +35,11 @@ pub struct ParamMergeBuilder {
     // 固定信号线的止盈比例
     pub fix_signal_kline_take_profit_ratio: Option<f64>, // 固定信号线的止盈比例，比如当盈利超过 k线路的长度的 n 倍时，直接止盈，适用短线策略
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
+    pub dynamic_entry_amp_threshold: Option<f64>,
+    pub dynamic_entry_loss_percent: Option<f64>,
+    pub dynamic_entry_require_direction_mismatch: Option<bool>,
+    pub dynamic_range_threshold: Option<f64>,
+    pub dynamic_range_loss_percent: Option<f64>,
     // strategy extensions
     pub signal_weights: Option<SignalWeightsConfig>,
     pub leg_detection_signal: Option<LegDetectionConfig>,
@@ -47,6 +52,7 @@ pub struct ParamMergeBuilder {
     pub emit_debug: Option<bool>,
     pub macd_signal: Option<MacdSignalConfig>,
     pub fib_retracement_signal: Option<FibRetracementSignalConfig>,
+    pub entry_block_config: Option<EntryBlockConfig>,
 }
 impl ParamMergeBuilder {
     //使用构造器
@@ -133,6 +139,11 @@ impl ParamMergeBuilder {
             fixed_signal_kline_take_profit_ratio: self.fix_signal_kline_take_profit_ratio,
             is_used_signal_k_line_stop_loss: Some(self.is_used_signal_k_line_stop_loss),
             dynamic_max_loss: Some(true),
+            dynamic_entry_amp_threshold: self.dynamic_entry_amp_threshold,
+            dynamic_entry_loss_percent: self.dynamic_entry_loss_percent,
+            dynamic_entry_require_direction_mismatch: self.dynamic_entry_require_direction_mismatch,
+            dynamic_range_threshold: self.dynamic_range_threshold,
+            dynamic_range_loss_percent: self.dynamic_range_loss_percent,
         }
     }
 
@@ -201,6 +212,7 @@ impl ParamMergeBuilder {
             fib_retracement_signal: self
                 .fib_retracement_signal
                 .or_else(default_fib_retracement_signal_config),
+            entry_block_config: self.entry_block_config.unwrap_or_default(),
             ema_distance_config: self.ema_distance_config.unwrap_or_default(),
             atr_stop_loss_multiplier: self.atr_stop_loss_multiplier.unwrap_or(1.5),
             emit_debug: self.emit_debug.unwrap_or(true),
@@ -356,6 +368,11 @@ impl ParamGenerator {
                 fix_signal_kline_take_profit_ratio: Some(
                     self.fix_signal_kline_take_profit_ratios[i_fsktpr],
                 ),
+                dynamic_entry_amp_threshold: None,
+                dynamic_entry_loss_percent: None,
+                dynamic_entry_require_direction_mismatch: None,
+                dynamic_range_threshold: None,
+                dynamic_range_loss_percent: None,
                 signal_weights: None,
                 leg_detection_signal: None,
                 market_structure_signal: None,
@@ -367,6 +384,7 @@ impl ParamGenerator {
                 emit_debug: None,
                 macd_signal: None,
                 fib_retracement_signal: None,
+                entry_block_config: None,
             };
 
             batch.push(param);
@@ -398,6 +416,34 @@ impl ParamGenerator {
     /// 获取剩余组合数
     pub fn remaining_count(&self) -> usize {
         self.total_count.saturating_sub(self.current_index)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ParamMergeBuilder;
+
+    #[test]
+    fn to_risk_config_preserves_dynamic_max_loss_thresholds() {
+        let params = ParamMergeBuilder {
+            max_loss_percent: 0.05,
+            take_profit_ratio: 5.0,
+            is_used_signal_k_line_stop_loss: true,
+            dynamic_entry_amp_threshold: Some(0.05),
+            dynamic_entry_loss_percent: Some(0.03),
+            dynamic_entry_require_direction_mismatch: Some(false),
+            dynamic_range_threshold: Some(0.08),
+            dynamic_range_loss_percent: Some(0.04),
+            ..Default::default()
+        };
+
+        let risk = params.to_risk_config();
+
+        assert_eq!(risk.dynamic_entry_amp_threshold, Some(0.05));
+        assert_eq!(risk.dynamic_entry_loss_percent, Some(0.03));
+        assert_eq!(risk.dynamic_entry_require_direction_mismatch, Some(false));
+        assert_eq!(risk.dynamic_range_threshold, Some(0.08));
+        assert_eq!(risk.dynamic_range_loss_percent, Some(0.04));
     }
 }
 
@@ -582,6 +628,7 @@ impl NweParamGenerator {
                 atr_take_profit_ratio: Some(self.take_profit_ratios[i_tpr]),
                 fixed_signal_kline_take_profit_ratio: None,
                 dynamic_max_loss: Some(true),
+                ..Default::default()
             };
             batch.push((cfg, risk));
             self.current_index += 1;
