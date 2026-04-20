@@ -1,6 +1,7 @@
 //! 策略相关服务模块
 
 pub mod backtest_service;
+pub mod bsc_event_arb_snapshot;
 pub mod live_decision;
 pub mod live_parity;
 pub mod strategy_config_service;
@@ -9,6 +10,7 @@ pub mod strategy_execution_service;
 pub mod vegas_factor_research;
 
 pub use backtest_service::BacktestService;
+pub use bsc_event_arb_snapshot::BscEventArbSnapshotBuilder;
 pub use live_decision::{apply_live_decision, LiveDecisionOutcome};
 pub use live_parity::{
     compare_parity_rows, compare_timing_parity, replay_live_with_warmup, to_parity_trade_rows,

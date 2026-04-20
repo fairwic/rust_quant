@@ -1,0 +1,67 @@
+{
+  "samples": 12,
+  "trades": 3,
+  "wins": 1,
+  "losses": 2,
+  "win_rate": 0.3333333333333333,
+  "avg_win_r": 0.05934761441090558,
+  "avg_loss_r": 1.15,
+  "profit_factor": 0.02580331061343721,
+  "net_r": -2.2406523855890943,
+  "avg_net_r": -0.7468841285296981,
+  "largest_winner_r": 0.05934761441090558,
+  "net_r_without_largest_winner": -2.3,
+  "passes_proof_gate": false,
+  "data_source": "LBank public 5m klines",
+  "proof_scope": "price_volume_only_not_full_strategy",
+  "sample_plan": [
+    {
+      "symbol": "rave_usdt",
+      "group": "success"
+    },
+    {
+      "symbol": "bianrensheng_usdt",
+      "group": "success"
+    },
+    {
+      "symbol": "4_usdt",
+      "group": "success"
+    },
+    {
+      "symbol": "palu_usdt",
+      "group": "success"
+    },
+    {
+      "symbol": "kefuxiaohe_usdt",
+      "group": "success"
+    },
+    {
+      "symbol": "xiuxian_usdt",
+      "group": "success"
+    },
+    {
+      "symbol": "hajimi_usdt",
+      "group": "success"
+    },
+    {
+      "symbol": "broccoli4_usdt",
+      "group": "control"
+    },
+    {
+      "symbol": "bnbholder_usdt",
+      "group": "control"
+    },
+    {
+      "symbol": "ai4_usdt",
+      "group": "control"
+    },
+    {
+      "symbol": "npcz_usdt",
+      "group": "control"
+    },
+    {
+      "symbol": "giggle_usdt",
+      "group": "control"
+    }
+  ]
+}

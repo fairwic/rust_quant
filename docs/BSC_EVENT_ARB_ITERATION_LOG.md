@@ -1,0 +1,47 @@
+# BSC Event Arb Iteration Log
+
+## 2026-04-20 BSC meme 事件套利策略验证：框架完成，但盈利证明未通过
+
+- 本轮目标：
+  - 围绕 RAVE、币安人生、4、PALU、客服小何、修仙、HAKIMI 以及失败样本，设计并验证 BSC meme 事件套利策略。
+  - 目标不是事后解释涨幅，而是证明一个可复用、可回放、可风控的事件交易框架。
+  - 默认只允许 `long / flat / force_exit`，不主动做空，避免 RAVE 式 squeeze 中方向判断正确但仓位被清算。
+- 核心策略假设：
+  - 这类行情主要来自 `叙事流量 + 低流通/薄深度 + CEX/合约放大 + 短线事件资金`。
+  - 不抢最早期土狗；等待 Binance Alpha / 主流 CEX / Four.Meme 热榜 / OI 与 funding / 链上 CEX flow 等证据确认后，做短线事件二段行情。
+  - 事件仓位必须快进快出，包含时间止损、VWAP 止损、trailing stop、OI/funding/链上流 kill switch，不能转成长线持仓。
+- 本次实现推进：
+  - 新增 `StrategyType::BscEventArb`，接入 `StrategyExecutor` 注册框架。
+  - 新增 `BscEventArb` 策略实现、快照类型、执行器与单元测试。
+  - 新增 `BscEventArbSnapshotBuilder`，从 `external_market_snapshots.metric_type + raw_payload` 聚合策略输入。
+  - 新增 Python 历史回放脚本，支持 LBank 5m K 线、GoPlus 安全/流动性、Bitget/Gate 衍生品、Coinalyze 历史 OI/funding/long-short、BSC Transfer logs 与 CEX 钱包候选输出。
+  - 新增 Chainstack Platform API 解析：`CHAINSTACK_API_KEY -> /v1/nodes -> https_endpoint + auth_key -> BSC RPC URL`。
+- 数据源验证结果：
+  - LBank 5m K 线可回放，但只靠 price/volume 不能证明完整事件套利策略。
+  - GoPlus 可提供合约安全、税费、流动性、holder concentration 等过滤字段。
+  - Coinalyze key 可用，近期 RAVE 可拿到 OI/funding/long-short；但多数老事件窗口 intraday 历史数据不可用，无法完整证明 squeeze 条件。
+  - Etherscan V2 对 BSC `chainid=56` 免费计划不可用，BscScan V1 已要求切换到 Etherscan V2，因此不适合作为低成本长期数据源。
+  - 公共 BSC RPC 可查轻量 block，但历史 `eth_getLogs` 容易触发 limit exceeded。
+  - Chainstack key 实测是 Platform API key，不是直接 RPC token；解析 node 后，近期 `eth_chainId=0x38`、`eth_blockNumber`、近 5 个区块 USDT Transfer logs 均可用。
+  - 当前 Chainstack node 配置为 `shared / full / archive=false`，RAVE 历史窗口旧块查询返回 archive 权限错误；脚本已将其归类为 `BSC_RPC_ARCHIVE_REQUIRED`。
+- 失败原因：
+  - 本轮失败不是策略回放出现明确负期望，而是完整历史验证数据不足，无法满足盈利证明门槛。
+  - 缺失的关键字段是历史 OI/funding/long-short 与历史链上 CEX flow；缺这些字段时，策略会退化成价格动量回放，无法证明事件因子有效。
+  - 严格版大量 `NO_ENTRY` 是正确的风控结果：在历史 OI、CEX flow 或安全字段缺失时拒绝交易，不能为了提升样本交易数而放松数据门槛。
+  - 因此当前结论是 `策略框架合理，但盈利证明失败；不允许进入实盘自动下单`。
+- 经验沉淀：
+  - 行情解释正确不等于策略盈利已证明；必须用当时可见数据触发，而不是事后看图总结。
+  - BSC meme 事件策略的核心瓶颈是数据覆盖，不是简单参数调优。
+  - 免费或低价 RPC 更适合实时监控，不一定适合历史 archive 回测。
+  - RAVE 这类极端样本必须短线事件化处理，trailing / kill switch / 24h 清仓是必要条件。
+  - 在没有 archive RPC 或历史索引数据前，不应继续优化入场阈值；先补数据基础设施。
+- 后续路线：
+  - 实时监控线：用当前 Chainstack full node 监听新 BSC meme 的近期 Transfer logs、合约安全、流动性、CEX/Coinalyze 当前数据，先做报警和模拟盘。
+  - 历史证明线：补 Chainstack archive node、QuickNode archive、Bitquery、Dune、Covalent、自建 Erigon archive 或自建 Transfer logs 索引库。
+  - 只有历史证明线跑通并通过 proof gate，才能把 `BscEventArb` 从研究/报警策略升级为实盘策略。
+- 验证记录：
+  - `python3 -m unittest tests/test_bsc_meme_event_backtest.py tests/test_bsc_rpc_sources.py`：14 passed。
+  - `cargo test -p rust-quant-strategies --test bsc_event_arb -- --nocapture`：5 passed。
+  - `cargo test -p rust-quant-services --test bsc_event_arb_snapshot -- --nocapture`：1 passed。
+  - `cargo check -p rust-quant-services`：passed。
+  - `cargo fmt --check`：passed。

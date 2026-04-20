@@ -11,6 +11,7 @@ pub mod profit_stop_loss;
 pub mod engulfing_strategy;
 
 // 执行器
+pub mod bsc_event_arb;
 pub mod nwe_executor;
 pub mod vegas_backtest;
 pub mod vegas_executor;
@@ -19,6 +20,7 @@ pub mod vegas_executor;
 pub mod nwe_strategy;
 
 // 重新导出
+pub use bsc_event_arb::*;
 pub use engulfing_strategy::*;
 pub use executor_common::*;
 pub use executor_common_lite::ExecutionContext as LiteExecutionContext; // 避免冲突

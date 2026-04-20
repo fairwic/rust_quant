@@ -23,6 +23,8 @@ pub enum StrategyType {
     UtBoot,
     /// 顶级合约策略
     TopContract,
+    /// BSC 事件套利策略
+    BscEventArb,
     /// 自定义策略
     Custom(u32),
 }
@@ -39,6 +41,7 @@ impl StrategyType {
             StrategyType::Squeeze => "squeeze",
             StrategyType::UtBoot => "ut_boot",
             StrategyType::TopContract => "top_contract",
+            StrategyType::BscEventArb => "bsc_event_arb",
             StrategyType::Custom(_) => "custom",
         }
     }
@@ -58,6 +61,7 @@ impl std::str::FromStr for StrategyType {
             "squeeze" => Ok(StrategyType::Squeeze),
             "ut_boot" => Ok(StrategyType::UtBoot),
             "top_contract" => Ok(StrategyType::TopContract),
+            "bsc_event_arb" => Ok(StrategyType::BscEventArb),
             _ => Err(format!("Unknown strategy type: {}", s)),
         }
     }

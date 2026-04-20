@@ -1,0 +1,140 @@
+{
+  "samples": 12,
+  "trades": 0,
+  "wins": 0,
+  "losses": 0,
+  "win_rate": 0.0,
+  "avg_win_r": 0.0,
+  "avg_loss_r": 0.0,
+  "profit_factor": 0.0,
+  "net_r": 0,
+  "avg_net_r": 0.0,
+  "largest_winner_r": 0.0,
+  "net_r_without_largest_winner": 0.0,
+  "passes_proof_gate": false,
+  "data_source": "LBank 5m klines + GoPlus security/liquidity + Bitget/Gate derivatives + Coinalyze history via $COINALYZE_API_KEY",
+  "proof_scope": "full_event_public_data_strict",
+  "sample_plan": [
+    {
+      "symbol": "rave_usdt",
+      "group": "success",
+      "contract_address": "0x97693439ea2f0ecdeb9135881e49f354656a911c",
+      "event_tags": [
+        "cex_listing",
+        "top_gainer"
+      ],
+      "perp_symbols": [
+        "RAVEUSDT"
+      ]
+    },
+    {
+      "symbol": "bianrensheng_usdt",
+      "group": "success",
+      "contract_address": "0x924fa68a0fc644485b8df8abfa0a41c2e7744444",
+      "event_tags": [
+        "binance_alpha",
+        "four_meme",
+        "top_gainer"
+      ]
+    },
+    {
+      "symbol": "4_usdt",
+      "group": "success",
+      "contract_address": "0x0a43fc31a73013089df59194872ecae4cae14444",
+      "event_tags": [
+        "four_meme",
+        "cex_listing",
+        "top_gainer"
+      ],
+      "perp_symbols": [
+        "4USDT"
+      ]
+    },
+    {
+      "symbol": "palu_usdt",
+      "group": "success",
+      "contract_address": "0x02e75d28a8aa2a0033b8cf866fcf0bb0e1ee4444",
+      "event_tags": [
+        "four_meme",
+        "cex_listing",
+        "top_gainer"
+      ],
+      "perp_symbols": [
+        "PALUUSDT"
+      ]
+    },
+    {
+      "symbol": "kefuxiaohe_usdt",
+      "group": "success",
+      "contract_address": "0x3ac8e2c113d5d7824ac6ebe82a3c60b1b9d64444",
+      "event_tags": [
+        "four_meme",
+        "cex_listing"
+      ]
+    },
+    {
+      "symbol": "xiuxian_usdt",
+      "group": "success",
+      "contract_address": "0x44443dd87ec4d1bea3425acc118adb023f07f91b",
+      "event_tags": [
+        "four_meme",
+        "cex_listing"
+      ]
+    },
+    {
+      "symbol": "hajimi_usdt",
+      "group": "success",
+      "contract_address": "0x82ec31d69b3c289e541b50e30681fd1acad24444",
+      "event_tags": [
+        "four_meme",
+        "cex_listing"
+      ]
+    },
+    {
+      "symbol": "broccoli4_usdt",
+      "group": "control",
+      "event_tags": []
+    },
+    {
+      "symbol": "bnbholder_usdt",
+      "group": "control",
+      "event_tags": [
+        "cex_listing"
+      ],
+      "perp_symbols": [
+        "BNBHOLDERUSDT"
+      ]
+    },
+    {
+      "symbol": "ai4_usdt",
+      "group": "control",
+      "event_tags": []
+    },
+    {
+      "symbol": "npcz_usdt",
+      "group": "control",
+      "event_tags": []
+    },
+    {
+      "symbol": "giggle_usdt",
+      "group": "control",
+      "contract_address": "0x20d6015660b3fe52e6690a889b5c51f69902ce0e",
+      "event_tags": [
+        "cex_listing",
+        "four_meme"
+      ],
+      "perp_symbols": [
+        "GIGGLEUSDT"
+      ]
+    }
+  ],
+  "event_data_coverage": {
+    "samples": 12,
+    "contract_address": 8,
+    "security_checked": 8,
+    "dex_liquidity_checked": 8,
+    "derivatives_checked": 3,
+    "historical_oi_growth": 0,
+    "cex_flow_checked": 0
+  }
+}

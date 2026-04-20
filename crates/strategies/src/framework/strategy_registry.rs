@@ -9,7 +9,9 @@ use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
 
 use super::strategy_trait::StrategyExecutor;
-use crate::implementations::{NweStrategyExecutor, VegasStrategyExecutor};
+use crate::implementations::{
+    BscEventArbStrategyExecutor, NweStrategyExecutor, VegasStrategyExecutor,
+};
 use crate::StrategyType;
 
 /// 策略注册中心
@@ -99,6 +101,13 @@ impl StrategyRegistry {
             }
         }
 
+        let normalized_name = normalize_strategy_lookup_name(name);
+        for (key, strategy) in strategies.iter() {
+            if normalize_strategy_lookup_name(key) == normalized_name {
+                return Ok(strategy.clone());
+            }
+        }
+
         Err(anyhow!("策略未注册: {}", name))
     }
 
@@ -137,6 +146,13 @@ impl StrategyRegistry {
         }
         removed
     }
+}
+
+fn normalize_strategy_lookup_name(name: &str) -> String {
+    name.chars()
+        .filter(|ch| *ch != '_' && *ch != '-' && !ch.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// 初始化策略注册中心（空注册表，按需加载）
@@ -195,7 +211,11 @@ pub fn register_default_strategies() {
 }
 
 fn register_builtin_strategies(registry: &StrategyRegistry) {
-    const DEFAULT_TYPES: [StrategyType; 2] = [StrategyType::Vegas, StrategyType::Nwe];
+    const DEFAULT_TYPES: [StrategyType; 3] = [
+        StrategyType::Vegas,
+        StrategyType::Nwe,
+        StrategyType::BscEventArb,
+    ];
     for strategy_type in DEFAULT_TYPES.iter() {
         register_executor_for_type(registry, strategy_type);
     }
@@ -205,6 +225,7 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
     let key = match strategy_type {
         StrategyType::Vegas => "Vegas",
         StrategyType::Nwe => "Nwe",
+        StrategyType::BscEventArb => "BscEventArb",
         _ => strategy_type.as_str(),
     };
     if registry.contains(key) {
@@ -219,6 +240,10 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
         StrategyType::Nwe => {
             registry.register(Arc::new(NweStrategyExecutor::new()));
             info!("✅ 注册策略: Nwe");
+        }
+        StrategyType::BscEventArb => {
+            registry.register(Arc::new(BscEventArbStrategyExecutor::new()));
+            info!("✅ 注册策略: BscEventArb");
         }
         _ => {
             warn!("⚠️  策略类型 {:?} 暂未实现执行器，跳过注册", strategy_type);
