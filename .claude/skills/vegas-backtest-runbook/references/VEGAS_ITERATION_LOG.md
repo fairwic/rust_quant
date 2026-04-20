@@ -1502,3 +1502,51 @@ if is_engulfing {
   - BTC 的正向改善来自 `3%-5%` 中等入场振幅段的温和风险收缩。
   - 该参数不是跨币种单参数通用，BCH 复核拒绝。
   - 分类：`BTC 分层参数有效 / BCH 已验证但无效 / SOL 未参与`。
+
+## 2026-04-16 指标参数分层迭代：布林带与成交量显著正向
+
+- 本轮目标：
+  - 按 `BTC / ETH / 其他币种` 波动层验证指标参数分层。
+  - 本轮只改 DB 配置，不改策略代码。
+  - 顺序：`布林带 multiplier -> 邻域收敛 -> 成交量阈值 -> 吞没 body_ratio`。
+- 执行口径：
+  - 单币顺序回测，使用 `BACKTEST_ONLY_INST_IDS`。
+  - 命令核心：
+    - `IS_BACK_TEST=true`
+    - `ENABLE_SPECIFIED_TEST_VEGAS=true`
+    - `TIGHTEN_VEGAS_RISK=0`
+    - `cargo run -q --bin rust_quant`
+  - 中途 MySQL 自动重启一次，日志显示 redo/binlog 压力；重启后已校验并回写最终 DB 配置。
+- 布林带分层结果：
+  - ETH：
+    - 基线 `1428`：`win_rate=0.529183`，`profit=8047.17`，`sharpe=3.14525`，`max_drawdown=0.323410`
+    - 接受 `bb_multiplier=1.9`，回测 `1506`：`win_rate=0.535959`，`profit=8288.84`，`sharpe=3.15051`，`max_drawdown=0.265312`
+  - BTC：
+    - 基线 `1502`：`win_rate=0.561258`，`profit=399.423`，`sharpe=1.19698`，`max_drawdown=0.355666`
+    - 接受 `bb_multiplier=2.3`，回测 `1524`：`win_rate=0.561886`，`profit=773.713`，`sharpe=1.68672`，`max_drawdown=0.297297`
+  - SOL：
+    - 基线 `1430`：`win_rate=0.427609`，`profit=715.006`，`sharpe=1.44106`，`max_drawdown=0.414416`
+    - 接受 `bb_multiplier=1.85`，回测 `1528`：`win_rate=0.458613`，`profit=3835.90`，`sharpe=2.78737`，`max_drawdown=0.339097`
+  - BCH：
+    - 基线 `1485`：`win_rate=0.393496`，`profit=-56.4274`，`sharpe=-0.338972`，`max_drawdown=0.655402`
+    - 接受 `bb_multiplier=1.9`，回测 `1542`：`win_rate=0.417533`，`profit=-30.7739`，`sharpe=-0.171764`，`max_drawdown=0.661470`
+    - BCH 仍为负收益，只能记为减亏分层。
+- 成交量阈值分层结果：
+  - ETH：接受 `volume_increase_ratio=2.8`，回测 `1544`：`win_rate=0.537943`，`profit=8652.73`，`sharpe=3.18827`，`max_drawdown=0.265312`
+  - BTC：接受 `volume_increase_ratio=4.2`，回测 `1547`：`win_rate=0.566337`，`profit=885.194`，`sharpe=1.80681`，`max_drawdown=0.297297`
+  - SOL：接受 `volume_increase_ratio=4.8`，回测 `1549`：`win_rate=0.459459`，`profit=3995.24`，`sharpe=2.84483`，`max_drawdown=0.339097`
+  - BCH：接受 `volume_increase_ratio=2.8`，回测 `1550`：`win_rate=0.420118`，`profit=-28.0247`，`sharpe=-0.157788`，`max_drawdown=0.661470`
+- 吞没 body_ratio：
+  - ETH/BTC/SOL/BCH 分别测试 `0.35-0.6` 区间。
+  - `1552-1559` 与各自基线结果完全一致。
+  - 结论：当前最优组合下无路径影响，标记为 `仅观察`。
+- 最终 DB 配置：
+  - ETH `id=1`：`bb=1.9`，`volume=2.8`，`engulf_body=0.4`
+  - BTC `id=15`：`bb=2.3`，`volume=4.2`，保留动态止损 `0.03 -> 0.035`
+  - SOL `id=12`：`bb=1.85`，`volume=4.8`
+  - BCH `id=13`：`bb=1.9`，`volume=2.8`
+- 分类结论：
+  - `布林带 multiplier`：分层参数通用，但不是“高波动币一律放宽”。
+  - `成交量阈值`：分层参数通用。
+  - `吞没 body_ratio`：已验证但无效。
+  - 当前推荐基线：`ETH 1544 / BTC 1547 / SOL 1549 / BCH 1550`，其中 BCH 仅为减亏候选。

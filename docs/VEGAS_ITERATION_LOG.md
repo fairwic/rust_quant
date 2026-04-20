@@ -8174,3 +8174,101 @@ TDD：
   - `BCH`：拒绝，恢复原配置。
   - `SOL`：未参与本轮，保持原配置。
   - 本轮结论：`分层参数通用候选`，但当前仅 BTC 正式接受；不能写成跨币种单参数通用。
+
+## 2026-04-16 指标参数分层迭代：布林带与成交量分层显著正向，吞没 body_ratio 无路径影响
+
+- 本轮目标：
+  - 按 `BTC / ETH / 其他币种` 的波动性分层，验证技术指标参数是否应该分层，而不是继续套单一参数。
+  - 本轮只做配置层实验，不改策略代码。
+  - 顺序固定为：`布林带 multiplier -> 邻域收敛 -> 成交量阈值 -> 吞没 body_ratio`。
+- 环境与执行：
+  - 单币顺序回测，使用 `BACKTEST_ONLY_INST_IDS` 避免四币混跑导致归因不清。
+  - 命令口径：
+    - `IS_BACK_TEST=true`
+    - `ENABLE_SPECIFIED_TEST_VEGAS=true`
+    - `TIGHTEN_VEGAS_RISK=0`
+    - `DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED'`
+    - `cargo run -q --bin rust_quant`
+  - 中途 MySQL 出现一次自动重启，日志显示 redo/binlog 压力：
+    - `Redo log writer is waiting for a new redo log file`
+    - `Could not open log file ./binlog.*`
+  - 已在重启后校验并手动恢复/回写最终 DB 配置。
+- 布林带第一轮与邻域收敛：
+  - ETH：
+    - 基线 `1428`：`win_rate=0.529183`，`profit=8047.17`，`sharpe=3.14525`，`max_drawdown=0.323410`
+    - `bb=1.9` -> `1506`：`win_rate=0.535959`，`profit=8288.84`，`sharpe=3.15051`，`max_drawdown=0.265312`
+    - `bb=1.75/1.8/1.85/1.95` 均未超过 `1.9`
+    - 结论：ETH 接受 `bb_multiplier=1.9`
+  - BTC：
+    - 基线 `1502`：`win_rate=0.561258`，`profit=399.423`，`sharpe=1.19698`，`max_drawdown=0.355666`
+    - `bb=2.2` -> `1512`：`win_rate=0.563771`，`profit=574.604`，`sharpe=1.47053`，`max_drawdown=0.307822`
+    - `bb=2.3` -> `1524`：`win_rate=0.561886`，`profit=773.713`，`sharpe=1.68672`，`max_drawdown=0.297297`
+    - `bb=2.4/2.5` 开始恶化
+    - 结论：BTC 接受 `bb_multiplier=2.3`
+  - SOL：
+    - 基线 `1430`：`win_rate=0.427609`，`profit=715.006`，`sharpe=1.44106`，`max_drawdown=0.414416`
+    - 放宽到 `2.3/2.5/2.8` 全部变差
+    - 收窄到 `bb=1.85` -> `1528`：`win_rate=0.458613`，`profit=3835.90`，`sharpe=2.78737`，`max_drawdown=0.339097`
+    - `bb=1.82/1.88/1.9` 均未超过 `1.85`
+    - 结论：SOL 接受 `bb_multiplier=1.85`
+  - BCH：
+    - 基线 `1485`：`win_rate=0.393496`，`profit=-56.4274`，`sharpe=-0.338972`，`max_drawdown=0.655402`
+    - `bb=1.9` -> `1542`：`win_rate=0.417533`，`profit=-30.7739`，`sharpe=-0.171764`，`max_drawdown=0.661470`
+    - `bb=1.7/1.8/2.1/2.2/2.35` 均未优于 `1.9`
+    - 结论：BCH 接受 `bb_multiplier=1.9`，但仍是负收益，不能升级为正向策略，只能记为减亏分层。
+- 成交量阈值分层：
+  - ETH：
+    - `1506` 基础上测试 `volume_increase_ratio=2.8/3.4`
+    - `2.8` -> `1544`：`win_rate=0.537943`，`profit=8652.73`，`sharpe=3.18827`，`max_drawdown=0.265312`
+    - `3.4` -> `1545`：`profit=7860.75`，`sharpe=3.19244`
+    - 结论：收益优先接受 `volume_increase_ratio=2.8`
+  - BTC：
+    - `1524` 基础上测试 `3.4/4.2`
+    - `4.2` -> `1547`：`win_rate=0.566337`，`profit=885.194`，`sharpe=1.80681`，`max_drawdown=0.297297`
+    - 结论：BTC 接受 `volume_increase_ratio=4.2`
+  - SOL：
+    - `1528` 基础上测试 `3.8/4.8`
+    - `4.8` -> `1549`：`win_rate=0.459459`，`profit=3995.24`，`sharpe=2.84483`，`max_drawdown=0.339097`
+    - 结论：SOL 接受 `volume_increase_ratio=4.8`
+  - BCH：
+    - `1542` 基础上测试 `2.8/3.4`
+    - `2.8` -> `1550`：`win_rate=0.420118`，`profit=-28.0247`，`sharpe=-0.157788`，`max_drawdown=0.661470`
+    - `3.4` -> `1551`：`profit=-29.9552`，`sharpe=-0.167651`
+    - 结论：BCH 接受 `volume_increase_ratio=2.8`，仍仅为减亏。
+- 吞没 body_ratio 分层：
+  - 测试：
+    - ETH：`0.45 / 0.5`
+    - BTC：`0.35 / 0.45`
+    - SOL：`0.5 / 0.6`
+    - BCH：`0.5 / 0.6`
+  - 结果：
+    - `1552-1559` 全部与各自基线结果完全一致。
+  - 结论：
+    - 当前 BB+Volume 最优组合下，`engulfing_signal.body_ratio` 不改变交易路径。
+    - 吞没质量阈值本轮标记为 `仅观察`，不进入正式分层参数。
+- 最终 DB 配置：
+  - ETH `strategy_config.id=1`：
+    - `bolling_signal.multiplier=1.9`
+    - `volume_signal.volume_increase_ratio=2.8`
+    - `engulfing_signal.body_ratio=0.4`
+  - BTC `strategy_config.id=15`：
+    - `bolling_signal.multiplier=2.3`
+    - `volume_signal.volume_increase_ratio=4.2`
+    - 保留上一轮动态止损：`dynamic_entry_amp_threshold=0.03 / dynamic_entry_loss_percent=0.035 / dynamic_entry_require_direction_mismatch=false`
+  - SOL `strategy_config.id=12`：
+    - `bolling_signal.multiplier=1.85`
+    - `volume_signal.volume_increase_ratio=4.8`
+  - BCH `strategy_config.id=13`：
+    - `bolling_signal.multiplier=1.9`
+    - `volume_signal.volume_increase_ratio=2.8`
+  - LTC 未参与默认 4H 分层复核，本轮不改。
+- 分层结论：
+  - `布林带 multiplier`：分层参数通用，但方向不是“高波动币一律放宽”。SOL/BCH 反而在收窄后改善，说明当前策略主要依赖更早捕捉反转/触轨信号，而不是减少触发。
+  - `成交量阈值`：分层参数通用。BTC/SOL 需要更高放量阈值，ETH/BCH 当前更适合较低阈值。
+  - `吞没 body_ratio`：当前无路径影响，拒绝升级。
+  - BCH：虽然亏损明显收敛，但仍未转正；不得把 BCH 结论写成“已优化为可交易正向策略”。
+- 当前推荐基线：
+  - ETH：`1544`
+  - BTC：`1547`
+  - SOL：`1549`
+  - BCH：`1550`，仅作为减亏候选，不作为正收益基线。
