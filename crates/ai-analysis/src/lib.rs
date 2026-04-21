@@ -5,6 +5,7 @@
 pub mod event_detector;
 pub mod market_impact_predictor;
 pub mod news_collector;
+pub mod news_prompt;
 pub mod sentiment_analyzer;
 
 // 重新导出核心 Trait
