@@ -4,19 +4,26 @@
 
 mod account_service;
 mod asset_service;
+pub mod binance_websocket;
 mod contracts_service;
 mod data_sync_service;
 pub mod dune_market_sync_service;
 pub mod economic_calendar_sync_service;
+pub mod exchange_symbol_sync_service;
 pub mod external_market_sync_service;
 pub mod funding_rate_sync_service;
 mod public_data_service;
 
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
+use chrono::Utc;
+use crypto_exc_all::{Candle as ExchangeCandle, CandleQuery, ExchangeId, Instrument};
 use okx::dto::market_dto::TickerOkxResDto;
 use rust_quant_domain::traits::CandleRepository;
-use rust_quant_domain::{Candle, Timeframe};
+use rust_quant_domain::{Candle, Price, Timeframe, Volume};
+use rust_quant_infrastructure::repositories::PostgresCandleRepository;
 use rust_quant_market::models::tickers::TickersDataEntity;
+use sqlx::{postgres::PgPoolOptions, Postgres, QueryBuilder};
+use std::str::FromStr;
 
 pub use account_service::AccountService;
 pub use asset_service::AssetService;
@@ -24,6 +31,10 @@ pub use contracts_service::ContractsService;
 pub use data_sync_service::DataSyncService;
 pub use dune_market_sync_service::{DuneMarketSyncService, DuneSqlRunner};
 pub use economic_calendar_sync_service::{EconomicCalendarSyncService, EconomicEventQueryService};
+pub use exchange_symbol_sync_service::{
+    BinanceExchangeInfoProvider, ExchangeSymbolSyncService, LiveBinanceExchangeInfoProvider,
+    MajorExchangeListingSignal, StaticExchangeInfoProvider,
+};
 pub use external_market_sync_service::{
     normalize_external_market_symbol, ExternalMarketDataProvider, ExternalMarketSource,
     ExternalMarketSyncService, HyperliquidExternalMarketDataProvider,
@@ -164,6 +175,42 @@ impl CandleService {
         Ok(candles)
     }
 
+    /// 通过 crypto_exc_all 聚合 SDK 获取交易所 K线，并转换成领域 Candle。
+    pub async fn fetch_candles_from_crypto_exc_all(
+        &self,
+        exchange: &str,
+        inst_id: &str,
+        period: &str,
+        after: Option<u64>,
+        before: Option<u64>,
+        limit: u32,
+    ) -> Result<Vec<Candle>> {
+        let exchange_id = ExchangeId::from_str(exchange).map_err(|error| anyhow!(error))?;
+        let timeframe =
+            Timeframe::from_str(period).map_err(|error| anyhow!("无效的K线周期: {}", error))?;
+        let instrument = instrument_from_inst_id(inst_id)?;
+        let interval = exchange_kline_interval(period);
+        let gateway = crypto_exc_all_gateway_from_env(exchange_id)?;
+
+        let mut query = CandleQuery::new(instrument, interval).with_limit(limit);
+        if let Some(after) = after {
+            query = query.with_start_time(after);
+        }
+        if let Some(before) = before {
+            query = query.with_end_time(before);
+        }
+
+        let candles = gateway
+            .candles(exchange_id, query)
+            .await
+            .map_err(|error| anyhow!("通过 crypto_exc_all 获取K线失败: {}", error))?;
+
+        candles
+            .iter()
+            .map(|candle| exchange_candle_to_domain(candle, inst_id, timeframe))
+            .collect()
+    }
+
     /// 从数据库获取确认的K线数据（用于回测）
     ///
     /// # 参数
@@ -184,28 +231,7 @@ impl CandleService {
         limit: usize,
         select_time: Option<rust_quant_market::models::SelectTime>,
     ) -> Result<Vec<rust_quant_market::models::CandlesEntity>> {
-        use rust_quant_market::models::{CandlesModel, SelectCandleReqDto};
-
-        let dto = SelectCandleReqDto {
-            inst_id: inst_id.to_string(),
-            time_interval: period.to_string(),
-            limit,
-            select_time,
-            confirm: Some(1),
-        };
-
-        let model = CandlesModel::new();
-        let candles = model.fetch_candles_from_mysql(dto).await?;
-
-        if candles.is_empty() {
-            return Err(anyhow::anyhow!(
-                "K线数据为空: inst_id={}, period={}",
-                inst_id,
-                period
-            ));
-        }
-
-        Ok(candles)
+        get_confirmed_candles_for_backtest(inst_id, period, limit, select_time).await
     }
 
     /// 将 CandlesEntity 转换为 CandleItem（用于回测）
@@ -241,6 +267,197 @@ impl CandleService {
             })
             .collect()
     }
+}
+
+pub async fn get_confirmed_candles_for_backtest(
+    inst_id: &str,
+    period: &str,
+    limit: usize,
+    select_time: Option<rust_quant_market::models::SelectTime>,
+) -> Result<Vec<rust_quant_market::models::CandlesEntity>> {
+    if should_use_quant_core_candle_source()? {
+        return get_quant_core_sharded_candles_for_backtest(inst_id, period, limit, select_time)
+            .await;
+    }
+
+    use rust_quant_market::models::{CandlesModel, SelectCandleReqDto};
+
+    let dto = SelectCandleReqDto {
+        inst_id: inst_id.to_string(),
+        time_interval: period.to_string(),
+        limit,
+        select_time,
+        confirm: Some(1),
+    };
+
+    let model = CandlesModel::new();
+    let candles = model.fetch_candles_from_mysql(dto).await?;
+
+    if candles.is_empty() {
+        return Err(anyhow::anyhow!(
+            "K线数据为空: inst_id={}, period={}",
+            inst_id,
+            period
+        ));
+    }
+
+    Ok(candles)
+}
+
+pub fn should_use_quant_core_candle_source() -> Result<bool> {
+    let source = std::env::var("CANDLE_SOURCE")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if source.is_empty() || source == "mysql" || source == "legacy_mysql" {
+        return Ok(false);
+    }
+    if matches!(source.as_str(), "quant_core" | "postgres" | "pg") {
+        return Ok(true);
+    }
+    Err(anyhow!("不支持的 CANDLE_SOURCE: {}", source))
+}
+
+fn crypto_exc_all_gateway_from_env(exchange: ExchangeId) -> Result<crate::CryptoExcAllGateway> {
+    if exchange == ExchangeId::Binance {
+        return crate::CryptoExcAllGateway::from_single_exchange_credentials(
+            ExchangeId::Binance,
+            std::env::var("BINANCE_API_KEY").unwrap_or_else(|_| "public-market-only".to_string()),
+            std::env::var("BINANCE_API_SECRET")
+                .unwrap_or_else(|_| "public-market-only".to_string()),
+            Option::<String>::None,
+            false,
+        )
+        .map_err(|error| anyhow!("创建 Binance crypto_exc_all gateway 失败: {}", error));
+    }
+
+    crate::CryptoExcAllGateway::from_env()
+        .map_err(|error| anyhow!("创建 crypto_exc_all gateway 失败: {}", error))
+}
+
+fn instrument_from_inst_id(inst_id: &str) -> Result<Instrument> {
+    let parts: Vec<&str> = inst_id.split('-').collect();
+    let base = parts
+        .first()
+        .copied()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("无法解析交易对 base: {}", inst_id))?;
+    let quote = parts
+        .get(1)
+        .copied()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("无法解析交易对 quote: {}", inst_id))?;
+
+    Ok(Instrument::perp(base, quote).with_settlement(quote))
+}
+
+fn exchange_kline_interval(period: &str) -> String {
+    match period {
+        "1Dutc" | "1DUTC" => "1d".to_string(),
+        value => value.to_ascii_lowercase(),
+    }
+}
+
+fn exchange_candle_to_domain(
+    candle: &ExchangeCandle,
+    inst_id: &str,
+    timeframe: Timeframe,
+) -> Result<Candle> {
+    let timestamp = candle
+        .open_time
+        .ok_or_else(|| anyhow!("交易所K线缺少 open_time"))? as i64;
+    let volume = candle
+        .quote_volume
+        .as_deref()
+        .unwrap_or(&candle.volume)
+        .parse::<f64>()
+        .with_context(|| format!("解析成交量失败: {:?}", candle.quote_volume))?;
+
+    let mut domain = Candle::new(
+        inst_id.to_string(),
+        timeframe,
+        timestamp,
+        Price::new(candle.open.parse::<f64>()?)
+            .map_err(|error| anyhow!("创建开盘价失败: {:?}", error))?,
+        Price::new(candle.high.parse::<f64>()?)
+            .map_err(|error| anyhow!("创建最高价失败: {:?}", error))?,
+        Price::new(candle.low.parse::<f64>()?)
+            .map_err(|error| anyhow!("创建最低价失败: {:?}", error))?,
+        Price::new(candle.close.parse::<f64>()?)
+            .map_err(|error| anyhow!("创建收盘价失败: {:?}", error))?,
+        Volume::new(volume).map_err(|error| anyhow!("创建成交量失败: {:?}", error))?,
+    );
+
+    let now_ms = Utc::now().timestamp_millis() as u64;
+    let confirmed = candle
+        .closed
+        .unwrap_or_else(|| candle.close_time.map(|ts| ts <= now_ms).unwrap_or(true));
+    if confirmed {
+        domain.confirm();
+    }
+
+    Ok(domain)
+}
+
+async fn get_quant_core_sharded_candles_for_backtest(
+    inst_id: &str,
+    period: &str,
+    limit: usize,
+    select_time: Option<rust_quant_market::models::SelectTime>,
+) -> Result<Vec<rust_quant_market::models::CandlesEntity>> {
+    use rust_quant_market::models::TimeDirect;
+
+    let timeframe =
+        Timeframe::from_str(period).map_err(|error| anyhow!("无效的K线周期: {}", error))?;
+    let table_name = PostgresCandleRepository::quoted_table_name(inst_id, timeframe)?;
+    let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
+        .context("CANDLE_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")?;
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect_lazy(&database_url)
+        .context("创建 quant_core Postgres K线连接池失败")?;
+
+    let mut query = QueryBuilder::<Postgres>::new(format!(
+        "SELECT id, ts, o, h, l, c, vol, vol_ccy, confirm, created_at, updated_at FROM {} WHERE confirm = '1'",
+        table_name
+    ));
+
+    if let Some(select_time) = select_time {
+        match select_time.direct {
+            TimeDirect::BEFORE => {
+                query.push(" AND ts <= ").push_bind(select_time.start_time);
+                if let Some(end_time) = select_time.end_time {
+                    query.push(" AND ts >= ").push_bind(end_time);
+                }
+            }
+            TimeDirect::AFTER => {
+                query.push(" AND ts >= ").push_bind(select_time.start_time);
+                if let Some(end_time) = select_time.end_time {
+                    query.push(" AND ts <= ").push_bind(end_time);
+                }
+            }
+        }
+    }
+
+    query
+        .push(" ORDER BY ts DESC LIMIT ")
+        .push_bind(limit as i64);
+    let mut candles = query
+        .build_query_as::<rust_quant_market::models::CandlesEntity>()
+        .fetch_all(&pool)
+        .await
+        .with_context(|| format!("查询 quant_core Postgres K线分表失败: {}", table_name))?;
+    candles.sort_unstable_by_key(|candle| candle.ts);
+
+    if candles.is_empty() {
+        return Err(anyhow!(
+            "K线数据为空: source=quant_core inst_id={} period={}",
+            inst_id,
+            period
+        ));
+    }
+
+    Ok(candles)
 }
 
 /// Ticker数据服务

@@ -25,6 +25,8 @@ use rust_quant_strategies::framework::risk::{StopLossCalculator, StopLossSide};
 use rust_quant_strategies::framework::types::TradeSide;
 use rust_quant_strategies::strategy_common::SignalResult;
 
+use crate::rust_quan_web::{ExecutionTaskClient, ExecutionTaskConfig, StrategySignalSubmitRequest};
+
 use super::live_decision::{apply_live_decision, approx_eq_opt};
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -241,6 +243,280 @@ impl StrategyExecutionService {
 
     fn build_entry_cl_ord_id(config_id: i64, ts: i64) -> String {
         format!("rq{}{}", config_id, ts)
+    }
+
+    fn should_dispatch_strategy_signal_to_quant_web() -> bool {
+        Self::should_dispatch_strategy_signal_to_quant_web_from_env(
+            std::env::var("STRATEGY_SIGNAL_DISPATCH_MODE")
+                .ok()
+                .as_deref(),
+            std::env::var("RUST_QUAN_WEB_BASE_URL").ok().as_deref(),
+            std::env::var("QUANT_WEB_BASE_URL").ok().as_deref(),
+        )
+    }
+
+    fn should_dispatch_strategy_signal_to_quant_web_from_env(
+        mode: Option<&str>,
+        rust_quan_web_base_url: Option<&str>,
+        quant_web_base_url: Option<&str>,
+    ) -> bool {
+        let mode = mode.unwrap_or("").trim().to_ascii_lowercase();
+        if matches!(
+            mode.as_str(),
+            "disabled" | "disable" | "false" | "0" | "legacy" | "legacy_local" | "local" | "direct"
+        ) {
+            return false;
+        }
+        if matches!(mode.as_str(), "web" | "quant_web" | "execution_tasks") {
+            return true;
+        }
+
+        rust_quan_web_base_url
+            .or(quant_web_base_url)
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    fn should_manage_local_close_algos_after_open() -> bool {
+        Self::should_manage_local_close_algos_after_open_from_env(
+            std::env::var("STRATEGY_SIGNAL_DISPATCH_MODE")
+                .ok()
+                .as_deref(),
+            std::env::var("RUST_QUAN_WEB_BASE_URL").ok().as_deref(),
+            std::env::var("QUANT_WEB_BASE_URL").ok().as_deref(),
+        )
+    }
+
+    fn should_manage_local_close_algos_after_open_from_env(
+        mode: Option<&str>,
+        rust_quan_web_base_url: Option<&str>,
+        quant_web_base_url: Option<&str>,
+    ) -> bool {
+        !Self::should_dispatch_strategy_signal_to_quant_web_from_env(
+            mode,
+            rust_quan_web_base_url,
+            quant_web_base_url,
+        )
+    }
+
+    fn smoke_forced_signal_side_from_env() -> Option<String> {
+        std::env::var("RUST_QUANT_SMOKE_FORCE_SIGNAL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
+    fn apply_smoke_forced_signal_from_env(
+        signal: &mut SignalResult,
+        trigger_candle: &CandleItem,
+    ) -> Result<bool> {
+        let side = Self::smoke_forced_signal_side_from_env();
+        Self::apply_smoke_forced_signal(signal, trigger_candle, side.as_deref())
+    }
+
+    fn apply_smoke_forced_signal(
+        signal: &mut SignalResult,
+        trigger_candle: &CandleItem,
+        side: Option<&str>,
+    ) -> Result<bool> {
+        let Some(side) = side.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Ok(false);
+        };
+        let side = side.to_ascii_lowercase();
+        if matches!(
+            side.as_str(),
+            "disabled" | "disable" | "false" | "0" | "none" | "off"
+        ) {
+            return Ok(false);
+        }
+
+        signal.ts = trigger_candle.ts;
+        signal.open_price = trigger_candle.c;
+        signal.best_open_price = None;
+        signal.atr_take_profit_ratio_price = None;
+        signal.atr_stop_loss_price = None;
+        signal.long_signal_take_profit_price = None;
+        signal.short_signal_take_profit_price = None;
+        signal.stop_loss_source = Some("smoke_forced_signal".to_string());
+        signal.filter_reasons.clear();
+
+        match side.as_str() {
+            "buy" | "long" => {
+                signal.should_buy = true;
+                signal.should_sell = false;
+                signal.signal_kline_stop_loss_price = Some(trigger_candle.c * 0.98);
+                signal.direction = rust_quant_domain::SignalDirection::Long;
+                Ok(true)
+            }
+            "sell" | "short" => {
+                signal.should_buy = false;
+                signal.should_sell = true;
+                signal.signal_kline_stop_loss_price = Some(trigger_candle.c * 1.02);
+                signal.direction = rust_quant_domain::SignalDirection::Short;
+                Ok(true)
+            }
+            other => Err(anyhow!(
+                "RUST_QUANT_SMOKE_FORCE_SIGNAL only supports buy/long/sell/short, got {}",
+                other
+            )),
+        }
+    }
+
+    fn quant_web_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
+        let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
+            .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
+            .map_err(|_| anyhow!("未配置 RUST_QUAN_WEB_BASE_URL/QUANT_WEB_BASE_URL"))?;
+        let internal_secret = std::env::var("EXECUTION_EVENT_SECRET")
+            .or_else(|_| std::env::var("RUST_QUAN_WEB_INTERNAL_SECRET"))
+            .unwrap_or_default();
+        Ok(ExecutionTaskConfig {
+            base_url,
+            internal_secret,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_strategy_signal_submit_request(
+        inst_id: &str,
+        period: &str,
+        signal: &SignalResult,
+        config_id: i64,
+        strategy_type: &str,
+        exchange: Option<&str>,
+        side: &str,
+        pos_side: &str,
+        client_order_id: &str,
+    ) -> Result<StrategySignalSubmitRequest> {
+        let direction = match pos_side {
+            "long" | "short" => pos_side.to_string(),
+            other => {
+                return Err(anyhow!(
+                    "unsupported strategy signal position side: {}",
+                    other
+                ))
+            }
+        };
+        let generated_at = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(signal.ts)
+            .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+
+        let payload_json = serde_json::json!({
+            "source": "rust_quant",
+            "source_signal_type": "technical_strategy",
+            "config_id": config_id,
+            "strategy_type": strategy_type,
+            "strategy_key": format!("{}:{}:{}:{}", strategy_type, inst_id, period, config_id),
+            "period": period,
+            "symbol": inst_id,
+            "exchange": exchange.map(str::to_ascii_lowercase),
+            "side": side,
+            "position_side": pos_side,
+            "trade_side": "open",
+            "order_type": "market",
+            "client_order_id": client_order_id,
+            "signal": signal,
+        });
+        let smoke_external_id_suffix = std::env::var("RUST_QUANT_SMOKE_EXTERNAL_ID_SUFFIX").ok();
+
+        Ok(StrategySignalSubmitRequest {
+            source: "rust_quant".to_string(),
+            external_id: Self::build_strategy_signal_external_id(
+                strategy_type,
+                config_id,
+                inst_id,
+                period,
+                signal.ts,
+                smoke_external_id_suffix.as_deref(),
+            ),
+            strategy_slug: strategy_type.to_string(),
+            strategy_key: format!("{}:{}:{}:{}", strategy_type, inst_id, period, config_id),
+            symbol: inst_id.to_string(),
+            signal_type: "entry".to_string(),
+            direction,
+            title: format!(
+                "{} {} signal {} {}",
+                Self::title_case_strategy(strategy_type),
+                pos_side,
+                inst_id,
+                period
+            ),
+            summary: Some(format!(
+                "rust_quant strategy {} generated {} entry signal at price {}",
+                strategy_type, pos_side, signal.open_price
+            )),
+            confidence: None,
+            payload_json: payload_json.to_string(),
+            generated_at,
+        })
+    }
+
+    fn build_strategy_signal_external_id(
+        strategy_type: &str,
+        config_id: i64,
+        inst_id: &str,
+        period: &str,
+        signal_ts: i64,
+        smoke_suffix: Option<&str>,
+    ) -> String {
+        let base = format!(
+            "rust_quant:{}:{}:{}:{}:{}",
+            strategy_type, config_id, inst_id, period, signal_ts
+        );
+        match smoke_suffix
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some(suffix) => format!("{base}:{suffix}"),
+            None => base,
+        }
+    }
+
+    fn title_case_strategy(strategy_type: &str) -> String {
+        let mut chars = strategy_type.chars();
+        match chars.next() {
+            Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+            None => "Strategy".to_string(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn dispatch_strategy_signal_to_quant_web(
+        &self,
+        inst_id: &str,
+        period: &str,
+        signal: &SignalResult,
+        config_id: i64,
+        strategy_type: &str,
+        exchange: Option<&str>,
+        side: &str,
+        pos_side: &str,
+        client_order_id: &str,
+    ) -> Result<()> {
+        let client = ExecutionTaskClient::new(Self::quant_web_execution_task_config_from_env()?)?;
+        let request = Self::build_strategy_signal_submit_request(
+            inst_id,
+            period,
+            signal,
+            config_id,
+            strategy_type,
+            exchange,
+            side,
+            pos_side,
+            client_order_id,
+        )?;
+        let external_id = request.external_id.clone();
+        let response = client.submit_strategy_signal(request).await.map_err(|e| {
+            anyhow!(
+                "提交 rust_quan_web 策略信号失败: external_id={}, error={}",
+                external_id,
+                e
+            )
+        })?;
+        info!(
+            "✅ 已提交策略信号到 rust_quan_web: external_id={}, generated_tasks={}",
+            external_id,
+            response.generated_tasks.len()
+        );
+        Ok(())
     }
 
     fn parse_detail_object(detail: &str) -> serde_json::Map<String, serde_json::Value> {
@@ -725,6 +1001,18 @@ impl StrategyExecutionService {
                 anyhow!("策略分析失败: {}", e)
             })?;
 
+        if Self::smoke_forced_signal_side_from_env().is_some() {
+            let trigger_candle = snap_item.as_ref().ok_or_else(|| {
+                anyhow!("RUST_QUANT_SMOKE_FORCE_SIGNAL requires a confirmed trigger candle")
+            })?;
+            if Self::apply_smoke_forced_signal_from_env(&mut signal, trigger_candle)? {
+                warn!(
+                    "已应用 smoke 强制策略信号: inst_id={}, period={}, should_buy={}, should_sell={}, ts={}",
+                    inst_id, period, signal.should_buy, signal.should_sell, signal.ts
+                );
+            }
+        }
+
         info!("策略分析完成");
 
         info!("signal: {:?}", serde_json::to_string(&signal).unwrap());
@@ -844,6 +1132,7 @@ impl StrategyExecutionService {
                     order_risk,
                     config.id,
                     config.strategy_type.as_str(),
+                    config.exchange.as_deref(),
                 )
                 .await
             {
@@ -864,49 +1153,65 @@ impl StrategyExecutionService {
 
         let opened_side = outcome.opened_side;
         if let (Some(targets), Some(side)) = (pending_targets, pending_side) {
-            match self
-                .sync_close_algos(
-                    inst_id,
-                    period,
-                    config.id,
-                    side,
-                    &targets,
-                    prev_snapshot.algo_ids.as_slice(),
-                )
-                .await
-            {
-                Ok(CloseAlgoSyncResult::Placed(algo_ids)) => {
-                    self.live_exit_targets.insert(
+            if Self::should_manage_local_close_algos_after_open() {
+                match self
+                    .sync_close_algos(
+                        inst_id,
+                        period,
                         config.id,
-                        LiveExitTargets {
-                            stop_loss: targets.stop_loss,
-                            take_profit: targets.take_profit,
-                            algo_ids,
-                            trade_side: Some(side),
-                        },
-                    );
-                }
-                Ok(CloseAlgoSyncResult::Cleared) => {
-                    self.live_exit_targets.remove(&config.id);
-                }
-                Ok(CloseAlgoSyncResult::SkippedNoPosition) => {}
-                Err(e) => {
-                    warn!(
-                        "⚠️ 同步止盈止损失败: inst_id={}, config_id={}, err={}",
-                        inst_id, config.id, e
-                    );
+                        side,
+                        &targets,
+                        prev_snapshot.algo_ids.as_slice(),
+                    )
+                    .await
+                {
+                    Ok(CloseAlgoSyncResult::Placed(algo_ids)) => {
+                        self.live_exit_targets.insert(
+                            config.id,
+                            LiveExitTargets {
+                                stop_loss: targets.stop_loss,
+                                take_profit: targets.take_profit,
+                                algo_ids,
+                                trade_side: Some(side),
+                            },
+                        );
+                    }
+                    Ok(CloseAlgoSyncResult::Cleared) => {
+                        self.live_exit_targets.remove(&config.id);
+                    }
+                    Ok(CloseAlgoSyncResult::SkippedNoPosition) => {}
+                    Err(e) => {
+                        warn!(
+                            "⚠️ 同步止盈止损失败: inst_id={}, config_id={}, err={}",
+                            inst_id, config.id, e
+                        );
 
-                    if opened_side == Some(side) {
-                        self.enforce_opened_position_guard(
-                            inst_id,
-                            period,
-                            config,
-                            side,
-                            trigger_candle.ts,
-                        )
-                        .await?;
+                        if opened_side == Some(side) {
+                            self.enforce_opened_position_guard(
+                                inst_id,
+                                period,
+                                config,
+                                side,
+                                trigger_candle.ts,
+                            )
+                            .await?;
+                        }
                     }
                 }
+            } else {
+                info!(
+                    "Web 分发模式跳过本地交易所止盈止损委托同步: inst_id={}, config_id={}",
+                    inst_id, config.id
+                );
+                self.live_exit_targets.insert(
+                    config.id,
+                    LiveExitTargets {
+                        stop_loss: targets.stop_loss,
+                        take_profit: targets.take_profit,
+                        algo_ids: vec![],
+                        trade_side: Some(side),
+                    },
+                );
             }
         }
 
@@ -1991,6 +2296,7 @@ impl StrategyExecutionService {
         risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
         strategy_type: &str,
+        exchange: Option<&str>,
     ) -> Result<()> {
         info!(
             "准备下单: inst_id={}, period={}, config_id={}",
@@ -2028,6 +2334,26 @@ impl StrategyExecutionService {
         };
 
         info!("交易方向: side={}, pos_side={}", side, pos_side);
+
+        if Self::should_dispatch_strategy_signal_to_quant_web() {
+            info!(
+                "策略信号改由 rust_quan_web 分发执行任务: inst_id={}, period={}, config_id={}, side={}, pos_side={}",
+                inst_id, period, config_id, side, pos_side
+            );
+            self.dispatch_strategy_signal_to_quant_web(
+                inst_id,
+                period,
+                signal,
+                config_id,
+                strategy_type,
+                exchange,
+                side,
+                pos_side,
+                &client_order_id,
+            )
+            .await?;
+            return Ok(());
+        }
 
         // 3. 获取API配置（从Redis缓存或数据库）
         use crate::exchange::create_exchange_api_service;
@@ -2514,6 +2840,152 @@ mod tests {
         }
     }
 
+    fn create_trigger_candle(close: f64, ts: i64) -> CandleItem {
+        CandleItem {
+            o: close * 0.99,
+            h: close * 1.01,
+            l: close * 0.98,
+            c: close,
+            v: 100.0,
+            ts,
+            confirm: 1,
+        }
+    }
+
+    #[test]
+    fn smoke_force_signal_buy_uses_trigger_candle() {
+        let mut signal = SignalResult {
+            should_buy: false,
+            should_sell: false,
+            open_price: 0.0,
+            ts: 0,
+            ..create_sell_signal(100.0, 1)
+        };
+        let trigger_candle = create_trigger_candle(3420.5, 1_714_000_000_000);
+
+        let applied = StrategyExecutionService::apply_smoke_forced_signal(
+            &mut signal,
+            &trigger_candle,
+            Some("buy"),
+        )
+        .unwrap();
+
+        assert!(applied);
+        assert!(signal.should_buy);
+        assert!(!signal.should_sell);
+        assert_eq!(signal.open_price, 3420.5);
+        assert_eq!(signal.ts, 1_714_000_000_000);
+        assert_eq!(signal.signal_kline_stop_loss_price, Some(3420.5 * 0.98));
+        assert_eq!(signal.direction, rust_quant_domain::SignalDirection::Long);
+    }
+
+    #[test]
+    fn smoke_force_signal_rejects_invalid_side() {
+        let mut signal = create_buy_signal(100.0, 1);
+        let trigger_candle = create_trigger_candle(101.0, 2);
+
+        let error = StrategyExecutionService::apply_smoke_forced_signal(
+            &mut signal,
+            &trigger_candle,
+            Some("flat"),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("RUST_QUANT_SMOKE_FORCE_SIGNAL"));
+    }
+
+    #[test]
+    fn web_dispatch_mode_skips_local_close_algo_management() {
+        assert!(
+            !StrategyExecutionService::should_manage_local_close_algos_after_open_from_env(
+                Some("web"),
+                Some("http://127.0.0.1:8000"),
+                None,
+            )
+        );
+        assert!(
+            StrategyExecutionService::should_manage_local_close_algos_after_open_from_env(
+                Some("legacy"),
+                Some("http://127.0.0.1:8000"),
+                None,
+            )
+        );
+    }
+
+    #[test]
+    fn builds_quant_web_strategy_signal_request_from_live_entry_signal() {
+        let config = StrategyConfig::new(
+            42,
+            rust_quant_domain::StrategyType::Vegas,
+            "ETH-USDT-SWAP".to_string(),
+            rust_quant_domain::Timeframe::H4,
+            serde_json::json!({"window": 144}),
+            serde_json::json!({"max_loss_percent": 0.02}),
+        );
+        let signal = create_buy_signal(3500.0, 1704067200000);
+
+        let request = StrategyExecutionService::build_strategy_signal_submit_request(
+            "ETH-USDT-SWAP",
+            "4H",
+            &signal,
+            42,
+            config.strategy_type.as_str(),
+            Some("binance"),
+            "buy",
+            "long",
+            "rq421704067200000",
+        )
+        .unwrap();
+
+        assert_eq!(request.source, "rust_quant");
+        assert_eq!(
+            request.external_id,
+            "rust_quant:vegas:42:ETH-USDT-SWAP:4H:1704067200000"
+        );
+        assert_eq!(request.strategy_slug, "vegas");
+        assert_eq!(request.strategy_key, "vegas:ETH-USDT-SWAP:4H:42");
+        assert_eq!(request.symbol, "ETH-USDT-SWAP");
+        assert_eq!(request.signal_type, "entry");
+        assert_eq!(request.direction, "long");
+        assert_eq!(
+            request.generated_at.as_deref(),
+            Some("2024-01-01T00:00:00Z")
+        );
+        assert!(request.title.contains("Vegas"));
+        assert!(request.title.contains("long"));
+
+        let payload: serde_json::Value = serde_json::from_str(&request.payload_json).unwrap();
+        assert_eq!(payload["source"], "rust_quant");
+        assert_eq!(payload["config_id"], 42);
+        assert_eq!(payload["strategy_type"], "vegas");
+        assert_eq!(payload["period"], "4H");
+        assert_eq!(payload["symbol"], "ETH-USDT-SWAP");
+        assert_eq!(payload["exchange"], "binance");
+        assert_eq!(payload["side"], "buy");
+        assert_eq!(payload["position_side"], "long");
+        assert_eq!(payload["order_type"], "market");
+        assert_eq!(payload["client_order_id"], "rq421704067200000");
+        assert_eq!(payload["signal"]["open_price"], 3500.0);
+        assert!(payload.get("size").is_none());
+    }
+
+    #[test]
+    fn strategy_signal_external_id_appends_smoke_suffix_when_present() {
+        let external_id = StrategyExecutionService::build_strategy_signal_external_id(
+            "vegas",
+            42,
+            "ETH-USDT-SWAP",
+            "4H",
+            1704067200000,
+            Some("run-20260424"),
+        );
+
+        assert_eq!(
+            external_id,
+            "rust_quant:vegas:42:ETH-USDT-SWAP:4H:1704067200000:run-20260424"
+        );
+    }
+
     #[test]
     fn test_service_creation() {
         let _service = create_test_service();
@@ -2565,6 +3037,7 @@ mod tests {
         let config = StrategyConfig {
             id: 1,
             strategy_type: StrategyType::Vegas,
+            exchange: None,
             symbol: "BTC-USDT".to_string(),
             timeframe: Timeframe::H1,
             status: StrategyStatus::Running,
@@ -2594,6 +3067,7 @@ mod tests {
         let config = StrategyConfig {
             id: 42,
             strategy_type: StrategyType::Vegas,
+            exchange: None,
             symbol: "BTC-USDT".to_string(),
             timeframe: Timeframe::H1,
             status: StrategyStatus::Running,
@@ -2667,6 +3141,7 @@ mod tests {
         let config = StrategyConfig {
             id: 4200,
             strategy_type: StrategyType::Vegas,
+            exchange: None,
             symbol: "BTC-USDT-SWAP".to_string(),
             timeframe: Timeframe::H4,
             status: StrategyStatus::Running,
@@ -2793,6 +3268,7 @@ mod tests {
         let config = StrategyConfig {
             id: 999,
             strategy_type: StrategyType::Vegas,
+            exchange: None,
             symbol: "BTC-USDT-SWAP".to_string(),
             timeframe: Timeframe::H4,
             status: StrategyStatus::Running,
@@ -2855,6 +3331,7 @@ mod tests {
         let config = StrategyConfig {
             id: 1000,
             strategy_type: StrategyType::Vegas,
+            exchange: None,
             symbol: "BTC-USDT-SWAP".to_string(),
             timeframe: Timeframe::H4,
             status: StrategyStatus::Running,
@@ -3617,6 +4094,7 @@ mod tests {
         let config = StrategyConfig {
             id: config_id,
             strategy_type: StrategyType::Vegas,
+            exchange: None,
             symbol: "BTC-USDT".to_string(),
             timeframe: Timeframe::H1,
             status: StrategyStatus::Running,
@@ -3971,6 +4449,7 @@ mod tests {
                 &risk_config,
                 config_id,
                 strategy_type,
+                None,
             )
             .await?;
 

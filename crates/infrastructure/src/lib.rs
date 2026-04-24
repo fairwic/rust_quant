@@ -38,6 +38,7 @@ pub mod repositories;
 pub use exchanges::*;
 pub use external_data::*;
 pub use repositories::{
+    PostgresCandleRepository, PostgresExchangeSymbolRepository, PostgresStrategyConfigRepository,
     SignalLogEntity, SignalLogRepository, SqlxBacktestRepository, SqlxCandleRepository,
     SqlxStrategyConfigRepository, StrategyConfigEntity, StrategyConfigEntityModel,
 };

@@ -47,6 +47,7 @@ sqlx.workspace = true
 
 # 交易所 SDK
 okx.workspace = true
+crypto_exc_all.workspace = true
 
 # 缓存
 redis.workspace = true

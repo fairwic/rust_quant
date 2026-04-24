@@ -55,6 +55,18 @@ pub trait StrategyConfigRepository: Send + Sync {
     /// 根据ID查询配置
     async fn find_by_id(&self, id: i64) -> Result<Option<StrategyConfig>>;
 
+    /// 根据外部ID查询配置。
+    ///
+    /// Postgres `quant_core.strategy_configs` 使用 UUID 作为行ID，同时保留
+    /// legacy_id。默认实现兼容旧 MySQL 数字ID。
+    async fn find_by_external_id(&self, id: &str) -> Result<Option<StrategyConfig>> {
+        let Some(id) = id.trim().parse::<i64>().ok() else {
+            return Ok(None);
+        };
+
+        self.find_by_id(id).await
+    }
+
     /// 查询所有启用的配置
     async fn find_all_enabled(&self) -> Result<Vec<StrategyConfig>>;
 

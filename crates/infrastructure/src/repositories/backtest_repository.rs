@@ -7,6 +7,8 @@ use rust_quant_domain::entities::{
 };
 use rust_quant_domain::traits::BacktestLogRepository;
 
+const BACKTEST_INSERT_CHUNK_ROWS: usize = 1_000;
+
 /// 基于 SQLx 的回测日志仓储实现
 pub struct SqlxBacktestRepository {
     pool: Pool<MySql>,
@@ -78,35 +80,40 @@ impl BacktestLogRepository for SqlxBacktestRepository {
             return Ok(0);
         }
 
-        let mut builder: QueryBuilder<MySql> =
-            QueryBuilder::new("INSERT INTO back_test_detail (option_type, strategy_type, inst_id, time, back_test_id, open_position_time, signal_open_position_time, signal_status, close_position_time, open_price, close_price, profit_loss, quantity, full_close, close_type, win_nums, loss_nums, signal_value, signal_result, stop_loss_source, stop_loss_update_history) ");
+        let mut rows_affected = 0;
+        for chunk in details.chunks(BACKTEST_INSERT_CHUNK_ROWS) {
+            let mut builder: QueryBuilder<MySql> =
+                QueryBuilder::new("INSERT INTO back_test_detail (option_type, strategy_type, inst_id, time, back_test_id, open_position_time, signal_open_position_time, signal_status, close_position_time, open_price, close_price, profit_loss, quantity, full_close, close_type, win_nums, loss_nums, signal_value, signal_result, stop_loss_source, stop_loss_update_history) ");
 
-        builder.push_values(details.iter(), |mut b, detail| {
-            b.push_bind(&detail.option_type)
-                .push_bind(&detail.strategy_type)
-                .push_bind(&detail.inst_id)
-                .push_bind(&detail.timeframe)
-                .push_bind(detail.back_test_id)
-                .push_bind(&detail.open_position_time)
-                .push_bind(&detail.signal_open_position_time)
-                .push_bind(detail.signal_status)
-                .push_bind(&detail.close_position_time)
-                .push_bind(&detail.open_price)
-                .push_bind(&detail.close_price)
-                .push_bind(&detail.profit_loss)
-                .push_bind(&detail.quantity)
-                .push_bind(&detail.full_close)
-                .push_bind(&detail.close_type)
-                .push_bind(detail.win_nums)
-                .push_bind(detail.loss_nums)
-                .push_bind(&detail.signal_value)
-                .push_bind(&detail.signal_result)
-                .push_bind(&detail.stop_loss_source)
-                .push_bind(&detail.stop_loss_update_history);
-        });
+            builder.push_values(chunk.iter(), |mut b, detail| {
+                b.push_bind(&detail.option_type)
+                    .push_bind(&detail.strategy_type)
+                    .push_bind(&detail.inst_id)
+                    .push_bind(&detail.timeframe)
+                    .push_bind(detail.back_test_id)
+                    .push_bind(&detail.open_position_time)
+                    .push_bind(&detail.signal_open_position_time)
+                    .push_bind(detail.signal_status)
+                    .push_bind(&detail.close_position_time)
+                    .push_bind(&detail.open_price)
+                    .push_bind(&detail.close_price)
+                    .push_bind(&detail.profit_loss)
+                    .push_bind(&detail.quantity)
+                    .push_bind(&detail.full_close)
+                    .push_bind(&detail.close_type)
+                    .push_bind(detail.win_nums)
+                    .push_bind(detail.loss_nums)
+                    .push_bind(&detail.signal_value)
+                    .push_bind(&detail.signal_result)
+                    .push_bind(&detail.stop_loss_source)
+                    .push_bind(&detail.stop_loss_update_history);
+            });
 
-        let result = builder.build().execute(self.pool()).await?;
-        Ok(result.rows_affected())
+            let result = builder.build().execute(self.pool()).await?;
+            rows_affected += result.rows_affected();
+        }
+
+        Ok(rows_affected)
     }
 
     async fn update_win_rate_stats(
@@ -207,28 +214,33 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         .execute(self.pool())
         .await?;
 
-        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO filtered_signal_log (backtest_id, inst_id, period, signal_time, direction, filter_reasons, signal_price, indicator_snapshot, theoretical_profit, theoretical_loss, final_pnl, trade_result, signal_value) ",
-        );
+        let mut rows_affected = 0;
+        for chunk in signals.chunks(BACKTEST_INSERT_CHUNK_ROWS) {
+            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                "INSERT INTO filtered_signal_log (backtest_id, inst_id, period, signal_time, direction, filter_reasons, signal_price, indicator_snapshot, theoretical_profit, theoretical_loss, final_pnl, trade_result, signal_value) ",
+            );
 
-        builder.push_values(signals.iter(), |mut b, signal| {
-            b.push_bind(signal.backtest_id)
-                .push_bind(&signal.inst_id)
-                .push_bind(&signal.period)
-                .push_bind(&signal.signal_time)
-                .push_bind(&signal.direction)
-                .push_bind(&signal.filter_reasons)
-                .push_bind(signal.signal_price)
-                .push_bind(&signal.indicator_snapshot)
-                .push_bind(signal.theoretical_profit)
-                .push_bind(signal.theoretical_loss)
-                .push_bind(signal.final_pnl)
-                .push_bind(&signal.trade_result)
-                .push_bind(&signal.signal_value);
-        });
+            builder.push_values(chunk.iter(), |mut b, signal| {
+                b.push_bind(signal.backtest_id)
+                    .push_bind(&signal.inst_id)
+                    .push_bind(&signal.period)
+                    .push_bind(&signal.signal_time)
+                    .push_bind(&signal.direction)
+                    .push_bind(&signal.filter_reasons)
+                    .push_bind(signal.signal_price)
+                    .push_bind(&signal.indicator_snapshot)
+                    .push_bind(signal.theoretical_profit)
+                    .push_bind(signal.theoretical_loss)
+                    .push_bind(signal.final_pnl)
+                    .push_bind(&signal.trade_result)
+                    .push_bind(&signal.signal_value);
+            });
 
-        let result = builder.build().execute(self.pool()).await?;
-        Ok(result.rows_affected())
+            let result = builder.build().execute(self.pool()).await?;
+            rows_affected += result.rows_affected();
+        }
+
+        Ok(rows_affected)
     }
 
     async fn insert_dynamic_config_logs(&self, logs: &[DynamicConfigLog]) -> Result<u64> {
@@ -259,20 +271,38 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         .execute(self.pool())
         .await?;
 
-        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO dynamic_config_log (backtest_id, inst_id, period, kline_time, adjustments, config_snapshot) ",
-        );
+        let mut rows_affected = 0;
+        for chunk in logs.chunks(BACKTEST_INSERT_CHUNK_ROWS) {
+            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                "INSERT INTO dynamic_config_log (backtest_id, inst_id, period, kline_time, adjustments, config_snapshot) ",
+            );
 
-        builder.push_values(logs.iter(), |mut b, log| {
-            b.push_bind(log.backtest_id)
-                .push_bind(&log.inst_id)
-                .push_bind(&log.period)
-                .push_bind(&log.kline_time)
-                .push_bind(&log.adjustments)
-                .push_bind(&log.config_snapshot);
-        });
+            builder.push_values(chunk.iter(), |mut b, log| {
+                b.push_bind(log.backtest_id)
+                    .push_bind(&log.inst_id)
+                    .push_bind(&log.period)
+                    .push_bind(&log.kline_time)
+                    .push_bind(&log.adjustments)
+                    .push_bind(&log.config_snapshot);
+            });
 
-        let result = builder.build().execute(self.pool()).await?;
-        Ok(result.rows_affected())
+            let result = builder.build().execute(self.pool()).await?;
+            rows_affected += result.rows_affected();
+        }
+
+        Ok(rows_affected)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BACKTEST_INSERT_CHUNK_ROWS;
+
+    #[test]
+    fn backtest_insert_chunk_keeps_mysql_bind_count_below_limit() {
+        const MYSQL_BIND_PARAM_LIMIT: usize = 65_535;
+        const MAX_BACKTEST_INSERT_COLUMNS: usize = 21;
+
+        assert!(BACKTEST_INSERT_CHUNK_ROWS * MAX_BACKTEST_INSERT_COLUMNS < MYSQL_BIND_PARAM_LIMIT);
     }
 }

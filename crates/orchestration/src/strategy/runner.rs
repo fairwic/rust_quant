@@ -141,6 +141,27 @@ impl StrategyExecutionStateManager {
     }
 }
 
+fn should_bypass_persisted_processed_guard() -> bool {
+    should_bypass_persisted_processed_guard_from_env(
+        std::env::var("RUST_QUANT_SMOKE_FORCE_SIGNAL")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn should_bypass_persisted_processed_guard_from_env(force_signal: Option<&str>) -> bool {
+    let Some(value) = force_signal
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    !matches!(
+        value.to_ascii_lowercase().as_str(),
+        "disabled" | "disable" | "false" | "0" | "none" | "off"
+    )
+}
+
 /// 执行策略 - 简化版接口
 ///
 /// # Arguments
@@ -196,12 +217,21 @@ pub async fn execute_strategy(
             .as_secs() as i64,
     };
 
-    if StrategyExecutionStateManager::is_persisted_processed(&key, timestamp).await {
+    let bypass_persisted_guard = should_bypass_persisted_processed_guard();
+    if !bypass_persisted_guard
+        && StrategyExecutionStateManager::is_persisted_processed(&key, timestamp).await
+    {
         info!(
             "⏭️ 跳过已持久化处理的确认K线: key={}, timestamp={}",
             key, timestamp
         );
         return Ok(());
+    }
+    if bypass_persisted_guard {
+        warn!(
+            "Smoke 强制信号模式绕过已处理确认K线保护: key={}, timestamp={}",
+            key, timestamp
+        );
     }
 
     if !StrategyExecutionStateManager::try_mark_processing(&key, timestamp) {
@@ -406,6 +436,24 @@ mod tests {
 
         // 清理后应该又可以执行
         assert!(StrategyExecutionStateManager::try_mark_processing(key, ts));
+    }
+
+    #[test]
+    fn smoke_forced_signal_bypasses_persisted_completed_guard_only_when_enabled() {
+        assert!(should_bypass_persisted_processed_guard_from_env(Some(
+            "buy"
+        )));
+        assert!(should_bypass_persisted_processed_guard_from_env(Some(
+            "short"
+        )));
+        assert!(!should_bypass_persisted_processed_guard_from_env(None));
+        assert!(!should_bypass_persisted_processed_guard_from_env(Some("")));
+        assert!(!should_bypass_persisted_processed_guard_from_env(Some(
+            "false"
+        )));
+        assert!(!should_bypass_persisted_processed_guard_from_env(Some(
+            "off"
+        )));
     }
 
     #[tokio::test]

@@ -7,9 +7,9 @@
 use anyhow::{anyhow, Result};
 use tracing::{debug, error, info, warn};
 
+use crate::market::get_confirmed_candles_for_backtest;
 use rust_quant_common::CandleItem;
 use rust_quant_domain::StrategyConfig;
-use rust_quant_market::models::{CandlesModel, SelectCandleReqDto};
 use rust_quant_strategies::framework::strategy_registry::get_strategy_registry;
 
 /// 策略数据服务
@@ -103,22 +103,13 @@ impl StrategyDataService {
             .map_err(|e| anyhow!("获取策略执行器失败: {}", e))?;
 
         // 2. 加载历史K线数据
-        let candles_model = CandlesModel::new();
         let warmup_limit = Self::determine_warmup_limit(&config.parameters);
-        let dto = SelectCandleReqDto {
-            inst_id: inst_id.clone(),
-            time_interval: period.to_string(),
-            limit: warmup_limit,
-            select_time: None,
-            confirm: Some(1), // 只获取已确认的K线
-        };
         info!(
             "预热K线数量: inst_id={}, period={}, limit={}",
             inst_id, period, warmup_limit
         );
 
-        let mut candles = candles_model
-            .get_all(dto)
+        let mut candles = get_confirmed_candles_for_backtest(inst_id, period, warmup_limit, None)
             .await
             .map_err(|e| anyhow!("加载历史K线失败: {}", e))?;
 

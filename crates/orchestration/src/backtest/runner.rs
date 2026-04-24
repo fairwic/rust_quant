@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
@@ -10,17 +10,20 @@ use crate::workflow::progress_manager::{
     NweRandomStrategyConfig, RandomStrategyConfig, StrategyProgressManager,
 };
 use crate::workflow::strategy_config::{
-    get_nwe_strategy_config_from_db, get_strategy_config_from_db, BackTestConfig,
+    get_nwe_strategy_config_from_db_with_selector, get_strategy_config_from_db_with_selector,
+    BackTestConfig,
 };
 
 use rust_quant_core::database::get_db_pool;
 use rust_quant_infrastructure::repositories::{
-    SqlxAuditRepository, SqlxBacktestRepository, SqlxCandleRepository, SqlxStrategyConfigRepository,
+    PostgresStrategyConfigRepository, SqlxAuditRepository, SqlxBacktestRepository,
+    SqlxCandleRepository, SqlxStrategyConfigRepository,
 };
 use rust_quant_market::models::{SelectTime, TimeDirect};
 use rust_quant_services::market::CandleService;
 use rust_quant_services::strategy::{BacktestService, StrategyConfigService};
 use rust_quant_strategies::implementations::nwe_strategy::NweStrategy;
+use sqlx::postgres::PgPoolOptions;
 
 /// 回测运行器
 ///
@@ -51,8 +54,7 @@ impl BacktestRunner {
         let candle_repo = SqlxCandleRepository::new(pool.clone());
         let candle_service = Arc::new(CandleService::new(Box::new(candle_repo)));
 
-        let config_repo = SqlxStrategyConfigRepository::new(pool);
-        let config_service = StrategyConfigService::new(Box::new(config_repo));
+        let config_service = create_strategy_config_service(pool)?;
 
         let executor = Arc::new(BacktestExecutor::new(backtest_service, candle_service));
 
@@ -66,11 +68,19 @@ impl BacktestRunner {
     ///
     /// 根据环境变量控制随机/指定模式，遍历 inst_id 与 period 组合执行回测
     pub async fn run(&self, targets: &[(String, String)]) -> Result<()> {
+        self.run_with_config(targets, BackTestConfig::default())
+            .await
+    }
+
+    /// 执行回测任务，允许调用方显式传入回测模式和数据范围。
+    pub async fn run_with_config(
+        &self,
+        targets: &[(String, String)],
+        config: BackTestConfig,
+    ) -> Result<()> {
         if targets.is_empty() {
             return Err(anyhow!("未提供任何回测目标"));
         }
-
-        let config = BackTestConfig::default();
 
         let mut success = 0usize;
 
@@ -100,12 +110,61 @@ impl BacktestRunner {
     }
 }
 
+fn create_strategy_config_service(
+    mysql_pool: sqlx::Pool<sqlx::MySql>,
+) -> Result<StrategyConfigService> {
+    if should_use_quant_core_strategy_configs()? {
+        let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
+            .context("STRATEGY_CONFIG_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")?;
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect_lazy(&database_url)
+            .context("创建 quant_core Postgres strategy_configs 连接池失败")?;
+        info!("📚 回测策略配置来源: quant_core.strategy_configs");
+        return Ok(StrategyConfigService::new(Box::new(
+            PostgresStrategyConfigRepository::new(pool),
+        )));
+    }
+
+    info!("📚 回测策略配置来源: legacy MySQL strategy_config");
+    Ok(StrategyConfigService::new(Box::new(
+        SqlxStrategyConfigRepository::new(mysql_pool),
+    )))
+}
+
+fn should_use_quant_core_strategy_configs() -> Result<bool> {
+    let source = std::env::var("STRATEGY_CONFIG_SOURCE")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if source == "mysql" || source == "legacy_mysql" {
+        return Ok(false);
+    }
+    if source == "quant_core" || source == "postgres" {
+        return Ok(true);
+    }
+    if !source.is_empty() {
+        return Err(anyhow!("不支持的 STRATEGY_CONFIG_SOURCE: {}", source));
+    }
+    Ok(std::env::var("QUANT_CORE_DATABASE_URL")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false))
+}
+
 /// 回测执行入口（兼容性函数）
 ///
 /// 根据环境变量控制随机/指定模式，遍历 inst_id 与 period 组合执行回测
 pub async fn run_backtest_runner(targets: &[(String, String)]) -> Result<()> {
     let runner = BacktestRunner::new()?;
     runner.run(targets).await
+}
+
+pub async fn run_backtest_runner_with_config(
+    targets: &[(String, String)],
+    config: BackTestConfig,
+) -> Result<()> {
+    let runner = BacktestRunner::new()?;
+    runner.run_with_config(targets, config).await
 }
 
 impl BacktestRunner {
@@ -304,7 +363,13 @@ impl BacktestRunner {
             .load_and_convert_candle_data(inst_id, period, config.candle_limit, None)
             .await?;
 
-        let pairs = get_nwe_strategy_config_from_db(&self.config_service, inst_id, period).await?;
+        let pairs = get_nwe_strategy_config_from_db_with_selector(
+            &self.config_service,
+            inst_id,
+            period,
+            config.strategy_config_id.as_deref(),
+        )
+        .await?;
         if pairs.is_empty() {
             warn!(
                 "[NWE 指定] 未找到策略配置，跳过 inst_id={}, period={}",
@@ -486,8 +551,13 @@ impl BacktestRunner {
             inst_id, period
         );
 
-        let params_batch =
-            get_strategy_config_from_db(&self.config_service, inst_id, period).await?;
+        let params_batch = get_strategy_config_from_db_with_selector(
+            &self.config_service,
+            inst_id,
+            period,
+            config.strategy_config_id.as_deref(),
+        )
+        .await?;
         if params_batch.is_empty() {
             warn!(
                 "[Vegas 指定] 未找到策略配置，跳过 inst_id={}, period={}",
@@ -589,8 +659,12 @@ fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig
 #[cfg(test)]
 mod tests {
     use super::derive_select_time;
+    use super::should_use_quant_core_strategy_configs;
     use crate::workflow::job_param_generator::ParamMergeBuilder;
     use rust_quant_market::models::TimeDirect;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn derive_select_time_uses_min_start_and_max_end() {
@@ -614,5 +688,54 @@ mod tests {
     fn derive_select_time_returns_none_when_unset() {
         let params = vec![ParamMergeBuilder::build()];
         assert!(derive_select_time(&params).is_none());
+    }
+
+    #[test]
+    fn quant_core_strategy_config_source_honors_explicit_env() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
+        let original_quant_core_url = std::env::var("QUANT_CORE_DATABASE_URL").ok();
+
+        std::env::set_var("STRATEGY_CONFIG_SOURCE", "quant_core");
+        std::env::remove_var("QUANT_CORE_DATABASE_URL");
+        assert!(should_use_quant_core_strategy_configs().expect("quant_core source"));
+
+        std::env::set_var("STRATEGY_CONFIG_SOURCE", "mysql");
+        std::env::set_var("QUANT_CORE_DATABASE_URL", "postgres://ignored");
+        assert!(!should_use_quant_core_strategy_configs().expect("mysql source"));
+
+        restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
+        restore_env(
+            "QUANT_CORE_DATABASE_URL",
+            original_quant_core_url.as_deref(),
+        );
+    }
+
+    #[test]
+    fn quant_core_strategy_config_source_falls_back_to_database_url() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
+        let original_quant_core_url = std::env::var("QUANT_CORE_DATABASE_URL").ok();
+
+        std::env::remove_var("STRATEGY_CONFIG_SOURCE");
+        std::env::set_var("QUANT_CORE_DATABASE_URL", "postgres://quant-core");
+        assert!(should_use_quant_core_strategy_configs().expect("quant_core url"));
+
+        std::env::set_var("QUANT_CORE_DATABASE_URL", "   ");
+        assert!(!should_use_quant_core_strategy_configs().expect("blank quant_core url"));
+
+        restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
+        restore_env(
+            "QUANT_CORE_DATABASE_URL",
+            original_quant_core_url.as_deref(),
+        );
+    }
+
+    fn restore_env(key: &str, value: Option<&str>) {
+        if let Some(value) = value {
+            std::env::set_var(key, value);
+        } else {
+            std::env::remove_var(key);
+        }
     }
 }

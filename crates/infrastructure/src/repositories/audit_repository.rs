@@ -8,6 +8,8 @@ use rust_quant_domain::entities::{
 };
 use rust_quant_domain::traits::AuditLogRepository;
 
+const AUDIT_LOG_INSERT_CHUNK_ROWS: usize = 1_000;
+
 pub struct SqlxAuditRepository {
     pool: Pool<MySql>,
 }
@@ -49,19 +51,24 @@ impl AuditLogRepository for SqlxAuditRepository {
             return Ok(0);
         }
 
-        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO signal_snapshot_log (run_id, kline_ts, filtered, filter_reasons, signal_json) ",
-        );
-        builder.push_values(snapshots.iter(), |mut b, s| {
-            b.push_bind(&s.run_id)
-                .push_bind(s.kline_ts)
-                .push_bind(if s.filtered { 1 } else { 0 })
-                .push_bind(&s.filter_reasons)
-                .push_bind(&s.signal_json);
-        });
+        let mut rows_affected = 0;
+        for chunk in snapshots.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
+            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                "INSERT INTO signal_snapshot_log (run_id, kline_ts, filtered, filter_reasons, signal_json) ",
+            );
+            builder.push_values(chunk.iter(), |mut b, s| {
+                b.push_bind(&s.run_id)
+                    .push_bind(s.kline_ts)
+                    .push_bind(if s.filtered { 1 } else { 0 })
+                    .push_bind(&s.filter_reasons)
+                    .push_bind(&s.signal_json);
+            });
 
-        let result = builder.build().execute(self.pool()).await?;
-        Ok(result.rows_affected())
+            let result = builder.build().execute(self.pool()).await?;
+            rows_affected += result.rows_affected();
+        }
+
+        Ok(rows_affected)
     }
 
     async fn insert_risk_decisions(&self, decisions: &[RiskDecisionLog]) -> Result<u64> {
@@ -69,18 +76,23 @@ impl AuditLogRepository for SqlxAuditRepository {
             return Ok(0);
         }
 
-        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO risk_decision_log (run_id, kline_ts, decision, reason, risk_json) ",
-        );
-        builder.push_values(decisions.iter(), |mut b, d| {
-            b.push_bind(&d.run_id)
-                .push_bind(d.kline_ts)
-                .push_bind(&d.decision)
-                .push_bind(&d.reason)
-                .push_bind(&d.risk_json);
-        });
-        let result = builder.build().execute(self.pool()).await?;
-        Ok(result.rows_affected())
+        let mut rows_affected = 0;
+        for chunk in decisions.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
+            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                "INSERT INTO risk_decision_log (run_id, kline_ts, decision, reason, risk_json) ",
+            );
+            builder.push_values(chunk.iter(), |mut b, d| {
+                b.push_bind(&d.run_id)
+                    .push_bind(d.kline_ts)
+                    .push_bind(&d.decision)
+                    .push_bind(&d.reason)
+                    .push_bind(&d.risk_json);
+            });
+            let result = builder.build().execute(self.pool()).await?;
+            rows_affected += result.rows_affected();
+        }
+
+        Ok(rows_affected)
     }
 
     async fn insert_order_decisions(&self, decisions: &[OrderDecisionLog]) -> Result<u64> {
@@ -88,19 +100,24 @@ impl AuditLogRepository for SqlxAuditRepository {
             return Ok(0);
         }
 
-        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO order_decision_log (run_id, kline_ts, side, size, price, decision_json) ",
-        );
-        builder.push_values(decisions.iter(), |mut b, d| {
-            b.push_bind(&d.run_id)
-                .push_bind(d.kline_ts)
-                .push_bind(&d.side)
-                .push_bind(d.size)
-                .push_bind(d.price)
-                .push_bind(&d.decision_json);
-        });
-        let result = builder.build().execute(self.pool()).await?;
-        Ok(result.rows_affected())
+        let mut rows_affected = 0;
+        for chunk in decisions.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
+            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                "INSERT INTO order_decision_log (run_id, kline_ts, side, size, price, decision_json) ",
+            );
+            builder.push_values(chunk.iter(), |mut b, d| {
+                b.push_bind(&d.run_id)
+                    .push_bind(d.kline_ts)
+                    .push_bind(&d.side)
+                    .push_bind(d.size)
+                    .push_bind(d.price)
+                    .push_bind(&d.decision_json);
+            });
+            let result = builder.build().execute(self.pool()).await?;
+            rows_affected += result.rows_affected();
+        }
+
+        Ok(rows_affected)
     }
 
     async fn insert_order_state_logs(&self, states: &[OrderStateLog]) -> Result<u64> {
@@ -108,18 +125,23 @@ impl AuditLogRepository for SqlxAuditRepository {
             return Ok(0);
         }
 
-        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO order_state_log (order_id, from_state, to_state, reason, ts) ",
-        );
-        builder.push_values(states.iter(), |mut b, s| {
-            b.push_bind(s.order_id)
-                .push_bind(&s.from_state)
-                .push_bind(&s.to_state)
-                .push_bind(&s.reason)
-                .push_bind(s.ts);
-        });
-        let result = builder.build().execute(self.pool()).await?;
-        Ok(result.rows_affected())
+        let mut rows_affected = 0;
+        for chunk in states.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
+            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                "INSERT INTO order_state_log (order_id, from_state, to_state, reason, ts) ",
+            );
+            builder.push_values(chunk.iter(), |mut b, s| {
+                b.push_bind(s.order_id)
+                    .push_bind(&s.from_state)
+                    .push_bind(&s.to_state)
+                    .push_bind(&s.reason)
+                    .push_bind(s.ts);
+            });
+            let result = builder.build().execute(self.pool()).await?;
+            rows_affected += result.rows_affected();
+        }
+
+        Ok(rows_affected)
     }
 
     async fn insert_position_snapshots(&self, positions: &[PositionSnapshot]) -> Result<u64> {
@@ -127,22 +149,27 @@ impl AuditLogRepository for SqlxAuditRepository {
             return Ok(0);
         }
 
-        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO positions (run_id, strategy_id, inst_id, side, qty, avg_price, unrealized_pnl, realized_pnl, status) ",
-        );
-        builder.push_values(positions.iter(), |mut b, p| {
-            b.push_bind(&p.run_id)
-                .push_bind(&p.strategy_id)
-                .push_bind(&p.inst_id)
-                .push_bind(&p.side)
-                .push_bind(p.qty)
-                .push_bind(p.avg_price)
-                .push_bind(p.unrealized_pnl)
-                .push_bind(p.realized_pnl)
-                .push_bind(&p.status);
-        });
-        let result = builder.build().execute(self.pool()).await?;
-        Ok(result.rows_affected())
+        let mut rows_affected = 0;
+        for chunk in positions.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
+            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                "INSERT INTO positions (run_id, strategy_id, inst_id, side, qty, avg_price, unrealized_pnl, realized_pnl, status) ",
+            );
+            builder.push_values(chunk.iter(), |mut b, p| {
+                b.push_bind(&p.run_id)
+                    .push_bind(&p.strategy_id)
+                    .push_bind(&p.inst_id)
+                    .push_bind(&p.side)
+                    .push_bind(p.qty)
+                    .push_bind(p.avg_price)
+                    .push_bind(p.unrealized_pnl)
+                    .push_bind(p.realized_pnl)
+                    .push_bind(&p.status);
+            });
+            let result = builder.build().execute(self.pool()).await?;
+            rows_affected += result.rows_affected();
+        }
+
+        Ok(rows_affected)
     }
 
     async fn insert_portfolio_snapshots(&self, snapshots: &[PortfolioSnapshot]) -> Result<u64> {
@@ -150,18 +177,36 @@ impl AuditLogRepository for SqlxAuditRepository {
             return Ok(0);
         }
 
-        let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
-            "INSERT INTO portfolio_snapshot_log (run_id, total_equity, available, margin, pnl, ts) ",
-        );
-        builder.push_values(snapshots.iter(), |mut b, s| {
-            b.push_bind(&s.run_id)
-                .push_bind(s.total_equity)
-                .push_bind(s.available)
-                .push_bind(s.margin)
-                .push_bind(s.pnl)
-                .push_bind(s.ts);
-        });
-        let result = builder.build().execute(self.pool()).await?;
-        Ok(result.rows_affected())
+        let mut rows_affected = 0;
+        for chunk in snapshots.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
+            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+                "INSERT INTO portfolio_snapshot_log (run_id, total_equity, available, margin, pnl, ts) ",
+            );
+            builder.push_values(chunk.iter(), |mut b, s| {
+                b.push_bind(&s.run_id)
+                    .push_bind(s.total_equity)
+                    .push_bind(s.available)
+                    .push_bind(s.margin)
+                    .push_bind(s.pnl)
+                    .push_bind(s.ts);
+            });
+            let result = builder.build().execute(self.pool()).await?;
+            rows_affected += result.rows_affected();
+        }
+
+        Ok(rows_affected)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AUDIT_LOG_INSERT_CHUNK_ROWS;
+
+    #[test]
+    fn audit_log_insert_chunk_keeps_mysql_bind_count_below_limit() {
+        const MYSQL_BIND_PARAM_LIMIT: usize = 65_535;
+        const MAX_AUDIT_INSERT_COLUMNS: usize = 9;
+
+        assert!(AUDIT_LOG_INSERT_CHUNK_ROWS * MAX_AUDIT_INSERT_COLUMNS < MYSQL_BIND_PARAM_LIMIT);
     }
 }

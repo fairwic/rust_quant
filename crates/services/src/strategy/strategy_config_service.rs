@@ -50,6 +50,17 @@ impl StrategyConfigService {
             .ok_or_else(|| anyhow!("策略配置不存在: {}", config_id))
     }
 
+    /// 根据 Admin/API 传入的外部ID加载策略配置。
+    pub async fn load_config_by_external_id(&self, config_id: &str) -> Result<StrategyConfig> {
+        let config_id = config_id.trim();
+        info!("加载策略配置: external_config_id={}", config_id);
+
+        self.repository
+            .find_by_external_id(config_id)
+            .await?
+            .ok_or_else(|| anyhow!("策略配置不存在: {}", config_id))
+    }
+
     /// 加载所有启用的策略配置
     pub async fn load_all_enabled_configs(&self) -> Result<Vec<StrategyConfig>> {
         let configs = self.repository.find_all_enabled().await?;

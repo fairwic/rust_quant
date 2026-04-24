@@ -1,6 +1,7 @@
 //! 领域接口模块
 //!
 //! 定义领域层的抽象接口，由基础设施层实现
+pub mod exchange_symbol_repository;
 pub mod external_market_snapshot_repository;
 pub mod fund_monitoring_repository;
 pub mod funding_rate_repository;
@@ -13,6 +14,7 @@ pub mod exchange_trait;
 pub mod repository_trait;
 pub mod strategy_trait;
 
+pub use exchange_symbol_repository::ExchangeSymbolRepository;
 pub use exchange_trait::{
     ExchangeAccount, ExchangeContracts, ExchangeMarketData, ExchangePublicData,
 };

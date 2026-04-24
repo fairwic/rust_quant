@@ -47,11 +47,17 @@ pub mod exchange;
 pub mod market;
 pub mod notification;
 pub mod risk;
+pub mod rust_quan_web;
 pub mod strategy;
 pub mod trading;
 
 // 重新导出常用服务
-pub use exchange::ExchangeApiService;
+pub use exchange::{CryptoExcAllGateway, ExchangeApiService, OrderPlacementRequest};
 pub use risk::RiskManagementService;
+pub use rust_quan_web::{
+    ExecutionOrderTask, ExecutionTask, ExecutionTaskClient, ExecutionTaskConfig,
+    ExecutionTaskLease, ExecutionTaskLeaseRequest, ExecutionTaskReportRequest,
+    ExecutionTaskReportResponse, ExecutionWorker, ExecutionWorkerConfig, UserExchangeConfig,
+};
 pub use strategy::{StrategyConfigService, StrategyExecutionService};
 pub use trading::OrderCreationService;

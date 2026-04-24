@@ -9,8 +9,11 @@ use anyhow::Result;
 use tracing::{error, info};
 
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
-use rust_quant_infrastructure::repositories::SqlxCandleRepository;
-use rust_quant_services::market::{CandleService as CandleMarketService, DataSyncService};
+use rust_quant_infrastructure::repositories::{PostgresCandleRepository, SqlxCandleRepository};
+use rust_quant_services::market::{
+    should_use_quant_core_candle_source, CandleService as CandleMarketService, DataSyncService,
+};
+use sqlx::postgres::PgPoolOptions;
 use std::str::FromStr;
 
 /// K线数据同步任务
@@ -41,10 +44,21 @@ impl CandlesJob {
     ///
     /// # Architecture
     /// 统一创建 CandleService 实例，使用依赖注入模式
-    fn create_candle_service() -> CandleMarketService {
+    fn create_candle_service() -> Result<CandleMarketService> {
+        if should_use_quant_core_candle_source()? {
+            let database_url = std::env::var("QUANT_CORE_DATABASE_URL").map_err(|_| {
+                anyhow::anyhow!("CANDLE_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")
+            })?;
+            let pool = PgPoolOptions::new()
+                .max_connections(5)
+                .connect_lazy(&database_url)?;
+            let repository = PostgresCandleRepository::new(pool);
+            return Ok(CandleMarketService::new(Box::new(repository)));
+        }
+
         let pool = rust_quant_core::database::get_db_pool();
         let repository = SqlxCandleRepository::new(pool.clone());
-        CandleMarketService::new(Box::new(repository))
+        Ok(CandleMarketService::new(Box::new(repository)))
     }
 
     /// 同步最新的K线数据
@@ -62,7 +76,7 @@ impl CandlesJob {
             periods.len()
         );
 
-        let service = Self::create_candle_service();
+        let service = Self::create_candle_service()?;
 
         for inst_id in inst_ids {
             for period in periods {
@@ -105,21 +119,38 @@ impl CandlesJob {
             None
         };
 
-        let okx_candles = service
-            .fetch_candles_from_exchange(inst_id, period, after_str.as_deref(), None, Some("100"))
-            .await?;
+        let domain_candles = if market_data_exchange() == "binance" {
+            let after =
+                after_ts
+                    .checked_add(1)
+                    .and_then(|ts| if ts > 1 { Some(ts as u64) } else { None });
+            service
+                .fetch_candles_from_crypto_exc_all("binance", inst_id, period, after, None, 100)
+                .await?
+        } else {
+            let okx_candles = service
+                .fetch_candles_from_exchange(
+                    inst_id,
+                    period,
+                    after_str.as_deref(),
+                    None,
+                    Some("100"),
+                )
+                .await?;
 
-        if okx_candles.is_empty() {
+            if okx_candles.is_empty() {
+                return Ok(0);
+            }
+
+            okx_candles
+                .iter()
+                .map(|dto| Self::convert_okx_to_domain(dto, inst_id, timeframe))
+                .collect::<Result<Vec<Candle>>>()?
+        };
+
+        if domain_candles.is_empty() {
             return Ok(0);
         }
-
-        // 4. 转换OKX DTO到Domain Candle
-        let domain_candles: Result<Vec<Candle>> = okx_candles
-            .iter()
-            .map(|dto| Self::convert_okx_to_domain(dto, inst_id, timeframe))
-            .collect();
-
-        let domain_candles = domain_candles?;
 
         // 5. 批量保存到数据库
         let saved_count = service.save_candles(domain_candles).await?;
@@ -224,6 +255,14 @@ impl Default for CandlesJob {
     }
 }
 
+fn market_data_exchange() -> String {
+    std::env::var("MARKET_DATA_EXCHANGE")
+        .or_else(|_| std::env::var("DEFAULT_EXCHANGE"))
+        .unwrap_or_else(|_| "okx".to_string())
+        .trim()
+        .to_ascii_lowercase()
+}
+
 /// 并发同步多个交易对的K线
 ///
 /// # Arguments
@@ -261,6 +300,7 @@ pub async fn sync_candles_concurrent(
             let service = CandlesJob::create_candle_service();
             let job = CandlesJob::new();
             async move {
+                let service = service?;
                 job.sync_single_candle_latest(&service, &inst_id, &period)
                     .await
             }

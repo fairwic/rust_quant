@@ -2,14 +2,15 @@
 //!  
 //! 简化版本 - 只保留核心功能
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use rust_quant_core::config::env_is_true;
 use rust_quant_core::database::get_db_pool;
 use rust_quant_domain::{StrategyConfig, StrategyType};
 use rust_quant_infrastructure::external_data::DuneQueryPerformance;
 use rust_quant_infrastructure::repositories::{
-    SqlxStrategyConfigRepository, SqlxSwapOrderRepository,
+    PostgresStrategyConfigRepository, SqlxStrategyConfigRepository, SqlxSwapOrderRepository,
 };
+use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -18,8 +19,12 @@ use rust_quant_orchestration::workflow::{
     backtest_runner, data_sync, external_market_sync_job::ExternalMarketSyncJob, funding_rate_job,
     tickets_job,
 };
+use rust_quant_services::market::get_confirmed_candles_for_backtest;
+use rust_quant_services::rust_quan_web::ExecutionWorker;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use std::collections::{BTreeSet, HashMap};
+
+use crate::app::internal_server;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DuneSyncRequest {
@@ -32,6 +37,10 @@ struct DuneSyncRequest {
 
 /// 运行基于环境变量控制的各个模式
 pub async fn run_modes() -> Result<()> {
+    if env_is_true("IS_RUN_INTERNAL_SERVER", false) {
+        return internal_server::run_internal_server().await;
+    }
+
     let env = match std::env::var("APP_ENV") {
         Ok(v) if !v.is_empty() => v,
         _ => "local".to_string(),
@@ -98,10 +107,23 @@ pub async fn run_modes() -> Result<()> {
             .map(|(_, period)| period.clone())
             .collect(),
     );
+    let periods = if env_is_true("IS_RUN_SYNC_DATA_JOB", false) {
+        override_periods_from_csv(periods, std::env::var("SYNC_ONLY_PERIODS").ok().as_deref())
+    } else {
+        periods
+    };
 
     info!(" 监控交易对: {:?}", inst_ids);
     info!("🕒 监控周期: {:?}", periods);
     info!("🎯 回测目标: {:?}", backtest_targets);
+
+    // 0) rust_quan_web 执行任务 worker
+    if env_is_true("IS_RUN_EXECUTION_WORKER", false) {
+        run_execution_worker_from_env().await?;
+        if env_is_true("EXECUTION_WORKER_ONLY", true) {
+            return Ok(());
+        }
+    }
 
     // 1) 数据同步任务（Ticker & Funding Rate）
     if env_is_true("IS_RUN_SYNC_DATA_JOB", false) {
@@ -167,7 +189,7 @@ pub async fn run_modes() -> Result<()> {
     if env_is_true("IS_RUN_REAL_STRATEGY", false) {
         info!("🤖 实盘策略模式已启用");
 
-        let config_service = Arc::new(create_strategy_config_service());
+        let config_service = Arc::new(create_strategy_config_service()?);
         let swap_order_repo = Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
         let execution_service = Arc::new(StrategyExecutionService::new(swap_order_repo));
 
@@ -189,14 +211,22 @@ pub async fn run_modes() -> Result<()> {
         } else {
             (inst_ids.clone(), periods.clone())
         };
+        let market_exchange = derive_market_data_exchange_from_configs(
+            &live_runtime_configs,
+            Some(&market_data_exchange()),
+        )
+        .unwrap_or_else(|| market_data_exchange());
 
         info!("🌐 WebSocket模式已启用");
-        info!("📡 启动WebSocket监听: {:?}", ws_inst_ids);
+        info!(
+            "📡 启动WebSocket监听: exchange={}, targets={:?}",
+            market_exchange, ws_inst_ids
+        );
 
         let (config_service, execution_service) = match live_runtime_services {
             Some((config_service, execution_service)) => (config_service, execution_service),
             None => {
-                let config_service = Arc::new(create_strategy_config_service());
+                let config_service = Arc::new(create_strategy_config_service()?);
                 let swap_order_repo = Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
                 let execution_service = Arc::new(StrategyExecutionService::new(swap_order_repo));
                 (config_service, execution_service)
@@ -205,10 +235,44 @@ pub async fn run_modes() -> Result<()> {
 
         // 注意：WebSocket 客户端内部包含 !Send 的锁卫（okx crate），不能用 tokio::spawn
         // 长期运行逻辑由 run() 通过 select! 方式与信号处理并行编排
-        run_websocket(&ws_inst_ids, &ws_periods, config_service, execution_service).await;
+        run_websocket(
+            &ws_inst_ids,
+            &ws_periods,
+            &market_exchange,
+            config_service,
+            execution_service,
+        )
+        .await;
     }
 
     Ok(())
+}
+
+async fn run_execution_worker_from_env() -> Result<()> {
+    let worker = ExecutionWorker::from_env()?;
+    let run_once = env_is_true("EXECUTION_WORKER_RUN_ONCE", true);
+    let poll_interval_secs = std::env::var("EXECUTION_WORKER_POLL_INTERVAL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(5);
+
+    if run_once {
+        let handled = worker.run_once().await?;
+        info!("🧾 执行任务 worker 单轮完成: handled={}", handled);
+        return Ok(());
+    }
+
+    info!(
+        "🧾 执行任务 worker 轮询启动: interval={}s",
+        poll_interval_secs
+    );
+    loop {
+        match worker.run_once().await {
+            Ok(handled) => info!("🧾 执行任务 worker 轮询完成: handled={}", handled),
+            Err(error) => error!("❌ 执行任务 worker 轮询失败: {}", error),
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(poll_interval_secs)).await;
+    }
 }
 
 async fn run_dune_sync_jobs_from_env() -> Result<()> {
@@ -364,6 +428,26 @@ fn default_backtest_targets() -> Vec<(String, String)> {
     ]
 }
 
+fn override_periods_from_csv(periods: Vec<String>, raw: Option<&str>) -> Vec<String> {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return periods;
+    };
+
+    let overridden = dedup_strings(
+        raw.split(',')
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .collect(),
+    );
+
+    if overridden.is_empty() {
+        periods
+    } else {
+        overridden
+    }
+}
+
 fn dedup_strings(values: Vec<String>) -> Vec<String> {
     let mut set = BTreeSet::new();
     for value in values {
@@ -386,14 +470,47 @@ fn derive_ws_targets_from_configs(configs: &[StrategyConfig]) -> (Vec<String>, V
 }
 
 /// 创建策略配置服务实例（依赖注入）
-fn create_strategy_config_service() -> StrategyConfigService {
+fn create_strategy_config_service() -> Result<StrategyConfigService> {
+    if should_use_quant_core_strategy_configs()? {
+        let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
+            .context("STRATEGY_CONFIG_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")?;
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect_lazy(&database_url)
+            .context("创建 quant_core Postgres strategy_configs 连接池失败")?;
+        info!("📚 策略配置来源: quant_core.strategy_configs");
+        return Ok(StrategyConfigService::new(Box::new(
+            PostgresStrategyConfigRepository::new(pool),
+        )));
+    }
+
     let pool = get_db_pool().clone();
     let repository = SqlxStrategyConfigRepository::new(pool);
-    StrategyConfigService::new(Box::new(repository))
+    info!("📚 策略配置来源: legacy MySQL strategy_config");
+    Ok(StrategyConfigService::new(Box::new(repository)))
+}
+
+fn should_use_quant_core_strategy_configs() -> Result<bool> {
+    let source = std::env::var("STRATEGY_CONFIG_SOURCE")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if source == "mysql" || source == "legacy_mysql" {
+        return Ok(false);
+    }
+    if source == "quant_core" || source == "postgres" {
+        return Ok(true);
+    }
+    if !source.is_empty() {
+        return Err(anyhow!("不支持的 STRATEGY_CONFIG_SOURCE: {}", source));
+    }
+    Ok(std::env::var("QUANT_CORE_DATABASE_URL")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false))
 }
 
 async fn load_backtest_targets_from_db() -> Result<Vec<(String, String)>> {
-    let service = create_strategy_config_service();
+    let service = create_strategy_config_service()?;
     let configs = service.load_all_enabled_configs().await?;
 
     let targets: Vec<(String, String)> = configs
@@ -424,6 +541,7 @@ async fn load_backtest_targets_from_db() -> Result<Vec<(String, String)>> {
 async fn run_websocket(
     inst_ids: &[String],
     periods: &[String],
+    market_exchange: &str,
     config_service: Arc<StrategyConfigService>,
     execution_service: Arc<StrategyExecutionService>,
 ) {
@@ -465,8 +583,99 @@ async fn run_websocket(
     let periods_vec: Vec<String> = periods.to_vec();
 
     // 使用带策略触发的 WebSocket 服务
-    streams::run_socket_with_strategy_trigger(&inst_ids_vec, &periods_vec, Some(strategy_trigger))
+    if market_exchange == "binance" {
+        if let Err(error) = rust_quant_services::market::binance_websocket::run_binance_websocket_with_strategy_trigger(
+            &inst_ids_vec,
+            &periods_vec,
+            Some(strategy_trigger),
+        )
+        .await
+        {
+            error!("❌ Binance WebSocket启动失败: {}", error);
+        }
+    } else {
+        streams::run_socket_with_strategy_trigger(
+            &inst_ids_vec,
+            &periods_vec,
+            Some(strategy_trigger),
+        )
         .await;
+    }
+}
+
+fn market_data_exchange() -> String {
+    std::env::var("MARKET_DATA_EXCHANGE")
+        .or_else(|_| std::env::var("DEFAULT_EXCHANGE"))
+        .unwrap_or_else(|_| "okx".to_string())
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn derive_market_data_exchange_from_configs(
+    configs: &[StrategyConfig],
+    fallback: Option<&str>,
+) -> Option<String> {
+    let exchanges = dedup_strings(
+        configs
+            .iter()
+            .filter_map(|config| config.exchange.as_deref())
+            .map(|exchange| exchange.trim().to_ascii_lowercase())
+            .filter(|exchange| !exchange.is_empty() && exchange != "all")
+            .collect(),
+    );
+
+    match exchanges.as_slice() {
+        [] => fallback
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty()),
+        [exchange] => Some(exchange.clone()),
+        multiple => {
+            warn!(
+                "⚠️  检测到多交易所实时策略配置，当前 WebSocket 仅使用单一数据源: {:?}",
+                multiple
+            );
+            fallback
+                .map(|value| value.trim().to_ascii_lowercase())
+                .filter(|value| !value.is_empty())
+        }
+    }
+}
+
+fn csv_filter_values(raw: Option<String>) -> BTreeSet<String> {
+    raw.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn filter_live_strategy_configs(configs: Vec<StrategyConfig>) -> Vec<StrategyConfig> {
+    let inst_ids = csv_filter_values(std::env::var("LIVE_STRATEGY_ONLY_INST_IDS").ok());
+    let periods = csv_filter_values(std::env::var("LIVE_STRATEGY_ONLY_PERIODS").ok());
+
+    if inst_ids.is_empty() && periods.is_empty() {
+        return configs;
+    }
+
+    let before = configs.len();
+    let filtered: Vec<StrategyConfig> = configs
+        .into_iter()
+        .filter(|config| {
+            (inst_ids.is_empty() || inst_ids.contains(&config.symbol))
+                && (periods.is_empty() || periods.contains(config.timeframe.as_str()))
+        })
+        .collect();
+
+    info!(
+        "🎯 实时策略过滤后剩余: before={}, after={}, inst_ids={:?}, periods={:?}",
+        before,
+        filtered.len(),
+        inst_ids,
+        periods
+    );
+
+    filtered
 }
 
 /// 从数据库加载策略配置并启动
@@ -483,7 +692,7 @@ async fn start_strategies_from_db(
 ) -> Result<Vec<StrategyConfig>> {
     use rust_quant_domain::StrategyType;
     use rust_quant_domain::Timeframe;
-    use rust_quant_market::models::{CandlesEntity, CandlesModel, SelectCandleReqDto};
+    use rust_quant_market::models::CandlesEntity;
     use rust_quant_orchestration::workflow::strategy_runner;
     use rust_quant_services::strategy::StrategyDataService;
 
@@ -491,6 +700,7 @@ async fn start_strategies_from_db(
 
     // 1. 通过服务层加载启用的策略配置
     let configs = config_service.load_all_enabled_configs().await?;
+    let configs = filter_live_strategy_configs(configs);
 
     if configs.is_empty() {
         warn!("⚠️  未找到启用的策略配置");
@@ -570,22 +780,15 @@ async fn start_strategies_from_db(
                 timeframe.as_str(),
                 strategy_type
             );
+            started_configs.push(config.clone());
             continue;
         }
 
         let snap: Option<CandlesEntity> = {
-            let candles_model = CandlesModel::new();
-            let dto = SelectCandleReqDto {
-                inst_id: inst_id.clone(),
-                time_interval: timeframe.as_str().to_string(),
-                limit: 1,
-                select_time: None,
-                confirm: Some(1),
-            };
-            let mut candles = candles_model
-                .get_all(dto)
-                .await
-                .map_err(|e| anyhow!("加载最新确认K线失败: {}", e))?;
+            let mut candles =
+                get_confirmed_candles_for_backtest(&inst_id, timeframe.as_str(), 1, None)
+                    .await
+                    .map_err(|e| anyhow!("加载最新确认K线失败: {}", e))?;
             candles.sort_unstable_by_key(|a| a.ts);
             candles.pop()
         };
@@ -674,7 +877,8 @@ pub async fn run() -> Result<()> {
     // - 若开启 WebSocket：run_modes() 会长期阻塞，因此必须与信号处理并行 select!
     // - 若未开启 WebSocket：先跑完 run_modes()，再进入信号等待
     let open_socket = env_is_true("IS_OPEN_SOCKET", false);
-    if open_socket {
+    let internal_server = env_is_true("IS_RUN_INTERNAL_SERVER", false);
+    if open_socket || internal_server {
         // 注意：run_modes() 在 WebSocket 场景可能“阻塞”也可能“快速返回”（内部可能 spawn 任务后返回）。
         // 目标：无论 run_modes 是否返回，都必须持续等待退出信号。
         let mut run_modes_fut = Box::pin(run_modes());
@@ -733,6 +937,48 @@ pub async fn run() -> Result<()> {
         if backtest_only {
             heartbeat_handle.abort();
             info!("📈 回测模式已完成，未启用实时/Socket，直接优雅退出");
+            let shutdown_config = crate::GracefulShutdownConfig {
+                total_timeout_secs: 30,
+                strategy_stop_timeout_secs: 20,
+                scheduler_shutdown_timeout_secs: 5,
+                db_cleanup_timeout_secs: 5,
+            };
+            if let Err(e) = crate::graceful_shutdown_with_config(shutdown_config).await {
+                error!("❌ 优雅关闭失败: {}", e);
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+
+        let live_strategy_one_shot = env_is_true("IS_RUN_REAL_STRATEGY", false)
+            && !env_is_true("IS_OPEN_SOCKET", false)
+            && env_is_true("EXIT_AFTER_REAL_STRATEGY_ONESHOT", false);
+        if live_strategy_one_shot {
+            heartbeat_handle.abort();
+            info!("🤖 实时策略 one-shot 已完成，未启用 WebSocket，直接优雅退出");
+            let shutdown_config = crate::GracefulShutdownConfig {
+                total_timeout_secs: 30,
+                strategy_stop_timeout_secs: 20,
+                scheduler_shutdown_timeout_secs: 5,
+                db_cleanup_timeout_secs: 5,
+            };
+            if let Err(e) = crate::graceful_shutdown_with_config(shutdown_config).await {
+                error!("❌ 优雅关闭失败: {}", e);
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+
+        let execution_worker_once_only = env_is_true("IS_RUN_EXECUTION_WORKER", false)
+            && env_is_true("EXECUTION_WORKER_ONLY", true)
+            && env_is_true("EXECUTION_WORKER_RUN_ONCE", true)
+            && !env_is_true("IS_RUN_SYNC_DATA_JOB", false)
+            && !env_is_true("IS_BACK_TEST", false)
+            && !env_is_true("IS_OPEN_SOCKET", false)
+            && !env_is_true("IS_RUN_REAL_STRATEGY", false);
+        if execution_worker_once_only {
+            heartbeat_handle.abort();
+            info!("🧾 执行任务 worker 单轮完成，未启用其他长期模式，直接优雅退出");
             let shutdown_config = crate::GracefulShutdownConfig {
                 total_timeout_secs: 30,
                 strategy_stop_timeout_secs: 20,
@@ -846,6 +1092,7 @@ mod tests {
         StrategyConfig {
             id,
             strategy_type: StrategyType::Vegas,
+            exchange: None,
             symbol: symbol.to_string(),
             timeframe,
             status: StrategyStatus::Running,
@@ -884,6 +1131,17 @@ mod tests {
     }
 
     #[test]
+    fn test_derive_market_data_exchange_from_configs_prefers_strategy_exchange() {
+        let mut config = test_config(1, "ETH-USDT-SWAP", Timeframe::H4);
+        config.exchange = Some("binance".to_string());
+
+        assert_eq!(
+            derive_market_data_exchange_from_configs(&[config], Some("okx")),
+            Some("binance".to_string())
+        );
+    }
+
+    #[test]
     fn test_default_backtest_targets_only_keep_eth_btc_sol_for_4h() {
         let targets = default_backtest_targets();
         assert_eq!(
@@ -894,6 +1152,24 @@ mod tests {
                 ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn test_override_periods_from_csv_replaces_default_periods() {
+        let periods = vec!["4H".to_string(), "1H".to_string()];
+
+        let overridden = override_periods_from_csv(periods, Some("1m,4H"));
+
+        assert_eq!(overridden, vec!["1m".to_string(), "4H".to_string()]);
+    }
+
+    #[test]
+    fn test_override_periods_from_csv_keeps_defaults_when_empty() {
+        let periods = vec!["4H".to_string(), "1H".to_string()];
+
+        let overridden = override_periods_from_csv(periods.clone(), Some("  ,  "));
+
+        assert_eq!(overridden, periods);
     }
 
     #[test]

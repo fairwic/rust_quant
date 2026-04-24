@@ -15,6 +15,10 @@ pub struct StrategyConfig {
     /// 策略类型
     pub strategy_type: StrategyType,
 
+    /// 行情/执行交易所
+    #[serde(default)]
+    pub exchange: Option<String>,
+
     /// 交易对符号
     pub symbol: String,
 
@@ -61,6 +65,7 @@ impl StrategyConfig {
         Self {
             id,
             strategy_type,
+            exchange: None,
             symbol,
             timeframe,
             parameters,

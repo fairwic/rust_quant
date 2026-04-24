@@ -51,6 +51,7 @@ env_logger = "0.11.3"
 sqlx = { version = "0.7", features = [
     "runtime-tokio-native-tls",
     "mysql",
+    "postgres",
     "chrono",
     "json",
     "migrate",
@@ -130,6 +131,7 @@ rust-quant-orchestration = { path = "crates/orchestration" }
 rust-quant-analytics = { path = "crates/analytics" }
 rust-quant-ai-analysis = { path = "crates/ai-analysis" }
 rust-quant-cli = { path = "crates/rust-quant-cli" }
+crypto_exc_all = { path = "../crypto_exc_all" }
 
 [patch.crates-io]
-okx = { path = "okx_rs" }
+okx = { path = "../crypto_exc_all/okx_rs" }
