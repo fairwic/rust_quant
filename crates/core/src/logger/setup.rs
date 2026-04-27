@@ -16,7 +16,7 @@ use crate::config::email;
 // 邮件发送配置
 #[derive(Debug, Clone)]
 struct EmailConfig {
-    /// 批量发送间隔（秒）
+    /// 批量发送间隔（秒ave
     batch_interval_secs: u64,
     /// 最大批量大小
     max_batch_size: usize,
