@@ -13,6 +13,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 : "${EXECUTION_WORKER_ONLY:="true"}"
 : "${EXECUTION_WORKER_DRY_RUN:="true"}"
 : "${EXECUTION_WORKER_DEFAULT_EXCHANGE:="binance"}"
+: "${EXECUTION_WORKER_TASK_TYPES:="execute_signal,risk_control_close_candidate"}"
+: "${EXECUTION_WORKER_TASK_STATUSES:="pending,pending_close"}"
 : "${QUANT_CORE_DATABASE_URL:="postgres://postgres:postgres123@localhost:5432/quant_core"}"
 
 if command -v rustup >/dev/null 2>&1; then
@@ -37,6 +39,8 @@ export EXECUTION_WORKER_RUN_ONCE
 export EXECUTION_WORKER_ONLY
 export EXECUTION_WORKER_DRY_RUN
 export EXECUTION_WORKER_DEFAULT_EXCHANGE
+export EXECUTION_WORKER_TASK_TYPES
+export EXECUTION_WORKER_TASK_STATUSES
 export QUANT_CORE_DATABASE_URL
 export RUSTC
 export IS_RUN_EXECUTION_WORKER=true
@@ -50,6 +54,8 @@ echo "  web: ${RUST_QUAN_WEB_BASE_URL}"
 echo "  worker_id: ${EXECUTION_WORKER_ID}"
 echo "  lease_limit: ${EXECUTION_WORKER_LEASE_LIMIT}"
 echo "  run_once: ${EXECUTION_WORKER_RUN_ONCE}"
+echo "  task_types: ${EXECUTION_WORKER_TASK_TYPES}"
+echo "  task_statuses: ${EXECUTION_WORKER_TASK_STATUSES}"
 echo "  quant_core db: ${QUANT_CORE_DATABASE_URL}"
 
 cd "${REPO_ROOT}"

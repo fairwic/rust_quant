@@ -31,7 +31,15 @@
 - 运行 Web smoke，走订阅/信号到 execution task 的本地流程。
 - 在 Admin 侧使用 seed 或页面操作创建 execution task。
 
-任务应是 Web backend 内部队列里的 pending 状态。worker 当前只拉取 `execute_signal` 类型任务。
+任务应是 Web backend 内部队列里的可执行状态。`rust_quant` worker 现在会带两个过滤维度去请求 lease：
+
+- `task_type in (execute_signal, risk_control_close_candidate)`
+- `task_status in (pending, pending_close)`
+
+其中：
+
+- `execute_signal + pending` 继续走原有开/平仓 dry-run 下单链路。
+- `risk_control_close_candidate + pending_close` 代表 Admin/内部复核已确认的风控平仓候选。
 
 ## 一键运行 dry-run worker
 
@@ -54,6 +62,8 @@ EXECUTION_WORKER_RUN_ONCE=true
 EXECUTION_WORKER_ONLY=true
 EXECUTION_WORKER_DRY_RUN=true
 EXECUTION_WORKER_DEFAULT_EXCHANGE=binance
+EXECUTION_WORKER_TASK_TYPES=execute_signal,risk_control_close_candidate
+EXECUTION_WORKER_TASK_STATUSES=pending,pending_close
 QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core
 ```
 
@@ -70,6 +80,64 @@ cargo run --bin rust_quant
 ```
 
 并只启用 execution worker，不启用回测、WebSocket、实盘策略或数据同步。`EXECUTION_WORKER_DRY_RUN=false` 会被脚本拒绝，避免误触真实下单。
+
+## pending_close 风控平仓说明
+
+`risk_control_close_candidate` 任务在 Web 侧创建时先是 `manual_review`，复核 confirm 后会进入 `pending_close`。`rust_quant` 当前实现分两层处理：
+
+1. lease/worker 契约层：
+
+   - worker 会把 `task_type` / `task_status` 过滤条件带到 `/api/commerce/internal/execution-tasks/lease`。
+   - `rust_quan_web` 后端已支持 `task_type` / `task_status` 查询参数，默认仍只领取 `execute_signal + pending`，worker 显式请求后才会放开到 `risk_control_close_candidate + pending_close`。
+   - Web lease 会把任务返回状态更新成 `leased`；worker 会把 `risk_control_close_candidate + leased` 继续按 pending close 平仓路径处理。
+   - `manual_review` 不会被 worker 自动领取，必须先由 Admin 或内部服务复核 confirm 后进入 `pending_close`。
+
+2. 执行层：
+
+   - dry-run 下，如果 `pending_close` payload 里还没有明确的 `close_order`，worker 会直接生成一个 `order_side=close` 的 dry-run 完成结果并回写，方便先打通 Admin 复核后的结果闭环。
+   - live 下，worker 不会绕过安全开关。若 Web 尚未提供 `close_order`（至少需要 side 或 position_side，以及 size/qty 等 close 指令），worker 会把任务回写成 failed，并在错误信息里明确提示缺少 Web close contract。
+
+建议的 Web close payload 最小字段：
+
+```json
+{
+  "close_order": {
+    "exchange": "binance",
+    "symbol": "BTC-USDT-SWAP",
+    "position_side": "long",
+    "size": "0.01",
+    "order_type": "market",
+    "reduce_only": true
+  }
+}
+```
+
+有了这块后，dry-run 会优先走真实的 dry-run 下单/audit 路径，live 也能复用同一份 close 指令。
+
+## 一键验证 pending_close worker 闭环
+
+先启动 `rust_quan_web/backend`，并显式覆盖 Postgres 配置，避免误读本地 `.env` 里的旧 MySQL 占位值：
+
+```bash
+cd /Users/mac2/onions/crypto_quant/rust_quan_web/backend
+DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_web \
+PORT=8000 \
+EXECUTION_EVENT_SECRET=local-dev-secret \
+cargo run
+```
+
+然后在 `rust_quant` 目录执行：
+
+```bash
+WEB_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_web \
+RUST_QUAN_WEB_BASE_URL=http://127.0.0.1:8000 \
+EXECUTION_EVENT_SECRET=local-dev-secret \
+./scripts/dev/run_pending_close_worker_e2e_smoke.sh
+```
+
+脚本会复用 Web risk close smoke，但设置 `RISK_CLOSE_SMOKE_STOP_AFTER_REVIEW=1`，让 Web 停在 `pending_close + close_order`；随后只运行 `risk_control_close_candidate + pending_close` worker，并验证 Web 侧订单和交易记录已回写。
+
+如果本地已有旧的 `pending_close` 任务，脚本会查询 `pending_close_count` 并把本次 `effective_lease_limit` 提升到足够覆盖当前待处理任务，避免旧任务挡住刚创建的 smoke task。
 
 ## 一键验证 quant_core audit 写入
 
@@ -149,6 +217,25 @@ cargo run --bin rust_quant
 ```bash
 ./scripts/dev/run_binance_websocket_natural_probe.sh
 ```
+
+这个脚本现在会先执行 `./scripts/dev/check_binance_connectivity.sh` 作为 preflight，默认在 Binance futures REST/WebSocket endpoint 或代理 TLS 不通时直接停止，避免 natural probe 盲跑。
+
+单独做 endpoint / 代理诊断时，可直接执行：
+
+```bash
+BINANCE_PROXY_URL='socks5h://127.0.0.1:7897' \
+BINANCE_CONNECTIVITY_RETRIES='3' \
+./scripts/dev/check_binance_connectivity.sh
+```
+
+常用覆盖项：
+
+- `BINANCE_REST_ENDPOINTS`: 以空格或逗号分隔的 REST endpoint 列表，按顺序重试。
+- `BINANCE_WS_ENDPOINTS`: 以空格或逗号分隔的 WebSocket/TLS endpoint 列表，按顺序重试。
+- `BINANCE_PROXY_URL`: 显式覆盖代理，优先级高于 `ALL_PROXY` / `HTTPS_PROXY`。
+- `BINANCE_CONNECTIVITY_RETRIES` / `BINANCE_CONNECTIVITY_RETRY_DELAY_SECS`: 单个 endpoint 的 curl 重试次数与间隔。
+- `BINANCE_CONNECTIVITY_PREFLIGHT=false`: 跳过 natural probe 前置连通性检查。
+- `BINANCE_CONNECTIVITY_ALLOW_FAILURE=true`: preflight 失败也继续 natural probe，仅用于确认本机网络问题之外的链路行为。
 
 如果想先离线挑出更可能自然命中的候选 `symbol/timeframe/config`，再把建议参数交给上面的 probe，先执行：
 
@@ -253,8 +340,12 @@ worker 成功 lease 到任务后，应在日志里看到 execution worker 单轮
 
 Web backend 侧应能看到：
 
-- execution task 从 pending/leased 变成 completed。
+- `execute_signal` 任务从 pending/leased 变成 completed。
+- `risk_control_close_candidate` 任务在 Web lease 能返回后，会从 pending_close/leased 变成 completed。
 - execution result 被写入。
-- dry-run order/trade 结果回写成功，order status 通常为 `dry_run`。
+- dry-run order/trade 结果回写成功，order status 通常为 `dry_run`。有 `close_order` 的 `pending_close` 会按 close order 回写真实方向，例如 long position 平仓回写 `order_side=sell`；尚未补齐 `close_order` 的旧任务才会退回 `order_side=close`。
 
-如果 handled 为 `0`，通常表示当前没有可 lease 的 pending `execute_signal` 任务。先用 Web smoke 或 Admin seed 准备任务后再运行脚本。
+如果 handled 为 `0`，常见原因有两类：
+
+- 当前没有可 lease 的 `pending execute_signal` 任务。
+- 已有 `risk_control_close_candidate` 任务但状态仍是 `manual_review`，需要先在 Admin 执行任务页点击“确认平仓”，或调用 Web 内部复核接口转成 `pending_close`。

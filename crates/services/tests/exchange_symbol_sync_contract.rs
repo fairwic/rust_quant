@@ -3,10 +3,15 @@ use async_trait::async_trait;
 use rust_quant_domain::entities::{ExchangeSymbol, ExchangeSymbolListingEvent};
 use rust_quant_domain::traits::ExchangeSymbolRepository;
 use rust_quant_services::market::{
-    BinanceExchangeInfoProvider, ExchangeSymbolSyncService, StaticExchangeInfoProvider,
+    parse_exchange_symbol_sync_sources, BinanceExchangeInfoProvider, ExchangeSymbolSyncService,
+    LiveBinanceExchangeInfoProvider, StaticExchangeInfoProvider,
 };
 use serde_json::json;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 const EXCHANGE_SYMBOL_LISTING_EVENTS_MIGRATION: &str =
     include_str!("../../../migrations/20260424165000_create_exchange_symbol_listing_events.sql");
@@ -412,6 +417,54 @@ fn exchange_symbol_listing_events_ddl_has_table_and_column_comments() {
 }
 
 #[test]
+fn exchange_symbol_sync_runs_ddl_has_table_and_column_comments() {
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("CREATE TABLE IF NOT EXISTS exchange_symbol_sync_runs"),
+        "exchange_symbol_sync_runs table DDL is required"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("COMMENT ON TABLE exchange_symbol_sync_runs"),
+        "exchange_symbol_sync_runs table comment is required"
+    );
+    for column in [
+        "id",
+        "run_id",
+        "trigger_source",
+        "requested_sources",
+        "run_status",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "persisted_rows",
+        "first_seen_rows",
+        "major_listing_signals",
+        "error_message",
+        "report_json",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(&format!(
+                "COMMENT ON COLUMN exchange_symbol_sync_runs.{column}"
+            )),
+            "exchange_symbol_sync_runs.{column} column comment is required"
+        );
+    }
+}
+
+#[test]
+fn exchange_symbol_sync_sources_accept_default_csv_and_space_separated_values() {
+    assert_eq!(
+        parse_exchange_symbol_sync_sources(None).expect("default sources"),
+        vec!["binance", "okx", "bitget", "gate", "kucoin"]
+    );
+    assert_eq!(
+        parse_exchange_symbol_sync_sources(Some(" okx, gate kucoin ")).expect("mixed separators"),
+        vec!["okx", "gate", "kucoin"]
+    );
+}
+
+#[test]
 fn parse_binance_exchange_info_only_keeps_perpetual_contracts() {
     let rows = ExchangeSymbolSyncService::parse_binance_usdm_exchange_info(
         &sample_binance_exchange_info(),
@@ -517,6 +570,75 @@ fn parse_kucoin_futures_contracts_normalizes_usdt_m_symbols() {
     assert_eq!(rows[0].min_qty.as_deref(), Some("1"));
     assert_eq!(rows[0].step_size.as_deref(), Some("1"));
     assert_eq!(rows[0].tick_size.as_deref(), Some("0.0001"));
+}
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[tokio::test]
+async fn live_kucoin_provider_uses_base_url_override() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let (base_url, received) = start_json_server(sample_kucoin_futures_contracts().to_string());
+    std::env::set_var("KUCOIN_FUTURES_BASE_URL", &base_url);
+
+    let payload = LiveBinanceExchangeInfoProvider
+        .fetch_kucoin_futures_contracts()
+        .await
+        .expect("provider should fetch from overridden base URL");
+
+    std::env::remove_var("KUCOIN_FUTURES_BASE_URL");
+    assert_eq!(payload["code"], "200000");
+    assert!(
+        received
+            .lock()
+            .unwrap()
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("GET /api/v1/contracts/active "),
+        "provider should request KuCoin contracts path from overridden base URL"
+    );
+}
+
+fn start_json_server(body: String) -> (String, Arc<Mutex<Option<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let addr = listener.local_addr().expect("test server addr");
+    listener
+        .set_nonblocking(true)
+        .expect("set test server nonblocking");
+    let received = Arc::new(Mutex::new(None));
+    let received_for_thread = received.clone();
+
+    thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let mut buffer = [0_u8; 4096];
+                    let size = stream.read(&mut buffer).expect("read request");
+                    let request = String::from_utf8_lossy(&buffer[..size]).to_string();
+                    *received_for_thread.lock().unwrap() =
+                        request.lines().next().map(ToString::to_string);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("write response");
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("accept request: {error}"),
+            }
+        }
+    });
+
+    (format!("http://{addr}"), received)
 }
 
 #[tokio::test]

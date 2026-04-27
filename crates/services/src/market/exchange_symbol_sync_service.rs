@@ -15,9 +15,55 @@ const OKX_EXCHANGE: &str = "okx";
 const BITGET_EXCHANGE: &str = "bitget";
 const GATE_EXCHANGE: &str = "gate";
 const KUCOIN_EXCHANGE: &str = "kucoin";
+const KUCOIN_FUTURES_BASE_URL_ENV: &str = "KUCOIN_FUTURES_BASE_URL";
+const KUCOIN_FUTURES_DEFAULT_BASE_URL: &str = "https://api-futures.kucoin.com";
 const PERPETUAL_MARKET_TYPE: &str = "perpetual";
 const PERPETUAL_CONTRACT_TYPE: &str = "PERPETUAL";
 const MAJOR_LISTING_EXCHANGES: &[&str] = &["binance", "okx"];
+const DEFAULT_EXCHANGE_SYMBOL_SYNC_SOURCES: &[&str] =
+    &["binance", "okx", "bitget", "gate", "kucoin"];
+
+pub fn parse_exchange_symbol_sync_sources(input: Option<&str>) -> Result<Vec<String>> {
+    let raw_sources = input.unwrap_or("binance okx bitget gate kucoin");
+    let mut sources = Vec::new();
+    for raw_source in raw_sources.split([',', ' ', '\n', '\t']) {
+        if raw_source.trim().is_empty() {
+            continue;
+        }
+        let normalized = normalize_exchange_symbol_sync_source(raw_source)?;
+        if !sources.iter().any(|source| source == normalized) {
+            sources.push(normalized.to_string());
+        }
+    }
+
+    if sources.is_empty() {
+        return Err(anyhow!("exchange symbol sync sources must not be empty"));
+    }
+
+    Ok(sources)
+}
+
+pub fn default_exchange_symbol_sync_sources() -> Vec<String> {
+    DEFAULT_EXCHANGE_SYMBOL_SYNC_SOURCES
+        .iter()
+        .map(|source| (*source).to_string())
+        .collect()
+}
+
+pub fn normalize_exchange_symbol_sync_source(source: &str) -> Result<&'static str> {
+    match source.trim().to_ascii_lowercase().as_str() {
+        "" => Err(anyhow!("empty exchange symbol sync source")),
+        "binance" | "binance_usdm" | "binance_perpetual" => Ok("binance"),
+        "okx" | "okx_swap" | "okx_perpetual" => Ok("okx"),
+        "bitget" | "bitget_usdt_futures" | "bitget_perpetual" => Ok("bitget"),
+        "gate" | "gate_usdt_futures" | "gate_perpetual" => Ok("gate"),
+        "kucoin" | "kucoin_futures" | "kucoin_perpetual" => Ok("kucoin"),
+        other => Err(anyhow!(
+            "unsupported exchange symbol sync source={}, expected binance/okx/bitget/gate/kucoin",
+            other
+        )),
+    }
+}
 
 #[async_trait]
 pub trait BinanceExchangeInfoProvider: Send + Sync {
@@ -77,7 +123,7 @@ impl BinanceExchangeInfoProvider for LiveBinanceExchangeInfoProvider {
     }
 
     async fn fetch_kucoin_futures_contracts(&self) -> Result<Value> {
-        fetch_json("https://api-futures.kucoin.com/api/v1/contracts/active")
+        fetch_json(&kucoin_futures_contracts_url())
             .await
             .context("fetch KuCoin futures contracts failed")
     }
@@ -209,6 +255,19 @@ impl ExchangeSymbolSyncService {
             .context("fetch KuCoin futures contracts")?;
         let symbols = Self::parse_kucoin_futures_contracts(&payload)?;
         self.persist_symbols_with_report(symbols).await
+    }
+
+    pub async fn sync_source_with_report(&self, source: &str) -> Result<ExchangeSymbolSyncReport> {
+        match normalize_exchange_symbol_sync_source(source)? {
+            "binance" => self.sync_binance_usdm_perpetual_symbols_with_report().await,
+            "okx" => self.sync_okx_swap_symbols_with_report().await,
+            "bitget" => self.sync_bitget_usdt_futures_symbols_with_report().await,
+            "gate" => self.sync_gate_usdt_futures_symbols_with_report().await,
+            "kucoin" => self.sync_kucoin_futures_symbols_with_report().await,
+            other => Err(anyhow!(
+                "unsupported normalized exchange symbol source={other}"
+            )),
+        }
     }
 
     async fn persist_symbols_with_report(
@@ -651,4 +710,13 @@ async fn fetch_json(url: &str) -> Result<Value> {
         .json::<Value>()
         .await
         .map_err(Into::into)
+}
+
+fn kucoin_futures_contracts_url() -> String {
+    let base_url = std::env::var(KUCOIN_FUTURES_BASE_URL_ENV)
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| KUCOIN_FUTURES_DEFAULT_BASE_URL.to_string());
+    format!("{base_url}/api/v1/contracts/active")
 }

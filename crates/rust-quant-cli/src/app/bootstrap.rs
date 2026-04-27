@@ -24,6 +24,9 @@ use rust_quant_services::rust_quan_web::ExecutionWorker;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use std::collections::{BTreeSet, HashMap};
 
+use crate::app::exchange_symbol_sync::{
+    run_exchange_symbol_sync_from_env, ExchangeSymbolSyncRequest,
+};
 use crate::app::internal_server;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +126,19 @@ pub async fn run_modes() -> Result<()> {
         if env_is_true("EXECUTION_WORKER_ONLY", true) {
             return Ok(());
         }
+    }
+
+    // 0.5) 交易对事实表同步 worker。默认每 60 秒同步一次五个交易所。
+    if env_is_true("IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER", false) {
+        if env_is_true("EXCHANGE_SYMBOL_SYNC_WORKER_ONLY", true) {
+            run_exchange_symbol_sync_worker_from_env().await?;
+            return Ok(());
+        }
+        tokio::spawn(async {
+            if let Err(error) = run_exchange_symbol_sync_worker_from_env().await {
+                error!("❌ 交易对事实表同步 worker 退出: {}", error);
+            }
+        });
     }
 
     // 1) 数据同步任务（Ticker & Funding Rate）
@@ -272,6 +288,58 @@ async fn run_execution_worker_from_env() -> Result<()> {
             Err(error) => error!("❌ 执行任务 worker 轮询失败: {}", error),
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(poll_interval_secs)).await;
+    }
+}
+
+async fn run_exchange_symbol_sync_worker_from_env() -> Result<()> {
+    let interval_secs = std::env::var("EXCHANGE_SYMBOL_SYNC_INTERVAL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(60);
+    let run_once = env_is_true("EXCHANGE_SYMBOL_SYNC_RUN_ONCE", false);
+
+    if run_once {
+        let response = run_exchange_symbol_sync_from_env(ExchangeSymbolSyncRequest {
+            sources: None,
+            trigger_source: Some("scheduled".to_string()),
+            submit_signals: None,
+        })
+        .await?;
+        info!(
+            "🔁 交易对事实表同步 worker 单轮完成: run_id={}, sources={:?}, persisted_rows={}, first_seen_rows={}, major_listing_signals={}",
+            response.run_id,
+            response.requested_sources,
+            response.persisted_rows,
+            response.first_seen_rows,
+            response.major_listing_signals
+        );
+        return Ok(());
+    }
+
+    info!(
+        "🔁 交易对事实表同步 worker 启动: interval={}s",
+        interval_secs
+    );
+    loop {
+        match run_exchange_symbol_sync_from_env(ExchangeSymbolSyncRequest {
+            sources: None,
+            trigger_source: Some("scheduled".to_string()),
+            submit_signals: None,
+        })
+        .await
+        {
+            Ok(response) => info!(
+                "🔁 交易对事实表同步 worker 完成: run_id={}, sources={:?}, persisted_rows={}, first_seen_rows={}, major_listing_signals={}",
+                response.run_id,
+                response.requested_sources,
+                response.persisted_rows,
+                response.first_seen_rows,
+                response.major_listing_signals
+            ),
+            Err(error) => error!("❌ 交易对事实表同步 worker 失败: {}", error),
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(interval_secs)).await;
     }
 }
 

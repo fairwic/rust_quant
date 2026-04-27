@@ -6,6 +6,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info};
 
+use crate::app::exchange_symbol_sync::{
+    run_exchange_symbol_sync_from_env, ExchangeSymbolSyncRequest,
+};
 use rust_quant_orchestration::infra::strategy_config::BackTestConfig;
 use rust_quant_orchestration::workflow::backtest_runner;
 
@@ -95,6 +98,52 @@ pub async fn handle_backtest_run_body(body: &[u8]) -> InternalHttpJsonResponse {
     }
 }
 
+pub async fn handle_exchange_symbol_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
+    let request = if body.is_empty() {
+        ExchangeSymbolSyncRequest {
+            sources: None,
+            trigger_source: Some("manual".to_string()),
+            submit_signals: None,
+        }
+    } else {
+        match serde_json::from_slice::<ExchangeSymbolSyncRequest>(body) {
+            Ok(mut request) => {
+                if request.trigger_source.is_none() {
+                    request.trigger_source = Some("manual".to_string());
+                }
+                request
+            }
+            Err(err) => {
+                return json_response(
+                    400,
+                    json!({
+                        "error": format!("invalid json body: {err}")
+                    }),
+                );
+            }
+        }
+    };
+
+    match run_exchange_symbol_sync_from_env(request).await {
+        Ok(response) => json_response(
+            200,
+            serde_json::to_value(response).unwrap_or_else(|err| {
+                json!({
+                    "status": "failed",
+                    "error": format!("serialize exchange symbol sync response failed: {err}")
+                })
+            }),
+        ),
+        Err(err) => json_response(
+            500,
+            json!({
+                "status": "failed",
+                "error": err.to_string()
+            }),
+        ),
+    }
+}
+
 pub fn backtest_config_from_body(body: &[u8]) -> Result<BackTestConfig, String> {
     let request = serde_json::from_slice::<BacktestRunRequest>(body)
         .map_err(|err| format!("invalid json body: {err}"))?;
@@ -106,6 +155,9 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     let request = read_request(&mut stream).await?;
     let response = match (request.method.as_str(), request.path.as_str()) {
         ("POST", "/internal/backtests/run") => handle_backtest_run_body(&request.body).await,
+        ("POST", "/internal/exchange-symbols/sync") => {
+            handle_exchange_symbol_sync_body(&request.body).await
+        }
         ("GET", "/internal/health") => json_response(200, json!({ "status": "ok" })),
         ("POST", _) => json_response(404, json!({ "error": "not found" })),
         _ => json_response(405, json!({ "error": "method not allowed" })),

@@ -58,6 +58,11 @@ async fn dry_run_worker_writes_checkpoint_and_exchange_audit_to_quant_core() -> 
             lease_limit: 1,
             dry_run: true,
             default_exchange: ExchangeId::Okx,
+            task_types: vec![
+                "execute_signal".to_string(),
+                "risk_control_close_candidate".to_string(),
+            ],
+            task_statuses: vec!["pending".to_string(), "pending_close".to_string()],
         },
     )
     .with_audit_repository(Arc::new(audit_repository));

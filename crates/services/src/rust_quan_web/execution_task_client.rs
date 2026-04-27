@@ -23,6 +23,8 @@ pub struct ExecutionTaskLeaseRequest {
     pub limit: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub task_types: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_statuses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -203,7 +205,7 @@ impl ExecutionTaskClient {
         &self,
         request: ExecutionTaskLeaseRequest,
     ) -> Result<ExecutionTaskLease> {
-        self.get_json(&self.lease_url(request.limit)).await
+        self.get_json(&self.lease_url_for_request(&request)).await
     }
 
     pub async fn report_result(
@@ -233,11 +235,32 @@ impl ExecutionTaskClient {
     }
 
     pub fn lease_url(&self, limit: u32) -> String {
-        format!(
-            "{}?limit={}",
-            self.url(LEASE_TASKS_PATH),
-            limit.clamp(1, 100)
-        )
+        self.lease_url_for_request(&ExecutionTaskLeaseRequest {
+            worker_id: String::new(),
+            limit,
+            task_types: Vec::new(),
+            task_statuses: Vec::new(),
+        })
+    }
+
+    pub fn lease_url_for_request(&self, request: &ExecutionTaskLeaseRequest) -> String {
+        let mut url = reqwest::Url::parse(&self.url(LEASE_TASKS_PATH))
+            .expect("execution task lease URL should always be valid");
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("limit", &request.limit.clamp(1, 100).to_string());
+            for task_type in &request.task_types {
+                if !task_type.trim().is_empty() {
+                    query.append_pair("task_type", task_type);
+                }
+            }
+            for task_status in &request.task_statuses {
+                if !task_status.trim().is_empty() {
+                    query.append_pair("task_status", task_status);
+                }
+            }
+        }
+        url.to_string()
     }
 
     pub fn strategy_signal_url(&self) -> String {
@@ -379,12 +402,14 @@ mod tests {
             worker_id: "worker-a".to_string(),
             limit: 10,
             task_types: vec![],
+            task_statuses: vec![],
         };
         let value = serde_json::to_value(&request).unwrap();
 
         assert_eq!(value["worker_id"], "worker-a");
         assert_eq!(value["limit"], 10);
         assert!(value.get("task_types").is_none());
+        assert!(value.get("task_statuses").is_none());
     }
 
     #[test]
@@ -635,6 +660,60 @@ mod tests {
         assert_eq!(config.api_secret, "plain-api-secret");
         assert_eq!(config.passphrase.as_deref(), Some("plain-passphrase"));
         assert!(!config.simulated);
+    }
+
+    #[tokio::test]
+    async fn lease_tasks_uses_task_type_filters_in_internal_contract() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server = tokio::task::spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 4096];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+            tx.send(request).unwrap();
+
+            let body = r#"{"success":true,"data":{"tasks":[]}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap();
+        let leased = client
+            .lease_tasks(ExecutionTaskLeaseRequest {
+                worker_id: "worker-close".to_string(),
+                limit: 5,
+                task_types: vec![
+                    "execute_signal".to_string(),
+                    "risk_control_close_candidate".to_string(),
+                ],
+                task_statuses: vec!["pending".to_string(), "pending_close".to_string()],
+            })
+            .await
+            .unwrap();
+
+        server.await.unwrap();
+        let request = rx.recv().unwrap();
+
+        assert!(leased.tasks.is_empty());
+        assert!(request.starts_with(
+            "GET /api/commerce/internal/execution-tasks/lease?limit=5&task_type=execute_signal&task_type=risk_control_close_candidate&task_status=pending&task_status=pending_close HTTP/1.1"
+        ));
+        assert!(request.contains("x-alpha-execution-secret: dev-secret"));
     }
 
     #[test]

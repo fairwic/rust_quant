@@ -19,6 +19,8 @@ pub struct ExecutionWorkerConfig {
     pub lease_limit: u32,
     pub dry_run: bool,
     pub default_exchange: ExchangeId,
+    pub task_types: Vec<String>,
+    pub task_statuses: Vec<String>,
 }
 
 impl ExecutionWorkerConfig {
@@ -38,12 +40,22 @@ impl ExecutionWorkerConfig {
             .ok()
             .and_then(|value| parse_exchange(&value).ok())
             .unwrap_or(ExchangeId::Okx);
+        let task_types = parse_env_list(
+            "EXECUTION_WORKER_TASK_TYPES",
+            &["execute_signal", "risk_control_close_candidate"],
+        );
+        let task_statuses = parse_env_list(
+            "EXECUTION_WORKER_TASK_STATUSES",
+            &["pending", "pending_close"],
+        );
 
         Self {
             worker_id,
             lease_limit,
             dry_run,
             default_exchange,
+            task_types,
+            task_statuses,
         }
     }
 }
@@ -110,6 +122,8 @@ impl ExecutionWorker {
                 "lease_limit": self.config.lease_limit,
                 "dry_run": self.config.dry_run,
                 "default_exchange": self.config.default_exchange.as_str(),
+                "task_types": self.config.task_types.clone(),
+                "task_statuses": self.config.task_statuses.clone(),
             }),
         )
         .await;
@@ -119,7 +133,8 @@ impl ExecutionWorker {
             .lease_tasks(ExecutionTaskLeaseRequest {
                 worker_id: self.config.worker_id.clone(),
                 limit: self.config.lease_limit,
-                task_types: vec!["execute_signal".to_string()],
+                task_types: self.config.task_types.clone(),
+                task_statuses: self.config.task_statuses.clone(),
             })
             .await
         {
@@ -191,6 +206,10 @@ impl ExecutionWorker {
     }
 
     async fn execute_task(&self, task: &ExecutionTask) -> ExecutionTaskReportRequest {
+        if is_pending_close_task(task) {
+            return self.execute_pending_close_task(task).await;
+        }
+
         let order_task =
             match ExecutionOrderTask::from_task_with_default(task, self.config.default_exchange) {
                 Ok(value) => value,
@@ -241,28 +260,10 @@ impl ExecutionWorker {
         }
 
         let gateway = match self
-            .client
-            .resolve_user_exchange_config(&task.buyer_email, order_task.exchange.as_str())
+            .resolve_live_gateway(&task.buyer_email, order_task.exchange)
             .await
         {
-            Ok(config) => match CryptoExcAllGateway::from_single_exchange_credentials(
-                order_task.exchange,
-                config.api_key,
-                config.api_secret,
-                config.passphrase,
-                config.simulated,
-            ) {
-                Ok(gateway) => gateway,
-                Err(error) => {
-                    return ExecutionTaskReportRequest::failed(
-                        task.id,
-                        order_task.exchange.as_str(),
-                        order_side_lower(order_task.side),
-                        error.to_string(),
-                        json!({"task_id": task.id}),
-                    );
-                }
-            },
+            Ok(gateway) => gateway,
             Err(error) => {
                 return ExecutionTaskReportRequest::failed(
                     task.id,
@@ -305,6 +306,118 @@ impl ExecutionWorker {
         }
     }
 
+    async fn execute_pending_close_task(&self, task: &ExecutionTask) -> ExecutionTaskReportRequest {
+        let close_task = match PendingCloseTask::from_task(task, self.config.default_exchange) {
+            Ok(value) => value,
+            Err(error) => {
+                return ExecutionTaskReportRequest::failed(
+                    task.id,
+                    self.config.default_exchange.as_str(),
+                    "close",
+                    error.to_string(),
+                    json!({"task_id": task.id, "task_type": task.task_type}),
+                );
+            }
+        };
+
+        if self.config.dry_run {
+            return match close_task.to_order_request() {
+                Ok(Some(request)) => match self
+                    .place_order_with_audit(task, &self.gateway, request.clone())
+                    .await
+                {
+                    Ok(ack) => ExecutionTaskReportRequest::success(
+                        task.id,
+                        ack.exchange.as_str(),
+                        ack.order_id
+                            .as_deref()
+                            .or(ack.client_order_id.as_deref())
+                            .unwrap_or("dry_run"),
+                        order_side_lower(request.side),
+                        ack.status.as_deref().unwrap_or("dry_run"),
+                        ack.raw,
+                    ),
+                    Err(error) => ExecutionTaskReportRequest::failed(
+                        task.id,
+                        close_task.exchange.as_str(),
+                        "close",
+                        error.to_string(),
+                        close_task.report_payload(true),
+                    ),
+                },
+                Ok(None) => close_task.dry_run_report(),
+                Err(error) => ExecutionTaskReportRequest::failed(
+                    task.id,
+                    close_task.exchange.as_str(),
+                    "close",
+                    error.to_string(),
+                    close_task.report_payload(true),
+                ),
+            };
+        }
+
+        let request = match close_task.to_order_request() {
+            Ok(Some(request)) => request,
+            Ok(None) => {
+                return ExecutionTaskReportRequest::failed(
+                    task.id,
+                    close_task.exchange.as_str(),
+                    "close",
+                    close_task.missing_live_contract_message(),
+                    close_task.report_payload(false),
+                );
+            }
+            Err(error) => {
+                return ExecutionTaskReportRequest::failed(
+                    task.id,
+                    close_task.exchange.as_str(),
+                    "close",
+                    error.to_string(),
+                    close_task.report_payload(false),
+                );
+            }
+        };
+        let gateway = match self
+            .resolve_live_gateway(&task.buyer_email, request.exchange)
+            .await
+        {
+            Ok(gateway) => gateway,
+            Err(error) => {
+                return ExecutionTaskReportRequest::failed(
+                    task.id,
+                    request.exchange.as_str(),
+                    order_side_lower(request.side),
+                    error.to_string(),
+                    close_task.report_payload(false),
+                );
+            }
+        };
+
+        match self
+            .place_order_with_audit(task, &gateway, request.clone())
+            .await
+        {
+            Ok(ack) => ExecutionTaskReportRequest::success(
+                task.id,
+                ack.exchange.as_str(),
+                ack.order_id
+                    .as_deref()
+                    .or(ack.client_order_id.as_deref())
+                    .unwrap_or("unknown"),
+                order_side_lower(request.side),
+                ack.status.as_deref().unwrap_or("submitted"),
+                ack.raw,
+            ),
+            Err(error) => ExecutionTaskReportRequest::failed(
+                task.id,
+                request.exchange.as_str(),
+                order_side_lower(request.side),
+                error.to_string(),
+                close_task.report_payload(false),
+            ),
+        }
+    }
+
     async fn live_order_request(
         &self,
         gateway: &CryptoExcAllGateway,
@@ -324,6 +437,25 @@ impl ExecutionWorker {
             )
         })?;
         order_task.to_order_request_with_last_price(Some(last_price))
+    }
+
+    async fn resolve_live_gateway(
+        &self,
+        buyer_email: &str,
+        exchange: ExchangeId,
+    ) -> Result<CryptoExcAllGateway> {
+        let config = self
+            .client
+            .resolve_user_exchange_config(buyer_email, exchange.as_str())
+            .await?;
+        CryptoExcAllGateway::from_single_exchange_credentials(
+            exchange,
+            config.api_key,
+            config.api_secret,
+            config.passphrase,
+            config.simulated,
+        )
+        .map_err(Into::into)
     }
 
     async fn place_order_with_audit(
@@ -421,6 +553,124 @@ pub struct ExecutionOrderTask {
     pub reduce_only: Option<bool>,
     pub time_in_force: Option<TimeInForce>,
     pub size_usdt: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingCloseTask {
+    task_id: i64,
+    exchange: ExchangeId,
+    symbol: String,
+    task_type: String,
+    task_status: String,
+    risk_control_action: String,
+    manual_review: Value,
+    close_order_payload: Option<Value>,
+}
+
+impl PendingCloseTask {
+    fn from_task(task: &ExecutionTask, default_exchange: ExchangeId) -> Result<Self> {
+        let payload = order_payload(&task.request_payload_json);
+        let exchange = payload_string(&payload, "exchange")
+            .map(|value| parse_exchange(&value))
+            .transpose()?
+            .unwrap_or(default_exchange);
+        let symbol = payload_string(&payload, "symbol").unwrap_or_else(|| task.symbol.clone());
+        let risk_control_action = payload
+            .get("manual_review")
+            .and_then(|value| value.get("action"))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                payload
+                    .get("risk_control")
+                    .and_then(|value| value.get("action"))
+                    .and_then(Value::as_str)
+            })
+            .unwrap_or("close_candidate")
+            .trim()
+            .to_string();
+        let close_order_payload = payload.get("close_order").cloned().or_else(|| {
+            payload
+                .get("execution")
+                .and_then(|value| value.get("close_order"))
+                .cloned()
+        });
+
+        Ok(Self {
+            task_id: task.id,
+            exchange,
+            symbol,
+            task_type: task.task_type.clone(),
+            task_status: task.task_status.clone(),
+            risk_control_action,
+            manual_review: payload.get("manual_review").cloned().unwrap_or(Value::Null),
+            close_order_payload,
+        })
+    }
+
+    fn to_order_request(&self) -> Result<Option<OrderPlacementRequest>> {
+        let Some(payload) = self.close_order_payload.as_ref() else {
+            return Ok(None);
+        };
+        let side = close_order_side(payload)?;
+        let exchange = payload_string(payload, "exchange")
+            .map(|value| parse_exchange(&value))
+            .transpose()?
+            .unwrap_or(self.exchange);
+        let symbol = payload_string(payload, "symbol").unwrap_or_else(|| self.symbol.clone());
+        let order_type = payload_string(payload, "order_type")
+            .map(|value| parse_order_type(&value))
+            .transpose()?
+            .unwrap_or(OrderType::Market);
+
+        Ok(Some(OrderPlacementRequest {
+            exchange,
+            instrument: parse_instrument(&symbol)?,
+            side,
+            order_type,
+            size: payload_string(payload, "size")
+                .or_else(|| payload_string(payload, "quantity"))
+                .or_else(|| payload_string(payload, "qty"))
+                .unwrap_or_else(|| "0".to_string()),
+            price: payload_string(payload, "price"),
+            margin_mode: payload_string(payload, "margin_mode").map(MarginMode::from),
+            margin_coin: payload_string(payload, "margin_coin"),
+            position_side: payload_string(payload, "position_side"),
+            trade_side: payload_string(payload, "trade_side").or_else(|| Some("close".to_string())),
+            client_order_id: payload_string(payload, "client_order_id")
+                .or_else(|| Some(format!("rq-close-task-{}", self.task_id))),
+            reduce_only: payload_bool(payload, "reduce_only").or(Some(true)),
+            time_in_force: payload_string(payload, "time_in_force")
+                .map(|value| parse_time_in_force(&value))
+                .transpose()?,
+        }))
+    }
+
+    fn dry_run_report(&self) -> ExecutionTaskReportRequest {
+        ExecutionTaskReportRequest::success(
+            self.task_id,
+            self.exchange.as_str(),
+            format!("dry-run-close-task-{}", self.task_id),
+            "close",
+            "dry_run",
+            self.report_payload(true),
+        )
+    }
+
+    fn missing_live_contract_message(&self) -> String {
+        "pending_close task requires Web close_order payload before live execution".to_string()
+    }
+
+    fn report_payload(&self, dry_run: bool) -> Value {
+        json!({
+            "dry_run": dry_run,
+            "task_type": self.task_type.clone(),
+            "task_status": self.task_status.clone(),
+            "symbol": self.symbol.clone(),
+            "risk_control_action": self.risk_control_action.clone(),
+            "manual_review": self.manual_review.clone(),
+            "close_order": self.close_order_payload.clone(),
+        })
+    }
 }
 
 impl ExecutionOrderTask {
@@ -613,6 +863,11 @@ fn is_zero_order_size(value: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn is_pending_close_task(task: &ExecutionTask) -> bool {
+    task.task_type == "risk_control_close_candidate"
+        && matches!(task.task_status.as_str(), "pending_close" | "leased")
+}
+
 fn payload_bool(payload: &Value, key: &str) -> Option<bool> {
     payload.get(key).and_then(|value| match value {
         Value::Bool(raw) => Some(*raw),
@@ -623,6 +878,43 @@ fn payload_bool(payload: &Value, key: &str) -> Option<bool> {
         },
         _ => None,
     })
+}
+
+fn close_order_side(payload: &Value) -> Result<OrderSide> {
+    if let Some(side) = payload_string(payload, "side") {
+        return parse_side(&side);
+    }
+    if let Some(position_side) = payload_string(payload, "position_side") {
+        return match position_side.trim().to_ascii_lowercase().as_str() {
+            "long" => Ok(OrderSide::Sell),
+            "short" => Ok(OrderSide::Buy),
+            other => Err(anyhow!(
+                "unsupported close_order.position_side for pending_close: {}",
+                other
+            )),
+        };
+    }
+    Err(anyhow!(
+        "pending_close close_order requires side or position_side"
+    ))
+}
+
+fn parse_env_list(key: &str, defaults: &[&str]) -> Vec<String> {
+    let values = std::env::var(key)
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if values.is_empty() {
+        defaults.iter().map(|value| value.to_string()).collect()
+    } else {
+        values
+    }
 }
 
 fn parse_exchange(raw: &str) -> Result<ExchangeId> {
@@ -689,6 +981,14 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn task(payload: serde_json::Value) -> ExecutionTask {
+        task_with_metadata("execute_signal", "pending", payload)
+    }
+
+    fn task_with_metadata(
+        task_type: &str,
+        task_status: &str,
+        payload: serde_json::Value,
+    ) -> ExecutionTask {
         ExecutionTask {
             id: 42,
             news_signal_id: Some(7),
@@ -697,8 +997,8 @@ mod tests {
             buyer_email: "buyer@example.com".to_string(),
             strategy_slug: "news_momentum".to_string(),
             symbol: "BTC-USDT-SWAP".to_string(),
-            task_type: "execute_signal".to_string(),
-            task_status: "pending".to_string(),
+            task_type: task_type.to_string(),
+            task_status: task_status.to_string(),
             priority: 3,
             lease_owner: None,
             lease_until: None,
@@ -851,6 +1151,141 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pending_close_task_dry_run_reports_close_candidate_result() {
+        let worker = ExecutionWorker::new(
+            ExecutionTaskClient::new(ExecutionTaskConfig {
+                base_url: "http://127.0.0.1".to_string(),
+                internal_secret: String::new(),
+            })
+            .unwrap(),
+            CryptoExcAllGateway::dry_run(),
+            ExecutionWorkerConfig {
+                worker_id: "worker-close".to_string(),
+                lease_limit: 1,
+                dry_run: true,
+                default_exchange: ExchangeId::Binance,
+                task_types: vec![
+                    "execute_signal".to_string(),
+                    "risk_control_close_candidate".to_string(),
+                ],
+                task_statuses: vec!["pending".to_string(), "pending_close".to_string()],
+            },
+        );
+        let task = task_with_metadata(
+            "risk_control_close_candidate",
+            "pending_close",
+            json!({
+                "symbol": "BTC-USDT-SWAP",
+                "manual_review": {
+                    "task_type": "risk_control_close_candidate",
+                    "action": "close_candidate",
+                    "category": "exchange_delisting"
+                },
+                "risk_control": {
+                    "action": "close_candidate",
+                    "category": "exchange_delisting",
+                    "auto_execution_allowed": false
+                }
+            }),
+        );
+
+        let report = worker.execute_task(&task).await;
+        let raw_payload =
+            serde_json::from_str::<Value>(report.raw_payload_json.as_deref().expect("raw payload"))
+                .expect("raw payload json");
+
+        assert_eq!(report.execution_status, "completed");
+        assert_eq!(report.exchange, "binance");
+        assert_eq!(report.order_side, "close");
+        assert_eq!(report.order_status, "dry_run");
+        assert_eq!(raw_payload["task_type"], "risk_control_close_candidate");
+        assert_eq!(raw_payload["task_status"], "pending_close");
+        assert_eq!(raw_payload["risk_control_action"], "close_candidate");
+        assert_eq!(raw_payload["symbol"], "BTC-USDT-SWAP");
+    }
+
+    #[tokio::test]
+    async fn leased_risk_close_candidate_still_uses_pending_close_order_path() {
+        let worker = ExecutionWorker::new(
+            ExecutionTaskClient::new(ExecutionTaskConfig {
+                base_url: "http://127.0.0.1".to_string(),
+                internal_secret: String::new(),
+            })
+            .unwrap(),
+            CryptoExcAllGateway::dry_run(),
+            ExecutionWorkerConfig {
+                worker_id: "worker-close".to_string(),
+                lease_limit: 1,
+                dry_run: true,
+                default_exchange: ExchangeId::Binance,
+                task_types: vec!["risk_control_close_candidate".to_string()],
+                task_statuses: vec!["pending_close".to_string()],
+            },
+        );
+        let task = task_with_metadata(
+            "risk_control_close_candidate",
+            "leased",
+            json!({
+                "symbol": "ETH-USDT-SWAP",
+                "close_order_status": "ready",
+                "close_order": {
+                    "exchange": "binance",
+                    "symbol": "ETH-USDT-SWAP",
+                    "position_side": "long",
+                    "side": "sell",
+                    "size": 0.42,
+                    "order_type": "market",
+                    "reduce_only": true
+                },
+                "signal_type": "hold"
+            }),
+        );
+
+        let report = worker.execute_task(&task).await;
+
+        assert_eq!(report.execution_status, "completed");
+        assert_eq!(report.exchange, "binance");
+        assert_eq!(report.order_side, "sell");
+        assert_ne!(report.order_status, "failed");
+    }
+
+    #[test]
+    fn pending_close_task_maps_web_close_order_to_reduce_only_order() {
+        let task = task_with_metadata(
+            "risk_control_close_candidate",
+            "pending_close",
+            json!({
+                "symbol": "ETH-USDT-SWAP",
+                "close_order_status": "ready",
+                "close_order": {
+                    "exchange": "binance",
+                    "symbol": "ETH-USDT-SWAP",
+                    "position_side": "long",
+                    "side": "sell",
+                    "size": 0.42,
+                    "order_type": "market",
+                    "reduce_only": true
+                }
+            }),
+        );
+
+        let close_task = PendingCloseTask::from_task(&task, ExchangeId::Okx).unwrap();
+        let order = close_task
+            .to_order_request()
+            .unwrap()
+            .expect("close_order should map to an executable order");
+
+        assert_eq!(order.exchange.as_str(), "binance");
+        assert_eq!(order.instrument.symbol_for(order.exchange), "ETHUSDT");
+        assert_eq!(order_side_lower(order.side), "sell");
+        assert_eq!(order.size, "0.42");
+        assert_eq!(order.position_side.as_deref(), Some("long"));
+        assert_eq!(order.trade_side.as_deref(), Some("close"));
+        assert_eq!(order.reduce_only, Some(true));
+        assert_eq!(order.client_order_id.as_deref(), Some("rq-close-task-42"));
+    }
+
+    #[tokio::test]
     async fn dry_run_worker_records_audit_and_checkpoint_through_repository() {
         let repository = Arc::new(CapturingAuditRepository::default());
         let worker = ExecutionWorker::new(
@@ -865,6 +1300,11 @@ mod tests {
                 lease_limit: 1,
                 dry_run: true,
                 default_exchange: ExchangeId::Okx,
+                task_types: vec![
+                    "execute_signal".to_string(),
+                    "risk_control_close_candidate".to_string(),
+                ],
+                task_statuses: vec!["pending".to_string(), "pending_close".to_string()],
             },
         )
         .with_audit_repository(repository.clone());
@@ -929,6 +1369,11 @@ mod tests {
                 lease_limit: 1,
                 dry_run: true,
                 default_exchange: ExchangeId::Okx,
+                task_types: vec![
+                    "execute_signal".to_string(),
+                    "risk_control_close_candidate".to_string(),
+                ],
+                task_statuses: vec!["pending".to_string(), "pending_close".to_string()],
             },
         );
         let task = task(json!({

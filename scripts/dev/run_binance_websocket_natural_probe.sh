@@ -18,12 +18,15 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 : "${SMOKE_MIN_K_LINE_NUM:="60"}"
 : "${SMOKE_SYNC_TIMEOUT_SECS:="180"}"
 : "${SMOKE_LIVE_TIMEOUT_SECS:="150"}"
+: "${BINANCE_CONNECTIVITY_PREFLIGHT:="true"}"
+: "${BINANCE_CONNECTIVITY_ALLOW_FAILURE:="false"}"
 : "${POSTGRES_CONTAINER:="postgres"}"
 : "${POSTGRES_USER:="postgres"}"
 : "${QUANT_CORE_POSTGRES_DB:="quant_core"}"
 : "${WEB_POSTGRES_DB:="quant_web"}"
 
 WEB_SEED_SCRIPT="${REPO_ROOT}/../rust_quan_web/backend/scripts/dev/seed_execution_demo_combo.sh"
+CONNECTIVITY_SCRIPT="${REPO_ROOT}/scripts/dev/check_binance_connectivity.sh"
 LOG_FILE="${TMPDIR:-/tmp}/rust_quant_binance_websocket_natural_probe.$$.log"
 RUST_QUANT_PID=""
 WEB_READY="false"
@@ -149,6 +152,23 @@ export WEB_DATABASE_URL
 export RUSTC
 
 cd "${REPO_ROOT}"
+
+if [[ "${BINANCE_CONNECTIVITY_PREFLIGHT}" == "true" ]]; then
+    echo
+    echo "Running Binance connectivity preflight"
+    echo "  script: ${CONNECTIVITY_SCRIPT}"
+    if ! "${CONNECTIVITY_SCRIPT}"; then
+        if [[ "${BINANCE_CONNECTIVITY_ALLOW_FAILURE}" == "true" ]]; then
+            echo "Binance connectivity preflight failed, but continuing because BINANCE_CONNECTIVITY_ALLOW_FAILURE=true." >&2
+        else
+            echo "Binance connectivity preflight failed. Refusing natural probe blind run." >&2
+            exit 2
+        fi
+    fi
+else
+    echo
+    echo "Skipping Binance connectivity preflight"
+fi
 
 if [[ -x "${WEB_SEED_SCRIPT}" ]] && run_web_sql -Atc "SELECT 1" >/dev/null 2>&1; then
     WEB_READY="true"

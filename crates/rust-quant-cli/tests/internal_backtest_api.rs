@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use rust_quant_cli::app::internal_server::{backtest_config_from_body, handle_backtest_run_body};
+use rust_quant_cli::app::internal_server::{
+    backtest_config_from_body, handle_backtest_run_body, handle_exchange_symbol_sync_body,
+};
 
 #[tokio::test]
 async fn dry_run_backtest_request_returns_admin_adapter_fields() {
@@ -109,4 +111,15 @@ fn backtest_config_carries_strategy_config_id_for_exact_row_runs() {
         config.strategy_config_id.as_deref(),
         Some("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
     );
+}
+
+#[tokio::test]
+async fn exchange_symbol_sync_request_rejects_invalid_json_before_running_job() {
+    let response = handle_exchange_symbol_sync_body(b"{not-json").await;
+
+    assert_eq!(response.status_code, 400);
+    assert!(response.body["error"]
+        .as_str()
+        .expect("error")
+        .contains("invalid json body"));
 }

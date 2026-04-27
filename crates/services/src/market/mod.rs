@@ -32,8 +32,9 @@ pub use data_sync_service::DataSyncService;
 pub use dune_market_sync_service::{DuneMarketSyncService, DuneSqlRunner};
 pub use economic_calendar_sync_service::{EconomicCalendarSyncService, EconomicEventQueryService};
 pub use exchange_symbol_sync_service::{
-    BinanceExchangeInfoProvider, ExchangeSymbolSyncService, LiveBinanceExchangeInfoProvider,
-    MajorExchangeListingSignal, StaticExchangeInfoProvider,
+    default_exchange_symbol_sync_sources, normalize_exchange_symbol_sync_source,
+    parse_exchange_symbol_sync_sources, BinanceExchangeInfoProvider, ExchangeSymbolSyncService,
+    LiveBinanceExchangeInfoProvider, MajorExchangeListingSignal, StaticExchangeInfoProvider,
 };
 pub use external_market_sync_service::{
     normalize_external_market_symbol, ExternalMarketDataProvider, ExternalMarketSource,
