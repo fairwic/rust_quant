@@ -182,7 +182,9 @@ Vegas 4H 后续优化统一按以下优先级执行：
 TIGHTEN_VEGAS_RISK=0 \
 IS_RUN_SYNC_DATA_JOB=0 \
 SYNC_ONLY_INST_IDS=ETH-USDT-SWAP \
-DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' \
+QUANT_CORE_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/quant_core' \
+STRATEGY_CONFIG_SOURCE=quant_core \
+CANDLE_SOURCE=quant_core \
 cargo run --bin rust_quant
 ```
 

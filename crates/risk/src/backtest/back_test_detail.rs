@@ -1,8 +1,8 @@
 use anyhow::Result;
 use chrono::{Local, NaiveDateTime};
-use rust_quant_core::database::get_db_pool;
+use rust_quant_market::get_quant_core_postgres_pool;
 use serde_json::json;
-use sqlx::{FromRow, MySql};
+use sqlx::{FromRow, Postgres};
 use tracing::{debug, info};
 
 /// 回测详情记录
@@ -41,16 +41,17 @@ pub struct BackTestDetailModel;
 impl BackTestDetailModel {
     /// 添加单条回测详情记录
     pub async fn add(&self, detail: &BackTestDetail) -> Result<i64> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
 
-        let result = sqlx::query(
+        let last_id = sqlx::query_scalar(
             r#"
             INSERT INTO back_test_detail (
                 back_test_id, inst_id, time, strategy_type, option_type,
                 signal_open_position_time, open_position_time, close_position_time,
                 open_price, close_price, fee, profit_loss, quantity, full_close,
                 close_type, signal_status, signal_value, signal_result, win_nums, loss_nums
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+            RETURNING id::bigint
             "#,
         )
         .bind(detail.back_test_id)
@@ -73,10 +74,8 @@ impl BackTestDetailModel {
         .bind(detail.signal_result.clone())
         .bind(detail.win_nums)
         .bind(detail.loss_nums)
-        .execute(pool)
+        .fetch_one(pool)
         .await?;
-
-        let last_id = result.last_insert_id() as i64;
         debug!(
             "insert_back_test_detail_result = {}",
             json!({"id": last_id})
@@ -90,14 +89,14 @@ impl BackTestDetailModel {
             return Ok(0);
         }
 
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
         let start_time = Local::now();
         let mut total_affected = 0u64;
 
         // 分批插入，每批 100 条
         const BATCH_SIZE: usize = 100;
         for chunk in details.chunks(BATCH_SIZE) {
-            let mut query_builder = sqlx::QueryBuilder::<MySql>::new(
+            let mut query_builder = sqlx::QueryBuilder::<Postgres>::new(
                 r#"INSERT INTO back_test_detail (
                     back_test_id, inst_id, time, strategy_type, option_type,
                     signal_open_position_time, open_position_time, close_position_time,
@@ -148,10 +147,10 @@ impl BackTestDetailModel {
 
     /// 根据 back_test_id 查询详情
     pub async fn find_by_back_test_id(&self, back_test_id: i64) -> Result<Vec<BackTestDetail>> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
 
         let details = sqlx::query_as::<_, BackTestDetail>(
-            "SELECT * FROM back_test_detail WHERE back_test_id = ? ORDER BY open_position_time ASC",
+            "SELECT * FROM back_test_detail WHERE back_test_id = $1 ORDER BY open_position_time ASC",
         )
         .bind(back_test_id)
         .fetch_all(pool)
@@ -162,9 +161,9 @@ impl BackTestDetailModel {
 
     /// 删除指定 back_test_id 的详情
     pub async fn delete_by_back_test_id(&self, back_test_id: i64) -> Result<u64> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
 
-        let result = sqlx::query("DELETE FROM back_test_detail WHERE back_test_id = ?")
+        let result = sqlx::query("DELETE FROM back_test_detail WHERE back_test_id = $1")
             .bind(back_test_id)
             .execute(pool)
             .await?;

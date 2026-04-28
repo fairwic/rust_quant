@@ -114,10 +114,7 @@ derive_runtime_strategy_version() {
     printf 'smoke-binance-websocket-natural-%s-%s' "${symbol_slug}" "${period_slug}"
 }
 
-if [[ -z "${SMOKE_SOURCE_STRATEGY_VERSION}" && "${SMOKE_STRATEGY_VERSION}" == legacy-mysql* ]]; then
-    SMOKE_SOURCE_STRATEGY_VERSION="${SMOKE_STRATEGY_VERSION}"
-    SMOKE_STRATEGY_VERSION="$(derive_runtime_strategy_version "${SMOKE_SYMBOL}" "${SMOKE_PERIOD}")"
-elif [[ -z "${SMOKE_SOURCE_STRATEGY_VERSION}" ]]; then
+if [[ -z "${SMOKE_SOURCE_STRATEGY_VERSION}" ]]; then
     SMOKE_SOURCE_STRATEGY_VERSION="${SMOKE_STRATEGY_VERSION}"
 fi
 
@@ -194,7 +191,7 @@ fi
 SMOKE_TABLE="$(printf '%s' "${SMOKE_SYMBOL}" | tr '[:upper:]' '[:lower:]')_candles_$(normalize_table_suffix "${SMOKE_PERIOD}")"
 
 echo
-EXISTING_STRATEGY_CONFIG_COUNT="$(query_quant_scalar "SELECT COUNT(*) FROM strategy_configs WHERE strategy_key = '${SMOKE_STRATEGY_KEY}' AND version = '${SMOKE_STRATEGY_VERSION}' AND version NOT LIKE 'legacy-mysql%' AND exchange = 'binance' AND symbol = '${SMOKE_SYMBOL}' AND timeframe = '${SMOKE_PERIOD}' AND enabled = true;")"
+EXISTING_STRATEGY_CONFIG_COUNT="$(query_quant_scalar "SELECT COUNT(*) FROM strategy_configs WHERE strategy_key = '${SMOKE_STRATEGY_KEY}' AND version = '${SMOKE_STRATEGY_VERSION}' AND exchange = 'binance' AND symbol = '${SMOKE_SYMBOL}' AND timeframe = '${SMOKE_PERIOD}' AND enabled = true;")"
 if [[ "${EXISTING_STRATEGY_CONFIG_COUNT}" != "0" ]]; then
     echo "Using existing runtime strategy config"
     echo "  strategy_key: ${SMOKE_STRATEGY_KEY}"
@@ -224,7 +221,7 @@ fallback_seed AS (
       AND exchange = 'binance'
       AND symbol = '${SMOKE_SYMBOL}'
       AND enabled = true
-      AND version NOT LIKE 'legacy-mysql%'
+      AND version NOT LIKE 'smoke-binance-websocket-natural-%'
     ORDER BY
       CASE
         WHEN timeframe = '${SMOKE_PERIOD}' THEN 0

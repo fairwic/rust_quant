@@ -57,10 +57,10 @@ impl BacktestExecutor {
         time: &str,
         strategy: VegasStrategy,
         risk_strategy_config: BasicRiskStrategyConfig,
-        mysql_candles: Arc<Vec<CandleItem>>,
+        source_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64> {
         let adapter = VegasBacktestAdapter::new(strategy);
-        self.run_strategy_backtest(inst_id, time, adapter, risk_strategy_config, mysql_candles)
+        self.run_strategy_backtest(inst_id, time, adapter, risk_strategy_config, source_candles)
             .await
     }
 
@@ -71,10 +71,16 @@ impl BacktestExecutor {
         time: &str,
         strategy: NweStrategy,
         risk_strategy_config: BasicRiskStrategyConfig,
-        mysql_candles: Arc<Vec<CandleItem>>,
+        source_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64> {
-        self.run_strategy_backtest(inst_id, time, strategy, risk_strategy_config, mysql_candles)
-            .await
+        self.run_strategy_backtest(
+            inst_id,
+            time,
+            strategy,
+            risk_strategy_config,
+            source_candles,
+        )
+        .await
     }
 
     /// 获取K线数据并确认
@@ -88,14 +94,14 @@ impl BacktestExecutor {
         let start_time = Instant::now();
 
         let db_query_start = Instant::now();
-        let mysql_candles = self
+        let source_candles = self
             .candle_service
             .get_confirmed_candles_for_backtest(inst_id, period, limit, select_time)
             .await?;
         let db_query_duration = db_query_start.elapsed();
 
         let validation_start = Instant::now();
-        data_validator::valid_candles_continuity(&mysql_candles, period)?;
+        data_validator::valid_candles_continuity(&source_candles, period)?;
         let validation_duration = validation_start.elapsed();
 
         let total_duration = start_time.elapsed();
@@ -104,10 +110,10 @@ impl BacktestExecutor {
             total_duration.as_millis(),
             db_query_duration.as_millis(),
             validation_duration.as_millis(),
-            mysql_candles.len()
+            source_candles.len()
         );
 
-        Ok(mysql_candles)
+        Ok(source_candles)
     }
 
     /// 加载并转换K线数据
@@ -125,18 +131,20 @@ impl BacktestExecutor {
         );
 
         let data_fetch_start = Instant::now();
-        let mysql_candles = self
+        let source_candles = self
             .get_candle_data_confirm(inst_id, time, limit, select_time)
             .await
             .map_err(|e| anyhow!("获取K线数据失败: {}", e))?;
         let data_fetch_duration = data_fetch_start.elapsed();
 
-        if mysql_candles.is_empty() {
+        if source_candles.is_empty() {
             return Err(anyhow!("K线数据为空"));
         }
 
         let data_convert_start = Instant::now();
-        let candle_item_vec = self.candle_service.convert_candles_to_items(&mysql_candles);
+        let candle_item_vec = self
+            .candle_service
+            .convert_candles_to_items(&source_candles);
         let data_convert_duration = data_convert_start.elapsed();
 
         let total_duration = start_time.elapsed();
@@ -166,7 +174,7 @@ impl BacktestExecutor {
 
             let inst_id = inst_id.to_string();
             let time = time.to_string();
-            let mysql_candles = Arc::clone(&arc_candle_item_clone);
+            let source_candles = Arc::clone(&arc_candle_item_clone);
             let permit = Arc::clone(&semaphore);
 
             // 创建任务
@@ -179,7 +187,7 @@ impl BacktestExecutor {
                         &time,
                         strategy,
                         risk_strategy_config,
-                        mysql_candles,
+                        source_candles,
                     )
                     .await
                 {
@@ -213,14 +221,14 @@ impl BacktestExecutor {
             let strategy = NweStrategy::new(cfg);
             let inst_id = inst_id.to_string();
             let time = time.to_string();
-            let mysql_candles = Arc::clone(&arc_candle_item_clone);
+            let source_candles = Arc::clone(&arc_candle_item_clone);
             let permit = Arc::clone(&semaphore);
 
             let executor = self.clone_for_spawn();
             batch_tasks.push(tokio::spawn(async move {
                 let _permit: tokio::sync::SemaphorePermit<'_> = permit.acquire().await.unwrap();
                 match executor
-                    .run_nwe_test(&inst_id, &time, strategy, risk_cfg, mysql_candles)
+                    .run_nwe_test(&inst_id, &time, strategy, risk_cfg, source_candles)
                     .await
                 {
                     Ok(back_test_id) => Some(back_test_id),
@@ -250,7 +258,7 @@ impl BacktestExecutor {
         period: &str,
         mut strategy: S,
         risk_strategy_config: BasicRiskStrategyConfig,
-        mysql_candles: Arc<Vec<CandleItem>>,
+        source_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64>
     where
         S: BackTestAbleStrategyTrait + Send + 'static,
@@ -260,7 +268,7 @@ impl BacktestExecutor {
         let start_time = Instant::now();
         let strategy_type = strategy.strategy_type();
         let config_desc = strategy.config_json();
-        let res = strategy.run_test(inst_id, &mysql_candles, risk_strategy_config);
+        let res = strategy.run_test(inst_id, &source_candles, risk_strategy_config);
 
         let back_test_id = self
             .backtest_service
@@ -269,7 +277,7 @@ impl BacktestExecutor {
                 period,
                 config_desc,
                 res,
-                &mysql_candles,
+                &source_candles,
                 risk_strategy_config,
                 strategy_type.as_str(),
             )

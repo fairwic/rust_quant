@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use rust_quant_core::database::get_db_pool;
 use rust_quant_domain::entities::ExternalMarketSnapshot;
-use sqlx::{FromRow, MySql, Pool, QueryBuilder};
+use sqlx::{FromRow, PgPool, Postgres, QueryBuilder};
 use std::collections::HashMap;
 
 use super::report::{render_path_impact_report, render_report};
@@ -86,7 +86,7 @@ struct FilteredSignalSampleRow {
 }
 
 pub struct VegasFactorResearchService {
-    pool: Pool<MySql>,
+    pool: PgPool,
 }
 
 impl VegasFactorResearchService {
@@ -108,7 +108,7 @@ impl VegasFactorResearchService {
         })
     }
 
-    pub fn with_pool(pool: Pool<MySql>) -> Self {
+    pub fn with_pool(pool: PgPool) -> Self {
         Self { pool }
     }
 
@@ -484,10 +484,10 @@ impl VegasFactorResearchService {
         if backtest_ids.is_empty() {
             return Err(anyhow!("backtest ids 不能为空"));
         }
-        let mut builder = QueryBuilder::<MySql>::new(
+        let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT o.back_test_id as backtest_id, o.inst_id, o.time as timeframe, o.option_type as side, \
              o.open_position_time as open_time, c.close_position_time as close_time, \
-             CAST(COALESCE(NULLIF(c.profit_loss, ''), NULLIF(o.profit_loss, '')) AS DOUBLE) as pnl, c.close_type, c.stop_loss_source, \
+             COALESCE(NULLIF(c.profit_loss, ''), NULLIF(o.profit_loss, ''))::double precision as pnl, c.close_type, c.stop_loss_source, \
              NULLIF(o.signal_value, '') as signal_value, NULLIF(o.signal_result, '') as signal_result \
              FROM back_test_detail o \
              LEFT JOIN back_test_detail c \
@@ -522,10 +522,10 @@ impl VegasFactorResearchService {
             return Ok(Vec::new());
         }
 
-        let mut builder = QueryBuilder::<MySql>::new(
+        let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT backtest_id, inst_id, period as timeframe, direction, signal_time, \
-             CAST(final_pnl AS DOUBLE) as theoretical_pnl, trade_result, \
-             CAST(filter_reasons AS CHAR) as filter_reasons, CAST(signal_value AS CHAR) as signal_value \
+             final_pnl::double precision as theoretical_pnl, trade_result, \
+             filter_reasons::text as filter_reasons, signal_value::text as signal_value \
              FROM filtered_signal_log WHERE period = ",
         );
         builder.push_bind(&query.timeframe);
@@ -598,14 +598,14 @@ impl VegasFactorResearchService {
             .max()
             .unwrap_or_default();
 
-        let mut builder = QueryBuilder::<MySql>::new(
+        let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT id, source, symbol, metric_type, metric_time, \
-             CAST(NULLIF(funding_rate, '') AS DOUBLE) as funding_rate, \
-             CAST(NULLIF(premium, '') AS DOUBLE) as premium, \
-             CAST(NULLIF(open_interest, '') AS DOUBLE) as open_interest, \
-             CAST(NULLIF(oracle_price, '') AS DOUBLE) as oracle_price, \
-             CAST(NULLIF(mark_price, '') AS DOUBLE) as mark_price, \
-             CAST(NULLIF(long_short_ratio, '') AS DOUBLE) as long_short_ratio, \
+             NULLIF(funding_rate, '')::double precision as funding_rate, \
+             NULLIF(premium, '')::double precision as premium, \
+             NULLIF(open_interest, '')::double precision as open_interest, \
+             NULLIF(oracle_price, '')::double precision as oracle_price, \
+             NULLIF(mark_price, '')::double precision as mark_price, \
+             NULLIF(long_short_ratio, '')::double precision as long_short_ratio, \
              raw_payload, created_at, updated_at \
              FROM external_market_snapshots WHERE metric_time >= ",
         );
@@ -643,9 +643,9 @@ impl VegasFactorResearchService {
             .iter()
             .map(|symbol| format!("{}-USDT-SWAP", symbol))
             .collect();
-        let mut builder = QueryBuilder::<MySql>::new(
-            "SELECT inst_id, funding_time, CAST(NULLIF(funding_rate, '') AS DOUBLE) as funding_rate, \
-             CAST(NULLIF(premium, '') AS DOUBLE) as premium FROM funding_rates WHERE funding_time >= ",
+        let mut builder = QueryBuilder::<Postgres>::new(
+            "SELECT inst_id, funding_time, NULLIF(funding_rate, '')::double precision as funding_rate, \
+             NULLIF(premium, '')::double precision as premium FROM funding_rates WHERE funding_time >= ",
         );
         builder.push_bind(min_time);
         builder.push(" AND funding_time <= ");

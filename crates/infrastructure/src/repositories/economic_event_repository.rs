@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use sqlx::{FromRow, MySql, Pool};
+use sqlx::{FromRow, PgPool};
 use tracing::error;
 
 use rust_quant_domain::entities::economic_event::EconomicEvent;
@@ -53,11 +53,11 @@ impl EconomicEventEntity {
 
 /// 基于 sqlx 的经济事件仓储实现
 pub struct SqlxEconomicEventRepository {
-    pool: Pool<MySql>,
+    pool: PgPool,
 }
 
 impl SqlxEconomicEventRepository {
-    pub fn new(pool: Pool<MySql>) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
@@ -112,21 +112,21 @@ impl EconomicEventRepository for SqlxEconomicEventRepository {
                 calendar_id, event_time, region, category, event, ref_date,
                 actual, previous, forecast, importance, updated_time,
                 prev_initial, currency, unit
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                event_time = VALUES(event_time),
-                region = VALUES(region),
-                category = VALUES(category),
-                event = VALUES(event),
-                ref_date = VALUES(ref_date),
-                actual = VALUES(actual),
-                previous = VALUES(previous),
-                forecast = VALUES(forecast),
-                importance = VALUES(importance),
-                updated_time = VALUES(updated_time),
-                prev_initial = VALUES(prev_initial),
-                currency = VALUES(currency),
-                unit = VALUES(unit)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT (calendar_id) DO UPDATE SET
+                event_time = EXCLUDED.event_time,
+                region = EXCLUDED.region,
+                category = EXCLUDED.category,
+                event = EXCLUDED.event,
+                ref_date = EXCLUDED.ref_date,
+                actual = EXCLUDED.actual,
+                previous = EXCLUDED.previous,
+                forecast = EXCLUDED.forecast,
+                importance = EXCLUDED.importance,
+                updated_time = EXCLUDED.updated_time,
+                prev_initial = EXCLUDED.prev_initial,
+                currency = EXCLUDED.currency,
+                unit = EXCLUDED.unit
         ";
 
         sqlx::query(query)
@@ -162,7 +162,7 @@ impl EconomicEventRepository for SqlxEconomicEventRepository {
     }
 
     async fn find_by_calendar_id(&self, calendar_id: &str) -> Result<Option<EconomicEvent>> {
-        let query = "SELECT * FROM economic_events WHERE calendar_id = ?";
+        let query = "SELECT * FROM economic_events WHERE calendar_id = $1";
 
         let entity = sqlx::query_as::<_, EconomicEventEntity>(query)
             .bind(calendar_id)
@@ -185,7 +185,7 @@ impl EconomicEventRepository for SqlxEconomicEventRepository {
         let min_imp = min_importance.unwrap_or(1);
         let query = "
             SELECT * FROM economic_events 
-            WHERE event_time >= ? AND event_time <= ? AND importance >= ?
+            WHERE event_time >= $1 AND event_time <= $2 AND importance >= $3
             ORDER BY event_time ASC
         ";
 
@@ -234,7 +234,7 @@ impl EconomicEventRepository for SqlxEconomicEventRepository {
         let end_time = current_time + window_ms;
         let query = "
             SELECT * FROM economic_events 
-            WHERE event_time >= ? AND event_time <= ? AND importance >= ?
+            WHERE event_time >= $1 AND event_time <= $2 AND importance >= $3
             ORDER BY event_time ASC
         ";
 
@@ -267,7 +267,7 @@ impl EconomicEventRepository for SqlxEconomicEventRepository {
 
         let query = "
             SELECT * FROM economic_events 
-            WHERE event_time >= ? AND event_time <= ? AND importance >= ?
+            WHERE event_time >= $1 AND event_time <= $2 AND importance >= $3
             ORDER BY event_time ASC
         ";
 
@@ -289,7 +289,7 @@ impl EconomicEventRepository for SqlxEconomicEventRepository {
         let query = "
             SELECT importance, COUNT(*) as cnt 
             FROM economic_events 
-            WHERE event_time >= ? AND event_time <= ?
+            WHERE event_time >= $1 AND event_time <= $2
             GROUP BY importance
             ORDER BY importance
         ";

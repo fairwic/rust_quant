@@ -36,6 +36,6 @@ fn natural_binance_websocket_probe_script_stays_dry_run_and_does_not_force_signa
     assert!(script.contains("CREATED_TEMP_STRATEGY_CONFIG"));
     assert!(script.contains("Using existing runtime strategy config"));
     assert!(script.contains("Preparing temporary runtime strategy config"));
-    assert!(script.contains("version NOT LIKE 'legacy-mysql%'"));
+    assert!(script.contains("version NOT LIKE 'smoke-binance-websocket-natural-%'"));
     assert!(!script.contains("RUST_QUANT_SMOKE_FORCE_SIGNAL="));
 }

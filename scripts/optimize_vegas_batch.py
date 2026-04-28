@@ -10,30 +10,24 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
+from postgres_backtest import (
+    binary_database_env,
+    query_rows,
+    query_scalar,
+    repo_root,
+    run_sql,
+    sql_quote,
+)
 
-ROOT = Path("/Users/xu/onions/rust_quant")
+ROOT = repo_root()
 REPORT_DIR = ROOT / "docs" / "backtest_reports"
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
-MYSQL_CMD = [
-    "podman",
-    "exec",
-    "-i",
-    "mysql",
-    "mysql",
-    "-uroot",
-    "-pexample",
-    "test",
-    "-N",
-    "-B",
-]
-
 RUN_ENV = {
     "TIGHTEN_VEGAS_RISK": "0",
-    "DB_HOST": "mysql://root:example@localhost:33306/test?ssl-mode=DISABLED",
+    **binary_database_env(),
 }
 
 BASELINE_BACKTEST_ID = 15690
@@ -70,28 +64,14 @@ def run_cmd(cmd: list[str], *, env: dict[str, str] | None = None) -> subprocess.
     )
 
 
-def mysql_query(sql: str) -> str:
-    result = run_cmd(MYSQL_CMD + ["-e", sql])
-    lines = [
-        line
-        for line in result.stdout.splitlines()
-        if line.strip() and not line.startswith("mysql: [Warning]")
-    ]
-    return "\n".join(lines).strip()
-
-
-def mysql_exec(sql: str) -> None:
-    run_cmd(MYSQL_CMD + ["-e", sql])
-
-
-def sql_quote(text: str) -> str:
-    return "'" + text.replace("\\", "\\\\").replace("'", "''") + "'"
-
-
 def fetch_current_config() -> tuple[dict[str, Any], dict[str, Any]]:
     sql = "select value, risk_config from strategy_config where id=11;"
-    output = mysql_query(sql)
-    value_raw, risk_raw = output.split("\t", 1)
+    output = query_scalar(
+        "SELECT row_to_json(config_row)::text "
+        "FROM (SELECT value, risk_config FROM strategy_config WHERE id = 11) config_row"
+    )
+    row = json.loads(output)
+    value_raw, risk_raw = row["value"], row["risk_config"]
     return json.loads(value_raw), json.loads(risk_raw)
 
 
@@ -103,7 +83,7 @@ def update_strategy_config(value: dict[str, Any], risk: dict[str, Any]) -> None:
         f"value={sql_quote(value_json)}, risk_config={sql_quote(risk_json)} "
         "where id=11;"
     )
-    mysql_exec(sql)
+    run_sql(sql)
 
 
 def fetch_metrics(backtest_id: int) -> Metrics:
@@ -112,8 +92,8 @@ def fetch_metrics(backtest_id: int) -> Metrics:
         "open_positions_num, created_at "
         f"from back_test_log where id={backtest_id};"
     )
-    output = mysql_query(sql)
-    cols = output.split("\t")
+    rows = query_rows(sql)
+    cols = list(rows[0].values())
     return Metrics(
         backtest_id=int(cols[0]),
         win_rate=float(cols[1]),

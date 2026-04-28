@@ -49,6 +49,20 @@
 ./scripts/dev/run_execution_worker_dry_run.sh
 ```
 
+如果想优先走更稳的“已有二进制 + 前置诊断”入口，执行：
+
+```bash
+./scripts/dev/run_execution_worker_local_preflight.sh
+```
+
+这个 preflight launcher 会先检查：
+
+- `target/debug/rust_quant` 是否已经存在；存在时直接强制 `EXECUTION_WORKER_USE_EXISTING_BINARY=true`，避免再次触发 cargo 编译。
+- 当前 PATH 是否落在 Homebrew 的 `/opt/homebrew/bin/cargo` / `rustc`；这是本地最常见的误判来源，会导致 `cargo test`/`cargo run` 看起来走了 `rustup`，但实际仍报 `rustc 1.89.0`。
+- 当 `SQLX_OFFLINE=true` 且仓库缺少 `.sqlx/` cache 时，提示旧的 `sqlx::query!` 编译期 cache 风险。
+
+因此，本地闭环默认建议先跑 preflight launcher；只有在确实需要重新编译 `rust_quant` 时，再处理 toolchain 和 `.sqlx` 风险。
+
 脚本默认环境变量：
 
 ```bash
@@ -65,6 +79,7 @@ EXECUTION_WORKER_DEFAULT_EXCHANGE=binance
 EXECUTION_WORKER_TASK_TYPES=execute_signal,risk_control_close_candidate
 EXECUTION_WORKER_TASK_STATUSES=pending,pending_close
 QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core
+QUANT_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core
 ```
 
 脚本会优先执行：
@@ -80,6 +95,17 @@ cargo run --bin rust_quant
 ```
 
 并只启用 execution worker，不启用回测、WebSocket、实盘策略或数据同步。`EXECUTION_WORKER_DRY_RUN=false` 会被脚本拒绝，避免误触真实下单。
+
+代码层还有一道 live 下单保护：即使绕过本地 dry-run 脚本直接启动 worker，
+`EXECUTION_WORKER_DRY_RUN=false` 也必须同时显式设置：
+
+```bash
+EXECUTION_WORKER_LIVE_ORDER_CONFIRM=I_UNDERSTAND_LIVE_ORDERS
+```
+
+否则 worker 会在构造 live exchange gateway 前拒绝启动。设置这个值前必须先确认
+Web lease 过滤条件、用户 API Key、交易所环境（模拟盘或真实盘）、下单数量和
+`risk_control_close_candidate` 的 reduce-only 平仓合约。
 
 ## pending_close 风控平仓说明
 
@@ -116,7 +142,7 @@ cargo run --bin rust_quant
 
 ## 一键验证 pending_close worker 闭环
 
-先启动 `rust_quan_web/backend`，并显式覆盖 Postgres 配置，避免误读本地 `.env` 里的旧 MySQL 占位值：
+先启动 `rust_quan_web/backend`，并显式覆盖 Postgres 配置，避免误读本地 `.env` 里的旧占位值：
 
 ```bash
 cd /Users/mac2/onions/crypto_quant/rust_quan_web/backend
@@ -208,7 +234,7 @@ cargo run --bin rust_quant
 - `EXECUTION_WORKER_DRY_RUN=true` 是本地安全约定；该脚本不启动 execution worker，因此不会处理或真实提交 execution task。
 - `SMOKE_TIMEOUT_SECS` 是外层兜底，避免本地依赖异常时进程长时间悬挂。
 
-边界说明：这是 one-shot startup smoke，不是 WebSocket 持续运行验证，也不是交易所下单 E2E。它需要本地基础初始化仍可用，包括 legacy MySQL 连接、Redis 连接、`quant_core` Postgres 连接，以及可选的 `rust_quan_web` 本地地址；如果没有 Web backend，只有当策略产生信号并尝试分发时才会在分发步骤报错。
+边界说明：这是 one-shot startup smoke，不是 WebSocket 持续运行验证，也不是交易所下单 E2E。它需要本地基础初始化仍可用，包括 Redis 连接、`quant_core` Postgres 连接，以及可选的 `rust_quan_web` 本地地址；如果没有 Web backend，只有当策略产生信号并尝试分发时才会在分发步骤报错。
 
 ## 一键验证 Binance WebSocket 自然触发能推进到哪一段
 
@@ -306,7 +332,7 @@ SMOKE_LIVE_TIMEOUT_SECS=150
 ```bash
 SMOKE_SYMBOL='BCH-USDT-SWAP' \
 SMOKE_PERIOD='15m' \
-SMOKE_STRATEGY_VERSION='legacy-mysql-191' \
+SMOKE_STRATEGY_VERSION='baseline-pg-191' \
 SMOKE_MIN_K_LINE_NUM='3600' \
 SMOKE_LIVE_TIMEOUT_SECS='5400' \
 ./scripts/dev/run_binance_websocket_natural_probe.sh

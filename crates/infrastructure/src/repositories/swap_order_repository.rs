@@ -5,7 +5,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
-use sqlx::{FromRow, MySql, Pool};
+use sqlx::{FromRow, PgPool};
 use tracing::{debug, info};
 
 use rust_quant_domain::entities::SwapOrder;
@@ -77,16 +77,16 @@ impl SwapOrderEntity {
 
 /// 合约订单仓储实现 (基于 sqlx)
 pub struct SqlxSwapOrderRepository {
-    pool: Pool<MySql>,
+    pool: PgPool,
 }
 
 impl SqlxSwapOrderRepository {
-    pub fn new(pool: Pool<MySql>) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
     /// 获取数据库连接池引用
-    pub fn pool(&self) -> &Pool<MySql> {
+    pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 }
@@ -100,7 +100,7 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
-               FROM swap_orders WHERE id = ? LIMIT 1"#,
+               FROM swap_orders WHERE id = $1 LIMIT 1"#,
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -116,7 +116,7 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
-               FROM swap_orders WHERE in_order_id = ? LIMIT 1"#,
+               FROM swap_orders WHERE in_order_id = $1 LIMIT 1"#,
         )
         .bind(in_order_id)
         .fetch_optional(&self.pool)
@@ -132,7 +132,7 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
-               FROM swap_orders WHERE out_order_id = ? LIMIT 1"#,
+               FROM swap_orders WHERE out_order_id = $1 LIMIT 1"#,
         )
         .bind(out_order_id)
         .fetch_optional(&self.pool)
@@ -149,7 +149,7 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
             r#"SELECT id, strategy_id, in_order_id, out_order_id, strategy_type,
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
-               FROM swap_orders WHERE inst_id = ? ORDER BY created_at DESC LIMIT ?"#,
+               FROM swap_orders WHERE inst_id = $1 ORDER BY created_at DESC LIMIT $2"#,
         )
         .bind(inst_id)
         .bind(limit)
@@ -177,8 +177,8 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
                FROM swap_orders
-               WHERE inst_id = ? AND period = ? AND side = ? AND pos_side = ?
-                 AND created_at > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+               WHERE inst_id = $1 AND period = $2 AND side = $3 AND pos_side = $4
+                 AND created_at > NOW() - INTERVAL '5 minutes'
                ORDER BY created_at DESC"#,
         )
         .bind(inst_id)
@@ -208,7 +208,7 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
                FROM swap_orders
-               WHERE strategy_id = ? AND inst_id = ? AND period = ? AND pos_side = ?
+               WHERE strategy_id = $1 AND inst_id = $2 AND period = $3 AND pos_side = $4
                ORDER BY created_at DESC
                LIMIT 1"#,
         )
@@ -228,11 +228,12 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
             order.in_order_id, order.inst_id, order.side, order.pos_side
         );
 
-        let result = sqlx::query(
+        let id = sqlx::query_scalar::<_, i32>(
             r#"INSERT INTO swap_orders
                (strategy_id, in_order_id, out_order_id, strategy_type, period,
                 inst_id, side, pos_size, pos_side, tag, platform_type, detail)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+               RETURNING id"#,
         )
         .bind(order.strategy_id)
         .bind(&order.in_order_id)
@@ -246,10 +247,9 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
         .bind(&order.tag)
         .bind(&order.platform_type)
         .bind(&order.detail)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
 
-        let id = result.last_insert_id() as i32;
         info!("合约订单保存成功: id={}", id);
 
         Ok(id)
@@ -262,8 +262,8 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
 
         sqlx::query(
             r#"UPDATE swap_orders SET
-               out_order_id = ?, pos_size = ?, detail = ?, update_at = NOW()
-               WHERE id = ?"#,
+               out_order_id = $1, pos_size = $2, detail = $3, update_at = NOW()
+               WHERE id = $4"#,
         )
         .bind(&order.out_order_id)
         .bind(&order.pos_size)
@@ -298,7 +298,7 @@ impl SwapOrderRepository for SqlxSwapOrderRepository {
                       period, inst_id, side, pos_size, pos_side, tag,
                       platform_type, detail, created_at, update_at
                FROM swap_orders
-               WHERE strategy_id = ? AND created_at BETWEEN ? AND ?
+               WHERE strategy_id = $1 AND created_at BETWEEN $2 AND $3
                ORDER BY created_at DESC"#,
         )
         .bind(strategy_id)

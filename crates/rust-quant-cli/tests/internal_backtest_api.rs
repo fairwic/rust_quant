@@ -1,8 +1,11 @@
 use serde_json::json;
+use std::sync::Mutex;
 
 use rust_quant_cli::app::internal_server::{
     backtest_config_from_body, handle_backtest_run_body, handle_exchange_symbol_sync_body,
 };
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[tokio::test]
 async fn dry_run_backtest_request_returns_admin_adapter_fields() {
@@ -122,4 +125,68 @@ async fn exchange_symbol_sync_request_rejects_invalid_json_before_running_job() 
         .as_str()
         .expect("error")
         .contains("invalid json body"));
+}
+
+#[tokio::test]
+async fn non_dry_run_backtest_requires_quant_core_database_url() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let original_quant_core = std::env::var("QUANT_CORE_DATABASE_URL").ok();
+    let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
+    std::env::remove_var("QUANT_CORE_DATABASE_URL");
+    std::env::remove_var("STRATEGY_CONFIG_SOURCE");
+
+    let body = json!({
+        "strategyKey": "vegas",
+        "symbol": "ETH-USDT-SWAP",
+        "timeframe": "4H",
+        "dryRun": false
+    })
+    .to_string();
+
+    let response = handle_backtest_run_body(body.as_bytes()).await;
+
+    assert_eq!(response.status_code, 400);
+    assert_eq!(
+        response.body["error"],
+        "QUANT_CORE_DATABASE_URL is required for non-dry-run backtests"
+    );
+
+    restore_env("QUANT_CORE_DATABASE_URL", original_quant_core.as_deref());
+    restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
+}
+
+#[tokio::test]
+async fn non_dry_run_backtest_rejects_unknown_strategy_config_source() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let original_quant_core = std::env::var("QUANT_CORE_DATABASE_URL").ok();
+    let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
+    std::env::set_var("QUANT_CORE_DATABASE_URL", "postgres://quant-core");
+    std::env::set_var("STRATEGY_CONFIG_SOURCE", "legacy_engine");
+
+    let body = json!({
+        "strategyKey": "vegas",
+        "symbol": "ETH-USDT-SWAP",
+        "timeframe": "4H",
+        "dryRun": false
+    })
+    .to_string();
+
+    let response = handle_backtest_run_body(body.as_bytes()).await;
+
+    assert_eq!(response.status_code, 400);
+    assert_eq!(
+        response.body["error"],
+        "STRATEGY_CONFIG_SOURCE=legacy_engine is not supported for non-dry-run backtests"
+    );
+
+    restore_env("QUANT_CORE_DATABASE_URL", original_quant_core.as_deref());
+    restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
+}
+
+fn restore_env(key: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        std::env::set_var(key, value);
+    } else {
+        std::env::remove_var(key);
+    }
 }

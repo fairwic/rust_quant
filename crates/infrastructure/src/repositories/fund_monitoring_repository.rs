@@ -6,14 +6,14 @@ use rust_quant_domain::entities::{FundFlowAlert, FundFlowSide, MarketAnomaly};
 use rust_quant_domain::traits::fund_monitoring_repository::{
     FundFlowAlertRepository, MarketAnomalyRepository,
 };
-use sqlx::{MySqlPool, Row};
+use sqlx::{PgPool, Row};
 
 pub struct SqlxMarketAnomalyRepository {
-    pool: MySqlPool,
+    pool: PgPool,
 }
 
 impl SqlxMarketAnomalyRepository {
-    pub fn new(pool: MySqlPool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -21,23 +21,24 @@ impl SqlxMarketAnomalyRepository {
 #[async_trait]
 impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
     async fn save(&self, anomaly: &MarketAnomaly) -> Result<i64> {
-        let result = sqlx::query(
+        let inserted_id = sqlx::query_scalar::<_, i64>(
             r#"
             INSERT INTO market_anomalies 
                 (symbol, current_rank, rank_15m_ago, rank_4h_ago, rank_24h_ago, 
                  delta_15m, delta_4h, delta_24h, volume_24h, updated_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                current_rank = VALUES(current_rank),
-                rank_15m_ago = VALUES(rank_15m_ago),
-                rank_4h_ago = VALUES(rank_4h_ago),
-                rank_24h_ago = VALUES(rank_24h_ago),
-                delta_15m = VALUES(delta_15m),
-                delta_4h = VALUES(delta_4h),
-                delta_24h = VALUES(delta_24h),
-                volume_24h = VALUES(volume_24h),
-                updated_at = VALUES(updated_at),
-                status = VALUES(status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (symbol) DO UPDATE SET
+                current_rank = EXCLUDED.current_rank,
+                rank_15m_ago = EXCLUDED.rank_15m_ago,
+                rank_4h_ago = EXCLUDED.rank_4h_ago,
+                rank_24h_ago = EXCLUDED.rank_24h_ago,
+                delta_15m = EXCLUDED.delta_15m,
+                delta_4h = EXCLUDED.delta_4h,
+                delta_24h = EXCLUDED.delta_24h,
+                volume_24h = EXCLUDED.volume_24h,
+                updated_at = EXCLUDED.updated_at,
+                status = EXCLUDED.status
+            RETURNING id
             "#,
         )
         .bind(&anomaly.symbol)
@@ -51,17 +52,17 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .bind(anomaly.volume_24h)
         .bind(anomaly.updated_at)
         .bind(&anomaly.status)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
 
-        Ok(result.last_insert_id() as i64)
+        Ok(inserted_id)
     }
 
     async fn mark_exited(&self, symbol: &str) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE market_anomalies SET status = 'EXITED', updated_at = NOW()
-            WHERE symbol = ?
+            WHERE symbol = $1
             "#,
         )
         .bind(symbol)
@@ -151,11 +152,11 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
 }
 
 pub struct SqlxFundFlowAlertRepository {
-    pool: MySqlPool,
+    pool: PgPool,
 }
 
 impl SqlxFundFlowAlertRepository {
-    pub fn new(pool: MySqlPool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -168,10 +169,11 @@ impl FundFlowAlertRepository for SqlxFundFlowAlertRepository {
             FundFlowSide::Outflow => "OUTFLOW",
         };
 
-        let result = sqlx::query(
+        let inserted_id = sqlx::query_scalar::<_, i64>(
             r#"
             INSERT INTO fund_flow_alerts (symbol, net_inflow, total_volume, side, window_secs, alert_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
             "#,
         )
         .bind(&alert.symbol)
@@ -180,9 +182,9 @@ impl FundFlowAlertRepository for SqlxFundFlowAlertRepository {
         .bind(side_str)
         .bind(alert.window_secs)
         .bind(alert.alert_at)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
 
-        Ok(result.last_insert_id() as i64)
+        Ok(inserted_id)
     }
 }

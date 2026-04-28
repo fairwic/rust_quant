@@ -21,19 +21,19 @@ async fn test_ta_atr() -> anyhow::Result<()> {
 
 
     // 获取K线数据
-    let mysql_candles: Vec<CandlesEntity> =
+    let source_candles: Vec<CandlesEntity> =
         trading::task::basic::get_candle_data_confirm(inst_id, time, 501, select_time).await?;
-    println!("{:#?}", mysql_candles);
+    println!("{:#?}", source_candles);
 
     // 确保有数据
-    if mysql_candles.is_empty() {
+    if source_candles.is_empty() {
         println!("警告: 未获取到K线数据");
         return Ok(());
     }
     let mut nwe = NweIndicator::new(8.0, 3.0, 500); // let mut sma = SMA::new(2); // 设置周期为15
 
     // 计算并显示结果
-    for candle in mysql_candles.iter() {
+    for candle in source_candles.iter() {
         // 解析价格数据
         let high = candle.h.parse::<f64>()?;
         let low = candle.l.parse::<f64>()?;

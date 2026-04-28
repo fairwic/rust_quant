@@ -1,11 +1,12 @@
 use anyhow::Result;
 use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
 use okx::dto::market_dto::TickerOkxResDto;
-use rust_quant_core::database::get_db_pool;
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, MySql, QueryBuilder};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 use std::collections::HashMap;
 use tracing::debug;
+
+use super::get_quant_core_postgres_pool;
 
 /// Tickers 数据表实体
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
@@ -75,8 +76,8 @@ impl TicketsModel {
             return Ok(0);
         }
 
-        let pool = get_db_pool();
-        let mut query_builder: QueryBuilder<MySql> = QueryBuilder::new(
+        let pool = get_quant_core_postgres_pool()?;
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO tickers_data (inst_type, inst_id, last, last_sz, ask_px, ask_sz, \
              bid_px, bid_sz, open24h, high24h, low24h, vol_ccy24h, vol24h, sod_utc0, sod_utc8, ts) "
         );
@@ -108,13 +109,13 @@ impl TicketsModel {
 
     /// 更新单个 Ticker 数据
     pub async fn update(&self, ticker: &TickerOkxResDto) -> Result<()> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
 
         sqlx::query(
-            "UPDATE tickers_data SET inst_type = ?, last = ?, last_sz = ?, ask_px = ?, \
-             ask_sz = ?, bid_px = ?, bid_sz = ?, open24h = ?, high24h = ?, low24h = ?, \
-             vol_ccy24h = ?, vol24h = ?, sod_utc0 = ?, sod_utc8 = ?, ts = ? \
-             WHERE inst_id = ?",
+            "UPDATE tickers_data SET inst_type = $1, last = $2, last_sz = $3, ask_px = $4, \
+             ask_sz = $5, bid_px = $6, bid_sz = $7, open24h = $8, high24h = $9, low24h = $10, \
+             vol_ccy24h = $11, vol24h = $12, sod_utc0 = $13, sod_utc8 = $14, ts = $15 \
+             WHERE inst_id = $16",
         )
         .bind(&ticker.inst_type)
         .bind(&ticker.last)
@@ -144,27 +145,31 @@ impl TicketsModel {
             return Ok(vec![]);
         }
 
-        let pool = get_db_pool();
-        let placeholders = inst_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let sql = format!(
-            "SELECT * FROM tickers_data WHERE inst_id IN ({}) AND inst_type='SWAP' ORDER BY id DESC",
-            placeholders
-        );
+        let pool = get_quant_core_postgres_pool()?;
+        let mut query_builder: QueryBuilder<Postgres> =
+            QueryBuilder::new("SELECT * FROM tickers_data WHERE inst_type = ");
+        query_builder.push_bind("SWAP").push(" AND inst_id IN (");
 
-        let mut query = sqlx::query_as::<_, TickersDataEntity>(&sql);
-        for inst_id in inst_ids {
-            query = query.bind(inst_id);
+        {
+            let mut separated = query_builder.separated(", ");
+            for inst_id in inst_ids {
+                separated.push_bind(inst_id);
+            }
         }
 
-        let results = query.fetch_all(pool).await?;
+        query_builder.push(") ORDER BY id DESC");
+        let results = query_builder
+            .build_query_as::<TickersDataEntity>()
+            .fetch_all(pool)
+            .await?;
         Ok(results)
     }
 
     /// 查找单个合约数据
     pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersDataEntity>> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
         let results =
-            sqlx::query_as::<_, TickersDataEntity>("SELECT * FROM tickers_data WHERE inst_id = ?")
+            sqlx::query_as::<_, TickersDataEntity>("SELECT * FROM tickers_data WHERE inst_id = $1")
                 .bind(inst_id)
                 .fetch_all(pool)
                 .await?;
@@ -177,34 +182,32 @@ impl TicketsModel {
         &self,
         inst_ids: Option<Vec<&str>>,
     ) -> Result<Vec<(String, NaiveDate, f64)>> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT inst_id, MAX(ts) AS ts, SUM((vol24h)::double precision) AS daily_vol \
+             FROM tickers_data",
+        );
 
-        let (sql, params): (String, Vec<&str>) = if let Some(inst_ids) = inst_ids {
-            let placeholders = inst_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-            let sql = format!(
-                "SELECT inst_id, MAX(ts) AS ts, SUM(vol24h) AS daily_vol \
-                 FROM tickers_data \
-                 WHERE inst_id IN ({}) \
-                 GROUP BY inst_id, DATE(FROM_UNIXTIME(ts / 1000)) \
-                 ORDER BY ts DESC",
-                placeholders
-            );
-            (sql, inst_ids)
-        } else {
-            let sql = "SELECT inst_id, MAX(ts) AS ts, SUM(vol24h) AS daily_vol \
-                       FROM tickers_data \
-                       GROUP BY inst_id, DATE(FROM_UNIXTIME(ts / 1000)) \
-                       ORDER BY ts DESC"
-                .to_string();
-            (sql, vec![])
-        };
-
-        let mut query = sqlx::query_as::<_, TickersDataQueryResult>(&sql);
-        for param in params {
-            query = query.bind(param);
+        if let Some(inst_ids) = inst_ids {
+            query_builder.push(" WHERE inst_id IN (");
+            {
+                let mut separated = query_builder.separated(", ");
+                for inst_id in inst_ids {
+                    separated.push_bind(inst_id);
+                }
+            }
+            query_builder.push(")");
         }
 
-        let results = query.fetch_all(pool).await?;
+        query_builder.push(
+            " GROUP BY inst_id, DATE(TO_TIMESTAMP(ts::double precision / 1000.0)) \
+              ORDER BY ts DESC",
+        );
+
+        let results = query_builder
+            .build_query_as::<TickersDataQueryResult>()
+            .fetch_all(pool)
+            .await?;
 
         // 转换为包含日期和交易量的元组
         let daily_volumes = results
@@ -270,6 +273,28 @@ impl TicketsModel {
         }
 
         lifted_assets
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Execute;
+
+    #[test]
+    fn daily_volume_query_uses_postgres_timestamp_and_cast() {
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT inst_id, MAX(ts) AS ts, SUM((vol24h)::double precision) AS daily_vol \
+             FROM tickers_data",
+        );
+        query_builder.push(
+            " GROUP BY inst_id, DATE(TO_TIMESTAMP(ts::double precision / 1000.0)) \
+              ORDER BY ts DESC",
+        );
+
+        let sql = query_builder.build().sql().to_string();
+        assert!(sql.contains("TO_TIMESTAMP"));
+        assert!(sql.contains("SUM((vol24h)::double precision)"));
     }
 }
 

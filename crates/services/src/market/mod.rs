@@ -292,7 +292,7 @@ pub async fn get_confirmed_candles_for_backtest(
     };
 
     let model = CandlesModel::new();
-    let candles = model.fetch_candles_from_mysql(dto).await?;
+    let candles = model.fetch_candles_from_postgres(dto).await?;
 
     if candles.is_empty() {
         return Err(anyhow::anyhow!(
@@ -310,10 +310,7 @@ pub fn should_use_quant_core_candle_source() -> Result<bool> {
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
-    if source.is_empty() || source == "mysql" || source == "legacy_mysql" {
-        return Ok(false);
-    }
-    if matches!(source.as_str(), "quant_core" | "postgres" | "pg") {
+    if source.is_empty() || matches!(source.as_str(), "quant_core" | "postgres" | "pg") {
         return Ok(true);
     }
     Err(anyhow!("不支持的 CANDLE_SOURCE: {}", source))

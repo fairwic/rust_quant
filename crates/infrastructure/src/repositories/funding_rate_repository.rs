@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use sqlx::{FromRow, MySql, Pool};
+use sqlx::{FromRow, PgPool};
 use tracing::error;
 
 use rust_quant_domain::entities::funding_rate::FundingRate;
@@ -74,11 +74,11 @@ impl FundingRateEntity {
 
 /// 基于 sqlx 的资金费率仓储实现
 pub struct SqlxFundingRateRepository {
-    pool: Pool<MySql>,
+    pool: PgPool,
 }
 
 impl SqlxFundingRateRepository {
-    pub fn new(pool: Pool<MySql>) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -91,20 +91,20 @@ impl FundingRateRepository for SqlxFundingRateRepository {
                 inst_id, funding_time, funding_rate, method, next_funding_rate, next_funding_time,
                 min_funding_rate, max_funding_rate, sett_funding_rate, sett_state, premium, ts,
                 realized_rate, interest_rate
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                funding_rate = VALUES(funding_rate),
-                method = VALUES(method),
-                next_funding_rate = VALUES(next_funding_rate),
-                next_funding_time = VALUES(next_funding_time),
-                min_funding_rate = VALUES(min_funding_rate),
-                max_funding_rate = VALUES(max_funding_rate),
-                sett_funding_rate = VALUES(sett_funding_rate),
-                sett_state = VALUES(sett_state),
-                premium = VALUES(premium),
-                ts = VALUES(ts),
-                realized_rate = VALUES(realized_rate),
-                interest_rate = VALUES(interest_rate),
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT (inst_id, funding_time) DO UPDATE SET
+                funding_rate = EXCLUDED.funding_rate,
+                method = EXCLUDED.method,
+                next_funding_rate = EXCLUDED.next_funding_rate,
+                next_funding_time = EXCLUDED.next_funding_time,
+                min_funding_rate = EXCLUDED.min_funding_rate,
+                max_funding_rate = EXCLUDED.max_funding_rate,
+                sett_funding_rate = EXCLUDED.sett_funding_rate,
+                sett_state = EXCLUDED.sett_state,
+                premium = EXCLUDED.premium,
+                ts = EXCLUDED.ts,
+                realized_rate = EXCLUDED.realized_rate,
+                interest_rate = EXCLUDED.interest_rate,
                 updated_at = CURRENT_TIMESTAMP
         ";
 
@@ -143,7 +143,7 @@ impl FundingRateRepository for SqlxFundingRateRepository {
     async fn find_latest(&self, inst_id: &str) -> Result<Option<FundingRate>> {
         let query = "
             SELECT * FROM funding_rates 
-            WHERE inst_id = ? 
+            WHERE inst_id = $1
             ORDER BY funding_time DESC 
             LIMIT 1
         ";
@@ -173,9 +173,9 @@ impl FundingRateRepository for SqlxFundingRateRepository {
         let limit = limit.unwrap_or(100);
         let query = "
             SELECT * FROM funding_rates 
-            WHERE inst_id = ? AND funding_time >= ? AND funding_time <= ?
+            WHERE inst_id = $1 AND funding_time >= $2 AND funding_time <= $3
             ORDER BY funding_time DESC
-            LIMIT ?
+            LIMIT $4
         ";
 
         let entities = sqlx::query_as::<_, FundingRateEntity>(query)
@@ -201,7 +201,7 @@ impl FundingRateRepository for SqlxFundingRateRepository {
     async fn find_oldest(&self, inst_id: &str) -> Result<Option<FundingRate>> {
         let query = "
             SELECT * FROM funding_rates 
-            WHERE inst_id = ? 
+            WHERE inst_id = $1
             ORDER BY funding_time ASC 
             LIMIT 1
         ";

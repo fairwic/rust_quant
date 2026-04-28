@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
@@ -23,7 +23,6 @@ use rust_quant_market::models::{SelectTime, TimeDirect};
 use rust_quant_services::market::CandleService;
 use rust_quant_services::strategy::{BacktestService, StrategyConfigService};
 use rust_quant_strategies::implementations::nwe_strategy::NweStrategy;
-use sqlx::postgres::PgPoolOptions;
 
 /// 回测运行器
 ///
@@ -110,25 +109,17 @@ impl BacktestRunner {
     }
 }
 
-fn create_strategy_config_service(
-    mysql_pool: sqlx::Pool<sqlx::MySql>,
-) -> Result<StrategyConfigService> {
+fn create_strategy_config_service(core_pool: sqlx::PgPool) -> Result<StrategyConfigService> {
     if should_use_quant_core_strategy_configs()? {
-        let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
-            .context("STRATEGY_CONFIG_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")?;
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect_lazy(&database_url)
-            .context("创建 quant_core Postgres strategy_configs 连接池失败")?;
         info!("📚 回测策略配置来源: quant_core.strategy_configs");
         return Ok(StrategyConfigService::new(Box::new(
-            PostgresStrategyConfigRepository::new(pool),
+            PostgresStrategyConfigRepository::new(core_pool),
         )));
     }
 
-    info!("📚 回测策略配置来源: legacy MySQL strategy_config");
+    info!("📚 回测策略配置来源: quant_core.strategy_config");
     Ok(StrategyConfigService::new(Box::new(
-        SqlxStrategyConfigRepository::new(mysql_pool),
+        SqlxStrategyConfigRepository::new(core_pool),
     )))
 }
 
@@ -137,7 +128,7 @@ fn should_use_quant_core_strategy_configs() -> Result<bool> {
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
-    if source == "mysql" || source == "legacy_mysql" {
+    if source == "strategy_config" || source == "legacy_pg" {
         return Ok(false);
     }
     if source == "quant_core" || source == "postgres" {
@@ -700,9 +691,9 @@ mod tests {
         std::env::remove_var("QUANT_CORE_DATABASE_URL");
         assert!(should_use_quant_core_strategy_configs().expect("quant_core source"));
 
-        std::env::set_var("STRATEGY_CONFIG_SOURCE", "mysql");
+        std::env::set_var("STRATEGY_CONFIG_SOURCE", "strategy_config");
         std::env::set_var("QUANT_CORE_DATABASE_URL", "postgres://ignored");
-        assert!(!should_use_quant_core_strategy_configs().expect("mysql source"));
+        assert!(!should_use_quant_core_strategy_configs().expect("strategy_config source"));
 
         restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
         restore_env(

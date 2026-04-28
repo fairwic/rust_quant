@@ -50,11 +50,12 @@ impl SwapOrderEntity {
     pub async fn insert(&self) -> Result<u64> {
         let pool = get_db_pool();
 
-        let result = sqlx::query(
+        let inserted_id: i64 = sqlx::query_scalar(
             "INSERT INTO swap_order 
              (in_order_id, out_order_id, strategy_id, strategy_type, period, 
               inst_id, side, pos_size, pos_side, tag, detail, platform_type)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             RETURNING id::bigint",
         )
         .bind(&self.in_order_id)
         .bind(&self.out_order_id)
@@ -68,19 +69,19 @@ impl SwapOrderEntity {
         .bind(&self.tag)
         .bind(&self.detail)
         .bind(&self.platform_type)
-        .execute(pool)
+        .fetch_one(pool)
         .await
         .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
 
         info!("订单已插入数据库: in_order_id={}", self.in_order_id);
-        Ok(result.last_insert_id())
+        Ok(inserted_id as u64)
     }
 
     /// 根据内部订单ID查询
     pub async fn select_by_in_order_id(in_order_id: &str) -> Result<Vec<Self>> {
         let pool = get_db_pool();
 
-        let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order WHERE in_order_id = ?")
+        let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order WHERE in_order_id = $1")
             .bind(in_order_id)
             .fetch_all(pool)
             .await
@@ -93,7 +94,7 @@ impl SwapOrderEntity {
     pub async fn select_by_strategy_id(strategy_id: i64) -> Result<Vec<Self>> {
         let pool = get_db_pool();
 
-        let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order WHERE strategy_id = ?")
+        let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order WHERE strategy_id = $1")
             .bind(strategy_id)
             .fetch_all(pool)
             .await
@@ -120,10 +121,10 @@ impl SwapOrderEntity {
 
         let result = sqlx::query(
             "UPDATE swap_order 
-             SET out_order_id = ?, strategy_type = ?, period = ?, 
-                 inst_id = ?, side = ?, pos_size = ?, pos_side = ?, 
-                 tag = ?, detail = ?, platform_type = ?
-             WHERE in_order_id = ?",
+             SET out_order_id = $1, strategy_type = $2, period = $3,
+                 inst_id = $4, side = $5, pos_size = $6, pos_side = $7,
+                 tag = $8, detail = $9, platform_type = $10
+             WHERE in_order_id = $11",
         )
         .bind(&self.out_order_id)
         .bind(&self.strategy_type)

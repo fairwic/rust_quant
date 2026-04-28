@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use rust_quant_core::database::{get_db_pool, init_db_pool};
 use rust_quant_indicators::trend::vegas::ema_filter::EmaDistanceState;
 use rust_quant_indicators::trend::vegas::{VegasIndicatorSignalValue, VegasStrategy};
+use rust_quant_market::quote_legacy_table_name;
 use rust_quant_strategies::framework::backtest::types::BasicRiskStrategyConfig;
 use rust_quant_strategies::implementations::vegas_backtest::VegasBacktestAdapter;
 use rust_quant_strategies::{get_multi_indicator_values, CandleItem, IndicatorStrategyBacktest};
@@ -9,13 +10,13 @@ use serde_json::json;
 use sqlx::Row;
 use std::env;
 
-fn parse_f64(row: &sqlx::mysql::MySqlRow, col: &str) -> Result<f64> {
+fn parse_f64(row: &sqlx::postgres::PgRow, col: &str) -> Result<f64> {
     let raw: String = row.get(col);
     raw.parse::<f64>()
         .map_err(|e| anyhow!("failed to parse {}='{}': {}", col, raw, e))
 }
 
-fn parse_i32(row: &sqlx::mysql::MySqlRow, col: &str) -> Result<i32> {
+fn parse_i32(row: &sqlx::postgres::PgRow, col: &str) -> Result<i32> {
     let raw: String = row.get(col);
     raw.parse::<i32>()
         .map_err(|e| anyhow!("failed to parse {}='{}': {}", col, raw, e))
@@ -104,7 +105,7 @@ async fn main() -> Result<()> {
     let pool = get_db_pool();
 
     let row = sqlx::query(
-        "SELECT inst_type, time, strategy_detail, risk_config_detail FROM back_test_log WHERE id=?",
+        "SELECT inst_type, time, strategy_detail, risk_config_detail FROM back_test_log WHERE id=$1",
     )
     .bind(back_test_id)
     .fetch_one(pool)
@@ -123,11 +124,15 @@ async fn main() -> Result<()> {
         .map_err(|e| anyhow!("failed to parse risk_config_detail: {}", e))?;
 
     let suffix = period_to_table_suffix(&period);
-    let table_name = format!("{}_candles_{}", inst_id.to_ascii_lowercase(), suffix);
+    let table_name = quote_legacy_table_name(&format!(
+        "{}_candles_{}",
+        inst_id.to_ascii_lowercase(),
+        suffix
+    ))?;
 
     let limit = limit_override.unwrap_or(50_000);
     let query = format!(
-        "SELECT ts, o, h, l, c, vol, confirm FROM `{}` ORDER BY ts ASC LIMIT ?",
+        "SELECT ts, o, h, l, c, vol, confirm FROM {} ORDER BY ts ASC LIMIT $1",
         table_name
     );
     let rows = sqlx::query(&query)

@@ -13,6 +13,9 @@ use crate::rust_quan_web::{
     ExecutionWorkerCheckpoint, NoopExecutionAuditRepository, PostgresExecutionAuditRepository,
 };
 
+const LIVE_ORDER_CONFIRM_ENV: &str = "EXECUTION_WORKER_LIVE_ORDER_CONFIRM";
+const LIVE_ORDER_CONFIRM_TOKEN: &str = "I_UNDERSTAND_LIVE_ORDERS";
+
 #[derive(Debug, Clone)]
 pub struct ExecutionWorkerConfig {
     pub worker_id: String,
@@ -104,6 +107,7 @@ impl ExecutionWorker {
         let gateway = if config.dry_run {
             CryptoExcAllGateway::dry_run()
         } else {
+            ensure_live_order_confirmation()?;
             CryptoExcAllGateway::from_env()?
         };
         let mut worker = Self::new(client, gateway, config);
@@ -917,6 +921,26 @@ fn parse_env_list(key: &str, defaults: &[&str]) -> Vec<String> {
     }
 }
 
+fn live_order_confirmation_valid(dry_run: bool, confirmation: Option<&str>) -> bool {
+    dry_run
+        || confirmation
+            .map(str::trim)
+            .is_some_and(|value| value == LIVE_ORDER_CONFIRM_TOKEN)
+}
+
+fn ensure_live_order_confirmation() -> Result<()> {
+    let confirmation = std::env::var(LIVE_ORDER_CONFIRM_ENV).ok();
+    if live_order_confirmation_valid(false, confirmation.as_deref()) {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "refusing live exchange orders: set {}={} after validating API keys, task filters, and exchange environment",
+            LIVE_ORDER_CONFIRM_ENV,
+            LIVE_ORDER_CONFIRM_TOKEN
+        ))
+    }
+}
+
 fn parse_exchange(raw: &str) -> Result<ExchangeId> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "币安" => Ok(ExchangeId::Binance),
@@ -1126,6 +1150,21 @@ mod tests {
 
         assert_eq!(order.exchange.as_str(), "binance");
         assert_eq!(order.size, "10");
+    }
+
+    #[test]
+    fn live_order_confirmation_requires_exact_opt_in_token() {
+        assert!(live_order_confirmation_valid(
+            false,
+            Some("I_UNDERSTAND_LIVE_ORDERS")
+        ));
+        assert!(live_order_confirmation_valid(true, None));
+        assert!(!live_order_confirmation_valid(false, None));
+        assert!(!live_order_confirmation_valid(false, Some("true")));
+        assert!(!live_order_confirmation_valid(
+            false,
+            Some("I_UNDERSTAND")
+        ));
     }
 
     #[test]

@@ -24,23 +24,23 @@ Finished `release` profile [optimized] target(s) in 1m 17s
 
 ### 1. 数据库服务
 
-**MySQL**:
+**Postgres**:
 ```bash
-# 启动 MySQL (macOS with Homebrew)
-brew services start mysql
+# 启动 Postgres (macOS with Homebrew)
+brew services start postgresql
 
 # 或使用 Podman
 podman run -d \
-  --name rust-quant-mysql \
-  -p 3306:3306 \
-  -e MYSQL_ROOT_PASSWORD=your_password \
-  -e MYSQL_DATABASE=rust_quant \
-  mysql:8.0
+  --name rust-quant-postgres \
+  -p 5432:5432 \
+  -e POSTGRES_PASSWORD=postgres123 \
+  -e POSTGRES_DB=quant_core \
+  postgres:16
 ```
 
 **检查连接**:
 ```bash
-mysql -h 127.0.0.1 -P 3306 -u root -p
+psql "postgres://postgres:postgres123@127.0.0.1:5432/quant_core" -c "SELECT 1"
 ```
 
 ### 2. Redis 服务
@@ -76,7 +76,8 @@ cat .env
 APP_ENV=local
 
 # 数据库配置
-DATABASE_URL=mysql://root:password@127.0.0.1:3306/rust_quant
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@127.0.0.1:5432/quant_core
+DATABASE_URL=postgres://postgres:postgres123@127.0.0.1:5432/quant_core
 DATABASE_MAX_CONNECTIONS=10
 
 # Redis 配置
@@ -163,9 +164,9 @@ ERROR Failed to connect to database: Connection refused (os error 61)
 ```
 
 **解决方案**:
-1. 检查 MySQL 是否启动: `brew services list | grep mysql`
-2. 检查端口占用: `lsof -i :3306`
-3. 检查 `.env` 中的 `DATABASE_URL`
+1. 检查 Postgres 是否启动: `brew services list | grep postgresql`
+2. 检查端口占用: `lsof -i :5432`
+3. 检查 `.env` 中的 `QUANT_CORE_DATABASE_URL` / `DATABASE_URL`
 
 #### 错误 2: Redis 连接失败
 
@@ -292,20 +293,19 @@ USE rust_quant;
 
 ```bash
 # 如果有初始化脚本
-mysql -h 127.0.0.1 -u root -p rust_quant < create_table.sql
+psql "$QUANT_CORE_DATABASE_URL" -f create_table.sql
 ```
 
 ### 3. 检查表结构
 
 ```sql
 -- 查看所有表
-SHOW TABLES;
+SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
 
 -- 检查关键表
-DESC back_test_log;
-DESC back_test_detail;
-DESC candles;
-DESC strategy_config;
+\d+ back_test_log
+\d+ back_test_detail
+\d+ strategy_configs
 ```
 
 ---
@@ -328,7 +328,7 @@ tail -f log_files/error.log
 
 **3. 检查数据库连接**:
 ```bash
-mysql -h 127.0.0.1 -u root -p -e "SELECT COUNT(*) FROM rust_quant.back_test_log;"
+psql "$QUANT_CORE_DATABASE_URL" -c "SELECT COUNT(*) FROM back_test_log;"
 ```
 
 **4. 检查 Redis**:
@@ -383,18 +383,18 @@ IS_BACK_TEST=true ./target/release/rust_quant
 
 ```bash
 # 1. 启动基础服务
-brew services start mysql
+brew services start postgresql
 brew services start redis
 
 # 2. 确认服务正常
-mysql -h 127.0.0.1 -u root -p -e "SELECT 1"
+psql "$QUANT_CORE_DATABASE_URL" -c "SELECT 1"
 redis-cli ping
 
 # 3. 检查配置
 cat .env | grep -E "DATABASE_URL|REDIS_URL"
 
 # 4. 初始化数据库
-mysql -h 127.0.0.1 -u root -p rust_quant < create_table.sql
+psql "$QUANT_CORE_DATABASE_URL" -f create_table.sql
 
 # 5. 测试编译
 cargo build --release
@@ -418,7 +418,7 @@ IS_RUN_REAL_STRATEGY=false \
 2. rust_quant_cli::app_init()
    ├─ 初始化日志系统 (env_logger + tracing)
    ├─ 加载环境变量 (dotenv)
-   ├─ 连接数据库 (MySQL via sqlx)
+   ├─ 连接数据库 (Postgres via sqlx)
    ├─ 连接 Redis (连接池)
    └─ 初始化完成
    ↓
@@ -520,8 +520,8 @@ cargo run -- --help  # (如果实现了 CLI 参数)
 **当前状态**: 
 
 - ✅ **编译成功**: Release 版本已编译
-- ⚠️ **数据库**: 需要启动 MySQL 服务
+- ⚠️ **数据库**: 需要启动 Postgres 服务
 - ⚠️ **Redis**: 需要启动 Redis 服务
 - ⚠️ **配置**: 需要检查 `.env` 文件
 
-**下一步**: 启动 MySQL 和 Redis，然后重新运行程序
+**下一步**: 启动 Postgres 和 Redis，然后重新运行程序

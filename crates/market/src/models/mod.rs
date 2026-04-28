@@ -3,6 +3,7 @@
 pub mod candle_dto;
 pub mod candle_entity;
 pub mod candles;
+pub mod postgres_support;
 pub mod tickers;
 pub mod tickers_volume;
 
@@ -10,5 +11,6 @@ pub mod tickers_volume;
 pub use candle_dto::*;
 pub use candle_entity::*;
 pub use candles::*;
+pub use postgres_support::*;
 pub use tickers::*;
 pub use tickers_volume::*;

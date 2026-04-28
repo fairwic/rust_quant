@@ -65,7 +65,8 @@ cargo sqlx migrate run
 ```bash
 APP_ENV=local
 
-DATABASE_URL=mysql://root:password@127.0.0.1:3306/rust_quant
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@127.0.0.1:5432/quant_core
+DATABASE_URL=postgres://postgres:postgres123@127.0.0.1:5432/quant_core
 REDIS_URL=redis://127.0.0.1:6379
 
 IS_RUN_SYNC_DATA_JOB=true

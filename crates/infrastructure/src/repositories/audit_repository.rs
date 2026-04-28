@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::{mysql::MySqlQueryResult, MySql, Pool, QueryBuilder};
+use sqlx::{postgres::PgQueryResult, PgPool, Postgres, QueryBuilder};
 
 use rust_quant_domain::entities::{
     OrderDecisionLog, OrderStateLog, PortfolioSnapshot, PositionSnapshot, RiskDecisionLog,
@@ -11,15 +11,15 @@ use rust_quant_domain::traits::AuditLogRepository;
 const AUDIT_LOG_INSERT_CHUNK_ROWS: usize = 1_000;
 
 pub struct SqlxAuditRepository {
-    pool: Pool<MySql>,
+    pool: PgPool,
 }
 
 impl SqlxAuditRepository {
-    pub fn new(pool: Pool<MySql>) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
-    fn pool(&self) -> &Pool<MySql> {
+    fn pool(&self) -> &PgPool {
         &self.pool
     }
 }
@@ -27,10 +27,10 @@ impl SqlxAuditRepository {
 #[async_trait]
 impl AuditLogRepository for SqlxAuditRepository {
     async fn insert_strategy_run(&self, run: &StrategyRun) -> Result<u64> {
-        let result: MySqlQueryResult = sqlx::query(
+        let result: PgQueryResult = sqlx::query(
             r#"
             INSERT INTO strategy_run (run_id, strategy_id, inst_id, period, start_at, end_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
         )
         .bind(&run.run_id)
@@ -53,7 +53,7 @@ impl AuditLogRepository for SqlxAuditRepository {
 
         let mut rows_affected = 0;
         for chunk in snapshots.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
-            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+            let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO signal_snapshot_log (run_id, kline_ts, filtered, filter_reasons, signal_json) ",
             );
             builder.push_values(chunk.iter(), |mut b, s| {
@@ -78,7 +78,7 @@ impl AuditLogRepository for SqlxAuditRepository {
 
         let mut rows_affected = 0;
         for chunk in decisions.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
-            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+            let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO risk_decision_log (run_id, kline_ts, decision, reason, risk_json) ",
             );
             builder.push_values(chunk.iter(), |mut b, d| {
@@ -102,7 +102,7 @@ impl AuditLogRepository for SqlxAuditRepository {
 
         let mut rows_affected = 0;
         for chunk in decisions.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
-            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+            let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO order_decision_log (run_id, kline_ts, side, size, price, decision_json) ",
             );
             builder.push_values(chunk.iter(), |mut b, d| {
@@ -127,7 +127,7 @@ impl AuditLogRepository for SqlxAuditRepository {
 
         let mut rows_affected = 0;
         for chunk in states.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
-            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+            let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO order_state_log (order_id, from_state, to_state, reason, ts) ",
             );
             builder.push_values(chunk.iter(), |mut b, s| {
@@ -151,7 +151,7 @@ impl AuditLogRepository for SqlxAuditRepository {
 
         let mut rows_affected = 0;
         for chunk in positions.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
-            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+            let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO positions (run_id, strategy_id, inst_id, side, qty, avg_price, unrealized_pnl, realized_pnl, status) ",
             );
             builder.push_values(chunk.iter(), |mut b, p| {
@@ -179,7 +179,7 @@ impl AuditLogRepository for SqlxAuditRepository {
 
         let mut rows_affected = 0;
         for chunk in snapshots.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
-            let mut builder: QueryBuilder<MySql> = QueryBuilder::new(
+            let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO portfolio_snapshot_log (run_id, total_equity, available, margin, pnl, ts) ",
             );
             builder.push_values(chunk.iter(), |mut b, s| {
@@ -203,10 +203,10 @@ mod tests {
     use super::AUDIT_LOG_INSERT_CHUNK_ROWS;
 
     #[test]
-    fn audit_log_insert_chunk_keeps_mysql_bind_count_below_limit() {
-        const MYSQL_BIND_PARAM_LIMIT: usize = 65_535;
+    fn audit_log_insert_chunk_keeps_postgres_bind_count_below_limit() {
+        const POSTGRES_BIND_PARAM_LIMIT: usize = 65_535;
         const MAX_AUDIT_INSERT_COLUMNS: usize = 9;
 
-        assert!(AUDIT_LOG_INSERT_CHUNK_ROWS * MAX_AUDIT_INSERT_COLUMNS < MYSQL_BIND_PARAM_LIMIT);
+        assert!(AUDIT_LOG_INSERT_CHUNK_ROWS * MAX_AUDIT_INSERT_COLUMNS < POSTGRES_BIND_PARAM_LIMIT);
     }
 }

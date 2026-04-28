@@ -1,7 +1,7 @@
 use anyhow::Result;
 use dotenv::dotenv;
 use rust_quant_analytics::monte_carlo::MonteCarloAnalyzer;
-use sqlx::mysql::MySqlPoolOptions;
+use sqlx::postgres::PgPoolOptions;
 use std::env;
 
 #[derive(sqlx::FromRow)]
@@ -18,12 +18,12 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     // Get DB URL
-    let database_url = env::var("DB_HOST")
+    let database_url = env::var("QUANT_CORE_DATABASE_URL")
         .or_else(|_| env::var("DATABASE_URL"))
-        .expect("DB_HOST or DATABASE_URL must be set");
+        .expect("QUANT_CORE_DATABASE_URL or DATABASE_URL must be set");
 
     // Connect to DB
-    let pool = MySqlPoolOptions::new()
+    let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
         .await?;
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
     // Query PnL data
     // Only fetch closing trades (close_type is not empty) to avoid double counting
     let rows: Vec<PnlRow> = sqlx::query_as::<_, PnlRow>(
-        "SELECT profit_loss FROM back_test_detail WHERE back_test_id = ? AND LENGTH(close_type) > 0",
+        "SELECT profit_loss FROM back_test_detail WHERE back_test_id = $1 AND LENGTH(close_type) > 0",
     )
     .bind(backtest_id)
     .fetch_all(&pool)

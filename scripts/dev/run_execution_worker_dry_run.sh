@@ -16,6 +16,9 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 : "${EXECUTION_WORKER_TASK_TYPES:="execute_signal,risk_control_close_candidate"}"
 : "${EXECUTION_WORKER_TASK_STATUSES:="pending,pending_close"}"
 : "${QUANT_CORE_DATABASE_URL:="postgres://postgres:postgres123@localhost:5432/quant_core"}"
+: "${QUANT_DATABASE_URL:="${QUANT_CORE_DATABASE_URL}"}"
+: "${SQLX_OFFLINE:="true"}"
+: "${EXECUTION_WORKER_USE_EXISTING_BINARY:="auto"}"
 
 if command -v rustup >/dev/null 2>&1; then
     : "${RUSTC:="$(rustup which --toolchain "${RUSTUP_TOOLCHAIN}" rustc)"}"
@@ -42,6 +45,8 @@ export EXECUTION_WORKER_DEFAULT_EXCHANGE
 export EXECUTION_WORKER_TASK_TYPES
 export EXECUTION_WORKER_TASK_STATUSES
 export QUANT_CORE_DATABASE_URL
+export QUANT_DATABASE_URL
+export SQLX_OFFLINE
 export RUSTC
 export IS_RUN_EXECUTION_WORKER=true
 export IS_BACK_TEST=false
@@ -59,6 +64,28 @@ echo "  task_statuses: ${EXECUTION_WORKER_TASK_STATUSES}"
 echo "  quant_core db: ${QUANT_CORE_DATABASE_URL}"
 
 cd "${REPO_ROOT}"
+case "${EXECUTION_WORKER_USE_EXISTING_BINARY}" in
+    true | TRUE | 1 | yes | YES)
+        if [[ ! -x "${REPO_ROOT}/target/debug/rust_quant" ]]; then
+            echo "target/debug/rust_quant is not executable; build it first or set EXECUTION_WORKER_USE_EXISTING_BINARY=auto/false." >&2
+            exit 2
+        fi
+        echo "Using existing rust_quant binary: ${REPO_ROOT}/target/debug/rust_quant"
+        exec "${REPO_ROOT}/target/debug/rust_quant" "$@"
+        ;;
+    auto | AUTO)
+        if [[ -x "${REPO_ROOT}/target/debug/rust_quant" ]]; then
+            echo "Using existing rust_quant binary: ${REPO_ROOT}/target/debug/rust_quant"
+            exec "${REPO_ROOT}/target/debug/rust_quant" "$@"
+        fi
+        ;;
+    false | FALSE | 0 | no | NO) ;;
+    *)
+        echo "EXECUTION_WORKER_USE_EXISTING_BINARY must be auto, true, or false." >&2
+        exit 2
+        ;;
+esac
+
 if command -v rustup >/dev/null 2>&1; then
     exec rustup run "${RUSTUP_TOOLCHAIN}" cargo run --bin rust_quant "$@"
 fi

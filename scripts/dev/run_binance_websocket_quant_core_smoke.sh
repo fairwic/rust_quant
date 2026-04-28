@@ -151,7 +151,7 @@ WITH seed AS (
       AND symbol = '${SMOKE_SYMBOL}'
       AND timeframe = '4H'
       AND enabled = true
-      AND version NOT LIKE 'legacy-mysql%'
+      AND version NOT LIKE 'smoke-binance-websocket-%'
     ORDER BY created_at DESC
     LIMIT 1
 )

@@ -1,4 +1,3 @@
-import pymysql
 import pandas as pd
 import mplfinance as mpf
 import sys
@@ -7,56 +6,36 @@ import numpy as np
 import json
 import matplotlib.pyplot as plt
 
-# DB Config
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': 33306,
-    'user': 'root',
-    'password': 'example',
-    'database': 'test',
-    'cursorclass': pymysql.cursors.DictCursor
-}
+from postgres_backtest import query_rows, quote_identifier
 
 def fetch_data(back_test_id):
+    back_test_id = int(back_test_id)
     print(f"Fetching data for Backtest ID: {back_test_id}")
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        # 1. Fetch Log
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM back_test_log WHERE id=%s", (back_test_id,))
-            log = cursor.fetchone()
-            if not log:
-                print(f"Backtest {back_test_id} not found")
-                return None, None, None
-            
-        inst_id = log['inst_type']
-        period = log['time']
-        
-        # 2. Fetch Candles
-        table_name = f"{inst_id.lower()}_candles_{period.lower()}"
-        start_ts = log['kline_start_time']
-        end_ts = log['kline_end_time']
-        
-        query_candles = f"SELECT ts, o, h, l, c FROM `{table_name}` WHERE ts >= %s AND ts <= %s ORDER BY ts ASC"
-        
-        with conn.cursor() as cursor:
-            cursor.execute(query_candles, (start_ts, end_ts))
-            candle_rows = cursor.fetchall()
-            
-        df_candles = pd.DataFrame(candle_rows)
-        
-        # 3. Fetch Trades
-        query_trades = "SELECT * FROM back_test_detail WHERE back_test_id=%s ORDER BY open_position_time ASC"
-        with conn.cursor() as cursor:
-            cursor.execute(query_trades, (back_test_id,))
-            trade_rows = cursor.fetchall()
-            
-        df_trades = pd.DataFrame(trade_rows)
-        
-        return df_candles, df_trades, log
-        
-    finally:
-        conn.close()
+    log_rows = query_rows(f"SELECT * FROM back_test_log WHERE id = {back_test_id}")
+    if not log_rows:
+        print(f"Backtest {back_test_id} not found")
+        return None, None, None
+
+    log = log_rows[0]
+    inst_id = log['inst_type']
+    period = log['time']
+
+    table_name = quote_identifier(f"{inst_id.lower()}_candles_{period.lower()}")
+    start_ts = int(log['kline_start_time'])
+    end_ts = int(log['kline_end_time'])
+    candle_rows = query_rows(
+        "SELECT ts, o, h, l, c "
+        f"FROM {table_name} WHERE ts >= {start_ts} AND ts <= {end_ts} ORDER BY ts ASC"
+    )
+    df_candles = pd.DataFrame(candle_rows)
+
+    trade_rows = query_rows(
+        "SELECT * FROM back_test_detail "
+        f"WHERE back_test_id = {back_test_id} ORDER BY open_position_time ASC"
+    )
+    df_trades = pd.DataFrame(trade_rows)
+
+    return df_candles, df_trades, log
 
 def parse_signals(df_trades):
     stats = {} # { SignalName: {'win': 0, 'loss': 0, 'profit': 0.0} }

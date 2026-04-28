@@ -6,26 +6,44 @@
 
 ## 数据库表结构
 
+当前 `rust_quant` 运行库统一使用 Postgres `quant_core`。下面 DDL 仅用于说明本地
+`exchange_api_config` 兼容表形态；用户真实 API Key 的业务归属仍在
+`rust_quan_web.quant_web.user_api_credentials`，执行 worker 通过 Web 内部接口解析。
+
 ### 1. exchange_api_config（交易所API配置表）
 
 存储交易所API凭证信息：
 
 ```sql
-CREATE TABLE `exchange_api_config` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `exchange_name` varchar(50) NOT NULL COMMENT '交易所名称（okx）',
-  `api_key` varchar(200) NOT NULL COMMENT 'API Key',
-  `api_secret` varchar(200) NOT NULL COMMENT 'API Secret',
-  `passphrase` varchar(200) DEFAULT NULL COMMENT 'Passphrase（OKX需要）',
-  `is_sandbox` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否沙箱环境',
-  `is_enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
-  `description` varchar(500) DEFAULT NULL COMMENT '描述',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  `is_deleted` smallint NOT NULL DEFAULT 0,
-  PRIMARY KEY (`id`),
-  KEY `exchange_name` (`exchange_name`, `is_enabled`, `is_deleted`)
+CREATE TABLE IF NOT EXISTS exchange_api_config (
+  id BIGSERIAL PRIMARY KEY,
+  exchange_name VARCHAR(50) NOT NULL,
+  api_key VARCHAR(200) NOT NULL,
+  api_secret VARCHAR(200) NOT NULL,
+  passphrase VARCHAR(200),
+  is_sandbox BOOLEAN NOT NULL DEFAULT FALSE,
+  is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  description VARCHAR(500),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ,
+  is_deleted SMALLINT NOT NULL DEFAULT 0
 );
+
+CREATE INDEX IF NOT EXISTS idx_exchange_api_config_exchange_name
+  ON exchange_api_config (exchange_name, is_enabled, is_deleted);
+
+COMMENT ON TABLE exchange_api_config IS '交易所 API 配置兼容表，当前仅用于 rust_quant 本地兼容和审计';
+COMMENT ON COLUMN exchange_api_config.id IS '主键 ID';
+COMMENT ON COLUMN exchange_api_config.exchange_name IS '交易所名称，如 binance、okx、hyperliquid';
+COMMENT ON COLUMN exchange_api_config.api_key IS '交易所 API Key';
+COMMENT ON COLUMN exchange_api_config.api_secret IS '交易所 API Secret';
+COMMENT ON COLUMN exchange_api_config.passphrase IS 'OKX 等交易所需要的 passphrase';
+COMMENT ON COLUMN exchange_api_config.is_sandbox IS '是否使用沙箱环境';
+COMMENT ON COLUMN exchange_api_config.is_enabled IS '是否启用';
+COMMENT ON COLUMN exchange_api_config.description IS '配置描述';
+COMMENT ON COLUMN exchange_api_config.created_at IS '创建时间';
+COMMENT ON COLUMN exchange_api_config.updated_at IS '更新时间';
+COMMENT ON COLUMN exchange_api_config.is_deleted IS '软删除标记，0 表示未删除';
 ```
 
 ### 2. strategy_api_config（策略与API配置关联表）
@@ -33,20 +51,32 @@ CREATE TABLE `exchange_api_config` (
 实现策略与API配置的多对多关系：
 
 ```sql
-CREATE TABLE `strategy_api_config` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `strategy_config_id` int NOT NULL COMMENT '策略配置ID',
-  `api_config_id` int NOT NULL COMMENT 'API配置ID',
-  `priority` int NOT NULL DEFAULT 0 COMMENT '优先级（数字越小优先级越高）',
-  `is_enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  `is_deleted` smallint NOT NULL DEFAULT 0,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `strategy_api_unique` (`strategy_config_id`, `api_config_id`, `is_deleted`),
-  KEY `strategy_config_id` (`strategy_config_id`, `is_enabled`, `is_deleted`),
-  KEY `api_config_id` (`api_config_id`, `is_enabled`, `is_deleted`)
+CREATE TABLE IF NOT EXISTS strategy_api_config (
+  id BIGSERIAL PRIMARY KEY,
+  strategy_config_id BIGINT NOT NULL,
+  api_config_id BIGINT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ,
+  is_deleted SMALLINT NOT NULL DEFAULT 0,
+  CONSTRAINT strategy_api_unique UNIQUE (strategy_config_id, api_config_id, is_deleted)
 );
+
+CREATE INDEX IF NOT EXISTS idx_strategy_api_config_strategy
+  ON strategy_api_config (strategy_config_id, is_enabled, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_strategy_api_config_api
+  ON strategy_api_config (api_config_id, is_enabled, is_deleted);
+
+COMMENT ON TABLE strategy_api_config IS '策略配置与交易所 API 配置关联兼容表';
+COMMENT ON COLUMN strategy_api_config.id IS '主键 ID';
+COMMENT ON COLUMN strategy_api_config.strategy_config_id IS '策略配置 ID';
+COMMENT ON COLUMN strategy_api_config.api_config_id IS 'API 配置 ID';
+COMMENT ON COLUMN strategy_api_config.priority IS '优先级，数字越小优先级越高';
+COMMENT ON COLUMN strategy_api_config.is_enabled IS '是否启用';
+COMMENT ON COLUMN strategy_api_config.created_at IS '创建时间';
+COMMENT ON COLUMN strategy_api_config.updated_at IS '更新时间';
+COMMENT ON COLUMN strategy_api_config.is_deleted IS '软删除标记，0 表示未删除';
 ```
 
 ## 架构设计
@@ -58,7 +88,7 @@ orchestration (调度层)
     ↓
 services (业务协调层)
     ├── ExchangeApiService (API配置管理)
-    └── OkxOrderService (OKX订单执行)
+    └── ExecutionWorker / crypto_exc_all facade (统一下单执行)
     ↓
 domain (领域层)
     ├── ExchangeApiConfig (实体)
@@ -76,8 +106,8 @@ infrastructure (基础设施层)
 2. **获取API配置** → `ExchangeApiService::get_first_api_config()` 
    - 优先从Redis缓存获取（1小时过期）
    - 缓存未命中则从数据库查询并缓存
-3. **获取账户信息** → `OkxOrderService::get_positions()` + `get_max_available_size()`
-4. **执行下单** → `OkxOrderService::execute_order_from_signal()`
+3. **获取用户凭证** → execution worker 调用 `rust_quan_web` 内部接口解析用户 API Key
+4. **执行下单** → 通过 `crypto_exc_all` facade 按交易所执行，dry-run/live 结果回写 Web
 
 ## 使用示例
 
@@ -119,11 +149,9 @@ api_service.associate_strategy_with_api(1, 1, 0).await?;
 策略执行服务会自动从Redis缓存或数据库获取关联的API配置：
 
 ```rust
-// 在 StrategyExecutionService::execute_order_internal() 中
-// 自动获取API配置并执行下单
+// legacy 本地路径：在 StrategyExecutionService::execute_order_internal() 中
+// 自动获取API配置并执行下单。新闭环优先走 Web execution task + worker。
 let api_config = api_service.get_first_api_config(strategy_config_id).await?;
-let okx_service = OkxOrderService;
-okx_service.execute_order_from_signal(&api_config, inst_id, &signal, size, price).await?;
 ```
 
 ## Redis缓存机制
@@ -164,11 +192,11 @@ api_service.clear_cache(strategy_config_id).await?;
 
 ### 支持更多交易所
 
-当前仅支持OKX，扩展其他交易所需要：
+当前执行路径已经按 `crypto_exc_all` facade 逐步扩展到 Binance、OKX 等交易所。新增交易所时优先：
 
-1. 在 `ExchangeApiConfig` 中添加交易所特定字段
-2. 实现对应的订单执行服务（如 `BinanceOrderService`）
-3. 在 `OkxOrderService` 中添加交易所类型判断
+1. 在 `crypto_exc_all` 增加或完善对应交易所 adapter
+2. 在 `rust_quant` execution worker 中增加凭证映射和 dry-run/live guard
+3. 在 `rust_quan_web` 的用户 API Key 配置中补齐该交易所必需字段
 
 ### 多API配置负载均衡
 
@@ -191,10 +219,9 @@ api_service.clear_cache(strategy_config_id).await?;
 
 ## 相关文件
 
-- 数据库表结构: `create_table_exchange_api.sql`
+- 数据库表结构: `quant_core` Postgres 兼容表或服务迁移 SQL
 - Domain实体: `crates/domain/src/entities/exchange_api_config.rs`
 - Repository实现: `crates/infrastructure/src/repositories/exchange_api_config_repository.rs`
 - Service层: `crates/services/src/exchange/exchange_api_service.rs`
 - OKX订单服务: `crates/services/src/exchange/okx_order_service.rs`
 - 策略执行集成: `crates/services/src/strategy/strategy_execution_service.rs`
-

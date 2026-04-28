@@ -26,8 +26,15 @@ fn rust_quan_web_worker_smoke_script_sets_safe_local_defaults() {
     assert!(script.contains(
         "QUANT_CORE_DATABASE_URL:=\"postgres://postgres:postgres123@localhost:5432/quant_core\""
     ));
+    assert!(script.contains("QUANT_DATABASE_URL:=\"${QUANT_CORE_DATABASE_URL}\""));
+    assert!(script.contains("SQLX_OFFLINE:=\"true\""));
+    assert!(script.contains("EXECUTION_WORKER_USE_EXISTING_BINARY:=\"auto\""));
+    assert!(script.contains("target/debug/rust_quant"));
+    assert!(script.contains("Using existing rust_quant binary"));
     assert!(script.contains("rustup which --toolchain \"${RUSTUP_TOOLCHAIN}\" rustc"));
     assert!(script.contains("export RUSTC"));
+    assert!(script.contains("export QUANT_DATABASE_URL"));
+    assert!(script.contains("export SQLX_OFFLINE"));
     assert!(script.contains("rustup run \"${RUSTUP_TOOLCHAIN}\" cargo run --bin rust_quant"));
     assert!(script.contains("cargo run --bin rust_quant"));
 }

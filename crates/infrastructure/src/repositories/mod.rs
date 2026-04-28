@@ -17,6 +17,9 @@ pub mod strategy_config_postgres_repository;
 pub mod strategy_config_repository;
 pub mod swap_order_repository;
 
+#[cfg(test)]
+mod postgres_contract_tests;
+
 pub use audit_repository::SqlxAuditRepository;
 pub use backtest_repository::SqlxBacktestRepository;
 pub use candle_repository::{PostgresCandleRepository, SqlxCandleRepository};

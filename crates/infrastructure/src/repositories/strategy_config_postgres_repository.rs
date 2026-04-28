@@ -169,7 +169,6 @@ impl PostgresStrategyConfigRepository {
             r#"
             SELECT id::text AS id, legacy_id, strategy_key, exchange, symbol, timeframe, enabled, config, risk_config
             FROM strategy_configs
-            WHERE version NOT LIKE 'legacy-mysql%'
             ORDER BY created_at ASC
             "#,
         )
@@ -241,7 +240,6 @@ impl StrategyConfigRepository for PostgresStrategyConfigRepository {
             SELECT id::text AS id, legacy_id, strategy_key, exchange, symbol, timeframe, enabled, config, risk_config
             FROM strategy_configs
             WHERE enabled = true
-              AND version NOT LIKE 'legacy-mysql%'
             ORDER BY created_at ASC
             "#,
         )
@@ -262,7 +260,6 @@ impl StrategyConfigRepository for PostgresStrategyConfigRepository {
             SELECT id::text AS id, legacy_id, strategy_key, exchange, symbol, timeframe, enabled, config, risk_config
             FROM strategy_configs
             WHERE enabled = true
-              AND version NOT LIKE 'legacy-mysql%'
               AND symbol = $1
               AND timeframe = $2
             ORDER BY created_at ASC

@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use rust_quant_domain::entities::{ExchangeSymbol, ExchangeSymbolListingEvent};
-use rust_quant_domain::traits::ExchangeSymbolRepository;
+use rust_quant_domain::entities::{
+    exchange_symbol::ExchangeSymbol, exchange_symbol_listing_event::ExchangeSymbolListingEvent,
+};
+use rust_quant_domain::traits::exchange_symbol_repository::ExchangeSymbolRepository;
 use serde_json::Value;
 use sqlx::{postgres::PgRow, FromRow, PgPool, Row};
 

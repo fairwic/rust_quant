@@ -63,7 +63,7 @@ struct BinanceKlinePayload {
 
 enum BinanceCandlePersister {
     QuantCore(PostgresCandleRepository),
-    LegacyMysql,
+    LegacyCompatTables,
 }
 
 impl BinanceCandlePersister {
@@ -77,7 +77,7 @@ impl BinanceCandlePersister {
                 .context("创建 quant_core Postgres K线连接池失败")?;
             Ok(Self::QuantCore(PostgresCandleRepository::new(pool)))
         } else {
-            Ok(Self::LegacyMysql)
+            Ok(Self::LegacyCompatTables)
         }
     }
 
@@ -94,7 +94,7 @@ impl BinanceCandlePersister {
                         )
                     })?;
             }
-            Self::LegacyMysql => {
+            Self::LegacyCompatTables => {
                 CandlesModel::new()
                     .upsert_batch(
                         vec![update.okx_candle.clone()],
@@ -104,7 +104,7 @@ impl BinanceCandlePersister {
                     .await
                     .with_context(|| {
                         format!(
-                            "保存 Binance K线到 legacy MySQL 分表失败: {} {}",
+                            "保存 Binance K线到 Postgres 分表失败: {} {}",
                             update.inst_id, update.time_interval
                         )
                     })?;

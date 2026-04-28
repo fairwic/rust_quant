@@ -1,7 +1,8 @@
 use anyhow::Result;
-use rust_quant_core::database::get_db_pool;
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, MySql, QueryBuilder};
+use sqlx::{FromRow, Postgres, QueryBuilder};
+
+use super::get_quant_core_postgres_pool;
 
 /// Tickers Volume 数据表实体
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
@@ -25,9 +26,9 @@ impl TickersVolumeModel {
 
     /// 根据 inst_id 查询
     pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersVolume>> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
         let results =
-            sqlx::query_as::<_, TickersVolume>("SELECT * FROM tickers_volume WHERE inst_id = ?")
+            sqlx::query_as::<_, TickersVolume>("SELECT * FROM tickers_volume WHERE inst_id = $1")
                 .bind(inst_id)
                 .fetch_all(pool)
                 .await?;
@@ -37,8 +38,8 @@ impl TickersVolumeModel {
 
     /// 根据 inst_id 删除
     pub async fn delete_by_inst_id(&self, inst_id: &str) -> Result<u64> {
-        let pool = get_db_pool();
-        let result = sqlx::query("DELETE FROM tickers_volume WHERE inst_id = ?")
+        let pool = get_quant_core_postgres_pool()?;
+        let result = sqlx::query("DELETE FROM tickers_volume WHERE inst_id = $1")
             .bind(inst_id)
             .execute(pool)
             .await?;
@@ -52,8 +53,8 @@ impl TickersVolumeModel {
             return Ok(0);
         }
 
-        let pool = get_db_pool();
-        let mut query_builder: QueryBuilder<MySql> =
+        let pool = get_quant_core_postgres_pool()?;
+        let mut query_builder: QueryBuilder<Postgres> =
             QueryBuilder::new("INSERT INTO tickers_volume (inst_id, period, ts, oi, vol) ");
 
         query_builder.push_values(list.iter(), |mut b, ticker| {

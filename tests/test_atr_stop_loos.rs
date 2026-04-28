@@ -26,12 +26,12 @@ async fn test_atr_stop_loos() -> anyhow::Result<()> {
     });
 
     // 获取K线数据
-    let mysql_candles: Vec<CandlesEntity> =
+    let source_candles: Vec<CandlesEntity> =
         trading::task::basic::get_candle_data_confirm(inst_id, time, 1000, select_time).await?;
-    println!("{:#?}", mysql_candles);
+    println!("{:#?}", source_candles);
 
     // 确保有数据
-    if mysql_candles.is_empty() {
+    if source_candles.is_empty() {
         println!("警告: 未获取到K线数据");
         return Ok(());
     }
@@ -39,7 +39,7 @@ async fn test_atr_stop_loos() -> anyhow::Result<()> {
     let period = 14;
     let multi = 1.5;
     let mut atr = ATRStopLoos::new(period, multi).unwrap();
-    for candle in mysql_candles.iter() {
+    for candle in source_candles.iter() {
         println!("candle: {:?}", candle);
         let (short_stop, long_stop, atr_value) = atr.next(
             candle.h.parse::<f64>()?,

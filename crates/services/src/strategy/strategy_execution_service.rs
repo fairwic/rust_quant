@@ -2212,9 +2212,10 @@ impl StrategyExecutionService {
         let strategy_type = config.strategy_type.as_str().to_string();
 
         tokio::spawn(async move {
+            use rust_quant_core::database::get_db_pool;
             use rust_quant_infrastructure::SignalLogRepository;
 
-            let repo = SignalLogRepository::new();
+            let repo = SignalLogRepository::new(get_db_pool().clone());
 
             match repo
                 .save_signal_log(&inst_id, &period, &strategy_type, &signal_json)
@@ -3126,14 +3127,6 @@ mod tests {
         use chrono::Utc;
         use rust_quant_domain::{StrategyStatus, StrategyType, Timeframe};
         use rust_quant_strategies::framework::backtest::BasicRiskStrategyConfig;
-
-        if std::env::var("DB_HOST").is_err() {
-            std::env::set_var(
-                "DB_HOST",
-                "mysql://root:example@127.0.0.1:33306/test?ssl-mode=DISABLED",
-            );
-        }
-        let _ = init_db_pool().await;
 
         let repo = Arc::new(MockSwapOrderRepository::new());
         let service = StrategyExecutionService::new(repo);
@@ -4329,10 +4322,10 @@ mod tests {
         std::env::set_var("APP_ENV", "local");
         std::env::set_var("OKX_SIMULATED_TRADING", "1");
         std::env::set_var("OKX_REQUEST_EXPIRATION_MS", "300000");
-        if std::env::var("DB_HOST").is_err() {
+        if std::env::var("QUANT_CORE_DATABASE_URL").is_err() {
             std::env::set_var(
-                "DB_HOST",
-                "mysql://root:example@127.0.0.1:33306/test?ssl-mode=DISABLED",
+                "QUANT_CORE_DATABASE_URL",
+                "postgres://postgres:postgres123@127.0.0.1:5432/quant_core",
             );
         }
         if std::env::var("REDIS_HOST").is_err() {
@@ -4487,11 +4480,11 @@ mod tests {
             wait_for_position(&okx_service, &db_api_config, &inst_id, "long", false).await?;
         }
 
-        sqlx::query("DELETE FROM exchange_apikey_strategy_relation WHERE strategy_config_id = ?")
+        sqlx::query("DELETE FROM exchange_apikey_strategy_relation WHERE strategy_config_id = $1")
             .bind(config_id as i32)
             .execute(&pool)
             .await?;
-        sqlx::query("UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = ?")
+        sqlx::query("UPDATE exchange_apikey_config SET is_deleted = 1 WHERE id = $1")
             .bind(api_config_id)
             .execute(&pool)
             .await?;

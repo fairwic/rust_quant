@@ -58,7 +58,7 @@ pub trait StrategyConfigRepository: Send + Sync {
     /// 根据外部ID查询配置。
     ///
     /// Postgres `quant_core.strategy_configs` 使用 UUID 作为行ID，同时保留
-    /// legacy_id。默认实现兼容旧 MySQL 数字ID。
+    /// legacy_id。默认实现兼容旧数字ID。
     async fn find_by_external_id(&self, id: &str) -> Result<Option<StrategyConfig>> {
         let Some(id) = id.trim().parse::<i64>().ok() else {
             return Ok(None);

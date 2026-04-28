@@ -54,7 +54,7 @@ impl BacktestService {
     /// * `time` - 时间周期
     /// * `strategy_config_string` - 策略配置 JSON 字符串
     /// * `back_test_result` - 回测结果
-    /// * `mysql_candles` - K 线数据（用于统计）
+    /// * `source_candles` - K 线数据（用于统计）
     /// * `risk_strategy_config` - 风险配置
     /// * `strategy_name` - 策略名称
     ///
@@ -67,7 +67,7 @@ impl BacktestService {
         time: &str,
         strategy_config_string: Option<String>,
         back_test_result: BackTestResult,
-        mysql_candles: &[CandleItem],
+        source_candles: &[CandleItem],
         risk_strategy_config: BasicRiskStrategyConfig,
         strategy_name: &str,
     ) -> Result<i64> {
@@ -81,9 +81,9 @@ impl BacktestService {
             strategy_config_string,
             json!(risk_strategy_config).to_string(),
             (back_test_result.funds - 100.0).to_string(),
-            mysql_candles.first().map(|c| c.ts).unwrap_or_default(),
-            mysql_candles.last().map(|c| c.ts).unwrap_or_default(),
-            mysql_candles.len() as i32,
+            source_candles.first().map(|c| c.ts).unwrap_or_default(),
+            source_candles.last().map(|c| c.ts).unwrap_or_default(),
+            source_candles.len() as i32,
         );
 
         // 可选：写入前后可在此更新自定义胜率统计
@@ -110,8 +110,8 @@ impl BacktestService {
                 .await?;
 
                 // 计算并更新绩效指标
-                let start_time = mysql_candles.first().map(|c| c.ts).unwrap_or_default();
-                let end_time = mysql_candles.last().map(|c| c.ts).unwrap_or_default();
+                let start_time = source_candles.first().map(|c| c.ts).unwrap_or_default();
+                let end_time = source_candles.last().map(|c| c.ts).unwrap_or_default();
 
                 self.update_performance_metrics(
                     back_test_id,

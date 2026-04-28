@@ -1,9 +1,9 @@
 use anyhow::Result;
 use chrono::NaiveDateTime;
-use rust_quant_core::database::get_db_pool;
+use rust_quant_market::get_quant_core_postgres_pool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{FromRow, MySql, QueryBuilder};
+use sqlx::{FromRow, Postgres, QueryBuilder};
 use tracing::debug;
 
 /// 回测分析记录
@@ -46,13 +46,13 @@ impl BackTestAnalysisModel {
             return Ok(0);
         }
 
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
         let mut total_affected = 0u64;
 
         // 分批插入，每批 100 条
         const BATCH_SIZE: usize = 100;
         for chunk in analyses.chunks(BATCH_SIZE) {
-            let mut query_builder = QueryBuilder::<MySql>::new(
+            let mut query_builder = QueryBuilder::<Postgres>::new(
                 r#"INSERT INTO back_test_analysis (
                     back_test_id, inst_id, time, option_type, open_position_time,
                     open_price, bars_after, price_after, price_change_percent, is_profitable
@@ -85,10 +85,10 @@ impl BackTestAnalysisModel {
 
     /// 查询指定回测的分析记录
     pub async fn find_by_back_test_id(&self, back_test_id: i32) -> Result<Vec<BackTestAnalysis>> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
 
         let analyses = sqlx::query_as::<_, BackTestAnalysis>(
-            "SELECT * FROM back_test_analysis WHERE back_test_id = ? ORDER BY open_position_time ASC",
+            "SELECT * FROM back_test_analysis WHERE back_test_id = $1 ORDER BY open_position_time ASC",
         )
         .bind(back_test_id)
         .fetch_all(pool)
@@ -125,7 +125,7 @@ impl BackTestAnalysisModel {
 
     /// 计算指定K线数后的胜率
     async fn calculate_win_rate_after_bars(&self, back_test_id: i32, bars: i32) -> Result<f32> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
 
         #[derive(FromRow)]
         struct WinRateStats {
@@ -139,7 +139,7 @@ impl BackTestAnalysisModel {
                 COUNT(*) as total_positions,
                 SUM(is_profitable) as profitable_positions
             FROM back_test_analysis
-            WHERE back_test_id = ? AND bars_after = ?
+            WHERE back_test_id = $1 AND bars_after = $2
             "#,
         )
         .bind(back_test_id)
@@ -165,9 +165,9 @@ impl BackTestAnalysisModel {
 
     /// 删除指定回测的分析记录
     pub async fn delete_by_back_test_id(&self, back_test_id: i32) -> Result<u64> {
-        let pool = get_db_pool();
+        let pool = get_quant_core_postgres_pool()?;
 
-        let result = sqlx::query("DELETE FROM back_test_analysis WHERE back_test_id = ?")
+        let result = sqlx::query("DELETE FROM back_test_analysis WHERE back_test_id = $1")
             .bind(back_test_id)
             .execute(pool)
             .await?;

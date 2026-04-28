@@ -3,9 +3,8 @@
 //! 记录策略产生的交易信号
 
 use anyhow::Result;
-use rust_quant_core::database::get_db_pool;
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, PgPool};
 use tracing::{debug, info};
 
 /// 策略信号日志实体
@@ -22,11 +21,13 @@ pub struct SignalLogEntity {
 }
 
 /// 信号日志仓储
-pub struct SignalLogRepository;
+pub struct SignalLogRepository {
+    pool: PgPool,
+}
 
 impl SignalLogRepository {
-    pub fn new() -> Self {
-        Self
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     /// 保存信号日志
@@ -43,17 +44,15 @@ impl SignalLogRepository {
         strategy_type: &str,
         signal_json: &str,
     ) -> Result<u64> {
-        let pool = get_db_pool();
-
-        let result = sqlx::query!(
+        let result = sqlx::query(
             "INSERT INTO strategy_job_signal_log (inst_id, time, strategy_type, strategy_result)
-             VALUES (?, ?, ?, ?)",
-            inst_id,
-            period,
-            strategy_type,
-            signal_json
+             VALUES ($1, $2, $3, $4)",
         )
-        .execute(pool)
+        .bind(inst_id)
+        .bind(period)
+        .bind(strategy_type)
+        .bind(signal_json)
+        .execute(&self.pool)
         .await?;
 
         debug!(
@@ -78,19 +77,16 @@ impl SignalLogRepository {
         period: &str,
         limit: usize,
     ) -> Result<Vec<SignalLogEntity>> {
-        let pool = get_db_pool();
-
-        let signals = sqlx::query_as!(
-            SignalLogEntity,
+        let signals = sqlx::query_as::<_, SignalLogEntity>(
             "SELECT * FROM strategy_job_signal_log
-             WHERE inst_id = ? AND time = ?
+             WHERE inst_id = $1 AND time = $2
              ORDER BY created_at DESC
-             LIMIT ?",
-            inst_id,
-            period,
-            limit as i64
+             LIMIT $3",
         )
-        .fetch_all(pool)
+        .bind(inst_id)
+        .bind(period)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
         .await?;
 
         Ok(signals)
@@ -98,17 +94,14 @@ impl SignalLogRepository {
 
     /// 查询所有信号日志
     pub async fn find_all(&self, limit: Option<usize>) -> Result<Vec<SignalLogEntity>> {
-        let pool = get_db_pool();
-
         let limit = limit.unwrap_or(100);
-        let signals = sqlx::query_as!(
-            SignalLogEntity,
+        let signals = sqlx::query_as::<_, SignalLogEntity>(
             "SELECT * FROM strategy_job_signal_log
              ORDER BY created_at DESC
-             LIMIT ?",
-            limit as i64
+             LIMIT $1",
         )
-        .fetch_all(pool)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
         .await?;
 
         Ok(signals)
@@ -116,14 +109,12 @@ impl SignalLogRepository {
 
     /// 清理过期日志（保留最近N天）
     pub async fn cleanup_old_logs(&self, days: i64) -> Result<u64> {
-        let pool = get_db_pool();
-
-        let result = sqlx::query!(
+        let result = sqlx::query(
             "DELETE FROM strategy_job_signal_log
-             WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)",
-            days
+             WHERE created_at < NOW() - ($1::bigint * INTERVAL '1 day')",
         )
-        .execute(pool)
+        .bind(days)
+        .execute(&self.pool)
         .await?;
 
         info!(
@@ -135,12 +126,6 @@ impl SignalLogRepository {
     }
 }
 
-impl Default for SignalLogRepository {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,7 +133,10 @@ mod tests {
     #[tokio::test]
     #[ignore] // 需要数据库
     async fn test_save_signal_log() {
-        let repo = SignalLogRepository::new();
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://postgres:postgres@127.0.0.1/test")
+            .expect("lazy postgres pool");
+        let repo = SignalLogRepository::new(pool);
         let signal_json = r#"{"should_buy":true,"should_sell":false,"ts":1234567890}"#;
 
         let result = repo

@@ -4,7 +4,7 @@
 ///
 /// 运行前请确保：
 /// 1. DATABASE_URL 环境变量已设置
-/// 2. MySQL 数据库正在运行
+/// 2. Postgres 数据库正在运行
 /// 3. 相关表已创建
 use rust_quant_market::models::*;
 

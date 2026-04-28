@@ -554,7 +554,7 @@ fn create_strategy_config_service() -> Result<StrategyConfigService> {
 
     let pool = get_db_pool().clone();
     let repository = SqlxStrategyConfigRepository::new(pool);
-    info!("📚 策略配置来源: legacy MySQL strategy_config");
+    info!("📚 策略配置来源: quant_core.strategy_config");
     Ok(StrategyConfigService::new(Box::new(repository)))
 }
 
@@ -563,11 +563,11 @@ fn should_use_quant_core_strategy_configs() -> Result<bool> {
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
-    if source == "mysql" || source == "legacy_mysql" {
-        return Ok(false);
-    }
     if source == "quant_core" || source == "postgres" {
         return Ok(true);
+    }
+    if source == "strategy_config" || source == "legacy_pg" {
+        return Ok(false);
     }
     if !source.is_empty() {
         return Err(anyhow!("不支持的 STRATEGY_CONFIG_SOURCE: {}", source));

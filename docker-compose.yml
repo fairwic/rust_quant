@@ -12,9 +12,11 @@ services:
       IS_RUN_REAL_STRATEGY: 'true'
       IS_OPEN_SOCKET: 'true'
       RUN_STRATEGY_PERIOD: "5m"
-      OKX_API_KEY: 
-      OKX_API_SECRET: 
-      OKX_PASSPHRASE: 
+      QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+      DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+      OKX_API_KEY:
+      OKX_API_SECRET:
+      OKX_PASSPHRASE:
     volumes:
       - .:/usr/src/rust_quant
     command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
@@ -30,9 +32,11 @@ services:
       IS_RUN_REAL_STRATEGY: 'true'
       IS_OPEN_SOCKET: 'true'
       RUN_STRATEGY_PERIOD: "1H"
-      OKX_API_KEY: 
-      OKX_API_SECRET: 
-      OKX_PASSPHRASE: 
+      QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+      DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+      OKX_API_KEY:
+      OKX_API_SECRET:
+      OKX_PASSPHRASE:
     volumes:
       - .:/usr/src/rust_quant
     command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
@@ -48,9 +52,11 @@ services:
       IS_RUN_REAL_STRATEGY: 'true'
       IS_OPEN_SOCKET: 'true'
       RUN_STRATEGY_PERIOD: "4H"
-      OKX_API_KEY: 
-      OKX_API_SECRET: 
-      OKX_PASSPHRASE: 
+      QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+      DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+      OKX_API_KEY:
+      OKX_API_SECRET:
+      OKX_PASSPHRASE:
     volumes:
       - .:/usr/src/rust_quant
     command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust-quant"
@@ -66,25 +72,27 @@ services:
       IS_RUN_REAL_STRATEGY: 'true'
       IS_OPEN_SOCKET: 'true'
       RUN_STRATEGY_PERIOD: "1Dutc"
-      OKX_API_KEY: 
-      OKX_API_SECRET: 
-      OKX_PASSPHRASE: 
+      QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+      DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+      OKX_API_KEY:
+      OKX_API_SECRET:
+      OKX_PASSPHRASE:
     volumes:
       - .:/usr/src/rust_quant
     command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
-  mysql:
-    image: mysql:8.0
-    container_name: mysql
+  postgres:
+    image: postgres:16
+    container_name: quant_core_postgres
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: example # root 用户密码
-      MYSQL_DATABASE: test # 默认创建的数据库
-      MYSQL_PASSWORD: example # 普通用户密码
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: example
+      POSTGRES_DB: quant_core
     ports:
-      - "33306:3306"
+      - "5432:5432"
     volumes:
-      - ~/docker-volumes/mysql_data:/var/lib/mysql # 本地路径映射到 MySQL 数据目录
-    command: --max_connections=1000
+      - ~/docker-volumes/quant_core_postgres:/var/lib/postgresql/data
+    command: ["postgres", "-c", "max_connections=1000"]
   redis:
     image: redis:6.2
     container_name: redis

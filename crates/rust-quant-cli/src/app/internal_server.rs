@@ -73,6 +73,9 @@ pub async fn handle_backtest_run_body(body: &[u8]) -> InternalHttpJsonResponse {
     if let Err(message) = validate_backtest_request(&request) {
         return json_response(400, json!({ "error": message }));
     }
+    if let Err(message) = validate_backtest_runtime_contract(&request) {
+        return json_response(400, json!({ "error": message }));
+    }
 
     let run_id = format!("rq-backtest-{}", Utc::now().timestamp_millis());
     if request.dry_run {
@@ -175,6 +178,38 @@ fn validate_backtest_request(request: &BacktestRunRequest) -> Result<(), &'stati
     if request.timeframe.trim().is_empty() {
         return Err("timeframe is required");
     }
+    Ok(())
+}
+
+fn validate_backtest_runtime_contract(request: &BacktestRunRequest) -> Result<(), String> {
+    if request.dry_run {
+        return Ok(());
+    }
+
+    let source = std::env::var("STRATEGY_CONFIG_SOURCE")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if !source.is_empty()
+        && !matches!(
+            source.as_str(),
+            "quant_core" | "postgres" | "strategy_config" | "legacy_pg"
+        )
+    {
+        return Err(format!(
+            "STRATEGY_CONFIG_SOURCE={} is not supported for non-dry-run backtests",
+            source
+        ));
+    }
+
+    let quant_core_database_url = std::env::var("QUANT_CORE_DATABASE_URL")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if quant_core_database_url.is_empty() {
+        return Err("QUANT_CORE_DATABASE_URL is required for non-dry-run backtests".to_string());
+    }
+
     Ok(())
 }
 

@@ -221,18 +221,6 @@ WITH deduped AS (
       AND sc.enabled = true
       AND sc.strategy_key = '${TARGET_STRATEGY_KEY}'
       AND sc.version NOT LIKE 'smoke-binance-websocket-natural-%'
-      AND NOT (
-          sc.version = 'legacy-mysql'
-          AND EXISTS (
-              SELECT 1
-              FROM strategy_configs dup
-              WHERE dup.exchange = sc.exchange
-                AND dup.symbol = sc.symbol
-                AND dup.timeframe = sc.timeframe
-                AND dup.enabled = true
-                AND dup.version <> sc.version
-          )
-      )
 )
 SELECT strategy_key, symbol, timeframe, version, min_k_line_num, config_period, tags
 FROM deduped

@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Result};
-use sqlx::{MySql, QueryBuilder};
+use sqlx::{Postgres, QueryBuilder};
 use tracing::{debug, info};
 
+use super::{get_quant_core_postgres_pool, quote_legacy_table_name};
 use super::{CandlesEntity, SelectCandleReqDto, SelectTime, TimeDirect};
 use okx::dto::market_dto::CandleOkxRespDto;
-use rust_quant_core::database::get_db_pool;
 
 #[derive(Debug)]
 enum TimeInterval {
@@ -31,28 +31,14 @@ impl CandlesModel {
     /// 创建 K线 数据表
     pub async fn create_table(&self, inst_id: &str, time_interval: &str) -> Result<u64> {
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let create_table_sql = format!(
-            "CREATE TABLE IF NOT EXISTS `{}` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `ts` bigint NOT NULL COMMENT '开始时间，Unix时间戳的毫秒数格式，如 1597026383085',
-  `o` varchar(20) NOT NULL COMMENT '开盘价格',
-  `h` varchar(20) NOT NULL COMMENT '最高价格',
-  `l` varchar(20) NOT NULL COMMENT '最低价格',
-  `c` varchar(20) NOT NULL COMMENT '收盘价格',
-  `vol` varchar(20) NOT NULL COMMENT '交易量，以张为单位',
-  `vol_ccy` varchar(50) NOT NULL COMMENT '交易量，以币为单位',
-  `confirm` varchar(20) NOT NULL COMMENT 'K线状态',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `ts` (`ts` DESC) USING BTREE,
-  KEY `vol_ccy` (`vol_ccy` DESC)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ;",
-            table_name
-        );
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
-        let pool = get_db_pool();
+        let create_table_sql = Self::build_create_table_sql(&quoted_table_name);
         let result = sqlx::query(&create_table_sql).execute(pool).await?;
+        for comment_sql in Self::build_table_comment_sqls(&quoted_table_name) {
+            sqlx::query(&comment_sql).execute(pool).await?;
+        }
         Ok(result.rows_affected())
     }
 
@@ -77,11 +63,12 @@ impl CandlesModel {
         }
 
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
-        let mut query_builder: QueryBuilder<MySql> = QueryBuilder::new(format!(
-            "INSERT INTO `{}` (ts, o, h, l, c, vol, vol_ccy, confirm) ",
-            table_name
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(format!(
+            "INSERT INTO {} (ts, o, h, l, c, vol, vol_ccy, confirm) ",
+            quoted_table_name
         ));
 
         query_builder.push_values(list.iter(), |mut b, candle| {
@@ -103,9 +90,10 @@ impl CandlesModel {
     /// 删除大于等于指定时间的数据
     pub async fn delete_lg_time(&self, inst_id: &str, time_interval: &str, ts: i64) -> Result<u64> {
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
-        let result = sqlx::query(&format!("DELETE FROM `{}` WHERE ts >= ?", table_name))
+        let result = sqlx::query(&format!("DELETE FROM {} WHERE ts >= $1", quoted_table_name))
             .bind(ts)
             .execute(pool)
             .await?;
@@ -125,11 +113,12 @@ impl CandlesModel {
         time_interval: &str,
     ) -> Result<Option<CandlesEntity>> {
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
         let result = sqlx::query_as::<_, CandlesEntity>(&format!(
-            "SELECT * FROM `{}` WHERE confirm = 0 ORDER BY ts ASC LIMIT 1",
-            table_name
+            "SELECT * FROM {} WHERE confirm = '0' ORDER BY ts ASC LIMIT 1",
+            quoted_table_name
         ))
         .fetch_optional(pool)
         .await?;
@@ -146,11 +135,12 @@ impl CandlesModel {
         time_interval: &str,
     ) -> Result<u64> {
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
         let result = sqlx::query(&format!(
-            "UPDATE `{}` SET o = ?, h = ?, l = ?, c = ?, vol = ?, vol_ccy = ?, confirm = ? WHERE ts = ?",
-            table_name
+            "UPDATE {} SET o = $1, h = $2, l = $3, c = $4, vol = $5, vol_ccy = $6, confirm = $7 WHERE ts = $8",
+            quoted_table_name
         ))
         .bind(&candle.o)
         .bind(&candle.h)
@@ -176,21 +166,22 @@ impl CandlesModel {
         time_interval: &str,
     ) -> Result<u64> {
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
         let result = sqlx::query(&format!(
-            "INSERT INTO `{}` (ts, o, h, l, c, vol, vol_ccy, confirm) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE 
-                o = VALUES(o),
-                h = VALUES(h),
-                l = VALUES(l),
-                c = VALUES(c),
-                vol = VALUES(vol),
-                vol_ccy = VALUES(vol_ccy),
-                confirm = VALUES(confirm),
+            "INSERT INTO {} (ts, o, h, l, c, vol, vol_ccy, confirm)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (ts) DO UPDATE SET
+                o = EXCLUDED.o,
+                h = EXCLUDED.h,
+                l = EXCLUDED.l,
+                c = EXCLUDED.c,
+                vol = EXCLUDED.vol,
+                vol_ccy = EXCLUDED.vol_ccy,
+                confirm = EXCLUDED.confirm,
                 updated_at = CURRENT_TIMESTAMP",
-            table_name
+            quoted_table_name
         ))
         .bind(candle_data.ts.parse::<i64>().unwrap_or(0))
         .bind(&candle_data.o)
@@ -220,46 +211,38 @@ impl CandlesModel {
         }
 
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
-        // 构建批量 UPSERT SQL
-        let mut query = format!(
-            "INSERT INTO `{}` (ts, o, h, l, c, vol, vol_ccy, confirm) VALUES ",
-            table_name
-        );
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(format!(
+            "INSERT INTO {} (ts, o, h, l, c, vol, vol_ccy, confirm) ",
+            quoted_table_name
+        ));
 
-        let placeholders: Vec<String> = candles
-            .iter()
-            .map(|_| "(?, ?, ?, ?, ?, ?, ?, ?)".to_string())
-            .collect();
-        query.push_str(&placeholders.join(", "));
+        query_builder.push_values(candles.iter(), |mut b, candle| {
+            b.push_bind(candle.ts.parse::<i64>().unwrap_or(0))
+                .push_bind(&candle.o)
+                .push_bind(&candle.h)
+                .push_bind(&candle.l)
+                .push_bind(&candle.c)
+                .push_bind(&candle.v)
+                .push_bind(&candle.vol_ccy)
+                .push_bind(&candle.confirm);
+        });
 
-        query.push_str(
-            " ON DUPLICATE KEY UPDATE 
-                o = VALUES(o),
-                h = VALUES(h),
-                l = VALUES(l),
-                c = VALUES(c),
-                vol = VALUES(vol),
-                vol_ccy = VALUES(vol_ccy),
-                confirm = VALUES(confirm),
+        query_builder.push(
+            " ON CONFLICT (ts) DO UPDATE SET
+                o = EXCLUDED.o,
+                h = EXCLUDED.h,
+                l = EXCLUDED.l,
+                c = EXCLUDED.c,
+                vol = EXCLUDED.vol,
+                vol_ccy = EXCLUDED.vol_ccy,
+                confirm = EXCLUDED.confirm,
                 updated_at = CURRENT_TIMESTAMP",
         );
 
-        let mut sql_query = sqlx::query(&query);
-        for candle in candles.iter() {
-            sql_query = sql_query
-                .bind(candle.ts.parse::<i64>().unwrap_or(0))
-                .bind(&candle.o)
-                .bind(&candle.h)
-                .bind(&candle.l)
-                .bind(&candle.c)
-                .bind(&candle.v)
-                .bind(&candle.vol_ccy)
-                .bind(&candle.confirm);
-        }
-
-        let result = sql_query.execute(pool).await?;
+        let result = query_builder.build().execute(pool).await?;
         debug!(
             "批量 upsert {} 条 K线数据，影响行数: {}",
             candles.len(),
@@ -282,19 +265,20 @@ impl CandlesModel {
     /// 查询 K线数据（支持复杂条件）
     pub async fn get_all(&self, dto: SelectCandleReqDto) -> Result<Vec<CandlesEntity>> {
         let table_name = Self::get_table_name(&dto.inst_id, &dto.time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
-        let mut query = format!(
-            "SELECT id, ts, o, h, l, c, vol, vol_ccy, confirm, created_at, updated_at FROM `{}` WHERE 1=1 ",
-            table_name
-        );
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(format!(
+            "SELECT id, ts, o, h, l, c, vol, vol_ccy, confirm, created_at, updated_at FROM {} WHERE 1=1",
+            quoted_table_name
+        ));
 
-        // 添加确认状态过滤
         if let Some(confirm) = dto.confirm {
-            query = format!("{} AND confirm = {} ", query, confirm);
+            query_builder
+                .push(" AND confirm = ")
+                .push_bind(confirm.to_string());
         }
 
-        // 添加时间范围过滤
         if let Some(SelectTime {
             direct,
             start_time: point_time,
@@ -303,25 +287,26 @@ impl CandlesModel {
         {
             match direct {
                 TimeDirect::BEFORE => {
-                    query = format!("{} AND ts <= {} ", query, point_time);
+                    query_builder.push(" AND ts <= ").push_bind(point_time);
                     if let Some(end_time) = end_time {
-                        query = format!("{} AND ts >= {} ", query, end_time);
+                        query_builder.push(" AND ts >= ").push_bind(end_time);
                     }
                 }
                 TimeDirect::AFTER => {
-                    query = format!("{} AND ts >= {} ", query, point_time);
+                    query_builder.push(" AND ts >= ").push_bind(point_time);
                     if let Some(end_time) = end_time {
-                        query = format!("{} AND ts <= {} ", query, end_time);
+                        query_builder.push(" AND ts <= ").push_bind(end_time);
                     }
                 }
             }
         }
 
-        // 排序和限制
-        query = format!("{} ORDER BY ts DESC LIMIT {}", query, dto.limit);
+        query_builder
+            .push(" ORDER BY ts DESC LIMIT ")
+            .push_bind(dto.limit as i64);
 
-        debug!("查询 K线 SQL: {}", query);
-        let results = sqlx::query_as::<_, CandlesEntity>(&query)
+        let results = query_builder
+            .build_query_as::<CandlesEntity>()
             .fetch_all(pool)
             .await?;
 
@@ -339,11 +324,12 @@ impl CandlesModel {
         time_interval: &str,
     ) -> Result<Option<CandlesEntity>> {
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
         let result = sqlx::query_as::<_, CandlesEntity>(&format!(
-            "SELECT * FROM `{}` ORDER BY ts DESC LIMIT 1",
-            table_name
+            "SELECT * FROM {} ORDER BY ts DESC LIMIT 1",
+            quoted_table_name
         ))
         .fetch_optional(pool)
         .await?;
@@ -360,11 +346,12 @@ impl CandlesModel {
         ts: i64,
     ) -> Result<Option<CandlesEntity>> {
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
         let result = sqlx::query_as::<_, CandlesEntity>(&format!(
-            "SELECT * FROM `{}` WHERE ts = ? ORDER BY ts DESC LIMIT 1",
-            table_name
+            "SELECT * FROM {} WHERE ts = $1 ORDER BY ts DESC LIMIT 1",
+            quoted_table_name
         ))
         .bind(ts)
         .fetch_optional(pool)
@@ -381,11 +368,12 @@ impl CandlesModel {
         time_interval: &str,
     ) -> Result<Option<CandlesEntity>> {
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
         let result = sqlx::query_as::<_, CandlesEntity>(&format!(
-            "SELECT * FROM `{}` ORDER BY ts ASC LIMIT 1",
-            table_name
+            "SELECT * FROM {} ORDER BY ts ASC LIMIT 1",
+            quoted_table_name
         ))
         .fetch_optional(pool)
         .await?;
@@ -403,7 +391,8 @@ impl CandlesModel {
     ) -> Result<i64> {
         let limit = limit.unwrap_or(30000);
         let table_name = Self::get_table_name(inst_id, time_interval);
-        let pool = get_db_pool();
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
 
         #[derive(sqlx::FromRow)]
         struct CountResult {
@@ -411,24 +400,131 @@ impl CandlesModel {
         }
 
         let result = sqlx::query_as::<_, CountResult>(&format!(
-            "SELECT COUNT(*) as count FROM `{}` ORDER BY ts DESC LIMIT {}",
-            table_name, limit
+            "SELECT COUNT(*) as count FROM {}",
+            quoted_table_name
         ))
         .fetch_one(pool)
         .await?;
 
+        debug!(
+            "get_new_count ignored legacy limit={} because COUNT aggregate is global",
+            limit
+        );
         debug!("K线数据数量: {}", result.count);
         Ok(result.count)
     }
 
-    /// 从数据库获取 K线数据并排序
-    pub async fn fetch_candles_from_mysql(
+    /// 从 Postgres 分表获取 K线数据并排序
+    pub async fn fetch_candles_from_postgres(
         &self,
         dto: SelectCandleReqDto,
     ) -> Result<Vec<CandlesEntity>> {
         let mut candles = self.get_all(dto).await?;
         candles.sort_unstable_by_key(|a| a.ts);
         Ok(candles)
+    }
+}
+
+impl CandlesModel {
+    fn build_create_table_sql(quoted_table_name: &str) -> String {
+        format!(
+            "CREATE TABLE IF NOT EXISTS {} (
+  id BIGSERIAL PRIMARY KEY,
+  ts BIGINT NOT NULL,
+  o VARCHAR(20) NOT NULL,
+  h VARCHAR(20) NOT NULL,
+  l VARCHAR(20) NOT NULL,
+  c VARCHAR(20) NOT NULL,
+  vol VARCHAR(20) NOT NULL,
+  vol_ccy VARCHAR(50) NOT NULL,
+  confirm VARCHAR(20) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (ts)
+)",
+            quoted_table_name
+        )
+    }
+
+    fn build_table_comment_sqls(quoted_table_name: &str) -> Vec<String> {
+        let mut comments = vec![format!(
+            "COMMENT ON TABLE {} IS 'K线数据分表'",
+            quoted_table_name
+        )];
+
+        for (column, comment) in [
+            ("id", "主键ID"),
+            ("ts", "开始时间，Unix时间戳的毫秒数格式，如 1597026383085"),
+            ("o", "开盘价格"),
+            ("h", "最高价格"),
+            ("l", "最低价格"),
+            ("c", "收盘价格"),
+            ("vol", "交易量，以张为单位"),
+            ("vol_ccy", "交易量，以币为单位"),
+            ("confirm", "K线状态"),
+            ("created_at", "创建时间"),
+            ("updated_at", "更新时间"),
+        ] {
+            comments.push(format!(
+                "COMMENT ON COLUMN {}.{} IS '{}'",
+                quoted_table_name, column, comment
+            ));
+        }
+
+        comments
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Execute;
+
+    #[test]
+    fn create_table_sql_uses_postgres_ddl_and_comments() {
+        let sql = CandlesModel::build_create_table_sql("\"btc-usdt-swap_candles_1h\"");
+        assert!(sql.contains("BIGSERIAL PRIMARY KEY"));
+        assert!(sql.contains("UNIQUE (ts)"));
+
+        let comments = CandlesModel::build_table_comment_sqls("\"btc-usdt-swap_candles_1h\"");
+        assert!(comments
+            .iter()
+            .any(|item| item.contains("COMMENT ON TABLE")));
+        assert!(comments
+            .iter()
+            .any(|item| item.contains("COMMENT ON COLUMN")));
+    }
+
+    #[test]
+    fn upsert_batch_sql_uses_on_conflict() {
+        let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO \"btc-usdt-swap_candles_1h\" (ts, o, h, l, c, vol, vol_ccy, confirm) ",
+        );
+        builder.push_values([0_i64].iter(), |mut b, ts| {
+            b.push_bind(*ts)
+                .push_bind("1")
+                .push_bind("1")
+                .push_bind("1")
+                .push_bind("1")
+                .push_bind("1")
+                .push_bind("1")
+                .push_bind("1");
+        });
+        builder.push(
+            " ON CONFLICT (ts) DO UPDATE SET
+                o = EXCLUDED.o,
+                h = EXCLUDED.h,
+                l = EXCLUDED.l,
+                c = EXCLUDED.c,
+                vol = EXCLUDED.vol,
+                vol_ccy = EXCLUDED.vol_ccy,
+                confirm = EXCLUDED.confirm,
+                updated_at = CURRENT_TIMESTAMP",
+        );
+
+        let sql = builder.build().sql().to_string();
+        assert!(sql.contains("ON CONFLICT (ts) DO UPDATE"));
+        assert!(sql.contains("EXCLUDED.confirm"));
     }
 }
 

@@ -1,4 +1,4 @@
-use sqlx::mysql::MySqlPoolOptions;
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{FromRow, Row};
 use std::collections::HashMap;
 use std::env;
@@ -21,13 +21,13 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     // 1. Setup DB connection
-    let database_url = env::var("DATABASE_URL")
-        .or_else(|_| env::var("DB_HOST"))
-        .expect("DATABASE_URL or DB_HOST must be set in .env");
+    let database_url = env::var("QUANT_CORE_DATABASE_URL")
+        .or_else(|_| env::var("DATABASE_URL"))
+        .expect("QUANT_CORE_DATABASE_URL or DATABASE_URL must be set in .env");
 
     println!("Connecting to DB: {}", database_url);
 
-    let pool = MySqlPoolOptions::new()
+    let pool = PgPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(std::time::Duration::from_secs(10))
         .connect(&database_url)
@@ -182,14 +182,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn fetch_trades(
-    pool: &sqlx::Pool<sqlx::MySql>,
+    pool: &sqlx::PgPool,
     backtest_id: i64,
 ) -> anyhow::Result<HashMap<(String, String), TradeDetail>> {
     let rows = sqlx::query_as::<_, TradeDetail>(
         r#"
-        SELECT inst_id, CAST(open_position_time AS CHAR) as open_position_time, option_type, open_price, close_price, profit_loss, stop_loss_source, close_type
+        SELECT inst_id, open_position_time::text as open_position_time, option_type, open_price, close_price, profit_loss, stop_loss_source, close_type
         FROM back_test_detail
-        WHERE back_test_id = ?
+        WHERE back_test_id = $1
         "#
     )
     .bind(backtest_id)

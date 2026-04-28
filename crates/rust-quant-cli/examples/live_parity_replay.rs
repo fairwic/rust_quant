@@ -125,7 +125,7 @@ async fn load_config_by_id(config_id: i64) -> Result<rust_quant_domain::Strategy
 async fn load_backtest_log(backtest_id: i64) -> Result<BacktestLogRow> {
     let pool = get_db_pool();
     let log = sqlx::query_as::<_, BacktestLogRow>(
-        "SELECT id, strategy_type, inst_type, time, kline_start_time, kline_end_time, kline_nums, strategy_detail, risk_config_detail FROM back_test_log WHERE id = ? LIMIT 1",
+        "SELECT id, strategy_type, inst_type, time, kline_start_time, kline_end_time, kline_nums, strategy_detail, risk_config_detail FROM back_test_log WHERE id = $1 LIMIT 1",
     )
     .bind(backtest_id)
     .fetch_optional(pool)
@@ -196,7 +196,7 @@ async fn load_backtest_expected_rows(
     backtest_id: i64,
 ) -> Result<Vec<rust_quant_services::strategy::ParityTradeRow>> {
     let rows = sqlx::query_as::<_, BacktestDetailRow>(
-        "SELECT option_type, open_position_time, close_position_time, open_price, close_price, profit_loss, quantity, close_type, signal_status FROM back_test_detail WHERE back_test_id = ? ORDER BY id ASC",
+        "SELECT option_type, open_position_time, close_position_time, open_price, close_price, profit_loss, quantity, close_type, signal_status FROM back_test_detail WHERE back_test_id = $1 ORDER BY id ASC",
     )
     .bind(backtest_id)
     .fetch_all(get_db_pool())

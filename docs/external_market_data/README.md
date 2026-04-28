@@ -268,7 +268,9 @@ SQL 模板统一使用 Dune 命名参数，不硬编码 query id：
 运行方式：
 
 ```bash
-DB_HOST='mysql://root:example@localhost:33306/test?ssl-mode=DISABLED' \
+QUANT_CORE_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/quant_core' \
+STRATEGY_CONFIG_SOURCE=quant_core \
+CANDLE_SOURCE=quant_core \
 cargo run -p rust-quant-cli --example run_vegas_factor_research
 ```
 

@@ -50,12 +50,12 @@ mod test {
         let period = 10;
 
         // 获取K线数据
-        let mysql_candles: Vec<CandlesEntity> =
+        let source_candles: Vec<CandlesEntity> =
             trading::task::basic::get_candle_data_confirm(inst_id, time, 300, None).await?;
-        println!("{:#?}", mysql_candles);
+        println!("{:#?}", source_candles);
 
         // 确保有数据
-        if mysql_candles.is_empty() {
+        if source_candles.is_empty() {
             println!("警告: 未获取到K线数据");
             return Ok(());
         }
@@ -70,7 +70,7 @@ mod test {
         println!("{}", "=".repeat(75));
 
         // 计算并显示结果
-        for candle in mysql_candles.iter() {
+        for candle in source_candles.iter() {
             // 解析价格数据
             let high = candle.h.parse::<f64>()?;
             let low = candle.l.parse::<f64>()?;

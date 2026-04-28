@@ -50,11 +50,12 @@ impl SwapOrdersDetailEntity {
     pub async fn insert(&self) -> Result<u64> {
         let pool = get_db_pool();
 
-        let result = sqlx::query(
+        let inserted_id: i64 = sqlx::query_scalar(
             "INSERT INTO swap_orders_detail 
              (in_order_id, out_order_id, strategy_id, strategy_type, period, 
               inst_id, side, pos_size, pos_side, tag, detail, platform_type, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+             RETURNING id::bigint",
         )
         .bind(&self.in_order_id)
         .bind(&self.out_order_id)
@@ -69,12 +70,12 @@ impl SwapOrdersDetailEntity {
         .bind(&self.detail)
         .bind(&self.platform_type)
         .bind(&self.status)
-        .execute(pool)
+        .fetch_one(pool)
         .await
         .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
 
         info!("订单详情已插入: in_order_id={}", self.in_order_id);
-        Ok(result.last_insert_id())
+        Ok(inserted_id as u64)
     }
 
     /// 根据内部订单ID查询
@@ -82,7 +83,7 @@ impl SwapOrdersDetailEntity {
         let pool = get_db_pool();
 
         let orders =
-            sqlx::query_as::<_, Self>("SELECT * FROM swap_orders_detail WHERE in_order_id = ?")
+            sqlx::query_as::<_, Self>("SELECT * FROM swap_orders_detail WHERE in_order_id = $1")
                 .bind(in_order_id)
                 .fetch_all(pool)
                 .await
@@ -99,7 +100,7 @@ impl SwapOrdersDetailEntity {
         let pool = get_db_pool();
 
         let orders = sqlx::query_as::<_, Self>(
-            "SELECT * FROM swap_orders_detail WHERE strategy_id = ? AND status = ?",
+            "SELECT * FROM swap_orders_detail WHERE strategy_id = $1 AND status = $2",
         )
         .bind(strategy_id)
         .bind(status)
@@ -133,8 +134,8 @@ impl SwapOrdersDetailEntity {
 
         let result = sqlx::query(
             "UPDATE swap_orders_detail 
-             SET status = ?, update_time = NOW()
-             WHERE in_order_id = ?",
+             SET status = $1, update_time = NOW()
+             WHERE in_order_id = $2",
         )
         .bind(status)
         .bind(&self.in_order_id)
@@ -156,8 +157,8 @@ impl SwapOrdersDetailEntity {
         let mut set_clauses = Vec::new();
         let mut values: Vec<String> = Vec::new();
 
-        for (key, value) in updates.iter() {
-            set_clauses.push(format!("{} = ?", key));
+        for (index, (key, value)) in updates.iter().enumerate() {
+            set_clauses.push(format!("{} = ${}", key, index + 1));
             values.push(value.clone());
         }
 
@@ -166,8 +167,9 @@ impl SwapOrdersDetailEntity {
         }
 
         let sql = format!(
-            "UPDATE swap_orders_detail SET {}, update_time = NOW() WHERE in_order_id = ?",
-            set_clauses.join(", ")
+            "UPDATE swap_orders_detail SET {}, update_time = NOW() WHERE in_order_id = ${}",
+            set_clauses.join(", "),
+            values.len() + 1
         );
 
         debug!("更新订单SQL: {}", sql);

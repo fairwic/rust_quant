@@ -44,7 +44,7 @@ impl BackTestLogModel {
         let pool = get_db_pool();
         let start_time = Instant::now();
 
-        let result = sqlx::query(
+        let last_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO back_test_log (
                 strategy_type, inst_type, time, win_rate, final_fund, 
@@ -53,7 +53,8 @@ impl BackTestLogModel {
                 three_bar_after_win_rate, four_bar_after_win_rate,
                 five_bar_after_win_rate, ten_bar_after_win_rate,
                 kline_start_time, kline_end_time, kline_nums
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            RETURNING id::bigint
             "#,
         )
         .bind(log.strategy_type.clone())
@@ -74,11 +75,10 @@ impl BackTestLogModel {
         .bind(log.kline_start_time)
         .bind(log.kline_end_time)
         .bind(log.kline_nums)
-        .execute(pool)
+        .fetch_one(pool)
         .await?;
 
         let duration = start_time.elapsed();
-        let last_id = result.last_insert_id() as i64;
 
         info!(
             "insert_back_test_log: id={}, 耗时={}ms",
@@ -101,13 +101,13 @@ impl BackTestLogModel {
             r#"
             UPDATE back_test_log 
             SET
-                one_bar_after_win_rate = ?,
-                two_bar_after_win_rate = ?,
-                three_bar_after_win_rate = ?,
-                four_bar_after_win_rate = ?,
-                five_bar_after_win_rate = ?,
-                ten_bar_after_win_rate = ?
-            WHERE id = ?
+                one_bar_after_win_rate = $1,
+                two_bar_after_win_rate = $2,
+                three_bar_after_win_rate = $3,
+                four_bar_after_win_rate = $4,
+                five_bar_after_win_rate = $5,
+                ten_bar_after_win_rate = $6
+            WHERE id = $7
             "#,
         )
         .bind(stats.one_bar_after_win_rate)
@@ -145,7 +145,7 @@ impl BackTestLogModel {
     pub async fn find_by_id(&self, id: i64) -> Result<Option<BackTestLog>> {
         let pool = get_db_pool();
 
-        let log = sqlx::query_as::<_, BackTestLog>("SELECT * FROM back_test_log WHERE id = ?")
+        let log = sqlx::query_as::<_, BackTestLog>("SELECT * FROM back_test_log WHERE id = $1")
             .bind(id)
             .fetch_optional(pool)
             .await?;
@@ -158,7 +158,7 @@ impl BackTestLogModel {
         let pool = get_db_pool();
 
         let logs = sqlx::query_as::<_, BackTestLog>(
-            "SELECT * FROM back_test_log ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM back_test_log ORDER BY created_at DESC LIMIT $1",
         )
         .bind(limit)
         .fetch_all(pool)
@@ -176,7 +176,7 @@ impl BackTestLogModel {
         let pool = get_db_pool();
 
         let logs = sqlx::query_as::<_, BackTestLog>(
-            "SELECT * FROM back_test_log WHERE strategy_type = ? ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM back_test_log WHERE strategy_type = $1 ORDER BY created_at DESC LIMIT $2",
         )
         .bind(strategy_type)
         .bind(limit)
