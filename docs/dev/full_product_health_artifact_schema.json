@@ -278,6 +278,7 @@
         "top_alerts",
         "required_operator_actions",
         "alert_taxonomy",
+        "operator_playbook_summary",
         "correlation",
         "correlation_ids"
       ],
@@ -295,6 +296,13 @@
         "correlation_id_count",
         "read_only_input_count"
       ],
+      "required_operator_playbook_summary_fields": [
+        "item_count",
+        "blocking_item_count",
+        "manual_review_item_count",
+        "observe_only_item_count",
+        "items"
+      ],
       "append_only_paths": [
         "summary.*",
         "section_statuses.*",
@@ -303,6 +311,8 @@
         "required_operator_actions[].*",
         "alert_taxonomy[].*",
         "alert_taxonomy[].correlation_keys[]",
+        "operator_playbook_summary.*",
+        "operator_playbook_summary.items[].*",
         "correlation.*",
         "correlation_ids[].*"
       ]
@@ -338,6 +348,7 @@
     "**Status:**",
     "## Counts",
     "## Top Alerts",
+    "## Operator Playbook Summary",
     "## Checklist",
     "## Artifact Paths",
     "## Skipped Sections"

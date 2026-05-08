@@ -80,7 +80,16 @@ COUNT_KEYS = [
     "warning_section_count",
     "top_alert_count",
     "required_operator_action_count",
+    "alert_taxonomy_count",
+    "correlation_id_count",
     "read_only_input_count",
+]
+
+PLAYBOOK_COUNT_KEYS = [
+    "item_count",
+    "blocking_item_count",
+    "manual_review_item_count",
+    "observe_only_item_count",
 ]
 
 
@@ -262,6 +271,59 @@ def render_markdown(payload: dict[str, Any]) -> str:
     else:
         lines.append("No top alerts.")
 
+    playbook = payload.get("operator_playbook_summary")
+    playbook = playbook if isinstance(playbook, dict) else {}
+    lines.extend(
+        [
+            "",
+            "## Operator Playbook Summary",
+            "",
+        ]
+    )
+    lines.extend(
+        render_table(
+            ["Metric", "Value"],
+            [[key, playbook.get(key, 0)] for key in PLAYBOOK_COUNT_KEYS],
+        )
+    )
+    playbook_items = list_items(playbook.get("items"))
+    if playbook_items:
+        lines.extend(
+            [
+                "",
+            ]
+        )
+        lines.extend(
+            render_table(
+                [
+                    "Source",
+                    "Severity",
+                    "Code",
+                    "Section",
+                    "Operator Action",
+                    "Owner",
+                    "Default Next Action",
+                    "Admin Link Target",
+                ],
+                [
+                    [
+                        item.get("source"),
+                        item.get("severity"),
+                        item.get("code"),
+                        item.get("section"),
+                        item.get("operator_action"),
+                        item.get("owner"),
+                        item.get("default_next_action"),
+                        item.get("admin_link_target"),
+                    ]
+                    for item in playbook_items
+                ],
+            )
+        )
+    else:
+        lines.append("")
+        lines.append("No operator playbook items.")
+
     lines.extend(
         [
             "",
@@ -351,6 +413,10 @@ def fail_markdown(message: str) -> str:
             "| Severity | Code | Section | Message |",
             "| --- | --- | --- | --- |",
             f"| P0 | FULL_PRODUCT_HEALTH_MARKDOWN_FAILED | admin_readiness | {markdown_cell(message)} |",
+            "",
+            "## Operator Playbook Summary",
+            "",
+            "No operator playbook items.",
             "",
         ]
     )

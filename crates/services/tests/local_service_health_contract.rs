@@ -400,6 +400,13 @@ fn write_phase45_valid_artifacts(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
   "top_alerts": [],
   "required_operator_actions": [],
   "alert_taxonomy": [],
+  "operator_playbook_summary": {
+    "item_count": 0,
+    "blocking_item_count": 0,
+    "manual_review_item_count": 0,
+    "observe_only_item_count": 0,
+    "items": []
+  },
   "correlation": {},
   "correlation_ids": []
 }"#,
@@ -407,7 +414,7 @@ fn write_phase45_valid_artifacts(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
     .unwrap_or_else(|error| panic!("failed to write {}: {}", summary_path.display(), error));
     fs::write(
         &markdown_path,
-        "# Full Product Health\n\n**Status:** ok\n\n## Counts\n\n## Top Alerts\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
+        "# Full Product Health\n\n**Status:** ok\n\n## Counts\n\n## Top Alerts\n\n## Operator Playbook Summary\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
 
@@ -2836,6 +2843,8 @@ fn full_product_health_markdown_renders_operator_readable_artifact_from_summary_
     "warning_section_count": 2,
     "top_alert_count": 3,
     "required_operator_action_count": 2,
+    "alert_taxonomy_count": 3,
+    "correlation_id_count": 0,
     "read_only_input_count": 3
   },
   "section_statuses": {
@@ -2910,7 +2919,45 @@ fn full_product_health_markdown_renders_operator_readable_artifact_from_summary_
       "message": "admin readiness still requires manual review",
       "action": "manual_review_before_release"
     }
-  ]
+  ],
+  "operator_playbook_summary": {
+    "item_count": 3,
+    "blocking_item_count": 1,
+    "manual_review_item_count": 1,
+    "observe_only_item_count": 1,
+    "items": [
+      {
+        "source": "alert",
+        "severity": "P0",
+        "code": "WEB_ORDER_RESULT_MISSING",
+        "section": "web_task_order_health",
+        "operator_action": "block_release_until_resolved",
+        "owner": "web_execution",
+        "default_next_action": "reconcile_missing_order_result",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      },
+      {
+        "source": "alert",
+        "severity": "P1",
+        "code": "ADMIN_READINESS_REVIEW_REQUIRED",
+        "section": "admin_readiness",
+        "operator_action": "manual_review_before_release",
+        "owner": "admin_ops",
+        "default_next_action": "complete_admin_manual_review",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      {
+        "source": "alert",
+        "severity": "INFO",
+        "code": "NEWS_INPUT_SKIPPED",
+        "section": "news_source_ai_health",
+        "operator_action": "observe_only",
+        "owner": "news_ops",
+        "default_next_action": "provide_news_read_only_input",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      }
+    ]
+  }
 }"#,
     );
 
@@ -2954,6 +3001,16 @@ fn full_product_health_markdown_renders_operator_readable_artifact_from_summary_
         "## Top Alerts",
         "WEB_ORDER_RESULT_MISSING",
         "ADMIN_READINESS_REVIEW_REQUIRED",
+        "## Operator Playbook Summary",
+        "blocking_item_count",
+        "manual_review_item_count",
+        "observe_only_item_count",
+        "Owner",
+        "Default Next Action",
+        "Admin Link Target",
+        "web_execution",
+        "reconcile_missing_order_result",
+        "admin.full_product_health.web_task_order_health",
         "## Checklist",
         "web_task_order_health",
         "news_source_ai_health",
@@ -3762,6 +3819,13 @@ fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() 
   "top_alerts": [],
   "required_operator_actions": [],
   "alert_taxonomy": [],
+  "operator_playbook_summary": {
+    "item_count": 0,
+    "blocking_item_count": 0,
+    "manual_review_item_count": 0,
+    "observe_only_item_count": 0,
+    "items": []
+  },
   "correlation": {},
   "correlation_ids": []
 }"#,
@@ -3769,7 +3833,7 @@ fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() 
     .unwrap_or_else(|error| panic!("failed to write {}: {}", summary_path.display(), error));
     fs::write(
         &markdown_path,
-        "# Full Product Health\n\n**Status:** ok\n\n## Counts\n\n## Top Alerts\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
+        "# Full Product Health\n\n**Status:** ok\n\n## Counts\n\n## Top Alerts\n\n## Operator Playbook Summary\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
 
@@ -3982,6 +4046,11 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         "owner",
         "default_next_action",
         "admin_link_target",
+        "operator_playbook_summary",
+        "operator_playbook_summary.items[]",
+        "blocking_item_count",
+        "manual_review_item_count",
+        "observe_only_item_count",
         "alerts[].code",
         "top_alerts[].code",
         "alert_taxonomy",
@@ -4048,6 +4117,12 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
     assert_required_top_level_fields(&schema, "summary", &summary);
     assert_required_top_level_fields(&schema, "validation", &validation);
     assert_required_nested_fields(&schema, "summary", "summary", &summary["summary"]);
+    assert_required_nested_fields(
+        &schema,
+        "summary",
+        "operator_playbook_summary",
+        &summary["operator_playbook_summary"],
+    );
     assert_required_nested_fields(&schema, "validation", "summary", &validation["summary"]);
 
     assert_enum_value(
@@ -4132,6 +4207,49 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         &schema,
         &summary["alert_taxonomy"],
         "summary alert_taxonomy",
+    );
+    assert_json_array_enum(
+        &schema,
+        "severity_values",
+        &summary["operator_playbook_summary"]["items"],
+        "severity",
+        "summary operator_playbook_summary.items",
+    );
+    assert_json_array_enum(
+        &schema,
+        "operator_action_values",
+        &summary["operator_playbook_summary"]["items"],
+        "operator_action",
+        "summary operator_playbook_summary.items",
+    );
+    assert_alert_taxonomy_metadata_matches_registry(
+        &schema,
+        &summary["operator_playbook_summary"]["items"],
+        "summary operator_playbook_summary.items",
+    );
+    assert_eq!(summary["operator_playbook_summary"]["item_count"], 2);
+    assert_eq!(
+        summary["operator_playbook_summary"]["blocking_item_count"],
+        0
+    );
+    assert_eq!(
+        summary["operator_playbook_summary"]["manual_review_item_count"],
+        1
+    );
+    assert_eq!(
+        summary["operator_playbook_summary"]["observe_only_item_count"],
+        1
+    );
+    assert!(
+        summary["operator_playbook_summary"]["items"]
+            .as_array()
+            .expect("operator playbook items should be an array")
+            .iter()
+            .any(|item| item["code"] == "NEWS_SOURCE_DEGRADED"
+                && item["owner"] == "news_ops"
+                && item["default_next_action"] == "review_news_source_status"
+                && item["admin_link_target"] == "admin.full_product_health.news_source_ai_health"),
+        "summary example should expose registry-backed playbook items: {summary_body}"
     );
 
     for marker in schema["markdown_required_markers"]
@@ -6570,6 +6688,44 @@ fn full_product_health_admin_ingest_fixture_is_machine_readable_and_redacted() {
         );
     }
 
+    let playbook = payload["summary"]["operator_playbook_summary"]
+        .as_object()
+        .expect("embedded summary should expose operator_playbook_summary");
+    assert_eq!(playbook["item_count"], 2);
+    assert_eq!(playbook["blocking_item_count"], 0);
+    assert_eq!(playbook["manual_review_item_count"], 1);
+    assert_eq!(playbook["observe_only_item_count"], 1);
+    let items = playbook["items"]
+        .as_array()
+        .expect("embedded operator_playbook_summary.items should be an array");
+    for field in [
+        "source",
+        "severity",
+        "code",
+        "section",
+        "operator_action",
+        "owner",
+        "default_next_action",
+        "admin_link_target",
+    ] {
+        assert!(
+            items
+                .iter()
+                .all(|item| item[field].as_str().is_some_and(|value| !value.is_empty())),
+            "embedded operator playbook item field {field} should be populated: {body}"
+        );
+    }
+    assert!(
+        items
+            .iter()
+            .any(|item| item["code"] == "NEWS_SOURCE_DEGRADED"
+                && item["operator_action"] == "manual_review_before_release"
+                && item["owner"] == "news_ops"
+                && item["default_next_action"] == "review_news_source_status"
+                && item["admin_link_target"] == "admin.full_product_health.news_source_ai_health"),
+        "embedded summary should expose registry-backed operator playbook items: {body}"
+    );
+
     let lowered = body.to_ascii_lowercase();
     for sensitive in [
         "postgres://",
@@ -6769,7 +6925,7 @@ fn full_product_health_admin_ingest_smoke_prints_parseable_redacted_payload_with
 
     assert_eq!(
         payload["artifactSetId"],
-        "health-2026-05-07T01-00-00Z-c77aa5e0ee88"
+        "health-2026-05-07T01-00-00Z-38370b9de0be"
     );
     assert_eq!(
         payload["operatorMetadata"]["generatedBy"],

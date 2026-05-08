@@ -169,7 +169,7 @@ Recommended Admin binding order:
 
 1. Read `full-product-health-summary.json` for `summary.overall_status`,
    `checklist`, `top_alerts`, `required_operator_actions`, and
-   `alert_taxonomy`, and `correlation_ids`.
+   `alert_taxonomy`, `operator_playbook_summary`, and `correlation_ids`.
 2. Link to `full-product-health.md` for operator-readable detail.
 3. Use `full-product-health-validation.json` to block artifact upload or show
    schema/safety findings.
@@ -192,6 +192,15 @@ present in `alert_code_values[section]` or `alert_code_values.global` in
 `owner`, `default_next_action`, and `admin_link_target`. Validator strict mode
 rejects unregistered codes so CI and Admin can detect producer/schema drift
 before showing a playbook.
+
+`operator_playbook_summary` is the compact JSON contract for Admin and CI
+operator queues. Use `blocking_item_count`, `manual_review_item_count`, and
+`observe_only_item_count` for dashboards, then render
+`operator_playbook_summary.items[]` as the actionable list. Each item contains
+`source`, `severity`, `code`, `section`, `operator_action`, `owner`,
+`default_next_action`, and `admin_link_target`. Consumers must ignore unknown
+appended item fields and must not infer actions from free-form `message` text
+when these structured fields are present.
 
 ## Redacted Ingest Payload Fixture
 

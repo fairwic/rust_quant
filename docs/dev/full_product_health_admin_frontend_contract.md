@@ -195,6 +195,13 @@ Bind the first Admin screen to these fields:
 - `alert_taxonomy[].default_next_action`
 - `alert_taxonomy[].admin_link_target`
 - `alert_taxonomy[].correlation_keys[]`
+- `operator_playbook_summary.item_count`
+- `operator_playbook_summary.blocking_item_count`
+- `operator_playbook_summary.manual_review_item_count`
+- `operator_playbook_summary.observe_only_item_count`
+- `operator_playbook_summary.items[].owner`
+- `operator_playbook_summary.items[].default_next_action`
+- `operator_playbook_summary.items[].admin_link_target`
 - `correlation_ids[]`
 - `validation.summary.sensitive_marker_count`
 - `validation.findings[]`
@@ -232,6 +239,13 @@ URLs, API keys, signed endpoints, or the protected live symbol. The taxonomy
 `code`, `alerts[].code`, and `top_alerts[].code` must be registered in
 `alert_code_values[section]` or `alert_code_values.global`; unknown codes should
 be treated as schema drift, not as free-form operator guidance.
+
+`operator_playbook_summary` is the UI-ready queue projection. The overview can
+use its blocking/manual/observe counts for badges and render
+`operator_playbook_summary.items[]` as the first actionable list before drilling
+into section detail. Each item should use the structured `owner`,
+`default_next_action`, and `admin_link_target` fields; unknown appended fields
+must be ignored for schema version `1`.
 
 The UI can show green only when the selected readiness scope has no blocking,
 review, skipped, or validation safety condition.

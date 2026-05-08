@@ -14,6 +14,8 @@
 | warning_section_count | 1 |
 | top_alert_count | 2 |
 | required_operator_action_count | 1 |
+| alert_taxonomy_count | 2 |
+| correlation_id_count | 7 |
 | read_only_input_count | 4 |
 
 ## Top Alerts
@@ -23,12 +25,19 @@
 | P1 | NEWS_SOURCE_DEGRADED | news_source_ai_health | Example source has repeated read-only collection warnings. |
 | INFO | MOCK_DEV_BOUNDARY_ACTIVE | admin_readiness | Example artifact uses fixture-only data and no live collection. |
 
-## Alert Playbook Registry
+## Operator Playbook Summary
 
-| Code | Owner | Default Next Action | Admin Link Target |
-| --- | --- | --- | --- |
-| NEWS_SOURCE_DEGRADED | news_ops | review_news_source_status | admin.full_product_health.news_source_ai_health |
-| MOCK_DEV_BOUNDARY_ACTIVE | platform_health | observe_fixture_boundary | admin.full_product_health.admin_readiness |
+| Metric | Value |
+| --- | --- |
+| item_count | 2 |
+| blocking_item_count | 0 |
+| manual_review_item_count | 1 |
+| observe_only_item_count | 1 |
+
+| Source | Severity | Code | Section | Operator Action | Owner | Default Next Action | Admin Link Target |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| alert | P1 | NEWS_SOURCE_DEGRADED | news_source_ai_health | manual_review_before_release | news_ops | review_news_source_status | admin.full_product_health.news_source_ai_health |
+| alert | INFO | MOCK_DEV_BOUNDARY_ACTIVE | admin_readiness | observe_only | platform_health | observe_fixture_boundary | admin.full_product_health.admin_readiness |
 
 ## Checklist
 
@@ -43,9 +52,9 @@
 
 | Artifact | Path |
 | --- | --- |
-| Full report JSON | docs/dev/full_product_health_examples/full-product-health.json |
-| Summary JSON | docs/dev/full_product_health_examples/full-product-health-summary.json |
-| Markdown | docs/dev/full_product_health_examples/full-product-health.md |
+| full_report_json | docs/dev/full_product_health_examples/full-product-health.json |
+| summary_json | docs/dev/full_product_health_examples/full-product-health-summary.json |
+| markdown | docs/dev/full_product_health_examples/full-product-health.md |
 
 ## Skipped Sections
 

@@ -71,13 +71,19 @@
       "severity": "P1",
       "code": "NEWS_SOURCE_DEGRADED",
       "section": "news_source_ai_health",
-      "message": "Example source has repeated read-only collection warnings."
+      "message": "Example source has repeated read-only collection warnings.",
+      "owner": "news_ops",
+      "default_next_action": "review_news_source_status",
+      "admin_link_target": "admin.full_product_health.news_source_ai_health"
     },
     {
       "severity": "INFO",
       "code": "MOCK_DEV_BOUNDARY_ACTIVE",
       "section": "admin_readiness",
-      "message": "Example artifact uses fixture-only data and no live collection."
+      "message": "Example artifact uses fixture-only data and no live collection.",
+      "owner": "platform_health",
+      "default_next_action": "observe_fixture_boundary",
+      "admin_link_target": "admin.full_product_health.admin_readiness"
     }
   ],
   "required_operator_actions": [
@@ -86,7 +92,10 @@
       "code": "NEWS_SOURCE_DEGRADED",
       "section": "news_source_ai_health",
       "message": "Review the degraded example source before promotion.",
-      "action": "manual_review_before_release"
+      "action": "manual_review_before_release",
+      "owner": "news_ops",
+      "default_next_action": "review_news_source_status",
+      "admin_link_target": "admin.full_product_health.news_source_ai_health"
     }
   ],
   "alert_taxonomy": [
@@ -119,6 +128,34 @@
       ]
     }
   ],
+  "operator_playbook_summary": {
+    "item_count": 2,
+    "blocking_item_count": 0,
+    "manual_review_item_count": 1,
+    "observe_only_item_count": 1,
+    "items": [
+      {
+        "source": "alert",
+        "severity": "P1",
+        "code": "NEWS_SOURCE_DEGRADED",
+        "section": "news_source_ai_health",
+        "operator_action": "manual_review_before_release",
+        "owner": "news_ops",
+        "default_next_action": "review_news_source_status",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
+      {
+        "source": "alert",
+        "severity": "INFO",
+        "code": "MOCK_DEV_BOUNDARY_ACTIVE",
+        "section": "admin_readiness",
+        "operator_action": "observe_only",
+        "owner": "platform_health",
+        "default_next_action": "observe_fixture_boundary",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      }
+    ]
+  },
   "correlation": {
     "news_id": "example-news-001",
     "analysis_result_id": 7001,

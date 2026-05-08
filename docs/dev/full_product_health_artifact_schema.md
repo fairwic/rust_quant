@@ -38,20 +38,29 @@ Summary example: `full_product_health_examples/full-product-health-summary.json`
 - Required top-level fields: `schema_version`, `source_schema_version`, `status`,
   `generated_at`, `source_generated_at`, `summary`, `section_statuses`,
   `checklist`, `top_alerts`, `required_operator_actions`, `alert_taxonomy`,
-  `correlation`, `correlation_ids`.
+  `operator_playbook_summary`, `correlation`, `correlation_ids`.
 - Required `summary` fields: `overall_status`, `p0_count`, `p1_count`,
   `info_count`, `section_count`, `blocking_section_count`,
   `warning_section_count`, `top_alert_count`,
   `required_operator_action_count`, `alert_taxonomy_count`,
   `correlation_id_count`,
   `read_only_input_count`.
+- Required `operator_playbook_summary` fields: `item_count`,
+  `blocking_item_count`, `manual_review_item_count`,
+  `observe_only_item_count`, and `items`.
+- `operator_playbook_summary.items[]` is the compact Admin/CI playbook list.
+  Each item mirrors the alert code registry fields `owner`,
+  `default_next_action`, and `admin_link_target`, plus `source`, `severity`,
+  `code`, `section`, and `operator_action`. Consumers should use the count
+  fields for dashboards and ignore unknown appended item fields.
 - `section_statuses` is the preferred Admin/CI summary lookup. Consumers should
   ignore unknown section keys.
 
 Markdown example: `full_product_health_examples/full-product-health.md`.
 
 - Required markers: `# Full Product Health`, `**Status:**`, `## Counts`,
-  `## Top Alerts`, `## Checklist`, `## Artifact Paths`, `## Skipped Sections`.
+  `## Top Alerts`, `## Operator Playbook Summary`, `## Checklist`,
+  `## Artifact Paths`, `## Skipped Sections`.
 - Markdown is for human review only. Admin and CI should bind to JSON artifacts
   when they need durable fields.
 
