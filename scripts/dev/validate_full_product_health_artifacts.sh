@@ -67,7 +67,14 @@ blocked_marker_groups = [
             "/api/commerce/internal/order-results",
         ],
     ),
+    ("URL_REFERENCE", ["https://", "http://", "file://"]),
+    ("LOCAL_PATH_REFERENCE", ["/Users/", "/tmp/"]),
     ("LINK_POSITION_SYMBOL", ["LINKUSDT", "LINK-USDT"]),
+]
+path_safe_marker_groups = [
+    (code, patterns)
+    for code, patterns in blocked_marker_groups
+    if code not in {"URL_REFERENCE", "LOCAL_PATH_REFERENCE"}
 ]
 
 
@@ -75,10 +82,11 @@ def generated_at() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def marker_codes(value: str) -> list[str]:
+def marker_codes(value: str, *, include_local_paths: bool = True) -> list[str]:
     lowered = value.lower()
+    groups = blocked_marker_groups if include_local_paths else path_safe_marker_groups
     codes: list[str] = []
-    for code, patterns in blocked_marker_groups:
+    for code, patterns in groups:
         if any(pattern.lower() in lowered for pattern in patterns):
             codes.append(code)
     return codes
@@ -238,13 +246,13 @@ def load_validation_schema(
             )
         )
         return record, {}
-    if marker_codes(path):
+    if marker_codes(path, include_local_paths=False):
         findings.append(
             finding(
                 "SENSITIVE_PATH_MARKER",
                 "schema",
                 "schema path contains a blocked sensitive marker",
-                marker_code=marker_codes(path)[0],
+                marker_code=marker_codes(path, include_local_paths=False)[0],
             )
         )
     file_path = Path(path)
@@ -481,13 +489,13 @@ def read_file_text(artifact: str, path: str, findings: list[dict[str, Any]]) -> 
     if not path:
         findings.append(finding("MISSING_ARTIFACT_PATH", artifact, "artifact path is not configured"))
         return False, ""
-    if marker_codes(path):
+    if marker_codes(path, include_local_paths=False):
         findings.append(
             finding(
                 "SENSITIVE_PATH_MARKER",
                 artifact,
                 "artifact path contains a blocked sensitive marker",
-                marker_code=marker_codes(path)[0],
+                marker_code=marker_codes(path, include_local_paths=False)[0],
             )
         )
     file_path = Path(path)

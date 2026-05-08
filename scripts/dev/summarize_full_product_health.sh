@@ -5,16 +5,22 @@ set -euo pipefail
 : "${FULL_PRODUCT_HEALTH_SUMMARY_SCHEMA_VERSION:=1}"
 : "${FULL_PRODUCT_HEALTH_SUMMARY_JSON_PATH:=}"
 : "${FULL_PRODUCT_HEALTH_SUMMARY_TOP_ALERT_LIMIT:=5}"
+: "${FULL_PRODUCT_HEALTH_SUMMARY_SCHEMA_PATH:=}"
 
 if [[ "${FULL_PRODUCT_HEALTH_SUMMARY_OUTPUT}" != "json" ]]; then
     printf 'FULL_PRODUCT_HEALTH_SUMMARY_OUTPUT must be json\n' >&2
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_SCHEMA_PATH="${SCRIPT_DIR}/../../docs/dev/full_product_health_artifact_schema.json"
+SCHEMA_PATH="${FULL_PRODUCT_HEALTH_SUMMARY_SCHEMA_PATH:-${DEFAULT_SCHEMA_PATH}}"
+
 python3 - \
     "${FULL_PRODUCT_HEALTH_SUMMARY_SCHEMA_VERSION}" \
     "${FULL_PRODUCT_HEALTH_SUMMARY_JSON_PATH}" \
     "${FULL_PRODUCT_HEALTH_SUMMARY_TOP_ALERT_LIMIT}" \
+    "${SCHEMA_PATH}" \
     <<'PY'
 import json
 import sys
@@ -26,34 +32,44 @@ from typing import Any
 schema_version = int(sys.argv[1])
 json_path = sys.argv[2]
 top_alert_limit = max(int(sys.argv[3]), 0)
+schema_path = sys.argv[4]
+
+BLOCKED_MARKER_GROUPS = [
+    ("ENV_FILE_REFERENCE", [".env"]),
+    ("DB_CONNECTION_STRING", ["postgres://", "mysql://"]),
+    ("DATABASE_URL_FIELD", ["database_url"]),
+    ("CREDENTIAL_TOKEN", ["api_key", "apikey", "api key", "api_secret", "apisecret", "api secret", "secret"]),
+    ("RAW_CONTENT", ["request_payload", "response_payload", "raw_payload", "request payload", "response payload"]),
+    (
+        "SIGNED_EXCHANGE_ENDPOINT",
+        [
+            "/fapi/v1/order",
+            "/fapi/v2/account",
+            "/fapi/v1/positionRisk",
+            "/fapi/v2/positionRisk",
+            "/fapi/v1/positionSide/dual",
+        ],
+    ),
+    (
+        "WEB_MUTATION_ENDPOINT",
+        [
+            "/api/commerce/internal/execution-tasks/lease",
+            "/api/commerce/internal/execution-results",
+            "/api/commerce/internal/order-results",
+        ],
+    ),
+    ("URL_REFERENCE", ["https://", "http://", "file://"]),
+    ("LOCAL_PATH_REFERENCE", ["/Users/", "/tmp/"]),
+    ("LINK_POSITION_SYMBOL", ["LINKUSDT", "LINK-USDT"]),
+]
 
 BLOCKED_MARKERS = [
-    ".env",
-    "postgres://",
-    "mysql://",
-    "database_url",
-    "api_key",
-    "apikey",
-    "api key",
-    "api_secret",
-    "apisecret",
-    "api secret",
-    "secret",
-    "request_payload",
-    "response_payload",
-    "raw_payload",
-    "request payload",
-    "response payload",
-    "/fapi/v1/order",
-    "/fapi/v2/account",
-    "/fapi/v1/positionRisk",
-    "/fapi/v2/positionRisk",
-    "/fapi/v1/positionSide/dual",
-    "/api/commerce/internal/execution-tasks/lease",
-    "/api/commerce/internal/execution-results",
-    "/api/commerce/internal/order-results",
-    "LINKUSDT",
-    "LINK-USDT",
+    marker for _, markers in BLOCKED_MARKER_GROUPS for marker in markers
+]
+PATH_SAFE_MARKER_GROUPS = [
+    (code, markers)
+    for code, markers in BLOCKED_MARKER_GROUPS
+    if code not in {"URL_REFERENCE", "LOCAL_PATH_REFERENCE"}
 ]
 
 BLOCKED_KEY_FRAGMENTS = [
@@ -116,8 +132,17 @@ def now_utc() -> str:
 
 
 def has_blocked_marker(value: str) -> bool:
+    return bool(blocked_marker_codes(value))
+
+
+def blocked_marker_codes(value: str, *, include_local_paths: bool = True) -> list[str]:
     lowered = value.lower()
-    return any(marker.lower() in lowered for marker in BLOCKED_MARKERS)
+    groups = BLOCKED_MARKER_GROUPS if include_local_paths else PATH_SAFE_MARKER_GROUPS
+    return [
+        code
+        for code, markers in groups
+        if any(marker.lower() in lowered for marker in markers)
+    ]
 
 
 def is_blocked_key(key: Any) -> bool:
@@ -139,6 +164,14 @@ def sanitize_json(value: Any) -> Any:
         if has_blocked_marker(value):
             return "[redacted]"
         return value
+    return value
+
+
+def safe_playbook_key(value: Any, default: str) -> str:
+    if not isinstance(value, str):
+        return default
+    if not value or is_blocked_key(value) or has_blocked_marker(value) or "/" in value or "://" in value:
+        return default
     return value
 
 
@@ -167,7 +200,7 @@ def as_int(value: Any, default: int = 0) -> int:
 
 def read_payload() -> dict[str, Any]:
     if json_path:
-        if ".env" in json_path.lower():
+        if blocked_marker_codes(json_path, include_local_paths=False):
             raise SummaryError("summary input path was rejected")
         path = Path(json_path)
         if not path.is_file():
@@ -185,6 +218,85 @@ def read_payload() -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SummaryError("summary input must be a JSON object")
     return sanitize_json(payload)
+
+
+def read_alert_metadata_registry() -> dict[tuple[str, str], dict[str, str]]:
+    if not schema_path or blocked_marker_codes(schema_path, include_local_paths=False):
+        return {}
+    path = Path(schema_path)
+    if not path.is_file():
+        return {}
+    try:
+        schema = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(schema, dict):
+        return {}
+    metadata = schema.get("alert_code_metadata")
+    if not isinstance(metadata, dict):
+        return {}
+
+    registry: dict[tuple[str, str], dict[str, str]] = {}
+    defaults = default_playbook_metadata()
+    for section, section_items in metadata.items():
+        if not isinstance(section_items, dict):
+            continue
+        section_key = safe_playbook_key(section, "global")
+        for code, item in section_items.items():
+            if not isinstance(item, dict):
+                continue
+            code_key = safe_playbook_key(code, "HEALTH_ALERT")
+            registry[(section_key, code_key)] = {
+                "owner": safe_playbook_key(item.get("owner"), defaults["owner"]),
+                "default_next_action": safe_playbook_key(
+                    item.get("default_next_action"), defaults["default_next_action"]
+                ),
+                "admin_link_target": safe_playbook_key(
+                    item.get("admin_link_target"), defaults["admin_link_target"]
+                ),
+            }
+    return registry
+
+
+def default_playbook_metadata() -> dict[str, str]:
+    return {
+        "owner": "platform_health",
+        "default_next_action": "review_full_product_health_summary",
+        "admin_link_target": "admin.full_product_health.overview",
+    }
+
+
+def playbook_metadata_for(
+    section: Any,
+    code: Any,
+    metadata_registry: dict[tuple[str, str], dict[str, str]],
+) -> dict[str, str]:
+    section_key = str(section or "")
+    code_key = str(code or "HEALTH_ALERT")
+    metadata = (
+        metadata_registry.get((section_key, code_key))
+        or metadata_registry.get(("global", code_key))
+        or default_playbook_metadata()
+    )
+    defaults = default_playbook_metadata()
+    return {
+        "owner": safe_playbook_key(metadata.get("owner"), defaults["owner"]),
+        "default_next_action": safe_playbook_key(
+            metadata.get("default_next_action"), defaults["default_next_action"]
+        ),
+        "admin_link_target": safe_playbook_key(
+            metadata.get("admin_link_target"), defaults["admin_link_target"]
+        ),
+    }
+
+
+def enrich_playbook_metadata(
+    item: dict[str, Any],
+    metadata_registry: dict[tuple[str, str], dict[str, str]],
+) -> dict[str, Any]:
+    enriched = dict(item)
+    enriched.update(playbook_metadata_for(enriched.get("section"), enriched.get("code"), metadata_registry))
+    return sanitize_json(enriched)
 
 
 def normalize_alerts(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -218,12 +330,15 @@ def sorted_alerts(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def public_alert(alert: dict[str, Any]) -> dict[str, Any]:
-    return {
+def public_alert(
+    alert: dict[str, Any],
+    metadata_registry: dict[tuple[str, str], dict[str, str]],
+) -> dict[str, Any]:
+    return enrich_playbook_metadata({
         key: value
         for key, value in alert.items()
         if key in {"severity", "code", "section", "message"}
-    }
+    }, metadata_registry)
 
 
 def section_names(sections: dict[str, Any]) -> list[str]:
@@ -275,7 +390,10 @@ def build_section_views(payload: dict[str, Any], alerts: list[dict[str, Any]]) -
     return statuses, checklist
 
 
-def build_required_actions(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_required_actions(
+    alerts: list[dict[str, Any]],
+    metadata_registry: dict[tuple[str, str], dict[str, str]],
+) -> list[dict[str, Any]]:
     actions = []
     for alert in sorted_alerts(alerts):
         severity = alert.get("severity")
@@ -283,13 +401,16 @@ def build_required_actions(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]
             continue
         action = "block_release_until_resolved" if severity == "P0" else "manual_review_before_release"
         actions.append(
+            enrich_playbook_metadata(
             {
                 "severity": severity,
                 "code": alert.get("code"),
                 "section": alert.get("section"),
                 "message": alert.get("message"),
                 "action": action,
-            }
+            },
+            metadata_registry,
+        )
         )
     return [sanitize_json(item) for item in actions]
 
@@ -313,7 +434,11 @@ def safe_operator_action(value: Any, severity: str) -> str:
     return operator_action_for_severity(severity)
 
 
-def build_alert_taxonomy(payload: dict[str, Any], alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_alert_taxonomy(
+    payload: dict[str, Any],
+    alerts: list[dict[str, Any]],
+    metadata_registry: dict[tuple[str, str], dict[str, str]],
+) -> list[dict[str, Any]]:
     source_taxonomy = payload.get("alert_taxonomy")
     if isinstance(source_taxonomy, list):
         taxonomy = []
@@ -326,6 +451,7 @@ def build_alert_taxonomy(payload: dict[str, Any], alerts: list[dict[str, Any]]) 
             if not isinstance(correlation_keys, list):
                 correlation_keys = SECTION_CORRELATION_KEYS.get(section, [])
             taxonomy.append(
+                enrich_playbook_metadata(
                 {
                     "severity": severity,
                     "code": str(item.get("code") or "HEALTH_ALERT"),
@@ -336,7 +462,9 @@ def build_alert_taxonomy(payload: dict[str, Any], alerts: list[dict[str, Any]]) 
                         for key in correlation_keys
                         if not is_blocked_key(key) and not has_blocked_marker(str(key))
                     ],
-                }
+                },
+                metadata_registry,
+            )
             )
         return [sanitize_json(item) for item in taxonomy]
 
@@ -345,13 +473,16 @@ def build_alert_taxonomy(payload: dict[str, Any], alerts: list[dict[str, Any]]) 
         section = str(alert.get("section") or "admin_readiness")
         severity = safe_severity(alert.get("severity"))
         taxonomy.append(
+            enrich_playbook_metadata(
             {
                 "severity": severity,
                 "code": str(alert.get("code") or "HEALTH_ALERT"),
                 "section": section,
                 "operator_action": operator_action_for_severity(severity),
                 "correlation_keys": SECTION_CORRELATION_KEYS.get(section, []),
-            }
+            },
+            metadata_registry,
+        )
         )
     return [sanitize_json(item) for item in taxonomy]
 
@@ -369,13 +500,64 @@ def build_correlation(payload: dict[str, Any]) -> tuple[dict[str, Any], list[dic
     return correlation, correlation_ids
 
 
+def build_operator_playbook_summary(
+    alerts: list[dict[str, Any]],
+    alert_taxonomy: list[dict[str, Any]],
+    metadata_registry: dict[tuple[str, str], dict[str, str]],
+) -> dict[str, Any]:
+    taxonomy_by_key = {
+        (str(item.get("section") or ""), str(item.get("code") or "")): item
+        for item in alert_taxonomy
+        if isinstance(item, dict)
+    }
+    items = []
+    for alert in sorted_alerts(alerts):
+        severity = safe_severity(alert.get("severity"))
+        section = str(alert.get("section") or "admin_readiness")
+        code = str(alert.get("code") or "HEALTH_ALERT")
+        taxonomy = taxonomy_by_key.get((section, code), {})
+        item = {
+            "source": "alert",
+            "severity": severity,
+            "code": code,
+            "section": section,
+            "message": str(alert.get("message") or "health alert"),
+            "operator_action": operator_action_for_severity(severity),
+            "correlation_keys": taxonomy.get("correlation_keys", SECTION_CORRELATION_KEYS.get(section, [])),
+        }
+        items.append(enrich_playbook_metadata(item, metadata_registry))
+
+    blocking_count = sum(
+        1 for item in items if item.get("operator_action") == "block_release_until_resolved"
+    )
+    manual_review_count = sum(
+        1 for item in items if item.get("operator_action") == "manual_review_before_release"
+    )
+    observe_only_count = sum(1 for item in items if item.get("operator_action") == "observe_only")
+    return sanitize_json(
+        {
+            "item_count": len(items),
+            "blocking_item_count": blocking_count,
+            "manual_review_item_count": manual_review_count,
+            "observe_only_item_count": observe_only_count,
+            "items": items,
+        }
+    )
+
+
 def build_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    metadata_registry = read_alert_metadata_registry()
     alerts = normalize_alerts(payload)
     ordered_alerts = sorted_alerts(alerts)
-    visible_top_alerts = [public_alert(alert) for alert in ordered_alerts[:top_alert_limit]]
+    visible_top_alerts = [
+        public_alert(alert, metadata_registry) for alert in ordered_alerts[:top_alert_limit]
+    ]
     section_statuses, checklist = build_section_views(payload, alerts)
-    required_actions = build_required_actions(alerts)
-    alert_taxonomy = build_alert_taxonomy(payload, alerts)
+    required_actions = build_required_actions(alerts, metadata_registry)
+    alert_taxonomy = build_alert_taxonomy(payload, alerts, metadata_registry)
+    operator_playbook_summary = build_operator_playbook_summary(
+        alerts, alert_taxonomy, metadata_registry
+    )
     correlation, correlation_ids = build_correlation(payload)
 
     p0_count = sum(1 for alert in alerts if alert.get("severity") == "P0")
@@ -396,6 +578,7 @@ def build_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "top_alert_count": len(visible_top_alerts),
         "required_operator_action_count": len(required_actions),
         "alert_taxonomy_count": len(alert_taxonomy),
+        "operator_playbook_item_count": operator_playbook_summary["item_count"],
         "correlation_id_count": len(correlation_ids),
         "read_only_input_count": as_int(source_summary.get("read_only_input_count")),
     }
@@ -413,6 +596,7 @@ def build_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "top_alerts": visible_top_alerts,
             "required_operator_actions": required_actions,
             "alert_taxonomy": alert_taxonomy,
+            "operator_playbook_summary": operator_playbook_summary,
             "correlation": correlation,
             "correlation_ids": correlation_ids,
         }
@@ -437,6 +621,7 @@ def fail_payload(message: str) -> dict[str, Any]:
             "top_alert_count": 1,
             "required_operator_action_count": 1,
             "alert_taxonomy_count": 1,
+            "operator_playbook_item_count": 1,
             "correlation_id_count": 0,
             "read_only_input_count": 0,
         },
@@ -468,6 +653,26 @@ def fail_payload(message: str) -> dict[str, Any]:
                 "correlation_keys": SECTION_CORRELATION_KEYS["admin_readiness"],
             }
         ],
+        "operator_playbook_summary": {
+            "item_count": 1,
+            "blocking_item_count": 1,
+            "manual_review_item_count": 0,
+            "observe_only_item_count": 0,
+            "items": [
+                {
+                    "source": "alert",
+                    "severity": "P0",
+                    "code": "FULL_PRODUCT_HEALTH_SUMMARY_FAILED",
+                    "section": "admin_readiness",
+                    "message": message,
+                    "operator_action": "block_release_until_resolved",
+                    "owner": "platform_health",
+                    "default_next_action": "inspect_summary_failure",
+                    "admin_link_target": "admin.full_product_health.summary",
+                    "correlation_keys": SECTION_CORRELATION_KEYS["admin_readiness"],
+                }
+            ],
+        },
         "correlation": {},
         "correlation_ids": [],
     }

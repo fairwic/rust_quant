@@ -2427,6 +2427,11 @@ fn full_product_health_summary_script_is_read_only_and_redacts_sensitive_markers
     assert!(script.contains("top_alerts"));
     assert!(script.contains("required_operator_actions"));
     assert!(script.contains("alert_taxonomy"));
+    assert!(script.contains("operator_playbook_summary"));
+    assert!(script.contains("alert_code_metadata"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_SUMMARY_SCHEMA_PATH"));
+    assert!(script.contains("URL_REFERENCE"));
+    assert!(script.contains("LOCAL_PATH_REFERENCE"));
     assert!(script.contains("correlation_ids"));
     assert!(script.contains("sanitize_json"));
     for required in [
@@ -2445,6 +2450,10 @@ fn full_product_health_summary_script_is_read_only_and_redacts_sensitive_markers
         "/fapi/v1/positionRisk",
         "/fapi/v2/positionRisk",
         "/fapi/v1/positionSide/dual",
+        "https://",
+        "file://",
+        "/Users/",
+        "/tmp/",
         "/api/commerce/internal/execution-tasks/lease",
         "/api/commerce/internal/execution-results",
         "/api/commerce/internal/order-results",
@@ -2613,6 +2622,15 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
     assert_eq!(top_alerts.len(), 2);
     assert_eq!(top_alerts[0]["code"], "WEB_ORDER_RESULT_MISSING");
     assert_eq!(top_alerts[0]["severity"], "P0");
+    assert_eq!(top_alerts[0]["owner"], "web_execution");
+    assert_eq!(
+        top_alerts[0]["default_next_action"],
+        "reconcile_missing_order_result"
+    );
+    assert_eq!(
+        top_alerts[0]["admin_link_target"],
+        "admin.full_product_health.web_task_order_health"
+    );
     assert_eq!(top_alerts[1]["code"], "NEWS_SOURCE_DEGRADED");
     assert_eq!(top_alerts[1]["severity"], "P1");
 
@@ -2624,14 +2642,20 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
         required_actions
             .iter()
             .any(|item| item["code"] == "WEB_ORDER_RESULT_MISSING"
-                && item["action"] == "block_release_until_resolved"),
+                && item["action"] == "block_release_until_resolved"
+                && item["owner"] == "web_execution"
+                && item["default_next_action"] == "reconcile_missing_order_result"
+                && item["admin_link_target"] == "admin.full_product_health.web_task_order_health"),
         "P0 alert should produce a blocking operator action: {stdout}"
     );
     assert!(
         required_actions
             .iter()
             .any(|item| item["code"] == "NEWS_SOURCE_DEGRADED"
-                && item["action"] == "manual_review_before_release"),
+                && item["action"] == "manual_review_before_release"
+                && item["owner"] == "news_ops"
+                && item["default_next_action"] == "review_news_source_status"
+                && item["admin_link_target"] == "admin.full_product_health.news_source_ai_health"),
         "P1 alert should produce a manual-review operator action: {stdout}"
     );
     assert_eq!(payload["correlation"]["execution_task_id"], 5202);
@@ -2651,6 +2675,9 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
             .any(|item| item["code"] == "WEB_ORDER_RESULT_MISSING"
                 && item["section"] == "web_task_order_health"
                 && item["operator_action"] == "block_release_until_resolved"
+                && item["owner"] == "web_execution"
+                && item["default_next_action"] == "reconcile_missing_order_result"
+                && item["admin_link_target"] == "admin.full_product_health.web_task_order_health"
                 && item["correlation_keys"]
                     .as_array()
                     .expect("taxonomy correlation_keys should be an array")
@@ -2665,6 +2692,25 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
                 && item["severity"] == "INFO"
                 && item["operator_action"] == "observe_only"),
         "summary should classify INFO alerts as observe-only taxonomy items: {stdout}"
+    );
+    let playbook = payload["operator_playbook_summary"]
+        .as_object()
+        .expect("operator_playbook_summary should be an object");
+    assert_eq!(playbook["item_count"], 4);
+    assert_eq!(playbook["blocking_item_count"], 1);
+    assert_eq!(playbook["manual_review_item_count"], 2);
+    assert!(
+        playbook["items"]
+            .as_array()
+            .expect("operator playbook items should be an array")
+            .iter()
+            .any(|item| item["code"] == "WEB_ORDER_RESULT_MISSING"
+                && item["source"] == "alert"
+                && item["operator_action"] == "block_release_until_resolved"
+                && item["owner"] == "web_execution"
+                && item["default_next_action"] == "reconcile_missing_order_result"
+                && item["admin_link_target"] == "admin.full_product_health.web_task_order_health"),
+        "operator playbook should map P0 alert to metadata registry: {stdout}"
     );
 
     let lowered = stdout.to_ascii_lowercase();
@@ -2687,6 +2733,10 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
         "/fapi/v1/positionrisk",
         "/fapi/v2/positionrisk",
         "/api/commerce/internal/execution-tasks/lease",
+        "https://",
+        "file://",
+        "/users/",
+        "/tmp/",
         "linkusdt",
     ] {
         assert!(
@@ -2985,6 +3035,8 @@ fn full_product_health_artifact_validator_is_read_only_and_scans_sensitive_marke
     assert!(script.contains("RAW_CONTENT"));
     assert!(script.contains("SIGNED_EXCHANGE_ENDPOINT"));
     assert!(script.contains("WEB_MUTATION_ENDPOINT"));
+    assert!(script.contains("URL_REFERENCE"));
+    assert!(script.contains("LOCAL_PATH_REFERENCE"));
     assert!(script.contains("LINK_POSITION_SYMBOL"));
     for required in [
         ".env",
@@ -3004,6 +3056,10 @@ fn full_product_health_artifact_validator_is_read_only_and_scans_sensitive_marke
         "/fapi/v1/positionRisk",
         "/fapi/v2/positionRisk",
         "/fapi/v1/positionSide/dual",
+        "https://",
+        "file://",
+        "/Users/",
+        "/tmp/",
         "/api/commerce/internal/execution-tasks/lease",
         "/api/commerce/internal/execution-results",
         "/api/commerce/internal/order-results",
@@ -3486,6 +3542,164 @@ fn full_product_health_artifact_validator_rejects_unregistered_emitted_alert_cod
                 finding["code"] == "INVALID_ALERT_CODE" && finding["field"] == expected_field
             }),
             "validator should identify unregistered emitted alert code at {expected_field}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_artifact_validator_rejects_unsafe_playbook_metadata() {
+    let artifact_dir = temp_artifact_dir("full-product-health-validator-playbook-metadata");
+    let full_report_path = artifact_dir.join("full-product-health.json");
+    let summary_path = artifact_dir.join("full-product-health-summary.json");
+    let markdown_path = artifact_dir.join("full-product-health.md");
+
+    fs::write(
+        &full_report_path,
+        r#"{
+  "schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:00Z",
+  "summary": {"p0_count": 0, "p1_count": 1, "info_count": 0, "read_only_input_count": 4},
+  "sections": {
+    "web_task_order_health": {"status": "warn"}
+  },
+  "alerts": [
+    {
+      "severity": "P1",
+      "code": "WEB_RETRY_BACKLOG",
+      "section": "web_task_order_health",
+      "message": "retry backlog needs review"
+    }
+  ],
+  "alert_taxonomy": [],
+  "correlation": {"execution_task_id": 5202}
+}"#,
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", full_report_path.display(), error));
+    fs::write(
+        &summary_path,
+        r#"{
+  "schema_version": 1,
+  "source_schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:01Z",
+  "source_generated_at": "2026-05-07T01:00:00Z",
+  "summary": {
+    "overall_status": "warn",
+    "p0_count": 0,
+    "p1_count": 1,
+    "info_count": 0,
+    "section_count": 1,
+    "blocking_section_count": 0,
+    "warning_section_count": 1,
+    "top_alert_count": 1,
+    "required_operator_action_count": 1,
+    "alert_taxonomy_count": 1,
+    "correlation_id_count": 1,
+    "read_only_input_count": 4
+  },
+  "section_statuses": {"web_task_order_health": "warn"},
+  "checklist": [],
+  "top_alerts": [
+    {
+      "severity": "P1",
+      "code": "WEB_RETRY_BACKLOG",
+      "section": "web_task_order_health",
+      "message": "retry backlog needs review",
+      "owner": "web_execution",
+      "default_next_action": "review_retry_backlog",
+      "admin_link_target": "https://runbooks.invalid/retry-backlog"
+    }
+  ],
+  "required_operator_actions": [
+    {
+      "severity": "P1",
+      "code": "WEB_RETRY_BACKLOG",
+      "section": "web_task_order_health",
+      "message": "retry backlog needs review",
+      "action": "manual_review_before_release",
+      "owner": "web_execution",
+      "default_next_action": "review_retry_backlog",
+      "admin_link_target": "/Users/mac2/runbooks/retry-backlog"
+    }
+  ],
+  "alert_taxonomy": [
+    {
+      "severity": "P1",
+      "code": "WEB_RETRY_BACKLOG",
+      "section": "web_task_order_health",
+      "operator_action": "manual_review_before_release",
+      "owner": "web_execution",
+      "default_next_action": "review_retry_backlog",
+      "admin_link_target": "file:///tmp/retry-backlog",
+      "correlation_keys": ["execution_task_id"]
+    }
+  ],
+  "operator_playbook_summary": {
+    "item_count": 1,
+    "blocking_item_count": 0,
+    "manual_review_item_count": 1,
+    "items": [
+      {
+        "source": "alert",
+        "severity": "P1",
+        "code": "WEB_RETRY_BACKLOG",
+        "section": "web_task_order_health",
+        "operator_action": "manual_review_before_release",
+        "owner": "web_execution",
+        "default_next_action": "review_retry_backlog",
+        "admin_link_target": "https://runbooks.invalid/retry-backlog"
+      }
+    ]
+  },
+  "correlation": {"execution_task_id": 5202},
+  "correlation_ids": [{"key": "execution_task_id", "value": 5202}]
+}"#,
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", summary_path.display(), error));
+    fs::write(
+        &markdown_path,
+        "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\n## Top Alerts\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
+
+    let output = Command::new(full_product_artifact_validator_path())
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
+        .env(
+            "FULL_PRODUCT_HEALTH_VALIDATION_FULL_REPORT_PATH",
+            &full_report_path,
+        )
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_SUMMARY_PATH", &summary_path)
+        .env(
+            "FULL_PRODUCT_HEALTH_VALIDATION_MARKDOWN_PATH",
+            &markdown_path,
+        )
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
+        .output()
+        .expect("full product artifact validator should run");
+
+    assert!(
+        !output.status.success(),
+        "strict validator should reject URL and local-path playbook metadata"
+    );
+    let stdout = String::from_utf8(output.stdout).expect("validation output should be utf8");
+    let payload: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid validation json: {error}\n{stdout}"));
+    let findings = payload["findings"].as_array().expect("findings array");
+    for expected_marker in ["URL_REFERENCE", "LOCAL_PATH_REFERENCE"] {
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding["marker_code"] == expected_marker),
+            "validator should report unsafe playbook metadata marker {expected_marker}: {stdout}"
+        );
+    }
+
+    let lowered = stdout.to_ascii_lowercase();
+    for sensitive in ["https://", "file://", "/users/", "/tmp/"] {
+        assert!(
+            !lowered.contains(sensitive),
+            "validation output must not echo unsafe playbook marker {sensitive}: {stdout}"
         );
     }
 }
