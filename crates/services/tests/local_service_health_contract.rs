@@ -512,6 +512,97 @@ fn assert_json_array_enum(schema: &Value, enum_key: &str, items: &Value, field: 
     }
 }
 
+fn alert_metadata<'a>(schema: &'a Value, section: &str, code: &str) -> &'a Value {
+    schema["alert_code_metadata"]
+        .get(section)
+        .and_then(|metadata| metadata.get(code))
+        .or_else(|| {
+            schema["alert_code_metadata"]
+                .get("global")
+                .and_then(|metadata| metadata.get(code))
+        })
+        .unwrap_or_else(|| {
+            panic!("alert_code_metadata.{section}.{code} or alert_code_metadata.global.{code} should exist")
+        })
+}
+
+fn assert_alert_code_metadata_alignment(schema: &Value) {
+    let code_values = schema["alert_code_values"]
+        .as_object()
+        .expect("alert_code_values should be an object");
+    let metadata = schema["alert_code_metadata"]
+        .as_object()
+        .expect("alert_code_metadata should be an object");
+
+    for (section, codes) in code_values {
+        let codes = codes
+            .as_array()
+            .unwrap_or_else(|| panic!("alert_code_values.{section} should be an array"));
+        let code_strings: Vec<&str> = codes
+            .iter()
+            .map(|code| {
+                code.as_str()
+                    .unwrap_or_else(|| panic!("alert_code_values.{section} should contain strings"))
+            })
+            .collect();
+        let section_metadata = metadata
+            .get(section)
+            .and_then(|value| value.as_object())
+            .unwrap_or_else(|| panic!("alert_code_metadata.{section} should be an object"));
+
+        for code in &code_strings {
+            let item = section_metadata
+                .get(*code)
+                .and_then(|value| value.as_object())
+                .unwrap_or_else(|| {
+                    panic!("alert_code_metadata.{section}.{code} should be an object")
+                });
+            for field in ["owner", "default_next_action", "admin_link_target"] {
+                let value = item
+                    .get(field)
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_else(|| {
+                        panic!("alert_code_metadata.{section}.{code}.{field} should be a string")
+                    });
+                assert!(
+                    !value.is_empty() && !value.contains('/') && !value.contains("://"),
+                    "alert_code_metadata.{section}.{code}.{field} should be a safe stable key"
+                );
+            }
+        }
+
+        for code in section_metadata.keys() {
+            assert!(
+                code_strings
+                    .iter()
+                    .any(|registered| *registered == code.as_str()),
+                "metadata code {section}.{code} should also be listed in alert_code_values"
+            );
+        }
+    }
+}
+
+fn assert_alert_taxonomy_metadata_matches_registry(schema: &Value, items: &Value, label: &str) {
+    let items = items
+        .as_array()
+        .unwrap_or_else(|| panic!("{label} should be an array"));
+    for item in items {
+        let section = item["section"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{label}.section should be a string"));
+        let code = item["code"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{label}.code should be a string"));
+        let metadata = alert_metadata(schema, section, code);
+        for field in ["owner", "default_next_action", "admin_link_target"] {
+            assert_eq!(
+                item[field], metadata[field],
+                "{label} {section}.{code} should mirror schema {field}"
+            );
+        }
+    }
+}
+
 fn fake_tool_dir() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -3288,6 +3379,118 @@ fn full_product_health_artifact_validator_rejects_unregistered_alert_taxonomy_co
 }
 
 #[test]
+fn full_product_health_artifact_validator_rejects_unregistered_emitted_alert_codes() {
+    let artifact_dir = temp_artifact_dir("full-product-health-validator-emitted-alert-codes");
+    let full_report_path = artifact_dir.join("full-product-health.json");
+    let summary_path = artifact_dir.join("full-product-health-summary.json");
+    let markdown_path = artifact_dir.join("full-product-health.md");
+
+    fs::write(
+        &full_report_path,
+        r#"{
+  "schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:00Z",
+  "summary": {"p0_count": 0, "p1_count": 1, "info_count": 0, "read_only_input_count": 4},
+  "sections": {
+    "web_task_order_health": {"status": "warn"},
+    "news_source_ai_health": {"status": "warn"}
+  },
+  "alerts": [
+    {
+      "severity": "P1",
+      "code": "WEB_UNREGISTERED_EMITTED_ALERT",
+      "section": "web_task_order_health",
+      "message": "synthetic emitted alert code is not registered"
+    }
+  ],
+  "alert_taxonomy": [],
+  "correlation": {"execution_task_id": 5202}
+}"#,
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", full_report_path.display(), error));
+    fs::write(
+        &summary_path,
+        r#"{
+  "schema_version": 1,
+  "source_schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:01Z",
+  "source_generated_at": "2026-05-07T01:00:00Z",
+  "summary": {
+    "overall_status": "warn",
+    "p0_count": 0,
+    "p1_count": 1,
+    "info_count": 0,
+    "section_count": 2,
+    "blocking_section_count": 0,
+    "warning_section_count": 2,
+    "top_alert_count": 1,
+    "required_operator_action_count": 0,
+    "alert_taxonomy_count": 0,
+    "correlation_id_count": 1,
+    "read_only_input_count": 4
+  },
+  "section_statuses": {
+    "web_task_order_health": "warn",
+    "news_source_ai_health": "warn"
+  },
+  "checklist": [],
+  "top_alerts": [
+    {
+      "severity": "P1",
+      "code": "NEWS_UNREGISTERED_TOP_ALERT",
+      "section": "news_source_ai_health",
+      "message": "synthetic top alert code is not registered"
+    }
+  ],
+  "required_operator_actions": [],
+  "alert_taxonomy": [],
+  "correlation": {"execution_task_id": 5202},
+  "correlation_ids": [{"key": "execution_task_id", "value": 5202}]
+}"#,
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", summary_path.display(), error));
+    fs::write(
+        &markdown_path,
+        "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\n## Top Alerts\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
+
+    let output = Command::new(full_product_artifact_validator_path())
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
+        .env(
+            "FULL_PRODUCT_HEALTH_VALIDATION_FULL_REPORT_PATH",
+            &full_report_path,
+        )
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_SUMMARY_PATH", &summary_path)
+        .env(
+            "FULL_PRODUCT_HEALTH_VALIDATION_MARKDOWN_PATH",
+            &markdown_path,
+        )
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
+        .output()
+        .expect("full product artifact validator should run");
+
+    assert!(
+        !output.status.success(),
+        "strict validator should reject emitted alert codes outside alert_code_values"
+    );
+    let stdout = String::from_utf8(output.stdout).expect("validation output should be utf8");
+    let payload: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid validation json: {error}\n{stdout}"));
+    let findings = payload["findings"].as_array().expect("findings array");
+    for expected_field in ["alerts[0].code", "top_alerts[0].code"] {
+        assert!(
+            findings.iter().any(|finding| {
+                finding["code"] == "INVALID_ALERT_CODE" && finding["field"] == expected_field
+            }),
+            "validator should identify unregistered emitted alert code at {expected_field}: {stdout}"
+        );
+    }
+}
+
+#[test]
 fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() {
     let artifact_dir = temp_artifact_dir("full-product-health-validator-ok");
     let full_report_path = artifact_dir.join("full-product-health.json");
@@ -3561,6 +3764,12 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         "Severity Values",
         "Operator Action Values",
         "Alert Code Values",
+        "alert_code_metadata",
+        "owner",
+        "default_next_action",
+        "admin_link_target",
+        "alerts[].code",
+        "top_alerts[].code",
         "alert_taxonomy",
     ] {
         assert!(
@@ -3619,6 +3828,7 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
             "schema should register alert code {expected} for {section}"
         );
     }
+    assert_alert_code_metadata_alignment(&schema);
 
     assert_required_top_level_fields(&schema, "full_report", &full_report);
     assert_required_top_level_fields(&schema, "summary", &summary);
@@ -3699,6 +3909,16 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         "operator_action",
         "summary alert_taxonomy",
     );
+    assert_alert_taxonomy_metadata_matches_registry(
+        &schema,
+        &full_report["alert_taxonomy"],
+        "full report alert_taxonomy",
+    );
+    assert_alert_taxonomy_metadata_matches_registry(
+        &schema,
+        &summary["alert_taxonomy"],
+        "summary alert_taxonomy",
+    );
 
     for marker in schema["markdown_required_markers"]
         .as_array()
@@ -3754,7 +3974,8 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         "allowed_operator_action_values",
         "allowed_alert_code_values",
         "validate_alert_taxonomy_values",
-        "validate_alert_taxonomy_code_values",
+        "validate_alert_code_values",
+        "validate_codes=True",
         "INVALID_ENUM_VALUE",
         "INVALID_ALERT_CODE",
     ] {
@@ -6334,7 +6555,7 @@ fn full_product_health_admin_ingest_smoke_prints_parseable_redacted_payload_with
 
     assert_eq!(
         payload["artifactSetId"],
-        "health-2026-05-07T01-00-00Z-9c2537e7b853"
+        "health-2026-05-07T01-00-00Z-c77aa5e0ee88"
     );
     assert_eq!(
         payload["operatorMetadata"]["generatedBy"],

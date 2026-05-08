@@ -77,6 +77,9 @@
       "code": "NEWS_SOURCE_DEGRADED",
       "section": "news_source_ai_health",
       "operator_action": "manual_review_before_release",
+      "owner": "news_ops",
+      "default_next_action": "review_news_source_status",
+      "admin_link_target": "admin.full_product_health.news_source_ai_health",
       "correlation_keys": [
         "news_id",
         "analysis_result_id",
@@ -88,6 +91,9 @@
       "code": "MOCK_DEV_BOUNDARY_ACTIVE",
       "section": "admin_readiness",
       "operator_action": "observe_only",
+      "owner": "platform_health",
+      "default_next_action": "observe_fixture_boundary",
+      "admin_link_target": "admin.full_product_health.admin_readiness",
       "correlation_keys": [
         "admin_operation_log_id",
         "admin_module",

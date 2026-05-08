@@ -60,6 +60,183 @@
       "FULL_PRODUCT_HEALTH_SUMMARY_FAILED"
     ]
   },
+  "alert_code_metadata": {
+    "global": {
+      "HEALTH_ALERT": {
+        "owner": "platform_health",
+        "default_next_action": "review_full_product_health_summary",
+        "admin_link_target": "admin.full_product_health.overview"
+      },
+      "INPUT_FILE_MISSING": {
+        "owner": "platform_health",
+        "default_next_action": "attach_expected_read_only_input",
+        "admin_link_target": "admin.full_product_health.inputs"
+      },
+      "INPUT_JSON_INVALID": {
+        "owner": "platform_health",
+        "default_next_action": "inspect_json_artifact_input",
+        "admin_link_target": "admin.full_product_health.inputs"
+      },
+      "LOCAL_HEALTH_JSON_INVALID": {
+        "owner": "quant_ops",
+        "default_next_action": "review_local_health_output",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      },
+      "LOCAL_HEALTH_OUTPUT_EMPTY": {
+        "owner": "quant_ops",
+        "default_next_action": "rerun_local_health_read_only_check",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      },
+      "LOCAL_HEALTH_SCRIPT_MISSING": {
+        "owner": "quant_ops",
+        "default_next_action": "restore_local_health_script",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      },
+      "MOCK_DEV_BOUNDARY_ACTIVE": {
+        "owner": "platform_health",
+        "default_next_action": "observe_fixture_boundary",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "READ_ONLY_COLLECTOR_ACTIVE": {
+        "owner": "platform_health",
+        "default_next_action": "observe_read_only_collection",
+        "admin_link_target": "admin.full_product_health.overview"
+      },
+      "SCHEMA_JSON_INVALID": {
+        "owner": "platform_health",
+        "default_next_action": "fix_schema_json",
+        "admin_link_target": "admin.full_product_health.schema"
+      },
+      "UNSAFE_INPUT_REJECTED": {
+        "owner": "platform_health",
+        "default_next_action": "remove_unsafe_input_marker",
+        "admin_link_target": "admin.full_product_health.inputs"
+      },
+      "UNSAFE_SCHEMA_REJECTED": {
+        "owner": "platform_health",
+        "default_next_action": "remove_unsafe_schema_marker",
+        "admin_link_target": "admin.full_product_health.schema"
+      }
+    },
+    "web_task_order_health": {
+      "WEB_EXECUTION_TASK_STALE": {
+        "owner": "web_execution",
+        "default_next_action": "review_stale_execution_task",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      },
+      "WEB_INPUT_QUERY_FAILED": {
+        "owner": "web_execution",
+        "default_next_action": "review_web_read_only_input",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      },
+      "WEB_INPUT_SKIPPED": {
+        "owner": "web_execution",
+        "default_next_action": "provide_web_read_only_input",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      },
+      "WEB_ORDER_RESULT_MISSING": {
+        "owner": "web_execution",
+        "default_next_action": "reconcile_missing_order_result",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      },
+      "WEB_RETRY_BACKLOG": {
+        "owner": "web_execution",
+        "default_next_action": "review_retry_backlog",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      }
+    },
+    "news_source_ai_health": {
+      "NEWS_AI_PROVIDER_UNAVAILABLE": {
+        "owner": "news_ops",
+        "default_next_action": "review_ai_provider_status",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
+      "NEWS_ANALYSIS_JOB_FAILED": {
+        "owner": "news_ops",
+        "default_next_action": "inspect_failed_analysis_jobs",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
+      "NEWS_INPUT_QUERY_FAILED": {
+        "owner": "news_ops",
+        "default_next_action": "review_news_read_only_input",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
+      "NEWS_INPUT_SKIPPED": {
+        "owner": "news_ops",
+        "default_next_action": "provide_news_read_only_input",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
+      "NEWS_SOURCE_DEGRADED": {
+        "owner": "news_ops",
+        "default_next_action": "review_news_source_status",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      }
+    },
+    "quant_worker_checkpoint_audit": {
+      "QUANT_EXCHANGE_AUDIT_FAILURES": {
+        "owner": "quant_ops",
+        "default_next_action": "review_exchange_audit_summary",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      },
+      "QUANT_EXPECTED_WORKER_STALE": {
+        "owner": "quant_ops",
+        "default_next_action": "review_expected_worker_checkpoint",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      },
+      "QUANT_LOCAL_HEALTH_FAIL": {
+        "owner": "quant_ops",
+        "default_next_action": "inspect_local_health_failure",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      },
+      "QUANT_LOCAL_HEALTH_WARN": {
+        "owner": "quant_ops",
+        "default_next_action": "inspect_local_health_warning",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      },
+      "QUANT_WORKER_LEASE_STALE": {
+        "owner": "quant_ops",
+        "default_next_action": "review_worker_checkpoint_lease",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      }
+    },
+    "admin_readiness": {
+      "ADMIN_ACTION_AUDIT_MISSING": {
+        "owner": "admin_ops",
+        "default_next_action": "restore_required_admin_audit",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "ADMIN_HIGH_RISK_OPERATION_FAILED": {
+        "owner": "admin_ops",
+        "default_next_action": "review_failed_admin_operation",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "ADMIN_INPUT_QUERY_FAILED": {
+        "owner": "admin_ops",
+        "default_next_action": "review_admin_read_only_input",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "ADMIN_INPUT_SKIPPED": {
+        "owner": "admin_ops",
+        "default_next_action": "provide_admin_read_only_input",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "ADMIN_LIVE_READINESS_BLOCKED": {
+        "owner": "admin_ops",
+        "default_next_action": "clear_live_readiness_blocker",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "ADMIN_READINESS_REVIEW_REQUIRED": {
+        "owner": "admin_ops",
+        "default_next_action": "complete_admin_manual_review",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "FULL_PRODUCT_HEALTH_SUMMARY_FAILED": {
+        "owner": "platform_health",
+        "default_next_action": "inspect_summary_failure",
+        "admin_link_target": "admin.full_product_health.summary"
+      }
+    }
+  },
   "artifact_schemas": {
     "full_report": {
       "required_top_level": [

@@ -23,12 +23,15 @@ Full report example: `full_product_health_examples/full-product-health.json`.
 - `alerts[]` items must use the stable severity enum and must be safe to render
   without showing credentials, request bodies, or exchange endpoint text.
 - `alert_taxonomy[]` is the stable drill-down map from an alert to its
-  `section`, `severity`, `code`, `operator_action`, and allowed
+  `section`, `severity`, `code`, `operator_action`, optional playbook metadata
+  (`owner`, `default_next_action`, `admin_link_target`), and allowed
   `correlation_keys`. It contains ID key names only, not raw payloads or secret
   values.
 - `alert_taxonomy[].code` must be registered in `alert_code_values[section]` or
   `alert_code_values.global`. The validator rejects unregistered codes in strict
   mode so Admin can bind code-specific playbooks without parsing free-form text.
+- `alerts[].code` and `top_alerts[].code` must follow the same registry rule;
+  emitted alert drift is rejected before Admin renders a playbook.
 
 Summary example: `full_product_health_examples/full-product-health-summary.json`.
 
@@ -90,7 +93,8 @@ Allowed `alert_taxonomy[].operator_action` values are:
 
 ## Alert Code Values
 
-`alert_code_values` is the explicit registry for `alert_taxonomy[].code`.
+`alert_code_values` is the explicit registry for `alert_taxonomy[].code`,
+`alerts[].code`, and `top_alerts[].code`.
 
 - `global`: generic collector or fixture-safe codes that may appear in any
   section.
@@ -101,10 +105,21 @@ Allowed `alert_taxonomy[].operator_action` values are:
 - `admin_readiness`: Admin audit/readiness and full-product summary failure
   codes.
 
+`alert_code_metadata` is the playbook-facing companion registry. For every code
+listed in `alert_code_values`, it records:
+
+- `owner`: a stable owner key such as `web_execution`, `news_ops`, `quant_ops`,
+  `admin_ops`, or `platform_health`.
+- `default_next_action`: a safe action key that Admin can show before a richer
+  playbook exists.
+- `admin_link_target`: a stable Admin route key. It is not a local filesystem
+  path, remote URL, exchange endpoint, raw payload pointer, or live symbol.
+
 When adding a new producer alert, add the code to the correct registry section
 in `full_product_health_artifact_schema.json` before emitting it in
-`alert_taxonomy[]`. Do not use the registry for local paths, URLs, raw payloads,
-credentials, signed endpoints, or live symbols.
+`alerts[]`, `top_alerts[]`, or `alert_taxonomy[]`, and add matching
+`alert_code_metadata`. Do not use the registry for local paths, URLs, raw
+payloads, credentials, signed endpoints, or live symbols.
 
 ## Append-Only Boundary
 

@@ -333,6 +333,8 @@ def validate_alert_enum_values(
     payload: dict[str, Any],
     list_field: str,
     findings: list[dict[str, Any]],
+    *,
+    validate_codes: bool = False,
 ) -> None:
     items = payload.get(list_field)
     if items is None:
@@ -366,6 +368,14 @@ def validate_alert_enum_values(
             findings,
             severity="P1",
         )
+        if validate_codes:
+            validate_alert_code_values(
+                artifact,
+                f"{list_field}[{index}].code",
+                item.get("section"),
+                item.get("code"),
+                findings,
+            )
 
 
 def validate_alert_taxonomy_values(
@@ -423,7 +433,7 @@ def validate_alert_taxonomy_values(
             findings,
             severity="P1",
         )
-        validate_alert_taxonomy_code_values(
+        validate_alert_code_values(
             artifact,
             f"alert_taxonomy[{index}].code",
             item.get("section"),
@@ -444,7 +454,7 @@ def validate_alert_taxonomy_values(
             )
 
 
-def validate_alert_taxonomy_code_values(
+def validate_alert_code_values(
     artifact: str,
     field: str,
     section: Any,
@@ -461,7 +471,7 @@ def validate_alert_taxonomy_code_values(
             finding(
                 "INVALID_ALERT_CODE",
                 artifact,
-                "alert taxonomy code is not registered for its section",
+                "alert code is not registered for its section",
                 field=field,
             )
         )
@@ -563,7 +573,7 @@ def validate_json_artifact(
             findings,
         )
     if artifact == "full_report":
-        validate_alert_enum_values(artifact, payload, "alerts", findings)
+        validate_alert_enum_values(artifact, payload, "alerts", findings, validate_codes=True)
         validate_alert_taxonomy_values(artifact, payload, findings)
     if artifact == "summary":
         if isinstance(summary, dict):
@@ -574,7 +584,7 @@ def validate_json_artifact(
                 allowed_status_values,
                 findings,
             )
-        validate_alert_enum_values(artifact, payload, "top_alerts", findings)
+        validate_alert_enum_values(artifact, payload, "top_alerts", findings, validate_codes=True)
         validate_alert_enum_values(artifact, payload, "required_operator_actions", findings)
         validate_alert_taxonomy_values(artifact, payload, findings)
     return record

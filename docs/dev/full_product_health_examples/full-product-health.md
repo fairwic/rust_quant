@@ -23,6 +23,13 @@
 | P1 | NEWS_SOURCE_DEGRADED | news_source_ai_health | Example source has repeated read-only collection warnings. |
 | INFO | MOCK_DEV_BOUNDARY_ACTIVE | admin_readiness | Example artifact uses fixture-only data and no live collection. |
 
+## Alert Playbook Registry
+
+| Code | Owner | Default Next Action | Admin Link Target |
+| --- | --- | --- | --- |
+| NEWS_SOURCE_DEGRADED | news_ops | review_news_source_status | admin.full_product_health.news_source_ai_health |
+| MOCK_DEV_BOUNDARY_ACTIVE | platform_health | observe_fixture_boundary | admin.full_product_health.admin_readiness |
+
 ## Checklist
 
 | Section | Status | Ready | Action Required | P0 | P1 | Info | Reason |

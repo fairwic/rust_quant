@@ -189,7 +189,11 @@ Bind the first Admin screen to these fields:
 - `top_alerts[].message`
 - `required_operator_actions[].action`
 - `alert_code_values`
+- `alert_code_metadata`
 - `alert_taxonomy[].operator_action`
+- `alert_taxonomy[].owner`
+- `alert_taxonomy[].default_next_action`
+- `alert_taxonomy[].admin_link_target`
 - `alert_taxonomy[].correlation_keys[]`
 - `correlation_ids[]`
 - `validation.summary.sensitive_marker_count`
@@ -219,12 +223,15 @@ Map operator actions as explicit callouts:
 
 `alert_taxonomy[]` is the stable relationship map for drill-down. Admin should
 use it to connect each `top_alerts[]` or full-report `alerts[]` item to the
-affected section, the required operator action, and the ID key names available
-in `correlation` / `correlation_ids`. It must not contain raw payloads, local
-paths, database URLs, API keys, signed endpoints, or the protected live symbol.
-The taxonomy `code` must be registered in `alert_code_values[section]` or
-`alert_code_values.global`; unknown codes should be treated as schema drift, not
-as free-form operator guidance.
+affected section, the required operator action, playbook metadata, and the ID
+key names available in `correlation` / `correlation_ids`. The schema-level
+`alert_code_metadata[section][code]` registry gives Admin the default `owner`,
+`default_next_action`, and `admin_link_target` when emitted taxonomy has not yet
+appended those fields. It must not contain raw payloads, local paths, database
+URLs, API keys, signed endpoints, or the protected live symbol. The taxonomy
+`code`, `alerts[].code`, and `top_alerts[].code` must be registered in
+`alert_code_values[section]` or `alert_code_values.global`; unknown codes should
+be treated as schema drift, not as free-form operator guidance.
 
 The UI can show green only when the selected readiness scope has no blocking,
 review, skipped, or validation safety condition.

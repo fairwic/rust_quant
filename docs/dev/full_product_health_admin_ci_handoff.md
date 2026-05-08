@@ -179,15 +179,19 @@ Admin must ignore unknown fields and should not remove support for known fields
 until the schema version changes and examples are updated in the same change.
 
 `alert_taxonomy[]` is the stable alert-to-action drill-down map. Each item
-links `severity`, `code`, and `section` to an `operator_action` and safe
-`correlation_keys[]`. The keys point at `correlation` / `correlation_ids`
+links `severity`, `code`, and `section` to an `operator_action`, optional
+playbook metadata (`owner`, `default_next_action`, `admin_link_target`), and
+safe `correlation_keys[]`. The keys point at `correlation` / `correlation_ids`
 entries across News, Web, worker checkpoints, and Admin audit logs; the taxonomy
 contains key names only and must not contain raw payloads, local paths,
 credentials, signed exchange endpoints, or position symbols.
-`alert_taxonomy[].code` must be present in `alert_code_values[section]` or
-`alert_code_values.global` in `full_product_health_artifact_schema.json`.
-Validator strict mode rejects unregistered codes so CI and Admin can detect
-producer/schema drift before showing a playbook.
+`alert_taxonomy[].code`, `alerts[].code`, and `top_alerts[].code` must be
+present in `alert_code_values[section]` or `alert_code_values.global` in
+`full_product_health_artifact_schema.json`. The sibling
+`alert_code_metadata[section][code]` registry supplies Admin playbook defaults:
+`owner`, `default_next_action`, and `admin_link_target`. Validator strict mode
+rejects unregistered codes so CI and Admin can detect producer/schema drift
+before showing a playbook.
 
 ## Redacted Ingest Payload Fixture
 
