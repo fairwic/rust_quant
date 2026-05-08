@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "source_schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:01Z",
+  "source_generated_at": "2026-05-07T01:00:00Z",
+  "summary": {
+    "overall_status": "warn",
+    "p0_count": 0,
+    "p1_count": 1,
+    "info_count": 1,
+    "section_count": 4,
+    "blocking_section_count": 0,
+    "warning_section_count": 1,
+    "top_alert_count": 2,
+    "required_operator_action_count": 1,
+    "correlation_id_count": 7,
+    "read_only_input_count": 4
+  },
+  "section_statuses": {
+    "web_task_order_health": "ok",
+    "news_source_ai_health": "warn",
+    "quant_worker_checkpoint_audit": "ok",
+    "admin_readiness": "ok"
+  },
+  "checklist": [
+    {
+      "section": "web_task_order_health",
+      "status": "ok",
+      "ready": true,
+      "action_required": false,
+      "p0_count": 0,
+      "p1_count": 0,
+      "info_count": 0,
+      "reason_code": "WEB_TASK_ORDER_READY"
+    },
+    {
+      "section": "news_source_ai_health",
+      "status": "warn",
+      "ready": false,
+      "action_required": true,
+      "p0_count": 0,
+      "p1_count": 1,
+      "info_count": 0,
+      "reason_code": "NEWS_SOURCE_DEGRADED"
+    },
+    {
+      "section": "quant_worker_checkpoint_audit",
+      "status": "ok",
+      "ready": true,
+      "action_required": false,
+      "p0_count": 0,
+      "p1_count": 0,
+      "info_count": 0,
+      "reason_code": "QUANT_WORKER_READY"
+    },
+    {
+      "section": "admin_readiness",
+      "status": "ok",
+      "ready": true,
+      "action_required": false,
+      "p0_count": 0,
+      "p1_count": 0,
+      "info_count": 1,
+      "reason_code": "ADMIN_READINESS_REVIEW"
+    }
+  ],
+  "top_alerts": [
+    {
+      "severity": "P1",
+      "code": "NEWS_SOURCE_DEGRADED",
+      "section": "news_source_ai_health",
+      "message": "Example source has repeated read-only collection warnings."
+    },
+    {
+      "severity": "INFO",
+      "code": "MOCK_DEV_BOUNDARY_ACTIVE",
+      "section": "admin_readiness",
+      "message": "Example artifact uses fixture-only data and no live collection."
+    }
+  ],
+  "required_operator_actions": [
+    {
+      "severity": "P1",
+      "code": "NEWS_SOURCE_DEGRADED",
+      "section": "news_source_ai_health",
+      "message": "Review the degraded example source before promotion.",
+      "action": "manual_review_before_release"
+    }
+  ],
+  "correlation": {
+    "news_id": "example-news-001",
+    "analysis_result_id": 7001,
+    "signal_inbox_id": 3801,
+    "external_id": "example-news-001:ETH-USDT",
+    "execution_task_id": 5202,
+    "execution_attempt_id": 6101,
+    "request_id": "task-5202-example",
+    "worker_id": "rust_quant_worker_example"
+  },
+  "correlation_ids": [
+    {
+      "key": "news_id",
+      "value": "example-news-001"
+    },
+    {
+      "key": "analysis_result_id",
+      "value": 7001
+    },
+    {
+      "key": "signal_inbox_id",
+      "value": 3801
+    },
+    {
+      "key": "execution_task_id",
+      "value": 5202
+    },
+    {
+      "key": "execution_attempt_id",
+      "value": 6101
+    },
+    {
+      "key": "request_id",
+      "value": "task-5202-example"
+    },
+    {
+      "key": "worker_id",
+      "value": "rust_quant_worker_example"
+    }
+  ]
+}

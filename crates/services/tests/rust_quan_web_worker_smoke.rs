@@ -57,6 +57,13 @@ fn pending_close_worker_e2e_smoke_hands_off_from_web_review_to_worker() {
     assert!(script.contains("effective_lease_limit"));
     assert!(script.contains("order_side = 'sell'"));
     assert!(script.contains("task_status = 'completed'"));
+    assert!(script.contains("close_order' ->> 'reduce_only'"));
+    assert!(script.contains("reduce_only is not true"));
+    assert!(script.contains("rerun worker once to verify completed task is not reprocessed"));
+    assert!(script.contains("worker rerun changed completed task artifacts unexpectedly"));
+    assert!(script.contains("COUNT(DISTINCT o.id)"));
+    assert!(script.contains("COUNT(DISTINCT tr.id)"));
+    assert!(script.contains("verified rerun boundary: no new order/trade rows"));
     assert!(script.contains("pending close worker e2e smoke completed"));
 }
 

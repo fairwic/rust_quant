@@ -1,9 +1,10 @@
 use std::time::Duration;
 
+use crypto_exc_all::{ExchangeId, Instrument, MarginMode, OrderSide, OrderType};
 use okx::dto::trade::trade_dto::OrderResDto;
 use rust_quant_domain::entities::ExchangeApiConfig;
 use rust_quant_risk::realtime::{OkxStopLossAmender, StopLossAmender};
-use rust_quant_services::exchange::OkxOrderService;
+use rust_quant_services::exchange::{CryptoExcAllGateway, OkxOrderService, OrderPlacementRequest};
 use rust_quant_strategies::strategy_common::SignalResult;
 
 #[derive(serde::Deserialize)]
@@ -331,6 +332,178 @@ async fn okx_simulated_order_flow_place_amend_close() -> anyhow::Result<()> {
     anyhow::ensure!(
         inspection.position_closed,
         "expected position to be closed after close_position"
+    );
+
+    Ok(())
+}
+
+/// OKX simulated reduce-only close order E2E test.
+///
+/// Validates the `CryptoExcAllGateway` close path used by the execution worker's
+/// `pending_close` task: open a position, then close it via the same gateway that
+/// `execute_pending_close_task` uses in live mode.
+///
+/// OKX hedge mode uses position_side (not reduce_only) to specify close direction.
+/// reduce_only is only applicable in OKX net (one-way) mode.
+///
+/// Run manually:
+/// - `RUN_OKX_SIMULATED_E2E=1 cargo test -p rust-quant-services --test okx_simulated_order_flow -- okx_simulated_reduce_only_close --ignored --nocapture`
+///
+/// Env knobs: same as `okx_simulated_order_flow_place_amend_close`.
+#[tokio::test]
+#[ignore]
+async fn okx_simulated_reduce_only_close_via_gateway() -> anyhow::Result<()> {
+    dotenv::dotenv().ok();
+
+    std::env::set_var("OKX_REQUEST_EXPIRATION_MS", "300000");
+
+    if env_or_default("RUN_OKX_SIMULATED_E2E", "0") != "1" {
+        return Ok(());
+    }
+
+    if env_or_default("APP_ENV", "local").eq_ignore_ascii_case("prod") {
+        anyhow::bail!("refuse to run in APP_ENV=prod");
+    }
+
+    let inst_id = env_or_default("OKX_TEST_INST_ID", "ETH-USDT-SWAP");
+    let side = env_or_default("OKX_TEST_SIDE", "buy");
+    let size = env_or_default("OKX_TEST_ORDER_SIZE", "1");
+
+    // Build gateway using the same code path as resolve_live_gateway in the execution worker.
+    let gateway = CryptoExcAllGateway::from_single_exchange_credentials(
+        ExchangeId::Okx,
+        env_required("OKX_SIMULATED_API_KEY")?,
+        env_required("OKX_SIMULATED_API_SECRET")?,
+        Some(env_required("OKX_SIMULATED_PASSPHRASE")?),
+        true, // simulated=true
+    )?;
+
+    // Also build OkxOrderService for position polling and cleanup.
+    let api = build_simulated_api_config()?;
+    let okx = OkxOrderService;
+
+    let pos_side = if side == "buy" { "long" } else { "short" };
+    let close_side = if side == "buy" {
+        OrderSide::Sell
+    } else {
+        OrderSide::Buy
+    };
+
+    // Parse instrument from inst_id (e.g. "ETH-USDT-SWAP" → perp("ETH", "USDT")).
+    let parts: Vec<&str> = inst_id.split('-').collect();
+    anyhow::ensure!(
+        parts.len() >= 2,
+        "OKX_TEST_INST_ID must be in BASE-QUOTE[-SWAP] format, got: {}",
+        inst_id
+    );
+    let instrument = Instrument::perp(parts[0], parts[1]);
+
+    // Step 0: clean up any leftover positions from previous test runs.
+    let positions = okx
+        .get_positions(&api, Some("SWAP"), Some(&inst_id))
+        .await?;
+    for p in &positions {
+        if p.inst_id != inst_id {
+            continue;
+        }
+        let qty = p.pos.parse::<f64>().unwrap_or(0.0);
+        if qty.abs() < 1e-12 {
+            continue;
+        }
+        println!(
+            "cleanup: closing leftover position pos_side={} qty={} mgn_mode={}",
+            p.pos_side, p.pos, p.mgn_mode
+        );
+        let cleanup_pos_side = if p.pos_side == "long" {
+            okx::dto::PositionSide::Long
+        } else {
+            okx::dto::PositionSide::Short
+        };
+        if let Err(e) = okx
+            .close_position(&api, &inst_id, cleanup_pos_side, &p.mgn_mode)
+            .await
+        {
+            println!("cleanup close_position error (ignored): {}", e);
+        }
+    }
+    if !positions.is_empty() {
+        // Give OKX a moment to process cleanup orders.
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+    }
+
+    // Step 1: open position via OkxOrderService (same as existing test).
+    let last = fetch_last_price(&inst_id).await?;
+    println!("last price: {}", last);
+    let (tp, sl) = compute_tp_sl(last, &side);
+    let open_order = place_order(&okx, &api, &inst_id, &side, size.clone(), tp, sl).await?;
+    println!("open order_id: {}", open_order.ord_id);
+
+    // Step 2: wait for position to appear.
+    wait_for_position(&okx, &api, &inst_id, pos_side, true).await?;
+    println!(
+        "position confirmed open: inst_id={} pos_side={}",
+        inst_id, pos_side
+    );
+
+    // Snapshot position size so we can verify it decreases after close.
+    let pos_before = okx
+        .get_positions(&api, Some("SWAP"), Some(&inst_id))
+        .await?
+        .into_iter()
+        .find(|p| p.inst_id == inst_id && p.pos_side == pos_side)
+        .map(|p| p.pos.parse::<f64>().unwrap_or(0.0))
+        .unwrap_or(0.0);
+    println!("position size before close: {}", pos_before);
+
+    // Step 3: close via CryptoExcAllGateway — mirrors execute_pending_close_task live path.
+    // OKX hedge mode: use position_side to specify close direction; do NOT set reduce_only
+    // (only applicable in net/one-way mode). The execution worker applies the same logic.
+    let close_request = OrderPlacementRequest {
+        exchange: ExchangeId::Okx,
+        instrument: instrument.clone(),
+        side: close_side,
+        order_type: OrderType::Market,
+        size: size.clone(),
+        price: None,
+        margin_mode: Some(MarginMode::Isolated),
+        margin_coin: None,
+        position_side: Some(pos_side.to_string()),
+        trade_side: Some("close".to_string()),
+        client_order_id: Some(format!("rqclose{}", chrono::Utc::now().timestamp_millis())),
+        reduce_only: None, // OKX hedge mode: position_side handles close direction
+        time_in_force: None,
+    };
+
+    println!(
+        "placing close order: side={:?} pos_side={} reduce_only=None (OKX hedge mode)",
+        close_request.side, pos_side
+    );
+    let close_ack = gateway.place_order(close_request).await?;
+    println!(
+        "close ack: exchange={:?} order_id={:?} status={:?}",
+        close_ack.exchange, close_ack.order_id, close_ack.status
+    );
+
+    anyhow::ensure!(
+        close_ack.order_id.is_some(),
+        "close order must return an order_id from OKX"
+    );
+
+    // Step 4: wait for position to disappear.
+    wait_for_position(&okx, &api, &inst_id, pos_side, false).await?;
+    println!(
+        "position confirmed closed: inst_id={} pos_side={}",
+        inst_id, pos_side
+    );
+
+    // Step 5: verify via inspect_auto_close.
+    let inspection = okx
+        .inspect_auto_close_by_order(&api, &inst_id, Some(&open_order.ord_id), None)
+        .await?;
+    println!("inspection: {:?}", inspection);
+    anyhow::ensure!(
+        inspection.position_closed,
+        "expected position to be closed after gateway close order"
     );
 
     Ok(())

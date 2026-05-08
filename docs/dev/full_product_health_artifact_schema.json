@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "status_values": [
+    "ok",
+    "warn",
+    "fail"
+  ],
+  "severity_values": [
+    "P0",
+    "P1",
+    "INFO"
+  ],
+  "artifact_schemas": {
+    "full_report": {
+      "required_top_level": [
+        "schema_version",
+        "status",
+        "generated_at",
+        "summary",
+        "sections",
+        "alerts",
+        "correlation"
+      ],
+      "required_summary_fields": [
+        "p0_count",
+        "p1_count",
+        "info_count",
+        "read_only_input_count"
+      ],
+      "append_only_paths": [
+        "summary.*",
+        "sections.*",
+        "sections.*.sample.*",
+        "alerts[].*",
+        "correlation.*"
+      ]
+    },
+    "summary": {
+      "required_top_level": [
+        "schema_version",
+        "source_schema_version",
+        "status",
+        "generated_at",
+        "source_generated_at",
+        "summary",
+        "section_statuses",
+        "checklist",
+        "top_alerts",
+        "required_operator_actions",
+        "correlation",
+        "correlation_ids"
+      ],
+      "required_summary_fields": [
+        "overall_status",
+        "p0_count",
+        "p1_count",
+        "info_count",
+        "section_count",
+        "blocking_section_count",
+        "warning_section_count",
+        "top_alert_count",
+        "required_operator_action_count",
+        "correlation_id_count",
+        "read_only_input_count"
+      ],
+      "append_only_paths": [
+        "summary.*",
+        "section_statuses.*",
+        "checklist[].*",
+        "top_alerts[].*",
+        "required_operator_actions[].*",
+        "correlation.*",
+        "correlation_ids[].*"
+      ]
+    },
+    "validation": {
+      "required_top_level": [
+        "schema_version",
+        "status",
+        "generated_at",
+        "summary",
+        "artifacts",
+        "findings"
+      ],
+      "required_summary_fields": [
+        "artifact_count",
+        "missing_artifact_count",
+        "json_parse_error_count",
+        "missing_required_field_count",
+        "sensitive_marker_count",
+        "finding_count"
+      ],
+      "append_only_paths": [
+        "summary.*",
+        "artifacts.*",
+        "artifacts.*.missing_fields[]",
+        "artifacts.*.missing_markers[]",
+        "findings[].*"
+      ]
+    }
+  },
+  "markdown_required_markers": [
+    "# Full Product Health",
+    "**Status:**",
+    "## Counts",
+    "## Top Alerts",
+    "## Checklist",
+    "## Artifact Paths",
+    "## Skipped Sections"
+  ]
+}

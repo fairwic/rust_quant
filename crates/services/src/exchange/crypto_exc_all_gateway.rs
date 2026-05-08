@@ -1,7 +1,8 @@
 use crypto_exc_all::{
     BinanceExchangeConfig, BitgetExchangeConfig, Candle, CandleQuery, CryptoSdk, Error, ExchangeId,
     Instrument, MarginMode, OkxExchangeConfig, OrderAck, OrderSide, OrderType, PlaceOrderRequest,
-    Result, SdkConfig, Ticker, TimeInForce,
+    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, Result, SdkConfig, Ticker,
+    TimeInForce,
 };
 use serde_json::json;
 
@@ -103,7 +104,20 @@ impl CryptoExcAllGateway {
                     ws_stream_url: None,
                     api_timeout_ms: None,
                     recv_window_ms: None,
-                    proxy_url: None,
+                    proxy_url: std::env::var("BINANCE_PROXY_URL")
+                        .ok()
+                        .or_else(|| std::env::var("ALL_PROXY").ok())
+                        .or_else(|| std::env::var("HTTPS_PROXY").ok())
+                        .map(|url| {
+                            let trimmed = url.trim().to_string();
+                            // normalise socks5:// → socks5h:// so DNS resolves through the proxy
+                            if let Some(rest) = trimmed.strip_prefix("socks5://") {
+                                format!("socks5h://{rest}")
+                            } else {
+                                trimmed
+                            }
+                        })
+                        .filter(|url| !url.is_empty()),
                 }),
                 ..SdkConfig::default()
             },
@@ -149,6 +163,20 @@ impl CryptoExcAllGateway {
             GatewayMode::DryRun => Err(Error::Unsupported {
                 exchange,
                 capability: "dry-run candles",
+            }),
+        }
+    }
+
+    pub async fn prepare_order_settings(
+        &self,
+        exchange: ExchangeId,
+        request: PrepareOrderSettingsRequest,
+    ) -> Result<PrepareOrderSettingsResult> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.account(exchange)?.prepare_order_settings(request).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run prepare_order_settings",
             }),
         }
     }

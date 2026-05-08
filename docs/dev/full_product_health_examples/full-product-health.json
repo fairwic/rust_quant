@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:00Z",
+  "summary": {
+    "p0_count": 0,
+    "p1_count": 1,
+    "info_count": 1,
+    "read_only_input_count": 4,
+    "web_open_task_count": 2,
+    "news_degraded_source_count": 1,
+    "quant_expected_worker_failures": 0,
+    "quant_expected_worker_warnings": 0
+  },
+  "sections": {
+    "web_task_order_health": {
+      "status": "ok",
+      "lookback_secs": 3600,
+      "open_task_count": 2,
+      "stale_task_count": 0,
+      "missing_order_result_count": 0,
+      "sample": {
+        "signal_inbox_id": 3801,
+        "execution_task_id": 5202,
+        "task_status": "processing",
+        "age_secs": 120
+      }
+    },
+    "news_source_ai_health": {
+      "status": "warn",
+      "degraded_source_count": 1,
+      "paused_source_count": 0,
+      "ai_provider_unavailable_count": 0,
+      "sample": {
+        "source": "news_source_example",
+        "effective_status": "degraded",
+        "consecutive_failures": 3,
+        "last_error_category": "provider_auth_check"
+      }
+    },
+    "quant_worker_checkpoint_audit": {
+      "status": "ok",
+      "expected_worker_failures": 0,
+      "expected_worker_warnings": 0,
+      "ignored_historical_worker_count": 1,
+      "exchange_audit_recent_failures": 0,
+      "sample": {
+        "worker_id": "rust_quant_worker_example",
+        "worker_status": "idle",
+        "heartbeat_age_secs": 42
+      }
+    },
+    "admin_readiness": {
+      "status": "ok",
+      "live_readiness": "review",
+      "reason_code": "manual_review_required",
+      "manual_review_required": true
+    }
+  },
+  "alerts": [
+    {
+      "severity": "P1",
+      "code": "NEWS_SOURCE_DEGRADED",
+      "section": "news_source_ai_health",
+      "message": "Example source has repeated read-only collection warnings."
+    },
+    {
+      "severity": "INFO",
+      "code": "MOCK_DEV_BOUNDARY_ACTIVE",
+      "section": "admin_readiness",
+      "message": "Example artifact uses fixture-only data and no live collection."
+    }
+  ],
+  "correlation": {
+    "news_id": "example-news-001",
+    "analysis_result_id": 7001,
+    "signal_inbox_id": 3801,
+    "external_id": "example-news-001:ETH-USDT",
+    "execution_task_id": 5202,
+    "execution_attempt_id": 6101,
+    "request_id": "task-5202-example",
+    "order_result_id": null,
+    "trade_record_id": null,
+    "worker_id": "rust_quant_worker_example"
+  }
+}

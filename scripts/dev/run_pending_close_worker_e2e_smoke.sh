@@ -139,14 +139,15 @@ RUST_QUAN_WEB_BASE_URL="$RUST_QUAN_WEB_BASE_URL" \
     "${SCRIPT_DIR}/run_execution_worker_dry_run.sh"
 
 echo
-echo "3) verify Web task, order result, and trade record"
+echo "3) verify Web task, order result, trade record, and reduce_only contract"
 result_row="$(
     run_web_tsv "
         SELECT
             t.task_status,
             COALESCE(o.order_side, ''),
             COALESCE(o.order_status, ''),
-            COALESCE(tr.trade_status, '')
+            COALESCE(tr.trade_status, ''),
+            COALESCE((t.request_payload_json::json -> 'close_order' ->> 'reduce_only'), '')
         FROM execution_tasks t
         LEFT JOIN exchange_order_results o ON o.execution_task_id = t.id
         LEFT JOIN user_trade_records tr ON tr.execution_task_id = t.id
@@ -179,8 +180,58 @@ if [[ -z "$result_row" ]]; then
     exit 1
 fi
 
-IFS=$'\t' read -r task_status order_side order_status trade_status <<<"$result_row"
-echo "verified close_task_id=$close_task_id task_status=$task_status order_side=$order_side order_status=$order_status trade_status=$trade_status"
+IFS=$'\t' read -r task_status order_side order_status trade_status reduce_only <<<"$result_row"
+if [[ "$reduce_only" != "true" ]]; then
+    echo "close_order.reduce_only is not true for task_id=$close_task_id (actual=$reduce_only)" >&2
+    exit 1
+fi
+
+echo "verified close_task_id=$close_task_id task_status=$task_status order_side=$order_side order_status=$order_status trade_status=$trade_status reduce_only=$reduce_only"
+
+order_trade_counts_before_retry="$(
+    run_web_tsv "
+        SELECT
+            COUNT(DISTINCT o.id),
+            COUNT(DISTINCT tr.id)
+        FROM execution_tasks t
+        LEFT JOIN exchange_order_results o ON o.execution_task_id = t.id
+        LEFT JOIN user_trade_records tr ON tr.execution_task_id = t.id
+        WHERE t.id = $close_task_id;
+    "
+)"
+IFS=$'\t' read -r order_count_before trade_count_before <<<"$order_trade_counts_before_retry"
+
+echo
+echo "4) rerun worker once to verify completed task is not reprocessed"
+RUST_QUAN_WEB_BASE_URL="$RUST_QUAN_WEB_BASE_URL" \
+    EXECUTION_EVENT_SECRET="$EXECUTION_EVENT_SECRET" \
+    EXECUTION_WORKER_LEASE_LIMIT="$effective_lease_limit" \
+    EXECUTION_WORKER_TASK_TYPES=risk_control_close_candidate \
+    EXECUTION_WORKER_TASK_STATUSES=pending_close \
+    EXECUTION_WORKER_DRY_RUN=true \
+    "${SCRIPT_DIR}/run_execution_worker_dry_run.sh"
+
+order_trade_counts_after_retry="$(
+    run_web_tsv "
+        SELECT
+            COUNT(DISTINCT o.id),
+            COUNT(DISTINCT tr.id)
+        FROM execution_tasks t
+        LEFT JOIN exchange_order_results o ON o.execution_task_id = t.id
+        LEFT JOIN user_trade_records tr ON tr.execution_task_id = t.id
+        WHERE t.id = $close_task_id;
+    "
+)"
+IFS=$'\t' read -r order_count_after trade_count_after <<<"$order_trade_counts_after_retry"
+
+if [[ "$order_count_before" != "$order_count_after" || "$trade_count_before" != "$trade_count_after" ]]; then
+    echo "worker rerun changed completed task artifacts unexpectedly: task_id=$close_task_id" >&2
+    echo "before: order_count=$order_count_before trade_count=$trade_count_before" >&2
+    echo "after : order_count=$order_count_after trade_count=$trade_count_after" >&2
+    exit 1
+fi
+
+echo "verified rerun boundary: no new order/trade rows for completed close task"
 
 run_web_table "
     SELECT

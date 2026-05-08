@@ -122,10 +122,17 @@ pub async fn run_modes() -> Result<()> {
 
     // 0) rust_quan_web 执行任务 worker
     if env_is_true("IS_RUN_EXECUTION_WORKER", false) {
-        run_execution_worker_from_env().await?;
         if env_is_true("EXECUTION_WORKER_ONLY", true) {
+            // 独占模式：阻塞运行（run_once 或持续轮询），完成后退出
+            run_execution_worker_from_env().await?;
             return Ok(());
         }
+        // 并行模式（EXECUTION_WORKER_ONLY=false）：后台持续轮询，与 WebSocket 并行运行
+        tokio::spawn(async {
+            if let Err(error) = run_execution_worker_loop().await {
+                error!("❌ execution worker 后台轮询退出: {}", error);
+            }
+        });
     }
 
     // 0.5) 交易对事实表同步 worker。默认每 60 秒同步一次五个交易所。
@@ -286,6 +293,34 @@ async fn run_execution_worker_from_env() -> Result<()> {
         match worker.run_once().await {
             Ok(handled) => info!("🧾 执行任务 worker 轮询完成: handled={}", handled),
             Err(error) => error!("❌ 执行任务 worker 轮询失败: {}", error),
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(poll_interval_secs)).await;
+    }
+}
+
+/// 后台持续轮询模式，供 `tokio::spawn` 使用（与 WebSocket 并行运行时）。
+/// 忽略 `EXECUTION_WORKER_RUN_ONCE`，始终持续轮询直到进程退出。
+async fn run_execution_worker_loop() -> Result<()> {
+    let worker = ExecutionWorker::from_env()?;
+    let poll_interval_secs = std::env::var("EXECUTION_WORKER_POLL_INTERVAL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(5);
+
+    info!(
+        "🧾 execution worker 后台轮询启动: interval={}s, dry_run={}",
+        poll_interval_secs,
+        std::env::var("EXECUTION_WORKER_DRY_RUN")
+            .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+            .unwrap_or(true),
+    );
+    loop {
+        match worker.run_once().await {
+            Ok(handled) if handled > 0 => {
+                info!("🧾 execution worker 处理完成: handled={}", handled)
+            }
+            Ok(_) => {}
+            Err(error) => error!("❌ execution worker 轮询失败: {}", error),
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(poll_interval_secs)).await;
     }

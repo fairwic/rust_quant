@@ -20,9 +20,7 @@ const FORBIDDEN_TOKENS: &[&str] = &[
 
 #[test]
 fn active_runtime_and_backtest_entrypoints_do_not_reference_mysql_tokens() {
-    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..");
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
 
     let mut violations = Vec::new();
     for relative_path in ACTIVE_ENTRYPOINTS {
@@ -46,9 +44,7 @@ fn active_runtime_and_backtest_entrypoints_do_not_reference_mysql_tokens() {
 
 #[test]
 fn workspace_sqlx_dependency_uses_explicit_postgres_features_only() {
-    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..");
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
     let manifest_path = repo_root.join("Cargo.toml");
     let manifest = fs::read_to_string(&manifest_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", manifest_path.display(), error));

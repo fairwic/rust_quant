@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "status": "ok",
+  "generated_at": "2026-05-07T01:00:02Z",
+  "summary": {
+    "artifact_count": 3,
+    "missing_artifact_count": 0,
+    "json_parse_error_count": 0,
+    "missing_required_field_count": 0,
+    "sensitive_marker_count": 0,
+    "finding_count": 0
+  },
+  "artifacts": {
+    "full_report": {
+      "path": "docs/dev/full_product_health_examples/full-product-health.json",
+      "exists": true,
+      "json_valid": true,
+      "missing_fields": []
+    },
+    "summary": {
+      "path": "docs/dev/full_product_health_examples/full-product-health-summary.json",
+      "exists": true,
+      "json_valid": true,
+      "missing_fields": []
+    },
+    "markdown": {
+      "path": "docs/dev/full_product_health_examples/full-product-health.md",
+      "provided": true,
+      "exists": true,
+      "missing_markers": []
+    }
+  },
+  "findings": []
+}

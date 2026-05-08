@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use crypto_exc_all::{
-    ExchangeId, Instrument, MarginMode, OrderAck, OrderSide, OrderType, TimeInForce,
+    ExchangeId, Instrument, MarginMode, OrderAck, OrderSide, OrderType, PositionMode,
+    PrepareOrderSettingsRequest, TimeInForce,
 };
 use serde_json::{json, Value};
 use std::{str::FromStr, sync::Arc, time::Instant};
@@ -24,6 +25,7 @@ pub struct ExecutionWorkerConfig {
     pub default_exchange: ExchangeId,
     pub task_types: Vec<String>,
     pub task_statuses: Vec<String>,
+    pub target_task_ids: Vec<i64>,
 }
 
 impl ExecutionWorkerConfig {
@@ -51,6 +53,7 @@ impl ExecutionWorkerConfig {
             "EXECUTION_WORKER_TASK_STATUSES",
             &["pending", "pending_close"],
         );
+        let target_task_ids = parse_env_i64_list("EXECUTION_WORKER_TARGET_TASK_IDS");
 
         Self {
             worker_id,
@@ -59,7 +62,12 @@ impl ExecutionWorkerConfig {
             default_exchange,
             task_types,
             task_statuses,
+            target_task_ids,
         }
+    }
+
+    fn leased_task_allowed(&self, task_id: i64) -> bool {
+        self.target_task_ids.is_empty() || self.target_task_ids.contains(&task_id)
     }
 }
 
@@ -128,6 +136,7 @@ impl ExecutionWorker {
                 "default_exchange": self.config.default_exchange.as_str(),
                 "task_types": self.config.task_types.clone(),
                 "task_statuses": self.config.task_statuses.clone(),
+                "target_task_ids": self.config.target_task_ids.clone(),
             }),
         )
         .await;
@@ -163,6 +172,7 @@ impl ExecutionWorker {
             json!({
                 "leased_count": leased.tasks.len(),
                 "lease_limit": self.config.lease_limit,
+                "target_task_ids": self.config.target_task_ids.clone(),
             }),
         )
         .await;
@@ -170,6 +180,25 @@ impl ExecutionWorker {
         let mut handled = 0;
         let mut last_task_id = None;
         for task in leased.tasks {
+            if !self.config.leased_task_allowed(task.id) {
+                warn!(
+                    task_id = task.id,
+                    target_task_ids = ?self.config.target_task_ids,
+                    "leased execution task is outside EXECUTION_WORKER_TARGET_TASK_IDS; skipping order execution"
+                );
+                self.record_checkpoint(
+                    "skipped_target_task_mismatch",
+                    Some(task.id),
+                    json!({
+                        "stage": "target_task_allowlist",
+                        "task_id": task.id,
+                        "target_task_ids": self.config.target_task_ids.clone(),
+                    }),
+                )
+                .await;
+                continue;
+            }
+
             let report = self.execute_task(&task).await;
             let report_status = report.execution_status.clone();
             if let Err(error) = self.client.report_result(report).await {
@@ -278,6 +307,46 @@ impl ExecutionWorker {
                 );
             }
         };
+
+        if order_task.exchange == ExchangeId::Binance
+            && (order_task.margin_mode.is_some()
+                || order_task.leverage.is_some()
+                || order_task.position_mode.is_some())
+        {
+            let instrument = match parse_instrument(&order_task.symbol) {
+                Ok(value) => value,
+                Err(error) => {
+                    return ExecutionTaskReportRequest::failed(
+                        task.id,
+                        order_task.exchange.as_str(),
+                        order_side_lower(order_task.side),
+                        error.to_string(),
+                        json!({"task_id": task.id}),
+                    );
+                }
+            };
+            let prepare = PrepareOrderSettingsRequest {
+                instrument,
+                margin_mode: order_task.margin_mode.clone(),
+                leverage: order_task.leverage.clone(),
+                position_mode: order_task.position_mode,
+                product_type: None,
+                margin_coin: order_task.margin_coin.clone(),
+                position_side: order_task.position_side.clone(),
+            };
+            if let Err(error) = gateway
+                .prepare_order_settings(order_task.exchange, prepare)
+                .await
+            {
+                return ExecutionTaskReportRequest::failed(
+                    task.id,
+                    order_task.exchange.as_str(),
+                    order_side_lower(order_task.side),
+                    error.to_string(),
+                    json!({"task_id": task.id}),
+                );
+            }
+        }
 
         match self.live_order_request(&gateway, &order_task).await {
             Ok(request) => match self.place_order_with_audit(task, &gateway, request).await {
@@ -550,6 +619,8 @@ pub struct ExecutionOrderTask {
     pub size: String,
     pub price: Option<String>,
     pub margin_mode: Option<MarginMode>,
+    pub leverage: Option<String>,
+    pub position_mode: Option<PositionMode>,
     pub margin_coin: Option<String>,
     pub position_side: Option<String>,
     pub trade_side: Option<String>,
@@ -626,6 +697,14 @@ impl PendingCloseTask {
             .transpose()?
             .unwrap_or(OrderType::Market);
 
+        // OKX hedge mode uses position_side to specify close direction; reduceOnly is only
+        // applicable in net (one-way) mode. Binance requires reduce_only=true to prevent
+        // accidentally opening a new position. Default to true for non-OKX exchanges.
+        let default_reduce_only = match exchange {
+            ExchangeId::Okx => None,
+            _ => Some(true),
+        };
+
         Ok(Some(OrderPlacementRequest {
             exchange,
             instrument: parse_instrument(&symbol)?,
@@ -641,8 +720,8 @@ impl PendingCloseTask {
             position_side: payload_string(payload, "position_side"),
             trade_side: payload_string(payload, "trade_side").or_else(|| Some("close".to_string())),
             client_order_id: payload_string(payload, "client_order_id")
-                .or_else(|| Some(format!("rq-close-task-{}", self.task_id))),
-            reduce_only: payload_bool(payload, "reduce_only").or(Some(true)),
+                .or_else(|| Some(format!("rqclose{}", self.task_id))),
+            reduce_only: payload_bool(payload, "reduce_only").or(default_reduce_only),
             time_in_force: payload_string(payload, "time_in_force")
                 .map(|value| parse_time_in_force(&value))
                 .transpose()?,
@@ -717,12 +796,16 @@ impl ExecutionOrderTask {
                 .unwrap_or_else(|| "0".to_string()),
             price: payload_string(payload, "price"),
             margin_mode: payload_string(payload, "margin_mode").map(MarginMode::from),
+            leverage: payload_string(payload, "leverage"),
+            position_mode: payload_string(payload, "position_mode")
+                .map(|value| parse_position_mode(&value))
+                .transpose()?,
             margin_coin: payload_string(payload, "margin_coin")
                 .or_else(|| Some("USDT".to_string())),
             position_side: payload_string(payload, "position_side"),
             trade_side: payload_string(payload, "trade_side"),
             client_order_id: payload_string(payload, "client_order_id")
-                .or_else(|| Some(format!("rq-task-{}", task.id))),
+                .or_else(|| Some(format!("rqtask{}", task.id))),
             reduce_only: payload_bool(payload, "reduce_only"),
             time_in_force: payload_string(payload, "time_in_force")
                 .map(|value| parse_time_in_force(&value))
@@ -921,6 +1004,36 @@ fn parse_env_list(key: &str, defaults: &[&str]) -> Vec<String> {
     }
 }
 
+fn parse_env_i64_list(key: &str) -> Vec<i64> {
+    let Some(raw) = std::env::var(key).ok() else {
+        return Vec::new();
+    };
+
+    let mut values = Vec::new();
+    let mut invalid_values = Vec::new();
+    for value in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        match value.parse::<i64>() {
+            Ok(parsed) => values.push(parsed),
+            Err(_) => invalid_values.push(value.to_string()),
+        }
+    }
+
+    if !invalid_values.is_empty() {
+        warn!(
+            env_key = key,
+            invalid_values = ?invalid_values,
+            "invalid execution worker target task ids; denying all leased tasks"
+        );
+        return vec![i64::MIN];
+    }
+
+    values
+}
+
 fn live_order_confirmation_valid(dry_run: bool, confirmation: Option<&str>) -> bool {
     dry_run
         || confirmation
@@ -971,6 +1084,14 @@ fn parse_time_in_force(raw: &str) -> Result<TimeInForce> {
         "fok" => Ok(TimeInForce::Fok),
         "post_only" | "postonly" => Ok(TimeInForce::PostOnly),
         other => Err(anyhow!("unsupported time_in_force: {}", other)),
+    }
+}
+
+fn parse_position_mode(raw: &str) -> Result<PositionMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "hedge" => Ok(PositionMode::Hedge),
+        "one_way" | "oneway" | "net" => Ok(PositionMode::OneWay),
+        other => Err(anyhow!("unsupported position_mode: {}", other)),
     }
 }
 
@@ -1077,7 +1198,7 @@ mod tests {
         assert_eq!(order.exchange.as_str(), "okx");
         assert_eq!(order.instrument.symbol_for(order.exchange), "BTC-USDT-SWAP");
         assert_eq!(order.size, "0.01");
-        assert_eq!(order.client_order_id.as_deref(), Some("rq-task-42"));
+        assert_eq!(order.client_order_id.as_deref(), Some("rqtask42"));
     }
 
     #[test]
@@ -1161,10 +1282,23 @@ mod tests {
         assert!(live_order_confirmation_valid(true, None));
         assert!(!live_order_confirmation_valid(false, None));
         assert!(!live_order_confirmation_valid(false, Some("true")));
-        assert!(!live_order_confirmation_valid(
-            false,
-            Some("I_UNDERSTAND")
-        ));
+        assert!(!live_order_confirmation_valid(false, Some("I_UNDERSTAND")));
+    }
+
+    #[test]
+    fn target_task_allowlist_rejects_unlisted_leased_task_ids() {
+        let config = ExecutionWorkerConfig {
+            worker_id: "worker-targeted".to_string(),
+            lease_limit: 1,
+            dry_run: false,
+            default_exchange: ExchangeId::Binance,
+            task_types: vec!["risk_control_close_candidate".to_string()],
+            task_statuses: vec!["pending_close".to_string()],
+            target_task_ids: vec![1001],
+        };
+
+        assert!(config.leased_task_allowed(1001));
+        assert!(!config.leased_task_allowed(1002));
     }
 
     #[test]
@@ -1208,6 +1342,7 @@ mod tests {
                     "risk_control_close_candidate".to_string(),
                 ],
                 task_statuses: vec!["pending".to_string(), "pending_close".to_string()],
+                target_task_ids: Vec::new(),
             },
         );
         let task = task_with_metadata(
@@ -1244,6 +1379,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pending_close_live_mode_without_close_order_contract_reports_failed() {
+        let worker = ExecutionWorker::new(
+            ExecutionTaskClient::new(ExecutionTaskConfig {
+                base_url: "http://127.0.0.1".to_string(),
+                internal_secret: String::new(),
+            })
+            .unwrap(),
+            CryptoExcAllGateway::dry_run(),
+            ExecutionWorkerConfig {
+                worker_id: "worker-live-close".to_string(),
+                lease_limit: 1,
+                dry_run: false,
+                default_exchange: ExchangeId::Binance,
+                task_types: vec!["risk_control_close_candidate".to_string()],
+                task_statuses: vec!["pending_close".to_string()],
+                target_task_ids: Vec::new(),
+            },
+        );
+        let task = task_with_metadata(
+            "risk_control_close_candidate",
+            "pending_close",
+            json!({
+                "symbol": "ETH-USDT-SWAP",
+                "manual_review": {
+                    "task_type": "risk_control_close_candidate",
+                    "action": "close_candidate"
+                },
+                "risk_control": {
+                    "action": "close_candidate",
+                    "auto_execution_allowed": false
+                }
+            }),
+        );
+
+        let report = worker.execute_task(&task).await;
+        let raw_payload =
+            serde_json::from_str::<Value>(report.raw_payload_json.as_deref().expect("raw payload"))
+                .expect("raw payload json");
+
+        assert_eq!(report.execution_status, "failed");
+        assert_eq!(report.exchange, "binance");
+        assert_eq!(report.order_side, "close");
+        assert!(report
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("requires Web close_order payload"));
+        assert_eq!(raw_payload["task_status"], "pending_close");
+        assert_eq!(raw_payload["close_order"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn pending_close_live_mode_invalid_position_side_reports_failed() {
+        let worker = ExecutionWorker::new(
+            ExecutionTaskClient::new(ExecutionTaskConfig {
+                base_url: "http://127.0.0.1".to_string(),
+                internal_secret: String::new(),
+            })
+            .unwrap(),
+            CryptoExcAllGateway::dry_run(),
+            ExecutionWorkerConfig {
+                worker_id: "worker-live-close".to_string(),
+                lease_limit: 1,
+                dry_run: false,
+                default_exchange: ExchangeId::Binance,
+                task_types: vec!["risk_control_close_candidate".to_string()],
+                task_statuses: vec!["pending_close".to_string()],
+                target_task_ids: Vec::new(),
+            },
+        );
+        let task = task_with_metadata(
+            "risk_control_close_candidate",
+            "pending_close",
+            json!({
+                "symbol": "ETH-USDT-SWAP",
+                "close_order_status": "ready",
+                "close_order": {
+                    "exchange": "binance",
+                    "symbol": "ETH-USDT-SWAP",
+                    "position_side": "net",
+                    "size": 0.42,
+                    "order_type": "market",
+                    "reduce_only": true
+                }
+            }),
+        );
+
+        let report = worker.execute_task(&task).await;
+
+        assert_eq!(report.execution_status, "failed");
+        assert_eq!(report.exchange, "binance");
+        assert_eq!(report.order_side, "close");
+        assert!(report
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("unsupported close_order.position_side"));
+    }
+
+    #[tokio::test]
     async fn leased_risk_close_candidate_still_uses_pending_close_order_path() {
         let worker = ExecutionWorker::new(
             ExecutionTaskClient::new(ExecutionTaskConfig {
@@ -1259,6 +1494,7 @@ mod tests {
                 default_exchange: ExchangeId::Binance,
                 task_types: vec!["risk_control_close_candidate".to_string()],
                 task_statuses: vec!["pending_close".to_string()],
+                target_task_ids: Vec::new(),
             },
         );
         let task = task_with_metadata(
@@ -1321,7 +1557,41 @@ mod tests {
         assert_eq!(order.position_side.as_deref(), Some("long"));
         assert_eq!(order.trade_side.as_deref(), Some("close"));
         assert_eq!(order.reduce_only, Some(true));
-        assert_eq!(order.client_order_id.as_deref(), Some("rq-close-task-42"));
+        assert_eq!(order.client_order_id.as_deref(), Some("rqclose42"));
+    }
+
+    #[test]
+    fn pending_close_task_okx_close_order_does_not_set_reduce_only_by_default() {
+        // OKX hedge mode uses position_side to specify close direction; reduce_only is only
+        // applicable in net mode. Verify the default is None for OKX.
+        let task = task_with_metadata(
+            "risk_control_close_candidate",
+            "pending_close",
+            json!({
+                "symbol": "ETH-USDT-SWAP",
+                "close_order_status": "ready",
+                "close_order": {
+                    "exchange": "okx",
+                    "symbol": "ETH-USDT-SWAP",
+                    "position_side": "long",
+                    "side": "sell",
+                    "size": "0.1",
+                    "order_type": "market"
+                }
+            }),
+        );
+
+        let close_task = PendingCloseTask::from_task(&task, ExchangeId::Okx).unwrap();
+        let order = close_task
+            .to_order_request()
+            .unwrap()
+            .expect("close_order should map to an executable order");
+
+        assert_eq!(order.exchange.as_str(), "okx");
+        assert_eq!(order_side_lower(order.side), "sell");
+        assert_eq!(order.position_side.as_deref(), Some("long"));
+        // reduce_only must be None for OKX — hedge mode does not support it
+        assert_eq!(order.reduce_only, None);
     }
 
     #[tokio::test]
@@ -1344,6 +1614,7 @@ mod tests {
                     "risk_control_close_candidate".to_string(),
                 ],
                 task_statuses: vec!["pending".to_string(), "pending_close".to_string()],
+                target_task_ids: Vec::new(),
             },
         )
         .with_audit_repository(repository.clone());
@@ -1413,6 +1684,7 @@ mod tests {
                     "risk_control_close_candidate".to_string(),
                 ],
                 task_statuses: vec!["pending".to_string(), "pending_close".to_string()],
+                target_task_ids: Vec::new(),
             },
         );
         let task = task(json!({
