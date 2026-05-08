@@ -1,11 +1,11 @@
 {
-  "artifactSetId": "health-2026-05-07T01-00-00Z-b6da220ec778",
+  "artifactSetId": "health-2026-05-07T01-00-00Z-9c2537e7b853",
   "schemaVersion": 1,
   "storedAt": "2026-05-07T01:03:00Z",
   "sourceGeneratedAt": "2026-05-07T01:00:00Z",
-  "summaryHash": "b6da220ec778f5c1c41eda5d6db5acb535b6388c5702203d337bc337c476532c",
+  "summaryHash": "9c2537e7b85333851f9a1a18d9846fb3ba45399f962ebac06c86832a80012b63",
   "validationHash": "0a51979f2917098a1a176d197944fe96e8f0520128500d0261e21fef58637767",
-  "fullArtifactHash": "9a7edb3547655edb471ed1ccd4a71139b2293860b6f204271aa3e9a11bb7d3f5",
+  "fullArtifactHash": "04483c5609205eacd221a2881e86ce3b8a8bb59f7274015165b95b50da8e7e4e",
   "markdownHash": "bf2c7d7c78ee21585396947c9fbf078e0c95eb603d645723d214b3b5973992d5",
   "storageStatus": "current",
   "retentionClass": "current",
@@ -25,12 +25,13 @@
       "info_count": 1,
       "section_count": 4,
       "blocking_section_count": 0,
-      "warning_section_count": 1,
-      "top_alert_count": 2,
-      "required_operator_action_count": 1,
-      "correlation_id_count": 7,
-      "read_only_input_count": 4
-    },
+        "warning_section_count": 1,
+        "top_alert_count": 2,
+        "required_operator_action_count": 1,
+        "alert_taxonomy_count": 2,
+        "correlation_id_count": 7,
+        "read_only_input_count": 4
+      },
     "section_statuses": {
       "web_task_order_health": "ok",
       "news_source_ai_health": "warn",
@@ -99,10 +100,34 @@
         "code": "NEWS_SOURCE_DEGRADED",
         "section": "news_source_ai_health",
         "message": "Review the degraded example source before promotion.",
-        "action": "manual_review_before_release"
-      }
-    ],
-    "correlation": {
+          "action": "manual_review_before_release"
+        }
+      ],
+      "alert_taxonomy": [
+        {
+          "severity": "P1",
+          "code": "NEWS_SOURCE_DEGRADED",
+          "section": "news_source_ai_health",
+          "operator_action": "manual_review_before_release",
+          "correlation_keys": [
+            "news_id",
+            "analysis_result_id",
+            "external_id"
+          ]
+        },
+        {
+          "severity": "INFO",
+          "code": "MOCK_DEV_BOUNDARY_ACTIVE",
+          "section": "admin_readiness",
+          "operator_action": "observe_only",
+          "correlation_keys": [
+            "admin_operation_log_id",
+            "admin_module",
+            "admin_action"
+          ]
+        }
+      ],
+      "correlation": {
       "news_id": "example-news-001",
       "analysis_result_id": 7001,
       "signal_inbox_id": 3801,

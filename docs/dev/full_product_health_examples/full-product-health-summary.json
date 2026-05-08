@@ -14,6 +14,7 @@
     "warning_section_count": 1,
     "top_alert_count": 2,
     "required_operator_action_count": 1,
+    "alert_taxonomy_count": 2,
     "correlation_id_count": 7,
     "read_only_input_count": 4
   },
@@ -86,6 +87,30 @@
       "section": "news_source_ai_health",
       "message": "Review the degraded example source before promotion.",
       "action": "manual_review_before_release"
+    }
+  ],
+  "alert_taxonomy": [
+    {
+      "severity": "P1",
+      "code": "NEWS_SOURCE_DEGRADED",
+      "section": "news_source_ai_health",
+      "operator_action": "manual_review_before_release",
+      "correlation_keys": [
+        "news_id",
+        "analysis_result_id",
+        "external_id"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "code": "MOCK_DEV_BOUNDARY_ACTIVE",
+      "section": "admin_readiness",
+      "operator_action": "observe_only",
+      "correlation_keys": [
+        "admin_operation_log_id",
+        "admin_module",
+        "admin_action"
+      ]
     }
   ],
   "correlation": {

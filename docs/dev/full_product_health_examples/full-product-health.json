@@ -71,6 +71,30 @@
       "message": "Example artifact uses fixture-only data and no live collection."
     }
   ],
+  "alert_taxonomy": [
+    {
+      "severity": "P1",
+      "code": "NEWS_SOURCE_DEGRADED",
+      "section": "news_source_ai_health",
+      "operator_action": "manual_review_before_release",
+      "correlation_keys": [
+        "news_id",
+        "analysis_result_id",
+        "external_id"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "code": "MOCK_DEV_BOUNDARY_ACTIVE",
+      "section": "admin_readiness",
+      "operator_action": "observe_only",
+      "correlation_keys": [
+        "admin_operation_log_id",
+        "admin_module",
+        "admin_action"
+      ]
+    }
+  ],
   "correlation": {
     "news_id": "example-news-001",
     "analysis_result_id": 7001,

@@ -76,6 +76,43 @@
       "message": "Fixture and dry-run boundary is active; no live collector executed."
     }
   ],
+  "alert_taxonomy": [
+    {
+      "severity": "P0",
+      "code": "WEB_ORDER_RESULT_MISSING",
+      "section": "web_task_order_health",
+      "operator_action": "block_release_until_resolved",
+      "correlation_keys": [
+        "signal_inbox_id",
+        "execution_task_id",
+        "execution_attempt_id",
+        "order_result_id",
+        "trade_record_id"
+      ]
+    },
+    {
+      "severity": "P1",
+      "code": "NEWS_SOURCE_DEGRADED",
+      "section": "news_source_ai_health",
+      "operator_action": "manual_review_before_release",
+      "correlation_keys": [
+        "news_id",
+        "analysis_result_id",
+        "external_id"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "code": "MOCK_DEV_BOUNDARY_ACTIVE",
+      "section": "admin_readiness",
+      "operator_action": "observe_only",
+      "correlation_keys": [
+        "admin_operation_log_id",
+        "admin_module",
+        "admin_action"
+      ]
+    }
+  ],
   "correlation": {
     "news_id": "binance_announcements:local-fixture-btc-listing-001",
     "analysis_result_id": 7001,

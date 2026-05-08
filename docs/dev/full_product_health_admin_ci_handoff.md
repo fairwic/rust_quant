@@ -169,7 +169,7 @@ Recommended Admin binding order:
 
 1. Read `full-product-health-summary.json` for `summary.overall_status`,
    `checklist`, `top_alerts`, `required_operator_actions`, and
-   `correlation_ids`.
+   `alert_taxonomy`, and `correlation_ids`.
 2. Link to `full-product-health.md` for operator-readable detail.
 3. Use `full-product-health-validation.json` to block artifact upload or show
    schema/safety findings.
@@ -177,6 +177,17 @@ Recommended Admin binding order:
 
 Admin must ignore unknown fields and should not remove support for known fields
 until the schema version changes and examples are updated in the same change.
+
+`alert_taxonomy[]` is the stable alert-to-action drill-down map. Each item
+links `severity`, `code`, and `section` to an `operator_action` and safe
+`correlation_keys[]`. The keys point at `correlation` / `correlation_ids`
+entries across News, Web, worker checkpoints, and Admin audit logs; the taxonomy
+contains key names only and must not contain raw payloads, local paths,
+credentials, signed exchange endpoints, or position symbols.
+`alert_taxonomy[].code` must be present in `alert_code_values[section]` or
+`alert_code_values.global` in `full_product_health_artifact_schema.json`.
+Validator strict mode rejects unregistered codes so CI and Admin can detect
+producer/schema drift before showing a playbook.
 
 ## Redacted Ingest Payload Fixture
 

@@ -15,24 +15,32 @@ falling back to script-local field or enum lists.
 Full report example: `full_product_health_examples/full-product-health.json`.
 
 - Required top-level fields: `schema_version`, `status`, `generated_at`, `summary`,
-  `sections`, `alerts`, `correlation`.
+  `sections`, `alerts`, `alert_taxonomy`, `correlation`.
 - Required `summary` fields: `p0_count`, `p1_count`, `info_count`,
   `read_only_input_count`.
 - `sections` is a keyed object. Existing section names are stable, but section
   detail fields are append-only.
 - `alerts[]` items must use the stable severity enum and must be safe to render
   without showing credentials, request bodies, or exchange endpoint text.
+- `alert_taxonomy[]` is the stable drill-down map from an alert to its
+  `section`, `severity`, `code`, `operator_action`, and allowed
+  `correlation_keys`. It contains ID key names only, not raw payloads or secret
+  values.
+- `alert_taxonomy[].code` must be registered in `alert_code_values[section]` or
+  `alert_code_values.global`. The validator rejects unregistered codes in strict
+  mode so Admin can bind code-specific playbooks without parsing free-form text.
 
 Summary example: `full_product_health_examples/full-product-health-summary.json`.
 
 - Required top-level fields: `schema_version`, `source_schema_version`, `status`,
   `generated_at`, `source_generated_at`, `summary`, `section_statuses`,
-  `checklist`, `top_alerts`, `required_operator_actions`, `correlation`,
-  `correlation_ids`.
+  `checklist`, `top_alerts`, `required_operator_actions`, `alert_taxonomy`,
+  `correlation`, `correlation_ids`.
 - Required `summary` fields: `overall_status`, `p0_count`, `p1_count`,
   `info_count`, `section_count`, `blocking_section_count`,
   `warning_section_count`, `top_alert_count`,
-  `required_operator_action_count`, `correlation_id_count`,
+  `required_operator_action_count`, `alert_taxonomy_count`,
+  `correlation_id_count`,
   `read_only_input_count`.
 - `section_statuses` is the preferred Admin/CI summary lookup. Consumers should
   ignore unknown section keys.
@@ -71,6 +79,32 @@ Allowed alert and action severity values are:
 - `P0`: blocks release or live promotion.
 - `P1`: requires operator review before release or live promotion.
 - `INFO`: context only.
+
+## Operator Action Values
+
+Allowed `alert_taxonomy[].operator_action` values are:
+
+- `block_release_until_resolved`: a `P0` alert blocks release or live promotion.
+- `manual_review_before_release`: a `P1` alert requires operator review.
+- `observe_only`: an `INFO` alert is context only.
+
+## Alert Code Values
+
+`alert_code_values` is the explicit registry for `alert_taxonomy[].code`.
+
+- `global`: generic collector or fixture-safe codes that may appear in any
+  section.
+- `web_task_order_health`: Web task/order/input health codes.
+- `news_source_ai_health`: News source, AI provider, and analysis job codes.
+- `quant_worker_checkpoint_audit`: local service health, worker checkpoint, and
+  execution audit codes.
+- `admin_readiness`: Admin audit/readiness and full-product summary failure
+  codes.
+
+When adding a new producer alert, add the code to the correct registry section
+in `full_product_health_artifact_schema.json` before emitting it in
+`alert_taxonomy[]`. Do not use the registry for local paths, URLs, raw payloads,
+credentials, signed endpoints, or live symbols.
 
 ## Append-Only Boundary
 

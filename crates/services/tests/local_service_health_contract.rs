@@ -310,6 +310,11 @@ fn write_phase45_validator_schema(
         "schema_version": 1,
         "status_values": status_values,
         "severity_values": severity_values,
+        "operator_action_values": [
+            "block_release_until_resolved",
+            "manual_review_before_release",
+            "observe_only"
+        ],
         "artifact_schemas": {
             "full_report": {
                 "required_top_level": full_report_required,
@@ -365,6 +370,7 @@ fn write_phase45_valid_artifacts(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
   "summary": {"p0_count": 0, "p1_count": 0, "info_count": 0, "read_only_input_count": 4},
   "sections": {},
   "alerts": [],
+  "alert_taxonomy": [],
   "correlation": {}
 }"#,
     )
@@ -393,6 +399,7 @@ fn write_phase45_valid_artifacts(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
   "checklist": [],
   "top_alerts": [],
   "required_operator_actions": [],
+  "alert_taxonomy": [],
   "correlation": {},
   "correlation_ids": []
 }"#,
@@ -805,6 +812,12 @@ fn alerts(payload: &Value) -> &[Value] {
         .expect("alerts should be an array")
 }
 
+fn alert_taxonomy(payload: &Value) -> &[Value] {
+    payload["alert_taxonomy"]
+        .as_array()
+        .expect("alert_taxonomy should be an array")
+}
+
 #[test]
 fn local_service_health_script_passes_bash_syntax_check() {
     let output = Command::new("bash")
@@ -1176,6 +1189,8 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
         "top_alerts[].severity",
         "top_alerts[].code",
         "required_operator_actions[].action",
+        "alert_taxonomy[].operator_action",
+        "alert_taxonomy[].correlation_keys[]",
         "correlation_ids[]",
         "validation.summary.sensitive_marker_count",
         "validation.findings[]",
@@ -1195,6 +1210,7 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
         "`INFO` -> context only",
         "`block_release_until_resolved`",
         "`manual_review_before_release`",
+        "`observe_only`",
     ] {
         assert!(
             docs.contains(mapping),
@@ -2074,6 +2090,120 @@ fn full_product_health_runner_outputs_machine_readable_json_from_read_only_input
 }
 
 #[test]
+fn full_product_health_runner_outputs_alert_taxonomy_for_correlation_drilldown() {
+    let web_json = temp_json_file(
+        "full-product-taxonomy-web-health",
+        r#"{
+  "status": "fail",
+  "open_task_count": 1,
+  "missing_order_result_count": 1,
+  "alerts": [
+    {
+      "severity": "P0",
+      "code": "WEB_ORDER_RESULT_MISSING",
+      "section": "web_task_order_health",
+      "message": "completed execution task missing order result"
+    }
+  ],
+  "correlation": {
+    "signal_inbox_id": 3801,
+    "execution_task_id": 5202,
+    "execution_attempt_id": 6101,
+    "order_result_id": null,
+    "trade_record_id": null
+  }
+}"#,
+    );
+    let admin_json = temp_json_file(
+        "full-product-taxonomy-admin-health",
+        r#"{
+  "status": "fail",
+  "alerts": [
+    {
+      "severity": "P1",
+      "code": "ADMIN_ACTION_AUDIT_MISSING",
+      "section": "admin_readiness",
+      "message": "required admin audit event is missing"
+    }
+  ],
+  "correlation": {
+    "admin_operation_log_id": "admin-op-9002",
+    "admin_module": "quant_exchange_symbols",
+    "admin_action": "exchange_symbol_sync"
+  }
+}"#,
+    );
+    let output = Command::new(aggregator_runner_path())
+        .env("FULL_PRODUCT_HEALTH_OUTPUT", "json")
+        .env("FULL_PRODUCT_HEALTH_RUN_LOCAL_HEALTH", "false")
+        .env("FULL_PRODUCT_HEALTH_WEB_JSON_PATH", web_json)
+        .env("FULL_PRODUCT_HEALTH_ADMIN_JSON_PATH", admin_json)
+        .output()
+        .expect("full product health runner should run");
+
+    assert!(
+        output.status.success(),
+        "runner should emit parseable json:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
+    let payload: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
+    let taxonomy = alert_taxonomy(&payload);
+
+    assert!(
+        taxonomy.iter().any(|item| item["severity"] == "P0"
+            && item["code"] == "WEB_ORDER_RESULT_MISSING"
+            && item["section"] == "web_task_order_health"
+            && item["operator_action"] == "block_release_until_resolved"
+            && item["correlation_keys"]
+                .as_array()
+                .expect("web taxonomy correlation_keys should be an array")
+                .iter()
+                .any(|key| key == "execution_task_id")),
+        "web/order alert should expose stable action and correlation keys: {stdout}"
+    );
+    assert!(
+        taxonomy.iter().any(|item| item["severity"] == "P1"
+            && item["code"] == "ADMIN_ACTION_AUDIT_MISSING"
+            && item["section"] == "admin_readiness"
+            && item["operator_action"] == "manual_review_before_release"
+            && item["correlation_keys"]
+                .as_array()
+                .expect("admin taxonomy correlation_keys should be an array")
+                .iter()
+                .any(|key| key == "admin_operation_log_id")),
+        "admin audit alert should expose stable action and correlation keys: {stdout}"
+    );
+
+    let lowered = stdout.to_ascii_lowercase();
+    for sensitive in [
+        ".env",
+        "postgres://",
+        "mysql://",
+        "database_url",
+        "api_key",
+        "api_secret",
+        "secret",
+        "request_payload",
+        "response_payload",
+        "raw_payload",
+        "/fapi/v1/order",
+        "/fapi/v2/account",
+        "/fapi/v1/positionrisk",
+        "/api/commerce/internal/execution-tasks/lease",
+        "linkusdt",
+    ] {
+        assert!(
+            !lowered.contains(sensitive),
+            "alert taxonomy output must not leak sensitive marker {sensitive}: {stdout}"
+        );
+    }
+}
+
+#[test]
 fn full_product_health_runner_merges_admin_readiness_input_and_correlation() {
     let admin_json = temp_json_file(
         "full-product-admin-health",
@@ -2205,6 +2335,7 @@ fn full_product_health_summary_script_is_read_only_and_redacts_sensitive_markers
     assert!(script.contains("checklist"));
     assert!(script.contains("top_alerts"));
     assert!(script.contains("required_operator_actions"));
+    assert!(script.contains("alert_taxonomy"));
     assert!(script.contains("correlation_ids"));
     assert!(script.contains("sanitize_json"));
     for required in [
@@ -2421,6 +2552,28 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
             .iter()
             .any(|item| item["key"] == "signal_inbox_id" && item["value"] == 3801),
         "non-null correlation ids should be flattened for CI display: {stdout}"
+    );
+    assert_eq!(payload["summary"]["alert_taxonomy_count"], 4);
+    assert!(
+        alert_taxonomy(&payload)
+            .iter()
+            .any(|item| item["code"] == "WEB_ORDER_RESULT_MISSING"
+                && item["section"] == "web_task_order_health"
+                && item["operator_action"] == "block_release_until_resolved"
+                && item["correlation_keys"]
+                    .as_array()
+                    .expect("taxonomy correlation_keys should be an array")
+                    .iter()
+                    .any(|key| key == "execution_task_id")),
+        "summary should preserve taxonomy for Web task/order drill-down: {stdout}"
+    );
+    assert!(
+        alert_taxonomy(&payload)
+            .iter()
+            .any(|item| item["code"] == "READ_ONLY_COLLECTOR_ACTIVE"
+                && item["severity"] == "INFO"
+                && item["operator_action"] == "observe_only"),
+        "summary should classify INFO alerts as observe-only taxonomy items: {stdout}"
     );
 
     let lowered = stdout.to_ascii_lowercase();
@@ -3027,6 +3180,114 @@ fn full_product_health_artifact_validator_enforces_schema_status_and_severity_en
 }
 
 #[test]
+fn full_product_health_artifact_validator_rejects_unregistered_alert_taxonomy_code() {
+    let artifact_dir = temp_artifact_dir("full-product-health-validator-alert-code-registry");
+    let full_report_path = artifact_dir.join("full-product-health.json");
+    let summary_path = artifact_dir.join("full-product-health-summary.json");
+    let markdown_path = artifact_dir.join("full-product-health.md");
+
+    fs::write(
+        &full_report_path,
+        r#"{
+  "schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:00Z",
+  "summary": {"p0_count": 0, "p1_count": 1, "info_count": 0, "read_only_input_count": 4},
+  "sections": {
+    "web_task_order_health": {"status": "warn"}
+  },
+  "alerts": [],
+  "alert_taxonomy": [
+    {
+      "severity": "P1",
+      "code": "WEB_UNREGISTERED_ALERT_CODE",
+      "section": "web_task_order_health",
+      "operator_action": "manual_review_before_release",
+      "correlation_keys": ["execution_task_id"]
+    }
+  ],
+  "correlation": {"execution_task_id": 5202}
+}"#,
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", full_report_path.display(), error));
+    fs::write(
+        &summary_path,
+        r#"{
+  "schema_version": 1,
+  "source_schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:01Z",
+  "source_generated_at": "2026-05-07T01:00:00Z",
+  "summary": {
+    "overall_status": "warn",
+    "p0_count": 0,
+    "p1_count": 1,
+    "info_count": 0,
+    "section_count": 1,
+    "blocking_section_count": 0,
+    "warning_section_count": 1,
+    "top_alert_count": 0,
+    "required_operator_action_count": 0,
+    "alert_taxonomy_count": 1,
+    "correlation_id_count": 1,
+    "read_only_input_count": 4
+  },
+  "section_statuses": {"web_task_order_health": "warn"},
+  "checklist": [],
+  "top_alerts": [],
+  "required_operator_actions": [],
+  "alert_taxonomy": [
+    {
+      "severity": "P1",
+      "code": "WEB_UNREGISTERED_ALERT_CODE",
+      "section": "web_task_order_health",
+      "operator_action": "manual_review_before_release",
+      "correlation_keys": ["execution_task_id"]
+    }
+  ],
+  "correlation": {"execution_task_id": 5202},
+  "correlation_ids": [{"key": "execution_task_id", "value": 5202}]
+}"#,
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", summary_path.display(), error));
+    fs::write(
+        &markdown_path,
+        "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\n## Top Alerts\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
+
+    let output = Command::new(full_product_artifact_validator_path())
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
+        .env(
+            "FULL_PRODUCT_HEALTH_VALIDATION_FULL_REPORT_PATH",
+            &full_report_path,
+        )
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_SUMMARY_PATH", &summary_path)
+        .env(
+            "FULL_PRODUCT_HEALTH_VALIDATION_MARKDOWN_PATH",
+            &markdown_path,
+        )
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
+        .output()
+        .expect("full product artifact validator should run");
+
+    assert!(
+        !output.status.success(),
+        "strict validator should reject taxonomy codes outside alert_code_values"
+    );
+    let stdout = String::from_utf8(output.stdout).expect("validation output should be utf8");
+    let payload: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid validation json: {error}\n{stdout}"));
+    let findings = payload["findings"].as_array().expect("findings array");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "INVALID_ALERT_CODE" && finding["field"] == "alert_taxonomy[0].code"
+        }),
+        "validator should identify the unregistered alert taxonomy code: {stdout}"
+    );
+}
+
+#[test]
 fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() {
     let artifact_dir = temp_artifact_dir("full-product-health-validator-ok");
     let full_report_path = artifact_dir.join("full-product-health.json");
@@ -3047,6 +3308,7 @@ fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() 
     "admin_readiness": {"status": "ok"}
   },
   "alerts": [],
+  "alert_taxonomy": [],
   "correlation": {}
 }"#,
     )
@@ -3069,6 +3331,7 @@ fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() 
     "warning_section_count": 0,
     "top_alert_count": 0,
     "required_operator_action_count": 0,
+    "alert_taxonomy_count": 0,
     "correlation_id_count": 0,
     "read_only_input_count": 4
   },
@@ -3081,6 +3344,7 @@ fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() 
   "checklist": [],
   "top_alerts": [],
   "required_operator_actions": [],
+  "alert_taxonomy": [],
   "correlation": {},
   "correlation_ids": []
 }"#,
@@ -3295,6 +3559,9 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         "Append-Only Boundary",
         "Status Values",
         "Severity Values",
+        "Operator Action Values",
+        "Alert Code Values",
+        "alert_taxonomy",
     ] {
         assert!(
             doc.contains(required_doc_token),
@@ -3318,6 +3585,38 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         assert!(
             severity_values.iter().any(|item| item == expected),
             "schema should allow severity {expected}"
+        );
+    }
+    let operator_action_values = schema["operator_action_values"]
+        .as_array()
+        .expect("operator_action_values should be an array");
+    for expected in [
+        "block_release_until_resolved",
+        "manual_review_before_release",
+        "observe_only",
+    ] {
+        assert!(
+            operator_action_values.iter().any(|item| item == expected),
+            "schema should allow operator action {expected}"
+        );
+    }
+    let alert_code_values = schema["alert_code_values"]
+        .as_object()
+        .expect("alert_code_values should be an object keyed by section");
+    for (section, expected) in [
+        ("web_task_order_health", "WEB_ORDER_RESULT_MISSING"),
+        ("news_source_ai_health", "NEWS_SOURCE_DEGRADED"),
+        ("quant_worker_checkpoint_audit", "QUANT_WORKER_LEASE_STALE"),
+        ("admin_readiness", "ADMIN_ACTION_AUDIT_MISSING"),
+        ("global", "MOCK_DEV_BOUNDARY_ACTIVE"),
+    ] {
+        let values = alert_code_values
+            .get(section)
+            .and_then(|item| item.as_array())
+            .unwrap_or_else(|| panic!("alert_code_values.{section} should be an array"));
+        assert!(
+            values.iter().any(|item| item == expected),
+            "schema should register alert code {expected} for {section}"
         );
     }
 
@@ -3372,6 +3671,34 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         "severity",
         "summary required_operator_actions",
     );
+    assert_json_array_enum(
+        &schema,
+        "severity_values",
+        &full_report["alert_taxonomy"],
+        "severity",
+        "full report alert_taxonomy",
+    );
+    assert_json_array_enum(
+        &schema,
+        "operator_action_values",
+        &full_report["alert_taxonomy"],
+        "operator_action",
+        "full report alert_taxonomy",
+    );
+    assert_json_array_enum(
+        &schema,
+        "severity_values",
+        &summary["alert_taxonomy"],
+        "severity",
+        "summary alert_taxonomy",
+    );
+    assert_json_array_enum(
+        &schema,
+        "operator_action_values",
+        &summary["alert_taxonomy"],
+        "operator_action",
+        "summary alert_taxonomy",
+    );
 
     for marker in schema["markdown_required_markers"]
         .as_array()
@@ -3424,7 +3751,12 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
     for required in [
         "allowed_status_values",
         "allowed_severity_values",
+        "allowed_operator_action_values",
+        "allowed_alert_code_values",
+        "validate_alert_taxonomy_values",
+        "validate_alert_taxonomy_code_values",
         "INVALID_ENUM_VALUE",
+        "INVALID_ALERT_CODE",
     ] {
         assert!(
             validator_script.contains(required),
@@ -6002,7 +6334,7 @@ fn full_product_health_admin_ingest_smoke_prints_parseable_redacted_payload_with
 
     assert_eq!(
         payload["artifactSetId"],
-        "health-2026-05-07T01-00-00Z-b6da220ec778"
+        "health-2026-05-07T01-00-00Z-9c2537e7b853"
     );
     assert_eq!(
         payload["operatorMetadata"]["generatedBy"],

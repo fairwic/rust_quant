@@ -103,6 +103,30 @@ DEFAULT_CORRELATION_KEYS = [
     "admin_action",
 ]
 
+SECTION_CORRELATION_KEYS = {
+    "web_task_order_health": [
+        "signal_inbox_id",
+        "execution_task_id",
+        "execution_attempt_id",
+        "order_result_id",
+        "trade_record_id",
+    ],
+    "news_source_ai_health": [
+        "news_id",
+        "analysis_result_id",
+        "external_id",
+    ],
+    "quant_worker_checkpoint_audit": [
+        "worker_id",
+        "request_id",
+    ],
+    "admin_readiness": [
+        "admin_operation_log_id",
+        "admin_module",
+        "admin_action",
+    ],
+}
+
 LOCAL_ALERT_CODE_MAP = {
     "EXPECTED_WORKER_STALE": "QUANT_EXPECTED_WORKER_STALE",
     "EXCHANGE_REQUEST_AUDIT_FAILURES": "QUANT_EXCHANGE_AUDIT_FAILURES",
@@ -133,6 +157,21 @@ def safe_status(value: Any, default: str = "ok") -> str:
     if value in {"ok", "warn", "fail"}:
         return str(value)
     return default
+
+
+def safe_severity(value: Any) -> str:
+    severity = str(value or "INFO").upper()
+    if severity in {"P0", "P1", "INFO"}:
+        return severity
+    return "P1"
+
+
+def operator_action_for_severity(severity: str) -> str:
+    if severity == "P0":
+        return "block_release_until_resolved"
+    if severity == "P1":
+        return "manual_review_before_release"
+    return "observe_only"
 
 
 def as_int(value: Any, default: int = 0) -> int:
@@ -260,6 +299,7 @@ def base_payload() -> dict[str, Any]:
         },
         "sections": base_sections(section_names),
         "alerts": [],
+        "alert_taxonomy": [],
         "correlation": {key: None for key in correlation_keys},
     }
 
@@ -271,16 +311,47 @@ def append_alert(
     section: str,
     message: str,
 ) -> None:
+    severity = safe_severity(severity)
     payload["alerts"].append(
         sanitize_json(
             {
-                "severity": severity if severity in {"P0", "P1", "INFO"} else "P1",
+                "severity": severity,
                 "code": code,
                 "section": section,
                 "message": message,
             }
         )
     )
+
+
+def build_alert_taxonomy(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    taxonomy = []
+    correlation = payload.get("correlation")
+    if not isinstance(correlation, dict):
+        correlation = {}
+    for alert in payload["alerts"]:
+        if not isinstance(alert, dict):
+            continue
+        severity = safe_severity(alert.get("severity"))
+        section = str(alert.get("section") or "admin_readiness")
+        mapped_keys = SECTION_CORRELATION_KEYS.get(section, [])
+        correlation_keys = [
+            key
+            for key in mapped_keys
+            if key in correlation and not is_blocked_key(key) and not has_blocked_marker(key)
+        ]
+        taxonomy.append(
+            sanitize_json(
+                {
+                    "severity": severity,
+                    "code": str(alert.get("code") or "HEALTH_ALERT"),
+                    "section": section,
+                    "operator_action": operator_action_for_severity(severity),
+                    "correlation_keys": correlation_keys,
+                }
+            )
+        )
+    return taxonomy
 
 
 def merge_correlation(payload: dict[str, Any], data: dict[str, Any]) -> None:
@@ -482,6 +553,7 @@ def finalize(payload: dict[str, Any]) -> dict[str, Any]:
     payload["summary"]["p0_count"] = p0_count
     payload["summary"]["p1_count"] = p1_count
     payload["summary"]["info_count"] = info_count
+    payload["alert_taxonomy"] = build_alert_taxonomy(payload)
 
     if p0_count > 0:
         payload["status"] = "fail"

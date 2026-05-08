@@ -548,6 +548,7 @@ validator 固定输出 machine-readable JSON：
 - full report JSON 必须存在、可解析，并满足 schema 中 `artifact_schemas.full_report.required_top_level` 和 `required_summary_fields`。
 - summary JSON 必须存在、可解析，并满足 schema 中 `artifact_schemas.summary.required_top_level` 和 `required_summary_fields`。
 - `status`、`summary.overall_status`、`alerts[].severity`、`top_alerts[].severity`、`required_operator_actions[].severity` 必须命中 schema 中的 `status_values` / `severity_values`。
+- `alert_taxonomy[].code` 必须命中 schema 中的 `alert_code_values[section]` 或 `alert_code_values.global`；未知 code 会输出 `INVALID_ALERT_CODE`，用于阻断 producer/schema 漂移。
 - 设置 `FULL_PRODUCT_HEALTH_VALIDATION_MARKDOWN_PATH` 后，Markdown artifact 必须存在，并包含 schema 中的 `markdown_required_markers`。
 - full report、summary、Markdown 以及 artifact 路径都会扫描 `.env`、数据库 URL、API key/secret、passphrase/cipher、request/response/raw payload、Binance signed/account/order/position endpoint、Web lease/report/order mutation endpoint 和 `LINKUSDT` 标记。
 - schema 缺失或不可解析时不会静默降级：未开启 strict 时输出 `SCHEMA_MISSING` / `SCHEMA_INVALID_JSON` / `SCHEMA_FIELD_INVALID` finding；`FULL_PRODUCT_HEALTH_VALIDATION_STRICT=true` 时任何 finding 都会退出非零。

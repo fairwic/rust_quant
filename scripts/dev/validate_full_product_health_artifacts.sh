@@ -138,6 +138,41 @@ def schema_array(
     return value
 
 
+def schema_string_array_object(
+    schema: dict[str, Any],
+    key: str,
+    findings: list[dict[str, Any]],
+) -> dict[str, set[str]]:
+    value = schema.get(key)
+    if not isinstance(value, dict):
+        findings.append(
+            finding(
+                "SCHEMA_FIELD_INVALID",
+                "schema",
+                "schema field should be an object of string arrays",
+                severity=schema_finding_severity(),
+                field=key,
+            )
+        )
+        return {}
+    result: dict[str, set[str]] = {}
+    for section, codes in value.items():
+        section_name = str(section)
+        if not isinstance(codes, list) or not all(isinstance(code, str) for code in codes):
+            findings.append(
+                finding(
+                    "SCHEMA_FIELD_INVALID",
+                    "schema",
+                    "schema object values should be arrays of strings",
+                    severity=schema_finding_severity(),
+                    field=f"{key}.{section_name}",
+                )
+            )
+            continue
+        result[section_name] = set(codes)
+    return result
+
+
 def schema_artifact_array(
     schema: dict[str, Any],
     artifact: str,
@@ -333,6 +368,105 @@ def validate_alert_enum_values(
         )
 
 
+def validate_alert_taxonomy_values(
+    artifact: str,
+    payload: dict[str, Any],
+    findings: list[dict[str, Any]],
+) -> None:
+    items = payload.get("alert_taxonomy")
+    if items is None:
+        return
+    if not isinstance(items, list):
+        findings.append(
+            finding(
+                "INVALID_JSON_SHAPE",
+                artifact,
+                "alert taxonomy should be an array",
+                field="alert_taxonomy",
+            )
+        )
+        return
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            findings.append(
+                finding(
+                    "INVALID_JSON_SHAPE",
+                    artifact,
+                    "alert taxonomy item should be an object",
+                    field=f"alert_taxonomy[{index}]",
+                )
+            )
+            continue
+        for field_name in ["severity", "code", "section", "operator_action"]:
+            if not isinstance(item.get(field_name), str):
+                findings.append(
+                    finding(
+                        "INVALID_JSON_SHAPE",
+                        artifact,
+                        "alert taxonomy field should be a string",
+                        field=f"alert_taxonomy[{index}].{field_name}",
+                    )
+                )
+        validate_enum_value(
+            artifact,
+            f"alert_taxonomy[{index}].severity",
+            item.get("severity"),
+            allowed_severity_values,
+            findings,
+            severity="P1",
+        )
+        validate_enum_value(
+            artifact,
+            f"alert_taxonomy[{index}].operator_action",
+            item.get("operator_action"),
+            allowed_operator_action_values,
+            findings,
+            severity="P1",
+        )
+        validate_alert_taxonomy_code_values(
+            artifact,
+            f"alert_taxonomy[{index}].code",
+            item.get("section"),
+            item.get("code"),
+            findings,
+        )
+        correlation_keys = item.get("correlation_keys")
+        if not isinstance(correlation_keys, list) or not all(
+            isinstance(key, str) for key in correlation_keys
+        ):
+            findings.append(
+                finding(
+                    "INVALID_JSON_SHAPE",
+                    artifact,
+                    "alert taxonomy correlation_keys should be an array of strings",
+                    field=f"alert_taxonomy[{index}].correlation_keys",
+                )
+            )
+
+
+def validate_alert_taxonomy_code_values(
+    artifact: str,
+    field: str,
+    section: Any,
+    code: Any,
+    findings: list[dict[str, Any]],
+) -> None:
+    if not allowed_alert_code_values or code is None:
+        return
+    section_name = str(section or "")
+    allowed_codes = set(allowed_alert_code_values.get("global", set()))
+    allowed_codes.update(allowed_alert_code_values.get(section_name, set()))
+    if not isinstance(code, str) or code not in allowed_codes:
+        findings.append(
+            finding(
+                "INVALID_ALERT_CODE",
+                artifact,
+                "alert taxonomy code is not registered for its section",
+                field=field,
+            )
+        )
+
+
 def read_file_text(artifact: str, path: str, findings: list[dict[str, Any]]) -> tuple[bool, str]:
     if not path:
         findings.append(finding("MISSING_ARTIFACT_PATH", artifact, "artifact path is not configured"))
@@ -430,6 +564,7 @@ def validate_json_artifact(
         )
     if artifact == "full_report":
         validate_alert_enum_values(artifact, payload, "alerts", findings)
+        validate_alert_taxonomy_values(artifact, payload, findings)
     if artifact == "summary":
         if isinstance(summary, dict):
             validate_enum_value(
@@ -441,6 +576,7 @@ def validate_json_artifact(
             )
         validate_alert_enum_values(artifact, payload, "top_alerts", findings)
         validate_alert_enum_values(artifact, payload, "required_operator_actions", findings)
+        validate_alert_taxonomy_values(artifact, payload, findings)
     return record
 
 
@@ -481,6 +617,14 @@ schema_record, validation_schema = load_validation_schema(schema_path, findings)
 allowed_status_values = schema_array(validation_schema, "status_values", findings) if validation_schema else []
 allowed_severity_values = (
     schema_array(validation_schema, "severity_values", findings) if validation_schema else []
+)
+allowed_operator_action_values = (
+    schema_array(validation_schema, "operator_action_values", findings) if validation_schema else []
+)
+allowed_alert_code_values = (
+    schema_string_array_object(validation_schema, "alert_code_values", findings)
+    if validation_schema
+    else {}
 )
 required_full_report_fields = (
     schema_artifact_array(validation_schema, "full_report", "required_top_level", findings)

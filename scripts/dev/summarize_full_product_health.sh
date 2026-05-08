@@ -82,6 +82,30 @@ SEVERITY_RANK = {
     "INFO": 2,
 }
 
+SECTION_CORRELATION_KEYS = {
+    "web_task_order_health": [
+        "signal_inbox_id",
+        "execution_task_id",
+        "execution_attempt_id",
+        "order_result_id",
+        "trade_record_id",
+    ],
+    "news_source_ai_health": [
+        "news_id",
+        "analysis_result_id",
+        "external_id",
+    ],
+    "quant_worker_checkpoint_audit": [
+        "worker_id",
+        "request_id",
+    ],
+    "admin_readiness": [
+        "admin_operation_log_id",
+        "admin_module",
+        "admin_action",
+    ],
+}
+
 
 class SummaryError(Exception):
     pass
@@ -270,6 +294,68 @@ def build_required_actions(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]
     return [sanitize_json(item) for item in actions]
 
 
+def operator_action_for_severity(severity: str) -> str:
+    if severity == "P0":
+        return "block_release_until_resolved"
+    if severity == "P1":
+        return "manual_review_before_release"
+    return "observe_only"
+
+
+def safe_operator_action(value: Any, severity: str) -> str:
+    action = str(value or operator_action_for_severity(severity))
+    if action in {
+        "block_release_until_resolved",
+        "manual_review_before_release",
+        "observe_only",
+    }:
+        return action
+    return operator_action_for_severity(severity)
+
+
+def build_alert_taxonomy(payload: dict[str, Any], alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    source_taxonomy = payload.get("alert_taxonomy")
+    if isinstance(source_taxonomy, list):
+        taxonomy = []
+        for item in source_taxonomy:
+            if not isinstance(item, dict):
+                continue
+            section = str(item.get("section") or "admin_readiness")
+            severity = safe_severity(item.get("severity"))
+            correlation_keys = item.get("correlation_keys")
+            if not isinstance(correlation_keys, list):
+                correlation_keys = SECTION_CORRELATION_KEYS.get(section, [])
+            taxonomy.append(
+                {
+                    "severity": severity,
+                    "code": str(item.get("code") or "HEALTH_ALERT"),
+                    "section": section,
+                    "operator_action": safe_operator_action(item.get("operator_action"), severity),
+                    "correlation_keys": [
+                        str(key)
+                        for key in correlation_keys
+                        if not is_blocked_key(key) and not has_blocked_marker(str(key))
+                    ],
+                }
+            )
+        return [sanitize_json(item) for item in taxonomy]
+
+    taxonomy = []
+    for alert in alerts:
+        section = str(alert.get("section") or "admin_readiness")
+        severity = safe_severity(alert.get("severity"))
+        taxonomy.append(
+            {
+                "severity": severity,
+                "code": str(alert.get("code") or "HEALTH_ALERT"),
+                "section": section,
+                "operator_action": operator_action_for_severity(severity),
+                "correlation_keys": SECTION_CORRELATION_KEYS.get(section, []),
+            }
+        )
+    return [sanitize_json(item) for item in taxonomy]
+
+
 def build_correlation(payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     source = payload.get("correlation")
     if not isinstance(source, dict):
@@ -289,6 +375,7 @@ def build_summary(payload: dict[str, Any]) -> dict[str, Any]:
     visible_top_alerts = [public_alert(alert) for alert in ordered_alerts[:top_alert_limit]]
     section_statuses, checklist = build_section_views(payload, alerts)
     required_actions = build_required_actions(alerts)
+    alert_taxonomy = build_alert_taxonomy(payload, alerts)
     correlation, correlation_ids = build_correlation(payload)
 
     p0_count = sum(1 for alert in alerts if alert.get("severity") == "P0")
@@ -308,6 +395,7 @@ def build_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "warning_section_count": sum(1 for status in section_statuses.values() if status == "warn"),
         "top_alert_count": len(visible_top_alerts),
         "required_operator_action_count": len(required_actions),
+        "alert_taxonomy_count": len(alert_taxonomy),
         "correlation_id_count": len(correlation_ids),
         "read_only_input_count": as_int(source_summary.get("read_only_input_count")),
     }
@@ -324,6 +412,7 @@ def build_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "checklist": checklist,
             "top_alerts": visible_top_alerts,
             "required_operator_actions": required_actions,
+            "alert_taxonomy": alert_taxonomy,
             "correlation": correlation,
             "correlation_ids": correlation_ids,
         }
@@ -347,6 +436,7 @@ def fail_payload(message: str) -> dict[str, Any]:
             "warning_section_count": 0,
             "top_alert_count": 1,
             "required_operator_action_count": 1,
+            "alert_taxonomy_count": 1,
             "correlation_id_count": 0,
             "read_only_input_count": 0,
         },
@@ -367,6 +457,15 @@ def fail_payload(message: str) -> dict[str, Any]:
                 "section": "admin_readiness",
                 "message": message,
                 "action": "block_release_until_resolved",
+            }
+        ],
+        "alert_taxonomy": [
+            {
+                "severity": "P0",
+                "code": "FULL_PRODUCT_HEALTH_SUMMARY_FAILED",
+                "section": "admin_readiness",
+                "operator_action": "block_release_until_resolved",
+                "correlation_keys": SECTION_CORRELATION_KEYS["admin_readiness"],
             }
         ],
         "correlation": {},

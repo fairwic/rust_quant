@@ -10,6 +10,56 @@
     "P1",
     "INFO"
   ],
+  "operator_action_values": [
+    "block_release_until_resolved",
+    "manual_review_before_release",
+    "observe_only"
+  ],
+  "alert_code_values": {
+    "global": [
+      "HEALTH_ALERT",
+      "INPUT_FILE_MISSING",
+      "INPUT_JSON_INVALID",
+      "LOCAL_HEALTH_JSON_INVALID",
+      "LOCAL_HEALTH_OUTPUT_EMPTY",
+      "LOCAL_HEALTH_SCRIPT_MISSING",
+      "MOCK_DEV_BOUNDARY_ACTIVE",
+      "READ_ONLY_COLLECTOR_ACTIVE",
+      "SCHEMA_JSON_INVALID",
+      "UNSAFE_INPUT_REJECTED",
+      "UNSAFE_SCHEMA_REJECTED"
+    ],
+    "web_task_order_health": [
+      "WEB_EXECUTION_TASK_STALE",
+      "WEB_INPUT_QUERY_FAILED",
+      "WEB_INPUT_SKIPPED",
+      "WEB_ORDER_RESULT_MISSING",
+      "WEB_RETRY_BACKLOG"
+    ],
+    "news_source_ai_health": [
+      "NEWS_AI_PROVIDER_UNAVAILABLE",
+      "NEWS_ANALYSIS_JOB_FAILED",
+      "NEWS_INPUT_QUERY_FAILED",
+      "NEWS_INPUT_SKIPPED",
+      "NEWS_SOURCE_DEGRADED"
+    ],
+    "quant_worker_checkpoint_audit": [
+      "QUANT_EXCHANGE_AUDIT_FAILURES",
+      "QUANT_EXPECTED_WORKER_STALE",
+      "QUANT_LOCAL_HEALTH_FAIL",
+      "QUANT_LOCAL_HEALTH_WARN",
+      "QUANT_WORKER_LEASE_STALE"
+    ],
+    "admin_readiness": [
+      "ADMIN_ACTION_AUDIT_MISSING",
+      "ADMIN_HIGH_RISK_OPERATION_FAILED",
+      "ADMIN_INPUT_QUERY_FAILED",
+      "ADMIN_INPUT_SKIPPED",
+      "ADMIN_LIVE_READINESS_BLOCKED",
+      "ADMIN_READINESS_REVIEW_REQUIRED",
+      "FULL_PRODUCT_HEALTH_SUMMARY_FAILED"
+    ]
+  },
   "artifact_schemas": {
     "full_report": {
       "required_top_level": [
@@ -19,6 +69,7 @@
         "summary",
         "sections",
         "alerts",
+        "alert_taxonomy",
         "correlation"
       ],
       "required_summary_fields": [
@@ -32,6 +83,8 @@
         "sections.*",
         "sections.*.sample.*",
         "alerts[].*",
+        "alert_taxonomy[].*",
+        "alert_taxonomy[].correlation_keys[]",
         "correlation.*"
       ]
     },
@@ -47,6 +100,7 @@
         "checklist",
         "top_alerts",
         "required_operator_actions",
+        "alert_taxonomy",
         "correlation",
         "correlation_ids"
       ],
@@ -60,6 +114,7 @@
         "warning_section_count",
         "top_alert_count",
         "required_operator_action_count",
+        "alert_taxonomy_count",
         "correlation_id_count",
         "read_only_input_count"
       ],
@@ -69,6 +124,8 @@
         "checklist[].*",
         "top_alerts[].*",
         "required_operator_actions[].*",
+        "alert_taxonomy[].*",
+        "alert_taxonomy[].correlation_keys[]",
         "correlation.*",
         "correlation_ids[].*"
       ]
