@@ -226,6 +226,33 @@ def schema_artifact_array(
     return value
 
 
+def schema_artifact_array_optional(
+    schema: dict[str, Any],
+    artifact: str,
+    key: str,
+    findings: list[dict[str, Any]],
+) -> list[str]:
+    artifact_schemas = schema.get("artifact_schemas")
+    if not isinstance(artifact_schemas, dict):
+        return []
+    artifact_schema = artifact_schemas.get(artifact)
+    if not isinstance(artifact_schema, dict) or key not in artifact_schema:
+        return []
+    value = artifact_schema.get(key)
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        findings.append(
+            finding(
+                "SCHEMA_FIELD_INVALID",
+                "schema",
+                "schema optional artifact field should be an array of strings",
+                severity=schema_finding_severity(),
+                field=f"artifact_schemas.{artifact}.{key}",
+            )
+        )
+        return []
+    return value
+
+
 def load_validation_schema(
     path: str,
     findings: list[dict[str, Any]],
@@ -510,6 +537,7 @@ def validate_json_artifact(
     path: str,
     required_fields: list[str],
     required_summary_fields: list[str],
+    required_nested_fields: dict[str, list[str]],
     findings: list[dict[str, Any]],
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
@@ -518,6 +546,7 @@ def validate_json_artifact(
         "json_valid": False,
         "missing_fields": [],
         "missing_summary_fields": [],
+        "missing_nested_fields": {},
     }
     exists, text = read_file_text(artifact, path, findings)
     record["exists"] = exists
@@ -572,6 +601,28 @@ def validate_json_artifact(
                         field=field,
                     )
                 )
+    for nested_name, nested_fields in required_nested_fields.items():
+        if not nested_fields:
+            continue
+        nested = payload.get(nested_name)
+        if not isinstance(nested, dict):
+            missing_nested = [f"{nested_name}.{field}" for field in nested_fields]
+        else:
+            missing_nested = [
+                f"{nested_name}.{field}" for field in nested_fields if field not in nested
+            ]
+        if not missing_nested:
+            continue
+        record["missing_nested_fields"][nested_name] = missing_nested
+        for field in missing_nested:
+            findings.append(
+                finding(
+                    "MISSING_REQUIRED_FIELD",
+                    artifact,
+                    "artifact JSON is missing a required nested field",
+                    field=field,
+                )
+            )
     if artifact in {"full_report", "summary"}:
         validate_enum_value(
             artifact,
@@ -664,6 +715,16 @@ required_summary_summary_fields = (
     if validation_schema
     else []
 )
+required_summary_operator_playbook_summary_fields = (
+    schema_artifact_array_optional(
+        validation_schema,
+        "summary",
+        "required_operator_playbook_summary_fields",
+        findings,
+    )
+    if validation_schema
+    else []
+)
 required_markdown_markers = (
     schema_array(validation_schema, "markdown_required_markers", findings) if validation_schema else []
 )
@@ -673,6 +734,7 @@ artifacts = {
         full_report_path,
         required_full_report_fields,
         required_full_report_summary_fields,
+        {},
         findings,
     ),
     "summary": validate_json_artifact(
@@ -680,6 +742,7 @@ artifacts = {
         summary_path,
         required_summary_fields,
         required_summary_summary_fields,
+        {"operator_playbook_summary": required_summary_operator_playbook_summary_fields},
         findings,
     ),
     "markdown": validate_markdown_artifact(markdown_path, findings),
@@ -696,7 +759,9 @@ json_parse_error_count = sum(
     if name != "markdown" and artifact.get("exists") and not artifact.get("json_valid")
 )
 missing_required_field_count = sum(
-    len(artifact.get("missing_fields", [])) + len(artifact.get("missing_summary_fields", []))
+    len(artifact.get("missing_fields", []))
+    + len(artifact.get("missing_summary_fields", []))
+    + sum(len(fields) for fields in artifact.get("missing_nested_fields", {}).values())
     for artifact in artifacts.values()
 )
 sensitive_marker_count = sum(1 for item in findings if item["code"] in {"SENSITIVE_MARKER_FOUND", "SENSITIVE_PATH_MARKER"})

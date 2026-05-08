@@ -15,13 +15,17 @@
       "path": "docs/dev/full_product_health_examples/full-product-health.json",
       "exists": true,
       "json_valid": true,
-      "missing_fields": []
+      "missing_fields": [],
+      "missing_summary_fields": [],
+      "missing_nested_fields": {}
     },
     "summary": {
       "path": "docs/dev/full_product_health_examples/full-product-health-summary.json",
       "exists": true,
       "json_valid": true,
-      "missing_fields": []
+      "missing_fields": [],
+      "missing_summary_fields": [],
+      "missing_nested_fields": {}
     },
     "markdown": {
       "path": "docs/dev/full_product_health_examples/full-product-health.md",

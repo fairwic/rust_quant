@@ -56,6 +56,27 @@ Summary example: `full_product_health_examples/full-product-health-summary.json`
 - `section_statuses` is the preferred Admin/CI summary lookup. Consumers should
   ignore unknown section keys.
 
+## Consumer Contract Versions
+
+`consumer_contracts.operator_playbook_summary.compatibility_contract_version`
+is the versioned compatibility record for the Admin/CI playbook queue. Version
+`1` binds producers to the paths listed in
+`consumer_contracts.operator_playbook_summary.producer_required_paths`:
+
+- `summary.operator_playbook_summary` and its required count fields.
+- `summary.operator_playbook_summary.items`.
+- Markdown marker `## Operator Playbook Summary` for human review.
+- `admin_ingest.summary.operator_playbook_summary` for the stored Admin handoff
+  fixture.
+
+Admin and CI must consume JSON first: use
+`operator_playbook_summary.items[]` as the actionable list and use
+`item_count`, `blocking_item_count`, `manual_review_item_count`, and
+`observe_only_item_count` for dashboard totals. Consumers must ignore unknown
+appended `operator_playbook_summary` fields and item fields under schema version
+`1`; removing or renaming any producer-required path requires a new
+`compatibility_contract_version`.
+
 Markdown example: `full_product_health_examples/full-product-health.md`.
 
 - Required markers: `# Full Product Health`, `**Status:**`, `## Counts`,
@@ -71,6 +92,9 @@ Validation example: `full_product_health_examples/full-product-health-validation
 - Required `summary` fields: `artifact_count`, `missing_artifact_count`,
   `json_parse_error_count`, `missing_required_field_count`,
   `sensitive_marker_count`, `finding_count`.
+- `artifacts.*.missing_nested_fields` records schema-driven nested contract
+  gaps such as `operator_playbook_summary.items`, so CI can fail before Admin
+  stores an incomplete handoff fixture.
 - `findings[]` must contain only safe codes, marker codes, artifact names, and
   field names. It must not echo the blocked source text.
 

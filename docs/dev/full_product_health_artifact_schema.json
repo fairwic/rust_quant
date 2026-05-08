@@ -237,6 +237,26 @@
       }
     }
   },
+  "consumer_contracts": {
+    "operator_playbook_summary": {
+      "compatibility_contract_version": 1,
+      "producer_required_paths": [
+        "summary.operator_playbook_summary",
+        "summary.operator_playbook_summary.item_count",
+        "summary.operator_playbook_summary.blocking_item_count",
+        "summary.operator_playbook_summary.manual_review_item_count",
+        "summary.operator_playbook_summary.observe_only_item_count",
+        "summary.operator_playbook_summary.items",
+        "markdown.## Operator Playbook Summary",
+        "admin_ingest.summary.operator_playbook_summary"
+      ],
+      "consumer_rules": [
+        "Admin and CI must bind operator_playbook_summary.items before free-form Markdown text",
+        "Consumers must ignore unknown appended operator_playbook_summary fields and item fields",
+        "Dashboard counts must use item_count, blocking_item_count, manual_review_item_count, and observe_only_item_count"
+      ]
+    }
+  },
   "artifact_schemas": {
     "full_report": {
       "required_top_level": [
@@ -338,6 +358,8 @@
         "summary.*",
         "artifacts.*",
         "artifacts.*.missing_fields[]",
+        "artifacts.*.missing_summary_fields[]",
+        "artifacts.*.missing_nested_fields.*[]",
         "artifacts.*.missing_markers[]",
         "findings[].*"
       ]
