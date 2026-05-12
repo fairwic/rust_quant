@@ -58,6 +58,12 @@
       "ADMIN_LIVE_READINESS_BLOCKED",
       "ADMIN_READINESS_REVIEW_REQUIRED",
       "FULL_PRODUCT_HEALTH_SUMMARY_FAILED"
+    ],
+    "payment_entitlement_health": [
+      "PAYMENT_INPUT_QUERY_FAILED",
+      "PAYMENT_INPUT_SKIPPED",
+      "WALLET_PAYMENT_EXCEPTION",
+      "PAYMENT_ENTITLEMENT_BLOCKED"
     ]
   },
   "alert_code_metadata": {
@@ -235,6 +241,28 @@
         "default_next_action": "inspect_summary_failure",
         "admin_link_target": "admin.full_product_health.summary"
       }
+    },
+    "payment_entitlement_health": {
+      "PAYMENT_INPUT_QUERY_FAILED": {
+        "owner": "commerce_billing",
+        "default_next_action": "inspect_payment_read_only_input",
+        "admin_link_target": "admin.full_product_health.payment_entitlement_health"
+      },
+      "PAYMENT_INPUT_SKIPPED": {
+        "owner": "commerce_billing",
+        "default_next_action": "provide_payment_read_only_input",
+        "admin_link_target": "admin.full_product_health.payment_entitlement_health"
+      },
+      "WALLET_PAYMENT_EXCEPTION": {
+        "owner": "commerce_billing",
+        "default_next_action": "review_wallet_payment_exceptions",
+        "admin_link_target": "admin.full_product_health.payment_entitlement_health"
+      },
+      "PAYMENT_ENTITLEMENT_BLOCKED": {
+        "owner": "commerce_billing",
+        "default_next_action": "reconcile_payment_entitlement",
+        "admin_link_target": "admin.full_product_health.payment_entitlement_health"
+      }
     }
   },
   "consumer_contracts": {
@@ -254,6 +282,59 @@
         "Admin and CI must bind operator_playbook_summary.items before free-form Markdown text",
         "Consumers must ignore unknown appended operator_playbook_summary fields and item fields",
         "Dashboard counts must use item_count, blocking_item_count, manual_review_item_count, and observe_only_item_count"
+      ]
+    },
+    "payment_entitlement_health_states": {
+      "compatibility_contract_version": 1,
+      "producer_required_paths": [
+        "sections.payment_entitlement_health.skipped",
+        "sections.payment_entitlement_health.query_failed",
+        "sections.payment_entitlement_health.wallet_payment_exception_count",
+        "sections.payment_entitlement_health.payment_entitlement_blocker_count",
+        "summary.wallet_payment_exception_count",
+        "summary.payment_entitlement_blocker_count"
+      ],
+      "states": [
+        {
+          "name": "skipped",
+          "status": "warn",
+          "source": "skipped",
+          "read_only_input": false,
+          "alert_code": "PAYMENT_INPUT_SKIPPED"
+        },
+        {
+          "name": "query_failed",
+          "status": "warn",
+          "source": "quant_web_payment_readonly_db",
+          "read_only_input": true,
+          "alert_code": "PAYMENT_INPUT_QUERY_FAILED"
+        },
+        {
+          "name": "real_count",
+          "status": "ok|warn|fail",
+          "source": "quant_web_payment_readonly_db",
+          "read_only_input": true,
+          "alert_code": "WALLET_PAYMENT_EXCEPTION|PAYMENT_ENTITLEMENT_BLOCKED"
+        }
+      ],
+      "example_fixtures": [
+        {
+          "state": "skipped",
+          "path": "docs/dev/full_product_health_examples/payment-entitlement-health-skipped.json"
+        },
+        {
+          "state": "query_failed",
+          "path": "docs/dev/full_product_health_examples/payment-entitlement-health-query-failed.json"
+        },
+        {
+          "state": "real_count",
+          "path": "docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json"
+        }
+      ],
+      "consumer_rules": [
+        "skipped means no explicit read-only DB input was provided and must not be treated as zero incidents",
+        "query_failed means explicit read-only DB input was provided but the query could not produce counts",
+        "real_count means explicit read-only DB input produced wallet_payment_exception_count and payment_entitlement_blocker_count"
       ]
     }
   },

@@ -1,0 +1,27 @@
+{
+  "contract_state": "skipped",
+  "section": "payment_entitlement_health",
+  "status": "warn",
+  "source": "skipped",
+  "database_engine": "postgresql",
+  "read_only_input": false,
+  "lookback_secs": 86400,
+  "confirmation_timeout_secs": 1800,
+  "skipped": true,
+  "wallet_payment_exception_count": 0,
+  "payment_entitlement_blocker_count": 0,
+  "sample": {},
+  "alerts": [
+    {
+      "severity": "INFO",
+      "code": "PAYMENT_INPUT_SKIPPED",
+      "section": "payment_entitlement_health",
+      "message": "Explicit read-only payment input was not provided."
+    }
+  ],
+  "correlation": {
+    "payment_exception_id": null,
+    "entitlement_check_id": null,
+    "user_id": null
+  }
+}

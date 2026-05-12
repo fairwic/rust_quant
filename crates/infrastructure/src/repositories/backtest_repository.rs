@@ -1,5 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
+use chrono::NaiveDateTime;
+use serde_json::Value;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 
 use rust_quant_domain::entities::{
@@ -22,11 +24,35 @@ impl SqlxBacktestRepository {
     fn pool(&self) -> &PgPool {
         &self.pool
     }
+
+    fn parse_backtest_datetime(value: &str, field_name: &str) -> Result<NaiveDateTime> {
+        NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
+            .with_context(|| format!("invalid {}: {}", field_name, value))
+    }
+
+    fn parse_json_value(value: &str, field_name: &str) -> Result<Value> {
+        serde_json::from_str(value).with_context(|| format!("invalid {}: {}", field_name, value))
+    }
+
+    fn parse_optional_json_value(value: Option<&str>, field_name: &str) -> Result<Option<Value>> {
+        value
+            .map(|raw| Self::parse_json_value(raw, field_name))
+            .transpose()
+    }
 }
 
 #[async_trait]
 impl BacktestLogRepository for SqlxBacktestRepository {
     async fn insert_log(&self, log: &BacktestLog) -> Result<i64> {
+        let final_fund = log
+            .final_fund
+            .parse::<f64>()
+            .with_context(|| format!("invalid back_test_log.final_fund: {}", log.final_fund))?;
+        let profit = log
+            .profit
+            .parse::<f64>()
+            .with_context(|| format!("invalid back_test_log.profit: {}", log.profit))?;
+
         let inserted_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO back_test_log (
@@ -56,11 +82,11 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         .bind(&log.inst_id)
         .bind(&log.timeframe)
         .bind(&log.win_rate)
-        .bind(&log.final_fund)
+        .bind(final_fund)
         .bind(log.open_positions_num)
         .bind(&log.strategy_detail)
         .bind(&log.risk_config_detail)
-        .bind(&log.profit)
+        .bind(profit)
         .bind(log.one_bar_after_win_rate)
         .bind(log.two_bar_after_win_rate)
         .bind(log.three_bar_after_win_rate)
@@ -83,19 +109,45 @@ impl BacktestLogRepository for SqlxBacktestRepository {
 
         let mut rows_affected = 0;
         for chunk in details.chunks(BACKTEST_INSERT_CHUNK_ROWS) {
+            let parsed_times = chunk
+                .iter()
+                .map(|detail| {
+                    Ok((
+                        Self::parse_backtest_datetime(
+                            &detail.open_position_time,
+                            "back_test_detail.open_position_time",
+                        )?,
+                        detail
+                            .signal_open_position_time
+                            .as_deref()
+                            .map(|value| {
+                                Self::parse_backtest_datetime(
+                                    value,
+                                    "back_test_detail.signal_open_position_time",
+                                )
+                            })
+                            .transpose()?,
+                        Self::parse_backtest_datetime(
+                            &detail.close_position_time,
+                            "back_test_detail.close_position_time",
+                        )?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
             let mut builder: QueryBuilder<Postgres> =
                 QueryBuilder::new("INSERT INTO back_test_detail (option_type, strategy_type, inst_id, time, back_test_id, open_position_time, signal_open_position_time, signal_status, close_position_time, open_price, close_price, profit_loss, quantity, full_close, close_type, win_nums, loss_nums, signal_value, signal_result, stop_loss_source, stop_loss_update_history) ");
 
-            builder.push_values(chunk.iter(), |mut b, detail| {
+            builder.push_values(chunk.iter().zip(parsed_times.iter()), |mut b, (detail, parsed)| {
                 b.push_bind(&detail.option_type)
                     .push_bind(&detail.strategy_type)
                     .push_bind(&detail.inst_id)
                     .push_bind(&detail.timeframe)
                     .push_bind(detail.back_test_id)
-                    .push_bind(&detail.open_position_time)
-                    .push_bind(&detail.signal_open_position_time)
+                    .push_bind(parsed.0)
+                    .push_bind(parsed.1)
                     .push_bind(detail.signal_status)
-                    .push_bind(&detail.close_position_time)
+                    .push_bind(parsed.2)
                     .push_bind(&detail.open_price)
                     .push_bind(&detail.close_price)
                     .push_bind(&detail.profit_loss)
@@ -228,24 +280,48 @@ impl BacktestLogRepository for SqlxBacktestRepository {
 
         let mut rows_affected = 0;
         for chunk in signals.chunks(BACKTEST_INSERT_CHUNK_ROWS) {
+            let parsed_signals = chunk
+                .iter()
+                .map(|signal| {
+                    Ok((
+                        Self::parse_backtest_datetime(
+                            &signal.signal_time,
+                            "filtered_signal_log.signal_time",
+                        )?,
+                        Self::parse_json_value(
+                            &signal.filter_reasons,
+                            "filtered_signal_log.filter_reasons",
+                        )?,
+                        Self::parse_optional_json_value(
+                            signal.indicator_snapshot.as_deref(),
+                            "filtered_signal_log.indicator_snapshot",
+                        )?,
+                        Self::parse_optional_json_value(
+                            signal.signal_value.as_deref(),
+                            "filtered_signal_log.signal_value",
+                        )?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
             let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO filtered_signal_log (backtest_id, inst_id, period, signal_time, direction, filter_reasons, signal_price, indicator_snapshot, theoretical_profit, theoretical_loss, final_pnl, trade_result, signal_value) ",
             );
 
-            builder.push_values(chunk.iter(), |mut b, signal| {
+            builder.push_values(chunk.iter().zip(parsed_signals.iter()), |mut b, (signal, parsed)| {
                 b.push_bind(signal.backtest_id)
                     .push_bind(&signal.inst_id)
                     .push_bind(&signal.period)
-                    .push_bind(&signal.signal_time)
+                    .push_bind(parsed.0)
                     .push_bind(&signal.direction)
-                    .push_bind(&signal.filter_reasons)
+                    .push_bind(&parsed.1)
                     .push_bind(signal.signal_price)
-                    .push_bind(&signal.indicator_snapshot)
+                    .push_bind(&parsed.2)
                     .push_bind(signal.theoretical_profit)
                     .push_bind(signal.theoretical_loss)
                     .push_bind(signal.final_pnl)
                     .push_bind(&signal.trade_result)
-                    .push_bind(&signal.signal_value);
+                    .push_bind(&parsed.3);
             });
 
             let result = builder.build().execute(self.pool()).await?;
@@ -300,17 +376,37 @@ impl BacktestLogRepository for SqlxBacktestRepository {
 
         let mut rows_affected = 0;
         for chunk in logs.chunks(BACKTEST_INSERT_CHUNK_ROWS) {
+            let parsed_logs = chunk
+                .iter()
+                .map(|log| {
+                    Ok((
+                        Self::parse_backtest_datetime(
+                            &log.kline_time,
+                            "dynamic_config_log.kline_time",
+                        )?,
+                        Self::parse_json_value(
+                            &log.adjustments,
+                            "dynamic_config_log.adjustments",
+                        )?,
+                        Self::parse_optional_json_value(
+                            log.config_snapshot.as_deref(),
+                            "dynamic_config_log.config_snapshot",
+                        )?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
             let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO dynamic_config_log (backtest_id, inst_id, period, kline_time, adjustments, config_snapshot) ",
             );
 
-            builder.push_values(chunk.iter(), |mut b, log| {
+            builder.push_values(chunk.iter().zip(parsed_logs.iter()), |mut b, (log, parsed)| {
                 b.push_bind(log.backtest_id)
                     .push_bind(&log.inst_id)
                     .push_bind(&log.period)
-                    .push_bind(&log.kline_time)
-                    .push_bind(&log.adjustments)
-                    .push_bind(&log.config_snapshot);
+                    .push_bind(parsed.0)
+                    .push_bind(&parsed.1)
+                    .push_bind(&parsed.2);
             });
 
             let result = builder.build().execute(self.pool()).await?;

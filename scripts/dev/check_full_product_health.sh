@@ -14,6 +14,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 : "${FULL_PRODUCT_HEALTH_WEB_JSON_PATH:=}"
 : "${FULL_PRODUCT_HEALTH_NEWS_JSON_PATH:=}"
 : "${FULL_PRODUCT_HEALTH_ADMIN_JSON_PATH:=}"
+: "${FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH:=}"
 
 if [[ "${FULL_PRODUCT_HEALTH_OUTPUT}" != "json" ]]; then
     printf 'FULL_PRODUCT_HEALTH_OUTPUT must be json\n' >&2
@@ -124,6 +125,11 @@ SECTION_CORRELATION_KEYS = {
         "admin_operation_log_id",
         "admin_module",
         "admin_action",
+    ],
+    "payment_entitlement_health": [
+        "payment_exception_id",
+        "entitlement_check_id",
+        "user_id",
     ],
 }
 
@@ -295,6 +301,8 @@ def base_payload() -> dict[str, Any]:
             "quant_expected_worker_warnings": 0,
             "quant_execution_audit_recent_failures": 0,
             "quant_execution_audit_stale_leased_workers": 0,
+            "wallet_payment_exception_count": 0,
+            "payment_entitlement_blocker_count": 0,
             "read_only_input_count": 0,
         },
         "sections": base_sections(section_names),
@@ -310,18 +318,18 @@ def append_alert(
     code: str,
     section: str,
     message: str,
+    metadata: Any = None,
 ) -> None:
     severity = safe_severity(severity)
-    payload["alerts"].append(
-        sanitize_json(
-            {
-                "severity": severity,
-                "code": code,
-                "section": section,
-                "message": message,
-            }
-        )
-    )
+    alert = {
+        "severity": severity,
+        "code": code,
+        "section": section,
+        "message": message,
+    }
+    if isinstance(metadata, dict):
+        alert["metadata"] = metadata
+    payload["alerts"].append(sanitize_json(alert))
 
 
 def build_alert_taxonomy(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -379,6 +387,7 @@ def merge_alerts(payload: dict[str, Any], data: dict[str, Any], default_section:
             str(alert.get("code", "SECTION_ALERT")),
             str(alert.get("section", default_section)),
             str(alert.get("message", "read-only section alert")),
+            alert.get("metadata"),
         )
 
 
@@ -388,10 +397,16 @@ def merge_section_input(
     env_name: str,
     summary_count_key: str | None = None,
     input_count_key: str | None = None,
+    summary_count_mappings: dict[str, str] | None = None,
 ) -> None:
     data = read_json_path(os.environ.get(env_name, ""), section_name)
     if data is None:
         return
+
+    payload["sections"].setdefault(
+        section_name,
+        {"status": "ok", "source": "not_provided", "read_only_input": False},
+    )
 
     section = {
         key: value
@@ -411,6 +426,11 @@ def merge_section_input(
     if isinstance(summary, dict):
         if summary_count_key and input_count_key:
             payload["summary"][summary_count_key] = as_int(summary.get(input_count_key), payload["summary"][summary_count_key])
+        for target_key, source_key in (summary_count_mappings or {}).items():
+            payload["summary"][target_key] = as_int(summary.get(source_key), payload["summary"].get(target_key, 0))
+    for target_key, source_key in (summary_count_mappings or {}).items():
+        if target_key not in payload["summary"] or payload["summary"][target_key] == 0:
+            payload["summary"][target_key] = as_int(section.get(source_key), payload["summary"].get(target_key, 0))
 
     merge_alerts(payload, data, section_name)
     merge_correlation(payload, data)
@@ -615,6 +635,15 @@ try:
         "degraded_source_count",
     )
     merge_section_input(payload, "admin_readiness", "FULL_PRODUCT_HEALTH_ADMIN_JSON_PATH")
+    merge_section_input(
+        payload,
+        "payment_entitlement_health",
+        "FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH",
+        summary_count_mappings={
+            "wallet_payment_exception_count": "wallet_payment_exception_count",
+            "payment_entitlement_blocker_count": "payment_entitlement_blocker_count",
+        },
+    )
     payload = finalize(payload)
 except CollectorError as error:
     payload = fail_payload(error)

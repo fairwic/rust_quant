@@ -120,6 +120,11 @@ SECTION_CORRELATION_KEYS = {
         "admin_module",
         "admin_action",
     ],
+    "payment_entitlement_health": [
+        "payment_exception_id",
+        "entitlement_check_id",
+        "user_id",
+    ],
 }
 
 
@@ -314,6 +319,7 @@ def normalize_alerts(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "code": str(alert.get("code") or "HEALTH_ALERT"),
                 "section": str(alert.get("section") or "admin_readiness"),
                 "message": str(alert.get("message") or "health alert"),
+                "metadata": sanitize_json(alert.get("metadata")) if isinstance(alert.get("metadata"), dict) else {},
                 "_index": index,
             }
         )
@@ -525,6 +531,9 @@ def build_operator_playbook_summary(
             "operator_action": operator_action_for_severity(severity),
             "correlation_keys": taxonomy.get("correlation_keys", SECTION_CORRELATION_KEYS.get(section, [])),
         }
+        metadata = alert.get("metadata")
+        if isinstance(metadata, dict) and metadata:
+            item["metadata"] = metadata
         items.append(enrich_playbook_metadata(item, metadata_registry))
 
     blocking_count = sum(
@@ -581,6 +590,8 @@ def build_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "operator_playbook_item_count": operator_playbook_summary["item_count"],
         "correlation_id_count": len(correlation_ids),
         "read_only_input_count": as_int(source_summary.get("read_only_input_count")),
+        "wallet_payment_exception_count": as_int(source_summary.get("wallet_payment_exception_count")),
+        "payment_entitlement_blocker_count": as_int(source_summary.get("payment_entitlement_blocker_count")),
     }
 
     return sanitize_json(

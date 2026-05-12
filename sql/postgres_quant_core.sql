@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS strategy_configs (
     enabled BOOLEAN NOT NULL DEFAULT true,
     config JSONB NOT NULL DEFAULT '{}'::jsonb,
     risk_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by TEXT,
+    updated_by TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (strategy_key, version, exchange, symbol, timeframe)
@@ -732,6 +734,8 @@ COMMENT ON COLUMN strategy_configs.timeframe IS 'K线周期';
 COMMENT ON COLUMN strategy_configs.enabled IS '是否启用';
 COMMENT ON COLUMN strategy_configs.config IS '配置内容';
 COMMENT ON COLUMN strategy_configs.risk_config IS '风控配置';
+COMMENT ON COLUMN strategy_configs.created_by IS '创建者用户名';
+COMMENT ON COLUMN strategy_configs.updated_by IS '最后一次编辑者用户名';
 COMMENT ON COLUMN strategy_configs.created_at IS '创建时间';
 COMMENT ON COLUMN strategy_configs.updated_at IS '更新时间';
 COMMENT ON COLUMN strategy_configs.legacy_id IS '旧系统ID';

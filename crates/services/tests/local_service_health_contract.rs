@@ -186,6 +186,20 @@ fn admin_input_producer_path() -> PathBuf {
         .join("build_full_product_health_admin_input.sh")
 }
 
+fn payment_input_producer_path() -> PathBuf {
+    repo_root()
+        .join("scripts")
+        .join("dev")
+        .join("build_full_product_health_payment_input.sh")
+}
+
+fn full_product_payment_artifact_smoke_path() -> PathBuf {
+    repo_root()
+        .join("scripts")
+        .join("dev")
+        .join("smoke_full_product_health_payment_artifact_handoff.sh")
+}
+
 fn read_script() -> String {
     let path = script_path();
     fs::read_to_string(&path)
@@ -260,6 +274,18 @@ fn read_full_product_admin_ingest_contract_smoke_script() -> String {
 
 fn read_web_input_producer_script() -> String {
     let path = web_input_producer_path();
+    fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
+}
+
+fn read_payment_input_producer_script() -> String {
+    let path = payment_input_producer_path();
+    fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
+}
+
+fn read_full_product_payment_artifact_smoke_script() -> String {
+    let path = full_product_payment_artifact_smoke_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
@@ -885,7 +911,11 @@ do
         exit 3
     fi
 done
-if [[ "${args}" == *"admin_operation_logs"* ]]; then
+if [[ "${args}" == *"payment_intents"* ]]; then
+    cat <<'JSON'
+{"status":"fail","source":"quant_web_payment_readonly_db","database_engine":"postgresql","read_only_input":true,"lookback_secs":86400,"confirmation_timeout_secs":1800,"wallet_payment_exception_count":2,"payment_entitlement_blocker_count":1,"alerts":[{"severity":"P1","code":"WALLET_PAYMENT_EXCEPTION","section":"payment_entitlement_health","message":"wallet payment exceptions require review","metadata":{"wallet_payment_exception_count":2,"payment_entitlement_blocker_count":1,"sample_kind":"wallet_payment_exception"}},{"severity":"P0","code":"PAYMENT_ENTITLEMENT_BLOCKED","section":"payment_entitlement_health","message":"wallet payment succeeded but entitlement is still blocked","metadata":{"wallet_payment_exception_count":2,"payment_entitlement_blocker_count":1,"sample_kind":"payment_entitlement"}}],"correlation":{"payment_exception_id":2001,"entitlement_check_id":1001,"user_id":null}}
+JSON
+elif [[ "${args}" == *"admin_operation_logs"* ]]; then
     cat <<'JSON'
 {"status":"fail","source":"quant_admin_readonly_db","database_engine":"postgresql","read_only_input":true,"lookback_secs":7200,"required_action_count":8,"recent_operation_count":11,"high_risk_operation_count":9,"failed_operation_count":2,"missing_required_action_count":1,"readiness_blocker_count":1,"manual_review_count":2,"alerts":[{"severity":"P0","code":"ADMIN_LIVE_READINESS_BLOCKED","section":"admin_readiness","message":"admin readiness has blockers or required audit coverage is missing"}],"correlation":{"admin_operation_log_id":"admin-op-9002","admin_module":"quant_exchange_symbols","admin_action":"exchange_symbol_sync"}}
 JSON
@@ -898,6 +928,69 @@ else
 {"status":"fail","source":"quant_web_readonly_db","database_engine":"postgresql","read_only_input":true,"lookback_secs":3600,"stale_task_secs":900,"missing_result_secs":900,"open_task_count":2,"stale_task_count":1,"missing_order_result_count":1,"failed_task_count":1,"retry_backlog_count":1,"delivery_blocker_count":1,"recent_order_result_count":3,"recent_trade_record_count":2,"alerts":[{"severity":"P0","code":"WEB_ORDER_RESULT_MISSING","section":"web_task_order_health","message":"completed execution task missing order result"}],"correlation":{"signal_inbox_id":3801,"execution_task_id":5202,"execution_attempt_id":6101,"order_result_id":null,"trade_record_id":null}}
 JSON
 fi
+"#,
+    );
+
+    dir
+}
+
+fn fake_payment_tool_dir() -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after epoch")
+        .as_nanos();
+    let dir = env::temp_dir().join(format!(
+        "payment-health-input-contract-{}-{}",
+        std::process::id(),
+        unique
+    ));
+    fs::create_dir_all(&dir)
+        .unwrap_or_else(|error| panic!("failed to create {}: {}", dir.display(), error));
+
+    write_executable(
+        &dir.join("psql"),
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+if [[ "${args}" != *"-Atc"* ]]; then
+    printf 'expected psql to run in tuples-only mode\n' >&2
+    exit 2
+fi
+for required in \
+    "payment_intents" \
+    "payment_transactions" \
+    "membership_orders"
+do
+    if [[ "${args}" != *"${required}"* ]]; then
+        printf 'expected payment health query to read %s\n' "${required}" >&2
+        exit 4
+    fi
+done
+for forbidden in \
+    "INSERT INTO " \
+    "UPDATE " \
+    "DELETE FROM " \
+    "raw_payload_json" \
+    "metadata_json" \
+    "external_tx_id" \
+    "payer_ref" \
+    "payee_ref" \
+    "failure_reason" \
+    "/api/commerce/internal/execution-tasks/lease" \
+    "/api/commerce/internal/execution-results" \
+    "/api/commerce/internal/order-results" \
+    "/fapi/v1/order" \
+    "/fapi/v2/account" \
+    "/fapi/v1/positionRisk"
+do
+    if [[ "${args}" == *"${forbidden}"* ]]; then
+        printf 'forbidden marker reached fake psql: %s\n' "${forbidden}" >&2
+        exit 3
+    fi
+done
+cat <<'JSON'
+{"status":"fail","source":"quant_web_payment_readonly_db","database_engine":"postgresql","read_only_input":true,"lookback_secs":86400,"confirmation_timeout_secs":1800,"wallet_payment_exception_count":2,"payment_entitlement_blocker_count":1,"sample":{"payment_intent_id":2001,"membership_order_id":1001,"payment_transaction_id":3001,"exception_code":"wallet_entitlement_missing","age_minutes":45},"alerts":[{"severity":"P1","code":"WALLET_PAYMENT_EXCEPTION","section":"payment_entitlement_health","message":"wallet payment exceptions require review","metadata":{"wallet_payment_exception_count":2,"payment_entitlement_blocker_count":1,"sample_kind":"wallet_payment_exception"}},{"severity":"P0","code":"PAYMENT_ENTITLEMENT_BLOCKED","section":"payment_entitlement_health","message":"wallet payment succeeded but entitlement is still blocked","metadata":{"wallet_payment_exception_count":2,"payment_entitlement_blocker_count":1,"sample_kind":"payment_entitlement"}}],"correlation":{"payment_exception_id":2001,"entitlement_check_id":1001,"user_id":null}}
+JSON
 "#,
     );
 
@@ -1157,6 +1250,13 @@ fn local_service_health_runbook_documents_cross_service_aggregator_contract() {
     assert!(docs.contains("FULL_PRODUCT_HEALTH_NEWS_LOOKBACK_SECS"));
     assert!(docs.contains("FULL_PRODUCT_HEALTH_NEWS_STALE_ANALYSIS_SECS"));
     assert!(docs.contains("FULL_PRODUCT_HEALTH_NEWS_FAILED_JOB_SECS"));
+    assert!(docs.contains("build_full_product_health_payment_input.sh"));
+    assert!(docs.contains("FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL"));
+    assert!(docs.contains("FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH"));
+    assert!(docs.contains("FULL_PRODUCT_HEALTH_PAYMENT_LOOKBACK_SECS"));
+    assert!(docs.contains("FULL_PRODUCT_HEALTH_PAYMENT_CONFIRMATION_TIMEOUT_SECS"));
+    assert!(docs.contains("PAYMENT_INPUT_SKIPPED"));
+    assert!(docs.contains("PAYMENT_INPUT_QUERY_FAILED"));
     assert!(docs.contains("NEWS_INPUT_SKIPPED"));
     assert!(docs.contains("NEWS_INPUT_QUERY_FAILED"));
     assert!(docs.contains("build_full_product_health_admin_input.sh"));
@@ -1216,8 +1316,12 @@ fn full_product_health_admin_ci_handoff_documents_command_matrix_and_boundaries(
         "FULL_PRODUCT_HEALTH_VALIDATION_SCHEMA_PATH=/tmp/full_product_health_artifact_schema.candidate.json",
         "FULL_PRODUCT_HEALTH_VALIDATION_STRICT=true",
         "FULL_PRODUCT_HEALTH_WEB_DATABASE_URL=mysql://readonly@host/quant_web",
+        "FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL=postgres://readonly@host/quant_web",
         "FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL=postgres://readonly@host/quant_news",
         "FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL=postgres://readonly@host/quant_admin",
+        "./scripts/dev/build_full_product_health_payment_input.sh",
+        "FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json",
+        "./scripts/dev/smoke_full_product_health_payment_artifact_handoff.sh",
         "./scripts/dev/run_full_product_health_ci.sh",
         "./scripts/dev/validate_full_product_health_artifacts.sh",
         "./scripts/dev/render_full_product_health_markdown.sh",
@@ -3015,9 +3119,9 @@ fn full_product_health_markdown_renders_operator_readable_artifact_from_summary_
         "web_task_order_health",
         "news_source_ai_health",
         "## Artifact Paths",
-        "/tmp/full-product-health.json",
-        "/tmp/full-product-health-summary.json",
-        "/tmp/full-product-health.md",
+        "full-product-health.json",
+        "full-product-health-summary.json",
+        "full-product-health.md",
         "## Skipped Sections",
         "NEWS_INPUT_SKIPPED",
     ] {
@@ -4513,6 +4617,10 @@ fn full_product_health_ci_wrapper_is_safe_and_uses_explicit_artifacts() {
     assert!(script.contains("FULL_PRODUCT_HEALTH_CI_MARKDOWN_PATH"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_CI_FAIL_ON_STATUS"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_CI_RUN_LOCAL_HEALTH"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_INPUT_PRODUCER_PATH"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_LOOKBACK_SECS"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_CONFIRMATION_TIMEOUT_SECS"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_SUMMARY_JSON_PATH"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_MARKDOWN_SUMMARY_JSON_PATH"));
     assert!(script.contains("env -i"));
@@ -4578,6 +4686,7 @@ fn full_product_health_ci_wrapper_writes_skipped_report_and_summary_without_urls
         .env("FULL_PRODUCT_HEALTH_CI_SUMMARY_PATH", &summary_path)
         .env("FULL_PRODUCT_HEALTH_CI_RUN_LOCAL_HEALTH", "false")
         .env_remove("FULL_PRODUCT_HEALTH_WEB_DATABASE_URL")
+        .env_remove("FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL")
         .env_remove("FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL")
         .env_remove("FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL")
         .env("BINANCE_API_KEY", "binance-key")
@@ -4618,9 +4727,13 @@ fn full_product_health_ci_wrapper_writes_skipped_report_and_summary_without_urls
     assert_eq!(full_payload["status"], "ok");
     assert_eq!(full_payload["summary"]["p0_count"], 0);
     assert_eq!(full_payload["summary"]["p1_count"], 0);
-    assert_eq!(full_payload["summary"]["read_only_input_count"], 3);
+    assert_eq!(full_payload["summary"]["read_only_input_count"], 4);
     assert_eq!(
         full_payload["sections"]["web_task_order_health"]["skipped"],
+        true
+    );
+    assert_eq!(
+        full_payload["sections"]["payment_entitlement_health"]["skipped"],
         true
     );
     assert_eq!(
@@ -4643,11 +4756,20 @@ fn full_product_health_ci_wrapper_writes_skipped_report_and_summary_without_urls
         "web skipped section should remain visible in the full report: {full_body}"
     );
     assert!(
+        alerts(&full_payload)
+            .iter()
+            .any(|alert| alert["severity"] == "INFO"
+                && alert["code"] == "PAYMENT_INPUT_SKIPPED"
+                && alert["section"] == "payment_entitlement_health"),
+        "payment skipped section should remain visible in the full report: {full_body}"
+    );
+    assert!(
         summary_payload["top_alerts"]
             .as_array()
             .expect("top_alerts should be an array")
             .iter()
-            .any(|alert| alert["code"] == "WEB_INPUT_SKIPPED"),
+            .any(|alert| alert["code"] == "WEB_INPUT_SKIPPED"
+                || alert["code"] == "PAYMENT_INPUT_SKIPPED"),
         "summary should include skipped input context: {summary_body}"
     );
 
@@ -4696,6 +4818,7 @@ fn full_product_health_ci_wrapper_writes_optional_markdown_artifact_without_urls
         .env("FULL_PRODUCT_HEALTH_CI_MARKDOWN_PATH", &markdown_path)
         .env("FULL_PRODUCT_HEALTH_CI_RUN_LOCAL_HEALTH", "false")
         .env_remove("FULL_PRODUCT_HEALTH_WEB_DATABASE_URL")
+        .env_remove("FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL")
         .env_remove("FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL")
         .env_remove("FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL")
         .env("BINANCE_API_KEY", "binance-key")
@@ -4736,6 +4859,8 @@ fn full_product_health_ci_wrapper_writes_optional_markdown_artifact_without_urls
         "## Skipped Sections",
         "web_task_order_health",
         "WEB_INPUT_SKIPPED",
+        "payment_entitlement_health",
+        "PAYMENT_INPUT_SKIPPED",
         "news_source_ai_health",
         "NEWS_INPUT_SKIPPED",
         "admin_readiness",
@@ -4801,6 +4926,7 @@ fn full_product_health_ci_wrapper_writes_optional_validation_artifact_without_ur
         .env("FULL_PRODUCT_HEALTH_CI_VALIDATION_PATH", &validation_path)
         .env("FULL_PRODUCT_HEALTH_CI_RUN_LOCAL_HEALTH", "false")
         .env_remove("FULL_PRODUCT_HEALTH_WEB_DATABASE_URL")
+        .env_remove("FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL")
         .env_remove("FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL")
         .env_remove("FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL")
         .env("BINANCE_API_KEY", "binance-key")
@@ -5029,14 +5155,18 @@ fn full_product_health_input_runner_is_safe_and_uses_only_read_only_producers() 
     assert!(script.contains("build_full_product_health_web_input.sh"));
     assert!(script.contains("build_full_product_health_news_input.sh"));
     assert!(script.contains("build_full_product_health_admin_input.sh"));
+    assert!(script.contains("build_full_product_health_payment_input.sh"));
     assert!(script.contains("check_full_product_health.sh"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_WEB_DATABASE_URL"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_WEB_JSON_PATH"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_NEWS_JSON_PATH"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_ADMIN_JSON_PATH"));
     assert!(script.contains("WEB_INPUT_SKIPPED"));
+    assert!(script.contains("PAYMENT_INPUT_SKIPPED"));
     assert!(script.contains("NEWS_INPUT_SKIPPED"));
     assert!(script.contains("ADMIN_INPUT_SKIPPED"));
     assert!(script.contains("mktemp -d"));
@@ -5094,6 +5224,7 @@ fn full_product_health_input_runner_outputs_skipped_sections_without_urls() {
         .env("FULL_PRODUCT_HEALTH_OUTPUT", "json")
         .env("FULL_PRODUCT_HEALTH_RUN_LOCAL_HEALTH", "false")
         .env_remove("FULL_PRODUCT_HEALTH_WEB_DATABASE_URL")
+        .env_remove("FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL")
         .env_remove("FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL")
         .env_remove("FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL")
         .env("BINANCE_API_KEY", "binance-key")
@@ -5118,9 +5249,13 @@ fn full_product_health_input_runner_outputs_skipped_sections_without_urls() {
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["summary"]["p0_count"], 0);
     assert_eq!(payload["summary"]["p1_count"], 0);
-    assert_eq!(payload["summary"]["read_only_input_count"], 3);
+    assert_eq!(payload["summary"]["read_only_input_count"], 4);
     assert_eq!(
         payload["sections"]["web_task_order_health"]["skipped"],
+        true
+    );
+    assert_eq!(
+        payload["sections"]["payment_entitlement_health"]["skipped"],
         true
     );
     assert_eq!(
@@ -5135,6 +5270,14 @@ fn full_product_health_input_runner_outputs_skipped_sections_without_urls() {
                 && alert["code"] == "WEB_INPUT_SKIPPED"
                 && alert["section"] == "web_task_order_health"),
         "web skipped section should be represented as an INFO alert: {stdout}"
+    );
+    assert!(
+        alerts(&payload)
+            .iter()
+            .any(|alert| alert["severity"] == "INFO"
+                && alert["code"] == "PAYMENT_INPUT_SKIPPED"
+                && alert["section"] == "payment_entitlement_health"),
+        "payment skipped section should be represented as an INFO alert: {stdout}"
     );
     assert!(
         alerts(&payload)
@@ -5201,6 +5344,10 @@ fn full_product_health_input_runner_calls_producers_for_explicit_read_only_urls(
             "postgres://user:secret@db/quant_web",
         )
         .env(
+            "FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL",
+            "postgres://user:secret@db/quant_web",
+        )
+        .env(
             "FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL",
             "postgres://user:secret@db/quant_news",
         )
@@ -5227,13 +5374,23 @@ fn full_product_health_input_runner_calls_producers_for_explicit_read_only_urls(
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
 
     assert_eq!(payload["status"], "fail");
-    assert_eq!(payload["summary"]["p0_count"], 2);
-    assert_eq!(payload["summary"]["p1_count"], 1);
+    assert_eq!(payload["summary"]["p0_count"], 3);
+    assert_eq!(payload["summary"]["p1_count"], 2);
     assert_eq!(payload["summary"]["web_open_task_count"], 2);
     assert_eq!(payload["summary"]["news_degraded_source_count"], 2);
+    assert_eq!(payload["summary"]["wallet_payment_exception_count"], 2);
+    assert_eq!(payload["summary"]["payment_entitlement_blocker_count"], 1);
     assert_eq!(
         payload["sections"]["web_task_order_health"]["source"],
         "json_path"
+    );
+    assert_eq!(
+        payload["sections"]["payment_entitlement_health"]["source"],
+        "json_path"
+    );
+    assert_eq!(
+        payload["sections"]["payment_entitlement_health"]["wallet_payment_exception_count"],
+        2
     );
     assert_eq!(
         payload["sections"]["web_task_order_health"]["missing_order_result_count"],
@@ -5255,6 +5412,8 @@ fn full_product_health_input_runner_calls_producers_for_explicit_read_only_urls(
         payload["correlation"]["admin_operation_log_id"],
         "admin-op-9002"
     );
+    assert_eq!(payload["correlation"]["payment_exception_id"], 2001);
+    assert_eq!(payload["correlation"]["entitlement_check_id"], 1001);
     assert!(
         alerts(&payload)
             .iter()
@@ -5270,6 +5429,14 @@ fn full_product_health_input_runner_calls_producers_for_explicit_read_only_urls(
                 && alert["code"] == "NEWS_SOURCE_DEGRADED"
                 && alert["section"] == "news_source_ai_health"),
         "news producer alert should be merged: {stdout}"
+    );
+    assert!(
+        alerts(&payload)
+            .iter()
+            .any(|alert| alert["severity"] == "P0"
+                && alert["code"] == "PAYMENT_ENTITLEMENT_BLOCKED"
+                && alert["section"] == "payment_entitlement_health"),
+        "payment producer alert should be merged: {stdout}"
     );
     assert!(
         alerts(&payload)
@@ -5314,6 +5481,1203 @@ fn full_product_health_input_runner_calls_producers_for_explicit_read_only_urls(
         assert!(
             !lowered.contains(sensitive),
             "input runner output must not leak sensitive marker {sensitive}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_aggregator_accepts_payment_entitlement_input_and_builds_playbook_item() {
+    let payment_input_path = temp_json_file(
+        "full-product-health-payment-entitlement",
+        r#"{
+  "status": "fail",
+  "source": "payment_entitlement_readonly_fixture",
+  "read_only_input": true,
+  "wallet_payment_exception_count": 2,
+  "payment_entitlement_blocker_count": 1,
+  "summary": {
+    "wallet_payment_exception_count": 2,
+    "payment_entitlement_blocker_count": 1
+  },
+  "sample": {
+    "payment_exception_id": "pay-ex-1001",
+    "entitlement_check_id": "ent-check-2001",
+    "payment_state": "exception"
+  },
+  "alerts": [
+    {
+      "severity": "P0",
+      "code": "PAYMENT_ENTITLEMENT_BLOCKED",
+      "section": "payment_entitlement_health",
+      "message": "payment entitlement check blocked auto-trade access",
+      "metadata": {
+        "wallet_payment_exception_count": 2,
+        "payment_entitlement_blocker_count": 1,
+        "sample_kind": "payment_entitlement"
+      }
+    }
+  ],
+  "correlation": {
+    "payment_exception_id": "pay-ex-1001",
+    "entitlement_check_id": "ent-check-2001"
+  }
+}"#,
+    );
+
+    let output = Command::new(aggregator_runner_path())
+        .env("FULL_PRODUCT_HEALTH_OUTPUT", "json")
+        .env("FULL_PRODUCT_HEALTH_RUN_LOCAL_HEALTH", "false")
+        .env("FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH", &payment_input_path)
+        .output()
+        .expect("full product health aggregator should run");
+
+    assert!(
+        output.status.success(),
+        "payment entitlement input should produce a full report:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let full_report_body = String::from_utf8(output.stdout).expect("json output should be utf8");
+    let full_report: Value = serde_json::from_str(&full_report_body)
+        .unwrap_or_else(|error| panic!("invalid full report json: {error}\n{full_report_body}"));
+    assert_eq!(full_report["status"], "fail");
+    assert_eq!(full_report["summary"]["wallet_payment_exception_count"], 2);
+    assert_eq!(
+        full_report["summary"]["payment_entitlement_blocker_count"],
+        1
+    );
+    assert_eq!(
+        full_report["sections"]["payment_entitlement_health"]["status"],
+        "fail"
+    );
+    assert_eq!(
+        full_report["sections"]["payment_entitlement_health"]["source"],
+        "json_path"
+    );
+    assert_eq!(
+        full_report["sections"]["payment_entitlement_health"]["read_only_input"],
+        true
+    );
+    assert_eq!(
+        full_report["correlation"]["payment_exception_id"],
+        "pay-ex-1001"
+    );
+    assert_eq!(
+        full_report["correlation"]["entitlement_check_id"],
+        "ent-check-2001"
+    );
+    assert!(
+        alerts(&full_report)
+            .iter()
+            .any(|alert| alert["severity"] == "P0"
+                && alert["code"] == "PAYMENT_ENTITLEMENT_BLOCKED"
+                && alert["section"] == "payment_entitlement_health"
+                && alert["metadata"]["wallet_payment_exception_count"] == 2
+                && alert["metadata"]["payment_entitlement_blocker_count"] == 1),
+        "payment entitlement alert should preserve safe count metadata: {full_report_body}"
+    );
+    assert!(
+        alert_taxonomy(&full_report)
+            .iter()
+            .any(|item| item["code"] == "PAYMENT_ENTITLEMENT_BLOCKED"
+                && item["section"] == "payment_entitlement_health"
+                && item["operator_action"] == "block_release_until_resolved"
+                && item["correlation_keys"]
+                    .as_array()
+                    .expect("correlation keys should be an array")
+                    .iter()
+                    .any(|key| key == "payment_exception_id")),
+        "full report taxonomy should expose payment entitlement correlation keys: {full_report_body}"
+    );
+
+    let full_report_path = temp_json_file(
+        "full-product-health-payment-entitlement-report",
+        &full_report_body,
+    );
+    let summary_output = Command::new(full_product_summary_path())
+        .env("FULL_PRODUCT_HEALTH_SUMMARY_OUTPUT", "json")
+        .env("FULL_PRODUCT_HEALTH_SUMMARY_JSON_PATH", &full_report_path)
+        .env("FULL_PRODUCT_HEALTH_SUMMARY_TOP_ALERT_LIMIT", "10")
+        .output()
+        .expect("full product health summary should run");
+
+    assert!(
+        summary_output.status.success(),
+        "payment entitlement full report should summarize:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&summary_output.stdout),
+        String::from_utf8_lossy(&summary_output.stderr)
+    );
+
+    let summary_body = String::from_utf8(summary_output.stdout).expect("summary should be utf8");
+    let summary: Value = serde_json::from_str(&summary_body)
+        .unwrap_or_else(|error| panic!("invalid summary json: {error}\n{summary_body}"));
+    assert_eq!(summary["status"], "fail");
+    assert_eq!(
+        summary["section_statuses"]["payment_entitlement_health"],
+        "fail"
+    );
+    assert_eq!(summary["summary"]["wallet_payment_exception_count"], 2);
+    assert_eq!(summary["summary"]["payment_entitlement_blocker_count"], 1);
+
+    let playbook_items = summary["operator_playbook_summary"]["items"]
+        .as_array()
+        .expect("operator playbook items should be an array");
+    assert!(
+        playbook_items.iter().any(|item| item["source"] == "alert"
+            && item["severity"] == "P0"
+            && item["code"] == "PAYMENT_ENTITLEMENT_BLOCKED"
+            && item["section"] == "payment_entitlement_health"
+            && item["operator_action"] == "block_release_until_resolved"
+            && item["owner"] == "commerce_billing"
+            && item["default_next_action"] == "reconcile_payment_entitlement"
+            && item["admin_link_target"] == "admin.full_product_health.payment_entitlement_health"
+            && item["metadata"]["wallet_payment_exception_count"] == 2
+            && item["metadata"]["payment_entitlement_blocker_count"] == 1),
+        "operator playbook should expose payment entitlement owner/action/link/metadata: {summary_body}"
+    );
+
+    let combined = format!("{full_report_body}\n{summary_body}").to_ascii_lowercase();
+    for sensitive in [
+        ".env",
+        "postgres://",
+        "mysql://",
+        "database_url",
+        "api_key",
+        "apikey",
+        "api_secret",
+        "secret",
+        "request_payload",
+        "response_payload",
+        "raw_payload",
+        "https://",
+        "http://",
+        "file://",
+        "/users/",
+        "/tmp/",
+        "/fapi/v1/order",
+        "/fapi/v2/account",
+        "/fapi/v1/positionrisk",
+        "/fapi/v2/positionrisk",
+        "/api/commerce/internal/execution-tasks/lease",
+        "linkusdt",
+    ] {
+        assert!(
+            !combined.contains(sensitive),
+            "payment entitlement artifacts must not leak sensitive marker {sensitive}: {combined}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_schema_registers_payment_entitlement_playbook_codes() {
+    let schema_path = full_product_artifact_schema_json_path();
+    let doc_path = full_product_artifact_schema_doc_path();
+    let schema_body = fs::read_to_string(&schema_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_path.display(), error));
+    let doc = fs::read_to_string(&doc_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", doc_path.display(), error));
+    let schema: Value = serde_json::from_str(&schema_body)
+        .unwrap_or_else(|error| panic!("invalid schema json: {error}\n{schema_body}"));
+
+    let payment_codes = schema["alert_code_values"]["payment_entitlement_health"]
+        .as_array()
+        .expect("payment_entitlement_health codes should be registered");
+    for expected in [
+        "PAYMENT_INPUT_QUERY_FAILED",
+        "PAYMENT_INPUT_SKIPPED",
+        "WALLET_PAYMENT_EXCEPTION",
+        "PAYMENT_ENTITLEMENT_BLOCKED",
+    ] {
+        assert!(
+            payment_codes.iter().any(|code| code == expected),
+            "schema should register payment entitlement alert code {expected}"
+        );
+    }
+    for (code, action) in [
+        (
+            "PAYMENT_INPUT_QUERY_FAILED",
+            "inspect_payment_read_only_input",
+        ),
+        ("PAYMENT_INPUT_SKIPPED", "provide_payment_read_only_input"),
+        (
+            "WALLET_PAYMENT_EXCEPTION",
+            "review_wallet_payment_exceptions",
+        ),
+        (
+            "PAYMENT_ENTITLEMENT_BLOCKED",
+            "reconcile_payment_entitlement",
+        ),
+    ] {
+        let metadata = &schema["alert_code_metadata"]["payment_entitlement_health"][code];
+        assert_eq!(metadata["owner"], "commerce_billing");
+        assert_eq!(metadata["default_next_action"], action);
+        assert_eq!(
+            metadata["admin_link_target"],
+            "admin.full_product_health.payment_entitlement_health"
+        );
+    }
+    for required in [
+        "payment_entitlement_health",
+        "PAYMENT_INPUT_SKIPPED",
+        "PAYMENT_INPUT_QUERY_FAILED",
+        "WALLET_PAYMENT_EXCEPTION",
+        "PAYMENT_ENTITLEMENT_BLOCKED",
+        "wallet_payment_exception_count",
+        "payment_entitlement_blocker_count",
+    ] {
+        assert!(
+            doc.contains(required),
+            "schema doc should describe payment entitlement contract token {required}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_schema_documents_payment_entitlement_three_state_contract() {
+    let schema_path = full_product_artifact_schema_json_path();
+    let schema_doc_path = full_product_artifact_schema_doc_path();
+    let handoff_path = full_product_admin_ci_handoff_path();
+    let runbook_path = runbook_path();
+    let schema_body = fs::read_to_string(&schema_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_path.display(), error));
+    let schema: Value = serde_json::from_str(&schema_body)
+        .unwrap_or_else(|error| panic!("invalid schema json: {error}\n{schema_body}"));
+    let schema_doc = fs::read_to_string(&schema_doc_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_doc_path.display(), error));
+    let handoff = fs::read_to_string(&handoff_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
+    let runbook = fs::read_to_string(&runbook_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", runbook_path.display(), error));
+
+    let contract = &schema["consumer_contracts"]["payment_entitlement_health_states"];
+    assert_eq!(contract["compatibility_contract_version"], 1);
+
+    for required_path in [
+        "sections.payment_entitlement_health.skipped",
+        "sections.payment_entitlement_health.query_failed",
+        "sections.payment_entitlement_health.wallet_payment_exception_count",
+        "sections.payment_entitlement_health.payment_entitlement_blocker_count",
+        "summary.wallet_payment_exception_count",
+        "summary.payment_entitlement_blocker_count",
+    ] {
+        assert!(
+            contract["producer_required_paths"]
+                .as_array()
+                .expect("payment state contract should list producer paths")
+                .iter()
+                .any(|path| path == required_path),
+            "payment entitlement state contract should require path {required_path}"
+        );
+    }
+
+    let states = contract["states"]
+        .as_array()
+        .expect("payment state contract should list stable states");
+    for state_name in ["skipped", "query_failed", "real_count"] {
+        let state = states
+            .iter()
+            .find(|state| state["name"] == state_name)
+            .unwrap_or_else(|| panic!("missing payment health state {state_name}: {schema_body}"));
+        assert!(state["status"].is_string());
+        assert!(state["source"].is_string());
+        assert!(
+            state["read_only_input"].is_boolean(),
+            "payment health state {state_name} should lock read_only_input semantics"
+        );
+        assert!(
+            state["alert_code"].is_string(),
+            "payment health state {state_name} should lock alert code semantics"
+        );
+    }
+
+    for required_doc_token in [
+        "payment_entitlement_health_states",
+        "skipped",
+        "query_failed",
+        "real_count",
+        "FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL",
+        "FULL_PRODUCT_HEALTH_PAYMENT_PSQL_BIN",
+        "FULL_PRODUCT_HEALTH_PAYMENT_QUERY_TIMEOUT_SECS",
+        "只读 DB opt-in",
+        "skipped / query_failed / real_count",
+    ] {
+        assert!(
+            schema_doc.contains(required_doc_token)
+                && handoff.contains(required_doc_token)
+                && runbook.contains(required_doc_token),
+            "schema doc, handoff, and runbook should all document token {required_doc_token}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_payment_entitlement_tri_state_examples_are_schema_declared_and_redacted() {
+    let schema_path = full_product_artifact_schema_json_path();
+    let schema_body = fs::read_to_string(&schema_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_path.display(), error));
+    let schema: Value = serde_json::from_str(&schema_body)
+        .unwrap_or_else(|error| panic!("invalid schema json: {error}\n{schema_body}"));
+    let contract = &schema["consumer_contracts"]["payment_entitlement_health_states"];
+    let examples = contract["example_fixtures"]
+        .as_array()
+        .expect("payment entitlement state contract should declare example_fixtures");
+
+    for state_name in ["skipped", "query_failed", "real_count"] {
+        let example = examples
+            .iter()
+            .find(|item| item["state"] == state_name)
+            .unwrap_or_else(|| panic!("missing payment entitlement fixture for {state_name}"));
+        let relative_path = example["path"]
+            .as_str()
+            .unwrap_or_else(|| panic!("fixture path for {state_name} should be a string"));
+        assert!(
+            relative_path
+                .starts_with("docs/dev/full_product_health_examples/payment-entitlement-health-"),
+            "payment fixture path should stay under explicit examples dir: {relative_path}"
+        );
+        let fixture_path = repo_root().join(relative_path);
+        let body = fs::read_to_string(&fixture_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", fixture_path.display(), error));
+        let payload: Value = serde_json::from_str(&body)
+            .unwrap_or_else(|error| panic!("invalid fixture json: {error}\n{body}"));
+
+        assert_eq!(payload["contract_state"], state_name);
+        assert_eq!(payload["section"], "payment_entitlement_health");
+        assert!(payload["status"].as_str().is_some());
+        assert!(payload["read_only_input"].is_boolean());
+        assert!(payload["wallet_payment_exception_count"].is_u64());
+        assert!(payload["payment_entitlement_blocker_count"].is_u64());
+
+        match state_name {
+            "skipped" => {
+                assert_eq!(payload["status"], "warn");
+                assert_eq!(payload["source"], "skipped");
+                assert_eq!(payload["read_only_input"], false);
+                assert_eq!(payload["skipped"], true);
+                assert_ne!(payload["query_failed"], true);
+                assert_eq!(payload["wallet_payment_exception_count"], 0);
+                assert_eq!(payload["payment_entitlement_blocker_count"], 0);
+                assert!(alerts(&payload).iter().any(|alert| {
+                    alert["severity"] == "INFO" && alert["code"] == "PAYMENT_INPUT_SKIPPED"
+                }));
+            }
+            "query_failed" => {
+                assert_eq!(payload["status"], "warn");
+                assert_eq!(payload["source"], "quant_web_payment_readonly_db");
+                assert_eq!(payload["read_only_input"], true);
+                assert_ne!(payload["skipped"], true);
+                assert_eq!(payload["query_failed"], true);
+                assert_eq!(payload["wallet_payment_exception_count"], 0);
+                assert_eq!(payload["payment_entitlement_blocker_count"], 0);
+                assert!(alerts(&payload).iter().any(|alert| {
+                    alert["severity"] == "P1" && alert["code"] == "PAYMENT_INPUT_QUERY_FAILED"
+                }));
+            }
+            "real_count" => {
+                assert_eq!(payload["source"], "quant_web_payment_readonly_db");
+                assert_eq!(payload["read_only_input"], true);
+                assert_ne!(payload["skipped"], true);
+                assert_ne!(payload["query_failed"], true);
+                assert!(payload["wallet_payment_exception_count"].as_u64().unwrap() > 0);
+                assert!(
+                    payload["payment_entitlement_blocker_count"]
+                        .as_u64()
+                        .unwrap()
+                        > 0
+                );
+                assert!(alerts(&payload).iter().any(|alert| {
+                    alert["severity"] == "P0" && alert["code"] == "PAYMENT_ENTITLEMENT_BLOCKED"
+                }));
+            }
+            _ => unreachable!(),
+        }
+
+        let lowered = body.to_ascii_lowercase();
+        for sensitive in [
+            ".env",
+            "postgres://",
+            "postgresql://",
+            "mysql://",
+            "database_url",
+            "api_key",
+            "api_secret",
+            "secret",
+            "tx_hash",
+            "transaction_hash",
+            "payer",
+            "payee",
+            "request_payload",
+            "response_payload",
+            "raw_payload",
+            "http://",
+            "https://",
+            "file://",
+            "/users/",
+            "/tmp/",
+            "/fapi/v1/order",
+            "/fapi/v2/account",
+            "/fapi/v1/positionrisk",
+            "/api/commerce/internal/execution-tasks/lease",
+            "linkusdt",
+            "link-usdt",
+        ] {
+            assert!(
+                !lowered.contains(sensitive),
+                "payment entitlement fixture {relative_path} must not leak sensitive marker {sensitive}: {body}"
+            );
+        }
+    }
+}
+
+#[test]
+fn full_product_health_artifact_validator_rejects_payment_entitlement_state_drift() {
+    let artifact_dir = temp_artifact_dir("full-product-health-validator-payment-state-drift");
+    let full_report_path = artifact_dir.join("full-product-health.json");
+    let summary_path = artifact_dir.join("full-product-health-summary.json");
+    let markdown_path = artifact_dir.join("full-product-health.md");
+
+    fs::write(
+        &full_report_path,
+        r#"{
+  "schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:00Z",
+  "summary": {
+    "p0_count": 0,
+    "p1_count": 0,
+    "info_count": 1,
+    "read_only_input_count": 3,
+    "wallet_payment_exception_count": 2,
+    "payment_entitlement_blocker_count": 1
+  },
+  "sections": {
+    "payment_entitlement_health": {
+      "status": "warn",
+      "source": "skipped",
+      "database_engine": "postgresql",
+      "read_only_input": false,
+      "skipped": true,
+      "wallet_payment_exception_count": 2,
+      "payment_entitlement_blocker_count": 1,
+      "alerts": [
+        {
+          "severity": "INFO",
+          "code": "PAYMENT_INPUT_SKIPPED",
+          "section": "payment_entitlement_health",
+          "message": "payment input was skipped"
+        }
+      ]
+    }
+  },
+  "alerts": [
+    {
+      "severity": "INFO",
+      "code": "PAYMENT_INPUT_SKIPPED",
+      "section": "payment_entitlement_health",
+      "message": "payment input was skipped"
+    }
+  ],
+  "alert_taxonomy": [],
+  "correlation": {}
+}"#,
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", full_report_path.display(), error));
+    fs::write(
+        &summary_path,
+        r#"{
+  "schema_version": 1,
+  "source_schema_version": 1,
+  "status": "warn",
+  "generated_at": "2026-05-07T01:00:01Z",
+  "source_generated_at": "2026-05-07T01:00:00Z",
+  "summary": {
+    "overall_status": "warn",
+    "p0_count": 0,
+    "p1_count": 0,
+    "info_count": 1,
+    "section_count": 1,
+    "blocking_section_count": 0,
+    "warning_section_count": 1,
+    "top_alert_count": 1,
+    "required_operator_action_count": 0,
+    "alert_taxonomy_count": 0,
+    "operator_playbook_item_count": 1,
+    "correlation_id_count": 0,
+    "read_only_input_count": 3,
+    "wallet_payment_exception_count": 2,
+    "payment_entitlement_blocker_count": 1
+  },
+  "section_statuses": {"payment_entitlement_health": "warn"},
+  "checklist": [],
+  "top_alerts": [
+    {
+      "severity": "INFO",
+      "code": "PAYMENT_INPUT_SKIPPED",
+      "section": "payment_entitlement_health",
+      "message": "payment input was skipped"
+    }
+  ],
+  "required_operator_actions": [],
+  "alert_taxonomy": [],
+  "operator_playbook_summary": {
+    "item_count": 1,
+    "blocking_item_count": 0,
+    "manual_review_item_count": 0,
+    "observe_only_item_count": 1,
+    "items": [
+      {
+        "source": "alert",
+        "severity": "INFO",
+        "code": "PAYMENT_INPUT_SKIPPED",
+        "section": "payment_entitlement_health",
+        "message": "payment input was skipped",
+        "operator_action": "observe_only",
+        "owner": "commerce_billing",
+        "default_next_action": "provide_payment_read_only_input",
+        "admin_link_target": "admin.full_product_health.payment_entitlement_health"
+      }
+    ]
+  },
+  "correlation": {},
+  "correlation_ids": []
+}"#,
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", summary_path.display(), error));
+    fs::write(
+        &markdown_path,
+        "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\n## Top Alerts\n\n## Operator Playbook Summary\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
+
+    let output = Command::new(full_product_artifact_validator_path())
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
+        .env(
+            "FULL_PRODUCT_HEALTH_VALIDATION_FULL_REPORT_PATH",
+            &full_report_path,
+        )
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_SUMMARY_PATH", &summary_path)
+        .env(
+            "FULL_PRODUCT_HEALTH_VALIDATION_MARKDOWN_PATH",
+            &markdown_path,
+        )
+        .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
+        .output()
+        .expect("full product artifact validator should run");
+
+    assert!(
+        !output.status.success(),
+        "strict validator should reject skipped payment artifacts carrying real counts"
+    );
+    let stdout = String::from_utf8(output.stdout).expect("validation output should be utf8");
+    let payload: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid validation json: {error}\n{stdout}"));
+    let findings = payload["findings"].as_array().expect("findings array");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "PAYMENT_ENTITLEMENT_STATE_DRIFT"
+                && finding["artifact"] == "full_report"
+                && finding["field"] == "sections.payment_entitlement_health.skipped"
+        }),
+        "validator should identify skipped/query_failed/real_count drift: {stdout}"
+    );
+}
+
+#[test]
+fn full_product_health_docs_expose_operator_safe_payment_fixture_commands() {
+    let handoff_path = full_product_admin_ci_handoff_path();
+    let runbook_path = runbook_path();
+    let schema_doc_path = full_product_artifact_schema_doc_path();
+    let handoff = fs::read_to_string(&handoff_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
+    let runbook = fs::read_to_string(&runbook_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", runbook_path.display(), error));
+    let schema_doc = fs::read_to_string(&schema_doc_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_doc_path.display(), error));
+    let combined = format!("{handoff}\n{runbook}\n{schema_doc}");
+
+    for required in [
+        "payment-entitlement-health-skipped.json",
+        "payment-entitlement-health-query-failed.json",
+        "payment-entitlement-health-real-count.json",
+        "FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json",
+        "FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json",
+        "FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR=/tmp/full-product-health-payment-smoke",
+        "FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_PUBLISH_INDEX_PATH=/tmp/full-product-health-payment-smoke/full-product-health-publish-index.json",
+        "./scripts/dev/smoke_full_product_health_payment_artifact_handoff.sh",
+        "full-product-health.md",
+        "full-product-health-validation.json",
+        "full-product-health-publish-index.json",
+        "publish_full_product_health_artifact_set.sh",
+        "storageStatus",
+        "operator_playbook_summary.items[]",
+        "wallet_payment_exception_count",
+        "FULL_PRODUCT_HEALTH_VALIDATION_STRICT=true",
+        "./scripts/dev/validate_full_product_health_artifacts.sh",
+        "operator-safe",
+        "不连接真实 DB",
+        "不读取 `.env`",
+        "不外呼交易所",
+        "不 lease/report/mutate task",
+    ] {
+        assert!(
+            combined.contains(required),
+            "payment entitlement docs should expose operator-safe fixture command token {required}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_payment_artifact_smoke_script_passes_bash_syntax_check() {
+    let output = Command::new("bash")
+        .arg("-n")
+        .arg(full_product_payment_artifact_smoke_path())
+        .output()
+        .expect("bash -n should be available");
+
+    assert!(
+        output.status.success(),
+        "bash -n syntax check failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn full_product_health_payment_artifact_smoke_is_explicit_file_only_and_no_env() {
+    let script = read_full_product_payment_artifact_smoke_script();
+
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_RUN_LOCAL_HEALTH=false"));
+    assert!(script.contains("summarize_full_product_health.sh"));
+    assert!(script.contains("render_full_product_health_markdown.sh"));
+    assert!(script.contains("validate_full_product_health_artifacts.sh"));
+    assert!(script.contains("publish_full_product_health_artifact_set.sh"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_PUBLISH_INDEX_PATH"));
+    assert!(
+        script.contains("env -i"),
+        "payment artifact smoke should call child scripts through an allowlisted environment"
+    );
+    for required in [
+        ".env",
+        "postgres://",
+        "mysql://",
+        "database_url",
+        "api_key",
+        "api_secret",
+        "request_payload",
+        "response_payload",
+        "raw_payload",
+        "/fapi/v1/order",
+        "/fapi/v2/account",
+        "/fapi/v1/positionRisk",
+        "/api/commerce/internal/execution-tasks/lease",
+        "linkusdt",
+    ] {
+        assert!(
+            script.contains(required),
+            "payment artifact smoke must scan supplied JSON for sensitive marker {required}"
+        );
+    }
+    for forbidden in [
+        "source .env",
+        "cat .env",
+        "FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL",
+        "FULL_PRODUCT_HEALTH_WEB_DATABASE_URL",
+        "FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL",
+        "FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL",
+        "psql ",
+        "curl ",
+        "wget ",
+        "INSERT INTO ",
+        "UPDATE ",
+        "DELETE FROM ",
+    ] {
+        assert!(
+            !script.contains(forbidden),
+            "payment artifact smoke must stay file-only and avoid {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_payment_artifact_smoke_generates_report_summary_and_validation() {
+    let input_path =
+        full_product_artifact_examples_dir().join("payment-entitlement-health-real-count.json");
+    let output_dir = temp_artifact_dir("full-product-health-payment-artifact-smoke");
+    let full_report_path = output_dir.join("full-product-health.json");
+    let summary_path = output_dir.join("full-product-health-summary.json");
+    let markdown_path = output_dir.join("full-product-health.md");
+    let validation_path = output_dir.join("full-product-health-validation.json");
+    let publish_index_path = output_dir.join("full-product-health-publish-index.json");
+
+    let output = Command::new(full_product_payment_artifact_smoke_path())
+        .env("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH", &input_path)
+        .env("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR", &output_dir)
+        .env("BINANCE_API_KEY", "binance-key")
+        .env("BINANCE_API_SECRET", "binance-secret")
+        .env("MINIMAX_TEST_KEY", "minimax-secret")
+        .env("DATABASE_URL", "postgres://user:secret@db/quant_core")
+        .output()
+        .expect("payment artifact smoke should run");
+
+    assert!(
+        output.status.success(),
+        "payment artifact smoke should generate all artifacts:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("smoke manifest should be utf8");
+    let manifest: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid smoke manifest json: {error}\n{stdout}"));
+    assert_eq!(manifest["status"], "ok");
+    assert_eq!(manifest["payment"]["wallet_payment_exception_count"], 2);
+    assert_eq!(manifest["payment"]["payment_entitlement_blocker_count"], 1);
+    assert_eq!(
+        manifest["artifacts"]["full_report"],
+        full_report_path.display().to_string()
+    );
+    assert_eq!(
+        manifest["artifacts"]["summary"],
+        summary_path.display().to_string()
+    );
+    assert_eq!(
+        manifest["artifacts"]["validation"],
+        validation_path.display().to_string()
+    );
+    assert_eq!(
+        manifest["artifacts"]["markdown"],
+        markdown_path.display().to_string()
+    );
+    assert_eq!(
+        manifest["artifacts"]["publish_index"],
+        publish_index_path.display().to_string()
+    );
+    assert_eq!(manifest["publish_index_status"], "current");
+
+    let full_report_body = fs::read_to_string(&full_report_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", full_report_path.display(), error));
+    let summary_body = fs::read_to_string(&summary_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", summary_path.display(), error));
+    let markdown_body = fs::read_to_string(&markdown_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", markdown_path.display(), error));
+    let validation_body = fs::read_to_string(&validation_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", validation_path.display(), error));
+    let publish_index_body = fs::read_to_string(&publish_index_path).unwrap_or_else(|error| {
+        panic!("failed to read {}: {}", publish_index_path.display(), error)
+    });
+
+    let full_report: Value = serde_json::from_str(&full_report_body)
+        .unwrap_or_else(|error| panic!("invalid full report json: {error}\n{full_report_body}"));
+    let summary: Value = serde_json::from_str(&summary_body)
+        .unwrap_or_else(|error| panic!("invalid summary json: {error}\n{summary_body}"));
+    let validation: Value = serde_json::from_str(&validation_body)
+        .unwrap_or_else(|error| panic!("invalid validation json: {error}\n{validation_body}"));
+    let publish_index: Value = serde_json::from_str(&publish_index_body).unwrap_or_else(|error| {
+        panic!("invalid publish index json: {error}\n{publish_index_body}")
+    });
+
+    assert_eq!(full_report["status"], "fail");
+    assert_eq!(full_report["summary"]["wallet_payment_exception_count"], 2);
+    assert_eq!(
+        full_report["summary"]["payment_entitlement_blocker_count"],
+        1
+    );
+    assert_eq!(
+        full_report["sections"]["payment_entitlement_health"]["source"],
+        "json_path"
+    );
+    assert_eq!(summary["status"], "fail");
+    assert_eq!(summary["summary"]["wallet_payment_exception_count"], 2);
+    assert_eq!(summary["summary"]["payment_entitlement_blocker_count"], 1);
+    assert_eq!(validation["status"], "ok");
+    assert_eq!(validation["summary"]["finding_count"], 0);
+    assert_eq!(publish_index["storageStatus"], "current");
+    assert_eq!(publish_index["validation"]["status"], "ok");
+    assert_eq!(
+        publish_index["summary"]["summary"]["wallet_payment_exception_count"],
+        2
+    );
+    assert_eq!(
+        publish_index["summary"]["summary"]["payment_entitlement_blocker_count"],
+        1
+    );
+    assert!(
+        summary["operator_playbook_summary"]["items"]
+            .as_array()
+            .expect("operator playbook items should be an array")
+            .iter()
+            .any(|item| item["code"] == "PAYMENT_ENTITLEMENT_BLOCKED"
+                && item["operator_action"] == "block_release_until_resolved"
+                && item["owner"] == "commerce_billing"),
+        "summary should expose Admin handoff playbook item: {summary_body}"
+    );
+    assert!(
+        publish_index["summary"]["operator_playbook_summary"]["items"]
+            .as_array()
+            .expect("publish index playbook items should be an array")
+            .iter()
+            .any(|item| item["code"] == "WALLET_PAYMENT_EXCEPTION"
+                && item["metadata"]["wallet_payment_exception_count"] == 2
+                && item["default_next_action"] == "review_wallet_payment_exceptions"),
+        "publish index should preserve wallet exception playbook metadata: {publish_index_body}"
+    );
+    assert!(
+        markdown_body.contains("## Operator Playbook Summary")
+            && markdown_body.contains("WALLET_PAYMENT_EXCEPTION")
+            && markdown_body.contains("PAYMENT_ENTITLEMENT_BLOCKED"),
+        "Markdown should expose operator playbook consumption path: {markdown_body}"
+    );
+
+    let combined_artifacts =
+        format!("{full_report_body}\n{summary_body}\n{markdown_body}\n{validation_body}\n{publish_index_body}")
+            .to_ascii_lowercase();
+    for sensitive in [
+        ".env",
+        "postgres://",
+        "mysql://",
+        "database_url",
+        "api_key",
+        "apikey",
+        "api_secret",
+        "secret",
+        "binance-key",
+        "binance-secret",
+        "minimax-secret",
+        "request_payload",
+        "response_payload",
+        "raw_payload",
+        "/fapi/v1/order",
+        "/fapi/v2/account",
+        "/fapi/v1/positionrisk",
+        "/api/commerce/internal/execution-tasks/lease",
+        "linkusdt",
+    ] {
+        assert!(
+            !combined_artifacts.contains(sensitive),
+            "payment artifact smoke output must not leak sensitive marker {sensitive}: {combined_artifacts}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_payment_artifact_smoke_rejects_missing_invalid_and_sensitive_json() {
+    let missing_path =
+        temp_artifact_dir("full-product-health-payment-smoke-missing").join("missing-payment.json");
+    let invalid_path = temp_json_file("full-product-health-payment-smoke-invalid", "{");
+    let sensitive_path = temp_json_file(
+        "full-product-health-payment-smoke-sensitive",
+        r#"{"status":"ok","source":"operator","api_key":"must-not-pass"}"#,
+    );
+
+    for (path, expected_stderr) in [
+        (&missing_path, "input file is missing"),
+        (&invalid_path, "input JSON is invalid"),
+        (&sensitive_path, "input JSON contains a blocked marker"),
+    ] {
+        let output = Command::new(full_product_payment_artifact_smoke_path())
+            .env("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH", path)
+            .output()
+            .expect("payment artifact smoke should run");
+        assert!(
+            !output.status.success(),
+            "payment artifact smoke should reject {}",
+            path.display()
+        );
+        let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+        assert!(
+            stderr.contains(expected_stderr),
+            "stderr should contain {expected_stderr}, got {stderr}"
+        );
+        let lowered = stderr.to_ascii_lowercase();
+        assert!(
+            !lowered.contains("must-not-pass"),
+            "stderr should not leak rejected JSON content: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_payment_input_producer_script_passes_bash_syntax_check() {
+    let output = Command::new("bash")
+        .arg("-n")
+        .arg(payment_input_producer_path())
+        .output()
+        .expect("bash -n should be available");
+
+    assert!(
+        output.status.success(),
+        "bash -n syntax check failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn full_product_health_payment_input_producer_outputs_skipped_json_without_database_url() {
+    let output = Command::new(payment_input_producer_path())
+        .env_remove("FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL")
+        .env_remove("FULL_PRODUCT_HEALTH_WEB_DATABASE_URL")
+        .env("BINANCE_API_KEY", "binance-key")
+        .env("BINANCE_API_SECRET", "binance-secret")
+        .output()
+        .expect("payment input producer should run");
+
+    assert!(
+        output.status.success(),
+        "missing database url should still produce skipped json:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
+    let payload: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
+
+    assert_eq!(payload["status"], "warn");
+    assert_eq!(payload["source"], "skipped");
+    assert_eq!(payload["read_only_input"], false);
+    assert_eq!(payload["skipped"], true);
+    assert_eq!(payload["wallet_payment_exception_count"], 0);
+    assert_eq!(payload["payment_entitlement_blocker_count"], 0);
+    assert!(
+        alerts(&payload)
+            .iter()
+            .any(|alert| alert["severity"] == "INFO"
+                && alert["code"] == "PAYMENT_INPUT_SKIPPED"
+                && alert["section"] == "payment_entitlement_health"),
+        "skipped payment producer output should explain the missing explicit db input: {stdout}"
+    );
+    for sensitive in [
+        ".env",
+        "postgres://",
+        "mysql://",
+        "database_url",
+        "api_key",
+        "api_secret",
+        "secret",
+        "binance-key",
+        "binance-secret",
+        "request_payload",
+        "response_payload",
+        "raw_payload",
+        "http://",
+        "https://",
+        "/fapi/v1/order",
+        "/api/commerce/internal/execution-tasks/lease",
+        "linkusdt",
+    ] {
+        assert!(
+            !stdout.to_ascii_lowercase().contains(sensitive),
+            "skipped payment input output must not leak sensitive marker {sensitive}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_payment_input_producer_prefers_dedicated_payment_database_url() {
+    let output = Command::new(payment_input_producer_path())
+        .env(
+            "FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL",
+            "postgres://payment-user:secret@db/quant_web",
+        )
+        .env(
+            "FULL_PRODUCT_HEALTH_WEB_DATABASE_URL",
+            "postgres://web-user:secret@db/quant_web",
+        )
+        .output()
+        .expect("payment input producer should run");
+
+    assert!(
+        output.status.success(),
+        "unsupported explicit database url should degrade to mergeable json:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
+    let payload: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
+
+    assert_eq!(payload["status"], "warn");
+    assert_eq!(payload["source"], "quant_web_payment_readonly_db");
+    assert_eq!(payload["query_failed"], true);
+    assert!(
+        alerts(&payload)
+            .iter()
+            .any(|alert| alert["severity"] == "P1"
+                && alert["code"] == "PAYMENT_INPUT_QUERY_FAILED"
+                && alert["section"] == "payment_entitlement_health"),
+        "dedicated payment database url should take precedence when query execution degrades: {stdout}"
+    );
+}
+
+#[test]
+fn full_product_health_payment_input_producer_is_read_only_and_redacts_sensitive_markers() {
+    let script = read_payment_input_producer_script();
+
+    assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL"));
+    assert!(script.contains("FULL_PRODUCT_HEALTH_WEB_DATABASE_URL"));
+    assert!(script.contains("payment_intents"));
+    assert!(script.contains("payment_transactions"));
+    assert!(script.contains("membership_orders"));
+    assert!(script.contains("WALLET_PAYMENT_EXCEPTION"));
+    assert!(script.contains("PAYMENT_ENTITLEMENT_BLOCKED"));
+    assert!(script.contains("PAYMENT_INPUT_SKIPPED"));
+    assert!(
+        script.contains("SELECT"),
+        "payment producer should rely on SELECT-only read models"
+    );
+    assert!(
+        script.contains("python3") || script.contains("python "),
+        "producer should use structured json generation instead of shell string parsing"
+    );
+    for required in [
+        ".env",
+        "postgres://",
+        "mysql://",
+        "database_url",
+        "api_key",
+        "api_secret",
+        "secret",
+        "request_payload",
+        "response_payload",
+        "raw_payload",
+        "http://",
+        "https://",
+        "/fapi/v1/order",
+        "/fapi/v2/account",
+        "/fapi/v1/positionRisk",
+        "/fapi/v2/positionRisk",
+        "/fapi/v1/positionSide/dual",
+        "/api/commerce/internal/execution-tasks/lease",
+        "/api/commerce/internal/execution-results",
+        "/api/commerce/internal/order-results",
+    ] {
+        assert!(
+            script.contains(required),
+            "producer must scan output for sensitive marker {required}"
+        );
+    }
+    for forbidden in [
+        "source .env",
+        "cat .env",
+        "curl ",
+        "wget ",
+        "podman exec",
+        "docker exec",
+        "INSERT INTO ",
+        "UPDATE ",
+        "DELETE FROM ",
+        "raw_payload_json",
+        "metadata_json",
+        "external_tx_id",
+        "payer_ref",
+        "payee_ref",
+        "failure_reason",
+        "LINKUSDT",
+        "LINK-USDT",
+    ] {
+        assert!(
+            !script.contains(forbidden),
+            "producer must stay read-only and avoid {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_payment_input_producer_outputs_mergeable_json_from_read_only_db() {
+    let tool_dir = fake_payment_tool_dir();
+    let path = format!(
+        "{}:{}",
+        tool_dir.display(),
+        env::var("PATH").unwrap_or_default()
+    );
+    let output = Command::new(payment_input_producer_path())
+        .env("PATH", path)
+        .env(
+            "FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL",
+            "postgres://payment-user:secret@db/quant_web",
+        )
+        .env("FULL_PRODUCT_HEALTH_PAYMENT_LOOKBACK_SECS", "86400")
+        .env(
+            "FULL_PRODUCT_HEALTH_PAYMENT_CONFIRMATION_TIMEOUT_SECS",
+            "1800",
+        )
+        .env("BINANCE_API_KEY", "binance-key")
+        .env("BINANCE_API_SECRET", "binance-secret")
+        .output()
+        .expect("payment input producer should run");
+
+    assert!(
+        output.status.success(),
+        "payment producer should emit parseable json for read-only db input:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
+    let payload: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
+
+    assert_eq!(payload["status"], "fail");
+    assert_eq!(payload["source"], "quant_web_payment_readonly_db");
+    assert_eq!(payload["database_engine"], "postgresql");
+    assert_eq!(payload["read_only_input"], true);
+    assert_eq!(payload["lookback_secs"], 86400);
+    assert_eq!(payload["confirmation_timeout_secs"], 1800);
+    assert_eq!(payload["wallet_payment_exception_count"], 2);
+    assert_eq!(payload["payment_entitlement_blocker_count"], 1);
+    assert_eq!(payload["sample"]["payment_intent_id"], 2001);
+    assert_eq!(payload["correlation"]["payment_exception_id"], 2001);
+    assert_eq!(payload["correlation"]["entitlement_check_id"], 1001);
+    assert!(
+        alerts(&payload)
+            .iter()
+            .any(|alert| alert["severity"] == "P1"
+                && alert["code"] == "WALLET_PAYMENT_EXCEPTION"
+                && alert["section"] == "payment_entitlement_health"
+                && alert["metadata"]["wallet_payment_exception_count"] == 2),
+        "producer should surface wallet payment exceptions with safe count metadata: {stdout}"
+    );
+    assert!(
+        alerts(&payload)
+            .iter()
+            .any(|alert| alert["severity"] == "P0"
+                && alert["code"] == "PAYMENT_ENTITLEMENT_BLOCKED"
+                && alert["section"] == "payment_entitlement_health"
+                && alert["metadata"]["payment_entitlement_blocker_count"] == 1),
+        "producer should surface entitlement blockers as P0: {stdout}"
+    );
+    for sensitive in [
+        ".env",
+        "postgres://",
+        "mysql://",
+        "database_url",
+        "api_key",
+        "api_secret",
+        "secret",
+        "binance-key",
+        "binance-secret",
+        "request_payload",
+        "response_payload",
+        "raw_payload",
+        "raw_payload_json",
+        "metadata_json",
+        "external_tx_id",
+        "payer_ref",
+        "payee_ref",
+        "failure_reason",
+        "http://",
+        "https://",
+        "/fapi/v1/order",
+        "/api/commerce/internal/execution-tasks/lease",
+        "linkusdt",
+    ] {
+        assert!(
+            !stdout.to_ascii_lowercase().contains(sensitive),
+            "payment input output must not leak sensitive marker {sensitive}: {stdout}"
         );
     }
 }

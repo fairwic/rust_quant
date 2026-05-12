@@ -138,7 +138,8 @@ def artifact_path(value: str) -> str:
         return "[not provided]"
     if has_blocked_marker(value):
         return "[redacted]"
-    return markdown_cell(value)
+    name = Path(value).name
+    return markdown_cell(name or "[provided]")
 
 
 def read_summary() -> dict[str, Any]:

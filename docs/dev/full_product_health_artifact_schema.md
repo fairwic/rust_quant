@@ -18,6 +18,8 @@ Full report example: `full_product_health_examples/full-product-health.json`.
   `sections`, `alerts`, `alert_taxonomy`, `correlation`.
 - Required `summary` fields: `p0_count`, `p1_count`, `info_count`,
   `read_only_input_count`.
+- Payment entitlement inputs may append `wallet_payment_exception_count` and
+  `payment_entitlement_blocker_count` to the full report summary.
 - `sections` is a keyed object. Existing section names are stable, but section
   detail fields are append-only.
 - `alerts[]` items must use the stable severity enum and must be safe to render
@@ -45,14 +47,17 @@ Summary example: `full_product_health_examples/full-product-health-summary.json`
   `required_operator_action_count`, `alert_taxonomy_count`,
   `correlation_id_count`,
   `read_only_input_count`.
+- Payment entitlement summaries may append `wallet_payment_exception_count` and
+  `payment_entitlement_blocker_count` for Admin/CI counters.
 - Required `operator_playbook_summary` fields: `item_count`,
   `blocking_item_count`, `manual_review_item_count`,
   `observe_only_item_count`, and `items`.
 - `operator_playbook_summary.items[]` is the compact Admin/CI playbook list.
   Each item mirrors the alert code registry fields `owner`,
   `default_next_action`, and `admin_link_target`, plus `source`, `severity`,
-  `code`, `section`, and `operator_action`. Consumers should use the count
-  fields for dashboards and ignore unknown appended item fields.
+  `code`, `section`, `operator_action`, and optional sanitized `metadata`.
+  Consumers should use the count fields for dashboards and ignore unknown
+  appended item fields.
 - `section_statuses` is the preferred Admin/CI summary lookup. Consumers should
   ignore unknown section keys.
 
@@ -137,12 +142,16 @@ Allowed `alert_taxonomy[].operator_action` values are:
   execution audit codes.
 - `admin_readiness`: Admin audit/readiness and full-product summary failure
   codes.
+- `payment_entitlement_health`: wallet payment input, exception, and payment
+  entitlement access codes, including `PAYMENT_INPUT_SKIPPED`,
+  `PAYMENT_INPUT_QUERY_FAILED`, `WALLET_PAYMENT_EXCEPTION`, and
+  `PAYMENT_ENTITLEMENT_BLOCKED`.
 
 `alert_code_metadata` is the playbook-facing companion registry. For every code
 listed in `alert_code_values`, it records:
 
 - `owner`: a stable owner key such as `web_execution`, `news_ops`, `quant_ops`,
-  `admin_ops`, or `platform_health`.
+  `admin_ops`, `commerce_billing`, or `platform_health`.
 - `default_next_action`: a safe action key that Admin can show before a richer
   playbook exists.
 - `admin_link_target`: a stable Admin route key. It is not a local filesystem
@@ -153,6 +162,83 @@ in `full_product_health_artifact_schema.json` before emitting it in
 `alerts[]`, `top_alerts[]`, or `alert_taxonomy[]`, and add matching
 `alert_code_metadata`. Do not use the registry for local paths, URLs, raw
 payloads, credentials, signed endpoints, or live symbols.
+
+Payment entitlement alerts use stable playbook actions:
+
+- `PAYMENT_INPUT_SKIPPED`: `provide_payment_read_only_input`.
+- `PAYMENT_INPUT_QUERY_FAILED`: `inspect_payment_read_only_input`.
+- `WALLET_PAYMENT_EXCEPTION`: `review_wallet_payment_exceptions`.
+- `PAYMENT_ENTITLEMENT_BLOCKED`: `reconcile_payment_entitlement`.
+
+## Payment Entitlement State Contract
+
+`consumer_contracts.payment_entitlement_health_states` pins the CI/Admin
+contract for the payment entitlement producer. This is the 只读 DB opt-in
+contract for payment entitlement health. The stable states are
+`skipped / query_failed / real_count`.
+
+- `skipped`: no explicit `FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL` was
+  provided. The section is `warn`, `source=skipped`,
+  `read_only_input=false`, and uses `PAYMENT_INPUT_SKIPPED`. Consumers must not
+  interpret this as zero incidents.
+- `query_failed`: an explicit read-only DB opt-in was provided, but the
+  PostgreSQL query could not return counts. The section is `warn`,
+  `source=quant_web_payment_readonly_db`, `read_only_input=true`, and uses
+  `PAYMENT_INPUT_QUERY_FAILED`.
+- `real_count`: an explicit read-only DB opt-in produced counts. The section is
+  `source=quant_web_payment_readonly_db`, `read_only_input=true`, and exposes
+  `wallet_payment_exception_count` plus `payment_entitlement_blocker_count`.
+  Status is `ok`, `warn`, or `fail` according to those counts.
+
+The real read-only lane is configured with
+`FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL`,
+`FULL_PRODUCT_HEALTH_PAYMENT_PSQL_BIN`, and
+`FULL_PRODUCT_HEALTH_PAYMENT_QUERY_TIMEOUT_SECS`. Artifact output must not
+include DB URLs, secrets, raw payloads, tx refs, payer/payee refs, local paths,
+signed exchange endpoints, Web mutation endpoints, or live symbols.
+
+The schema declares three synthetic state examples for Admin/CI drift checks:
+`payment-entitlement-health-skipped.json`,
+`payment-entitlement-health-query-failed.json`, and
+`payment-entitlement-health-real-count.json`. These are section-level fixtures,
+not live DB samples. The operator-safe fixture path validates artifacts without
+connecting to a real DB:
+
+```bash
+FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json \
+FULL_PRODUCT_HEALTH_RUN_LOCAL_HEALTH=false \
+./scripts/dev/check_full_product_health.sh > full-product-health-payment-fixture.json
+
+FULL_PRODUCT_HEALTH_SUMMARY_JSON_PATH=full-product-health-payment-fixture.json \
+./scripts/dev/summarize_full_product_health.sh > full-product-health-payment-fixture-summary.json
+
+FULL_PRODUCT_HEALTH_VALIDATION_FULL_REPORT_PATH=full-product-health-payment-fixture.json \
+FULL_PRODUCT_HEALTH_VALIDATION_SUMMARY_PATH=full-product-health-payment-fixture-summary.json \
+FULL_PRODUCT_HEALTH_VALIDATION_MARKDOWN_PATH=docs/dev/full_product_health_examples/full-product-health.md \
+FULL_PRODUCT_HEALTH_VALIDATION_STRICT=true \
+./scripts/dev/validate_full_product_health_artifacts.sh
+```
+
+For the payment handoff smoke that mirrors the final publish/index gate without
+connecting to DB/provider:
+
+```bash
+FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json \
+FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR=/tmp/full-product-health-payment-smoke \
+FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_PUBLISH_INDEX_PATH=/tmp/full-product-health-payment-smoke/full-product-health-publish-index.json \
+./scripts/dev/smoke_full_product_health_payment_artifact_handoff.sh
+```
+
+That smoke writes `full-product-health.md`,
+`full-product-health-validation.json`, and
+`full-product-health-publish-index.json` in addition to full report and summary.
+Before Admin stores or renders the artifact set, consumers should check
+`storageStatus`, then consume
+`summary.summary.wallet_payment_exception_count` and
+`summary.operator_playbook_summary.items[]` from the publish index.
+
+This command is operator-safe: 不连接真实 DB, 不读取 `.env`, 不外呼交易所, and
+不 lease/report/mutate task.
 
 ## Append-Only Boundary
 

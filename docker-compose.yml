@@ -1,107 +1,119 @@
-version: '3.0'
+version: "3.0"
 services:
-  quant_5m:
-    container_name: quant_5m
-    build:
-      context: .
-      dockerfile: Dockerfile
-    working_dir: /usr/src/rust_quant
-    environment:
-      IS_BACK_TEST: 'false'
-      IS_RUN_SYNC_DATA_JOB: 'true'
-      IS_RUN_REAL_STRATEGY: 'true'
-      IS_OPEN_SOCKET: 'true'
-      RUN_STRATEGY_PERIOD: "5m"
-      QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
-      DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
-      OKX_API_KEY:
-      OKX_API_SECRET:
-      OKX_PASSPHRASE:
-    volumes:
-      - .:/usr/src/rust_quant
-    command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
-  quant_1h:
-    container_name: quant_1h  
-    build:
-      context: .
-      dockerfile: Dockerfile
-    working_dir: /usr/src/rust_quant
-    environment:
-      IS_BACK_TEST: 'false'
-      IS_RUN_SYNC_DATA_JOB: 'true'
-      IS_RUN_REAL_STRATEGY: 'true'
-      IS_OPEN_SOCKET: 'true'
-      RUN_STRATEGY_PERIOD: "1H"
-      QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
-      DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
-      OKX_API_KEY:
-      OKX_API_SECRET:
-      OKX_PASSPHRASE:
-    volumes:
-      - .:/usr/src/rust_quant
-    command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
-  quant_4h:
-    container_name: quant_4h
-    build:
-      context: .
-      dockerfile: Dockerfile
-    working_dir: /usr/src/rust_quant
-    environment:
-      IS_BACK_TEST: 'false'
-      IS_RUN_SYNC_DATA_JOB: 'true'
-      IS_RUN_REAL_STRATEGY: 'true'
-      IS_OPEN_SOCKET: 'true'
-      RUN_STRATEGY_PERIOD: "4H"
-      QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
-      DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
-      OKX_API_KEY:
-      OKX_API_SECRET:
-      OKX_PASSPHRASE:
-    volumes:
-      - .:/usr/src/rust_quant
-    command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust-quant"
-  quant_1d:
-    container_name: quant_1d  
-    build:
-      context: .
-      dockerfile: Dockerfile
-    working_dir: /usr/src/rust_quant
-    environment:
-      IS_BACK_TEST: 'false'
-      IS_RUN_SYNC_DATA_JOB: 'true'
-      IS_RUN_REAL_STRATEGY: 'true'
-      IS_OPEN_SOCKET: 'true'
-      RUN_STRATEGY_PERIOD: "1Dutc"
-      QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
-      DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
-      OKX_API_KEY:
-      OKX_API_SECRET:
-      OKX_PASSPHRASE:
-    volumes:
-      - .:/usr/src/rust_quant
-    command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
-  postgres:
-    image: postgres:16
-    container_name: quant_core_postgres
-    restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: example
-      POSTGRES_DB: quant_core
-    ports:
-      - "5432:5432"
-    volumes:
-      - ~/docker-volumes/quant_core_postgres:/var/lib/postgresql/data
-    command: ["postgres", "-c", "max_connections=1000"]
-  redis:
-    image: redis:6.2
-    container_name: redis
-    restart: always
-    ports:
-      - "6379:6379" # 映射端口：宿主机6379 -> 容器6379
-    volumes:
-      - ~/docker-volumes/redis/redis_data:/data
-      - ~/docker-volumes/redis/redis.conf:/usr/local/etc/redis/redis.conf
-    command: [ "redis-server", "/usr/local/etc/redis/redis.conf" ]
+    quant_5m:
+        container_name: quant_5m
+        build:
+            context: .
+            dockerfile: Dockerfile
+        working_dir: /usr/src/rust_quant
+        environment:
+            IS_BACK_TEST: "false"
+            IS_RUN_SYNC_DATA_JOB: "true"
+            IS_RUN_REAL_STRATEGY: "true"
+            IS_OPEN_SOCKET: "true"
+            RUN_STRATEGY_PERIOD: "5m"
+            QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+            DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+            OKX_API_KEY:
+            OKX_API_SECRET:
+            OKX_PASSPHRASE:
+        volumes:
+            - .:/usr/src/rust_quant
+        command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
+    quant_1h:
+        container_name: quant_1h
+        build:
+            context: .
+            dockerfile: Dockerfile
+        working_dir: /usr/src/rust_quant
+        environment:
+            IS_BACK_TEST: "false"
+            IS_RUN_SYNC_DATA_JOB: "true"
+            IS_RUN_REAL_STRATEGY: "true"
+            IS_OPEN_SOCKET: "true"
+            RUN_STRATEGY_PERIOD: "1H"
+            QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+            DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+            OKX_API_KEY:
+            OKX_API_SECRET:
+            OKX_PASSPHRASE:
+        volumes:
+            - .:/usr/src/rust_quant
+        command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
+    quant_4h:
+        container_name: quant_4h
+        build:
+            context: .
+            dockerfile: Dockerfile
+        working_dir: /usr/src/rust_quant
+        environment:
+            IS_BACK_TEST: "false"
+            IS_RUN_SYNC_DATA_JOB: "true"
+            IS_RUN_REAL_STRATEGY: "true"
+            IS_OPEN_SOCKET: "true"
+            RUN_STRATEGY_PERIOD: "4H"
+            QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+            DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+            OKX_API_KEY:
+            OKX_API_SECRET:
+            OKX_PASSPHRASE:
+        volumes:
+            - .:/usr/src/rust_quant
+        command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust-quant"
+    quant_1d:
+        container_name: quant_1d
+        build:
+            context: .
+            dockerfile: Dockerfile
+        working_dir: /usr/src/rust_quant
+        environment:
+            IS_BACK_TEST: "false"
+            IS_RUN_SYNC_DATA_JOB: "true"
+            IS_RUN_REAL_STRATEGY: "true"
+            IS_OPEN_SOCKET: "true"
+            RUN_STRATEGY_PERIOD: "1Dutc"
+            QUANT_CORE_DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+            DATABASE_URL: postgres://postgres:example@postgres:5432/quant_core
+            OKX_API_KEY:
+            OKX_API_SECRET:
+            OKX_PASSPHRASE:
+        volumes:
+            - .:/usr/src/rust_quant
+        command: sh -c "cargo build --release -p rust-quant-cli && ./target/release/rust_quant"
+    postgres:
+        image: postgres:16
+        container_name: quant_core_postgres
+        restart: always
+        environment:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: example
+            POSTGRES_DB: quant_core
+        ports:
+            - "5432:5432"
+        volumes:
+            - ~/docker-volumes/quant_core_postgres:/var/lib/postgresql/data
+        command: ["postgres", "-c", "max_connections=1000"]
+    mysql:
+        image: mysql:8
+        container_name: quant_core_mysql
+        restart: always
+        environment:
+            MYSQL_ROOT_USER: root
+            MYSQL_ROOT_PASSWORD: example
+            MYSQL_DATABASE: test
+        ports:
+            - "5432:5432"
+        volumes:
+            - ~/docker-volumes/mysql_data:/var/lib/mysql
+    redis:
+        image: redis:6.2
+        container_name: redis
+        restart: always
+        ports:
+            - "6379:6379" # 映射端口：宿主机6379 -> 容器6379
+        volumes:
+            - ~/docker-volumes/redis/redis_data:/data
+            - ~/docker-volumes/redis/redis.conf:/usr/local/etc/redis/redis.conf
+        command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
 networks:
-  default:
+    default:

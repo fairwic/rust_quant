@@ -1,0 +1,48 @@
+{
+  "contract_state": "real_count",
+  "section": "payment_entitlement_health",
+  "status": "fail",
+  "source": "quant_web_payment_readonly_db",
+  "database_engine": "postgresql",
+  "read_only_input": true,
+  "lookback_secs": 86400,
+  "confirmation_timeout_secs": 1800,
+  "wallet_payment_exception_count": 2,
+  "payment_entitlement_blocker_count": 1,
+  "sample": {
+    "payment_intent_id": 2001,
+    "membership_order_id": 1001,
+    "payment_transaction_id": 3001,
+    "exception_code": "wallet_entitlement_missing",
+    "age_minutes": 45
+  },
+  "alerts": [
+    {
+      "severity": "P1",
+      "code": "WALLET_PAYMENT_EXCEPTION",
+      "section": "payment_entitlement_health",
+      "message": "wallet payment exceptions require review",
+      "metadata": {
+        "wallet_payment_exception_count": 2,
+        "payment_entitlement_blocker_count": 1,
+        "sample_kind": "wallet_payment_exception"
+      }
+    },
+    {
+      "severity": "P0",
+      "code": "PAYMENT_ENTITLEMENT_BLOCKED",
+      "section": "payment_entitlement_health",
+      "message": "wallet payment succeeded but entitlement is still blocked",
+      "metadata": {
+        "wallet_payment_exception_count": 2,
+        "payment_entitlement_blocker_count": 1,
+        "sample_kind": "payment_entitlement"
+      }
+    }
+  ],
+  "correlation": {
+    "payment_exception_id": 2001,
+    "entitlement_check_id": 1001,
+    "user_id": null
+  }
+}

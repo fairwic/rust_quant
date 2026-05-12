@@ -67,6 +67,7 @@ blocked_marker_groups = [
             "/api/commerce/internal/order-results",
         ],
     ),
+    ("PAYMENT_IDENTITY_OR_TX_REFERENCE", ["tx_hash", "transaction_hash", "payer", "payee"]),
     ("URL_REFERENCE", ["https://", "http://", "file://"]),
     ("LOCAL_PATH_REFERENCE", ["/Users/", "/tmp/"]),
     ("LINK_POSITION_SYMBOL", ["LINKUSDT", "LINK-USDT"]),
@@ -512,6 +513,150 @@ def validate_alert_code_values(
         )
 
 
+def optional_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def payment_alert_codes(payload: dict[str, Any], section: dict[str, Any]) -> set[str]:
+    alerts = section.get("alerts")
+    all_alerts = []
+    if not isinstance(alerts, list):
+        alerts = []
+    all_alerts.extend(alerts)
+    top_alerts = payload.get("alerts")
+    if isinstance(top_alerts, list):
+        all_alerts.extend(
+            alert
+            for alert in top_alerts
+            if isinstance(alert, dict)
+            and str(alert.get("section") or "") == "payment_entitlement_health"
+        )
+    codes: set[str] = set()
+    for alert in all_alerts:
+        if isinstance(alert, dict) and isinstance(alert.get("code"), str):
+            codes.add(alert["code"])
+    return codes
+
+
+def payment_state_drift(
+    findings: list[dict[str, Any]],
+    field: str,
+    message: str = "payment entitlement state does not match skipped/query_failed/real_count contract",
+) -> None:
+    findings.append(
+        finding(
+            "PAYMENT_ENTITLEMENT_STATE_DRIFT",
+            "full_report",
+            message,
+            field=field,
+        )
+    )
+
+
+def validate_payment_entitlement_state(
+    payload: dict[str, Any],
+    findings: list[dict[str, Any]],
+) -> None:
+    sections = payload.get("sections")
+    if not isinstance(sections, dict):
+        return
+    section = sections.get("payment_entitlement_health")
+    if section is None:
+        return
+    if not isinstance(section, dict):
+        payment_state_drift(findings, "sections.payment_entitlement_health")
+        return
+
+    skipped = section.get("skipped") is True
+    query_failed = section.get("query_failed") is True
+    wallet_count = optional_int(section.get("wallet_payment_exception_count"))
+    blocker_count = optional_int(section.get("payment_entitlement_blocker_count"))
+    alert_codes = payment_alert_codes(payload, section)
+    contract_state = str(section.get("contract_state") or "")
+    fixture_json_path = section.get("source") == "json_path" and contract_state in {
+        "skipped",
+        "query_failed",
+        "real_count",
+    }
+
+    if skipped and query_failed:
+        payment_state_drift(findings, "sections.payment_entitlement_health.query_failed")
+    if wallet_count is None:
+        payment_state_drift(
+            findings,
+            "sections.payment_entitlement_health.wallet_payment_exception_count",
+        )
+        wallet_count = 0
+    if blocker_count is None:
+        payment_state_drift(
+            findings,
+            "sections.payment_entitlement_health.payment_entitlement_blocker_count",
+        )
+        blocker_count = 0
+
+    if skipped:
+        if section.get("status") != "warn":
+            payment_state_drift(findings, "sections.payment_entitlement_health.status")
+        if section.get("source") != "skipped" and not fixture_json_path:
+            payment_state_drift(findings, "sections.payment_entitlement_health.source")
+        if section.get("read_only_input") is not False and not fixture_json_path:
+            payment_state_drift(findings, "sections.payment_entitlement_health.read_only_input")
+        if wallet_count != 0 or blocker_count != 0:
+            payment_state_drift(findings, "sections.payment_entitlement_health.skipped")
+        if "PAYMENT_INPUT_SKIPPED" not in alert_codes:
+            payment_state_drift(findings, "sections.payment_entitlement_health.alerts")
+        return
+
+    if query_failed:
+        if section.get("status") != "warn":
+            payment_state_drift(findings, "sections.payment_entitlement_health.status")
+        if section.get("source") != "quant_web_payment_readonly_db" and not fixture_json_path:
+            payment_state_drift(findings, "sections.payment_entitlement_health.source")
+        if section.get("read_only_input") is not True:
+            payment_state_drift(findings, "sections.payment_entitlement_health.read_only_input")
+        if wallet_count != 0 or blocker_count != 0:
+            payment_state_drift(findings, "sections.payment_entitlement_health.query_failed")
+        if "PAYMENT_INPUT_QUERY_FAILED" not in alert_codes:
+            payment_state_drift(findings, "sections.payment_entitlement_health.alerts")
+        return
+
+    if section.get("source") != "quant_web_payment_readonly_db" and not fixture_json_path:
+        payment_state_drift(findings, "sections.payment_entitlement_health.source")
+    if section.get("read_only_input") is not True:
+        payment_state_drift(findings, "sections.payment_entitlement_health.read_only_input")
+    validate_enum_value(
+        "full_report",
+        "sections.payment_entitlement_health.status",
+        section.get("status"),
+        allowed_status_values,
+        findings,
+    )
+    if wallet_count < 0 or blocker_count < 0:
+        payment_state_drift(findings, "sections.payment_entitlement_health.real_count")
+    if blocker_count > wallet_count:
+        payment_state_drift(
+            findings,
+            "sections.payment_entitlement_health.payment_entitlement_blocker_count",
+        )
+    if wallet_count > 0 and "WALLET_PAYMENT_EXCEPTION" not in alert_codes:
+        payment_state_drift(findings, "sections.payment_entitlement_health.alerts")
+    if blocker_count > 0 and "PAYMENT_ENTITLEMENT_BLOCKED" not in alert_codes:
+        payment_state_drift(findings, "sections.payment_entitlement_health.alerts")
+
+    summary = payload.get("summary")
+    if isinstance(summary, dict):
+        summary_wallet_count = optional_int(summary.get("wallet_payment_exception_count"))
+        summary_blocker_count = optional_int(summary.get("payment_entitlement_blocker_count"))
+        if summary_wallet_count is not None and summary_wallet_count != wallet_count:
+            payment_state_drift(findings, "summary.wallet_payment_exception_count")
+        if summary_blocker_count is not None and summary_blocker_count != blocker_count:
+            payment_state_drift(findings, "summary.payment_entitlement_blocker_count")
+
+
 def read_file_text(artifact: str, path: str, findings: list[dict[str, Any]]) -> tuple[bool, str]:
     if not path:
         findings.append(finding("MISSING_ARTIFACT_PATH", artifact, "artifact path is not configured"))
@@ -632,6 +777,7 @@ def validate_json_artifact(
             findings,
         )
     if artifact == "full_report":
+        validate_payment_entitlement_state(payload, findings)
         validate_alert_enum_values(artifact, payload, "alerts", findings, validate_codes=True)
         validate_alert_taxonomy_values(artifact, payload, findings)
     if artifact == "summary":

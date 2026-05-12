@@ -34,7 +34,9 @@ not shell out from a request handler and should not parse free-form log text.
 | Strict validation gate | yes | no | no | `FULL_PRODUCT_HEALTH_VALIDATION_FULL_REPORT_PATH=/tmp/full-product-health-ci/full-product-health.json FULL_PRODUCT_HEALTH_VALIDATION_SUMMARY_PATH=/tmp/full-product-health-ci/full-product-health-summary.json FULL_PRODUCT_HEALTH_VALIDATION_MARKDOWN_PATH=/tmp/full-product-health-ci/full-product-health.md FULL_PRODUCT_HEALTH_VALIDATION_STRICT=true ./scripts/dev/validate_full_product_health_artifacts.sh` |
 | Candidate schema validation | yes | no | no | `FULL_PRODUCT_HEALTH_VALIDATION_SCHEMA_PATH=/tmp/full_product_health_artifact_schema.candidate.json FULL_PRODUCT_HEALTH_VALIDATION_FULL_REPORT_PATH=/tmp/full-product-health-ci/full-product-health.json FULL_PRODUCT_HEALTH_VALIDATION_SUMMARY_PATH=/tmp/full-product-health-ci/full-product-health-summary.json FULL_PRODUCT_HEALTH_VALIDATION_STRICT=true ./scripts/dev/validate_full_product_health_artifacts.sh` |
 | Standalone Markdown render | yes | no | no | `FULL_PRODUCT_HEALTH_MARKDOWN_SUMMARY_JSON_PATH=/tmp/full-product-health-ci/full-product-health-summary.json FULL_PRODUCT_HEALTH_MARKDOWN_FULL_REPORT_PATH=/tmp/full-product-health-ci/full-product-health.json FULL_PRODUCT_HEALTH_MARKDOWN_SUMMARY_PATH=/tmp/full-product-health-ci/full-product-health-summary.json FULL_PRODUCT_HEALTH_MARKDOWN_PATH=/tmp/full-product-health-ci/full-product-health.md ./scripts/dev/render_full_product_health_markdown.sh` |
+| Payment real-count artifact smoke | yes | explicit redacted JSON file only | no | `FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR=/tmp/full-product-health-payment-smoke ./scripts/dev/smoke_full_product_health_payment_artifact_handoff.sh` |
 | Web section sampling | no | yes | no | `FULL_PRODUCT_HEALTH_WEB_DATABASE_URL=mysql://readonly@host/quant_web ./scripts/dev/build_full_product_health_web_input.sh` |
+| Payment entitlement sampling | no | yes | no | `FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL=postgres://readonly@host/quant_web ./scripts/dev/build_full_product_health_payment_input.sh` |
 | News section sampling | no | yes | no | `FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL=postgres://readonly@host/quant_news ./scripts/dev/build_full_product_health_news_input.sh` |
 | Admin section sampling | no | yes | no | `FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL=postgres://readonly@host/quant_admin ./scripts/dev/build_full_product_health_admin_input.sh` |
 | Local worker health child process | no | local explicit opt-in only | no | `FULL_PRODUCT_HEALTH_CI_RUN_LOCAL_HEALTH=true ./scripts/dev/run_full_product_health_ci.sh` |
@@ -87,6 +89,7 @@ These commands are not default CI commands.
 
 ```bash
 FULL_PRODUCT_HEALTH_WEB_DATABASE_URL=mysql://readonly@host/quant_web \
+FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL=postgres://readonly@host/quant_web \
 FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL=postgres://readonly@host/quant_news \
 FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL=postgres://readonly@host/quant_admin \
 FULL_PRODUCT_HEALTH_CI_ARTIFACT_DIR=/tmp/full-product-health-ci \
@@ -98,11 +101,84 @@ FULL_PRODUCT_HEALTH_CI_RUN_LOCAL_HEALTH=false \
 ./scripts/dev/run_full_product_health_ci.sh
 ```
 
-Read-only DB opt-in may sample aggregate counts from `quant_web`, `quant_news`,
-and Admin-owned readiness/audit tables. It must not write to any database, must
-not call lease/report/mutate task endpoints, and must not include raw payloads,
-API keys, secrets, passphrases, ciphers, signed exchange endpoints, or database
-connection strings in generated artifacts.
+Read-only DB opt-in may sample aggregate counts from `quant_web`, payment
+entitlement breakpoints, `quant_news`, and Admin-owned readiness/audit tables.
+It must not write to any database, must not call lease/report/mutate task
+endpoints, and must not include raw payloads, tx raw bodies, API keys, secrets,
+passphrases, ciphers, signed exchange endpoints, or database connection strings
+in generated artifacts.
+
+Payment entitlement read-only DB opt-in is the 只读 DB opt-in lane covered by
+`consumer_contracts.payment_entitlement_health_states`. It has a stable
+three-state contract: `skipped / query_failed / real_count`. `skipped` means
+`FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL` was not provided and must not be
+treated as zero incidents. `query_failed` means the URL was provided but the
+read-only PostgreSQL query failed. `real_count` means the query returned
+`wallet_payment_exception_count` and `payment_entitlement_blocker_count`.
+Operators can override only the payment producer binary and timeout with
+`FULL_PRODUCT_HEALTH_PAYMENT_PSQL_BIN` and
+`FULL_PRODUCT_HEALTH_PAYMENT_QUERY_TIMEOUT_SECS`; these values are runtime
+inputs only and must not appear in uploaded artifacts.
+
+For local Admin/CI contract drift checks, use a redacted payment real-count JSON
+instead of a real DB. The reusable operator-safe smoke command is:
+
+```bash
+FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json \
+FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR=/tmp/full-product-health-payment-smoke \
+FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_PUBLISH_INDEX_PATH=/tmp/full-product-health-payment-smoke/full-product-health-publish-index.json \
+./scripts/dev/smoke_full_product_health_payment_artifact_handoff.sh
+```
+
+It writes `full-product-health.json`,
+`full-product-health-summary.json`, `full-product-health.md`,
+`full-product-health-validation.json`, and
+`full-product-health-publish-index.json` under the output directory, then
+prints a small manifest with the generated paths, publish/index status, and
+payment counts. If
+`FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR` is omitted, the script creates a
+temporary output directory and keeps it for operator review.
+
+The publish/index artifact is produced by
+`publish_full_product_health_artifact_set.sh` before any real upload or Admin
+storage write. Admin/CI should consume `storageStatus`,
+`summary.summary.wallet_payment_exception_count`,
+`summary.summary.payment_entitlement_blocker_count`, and
+`summary.operator_playbook_summary.items[]` from that index. The
+`WALLET_PAYMENT_EXCEPTION` item must preserve
+`default_next_action=review_wallet_payment_exceptions`; the
+`PAYMENT_ENTITLEMENT_BLOCKED` item must preserve the blocking
+`operator_action=block_release_until_resolved`.
+
+The wrapper is intentionally file-only: it requires
+`FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH`, rejects missing files, invalid
+JSON, and JSON containing blocked sensitive markers, and runs the aggregator,
+summary, Markdown renderer, validator, and publisher through an allowlisted
+environment. It does not read `.env`, does not connect to a DB, does not call
+providers or signed exchange endpoints, does not lease/report/mutate tasks, and
+does not touch `LINKUSDT`.
+
+The equivalent expanded command path is:
+
+```bash
+FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json \
+FULL_PRODUCT_HEALTH_RUN_LOCAL_HEALTH=false \
+./scripts/dev/check_full_product_health.sh > full-product-health-payment-fixture.json
+
+FULL_PRODUCT_HEALTH_SUMMARY_JSON_PATH=full-product-health-payment-fixture.json \
+./scripts/dev/summarize_full_product_health.sh > full-product-health-payment-fixture-summary.json
+
+FULL_PRODUCT_HEALTH_VALIDATION_FULL_REPORT_PATH=full-product-health-payment-fixture.json \
+FULL_PRODUCT_HEALTH_VALIDATION_SUMMARY_PATH=full-product-health-payment-fixture-summary.json \
+FULL_PRODUCT_HEALTH_VALIDATION_MARKDOWN_PATH=docs/dev/full_product_health_examples/full-product-health.md \
+FULL_PRODUCT_HEALTH_VALIDATION_STRICT=true \
+./scripts/dev/validate_full_product_health_artifacts.sh
+```
+
+The fixture set covers `payment-entitlement-health-skipped.json`,
+`payment-entitlement-health-query-failed.json`, and
+`payment-entitlement-health-real-count.json`. It is operator-safe: 不连接真实 DB,
+不读取 `.env`, 不外呼交易所, and 不 lease/report/mutate task.
 
 If a downstream pipeline wants to validate a candidate schema before adopting it:
 

@@ -243,13 +243,14 @@ Phase 39 增加的安全一键输入 runner 是：
 ./scripts/dev/build_full_product_health_inputs.sh
 ```
 
-它先按显式提供的只读 URL 分别调用三个 producer：
+它先按显式提供的只读 URL 分别调用四个 producer：
 
 - `build_full_product_health_web_input.sh`
+- `build_full_product_health_payment_input.sh`
 - `build_full_product_health_news_input.sh`
 - `build_full_product_health_admin_input.sh`
 
-然后把生成的三个临时 JSON 路径传给 `check_full_product_health.sh` 合并成完整 full-product 报告。未提供的 section 不会尝试读取配置或 `.env`，而是复用对应 producer 的 skipped JSON：`WEB_INPUT_SKIPPED`、`NEWS_INPUT_SKIPPED`、`ADMIN_INPUT_SKIPPED`。默认临时文件会自动删除；需要排查 producer 输出时可以显式设置 `FULL_PRODUCT_HEALTH_KEEP_INPUTS=true`。
+然后把生成的四个临时 JSON 路径传给 `check_full_product_health.sh` 合并成完整 full-product 报告。未提供的 section 不会尝试读取配置或 `.env`，而是复用对应 producer 的 skipped JSON：`WEB_INPUT_SKIPPED`、`PAYMENT_INPUT_SKIPPED`、`NEWS_INPUT_SKIPPED`、`ADMIN_INPUT_SKIPPED`。默认临时文件会自动删除；需要排查 producer 输出时可以显式设置 `FULL_PRODUCT_HEALTH_KEEP_INPUTS=true`。
 
 最小本地只读合并，不采集本地 worker 子进程时：
 
@@ -258,10 +259,11 @@ FULL_PRODUCT_HEALTH_RUN_LOCAL_HEALTH=false \
 ./scripts/dev/build_full_product_health_inputs.sh
 ```
 
-采集三段真实只读 DB 输入时必须显式传入 URL：
+采集四段真实只读 DB 输入时必须显式传入 URL：
 
 ```bash
 FULL_PRODUCT_HEALTH_WEB_DATABASE_URL=<readonly-web-postgres-url> \
+FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL=<readonly-payment-postgres-url> \
 FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL=<readonly-news-postgres-url> \
 FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL=<readonly-admin-postgres-url> \
 ./scripts/dev/build_full_product_health_inputs.sh
@@ -274,6 +276,7 @@ FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL=<readonly-admin-postgres-url> \
 ```bash
 FULL_PRODUCT_HEALTH_LOCAL_JSON_PATH=/tmp/local-health.json \
 FULL_PRODUCT_HEALTH_WEB_JSON_PATH=/tmp/web-task-order-health.json \
+FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH=/tmp/payment-entitlement-health.json \
 FULL_PRODUCT_HEALTH_NEWS_JSON_PATH=/tmp/news-source-ai-health.json \
 FULL_PRODUCT_HEALTH_ADMIN_JSON_PATH=/tmp/admin-readiness.json \
 ./scripts/dev/check_full_product_health.sh
@@ -315,7 +318,39 @@ FULL_PRODUCT_HEALTH_WEB_JSON_PATH=/tmp/web-task-order-health.json \
 
 输出只包含最小可合并 section JSON：`status`、`source`、`read_only_input`、窗口阈值、计数、脱敏 sample、`alerts[]`、`correlation`。它不会输出 Web DB URL、API key/secret、buyer email、symbol、request/response/raw payload，也不会输出 signed/account/order/position endpoint。查询失败、`psql` 不可用或 URL 未提供时不会写库、不会重试 mutation，而是输出 `WEB_INPUT_QUERY_FAILED` 或 `WEB_INPUT_SKIPPED` 的降级 JSON，供 full-product runner 合并展示。
 
-第二片真实 News/AI 只读输入由独立 producer 生成：
+### Payment Entitlement Input Producer
+
+第二片真实 payment entitlement 只读输入由独立 producer 生成：
+
+```bash
+./scripts/dev/build_full_product_health_payment_input.sh
+```
+
+默认不读取任何 payment 连接配置，也不读取 `.env`。未显式提供只读 payment 数据库输入时，脚本仍以 exit code `0` 输出 machine-readable JSON，字段为 `status=warn`、`source=skipped`、`skipped=true`，并带 `PAYMENT_INPUT_SKIPPED` INFO alert，表示 `payment_entitlement_health` 真实钱包支付/权益阻断事实未采集。
+
+需要采集 `quant_web` 钱包支付与权益阻断事实时，必须显式传入只读 PostgreSQL URL。优先读取 `FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL`；未设置时才回退到 `FULL_PRODUCT_HEALTH_WEB_DATABASE_URL`：
+
+```bash
+FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL=<readonly-payment-postgres-url> \
+FULL_PRODUCT_HEALTH_PAYMENT_LOOKBACK_SECS=86400 \
+FULL_PRODUCT_HEALTH_PAYMENT_CONFIRMATION_TIMEOUT_SECS=1800 \
+./scripts/dev/build_full_product_health_payment_input.sh > /tmp/payment-entitlement-health.json
+
+FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH=/tmp/payment-entitlement-health.json \
+./scripts/dev/check_full_product_health.sh
+```
+
+该 producer 只执行只读 `SELECT` 聚合，读取：
+
+- `payment_intents`：聚合钱包支付 intent 的超时、缺失交易、校验失败、权益未发放等异常数。
+- `payment_transactions`：仅用于关联最近只读 transaction 状态与 confirmation timeout，不读取原始 payload、tx 原文或地址引用。
+- `membership_orders`：仅用于判断 membership entitlement 是否已发放以及 `entitlement_check_id` 的只读关联。
+
+输出只包含最小可合并 section JSON：`status`、`source`、`read_only_input`、窗口阈值、`wallet_payment_exception_count`、`payment_entitlement_blocker_count`、脱敏 sample、`alerts[]`、`correlation`。它不会输出 DB URL、buyer email、tx hash、payer/payee ref、provider raw payload、local path、http URL，也不会调用 provider、signed/account/order/position endpoint。查询失败、`psql` 不可用或 URL 未提供时不会写库、不会重试 mutation，而是输出 `PAYMENT_INPUT_QUERY_FAILED` 或 `PAYMENT_INPUT_SKIPPED` 的降级 JSON，供 full-product runner 合并展示。
+
+### News Input Producer
+
+第三片真实 News/AI 只读输入由独立 producer 生成：
 
 ```bash
 ./scripts/dev/build_full_product_health_news_input.sh
@@ -511,6 +546,57 @@ FULL_PRODUCT_HEALTH_CI_RUN_LOCAL_HEALTH=false \
 - `FULL_PRODUCT_HEALTH_CI_FAIL_ON_STATUS`: 默认 `fail`，即 summary `overall_status=fail` 时退出非零；设为 `warn` 时 `warn/fail` 都阻断；设为 `never` 时只写 artifact，不按 overall status 阻断，例如 `FULL_PRODUCT_HEALTH_CI_FAIL_ON_STATUS=never`。
 
 CI wrapper 使用 `env -i` 白名单调用 builder、summary 和可选 Markdown renderer，只传递 `PATH`、`FULL_PRODUCT_HEALTH_*` 的只读输入变量和 artifact 路径。它会扫描 full report、summary 和可选 Markdown artifact，拒绝 `.env`、数据库 URL、API key/secret、raw payload、Binance signed/account/order/position endpoint、Web lease/report/order mutation endpoint 和 `LINKUSDT` 标记。
+
+#### Payment Entitlement 只读 DB opt-in
+
+payment entitlement producer 只能通过显式只读 DB opt-in 进入真实采样：
+对应 schema contract 是 `payment_entitlement_health_states`。
+
+```bash
+FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL=postgres://readonly@host/quant_web \
+FULL_PRODUCT_HEALTH_PAYMENT_PSQL_BIN=psql \
+FULL_PRODUCT_HEALTH_PAYMENT_QUERY_TIMEOUT_SECS=15 \
+./scripts/dev/build_full_product_health_payment_input.sh
+```
+
+它的 artifact/contract 三态固定为 `skipped / query_failed / real_count`：
+
+- `skipped`: 没有提供 `FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL`，输出
+  `PAYMENT_INPUT_SKIPPED`。这只是未采集，不代表真实计数为 0。
+- `query_failed`: 已 opt-in，但只读查询失败，输出
+  `PAYMENT_INPUT_QUERY_FAILED`。这代表采集失败，不代表真实计数为 0。
+- `real_count`: 只读查询成功，输出 `wallet_payment_exception_count` 和
+  `payment_entitlement_blocker_count`；Admin/CI 只能消费这些聚合计数和安全
+  alert metadata。
+
+该路径不读取 `.env`，不调用服务，不访问交易所，不 lease/report/mutate task，
+不输出 DB URL、secret、raw payload、tx hash、payer/payee ref 或本地路径。
+
+合成 fixture 用于 Admin/CI 区分三态且不连接真实 DB：
+`payment-entitlement-health-skipped.json`,
+`payment-entitlement-health-query-failed.json`, and
+`payment-entitlement-health-real-count.json`。operator-safe 校验路径会先生成
+full report、summary、Markdown 和 strict validation，再通过
+`publish_full_product_health_artifact_set.sh` 生成正式上传或入库前的
+metadata/index JSON：
+
+```bash
+FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json \
+FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR=/tmp/full-product-health-payment-smoke \
+FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_PUBLISH_INDEX_PATH=/tmp/full-product-health-payment-smoke/full-product-health-publish-index.json \
+./scripts/dev/smoke_full_product_health_payment_artifact_handoff.sh
+```
+
+该命令不连接真实 DB，不读取 `.env`，不外呼交易所，不 lease/report/mutate task。
+输出目录固定包含 `full-product-health.json`,
+`full-product-health-summary.json`, `full-product-health.md`,
+`full-product-health-validation.json`, and
+`full-product-health-publish-index.json`。Admin/CI 在正式 publish/index 前应
+先检查 index 的 `storageStatus` 和 `validation.status`，再从
+`summary.summary.wallet_payment_exception_count`,
+`summary.summary.payment_entitlement_blocker_count`, and
+`summary.operator_playbook_summary.items[]` 消费钱包异常数量和 operator
+playbook。不得从 Markdown 文本推断 action。
 
 ### Artifact Validation
 

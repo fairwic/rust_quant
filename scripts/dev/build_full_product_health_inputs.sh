@@ -13,6 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 : "${FULL_PRODUCT_HEALTH_LOCAL_JSON_PATH:=}"
 : "${FULL_PRODUCT_HEALTH_KEEP_INPUTS:=false}"
 : "${FULL_PRODUCT_HEALTH_WEB_INPUT_PRODUCER_PATH:=${REPO_ROOT}/scripts/dev/build_full_product_health_web_input.sh}"
+: "${FULL_PRODUCT_HEALTH_PAYMENT_INPUT_PRODUCER_PATH:=${REPO_ROOT}/scripts/dev/build_full_product_health_payment_input.sh}"
 : "${FULL_PRODUCT_HEALTH_NEWS_INPUT_PRODUCER_PATH:=${REPO_ROOT}/scripts/dev/build_full_product_health_news_input.sh}"
 : "${FULL_PRODUCT_HEALTH_ADMIN_INPUT_PRODUCER_PATH:=${REPO_ROOT}/scripts/dev/build_full_product_health_admin_input.sh}"
 : "${FULL_PRODUCT_HEALTH_AGGREGATOR_PATH:=${REPO_ROOT}/scripts/dev/check_full_product_health.sh}"
@@ -22,6 +23,11 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 : "${FULL_PRODUCT_HEALTH_WEB_MISSING_RESULT_SECS:=900}"
 : "${FULL_PRODUCT_HEALTH_WEB_QUERY_TIMEOUT_SECS:=15}"
 : "${FULL_PRODUCT_HEALTH_WEB_PSQL_BIN:=psql}"
+: "${FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL:=}"
+: "${FULL_PRODUCT_HEALTH_PAYMENT_LOOKBACK_SECS:=86400}"
+: "${FULL_PRODUCT_HEALTH_PAYMENT_CONFIRMATION_TIMEOUT_SECS:=1800}"
+: "${FULL_PRODUCT_HEALTH_PAYMENT_QUERY_TIMEOUT_SECS:=15}"
+: "${FULL_PRODUCT_HEALTH_PAYMENT_PSQL_BIN:=psql}"
 : "${FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL:=}"
 : "${FULL_PRODUCT_HEALTH_NEWS_LOOKBACK_SECS:=3600}"
 : "${FULL_PRODUCT_HEALTH_NEWS_STALE_ANALYSIS_SECS:=1800}"
@@ -70,6 +76,7 @@ BLOCKED_MARKERS=(
 
 EXPECTED_SKIPPED_CODES=(
     "WEB_INPUT_SKIPPED"
+    "PAYMENT_INPUT_SKIPPED"
     "NEWS_INPUT_SKIPPED"
     "ADMIN_INPUT_SKIPPED"
 )
@@ -105,10 +112,13 @@ print(json.dumps(
             "quant_expected_worker_warnings": 0,
             "quant_execution_audit_recent_failures": 0,
             "quant_execution_audit_stale_leased_workers": 0,
+            "wallet_payment_exception_count": 0,
+            "payment_entitlement_blocker_count": 0,
             "read_only_input_count": 0,
         },
         "sections": {
             "web_task_order_health": {"status": "ok", "source": "not_collected", "read_only_input": False},
+            "payment_entitlement_health": {"status": "ok", "source": "not_collected", "read_only_input": False},
             "news_source_ai_health": {"status": "ok", "source": "not_collected", "read_only_input": False},
             "quant_worker_checkpoint_audit": {"status": "ok", "source": "not_collected", "read_only_input": False},
             "admin_readiness": {
@@ -172,6 +182,19 @@ run_web_producer() {
         bash "${FULL_PRODUCT_HEALTH_WEB_INPUT_PRODUCER_PATH}" > "$1"
 }
 
+run_payment_producer() {
+    env -i \
+        PATH="${PATH:-}" \
+        FULL_PRODUCT_HEALTH_PAYMENT_OUTPUT="json" \
+        FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL="${FULL_PRODUCT_HEALTH_PAYMENT_DATABASE_URL}" \
+        FULL_PRODUCT_HEALTH_WEB_DATABASE_URL="${FULL_PRODUCT_HEALTH_WEB_DATABASE_URL}" \
+        FULL_PRODUCT_HEALTH_PAYMENT_LOOKBACK_SECS="${FULL_PRODUCT_HEALTH_PAYMENT_LOOKBACK_SECS}" \
+        FULL_PRODUCT_HEALTH_PAYMENT_CONFIRMATION_TIMEOUT_SECS="${FULL_PRODUCT_HEALTH_PAYMENT_CONFIRMATION_TIMEOUT_SECS}" \
+        FULL_PRODUCT_HEALTH_PAYMENT_QUERY_TIMEOUT_SECS="${FULL_PRODUCT_HEALTH_PAYMENT_QUERY_TIMEOUT_SECS}" \
+        FULL_PRODUCT_HEALTH_PAYMENT_PSQL_BIN="${FULL_PRODUCT_HEALTH_PAYMENT_PSQL_BIN}" \
+        bash "${FULL_PRODUCT_HEALTH_PAYMENT_INPUT_PRODUCER_PATH}" > "$1"
+}
+
 run_news_producer() {
     env -i \
         PATH="${PATH:-}" \
@@ -208,33 +231,37 @@ run_aggregator() {
         FULL_PRODUCT_HEALTH_LOCAL_HEALTH_TIMEOUT_SECS="${FULL_PRODUCT_HEALTH_LOCAL_HEALTH_TIMEOUT_SECS}" \
         FULL_PRODUCT_HEALTH_LOCAL_JSON_PATH="${FULL_PRODUCT_HEALTH_LOCAL_JSON_PATH}" \
         FULL_PRODUCT_HEALTH_WEB_JSON_PATH="$1" \
-        FULL_PRODUCT_HEALTH_NEWS_JSON_PATH="$2" \
-        FULL_PRODUCT_HEALTH_ADMIN_JSON_PATH="$3" \
-        bash "${FULL_PRODUCT_HEALTH_AGGREGATOR_PATH}" > "$4"
+        FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH="$2" \
+        FULL_PRODUCT_HEALTH_NEWS_JSON_PATH="$3" \
+        FULL_PRODUCT_HEALTH_ADMIN_JSON_PATH="$4" \
+        bash "${FULL_PRODUCT_HEALTH_AGGREGATOR_PATH}" > "$5"
 }
 
 require_script "${FULL_PRODUCT_HEALTH_WEB_INPUT_PRODUCER_PATH}"
+require_script "${FULL_PRODUCT_HEALTH_PAYMENT_INPUT_PRODUCER_PATH}"
 require_script "${FULL_PRODUCT_HEALTH_NEWS_INPUT_PRODUCER_PATH}"
 require_script "${FULL_PRODUCT_HEALTH_ADMIN_INPUT_PRODUCER_PATH}"
 require_script "${FULL_PRODUCT_HEALTH_AGGREGATOR_PATH}"
 
 WEB_JSON_PATH="${TMP_DIR}/web-task-order-health.json"
+PAYMENT_JSON_PATH="${TMP_DIR}/payment-entitlement-health.json"
 NEWS_JSON_PATH="${TMP_DIR}/news-source-ai-health.json"
 ADMIN_JSON_PATH="${TMP_DIR}/admin-readiness.json"
 FULL_JSON_PATH="${TMP_DIR}/full-product-health.json"
 
 run_web_producer "${WEB_JSON_PATH}"
+run_payment_producer "${PAYMENT_JSON_PATH}"
 run_news_producer "${NEWS_JSON_PATH}"
 run_admin_producer "${ADMIN_JSON_PATH}"
 
-for generated_input in "${WEB_JSON_PATH}" "${NEWS_JSON_PATH}" "${ADMIN_JSON_PATH}"; do
+for generated_input in "${WEB_JSON_PATH}" "${PAYMENT_JSON_PATH}" "${NEWS_JSON_PATH}" "${ADMIN_JSON_PATH}"; do
     if ! scan_file "${generated_input}"; then
         emit_fail "generated read-only input was rejected by safety scan"
         exit 1
     fi
 done
 
-run_aggregator "${WEB_JSON_PATH}" "${NEWS_JSON_PATH}" "${ADMIN_JSON_PATH}" "${FULL_JSON_PATH}"
+run_aggregator "${WEB_JSON_PATH}" "${PAYMENT_JSON_PATH}" "${NEWS_JSON_PATH}" "${ADMIN_JSON_PATH}" "${FULL_JSON_PATH}"
 
 if ! scan_file "${FULL_JSON_PATH}"; then
     emit_fail "merged health report was rejected by safety scan"
