@@ -829,7 +829,7 @@ impl ExecutionWorker {
                     ProtectionSyncContract::from_task(task, order_side_lower(order_task.side));
                 match self
                     .pre_place_client_order_report(
-                        task.id,
+                        task,
                         &gateway,
                         Some(&order_task),
                         order_side_lower(order_task.side),
@@ -864,7 +864,7 @@ impl ExecutionWorker {
                 {
                     Ok(ack) => {
                         self.confirmed_live_order_report(
-                            task.id,
+                            task,
                             &gateway,
                             Some(&order_task),
                             order_side_lower(order_task.side),
@@ -875,7 +875,7 @@ impl ExecutionWorker {
                     }
                     Err(error) if is_duplicate_client_order_id_error(&error.to_string()) => {
                         self.duplicate_client_order_id_report(
-                            task.id,
+                            task,
                             &gateway,
                             Some(&order_task),
                             order_side_lower(order_task.side),
@@ -1000,7 +1000,7 @@ impl ExecutionWorker {
 
         match self
             .pre_place_client_order_report(
-                task.id,
+                task,
                 &gateway,
                 None,
                 order_side_lower(request.side),
@@ -1037,7 +1037,7 @@ impl ExecutionWorker {
             Ok(ack) => {
                 let mut report = self
                     .confirmed_live_order_report(
-                        task.id,
+                        task,
                         &gateway,
                         None,
                         order_side_lower(request.side),
@@ -1057,7 +1057,7 @@ impl ExecutionWorker {
             }
             Err(error) if is_duplicate_client_order_id_error(&error.to_string()) => {
                 self.duplicate_client_order_id_report(
-                    task.id,
+                    task,
                     &gateway,
                     None,
                     order_side_lower(request.side),
@@ -1268,16 +1268,17 @@ impl ExecutionWorker {
 
     async fn confirmed_live_order_report(
         &self,
-        task_id: i64,
+        task: &ExecutionTask,
         gateway: &CryptoExcAllGateway,
         order_task: Option<&ExecutionOrderTask>,
         order_side: &str,
         ack: OrderAck,
         protection: Option<ProtectionSyncContract>,
     ) -> ExecutionTaskReportRequest {
+        let task_id = task.id;
         let mut report = match confirm_live_order(gateway, &ack).await {
-            Ok((order, fills)) => build_confirmed_order_report(
-                task_id,
+            Ok((order, fills)) => build_confirmed_order_report_for_task(
+                task,
                 order_side,
                 &ack,
                 Some(order),
@@ -1294,8 +1295,8 @@ impl ExecutionWorker {
                     "live order confirmation failed after place_order ack: {}",
                     error
                 );
-                build_confirmed_order_report(
-                    task_id,
+                build_confirmed_order_report_for_task(
+                    task,
                     order_side,
                     &ack,
                     None,
@@ -1348,7 +1349,7 @@ impl ExecutionWorker {
 
     async fn duplicate_client_order_id_report(
         &self,
-        task_id: i64,
+        task: &ExecutionTask,
         gateway: &CryptoExcAllGateway,
         order_task: Option<&ExecutionOrderTask>,
         order_side: &str,
@@ -1358,12 +1359,12 @@ impl ExecutionWorker {
         match duplicate_client_order_id_reconciliation_ack(request) {
             Some(ack) => {
                 self.confirmed_live_order_report(
-                    task_id, gateway, order_task, order_side, ack, protection,
+                    task, gateway, order_task, order_side, ack, protection,
                 )
                 .await
             }
             None => ExecutionTaskReportRequest::failed(
-                task_id,
+                task.id,
                 request.exchange.as_str(),
                 order_side,
                 "duplicate client order id error requires a stable client_order_id to reconcile",
@@ -1380,7 +1381,7 @@ impl ExecutionWorker {
 
     async fn pre_place_client_order_report(
         &self,
-        task_id: i64,
+        task: &ExecutionTask,
         gateway: &CryptoExcAllGateway,
         order_task: Option<&ExecutionOrderTask>,
         order_side: &str,
@@ -1394,7 +1395,7 @@ impl ExecutionWorker {
         match gateway.order(request.exchange, lookup.query.clone()).await {
             Ok(_) => Ok(Some(
                 self.confirmed_live_order_report(
-                    task_id, gateway, order_task, order_side, lookup.ack, protection,
+                    task, gateway, order_task, order_side, lookup.ack, protection,
                 )
                 .await,
             )),
@@ -3612,6 +3613,65 @@ fn build_confirmed_order_report(
     report
 }
 
+fn build_confirmed_order_report_for_task(
+    task: &ExecutionTask,
+    order_side: &str,
+    ack: &OrderAck,
+    order: Option<Order>,
+    fills: Vec<Fill>,
+    confirmation_error: Option<String>,
+    protection: Option<ProtectionSyncContract>,
+) -> ExecutionTaskReportRequest {
+    let mut report = build_confirmed_order_report(
+        task.id,
+        order_side,
+        ack,
+        order,
+        fills,
+        confirmation_error,
+        protection,
+    );
+    attach_execution_task_context_to_report(&mut report, task);
+    report
+}
+
+fn attach_execution_task_context_to_report(
+    report: &mut ExecutionTaskReportRequest,
+    task: &ExecutionTask,
+) {
+    let mut raw_payload = report
+        .raw_payload_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .unwrap_or_else(|| json!({}));
+    let source_signal_type = task
+        .request_payload_json
+        .get("source_signal_type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            if task.news_signal_id.is_some() {
+                "news_event".to_string()
+            } else {
+                "technical_strategy".to_string()
+            }
+        });
+
+    raw_payload["execution_task"] = json!({
+        "task_id": task.id,
+        "news_signal_id": task.news_signal_id,
+        "strategy_signal_id": task.strategy_signal_id,
+        "combo_id": task.combo_id,
+        "strategy_slug": task.strategy_slug,
+        "symbol": task.symbol,
+        "task_type": task.task_type,
+        "source_signal_type": source_signal_type,
+    });
+    report.raw_payload_json = Some(raw_payload.to_string());
+}
+
 fn live_order_execution_status(order_status: &str) -> &'static str {
     match order_status.trim().to_ascii_uppercase().as_str() {
         "FILLED" => "completed",
@@ -5635,6 +5695,137 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn completed_news_protection_report_posts_safe_task_context_to_web() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let mut task = task(json!({
+            "exchange": "binance",
+            "symbol": "ETH-USDT-SWAP",
+            "source_signal_type": "news_event",
+            "side": "buy",
+            "size": "0.011",
+            "risk_plan": {
+                "protective_stop_loss_required": true,
+                "selected_stop_loss_price": 2156.0,
+                "entry_reference_price": 2200.0,
+                "direction": "long"
+            }
+        }));
+        task.id = 218;
+        task.news_signal_id = Some(601);
+        task.strategy_slug = "news_momentum".to_string();
+        task.symbol = "ETH-USDT-SWAP".to_string();
+        let instrument = Instrument::perp("ETH", "USDT");
+        let ack = OrderAck {
+            exchange: ExchangeId::Binance,
+            instrument: instrument.clone(),
+            exchange_symbol: "ETHUSDT".to_string(),
+            order_id: Some("8389766181876482454".to_string()),
+            client_order_id: Some("rqtask218".to_string()),
+            status: Some("FILLED".to_string()),
+            raw: json!({"status":"FILLED","orderId":"8389766181876482454"}),
+        };
+        let order = Order {
+            exchange: ExchangeId::Binance,
+            instrument,
+            exchange_symbol: "ETHUSDT".to_string(),
+            order_id: Some("8389766181876482454".to_string()),
+            client_order_id: Some("rqtask218".to_string()),
+            side: Some("BUY".to_string()),
+            order_type: Some("MARKET".to_string()),
+            price: Some("0".to_string()),
+            size: Some("0.011".to_string()),
+            filled_size: Some("0.011".to_string()),
+            average_price: Some("2200.00".to_string()),
+            status: Some("FILLED".to_string()),
+            created_at: Some(1),
+            updated_at: Some(2),
+            raw: json!({"status":"FILLED","executedQty":"0.011","avgPrice":"2200.00"}),
+        };
+        let protection = ProtectionSyncContract::required(task.request_payload_json.clone(), "buy")
+            .expect("news task should carry a valid protection contract");
+        let mut report = build_confirmed_order_report_for_task(
+            &task,
+            "buy",
+            &ack,
+            Some(order),
+            vec![],
+            None,
+            Some(protection),
+        );
+        ProtectionSyncContract::required(task.request_payload_json.clone(), "buy")
+            .unwrap()
+            .apply_outcome_to_report(
+                &mut report,
+                ProtectionSyncOutcome::confirmed("2000000956163119", "query_order"),
+            );
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server = tokio::task::spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 8192];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+            tx.send(request).unwrap();
+
+            let body = r#"{"success":true,"data":{"task":{"id":218,"news_signal_id":601,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"news_momentum","symbol":"ETH-USDT-SWAP","task_type":"execute_signal","task_status":"completed","priority":3,"lease_owner":"worker","lease_until":null,"scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"attempt":{},"order_result":null,"trade_record":null}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap();
+        let response = client.report_result(report).await.unwrap();
+
+        server.await.unwrap();
+        assert_eq!(response.task.id, 218);
+        let request = rx.recv().unwrap();
+        assert!(request.starts_with("POST /api/commerce/internal/execution-results HTTP/1.1"));
+        assert!(request.contains("x-alpha-execution-secret: dev-secret"));
+        let body = request
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("mock Web request should include JSON body");
+        let posted: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(posted["task_id"], 218);
+        assert_eq!(posted["execution_status"], "completed");
+        let raw_payload: Value =
+            serde_json::from_str(posted["raw_payload_json"].as_str().unwrap()).unwrap();
+        assert_eq!(raw_payload["execution_task"]["news_signal_id"], 601);
+        assert_eq!(
+            raw_payload["execution_task"]["source_signal_type"],
+            "news_event"
+        );
+        assert_eq!(
+            raw_payload["execution_task"]["strategy_slug"],
+            "news_momentum"
+        );
+        assert_eq!(raw_payload["protection_sync"]["status"], "completed");
+        assert_eq!(
+            raw_payload["protection_sync"]["protective_order_external_id"],
+            "2000000956163119"
+        );
+        assert_eq!(
+            raw_payload["protection_sync"]["protective_order_confirmed"],
+            true
+        );
+        assert!(raw_payload.get("api_secret").is_none());
+        assert!(raw_payload.get("api_key").is_none());
+    }
+
     #[test]
     fn protection_sync_failure_marks_protective_order_failed_without_allowing_repeat_open() {
         let protection = ProtectionSyncContract::required(
@@ -5894,13 +6085,8 @@ mod tests {
             time_in_force: None,
         };
 
-        let report = client_order_id_owner_violation_report(
-            999,
-            "execute_signal",
-            "buy",
-            &request,
-        )
-        .expect("foreign rqtask client id must fail closed before live mutation");
+        let report = client_order_id_owner_violation_report(999, "execute_signal", "buy", &request)
+            .expect("foreign rqtask client id must fail closed before live mutation");
         let raw_payload: Value =
             serde_json::from_str(report.raw_payload_json.as_deref().unwrap()).unwrap();
 
