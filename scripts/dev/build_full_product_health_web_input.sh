@@ -217,11 +217,17 @@ recent_tasks AS (
     SELECT
         et.id,
         nsi.id AS news_signal_id,
+        et.strategy_signal_id,
         et.task_status,
         et.task_type,
         et.lease_until,
         et.created_at,
         et.updated_at,
+        CASE
+            WHEN nsi.id IS NOT NULL THEN 'news_event'
+            WHEN et.strategy_signal_id IS NOT NULL THEN 'technical_strategy'
+            ELSE NULL
+        END AS source_signal_type,
         EXTRACT(EPOCH FROM (NOW() - COALESCE(et.updated_at, et.created_at)))::bigint AS age_secs
     FROM execution_tasks et
     LEFT JOIN news_signal_inbox nsi ON nsi.id = et.news_signal_id
@@ -232,10 +238,12 @@ task_links AS (
     SELECT
         rt.id,
         rt.news_signal_id,
+        rt.strategy_signal_id,
         rt.task_status,
         rt.task_type,
         rt.lease_until,
         rt.age_secs,
+        rt.source_signal_type,
         COALESCE(attempts.attempt_count, 0) AS attempt_count,
         attempts.latest_attempt_id,
         attempts.latest_attempt_status,
@@ -313,6 +321,7 @@ sample_row AS (
         latest_attempt_id AS execution_attempt_id,
         latest_order_result_id AS order_result_id,
         latest_trade_record_id AS trade_record_id,
+        source_signal_type,
         task_status,
         age_secs
     FROM task_links
@@ -375,6 +384,7 @@ SELECT json_build_object(
                     'execution_attempt_id', execution_attempt_id,
                     'order_result_id', order_result_id,
                     'trade_record_id', trade_record_id,
+                    'source_signal_type', source_signal_type,
                     'task_status', task_status,
                     'age_secs', age_secs
                 )
@@ -390,7 +400,10 @@ SELECT json_build_object(
                     'severity', 'P0',
                     'code', 'WEB_EXECUTION_TASK_STALE',
                     'section', 'web_task_order_health',
-                    'message', 'Web execution tasks have stale leases or processing state.'
+                    'message', 'Web execution tasks have stale leases or processing state.',
+                    'execution_task_id', (SELECT execution_task_id FROM sample_row),
+                    'order_result_id', (SELECT order_result_id FROM sample_row),
+                    'source_signal_type', (SELECT source_signal_type FROM sample_row)
                 ) AS alert
                 WHERE stale_task_count > 0
                 UNION ALL
@@ -398,7 +411,10 @@ SELECT json_build_object(
                     'severity', 'P0',
                     'code', 'WEB_ORDER_RESULT_MISSING',
                     'section', 'web_task_order_health',
-                    'message', 'Completed Web execution tasks are missing order or trade records.'
+                    'message', 'Completed Web execution tasks are missing order or trade records.',
+                    'execution_task_id', (SELECT execution_task_id FROM sample_row),
+                    'order_result_id', (SELECT order_result_id FROM sample_row),
+                    'source_signal_type', (SELECT source_signal_type FROM sample_row)
                 ) AS alert
                 WHERE missing_order_result_count > 0
                 UNION ALL
@@ -406,7 +422,10 @@ SELECT json_build_object(
                     'severity', 'P1',
                     'code', 'WEB_RETRY_BACKLOG',
                     'section', 'web_task_order_health',
-                    'message', 'Recent Web execution tasks have failed attempts or retry backlog.'
+                    'message', 'Recent Web execution tasks have failed attempts or retry backlog.',
+                    'execution_task_id', (SELECT execution_task_id FROM sample_row),
+                    'order_result_id', (SELECT order_result_id FROM sample_row),
+                    'source_signal_type', (SELECT source_signal_type FROM sample_row)
                 ) AS alert
                 WHERE failed_task_count > 0 OR retry_backlog_count > 0
                 UNION ALL
@@ -414,7 +433,10 @@ SELECT json_build_object(
                     'severity', 'P1',
                     'code', 'WEB_DELIVERY_BLOCKER',
                     'section', 'web_task_order_health',
-                    'message', 'Recent Web delivery logs include blocked or failed channels.'
+                    'message', 'Recent Web delivery logs include blocked or failed channels.',
+                    'execution_task_id', (SELECT execution_task_id FROM sample_row),
+                    'order_result_id', (SELECT order_result_id FROM sample_row),
+                    'source_signal_type', (SELECT source_signal_type FROM sample_row)
                 ) AS alert
                 WHERE delivery_blocker_count > 0
             ) alert_rows
@@ -427,7 +449,8 @@ SELECT json_build_object(
                     'execution_task_id', execution_task_id,
                     'execution_attempt_id', execution_attempt_id,
                     'order_result_id', order_result_id,
-                    'trade_record_id', trade_record_id
+                    'trade_record_id', trade_record_id,
+                    'source_signal_type', source_signal_type
                 )
                 FROM sample_row
             ),
@@ -436,7 +459,8 @@ SELECT json_build_object(
                 'execution_task_id', NULL,
                 'execution_attempt_id', NULL,
                 'order_result_id', NULL,
-                'trade_record_id', NULL
+                'trade_record_id', NULL,
+                'source_signal_type', NULL
             )
         )
 )::text

@@ -190,6 +190,11 @@ Bind the first Admin screen to these fields:
 - `top_alerts[].code`
 - `top_alerts[].section`
 - `top_alerts[].message`
+- optional `top_alerts[].execution_task_id`
+- optional `top_alerts[].order_result_id`
+- optional `top_alerts[].source_signal_type`
+- optional `top_alerts[].protection_status`
+- optional `top_alerts[].blocker_code`
 - `required_operator_actions[].action`
 - `alert_code_values`
 - `alert_code_metadata`
@@ -307,6 +312,9 @@ use its blocking/manual/observe counts for badges and render
 into section detail. Each item should use the structured `owner`,
 `default_next_action`, and `admin_link_target` fields; unknown appended fields
 must be ignored for schema version `1`.
+When alert items include `execution_task_id`, `order_result_id`,
+`source_signal_type`, `protection_status`, or `blocker_code`, Admin should pass
+them through as event-chain handoff context and still treat the page as read-only.
 
 The UI can show green only when the selected readiness scope has no blocking,
 review, skipped, or validation safety condition.

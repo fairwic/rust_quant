@@ -127,6 +127,14 @@ SECTION_CORRELATION_KEYS = {
     ],
 }
 
+ALERT_HANDOFF_KEYS = [
+    "execution_task_id",
+    "order_result_id",
+    "source_signal_type",
+    "protection_status",
+    "blocker_code",
+]
+
 
 class SummaryError(Exception):
     pass
@@ -191,6 +199,22 @@ def safe_severity(value: Any) -> str:
     if severity in SEVERITY_RANK:
         return severity
     return "P1"
+
+
+def copy_alert_handoff_fields(source: Any) -> dict[str, Any]:
+    if not isinstance(source, dict):
+        return {}
+    handoff = {}
+    for key in ALERT_HANDOFF_KEYS:
+        if key not in source or source.get(key) is None:
+            continue
+        value = sanitize_json(source.get(key))
+        if value is None:
+            continue
+        if isinstance(value, str) and (not value.strip() or has_blocked_marker(value)):
+            continue
+        handoff[key] = value
+    return handoff
 
 
 def as_int(value: Any, default: int = 0) -> int:
@@ -313,16 +337,19 @@ def normalize_alerts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for index, alert in enumerate(alerts):
         if not isinstance(alert, dict):
             continue
-        normalized.append(
-            {
-                "severity": safe_severity(alert.get("severity")),
-                "code": str(alert.get("code") or "HEALTH_ALERT"),
-                "section": str(alert.get("section") or "admin_readiness"),
-                "message": str(alert.get("message") or "health alert"),
-                "metadata": sanitize_json(alert.get("metadata")) if isinstance(alert.get("metadata"), dict) else {},
-                "_index": index,
-            }
-        )
+        metadata = sanitize_json(alert.get("metadata")) if isinstance(alert.get("metadata"), dict) else {}
+        normalized_alert = {
+            "severity": safe_severity(alert.get("severity")),
+            "code": str(alert.get("code") or "HEALTH_ALERT"),
+            "section": str(alert.get("section") or "admin_readiness"),
+            "message": str(alert.get("message") or "health alert"),
+            "metadata": metadata,
+            "_index": index,
+        }
+        normalized_alert.update(copy_alert_handoff_fields(alert))
+        for key, value in copy_alert_handoff_fields(metadata).items():
+            normalized_alert.setdefault(key, value)
+        normalized.append(normalized_alert)
     return [sanitize_json(alert) for alert in normalized]
 
 
@@ -343,7 +370,7 @@ def public_alert(
     return enrich_playbook_metadata({
         key: value
         for key, value in alert.items()
-        if key in {"severity", "code", "section", "message"}
+        if key in {"severity", "code", "section", "message", *ALERT_HANDOFF_KEYS}
     }, metadata_registry)
 
 
@@ -531,6 +558,7 @@ def build_operator_playbook_summary(
             "operator_action": operator_action_for_severity(severity),
             "correlation_keys": taxonomy.get("correlation_keys", SECTION_CORRELATION_KEYS.get(section, [])),
         }
+        item.update(copy_alert_handoff_fields(alert))
         metadata = alert.get("metadata")
         if isinstance(metadata, dict) and metadata:
             item["metadata"] = metadata

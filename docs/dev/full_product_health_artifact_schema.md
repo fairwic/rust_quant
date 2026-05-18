@@ -56,6 +56,9 @@ Summary example: `full_product_health_examples/full-product-health-summary.json`
   Each item mirrors the alert code registry fields `owner`,
   `default_next_action`, and `admin_link_target`, plus `source`, `severity`,
   `code`, `section`, `operator_action`, and optional sanitized `metadata`.
+  Web task/order alerts may append safe event-chain handoff fields:
+  `execution_task_id`, `order_result_id`, `source_signal_type`,
+  `protection_status`, and `blocker_code`.
   Consumers should use the count fields for dashboards and ignore unknown
   appended item fields.
 - `section_statuses` is the preferred Admin/CI summary lookup. Consumers should

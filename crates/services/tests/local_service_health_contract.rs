@@ -732,7 +732,7 @@ do
     fi
 done
 cat <<'JSON'
-{"status":"fail","source":"quant_web_readonly_db","database_engine":"postgresql","read_only_input":true,"lookback_secs":3600,"stale_task_secs":900,"missing_result_secs":900,"open_task_count":2,"stale_task_count":1,"missing_order_result_count":1,"failed_task_count":1,"retry_backlog_count":1,"delivery_blocker_count":1,"recent_order_result_count":3,"recent_trade_record_count":2,"sample":{"signal_inbox_id":3801,"execution_task_id":5202,"execution_attempt_id":6101,"order_result_id":null,"trade_record_id":null,"task_status":"completed","age_secs":960},"alerts":[{"severity":"P0","code":"WEB_ORDER_RESULT_MISSING","section":"web_task_order_health","message":"completed execution task missing order result"},{"severity":"P1","code":"WEB_RETRY_BACKLOG","section":"web_task_order_health","message":"recent execution task retries need review"}],"correlation":{"signal_inbox_id":3801,"execution_task_id":5202,"execution_attempt_id":6101,"order_result_id":null,"trade_record_id":null}}
+{"status":"fail","source":"quant_web_readonly_db","database_engine":"postgresql","read_only_input":true,"lookback_secs":3600,"stale_task_secs":900,"missing_result_secs":900,"open_task_count":2,"stale_task_count":1,"missing_order_result_count":1,"failed_task_count":1,"retry_backlog_count":1,"delivery_blocker_count":1,"recent_order_result_count":3,"recent_trade_record_count":2,"sample":{"signal_inbox_id":3801,"execution_task_id":5202,"execution_attempt_id":6101,"order_result_id":null,"trade_record_id":null,"source_signal_type":"news_event","task_status":"completed","age_secs":960},"alerts":[{"severity":"P0","code":"WEB_ORDER_RESULT_MISSING","section":"web_task_order_health","message":"completed execution task missing order result","execution_task_id":5202,"order_result_id":null,"source_signal_type":"news_event"},{"severity":"P1","code":"WEB_RETRY_BACKLOG","section":"web_task_order_health","message":"recent execution task retries need review","execution_task_id":5202,"order_result_id":null,"source_signal_type":"news_event"}],"correlation":{"signal_inbox_id":3801,"execution_task_id":5202,"execution_attempt_id":6101,"order_result_id":null,"trade_record_id":null,"source_signal_type":"news_event"}}
 JSON
 "#,
     );
@@ -925,7 +925,7 @@ elif [[ "${args}" == *"news_ai_analysis_results"* ]]; then
 JSON
 else
     cat <<'JSON'
-{"status":"fail","source":"quant_web_readonly_db","database_engine":"postgresql","read_only_input":true,"lookback_secs":3600,"stale_task_secs":900,"missing_result_secs":900,"open_task_count":2,"stale_task_count":1,"missing_order_result_count":1,"failed_task_count":1,"retry_backlog_count":1,"delivery_blocker_count":1,"recent_order_result_count":3,"recent_trade_record_count":2,"alerts":[{"severity":"P0","code":"WEB_ORDER_RESULT_MISSING","section":"web_task_order_health","message":"completed execution task missing order result"}],"correlation":{"signal_inbox_id":3801,"execution_task_id":5202,"execution_attempt_id":6101,"order_result_id":null,"trade_record_id":null}}
+{"status":"fail","source":"quant_web_readonly_db","database_engine":"postgresql","read_only_input":true,"lookback_secs":3600,"stale_task_secs":900,"missing_result_secs":900,"open_task_count":2,"stale_task_count":1,"missing_order_result_count":1,"failed_task_count":1,"retry_backlog_count":1,"delivery_blocker_count":1,"recent_order_result_count":3,"recent_trade_record_count":2,"alerts":[{"severity":"P0","code":"WEB_ORDER_RESULT_MISSING","section":"web_task_order_health","message":"completed execution task missing order result","execution_task_id":5202,"order_result_id":null,"source_signal_type":"news_event"}],"correlation":{"signal_inbox_id":3801,"execution_task_id":5202,"execution_attempt_id":6101,"order_result_id":null,"trade_record_id":null,"source_signal_type":"news_event"}}
 JSON
 fi
 "#,
@@ -2656,7 +2656,12 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
       "severity": "P0",
       "code": "WEB_ORDER_RESULT_MISSING",
       "section": "web_task_order_health",
-      "message": "completed execution task missing order result"
+      "message": "completed execution task missing order result",
+      "execution_task_id": 5202,
+      "order_result_id": 244,
+      "source_signal_type": "news_event",
+      "protection_status": "failed",
+      "blocker_code": "protective_order_failed"
     },
     {
       "severity": "P1",
@@ -2762,6 +2767,11 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
         top_alerts[0]["admin_link_target"],
         "admin.full_product_health.web_task_order_health"
     );
+    assert_eq!(top_alerts[0]["execution_task_id"], 5202);
+    assert_eq!(top_alerts[0]["order_result_id"], 244);
+    assert_eq!(top_alerts[0]["source_signal_type"], "news_event");
+    assert_eq!(top_alerts[0]["protection_status"], "failed");
+    assert_eq!(top_alerts[0]["blocker_code"], "protective_order_failed");
     assert_eq!(top_alerts[1]["code"], "NEWS_SOURCE_DEGRADED");
     assert_eq!(top_alerts[1]["severity"], "P1");
 
@@ -2837,6 +2847,11 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
             .iter()
             .any(|item| item["code"] == "WEB_ORDER_RESULT_MISSING"
                 && item["source"] == "alert"
+                && item["execution_task_id"] == 5202
+                && item["order_result_id"] == 244
+                && item["source_signal_type"] == "news_event"
+                && item["protection_status"] == "failed"
+                && item["blocker_code"] == "protective_order_failed"
                 && item["operator_action"] == "block_release_until_resolved"
                 && item["owner"] == "web_execution"
                 && item["default_next_action"] == "reconcile_missing_order_result"
@@ -7020,6 +7035,7 @@ fn full_product_health_web_input_producer_is_read_only_and_redacts_sensitive_mar
     assert!(script.contains("exchange_order_results"));
     assert!(script.contains("user_trade_records"));
     assert!(script.contains("combo_signal_delivery_logs"));
+    assert!(script.contains("source_signal_type"));
     assert!(script.contains("WEB_ORDER_RESULT_MISSING"));
     assert!(script.contains("WEB_RETRY_BACKLOG"));
     assert!(script.contains("WEB_INPUT_SKIPPED"));
@@ -7184,8 +7200,10 @@ fn full_product_health_web_input_producer_outputs_mergeable_json_from_read_only_
             .iter()
             .any(|alert| alert["severity"] == "P0"
                 && alert["code"] == "WEB_ORDER_RESULT_MISSING"
-                && alert["section"] == "web_task_order_health"),
-        "producer should surface missing Web order result as P0: {stdout}"
+                && alert["section"] == "web_task_order_health"
+                && alert["execution_task_id"] == 5202
+                && alert["source_signal_type"] == "news_event"),
+        "producer should surface missing Web order result with event-chain handoff context: {stdout}"
     );
     assert!(
         alerts(&payload)
