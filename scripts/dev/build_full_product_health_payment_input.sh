@@ -193,7 +193,7 @@ base AS (
     FROM payment_intents intents
     LEFT JOIN latest_tx tx ON tx.payment_intent_id = intents.id
     LEFT JOIN membership_orders orders
-      ON intents.order_type = 'membership_order'
+      ON intents.order_type = 'membership'
      AND orders.id = intents.order_id
     CROSS JOIN params p
     WHERE intents.provider = 'wallet'

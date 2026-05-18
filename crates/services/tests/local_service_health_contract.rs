@@ -959,13 +959,18 @@ fi
 for required in \
     "payment_intents" \
     "payment_transactions" \
-    "membership_orders"
+    "membership_orders" \
+    "intents.order_type = 'membership'"
 do
     if [[ "${args}" != *"${required}"* ]]; then
         printf 'expected payment health query to read %s\n' "${required}" >&2
         exit 4
     fi
 done
+if [[ "${args}" == *"intents.order_type = 'membership_order'"* ]]; then
+    printf 'payment health query must use the real membership payment order_type\n' >&2
+    exit 4
+fi
 for forbidden in \
     "INSERT INTO " \
     "UPDATE " \
