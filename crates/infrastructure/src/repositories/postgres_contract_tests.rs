@@ -27,6 +27,8 @@ const FORBIDDEN_TOKENS: &[&str] = &[
     "last_insert_id()",
 ];
 
+const POSTGRES_QUANT_CORE_DDL: &str = include_str!("../../../../sql/postgres_quant_core.sql");
+
 #[test]
 fn active_repositories_do_not_use_mysql_runtime_tokens() {
     let repository_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/repositories");
@@ -49,4 +51,63 @@ fn active_repositories_do_not_use_mysql_runtime_tokens() {
         "repository Postgres migration contract violated:\n{}",
         violations.join("\n")
     );
+}
+
+#[test]
+fn postgres_quant_core_ddl_contains_live_strategy_order_contract() {
+    for table in [
+        "swap_orders",
+        "exchange_apikey_config",
+        "exchange_apikey_strategy_relation",
+    ] {
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(&format!("CREATE TABLE IF NOT EXISTS {table}")),
+            "postgres quant_core DDL must create {table}"
+        );
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(&format!("COMMENT ON TABLE {table}")),
+            "postgres quant_core DDL must comment table {table}"
+        );
+    }
+
+    for column in [
+        "swap_orders.id",
+        "swap_orders.strategy_id",
+        "swap_orders.in_order_id",
+        "swap_orders.out_order_id",
+        "swap_orders.strategy_type",
+        "swap_orders.period",
+        "swap_orders.inst_id",
+        "swap_orders.side",
+        "swap_orders.pos_size",
+        "swap_orders.pos_side",
+        "swap_orders.tag",
+        "swap_orders.platform_type",
+        "swap_orders.detail",
+        "swap_orders.created_at",
+        "swap_orders.update_at",
+        "exchange_apikey_config.id",
+        "exchange_apikey_config.exchange_name",
+        "exchange_apikey_config.api_key",
+        "exchange_apikey_config.api_secret",
+        "exchange_apikey_config.passphrase",
+        "exchange_apikey_config.is_sandbox",
+        "exchange_apikey_config.is_enabled",
+        "exchange_apikey_config.description",
+        "exchange_apikey_config.create_user_id",
+        "exchange_apikey_config.create_time",
+        "exchange_apikey_config.update_time",
+        "exchange_apikey_config.is_deleted",
+        "exchange_apikey_strategy_relation.id",
+        "exchange_apikey_strategy_relation.strategy_config_id",
+        "exchange_apikey_strategy_relation.api_config_id",
+        "exchange_apikey_strategy_relation.priority",
+        "exchange_apikey_strategy_relation.is_enabled",
+        "exchange_apikey_strategy_relation.is_deleted",
+    ] {
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(&format!("COMMENT ON COLUMN {column}")),
+            "postgres quant_core DDL must comment column {column}"
+        );
+    }
 }

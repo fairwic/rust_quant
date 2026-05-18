@@ -13,9 +13,62 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+MONOREPO_ROOT="$(cd "${REPO_ROOT}/.." && pwd)"
+
+safe_assign_env() {
+    local key="$1"
+    local value="$2"
+    if [[ -z "${!key:-}" ]]; then
+        printf -v "${key}" '%s' "${value}"
+        export "${key}"
+    fi
+}
+
+load_env_file_safe() {
+    local env_file="$1"
+    [[ -f "${env_file}" ]] || return 0
+
+    local line
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        line="${line%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        [[ -z "${line}" || "${line}" == \#* ]] && continue
+        if [[ "${line}" == export[[:space:]]* ]]; then
+            line="${line#export }"
+            line="${line#"${line%%[![:space:]]*}"}"
+        fi
+        [[ "${line}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+
+        local key="${line%%=*}"
+        local value="${line#*=}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+        if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+            value="${value:1:${#value}-2}"
+        elif [[ "${value}" == \'*\' && "${value}" == *\' ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+
+        case "${key}" in
+            BINANCE_API_KEY|BINANCE_API_SECRET|binance_api_secret|BINANCE_LIVE_API_KEY|BINANCE_LIVE_API_SECRET|BINANCE_PROXY_URL|API_CREDENTIAL_SECRET|RUST_QUAN_WEB_BASE_URL|EXECUTION_EVENT_SECRET|POSTGRES_CONTAINER|POSTGRES_USER|WEB_POSTGRES_DB|WEB_DATABASE_URL|BINANCE_ETH_MICRO_COMBO_ID|BINANCE_ETH_MICRO_QTY|BINANCE_ETH_MICRO_BUYER_EMAIL|BINANCE_ETH_MICRO_STRATEGY_SLUG|BINANCE_ETH_MICRO_STRATEGY_KEY|RUSTUP_TOOLCHAIN|EXECUTION_WORKER_USE_EXISTING_BINARY)
+                safe_assign_env "${key}" "${value}"
+                ;;
+            DATABASE_URL)
+                if [[ "${env_file}" == *"/rust_quan_web/backend/.env" ]]; then
+                    safe_assign_env WEB_DATABASE_URL "${value}"
+                else
+                    safe_assign_env DATABASE_URL "${value}"
+                fi
+                ;;
+        esac
+    done < "${env_file}"
+}
+
+load_env_file_safe "${REPO_ROOT}/.env"
+load_env_file_safe "${MONOREPO_ROOT}/rust_quan_web/backend/.env"
 
 : "${BINANCE_ETH_MICRO_SYMBOL:="ETH-USDT-SWAP"}"
-: "${BINANCE_ETH_MICRO_QTY:="0.001"}"
+: "${BINANCE_ETH_MICRO_QTY:="0.010"}"
 : "${BINANCE_PROXY_URL:="socks5h://127.0.0.1:7897"}"
 : "${API_CREDENTIAL_SECRET:="alpha-pulse-local-credential-key"}"
 : "${RUST_QUAN_WEB_BASE_URL:="http://127.0.0.1:8000"}"
@@ -46,6 +99,11 @@ esac
 
 BINANCE_ETH_MICRO_NATIVE_SYMBOL="${ETH_NATIVE_SYMBOL}"
 BINANCE_ETH_MICRO_WEB_SYMBOL="${ETH_WEB_SYMBOL}"
+BINANCE_ETH_MICRO_POSITION_MODE=""
+BINANCE_ETH_MICRO_POSITION_SIDE=""
+BINANCE_ETH_MICRO_OPEN_REDUCE_ONLY=""
+BINANCE_ETH_MICRO_CLOSE_REDUCE_ONLY="true"
+BINANCE_ETH_MICRO_NOTIONAL=""
 
 if [[ -z "${BINANCE_LIVE_API_KEY:-}" && -n "${BINANCE_API_KEY:-}" ]]; then
     BINANCE_LIVE_API_KEY="${BINANCE_API_KEY}"
@@ -164,6 +222,7 @@ require_binance_signed_tools() {
 fetch_binance_signed_body() {
     local endpoint_path="$1"
     local context="$2"
+    local extra_query="${3:-}"
     require_binance_signed_tools
 
     if [[ ! "${BINANCE_SIGNED_PREFLIGHT_RETRIES}" =~ ^[0-9]+$ ]] ||
@@ -176,6 +235,9 @@ fetch_binance_signed_body() {
     for (( attempt = 1; attempt <= BINANCE_SIGNED_PREFLIGHT_RETRIES; attempt++ )); do
         local query
         query="timestamp=$(($(date +%s) * 1000))&recvWindow=5000"
+        if [[ -n "${extra_query}" ]]; then
+            query="${extra_query}&${query}"
+        fi
         local signature
         signature="$(printf '%s' "${query}" | openssl dgst -sha256 -hmac "${BINANCE_LIVE_API_SECRET}" -binary | xxd -p -c 256)"
         local body_file
@@ -219,6 +281,10 @@ fetch_binance_position_mode_body() {
     fetch_binance_signed_body "/fapi/v1/positionSide/dual" "position-mode"
 }
 
+fetch_binance_open_orders_body() {
+    fetch_binance_signed_body "/fapi/v1/openOrders" "open-orders" "symbol=ETHUSDT"
+}
+
 assert_eth_position_flat() {
     local body_file="$1"
     local context="$2"
@@ -245,6 +311,68 @@ if position_amt != 0:
         f"ERROR: ETHUSDT position must be flat during {context}; positionAmt={position_amt}"
     )
 PY
+}
+
+eth_position_is_flat() {
+    local body_file
+    body_file="$(fetch_binance_signed_account_body)"
+    if python3 - "${body_file}" <<'PY'
+import json
+import sys
+from decimal import Decimal, InvalidOperation
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+positions = data.get("positions") or []
+eth_position = next((item for item in positions if item.get("symbol") == "ETHUSDT"), None)
+if eth_position is None:
+    raise SystemExit(2)
+try:
+    position_amt = Decimal(str(eth_position.get("positionAmt", "0")))
+except InvalidOperation:
+    raise SystemExit(2)
+raise SystemExit(0 if position_amt == 0 else 1)
+PY
+    then
+        rm -f "${body_file}"
+        return 0
+    fi
+    local status=$?
+    rm -f "${body_file}"
+    return "${status}"
+}
+
+assert_eth_open_orders_clear() {
+    local body_file="$1"
+    local context="$2"
+
+    python3 - "${body_file}" "${context}" <<'PY'
+import json
+import sys
+
+body_path, context = sys.argv[1], sys.argv[2]
+with open(body_path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+if not isinstance(data, list):
+    raise SystemExit(f"ERROR: ETHUSDT openOrders response is not a list during {context}")
+if data:
+    raise SystemExit(
+        f"ERROR: ETHUSDT must have no open orders during {context}; open_order_count={len(data)}"
+    )
+PY
+}
+
+preflight_binance_open_orders_clear() {
+    local body_file
+    body_file="$(fetch_binance_open_orders_body)"
+    if ! assert_eth_open_orders_clear "${body_file}" "preflight_eth_open_orders_clear"; then
+        rm -f "${body_file}"
+        exit 1
+    fi
+    rm -f "${body_file}"
+    echo "  preflight_eth_open_orders_clear=ok"
 }
 
 preflight_binance_signed_account() {
@@ -276,7 +404,8 @@ PY
 preflight_binance_position_mode() {
     local body_file
     body_file="$(fetch_binance_position_mode_body)"
-    if ! python3 - "${body_file}" <<'PY'
+    local position_mode
+    position_mode="$(python3 - "${body_file}" <<'PY'
 import json
 import sys
 
@@ -285,20 +414,31 @@ with open(sys.argv[1], "r", encoding="utf-8") as fh:
 
 mode = data.get("dualSidePosition")
 if mode is False or str(mode).lower() == "false":
+    print("one_way")
     raise SystemExit(0)
 if mode is True or str(mode).lower() == "true":
-    raise SystemExit(
-        "ERROR: refusing Binance Hedge Mode for this ETH reduce-only smoke; "
-        "reduceOnly close orders require one-way mode in this script"
-    )
+    print("hedge")
+    raise SystemExit(0)
 raise SystemExit("ERROR: Binance position mode response missing dualSidePosition")
 PY
-    then
+    )"
+    if [[ -z "${position_mode}" ]]; then
         rm -f "${body_file}"
         exit 1
     fi
     rm -f "${body_file}"
-    echo "  binance_position_mode=one_way"
+    if [[ "${position_mode}" == "hedge" ]]; then
+        BINANCE_ETH_MICRO_POSITION_MODE=hedge
+        BINANCE_ETH_MICRO_POSITION_SIDE=long
+        BINANCE_ETH_MICRO_CLOSE_REDUCE_ONLY=""
+        echo "  binance_position_mode=hedge"
+        echo "  hedge_position_side=LONG"
+    else
+        BINANCE_ETH_MICRO_POSITION_MODE=""
+        BINANCE_ETH_MICRO_POSITION_SIDE=""
+        BINANCE_ETH_MICRO_CLOSE_REDUCE_ONLY="true"
+        echo "  binance_position_mode=one_way"
+    fi
 }
 
 verify_final_eth_position_flat() {
@@ -310,6 +450,17 @@ verify_final_eth_position_flat() {
     fi
     rm -f "${body_file}"
     echo "  final_eth_position=flat"
+}
+
+verify_final_eth_open_orders_clear() {
+    local body_file
+    body_file="$(fetch_binance_open_orders_body)"
+    if ! assert_eth_open_orders_clear "${body_file}" "final_eth_open_orders_clear"; then
+        rm -f "${body_file}"
+        exit 1
+    fi
+    rm -f "${body_file}"
+    echo "  final_eth_open_orders_clear=ok"
 }
 
 preflight_binance_exchange_info_filters() {
@@ -390,7 +541,66 @@ PY
     )"
 
     rm -f "${exchange_info_file}" "${premium_file}"
+    BINANCE_ETH_MICRO_NOTIONAL="$(printf '%s\n' "${filter_summary}" | sed -n 's/.*notional=\([^ ]*\).*/\1/p')"
+    if [[ -z "${BINANCE_ETH_MICRO_NOTIONAL}" ]]; then
+        echo "ERROR: failed to capture ETH micro notional from Binance exchangeInfo preflight." >&2
+        exit 1
+    fi
     echo "  exchange_info_filters=ok ${filter_summary}"
+}
+
+preflight_binance_margin_available() {
+    if [[ -z "${BINANCE_ETH_MICRO_NOTIONAL}" ]]; then
+        echo "ERROR: ETH micro notional is missing before available-margin preflight." >&2
+        exit 1
+    fi
+
+    local body_file
+    body_file="$(fetch_binance_signed_account_body)"
+    if ! python3 - "${body_file}" "${BINANCE_ETH_MICRO_NOTIONAL}" <<'PY'
+import json
+import sys
+from decimal import Decimal, InvalidOperation
+
+body_path, notional_raw = sys.argv[1], sys.argv[2]
+try:
+    estimated_notional = Decimal(str(notional_raw))
+except InvalidOperation as exc:
+    raise SystemExit("ERROR: invalid ETH micro notional before margin preflight") from exc
+
+with open(body_path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+available_raw = data.get("availableBalance")
+if available_raw is None:
+    assets = data.get("assets") or []
+    usdt_asset = next((item for item in assets if item.get("asset") == "USDT"), None)
+    if usdt_asset:
+        available_raw = usdt_asset.get("availableBalance")
+
+if available_raw is None:
+    raise SystemExit("ERROR: Binance account response missing USDT availableBalance")
+
+try:
+    available = Decimal(str(available_raw))
+except InvalidOperation as exc:
+    raise SystemExit("ERROR: invalid Binance USDT availableBalance") from exc
+
+if estimated_notional <= 0:
+    raise SystemExit("ERROR: ETH micro estimated notional must be positive")
+
+if available < estimated_notional:
+    raise SystemExit(
+        "ERROR: Binance Futures available USDT margin is below the ETH micro notional preflight; "
+        f"estimated_notional={estimated_notional}"
+    )
+PY
+    then
+        rm -f "${body_file}"
+        exit 1
+    fi
+    rm -f "${body_file}"
+    echo "  preflight_margin_available=ok"
 }
 
 seal_credential() {
@@ -456,7 +666,7 @@ VALUES (
     '只读 + 下单',
     'active',
     NOW(),
-    'binance_eth_micro_live_smoke',
+    'signed_exchange_preflight_passed',
     'Binance ETH micro live smoke credential.',
     NOW(),
     NOW()
@@ -469,7 +679,7 @@ SET api_key_cipher     = EXCLUDED.api_key_cipher,
     permission_scope   = '只读 + 下单',
     status             = 'active',
     last_check_at      = NOW(),
-    last_check_code    = 'binance_eth_micro_live_smoke',
+    last_check_code    = 'signed_exchange_preflight_passed',
     last_check_message = EXCLUDED.last_check_message,
     updated_at         = NOW();
 SQL
@@ -532,32 +742,66 @@ SQL
     printf '%s\n' "${rows}" | sed -n '1p'
 }
 
-assert_no_other_pending_tasks() {
+assert_target_is_next_leaseable_task() {
     local task_type="$1"
     local task_status="$2"
     local target_task_id="$3"
-    # Lease guard contract: task_type = $1, task_status = $2, id <> $3.
-    local other_count
-    other_count="$(
+    local row
+    row="$(
         run_web_sql \
             -v task_type="${task_type}" \
             -v task_status="${task_status}" \
             -v target_task_id="${target_task_id}" \
             -At <<'SQL'
-SELECT COUNT(*)
-FROM execution_tasks
-WHERE task_type = :'task_type'
-  AND task_status = :'task_status'
-  AND id <> :target_task_id;
+WITH target AS (
+    SELECT id, priority, scheduled_at
+    FROM execution_tasks
+    WHERE id = :target_task_id
+      AND task_type = :'task_type'
+      AND task_status = :'task_status'
+      AND scheduled_at <= NOW()
+), earlier_leaseable AS (
+    SELECT other.id
+    FROM execution_tasks other
+    JOIN target ON TRUE
+    WHERE other.task_type = :'task_type'
+      AND other.id <> target.id
+      AND other.scheduled_at <= NOW()
+      AND (
+        other.task_status = :'task_status'
+        OR (other.task_status = 'leased' AND other.lease_until < NOW())
+      )
+      AND (
+        other.priority > target.priority
+        OR (
+          other.priority = target.priority
+          AND (
+            other.scheduled_at < target.scheduled_at
+            OR (other.scheduled_at = target.scheduled_at AND other.id < target.id)
+          )
+        )
+      )
+)
+SELECT
+    (SELECT COUNT(*) FROM target),
+    (SELECT COUNT(*) FROM earlier_leaseable);
 SQL
     )"
-    if [[ ! "${other_count}" =~ ^[0-9]+$ ]]; then
-        echo "ERROR: pending task isolation query returned invalid count: ${other_count}" >&2
+    local target_count
+    local earlier_count
+    IFS='|' read -r target_count earlier_count <<<"${row}"
+    if [[ "${target_count}" != "1" ]]; then
+        echo "ERROR: target task is not leaseable before live worker run." >&2
+        echo "  task_type=${task_type} task_status=${task_status} target_task_id=${target_task_id}" >&2
         exit 1
     fi
-    if (( other_count > 0 )); then
-        echo "ERROR: refusing live worker run because another matching task can be leased." >&2
-        echo "  task_type=${task_type} task_status=${task_status} other_count=${other_count}" >&2
+    if [[ ! "${earlier_count}" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: lease order isolation query returned invalid count: ${earlier_count}" >&2
+        exit 1
+    fi
+    if (( earlier_count > 0 )); then
+        echo "ERROR: refusing live worker run because another task would be leased first." >&2
+        echo "  task_type=${task_type} task_status=${task_status} target_task_id=${target_task_id} earlier_count=${earlier_count}" >&2
         exit 1
     fi
 }
@@ -576,6 +820,9 @@ create_open_execution_task() {
         -v strategy_key="${BINANCE_ETH_MICRO_STRATEGY_KEY}" \
         -v symbol="${BINANCE_ETH_MICRO_WEB_SYMBOL}" \
         -v qty="${BINANCE_ETH_MICRO_QTY}" \
+        -v position_mode="${BINANCE_ETH_MICRO_POSITION_MODE}" \
+        -v position_side="${BINANCE_ETH_MICRO_POSITION_SIDE}" \
+        -v open_reduce_only="${BINANCE_ETH_MICRO_OPEN_REDUCE_ONLY}" \
         -v combo_id="${combo_id}" \
         -v buyer_email="${BINANCE_ETH_MICRO_BUYER_EMAIL}" \
         -v client_order_id="${client_order_id}" \
@@ -608,7 +855,7 @@ WITH signal AS (
         'Binance ETH micro live open smoke',
         'Tiny ETH open order created by guarded live smoke script.',
         1.0,
-        jsonb_build_object(
+        jsonb_strip_nulls(jsonb_build_object(
             'exchange', 'binance',
             'symbol', :'symbol',
             'side', 'buy',
@@ -617,10 +864,12 @@ WITH signal AS (
             'quantity', :'qty',
             'margin_mode', 'cross',
             'margin_coin', 'USDT',
+            'position_mode', NULLIF(:'position_mode', ''),
+            'position_side', NULLIF(:'position_side', ''),
             'trade_side', 'open',
             'client_order_id', :'client_order_id',
-            'reduce_only', false
-        )::text,
+            'reduce_only', NULLIF(:'open_reduce_only', '')::boolean
+        ))::text,
         NOW(),
         NOW(),
         NOW()
@@ -654,7 +903,7 @@ WITH signal AS (
         NULL,
         NULL,
         NOW(),
-        jsonb_build_object(
+        jsonb_strip_nulls(jsonb_build_object(
             'source', 'rust_quant_eth_micro_live_smoke',
             'symbol', :'symbol',
             'signal_type', 'entry',
@@ -666,10 +915,12 @@ WITH signal AS (
             'quantity', :'qty',
             'margin_mode', 'cross',
             'margin_coin', 'USDT',
+            'position_mode', NULLIF(:'position_mode', ''),
+            'position_side', NULLIF(:'position_side', ''),
             'trade_side', 'open',
             'client_order_id', :'client_order_id',
-            'reduce_only', false
-        )::text,
+            'reduce_only', NULLIF(:'open_reduce_only', '')::boolean
+        ))::text,
         NOW(),
         NOW()
     FROM signal
@@ -687,13 +938,16 @@ create_close_execution_task() {
     external_id="binance-eth-micro-close-$(date +%s)-$$"
     client_order_id="rqethclose$(date +%s)$$"
 
-    # Contract JSON keys: "close_order", "reduce_only", true, "trade_side", "close".
+    # Contract JSON keys: "close_order", mode-aware "reduce_only", "position_side", "trade_side", "close".
     run_web_sql \
         -v external_id="${external_id}" \
         -v strategy_slug="${BINANCE_ETH_MICRO_STRATEGY_SLUG}" \
         -v strategy_key="${BINANCE_ETH_MICRO_STRATEGY_KEY}" \
         -v symbol="${BINANCE_ETH_MICRO_WEB_SYMBOL}" \
         -v qty="${BINANCE_ETH_MICRO_QTY}" \
+        -v position_mode="${BINANCE_ETH_MICRO_POSITION_MODE}" \
+        -v position_side="${BINANCE_ETH_MICRO_POSITION_SIDE}" \
+        -v close_reduce_only="${BINANCE_ETH_MICRO_CLOSE_REDUCE_ONLY}" \
         -v combo_id="${combo_id}" \
         -v buyer_email="${BINANCE_ETH_MICRO_BUYER_EMAIL}" \
         -v client_order_id="${client_order_id}" \
@@ -727,18 +981,20 @@ WITH signal AS (
         'Binance ETH micro live reduce-only close smoke',
         'Immediate reduce-only close task created after open task.',
         1.0,
-        jsonb_build_object(
+        jsonb_strip_nulls(jsonb_build_object(
             'exchange', 'binance',
             'symbol', :'symbol',
             'side', 'sell',
             'order_type', 'market',
             'size', :'qty',
             'quantity', :'qty',
+            'position_mode', NULLIF(:'position_mode', ''),
+            'position_side', NULLIF(:'position_side', ''),
             'trade_side', 'close',
             'client_order_id', :'client_order_id',
-            'reduce_only', true,
+            'reduce_only', NULLIF(:'close_reduce_only', '')::boolean,
             'open_task_id', :open_task_id
-        )::text,
+        ))::text,
         NOW(),
         NOW(),
         NOW()
@@ -772,24 +1028,26 @@ WITH signal AS (
         NULL,
         NULL,
         NOW(),
-        jsonb_build_object(
+        jsonb_strip_nulls(jsonb_build_object(
             'source', 'rust_quant_eth_micro_live_smoke',
             'symbol', :'symbol',
             'risk_control', jsonb_build_object('action', 'close_candidate'),
             'manual_review', jsonb_build_object('action', 'approved_micro_smoke_close'),
-            'close_order', jsonb_build_object(
+            'close_order', jsonb_strip_nulls(jsonb_build_object(
                 'exchange', 'binance',
                 'symbol', :'symbol',
                 'side', 'sell',
                 'order_type', 'market',
                 'size', :'qty',
                 'quantity', :'qty',
+                'position_mode', NULLIF(:'position_mode', ''),
+                'position_side', NULLIF(:'position_side', ''),
                 'trade_side', 'close',
                 'client_order_id', :'client_order_id',
-                'reduce_only', true,
+                'reduce_only', NULLIF(:'close_reduce_only', '')::boolean,
                 'open_task_id', :open_task_id
-            )
-        )::text,
+            ))
+        ))::text,
         NOW(),
         NOW()
     FROM signal
@@ -805,7 +1063,7 @@ run_execution_worker_once() {
     local task_status="$3"
     local task_id="$4"
 
-    assert_no_other_pending_tasks "${task_type}" "${task_status}" "${task_id}"
+    assert_target_is_next_leaseable_task "${task_type}" "${task_status}" "${task_id}"
 
     export RUST_QUAN_WEB_BASE_URL
     export EXECUTION_EVENT_SECRET
@@ -885,13 +1143,27 @@ SQL
 
     if [[ -z "${row}" ]]; then
         echo "ERROR: ${label} order result was not written back to Web." >&2
-        exit 1
+        return 1
     fi
 
     IFS='|' read -r order_id order_status order_side exchange external_order_id task_status <<<"${row}"
+    local order_status_upper
+    order_status_upper="$(printf '%s' "${order_status}" | tr '[:lower:]' '[:upper:]')"
     if [[ "${order_status}" == "dry_run" ]]; then
         echo "ERROR: ${label} order result is dry_run; refusing to claim live smoke success." >&2
-        exit 1
+        return 1
+    fi
+    if [[ "${order_status}" == "failed" || "${task_status}" == "failed" ]]; then
+        echo "ERROR: ${label} order result failed; refusing to claim live smoke success." >&2
+        echo "  ${label}_order_status=${order_status}" >&2
+        echo "  ${label}_task_status=${task_status}" >&2
+        return 1
+    fi
+    if [[ "${order_status_upper}" != "FILLED" ]]; then
+        echo "ERROR: ${label} order result is ${order_status}; live ETH market smoke requires FILLED." >&2
+        echo "  ${label}_order_status=${order_status}" >&2
+        echo "  ${label}_task_status=${task_status}" >&2
+        return 1
     fi
 
     echo "  ${label}_order_result_id=${order_id}"
@@ -902,30 +1174,86 @@ SQL
     echo "  ${label}_task_status=${task_status}"
 }
 
+emergency_close_eth_position_via_web() {
+    local combo_id="$1"
+    local open_task_id="$2"
+
+    echo "  emergency_close_eth_position_via_web=attempting"
+    local emergency_close_task_id
+    emergency_close_task_id="$(create_close_execution_task "${combo_id}" "${open_task_id}")"
+    echo "  emergency_close_task_id=${emergency_close_task_id}"
+    verify_close_reduce_only_contract "${emergency_close_task_id}"
+    if ! run_execution_worker_once "emergency-close" "risk_control_close_candidate" "pending_close" "${emergency_close_task_id}"; then
+        echo "ERROR: emergency Web close worker failed; manual exchange review is required." >&2
+        verify_final_eth_position_flat
+        verify_final_eth_open_orders_clear
+        exit 1
+    fi
+    verify_order_result "${emergency_close_task_id}" "sell" "emergency_close"
+    verify_final_eth_position_flat
+    verify_final_eth_open_orders_clear
+}
+
+handle_open_stage_failure() {
+    local combo_id="$1"
+    local open_task_id="$2"
+
+    echo "ERROR: open stage failed after possible live order placement; checking ETH position before exit." >&2
+    if eth_position_is_flat; then
+        echo "  open_stage_failure_eth_position=flat"
+        verify_final_eth_open_orders_clear
+        exit 1
+    fi
+
+    echo "WARN: ETHUSDT is not flat after open-stage failure; attempting Web-path emergency close." >&2
+    emergency_close_eth_position_via_web "${combo_id}" "${open_task_id}"
+    exit 1
+}
+
 verify_close_reduce_only_contract() {
     local close_task_id="$1"
-    local reduce_only
-    reduce_only="$(
+    local row
+    row="$(
         run_web_sql \
             -v task_id="${close_task_id}" \
             -At <<'SQL'
-SELECT COALESCE((request_payload_json::jsonb -> 'close_order' ->> 'reduce_only'), '')
+SELECT
+    COALESCE((request_payload_json::jsonb -> 'close_order' ->> 'reduce_only'), ''),
+    COALESCE((request_payload_json::jsonb -> 'close_order' ->> 'position_side'), '')
 FROM execution_tasks
 WHERE id = :task_id;
 SQL
     )"
-    if [[ "${reduce_only}" != "true" ]]; then
-        echo "ERROR: close task does not carry close_order.reduce_only=true." >&2
-        exit 1
+    local reduce_only
+    local position_side
+    IFS='|' read -r reduce_only position_side <<<"${row}"
+    if [[ -n "${BINANCE_ETH_MICRO_CLOSE_REDUCE_ONLY}" ]]; then
+        if [[ "${reduce_only}" != "true" ]]; then
+            echo "ERROR: one-way close task does not carry close_order.reduce_only=true." >&2
+            exit 1
+        fi
+        echo "  close_reduce_only=true"
+    else
+        if [[ -n "${reduce_only}" ]]; then
+            echo "ERROR: hedge close task must omit close_order.reduce_only." >&2
+            exit 1
+        fi
+        if [[ "${position_side}" != "long" ]]; then
+            echo "ERROR: hedge close task must carry close_order.position_side=long." >&2
+            exit 1
+        fi
+        echo "  close_reduce_only=omitted_for_hedge"
+        echo "  close_position_side=long"
     fi
-    echo "  close_reduce_only=true"
 }
 
 echo
 echo "=== Step 1: Binance preflights ==="
 preflight_binance_signed_account
 preflight_binance_position_mode
+preflight_binance_open_orders_clear
 preflight_binance_exchange_info_filters
+preflight_binance_margin_available
 
 echo
 echo "=== Step 2: Web credential and combo preflight ==="
@@ -937,17 +1265,32 @@ echo
 echo "=== Step 3: Create ETH open task and run worker once ==="
 OPEN_TASK_ID="$(create_open_execution_task "${COMBO_ID}")"
 echo "  open_task_id=${OPEN_TASK_ID}"
-run_execution_worker_once "open" "execute_signal" "pending" "${OPEN_TASK_ID}"
-verify_order_result "${OPEN_TASK_ID}" "buy" "open"
+if ! run_execution_worker_once "open" "execute_signal" "pending" "${OPEN_TASK_ID}"; then
+    handle_open_stage_failure "${COMBO_ID}" "${OPEN_TASK_ID}"
+fi
+if ! verify_order_result "${OPEN_TASK_ID}" "buy" "open"; then
+    handle_open_stage_failure "${COMBO_ID}" "${OPEN_TASK_ID}"
+fi
 
 echo
 echo "=== Step 4: Create immediate reduce-only close task and run worker once ==="
 CLOSE_TASK_ID="$(create_close_execution_task "${COMBO_ID}" "${OPEN_TASK_ID}")"
 echo "  close_task_id=${CLOSE_TASK_ID}"
 verify_close_reduce_only_contract "${CLOSE_TASK_ID}"
-run_execution_worker_once "close" "risk_control_close_candidate" "pending_close" "${CLOSE_TASK_ID}"
-verify_order_result "${CLOSE_TASK_ID}" "sell" "close"
+if ! run_execution_worker_once "close" "risk_control_close_candidate" "pending_close" "${CLOSE_TASK_ID}"; then
+    echo "ERROR: close worker failed; checking final ETH state." >&2
+    verify_final_eth_position_flat
+    verify_final_eth_open_orders_clear
+    exit 1
+fi
+if ! verify_order_result "${CLOSE_TASK_ID}" "sell" "close"; then
+    echo "ERROR: close order result verification failed; checking final ETH state." >&2
+    verify_final_eth_position_flat
+    verify_final_eth_open_orders_clear
+    exit 1
+fi
 verify_final_eth_position_flat
+verify_final_eth_open_orders_clear
 
 echo
 echo "=== Binance ETH micro live smoke completed ==="

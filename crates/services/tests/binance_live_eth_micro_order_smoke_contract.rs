@@ -65,8 +65,8 @@ fn smoke_script_defaults_to_tiny_eth_quantity_and_requires_micro_confirmation() 
     let script = read_smoke_script();
 
     assert!(
-        script.contains("BINANCE_ETH_MICRO_QTY:=\"0.001\""),
-        "script must default to the tiny ETH quantity"
+        script.contains("BINANCE_ETH_MICRO_QTY:=\"0.010\""),
+        "script must default to a tiny ETH quantity that clears Binance USD-M minNotional in normal ETH price ranges"
     );
     assert!(
         script.contains("I_UNDERSTAND_TINY_ETH_LIVE_ORDER"),
@@ -135,6 +135,64 @@ fn smoke_script_preflights_account_and_exchange_filters_before_web_state_changes
 }
 
 #[test]
+fn smoke_script_preflights_available_margin_before_web_state_changes() {
+    let script = read_smoke_script();
+
+    assert!(
+        script.contains("BINANCE_ETH_MICRO_NOTIONAL"),
+        "script must persist the ETH micro notional computed from exchange filters"
+    );
+    assert!(
+        script.contains("preflight_binance_margin_available()"),
+        "script must define a signed available-margin preflight"
+    );
+    assert!(
+        script.contains("availableBalance") && script.contains("USDT"),
+        "script must inspect Binance Futures available USDT balance"
+    );
+    assert!(
+        script.contains("preflight_margin_available=ok"),
+        "script must print a non-sensitive margin preflight success summary"
+    );
+
+    let margin_pos = script
+        .find("preflight_binance_margin_available")
+        .expect("margin preflight must exist");
+    let credential_pos = script
+        .find("INSERT INTO user_api_credentials")
+        .expect("credential upsert must exist");
+    let task_pos = script
+        .find("INSERT INTO execution_tasks")
+        .expect("task insert must exist");
+
+    assert!(
+        margin_pos < credential_pos && margin_pos < task_pos,
+        "available-margin preflight must happen before Web credential/task state changes"
+    );
+}
+
+#[test]
+fn smoke_script_loads_local_env_files_without_executing_them() {
+    let script = read_smoke_script();
+
+    assert!(
+        script.contains("load_env_file_safe()"),
+        "script must load local .env files through a parser, not shell source"
+    );
+    assert!(
+        script.contains("safe_assign_env")
+            && script.contains("rust_quan_web/backend/.env")
+            && script.contains("WEB_DATABASE_URL"),
+        "script must safely map Web backend DATABASE_URL to WEB_DATABASE_URL"
+    );
+    assert!(
+        !script.contains(". \"${REPO_ROOT}/.env\"")
+            && !script.contains("source \"${REPO_ROOT}/.env\""),
+        "script must not source .env because malformed/non-kv lines can execute"
+    );
+}
+
+#[test]
 fn smoke_script_requires_eth_position_flat_before_and_after_live_smoke() {
     let script = read_smoke_script();
 
@@ -157,12 +215,30 @@ fn smoke_script_requires_eth_position_flat_before_and_after_live_smoke() {
 }
 
 #[test]
-fn smoke_script_requires_one_way_position_mode_for_reduce_only_close() {
+fn smoke_script_requires_no_eth_open_orders_before_and_after_live_smoke() {
+    let script = read_smoke_script();
+
+    assert!(
+        script.contains("/fapi/v1/openOrders") && script.contains("symbol=ETHUSDT"),
+        "script must query ETHUSDT open orders through Binance signed read-only API"
+    );
+    assert!(
+        script.contains("preflight_eth_open_orders_clear"),
+        "script must refuse to start when ETHUSDT has existing open orders"
+    );
+    assert!(
+        script.contains("final_eth_open_orders_clear"),
+        "script must verify no ETHUSDT open orders remain after the smoke"
+    );
+}
+
+#[test]
+fn smoke_script_supports_one_way_and_hedge_position_modes_for_close() {
     let script = read_smoke_script();
 
     assert!(
         script.contains("/fapi/v1/positionSide/dual"),
-        "script must inspect Binance Futures position mode before a reduce-only close smoke"
+        "script must inspect Binance Futures position mode before a live close smoke"
     );
     assert!(
         script.contains("dualSidePosition"),
@@ -173,8 +249,10 @@ fn smoke_script_requires_one_way_position_mode_for_reduce_only_close() {
         "script must print a non-sensitive one-way mode summary before live order placement"
     );
     assert!(
-        script.contains("refusing Binance Hedge Mode"),
-        "script must refuse Hedge Mode because reduceOnly close orders are not valid there"
+        script.contains("binance_position_mode=hedge")
+            && script.contains("BINANCE_ETH_MICRO_POSITION_MODE=hedge")
+            && script.contains("BINANCE_ETH_MICRO_POSITION_SIDE=long"),
+        "script must support Binance Hedge Mode by routing orders to positionSide=LONG"
     );
 
     let mode_pos = script
@@ -207,9 +285,10 @@ fn smoke_script_proves_open_then_immediate_reduce_only_close_intent() {
     assert!(
         script.contains("'risk_control_close_candidate', 'pending_close'")
             && script.contains("'close_order'")
-            && script.contains("'reduce_only', true")
+            && script.contains("'position_side', NULLIF(:'position_side', '')")
+            && script.contains("'reduce_only', NULLIF(:'close_reduce_only', '')::boolean")
             && script.contains("'trade_side', 'close'"),
-        "script must create an immediate pending_close task with reduce_only=true"
+        "script must create an immediate pending_close task with mode-aware close payload"
     );
     assert!(
         script.contains("run_execution_worker_once \"open\"")
@@ -223,13 +302,51 @@ fn smoke_script_proves_open_then_immediate_reduce_only_close_intent() {
     let close_insert_pos = script
         .find("create_close_execution_task")
         .expect("close task function/call must exist");
-    let reduce_only_pos = script
-        .find("'reduce_only', true")
-        .expect("reduce-only close intent must exist");
+    let close_payload_pos = script
+        .find("'reduce_only', NULLIF(:'close_reduce_only', '')::boolean")
+        .expect("mode-aware close reduce_only intent must exist");
 
     assert!(
-        open_insert_pos < close_insert_pos && open_insert_pos < reduce_only_pos,
-        "open task must be created before close task and close must carry reduce_only=true"
+        open_insert_pos < close_insert_pos && open_insert_pos < close_payload_pos,
+        "open task must be created before close task and close payload must be mode-aware"
+    );
+}
+
+#[test]
+fn smoke_script_attempts_web_close_if_open_stage_fails_with_eth_position() {
+    let script = read_smoke_script();
+
+    assert!(
+        script.contains("handle_open_stage_failure()"),
+        "script must have an explicit open-stage failure handler"
+    );
+    assert!(
+        script.contains("emergency_close_eth_position_via_web"),
+        "open-stage failure handling must attempt close through the Web task/worker path"
+    );
+    assert!(
+        script.contains("open stage failed after possible live order placement"),
+        "failure handler must make the production risk obvious in logs"
+    );
+}
+
+#[test]
+fn smoke_script_uses_production_ready_credential_code_and_rejects_failed_results() {
+    let script = read_smoke_script();
+
+    assert!(
+        script.contains("'signed_exchange_preflight_passed'"),
+        "script must upsert a production-ready signed preflight code so Web internal resolve can use the credential"
+    );
+    assert!(
+        script.contains(r#"${order_status}" == "failed"#)
+            && script.contains(r#"${task_status}" == "failed"#)
+            && script.contains("refusing to claim live smoke success"),
+        "script must fail closed when Web reports a failed order/task result"
+    );
+    assert!(
+        script.contains(r#"${order_status_upper}" != "FILLED"#),
+        "script must require live ETH market smoke orders to be FILLED, not just non-failed"
     );
 }
 
@@ -255,14 +372,25 @@ fn smoke_script_isolates_worker_lease_scope_before_each_live_worker_run() {
     let script = read_smoke_script();
 
     assert!(
-        script.contains("assert_no_other_pending_tasks()"),
+        script.contains("assert_target_is_next_leaseable_task()"),
         "script must guard worker lease isolation"
     );
     assert!(
-        script.contains("task_type = $1")
-            && script.contains("task_status = $2")
-            && script.contains("id <> $3"),
-        "script must check no other matching task can be leased before live worker run"
+        script.contains("task_status = :'task_status'")
+            && script.contains("(other.task_status = 'leased' AND other.lease_until < NOW())"),
+        "script must mirror Web leasing semantics, including expired leased tasks"
+    );
+    assert!(
+        script.contains("other.priority > target.priority")
+            && script.contains("other.priority = target.priority")
+            && script.contains("other.scheduled_at < target.scheduled_at")
+            && script.contains("other.scheduled_at = target.scheduled_at")
+            && script.contains("other.id < target.id"),
+        "script must prove no other leaseable task sorts before the pinned target"
+    );
+    assert!(
+        script.contains("refusing live worker run because another task would be leased first"),
+        "script must fail closed when another task would sort ahead of the target"
     );
     assert!(
         script.contains("EXECUTION_WORKER_LEASE_LIMIT=1"),

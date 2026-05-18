@@ -236,7 +236,121 @@ full_report = json.loads(Path(full_report_path).read_text(encoding="utf-8"))
 summary = json.loads(Path(summary_path).read_text(encoding="utf-8"))
 validation = json.loads(Path(validation_path).read_text(encoding="utf-8"))
 publish_index = json.loads(Path(publish_index_path).read_text(encoding="utf-8"))
+payment_input = json.loads(Path(input_path).read_text(encoding="utf-8"))
 source_summary = full_report.get("summary") if isinstance(full_report.get("summary"), dict) else {}
+
+
+def fail_contract(message):
+    print(f"publish index contract failed: {message}", file=sys.stderr)
+    sys.exit(21)
+
+
+def as_object(value, path):
+    if not isinstance(value, dict):
+        fail_contract(f"{path} must be an object")
+    return value
+
+
+def as_items(value, path):
+    if not isinstance(value, list):
+        fail_contract(f"{path} must be an array")
+    if any(not isinstance(item, dict) for item in value):
+        fail_contract(f"{path} items must be objects")
+    return value
+
+
+def as_non_negative_int(value, path):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        fail_contract(f"{path} must be a non-negative integer")
+    return value
+
+
+def find_playbook_item(items, code):
+    for item in items:
+        if item.get("section") == "payment_entitlement_health" and item.get("code") == code:
+            return item
+    fail_contract(f"missing payment playbook item: {code}")
+
+
+publish_summary = as_object(publish_index.get("summary"), "publish_index.summary")
+publish_summary_counts = as_object(
+    publish_summary.get("summary"),
+    "publish_index.summary.summary",
+)
+publish_playbook = as_object(
+    publish_summary.get("operator_playbook_summary"),
+    "publish_index.summary.operator_playbook_summary",
+)
+publish_playbook_items = as_items(
+    publish_playbook.get("items"),
+    "publish_index.summary.operator_playbook_summary.items",
+)
+publish_validation = as_object(publish_index.get("validation"), "publish_index.validation")
+publish_redaction = as_object(publish_index.get("redaction"), "publish_index.redaction")
+
+expected_wallet_count = as_non_negative_int(
+    payment_input.get("wallet_payment_exception_count"),
+    "input.wallet_payment_exception_count",
+)
+expected_blocker_count = as_non_negative_int(
+    payment_input.get("payment_entitlement_blocker_count"),
+    "input.payment_entitlement_blocker_count",
+)
+publish_wallet_count = as_non_negative_int(
+    publish_summary_counts.get("wallet_payment_exception_count"),
+    "publish_index.summary.summary.wallet_payment_exception_count",
+)
+publish_blocker_count = as_non_negative_int(
+    publish_summary_counts.get("payment_entitlement_blocker_count"),
+    "publish_index.summary.summary.payment_entitlement_blocker_count",
+)
+
+if publish_index.get("storageStatus") != "current":
+    fail_contract("publish_index.storageStatus must be current")
+if publish_index.get("stale") is not False:
+    fail_contract("publish_index.stale must be false")
+if publish_validation.get("status") != "ok":
+    fail_contract("publish_index.validation.status must be ok")
+if publish_redaction.get("status") != "ok":
+    fail_contract("publish_index.redaction.status must be ok")
+if publish_wallet_count != expected_wallet_count:
+    fail_contract("wallet_payment_exception_count drifted between input and publish index")
+if publish_blocker_count != expected_blocker_count:
+    fail_contract("payment_entitlement_blocker_count drifted between input and publish index")
+
+wallet_playbook_item = find_playbook_item(publish_playbook_items, "WALLET_PAYMENT_EXCEPTION")
+blocker_playbook_item = find_playbook_item(publish_playbook_items, "PAYMENT_ENTITLEMENT_BLOCKED")
+if wallet_playbook_item.get("default_next_action") != "review_wallet_payment_exceptions":
+    fail_contract("WALLET_PAYMENT_EXCEPTION default_next_action drifted")
+if blocker_playbook_item.get("operator_action") != "block_release_until_resolved":
+    fail_contract("PAYMENT_ENTITLEMENT_BLOCKED operator_action drifted")
+
+publish_index_contract = {
+    "compatibility_contract_version": 1,
+    "ready_to_render": True,
+    "counter_source": "publish_index.summary.summary",
+    "playbook_source": "publish_index.summary.operator_playbook_summary.items",
+    "wallet_payment_exception_count": publish_wallet_count,
+    "payment_entitlement_blocker_count": publish_blocker_count,
+    "required_gate": {
+        "storageStatus": publish_index.get("storageStatus"),
+        "stale": publish_index.get("stale"),
+        "validation.status": publish_validation.get("status"),
+        "redaction.status": publish_redaction.get("status"),
+    },
+    "required_playbook_items": [
+        {
+            "code": wallet_playbook_item.get("code"),
+            "section": wallet_playbook_item.get("section"),
+            "default_next_action": wallet_playbook_item.get("default_next_action"),
+        },
+        {
+            "code": blocker_playbook_item.get("code"),
+            "section": blocker_playbook_item.get("section"),
+            "operator_action": blocker_playbook_item.get("operator_action"),
+        },
+    ],
+}
 
 print(json.dumps(
     {
@@ -275,6 +389,7 @@ print(json.dumps(
             "wallet_payment_exception_count": source_summary.get("wallet_payment_exception_count", 0),
             "payment_entitlement_blocker_count": source_summary.get("payment_entitlement_blocker_count", 0),
         },
+        "publish_index_contract": publish_index_contract,
     },
     ensure_ascii=True,
     indent=2,

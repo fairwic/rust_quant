@@ -26,7 +26,8 @@ not by running local commands from a request handler:
 - GET `/admin/quant/full-product-health/latest`
 - response fields: `artifactSetId`, `storedAt`, `summary`, `validation`,
   `sourceGeneratedAt`, `markdownUrl`, `fullArtifactUrl`, `ready`, `stale`,
-  `staleReason`, `artifactSlaSeconds`, `operatorMetadata`, and `redaction`
+  `staleReason`, `artifactSlaSeconds`, `operatorMetadata`, `redaction`, and
+  `paymentPublishIndex`
 - `summary` is the stored `full-product-health-summary.json` payload.
 - `validation` is the stored `full-product-health-validation.json` payload,
   reduced to stable status, summary, and finding locator fields.
@@ -35,6 +36,8 @@ not by running local commands from a request handler:
 - `ready` is computed from stored summary and validation fields only.
 - `stale` is true when `storedAt`, `generated_at`, or `source_generated_at`
   exceeds the product freshness SLA.
+- `paymentPublishIndex` is a read-only projection of the stored publish index
+  for payment health counters and playbook cards.
 - `redaction` records whether the stored set passed sensitive-marker
   validation and must not contain source text, raw payload, or secrets.
 
@@ -202,12 +205,70 @@ Bind the first Admin screen to these fields:
 - `operator_playbook_summary.items[].owner`
 - `operator_playbook_summary.items[].default_next_action`
 - `operator_playbook_summary.items[].admin_link_target`
+- `checklist[].live_readiness`
+- `checklist[].manual_review_required`
+- latest response `paymentPublishIndex.status`
+- latest response `paymentPublishIndex.readyToRender`
+- latest response `paymentPublishIndex.walletPaymentExceptionCount`
+- latest response `paymentPublishIndex.paymentEntitlementBlockerCount`
+- latest response `paymentPublishIndex.playbookItems[]`
+- latest response `walletPaymentConfig.source`
+- latest response `walletPaymentConfig.status`
+- latest response `walletPaymentConfig.webWalletProviderReadiness`
+- publish index `storageStatus`
+- publish index `stale`
+- publish index `validation.status`
+- publish index `redaction.status`
+- publish index `summary.summary.wallet_payment_exception_count`
+- publish index `summary.summary.payment_entitlement_blocker_count`
+- publish index `summary.operator_playbook_summary.items[]`
 - `correlation_ids[]`
 - `validation.summary.sensitive_marker_count`
 - `validation.findings[]`
 
 Consumers must ignore unknown appended fields for schema version `1`.
 
+For payment health, the publish index is a read-only consumption artifact.
+Admin must display wallet exception and entitlement blocker counts from the
+stored publish index only; a missing count is unknown artifact drift, not zero
+incidents. Payment playbook cards must bind
+`summary.operator_playbook_summary.items[]` and use Markdown only as a detail
+link. The index may be shown as latest-ready only when `storageStatus=current`,
+`stale=false`, `validation.status=ok`, and `redaction.status=ok`.
+
+The latest response `paymentPublishIndex` is the Admin-facing alias of the same
+stored publish-index facts. It is stable as a read-only operator surface:
+`status`, `readyToRender`, `walletPaymentExceptionCount`,
+`paymentEntitlementBlockerCount`, `counterSource`, `playbookSource`,
+`validationStatus`, `redactionStatus`, and `playbookItems[]` can drive display
+and blocker reasons only. Missing counts or missing readiness fields mean
+artifact drift/unknown, not zero and not ready.
+
+Readiness rows and payment publish-index cards must not trigger automatic recovery.
+They may link to read-only diagnosis or guarded runbooks, but the UI
+must not call provider recovery, signed exchange/account/order/position
+endpoints, execution task lease/report/mutate endpoints, local health probes,
+or order placement from these fields.
+They must not automatically trigger recovery or mutation.
+
+`walletPaymentConfig` is an Admin-only config snapshot or draft. It must show
+`walletPaymentConfig.source.kind=admin_process_env_snapshot` or
+`admin_managed_config_draft` before rendering any provider/config badge, and it
+must not represent Web wallet provider readiness.
+If Web wallet readiness is missing, unavailable, or inconsistent with
+the Admin config surface, render degraded/unknown and not ready. The UI must not
+turn `walletPaymentConfig` into ready state by itself, and a missing
+`walletPaymentConfig.source` is artifact drift/unknown.
+The not-ready decision table is explicit:
+`source_kind_missing_or_not_allowed_admin_config_source`,
+`status_configured_without_web_wallet_provider_readiness`, `status_draft`,
+`status_degraded`, `status_unknown`, `web_wallet_provider_readiness_missing`,
+`web_wallet_provider_readiness_unknown`,
+`web_wallet_provider_readiness_incomplete`, and
+`web_wallet_provider_readiness_inconsistent_with_admin_snapshot` cannot be
+ready. Web wallet readiness is incomplete when the stored latest response lacks
+the Web provider readiness fields needed to compare against the Admin snapshot.
+These cases cannot be ready.
 ## Status Mapping
 
 Map artifact and section status values consistently:
@@ -268,6 +329,9 @@ or a report-only lane was used:
 - `read_only_input_count == 0`
 - `admin_readiness.live_readiness` is `blocked` or `review`
 - `manual_review_required == true`
+- `walletPaymentConfig.source.kind` is missing or not one of
+  `admin_process_env_snapshot` / `admin_managed_config_draft`
+- `walletPaymentConfig.webWalletProviderReadiness` is missing, `unknown`, or inconsistent
 
 Skipped input is visible context, not success. A skipped section can exist in a
 safe default CI lane and still require a separate read-only collection before a

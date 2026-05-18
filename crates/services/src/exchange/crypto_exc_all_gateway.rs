@@ -1,8 +1,9 @@
 use crypto_exc_all::{
-    BinanceExchangeConfig, BitgetExchangeConfig, Candle, CandleQuery, CryptoSdk, Error, ExchangeId,
-    Instrument, MarginMode, OkxExchangeConfig, OrderAck, OrderSide, OrderType, PlaceOrderRequest,
-    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, Result, SdkConfig, Ticker,
-    TimeInForce,
+    Balance, BinanceExchangeConfig, BitgetExchangeConfig, CancelOrderRequest, Candle, CandleQuery,
+    CryptoSdk, Error, ExchangeId, Fill, FillListQuery, Instrument, MarginMode, OkxExchangeConfig,
+    Order, OrderAck, OrderListQuery, OrderQuery, OrderSide, OrderType, PlaceOrderRequest, Position,
+    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderQuery,
+    ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
 };
 use serde_json::json;
 
@@ -210,6 +211,127 @@ impl CryptoExcAllGateway {
             }),
         }
     }
+
+    pub async fn place_protective_order(
+        &self,
+        exchange: ExchangeId,
+        request: ProtectiveOrderRequest,
+    ) -> Result<OrderAck> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.trade(exchange)?.place_protective_order(request).await,
+            GatewayMode::DryRun => Ok(OrderAck {
+                exchange,
+                exchange_symbol: request.instrument.symbol_for(exchange),
+                instrument: request.instrument,
+                order_id: Some(format!(
+                    "dry-run-protective-{}",
+                    request
+                        .client_order_id
+                        .clone()
+                        .unwrap_or_else(|| "order".to_string())
+                )),
+                client_order_id: request.client_order_id,
+                status: Some("dry_run".to_string()),
+                raw: json!({
+                    "dry_run": true,
+                    "protective": true,
+                    "side": request.side,
+                    "stop_price": request.stop_price,
+                    "position_side": request.position_side,
+                    "reduce_only": request.reduce_only,
+                    "close_position": request.close_position,
+                    "working_type": request.working_type,
+                    "price_protect": request.price_protect,
+                }),
+            }),
+        }
+    }
+
+    pub async fn order(&self, exchange: ExchangeId, query: OrderQuery) -> Result<Order> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.orders(exchange)?.get(query).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run order query",
+            }),
+        }
+    }
+
+    pub async fn protective_order(
+        &self,
+        exchange: ExchangeId,
+        query: ProtectiveOrderQuery,
+    ) -> Result<Order> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.orders(exchange)?.get_protective_order(query).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run protective order query",
+            }),
+        }
+    }
+
+    pub async fn open_orders(
+        &self,
+        exchange: ExchangeId,
+        query: OrderListQuery,
+    ) -> Result<Vec<Order>> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.orders(exchange)?.open(query).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run open orders query",
+            }),
+        }
+    }
+
+    pub async fn fills(&self, exchange: ExchangeId, query: FillListQuery) -> Result<Vec<Fill>> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.fills(exchange)?.list(query).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run fills query",
+            }),
+        }
+    }
+
+    pub async fn balances(&self, exchange: ExchangeId) -> Result<Vec<Balance>> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.account(exchange)?.balances().await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run balance query",
+            }),
+        }
+    }
+
+    pub async fn positions(
+        &self,
+        exchange: ExchangeId,
+        instrument: Option<&Instrument>,
+    ) -> Result<Vec<Position>> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.positions(exchange)?.list(instrument).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run position query",
+            }),
+        }
+    }
+
+    pub async fn cancel_order(
+        &self,
+        exchange: ExchangeId,
+        request: CancelOrderRequest,
+    ) -> Result<OrderAck> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.trade(exchange)?.cancel_order(request).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run cancel order",
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -275,6 +397,46 @@ mod tests {
         assert_eq!(ack.client_order_id.as_deref(), Some("rq-dry-run"));
         assert_eq!(ack.status.as_deref(), Some("dry_run"));
         assert_eq!(ack.raw["dry_run"], true);
+    }
+
+    #[tokio::test]
+    async fn dry_run_place_protective_order_returns_simulated_ack_without_credentials() {
+        let gateway = CryptoExcAllGateway::dry_run();
+        let instrument = Instrument::perp("eth", "usdt").with_settlement("usdt");
+        let request = ProtectiveOrderRequest::stop_market(instrument, OrderSide::Sell, "2200")
+            .with_close_position(true)
+            .with_client_order_id("rq-sl-42");
+
+        let ack = gateway
+            .place_protective_order(ExchangeId::Binance, request)
+            .await
+            .unwrap();
+
+        assert_eq!(ack.exchange, ExchangeId::Binance);
+        assert_eq!(ack.exchange_symbol, "ETHUSDT");
+        assert_eq!(ack.client_order_id.as_deref(), Some("rq-sl-42"));
+        assert_eq!(ack.status.as_deref(), Some("dry_run"));
+        assert_eq!(ack.raw["protective"], true);
+        assert_eq!(ack.raw["close_position"], true);
+    }
+
+    #[tokio::test]
+    async fn dry_run_rejects_live_account_and_cancel_queries() {
+        let gateway = CryptoExcAllGateway::dry_run();
+        let instrument = Instrument::perp("eth", "usdt").with_settlement("usdt");
+
+        assert!(gateway.balances(ExchangeId::Binance).await.is_err());
+        assert!(gateway
+            .positions(ExchangeId::Binance, Some(&instrument))
+            .await
+            .is_err());
+        assert!(gateway
+            .cancel_order(
+                ExchangeId::Binance,
+                CancelOrderRequest::by_client_order_id(instrument, "rq-cancel"),
+            )
+            .await
+            .is_err());
     }
 
     #[test]

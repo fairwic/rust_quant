@@ -336,6 +336,120 @@
         "query_failed means explicit read-only DB input was provided but the query could not produce counts",
         "real_count means explicit read-only DB input produced wallet_payment_exception_count and payment_entitlement_blocker_count"
       ]
+    },
+    "payment_publish_index_read_only_consumption": {
+      "compatibility_contract_version": 1,
+      "producer_required_paths": [
+        "publish_index.schemaVersion",
+        "publish_index.storageStatus",
+        "publish_index.stale",
+        "publish_index.validation.status",
+        "publish_index.redaction.status",
+        "publish_index.summary.summary.wallet_payment_exception_count",
+        "publish_index.summary.summary.payment_entitlement_blocker_count",
+        "publish_index.summary.operator_playbook_summary.items"
+      ],
+      "consumer_rules": [
+        "Admin and CI must read wallet_payment_exception_count and payment_entitlement_blocker_count from publish_index.summary.summary and must not re-query a database for these counters",
+        "Missing wallet_payment_exception_count means unknown artifact drift and must not be displayed as zero incidents",
+        "Admin and CI must bind publish_index.summary.operator_playbook_summary.items before free-form Markdown or log text",
+        "The WALLET_PAYMENT_EXCEPTION playbook item must preserve default_next_action=review_wallet_payment_exceptions",
+        "The PAYMENT_ENTITLEMENT_BLOCKED playbook item must preserve operator_action=block_release_until_resolved",
+        "A publish index can be rendered as latest-ready only when storageStatus=current, stale=false, validation.status=ok, and redaction.status=ok"
+      ]
+    },
+    "admin_latest_artifact_readiness_envelope": {
+      "compatibility_contract_version": 1,
+      "producer_required_paths": [
+        "latest.ready",
+        "latest.stale",
+        "latest.staleReason",
+        "latest.summary.summary.overall_status",
+        "latest.summary.section_statuses",
+        "latest.summary.checklist[].ready",
+        "latest.summary.checklist[].action_required",
+        "latest.summary.checklist[].live_readiness",
+        "latest.summary.checklist[].manual_review_required",
+        "latest.summary.required_operator_actions",
+        "latest.summary.read_only_input_count",
+        "latest.validation.status",
+        "latest.validation.summary.sensitive_marker_count",
+        "latest.redaction.status",
+        "latest.paymentPublishIndex.status",
+        "latest.paymentPublishIndex.readyToRender",
+        "latest.walletPaymentConfig.source"
+      ],
+      "read_only_operator_surface": [
+        "latest.ready",
+        "latest.stale",
+        "latest.staleReason",
+        "latest.summary.section_statuses",
+        "latest.summary.checklist",
+        "latest.summary.operator_playbook_summary.items",
+        "latest.paymentPublishIndex",
+        "latest.walletPaymentConfig"
+      ],
+      "prohibited_automatic_actions": [
+        "shell_out_from_admin_request",
+        "read_env",
+        "run_live_probe",
+        "call_signed_exchange_endpoint",
+        "lease_execution_task",
+        "report_order_result",
+        "mutate_execution_task",
+        "place_order",
+        "trigger_provider_recovery",
+        "touch_protected_live_position"
+      ],
+      "consumer_rules": [
+        "Admin must compute readiness from stored artifact fields only and must not use command exit code as readiness",
+        "Missing latest readiness fields or paymentPublishIndex fields mean artifact drift or unknown, not ready",
+        "paymentPublishIndex is a read-only display projection of the stored publish index",
+        "readiness and paymentPublishIndex may render operator next-action labels but must not trigger recovery, task mutation, provider calls, or exchange calls automatically",
+        "Only appended fields are allowed under compatibility_contract_version 1; removing or renaming any producer_required_paths entry requires a new compatibility_contract_version"
+      ]
+    },
+    "admin_wallet_payment_config_env_snapshot": {
+      "compatibility_contract_version": 1,
+      "producer_required_paths": [
+        "latest.walletPaymentConfig",
+        "latest.walletPaymentConfig.source",
+        "latest.walletPaymentConfig.source.kind",
+        "latest.walletPaymentConfig.status",
+        "latest.walletPaymentConfig.webWalletProviderReadiness"
+      ],
+      "source_values": [
+        "admin_process_env_snapshot",
+        "admin_managed_config_draft"
+      ],
+      "source_kind_allowed_values": [
+        "admin_process_env_snapshot",
+        "admin_managed_config_draft"
+      ],
+      "status_values": [
+        "configured",
+        "draft",
+        "ready",
+        "degraded",
+        "unknown"
+      ],
+      "not_ready_cases": [
+        "source_kind_missing_or_not_allowed_admin_config_source",
+        "status_configured_without_web_wallet_provider_readiness",
+        "status_draft",
+        "status_degraded",
+        "status_unknown",
+        "web_wallet_provider_readiness_missing",
+        "web_wallet_provider_readiness_unknown",
+        "web_wallet_provider_readiness_incomplete",
+        "web_wallet_provider_readiness_inconsistent_with_admin_snapshot"
+      ],
+      "consumer_rules": [
+        "walletPaymentConfig.source.kind must be one of admin_process_env_snapshot or admin_managed_config_draft",
+        "walletPaymentConfig is an Admin-only config snapshot or draft",
+        "walletPaymentConfig must not represent Web wallet provider readiness",
+        "If Web wallet readiness is missing or inconsistent, render degraded/unknown and not ready"
+      ]
     }
   },
   "artifact_schemas": {

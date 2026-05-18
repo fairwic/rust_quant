@@ -82,6 +82,80 @@ appended `operator_playbook_summary` fields and item fields under schema version
 `1`; removing or renaming any producer-required path requires a new
 `compatibility_contract_version`.
 
+`consumer_contracts.payment_publish_index_read_only_consumption.compatibility_contract_version`
+is the publish-index contract for payment health. Version `1` binds Admin and CI
+to the stored publish index fields, not to a live query:
+
+- Read `wallet_payment_exception_count` and
+  `payment_entitlement_blocker_count` from
+  `publish_index.summary.summary`.
+- Treat a missing wallet counter as artifact drift or unknown, not as zero
+  incidents.
+- Render payment next actions from
+  `publish_index.summary.operator_playbook_summary.items[]` before Markdown or
+  log text.
+- Preserve `default_next_action=review_wallet_payment_exceptions` for
+  `WALLET_PAYMENT_EXCEPTION`.
+- Preserve `operator_action=block_release_until_resolved` for
+  `PAYMENT_ENTITLEMENT_BLOCKED`.
+- Render the index as latest-ready only when `storageStatus=current`,
+  `stale=false`, `validation.status=ok`, and `redaction.status=ok`.
+
+`consumer_contracts.admin_latest_artifact_readiness_envelope.compatibility_contract_version`
+is the latest-artifact readiness contract for Admin. Version `1` binds the
+stored response envelope and panel projection to these stable fields:
+
+- `latest.ready`, `latest.stale`, and `latest.staleReason`.
+- `latest.summary.summary.overall_status`.
+- `latest.summary.section_statuses`.
+- `latest.summary.checklist[].ready`,
+  `latest.summary.checklist[].action_required`,
+  `latest.summary.checklist[].live_readiness`, and
+  `latest.summary.checklist[].manual_review_required` when emitted by the
+  `admin_readiness` section.
+- `latest.summary.required_operator_actions` and
+  `latest.summary.read_only_input_count`.
+- `latest.validation.status`,
+  `latest.validation.summary.sensitive_marker_count`, and
+  `latest.redaction.status`.
+- `latest.paymentPublishIndex.status` and
+  `latest.paymentPublishIndex.readyToRender`.
+- `latest.walletPaymentConfig.source`.
+
+These fields are a read-only operator surface. Admin may render badges,
+blockers, counters, and next-action labels from them, but must not trigger
+recovery, provider calls, execution task lease/report/mutate, signed exchange
+calls, order placement, or live smoke automatically.
+They must not automatically trigger recovery or mutation. A missing readiness or
+`paymentPublishIndex` field is artifact drift/unknown and must render not-ready,
+not a default ready state. Removing or renaming any producer-required path
+requires a new `compatibility_contract_version`.
+
+`consumer_contracts.admin_wallet_payment_config_env_snapshot.compatibility_contract_version`
+is the Admin wallet payment config boundary. Version `1` exists only to prevent
+Admin UI drift:
+
+- `walletPaymentConfig` is an Admin-only config snapshot or draft.
+- `walletPaymentConfig.source.kind` must be `admin_process_env_snapshot` or
+  `admin_managed_config_draft`, and the source must be visible wherever the
+  config surface is displayed.
+- `walletPaymentConfig` must not represent Web wallet provider readiness.
+- Admin must not infer Web payment/provider readiness, payment publish readiness,
+  or live release readiness from this snapshot alone.
+- If Web wallet readiness is missing or inconsistent with the Admin snapshot,
+  render degraded/unknown and not ready.
+- Missing `walletPaymentConfig.source` is artifact drift/unknown and must render
+  not ready.
+- The not-ready decision table is explicit:
+  `source_kind_missing_or_not_allowed_admin_config_source`,
+  `status_configured_without_web_wallet_provider_readiness`, `status_draft`,
+  `status_degraded`, `status_unknown`, `web_wallet_provider_readiness_missing`,
+  `web_wallet_provider_readiness_unknown`,
+  `web_wallet_provider_readiness_incomplete`, and
+  `web_wallet_provider_readiness_inconsistent_with_admin_snapshot` cannot be
+  ready. Web wallet readiness is incomplete when Web provider readiness is
+  missing any required stored artifact field or cannot be compared to the Admin
+  snapshot. These cases cannot be ready.
 Markdown example: `full_product_health_examples/full-product-health.md`.
 
 - Required markers: `# Full Product Health`, `**Status:**`, `## Counts`,

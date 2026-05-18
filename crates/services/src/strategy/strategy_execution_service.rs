@@ -380,6 +380,7 @@ impl StrategyExecutionService {
         inst_id: &str,
         period: &str,
         signal: &SignalResult,
+        risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
         strategy_type: &str,
         exchange: Option<&str>,
@@ -396,6 +397,9 @@ impl StrategyExecutionService {
                 ))
             }
         };
+        let selected_stop_loss =
+            Self::select_strategy_signal_stop_loss(side, pos_side, signal, risk_config)?;
+        let entry_price = signal.open_price;
         let generated_at = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(signal.ts)
             .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
 
@@ -413,6 +417,12 @@ impl StrategyExecutionService {
             "trade_side": "open",
             "order_type": "market",
             "client_order_id": client_order_id,
+            "risk_plan": {
+                "entry_price": entry_price,
+                "selected_stop_loss_price": selected_stop_loss,
+                "direction": pos_side,
+                "protective_stop_loss_required": true,
+            },
             "signal": signal,
         });
         let smoke_external_id_suffix = std::env::var("RUST_QUANT_SMOKE_EXTERNAL_ID_SUFFIX").ok();
@@ -478,12 +488,52 @@ impl StrategyExecutionService {
         }
     }
 
+    fn select_strategy_signal_stop_loss(
+        side: &str,
+        pos_side: &str,
+        signal: &SignalResult,
+        risk_config: &rust_quant_domain::BasicRiskConfig,
+    ) -> Result<f64> {
+        let entry_price = signal.open_price;
+        if !entry_price.is_finite() || entry_price <= 0.0 {
+            return Err(anyhow!("策略信号开仓价无效: {}", entry_price));
+        }
+
+        let stop_side = match side {
+            "buy" => StopLossSide::Long,
+            "sell" => StopLossSide::Short,
+            other => return Err(anyhow!("unsupported strategy signal side: {}", other)),
+        };
+        let stop_candidates = Self::build_stop_loss_candidates(side, signal, risk_config);
+        let selected_stop_loss =
+            StopLossCalculator::select(stop_side, entry_price, &stop_candidates)
+                .ok_or_else(|| anyhow!("无有效止损价"))?;
+
+        if pos_side == "short" && entry_price > selected_stop_loss {
+            return Err(anyhow!(
+                "做空开仓价 > 止损价，不提交Web信号: entry={}, stop_loss={}",
+                entry_price,
+                selected_stop_loss
+            ));
+        }
+        if pos_side == "long" && entry_price < selected_stop_loss {
+            return Err(anyhow!(
+                "做多开仓价 < 止损价，不提交Web信号: entry={}, stop_loss={}",
+                entry_price,
+                selected_stop_loss
+            ));
+        }
+
+        Ok(selected_stop_loss)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn dispatch_strategy_signal_to_quant_web(
         &self,
         inst_id: &str,
         period: &str,
         signal: &SignalResult,
+        risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
         strategy_type: &str,
         exchange: Option<&str>,
@@ -496,6 +546,7 @@ impl StrategyExecutionService {
             inst_id,
             period,
             signal,
+            risk_config,
             config_id,
             strategy_type,
             exchange,
@@ -2345,6 +2396,7 @@ impl StrategyExecutionService {
                 inst_id,
                 period,
                 signal,
+                risk_config,
                 config_id,
                 strategy_type,
                 exchange,
@@ -2924,11 +2976,13 @@ mod tests {
             serde_json::json!({"max_loss_percent": 0.02}),
         );
         let signal = create_buy_signal(3500.0, 1704067200000);
+        let risk_config = create_test_risk_config(0.02, Some(true));
 
         let request = StrategyExecutionService::build_strategy_signal_submit_request(
             "ETH-USDT-SWAP",
             "4H",
             &signal,
+            &risk_config,
             42,
             config.strategy_type.as_str(),
             Some("binance"),
@@ -2967,7 +3021,38 @@ mod tests {
         assert_eq!(payload["order_type"], "market");
         assert_eq!(payload["client_order_id"], "rq421704067200000");
         assert_eq!(payload["signal"]["open_price"], 3500.0);
+        assert_eq!(payload["risk_plan"]["entry_price"], 3500.0);
+        assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3430.0);
+        assert_eq!(payload["risk_plan"]["direction"], "long");
+        assert_eq!(payload["risk_plan"]["protective_stop_loss_required"], true);
         assert!(payload.get("size").is_none());
+    }
+
+    #[test]
+    fn builds_quant_web_strategy_signal_request_with_short_risk_plan() {
+        let signal = create_sell_signal(3500.0, 1704067200000);
+        let risk_config = create_test_risk_config(0.02, Some(true));
+
+        let request = StrategyExecutionService::build_strategy_signal_submit_request(
+            "ETH-USDT-SWAP",
+            "4H",
+            &signal,
+            &risk_config,
+            42,
+            "vegas",
+            Some("binance"),
+            "sell",
+            "short",
+            "rq421704067200000",
+        )
+        .unwrap();
+
+        let payload: serde_json::Value = serde_json::from_str(&request.payload_json).unwrap();
+        assert_eq!(request.direction, "short");
+        assert_eq!(payload["risk_plan"]["entry_price"], 3500.0);
+        assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3570.0);
+        assert_eq!(payload["risk_plan"]["direction"], "short");
+        assert_eq!(payload["risk_plan"]["protective_stop_loss_required"], true);
     }
 
     #[test]

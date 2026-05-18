@@ -64,6 +64,11 @@ async fn dry_run_worker_writes_checkpoint_and_exchange_audit_to_quant_core() -> 
             ],
             task_statuses: vec!["pending".to_string(), "pending_close".to_string()],
             target_task_ids: Vec::new(),
+            confirmation_mode: false,
+            report_replay_mode: false,
+            report_replay_max_per_run: 1,
+            report_replay_failure_backoff_seconds: 300,
+            report_replay_throttle_ms: 0,
         },
     )
     .with_audit_repository(Arc::new(audit_repository));

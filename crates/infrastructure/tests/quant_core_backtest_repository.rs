@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
-use rust_quant_domain::entities::{BacktestDetail, BacktestLog, DynamicConfigLog, FilteredSignalLog};
+use rust_quant_domain::entities::{
+    BacktestDetail, BacktestLog, DynamicConfigLog, FilteredSignalLog,
+};
 use rust_quant_domain::traits::BacktestLogRepository;
 use rust_quant_infrastructure::repositories::SqlxBacktestRepository;
 use sqlx::postgres::PgPoolOptions;

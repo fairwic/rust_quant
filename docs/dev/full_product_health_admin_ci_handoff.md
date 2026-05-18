@@ -149,6 +149,11 @@ storage write. Admin/CI should consume `storageStatus`,
 `default_next_action=review_wallet_payment_exceptions`; the
 `PAYMENT_ENTITLEMENT_BLOCKED` item must preserve the blocking
 `operator_action=block_release_until_resolved`.
+Missing payment counters in the publish index mean artifact drift/unknown, not
+zero incidents. Admin/CI must not re-query DB from this handoff path; use the
+stored publish index only, and render it as latest-ready only when
+`storageStatus=current`, `stale=false`, `validation.status=ok`, and
+`redaction.status=ok`.
 
 The wrapper is intentionally file-only: it requires
 `FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH`, rejects missing files, invalid
@@ -254,6 +259,53 @@ Recommended Admin binding order:
 Admin must ignore unknown fields and should not remove support for known fields
 until the schema version changes and examples are updated in the same change.
 
+## Read-Only Operator Surfaces
+
+The Admin latest-artifact response may expose `paymentPublishIndex` and
+readiness fields derived from the stored summary, validation, redaction, and
+publish index. These are stable display surfaces, not action surfaces.
+Each field is a read-only operator surface.
+
+Stable readiness inputs are `ready`, `stale`, `staleReason`,
+`summary.summary.overall_status`, `summary.section_statuses`,
+`summary.checklist[].ready`, `summary.checklist[].action_required`,
+`summary.checklist[].live_readiness`,
+`summary.checklist[].manual_review_required`,
+`summary.required_operator_actions`, `summary.read_only_input_count`,
+`validation.status`, `validation.summary.sensitive_marker_count`, and
+`redaction.status`. Stable payment publish-index inputs are
+`paymentPublishIndex.status`, `paymentPublishIndex.readyToRender`,
+`paymentPublishIndex.walletPaymentExceptionCount`,
+`paymentPublishIndex.paymentEntitlementBlockerCount`,
+`paymentPublishIndex.counterSource`, `paymentPublishIndex.playbookSource`,
+`paymentPublishIndex.validationStatus`, `paymentPublishIndex.redactionStatus`,
+and `paymentPublishIndex.playbookItems[]`.
+
+Admin/CI must treat missing readiness fields or missing `paymentPublishIndex`
+fields as artifact drift/unknown and render not-ready. These fields may show
+operator next-action labels and read-only links, but they must not automatically
+run recovery, call provider APIs, call signed exchange endpoints, place orders,
+lease/report/mutate execution tasks, run local probes, or touch `LINKUSDT`.
+They must not automatically trigger recovery or mutation.
+
+`walletPaymentConfig` is an Admin-only config snapshot or draft. It must carry
+and display `walletPaymentConfig.source.kind=admin_process_env_snapshot` or
+`admin_managed_config_draft`; missing source means artifact drift/unknown and
+not ready. This surface only describes the Admin process environment or
+Admin-managed draft that produced the artifact. It must not represent Web wallet provider readiness,
+payment publish readiness, or live release readiness. If Web
+wallet readiness is missing, unavailable, or inconsistent with the Admin config
+surface, Admin/CI must render degraded/unknown and not ready.
+The not-ready decision table is explicit:
+`source_kind_missing_or_not_allowed_admin_config_source`,
+`status_configured_without_web_wallet_provider_readiness`, `status_draft`,
+`status_degraded`, `status_unknown`, `web_wallet_provider_readiness_missing`,
+`web_wallet_provider_readiness_unknown`,
+`web_wallet_provider_readiness_incomplete`, and
+`web_wallet_provider_readiness_inconsistent_with_admin_snapshot` cannot be
+ready. Web wallet readiness is incomplete when the stored latest response lacks
+the Web provider readiness fields needed to compare against the Admin snapshot.
+These cases cannot be ready.
 `alert_taxonomy[]` is the stable alert-to-action drill-down map. Each item
 links `severity`, `code`, and `section` to an `operator_action`, optional
 playbook metadata (`owner`, `default_next_action`, `admin_link_target`), and

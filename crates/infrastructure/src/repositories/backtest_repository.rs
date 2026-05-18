@@ -138,29 +138,32 @@ impl BacktestLogRepository for SqlxBacktestRepository {
             let mut builder: QueryBuilder<Postgres> =
                 QueryBuilder::new("INSERT INTO back_test_detail (option_type, strategy_type, inst_id, time, back_test_id, open_position_time, signal_open_position_time, signal_status, close_position_time, open_price, close_price, profit_loss, quantity, full_close, close_type, win_nums, loss_nums, signal_value, signal_result, stop_loss_source, stop_loss_update_history) ");
 
-            builder.push_values(chunk.iter().zip(parsed_times.iter()), |mut b, (detail, parsed)| {
-                b.push_bind(&detail.option_type)
-                    .push_bind(&detail.strategy_type)
-                    .push_bind(&detail.inst_id)
-                    .push_bind(&detail.timeframe)
-                    .push_bind(detail.back_test_id)
-                    .push_bind(parsed.0)
-                    .push_bind(parsed.1)
-                    .push_bind(detail.signal_status)
-                    .push_bind(parsed.2)
-                    .push_bind(&detail.open_price)
-                    .push_bind(&detail.close_price)
-                    .push_bind(&detail.profit_loss)
-                    .push_bind(&detail.quantity)
-                    .push_bind(&detail.full_close)
-                    .push_bind(&detail.close_type)
-                    .push_bind(detail.win_nums)
-                    .push_bind(detail.loss_nums)
-                    .push_bind(&detail.signal_value)
-                    .push_bind(&detail.signal_result)
-                    .push_bind(&detail.stop_loss_source)
-                    .push_bind(&detail.stop_loss_update_history);
-            });
+            builder.push_values(
+                chunk.iter().zip(parsed_times.iter()),
+                |mut b, (detail, parsed)| {
+                    b.push_bind(&detail.option_type)
+                        .push_bind(&detail.strategy_type)
+                        .push_bind(&detail.inst_id)
+                        .push_bind(&detail.timeframe)
+                        .push_bind(detail.back_test_id)
+                        .push_bind(parsed.0)
+                        .push_bind(parsed.1)
+                        .push_bind(detail.signal_status)
+                        .push_bind(parsed.2)
+                        .push_bind(&detail.open_price)
+                        .push_bind(&detail.close_price)
+                        .push_bind(&detail.profit_loss)
+                        .push_bind(&detail.quantity)
+                        .push_bind(&detail.full_close)
+                        .push_bind(&detail.close_type)
+                        .push_bind(detail.win_nums)
+                        .push_bind(detail.loss_nums)
+                        .push_bind(&detail.signal_value)
+                        .push_bind(&detail.signal_result)
+                        .push_bind(&detail.stop_loss_source)
+                        .push_bind(&detail.stop_loss_update_history);
+                },
+            );
 
             let result = builder.build().execute(self.pool()).await?;
             rows_affected += result.rows_affected();
@@ -308,21 +311,24 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 "INSERT INTO filtered_signal_log (backtest_id, inst_id, period, signal_time, direction, filter_reasons, signal_price, indicator_snapshot, theoretical_profit, theoretical_loss, final_pnl, trade_result, signal_value) ",
             );
 
-            builder.push_values(chunk.iter().zip(parsed_signals.iter()), |mut b, (signal, parsed)| {
-                b.push_bind(signal.backtest_id)
-                    .push_bind(&signal.inst_id)
-                    .push_bind(&signal.period)
-                    .push_bind(parsed.0)
-                    .push_bind(&signal.direction)
-                    .push_bind(&parsed.1)
-                    .push_bind(signal.signal_price)
-                    .push_bind(&parsed.2)
-                    .push_bind(signal.theoretical_profit)
-                    .push_bind(signal.theoretical_loss)
-                    .push_bind(signal.final_pnl)
-                    .push_bind(&signal.trade_result)
-                    .push_bind(&parsed.3);
-            });
+            builder.push_values(
+                chunk.iter().zip(parsed_signals.iter()),
+                |mut b, (signal, parsed)| {
+                    b.push_bind(signal.backtest_id)
+                        .push_bind(&signal.inst_id)
+                        .push_bind(&signal.period)
+                        .push_bind(parsed.0)
+                        .push_bind(&signal.direction)
+                        .push_bind(&parsed.1)
+                        .push_bind(signal.signal_price)
+                        .push_bind(&parsed.2)
+                        .push_bind(signal.theoretical_profit)
+                        .push_bind(signal.theoretical_loss)
+                        .push_bind(signal.final_pnl)
+                        .push_bind(&signal.trade_result)
+                        .push_bind(&parsed.3);
+                },
+            );
 
             let result = builder.build().execute(self.pool()).await?;
             rows_affected += result.rows_affected();
@@ -384,10 +390,7 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                             &log.kline_time,
                             "dynamic_config_log.kline_time",
                         )?,
-                        Self::parse_json_value(
-                            &log.adjustments,
-                            "dynamic_config_log.adjustments",
-                        )?,
+                        Self::parse_json_value(&log.adjustments, "dynamic_config_log.adjustments")?,
                         Self::parse_optional_json_value(
                             log.config_snapshot.as_deref(),
                             "dynamic_config_log.config_snapshot",
@@ -400,14 +403,17 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 "INSERT INTO dynamic_config_log (backtest_id, inst_id, period, kline_time, adjustments, config_snapshot) ",
             );
 
-            builder.push_values(chunk.iter().zip(parsed_logs.iter()), |mut b, (log, parsed)| {
-                b.push_bind(log.backtest_id)
-                    .push_bind(&log.inst_id)
-                    .push_bind(&log.period)
-                    .push_bind(parsed.0)
-                    .push_bind(&parsed.1)
-                    .push_bind(&parsed.2);
-            });
+            builder.push_values(
+                chunk.iter().zip(parsed_logs.iter()),
+                |mut b, (log, parsed)| {
+                    b.push_bind(log.backtest_id)
+                        .push_bind(&log.inst_id)
+                        .push_bind(&log.period)
+                        .push_bind(parsed.0)
+                        .push_bind(&parsed.1)
+                        .push_bind(&parsed.2);
+                },
+            );
 
             let result = builder.build().execute(self.pool()).await?;
             rows_affected += result.rows_affected();

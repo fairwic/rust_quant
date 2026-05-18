@@ -22,6 +22,8 @@ pub struct ExecutionTaskLeaseRequest {
     pub worker_id: String,
     pub limit: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_ids: Vec<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub task_types: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub task_statuses: Vec<String>,
@@ -31,6 +33,19 @@ pub struct ExecutionTaskLeaseRequest {
 #[serde(rename_all = "snake_case")]
 pub struct ExecutionTaskLease {
     pub tasks: Vec<ExecutionTask>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExecutionTaskConfirmationLease {
+    pub items: Vec<ExecutionTaskConfirmationLeaseItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExecutionTaskConfirmationLeaseItem {
+    pub task: ExecutionTask,
+    pub order_result: ExchangeOrderResult,
 }
 
 impl<'de> Deserialize<'de> for ExecutionTaskLease {
@@ -88,6 +103,25 @@ pub struct ExecutionTask {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+pub struct ExchangeOrderResult {
+    pub id: i64,
+    pub execution_task_id: i64,
+    pub combo_id: i64,
+    pub buyer_email: String,
+    pub exchange: String,
+    pub external_order_id: String,
+    pub order_side: String,
+    pub order_status: String,
+    pub filled_qty: Option<f64>,
+    pub filled_quote: Option<f64>,
+    pub fee_amount: Option<f64>,
+    pub raw_payload_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub struct ExecutionTaskReportRequest {
     pub task_id: i64,
     pub execution_status: String,
@@ -111,6 +145,46 @@ pub struct ExecutionTaskReportResponse {
     pub attempt: Value,
     pub order_result: Option<Value>,
     pub trade_record: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExchangeReconciliationIssueType {
+    ExchangePositionStale,
+    ExchangeOpenOrderConflict,
+}
+
+impl ExchangeReconciliationIssueType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExchangePositionStale => "exchange_position_stale",
+            Self::ExchangeOpenOrderConflict => "exchange_open_order_conflict",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExchangeReconciliationReportRequest {
+    pub combo_id: i64,
+    pub buyer_email: String,
+    pub symbol: String,
+    pub issue_type: ExchangeReconciliationIssueType,
+    pub detected_at: Option<String>,
+    pub source_ref: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExchangeReconciliationReportResponse {
+    pub combo_id: i64,
+    pub buyer_email: String,
+    pub symbol: String,
+    pub signal_id: String,
+    pub issue_type: String,
+    pub api_execution_status: String,
+    pub log: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -176,7 +250,10 @@ struct ApiEnvelope<T> {
 }
 
 const LEASE_TASKS_PATH: &str = "/api/commerce/internal/execution-tasks/lease";
+const LEASE_CONFIRMATION_TASKS_PATH: &str =
+    "/api/commerce/internal/execution-tasks/confirmations/lease";
 const REPORT_RESULT_PATH: &str = "/api/commerce/internal/execution-results";
+const EXCHANGE_RECONCILIATION_PATH: &str = "/api/commerce/internal/exchange-reconciliation";
 const STRATEGY_SIGNAL_PATH: &str = "/api/commerce/internal/strategy-signals";
 const USER_EXCHANGE_CONFIG_PATH: &str = "/api/commerce/internal/api-credentials/resolve";
 const INTERNAL_SECRET_HEADER: &str = "x-alpha-execution-secret";
@@ -208,11 +285,25 @@ impl ExecutionTaskClient {
         self.get_json(&self.lease_url_for_request(&request)).await
     }
 
+    pub async fn lease_confirmation_tasks(
+        &self,
+        limit: u32,
+    ) -> Result<ExecutionTaskConfirmationLease> {
+        self.get_json(&self.confirmation_lease_url(limit)).await
+    }
+
     pub async fn report_result(
         &self,
         request: ExecutionTaskReportRequest,
     ) -> Result<ExecutionTaskReportResponse> {
         self.post_json(REPORT_RESULT_PATH, &request).await
+    }
+
+    pub async fn report_exchange_reconciliation(
+        &self,
+        request: ExchangeReconciliationReportRequest,
+    ) -> Result<ExchangeReconciliationReportResponse> {
+        self.post_json(EXCHANGE_RECONCILIATION_PATH, &request).await
     }
 
     pub async fn submit_strategy_signal(
@@ -238,9 +329,18 @@ impl ExecutionTaskClient {
         self.lease_url_for_request(&ExecutionTaskLeaseRequest {
             worker_id: String::new(),
             limit,
+            task_ids: Vec::new(),
             task_types: Vec::new(),
             task_statuses: Vec::new(),
         })
+    }
+
+    pub fn confirmation_lease_url(&self, limit: u32) -> String {
+        let mut url = reqwest::Url::parse(&self.url(LEASE_CONFIRMATION_TASKS_PATH))
+            .expect("execution confirmation lease URL should always be valid");
+        url.query_pairs_mut()
+            .append_pair("limit", &limit.clamp(1, 100).to_string());
+        url.to_string()
     }
 
     pub fn lease_url_for_request(&self, request: &ExecutionTaskLeaseRequest) -> String {
@@ -249,6 +349,11 @@ impl ExecutionTaskClient {
         {
             let mut query = url.query_pairs_mut();
             query.append_pair("limit", &request.limit.clamp(1, 100).to_string());
+            for task_id in &request.task_ids {
+                if *task_id > 0 {
+                    query.append_pair("task_id", &task_id.to_string());
+                }
+            }
             for task_type in &request.task_types {
                 if !task_type.trim().is_empty() {
                     query.append_pair("task_type", task_type);
@@ -265,6 +370,10 @@ impl ExecutionTaskClient {
 
     pub fn strategy_signal_url(&self) -> String {
         self.url(STRATEGY_SIGNAL_PATH)
+    }
+
+    pub fn exchange_reconciliation_url(&self) -> String {
+        self.url(EXCHANGE_RECONCILIATION_PATH)
     }
 
     pub fn parse_envelope<R>(body: &str) -> Result<R>
@@ -401,6 +510,7 @@ mod tests {
         let request = ExecutionTaskLeaseRequest {
             worker_id: "worker-a".to_string(),
             limit: 10,
+            task_ids: vec![],
             task_types: vec![],
             task_statuses: vec![],
         };
@@ -408,6 +518,7 @@ mod tests {
 
         assert_eq!(value["worker_id"], "worker-a");
         assert_eq!(value["limit"], 10);
+        assert!(value.get("task_ids").is_none());
         assert!(value.get("task_types").is_none());
         assert!(value.get("task_statuses").is_none());
     }
@@ -423,6 +534,20 @@ mod tests {
         assert_eq!(
             client.lease_url(25),
             "https://quant-web.example/api/commerce/internal/execution-tasks/lease?limit=25"
+        );
+    }
+
+    #[test]
+    fn confirmation_lease_url_matches_dedicated_internal_contract() {
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "https://quant-web.example/".to_string(),
+            internal_secret: "secret".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            client.confirmation_lease_url(5),
+            "https://quant-web.example/api/commerce/internal/execution-tasks/confirmations/lease?limit=5"
         );
     }
 
@@ -591,6 +716,43 @@ mod tests {
     }
 
     #[test]
+    fn exchange_reconciliation_request_matches_quant_web_contract() {
+        let request = ExchangeReconciliationReportRequest {
+            combo_id: 9,
+            buyer_email: "buyer@example.com".to_string(),
+            symbol: "ETHUSDT".to_string(),
+            issue_type: ExchangeReconciliationIssueType::ExchangeOpenOrderConflict,
+            detected_at: Some("2026-05-15T09:30:00Z".to_string()),
+            source_ref: Some(
+                "rust_quant/exchange_reconciliation/exchange_open_order_conflict/combo/9/task/42/symbol/ETHUSDT"
+                    .to_string(),
+            ),
+            message: Some("open order conflict detected".to_string()),
+        };
+        let value = serde_json::to_value(&request).unwrap();
+
+        assert_eq!(value["combo_id"], 9);
+        assert_eq!(value["buyer_email"], "buyer@example.com");
+        assert_eq!(value["symbol"], "ETHUSDT");
+        assert_eq!(value["issue_type"], "exchange_open_order_conflict");
+        assert_eq!(value["detected_at"], "2026-05-15T09:30:00Z");
+        assert_eq!(
+            value["source_ref"],
+            "rust_quant/exchange_reconciliation/exchange_open_order_conflict/combo/9/task/42/symbol/ETHUSDT"
+        );
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "https://quant-web.example/".to_string(),
+            internal_secret: "secret".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            client.exchange_reconciliation_url(),
+            "https://quant-web.example/api/commerce/internal/exchange-reconciliation"
+        );
+    }
+
+    #[test]
     fn parses_user_exchange_config_envelope_without_persisting_secret() {
         let body = r#"{
             "success": true,
@@ -663,6 +825,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn report_exchange_reconciliation_uses_internal_post_contract() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server = tokio::task::spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 4096];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+            tx.send(request).unwrap();
+
+            let body = r#"{"success":true,"data":{"combo_id":9,"buyer_email":"buyer@example.com","symbol":"ETHUSDT","signal_id":"exchange-reconciliation-exchange_open_order_conflict-9-ref","issue_type":"exchange_open_order_conflict","api_execution_status":"blocked_by_reconciliation","log":{}}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap();
+        let response = client
+            .report_exchange_reconciliation(ExchangeReconciliationReportRequest {
+                combo_id: 9,
+                buyer_email: "buyer@example.com".to_string(),
+                symbol: "ETHUSDT".to_string(),
+                issue_type: ExchangeReconciliationIssueType::ExchangeOpenOrderConflict,
+                detected_at: Some("2026-05-15T09:30:00Z".to_string()),
+                source_ref: Some(
+                    "rust_quant/exchange_reconciliation/exchange_open_order_conflict/combo/9/task/42/symbol/ETHUSDT"
+                        .to_string(),
+                ),
+                message: Some("open order conflict detected".to_string()),
+            })
+            .await
+            .unwrap();
+
+        server.await.unwrap();
+        let request = rx.recv().unwrap();
+
+        assert!(request.starts_with("POST /api/commerce/internal/exchange-reconciliation HTTP/1.1"));
+        assert!(request.contains("x-alpha-execution-secret: dev-secret"));
+        assert!(request.contains(r#""combo_id":9"#));
+        assert!(request.contains(r#""buyer_email":"buyer@example.com""#));
+        assert!(request.contains(r#""symbol":"ETHUSDT""#));
+        assert!(request.contains(r#""issue_type":"exchange_open_order_conflict""#));
+        assert!(request.contains(r#""detected_at":"2026-05-15T09:30:00Z""#));
+        assert!(request.contains(
+            r#""source_ref":"rust_quant/exchange_reconciliation/exchange_open_order_conflict/combo/9/task/42/symbol/ETHUSDT""#
+        ));
+        assert_eq!(response.combo_id, 9);
+        assert_eq!(response.issue_type, "exchange_open_order_conflict");
+        assert_eq!(response.api_execution_status, "blocked_by_reconciliation");
+    }
+
+    #[tokio::test]
     async fn lease_tasks_uses_task_type_filters_in_internal_contract() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -697,6 +924,7 @@ mod tests {
             .lease_tasks(ExecutionTaskLeaseRequest {
                 worker_id: "worker-close".to_string(),
                 limit: 5,
+                task_ids: vec![42, 43],
                 task_types: vec![
                     "execute_signal".to_string(),
                     "risk_control_close_candidate".to_string(),
@@ -711,7 +939,7 @@ mod tests {
 
         assert!(leased.tasks.is_empty());
         assert!(request.starts_with(
-            "GET /api/commerce/internal/execution-tasks/lease?limit=5&task_type=execute_signal&task_type=risk_control_close_candidate&task_status=pending&task_status=pending_close HTTP/1.1"
+            "GET /api/commerce/internal/execution-tasks/lease?limit=5&task_id=42&task_id=43&task_type=execute_signal&task_type=risk_control_close_candidate&task_status=pending&task_status=pending_close HTTP/1.1"
         ));
         assert!(request.contains("x-alpha-execution-secret: dev-secret"));
     }

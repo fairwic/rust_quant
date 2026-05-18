@@ -1300,6 +1300,7 @@ fn full_product_health_admin_ci_handoff_documents_command_matrix_and_boundaries(
         "Default CI Safe",
         "Read-Only DB Opt-In",
         "Never Run In Default CI",
+        "Read-Only Operator Surfaces",
         "Command Matrix",
     ] {
         assert!(
@@ -1321,6 +1322,8 @@ fn full_product_health_admin_ci_handoff_documents_command_matrix_and_boundaries(
         "FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL=postgres://readonly@host/quant_admin",
         "./scripts/dev/build_full_product_health_payment_input.sh",
         "FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH=docs/dev/full_product_health_examples/payment-entitlement-health-real-count.json",
+        "paymentPublishIndex.readyToRender",
+        "summary.checklist[].live_readiness",
         "./scripts/dev/smoke_full_product_health_payment_artifact_handoff.sh",
         "./scripts/dev/run_full_product_health_ci.sh",
         "./scripts/dev/validate_full_product_health_artifacts.sh",
@@ -1347,6 +1350,9 @@ fn full_product_health_admin_ci_handoff_documents_command_matrix_and_boundaries(
         "不 report result",
         "不 mutate task",
         "不触碰 `LINKUSDT`",
+        "read-only operator surface",
+        "artifact drift/unknown",
+        "must not automatically",
         "只读 DB URL",
         "默认 CI",
         "显式 opt-in",
@@ -1393,6 +1399,13 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
         "required_operator_actions[].action",
         "alert_taxonomy[].operator_action",
         "alert_taxonomy[].correlation_keys[]",
+        "checklist[].live_readiness",
+        "checklist[].manual_review_required",
+        "paymentPublishIndex.status",
+        "paymentPublishIndex.readyToRender",
+        "paymentPublishIndex.walletPaymentExceptionCount",
+        "paymentPublishIndex.paymentEntitlementBlockerCount",
+        "paymentPublishIndex.playbookItems[]",
         "correlation_ids[]",
         "validation.summary.sensitive_marker_count",
         "validation.findings[]",
@@ -1450,6 +1463,7 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
         "must not mutate task",
         "must not place orders",
         "must not touch `LINKUSDT`",
+        "must not trigger automatic recovery",
         "must render `[redacted]`",
         "must not show raw database URLs",
         "must not show API keys",
@@ -1493,6 +1507,7 @@ fn full_product_health_latest_stored_artifact_api_contract_documents_safe_respon
         "`fullArtifactUrl`",
         "`ready`",
         "`stale`",
+        "`paymentPublishIndex`",
         "`redaction`",
     ] {
         assert!(
@@ -5807,6 +5822,298 @@ fn full_product_health_schema_documents_payment_entitlement_three_state_contract
                 && handoff.contains(required_doc_token)
                 && runbook.contains(required_doc_token),
             "schema doc, handoff, and runbook should all document token {required_doc_token}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_schema_documents_admin_latest_readiness_envelope_contract() {
+    let schema_path = full_product_artifact_schema_json_path();
+    let schema_doc_path = full_product_artifact_schema_doc_path();
+    let frontend_contract_path = full_product_admin_frontend_contract_path();
+    let handoff_path = full_product_admin_ci_handoff_path();
+    let schema_body = fs::read_to_string(&schema_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_path.display(), error));
+    let schema: Value = serde_json::from_str(&schema_body)
+        .unwrap_or_else(|error| panic!("invalid schema json: {error}\n{schema_body}"));
+    let schema_doc = fs::read_to_string(&schema_doc_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_doc_path.display(), error));
+    let frontend_contract = fs::read_to_string(&frontend_contract_path).unwrap_or_else(|error| {
+        panic!(
+            "failed to read {}: {}",
+            frontend_contract_path.display(),
+            error
+        )
+    });
+    let handoff = fs::read_to_string(&handoff_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
+
+    let contract = &schema["consumer_contracts"]["admin_latest_artifact_readiness_envelope"];
+    assert_eq!(contract["compatibility_contract_version"], 1);
+
+    for required_path in [
+        "latest.ready",
+        "latest.stale",
+        "latest.staleReason",
+        "latest.summary.summary.overall_status",
+        "latest.summary.section_statuses",
+        "latest.summary.checklist[].ready",
+        "latest.summary.checklist[].action_required",
+        "latest.summary.checklist[].live_readiness",
+        "latest.summary.checklist[].manual_review_required",
+        "latest.summary.required_operator_actions",
+        "latest.summary.read_only_input_count",
+        "latest.validation.status",
+        "latest.validation.summary.sensitive_marker_count",
+        "latest.redaction.status",
+        "latest.paymentPublishIndex.status",
+        "latest.paymentPublishIndex.readyToRender",
+    ] {
+        assert!(
+            contract["producer_required_paths"]
+                .as_array()
+                .expect("Admin readiness contract should list producer paths")
+                .iter()
+                .any(|path| path == required_path),
+            "Admin readiness contract should require path {required_path}"
+        );
+    }
+
+    for prohibited in [
+        "shell_out_from_admin_request",
+        "call_signed_exchange_endpoint",
+        "lease_execution_task",
+        "report_order_result",
+        "mutate_execution_task",
+        "place_order",
+        "trigger_provider_recovery",
+        "touch_protected_live_position",
+    ] {
+        assert!(
+            contract["prohibited_automatic_actions"]
+                .as_array()
+                .expect("Admin readiness contract should list prohibited actions")
+                .iter()
+                .any(|action| action == prohibited),
+            "Admin readiness contract should prohibit {prohibited}"
+        );
+    }
+
+    assert!(
+        schema_doc.contains("admin_latest_artifact_readiness_envelope"),
+        "schema doc should name the Admin latest readiness envelope contract"
+    );
+
+    for required_doc_token in [
+        "paymentPublishIndex",
+        "readyToRender",
+        "read-only operator surface",
+        "artifact drift/unknown",
+        "must not automatically trigger recovery",
+        "checklist[].live_readiness",
+        "validation.summary.sensitive_marker_count",
+    ] {
+        assert!(
+            schema_doc.contains(required_doc_token)
+                && frontend_contract.contains(required_doc_token)
+                && handoff.contains(required_doc_token),
+            "schema doc, frontend contract, and handoff should all document token {required_doc_token}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_schema_documents_admin_wallet_payment_config_env_snapshot_only_contract() {
+    let schema_path = full_product_artifact_schema_json_path();
+    let schema_doc_path = full_product_artifact_schema_doc_path();
+    let frontend_contract_path = full_product_admin_frontend_contract_path();
+    let handoff_path = full_product_admin_ci_handoff_path();
+    let schema_body = fs::read_to_string(&schema_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_path.display(), error));
+    let schema: Value = serde_json::from_str(&schema_body)
+        .unwrap_or_else(|error| panic!("invalid schema json: {error}\n{schema_body}"));
+    let schema_doc = fs::read_to_string(&schema_doc_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_doc_path.display(), error));
+    let frontend_contract = fs::read_to_string(&frontend_contract_path).unwrap_or_else(|error| {
+        panic!(
+            "failed to read {}: {}",
+            frontend_contract_path.display(),
+            error
+        )
+    });
+    let handoff = fs::read_to_string(&handoff_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
+
+    let contract = &schema["consumer_contracts"]["admin_wallet_payment_config_env_snapshot"];
+    assert_eq!(contract["compatibility_contract_version"], 1);
+
+    for required_path in [
+        "latest.walletPaymentConfig",
+        "latest.walletPaymentConfig.source",
+        "latest.walletPaymentConfig.source.kind",
+        "latest.walletPaymentConfig.status",
+        "latest.walletPaymentConfig.webWalletProviderReadiness",
+    ] {
+        assert!(
+            contract["producer_required_paths"]
+                .as_array()
+                .expect("walletPaymentConfig contract should list producer paths")
+                .iter()
+                .any(|path| path == required_path),
+            "walletPaymentConfig contract should require path {required_path}"
+        );
+    }
+
+    for required_rule in [
+        "walletPaymentConfig.source.kind must be one of admin_process_env_snapshot or admin_managed_config_draft",
+        "walletPaymentConfig is an Admin-only config snapshot or draft",
+        "walletPaymentConfig must not represent Web wallet provider readiness",
+        "If Web wallet readiness is missing or inconsistent, render degraded/unknown and not ready",
+    ] {
+        assert!(
+            contract["consumer_rules"]
+                .as_array()
+                .expect("walletPaymentConfig contract should list consumer rules")
+                .iter()
+                .any(|rule| rule == required_rule),
+            "walletPaymentConfig contract should document rule {required_rule}"
+        );
+    }
+
+    for required_doc_token in [
+        "walletPaymentConfig",
+        "admin_process_env_snapshot",
+        "admin_managed_config_draft",
+        "Admin-only config snapshot or draft",
+        "must not represent Web wallet provider readiness",
+        "degraded/unknown",
+        "not ready",
+    ] {
+        assert!(
+            schema_doc.contains(required_doc_token)
+                && frontend_contract.contains(required_doc_token)
+                && handoff.contains(required_doc_token),
+            "schema doc, frontend contract, and handoff should all document token {required_doc_token}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_schema_locks_admin_wallet_payment_config_not_ready_decision_table() {
+    let schema_path = full_product_artifact_schema_json_path();
+    let schema_doc_path = full_product_artifact_schema_doc_path();
+    let frontend_contract_path = full_product_admin_frontend_contract_path();
+    let handoff_path = full_product_admin_ci_handoff_path();
+    let schema_body = fs::read_to_string(&schema_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_path.display(), error));
+    let schema: Value = serde_json::from_str(&schema_body)
+        .unwrap_or_else(|error| panic!("invalid schema json: {error}\n{schema_body}"));
+    let schema_doc = fs::read_to_string(&schema_doc_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_doc_path.display(), error));
+    let frontend_contract = fs::read_to_string(&frontend_contract_path).unwrap_or_else(|error| {
+        panic!(
+            "failed to read {}: {}",
+            frontend_contract_path.display(),
+            error
+        )
+    });
+    let handoff = fs::read_to_string(&handoff_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
+
+    let contract = &schema["consumer_contracts"]["admin_wallet_payment_config_env_snapshot"];
+
+    for allowed_source in ["admin_process_env_snapshot", "admin_managed_config_draft"] {
+        assert!(
+            contract["source_kind_allowed_values"]
+                .as_array()
+                .expect("walletPaymentConfig contract should list allowed source kinds")
+                .iter()
+                .any(|kind| kind == allowed_source),
+            "walletPaymentConfig contract should allow source kind {allowed_source}"
+        );
+    }
+
+    for not_ready_case in [
+        "source_kind_missing_or_not_allowed_admin_config_source",
+        "status_configured_without_web_wallet_provider_readiness",
+        "status_draft",
+        "status_degraded",
+        "status_unknown",
+        "web_wallet_provider_readiness_missing",
+        "web_wallet_provider_readiness_unknown",
+        "web_wallet_provider_readiness_incomplete",
+        "web_wallet_provider_readiness_inconsistent_with_admin_snapshot",
+    ] {
+        assert!(
+            contract["not_ready_cases"]
+                .as_array()
+                .expect("walletPaymentConfig contract should list not_ready_cases")
+                .iter()
+                .any(|case| case == not_ready_case),
+            "walletPaymentConfig contract should mark {not_ready_case} as not ready"
+        );
+    }
+
+    for required_doc_token in [
+        "source_kind_missing_or_not_allowed_admin_config_source",
+        "status_configured_without_web_wallet_provider_readiness",
+        "status_draft",
+        "status_degraded",
+        "status_unknown",
+        "web_wallet_provider_readiness_incomplete",
+        "Web wallet readiness is incomplete",
+        "cannot be ready",
+    ] {
+        assert!(
+            schema_doc.contains(required_doc_token)
+                && frontend_contract.contains(required_doc_token)
+                && handoff.contains(required_doc_token),
+            "schema doc, frontend contract, and handoff should document token {required_doc_token}"
+        );
+    }
+}
+
+#[test]
+fn full_product_health_schema_does_not_expose_wallet_payment_config_operator_next_action() {
+    let schema_path = full_product_artifact_schema_json_path();
+    let schema_doc_path = full_product_artifact_schema_doc_path();
+    let frontend_contract_path = full_product_admin_frontend_contract_path();
+    let handoff_path = full_product_admin_ci_handoff_path();
+    let schema_body = fs::read_to_string(&schema_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_path.display(), error));
+    let schema: Value = serde_json::from_str(&schema_body)
+        .unwrap_or_else(|error| panic!("invalid schema json: {error}\n{schema_body}"));
+    let schema_doc = fs::read_to_string(&schema_doc_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_doc_path.display(), error));
+    let frontend_contract = fs::read_to_string(&frontend_contract_path).unwrap_or_else(|error| {
+        panic!(
+            "failed to read {}: {}",
+            frontend_contract_path.display(),
+            error
+        )
+    });
+    let handoff = fs::read_to_string(&handoff_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
+
+    let contract = schema["consumer_contracts"]["admin_wallet_payment_config_env_snapshot"]
+        .as_object()
+        .expect("walletPaymentConfig consumer contract should be an object");
+
+    assert!(
+        !contract.contains_key("operatorNextAction"),
+        "walletPaymentConfig should not expose a redundant operatorNextAction"
+    );
+
+    for removed_doc_token in [
+        "operatorNextAction",
+        "verify_web_wallet_provider_readiness",
+        "Verify Web wallet provider readiness",
+    ] {
+        assert!(
+            !schema_doc.contains(removed_doc_token)
+                && !frontend_contract.contains(removed_doc_token)
+                && !handoff.contains(removed_doc_token),
+            "schema doc, frontend contract, and handoff should not document removed token {removed_doc_token}"
         );
     }
 }

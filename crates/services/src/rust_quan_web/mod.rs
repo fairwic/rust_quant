@@ -5,9 +5,12 @@ mod execution_worker;
 pub use execution_audit::{
     redact_audit_payload, ExchangeRequestAuditLog, ExecutionAuditRepository,
     ExecutionWorkerCheckpoint, NoopExecutionAuditRepository, PostgresExecutionAuditRepository,
+    ReportResultReplayCandidate,
 };
 pub use execution_task_client::{
-    ExecutionTask, ExecutionTaskClient, ExecutionTaskConfig, ExecutionTaskLease,
+    ExchangeOrderResult, ExchangeReconciliationIssueType, ExchangeReconciliationReportRequest,
+    ExchangeReconciliationReportResponse, ExecutionTask, ExecutionTaskClient, ExecutionTaskConfig,
+    ExecutionTaskConfirmationLease, ExecutionTaskConfirmationLeaseItem, ExecutionTaskLease,
     ExecutionTaskLeaseRequest, ExecutionTaskReportRequest, ExecutionTaskReportResponse,
     StrategySignalDispatchResponse, StrategySignalSubmitRequest, UserExchangeConfig,
 };

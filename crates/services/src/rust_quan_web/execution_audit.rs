@@ -1,13 +1,14 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 
 use crate::exchange::OrderPlacementRequest;
-use crate::rust_quan_web::ExecutionTask;
+use crate::rust_quan_web::{ExecutionTask, ExecutionTaskReportRequest};
 
 const REDACTED: &str = "***REDACTED***";
 const AUDIT_ENDPOINT_PLACE_ORDER: &str = "trade.place_order";
+const AUDIT_ENDPOINT_REPORT_RESULT: &str = "web.report_result";
 const UPSERT_WORKER_CHECKPOINT_SQL: &str = r#"
             INSERT INTO execution_worker_checkpoints (
                 worker_id,
@@ -44,6 +45,32 @@ const INSERT_EXCHANGE_REQUEST_AUDIT_SQL: &str = r#"
                 error_message
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            "#;
+const LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL: &str = r#"
+            SELECT failed.request_id, failed.request_payload
+            FROM exchange_request_audit_logs failed
+            WHERE failed.endpoint = $1
+              AND failed.request_status = 'failed'
+              AND failed.request_payload #>> '{replay,action}' = 'retry_report_result_only'
+              AND failed.request_payload #>> '{replay,place_order_allowed}' = 'false'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM exchange_request_audit_logs replayed
+                  WHERE replayed.endpoint = failed.endpoint
+                    AND replayed.request_id = failed.request_id
+                    AND replayed.request_status = 'replayed'
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM exchange_request_audit_logs recent_failed
+                  WHERE recent_failed.endpoint = failed.endpoint
+                    AND recent_failed.request_id = failed.request_id
+                    AND recent_failed.request_status = 'failed'
+                    AND recent_failed.created_at > failed.created_at
+                    AND recent_failed.created_at >= NOW() - ($3::bigint * INTERVAL '1 second')
+              )
+            ORDER BY failed.created_at ASC
+            LIMIT $2
             "#;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,6 +157,54 @@ impl ExchangeRequestAuditLog {
             error_message: redact_error_message(error_message.into()),
         }
     }
+
+    pub fn report_result_failed(
+        report: &ExecutionTaskReportRequest,
+        error_message: impl Into<String>,
+    ) -> Self {
+        Self {
+            request_id: report_request_id(report),
+            exchange: report.exchange.clone(),
+            symbol: String::new(),
+            endpoint: AUDIT_ENDPOINT_REPORT_RESULT.to_string(),
+            request_status: "failed".to_string(),
+            latency_ms: None,
+            request_payload: report_result_request_payload(report),
+            response_payload: json!({
+                "replay_action": "retry_report_result_only",
+                "place_order_allowed": false,
+            }),
+            error_message: redact_error_message(error_message.into()),
+        }
+    }
+
+    pub fn report_result_replayed(
+        report: &ExecutionTaskReportRequest,
+        latency_ms: Option<i32>,
+        response_payload: Value,
+    ) -> Self {
+        Self {
+            request_id: report_request_id(report),
+            exchange: report.exchange.clone(),
+            symbol: String::new(),
+            endpoint: AUDIT_ENDPOINT_REPORT_RESULT.to_string(),
+            request_status: "replayed".to_string(),
+            latency_ms,
+            request_payload: report_result_request_payload(report),
+            response_payload: redact_audit_payload(json!({
+                "replay_status": "completed",
+                "place_order_allowed": false,
+                "response": response_payload,
+            })),
+            error_message: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReportResultReplayCandidate {
+    pub request_id: String,
+    pub report: ExecutionTaskReportRequest,
 }
 
 #[async_trait]
@@ -137,6 +212,14 @@ pub trait ExecutionAuditRepository: Send + Sync {
     async fn upsert_worker_checkpoint(&self, checkpoint: &ExecutionWorkerCheckpoint) -> Result<()>;
 
     async fn insert_exchange_request_audit(&self, audit: &ExchangeRequestAuditLog) -> Result<()>;
+
+    async fn list_report_result_replay_candidates(
+        &self,
+        _limit: u32,
+        _failure_backoff_seconds: u64,
+    ) -> Result<Vec<ReportResultReplayCandidate>> {
+        Ok(Vec::new())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -215,6 +298,27 @@ impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    async fn list_report_result_replay_candidates(
+        &self,
+        limit: u32,
+        failure_backoff_seconds: u64,
+    ) -> Result<Vec<ReportResultReplayCandidate>> {
+        let rows = sqlx::query(LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL)
+            .bind(AUDIT_ENDPOINT_REPORT_RESULT)
+            .bind(i64::from(limit.clamp(1, 100)))
+            .bind(i64::try_from(failure_backoff_seconds).unwrap_or(i64::MAX))
+            .fetch_all(&self.pool)
+            .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let request_id: String = row.try_get("request_id")?;
+                let request_payload: Value = row.try_get("request_payload")?;
+                report_result_replay_candidate_from_payload(request_id, &request_payload)
+            })
+            .collect()
     }
 }
 
@@ -314,6 +418,145 @@ fn order_request_payload(
             "time_in_force": request.time_in_force,
         }
     }))
+}
+
+fn report_request_id(report: &ExecutionTaskReportRequest) -> String {
+    let external_order_id = report.external_order_id.trim();
+    let candidate = if external_order_id.is_empty() {
+        format!("report-task-{}", report.task_id)
+    } else {
+        format!("report-task-{}-{}", report.task_id, external_order_id)
+    };
+    candidate.chars().take(128).collect()
+}
+
+fn report_result_request_payload(report: &ExecutionTaskReportRequest) -> Value {
+    let raw_payload_json = report
+        .raw_payload_json
+        .as_deref()
+        .map(redact_report_raw_payload_json)
+        .unwrap_or(Value::Null);
+    redact_audit_payload(json!({
+        "replay": {
+            "action": "retry_report_result_only",
+            "place_order_allowed": false,
+            "reason": "web_report_result_failed",
+        },
+        "report": {
+            "task_id": report.task_id,
+            "execution_status": report.execution_status,
+            "exchange": report.exchange,
+            "external_order_id": report.external_order_id,
+            "order_side": report.order_side,
+            "order_status": report.order_status,
+            "filled_qty": report.filled_qty,
+            "filled_quote": report.filled_quote,
+            "fee_amount": report.fee_amount,
+            "profit_usdt": report.profit_usdt,
+            "executed_at": report.executed_at,
+            "error_message": report.error_message,
+            "raw_payload_json": raw_payload_json,
+        }
+    }))
+}
+
+fn report_result_replay_candidate_from_payload(
+    request_id: String,
+    request_payload: &Value,
+) -> Result<ReportResultReplayCandidate> {
+    let replay = request_payload
+        .get("replay")
+        .ok_or_else(|| anyhow!("report replay payload missing replay section"))?;
+    if replay.get("action").and_then(Value::as_str) != Some("retry_report_result_only") {
+        return Err(anyhow!(
+            "report replay payload action is not retry_report_result_only"
+        ));
+    }
+    if replay
+        .get("place_order_allowed")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
+        return Err(anyhow!("report replay payload allows place_order"));
+    }
+
+    let report = request_payload
+        .get("report")
+        .ok_or_else(|| anyhow!("report replay payload missing report section"))?;
+
+    Ok(ReportResultReplayCandidate {
+        request_id,
+        report: ExecutionTaskReportRequest {
+            task_id: required_i64(report, "task_id")?,
+            execution_status: required_string(report, "execution_status")?,
+            exchange: required_string(report, "exchange")?,
+            external_order_id: required_string(report, "external_order_id")?,
+            order_side: required_string(report, "order_side")?,
+            order_status: required_string(report, "order_status")?,
+            filled_qty: optional_f64(report, "filled_qty"),
+            filled_quote: optional_f64(report, "filled_quote"),
+            fee_amount: optional_f64(report, "fee_amount"),
+            profit_usdt: optional_f64(report, "profit_usdt"),
+            executed_at: optional_string(report, "executed_at"),
+            error_message: optional_string(report, "error_message"),
+            raw_payload_json: report
+                .get("raw_payload_json")
+                .filter(|value| !value.is_null())
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| value.to_string())
+                }),
+        },
+    })
+}
+
+fn required_i64(value: &Value, field: &str) -> Result<i64> {
+    value
+        .get(field)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| anyhow!("report replay payload missing numeric field: {field}"))
+}
+
+fn required_string(value: &Value, field: &str) -> Result<String> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| anyhow!("report replay payload missing string field: {field}"))
+}
+
+fn optional_string(value: &Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
+fn optional_f64(value: &Value, field: &str) -> Option<f64> {
+    value.get(field).and_then(Value::as_f64)
+}
+
+fn redact_report_raw_payload_json(raw: &str) -> Value {
+    match serde_json::from_str::<Value>(raw) {
+        Ok(value) => redact_audit_payload(value),
+        Err(_) if contains_sensitive_marker(raw) => Value::String(REDACTED.to_string()),
+        Err(_) => Value::String(raw.to_string()),
+    }
+}
+
+fn contains_sensitive_marker(value: &str) -> bool {
+    let normalized = value.to_ascii_lowercase();
+    normalized.contains("api_key")
+        || normalized.contains("api key")
+        || normalized.contains("api_secret")
+        || normalized.contains("api secret")
+        || normalized.contains("passphrase")
+        || normalized.contains("access_token")
+        || normalized.contains("authorization")
+        || normalized.contains("bearer ")
+        || normalized.contains("secret")
 }
 
 #[cfg(test)]
@@ -430,7 +673,7 @@ mod tests {
             }),
         );
 
-        assert_eq!(audit.request_id, "task-42-rq-task-42");
+        assert_eq!(audit.request_id, "task-42-rqtask42");
         assert_eq!(audit.exchange, "okx");
         assert_eq!(audit.symbol, "BTC-USDT-SWAP");
         assert_eq!(audit.endpoint, "trade.place_order");
@@ -473,6 +716,76 @@ mod tests {
     }
 
     #[test]
+    fn report_result_replay_candidate_reconstructs_report_without_order_retry() {
+        let report = ExecutionTaskReportRequest {
+            task_id: 42,
+            execution_status: "pending_confirmation".to_string(),
+            exchange: "binance".to_string(),
+            external_order_id: "12345".to_string(),
+            order_side: "buy".to_string(),
+            order_status: "NEW".to_string(),
+            filled_qty: Some(0.0),
+            filled_quote: Some(0.0),
+            fee_amount: None,
+            profit_usdt: None,
+            executed_at: None,
+            error_message: Some("waiting for fill".to_string()),
+            raw_payload_json: Some(r#"{"client_order_id":"rqtask42"}"#.to_string()),
+        };
+        let audit = ExchangeRequestAuditLog::report_result_failed(&report, "web outage");
+
+        let candidate = report_result_replay_candidate_from_payload(
+            audit.request_id.clone(),
+            &audit.request_payload,
+        )
+        .unwrap();
+
+        assert_eq!(candidate.request_id, "report-task-42-12345");
+        assert_eq!(candidate.report.task_id, 42);
+        assert_eq!(candidate.report.exchange, "binance");
+        assert_eq!(candidate.report.external_order_id, "12345");
+        assert_eq!(candidate.report.order_status, "NEW");
+        assert_eq!(
+            candidate.report.raw_payload_json.as_deref(),
+            Some(r#"{"client_order_id":"rqtask42"}"#)
+        );
+        assert_eq!(
+            audit.request_payload["replay"]["action"],
+            "retry_report_result_only"
+        );
+        assert_eq!(
+            audit.request_payload["replay"]["place_order_allowed"],
+            false
+        );
+    }
+
+    #[test]
+    fn report_result_replay_candidate_rejects_place_order_allowed_payload() {
+        let payload = json!({
+            "replay": {
+                "action": "retry_report_result_only",
+                "place_order_allowed": true
+            },
+            "report": {
+                "task_id": 42,
+                "execution_status": "completed",
+                "exchange": "binance",
+                "external_order_id": "12345",
+                "order_side": "buy",
+                "order_status": "FILLED"
+            }
+        });
+
+        let err = report_result_replay_candidate_from_payload(
+            "report-task-42-12345".to_string(),
+            &payload,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("allows place_order"));
+    }
+
+    #[test]
     fn repository_checkpoint_columns_match_quant_core_ddl() {
         assert_insert_columns_exist_in_ddl(
             UPSERT_WORKER_CHECKPOINT_SQL,
@@ -507,6 +820,20 @@ mod tests {
                 "response_payload",
                 "error_message",
             ],
+        );
+    }
+
+    #[test]
+    fn report_replay_candidate_sql_applies_failure_backoff_window() {
+        assert!(
+            LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL
+                .contains("recent_failed.created_at > failed.created_at"),
+            "report replay SQL must ignore its original failed row while backing off newer replay failures"
+        );
+        assert!(
+            LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL
+                .contains("recent_failed.created_at >= NOW() - ($3::bigint * INTERVAL '1 second')"),
+            "report replay SQL must exclude candidates that failed again inside the configured backoff window"
         );
     }
 
