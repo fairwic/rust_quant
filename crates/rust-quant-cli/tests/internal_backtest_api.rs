@@ -3,9 +3,57 @@ use std::sync::Mutex;
 
 use rust_quant_cli::app::internal_server::{
     backtest_config_from_body, handle_backtest_run_body, handle_exchange_symbol_sync_body,
+    latest_backtest_query_from_path, market_kline_query_from_path,
 };
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[test]
+fn latest_backtest_query_parses_symbol_period_and_public_limit() {
+    let query = latest_backtest_query_from_path(
+        "/internal/backtests/latest?strategyKey=vegas&symbol=eth-usdt-swap&timeframe=4H&limit=500&includeSignalPayload=false",
+    )
+    .expect("query");
+
+    assert_eq!(query.strategy_key, "vegas");
+    assert_eq!(query.symbol, "ETH-USDT-SWAP");
+    assert_eq!(query.timeframe, "4H");
+    assert_eq!(query.limit, 100);
+    assert!(!query.include_signal_payload);
+}
+
+#[test]
+fn latest_backtest_query_rejects_missing_symbol() {
+    let error = latest_backtest_query_from_path(
+        "/internal/backtests/latest?strategyKey=vegas&timeframe=4H",
+    )
+    .expect_err("missing symbol");
+
+    assert_eq!(error, "symbol is required");
+}
+
+#[test]
+fn market_kline_query_accepts_interval_alias_and_clamps_limit() {
+    let query = market_kline_query_from_path(
+        "/internal/klines?symbol=eth-usdt-swap&interval=4H&limit=5000&before=1773115200&after=1577232000",
+    )
+    .expect("query");
+
+    assert_eq!(query.exchange, "binance");
+    assert_eq!(query.symbol, "ETH-USDT-SWAP");
+    assert_eq!(query.timeframe, "4H");
+    assert_eq!(query.limit, 2000);
+    assert_eq!(query.before, Some(1_773_115_200));
+    assert_eq!(query.after, Some(1_577_232_000));
+}
+
+#[test]
+fn market_kline_query_rejects_missing_symbol() {
+    let error =
+        market_kline_query_from_path("/internal/klines?timeframe=4H").expect_err("missing symbol");
+
+    assert_eq!(error, "symbol is required");
+}
 
 #[tokio::test]
 async fn dry_run_backtest_request_returns_admin_adapter_fields() {

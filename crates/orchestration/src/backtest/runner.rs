@@ -17,7 +17,7 @@ use crate::workflow::strategy_config::{
 use rust_quant_core::database::get_db_pool;
 use rust_quant_infrastructure::repositories::{
     PostgresStrategyConfigRepository, SqlxAuditRepository, SqlxBacktestRepository,
-    SqlxCandleRepository, SqlxStrategyConfigRepository,
+    SqlxCandleRepository,
 };
 use rust_quant_market::models::{SelectTime, TimeDirect};
 use rust_quant_services::market::CandleService;
@@ -110,36 +110,28 @@ impl BacktestRunner {
 }
 
 fn create_strategy_config_service(core_pool: sqlx::PgPool) -> Result<StrategyConfigService> {
-    if should_use_quant_core_strategy_configs()? {
-        info!("📚 回测策略配置来源: quant_core.strategy_configs");
-        return Ok(StrategyConfigService::new(Box::new(
-            PostgresStrategyConfigRepository::new(core_pool),
-        )));
-    }
-
-    info!("📚 回测策略配置来源: quant_core.strategy_config");
+    validate_strategy_config_source()?;
+    info!("📚 回测策略配置来源: quant_core.strategy_configs");
     Ok(StrategyConfigService::new(Box::new(
-        SqlxStrategyConfigRepository::new(core_pool),
+        PostgresStrategyConfigRepository::new(core_pool),
     )))
 }
 
-fn should_use_quant_core_strategy_configs() -> Result<bool> {
+fn validate_strategy_config_source() -> Result<()> {
     let source = std::env::var("STRATEGY_CONFIG_SOURCE")
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
+    if source.is_empty() || source == "quant_core" || source == "postgres" {
+        return Ok(());
+    }
     if source == "strategy_config" || source == "legacy_pg" {
-        return Ok(false);
+        return Err(anyhow!(
+            "STRATEGY_CONFIG_SOURCE={} 已废弃；策略配置只保留 quant_core.strategy_configs",
+            source
+        ));
     }
-    if source == "quant_core" || source == "postgres" {
-        return Ok(true);
-    }
-    if !source.is_empty() {
-        return Err(anyhow!("不支持的 STRATEGY_CONFIG_SOURCE: {}", source));
-    }
-    Ok(std::env::var("QUANT_CORE_DATABASE_URL")
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false))
+    Err(anyhow!("不支持的 STRATEGY_CONFIG_SOURCE: {}", source))
 }
 
 /// 回测执行入口（兼容性函数）
@@ -650,7 +642,7 @@ fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig
 #[cfg(test)]
 mod tests {
     use super::derive_select_time;
-    use super::should_use_quant_core_strategy_configs;
+    use super::validate_strategy_config_source;
     use crate::workflow::job_param_generator::ParamMergeBuilder;
     use rust_quant_market::models::TimeDirect;
     use std::sync::Mutex;
@@ -682,18 +674,18 @@ mod tests {
     }
 
     #[test]
-    fn quant_core_strategy_config_source_honors_explicit_env() {
+    fn quant_core_strategy_config_source_rejects_legacy_env() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
         let original_quant_core_url = std::env::var("QUANT_CORE_DATABASE_URL").ok();
 
         std::env::set_var("STRATEGY_CONFIG_SOURCE", "quant_core");
         std::env::remove_var("QUANT_CORE_DATABASE_URL");
-        assert!(should_use_quant_core_strategy_configs().expect("quant_core source"));
+        validate_strategy_config_source().expect("quant_core source");
 
         std::env::set_var("STRATEGY_CONFIG_SOURCE", "strategy_config");
         std::env::set_var("QUANT_CORE_DATABASE_URL", "postgres://ignored");
-        assert!(!should_use_quant_core_strategy_configs().expect("strategy_config source"));
+        assert!(validate_strategy_config_source().is_err());
 
         restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
         restore_env(
@@ -703,17 +695,17 @@ mod tests {
     }
 
     #[test]
-    fn quant_core_strategy_config_source_falls_back_to_database_url() {
+    fn quant_core_strategy_config_source_accepts_blank_env() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
         let original_quant_core_url = std::env::var("QUANT_CORE_DATABASE_URL").ok();
 
         std::env::remove_var("STRATEGY_CONFIG_SOURCE");
         std::env::set_var("QUANT_CORE_DATABASE_URL", "postgres://quant-core");
-        assert!(should_use_quant_core_strategy_configs().expect("quant_core url"));
+        validate_strategy_config_source().expect("blank source");
 
         std::env::set_var("QUANT_CORE_DATABASE_URL", "   ");
-        assert!(!should_use_quant_core_strategy_configs().expect("blank quant_core url"));
+        validate_strategy_config_source().expect("blank source remains accepted");
 
         restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
         restore_env(
