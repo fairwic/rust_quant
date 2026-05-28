@@ -7,6 +7,9 @@ use rust_quant_core::config::env_is_true;
 use rust_quant_core::database::get_db_pool;
 use rust_quant_domain::{StrategyConfig, StrategyType};
 use rust_quant_infrastructure::external_data::DuneQueryPerformance;
+use rust_quant_infrastructure::repositories::fund_monitoring_repository::{
+    SqlxFundFlowAlertRepository, SqlxMarketAnomalyRepository,
+};
 use rust_quant_infrastructure::repositories::{
     PostgresStrategyConfigRepository, SqlxSwapOrderRepository,
 };
@@ -15,6 +18,7 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use rust_quant_market::streams;
+use rust_quant_orchestration::jobs::data::fund_monitor_job::FundMonitorJob;
 use rust_quant_orchestration::workflow::{
     backtest_runner, data_sync, external_market_sync_job::ExternalMarketSyncJob, funding_rate_job,
     tickets_job,
@@ -144,6 +148,20 @@ pub async fn run_modes() -> Result<()> {
         tokio::spawn(async {
             if let Err(error) = run_exchange_symbol_sync_worker_from_env().await {
                 error!("❌ 交易对事实表同步 worker 退出: {}", error);
+            }
+        });
+    }
+
+    // 0.6) 市场动能雷达：复用全市场排名扫描，产出可被 Web/Admin 消费的市场事实。
+    let envs: HashMap<String, String> = std::env::vars().collect();
+    if should_run_market_velocity_radar_from_map(&envs) {
+        if env_is_true("MARKET_VELOCITY_RADAR_ONLY", true) {
+            run_market_velocity_radar_worker_from_env().await?;
+            return Ok(());
+        }
+        tokio::spawn(async {
+            if let Err(error) = run_market_velocity_radar_worker_from_env().await {
+                error!("❌ 市场动能雷达 worker 退出: {}", error);
             }
         });
     }
@@ -378,6 +396,34 @@ async fn run_exchange_symbol_sync_worker_from_env() -> Result<()> {
     }
 }
 
+async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
+    let interval_secs = std::env::var("MARKET_VELOCITY_SCAN_INTERVAL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(10);
+    let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .context("缺少 QUANT_CORE_DATABASE_URL 或 DATABASE_URL，无法启动市场动能雷达")?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await
+        .context("连接 quant_core 数据库失败，无法启动市场动能雷达")?;
+    let anomaly_repo = Arc::new(SqlxMarketAnomalyRepository::new(pool.clone()));
+    let alert_repo = Arc::new(SqlxFundFlowAlertRepository::new(pool));
+    let (mut job, analyzer) = FundMonitorJob::new(interval_secs, anomaly_repo, alert_repo)?;
+
+    tokio::spawn(async move {
+        analyzer.run().await;
+    });
+
+    info!("📈 市场动能雷达 worker 启动: interval={}s", interval_secs);
+    job.run_loop().await;
+    Ok(())
+}
+
 async fn run_dune_sync_jobs_from_env() -> Result<()> {
     let envs: HashMap<String, String> = std::env::vars().collect();
     let requests = parse_dune_sync_requests_from_map(&envs)?;
@@ -508,6 +554,10 @@ fn should_skip_market_data_sync_from_map(envs: &HashMap<String, String>) -> bool
 
 fn should_run_funding_rate_sync_from_map(envs: &HashMap<String, String>) -> bool {
     env_flag_is_true(envs, "IS_RUN_FUNDING_RATE_JOB")
+}
+
+fn should_run_market_velocity_radar_from_map(envs: &HashMap<String, String>) -> bool {
+    env_flag_is_true(envs, "IS_RUN_MARKET_VELOCITY_RADAR")
 }
 
 fn default_backtest_targets() -> Vec<(String, String)> {
@@ -1363,5 +1413,23 @@ eth_whale_transfer|ETH|docs/external_market_data/dune/eth_whale_transfer.sql|202
         let envs = std::collections::HashMap::new();
 
         assert!(!should_run_funding_rate_sync_from_map(&envs));
+    }
+
+    #[test]
+    fn test_should_run_market_velocity_radar_from_map_enabled() {
+        let mut envs = std::collections::HashMap::new();
+        envs.insert(
+            "IS_RUN_MARKET_VELOCITY_RADAR".to_string(),
+            "true".to_string(),
+        );
+
+        assert!(should_run_market_velocity_radar_from_map(&envs));
+    }
+
+    #[test]
+    fn test_should_run_market_velocity_radar_from_map_disabled_by_default() {
+        let envs = std::collections::HashMap::new();
+
+        assert!(!should_run_market_velocity_radar_from_map(&envs));
     }
 }

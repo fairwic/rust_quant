@@ -1,9 +1,14 @@
 use anyhow::{Context, Result};
-use chrono::NaiveDateTime;
-use chrono::Utc;
+use chrono::{DateTime, NaiveDateTime, Utc};
+use rust_quant_domain::Timeframe;
+use rust_quant_infrastructure::repositories::{PostgresCandleRepository, SqlxCandleRepository};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, QueryBuilder};
+use std::cmp::Ordering;
+use std::collections::HashSet;
+use std::str::FromStr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info};
@@ -13,6 +18,7 @@ use crate::app::exchange_symbol_sync::{
 };
 use rust_quant_orchestration::infra::strategy_config::BackTestConfig;
 use rust_quant_orchestration::workflow::backtest_runner;
+use rust_quant_services::market::{should_use_quant_core_candle_source, CandleService};
 
 const DEFAULT_INTERNAL_ADDR: &str = "127.0.0.1:5322";
 const MAX_HEADER_BYTES: usize = 16 * 1024;
@@ -21,6 +27,10 @@ const MAX_BACKTEST_SIGNAL_LIMIT: i64 = 100;
 const MAX_KLINE_LIMIT: i64 = 2_000;
 const DEFAULT_KLINE_LIMIT: i64 = 500;
 const DEFAULT_KLINE_EXCHANGE: &str = "binance";
+const MAX_MARKET_RANK_EVENT_LIMIT: i64 = 200;
+const DEFAULT_MARKET_RANK_EVENT_LIMIT: i64 = 50;
+const DEFAULT_MARKET_RANK_EVENT_EXCHANGE: &str = "okx";
+const MARKET_RANK_TOP_BOUNDARY: i32 = 50;
 
 #[derive(Debug, Clone)]
 pub struct InternalHttpJsonResponse {
@@ -45,6 +55,24 @@ pub struct MarketKlineQuery {
     pub limit: i64,
     pub before: Option<i64>,
     pub after: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketRankEventsQuery {
+    pub exchange: String,
+    pub symbol: Option<String>,
+    pub event_type: Option<String>,
+    pub timeframe: Option<String>,
+    pub sort: Option<String>,
+    pub limit: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KlineSyncRequest {
+    pub exchange: String,
+    pub symbol: String,
+    pub timeframe: String,
+    pub limit: i64,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -102,6 +130,38 @@ struct MarketKlineItem {
     close: f64,
     volume: f64,
     timezone: String,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+struct MarketRankEventItem {
+    id: i64,
+    exchange: String,
+    symbol: String,
+    event_type: String,
+    timeframe: Option<String>,
+    old_rank: Option<i32>,
+    new_rank: Option<i32>,
+    delta_rank: Option<i32>,
+    rank_change_pct: Option<f64>,
+    volume_24h_quote: Option<f64>,
+    previous_volume_24h_quote: Option<f64>,
+    volume_24h_change_pct: Option<f64>,
+    volume_15m_quote: Option<f64>,
+    volume_15m_change_pct: Option<f64>,
+    current_price: Option<f64>,
+    previous_price: Option<f64>,
+    price_change_pct: Option<f64>,
+    price_direction: String,
+    price_change_24h_pct: Option<f64>,
+    detected_at: DateTime<Utc>,
+    source: String,
+    notification_state: String,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct CandleVolume15mStats {
+    volume_15m_quote: Option<f64>,
+    volume_15m_change_pct: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -173,6 +233,17 @@ struct BacktestRunRequest {
     config_overrides: Value,
     #[serde(default)]
     dry_run: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawKlineSyncRequest {
+    #[serde(default)]
+    exchange: Option<String>,
+    symbol: String,
+    #[serde(alias = "interval", alias = "period")]
+    timeframe: String,
+    #[serde(default)]
+    limit: Option<i64>,
 }
 
 pub async fn run_internal_server() -> Result<()> {
@@ -282,6 +353,46 @@ pub fn market_kline_query_from_path(path: &str) -> Result<MarketKlineQuery, Stri
     })
 }
 
+pub fn market_rank_events_query_from_path(path: &str) -> Result<MarketRankEventsQuery, String> {
+    let query = path
+        .split_once('?')
+        .map(|(_, query)| query)
+        .unwrap_or_default();
+    let exchange = query_param(query, &["exchange"])
+        .unwrap_or_else(|| DEFAULT_MARKET_RANK_EVENT_EXCHANGE.to_string())
+        .trim()
+        .to_ascii_lowercase();
+    let symbol = query_param(query, &["symbol"])
+        .map(|value| value.trim().to_ascii_uppercase())
+        .filter(|value| !value.is_empty());
+    let event_type = query_param(query, &["eventType", "event_type"])
+        .map(|value| normalize_market_rank_event_type(&value))
+        .transpose()?;
+    let timeframe = query_param(query, &["timeframe", "period"])
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+    let sort = query_param(query, &["sort", "orderBy", "order_by"])
+        .map(|value| normalize_market_rank_sort(&value))
+        .transpose()?;
+    let limit = query_param(query, &["limit"])
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_MARKET_RANK_EVENT_LIMIT)
+        .clamp(1, MAX_MARKET_RANK_EVENT_LIMIT);
+
+    if exchange.is_empty() {
+        return Err("exchange is required".to_string());
+    }
+
+    Ok(MarketRankEventsQuery {
+        exchange,
+        symbol,
+        event_type,
+        timeframe,
+        sort,
+        limit,
+    })
+}
+
 pub async fn handle_market_klines_path(path: &str) -> InternalHttpJsonResponse {
     let query = match market_kline_query_from_path(path) {
         Ok(query) => query,
@@ -294,6 +405,26 @@ pub async fn handle_market_klines_path(path: &str) -> InternalHttpJsonResponse {
             serde_json::to_value(items).unwrap_or_else(|err| {
                 json!({
                     "error": format!("serialize market klines response failed: {err}")
+                })
+            }),
+        ),
+        Err(err) => json_response(500, json!({ "error": err.to_string() })),
+    }
+}
+
+pub async fn handle_market_rank_events_path(path: &str) -> InternalHttpJsonResponse {
+    let query = match market_rank_events_query_from_path(path) {
+        Ok(query) => query,
+        Err(message) => return json_response(400, json!({ "error": message })),
+    };
+
+    match fetch_market_rank_events_response(rust_quant_core::database::get_db_pool(), &query).await
+    {
+        Ok(items) => json_response(
+            200,
+            serde_json::to_value(items).unwrap_or_else(|err| {
+                json!({
+                    "error": format!("serialize market rank events response failed: {err}")
                 })
             }),
         ),
@@ -374,6 +505,38 @@ pub async fn handle_backtest_run_body(body: &[u8]) -> InternalHttpJsonResponse {
     }
 }
 
+pub async fn handle_kline_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
+    let request = match kline_sync_request_from_body(body) {
+        Ok(request) => request,
+        Err(message) => return json_response(400, json!({ "error": message })),
+    };
+
+    match sync_kline_request(&request).await {
+        Ok(saved_count) => json_response(
+            200,
+            json!({
+                "status": "completed",
+                "exchange": request.exchange,
+                "symbol": request.symbol,
+                "timeframe": request.timeframe,
+                "limit": request.limit,
+                "savedCount": saved_count,
+            }),
+        ),
+        Err(err) => json_response(
+            500,
+            json!({
+                "status": "failed",
+                "exchange": request.exchange,
+                "symbol": request.symbol,
+                "timeframe": request.timeframe,
+                "limit": request.limit,
+                "error": err.to_string()
+            }),
+        ),
+    }
+}
+
 pub async fn handle_exchange_symbol_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
     let request = if body.is_empty() {
         ExchangeSymbolSyncRequest {
@@ -427,6 +590,36 @@ pub fn backtest_config_from_body(body: &[u8]) -> Result<BackTestConfig, String> 
     Ok(backtest_config_from_request(&request))
 }
 
+pub fn kline_sync_request_from_body(body: &[u8]) -> Result<KlineSyncRequest, String> {
+    let request = serde_json::from_slice::<RawKlineSyncRequest>(body)
+        .map_err(|err| format!("invalid json body: {err}"))?;
+    let exchange = request
+        .exchange
+        .unwrap_or_else(|| DEFAULT_KLINE_EXCHANGE.to_string())
+        .trim()
+        .to_ascii_lowercase();
+    let symbol = request.symbol.trim().to_ascii_uppercase();
+    let timeframe = normalize_kline_sync_timeframe(&request.timeframe)?;
+    let limit = request
+        .limit
+        .unwrap_or(DEFAULT_KLINE_LIMIT)
+        .clamp(1, MAX_KLINE_LIMIT);
+
+    if exchange.is_empty() {
+        return Err("exchange is required".to_string());
+    }
+    if symbol.is_empty() {
+        return Err("symbol is required".to_string());
+    }
+
+    Ok(KlineSyncRequest {
+        exchange,
+        symbol,
+        timeframe,
+        limit,
+    })
+}
+
 async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     let request = read_request(&mut stream).await?;
     let route = route_path(&request.path);
@@ -434,6 +627,10 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
         ("POST", "/internal/backtests/run") => handle_backtest_run_body(&request.body).await,
         ("GET", "/internal/backtests/latest") => handle_latest_backtest_path(&request.path).await,
         ("GET", "/internal/klines") => handle_market_klines_path(&request.path).await,
+        ("POST", "/internal/klines/sync") => handle_kline_sync_body(&request.body).await,
+        ("GET", "/internal/market-rank-events") => {
+            handle_market_rank_events_path(&request.path).await
+        }
         ("POST", "/internal/exchange-symbols/sync") => {
             handle_exchange_symbol_sync_body(&request.body).await
         }
@@ -442,6 +639,54 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
         _ => json_response(405, json!({ "error": "method not allowed" })),
     };
     write_response(&mut stream, response).await
+}
+
+async fn sync_kline_request(request: &KlineSyncRequest) -> Result<i64> {
+    let service = create_kline_sync_candle_service()?;
+    let period = kline_sync_period_for_job(&request.timeframe)?;
+    let timeframe = Timeframe::from_str(&period)
+        .map_err(|error| anyhow::anyhow!("无效的K线周期: {}", error))?;
+    let latest_candle = service
+        .get_latest_candle(&request.symbol, timeframe)
+        .await?;
+    let after = latest_candle.and_then(|candle| {
+        candle
+            .timestamp
+            .checked_add(1)
+            .and_then(|timestamp| u64::try_from(timestamp).ok())
+    });
+
+    let candles = service
+        .fetch_candles_from_crypto_exc_all(
+            &request.exchange,
+            &request.symbol,
+            &period,
+            after,
+            None,
+            request.limit as u32,
+        )
+        .await?;
+    if candles.is_empty() {
+        return Ok(0);
+    }
+
+    Ok(service.save_candles(candles).await? as i64)
+}
+
+fn create_kline_sync_candle_service() -> Result<CandleService> {
+    if should_use_quant_core_candle_source()? {
+        let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
+            .context("CANDLE_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")?;
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect_lazy(&database_url)?;
+        let repository = PostgresCandleRepository::new(pool);
+        return Ok(CandleService::new(Box::new(repository)));
+    }
+
+    let pool = rust_quant_core::database::get_db_pool();
+    let repository = SqlxCandleRepository::new(pool.clone());
+    Ok(CandleService::new(Box::new(repository)))
 }
 
 async fn fetch_market_klines_response(
@@ -454,6 +699,434 @@ async fn fetch_market_klines_response(
     }
     rows.sort_by_key(|item| item.time);
     Ok(rows)
+}
+
+async fn fetch_market_rank_events_response(
+    pool: &PgPool,
+    query: &MarketRankEventsQuery,
+) -> Result<Vec<MarketRankEventItem>> {
+    if market_rank_sort_requires_legacy_volume_before_limit(query.sort.as_deref()) {
+        return fetch_volume_15m_market_rank_events_response(pool, query).await;
+    }
+
+    if market_rank_sort_can_use_recent_query(query.sort.as_deref()) {
+        return fetch_recent_market_rank_events_response(pool, query).await;
+    }
+
+    let sql = r#"
+        SELECT
+            latest.id,
+            latest.exchange,
+            latest.symbol,
+            latest.event_type,
+            latest.timeframe,
+            latest.old_rank,
+            latest.new_rank,
+            latest.delta_rank,
+            CASE
+                WHEN latest.old_rank IS NOT NULL
+                     AND latest.old_rank > 0
+                     AND latest.delta_rank IS NOT NULL
+                THEN ABS(latest.delta_rank)::FLOAT8 / latest.old_rank::FLOAT8 * 100.0
+                ELSE NULL
+            END AS rank_change_pct,
+            latest.volume_24h_quote::FLOAT8 AS volume_24h_quote,
+            previous.previous_volume_24h_quote,
+            CASE
+                WHEN previous.previous_volume_24h_quote IS NOT NULL
+                     AND previous.previous_volume_24h_quote > 0
+                     AND latest.volume_24h_quote IS NOT NULL
+                THEN (latest.volume_24h_quote::FLOAT8 - previous.previous_volume_24h_quote)
+                     / previous.previous_volume_24h_quote * 100.0
+                ELSE NULL
+            END AS volume_24h_change_pct,
+            NULL::FLOAT8 AS volume_15m_quote,
+            NULL::FLOAT8 AS volume_15m_change_pct,
+            latest.current_price::FLOAT8 AS current_price,
+            latest.previous_price::FLOAT8 AS previous_price,
+            latest.price_change_pct::FLOAT8 AS price_change_pct,
+            latest.price_direction,
+            latest.price_change_pct::FLOAT8 AS price_change_24h_pct,
+            latest.detected_at,
+            latest.source,
+            latest.notification_state
+        FROM (
+            SELECT DISTINCT ON (UPPER(symbol))
+                id,
+                exchange,
+                symbol,
+                event_type,
+                timeframe,
+                old_rank,
+                new_rank,
+                delta_rank,
+                volume_24h_quote,
+                current_price,
+                previous_price,
+                price_change_pct,
+                price_direction,
+                detected_at,
+                source,
+                notification_state
+            FROM market_rank_events
+            WHERE LOWER(exchange) = LOWER($1)
+              AND ($2::TEXT IS NULL OR UPPER(symbol) = UPPER($2))
+              AND ($3::TEXT IS NULL OR event_type = $3)
+              AND ($4::TEXT IS NULL OR LOWER(COALESCE(timeframe, '')) = LOWER($4))
+            ORDER BY UPPER(symbol), detected_at DESC, id DESC
+        ) latest
+        LEFT JOIN LATERAL (
+            SELECT previous.volume_24h_quote::FLOAT8 AS previous_volume_24h_quote
+            FROM market_rank_events previous
+            WHERE previous.exchange = latest.exchange
+              AND previous.symbol = latest.symbol
+              AND previous.volume_24h_quote IS NOT NULL
+              AND previous.detected_at <= latest.detected_at - INTERVAL '15 minutes'
+              AND previous.detected_at >= latest.detected_at - INTERVAL '24 hours'
+            ORDER BY previous.detected_at ASC, previous.id ASC
+            LIMIT 1
+        ) previous ON TRUE
+        WHERE latest.new_rank <= 50 OR latest.old_rank <= 50
+        "#;
+    let result = sqlx::query_as::<_, MarketRankEventItem>(sql)
+        .bind(&query.exchange)
+        .bind(query.symbol.as_deref())
+        .bind(query.event_type.as_deref())
+        .bind(query.timeframe.as_deref())
+        .fetch_all(pool)
+        .await;
+
+    match result {
+        Ok(mut rows) => {
+            if market_rank_sort_requires_legacy_volume_before_limit(query.sort.as_deref()) {
+                attach_legacy_volume_15m(pool, &mut rows).await?;
+                return Ok(finalize_market_rank_rows(
+                    rows,
+                    query.sort.as_deref(),
+                    query.limit,
+                ));
+            }
+
+            let mut rows = finalize_market_rank_rows(rows, query.sort.as_deref(), query.limit);
+            attach_legacy_volume_15m(pool, &mut rows).await?;
+            Ok(rows)
+        }
+        Err(err) if is_undefined_table_error(&err) => Ok(Vec::new()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+async fn fetch_volume_15m_market_rank_events_response(
+    pool: &PgPool,
+    query: &MarketRankEventsQuery,
+) -> Result<Vec<MarketRankEventItem>> {
+    let mut recent_query = query.clone();
+    recent_query.sort = None;
+    recent_query.limit = MAX_MARKET_RANK_EVENT_LIMIT;
+
+    let mut rows = fetch_recent_market_rank_events_response(pool, &recent_query).await?;
+    attach_legacy_volume_15m(pool, &mut rows).await?;
+    Ok(finalize_market_rank_rows(
+        rows,
+        query.sort.as_deref(),
+        query.limit,
+    ))
+}
+
+async fn fetch_recent_market_rank_events_response(
+    pool: &PgPool,
+    query: &MarketRankEventsQuery,
+) -> Result<Vec<MarketRankEventItem>> {
+    let sql = recent_market_rank_events_sql(query.sort.as_deref());
+
+    let result = sqlx::query_as::<_, MarketRankEventItem>(&sql)
+        .bind(&query.exchange)
+        .bind(query.symbol.as_deref())
+        .bind(query.event_type.as_deref())
+        .bind(query.timeframe.as_deref())
+        .bind(query.limit)
+        .fetch_all(pool)
+        .await;
+
+    match result {
+        Ok(rows) => Ok(finalize_market_rank_rows(
+            rows,
+            query.sort.as_deref(),
+            query.limit,
+        )),
+        Err(err) if is_undefined_table_error(&err) => Ok(Vec::new()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn recent_market_rank_events_sql(sort: Option<&str>) -> String {
+    format!(
+        r#"
+        WITH latest AS (
+            SELECT DISTINCT ON (UPPER(symbol))
+                id,
+                exchange,
+                symbol,
+                event_type,
+                timeframe,
+                old_rank,
+                new_rank,
+                delta_rank,
+                volume_24h_quote,
+                current_price,
+                previous_price,
+                price_change_pct,
+                price_direction,
+                detected_at,
+                source,
+                notification_state
+            FROM market_rank_events
+            WHERE LOWER(exchange) = LOWER($1)
+              AND ($2::TEXT IS NULL OR UPPER(symbol) = UPPER($2))
+              AND ($3::TEXT IS NULL OR event_type = $3)
+              AND ($4::TEXT IS NULL OR LOWER(COALESCE(timeframe, '')) = LOWER($4))
+              AND (new_rank <= 50 OR old_rank <= 50)
+            ORDER BY UPPER(symbol), detected_at DESC, id DESC
+        )
+        SELECT
+            id,
+            exchange,
+            symbol,
+            event_type,
+            timeframe,
+            old_rank,
+            new_rank,
+            delta_rank,
+            CASE
+                WHEN old_rank IS NOT NULL
+                     AND old_rank > 0
+                     AND delta_rank IS NOT NULL
+                THEN ABS(delta_rank)::FLOAT8 / old_rank::FLOAT8 * 100.0
+                ELSE NULL
+            END AS rank_change_pct,
+            volume_24h_quote::FLOAT8 AS volume_24h_quote,
+            NULL::FLOAT8 AS previous_volume_24h_quote,
+            NULL::FLOAT8 AS volume_24h_change_pct,
+            NULL::FLOAT8 AS volume_15m_quote,
+            NULL::FLOAT8 AS volume_15m_change_pct,
+            current_price::FLOAT8 AS current_price,
+            previous_price::FLOAT8 AS previous_price,
+            price_change_pct::FLOAT8 AS price_change_pct,
+            price_direction,
+            price_change_pct::FLOAT8 AS price_change_24h_pct,
+            detected_at,
+            source,
+            notification_state
+        FROM latest
+        ORDER BY {}
+        LIMIT $5
+        "#,
+        market_rank_recent_order_clause(sort)
+    )
+}
+
+fn market_rank_sort_can_use_recent_query(sort: Option<&str>) -> bool {
+    matches!(sort, None | Some("detected_at") | Some("delta_rank"))
+}
+
+fn market_rank_recent_order_clause(sort: Option<&str>) -> &'static str {
+    match sort {
+        None | Some("delta_rank") => {
+            "rank_change_pct DESC NULLS LAST, ABS(COALESCE(delta_rank, 0)) DESC, detected_at DESC, id DESC"
+        }
+        _ => "detected_at DESC, id DESC",
+    }
+}
+
+fn market_rank_sort_requires_legacy_volume_before_limit(sort: Option<&str>) -> bool {
+    matches!(sort, Some("volume_15m"))
+}
+
+async fn attach_legacy_volume_15m(pool: &PgPool, rows: &mut [MarketRankEventItem]) -> Result<()> {
+    for row in rows {
+        let stats = fetch_legacy_volume_15m_stats(pool, &row.symbol, row.detected_at).await?;
+        row.volume_15m_quote = stats.as_ref().and_then(|item| item.volume_15m_quote);
+        row.volume_15m_change_pct = stats.as_ref().and_then(|item| item.volume_15m_change_pct);
+    }
+    Ok(())
+}
+
+async fn fetch_legacy_volume_15m_stats(
+    pool: &PgPool,
+    symbol: &str,
+    detected_at: DateTime<Utc>,
+) -> Result<Option<CandleVolume15mStats>> {
+    let table_name = PostgresCandleRepository::quoted_table_name(symbol, Timeframe::M15)?;
+    let detected_at_millis = detected_at.timestamp_millis();
+    let detected_at_secs = detected_at.timestamp();
+    let sql = format!(
+        r#"
+        WITH latest AS (
+            SELECT
+                ts,
+                NULLIF(vol_ccy, '')::FLOAT8 AS volume_15m_quote
+            FROM {table_name}
+            WHERE (
+                ts > 10000000000
+                AND ts > $1::BIGINT - 1800000
+                AND ts <= $1::BIGINT
+            ) OR (
+                ts <= 10000000000
+                AND ts > $2::BIGINT - 1800
+                AND ts <= $2::BIGINT
+            )
+            ORDER BY ts DESC
+            LIMIT 1
+        ),
+        baseline AS (
+            SELECT AVG(NULLIF(c.vol_ccy, '')::FLOAT8) AS avg_volume_15m_quote
+            FROM {table_name} c
+            JOIN latest ON TRUE
+            WHERE c.ts < latest.ts
+              AND c.ts >= latest.ts - CASE WHEN latest.ts > 10000000000 THEN 7200000 ELSE 7200 END
+        )
+        SELECT
+            latest.volume_15m_quote,
+            CASE
+                WHEN baseline.avg_volume_15m_quote IS NOT NULL
+                     AND baseline.avg_volume_15m_quote > 0
+                THEN (latest.volume_15m_quote - baseline.avg_volume_15m_quote)
+                     / baseline.avg_volume_15m_quote * 100.0
+                ELSE NULL
+            END AS volume_15m_change_pct
+        FROM latest
+        LEFT JOIN baseline ON TRUE
+        "#
+    );
+
+    let result = sqlx::query_as::<_, CandleVolume15mStats>(&sql)
+        .bind(detected_at_millis)
+        .bind(detected_at_secs)
+        .fetch_optional(pool)
+        .await;
+
+    match result {
+        Ok(stats) => Ok(stats),
+        Err(err) if is_undefined_table_error(&err) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn finalize_market_rank_rows(
+    mut rows: Vec<MarketRankEventItem>,
+    sort: Option<&str>,
+    limit: i64,
+) -> Vec<MarketRankEventItem> {
+    for row in &mut rows {
+        if row.rank_change_pct.is_none() {
+            row.rank_change_pct = compute_rank_change_pct(row.old_rank, row.delta_rank);
+        }
+        if row.volume_24h_change_pct.is_none() {
+            row.volume_24h_change_pct =
+                compute_change_pct(row.volume_24h_quote, row.previous_volume_24h_quote);
+        }
+    }
+    rows.retain(is_market_rank_top_boundary_row);
+
+    rows.sort_by(compare_market_rank_latest);
+
+    let mut seen = HashSet::new();
+    rows.retain(|row| seen.insert(row.symbol.trim().to_ascii_uppercase()));
+
+    match sort {
+        None | Some("delta_rank") => rows.sort_by(compare_market_rank_by_rank_change_pct),
+        Some("volume_24h") => rows.sort_by(compare_market_rank_by_volume_24h_change_pct),
+        Some("volume_15m") => rows.sort_by(compare_market_rank_by_volume_15m_change_pct),
+        _ => rows.sort_by(compare_market_rank_latest),
+    }
+
+    rows.truncate(limit.max(0) as usize);
+    rows
+}
+
+fn is_market_rank_top_boundary_row(row: &MarketRankEventItem) -> bool {
+    rank_is_within_top_boundary(row.new_rank) || rank_is_within_top_boundary(row.old_rank)
+}
+
+fn rank_is_within_top_boundary(rank: Option<i32>) -> bool {
+    rank.is_some_and(|value| value > 0 && value <= MARKET_RANK_TOP_BOUNDARY)
+}
+
+fn compute_rank_change_pct(old_rank: Option<i32>, delta_rank: Option<i32>) -> Option<f64> {
+    let old_rank = old_rank?;
+    let delta_rank = delta_rank?;
+    if old_rank <= 0 {
+        return None;
+    }
+    Some(delta_rank.abs() as f64 / old_rank as f64 * 100.0)
+}
+
+fn compute_change_pct(current: Option<f64>, previous: Option<f64>) -> Option<f64> {
+    let current = current?;
+    let previous = previous?;
+    if !current.is_finite() || !previous.is_finite() || previous <= 0.0 {
+        return None;
+    }
+    Some((current - previous) / previous * 100.0)
+}
+
+fn compare_market_rank_latest(left: &MarketRankEventItem, right: &MarketRankEventItem) -> Ordering {
+    right
+        .detected_at
+        .cmp(&left.detected_at)
+        .then_with(|| right.id.cmp(&left.id))
+}
+
+fn compare_market_rank_by_rank_change_pct(
+    left: &MarketRankEventItem,
+    right: &MarketRankEventItem,
+) -> Ordering {
+    compare_optional_f64_desc(left.rank_change_pct, right.rank_change_pct)
+        .then_with(|| {
+            i32::abs(right.delta_rank.unwrap_or(0)).cmp(&i32::abs(left.delta_rank.unwrap_or(0)))
+        })
+        .then_with(|| compare_market_rank_latest(left, right))
+}
+
+fn compare_market_rank_by_volume_24h_change_pct(
+    left: &MarketRankEventItem,
+    right: &MarketRankEventItem,
+) -> Ordering {
+    compare_optional_f64_abs_desc(left.volume_24h_change_pct, right.volume_24h_change_pct)
+        .then_with(|| compare_market_rank_latest(left, right))
+}
+
+fn compare_market_rank_by_volume_15m_change_pct(
+    left: &MarketRankEventItem,
+    right: &MarketRankEventItem,
+) -> Ordering {
+    compare_optional_f64_abs_desc(left.volume_15m_change_pct, right.volume_15m_change_pct)
+        .then_with(|| compare_market_rank_latest(left, right))
+}
+
+fn compare_optional_f64_desc(left: Option<f64>, right: Option<f64>) -> Ordering {
+    match (finite_f64(left), finite_f64(right)) {
+        (Some(left), Some(right)) => right.partial_cmp(&left).unwrap_or(Ordering::Equal),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn finite_f64(value: Option<f64>) -> Option<f64> {
+    value.filter(|item| item.is_finite())
+}
+
+fn compare_optional_f64_abs_desc(left: Option<f64>, right: Option<f64>) -> Ordering {
+    match (finite_f64(left), finite_f64(right)) {
+        (Some(left), Some(right)) => right
+            .abs()
+            .partial_cmp(&left.abs())
+            .unwrap_or(Ordering::Equal),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
 }
 
 async fn fetch_unified_market_klines(
@@ -588,11 +1261,67 @@ fn normalize_legacy_timeframe(raw: &str) -> Result<&'static str> {
     }
 }
 
+fn normalize_kline_sync_timeframe(raw: &str) -> Result<String, String> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "1m" => Ok("1M".to_string()),
+        "3m" => Ok("3M".to_string()),
+        "5m" => Ok("5M".to_string()),
+        "15m" => Ok("15M".to_string()),
+        "30m" => Ok("30M".to_string()),
+        "1h" => Ok("1H".to_string()),
+        "2h" => Ok("2H".to_string()),
+        "4h" => Ok("4H".to_string()),
+        "6h" => Ok("6H".to_string()),
+        "12h" => Ok("12H".to_string()),
+        "1d" | "1dutc" => Ok("1DUTC".to_string()),
+        "1w" => Ok("1W".to_string()),
+        other if other.is_empty() => Err("timeframe is required".to_string()),
+        other => Err(format!("unsupported timeframe: {other}")),
+    }
+}
+
+fn kline_sync_period_for_job(timeframe: &str) -> Result<String> {
+    let period = match timeframe {
+        "1M" => "1m",
+        "3M" => "3m",
+        "5M" => "5m",
+        "15M" => "15m",
+        "30M" => "30m",
+        "1DUTC" => "1Dutc",
+        value => value,
+    };
+    Ok(period.to_string())
+}
+
 fn seconds_to_legacy_millis(timestamp: i64) -> i64 {
     if timestamp > 10_000_000_000 {
         timestamp
     } else {
         timestamp.saturating_mul(1_000)
+    }
+}
+
+fn normalize_market_rank_event_type(raw: &str) -> Result<String, String> {
+    let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "rank_velocity" | "rankvelocity" => Ok("rank_velocity".to_string()),
+        "top_entry" | "topentry" => Ok("top_entry".to_string()),
+        "top_exit" | "topexit" => Ok("top_exit".to_string()),
+        other => Err(format!("unsupported eventType: {other}")),
+    }
+}
+
+fn normalize_market_rank_sort(raw: &str) -> Result<String, String> {
+    let normalized = raw.trim().to_ascii_lowercase().replace(['-', '.'], "_");
+    match normalized.as_str() {
+        "" | "time" | "latest" | "detected_at" => Ok("detected_at".to_string()),
+        "delta" | "delta_rank" | "rank_delta" | "rank_movement" | "volatility" => {
+            Ok("delta_rank".to_string())
+        }
+        "volume_24h" | "volume24h" | "volume_24h_quote" => Ok("volume_24h".to_string()),
+        "volume_15m" | "volume15m" | "volume_15m_quote" => Ok("volume_15m".to_string()),
+        other => Err(format!("unsupported sort: {other}")),
     }
 }
 
@@ -1045,3 +1774,7 @@ fn reason_phrase(status_code: u16) -> &'static str {
         _ => "OK",
     }
 }
+
+#[cfg(test)]
+#[path = "internal_server_tests.rs"]
+mod tests;

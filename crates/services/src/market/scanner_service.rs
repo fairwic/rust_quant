@@ -1,7 +1,9 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
-use rust_quant_domain::entities::{MarketAnomaly, TickerSnapshot};
+use rust_quant_domain::entities::{
+    MarketAnomaly, MarketRankEvent, MarketRankEventType, TickerSnapshot,
+};
 use rust_quant_domain::traits::fund_monitoring_repository::MarketAnomalyRepository;
 use rust_quant_market::scanners::okx_scanner::OkxScanner;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -11,9 +13,11 @@ use tracing::{error, info, warn};
 use crate::notification::TelegramNotifier;
 
 /// 排名快照
+#[derive(Clone)]
 struct RankSnapshot {
     timestamp: DateTime<Utc>,
     ranks: HashMap<String, i32>,
+    prices: HashMap<String, Decimal>,
 }
 
 /// 扫描器服务
@@ -44,6 +48,7 @@ const COOLDOWN_MINUTES_15M: i64 = 15;
 const COOLDOWN_MINUTES_4H: i64 = 120; // 2 * 60
 const COOLDOWN_MINUTES_24H: i64 = 720; // 12 * 60
 const COOLDOWN_MINUTES_LIST: i64 = 30;
+const MARKET_RANK_TOP_BOUNDARY: i32 = 50;
 
 impl ScannerService {
     pub fn new(anomaly_repo: Arc<dyn MarketAnomalyRepository>) -> Result<Self> {
@@ -116,6 +121,7 @@ impl ScannerService {
                 self.rank_history.push_back(RankSnapshot {
                     timestamp: last_update,
                     ranks,
+                    prices: HashMap::new(),
                 });
                 info!(
                     "Restored {} active records from database",
@@ -141,11 +147,15 @@ impl ScannerService {
         });
 
         let mut current_ranks: HashMap<String, i32> = HashMap::new();
+        let mut current_prices: HashMap<String, Decimal> = HashMap::new();
+        let mut current_volumes_24h: HashMap<String, Decimal> = HashMap::new();
         let mut current_top_150: HashSet<String> = HashSet::new();
 
         for (i, snapshot) in current_snapshots.iter().enumerate() {
             let rank = (i + 1) as i32;
             current_ranks.insert(snapshot.symbol.clone(), rank);
+            current_prices.insert(snapshot.symbol.clone(), snapshot.price);
+            current_volumes_24h.insert(snapshot.symbol.clone(), snapshot.volume_24h_quote);
             if rank <= 150 {
                 current_top_150.insert(snapshot.symbol.clone());
             }
@@ -161,6 +171,7 @@ impl ScannerService {
             self.rank_history.push_back(RankSnapshot {
                 timestamp: now,
                 ranks: current_ranks,
+                prices: current_prices,
             });
             info!(
                 "Initialized scanner with {} tickers",
@@ -168,6 +179,8 @@ impl ScannerService {
             );
             return Ok(vec![]);
         }
+
+        let previous_rank_snapshot = self.rank_history.back().cloned();
 
         // 2. 维护历史 (保留 25 小时)
         while let Some(front) = self.rank_history.front() {
@@ -180,12 +193,22 @@ impl ScannerService {
         self.rank_history.push_back(RankSnapshot {
             timestamp: now,
             ranks: current_ranks.clone(),
+            prices: current_prices.clone(),
         });
 
         // 3. 获取历史排名
-        let rank_15m = self.get_historical_rank(Duration::minutes(15));
-        let rank_4h = self.get_historical_rank(Duration::hours(4));
-        let rank_24h = self.get_historical_rank(Duration::hours(24));
+        let snapshot_15m = self.get_historical_snapshot(Duration::minutes(15));
+        let snapshot_4h = self.get_historical_snapshot(Duration::hours(4));
+        let snapshot_24h = self.get_historical_snapshot(Duration::hours(24));
+
+        self.persist_top50_boundary_events(
+            &current_ranks,
+            &current_prices,
+            &current_volumes_24h,
+            previous_rank_snapshot.as_ref(),
+            now,
+        )
+        .await;
 
         // 4. 处理 Top 150 Entry/Exit (首次扫描时跳过通知，避免刷屏)
         for symbol in &current_top_150 {
@@ -218,19 +241,65 @@ impl ScannerService {
                 continue;
             }
 
-            let r15m = rank_15m
+            let r15m = snapshot_15m
                 .as_ref()
-                .and_then(|m| m.get(&snapshot.symbol).cloned());
-            let r4h = rank_4h
+                .and_then(|item| item.ranks.get(&snapshot.symbol).cloned());
+            let r4h = snapshot_4h
                 .as_ref()
-                .and_then(|m| m.get(&snapshot.symbol).cloned());
-            let r24h = rank_24h
+                .and_then(|item| item.ranks.get(&snapshot.symbol).cloned());
+            let r24h = snapshot_24h
                 .as_ref()
-                .and_then(|m| m.get(&snapshot.symbol).cloned());
+                .and_then(|item| item.ranks.get(&snapshot.symbol).cloned());
+            let p15m = snapshot_15m
+                .as_ref()
+                .and_then(|item| item.prices.get(&snapshot.symbol).cloned());
+            let p4h = snapshot_4h
+                .as_ref()
+                .and_then(|item| item.prices.get(&snapshot.symbol).cloned());
+            let p24h = snapshot_24h
+                .as_ref()
+                .and_then(|item| item.prices.get(&snapshot.symbol).cloned());
 
             let d15m = r15m.map(|r| r - rank);
             let d4h = r4h.map(|r| r - rank);
             let d24h = r24h.map(|r| r - rank);
+
+            self.persist_rank_velocity_event(
+                &snapshot.symbol,
+                "15分钟",
+                r15m,
+                rank,
+                d15m,
+                Some(snapshot.volume_24h_quote),
+                Some(snapshot.price),
+                p15m,
+                now,
+            )
+            .await;
+            self.persist_rank_velocity_event(
+                &snapshot.symbol,
+                "4小时",
+                r4h,
+                rank,
+                d4h,
+                Some(snapshot.volume_24h_quote),
+                Some(snapshot.price),
+                p4h,
+                now,
+            )
+            .await;
+            self.persist_rank_velocity_event(
+                &snapshot.symbol,
+                "24小时",
+                r24h,
+                rank,
+                d24h,
+                Some(snapshot.volume_24h_quote),
+                Some(snapshot.price),
+                p24h,
+                now,
+            )
+            .await;
 
             // 排名剧变通知 (任一周期上升 >= 3) - 带冷却期
             self.check_and_notify_rank_change(
@@ -374,8 +443,105 @@ impl ScannerService {
         }
     }
 
+    async fn persist_rank_velocity_event(
+        &self,
+        symbol: &str,
+        timeframe: &str,
+        old_rank: Option<i32>,
+        new_rank: i32,
+        delta: Option<i32>,
+        volume_24h_quote: Option<Decimal>,
+        current_price: Option<Decimal>,
+        previous_price: Option<Decimal>,
+        detected_at: DateTime<Utc>,
+    ) {
+        if !matches!(delta, Some(d) if d >= RANK_CHANGE_THRESHOLD) {
+            return;
+        }
+
+        let event = build_rank_velocity_event(
+            symbol,
+            timeframe,
+            old_rank,
+            new_rank,
+            delta,
+            volume_24h_quote,
+            current_price,
+            previous_price,
+            detected_at,
+        );
+        if let Err(e) = self.anomaly_repo.save_rank_event(&event).await {
+            error!("Failed to save rank velocity event for {}: {:?}", symbol, e);
+        }
+    }
+
+    async fn persist_top_list_event(
+        &self,
+        symbol: &str,
+        is_entry: bool,
+        old_rank: Option<i32>,
+        new_rank: Option<i32>,
+        volume_24h_quote: Option<Decimal>,
+        current_price: Option<Decimal>,
+        previous_price: Option<Decimal>,
+        detected_at: DateTime<Utc>,
+    ) {
+        let event = build_top_list_event(
+            symbol,
+            is_entry,
+            old_rank,
+            new_rank,
+            volume_24h_quote,
+            current_price,
+            previous_price,
+            detected_at,
+        );
+        if let Err(e) = self.anomaly_repo.save_rank_event(&event).await {
+            error!("Failed to save top list event for {}: {:?}", symbol, e);
+        }
+    }
+
+    async fn persist_top50_boundary_events(
+        &self,
+        current_ranks: &HashMap<String, i32>,
+        current_prices: &HashMap<String, Decimal>,
+        current_volumes_24h: &HashMap<String, Decimal>,
+        previous_snapshot: Option<&RankSnapshot>,
+        detected_at: DateTime<Utc>,
+    ) {
+        let Some(previous_snapshot) = previous_snapshot else {
+            return;
+        };
+
+        let mut symbols: HashSet<String> = previous_snapshot.ranks.keys().cloned().collect();
+        symbols.extend(current_ranks.keys().cloned());
+
+        for symbol in symbols {
+            let old_rank = previous_snapshot.ranks.get(&symbol).copied();
+            let new_rank = current_ranks.get(&symbol).copied();
+            let was_top50 = is_top50_rank(old_rank);
+            let is_top50 = is_top50_rank(new_rank);
+
+            if was_top50 == is_top50 {
+                continue;
+            }
+
+            self.persist_top_list_event(
+                &symbol,
+                is_top50,
+                old_rank,
+                new_rank,
+                current_volumes_24h.get(&symbol).cloned(),
+                current_prices.get(&symbol).cloned(),
+                previous_snapshot.prices.get(&symbol).cloned(),
+                detected_at,
+            )
+            .await;
+        }
+    }
+
     /// 获取指定时间前的排名快照
-    fn get_historical_rank(&self, duration: Duration) -> Option<HashMap<String, i32>> {
+    fn get_historical_snapshot(&self, duration: Duration) -> Option<RankSnapshot> {
         let now = Utc::now();
         let target = now - duration;
 
@@ -383,6 +549,182 @@ impl ScannerService {
             .iter()
             .rev()
             .find(|snap| snap.timestamp <= target)
-            .map(|snap| snap.ranks.clone())
+            .cloned()
+    }
+}
+
+fn compute_event_price_change_pct(
+    current_price: Option<Decimal>,
+    previous_price: Option<Decimal>,
+) -> Option<Decimal> {
+    let current_price = current_price?;
+    let previous_price = previous_price?;
+    if previous_price <= Decimal::ZERO {
+        return None;
+    }
+    Some((current_price - previous_price) / previous_price * Decimal::new(100, 0))
+}
+
+fn price_direction(price_change_pct: Option<Decimal>) -> String {
+    match price_change_pct {
+        Some(value) if value > Decimal::ZERO => "up".to_string(),
+        Some(value) if value < Decimal::ZERO => "down".to_string(),
+        Some(_) => "flat".to_string(),
+        None => "unknown".to_string(),
+    }
+}
+
+fn is_top50_rank(rank: Option<i32>) -> bool {
+    rank.is_some_and(|value| value > 0 && value <= MARKET_RANK_TOP_BOUNDARY)
+}
+
+fn compute_rank_delta(old_rank: Option<i32>, new_rank: Option<i32>) -> Option<i32> {
+    Some(old_rank? - new_rank?)
+}
+
+fn build_rank_velocity_event(
+    symbol: &str,
+    timeframe: &str,
+    old_rank: Option<i32>,
+    new_rank: i32,
+    delta: Option<i32>,
+    volume_24h_quote: Option<Decimal>,
+    current_price: Option<Decimal>,
+    previous_price: Option<Decimal>,
+    detected_at: DateTime<Utc>,
+) -> MarketRankEvent {
+    let price_change_pct = compute_event_price_change_pct(current_price, previous_price);
+    MarketRankEvent {
+        id: None,
+        exchange: "okx".to_string(),
+        symbol: symbol.to_string(),
+        event_type: MarketRankEventType::RankVelocity,
+        timeframe: Some(timeframe.to_string()),
+        old_rank,
+        new_rank: Some(new_rank),
+        delta_rank: delta,
+        volume_24h_quote,
+        current_price,
+        previous_price,
+        price_change_pct,
+        price_direction: price_direction(price_change_pct),
+        detected_at,
+        source: "scanner_service".to_string(),
+        notification_state: "pending".to_string(),
+    }
+}
+
+fn build_top_list_event(
+    symbol: &str,
+    is_entry: bool,
+    old_rank: Option<i32>,
+    new_rank: Option<i32>,
+    volume_24h_quote: Option<Decimal>,
+    current_price: Option<Decimal>,
+    previous_price: Option<Decimal>,
+    detected_at: DateTime<Utc>,
+) -> MarketRankEvent {
+    let price_change_pct = compute_event_price_change_pct(current_price, previous_price);
+    MarketRankEvent {
+        id: None,
+        exchange: "okx".to_string(),
+        symbol: symbol.to_string(),
+        event_type: if is_entry {
+            MarketRankEventType::TopEntry
+        } else {
+            MarketRankEventType::TopExit
+        },
+        timeframe: None,
+        old_rank,
+        new_rank,
+        delta_rank: compute_rank_delta(old_rank, new_rank),
+        volume_24h_quote,
+        current_price,
+        previous_price,
+        price_change_pct,
+        price_direction: price_direction(price_change_pct),
+        detected_at,
+        source: "scanner_service".to_string(),
+        notification_state: "pending".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_quant_domain::entities::MarketRankEventType;
+
+    #[test]
+    fn build_rank_velocity_event_uses_scanner_product_contract() {
+        let detected_at = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
+
+        let event = build_rank_velocity_event(
+            "ETH-USDT-SWAP",
+            "15分钟",
+            Some(42),
+            18,
+            Some(24),
+            None,
+            Some(Decimal::new(2200, 0)),
+            Some(Decimal::new(2000, 0)),
+            detected_at,
+        );
+
+        assert_eq!(event.exchange, "okx");
+        assert_eq!(event.symbol, "ETH-USDT-SWAP");
+        assert_eq!(event.event_type, MarketRankEventType::RankVelocity);
+        assert_eq!(event.timeframe.as_deref(), Some("15分钟"));
+        assert_eq!(event.old_rank, Some(42));
+        assert_eq!(event.new_rank, Some(18));
+        assert_eq!(event.delta_rank, Some(24));
+        assert_eq!(event.current_price, Some(Decimal::new(2200, 0)));
+        assert_eq!(event.previous_price, Some(Decimal::new(2000, 0)));
+        assert_eq!(event.price_change_pct, Some(Decimal::new(100, 1)));
+        assert_eq!(event.price_direction, "up");
+        assert_eq!(event.source, "scanner_service");
+        assert_eq!(event.notification_state, "pending");
+    }
+
+    #[test]
+    fn build_top_list_event_uses_entry_and_exit_contract() {
+        let detected_at = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
+
+        let entry = build_top_list_event(
+            "SOL-USDT-SWAP",
+            true,
+            Some(55),
+            Some(40),
+            None,
+            Some(Decimal::new(180, 1)),
+            None,
+            detected_at,
+        );
+        assert_eq!(entry.exchange, "okx");
+        assert_eq!(entry.event_type, MarketRankEventType::TopEntry);
+        assert_eq!(entry.old_rank, Some(55));
+        assert_eq!(entry.new_rank, Some(40));
+        assert_eq!(entry.delta_rank, Some(15));
+        assert_eq!(entry.current_price, Some(Decimal::new(180, 1)));
+        assert_eq!(entry.price_direction, "unknown");
+        assert_eq!(entry.source, "scanner_service");
+
+        let exit = build_top_list_event(
+            "DOGE-USDT-SWAP",
+            false,
+            Some(45),
+            Some(62),
+            None,
+            Some(Decimal::new(12, 2)),
+            Some(Decimal::new(15, 2)),
+            detected_at,
+        );
+        assert_eq!(exit.event_type, MarketRankEventType::TopExit);
+        assert_eq!(exit.symbol, "DOGE-USDT-SWAP");
+        assert_eq!(exit.old_rank, Some(45));
+        assert_eq!(exit.new_rank, Some(62));
+        assert_eq!(exit.delta_rank, Some(-17));
+        assert_eq!(exit.price_change_pct, Some(Decimal::new(-200, 1)));
+        assert_eq!(exit.price_direction, "down");
+        assert_eq!(exit.notification_state, "pending");
     }
 }

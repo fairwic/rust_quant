@@ -111,3 +111,44 @@ fn postgres_quant_core_ddl_contains_live_strategy_order_contract() {
         );
     }
 }
+
+#[test]
+fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("CREATE TABLE IF NOT EXISTS market_rank_events"),
+        "postgres quant_core DDL must create market_rank_events"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("COMMENT ON TABLE market_rank_events"),
+        "postgres quant_core DDL must comment market_rank_events"
+    );
+
+    for column in [
+        "market_rank_events.id",
+        "market_rank_events.exchange",
+        "market_rank_events.symbol",
+        "market_rank_events.event_type",
+        "market_rank_events.timeframe",
+        "market_rank_events.old_rank",
+        "market_rank_events.new_rank",
+        "market_rank_events.delta_rank",
+        "market_rank_events.volume_24h_quote",
+        "market_rank_events.current_price",
+        "market_rank_events.previous_price",
+        "market_rank_events.price_change_pct",
+        "market_rank_events.price_direction",
+        "market_rank_events.detected_at",
+        "market_rank_events.source",
+        "market_rank_events.notification_state",
+        "market_rank_events.created_at",
+    ] {
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(&format!("COMMENT ON COLUMN {column}")),
+            "postgres quant_core DDL must comment column {column}"
+        );
+    }
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("chk_market_rank_events_price_direction"),
+        "postgres quant_core DDL must constrain market rank event price direction"
+    );
+}

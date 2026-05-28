@@ -1,4 +1,4 @@
-use crate::entities::{FundFlowAlert, MarketAnomaly};
+use crate::entities::{FundFlowAlert, MarketAnomaly, MarketRankEvent};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -20,6 +20,8 @@ pub trait MarketAnomalyRepository: Send + Sync {
         clear_4h: bool,
         clear_24h: bool,
     ) -> Result<()>;
+    /// 追加市场排名事件流水
+    async fn save_rank_event(&self, event: &MarketRankEvent) -> Result<i64>;
 }
 
 #[async_trait]

@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// 市场快照 (用于扫描器)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +44,65 @@ pub struct MarketAnomaly {
     pub volume_24h: Option<Decimal>,
     pub updated_at: DateTime<Utc>,
     pub status: String, // ACTIVE, EXITED
+}
+
+/// 市场排名事件类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketRankEventType {
+    RankVelocity,
+    TopEntry,
+    TopExit,
+}
+
+impl MarketRankEventType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RankVelocity => "rank_velocity",
+            Self::TopEntry => "top_entry",
+            Self::TopExit => "top_exit",
+        }
+    }
+}
+
+impl TryFrom<&str> for MarketRankEventType {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "rank_velocity" => Ok(Self::RankVelocity),
+            "top_entry" => Ok(Self::TopEntry),
+            "top_exit" => Ok(Self::TopExit),
+            other => Err(anyhow::anyhow!("unknown market rank event type: {}", other)),
+        }
+    }
+}
+
+impl fmt::Display for MarketRankEventType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// 市场排名事件流水，用于产品时间线、通知和 Admin 诊断
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketRankEvent {
+    pub id: Option<i64>,
+    pub exchange: String,
+    pub symbol: String,
+    pub event_type: MarketRankEventType,
+    pub timeframe: Option<String>,
+    pub old_rank: Option<i32>,
+    pub new_rank: Option<i32>,
+    pub delta_rank: Option<i32>,
+    pub volume_24h_quote: Option<Decimal>,
+    pub current_price: Option<Decimal>,
+    pub previous_price: Option<Decimal>,
+    pub price_change_pct: Option<Decimal>,
+    pub price_direction: String,
+    pub detected_at: DateTime<Utc>,
+    pub source: String,
+    pub notification_state: String,
 }
 
 /// 资金流向报警

@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use rust_quant_domain::entities::{FundFlowAlert, FundFlowSide, MarketAnomaly};
+use rust_quant_domain::entities::{FundFlowAlert, FundFlowSide, MarketAnomaly, MarketRankEvent};
 use rust_quant_domain::traits::fund_monitoring_repository::{
     FundFlowAlertRepository, MarketAnomalyRepository,
 };
@@ -148,6 +148,38 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         );
         sqlx::query(&sql).execute(&self.pool).await?;
         Ok(())
+    }
+
+    async fn save_rank_event(&self, event: &MarketRankEvent) -> Result<i64> {
+        let inserted_id = sqlx::query_scalar::<_, i64>(
+            r#"
+            INSERT INTO market_rank_events
+                (exchange, symbol, event_type, timeframe, old_rank, new_rank, delta_rank,
+                 volume_24h_quote, current_price, previous_price, price_change_pct,
+                 price_direction, detected_at, source, notification_state)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            RETURNING id
+            "#,
+        )
+        .bind(&event.exchange)
+        .bind(&event.symbol)
+        .bind(event.event_type.as_str())
+        .bind(&event.timeframe)
+        .bind(event.old_rank)
+        .bind(event.new_rank)
+        .bind(event.delta_rank)
+        .bind(event.volume_24h_quote)
+        .bind(event.current_price)
+        .bind(event.previous_price)
+        .bind(event.price_change_pct)
+        .bind(&event.price_direction)
+        .bind(event.detected_at)
+        .bind(&event.source)
+        .bind(&event.notification_state)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(inserted_id)
     }
 }
 

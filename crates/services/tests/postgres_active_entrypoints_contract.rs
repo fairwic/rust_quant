@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 const ACTIVE_ENTRYPOINTS: &[&str] = &[
+    "crates/rust-quant-cli/src/app/bootstrap.rs",
     "crates/services/src/market/binance_websocket.rs",
     "scripts/optimize_vegas_batch.py",
     "scripts/visualize_backtest_detail.py",
