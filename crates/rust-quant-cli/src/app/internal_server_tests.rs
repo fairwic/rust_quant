@@ -36,6 +36,19 @@ fn rank_event_row(
         price_change_pct: Some(10.0),
         price_direction: "up".to_string(),
         price_change_24h_pct: None,
+        technical_timeframe: None,
+        technical_period: None,
+        technical_close_price: None,
+        technical_ma_value: None,
+        technical_ema_value: None,
+        technical_ma_distance_pct: None,
+        technical_ema_distance_pct: None,
+        technical_ma_state: None,
+        technical_ema_state: None,
+        technical_candle_count: None,
+        technical_snapshot_at: None,
+        technical_snapshot_status: None,
+        technical_context: None,
         detected_at: Utc
             .with_ymd_and_hms(2026, 5, 27, 10, 0, detected_second)
             .unwrap(),
@@ -84,6 +97,17 @@ fn market_rank_events_query_defaults_exchange_and_caps_limit() {
     assert_eq!(query.timeframe, None);
     assert_eq!(query.sort.as_deref(), Some("volume_15m"));
     assert_eq!(query.limit, 200);
+    assert_eq!(query.lookback_minutes, 120);
+}
+
+#[test]
+fn market_rank_events_query_caps_recent_lookback_window() {
+    let query = market_rank_events_query_from_path(
+        "/internal/market-rank-events?lookbackMinutes=99999&limit=20",
+    )
+    .expect("market rank event query should parse");
+
+    assert_eq!(query.lookback_minutes, 1440);
 }
 
 #[test]
@@ -124,6 +148,9 @@ fn market_rank_recent_query_is_used_for_sorts_that_do_not_need_volume_context() 
 #[test]
 fn market_rank_recent_query_filters_top50_before_symbol_dedup() {
     let sql = recent_market_rank_events_sql(Some("delta_rank"));
+    let recency_filter = sql
+        .find("detected_at >= NOW() - ($5::INTEGER * INTERVAL '1 minute')")
+        .expect("recent market rank SQL should keep only a fresh time window");
     let top50_filter = sql
         .find("AND (new_rank <= 50 OR old_rank <= 50)")
         .expect("recent market rank SQL should filter Top50 boundary rows");
@@ -132,6 +159,10 @@ fn market_rank_recent_query_filters_top50_before_symbol_dedup() {
         .expect("recent market rank SQL should dedupe by latest symbol rows");
 
     assert!(
+        recency_filter < symbol_dedup,
+        "freshness filter must run before DISTINCT ON symbol picks rows"
+    );
+    assert!(
         top50_filter < symbol_dedup,
         "Top50 filter must run before DISTINCT ON symbol picks the latest row"
     );
@@ -139,6 +170,31 @@ fn market_rank_recent_query_filters_top50_before_symbol_dedup() {
         !sql.contains("FROM latest\n        WHERE new_rank <= 50 OR old_rank <= 50"),
         "outer Top50 filter drops symbols whose latest non-Top50 event is newer"
     );
+}
+
+#[test]
+fn market_rank_recent_query_exposes_persisted_technical_snapshot_columns() {
+    let sql = recent_market_rank_events_sql(Some("delta_rank"));
+
+    for fragment in [
+        "technical_timeframe",
+        "technical_period",
+        "technical_close_price::FLOAT8 AS technical_close_price",
+        "technical_ma_value::FLOAT8 AS technical_ma_value",
+        "technical_ema_value::FLOAT8 AS technical_ema_value",
+        "technical_ma_distance_pct::FLOAT8 AS technical_ma_distance_pct",
+        "technical_ema_distance_pct::FLOAT8 AS technical_ema_distance_pct",
+        "technical_ma_state",
+        "technical_ema_state",
+        "technical_candle_count",
+        "technical_snapshot_at",
+        "technical_snapshot_status",
+    ] {
+        assert!(
+            sql.contains(fragment),
+            "recent market rank SQL should expose persisted technical snapshot fragment: {fragment}"
+        );
+    }
 }
 
 #[test]

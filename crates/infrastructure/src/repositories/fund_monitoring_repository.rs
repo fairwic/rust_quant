@@ -2,7 +2,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use rust_quant_domain::entities::{FundFlowAlert, FundFlowSide, MarketAnomaly, MarketRankEvent};
+use rust_quant_domain::entities::{
+    FundFlowAlert, FundFlowSide, MarketAnomaly, MarketRankEvent, MarketRankSnapshot,
+};
 use rust_quant_domain::traits::fund_monitoring_repository::{
     FundFlowAlertRepository, MarketAnomalyRepository,
 };
@@ -151,13 +153,20 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
     }
 
     async fn save_rank_event(&self, event: &MarketRankEvent) -> Result<i64> {
+        let technical_snapshot = event.technical_snapshot.as_ref();
         let inserted_id = sqlx::query_scalar::<_, i64>(
             r#"
             INSERT INTO market_rank_events
                 (exchange, symbol, event_type, timeframe, old_rank, new_rank, delta_rank,
                  volume_24h_quote, current_price, previous_price, price_change_pct,
-                 price_direction, detected_at, source, notification_state)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                 price_direction, technical_timeframe, technical_period, technical_close_price,
+                 technical_ma_value, technical_ema_value, technical_ma_distance_pct,
+                 technical_ema_distance_pct, technical_ma_state, technical_ema_state,
+                 technical_candle_count, technical_snapshot_at, technical_snapshot_status,
+                 detected_at, source, notification_state)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                    $21, $22, $23, $24, $25, $26, $27)
             RETURNING id
             "#,
         )
@@ -173,6 +182,18 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .bind(event.previous_price)
         .bind(event.price_change_pct)
         .bind(&event.price_direction)
+        .bind(technical_snapshot.map(|snapshot| snapshot.timeframe.as_str()))
+        .bind(technical_snapshot.map(|snapshot| snapshot.period))
+        .bind(technical_snapshot.map(|snapshot| snapshot.close_price))
+        .bind(technical_snapshot.map(|snapshot| snapshot.ma_value))
+        .bind(technical_snapshot.map(|snapshot| snapshot.ema_value))
+        .bind(technical_snapshot.map(|snapshot| snapshot.ma_distance_pct))
+        .bind(technical_snapshot.map(|snapshot| snapshot.ema_distance_pct))
+        .bind(technical_snapshot.map(|snapshot| snapshot.ma_state.as_str()))
+        .bind(technical_snapshot.map(|snapshot| snapshot.ema_state.as_str()))
+        .bind(technical_snapshot.map(|snapshot| snapshot.candle_count))
+        .bind(technical_snapshot.map(|snapshot| snapshot.snapshot_at))
+        .bind(&event.technical_snapshot_status)
         .bind(event.detected_at)
         .bind(&event.source)
         .bind(&event.notification_state)
@@ -180,6 +201,85 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .await?;
 
         Ok(inserted_id)
+    }
+
+    async fn save_rank_snapshots(&self, snapshots: &[MarketRankSnapshot]) -> Result<()> {
+        if snapshots.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self.pool.begin().await?;
+        for snapshot in snapshots {
+            sqlx::query(
+                r#"
+                INSERT INTO market_rank_snapshots
+                    (exchange, symbol, rank, price, volume_24h_quote, captured_at)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (exchange, symbol, captured_at) DO UPDATE SET
+                    rank = EXCLUDED.rank,
+                    price = EXCLUDED.price,
+                    volume_24h_quote = EXCLUDED.volume_24h_quote
+                "#,
+            )
+            .bind(&snapshot.exchange)
+            .bind(&snapshot.symbol)
+            .bind(snapshot.rank)
+            .bind(snapshot.price)
+            .bind(snapshot.volume_24h_quote)
+            .bind(snapshot.captured_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn load_recent_rank_snapshots(
+        &self,
+        exchange: &str,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<MarketRankSnapshot>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, exchange, symbol, rank, price, volume_24h_quote, captured_at, created_at
+            FROM market_rank_snapshots
+            WHERE LOWER(exchange) = LOWER($1)
+              AND captured_at >= $2
+            ORDER BY captured_at ASC, rank ASC, symbol ASC
+            "#,
+        )
+        .bind(exchange)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut snapshots = Vec::with_capacity(rows.len());
+        for row in rows {
+            snapshots.push(MarketRankSnapshot {
+                id: row.try_get("id").ok(),
+                exchange: row.try_get("exchange")?,
+                symbol: row.try_get("symbol")?,
+                rank: row.try_get("rank")?,
+                price: row.try_get("price")?,
+                volume_24h_quote: row.try_get("volume_24h_quote")?,
+                captured_at: row.try_get("captured_at")?,
+                created_at: row.try_get("created_at")?,
+            });
+        }
+        Ok(snapshots)
+    }
+
+    async fn delete_rank_snapshots_before(&self, before: DateTime<Utc>) -> Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM market_rank_snapshots
+            WHERE captured_at < $1
+            "#,
+        )
+        .bind(before)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 

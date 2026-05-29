@@ -137,6 +137,18 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
         "market_rank_events.previous_price",
         "market_rank_events.price_change_pct",
         "market_rank_events.price_direction",
+        "market_rank_events.technical_timeframe",
+        "market_rank_events.technical_period",
+        "market_rank_events.technical_close_price",
+        "market_rank_events.technical_ma_value",
+        "market_rank_events.technical_ema_value",
+        "market_rank_events.technical_ma_distance_pct",
+        "market_rank_events.technical_ema_distance_pct",
+        "market_rank_events.technical_ma_state",
+        "market_rank_events.technical_ema_state",
+        "market_rank_events.technical_candle_count",
+        "market_rank_events.technical_snapshot_at",
+        "market_rank_events.technical_snapshot_status",
         "market_rank_events.detected_at",
         "market_rank_events.source",
         "market_rank_events.notification_state",
@@ -151,4 +163,28 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
         POSTGRES_QUANT_CORE_DDL.contains("chk_market_rank_events_price_direction"),
         "postgres quant_core DDL must constrain market rank event price direction"
     );
+
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("CREATE TABLE IF NOT EXISTS market_rank_snapshots"),
+        "postgres quant_core DDL must create market_rank_snapshots"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("COMMENT ON TABLE market_rank_snapshots"),
+        "postgres quant_core DDL must comment market_rank_snapshots"
+    );
+    for column in [
+        "market_rank_snapshots.id",
+        "market_rank_snapshots.exchange",
+        "market_rank_snapshots.symbol",
+        "market_rank_snapshots.rank",
+        "market_rank_snapshots.price",
+        "market_rank_snapshots.volume_24h_quote",
+        "market_rank_snapshots.captured_at",
+        "market_rank_snapshots.created_at",
+    ] {
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(&format!("COMMENT ON COLUMN {column}")),
+            "postgres quant_core DDL must comment column {column}"
+        );
+    }
 }

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use rust_quant_market::streams::deep_stream_manager::DeepStreamManager;
-use rust_quant_services::market::{FlowAnalyzer, ScannerService};
+use rust_quant_services::market::{CandleService, FlowAnalyzer, ScannerService};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
@@ -30,11 +30,23 @@ impl FundMonitorJob {
         anomaly_repo: Arc<dyn MarketAnomalyRepository>,
         alert_repo: Arc<dyn FundFlowAlertRepository>,
     ) -> Result<(Self, FlowAnalyzer)> {
+        Self::new_with_candle_service(interval_secs, anomaly_repo, alert_repo, None)
+    }
+
+    pub fn new_with_candle_service(
+        interval_secs: u64,
+        anomaly_repo: Arc<dyn MarketAnomalyRepository>,
+        alert_repo: Arc<dyn FundFlowAlertRepository>,
+        candle_service: Option<Arc<CandleService>>,
+    ) -> Result<(Self, FlowAnalyzer)> {
         // 创建 FlowAnalyzer 同时获取 manager 句柄
         let (analyzer, manager) = FlowAnalyzer::new(alert_repo);
 
         let job = Self {
-            scanner_service: ScannerService::new(anomaly_repo)?,
+            scanner_service: ScannerService::new_with_technical_candle_service(
+                anomaly_repo,
+                candle_service,
+            )?,
             stream_manager: manager,
             active_promotions: HashMap::new(),
             interval_secs,

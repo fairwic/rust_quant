@@ -1,5 +1,7 @@
 use rust_decimal::Decimal;
-use rust_quant_domain::entities::{MarketRankEvent, MarketRankEventType};
+use rust_quant_domain::entities::{
+    MarketRankEvent, MarketRankEventType, MarketRankTechnicalSnapshot,
+};
 
 #[test]
 fn market_rank_event_type_uses_product_event_codes() {
@@ -38,6 +40,21 @@ fn market_rank_event_serializes_product_payload_fields() {
             .expect("valid test timestamp"),
         source: "scanner_service".to_string(),
         notification_state: "pending".to_string(),
+        technical_snapshot_status: "captured".to_string(),
+        technical_snapshot: Some(MarketRankTechnicalSnapshot {
+            timeframe: "4h".to_string(),
+            period: 20,
+            close_price: Decimal::new(2210, 0),
+            ma_value: Decimal::new(2100, 0),
+            ema_value: Decimal::new(2120, 0),
+            ma_distance_pct: Decimal::new(5238, 3),
+            ema_distance_pct: Decimal::new(4245, 3),
+            ma_state: "breakout_up".to_string(),
+            ema_state: "above".to_string(),
+            candle_count: 80,
+            snapshot_at: chrono::DateTime::from_timestamp(1_774_814_400, 0)
+                .expect("valid test timestamp"),
+        }),
     };
 
     let value = serde_json::to_value(&event).expect("event should serialize");
@@ -52,6 +69,14 @@ fn market_rank_event_serializes_product_payload_fields() {
     assert_eq!(value["previous_price"], "2000");
     assert_eq!(value["price_change_pct"], "10.0");
     assert_eq!(value["price_direction"], "up");
+    assert_eq!(value["technical_snapshot_status"], "captured");
+    assert_eq!(value["technical_snapshot"]["timeframe"], "4h");
+    assert_eq!(value["technical_snapshot"]["period"], 20);
+    assert_eq!(value["technical_snapshot"]["close_price"], "2210");
+    assert_eq!(value["technical_snapshot"]["ma_value"], "2100");
+    assert_eq!(value["technical_snapshot"]["ema_value"], "2120");
+    assert_eq!(value["technical_snapshot"]["ma_state"], "breakout_up");
+    assert_eq!(value["technical_snapshot"]["ema_state"], "above");
     assert_eq!(value["source"], "scanner_service");
     assert_eq!(value["notification_state"], "pending");
 }

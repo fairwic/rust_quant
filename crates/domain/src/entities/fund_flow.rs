@@ -46,6 +46,35 @@ pub struct MarketAnomaly {
     pub status: String, // ACTIVE, EXITED
 }
 
+/// 市场排名价格快照，用于重启后恢复排名历史和价格对比证据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketRankSnapshot {
+    pub id: Option<i64>,
+    pub exchange: String,
+    pub symbol: String,
+    pub rank: i32,
+    pub price: Decimal,
+    pub volume_24h_quote: Decimal,
+    pub captured_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 市场排名事件的技术指标快照，用于前端快速展示排名事件发生时的均线证据
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MarketRankTechnicalSnapshot {
+    pub timeframe: String,
+    pub period: i32,
+    pub close_price: Decimal,
+    pub ma_value: Decimal,
+    pub ema_value: Decimal,
+    pub ma_distance_pct: Decimal,
+    pub ema_distance_pct: Decimal,
+    pub ma_state: String,
+    pub ema_state: String,
+    pub candle_count: i32,
+    pub snapshot_at: DateTime<Utc>,
+}
+
 /// 市场排名事件类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -100,6 +129,8 @@ pub struct MarketRankEvent {
     pub previous_price: Option<Decimal>,
     pub price_change_pct: Option<Decimal>,
     pub price_direction: String,
+    pub technical_snapshot_status: String,
+    pub technical_snapshot: Option<MarketRankTechnicalSnapshot>,
     pub detected_at: DateTime<Utc>,
     pub source: String,
     pub notification_state: String,

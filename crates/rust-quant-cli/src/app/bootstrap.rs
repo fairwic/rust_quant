@@ -11,7 +11,7 @@ use rust_quant_infrastructure::repositories::fund_monitoring_repository::{
     SqlxFundFlowAlertRepository, SqlxMarketAnomalyRepository,
 };
 use rust_quant_infrastructure::repositories::{
-    PostgresStrategyConfigRepository, SqlxSwapOrderRepository,
+    PostgresCandleRepository, PostgresStrategyConfigRepository, SqlxSwapOrderRepository,
 };
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use rust_quant_orchestration::workflow::{
     backtest_runner, data_sync, external_market_sync_job::ExternalMarketSyncJob, funding_rate_job,
     tickets_job,
 };
-use rust_quant_services::market::get_confirmed_candles_for_backtest;
+use rust_quant_services::market::{get_confirmed_candles_for_backtest, CandleService};
 use rust_quant_services::rust_quan_web::ExecutionWorker;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use std::collections::{BTreeSet, HashMap};
@@ -412,8 +412,16 @@ async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
         .await
         .context("连接 quant_core 数据库失败，无法启动市场动能雷达")?;
     let anomaly_repo = Arc::new(SqlxMarketAnomalyRepository::new(pool.clone()));
+    let candle_service = Arc::new(CandleService::new(Box::new(PostgresCandleRepository::new(
+        pool.clone(),
+    ))));
     let alert_repo = Arc::new(SqlxFundFlowAlertRepository::new(pool));
-    let (mut job, analyzer) = FundMonitorJob::new(interval_secs, anomaly_repo, alert_repo)?;
+    let (mut job, analyzer) = FundMonitorJob::new_with_candle_service(
+        interval_secs,
+        anomaly_repo,
+        alert_repo,
+        Some(candle_service),
+    )?;
 
     tokio::spawn(async move {
         analyzer.run().await;

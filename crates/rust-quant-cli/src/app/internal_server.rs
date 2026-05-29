@@ -13,6 +13,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info};
 
+mod market_rank_technical_context;
+
+use market_rank_technical_context::{
+    build_market_rank_technical_context, MarketRankTechnicalContext, MarketRankTechnicalSource,
+};
+
 use crate::app::exchange_symbol_sync::{
     run_exchange_symbol_sync_from_env, ExchangeSymbolSyncRequest,
 };
@@ -30,6 +36,8 @@ const DEFAULT_KLINE_EXCHANGE: &str = "binance";
 const MAX_MARKET_RANK_EVENT_LIMIT: i64 = 200;
 const DEFAULT_MARKET_RANK_EVENT_LIMIT: i64 = 50;
 const DEFAULT_MARKET_RANK_EVENT_EXCHANGE: &str = "okx";
+const DEFAULT_MARKET_RANK_EVENT_LOOKBACK_MINUTES: i64 = 120;
+const MAX_MARKET_RANK_EVENT_LOOKBACK_MINUTES: i64 = 1_440;
 const MARKET_RANK_TOP_BOUNDARY: i32 = 50;
 
 #[derive(Debug, Clone)]
@@ -65,6 +73,7 @@ pub struct MarketRankEventsQuery {
     pub timeframe: Option<String>,
     pub sort: Option<String>,
     pub limit: i64,
+    pub lookback_minutes: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +162,33 @@ struct MarketRankEventItem {
     price_change_pct: Option<f64>,
     price_direction: String,
     price_change_24h_pct: Option<f64>,
+    #[serde(skip_serializing)]
+    technical_timeframe: Option<String>,
+    #[serde(skip_serializing)]
+    technical_period: Option<i32>,
+    #[serde(skip_serializing)]
+    technical_close_price: Option<f64>,
+    #[serde(skip_serializing)]
+    technical_ma_value: Option<f64>,
+    #[serde(skip_serializing)]
+    technical_ema_value: Option<f64>,
+    #[serde(skip_serializing)]
+    technical_ma_distance_pct: Option<f64>,
+    #[serde(skip_serializing)]
+    technical_ema_distance_pct: Option<f64>,
+    #[serde(skip_serializing)]
+    technical_ma_state: Option<String>,
+    #[serde(skip_serializing)]
+    technical_ema_state: Option<String>,
+    #[serde(skip_serializing)]
+    technical_candle_count: Option<i32>,
+    #[serde(skip_serializing)]
+    technical_snapshot_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing)]
+    technical_snapshot_status: Option<String>,
+    #[sqlx(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    technical_context: Option<MarketRankTechnicalContext>,
     detected_at: DateTime<Utc>,
     source: String,
     notification_state: String,
@@ -378,6 +414,18 @@ pub fn market_rank_events_query_from_path(path: &str) -> Result<MarketRankEvents
         .and_then(|value| value.parse::<i64>().ok())
         .unwrap_or(DEFAULT_MARKET_RANK_EVENT_LIMIT)
         .clamp(1, MAX_MARKET_RANK_EVENT_LIMIT);
+    let lookback_minutes = query_param(
+        query,
+        &[
+            "lookbackMinutes",
+            "lookback_minutes",
+            "recentMinutes",
+            "recent_minutes",
+        ],
+    )
+    .and_then(|value| value.parse::<i64>().ok())
+    .unwrap_or(DEFAULT_MARKET_RANK_EVENT_LOOKBACK_MINUTES)
+    .clamp(1, MAX_MARKET_RANK_EVENT_LOOKBACK_MINUTES);
 
     if exchange.is_empty() {
         return Err("exchange is required".to_string());
@@ -390,6 +438,7 @@ pub fn market_rank_events_query_from_path(path: &str) -> Result<MarketRankEvents
         timeframe,
         sort,
         limit,
+        lookback_minutes,
     })
 }
 
@@ -747,6 +796,18 @@ async fn fetch_market_rank_events_response(
             latest.price_change_pct::FLOAT8 AS price_change_pct,
             latest.price_direction,
             latest.price_change_pct::FLOAT8 AS price_change_24h_pct,
+            latest.technical_timeframe,
+            latest.technical_period,
+            latest.technical_close_price::FLOAT8 AS technical_close_price,
+            latest.technical_ma_value::FLOAT8 AS technical_ma_value,
+            latest.technical_ema_value::FLOAT8 AS technical_ema_value,
+            latest.technical_ma_distance_pct::FLOAT8 AS technical_ma_distance_pct,
+            latest.technical_ema_distance_pct::FLOAT8 AS technical_ema_distance_pct,
+            latest.technical_ma_state,
+            latest.technical_ema_state,
+            latest.technical_candle_count,
+            latest.technical_snapshot_at,
+            latest.technical_snapshot_status,
             latest.detected_at,
             latest.source,
             latest.notification_state
@@ -765,6 +826,18 @@ async fn fetch_market_rank_events_response(
                 previous_price,
                 price_change_pct,
                 price_direction,
+                technical_timeframe,
+                technical_period,
+                technical_close_price,
+                technical_ma_value,
+                technical_ema_value,
+                technical_ma_distance_pct,
+                technical_ema_distance_pct,
+                technical_ma_state,
+                technical_ema_state,
+                technical_candle_count,
+                technical_snapshot_at,
+                technical_snapshot_status,
                 detected_at,
                 source,
                 notification_state
@@ -773,6 +846,7 @@ async fn fetch_market_rank_events_response(
               AND ($2::TEXT IS NULL OR UPPER(symbol) = UPPER($2))
               AND ($3::TEXT IS NULL OR event_type = $3)
               AND ($4::TEXT IS NULL OR LOWER(COALESCE(timeframe, '')) = LOWER($4))
+              AND detected_at >= NOW() - ($5::INTEGER * INTERVAL '1 minute')
             ORDER BY UPPER(symbol), detected_at DESC, id DESC
         ) latest
         LEFT JOIN LATERAL (
@@ -793,6 +867,7 @@ async fn fetch_market_rank_events_response(
         .bind(query.symbol.as_deref())
         .bind(query.event_type.as_deref())
         .bind(query.timeframe.as_deref())
+        .bind(query.lookback_minutes as i32)
         .fetch_all(pool)
         .await;
 
@@ -844,6 +919,7 @@ async fn fetch_recent_market_rank_events_response(
         .bind(query.symbol.as_deref())
         .bind(query.event_type.as_deref())
         .bind(query.timeframe.as_deref())
+        .bind(query.lookback_minutes as i32)
         .bind(query.limit)
         .fetch_all(pool)
         .await;
@@ -877,6 +953,18 @@ fn recent_market_rank_events_sql(sort: Option<&str>) -> String {
                 previous_price,
                 price_change_pct,
                 price_direction,
+                technical_timeframe,
+                technical_period,
+                technical_close_price,
+                technical_ma_value,
+                technical_ema_value,
+                technical_ma_distance_pct,
+                technical_ema_distance_pct,
+                technical_ma_state,
+                technical_ema_state,
+                technical_candle_count,
+                technical_snapshot_at,
+                technical_snapshot_status,
                 detected_at,
                 source,
                 notification_state
@@ -885,6 +973,7 @@ fn recent_market_rank_events_sql(sort: Option<&str>) -> String {
               AND ($2::TEXT IS NULL OR UPPER(symbol) = UPPER($2))
               AND ($3::TEXT IS NULL OR event_type = $3)
               AND ($4::TEXT IS NULL OR LOWER(COALESCE(timeframe, '')) = LOWER($4))
+              AND detected_at >= NOW() - ($5::INTEGER * INTERVAL '1 minute')
               AND (new_rank <= 50 OR old_rank <= 50)
             ORDER BY UPPER(symbol), detected_at DESC, id DESC
         )
@@ -914,12 +1003,24 @@ fn recent_market_rank_events_sql(sort: Option<&str>) -> String {
             price_change_pct::FLOAT8 AS price_change_pct,
             price_direction,
             price_change_pct::FLOAT8 AS price_change_24h_pct,
+            technical_timeframe,
+            technical_period,
+            technical_close_price::FLOAT8 AS technical_close_price,
+            technical_ma_value::FLOAT8 AS technical_ma_value,
+            technical_ema_value::FLOAT8 AS technical_ema_value,
+            technical_ma_distance_pct::FLOAT8 AS technical_ma_distance_pct,
+            technical_ema_distance_pct::FLOAT8 AS technical_ema_distance_pct,
+            technical_ma_state,
+            technical_ema_state,
+            technical_candle_count,
+            technical_snapshot_at,
+            technical_snapshot_status,
             detected_at,
             source,
             notification_state
         FROM latest
         ORDER BY {}
-        LIMIT $5
+        LIMIT $6
         "#,
         market_rank_recent_order_clause(sort)
     )
@@ -1018,6 +1119,20 @@ fn finalize_market_rank_rows(
     limit: i64,
 ) -> Vec<MarketRankEventItem> {
     for row in &mut rows {
+        row.technical_context = build_market_rank_technical_context(MarketRankTechnicalSource {
+            timeframe: row.technical_timeframe.as_deref(),
+            period: row.technical_period,
+            close_price: row.technical_close_price,
+            ma_value: row.technical_ma_value,
+            ema_value: row.technical_ema_value,
+            ma_distance_pct: row.technical_ma_distance_pct,
+            ema_distance_pct: row.technical_ema_distance_pct,
+            ma_state: row.technical_ma_state.as_deref(),
+            ema_state: row.technical_ema_state.as_deref(),
+            candle_count: row.technical_candle_count,
+            snapshot_at: row.technical_snapshot_at,
+            snapshot_status: row.technical_snapshot_status.as_deref(),
+        });
         if row.rank_change_pct.is_none() {
             row.rank_change_pct = compute_rank_change_pct(row.old_rank, row.delta_rank);
         }
