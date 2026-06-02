@@ -22,6 +22,7 @@ pub struct OrderPlacementRequest {
     pub client_order_id: Option<String>,
     pub reduce_only: Option<bool>,
     pub time_in_force: Option<TimeInForce>,
+    pub attached_stop_loss_price: Option<String>,
 }
 
 impl OrderPlacementRequest {
@@ -39,6 +40,7 @@ impl OrderPlacementRequest {
             client_order_id: self.client_order_id,
             reduce_only: self.reduce_only,
             time_in_force: self.time_in_force,
+            attached_stop_loss_price: self.attached_stop_loss_price,
         }
     }
 }
@@ -105,20 +107,7 @@ impl CryptoExcAllGateway {
                     ws_stream_url: None,
                     api_timeout_ms: None,
                     recv_window_ms: None,
-                    proxy_url: std::env::var("BINANCE_PROXY_URL")
-                        .ok()
-                        .or_else(|| std::env::var("ALL_PROXY").ok())
-                        .or_else(|| std::env::var("HTTPS_PROXY").ok())
-                        .map(|url| {
-                            let trimmed = url.trim().to_string();
-                            // normalise socks5:// → socks5h:// so DNS resolves through the proxy
-                            if let Some(rest) = trimmed.strip_prefix("socks5://") {
-                                format!("socks5h://{rest}")
-                            } else {
-                                trimmed
-                            }
-                        })
-                        .filter(|url| !url.is_empty()),
+                    proxy_url: None,
                 }),
                 ..SdkConfig::default()
             },
@@ -207,6 +196,7 @@ impl CryptoExcAllGateway {
                     "order_type": request.order_type,
                     "size": request.size,
                     "price": request.price,
+                    "attached_stop_loss_price": request.attached_stop_loss_price,
                 }),
             }),
         }
@@ -332,6 +322,20 @@ impl CryptoExcAllGateway {
             }),
         }
     }
+
+    pub async fn cancel_protective_order(
+        &self,
+        exchange: ExchangeId,
+        request: CancelOrderRequest,
+    ) -> Result<OrderAck> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.trade(exchange)?.cancel_protective_order(request).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run protective order cancellation",
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -354,6 +358,7 @@ mod tests {
             client_order_id: Some("rq-1".to_string()),
             reduce_only: Some(false),
             time_in_force: Some(TimeInForce::Gtc),
+            attached_stop_loss_price: Some("2200.5".to_string()),
         };
 
         let mapped = request.clone().into_place_order_request();
@@ -369,6 +374,10 @@ mod tests {
         assert_eq!(mapped.client_order_id, request.client_order_id);
         assert_eq!(mapped.reduce_only, request.reduce_only);
         assert_eq!(mapped.time_in_force, request.time_in_force);
+        assert_eq!(
+            mapped.attached_stop_loss_price,
+            request.attached_stop_loss_price
+        );
     }
 
     #[tokio::test]
@@ -388,6 +397,7 @@ mod tests {
             client_order_id: Some("rq-dry-run".to_string()),
             reduce_only: Some(false),
             time_in_force: None,
+            attached_stop_loss_price: Some("2200.5".to_string()),
         };
 
         let ack = gateway.place_order(request).await.unwrap();
@@ -397,6 +407,7 @@ mod tests {
         assert_eq!(ack.client_order_id.as_deref(), Some("rq-dry-run"));
         assert_eq!(ack.status.as_deref(), Some("dry_run"));
         assert_eq!(ack.raw["dry_run"], true);
+        assert_eq!(ack.raw["attached_stop_loss_price"], "2200.5");
     }
 
     #[tokio::test]

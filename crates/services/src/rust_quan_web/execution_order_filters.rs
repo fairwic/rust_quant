@@ -1,0 +1,242 @@
+use anyhow::{anyhow, Result};
+use crypto_exc_all::ExchangeId;
+use rust_decimal::{Decimal, RoundingStrategy};
+
+use super::execution_protection::ProtectiveDirection;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct ExchangeOrderFilters {
+    pub(super) min_qty: Option<Decimal>,
+    pub(super) max_qty: Option<Decimal>,
+    pub(super) step_size: Option<Decimal>,
+    pub(super) min_notional: Option<Decimal>,
+    pub(super) quantity_precision: Option<u32>,
+    pub(super) tick_size: Option<Decimal>,
+    pub(super) price_precision: Option<u32>,
+}
+
+pub(super) async fn load_exchange_order_filters(
+    exchange: ExchangeId,
+    symbol: &str,
+) -> Result<Option<ExchangeOrderFilters>> {
+    let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .map_err(|_| anyhow!("QUANT_CORE_DATABASE_URL is required for live order filter checks"))?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await?;
+    let row = sqlx::query_as::<
+        _,
+        (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i32>,
+            Option<String>,
+            Option<i32>,
+        ),
+    >(
+        r#"
+        SELECT min_qty, max_qty, step_size, min_notional, quantity_precision, tick_size, price_precision
+        FROM exchange_symbols
+        WHERE exchange = $1
+          AND normalized_symbol = $2
+          AND lower(status) IN ('trading', 'live')
+        ORDER BY updated_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(exchange.as_str())
+    .bind(symbol)
+    .fetch_optional(&pool)
+    .await?;
+    pool.close().await;
+
+    row.map(
+        |(
+            min_qty,
+            max_qty,
+            step_size,
+            min_notional,
+            quantity_precision,
+            tick_size,
+            price_precision,
+        )| {
+            Ok(ExchangeOrderFilters {
+                min_qty: parse_optional_decimal(min_qty.as_deref(), "min_qty")?,
+                max_qty: parse_optional_decimal(max_qty.as_deref(), "max_qty")?,
+                step_size: parse_optional_decimal(step_size.as_deref(), "step_size")?,
+                min_notional: parse_optional_decimal(min_notional.as_deref(), "min_notional")?,
+                quantity_precision: quantity_precision.and_then(|value| u32::try_from(value).ok()),
+                tick_size: parse_optional_decimal(tick_size.as_deref(), "tick_size")?,
+                price_precision: price_precision.and_then(|value| u32::try_from(value).ok()),
+            })
+        },
+    )
+    .transpose()
+}
+
+fn parse_optional_decimal(raw: Option<&str>, label: &str) -> Result<Option<Decimal>> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .parse::<Decimal>()
+                .map_err(|error| anyhow!("invalid {label} exchange filter {value}: {error}"))
+        })
+        .transpose()
+}
+
+pub(super) fn parse_positive_decimal(raw: &str, label: &str) -> Result<Decimal> {
+    let value = raw
+        .trim()
+        .parse::<Decimal>()
+        .map_err(|error| anyhow!("invalid {label} {raw}: {error}"))?;
+    if value <= Decimal::ZERO {
+        return Err(anyhow!("{label} must be positive"));
+    }
+    Ok(value)
+}
+
+pub(super) fn decimal_from_f64(raw: f64) -> Result<Decimal> {
+    if !raw.is_finite() || raw <= 0.0 {
+        return Err(anyhow!("price must be a positive finite number"));
+    }
+    format!("{raw:.12}")
+        .parse::<Decimal>()
+        .map_err(|error| anyhow!("invalid decimal price {raw}: {error}"))
+}
+
+fn floor_to_step(value: Decimal, step: Decimal) -> Decimal {
+    if step <= Decimal::ZERO {
+        return value;
+    }
+    (value / step).floor() * step
+}
+
+fn ceil_to_step(value: Decimal, step: Decimal) -> Decimal {
+    if step <= Decimal::ZERO {
+        return value;
+    }
+    let floored = floor_to_step(value, step);
+    if floored == value {
+        floored
+    } else {
+        floored + step
+    }
+}
+
+pub(super) fn quantize_order_size(
+    requested_size: Decimal,
+    last_price: Decimal,
+    filters: &ExchangeOrderFilters,
+    enforce_min_notional: bool,
+) -> Result<Decimal> {
+    if requested_size <= Decimal::ZERO {
+        return Err(anyhow!("order size must be positive"));
+    }
+
+    let mut size = requested_size;
+    if let Some(step) = filters.step_size.filter(|value| *value > Decimal::ZERO) {
+        size = floor_to_step(size, step);
+    } else if let Some(precision) = filters.quantity_precision {
+        size = size.round_dp_with_strategy(precision, RoundingStrategy::ToZero);
+    }
+
+    if size <= Decimal::ZERO {
+        return Err(anyhow!(
+            "order size is below exchange step size after quantization"
+        ));
+    }
+    if let Some(min_qty) = filters.min_qty {
+        if size < min_qty {
+            return Err(anyhow!(
+                "order size {} is below exchange min_qty {}",
+                format_order_size_decimal(size, filters),
+                min_qty
+            ));
+        }
+    }
+    if let Some(max_qty) = filters.max_qty {
+        if max_qty > Decimal::ZERO && size > max_qty {
+            return Err(anyhow!(
+                "order size {} is above exchange max_qty {}",
+                format_order_size_decimal(size, filters),
+                max_qty
+            ));
+        }
+    }
+    if enforce_min_notional {
+        if let Some(min_notional) = filters.min_notional {
+            let notional = size * last_price;
+            if min_notional > Decimal::ZERO && notional < min_notional {
+                return Err(anyhow!(
+                    "order notional {} is below exchange min_notional {} after size quantization",
+                    notional,
+                    min_notional
+                ));
+            }
+        }
+    }
+
+    Ok(size)
+}
+
+pub(super) fn format_order_size_decimal(size: Decimal, filters: &ExchangeOrderFilters) -> String {
+    let precision = filters
+        .quantity_precision
+        .or_else(|| filters.step_size.map(|step| step.scale()));
+    let normalized = match precision {
+        Some(precision) => size.round_dp_with_strategy(precision, RoundingStrategy::ToZero),
+        None => size,
+    }
+    .normalize();
+    normalized.to_string()
+}
+
+pub(super) fn quantize_protective_stop_price(
+    price: f64,
+    direction: ProtectiveDirection,
+    filters: &ExchangeOrderFilters,
+) -> Result<Decimal> {
+    let price = decimal_from_f64(price)?;
+    let step = filters
+        .tick_size
+        .filter(|value| *value > Decimal::ZERO)
+        .or_else(|| {
+            filters
+                .price_precision
+                .map(|precision| Decimal::new(1, precision))
+        });
+    let Some(step) = step else {
+        return Ok(price);
+    };
+
+    let normalized = match direction {
+        ProtectiveDirection::Long => floor_to_step(price, step),
+        ProtectiveDirection::Short => ceil_to_step(price, step),
+    };
+    if normalized <= Decimal::ZERO {
+        return Err(anyhow!(
+            "protective stop price is below exchange tick size after quantization"
+        ));
+    }
+    Ok(normalized)
+}
+
+pub(super) fn format_protective_stop_price_decimal(
+    price: Decimal,
+    filters: &ExchangeOrderFilters,
+) -> String {
+    let precision = filters
+        .price_precision
+        .or_else(|| filters.tick_size.map(|step| step.scale()));
+    let normalized = match precision {
+        Some(precision) => price.round_dp_with_strategy(precision, RoundingStrategy::ToZero),
+        None => price,
+    }
+    .normalize();
+    normalized.to_string()
+}

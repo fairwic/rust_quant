@@ -1,5 +1,6 @@
 use crate::leg_detection_indicator::LegDetectionValue;
 use crate::market_structure_indicator::MarketStructureValue;
+use crate::volume::VolumeProfileValue;
 use serde::{Deserialize, Serialize};
 
 /// 锤子形态信号值
@@ -200,6 +201,9 @@ pub struct VegasIndicatorSignalValue {
     pub ema_values: EmaSignalValue,
     /// 成交量信号配置
     pub volume_value: VolumeTrendSignalValue,
+    /// 价格区间成交量分布
+    #[serde(default)]
+    pub volume_profile_value: VolumeProfileValue,
     /// EMA趋势
     pub ema_touch_value: EmaTouchTrendSignalValue,
     /// RSI信号配置
@@ -242,5 +246,13 @@ mod tests {
         let value = VegasIndicatorSignalValue::default();
         let json = serde_json::to_value(&value).expect("serialize vegas signal value");
         assert!(json.get("market_structure_value").is_some());
+    }
+
+    #[test]
+    fn vegas_signal_value_includes_volume_profile() {
+        let value = VegasIndicatorSignalValue::default();
+        let json = serde_json::to_value(&value).expect("serialize vegas signal value");
+
+        assert!(json.get("volume_profile_value").is_some());
     }
 }

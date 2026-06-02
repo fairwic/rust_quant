@@ -393,7 +393,7 @@ fn default_min_trend_move_pct() -> f64 {
 
 /// 入场硬拦截配置
 ///
-/// 默认全部开启，保证旧配置行为不变；不同波动层可按标的单独关闭部分拦截做回测验证。
+/// 默认保持既有基线；实验性拦截必须显式开启后再做回测验证。
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(default)]
 pub struct EntryBlockConfig {
@@ -407,6 +407,14 @@ pub struct EntryBlockConfig {
     pub block_conflicting_too_far_new_bear_leg_short: bool,
     /// 缩量 + RSI 中性 + MACD 零轴上方转弱时拦截做多
     pub block_low_volume_neutral_rsi_macd_weakening_long: bool,
+    /// 实验性：空头浅反弹里的缩量震荡多单拦截，默认关闭
+    pub block_low_volume_inside_range_entry: bool,
+    /// 实验性：做多低于 VAL、做空高于 VAH 时拦截入场，默认关闭
+    pub block_opposite_value_area_entry: bool,
+    /// 实验性：价格在 VAH 上方但处于低成交量节点时拦截入场，默认关闭
+    pub block_low_volume_above_value_area_entry: bool,
+    /// 实验性：价格在价值区内且处于低成交量节点时拦截做空，默认关闭
+    pub block_short_inside_low_volume_node_entry: bool,
     /// EMA 距离过滤的空头分支
     pub block_ema_distance_short: bool,
 }
@@ -419,6 +427,10 @@ impl Default for EntryBlockConfig {
             block_weak_ema_trend_entry: true,
             block_conflicting_too_far_new_bear_leg_short: true,
             block_low_volume_neutral_rsi_macd_weakening_long: true,
+            block_low_volume_inside_range_entry: false,
+            block_opposite_value_area_entry: false,
+            block_low_volume_above_value_area_entry: false,
+            block_short_inside_low_volume_node_entry: false,
             block_ema_distance_short: true,
         }
     }
@@ -464,7 +476,7 @@ mod tests {
     use super::{EntryBlockConfig, MacdSignalConfig};
 
     #[test]
-    fn entry_block_config_defaults_keep_existing_filters_enabled() {
+    fn entry_block_config_defaults_keep_existing_baseline_stable() {
         let config = EntryBlockConfig::default();
 
         assert!(config.block_ema_distance_short);
@@ -472,21 +484,33 @@ mod tests {
         assert!(config.block_counter_trend_hammer_long);
         assert!(config.block_conflicting_too_far_new_bear_leg_short);
         assert!(config.block_low_volume_neutral_rsi_macd_weakening_long);
+        assert!(!config.block_low_volume_inside_range_entry);
+        assert!(!config.block_opposite_value_area_entry);
+        assert!(!config.block_low_volume_above_value_area_entry);
+        assert!(!config.block_short_inside_low_volume_node_entry);
         assert!(config.block_weak_ema_trend_entry);
     }
 
     #[test]
-    fn entry_block_config_can_disable_specific_filter_from_json() {
+    fn entry_block_config_can_override_specific_filter_from_json() {
         let config: EntryBlockConfig = serde_json::from_value(serde_json::json!({
             "block_ema_distance_short": false,
             "block_counter_trend_hammer_long": false,
-            "block_low_volume_neutral_rsi_macd_weakening_long": false
+            "block_low_volume_neutral_rsi_macd_weakening_long": false,
+            "block_low_volume_inside_range_entry": true,
+            "block_opposite_value_area_entry": true,
+            "block_low_volume_above_value_area_entry": true,
+            "block_short_inside_low_volume_node_entry": true
         }))
         .expect("entry block config should deserialize");
 
         assert!(!config.block_ema_distance_short);
         assert!(!config.block_counter_trend_hammer_long);
         assert!(!config.block_low_volume_neutral_rsi_macd_weakening_long);
+        assert!(config.block_low_volume_inside_range_entry);
+        assert!(config.block_opposite_value_area_entry);
+        assert!(config.block_low_volume_above_value_area_entry);
+        assert!(config.block_short_inside_low_volume_node_entry);
         assert!(config.block_too_far_outside_fib_short);
         assert!(config.block_conflicting_too_far_new_bear_leg_short);
         assert!(config.block_weak_ema_trend_entry);

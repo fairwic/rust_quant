@@ -1,6 +1,7 @@
 // Vegas指标模块
 pub mod config;
 pub mod ema_filter;
+pub(crate) mod entry_blocks;
 pub mod indicator_combine;
 pub mod signal;
 pub mod strategy;

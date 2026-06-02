@@ -472,6 +472,7 @@ async fn okx_simulated_reduce_only_close_via_gateway() -> anyhow::Result<()> {
         client_order_id: Some(format!("rqclose{}", chrono::Utc::now().timestamp_millis())),
         reduce_only: None, // OKX hedge mode: position_side handles close direction
         time_in_force: None,
+        attached_stop_loss_price: None,
     };
 
     println!(

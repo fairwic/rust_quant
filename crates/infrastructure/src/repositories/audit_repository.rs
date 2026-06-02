@@ -1,5 +1,6 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
+use serde_json::Value;
 use sqlx::{postgres::PgQueryResult, PgPool, Postgres, QueryBuilder};
 
 use rust_quant_domain::entities::{
@@ -21,6 +22,16 @@ impl SqlxAuditRepository {
 
     fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    fn parse_json_value(value: &str, field_name: &str) -> Result<Value> {
+        serde_json::from_str(value).with_context(|| format!("invalid {}: {}", field_name, value))
+    }
+
+    fn parse_optional_json_value(value: Option<&str>, field_name: &str) -> Result<Option<Value>> {
+        value
+            .map(|raw| Self::parse_json_value(raw, field_name))
+            .transpose()
     }
 }
 
@@ -53,16 +64,35 @@ impl AuditLogRepository for SqlxAuditRepository {
 
         let mut rows_affected = 0;
         for chunk in snapshots.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
+            let parsed_snapshots = chunk
+                .iter()
+                .map(|snapshot| {
+                    Ok((
+                        Self::parse_optional_json_value(
+                            snapshot.filter_reasons.as_deref(),
+                            "signal_snapshot_log.filter_reasons",
+                        )?,
+                        Self::parse_json_value(
+                            &snapshot.signal_json,
+                            "signal_snapshot_log.signal_json",
+                        )?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
             let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO signal_snapshot_log (run_id, kline_ts, filtered, filter_reasons, signal_json) ",
             );
-            builder.push_values(chunk.iter(), |mut b, s| {
-                b.push_bind(&s.run_id)
-                    .push_bind(s.kline_ts)
-                    .push_bind(if s.filtered { 1 } else { 0 })
-                    .push_bind(&s.filter_reasons)
-                    .push_bind(&s.signal_json);
-            });
+            builder.push_values(
+                chunk.iter().zip(parsed_snapshots.iter()),
+                |mut b, (s, parsed)| {
+                    b.push_bind(&s.run_id)
+                        .push_bind(s.kline_ts)
+                        .push_bind(if s.filtered { 1 } else { 0 })
+                        .push_bind(&parsed.0)
+                        .push_bind(&parsed.1);
+                },
+            );
 
             let result = builder.build().execute(self.pool()).await?;
             rows_affected += result.rows_affected();
@@ -78,16 +108,29 @@ impl AuditLogRepository for SqlxAuditRepository {
 
         let mut rows_affected = 0;
         for chunk in decisions.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
+            let parsed_decisions = chunk
+                .iter()
+                .map(|decision| {
+                    Self::parse_optional_json_value(
+                        decision.risk_json.as_deref(),
+                        "risk_decision_log.risk_json",
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+
             let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO risk_decision_log (run_id, kline_ts, decision, reason, risk_json) ",
             );
-            builder.push_values(chunk.iter(), |mut b, d| {
-                b.push_bind(&d.run_id)
-                    .push_bind(d.kline_ts)
-                    .push_bind(&d.decision)
-                    .push_bind(&d.reason)
-                    .push_bind(&d.risk_json);
-            });
+            builder.push_values(
+                chunk.iter().zip(parsed_decisions.iter()),
+                |mut b, (d, risk_json)| {
+                    b.push_bind(&d.run_id)
+                        .push_bind(d.kline_ts)
+                        .push_bind(&d.decision)
+                        .push_bind(&d.reason)
+                        .push_bind(risk_json);
+                },
+            );
             let result = builder.build().execute(self.pool()).await?;
             rows_affected += result.rows_affected();
         }
@@ -102,17 +145,30 @@ impl AuditLogRepository for SqlxAuditRepository {
 
         let mut rows_affected = 0;
         for chunk in decisions.chunks(AUDIT_LOG_INSERT_CHUNK_ROWS) {
+            let parsed_decisions = chunk
+                .iter()
+                .map(|decision| {
+                    Self::parse_optional_json_value(
+                        decision.decision_json.as_deref(),
+                        "order_decision_log.decision_json",
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+
             let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO order_decision_log (run_id, kline_ts, side, size, price, decision_json) ",
             );
-            builder.push_values(chunk.iter(), |mut b, d| {
-                b.push_bind(&d.run_id)
-                    .push_bind(d.kline_ts)
-                    .push_bind(&d.side)
-                    .push_bind(d.size)
-                    .push_bind(d.price)
-                    .push_bind(&d.decision_json);
-            });
+            builder.push_values(
+                chunk.iter().zip(parsed_decisions.iter()),
+                |mut b, (d, decision_json)| {
+                    b.push_bind(&d.run_id)
+                        .push_bind(d.kline_ts)
+                        .push_bind(&d.side)
+                        .push_bind(d.size)
+                        .push_bind(d.price)
+                        .push_bind(decision_json);
+                },
+            );
             let result = builder.build().execute(self.pool()).await?;
             rows_affected += result.rows_affected();
         }
@@ -200,8 +256,38 @@ impl AuditLogRepository for SqlxAuditRepository {
 
 #[cfg(test)]
 mod tests {
-    use super::AUDIT_LOG_INSERT_CHUNK_ROWS;
+    use super::{SqlxAuditRepository, AUDIT_LOG_INSERT_CHUNK_ROWS};
 
+    #[test]
+    fn parses_audit_jsonb_strings_before_binding() {
+        let reasons = SqlxAuditRepository::parse_optional_json_value(
+            Some("[\"LOW_VOLUME_INSIDE_RANGE_BLOCK_ENTRY\"]"),
+            "signal_snapshot_log.filter_reasons",
+        )
+        .expect("filter reasons should parse");
+        let signal = SqlxAuditRepository::parse_json_value(
+            "{\"should_buy\":false}",
+            "signal_snapshot_log.signal_json",
+        )
+        .expect("signal json should parse");
+
+        assert_eq!(
+            reasons.expect("filter reasons value"),
+            serde_json::json!(["LOW_VOLUME_INSIDE_RANGE_BLOCK_ENTRY"])
+        );
+        assert_eq!(signal, serde_json::json!({"should_buy": false}));
+    }
+
+    #[test]
+    fn rejects_invalid_audit_jsonb_strings() {
+        let err =
+            SqlxAuditRepository::parse_json_value("not-json", "signal_snapshot_log.signal_json")
+                .expect_err("invalid json should fail before insert");
+
+        assert!(err
+            .to_string()
+            .contains("invalid signal_snapshot_log.signal_json"));
+    }
     #[test]
     fn audit_log_insert_chunk_keeps_postgres_bind_count_below_limit() {
         const POSTGRES_BIND_PARAM_LIMIT: usize = 65_535;

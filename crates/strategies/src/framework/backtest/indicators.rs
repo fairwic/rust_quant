@@ -3,6 +3,7 @@ use rust_quant_indicators::trend::ema_indicator::EmaIndicator;
 use rust_quant_indicators::trend::vegas::{
     EmaSignalValue, IndicatorCombine, KlineHammerSignalValue, VegasIndicatorSignalValue,
 };
+use rust_quant_indicators::volume::VolumeProfileIndicator;
 use std::time::Instant;
 use ta::Next; // ⭐ 需要导入Next trait才能使用next方法
 use tracing::{info, warn};
@@ -111,6 +112,18 @@ pub fn get_multi_indicator_values(
         );
     }
 
+    let volume_profile_start = Instant::now();
+    let volume_profile_indicator = indicator_combine
+        .volume_profile_indicator
+        .get_or_insert_with(VolumeProfileIndicator::default);
+    vegas_indicator_signal_value.volume_profile_value = volume_profile_indicator.next(data_item);
+    if volume_profile_start.elapsed().as_millis() > 10 {
+        warn!(
+            duration_ms = volume_profile_start.elapsed().as_millis(),
+            "计算VolumeProfile"
+        );
+    }
+
     // 计算RSI
     let rsi_start = Instant::now();
     if let Some(rsi_indicator) = &mut indicator_combine.rsi_indicator {
@@ -196,4 +209,34 @@ pub fn get_multi_indicator_values(
     }
 
     vegas_indicator_signal_value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candle(o: f64, h: f64, l: f64, c: f64, v: f64, ts: i64) -> CandleItem {
+        CandleItem {
+            o,
+            h,
+            l,
+            c,
+            v,
+            ts,
+            confirm: 1,
+        }
+    }
+
+    #[test]
+    fn get_multi_indicator_values_populates_volume_profile() {
+        let mut combine = IndicatorCombine::default();
+
+        get_multi_indicator_values(&mut combine, &candle(100.0, 110.0, 100.0, 108.0, 10.0, 1));
+        get_multi_indicator_values(&mut combine, &candle(108.0, 120.0, 108.0, 118.0, 30.0, 2));
+        let value =
+            get_multi_indicator_values(&mut combine, &candle(118.0, 130.0, 118.0, 128.0, 80.0, 3));
+
+        assert!(value.volume_profile_value.total_volume > 0.0);
+        assert!(value.volume_profile_value.point_of_control > 0.0);
+    }
 }

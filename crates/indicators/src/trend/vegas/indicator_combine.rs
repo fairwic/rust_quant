@@ -5,6 +5,7 @@ use crate::momentum::rsi::RsiIndicator;
 use crate::pattern::engulfing::KlineEngulfingIndicator;
 use crate::pattern::hammer::KlineHammerIndicator;
 use crate::volatility::bollinger::BollingBandsPlusIndicator;
+use crate::volume::VolumeProfileIndicator;
 use crate::volume_indicator::VolumeRatioIndicator;
 
 /// 指标组合结构体
@@ -13,6 +14,7 @@ pub struct IndicatorCombine {
     pub ema_indicator: Option<EmaIndicator>,
     pub rsi_indicator: Option<RsiIndicator>,
     pub volume_indicator: Option<VolumeRatioIndicator>,
+    pub volume_profile_indicator: Option<VolumeProfileIndicator>,
     pub bollinger_indicator: Option<BollingBandsPlusIndicator>,
     pub engulfing_indicator: Option<KlineEngulfingIndicator>,
     pub kline_hammer_indicator: Option<KlineHammerIndicator>,
@@ -38,6 +40,9 @@ impl IndicatorCombine {
         if let Some(_vol) = &self.volume_indicator {
             // VolumeRatioIndicator 未暴露窗口，采用保守值，或在其结构体中暴露 length/getter
             max_period = max_period.max(20);
+        }
+        if let Some(profile) = &self.volume_profile_indicator {
+            max_period = max_period.max(profile.lookback());
         }
         // 其他形态/结构类指标多为无窗口或小窗口，这里不计入
         max_period

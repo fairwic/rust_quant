@@ -3258,6 +3258,14 @@ impl VegasStrategy {
             }
         }
 
+        super::entry_blocks::apply_entry_block_reasons(
+            &mut signal_result,
+            &self.entry_block_config,
+            last_data_item,
+            vegas_indicator_signal_values,
+            self.range_filter_signal.as_ref(),
+        );
+
         // ================================================================
         // 震荡过滤：震荡时降低止盈目标（不影响开仓，只影响 TP）
         // 震荡区间: RSI 中性 + 缩量或 MACD 近零轴 -> 1:1 止盈

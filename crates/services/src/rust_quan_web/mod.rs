@@ -1,4 +1,8 @@
 mod execution_audit;
+mod execution_order_filters;
+mod execution_payload;
+mod execution_protection;
+mod execution_rollback;
 mod execution_task_client;
 mod execution_worker;
 
