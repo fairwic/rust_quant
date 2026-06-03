@@ -361,7 +361,7 @@ fn is_sensitive_key(key: &str) -> bool {
         || normalized == "token"
 }
 
-fn redact_error_message(message: String) -> String {
+pub(crate) fn redact_error_message(message: String) -> String {
     let normalized = message.to_ascii_lowercase();
     if normalized.contains("api_key")
         || normalized.contains("api key")
@@ -374,9 +374,96 @@ fn redact_error_message(message: String) -> String {
         || normalized.contains("secret")
     {
         "redacted sensitive error".to_string()
+    } else if normalized.contains("signature") {
+        let redacted = redact_signature_material(&message);
+        if redacted == message {
+            "redacted sensitive error".to_string()
+        } else {
+            redacted
+        }
     } else {
         message
     }
+}
+
+fn redact_signature_material(message: &str) -> String {
+    redact_signature_parameters(&redact_signed_urls(message))
+}
+
+fn redact_signed_urls(message: &str) -> String {
+    let lower = message.to_ascii_lowercase();
+    let mut result = String::with_capacity(message.len());
+    let mut cursor = 0;
+
+    while let Some(url_start) = next_url_start(&lower, cursor) {
+        let url_end = url_token_end(message, url_start);
+        result.push_str(&message[cursor..url_start]);
+
+        let token = &message[url_start..url_end];
+        if token.to_ascii_lowercase().contains("signature=") {
+            result.push_str("[signed_url_redacted]");
+        } else {
+            result.push_str(token);
+        }
+        cursor = url_end;
+    }
+
+    result.push_str(&message[cursor..]);
+    result
+}
+
+fn next_url_start(lower: &str, cursor: usize) -> Option<usize> {
+    let tail = &lower[cursor..];
+    let http = tail.find("http://");
+    let https = tail.find("https://");
+    match (http, https) {
+        (Some(http), Some(https)) => Some(cursor + http.min(https)),
+        (Some(http), None) => Some(cursor + http),
+        (None, Some(https)) => Some(cursor + https),
+        (None, None) => None,
+    }
+}
+
+fn url_token_end(message: &str, start: usize) -> usize {
+    message[start..]
+        .char_indices()
+        .find_map(|(offset, ch)| {
+            matches!(ch, ' ' | '\n' | '\t' | '\r' | ')' | '"' | '\'' | ']' | '}')
+                .then_some(start + offset)
+        })
+        .unwrap_or(message.len())
+}
+
+fn redact_signature_parameters(message: &str) -> String {
+    let lower = message.to_ascii_lowercase();
+    let mut result = String::with_capacity(message.len());
+    let mut cursor = 0;
+
+    while let Some(relative_start) = lower[cursor..].find("signature=") {
+        let key_start = cursor + relative_start;
+        let value_start = key_start + "signature=".len();
+        let value_end = signature_value_end(message, value_start);
+
+        result.push_str(&message[cursor..key_start]);
+        result.push_str("[signed_param_redacted]");
+        cursor = value_end;
+    }
+
+    result.push_str(&message[cursor..]);
+    result
+}
+
+fn signature_value_end(message: &str, value_start: usize) -> usize {
+    message[value_start..]
+        .char_indices()
+        .find_map(|(offset, ch)| {
+            matches!(
+                ch,
+                '&' | ' ' | '\n' | '\t' | '\r' | ')' | '"' | '\'' | ',' | ';'
+            )
+            .then_some(value_start + offset)
+        })
+        .unwrap_or(message.len())
 }
 
 fn request_id(task: &ExecutionTask, request: &OrderPlacementRequest) -> String {
@@ -644,6 +731,19 @@ mod tests {
         assert!(!serialized.contains("plain-header-api-key"));
         assert!(!serialized.contains("plain-secret-key"));
         assert!(!serialized.contains("plain-access-token"));
+    }
+
+    #[test]
+    fn redacts_signed_url_signature_from_error_message() {
+        let message = "HTTP错误: error sending request for url (https://fapi.binance.com/fapi/v3/positionRisk?symbol=ETHUSDT&timestamp=1780485895031&signature=d9abb4b3b09c375e3111a500ca91e472fce1a3837575ec3753e8038af20f2778): operation timed out";
+
+        let redacted = redact_error_message(message.to_string());
+
+        assert!(redacted.contains("HTTP错误"));
+        assert!(redacted.contains("operation timed out"));
+        assert!(redacted.contains("[signed_url_redacted]"));
+        assert!(!redacted.contains("signature"));
+        assert!(!redacted.contains("d9abb4"));
     }
 
     #[test]

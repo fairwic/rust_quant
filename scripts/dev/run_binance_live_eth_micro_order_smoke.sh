@@ -50,7 +50,7 @@ load_env_file_safe() {
         fi
 
         case "${key}" in
-            BINANCE_API_KEY|BINANCE_API_SECRET|binance_api_secret|BINANCE_LIVE_API_KEY|BINANCE_LIVE_API_SECRET|BINANCE_PROXY_URL|API_CREDENTIAL_SECRET|RUST_QUAN_WEB_BASE_URL|EXECUTION_EVENT_SECRET|POSTGRES_CONTAINER|POSTGRES_USER|WEB_POSTGRES_DB|WEB_DATABASE_URL|BINANCE_ETH_MICRO_COMBO_ID|BINANCE_ETH_MICRO_QTY|BINANCE_ETH_MICRO_BUYER_EMAIL|BINANCE_ETH_MICRO_STRATEGY_SLUG|BINANCE_ETH_MICRO_STRATEGY_KEY|RUSTUP_TOOLCHAIN|EXECUTION_WORKER_USE_EXISTING_BINARY)
+            BINANCE_API_KEY|BINANCE_API_SECRET|binance_api_secret|BINANCE_LIVE_API_KEY|BINANCE_LIVE_API_SECRET|BINANCE_PROXY_URL|RUST_QUAN_WEB_BASE_URL|EXECUTION_EVENT_SECRET|POSTGRES_CONTAINER|POSTGRES_USER|WEB_POSTGRES_DB|WEB_DATABASE_URL|BINANCE_ETH_MICRO_COMBO_ID|BINANCE_ETH_MICRO_QTY|BINANCE_ETH_MICRO_STOP_LOSS_PRICE|BINANCE_ETH_MICRO_BUYER_EMAIL|BINANCE_ETH_MICRO_STRATEGY_SLUG|BINANCE_ETH_MICRO_STRATEGY_KEY|RUSTUP_TOOLCHAIN|EXECUTION_WORKER_USE_EXISTING_BINARY)
                 safe_assign_env "${key}" "${value}"
                 ;;
             DATABASE_URL)
@@ -69,8 +69,8 @@ load_env_file_safe "${MONOREPO_ROOT}/rust_quan_web/backend/.env"
 
 : "${BINANCE_ETH_MICRO_SYMBOL:="ETH-USDT-SWAP"}"
 : "${BINANCE_ETH_MICRO_QTY:="0.010"}"
+: "${BINANCE_ETH_MICRO_STOP_LOSS_PRICE:=""}"
 : "${BINANCE_PROXY_URL:="socks5h://127.0.0.1:7897"}"
-: "${API_CREDENTIAL_SECRET:="alpha-pulse-local-credential-key"}"
 : "${RUST_QUAN_WEB_BASE_URL:="http://127.0.0.1:8000"}"
 : "${EXECUTION_EVENT_SECRET:="local-dev-secret"}"
 : "${BINANCE_ETH_MICRO_BUYER_EMAIL:="demo-exec-worker@example.com"}"
@@ -104,6 +104,7 @@ BINANCE_ETH_MICRO_POSITION_SIDE=""
 BINANCE_ETH_MICRO_OPEN_REDUCE_ONLY=""
 BINANCE_ETH_MICRO_CLOSE_REDUCE_ONLY="true"
 BINANCE_ETH_MICRO_NOTIONAL=""
+BINANCE_ETH_MICRO_MARK_PRICE=""
 
 if [[ -z "${BINANCE_LIVE_API_KEY:-}" && -n "${BINANCE_API_KEY:-}" ]]; then
     BINANCE_LIVE_API_KEY="${BINANCE_API_KEY}"
@@ -487,12 +488,12 @@ preflight_binance_exchange_info_filters() {
 
     local filter_summary
     filter_summary="$(
-        python3 - "${exchange_info_file}" "${premium_file}" "${BINANCE_ETH_MICRO_QTY}" <<'PY'
+        python3 - "${exchange_info_file}" "${premium_file}" "${BINANCE_ETH_MICRO_QTY}" "${BINANCE_ETH_MICRO_STOP_LOSS_PRICE}" <<'PY'
 import json
 import sys
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
-exchange_path, premium_path, qty_raw = sys.argv[1], sys.argv[2], sys.argv[3]
+exchange_path, premium_path, qty_raw, stop_loss_raw = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 try:
     qty = Decimal(qty_raw)
 except InvalidOperation as exc:
@@ -517,6 +518,8 @@ lot = filters.get("MARKET_LOT_SIZE") or filters.get("LOT_SIZE") or {}
 min_qty = Decimal(lot.get("minQty", "0"))
 max_qty = Decimal(lot.get("maxQty", "0"))
 step_size = Decimal(lot.get("stepSize", "0"))
+price_filter = filters.get("PRICE_FILTER") or {}
+tick_size = Decimal(price_filter.get("tickSize", "0"))
 
 if qty < min_qty:
     raise SystemExit(f"ERROR: quantity {qty} is below minQty {min_qty}")
@@ -536,14 +539,44 @@ if min_notional > 0 and notional < min_notional:
         f"ERROR: quantity {qty} notional {notional} is below minNotional {min_notional}"
     )
 
-print(f"minQty={min_qty} stepSize={step_size} minNotional={min_notional} markPrice={mark_price} notional={notional}")
+if stop_loss_raw:
+    try:
+        stop_loss_price = Decimal(stop_loss_raw)
+    except InvalidOperation as exc:
+        raise SystemExit(f"ERROR: invalid ETH stop-loss price: {stop_loss_raw}") from exc
+else:
+    stop_loss_price = mark_price * Decimal("0.98")
+
+if tick_size > 0:
+    stop_loss_price = (stop_loss_price / tick_size).to_integral_value(rounding=ROUND_DOWN) * tick_size
+if stop_loss_price <= 0:
+    raise SystemExit("ERROR: ETH stop-loss price must be positive")
+if stop_loss_price >= mark_price:
+    raise SystemExit(
+        f"ERROR: long ETH stop-loss price {stop_loss_price} must be below markPrice {mark_price}"
+    )
+
+print(
+    " ".join(
+        [
+            f"minQty={min_qty}",
+            f"stepSize={step_size}",
+            f"minNotional={min_notional}",
+            f"markPrice={mark_price}",
+            f"notional={notional}",
+            f"stopLossPrice={stop_loss_price}",
+        ]
+    )
+)
 PY
     )"
 
     rm -f "${exchange_info_file}" "${premium_file}"
+    BINANCE_ETH_MICRO_MARK_PRICE="$(printf '%s\n' "${filter_summary}" | sed -n 's/.*markPrice=\([^ ]*\).*/\1/p')"
     BINANCE_ETH_MICRO_NOTIONAL="$(printf '%s\n' "${filter_summary}" | sed -n 's/.*notional=\([^ ]*\).*/\1/p')"
-    if [[ -z "${BINANCE_ETH_MICRO_NOTIONAL}" ]]; then
-        echo "ERROR: failed to capture ETH micro notional from Binance exchangeInfo preflight." >&2
+    BINANCE_ETH_MICRO_STOP_LOSS_PRICE="$(printf '%s\n' "${filter_summary}" | sed -n 's/.*stopLossPrice=\([^ ]*\).*/\1/p')"
+    if [[ -z "${BINANCE_ETH_MICRO_MARK_PRICE}" || -z "${BINANCE_ETH_MICRO_NOTIONAL}" || -z "${BINANCE_ETH_MICRO_STOP_LOSS_PRICE}" ]]; then
+        echo "ERROR: failed to capture ETH micro mark/notional/stop-loss from Binance exchangeInfo preflight." >&2
         exit 1
     fi
     echo "  exchange_info_filters=ok ${filter_summary}"
@@ -603,87 +636,47 @@ PY
     echo "  preflight_margin_available=ok"
 }
 
-seal_credential() {
-    local raw="$1"
-    local key="$2"
-    local key_len="${#key}"
-    local result=""
-    local i
-    for (( i = 0; i < ${#raw}; i++ )); do
-        local raw_byte
-        raw_byte=$(printf '%d' "'${raw:$i:1}")
-        local key_byte
-        key_byte=$(printf '%d' "'${key:$(( i % key_len )):1}")
-        result+=$(printf '%02x' $(( raw_byte ^ key_byte )))
-    done
-    printf '%s' "${result}"
-}
+verify_existing_binance_credential_ready() {
+    local rows
+    rows="$(
+        run_web_sql \
+            -v buyer_email="${BINANCE_ETH_MICRO_BUYER_EMAIL}" \
+            -At <<'SQL'
+SELECT
+    id,
+    COALESCE(api_key_mask, ''),
+    COALESCE(last_check_code, '')
+FROM user_api_credentials
+WHERE buyer_email = :'buyer_email'
+  AND exchange = '币安'
+  AND status = 'active'
+  AND last_check_code IN ('signed_exchange_preflight_passed', 'signed_exchange_check_passed')
+  AND api_key_cipher LIKE 'v3:aes256gcm:%'
+  AND api_secret_cipher LIKE 'v3:aes256gcm:%'
+  AND (passphrase_cipher IS NULL OR passphrase_cipher LIKE 'v3:aes256gcm:%')
+ORDER BY updated_at DESC, id DESC
+LIMIT 2;
+SQL
+    )"
 
-upsert_binance_credentials() {
-    local api_key_cipher
-    local api_secret_cipher
-    api_key_cipher="$(seal_credential "${BINANCE_LIVE_API_KEY}" "${API_CREDENTIAL_SECRET}")"
-    api_secret_cipher="$(seal_credential "${BINANCE_LIVE_API_SECRET}" "${API_CREDENTIAL_SECRET}")"
-
-    local key_len
-    local api_key_mask
-    key_len="${#BINANCE_LIVE_API_KEY}"
-    if (( key_len <= 4 )); then
-        api_key_mask="$(printf '%*s' "${key_len}" '' | tr ' ' '*')"
-    elif (( key_len < 8 )); then
-        api_key_mask="${BINANCE_LIVE_API_KEY:0:2}****${BINANCE_LIVE_API_KEY: -2}"
-    else
-        api_key_mask="${BINANCE_LIVE_API_KEY:0:4}****${BINANCE_LIVE_API_KEY: -4}"
+    local row_count
+    row_count="$(printf '%s\n' "${rows}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+    if [[ "${row_count}" != "1" ]]; then
+        echo "ERROR: expected exactly one active Binance Web credential with v3 envelope and signed preflight code." >&2
+        echo "  buyer_email=${BINANCE_ETH_MICRO_BUYER_EMAIL}" >&2
+        echo "  matching_credential_count=${row_count}" >&2
+        echo "  Re-save the Binance credential through rust_quan_web before running live validation." >&2
+        exit 1
     fi
 
-    run_web_sql \
-        -v buyer_email="${BINANCE_ETH_MICRO_BUYER_EMAIL}" \
-        -v api_key_cipher="${api_key_cipher}" \
-        -v api_secret_cipher="${api_secret_cipher}" \
-        -v api_key_mask="${api_key_mask}" <<'SQL'
-INSERT INTO user_api_credentials (
-    buyer_email,
-    exchange,
-    api_key_cipher,
-    api_secret_cipher,
-    passphrase_cipher,
-    api_key_mask,
-    permission_scope,
-    status,
-    last_check_at,
-    last_check_code,
-    last_check_message,
-    created_at,
-    updated_at
-)
-VALUES (
-    :'buyer_email',
-    '币安',
-    :'api_key_cipher',
-    :'api_secret_cipher',
-    NULL,
-    :'api_key_mask',
-    '只读 + 下单',
-    'active',
-    NOW(),
-    'signed_exchange_preflight_passed',
-    'Binance ETH micro live smoke credential.',
-    NOW(),
-    NOW()
-)
-ON CONFLICT (buyer_email, exchange) DO UPDATE
-SET api_key_cipher     = EXCLUDED.api_key_cipher,
-    api_secret_cipher  = EXCLUDED.api_secret_cipher,
-    passphrase_cipher  = NULL,
-    api_key_mask       = EXCLUDED.api_key_mask,
-    permission_scope   = '只读 + 下单',
-    status             = 'active',
-    last_check_at      = NOW(),
-    last_check_code    = 'signed_exchange_preflight_passed',
-    last_check_message = EXCLUDED.last_check_message,
-    updated_at         = NOW();
-SQL
-    echo "  web_credentials=upserted"
+    local credential_id
+    local api_key_mask
+    local last_check_code
+    IFS='|' read -r credential_id api_key_mask last_check_code <<<"${rows}"
+    echo "  web_credential_ready=ok"
+    echo "  web_credential_id=${credential_id}"
+    echo "  web_credential_api_key_mask=${api_key_mask:-<masked>}"
+    echo "  web_credential_last_check_code=${last_check_code}"
 }
 
 resolve_combo_id() {
@@ -820,6 +813,8 @@ create_open_execution_task() {
         -v strategy_key="${BINANCE_ETH_MICRO_STRATEGY_KEY}" \
         -v symbol="${BINANCE_ETH_MICRO_WEB_SYMBOL}" \
         -v qty="${BINANCE_ETH_MICRO_QTY}" \
+        -v entry_price="${BINANCE_ETH_MICRO_MARK_PRICE}" \
+        -v stop_loss_price="${BINANCE_ETH_MICRO_STOP_LOSS_PRICE}" \
         -v position_mode="${BINANCE_ETH_MICRO_POSITION_MODE}" \
         -v position_side="${BINANCE_ETH_MICRO_POSITION_SIDE}" \
         -v open_reduce_only="${BINANCE_ETH_MICRO_OPEN_REDUCE_ONLY}" \
@@ -868,7 +863,14 @@ WITH signal AS (
             'position_side', NULLIF(:'position_side', ''),
             'trade_side', 'open',
             'client_order_id', :'client_order_id',
-            'reduce_only', NULLIF(:'open_reduce_only', '')::boolean
+            'reduce_only', NULLIF(:'open_reduce_only', '')::boolean,
+            'protective_stop_loss_required', true,
+            'risk_plan', jsonb_build_object(
+                'entry_price', :'entry_price'::numeric,
+                'selected_stop_loss_price', :'stop_loss_price'::numeric,
+                'direction', 'long',
+                'protective_stop_loss_required', true
+            )
         ))::text,
         NOW(),
         NOW(),
@@ -919,7 +921,14 @@ WITH signal AS (
             'position_side', NULLIF(:'position_side', ''),
             'trade_side', 'open',
             'client_order_id', :'client_order_id',
-            'reduce_only', NULLIF(:'open_reduce_only', '')::boolean
+            'reduce_only', NULLIF(:'open_reduce_only', '')::boolean,
+            'protective_stop_loss_required', true,
+            'risk_plan', jsonb_build_object(
+                'entry_price', :'entry_price'::numeric,
+                'selected_stop_loss_price', :'stop_loss_price'::numeric,
+                'direction', 'long',
+                'protective_stop_loss_required', true
+            )
         ))::text,
         NOW(),
         NOW()
@@ -1174,6 +1183,71 @@ SQL
     echo "  ${label}_task_status=${task_status}"
 }
 
+verify_open_protection_sync() {
+    local task_id="$1"
+    local row
+    row="$(
+        run_web_sql \
+            -v task_id="${task_id}" \
+            -At <<'SQL'
+SELECT
+    COALESCE(raw_payload_json::jsonb #>> '{protection_sync,contract_version}', ''),
+    COALESCE(raw_payload_json::jsonb #>> '{protection_sync,status}', ''),
+    COALESCE(raw_payload_json::jsonb #>> '{protection_sync,exchange}', ''),
+    COALESCE(raw_payload_json::jsonb #>> '{protection_sync,protective_order_mode}', ''),
+    COALESCE(raw_payload_json::jsonb #>> '{protection_sync,source}', ''),
+    COALESCE(raw_payload_json::jsonb #>> '{protection_sync,protective_order_confirmed}', ''),
+    COALESCE(raw_payload_json::jsonb #>> '{protection_sync,protective_order_external_id}', ''),
+    COALESCE(raw_payload_json::jsonb #>> '{protection_sync,exchange_protective_order_supported}', '')
+FROM exchange_order_results
+WHERE execution_task_id = :task_id
+  AND order_side = 'buy'
+ORDER BY id DESC
+LIMIT 1;
+SQL
+    )"
+
+    if [[ -z "${row}" ]]; then
+        echo "ERROR: open protection_sync evidence was not written back to Web." >&2
+        return 1
+    fi
+
+    local contract_version
+    local status
+    local exchange
+    local protective_order_mode
+    local source
+    local protective_order_confirmed
+    local protective_order_external_id
+    local exchange_protective_order_supported
+    IFS='|' read -r contract_version status exchange protective_order_mode source protective_order_confirmed protective_order_external_id exchange_protective_order_supported <<<"${row}"
+
+    if [[ "${contract_version}" != "v2" ||
+          "${status}" != "completed" ||
+          "${exchange}" != "binance" ||
+          "${protective_order_mode}" != "independent_stop_market" ||
+          "${source}" != "query_protective_order" ||
+          "${protective_order_confirmed}" != "true" ||
+          -z "${protective_order_external_id}" ||
+          "${exchange_protective_order_supported}" != "true" ]]; then
+        echo "ERROR: open protection_sync is not confirmed by Binance active-order evidence." >&2
+        echo "  protection_contract_version=${contract_version}" >&2
+        echo "  protection_status=${status}" >&2
+        echo "  protection_exchange=${exchange}" >&2
+        echo "  protective_order_mode=${protective_order_mode}" >&2
+        echo "  protection_source=${source}" >&2
+        echo "  protective_order_confirmed=${protective_order_confirmed}" >&2
+        echo "  protective_order_external_id_present=$(if [[ -n "${protective_order_external_id}" ]]; then echo yes; else echo no; fi)" >&2
+        echo "  exchange_protective_order_supported=${exchange_protective_order_supported}" >&2
+        return 1
+    fi
+
+    echo "  open_protection_sync=confirmed"
+    echo "  open_protection_contract_version=${contract_version}"
+    echo "  open_protective_order_mode=${protective_order_mode}"
+    echo "  open_protective_order_external_id_present=yes"
+}
+
 emergency_close_eth_position_via_web() {
     local combo_id="$1"
     local open_task_id="$2"
@@ -1257,7 +1331,7 @@ preflight_binance_margin_available
 
 echo
 echo "=== Step 2: Web credential and combo preflight ==="
-upsert_binance_credentials
+verify_existing_binance_credential_ready
 COMBO_ID="$(resolve_combo_id)"
 echo "  combo_id=${COMBO_ID}"
 
@@ -1269,6 +1343,9 @@ if ! run_execution_worker_once "open" "execute_signal" "pending" "${OPEN_TASK_ID
     handle_open_stage_failure "${COMBO_ID}" "${OPEN_TASK_ID}"
 fi
 if ! verify_order_result "${OPEN_TASK_ID}" "buy" "open"; then
+    handle_open_stage_failure "${COMBO_ID}" "${OPEN_TASK_ID}"
+fi
+if ! verify_open_protection_sync "${OPEN_TASK_ID}"; then
     handle_open_stage_failure "${COMBO_ID}" "${OPEN_TASK_ID}"
 fi
 

@@ -5,13 +5,9 @@ fn build_exchange_reconciliation_report_request(
     message: impl Into<String>,
 ) -> ExchangeReconciliationReportRequest {
     let symbol = reconciliation_symbol(task);
-    let source_ref = format!(
-        "rust_quant/exchange_reconciliation/{}/combo/{}/task/{}/symbol/{}",
-        issue_type.as_str(),
-        task.combo_id,
-        task.id,
-        symbol
-    );
+    let exchange = reconciliation_exchange(task);
+    let source_ref =
+        build_exchange_reconciliation_source_ref(task, &exchange, &symbol, issue_type.as_str());
     let message = message.into().trim().to_string();
     let message = (!message.is_empty()).then_some(message);
 
@@ -26,7 +22,7 @@ fn build_exchange_reconciliation_report_request(
     }
 }
 
-fn build_exchange_reconciliation_requests_from_read_only_snapshot(
+pub(crate) fn build_exchange_reconciliation_requests_from_read_only_snapshot(
     task: &ExecutionTask,
     positions: &[Position],
     open_orders: &[Order],
@@ -71,6 +67,10 @@ fn build_live_order_blocked_by_exchange_reconciliation_report(
     order_task: &ExecutionOrderTask,
     requests: &[ExchangeReconciliationReportRequest],
 ) -> ExecutionTaskReportRequest {
+    let source_refs: Vec<String> = requests
+        .iter()
+        .filter_map(|request| request.source_ref.clone())
+        .collect();
     let issues: Vec<Value> = requests
         .iter()
         .map(|request| {
@@ -101,8 +101,42 @@ fn build_live_order_blocked_by_exchange_reconciliation_report(
             "exchange": order_task.exchange.as_str(),
             "symbol": order_task.symbol,
             "issues": issues,
+            "source_refs": source_refs,
             "place_order_allowed": false,
             "mutation_allowed": false,
+        }),
+    )
+}
+
+fn build_live_order_blocked_by_exchange_reconciliation_read_error_report(
+    task: &ExecutionTask,
+    order_task: &ExecutionOrderTask,
+    error_message: impl Into<String>,
+) -> ExecutionTaskReportRequest {
+    let error_message = error_message.into();
+    let source_ref = build_exchange_reconciliation_source_ref(
+        task,
+        order_task.exchange.as_str(),
+        &order_task.symbol,
+        "gateway_read_failed",
+    );
+    ExecutionTaskReportRequest::failed(
+        task.id,
+        order_task.exchange.as_str(),
+        order_side_lower(order_task.side),
+        format!(
+            "live order blocked because read-only exchange reconciliation failed before live order: {error_message}; place_order_allowed=false; mutation_allowed=false"
+        ),
+        json!({
+            "task_id": task.id,
+            "stage": "exchange_reconciliation_read_only",
+            "exchange": order_task.exchange.as_str(),
+            "symbol": order_task.symbol,
+            "source_ref": source_ref,
+            "gateway_read_failed": true,
+            "place_order_allowed": false,
+            "mutation_allowed": false,
+            "place_order_retried": false,
         }),
     )
 }
@@ -125,6 +159,72 @@ fn active_open_order_status(status: Option<&str>) -> bool {
 fn reconciliation_symbol(task: &ExecutionTask) -> String {
     let payload = order_payload(&task.request_payload_json);
     payload_string(&payload, "symbol").unwrap_or_else(|| task.symbol.clone())
+}
+
+fn reconciliation_exchange(task: &ExecutionTask) -> String {
+    let payload = order_payload(&task.request_payload_json);
+    payload_string(&payload, "exchange")
+        .map(|exchange| exchange.to_ascii_lowercase())
+        .unwrap_or_else(|| "exchange_unknown".to_string())
+}
+
+fn build_exchange_reconciliation_source_ref(
+    task: &ExecutionTask,
+    exchange: &str,
+    symbol: &str,
+    issue_type: &str,
+) -> String {
+    let account_ref = reconciliation_account_ref(task);
+    let credential_ref = reconciliation_credential_ref(task);
+    let exchange = sanitize_source_ref_segment(exchange, "exchange_unknown");
+    let symbol = sanitize_source_ref_segment(symbol, "symbol_unknown");
+    let issue_type = sanitize_source_ref_segment(issue_type, "issue_unknown");
+    format!(
+        "rq:xrec:v2:ex={exchange}:acct={account_ref}:cred={credential_ref}:combo={combo_id}:task={task_id}:sym={symbol}:issue={issue_type}",
+        combo_id = task.combo_id,
+        task_id = task.id
+    )
+}
+
+fn reconciliation_account_ref(task: &ExecutionTask) -> String {
+    let normalized = task.buyer_email.trim().to_ascii_lowercase();
+    let digest = rust_quant_common::utils::function::sha256(&normalized);
+    format!("email_sha256_{}", &digest[..16])
+}
+
+fn reconciliation_credential_ref(task: &ExecutionTask) -> String {
+    let payload = order_payload(&task.request_payload_json);
+    [
+        "credential_ref",
+        "api_credential_ref",
+        "exchange_credential_ref",
+        "credential_id",
+        "api_credential_id",
+        "exchange_credential_id",
+    ]
+    .iter()
+    .find_map(|key| payload_string(&payload, key))
+    .map(|value| sanitize_source_ref_segment(&value, "cred_unknown"))
+    .unwrap_or_else(|| "cred_unknown".to_string())
+}
+
+fn sanitize_source_ref_segment(value: &str, fallback: &str) -> String {
+    let sanitized: String = value
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        fallback.to_string()
+    } else {
+        sanitized
+    }
 }
 
 fn report_replay_operator_playbook_summary(

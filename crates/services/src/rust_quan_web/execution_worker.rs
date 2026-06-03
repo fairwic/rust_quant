@@ -125,6 +125,22 @@ impl ExecutionWorkerConfig {
     }
 }
 
+fn reconciliation_only_mode_from_env() -> bool {
+    std::env::var("EXECUTION_WORKER_RECONCILIATION_ONLY")
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
+}
+
+pub(crate) fn is_protected_link_symbol(symbol: &str) -> bool {
+    let normalized: String = symbol
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_uppercase())
+        .collect();
+    normalized == "LINKUSDT" || normalized.starts_with("LINKUSDT")
+}
+
 pub struct ExecutionWorker {
     client: ExecutionTaskClient,
     gateway: CryptoExcAllGateway,
@@ -166,7 +182,8 @@ impl ExecutionWorker {
             base_url,
             internal_secret,
         })?;
-        let gateway = if config.dry_run {
+        let reconciliation_only_mode = reconciliation_only_mode_from_env();
+        let gateway = if config.dry_run || reconciliation_only_mode {
             CryptoExcAllGateway::dry_run()
         } else {
             ensure_live_order_confirmation()?;
@@ -186,6 +203,9 @@ impl ExecutionWorker {
         }
         if self.config.confirmation_mode {
             return self.run_confirmation_once().await;
+        }
+        if reconciliation_only_mode_from_env() {
+            return self.run_reconciliation_only_once().await;
         }
 
         self.record_checkpoint(
@@ -390,6 +410,52 @@ impl ExecutionWorker {
         Ok(Some(
             build_live_order_blocked_by_exchange_reconciliation_report(task, order_task, &requests),
         ))
+    }
+
+    async fn check_exchange_read_only_before_pending_close(
+        &self,
+        task: &ExecutionTask,
+        request: &OrderPlacementRequest,
+        gateway: &CryptoExcAllGateway,
+    ) -> Result<()> {
+        let instrument = request.instrument.clone();
+        let positions = gateway
+            .positions(request.exchange, Some(&instrument))
+            .await
+            .map_err(|error| {
+                anyhow!(
+                    "read-only exchange position reconciliation failed before pending close: {}",
+                    error
+                )
+            })?;
+        let open_orders = gateway
+            .open_orders(
+                request.exchange,
+                OrderListQuery::for_instrument(instrument.clone()).with_limit(100),
+            )
+            .await
+            .map_err(|error| {
+                anyhow!(
+                    "read-only exchange open-order reconciliation failed before pending close: {}",
+                    error
+                )
+            })?;
+        self.record_checkpoint(
+            "pending_close_exchange_reconciliation_read_only_checked",
+            Some(task.id),
+            json!({
+                "stage": "pending_close_exchange_reconciliation_read_only",
+                "exchange": request.exchange.as_str(),
+                "symbol": instrument.symbol_for(request.exchange),
+                "position_count": positions.len(),
+                "open_order_count": open_orders.len(),
+                "place_order_allowed": true,
+                "mutation_allowed": false,
+            }),
+        )
+        .await;
+
+        Ok(())
     }
 
     async fn run_confirmation_once(&self) -> Result<usize> {
@@ -784,6 +850,17 @@ impl ExecutionWorker {
             Ok(Some(report)) => return report,
             Ok(None) => {}
             Err(error) => {
+                return build_live_order_blocked_by_exchange_reconciliation_read_error_report(
+                    task,
+                    &order_task,
+                    error.to_string(),
+                );
+            }
+        }
+
+        let mut request = match self.live_order_request(&gateway, &order_task).await {
+            Ok(request) => request,
+            Err(error) => {
                 return ExecutionTaskReportRequest::failed(
                     task.id,
                     order_task.exchange.as_str(),
@@ -791,15 +868,13 @@ impl ExecutionWorker {
                     error.to_string(),
                     json!({
                         "task_id": task.id,
-                        "stage": "exchange_reconciliation_read_only",
-                        "exchange": order_task.exchange.as_str(),
-                        "symbol": order_task.symbol,
+                        "stage": "live_order_read_only_request_build",
                         "place_order_allowed": false,
                         "mutation_allowed": false,
                     }),
                 );
             }
-        }
+        };
 
         if order_task.exchange == ExchangeId::Binance
             && (order_task.margin_mode.is_some()
@@ -841,143 +916,127 @@ impl ExecutionWorker {
             }
         }
 
-        match self.live_order_request(&gateway, &order_task).await {
-            Ok(mut request) => {
-                let protection =
-                    ProtectionSyncContract::from_task(task, order_side_lower(order_task.side));
-                match self
-                    .pre_place_client_order_report(
+        let protection = ProtectionSyncContract::from_task(task, order_side_lower(order_task.side));
+        match self
+            .pre_place_client_order_report(
+                task,
+                &gateway,
+                Some(&order_task),
+                order_side_lower(order_task.side),
+                &request,
+                protection.clone(),
+            )
+            .await
+        {
+            Ok(Some(report)) => return report,
+            Ok(None) => {}
+            Err(error) => {
+                return ExecutionTaskReportRequest::failed(
+                    task.id,
+                    order_task.exchange.as_str(),
+                    order_side_lower(order_task.side),
+                    error.to_string(),
+                    json!({
+                        "task_id": task.id,
+                        "stage": "client_order_id_pre_place_check",
+                        "exchange": order_task.exchange.as_str(),
+                        "symbol": order_task.symbol,
+                        "client_order_id": request.client_order_id.clone(),
+                        "place_order_allowed": false,
+                        "mutation_allowed": false,
+                    }),
+                );
+            }
+        }
+        let prearmed_protection =
+            match prearm_protective_order_if_required(&gateway, &order_task, protection.as_ref())
+                .await
+            {
+                Ok(value) => value,
+                Err((protection, outcome)) => {
+                    let mut report = ExecutionTaskReportRequest::failed(
+                        task.id,
+                        order_task.exchange.as_str(),
+                        order_side_lower(order_task.side),
+                        "prearmed protective stop-loss was not confirmed; refusing main order",
+                        json!({
+                            "task_id": task.id,
+                            "stage": "prearmed_protective_order",
+                            "exchange": order_task.exchange.as_str(),
+                            "symbol": order_task.symbol,
+                            "main_order_placed": false,
+                            "place_order_allowed": false,
+                            "mutation_allowed": false,
+                        }),
+                    );
+                    protection.apply_outcome_to_report(&mut report, outcome);
+                    return report;
+                }
+            };
+        let post_fill_protection = if prearmed_protection.is_some() {
+            request.attached_stop_loss_price = None;
+            None
+        } else {
+            protection.clone()
+        };
+        match self
+            .place_order_with_audit(task, &gateway, request.clone())
+            .await
+        {
+            Ok(ack) => {
+                let mut report = self
+                    .confirmed_live_order_report(
+                        task,
+                        &gateway,
+                        Some(&order_task),
+                        order_side_lower(order_task.side),
+                        ack,
+                        post_fill_protection.clone(),
+                    )
+                    .await;
+                if let Some(prearmed) = &prearmed_protection {
+                    prearmed.apply_after_main_order_report(&mut report);
+                }
+                report
+            }
+            Err(error) if is_duplicate_client_order_id_error(&error.to_string()) => {
+                let mut report = self
+                    .duplicate_client_order_id_report(
                         task,
                         &gateway,
                         Some(&order_task),
                         order_side_lower(order_task.side),
                         &request,
-                        protection.clone(),
+                        post_fill_protection,
                     )
-                    .await
-                {
-                    Ok(Some(report)) => return report,
-                    Ok(None) => {}
-                    Err(error) => {
-                        return ExecutionTaskReportRequest::failed(
-                            task.id,
-                            order_task.exchange.as_str(),
-                            order_side_lower(order_task.side),
-                            error.to_string(),
-                            json!({
-                                "task_id": task.id,
-                                "stage": "client_order_id_pre_place_check",
-                                "exchange": order_task.exchange.as_str(),
-                                "symbol": order_task.symbol,
-                                "client_order_id": request.client_order_id.clone(),
-                                "place_order_allowed": false,
-                                "mutation_allowed": false,
-                            }),
-                        );
-                    }
+                    .await;
+                if let Some(prearmed) = &prearmed_protection {
+                    prearmed.apply_after_main_order_report(&mut report);
                 }
-                let prearmed_protection = match prearm_protective_order_if_required(
-                    &gateway,
-                    &order_task,
-                    protection.as_ref(),
-                )
-                .await
-                {
-                    Ok(value) => value,
-                    Err((protection, outcome)) => {
-                        let mut report = ExecutionTaskReportRequest::failed(
-                            task.id,
-                            order_task.exchange.as_str(),
-                            order_side_lower(order_task.side),
-                            "prearmed protective stop-loss was not confirmed; refusing main order",
-                            json!({
-                                "task_id": task.id,
-                                "stage": "prearmed_protective_order",
-                                "exchange": order_task.exchange.as_str(),
-                                "symbol": order_task.symbol,
-                                "main_order_placed": false,
-                                "place_order_allowed": false,
-                                "mutation_allowed": false,
-                            }),
-                        );
-                        protection.apply_outcome_to_report(&mut report, outcome);
-                        return report;
-                    }
-                };
-                let post_fill_protection = if prearmed_protection.is_some() {
-                    request.attached_stop_loss_price = None;
-                    None
-                } else {
-                    protection.clone()
-                };
-                match self
-                    .place_order_with_audit(task, &gateway, request.clone())
-                    .await
-                {
-                    Ok(ack) => {
-                        let mut report = self
-                            .confirmed_live_order_report(
-                                task,
-                                &gateway,
-                                Some(&order_task),
-                                order_side_lower(order_task.side),
-                                ack,
-                                post_fill_protection.clone(),
-                            )
-                            .await;
-                        if let Some(prearmed) = &prearmed_protection {
-                            prearmed.apply_after_main_order_report(&mut report);
-                        }
-                        report
-                    }
-                    Err(error) if is_duplicate_client_order_id_error(&error.to_string()) => {
-                        let mut report = self
-                            .duplicate_client_order_id_report(
-                                task,
-                                &gateway,
-                                Some(&order_task),
-                                order_side_lower(order_task.side),
-                                &request,
-                                post_fill_protection,
-                            )
-                            .await;
-                        if let Some(prearmed) = &prearmed_protection {
-                            prearmed.apply_after_main_order_report(&mut report);
-                        }
-                        report
-                    }
-                    Err(error) => {
-                        let mut report = ExecutionTaskReportRequest::failed(
-                            task.id,
-                            order_task.exchange.as_str(),
-                            order_side_lower(order_task.side),
-                            error.to_string(),
-                            json!({
-                                "task_id": task.id,
-                                "stage": "place_order",
-                                "prearmed_protective_order": prearmed_protection.is_some(),
-                            }),
-                        );
-                        if let Some(prearmed) = &prearmed_protection {
-                            let cancel_result =
-                                prearmed.cancel_after_main_order_failure(&gateway).await;
-                            prearmed.apply_main_order_failure_cancel_result(
-                                &mut report,
-                                &error.to_string(),
-                                cancel_result,
-                            );
-                        }
-                        report
-                    }
-                }
+                report
             }
-            Err(error) => ExecutionTaskReportRequest::failed(
-                task.id,
-                order_task.exchange.as_str(),
-                order_side_lower(order_task.side),
-                error.to_string(),
-                json!({"task_id": task.id}),
-            ),
+            Err(error) => {
+                let mut report = ExecutionTaskReportRequest::failed(
+                    task.id,
+                    order_task.exchange.as_str(),
+                    order_side_lower(order_task.side),
+                    error.to_string(),
+                    json!({
+                        "task_id": task.id,
+                        "stage": "place_order",
+                        "prearmed_protective_order": prearmed_protection.is_some(),
+                    }),
+                );
+                if let Some(prearmed) = &prearmed_protection {
+                    let cancel_result = prearmed.cancel_after_main_order_failure(&gateway).await;
+                    prearmed.apply_main_order_failure_cancel_result(
+                        &mut report,
+                        &error.to_string(),
+                        cancel_result,
+                    );
+                }
+                report
+            }
         }
     }
 
@@ -1075,6 +1134,38 @@ impl ExecutionWorker {
                 );
             }
         };
+
+        if let Err(error) = self
+            .check_exchange_read_only_before_pending_close(task, &request, &gateway)
+            .await
+        {
+            let symbol = request.instrument.symbol_for(request.exchange);
+            let source_ref = build_exchange_reconciliation_source_ref(
+                task,
+                request.exchange.as_str(),
+                &symbol,
+                "pending_close_gateway_read_failed",
+            );
+            return ExecutionTaskReportRequest::failed(
+                task.id,
+                request.exchange.as_str(),
+                order_side_lower(request.side),
+                format!(
+                    "pending close blocked because read-only exchange reconciliation failed before live close: {error}; place_order_allowed=false; mutation_allowed=false"
+                ),
+                json!({
+                    "task_id": task.id,
+                    "stage": "pending_close_exchange_reconciliation_read_only",
+                    "exchange": request.exchange.as_str(),
+                    "symbol": symbol,
+                    "source_ref": source_ref,
+                    "gateway_read_failed": true,
+                    "place_order_allowed": false,
+                    "mutation_allowed": false,
+                    "place_order_retried": false,
+                }),
+            );
+        }
 
         match self
             .pre_place_client_order_report(
@@ -1636,6 +1727,7 @@ impl ExecutionWorker {
     }
 }
 
+include!("execution_worker_reconciliation_only_section.rs");
 include!("execution_worker_reconciliation_section.rs");
 include!("execution_worker_order_task_section.rs");
 include!("execution_worker_confirmation_section.rs");

@@ -107,7 +107,7 @@ impl CryptoExcAllGateway {
                     ws_stream_url: None,
                     api_timeout_ms: None,
                     recv_window_ms: None,
-                    proxy_url: None,
+                    proxy_url: binance_proxy_url_from_env(),
                 }),
                 ..SdkConfig::default()
             },
@@ -338,9 +338,24 @@ impl CryptoExcAllGateway {
     }
 }
 
+fn binance_proxy_url_from_env() -> Option<String> {
+    std::env::var("BINANCE_PROXY_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock")
+    }
 
     #[test]
     fn maps_our_request_to_crypto_exc_all_request() {
@@ -462,5 +477,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(gateway.configured_exchanges(), vec![ExchangeId::Okx]);
+    }
+
+    #[test]
+    fn single_exchange_binance_runtime_config_reads_proxy_env() {
+        let _guard = env_lock();
+        let previous = std::env::var("BINANCE_PROXY_URL").ok();
+
+        std::env::set_var("BINANCE_PROXY_URL", " http://127.0.0.1:7897 ");
+        assert_eq!(
+            binance_proxy_url_from_env().as_deref(),
+            Some("http://127.0.0.1:7897")
+        );
+
+        match previous {
+            Some(value) => std::env::set_var("BINANCE_PROXY_URL", value),
+            None => std::env::remove_var("BINANCE_PROXY_URL"),
+        }
     }
 }

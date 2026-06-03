@@ -1,10 +1,13 @@
 use super::{
-    compute_rank_change_pct, finalize_market_rank_rows, kline_sync_request_from_body,
-    market_rank_events_query_from_path, market_rank_sort_can_use_recent_query,
-    market_rank_sort_requires_legacy_volume_before_limit, recent_market_rank_events_sql,
-    MarketRankEventItem,
+    backtest_detail_list_query_from_path, backtest_log_list_query_from_path,
+    compute_rank_change_pct, core_backtest_run_list_query_from_path, finalize_market_rank_rows,
+    kline_sync_request_from_body, market_rank_events_query_from_path,
+    market_rank_sort_can_use_recent_query, market_rank_sort_requires_legacy_volume_before_limit,
+    recent_market_rank_events_sql, strategy_config_list_query_from_path,
+    strategy_config_upsert_request_from_body, BacktestLogListQuery, MarketRankEventItem,
 };
 use chrono::{TimeZone, Utc};
+use serde_json::json;
 
 fn rank_event_row(
     id: i64,
@@ -117,6 +120,120 @@ fn market_rank_events_query_rejects_unknown_event_type() {
             .expect_err("unknown rank event type should be rejected");
 
     assert_eq!(error, "unsupported eventType: unknown");
+}
+
+#[test]
+fn strategy_config_list_query_accepts_api_internal_prefix_and_caps_page_size() {
+    let query = strategy_config_list_query_from_path(
+        "/api/internal/strategy-configs?page=2&pageSize=999&keyword=vegas&exchange=binance&symbol=eth-usdt-swap",
+    )
+    .expect("strategy config query should parse");
+
+    assert_eq!(query.page, 2);
+    assert_eq!(query.page_size, 200);
+    assert_eq!(query.keyword.as_deref(), Some("vegas"));
+    assert_eq!(query.exchange.as_deref(), Some("binance"));
+    assert_eq!(query.symbol.as_deref(), Some("ETH-USDT-SWAP"));
+}
+
+#[test]
+fn strategy_config_upsert_request_accepts_admin_payload() {
+    let request = strategy_config_upsert_request_from_body(
+        json!({
+            "legacyId": 42,
+            "strategyKey": "vegas",
+            "strategyName": "Vegas 4H",
+            "version": "admin-upsert",
+            "exchange": "okx",
+            "symbol": "btc-usdt-swap",
+            "timeframe": "4H",
+            "enabled": false,
+            "config": {"ema": 144},
+            "riskConfig": {"maxLossPercent": 0.02},
+            "updatedBy": "strategy-auditor"
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .expect("strategy config upsert payload should parse");
+
+    assert_eq!(request.legacy_id, Some(42));
+    assert_eq!(request.strategy_key, "vegas");
+    assert_eq!(request.strategy_name.as_deref(), Some("Vegas 4H"));
+    assert_eq!(request.version.as_deref(), Some("admin-upsert"));
+    assert_eq!(request.exchange.as_deref(), Some("okx"));
+    assert_eq!(request.symbol, "BTC-USDT-SWAP");
+    assert_eq!(request.timeframe, "4H");
+    assert!(!request.enabled);
+    assert_eq!(request.config["ema"], 144);
+    assert_eq!(request.risk_config["maxLossPercent"], 0.02);
+    assert_eq!(request.updated_by.as_deref(), Some("strategy-auditor"));
+}
+
+#[test]
+fn backtest_log_list_query_accepts_api_internal_prefix_and_filters() {
+    let query = backtest_log_list_query_from_path(
+        "/api/internal/backtests/logs?page=2&pageSize=999&keyword=vegas&status=success&exchange=okx&symbol=eth-usdt-swap",
+    )
+    .expect("backtest log query should parse");
+
+    assert_eq!(query.page, 2);
+    assert_eq!(query.page_size, 200);
+    assert_eq!(query.keyword.as_deref(), Some("vegas"));
+    assert_eq!(query.status.as_deref(), Some("success"));
+    assert_eq!(query.exchange.as_deref(), Some("okx"));
+    assert_eq!(query.symbol.as_deref(), Some("ETH-USDT-SWAP"));
+}
+
+#[test]
+fn backtest_log_list_query_defaults_page_fields() {
+    let query = backtest_log_list_query_from_path("/api/internal/backtests/logs")
+        .expect("default backtest log query should parse");
+
+    assert_eq!(
+        query,
+        BacktestLogListQuery {
+            page: 1,
+            page_size: 20,
+            keyword: None,
+            status: None,
+            exchange: None,
+            symbol: None,
+            start_time: None,
+            end_time: None,
+        }
+    );
+}
+
+#[test]
+fn backtest_detail_list_query_accepts_api_internal_prefix_and_filters() {
+    let query = backtest_detail_list_query_from_path(
+        "/api/internal/backtests/details?page=2&pageSize=999&keyword=vegas&status=closed&backTestId=42&symbol=eth-usdt-swap&side=long",
+    )
+    .expect("backtest detail query should parse");
+
+    assert_eq!(query.page, 2);
+    assert_eq!(query.page_size, 200);
+    assert_eq!(query.keyword.as_deref(), Some("vegas"));
+    assert_eq!(query.status.as_deref(), Some("closed"));
+    assert_eq!(query.back_test_id.as_deref(), Some("42"));
+    assert_eq!(query.symbol.as_deref(), Some("ETH-USDT-SWAP"));
+    assert_eq!(query.side.as_deref(), Some("long"));
+}
+
+#[test]
+fn core_backtest_run_list_query_accepts_api_internal_prefix_and_filters() {
+    let query = core_backtest_run_list_query_from_path(
+        "/api/internal/core/backtest-runs?page=2&pageSize=999&keyword=vegas&status=success&exchange=okx&symbol=eth-usdt-swap",
+    )
+    .expect("core backtest run query should parse");
+
+    assert_eq!(query.page, 2);
+    assert_eq!(query.page_size, 200);
+    assert_eq!(query.keyword.as_deref(), Some("vegas"));
+    assert_eq!(query.status.as_deref(), Some("success"));
+    assert_eq!(query.exchange.as_deref(), Some("okx"));
+    assert_eq!(query.symbol.as_deref(), Some("ETH-USDT-SWAP"));
 }
 
 #[test]

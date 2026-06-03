@@ -13,7 +13,19 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info};
 
+mod backtest_details;
+mod backtest_logs;
 mod market_rank_technical_context;
+mod strategy_configs;
+
+pub use backtest_details::{backtest_detail_list_query_from_path, BacktestDetailListQuery};
+pub use backtest_logs::{
+    backtest_log_list_query_from_path, core_backtest_run_list_query_from_path, BacktestLogListQuery,
+};
+pub use strategy_configs::{
+    strategy_config_list_query_from_path, strategy_config_upsert_request_from_body,
+    StrategyConfigListQuery, StrategyConfigUpsertRequest,
+};
 
 use market_rank_technical_context::{
     build_market_rank_technical_context, MarketRankTechnicalContext, MarketRankTechnicalSource,
@@ -481,6 +493,38 @@ pub async fn handle_market_rank_events_path(path: &str) -> InternalHttpJsonRespo
     }
 }
 
+pub async fn handle_strategy_config_list_path(path: &str) -> InternalHttpJsonResponse {
+    let query = match strategy_config_list_query_from_path(path) {
+        Ok(query) => query,
+        Err(message) => return json_response(400, json!({ "error": message })),
+    };
+    let pool = match strategy_configs::create_quant_core_internal_pool() {
+        Ok(pool) => pool,
+        Err(error) => return json_response(500, json!({ "error": error.to_string() })),
+    };
+
+    match strategy_configs::fetch_strategy_config_list_response(&pool, &query).await {
+        Ok((items, total)) => json_response(200, json!({ "items": items, "total": total })),
+        Err(error) => json_response(500, json!({ "error": error.to_string() })),
+    }
+}
+
+pub async fn handle_strategy_config_upsert_body(body: &[u8]) -> InternalHttpJsonResponse {
+    let request = match strategy_config_upsert_request_from_body(body) {
+        Ok(request) => request,
+        Err(message) => return json_response(400, json!({ "error": message })),
+    };
+    let pool = match strategy_configs::create_quant_core_internal_pool() {
+        Ok(pool) => pool,
+        Err(error) => return json_response(500, json!({ "error": error.to_string() })),
+    };
+
+    match strategy_configs::upsert_strategy_config_response(&pool, &request).await {
+        Ok(item) => json_response(200, item),
+        Err(error) => json_response(500, json!({ "error": error.to_string() })),
+    }
+}
+
 pub async fn handle_latest_backtest_path(path: &str) -> InternalHttpJsonResponse {
     let query = match latest_backtest_query_from_path(path) {
         Ok(query) => query,
@@ -673,17 +717,43 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     let request = read_request(&mut stream).await?;
     let route = route_path(&request.path);
     let response = match (request.method.as_str(), route) {
-        ("POST", "/internal/backtests/run") => handle_backtest_run_body(&request.body).await,
-        ("GET", "/internal/backtests/latest") => handle_latest_backtest_path(&request.path).await,
-        ("GET", "/internal/klines") => handle_market_klines_path(&request.path).await,
-        ("POST", "/internal/klines/sync") => handle_kline_sync_body(&request.body).await,
-        ("GET", "/internal/market-rank-events") => {
+        ("POST", "/internal/backtests/run") | ("POST", "/api/internal/backtests/run") => {
+            handle_backtest_run_body(&request.body).await
+        }
+        ("GET", "/internal/backtests/latest") | ("GET", "/api/internal/backtests/latest") => {
+            handle_latest_backtest_path(&request.path).await
+        }
+        ("GET", "/api/internal/backtests/logs") => {
+            backtest_logs::handle_backtest_log_list_path(&request.path).await
+        }
+        ("GET", "/api/internal/backtests/details") => {
+            backtest_details::handle_backtest_detail_list_path(&request.path).await
+        }
+        ("GET", "/api/internal/core/backtest-runs") => {
+            backtest_logs::handle_core_backtest_run_list_path(&request.path).await
+        }
+        ("GET", "/internal/klines") | ("GET", "/api/internal/klines") => {
+            handle_market_klines_path(&request.path).await
+        }
+        ("POST", "/internal/klines/sync") | ("POST", "/api/internal/klines/sync") => {
+            handle_kline_sync_body(&request.body).await
+        }
+        ("GET", "/internal/market-rank-events") | ("GET", "/api/internal/market-rank-events") => {
             handle_market_rank_events_path(&request.path).await
         }
-        ("POST", "/internal/exchange-symbols/sync") => {
+        ("GET", "/api/internal/strategy-configs") => {
+            handle_strategy_config_list_path(&request.path).await
+        }
+        ("POST", "/api/internal/strategy-configs") => {
+            handle_strategy_config_upsert_body(&request.body).await
+        }
+        ("POST", "/internal/exchange-symbols/sync")
+        | ("POST", "/api/internal/exchange-symbols/sync") => {
             handle_exchange_symbol_sync_body(&request.body).await
         }
-        ("GET", "/internal/health") => json_response(200, json!({ "status": "ok" })),
+        ("GET", "/internal/health") | ("GET", "/api/internal/health") => {
+            json_response(200, json!({ "status": "ok" }))
+        }
         ("POST", _) => json_response(404, json!({ "error": "not found" })),
         _ => json_response(405, json!({ "error": "method not allowed" })),
     };

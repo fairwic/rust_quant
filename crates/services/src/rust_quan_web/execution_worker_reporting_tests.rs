@@ -259,7 +259,16 @@ fn okx_and_bitget_attached_stop_loss_ack_evidence_confirms_protection() {
     for (exchange, raw) in [
         (
             "okx",
-            json!({"ordId":"10002","attachAlgoClOrdId":"rq-sl-10002","sCode":"0"}),
+            json!({
+                "ordId":"10002",
+                "attachAlgoOrds":[{
+                    "attachAlgoId":"rq-sl-10002",
+                    "slTriggerPx":"2200",
+                    "slOrdPx":"-1",
+                    "slTriggerPxType":"last"
+                }],
+                "sCode":"0"
+            }),
         ),
         (
             "bitget",

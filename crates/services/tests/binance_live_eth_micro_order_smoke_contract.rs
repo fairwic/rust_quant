@@ -122,15 +122,15 @@ fn smoke_script_preflights_account_and_exchange_filters_before_web_state_changes
         .find("preflight_binance_exchange_info_filters")
         .expect("exchangeInfo preflight must exist");
     let credential_pos = script
-        .find("INSERT INTO user_api_credentials")
-        .expect("credential upsert must exist");
+        .find("verify_existing_binance_credential_ready")
+        .expect("existing v3 credential gate must exist");
     let task_pos = script
         .find("INSERT INTO execution_tasks")
         .expect("task insert must exist");
 
     assert!(
         account_pos < credential_pos && filters_pos < credential_pos && filters_pos < task_pos,
-        "Binance preflights must happen before Web credential/task state changes"
+        "Binance preflights must happen before Web credential gate and task state changes"
     );
 }
 
@@ -159,15 +159,15 @@ fn smoke_script_preflights_available_margin_before_web_state_changes() {
         .find("preflight_binance_margin_available")
         .expect("margin preflight must exist");
     let credential_pos = script
-        .find("INSERT INTO user_api_credentials")
-        .expect("credential upsert must exist");
+        .find("verify_existing_binance_credential_ready")
+        .expect("existing v3 credential gate must exist");
     let task_pos = script
         .find("INSERT INTO execution_tasks")
         .expect("task insert must exist");
 
     assert!(
         margin_pos < credential_pos && margin_pos < task_pos,
-        "available-margin preflight must happen before Web credential/task state changes"
+        "available-margin preflight must happen before Web credential gate and task state changes"
     );
 }
 
@@ -259,15 +259,15 @@ fn smoke_script_supports_one_way_and_hedge_position_modes_for_close() {
         .find("preflight_binance_position_mode")
         .expect("position mode preflight must exist");
     let credential_pos = script
-        .find("INSERT INTO user_api_credentials")
-        .expect("credential upsert must exist");
+        .find("verify_existing_binance_credential_ready")
+        .expect("existing v3 credential gate must exist");
     let task_pos = script
         .find("INSERT INTO execution_tasks")
         .expect("task insert must exist");
 
     assert!(
         mode_pos < credential_pos && mode_pos < task_pos,
-        "Binance position mode preflight must happen before Web credential/task state changes"
+        "Binance position mode preflight must happen before Web credential gate and task state changes"
     );
 }
 
@@ -313,6 +313,59 @@ fn smoke_script_proves_open_then_immediate_reduce_only_close_intent() {
 }
 
 #[test]
+fn smoke_script_open_task_carries_protective_stop_loss_contract() {
+    let script = read_smoke_script();
+
+    assert!(
+        script.contains("BINANCE_ETH_MICRO_STOP_LOSS_PRICE"),
+        "script must derive or accept a protective stop-loss price before live open"
+    );
+    assert!(
+        script.contains("'risk_plan'")
+            && script.contains("'selected_stop_loss_price'")
+            && script.contains("'protective_stop_loss_required', true")
+            && script.contains("'direction', 'long'"),
+        "open task payload must request a protective stop-loss contract"
+    );
+}
+
+#[test]
+fn smoke_script_requires_protection_sync_success_before_claiming_open_success() {
+    let script = read_smoke_script();
+
+    assert!(
+        script.contains("verify_open_protection_sync()"),
+        "script must define an explicit protection_sync verifier for the live open result"
+    );
+    assert!(
+        script.contains("contract_version")
+            && script.contains("protective_order_mode")
+            && script.contains("protective_order_confirmed")
+            && script.contains("protective_order_external_id"),
+        "protection verifier must inspect the v2 protection_sync evidence fields"
+    );
+    assert!(
+        script.contains("open_protection_sync=confirmed"),
+        "script must print a non-sensitive protection confirmation summary"
+    );
+
+    let open_result_pos = script
+        .find("verify_order_result \"${OPEN_TASK_ID}\" \"buy\" \"open\"")
+        .expect("open order result verification must exist");
+    let protection_pos = script
+        .find("verify_open_protection_sync \"${OPEN_TASK_ID}\"")
+        .expect("open protection verifier call must exist");
+    let close_task_pos = script
+        .find("CLOSE_TASK_ID=\"$(create_close_execution_task")
+        .expect("close task creation must exist");
+
+    assert!(
+        open_result_pos < protection_pos && protection_pos < close_task_pos,
+        "open protection_sync must be verified after the open fill and before close creation"
+    );
+}
+
+#[test]
 fn smoke_script_attempts_web_close_if_open_stage_fails_with_eth_position() {
     let script = read_smoke_script();
 
@@ -335,8 +388,18 @@ fn smoke_script_uses_production_ready_credential_code_and_rejects_failed_results
     let script = read_smoke_script();
 
     assert!(
-        script.contains("'signed_exchange_preflight_passed'"),
-        "script must upsert a production-ready signed preflight code so Web internal resolve can use the credential"
+        script.contains("verify_existing_binance_credential_ready()"),
+        "script must verify an existing Web credential instead of writing one locally"
+    );
+    assert!(
+        script.contains("'signed_exchange_preflight_passed'")
+            && script.contains("'signed_exchange_check_passed'"),
+        "credential gate must require production-ready signed preflight codes"
+    );
+    assert!(
+        script.contains("api_key_cipher LIKE 'v3:aes256gcm:%'")
+            && script.contains("api_secret_cipher LIKE 'v3:aes256gcm:%'"),
+        "credential gate must require v3 AEAD envelopes"
     );
     assert!(
         script.contains(r#"${order_status}" == "failed"#)
@@ -347,6 +410,25 @@ fn smoke_script_uses_production_ready_credential_code_and_rejects_failed_results
     assert!(
         script.contains(r#"${order_status_upper}" != "FILLED"#),
         "script must require live ETH market smoke orders to be FILLED, not just non-failed"
+    );
+}
+
+#[test]
+fn smoke_script_does_not_generate_or_upsert_legacy_credential_material() {
+    let script = read_smoke_script();
+
+    assert!(
+        !script.contains("API_CREDENTIAL_SECRET"),
+        "script must not accept the removed legacy API_CREDENTIAL_SECRET alias"
+    );
+    assert!(
+        !script.contains("seal_credential()") && !script.contains("seal_credential \""),
+        "script must not generate local legacy credential ciphertext"
+    );
+    assert!(
+        !script.contains("INSERT INTO user_api_credentials")
+            && !script.contains("ON CONFLICT (buyer_email, exchange) DO UPDATE"),
+        "script must not upsert API credentials; credentials must be saved through Web v3 envelope flow"
     );
 }
 

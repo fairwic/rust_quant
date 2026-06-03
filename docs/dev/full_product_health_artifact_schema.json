@@ -30,7 +30,11 @@
       "UNSAFE_SCHEMA_REJECTED"
     ],
     "web_task_order_health": [
+      "WEB_DELIVERY_BLOCKER",
       "WEB_EXECUTION_TASK_STALE",
+      "WEB_INPUT_JSON_INVALID",
+      "WEB_INPUT_OUTPUT_REJECTED",
+      "WEB_INPUT_QUERY_EMPTY",
       "WEB_INPUT_QUERY_FAILED",
       "WEB_INPUT_SKIPPED",
       "WEB_ORDER_RESULT_MISSING",
@@ -39,11 +43,18 @@
     "news_source_ai_health": [
       "NEWS_AI_PROVIDER_UNAVAILABLE",
       "NEWS_ANALYSIS_JOB_FAILED",
+      "NEWS_ANALYSIS_JOB_STUCK",
+      "NEWS_INPUT_JSON_INVALID",
+      "NEWS_INPUT_OUTPUT_REJECTED",
+      "NEWS_INPUT_QUERY_EMPTY",
       "NEWS_INPUT_QUERY_FAILED",
       "NEWS_INPUT_SKIPPED",
+      "NO_RECENT_AI_ANALYSIS",
       "NEWS_SOURCE_DEGRADED"
     ],
     "quant_worker_checkpoint_audit": [
+      "EXECUTION_AUDIT_TABLE_MISSING",
+      "IGNORED_HISTORICAL_WORKER",
       "QUANT_EXCHANGE_AUDIT_FAILURES",
       "QUANT_EXPECTED_WORKER_STALE",
       "QUANT_LOCAL_HEALTH_FAIL",
@@ -53,10 +64,15 @@
     "admin_readiness": [
       "ADMIN_ACTION_AUDIT_MISSING",
       "ADMIN_HIGH_RISK_OPERATION_FAILED",
+      "ADMIN_INPUT_JSON_INVALID",
+      "ADMIN_INPUT_OUTPUT_REJECTED",
+      "ADMIN_INPUT_QUERY_EMPTY",
       "ADMIN_INPUT_QUERY_FAILED",
       "ADMIN_INPUT_SKIPPED",
       "ADMIN_LIVE_READINESS_BLOCKED",
       "ADMIN_READINESS_REVIEW_REQUIRED",
+      "COLLECTOR_OUTPUT_REJECTED",
+      "FULL_PRODUCT_INPUT_RUNNER_FAILED",
       "FULL_PRODUCT_HEALTH_SUMMARY_FAILED"
     ],
     "payment_entitlement_health": [
@@ -125,9 +141,29 @@
       }
     },
     "web_task_order_health": {
+      "WEB_DELIVERY_BLOCKER": {
+        "owner": "web_execution",
+        "default_next_action": "review_delivery_blockers",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      },
       "WEB_EXECUTION_TASK_STALE": {
         "owner": "web_execution",
         "default_next_action": "review_stale_execution_task",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      },
+      "WEB_INPUT_JSON_INVALID": {
+        "owner": "web_execution",
+        "default_next_action": "inspect_web_read_only_input_json",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      },
+      "WEB_INPUT_OUTPUT_REJECTED": {
+        "owner": "web_execution",
+        "default_next_action": "remove_unsafe_web_input_marker",
+        "admin_link_target": "admin.full_product_health.web_task_order_health"
+      },
+      "WEB_INPUT_QUERY_EMPTY": {
+        "owner": "web_execution",
+        "default_next_action": "review_web_read_only_input",
         "admin_link_target": "admin.full_product_health.web_task_order_health"
       },
       "WEB_INPUT_QUERY_FAILED": {
@@ -162,6 +198,26 @@
         "default_next_action": "inspect_failed_analysis_jobs",
         "admin_link_target": "admin.full_product_health.news_source_ai_health"
       },
+      "NEWS_ANALYSIS_JOB_STUCK": {
+        "owner": "news_ops",
+        "default_next_action": "inspect_stale_analysis_jobs",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
+      "NEWS_INPUT_JSON_INVALID": {
+        "owner": "news_ops",
+        "default_next_action": "inspect_news_read_only_input_json",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
+      "NEWS_INPUT_OUTPUT_REJECTED": {
+        "owner": "news_ops",
+        "default_next_action": "remove_unsafe_news_input_marker",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
+      "NEWS_INPUT_QUERY_EMPTY": {
+        "owner": "news_ops",
+        "default_next_action": "review_news_read_only_input",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
       "NEWS_INPUT_QUERY_FAILED": {
         "owner": "news_ops",
         "default_next_action": "review_news_read_only_input",
@@ -172,6 +228,11 @@
         "default_next_action": "provide_news_read_only_input",
         "admin_link_target": "admin.full_product_health.news_source_ai_health"
       },
+      "NO_RECENT_AI_ANALYSIS": {
+        "owner": "news_ops",
+        "default_next_action": "review_news_ai_analysis_freshness",
+        "admin_link_target": "admin.full_product_health.news_source_ai_health"
+      },
       "NEWS_SOURCE_DEGRADED": {
         "owner": "news_ops",
         "default_next_action": "review_news_source_status",
@@ -179,6 +240,16 @@
       }
     },
     "quant_worker_checkpoint_audit": {
+      "EXECUTION_AUDIT_TABLE_MISSING": {
+        "owner": "quant_ops",
+        "default_next_action": "deploy_execution_audit_table",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      },
+      "IGNORED_HISTORICAL_WORKER": {
+        "owner": "quant_ops",
+        "default_next_action": "observe_ignored_historical_worker",
+        "admin_link_target": "admin.full_product_health.quant_worker_checkpoint_audit"
+      },
       "QUANT_EXCHANGE_AUDIT_FAILURES": {
         "owner": "quant_ops",
         "default_next_action": "review_exchange_audit_summary",
@@ -216,6 +287,21 @@
         "default_next_action": "review_failed_admin_operation",
         "admin_link_target": "admin.full_product_health.admin_readiness"
       },
+      "ADMIN_INPUT_JSON_INVALID": {
+        "owner": "admin_ops",
+        "default_next_action": "inspect_admin_read_only_input_json",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "ADMIN_INPUT_OUTPUT_REJECTED": {
+        "owner": "admin_ops",
+        "default_next_action": "remove_unsafe_admin_input_marker",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "ADMIN_INPUT_QUERY_EMPTY": {
+        "owner": "admin_ops",
+        "default_next_action": "review_admin_read_only_input",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
       "ADMIN_INPUT_QUERY_FAILED": {
         "owner": "admin_ops",
         "default_next_action": "review_admin_read_only_input",
@@ -234,6 +320,16 @@
       "ADMIN_READINESS_REVIEW_REQUIRED": {
         "owner": "admin_ops",
         "default_next_action": "complete_admin_manual_review",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "COLLECTOR_OUTPUT_REJECTED": {
+        "owner": "platform_health",
+        "default_next_action": "remove_unsafe_collector_output_marker",
+        "admin_link_target": "admin.full_product_health.admin_readiness"
+      },
+      "FULL_PRODUCT_INPUT_RUNNER_FAILED": {
+        "owner": "platform_health",
+        "default_next_action": "inspect_input_runner_failure",
         "admin_link_target": "admin.full_product_health.admin_readiness"
       },
       "FULL_PRODUCT_HEALTH_SUMMARY_FAILED": {

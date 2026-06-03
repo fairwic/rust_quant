@@ -24,7 +24,10 @@ use rust_quant_orchestration::workflow::{
     tickets_job,
 };
 use rust_quant_services::market::{get_confirmed_candles_for_backtest, CandleService};
-use rust_quant_services::rust_quan_web::ExecutionWorker;
+use rust_quant_services::rust_quan_web::{
+    run_protective_order_outcome_check_from_env, run_reconciliation_snapshot_check_from_env,
+    ExecutionWorker,
+};
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use std::collections::{BTreeSet, HashMap};
 
@@ -46,6 +49,19 @@ struct DuneSyncRequest {
 pub async fn run_modes() -> Result<()> {
     if env_is_true("IS_RUN_INTERNAL_SERVER", false) {
         return internal_server::run_internal_server().await;
+    }
+    if env_is_true("IS_RUN_PROTECTIVE_OUTCOME_CHECK", false) {
+        let result = run_protective_order_outcome_check_from_env().await?;
+        info!("🛡️ 保护单 outcome 实盘验收完成: {}", result);
+        return Ok(());
+    }
+    if env_is_true("IS_RUN_RECONCILIATION_SNAPSHOT_CHECK", false) {
+        let result = run_reconciliation_snapshot_check_from_env().await?;
+        info!(
+            "🔎 signed read-only reconciliation snapshot 完成: {}",
+            result
+        );
+        return Ok(());
     }
 
     let env = match std::env::var("APP_ENV") {

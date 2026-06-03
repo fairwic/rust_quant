@@ -15,7 +15,14 @@ use crate::rust_quan_web::{
 use async_trait::async_trait;
 use crypto_exc_all::{Instrument, ProtectiveOrderWorkingType};
 use serde_json::json;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("env lock")
+}
 
 #[test]
 fn position_stale_reconciliation_request_from_task_uses_idempotent_source_ref() {
@@ -23,7 +30,8 @@ fn position_stale_reconciliation_request_from_task_uses_idempotent_source_ref() 
         "exchange": "binance",
         "symbol": "ETHUSDT",
         "side": "buy",
-        "size": "0.01"
+        "size": "0.01",
+        "credential_ref": "web-cred-42"
     }));
 
     let request = build_exchange_reconciliation_report_request(
@@ -49,20 +57,30 @@ fn position_stale_reconciliation_request_from_task_uses_idempotent_source_ref() 
     assert_eq!(
         request.source_ref.as_deref(),
         Some(
-            "rust_quant/exchange_reconciliation/exchange_position_stale/combo/9/task/42/symbol/ETHUSDT"
+            "rq:xrec:v2:ex=binance:acct=email_sha256_6a6c26195c3682fa:cred=web-cred-42:combo=9:task=42:sym=ETHUSDT:issue=exchange_position_stale"
         )
     );
     assert_eq!(request.source_ref, repeated.source_ref);
+    assert!(!request
+        .source_ref
+        .as_deref()
+        .unwrap()
+        .contains("buyer@example.com"));
 }
 
 #[test]
-fn open_order_conflict_reconciliation_request_from_task_uses_allowed_issue_type() {
-    let task = task(json!({
+fn open_order_conflict_reconciliation_request_uses_hashed_account_and_safe_credential_ref() {
+    let mut task = task(json!({
         "exchange": "binance",
         "symbol": "ETHUSDT",
         "side": "buy",
-        "size": "0.01"
+        "size": "0.01",
+        "api_credential_id": 7788,
+        "api_key": "plain-api-key",
+        "api_secret": "plain-api-secret",
+        "passphrase": "plain-passphrase"
     }));
+    task.buyer_email = "  Buyer@Example.COM  ".to_string();
 
     let request = build_exchange_reconciliation_report_request(
         &task,
@@ -78,13 +96,49 @@ fn open_order_conflict_reconciliation_request_from_task_uses_allowed_issue_type(
     assert_eq!(
         request.source_ref.as_deref(),
         Some(
-            "rust_quant/exchange_reconciliation/exchange_open_order_conflict/combo/9/task/42/symbol/ETHUSDT"
+            "rq:xrec:v2:ex=binance:acct=email_sha256_6a6c26195c3682fa:cred=7788:combo=9:task=42:sym=ETHUSDT:issue=exchange_open_order_conflict"
         )
     );
+    let source_ref = request.source_ref.as_deref().unwrap();
+    assert!(!source_ref.contains("Buyer@Example.COM"));
+    assert!(!source_ref.contains("plain-api-key"));
+    assert!(!source_ref.contains("plain-api-secret"));
+    assert!(!source_ref.contains("plain-passphrase"));
     assert_eq!(
         request.message.as_deref(),
         Some("unexpected open order blocks execution")
     );
+}
+
+#[test]
+fn reconciliation_request_defaults_unknown_credential_ref_without_rendering_secret_fields() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETHUSDT",
+        "side": "buy",
+        "size": "0.01",
+        "api_key": "plain-api-key",
+        "api_secret": "plain-api-secret",
+        "passphrase": "plain-passphrase"
+    }));
+
+    let request = build_exchange_reconciliation_report_request(
+        &task,
+        ExchangeReconciliationIssueType::ExchangeOpenOrderConflict,
+        None,
+        "unexpected open order blocks execution",
+    );
+
+    assert_eq!(
+        request.source_ref.as_deref(),
+        Some(
+            "rq:xrec:v2:ex=binance:acct=email_sha256_6a6c26195c3682fa:cred=cred_unknown:combo=9:task=42:sym=ETHUSDT:issue=exchange_open_order_conflict"
+        )
+    );
+    let rendered = serde_json::to_string(&request).unwrap();
+    assert!(!rendered.contains("plain-api-key"));
+    assert!(!rendered.contains("plain-api-secret"));
+    assert!(!rendered.contains("plain-passphrase"));
 }
 
 #[test]
@@ -93,7 +147,8 @@ fn read_only_exchange_snapshot_builds_reconciliation_requests_without_live_mutat
         "exchange": "binance",
         "symbol": "ETHUSDT",
         "side": "buy",
-        "size": "0.01"
+        "size": "0.01",
+        "credential_ref": "web-cred-42"
     }));
     let instrument = Instrument::perp("ETH", "USDT");
     let positions = vec![Position {
@@ -143,7 +198,7 @@ fn read_only_exchange_snapshot_builds_reconciliation_requests_without_live_mutat
     assert_eq!(
         requests[0].source_ref.as_deref(),
         Some(
-            "rust_quant/exchange_reconciliation/exchange_position_stale/combo/9/task/42/symbol/ETHUSDT"
+            "rq:xrec:v2:ex=binance:acct=email_sha256_6a6c26195c3682fa:cred=web-cred-42:combo=9:task=42:sym=ETHUSDT:issue=exchange_position_stale"
         )
     );
     assert_eq!(
@@ -153,7 +208,7 @@ fn read_only_exchange_snapshot_builds_reconciliation_requests_without_live_mutat
     assert_eq!(
         requests[1].source_ref.as_deref(),
         Some(
-            "rust_quant/exchange_reconciliation/exchange_open_order_conflict/combo/9/task/42/symbol/ETHUSDT"
+            "rq:xrec:v2:ex=binance:acct=email_sha256_6a6c26195c3682fa:cred=web-cred-42:combo=9:task=42:sym=ETHUSDT:issue=exchange_open_order_conflict"
         )
     );
     let rendered = serde_json::to_string(&requests).unwrap();
@@ -169,7 +224,8 @@ fn live_order_reconciliation_conflict_builds_no_mutation_failed_report() {
         "exchange": "binance",
         "symbol": "ETHUSDT",
         "side": "buy",
-        "size": "0.01"
+        "size": "0.01",
+        "credential_ref": "web-cred-42"
     }));
     let order_task =
         ExecutionOrderTask::from_task_with_default(&task, ExchangeId::Binance).unwrap();
@@ -206,6 +262,53 @@ fn live_order_reconciliation_conflict_builds_no_mutation_failed_report() {
     assert_eq!(raw_payload["place_order_allowed"], false);
     assert_eq!(raw_payload["mutation_allowed"], false);
     assert_eq!(raw_payload["issues"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        raw_payload["source_refs"],
+        json!([
+            "rq:xrec:v2:ex=binance:acct=email_sha256_6a6c26195c3682fa:cred=web-cred-42:combo=9:task=42:sym=ETHUSDT:issue=exchange_position_stale",
+            "rq:xrec:v2:ex=binance:acct=email_sha256_6a6c26195c3682fa:cred=web-cred-42:combo=9:task=42:sym=ETHUSDT:issue=exchange_open_order_conflict"
+        ])
+    );
+}
+
+#[test]
+fn live_order_reconciliation_gateway_read_failure_builds_no_mutation_failed_report() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETHUSDT",
+        "side": "buy",
+        "size": "0.01",
+        "credential_ref": "web-cred-42"
+    }));
+    let order_task =
+        ExecutionOrderTask::from_task_with_default(&task, ExchangeId::Binance).unwrap();
+
+    let report = build_live_order_blocked_by_exchange_reconciliation_read_error_report(
+        &task,
+        &order_task,
+        "read-only exchange position reconciliation failed before live order: fixture timeout",
+    );
+    let raw_payload: Value =
+        serde_json::from_str(report.raw_payload_json.as_deref().unwrap()).unwrap();
+
+    assert_eq!(report.execution_status, "failed");
+    assert_eq!(report.order_status, "failed");
+    assert_eq!(report.exchange, "binance");
+    assert_eq!(report.order_side, "buy");
+    assert!(report
+        .error_message
+        .as_deref()
+        .unwrap()
+        .contains("read-only exchange reconciliation failed before live order"));
+    assert_eq!(raw_payload["stage"], "exchange_reconciliation_read_only");
+    assert_eq!(raw_payload["gateway_read_failed"], true);
+    assert_eq!(raw_payload["place_order_allowed"], false);
+    assert_eq!(raw_payload["mutation_allowed"], false);
+    assert_eq!(raw_payload["place_order_retried"], false);
+    assert_eq!(
+        raw_payload["source_ref"],
+        "rq:xrec:v2:ex=binance:acct=email_sha256_6a6c26195c3682fa:cred=web-cred-42:combo=9:task=42:sym=ETHUSDT:issue=gateway_read_failed"
+    );
 }
 
 #[test]
@@ -458,7 +561,7 @@ fn filled_long_with_stale_strategy_reference_rebases_protective_stop_below_fill_
 }
 
 #[test]
-fn protective_order_ack_maps_to_confirmed_sync_outcome() {
+fn protective_order_ack_requires_active_query_confirmation() {
     let ack = OrderAck {
         exchange: ExchangeId::Binance,
         exchange_symbol: "ETHUSDT".to_string(),
@@ -473,7 +576,10 @@ fn protective_order_ack_maps_to_confirmed_sync_outcome() {
 
     assert_eq!(
         outcome,
-        ProtectionSyncOutcome::confirmed("sl-123", "place_protective_order")
+        ProtectionSyncOutcome::uncertain(
+            "query_protective_order",
+            "protective order ack requires active query confirmation"
+        )
     );
 }
 
@@ -770,7 +876,15 @@ fn attached_stop_loss_exchanges_require_ack_or_order_detail_evidence() {
     for (exchange, raw) in [
         (
             "okx",
-            json!({"ordId":"10001","attachAlgoClOrdId":"rq-sl-10001"}),
+            json!({
+                "ordId":"10001",
+                "attachAlgoOrds":[{
+                    "attachAlgoId":"rq-sl-10001",
+                    "slTriggerPx":"2200.5",
+                    "slOrdPx":"-1",
+                    "slTriggerPxType":"last"
+                }]
+            }),
         ),
         (
             "bitget",
@@ -862,6 +976,34 @@ fn live_order_confirmation_requires_exact_opt_in_token() {
     assert!(!live_order_confirmation_valid(false, None));
     assert!(!live_order_confirmation_valid(false, Some("true")));
     assert!(!live_order_confirmation_valid(false, Some("I_UNDERSTAND")));
+}
+
+#[test]
+fn reconciliation_only_mode_is_explicit_opt_in() {
+    let _guard = env_lock();
+    let previous = std::env::var("EXECUTION_WORKER_RECONCILIATION_ONLY").ok();
+
+    std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY");
+    assert!(!reconciliation_only_mode_from_env());
+    std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", "true");
+    assert!(reconciliation_only_mode_from_env());
+    std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", "yes");
+    assert!(reconciliation_only_mode_from_env());
+    std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", "false");
+    assert!(!reconciliation_only_mode_from_env());
+
+    match previous {
+        Some(value) => std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", value),
+        None => std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY"),
+    }
+}
+
+#[test]
+fn reconciliation_only_symbol_guard_excludes_linkusdt() {
+    assert!(is_protected_link_symbol("LINKUSDT"));
+    assert!(is_protected_link_symbol("LINK-USDT-SWAP"));
+    assert!(is_protected_link_symbol("link-usdt"));
+    assert!(!is_protected_link_symbol("ETHUSDT"));
 }
 
 #[test]

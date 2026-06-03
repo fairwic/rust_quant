@@ -423,7 +423,7 @@ pub(super) fn ensure_live_order_confirmation() -> Result<()> {
     }
 }
 
-pub(super) fn parse_exchange(raw: &str) -> Result<ExchangeId> {
+pub(crate) fn parse_exchange(raw: &str) -> Result<ExchangeId> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "币安" => Ok(ExchangeId::Binance),
         other => ExchangeId::from_str(other).map_err(anyhow::Error::msg),
@@ -478,7 +478,7 @@ pub(super) fn is_duplicate_client_order_id_error(error_message: &str) -> bool {
             || normalized.contains("clordid"))
 }
 
-pub(super) fn parse_instrument(symbol: &str) -> Result<Instrument> {
+pub(crate) fn parse_instrument(symbol: &str) -> Result<Instrument> {
     let normalized = symbol.trim().to_ascii_uppercase();
     let parts: Vec<&str> = normalized.split('-').collect();
     if parts.len() >= 3 && parts[2] == "SWAP" {
