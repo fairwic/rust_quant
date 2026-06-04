@@ -13,6 +13,7 @@ use std::time::Duration;
 const BINANCE_EXCHANGE: &str = "binance";
 const OKX_EXCHANGE: &str = "okx";
 const BITGET_EXCHANGE: &str = "bitget";
+const BYBIT_EXCHANGE: &str = "bybit";
 const GATE_EXCHANGE: &str = "gate";
 const KUCOIN_EXCHANGE: &str = "kucoin";
 const KUCOIN_FUTURES_BASE_URL_ENV: &str = "KUCOIN_FUTURES_BASE_URL";
@@ -21,10 +22,10 @@ const PERPETUAL_MARKET_TYPE: &str = "perpetual";
 const PERPETUAL_CONTRACT_TYPE: &str = "PERPETUAL";
 const MAJOR_LISTING_EXCHANGES: &[&str] = &["binance", "okx"];
 const DEFAULT_EXCHANGE_SYMBOL_SYNC_SOURCES: &[&str] =
-    &["binance", "okx", "bitget", "gate", "kucoin"];
+    &["binance", "okx", "bitget", "bybit", "gate"];
 
 pub fn parse_exchange_symbol_sync_sources(input: Option<&str>) -> Result<Vec<String>> {
-    let raw_sources = input.unwrap_or("binance okx bitget gate kucoin");
+    let raw_sources = input.unwrap_or("binance okx bitget bybit gate");
     let mut sources = Vec::new();
     for raw_source in raw_sources.split([',', ' ', '\n', '\t']) {
         if raw_source.trim().is_empty() {
@@ -56,10 +57,11 @@ pub fn normalize_exchange_symbol_sync_source(source: &str) -> Result<&'static st
         "binance" | "binance_usdm" | "binance_perpetual" => Ok("binance"),
         "okx" | "okx_swap" | "okx_perpetual" => Ok("okx"),
         "bitget" | "bitget_usdt_futures" | "bitget_perpetual" => Ok("bitget"),
+        "bybit" | "bybit_linear" | "bybit_usdt_perpetual" | "bybit_perpetual" => Ok("bybit"),
         "gate" | "gate_usdt_futures" | "gate_perpetual" => Ok("gate"),
         "kucoin" | "kucoin_futures" | "kucoin_perpetual" => Ok("kucoin"),
         other => Err(anyhow!(
-            "unsupported exchange symbol sync source={}, expected binance/okx/bitget/gate/kucoin",
+            "unsupported exchange symbol sync source={}, expected binance/okx/bitget/bybit/gate/kucoin",
             other
         )),
     }
@@ -77,6 +79,10 @@ pub trait BinanceExchangeInfoProvider: Send + Sync {
         Err(anyhow!(
             "Bitget USDT futures contracts provider is not configured"
         ))
+    }
+
+    async fn fetch_bybit_linear_instruments(&self) -> Result<Value> {
+        Err(anyhow!("Bybit linear instruments provider is not configured"))
     }
 
     async fn fetch_gate_usdt_futures_contracts(&self) -> Result<Value> {
@@ -114,6 +120,12 @@ impl BinanceExchangeInfoProvider for LiveBinanceExchangeInfoProvider {
         fetch_json("https://api.bitget.com/api/v2/mix/market/contracts?productType=USDT-FUTURES")
             .await
             .context("fetch Bitget USDT futures contracts failed")
+    }
+
+    async fn fetch_bybit_linear_instruments(&self) -> Result<Value> {
+        fetch_json("https://api.bybit.com/v5/market/instruments-info?category=linear")
+            .await
+            .context("fetch Bybit linear instruments failed")
     }
 
     async fn fetch_gate_usdt_futures_contracts(&self) -> Result<Value> {
@@ -233,6 +245,16 @@ impl ExchangeSymbolSyncService {
         self.persist_symbols_with_report(symbols).await
     }
 
+    pub async fn sync_bybit_linear_symbols_with_report(&self) -> Result<ExchangeSymbolSyncReport> {
+        let payload = self
+            .provider
+            .fetch_bybit_linear_instruments()
+            .await
+            .context("fetch Bybit linear instruments")?;
+        let symbols = Self::parse_bybit_linear_instruments(&payload)?;
+        self.persist_symbols_with_report(symbols).await
+    }
+
     pub async fn sync_gate_usdt_futures_symbols_with_report(
         &self,
     ) -> Result<ExchangeSymbolSyncReport> {
@@ -262,6 +284,7 @@ impl ExchangeSymbolSyncService {
             "binance" => self.sync_binance_usdm_perpetual_symbols_with_report().await,
             "okx" => self.sync_okx_swap_symbols_with_report().await,
             "bitget" => self.sync_bitget_usdt_futures_symbols_with_report().await,
+            "bybit" => self.sync_bybit_linear_symbols_with_report().await,
             "gate" => self.sync_gate_usdt_futures_symbols_with_report().await,
             "kucoin" => self.sync_kucoin_futures_symbols_with_report().await,
             other => Err(anyhow!(
@@ -443,6 +466,59 @@ impl ExchangeSymbolSyncService {
             row.tick_size = optional_string(contract, "priceEndStep");
             row.min_notional = optional_string(contract, "minTradeUSDT");
             row.raw_payload = Some(contract.clone());
+            rows.push(row);
+        }
+
+        Ok(rows)
+    }
+
+    pub fn parse_bybit_linear_instruments(payload: &Value) -> Result<Vec<ExchangeSymbol>> {
+        let instruments = payload
+            .get("result")
+            .and_then(|result| result.get("list"))
+            .and_then(Value::as_array)
+            .context("Bybit instruments missing result.list array")?;
+
+        let mut rows = Vec::new();
+        for instrument in instruments {
+            let quote_asset =
+                required_str_for(instrument, "quoteCoin", "Bybit instruments")?.to_uppercase();
+            if quote_asset != "USDT" {
+                continue;
+            }
+
+            let contract_type = optional_string(instrument, "contractType").unwrap_or_default();
+            if !contract_type.to_ascii_lowercase().contains("perpetual") {
+                continue;
+            }
+
+            let exchange_symbol =
+                required_str_for(instrument, "symbol", "Bybit instruments")?.to_string();
+            let base_asset =
+                required_str_for(instrument, "baseCoin", "Bybit instruments")?.to_uppercase();
+            let status =
+                required_str_for(instrument, "status", "Bybit instruments")?.to_string();
+
+            let mut row = ExchangeSymbol::new(
+                BYBIT_EXCHANGE.to_string(),
+                PERPETUAL_MARKET_TYPE.to_string(),
+                exchange_symbol,
+                normalize_swap_symbol(&base_asset, &quote_asset, None),
+                base_asset,
+                quote_asset,
+                status,
+            );
+            row.contract_type = Some(contract_type);
+            if let Some(price_filter) = instrument.get("priceFilter") {
+                row.tick_size = optional_string(price_filter, "tickSize");
+            }
+            if let Some(lot_size_filter) = instrument.get("lotSizeFilter") {
+                row.min_qty = optional_string(lot_size_filter, "minOrderQty");
+                row.max_qty = optional_string(lot_size_filter, "maxOrderQty");
+                row.step_size = optional_string(lot_size_filter, "qtyStep");
+                row.min_notional = optional_string(lot_size_filter, "minNotionalValue");
+            }
+            row.raw_payload = Some(instrument.clone());
             rows.push(row);
         }
 

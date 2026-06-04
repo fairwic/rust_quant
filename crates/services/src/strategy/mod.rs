@@ -4,6 +4,7 @@ pub mod backtest_service;
 pub mod bsc_event_arb_snapshot;
 pub mod live_decision;
 pub mod live_parity;
+pub mod pre_major_listing_perp_catchup;
 pub mod strategy_config_service;
 pub mod strategy_data_service;
 pub mod strategy_execution_service;

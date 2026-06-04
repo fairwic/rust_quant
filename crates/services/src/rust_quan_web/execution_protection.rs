@@ -120,7 +120,7 @@ pub(super) fn attached_stop_loss_order_ack_outcome(
                 ),
             ))
         }
-        ExchangeId::Binance => None,
+        ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => None,
     }
 }
 
@@ -146,7 +146,7 @@ fn attached_stop_loss_key_matches(exchange: ExchangeId, key: &str) -> bool {
                 || normalized == "sltriggerpxtype"
         }
         ExchangeId::Bitget => normalized == "presetstoplossprice" || normalized == "stoplossprice",
-        ExchangeId::Binance => false,
+        ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => false,
     }
 }
 
@@ -636,7 +636,11 @@ pub(super) async fn prearm_protective_order_if_required(
 
 pub(super) fn exchange_uses_prearmed_protective_order(exchange: ExchangeId) -> bool {
     match exchange {
-        ExchangeId::Binance | ExchangeId::Okx | ExchangeId::Bitget => false,
+        ExchangeId::Binance
+        | ExchangeId::Okx
+        | ExchangeId::Bitget
+        | ExchangeId::Bybit
+        | ExchangeId::Gate => false,
     }
 }
 

@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const EXCHANGE_SYMBOL_LISTING_EVENTS_MIGRATION: &str =
     include_str!("../../../migrations/20260424165000_create_exchange_symbol_listing_events.sql");
@@ -202,6 +202,48 @@ fn sample_bitget_usdt_futures_contracts() -> serde_json::Value {
     })
 }
 
+fn sample_bybit_linear_instruments() -> serde_json::Value {
+    json!({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "category": "linear",
+            "list": [
+                {
+                    "symbol": "TESTUSDT",
+                    "baseCoin": "TEST",
+                    "quoteCoin": "USDT",
+                    "status": "Trading",
+                    "contractType": "LinearPerpetual",
+                    "priceFilter": {
+                        "tickSize": "0.0001"
+                    },
+                    "lotSizeFilter": {
+                        "minOrderQty": "1",
+                        "maxOrderQty": "100000",
+                        "qtyStep": "1",
+                        "minNotionalValue": "5"
+                    }
+                },
+                {
+                    "symbol": "TESTUSDC",
+                    "baseCoin": "TEST",
+                    "quoteCoin": "USDC",
+                    "status": "Trading",
+                    "contractType": "LinearPerpetual"
+                },
+                {
+                    "symbol": "TESTUSDT-260626",
+                    "baseCoin": "TEST",
+                    "quoteCoin": "USDT",
+                    "status": "Trading",
+                    "contractType": "LinearFutures"
+                }
+            ]
+        }
+    })
+}
+
 fn sample_gate_usdt_futures_contracts() -> serde_json::Value {
     json!([
         {
@@ -307,6 +349,18 @@ fn detects_okx_listing_after_non_mainstream_history() {
 
     assert_eq!(signal.exchange, "okx");
     assert_eq!(signal.prior_non_mainstream_exchanges, vec!["gate"]);
+}
+
+#[test]
+fn detects_binance_listing_after_bybit_history() {
+    let new_listing = listing_event("binance", "TEST");
+    let history = vec![listing_event("bybit", "TEST"), new_listing.clone()];
+
+    let signal = ExchangeSymbolSyncService::detect_major_exchange_listing(&new_listing, &history)
+        .expect("binance after bybit should be a major listing signal");
+
+    assert_eq!(signal.exchange, "binance");
+    assert_eq!(signal.prior_non_mainstream_exchanges, vec!["bybit"]);
 }
 
 #[test]
@@ -456,11 +510,12 @@ fn exchange_symbol_sync_runs_ddl_has_table_and_column_comments() {
 fn exchange_symbol_sync_sources_accept_default_csv_and_space_separated_values() {
     assert_eq!(
         parse_exchange_symbol_sync_sources(None).expect("default sources"),
-        vec!["binance", "okx", "bitget", "gate", "kucoin"]
+        vec!["binance", "okx", "bitget", "bybit", "gate"]
     );
     assert_eq!(
-        parse_exchange_symbol_sync_sources(Some(" okx, gate kucoin ")).expect("mixed separators"),
-        vec!["okx", "gate", "kucoin"]
+        parse_exchange_symbol_sync_sources(Some(" okx, bybit gate kucoin "))
+            .expect("mixed separators"),
+        vec!["okx", "bybit", "gate", "kucoin"]
     );
 }
 
@@ -527,6 +582,29 @@ fn parse_bitget_usdt_futures_contracts_normalizes_to_swap_symbols() {
     assert_eq!(rows[0].min_qty.as_deref(), Some("1"));
     assert_eq!(rows[0].step_size.as_deref(), Some("0.01"));
     assert_eq!(rows[0].tick_size.as_deref(), Some("1"));
+}
+
+#[test]
+fn parse_bybit_linear_instruments_keeps_usdt_perpetuals() {
+    let rows = ExchangeSymbolSyncService::parse_bybit_linear_instruments(
+        &sample_bybit_linear_instruments(),
+    )
+    .expect("bybit instruments should parse");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].exchange, "bybit");
+    assert_eq!(rows[0].market_type, "perpetual");
+    assert_eq!(rows[0].exchange_symbol, "TESTUSDT");
+    assert_eq!(rows[0].normalized_symbol, "TEST-USDT-SWAP");
+    assert_eq!(rows[0].base_asset, "TEST");
+    assert_eq!(rows[0].quote_asset, "USDT");
+    assert_eq!(rows[0].status, "Trading");
+    assert_eq!(rows[0].contract_type.as_deref(), Some("LinearPerpetual"));
+    assert_eq!(rows[0].tick_size.as_deref(), Some("0.0001"));
+    assert_eq!(rows[0].min_qty.as_deref(), Some("1"));
+    assert_eq!(rows[0].max_qty.as_deref(), Some("100000"));
+    assert_eq!(rows[0].step_size.as_deref(), Some("1"));
+    assert_eq!(rows[0].min_notional.as_deref(), Some("5"));
 }
 
 #[test]
@@ -601,41 +679,30 @@ async fn live_kucoin_provider_uses_base_url_override() {
 fn start_json_server(body: String) -> (String, Arc<Mutex<Option<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
     let addr = listener.local_addr().expect("test server addr");
-    listener
-        .set_nonblocking(true)
-        .expect("set test server nonblocking");
     let received = Arc::new(Mutex::new(None));
     let received_for_thread = received.clone();
 
     thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    let mut buffer = [0_u8; 4096];
-                    let size = stream.read(&mut buffer).expect("read request");
-                    let request = String::from_utf8_lossy(&buffer[..size]).to_string();
-                    *received_for_thread.lock().unwrap() =
-                        request.lines().next().map(ToString::to_string);
-                    let response = format!(
-                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                        body.len(),
-                        body
-                    );
-                    stream
-                        .write_all(response.as_bytes())
-                        .expect("write response");
-                    break;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if Instant::now() >= deadline {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => panic!("accept request: {error}"),
-            }
-        }
+        let (mut stream, _) = listener.accept().expect("accept request");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set read timeout");
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .expect("set write timeout");
+        let mut buffer = [0_u8; 4096];
+        let size = stream.read(&mut buffer).expect("read request");
+        let request = String::from_utf8_lossy(&buffer[..size]).to_string();
+        *received_for_thread.lock().unwrap() =
+            request.lines().next().map(ToString::to_string);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
     });
 
     (format!("http://{addr}"), received)

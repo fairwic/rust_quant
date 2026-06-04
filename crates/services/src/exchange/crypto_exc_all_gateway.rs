@@ -1,9 +1,10 @@
 use crypto_exc_all::{
-    Balance, BinanceExchangeConfig, BitgetExchangeConfig, CancelOrderRequest, Candle, CandleQuery,
-    CryptoSdk, Error, ExchangeId, Fill, FillListQuery, Instrument, MarginMode, OkxExchangeConfig,
-    Order, OrderAck, OrderListQuery, OrderQuery, OrderSide, OrderType, PlaceOrderRequest, Position,
-    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderQuery,
-    ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
+    Balance, BinanceExchangeConfig, BitgetExchangeConfig, BybitExchangeConfig, CancelOrderRequest,
+    Candle, CandleQuery, CryptoSdk, Error, ExchangeId, Fill, FillListQuery, GateExchangeConfig,
+    Instrument, MarginMode, OkxExchangeConfig, Order, OrderAck, OrderListQuery, OrderQuery,
+    OrderSide, OrderType, PlaceOrderRequest, Position, PrepareOrderSettingsRequest,
+    PrepareOrderSettingsResult, ProtectiveOrderQuery, ProtectiveOrderRequest, Result, SdkConfig,
+    Ticker, TimeInForce,
 };
 use serde_json::json;
 
@@ -122,6 +123,29 @@ impl CryptoExcAllGateway {
                     api_timeout_ms: None,
                     proxy_url: None,
                     product_type: None,
+                }),
+                ..SdkConfig::default()
+            },
+            ExchangeId::Bybit => SdkConfig {
+                bybit: Some(BybitExchangeConfig {
+                    api_key,
+                    api_secret,
+                    api_url: None,
+                    api_timeout_ms: None,
+                    recv_window_ms: None,
+                    proxy_url: None,
+                    category: None,
+                }),
+                ..SdkConfig::default()
+            },
+            ExchangeId::Gate => SdkConfig {
+                gate: Some(GateExchangeConfig {
+                    api_key,
+                    api_secret,
+                    api_url: None,
+                    api_timeout_ms: None,
+                    proxy_url: None,
+                    settle: None,
                 }),
                 ..SdkConfig::default()
             },

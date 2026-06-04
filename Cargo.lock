@@ -1079,6 +1079,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
 
 [[package]]
+name = "bybit_rs"
+version = "0.1.0"
+dependencies = [
+ "dotenv",
+ "hex",
+ "hmac",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.16",
+]
+
+[[package]]
 name = "byte-slice-cast"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1466,7 +1480,9 @@ version = "0.1.1"
 dependencies = [
  "bitget_rs",
  "bnb_rs",
+ "bybit_rs",
  "dotenv",
+ "gate_rs",
  "okx",
  "serde",
  "serde_json",
@@ -2156,6 +2172,20 @@ name = "futures-utils-wasm"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42012b0f064e01aa58b545fe3727f90f7dd4020f4a3ea735b50344965f5a57e9"
+
+[[package]]
+name = "gate_rs"
+version = "0.1.0"
+dependencies = [
+ "dotenv",
+ "hex",
+ "hmac",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.16",
+]
 
 [[package]]
 name = "generic-array"
