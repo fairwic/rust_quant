@@ -62,6 +62,34 @@ pub(crate) fn build_exchange_reconciliation_requests_from_read_only_snapshot(
     requests
 }
 
+pub(crate) fn build_exchange_reconciliation_sync_requests_from_read_only_snapshot(
+    task: &ExecutionTask,
+    positions: &[Position],
+    open_orders: &[Order],
+    detected_at: Option<String>,
+) -> Vec<ExchangeReconciliationReportRequest> {
+    let mut requests = build_exchange_reconciliation_requests_from_read_only_snapshot(
+        task,
+        positions,
+        open_orders,
+        detected_at.clone(),
+    );
+    let position_count = positions
+        .iter()
+        .filter(|position| positive_decimal_text(&position.size))
+        .count();
+    if position_count == 0 {
+        requests.push(build_exchange_reconciliation_report_request(
+            task,
+            ExchangeReconciliationIssueType::ExchangePositionFlat,
+            detected_at,
+            "read-only exchange snapshot confirmed zero position; local position snapshot sync allowed; place_order_allowed=false; mutation_allowed=false",
+        ));
+    }
+
+    requests
+}
+
 fn build_live_order_blocked_by_exchange_reconciliation_report(
     task: &ExecutionTask,
     order_task: &ExecutionOrderTask,

@@ -45,6 +45,12 @@ pub use public_data_service::PublicDataService;
 mod scanner_service;
 pub use scanner_service::ScannerService;
 
+mod market_velocity_signal;
+pub use market_velocity_signal::{
+    build_market_velocity_strategy_signal_request, MarketVelocityStrategySignalBlocker,
+    MarketVelocityStrategySignalConfig, MarketVelocityStrategySignalDecision,
+};
+
 mod flow_analyzer;
 pub use flow_analyzer::FlowAnalyzer;
 

@@ -20,11 +20,13 @@ pub use execution_capability::{
 };
 pub use execution_protective_outcome_check::run_protective_order_outcome_check_from_env;
 pub use execution_reconciliation_snapshot_check::{
+    build_close_fill_writeback_candidates, build_close_fill_writeback_request_from_candidate,
     build_reconciliation_snapshot_requests, build_reconciliation_snapshot_task,
     run_reconciliation_snapshot_check_from_env, ReconciliationSnapshotCheckConfig,
 };
 pub use execution_task_client::{
-    ExchangeOrderResult, ExchangeReconciliationIssueType, ExchangeReconciliationReportRequest,
+    ExchangeCloseFillWritebackRequest, ExchangeCloseFillWritebackResponse, ExchangeOrderResult,
+    ExchangeReconciliationIssueType, ExchangeReconciliationReportRequest,
     ExchangeReconciliationReportResponse, ExecutionTask, ExecutionTaskClient, ExecutionTaskConfig,
     ExecutionTaskConfirmationLease, ExecutionTaskConfirmationLeaseItem, ExecutionTaskLease,
     ExecutionTaskLeaseRequest, ExecutionTaskReportRequest, ExecutionTaskReportResponse,

@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
+use super::market_velocity_signal::dispatch_market_velocity_strategy_signal_if_enabled;
 use super::CandleService;
 use crate::notification::TelegramNotifier;
 
@@ -538,7 +539,7 @@ impl ScannerService {
                 is_top50_rank(Some(new_rank)) || is_top50_rank(old_rank),
             )
             .await;
-        let event = build_rank_velocity_event(
+        let mut event = build_rank_velocity_event(
             symbol,
             timeframe,
             old_rank,
@@ -550,8 +551,19 @@ impl ScannerService {
             detected_at,
             technical_capture,
         );
-        if let Err(e) = self.anomaly_repo.save_rank_event(&event).await {
-            error!("Failed to save rank velocity event for {}: {:?}", symbol, e);
+        match self.anomaly_repo.save_rank_event(&event).await {
+            Ok(id) => {
+                event.id = Some(id);
+                if let Err(e) = dispatch_market_velocity_strategy_signal_if_enabled(&event).await {
+                    error!(
+                        "Failed to dispatch rank velocity strategy signal for {}: {:?}",
+                        symbol, e
+                    );
+                }
+            }
+            Err(e) => {
+                error!("Failed to save rank velocity event for {}: {:?}", symbol, e);
+            }
         }
     }
 
@@ -572,7 +584,7 @@ impl ScannerService {
                 is_top50_rank(new_rank) || is_top50_rank(old_rank),
             )
             .await;
-        let event = build_top_list_event(
+        let mut event = build_top_list_event(
             symbol,
             is_entry,
             old_rank,
@@ -583,8 +595,19 @@ impl ScannerService {
             detected_at,
             technical_capture,
         );
-        if let Err(e) = self.anomaly_repo.save_rank_event(&event).await {
-            error!("Failed to save top list event for {}: {:?}", symbol, e);
+        match self.anomaly_repo.save_rank_event(&event).await {
+            Ok(id) => {
+                event.id = Some(id);
+                if let Err(e) = dispatch_market_velocity_strategy_signal_if_enabled(&event).await {
+                    error!(
+                        "Failed to dispatch top list strategy signal for {}: {:?}",
+                        symbol, e
+                    );
+                }
+            }
+            Err(e) => {
+                error!("Failed to save top list event for {}: {:?}", symbol, e);
+            }
         }
     }
 

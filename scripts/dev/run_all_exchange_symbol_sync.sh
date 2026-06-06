@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SINGLE_SYNC_SCRIPT="${REPO_ROOT}/scripts/dev/run_exchange_symbol_sync.sh"
 
-: "${EXCHANGE_SYMBOL_SOURCES:=binance okx bitget gate kucoin}"
+: "${EXCHANGE_SYMBOL_SOURCES:=binance okx bitget bybit gate}"
 
 normalize_sources() {
     echo "$1" | tr ',' ' '

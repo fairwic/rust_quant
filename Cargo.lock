@@ -4337,6 +4337,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "crypto_exc_all",
  "dotenv",
  "env_logger",
  "okx",

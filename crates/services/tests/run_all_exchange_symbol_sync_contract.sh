@@ -88,14 +88,14 @@ test_default_order() {
 binance
 okx
 bitget
+bybit
 gate
-kucoin
 EOF
 
     assert_file_equals "${expected_file}" "${actual_file}"
     assert_contains "==> syncing exchange symbols for 5 sources" "${stdout_file}"
     assert_contains "[1/5] source=binance" "${stdout_file}"
-    assert_contains "[5/5] source=kucoin" "${stdout_file}"
+    assert_contains "[5/5] source=gate" "${stdout_file}"
     assert_contains "completed exchange symbol sync for all sources" "${stdout_file}"
 }
 

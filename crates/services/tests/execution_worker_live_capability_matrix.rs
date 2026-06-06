@@ -82,17 +82,19 @@ fn matrix_declares_unwired_exchanges_as_unsupported_without_guessing() {
         LiveWorkerCapabilityStatus::Unsupported
     );
 
-    let unknown = worker_live_capability_for_exchange("bybit");
-    assert_eq!(unknown.exchange, WorkerLiveExchange::Unknown);
-    assert_eq!(unknown.exchange_name, "bybit");
-    assert_eq!(
-        unknown.protection_placement,
-        ProtectionPlacementMode::Unsupported
-    );
-    assert_eq!(
-        unknown.order_lookup,
-        LiveWorkerCapabilityStatus::Unsupported
-    );
+    for exchange in ["bybit", "gate"] {
+        let unknown = worker_live_capability_for_exchange(exchange);
+        assert_eq!(unknown.exchange, WorkerLiveExchange::Unknown);
+        assert_eq!(unknown.exchange_name, exchange);
+        assert_eq!(
+            unknown.protection_placement,
+            ProtectionPlacementMode::Unsupported
+        );
+        assert_eq!(
+            unknown.order_lookup,
+            LiveWorkerCapabilityStatus::Unsupported
+        );
+    }
 }
 
 #[test]

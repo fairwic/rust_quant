@@ -68,6 +68,31 @@ fn pending_close_worker_e2e_smoke_hands_off_from_web_review_to_worker() {
 }
 
 #[test]
+fn market_velocity_dry_run_e2e_smoke_chains_core_signal_web_task_and_worker() {
+    let script_path = repo_root()
+        .join("scripts")
+        .join("dev")
+        .join("run_market_velocity_dry_run_e2e.sh");
+    let script = fs::read_to_string(&script_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", script_path.display(), error));
+
+    assert!(script.contains("seed_market_velocity_runtime_fixture_for_dry_run_worker"));
+    assert!(script.contains("market_velocity_synthetic_event_dispatches_to_running_quant_web"));
+    assert!(script.contains("MARKET_VELOCITY_SIGNAL_DISPATCH_MODE=web"));
+    assert!(script.contains("MARKET_VELOCITY_STRATEGY_SLUG=market_velocity"));
+    assert!(script.contains("EXECUTION_WORKER_DRY_RUN=true"));
+    assert!(script.contains("EXECUTION_WORKER_TARGET_TASK_IDS=\"${new_task_id}\""));
+    assert!(script.contains("for candidate in quant_core_postgres postgres pgsql"));
+    assert!(script.contains("podman ps --format '{{.Names}}'"));
+    assert!(script.contains("podman inspect -f '{{.State.Running}}'"));
+    assert!(script.contains("run_execution_worker_dry_run.sh"));
+    assert!(script.contains("task_status IN ('completed', 'pending_protection_sync')"));
+    assert!(script.contains("order_status = 'dry_run'"));
+    assert!(script.contains("source_signal_type"));
+    assert!(script.contains("market_velocity dry-run e2e smoke completed"));
+}
+
+#[test]
 fn quant_core_audit_smoke_script_runs_ddl_and_real_postgres_test() {
     let script_path = repo_root()
         .join("scripts")

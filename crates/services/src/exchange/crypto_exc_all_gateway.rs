@@ -1,10 +1,10 @@
 use crypto_exc_all::{
     Balance, BinanceExchangeConfig, BitgetExchangeConfig, BybitExchangeConfig, CancelOrderRequest,
     Candle, CandleQuery, CryptoSdk, Error, ExchangeId, Fill, FillListQuery, GateExchangeConfig,
-    Instrument, MarginMode, OkxExchangeConfig, Order, OrderAck, OrderListQuery, OrderQuery,
-    OrderSide, OrderType, PlaceOrderRequest, Position, PrepareOrderSettingsRequest,
-    PrepareOrderSettingsResult, ProtectiveOrderQuery, ProtectiveOrderRequest, Result, SdkConfig,
-    Ticker, TimeInForce,
+    Instrument, MarginMode, OkxExchangeConfig, Order, OrderAck, OrderBook, OrderBookQuery,
+    OrderListQuery, OrderQuery, OrderSide, OrderType, PlaceOrderRequest, Position,
+    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderQuery,
+    ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
 };
 use serde_json::json;
 
@@ -94,7 +94,7 @@ impl CryptoExcAllGateway {
                     })?,
                     simulated,
                     api_url: None,
-                    request_expiration_ms: None,
+                    request_expiration_ms: okx_request_expiration_ms_from_env(),
                 }),
                 ..SdkConfig::default()
             },
@@ -167,6 +167,20 @@ impl CryptoExcAllGateway {
             GatewayMode::DryRun => Err(Error::Unsupported {
                 exchange,
                 capability: "dry-run ticker",
+            }),
+        }
+    }
+
+    pub async fn orderbook(
+        &self,
+        exchange: ExchangeId,
+        query: OrderBookQuery,
+    ) -> Result<OrderBook> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.market(exchange)?.orderbook(query).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run orderbook",
             }),
         }
     }
@@ -369,6 +383,13 @@ fn binance_proxy_url_from_env() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn okx_request_expiration_ms_from_env() -> Option<i64> {
+    std::env::var("OKX_REQUEST_EXPIRATION_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .filter(|value| *value > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,6 +496,17 @@ mod tests {
         let gateway = CryptoExcAllGateway::dry_run();
         let instrument = Instrument::perp("eth", "usdt").with_settlement("usdt");
 
+        assert!(gateway
+            .ticker(ExchangeId::Binance, &instrument)
+            .await
+            .is_err());
+        assert!(gateway
+            .orderbook(
+                ExchangeId::Binance,
+                OrderBookQuery::new(instrument.clone()).with_limit(5),
+            )
+            .await
+            .is_err());
         assert!(gateway.balances(ExchangeId::Binance).await.is_err());
         assert!(gateway
             .positions(ExchangeId::Binance, Some(&instrument))
@@ -501,6 +533,26 @@ mod tests {
         .unwrap();
 
         assert_eq!(gateway.configured_exchanges(), vec![ExchangeId::Okx]);
+    }
+
+    #[test]
+    fn single_exchange_okx_runtime_config_does_not_force_request_expiration_window() {
+        let _guard = env_lock();
+        let previous = std::env::var("OKX_REQUEST_EXPIRATION_MS").ok();
+
+        std::env::remove_var("OKX_REQUEST_EXPIRATION_MS");
+        assert_eq!(okx_request_expiration_ms_from_env(), None);
+
+        std::env::set_var("OKX_REQUEST_EXPIRATION_MS", "450000");
+        assert_eq!(okx_request_expiration_ms_from_env(), Some(450_000));
+
+        std::env::set_var("OKX_REQUEST_EXPIRATION_MS", "0");
+        assert_eq!(okx_request_expiration_ms_from_env(), None);
+
+        match previous {
+            Some(value) => std::env::set_var("OKX_REQUEST_EXPIRATION_MS", value),
+            None => std::env::remove_var("OKX_REQUEST_EXPIRATION_MS"),
+        }
     }
 
     #[test]

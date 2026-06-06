@@ -13,6 +13,8 @@ pub(super) struct ExchangeOrderFilters {
     pub(super) quantity_precision: Option<u32>,
     pub(super) tick_size: Option<Decimal>,
     pub(super) price_precision: Option<u32>,
+    pub(super) contract_value: Option<Decimal>,
+    pub(super) contract_value_currency: Option<String>,
 }
 
 pub(super) async fn load_exchange_order_filters(
@@ -36,10 +38,21 @@ pub(super) async fn load_exchange_order_filters(
             Option<i32>,
             Option<String>,
             Option<i32>,
+            Option<String>,
+            Option<String>,
         ),
     >(
         r#"
-        SELECT min_qty, max_qty, step_size, min_notional, quantity_precision, tick_size, price_precision
+        SELECT
+            min_qty,
+            max_qty,
+            step_size,
+            min_notional,
+            quantity_precision,
+            tick_size,
+            price_precision,
+            raw_payload #>> '{ctVal}',
+            raw_payload #>> '{ctValCcy}'
         FROM exchange_symbols
         WHERE exchange = $1
           AND normalized_symbol = $2
@@ -63,6 +76,8 @@ pub(super) async fn load_exchange_order_filters(
             quantity_precision,
             tick_size,
             price_precision,
+            contract_value,
+            contract_value_currency,
         )| {
             Ok(ExchangeOrderFilters {
                 min_qty: parse_optional_decimal(min_qty.as_deref(), "min_qty")?,
@@ -72,6 +87,13 @@ pub(super) async fn load_exchange_order_filters(
                 quantity_precision: quantity_precision.and_then(|value| u32::try_from(value).ok()),
                 tick_size: parse_optional_decimal(tick_size.as_deref(), "tick_size")?,
                 price_precision: price_precision.and_then(|value| u32::try_from(value).ok()),
+                contract_value: parse_optional_decimal(
+                    contract_value.as_deref(),
+                    "contract_value",
+                )?,
+                contract_value_currency: contract_value_currency
+                    .map(|value| value.trim().to_ascii_uppercase())
+                    .filter(|value| !value.is_empty()),
             })
         },
     )
@@ -128,6 +150,21 @@ fn ceil_to_step(value: Decimal, step: Decimal) -> Decimal {
     }
 }
 
+fn notional_per_size_unit(last_price: Decimal, filters: &ExchangeOrderFilters) -> Decimal {
+    let Some(contract_value) = filters
+        .contract_value
+        .filter(|value| *value > Decimal::ZERO)
+    else {
+        return last_price;
+    };
+
+    match filters.contract_value_currency.as_deref() {
+        Some("USDT" | "USD") => contract_value,
+        Some(_) => contract_value * last_price,
+        None => last_price,
+    }
+}
+
 pub(super) fn quantize_order_size(
     requested_size: Decimal,
     last_price: Decimal,
@@ -170,7 +207,7 @@ pub(super) fn quantize_order_size(
     }
     if enforce_min_notional {
         if let Some(min_notional) = filters.min_notional {
-            let notional = size * last_price;
+            let notional = size * notional_per_size_unit(last_price, filters);
             if min_notional > Decimal::ZERO && notional < min_notional {
                 return Err(anyhow!(
                     "order notional {} is below exchange min_notional {} after size quantization",
@@ -182,6 +219,39 @@ pub(super) fn quantize_order_size(
     }
 
     Ok(size)
+}
+
+pub(super) fn minimum_order_size(
+    last_price: Decimal,
+    filters: &ExchangeOrderFilters,
+    enforce_min_notional: bool,
+) -> Result<Decimal> {
+    if last_price <= Decimal::ZERO {
+        return Err(anyhow!(
+            "last_price must be positive for minimum order size"
+        ));
+    }
+
+    let mut size = filters.min_qty.unwrap_or(Decimal::ZERO);
+    if enforce_min_notional {
+        if let Some(min_notional) = filters.min_notional.filter(|value| *value > Decimal::ZERO) {
+            size = size.max(min_notional / notional_per_size_unit(last_price, filters));
+        }
+    }
+
+    if let Some(step) = filters.step_size.filter(|value| *value > Decimal::ZERO) {
+        size = ceil_to_step(size, step);
+    } else if let Some(precision) = filters.quantity_precision {
+        size = ceil_to_step(size, Decimal::new(1, precision));
+    }
+
+    if size <= Decimal::ZERO {
+        return Err(anyhow!(
+            "exchange filters do not define a positive minimum order size"
+        ));
+    }
+
+    quantize_order_size(size, last_price, filters, enforce_min_notional)
 }
 
 pub(super) fn format_order_size_decimal(size: Decimal, filters: &ExchangeOrderFilters) -> String {

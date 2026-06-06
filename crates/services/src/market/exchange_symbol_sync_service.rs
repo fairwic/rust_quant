@@ -82,7 +82,9 @@ pub trait BinanceExchangeInfoProvider: Send + Sync {
     }
 
     async fn fetch_bybit_linear_instruments(&self) -> Result<Value> {
-        Err(anyhow!("Bybit linear instruments provider is not configured"))
+        Err(anyhow!(
+            "Bybit linear instruments provider is not configured"
+        ))
     }
 
     async fn fetch_gate_usdt_futures_contracts(&self) -> Result<Value> {
@@ -496,8 +498,7 @@ impl ExchangeSymbolSyncService {
                 required_str_for(instrument, "symbol", "Bybit instruments")?.to_string();
             let base_asset =
                 required_str_for(instrument, "baseCoin", "Bybit instruments")?.to_uppercase();
-            let status =
-                required_str_for(instrument, "status", "Bybit instruments")?.to_string();
+            let status = required_str_for(instrument, "status", "Bybit instruments")?.to_string();
 
             let mut row = ExchangeSymbol::new(
                 BYBIT_EXCHANGE.to_string(),

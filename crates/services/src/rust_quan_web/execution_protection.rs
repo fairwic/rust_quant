@@ -104,8 +104,8 @@ pub(super) fn attached_stop_loss_order_ack_outcome(
                 })
             {
                 return Some(ProtectionSyncOutcome::confirmed(
-                    ack.order_id
-                        .clone()
+                    attached_stop_loss_external_id(order_task.exchange, ack, order)
+                        .or_else(|| ack.order_id.clone())
                         .or_else(|| ack.client_order_id.clone())
                         .unwrap_or_else(|| "attached_stop_loss".to_string()),
                     "place_order_attached_stop_loss_ack",
@@ -135,6 +135,74 @@ fn attached_stop_loss_evidence_present(exchange: ExchangeId, value: &Value) -> b
             .any(|item| attached_stop_loss_evidence_present(exchange, item)),
         _ => false,
     }
+}
+
+fn attached_stop_loss_external_id(
+    exchange: ExchangeId,
+    ack: &OrderAck,
+    order: Option<&Order>,
+) -> Option<String> {
+    attached_stop_loss_external_id_from_value(exchange, &ack.raw).or_else(|| {
+        order.and_then(|order| attached_stop_loss_external_id_from_value(exchange, &order.raw))
+    })
+}
+
+fn attached_stop_loss_external_id_from_value(
+    exchange: ExchangeId,
+    value: &Value,
+) -> Option<String> {
+    match value {
+        Value::Object(fields) => {
+            if object_has_direct_attached_stop_loss_evidence(exchange, fields) {
+                let keys: &[&str] = match exchange {
+                    ExchangeId::Okx => &[
+                        "attachAlgoId",
+                        "attach_algo_id",
+                        "attachAlgoClOrdId",
+                        "attach_algo_cl_ord_id",
+                        "clientAlgoId",
+                        "algoId",
+                    ],
+                    ExchangeId::Bitget => &["orderId", "clientOid", "client_order_id"],
+                    ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => &[],
+                };
+                if let Some(external_id) = string_field_from_object(fields, keys) {
+                    return Some(external_id);
+                }
+            }
+
+            fields
+                .values()
+                .find_map(|value| attached_stop_loss_external_id_from_value(exchange, value))
+        }
+        Value::Array(items) => items
+            .iter()
+            .find_map(|value| attached_stop_loss_external_id_from_value(exchange, value)),
+        _ => None,
+    }
+}
+
+fn object_has_direct_attached_stop_loss_evidence(
+    exchange: ExchangeId,
+    fields: &serde_json::Map<String, Value>,
+) -> bool {
+    fields.iter().any(|(key, value)| {
+        attached_stop_loss_key_matches(exchange, key) && value_has_content(value)
+    })
+}
+
+fn string_field_from_object(
+    fields: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<String> {
+    keys.iter().find_map(|key| {
+        fields
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    })
 }
 
 fn attached_stop_loss_key_matches(exchange: ExchangeId, key: &str) -> bool {
@@ -882,6 +950,8 @@ mod tests {
             quantity_precision: Some(3),
             tick_size: Some("0.01".parse().unwrap()),
             price_precision: Some(2),
+            contract_value: None,
+            contract_value_currency: None,
         }
     }
 
@@ -1073,7 +1143,11 @@ mod tests {
             .expect("OKX attached stop-loss should produce an outcome");
 
         match outcome {
-            ProtectionSyncOutcome::Confirmed { source, .. } => {
+            ProtectionSyncOutcome::Confirmed {
+                protective_order_external_id,
+                source,
+            } => {
+                assert_eq!(protective_order_external_id, "sl-10043");
                 assert_eq!(source, "place_order_attached_stop_loss_ack");
             }
             other => panic!("expected OKX attached stop-loss confirmation, got {other:?}"),

@@ -219,6 +219,64 @@ fn read_only_exchange_snapshot_builds_reconciliation_requests_without_live_mutat
 }
 
 #[test]
+fn read_only_exchange_snapshot_blocker_builder_does_not_emit_flat_sync() {
+    let task = task(json!({
+        "exchange": "okx",
+        "symbol": "UNI-USDT-SWAP",
+        "side": "buy",
+        "size": "1",
+        "credential_ref": "web-cred-85"
+    }));
+
+    let requests = build_exchange_reconciliation_requests_from_read_only_snapshot(
+        &task,
+        &[],
+        &[],
+        Some("2026-06-06T08:30:00Z".to_string()),
+    );
+
+    assert!(
+        requests.is_empty(),
+        "normal live preflight builder must not treat flat position sync as a blocker"
+    );
+}
+
+#[test]
+fn read_only_exchange_snapshot_sync_builder_emits_flat_position_report() {
+    let task = task(json!({
+        "exchange": "okx",
+        "symbol": "UNI-USDT-SWAP",
+        "side": "buy",
+        "size": "1",
+        "credential_ref": "web-cred-85"
+    }));
+
+    let requests = build_exchange_reconciliation_sync_requests_from_read_only_snapshot(
+        &task,
+        &[],
+        &[],
+        Some("2026-06-06T08:30:00Z".to_string()),
+    );
+
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].issue_type,
+        ExchangeReconciliationIssueType::ExchangePositionFlat
+    );
+    assert_eq!(requests[0].symbol, "UNI-USDT-SWAP");
+    assert_eq!(
+        requests[0].source_ref.as_deref(),
+        Some(
+            "rq:xrec:v2:ex=okx:acct=email_sha256_6a6c26195c3682fa:cred=web-cred-85:combo=9:task=42:sym=UNI-USDT-SWAP:issue=exchange_position_flat"
+        )
+    );
+    assert!(requests[0]
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("zero position")));
+}
+
+#[test]
 fn live_order_reconciliation_conflict_builds_no_mutation_failed_report() {
     let task = task(json!({
         "exchange": "binance",
@@ -846,6 +904,132 @@ fn live_order_size_is_quantized_to_exchange_step_size() {
         .unwrap();
 
     assert_eq!(order.size, "0.026");
+}
+
+#[test]
+fn local_live_order_size_is_forced_to_exchange_min_notional() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "order_type": "market",
+        "size_usdt": 1000.0,
+        "client_order_id": "rqtest-local-min"
+    }));
+    let filters = binance_eth_filters();
+
+    let request = ExecutionOrderTask::from_task(&task).unwrap();
+    let order = request
+        .to_live_order_request_with_local_min_size(Some(2300.38), Some(&filters), true)
+        .unwrap();
+
+    assert_eq!(order.size, "0.009");
+}
+
+#[test]
+fn local_okx_swap_min_order_size_uses_contract_units_without_static_min_notional() {
+    let task = task(json!({
+        "exchange": "okx",
+        "symbol": "ALLO-USDT-SWAP",
+        "side": "buy",
+        "order_type": "market",
+        "size_usdt": 5.0,
+        "client_order_id": "rqtest-okx-contract"
+    }));
+    let filters = ExchangeOrderFilters {
+        min_qty: Some("1".parse().unwrap()),
+        max_qty: Some("2700".parse().unwrap()),
+        step_size: Some("1".parse().unwrap()),
+        min_notional: None,
+        quantity_precision: None,
+        tick_size: Some("0.00001".parse().unwrap()),
+        price_precision: Some(5),
+        contract_value: Some("10".parse().unwrap()),
+        contract_value_currency: Some("ALLO".to_string()),
+    };
+
+    let request = ExecutionOrderTask::from_task(&task).unwrap();
+    let order = request
+        .to_live_order_request_with_local_min_size(Some(0.18702), Some(&filters), true)
+        .unwrap();
+
+    assert_eq!(order.size, "1");
+}
+
+#[test]
+fn okx_swap_contract_value_is_used_for_notional_validation() {
+    let filters = ExchangeOrderFilters {
+        min_qty: Some("1".parse().unwrap()),
+        max_qty: Some("2700".parse().unwrap()),
+        step_size: Some("1".parse().unwrap()),
+        min_notional: Some("5".parse().unwrap()),
+        quantity_precision: None,
+        tick_size: Some("0.00001".parse().unwrap()),
+        price_precision: Some(5),
+        contract_value: Some("10".parse().unwrap()),
+        contract_value_currency: Some("ALLO".to_string()),
+    };
+
+    let error = quantize_order_size(
+        "2".parse().unwrap(),
+        "0.18702".parse().unwrap(),
+        &filters,
+        true,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("min_notional"));
+
+    let ok = quantize_order_size(
+        "3".parse().unwrap(),
+        "0.18702".parse().unwrap(),
+        &filters,
+        true,
+    )
+    .unwrap();
+    assert_eq!(ok.to_string(), "3");
+}
+
+#[test]
+fn non_local_live_order_size_keeps_strategy_sizing() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "order_type": "market",
+        "size_usdt": 1000.0,
+        "client_order_id": "rqtest-strategy-size"
+    }));
+    let filters = binance_eth_filters();
+
+    let request = ExecutionOrderTask::from_task(&task).unwrap();
+    let order = request
+        .to_live_order_request_with_local_min_size(Some(2300.38), Some(&filters), false)
+        .unwrap();
+
+    assert_eq!(order.size, "0.434");
+}
+
+#[test]
+fn local_min_live_order_size_does_not_expand_reduce_only_close() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "sell",
+        "order_type": "market",
+        "size": "0.004",
+        "trade_side": "close",
+        "reduce_only": true,
+        "client_order_id": "rqtest-local-close"
+    }));
+    let filters = binance_eth_filters();
+
+    let request = ExecutionOrderTask::from_task(&task).unwrap();
+    let order = request
+        .to_live_order_request_with_local_min_size(Some(2300.38), Some(&filters), true)
+        .unwrap();
+
+    assert_eq!(order.size, "0.004");
 }
 
 #[test]

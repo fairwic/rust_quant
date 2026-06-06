@@ -218,7 +218,7 @@ impl ExecutionWorker {
                 return;
             }
         };
-        let requests = build_exchange_reconciliation_requests_from_read_only_snapshot(
+        let requests = build_exchange_reconciliation_sync_requests_from_read_only_snapshot(
             task,
             &positions,
             &open_orders,

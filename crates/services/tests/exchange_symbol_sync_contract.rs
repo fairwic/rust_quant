@@ -693,8 +693,7 @@ fn start_json_server(body: String) -> (String, Arc<Mutex<Option<String>>>) {
         let mut buffer = [0_u8; 4096];
         let size = stream.read(&mut buffer).expect("read request");
         let request = String::from_utf8_lossy(&buffer[..size]).to_string();
-        *received_for_thread.lock().unwrap() =
-            request.lines().next().map(ToString::to_string);
+        *received_for_thread.lock().unwrap() = request.lines().next().map(ToString::to_string);
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             body.len(),

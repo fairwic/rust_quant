@@ -152,6 +152,7 @@ pub struct ExecutionTaskReportResponse {
 pub enum ExchangeReconciliationIssueType {
     ExchangePositionStale,
     ExchangeOpenOrderConflict,
+    ExchangePositionFlat,
 }
 
 impl ExchangeReconciliationIssueType {
@@ -159,6 +160,7 @@ impl ExchangeReconciliationIssueType {
         match self {
             Self::ExchangePositionStale => "exchange_position_stale",
             Self::ExchangeOpenOrderConflict => "exchange_open_order_conflict",
+            Self::ExchangePositionFlat => "exchange_position_flat",
         }
     }
 }
@@ -185,6 +187,37 @@ pub struct ExchangeReconciliationReportResponse {
     pub issue_type: String,
     pub api_execution_status: String,
     pub log: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExchangeCloseFillWritebackRequest {
+    pub task_id: i64,
+    pub combo_id: i64,
+    pub exchange: String,
+    pub symbol: String,
+    pub source_ref: String,
+    pub open_order_id: Option<String>,
+    pub open_trade_id: Option<String>,
+    pub close_order_id: String,
+    pub close_trade_id: Option<String>,
+    pub close_side: String,
+    pub close_size: f64,
+    pub close_price: Option<f64>,
+    pub close_fee: Option<f64>,
+    pub close_timestamp_ms: Option<i64>,
+    pub position_flat_confirmed: bool,
+    pub active_open_order_count: i64,
+    pub quantity_match: bool,
+    pub writeback_authorized: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExchangeCloseFillWritebackResponse {
+    pub order_result: ExchangeOrderResult,
+    pub trade_record: Value,
+    pub position_snapshot_cleared: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -243,6 +276,33 @@ pub struct UserExchangeConfig {
     pub simulated: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ApiCredentialCheckSummary {
+    pub id: i64,
+    pub exchange: String,
+    pub api_key_mask: String,
+    pub permission_scope: String,
+    pub status: String,
+    pub credential_envelope_ready: bool,
+    pub last_check_at: Option<String>,
+    pub last_check_code: Option<String>,
+    pub last_check_message: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub execution_readiness: ApiCredentialExecutionReadiness,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ApiCredentialExecutionReadiness {
+    pub can_execute: bool,
+    pub blocker_code: Option<String>,
+    pub blocker_message: Option<String>,
+    pub next_action_label: Option<String>,
+    pub next_action_href: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ApiEnvelope<T> {
     success: bool,
@@ -254,8 +314,11 @@ const LEASE_CONFIRMATION_TASKS_PATH: &str =
     "/api/commerce/internal/execution-tasks/confirmations/lease";
 const REPORT_RESULT_PATH: &str = "/api/commerce/internal/execution-results";
 const EXCHANGE_RECONCILIATION_PATH: &str = "/api/commerce/internal/exchange-reconciliation";
+const EXCHANGE_CLOSE_FILL_WRITEBACK_PATH: &str =
+    "/api/commerce/internal/exchange-close-fill-writeback";
 const STRATEGY_SIGNAL_PATH: &str = "/api/commerce/internal/strategy-signals";
 const USER_EXCHANGE_CONFIG_PATH: &str = "/api/commerce/internal/api-credentials/resolve";
+const API_CREDENTIAL_CHECK_PATH_PREFIX: &str = "/api/commerce/internal/api-credentials";
 const INTERNAL_SECRET_HEADER: &str = "x-alpha-execution-secret";
 
 impl ExecutionTaskClient {
@@ -306,6 +369,14 @@ impl ExecutionTaskClient {
         self.post_json(EXCHANGE_RECONCILIATION_PATH, &request).await
     }
 
+    pub async fn apply_exchange_close_fill_writeback(
+        &self,
+        request: ExchangeCloseFillWritebackRequest,
+    ) -> Result<ExchangeCloseFillWritebackResponse> {
+        self.post_json(EXCHANGE_CLOSE_FILL_WRITEBACK_PATH, &request)
+            .await
+    }
+
     pub async fn submit_strategy_signal(
         &self,
         request: StrategySignalSubmitRequest,
@@ -323,6 +394,14 @@ impl ExecutionTaskClient {
             .append_pair("buyer_email", buyer_email)
             .append_pair("exchange", exchange);
         self.get_json(url.as_str()).await
+    }
+
+    pub async fn check_internal_api_credential(
+        &self,
+        credential_id: i64,
+    ) -> Result<ApiCredentialCheckSummary> {
+        let path = format!("{API_CREDENTIAL_CHECK_PATH_PREFIX}/{credential_id}/check");
+        self.post_json(&path, &serde_json::json!({})).await
     }
 
     pub fn lease_url(&self, limit: u32) -> String {
@@ -374,6 +453,10 @@ impl ExecutionTaskClient {
 
     pub fn exchange_reconciliation_url(&self) -> String {
         self.url(EXCHANGE_RECONCILIATION_PATH)
+    }
+
+    pub fn exchange_close_fill_writeback_url(&self) -> String {
+        self.url(EXCHANGE_CLOSE_FILL_WRITEBACK_PATH)
     }
 
     pub fn parse_envelope<R>(body: &str) -> Result<R>
@@ -753,6 +836,55 @@ mod tests {
     }
 
     #[test]
+    fn exchange_close_fill_writeback_request_matches_quant_web_contract() {
+        let request = ExchangeCloseFillWritebackRequest {
+            task_id: 86,
+            combo_id: 85,
+            exchange: "okx".to_string(),
+            symbol: "ASTER-USDT-SWAP".to_string(),
+            source_ref: "rq:xrec:v2:ex=okx:combo=85:task=86:sym=ASTER-USDT-SWAP".to_string(),
+            open_order_id: Some("3631557801300238336".to_string()),
+            open_trade_id: Some("211849844".to_string()),
+            close_order_id: "3631564680998985728".to_string(),
+            close_trade_id: Some("211850229".to_string()),
+            close_side: "sell".to_string(),
+            close_size: 1.0,
+            close_price: Some(0.6047),
+            close_fee: Some(-0.00030235),
+            close_timestamp_ms: Some(1_780_731_461_395),
+            position_flat_confirmed: true,
+            active_open_order_count: 0,
+            quantity_match: true,
+            writeback_authorized: true,
+        };
+        let value = serde_json::to_value(&request).unwrap();
+
+        assert_eq!(value["task_id"], 86);
+        assert_eq!(value["combo_id"], 85);
+        assert_eq!(value["exchange"], "okx");
+        assert_eq!(value["symbol"], "ASTER-USDT-SWAP");
+        assert_eq!(value["close_order_id"], "3631564680998985728");
+        assert_eq!(value["close_side"], "sell");
+        assert_eq!(value["close_size"], 1.0);
+        assert_eq!(value["close_price"], 0.6047);
+        assert_eq!(value["position_flat_confirmed"], true);
+        assert_eq!(value["active_open_order_count"], 0);
+        assert_eq!(value["quantity_match"], true);
+        assert_eq!(value["writeback_authorized"], true);
+        assert!(!value.to_string().contains("buyer@example.com"));
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "https://quant-web.example/".to_string(),
+            internal_secret: "secret".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            client.exchange_close_fill_writeback_url(),
+            "https://quant-web.example/api/commerce/internal/exchange-close-fill-writeback"
+        );
+    }
+
+    #[test]
     fn parses_user_exchange_config_envelope_without_persisting_secret() {
         let body = r#"{
             "success": true,
@@ -825,6 +957,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn check_internal_api_credential_uses_internal_post_contract() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server = tokio::task::spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 4096];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+            tx.send(request).unwrap();
+
+            let body = r#"{"success":true,"data":{"id":42,"exchange":"OKX","api_key_mask":"okx_***_tail","permission_scope":"trade","status":"active","credential_envelope_ready":true,"last_check_at":"2026-06-05T08:00:00","last_check_code":"signed_exchange_preflight_passed","last_check_message":"ok","created_at":"2026-06-05T07:00:00","updated_at":"2026-06-05T08:00:00","execution_readiness":{"can_execute":true,"blocker_code":null,"blocker_message":null,"next_action_label":null,"next_action_href":null}}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap();
+        let summary = client.check_internal_api_credential(42).await.unwrap();
+
+        server.await.unwrap();
+        let request = rx.recv().unwrap();
+
+        assert!(
+            request.starts_with("POST /api/commerce/internal/api-credentials/42/check HTTP/1.1")
+        );
+        assert!(request.contains("x-alpha-execution-secret: dev-secret"));
+        assert!(request.contains("content-type: application/json"));
+        assert!(!request.contains("plain-api-secret"));
+        assert_eq!(summary.id, 42);
+        assert_eq!(summary.exchange, "OKX");
+        assert_eq!(
+            summary.last_check_code.as_deref(),
+            Some("signed_exchange_preflight_passed")
+        );
+        assert!(summary.credential_envelope_ready);
+        assert!(summary.execution_readiness.can_execute);
+    }
+
+    #[tokio::test]
     async fn report_exchange_reconciliation_uses_internal_post_contract() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -887,6 +1071,84 @@ mod tests {
         assert_eq!(response.combo_id, 9);
         assert_eq!(response.issue_type, "exchange_open_order_conflict");
         assert_eq!(response.api_execution_status, "blocked_by_reconciliation");
+    }
+
+    #[tokio::test]
+    async fn apply_exchange_close_fill_writeback_uses_internal_post_contract() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server = tokio::task::spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 8192];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+            tx.send(request).unwrap();
+
+            let body = r#"{"success":true,"data":{"order_result":{"id":30,"execution_task_id":86,"combo_id":85,"buyer_email":"buyer@example.com","exchange":"okx","external_order_id":"3631564680998985728","order_side":"sell","order_status":"filled","filled_qty":1.0,"filled_quote":0.6047,"fee_amount":-0.00030235,"raw_payload_json":"{}","created_at":"2026-06-06T08:00:00","updated_at":"2026-06-06T08:00:00"},"trade_record":{"id":44,"exchange_order_result_id":30,"side":"sell"},"position_snapshot_cleared":true}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap();
+        let response = client
+            .apply_exchange_close_fill_writeback(ExchangeCloseFillWritebackRequest {
+                task_id: 86,
+                combo_id: 85,
+                exchange: "okx".to_string(),
+                symbol: "ASTER-USDT-SWAP".to_string(),
+                source_ref: "rq:xrec:v2:ex=okx:combo=85:task=86:sym=ASTER-USDT-SWAP".to_string(),
+                open_order_id: Some("3631557801300238336".to_string()),
+                open_trade_id: Some("211849844".to_string()),
+                close_order_id: "3631564680998985728".to_string(),
+                close_trade_id: Some("211850229".to_string()),
+                close_side: "sell".to_string(),
+                close_size: 1.0,
+                close_price: Some(0.6047),
+                close_fee: Some(-0.00030235),
+                close_timestamp_ms: Some(1_780_731_461_395),
+                position_flat_confirmed: true,
+                active_open_order_count: 0,
+                quantity_match: true,
+                writeback_authorized: true,
+            })
+            .await
+            .unwrap();
+
+        server.await.unwrap();
+        let request = rx.recv().unwrap();
+
+        assert!(request
+            .starts_with("POST /api/commerce/internal/exchange-close-fill-writeback HTTP/1.1"));
+        assert!(request.contains("x-alpha-execution-secret: dev-secret"));
+        assert!(request.contains(r#""task_id":86"#));
+        assert!(request.contains(r#""combo_id":85"#));
+        assert!(request.contains(r#""exchange":"okx""#));
+        assert!(request.contains(r#""symbol":"ASTER-USDT-SWAP""#));
+        assert!(request.contains(r#""close_order_id":"3631564680998985728""#));
+        assert!(request.contains(r#""close_side":"sell""#));
+        assert!(request.contains(r#""close_size":1.0"#) || request.contains(r#""close_size":1"#));
+        assert!(request.contains(r#""writeback_authorized":true"#));
+        assert!(!request.contains("api-secret"));
+        assert!(response.position_snapshot_cleared);
+        assert_eq!(
+            response.order_result.external_order_id,
+            "3631564680998985728"
+        );
+        assert_eq!(response.trade_record["side"], "sell");
     }
 
     #[tokio::test]

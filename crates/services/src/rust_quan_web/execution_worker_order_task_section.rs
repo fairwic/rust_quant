@@ -436,6 +436,19 @@ impl ExecutionOrderTask {
         last_price: Option<f64>,
         filters: Option<&ExchangeOrderFilters>,
     ) -> Result<OrderPlacementRequest> {
+        self.to_live_order_request_with_local_min_size(
+            last_price,
+            filters,
+            local_live_min_order_size_enabled(),
+        )
+    }
+
+    fn to_live_order_request_with_local_min_size(
+        &self,
+        last_price: Option<f64>,
+        filters: Option<&ExchangeOrderFilters>,
+        use_local_min_order_size: bool,
+    ) -> Result<OrderPlacementRequest> {
         let mut request = self.to_order_request_with_last_price(last_price)?;
         let filters = filters.ok_or_else(|| {
             anyhow!(
@@ -457,7 +470,11 @@ impl ExecutionOrderTask {
                 request.trade_side.as_deref().map(|value| value.to_ascii_lowercase()),
                 Some(value) if value == "close"
             );
-        let normalized_size = quantize_order_size(size, last_price, filters, enforce_min_notional)?;
+        let normalized_size = if use_local_min_order_size && enforce_min_notional {
+            minimum_order_size(last_price, filters, enforce_min_notional)?
+        } else {
+            quantize_order_size(size, last_price, filters, enforce_min_notional)?
+        };
         request.size = format_order_size_decimal(normalized_size, filters);
         if let Some(stop_loss_price) = request.attached_stop_loss_price.as_deref() {
             let stop_loss_price = stop_loss_price
@@ -490,4 +507,10 @@ impl ExecutionOrderTask {
             }),
         ))
     }
+}
+
+fn local_live_min_order_size_enabled() -> bool {
+    std::env::var("APP_ENV")
+        .ok()
+        .is_some_and(|value| value.eq_ignore_ascii_case("local"))
 }

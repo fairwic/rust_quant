@@ -17,6 +17,8 @@ pub(crate) fn binance_eth_filters() -> ExchangeOrderFilters {
         quantity_precision: Some(3),
         tick_size: Some("0.01".parse().unwrap()),
         price_precision: Some(2),
+        contract_value: None,
+        contract_value_currency: None,
     }
 }
 

@@ -12,7 +12,7 @@ use tracing::{error, warn};
 use crate::exchange::{CryptoExcAllGateway, OrderPlacementRequest};
 use crate::rust_quan_web::execution_order_filters::{
     decimal_from_f64, format_order_size_decimal, format_protective_stop_price_decimal,
-    load_exchange_order_filters, parse_positive_decimal, quantize_order_size,
+    load_exchange_order_filters, minimum_order_size, parse_positive_decimal, quantize_order_size,
     quantize_protective_stop_price, ExchangeOrderFilters,
 };
 use crate::rust_quan_web::execution_payload::{
@@ -139,6 +139,26 @@ pub(crate) fn is_protected_link_symbol(symbol: &str) -> bool {
         .map(|ch| ch.to_ascii_uppercase())
         .collect();
     normalized == "LINKUSDT" || normalized.starts_with("LINKUSDT")
+}
+
+fn api_credential_id_from_task(task: &ExecutionTask) -> Option<i64> {
+    let payload = order_payload(&task.request_payload_json);
+    payload_string(&payload, "api_credential_id")
+        .and_then(|raw| raw.parse::<i64>().ok())
+        .filter(|id| *id > 0)
+}
+
+fn api_credential_exchange_matches_task(
+    credential_exchange: &str,
+    task_exchange: ExchangeId,
+) -> bool {
+    let normalized = credential_exchange.trim();
+    if normalized == "币安" {
+        return task_exchange == ExchangeId::Binance;
+    }
+    normalized
+        .parse::<ExchangeId>()
+        .is_ok_and(|exchange| exchange == task_exchange)
 }
 
 pub struct ExecutionWorker {
@@ -827,6 +847,13 @@ impl ExecutionWorker {
             };
         }
 
+        if let Some(report) = self
+            .live_api_credential_preflight_report(task, &order_task)
+            .await
+        {
+            return report;
+        }
+
         let gateway = match self
             .resolve_live_gateway(&task.buyer_email, order_task.exchange)
             .await
@@ -1397,6 +1424,101 @@ impl ExecutionWorker {
             config.simulated,
         )
         .map_err(Into::into)
+    }
+
+    async fn live_api_credential_preflight_report(
+        &self,
+        task: &ExecutionTask,
+        order_task: &ExecutionOrderTask,
+    ) -> Option<ExecutionTaskReportRequest> {
+        let credential_id = api_credential_id_from_task(task)?;
+        let checked = match self
+            .client
+            .check_internal_api_credential(credential_id)
+            .await
+        {
+            Ok(checked) => checked,
+            Err(error) => {
+                return Some(ExecutionTaskReportRequest::failed(
+                    task.id,
+                    order_task.exchange.as_str(),
+                    order_side_lower(order_task.side),
+                    format!(
+                        "API credential preflight failed before live order: {error}; place_order_allowed=false; mutation_allowed=false"
+                    ),
+                    json!({
+                        "task_id": task.id,
+                        "stage": "api_credential_preflight",
+                        "api_credential_id": credential_id,
+                        "exchange": order_task.exchange.as_str(),
+                        "symbol": order_task.symbol,
+                        "place_order_allowed": false,
+                        "mutation_allowed": false,
+                    }),
+                ));
+            }
+        };
+
+        if !api_credential_exchange_matches_task(&checked.exchange, order_task.exchange) {
+            return Some(ExecutionTaskReportRequest::failed(
+                task.id,
+                order_task.exchange.as_str(),
+                order_side_lower(order_task.side),
+                format!(
+                    "API credential preflight returned exchange {} for task exchange {}; place_order_allowed=false; mutation_allowed=false",
+                    checked.exchange,
+                    order_task.exchange.as_str()
+                ),
+                json!({
+                    "task_id": task.id,
+                    "stage": "api_credential_preflight",
+                    "api_credential_id": credential_id,
+                    "credential_exchange": checked.exchange,
+                    "task_exchange": order_task.exchange.as_str(),
+                    "symbol": order_task.symbol,
+                    "place_order_allowed": false,
+                    "mutation_allowed": false,
+                }),
+            ));
+        }
+
+        if checked.execution_readiness.can_execute {
+            return None;
+        }
+
+        let blocker_code = checked
+            .execution_readiness
+            .blocker_code
+            .as_deref()
+            .or(checked.last_check_code.as_deref())
+            .unwrap_or("api_credential_not_ready");
+        let blocker_message = checked
+            .execution_readiness
+            .blocker_message
+            .as_deref()
+            .or(checked.last_check_message.as_deref())
+            .unwrap_or("API credential is not ready for live execution");
+
+        Some(ExecutionTaskReportRequest::failed(
+            task.id,
+            order_task.exchange.as_str(),
+            order_side_lower(order_task.side),
+            format!(
+                "API credential preflight blocked live order: {blocker_code}: {blocker_message}; place_order_allowed=false; mutation_allowed=false"
+            ),
+            json!({
+                "task_id": task.id,
+                "stage": "api_credential_preflight",
+                "api_credential_id": credential_id,
+                "exchange": order_task.exchange.as_str(),
+                "symbol": order_task.symbol,
+                "last_check_code": checked.last_check_code,
+                "blocker_code": checked.execution_readiness.blocker_code,
+                "blocker_message": checked.execution_readiness.blocker_message,
+                "place_order_allowed": false,
+                "mutation_allowed": false,
+            }),
+        ))
     }
 
     async fn place_order_with_audit(
