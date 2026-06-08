@@ -1,0 +1,211 @@
+name: Core CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'Dockerfile.runtime'
+      - 'docker-compose.deploy.yml'
+      - 'scripts/ci/**'
+      - 'scripts/deploy/**'
+      - '.github/workflows/cicd.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'Dockerfile.runtime'
+      - 'docker-compose.deploy.yml'
+      - 'scripts/ci/**'
+      - 'scripts/deploy/**'
+      - '.github/workflows/cicd.yml'
+  workflow_dispatch:
+    inputs:
+      rollback:
+        description: 'Rollback quant core services to previous deployed images'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: quant-core-worker
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch'
+
+    steps:
+      - name: Checkout rust_quant
+        uses: actions/checkout@v4
+        with:
+          path: rust_quant
+
+      - name: Checkout crypto_exc_all
+        uses: actions/checkout@v4
+        with:
+          repository: fairwic/crypto_exc_all
+          path: crypto_exc_all
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.1
+          components: rustfmt
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust_quant
+
+      - name: Format
+        working-directory: rust_quant
+        run: cargo fmt --all -- --check
+
+      - name: Focused tests
+        working-directory: rust_quant
+        run: |
+          cargo test -p rust-quant-services market_velocity_signal -- --nocapture
+          cargo test -p rust-quant-services --test market_velocity_okx_live_preflight_contract -- --nocapture
+          cargo test -p rust-quant-services --test market_velocity_okx_scoped_live_worker_contract -- --nocapture
+
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout rust_quant
+        uses: actions/checkout@v4
+        with:
+          path: rust_quant
+
+      - name: Checkout crypto_exc_all
+        uses: actions/checkout@v4
+        with:
+          repository: fairwic/crypto_exc_all
+          path: crypto_exc_all
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Normalize image owner
+        id: image_owner
+        run: echo "value=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image_owner.outputs.value }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: rust_quant/Dockerfile.runtime
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-stable:
+    name: Deploy Production
+    runs-on: ubuntu-24.04
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+    concurrency:
+      group: quant-core-production-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add known hosts
+        run: ./scripts/ci/prepare_ssh.sh
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+
+      - name: Normalize image owner
+        id: image_owner
+        run: echo "value=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy production services
+        run: ./scripts/deploy/promote_stable.sh
+        env:
+          DEPLOY_SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.SSH_PORT }}
+          SERVER_APP_PATH: ${{ secrets.SERVER_APP_PATH }}
+          DEPLOY_COMPOSE_FILE: ${{ secrets.DEPLOY_COMPOSE_FILE || 'docker-compose.deploy.yml' }}
+          DEPLOY_SERVICES: ${{ secrets.DEPLOY_SERVICES }}
+          DEPLOY_GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          DEPLOY_GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+          DEPLOY_IMAGE: ${{ env.REGISTRY }}/${{ steps.image_owner.outputs.value }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+
+  rollback-manual:
+    name: Manual Rollback
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'workflow_dispatch' && inputs.rollback == true
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add known hosts
+        run: ./scripts/ci/prepare_ssh.sh
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+
+      - name: Rollback production services
+        run: ./scripts/deploy/rollback.sh
+        env:
+          DEPLOY_SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.SSH_PORT }}
+          SERVER_APP_PATH: ${{ secrets.SERVER_APP_PATH }}
+          DEPLOY_COMPOSE_FILE: ${{ secrets.DEPLOY_COMPOSE_FILE || 'docker-compose.deploy.yml' }}
+          DEPLOY_SERVICES: ${{ secrets.DEPLOY_SERVICES }}
+          DEPLOY_GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          DEPLOY_GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}

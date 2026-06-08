@@ -11,6 +11,32 @@ WEB_REPO_ROOT="${REPO_ROOT}/../rust_quan_web"
 : "${POSTGRES_CONTAINER:=""}"
 : "${RUSTUP_TOOLCHAIN:="1.91.1"}"
 
+load_web_env_if_unset() {
+    local key="$1"
+    local env_file="${WEB_REPO_ROOT}/backend/.env"
+    if [[ ! -f "${env_file}" ]]; then
+        return
+    fi
+    if [[ "${MARKET_VELOCITY_DRY_RUN_PRESERVE_CREDENTIAL_ENV:-false}" == "true" &&
+        -n "${!key:-}" ]]; then
+        return
+    fi
+
+    local value
+    value="$(
+        awk -F '=' -v key="${key}" '
+            $1 == key {
+                sub(/^[^=]*=/, "")
+                print
+                exit
+            }
+        ' "${env_file}"
+    )"
+    if [[ -n "${value}" ]]; then
+        export "${key}=${value}"
+    fi
+}
+
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "missing required command: $1" >&2
@@ -88,6 +114,9 @@ if ! curl -fsS -m 3 "${RUST_QUAN_WEB_BASE_URL}/" >/dev/null; then
     echo "Web backend is not reachable at ${RUST_QUAN_WEB_BASE_URL}" >&2
     exit 2
 fi
+
+load_web_env_if_unset API_CREDENTIAL_ENCRYPTION_KEY
+load_web_env_if_unset API_CREDENTIAL_ENCRYPTION_KEY_ID
 
 baseline_signal_id="$(
     query_web_scalar "
