@@ -8,6 +8,7 @@ mod execution_reconciliation_snapshot_check;
 mod execution_rollback;
 mod execution_task_client;
 mod execution_worker;
+mod market_velocity_live_readiness;
 
 pub use execution_audit::{
     redact_audit_payload, ExchangeRequestAuditLog, ExecutionAuditRepository,
@@ -30,6 +31,19 @@ pub use execution_task_client::{
     ExchangeReconciliationReportResponse, ExecutionTask, ExecutionTaskClient, ExecutionTaskConfig,
     ExecutionTaskConfirmationLease, ExecutionTaskConfirmationLeaseItem, ExecutionTaskLease,
     ExecutionTaskLeaseRequest, ExecutionTaskReportRequest, ExecutionTaskReportResponse,
-    StrategySignalDispatchResponse, StrategySignalSubmitRequest, UserExchangeConfig,
+    MarketVelocityExecutionTaskCreationPreviewCheck,
+    MarketVelocityExecutionTaskCreationPreviewRequest,
+    MarketVelocityExecutionTaskCreationPreviewResponse,
+    MarketVelocityExecutionTaskLiveReadinessCheck,
+    MarketVelocityExecutionTaskLiveReadinessResponse, MarketVelocityPaperOutcomeRequest,
+    MarketVelocityPaperOutcomeResponse, StrategySignalDispatchResponse,
+    StrategySignalSubmitRequest, UserExchangeConfig,
 };
 pub use execution_worker::{ExecutionOrderTask, ExecutionWorker, ExecutionWorkerConfig};
+pub use market_velocity_live_readiness::{
+    build_market_velocity_scoped_execution_worker_config,
+    build_market_velocity_scoped_execution_worker_env,
+    build_market_velocity_scoped_worker_handoff_readiness,
+    market_velocity_existing_execution_worker_path, run_market_velocity_live_readiness_from_env,
+    MarketVelocityLiveReadinessConfig, MarketVelocityWorkerHandoffReadiness,
+};

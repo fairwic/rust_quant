@@ -10,7 +10,7 @@ COPY rust_quant ./rust_quant
 COPY crypto_exc_all ./crypto_exc_all
 
 WORKDIR /app/rust_quant
-RUN cargo build --release -p rust-quant-cli
+RUN cargo build --release -p rust-quant-cli --bins
 
 FROM debian:bookworm-slim AS runtime
 
@@ -21,6 +21,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/rust_quant/target/release/rust_quant /usr/local/bin/rust_quant
+COPY --from=builder /app/rust_quant/target/release/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill
+COPY --from=builder /app/rust_quant/target/release/market_velocity_paper_observation /usr/local/bin/market_velocity_paper_observation
+COPY --from=builder /app/rust_quant/target/release/market_velocity_live_handoff /usr/local/bin/market_velocity_live_handoff
 
 ENV APP_ENV=production
 

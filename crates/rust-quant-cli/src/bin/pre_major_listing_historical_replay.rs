@@ -585,7 +585,7 @@ async fn fetch_candles(
 ) -> Result<Vec<FixtureCandle>> {
     let start = announced_at_ms.saturating_sub(LOOKBACK_MS);
     let end = announced_at_ms + HOLD_WINDOW_MS;
-    let query = CandleQuery::new(Instrument::perp(base_asset, "USDT"), interval_for(exchange))
+    let query = CandleQuery::new(Instrument::perp(base_asset, "USDT"), "1m")
         .with_start_time(start)
         .with_end_time(end)
         .with_limit(200);
@@ -615,13 +615,6 @@ impl FixtureCandle {
                 .and_then(|value| value.parse::<f64>().ok()),
             volume: candle.volume.parse::<f64>().ok(),
         })
-    }
-}
-
-fn interval_for(exchange: ExchangeId) -> &'static str {
-    match exchange {
-        ExchangeId::Bybit => "1",
-        _ => "1m",
     }
 }
 

@@ -1212,6 +1212,38 @@ fn target_task_allowlist_rejects_unlisted_leased_task_ids() {
 }
 
 #[test]
+fn live_worker_config_requires_target_task_allowlist() {
+    let live_unscoped = ExecutionWorkerConfig {
+        worker_id: "worker-live-unscoped".to_string(),
+        lease_limit: 1,
+        dry_run: false,
+        default_exchange: ExchangeId::Okx,
+        task_types: vec!["execute_signal".to_string()],
+        task_statuses: vec!["pending".to_string()],
+        target_task_ids: Vec::new(),
+        confirmation_mode: false,
+        report_replay_mode: false,
+        report_replay_max_per_run: 1,
+        report_replay_failure_backoff_seconds: 300,
+        report_replay_throttle_ms: 0,
+    };
+    let error = live_unscoped
+        .validate_live_worker_scope()
+        .expect_err("live worker without target task ids must fail closed");
+    assert!(error
+        .to_string()
+        .contains("EXECUTION_WORKER_TARGET_TASK_IDS"));
+
+    let dry_run_unscoped = ExecutionWorkerConfig {
+        dry_run: true,
+        ..live_unscoped
+    };
+    dry_run_unscoped
+        .validate_live_worker_scope()
+        .expect("dry-run worker may lease broadly");
+}
+
+#[test]
 fn dry_run_result_is_reportable_without_exchange_credentials() {
     let task = task(json!({
         "exchange": "okx",

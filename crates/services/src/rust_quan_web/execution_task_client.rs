@@ -264,6 +264,103 @@ pub struct StrategySignalDispatchResponse {
     pub generated_tasks: Vec<ExecutionTask>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct MarketVelocityPaperOutcomeRequest {
+    pub rank_event_id: i64,
+    pub exchange: String,
+    pub symbol: String,
+    pub target_r: f64,
+    pub horizon_hours: i32,
+    pub entry_rule_version: String,
+    pub entry_trigger: Option<String>,
+    pub entry_price: f64,
+    pub entry_at: String,
+    pub outcome_status: String,
+    pub exit_reason: String,
+    pub result_r: Option<f64>,
+    pub evaluated_at: String,
+    pub evaluation_payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct MarketVelocityPaperOutcomeResponse {
+    pub outcome: Value,
+    pub generated_execution_task_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct MarketVelocityExecutionTaskCreationPreviewRequest {
+    pub rank_event_id: Option<i64>,
+    pub buyer_email: Option<String>,
+    pub combo_id: Option<i64>,
+    pub exchange: String,
+    pub symbol: String,
+    pub target_r: f64,
+    pub horizon_hours: i32,
+    pub entry_rule_version: Option<String>,
+    pub entry_trigger_filter_version: Option<String>,
+    pub risk_adjusted_win_rate_edge: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct MarketVelocityExecutionTaskCreationPreviewCheck {
+    pub code: String,
+    pub label: String,
+    pub status: String,
+    pub blocker_code: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct MarketVelocityExecutionTaskCreationPreviewResponse {
+    pub read_only: bool,
+    pub dry_run_only: bool,
+    pub mutation_allowed: bool,
+    pub would_create_execution_task: bool,
+    pub generated_execution_task_count: i64,
+    pub owner_service: String,
+    pub status: String,
+    pub exchange: String,
+    pub symbol: String,
+    pub rank_event_id: Option<i64>,
+    pub buyer_email: Option<String>,
+    pub combo_id: Option<i64>,
+    pub target_r: f64,
+    pub horizon_hours: i32,
+    pub entry_rule_version: String,
+    pub entry_trigger_filter_version: Option<String>,
+    pub risk_adjusted_win_rate_edge: Option<f64>,
+    pub required_web_checks: Vec<MarketVelocityExecutionTaskCreationPreviewCheck>,
+    pub blocker_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct MarketVelocityExecutionTaskLiveReadinessCheck {
+    pub code: String,
+    pub label: String,
+    pub status: String,
+    pub blocker_code: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct MarketVelocityExecutionTaskLiveReadinessResponse {
+    pub read_only: bool,
+    pub mutation_allowed: bool,
+    pub owner_service: String,
+    pub status: String,
+    pub task: ExecutionTask,
+    pub checks: Vec<MarketVelocityExecutionTaskLiveReadinessCheck>,
+    pub blocker_codes: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct UserExchangeConfig {
@@ -317,6 +414,12 @@ const EXCHANGE_RECONCILIATION_PATH: &str = "/api/commerce/internal/exchange-reco
 const EXCHANGE_CLOSE_FILL_WRITEBACK_PATH: &str =
     "/api/commerce/internal/exchange-close-fill-writeback";
 const STRATEGY_SIGNAL_PATH: &str = "/api/commerce/internal/strategy-signals";
+const MARKET_VELOCITY_PAPER_OUTCOME_PATH: &str =
+    "/api/commerce/internal/market-velocity/paper-outcomes";
+const MARKET_VELOCITY_TASK_CREATION_PREVIEW_PATH: &str =
+    "/api/commerce/internal/market-velocity/execution-task-creation-preview";
+const MARKET_VELOCITY_LIVE_TASK_READINESS_PATH_PREFIX: &str =
+    "/api/commerce/internal/market-velocity/execution-tasks";
 const USER_EXCHANGE_CONFIG_PATH: &str = "/api/commerce/internal/api-credentials/resolve";
 const API_CREDENTIAL_CHECK_PATH_PREFIX: &str = "/api/commerce/internal/api-credentials";
 const INTERNAL_SECRET_HEADER: &str = "x-alpha-execution-secret";
@@ -384,6 +487,30 @@ impl ExecutionTaskClient {
         self.post_json(STRATEGY_SIGNAL_PATH, &request).await
     }
 
+    pub async fn submit_market_velocity_paper_outcome(
+        &self,
+        request: MarketVelocityPaperOutcomeRequest,
+    ) -> Result<MarketVelocityPaperOutcomeResponse> {
+        self.post_json(MARKET_VELOCITY_PAPER_OUTCOME_PATH, &request)
+            .await
+    }
+
+    pub async fn preview_market_velocity_execution_task_creation(
+        &self,
+        request: MarketVelocityExecutionTaskCreationPreviewRequest,
+    ) -> Result<MarketVelocityExecutionTaskCreationPreviewResponse> {
+        self.post_json(MARKET_VELOCITY_TASK_CREATION_PREVIEW_PATH, &request)
+            .await
+    }
+
+    pub async fn market_velocity_live_task_readiness(
+        &self,
+        task_id: i64,
+    ) -> Result<MarketVelocityExecutionTaskLiveReadinessResponse> {
+        self.get_json(&self.market_velocity_live_task_readiness_url(task_id))
+            .await
+    }
+
     pub async fn resolve_user_exchange_config(
         &self,
         buyer_email: &str,
@@ -449,6 +576,16 @@ impl ExecutionTaskClient {
 
     pub fn strategy_signal_url(&self) -> String {
         self.url(STRATEGY_SIGNAL_PATH)
+    }
+
+    pub fn market_velocity_paper_outcome_url(&self) -> String {
+        self.url(MARKET_VELOCITY_PAPER_OUTCOME_PATH)
+    }
+
+    pub fn market_velocity_live_task_readiness_url(&self, task_id: i64) -> String {
+        self.url(&format!(
+            "{MARKET_VELOCITY_LIVE_TASK_READINESS_PATH_PREFIX}/{task_id}/live-readiness"
+        ))
     }
 
     pub fn exchange_reconciliation_url(&self) -> String {
@@ -1009,6 +1146,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preview_market_velocity_task_creation_uses_internal_owner_route() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server = tokio::task::spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 4096];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+            tx.send(request).unwrap();
+
+            let body = r#"{"success":true,"data":{"read_only":true,"dry_run_only":true,"mutation_allowed":false,"would_create_execution_task":false,"generated_execution_task_count":0,"owner_service":"quant_web","status":"ready","exchange":"okx","symbol":"ASTER-USDT-SWAP","rank_event_id":2042663,"buyer_email":"buyer@example.com","combo_id":85,"target_r":2.4,"horizon_hours":48,"entry_rule_version":"rank_radar_4h_trend_15m_stop_reentry_025sl_24r_v1","entry_trigger_filter_version":"entry_trigger_allowlist_v1","risk_adjusted_win_rate_edge":null,"required_web_checks":[],"blocker_codes":[]}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap();
+        let preview = client
+            .preview_market_velocity_execution_task_creation(
+                MarketVelocityExecutionTaskCreationPreviewRequest {
+                    rank_event_id: Some(2042663),
+                    buyer_email: Some("buyer@example.com".to_string()),
+                    combo_id: Some(85),
+                    exchange: "okx".to_string(),
+                    symbol: "ASTER-USDT-SWAP".to_string(),
+                    target_r: 2.4,
+                    horizon_hours: 48,
+                    entry_rule_version: Some(
+                        "rank_radar_4h_trend_15m_stop_reentry_025sl_24r_v1".to_string(),
+                    ),
+                    entry_trigger_filter_version: Some("entry_trigger_allowlist_v1".to_string()),
+                    risk_adjusted_win_rate_edge: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        server.await.unwrap();
+        let request = rx.recv().unwrap();
+
+        assert!(request.starts_with(
+            "POST /api/commerce/internal/market-velocity/execution-task-creation-preview HTTP/1.1"
+        ));
+        assert!(request.contains("x-alpha-execution-secret: dev-secret"));
+        assert!(request.contains("\"rank_event_id\":2042663"));
+        assert!(preview.read_only);
+        assert!(preview.dry_run_only);
+        assert!(!preview.mutation_allowed);
+        assert_eq!(preview.owner_service, "quant_web");
+        assert!(preview.blocker_codes.is_empty());
+    }
+
+    #[tokio::test]
     async fn report_exchange_reconciliation_uses_internal_post_contract() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -1149,6 +1352,119 @@ mod tests {
             "3631564680998985728"
         );
         assert_eq!(response.trade_record["side"], "sell");
+    }
+
+    #[test]
+    fn market_velocity_paper_outcome_request_matches_quant_web_contract() {
+        let request = MarketVelocityPaperOutcomeRequest {
+            rank_event_id: 77,
+            exchange: "okx".to_string(),
+            symbol: "ETH-USDT-SWAP".to_string(),
+            target_r: 1.5,
+            horizon_hours: 24,
+            entry_rule_version: "rank_radar_4h_15m_v2".to_string(),
+            entry_trigger: Some("breakout_previous_high".to_string()),
+            entry_price: 100.0,
+            entry_at: "2026-06-15T00:15:00Z".to_string(),
+            outcome_status: "win".to_string(),
+            exit_reason: "target_hit".to_string(),
+            result_r: Some(1.5),
+            evaluated_at: "2026-06-15T01:00:00Z".to_string(),
+            evaluation_payload: serde_json::json!({
+                "source": "market_velocity_event_backtest",
+                "target_r": 1.5
+            }),
+        };
+        let value = serde_json::to_value(&request).unwrap();
+
+        assert_eq!(value["rank_event_id"], 77);
+        assert_eq!(value["exchange"], "okx");
+        assert_eq!(value["symbol"], "ETH-USDT-SWAP");
+        assert_eq!(value["target_r"], 1.5);
+        assert_eq!(value["horizon_hours"], 24);
+        assert_eq!(value["entry_rule_version"], "rank_radar_4h_15m_v2");
+        assert_eq!(value["outcome_status"], "win");
+        assert_eq!(value["generated_execution_task_count"], Value::Null);
+        assert!(!value.to_string().contains("buyer_email"));
+        assert!(!value.to_string().contains("execution_task"));
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "https://quant-web.example/".to_string(),
+            internal_secret: "secret".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            client.market_velocity_paper_outcome_url(),
+            "https://quant-web.example/api/commerce/internal/market-velocity/paper-outcomes"
+        );
+    }
+
+    #[tokio::test]
+    async fn submit_market_velocity_paper_outcome_uses_internal_post_contract() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server = tokio::task::spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 8192];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+            tx.send(request).unwrap();
+
+            let body = r#"{"success":true,"data":{"outcome":{"id":9,"rank_event_id":77,"exchange":"okx","symbol":"ETH-USDT-SWAP","target_r":1.5,"horizon_hours":24,"entry_rule_version":"rank_radar_4h_15m_v2","outcome_status":"win"},"generated_execution_task_count":0}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap();
+        let response = client
+            .submit_market_velocity_paper_outcome(MarketVelocityPaperOutcomeRequest {
+                rank_event_id: 77,
+                exchange: "okx".to_string(),
+                symbol: "ETH-USDT-SWAP".to_string(),
+                target_r: 1.5,
+                horizon_hours: 24,
+                entry_rule_version: "rank_radar_4h_15m_v2".to_string(),
+                entry_trigger: Some("breakout_previous_high".to_string()),
+                entry_price: 100.0,
+                entry_at: "2026-06-15T00:15:00Z".to_string(),
+                outcome_status: "win".to_string(),
+                exit_reason: "target_hit".to_string(),
+                result_r: Some(1.5),
+                evaluated_at: "2026-06-15T01:00:00Z".to_string(),
+                evaluation_payload: serde_json::json!({
+                    "source": "market_velocity_event_backtest",
+                    "target_r": 1.5
+                }),
+            })
+            .await
+            .unwrap();
+
+        server.await.unwrap();
+        let request = rx.recv().unwrap();
+
+        assert!(request
+            .starts_with("POST /api/commerce/internal/market-velocity/paper-outcomes HTTP/1.1"));
+        assert!(request.contains("x-alpha-execution-secret: dev-secret"));
+        assert!(request.contains(r#""rank_event_id":77"#));
+        assert!(request.contains(r#""symbol":"ETH-USDT-SWAP""#));
+        assert!(request.contains(r#""target_r":1.5"#));
+        assert!(!request.contains("buyer@example.com"));
+        assert_eq!(response.generated_execution_task_count, 0);
+        assert_eq!(response.outcome["rank_event_id"], 77);
     }
 
     #[tokio::test]

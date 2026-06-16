@@ -6,7 +6,6 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use crypto_exc_all::raw::binance::api::websocket::BinanceWebsocket;
 use crypto_exc_all::raw::binance::config::{Config, DEFAULT_WS_STREAM_URL};
-use okx::dto::market_dto::CandleOkxRespDto;
 use rust_quant_domain::traits::CandleRepository;
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use rust_quant_infrastructure::repositories::PostgresCandleRepository;
@@ -24,7 +23,6 @@ pub struct BinanceKlineUpdate {
     pub time_interval: String,
     pub candle_entity: CandlesEntity,
     pub domain_candle: Candle,
-    pub okx_candle: CandleOkxRespDto,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,8 +94,8 @@ impl BinanceCandlePersister {
             }
             Self::LegacyCompatTables => {
                 CandlesModel::new()
-                    .upsert_batch(
-                        vec![update.okx_candle.clone()],
+                    .upsert_entities_batch(
+                        vec![update.candle_entity.clone()],
                         &update.inst_id,
                         &update.time_interval,
                     )
@@ -200,24 +198,11 @@ pub fn parse_binance_kline_message(
         updated_at: None,
     };
 
-    let okx_candle = CandleOkxRespDto {
-        ts: event.kline.open_time.to_string(),
-        o: event.kline.open,
-        h: event.kline.high,
-        l: event.kline.low,
-        c: event.kline.close,
-        v: event.kline.volume,
-        vol_ccy: quote_volume.clone(),
-        vol_ccy_quote: quote_volume,
-        confirm,
-    };
-
     Ok(BinanceKlineUpdate {
         inst_id: inst_id.to_string(),
         time_interval: period.to_string(),
         candle_entity,
         domain_candle,
-        okx_candle,
     })
 }
 

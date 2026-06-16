@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tracing::{info, span, Level};
 
 use crate::cache::default_provider;
-use crate::models::CandlesEntity;
+use crate::models::TickersDataEntity;
 use crate::repositories::candle_service::{CandleService, StrategyTrigger};
 use crate::repositories::persist_worker::{CandlePersistWorker, PersistTask};
 use crate::repositories::ticker_service::TickerService;
@@ -157,8 +157,13 @@ pub async fn run_socket_with_strategy_trigger(
         tokio::spawn(async move {
             while let Some(msg) = public_receiver.recv().await {
                 if let Ok(ticker) = serde_json::from_value::<TickerOkxResWsDto>(msg.clone()) {
+                    let tickers = ticker
+                        .data
+                        .iter()
+                        .map(TickersDataEntity::from_okx_ticker)
+                        .collect::<Vec<_>>();
                     if let Err(e) = ticker_service
-                        .upsert_tickers(ticker.data, inst_filters.as_ref())
+                        .upsert_tickers(tickers, inst_filters.as_ref())
                         .await
                     {
                         error!("更新ticker失败: {:?}", e);

@@ -1,8 +1,7 @@
 use anyhow::Result;
-use okx::dto::market_dto::TickerOkxResDto;
 use tracing::debug;
 
-use crate::models::TicketsModel;
+use crate::models::{TickersDataEntity, TicketsModel};
 
 /// 市场 Ticker 数据服务
 pub struct TickerService {
@@ -19,7 +18,7 @@ impl TickerService {
     /// 更新指定交易对的 ticker 数据（存在则更新，不存在则插入）
     pub async fn upsert_tickers(
         &self,
-        tickers: Vec<TickerOkxResDto>,
+        tickers: Vec<TickersDataEntity>,
         filter_inst_ids: &[String],
     ) -> Result<()> {
         if tickers.is_empty() {
@@ -38,10 +37,10 @@ impl TickerService {
 
             if existing.is_empty() {
                 debug!("插入新的ticker记录: {}", inst_id);
-                self.model.add(vec![ticker]).await?;
+                self.model.add_entities(vec![ticker]).await?;
             } else {
                 debug!("更新已存在的ticker记录: {}", inst_id);
-                self.model.update(&ticker).await?;
+                self.model.update_entity(&ticker).await?;
             }
         }
 

@@ -251,6 +251,58 @@ impl CandlesModel {
         Ok(result.rows_affected())
     }
 
+    /// 批量 UPSERT 已归一化的 K 线实体。
+    pub async fn upsert_entities_batch(
+        &self,
+        candles: Vec<CandlesEntity>,
+        inst_id: &str,
+        time_interval: &str,
+    ) -> Result<u64> {
+        if candles.is_empty() {
+            return Ok(0);
+        }
+
+        let table_name = Self::get_table_name(inst_id, time_interval);
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
+
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(format!(
+            "INSERT INTO {} (ts, o, h, l, c, vol, vol_ccy, confirm) ",
+            quoted_table_name
+        ));
+
+        query_builder.push_values(candles.iter(), |mut b, candle| {
+            b.push_bind(candle.ts)
+                .push_bind(&candle.o)
+                .push_bind(&candle.h)
+                .push_bind(&candle.l)
+                .push_bind(&candle.c)
+                .push_bind(&candle.vol)
+                .push_bind(&candle.vol_ccy)
+                .push_bind(&candle.confirm);
+        });
+
+        query_builder.push(
+            " ON CONFLICT (ts) DO UPDATE SET
+                o = EXCLUDED.o,
+                h = EXCLUDED.h,
+                l = EXCLUDED.l,
+                c = EXCLUDED.c,
+                vol = EXCLUDED.vol,
+                vol_ccy = EXCLUDED.vol_ccy,
+                confirm = EXCLUDED.confirm,
+                updated_at = CURRENT_TIMESTAMP",
+        );
+
+        let result = query_builder.build().execute(pool).await?;
+        debug!(
+            "批量 upsert {} 条归一化 K线数据，影响行数: {}",
+            candles.len(),
+            result.rows_affected()
+        );
+        Ok(result.rows_affected())
+    }
+
     /// [保留兼容] 旧版本方法，内部调用 upsert_one
     pub async fn update_or_create(
         &self,

@@ -71,9 +71,15 @@ jobs:
       - name: Focused tests
         working-directory: rust_quant
         run: |
-          cargo test -p rust-quant-services market_velocity_signal -- --nocapture
-          cargo test -p rust-quant-services --test market_velocity_okx_live_preflight_contract -- --nocapture
-          cargo test -p rust-quant-services --test market_velocity_okx_scoped_live_worker_contract -- --nocapture
+          cargo test -p rust-quant-cli market_velocity_live_handoff --lib -- --nocapture
+          cargo check -p rust-quant-cli --bin market_velocity_live_handoff
+          cargo test -p rust-quant-cli market_velocity_backfill --lib -- --nocapture
+          cargo check -p rust-quant-cli --bin market_velocity_candle_backfill
+          cargo test -p rust-quant-services --test market_velocity_production_deploy_contract -- --nocapture
+          cargo test -p rust-quant-services market_velocity_signal --lib -- --nocapture
+          cargo test -p rust-quant-services strategy_signal --lib -- --nocapture
+          cargo test -p rust-quant-services target_task --lib -- --nocapture
+          cargo test -p rust-quant-services live_order_confirmation --lib -- --nocapture
 
   build-and-push:
     name: Build & Push Image

@@ -171,6 +171,17 @@ impl CryptoExcAllGateway {
         }
     }
 
+    pub async fn tickers(
+        &self,
+        exchange: ExchangeId,
+        _instrument_type: &str,
+    ) -> Result<Vec<Ticker>> {
+        Err(Error::Unsupported {
+            exchange,
+            capability: "bulk tickers via crypto_exc_all",
+        })
+    }
+
     pub async fn orderbook(
         &self,
         exchange: ExchangeId,

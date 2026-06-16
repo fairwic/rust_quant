@@ -13,7 +13,15 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
-use super::market_velocity_signal::dispatch_market_velocity_strategy_signal_if_enabled;
+use super::market_velocity_entry::{
+    build_market_velocity_entry_confirmation_from_candles, MarketVelocityEntryConfirmation,
+    MarketVelocityEntryConfirmationDecision,
+};
+use super::market_velocity_signal::{
+    dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
+    market_velocity_signal_dispatch_is_enabled,
+    market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityStrategySignalConfig,
+};
 use super::CandleService;
 use crate::notification::TelegramNotifier;
 
@@ -60,6 +68,7 @@ const MARKET_RANK_TECHNICAL_TIMEFRAME: &str = "4h";
 const MARKET_RANK_TECHNICAL_PERIOD: usize = 20;
 const MARKET_RANK_TECHNICAL_FETCH_LIMIT: u32 = 80;
 const MARKET_RANK_TECHNICAL_TOUCH_THRESHOLD_PCT: f64 = 0.3;
+const MARKET_VELOCITY_ENTRY_TIMEFRAME: &str = "15m";
 
 impl ScannerService {
     pub fn new(anomaly_repo: Arc<dyn MarketAnomalyRepository>) -> Result<Self> {
@@ -554,7 +563,16 @@ impl ScannerService {
         match self.anomaly_repo.save_rank_event(&event).await {
             Ok(id) => {
                 event.id = Some(id);
-                if let Err(e) = dispatch_market_velocity_strategy_signal_if_enabled(&event).await {
+                let entry_confirmation = self
+                    .market_velocity_entry_confirmation_if_needed(&event)
+                    .await;
+                if let Err(e) =
+                    dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled(
+                        &event,
+                        entry_confirmation.as_ref(),
+                    )
+                    .await
+                {
                     error!(
                         "Failed to dispatch rank velocity strategy signal for {}: {:?}",
                         symbol, e
@@ -598,7 +616,16 @@ impl ScannerService {
         match self.anomaly_repo.save_rank_event(&event).await {
             Ok(id) => {
                 event.id = Some(id);
-                if let Err(e) = dispatch_market_velocity_strategy_signal_if_enabled(&event).await {
+                let entry_confirmation = self
+                    .market_velocity_entry_confirmation_if_needed(&event)
+                    .await;
+                if let Err(e) =
+                    dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled(
+                        &event,
+                        entry_confirmation.as_ref(),
+                    )
+                    .await
+                {
                     error!(
                         "Failed to dispatch top list strategy signal for {}: {:?}",
                         symbol, e
@@ -661,6 +688,100 @@ impl ScannerService {
         ) {
             Some(snapshot) => MarketRankTechnicalCapture::new("captured", Some(snapshot)),
             None => MarketRankTechnicalCapture::new("insufficient_kline", None),
+        }
+    }
+
+    async fn market_velocity_entry_confirmation_if_needed(
+        &self,
+        event: &MarketRankEvent,
+    ) -> Option<MarketVelocityEntryConfirmation> {
+        if !market_velocity_signal_dispatch_is_enabled() {
+            return None;
+        }
+
+        let config = match MarketVelocityStrategySignalConfig::from_env() {
+            Ok(config) => config,
+            Err(error) => {
+                warn!(
+                    "Market Velocity signal config invalid before entry confirmation fetch: symbol={}, event_id={:?}, error={:?}",
+                    event.symbol, event.id, error
+                );
+                return None;
+            }
+        };
+
+        match market_velocity_strategy_signal_needs_entry_confirmation(event, &config) {
+            Ok(true) => {
+                self.capture_market_velocity_entry_confirmation(&event.symbol, &config)
+                    .await
+            }
+            Ok(false) => None,
+            Err(error) => {
+                warn!(
+                    "Failed to evaluate Market Velocity entry confirmation need: symbol={}, event_id={:?}, error={:?}",
+                    event.symbol, event.id, error
+                );
+                None
+            }
+        }
+    }
+
+    async fn capture_market_velocity_entry_confirmation(
+        &self,
+        symbol: &str,
+        config: &MarketVelocityStrategySignalConfig,
+    ) -> Option<MarketVelocityEntryConfirmation> {
+        let Some(candle_service) = &self.technical_candle_service else {
+            warn!(
+                "Market Velocity entry confirmation skipped because candle service is not configured: symbol={}",
+                symbol
+            );
+            return None;
+        };
+
+        let candles = match candle_service
+            .fetch_candles_from_crypto_exc_all(
+                "okx",
+                symbol,
+                MARKET_VELOCITY_ENTRY_TIMEFRAME,
+                None,
+                None,
+                config.entry_confirmation_fetch_limit,
+            )
+            .await
+        {
+            Ok(candles) => candles,
+            Err(error) => {
+                warn!(
+                    "Failed to fetch {} candles for Market Velocity entry confirmation {}: {:?}",
+                    MARKET_VELOCITY_ENTRY_TIMEFRAME, symbol, error
+                );
+                return None;
+            }
+        };
+
+        if !candles.is_empty() {
+            if let Err(error) = candle_service.save_candles(candles.clone()).await {
+                warn!(
+                    "Failed to persist {} candles for Market Velocity entry confirmation {}: {:?}",
+                    MARKET_VELOCITY_ENTRY_TIMEFRAME, symbol, error
+                );
+            }
+        }
+
+        match build_market_velocity_entry_confirmation_from_candles(
+            MARKET_VELOCITY_ENTRY_TIMEFRAME,
+            &candles,
+            &config.entry_confirmation_config(),
+        ) {
+            MarketVelocityEntryConfirmationDecision::Confirmed(confirmation) => Some(confirmation),
+            MarketVelocityEntryConfirmationDecision::Blocked(blocker) => {
+                info!(
+                    "Market Velocity entry timing not confirmed: symbol={}, blocker={:?}",
+                    symbol, blocker
+                );
+                None
+            }
         }
     }
 

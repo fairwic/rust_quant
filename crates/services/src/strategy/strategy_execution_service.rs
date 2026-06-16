@@ -28,6 +28,7 @@ use rust_quant_strategies::strategy_common::SignalResult;
 use crate::rust_quan_web::{ExecutionTaskClient, ExecutionTaskConfig, StrategySignalSubmitRequest};
 
 use super::live_decision::{apply_live_decision, approx_eq_opt};
+use super::strategy_signal_payload::{self, StrategySignalPayloadBuildOptions};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 struct LiveExitTargets {
@@ -388,77 +389,22 @@ impl StrategyExecutionService {
         pos_side: &str,
         client_order_id: &str,
     ) -> Result<StrategySignalSubmitRequest> {
-        let direction = match pos_side {
-            "long" | "short" => pos_side.to_string(),
-            other => {
-                return Err(anyhow!(
-                    "unsupported strategy signal position side: {}",
-                    other
-                ))
-            }
-        };
-        let selected_stop_loss =
-            Self::select_strategy_signal_stop_loss(side, pos_side, signal, risk_config)?;
-        let entry_price = signal.open_price;
-        let generated_at = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(signal.ts)
-            .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
-
-        let payload_json = serde_json::json!({
-            "source": "rust_quant",
-            "source_signal_type": "technical_strategy",
-            "config_id": config_id,
-            "strategy_type": strategy_type,
-            "strategy_key": format!("{}:{}:{}:{}", strategy_type, inst_id, period, config_id),
-            "period": period,
-            "symbol": inst_id,
-            "exchange": exchange.map(str::to_ascii_lowercase),
-            "side": side,
-            "position_side": pos_side,
-            "trade_side": "open",
-            "order_type": "market",
-            "client_order_id": client_order_id,
-            "risk_plan": {
-                "entry_price": entry_price,
-                "selected_stop_loss_price": selected_stop_loss,
-                "direction": pos_side,
-                "protective_stop_loss_required": true,
-            },
-            "signal": signal,
-        });
-        let smoke_external_id_suffix = std::env::var("RUST_QUANT_SMOKE_EXTERNAL_ID_SUFFIX").ok();
-
-        Ok(StrategySignalSubmitRequest {
-            source: "rust_quant".to_string(),
-            external_id: Self::build_strategy_signal_external_id(
-                strategy_type,
-                config_id,
-                inst_id,
-                period,
-                signal.ts,
-                smoke_external_id_suffix.as_deref(),
-            ),
-            strategy_slug: strategy_type.to_string(),
-            strategy_key: format!("{}:{}:{}:{}", strategy_type, inst_id, period, config_id),
-            symbol: inst_id.to_string(),
-            signal_type: "entry".to_string(),
-            direction,
-            title: format!(
-                "{} {} signal {} {}",
-                Self::title_case_strategy(strategy_type),
-                pos_side,
-                inst_id,
-                period
-            ),
-            summary: Some(format!(
-                "rust_quant strategy {} generated {} entry signal at price {}",
-                strategy_type, pos_side, signal.open_price
-            )),
-            confidence: None,
-            payload_json: payload_json.to_string(),
-            generated_at,
-        })
+        strategy_signal_payload::build_strategy_signal_submit_request(
+            inst_id,
+            period,
+            signal,
+            risk_config,
+            config_id,
+            strategy_type,
+            exchange,
+            side,
+            pos_side,
+            client_order_id,
+            StrategySignalPayloadBuildOptions::default(),
+        )
     }
 
+    #[cfg(test)]
     fn build_strategy_signal_external_id(
         strategy_type: &str,
         config_id: i64,
@@ -467,64 +413,14 @@ impl StrategyExecutionService {
         signal_ts: i64,
         smoke_suffix: Option<&str>,
     ) -> String {
-        let base = format!(
-            "rust_quant:{}:{}:{}:{}:{}",
-            strategy_type, config_id, inst_id, period, signal_ts
-        );
-        match smoke_suffix
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            Some(suffix) => format!("{base}:{suffix}"),
-            None => base,
-        }
-    }
-
-    fn title_case_strategy(strategy_type: &str) -> String {
-        let mut chars = strategy_type.chars();
-        match chars.next() {
-            Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
-            None => "Strategy".to_string(),
-        }
-    }
-
-    fn select_strategy_signal_stop_loss(
-        side: &str,
-        pos_side: &str,
-        signal: &SignalResult,
-        risk_config: &rust_quant_domain::BasicRiskConfig,
-    ) -> Result<f64> {
-        let entry_price = signal.open_price;
-        if !entry_price.is_finite() || entry_price <= 0.0 {
-            return Err(anyhow!("策略信号开仓价无效: {}", entry_price));
-        }
-
-        let stop_side = match side {
-            "buy" => StopLossSide::Long,
-            "sell" => StopLossSide::Short,
-            other => return Err(anyhow!("unsupported strategy signal side: {}", other)),
-        };
-        let stop_candidates = Self::build_stop_loss_candidates(side, signal, risk_config);
-        let selected_stop_loss =
-            StopLossCalculator::select(stop_side, entry_price, &stop_candidates)
-                .ok_or_else(|| anyhow!("无有效止损价"))?;
-
-        if pos_side == "short" && entry_price > selected_stop_loss {
-            return Err(anyhow!(
-                "做空开仓价 > 止损价，不提交Web信号: entry={}, stop_loss={}",
-                entry_price,
-                selected_stop_loss
-            ));
-        }
-        if pos_side == "long" && entry_price < selected_stop_loss {
-            return Err(anyhow!(
-                "做多开仓价 < 止损价，不提交Web信号: entry={}, stop_loss={}",
-                entry_price,
-                selected_stop_loss
-            ));
-        }
-
-        Ok(selected_stop_loss)
+        strategy_signal_payload::build_strategy_signal_external_id(
+            strategy_type,
+            config_id,
+            inst_id,
+            period,
+            signal_ts,
+            smoke_suffix,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4346,6 +4242,23 @@ mod tests {
             std::env::var(key).map_err(|_| anyhow::anyhow!("missing env var: {}", key))
         }
 
+        fn instrument_from_okx_inst_id(
+            inst_id: &str,
+        ) -> anyhow::Result<crypto_exc_all::Instrument> {
+            let parts = inst_id.split('-').collect::<Vec<_>>();
+            let base = parts
+                .first()
+                .copied()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("invalid OKX inst_id: {}", inst_id))?;
+            let quote = parts
+                .get(1)
+                .copied()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("invalid OKX inst_id: {}", inst_id))?;
+            Ok(crypto_exc_all::Instrument::perp(base, quote).with_settlement(quote))
+        }
+
         async fn get_position_mgn_mode(
             okx: &crate::exchange::OkxOrderService,
             api: &ExchangeApiConfig,
@@ -4439,7 +4352,7 @@ mod tests {
             0,
             "okx".to_string(),
             api_key.clone(),
-            api_secret,
+            api_secret.clone(),
             Some(passphrase.clone()),
             true,
             true,
@@ -4471,27 +4384,19 @@ mod tests {
             wait_for_position(&okx_service, &db_api_config, &inst_id, "long", false).await?;
         }
 
-        let open_price = {
-            #[derive(serde::Deserialize)]
-            struct OkxTickerResponse {
-                data: Vec<OkxTickerData>,
-            }
-            #[derive(serde::Deserialize)]
-            struct OkxTickerData {
-                last: String,
-            }
-            let url = format!(
-                "https://www.okx.com/api/v5/market/ticker?instId={}",
-                inst_id
-            );
-            let resp = reqwest::get(url).await?.error_for_status()?;
-            let data: OkxTickerResponse = resp.json().await?;
-            data.data
-                .first()
-                .ok_or_else(|| anyhow!("empty ticker response"))?
-                .last
-                .parse::<f64>()?
-        };
+        let instrument = instrument_from_okx_inst_id(&inst_id)?;
+        let gateway = crate::exchange::CryptoExcAllGateway::from_single_exchange_credentials(
+            crypto_exc_all::ExchangeId::Okx,
+            api_key.clone(),
+            api_secret,
+            Some(passphrase.clone()),
+            true,
+        )?;
+        let open_price = gateway
+            .ticker(crypto_exc_all::ExchangeId::Okx, &instrument)
+            .await?
+            .last_price
+            .parse::<f64>()?;
 
         let signal = SignalResult {
             should_buy: true,

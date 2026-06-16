@@ -118,6 +118,16 @@ impl ExecutionWorkerConfig {
         self.target_task_ids.is_empty() || self.target_task_ids.contains(&task_id)
     }
 
+    pub(crate) fn validate_live_worker_scope(&self) -> Result<()> {
+        if self.dry_run || !self.target_task_ids.is_empty() {
+            return Ok(());
+        }
+
+        Err(anyhow!(
+            "refusing live execution worker without EXECUTION_WORKER_TARGET_TASK_IDS; live workers must be scoped to explicit reviewed task ids"
+        ))
+    }
+
     fn report_replay_limit(&self) -> u32 {
         self.lease_limit
             .min(self.report_replay_max_per_run)
@@ -203,6 +213,9 @@ impl ExecutionWorker {
             internal_secret,
         })?;
         let reconciliation_only_mode = reconciliation_only_mode_from_env();
+        if !reconciliation_only_mode {
+            config.validate_live_worker_scope()?;
+        }
         let gateway = if config.dry_run || reconciliation_only_mode {
             CryptoExcAllGateway::dry_run()
         } else {

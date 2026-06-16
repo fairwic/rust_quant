@@ -5,7 +5,7 @@ use okx::api::market::OkxMarket;
 use okx::dto::market_dto::TickerOkxResDto;
 
 use rust_decimal::Decimal;
-use rust_quant_domain::entities::{FundFlow, FundFlowSide, TickerSnapshot};
+use rust_quant_domain::entities::TickerSnapshot;
 use std::str::FromStr;
 use tracing::{debug, error};
 
@@ -41,7 +41,7 @@ impl OkxScanner {
         }
 
         // 2. 获取现货 (SPOT)
-        // match self.client.get_tickers("SPOT").await {
+        // match self.sdk.market(ExchangeId::Okx)?.tickers("SPOT").await {
         //     Ok(tickers) => {
         //         debug!("Fetched {} SPOT tickers", tickers.len());
         //         for t in tickers {
@@ -71,8 +71,7 @@ impl OkxScanner {
         let (volume_24h_base, volume_24h_quote) = match t.inst_type.as_str() {
             "SPOT" => (vol_raw, vol_ccy),
             "SWAP" | "FUTURES" => {
-                let base = vol_ccy; // Base Volume (e.g. BTC)
-                                    // Need to calculate Quote Volume manually: Base Vol * Price
+                let base = vol_ccy;
                 (base, base * price)
             }
             _ => {
@@ -81,8 +80,7 @@ impl OkxScanner {
             }
         };
 
-        let ts_str = t.ts;
-        let ts_millis = ts_str.parse::<i64>().unwrap_or(0);
+        let ts_millis = t.ts.parse::<i64>().unwrap_or(0);
         let timestamp = DateTime::from_timestamp_millis(ts_millis).unwrap_or(Utc::now());
 
         Ok(TickerSnapshot {
@@ -96,4 +94,3 @@ impl OkxScanner {
 }
 
 use chrono::DateTime;
-use chrono::TimeZone;

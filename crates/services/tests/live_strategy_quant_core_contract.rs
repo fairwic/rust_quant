@@ -90,18 +90,55 @@ fn forced_signal_quant_core_smoke_script_drives_web_execution_loop() {
         .unwrap_or_else(|error| panic!("failed to read {}: {}", script_path.display(), error));
 
     assert!(script.contains("RUST_QUANT_SMOKE_FORCE_SIGNAL:=\"buy\""));
+    assert!(script.contains("POSTGRES_CONTAINER:=\"quant_core_postgres\""));
+    assert!(script.contains("POSTGRES_CONTAINER=\"${POSTGRES_CONTAINER}\""));
+    assert!(script.contains("RESTORE_DEMO_CREDENTIAL"));
+    assert!(script.contains("signed_exchange_preflight_passed"));
+    assert!(script.contains("Local forced-signal dry-run fixture"));
+    assert!(script.contains("last_check_code = 'local_smoke'"));
+    assert!(script.contains("seal_forced_signal_fixture_cipher"));
+    assert!(script.contains("WEB_BACKEND_ENV"));
+    assert!(script.contains("load_web_backend_credential_encryption_env"));
+    assert!(script.contains("API_CREDENTIAL_ENCRYPTION_KEY"));
+    assert!(script.contains("crypto.createCipheriv('aes-256-gcm'"));
+    assert!(script.contains("CredentialEnvelopeContext"));
+    assert!(!script.contains("'v4:local_aes256gcm:forced-signal-fixture-api-key'"));
+    assert!(!script.contains("'v4:local_aes256gcm:forced-signal-fixture-api-secret'"));
+    assert!(script.contains("RESTORE_DEMO_RISK_SNAPSHOT"));
+    assert!(script.contains("user_execution_risk_snapshots"));
+    assert!(script.contains("fixture_signed_read_only_preflight"));
+    assert!(script.contains("account_equity_usdt"));
+    assert!(script.contains("ON CONFLICT (buyer_email, exchange, symbol)"));
+    assert!(script.contains("RESTORE_DEMO_POSITION"));
+    assert!(script.contains("user_position_snapshots"));
+    assert!(script.contains("snapshot_source = 'forced_signal_position_clear'"));
+    assert!(script.contains("quantity = 0"));
+    assert!(script.contains("reset_forced_signal_open_tasks"));
+    assert!(script.contains("forced_signal_smoke_reset"));
+    assert!(script.contains("task_status = 'blocked'"));
     assert!(script.contains("TRADE_SIGNAL_SMOKE_STRATEGY_SLUG=vegas"));
     assert!(script.contains("EXECUTION_DEMO_STRATEGY_TITLE=\"Vegas Strategy Smoke\""));
     assert!(script.contains("TRADE_SIGNAL_SMOKE_SYMBOL=ETH-USDT-SWAP"));
+    assert!(script.contains("LIVE_STRATEGY_ONLY_INST_IDS=ETH-USDT-SWAP"));
+    assert!(script.contains("LIVE_STRATEGY_ONLY_PERIODS=4H"));
     assert!(script.contains("WEB_SEED_SCRIPT=\"${REPO_ROOT}/../rust_quan_web/backend/scripts/dev/seed_execution_demo_combo.sh\""));
     assert!(script.contains("STRATEGY_SIGNAL_DISPATCH_MODE=web"));
     assert!(script.contains("EXECUTION_WORKER_DRY_RUN=true"));
-    assert!(script.contains("RUN_EXECUTION_WORKER_AFTER_STRATEGY=true"));
+    assert!(script.contains("RUN_EXECUTION_WORKER_AFTER_STRATEGY=false"));
     assert!(script.contains("RUST_QUANT_SMOKE_EXTERNAL_ID_SUFFIX"));
     assert!(script.contains("BASE_SIGNAL_ID=\"$(query_web_scalar"));
     assert!(script.contains("id > ${BASE_SIGNAL_ID}"));
     assert!(script.contains("Expected a fresh rust_quant forced strategy signal"));
+    assert!(script.contains("EXECUTION_WORKER_TARGET_TASK_IDS=\"${NEW_TASK_ID}\""));
+    assert!(script.contains("EXECUTION_WORKER_LEASE_LIMIT=1"));
+    assert!(script.contains("EXECUTION_WORKER_TASK_TYPES=execute_signal"));
+    assert!(script.contains("EXECUTION_WORKER_TASK_STATUSES=pending"));
+    assert!(script.contains("exchange_order_results"));
+    assert!(script.contains("execution_task_attempts"));
+    assert!(script.contains("order_status = 'dry_run'"));
+    assert!(script.contains("task_status IN ('completed', 'pending_protection_sync')"));
     assert!(script.contains("./scripts/dev/run_live_strategy_quant_core_smoke.sh"));
+    assert!(script.contains("./scripts/dev/run_execution_worker_dry_run.sh"));
 }
 
 #[test]

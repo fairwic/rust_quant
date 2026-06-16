@@ -10,6 +10,7 @@ use tracing::{error, info};
 
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use rust_quant_infrastructure::repositories::{PostgresCandleRepository, SqlxCandleRepository};
+use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::market::{
     should_use_quant_core_candle_source, CandleService as CandleMarketService, DataSyncService,
 };
@@ -128,7 +129,7 @@ impl CandlesJob {
                 .fetch_candles_from_crypto_exc_all("binance", inst_id, period, after, None, 100)
                 .await?
         } else {
-            let okx_candles = service
+            let exchange_candles = service
                 .fetch_candles_from_exchange(
                     inst_id,
                     period,
@@ -138,13 +139,13 @@ impl CandlesJob {
                 )
                 .await?;
 
-            if okx_candles.is_empty() {
+            if exchange_candles.is_empty() {
                 return Ok(0);
             }
 
-            okx_candles
+            exchange_candles
                 .iter()
-                .map(|dto| Self::convert_okx_to_domain(dto, inst_id, timeframe))
+                .map(|entity| Self::convert_entity_to_domain(entity, inst_id, timeframe))
                 .collect::<Result<Vec<Candle>>>()?
         };
 
@@ -158,54 +159,51 @@ impl CandlesJob {
         Ok(saved_count)
     }
 
-    /// 转换OKX DTO到Domain Candle
+    /// 转换K线实体到Domain Candle
     ///
     /// # Architecture
-    /// 数据转换逻辑，将外部DTO转换为领域实体
-    fn convert_okx_to_domain(
-        dto: &okx::dto::market_dto::CandleOkxRespDto,
+    /// 数据转换逻辑，将持久化实体转换为领域实体
+    fn convert_entity_to_domain(
+        entity: &CandlesEntity,
         symbol: &str,
         timeframe: Timeframe,
     ) -> Result<Candle> {
-        let timestamp = dto
-            .ts
-            .parse::<i64>()
-            .map_err(|e| anyhow::anyhow!("解析时间戳失败: ts={}, err={}", dto.ts, e))?;
+        let timestamp = entity.ts;
 
-        let open = dto
+        let open = entity
             .o
             .parse::<f64>()
-            .map_err(|e| anyhow::anyhow!("解析开盘价失败: o={}, err={}", dto.o, e))?;
+            .map_err(|e| anyhow::anyhow!("解析开盘价失败: o={}, err={}", entity.o, e))?;
         let open = Price::new(open)
-            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.o, e))?;
+            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", entity.o, e))?;
 
-        let high = dto
+        let high = entity
             .h
             .parse::<f64>()
-            .map_err(|e| anyhow::anyhow!("解析最高价失败: h={}, err={}", dto.h, e))?;
+            .map_err(|e| anyhow::anyhow!("解析最高价失败: h={}, err={}", entity.h, e))?;
         let high = Price::new(high)
-            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.h, e))?;
+            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", entity.h, e))?;
 
-        let low = dto
+        let low = entity
             .l
             .parse::<f64>()
-            .map_err(|e| anyhow::anyhow!("解析最低价失败: l={}, err={}", dto.l, e))?;
+            .map_err(|e| anyhow::anyhow!("解析最低价失败: l={}, err={}", entity.l, e))?;
         let low = Price::new(low)
-            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.l, e))?;
+            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", entity.l, e))?;
 
-        let close = dto
+        let close = entity
             .c
             .parse::<f64>()
-            .map_err(|e| anyhow::anyhow!("解析收盘价失败: c={}, err={}", dto.c, e))?;
+            .map_err(|e| anyhow::anyhow!("解析收盘价失败: c={}, err={}", entity.c, e))?;
         let close = Price::new(close)
-            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", dto.c, e))?;
+            .map_err(|e| anyhow::anyhow!("创建Price失败: value={}, err={:?}", entity.c, e))?;
 
-        let volume = dto
-            .vol_ccy
-            .parse::<f64>()
-            .map_err(|e| anyhow::anyhow!("解析成交量失败: vol_ccy={}, err={}", dto.vol_ccy, e))?;
-        let volume = Volume::new(volume)
-            .map_err(|e| anyhow::anyhow!("创建Volume失败: value={}, err={:?}", dto.vol_ccy, e))?;
+        let volume = entity.vol_ccy.parse::<f64>().map_err(|e| {
+            anyhow::anyhow!("解析成交量失败: vol_ccy={}, err={}", entity.vol_ccy, e)
+        })?;
+        let volume = Volume::new(volume).map_err(|e| {
+            anyhow::anyhow!("创建Volume失败: value={}, err={:?}", entity.vol_ccy, e)
+        })?;
 
         let mut candle = Candle::new(
             symbol.to_string(),
@@ -219,7 +217,7 @@ impl CandlesJob {
         );
 
         // 设置确认状态
-        if dto.confirm == "1" {
+        if entity.confirm == "1" {
             candle.confirm();
         }
 

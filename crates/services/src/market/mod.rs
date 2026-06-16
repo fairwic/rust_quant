@@ -17,11 +17,10 @@ mod public_data_service;
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use crypto_exc_all::{Candle as ExchangeCandle, CandleQuery, ExchangeId, Instrument};
-use okx::dto::market_dto::TickerOkxResDto;
 use rust_quant_domain::traits::CandleRepository;
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use rust_quant_infrastructure::repositories::PostgresCandleRepository;
-use rust_quant_market::models::tickers::TickersDataEntity;
+use rust_quant_market::models::{tickers::TickersDataEntity, CandlesEntity};
 use sqlx::{postgres::PgPoolOptions, Postgres, QueryBuilder};
 use std::str::FromStr;
 
@@ -45,9 +44,21 @@ pub use public_data_service::PublicDataService;
 mod scanner_service;
 pub use scanner_service::ScannerService;
 
+mod market_velocity_entry;
+pub use market_velocity_entry::{
+    build_market_velocity_entry_confirmation_from_candles, MarketVelocityEntryConfirmation,
+    MarketVelocityEntryConfirmationBlocker, MarketVelocityEntryConfirmationConfig,
+    MarketVelocityEntryConfirmationDecision,
+};
+
 mod market_velocity_signal;
 pub use market_velocity_signal::{
-    build_market_velocity_strategy_signal_request, MarketVelocityStrategySignalBlocker,
+    build_market_velocity_strategy_signal_request,
+    build_market_velocity_strategy_signal_request_with_entry_confirmation,
+    dispatch_market_velocity_strategy_signal_if_enabled,
+    dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
+    market_velocity_signal_dispatch_is_enabled,
+    market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityStrategySignalBlocker,
     MarketVelocityStrategySignalConfig, MarketVelocityStrategySignalDecision,
 };
 
@@ -131,7 +142,7 @@ impl CandleService {
         after: Option<&str>,
         before: Option<&str>,
         limit: Option<&str>,
-    ) -> Result<Vec<okx::dto::market_dto::CandleOkxRespDto>> {
+    ) -> Result<Vec<CandlesEntity>> {
         use rust_quant_infrastructure::ExchangeFactory;
 
         let exchange = ExchangeFactory::create_default_market_data()?;
@@ -144,10 +155,9 @@ impl CandleService {
             .fetch_candles(inst_id, bar, after_i64, before_i64, limit_usize)
             .await?;
 
-        // 转换JSON数组为CandleOkxRespDto列表（保持向后兼容）
-        let candles: Vec<okx::dto::market_dto::CandleOkxRespDto> = candles_json
+        let candles: Vec<CandlesEntity> = candles_json
             .into_iter()
-            .filter_map(|v| serde_json::from_value(v).ok())
+            .filter_map(exchange_candle_value_to_entity)
             .collect();
 
         Ok(candles)
@@ -162,7 +172,7 @@ impl CandleService {
         inst_id: &str,
         bar: &str,
         limit: Option<&str>,
-    ) -> Result<Vec<okx::dto::market_dto::CandleOkxRespDto>> {
+    ) -> Result<Vec<CandlesEntity>> {
         use rust_quant_infrastructure::ExchangeFactory;
 
         let exchange = ExchangeFactory::create_default_market_data()?;
@@ -173,10 +183,9 @@ impl CandleService {
             .fetch_latest_candles(inst_id, bar, limit_usize)
             .await?;
 
-        // 转换JSON数组为CandleOkxRespDto列表（保持向后兼容）
-        let candles: Vec<okx::dto::market_dto::CandleOkxRespDto> = candles_json
+        let candles: Vec<CandlesEntity> = candles_json
             .into_iter()
-            .filter_map(|v| serde_json::from_value(v).ok())
+            .filter_map(exchange_candle_value_to_entity)
             .collect();
 
         Ok(candles)
@@ -196,10 +205,9 @@ impl CandleService {
         let timeframe =
             Timeframe::from_str(period).map_err(|error| anyhow!("无效的K线周期: {}", error))?;
         let instrument = instrument_from_inst_id(inst_id)?;
-        let interval = exchange_kline_interval(period);
         let gateway = crypto_exc_all_gateway_from_env(exchange_id)?;
 
-        let mut query = CandleQuery::new(instrument, interval).with_limit(limit);
+        let mut query = CandleQuery::new(instrument, period).with_limit(limit);
         if let Some(after) = after {
             query = query.with_start_time(after);
         }
@@ -339,6 +347,66 @@ fn crypto_exc_all_gateway_from_env(exchange: ExchangeId) -> Result<crate::Crypto
         .map_err(|error| anyhow!("创建 crypto_exc_all gateway 失败: {}", error))
 }
 
+fn default_exchange_id() -> Result<ExchangeId> {
+    let exchange = std::env::var("DEFAULT_EXCHANGE")
+        .or_else(|_| std::env::var("EXCHANGE_NAME"))
+        .unwrap_or_else(|_| "okx".to_string());
+    ExchangeId::from_str(&exchange).map_err(|error| anyhow!(error))
+}
+
+fn exchange_candle_value_to_entity(value: serde_json::Value) -> Option<CandlesEntity> {
+    if let Some(values) = value.as_array() {
+        let field = |index: usize| -> Option<String> {
+            values.get(index).and_then(|value| match value {
+                serde_json::Value::String(text) => Some(text.clone()),
+                serde_json::Value::Number(number) => Some(number.to_string()),
+                _ => None,
+            })
+        };
+        let ts = field(0)?.parse::<i64>().ok()?;
+        let vol = field(5).unwrap_or_default();
+        return Some(CandlesEntity {
+            id: None,
+            ts,
+            o: field(1)?,
+            h: field(2)?,
+            l: field(3)?,
+            c: field(4)?,
+            vol: vol.clone(),
+            vol_ccy: field(6).unwrap_or_else(|| vol.clone()),
+            confirm: field(8).unwrap_or_else(|| "1".to_string()),
+            created_at: None,
+            updated_at: None,
+        });
+    }
+
+    let field = |key: &str| -> Option<String> {
+        value.get(key).and_then(|value| match value {
+            serde_json::Value::String(text) => Some(text.clone()),
+            serde_json::Value::Number(number) => Some(number.to_string()),
+            _ => None,
+        })
+    };
+    let ts = field("ts")?.parse::<i64>().ok()?;
+    let vol = field("v").or_else(|| field("vol")).unwrap_or_default();
+    Some(CandlesEntity {
+        id: None,
+        ts,
+        o: field("o")?,
+        h: field("h")?,
+        l: field("l")?,
+        c: field("c")?,
+        vol: vol.clone(),
+        vol_ccy: field("vol_ccy")
+            .or_else(|| field("volCcy"))
+            .or_else(|| field("vol_ccy_quote"))
+            .unwrap_or(vol),
+        confirm: field("confirm").unwrap_or_else(|| "1".to_string()),
+        created_at: None,
+        updated_at: None,
+    })
+}
+
 fn instrument_from_inst_id(inst_id: &str) -> Result<Instrument> {
     let parts: Vec<&str> = inst_id.split('-').collect();
     let base = parts
@@ -353,13 +421,6 @@ fn instrument_from_inst_id(inst_id: &str) -> Result<Instrument> {
         .ok_or_else(|| anyhow!("无法解析交易对 quote: {}", inst_id))?;
 
     Ok(Instrument::perp(base, quote).with_settlement(quote))
-}
-
-fn exchange_kline_interval(period: &str) -> String {
-    match period {
-        "1Dutc" | "1DUTC" => "1d".to_string(),
-        value => value.to_ascii_lowercase(),
-    }
 }
 
 fn exchange_candle_to_domain(
@@ -492,7 +553,7 @@ impl TickerService {
     /// # Returns
     /// * `true` - 插入新记录
     /// * `false` - 更新现有记录
-    pub async fn save_or_update_ticker(&self, ticker: &TickerOkxResDto) -> Result<bool> {
+    pub async fn save_or_update_ticker(&self, ticker: &TickersDataEntity) -> Result<bool> {
         use rust_quant_market::models::tickers::TicketsModel;
         use tracing::debug;
 
@@ -501,30 +562,11 @@ impl TickerService {
 
         if existing.is_empty() {
             debug!("Ticker不存在，插入新数据: {}", ticker.inst_id);
-            // TickerOkxResDto没有实现Clone，需要手动构造
-            let ticker_to_add = TickerOkxResDto {
-                inst_type: ticker.inst_type.clone(),
-                inst_id: ticker.inst_id.clone(),
-                last: ticker.last.clone(),
-                last_sz: ticker.last_sz.clone(),
-                ask_px: ticker.ask_px.clone(),
-                ask_sz: ticker.ask_sz.clone(),
-                bid_px: ticker.bid_px.clone(),
-                bid_sz: ticker.bid_sz.clone(),
-                open24h: ticker.open24h.clone(),
-                high24h: ticker.high24h.clone(),
-                low24h: ticker.low24h.clone(),
-                vol_ccy24h: ticker.vol_ccy24h.clone(),
-                vol24h: ticker.vol24h.clone(),
-                sod_utc0: ticker.sod_utc0.clone(),
-                sod_utc8: ticker.sod_utc8.clone(),
-                ts: ticker.ts.clone(),
-            };
-            model.add(vec![ticker_to_add]).await?;
+            model.add_entities(vec![ticker.clone()]).await?;
             Ok(true)
         } else {
             debug!("Ticker已存在，更新数据: {}", ticker.inst_id);
-            model.update(ticker).await?;
+            model.update_entity(ticker).await?;
             Ok(false)
         }
     }
@@ -541,7 +583,7 @@ impl TickerService {
     /// * 成功处理的ticker数量
     pub async fn batch_update_tickers(
         &self,
-        tickers: Vec<TickerOkxResDto>,
+        tickers: Vec<TickersDataEntity>,
         inst_ids: &[String],
     ) -> Result<usize> {
         use rust_quant_market::models::tickers::TicketsModel;
@@ -564,29 +606,10 @@ impl TickerService {
 
                 if existing.is_empty() {
                     debug!("不存在，插入新数据: {}", inst_id);
-                    // TickerOkxResDto没有实现Clone，需要手动构造
-                    let ticker_to_add = TickerOkxResDto {
-                        inst_type: ticker.inst_type.clone(),
-                        inst_id: ticker.inst_id.clone(),
-                        last: ticker.last.clone(),
-                        last_sz: ticker.last_sz.clone(),
-                        ask_px: ticker.ask_px.clone(),
-                        ask_sz: ticker.ask_sz.clone(),
-                        bid_px: ticker.bid_px.clone(),
-                        bid_sz: ticker.bid_sz.clone(),
-                        open24h: ticker.open24h.clone(),
-                        high24h: ticker.high24h.clone(),
-                        low24h: ticker.low24h.clone(),
-                        vol_ccy24h: ticker.vol_ccy24h.clone(),
-                        vol24h: ticker.vol24h.clone(),
-                        sod_utc0: ticker.sod_utc0.clone(),
-                        sod_utc8: ticker.sod_utc8.clone(),
-                        ts: ticker.ts.clone(),
-                    };
-                    model.add(vec![ticker_to_add]).await?;
+                    model.add_entities(vec![ticker]).await?;
                 } else {
                     debug!("已经存在，更新数据: {}", inst_id);
-                    model.update(&ticker).await?;
+                    model.update_entity(&ticker).await?;
                 }
                 count += 1;
             }
@@ -621,21 +644,15 @@ impl TickerService {
     pub async fn fetch_ticker_from_exchange(
         &self,
         inst_id: &str,
-    ) -> Result<Option<TickerOkxResDto>> {
-        use rust_quant_infrastructure::ExchangeFactory;
-
-        let exchange = ExchangeFactory::create_default_market_data()?;
-        let ticker_json = exchange.fetch_ticker(inst_id).await?;
-
-        // 解析JSON数组，获取第一个ticker
-        if let Some(arr) = ticker_json.as_array() {
-            if let Some(first) = arr.first() {
-                let ticker: TickerOkxResDto = serde_json::from_value(first.clone())?;
-                return Ok(Some(ticker));
-            }
-        }
-
-        Ok(None)
+    ) -> Result<Option<TickersDataEntity>> {
+        let exchange_id = default_exchange_id()?;
+        let gateway = crypto_exc_all_gateway_from_env(exchange_id)?;
+        let instrument = instrument_from_inst_id(inst_id)?;
+        let ticker = gateway
+            .ticker(exchange_id, &instrument)
+            .await
+            .map_err(|error| anyhow!("通过 crypto_exc_all 获取Ticker失败: {}", error))?;
+        Ok(Some(TickersDataEntity::from_exchange_ticker(&ticker)))
     }
 
     /// 从交易所批量获取Ticker数据
@@ -651,19 +668,24 @@ impl TickerService {
     pub async fn fetch_tickers_from_exchange(
         &self,
         inst_type: &str,
-    ) -> Result<Vec<TickerOkxResDto>> {
-        use rust_quant_infrastructure::ExchangeFactory;
+    ) -> Result<Vec<TickersDataEntity>> {
+        let exchange_id = default_exchange_id()?;
+        if exchange_id != ExchangeId::Okx {
+            return Err(anyhow!("批量Ticker同步当前仅支持 OKX: {:?}", exchange_id));
+        }
 
-        let exchange = ExchangeFactory::create_default_market_data()?;
-        let tickers_json = exchange.fetch_tickers(inst_type).await?;
+        use okx::api::api_trait::OkxApiTrait;
+        use okx::api::market::OkxMarket;
 
-        // 转换JSON数组为TickerOkxResDto列表
-        let tickers: Vec<TickerOkxResDto> = tickers_json
-            .into_iter()
-            .filter_map(|v| serde_json::from_value(v).ok())
-            .collect();
-
-        Ok(tickers)
+        let client = OkxMarket::from_env()?;
+        let tickers = client
+            .get_tickers(inst_type)
+            .await
+            .map_err(|error| anyhow!("通过 OKX 获取批量Ticker失败: {}", error))?;
+        Ok(tickers
+            .iter()
+            .map(TickersDataEntity::from_okx_ticker)
+            .collect())
     }
 
     /// 同步单个Ticker（从交易所获取并保存）
@@ -716,7 +738,7 @@ impl TickerService {
         &self,
         inst_type: &str,
         top_n: usize,
-    ) -> Result<Vec<TickerOkxResDto>> {
+    ) -> Result<Vec<TickersDataEntity>> {
         let mut tickers = self.fetch_tickers_from_exchange(inst_type).await?;
 
         // 按vol24h排序

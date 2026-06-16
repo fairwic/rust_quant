@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
+use crypto_exc_all::Ticker;
 use okx::dto::market_dto::TickerOkxResDto;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, QueryBuilder};
@@ -61,6 +62,62 @@ impl TickersDataEntity {
         let naive_datetime = Utc.timestamp_millis_opt(self.ts).unwrap().naive_utc();
         naive_datetime.date()
     }
+
+    pub fn from_exchange_ticker(ticker: &Ticker) -> Self {
+        let raw_text = |key: &str| -> String {
+            ticker
+                .raw
+                .get(key)
+                .and_then(|value| match value {
+                    serde_json::Value::String(text) => Some(text.clone()),
+                    serde_json::Value::Number(number) => Some(number.to_string()),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        };
+
+        Self {
+            id: None,
+            inst_type: raw_text("instType"),
+            inst_id: ticker.exchange_symbol.clone(),
+            last: ticker.last_price.clone(),
+            last_sz: raw_text("lastSz"),
+            ask_px: ticker.ask_price.clone().unwrap_or_default(),
+            ask_sz: raw_text("askSz"),
+            bid_px: ticker.bid_price.clone().unwrap_or_default(),
+            bid_sz: raw_text("bidSz"),
+            open24h: raw_text("open24h"),
+            high24h: raw_text("high24h"),
+            low24h: raw_text("low24h"),
+            vol_ccy24h: raw_text("volCcy24h"),
+            vol24h: ticker.volume_24h.clone().unwrap_or_default(),
+            sod_utc0: raw_text("sodUtc0"),
+            sod_utc8: raw_text("sodUtc8"),
+            ts: ticker.timestamp.unwrap_or_default() as i64,
+        }
+    }
+
+    pub fn from_okx_ticker(ticker: &TickerOkxResDto) -> Self {
+        Self {
+            id: None,
+            inst_type: ticker.inst_type.clone(),
+            inst_id: ticker.inst_id.clone(),
+            last: ticker.last.clone(),
+            last_sz: ticker.last_sz.clone(),
+            ask_px: ticker.ask_px.clone(),
+            ask_sz: ticker.ask_sz.clone(),
+            bid_px: ticker.bid_px.clone(),
+            bid_sz: ticker.bid_sz.clone(),
+            open24h: ticker.open24h.clone(),
+            high24h: ticker.high24h.clone(),
+            low24h: ticker.low24h.clone(),
+            vol_ccy24h: ticker.vol_ccy24h.clone(),
+            vol24h: ticker.vol24h.clone(),
+            sod_utc0: ticker.sod_utc0.clone(),
+            sod_utc8: ticker.sod_utc8.clone(),
+            ts: ticker.ts.parse::<i64>().unwrap_or(0),
+        }
+    }
 }
 
 pub struct TicketsModel;
@@ -72,6 +129,15 @@ impl TicketsModel {
 
     /// 批量插入 Ticker 数据
     pub async fn add(&self, list: Vec<TickerOkxResDto>) -> Result<u64> {
+        let entities = list
+            .iter()
+            .map(TickersDataEntity::from_okx_ticker)
+            .collect::<Vec<_>>();
+        self.add_entities(entities).await
+    }
+
+    /// 批量插入已归一化的 Ticker 数据
+    pub async fn add_entities(&self, list: Vec<TickersDataEntity>) -> Result<u64> {
         if list.is_empty() {
             return Ok(0);
         }
@@ -98,7 +164,7 @@ impl TicketsModel {
                 .push_bind(&ticker.vol24h)
                 .push_bind(&ticker.sod_utc0)
                 .push_bind(&ticker.sod_utc8)
-                .push_bind(ticker.ts.parse::<i64>().unwrap_or(0));
+                .push_bind(ticker.ts);
         });
 
         let result = query_builder.build().execute(pool).await?;
@@ -109,6 +175,12 @@ impl TicketsModel {
 
     /// 更新单个 Ticker 数据
     pub async fn update(&self, ticker: &TickerOkxResDto) -> Result<()> {
+        let entity = TickersDataEntity::from_okx_ticker(ticker);
+        self.update_entity(&entity).await
+    }
+
+    /// 更新单个已归一化的 Ticker 数据
+    pub async fn update_entity(&self, ticker: &TickersDataEntity) -> Result<()> {
         let pool = get_quant_core_postgres_pool()?;
 
         sqlx::query(
@@ -131,7 +203,7 @@ impl TicketsModel {
         .bind(&ticker.vol24h)
         .bind(&ticker.sod_utc0)
         .bind(&ticker.sod_utc8)
-        .bind(ticker.ts.parse::<i64>().unwrap_or(0))
+        .bind(ticker.ts)
         .bind(&ticker.inst_id)
         .execute(pool)
         .await?;

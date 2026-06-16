@@ -23,10 +23,12 @@ use rust_quant_orchestration::workflow::{
     backtest_runner, data_sync, external_market_sync_job::ExternalMarketSyncJob, funding_rate_job,
     tickets_job,
 };
-use rust_quant_services::market::{get_confirmed_candles_for_backtest, CandleService};
+use rust_quant_services::market::{
+    get_confirmed_candles_for_backtest, market_velocity_signal_dispatch_is_enabled, CandleService,
+};
 use rust_quant_services::rust_quan_web::{
-    run_protective_order_outcome_check_from_env, run_reconciliation_snapshot_check_from_env,
-    ExecutionWorker,
+    run_market_velocity_live_readiness_from_env, run_protective_order_outcome_check_from_env,
+    run_reconciliation_snapshot_check_from_env, ExecutionWorker,
 };
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use std::collections::{BTreeSet, HashMap};
@@ -61,6 +63,11 @@ pub async fn run_modes() -> Result<()> {
             "🔎 signed read-only reconciliation snapshot 完成: {}",
             result
         );
+        return Ok(());
+    }
+    if env_is_true("IS_RUN_MARKET_VELOCITY_LIVE_READINESS", false) {
+        let result = run_market_velocity_live_readiness_from_env().await?;
+        info!("🧭 Market Velocity live readiness 完成: {}", result);
         return Ok(());
     }
 
@@ -443,7 +450,20 @@ async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
         analyzer.run().await;
     });
 
-    info!("📈 市场动能雷达 worker 启动: interval={}s", interval_secs);
+    let dispatch_state = if market_velocity_signal_dispatch_is_enabled() {
+        "web-dispatch"
+    } else {
+        "core-only"
+    };
+    info!(
+        "📈 市场动能雷达 worker 启动: interval={}s, strategy_signal_dispatch={}",
+        interval_secs, dispatch_state
+    );
+    if dispatch_state == "core-only" {
+        warn!(
+            "市场动能雷达当前仅写入 Core 事件；如需生成 Web 24h 信号，需配置 MARKET_VELOCITY_SIGNAL_DISPATCH_MODE=web 和 RUST_QUAN_WEB_BASE_URL/EXECUTION_EVENT_SECRET"
+        );
+    }
     job.run_loop().await;
     Ok(())
 }
@@ -582,6 +602,14 @@ fn should_run_funding_rate_sync_from_map(envs: &HashMap<String, String>) -> bool
 
 fn should_run_market_velocity_radar_from_map(envs: &HashMap<String, String>) -> bool {
     env_flag_is_true(envs, "IS_RUN_MARKET_VELOCITY_RADAR")
+}
+
+fn should_exit_after_market_velocity_live_readiness_from_map(
+    envs: &HashMap<String, String>,
+) -> bool {
+    env_flag_is_true(envs, "IS_RUN_MARKET_VELOCITY_LIVE_READINESS")
+        && !env_flag_is_true(envs, "IS_OPEN_SOCKET")
+        && !env_flag_is_true(envs, "IS_RUN_INTERNAL_SERVER")
 }
 
 fn default_backtest_targets() -> Vec<(String, String)> {
@@ -1074,6 +1102,23 @@ pub async fn run() -> Result<()> {
         info!("📡 接收到 {} 信号", signal_name);
     } else {
         run_modes().await?;
+        let envs: HashMap<String, String> = std::env::vars().collect();
+
+        if should_exit_after_market_velocity_live_readiness_from_map(&envs) {
+            heartbeat_handle.abort();
+            info!("🧭 Market Velocity live readiness 已完成，直接优雅退出");
+            let shutdown_config = crate::GracefulShutdownConfig {
+                total_timeout_secs: 30,
+                strategy_stop_timeout_secs: 20,
+                scheduler_shutdown_timeout_secs: 5,
+                db_cleanup_timeout_secs: 5,
+            };
+            if let Err(e) = crate::graceful_shutdown_with_config(shutdown_config).await {
+                error!("❌ 优雅关闭失败: {}", e);
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
 
         // 数据同步-only 场景可直接退出（避免本地一键 sync 后进程挂起等待信号）
         // - local 环境默认退出；prod 如需退出可设置 EXIT_AFTER_SYNC=1
@@ -1455,5 +1500,18 @@ eth_whale_transfer|ETH|docs/external_market_data/dune/eth_whale_transfer.sql|202
         let envs = std::collections::HashMap::new();
 
         assert!(!should_run_market_velocity_radar_from_map(&envs));
+    }
+
+    #[test]
+    fn test_market_velocity_live_readiness_exits_as_one_shot() {
+        let mut envs = std::collections::HashMap::new();
+        envs.insert(
+            "IS_RUN_MARKET_VELOCITY_LIVE_READINESS".to_string(),
+            "true".to_string(),
+        );
+
+        assert!(should_exit_after_market_velocity_live_readiness_from_map(
+            &envs
+        ));
     }
 }

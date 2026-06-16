@@ -8,6 +8,7 @@ pub mod pre_major_listing_perp_catchup;
 pub mod strategy_config_service;
 pub mod strategy_data_service;
 pub mod strategy_execution_service;
+pub(crate) mod strategy_signal_payload;
 pub mod vegas_factor_research;
 
 pub use backtest_service::BacktestService;

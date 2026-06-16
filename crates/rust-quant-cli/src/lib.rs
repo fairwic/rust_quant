@@ -7,7 +7,7 @@ pub mod app;
 use anyhow::Result;
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use tokio_cron_scheduler::JobScheduler;
 use tracing::{error, info};
@@ -26,6 +26,13 @@ pub async fn app_init() -> Result<()> {
     // 设置日志
     rust_quant_core::logger::setup_logging().await?;
 
+    if should_skip_local_state_init() {
+        info!(
+            "Market Velocity live readiness 为只读 Web owner 检查，跳过 Core 本地 DB/Redis 初始化"
+        );
+        return Ok(());
+    }
+
     // 初始化数据库连接
     rust_quant_core::database::init_db_pool().await?;
 
@@ -34,6 +41,22 @@ pub async fn app_init() -> Result<()> {
 
     info!("应用初始化完成");
     Ok(())
+}
+
+fn should_skip_local_state_init() -> bool {
+    let envs: HashMap<String, String> = std::env::vars().collect();
+    should_skip_local_state_init_from_map(&envs)
+}
+
+fn should_skip_local_state_init_from_map(envs: &HashMap<String, String>) -> bool {
+    envs.get("IS_RUN_MARKET_VELOCITY_LIVE_READINESS")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 /// 全局调度器
@@ -159,4 +182,21 @@ async fn shutdown_scheduler() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn market_velocity_live_readiness_skips_local_state_init() {
+        let mut envs = HashMap::new();
+        envs.insert(
+            "IS_RUN_MARKET_VELOCITY_LIVE_READINESS".to_string(),
+            "true".to_string(),
+        );
+
+        assert!(should_skip_local_state_init_from_map(&envs));
+    }
 }
