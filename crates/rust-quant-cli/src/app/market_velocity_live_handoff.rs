@@ -16,7 +16,8 @@ use rust_quant_services::rust_quan_web::{
     build_market_velocity_scoped_execution_worker_env,
     build_market_velocity_scoped_worker_handoff_readiness,
     market_velocity_existing_execution_worker_path, ExecutionTaskClient, ExecutionTaskConfig,
-    MarketVelocityExecutionTaskCreationPreviewRequest, StrategySignalSubmitRequest,
+    ExecutionWorker, MarketVelocityExecutionTaskCreationPreviewRequest,
+    StrategySignalSubmitRequest,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -29,6 +30,7 @@ pub const MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN: &str =
     "I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK";
 pub const MARKET_VELOCITY_REFRESH_READINESS_CONFIRM_TOKEN: &str =
     "I_UNDERSTAND_THIS_REFRESHES_OKX_READONLY_TASK_READINESS";
+pub const MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN: &str = "I_UNDERSTAND_LIVE_ORDERS";
 const DEFAULT_OKX_REST_BASE: &str = "https://www.okx.com";
 const DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES: i64 = 45;
 const DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS: u64 = 0;
@@ -53,6 +55,8 @@ pub struct MarketVelocityLiveHandoffConfig {
     pub refresh_readiness_confirm: Option<String>,
     pub create_task_apply: bool,
     pub create_task_confirm: Option<String>,
+    pub run_scoped_worker_apply: bool,
+    pub run_scoped_worker_confirm: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +172,11 @@ pub fn market_velocity_live_handoff_config_from_env() -> Result<MarketVelocityLi
         create_task_confirm: first_non_empty_env(&[
             "MARKET_VELOCITY_CREATE_TASK_CONFIRM",
             "MARKET_VELOCITY_SIGNAL_REPLAY_CONFIRM",
+        ]),
+        run_scoped_worker_apply: parse_bool_env("MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY", false)?,
+        run_scoped_worker_confirm: first_non_empty_env(&[
+            "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM",
+            "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
         ]),
     })
 }
@@ -426,12 +435,54 @@ pub async fn run_market_velocity_live_handoff(
         }
         None => None,
     };
+    let scoped_worker_execution = if config.run_scoped_worker_apply {
+        if !market_velocity_scoped_worker_apply_authorized(
+            true,
+            config.run_scoped_worker_confirm.as_deref(),
+        ) {
+            bail!(
+                "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM={} is required before running scoped live worker",
+                MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN
+            );
+        }
+        let task = dispatch
+            .generated_tasks
+            .first()
+            .ok_or_else(|| anyhow!("live task creation returned no execution task"))?;
+        let handoff = next_worker
+            .as_ref()
+            .ok_or_else(|| anyhow!("scoped live worker handoff is unavailable"))?;
+        if handoff.get("status").and_then(Value::as_str) != Some("ready_for_scoped_live_worker") {
+            bail!("scoped live worker readiness is blocked; refusing live worker run");
+        }
+        let handled = run_market_velocity_scoped_worker_once(
+            task.id,
+            config
+                .run_scoped_worker_confirm
+                .as_deref()
+                .unwrap_or(MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN),
+        )
+        .await?;
+        json!({
+            "apply": true,
+            "status": "scoped_worker_ran_once",
+            "task_id": task.id,
+            "handled": handled,
+        })
+    } else {
+        json!({
+            "apply": false,
+            "status": "not_requested",
+            "next_apply_confirm": MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN,
+        })
+    };
     response["status"] = json!("execution_task_created");
     response["read_only"] = json!(false);
     response["mutation_allowed"] = json!(true);
     response["strategy_signal_id"] = json!(dispatch.inbox.id);
     response["generated_tasks"] = json!(dispatch.generated_tasks);
     response["next_worker_handoff"] = next_worker.unwrap_or_else(|| json!(null));
+    response["scoped_worker_execution"] = scoped_worker_execution;
     Ok(response)
 }
 
@@ -553,6 +604,89 @@ pub fn market_velocity_task_creation_apply_authorized(
     confirmation: Option<&str>,
 ) -> bool {
     apply && confirmation.map(str::trim) == Some(MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN)
+}
+
+pub fn market_velocity_scoped_worker_apply_authorized(
+    apply: bool,
+    confirmation: Option<&str>,
+) -> bool {
+    apply && confirmation.map(str::trim) == Some(MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN)
+}
+
+pub fn build_market_velocity_scoped_worker_env_overrides(
+    task_id: i64,
+    confirmation: &str,
+) -> Result<BTreeMap<&'static str, String>> {
+    if task_id <= 0 {
+        bail!("scoped live worker task_id must be positive");
+    }
+    if !market_velocity_scoped_worker_apply_authorized(true, Some(confirmation)) {
+        bail!(
+            "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM={} is required before running scoped live worker",
+            MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN
+        );
+    }
+
+    Ok(BTreeMap::from([
+        ("IS_RUN_EXECUTION_WORKER", "true".to_string()),
+        ("EXECUTION_WORKER_ONLY", "true".to_string()),
+        ("EXECUTION_WORKER_RUN_ONCE", "true".to_string()),
+        ("EXECUTION_WORKER_DRY_RUN", "false".to_string()),
+        (
+            "EXECUTION_WORKER_ID",
+            "market_velocity_scoped_live_worker".to_string(),
+        ),
+        ("EXECUTION_WORKER_LEASE_LIMIT", "1".to_string()),
+        ("EXECUTION_WORKER_TARGET_TASK_IDS", task_id.to_string()),
+        ("EXECUTION_WORKER_TASK_TYPES", "execute_signal".to_string()),
+        (
+            "EXECUTION_WORKER_TASK_STATUSES",
+            "pending,leased".to_string(),
+        ),
+        ("EXECUTION_WORKER_CONFIRMATION_MODE", "false".to_string()),
+        ("EXECUTION_WORKER_RECONCILIATION_ONLY", "false".to_string()),
+        ("EXECUTION_WORKER_REPORT_REPLAY_MODE", "false".to_string()),
+        (
+            "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
+            MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN.to_string(),
+        ),
+    ]))
+}
+
+async fn run_market_velocity_scoped_worker_once(task_id: i64, confirmation: &str) -> Result<usize> {
+    let overrides = build_market_velocity_scoped_worker_env_overrides(task_id, confirmation)?;
+    let _guard = EnvOverrideGuard::apply(&overrides);
+    let worker = ExecutionWorker::from_env()?;
+    worker.run_once().await
+}
+
+struct EnvOverrideGuard {
+    previous: Vec<(&'static str, Option<String>)>,
+}
+
+impl EnvOverrideGuard {
+    fn apply(overrides: &BTreeMap<&'static str, String>) -> Self {
+        let previous = overrides
+            .iter()
+            .map(|(key, value)| {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                (*key, previous)
+            })
+            .collect();
+        Self { previous }
+    }
+}
+
+impl Drop for EnvOverrideGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.previous.drain(..).rev() {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
 }
 
 fn normalize_candidate_limit(limit: i64) -> u32 {
@@ -1109,6 +1243,9 @@ mod tests {
         "MARKET_VELOCITY_CREATE_TASK_APPLY",
         "MARKET_VELOCITY_CREATE_TASK_CONFIRM",
         "MARKET_VELOCITY_SIGNAL_REPLAY_CONFIRM",
+        "MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY",
+        "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM",
+        "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
     ];
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -1296,6 +1433,47 @@ mod tests {
         assert_eq!(config.entry_candle_okx_rest_base, "https://www.okx.com");
         assert_eq!(config.entry_candle_proxy_url, None);
         assert_eq!(config.entry_candle_request_sleep_ms, 0);
+        assert!(!config.run_scoped_worker_apply);
+        assert_eq!(config.run_scoped_worker_confirm, None);
+    }
+
+    #[test]
+    fn scoped_worker_auto_run_requires_exact_live_order_confirmation() {
+        assert!(!market_velocity_scoped_worker_apply_authorized(false, None));
+        assert!(!market_velocity_scoped_worker_apply_authorized(true, None));
+        assert!(!market_velocity_scoped_worker_apply_authorized(
+            true,
+            Some("true")
+        ));
+        assert!(market_velocity_scoped_worker_apply_authorized(
+            true,
+            Some(MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN)
+        ));
+    }
+
+    #[test]
+    fn scoped_worker_env_overrides_force_one_reviewed_live_task() {
+        let overrides = build_market_velocity_scoped_worker_env_overrides(
+            2042663,
+            MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN,
+        )
+        .expect("overrides");
+
+        assert_eq!(overrides["IS_RUN_EXECUTION_WORKER"], "true");
+        assert_eq!(overrides["EXECUTION_WORKER_ONLY"], "true");
+        assert_eq!(overrides["EXECUTION_WORKER_RUN_ONCE"], "true");
+        assert_eq!(overrides["EXECUTION_WORKER_DRY_RUN"], "false");
+        assert_eq!(overrides["EXECUTION_WORKER_TARGET_TASK_IDS"], "2042663");
+        assert_eq!(overrides["EXECUTION_WORKER_LEASE_LIMIT"], "1");
+        assert_eq!(overrides["EXECUTION_WORKER_TASK_TYPES"], "execute_signal");
+        assert_eq!(
+            overrides["EXECUTION_WORKER_TASK_STATUSES"],
+            "pending,leased"
+        );
+        assert_eq!(
+            overrides["EXECUTION_WORKER_LIVE_ORDER_CONFIRM"],
+            "I_UNDERSTAND_LIVE_ORDERS"
+        );
     }
 
     #[test]
