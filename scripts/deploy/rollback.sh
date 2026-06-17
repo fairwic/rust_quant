@@ -162,6 +162,25 @@ remove_conflicting_named_containers() {
   done
 }
 
+print_runtime_safety_flags() {
+  local override_file="$1"
+  shift
+
+  local service container_id
+  local flags_pattern='^(MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH|MARKET_VELOCITY_CREATE_TASK_APPLY|MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED|MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED|EXECUTION_WORKER_DRY_RUN)='
+  for service in "$@"; do
+    service="$(printf '%s' "${service}" | xargs)"
+    [ -z "${service}" ] && continue
+
+    container_id="$(compose -f "${override_file}" ps --all -q "${service}" | head -n 1 || true)"
+    [ -z "${container_id}" ] && continue
+
+    echo "deployment runtime safety flags: ${service}" >&2
+    docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${container_id}" |
+      grep -E "${flags_pattern}" >&2 || true
+  done
+}
+
 IFS=',' read -r -a services <<< "${services_csv}"
 override_file=".deploy/quant-core.rollback.override.yml"
 {
@@ -184,5 +203,6 @@ compose -f "${override_file}" pull "${services[@]}" || true
 remove_conflicting_named_containers "${services[@]}"
 compose -f "${override_file}" up -d --no-build "${services[@]}"
 assert_services_running "${compose_file}" "${override_file}" "${services[@]}"
+print_runtime_safety_flags "${override_file}" "${services[@]}"
 compose -f "${override_file}" ps --all "${services[@]}"
 REMOTE

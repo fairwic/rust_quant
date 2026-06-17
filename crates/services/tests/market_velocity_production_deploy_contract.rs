@@ -175,6 +175,22 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "default deploy/rollback must treat restarting containers and restart-count spikes as failed readiness"
         );
         assert!(
+            deploy_script.contains("print_runtime_safety_flags"),
+            "default deploy/rollback must print non-secret runtime safety flags after stable readiness"
+        );
+        for safety_flag in [
+            "MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH",
+            "MARKET_VELOCITY_CREATE_TASK_APPLY",
+            "MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED",
+            "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED",
+            "EXECUTION_WORKER_DRY_RUN",
+        ] {
+            assert!(
+                deploy_script.contains(safety_flag),
+                "default deploy/rollback must include runtime safety flag `{safety_flag}` in diagnostics"
+            );
+        }
+        assert!(
             deploy_script.contains("remove_conflicting_named_containers"),
             "default deploy/rollback must remove stale fixed-name containers left by failed deployments"
         );
