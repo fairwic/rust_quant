@@ -5,15 +5,16 @@ services:
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - "postgres:host-gateway"
-      - "redis:host-gateway"
+    networks:
+      - default
+      - quant-core-external
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
       RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
       QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
       DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
-      REDIS_HOST: ${REDIS_HOST:-redis://host.docker.internal:6379/}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
       IS_RUN_MARKET_VELOCITY_RADAR: "true"
       MARKET_VELOCITY_RADAR_ONLY: "true"
       MARKET_VELOCITY_SCAN_INTERVAL_SECS: ${MARKET_VELOCITY_SCAN_INTERVAL_SECS:-10}
@@ -40,8 +41,9 @@ services:
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - "postgres:host-gateway"
-      - "redis:host-gateway"
+    networks:
+      - default
+      - quant-core-external
     profiles:
       - candle-backfill-scheduler
     restart: unless-stopped
@@ -74,8 +76,9 @@ services:
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - "postgres:host-gateway"
-      - "redis:host-gateway"
+    networks:
+      - default
+      - quant-core-external
     profiles:
       - observation
     restart: "no"
@@ -97,8 +100,9 @@ services:
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - "postgres:host-gateway"
-      - "redis:host-gateway"
+    networks:
+      - default
+      - quant-core-external
     profiles:
       - observation-scheduler
     restart: unless-stopped
@@ -122,8 +126,9 @@ services:
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - "postgres:host-gateway"
-      - "redis:host-gateway"
+    networks:
+      - default
+      - quant-core-external
     profiles:
       - live-handoff
     restart: "no"
@@ -169,8 +174,9 @@ services:
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - "postgres:host-gateway"
-      - "redis:host-gateway"
+    networks:
+      - default
+      - quant-core-external
     profiles:
       - live-handoff-scheduler
     restart: unless-stopped
@@ -218,15 +224,16 @@ services:
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - "postgres:host-gateway"
-      - "redis:host-gateway"
+    networks:
+      - default
+      - quant-core-external
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
       RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
       QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
       DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
-      REDIS_HOST: ${REDIS_HOST:-redis://host.docker.internal:6379/}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
       IS_RUN_EXECUTION_WORKER: "true"
       EXECUTION_WORKER_ONLY: "true"
       EXECUTION_WORKER_RUN_ONCE: "false"
@@ -244,3 +251,8 @@ services:
       RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
       EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
       OKX_REQUEST_EXPIRATION_MS: ${OKX_REQUEST_EXPIRATION_MS:-}
+
+networks:
+  quant-core-external:
+    name: ${QUANT_CORE_EXTERNAL_NETWORK:-bjd_server_default}
+    external: true

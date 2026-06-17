@@ -84,12 +84,23 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "production containers must not default Redis to container-local 127.0.0.1"
     );
     assert!(
-        compose.contains("REDIS_HOST: ${REDIS_HOST:-redis://host.docker.internal:6379/}"),
-        "production Redis default must target a host-reachable address unless REDIS_HOST is explicitly set"
+        compose.contains("REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}"),
+        "production Redis default must use Docker DNS for the deployed redis container unless REDIS_HOST is explicitly set"
     );
     assert!(
         compose.contains(r#""host.docker.internal:host-gateway""#),
         "production compose must map host.docker.internal for Linux Docker deployments"
+    );
+    assert!(
+        compose.contains("quant-core-external:")
+            && compose.contains("name: ${QUANT_CORE_EXTERNAL_NETWORK:-bjd_server_default}")
+            && compose.contains("external: true"),
+        "production compose must attach Core services to the external app network that owns postgres and quant-web-backend"
+    );
+    assert!(
+        !compose.contains(r#""postgres:host-gateway""#)
+            && !compose.contains(r#""redis:host-gateway""#),
+        "production compose must not override postgres/redis Docker DNS with host-gateway aliases"
     );
     for service in [
         "quant-core-market-velocity-radar",
@@ -98,16 +109,16 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-execution-worker",
     ] {
         let service_block = compose_service_block(&compose, service);
-        for host_gateway_alias in [
-            r#""host.docker.internal:host-gateway""#,
-            r#""postgres:host-gateway""#,
-            r#""redis:host-gateway""#,
-        ] {
-            assert!(
-                service_block.contains(host_gateway_alias),
-                "default deployed service `{service}` must map `{host_gateway_alias}` so host-local DB/Redis URLs resolve inside containers"
-            );
-        }
+        assert!(
+            service_block.contains(r#""host.docker.internal:host-gateway""#),
+            "default deployed service `{service}` must keep host.docker.internal available for host-reachable dependencies"
+        );
+        assert!(
+            service_block.contains("networks:")
+                && service_block.contains("- default")
+                && service_block.contains("- quant-core-external"),
+            "default deployed service `{service}` must join both the Core compose network and the external app network"
+        );
     }
     assert!(
         dockerfile.contains(
