@@ -1,0 +1,238 @@
+name: Market Velocity Production Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Gate mode"
+        required: true
+        default: "readonly_preview"
+        type: choice
+        options:
+          - readonly_preview
+          - refresh_readiness
+          - create_task
+          - create_task_and_scoped_worker
+      buyer_email:
+        description: "Target buyer email"
+        required: true
+        type: string
+      combo_id:
+        description: "Target combo id"
+        required: true
+        type: string
+      credential_id:
+        description: "Web API credential id for readiness refresh"
+        required: false
+        type: string
+      event_id:
+        description: "Optional market_rank_events id"
+        required: false
+        type: string
+      lookback_hours:
+        description: "Candidate lookback hours"
+        required: true
+        default: "24"
+        type: string
+      candidate_limit:
+        description: "Candidate limit"
+        required: true
+        default: "20"
+        type: string
+      refresh_readiness_confirm:
+        description: "Required for refresh_readiness"
+        required: false
+        type: string
+      create_task_confirm:
+        description: "Required for create_task modes"
+        required: false
+        type: string
+      run_scoped_worker_confirm:
+        description: "Required for create_task_and_scoped_worker"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  production-gate:
+    name: Production Gate
+    runs-on: ubuntu-24.04
+    environment:
+      name: production
+    concurrency:
+      group: quant-core-market-velocity-production-gate
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add known hosts
+        run: ./scripts/ci/prepare_ssh.sh
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+
+      - name: Run Rust-native production gate
+        env:
+          DEPLOY_SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.SSH_PORT }}
+          SERVER_APP_PATH: ${{ secrets.SERVER_APP_PATH }}
+          DEPLOY_COMPOSE_FILE: ${{ secrets.DEPLOY_COMPOSE_FILE || 'docker-compose.deploy.yml' }}
+          MARKET_VELOCITY_GATE_MODE: ${{ inputs.mode }}
+          MARKET_VELOCITY_LIVE_BUYER_EMAIL: ${{ inputs.buyer_email }}
+          MARKET_VELOCITY_LIVE_COMBO_ID: ${{ inputs.combo_id }}
+          MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID: ${{ inputs.credential_id }}
+          MARKET_VELOCITY_SIGNAL_EVENT_ID: ${{ inputs.event_id }}
+          MARKET_VELOCITY_SIGNAL_LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
+          MARKET_VELOCITY_LIVE_CANDIDATE_LIMIT: ${{ inputs.candidate_limit }}
+          MARKET_VELOCITY_TASK_READINESS_REFRESH_CONFIRM: ${{ inputs.refresh_readiness_confirm }}
+          MARKET_VELOCITY_CREATE_TASK_CONFIRM: ${{ inputs.create_task_confirm }}
+          MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM: ${{ inputs.run_scoped_worker_confirm }}
+        run: |
+          set -euo pipefail
+
+          : "${DEPLOY_SSH_USER:?DEPLOY_SSH_USER is required}"
+          : "${DEPLOY_SSH_HOST:?DEPLOY_SSH_HOST is required}"
+          : "${SERVER_APP_PATH:?SERVER_APP_PATH is required}"
+          : "${MARKET_VELOCITY_LIVE_BUYER_EMAIL:?buyer_email is required}"
+          : "${MARKET_VELOCITY_LIVE_COMBO_ID:?combo_id is required}"
+
+          mode="${MARKET_VELOCITY_GATE_MODE}"
+          create_task_apply="false"
+          run_scoped_worker_apply="false"
+          refresh_readiness_apply="false"
+          live_order_allowed="false"
+          paper_trade_required="true"
+          automation_mode="signal_only"
+
+          case "${mode}" in
+            readonly_preview)
+              ;;
+            refresh_readiness)
+              : "${MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID:?credential_id is required for refresh_readiness}"
+              if [ "${MARKET_VELOCITY_TASK_READINESS_REFRESH_CONFIRM}" != "I_UNDERSTAND_THIS_REFRESHES_OKX_READONLY_TASK_READINESS" ]; then
+                echo "refresh_readiness_confirm must be I_UNDERSTAND_THIS_REFRESHES_OKX_READONLY_TASK_READINESS" >&2
+                exit 1
+              fi
+              refresh_readiness_apply="true"
+              ;;
+            create_task)
+              if [ "${MARKET_VELOCITY_CREATE_TASK_CONFIRM}" != "I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK" ]; then
+                echo "create_task_confirm must be I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK" >&2
+                exit 1
+              fi
+              create_task_apply="true"
+              live_order_allowed="true"
+              paper_trade_required="false"
+              automation_mode="live"
+              ;;
+            create_task_and_scoped_worker)
+              if [ "${MARKET_VELOCITY_CREATE_TASK_CONFIRM}" != "I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK" ]; then
+                echo "create_task_confirm must be I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK" >&2
+                exit 1
+              fi
+              if [ "${MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM}" != "I_UNDERSTAND_LIVE_ORDERS" ]; then
+                echo "run_scoped_worker_confirm must be I_UNDERSTAND_LIVE_ORDERS" >&2
+                exit 1
+              fi
+              create_task_apply="true"
+              run_scoped_worker_apply="true"
+              live_order_allowed="true"
+              paper_trade_required="false"
+              automation_mode="live"
+              ;;
+            *)
+              echo "unsupported mode: ${mode}" >&2
+              exit 1
+              ;;
+          esac
+
+          ssh_host_input="${DEPLOY_SSH_HOST}"
+          ssh_port="${DEPLOY_SSH_PORT:-22}"
+          ssh_host="${ssh_host_input}"
+          if [[ "${ssh_host_input}" == *"@"* ]]; then
+            echo "DEPLOY_SSH_HOST must not include a username. Set DEPLOY_SSH_USER separately." >&2
+            exit 1
+          fi
+          if [[ "${ssh_host_input}" =~ ^\[([^]]+)\]:(.+)$ ]]; then
+            if [[ -z "${DEPLOY_SSH_PORT:-}" ]]; then
+              ssh_port="${BASH_REMATCH[2]}"
+            fi
+            ssh_host="${BASH_REMATCH[1]}"
+          elif [[ "${ssh_host_input}" =~ ^([^:]+):([0-9]+)$ ]]; then
+            if [[ -z "${DEPLOY_SSH_PORT:-}" ]]; then
+              ssh_port="${BASH_REMATCH[2]}"
+            fi
+            ssh_host="${BASH_REMATCH[1]}"
+          fi
+
+          remote_compose_file=".deploy/current.$(basename "${DEPLOY_COMPOSE_FILE}")"
+
+          ssh -p "${ssh_port}" "${DEPLOY_SSH_USER}@${ssh_host}" \
+            env \
+            "MARKET_VELOCITY_LIVE_BUYER_EMAIL=${MARKET_VELOCITY_LIVE_BUYER_EMAIL}" \
+            "MARKET_VELOCITY_LIVE_COMBO_ID=${MARKET_VELOCITY_LIVE_COMBO_ID}" \
+            "MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID=${MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID}" \
+            "MARKET_VELOCITY_SIGNAL_EVENT_ID=${MARKET_VELOCITY_SIGNAL_EVENT_ID}" \
+            "MARKET_VELOCITY_SIGNAL_LOOKBACK_HOURS=${MARKET_VELOCITY_SIGNAL_LOOKBACK_HOURS}" \
+            "MARKET_VELOCITY_LIVE_CANDIDATE_LIMIT=${MARKET_VELOCITY_LIVE_CANDIDATE_LIMIT}" \
+            "MARKET_VELOCITY_TASK_READINESS_REFRESH_APPLY=${refresh_readiness_apply}" \
+            "MARKET_VELOCITY_TASK_READINESS_REFRESH_CONFIRM=${MARKET_VELOCITY_TASK_READINESS_REFRESH_CONFIRM}" \
+            "MARKET_VELOCITY_CREATE_TASK_APPLY=${create_task_apply}" \
+            "MARKET_VELOCITY_CREATE_TASK_CONFIRM=${MARKET_VELOCITY_CREATE_TASK_CONFIRM}" \
+            "MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY=${run_scoped_worker_apply}" \
+            "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM=${MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM}" \
+            "MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE=${automation_mode}" \
+            "MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED=${live_order_allowed}" \
+            "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED=${paper_trade_required}" \
+            bash -s -- \
+            "${SERVER_APP_PATH}" \
+            "${remote_compose_file}" <<'REMOTE'
+          set -euo pipefail
+
+          server_app_path="$1"
+          compose_file="$2"
+          cd "${server_app_path}"
+          compose_project_name="${DEPLOY_COMPOSE_PROJECT_NAME:-$(basename "$(pwd)")}"
+          compose() {
+            docker compose \
+              --project-directory "${server_app_path}" \
+              --project-name "${compose_project_name}" \
+              --profile live-handoff \
+              -f "${compose_file}" \
+              "$@"
+          }
+
+          echo "market_velocity_production_gate: service=quant-core-market-velocity-live-handoff"
+          echo "market_velocity_production_gate: mode=${MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE} create_task_apply=${MARKET_VELOCITY_CREATE_TASK_APPLY} scoped_worker_apply=${MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY}"
+
+          compose run --rm --no-deps \
+            -e MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE=true \
+            -e MARKET_VELOCITY_LIVE_BUYER_EMAIL \
+            -e MARKET_VELOCITY_LIVE_COMBO_ID \
+            -e MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID \
+            -e MARKET_VELOCITY_SIGNAL_EVENT_ID \
+            -e MARKET_VELOCITY_SIGNAL_LOOKBACK_HOURS \
+            -e MARKET_VELOCITY_LIVE_CANDIDATE_LIMIT \
+            -e MARKET_VELOCITY_TASK_READINESS_REFRESH_APPLY \
+            -e MARKET_VELOCITY_TASK_READINESS_REFRESH_CONFIRM \
+            -e MARKET_VELOCITY_CREATE_TASK_APPLY \
+            -e MARKET_VELOCITY_CREATE_TASK_CONFIRM \
+            -e MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY \
+            -e MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM \
+            -e MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE \
+            -e MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED \
+            -e MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED \
+            quant-core-market-velocity-live-handoff |
+            sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[email-redacted]/g'
+          REMOTE
