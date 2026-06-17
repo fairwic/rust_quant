@@ -2,7 +2,9 @@ use anyhow::Result;
 use chrono::Utc;
 use okx::api::api_trait::OkxApiTrait;
 use okx::api::market::OkxMarket;
+use okx::config::Credentials;
 use okx::dto::market_dto::TickerOkxResDto;
+use okx::{Error as OkxError, OkxClient};
 
 use rust_decimal::Decimal;
 use rust_quant_domain::entities::TickerSnapshot;
@@ -19,7 +21,7 @@ impl OkxScanner {
     /// 创建新的扫描器实例
     pub fn new() -> Result<Self> {
         Ok(Self {
-            client: OkxMarket::from_env()?,
+            client: okx_market_from_env_or_public()?,
         })
     }
 
@@ -90,6 +92,85 @@ impl OkxScanner {
             volume_24h_quote,
             timestamp,
         })
+    }
+}
+
+fn okx_market_from_env_or_public() -> Result<OkxMarket> {
+    match OkxMarket::from_env() {
+        Ok(client) => Ok(client),
+        Err(error) if is_missing_okx_market_credentials(&error) => {
+            debug!("OKX private credentials are not configured; using public market client");
+            let client = OkxClient::new(Credentials::new(
+                "public-market-api-key-not-used",
+                "public-market-api-secret-not-used",
+                "public-market-passphrase-not-used",
+                "0",
+            ))?;
+            Ok(OkxMarket::new(client))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn is_missing_okx_market_credentials(error: &OkxError) -> bool {
+    match error {
+        OkxError::ConfigError(message) => [
+            "OKX_API_KEY",
+            "OKX_API_SECRET",
+            "OKX_PASSPHRASE",
+            "OKX_SIMULATED_TRADING",
+        ]
+        .iter()
+        .any(|key| message.contains(key)),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    const OKX_ENV_KEYS: &[&str] = &[
+        "OKX_API_KEY",
+        "OKX_API_SECRET",
+        "OKX_PASSPHRASE",
+        "OKX_SIMULATED_TRADING",
+    ];
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn snapshot_env() -> Vec<(&'static str, Option<String>)> {
+        OKX_ENV_KEYS
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect()
+    }
+
+    fn restore_env(snapshot: Vec<(&'static str, Option<String>)>) {
+        for (key, value) in snapshot {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
+    fn scanner_uses_public_market_client_without_private_okx_credentials() {
+        let _guard = env_lock();
+        let snapshot = snapshot_env();
+        for key in OKX_ENV_KEYS {
+            std::env::remove_var(key);
+        }
+
+        let scanner = OkxScanner::new();
+
+        restore_env(snapshot);
+        assert!(scanner.is_ok());
     }
 }
 
