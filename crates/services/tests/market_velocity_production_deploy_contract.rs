@@ -248,7 +248,11 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     );
     assert!(
         promote.contains("run --rm --no-deps -T"),
-        "schema ensure compose run must disable stdin so it cannot consume the remote deployment heredoc"
+        "schema ensure compose run must disable TTY in CI"
+    );
+    assert!(
+        promote.contains("</dev/null"),
+        "schema ensure compose run must close stdin so it cannot consume the remote deployment heredoc"
     );
     assert!(
         !workflow.contains("market_velocity_okx_task_creation_handoff_contract"),
