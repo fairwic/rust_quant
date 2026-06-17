@@ -248,6 +248,14 @@ jobs:
               sed -E \
                 -e 's#(postgres(ql)?://)[^@]+@#\1***@#g' \
                 -e 's#[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+#[email-redacted]#g' >&2 || true
+            echo "market_velocity_production_gate: container network diagnostics" >&2
+            docker exec "${container_id}" getent hosts postgres host.docker.internal >&2 || true
+            docker exec "${container_id}" curl --connect-timeout 3 --max-time 5 -sS telnet://postgres:5432 </dev/null >&2 || true
+            docker exec "${container_id}" curl --connect-timeout 3 --max-time 5 -sS telnet://host.docker.internal:5432 </dev/null >&2 || true
+            echo "market_velocity_production_gate: host postgres/docker diagnostics" >&2
+            docker ps --format 'name={{.Names}} image={{.Image}} ports={{.Ports}} networks={{.Networks}}' |
+              grep -Ei 'postgres|quant-core|redis|mysql' >&2 || true
+            ss -ltnp 2>/dev/null | grep -E '(:5432|:8000|:6379)' >&2 || true
             docker logs --tail=160 "${container_id}" |
               sed -E \
                 -e 's#(postgres(ql)?://)[^@]+@#\1***@#g' \
