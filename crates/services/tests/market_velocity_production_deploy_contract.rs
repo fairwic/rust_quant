@@ -13,6 +13,26 @@ fn read_repo_file(path: &str) -> String {
     fs::read_to_string(repo_root().join(path)).expect(path)
 }
 
+fn compose_service_block(compose: &str, service: &str) -> String {
+    let needle = format!("  {service}:");
+    let mut found = false;
+    let mut lines = Vec::new();
+    for line in compose.lines() {
+        if line == needle {
+            found = true;
+            continue;
+        }
+        if found && line.starts_with("  ") && !line.starts_with("    ") {
+            break;
+        }
+        if found {
+            lines.push(line);
+        }
+    }
+    assert!(found, "compose must contain service block `{service}`");
+    lines.join("\n")
+}
+
 #[test]
 fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     let compose = read_repo_file("docker-compose.deploy.yml");
@@ -69,6 +89,24 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         compose.contains(r#""host.docker.internal:host-gateway""#),
         "production compose must map host.docker.internal for Linux Docker deployments"
     );
+    for service in [
+        "quant-core-market-velocity-radar",
+        "quant-core-market-velocity-paper-observation-scheduler",
+        "quant-core-market-velocity-live-handoff-scheduler",
+        "quant-core-execution-worker",
+    ] {
+        let service_block = compose_service_block(&compose, service);
+        for host_gateway_alias in [
+            r#""host.docker.internal:host-gateway""#,
+            r#""postgres:host-gateway""#,
+            r#""redis:host-gateway""#,
+        ] {
+            assert!(
+                service_block.contains(host_gateway_alias),
+                "default deployed service `{service}` must map `{host_gateway_alias}` so host-local DB/Redis URLs resolve inside containers"
+            );
+        }
+    }
     assert!(
         dockerfile.contains(
             "COPY --from=builder /app/rust_quant/target/release/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill"

@@ -5,6 +5,8 @@ services:
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "postgres:host-gateway"
+      - "redis:host-gateway"
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -36,6 +38,10 @@ services:
     container_name: quant-core-market-velocity-candle-backfill-scheduler
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
     pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "postgres:host-gateway"
+      - "redis:host-gateway"
     profiles:
       - candle-backfill-scheduler
     restart: unless-stopped
@@ -66,6 +72,10 @@ services:
     container_name: quant-core-market-velocity-paper-observation
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
     pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "postgres:host-gateway"
+      - "redis:host-gateway"
     profiles:
       - observation
     restart: "no"
@@ -85,6 +95,10 @@ services:
     container_name: quant-core-market-velocity-paper-observation-scheduler
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
     pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "postgres:host-gateway"
+      - "redis:host-gateway"
     profiles:
       - observation-scheduler
     restart: unless-stopped
@@ -106,6 +120,10 @@ services:
     container_name: quant-core-market-velocity-live-handoff
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
     pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "postgres:host-gateway"
+      - "redis:host-gateway"
     profiles:
       - live-handoff
     restart: "no"
@@ -147,6 +165,10 @@ services:
     container_name: quant-core-market-velocity-live-handoff-scheduler
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
     pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "postgres:host-gateway"
+      - "redis:host-gateway"
     profiles:
       - live-handoff-scheduler
     restart: unless-stopped
@@ -192,6 +214,8 @@ services:
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "postgres:host-gateway"
+      - "redis:host-gateway"
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
