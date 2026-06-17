@@ -203,20 +203,21 @@ jobs:
           server_app_path="$1"
           compose_file="$2"
           cd "${server_app_path}"
-          compose_project_name="${DEPLOY_COMPOSE_PROJECT_NAME:-$(basename "$(pwd)")}"
-          compose() {
+          container_id="$(docker ps -q --filter "name=^/quant-core-market-velocity-live-handoff-scheduler$" | head -n 1 || true)"
+          if [ -z "${container_id}" ]; then
+            echo "quant-core-market-velocity-live-handoff-scheduler is not running" >&2
             docker compose \
               --project-directory "${server_app_path}" \
-              --project-name "${compose_project_name}" \
-              --profile live-handoff \
+              --profile live-handoff-scheduler \
               -f "${compose_file}" \
-              "$@"
-          }
+              ps --all quant-core-market-velocity-live-handoff-scheduler >&2 || true
+            exit 1
+          fi
 
-          echo "market_velocity_production_gate: service=quant-core-market-velocity-live-handoff"
+          echo "market_velocity_production_gate: container=quant-core-market-velocity-live-handoff-scheduler"
           echo "market_velocity_production_gate: mode=${MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE} create_task_apply=${MARKET_VELOCITY_CREATE_TASK_APPLY} scoped_worker_apply=${MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY}"
 
-          compose run --rm --no-deps \
+          docker exec \
             -e MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE=true \
             -e MARKET_VELOCITY_LIVE_BUYER_EMAIL \
             -e MARKET_VELOCITY_LIVE_COMBO_ID \
@@ -233,6 +234,7 @@ jobs:
             -e MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE \
             -e MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED \
             -e MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED \
-            quant-core-market-velocity-live-handoff |
+            "${container_id}" \
+            market_velocity_live_handoff |
             sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[email-redacted]/g'
           REMOTE
