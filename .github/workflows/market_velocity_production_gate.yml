@@ -217,6 +217,7 @@ jobs:
           echo "market_velocity_production_gate: container=quant-core-market-velocity-live-handoff-scheduler"
           echo "market_velocity_production_gate: mode=${MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE} create_task_apply=${MARKET_VELOCITY_CREATE_TASK_APPLY} scoped_worker_apply=${MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY}"
 
+          set +e
           docker exec \
             -e MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE=true \
             -e MARKET_VELOCITY_LIVE_BUYER_EMAIL \
@@ -237,4 +238,20 @@ jobs:
             "${container_id}" \
             market_velocity_live_handoff |
             sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[email-redacted]/g'
+          status="${PIPESTATUS[0]}"
+          set -e
+
+          if [ "${status}" -ne 0 ]; then
+            echo "market_velocity_production_gate: rust gate failed, printing redacted scheduler diagnostics" >&2
+            docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${container_id}" |
+              grep -E '^(APP_ENV|QUANT_CORE_DATABASE_URL|DATABASE_URL|RUST_QUAN_WEB_BASE_URL|MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH|MARKET_VELOCITY_CREATE_TASK_APPLY|MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY|MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED|MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED)=' |
+              sed -E \
+                -e 's#(postgres(ql)?://)[^@]+@#\1***@#g' \
+                -e 's#[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+#[email-redacted]#g' >&2 || true
+            docker logs --tail=160 "${container_id}" |
+              sed -E \
+                -e 's#(postgres(ql)?://)[^@]+@#\1***@#g' \
+                -e 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[email-redacted]/g' >&2 || true
+            exit "${status}"
+          fi
           REMOTE
