@@ -83,26 +83,67 @@ assert_services_running() {
   local override_file="$2"
   shift 2
 
-  local service container_id running
-  for service in "$@"; do
-    service="$(printf '%s' "${service}" | xargs)"
-    [ -z "${service}" ] && continue
+  local timeout_secs="${DEPLOY_HEALTH_TIMEOUT_SECS:-45}"
+  local stable_secs="${DEPLOY_HEALTH_STABLE_SECS:-10}"
+  local poll_secs="${DEPLOY_HEALTH_POLL_SECS:-2}"
+  local allowed_restarts="${DEPLOY_HEALTH_ALLOWED_RESTARTS:-0}"
+  local deadline stable_since now all_ready service container_id running restarting restart_count status exit_code
 
-    container_id="$(compose -f "${override_file}" ps --all -q "${service}" | head -n 1 || true)"
-    if [ -z "${container_id}" ]; then
-      echo "deployment service container missing: ${service}" >&2
+  deadline="$(($(date +%s) + timeout_secs))"
+  stable_since=0
+
+  while true; do
+    now="$(date +%s)"
+    all_ready=1
+
+    for service in "$@"; do
+      service="$(printf '%s' "${service}" | xargs)"
+      [ -z "${service}" ] && continue
+
+      container_id="$(compose -f "${override_file}" ps --all -q "${service}" | head -n 1 || true)"
+      if [ -z "${container_id}" ]; then
+        all_ready=0
+        continue
+      fi
+
+      running="$(docker inspect --format '{{.State.Running}}' "${container_id}")"
+      restarting="$(docker inspect --format '{{.State.Restarting}}' "${container_id}")"
+      restart_count="$(docker inspect --format '{{.RestartCount}}' "${container_id}")"
+      status="$(docker inspect --format '{{.State.Status}}' "${container_id}")"
+      exit_code="$(docker inspect --format '{{.State.ExitCode}}' "${container_id}")"
+
+      if [ "${running}" != "true" ] ||
+        [ "${restarting}" = "true" ] ||
+        [ "${restart_count:-0}" -gt "${allowed_restarts}" ]; then
+        all_ready=0
+        echo "deployment service not stable yet: ${service} status=${status} running=${running} restarting=${restarting} restart_count=${restart_count} exit_code=${exit_code}" >&2
+      fi
+    done
+
+    if [ "${all_ready}" = "1" ]; then
+      if [ "${stable_since}" -eq 0 ]; then
+        stable_since="${now}"
+      fi
+      if [ "$((now - stable_since))" -ge "${stable_secs}" ]; then
+        return 0
+      fi
+    else
+      stable_since=0
+    fi
+
+    if [ "${now}" -ge "${deadline}" ]; then
+      echo "deployment services failed readiness within ${timeout_secs}s" >&2
       compose -f "${override_file}" config --services >&2 || true
       compose -f "${override_file}" ps --all >&2 || true
+      for service in "$@"; do
+        service="$(printf '%s' "${service}" | xargs)"
+        [ -z "${service}" ] && continue
+        compose -f "${override_file}" logs --tail=120 "${service}" >&2 || true
+      done
       exit 1
     fi
 
-    running="$(docker inspect --format '{{.State.Running}}' "${container_id}")"
-    if [ "${running}" != "true" ]; then
-      echo "deployment service is not running: ${service}" >&2
-      compose -f "${override_file}" ps --all "${service}" >&2 || true
-      compose -f "${override_file}" logs --tail=120 "${service}" >&2 || true
-      exit 1
-    fi
+    sleep "${poll_secs}"
   done
 }
 

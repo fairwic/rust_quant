@@ -58,6 +58,18 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         );
     }
     assert!(
+        !compose.contains("REDIS_HOST: ${REDIS_HOST:-redis://127.0.0.1:6379/}"),
+        "production containers must not default Redis to container-local 127.0.0.1"
+    );
+    assert!(
+        compose.contains("REDIS_HOST: ${REDIS_HOST:-redis://host.docker.internal:6379/}"),
+        "production Redis default must target a host-reachable address unless REDIS_HOST is explicitly set"
+    );
+    assert!(
+        compose.contains(r#""host.docker.internal:host-gateway""#),
+        "production compose must map host.docker.internal for Linux Docker deployments"
+    );
+    assert!(
         dockerfile.contains(
             "COPY --from=builder /app/rust_quant/target/release/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill"
         ),
@@ -117,6 +129,12 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         assert!(
             deploy_script.contains("logs --tail=120"),
             "default deploy/rollback must print service logs when a deployed service is not running"
+        );
+        assert!(
+            deploy_script.contains(".State.Restarting")
+                && deploy_script.contains(".RestartCount")
+                && deploy_script.contains("DEPLOY_HEALTH_STABLE_SECS"),
+            "default deploy/rollback must treat restarting containers and restart-count spikes as failed readiness"
         );
         assert!(
             deploy_script.contains("remove_conflicting_named_containers"),
