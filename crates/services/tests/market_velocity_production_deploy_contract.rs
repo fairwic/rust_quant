@@ -42,6 +42,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     let rollback = read_repo_file("scripts/deploy/rollback.sh");
 
     for service in [
+        "quant-core-schema-ensure:",
         "quant-core-market-velocity-radar:",
         "quant-core-market-velocity-candle-backfill-scheduler:",
         "quant-core-market-velocity-paper-observation-scheduler:",
@@ -133,6 +134,28 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "runtime image must include the Rust-native Market Velocity live handoff binary"
     );
     assert!(
+        dockerfile.contains(
+            "COPY --from=builder /app/rust_quant/target/release/quant_core_schema_ensure /usr/local/bin/quant_core_schema_ensure"
+        ),
+        "runtime image must include the Rust-native quant_core schema ensure binary"
+    );
+    let schema_ensure_block = compose_service_block(&compose, "quant-core-schema-ensure");
+    assert!(
+        schema_ensure_block.contains("quant_core_schema_ensure"),
+        "schema ensure service must run the Rust-native schema ensure binary"
+    );
+    assert!(
+        schema_ensure_block.contains("QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}")
+            && schema_ensure_block.contains("DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}"),
+        "schema ensure service must target the quant_core database explicitly"
+    );
+    assert!(
+        schema_ensure_block.contains("networks:")
+            && schema_ensure_block.contains("- default")
+            && schema_ensure_block.contains("- quant-core-external"),
+        "schema ensure service must join the same networks as deployed Core services"
+    );
+    assert!(
         workflow.contains("market_velocity_production_deploy_contract"),
         "CI verify must run the production deploy contract"
     );
@@ -150,8 +173,9 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         );
         assert!(
             deploy_script.contains("--profile observation-scheduler")
-                && deploy_script.contains("--profile live-handoff-scheduler"),
-            "default deploy/rollback must enable the live handoff scheduler profile explicitly"
+                && deploy_script.contains("--profile live-handoff-scheduler")
+                && deploy_script.contains("--profile schema-ensure"),
+            "default deploy/rollback must enable required production profiles explicitly"
         );
         assert!(
             deploy_script.contains("DEPLOY_COMPOSE_SOURCE_FILE"),
@@ -214,6 +238,15 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         );
     }
     assert!(
+        promote.contains("run_schema_ensure")
+            && promote.contains("quant-core-schema-ensure")
+            && promote.find("run_schema_ensure").expect("schema ensure helper exists")
+                < promote
+                    .find("compose -f \"${override_file}\" up -d --no-build")
+                    .expect("deploy script starts long-running services"),
+        "promote must run the Rust-native schema ensure service before starting long-running workers"
+    );
+    assert!(
         !workflow.contains("market_velocity_okx_task_creation_handoff_contract"),
         "production CI must not validate shell handoff contracts for Market Velocity"
     );
@@ -233,6 +266,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     for rust_native_contract in [
         "cargo test -p rust-quant-cli market_velocity_live_handoff --lib -- --nocapture",
         "cargo check -p rust-quant-cli --bin market_velocity_live_handoff",
+        "cargo check -p rust-quant-cli --bin quant_core_schema_ensure",
         "cargo test -p rust-quant-cli market_velocity_backfill --lib -- --nocapture",
         "cargo check -p rust-quant-cli --bin market_velocity_candle_backfill",
         "cargo test -p rust-quant-services market_velocity_signal --lib -- --nocapture",

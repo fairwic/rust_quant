@@ -24,6 +24,7 @@ COPY --from=builder /app/rust_quant/target/release/rust_quant /usr/local/bin/rus
 COPY --from=builder /app/rust_quant/target/release/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill
 COPY --from=builder /app/rust_quant/target/release/market_velocity_paper_observation /usr/local/bin/market_velocity_paper_observation
 COPY --from=builder /app/rust_quant/target/release/market_velocity_live_handoff /usr/local/bin/market_velocity_live_handoff
+COPY --from=builder /app/rust_quant/target/release/quant_core_schema_ensure /usr/local/bin/quant_core_schema_ensure
 
 ENV APP_ENV=production
 

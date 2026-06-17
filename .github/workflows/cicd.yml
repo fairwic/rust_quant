@@ -73,6 +73,7 @@ jobs:
         run: |
           cargo test -p rust-quant-cli market_velocity_live_handoff --lib -- --nocapture
           cargo check -p rust-quant-cli --bin market_velocity_live_handoff
+          cargo check -p rust-quant-cli --bin quant_core_schema_ensure
           cargo test -p rust-quant-cli market_velocity_backfill --lib -- --nocapture
           cargo check -p rust-quant-cli --bin market_velocity_candle_backfill
           cargo test -p rust-quant-services --test market_velocity_production_deploy_contract -- --nocapture

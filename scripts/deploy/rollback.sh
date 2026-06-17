@@ -64,6 +64,7 @@ compose() {
   docker compose \
     --project-directory "${server_app_path}" \
     --project-name "${compose_project_name}" \
+    --profile schema-ensure \
     --profile observation-scheduler \
     --profile live-handoff-scheduler \
     -f "${compose_file}" \

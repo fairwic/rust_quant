@@ -68,6 +68,7 @@ compose() {
   docker compose \
     --project-directory "${server_app_path}" \
     --project-name "${compose_project_name}" \
+    --profile schema-ensure \
     --profile observation-scheduler \
     --profile live-handoff-scheduler \
     -f "${compose_file}" \
@@ -187,8 +188,12 @@ print_runtime_safety_flags() {
 
 IFS=',' read -r -a services <<< "${services_csv}"
 override_file=".deploy/quant-core.release.override.yml"
+schema_service="quant-core-schema-ensure"
 {
   echo "services:"
+  echo "  ${schema_service}:"
+  echo "    image: ${target_image}"
+  echo "    pull_policy: always"
   for service in "${services[@]}"; do
     service="$(printf '%s' "${service}" | xargs)"
     [ -z "${service}" ] && continue
@@ -202,7 +207,13 @@ override_file=".deploy/quant-core.release.override.yml"
   done
 } > "${override_file}"
 
-compose -f "${override_file}" pull "${services[@]}"
+run_schema_ensure() {
+  docker rm -f "${schema_service}" >/dev/null 2>&1 || true
+  compose -f "${override_file}" run --rm --no-deps "${schema_service}"
+}
+
+compose -f "${override_file}" pull "${schema_service}" "${services[@]}"
+run_schema_ensure
 remove_conflicting_named_containers "${services[@]}"
 compose -f "${override_file}" up -d --no-build "${services[@]}"
 assert_services_running "${compose_file}" "${override_file}" "${services[@]}"
