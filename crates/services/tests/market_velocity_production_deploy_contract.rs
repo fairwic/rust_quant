@@ -247,6 +247,10 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "promote must run the Rust-native schema ensure service before starting long-running workers"
     );
     assert!(
+        promote.contains("run --rm --no-deps -T"),
+        "schema ensure compose run must disable stdin so it cannot consume the remote deployment heredoc"
+    );
+    assert!(
         !workflow.contains("market_velocity_okx_task_creation_handoff_contract"),
         "production CI must not validate shell handoff contracts for Market Velocity"
     );

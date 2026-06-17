@@ -209,7 +209,7 @@ schema_service="quant-core-schema-ensure"
 
 run_schema_ensure() {
   docker rm -f "${schema_service}" >/dev/null 2>&1 || true
-  compose -f "${override_file}" run --rm --no-deps "${schema_service}"
+  compose -f "${override_file}" run --rm --no-deps -T "${schema_service}"
 }
 
 compose -f "${override_file}" pull "${schema_service}" "${services[@]}"
