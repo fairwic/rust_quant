@@ -250,6 +250,12 @@ pub async fn run_market_velocity_live_handoff(
         &signal_config,
     )
     .await?;
+    if candidate_events.is_empty() {
+        return Ok(build_market_velocity_no_live_candidate_response(
+            &config,
+            refresh_readiness,
+        ));
+    }
     let entry_candle_refresh_client = if config.entry_candle_on_demand_refresh {
         Some(build_okx_http_client(
             config.entry_candle_proxy_url.as_deref(),
@@ -739,6 +745,34 @@ fn summarize_skipped_candidates(skipped_candidates: &[Value]) -> Value {
     })
 }
 
+fn build_market_velocity_no_live_candidate_response(
+    config: &MarketVelocityLiveHandoffConfig,
+    refresh_readiness: Value,
+) -> Value {
+    json!({
+        "status": "no_candidate",
+        "blocker_code": "market_velocity_no_live_candidate",
+        "read_only": true,
+        "mutation_allowed": false,
+        "exchange_mutation_allowed": false,
+        "creates_new_order_system": false,
+        "candidate_scan": {
+            "limit": config.candidate_limit,
+            "evaluated": 0,
+            "lookback_hours": config.lookback_hours,
+            "explicit_event_id": config.event_id,
+        },
+        "automation": {
+            "task_creation_apply": config.create_task_apply,
+            "scoped_worker_apply": config.run_scoped_worker_apply,
+            "entry_candle_on_demand_refresh": config.entry_candle_on_demand_refresh,
+        },
+        "next_action": "wait_for_next_market_velocity_event",
+        "execution_path": market_velocity_existing_execution_worker_path(),
+        "refresh_readiness": refresh_readiness,
+    })
+}
+
 fn payload_string(payload: &Value, key: &str) -> Option<String> {
     payload.get(key).and_then(|value| match value {
         Value::String(raw) => Some(raw.trim().to_string()).filter(|value| !value.is_empty()),
@@ -791,9 +825,6 @@ async fn load_market_velocity_live_candidate_events(
         .fetch_all(pool)
         .await
         .context("load recent market velocity live candidate events")?;
-    if rows.is_empty() {
-        bail!("eligible OKX Market Velocity event missing");
-    }
     rows.into_iter().map(market_rank_event_from_row).collect()
 }
 
@@ -1275,6 +1306,31 @@ mod tests {
         }
     }
 
+    fn sample_live_handoff_config() -> MarketVelocityLiveHandoffConfig {
+        MarketVelocityLiveHandoffConfig {
+            database_url: "postgres://postgres:postgres123@localhost:5432/quant_core".to_string(),
+            web_base_url: "http://127.0.0.1:18000".to_string(),
+            internal_secret: "local-dev-secret".to_string(),
+            buyer_email: Some("buyer@example.com".to_string()),
+            combo_id: Some(85),
+            credential_id: Some(1),
+            event_id: None,
+            lookback_hours: 24,
+            candidate_limit: 20,
+            entry_candle_max_staleness_minutes: 45,
+            entry_candle_on_demand_refresh: true,
+            entry_candle_okx_rest_base: DEFAULT_OKX_REST_BASE.to_string(),
+            entry_candle_proxy_url: None,
+            entry_candle_request_sleep_ms: 0,
+            refresh_readiness_apply: false,
+            refresh_readiness_confirm: None,
+            create_task_apply: false,
+            create_task_confirm: None,
+            run_scoped_worker_apply: false,
+            run_scoped_worker_confirm: None,
+        }
+    }
+
     fn sample_signal_request() -> StrategySignalSubmitRequest {
         StrategySignalSubmitRequest {
             source: "rust_quant".to_string(),
@@ -1611,6 +1667,34 @@ mod tests {
         assert_eq!(normalize_candidate_limit(0), 1);
         assert_eq!(normalize_candidate_limit(20), 20);
         assert_eq!(normalize_candidate_limit(500), 100);
+    }
+
+    #[test]
+    fn no_live_candidate_response_is_non_error_signal_status() {
+        let config = sample_live_handoff_config();
+        let response = build_market_velocity_no_live_candidate_response(
+            &config,
+            json!({
+                "apply": false,
+                "exchange_mutation_allowed": false,
+            }),
+        );
+
+        assert_eq!(response["status"], "no_candidate");
+        assert_eq!(
+            response["blocker_code"],
+            "market_velocity_no_live_candidate"
+        );
+        assert_eq!(response["read_only"], true);
+        assert_eq!(response["mutation_allowed"], false);
+        assert_eq!(response["exchange_mutation_allowed"], false);
+        assert_eq!(response["candidate_scan"]["limit"], 20);
+        assert_eq!(response["candidate_scan"]["evaluated"], 0);
+        assert_eq!(response["candidate_scan"]["lookback_hours"], 24);
+        assert_eq!(
+            response["next_action"],
+            "wait_for_next_market_velocity_event"
+        );
     }
 
     #[test]
