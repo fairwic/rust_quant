@@ -246,6 +246,26 @@ pub struct ExchangeAccountBalanceSnapshotInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+pub struct ExchangeAccountBillSnapshotInput {
+    pub external_bill_id: String,
+    pub asset: String,
+    pub balance_change: Option<f64>,
+    pub balance_change_usdt: Option<f64>,
+    pub balance_after: Option<f64>,
+    pub fee_amount: Option<f64>,
+    pub fee_usdt: Option<f64>,
+    pub pnl_amount: Option<f64>,
+    pub pnl_usdt: Option<f64>,
+    pub bill_type: Option<String>,
+    pub bill_sub_type: Option<String>,
+    pub external_order_id: Option<String>,
+    pub external_trade_id: Option<String>,
+    pub raw_payload_json: Option<String>,
+    pub bill_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub struct ExchangeAccountSnapshotReportRequest {
     pub combo_id: i64,
     pub buyer_email: String,
@@ -261,6 +281,8 @@ pub struct ExchangeAccountSnapshotReportRequest {
     pub positions: Vec<ExchangeAccountPositionSnapshotInput>,
     #[serde(default)]
     pub balances: Vec<ExchangeAccountBalanceSnapshotInput>,
+    #[serde(default)]
+    pub bills: Vec<ExchangeAccountBillSnapshotInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -276,6 +298,7 @@ pub struct ExchangeAccountSnapshotReportResponse {
     pub trades_upserted: i64,
     pub positions_upserted: i64,
     pub balances_upserted: i64,
+    pub bills_upserted: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -702,8 +725,13 @@ impl ExecutionTaskClient {
     where
         R: DeserializeOwned,
     {
-        let envelope = serde_json::from_str::<ApiEnvelope<R>>(body)
-            .map_err(|e| anyhow!("parse quant_web envelope failed: {}; body={}", e, body))?;
+        let envelope = serde_json::from_str::<ApiEnvelope<R>>(body).map_err(|e| {
+            anyhow!(
+                "parse quant_web envelope failed: {}; {}",
+                e,
+                response_body_context(body)
+            )
+        })?;
         if !envelope.success {
             return Err(anyhow!("quant_web envelope success=false"));
         }
@@ -727,7 +755,12 @@ impl ExecutionTaskClient {
         let status = response.status();
         let body = response.text().await?;
         if !status.is_success() {
-            return Err(anyhow!("GET {} returned {}: {}", url, status, body));
+            return Err(anyhow!(
+                "GET {} returned {}; {}",
+                url,
+                status,
+                response_body_context(&body)
+            ));
         }
 
         Self::parse_envelope(&body)
@@ -752,7 +785,12 @@ impl ExecutionTaskClient {
         let status = response.status();
         let body = response.text().await?;
         if !status.is_success() {
-            return Err(anyhow!("{} returned {}: {}", path, status, body));
+            return Err(anyhow!(
+                "{} returned {}; {}",
+                path,
+                status,
+                response_body_context(&body)
+            ));
         }
 
         Self::parse_envelope(&body)
@@ -821,6 +859,13 @@ where
         Value::String(raw) => serde_json::from_str(&raw).map_err(serde::de::Error::custom),
         other => Ok(other),
     }
+}
+
+fn response_body_context(body: &str) -> String {
+    format!(
+        "response_body_omitted=true body_len={}",
+        body.as_bytes().len()
+    )
 }
 
 #[cfg(test)]
@@ -1175,6 +1220,23 @@ mod tests {
                 raw_payload_json: Some(r#"{"ccy":"USDT","eqUsd":"8211.49"}"#.to_string()),
                 snapshot_at: Some("2026-06-18T02:30:00".to_string()),
             }],
+            bills: vec![ExchangeAccountBillSnapshotInput {
+                external_bill_id: "okx-bill-1".to_string(),
+                asset: "USDT".to_string(),
+                balance_change: Some(9.7),
+                balance_change_usdt: None,
+                balance_after: Some(8211.49),
+                fee_amount: Some(-0.3),
+                fee_usdt: None,
+                pnl_amount: Some(10.0),
+                pnl_usdt: None,
+                bill_type: Some("2".to_string()),
+                bill_sub_type: Some("1".to_string()),
+                external_order_id: Some("3631557801300238336".to_string()),
+                external_trade_id: Some("211849844".to_string()),
+                raw_payload_json: Some(r#"{"billId":"okx-bill-1"}"#.to_string()),
+                bill_at: Some("2026-06-18T02:30:00".to_string()),
+            }],
         };
         let value = serde_json::to_value(&request).unwrap();
 
@@ -1188,6 +1250,7 @@ mod tests {
         assert_eq!(value["positions"][0]["quantity"], 0.01);
         assert_eq!(value["balances"][0]["asset"], "USDT");
         assert_eq!(value["balances"][0]["equity_usdt"], 8211.49);
+        assert_eq!(value["bills"][0]["external_bill_id"], "okx-bill-1");
         assert!(!value.to_string().contains("plain-api-secret"));
 
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
@@ -1223,6 +1286,29 @@ mod tests {
         assert!(config.simulated);
     }
 
+    #[test]
+    fn parse_envelope_error_omits_sensitive_response_body() {
+        let body = r#"{
+            "success": true,
+            "data": {
+                "buyer_email": "buyer@example.com",
+                "api_key": "plain-api-key",
+                "api_secret": "plain-api-secret",
+                "passphrase": "plain-passphrase"
+            }
+        }"#;
+
+        let error =
+            ExecutionTaskClient::parse_envelope::<UserExchangeConfig>(body).expect_err("bad body");
+        let message = error.to_string();
+
+        assert!(message.contains("response_body_omitted=true"));
+        assert!(message.contains("body_len="));
+        assert!(!message.contains("plain-api-key"));
+        assert!(!message.contains("plain-api-secret"));
+        assert!(!message.contains("plain-passphrase"));
+    }
+
     #[tokio::test]
     async fn report_exchange_account_snapshot_uses_internal_post_contract() {
         use std::io::{Read, Write};
@@ -1240,7 +1326,7 @@ mod tests {
             let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
             tx.send(request).unwrap();
 
-            let body = r#"{"success":true,"data":{"combo_id":85,"buyer_email":"buyer@example.com","exchange":"OKX","symbol":"BTC-USDT-SWAP","source_ref":"rq:acct:v1:ex=okx:combo=85:sym=BTC-USDT-SWAP","snapshot_at":"2026-06-18T02:30:00","orders_upserted":1,"trades_upserted":1,"positions_upserted":1,"balances_upserted":1}}"#;
+            let body = r#"{"success":true,"data":{"combo_id":85,"buyer_email":"buyer@example.com","exchange":"OKX","symbol":"BTC-USDT-SWAP","source_ref":"rq:acct:v1:ex=okx:combo=85:sym=BTC-USDT-SWAP","snapshot_at":"2026-06-18T02:30:00","orders_upserted":1,"trades_upserted":1,"positions_upserted":1,"balances_upserted":1,"bills_upserted":1}}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 body.len(),
@@ -1305,6 +1391,23 @@ mod tests {
                     raw_payload_json: Some(r#"{"ccy":"USDT","eqUsd":"8211.49"}"#.to_string()),
                     snapshot_at: Some("2026-06-18T02:30:00".to_string()),
                 }],
+                bills: vec![ExchangeAccountBillSnapshotInput {
+                    external_bill_id: "okx-bill-1".to_string(),
+                    asset: "USDT".to_string(),
+                    balance_change: Some(9.7),
+                    balance_change_usdt: None,
+                    balance_after: Some(8211.49),
+                    fee_amount: Some(-0.3),
+                    fee_usdt: None,
+                    pnl_amount: Some(10.0),
+                    pnl_usdt: None,
+                    bill_type: Some("2".to_string()),
+                    bill_sub_type: Some("1".to_string()),
+                    external_order_id: Some("3631557801300238336".to_string()),
+                    external_trade_id: Some("211849844".to_string()),
+                    raw_payload_json: Some(r#"{"billId":"okx-bill-1"}"#.to_string()),
+                    bill_at: Some("2026-06-18T02:30:00".to_string()),
+                }],
             })
             .await
             .unwrap();
@@ -1321,11 +1424,13 @@ mod tests {
         assert!(request.contains(r#""external_order_id":"3631557801300238336""#));
         assert!(request.contains(r#""external_trade_id":"211849844""#));
         assert!(request.contains(r#""balances":[{"asset":"USDT""#));
+        assert!(request.contains(r#""bills":[{"external_bill_id":"okx-bill-1""#));
         assert!(!request.contains("plain-api-secret"));
         assert_eq!(response.orders_upserted, 1);
         assert_eq!(response.trades_upserted, 1);
         assert_eq!(response.positions_upserted, 1);
         assert_eq!(response.balances_upserted, 1);
+        assert_eq!(response.bills_upserted, 1);
     }
 
     #[tokio::test]

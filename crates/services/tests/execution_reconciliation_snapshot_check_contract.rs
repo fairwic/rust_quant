@@ -246,6 +246,7 @@ fn reconciliation_snapshot_maps_signed_read_only_account_evidence_for_web_snapsh
         &[history_order],
         &[fill],
         &[balance],
+        &[],
     )
     .unwrap();
 

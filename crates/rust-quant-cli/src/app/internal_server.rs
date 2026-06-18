@@ -14,6 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info};
 
+mod auth;
 mod backtest_details;
 mod backtest_logs;
 mod market_rank_technical_context;
@@ -28,6 +29,7 @@ pub use strategy_configs::{
     StrategyConfigListQuery, StrategyConfigUpsertRequest,
 };
 
+use auth::{authorize_internal_request, parse_headers};
 use market_rank_technical_context::{
     build_market_rank_technical_context, MarketRankTechnicalContext, MarketRankTechnicalSource,
 };
@@ -875,6 +877,11 @@ fn safe_internal_ref_component(raw: &str) -> String {
 async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     let request = read_request(&mut stream).await?;
     let route = route_path(&request.path);
+    if let Some(response) =
+        authorize_internal_request(request.method.as_str(), route, &request.headers)
+    {
+        return write_response(&mut stream, response).await;
+    }
     let response = match (request.method.as_str(), route) {
         ("POST", "/internal/backtests/run") | ("POST", "/api/internal/backtests/run") => {
             handle_backtest_run_body(&request.body).await
@@ -2033,6 +2040,7 @@ fn query_param(query: &str, names: &[&str]) -> Option<String> {
 struct HttpRequest {
     method: String,
     path: String,
+    headers: Vec<(String, String)>,
     body: Vec<u8>,
 }
 
@@ -2060,6 +2068,7 @@ async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest> {
     let mut request_parts = request_line.split_whitespace();
     let method = request_parts.next().context("缺少HTTP method")?.to_string();
     let path = request_parts.next().context("缺少HTTP path")?.to_string();
+    let headers = parse_headers(header);
     let content_length = parse_content_length(header)?;
     if content_length > MAX_BODY_BYTES {
         anyhow::bail!("HTTP body too large");
@@ -2075,7 +2084,12 @@ async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest> {
     }
     let body = buffer[body_start..body_start + content_length].to_vec();
 
-    Ok(HttpRequest { method, path, body })
+    Ok(HttpRequest {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
@@ -2116,6 +2130,7 @@ fn reason_phrase(status_code: u16) -> &'static str {
     match status_code {
         200 => "OK",
         400 => "Bad Request",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
         500 => "Internal Server Error",

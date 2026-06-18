@@ -1,14 +1,18 @@
 use anyhow::{anyhow, bail, Result};
-use crypto_exc_all::{Balance, ExchangeId, Fill, FillListQuery, Order, OrderListQuery, Position};
+use crypto_exc_all::{
+    AccountBill, AccountBillQuery, Balance, ExchangeId, Fill, FillListQuery, Order, OrderListQuery,
+    Position,
+};
 use serde_json::{json, Value};
 
 use super::execution_audit::redact_error_message;
 use super::execution_payload::{parse_exchange, parse_instrument};
 use super::execution_task_client::{
-    ExchangeAccountBalanceSnapshotInput, ExchangeAccountOrderSnapshotInput,
-    ExchangeAccountPositionSnapshotInput, ExchangeAccountSnapshotReportRequest,
-    ExchangeAccountSnapshotReportResponse, ExchangeAccountTradeSnapshotInput,
-    ExchangeCloseFillWritebackRequest, ExchangeCloseFillWritebackResponse,
+    ExchangeAccountBalanceSnapshotInput, ExchangeAccountBillSnapshotInput,
+    ExchangeAccountOrderSnapshotInput, ExchangeAccountPositionSnapshotInput,
+    ExchangeAccountSnapshotReportRequest, ExchangeAccountSnapshotReportResponse,
+    ExchangeAccountTradeSnapshotInput, ExchangeCloseFillWritebackRequest,
+    ExchangeCloseFillWritebackResponse,
 };
 use super::execution_worker::{
     build_exchange_reconciliation_sync_requests_from_read_only_snapshot, is_protected_link_symbol,
@@ -319,6 +323,7 @@ pub fn build_exchange_account_snapshot_report_request(
     order_history: &[Order],
     fills: &[Fill],
     balances: &[Balance],
+    account_bills: &[AccountBill],
 ) -> Result<ExchangeAccountSnapshotReportRequest> {
     let snapshot_at = web_naive_datetime_string(chrono::Utc::now().naive_utc());
     let source_ref = exchange_account_snapshot_source_ref(config);
@@ -470,6 +475,57 @@ pub fn build_exchange_account_snapshot_report_request(
         })
         .collect();
 
+    let bills = account_bills
+        .iter()
+        .filter(|bill| bill.exchange == config.exchange)
+        .filter_map(|bill| {
+            if let Some(exchange_symbol) = bill.exchange_symbol.as_deref() {
+                if !same_exchange_symbol(exchange_symbol, &config.symbol) {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+            let external_bill_id = trimmed_optional(bill.bill_id.as_deref())?;
+            let asset = trimmed_optional(bill.asset.as_deref())?.to_ascii_uppercase();
+            let balance_change = decimal_option(bill.balance_change.as_deref());
+            let fee_amount = decimal_option(bill.fee.as_deref());
+            let pnl_amount = decimal_option(bill.pnl.as_deref());
+            if balance_change.is_none() && fee_amount.is_none() && pnl_amount.is_none() {
+                return None;
+            }
+            Some(ExchangeAccountBillSnapshotInput {
+                external_bill_id,
+                asset,
+                balance_change,
+                balance_change_usdt: None,
+                balance_after: decimal_option(bill.balance_after.as_deref()),
+                fee_amount,
+                fee_usdt: None,
+                pnl_amount,
+                pnl_usdt: None,
+                bill_type: trimmed_optional(bill.bill_type.as_deref()),
+                bill_sub_type: trimmed_optional(bill.bill_sub_type.as_deref()),
+                external_order_id: trimmed_optional(bill.order_id.as_deref()),
+                external_trade_id: trimmed_optional(bill.trade_id.as_deref()),
+                raw_payload_json: Some(
+                    json!({
+                        "source": "signed_read_only_account_snapshot",
+                        "kind": "bill",
+                        "exchange": bill.exchange.as_str(),
+                        "symbol": bill.exchange_symbol,
+                        "bill": bill.raw,
+                    })
+                    .to_string(),
+                ),
+                bill_at: bill
+                    .timestamp
+                    .and_then(timestamp_millis_to_naive_string)
+                    .or_else(|| Some(snapshot_at.clone())),
+            })
+        })
+        .collect();
+
     Ok(ExchangeAccountSnapshotReportRequest {
         combo_id: config.combo_id,
         buyer_email: config.buyer_email.clone(),
@@ -481,6 +537,7 @@ pub fn build_exchange_account_snapshot_report_request(
         trades,
         positions,
         balances,
+        bills,
     })
 }
 
@@ -557,7 +614,7 @@ async fn run_reconciliation_snapshot_check(
         gateway
             .fills(
                 config.exchange,
-                FillListQuery::for_instrument(instrument).with_limit(20),
+                FillListQuery::for_instrument(instrument.clone()).with_limit(20),
             )
             .await
             .map_err(|error| {
@@ -575,6 +632,28 @@ async fn run_reconciliation_snapshot_check(
             redact_error_message(error.to_string())
         )
     })?;
+    let account_bills = if config.exchange == ExchangeId::Okx {
+        let now = chrono::Utc::now();
+        let start_time = (now - chrono::Duration::days(30)).timestamp_millis() as u64;
+        gateway
+            .account_bills(
+                config.exchange,
+                AccountBillQuery::for_instrument(instrument)
+                    .with_start_time(start_time)
+                    .with_end_time(now.timestamp_millis() as u64)
+                    .with_limit(100)
+                    .with_archive(true),
+            )
+            .await
+            .map_err(|error| {
+                anyhow!(
+                    "signed read-only account bills snapshot failed: {}",
+                    redact_error_message(error.to_string())
+                )
+            })?
+    } else {
+        Vec::new()
+    };
 
     let requests = build_reconciliation_snapshot_requests(&config, &positions, &open_orders);
     let close_fill_writeback_candidates =
@@ -586,12 +665,14 @@ async fn run_reconciliation_snapshot_check(
         &order_history,
         &fills,
         &balances,
+        &account_bills,
     )?;
     let account_snapshot_counts = json!({
         "orders": account_snapshot_request.orders.len(),
         "trades": account_snapshot_request.trades.len(),
         "positions": account_snapshot_request.positions.len(),
         "balances": account_snapshot_request.balances.len(),
+        "bills": account_snapshot_request.bills.len(),
         "source_ref": account_snapshot_request.source_ref,
     });
     let account_snapshot_response = if has_internal_secret {
@@ -1094,9 +1175,16 @@ mod tests {
 
     #[test]
     fn account_snapshot_report_uses_web_datetime_contract() {
-        let request =
-            build_exchange_account_snapshot_report_request(&test_config(), &[], &[], &[], &[], &[])
-                .expect("account snapshot request");
+        let request = build_exchange_account_snapshot_report_request(
+            &test_config(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("account snapshot request");
 
         let snapshot_at = request.snapshot_at.expect("snapshot_at");
         assert!(
@@ -1115,5 +1203,62 @@ mod tests {
             timestamp_millis_to_naive_string(1_774_814_400_000).expect("valid timestamp millis");
 
         assert_eq!(formatted, "2026-03-29T20:00:00");
+    }
+
+    #[test]
+    fn account_snapshot_report_includes_symbol_scoped_account_bills() {
+        let bills = vec![
+            AccountBill {
+                exchange: ExchangeId::Okx,
+                instrument: Some(crypto_exc_all::Instrument::perp("BTC", "USDT")),
+                exchange_symbol: Some("BTC-USDT-SWAP".to_string()),
+                bill_id: Some("okx-bill-1".to_string()),
+                asset: Some("USDT".to_string()),
+                balance_change: Some("9.7".to_string()),
+                balance_after: Some("8211.49".to_string()),
+                fee: Some("-0.3".to_string()),
+                pnl: Some("10".to_string()),
+                bill_type: Some("2".to_string()),
+                bill_sub_type: Some("1".to_string()),
+                order_id: Some("okx-order-1".to_string()),
+                trade_id: Some("okx-fill-1".to_string()),
+                timestamp: Some(1_774_814_400_000),
+                raw: json!({"billId":"okx-bill-1"}),
+            },
+            AccountBill {
+                exchange: ExchangeId::Okx,
+                instrument: None,
+                exchange_symbol: None,
+                bill_id: Some("okx-transfer".to_string()),
+                asset: Some("USDT".to_string()),
+                balance_change: Some("100".to_string()),
+                balance_after: None,
+                fee: None,
+                pnl: None,
+                bill_type: Some("1".to_string()),
+                bill_sub_type: None,
+                order_id: None,
+                trade_id: None,
+                timestamp: Some(1_774_814_400_000),
+                raw: json!({"billId":"okx-transfer"}),
+            },
+        ];
+        let request = build_exchange_account_snapshot_report_request(
+            &test_config(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &bills,
+        )
+        .expect("account snapshot request");
+
+        assert_eq!(request.bills.len(), 1);
+        assert_eq!(request.bills[0].external_bill_id, "okx-bill-1");
+        assert_eq!(request.bills[0].asset, "USDT");
+        assert_eq!(request.bills[0].balance_change, Some(9.7));
+        assert_eq!(request.bills[0].fee_amount, Some(-0.3));
+        assert_eq!(request.bills[0].pnl_amount, Some(10.0));
     }
 }

@@ -1,10 +1,10 @@
 use crypto_exc_all::{
-    Balance, BinanceExchangeConfig, BitgetExchangeConfig, BybitExchangeConfig, CancelOrderRequest,
-    Candle, CandleQuery, CryptoSdk, Error, ExchangeId, Fill, FillListQuery, GateExchangeConfig,
-    Instrument, MarginMode, OkxExchangeConfig, Order, OrderAck, OrderBook, OrderBookQuery,
-    OrderListQuery, OrderQuery, OrderSide, OrderType, PlaceOrderRequest, Position,
-    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderQuery,
-    ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
+    AccountBill, AccountBillQuery, Balance, BinanceExchangeConfig, BitgetExchangeConfig,
+    BybitExchangeConfig, CancelOrderRequest, Candle, CandleQuery, CryptoSdk, Error, ExchangeId,
+    Fill, FillListQuery, GateExchangeConfig, Instrument, MarginMode, OkxExchangeConfig, Order,
+    OrderAck, OrderBook, OrderBookQuery, OrderListQuery, OrderQuery, OrderSide, OrderType,
+    PlaceOrderRequest, Position, PrepareOrderSettingsRequest, PrepareOrderSettingsResult,
+    ProtectiveOrderQuery, ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
 };
 use serde_json::json;
 
@@ -354,6 +354,20 @@ impl CryptoExcAllGateway {
             GatewayMode::DryRun => Err(Error::Unsupported {
                 exchange,
                 capability: "dry-run balance query",
+            }),
+        }
+    }
+
+    pub async fn account_bills(
+        &self,
+        exchange: ExchangeId,
+        query: AccountBillQuery,
+    ) -> Result<Vec<AccountBill>> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.account(exchange)?.bills(query).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run account bills query",
             }),
         }
     }

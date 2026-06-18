@@ -107,6 +107,135 @@ EXECUTION_WORKER_LIVE_ORDER_CONFIRM=I_UNDERSTAND_LIVE_ORDERS
 Web lease 过滤条件、用户 API Key、交易所环境（模拟盘或真实盘）、下单数量和
 `risk_control_close_candidate` 的 reduce-only 平仓合约。
 
+## Market Velocity Rust-native handoff
+
+Market Velocity 生产 handoff 不再使用 `scripts/dev/*.sh`。Core 只负责从
+`market_rank_events` 和 15m K 线中筛出合格雷达事件，调用 Web owner API 做只读
+preview 或创建 `execution_tasks`；真实执行继续复用 Vegas 风格的既有
+`ExecutionWorker`，不得新写一套下单系统。
+
+只读检查当前可执行候选和 Web readiness：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+RUST_QUAN_WEB_BASE_URL=http://127.0.0.1:8000 \
+RUST_QUAN_WEB_INTERNAL_SECRET=local-dev-secret \
+MARKET_VELOCITY_LIVE_BUYER_EMAIL=723875705@qq.com \
+MARKET_VELOCITY_LIVE_COMBO_ID=85 \
+MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID=1 \
+MARKET_VELOCITY_SIGNAL_LOOKBACK_HOURS=24 \
+MARKET_VELOCITY_LIVE_CANDIDATE_LIMIT=20 \
+MARKET_VELOCITY_CREATE_TASK_APPLY=false \
+cargo run -q -p rust-quant-cli --bin market_velocity_live_handoff
+```
+
+如果需要刷新 Web 的 signed read-only preflight 快照，只允许显式只读确认：
+
+```bash
+MARKET_VELOCITY_TASK_READINESS_REFRESH_APPLY=true
+MARKET_VELOCITY_TASK_READINESS_REFRESH_CONFIRM=I_UNDERSTAND_THIS_REFRESHES_OKX_READONLY_TASK_READINESS
+```
+
+创建 Web `execution_tasks` 仍然不是下单。它必须同时满足 Web owner preview 无
+blocker、15m 入场确认通过、live signal 显式允许，并带创建确认：
+
+```bash
+MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE=live
+MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED=true
+MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED=false
+MARKET_VELOCITY_CREATE_TASK_APPLY=true
+MARKET_VELOCITY_CREATE_TASK_CONFIRM=I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK
+```
+
+runner 成功创建 task 后只输出 scoped worker handoff manifest。真正 live worker
+仍必须走现有 `ExecutionWorker`：
+
+```bash
+IS_RUN_EXECUTION_WORKER=true
+EXECUTION_WORKER_ONLY=true
+EXECUTION_WORKER_RUN_ONCE=true
+EXECUTION_WORKER_DRY_RUN=false
+EXECUTION_WORKER_TARGET_TASK_IDS=<web_execution_task_id>
+EXECUTION_WORKER_TASK_TYPES=execute_signal
+EXECUTION_WORKER_TASK_STATUSES=pending,leased
+EXECUTION_WORKER_LIVE_ORDER_CONFIRM=I_UNDERSTAND_LIVE_ORDERS
+```
+
+在 `ready_for_scoped_live_worker` 前，不得运行 live worker。若 runner 返回
+`market_velocity_no_entry_confirmed_candidate`，查看 `skipped_summary`：
+`VolumeNotConfirmed`、`PriceBelowAverages`、`TimingTriggerNotConfirmed` 分别表示
+15m 成交量、均线位置和突破/回踩触发未通过。
+
+生产 signal-only 降噪的 entry trigger 过滤可以用环境变量调整：
+
+```bash
+MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST=breakout_previous_high,reclaim_ema
+MARKET_VELOCITY_ENTRY_TRIGGER_BLOCKLIST=
+```
+
+`MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST=all` 可以临时关闭 allowlist；blocklist
+优先级高于 allowlist。过滤结果只决定是否向 Web 提交 Market Velocity strategy
+signal，不会绕过 `signal_only`、`paper_trade_required=true` 或 worker dry-run/live
+安全开关。
+
+## Market Velocity 纸面后验回测
+
+如果要评估历史 `market_rank_events` 是否经过 4h 趋势确认、15m 入场确认和追高过滤后仍有优势，
+可以直接跑 Core Rust CLI，不需要 Python：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --sample-limit 0
+```
+
+生产默认参数是 `delta_rank >= 10`、`new_rank <= 30`、追高过滤
+`new_rank <= 10 && price_change_pct >= 8%`、止损 `3%`，并同时统计 `1.5R`
+和 `2R` 在 `24h`、`48h` 两个窗口内的结果。
+
+如果要对比不同 15m 入场触发的后验质量，可以在确认事件之后、生成收益统计和
+paper outcome 之前加入口径过滤：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --sample-limit 0 \
+  --entry-trigger-allowlist breakout_previous_high,reclaim_ema
+```
+
+或仅排除某类触发：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --sample-limit 0 \
+  --entry-trigger-blocklist pullback_hold_ema
+```
+
+2026-06-15 本地 `quant_core` 对照结果：baseline confirmed `3210`，锁仓后
+`1.5R/24h` resolved `61.90%`，`2R/24h` resolved `56.10%`；只保留
+`breakout_previous_high` 后 confirmed `2182`，锁仓后 `1.5R/24h` resolved
+`66.67%`，`2R/24h` resolved `65.52%`；保留
+`breakout_previous_high,reclaim_ema` 后 confirmed `2867`，锁仓后 `1.5R/24h`
+resolved `64.86%`，`2R/24h` resolved `61.11%`。当前生产 signal-only 默认已接入
+`breakout_previous_high,reclaim_ema` 作为信号降噪口径，继续保持 paper observation，
+不直接升自动执行。
+
+需要把纸面结果写入 Web 观察表时，先确认 Web backend 已加载当前代码和
+`market_velocity_paper_outcomes` 迁移，再执行：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+RUST_QUAN_WEB_BASE_URL=http://127.0.0.1:8000 \
+EXECUTION_EVENT_SECRET=local-dev-secret \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --sample-limit 0 \
+  --paper-outcome-sink web
+```
+
+该模式只调用 Web 的 observation-only paper outcome 接口；Core 会校验
+Web 返回的 `generated_execution_task_count=0`，不创建 execution task，也不会触发 worker 或真实下单。
+
 ## pending_close 风控平仓说明
 
 `risk_control_close_candidate` 任务在 Web 侧创建时先是 `manual_review`，复核 confirm 后会进入 `pending_close`。`rust_quant` 当前实现分两层处理：

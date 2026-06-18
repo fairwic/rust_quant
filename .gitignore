@@ -21,3 +21,5 @@ runt_quant_old/
 okx/
 okx_rs/
 dist/
+test-artifacts/
+target-clean-sdk-check/
