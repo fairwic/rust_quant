@@ -206,8 +206,9 @@ impl CandleService {
             Timeframe::from_str(period).map_err(|error| anyhow!("无效的K线周期: {}", error))?;
         let instrument = instrument_from_inst_id(inst_id)?;
         let gateway = crypto_exc_all_gateway_from_env(exchange_id)?;
+        let exchange_period = crypto_exc_all_candle_period(exchange_id, period);
 
-        let mut query = CandleQuery::new(instrument, period).with_limit(limit);
+        let mut query = CandleQuery::new(instrument, exchange_period).with_limit(limit);
         if let Some(after) = after {
             query = query.with_start_time(after);
         }
@@ -331,6 +332,20 @@ pub fn should_use_quant_core_candle_source() -> Result<bool> {
 }
 
 fn crypto_exc_all_gateway_from_env(exchange: ExchangeId) -> Result<crate::CryptoExcAllGateway> {
+    if exchange == ExchangeId::Okx {
+        return crate::CryptoExcAllGateway::from_single_exchange_credentials(
+            ExchangeId::Okx,
+            std::env::var("OKX_API_KEY").unwrap_or_else(|_| "public-market-only".to_string()),
+            std::env::var("OKX_API_SECRET").unwrap_or_else(|_| "public-market-only".to_string()),
+            Some(
+                std::env::var("OKX_PASSPHRASE")
+                    .unwrap_or_else(|_| "public-market-only".to_string()),
+            ),
+            false,
+        )
+        .map_err(|error| anyhow!("创建 OKX crypto_exc_all gateway 失败: {}", error));
+    }
+
     if exchange == ExchangeId::Binance {
         return crate::CryptoExcAllGateway::from_single_exchange_credentials(
             ExchangeId::Binance,
@@ -345,6 +360,23 @@ fn crypto_exc_all_gateway_from_env(exchange: ExchangeId) -> Result<crate::Crypto
 
     crate::CryptoExcAllGateway::from_env()
         .map_err(|error| anyhow!("创建 crypto_exc_all gateway 失败: {}", error))
+}
+
+fn crypto_exc_all_candle_period(exchange: ExchangeId, period: &str) -> String {
+    if exchange != ExchangeId::Okx {
+        return period.to_string();
+    }
+
+    match period.trim() {
+        "1Dutc" | "1DUTC" => "1Dutc".to_string(),
+        value if value.ends_with('h') || value.ends_with('H') => {
+            format!("{}H", &value[..value.len() - 1])
+        }
+        value if value.ends_with('d') || value.ends_with('D') => {
+            format!("{}D", &value[..value.len() - 1])
+        }
+        value => value.to_string(),
+    }
 }
 
 fn default_exchange_id() -> Result<ExchangeId> {
@@ -779,5 +811,68 @@ impl MarketDepthService {
     pub async fn get_depth(&self, _symbol: &str, _depth: usize) -> Result<()> {
         // TODO: 实现市场深度查询
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock")
+    }
+
+    fn clear_okx_env() -> Vec<(&'static str, Option<String>)> {
+        let names = ["OKX_API_KEY", "OKX_API_SECRET", "OKX_PASSPHRASE"];
+        names
+            .into_iter()
+            .map(|name| {
+                let previous = std::env::var(name).ok();
+                std::env::remove_var(name);
+                (name, previous)
+            })
+            .collect()
+    }
+
+    fn restore_env(previous: Vec<(&'static str, Option<String>)>) {
+        for (name, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+
+    #[test]
+    fn okx_market_gateway_is_available_without_private_credentials() {
+        let _guard = env_lock();
+        let previous = clear_okx_env();
+
+        let gateway = crypto_exc_all_gateway_from_env(ExchangeId::Okx)
+            .expect("OKX public market gateway should not require private credentials");
+        let configured_exchanges = gateway.configured_exchanges();
+
+        restore_env(previous);
+        assert_eq!(configured_exchanges, vec![ExchangeId::Okx]);
+    }
+
+    #[test]
+    fn okx_candle_period_uses_okx_bar_case() {
+        assert_eq!(crypto_exc_all_candle_period(ExchangeId::Okx, "4h"), "4H");
+        assert_eq!(crypto_exc_all_candle_period(ExchangeId::Okx, "1h"), "1H");
+        assert_eq!(crypto_exc_all_candle_period(ExchangeId::Okx, "1d"), "1D");
+        assert_eq!(
+            crypto_exc_all_candle_period(ExchangeId::Okx, "1Dutc"),
+            "1Dutc"
+        );
+        assert_eq!(crypto_exc_all_candle_period(ExchangeId::Okx, "15m"), "15m");
+        assert_eq!(
+            crypto_exc_all_candle_period(ExchangeId::Binance, "4h"),
+            "4h"
+        );
     }
 }

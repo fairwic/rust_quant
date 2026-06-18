@@ -1,8 +1,8 @@
-use crypto_exc_all::{ExchangeId, Fill, Instrument, Order, Position};
+use crypto_exc_all::{Balance, ExchangeId, Fill, Instrument, Order, Position};
 use rust_quant_services::rust_quan_web::{
     build_close_fill_writeback_candidates, build_close_fill_writeback_request_from_candidate,
-    build_reconciliation_snapshot_requests, build_reconciliation_snapshot_task,
-    ReconciliationSnapshotCheckConfig,
+    build_exchange_account_snapshot_report_request, build_reconciliation_snapshot_requests,
+    build_reconciliation_snapshot_task, ReconciliationSnapshotCheckConfig,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -149,6 +149,137 @@ fn reconciliation_snapshot_can_disable_web_report_for_read_only_evidence() {
     assert!(!config.report_reconciliation);
     assert!(config.include_fills);
     assert!(!config.close_fill_writeback_apply);
+}
+
+#[test]
+fn reconciliation_snapshot_maps_signed_read_only_account_evidence_for_web_snapshot() {
+    let config = config_from(&[
+        (
+            "RECONCILIATION_SNAPSHOT_CONFIRM",
+            "I_UNDERSTAND_SIGNED_READ_ONLY_RECONCILIATION",
+        ),
+        ("RECONCILIATION_SNAPSHOT_BUYER_EMAIL", "buyer@example.com"),
+        ("RECONCILIATION_SNAPSHOT_EXCHANGE", "okx"),
+        ("RECONCILIATION_SNAPSHOT_SYMBOL", "BTC-USDT-SWAP"),
+        ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
+        ("RECONCILIATION_SNAPSHOT_TASK_ID", "86"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_REF", "web-cred-85"),
+    ])
+    .unwrap();
+    let instrument = Instrument::perp("btc", "usdt").with_settlement("usdt");
+    let open_order = Order {
+        exchange: ExchangeId::Okx,
+        instrument: instrument.clone(),
+        exchange_symbol: "BTC-USDT-SWAP".to_string(),
+        order_id: Some("3631557801300238336".to_string()),
+        client_order_id: None,
+        side: Some("buy".to_string()),
+        order_type: Some("limit".to_string()),
+        price: Some("66000".to_string()),
+        size: Some("0.01".to_string()),
+        filled_size: Some("0.004".to_string()),
+        average_price: Some("66010".to_string()),
+        status: Some("live".to_string()),
+        created_at: Some(1_781_000_000_000),
+        updated_at: Some(1_781_000_100_000),
+        raw: json!({"ordId":"3631557801300238336"}),
+    };
+    let history_order = Order {
+        exchange: ExchangeId::Okx,
+        instrument: instrument.clone(),
+        exchange_symbol: "BTC-USDT-SWAP".to_string(),
+        order_id: Some("3631557801300238337".to_string()),
+        client_order_id: None,
+        side: Some("buy".to_string()),
+        order_type: Some("market".to_string()),
+        price: None,
+        size: Some("0.01".to_string()),
+        filled_size: Some("0.01".to_string()),
+        average_price: Some("66000".to_string()),
+        status: Some("filled".to_string()),
+        created_at: Some(1_780_999_000_000),
+        updated_at: Some(1_780_999_100_000),
+        raw: json!({"ordId":"3631557801300238337"}),
+    };
+    let fill = Fill {
+        exchange: ExchangeId::Okx,
+        instrument: instrument.clone(),
+        exchange_symbol: "BTC-USDT-SWAP".to_string(),
+        trade_id: Some("211849844".to_string()),
+        order_id: Some("3631557801300238337".to_string()),
+        side: Some("buy".to_string()),
+        price: Some("66000".to_string()),
+        size: Some("0.01".to_string()),
+        fee: Some("-0.33".to_string()),
+        fee_asset: Some("USDT".to_string()),
+        role: Some("taker".to_string()),
+        timestamp: Some(1_780_999_120_000),
+        raw: json!({"tradeId":"211849844"}),
+    };
+    let position = Position {
+        exchange: ExchangeId::Okx,
+        instrument,
+        exchange_symbol: "BTC-USDT-SWAP".to_string(),
+        side: Some("long".to_string()),
+        size: "0.01".to_string(),
+        entry_price: Some("66000".to_string()),
+        mark_price: Some("66200".to_string()),
+        unrealized_pnl: Some("2.0".to_string()),
+        leverage: Some("3".to_string()),
+        margin_mode: Some("isolated".to_string()),
+        liquidation_price: Some("52000".to_string()),
+        raw: json!({"pos":"0.01"}),
+    };
+    let balance = Balance {
+        exchange: ExchangeId::Okx,
+        asset: "USDT".to_string(),
+        total: "8211.49".to_string(),
+        available: "6400.25".to_string(),
+        frozen: Some("0".to_string()),
+        raw: json!({"ccy":"USDT","eqUsd":"8211.49"}),
+    };
+
+    let request = build_exchange_account_snapshot_report_request(
+        &config,
+        &[position],
+        &[open_order],
+        &[history_order],
+        &[fill],
+        &[balance],
+    )
+    .unwrap();
+
+    assert_eq!(request.combo_id, 85);
+    assert_eq!(request.buyer_email, "buyer@example.com");
+    assert_eq!(request.exchange, "okx");
+    assert_eq!(request.symbol, "BTC-USDT-SWAP");
+    assert_eq!(request.orders.len(), 2);
+    assert_eq!(request.orders[0].external_order_id, "3631557801300238336");
+    assert_eq!(request.orders[0].order_status, "live");
+    assert_eq!(request.orders[1].external_order_id, "3631557801300238337");
+    assert_eq!(request.trades.len(), 1);
+    assert_eq!(request.trades[0].external_trade_id, "211849844");
+    assert_eq!(
+        request.trades[0].external_order_id.as_deref(),
+        Some("3631557801300238337")
+    );
+    assert_eq!(request.trades[0].quantity, Some(0.01));
+    assert_eq!(request.trades[0].quote_amount, Some(660.0));
+    assert_eq!(request.positions.len(), 1);
+    assert_eq!(request.positions[0].side, "long");
+    assert_eq!(request.positions[0].quantity, 0.01);
+    assert_eq!(request.positions[0].quote_amount, Some(662.0));
+    assert_eq!(request.positions[0].leverage, Some(3.0));
+    assert_eq!(request.balances.len(), 1);
+    assert_eq!(request.balances[0].asset, "USDT");
+    assert_eq!(request.balances[0].wallet_balance, Some(8211.49));
+    assert_eq!(request.balances[0].available_balance, Some(6400.25));
+    assert_eq!(request.balances[0].equity_usdt, Some(8211.49));
+    assert!(request.source_ref.contains("rq:acct:v1:ex=okx:"));
+    assert!(!request.source_ref.contains("buyer@example.com"));
+    assert!(!serde_json::to_string(&request)
+        .unwrap()
+        .contains("api-secret"));
 }
 
 #[test]

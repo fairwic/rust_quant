@@ -1,6 +1,7 @@
 use super::{
     backtest_detail_list_query_from_path, backtest_log_list_query_from_path,
-    compute_rank_change_pct, core_backtest_run_list_query_from_path, finalize_market_rank_rows,
+    compute_rank_change_pct, core_backtest_run_list_query_from_path,
+    exchange_account_snapshot_sync_request_from_body, finalize_market_rank_rows,
     kline_sync_request_from_body, market_rank_events_query_from_path,
     market_rank_sort_can_use_recent_query, market_rank_sort_requires_legacy_volume_before_limit,
     recent_market_rank_events_sql, strategy_config_list_query_from_path,
@@ -101,6 +102,48 @@ fn market_rank_events_query_defaults_exchange_and_caps_limit() {
     assert_eq!(query.sort.as_deref(), Some("volume_15m"));
     assert_eq!(query.limit, 200);
     assert_eq!(query.lookback_minutes, 120);
+}
+
+#[test]
+fn exchange_account_snapshot_sync_request_normalizes_symbols_and_defaults() {
+    let body = json!({
+        "buyerEmail": " Trader@Example.COM ",
+        "exchange": "okx",
+        "combos": [
+            {"comboId": 42, "symbol": " btc-usdt-swap "}
+        ],
+        "triggerSource": "api credential checked"
+    })
+    .to_string();
+
+    let request =
+        exchange_account_snapshot_sync_request_from_body(body.as_bytes()).expect("sync request");
+
+    assert_eq!(request.buyer_email, "Trader@Example.COM");
+    assert_eq!(request.exchange.as_str(), "okx");
+    assert_eq!(request.combos.len(), 1);
+    assert_eq!(request.combos[0].combo_id, 42);
+    assert_eq!(request.combos[0].symbol, "BTC-USDT-SWAP");
+    assert!(request.include_fills);
+    assert!(!request.report_reconciliation);
+    assert_eq!(request.trigger_source, "api credential checked");
+}
+
+#[test]
+fn exchange_account_snapshot_sync_request_rejects_invalid_combos() {
+    let body = json!({
+        "buyerEmail": "buyer@example.com",
+        "exchange": "okx",
+        "combos": [
+            {"comboId": 0, "symbol": "BTC-USDT-SWAP"}
+        ]
+    })
+    .to_string();
+
+    let error = exchange_account_snapshot_sync_request_from_body(body.as_bytes())
+        .expect_err("invalid combo id");
+
+    assert_eq!(error, "combo_id must be a positive integer");
 }
 
 #[test]

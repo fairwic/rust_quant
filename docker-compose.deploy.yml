@@ -19,6 +19,25 @@ services:
       QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
       DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
 
+  quant-core-internal-server:
+    container_name: quant-core-internal-server
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
+      IS_RUN_INTERNAL_SERVER: "true"
+      QUANT_INTERNAL_ADDR: 0.0.0.0:5322
+
   quant-core-market-velocity-radar:
     container_name: quant-core-market-velocity-radar
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
@@ -54,6 +73,9 @@ services:
       MARKET_VELOCITY_SIGNAL_DISPATCH_TIMEOUT_SECS: ${MARKET_VELOCITY_SIGNAL_DISPATCH_TIMEOUT_SECS:-5}
       RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
       EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
+      OKX_API_KEY: ${OKX_API_KEY:-public-market-only}
+      OKX_API_SECRET: ${OKX_API_SECRET:-public-market-only}
+      OKX_PASSPHRASE: ${OKX_PASSPHRASE:-public-market-only}
 
   quant-core-market-velocity-candle-backfill-scheduler:
     container_name: quant-core-market-velocity-candle-backfill-scheduler

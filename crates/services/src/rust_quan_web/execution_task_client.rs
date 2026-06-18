@@ -191,6 +191,95 @@ pub struct ExchangeReconciliationReportResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+pub struct ExchangeAccountOrderSnapshotInput {
+    pub external_order_id: String,
+    pub order_side: String,
+    pub order_status: String,
+    pub price: Option<f64>,
+    pub filled_qty: Option<f64>,
+    pub filled_quote: Option<f64>,
+    pub fee_amount: Option<f64>,
+    pub raw_payload_json: Option<String>,
+    pub observed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExchangeAccountTradeSnapshotInput {
+    pub external_trade_id: String,
+    pub external_order_id: Option<String>,
+    pub side: String,
+    pub quantity: Option<f64>,
+    pub quote_amount: Option<f64>,
+    pub fee_amount: Option<f64>,
+    pub price: Option<f64>,
+    pub raw_payload_json: Option<String>,
+    pub executed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExchangeAccountPositionSnapshotInput {
+    pub side: String,
+    pub quantity: f64,
+    pub quote_amount: Option<f64>,
+    pub leverage: Option<f64>,
+    pub margin_mode: Option<String>,
+    pub liquidation_price: Option<f64>,
+    pub margin_ratio: Option<f64>,
+    pub unrealized_pnl: Option<f64>,
+    pub protective_order_status: Option<String>,
+    pub raw_payload_json: Option<String>,
+    pub snapshot_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExchangeAccountBalanceSnapshotInput {
+    pub asset: String,
+    pub wallet_balance: Option<f64>,
+    pub available_balance: Option<f64>,
+    pub equity_usdt: Option<f64>,
+    pub raw_payload_json: Option<String>,
+    pub snapshot_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExchangeAccountSnapshotReportRequest {
+    pub combo_id: i64,
+    pub buyer_email: String,
+    pub exchange: String,
+    pub symbol: String,
+    pub source_ref: String,
+    pub snapshot_at: Option<String>,
+    #[serde(default)]
+    pub orders: Vec<ExchangeAccountOrderSnapshotInput>,
+    #[serde(default)]
+    pub trades: Vec<ExchangeAccountTradeSnapshotInput>,
+    #[serde(default)]
+    pub positions: Vec<ExchangeAccountPositionSnapshotInput>,
+    #[serde(default)]
+    pub balances: Vec<ExchangeAccountBalanceSnapshotInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExchangeAccountSnapshotReportResponse {
+    pub combo_id: i64,
+    pub buyer_email: String,
+    pub exchange: String,
+    pub symbol: String,
+    pub source_ref: String,
+    pub snapshot_at: String,
+    pub orders_upserted: i64,
+    pub trades_upserted: i64,
+    pub positions_upserted: i64,
+    pub balances_upserted: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub struct ExchangeCloseFillWritebackRequest {
     pub task_id: i64,
     pub combo_id: i64,
@@ -411,6 +500,7 @@ const LEASE_CONFIRMATION_TASKS_PATH: &str =
     "/api/commerce/internal/execution-tasks/confirmations/lease";
 const REPORT_RESULT_PATH: &str = "/api/commerce/internal/execution-results";
 const EXCHANGE_RECONCILIATION_PATH: &str = "/api/commerce/internal/exchange-reconciliation";
+const EXCHANGE_ACCOUNT_SNAPSHOT_PATH: &str = "/api/commerce/internal/exchange-account-snapshots";
 const EXCHANGE_CLOSE_FILL_WRITEBACK_PATH: &str =
     "/api/commerce/internal/exchange-close-fill-writeback";
 const STRATEGY_SIGNAL_PATH: &str = "/api/commerce/internal/strategy-signals";
@@ -470,6 +560,14 @@ impl ExecutionTaskClient {
         request: ExchangeReconciliationReportRequest,
     ) -> Result<ExchangeReconciliationReportResponse> {
         self.post_json(EXCHANGE_RECONCILIATION_PATH, &request).await
+    }
+
+    pub async fn report_exchange_account_snapshot(
+        &self,
+        request: ExchangeAccountSnapshotReportRequest,
+    ) -> Result<ExchangeAccountSnapshotReportResponse> {
+        self.post_json(EXCHANGE_ACCOUNT_SNAPSHOT_PATH, &request)
+            .await
     }
 
     pub async fn apply_exchange_close_fill_writeback(
@@ -590,6 +688,10 @@ impl ExecutionTaskClient {
 
     pub fn exchange_reconciliation_url(&self) -> String {
         self.url(EXCHANGE_RECONCILIATION_PATH)
+    }
+
+    pub fn exchange_account_snapshot_url(&self) -> String {
+        self.url(EXCHANGE_ACCOUNT_SNAPSHOT_PATH)
     }
 
     pub fn exchange_close_fill_writeback_url(&self) -> String {
@@ -1022,6 +1124,84 @@ mod tests {
     }
 
     #[test]
+    fn exchange_account_snapshot_request_matches_quant_web_contract() {
+        let request = ExchangeAccountSnapshotReportRequest {
+            combo_id: 85,
+            buyer_email: "buyer@example.com".to_string(),
+            exchange: "okx".to_string(),
+            symbol: "BTC-USDT-SWAP".to_string(),
+            source_ref: "rq:acct:v1:ex=okx:combo=85:sym=BTC-USDT-SWAP".to_string(),
+            snapshot_at: Some("2026-06-18T02:30:00".to_string()),
+            orders: vec![ExchangeAccountOrderSnapshotInput {
+                external_order_id: "3631557801300238336".to_string(),
+                order_side: "buy".to_string(),
+                order_status: "filled".to_string(),
+                price: Some(66000.0),
+                filled_qty: Some(0.01),
+                filled_quote: Some(660.0),
+                fee_amount: Some(0.33),
+                raw_payload_json: Some(r#"{"ordId":"3631557801300238336"}"#.to_string()),
+                observed_at: Some("2026-06-18T02:30:00".to_string()),
+            }],
+            trades: vec![ExchangeAccountTradeSnapshotInput {
+                external_trade_id: "211849844".to_string(),
+                external_order_id: Some("3631557801300238336".to_string()),
+                side: "buy".to_string(),
+                quantity: Some(0.01),
+                quote_amount: Some(660.0),
+                fee_amount: Some(0.33),
+                price: Some(66000.0),
+                raw_payload_json: Some(r#"{"tradeId":"211849844"}"#.to_string()),
+                executed_at: Some("2026-06-18T02:30:00".to_string()),
+            }],
+            positions: vec![ExchangeAccountPositionSnapshotInput {
+                side: "long".to_string(),
+                quantity: 0.01,
+                quote_amount: Some(660.0),
+                leverage: Some(3.0),
+                margin_mode: Some("isolated".to_string()),
+                liquidation_price: Some(52000.0),
+                margin_ratio: None,
+                unrealized_pnl: Some(4.2),
+                protective_order_status: Some("exchange_manual".to_string()),
+                raw_payload_json: Some(r#"{"pos":"0.01"}"#.to_string()),
+                snapshot_at: Some("2026-06-18T02:30:00".to_string()),
+            }],
+            balances: vec![ExchangeAccountBalanceSnapshotInput {
+                asset: "USDT".to_string(),
+                wallet_balance: Some(8211.49),
+                available_balance: Some(6400.25),
+                equity_usdt: Some(8211.49),
+                raw_payload_json: Some(r#"{"ccy":"USDT","eqUsd":"8211.49"}"#.to_string()),
+                snapshot_at: Some("2026-06-18T02:30:00".to_string()),
+            }],
+        };
+        let value = serde_json::to_value(&request).unwrap();
+
+        assert_eq!(value["combo_id"], 85);
+        assert_eq!(value["buyer_email"], "buyer@example.com");
+        assert_eq!(
+            value["orders"][0]["external_order_id"],
+            "3631557801300238336"
+        );
+        assert_eq!(value["trades"][0]["external_trade_id"], "211849844");
+        assert_eq!(value["positions"][0]["quantity"], 0.01);
+        assert_eq!(value["balances"][0]["asset"], "USDT");
+        assert_eq!(value["balances"][0]["equity_usdt"], 8211.49);
+        assert!(!value.to_string().contains("plain-api-secret"));
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "https://quant-web.example/".to_string(),
+            internal_secret: "secret".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            client.exchange_account_snapshot_url(),
+            "https://quant-web.example/api/commerce/internal/exchange-account-snapshots"
+        );
+    }
+
+    #[test]
     fn parses_user_exchange_config_envelope_without_persisting_secret() {
         let body = r#"{
             "success": true,
@@ -1041,6 +1221,111 @@ mod tests {
         assert_eq!(config.api_key, "api-key");
         assert_eq!(config.passphrase.as_deref(), Some("passphrase"));
         assert!(config.simulated);
+    }
+
+    #[tokio::test]
+    async fn report_exchange_account_snapshot_uses_internal_post_contract() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server = tokio::task::spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 8192];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+            tx.send(request).unwrap();
+
+            let body = r#"{"success":true,"data":{"combo_id":85,"buyer_email":"buyer@example.com","exchange":"OKX","symbol":"BTC-USDT-SWAP","source_ref":"rq:acct:v1:ex=okx:combo=85:sym=BTC-USDT-SWAP","snapshot_at":"2026-06-18T02:30:00","orders_upserted":1,"trades_upserted":1,"positions_upserted":1,"balances_upserted":1}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap();
+        let response = client
+            .report_exchange_account_snapshot(ExchangeAccountSnapshotReportRequest {
+                combo_id: 85,
+                buyer_email: "buyer@example.com".to_string(),
+                exchange: "okx".to_string(),
+                symbol: "BTC-USDT-SWAP".to_string(),
+                source_ref: "rq:acct:v1:ex=okx:combo=85:sym=BTC-USDT-SWAP".to_string(),
+                snapshot_at: Some("2026-06-18T02:30:00".to_string()),
+                orders: vec![ExchangeAccountOrderSnapshotInput {
+                    external_order_id: "3631557801300238336".to_string(),
+                    order_side: "buy".to_string(),
+                    order_status: "filled".to_string(),
+                    price: Some(66000.0),
+                    filled_qty: Some(0.01),
+                    filled_quote: Some(660.0),
+                    fee_amount: Some(0.33),
+                    raw_payload_json: Some(r#"{"ordId":"3631557801300238336"}"#.to_string()),
+                    observed_at: Some("2026-06-18T02:30:00".to_string()),
+                }],
+                trades: vec![ExchangeAccountTradeSnapshotInput {
+                    external_trade_id: "211849844".to_string(),
+                    external_order_id: Some("3631557801300238336".to_string()),
+                    side: "buy".to_string(),
+                    quantity: Some(0.01),
+                    quote_amount: Some(660.0),
+                    fee_amount: Some(0.33),
+                    price: Some(66000.0),
+                    raw_payload_json: Some(r#"{"tradeId":"211849844"}"#.to_string()),
+                    executed_at: Some("2026-06-18T02:30:00".to_string()),
+                }],
+                positions: vec![ExchangeAccountPositionSnapshotInput {
+                    side: "long".to_string(),
+                    quantity: 0.01,
+                    quote_amount: Some(660.0),
+                    leverage: Some(3.0),
+                    margin_mode: Some("isolated".to_string()),
+                    liquidation_price: Some(52000.0),
+                    margin_ratio: None,
+                    unrealized_pnl: Some(4.2),
+                    protective_order_status: Some("exchange_manual".to_string()),
+                    raw_payload_json: Some(r#"{"pos":"0.01"}"#.to_string()),
+                    snapshot_at: Some("2026-06-18T02:30:00".to_string()),
+                }],
+                balances: vec![ExchangeAccountBalanceSnapshotInput {
+                    asset: "USDT".to_string(),
+                    wallet_balance: Some(8211.49),
+                    available_balance: Some(6400.25),
+                    equity_usdt: Some(8211.49),
+                    raw_payload_json: Some(r#"{"ccy":"USDT","eqUsd":"8211.49"}"#.to_string()),
+                    snapshot_at: Some("2026-06-18T02:30:00".to_string()),
+                }],
+            })
+            .await
+            .unwrap();
+
+        server.await.unwrap();
+        let request = rx.recv().unwrap();
+
+        assert!(
+            request.starts_with("POST /api/commerce/internal/exchange-account-snapshots HTTP/1.1")
+        );
+        assert!(request.contains("x-alpha-execution-secret: dev-secret"));
+        assert!(request.contains(r#""combo_id":85"#));
+        assert!(request.contains(r#""buyer_email":"buyer@example.com""#));
+        assert!(request.contains(r#""external_order_id":"3631557801300238336""#));
+        assert!(request.contains(r#""external_trade_id":"211849844""#));
+        assert!(request.contains(r#""balances":[{"asset":"USDT""#));
+        assert!(!request.contains("plain-api-secret"));
+        assert_eq!(response.orders_upserted, 1);
+        assert_eq!(response.trades_upserted, 1);
+        assert_eq!(response.positions_upserted, 1);
+        assert_eq!(response.balances_upserted, 1);
     }
 
     #[tokio::test]

@@ -1,10 +1,13 @@
 use anyhow::{anyhow, bail, Result};
-use crypto_exc_all::{ExchangeId, Fill, FillListQuery, Order, OrderListQuery, Position};
+use crypto_exc_all::{Balance, ExchangeId, Fill, FillListQuery, Order, OrderListQuery, Position};
 use serde_json::{json, Value};
 
 use super::execution_audit::redact_error_message;
 use super::execution_payload::{parse_exchange, parse_instrument};
 use super::execution_task_client::{
+    ExchangeAccountBalanceSnapshotInput, ExchangeAccountOrderSnapshotInput,
+    ExchangeAccountPositionSnapshotInput, ExchangeAccountSnapshotReportRequest,
+    ExchangeAccountSnapshotReportResponse, ExchangeAccountTradeSnapshotInput,
     ExchangeCloseFillWritebackRequest, ExchangeCloseFillWritebackResponse,
 };
 use super::execution_worker::{
@@ -118,6 +121,35 @@ impl ReconciliationSnapshotCheckConfig {
             close_fill_writeback_apply,
             close_fill_writeback_intent,
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountSnapshotSyncConfig {
+    pub buyer_email: String,
+    pub exchange: ExchangeId,
+    pub symbol: String,
+    pub combo_id: i64,
+    pub task_id: i64,
+    pub credential_ref: Option<String>,
+    pub report_reconciliation: bool,
+    pub include_fills: bool,
+}
+
+impl AccountSnapshotSyncConfig {
+    pub fn into_reconciliation_config(self) -> ReconciliationSnapshotCheckConfig {
+        ReconciliationSnapshotCheckConfig {
+            buyer_email: self.buyer_email,
+            exchange: self.exchange,
+            symbol: self.symbol,
+            combo_id: self.combo_id,
+            task_id: self.task_id,
+            credential_ref: self.credential_ref,
+            report_reconciliation: self.report_reconciliation,
+            include_fills: self.include_fills,
+            close_fill_writeback_apply: false,
+            close_fill_writeback_intent: None,
+        }
     }
 }
 
@@ -280,8 +312,190 @@ pub fn build_close_fill_writeback_request_from_candidate(
     })
 }
 
+pub fn build_exchange_account_snapshot_report_request(
+    config: &ReconciliationSnapshotCheckConfig,
+    positions: &[Position],
+    open_orders: &[Order],
+    order_history: &[Order],
+    fills: &[Fill],
+    balances: &[Balance],
+) -> Result<ExchangeAccountSnapshotReportRequest> {
+    let snapshot_at = web_naive_datetime_string(chrono::Utc::now().naive_utc());
+    let source_ref = exchange_account_snapshot_source_ref(config);
+    let mut orders = Vec::new();
+    for order in open_orders.iter().chain(order_history.iter()) {
+        if order.exchange != config.exchange
+            || !same_exchange_symbol(&order.exchange_symbol, &config.symbol)
+        {
+            continue;
+        }
+        let Some(external_order_id) = trimmed_optional(order.order_id.as_deref()) else {
+            continue;
+        };
+        let order_side =
+            trimmed_optional(order.side.as_deref()).unwrap_or_else(|| "unknown".to_string());
+        let order_status =
+            trimmed_optional(order.status.as_deref()).unwrap_or_else(|| "unknown".to_string());
+        let price = decimal_option(order.average_price.as_deref())
+            .or_else(|| decimal_option(order.price.as_deref()));
+        let filled_qty = decimal_option(order.filled_size.as_deref());
+        let filled_quote = multiply_optional(price, filled_qty);
+        let observed_at = order
+            .updated_at
+            .or(order.created_at)
+            .and_then(timestamp_millis_to_naive_string)
+            .or_else(|| Some(snapshot_at.clone()));
+
+        orders.push(ExchangeAccountOrderSnapshotInput {
+            external_order_id,
+            order_side,
+            order_status,
+            price,
+            filled_qty,
+            filled_quote,
+            fee_amount: None,
+            raw_payload_json: Some(
+                json!({
+                    "source": "signed_read_only_account_snapshot",
+                    "kind": "order",
+                    "exchange": order.exchange.as_str(),
+                    "symbol": order.exchange_symbol,
+                    "order": order.raw,
+                })
+                .to_string(),
+            ),
+            observed_at,
+        });
+    }
+
+    let trades = fills
+        .iter()
+        .filter(|fill| fill.exchange == config.exchange)
+        .filter(|fill| same_exchange_symbol(&fill.exchange_symbol, &config.symbol))
+        .filter_map(|fill| {
+            let external_trade_id = trimmed_optional(fill.trade_id.as_deref())?;
+            let side =
+                trimmed_optional(fill.side.as_deref()).unwrap_or_else(|| "unknown".to_string());
+            let price = decimal_option(fill.price.as_deref());
+            let quantity = decimal_option(fill.size.as_deref());
+            Some(ExchangeAccountTradeSnapshotInput {
+                external_trade_id,
+                external_order_id: trimmed_optional(fill.order_id.as_deref()),
+                side,
+                quantity,
+                quote_amount: multiply_optional(price, quantity),
+                fee_amount: decimal_option(fill.fee.as_deref()),
+                price,
+                raw_payload_json: Some(
+                    json!({
+                        "source": "signed_read_only_account_snapshot",
+                        "kind": "fill",
+                        "exchange": fill.exchange.as_str(),
+                        "symbol": fill.exchange_symbol,
+                        "fill": fill.raw,
+                    })
+                    .to_string(),
+                ),
+                executed_at: fill
+                    .timestamp
+                    .and_then(timestamp_millis_to_naive_string)
+                    .or_else(|| Some(snapshot_at.clone())),
+            })
+        })
+        .collect();
+
+    let positions = positions
+        .iter()
+        .filter(|position| position.exchange == config.exchange)
+        .filter(|position| same_exchange_symbol(&position.exchange_symbol, &config.symbol))
+        .filter(|position| positive_decimal_text(&position.size))
+        .filter_map(|position| {
+            let quantity = decimal_option(Some(position.size.as_str()))?;
+            let entry_price = decimal_option(position.entry_price.as_deref());
+            let mark_price = decimal_option(position.mark_price.as_deref());
+            let quote_amount = multiply_optional(mark_price.or(entry_price), Some(quantity));
+            Some(ExchangeAccountPositionSnapshotInput {
+                side: trimmed_optional(position.side.as_deref())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                quantity,
+                quote_amount,
+                leverage: decimal_option(position.leverage.as_deref()),
+                margin_mode: trimmed_optional(position.margin_mode.as_deref()),
+                liquidation_price: decimal_option(position.liquidation_price.as_deref()),
+                margin_ratio: None,
+                unrealized_pnl: decimal_option(position.unrealized_pnl.as_deref()),
+                protective_order_status: None,
+                raw_payload_json: Some(
+                    json!({
+                        "source": "signed_read_only_account_snapshot",
+                        "kind": "position",
+                        "exchange": position.exchange.as_str(),
+                        "symbol": position.exchange_symbol,
+                        "position": position.raw,
+                    })
+                    .to_string(),
+                ),
+                snapshot_at: Some(snapshot_at.clone()),
+            })
+        })
+        .collect();
+
+    let balances = balances
+        .iter()
+        .filter(|balance| balance.exchange == config.exchange)
+        .filter_map(|balance| {
+            let asset = trimmed_optional(Some(balance.asset.as_str()))?.to_ascii_uppercase();
+            let wallet_balance = decimal_option(Some(balance.total.as_str()));
+            let available_balance = decimal_option(Some(balance.available.as_str()));
+            if wallet_balance.is_none() && available_balance.is_none() {
+                return None;
+            }
+            Some(ExchangeAccountBalanceSnapshotInput {
+                equity_usdt: balance_equity_usdt(balance, wallet_balance),
+                asset,
+                wallet_balance,
+                available_balance,
+                raw_payload_json: Some(
+                    json!({
+                        "source": "signed_read_only_account_snapshot",
+                        "kind": "balance",
+                        "exchange": balance.exchange.as_str(),
+                        "asset": balance.asset,
+                        "balance": balance.raw,
+                    })
+                    .to_string(),
+                ),
+                snapshot_at: Some(snapshot_at.clone()),
+            })
+        })
+        .collect();
+
+    Ok(ExchangeAccountSnapshotReportRequest {
+        combo_id: config.combo_id,
+        buyer_email: config.buyer_email.clone(),
+        exchange: config.exchange.as_str().to_string(),
+        symbol: config.symbol.clone(),
+        source_ref,
+        snapshot_at: Some(snapshot_at),
+        orders,
+        trades,
+        positions,
+        balances,
+    })
+}
+
 pub async fn run_reconciliation_snapshot_check_from_env() -> Result<Value> {
     let config = ReconciliationSnapshotCheckConfig::from_env()?;
+    run_reconciliation_snapshot_check(config).await
+}
+
+pub async fn run_account_snapshot_sync(config: AccountSnapshotSyncConfig) -> Result<Value> {
+    run_reconciliation_snapshot_check(config.into_reconciliation_config()).await
+}
+
+async fn run_reconciliation_snapshot_check(
+    config: ReconciliationSnapshotCheckConfig,
+) -> Result<Value> {
     let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
         .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
         .map_err(|_| anyhow!("RUST_QUAN_WEB_BASE_URL is required"))?;
@@ -327,6 +541,18 @@ pub async fn run_reconciliation_snapshot_check_from_env() -> Result<Value> {
                 redact_error_message(error.to_string())
             )
         })?;
+    let order_history = gateway
+        .order_history(
+            config.exchange,
+            OrderListQuery::for_instrument(instrument.clone()).with_limit(100),
+        )
+        .await
+        .map_err(|error| {
+            anyhow!(
+                "signed read-only order-history snapshot failed: {}",
+                redact_error_message(error.to_string())
+            )
+        })?;
     let fills = if config.include_fills {
         gateway
             .fills(
@@ -343,10 +569,36 @@ pub async fn run_reconciliation_snapshot_check_from_env() -> Result<Value> {
     } else {
         Vec::new()
     };
+    let balances = gateway.balances(config.exchange).await.map_err(|error| {
+        anyhow!(
+            "signed read-only balance snapshot failed: {}",
+            redact_error_message(error.to_string())
+        )
+    })?;
 
     let requests = build_reconciliation_snapshot_requests(&config, &positions, &open_orders);
     let close_fill_writeback_candidates =
         build_close_fill_writeback_candidates(&config, &positions, &open_orders, &fills);
+    let account_snapshot_request = build_exchange_account_snapshot_report_request(
+        &config,
+        &positions,
+        &open_orders,
+        &order_history,
+        &fills,
+        &balances,
+    )?;
+    let account_snapshot_counts = json!({
+        "orders": account_snapshot_request.orders.len(),
+        "trades": account_snapshot_request.trades.len(),
+        "positions": account_snapshot_request.positions.len(),
+        "balances": account_snapshot_request.balances.len(),
+        "source_ref": account_snapshot_request.source_ref,
+    });
+    let account_snapshot_response = if has_internal_secret {
+        Some(report_exchange_account_snapshot(&client, account_snapshot_request).await?)
+    } else {
+        None
+    };
     let mut close_fill_writeback_responses = Vec::new();
     if config.close_fill_writeback_apply {
         if !has_internal_secret {
@@ -390,12 +642,14 @@ pub async fn run_reconciliation_snapshot_check_from_env() -> Result<Value> {
         "position_count": positions.len(),
         "non_zero_position_count": non_zero_position_count(&positions),
         "open_order_count": open_orders.len(),
+        "order_history_count": order_history.len(),
         "active_open_order_count": active_open_order_count(&open_orders),
         "issue_count": requests.len(),
         "reconciliation_report_enabled": config.report_reconciliation,
         "reported_issue_count": report_responses.len(),
         "position_summaries": position_summaries(&positions),
         "open_order_summaries": open_order_summaries(&open_orders),
+        "order_history_summaries": open_order_summaries(&order_history),
         "fill_snapshot_enabled": config.include_fills,
         "fill_count": fills.len(),
         "fill_summaries": fill_summaries(&fills),
@@ -403,6 +657,9 @@ pub async fn run_reconciliation_snapshot_check_from_env() -> Result<Value> {
         "close_fill_writeback_apply_enabled": config.close_fill_writeback_apply,
         "close_fill_writeback_apply_count": close_fill_writeback_responses.len(),
         "close_fill_writeback_responses": close_fill_writeback_responses,
+        "account_snapshot_counts": account_snapshot_counts,
+        "account_snapshot_writeback_enabled": has_internal_secret,
+        "account_snapshot_writeback_response": account_snapshot_response,
         "source_refs": requests
             .iter()
             .filter_map(|request| request.source_ref.clone())
@@ -411,6 +668,21 @@ pub async fn run_reconciliation_snapshot_check_from_env() -> Result<Value> {
         "mutation_allowed": false,
         "report_result_allowed": false,
     }))
+}
+
+async fn report_exchange_account_snapshot(
+    client: &ExecutionTaskClient,
+    request: ExchangeAccountSnapshotReportRequest,
+) -> Result<ExchangeAccountSnapshotReportResponse> {
+    client
+        .report_exchange_account_snapshot(request)
+        .await
+        .map_err(|error| {
+            anyhow!(
+                "report exchange account snapshot failed: {}",
+                redact_error_message(error.to_string())
+            )
+        })
 }
 
 async fn apply_close_fill_writeback(
@@ -668,6 +940,96 @@ fn same_exchange_symbol(left: &str, right: &str) -> bool {
     left.trim().eq_ignore_ascii_case(right.trim())
 }
 
+fn exchange_account_snapshot_source_ref(config: &ReconciliationSnapshotCheckConfig) -> String {
+    let account_hash = anonymized_account_ref(&config.buyer_email);
+    let credential_ref = config
+        .credential_ref
+        .as_deref()
+        .map(safe_source_ref_component)
+        .unwrap_or_else(|| "cred_unknown".to_string());
+    format!(
+        "rq:acct:v1:ex={}:acct={}:cred={}:combo={}:task={}:sym={}",
+        config.exchange.as_str(),
+        account_hash,
+        credential_ref,
+        config.combo_id,
+        config.task_id,
+        safe_source_ref_component(&config.symbol),
+    )
+}
+
+fn anonymized_account_ref(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase();
+    let digest = rust_quant_common::utils::function::sha256(&normalized);
+    format!("email_sha256_{}", &digest[..16])
+}
+
+fn safe_source_ref_component(raw: &str) -> String {
+    let component: String = raw
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        .take(64)
+        .collect();
+    if component.is_empty() {
+        "unknown".to_string()
+    } else {
+        component
+    }
+}
+
+fn trimmed_optional(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn decimal_option(raw: Option<&str>) -> Option<f64> {
+    raw.and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite())
+}
+
+fn balance_equity_usdt(balance: &Balance, wallet_balance: Option<f64>) -> Option<f64> {
+    raw_number_field(
+        &balance.raw,
+        &["disEq", "usdtEquity", "usdt_equity", "usdValue"],
+    )
+    .or_else(|| {
+        let asset = balance.asset.trim().to_ascii_uppercase();
+        if matches!(asset.as_str(), "USDT" | "USDC" | "USD") {
+            wallet_balance
+        } else {
+            None
+        }
+    })
+}
+
+fn raw_number_field(value: &Value, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|key| {
+        let raw = value.get(*key)?;
+        raw.as_f64()
+            .or_else(|| raw.as_str()?.trim().parse::<f64>().ok())
+            .filter(|parsed| parsed.is_finite())
+    })
+}
+
+fn multiply_optional(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    let value = left? * right?;
+    value
+        .is_finite()
+        .then_some((value * 100_000_000.0).round() / 100_000_000.0)
+}
+
+fn timestamp_millis_to_naive_string(timestamp_millis: u64) -> Option<String> {
+    let timestamp_millis = i64::try_from(timestamp_millis).ok()?;
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_millis)
+        .map(|value| web_naive_datetime_string(value.naive_utc()))
+}
+
+fn web_naive_datetime_string(value: chrono::NaiveDateTime) -> String {
+    value.format("%Y-%m-%dT%H:%M:%S").to_string()
+}
+
 fn normalized_fill_side(fill: &Fill) -> Option<String> {
     fill.side
         .as_deref()
@@ -709,4 +1071,49 @@ fn active_open_order_status(status: Option<&str>) -> bool {
         normalized.as_str(),
         "canceled" | "cancelled" | "filled" | "closed" | "rejected" | "expired"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> ReconciliationSnapshotCheckConfig {
+        ReconciliationSnapshotCheckConfig {
+            buyer_email: "buyer@example.com".to_string(),
+            exchange: ExchangeId::Okx,
+            symbol: "BTC-USDT-SWAP".to_string(),
+            combo_id: 85,
+            task_id: 85,
+            credential_ref: Some("manual".to_string()),
+            report_reconciliation: false,
+            include_fills: true,
+            close_fill_writeback_apply: false,
+            close_fill_writeback_intent: None,
+        }
+    }
+
+    #[test]
+    fn account_snapshot_report_uses_web_datetime_contract() {
+        let request =
+            build_exchange_account_snapshot_report_request(&test_config(), &[], &[], &[], &[], &[])
+                .expect("account snapshot request");
+
+        let snapshot_at = request.snapshot_at.expect("snapshot_at");
+        assert!(
+            chrono::NaiveDateTime::parse_from_str(&snapshot_at, "%Y-%m-%dT%H:%M:%S").is_ok(),
+            "snapshot_at must use Web NaiveDateTime JSON contract, got {snapshot_at}"
+        );
+        assert!(
+            !snapshot_at.contains(' '),
+            "snapshot_at must not use chrono default space separator"
+        );
+    }
+
+    #[test]
+    fn exchange_timestamps_use_web_datetime_contract() {
+        let formatted =
+            timestamp_millis_to_naive_string(1_774_814_400_000).expect("valid timestamp millis");
+
+        assert_eq!(formatted, "2026-03-29T20:00:00");
+    }
 }

@@ -92,6 +92,18 @@ impl CandlePersistWorker {
             let time_interval = parts.last().unwrap();
             let inst_id = parts[..parts.len() - 1].join("_");
 
+            let original_count = candles.len();
+            let candles = dedupe_candles_by_ts(candles);
+            if candles.len() < original_count {
+                debug!(
+                    "合并重复K线: inst_id={}, time_interval={}, before={}, after={}",
+                    inst_id,
+                    time_interval,
+                    original_count,
+                    candles.len()
+                );
+            }
+
             debug!(
                 "批量写入K线: inst_id={}, time_interval={}, count={}",
                 inst_id,
@@ -112,5 +124,68 @@ impl CandlePersistWorker {
                 }
             }
         }
+    }
+}
+
+fn dedupe_candles_by_ts(candles: Vec<CandleOkxRespDto>) -> Vec<CandleOkxRespDto> {
+    let mut index_by_ts: HashMap<String, usize> = HashMap::with_capacity(candles.len());
+    let mut deduped = Vec::with_capacity(candles.len());
+
+    for candle in candles {
+        if let Some(index) = index_by_ts.get(&candle.ts).copied() {
+            deduped[index] = candle;
+        } else {
+            index_by_ts.insert(candle.ts.clone(), deduped.len());
+            deduped.push(candle);
+        }
+    }
+
+    deduped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candle(ts: &str, close: &str, confirm: &str) -> CandleOkxRespDto {
+        CandleOkxRespDto {
+            ts: ts.to_string(),
+            o: "1".to_string(),
+            h: "1".to_string(),
+            l: "1".to_string(),
+            c: close.to_string(),
+            v: "1".to_string(),
+            vol_ccy: "1".to_string(),
+            vol_ccy_quote: "1".to_string(),
+            confirm: confirm.to_string(),
+        }
+    }
+
+    #[test]
+    fn dedupe_candles_by_ts_keeps_latest_update_for_same_ts() {
+        let candles = vec![
+            candle("1000", "10", "0"),
+            candle("2000", "20", "0"),
+            candle("1000", "11", "1"),
+        ];
+
+        let deduped = dedupe_candles_by_ts(candles);
+
+        assert_eq!(deduped.len(), 2);
+        assert_eq!(deduped[0].ts, "1000");
+        assert_eq!(deduped[0].c, "11");
+        assert_eq!(deduped[0].confirm, "1");
+        assert_eq!(deduped[1].ts, "2000");
+    }
+
+    #[test]
+    fn dedupe_candles_by_ts_keeps_unique_candles_unchanged() {
+        let candles = vec![candle("1000", "10", "0"), candle("2000", "20", "1")];
+
+        let deduped = dedupe_candles_by_ts(candles);
+
+        assert_eq!(deduped.len(), 2);
+        assert_eq!(deduped[0].ts, "1000");
+        assert_eq!(deduped[1].ts, "2000");
     }
 }

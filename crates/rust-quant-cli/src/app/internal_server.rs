@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
+use crypto_exc_all::ExchangeId;
 use rust_quant_domain::Timeframe;
 use rust_quant_infrastructure::repositories::{PostgresCandleRepository, SqlxCandleRepository};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,7 @@ use crate::app::exchange_symbol_sync::{
 use rust_quant_orchestration::infra::strategy_config::BackTestConfig;
 use rust_quant_orchestration::workflow::backtest_runner;
 use rust_quant_services::market::{should_use_quant_core_candle_source, CandleService};
+use rust_quant_services::rust_quan_web::{run_account_snapshot_sync, AccountSnapshotSyncConfig};
 
 const DEFAULT_INTERNAL_ADDR: &str = "127.0.0.1:5322";
 const MAX_HEADER_BYTES: usize = 16 * 1024;
@@ -292,6 +294,43 @@ struct RawKlineSyncRequest {
     timeframe: String,
     #[serde(default)]
     limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawExchangeAccountSnapshotSyncRequest {
+    buyer_email: String,
+    exchange: String,
+    combos: Vec<RawExchangeAccountSnapshotSyncCombo>,
+    #[serde(default)]
+    include_fills: Option<bool>,
+    #[serde(default)]
+    report_reconciliation: Option<bool>,
+    #[serde(default)]
+    trigger_source: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawExchangeAccountSnapshotSyncCombo {
+    combo_id: i64,
+    symbol: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExchangeAccountSnapshotSyncRequest {
+    buyer_email: String,
+    exchange: ExchangeId,
+    combos: Vec<ExchangeAccountSnapshotSyncCombo>,
+    include_fills: bool,
+    report_reconciliation: bool,
+    trigger_source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExchangeAccountSnapshotSyncCombo {
+    combo_id: i64,
+    symbol: String,
 }
 
 pub async fn run_internal_server() -> Result<()> {
@@ -630,6 +669,65 @@ pub async fn handle_kline_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
     }
 }
 
+pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
+    let request = match exchange_account_snapshot_sync_request_from_body(body) {
+        Ok(request) => request,
+        Err(message) => return json_response(400, json!({ "error": message })),
+    };
+
+    let requested = request.combos.len();
+    let mut accepted = 0_usize;
+    let mut skipped = 0_usize;
+    for combo in request.combos.clone() {
+        if combo.symbol.trim().is_empty() || combo.combo_id <= 0 {
+            skipped += 1;
+            continue;
+        }
+
+        accepted += 1;
+        let config = AccountSnapshotSyncConfig {
+            buyer_email: request.buyer_email.clone(),
+            exchange: request.exchange,
+            symbol: combo.symbol,
+            combo_id: combo.combo_id,
+            task_id: combo.combo_id,
+            credential_ref: Some(format!(
+                "{}:{}",
+                safe_internal_ref_component(&request.trigger_source),
+                combo.combo_id
+            )),
+            report_reconciliation: request.report_reconciliation,
+            include_fills: request.include_fills,
+        };
+        tokio::spawn(async move {
+            match run_account_snapshot_sync(config).await {
+                Ok(result) => {
+                    info!(result = %result, "Core 账户快照异步同步完成");
+                }
+                Err(err) => {
+                    error!(error = %err, "Core 账户快照异步同步失败");
+                }
+            }
+        });
+    }
+
+    json_response(
+        202,
+        json!({
+            "status": "accepted",
+            "buyer_email": request.buyer_email,
+            "exchange": request.exchange.as_str(),
+            "requested": requested,
+            "accepted": accepted,
+            "skipped": skipped,
+            "include_fills": request.include_fills,
+            "report_reconciliation": request.report_reconciliation,
+            "mutation_allowed": false,
+            "place_order_allowed": false,
+        }),
+    )
+}
+
 pub async fn handle_exchange_symbol_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
     let request = if body.is_empty() {
         ExchangeSymbolSyncRequest {
@@ -713,6 +811,67 @@ pub fn kline_sync_request_from_body(body: &[u8]) -> Result<KlineSyncRequest, Str
     })
 }
 
+fn exchange_account_snapshot_sync_request_from_body(
+    body: &[u8],
+) -> Result<ExchangeAccountSnapshotSyncRequest, String> {
+    let request = serde_json::from_slice::<RawExchangeAccountSnapshotSyncRequest>(body)
+        .map_err(|err| format!("invalid json body: {err}"))?;
+    let buyer_email = request.buyer_email.trim().to_string();
+    if buyer_email.is_empty() {
+        return Err("buyer_email is required".to_string());
+    }
+    let exchange = ExchangeId::from_str(request.exchange.trim())
+        .map_err(|err| format!("unsupported exchange: {err}"))?;
+    if request.combos.is_empty() {
+        return Err("combos must include at least one item".to_string());
+    }
+
+    let combos = request
+        .combos
+        .into_iter()
+        .map(|combo| {
+            let symbol = combo.symbol.trim().to_ascii_uppercase();
+            if combo.combo_id <= 0 {
+                return Err("combo_id must be a positive integer".to_string());
+            }
+            if symbol.is_empty() {
+                return Err("symbol is required".to_string());
+            }
+            Ok(ExchangeAccountSnapshotSyncCombo {
+                combo_id: combo.combo_id,
+                symbol,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(ExchangeAccountSnapshotSyncRequest {
+        buyer_email,
+        exchange,
+        combos,
+        include_fills: request.include_fills.unwrap_or(true),
+        report_reconciliation: request.report_reconciliation.unwrap_or(false),
+        trigger_source: request
+            .trigger_source
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "web_api_credential_ready".to_string()),
+    })
+}
+
+fn safe_internal_ref_component(raw: &str) -> String {
+    let component: String = raw
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        .take(48)
+        .collect();
+    if component.is_empty() {
+        "web_api_credential_ready".to_string()
+    } else {
+        component
+    }
+}
+
 async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     let request = read_request(&mut stream).await?;
     let route = route_path(&request.path);
@@ -737,6 +896,10 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
         }
         ("POST", "/internal/klines/sync") | ("POST", "/api/internal/klines/sync") => {
             handle_kline_sync_body(&request.body).await
+        }
+        ("POST", "/internal/exchange-account-snapshots/sync")
+        | ("POST", "/api/internal/exchange-account-snapshots/sync") => {
+            handle_exchange_account_snapshot_sync_body(&request.body).await
         }
         ("GET", "/internal/market-rank-events") | ("GET", "/api/internal/market-rank-events") => {
             handle_market_rank_events_path(&request.path).await

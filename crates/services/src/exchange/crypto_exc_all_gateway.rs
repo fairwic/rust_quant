@@ -324,6 +324,20 @@ impl CryptoExcAllGateway {
         }
     }
 
+    pub async fn order_history(
+        &self,
+        exchange: ExchangeId,
+        query: OrderListQuery,
+    ) -> Result<Vec<Order>> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.orders(exchange)?.history(query).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run order history query",
+            }),
+        }
+    }
+
     pub async fn fills(&self, exchange: ExchangeId, query: FillListQuery) -> Result<Vec<Fill>> {
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.fills(exchange)?.list(query).await,
