@@ -1,4 +1,12 @@
-const EXECUTION_WORKER: &str = include_str!("../src/rust_quan_web/execution_worker.rs");
+const EXECUTION_WORKER: &str = concat!(
+    include_str!("../src/rust_quan_web/execution_worker.rs"),
+    "\n",
+    include_str!("../src/rust_quan_web/execution_worker_orchestration_section.rs"),
+    "\n",
+    include_str!("../src/rust_quan_web/execution_worker_live_execution_section.rs"),
+    "\n",
+    include_str!("../src/rust_quan_web/execution_worker_live_execution_support_section.rs"),
+);
 const EXECUTION_WORKER_RECONCILIATION: &str =
     include_str!("../src/rust_quan_web/execution_worker_reconciliation_section.rs");
 

@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use crypto_exc_all::ExchangeId;
 use rust_quant_services::rust_quan_web::{
-    ExecutionTaskClient, ExecutionTaskConfig, ExecutionWorker, ExecutionWorkerConfig,
-    PostgresExecutionAuditRepository,
+    ExecutionAuditRepository, ExecutionTaskClient, ExecutionTaskConfig, ExecutionWorker,
+    ExecutionWorkerConfig, PostgresExecutionAuditRepository,
 };
 use rust_quant_services::CryptoExcAllGateway;
 use serde_json::{json, Value};
@@ -47,6 +47,13 @@ async fn dry_run_worker_writes_checkpoint_and_exchange_audit_to_quant_core() -> 
     let (base_url, server) = spawn_quant_web_stub(task_id, client_order_id.clone()).await?;
     let audit_repository = PostgresExecutionAuditRepository::from_env()?
         .ok_or_else(|| anyhow!("Postgres audit repository was not configured from env"))?;
+    let preflight_audit_rows_before = count_live_audit_preflight_rows(&pool).await?;
+    audit_repository.verify_live_audit_ready().await?;
+    let preflight_audit_rows_after = count_live_audit_preflight_rows(&pool).await?;
+    assert_eq!(
+        preflight_audit_rows_after, preflight_audit_rows_before,
+        "live audit readiness preflight should roll back probe writes"
+    );
     let worker = ExecutionWorker::new(
         ExecutionTaskClient::new(ExecutionTaskConfig {
             base_url,
@@ -81,6 +88,19 @@ async fn dry_run_worker_writes_checkpoint_and_exchange_audit_to_quant_core() -> 
     assert_exchange_audit(&pool, &request_id, task_id, &client_order_id).await?;
 
     Ok(())
+}
+
+async fn count_live_audit_preflight_rows(pool: &PgPool) -> Result<i64> {
+    sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM exchange_request_audit_logs
+        WHERE endpoint = 'live_audit_preflight'
+        "#,
+    )
+    .fetch_one(pool)
+    .await
+    .context("count live audit preflight rows")
 }
 
 fn smoke_enabled() -> bool {
@@ -293,7 +313,7 @@ async fn spawn_quant_web_stub(
 fn leased_task(task_id: i64, client_order_id: &str) -> Value {
     json!({
         "id": task_id,
-        "news_signal_id": 7,
+        "news_signal_id": null,
         "combo_id": 9,
         "buyer_email": "buyer@example.com",
         "strategy_slug": "news_momentum",

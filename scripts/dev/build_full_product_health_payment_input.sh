@@ -144,6 +144,7 @@ def append_alert(payload: dict[str, Any], severity: str, code: str, message: str
 
 def skipped_payload(code: str, message: str) -> dict[str, Any]:
     payload = base_payload("warn", "skipped", False)
+    payload["contract_state"] = "skipped"
     payload["skipped"] = True
     append_alert(payload, "INFO", code, message)
     return payload
@@ -151,6 +152,7 @@ def skipped_payload(code: str, message: str) -> dict[str, Any]:
 
 def degraded_payload(code: str, message: str) -> dict[str, Any]:
     payload = base_payload("warn", "quant_web_payment_readonly_db", True)
+    payload["contract_state"] = "query_failed"
     payload["query_failed"] = True
     append_alert(payload, "P1", code, message)
     return payload
@@ -268,6 +270,7 @@ SELECT json_build_object(
         END,
     'source', 'quant_web_payment_readonly_db',
     'database_engine', 'postgresql',
+    'contract_state', 'real_count',
     'read_only_input', TRUE,
     'lookback_secs', (SELECT lookback_secs FROM params),
     'confirmation_timeout_secs', (SELECT confirmation_timeout_secs FROM params),

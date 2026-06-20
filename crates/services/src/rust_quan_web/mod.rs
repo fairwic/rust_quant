@@ -7,6 +7,7 @@ mod execution_protective_outcome_check;
 mod execution_reconciliation_snapshot_check;
 mod execution_rollback;
 mod execution_task_client;
+mod execution_task_contract;
 mod execution_worker;
 mod market_velocity_live_readiness;
 
@@ -27,15 +28,15 @@ pub use execution_reconciliation_snapshot_check::{
     run_reconciliation_snapshot_check_from_env, AccountSnapshotSyncConfig,
     ReconciliationSnapshotCheckConfig,
 };
-pub use execution_task_client::{
+pub use execution_task_client::{ExecutionTaskClient, ExecutionTaskConfig};
+pub use execution_task_contract::{
     ExchangeAccountOrderSnapshotInput, ExchangeAccountPositionSnapshotInput,
     ExchangeAccountSnapshotReportRequest, ExchangeAccountSnapshotReportResponse,
     ExchangeAccountTradeSnapshotInput, ExchangeCloseFillWritebackRequest,
     ExchangeCloseFillWritebackResponse, ExchangeOrderResult, ExchangeReconciliationIssueType,
     ExchangeReconciliationReportRequest, ExchangeReconciliationReportResponse, ExecutionTask,
-    ExecutionTaskClient, ExecutionTaskConfig, ExecutionTaskConfirmationLease,
-    ExecutionTaskConfirmationLeaseItem, ExecutionTaskLease, ExecutionTaskLeaseRequest,
-    ExecutionTaskReportRequest, ExecutionTaskReportResponse,
+    ExecutionTaskConfirmationLease, ExecutionTaskConfirmationLeaseItem, ExecutionTaskLease,
+    ExecutionTaskLeaseRequest, ExecutionTaskReportRequest, ExecutionTaskReportResponse,
     MarketVelocityExecutionTaskCreationPreviewCheck,
     MarketVelocityExecutionTaskCreationPreviewRequest,
     MarketVelocityExecutionTaskCreationPreviewResponse,

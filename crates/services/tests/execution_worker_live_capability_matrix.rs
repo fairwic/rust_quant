@@ -82,9 +82,12 @@ fn matrix_declares_unwired_exchanges_as_unsupported_without_guessing() {
         LiveWorkerCapabilityStatus::Unsupported
     );
 
-    for exchange in ["bybit", "gate"] {
+    for (exchange, worker_exchange) in [
+        ("bybit", WorkerLiveExchange::Bybit),
+        ("gate", WorkerLiveExchange::Gate),
+    ] {
         let unknown = worker_live_capability_for_exchange(exchange);
-        assert_eq!(unknown.exchange, WorkerLiveExchange::Unknown);
+        assert_eq!(unknown.exchange, worker_exchange);
         assert_eq!(unknown.exchange_name, exchange);
         assert_eq!(
             unknown.protection_placement,
@@ -112,5 +115,8 @@ fn matrix_lists_each_worker_exchange_once_in_display_order() {
         .map(|capability| capability.exchange_name.as_str())
         .collect();
 
-    assert_eq!(names, vec!["binance", "okx", "bitget", "hyperliquid"]);
+    assert_eq!(
+        names,
+        vec!["binance", "okx", "bitget", "bybit", "gate", "hyperliquid"]
+    );
 }

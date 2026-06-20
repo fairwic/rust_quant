@@ -57,6 +57,10 @@ pub(crate) struct CapturingAuditRepository {
 
 #[async_trait]
 impl ExecutionAuditRepository for CapturingAuditRepository {
+    fn can_audit_live_mutations(&self) -> bool {
+        true
+    }
+
     async fn upsert_worker_checkpoint(&self, checkpoint: &ExecutionWorkerCheckpoint) -> Result<()> {
         self.checkpoints.lock().unwrap().push(checkpoint.clone());
         Ok(())
@@ -79,5 +83,26 @@ impl ExecutionAuditRepository for CapturingAuditRepository {
         let mut candidates = self.report_replay_candidates.lock().unwrap();
         let take = usize::min(candidates.len(), limit as usize);
         Ok(candidates.drain(..take).collect())
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct FailingAuditRepository;
+
+#[async_trait]
+impl ExecutionAuditRepository for FailingAuditRepository {
+    fn can_audit_live_mutations(&self) -> bool {
+        true
+    }
+
+    async fn upsert_worker_checkpoint(
+        &self,
+        _checkpoint: &ExecutionWorkerCheckpoint,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn insert_exchange_request_audit(&self, _audit: &ExchangeRequestAuditLog) -> Result<()> {
+        Err(anyhow!("audit write unavailable"))
     }
 }

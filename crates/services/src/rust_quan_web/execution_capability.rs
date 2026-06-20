@@ -6,6 +6,8 @@ pub enum WorkerLiveExchange {
     Binance,
     Okx,
     Bitget,
+    Bybit,
+    Gate,
     Hyperliquid,
     Unknown,
 }
@@ -41,7 +43,7 @@ pub struct WorkerLiveCapability {
 }
 
 pub fn worker_live_capability_matrix() -> Vec<WorkerLiveCapability> {
-    ["binance", "okx", "bitget", "hyperliquid"]
+    ["binance", "okx", "bitget", "bybit", "gate", "hyperliquid"]
         .into_iter()
         .map(worker_live_capability_for_exchange)
         .collect()
@@ -68,6 +70,8 @@ pub fn worker_live_capability_for_exchange(exchange: &str) -> WorkerLiveCapabili
             ProtectionPlacementMode::AttachedStopLoss,
             LiveWorkerCapabilityStatus::Unsupported,
         ),
+        "bybit" => unsupported_exchange_capability(WorkerLiveExchange::Bybit, exchange_name),
+        "gate" => unsupported_exchange_capability(WorkerLiveExchange::Gate, exchange_name),
         "hyperliquid" => {
             unsupported_exchange_capability(WorkerLiveExchange::Hyperliquid, exchange_name)
         }
