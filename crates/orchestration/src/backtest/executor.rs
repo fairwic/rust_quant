@@ -256,7 +256,7 @@ impl BacktestExecutor {
         &self,
         inst_id: &str,
         period: &str,
-        mut strategy: S,
+        strategy: S,
         risk_strategy_config: BasicRiskStrategyConfig,
         source_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64>

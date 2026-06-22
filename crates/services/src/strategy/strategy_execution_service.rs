@@ -567,6 +567,7 @@ impl StrategyExecutionService {
     /// - `Ok(true)` - 当前处于经济事件窗口，建议等待
     /// - `Ok(false)` - 当前无活跃经济事件，可正常交易
     /// - `Err(_)` - 查询失败（建议忽略错误，继续交易）
+    #[allow(dead_code)]
     async fn check_economic_event_window(&self) -> Result<bool> {
         use crate::market::EconomicEventQueryService;
 

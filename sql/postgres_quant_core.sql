@@ -1335,14 +1335,18 @@ CREATE INDEX IF NOT EXISTS idx_market_velocity_episodes_recent
     ON market_velocity_episodes (last_seen_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_market_velocity_episodes_symbol_recent
     ON market_velocity_episodes (symbol, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_market_velocity_episodes_active_stale
+    ON market_velocity_episodes (LOWER(exchange), last_seen_at)
+    WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_market_velocity_episodes_backtest_active
     ON market_velocity_episodes (
+        status,
         event_type,
         COALESCE(max_delta_rank, latest_delta_rank, 0),
         COALESCE(best_new_rank, latest_new_rank),
         started_at
     )
-    WHERE status = 'active' AND current_price IS NOT NULL;
+    WHERE status IN ('active', 'closed') AND current_price IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_market_velocity_episodes_last_rank_event
     ON market_velocity_episodes (last_rank_event_id)
     WHERE last_rank_event_id IS NOT NULL;

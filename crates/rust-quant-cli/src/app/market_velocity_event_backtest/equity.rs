@@ -1,4 +1,10 @@
-use super::{BacktestCandle, ConfirmedEvent, MarketVelocityEventBacktestArgs};
+use super::{
+    runner_exit_for_target, BacktestCandle, ConfirmedEvent, MarketVelocityEventBacktestArgs,
+    RunnerExit,
+};
+use anyhow::Result;
+use chrono::{FixedOffset, TimeZone, Utc};
+use rust_quant_domain::entities::BacktestDetail;
 use rust_quant_domain::SignalDirection;
 use rust_quant_strategies::framework::backtest::{
     run_indicator_strategy_backtest, BasicRiskStrategyConfig, IndicatorStrategyBacktest,
@@ -70,15 +76,34 @@ pub struct FrameworkEquityTradeReport {
     pub event_id: i64,
     pub detected_at: String,
     pub entry_ts: i64,
+    pub signal_open_position_time: String,
     pub open_position_time: String,
     pub close_position_time: Option<String>,
+    pub open_price: f64,
+    pub close_price: Option<f64>,
     pub close_type: String,
+    pub signal_status: i32,
     pub profit_loss: f64,
+    pub quantity: f64,
     pub outcome: &'static str,
     pub trigger: String,
     pub new_rank: i32,
     pub delta_rank: i32,
     pub price_change_pct: f64,
+    pub close_legs: Vec<FrameworkEquityCloseLegReport>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrameworkEquityCloseLegReport {
+    pub close_ts: i64,
+    pub close_position_time: String,
+    pub close_price: f64,
+    pub close_type: String,
+    pub profit_loss: f64,
+    pub quantity: f64,
+    pub full_close: bool,
+    pub exit_reason: String,
+    pub result_r: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -110,6 +135,7 @@ struct ReplayActivePosition {
     event_id: i64,
     trigger: String,
     profit_protected: bool,
+    observed_candles: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,6 +143,9 @@ struct ReplayOpenTrade {
     event_id: i64,
     trigger: String,
     open_position_time: String,
+    open_price: f64,
+    quantity: f64,
+    signal_status: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +155,7 @@ struct MarketVelocityReplayStrategy {
     target_r: f64,
     profit_protect_after_r: Option<f64>,
     profit_protect_stop_r: f64,
+    early_exit_no_profit_candles: Option<usize>,
     active_position: Option<ReplayActivePosition>,
 }
 
@@ -135,6 +165,20 @@ struct ClosedTradeStats {
     losses: usize,
     returns: Vec<f64>,
     max_drawdown_pct: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RunnerReplayTrade {
+    event_id: i64,
+    open_position_time: String,
+    close_position_time: String,
+    open_price: f64,
+    close_price: f64,
+    quantity: f64,
+    profit_loss: f64,
+    close_type: String,
+    result_r: f64,
+    close_legs: Vec<FrameworkEquityCloseLegReport>,
 }
 
 pub fn build_framework_equity_report(
@@ -159,6 +203,33 @@ pub fn build_framework_equity_report(
         else {
             continue;
         };
+        if let Some(runner) = runner_exit_for_target(args, target_r) {
+            let trades = build_runner_replay_trades(
+                confirmed
+                    .iter()
+                    .filter(|event| event.event.symbol == symbol)
+                    .cloned()
+                    .collect(),
+                candles,
+                target_r,
+                args,
+                runner,
+            );
+            let closed_stats = analyze_runner_trades(&trades);
+            let profit = trades.iter().map(|trade| trade.profit_loss).sum::<f64>();
+            all_returns.extend(closed_stats.returns.iter().copied());
+            symbol_reports.push(FrameworkEquitySymbolReport {
+                symbol,
+                open_trades: trades.len(),
+                final_fund: INITIAL_FUND_PER_SYMBOL + profit,
+                profit,
+                wins: closed_stats.wins,
+                losses: closed_stats.losses,
+                trade_sharpe: trade_sharpe(&closed_stats.returns),
+                max_drawdown_pct: closed_stats.max_drawdown_pct,
+            });
+            continue;
+        }
         let strategy = MarketVelocityReplayStrategy::new(
             confirmed
                 .iter()
@@ -169,6 +240,7 @@ pub fn build_framework_equity_report(
             target_r,
             args.profit_protect_after_r,
             args.profit_protect_stop_r,
+            args.early_exit_no_profit_candles,
         );
         let candle_items = candles.iter().map(to_candle_item).collect::<Vec<_>>();
         let risk_config = BasicRiskStrategyConfig {
@@ -483,6 +555,45 @@ pub fn build_framework_equity_trade_reports(
         else {
             continue;
         };
+        if let Some(runner) = runner_exit_for_target(args, target_r) {
+            let runner_trades = build_runner_replay_trades(
+                confirmed
+                    .iter()
+                    .filter(|event| event.event.symbol == symbol)
+                    .cloned()
+                    .collect(),
+                candles,
+                target_r,
+                args,
+                runner,
+            );
+            reports.extend(runner_trades.into_iter().filter_map(|trade| {
+                let event = confirmed_by_event_id.get(&trade.event_id)?;
+                Some(FrameworkEquityTradeReport {
+                    target_r,
+                    symbol: symbol.clone(),
+                    event_id: trade.event_id,
+                    detected_at: event.event.detected_at.clone(),
+                    entry_ts: event.entry_ts,
+                    signal_open_position_time: timestamp_ms_to_shanghai_datetime(event.event.ts),
+                    open_position_time: trade.open_position_time,
+                    close_position_time: Some(trade.close_position_time),
+                    open_price: trade.open_price,
+                    close_price: Some(trade.close_price),
+                    close_type: trade.close_type,
+                    signal_status: 0,
+                    profit_loss: trade.profit_loss,
+                    quantity: trade.quantity,
+                    outcome: trade_outcome_label(trade.profit_loss),
+                    trigger: event.trigger.clone(),
+                    new_rank: event.event.new_rank,
+                    delta_rank: event.event.delta_rank,
+                    price_change_pct: event.event.price_change_pct,
+                    close_legs: trade.close_legs,
+                })
+            }));
+            continue;
+        }
         let strategy = MarketVelocityReplayStrategy::new(
             confirmed
                 .iter()
@@ -493,6 +604,7 @@ pub fn build_framework_equity_trade_reports(
             target_r,
             args.profit_protect_after_r,
             args.profit_protect_stop_r,
+            args.early_exit_no_profit_candles,
         );
         let candle_items = candles.iter().map(to_candle_item).collect::<Vec<_>>();
         let risk_config = BasicRiskStrategyConfig {
@@ -521,21 +633,316 @@ pub fn build_framework_equity_trade_reports(
                 event_id: open.event_id,
                 detected_at: event.event.detected_at.clone(),
                 entry_ts: event.entry_ts,
+                signal_open_position_time: timestamp_ms_to_shanghai_datetime(event.event.ts),
                 open_position_time: open.open_position_time,
                 close_position_time: record.close_position_time.clone(),
-                close_type: record.close_type.clone(),
+                open_price: open.open_price,
+                close_price: record.close_price,
+                close_type: framework_close_type(record),
+                signal_status: record.signal_status,
                 profit_loss: record.profit_loss,
+                quantity: if record.quantity > 0.0 {
+                    record.quantity
+                } else {
+                    open.quantity
+                },
                 outcome: trade_outcome_label(record.profit_loss),
                 trigger: open.trigger,
                 new_rank: event.event.new_rank,
                 delta_rank: event.event.delta_rank,
                 price_change_pct: event.event.price_change_pct,
+                close_legs: Vec::new(),
             });
         }
     }
 
     reports.sort_by_key(|report| (report.entry_ts, report.event_id));
     reports
+}
+
+fn framework_close_type(record: &TradeRecord) -> String {
+    if !record.close_type.starts_with("反向信号平仓") {
+        return record.close_type.clone();
+    }
+    let Some(value) = record
+        .signal_value
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+    else {
+        return record.close_type.clone();
+    };
+    value
+        .get("exit_reason")
+        .and_then(Value::as_str)
+        .unwrap_or(&record.close_type)
+        .to_string()
+}
+
+fn build_runner_replay_trades(
+    events: Vec<ConfirmedEvent>,
+    candles: &[BacktestCandle],
+    target_r: f64,
+    args: &MarketVelocityEventBacktestArgs,
+    runner: RunnerExit,
+) -> Vec<RunnerReplayTrade> {
+    let mut entries_by_ts = events
+        .into_iter()
+        .map(|event| (event.entry_ts, event))
+        .collect::<BTreeMap<_, _>>();
+    if entries_by_ts.is_empty() || candles.is_empty() {
+        return Vec::new();
+    }
+
+    let mut trades = Vec::new();
+    let mut locked_until = i64::MIN;
+    for (entry_ts, event) in std::mem::take(&mut entries_by_ts) {
+        if entry_ts <= locked_until {
+            continue;
+        }
+        let Some(entry_idx) = candles.iter().position(|candle| candle.ts == entry_ts) else {
+            continue;
+        };
+        let Some(trade) = simulate_framework_runner_trade(
+            candles,
+            entry_idx,
+            &event,
+            target_r,
+            args.stop_loss_pct,
+            runner,
+        ) else {
+            continue;
+        };
+        locked_until = trade_exit_ts(&trade);
+        trades.push(trade);
+    }
+    trades
+}
+
+fn simulate_framework_runner_trade(
+    candles: &[BacktestCandle],
+    entry_idx: usize,
+    event: &ConfirmedEvent,
+    target_r: f64,
+    stop_loss_pct: f64,
+    runner: RunnerExit,
+) -> Option<RunnerReplayTrade> {
+    let entry_price = event.entry_price;
+    let quantity = INITIAL_FUND_PER_SYMBOL / entry_price;
+    let stop_price = entry_price * (1.0 - stop_loss_pct);
+    let target_price = entry_price * (1.0 + stop_loss_pct * target_r);
+    let runner_target_price = entry_price * (1.0 + stop_loss_pct * runner.target_r);
+    let runner_stop_price = entry_price * (1.0 + stop_loss_pct * runner.stop_r);
+    let base_fraction = 1.0 - runner.fraction;
+    let base_quantity = quantity * base_fraction;
+    let runner_quantity = quantity * runner.fraction;
+    let open_position_time = timestamp_ms_to_shanghai_datetime(event.entry_ts);
+    let mut base_leg: Option<FrameworkEquityCloseLegReport> = None;
+    let mut last_seen: Option<&BacktestCandle> = None;
+
+    for candle in candles.iter().skip(entry_idx) {
+        last_seen = Some(candle);
+        if base_leg.is_none() {
+            let hit_stop = candle.low <= stop_price;
+            let hit_target = candle.high >= target_price;
+            if hit_stop && hit_target {
+                return Some(build_single_leg_runner_trade(
+                    event,
+                    &open_position_time,
+                    entry_price,
+                    quantity,
+                    stop_price,
+                    candle.ts,
+                    "both_hit_stop_first",
+                    -1.0,
+                ));
+            }
+            if hit_stop {
+                return Some(build_single_leg_runner_trade(
+                    event,
+                    &open_position_time,
+                    entry_price,
+                    quantity,
+                    stop_price,
+                    candle.ts,
+                    "stop_hit",
+                    -1.0,
+                ));
+            }
+            if hit_target {
+                base_leg = Some(build_close_leg(
+                    event.entry_price,
+                    base_quantity,
+                    target_price,
+                    candle.ts,
+                    "runner_base_target_hit",
+                    target_r,
+                    false,
+                ));
+            }
+            continue;
+        }
+
+        let hit_stop = candle.low <= runner_stop_price;
+        let hit_target = candle.high >= runner_target_price;
+        let (close_price, exit_reason, result_r) = if hit_stop && hit_target {
+            (runner_stop_price, "runner_stop_first", runner.stop_r)
+        } else if hit_target {
+            (runner_target_price, "runner_target_hit", runner.target_r)
+        } else if hit_stop {
+            (runner_stop_price, "runner_stop_hit", runner.stop_r)
+        } else {
+            continue;
+        };
+        let runner_leg = build_close_leg(
+            event.entry_price,
+            runner_quantity,
+            close_price,
+            candle.ts,
+            exit_reason,
+            result_r,
+            true,
+        );
+        return Some(build_multi_leg_runner_trade(
+            event,
+            open_position_time,
+            entry_price,
+            quantity,
+            vec![base_leg.expect("base leg exists"), runner_leg],
+        ));
+    }
+
+    let last_seen = last_seen?;
+    if let Some(base_leg) = base_leg {
+        let close_r = r_for_price(entry_price, stop_loss_pct, last_seen.close);
+        let runner_leg = build_close_leg(
+            entry_price,
+            runner_quantity,
+            last_seen.close,
+            last_seen.ts,
+            "runner_forward_data_incomplete",
+            close_r,
+            true,
+        );
+        return Some(build_multi_leg_runner_trade(
+            event,
+            open_position_time,
+            entry_price,
+            quantity,
+            vec![base_leg, runner_leg],
+        ));
+    }
+
+    let close_r = r_for_price(entry_price, stop_loss_pct, last_seen.close);
+    Some(build_single_leg_runner_trade(
+        event,
+        &open_position_time,
+        entry_price,
+        quantity,
+        last_seen.close,
+        last_seen.ts,
+        "forward_data_incomplete",
+        close_r,
+    ))
+}
+
+fn build_single_leg_runner_trade(
+    event: &ConfirmedEvent,
+    open_position_time: &str,
+    entry_price: f64,
+    quantity: f64,
+    close_price: f64,
+    close_ts: i64,
+    exit_reason: &str,
+    result_r: f64,
+) -> RunnerReplayTrade {
+    build_multi_leg_runner_trade(
+        event,
+        open_position_time.to_string(),
+        entry_price,
+        quantity,
+        vec![build_close_leg(
+            entry_price,
+            quantity,
+            close_price,
+            close_ts,
+            exit_reason,
+            result_r,
+            true,
+        )],
+    )
+}
+
+fn build_multi_leg_runner_trade(
+    event: &ConfirmedEvent,
+    open_position_time: String,
+    entry_price: f64,
+    quantity: f64,
+    close_legs: Vec<FrameworkEquityCloseLegReport>,
+) -> RunnerReplayTrade {
+    let close_leg = close_legs
+        .last()
+        .expect("runner replay trade should have at least one close leg");
+    let profit_loss = close_legs.iter().map(|leg| leg.profit_loss).sum::<f64>();
+    let close_type = close_legs
+        .iter()
+        .map(|leg| leg.close_type.clone())
+        .collect::<Vec<_>>()
+        .join("+");
+    RunnerReplayTrade {
+        event_id: event.event.id,
+        open_position_time,
+        close_position_time: close_leg.close_position_time.clone(),
+        open_price: entry_price,
+        close_price: close_leg.close_price,
+        quantity,
+        profit_loss,
+        close_type,
+        result_r: close_legs
+            .iter()
+            .map(|leg| leg.result_r * leg.quantity / quantity)
+            .sum(),
+        close_legs,
+    }
+}
+
+fn build_close_leg(
+    entry_price: f64,
+    quantity: f64,
+    close_price: f64,
+    close_ts: i64,
+    exit_reason: &str,
+    result_r: f64,
+    full_close: bool,
+) -> FrameworkEquityCloseLegReport {
+    let raw_profit = quantity * (close_price - entry_price);
+    let fee = if raw_profit != 0.0 {
+        quantity * entry_price * 0.0007
+    } else {
+        0.0
+    };
+    FrameworkEquityCloseLegReport {
+        close_ts,
+        close_position_time: timestamp_ms_to_shanghai_datetime(close_ts),
+        close_price,
+        close_type: exit_reason.to_string(),
+        profit_loss: raw_profit - fee,
+        quantity,
+        full_close,
+        exit_reason: exit_reason.to_string(),
+        result_r,
+    }
+}
+
+fn trade_exit_ts(trade: &RunnerReplayTrade) -> i64 {
+    trade
+        .close_legs
+        .last()
+        .map(|leg| leg.close_ts)
+        .unwrap_or(i64::MAX)
+}
+
+fn r_for_price(entry_price: f64, stop_loss_pct: f64, price: f64) -> f64 {
+    (price - entry_price) / (entry_price * stop_loss_pct)
 }
 
 fn push_feature_report<F>(
@@ -580,7 +987,190 @@ fn parse_replay_open_trade(record: &TradeRecord) -> Option<ReplayOpenTrade> {
         event_id,
         trigger,
         open_position_time: record.open_position_time.clone(),
+        open_price: record.open_price,
+        quantity: record.quantity,
+        signal_status: record.signal_status,
     })
+}
+
+pub fn build_market_velocity_backtest_details(
+    trade: &FrameworkEquityTradeReport,
+    back_test_id: i64,
+    args: &MarketVelocityEventBacktestArgs,
+) -> Result<Vec<BacktestDetail>> {
+    let close_position_time = trade
+        .close_position_time
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("market velocity trade missing close_position_time"))?;
+    let signal_value = market_velocity_detail_signal_value(trade, args).to_string();
+    let signal_result = "market_velocity_framework_replay".to_string();
+    let strategy_type = market_velocity_strategy_type(args).to_string();
+    let open_price = trade.open_price.to_string();
+    let quantity = trade.quantity.to_string();
+    let (win_nums, loss_nums) = match trade.outcome {
+        "win" => (1, 0),
+        "loss" => (0, 1),
+        _ => (0, 0),
+    };
+
+    let mut details = vec![BacktestDetail::new(
+        back_test_id,
+        "long".to_string(),
+        strategy_type.clone(),
+        trade.symbol.clone(),
+        "15m".to_string(),
+        trade.open_position_time.clone(),
+        Some(trade.signal_open_position_time.clone()),
+        trade.signal_status,
+        trade.open_position_time.clone(),
+        open_price.clone(),
+        None,
+        "0".to_string(),
+        quantity.clone(),
+        "false".to_string(),
+        String::new(),
+        0,
+        0,
+        signal_value.clone(),
+        signal_result.clone(),
+        None,
+        None,
+    )];
+
+    if trade.close_legs.is_empty() {
+        details.push(BacktestDetail::new(
+            back_test_id,
+            "close".to_string(),
+            strategy_type,
+            trade.symbol.clone(),
+            "15m".to_string(),
+            trade.open_position_time.clone(),
+            Some(trade.signal_open_position_time.clone()),
+            trade.signal_status,
+            close_position_time,
+            open_price,
+            trade.close_price.map(|value| value.to_string()),
+            trade.profit_loss.to_string(),
+            quantity,
+            "true".to_string(),
+            trade.close_type.clone(),
+            win_nums,
+            loss_nums,
+            signal_value,
+            signal_result,
+            None,
+            None,
+        ));
+        return Ok(details);
+    }
+
+    for leg in &trade.close_legs {
+        let leg_signal_value =
+            market_velocity_detail_signal_value_for_leg(trade, args, leg).to_string();
+        let (leg_win_nums, leg_loss_nums) = if leg.full_close {
+            (win_nums, loss_nums)
+        } else {
+            (0, 0)
+        };
+        details.push(BacktestDetail::new(
+            back_test_id,
+            "close".to_string(),
+            strategy_type.clone(),
+            trade.symbol.clone(),
+            "15m".to_string(),
+            trade.open_position_time.clone(),
+            Some(trade.signal_open_position_time.clone()),
+            trade.signal_status,
+            leg.close_position_time.clone(),
+            open_price.clone(),
+            Some(leg.close_price.to_string()),
+            leg.profit_loss.to_string(),
+            leg.quantity.to_string(),
+            leg.full_close.to_string(),
+            leg.close_type.clone(),
+            leg_win_nums,
+            leg_loss_nums,
+            leg_signal_value,
+            signal_result.clone(),
+            None,
+            None,
+        ));
+    }
+
+    Ok(details)
+}
+
+pub fn market_velocity_strategy_type(args: &MarketVelocityEventBacktestArgs) -> &'static str {
+    match args.event_source {
+        super::MarketVelocityEventSource::Episodes => "market_velocity_episode",
+        super::MarketVelocityEventSource::RawEvents => "market_velocity_raw_events",
+        super::MarketVelocityEventSource::RawState => "market_velocity_raw_state",
+    }
+}
+
+fn market_velocity_detail_signal_value(
+    trade: &FrameworkEquityTradeReport,
+    args: &MarketVelocityEventBacktestArgs,
+) -> Value {
+    json!({
+        "source": "market_velocity_framework_replay",
+        "rank_event_id": trade.event_id,
+        "detected_at": &trade.detected_at,
+        "entry_ts": trade.entry_ts,
+        "entry_trigger": &trade.trigger,
+        "new_rank": trade.new_rank,
+        "delta_rank": trade.delta_rank,
+        "price_change_pct": trade.price_change_pct,
+        "target_r": trade.target_r,
+        "stop_loss_pct": args.stop_loss_pct,
+        "entry_rule_version": &args.paper_outcome_entry_rule_version,
+        "event_source": match args.event_source {
+            super::MarketVelocityEventSource::Episodes => "episodes",
+            super::MarketVelocityEventSource::RawEvents => "raw_events",
+            super::MarketVelocityEventSource::RawState => "raw_state",
+        },
+    })
+}
+
+fn market_velocity_detail_signal_value_for_leg(
+    trade: &FrameworkEquityTradeReport,
+    args: &MarketVelocityEventBacktestArgs,
+    leg: &FrameworkEquityCloseLegReport,
+) -> Value {
+    let mut value = market_velocity_detail_signal_value(trade, args);
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "exit_reason".to_string(),
+            Value::String(leg.exit_reason.clone()),
+        );
+        object.insert(
+            "runner_target_r".to_string(),
+            args.runner_target_r.map_or(Value::Null, Value::from),
+        );
+        object.insert(
+            "runner_fraction".to_string(),
+            Value::from(args.runner_fraction),
+        );
+        object.insert("runner_stop_r".to_string(), Value::from(args.runner_stop_r));
+        object.insert("leg_result_r".to_string(), Value::from(leg.result_r));
+        object.insert("leg_full_close".to_string(), Value::from(leg.full_close));
+    }
+    value
+}
+
+fn timestamp_ms_to_shanghai_datetime(timestamp_ms: i64) -> String {
+    let offset = FixedOffset::east_opt(8 * 3600).expect("valid shanghai fixed offset");
+    Utc.timestamp_millis_opt(timestamp_ms)
+        .single()
+        .unwrap_or_else(|| {
+            Utc.timestamp_millis_opt(0)
+                .single()
+                .expect("unix epoch timestamp should be valid")
+        })
+        .with_timezone(&offset)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
 }
 
 fn trade_outcome_label(profit_loss: f64) -> &'static str {
@@ -829,7 +1419,7 @@ pub fn print_framework_equity_symbol_window_reports(reports: &[FrameworkEquitySy
 pub fn print_framework_equity_trade_reports(reports: &[FrameworkEquityTradeReport]) {
     for trade in reports {
         println!(
-            "framework_equity_trade\ttarget={}R\tmode=symbol_isolated_100u\tsymbol={}\tevent_id={}\tdetected_at={}\tentry_ts={}\topen_time={}\tclose_time={}\tclose_type={}\tprofit_loss={:.8}\toutcome={}\ttrigger={}\tnew_rank={}\tdelta_rank={}\tprice_change_pct={}",
+            "framework_equity_trade\ttarget={}R\tmode=symbol_isolated_100u\tsymbol={}\tevent_id={}\tdetected_at={}\tentry_ts={}\topen_time={}\tclose_time={}\topen_price={}\tclose_price={}\tquantity={}\tclose_type={}\tprofit_loss={:.8}\toutcome={}\ttrigger={}\tnew_rank={}\tdelta_rank={}\tprice_change_pct={}",
             trade.target_r,
             trade.symbol,
             trade.event_id,
@@ -837,6 +1427,12 @@ pub fn print_framework_equity_trade_reports(reports: &[FrameworkEquityTradeRepor
             trade.entry_ts,
             trade.open_position_time,
             trade.close_position_time.as_deref().unwrap_or("NA"),
+            trade.open_price,
+            trade
+                .close_price
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "NA".to_string()),
+            trade.quantity,
             trade.close_type,
             trade.profit_loss,
             trade.outcome,
@@ -907,6 +1503,7 @@ impl MarketVelocityReplayStrategy {
         target_r: f64,
         profit_protect_after_r: Option<f64>,
         profit_protect_stop_r: f64,
+        early_exit_no_profit_candles: Option<usize>,
     ) -> Self {
         let entries_by_ts = events
             .into_iter()
@@ -927,6 +1524,7 @@ impl MarketVelocityReplayStrategy {
             target_r,
             profit_protect_after_r,
             profit_protect_stop_r,
+            early_exit_no_profit_candles,
             active_position: None,
         }
     }
@@ -937,6 +1535,7 @@ impl MarketVelocityReplayStrategy {
             event_id: entry.event_id,
             trigger: entry.trigger.clone(),
             profit_protected: false,
+            observed_candles: 0,
         });
         self.build_long_signal(
             candle_ts,
@@ -996,6 +1595,39 @@ impl MarketVelocityReplayStrategy {
             &trigger,
             true,
         ))
+    }
+
+    fn maybe_build_early_exit_signal(&mut self, candle: &CandleItem) -> Option<SignalResult> {
+        let no_profit_candles = self.early_exit_no_profit_candles?;
+        let active = self.active_position.as_mut()?;
+        active.observed_candles += 1;
+        if active.observed_candles < no_profit_candles || candle.c > active.entry_price {
+            return None;
+        }
+
+        let event_id = active.event_id;
+        let trigger = active.trigger.clone();
+        self.active_position = None;
+        Some(SignalResult {
+            should_buy: false,
+            should_sell: true,
+            open_price: candle.c,
+            ts: candle.ts,
+            single_value: Some(
+                json!({
+                    "source": "market_velocity_framework_replay",
+                    "rank_event_id": event_id,
+                    "entry_trigger": trigger,
+                    "exit_reason": "early_exit_no_profit",
+                    "no_profit_candles": no_profit_candles,
+                })
+                .to_string(),
+            ),
+            single_result: Some("market_velocity_framework_replay".to_string()),
+            filter_reasons: vec!["FIB_STRICT_MAJOR_BULL_BLOCK_SHORT".to_string()],
+            direction: SignalDirection::Short,
+            ..SignalResult::default()
+        })
     }
 
     fn build_long_signal(
@@ -1063,6 +1695,9 @@ impl IndicatorStrategyBacktest for MarketVelocityReplayStrategy {
         if let Some(entry) = self.entries_by_ts.get(&candle.ts).cloned() {
             return self.build_entry_signal(candle.ts, &entry);
         }
+        if let Some(signal) = self.maybe_build_early_exit_signal(candle) {
+            return signal;
+        }
         if let Some(signal) = self.maybe_build_profit_protection_signal(candle) {
             return signal;
         }
@@ -1104,6 +1739,41 @@ fn analyze_closed_trades(records: &[TradeRecord]) -> ClosedTradeStats {
             returns.push(record.profit_loss / equity);
         }
         equity += record.profit_loss;
+        peak = peak.max(equity);
+        if peak > 0.0 {
+            let drawdown_pct = (peak - equity) / peak * 100.0;
+            if drawdown_pct > max_drawdown_pct {
+                max_drawdown_pct = drawdown_pct;
+            }
+        }
+    }
+
+    ClosedTradeStats {
+        wins,
+        losses,
+        returns,
+        max_drawdown_pct,
+    }
+}
+
+fn analyze_runner_trades(trades: &[RunnerReplayTrade]) -> ClosedTradeStats {
+    let mut wins = 0;
+    let mut losses = 0;
+    let mut equity = INITIAL_FUND_PER_SYMBOL;
+    let mut peak = INITIAL_FUND_PER_SYMBOL;
+    let mut max_drawdown_pct = 0.0;
+    let mut returns = Vec::new();
+
+    for trade in trades {
+        if trade.profit_loss > 0.0 {
+            wins += 1;
+        } else if trade.profit_loss < 0.0 {
+            losses += 1;
+        }
+        if equity > 0.0 {
+            returns.push(trade.profit_loss / equity);
+        }
+        equity += trade.profit_loss;
         peak = peak.max(equity);
         if peak > 0.0 {
             let drawdown_pct = (peak - equity) / peak * 100.0;

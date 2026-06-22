@@ -196,7 +196,7 @@ impl VegasStrategy {
             //如果价格
             //判断k线的实体部分占比是否大于60%
 
-            let body_ratio = data_items.last().expect("数据不能为空").body_ratio();
+            let _body_ratio = data_items.last().expect("数据不能为空").body_ratio();
             if bolling_bands.is_long_signal || bolling_bands.is_short_signal {
                 // if data_items.last().unwrap().ts == 1763049600000 {
                 //     println!("data_items: {:?}", data_items.last().unwrap());

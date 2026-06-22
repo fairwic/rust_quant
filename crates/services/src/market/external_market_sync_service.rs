@@ -12,8 +12,6 @@ use rust_quant_infrastructure::{
 use serde_json::json;
 use std::sync::Arc;
 
-const HYPERLIQUID_SOURCE: &str = "hyperliquid";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExternalMarketSource {
     Hyperliquid,

@@ -5,6 +5,7 @@ use chrono::{
 // 移除 rbatis 依赖，使用 chrono 的 NaiveDateTime 替代 Timestamp
 use tracing::warn;
 
+#[allow(dead_code)]
 pub(crate) fn is_within_business_hours(ts: i64) -> bool {
     // 获取当前UTC时间
     let now_utc: DateTime<Utc> = DateTime::from_timestamp_millis(ts).unwrap();

@@ -1,7 +1,7 @@
 use super::{
-    profit_protection_for_target, runner_exit_for_target, simulate_trade, BacktestCandle,
-    ConfirmedEvent, MarketVelocityEventBacktestArgs, StopReentryDetails, StopReentryMode,
-    TradeOutcome, TradeResult,
+    early_exit, profit_protection_for_target, runner_exit_for_target, simulate_trade,
+    BacktestCandle, ConfirmedEvent, MarketVelocityEventBacktestArgs, StopReentryDetails,
+    StopReentryMode, TradeOutcome, TradeResult,
 };
 
 const ORIGINAL_STOP_R: f64 = -1.0;
@@ -58,6 +58,7 @@ fn apply_breakout_reclaim(
         horizon_ms,
         profit_protection_for_target(args, target_r),
         runner_exit_for_target(args, target_r),
+        early_exit(args),
     );
     combine_reentry_result(original, reentry, reclaim_price, args.stop_reentry_mode)
 }

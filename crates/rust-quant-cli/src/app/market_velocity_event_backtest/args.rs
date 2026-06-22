@@ -18,6 +18,9 @@ const MOMENTUM_RECLAIM_MIDRANK_RESEARCH_PRESET: &str =
     "research_momentum_0375sl_27r_reclaim13_22_v1";
 const MOMENTUM_RECLAIM_MIDRANK_RESEARCH_ENTRY_RULE_VERSION: &str =
     "rank_radar_4h_trend_15m_research_0375sl_27r_dist55_reclaim13_22_v1";
+const EPISODE_MOMENTUM_RESEARCH_PRESET: &str = "research_episode_momentum_03sl_24r_rank5_30_v1";
+const EPISODE_MOMENTUM_RESEARCH_ENTRY_RULE_VERSION: &str =
+    "rank_radar_4h_trend_15m_episode_research_03sl_24r_rank5_30_v1";
 const PAPER_OBSERVATION_OWNED_FLAGS: &[&str] = &[
     "--paper-outcome-sink",
     "--paper-outcome-entry-rule-version",
@@ -34,8 +37,11 @@ const PAPER_OBSERVATION_OWNED_FLAGS: &[&str] = &[
     "--runner-target-r",
     "--runner-fraction",
     "--runner-stop-r",
+    "--early-exit-no-profit-candles",
+    "--save-backtest-detail",
 ];
 const PAPER_STRATEGY_PRESET_LOCKED_FLAGS: &[&str] = &[
+    "--event-source",
     "--target-rs",
     "--stop-loss-pct",
     "--entry-period",
@@ -56,6 +62,7 @@ const PAPER_STRATEGY_PRESET_LOCKED_FLAGS: &[&str] = &[
 pub enum MarketVelocityEventSource {
     Episodes,
     RawEvents,
+    RawState,
 }
 
 impl MarketVelocityEventSource {
@@ -63,7 +70,34 @@ impl MarketVelocityEventSource {
         match value.trim().to_ascii_lowercase().as_str() {
             "episodes" | "episode" | "market_velocity_episodes" => Ok(Self::Episodes),
             "raw_events" | "raw" => Ok(Self::RawEvents),
+            "raw_state" | "state" | "signal_state" => Ok(Self::RawState),
             other => bail!("unknown --event-source: {other}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketVelocityTradeDirection {
+    Long,
+    Short,
+    Both,
+}
+
+impl MarketVelocityTradeDirection {
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "long" | "up" => Ok(Self::Long),
+            "short" | "down" => Ok(Self::Short),
+            "both" | "long_short" | "long+short" => Ok(Self::Both),
+            other => bail!("unknown --trade-direction: {other}"),
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Long => "long",
+            Self::Short => "short",
+            Self::Both => "both",
         }
     }
 }
@@ -146,6 +180,7 @@ impl FvgEntryMode {
 enum PaperStrategyPreset {
     Momentum03Sl20R,
     ResearchMomentum0375Sl27RReclaim13To22,
+    ResearchEpisodeMomentum03Sl24RRank5To30,
 }
 
 impl PaperStrategyPreset {
@@ -155,6 +190,7 @@ impl PaperStrategyPreset {
             MOMENTUM_RECLAIM_MIDRANK_RESEARCH_PRESET => {
                 Ok(Self::ResearchMomentum0375Sl27RReclaim13To22)
             }
+            EPISODE_MOMENTUM_RESEARCH_PRESET => Ok(Self::ResearchEpisodeMomentum03Sl24RRank5To30),
             other => bail!("unknown {PAPER_STRATEGY_PRESET_FLAG}: {other}"),
         }
     }
@@ -207,6 +243,34 @@ impl PaperStrategyPreset {
                     "reclaim_ema:13-22".to_string(),
                 ]);
             }
+            Self::ResearchEpisodeMomentum03Sl24RRank5To30 => {
+                args.extend([
+                    "--paper-outcome-entry-rule-version".to_string(),
+                    EPISODE_MOMENTUM_RESEARCH_ENTRY_RULE_VERSION.to_string(),
+                    "--event-source".to_string(),
+                    "episodes".to_string(),
+                    "--stop-loss-pct".to_string(),
+                    "0.03".to_string(),
+                    "--target-rs".to_string(),
+                    "2.4".to_string(),
+                    "--entry-max-distance-pct".to_string(),
+                    "7.0".to_string(),
+                    "--entry-min-volume-ratio".to_string(),
+                    "0.8".to_string(),
+                    "--trend-min-average-distance-pct".to_string(),
+                    "0.0".to_string(),
+                    "--min-delta-rank".to_string(),
+                    "5".to_string(),
+                    "--max-new-rank".to_string(),
+                    "30".to_string(),
+                    "--chase-top-rank".to_string(),
+                    "5".to_string(),
+                    "--chase-price-change-pct".to_string(),
+                    "80.0".to_string(),
+                    "--entry-trigger-allowlist".to_string(),
+                    "all".to_string(),
+                ]);
+            }
         }
     }
 }
@@ -238,6 +302,7 @@ pub struct MarketVelocityEventBacktestArgs {
     pub max_4h_staleness_min: i64,
     pub sample_limit: usize,
     pub event_source: MarketVelocityEventSource,
+    pub trade_direction: MarketVelocityTradeDirection,
     pub paper_outcome_sink: MarketVelocityPaperOutcomeSink,
     pub paper_outcome_entry_rule_version: String,
     pub entry_trigger_allowlist: Vec<String>,
@@ -253,6 +318,7 @@ pub struct MarketVelocityEventBacktestArgs {
     pub runner_target_r: Option<f64>,
     pub runner_fraction: f64,
     pub runner_stop_r: f64,
+    pub early_exit_no_profit_candles: Option<usize>,
     pub equity_report: bool,
     pub equity_split_report: bool,
     pub equity_quartile_report: bool,
@@ -261,6 +327,7 @@ pub struct MarketVelocityEventBacktestArgs {
     pub equity_feature_report: bool,
     pub equity_symbol_window_report: bool,
     pub equity_trade_report: bool,
+    pub save_backtest_detail: bool,
     pub min_trades: usize,
 }
 
@@ -285,6 +352,7 @@ impl Default for MarketVelocityEventBacktestArgs {
             max_4h_staleness_min: 240,
             sample_limit: 5,
             event_source: MarketVelocityEventSource::Episodes,
+            trade_direction: MarketVelocityTradeDirection::Long,
             paper_outcome_sink: MarketVelocityPaperOutcomeSink::Off,
             paper_outcome_entry_rule_version: DEFAULT_PAPER_OUTCOME_ENTRY_RULE_VERSION.to_string(),
             entry_trigger_allowlist: Vec::new(),
@@ -300,6 +368,7 @@ impl Default for MarketVelocityEventBacktestArgs {
             runner_target_r: None,
             runner_fraction: 0.0,
             runner_stop_r: 0.0,
+            early_exit_no_profit_candles: None,
             equity_report: false,
             equity_split_report: false,
             equity_quartile_report: false,
@@ -308,6 +377,7 @@ impl Default for MarketVelocityEventBacktestArgs {
             equity_feature_report: false,
             equity_symbol_window_report: false,
             equity_trade_report: false,
+            save_backtest_detail: false,
             min_trades: 30,
         }
     }
@@ -369,6 +439,10 @@ where
                 parsed.event_source =
                     MarketVelocityEventSource::from_str(&next_arg(&mut args, &arg)?)?
             }
+            "--trade-direction" => {
+                parsed.trade_direction =
+                    MarketVelocityTradeDirection::from_str(&next_arg(&mut args, &arg)?)?
+            }
             "--paper-outcome-sink" => {
                 parsed.paper_outcome_sink =
                     MarketVelocityPaperOutcomeSink::from_str(&next_arg(&mut args, &arg)?)?
@@ -411,6 +485,9 @@ where
             "--runner-target-r" => parsed.runner_target_r = Some(parse_next(&mut args, &arg)?),
             "--runner-fraction" => parsed.runner_fraction = parse_next(&mut args, &arg)?,
             "--runner-stop-r" => parsed.runner_stop_r = parse_next(&mut args, &arg)?,
+            "--early-exit-no-profit-candles" => {
+                parsed.early_exit_no_profit_candles = Some(parse_next(&mut args, &arg)?)
+            }
             "--equity-report" => parsed.equity_report = true,
             "--equity-split-report" => parsed.equity_split_report = true,
             "--equity-quartile-report" => parsed.equity_quartile_report = true,
@@ -419,6 +496,7 @@ where
             "--equity-feature-report" => parsed.equity_feature_report = true,
             "--equity-symbol-window-report" => parsed.equity_symbol_window_report = true,
             "--equity-trade-report" => parsed.equity_trade_report = true,
+            "--save-backtest-detail" => parsed.save_backtest_detail = true,
             "--min-trades" => parsed.min_trades = parse_next(&mut args, &arg)?,
             "--help" | "-h" => {
                 print_market_velocity_event_backtest_usage();
@@ -529,6 +607,9 @@ fn validate_args(
             bail!("--runner-fraction and --runner-stop-r require --runner-target-r");
         }
         None => {}
+    }
+    if parsed.early_exit_no_profit_candles == Some(0) {
+        bail!("--early-exit-no-profit-candles must be greater than 0");
     }
     if parsed.paper_outcome_sink == MarketVelocityPaperOutcomeSink::Web
         && parsed.stop_reentry_mode != StopReentryMode::Off
@@ -670,13 +751,13 @@ fn normalized_arg_flag(arg: &str) -> &str {
 
 pub fn print_market_velocity_event_backtest_usage() {
     println!(
-        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02] [--entry-period 20] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--tail-new-rank-threshold 21 --tail-rank-min-price-change-pct 10.0] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--entry-trigger-rank-blocklist reclaim_ema:11-20] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--fvg-entry-mode off|15m_to_1h|1h_to_4h] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--paper-outcome-sink off|jsonl|web]"
+        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state] [--trade-direction long|short|both] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02] [--entry-period 20] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--tail-new-rank-threshold 21 --tail-rank-min-price-change-pct 10.0] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--entry-trigger-rank-blocklist reclaim_ema:11-20] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--fvg-entry-mode off|15m_to_1h|1h_to_4h] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
     );
 }
 
 pub fn print_market_velocity_paper_observation_usage() {
     println!(
-        "Usage: market_velocity_paper_observation [--loop-interval-seconds 21600] [--paper-strategy-preset momentum_03sl_20r_v5|research_momentum_0375sl_27r_reclaim13_22_v1] [--target-rs 2.0] [--stop-loss-pct 0.03] [--entry-period 20]"
+        "Usage: market_velocity_paper_observation [--loop-interval-seconds 21600] [--paper-strategy-preset momentum_03sl_20r_v5|research_momentum_0375sl_27r_reclaim13_22_v1|research_episode_momentum_03sl_24r_rank5_30_v1] [--target-rs 2.0] [--stop-loss-pct 0.03] [--entry-period 20]"
     );
 }
 

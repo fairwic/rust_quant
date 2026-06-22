@@ -1,11 +1,8 @@
 use anyhow::Result;
 use dotenv::dotenv;
 
-use okx::api::api_trait::OkxApiTrait;
-use okx::api::public_data::OkxPublicData;
 use rust_quant_domain::traits::funding_rate_repository::FundingRateRepository;
 use rust_quant_infrastructure::repositories::funding_rate_repository::SqlxFundingRateRepository;
-use std::env;
 use tracing::info;
 
 #[tokio::main]

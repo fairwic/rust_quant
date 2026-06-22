@@ -664,7 +664,7 @@ mod tests {
     fn test_tiered_take_profit() {
         let r_state = RSystemState::new(100.0, 98.0, TradeSide::Long, 0);
         let config = TieredTakeProfitConfig::default();
-        let mut tp_state = TieredTakeProfitState::new(&r_state, &config);
+        let tp_state = TieredTakeProfitState::new(&r_state, &config);
 
         // 验证目标价格计算
         assert_eq!(tp_state.target_1_price, 103.0); // 1.5R

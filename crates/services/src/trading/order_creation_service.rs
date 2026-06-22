@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_service_creation() {
-        let service = OrderCreationService::new();
+        let _service = OrderCreationService::new();
         // 验证服务可以创建
     }
 

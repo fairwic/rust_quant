@@ -26,7 +26,7 @@
 
     #[test]
     fn fib_strict_reason_includes_swing_pct_suffix() {
-        let mut strategy = VegasStrategy {
+        let strategy = VegasStrategy {
             period: "4H".to_string(),
             volume_signal: Some(VolumeSignalConfig {
                 volume_bar_num: 4,

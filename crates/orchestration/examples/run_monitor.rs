@@ -7,7 +7,6 @@ use rust_quant_infrastructure::repositories::fund_monitoring_repository::{
 };
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {

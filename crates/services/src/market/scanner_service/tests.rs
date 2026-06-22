@@ -153,4 +153,14 @@ mod tests {
             Some(&Decimal::new(126, 3))
         );
     }
+
+    #[test]
+    fn market_velocity_episode_stale_cutoff_uses_rank_history_window() {
+        let now = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
+
+        assert_eq!(
+            market_velocity_episode_stale_before(now),
+            now - Duration::hours(MARKET_RANK_HISTORY_RETENTION_HOURS)
+        );
+    }
 }

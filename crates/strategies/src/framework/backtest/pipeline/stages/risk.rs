@@ -2,7 +2,6 @@
 
 use crate::framework::backtest::pipeline::{BacktestContext, BacktestStage, StageResult};
 use crate::framework::backtest::risk::check_risk_config;
-use crate::framework::backtest::types::SignalResult;
 use rust_quant_trading::audit::RiskDecision;
 
 /// 风控检查阶段

@@ -1,7 +1,7 @@
     use super::*;
     use async_trait::async_trait;
     use rust_quant_core::cache::init_redis_pool;
-    use rust_quant_core::database::init_db_pool;
+
     use rust_quant_strategies::TradePosition;
     use std::sync::Mutex;
 

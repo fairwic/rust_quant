@@ -74,7 +74,7 @@ impl StrategyExecutor for VegasStrategyExecutor {
 
         // 3. 转换K线数据并计算指标
         let mut multi_strategy_indicators = vegas_strategy.get_indicator_combine();
-        let mut candle_items = convert_candles_to_items(&candles);
+        let candle_items = convert_candles_to_items(&candles);
 
         for item in &candle_items {
             get_multi_indicator_values(&mut multi_strategy_indicators, item);

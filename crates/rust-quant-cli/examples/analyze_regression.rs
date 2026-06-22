@@ -1,5 +1,5 @@
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{FromRow, Row};
+use sqlx::FromRow;
 use std::collections::HashMap;
 use std::env;
 
@@ -8,6 +8,7 @@ struct TradeDetail {
     inst_id: String,
     open_position_time: String,
     option_type: String, // long/short
+    #[allow(dead_code)]
     open_price: String,
     close_price: Option<String>,
     profit_loss: String,

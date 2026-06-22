@@ -6,21 +6,6 @@ use super::{get_quant_core_postgres_pool, quote_legacy_table_name};
 use super::{CandlesEntity, SelectCandleReqDto, SelectTime, TimeDirect};
 use okx::dto::market_dto::CandleOkxRespDto;
 
-#[derive(Debug)]
-enum TimeInterval {
-    OneDay,
-    OneHour,
-}
-
-impl TimeInterval {
-    fn table_name(&self) -> &'static str {
-        match self {
-            TimeInterval::OneDay => "btc_candles_1d",
-            TimeInterval::OneHour => "btc_candles_1h",
-        }
-    }
-}
-
 pub struct CandlesModel;
 
 impl CandlesModel {

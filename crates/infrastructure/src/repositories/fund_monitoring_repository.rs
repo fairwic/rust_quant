@@ -359,6 +359,28 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         Ok(())
     }
 
+    async fn close_stale_market_velocity_episodes(
+        &self,
+        exchange: &str,
+        stale_before: DateTime<Utc>,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE market_velocity_episodes
+               SET status = 'closed',
+                   updated_at = NOW()
+             WHERE LOWER(exchange) = LOWER($1)
+               AND status = 'active'
+               AND last_seen_at < $2
+            "#,
+        )
+        .bind(exchange)
+        .bind(stale_before)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     async fn save_rank_snapshots(&self, snapshots: &[MarketRankSnapshot]) -> Result<()> {
         if snapshots.is_empty() {
             return Ok(());

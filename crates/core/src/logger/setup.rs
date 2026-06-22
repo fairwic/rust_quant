@@ -21,6 +21,7 @@ struct EmailConfig {
     /// 最大批量大小
     max_batch_size: usize,
     /// 去重时间窗口（秒）
+    #[allow(dead_code)]
     dedup_window_secs: u64,
     /// 最大队列大小
     max_queue_size: usize,
@@ -47,7 +48,9 @@ struct ErrorLogEntry {
 
 // 邮件发送器
 struct EmailSender {
+    #[allow(dead_code)]
     config: EmailConfig,
+    #[allow(dead_code)]
     error_queue: Arc<Mutex<HashMap<String, ErrorLogEntry>>>,
     sender: mpsc::UnboundedSender<String>,
 }
@@ -259,10 +262,13 @@ struct LogConfig {
     log_rotation: String,
     info_file_name: String,
     error_file_name: String,
+    #[allow(dead_code)]
     enable_file_logging: bool,
     enable_console_logging: bool,
     enable_email_notification: bool,
+    #[allow(dead_code)]
     max_file_size: u64,
+    #[allow(dead_code)]
     max_files: usize,
 }
 

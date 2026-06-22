@@ -10,7 +10,6 @@ pub enum AtrError {
 
 #[derive(Debug, Clone)]
 pub struct ATRStopLoos {
-    period: usize,
     multi: f64,
     atr: ATR,
 }
@@ -21,7 +20,6 @@ impl ATRStopLoos {
             return Err(AtrError::InvalidPeriod(0));
         }
         Ok(Self {
-            period,
             multi,
             atr: ATR::new(period).unwrap(),
         })
@@ -46,9 +44,9 @@ impl ATRStopLoos {
 #[test]
 fn test_atr_stop_loos() {
     let mut atr = ATRStopLoos::new(3, 1.0).unwrap();
-    let result = atr.next(10.0, 8.0, 9.0);
-    let result = atr.next(11.0, 8.0, 10.0);
-    let result = atr.next(12.0, 8.0, 11.0);
+    let _ = atr.next(10.0, 8.0, 9.0);
+    let _ = atr.next(11.0, 8.0, 10.0);
+    let _ = atr.next(12.0, 8.0, 11.0);
     let result = atr.next(13.0, 8.0, 12.0);
     println!("result:{:#?}", result);
 }

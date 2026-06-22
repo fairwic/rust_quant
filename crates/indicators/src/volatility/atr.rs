@@ -86,7 +86,7 @@ impl ATR {
         }
     }
 
-    fn calculate_tr(&self, high: f64, low: f64, close: f64) -> f64 {
+    fn calculate_tr(&self, high: f64, low: f64, _close: f64) -> f64 {
         match self.prev_close {
             None => high - low,
             Some(prev_close) => {

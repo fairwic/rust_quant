@@ -123,6 +123,7 @@ pub struct ExitTargets {
     pub take_reason: Option<String>,
 }
 
+#[cfg(test)]
 fn compute_effective_max_loss(
     position: &TradePosition,
     ctx: &ExitContext,
@@ -430,7 +431,7 @@ fn check_atr_ratio_take_profit(
     ratio: Option<f64>,
     target_price: Option<f64>,
 ) -> ExitResult {
-    let ratio = match ratio {
+    let _ratio = match ratio {
         Some(r) if r > 0.0 => r,
         _ => return ExitResult::None,
     };

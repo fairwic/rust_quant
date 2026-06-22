@@ -1,5 +1,5 @@
 use super::super::parse_cli_args_from;
-use super::super::MarketVelocityEventSource;
+use super::super::{MarketVelocityEventSource, MarketVelocityTradeDirection};
 
 #[test]
 fn defaults_to_episode_event_source_for_clean_backtests() {
@@ -9,10 +9,45 @@ fn defaults_to_episode_event_source_for_clean_backtests() {
 }
 
 #[test]
+fn defaults_to_long_trade_direction() {
+    let args = parse_cli_args_from([] as [&str; 0]).unwrap();
+
+    assert_eq!(args.trade_direction, MarketVelocityTradeDirection::Long);
+}
+
+#[test]
+fn parses_short_trade_direction() {
+    let args = parse_cli_args_from(["--trade-direction", "short"]).unwrap();
+
+    assert_eq!(args.trade_direction, MarketVelocityTradeDirection::Short);
+}
+
+#[test]
+fn parses_both_trade_direction() {
+    let args = parse_cli_args_from(["--trade-direction", "both"]).unwrap();
+
+    assert_eq!(args.trade_direction, MarketVelocityTradeDirection::Both);
+}
+
+#[test]
+fn rejects_unknown_trade_direction() {
+    let err = parse_cli_args_from(["--trade-direction", "inverse"]).unwrap_err();
+
+    assert!(err.to_string().contains("unknown --trade-direction"));
+}
+
+#[test]
 fn parses_raw_event_source_for_legacy_research() {
     let args = parse_cli_args_from(["--event-source", "raw_events"]).unwrap();
 
     assert_eq!(args.event_source, MarketVelocityEventSource::RawEvents);
+}
+
+#[test]
+fn parses_raw_state_event_source_for_signal_state_research() {
+    let args = parse_cli_args_from(["--event-source", "raw_state"]).unwrap();
+
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
 }
 
 #[test]
@@ -111,6 +146,13 @@ fn parses_equity_trade_report() {
     let args = parse_cli_args_from(["--equity-trade-report"]).unwrap();
 
     assert!(args.equity_trade_report);
+}
+
+#[test]
+fn parses_save_backtest_detail() {
+    let args = parse_cli_args_from(["--save-backtest-detail"]).unwrap();
+
+    assert!(args.save_backtest_detail);
 }
 
 #[test]

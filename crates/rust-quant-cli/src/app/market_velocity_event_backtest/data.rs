@@ -67,6 +67,7 @@ async fn load_candle_pairs(
         .bind(args.tail_rank_min_price_change_pct)
         .bind(args.chase_top_rank)
         .bind(args.chase_price_change_pct)
+        .bind(args.trade_direction.label())
         .fetch_all(pool)
         .await
         .context("load market velocity candle table pairs")?;
@@ -90,22 +91,26 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
               SELECT DISTINCT upper(symbol) AS symbol
               FROM market_velocity_episodes
               WHERE event_type IN ('rank_velocity', 'top_entry')
-                AND status = 'active'
+                AND status IN ('active', 'closed')
                 AND COALESCE(max_delta_rank, latest_delta_rank, 0) >= $1
                 AND ($2::int IS NULL OR COALESCE(max_delta_rank, latest_delta_rank, 0) <= $2)
                 AND COALESCE(best_new_rank, latest_new_rank) BETWEEN 1 AND $3
-                AND lower(price_direction) = 'up'
+                AND (
+                  ($10 = 'long' AND lower(price_direction) = 'up')
+                  OR ($10 = 'short' AND lower(price_direction) = 'down')
+                  OR ($10 = 'both' AND lower(price_direction) IN ('up', 'down'))
+                )
                 AND current_price IS NOT NULL
-                AND ($4::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $4)
+                AND ($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $4)
                 AND (
                   $5::int IS NULL
                   OR $6::double precision IS NULL
                   OR COALESCE(best_new_rank, latest_new_rank) < $5
-                  OR COALESCE(price_change_pct, 0) >= $6
+                  OR ABS(COALESCE(price_change_pct, 0)) >= $6
                 )
                 AND NOT (
                   COALESCE(best_new_rank, latest_new_rank) <= $7
-                  AND COALESCE(price_change_pct, 0) >= $8
+                  AND ABS(COALESCE(price_change_pct, 0)) >= $8
                 )
             )
             SELECT
@@ -126,7 +131,7 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
             ORDER BY candidates.symbol
             "#
         }
-        MarketVelocityEventSource::RawEvents => {
+        MarketVelocityEventSource::RawEvents | MarketVelocityEventSource::RawState => {
             r#"
             WITH candidates AS (
               SELECT DISTINCT upper(symbol) AS symbol
@@ -135,16 +140,20 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
                 AND delta_rank >= $1
                 AND ($2::int IS NULL OR delta_rank <= $2)
                 AND new_rank BETWEEN 1 AND $3
-                AND lower(price_direction) = 'up'
+                AND (
+                  ($10 = 'long' AND lower(price_direction) = 'up')
+                  OR ($10 = 'short' AND lower(price_direction) = 'down')
+                  OR ($10 = 'both' AND lower(price_direction) IN ('up', 'down'))
+                )
                 AND current_price IS NOT NULL
-                AND ($4::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $4)
+                AND ($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $4)
                 AND (
                   $5::int IS NULL
                   OR $6::double precision IS NULL
                   OR new_rank < $5
-                  OR COALESCE(price_change_pct, 0) >= $6
+                  OR ABS(COALESCE(price_change_pct, 0)) >= $6
                 )
-                AND NOT (new_rank <= $7 AND COALESCE(price_change_pct, 0) >= $8)
+                AND NOT (new_rank <= $7 AND ABS(COALESCE(price_change_pct, 0)) >= $8)
             )
             SELECT
               candidates.symbol,
@@ -209,6 +218,7 @@ async fn load_events(
         .bind(args.tail_rank_min_price_change_pct)
         .bind(args.chase_top_rank)
         .bind(args.chase_price_change_pct)
+        .bind(args.trade_direction.label())
         .fetch_all(pool)
         .await
         .context("load market velocity radar events")?;
@@ -247,22 +257,26 @@ fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
             FROM market_velocity_episodes
             WHERE upper(symbol) = ANY($1)
               AND event_type IN ('rank_velocity', 'top_entry')
-              AND status = 'active'
+              AND status IN ('active', 'closed')
               AND COALESCE(max_delta_rank, latest_delta_rank, 0) >= $2
               AND ($3::int IS NULL OR COALESCE(max_delta_rank, latest_delta_rank, 0) <= $3)
               AND COALESCE(best_new_rank, latest_new_rank) BETWEEN 1 AND $4
-              AND lower(price_direction) = 'up'
+              AND (
+                ($10 = 'long' AND lower(price_direction) = 'up')
+                OR ($10 = 'short' AND lower(price_direction) = 'down')
+                OR ($10 = 'both' AND lower(price_direction) IN ('up', 'down'))
+              )
               AND current_price IS NOT NULL
-              AND ($5::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $5)
+              AND ($5::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $5)
               AND (
                 $6::int IS NULL
                 OR $7::double precision IS NULL
                 OR COALESCE(best_new_rank, latest_new_rank) < $6
-                OR COALESCE(price_change_pct, 0) >= $7
+                OR ABS(COALESCE(price_change_pct, 0)) >= $7
               )
               AND NOT (
                 COALESCE(best_new_rank, latest_new_rank) <= $8
-                AND COALESCE(price_change_pct, 0) >= $9
+                AND ABS(COALESCE(price_change_pct, 0)) >= $9
               )
             ORDER BY started_at, id
             "#
@@ -285,17 +299,73 @@ fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
               AND delta_rank >= $2
               AND ($3::int IS NULL OR delta_rank <= $3)
               AND new_rank BETWEEN 1 AND $4
-              AND lower(price_direction) = 'up'
+              AND (
+                ($10 = 'long' AND lower(price_direction) = 'up')
+                OR ($10 = 'short' AND lower(price_direction) = 'down')
+                OR ($10 = 'both' AND lower(price_direction) IN ('up', 'down'))
+              )
               AND current_price IS NOT NULL
-              AND ($5::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $5)
+              AND ($5::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $5)
               AND (
                 $6::int IS NULL
                 OR $7::double precision IS NULL
                 OR new_rank < $6
-                OR COALESCE(price_change_pct, 0) >= $7
+                OR ABS(COALESCE(price_change_pct, 0)) >= $7
               )
-              AND NOT (new_rank <= $8 AND COALESCE(price_change_pct, 0) >= $9)
+              AND NOT (new_rank <= $8 AND ABS(COALESCE(price_change_pct, 0)) >= $9)
             ORDER BY detected_at, id
+            "#
+        }
+        MarketVelocityEventSource::RawState => {
+            r#"
+            WITH filtered AS (
+              SELECT
+                id,
+                exchange,
+                symbol,
+                detected_at,
+                new_rank,
+                delta_rank,
+                current_price,
+                price_change_pct,
+                floor(extract(epoch from detected_at) / 900) AS detected_15m_bucket
+              FROM market_rank_events
+              WHERE upper(symbol) = ANY($1)
+                AND event_type IN ('rank_velocity', 'top_entry')
+                AND delta_rank >= $2
+                AND ($3::int IS NULL OR delta_rank <= $3)
+                AND new_rank BETWEEN 1 AND $4
+                AND (
+                  ($10 = 'long' AND lower(price_direction) = 'up')
+                  OR ($10 = 'short' AND lower(price_direction) = 'down')
+                  OR ($10 = 'both' AND lower(price_direction) IN ('up', 'down'))
+                )
+                AND current_price IS NOT NULL
+                AND ($5::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $5)
+                AND (
+                  $6::int IS NULL
+                  OR $7::double precision IS NULL
+                  OR new_rank < $6
+                  OR ABS(COALESCE(price_change_pct, 0)) >= $7
+                )
+                AND NOT (new_rank <= $8 AND ABS(COALESCE(price_change_pct, 0)) >= $9)
+            )
+            SELECT *
+            FROM (
+              SELECT DISTINCT ON (upper(symbol), detected_15m_bucket)
+                id::bigint AS id,
+                lower(exchange) AS exchange,
+                upper(symbol) AS symbol,
+                floor(extract(epoch from detected_at) * 1000)::bigint AS detected_ms,
+                detected_at::text AS detected_at,
+                new_rank::int AS new_rank,
+                delta_rank::int AS delta_rank,
+                current_price::text AS current_price,
+                COALESCE(price_change_pct, 0)::text AS price_change_pct
+              FROM filtered
+              ORDER BY upper(symbol), detected_15m_bucket, detected_at, id
+            ) deduped
+            ORDER BY detected_ms, id
             "#
         }
     }
@@ -341,5 +411,36 @@ mod tests {
         let sql = event_source_sql(&args);
 
         assert!(sql.contains("FROM market_rank_events"));
+    }
+
+    #[test]
+    fn raw_state_event_source_deduplicates_scanner_hits_by_15m_candle() {
+        let args = MarketVelocityEventBacktestArgs {
+            event_source: MarketVelocityEventSource::RawState,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+
+        let sql = event_source_sql(&args);
+
+        assert!(sql.contains("FROM market_rank_events"));
+        assert!(sql.contains("DISTINCT ON (upper(symbol), detected_15m_bucket)"));
+        assert!(sql.contains("floor(extract(epoch from detected_at) / 900)"));
+        assert!(sql.contains("ORDER BY upper(symbol), detected_15m_bucket, detected_at, id"));
+    }
+
+    #[test]
+    fn episode_event_source_keeps_closed_historical_episodes_in_backtests() {
+        let args = MarketVelocityEventBacktestArgs {
+            event_source: MarketVelocityEventSource::Episodes,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+
+        let candidate_sql = candidate_symbols_sql(&args);
+        let event_sql = event_source_sql(&args);
+
+        assert!(candidate_sql.contains("status IN ('active', 'closed')"));
+        assert!(event_sql.contains("status IN ('active', 'closed')"));
+        assert!(!candidate_sql.contains("status = 'active'"));
+        assert!(!event_sql.contains("status = 'active'"));
     }
 }

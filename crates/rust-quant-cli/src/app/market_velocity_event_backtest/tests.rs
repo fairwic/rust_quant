@@ -86,6 +86,49 @@ fn entry_confirmation_accepts_breakout_above_averages_with_volume() {
 }
 
 #[test]
+fn entry_confirmation_accepts_breakdown_below_averages_with_volume_for_short() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_min_volume_ratio: 1.2,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let candles = vec![
+        candle(0, 105.0, 10.0),
+        candle(MS_15M, 104.0, 10.0),
+        candle(MS_15M * 2, 103.0, 10.0),
+        BacktestCandle {
+            ts: MS_15M * 3,
+            open: 103.5,
+            high: 104.0,
+            low: 102.6,
+            close: 103.0,
+            volume: 10.0,
+        },
+        BacktestCandle {
+            ts: MS_15M * 4,
+            open: 103.0,
+            high: 103.2,
+            low: 99.0,
+            close: 100.0,
+            volume: 20.0,
+        },
+    ];
+    let computed = build_computed_candles(candles, args.entry_period);
+
+    let event_ts = MS_15M * 5;
+    let (ok, reason) = entry_confirmation(
+        &computed,
+        event_ts,
+        MarketVelocityTradeDirection::Short,
+        &args,
+    );
+
+    assert!(ok);
+    assert_eq!(reason, "breakdown_previous_low");
+}
+
+#[test]
 fn trend_confirmation_blocks_weak_4h_average_distance_when_required() {
     let mut candles = Vec::new();
     for index in 0..20 {
@@ -102,6 +145,31 @@ fn trend_confirmation_blocks_weak_4h_average_distance_when_required() {
 
     assert!(!ok);
     assert_eq!(reason, "weak_4h_average_distance");
+}
+
+#[test]
+fn trend_confirmation_accepts_short_trend_below_averages() {
+    let candles = vec![
+        candle(0, 105.0, 10.0),
+        candle(MS_4H, 104.0, 10.0),
+        candle(MS_4H * 2, 103.0, 10.0),
+        candle(MS_4H * 3, 99.0, 10.0),
+    ];
+    let computed = build_computed_candles(candles, 3);
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let (ok, reason) = trend_confirmation(
+        &computed,
+        MS_4H * 4 + MS_15M,
+        MarketVelocityTradeDirection::Short,
+        &args,
+    );
+
+    assert!(ok);
+    assert_eq!(reason, "4h_below_below");
 }
 
 #[test]
@@ -123,6 +191,69 @@ fn simulate_trade_treats_same_candle_stop_and_target_as_loss() {
         0.02,
         1.5,
         MS_15M * 4,
+        None,
+        None,
+        None,
+    );
+
+    assert_eq!(result.outcome, TradeOutcome::Loss);
+    assert_eq!(result.reason, "both_hit_stop_first");
+    assert_eq!(result.r, Some(-1.0));
+    assert!(result.complete);
+}
+
+#[test]
+fn simulate_trade_can_win_short_when_downside_target_is_hit() {
+    let candles = vec![BacktestCandle {
+        ts: MS_15M,
+        open: 100.0,
+        high: 100.5,
+        low: 96.0,
+        close: 97.0,
+        volume: 10.0,
+    }];
+
+    let result = simulate_trade(
+        &candles,
+        0,
+        MS_15M,
+        100.0,
+        MarketVelocityTradeDirection::Short,
+        0.02,
+        1.5,
+        MS_15M * 4,
+        None,
+        None,
+        None,
+    );
+
+    assert_eq!(result.outcome, TradeOutcome::Win);
+    assert_eq!(result.reason, "target_hit");
+    assert_eq!(result.r, Some(1.5));
+    assert!(result.complete);
+}
+
+#[test]
+fn simulate_trade_treats_same_candle_short_stop_and_target_as_loss() {
+    let candles = vec![BacktestCandle {
+        ts: MS_15M,
+        open: 100.0,
+        high: 103.0,
+        low: 96.0,
+        close: 99.0,
+        volume: 10.0,
+    }];
+
+    let result = simulate_trade(
+        &candles,
+        0,
+        MS_15M,
+        100.0,
+        MarketVelocityTradeDirection::Short,
+        0.02,
+        1.5,
+        MS_15M * 4,
+        None,
         None,
         None,
     );
@@ -167,6 +298,7 @@ fn simulate_trade_can_protect_profit_after_threshold_is_reached() {
             stop_r: 0.5,
         }),
         None,
+        None,
     );
 
     assert_eq!(result.outcome, TradeOutcome::Win);
@@ -209,11 +341,55 @@ fn simulate_trade_reports_flat_when_breakeven_protection_is_hit() {
             stop_r: 0.0,
         }),
         None,
+        None,
     );
 
     assert_eq!(result.outcome, TradeOutcome::Flat);
     assert_eq!(result.reason, "profit_protect_stop_hit");
     assert_eq!(result.r, Some(0.0));
+    assert!(result.complete);
+}
+
+#[test]
+fn simulate_trade_exits_when_entry_does_not_profit_after_configured_candles() {
+    let candles = vec![
+        BacktestCandle {
+            ts: MS_15M,
+            open: 100.0,
+            high: 101.0,
+            low: 99.5,
+            close: 100.4,
+            volume: 10.0,
+        },
+        BacktestCandle {
+            ts: MS_15M * 2,
+            open: 100.4,
+            high: 101.0,
+            low: 99.0,
+            close: 99.8,
+            volume: 10.0,
+        },
+    ];
+
+    let result = simulate_trade(
+        &candles,
+        0,
+        MS_15M,
+        100.0,
+        0.02,
+        2.0,
+        MS_15M * 4,
+        None,
+        None,
+        Some(EarlyExit {
+            no_profit_candles: 1,
+        }),
+    );
+
+    assert_eq!(result.outcome, TradeOutcome::Loss);
+    assert_eq!(result.reason, "early_exit_no_profit");
+    assert_eq!(result.exit_ts, MS_15M * 2);
+    assert!((result.r.unwrap() + 0.1).abs() < 1e-9);
     assert!(result.complete);
 }
 
@@ -252,6 +428,7 @@ fn simulate_trade_can_take_partial_profit_and_hit_runner_target() {
             fraction: 0.5,
             stop_r: 0.0,
         }),
+        None,
     );
 
     assert_eq!(result.outcome, TradeOutcome::Win);
@@ -295,6 +472,7 @@ fn simulate_trade_keeps_partial_profit_when_runner_stop_is_hit() {
             fraction: 0.5,
             stop_r: 0.0,
         }),
+        None,
     );
 
     assert_eq!(result.outcome, TradeOutcome::Win);
@@ -605,6 +783,13 @@ fn parses_runner_exit_controls() {
     assert_eq!(args.runner_target_r, Some(4.0));
     assert_eq!(args.runner_fraction, 0.5);
     assert_eq!(args.runner_stop_r, 0.0);
+}
+
+#[test]
+fn parses_early_exit_no_profit_controls() {
+    let args = parse_cli_args_from(["--early-exit-no-profit-candles", "2"]).unwrap();
+
+    assert_eq!(args.early_exit_no_profit_candles, Some(2));
 }
 
 #[test]

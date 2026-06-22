@@ -226,7 +226,7 @@ impl PerformanceCalculator {
     ///
     /// 基于交易收益率计算，然后年化
     /// 公式: 交易收益率标准差 * sqrt(每年交易次数)
-    fn calculate_volatility(&self, equity_curve: &[f64], actual_trading_days: f64) -> f64 {
+    fn calculate_volatility(&self, _equity_curve: &[f64], actual_trading_days: f64) -> f64 {
         if self.trade_records.len() < 2 {
             return 0.0;
         }

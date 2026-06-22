@@ -77,7 +77,7 @@ pub fn get_multi_indicator_values(
     indicator_combine: &mut IndicatorCombine,
     data_item: &CandleItem,
 ) -> VegasIndicatorSignalValue {
-    let start = Instant::now();
+    let _start = Instant::now();
     let mut vegas_indicator_signal_value = VegasIndicatorSignalValue::default();
 
     // 缓存频繁使用的值

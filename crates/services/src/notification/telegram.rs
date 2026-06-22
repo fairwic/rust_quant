@@ -66,7 +66,6 @@ impl TelegramNotifier {
         delta: i32,
     ) -> Result<()> {
         let emoji = if delta > 0 { "🚀" } else { "📉" };
-        let direction = if delta > 0 { "上升" } else { "下降" };
 
         let message = format!(
             "{} *排名剧变*\n\n\

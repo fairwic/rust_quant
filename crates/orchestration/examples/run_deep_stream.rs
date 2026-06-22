@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
     let (analyzer, manager) = FlowAnalyzer::new(alert_repo);
 
     // 3. 启动 analyzer (它会启动内部的 stream manager)
-    let analyzer_handle = tokio::spawn(async move {
+    let _analyzer_handle = tokio::spawn(async move {
         analyzer.run().await;
     });
 

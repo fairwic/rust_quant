@@ -1,23 +1,13 @@
-// ⭐ 指标组合已移至 indicators 包
-// pub mod indicator_combine;  // 已废弃
-
-use core::time;
-
-use rust_quant_domain::entities::candle;
 use rust_quant_indicators::KlineHammerIndicator;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::info;
 
 use rust_quant_indicators::trend::ema_indicator::EmaIndicator;
-use rust_quant_indicators::trend::nwe_indicator::NweIndicator;
-use rust_quant_indicators::volatility::ATRStopLoos;
-use rust_quant_indicators::volume::VolumeRatioIndicator;
 use ta::Next;
 // ⭐ 使用新的 indicators::nwe 模块
 use crate::framework::backtest::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
 use crate::strategy_common::{BackTestResult, BasicRiskStrategyConfig, SignalResult};
-use crate::{risk, time_util, CandleItem};
+use crate::CandleItem;
 use rust_quant_indicators::trend::nwe::{
     NweIndicatorCombine, NweIndicatorConfig, NweIndicatorValues,
 };
@@ -395,10 +385,6 @@ impl NweStrategy {
         let adjusted_nwe_upper = nwe_middle + new_half_width;
         let adjusted_nwe_lower = nwe_middle - new_half_width;
 
-        // 6. 使用动态调整后的带宽重新计算上下轨
-        let adjusted_nwe_upper = nwe_middle + new_half_width;
-        let adjusted_nwe_lower = nwe_middle - new_half_width;
-
         NweSignalValues {
             stc_value: base_values.stc_value,
             volume_ratio: base_values.volume_ratio,
@@ -430,14 +416,14 @@ impl NweStrategy {
         )
         .next(current_candle);
 
-        let is_hanging_man = kline_hammer_indicator_output.is_hanging_man;
-        let is_hammer = kline_hammer_indicator_output.is_hammer;
+        let _is_hanging_man = kline_hammer_indicator_output.is_hanging_man;
+        let _is_hammer = kline_hammer_indicator_output.is_hammer;
 
         // 使用动态调整的STC阈值
         let adjusted_oversold = self.calculate_dynamic_stc_oversold(candles);
         let adjusted_overbought = self.calculate_dynamic_stc_overbought(candles);
 
-        let (is_stc_buy, is_stc_sell) =
+        let (_is_stc_buy, _is_stc_sell) =
             Self::check_stc(values.stc_value, adjusted_oversold, adjusted_overbought);
 
         // 做多信号判断
@@ -511,6 +497,7 @@ impl NweStrategy {
     /**
      * 检查rsi是否超卖或超买
      */
+    #[allow(dead_code)]
     fn check_rsi(rsi: f64, rsi_oversold: f64, rsi_overbought: f64) -> (bool, bool) {
         let mut is_buy = false;
         let mut is_sell = false;
@@ -524,6 +511,7 @@ impl NweStrategy {
     /**
      * 检查成交量比率是否超卖或超买
      */
+    #[allow(dead_code)]
     fn check_volume_ratio(volume_ratio: f64, volume_ratio_threshold: f64) -> (bool, bool) {
         let mut is_buy = false;
         let mut is_sell = false;
@@ -593,10 +581,10 @@ impl NweStrategy {
 
         let current_price = candles.last().unwrap().c;
         let o = candles.last().unwrap().o;
-        let l = candles.last().unwrap().l;
-        let atr = values.atr_value;
-        let upper = values.nwe_upper;
-        let lower = values.nwe_lower;
+        let _l = candles.last().unwrap().l;
+        let _atr = values.atr_value;
+        let _upper = values.nwe_upper;
+        let _lower = values.nwe_lower;
 
         //检查nwe是否超卖或超买
         let (is_nwe_buy, is_nwe_sell) = self.check_nwe(candles, &values);
@@ -687,7 +675,7 @@ impl NweStrategy {
         // }
 
         // 使用 Vegas EMA 排列进行方向过滤
-        let ema1_value = self.apply_vegas_trend_filter(candles, &mut signal_result);
+        let _ema1_value = self.apply_vegas_trend_filter(candles, &mut signal_result);
 
         signal_result.ts = candles.last().unwrap().ts;
         signal_result.open_price = candles.last().unwrap().c;
@@ -707,11 +695,13 @@ impl NweStrategy {
         signal_result
     }
 
+    #[allow(dead_code)]
     fn check_kline_high_point(candles: &[CandleItem], values: &NweSignalValues) -> bool {
         let last_candle = candles.last().unwrap();
         last_candle.h > values.nwe_upper
     }
 
+    #[allow(dead_code)]
     fn check_kline_low_point(candles: &[CandleItem], values: &NweSignalValues) -> bool {
         let last_candle = candles.last().unwrap();
         last_candle.l < values.nwe_lower
@@ -719,7 +709,7 @@ impl NweStrategy {
 
     /// 运行回测：仅使用 RSI、Volume、NWE、ATR 指标（复用可插拔的 indicator_combine）
     pub fn run_test(
-        mut self,
+        self,
         inst_id: &str,
         candles: &[CandleItem],
         risk: BasicRiskStrategyConfig,

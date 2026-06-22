@@ -48,8 +48,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn pipeline_backtest_runs_and_records_trades() {
         use crate::framework::backtest::adapter::run_indicator_strategy_backtest;

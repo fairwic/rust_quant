@@ -323,7 +323,7 @@
             max_leverage: None,
         };
 
-        let config = StrategyConfig {
+        let _config = StrategyConfig {
             id: config_id,
             strategy_type: StrategyType::Vegas,
             exchange: None,

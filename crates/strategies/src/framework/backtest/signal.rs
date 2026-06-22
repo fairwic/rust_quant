@@ -1,5 +1,3 @@
-use rust_quant_domain::entities::position;
-
 use super::super::types::TradeSide;
 use super::position::{
     close_position, open_long_position, open_short_position, set_long_stop_close_price,
@@ -77,8 +75,8 @@ pub fn deal_signal(
     signal: &mut SignalResult,
     candle: &CandleItem,
     risk_config: BasicRiskStrategyConfig,
-    candle_item_list: &[CandleItem],
-    i: usize,
+    _candle_item_list: &[CandleItem],
+    _i: usize,
 ) -> TradingState {
     //先检查设置了是否预止损价格
     // if signal.ts == 1762747200000 {

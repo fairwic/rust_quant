@@ -11,6 +11,7 @@ use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 
 /// K线数据库实体
 #[derive(Debug, Clone, FromRow)]
+#[allow(dead_code)]
 struct CandlesEntity {
     #[sqlx(default)]
     pub id: Option<i64>,

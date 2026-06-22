@@ -1,6 +1,6 @@
 use super::super::{
     parse_paper_observation_args_from, parse_paper_observation_command_from,
-    MarketVelocityPaperOutcomeSink, StopReentryMode,
+    MarketVelocityEventSource, MarketVelocityPaperOutcomeSink, StopReentryMode,
 };
 
 #[test]
@@ -89,6 +89,39 @@ fn paper_observation_args_apply_reclaim_midrank_research_preset() {
 }
 
 #[test]
+fn paper_observation_args_apply_episode_research_preset() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_episode_momentum_03sl_24r_rank5_30_v1",
+    ])
+    .unwrap();
+
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::Episodes);
+    assert!(args.entry_trigger_allowlist.is_empty());
+    assert!(args.entry_trigger_blocklist.is_empty());
+    assert!(args.entry_trigger_rank_blocklist.is_empty());
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "rank_radar_4h_trend_15m_episode_research_03sl_24r_rank5_30_v1"
+    );
+    assert_eq!(args.stop_reentry_mode, StopReentryMode::Off);
+    assert_eq!(args.stop_loss_pct, 0.03);
+    assert_eq!(args.target_rs, vec![2.4]);
+    assert_eq!(args.entry_max_distance_pct, 7.0);
+    assert_eq!(args.entry_min_volume_ratio, 0.8);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 5);
+    assert_eq!(args.max_delta_rank, None);
+    assert_eq!(args.max_new_rank, 30);
+    assert_eq!(args.min_price_change_pct, None);
+    assert_eq!(args.chase_top_rank, 5);
+    assert_eq!(args.chase_price_change_pct, 80.0);
+    assert_eq!(args.profit_protect_after_r, None);
+    assert_eq!(args.runner_target_r, None);
+}
+
+#[test]
 fn paper_observation_args_reject_unknown_strategy_preset() {
     let err =
         parse_paper_observation_args_from(["--paper-strategy-preset", "unknown"]).unwrap_err();
@@ -157,6 +190,21 @@ fn paper_observation_args_reject_preset_stop_override() {
 }
 
 #[test]
+fn paper_observation_args_reject_preset_event_source_override() {
+    let err = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_episode_momentum_03sl_24r_rank5_30_v1",
+        "--event-source",
+        "raw_state",
+    ])
+    .unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("--paper-strategy-preset locks --event-source"));
+}
+
+#[test]
 fn paper_observation_args_reject_entry_trigger_filter_overrides() {
     let err = parse_paper_observation_args_from(["--entry-trigger-allowlist", "all"]).unwrap_err();
 
@@ -174,6 +222,15 @@ fn paper_observation_args_reject_entry_trigger_rank_blocklist_override() {
     assert!(err
         .to_string()
         .contains("market_velocity_paper_observation owns --entry-trigger-rank-blocklist"));
+}
+
+#[test]
+fn paper_observation_args_reject_save_backtest_detail() {
+    let err = parse_paper_observation_args_from(["--save-backtest-detail"]).unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("market_velocity_paper_observation owns --save-backtest-detail"));
 }
 
 #[test]

@@ -13,6 +13,11 @@ pub struct RunnerExit {
     pub stop_r: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EarlyExit {
+    pub no_profit_candles: usize,
+}
+
 pub fn simulate_trade(
     candles: &[BacktestCandle],
     entry_idx: usize,
@@ -23,6 +28,7 @@ pub fn simulate_trade(
     horizon_ms: i64,
     profit_protection: Option<ProfitProtection>,
     runner_exit: Option<RunnerExit>,
+    early_exit: Option<EarlyExit>,
 ) -> TradeResult {
     let stop_price = entry_price * (1.0 - stop_loss_pct);
     let target_price = entry_price * (1.0 + stop_loss_pct * target_r);
@@ -104,6 +110,22 @@ pub fn simulate_trade(
             {
                 protected_stop = Some((stop_price, protection.stop_r));
             }
+        }
+        if early_exit.is_some_and(|exit| {
+            idx > entry_idx
+                && idx >= entry_idx + exit.no_profit_candles
+                && candle.close <= entry_price
+        }) {
+            let r = (candle.close - entry_price) / (entry_price * stop_loss_pct);
+            return base_trade_result(
+                outcome_for_r(r),
+                "early_exit_no_profit",
+                candle.ts,
+                Some(r),
+                true,
+                entry_ts,
+                entry_price,
+            );
         }
     }
 

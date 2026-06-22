@@ -26,11 +26,9 @@ pub fn apply_live_decision(
     risk: BasicRiskStrategyConfig,
 ) -> LiveDecisionOutcome {
     let before = state.trade_position.clone();
-    let before_side = before.as_ref().map(|p| p.trade_side);
 
     let updated = deal_signal(state.clone(), signal, candle, risk, &[], 0);
     let after = updated.trade_position.clone();
-    let after_side = after.as_ref().map(|p| p.trade_side);
 
     *state = updated;
 

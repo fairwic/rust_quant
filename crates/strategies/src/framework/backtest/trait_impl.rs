@@ -14,7 +14,7 @@ where
     fn strategy_type(&self) -> crate::StrategyType;
     fn config_json(&self) -> Option<String>;
     fn run_test(
-        mut self,
+        self,
         inst_id: &str,
         candles: &[CandleItem],
         risk_strategy_config: BasicRiskStrategyConfig,

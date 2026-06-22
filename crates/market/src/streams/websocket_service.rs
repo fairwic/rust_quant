@@ -1,4 +1,3 @@
-use futures_util::StreamExt;
 use okx::websocket::auto_reconnect_client::AutoReconnectWebsocketClient;
 use std::env;
 use std::sync::Arc;

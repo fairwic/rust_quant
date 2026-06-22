@@ -8,8 +8,6 @@ pub struct KlineEngulfingIndicator {
     last_kline: Option<CandleItem>,
     // 前前一根K线（用于过滤）
     prev_prev_kline: Option<CandleItem>,
-    // 看涨||看跌吞没
-    is_bullish: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -23,7 +21,6 @@ impl KlineEngulfingIndicator {
         Self {
             last_kline: None,
             prev_prev_kline: None,
-            is_bullish: false,
         }
     }
     pub fn next(&mut self, current_kline: &CandleItem) -> KlineEngulfingOutput {

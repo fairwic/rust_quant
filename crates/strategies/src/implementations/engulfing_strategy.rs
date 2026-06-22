@@ -1,11 +1,8 @@
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::error;
 
-use crate::strategy_common::{run_back_test, BackTestResult, SignalResult, TradeRecord};
+use crate::strategy_common::SignalResult;
 use rust_quant_common::CandleItem;
-
-use crate::framework::strategy_common::BasicRiskStrategyConfig; // ⭐ 正确路径
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct EngulfingStrategy {
@@ -28,7 +25,6 @@ impl EngulfingStrategy {
             let previous_candles =
                 &candles_5m[candles_5m.len() - num_bars - 1..candles_5m.len() - 1];
 
-            let current_open = current_candle.o;
             let current_close = current_candle.c;
 
             let mut all_previous_bearish = true;

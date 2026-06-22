@@ -113,7 +113,7 @@ impl VegasStrategy {
         let mut range_snapshot: Option<serde_json::Value> = None;
 
         // 优先判断成交量
-        if let Some(volume_signal) = &self.volume_signal {
+        if let Some(_volume_signal) = &self.volume_signal {
             let is_than_vol_ratio =
                 self.check_volume_trend(&vegas_indicator_signal_values.volume_value);
             conditions.push((

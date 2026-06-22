@@ -23,7 +23,7 @@ impl Default for OrderService {
 impl OrderService {
     pub async fn get_pending_orders(
         &self,
-        inst_id: Option<&str>,
+        _inst_id: Option<&str>,
     ) -> Result<Vec<OrderPendingRespDto>, AppError> {
         let trade_client = OkxTrade::from_env()
             .map_err(|e| AppError::OkxApiError(format!("OKX初始化失败: {:?}", e)))?;
@@ -70,7 +70,7 @@ impl OrderService {
 
     pub async fn update_order_detail(
         &self,
-        order_detail: OrderDetailRespDto,
+        _order_detail: OrderDetailRespDto,
     ) -> Result<(), AppError> {
         // TODO: 实现 OrderDetailRespDto 到 SwapOrdersDetailEntity 的转换
         // let entity = SwapOrdersDetailEntity::from(order_detail);

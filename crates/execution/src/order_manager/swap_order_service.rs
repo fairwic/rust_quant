@@ -66,7 +66,7 @@ impl SwapOrderService {
         &self,
         inst_id: &str,
         side: Side,
-        px: f64,
+        _px: f64,
     ) -> Result<Vec<OrderResDto>, Error> {
         //todo 获取当前可以开仓的数量
         let sz = 1;
@@ -362,7 +362,7 @@ impl SwapOrderService {
     pub async fn async_ready_close_order(
         &self,
         inst_id: &str,
-        time: &str,
+        _time: &str,
         position_list: &[Position],
         close_pos_side: &PositionSide,
     ) -> Result<(), AppError> {
@@ -391,14 +391,14 @@ impl SwapOrderService {
     pub async fn start_to_order(
         &self,
         inst_id: &str,
-        time: &str,
+        _time: &str,
         in_order_id: String,
-        close_pos_side: PositionSide,
+        _close_pos_side: PositionSide,
         side: Side,
         pos_side: PositionSide,
         pos_size: String,
         signal: &SignalResult,
-        strategy_type: &StrategyType,
+        _strategy_type: &StrategyType,
         risk_config: &BasicRiskStrategyConfig,
     ) -> Result<Vec<OrderResDto>, AppError> {
         //判断相同周期下是否已经有了订单
@@ -422,7 +422,7 @@ impl SwapOrderService {
         //     return None;
         // }
         let price = signal.open_price;
-        let ts = signal.ts;
+        let _ts = signal.ts;
 
         //todo 当前下单数量不足的时候自动划转交易资金
         // 下单
@@ -456,7 +456,7 @@ impl SwapOrderService {
     ) -> Result<(), AppError> {
         for order in order_results.into_iter() {
             // 下单成功
-            let swap_order_entity = SwapOrderEntity {
+            let _swap_order_entity = SwapOrderEntity {
                 strategy_id,
                 in_order_id: order.cl_ord_id.clone().unwrap_or("".to_string()),
                 strategy_type: strategy_type.as_str().to_owned(),
@@ -484,11 +484,11 @@ impl SwapOrderService {
 
     pub fn generate_fibonacci_take_profit_orders(
         &self,
-        entry_price: f64,
+        _entry_price: f64,
         stop_loss_price: f64,
         tp_price: Option<f64>,
         size: &str,
-        side: &Side,
+        _side: &Side,
     ) -> Vec<AttachAlgoOrdReqDto> {
         let mut orders = Vec::new();
         //止盈

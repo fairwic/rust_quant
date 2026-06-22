@@ -414,7 +414,280 @@ fn framework_equity_trade_report_maps_closed_trade_to_rank_event() {
     assert_eq!(reports[0].delta_rank, 21);
     assert_eq!(reports[0].price_change_pct, 54.09);
     assert_eq!(reports[0].outcome, "win");
+    assert_eq!(reports[0].open_price, 100.0);
+    assert!(reports[0].close_price.unwrap() > reports[0].open_price);
+    assert!(reports[0].quantity > 0.0);
     assert!(reports[0].profit_loss > 0.0);
+}
+
+#[test]
+fn framework_equity_trade_report_applies_early_no_profit_exit() {
+    let entry_ts = MS_15M * 505;
+    let mut candles = Vec::new();
+    for index in 0..505 {
+        candles.push(ohlc(MS_15M * index, 100.0, 100.5, 99.5, 100.0));
+    }
+    candles.push(ohlc(entry_ts, 100.0, 101.0, 99.5, 100.4));
+    candles.push(ohlc(entry_ts + MS_15M, 100.4, 101.0, 99.0, 99.8));
+    candles.push(ohlc(entry_ts + MS_15M * 2, 99.8, 108.0, 99.0, 107.0));
+
+    let confirmed = vec![confirmed_event(
+        43,
+        "EARLY-EXIT-USDT-SWAP",
+        entry_ts,
+        "2026-06-01T00:00:00Z",
+    )];
+    let candles_by_symbol = HashMap::from([("EARLY-EXIT-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 1,
+        stop_loss_pct: 0.03,
+        early_exit_no_profit_candles: Some(1),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let reports = build_framework_equity_trade_reports(&confirmed, &candles_by_symbol, 2.0, &args);
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].event_id, 43);
+    assert_eq!(reports[0].close_type, "early_exit_no_profit");
+    assert_eq!(reports[0].outcome, "loss");
+    assert!(reports[0].profit_loss < 0.0);
+    assert!(reports[0].profit_loss > -1.0);
+}
+
+#[test]
+fn framework_equity_trade_report_keeps_risk_close_type_before_early_exit_signal() {
+    let entry_ts = MS_15M * 505;
+    let mut candles = Vec::new();
+    for index in 0..505 {
+        candles.push(ohlc(MS_15M * index, 100.0, 100.5, 99.5, 100.0));
+    }
+    candles.push(ohlc(entry_ts, 100.0, 101.0, 99.5, 100.4));
+    candles.push(ohlc(entry_ts + MS_15M, 100.4, 101.0, 96.0, 99.8));
+
+    let confirmed = vec![confirmed_event(
+        44,
+        "EARLY-EXIT-STOP-USDT-SWAP",
+        entry_ts,
+        "2026-06-01T00:00:00Z",
+    )];
+    let candles_by_symbol = HashMap::from([("EARLY-EXIT-STOP-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 1,
+        stop_loss_pct: 0.03,
+        early_exit_no_profit_candles: Some(1),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let reports = build_framework_equity_trade_reports(&confirmed, &candles_by_symbol, 2.0, &args);
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].event_id, 44);
+    assert_eq!(reports[0].close_type, "Signal_Kline_Stop_Loss");
+    assert_eq!(reports[0].outcome, "loss");
+}
+
+#[test]
+fn framework_equity_trade_report_expands_runner_close_legs() {
+    let entry_ts = MS_15M * 505;
+    let mut candles = Vec::new();
+    for index in 0..505 {
+        candles.push(ohlc(MS_15M * index, 100.0, 100.5, 99.5, 100.0));
+    }
+    candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
+    candles.push(ohlc(entry_ts + MS_15M, 106.0, 106.5, 105.0, 106.0));
+    candles.push(ohlc(entry_ts + MS_15M * 2, 112.0, 112.5, 111.0, 112.0));
+
+    let confirmed = vec![confirmed_event(
+        45,
+        "RUNNER-USDT-SWAP",
+        entry_ts,
+        "2026-06-01T00:00:00Z",
+    )];
+    let candles_by_symbol = HashMap::from([("RUNNER-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 1,
+        stop_loss_pct: 0.03,
+        runner_target_r: Some(4.0),
+        runner_fraction: 0.3,
+        runner_stop_r: 0.0,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let reports = build_framework_equity_trade_reports(&confirmed, &candles_by_symbol, 2.0, &args);
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].event_id, 45);
+    assert_eq!(reports[0].close_legs.len(), 2);
+    assert_eq!(
+        reports[0].close_legs[0].close_type,
+        "runner_base_target_hit"
+    );
+    assert!(!reports[0].close_legs[0].full_close);
+    assert_eq!(reports[0].close_legs[1].close_type, "runner_target_hit");
+    assert!(reports[0].close_legs[1].full_close);
+    assert!(reports[0].profit_loss > 0.0);
+    assert_eq!(
+        reports[0].profit_loss,
+        reports[0]
+            .close_legs
+            .iter()
+            .map(|leg| leg.profit_loss)
+            .sum::<f64>()
+    );
+}
+
+#[test]
+fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
+    let report = FrameworkEquityTradeReport {
+        target_r: 2.4,
+        symbol: "DETAIL-USDT-SWAP".to_string(),
+        event_id: 77,
+        detected_at: "2026-06-01T02:25:36Z".to_string(),
+        entry_ts: MS_15M * 505,
+        signal_open_position_time: "2026-06-01 10:25:36".to_string(),
+        open_position_time: "1970-01-04 07:15:00".to_string(),
+        close_position_time: Some("1970-01-04 07:30:00".to_string()),
+        open_price: 100.0,
+        close_price: Some(107.2),
+        close_type: "LongTakeProfit".to_string(),
+        signal_status: 1,
+        profit_loss: 6.43,
+        quantity: 1.0,
+        outcome: "win",
+        trigger: "reclaim_ema".to_string(),
+        new_rank: 8,
+        delta_rank: 19,
+        price_change_pct: 43.2,
+        close_legs: Vec::new(),
+    };
+    let args = MarketVelocityEventBacktestArgs {
+        stop_loss_pct: 0.03,
+        entry_period: 20,
+        paper_outcome_entry_rule_version:
+            "rank_radar_4h_trend_15m_episode_research_03sl_24r_rank5_30_v1".to_string(),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let details = build_market_velocity_backtest_details(&report, 123, &args).unwrap();
+    let open = &details[0];
+    let close = &details[1];
+    let signal_value = serde_json::from_str::<serde_json::Value>(&close.signal_value).unwrap();
+
+    assert_eq!(details.len(), 2);
+    assert_eq!(open.back_test_id, 123);
+    assert_eq!(open.inst_id, "DETAIL-USDT-SWAP");
+    assert_eq!(open.strategy_type, "market_velocity_episode");
+    assert_eq!(open.timeframe, "15m");
+    assert_eq!(open.option_type, "long");
+    assert_eq!(
+        open.signal_open_position_time.as_deref(),
+        Some("2026-06-01 10:25:36")
+    );
+    assert_eq!(open.open_position_time, "1970-01-04 07:15:00");
+    assert_eq!(open.close_position_time, "1970-01-04 07:15:00");
+    assert_eq!(open.open_price, "100");
+    assert_eq!(open.close_price, None);
+    assert_eq!(open.profit_loss, "0");
+    assert_eq!(open.quantity, "1");
+    assert_eq!(open.full_close, "false");
+    assert_eq!(open.close_type, "");
+    assert_eq!(close.option_type, "close");
+    assert_eq!(
+        close.signal_open_position_time.as_deref(),
+        Some("2026-06-01 10:25:36")
+    );
+    assert_eq!(close.open_position_time, "1970-01-04 07:15:00");
+    assert_eq!(close.close_position_time, "1970-01-04 07:30:00");
+    assert_eq!(close.close_price.as_deref(), Some("107.2"));
+    assert_eq!(close.profit_loss, "6.43");
+    assert_eq!(close.full_close, "true");
+    assert_eq!(close.close_type, "LongTakeProfit");
+    assert_eq!(close.signal_status, 1);
+    assert_eq!(close.win_nums, 1);
+    assert_eq!(close.loss_nums, 0);
+    assert_eq!(close.signal_result, "market_velocity_framework_replay");
+    assert_eq!(signal_value["rank_event_id"], 77);
+    assert_eq!(signal_value["entry_trigger"], "reclaim_ema");
+    assert_eq!(signal_value["target_r"], 2.4);
+    assert_eq!(
+        signal_value["entry_rule_version"],
+        args.paper_outcome_entry_rule_version
+    );
+}
+
+#[test]
+fn framework_equity_trade_report_builds_runner_legacy_backtest_detail_payload() {
+    let report = FrameworkEquityTradeReport {
+        target_r: 2.4,
+        symbol: "RUNNER-DETAIL-USDT-SWAP".to_string(),
+        event_id: 88,
+        detected_at: "2026-06-01T02:25:36Z".to_string(),
+        entry_ts: MS_15M * 505,
+        signal_open_position_time: "2026-06-01 10:25:36".to_string(),
+        open_position_time: "1970-01-04 07:15:00".to_string(),
+        close_position_time: Some("1970-01-04 07:45:00".to_string()),
+        open_price: 100.0,
+        close_price: Some(112.0),
+        close_type: "runner_base_target_hit+runner_target_hit".to_string(),
+        signal_status: 1,
+        profit_loss: 4.0,
+        quantity: 1.0,
+        outcome: "win",
+        trigger: "breakout_previous_high".to_string(),
+        new_rank: 6,
+        delta_rank: 50,
+        price_change_pct: 21.0,
+        close_legs: vec![
+            FrameworkEquityCloseLegReport {
+                close_ts: MS_15M * 506,
+                close_position_time: "1970-01-04 07:30:00".to_string(),
+                close_price: 107.2,
+                close_type: "runner_base_target_hit".to_string(),
+                profit_loss: 3.0,
+                quantity: 0.7,
+                full_close: false,
+                exit_reason: "runner_base_target_hit".to_string(),
+                result_r: 2.4,
+            },
+            FrameworkEquityCloseLegReport {
+                close_ts: MS_15M * 507,
+                close_position_time: "1970-01-04 07:45:00".to_string(),
+                close_price: 112.0,
+                close_type: "runner_target_hit".to_string(),
+                profit_loss: 1.0,
+                quantity: 0.3,
+                full_close: true,
+                exit_reason: "runner_target_hit".to_string(),
+                result_r: 4.0,
+            },
+        ],
+    };
+    let args = MarketVelocityEventBacktestArgs {
+        stop_loss_pct: 0.03,
+        runner_target_r: Some(4.0),
+        runner_fraction: 0.3,
+        runner_stop_r: 0.0,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let details = build_market_velocity_backtest_details(&report, 456, &args).unwrap();
+
+    assert_eq!(details.len(), 3);
+    assert_eq!(details[0].option_type, "long");
+    assert_eq!(details[1].option_type, "close");
+    assert_eq!(details[1].full_close, "false");
+    assert_eq!(details[1].quantity, "0.7");
+    assert_eq!(details[1].close_type, "runner_base_target_hit");
+    assert_eq!(details[2].option_type, "close");
+    assert_eq!(details[2].full_close, "true");
+    assert_eq!(details[2].quantity, "0.3");
+    assert_eq!(details[2].close_type, "runner_target_hit");
+    let signal_value = serde_json::from_str::<serde_json::Value>(&details[2].signal_value).unwrap();
+    assert_eq!(signal_value["rank_event_id"], 88);
+    assert_eq!(signal_value["exit_reason"], "runner_target_hit");
+    assert_eq!(signal_value["runner_target_r"], 4.0);
+    assert_eq!(signal_value["runner_fraction"], 0.3);
 }
 
 fn confirmed_event(id: i64, symbol: &str, entry_ts: i64, detected_at: &str) -> ConfirmedEvent {

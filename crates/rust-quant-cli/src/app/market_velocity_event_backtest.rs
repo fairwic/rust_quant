@@ -1,10 +1,13 @@
 use anyhow::{bail, Context, Result};
 use chrono::{SecondsFormat, TimeZone, Utc};
+use rust_quant_domain::entities::BacktestLog;
+use rust_quant_domain::traits::BacktestLogRepository;
+use rust_quant_infrastructure::SqlxBacktestRepository;
 use rust_quant_services::rust_quan_web::{
     ExecutionTaskClient, ExecutionTaskConfig, MarketVelocityPaperOutcomeRequest,
 };
 use serde_json::json;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::collections::{BTreeMap, HashMap};
 
 mod args;
@@ -23,17 +26,18 @@ pub use args::{
     print_market_velocity_event_backtest_usage, print_market_velocity_paper_observation_usage,
     EntryTriggerRankBlock, FvgEntryMode, MarketVelocityEventBacktestArgs,
     MarketVelocityEventSource, MarketVelocityPaperObservationCommand,
-    MarketVelocityPaperOutcomeSink, StopReentryMode,
+    MarketVelocityPaperOutcomeSink, MarketVelocityTradeDirection, StopReentryMode,
 };
 use data::load_backtest_data;
 pub use equity::{
     build_framework_equity_concentration_reports, build_framework_equity_quartile_reports,
     build_framework_equity_report, build_framework_equity_split_reports,
     build_framework_equity_trade_reports, build_framework_equity_trigger_reports,
-    print_framework_equity_reports, FrameworkEquityReport, FrameworkEquitySymbolReport,
-    FrameworkEquityTradeReport,
+    build_market_velocity_backtest_details, market_velocity_strategy_type,
+    print_framework_equity_reports, FrameworkEquityCloseLegReport, FrameworkEquityReport,
+    FrameworkEquitySymbolReport, FrameworkEquityTradeReport,
 };
-pub use exit::{simulate_trade, ProfitProtection, RunnerExit};
+pub use exit::{simulate_trade, EarlyExit, ProfitProtection, RunnerExit};
 use fvg::{find_fvg_entry, FvgEntrySearch};
 use reentry::maybe_apply_stop_reentry;
 use report::{print_result_report, print_stage_report};
@@ -98,6 +102,14 @@ pub struct ConfirmedEvent {
     pub entry_price: f64,
     pub entry_idx: usize,
     pub trigger: String,
+}
+
+fn trade_direction_for_event(event: &RadarEvent) -> MarketVelocityTradeDirection {
+    if event.price_change_pct < 0.0 {
+        MarketVelocityTradeDirection::Short
+    } else {
+        MarketVelocityTradeDirection::Long
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -215,6 +227,10 @@ pub async fn run_market_velocity_event_backtest(
     {
         print_framework_equity_reports(&confirmed, &data.candles_15m, &config.args);
     }
+    if config.args.save_backtest_detail {
+        save_market_velocity_backtest_detail(&pool, &confirmed, &data.candles_15m, &config.args)
+            .await?;
+    }
     match config.args.paper_outcome_sink {
         MarketVelocityPaperOutcomeSink::Off => {}
         MarketVelocityPaperOutcomeSink::Jsonl => {
@@ -229,6 +245,151 @@ pub async fn run_market_velocity_event_backtest(
         }
     }
     Ok(())
+}
+
+async fn save_market_velocity_backtest_detail(
+    pool: &PgPool,
+    confirmed: &[ConfirmedEvent],
+    candles_15m: &HashMap<String, Vec<BacktestCandle>>,
+    args: &MarketVelocityEventBacktestArgs,
+) -> Result<()> {
+    let repository = SqlxBacktestRepository::new(pool.clone());
+    let (kline_start_time, kline_end_time, kline_nums) = market_velocity_kline_window(candles_15m);
+    let strategy_type = market_velocity_strategy_type(args).to_string();
+
+    for target_r in &args.target_rs {
+        let report = build_framework_equity_report(confirmed, candles_15m, *target_r, args);
+        let trade_reports =
+            build_framework_equity_trade_reports(confirmed, candles_15m, *target_r, args);
+        let details = trade_reports
+            .iter()
+            .map(|trade| build_market_velocity_backtest_details(trade, 0, args))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+
+        let backtest_log = BacktestLog::new(
+            strategy_type.clone(),
+            "MULTI_SYMBOL".to_string(),
+            "15m".to_string(),
+            report
+                .win_rate
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "NA".to_string()),
+            market_velocity_final_fund(&report).to_string(),
+            report.total_open_trades as i32,
+            Some(market_velocity_strategy_detail(args).to_string()),
+            market_velocity_risk_config_detail(args, *target_r).to_string(),
+            report.total_profit.to_string(),
+            kline_start_time,
+            kline_end_time,
+            kline_nums,
+        );
+        let back_test_id = repository.insert_log(&backtest_log).await?;
+        let details = details
+            .into_iter()
+            .map(|mut detail| {
+                detail.back_test_id = back_test_id;
+                detail
+            })
+            .collect::<Vec<_>>();
+        let inserted = repository.insert_details(&details).await?;
+        println!(
+            "market_velocity_backtest_detail_saved\ttarget={}R\tback_test_log_id={}\ttrades={}\tdetails_inserted={}",
+            target_r,
+            back_test_id,
+            trade_reports.len(),
+            inserted,
+        );
+    }
+
+    Ok(())
+}
+
+fn market_velocity_final_fund(report: &FrameworkEquityReport) -> f64 {
+    report
+        .symbols
+        .iter()
+        .map(|symbol| symbol.final_fund)
+        .sum::<f64>()
+}
+
+fn market_velocity_kline_window(
+    candles_15m: &HashMap<String, Vec<BacktestCandle>>,
+) -> (i64, i64, i32) {
+    let mut start = i64::MAX;
+    let mut end = i64::MIN;
+    let mut nums = 0i32;
+
+    for candle in candles_15m.values().flatten() {
+        start = start.min(candle.ts);
+        end = end.max(candle.ts);
+        nums = nums.saturating_add(1);
+    }
+
+    if nums == 0 {
+        (0, 0, 0)
+    } else {
+        (start, end, nums)
+    }
+}
+
+fn market_velocity_strategy_detail(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
+    json!({
+        "source": "market_velocity_event_backtest",
+        "event_source": match args.event_source {
+            MarketVelocityEventSource::Episodes => "episodes",
+            MarketVelocityEventSource::RawEvents => "raw_events",
+            MarketVelocityEventSource::RawState => "raw_state",
+        },
+        "trade_direction": args.trade_direction.label(),
+        "entry_rule_version": &args.paper_outcome_entry_rule_version,
+        "entry_period": args.entry_period,
+        "entry_max_distance_pct": args.entry_max_distance_pct,
+        "entry_min_volume_ratio": args.entry_min_volume_ratio,
+        "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
+        "min_delta_rank": args.min_delta_rank,
+        "max_delta_rank": args.max_delta_rank,
+        "max_new_rank": args.max_new_rank,
+        "min_price_change_pct": args.min_price_change_pct,
+        "tail_new_rank_threshold": args.tail_new_rank_threshold,
+        "tail_rank_min_price_change_pct": args.tail_rank_min_price_change_pct,
+        "chase_top_rank": args.chase_top_rank,
+        "chase_price_change_pct": args.chase_price_change_pct,
+        "entry_trigger_allowlist": &args.entry_trigger_allowlist,
+        "entry_trigger_blocklist": &args.entry_trigger_blocklist,
+        "entry_trigger_rank_blocklist": args.entry_trigger_rank_blocklist.iter().map(|block| {
+            json!({
+                "trigger": &block.trigger,
+                "min_new_rank": block.min_new_rank,
+                "max_new_rank": block.max_new_rank,
+            })
+        }).collect::<Vec<_>>(),
+        "symbol_blocklist": &args.symbol_blocklist,
+    })
+}
+
+fn market_velocity_risk_config_detail(
+    args: &MarketVelocityEventBacktestArgs,
+    target_r: f64,
+) -> serde_json::Value {
+    json!({
+        "mode": "symbol_isolated_100u",
+        "trade_direction": args.trade_direction.label(),
+        "stop_loss_pct": args.stop_loss_pct,
+        "target_r": target_r,
+        "profit_protect_after_r": args.profit_protect_after_r,
+        "profit_protect_stop_r": args.profit_protect_stop_r,
+        "runner_target_r": args.runner_target_r,
+        "runner_fraction": args.runner_fraction,
+        "runner_stop_r": args.runner_stop_r,
+        "early_exit_no_profit_candles": args.early_exit_no_profit_candles,
+        "stop_reentry_mode": args.stop_reentry_mode.label(),
+        "fvg_entry_mode": args.fvg_entry_mode.label(),
+        "fvg_lookback_candles": args.fvg_lookback_candles,
+        "fvg_max_wait_candles": args.fvg_max_wait_candles,
+    })
 }
 
 pub fn filter_confirmed_events_by_entry_trigger(
@@ -644,6 +805,7 @@ fn summarize_target(
             horizon_ms,
             profit_protection_for_target(args, target_r),
             runner_exit_for_target(args, target_r),
+            early_exit(args),
         );
         result = maybe_apply_stop_reentry(candles, signal, result, target_r, horizon_ms, args);
         result.symbol = Some(symbol.clone());
@@ -732,6 +894,7 @@ pub fn build_market_velocity_paper_outcomes(
                         "fvg_entry": fvg_entry_payload(args),
                         "profit_protection": profit_protection_payload(args),
                         "runner_exit": runner_exit_payload(args),
+                        "early_exit": early_exit_payload(args),
                         "entry_filter": {
                             "entry_trigger_filter_version": entry_trigger_filter_version,
                             "entry_trigger_allowlist": &args.entry_trigger_allowlist,
@@ -787,6 +950,13 @@ fn runner_exit_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Va
     })
 }
 
+fn early_exit_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
+    json!({
+        "enabled": args.early_exit_no_profit_candles.is_some(),
+        "no_profit_candles": args.early_exit_no_profit_candles,
+    })
+}
+
 pub(crate) fn profit_protection_for_target(
     args: &MarketVelocityEventBacktestArgs,
     target_r: f64,
@@ -808,6 +978,11 @@ pub(crate) fn runner_exit_for_target(
         fraction: args.runner_fraction,
         stop_r: args.runner_stop_r,
     })
+}
+
+pub(crate) fn early_exit(args: &MarketVelocityEventBacktestArgs) -> Option<EarlyExit> {
+    args.early_exit_no_profit_candles
+        .map(|no_profit_candles| EarlyExit { no_profit_candles })
 }
 
 fn stop_reentry_payload(

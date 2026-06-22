@@ -37,6 +37,12 @@ pub trait MarketAnomalyRepository: Send + Sync {
         rank_event_id: i64,
         escalated_at: DateTime<Utc>,
     ) -> Result<()>;
+    /// 关闭长时间未再次命中的 active episode，让后续新行情可以形成新的回测样本
+    async fn close_stale_market_velocity_episodes(
+        &self,
+        exchange: &str,
+        stale_before: DateTime<Utc>,
+    ) -> Result<u64>;
     /// 批量保存市场排名价格快照，用于重启后恢复历史排名和价格证据
     async fn save_rank_snapshots(&self, snapshots: &[MarketRankSnapshot]) -> Result<()>;
     /// 读取指定时间之后的市场排名价格快照

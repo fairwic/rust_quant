@@ -9,7 +9,7 @@ pub fn check_ema_touch_trend(
     config: &EmaTouchTrendSignalConfig,
 ) -> EmaTouchTrendSignalValue {
     let mut ema_touch_trend_value = EmaTouchTrendSignalValue::default();
-    let last_data_item = data_items.last().expect("数据不能为空");
+    let _last_data_item = data_items.last().expect("数据不能为空");
 
     // if data_items.last().unwrap().ts == 1762128000000 {
     //     println!("last_data_item: {:?}", data_items.last().unwrap());
@@ -256,6 +256,7 @@ fn check_ema7_touch_signal_bullish(
 }
 
 /// 检查EMA7触碰信号（空头环境中的多头信号）
+#[allow(dead_code)]
 fn check_ema7_touch_signal_bearish(
     last_item: &CandleItem,
     ema_value: &EmaSignalValue,
@@ -306,7 +307,7 @@ pub fn check_breakthrough_conditions(
 }
 
 /// 检查突破确认
-pub fn check_breakthrough_confirmation(data_items: &[CandleItem], is_upward: bool) -> bool {
+pub fn check_breakthrough_confirmation(_data_items: &[CandleItem], _is_upward: bool) -> bool {
     // 实现突破确认逻辑
     // 可以检查:
     // 1. 突破后的持续性

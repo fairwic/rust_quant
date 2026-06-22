@@ -14,9 +14,7 @@ use std::collections::VecDeque;
 use tracing::{debug, info, warn};
 
 use crate::framework::config::strategy_config::StrategyConfig;
-use crate::framework::execution_traits::{
-    ExecutionStateManager, SignalLogger, StrategyExecutionContext, TimeChecker,
-};
+use crate::framework::execution_traits::StrategyExecutionContext;
 use crate::strategy_common::{BasicRiskStrategyConfig, SignalResult};
 use crate::StrategyType;
 use rust_quant_common::CandleItem;

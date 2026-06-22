@@ -5,11 +5,9 @@ use rust_quant_indicators::trend::vegas::{
 
 use crate::framework::backtest::adapter::IndicatorStrategyBacktest;
 use crate::framework::backtest::conversions::{convert_domain_signal, to_domain_basic_risk_config};
-use crate::framework::backtest::trait_impl::BackTestAbleStrategyTrait;
 use crate::framework::backtest::types::{BasicRiskStrategyConfig, SignalResult};
 use crate::strategy_common::get_multi_indicator_values;
 use crate::CandleItem;
-use crate::StrategyType;
 
 /// Vegas 策略回测适配器
 ///

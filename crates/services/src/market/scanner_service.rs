@@ -70,6 +70,10 @@ const MARKET_RANK_TECHNICAL_FETCH_LIMIT: u32 = 80;
 const MARKET_RANK_TECHNICAL_TOUCH_THRESHOLD_PCT: f64 = 0.3;
 const MARKET_VELOCITY_ENTRY_TIMEFRAME: &str = "15m";
 
+fn market_velocity_episode_stale_before(now: DateTime<Utc>) -> DateTime<Utc> {
+    now - Duration::hours(MARKET_RANK_HISTORY_RETENTION_HOURS)
+}
+
 impl ScannerService {
     pub fn new(anomaly_repo: Arc<dyn MarketAnomalyRepository>) -> Result<Self> {
         Self::new_with_technical_candle_service(anomaly_repo, None)
@@ -192,6 +196,8 @@ impl ScannerService {
     pub async fn scan_and_analyze(&mut self) -> Result<Vec<(String, Decimal)>> {
         let mut current_snapshots = self.scanner.fetch_all_tickers().await?;
         let now = Utc::now();
+
+        self.close_stale_market_velocity_episodes(now).await;
 
         // 1. 按 Quote Volume 降序排名
         current_snapshots.sort_by(|a, b| {
@@ -666,6 +672,26 @@ impl ScannerService {
                     episode.symbol, error
                 );
                 None
+            }
+        }
+    }
+
+    async fn close_stale_market_velocity_episodes(&self, now: DateTime<Utc>) {
+        let stale_before = market_velocity_episode_stale_before(now);
+        match self
+            .anomaly_repo
+            .close_stale_market_velocity_episodes("okx", stale_before)
+            .await
+        {
+            Ok(0) => {}
+            Ok(count) => {
+                info!("Closed {} stale market velocity episodes", count);
+            }
+            Err(error) => {
+                warn!(
+                    "Failed to close stale market velocity episodes: {:?}",
+                    error
+                );
             }
         }
     }

@@ -110,7 +110,7 @@ mod tickers_tests {
             .await
             .expect("Failed to init DB pool");
 
-        let model = TicketsModel::new();
+        let _model = TicketsModel::new();
 
         // 注意：这里需要实际的 OKX DTO 结构
         // 由于 TickerOkxResDto 来自 okx 包，这里使用模拟数据
