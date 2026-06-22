@@ -1,4 +1,4 @@
-use super::{BacktestCandle, TradeOutcome, TradeResult};
+use super::{BacktestCandle, MarketVelocityTradeDirection, TradeOutcome, TradeResult};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProfitProtection {
@@ -23,6 +23,7 @@ pub fn simulate_trade(
     entry_idx: usize,
     entry_ts: i64,
     entry_price: f64,
+    direction: MarketVelocityTradeDirection,
     stop_loss_pct: f64,
     target_r: f64,
     horizon_ms: i64,
@@ -30,12 +31,19 @@ pub fn simulate_trade(
     runner_exit: Option<RunnerExit>,
     early_exit: Option<EarlyExit>,
 ) -> TradeResult {
-    let stop_price = entry_price * (1.0 - stop_loss_pct);
-    let target_price = entry_price * (1.0 + stop_loss_pct * target_r);
-    let protection_trigger_price = profit_protection
-        .map(|protection| entry_price * (1.0 + stop_loss_pct * protection.activate_after_r));
-    let protection_stop_price =
-        profit_protection.map(|protection| entry_price * (1.0 + stop_loss_pct * protection.stop_r));
+    let stop_price = stop_price_for(entry_price, stop_loss_pct, direction);
+    let target_price = target_price_for(entry_price, stop_loss_pct, target_r, direction);
+    let protection_trigger_price = profit_protection.map(|protection| {
+        target_price_for(
+            entry_price,
+            stop_loss_pct,
+            protection.activate_after_r,
+            direction,
+        )
+    });
+    let protection_stop_price = profit_protection.map(|protection| {
+        target_price_for(entry_price, stop_loss_pct, protection.stop_r, direction)
+    });
     let horizon_end = entry_ts + horizon_ms;
     let max_ts = candles.last().map(|candle| candle.ts).unwrap_or_default();
     let mut last_seen: Option<&BacktestCandle> = None;
@@ -47,9 +55,9 @@ pub fn simulate_trade(
         }
         last_seen = Some(candle);
         let active_stop_price = protected_stop.map(|(price, _)| price).unwrap_or(stop_price);
-        let hit_stop = candle.low <= active_stop_price;
-        let hit_target = candle.high >= target_price;
-        if hit_stop && hit_target {
+        let hit_stop = hit_stop(candle, active_stop_price, direction);
+        let target_hit = hit_target(candle, target_price, direction);
+        if hit_stop && target_hit {
             return protected_stop
                 .map(|(_, stop_r)| protected_stop_result(candle.ts, stop_r, entry_ts, entry_price))
                 .unwrap_or_else(|| {
@@ -64,7 +72,7 @@ pub fn simulate_trade(
                     )
                 });
         }
-        if hit_target {
+        if target_hit {
             if let Some(runner) = runner_exit {
                 return simulate_runner_trade(
                     candles,
@@ -76,6 +84,7 @@ pub fn simulate_trade(
                     target_r,
                     horizon_ms,
                     runner,
+                    direction,
                 );
             }
             return base_trade_result(
@@ -104,7 +113,8 @@ pub fn simulate_trade(
                 });
         }
         if protected_stop.is_none()
-            && protection_trigger_price.is_some_and(|trigger_price| candle.high >= trigger_price)
+            && protection_trigger_price
+                .is_some_and(|trigger_price| hit_target(candle, trigger_price, direction))
         {
             if let (Some(stop_price), Some(protection)) = (protection_stop_price, profit_protection)
             {
@@ -114,9 +124,9 @@ pub fn simulate_trade(
         if early_exit.is_some_and(|exit| {
             idx > entry_idx
                 && idx >= entry_idx + exit.no_profit_candles
-                && candle.close <= entry_price
+                && no_profit_close(candle.close, entry_price, direction)
         }) {
-            let r = (candle.close - entry_price) / (entry_price * stop_loss_pct);
+            let r = r_for_price(entry_price, stop_loss_pct, candle.close, direction);
             return base_trade_result(
                 outcome_for_r(r),
                 "early_exit_no_profit",
@@ -130,8 +140,8 @@ pub fn simulate_trade(
     }
 
     if max_ts >= horizon_end {
-        let r =
-            last_seen.map(|candle| (candle.close - entry_price) / (entry_price * stop_loss_pct));
+        let r = last_seen
+            .map(|candle| r_for_price(entry_price, stop_loss_pct, candle.close, direction));
         return base_trade_result(
             TradeOutcome::Timeout,
             "horizon_timeout",
@@ -143,7 +153,8 @@ pub fn simulate_trade(
         );
     }
 
-    let r = last_seen.map(|candle| (candle.close - entry_price) / (entry_price * stop_loss_pct));
+    let r =
+        last_seen.map(|candle| r_for_price(entry_price, stop_loss_pct, candle.close, direction));
     base_trade_result(
         TradeOutcome::Incomplete,
         "forward_data_incomplete",
@@ -165,10 +176,12 @@ fn simulate_runner_trade(
     first_target_r: f64,
     horizon_ms: i64,
     runner: RunnerExit,
+    direction: MarketVelocityTradeDirection,
 ) -> TradeResult {
     let first_profit_r = first_target_r * (1.0 - runner.fraction);
-    let runner_target_price = entry_price * (1.0 + stop_loss_pct * runner.target_r);
-    let runner_stop_price = entry_price * (1.0 + stop_loss_pct * runner.stop_r);
+    let runner_target_price =
+        target_price_for(entry_price, stop_loss_pct, runner.target_r, direction);
+    let runner_stop_price = target_price_for(entry_price, stop_loss_pct, runner.stop_r, direction);
     let horizon_end = entry_ts + horizon_ms;
     let max_ts = candles.last().map(|candle| candle.ts).unwrap_or_default();
     let mut last_seen: Option<&BacktestCandle> = None;
@@ -178,8 +191,8 @@ fn simulate_runner_trade(
             break;
         }
         last_seen = Some(candle);
-        let hit_stop = candle.low <= runner_stop_price;
-        let hit_target = candle.high >= runner_target_price;
+        let hit_stop = hit_stop(candle, runner_stop_price, direction);
+        let hit_target = hit_target(candle, runner_target_price, direction);
         if hit_stop && hit_target {
             return runner_trade_result(
                 "runner_stop_first",
@@ -213,7 +226,7 @@ fn simulate_runner_trade(
     }
 
     let runner_close_r =
-        last_seen.map(|candle| (candle.close - entry_price) / (entry_price * stop_loss_pct));
+        last_seen.map(|candle| r_for_price(entry_price, stop_loss_pct, candle.close, direction));
     if max_ts >= horizon_end {
         let r = runner_close_r
             .map(|close_r| first_profit_r + runner.fraction * close_r)
@@ -241,6 +254,82 @@ fn simulate_runner_trade(
         entry_ts,
         entry_price,
     )
+}
+
+fn stop_price_for(
+    entry_price: f64,
+    stop_loss_pct: f64,
+    direction: MarketVelocityTradeDirection,
+) -> f64 {
+    match direction {
+        MarketVelocityTradeDirection::Long => entry_price * (1.0 - stop_loss_pct),
+        MarketVelocityTradeDirection::Short => entry_price * (1.0 + stop_loss_pct),
+        MarketVelocityTradeDirection::Both => entry_price,
+    }
+}
+
+fn target_price_for(
+    entry_price: f64,
+    stop_loss_pct: f64,
+    target_r: f64,
+    direction: MarketVelocityTradeDirection,
+) -> f64 {
+    match direction {
+        MarketVelocityTradeDirection::Long => entry_price * (1.0 + stop_loss_pct * target_r),
+        MarketVelocityTradeDirection::Short => entry_price * (1.0 - stop_loss_pct * target_r),
+        MarketVelocityTradeDirection::Both => entry_price,
+    }
+}
+
+fn hit_stop(
+    candle: &BacktestCandle,
+    stop_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Long => candle.low <= stop_price,
+        MarketVelocityTradeDirection::Short => candle.high >= stop_price,
+        MarketVelocityTradeDirection::Both => false,
+    }
+}
+
+fn hit_target(
+    candle: &BacktestCandle,
+    target_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Long => candle.high >= target_price,
+        MarketVelocityTradeDirection::Short => candle.low <= target_price,
+        MarketVelocityTradeDirection::Both => false,
+    }
+}
+
+fn no_profit_close(
+    close_price: f64,
+    entry_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Long => close_price <= entry_price,
+        MarketVelocityTradeDirection::Short => close_price >= entry_price,
+        MarketVelocityTradeDirection::Both => false,
+    }
+}
+
+fn r_for_price(
+    entry_price: f64,
+    stop_loss_pct: f64,
+    price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> f64 {
+    match direction {
+        MarketVelocityTradeDirection::Long => (price - entry_price) / (entry_price * stop_loss_pct),
+        MarketVelocityTradeDirection::Short => {
+            (entry_price - price) / (entry_price * stop_loss_pct)
+        }
+        MarketVelocityTradeDirection::Both => 0.0,
+    }
 }
 
 fn runner_trade_result(

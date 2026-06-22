@@ -79,7 +79,12 @@ fn entry_confirmation_accepts_breakout_above_averages_with_volume() {
     let computed = build_computed_candles(candles, args.entry_period);
 
     let event_ts = MS_15M * 5;
-    let (ok, reason) = entry_confirmation(&computed, event_ts, &args);
+    let (ok, reason) = entry_confirmation(
+        &computed,
+        event_ts,
+        MarketVelocityTradeDirection::Long,
+        &args,
+    );
 
     assert!(ok);
     assert_eq!(reason, "breakout_previous_high");
@@ -141,7 +146,12 @@ fn trend_confirmation_blocks_weak_4h_average_distance_when_required() {
         ..MarketVelocityEventBacktestArgs::default()
     };
 
-    let (ok, reason) = trend_confirmation(&computed, MS_4H * 21 + MS_15M, &args);
+    let (ok, reason) = trend_confirmation(
+        &computed,
+        MS_4H * 21 + MS_15M,
+        MarketVelocityTradeDirection::Long,
+        &args,
+    );
 
     assert!(!ok);
     assert_eq!(reason, "weak_4h_average_distance");
@@ -188,6 +198,7 @@ fn simulate_trade_treats_same_candle_stop_and_target_as_loss() {
         0,
         MS_15M,
         100.0,
+        MarketVelocityTradeDirection::Long,
         0.02,
         1.5,
         MS_15M * 4,
@@ -290,6 +301,7 @@ fn simulate_trade_can_protect_profit_after_threshold_is_reached() {
         0,
         MS_15M,
         100.0,
+        MarketVelocityTradeDirection::Long,
         0.02,
         2.0,
         MS_15M * 4,
@@ -333,6 +345,7 @@ fn simulate_trade_reports_flat_when_breakeven_protection_is_hit() {
         0,
         MS_15M,
         100.0,
+        MarketVelocityTradeDirection::Long,
         0.02,
         2.0,
         MS_15M * 4,
@@ -376,6 +389,7 @@ fn simulate_trade_exits_when_entry_does_not_profit_after_configured_candles() {
         0,
         MS_15M,
         100.0,
+        MarketVelocityTradeDirection::Long,
         0.02,
         2.0,
         MS_15M * 4,
@@ -419,6 +433,7 @@ fn simulate_trade_can_take_partial_profit_and_hit_runner_target() {
         0,
         MS_15M,
         100.0,
+        MarketVelocityTradeDirection::Long,
         0.02,
         2.0,
         MS_15M * 4,
@@ -463,6 +478,7 @@ fn simulate_trade_keeps_partial_profit_when_runner_stop_is_hit() {
         0,
         MS_15M,
         100.0,
+        MarketVelocityTradeDirection::Long,
         0.02,
         2.0,
         MS_15M * 4,

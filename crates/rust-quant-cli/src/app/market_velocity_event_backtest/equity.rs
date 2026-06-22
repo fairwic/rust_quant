@@ -1,6 +1,6 @@
 use super::{
-    runner_exit_for_target, BacktestCandle, ConfirmedEvent, MarketVelocityEventBacktestArgs,
-    RunnerExit,
+    runner_exit_for_target, trade_direction_for_event, BacktestCandle, ConfirmedEvent,
+    MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection, RunnerExit,
 };
 use anyhow::Result;
 use chrono::{FixedOffset, TimeZone, Utc};
@@ -127,6 +127,7 @@ struct ReplayEntry {
     entry_price: f64,
     event_id: i64,
     trigger: String,
+    direction: MarketVelocityTradeDirection,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -134,6 +135,7 @@ struct ReplayActivePosition {
     entry_price: f64,
     event_id: i64,
     trigger: String,
+    direction: MarketVelocityTradeDirection,
     profit_protected: bool,
     observed_candles: usize,
 }
@@ -727,11 +729,13 @@ fn simulate_framework_runner_trade(
     runner: RunnerExit,
 ) -> Option<RunnerReplayTrade> {
     let entry_price = event.entry_price;
+    let direction = trade_direction_for_event(&event.event);
     let quantity = INITIAL_FUND_PER_SYMBOL / entry_price;
-    let stop_price = entry_price * (1.0 - stop_loss_pct);
-    let target_price = entry_price * (1.0 + stop_loss_pct * target_r);
-    let runner_target_price = entry_price * (1.0 + stop_loss_pct * runner.target_r);
-    let runner_stop_price = entry_price * (1.0 + stop_loss_pct * runner.stop_r);
+    let stop_price = stop_price_for(entry_price, stop_loss_pct, direction);
+    let target_price = target_price_for(entry_price, stop_loss_pct, target_r, direction);
+    let runner_target_price =
+        target_price_for(entry_price, stop_loss_pct, runner.target_r, direction);
+    let runner_stop_price = target_price_for(entry_price, stop_loss_pct, runner.stop_r, direction);
     let base_fraction = 1.0 - runner.fraction;
     let base_quantity = quantity * base_fraction;
     let runner_quantity = quantity * runner.fraction;
@@ -742,11 +746,12 @@ fn simulate_framework_runner_trade(
     for candle in candles.iter().skip(entry_idx) {
         last_seen = Some(candle);
         if base_leg.is_none() {
-            let hit_stop = candle.low <= stop_price;
-            let hit_target = candle.high >= target_price;
+            let hit_stop = hit_stop(candle.low, candle.high, stop_price, direction);
+            let hit_target = hit_target(candle.low, candle.high, target_price, direction);
             if hit_stop && hit_target {
                 return Some(build_single_leg_runner_trade(
                     event,
+                    direction,
                     &open_position_time,
                     entry_price,
                     quantity,
@@ -759,6 +764,7 @@ fn simulate_framework_runner_trade(
             if hit_stop {
                 return Some(build_single_leg_runner_trade(
                     event,
+                    direction,
                     &open_position_time,
                     entry_price,
                     quantity,
@@ -770,6 +776,7 @@ fn simulate_framework_runner_trade(
             }
             if hit_target {
                 base_leg = Some(build_close_leg(
+                    direction,
                     event.entry_price,
                     base_quantity,
                     target_price,
@@ -782,8 +789,8 @@ fn simulate_framework_runner_trade(
             continue;
         }
 
-        let hit_stop = candle.low <= runner_stop_price;
-        let hit_target = candle.high >= runner_target_price;
+        let hit_stop = hit_stop(candle.low, candle.high, runner_stop_price, direction);
+        let hit_target = hit_target(candle.low, candle.high, runner_target_price, direction);
         let (close_price, exit_reason, result_r) = if hit_stop && hit_target {
             (runner_stop_price, "runner_stop_first", runner.stop_r)
         } else if hit_target {
@@ -794,6 +801,7 @@ fn simulate_framework_runner_trade(
             continue;
         };
         let runner_leg = build_close_leg(
+            direction,
             event.entry_price,
             runner_quantity,
             close_price,
@@ -813,8 +821,9 @@ fn simulate_framework_runner_trade(
 
     let last_seen = last_seen?;
     if let Some(base_leg) = base_leg {
-        let close_r = r_for_price(entry_price, stop_loss_pct, last_seen.close);
+        let close_r = r_for_price(entry_price, stop_loss_pct, last_seen.close, direction);
         let runner_leg = build_close_leg(
+            direction,
             entry_price,
             runner_quantity,
             last_seen.close,
@@ -832,9 +841,10 @@ fn simulate_framework_runner_trade(
         ));
     }
 
-    let close_r = r_for_price(entry_price, stop_loss_pct, last_seen.close);
+    let close_r = r_for_price(entry_price, stop_loss_pct, last_seen.close, direction);
     Some(build_single_leg_runner_trade(
         event,
+        direction,
         &open_position_time,
         entry_price,
         quantity,
@@ -847,6 +857,7 @@ fn simulate_framework_runner_trade(
 
 fn build_single_leg_runner_trade(
     event: &ConfirmedEvent,
+    direction: MarketVelocityTradeDirection,
     open_position_time: &str,
     entry_price: f64,
     quantity: f64,
@@ -861,6 +872,7 @@ fn build_single_leg_runner_trade(
         entry_price,
         quantity,
         vec![build_close_leg(
+            direction,
             entry_price,
             quantity,
             close_price,
@@ -906,6 +918,7 @@ fn build_multi_leg_runner_trade(
 }
 
 fn build_close_leg(
+    direction: MarketVelocityTradeDirection,
     entry_price: f64,
     quantity: f64,
     close_price: f64,
@@ -914,7 +927,11 @@ fn build_close_leg(
     result_r: f64,
     full_close: bool,
 ) -> FrameworkEquityCloseLegReport {
-    let raw_profit = quantity * (close_price - entry_price);
+    let raw_profit = match direction {
+        MarketVelocityTradeDirection::Long => quantity * (close_price - entry_price),
+        MarketVelocityTradeDirection::Short => quantity * (entry_price - close_price),
+        MarketVelocityTradeDirection::Both => 0.0,
+    };
     let fee = if raw_profit != 0.0 {
         quantity * entry_price * 0.0007
     } else {
@@ -941,8 +958,94 @@ fn trade_exit_ts(trade: &RunnerReplayTrade) -> i64 {
         .unwrap_or(i64::MAX)
 }
 
-fn r_for_price(entry_price: f64, stop_loss_pct: f64, price: f64) -> f64 {
-    (price - entry_price) / (entry_price * stop_loss_pct)
+fn stop_price_for(
+    entry_price: f64,
+    stop_loss_pct: f64,
+    direction: MarketVelocityTradeDirection,
+) -> f64 {
+    match direction {
+        MarketVelocityTradeDirection::Long => entry_price * (1.0 - stop_loss_pct),
+        MarketVelocityTradeDirection::Short => entry_price * (1.0 + stop_loss_pct),
+        MarketVelocityTradeDirection::Both => entry_price,
+    }
+}
+
+fn target_price_for(
+    entry_price: f64,
+    stop_loss_pct: f64,
+    target_r: f64,
+    direction: MarketVelocityTradeDirection,
+) -> f64 {
+    match direction {
+        MarketVelocityTradeDirection::Long => entry_price * (1.0 + stop_loss_pct * target_r),
+        MarketVelocityTradeDirection::Short => entry_price * (1.0 - stop_loss_pct * target_r),
+        MarketVelocityTradeDirection::Both => entry_price,
+    }
+}
+
+fn hit_stop(
+    candle_low: f64,
+    candle_high: f64,
+    stop_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Long => candle_low <= stop_price,
+        MarketVelocityTradeDirection::Short => candle_high >= stop_price,
+        MarketVelocityTradeDirection::Both => false,
+    }
+}
+
+fn hit_target(
+    candle_low: f64,
+    candle_high: f64,
+    target_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Long => candle_high >= target_price,
+        MarketVelocityTradeDirection::Short => candle_low <= target_price,
+        MarketVelocityTradeDirection::Both => false,
+    }
+}
+
+fn stop_already_crossed(
+    close_price: f64,
+    stop_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Long => close_price <= stop_price,
+        MarketVelocityTradeDirection::Short => close_price >= stop_price,
+        MarketVelocityTradeDirection::Both => true,
+    }
+}
+
+fn no_profit_close(
+    close_price: f64,
+    entry_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Long => close_price <= entry_price,
+        MarketVelocityTradeDirection::Short => close_price >= entry_price,
+        MarketVelocityTradeDirection::Both => false,
+    }
+}
+
+fn r_for_price(
+    entry_price: f64,
+    stop_loss_pct: f64,
+    price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> f64 {
+    match direction {
+        MarketVelocityTradeDirection::Long => (price - entry_price) / (entry_price * stop_loss_pct),
+        MarketVelocityTradeDirection::Short => {
+            (entry_price - price) / (entry_price * stop_loss_pct)
+        }
+        MarketVelocityTradeDirection::Both => 0.0,
+    }
 }
 
 fn push_feature_report<F>(
@@ -972,7 +1075,7 @@ fn push_feature_report<F>(
 }
 
 fn parse_replay_open_trade(record: &TradeRecord) -> Option<ReplayOpenTrade> {
-    if record.option_type != "long" {
+    if record.option_type != "long" && record.option_type != "short" {
         return None;
     }
     let payload = record.signal_value.as_deref()?;
@@ -1006,6 +1109,11 @@ pub fn build_market_velocity_backtest_details(
     let signal_value = market_velocity_detail_signal_value(trade, args).to_string();
     let signal_result = "market_velocity_framework_replay".to_string();
     let strategy_type = market_velocity_strategy_type(args).to_string();
+    let open_option_type = if trade.price_change_pct < 0.0 {
+        "short"
+    } else {
+        "long"
+    };
     let open_price = trade.open_price.to_string();
     let quantity = trade.quantity.to_string();
     let (win_nums, loss_nums) = match trade.outcome {
@@ -1016,7 +1124,7 @@ pub fn build_market_velocity_backtest_details(
 
     let mut details = vec![BacktestDetail::new(
         back_test_id,
-        "long".to_string(),
+        open_option_type.to_string(),
         strategy_type.clone(),
         trade.symbol.clone(),
         "15m".to_string(),
@@ -1119,6 +1227,7 @@ fn market_velocity_detail_signal_value(
         "detected_at": &trade.detected_at,
         "entry_ts": trade.entry_ts,
         "entry_trigger": &trade.trigger,
+        "trade_direction": if trade.price_change_pct < 0.0 { "short" } else { "long" },
         "new_rank": trade.new_rank,
         "delta_rank": trade.delta_rank,
         "price_change_pct": trade.price_change_pct,
@@ -1514,6 +1623,7 @@ impl MarketVelocityReplayStrategy {
                         entry_price: event.entry_price,
                         event_id: event.event.id,
                         trigger: event.trigger,
+                        direction: trade_direction_for_event(&event.event),
                     },
                 )
             })
@@ -1534,16 +1644,18 @@ impl MarketVelocityReplayStrategy {
             entry_price: entry.entry_price,
             event_id: entry.event_id,
             trigger: entry.trigger.clone(),
+            direction: entry.direction,
             profit_protected: false,
             observed_candles: 0,
         });
-        self.build_long_signal(
+        self.build_entry_direction_signal(
             candle_ts,
             entry.entry_price,
-            entry.entry_price * (1.0 - self.stop_loss_pct),
+            stop_price_for(entry.entry_price, self.stop_loss_pct, entry.direction),
             "MarketVelocityFixedRisk",
             entry.event_id,
             &entry.trigger,
+            entry.direction,
             false,
         )
     }
@@ -1554,17 +1666,26 @@ impl MarketVelocityReplayStrategy {
     ) -> Option<SignalResult> {
         let after_r = self.profit_protect_after_r?;
         let active = self.active_position.as_mut()?;
-        let target_price = active.entry_price * (1.0 + self.stop_loss_pct * self.target_r);
-        let current_stop_price = active.entry_price
-            * (1.0
-                + self.stop_loss_pct
-                    * if active.profit_protected {
-                        self.profit_protect_stop_r
-                    } else {
-                        -1.0
-                    });
+        let target_price = target_price_for(
+            active.entry_price,
+            self.stop_loss_pct,
+            self.target_r,
+            active.direction,
+        );
+        let current_stop_price = if active.profit_protected {
+            target_price_for(
+                active.entry_price,
+                self.stop_loss_pct,
+                self.profit_protect_stop_r,
+                active.direction,
+            )
+        } else {
+            stop_price_for(active.entry_price, self.stop_loss_pct, active.direction)
+        };
 
-        if candle.l <= current_stop_price || candle.h >= target_price {
+        if hit_stop(candle.l, candle.h, current_stop_price, active.direction)
+            || hit_target(candle.l, candle.h, target_price, active.direction)
+        {
             self.active_position = None;
             return None;
         }
@@ -1572,27 +1693,38 @@ impl MarketVelocityReplayStrategy {
             return None;
         }
 
-        let trigger_price = active.entry_price * (1.0 + self.stop_loss_pct * after_r);
-        if candle.h < trigger_price {
+        let trigger_price = target_price_for(
+            active.entry_price,
+            self.stop_loss_pct,
+            after_r,
+            active.direction,
+        );
+        if !hit_target(candle.l, candle.h, trigger_price, active.direction) {
             return None;
         }
 
         let entry_price = active.entry_price;
         let event_id = active.event_id;
         let trigger = active.trigger.clone();
-        let protected_stop_price =
-            entry_price * (1.0 + self.stop_loss_pct * self.profit_protect_stop_r);
-        if candle.c <= protected_stop_price {
+        let direction = active.direction;
+        let protected_stop_price = target_price_for(
+            entry_price,
+            self.stop_loss_pct,
+            self.profit_protect_stop_r,
+            direction,
+        );
+        if stop_already_crossed(candle.c, protected_stop_price, direction) {
             return None;
         }
         active.profit_protected = true;
-        Some(self.build_long_signal(
+        Some(self.build_entry_direction_signal(
             candle.ts,
             entry_price,
             protected_stop_price,
             "MarketVelocityProfitProtect",
             event_id,
             &trigger,
+            direction,
             true,
         ))
     }
@@ -1601,16 +1733,19 @@ impl MarketVelocityReplayStrategy {
         let no_profit_candles = self.early_exit_no_profit_candles?;
         let active = self.active_position.as_mut()?;
         active.observed_candles += 1;
-        if active.observed_candles < no_profit_candles || candle.c > active.entry_price {
+        if active.observed_candles < no_profit_candles
+            || !no_profit_close(candle.c, active.entry_price, active.direction)
+        {
             return None;
         }
 
         let event_id = active.event_id;
         let trigger = active.trigger.clone();
+        let direction = active.direction;
         self.active_position = None;
         Some(SignalResult {
-            should_buy: false,
-            should_sell: true,
+            should_buy: direction == MarketVelocityTradeDirection::Short,
+            should_sell: direction == MarketVelocityTradeDirection::Long,
             open_price: candle.c,
             ts: candle.ts,
             single_value: Some(
@@ -1624,13 +1759,22 @@ impl MarketVelocityReplayStrategy {
                 .to_string(),
             ),
             single_result: Some("market_velocity_framework_replay".to_string()),
-            filter_reasons: vec!["FIB_STRICT_MAJOR_BULL_BLOCK_SHORT".to_string()],
-            direction: SignalDirection::Short,
+            filter_reasons: vec![match direction {
+                MarketVelocityTradeDirection::Long => "FIB_STRICT_MAJOR_BULL_BLOCK_SHORT",
+                MarketVelocityTradeDirection::Short => "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG",
+                MarketVelocityTradeDirection::Both => "MARKET_VELOCITY_EARLY_EXIT",
+            }
+            .to_string()],
+            direction: match direction {
+                MarketVelocityTradeDirection::Long => SignalDirection::Short,
+                MarketVelocityTradeDirection::Short => SignalDirection::Long,
+                MarketVelocityTradeDirection::Both => SignalDirection::None,
+            },
             ..SignalResult::default()
         })
     }
 
-    fn build_long_signal(
+    fn build_entry_direction_signal(
         &self,
         candle_ts: i64,
         entry_price: f64,
@@ -1638,22 +1782,36 @@ impl MarketVelocityReplayStrategy {
         stop_loss_source: &str,
         event_id: i64,
         trigger: &str,
+        direction: MarketVelocityTradeDirection,
         profit_protected: bool,
     ) -> SignalResult {
         SignalResult {
-            should_buy: true,
+            should_buy: direction == MarketVelocityTradeDirection::Long,
+            should_sell: direction == MarketVelocityTradeDirection::Short,
             open_price: entry_price,
             signal_kline_stop_loss_price: Some(stop_loss_price),
             stop_loss_source: Some(stop_loss_source.to_string()),
-            long_signal_take_profit_price: Some(
-                entry_price * (1.0 + self.stop_loss_pct * self.target_r),
-            ),
+            long_signal_take_profit_price: (direction == MarketVelocityTradeDirection::Long)
+                .then_some(target_price_for(
+                    entry_price,
+                    self.stop_loss_pct,
+                    self.target_r,
+                    direction,
+                )),
+            short_signal_take_profit_price: (direction == MarketVelocityTradeDirection::Short)
+                .then_some(target_price_for(
+                    entry_price,
+                    self.stop_loss_pct,
+                    self.target_r,
+                    direction,
+                )),
             ts: candle_ts,
             single_value: Some(
                 json!({
                     "source": "market_velocity_framework_replay",
                     "rank_event_id": event_id,
                     "entry_trigger": trigger,
+                    "trade_direction": direction.label(),
                     "target_r": self.target_r,
                     "stop_loss_pct": self.stop_loss_pct,
                     "profit_protected": profit_protected,
@@ -1661,7 +1819,11 @@ impl MarketVelocityReplayStrategy {
                 .to_string(),
             ),
             single_result: Some("market_velocity_framework_replay".to_string()),
-            direction: SignalDirection::Long,
+            direction: match direction {
+                MarketVelocityTradeDirection::Long => SignalDirection::Long,
+                MarketVelocityTradeDirection::Short => SignalDirection::Short,
+                MarketVelocityTradeDirection::Both => SignalDirection::None,
+            },
             ..SignalResult::default()
         }
     }

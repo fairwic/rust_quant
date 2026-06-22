@@ -104,7 +104,7 @@ pub struct ConfirmedEvent {
     pub trigger: String,
 }
 
-fn trade_direction_for_event(event: &RadarEvent) -> MarketVelocityTradeDirection {
+pub(super) fn trade_direction_for_event(event: &RadarEvent) -> MarketVelocityTradeDirection {
     if event.price_change_pct < 0.0 {
         MarketVelocityTradeDirection::Short
     } else {
@@ -526,6 +526,7 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
 pub fn trend_confirmation(
     candles: &[ComputedCandle],
     event_ts: i64,
+    direction: MarketVelocityTradeDirection,
     args: &MarketVelocityEventBacktestArgs,
 ) -> (bool, String) {
     let idx = completed_candle_count(candles, event_ts, MS_4H);
@@ -556,28 +557,38 @@ pub fn trend_confirmation(
     let previous_ema = previous.and_then(|candle| candle.ema);
     let sma_state = moving_average_state(latest.candle.close, sma, previous_close, previous_sma);
     let ema_state = moving_average_state(latest.candle.close, ema, previous_close, previous_ema);
-    let positive = matches!(sma_state, "above" | "breakout_up")
-        && matches!(ema_state, "above" | "breakout_up");
-    if positive && args.trend_min_average_distance_pct > 0.0 {
+    let confirmed = match direction {
+        MarketVelocityTradeDirection::Long => {
+            matches!(sma_state, "above" | "breakout_up")
+                && matches!(ema_state, "above" | "breakout_up")
+        }
+        MarketVelocityTradeDirection::Short => {
+            matches!(sma_state, "below" | "breakdown_down")
+                && matches!(ema_state, "below" | "breakdown_down")
+        }
+        MarketVelocityTradeDirection::Both => false,
+    };
+    if confirmed && args.trend_min_average_distance_pct > 0.0 {
         let Some(sma_distance) = moving_average_distance_pct(latest.candle.close, sma) else {
             return (false, "invalid_4h_distance".to_string());
         };
         let Some(ema_distance) = moving_average_distance_pct(latest.candle.close, ema) else {
             return (false, "invalid_4h_distance".to_string());
         };
-        if sma_distance < args.trend_min_average_distance_pct
-            || ema_distance < args.trend_min_average_distance_pct
+        if sma_distance.abs() < args.trend_min_average_distance_pct
+            || ema_distance.abs() < args.trend_min_average_distance_pct
         {
             return (false, "weak_4h_average_distance".to_string());
         }
     }
 
-    (positive, format!("4h_{sma_state}_{ema_state}"))
+    (confirmed, format!("4h_{sma_state}_{ema_state}"))
 }
 
 pub fn entry_confirmation(
     candles: &[ComputedCandle],
     event_ts: i64,
+    direction: MarketVelocityTradeDirection,
     args: &MarketVelocityEventBacktestArgs,
 ) -> (bool, String) {
     let idx = completed_candle_count(candles, event_ts, MS_15M);
@@ -601,8 +612,21 @@ pub fn entry_confirmation(
     let Some(ema) = latest.ema else {
         return (false, "invalid_15m_average".to_string());
     };
-    if latest.candle.close <= sma || latest.candle.close <= ema {
-        return (false, "price_below_15m_average".to_string());
+    match direction {
+        MarketVelocityTradeDirection::Long
+            if latest.candle.close <= sma || latest.candle.close <= ema =>
+        {
+            return (false, "price_below_15m_average".to_string());
+        }
+        MarketVelocityTradeDirection::Short
+            if latest.candle.close >= sma || latest.candle.close >= ema =>
+        {
+            return (false, "price_above_15m_average".to_string());
+        }
+        MarketVelocityTradeDirection::Both => {
+            return (false, "invalid_trade_direction".to_string())
+        }
+        _ => {}
     }
 
     let Some(sma_distance) = moving_average_distance_pct(latest.candle.close, sma) else {
@@ -612,8 +636,8 @@ pub fn entry_confirmation(
         return (false, "invalid_15m_distance".to_string());
     };
     if args.entry_max_distance_pct > 0.0
-        && (sma_distance > args.entry_max_distance_pct
-            || ema_distance > args.entry_max_distance_pct)
+        && (sma_distance.abs() > args.entry_max_distance_pct
+            || ema_distance.abs() > args.entry_max_distance_pct)
     {
         return (false, "overextended_15m_average".to_string());
     }
@@ -628,24 +652,50 @@ pub fn entry_confirmation(
         return (false, "volume_not_confirmed".to_string());
     }
 
-    if previous.ema.is_some_and(|previous_ema| {
-        previous.candle.close <= previous_ema && latest.candle.close > ema
-    }) {
-        return (true, "reclaim_ema".to_string());
-    }
-    if previous.sma.is_some_and(|previous_sma| {
-        previous.candle.close <= previous_sma && latest.candle.close > sma
-    }) {
-        return (true, "reclaim_ma".to_string());
-    }
-    if latest.candle.close > previous.candle.high {
-        return (true, "breakout_previous_high".to_string());
-    }
-    if latest.candle.low <= ema
-        && latest.candle.close > latest.candle.open
-        && latest.candle.close > ema
-    {
-        return (true, "pullback_hold_ema".to_string());
+    match direction {
+        MarketVelocityTradeDirection::Long => {
+            if previous.ema.is_some_and(|previous_ema| {
+                previous.candle.close <= previous_ema && latest.candle.close > ema
+            }) {
+                return (true, "reclaim_ema".to_string());
+            }
+            if previous.sma.is_some_and(|previous_sma| {
+                previous.candle.close <= previous_sma && latest.candle.close > sma
+            }) {
+                return (true, "reclaim_ma".to_string());
+            }
+            if latest.candle.close > previous.candle.high {
+                return (true, "breakout_previous_high".to_string());
+            }
+            if latest.candle.low <= ema
+                && latest.candle.close > latest.candle.open
+                && latest.candle.close > ema
+            {
+                return (true, "pullback_hold_ema".to_string());
+            }
+        }
+        MarketVelocityTradeDirection::Short => {
+            if previous.ema.is_some_and(|previous_ema| {
+                previous.candle.close >= previous_ema && latest.candle.close < ema
+            }) {
+                return (true, "reject_ema".to_string());
+            }
+            if previous.sma.is_some_and(|previous_sma| {
+                previous.candle.close >= previous_sma && latest.candle.close < sma
+            }) {
+                return (true, "reject_ma".to_string());
+            }
+            if latest.candle.close < previous.candle.low {
+                return (true, "breakdown_previous_low".to_string());
+            }
+            if latest.candle.high >= ema
+                && latest.candle.close < latest.candle.open
+                && latest.candle.close < ema
+            {
+                return (true, "pullback_reject_ema".to_string());
+            }
+        }
+        MarketVelocityTradeDirection::Both => {}
     }
 
     (false, "timing_not_confirmed".to_string())
@@ -683,7 +733,8 @@ pub fn evaluate_events(
             continue;
         };
 
-        let (trend_ok, trend_reason) = trend_confirmation(symbol_4h, event.ts, args);
+        let direction = trade_direction_for_event(event);
+        let (trend_ok, trend_reason) = trend_confirmation(symbol_4h, event.ts, direction, args);
         if !trend_ok {
             increment(&mut stage_counts, "trend_blocked");
             increment_nested(&mut blockers, &event.symbol, &trend_reason);
@@ -693,7 +744,8 @@ pub fn evaluate_events(
 
         match args.fvg_entry_mode {
             FvgEntryMode::Off => {
-                let (entry_ok, entry_reason) = entry_confirmation(symbol_15m, event.ts, args);
+                let (entry_ok, entry_reason) =
+                    entry_confirmation(symbol_15m, event.ts, direction, args);
                 if !entry_ok {
                     increment(&mut stage_counts, "entry_blocked");
                     increment_nested(&mut blockers, &event.symbol, &entry_reason);
@@ -740,6 +792,12 @@ pub fn evaluate_events(
                     increment_nested(&mut blockers, &event.symbol, "no_4h_rows");
                     continue;
                 };
+
+                if direction == MarketVelocityTradeDirection::Short {
+                    increment(&mut stage_counts, "entry_blocked");
+                    increment_nested(&mut blockers, &event.symbol, "short_fvg_not_supported");
+                    continue;
+                }
 
                 match find_fvg_entry(
                     fvg_mode,
@@ -800,6 +858,7 @@ fn summarize_target(
             signal.entry_idx,
             signal.entry_ts,
             signal.entry_price,
+            trade_direction_for_event(&signal.event),
             args.stop_loss_pct,
             target_r,
             horizon_ms,
@@ -882,6 +941,7 @@ pub fn build_market_velocity_paper_outcomes(
                         "detected_at": signal.event.detected_at,
                         "target_r": target_r,
                         "horizon_hours": horizon_hours,
+                        "trade_direction": trade_direction_for_event(&signal.event).label(),
                         "stop_loss_pct": args.stop_loss_pct,
                         "entry_period": args.entry_period,
                         "entry_trigger": entry_trigger,
