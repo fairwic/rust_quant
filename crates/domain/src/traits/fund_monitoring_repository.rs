@@ -1,4 +1,7 @@
-use crate::entities::{FundFlowAlert, MarketAnomaly, MarketRankEvent, MarketRankSnapshot};
+use crate::entities::{
+    FundFlowAlert, MarketAnomaly, MarketRankEvent, MarketRankSnapshot, MarketVelocityEpisode,
+    MarketVelocityEpisodeWrite,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -22,6 +25,18 @@ pub trait MarketAnomalyRepository: Send + Sync {
     ) -> Result<()>;
     /// 追加市场排名事件流水
     async fn save_rank_event(&self, event: &MarketRankEvent) -> Result<i64>;
+    /// UPSERT 市场动能 episode，避免同一机会在高频扫描中重复生成回测样本
+    async fn upsert_market_velocity_episode(
+        &self,
+        episode: &MarketVelocityEpisode,
+    ) -> Result<(i64, MarketVelocityEpisodeWrite)>;
+    /// 记录 episode 最近一次关联的排名事件
+    async fn attach_rank_event_to_market_velocity_episode(
+        &self,
+        episode_id: i64,
+        rank_event_id: i64,
+        escalated_at: DateTime<Utc>,
+    ) -> Result<()>;
     /// 批量保存市场排名价格快照，用于重启后恢复历史排名和价格证据
     async fn save_rank_snapshots(&self, snapshots: &[MarketRankSnapshot]) -> Result<()>;
     /// 读取指定时间之后的市场排名价格快照

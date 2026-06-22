@@ -22,7 +22,8 @@ pub use args::{
     parse_cli_args_from, parse_paper_observation_args_from, parse_paper_observation_command_from,
     print_market_velocity_event_backtest_usage, print_market_velocity_paper_observation_usage,
     EntryTriggerRankBlock, FvgEntryMode, MarketVelocityEventBacktestArgs,
-    MarketVelocityPaperObservationCommand, MarketVelocityPaperOutcomeSink, StopReentryMode,
+    MarketVelocityEventSource, MarketVelocityPaperObservationCommand,
+    MarketVelocityPaperOutcomeSink, StopReentryMode,
 };
 use data::load_backtest_data;
 pub use equity::{

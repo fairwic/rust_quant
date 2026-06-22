@@ -1,6 +1,6 @@
 use super::{
     build_computed_candles, BacktestCandle, BacktestDataSet, CandlePair,
-    MarketVelocityEventBacktestArgs, RadarEvent,
+    MarketVelocityEventBacktestArgs, MarketVelocityEventSource, RadarEvent,
 };
 use anyhow::{Context, Result};
 use sqlx::{PgPool, Row};
@@ -57,55 +57,19 @@ async fn load_candle_pairs(
     pool: &PgPool,
     args: &MarketVelocityEventBacktestArgs,
 ) -> Result<Vec<CandlePair>> {
-    let rows = sqlx::query(
-        r#"
-        WITH candidates AS (
-          SELECT DISTINCT upper(symbol) AS symbol
-          FROM market_rank_events
-          WHERE event_type IN ('rank_velocity', 'top_entry')
-            AND delta_rank >= $1
-            AND ($2::int IS NULL OR delta_rank <= $2)
-            AND new_rank BETWEEN 1 AND $3
-            AND lower(price_direction) = 'up'
-            AND current_price IS NOT NULL
-            AND ($4::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $4)
-            AND (
-              $5::int IS NULL
-              OR $6::double precision IS NULL
-              OR new_rank < $5
-              OR COALESCE(price_change_pct, 0) >= $6
-            )
-            AND NOT (new_rank <= $7 AND COALESCE(price_change_pct, 0) >= $8)
-        )
-        SELECT
-          candidates.symbol,
-          t15.table_name AS candles_15m,
-          t1.table_name AS candles_1h,
-          t4.table_name AS candles_4h
-        FROM candidates
-        JOIN information_schema.tables t15
-          ON t15.table_schema = 'public'
-         AND t15.table_name = lower(candidates.symbol) || '_candles_15m'
-        LEFT JOIN information_schema.tables t1
-          ON t1.table_schema = 'public'
-         AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
-        JOIN information_schema.tables t4
-          ON t4.table_schema = 'public'
-         AND t4.table_name = lower(candidates.symbol) || '_candles_4h'
-        ORDER BY candidates.symbol
-        "#,
-    )
-    .bind(args.min_delta_rank)
-    .bind(args.max_delta_rank)
-    .bind(args.max_new_rank)
-    .bind(args.min_price_change_pct)
-    .bind(args.tail_new_rank_threshold)
-    .bind(args.tail_rank_min_price_change_pct)
-    .bind(args.chase_top_rank)
-    .bind(args.chase_price_change_pct)
-    .fetch_all(pool)
-    .await
-    .context("load market velocity candle table pairs")?;
+    let sql = candidate_symbols_sql(args);
+    let rows = sqlx::query(sql)
+        .bind(args.min_delta_rank)
+        .bind(args.max_delta_rank)
+        .bind(args.max_new_rank)
+        .bind(args.min_price_change_pct)
+        .bind(args.tail_new_rank_threshold)
+        .bind(args.tail_rank_min_price_change_pct)
+        .bind(args.chase_top_rank)
+        .bind(args.chase_price_change_pct)
+        .fetch_all(pool)
+        .await
+        .context("load market velocity candle table pairs")?;
 
     Ok(rows
         .into_iter()
@@ -116,6 +80,91 @@ async fn load_candle_pairs(
             candles_4h: row.get("candles_4h"),
         })
         .collect())
+}
+
+fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
+    match args.event_source {
+        MarketVelocityEventSource::Episodes => {
+            r#"
+            WITH candidates AS (
+              SELECT DISTINCT upper(symbol) AS symbol
+              FROM market_velocity_episodes
+              WHERE event_type IN ('rank_velocity', 'top_entry')
+                AND status = 'active'
+                AND COALESCE(max_delta_rank, latest_delta_rank, 0) >= $1
+                AND ($2::int IS NULL OR COALESCE(max_delta_rank, latest_delta_rank, 0) <= $2)
+                AND COALESCE(best_new_rank, latest_new_rank) BETWEEN 1 AND $3
+                AND lower(price_direction) = 'up'
+                AND current_price IS NOT NULL
+                AND ($4::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $4)
+                AND (
+                  $5::int IS NULL
+                  OR $6::double precision IS NULL
+                  OR COALESCE(best_new_rank, latest_new_rank) < $5
+                  OR COALESCE(price_change_pct, 0) >= $6
+                )
+                AND NOT (
+                  COALESCE(best_new_rank, latest_new_rank) <= $7
+                  AND COALESCE(price_change_pct, 0) >= $8
+                )
+            )
+            SELECT
+              candidates.symbol,
+              t15.table_name AS candles_15m,
+              t1.table_name AS candles_1h,
+              t4.table_name AS candles_4h
+            FROM candidates
+            JOIN information_schema.tables t15
+              ON t15.table_schema = 'public'
+             AND t15.table_name = lower(candidates.symbol) || '_candles_15m'
+            LEFT JOIN information_schema.tables t1
+              ON t1.table_schema = 'public'
+             AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
+            JOIN information_schema.tables t4
+              ON t4.table_schema = 'public'
+             AND t4.table_name = lower(candidates.symbol) || '_candles_4h'
+            ORDER BY candidates.symbol
+            "#
+        }
+        MarketVelocityEventSource::RawEvents => {
+            r#"
+            WITH candidates AS (
+              SELECT DISTINCT upper(symbol) AS symbol
+              FROM market_rank_events
+              WHERE event_type IN ('rank_velocity', 'top_entry')
+                AND delta_rank >= $1
+                AND ($2::int IS NULL OR delta_rank <= $2)
+                AND new_rank BETWEEN 1 AND $3
+                AND lower(price_direction) = 'up'
+                AND current_price IS NOT NULL
+                AND ($4::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $4)
+                AND (
+                  $5::int IS NULL
+                  OR $6::double precision IS NULL
+                  OR new_rank < $5
+                  OR COALESCE(price_change_pct, 0) >= $6
+                )
+                AND NOT (new_rank <= $7 AND COALESCE(price_change_pct, 0) >= $8)
+            )
+            SELECT
+              candidates.symbol,
+              t15.table_name AS candles_15m,
+              t1.table_name AS candles_1h,
+              t4.table_name AS candles_4h
+            FROM candidates
+            JOIN information_schema.tables t15
+              ON t15.table_schema = 'public'
+             AND t15.table_name = lower(candidates.symbol) || '_candles_15m'
+            LEFT JOIN information_schema.tables t1
+              ON t1.table_schema = 'public'
+             AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
+            JOIN information_schema.tables t4
+              ON t4.table_schema = 'public'
+             AND t4.table_name = lower(candidates.symbol) || '_candles_4h'
+            ORDER BY candidates.symbol
+            "#
+        }
+    }
 }
 
 async fn load_candles(pool: &PgPool, table_name: &str) -> Result<Vec<BacktestCandle>> {
@@ -149,49 +198,20 @@ async fn load_events(
     if symbols.is_empty() {
         return Ok(Vec::new());
     }
-    let rows = sqlx::query(
-        r#"
-        SELECT
-          id::bigint AS id,
-          lower(exchange) AS exchange,
-          upper(symbol) AS symbol,
-          floor(extract(epoch from detected_at) * 1000)::bigint AS detected_ms,
-          detected_at::text AS detected_at,
-          new_rank::int AS new_rank,
-          delta_rank::int AS delta_rank,
-          current_price::text AS current_price,
-          COALESCE(price_change_pct, 0)::text AS price_change_pct
-        FROM market_rank_events
-        WHERE upper(symbol) = ANY($1)
-          AND event_type IN ('rank_velocity', 'top_entry')
-          AND delta_rank >= $2
-          AND ($3::int IS NULL OR delta_rank <= $3)
-          AND new_rank BETWEEN 1 AND $4
-          AND lower(price_direction) = 'up'
-          AND current_price IS NOT NULL
-          AND ($5::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $5)
-          AND (
-            $6::int IS NULL
-            OR $7::double precision IS NULL
-            OR new_rank < $6
-            OR COALESCE(price_change_pct, 0) >= $7
-          )
-          AND NOT (new_rank <= $8 AND COALESCE(price_change_pct, 0) >= $9)
-        ORDER BY detected_at, id
-        "#,
-    )
-    .bind(symbols)
-    .bind(args.min_delta_rank)
-    .bind(args.max_delta_rank)
-    .bind(args.max_new_rank)
-    .bind(args.min_price_change_pct)
-    .bind(args.tail_new_rank_threshold)
-    .bind(args.tail_rank_min_price_change_pct)
-    .bind(args.chase_top_rank)
-    .bind(args.chase_price_change_pct)
-    .fetch_all(pool)
-    .await
-    .context("load market velocity radar events")?;
+    let sql = event_source_sql(args);
+    let rows = sqlx::query(sql)
+        .bind(symbols)
+        .bind(args.min_delta_rank)
+        .bind(args.max_delta_rank)
+        .bind(args.max_new_rank)
+        .bind(args.min_price_change_pct)
+        .bind(args.tail_new_rank_threshold)
+        .bind(args.tail_rank_min_price_change_pct)
+        .bind(args.chase_top_rank)
+        .bind(args.chase_price_change_pct)
+        .fetch_all(pool)
+        .await
+        .context("load market velocity radar events")?;
 
     rows.into_iter()
         .map(|row| {
@@ -210,6 +230,77 @@ async fn load_events(
         .collect()
 }
 
+fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
+    match args.event_source {
+        MarketVelocityEventSource::Episodes => {
+            r#"
+            SELECT
+              id::bigint AS id,
+              lower(exchange) AS exchange,
+              upper(symbol) AS symbol,
+              floor(extract(epoch from started_at) * 1000)::bigint AS detected_ms,
+              started_at::text AS detected_at,
+              COALESCE(best_new_rank, latest_new_rank)::int AS new_rank,
+              COALESCE(max_delta_rank, latest_delta_rank)::int AS delta_rank,
+              current_price::text AS current_price,
+              COALESCE(price_change_pct, 0)::text AS price_change_pct
+            FROM market_velocity_episodes
+            WHERE upper(symbol) = ANY($1)
+              AND event_type IN ('rank_velocity', 'top_entry')
+              AND status = 'active'
+              AND COALESCE(max_delta_rank, latest_delta_rank, 0) >= $2
+              AND ($3::int IS NULL OR COALESCE(max_delta_rank, latest_delta_rank, 0) <= $3)
+              AND COALESCE(best_new_rank, latest_new_rank) BETWEEN 1 AND $4
+              AND lower(price_direction) = 'up'
+              AND current_price IS NOT NULL
+              AND ($5::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $5)
+              AND (
+                $6::int IS NULL
+                OR $7::double precision IS NULL
+                OR COALESCE(best_new_rank, latest_new_rank) < $6
+                OR COALESCE(price_change_pct, 0) >= $7
+              )
+              AND NOT (
+                COALESCE(best_new_rank, latest_new_rank) <= $8
+                AND COALESCE(price_change_pct, 0) >= $9
+              )
+            ORDER BY started_at, id
+            "#
+        }
+        MarketVelocityEventSource::RawEvents => {
+            r#"
+            SELECT
+              id::bigint AS id,
+              lower(exchange) AS exchange,
+              upper(symbol) AS symbol,
+              floor(extract(epoch from detected_at) * 1000)::bigint AS detected_ms,
+              detected_at::text AS detected_at,
+              new_rank::int AS new_rank,
+              delta_rank::int AS delta_rank,
+              current_price::text AS current_price,
+              COALESCE(price_change_pct, 0)::text AS price_change_pct
+            FROM market_rank_events
+            WHERE upper(symbol) = ANY($1)
+              AND event_type IN ('rank_velocity', 'top_entry')
+              AND delta_rank >= $2
+              AND ($3::int IS NULL OR delta_rank <= $3)
+              AND new_rank BETWEEN 1 AND $4
+              AND lower(price_direction) = 'up'
+              AND current_price IS NOT NULL
+              AND ($5::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $5)
+              AND (
+                $6::int IS NULL
+                OR $7::double precision IS NULL
+                OR new_rank < $6
+                OR COALESCE(price_change_pct, 0) >= $7
+              )
+              AND NOT (new_rank <= $8 AND COALESCE(price_change_pct, 0) >= $9)
+            ORDER BY detected_at, id
+            "#
+        }
+    }
+}
+
 fn parse_f64(value: &str) -> Result<f64> {
     value
         .parse::<f64>()
@@ -218,4 +309,37 @@ fn parse_f64(value: &str) -> Result<f64> {
 
 fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::market_velocity_event_backtest::{
+        MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
+    };
+
+    #[test]
+    fn episode_event_source_reads_episode_table() {
+        let args = MarketVelocityEventBacktestArgs {
+            event_source: MarketVelocityEventSource::Episodes,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+
+        let sql = event_source_sql(&args);
+
+        assert!(sql.contains("FROM market_velocity_episodes"));
+        assert!(!sql.contains("FROM market_rank_events"));
+    }
+
+    #[test]
+    fn raw_event_source_keeps_legacy_rank_event_table() {
+        let args = MarketVelocityEventBacktestArgs {
+            event_source: MarketVelocityEventSource::RawEvents,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+
+        let sql = event_source_sql(&args);
+
+        assert!(sql.contains("FROM market_rank_events"));
+    }
 }

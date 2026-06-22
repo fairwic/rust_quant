@@ -191,4 +191,49 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
             "postgres quant_core DDL must comment column {column}"
         );
     }
+
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("CREATE TABLE IF NOT EXISTS market_velocity_episodes"),
+        "postgres quant_core DDL must create market_velocity_episodes"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("COMMENT ON TABLE market_velocity_episodes"),
+        "postgres quant_core DDL must comment market_velocity_episodes"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("uidx_market_velocity_episodes_active_key"),
+        "postgres quant_core DDL must enforce one active market velocity episode per rank signal key"
+    );
+    for column in [
+        "market_velocity_episodes.id",
+        "market_velocity_episodes.exchange",
+        "market_velocity_episodes.symbol",
+        "market_velocity_episodes.event_type",
+        "market_velocity_episodes.timeframe",
+        "market_velocity_episodes.status",
+        "market_velocity_episodes.started_at",
+        "market_velocity_episodes.last_seen_at",
+        "market_velocity_episodes.first_old_rank",
+        "market_velocity_episodes.latest_old_rank",
+        "market_velocity_episodes.latest_new_rank",
+        "market_velocity_episodes.best_new_rank",
+        "market_velocity_episodes.latest_delta_rank",
+        "market_velocity_episodes.max_delta_rank",
+        "market_velocity_episodes.hit_count",
+        "market_velocity_episodes.volume_24h_quote",
+        "market_velocity_episodes.current_price",
+        "market_velocity_episodes.previous_price",
+        "market_velocity_episodes.price_change_pct",
+        "market_velocity_episodes.price_direction",
+        "market_velocity_episodes.technical_snapshot_status",
+        "market_velocity_episodes.last_rank_event_id",
+        "market_velocity_episodes.last_escalated_at",
+        "market_velocity_episodes.created_at",
+        "market_velocity_episodes.updated_at",
+    ] {
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(&format!("COMMENT ON COLUMN {column}")),
+            "postgres quant_core DDL must comment column {column}"
+        );
+    }
 }

@@ -1,4 +1,26 @@
 use super::super::parse_cli_args_from;
+use super::super::MarketVelocityEventSource;
+
+#[test]
+fn defaults_to_episode_event_source_for_clean_backtests() {
+    let args = parse_cli_args_from([] as [&str; 0]).unwrap();
+
+    assert_eq!(args.event_source, MarketVelocityEventSource::Episodes);
+}
+
+#[test]
+fn parses_raw_event_source_for_legacy_research() {
+    let args = parse_cli_args_from(["--event-source", "raw_events"]).unwrap();
+
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawEvents);
+}
+
+#[test]
+fn rejects_unknown_event_source() {
+    let err = parse_cli_args_from(["--event-source", "market_rank_events"]).unwrap_err();
+
+    assert!(err.to_string().contains("unknown --event-source"));
+}
 
 #[test]
 fn parses_optional_max_delta_rank_research_filter() {

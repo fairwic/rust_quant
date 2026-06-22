@@ -81,6 +81,34 @@ fn build_rank_velocity_event(
     }
 }
 
+fn build_market_velocity_episode_from_event(event: &MarketRankEvent) -> MarketVelocityEpisode {
+    MarketVelocityEpisode {
+        id: None,
+        exchange: event.exchange.clone(),
+        symbol: event.symbol.clone(),
+        event_type: event.event_type,
+        timeframe: event.timeframe.clone(),
+        status: "active".to_string(),
+        started_at: event.detected_at,
+        last_seen_at: event.detected_at,
+        first_old_rank: event.old_rank,
+        latest_old_rank: event.old_rank,
+        latest_new_rank: event.new_rank,
+        best_new_rank: event.new_rank,
+        latest_delta_rank: event.delta_rank,
+        max_delta_rank: event.delta_rank,
+        hit_count: 1,
+        volume_24h_quote: event.volume_24h_quote,
+        current_price: event.current_price,
+        previous_price: event.previous_price,
+        price_change_pct: event.price_change_pct,
+        price_direction: event.price_direction.clone(),
+        technical_snapshot_status: event.technical_snapshot_status.clone(),
+        last_rank_event_id: event.id,
+        last_escalated_at: None,
+    }
+}
+
 fn build_top_list_event(
     symbol: &str,
     is_entry: bool,

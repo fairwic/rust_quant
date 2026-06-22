@@ -53,6 +53,22 @@ const PAPER_STRATEGY_PRESET_LOCKED_FLAGS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketVelocityEventSource {
+    Episodes,
+    RawEvents,
+}
+
+impl MarketVelocityEventSource {
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "episodes" | "episode" | "market_velocity_episodes" => Ok(Self::Episodes),
+            "raw_events" | "raw" => Ok(Self::RawEvents),
+            other => bail!("unknown --event-source: {other}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarketVelocityPaperOutcomeSink {
     Off,
     Jsonl,
@@ -221,6 +237,7 @@ pub struct MarketVelocityEventBacktestArgs {
     pub max_15m_staleness_min: i64,
     pub max_4h_staleness_min: i64,
     pub sample_limit: usize,
+    pub event_source: MarketVelocityEventSource,
     pub paper_outcome_sink: MarketVelocityPaperOutcomeSink,
     pub paper_outcome_entry_rule_version: String,
     pub entry_trigger_allowlist: Vec<String>,
@@ -267,6 +284,7 @@ impl Default for MarketVelocityEventBacktestArgs {
             max_15m_staleness_min: 30,
             max_4h_staleness_min: 240,
             sample_limit: 5,
+            event_source: MarketVelocityEventSource::Episodes,
             paper_outcome_sink: MarketVelocityPaperOutcomeSink::Off,
             paper_outcome_entry_rule_version: DEFAULT_PAPER_OUTCOME_ENTRY_RULE_VERSION.to_string(),
             entry_trigger_allowlist: Vec::new(),
@@ -347,6 +365,10 @@ where
             }
             "--max-4h-staleness-min" => parsed.max_4h_staleness_min = parse_next(&mut args, &arg)?,
             "--sample-limit" => parsed.sample_limit = parse_next(&mut args, &arg)?,
+            "--event-source" => {
+                parsed.event_source =
+                    MarketVelocityEventSource::from_str(&next_arg(&mut args, &arg)?)?
+            }
             "--paper-outcome-sink" => {
                 parsed.paper_outcome_sink =
                     MarketVelocityPaperOutcomeSink::from_str(&next_arg(&mut args, &arg)?)?
@@ -648,7 +670,7 @@ fn normalized_arg_flag(arg: &str) -> &str {
 
 pub fn print_market_velocity_event_backtest_usage() {
     println!(
-        "Usage: market_velocity_event_backtest [--target-rs 1.5,2.0] [--stop-loss-pct 0.02] [--entry-period 20] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--tail-new-rank-threshold 21 --tail-rank-min-price-change-pct 10.0] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--entry-trigger-rank-blocklist reclaim_ema:11-20] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--fvg-entry-mode off|15m_to_1h|1h_to_4h] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--paper-outcome-sink off|jsonl|web]"
+        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02] [--entry-period 20] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--tail-new-rank-threshold 21 --tail-rank-min-price-change-pct 10.0] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--entry-trigger-rank-blocklist reclaim_ema:11-20] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--fvg-entry-mode off|15m_to_1h|1h_to_4h] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--paper-outcome-sink off|jsonl|web]"
     );
 }
 

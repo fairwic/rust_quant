@@ -4,7 +4,7 @@ use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use rust_quant_domain::entities::{
     MarketAnomaly, MarketRankEvent, MarketRankEventType, MarketRankSnapshot,
-    MarketRankTechnicalSnapshot, TickerSnapshot,
+    MarketRankTechnicalSnapshot, MarketVelocityEpisode, TickerSnapshot,
 };
 use rust_quant_domain::traits::fund_monitoring_repository::MarketAnomalyRepository;
 use rust_quant_domain::Candle;
@@ -560,9 +560,15 @@ impl ScannerService {
             detected_at,
             technical_capture,
         );
+        let episode = build_market_velocity_episode_from_event(&event);
+        let Some(episode_id) = self.market_velocity_episode_append_id(&episode).await else {
+            return;
+        };
         match self.anomaly_repo.save_rank_event(&event).await {
             Ok(id) => {
                 event.id = Some(id);
+                self.attach_rank_event_to_market_velocity_episode(episode_id, id, detected_at)
+                    .await;
                 let entry_confirmation = self
                     .market_velocity_entry_confirmation_if_needed(&event)
                     .await;
@@ -613,9 +619,15 @@ impl ScannerService {
             detected_at,
             technical_capture,
         );
+        let episode = build_market_velocity_episode_from_event(&event);
+        let Some(episode_id) = self.market_velocity_episode_append_id(&episode).await else {
+            return;
+        };
         match self.anomaly_repo.save_rank_event(&event).await {
             Ok(id) => {
                 event.id = Some(id);
+                self.attach_rank_event_to_market_velocity_episode(episode_id, id, detected_at)
+                    .await;
                 let entry_confirmation = self
                     .market_velocity_entry_confirmation_if_needed(&event)
                     .await;
@@ -635,6 +647,44 @@ impl ScannerService {
             Err(e) => {
                 error!("Failed to save top list event for {}: {:?}", symbol, e);
             }
+        }
+    }
+
+    async fn market_velocity_episode_append_id(
+        &self,
+        episode: &MarketVelocityEpisode,
+    ) -> Option<i64> {
+        match self
+            .anomaly_repo
+            .upsert_market_velocity_episode(episode)
+            .await
+        {
+            Ok((id, write)) => write.should_append_rank_event().then_some(id),
+            Err(error) => {
+                error!(
+                    "Failed to upsert market velocity episode for {}: {:?}",
+                    episode.symbol, error
+                );
+                None
+            }
+        }
+    }
+
+    async fn attach_rank_event_to_market_velocity_episode(
+        &self,
+        episode_id: i64,
+        rank_event_id: i64,
+        escalated_at: DateTime<Utc>,
+    ) {
+        if let Err(error) = self
+            .anomaly_repo
+            .attach_rank_event_to_market_velocity_episode(episode_id, rank_event_id, escalated_at)
+            .await
+        {
+            warn!(
+                "Failed to attach rank event {} to market velocity episode {}: {:?}",
+                rank_event_id, episode_id, error
+            );
         }
     }
 

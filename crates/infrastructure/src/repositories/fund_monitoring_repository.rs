@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_quant_domain::entities::{
     FundFlowAlert, FundFlowSide, MarketAnomaly, MarketRankEvent, MarketRankSnapshot,
+    MarketVelocityEpisode, MarketVelocityEpisodeWrite,
 };
 use rust_quant_domain::traits::fund_monitoring_repository::{
     FundFlowAlertRepository, MarketAnomalyRepository,
@@ -17,6 +18,22 @@ pub struct SqlxMarketAnomalyRepository {
 impl SqlxMarketAnomalyRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+}
+
+fn rank_improved(new_rank: Option<i32>, old_best_rank: Option<i32>) -> bool {
+    match (new_rank, old_best_rank) {
+        (Some(new_rank), Some(old_best_rank)) => new_rank < old_best_rank,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+fn delta_improved(new_delta: Option<i32>, old_max_delta: Option<i32>) -> bool {
+    match (new_delta, old_max_delta) {
+        (Some(new_delta), Some(old_max_delta)) => new_delta > old_max_delta,
+        (Some(_), None) => true,
+        _ => false,
     }
 }
 
@@ -201,6 +218,145 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .await?;
 
         Ok(inserted_id)
+    }
+
+    async fn upsert_market_velocity_episode(
+        &self,
+        episode: &MarketVelocityEpisode,
+    ) -> Result<(i64, MarketVelocityEpisodeWrite)> {
+        let mut tx = self.pool.begin().await?;
+        let existing = sqlx::query(
+            r#"
+            SELECT id, best_new_rank, max_delta_rank
+              FROM market_velocity_episodes
+             WHERE LOWER(exchange) = LOWER($1)
+               AND symbol = $2
+               AND event_type = $3
+               AND COALESCE(timeframe, '') = COALESCE($4, '')
+               AND status = 'active'
+             FOR UPDATE
+            "#,
+        )
+        .bind(&episode.exchange)
+        .bind(&episode.symbol)
+        .bind(episode.event_type.as_str())
+        .bind(&episode.timeframe)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(row) = existing else {
+            let id = sqlx::query_scalar::<_, i64>(
+                r#"
+                INSERT INTO market_velocity_episodes
+                    (exchange, symbol, event_type, timeframe, status, started_at, last_seen_at,
+                     first_old_rank, latest_old_rank, latest_new_rank, best_new_rank,
+                     latest_delta_rank, max_delta_rank, hit_count, volume_24h_quote,
+                     current_price, previous_price, price_change_pct, price_direction,
+                     technical_snapshot_status)
+                VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $7, $8, $8,
+                        $9, $9, 1, $10, $11, $12, $13, $14, $15)
+                RETURNING id
+                "#,
+            )
+            .bind(&episode.exchange)
+            .bind(&episode.symbol)
+            .bind(episode.event_type.as_str())
+            .bind(&episode.timeframe)
+            .bind(episode.started_at)
+            .bind(episode.last_seen_at)
+            .bind(episode.first_old_rank)
+            .bind(episode.latest_new_rank)
+            .bind(episode.latest_delta_rank)
+            .bind(episode.volume_24h_quote)
+            .bind(episode.current_price)
+            .bind(episode.previous_price)
+            .bind(episode.price_change_pct)
+            .bind(&episode.price_direction)
+            .bind(&episode.technical_snapshot_status)
+            .fetch_one(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok((id, MarketVelocityEpisodeWrite::Created));
+        };
+
+        let id: i64 = row.try_get("id")?;
+        let old_best_rank: Option<i32> = row.try_get("best_new_rank")?;
+        let old_max_delta: Option<i32> = row.try_get("max_delta_rank")?;
+        let escalated = rank_improved(episode.latest_new_rank, old_best_rank)
+            || delta_improved(episode.latest_delta_rank, old_max_delta);
+
+        sqlx::query(
+            r#"
+            UPDATE market_velocity_episodes
+               SET last_seen_at = $2,
+                   latest_old_rank = $3,
+                   latest_new_rank = $4,
+                   best_new_rank = CASE
+                       WHEN best_new_rank IS NULL THEN $4
+                       WHEN $4::INTEGER IS NULL THEN best_new_rank
+                       ELSE LEAST(best_new_rank, $4)
+                   END,
+                   latest_delta_rank = $5,
+                   max_delta_rank = CASE
+                       WHEN max_delta_rank IS NULL THEN $5
+                       WHEN $5::INTEGER IS NULL THEN max_delta_rank
+                       ELSE GREATEST(max_delta_rank, $5)
+                   END,
+                   hit_count = hit_count + 1,
+                   volume_24h_quote = $6,
+                   current_price = $7,
+                   previous_price = $8,
+                   price_change_pct = $9,
+                   price_direction = $10,
+                   technical_snapshot_status = $11,
+                   updated_at = NOW()
+             WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .bind(episode.last_seen_at)
+        .bind(episode.latest_old_rank)
+        .bind(episode.latest_new_rank)
+        .bind(episode.latest_delta_rank)
+        .bind(episode.volume_24h_quote)
+        .bind(episode.current_price)
+        .bind(episode.previous_price)
+        .bind(episode.price_change_pct)
+        .bind(&episode.price_direction)
+        .bind(&episode.technical_snapshot_status)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        let write = if escalated {
+            MarketVelocityEpisodeWrite::Escalated
+        } else {
+            MarketVelocityEpisodeWrite::Updated
+        };
+        Ok((id, write))
+    }
+
+    async fn attach_rank_event_to_market_velocity_episode(
+        &self,
+        episode_id: i64,
+        rank_event_id: i64,
+        escalated_at: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE market_velocity_episodes
+               SET last_rank_event_id = $2,
+                   last_escalated_at = $3,
+                   updated_at = NOW()
+             WHERE id = $1
+            "#,
+        )
+        .bind(episode_id)
+        .bind(rank_event_id)
+        .bind(escalated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn save_rank_snapshots(&self, snapshots: &[MarketRankSnapshot]) -> Result<()> {

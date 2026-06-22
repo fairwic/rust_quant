@@ -136,6 +136,47 @@ pub struct MarketRankEvent {
     pub notification_state: String,
 }
 
+/// 市场动能机会状态。一个 active episode 表示同一交易对/周期的排名跃迁机会仍在延续。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketVelocityEpisode {
+    pub id: Option<i64>,
+    pub exchange: String,
+    pub symbol: String,
+    pub event_type: MarketRankEventType,
+    pub timeframe: Option<String>,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub first_old_rank: Option<i32>,
+    pub latest_old_rank: Option<i32>,
+    pub latest_new_rank: Option<i32>,
+    pub best_new_rank: Option<i32>,
+    pub latest_delta_rank: Option<i32>,
+    pub max_delta_rank: Option<i32>,
+    pub hit_count: i32,
+    pub volume_24h_quote: Option<Decimal>,
+    pub current_price: Option<Decimal>,
+    pub previous_price: Option<Decimal>,
+    pub price_change_pct: Option<Decimal>,
+    pub price_direction: String,
+    pub technical_snapshot_status: String,
+    pub last_rank_event_id: Option<i64>,
+    pub last_escalated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketVelocityEpisodeWrite {
+    Created,
+    Escalated,
+    Updated,
+}
+
+impl MarketVelocityEpisodeWrite {
+    pub fn should_append_rank_event(self) -> bool {
+        matches!(self, Self::Created | Self::Escalated)
+    }
+}
+
 /// 资金流向报警
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FundFlowAlert {
