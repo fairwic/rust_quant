@@ -113,8 +113,10 @@ pub fn strategy_config_upsert_request_from_body(
 
 pub(super) fn create_quant_core_internal_pool() -> Result<PgPool> {
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .context("QUANT_CORE_DATABASE_URL is required for quant_core internal APIs")?;
+        .or_else(|_| std::env::var("POSTGRES_QUANT_CORE_DATABASE_URL"))
+        .context(
+            "QUANT_CORE_DATABASE_URL or POSTGRES_QUANT_CORE_DATABASE_URL is required for quant_core internal APIs",
+        )?;
     PgPoolOptions::new()
         .max_connections(3)
         .connect_lazy(&database_url)

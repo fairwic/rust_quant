@@ -163,6 +163,10 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
         POSTGRES_QUANT_CORE_DDL.contains("chk_market_rank_events_price_direction"),
         "postgres quant_core DDL must constrain market rank event price direction"
     );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("idx_market_rank_events_radar_exchange_recent"),
+        "postgres quant_core DDL must index recent radar event lookups by exchange and time"
+    );
 
     assert!(
         POSTGRES_QUANT_CORE_DDL.contains("CREATE TABLE IF NOT EXISTS market_rank_snapshots"),

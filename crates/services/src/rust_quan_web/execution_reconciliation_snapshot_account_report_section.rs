@@ -6,6 +6,7 @@ pub fn build_exchange_account_snapshot_report_request(
     fills: &[Fill],
     balances: &[Balance],
     account_bills: &[AccountBill],
+    position_history: &[PositionHistory],
 ) -> Result<ExchangeAccountSnapshotReportRequest> {
     let snapshot_at = web_naive_datetime_string(chrono::Utc::now().naive_utc());
     let source_ref = exchange_account_snapshot_source_ref(config);
@@ -127,6 +128,48 @@ pub fn build_exchange_account_snapshot_report_request(
         })
         .collect();
 
+    let position_history = position_history
+        .iter()
+        .filter(|position| position.exchange == config.exchange)
+        .filter(|position| same_exchange_symbol(&position.exchange_symbol, &config.symbol))
+        .filter_map(|position| {
+            let external_position_id = trimmed_optional(position.position_id.as_deref())?;
+            Some(ExchangeAccountPositionHistorySnapshotInput {
+                external_position_id,
+                side: trimmed_optional(position.side.as_deref()),
+                direction: trimmed_optional(position.direction.as_deref()),
+                close_type: trimmed_optional(position.close_type.as_deref()),
+                margin_mode: trimmed_optional(position.margin_mode.as_deref()),
+                leverage: decimal_option(position.leverage.as_deref()),
+                open_avg_price: decimal_option(position.open_avg_price.as_deref()),
+                close_avg_price: decimal_option(position.close_avg_price.as_deref()),
+                open_max_position: decimal_option(position.open_max_position.as_deref()),
+                close_total_position: decimal_option(position.close_total_position.as_deref()),
+                realized_pnl_usdt: decimal_option(position.realized_pnl.as_deref()),
+                pnl_usdt: decimal_option(position.pnl.as_deref()),
+                pnl_ratio: decimal_option(position.pnl_ratio.as_deref()),
+                fee_usdt: decimal_option(position.fee.as_deref()),
+                funding_fee_usdt: decimal_option(position.funding_fee.as_deref()),
+                liquidation_penalty_usdt: decimal_option(position.liquidation_penalty.as_deref()),
+                raw_payload_json: Some(
+                    json!({
+                        "source": "signed_read_only_account_snapshot",
+                        "kind": "position_history",
+                        "exchange": position.exchange.as_str(),
+                        "symbol": position.exchange_symbol,
+                        "position_history": position.raw,
+                    })
+                    .to_string(),
+                ),
+                opened_at: position.open_time.and_then(timestamp_millis_to_naive_string),
+                closed_at: position
+                    .close_time
+                    .and_then(timestamp_millis_to_naive_string)
+                    .or_else(|| Some(snapshot_at.clone())),
+            })
+        })
+        .collect();
+
     let balances = balances
         .iter()
         .filter(|balance| balance.exchange == config.exchange)
@@ -218,6 +261,7 @@ pub fn build_exchange_account_snapshot_report_request(
         orders,
         trades,
         positions,
+        position_history,
         balances,
         bills,
     })

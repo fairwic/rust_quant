@@ -1,5 +1,8 @@
 use super::*;
+use std::collections::HashMap;
 
+mod args;
+mod equity;
 mod paper_observation;
 
 fn candle(ts: i64, close: f64, volume: f64) -> BacktestCandle {
@@ -413,12 +416,18 @@ fn event_backtest_defaults_match_production_market_velocity_policy() {
     assert_eq!(args.stop_loss_pct, 0.03);
     assert_eq!(args.target_rs, vec![1.5, 2.0]);
     assert_eq!(args.min_delta_rank, 10);
+    assert_eq!(args.max_delta_rank, None);
     assert_eq!(args.max_new_rank, 30);
+    assert_eq!(args.tail_new_rank_threshold, None);
+    assert_eq!(args.tail_rank_min_price_change_pct, None);
     assert_eq!(
         args.paper_outcome_entry_rule_version,
         "rank_radar_4h_trend_15m_timing_v1"
     );
     assert_eq!(args.stop_reentry_mode, StopReentryMode::Off);
+    assert!(!args.equity_report);
+    assert!(!args.equity_trade_report);
+    assert_eq!(args.min_trades, 30);
 }
 
 #[test]
@@ -439,6 +448,125 @@ fn parses_paper_outcome_sink_and_entry_rule_version() {
         args.paper_outcome_entry_rule_version,
         "rank_radar_4h_15m_v2"
     );
+}
+
+#[test]
+fn parses_equity_report_and_min_trades() {
+    let args = parse_cli_args_from([
+        "--equity-report",
+        "--equity-split-report",
+        "--min-trades",
+        "50",
+    ])
+    .unwrap();
+
+    assert!(args.equity_report);
+    assert!(args.equity_split_report);
+    assert_eq!(args.min_trades, 50);
+}
+
+#[test]
+fn framework_equity_report_uses_100u_funds_and_min_trade_gate() {
+    let mut candles = Vec::new();
+    for i in 0..505 {
+        candles.push(ohlc(MS_15M * i, 100.0, 101.0, 99.0, 100.0));
+    }
+    candles.push(ohlc(MS_15M * 505, 100.0, 101.0, 99.0, 100.0));
+    candles.push(ohlc(MS_15M * 506, 106.0, 106.5, 105.0, 106.0));
+    let entry_ts = MS_15M * 505;
+    let confirmed = vec![ConfirmedEvent {
+        event: RadarEvent {
+            id: 1,
+            exchange: "okx".to_string(),
+            symbol: "TEST-USDT-SWAP".to_string(),
+            ts: MS_15M * 504,
+            detected_at: "2026-06-20T00:00:00Z".to_string(),
+            new_rank: 10,
+            delta_rank: 20,
+            current_price: 100.0,
+            price_change_pct: 3.0,
+        },
+        entry_ts,
+        entry_price: 100.0,
+        entry_idx: 505,
+        trigger: "breakout_previous_high".to_string(),
+    }];
+    let candles_by_symbol = HashMap::from([("TEST-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 2,
+        stop_loss_pct: 0.025,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let report = build_framework_equity_report(&confirmed, &candles_by_symbol, 2.4, &args);
+
+    assert_eq!(report.initial_fund_per_symbol, 100.0);
+    assert_eq!(report.total_open_trades, 1);
+    assert_eq!(report.win_rate, Some(100.0));
+    assert!(!report.meets_min_trades);
+    assert!(report.total_profit > 5.0);
+}
+
+#[test]
+fn framework_equity_report_calculates_trade_sharpe_and_max_drawdown() {
+    let mut candles = Vec::new();
+    for i in 0..505 {
+        candles.push(ohlc(MS_15M * i, 100.0, 101.0, 99.0, 100.0));
+    }
+    candles.push(ohlc(MS_15M * 505, 100.0, 101.0, 99.0, 100.0));
+    candles.push(ohlc(MS_15M * 506, 98.0, 98.5, 97.0, 98.0));
+    candles.push(ohlc(MS_15M * 507, 100.0, 101.0, 99.0, 100.0));
+    candles.push(ohlc(MS_15M * 508, 106.0, 106.5, 105.0, 106.0));
+    let confirmed = vec![
+        ConfirmedEvent {
+            event: RadarEvent {
+                id: 1,
+                exchange: "okx".to_string(),
+                symbol: "TEST-USDT-SWAP".to_string(),
+                ts: MS_15M * 504,
+                detected_at: "2026-06-20T00:00:00Z".to_string(),
+                new_rank: 10,
+                delta_rank: 20,
+                current_price: 100.0,
+                price_change_pct: 3.0,
+            },
+            entry_ts: MS_15M * 505,
+            entry_price: 100.0,
+            entry_idx: 505,
+            trigger: "breakout_previous_high".to_string(),
+        },
+        ConfirmedEvent {
+            event: RadarEvent {
+                id: 2,
+                exchange: "okx".to_string(),
+                symbol: "TEST-USDT-SWAP".to_string(),
+                ts: MS_15M * 506,
+                detected_at: "2026-06-20T00:15:00Z".to_string(),
+                new_rank: 11,
+                delta_rank: 18,
+                current_price: 100.0,
+                price_change_pct: 2.5,
+            },
+            entry_ts: MS_15M * 507,
+            entry_price: 100.0,
+            entry_idx: 507,
+            trigger: "reclaim_ema".to_string(),
+        },
+    ];
+    let candles_by_symbol = HashMap::from([("TEST-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 2,
+        stop_loss_pct: 0.025,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let report = build_framework_equity_report(&confirmed, &candles_by_symbol, 2.4, &args);
+
+    assert_eq!(report.total_open_trades, 2);
+    assert!(report.trade_sharpe.is_some());
+    assert!(report.max_drawdown_pct > 2.0);
+    assert!(report.max_drawdown_pct < 5.0);
+    assert_eq!(report.symbols[0].max_drawdown_pct, report.max_drawdown_pct);
 }
 
 #[test]
@@ -658,7 +786,10 @@ fn web_paper_outcome_sink_defaults_to_production_entry_trigger_allowlist() {
     let args = parse_cli_args_from(["--paper-outcome-sink", "web"]).unwrap();
 
     assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
-    assert_eq!(args.entry_trigger_allowlist, vec!["breakout_previous_high"]);
+    assert_eq!(
+        args.entry_trigger_allowlist,
+        vec!["breakout_previous_high", "reclaim_ema"]
+    );
     assert!(args.entry_trigger_blocklist.is_empty());
 }
 
@@ -695,6 +826,32 @@ fn parses_entry_trigger_allowlist_and_blocklist() {
 }
 
 #[test]
+fn filters_confirmed_events_by_symbol_blocklist_before_entry_trigger() {
+    let args = MarketVelocityEventBacktestArgs {
+        symbol_blocklist: vec!["ASTER-USDT-SWAP".to_string()],
+        entry_trigger_allowlist: vec!["breakout_previous_high".to_string()],
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let mut blocked_symbol = confirmed_event(1, "breakout_previous_high");
+    blocked_symbol.event.symbol = "ASTER-USDT-SWAP".to_string();
+    let mut allowed_symbol = confirmed_event(2, "breakout_previous_high");
+    allowed_symbol.event.symbol = "JTO-USDT-SWAP".to_string();
+    let mut blocked_trigger = confirmed_event(3, "reclaim_ma");
+    blocked_trigger.event.symbol = "JTO-USDT-SWAP".to_string();
+
+    let symbol_filtered = filter_confirmed_events_by_symbol(
+        &[blocked_symbol, allowed_symbol, blocked_trigger],
+        &args,
+    );
+    let filtered = filter_confirmed_events_by_entry_trigger(&symbol_filtered, &args);
+
+    assert_eq!(symbol_filtered.len(), 2);
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].event.id, 2);
+    assert_eq!(filtered[0].event.symbol, "JTO-USDT-SWAP");
+}
+
+#[test]
 fn filters_confirmed_events_by_entry_trigger_with_blocklist_precedence() {
     let args = MarketVelocityEventBacktestArgs {
         entry_trigger_allowlist: vec![
@@ -718,6 +875,40 @@ fn filters_confirmed_events_by_entry_trigger_with_blocklist_precedence() {
 }
 
 #[test]
+fn filters_confirmed_events_by_entry_trigger_rank_blocklist() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_trigger_allowlist: vec![
+            "breakout_previous_high".to_string(),
+            "reclaim_ema".to_string(),
+        ],
+        entry_trigger_rank_blocklist: vec![EntryTriggerRankBlock {
+            trigger: "reclaim_ema".to_string(),
+            min_new_rank: 11,
+            max_new_rank: 20,
+        }],
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let blocked = confirmed_event(1, "reclaim_ema");
+    let same_rank_other_trigger = confirmed_event(2, "breakout_previous_high");
+    let mut outside_rank = confirmed_event(3, "reclaim_ema");
+    outside_rank.event.new_rank = 21;
+
+    let filtered = filter_confirmed_events_by_entry_trigger(
+        &[blocked, same_rank_other_trigger, outside_rank],
+        &args,
+    );
+
+    assert_eq!(filtered.len(), 2);
+    assert_eq!(
+        filtered
+            .iter()
+            .map(|event| event.event.id)
+            .collect::<Vec<_>>(),
+        vec![2, 3]
+    );
+}
+
+#[test]
 fn builds_paper_outcomes_for_each_target_and_horizon_without_execution_task_payload() {
     let args = MarketVelocityEventBacktestArgs {
         stop_loss_pct: 0.02,
@@ -727,6 +918,8 @@ fn builds_paper_outcomes_for_each_target_and_horizon_without_execution_task_payl
             "breakout_previous_high".to_string(),
             "reclaim_ema".to_string(),
         ],
+        max_delta_rank: Some(79),
+        min_price_change_pct: Some(5.0),
         ..MarketVelocityEventBacktestArgs::default()
     };
     let confirmed = vec![ConfirmedEvent {
@@ -781,6 +974,11 @@ fn builds_paper_outcomes_for_each_target_and_horizon_without_execution_task_payl
         "market_velocity_event_backtest"
     );
     assert_eq!(first.evaluation_payload["stop_loss_pct"], 0.02);
+    assert_eq!(first.evaluation_payload["filters"]["max_delta_rank"], 79);
+    assert_eq!(
+        first.evaluation_payload["filters"]["min_price_change_pct"],
+        5.0
+    );
     assert_eq!(
         first.evaluation_payload["entry_trigger_filter_version"],
         "entry_trigger_allowlist_v1"

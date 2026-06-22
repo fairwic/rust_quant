@@ -1257,6 +1257,9 @@ CREATE INDEX IF NOT EXISTS idx_market_rank_events_symbol_detected_at
     ON market_rank_events (symbol, detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_market_rank_events_type_timeframe
     ON market_rank_events (event_type, timeframe, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_market_rank_events_radar_exchange_recent
+    ON market_rank_events (LOWER(exchange), detected_at DESC, id DESC)
+    WHERE new_rank <= 50 OR old_rank <= 50;
 
 COMMENT ON TABLE market_rank_events IS '市场速度雷达排名事件流水表，用于用户产品时间线、通知和Admin诊断';
 COMMENT ON COLUMN market_rank_events.id IS '自增主键';

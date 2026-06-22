@@ -140,7 +140,6 @@ pub fn config_from_env_and_args(
     let database_url = first_non_empty_env(&[
         "QUANT_CORE_DATABASE_URL",
         "POSTGRES_QUANT_CORE_DATABASE_URL",
-        "DATABASE_URL",
     ])
     .context("market velocity candle backfill requires QUANT_CORE_DATABASE_URL")?;
 

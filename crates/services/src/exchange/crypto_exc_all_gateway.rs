@@ -3,8 +3,9 @@ use crypto_exc_all::{
     BybitExchangeConfig, CancelOrderRequest, Candle, CandleQuery, CryptoSdk, Error, ExchangeId,
     Fill, FillListQuery, GateExchangeConfig, Instrument, MarginMode, OkxExchangeConfig, Order,
     OrderAck, OrderBook, OrderBookQuery, OrderListQuery, OrderQuery, OrderSide, OrderType,
-    PlaceOrderRequest, Position, PrepareOrderSettingsRequest, PrepareOrderSettingsResult,
-    ProtectiveOrderQuery, ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
+    PlaceOrderRequest, Position, PositionHistory, PositionHistoryQuery,
+    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderQuery,
+    ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
 };
 use serde_json::json;
 
@@ -334,6 +335,20 @@ impl CryptoExcAllGateway {
             GatewayMode::DryRun => Err(Error::Unsupported {
                 exchange,
                 capability: "dry-run order history query",
+            }),
+        }
+    }
+
+    pub async fn position_history(
+        &self,
+        exchange: ExchangeId,
+        query: PositionHistoryQuery,
+    ) -> Result<Vec<PositionHistory>> {
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.positions(exchange)?.history(query).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run position history query",
             }),
         }
     }

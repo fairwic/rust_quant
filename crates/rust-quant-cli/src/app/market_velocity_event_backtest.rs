@@ -9,20 +9,29 @@ use std::collections::{BTreeMap, HashMap};
 
 mod args;
 mod data;
+mod equity;
 mod exit;
 mod fvg;
 mod reentry;
 mod report;
 use args::{
-    entry_trigger_filter_version_label, format_entry_trigger_filter_list, normalize_entry_trigger,
+    entry_trigger_filter_version_label, format_entry_trigger_filter_list,
+    format_entry_trigger_rank_blocklist, normalize_entry_trigger, normalize_symbol,
 };
 pub use args::{
     parse_cli_args_from, parse_paper_observation_args_from, parse_paper_observation_command_from,
     print_market_velocity_event_backtest_usage, print_market_velocity_paper_observation_usage,
-    FvgEntryMode, MarketVelocityEventBacktestArgs, MarketVelocityPaperObservationCommand,
-    MarketVelocityPaperOutcomeSink, StopReentryMode,
+    EntryTriggerRankBlock, FvgEntryMode, MarketVelocityEventBacktestArgs,
+    MarketVelocityPaperObservationCommand, MarketVelocityPaperOutcomeSink, StopReentryMode,
 };
 use data::load_backtest_data;
+pub use equity::{
+    build_framework_equity_concentration_reports, build_framework_equity_quartile_reports,
+    build_framework_equity_report, build_framework_equity_split_reports,
+    build_framework_equity_trade_reports, build_framework_equity_trigger_reports,
+    print_framework_equity_reports, FrameworkEquityReport, FrameworkEquitySymbolReport,
+    FrameworkEquityTradeReport,
+};
 pub use exit::{simulate_trade, ProfitProtection, RunnerExit};
 use fvg::{find_fvg_entry, FvgEntrySearch};
 use reentry::maybe_apply_stop_reentry;
@@ -165,7 +174,6 @@ pub fn config_from_env_and_args(
     let database_url = first_non_empty_env(&[
         "QUANT_CORE_DATABASE_URL",
         "POSTGRES_QUANT_CORE_DATABASE_URL",
-        "DATABASE_URL",
     ])
     .context("market velocity event backtest requires QUANT_CORE_DATABASE_URL")?;
     Ok(MarketVelocityEventBacktestConfig { database_url, args })
@@ -190,9 +198,22 @@ pub async fn run_market_velocity_event_backtest(
         &config.args,
     );
     print_stage_report(&data, &evaluation);
-    let confirmed = filter_confirmed_events_by_entry_trigger(&evaluation.confirmed, &config.args);
-    print_entry_trigger_filter_report(&evaluation.confirmed, &confirmed, &config.args);
+    let symbol_filtered = filter_confirmed_events_by_symbol(&evaluation.confirmed, &config.args);
+    print_symbol_filter_report(&evaluation.confirmed, &symbol_filtered, &config.args);
+    let confirmed = filter_confirmed_events_by_entry_trigger(&symbol_filtered, &config.args);
+    print_entry_trigger_filter_report(&symbol_filtered, &confirmed, &config.args);
     print_result_report(&confirmed, &data.candles_15m, &config.args);
+    if config.args.equity_report
+        || config.args.equity_split_report
+        || config.args.equity_quartile_report
+        || config.args.equity_trigger_report
+        || config.args.equity_concentration_report
+        || config.args.equity_feature_report
+        || config.args.equity_symbol_window_report
+        || config.args.equity_trade_report
+    {
+        print_framework_equity_reports(&confirmed, &data.candles_15m, &config.args);
+    }
     match config.args.paper_outcome_sink {
         MarketVelocityPaperOutcomeSink::Off => {}
         MarketVelocityPaperOutcomeSink::Jsonl => {
@@ -215,13 +236,32 @@ pub fn filter_confirmed_events_by_entry_trigger(
 ) -> Vec<ConfirmedEvent> {
     confirmed
         .iter()
-        .filter(|event| entry_trigger_allowed(&event.trigger, args))
+        .filter(|event| entry_trigger_allowed(event, args))
         .cloned()
         .collect()
 }
 
-fn entry_trigger_allowed(trigger: &str, args: &MarketVelocityEventBacktestArgs) -> bool {
-    let normalized = normalize_entry_trigger(trigger);
+pub fn filter_confirmed_events_by_symbol(
+    confirmed: &[ConfirmedEvent],
+    args: &MarketVelocityEventBacktestArgs,
+) -> Vec<ConfirmedEvent> {
+    confirmed
+        .iter()
+        .filter(|event| symbol_allowed(&event.event.symbol, args))
+        .cloned()
+        .collect()
+}
+
+fn symbol_allowed(symbol: &str, args: &MarketVelocityEventBacktestArgs) -> bool {
+    let normalized = normalize_symbol(symbol);
+    !args
+        .symbol_blocklist
+        .iter()
+        .any(|blocked| normalize_symbol(blocked) == normalized)
+}
+
+fn entry_trigger_allowed(event: &ConfirmedEvent, args: &MarketVelocityEventBacktestArgs) -> bool {
+    let normalized = normalize_entry_trigger(&event.trigger);
     if !args.entry_trigger_allowlist.is_empty()
         && !args
             .entry_trigger_allowlist
@@ -230,10 +270,34 @@ fn entry_trigger_allowed(trigger: &str, args: &MarketVelocityEventBacktestArgs) 
     {
         return false;
     }
-    !args
+    if args
         .entry_trigger_blocklist
         .iter()
         .any(|blocked| blocked == &normalized)
+    {
+        return false;
+    }
+    !args.entry_trigger_rank_blocklist.iter().any(|blocked| {
+        blocked.trigger == normalized
+            && event.event.new_rank >= blocked.min_new_rank
+            && event.event.new_rank <= blocked.max_new_rank
+    })
+}
+
+fn print_symbol_filter_report(
+    before: &[ConfirmedEvent],
+    after: &[ConfirmedEvent],
+    args: &MarketVelocityEventBacktestArgs,
+) {
+    if args.symbol_blocklist.is_empty() {
+        return;
+    }
+    println!(
+        "symbol_filter\tbefore={}\tafter={}\tblocklist={}",
+        before.len(),
+        after.len(),
+        args.symbol_blocklist.join(",")
+    );
 }
 
 fn print_entry_trigger_filter_report(
@@ -241,15 +305,19 @@ fn print_entry_trigger_filter_report(
     after: &[ConfirmedEvent],
     args: &MarketVelocityEventBacktestArgs,
 ) {
-    if args.entry_trigger_allowlist.is_empty() && args.entry_trigger_blocklist.is_empty() {
+    if args.entry_trigger_allowlist.is_empty()
+        && args.entry_trigger_blocklist.is_empty()
+        && args.entry_trigger_rank_blocklist.is_empty()
+    {
         return;
     }
     println!(
-        "entry_trigger_filter\tbefore={}\tafter={}\tallowlist={}\tblocklist={}",
+        "entry_trigger_filter\tbefore={}\tafter={}\tallowlist={}\tblocklist={}\trank_blocklist={}",
         before.len(),
         after.len(),
         format_entry_trigger_filter_list(&args.entry_trigger_allowlist),
-        format_entry_trigger_filter_list(&args.entry_trigger_blocklist)
+        format_entry_trigger_filter_list(&args.entry_trigger_blocklist),
+        format_entry_trigger_rank_blocklist(&args.entry_trigger_rank_blocklist)
     );
 }
 
@@ -667,10 +735,15 @@ pub fn build_market_velocity_paper_outcomes(
                             "entry_trigger_filter_version": entry_trigger_filter_version,
                             "entry_trigger_allowlist": &args.entry_trigger_allowlist,
                             "entry_trigger_blocklist": &args.entry_trigger_blocklist,
+                            "entry_trigger_rank_blocklist": format_entry_trigger_rank_blocklist(&args.entry_trigger_rank_blocklist),
                         },
                         "filters": {
                             "min_delta_rank": args.min_delta_rank,
+                            "max_delta_rank": args.max_delta_rank,
                             "max_new_rank": args.max_new_rank,
+                            "min_price_change_pct": args.min_price_change_pct,
+                            "tail_new_rank_threshold": args.tail_new_rank_threshold,
+                            "tail_rank_min_price_change_pct": args.tail_rank_min_price_change_pct,
                             "chase_top_rank": args.chase_top_rank,
                             "chase_price_change_pct": args.chase_price_change_pct,
                             "entry_max_distance_pct": args.entry_max_distance_pct,
@@ -765,6 +838,7 @@ fn entry_trigger_filter_version(args: &MarketVelocityEventBacktestArgs) -> &'sta
     entry_trigger_filter_version_label(
         !args.entry_trigger_allowlist.is_empty(),
         !args.entry_trigger_blocklist.is_empty(),
+        !args.entry_trigger_rank_blocklist.is_empty(),
     )
 }
 

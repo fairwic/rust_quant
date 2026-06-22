@@ -422,8 +422,8 @@ async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
         .filter(|value| *value > 0)
         .unwrap_or(10);
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .context("缺少 QUANT_CORE_DATABASE_URL 或 DATABASE_URL，无法启动市场动能雷达")?;
+        .or_else(|_| std::env::var("POSTGRES_QUANT_CORE_DATABASE_URL"))
+        .context("缺少 QUANT_CORE_DATABASE_URL，无法启动市场动能雷达")?;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)

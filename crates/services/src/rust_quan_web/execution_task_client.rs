@@ -18,8 +18,9 @@ use super::execution_task_contract::{
 #[cfg(test)]
 use super::execution_task_contract::{
     ExchangeAccountBalanceSnapshotInput, ExchangeAccountBillSnapshotInput,
-    ExchangeAccountOrderSnapshotInput, ExchangeAccountPositionSnapshotInput,
-    ExchangeAccountTradeSnapshotInput, ExchangeReconciliationIssueType,
+    ExchangeAccountOrderSnapshotInput, ExchangeAccountPositionHistorySnapshotInput,
+    ExchangeAccountPositionSnapshotInput, ExchangeAccountTradeSnapshotInput,
+    ExchangeReconciliationIssueType,
 };
 
 #[derive(Debug, Clone)]
@@ -674,6 +675,27 @@ mod tests {
                 raw_payload_json: Some(r#"{"pos":"0.01"}"#.to_string()),
                 snapshot_at: Some("2026-06-18T02:30:00".to_string()),
             }],
+            position_history: vec![ExchangeAccountPositionHistorySnapshotInput {
+                external_position_id: "okx-position-1".to_string(),
+                side: Some("long".to_string()),
+                direction: Some("long".to_string()),
+                close_type: Some("2".to_string()),
+                margin_mode: Some("cross".to_string()),
+                leverage: Some(3.0),
+                open_avg_price: Some(0.6208),
+                close_avg_price: Some(0.6047),
+                open_max_position: Some(1.0),
+                close_total_position: Some(1.0),
+                realized_pnl_usdt: Some(-0.01),
+                pnl_usdt: Some(-0.01),
+                pnl_ratio: Some(-0.0817),
+                fee_usdt: Some(-0.0002),
+                funding_fee_usdt: Some(0.0),
+                liquidation_penalty_usdt: Some(0.0),
+                raw_payload_json: Some(r#"{"posId":"okx-position-1"}"#.to_string()),
+                opened_at: Some("2026-06-18T00:30:00".to_string()),
+                closed_at: Some("2026-06-18T02:30:00".to_string()),
+            }],
             balances: vec![ExchangeAccountBalanceSnapshotInput {
                 asset: "USDT".to_string(),
                 wallet_balance: Some(8211.49),
@@ -710,6 +732,11 @@ mod tests {
         );
         assert_eq!(value["trades"][0]["external_trade_id"], "211849844");
         assert_eq!(value["positions"][0]["quantity"], 0.01);
+        assert_eq!(
+            value["position_history"][0]["external_position_id"],
+            "okx-position-1"
+        );
+        assert_eq!(value["position_history"][0]["realized_pnl_usdt"], -0.01);
         assert_eq!(value["balances"][0]["asset"], "USDT");
         assert_eq!(value["balances"][0]["equity_usdt"], 8211.49);
         assert_eq!(value["bills"][0]["external_bill_id"], "okx-bill-1");

@@ -102,7 +102,6 @@ pub fn market_velocity_live_handoff_config_from_env() -> Result<MarketVelocityLi
         database_url: first_non_empty_env(&[
             "QUANT_CORE_DATABASE_URL",
             "POSTGRES_QUANT_CORE_DATABASE_URL",
-            "DATABASE_URL",
         ])
         .context("market_velocity_live_handoff requires QUANT_CORE_DATABASE_URL")?,
         web_base_url: first_non_empty_env(&["RUST_QUAN_WEB_BASE_URL", "QUANT_WEB_BASE_URL"])
@@ -653,7 +652,6 @@ mod tests {
     const LIVE_HANDOFF_ENV_KEYS: &[&str] = &[
         "QUANT_CORE_DATABASE_URL",
         "POSTGRES_QUANT_CORE_DATABASE_URL",
-        "DATABASE_URL",
         "RUST_QUAN_WEB_BASE_URL",
         "QUANT_WEB_BASE_URL",
         "EXECUTION_EVENT_SECRET",

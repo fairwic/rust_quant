@@ -124,9 +124,28 @@ fn exchange_account_snapshot_sync_request_normalizes_symbols_and_defaults() {
     assert_eq!(request.combos.len(), 1);
     assert_eq!(request.combos[0].combo_id, 42);
     assert_eq!(request.combos[0].symbol, "BTC-USDT-SWAP");
+    assert!(!request.account_wide);
     assert!(request.include_fills);
     assert!(!request.report_reconciliation);
     assert_eq!(request.trigger_source, "api credential checked");
+}
+
+#[test]
+fn exchange_account_snapshot_sync_request_accepts_account_wide_without_combos() {
+    let body = json!({
+        "buyerEmail": "buyer@example.com",
+        "exchange": "okx",
+        "accountWide": true,
+        "triggerSource": "asset overview refresh"
+    })
+    .to_string();
+
+    let request = exchange_account_snapshot_sync_request_from_body(body.as_bytes())
+        .expect("account-wide sync request");
+
+    assert!(request.account_wide);
+    assert!(request.combos.is_empty());
+    assert_eq!(request.trigger_source, "asset overview refresh");
 }
 
 #[test]
@@ -355,6 +374,28 @@ fn market_rank_recent_query_exposes_persisted_technical_snapshot_columns() {
             "recent market rank SQL should expose persisted technical snapshot fragment: {fragment}"
         );
     }
+}
+
+#[test]
+fn market_rank_recent_query_exposes_24h_volume_delta_fields() {
+    let sql = recent_market_rank_events_sql(Some("delta_rank"));
+
+    assert!(
+        sql.contains("previous.previous_volume_24h_quote"),
+        "recent market rank SQL should expose previous 24h volume for delta display"
+    );
+    assert!(
+        sql.contains("AS volume_24h_change_pct"),
+        "recent market rank SQL should expose computed 24h volume change percentage"
+    );
+    assert!(
+        !sql.contains("NULL::FLOAT8 AS previous_volume_24h_quote"),
+        "recent market rank SQL must not return a fixed empty previous 24h volume"
+    );
+    assert!(
+        !sql.contains("NULL::FLOAT8 AS volume_24h_change_pct"),
+        "recent market rank SQL must not return a fixed empty 24h volume change"
+    );
 }
 
 #[test]

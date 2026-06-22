@@ -5,14 +5,54 @@
 use once_cell::sync::OnceCell;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use tracing::info;
 
 static DB_POOL: OnceCell<PgPool> = OnceCell::new();
 
 fn database_url_from_env() -> anyhow::Result<String> {
-    std::env::var("QUANT_CORE_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .map_err(|_| anyhow::anyhow!("QUANT_CORE_DATABASE_URL or DATABASE_URL must be set"))
+    let envs: HashMap<String, String> = std::env::vars().collect();
+    database_url_from_map(&envs)
+}
+
+fn database_url_from_map(envs: &HashMap<String, String>) -> anyhow::Result<String> {
+    if let Some(database_url) = non_empty_env(envs, "QUANT_CORE_DATABASE_URL")
+        .or_else(|| non_empty_env(envs, "POSTGRES_QUANT_CORE_DATABASE_URL"))
+    {
+        return Ok(database_url.to_string());
+    }
+
+    let database_url = non_empty_env(envs, "DATABASE_URL").ok_or_else(|| {
+        anyhow::anyhow!(
+            "QUANT_CORE_DATABASE_URL, POSTGRES_QUANT_CORE_DATABASE_URL or DATABASE_URL must be set"
+        )
+    })?;
+
+    if !database_url_targets_quant_core(database_url) {
+        anyhow::bail!(
+            "QUANT_CORE_DATABASE_URL must be set for rust_quant Core database access; DATABASE_URL points to a non-core database"
+        );
+    }
+
+    Ok(database_url.to_string())
+}
+
+fn non_empty_env<'a>(envs: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
+    envs.get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+}
+
+fn database_url_targets_quant_core(database_url: &str) -> bool {
+    database_url
+        .split('?')
+        .next()
+        .unwrap_or(database_url)
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .map(|database_name| database_name.eq_ignore_ascii_case("quant_core"))
+        .unwrap_or(false)
 }
 
 /// 初始化数据库连接池
@@ -59,4 +99,59 @@ pub async fn health_check() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("数据库健康检查失败: {}", e))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_server_rejects_web_database_url_without_quant_core_url() {
+        let envs = HashMap::from([
+            ("IS_RUN_INTERNAL_SERVER".to_string(), "true".to_string()),
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://postgres:secret@localhost:5432/quant_web".to_string(),
+            ),
+        ]);
+
+        let error = database_url_from_map(&envs).expect_err("quant_web must be rejected");
+        assert!(
+            error.to_string().contains("QUANT_CORE_DATABASE_URL"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn database_url_fallback_allows_quant_core_database_url() {
+        let envs = HashMap::from([(
+            "DATABASE_URL".to_string(),
+            "postgres://postgres:secret@localhost:5432/quant_core?sslmode=disable".to_string(),
+        )]);
+
+        assert_eq!(
+            database_url_from_map(&envs).expect("quant_core fallback should be selected"),
+            "postgres://postgres:secret@localhost:5432/quant_core?sslmode=disable"
+        );
+    }
+
+    #[test]
+    fn internal_server_prefers_quant_core_database_url() {
+        let envs = HashMap::from([
+            ("IS_RUN_INTERNAL_SERVER".to_string(), "true".to_string()),
+            (
+                "QUANT_CORE_DATABASE_URL".to_string(),
+                "postgres://postgres:secret@localhost:5432/quant_core".to_string(),
+            ),
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://postgres:secret@localhost:5432/quant_web".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            database_url_from_map(&envs).expect("quant_core url should be selected"),
+            "postgres://postgres:secret@localhost:5432/quant_core"
+        );
+    }
 }

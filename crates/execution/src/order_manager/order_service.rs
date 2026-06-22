@@ -111,6 +111,8 @@ impl OrderService {
                 limit,
                 after: after.map(|s| s.to_string()),
                 before: before.map(|s| s.to_string()),
+                begin: None,
+                end: None,
             })
             .await
             .map_err(|e| AppError::OkxApiError(e.to_string()))?;
@@ -141,6 +143,8 @@ impl OrderService {
                 state: state.map(|s| s.to_string()),
                 after: after.map(|s| s.to_string()),
                 before: before.map(|s| s.to_string()),
+                begin: None,
+                end: None,
                 limit,
             })
             .await

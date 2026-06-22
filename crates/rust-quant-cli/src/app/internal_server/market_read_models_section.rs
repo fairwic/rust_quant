@@ -254,8 +254,15 @@ fn recent_market_rank_events_sql(sort: Option<&str>) -> String {
                 ELSE NULL
             END AS rank_change_pct,
             volume_24h_quote::FLOAT8 AS volume_24h_quote,
-            NULL::FLOAT8 AS previous_volume_24h_quote,
-            NULL::FLOAT8 AS volume_24h_change_pct,
+            previous.previous_volume_24h_quote,
+            CASE
+                WHEN previous.previous_volume_24h_quote IS NOT NULL
+                     AND previous.previous_volume_24h_quote > 0
+                     AND latest.volume_24h_quote IS NOT NULL
+                THEN (latest.volume_24h_quote::FLOAT8 - previous.previous_volume_24h_quote)
+                     / previous.previous_volume_24h_quote * 100.0
+                ELSE NULL
+            END AS volume_24h_change_pct,
             NULL::FLOAT8 AS volume_15m_quote,
             NULL::FLOAT8 AS volume_15m_change_pct,
             current_price::FLOAT8 AS current_price,
@@ -279,6 +286,17 @@ fn recent_market_rank_events_sql(sort: Option<&str>) -> String {
             source,
             notification_state
         FROM latest
+        LEFT JOIN LATERAL (
+            SELECT previous.volume_24h_quote::FLOAT8 AS previous_volume_24h_quote
+            FROM market_rank_events previous
+            WHERE previous.exchange = latest.exchange
+              AND previous.symbol = latest.symbol
+              AND previous.volume_24h_quote IS NOT NULL
+              AND previous.detected_at <= latest.detected_at - INTERVAL '15 minutes'
+              AND previous.detected_at >= latest.detected_at - INTERVAL '24 hours'
+            ORDER BY previous.detected_at ASC, previous.id ASC
+            LIMIT 1
+        ) previous ON TRUE
         ORDER BY {}
         LIMIT $6
         "#,

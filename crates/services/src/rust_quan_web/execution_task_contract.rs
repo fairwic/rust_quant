@@ -271,6 +271,30 @@ pub struct ExchangeAccountPositionSnapshotInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+pub struct ExchangeAccountPositionHistorySnapshotInput {
+    pub external_position_id: String,
+    pub side: Option<String>,
+    pub direction: Option<String>,
+    pub close_type: Option<String>,
+    pub margin_mode: Option<String>,
+    pub leverage: Option<f64>,
+    pub open_avg_price: Option<f64>,
+    pub close_avg_price: Option<f64>,
+    pub open_max_position: Option<f64>,
+    pub close_total_position: Option<f64>,
+    pub realized_pnl_usdt: Option<f64>,
+    pub pnl_usdt: Option<f64>,
+    pub pnl_ratio: Option<f64>,
+    pub fee_usdt: Option<f64>,
+    pub funding_fee_usdt: Option<f64>,
+    pub liquidation_penalty_usdt: Option<f64>,
+    pub raw_payload_json: Option<String>,
+    pub opened_at: Option<String>,
+    pub closed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub struct ExchangeAccountBalanceSnapshotInput {
     pub asset: String,
     pub wallet_balance: Option<f64>,
@@ -316,6 +340,8 @@ pub struct ExchangeAccountSnapshotReportRequest {
     #[serde(default)]
     pub positions: Vec<ExchangeAccountPositionSnapshotInput>,
     #[serde(default)]
+    pub position_history: Vec<ExchangeAccountPositionHistorySnapshotInput>,
+    #[serde(default)]
     pub balances: Vec<ExchangeAccountBalanceSnapshotInput>,
     #[serde(default)]
     pub bills: Vec<ExchangeAccountBillSnapshotInput>,
@@ -333,6 +359,7 @@ pub struct ExchangeAccountSnapshotReportResponse {
     pub orders_upserted: i64,
     pub trades_upserted: i64,
     pub positions_upserted: i64,
+    pub position_history_upserted: i64,
     pub balances_upserted: i64,
     pub bills_upserted: i64,
 }

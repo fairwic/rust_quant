@@ -21,15 +21,17 @@ pub use super::market_velocity_entry::MarketVelocityEntryConfirmation;
 use super::market_velocity_entry::MarketVelocityEntryConfirmationConfig;
 
 const ENTRY_TRIGGER_FILTER_VERSION: &str = "entry_trigger_allowlist_v1";
-const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] = &["breakout_previous_high"];
-const DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET: &str = "stop_reentry_025sl_24r_v1";
+const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] = &["breakout_previous_high", "reclaim_ema"];
+const DEFAULT_SYMBOL_BLOCKLIST: &[&str] = &[];
+const DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET: &str = "momentum_03sl_20r_v5";
 const DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION: &str =
-    "rank_radar_4h_trend_15m_stop_reentry_025sl_24r_v1";
-const DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE: &str = "rank_radar_4h_trend_15m_stop_reentry";
-const DEFAULT_STOP_LOSS_PCT: f64 = 0.025;
-const DEFAULT_TAKE_PROFIT_R: f64 = 2.4;
+    "rank_radar_4h_trend_15m_momentum_03sl_20r_v5";
+const DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE: &str = "rank_radar_4h_trend_15m_momentum";
+const DEFAULT_STOP_LOSS_PCT: f64 = 0.03;
+const DEFAULT_TAKE_PROFIT_R: f64 = 2.0;
 const DEFAULT_MAX_HOLDING_HOURS: u32 = 48;
-const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 1.5;
+const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 4.0;
+const DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT: f64 = 0.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MarketVelocityStrategySignalConfig {
@@ -48,12 +50,14 @@ pub struct MarketVelocityStrategySignalConfig {
     pub require_entry_confirmation: bool,
     pub chasing_risk_top_rank: i32,
     pub chasing_risk_price_change_pct: f64,
+    pub trend_min_average_distance_pct: f64,
     pub entry_confirmation_period: usize,
     pub entry_confirmation_fetch_limit: u32,
     pub entry_max_average_distance_pct: f64,
     pub entry_min_volume_ratio: f64,
     pub entry_trigger_allowlist: Vec<String>,
     pub entry_trigger_blocklist: Vec<String>,
+    pub symbol_blocklist: Vec<String>,
 }
 
 impl Default for MarketVelocityStrategySignalConfig {
@@ -62,7 +66,7 @@ impl Default for MarketVelocityStrategySignalConfig {
             strategy_slug: "market_velocity".to_string(),
             strategy_preset: DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET.to_string(),
             entry_rule_version: DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION.to_string(),
-            min_delta_rank: 10,
+            min_delta_rank: 15,
             max_new_rank: 30,
             stop_loss_pct: DEFAULT_STOP_LOSS_PCT,
             take_profit_r: DEFAULT_TAKE_PROFIT_R,
@@ -74,12 +78,14 @@ impl Default for MarketVelocityStrategySignalConfig {
             require_entry_confirmation: true,
             chasing_risk_top_rank: 10,
             chasing_risk_price_change_pct: 8.0,
+            trend_min_average_distance_pct: DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT,
             entry_confirmation_period: 20,
             entry_confirmation_fetch_limit: 80,
             entry_max_average_distance_pct: DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT,
             entry_min_volume_ratio: 1.0,
             entry_trigger_allowlist: default_entry_trigger_allowlist(),
             entry_trigger_blocklist: Vec::new(),
+            symbol_blocklist: default_symbol_blocklist(),
         }
     }
 }
@@ -100,7 +106,7 @@ impl MarketVelocityStrategySignalConfig {
                 "MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION",
                 DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION,
             ),
-            min_delta_rank: parse_env_i32("MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK", 10)?,
+            min_delta_rank: parse_env_i32("MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK", 15)?,
             max_new_rank: parse_env_i32("MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK", 30)?,
             stop_loss_pct: parse_env_f64(
                 "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT",
@@ -137,6 +143,10 @@ impl MarketVelocityStrategySignalConfig {
                 "MARKET_VELOCITY_CHASING_RISK_PRICE_CHANGE_PCT",
                 8.0,
             )?,
+            trend_min_average_distance_pct: parse_env_f64(
+                "MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT",
+                DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT,
+            )?,
             entry_confirmation_period: parse_env_usize("MARKET_VELOCITY_ENTRY_PERIOD", 20)?,
             entry_confirmation_fetch_limit: parse_env_u32("MARKET_VELOCITY_ENTRY_FETCH_LIMIT", 80)?,
             entry_max_average_distance_pct: parse_env_f64(
@@ -151,6 +161,10 @@ impl MarketVelocityStrategySignalConfig {
             entry_trigger_blocklist: parse_env_entry_trigger_list(
                 "MARKET_VELOCITY_ENTRY_TRIGGER_BLOCKLIST",
                 &[],
+            )?,
+            symbol_blocklist: parse_env_symbol_list(
+                "MARKET_VELOCITY_SYMBOL_BLOCKLIST",
+                DEFAULT_SYMBOL_BLOCKLIST,
             )?,
         })
     }
@@ -184,6 +198,7 @@ pub enum MarketVelocityStrategySignalBlocker {
     RankOutsideTradeWindow,
     PriceDirectionNotUp,
     MissingCurrentPrice,
+    SymbolFiltered,
     InvalidStopLossConfig,
     InvalidRiskRewardConfig,
     ChasingRisk,
@@ -353,6 +368,10 @@ fn pre_entry_signal_blocker(
         return Ok(Some(MarketVelocityStrategySignalBlocker::RankDeltaTooWeak));
     }
 
+    if symbol_is_blocked(&event.symbol, config) {
+        return Ok(Some(MarketVelocityStrategySignalBlocker::SymbolFiltered));
+    }
+
     if !matches!(event.new_rank, Some(rank) if rank > 0 && rank <= config.max_new_rank) {
         return Ok(Some(
             MarketVelocityStrategySignalBlocker::RankOutsideTradeWindow,
@@ -497,11 +516,13 @@ fn build_market_velocity_strategy_signal_submit_request(
             "max_new_rank": config.max_new_rank,
             "anti_chase_top_rank": config.chasing_risk_top_rank,
             "anti_chase_price_change_pct": config.chasing_risk_price_change_pct,
+            "trend_min_average_distance_pct": config.trend_min_average_distance_pct,
             "entry_max_average_distance_pct": config.entry_max_average_distance_pct,
             "entry_min_volume_ratio": config.entry_min_volume_ratio,
             "entry_trigger_filter_version": ENTRY_TRIGGER_FILTER_VERSION,
             "entry_trigger_allowlist": &config.entry_trigger_allowlist,
             "entry_trigger_blocklist": &config.entry_trigger_blocklist,
+            "symbol_blocklist": &config.symbol_blocklist,
         },
         "entry_confirmation": entry_confirmation,
         "side": "buy",
@@ -598,7 +619,7 @@ fn market_velocity_signal_result(
         should_sell: false,
         open_price: entry_price,
         signal_kline_stop_loss_price: Some(selected_stop_loss_price),
-        stop_loss_source: Some("market_velocity_stop_reentry_025sl".to_string()),
+        stop_loss_source: Some("market_velocity_fixed_03sl".to_string()),
         best_open_price: None,
         atr_take_profit_ratio_price: None,
         atr_stop_loss_price: None,
@@ -613,7 +634,7 @@ fn market_velocity_signal_result(
         atr_take_profit_level_2: None,
         atr_take_profit_level_3: None,
         filter_reasons: Vec::new(),
-        dynamic_adjustments: vec!["market_velocity_stop_reentry".to_string()],
+        dynamic_adjustments: vec!["market_velocity_fixed_risk".to_string()],
         dynamic_config_snapshot: Some(
             json!({
                 "strategy_preset": config.strategy_preset.trim(),
@@ -669,13 +690,27 @@ fn technical_confirmation_blocker(
         return Some(MarketVelocityStrategySignalBlocker::TechnicalConfirmationMissing);
     };
 
-    if moving_average_state_is_positive(&snapshot.ma_state)
-        && moving_average_state_is_positive(&snapshot.ema_state)
+    if !moving_average_state_is_positive(&snapshot.ma_state)
+        || !moving_average_state_is_positive(&snapshot.ema_state)
     {
-        None
-    } else {
-        Some(MarketVelocityStrategySignalBlocker::TechnicalTrendNotConfirmed)
+        return Some(MarketVelocityStrategySignalBlocker::TechnicalTrendNotConfirmed);
     }
+
+    if config.trend_min_average_distance_pct > 0.0 {
+        let Some(ma_distance_pct) = decimal_to_f64(snapshot.ma_distance_pct) else {
+            return Some(MarketVelocityStrategySignalBlocker::TechnicalTrendNotConfirmed);
+        };
+        let Some(ema_distance_pct) = decimal_to_f64(snapshot.ema_distance_pct) else {
+            return Some(MarketVelocityStrategySignalBlocker::TechnicalTrendNotConfirmed);
+        };
+        if ma_distance_pct < config.trend_min_average_distance_pct
+            || ema_distance_pct < config.trend_min_average_distance_pct
+        {
+            return Some(MarketVelocityStrategySignalBlocker::TechnicalTrendNotConfirmed);
+        }
+    }
+
+    None
 }
 
 fn entry_confirmation_blocker(
@@ -782,6 +817,21 @@ fn default_entry_trigger_allowlist() -> Vec<String> {
         .collect()
 }
 
+fn default_symbol_blocklist() -> Vec<String> {
+    DEFAULT_SYMBOL_BLOCKLIST
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect()
+}
+
+fn symbol_is_blocked(symbol: &str, config: &MarketVelocityStrategySignalConfig) -> bool {
+    let normalized = normalize_symbol(symbol);
+    config
+        .symbol_blocklist
+        .iter()
+        .any(|blocked| normalize_symbol(blocked) == normalized)
+}
+
 fn parse_env_entry_trigger_list(key: &str, default: &[&str]) -> Result<Vec<String>> {
     let Some(value) = std::env::var(key).ok() else {
         return Ok(default.iter().map(|value| (*value).to_string()).collect());
@@ -809,6 +859,35 @@ fn parse_env_entry_trigger_list(key: &str, default: &[&str]) -> Result<Vec<Strin
 
 fn normalize_entry_trigger(value: &str) -> String {
     value.trim().to_ascii_lowercase()
+}
+
+fn parse_env_symbol_list(key: &str, default: &[&str]) -> Result<Vec<String>> {
+    let Some(value) = std::env::var(key).ok() else {
+        return Ok(default.iter().map(|value| (*value).to_string()).collect());
+    };
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Ok(default.iter().map(|value| (*value).to_string()).collect());
+    }
+    if matches!(normalized.as_str(), "all" | "*" | "none") {
+        return Ok(Vec::new());
+    }
+
+    let mut symbols = Vec::new();
+    for symbol in value.split(',').map(normalize_symbol) {
+        if symbol.is_empty() || symbols.contains(&symbol) {
+            continue;
+        }
+        symbols.push(symbol);
+    }
+    if symbols.is_empty() {
+        return Err(anyhow!("{key} must contain at least one symbol"));
+    }
+    Ok(symbols)
+}
+
+fn normalize_symbol(value: &str) -> String {
+    value.trim().to_ascii_uppercase()
 }
 
 fn parse_env_i32(key: &str, default: i32) -> Result<i32> {

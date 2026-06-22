@@ -17,7 +17,7 @@ async fn report_exchange_account_snapshot_uses_internal_post_contract() {
         let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
         tx.send(request).unwrap();
 
-        let body = r#"{"success":true,"data":{"combo_id":85,"buyer_email":"buyer@example.com","exchange":"OKX","symbol":"BTC-USDT-SWAP","source_ref":"rq:acct:v1:ex=okx:combo=85:sym=BTC-USDT-SWAP","snapshot_at":"2026-06-18T02:30:00","orders_upserted":1,"trades_upserted":1,"positions_upserted":1,"balances_upserted":1,"bills_upserted":1}}"#;
+        let body = r#"{"success":true,"data":{"combo_id":85,"buyer_email":"buyer@example.com","exchange":"OKX","symbol":"BTC-USDT-SWAP","source_ref":"rq:acct:v1:ex=okx:combo=85:sym=BTC-USDT-SWAP","snapshot_at":"2026-06-18T02:30:00","orders_upserted":1,"trades_upserted":1,"positions_upserted":1,"position_history_upserted":1,"balances_upserted":1,"bills_upserted":1}}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             body.len(),
@@ -74,6 +74,27 @@ async fn report_exchange_account_snapshot_uses_internal_post_contract() {
                 raw_payload_json: Some(r#"{"pos":"0.01"}"#.to_string()),
                 snapshot_at: Some("2026-06-18T02:30:00".to_string()),
             }],
+            position_history: vec![ExchangeAccountPositionHistorySnapshotInput {
+                external_position_id: "okx-position-1".to_string(),
+                side: Some("long".to_string()),
+                direction: Some("long".to_string()),
+                close_type: Some("2".to_string()),
+                margin_mode: Some("cross".to_string()),
+                leverage: Some(3.0),
+                open_avg_price: Some(0.6208),
+                close_avg_price: Some(0.6047),
+                open_max_position: Some(1.0),
+                close_total_position: Some(1.0),
+                realized_pnl_usdt: Some(-0.01),
+                pnl_usdt: Some(-0.01),
+                pnl_ratio: Some(-0.0817),
+                fee_usdt: Some(-0.0002),
+                funding_fee_usdt: Some(0.0),
+                liquidation_penalty_usdt: Some(0.0),
+                raw_payload_json: Some(r#"{"posId":"okx-position-1"}"#.to_string()),
+                opened_at: Some("2026-06-18T00:30:00".to_string()),
+                closed_at: Some("2026-06-18T02:30:00".to_string()),
+            }],
             balances: vec![ExchangeAccountBalanceSnapshotInput {
                 asset: "USDT".to_string(),
                 wallet_balance: Some(8211.49),
@@ -112,12 +133,14 @@ async fn report_exchange_account_snapshot_uses_internal_post_contract() {
     assert!(request.contains(r#""buyer_email":"buyer@example.com""#));
     assert!(request.contains(r#""external_order_id":"3631557801300238336""#));
     assert!(request.contains(r#""external_trade_id":"211849844""#));
+    assert!(request.contains(r#""external_position_id":"okx-position-1""#));
     assert!(request.contains(r#""balances":[{"asset":"USDT""#));
     assert!(request.contains(r#""bills":[{"external_bill_id":"okx-bill-1""#));
     assert!(!request.contains("plain-api-secret"));
     assert_eq!(response.orders_upserted, 1);
     assert_eq!(response.trades_upserted, 1);
     assert_eq!(response.positions_upserted, 1);
+    assert_eq!(response.position_history_upserted, 1);
     assert_eq!(response.balances_upserted, 1);
     assert_eq!(response.bills_upserted, 1);
 }

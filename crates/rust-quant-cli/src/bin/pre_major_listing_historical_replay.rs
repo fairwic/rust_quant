@@ -195,7 +195,7 @@ struct CliArgs {
 
 fn parse_args() -> Result<CliArgs> {
     let mut fixture_path = None;
-    let mut database_url = std::env::var("DATABASE_URL").ok();
+    let mut database_url = quant_news_database_url_from_env();
     let mut sources = parse_sources(
         &std::env::var("PRE_MAJOR_LISTING_REPLAY_SOURCES")
             .unwrap_or_else(|_| DEFAULT_REPLAY_SOURCES.to_string()),
@@ -258,6 +258,39 @@ fn parse_args() -> Result<CliArgs> {
         min_trade_samples,
         min_win_rate_pct,
     })
+}
+
+fn quant_news_database_url_from_env() -> Option<String> {
+    let envs: HashMap<String, String> = std::env::vars().collect();
+    quant_news_database_url_from_map(&envs)
+}
+
+fn quant_news_database_url_from_map(envs: &HashMap<String, String>) -> Option<String> {
+    non_empty_env(envs, "QUANT_NEWS_DATABASE_URL")
+        .or_else(|| non_empty_env(envs, "POSTGRES_QUANT_NEWS_DATABASE_URL"))
+        .or_else(|| {
+            non_empty_env(envs, "DATABASE_URL")
+                .filter(|url| database_url_targets(url, "quant_news"))
+        })
+        .map(str::to_string)
+}
+
+fn non_empty_env<'a>(envs: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
+    envs.get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+}
+
+fn database_url_targets(database_url: &str, database_name: &str) -> bool {
+    database_url
+        .split('?')
+        .next()
+        .unwrap_or(database_url)
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .map(|name| name.eq_ignore_ascii_case(database_name))
+        .unwrap_or(false)
 }
 
 fn parse_sources(value: &str) -> Result<Vec<AnnouncementSource>> {
@@ -831,4 +864,39 @@ fn print_usage() {
     println!(
         "Usage: pre_major_listing_historical_replay [--database-url <url>] [--sources binance_announcements,okx_announcements] [--limit 80] [--fixture <fixture.json>] [--min-trade-samples 30] [--min-win-rate-pct 60]"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quant_news_database_url_from_map;
+    use std::collections::HashMap;
+
+    #[test]
+    fn quant_news_database_url_ignores_quant_web_fallback() {
+        let envs = HashMap::from([(
+            "DATABASE_URL".to_string(),
+            "postgres://postgres:secret@localhost:5432/quant_web".to_string(),
+        )]);
+
+        assert_eq!(quant_news_database_url_from_map(&envs), None);
+    }
+
+    #[test]
+    fn quant_news_database_url_prefers_explicit_news_url() {
+        let envs = HashMap::from([
+            (
+                "QUANT_NEWS_DATABASE_URL".to_string(),
+                "postgres://postgres:secret@localhost:5432/quant_news".to_string(),
+            ),
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://postgres:secret@localhost:5432/quant_web".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            quant_news_database_url_from_map(&envs),
+            Some("postgres://postgres:secret@localhost:5432/quant_news".to_string())
+        );
+    }
 }

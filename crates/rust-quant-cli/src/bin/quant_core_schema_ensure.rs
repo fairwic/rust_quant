@@ -10,8 +10,8 @@ async fn main() -> Result<()> {
     rust_quant_core::logger::setup_logging().await?;
 
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .context("QUANT_CORE_DATABASE_URL or DATABASE_URL must be set")?;
+        .or_else(|_| std::env::var("POSTGRES_QUANT_CORE_DATABASE_URL"))
+        .context("QUANT_CORE_DATABASE_URL or POSTGRES_QUANT_CORE_DATABASE_URL must be set")?;
 
     let pool = PgPoolOptions::new()
         .max_connections(1)

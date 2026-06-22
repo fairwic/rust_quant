@@ -1,18 +1,19 @@
 use anyhow::{anyhow, bail, Result};
 use crypto_exc_all::{
     AccountBill, AccountBillQuery, Balance, ExchangeId, Fill, FillListQuery, Order, OrderListQuery,
-    Position,
+    Position, PositionHistory, PositionHistoryQuery,
 };
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 
 use super::execution_audit::redact_error_message;
 use super::execution_payload::{parse_exchange, parse_instrument};
 use super::execution_task_contract::{
     ExchangeAccountBalanceSnapshotInput, ExchangeAccountBillSnapshotInput,
-    ExchangeAccountOrderSnapshotInput, ExchangeAccountPositionSnapshotInput,
-    ExchangeAccountSnapshotReportRequest, ExchangeAccountSnapshotReportResponse,
-    ExchangeAccountTradeSnapshotInput, ExchangeCloseFillWritebackRequest,
-    ExchangeCloseFillWritebackResponse,
+    ExchangeAccountOrderSnapshotInput, ExchangeAccountPositionHistorySnapshotInput,
+    ExchangeAccountPositionSnapshotInput, ExchangeAccountSnapshotReportRequest,
+    ExchangeAccountSnapshotReportResponse, ExchangeAccountTradeSnapshotInput,
+    ExchangeCloseFillWritebackRequest, ExchangeCloseFillWritebackResponse,
 };
 use super::execution_worker::{
     build_exchange_reconciliation_sync_requests_from_read_only_snapshot, is_protected_link_symbol,
@@ -138,6 +139,7 @@ pub struct AccountSnapshotSyncConfig {
     pub credential_ref: Option<String>,
     pub report_reconciliation: bool,
     pub include_fills: bool,
+    pub account_wide: bool,
 }
 
 impl AccountSnapshotSyncConfig {

@@ -64,10 +64,18 @@ async fn load_candle_pairs(
           FROM market_rank_events
           WHERE event_type IN ('rank_velocity', 'top_entry')
             AND delta_rank >= $1
-            AND new_rank BETWEEN 1 AND $2
+            AND ($2::int IS NULL OR delta_rank <= $2)
+            AND new_rank BETWEEN 1 AND $3
             AND lower(price_direction) = 'up'
             AND current_price IS NOT NULL
-            AND NOT (new_rank <= $3 AND COALESCE(price_change_pct, 0) >= $4)
+            AND ($4::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $4)
+            AND (
+              $5::int IS NULL
+              OR $6::double precision IS NULL
+              OR new_rank < $5
+              OR COALESCE(price_change_pct, 0) >= $6
+            )
+            AND NOT (new_rank <= $7 AND COALESCE(price_change_pct, 0) >= $8)
         )
         SELECT
           candidates.symbol,
@@ -88,7 +96,11 @@ async fn load_candle_pairs(
         "#,
     )
     .bind(args.min_delta_rank)
+    .bind(args.max_delta_rank)
     .bind(args.max_new_rank)
+    .bind(args.min_price_change_pct)
+    .bind(args.tail_new_rank_threshold)
+    .bind(args.tail_rank_min_price_change_pct)
     .bind(args.chase_top_rank)
     .bind(args.chase_price_change_pct)
     .fetch_all(pool)
@@ -153,16 +165,28 @@ async fn load_events(
         WHERE upper(symbol) = ANY($1)
           AND event_type IN ('rank_velocity', 'top_entry')
           AND delta_rank >= $2
-          AND new_rank BETWEEN 1 AND $3
+          AND ($3::int IS NULL OR delta_rank <= $3)
+          AND new_rank BETWEEN 1 AND $4
           AND lower(price_direction) = 'up'
           AND current_price IS NOT NULL
-          AND NOT (new_rank <= $4 AND COALESCE(price_change_pct, 0) >= $5)
+          AND ($5::double precision IS NULL OR COALESCE(price_change_pct, 0) >= $5)
+          AND (
+            $6::int IS NULL
+            OR $7::double precision IS NULL
+            OR new_rank < $6
+            OR COALESCE(price_change_pct, 0) >= $7
+          )
+          AND NOT (new_rank <= $8 AND COALESCE(price_change_pct, 0) >= $9)
         ORDER BY detected_at, id
         "#,
     )
     .bind(symbols)
     .bind(args.min_delta_rank)
+    .bind(args.max_delta_rank)
     .bind(args.max_new_rank)
+    .bind(args.min_price_change_pct)
+    .bind(args.tail_new_rank_threshold)
+    .bind(args.tail_rank_min_price_change_pct)
     .bind(args.chase_top_rank)
     .bind(args.chase_price_change_pct)
     .fetch_all(pool)

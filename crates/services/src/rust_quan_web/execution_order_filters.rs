@@ -22,7 +22,7 @@ pub(super) async fn load_exchange_order_filters(
     symbol: &str,
 ) -> Result<Option<ExchangeOrderFilters>> {
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
+        .or_else(|_| std::env::var("POSTGRES_QUANT_CORE_DATABASE_URL"))
         .map_err(|_| anyhow!("QUANT_CORE_DATABASE_URL is required for live order filter checks"))?;
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)

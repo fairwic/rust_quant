@@ -301,7 +301,10 @@ struct RawKlineSyncRequest {
 struct RawExchangeAccountSnapshotSyncRequest {
     buyer_email: String,
     exchange: String,
+    #[serde(default)]
     combos: Vec<RawExchangeAccountSnapshotSyncCombo>,
+    #[serde(default)]
+    account_wide: bool,
     #[serde(default)]
     include_fills: Option<bool>,
     #[serde(default)]
@@ -322,6 +325,7 @@ struct ExchangeAccountSnapshotSyncRequest {
     buyer_email: String,
     exchange: ExchangeId,
     combos: Vec<ExchangeAccountSnapshotSyncCombo>,
+    account_wide: bool,
     include_fills: bool,
     report_reconciliation: bool,
     trigger_source: String,
@@ -675,9 +679,36 @@ pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> Internal
         Err(message) => return json_response(400, json!({ "error": message })),
     };
 
-    let requested = request.combos.len();
+    let requested = request.combos.len() + usize::from(request.account_wide);
     let mut accepted = 0_usize;
     let mut skipped = 0_usize;
+    if request.account_wide {
+        accepted += 1;
+        let config = AccountSnapshotSyncConfig {
+            buyer_email: request.buyer_email.clone(),
+            exchange: request.exchange,
+            symbol: "ACCOUNT-WIDE".to_string(),
+            combo_id: 0,
+            task_id: 0,
+            credential_ref: Some(format!(
+                "{}:account-wide",
+                safe_internal_ref_component(&request.trigger_source)
+            )),
+            report_reconciliation: false,
+            include_fills: request.include_fills,
+            account_wide: true,
+        };
+        tokio::spawn(async move {
+            match run_account_snapshot_sync(config).await {
+                Ok(result) => {
+                    info!(result = %result, "Core 账户级快照异步同步完成");
+                }
+                Err(err) => {
+                    error!(error = %err, "Core 账户级快照异步同步失败");
+                }
+            }
+        });
+    }
     for combo in request.combos.clone() {
         if combo.symbol.trim().is_empty() || combo.combo_id <= 0 {
             skipped += 1;
@@ -698,6 +729,7 @@ pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> Internal
             )),
             report_reconciliation: request.report_reconciliation,
             include_fills: request.include_fills,
+            account_wide: false,
         };
         tokio::spawn(async move {
             match run_account_snapshot_sync(config).await {
@@ -720,6 +752,7 @@ pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> Internal
             "requested": requested,
             "accepted": accepted,
             "skipped": skipped,
+            "account_wide": request.account_wide,
             "include_fills": request.include_fills,
             "report_reconciliation": request.report_reconciliation,
             "mutation_allowed": false,
@@ -822,7 +855,7 @@ fn exchange_account_snapshot_sync_request_from_body(
     }
     let exchange = ExchangeId::from_str(request.exchange.trim())
         .map_err(|err| format!("unsupported exchange: {err}"))?;
-    if request.combos.is_empty() {
+    if request.combos.is_empty() && !request.account_wide {
         return Err("combos must include at least one item".to_string());
     }
 
@@ -848,6 +881,7 @@ fn exchange_account_snapshot_sync_request_from_body(
         buyer_email,
         exchange,
         combos,
+        account_wide: request.account_wide,
         include_fills: request.include_fills.unwrap_or(true),
         report_reconciliation: request.report_reconciliation.unwrap_or(false),
         trigger_source: request
