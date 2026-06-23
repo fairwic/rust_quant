@@ -190,6 +190,73 @@ fn stale_live_ticker_is_rejected_before_live_order_sizing() {
     assert!(error.to_string().contains("stale_live_ticker"));
 }
 #[test]
+fn live_orderbook_guard_rejects_wide_spread_before_market_order() {
+    let now_ms = 1_772_000_000_000_u64;
+    let request = live_order_request("buy", "1");
+    let book = live_orderbook("99", "10", "101", "10", Some(now_ms - 1_000));
+    let error = validate_live_orderbook_execution_boundary(
+        &book,
+        &request,
+        100.0,
+        &binance_eth_filters(),
+        now_ms,
+    )
+    .expect_err("wide spread orderbook must fail closed before live market order");
+    assert!(error.to_string().contains("live_orderbook_spread_too_wide"));
+}
+#[test]
+fn live_orderbook_guard_rejects_insufficient_execution_side_depth() {
+    let now_ms = 1_772_000_000_000_u64;
+    let request = live_order_request("buy", "1");
+    let book = live_orderbook("99.99", "20", "100.01", "0.5", Some(now_ms - 1_000));
+    let error = validate_live_orderbook_execution_boundary(
+        &book,
+        &request,
+        100.0,
+        &binance_eth_filters(),
+        now_ms,
+    )
+    .expect_err("buy order must fail closed when ask depth cannot absorb the final order");
+    assert!(error
+        .to_string()
+        .contains("live_orderbook_depth_insufficient"));
+}
+#[test]
+fn live_orderbook_guard_allows_tight_spread_and_sufficient_depth() {
+    let now_ms = 1_772_000_000_000_u64;
+    let request = live_order_request("sell", "1");
+    let book = live_orderbook("99.99", "2", "100.01", "20", Some(now_ms - 1_000));
+    validate_live_orderbook_execution_boundary(
+        &book,
+        &request,
+        100.0,
+        &binance_eth_filters(),
+        now_ms,
+    )
+    .unwrap();
+}
+#[test]
+fn live_orderbook_guard_rejects_stale_timestamp_when_exchange_provides_one() {
+    let now_ms = 1_772_000_000_000_u64;
+    let request = live_order_request("buy", "1");
+    let book = live_orderbook(
+        "99.99",
+        "20",
+        "100.01",
+        "20",
+        Some(now_ms - LIVE_TICKER_MAX_AGE_MS - 1),
+    );
+    let error = validate_live_orderbook_execution_boundary(
+        &book,
+        &request,
+        100.0,
+        &binance_eth_filters(),
+        now_ms,
+    )
+    .expect_err("stale orderbook timestamp must fail closed when present");
+    assert!(error.to_string().contains("stale_live_orderbook"));
+}
+#[test]
 fn live_order_revalidates_stop_loss_against_current_reference_price() {
     let task = task(json!({
         "exchange": "binance",
@@ -1005,5 +1072,43 @@ fn live_ticker(
         sod_utc8: None,
         timestamp,
         raw: json!({}),
+    }
+}
+fn live_order_request(side: &str, size: &str) -> OrderPlacementRequest {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": side,
+        "order_type": "market",
+        "size": size,
+        "client_order_id": "rqtest-orderbook"
+    }));
+    ExecutionOrderTask::from_task(&task)
+        .unwrap()
+        .to_order_request()
+        .unwrap()
+}
+fn live_orderbook(
+    bid_price: &str,
+    bid_size: &str,
+    ask_price: &str,
+    ask_size: &str,
+    timestamp: Option<u64>,
+) -> OrderBook {
+    OrderBook {
+        exchange: ExchangeId::Binance,
+        instrument: parse_instrument("ETH-USDT-SWAP").unwrap(),
+        exchange_symbol: "ETHUSDT".to_string(),
+        bids: vec![live_orderbook_level(bid_price, bid_size)],
+        asks: vec![live_orderbook_level(ask_price, ask_size)],
+        timestamp,
+        raw: json!({}),
+    }
+}
+fn live_orderbook_level(price: &str, size: &str) -> OrderBookLevel {
+    OrderBookLevel {
+        price: price.to_string(),
+        size: size.to_string(),
+        raw: json!([price, size]),
     }
 }

@@ -85,6 +85,45 @@ fn execution_worker_reconciliation_contract_fail_closes_when_read_only_read_fail
     );
 }
 #[test]
+fn live_order_request_checks_orderbook_before_main_order_settings_mutation() {
+    let live_order_request_start = EXECUTION_WORKER
+        .find("async fn live_order_request")
+        .expect("live order request builder must exist");
+    let live_order_request_end = EXECUTION_WORKER[live_order_request_start..]
+        .find("async fn resolve_live_gateway")
+        .map(|offset| live_order_request_start + offset)
+        .expect("live order request section end must exist");
+    let live_order_request_section =
+        &EXECUTION_WORKER[live_order_request_start..live_order_request_end];
+    let orderbook_read = live_order_request_section
+        .find(".orderbook(")
+        .expect("live order request builder must read orderbook before mutation");
+    let request_build = live_order_request_section
+        .find("order_task.to_live_order_request")
+        .expect("live order request builder must construct final order request");
+    let orderbook_guard = live_order_request_section
+        .find("validate_live_orderbook_execution_boundary(")
+        .expect("live order request builder must validate orderbook execution boundary");
+    let prepare_settings = EXECUTION_WORKER
+        .find(".prepare_order_settings_with_audit(")
+        .expect("account settings mutation path must exist");
+    let live_order_call = EXECUTION_WORKER
+        .find("self.live_order_request(&gateway, &order_task).await")
+        .expect("live worker must build order request before settings mutation");
+    assert!(
+        orderbook_read < request_build,
+        "orderbook should be read before final order request is returned"
+    );
+    assert!(
+        request_build < orderbook_guard,
+        "orderbook guard must check the final quantized order size"
+    );
+    assert!(
+        live_order_call < prepare_settings,
+        "read-only orderbook guard must run before account settings mutation"
+    );
+}
+#[test]
 fn prepare_order_settings_uses_worker_live_mutation_audit() {
     let prepare_start = EXECUTION_WORKER
         .find("async fn prepare_order_settings_after_protection")

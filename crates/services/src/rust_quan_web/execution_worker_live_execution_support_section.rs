@@ -56,11 +56,34 @@ impl ExecutionWorker {
         order_task: &ExecutionOrderTask,
     ) -> Result<OrderPlacementRequest> {
         let instrument = parse_instrument(&order_task.symbol)?;
+        let now_ms = current_time_millis_u64();
         let ticker = gateway.ticker(order_task.exchange, &instrument).await?;
-        let reference_price =
-            live_order_reference_price(&ticker, order_task.side, current_time_millis_u64())?;
-        let filters = load_exchange_order_filters(order_task.exchange, &order_task.symbol).await?;
-        order_task.to_live_order_request(Some(reference_price), filters.as_ref())
+        let reference_price = live_order_reference_price(&ticker, order_task.side, now_ms)?;
+        let orderbook = gateway
+            .orderbook(
+                order_task.exchange,
+                OrderBookQuery::new(instrument).with_limit(LIVE_ORDERBOOK_DEPTH_LIMIT),
+            )
+            .await?;
+        let filters =
+            load_exchange_order_filters(order_task.exchange, &order_task.symbol)
+                .await?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "missing exchange symbol filters for {} on {}; run exchange symbol sync before live order",
+                        order_task.symbol,
+                        order_task.exchange.as_str()
+                    )
+                })?;
+        let request = order_task.to_live_order_request(Some(reference_price), Some(&filters))?;
+        validate_live_orderbook_execution_boundary(
+            &orderbook,
+            &request,
+            reference_price,
+            &filters,
+            now_ms,
+        )?;
+        Ok(request)
     }
     /// 选择 Web 商业、会员和执行准备度 的最佳候选结果，避免选择规则分散在调用方。
     async fn resolve_live_gateway(

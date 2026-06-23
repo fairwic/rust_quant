@@ -595,6 +595,105 @@ fn validate_live_ticker_freshness(ticker: &Ticker, now_ms: u64) -> Result<()> {
     }
     Ok(())
 }
+fn validate_live_orderbook_execution_boundary(
+    orderbook: &OrderBook,
+    request: &OrderPlacementRequest,
+    reference_price: f64,
+    filters: &ExchangeOrderFilters,
+    now_ms: u64,
+) -> Result<()> {
+    if request.reduce_only.unwrap_or(false)
+        || matches!(
+            request
+                .trade_side
+                .as_deref()
+                .map(|value| value.to_ascii_lowercase()),
+            Some(value) if value == "close"
+        )
+    {
+        return Ok(());
+    }
+    validate_live_orderbook_freshness(orderbook, now_ms)?;
+    if orderbook.exchange != request.exchange {
+        return Err(anyhow!(
+            "live_orderbook_exchange_mismatch: orderbook={} request={}",
+            orderbook.exchange.as_str(),
+            request.exchange.as_str()
+        ));
+    }
+    let best_bid = first_live_orderbook_level_price(&orderbook.bids, "bid")?;
+    let best_ask = first_live_orderbook_level_price(&orderbook.asks, "ask")?;
+    if best_ask <= best_bid {
+        return Err(anyhow!(
+            "live_orderbook_crossed_or_locked: bid={} ask={}",
+            best_bid,
+            best_ask
+        ));
+    }
+    let midpoint = (best_bid + best_ask) / 2.0;
+    let spread_ratio = (best_ask - best_bid) / midpoint;
+    if !spread_ratio.is_finite() || spread_ratio > LIVE_ORDERBOOK_MAX_SPREAD_RATIO {
+        return Err(anyhow!(
+            "live_orderbook_spread_too_wide: spread_ratio={} max={}",
+            spread_ratio,
+            LIVE_ORDERBOOK_MAX_SPREAD_RATIO
+        ));
+    }
+    let reference_price = decimal_from_f64(reference_price)?;
+    let order_size = parse_positive_decimal(&request.size, "order size")?;
+    let order_notional = order_notional_usdt(order_size, reference_price, filters)?;
+    let execution_depth = match request.side {
+        OrderSide::Buy => orderbook_side_depth_notional(&orderbook.asks, filters)?,
+        OrderSide::Sell => orderbook_side_depth_notional(&orderbook.bids, filters)?,
+    };
+    let required_depth = order_notional * LIVE_ORDERBOOK_MIN_DEPTH_NOTIONAL_MULTIPLIER;
+    if execution_depth + 0.000_001 < required_depth {
+        return Err(anyhow!(
+            "live_orderbook_depth_insufficient: side={} depth_notional={} required_notional={}",
+            order_side_lower(request.side),
+            execution_depth,
+            required_depth
+        ));
+    }
+    Ok(())
+}
+fn validate_live_orderbook_freshness(orderbook: &OrderBook, now_ms: u64) -> Result<()> {
+    let Some(timestamp) = orderbook.timestamp else {
+        return Ok(());
+    };
+    if timestamp > now_ms.saturating_add(LIVE_TICKER_MAX_AGE_MS) {
+        return Err(anyhow!("future_live_orderbook_timestamp"));
+    }
+    if now_ms.saturating_sub(timestamp) > LIVE_TICKER_MAX_AGE_MS {
+        return Err(anyhow!("stale_live_orderbook"));
+    }
+    Ok(())
+}
+fn first_live_orderbook_level_price(levels: &[OrderBookLevel], side: &str) -> Result<f64> {
+    levels
+        .iter()
+        .find_map(|level| parse_required_positive_f64(&level.price, side).ok())
+        .ok_or_else(|| anyhow!("live_orderbook_missing_best_{side}"))
+}
+fn orderbook_side_depth_notional(
+    levels: &[OrderBookLevel],
+    filters: &ExchangeOrderFilters,
+) -> Result<f64> {
+    let mut depth = 0.0;
+    for level in levels
+        .iter()
+        .take(usize::try_from(LIVE_ORDERBOOK_DEPTH_LIMIT).unwrap_or(5))
+    {
+        let price = decimal_from_f64(parse_required_positive_f64(&level.price, "book_price")?)?;
+        let size = parse_positive_decimal(&level.size, "book size")?;
+        depth += order_notional_usdt(size, price, filters)?;
+    }
+    if depth.is_finite() && depth >= 0.0 {
+        Ok(depth)
+    } else {
+        Err(anyhow!("live_orderbook_depth_invalid"))
+    }
+}
 fn parse_optional_positive_f64(raw: Option<&str>, label: &str) -> Result<Option<f64>> {
     raw.map(str::trim)
         .filter(|value| !value.is_empty())

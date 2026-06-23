@@ -53,9 +53,9 @@ use crate::rust_quan_web::{
 use anyhow::{anyhow, Result};
 use crypto_exc_all::{
     CancelOrderRequest, Error as CryptoExchangeError, ExchangeId, Fill, FillListQuery, MarginMode,
-    Order, OrderAck, OrderListQuery, OrderQuery, OrderSide, OrderType, Position, PositionMode,
-    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderRequest, Ticker,
-    TimeInForce,
+    Order, OrderAck, OrderBook, OrderBookLevel, OrderBookQuery, OrderListQuery, OrderQuery,
+    OrderSide, OrderType, Position, PositionMode, PrepareOrderSettingsRequest,
+    PrepareOrderSettingsResult, ProtectiveOrderRequest, Ticker, TimeInForce,
 };
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Instant};
@@ -65,6 +65,9 @@ const LIVE_TICKER_MAX_AGE_MS: u64 = 30_000;
 const LIVE_LAST_PRICE_FALLBACK_BUFFER_RATIO: f64 = 0.001;
 const LIVE_STOP_LOSS_MIN_DISTANCE_RATIO: f64 = 0.0005;
 const LIVE_STOP_LOSS_MAX_DISTANCE_RATIO: f64 = 0.50;
+const LIVE_ORDERBOOK_DEPTH_LIMIT: u32 = 5;
+const LIVE_ORDERBOOK_MAX_SPREAD_RATIO: f64 = 0.005;
+const LIVE_ORDERBOOK_MIN_DEPTH_NOTIONAL_MULTIPLIER: f64 = 1.20;
 #[derive(Debug, Clone)]
 pub struct ExecutionWorkerConfig {
     /// worker ID。
