@@ -400,6 +400,33 @@ impl ExecutionOrderTask {
             take_profit_legs,
         })
     }
+    /// 应用 Web owner service 在下单前原子分配的最终实盘仓位预算。
+    fn apply_risk_reservation(
+        &mut self,
+        reservation: &ExecutionRiskReservationResponse,
+    ) -> Result<()> {
+        if reservation.task_id != self.task_id {
+            return Err(anyhow!(
+                "risk reservation task mismatch: reservation={} order_task={}",
+                reservation.task_id,
+                self.task_id
+            ));
+        }
+        if !reservation.allowed_notional_usdt.is_finite()
+            || reservation.allowed_notional_usdt <= 0.0
+        {
+            return Err(anyhow!("risk reservation allowed_notional_usdt is invalid"));
+        }
+        if !reservation.leverage.is_finite() || reservation.leverage <= 0.0 {
+            return Err(anyhow!("risk reservation leverage is invalid"));
+        }
+        self.size_usdt = Some(reservation.allowed_notional_usdt);
+        self.size = "0".to_string();
+        self.leverage = Some(format_order_size(reservation.leverage));
+        self.margin_mode = Some(MarginMode::from(reservation.margin_mode.clone()));
+        self.position_mode = Some(parse_position_mode(&reservation.position_mode)?);
+        Ok(())
+    }
     /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
     pub fn to_order_request(&self) -> Result<OrderPlacementRequest> {
         Ok(OrderPlacementRequest {

@@ -391,6 +391,20 @@ fn prepare_order_settings_happens_after_prearmed_protection_guard() {
     );
 }
 #[test]
+fn live_risk_reservation_happens_before_final_live_order_request() {
+    let source = include_str!("execution_worker_live_execution_section.rs");
+    let reservation_offset = source
+        .find(".reserve_live_execution_risk_budget")
+        .expect("execute_task should reserve final risk budget before building the live order");
+    let live_request_offset = source
+        .find(".live_order_request")
+        .expect("execute_task should build final live order request");
+    assert!(
+        reservation_offset < live_request_offset,
+        "final account-level risk reservation must happen before live order sizing"
+    );
+}
+#[test]
 fn live_prepare_order_settings_is_not_binance_only() {
     let source = include_str!("execution_worker_live_execution_support_section.rs");
     assert!(

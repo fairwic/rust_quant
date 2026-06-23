@@ -42,7 +42,8 @@ use crate::rust_quan_web::execution_take_profit::{
 use crate::rust_quan_web::{
     worker_live_capability_for_exchange, ExchangeOrderResult, ExchangeReconciliationIssueType,
     ExchangeReconciliationReportRequest, ExchangeReconciliationReportResponse,
-    ExchangeRequestAuditLog, ExchangeRequestControlGuard, ExecutionAuditRepository, ExecutionTask,
+    ExchangeRequestAuditLog, ExchangeRequestControlGuard, ExecutionAuditRepository,
+    ExecutionRiskReservationRequest, ExecutionRiskReservationResponse, ExecutionTask,
     ExecutionTaskClient, ExecutionTaskConfig, ExecutionTaskConfirmationLeaseItem,
     ExecutionTaskLeaseExtendRequest, ExecutionTaskLeaseRequest, ExecutionTaskReportRequest,
     ExecutionWorkerCheckpoint, NoopExecutionAuditRepository, PostgresExecutionAuditRepository,

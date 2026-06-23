@@ -69,6 +69,50 @@ fn derives_market_order_size_from_size_usdt_and_last_price() {
     assert_eq!(order.size, "10");
 }
 #[test]
+fn risk_reservation_overrides_payload_derived_live_order_size() {
+    let task = task(json!({
+        "source": "rust_quan_web",
+        "symbol": "TEST-USDT-SWAP",
+        "signal_type": "buy",
+        "execution": {
+            "exchange": "binance",
+            "symbol": "TEST-USDT-SWAP",
+            "side": "buy",
+            "order_type": "market",
+            "size_usdt": 500.0,
+            "leverage": 3.0
+        },
+        "risk_plan": {
+            "entry_price": 100.0,
+            "selected_stop_loss_price": 90.0,
+            "direction": "long"
+        }
+    }));
+    let mut request = ExecutionOrderTask::from_task(&task).unwrap();
+    assert_eq!(request.size, "5");
+    request
+        .apply_risk_reservation(&ExecutionRiskReservationResponse {
+            task_id: task.id,
+            buyer_email: task.buyer_email.clone(),
+            exchange: "binance".to_string(),
+            api_credential_id: Some(8801),
+            risk_budget_batch_id: Some("batch-1".to_string()),
+            allocation_mode: "equal_batch_split".to_string(),
+            allowed_notional_usdt: 250.0,
+            required_margin_usdt: 50.0,
+            stop_risk_usdt: 25.0,
+            leverage: 5.0,
+            margin_mode: "isolated".to_string(),
+            position_mode: "one_way".to_string(),
+        })
+        .unwrap();
+    assert_eq!(request.size, "0");
+    assert_eq!(request.size_usdt, Some(250.0));
+    assert_eq!(request.leverage.as_deref(), Some("5"));
+    let order = request.to_order_request_with_last_price(Some(100.0)).unwrap();
+    assert_eq!(order.size, "2.5");
+}
+#[test]
 fn strategy_size_usdt_payload_waits_for_live_ticker_and_filters() {
     let task = task(json!({
         "source": "rust_quant",

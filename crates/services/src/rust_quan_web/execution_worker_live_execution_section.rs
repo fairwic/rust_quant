@@ -6,7 +6,7 @@ impl ExecutionWorker {
             return self.execute_pending_close_task(task).await;
         }
         // Web payload 先被解析成 Core 可执行的订单任务，后续所有校验都基于这个结构化合同。
-        let order_task =
+        let mut order_task =
             match ExecutionOrderTask::from_task_with_default(task, self.config.default_exchange) {
                 Ok(value) => value,
                 Err(error) => {
@@ -152,6 +152,46 @@ impl ExecutionWorker {
                     error.to_string(),
                 );
             }
+        }
+        let reservation = match self
+            .reserve_live_execution_risk_budget(task, &order_task)
+            .await
+        {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                return ExecutionTaskReportRequest::failed(
+                    task.id,
+                    order_task.exchange.as_str(),
+                    order_side_lower(order_task.side),
+                    format!(
+                        "live risk reservation blocked main order: {error}; place_order_allowed=false; mutation_allowed=false"
+                    ),
+                    json!({
+                        "task_id": task.id,
+                        "stage": "risk_reservation",
+                        "exchange": order_task.exchange.as_str(),
+                        "symbol": order_task.symbol,
+                        "place_order_allowed": false,
+                        "mutation_allowed": false,
+                    }),
+                );
+            }
+        };
+        if let Err(error) = order_task.apply_risk_reservation(&reservation) {
+            return ExecutionTaskReportRequest::failed(
+                task.id,
+                order_task.exchange.as_str(),
+                order_side_lower(order_task.side),
+                error.to_string(),
+                json!({
+                    "task_id": task.id,
+                    "stage": "risk_reservation_apply",
+                    "exchange": order_task.exchange.as_str(),
+                    "symbol": order_task.symbol,
+                    "place_order_allowed": false,
+                    "mutation_allowed": false,
+                }),
+            );
         }
         // live_order_request 会按交易所过滤器、最新价格和合约规则修正数量/价格，是 mutation 前的最后本地成单模型。
         let mut request = match self.live_order_request(&gateway, &order_task).await {
