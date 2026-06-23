@@ -394,6 +394,7 @@ impl ExecutionOrderTask {
             time_in_force: payload_string(payload, "time_in_force")
                 .map(|value| parse_time_in_force(&value))
                 .transpose()?,
+            risk_reserved: false,
             attached_stop_loss_price: selected_stop_loss_price(payload)
                 .filter(|price| price.is_finite() && *price > 0.0)
                 .map(format_order_price),
@@ -425,6 +426,7 @@ impl ExecutionOrderTask {
         self.leverage = Some(format_order_size(reservation.leverage));
         self.margin_mode = Some(MarginMode::from(reservation.margin_mode.clone()));
         self.position_mode = Some(parse_position_mode(&reservation.position_mode)?);
+        self.risk_reserved = true;
         Ok(())
     }
     /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
@@ -506,7 +508,7 @@ impl ExecutionOrderTask {
                 request.trade_side.as_deref().map(|value| value.to_ascii_lowercase()),
                 Some(value) if value == "close"
             );
-        let normalized_size = if use_local_min_order_size && enforce_min_notional {
+        let normalized_size = if use_local_min_order_size && enforce_min_notional && !self.risk_reserved {
             minimum_order_size(last_price, filters, enforce_min_notional)?
         } else {
             quantize_order_size(size, last_price, filters, enforce_min_notional)?

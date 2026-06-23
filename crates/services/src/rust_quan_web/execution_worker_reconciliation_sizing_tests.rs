@@ -113,6 +113,58 @@ fn risk_reservation_overrides_payload_derived_live_order_size() {
     assert_eq!(order.size, "2.5");
 }
 #[test]
+fn risk_reserved_live_order_below_exchange_minimum_fails_closed_even_with_local_min_size() {
+    let task = task(json!({
+        "source": "rust_quan_web",
+        "symbol": "ETH-USDT-SWAP",
+        "signal_type": "buy",
+        "execution": {
+            "exchange": "binance",
+            "symbol": "ETH-USDT-SWAP",
+            "side": "buy",
+            "order_type": "market",
+            "size_usdt": 500.0,
+            "leverage": 3.0
+        },
+        "risk_plan": {
+            "entry_price": 2300.38,
+            "selected_stop_loss_price": 2200.0,
+            "direction": "long"
+        }
+    }));
+    let mut request = ExecutionOrderTask::from_task(&task).unwrap();
+    request
+        .apply_risk_reservation(&ExecutionRiskReservationResponse {
+            task_id: task.id,
+            buyer_email: task.buyer_email.clone(),
+            exchange: "binance".to_string(),
+            api_credential_id: Some(8801),
+            risk_budget_batch_id: Some("batch-1".to_string()),
+            allocation_mode: "equal_batch_split".to_string(),
+            allowed_notional_usdt: 19.0,
+            required_margin_usdt: 3.8,
+            stop_risk_usdt: 0.83,
+            leverage: 5.0,
+            margin_mode: "isolated".to_string(),
+            position_mode: "one_way".to_string(),
+        })
+        .unwrap();
+    let error = request
+        .to_live_order_request_with_local_min_size(Some(2300.38), Some(&binance_eth_filters()), true)
+        .expect_err("risk reservation must not be expanded above its allowed notional");
+    assert!(error.to_string().contains("min_notional"));
+}
+#[test]
+fn exchange_minimum_notional_is_derived_for_risk_reservation() {
+    let minimum = minimum_order_notional_usdt(
+        "2300.38".parse().unwrap(),
+        &binance_eth_filters(),
+        true,
+    )
+    .unwrap();
+    assert_eq!(minimum, Some(20.70342));
+}
+#[test]
 fn strategy_size_usdt_payload_waits_for_live_ticker_and_filters() {
     let task = task(json!({
         "source": "rust_quant",

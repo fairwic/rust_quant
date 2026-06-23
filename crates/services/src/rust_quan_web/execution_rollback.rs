@@ -135,6 +135,7 @@ mod tests {
             reduce_only: None,
             time_in_force: None,
             size_usdt: None,
+            risk_reserved: false,
             attached_stop_loss_price: None,
             take_profit_legs: Vec::new(),
         };

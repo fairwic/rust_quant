@@ -32,6 +32,7 @@ fn binance_buy_order_task() -> ExecutionOrderTask {
         reduce_only: None,
         time_in_force: None,
         size_usdt: None,
+        risk_reserved: false,
         attached_stop_loss_price: Some("2100".to_string()),
         take_profit_legs: Vec::new(),
     }
@@ -63,6 +64,7 @@ fn attached_stop_loss_order_task(exchange: ExchangeId) -> ExecutionOrderTask {
         reduce_only: None,
         time_in_force: None,
         size_usdt: None,
+        risk_reserved: false,
         attached_stop_loss_price: Some("2100".to_string()),
         take_profit_legs: Vec::new(),
     }

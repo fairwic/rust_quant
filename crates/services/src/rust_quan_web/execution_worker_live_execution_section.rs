@@ -153,8 +153,32 @@ impl ExecutionWorker {
                 );
             }
         }
+        let minimum_notional_usdt = match self
+            .live_order_minimum_notional_usdt(&gateway, &order_task)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                return ExecutionTaskReportRequest::failed(
+                    task.id,
+                    order_task.exchange.as_str(),
+                    order_side_lower(order_task.side),
+                    format!(
+                        "live risk reservation minimum notional lookup failed: {error}; place_order_allowed=false; mutation_allowed=false"
+                    ),
+                    json!({
+                        "task_id": task.id,
+                        "stage": "risk_reservation_min_notional",
+                        "exchange": order_task.exchange.as_str(),
+                        "symbol": order_task.symbol,
+                        "place_order_allowed": false,
+                        "mutation_allowed": false,
+                    }),
+                );
+            }
+        };
         let reservation = match self
-            .reserve_live_execution_risk_budget(task, &order_task)
+            .reserve_live_execution_risk_budget(task, &order_task, minimum_notional_usdt)
             .await
         {
             Ok(reservation) => reservation,

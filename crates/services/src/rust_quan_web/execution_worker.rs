@@ -1,8 +1,9 @@
 use crate::exchange::{CryptoExcAllGateway, OrderPlacementRequest};
 use crate::rust_quan_web::execution_order_filters::{
     decimal_from_f64, format_order_size_decimal, format_protective_stop_price_decimal,
-    load_exchange_order_filters, minimum_order_size, parse_positive_decimal, quantize_order_size,
-    quantize_protective_stop_price, ExchangeOrderFilters,
+    load_exchange_order_filters, minimum_order_notional_usdt, minimum_order_size,
+    parse_positive_decimal, quantize_order_size, quantize_protective_stop_price,
+    ExchangeOrderFilters,
 };
 use crate::rust_quan_web::execution_payload::{
     close_order_side, direction_from_order_side, ensure_live_order_confirmation,

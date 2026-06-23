@@ -455,6 +455,14 @@ mod tests {
         );
     }
     #[test]
+    fn risk_reservation_request_serializes_minimum_notional() {
+        let request = ExecutionRiskReservationRequest {
+            minimum_notional_usdt: Some(20.70342),
+        };
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(value["minimum_notional_usdt"], 20.70342);
+    }
+    #[test]
     fn lease_extend_request_serializes_worker_and_seconds() {
         let request = ExecutionTaskLeaseExtendRequest {
             worker_id: "worker-a".to_string(),

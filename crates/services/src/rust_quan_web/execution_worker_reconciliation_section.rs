@@ -328,6 +328,8 @@ pub struct ExecutionOrderTask {
     pub time_in_force: Option<TimeInForce>,
     /// size USDT 金额；为空时使用默认值或表示不限制。
     pub size_usdt: Option<f64>,
+    /// 是否已应用 Web owner service 的最终风险预算预留。
+    pub risk_reserved: bool,
     /// 止损价格。
     pub attached_stop_loss_price: Option<String>,
     /// 列表数据。

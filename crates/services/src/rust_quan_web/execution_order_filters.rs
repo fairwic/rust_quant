@@ -252,6 +252,28 @@ pub(super) fn minimum_order_size(
     }
     quantize_order_size(size, last_price, filters, enforce_min_notional)
 }
+/// 计算交易所允许的最小名义金额，供下单前全局风险预留判断是否值得占用预算。
+pub(super) fn minimum_order_notional_usdt(
+    last_price: Decimal,
+    filters: &ExchangeOrderFilters,
+    enforce_min_notional: bool,
+) -> Result<Option<f64>> {
+    if filters.min_qty.is_none() && !(enforce_min_notional && filters.min_notional.is_some()) {
+        return Ok(None);
+    }
+    let size = minimum_order_size(last_price, filters, enforce_min_notional)?;
+    let notional = size * notional_per_size_unit(last_price, filters);
+    let value = notional
+        .normalize()
+        .to_string()
+        .parse::<f64>()
+        .map_err(|error| anyhow!("invalid minimum order notional {notional}: {error}"))?;
+    if value.is_finite() && value > 0.0 {
+        Ok(Some(value))
+    } else {
+        Ok(None)
+    }
+}
 /// 生成 Web 商业、会员和执行准备度 需要的派生数据，供后续执行、展示或审计使用。
 pub(super) fn format_order_size_decimal(size: Decimal, filters: &ExchangeOrderFilters) -> String {
     let precision = filters

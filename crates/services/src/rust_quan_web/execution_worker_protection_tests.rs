@@ -405,6 +405,20 @@ fn live_risk_reservation_happens_before_final_live_order_request() {
     );
 }
 #[test]
+fn live_min_notional_lookup_happens_before_risk_reservation() {
+    let source = include_str!("execution_worker_live_execution_section.rs");
+    let min_notional_offset = source
+        .find(".live_order_minimum_notional_usdt")
+        .expect("execute_task should derive exchange minimum notional before risk reservation");
+    let reservation_offset = source
+        .find(".reserve_live_execution_risk_budget")
+        .expect("execute_task should reserve final risk budget before building the live order");
+    assert!(
+        min_notional_offset < reservation_offset,
+        "exchange minimum notional must be known before occupying risk reservation budget"
+    );
+}
+#[test]
 fn live_prepare_order_settings_is_not_binance_only() {
     let source = include_str!("execution_worker_live_execution_support_section.rs");
     assert!(

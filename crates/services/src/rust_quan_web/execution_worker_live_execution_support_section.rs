@@ -4,15 +4,51 @@ impl ExecutionWorker {
         &self,
         task: &ExecutionTask,
         _order_task: &ExecutionOrderTask,
+        minimum_notional_usdt: Option<f64>,
     ) -> Result<ExecutionRiskReservationResponse> {
         self.client
             .reserve_execution_risk_budget(
                 task.id,
                 ExecutionRiskReservationRequest {
-                    minimum_notional_usdt: None,
+                    minimum_notional_usdt,
                 },
             )
             .await
+    }
+    /// 下单前根据交易所过滤器派生最小名义金额，避免预留一笔最终无法成交的风险预算。
+    async fn live_order_minimum_notional_usdt(
+        &self,
+        gateway: &CryptoExcAllGateway,
+        order_task: &ExecutionOrderTask,
+    ) -> Result<Option<f64>> {
+        let enforce_min_notional = !order_task.reduce_only.unwrap_or(false)
+            && !matches!(
+                order_task.trade_side.as_deref().map(|value| value.to_ascii_lowercase()),
+                Some(value) if value == "close"
+            );
+        if !enforce_min_notional {
+            return Ok(None);
+        }
+        let instrument = parse_instrument(&order_task.symbol)?;
+        let ticker = gateway.ticker(order_task.exchange, &instrument).await?;
+        let last_price = ticker.last_price.trim().parse::<f64>().map_err(|err| {
+            anyhow!(
+                "invalid ticker last_price for {} on {}: {}",
+                order_task.symbol,
+                order_task.exchange.as_str(),
+                err
+            )
+        })?;
+        let filters = load_exchange_order_filters(order_task.exchange, &order_task.symbol)
+            .await?
+            .ok_or_else(|| {
+                anyhow!(
+                    "missing exchange symbol filters for {} on {}; run exchange symbol sync before live risk reservation",
+                    order_task.symbol,
+                    order_task.exchange.as_str()
+                )
+            })?;
+        minimum_order_notional_usdt(decimal_from_f64(last_price)?, &filters, enforce_min_notional)
     }
     /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
     /// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
