@@ -7,7 +7,7 @@ set -euo pipefail
 
 compose_file="${DEPLOY_COMPOSE_FILE:-docker-compose.deploy.yml}"
 compose_source_file="${DEPLOY_COMPOSE_SOURCE_FILE:-docker-compose.deploy.yml}"
-services_csv="${DEPLOY_SERVICES:-quant-core-market-velocity-radar,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker}"
+services_csv="${DEPLOY_SERVICES:-quant-core-internal-server,quant-core-market-velocity-radar,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker}"
 ghcr_username="${DEPLOY_GHCR_USERNAME:-}"
 ghcr_token="${DEPLOY_GHCR_TOKEN:-}"
 ssh_host_input="${DEPLOY_SSH_HOST}"
@@ -264,7 +264,21 @@ print_runtime_safety_flags() {
   done
 }
 
+require_internal_server_deploy_service() {
+  local service
+  for service in "$@"; do
+    service="$(printf '%s' "${service}" | xargs)"
+    if [ "${service}" = "quant-core-internal-server" ]; then
+      return 0
+    fi
+  done
+
+  echo "DEPLOY_SERVICES must include quant-core-internal-server; quant-web depends on the Core internal API for market radar and asset snapshot refresh" >&2
+  exit 1
+}
+
 IFS=',' read -r -a services <<< "${services_csv}"
+require_internal_server_deploy_service "${services[@]}"
 override_file=".deploy/quant-core.rollback.override.yml"
 {
   echo "services:"

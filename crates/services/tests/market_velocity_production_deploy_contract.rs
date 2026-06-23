@@ -38,6 +38,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     let rollback = read_repo_file("scripts/deploy/rollback.sh");
     for service in [
         "quant-core-schema-ensure:",
+        "quant-core-internal-server:",
         "quant-core-market-velocity-radar:",
         "quant-core-market-velocity-candle-backfill-scheduler:",
         "quant-core-market-velocity-paper-observation-scheduler:",
@@ -100,6 +101,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "production compose must not override postgres/redis Docker DNS with host-gateway aliases"
     );
     for service in [
+        "quant-core-internal-server",
         "quant-core-market-velocity-radar",
         "quant-core-market-velocity-paper-observation-scheduler",
         "quant-core-market-velocity-live-handoff-scheduler",
@@ -155,11 +157,18 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         workflow.contains("market_velocity_production_deploy_contract"),
         "CI verify must run the production deploy contract"
     );
-    let default_deploy_services = "quant-core-market-velocity-radar,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
+    let default_deploy_services = "quant-core-internal-server,quant-core-market-velocity-radar,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
     for deploy_script in [&promote, &rollback] {
         assert!(
             deploy_script.contains(default_deploy_services),
             "default Core deployment must run the live handoff scheduler so Market Velocity reaches the production handoff node"
+        );
+        assert!(
+            deploy_script.contains("require_internal_server_deploy_service")
+                && deploy_script.contains(
+                    "DEPLOY_SERVICES must include quant-core-internal-server"
+                ),
+            "default deploy/rollback must fail fast if DEPLOY_SERVICES omits the Web-facing Core internal server"
         );
         assert!(
             !deploy_script.contains(
