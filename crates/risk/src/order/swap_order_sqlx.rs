@@ -1,13 +1,11 @@
 //! SwapOrder 实体 - sqlx 实现
 //! 从 swap_order.rs 迁移 (rbatis → sqlx)
-
 use anyhow::Result;
 use rust_quant_common::utils::time;
 use rust_quant_core::database::get_db_pool;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use tracing::info;
-
 /// 订单实体
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 #[serde(rename_all = "snake_case")]
@@ -37,19 +35,17 @@ pub struct SwapOrderEntity {
     // 平台类型
     pub platform_type: String, //okx,binance,huobi,bitget,
 }
-
 impl SwapOrderEntity {
     // 生成订单id
+    /// 提供gen订单ID的集中实现，避免交易执行调用方重复处理相同细节。
     pub fn gen_order_id(inst_id: &str, period: &str, side: &str, pos_side: &str) -> String {
         let time = time::format_to_period_str(period);
         let order_id = format!("{}_{}_{}_{}_{}", inst_id, period, side, pos_side, time);
         order_id
     }
-
     /// 插入订单到数据库
     pub async fn insert(&self) -> Result<u64> {
         let pool = get_db_pool();
-
         let inserted_id: i64 = sqlx::query_scalar(
             "INSERT INTO swap_order 
              (in_order_id, out_order_id, strategy_id, strategy_type, period, 
@@ -72,53 +68,41 @@ impl SwapOrderEntity {
         .fetch_one(pool)
         .await
         .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         info!("订单已插入数据库: in_order_id={}", self.in_order_id);
         Ok(inserted_id as u64)
     }
-
     /// 根据内部订单ID查询
     pub async fn select_by_in_order_id(in_order_id: &str) -> Result<Vec<Self>> {
         let pool = get_db_pool();
-
         let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order WHERE in_order_id = $1")
             .bind(in_order_id)
             .fetch_all(pool)
             .await
             .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         Ok(orders)
     }
-
     /// 根据策略ID查询
     pub async fn select_by_strategy_id(strategy_id: i64) -> Result<Vec<Self>> {
         let pool = get_db_pool();
-
         let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order WHERE strategy_id = $1")
             .bind(strategy_id)
             .fetch_all(pool)
             .await
             .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         Ok(orders)
     }
-
     /// 查询所有订单
     pub async fn select_all() -> Result<Vec<Self>> {
         let pool = get_db_pool();
-
         let orders = sqlx::query_as::<_, Self>("SELECT * FROM swap_order")
             .fetch_all(pool)
             .await
             .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         Ok(orders)
     }
-
     /// 更新订单
     pub async fn update(&self) -> Result<u64> {
         let pool = get_db_pool();
-
         let result = sqlx::query(
             "UPDATE swap_order 
              SET out_order_id = $1, strategy_type = $2, period = $3,
@@ -140,7 +124,6 @@ impl SwapOrderEntity {
         .execute(pool)
         .await
         .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         Ok(result.rows_affected())
     }
 }

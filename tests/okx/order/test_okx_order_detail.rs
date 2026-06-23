@@ -9,7 +9,6 @@ use rust_quant::trading::strategy::strategy_common::{BasicRiskStrategyConfig, Si
 use rust_quant::trading::strategy::StrategyType;
 use serde_json::json;
 use tracing::error;
-
 #[tokio::test]
 async fn test_okx_order_detail() {
     // 启用详细日志
@@ -21,7 +20,6 @@ async fn test_okx_order_detail() {
     // builder.filter_module("rust_quant", Level::Debug);
     // builder.default_format();
     // builder.init();
-
     app_init().await;
     let inst_id = "BTC-USDT-SWAP";
     let order_id = Some("2752618588464259072");
@@ -33,7 +31,6 @@ async fn test_okx_order_detail() {
         .await;
     println!("order_list: {:?}", order_list);
 }
-
 // #[tokio::test]
 // async fn test_get_position() -> Result<(), AppError> {
 //     // 启用详细日志
@@ -48,7 +45,6 @@ async fn test_okx_order_detail() {
 //     app_init().await;
 //     let inst_id = "BTC-USDT-SWAP";
 //     let period = "1H";
-
 //     // 获取当前仓位状态
 //     let account = OkxAccount::from_env()?;
 //     //todo 如有反向的仓位，应该开启异步去立即关闭

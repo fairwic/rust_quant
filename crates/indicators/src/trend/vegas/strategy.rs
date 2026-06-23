@@ -1,3 +1,9 @@
+use super::config::*;
+use super::ema_filter::{self, EmaDistanceConfig, EmaDistanceState};
+use super::indicator_combine::IndicatorCombine;
+use super::signal::*;
+use super::trend;
+use super::utils;
 use crate::momentum::stc::StcIndicator;
 use crate::signal_weight::{SignalCondition, SignalDirect, SignalType, SignalWeightsConfig};
 use crate::volatility::atr::ATR;
@@ -7,14 +13,6 @@ use rust_quant_common::CandleItem;
 use rust_quant_domain::{BacktestResult, BasicRiskStrategyConfig, SignalResult};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-
-use super::config::*;
-use super::ema_filter::{self, EmaDistanceConfig, EmaDistanceState};
-use super::indicator_combine::IndicatorCombine;
-use super::signal::*;
-use super::trend;
-use super::utils;
-
 /// Vegas综合策略配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VegasStrategy {
@@ -72,19 +70,16 @@ pub struct VegasStrategy {
     #[serde(default = "default_emit_debug")]
     pub emit_debug: bool,
 }
-
 fn default_ema_distance_config() -> EmaDistanceConfig {
     EmaDistanceConfig::default()
 }
-
 fn default_atr_stop_loss_multiplier() -> f64 {
     1.5
 }
-
 fn default_emit_debug() -> bool {
     true
 }
-
+/// 封装环境变量开关，减少回测策略调用方重复实现相同细节。
 fn env_flag(name: &str) -> bool {
     matches!(
         std::env::var(name)
@@ -94,7 +89,7 @@ fn env_flag(name: &str) -> bool {
         "1" | "true" | "yes" | "on"
     )
 }
-
+/// 封装环境变量字符串，减少回测策略调用方重复实现相同细节。
 fn env_string(name: &str) -> Option<String> {
     let value = std::env::var(name).ok()?;
     let trimmed = value.trim().to_ascii_lowercase();
@@ -104,26 +99,23 @@ fn env_string(name: &str) -> Option<String> {
         Some(trimmed)
     }
 }
-
+/// 计算 回测与策略研究 指标，保持公式和边界处理集中可审计。
 fn compute_stc_pair(data_items: &[CandleItem]) -> Option<(f64, f64)> {
     if data_items.len() < 60 {
         return None;
     }
-
     let mut stc = StcIndicator::new(23, 50, 10, 3, 3);
     let mut prev = None;
     let mut current = None;
-
     for item in data_items {
         let value = stc.next(item.c);
         prev = current;
         current = Some(value);
     }
-
     Some((prev?, current?))
 }
-
 impl VegasStrategy {
+    /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     pub fn new(period: String) -> Self {
         Self {
             period,
@@ -145,7 +137,6 @@ impl VegasStrategy {
                 ..MarketStructureConfig::default()
             }),
             range_filter_signal: Some(RangeFilterConfig::default()),
-
             extreme_k_filter_signal: default_extreme_k_filter(),
             large_entity_stop_loss_config: default_large_entity_stop_loss_config(),
             chase_confirm_config: default_chase_confirm_config(),
@@ -157,24 +148,19 @@ impl VegasStrategy {
             emit_debug: default_emit_debug(),
         }
     }
-
     pub fn get_strategy_name() -> String {
         "vegas".to_string()
     }
-
-    /// 获取最小数据长度
     pub fn get_min_data_length(&mut self) -> usize {
         self.min_k_line_num
     }
 }
-
 include!("strategy/short_rule_helpers.rs");
 include!("strategy/long_rule_helpers.rs");
 include!("strategy/long_entry_helpers.rs");
 include!("strategy/trade_signal_entry_filters.rs");
 include!("strategy/trade_signal.rs");
 include!("strategy/indicator_helpers.rs");
-
 #[cfg(test)]
 mod tests {
     include!("strategy/tests.rs");

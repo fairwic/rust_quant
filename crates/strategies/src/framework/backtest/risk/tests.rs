@@ -1,5 +1,4 @@
 use super::*;
-
 #[test]
 fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_long() {
     let position = TradePosition {
@@ -12,7 +11,6 @@ fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_long() {
         long_signal_take_profit_price: Some(110.0),
         ..TradePosition::default()
     };
-
     let candle = CandleItem {
         o: 100.0,
         h: 105.0,
@@ -26,12 +24,10 @@ fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_long() {
         max_loss_percent: 0.05,
         ..Default::default()
     };
-
     let targets = compute_current_targets(&position, &candle, &risk);
     assert_eq!(targets.stop_loss, Some(98.0));
     assert_eq!(targets.take_profit, Some(110.0));
 }
-
 #[test]
 fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_short() {
     let position = TradePosition {
@@ -44,7 +40,6 @@ fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_short() {
         short_signal_take_profit_price: Some(90.0),
         ..TradePosition::default()
     };
-
     let candle = CandleItem {
         o: 100.0,
         h: 101.0,
@@ -58,12 +53,10 @@ fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_short() {
         max_loss_percent: 0.05,
         ..Default::default()
     };
-
     let targets = compute_current_targets(&position, &candle, &risk);
     assert_eq!(targets.stop_loss, Some(103.0));
     assert_eq!(targets.take_profit, Some(90.0));
 }
-
 #[test]
 fn effective_max_loss_keeps_default_entry_mismatch_tightening() {
     let position = TradePosition {
@@ -83,13 +76,11 @@ fn effective_max_loss_keeps_default_entry_mismatch_tightening() {
         confirm: 1,
     };
     let ctx = ExitContext::new(&position, &candle);
-
     assert_eq!(
         compute_effective_max_loss(&position, &ctx, 0.05, true),
         0.03
     );
 }
-
 #[test]
 fn effective_max_loss_can_tighten_entry_amplitude_without_direction_mismatch() {
     let position = TradePosition {
@@ -116,7 +107,6 @@ fn effective_max_loss_can_tighten_entry_amplitude_without_direction_mismatch() {
         dynamic_entry_loss_percent: Some(0.035),
         ..Default::default()
     };
-
     assert_eq!(
         compute_effective_max_loss_with_config(
             &position,

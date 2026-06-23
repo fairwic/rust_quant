@@ -1,20 +1,24 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DuneSyncRequest {
+    /// 类型标识。
     metric_type: String,
+    /// 交易对或资产符号。
     symbol: String,
+    /// template路径，用于构建接口请求。
     template_path: String,
+    /// 键值扩展数据。
     params: HashMap<String, String>,
+    /// performance，用于构建接口请求。
     performance: DuneQueryPerformance,
 }
-
+/// 封装当前函数，减少配置运行时调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 async fn run_dune_sync_jobs_from_env() -> Result<()> {
     let envs: HashMap<String, String> = std::env::vars().collect();
     let requests = parse_dune_sync_requests_from_map(&envs)?;
-
     if requests.is_empty() {
         return Ok(());
     }
-
     for request in requests {
         info!(
             "📊 执行Dune模板同步: metric_type={}, symbol={}, template_path={}",
@@ -29,17 +33,15 @@ async fn run_dune_sync_jobs_from_env() -> Result<()> {
         )
         .await?;
     }
-
     Ok(())
 }
-
+/// 解析输入参数并收敛为 配置、基础设施和运行时 可使用的结构化值。
 fn parse_dune_sync_requests_from_map(
     envs: &HashMap<String, String>,
 ) -> Result<Vec<DuneSyncRequest>> {
     if !env_flag_is_true(envs, "IS_RUN_DUNE_SYNC_JOB") {
         return Ok(Vec::new());
     }
-
     if let Some(raw_jobs) = envs
         .get("DUNE_TEMPLATE_JOBS")
         .map(|s| s.trim())
@@ -65,7 +67,6 @@ fn parse_dune_sync_requests_from_map(
         }
         return Ok(requests);
     }
-
     Ok(vec![build_dune_sync_request(
         env_required(envs, "DUNE_METRIC_TYPE")?.as_str(),
         env_required(envs, "DUNE_SYMBOL")?.as_str(),
@@ -80,7 +81,7 @@ fn parse_dune_sync_requests_from_map(
             .unwrap_or("100000"),
     )?])
 }
-
+/// 构建 配置、基础设施和运行时 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_dune_sync_request(
     metric_type: &str,
     symbol: &str,
@@ -95,7 +96,6 @@ fn build_dune_sync_request(
     params.insert("start_time".to_string(), start_time.to_string());
     params.insert("end_time".to_string(), end_time.to_string());
     params.insert("min_usd".to_string(), min_usd.to_string());
-
     Ok(DuneSyncRequest {
         metric_type: metric_type.to_string(),
         symbol: symbol.to_string(),
@@ -104,7 +104,7 @@ fn build_dune_sync_request(
         performance: parse_dune_performance(performance)?,
     })
 }
-
+/// 解析输入参数并收敛为 配置、基础设施和运行时 可使用的结构化值。
 fn parse_dune_performance(value: &str) -> Result<DuneQueryPerformance> {
     match value.to_ascii_lowercase().as_str() {
         "medium" => Ok(DuneQueryPerformance::Medium),
@@ -112,7 +112,7 @@ fn parse_dune_performance(value: &str) -> Result<DuneQueryPerformance> {
         other => Err(anyhow!("不支持的 Dune performance: {}", other)),
     }
 }
-
+/// 封装环境变量必需，减少配置运行时调用方重复实现相同细节。
 fn env_required(envs: &HashMap<String, String>, key: &str) -> Result<String> {
     envs.get(key)
         .cloned()

@@ -4,7 +4,6 @@ fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() 
     let full_report_path = artifact_dir.join("full-product-health.json");
     let summary_path = artifact_dir.join("full-product-health-summary.json");
     let markdown_path = artifact_dir.join("full-product-health.md");
-
     fs::write(
         &full_report_path,
         r#"{
@@ -73,7 +72,6 @@ fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() 
         "# Full Product Health\n\n**Status:** ok\n\n## Counts\n\n## Top Alerts\n\n## Operator Playbook Summary\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env(
@@ -88,7 +86,6 @@ fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() 
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         output.status.success(),
         "validator should accept complete redacted artifacts:\nstdout={}\nstderr={}",
@@ -98,7 +95,6 @@ fn full_product_health_artifact_validator_accepts_complete_redacted_artifacts() 
     let stdout = String::from_utf8(output.stdout).expect("validation output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid validation json: {error}\n{stdout}"));
-
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["summary"]["artifact_count"], 3);
     assert_eq!(payload["summary"]["sensitive_marker_count"], 0);
@@ -113,7 +109,6 @@ fn full_product_health_artifact_validator_strict_fails_missing_fields_and_sensit
     let full_report_path = artifact_dir.join("full-product-health.json");
     let summary_path = artifact_dir.join("full-product-health-summary.json");
     let markdown_path = artifact_dir.join("full-product-health.md");
-
     fs::write(
         &full_report_path,
         r#"{
@@ -150,7 +145,6 @@ fn full_product_health_artifact_validator_strict_fails_missing_fields_and_sensit
         "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\napi secret appeared here\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env(
@@ -165,7 +159,6 @@ fn full_product_health_artifact_validator_strict_fails_missing_fields_and_sensit
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         !output.status.success(),
         "strict validator should exit non-zero for invalid artifacts"
@@ -173,7 +166,6 @@ fn full_product_health_artifact_validator_strict_fails_missing_fields_and_sensit
     let stdout = String::from_utf8(output.stdout).expect("validation output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid validation json: {error}\n{stdout}"));
-
     assert_eq!(payload["status"], "fail");
     assert!(
         payload["summary"]["missing_required_field_count"]
@@ -214,7 +206,6 @@ fn full_product_health_artifact_validator_strict_fails_missing_fields_and_sensit
             "validator should report marker code {expected_marker}: {stdout}"
         );
     }
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         "api_key",

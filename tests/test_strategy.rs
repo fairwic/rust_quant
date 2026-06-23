@@ -3,17 +3,14 @@ use rust_quant::trading::model::entity::candles::entity::CandlesEntity;
 use rust_quant::trading::strategy::strategy_common::{
     run_back_test, BasicRiskStrategyConfig, SignalResult, TradeRecord,
 };
-
 #[tokio::test]
 async fn test_strategy_signals() -> Result<()> {
     let mock_candles = create_mock_candles();
-
     let strategy_config = BasicRiskStrategyConfig {
         max_loss_percent: 0.02,
         take_profit_ratio: true,
         is_used_signal_k_line_stop_loss: false,
     };
-
     // 打印每根K线的信息
     println!("\n模拟K线数据:");
     for (i, candle) in mock_candles.iter().enumerate() {
@@ -27,7 +24,6 @@ async fn test_strategy_signals() -> Result<()> {
             candle.ts
         );
     }
-
     // let result = run_back_test(
     //     |candles| mock_strategy(candles),
     //     &mock_candles,
@@ -38,23 +34,18 @@ async fn test_strategy_signals() -> Result<()> {
     //     true,  // 允许做多
     //     false, // 禁用做空
     // );
-
     // println!("\n回测结果: {:#?}", result);
     // assert!(!result.trade_records.is_empty(), "应该有交易记录生成");
     // verify_trade_signals(&result.trade_records);
-
     Ok(())
 }
-
 #[tokio::test]
 async fn test_strategy_scenarios() -> Result<()> {
     // 场景1: 做多盈利平仓
     let candles_profit = create_profit_scenario();
     verify_scenario("盈利平仓", candles_profit).await?;
-
     Ok(())
 }
-
 #[tokio::test]
 async fn test_2() -> Result<()> {
     // 场景2: 做多止损
@@ -62,43 +53,34 @@ async fn test_2() -> Result<()> {
     verify_scenario("止损平仓", candles_stoploss).await?;
     Ok(())
 }
-
 #[tokio::test]
 async fn test_3() -> Result<()> {
     // 场景3: 动态止盈
     let candles_dynamic = create_dynamic_tp_scenario();
     verify_scenario("动态止盈", candles_dynamic).await?;
-
     Ok(())
 }
-
 #[tokio::test]
 async fn test_short_scenarios() -> Result<()> {
     // 场景4: 做空盈利平仓
     // let candles_short_profit = create_short_profit_scenario();
     // verify_short_scenario("做空盈利平仓", candles_short_profit).await?;
-
     // 场景5: 做空止损
     let candles_short_stoploss = create_short_stoploss_scenario();
     verify_short_scenario("做空止损平仓", candles_short_stoploss).await?;
-
     // 场景6: 做空动态止盈
     let candles_short_dynamic = create_short_dynamic_tp_scenario();
     verify_short_scenario("做空动态止盈", candles_short_dynamic).await?;
-
     Ok(())
 }
-
 /// 验证单个场景
 async fn verify_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result<()> {
     println!("\n测试场景: {}", name);
-
     let strategy_config = BasicRiskStrategyConfig {
         is_used_signal_k_line_stop_loss: false,
         max_loss_percent: 0.02, // 2%止损
         take_profit_ratio: true, // 1%启用动态止盈
     };
-
     // let result = run_back_test(
     //     |candles| mock_strategy(candles),
     //     &mock_candles,
@@ -109,22 +91,18 @@ async fn verify_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result
     //     true,
     //     false,
     // );
-
     // println!("回测结果: {:#?}", result);
     // verify_trade_signals(&result.trade_records);
     Ok(())
 }
-
 /// 验证做空场景
 async fn verify_short_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> Result<()> {
     println!("\n测试场景: {}", name);
-
     let strategy_config = BasicRiskStrategyConfig {
         take_profit_ratio: true,
         is_used_signal_k_line_stop_loss: false,
         max_loss_percent: 0.02, // 2%止损
     };
-
     // let result = run_back_test(
     //     |candles| mock_short_strategy(candles),
     //     &mock_candles,
@@ -135,19 +113,16 @@ async fn verify_short_scenario(name: &str, mock_candles: Vec<CandlesEntity>) -> 
     //     false,  // 禁用做多
     //     true,   // 启用做空
     // );
-
     // println!("回测结果: {:#?}", result);
     // verify_trade_signals(&result.trade_records);
     Ok(())
 }
-
 /// 创建模拟K线数据
 fn create_mock_candles() -> Vec<CandlesEntity> {
     let mut candles = Vec::new();
     let now = chrono::Utc::now().timestamp_millis();
     let five_min = 5 * 60 * 1000;
     let base_price = 100.0;
-
     // 构建初始数据
     add_mock_candle(
         &mut candles,
@@ -167,7 +142,6 @@ fn create_mock_candles() -> Vec<CandlesEntity> {
         now - five_min * 5,
         "100,101,99,100",
     ); // K3
-
     // 触发做多信号
     add_mock_candle(
         &mut candles,
@@ -175,7 +149,6 @@ fn create_mock_candles() -> Vec<CandlesEntity> {
         now - five_min * 4,
         "100,103,100,103",
     ); // K4: +3%
-
     // 上涨趋势
     add_mock_candle(
         &mut candles,
@@ -189,7 +162,6 @@ fn create_mock_candles() -> Vec<CandlesEntity> {
         now - five_min * 2,
         "105,107,105,107",
     ); // K6: +1.9%
-
     add_mock_candle(
         &mut candles,
         base_price,
@@ -198,10 +170,8 @@ fn create_mock_candles() -> Vec<CandlesEntity> {
     ); // K7: -4.7%
        // 回落触发止盈
     add_mock_candle(&mut candles, base_price, now, "107,107,102,102"); // K8: -4.7%
-
     candles
 }
-
 /// 添加模拟K线
 fn add_mock_candle(candles: &mut Vec<CandlesEntity>, base_price: f64, ts: i64, prices: &str) {
     let (o, h, l, c) = parse_prices(prices);
@@ -217,7 +187,6 @@ fn add_mock_candle(candles: &mut Vec<CandlesEntity>, base_price: f64, ts: i64, p
         updated_at: None,
     });
 }
-
 /// 解析价格字符串 "open,high,low,close"
 fn parse_prices(prices: &str) -> (f64, f64, f64, f64) {
     let parts: Vec<f64> = prices
@@ -226,7 +195,6 @@ fn parse_prices(prices: &str) -> (f64, f64, f64, f64) {
         .collect();
     (parts[0], parts[1], parts[2], parts[3])
 }
-
 /// 模拟策略
 fn mock_strategy(candles: &[CandlesEntity]) -> SignalResult {
     let current = candles.last().unwrap();
@@ -242,21 +210,17 @@ fn mock_strategy(candles: &[CandlesEntity]) -> SignalResult {
         best_open_price: None,
         best_take_profit_price: None,
     };
-
     if candles.len() < 3 {
         return signal;
     }
-
     let prev = &candles[candles.len() - 2];
     let prev_close = prev.c.parse::<f64>().unwrap();
     let change = (price - prev_close) / prev_close;
-
     // 找到开仓价格（第一个103）
     let entry_price = candles
         .iter()
         .find(|c| c.c.parse::<f64>().unwrap() == 103.0)
         .map(|c| c.c.parse::<f64>().unwrap());
-
     println!(
         "\nK线分析: K{} -> K{}, 前收={}, 当前={}, 变化率={:.2}%",
         candles.len() - 1,
@@ -265,7 +229,6 @@ fn mock_strategy(candles: &[CandlesEntity]) -> SignalResult {
         price,
         change * 100.0
     );
-
     // 开仓信号：从100.0开始的上涨
     if prev_close >= 99.9 && prev_close <= 100.1 && change > 0.02 {
         signal.should_buy = true;
@@ -289,10 +252,8 @@ fn mock_strategy(candles: &[CandlesEntity]) -> SignalResult {
             );
         }
     }
-
     signal
 }
-
 /// 做空策略
 fn mock_short_strategy(candles: &[CandlesEntity]) -> SignalResult {
     let current = candles.last().unwrap();
@@ -308,15 +269,12 @@ fn mock_short_strategy(candles: &[CandlesEntity]) -> SignalResult {
         best_open_price:None,
         best_take_profit_price:None,
     };
-
     if candles.len() < 3 {
         return signal;
     }
-
     let prev = &candles[candles.len() - 2];
     let prev_close = prev.c.parse::<f64>().unwrap();
     let change = (price - prev_close) / prev_close;
-
     println!(
         "\nK线分析: K{} -> K{}, 前收={}, 当前={}, 变化率={:.2}%",
         candles.len() - 1,
@@ -325,7 +283,6 @@ fn mock_short_strategy(candles: &[CandlesEntity]) -> SignalResult {
         price,
         change * 100.0
     );
-
     // 开仓信号：从100.0开始的下跌
     if prev_close >= 99.9 && prev_close <= 100.1 && change < -0.02 {
         signal.should_sell = true;
@@ -333,17 +290,14 @@ fn mock_short_strategy(candles: &[CandlesEntity]) -> SignalResult {
         signal.single_value = Some("做空信号".to_string());
         println!(">>> 触发做空信号 <<< 开仓价格: {}", price);
     }
-
     signal
 }
-
 /// 验证交易信号
 fn verify_trade_signals(trade_records: &Vec<TradeRecord>) {
     let mut long_entries = 0;
     let mut long_exits = 0;
     let mut short_entries = 0;
     let mut short_exits = 0;
-
     for record in trade_records {
         println!("交易记录: {:?}", record);
         match record.option_type.as_str() {
@@ -363,13 +317,11 @@ fn verify_trade_signals(trade_records: &Vec<TradeRecord>) {
             _ => println!("未知交易类型: {}", record.option_type),
         }
     }
-
     println!("\n交易统计:");
     println!("做多开仓次数: {}", long_entries);
     println!("做多平仓次数: {}", long_exits);
     println!("做空开仓次数: {}", short_entries);
     println!("做空平仓次数: {}", short_exits);
-
     // 根据是否有多空交易分别验证
     if long_entries > 0 {
         assert!(long_exits > 0, "应该有做多平仓");
@@ -379,14 +331,12 @@ fn verify_trade_signals(trade_records: &Vec<TradeRecord>) {
     }
     assert!(long_entries > 0 || short_entries > 0, "应该有开仓交易");
 }
-
 /// 创建盈利平仓场景
 fn create_profit_scenario() -> Vec<CandlesEntity> {
     let mut candles = Vec::new();
     let now = chrono::Utc::now().timestamp_millis();
     let five_min = 5 * 60 * 1000;
     let base_price = 100.0;
-
     add_mock_candle(
         &mut candles,
         base_price,
@@ -424,17 +374,14 @@ fn create_profit_scenario() -> Vec<CandlesEntity> {
         "107,107,102,102",
     ); // K6: 回落平仓
     add_mock_candle(&mut candles, base_price, now, "102,103,101,101"); // K7: 收尾K线
-
     candles
 }
-
 /// 创建止损场景
 fn create_stoploss_scenario() -> Vec<CandlesEntity> {
     let mut candles = Vec::new();
     let now = chrono::Utc::now().timestamp_millis();
     let five_min = 5 * 60 * 1000;
     let base_price = 100.0;
-
     add_mock_candle(
         &mut candles,
         base_price,
@@ -467,17 +414,14 @@ fn create_stoploss_scenario() -> Vec<CandlesEntity> {
     ); // K5: 小幅回落
     add_mock_candle(&mut candles, base_price, now - five_min * 1, "99,99,97,100"); // K6: 跌破止损
     add_mock_candle(&mut candles, base_price, now, "97,98,96,100"); // K7: 收尾K线
-
     candles
 }
-
 // 创建动态止盈场景
 fn create_dynamic_tp_scenario() -> Vec<CandlesEntity> {
     let mut candles = Vec::new();
     let now = chrono::Utc::now().timestamp_millis();
     let five_min = 5 * 60 * 1000;
     let base_price = 100.0;
-
     add_mock_candle(
         &mut candles,
         base_price,
@@ -521,17 +465,14 @@ fn create_dynamic_tp_scenario() -> Vec<CandlesEntity> {
         "108,108,102,105",
     ); // K7: 大幅回落
     add_mock_candle(&mut candles, base_price, now, "102,103,101,102"); // K8: 收尾K线
-
     candles
 }
-
 /// 创建做空盈利场景
 fn create_short_profit_scenario() -> Vec<CandlesEntity> {
     let mut candles = Vec::new();
     let now = chrono::Utc::now().timestamp_millis();
     let five_min = 5 * 60 * 1000;
     let base_price = 100.0;
-
     add_mock_candle(
         &mut candles,
         base_price,
@@ -554,17 +495,14 @@ fn create_short_profit_scenario() -> Vec<CandlesEntity> {
     add_mock_candle(&mut candles, base_price, now - five_min * 2, "94,94,91,91"); // K5: 继续下跌
     add_mock_candle(&mut candles, base_price, now - five_min * 1, "91,94,91,94"); // K6: 反弹平仓
     add_mock_candle(&mut candles, base_price, now, "94,95,93,95"); // K7: 收尾K线
-
     candles
 }
-
 /// 创建做空止损场景
 fn create_short_stoploss_scenario() -> Vec<CandlesEntity> {
     let mut candles = Vec::new();
     let now = chrono::Utc::now().timestamp_millis();
     let five_min = 5 * 60 * 1000;
     let base_price = 100.0;
-
     add_mock_candle(
         &mut candles,
         base_price,
@@ -596,17 +534,14 @@ fn create_short_stoploss_scenario() -> Vec<CandlesEntity> {
         now - five_min * 1,
         "100,101,99,99",
     ); // K6: 收尾K线
-
     candles
 }
-
 /// 创建做空动态止盈场景
 fn create_short_dynamic_tp_scenario() -> Vec<CandlesEntity> {
     let mut candles = Vec::new();
     let now = chrono::Utc::now().timestamp_millis();
     let five_min = 5 * 60 * 1000;
     let base_price = 100.0;
-
     add_mock_candle(
         &mut candles,
         base_price,
@@ -630,6 +565,5 @@ fn create_short_dynamic_tp_scenario() -> Vec<CandlesEntity> {
     add_mock_candle(&mut candles, base_price, now - five_min * 2, "91,91,89,89"); // K6: 新低
     add_mock_candle(&mut candles, base_price, now - five_min * 1, "89,92,89,96"); // K7: 反弹触发动态止盈
     add_mock_candle(&mut candles, base_price, now, "92,93,91,93"); // K8: 收尾K线
-
     candles
 }

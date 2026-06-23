@@ -1,7 +1,6 @@
 use serde_json::Value;
 use std::fs;
 use std::process::Command;
-
 #[test]
 fn cli_converts_probe_seeds_to_acceptance_samples() {
     let input_path = std::env::temp_dir().join(format!(
@@ -53,7 +52,6 @@ fn cli_converts_probe_seeds_to_acceptance_samples() {
         "#,
     )
     .expect("write probe seed fixture");
-
     let output = Command::new(env!(
         "CARGO_BIN_EXE_pre_major_listing_paper_samples_from_probe"
     ))
@@ -61,9 +59,7 @@ fn cli_converts_probe_seeds_to_acceptance_samples() {
     .arg(&input_path)
     .output()
     .expect("run pre_major_listing_paper_samples_from_probe");
-
     fs::remove_file(&input_path).ok();
-
     assert!(
         output.status.success(),
         "stderr={}",

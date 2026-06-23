@@ -2,15 +2,16 @@ use super::super::types::TradeSide;
 use super::position::close_position;
 use super::types::{BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState};
 use crate::CandleItem;
-
 // ============================================================================
 // 出场上下文结构（减少参数传递和重复计算）
 // ============================================================================
-
 /// 出场检查上下文，封装常用数据避免重复计算
 struct ExitContext {
+    /// 交易方向。
     side: TradeSide,
+    /// 交易入场信息。
     entry: f64,
+    /// 数量。
     qty: f64,
     /// 不利价格（触发止损用）：Long=low, Short=high
     adverse_price: f64,
@@ -21,8 +22,8 @@ struct ExitContext {
     /// K线时间戳
     candle_ts: i64,
 }
-
 impl ExitContext {
+    /// 初始化new，确保风控依赖和内部状态可直接使用。
     fn new(position: &TradePosition, candle: &CandleItem) -> Self {
         let side = position.trade_side;
         Self {
@@ -41,54 +42,42 @@ impl ExitContext {
             side,
         }
     }
-
     /// 计算利润
-    #[inline]
     fn profit(&self, exit_price: f64) -> f64 {
         match self.side {
             TradeSide::Long => (exit_price - self.entry) * self.qty,
             TradeSide::Short => (self.entry - exit_price) * self.qty,
         }
     }
-
     /// 检查止盈是否触发
-    #[inline]
     fn is_take_profit_hit(&self, target: f64) -> bool {
         match self.side {
             TradeSide::Long => self.favorable_price >= target,
             TradeSide::Short => self.favorable_price <= target,
         }
     }
-
     /// 检查止盈是否触发（严格模式，用于某些需要 > 而非 >= 的场景）
-    #[inline]
     fn is_take_profit_hit_strict(&self, target: f64) -> bool {
         match self.side {
             TradeSide::Long => self.favorable_price > target,
             TradeSide::Short => self.favorable_price < target,
         }
     }
-
     /// 检查止损是否触发
-    #[inline]
     fn is_stop_loss_hit(&self, target: f64) -> bool {
         match self.side {
             TradeSide::Long => self.adverse_price <= target,
             TradeSide::Short => self.adverse_price >= target,
         }
     }
-
     /// 计算止损价格
-    #[inline]
     fn stop_loss_price(&self, loss_pct: f64) -> f64 {
         match self.side {
             TradeSide::Long => self.entry * (1.0 - loss_pct),
             TradeSide::Short => self.entry * (1.0 + loss_pct),
         }
     }
-
     /// 计算收益率
-    #[inline]
     fn profit_pct(&self) -> f64 {
         match self.side {
             TradeSide::Long => (self.adverse_price - self.entry) / self.entry,
@@ -96,11 +85,9 @@ impl ExitContext {
         }
     }
 }
-
 // ============================================================================
 // 出场结果
 // ============================================================================
-
 /// 出场检查结果
 enum ExitResult {
     /// 触发出场，返回平仓价格和原因
@@ -110,20 +97,24 @@ enum ExitResult {
     /// 未触发
     None,
 }
-
 // ============================================================================
 // 出场目标计算（供实盘同步）
 // ============================================================================
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExitTargets {
+    /// 止损；为空时使用默认值或表示不限制。
     pub stop_loss: Option<f64>,
+    /// 止盈；为空时使用默认值或表示不限制。
     pub take_profit: Option<f64>,
+    /// 原因说明。
     pub stop_reason: Option<String>,
+    /// 原因说明。
     pub take_reason: Option<String>,
 }
-
 #[cfg(test)]
+/// 封装当前函数，减少风控调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 fn compute_effective_max_loss(
     position: &TradePosition,
     ctx: &ExitContext,
@@ -138,7 +129,7 @@ fn compute_effective_max_loss(
         &BasicRiskStrategyConfig::default(),
     )
 }
-
+/// 计算 交易执行与风控 指标，保持公式和边界处理集中可审计。
 fn compute_effective_max_loss_with_config(
     position: &TradePosition,
     ctx: &ExitContext,
@@ -172,7 +163,6 @@ fn compute_effective_max_loss_with_config(
                 }
             }
         }
-
         if !tightened_by_entry {
             let range_pct = (ctx.favorable_price - ctx.adverse_price).abs() / ctx.entry.max(1e-9);
             let range_threshold = risk_config.dynamic_range_threshold.unwrap_or(0.05);
@@ -182,10 +172,9 @@ fn compute_effective_max_loss_with_config(
             }
         }
     }
-
     effective_max_loss
 }
-
+/// 选择 交易执行与风控 的最佳候选结果，避免选择规则分散在调用方。
 fn select_tightest_stop(side: TradeSide, candidates: &[f64]) -> Option<f64> {
     let values: Vec<f64> = candidates
         .iter()
@@ -206,7 +195,7 @@ fn select_tightest_stop(side: TradeSide, candidates: &[f64]) -> Option<f64> {
             .unwrap(),
     })
 }
-
+/// 选择 交易执行与风控 的最佳候选结果，避免选择规则分散在调用方。
 fn select_nearest_tp(side: TradeSide, entry: f64, candidates: &[f64]) -> Option<f64> {
     let values: Vec<f64> = candidates
         .iter()
@@ -231,7 +220,7 @@ fn select_nearest_tp(side: TradeSide, entry: f64, candidates: &[f64]) -> Option<
             .unwrap(),
     })
 }
-
+/// 计算 交易执行与风控 指标，保持公式和边界处理集中可审计。
 pub fn compute_current_targets(
     position: &TradePosition,
     candle: &CandleItem,
@@ -246,7 +235,6 @@ pub fn compute_current_targets(
         risk,
     );
     let max_loss_stop = ctx.stop_loss_price(effective_max_loss);
-
     let mut stop_candidates = vec![max_loss_stop];
     if let Some(px) = position.signal_kline_stop_close_price {
         stop_candidates.push(px);
@@ -255,7 +243,6 @@ pub fn compute_current_targets(
         stop_candidates.push(px);
     }
     let stop_loss = select_tightest_stop(ctx.side, &stop_candidates);
-
     let mut tp_candidates = Vec::new();
     if let Some(px) = position.atr_take_profit_level_3 {
         tp_candidates.push(px);
@@ -279,7 +266,6 @@ pub fn compute_current_targets(
         }
     }
     let take_profit = select_nearest_tp(ctx.side, ctx.entry, &tp_candidates);
-
     ExitTargets {
         stop_loss,
         take_profit,
@@ -287,11 +273,9 @@ pub fn compute_current_targets(
         take_reason: None,
     }
 }
-
 // ============================================================================
 // 止损检查函数
 // ============================================================================
-
 /// 检查最大损失止损
 fn check_max_loss_stop(
     ctx: &ExitContext,
@@ -305,7 +289,6 @@ fn check_max_loss_stop(
         risk_config.dynamic_max_loss.unwrap_or(true),
         risk_config,
     );
-
     if ctx.profit_pct() < -effective_max_loss {
         let stop_price = ctx.stop_loss_price(effective_max_loss);
         ExitResult::Exit {
@@ -316,7 +299,6 @@ fn check_max_loss_stop(
         ExitResult::None
     }
 }
-
 /// 检查信号K线止损
 fn check_signal_kline_stop(ctx: &ExitContext, stop_price: Option<f64>) -> ExitResult {
     if ctx.candle_ts >= 1766952000000 && ctx.candle_ts <= 1767052800000 {
@@ -334,7 +316,6 @@ fn check_signal_kline_stop(ctx: &ExitContext, stop_price: Option<f64>) -> ExitRe
             );
         }
     }
-
     match stop_price {
         Some(price) => match ctx.side {
             TradeSide::Long => {
@@ -363,14 +344,12 @@ fn check_signal_kline_stop(ctx: &ExitContext, stop_price: Option<f64>) -> ExitRe
         _ => ExitResult::None,
     }
 }
-
 /// 检查三级ATR系统的移动止损
 fn check_atr_trailing_stop(ctx: &ExitContext, position: &TradePosition) -> ExitResult {
     // 必须有三级止盈配置才有移动止损
     if position.atr_take_profit_level_1.is_none() {
         return ExitResult::None;
     }
-
     match position.move_stop_open_price {
         Some(stop_price) if ctx.is_stop_loss_hit(stop_price) => ExitResult::ExitDynamic {
             price: stop_price,
@@ -379,11 +358,9 @@ fn check_atr_trailing_stop(ctx: &ExitContext, position: &TradePosition) -> ExitR
         _ => ExitResult::None,
     }
 }
-
 // ============================================================================
 // 三级止盈系统
 // ============================================================================
-
 /// 更新三级ATR止盈系统的级别和移动止损线
 /// 返回是否触发第三级完全平仓
 fn update_atr_tiered_levels(ctx: &ExitContext, position: &mut TradePosition) -> ExitResult {
@@ -395,9 +372,7 @@ fn update_atr_tiered_levels(ctx: &ExitContext, position: &mut TradePosition) -> 
         (Some(l1), Some(l2), Some(l3)) => (l1, l2, l3),
         _ => return ExitResult::None,
     };
-
     let current_level = position.reached_take_profit_level;
-
     // 第三级：5倍ATR，完全平仓
     if current_level < 3 && ctx.is_take_profit_hit(level_3) {
         return ExitResult::Exit {
@@ -405,26 +380,21 @@ fn update_atr_tiered_levels(ctx: &ExitContext, position: &mut TradePosition) -> 
             reason: "三级止盈(5倍ATR)-完全平仓",
         };
     }
-
     // 第二级：2倍ATR，移动止损到第一级止盈价
     if current_level < 2 && ctx.is_take_profit_hit(level_2) {
         position.reached_take_profit_level = 2;
         position.move_stop_open_price = Some(level_1);
     }
-
     // 第一级：1.5倍ATR，移动止损到开仓价
     if current_level < 1 && ctx.is_take_profit_hit(level_1) {
         position.reached_take_profit_level = 1;
         position.move_stop_open_price = Some(ctx.entry);
     }
-
     ExitResult::None
 }
-
 // ============================================================================
 // 止盈检查函数
 // ============================================================================
-
 /// 检查ATR比例止盈
 fn check_atr_ratio_take_profit(
     ctx: &ExitContext,
@@ -435,7 +405,6 @@ fn check_atr_ratio_take_profit(
         Some(r) if r > 0.0 => r,
         _ => return ExitResult::None,
     };
-
     match target_price {
         Some(price) if ctx.is_take_profit_hit(price) => ExitResult::Exit {
             price,
@@ -444,7 +413,6 @@ fn check_atr_ratio_take_profit(
         _ => ExitResult::None,
     }
 }
-
 /// 检查固定信号线比例止盈
 fn check_fixed_take_profit(ctx: &ExitContext, target: Option<f64>) -> ExitResult {
     match target {
@@ -456,7 +424,6 @@ fn check_fixed_take_profit(ctx: &ExitContext, target: Option<f64>) -> ExitResult
         _ => ExitResult::None,
     }
 }
-
 /// 检查动态止盈（做多/做空通用）
 fn check_dynamic_take_profit(
     ctx: &ExitContext,
@@ -473,19 +440,15 @@ fn check_dynamic_take_profit(
             _ => return ExitResult::None,
         },
     };
-
     ExitResult::Exit {
         price: target,
         reason,
     }
 }
-
 // ============================================================================
 // 公共检查链（供 check_risk_config 和 check_risk_config_with_r_system 复用）
 // ============================================================================
-
 /// 止损检查链（优先级从高到低）
-///
 /// 检查顺序：
 /// 1. 最大损失止损
 /// 2. 单K振幅固定止损(1R)
@@ -502,7 +465,6 @@ fn run_stop_loss_checks(
     {
         return result;
     }
-
     // 2. 最大损失止损
     let result = check_max_loss_stop(ctx, position, risk_config);
     if matches!(
@@ -511,13 +473,10 @@ fn run_stop_loss_checks(
     ) {
         return result;
     }
-
     // 3. 移动止损（三级ATR系统）
     check_atr_trailing_stop(ctx, position)
 }
-
 /// 止盈检查链（优先级从高到低）
-///
 /// 检查顺序：
 /// 1. 三级ATR止盈
 /// 2. ATR比例止盈
@@ -533,7 +492,6 @@ fn run_take_profit_checks(
     if matches!(result, ExitResult::Exit { .. }) {
         return result;
     }
-
     // 2. ATR比例止盈
     let result = check_atr_ratio_take_profit(
         ctx,
@@ -543,13 +501,11 @@ fn run_take_profit_checks(
     if matches!(result, ExitResult::Exit { .. }) {
         return result;
     }
-
     // 3. 固定信号线比例止盈
     let result = check_fixed_take_profit(ctx, position.fixed_take_profit_price);
     if matches!(result, ExitResult::Exit { .. }) {
         return result;
     }
-
     // 4. 动态止盈（做多/做空）
     let result = check_dynamic_take_profit(
         ctx,
@@ -559,25 +515,19 @@ fn run_take_profit_checks(
     if matches!(result, ExitResult::Exit { .. }) {
         return result;
     }
-
     ExitResult::None
 }
-
 // ============================================================================
 // 主函数
 // ============================================================================
-
 /// 风险管理检查入口
-///
 /// # 优先级原则
 /// **同一K线内，止损永远优先于止盈**
-///
 /// ## 检查顺序
 /// ### 止损（优先级高）
 /// 1. 最大损失止损 - 资金保护
 /// 2. 移动止损 - 三级ATR系统
 /// 3. 信号K线止损 - 技术止损
-///
 /// ### 止盈
 /// 4. 三级ATR止盈 - 5倍ATR完全平仓
 /// 5. ATR比例止盈
@@ -593,10 +543,8 @@ pub fn check_risk_config(
     let Some(ref position) = trading_state.trade_position else {
         return trading_state;
     };
-
     let mut trade_position = position.clone();
     let ctx = ExitContext::new(&trade_position, candle);
-
     // 止损检查（优先级最高）
     let stop_result = run_stop_loss_checks(&ctx, risk_config, &trade_position);
     if matches!(
@@ -612,7 +560,6 @@ pub fn check_risk_config(
             stop_result,
         );
     }
-
     // 止盈检查
     let tp_result = run_take_profit_checks(&ctx, risk_config, &mut trade_position);
     if matches!(tp_result, ExitResult::Exit { .. }) {
@@ -625,21 +572,17 @@ pub fn check_risk_config(
             tp_result,
         );
     }
-
     // 更新仓位状态（三级止盈系统可能修改了级别和移动止损）
     trading_state.trade_position = Some(trade_position);
     trading_state
 }
-
 // ============================================================================
 // R系统增强风控（基于第一性原理）
 // ============================================================================
-
 use super::r_system::{
     check_time_stop, update_r_system_trailing_stop, RSystemConfig, RSystemState, TimeStopAction,
     TimeStopConfig,
 };
-
 /// R系统增强风控配置
 #[derive(Debug, Clone)]
 pub struct RSystemRiskConfig {
@@ -652,8 +595,8 @@ pub struct RSystemRiskConfig {
     /// 时间止损配置
     pub time_config: TimeStopConfig,
 }
-
 impl Default for RSystemRiskConfig {
+    /// 提供默认参数，保证 交易执行与风控 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             enable_r_system: true,
@@ -663,7 +606,6 @@ impl Default for RSystemRiskConfig {
         }
     }
 }
-
 /// R系统运行时状态（需要在回测循环中维护）
 #[derive(Debug, Clone, Default)]
 pub struct RSystemRuntime {
@@ -674,13 +616,10 @@ pub struct RSystemRuntime {
     /// ATR值（需要从外部计算并传入）
     pub current_atr: f64,
 }
-
 /// R系统增强风控检查入口
-///
 /// 在标准风控的基础上，增加：
 /// - R系统移动止损：根据盈利R倍数动态调整止损
 /// - 时间止损：根据持仓时间和盈亏状态决定是否平仓
-///
 /// # 参数
 /// - `risk_config`: 基础风控配置
 /// - `r_risk_config`: R系统风控配置
@@ -688,7 +627,6 @@ pub struct RSystemRuntime {
 /// - `trading_state`: 交易状态
 /// - `signal`: 信号结果
 /// - `candle`: 当前K线
-///
 /// # 返回
 /// - `TradingState`: 更新后的交易状态
 pub fn check_risk_config_with_r_system(
@@ -702,14 +640,11 @@ pub fn check_risk_config_with_r_system(
     let Some(ref position) = trading_state.trade_position else {
         return trading_state;
     };
-
     let mut trade_position = position.clone();
     let ctx = ExitContext::new(&trade_position, candle);
-
     // ========================================================================
     // 止损检查（优先级最高）
     // ========================================================================
-
     // 1. 最大损失止损（最高优先级）
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
         check_max_loss_stop(&ctx, &trade_position, risk_config)
@@ -717,7 +652,6 @@ pub fn check_risk_config_with_r_system(
         r_runtime.r_state = None; // 平仓后清除R系统状态
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
     }
-
     // 2. R系统移动止损（新增）
     if r_risk_config.enable_r_system {
         if let Some(ref mut r_state) = r_runtime.r_state {
@@ -729,7 +663,6 @@ pub fn check_risk_config_with_r_system(
                 r_runtime.current_atr,
                 &r_risk_config.r_config,
             );
-
             // 检查是否触发R系统止损
             if r_state.is_stop_triggered(candle.l, candle.h) {
                 let stop_price = r_state.current_stop_price;
@@ -747,13 +680,11 @@ pub fn check_risk_config_with_r_system(
                     },
                 );
             }
-
             // 同步R系统止损到仓位
             trade_position.move_stop_open_price = Some(r_state.current_stop_price);
             trade_position.reached_take_profit_level = r_state.stop_level.as_level();
         }
     }
-
     // 3. 时间止损（新增）
     if r_risk_config.enable_time_stop {
         if let Some(ref r_state) = r_runtime.r_state {
@@ -762,7 +693,6 @@ pub fn check_risk_config_with_r_system(
                 target_1_reached: trade_position.reached_take_profit_level >= 1,
                 ..Default::default()
             };
-
             let time_action = check_time_stop(
                 r_state,
                 &tp_state,
@@ -770,7 +700,6 @@ pub fn check_risk_config_with_r_system(
                 candle.c,
                 &r_risk_config.time_config,
             );
-
             match time_action {
                 TimeStopAction::CloseAll { reason } => {
                     r_runtime.r_state = None;
@@ -799,7 +728,6 @@ pub fn check_risk_config_with_r_system(
             }
         }
     }
-
     // 4. 移动止损（三级ATR系统）
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
         check_atr_trailing_stop(&ctx, &trade_position)
@@ -807,7 +735,6 @@ pub fn check_risk_config_with_r_system(
         r_runtime.r_state = None;
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
     }
-
     // 5. 信号K线止损
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
         check_signal_kline_stop(&ctx, trade_position.signal_kline_stop_close_price)
@@ -815,11 +742,9 @@ pub fn check_risk_config_with_r_system(
         r_runtime.r_state = None;
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
     }
-
     // ========================================================================
     // 止盈检查（复用公共检查链）
     // ========================================================================
-
     let tp_result = run_take_profit_checks(&ctx, risk_config, &mut trade_position);
     if matches!(tp_result, ExitResult::Exit { .. }) {
         r_runtime.r_state = None;
@@ -832,24 +757,13 @@ pub fn check_risk_config_with_r_system(
             tp_result,
         );
     }
-
     // 更新仓位状态
     trading_state.trade_position = Some(trade_position);
     trading_state
 }
-
-/// 初始化R系统状态（在开仓时调用）
-///
-/// # 参数
-/// - `position`: 当前仓位
-/// - `bar_index`: 当前K线索引
-///
-/// # 返回
-/// - `Option<RSystemState>`: R系统状态
 pub fn init_r_system_state(position: &TradePosition, bar_index: usize) -> Option<RSystemState> {
     super::r_system::create_r_state_from_position(position, bar_index)
 }
-
 /// 执行平仓并返回最终状态
 fn finalize_exit(
     mut trading_state: TradingState,
@@ -864,14 +778,11 @@ fn finalize_exit(
         ExitResult::ExitDynamic { price, reason } => (price, reason),
         ExitResult::None => return trading_state,
     };
-
     trade_position.close_price = Some(price);
     trading_state.trade_position = Some(trade_position);
-
     let profit = ctx.profit(price);
     close_position(&mut trading_state, candle, signal, &reason, profit);
     trading_state
 }
-
 #[cfg(test)]
 mod tests;

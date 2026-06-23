@@ -7,25 +7,26 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
-
 /// 告警冷却期 (秒)
 const ALERT_COOLDOWN_SECS: i64 = 60;
-
 /// 资金流向分析器
 pub struct FlowAnalyzer {
+    /// 行情流管理器。
     stream_manager: Arc<DeepStreamManager>,
+    /// 流向rx，用于行情、K 线或市场扫描。
     flow_rx: mpsc::UnboundedReceiver<FundFlow>,
+    /// 键值扩展数据。
     history: HashMap<String, VecDeque<FundFlow>>,
+    /// alertrepo，用于行情、K 线或市场扫描。
     alert_repo: Arc<dyn FundFlowAlertRepository>,
     /// 上次告警时间 (用于冷却期)
     last_alert_times: HashMap<String, DateTime<Utc>>,
 }
-
 impl FlowAnalyzer {
+    /// 初始化new，确保行情数据依赖和内部状态可直接使用。
     pub fn new(alert_repo: Arc<dyn FundFlowAlertRepository>) -> (Self, Arc<DeepStreamManager>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let manager = Arc::new(DeepStreamManager::new(tx));
-
         (
             Self {
                 stream_manager: manager.clone(),
@@ -37,24 +38,21 @@ impl FlowAnalyzer {
             manager,
         )
     }
-
+    /// 封装运行，减少行情数据调用方重复实现相同细节。
     pub async fn run(mut self) {
         info!("Starting FlowAnalyzer...");
-
         if let Err(e) = self.stream_manager.start().await {
             warn!("Failed to start stream manager: {:?}", e);
             return;
         }
-
         while let Some(flow) = self.flow_rx.recv().await {
             self.process_flow(flow).await;
         }
     }
-
+    /// 执行 行情与市场数据 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     async fn process_flow(&mut self, flow: FundFlow) {
         let symbol = flow.symbol.clone();
         let now = Utc::now();
-
         // 检查冷却期
         if let Some(&last_time) = self.last_alert_times.get(&symbol) {
             if now - last_time < ChronoDuration::seconds(ALERT_COOLDOWN_SECS) {
@@ -63,19 +61,15 @@ impl FlowAnalyzer {
                 return;
             }
         }
-
         self.update_history(flow.clone());
-
         // 计算净流入
         let window = self.history.get(&symbol);
         if window.is_none() {
             return;
         }
         let window = window.unwrap();
-
         let mut net_inflow = Decimal::ZERO;
         let mut total_vol = Decimal::ZERO;
-
         for f in window.iter() {
             total_vol += f.value;
             match f.side {
@@ -83,7 +77,6 @@ impl FlowAnalyzer {
                 FundFlowSide::Outflow => net_inflow -= f.value,
             }
         }
-
         // 异动阈值: |净流入| > 100,000 USDT
         if net_inflow.abs() > Decimal::from(100_000) {
             let direction = if net_inflow > Decimal::ZERO {
@@ -91,15 +84,12 @@ impl FlowAnalyzer {
             } else {
                 "OUTFLOW"
             };
-
             info!(
                 "🌊 [FLOW ALERT] {}: Net {} = {} USDT (Window: 60s, TotalVol: {})",
                 symbol, direction, net_inflow, total_vol
             );
-
             // 更新冷却时间
             self.last_alert_times.insert(symbol.clone(), now);
-
             // 持久化
             let alert = FundFlowAlert {
                 id: None,
@@ -114,20 +104,17 @@ impl FlowAnalyzer {
                 window_secs: 60,
                 alert_at: now,
             };
-
             if let Err(e) = self.alert_repo.save(&alert).await {
                 error!("Failed to save fund flow alert for {}: {:?}", symbol, e);
             }
         }
     }
-
+    /// 更新 行情与市场数据 状态，并保留调用方需要的结果或错误信息。
     fn update_history(&mut self, flow: FundFlow) {
         let symbol = flow.symbol.clone();
         let now = Utc::now();
-
         let window = self.history.entry(symbol).or_default();
         window.push_back(flow);
-
         // 清理超过 60 秒的数据
         while let Some(front) = window.front() {
             if now - front.timestamp > ChronoDuration::seconds(60) {

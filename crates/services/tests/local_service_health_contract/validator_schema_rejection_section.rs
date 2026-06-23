@@ -4,7 +4,6 @@ fn full_product_health_artifact_validator_strict_fails_when_schema_is_missing() 
     let missing_schema_path = artifact_dir.join("missing-schema.json");
     let (full_report_path, summary_path, markdown_path) =
         write_phase45_valid_artifacts(&artifact_dir);
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env(
@@ -23,7 +22,6 @@ fn full_product_health_artifact_validator_strict_fails_when_schema_is_missing() 
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         !output.status.success(),
         "strict validator should fail when schema is missing"
@@ -47,7 +45,6 @@ fn full_product_health_artifact_validator_enforces_schema_status_and_severity_en
     let full_report_path = artifact_dir.join("full-product-health.json");
     let summary_path = artifact_dir.join("full-product-health-summary.json");
     let markdown_path = artifact_dir.join("full-product-health.md");
-
     write_phase45_validator_schema(
         &schema_path,
         &["ok"],
@@ -120,7 +117,6 @@ fn full_product_health_artifact_validator_enforces_schema_status_and_severity_en
         "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\n## Top Alerts\n\n## Checklist\n\n## Artifact Paths\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env("FULL_PRODUCT_HEALTH_VALIDATION_SCHEMA_PATH", &schema_path)
@@ -136,7 +132,6 @@ fn full_product_health_artifact_validator_enforces_schema_status_and_severity_en
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         !output.status.success(),
         "strict validator should reject enum values not allowed by schema"
@@ -154,14 +149,12 @@ fn full_product_health_artifact_validator_enforces_schema_status_and_severity_en
         "validator should reject schema-disallowed status and severity values: {stdout}"
     );
 }
-
 #[test]
 fn full_product_health_artifact_validator_rejects_unregistered_alert_taxonomy_code() {
     let artifact_dir = temp_artifact_dir("full-product-health-validator-alert-code-registry");
     let full_report_path = artifact_dir.join("full-product-health.json");
     let summary_path = artifact_dir.join("full-product-health-summary.json");
     let markdown_path = artifact_dir.join("full-product-health.md");
-
     fs::write(
         &full_report_path,
         r#"{
@@ -231,7 +224,6 @@ fn full_product_health_artifact_validator_rejects_unregistered_alert_taxonomy_co
         "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\n## Top Alerts\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env(
@@ -246,7 +238,6 @@ fn full_product_health_artifact_validator_rejects_unregistered_alert_taxonomy_co
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         !output.status.success(),
         "strict validator should reject taxonomy codes outside alert_code_values"
@@ -262,14 +253,12 @@ fn full_product_health_artifact_validator_rejects_unregistered_alert_taxonomy_co
         "validator should identify the unregistered alert taxonomy code: {stdout}"
     );
 }
-
 #[test]
 fn full_product_health_artifact_validator_rejects_unregistered_emitted_alert_codes() {
     let artifact_dir = temp_artifact_dir("full-product-health-validator-emitted-alert-codes");
     let full_report_path = artifact_dir.join("full-product-health.json");
     let summary_path = artifact_dir.join("full-product-health-summary.json");
     let markdown_path = artifact_dir.join("full-product-health.md");
-
     fs::write(
         &full_report_path,
         r#"{
@@ -341,7 +330,6 @@ fn full_product_health_artifact_validator_rejects_unregistered_emitted_alert_cod
         "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\n## Top Alerts\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env(
@@ -356,7 +344,6 @@ fn full_product_health_artifact_validator_rejects_unregistered_emitted_alert_cod
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         !output.status.success(),
         "strict validator should reject emitted alert codes outside alert_code_values"
@@ -374,14 +361,12 @@ fn full_product_health_artifact_validator_rejects_unregistered_emitted_alert_cod
         );
     }
 }
-
 #[test]
 fn full_product_health_artifact_validator_rejects_unsafe_playbook_metadata() {
     let artifact_dir = temp_artifact_dir("full-product-health-validator-playbook-metadata");
     let full_report_path = artifact_dir.join("full-product-health.json");
     let summary_path = artifact_dir.join("full-product-health-summary.json");
     let markdown_path = artifact_dir.join("full-product-health.md");
-
     fs::write(
         &full_report_path,
         r#"{
@@ -491,7 +476,6 @@ fn full_product_health_artifact_validator_rejects_unsafe_playbook_metadata() {
         "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\n## Top Alerts\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env(
@@ -506,7 +490,6 @@ fn full_product_health_artifact_validator_rejects_unsafe_playbook_metadata() {
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         !output.status.success(),
         "strict validator should reject URL and local-path playbook metadata"
@@ -523,7 +506,6 @@ fn full_product_health_artifact_validator_rejects_unsafe_playbook_metadata() {
             "validator should report unsafe playbook metadata marker {expected_marker}: {stdout}"
         );
     }
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in ["https://", "file://", "/users/", "/tmp/"] {
         assert!(

@@ -12,12 +12,11 @@ use rust_quant_services::market::{
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-
 #[derive(Default)]
 struct InMemoryExternalMarketSnapshotRepository {
+    /// 键值扩展数据。
     rows: Mutex<HashMap<(String, String, String, i64), ExternalMarketSnapshot>>,
 }
-
 #[async_trait]
 impl ExternalMarketSnapshotRepository for InMemoryExternalMarketSnapshotRepository {
     async fn save(&self, snapshot: ExternalMarketSnapshot) -> Result<()> {
@@ -30,14 +29,12 @@ impl ExternalMarketSnapshotRepository for InMemoryExternalMarketSnapshotReposito
         self.rows.lock().unwrap().insert(key, snapshot);
         Ok(())
     }
-
     async fn save_batch(&self, snapshots: Vec<ExternalMarketSnapshot>) -> Result<()> {
         for snapshot in snapshots {
             self.save(snapshot).await?;
         }
         Ok(())
     }
-
     async fn find_range(
         &self,
         source: &str,
@@ -67,9 +64,7 @@ impl ExternalMarketSnapshotRepository for InMemoryExternalMarketSnapshotReposito
         Ok(rows)
     }
 }
-
 struct FakeExternalMarketDataProvider;
-
 #[async_trait]
 impl ExternalMarketDataProvider for FakeExternalMarketDataProvider {
     async fn fetch_hyperliquid_funding_history(
@@ -81,7 +76,6 @@ impl ExternalMarketDataProvider for FakeExternalMarketDataProvider {
         assert_eq!(coin, "ETH");
         assert_eq!(start_time, 1774800000000_i64);
         assert_eq!(end_time, 1774814400062_i64);
-
         Ok(vec![HyperliquidFundingHistoryPoint {
             coin: "ETH".to_string(),
             funding_rate: 0.0000105495,
@@ -89,13 +83,11 @@ impl ExternalMarketDataProvider for FakeExternalMarketDataProvider {
             time: 1774814400062_i64,
         }])
     }
-
     async fn fetch_hyperliquid_meta_and_asset_ctxs(
         &self,
         coin: &str,
     ) -> Result<HyperliquidAssetContextSnapshot> {
         assert_eq!(coin, "ETH");
-
         Ok(HyperliquidAssetContextSnapshot {
             coin: "ETH".to_string(),
             funding: Some(0.0000105495),
@@ -106,13 +98,11 @@ impl ExternalMarketDataProvider for FakeExternalMarketDataProvider {
         })
     }
 }
-
 #[tokio::test]
 async fn sync_hyperliquid_coin_converts_and_deduplicates_snapshots() {
     let repo = Arc::new(InMemoryExternalMarketSnapshotRepository::default());
     let provider = Arc::new(FakeExternalMarketDataProvider);
     let service = ExternalMarketSyncService::with_repo_and_provider(repo.clone(), provider);
-
     let saved = service
         .sync_hyperliquid_coin(
             "ETH",
@@ -123,7 +113,6 @@ async fn sync_hyperliquid_coin_converts_and_deduplicates_snapshots() {
         .await
         .expect("sync should succeed");
     assert_eq!(saved, 2);
-
     let saved_again = service
         .sync_hyperliquid_coin(
             "ETH",
@@ -134,7 +123,6 @@ async fn sync_hyperliquid_coin_converts_and_deduplicates_snapshots() {
         .await
         .expect("repeat sync should also succeed");
     assert_eq!(saved_again, 2);
-
     let funding_rows = repo
         .find_range(
             "hyperliquid",
@@ -158,7 +146,6 @@ async fn sync_hyperliquid_coin_converts_and_deduplicates_snapshots() {
             "time": 1774814400062_i64
         }))
     );
-
     let meta_rows = repo
         .find_range(
             "hyperliquid",
@@ -185,14 +172,12 @@ async fn sync_hyperliquid_coin_converts_and_deduplicates_snapshots() {
         }))
     );
 }
-
 #[test]
 fn normalize_external_market_symbol_extracts_base_coin() {
     assert_eq!(normalize_external_market_symbol("ETH-USDT-SWAP"), "ETH");
     assert_eq!(normalize_external_market_symbol("ethusdt"), "ETH");
     assert_eq!(normalize_external_market_symbol("BTC"), "BTC");
 }
-
 #[test]
 fn external_market_source_names_are_stable() {
     assert_eq!(ExternalMarketSource::Hyperliquid.as_str(), "hyperliquid");

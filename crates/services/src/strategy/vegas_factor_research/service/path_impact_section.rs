@@ -2,7 +2,7 @@ impl VegasFactorResearchService {
     pub fn render_path_impact_report(summaries: &[PathImpactSummary]) -> String {
         render_path_impact_report(summaries)
     }
-
+    /// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
     pub fn summarize_path_impact(
         baseline_id: i64,
         experiment_id: i64,
@@ -16,7 +16,6 @@ impl VegasFactorResearchService {
         let mut new_pnls = Vec::new();
         let mut common_deltas = Vec::new();
         let mut changes = Vec::new();
-
         for (key, baseline_trade) in &baseline_map {
             if let Some(experiment_trade) = experiment_map.get(key) {
                 let pnl_delta = experiment_trade.pnl - baseline_trade.pnl;
@@ -45,7 +44,6 @@ impl VegasFactorResearchService {
                 });
             }
         }
-
         for (key, experiment_trade) in &experiment_map {
             if !baseline_map.contains_key(key) {
                 new_pnls.push(experiment_trade.pnl);
@@ -61,7 +59,6 @@ impl VegasFactorResearchService {
                 });
             }
         }
-
         changes.sort_by(|left, right| {
             right
                 .pnl_delta
@@ -70,7 +67,6 @@ impl VegasFactorResearchService {
                 .then(left.open_time_ms.cmp(&right.open_time_ms))
         });
         changes.truncate(top_changed_limit);
-
         let missing_pnl = missing_pnls.iter().sum::<f64>();
         let new_pnl = new_pnls.iter().sum::<f64>();
         let common_pnl_delta = common_deltas.iter().sum::<f64>();
@@ -82,7 +78,6 @@ impl VegasFactorResearchService {
         } else {
             "neutral"
         };
-
         PathImpactSummary {
             baseline_id,
             experiment_id,
@@ -103,7 +98,7 @@ impl VegasFactorResearchService {
             top_changes: changes,
         }
     }
-
+    /// 提供交易map的集中实现，避免回测策略调用方重复处理相同细节。
     fn trade_map(
         trades: &[ResearchTradeSample],
     ) -> HashMap<(String, String, i64), &ResearchTradeSample> {
@@ -121,7 +116,7 @@ impl VegasFactorResearchService {
             })
             .collect()
     }
-
+    /// 提供uniqueinstID的集中实现，避免回测策略调用方重复处理相同细节。
     fn unique_inst_id(
         baseline: &[ResearchTradeSample],
         experiment: &[ResearchTradeSample],
@@ -139,7 +134,7 @@ impl VegasFactorResearchService {
             None
         }
     }
-
+    /// 封装平均，减少回测策略调用方重复实现相同细节。
     fn avg(values: &[f64]) -> f64 {
         if values.is_empty() {
             0.0
@@ -147,5 +142,4 @@ impl VegasFactorResearchService {
             values.iter().sum::<f64>() / values.len() as f64
         }
     }
-
 }

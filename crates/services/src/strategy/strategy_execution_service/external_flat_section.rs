@@ -3,26 +3,26 @@ enum TradeBucketTransferDirection {
     FundToTrade,
     TradeToFund,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExternalFlatDecision {
     Skip,
     Confirmed,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct LiveTradeBucketRebalanceConfig {
+    /// targettrade 比例。
     target_trade_ratio: f64,
+    /// 最小transfer，用于控制策略触发门槛。
     min_transfer: f64,
+    /// transferepsilon，用于配置运行参数。
     transfer_epsilon: f64,
 }
-
 impl StrategyExecutionService {
+    /// 封装实盘tradebucketrebalance配置，减少交易执行调用方重复实现相同细节。
     fn live_trade_bucket_rebalance_config() -> Option<LiveTradeBucketRebalanceConfig> {
         if !Self::env_enabled("LIVE_ENABLE_TRADE_BUCKET_REBALANCE") {
             return None;
         }
-
         let target_trade_ratio = std::env::var("LIVE_TARGET_TRADE_RATIO")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
@@ -32,14 +32,13 @@ impl StrategyExecutionService {
             Self::env_positive_f64("LIVE_TRADE_BUCKET_MIN_TRANSFER_USDT").unwrap_or(1.0);
         let transfer_epsilon =
             Self::env_positive_f64("LIVE_TRADE_BUCKET_EPSILON_USDT").unwrap_or(0.5);
-
         Some(LiveTradeBucketRebalanceConfig {
             target_trade_ratio,
             min_transfer,
             transfer_epsilon,
         })
     }
-
+    /// 计算 交易执行与风控 指标，保持公式和边界处理集中可审计。
     fn calculate_trade_bucket_transfer(
         trade_balance: f64,
         funding_balance: f64,
@@ -52,35 +51,30 @@ impl StrategyExecutionService {
         {
             return None;
         }
-
         let total_balance = trade_balance + funding_balance;
         if total_balance <= 0.0 {
             return None;
         }
-
         let target_trade_balance = total_balance * config.target_trade_ratio;
         let diff = target_trade_balance - trade_balance;
         if diff.abs() < config.transfer_epsilon {
             return None;
         }
-
         if diff > 0.0 {
             let amount = diff;
             if amount >= config.min_transfer {
                 return Some((amount, TradeBucketTransferDirection::FundToTrade));
             }
         }
-
         if diff < 0.0 {
             let amount = -diff;
             if amount >= config.min_transfer {
                 return Some((amount, TradeBucketTransferDirection::TradeToFund));
             }
         }
-
         None
     }
-
+    /// 同步 交易执行与风控 数据，保证本地状态与外部事实源保持一致。
     async fn reconcile_external_flat_close(
         &self,
         config: &StrategyConfig,
@@ -89,7 +83,6 @@ impl StrategyExecutionService {
     ) -> Result<()> {
         use crate::exchange::create_exchange_api_service;
         use crate::exchange::OkxOrderService;
-
         let has_local_state = self
             .live_states
             .get(&config.id)
@@ -100,7 +93,6 @@ impl StrategyExecutionService {
             .get(&config.id)
             .map(|targets| !targets.algo_ids.is_empty() || targets.trade_side.is_some())
             .unwrap_or(false);
-
         let persisted_long = self
             .load_persisted_close_algos(config.id, inst_id, period, "long")
             .await?;
@@ -115,27 +107,22 @@ impl StrategyExecutionService {
                 .as_ref()
                 .map(|order| !Self::extract_close_algo_ids(&order.detail).is_empty())
                 .unwrap_or(false);
-
         if !has_local_state && !has_live_exit_cache && !has_persisted_close_algo {
             return Ok(());
         }
-
         let api_service = create_exchange_api_service();
         let api_config = api_service
             .get_first_api_config(config.id as i32)
             .await
             .map_err(|e| anyhow!("获取API配置失败: {}", e))?;
-
         let okx_service = OkxOrderService;
         let positions = okx_service
             .get_positions(&api_config, Some("SWAP"), Some(inst_id))
             .await
             .map_err(|e| anyhow!("获取账户数据失败: {}", e))?;
-
         let has_exchange_position = positions
             .iter()
             .any(|p| p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12);
-
         if has_exchange_position {
             if let Err(e) = self
                 .clear_external_flat_probe(config.id, inst_id, period)
@@ -148,7 +135,6 @@ impl StrategyExecutionService {
             }
             return Ok(());
         }
-
         let mut inspection_confirms_close = false;
         for order in [&persisted_long, &persisted_short].into_iter().flatten() {
             if order.out_order_id.trim().is_empty() {
@@ -181,7 +167,6 @@ impl StrategyExecutionService {
                 }
             }
         }
-
         match self
             .confirm_external_flat_close(config.id, inst_id, period, inspection_confirms_close)
             .await?
@@ -189,12 +174,10 @@ impl StrategyExecutionService {
             ExternalFlatDecision::Skip => return Ok(()),
             ExternalFlatDecision::Confirmed => {}
         }
-
         info!(
             "🔄 检测到外部平仓完成，清理本地状态并执行交易桶回补: config_id={}, inst_id={}, period={}",
             config.id, inst_id, period
         );
-
         if let Err(e) = self
             .clear_persisted_close_algos(config.id, inst_id, period, "long")
             .await
@@ -213,10 +196,8 @@ impl StrategyExecutionService {
                 inst_id, config.id, e
             );
         }
-
         self.live_exit_targets.remove(&config.id);
         self.live_states.insert(config.id, TradingState::default());
-
         if let Err(e) = self
             .clear_external_flat_probe(config.id, inst_id, period)
             .await
@@ -226,7 +207,6 @@ impl StrategyExecutionService {
                 inst_id, period, config.id, e
             );
         }
-
         if let Err(e) = self
             .rebalance_trade_bucket_after_close(&api_config, config.id, inst_id)
             .await
@@ -236,17 +216,16 @@ impl StrategyExecutionService {
                 inst_id, period, config.id, e
             );
         }
-
         Ok(())
     }
-
+    /// 提供external空仓probekey的集中实现，避免交易执行调用方重复处理相同细节。
     fn external_flat_probe_key(config_id: i64, inst_id: &str, period: &str) -> String {
         format!(
             "live_external_flat_probe:{}:{}:{}",
             config_id, inst_id, period
         )
     }
-
+    /// 删除或清理 交易执行与风控 的临时数据，避免过期状态继续影响后续流程。
     async fn clear_external_flat_probe(
         &self,
         config_id: i64,
@@ -272,7 +251,7 @@ impl StrategyExecutionService {
         }
         Ok(())
     }
-
+    /// 提供confirmexternal空仓平仓的集中实现，避免交易执行调用方重复处理相同细节。
     async fn confirm_external_flat_close(
         &self,
         config_id: i64,
@@ -283,7 +262,6 @@ impl StrategyExecutionService {
         if inspection_confirms_close {
             return Ok(ExternalFlatDecision::Confirmed);
         }
-
         let rkey = Self::external_flat_probe_key(config_id, inst_id, period);
         let mut conn = match get_redis_connection().await {
             Ok(conn) => conn,
@@ -296,7 +274,6 @@ impl StrategyExecutionService {
             }
         };
         let seen_once = conn.get::<_, Option<String>>(&rkey).await?.is_some();
-
         if !seen_once {
             conn.set_ex::<_, _, ()>(&rkey, "1", Self::EXTERNAL_FLAT_PROBE_TTL_SECS)
                 .await?;
@@ -306,14 +283,13 @@ impl StrategyExecutionService {
             );
             return Ok(ExternalFlatDecision::Skip);
         }
-
         warn!(
             "⚠️ 二次观测到交易所无持仓，按外部平仓处理: config_id={}, inst_id={}, period={}",
             config_id, inst_id, period
         );
         Ok(ExternalFlatDecision::Confirmed)
     }
-
+    /// 提供rebalance交易bucket之后平仓的集中实现，避免交易执行调用方重复处理相同细节。
     async fn rebalance_trade_bucket_after_close(
         &self,
         api_config: &rust_quant_domain::entities::ExchangeApiConfig,
@@ -323,19 +299,16 @@ impl StrategyExecutionService {
         let Some(rebalance_config) = Self::live_trade_bucket_rebalance_config() else {
             return Ok(());
         };
-
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
         use crate::exchange::OkxOrderService;
-
         let okx_service = OkxOrderService;
         let positions = okx_service
             .get_positions(api_config, Some("SWAP"), None)
             .await
             .map_err(|e| anyhow!("获取持仓失败: {}", e))?;
-
         let has_open_swap_positions = positions
             .iter()
             .any(|p| p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12);
-
         if has_open_swap_positions {
             info!(
                 "⏭️ 跳过交易桶回补: 当前仍有未平 SWAP 持仓, config_id={}, inst_id={}",
@@ -343,12 +316,10 @@ impl StrategyExecutionService {
             );
             return Ok(());
         }
-
         let currency = std::env::var("LIVE_TRADE_BUCKET_CURRENCY")
             .ok()
             .filter(|v| !v.trim().is_empty())
             .unwrap_or_else(|| "USDT".to_string());
-
         let funding_balance = okx_service
             .get_funding_available_balance(api_config, &currency)
             .await?;
@@ -357,7 +328,6 @@ impl StrategyExecutionService {
             .await?;
         let target_trade_balance =
             (trade_balance + funding_balance) * rebalance_config.target_trade_ratio;
-
         let Some((transfer_amount, direction)) =
             Self::calculate_trade_bucket_transfer(trade_balance, funding_balance, rebalance_config)
         else {
@@ -375,7 +345,6 @@ impl StrategyExecutionService {
             );
             return Ok(());
         };
-
         let (from, to, direction_label) = match direction {
             TradeBucketTransferDirection::FundToTrade => {
                 (AccountType::FOUND, AccountType::TRADE, "fund_to_trade")
@@ -384,7 +353,6 @@ impl StrategyExecutionService {
                 (AccountType::TRADE, AccountType::FOUND, "trade_to_fund")
             }
         };
-
         if matches!(direction, TradeBucketTransferDirection::FundToTrade)
             && funding_balance + 1e-9 < transfer_amount
         {
@@ -394,11 +362,9 @@ impl StrategyExecutionService {
             );
             return Ok(());
         }
-
         okx_service
             .transfer_between_accounts(api_config, &currency, transfer_amount, from, to)
             .await?;
-
         info!(
             "💸 交易桶自动划转完成: config_id={}, inst_id={}, direction={}, amount={:.4}, currency={}, total_balance={:.4}, target={:.4}, ratio={:.4}",
             config_id,
@@ -410,8 +376,6 @@ impl StrategyExecutionService {
             target_trade_balance,
             rebalance_config.target_trade_ratio
         );
-
         Ok(())
     }
-
 }

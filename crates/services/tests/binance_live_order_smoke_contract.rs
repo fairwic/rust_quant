@@ -1,5 +1,4 @@
 use std::{fs, path::PathBuf};
-
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -7,21 +6,18 @@ fn repo_root() -> PathBuf {
         .expect("services crate should live under crates/services")
         .to_path_buf()
 }
-
 fn script_path() -> PathBuf {
     repo_root()
         .join("scripts")
         .join("dev")
         .join("run_binance_live_order_smoke.sh")
 }
-
 fn read_smoke_script() -> String {
     let path = script_path();
     fs::read_to_string(&path).unwrap_or_else(|error| {
         panic!("failed to read {}: {}", path.display(), error);
     })
 }
-
 #[test]
 fn smoke_script_passes_bash_syntax_check() {
     let output = std::process::Command::new("bash")
@@ -29,18 +25,15 @@ fn smoke_script_passes_bash_syntax_check() {
         .arg(script_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
-
 #[test]
 fn legacy_live_order_smoke_entrypoint_is_fail_fast_disabled() {
     let script = read_smoke_script();
-
     assert!(
         script.contains("deprecated and disabled"),
         "legacy live order entrypoint must explain that it is disabled"
@@ -50,15 +43,13 @@ fn legacy_live_order_smoke_entrypoint_is_fail_fast_disabled() {
         "legacy live order entrypoint must fail closed with a non-zero exit"
     );
     assert!(
-        script.contains("run_binance_live_eth_micro_order_smoke.sh"),
-        "disabled entrypoint must point operators to the guarded ETH micro validation path"
+        script.contains("cargo run -q -p rust-quant-cli --bin binance_eth_micro_live_validation"),
+        "disabled entrypoint must point operators to the Rust-native ETH micro validation path"
     );
 }
-
 #[test]
 fn legacy_live_order_smoke_entrypoint_cannot_write_credentials_or_place_orders() {
     let script = read_smoke_script();
-
     assert!(
         !script.contains("API_CREDENTIAL_SECRET")
             && !script.contains("seal_credential")
@@ -77,12 +68,10 @@ fn legacy_live_order_smoke_entrypoint_cannot_write_credentials_or_place_orders()
         "disabled entrypoint must not mention the protected LINKUSDT position"
     );
 }
-
 // ---------------------------------------------------------------------------
 // Unit-level contract: live_order_confirmation_valid logic mirrors the Rust
 // implementation in execution_worker.rs.
 // ---------------------------------------------------------------------------
-
 fn live_order_confirmation_valid(dry_run: bool, confirmation: Option<&str>) -> bool {
     const TOKEN: &str = "I_UNDERSTAND_LIVE_ORDERS";
     dry_run
@@ -90,7 +79,6 @@ fn live_order_confirmation_valid(dry_run: bool, confirmation: Option<&str>) -> b
             .map(str::trim)
             .is_some_and(|value| value == TOKEN)
 }
-
 #[test]
 fn dry_run_true_always_passes_regardless_of_confirmation() {
     assert!(live_order_confirmation_valid(true, None));
@@ -101,7 +89,6 @@ fn dry_run_true_always_passes_regardless_of_confirmation() {
         Some("I_UNDERSTAND_LIVE_ORDERS")
     ));
 }
-
 #[test]
 fn dry_run_false_requires_exact_confirmation_token() {
     assert!(!live_order_confirmation_valid(false, None));
@@ -120,7 +107,6 @@ fn dry_run_false_requires_exact_confirmation_token() {
         Some("  I_UNDERSTAND_LIVE_ORDERS  ")
     ));
 }
-
 #[test]
 fn dry_run_false_without_confirmation_is_refused() {
     let result = if live_order_confirmation_valid(false, None) {

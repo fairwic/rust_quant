@@ -1,14 +1,10 @@
 //! 回测执行器
 //!
 //! 负责回测策略的执行，协调 BacktestService 和 CandleService
-
+use crate::infra::data_validator;
+use crate::workflow::job_param_generator::ParamMergeBuilder;
 use anyhow::{anyhow, Result};
 use futures::future::join_all;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
-use tokio::time::Instant;
-use tracing::{error, info};
-
 use rust_quant_common::CandleItem;
 use rust_quant_indicators::trend::vegas::VegasStrategy;
 use rust_quant_market::models::SelectTime;
@@ -18,10 +14,10 @@ use rust_quant_strategies::framework::backtest::BackTestAbleStrategyTrait;
 use rust_quant_strategies::implementations::nwe_strategy::{NweStrategy, NweStrategyConfig};
 use rust_quant_strategies::implementations::vegas_backtest::VegasBacktestAdapter;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
-
-use crate::infra::data_validator;
-use crate::workflow::job_param_generator::ParamMergeBuilder;
-
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tokio::time::Instant;
+use tracing::{error, info};
 /// 回测执行器
 ///
 /// 职责：
@@ -33,13 +29,13 @@ use crate::workflow::job_param_generator::ParamMergeBuilder;
 /// - BacktestService: 保存回测结果
 /// - CandleService: 获取K线数据
 pub struct BacktestExecutor {
+    /// backtestservice，用于交易策略计算。
     backtest_service: Arc<BacktestService>,
+    /// K 线service，用于交易策略计算。
     candle_service: Arc<CandleService>,
 }
-
 impl BacktestExecutor {
     /// 创建回测执行器实例
-    ///
     /// # 参数
     /// * `backtest_service` - 回测服务
     /// * `candle_service` - K线服务
@@ -49,7 +45,6 @@ impl BacktestExecutor {
             candle_service,
         }
     }
-
     /// 运行 Vegas 策略测试
     pub async fn run_vegas_test(
         &self,
@@ -63,7 +58,6 @@ impl BacktestExecutor {
         self.run_strategy_backtest(inst_id, time, adapter, risk_strategy_config, source_candles)
             .await
     }
-
     /// 运行 NWE 策略测试
     pub async fn run_nwe_test(
         &self,
@@ -82,7 +76,6 @@ impl BacktestExecutor {
         )
         .await
     }
-
     /// 获取K线数据并确认
     async fn get_candle_data_confirm(
         &self,
@@ -92,18 +85,15 @@ impl BacktestExecutor {
         select_time: Option<SelectTime>,
     ) -> Result<Vec<rust_quant_market::models::CandlesEntity>> {
         let start_time = Instant::now();
-
         let db_query_start = Instant::now();
         let source_candles = self
             .candle_service
             .get_confirmed_candles_for_backtest(inst_id, period, limit, select_time)
             .await?;
         let db_query_duration = db_query_start.elapsed();
-
         let validation_start = Instant::now();
         data_validator::valid_candles_continuity(&source_candles, period)?;
         let validation_duration = validation_start.elapsed();
-
         let total_duration = start_time.elapsed();
         info!(
             "[性能跟踪] get_candle_data_confirm 完成 - 总耗时: {}ms, 数据库查询: {}ms, 数据验证: {}ms, 数据条数: {}",
@@ -112,10 +102,8 @@ impl BacktestExecutor {
             validation_duration.as_millis(),
             source_candles.len()
         );
-
         Ok(source_candles)
     }
-
     /// 加载并转换K线数据
     pub async fn load_and_convert_candle_data(
         &self,
@@ -129,24 +117,20 @@ impl BacktestExecutor {
             "[性能跟踪] 开始加载K线数据: inst_id={}, time={}, limit={}",
             inst_id, time, limit
         );
-
         let data_fetch_start = Instant::now();
         let source_candles = self
             .get_candle_data_confirm(inst_id, time, limit, select_time)
             .await
             .map_err(|e| anyhow!("获取K线数据失败: {}", e))?;
         let data_fetch_duration = data_fetch_start.elapsed();
-
         if source_candles.is_empty() {
             return Err(anyhow!("K线数据为空"));
         }
-
         let data_convert_start = Instant::now();
         let candle_item_vec = self
             .candle_service
             .convert_candles_to_items(&source_candles);
         let data_convert_duration = data_convert_start.elapsed();
-
         let total_duration = start_time.elapsed();
         info!(
             "[性能跟踪] K线数据加载完成 - 总耗时: {}ms, 数据获取: {}ms, 数据转换: {}ms, 数据条数: {}",
@@ -157,7 +141,6 @@ impl BacktestExecutor {
         );
         Ok(Arc::new(candle_item_vec))
     }
-
     /// 运行回测策略
     pub async fn run_back_test_strategy(
         &self,
@@ -171,12 +154,10 @@ impl BacktestExecutor {
         for param in params_batch {
             let risk_strategy_config = param.to_risk_config();
             let strategy = param.to_vegas_strategy(time.to_string());
-
             let inst_id = inst_id.to_string();
             let time = time.to_string();
             let source_candles = Arc::clone(&arc_candle_item_clone);
             let permit = Arc::clone(&semaphore);
-
             // 创建任务
             let executor = self.clone_for_spawn();
             batch_tasks.push(tokio::spawn(async move {
@@ -199,11 +180,9 @@ impl BacktestExecutor {
                 }
             }));
         }
-
         // 等待当前批次完成
         join_all(batch_tasks).await;
     }
-
     /// 运行一组 NWE 策略（随机/网格参数）回测，复用与 Vegas 相同的并发调度思路
     pub async fn run_nwe_random_batch(
         &self,
@@ -223,7 +202,6 @@ impl BacktestExecutor {
             let time = time.to_string();
             let source_candles = Arc::clone(&arc_candle_item_clone);
             let permit = Arc::clone(&semaphore);
-
             let executor = self.clone_for_spawn();
             batch_tasks.push(tokio::spawn(async move {
                 let _permit: tokio::sync::SemaphorePermit<'_> = permit.acquire().await.unwrap();
@@ -239,11 +217,9 @@ impl BacktestExecutor {
                 }
             }));
         }
-
         // 等待当前批次完成
         join_all(batch_tasks).await;
     }
-
     /// 克隆执行器用于异步任务（内部方法）
     fn clone_for_spawn(&self) -> Arc<Self> {
         Arc::new(BacktestExecutor {
@@ -251,7 +227,7 @@ impl BacktestExecutor {
             candle_service: Arc::clone(&self.candle_service),
         })
     }
-
+    /// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     async fn run_strategy_backtest<S>(
         &self,
         inst_id: &str,
@@ -269,7 +245,6 @@ impl BacktestExecutor {
         let strategy_type = strategy.strategy_type();
         let config_desc = strategy.config_json();
         let res = strategy.run_test(inst_id, &source_candles, risk_strategy_config);
-
         let back_test_id = self
             .backtest_service
             .save_backtest_log(
@@ -282,7 +257,6 @@ impl BacktestExecutor {
                 strategy_type.as_str(),
             )
             .await?;
-
         let elapsed = start_time.elapsed();
         info!(
             "[{} 回测] 完成 inst_id={}, period={}, back_test_id={}, 耗时={}ms",

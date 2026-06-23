@@ -7,8 +7,8 @@ use rust_quant_indicators::volume::VolumeProfileIndicator;
 use std::time::Instant;
 use ta::Next; // ⭐ 需要导入Next trait才能使用next方法
 use tracing::{info, warn};
-
 /// 计算多个EMA值
+/// 计算 计算 EMA，并把公式边界留在回测策略内部。
 pub fn calculate_ema(data: &CandleItem, ema_indicator: &mut EmaIndicator) -> EmaSignalValue {
     let prev_signal_value = ema_indicator.last_signal_value;
     let mut ema_signal_value = EmaSignalValue::default();
@@ -19,34 +19,28 @@ pub fn calculate_ema(data: &CandleItem, ema_indicator: &mut EmaIndicator) -> Ema
     ema_signal_value.ema5_value = ema_indicator.ema5_indicator.next(data.c());
     ema_signal_value.ema6_value = ema_indicator.ema6_indicator.next(data.c());
     ema_signal_value.ema7_value = ema_indicator.ema7_indicator.next(data.c());
-
     // 判断是否多头排列
     ema_signal_value.is_long_trend = ema_signal_value.ema1_value > ema_signal_value.ema2_value
         && ema_signal_value.ema2_value > ema_signal_value.ema3_value
         && ema_signal_value.ema3_value > ema_signal_value.ema4_value;
-
     // 判断是否空头排列
     ema_signal_value.is_short_trend = ema_signal_value.ema1_value < ema_signal_value.ema2_value
         && ema_signal_value.ema2_value < ema_signal_value.ema3_value
         && ema_signal_value.ema3_value < ema_signal_value.ema4_value;
-
     if let Some(prev) = prev_signal_value {
         let (is_golden_cross, is_death_cross) = detect_ema_crosses(&ema_signal_value, &prev);
         ema_signal_value.is_golden_cross = is_golden_cross;
         ema_signal_value.is_death_cross = is_death_cross;
     }
-
     ema_indicator.last_signal_value = Some(ema_signal_value);
-
     ema_signal_value
 }
-
+/// 识别 EMA 交叉信号，供策略入口和风控过滤复用。
 fn detect_ema_crosses(current: &EmaSignalValue, previous: &EmaSignalValue) -> (bool, bool) {
     let mut is_golden_cross =
         previous.ema1_value < previous.ema2_value && current.ema1_value > current.ema2_value;
     let mut is_death_cross =
         previous.ema1_value > previous.ema2_value && current.ema1_value < current.ema2_value;
-
     if !is_death_cross {
         let ema1_below = current.ema1_value < current.ema2_value
             && current.ema2_value < current.ema3_value
@@ -57,7 +51,6 @@ fn detect_ema_crosses(current: &EmaSignalValue, previous: &EmaSignalValue) -> (b
             is_death_cross = true;
         }
     }
-
     if !is_golden_cross {
         let ema1_above = current.ema1_value > current.ema2_value
             && current.ema2_value > current.ema3_value
@@ -68,10 +61,8 @@ fn detect_ema_crosses(current: &EmaSignalValue, previous: &EmaSignalValue) -> (b
             is_golden_cross = true;
         }
     }
-
     (is_golden_cross, is_death_cross)
 }
-
 /// 获取多个指标值
 pub fn get_multi_indicator_values(
     indicator_combine: &mut IndicatorCombine,
@@ -79,11 +70,9 @@ pub fn get_multi_indicator_values(
 ) -> VegasIndicatorSignalValue {
     let _start = Instant::now();
     let mut vegas_indicator_signal_value = VegasIndicatorSignalValue::default();
-
     // 缓存频繁使用的值
     let close_price = data_item.c();
     let volume = data_item.v();
-
     // 计算EMA
     let ema_start = Instant::now();
     if let Some(ema_indicator) = &mut indicator_combine.ema_indicator {
@@ -92,7 +81,6 @@ pub fn get_multi_indicator_values(
     if ema_start.elapsed().as_millis() > 10 {
         warn!(duration_ms = ema_start.elapsed().as_millis(), "计算EMA");
     }
-
     // 计算Volume
     let volume_start = Instant::now();
     if let Some(volume_indicator) = &mut indicator_combine.volume_indicator {
@@ -111,7 +99,6 @@ pub fn get_multi_indicator_values(
             "计算Volume"
         );
     }
-
     let volume_profile_start = Instant::now();
     let volume_profile_indicator = indicator_combine
         .volume_profile_indicator
@@ -123,7 +110,6 @@ pub fn get_multi_indicator_values(
             "计算VolumeProfile"
         );
     }
-
     // 计算RSI
     let rsi_start = Instant::now();
     if let Some(rsi_indicator) = &mut indicator_combine.rsi_indicator {
@@ -132,7 +118,6 @@ pub fn get_multi_indicator_values(
     if rsi_start.elapsed().as_millis() > 10 {
         warn!(duration_ms = rsi_start.elapsed().as_millis(), "计算RSI");
     }
-
     // 计算Bollinger
     let bb_start = Instant::now();
     if let Some(bollinger_indicator) = &mut indicator_combine.bollinger_indicator {
@@ -150,7 +135,6 @@ pub fn get_multi_indicator_values(
             "计算Bollinger"
         );
     }
-
     // 计算吞没形态
     let eng_start = Instant::now();
     if let Some(engulfing_indicator) = &mut indicator_combine.engulfing_indicator {
@@ -164,7 +148,6 @@ pub fn get_multi_indicator_values(
             "计算吞没形态"
         );
     }
-
     // 计算锤子形态
     let hammer_start = Instant::now();
     if let Some(kline_hammer_indicator) = &mut indicator_combine.kline_hammer_indicator {
@@ -185,7 +168,6 @@ pub fn get_multi_indicator_values(
             "计算锤子形态"
         );
     }
-
     // 腿部识别
     let leg_start = Instant::now();
     if let Some(leg_detection_indicator) = &mut indicator_combine.leg_detection_indicator {
@@ -197,7 +179,6 @@ pub fn get_multi_indicator_values(
             "计算腿部识别"
         );
     }
-
     // 市场结构
     let ms_start = Instant::now();
     if let Some(market_structure_indicator) = &mut indicator_combine.market_structure_indicator {
@@ -207,14 +188,12 @@ pub fn get_multi_indicator_values(
     if ms_start.elapsed().as_millis() > 10 {
         info!(duration_ms = ms_start.elapsed().as_millis(), "计算市场结构");
     }
-
     vegas_indicator_signal_value
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    /// 构造测试或回测用 K 线，减少样本初始化重复代码。
     fn candle(o: f64, h: f64, l: f64, c: f64, v: f64, ts: i64) -> CandleItem {
         CandleItem {
             o,
@@ -226,16 +205,13 @@ mod tests {
             confirm: 1,
         }
     }
-
     #[test]
     fn get_multi_indicator_values_populates_volume_profile() {
         let mut combine = IndicatorCombine::default();
-
         get_multi_indicator_values(&mut combine, &candle(100.0, 110.0, 100.0, 108.0, 10.0, 1));
         get_multi_indicator_values(&mut combine, &candle(108.0, 120.0, 108.0, 118.0, 30.0, 2));
         let value =
             get_multi_indicator_values(&mut combine, &candle(118.0, 130.0, 118.0, 128.0, 80.0, 3));
-
         assert!(value.volume_profile_value.total_volume > 0.0);
         assert!(value.volume_profile_value.point_of_control > 0.0);
     }

@@ -5,26 +5,39 @@ use rust_quant_domain::traits::ExternalMarketSnapshotRepository;
 use serde_json::Value;
 use sqlx::{types::Json, FromRow, PgPool};
 use tracing::error;
-
 #[derive(Debug, Clone, FromRow)]
 struct ExternalMarketSnapshotEntity {
+    /// 唯一标识。
     pub id: i64,
+    /// 数据来源。
     pub source: String,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// 类型标识。
     pub metric_type: String,
+    /// 时间字段。
     pub metric_time: i64,
+    /// 资金费率；为空时使用默认值或表示不限制。
     pub funding_rate: Option<String>,
+    /// 溢价率；为空时表示交易所未返回该指标。
     pub premium: Option<String>,
+    /// 未平仓量；为空时表示交易所未返回该指标。
     pub open_interest: Option<String>,
+    /// 价格数值。
     pub oracle_price: Option<String>,
+    /// 价格数值。
     pub mark_price: Option<String>,
+    /// longshort 比例；为空时使用默认值或表示不限制。
     pub long_short_ratio: Option<String>,
+    /// 原始 payload；为空时表示没有保留原始响应。
     pub raw_payload: Option<Json<Value>>,
+    /// 创建时间。
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// 最后更新时间。
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
-
 impl ExternalMarketSnapshotEntity {
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
     fn to_domain(&self) -> ExternalMarketSnapshot {
         ExternalMarketSnapshot {
             id: Some(self.id),
@@ -47,19 +60,19 @@ impl ExternalMarketSnapshotEntity {
         }
     }
 }
-
 pub struct SqlxExternalMarketSnapshotRepository {
+    /// 数据库连接池。
     pool: PgPool,
 }
-
 impl SqlxExternalMarketSnapshotRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
-
 #[async_trait]
 impl ExternalMarketSnapshotRepository for SqlxExternalMarketSnapshotRepository {
+    /// 封装当前函数，减少行情数据调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     async fn save(&self, snapshot: ExternalMarketSnapshot) -> Result<()> {
         let query = r#"
             INSERT INTO external_market_snapshots (
@@ -76,7 +89,6 @@ impl ExternalMarketSnapshotRepository for SqlxExternalMarketSnapshotRepository {
                 raw_payload = EXCLUDED.raw_payload,
                 updated_at = CURRENT_TIMESTAMP
         "#;
-
         sqlx::query(query)
             .bind(snapshot.source)
             .bind(snapshot.symbol)
@@ -95,17 +107,16 @@ impl ExternalMarketSnapshotRepository for SqlxExternalMarketSnapshotRepository {
                 error!("保存外部市场快照失败: {}", e);
                 anyhow!("保存外部市场快照失败: {}", e)
             })?;
-
         Ok(())
     }
-
+    /// 持久化 行情与市场数据 结果，保证写入路径和幂等语义集中处理。
     async fn save_batch(&self, snapshots: Vec<ExternalMarketSnapshot>) -> Result<()> {
         for snapshot in snapshots {
             self.save(snapshot).await?;
         }
         Ok(())
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn find_range(
         &self,
         source: &str,
@@ -127,7 +138,6 @@ impl ExternalMarketSnapshotRepository for SqlxExternalMarketSnapshotRepository {
             ORDER BY metric_time ASC
             LIMIT $6
         "#;
-
         let rows = sqlx::query_as::<_, ExternalMarketSnapshotEntity>(query)
             .bind(source)
             .bind(symbol)
@@ -141,17 +151,17 @@ impl ExternalMarketSnapshotRepository for SqlxExternalMarketSnapshotRepository {
                 error!("查询外部市场快照失败: {}", e);
                 anyhow!("查询外部市场快照失败: {}", e)
             })?;
-
         Ok(rows.into_iter().map(|row| row.to_domain()).collect())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
     #[test]
+    /// 封装当前函数，减少行情数据调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_entity_to_domain_can_be_called_without_consuming_entity() {
         let entity = ExternalMarketSnapshotEntity {
             id: 1,
@@ -169,10 +179,8 @@ mod tests {
             created_at: None,
             updated_at: None,
         };
-
         let first = entity.to_domain();
         let second = entity.to_domain();
-
         assert_eq!(first.id, Some(1));
         assert_eq!(first.source, "hyperliquid");
         assert_eq!(first.symbol, "ETH");

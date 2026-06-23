@@ -2,7 +2,6 @@ use hyperliquid_rust_sdk::{AssetContext, AssetMeta, FundingHistoryResponse, Meta
 use rust_quant_infrastructure::exchanges::{
     HyperliquidAssetContextSnapshot, HyperliquidFundingHistoryPoint, HyperliquidPublicAdapter,
 };
-
 #[test]
 fn convert_sdk_funding_history_response_parses_numeric_strings() {
     let payload = vec![FundingHistoryResponse {
@@ -11,10 +10,8 @@ fn convert_sdk_funding_history_response_parses_numeric_strings() {
         premium: "-0.0004156042".to_string(),
         time: 1774814400062_u64,
     }];
-
     let rows = HyperliquidPublicAdapter::from_sdk_funding_history(payload)
         .expect("sdk funding history should map");
-
     assert_eq!(
         rows,
         vec![HyperliquidFundingHistoryPoint {
@@ -25,7 +22,6 @@ fn convert_sdk_funding_history_response_parses_numeric_strings() {
         }]
     );
 }
-
 #[test]
 fn convert_sdk_meta_and_asset_ctxs_response_extracts_requested_coin() {
     let meta = Meta {
@@ -68,10 +64,8 @@ fn convert_sdk_meta_and_asset_ctxs_response_extracts_requested_coin() {
             prev_day_px: "1990.0".to_string(),
         },
     ];
-
     let snapshot = HyperliquidPublicAdapter::from_sdk_meta_and_asset_ctxs(&meta, &contexts, "ETH")
         .expect("sdk meta and asset contexts should map");
-
     assert_eq!(
         snapshot,
         HyperliquidAssetContextSnapshot {

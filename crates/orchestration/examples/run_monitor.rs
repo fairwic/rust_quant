@@ -1,50 +1,41 @@
 use anyhow::Result;
-use rust_quant_orchestration::jobs::data::fund_monitor_job::FundMonitorJob;
-use tracing::info;
-
 use rust_quant_infrastructure::repositories::fund_monitoring_repository::{
     SqlxFundFlowAlertRepository, SqlxMarketAnomalyRepository,
 };
+use rust_quant_orchestration::jobs::data::fund_monitor_job::FundMonitorJob;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
-
+use tracing::info;
 #[tokio::main]
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 async fn main() -> Result<()> {
     // 0. Install Rustls Crypto Provider
     let _ = rustls::crypto::ring::default_provider().install_default();
-
     // 1. 初始化日志
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
-
     info!("Starting Integrated Fund Monitor...");
-
     // 加载配置 (.env)
     dotenv::dotenv().ok();
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
         .or_else(|_| std::env::var("DATABASE_URL"))
         .expect("QUANT_CORE_DATABASE_URL or DATABASE_URL must be set");
-
     // 连接数据库
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
         .await?;
-
     let anomaly_repo = Arc::new(SqlxMarketAnomalyRepository::new(pool.clone()));
     let alert_repo = Arc::new(SqlxFundFlowAlertRepository::new(pool.clone()));
-
     // 2. 创建 MonitorJob (同时会创建 FlowAnalyzer)
     let (mut job, analyzer) = FundMonitorJob::new(10, anomaly_repo, alert_repo)?; // 10s 扫描一次
-
-    // 3. 启动 FlowAnalyzer (后台运行)
+                                                                                  // 3. 启动 FlowAnalyzer (后台运行)
     tokio::spawn(async move {
         analyzer.run().await;
     });
-
     // 4. 运行 Monitor Loop (主流程)
     job.run_loop().await;
-
     Ok(())
 }

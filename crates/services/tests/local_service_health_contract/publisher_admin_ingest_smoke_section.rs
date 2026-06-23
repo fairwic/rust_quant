@@ -5,7 +5,6 @@ fn full_product_health_admin_ingest_fixture_is_machine_readable_and_redacted() {
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
     let payload: Value = serde_json::from_str(&body)
         .unwrap_or_else(|error| panic!("fixture should be valid json: {error}\n{body}"));
-
     for field in [
         "artifactSetId",
         "schemaVersion",
@@ -32,7 +31,6 @@ fn full_product_health_admin_ingest_fixture_is_machine_readable_and_redacted() {
             "fixture missing field {field}: {body}"
         );
     }
-
     let playbook = payload["summary"]["operator_playbook_summary"]
         .as_object()
         .expect("embedded summary should expose operator_playbook_summary");
@@ -70,7 +68,6 @@ fn full_product_health_admin_ingest_fixture_is_machine_readable_and_redacted() {
                 && item["admin_link_target"] == "admin.full_product_health.news_source_ai_health"),
         "embedded summary should expose registry-backed operator playbook items: {body}"
     );
-
     let lowered = body.to_ascii_lowercase();
     for sensitive in [
         "postgres://",
@@ -88,7 +85,6 @@ fn full_product_health_admin_ingest_fixture_is_machine_readable_and_redacted() {
         );
     }
 }
-
 #[test]
 fn full_product_health_admin_ingest_smoke_passes_bash_syntax_check() {
     let output = Command::new("bash")
@@ -96,18 +92,15 @@ fn full_product_health_admin_ingest_smoke_passes_bash_syntax_check() {
         .arg(full_product_admin_ingest_smoke_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
-
 #[test]
 fn full_product_health_admin_ingest_smoke_stays_no_env_and_localhost_only() {
     let script = read_full_product_admin_ingest_smoke_script();
-
     for required in [
         "ADMIN_INGEST_URL",
         "ADMIN_INGEST_ALLOW_REMOTE",
@@ -132,7 +125,6 @@ fn full_product_health_admin_ingest_smoke_stays_no_env_and_localhost_only() {
             "admin ingest smoke script should document or scan marker {required}"
         );
     }
-
     for forbidden in [
         "source .env",
         "cat .env",
@@ -148,12 +140,10 @@ fn full_product_health_admin_ingest_smoke_stays_no_env_and_localhost_only() {
         );
     }
 }
-
 #[test]
 fn full_product_health_admin_ingest_contract_wrapper_and_mock_receiver_stay_local_and_safe() {
     let receiver = read_full_product_admin_ingest_mock_receiver_script();
     let contract = read_full_product_admin_ingest_contract_smoke_script();
-
     for required in [
         "127.0.0.1",
         ".env",
@@ -170,7 +160,6 @@ fn full_product_health_admin_ingest_contract_wrapper_and_mock_receiver_stay_loca
             "mock receiver script should document or scan marker {required}"
         );
     }
-
     for required in [
         "mock_full_product_health_admin_ingest_receiver.py",
         "smoke_publish_full_product_health_admin_ingest.sh",
@@ -190,7 +179,6 @@ fn full_product_health_admin_ingest_contract_wrapper_and_mock_receiver_stay_loca
             "contract smoke script should document or use marker {required}"
         );
     }
-
     for forbidden in [
         "source .env",
         "cat .env",
@@ -205,14 +193,12 @@ fn full_product_health_admin_ingest_contract_wrapper_and_mock_receiver_stay_loca
         );
     }
 }
-
 #[test]
 fn full_product_health_admin_ingest_smoke_prints_parseable_redacted_payload_without_url() {
     let examples_dir = full_product_artifact_examples_dir();
     let full_report_path = examples_dir.join("full-product-health.json");
     let summary_path = examples_dir.join("full-product-health-summary.json");
     let markdown_path = examples_dir.join("full-product-health.md");
-
     let output = Command::new(full_product_admin_ingest_smoke_path())
         .env(
             "FULL_PRODUCT_HEALTH_ARTIFACT_SET_FULL_REPORT_PATH",
@@ -255,19 +241,16 @@ fn full_product_health_admin_ingest_smoke_prints_parseable_redacted_payload_with
         )
         .output()
         .expect("admin ingest smoke should run");
-
     assert!(
         output.status.success(),
         "dry-run smoke should succeed:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
     let payload: Value = serde_json::from_str(&stdout).unwrap_or_else(|error| {
         panic!("dry-run stdout should be parseable json: {error}\n{stdout}")
     });
-
     assert_eq!(
         payload["artifactSetId"],
         "health-2026-05-07T01-00-00Z-38370b9de0be"
@@ -276,7 +259,6 @@ fn full_product_health_admin_ingest_smoke_prints_parseable_redacted_payload_with
         payload["operatorMetadata"]["generatedBy"],
         "phase-53-contract-test"
     );
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         "postgres://",
@@ -297,18 +279,15 @@ fn full_product_health_admin_ingest_smoke_prints_parseable_redacted_payload_with
         );
     }
 }
-
 #[test]
 fn full_product_health_admin_ingest_smoke_posts_to_local_mock_without_leaking_payload_or_paths() {
     let examples_dir = full_product_artifact_examples_dir();
     let full_report_path = examples_dir.join("full-product-health.json");
     let summary_path = examples_dir.join("full-product-health-summary.json");
     let markdown_path = examples_dir.join("full-product-health.md");
-
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("listener should expose addr");
     let (tx, rx) = mpsc::channel();
-
     let handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("mock server should accept");
         let mut header_bytes = Vec::new();
@@ -349,7 +328,6 @@ fn full_product_health_admin_ingest_smoke_posts_to_local_mock_without_leaking_pa
             )
             .expect("mock server should write response");
     });
-
     let output = Command::new(full_product_admin_ingest_smoke_path())
         .env(
             "FULL_PRODUCT_HEALTH_ARTIFACT_SET_FULL_REPORT_PATH",
@@ -393,16 +371,13 @@ fn full_product_health_admin_ingest_smoke_posts_to_local_mock_without_leaking_pa
         )
         .output()
         .expect("admin ingest smoke should run");
-
     handle.join().expect("mock server thread should finish");
-
     assert!(
         output.status.success(),
         "localhost POST smoke should succeed:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let request = rx.recv().expect("mock server should capture request");
     assert!(request.starts_with("POST /admin/ingest HTTP/1.1\r\n"));
     assert!(request.contains("\r\nHost: 127.0.0.1:"));
@@ -411,7 +386,6 @@ fn full_product_health_admin_ingest_smoke_posts_to_local_mock_without_leaking_pa
     assert!(!request.to_ascii_lowercase().contains("postgres://"));
     assert!(!request.to_ascii_lowercase().contains("api_key"));
     assert!(!request.contains("/Users/"));
-
     let body = request
         .split("\r\n\r\n")
         .nth(1)
@@ -419,7 +393,6 @@ fn full_product_health_admin_ingest_smoke_posts_to_local_mock_without_leaking_pa
     let payload: Value = serde_json::from_str(body)
         .unwrap_or_else(|error| panic!("request body should be parseable json: {error}\n{body}"));
     assert_eq!(payload["operatorMetadata"]["runId"], "phase-53-post");
-
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
     let combined = format!("{stdout}\n{stderr}").to_ascii_lowercase();
@@ -441,14 +414,12 @@ fn full_product_health_admin_ingest_smoke_posts_to_local_mock_without_leaking_pa
         );
     }
 }
-
 #[test]
 fn full_product_health_admin_ingest_contract_smoke_uses_local_mock_receiver_and_safe_stdout() {
     let examples_dir = full_product_artifact_examples_dir();
     let full_report_path = examples_dir.join("full-product-health.json");
     let summary_path = examples_dir.join("full-product-health-summary.json");
     let markdown_path = examples_dir.join("full-product-health.md");
-
     let output = Command::new(full_product_admin_ingest_contract_smoke_path())
         .env(
             "FULL_PRODUCT_HEALTH_ARTIFACT_SET_FULL_REPORT_PATH",
@@ -491,19 +462,16 @@ fn full_product_health_admin_ingest_contract_smoke_uses_local_mock_receiver_and_
         )
         .output()
         .expect("admin ingest contract smoke should run");
-
     assert!(
         output.status.success(),
         "contract smoke should succeed:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
     let payload: Value = serde_json::from_str(&stdout).unwrap_or_else(|error| {
         panic!("contract smoke stdout should be parseable json: {error}\n{stdout}")
     });
-
     assert_eq!(payload["mode"], "mock_contract");
     assert_eq!(payload["request"]["method"], "POST");
     assert_eq!(payload["request"]["path"], "/admin/ingest");
@@ -518,7 +486,6 @@ fn full_product_health_admin_ingest_contract_smoke_uses_local_mock_receiver_and_
     assert_eq!(payload["delivery"]["http"]["status"], 202);
     assert_eq!(payload["delivery"]["http"]["ok"], true);
     assert_eq!(payload["delivery"]["response"]["status"], "accepted");
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         "postgres://",
@@ -538,27 +505,22 @@ fn full_product_health_admin_ingest_contract_smoke_uses_local_mock_receiver_and_
         );
     }
 }
-
 #[test]
 fn full_product_health_admin_ingest_contract_smoke_requires_explicit_artifact_env_before_starting_mock_receiver(
 ) {
     let output = Command::new(full_product_admin_ingest_contract_smoke_path())
         .output()
         .expect("admin ingest contract smoke should run");
-
     assert!(
         !output.status.success(),
         "contract smoke should fail safely when explicit artifact env is missing"
     );
-
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
-
     assert!(
         stdout.trim().is_empty(),
         "missing artifact env should fail before emitting stdout summary: {stdout}"
     );
-
     for required in [
         "FULL_PRODUCT_HEALTH_ARTIFACT_SET_FULL_REPORT_PATH",
         "FULL_PRODUCT_HEALTH_ARTIFACT_SET_SUMMARY_PATH",
@@ -572,7 +534,6 @@ fn full_product_health_admin_ingest_contract_smoke_requires_explicit_artifact_en
             "missing artifact env failure should mention {required}: {stderr}"
         );
     }
-
     let lowered = stderr.to_ascii_lowercase();
     for sensitive in [
         "postgres://",

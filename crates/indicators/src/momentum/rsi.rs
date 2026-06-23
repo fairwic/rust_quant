@@ -1,13 +1,17 @@
 /// RMA (Relative Moving Average) implementation matching TradingView's ta.rma()
 #[derive(Debug, Clone)]
 struct TvRma {
+    /// length，用于交易策略计算。
     length: usize,
+    /// alpha，用于交易策略计算。
     alpha: f64,
+    /// 累计值；为空时表示指标尚未完成初始化。
     sum: Option<f64>,
+    /// 列表数据。
     values: Vec<f64>,
 }
-
 impl TvRma {
+    /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     fn new(length: usize) -> Self {
         Self {
             length,
@@ -16,8 +20,8 @@ impl TvRma {
             values: Vec::with_capacity(length * 2), // 保留更多历史数据用于SMA计算
         }
     }
-
     // 完全按照Pine Script的方式计算SMA
+    /// 计算 回测与策略研究 指标，保持公式和边界处理集中可审计。
     fn calculate_pine_sma(&self) -> f64 {
         let mut sum = 0.0;
         let start = self.values.len().saturating_sub(self.length);
@@ -27,11 +31,10 @@ impl TvRma {
         }
         sum
     }
-
+    /// 推进指标到下一根 K 线，并返回最新计算结果。
     fn next(&mut self, value: f64) -> f64 {
         // 保存值用于SMA计算
         self.values.push(value);
-
         match self.sum {
             None => {
                 // 当收集到足够的数据时，使用Pine Script方式计算SMA
@@ -56,20 +59,24 @@ impl TvRma {
         }
     }
 }
-
 /// RSI indicator using RMA (Relative Moving Average) for calculations
 /// Implements the exact same logic as TradingView's Pine Script RSI
 #[derive(Debug, Clone)]
 pub struct RsiIndicator {
     #[allow(dead_code)]
+    /// length，用于交易策略计算。
     length: usize,
+    /// uprma，用于交易策略计算。
     up_rma: TvRma,
+    /// downrma，用于交易策略计算。
     down_rma: TvRma,
+    /// 上一周期指标值；为空时表示没有历史值。
     prev_value: Option<f64>,
+    /// debug，用于交易策略计算。
     debug: bool,
 }
-
 impl RsiIndicator {
+    /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     pub fn new(length: usize) -> Self {
         Self {
             length,
@@ -79,7 +86,6 @@ impl RsiIndicator {
             debug: false,
         }
     }
-
     /// Calculate next RSI value based on a new price input
     /// Follows TradingView Pine Script logic exactly:
     /// change = ta.change(source)
@@ -99,27 +105,21 @@ impl RsiIndicator {
             }
         };
         self.prev_value = Some(value);
-
         if self.debug {
             println!("Price: {:.2}, Change: {:.2}", value, change);
         }
-
         // Exactly match Pine Script's math.max and math.min behavior
         let up = if change > 0.0 { change } else { 0.0 };
         let down = if change < 0.0 { -change } else { 0.0 };
-
         if self.debug {
             println!("Up movement: {:.2}, Down movement: {:.2}", up, down);
         }
-
         // Apply RMA exactly as TradingView does
         let up_avg = self.up_rma.next(up);
         let down_avg = self.down_rma.next(down);
-
         if self.debug {
             println!("Up RMA: {:.2}, Down RMA: {:.2}", up_avg, down_avg);
         }
-
         // Calculate RSI using exact Pine Script formula
         let rsi = if down_avg == 0.0 {
             100.0
@@ -128,45 +128,40 @@ impl RsiIndicator {
         } else {
             100.0 - (100.0 / (1.0 + up_avg / down_avg))
         };
-
         if self.debug {
             println!("RSI: {:.2}\n", rsi);
         }
-
         rsi
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_pine_sma_calculation() {
         let mut rma = TvRma::new(14);
         let values = vec![
             44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 45.89, 46.03,
             45.61, 46.28,
         ];
-
         println!("===== Pine Script SMA Test =====");
         for value in values {
             let result = rma.next(value);
             println!("Value: {:.2}, Result: {:.2}", value, result);
         }
     }
-
     #[test]
     fn test_rsi_calculation() {
         let mut rsi = RsiIndicator::new(14);
-
         // TradingView documentation example data
         let prices = vec![
             44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 45.89, 46.03,
             45.61, 46.28, 46.28, 46.00, 46.03, 46.41, 46.22, 45.64, 46.21, 46.25, 45.71, 46.45,
             45.78, 45.35,
         ];
-
         println!("===== RSI Calculation Test =====");
         for (i, &price) in prices.iter().enumerate() {
             let rsi_value = rsi.next(price);

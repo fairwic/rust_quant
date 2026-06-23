@@ -1,10 +1,8 @@
 use super::*;
 use std::collections::HashMap;
-
 mod args;
 mod equity;
 mod paper_observation;
-
 fn candle(ts: i64, close: f64, volume: f64) -> BacktestCandle {
     BacktestCandle {
         ts,
@@ -15,7 +13,6 @@ fn candle(ts: i64, close: f64, volume: f64) -> BacktestCandle {
         volume,
     }
 }
-
 fn ohlc(ts: i64, open: f64, high: f64, low: f64, close: f64) -> BacktestCandle {
     BacktestCandle {
         ts,
@@ -26,7 +23,6 @@ fn ohlc(ts: i64, open: f64, high: f64, low: f64, close: f64) -> BacktestCandle {
         volume: 10.0,
     }
 }
-
 #[test]
 fn precomputes_sma_ema_and_previous_volume_average() {
     let candles = vec![
@@ -36,9 +32,7 @@ fn precomputes_sma_ema_and_previous_volume_average() {
         candle(MS_15M * 3, 4.0, 40.0),
         candle(MS_15M * 4, 5.0, 50.0),
     ];
-
     let computed = build_computed_candles(candles, 3);
-
     assert_eq!(computed[2].sma, Some(2.0));
     assert_eq!(computed[2].ema, Some(2.0));
     assert_eq!(computed[3].sma, Some(3.0));
@@ -46,7 +40,6 @@ fn precomputes_sma_ema_and_previous_volume_average() {
     assert_eq!(computed[3].previous_volume_avg, Some(20.0));
     assert_eq!(computed[4].ema, Some(4.0));
 }
-
 #[test]
 fn entry_confirmation_accepts_breakout_above_averages_with_volume() {
     let args = MarketVelocityEventBacktestArgs {
@@ -77,7 +70,6 @@ fn entry_confirmation_accepts_breakout_above_averages_with_volume() {
         },
     ];
     let computed = build_computed_candles(candles, args.entry_period);
-
     let event_ts = MS_15M * 5;
     let (ok, reason) = entry_confirmation(
         &computed,
@@ -85,11 +77,9 @@ fn entry_confirmation_accepts_breakout_above_averages_with_volume() {
         MarketVelocityTradeDirection::Long,
         &args,
     );
-
     assert!(ok);
     assert_eq!(reason, "breakout_previous_high");
 }
-
 #[test]
 fn entry_confirmation_accepts_breakdown_below_averages_with_volume_for_short() {
     let args = MarketVelocityEventBacktestArgs {
@@ -120,7 +110,6 @@ fn entry_confirmation_accepts_breakdown_below_averages_with_volume_for_short() {
         },
     ];
     let computed = build_computed_candles(candles, args.entry_period);
-
     let event_ts = MS_15M * 5;
     let (ok, reason) = entry_confirmation(
         &computed,
@@ -128,11 +117,9 @@ fn entry_confirmation_accepts_breakdown_below_averages_with_volume_for_short() {
         MarketVelocityTradeDirection::Short,
         &args,
     );
-
     assert!(ok);
     assert_eq!(reason, "breakdown_previous_low");
 }
-
 #[test]
 fn trend_confirmation_blocks_weak_4h_average_distance_when_required() {
     let mut candles = Vec::new();
@@ -145,18 +132,15 @@ fn trend_confirmation_blocks_weak_4h_average_distance_when_required() {
         trend_min_average_distance_pct: 0.5,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let (ok, reason) = trend_confirmation(
         &computed,
         MS_4H * 21 + MS_15M,
         MarketVelocityTradeDirection::Long,
         &args,
     );
-
     assert!(!ok);
     assert_eq!(reason, "weak_4h_average_distance");
 }
-
 #[test]
 fn trend_confirmation_accepts_short_trend_below_averages() {
     let candles = vec![
@@ -170,18 +154,15 @@ fn trend_confirmation_accepts_short_trend_below_averages() {
         entry_period: 3,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let (ok, reason) = trend_confirmation(
         &computed,
         MS_4H * 4 + MS_15M,
         MarketVelocityTradeDirection::Short,
         &args,
     );
-
     assert!(ok);
     assert_eq!(reason, "4h_below_below");
 }
-
 #[test]
 fn simulate_trade_treats_same_candle_stop_and_target_as_loss() {
     let candles = vec![BacktestCandle {
@@ -192,7 +173,6 @@ fn simulate_trade_treats_same_candle_stop_and_target_as_loss() {
         close: 101.0,
         volume: 10.0,
     }];
-
     let result = simulate_trade(
         &candles,
         0,
@@ -206,13 +186,11 @@ fn simulate_trade_treats_same_candle_stop_and_target_as_loss() {
         None,
         None,
     );
-
     assert_eq!(result.outcome, TradeOutcome::Loss);
     assert_eq!(result.reason, "both_hit_stop_first");
     assert_eq!(result.r, Some(-1.0));
     assert!(result.complete);
 }
-
 #[test]
 fn simulate_trade_can_win_short_when_downside_target_is_hit() {
     let candles = vec![BacktestCandle {
@@ -223,7 +201,6 @@ fn simulate_trade_can_win_short_when_downside_target_is_hit() {
         close: 97.0,
         volume: 10.0,
     }];
-
     let result = simulate_trade(
         &candles,
         0,
@@ -237,13 +214,11 @@ fn simulate_trade_can_win_short_when_downside_target_is_hit() {
         None,
         None,
     );
-
     assert_eq!(result.outcome, TradeOutcome::Win);
     assert_eq!(result.reason, "target_hit");
     assert_eq!(result.r, Some(1.5));
     assert!(result.complete);
 }
-
 #[test]
 fn simulate_trade_treats_same_candle_short_stop_and_target_as_loss() {
     let candles = vec![BacktestCandle {
@@ -254,7 +229,6 @@ fn simulate_trade_treats_same_candle_short_stop_and_target_as_loss() {
         close: 99.0,
         volume: 10.0,
     }];
-
     let result = simulate_trade(
         &candles,
         0,
@@ -268,13 +242,11 @@ fn simulate_trade_treats_same_candle_short_stop_and_target_as_loss() {
         None,
         None,
     );
-
     assert_eq!(result.outcome, TradeOutcome::Loss);
     assert_eq!(result.reason, "both_hit_stop_first");
     assert_eq!(result.r, Some(-1.0));
     assert!(result.complete);
 }
-
 #[test]
 fn simulate_trade_can_protect_profit_after_threshold_is_reached() {
     let candles = vec![
@@ -295,7 +267,6 @@ fn simulate_trade_can_protect_profit_after_threshold_is_reached() {
             volume: 10.0,
         },
     ];
-
     let result = simulate_trade(
         &candles,
         0,
@@ -312,13 +283,11 @@ fn simulate_trade_can_protect_profit_after_threshold_is_reached() {
         None,
         None,
     );
-
     assert_eq!(result.outcome, TradeOutcome::Win);
     assert_eq!(result.reason, "profit_protect_stop_hit");
     assert_eq!(result.r, Some(0.5));
     assert!(result.complete);
 }
-
 #[test]
 fn simulate_trade_reports_flat_when_breakeven_protection_is_hit() {
     let candles = vec![
@@ -339,7 +308,6 @@ fn simulate_trade_reports_flat_when_breakeven_protection_is_hit() {
             volume: 10.0,
         },
     ];
-
     let result = simulate_trade(
         &candles,
         0,
@@ -356,13 +324,11 @@ fn simulate_trade_reports_flat_when_breakeven_protection_is_hit() {
         None,
         None,
     );
-
     assert_eq!(result.outcome, TradeOutcome::Flat);
     assert_eq!(result.reason, "profit_protect_stop_hit");
     assert_eq!(result.r, Some(0.0));
     assert!(result.complete);
 }
-
 #[test]
 fn simulate_trade_exits_when_entry_does_not_profit_after_configured_candles() {
     let candles = vec![
@@ -383,7 +349,6 @@ fn simulate_trade_exits_when_entry_does_not_profit_after_configured_candles() {
             volume: 10.0,
         },
     ];
-
     let result = simulate_trade(
         &candles,
         0,
@@ -399,14 +364,12 @@ fn simulate_trade_exits_when_entry_does_not_profit_after_configured_candles() {
             no_profit_candles: 1,
         }),
     );
-
     assert_eq!(result.outcome, TradeOutcome::Loss);
     assert_eq!(result.reason, "early_exit_no_profit");
     assert_eq!(result.exit_ts, MS_15M * 2);
     assert!((result.r.unwrap() + 0.1).abs() < 1e-9);
     assert!(result.complete);
 }
-
 #[test]
 fn simulate_trade_can_take_partial_profit_and_hit_runner_target() {
     let candles = vec![
@@ -427,7 +390,6 @@ fn simulate_trade_can_take_partial_profit_and_hit_runner_target() {
             volume: 10.0,
         },
     ];
-
     let result = simulate_trade(
         &candles,
         0,
@@ -445,13 +407,11 @@ fn simulate_trade_can_take_partial_profit_and_hit_runner_target() {
         }),
         None,
     );
-
     assert_eq!(result.outcome, TradeOutcome::Win);
     assert_eq!(result.reason, "runner_target_hit");
     assert_eq!(result.r, Some(3.0));
     assert!(result.complete);
 }
-
 #[test]
 fn simulate_trade_keeps_partial_profit_when_runner_stop_is_hit() {
     let candles = vec![
@@ -472,7 +432,6 @@ fn simulate_trade_keeps_partial_profit_when_runner_stop_is_hit() {
             volume: 10.0,
         },
     ];
-
     let result = simulate_trade(
         &candles,
         0,
@@ -490,13 +449,11 @@ fn simulate_trade_keeps_partial_profit_when_runner_stop_is_hit() {
         }),
         None,
     );
-
     assert_eq!(result.outcome, TradeOutcome::Win);
     assert_eq!(result.reason, "runner_stop_hit");
     assert_eq!(result.r, Some(1.0));
     assert!(result.complete);
 }
-
 #[test]
 fn summarize_target_can_reenter_after_stop_on_breakout_reclaim() {
     let args = MarketVelocityEventBacktestArgs {
@@ -581,9 +538,7 @@ fn summarize_target_can_reenter_after_stop_on_breakout_reclaim() {
             },
         ],
     )]);
-
     let (results, skipped_lock) = summarize_target(&confirmed, &candles, 1.5, MS_15M * 12, &args);
-
     assert_eq!(skipped_lock, 0);
     assert_eq!(results.len(), 1);
     let result = &results[0];
@@ -602,11 +557,9 @@ fn summarize_target_can_reenter_after_stop_on_breakout_reclaim() {
     assert_eq!(reentry.signal_ts, MS_15M * 4);
     assert_eq!(reentry.reclaim_price, 103.0);
 }
-
 #[test]
 fn event_backtest_defaults_match_production_market_velocity_policy() {
     let args = MarketVelocityEventBacktestArgs::default();
-
     assert_eq!(args.stop_loss_pct, 0.03);
     assert_eq!(args.target_rs, vec![1.5, 2.0]);
     assert_eq!(args.min_delta_rank, 10);
@@ -623,7 +576,6 @@ fn event_backtest_defaults_match_production_market_velocity_policy() {
     assert!(!args.equity_trade_report);
     assert_eq!(args.min_trades, 30);
 }
-
 #[test]
 fn parses_paper_outcome_sink_and_entry_rule_version() {
     let args = parse_cli_args_from([
@@ -633,7 +585,6 @@ fn parses_paper_outcome_sink_and_entry_rule_version() {
         "rank_radar_4h_15m_v2",
     ])
     .unwrap();
-
     assert_eq!(
         args.paper_outcome_sink,
         MarketVelocityPaperOutcomeSink::Jsonl
@@ -643,7 +594,6 @@ fn parses_paper_outcome_sink_and_entry_rule_version() {
         "rank_radar_4h_15m_v2"
     );
 }
-
 #[test]
 fn parses_equity_report_and_min_trades() {
     let args = parse_cli_args_from([
@@ -653,12 +603,10 @@ fn parses_equity_report_and_min_trades() {
         "50",
     ])
     .unwrap();
-
     assert!(args.equity_report);
     assert!(args.equity_split_report);
     assert_eq!(args.min_trades, 50);
 }
-
 #[test]
 fn framework_equity_report_uses_100u_funds_and_min_trade_gate() {
     let mut candles = Vec::new();
@@ -691,16 +639,13 @@ fn framework_equity_report_uses_100u_funds_and_min_trade_gate() {
         stop_loss_pct: 0.025,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let report = build_framework_equity_report(&confirmed, &candles_by_symbol, 2.4, &args);
-
     assert_eq!(report.initial_fund_per_symbol, 100.0);
     assert_eq!(report.total_open_trades, 1);
     assert_eq!(report.win_rate, Some(100.0));
     assert!(!report.meets_min_trades);
     assert!(report.total_profit > 5.0);
 }
-
 #[test]
 fn framework_equity_report_calculates_trade_sharpe_and_max_drawdown() {
     let mut candles = Vec::new();
@@ -753,23 +698,18 @@ fn framework_equity_report_calculates_trade_sharpe_and_max_drawdown() {
         stop_loss_pct: 0.025,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let report = build_framework_equity_report(&confirmed, &candles_by_symbol, 2.4, &args);
-
     assert_eq!(report.total_open_trades, 2);
     assert!(report.trade_sharpe.is_some());
     assert!(report.max_drawdown_pct > 2.0);
     assert!(report.max_drawdown_pct < 5.0);
     assert_eq!(report.symbols[0].max_drawdown_pct, report.max_drawdown_pct);
 }
-
 #[test]
 fn parses_stop_reentry_mode() {
     let args = parse_cli_args_from(["--stop-reentry-mode", "breakout_reclaim"]).unwrap();
-
     assert_eq!(args.stop_reentry_mode, StopReentryMode::BreakoutReclaim);
 }
-
 #[test]
 fn parses_profit_protection_controls() {
     let args = parse_cli_args_from([
@@ -779,11 +719,9 @@ fn parses_profit_protection_controls() {
         "0.3",
     ])
     .unwrap();
-
     assert_eq!(args.profit_protect_after_r, Some(1.2));
     assert_eq!(args.profit_protect_stop_r, 0.3);
 }
-
 #[test]
 fn parses_runner_exit_controls() {
     let args = parse_cli_args_from([
@@ -795,29 +733,23 @@ fn parses_runner_exit_controls() {
         "0.0",
     ])
     .unwrap();
-
     assert_eq!(args.runner_target_r, Some(4.0));
     assert_eq!(args.runner_fraction, 0.5);
     assert_eq!(args.runner_stop_r, 0.0);
 }
-
 #[test]
 fn parses_early_exit_no_profit_controls() {
     let args = parse_cli_args_from(["--early-exit-no-profit-candles", "2"]).unwrap();
-
     assert_eq!(args.early_exit_no_profit_candles, Some(2));
 }
-
 #[test]
 fn rejects_runner_fraction_outside_position_share() {
     let err =
         parse_cli_args_from(["--runner-target-r", "4.0", "--runner-fraction", "1.0"]).unwrap_err();
-
     assert!(err
         .to_string()
         .contains("--runner-fraction must be greater than 0 and lower than 1"));
 }
-
 #[test]
 fn rejects_profit_protection_stop_at_or_above_activation() {
     let err = parse_cli_args_from([
@@ -827,12 +759,10 @@ fn rejects_profit_protection_stop_at_or_above_activation() {
         "1.0",
     ])
     .unwrap_err();
-
     assert!(err
         .to_string()
         .contains("--profit-protect-stop-r must be lower than --profit-protect-after-r"));
 }
-
 #[test]
 fn parses_fvg_entry_mode_and_wait_controls() {
     let args = parse_cli_args_from([
@@ -844,12 +774,10 @@ fn parses_fvg_entry_mode_and_wait_controls() {
         "8",
     ])
     .unwrap();
-
     assert_eq!(args.fvg_entry_mode, FvgEntryMode::M15To1h);
     assert_eq!(args.fvg_lookback_candles, 12);
     assert_eq!(args.fvg_max_wait_candles, 8);
 }
-
 #[test]
 fn evaluate_events_uses_15m_pullback_into_1h_bullish_fvg() {
     let args = MarketVelocityEventBacktestArgs {
@@ -881,7 +809,6 @@ fn evaluate_events_uses_15m_pullback_into_1h_bullish_fvg() {
         ohlc(MS_1H * 16 + MS_15M, 101.5, 103.0, 100.5, 102.6),
         ohlc(MS_1H * 16 + MS_15M * 2, 102.7, 104.0, 102.4, 103.5),
     ];
-
     let report = evaluate_events(
         &[event],
         &HashMap::from([(
@@ -897,14 +824,12 @@ fn evaluate_events_uses_15m_pullback_into_1h_bullish_fvg() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-
     assert_eq!(report.confirmed.len(), 1);
     let confirmed = &report.confirmed[0];
     assert_eq!(confirmed.entry_ts, MS_1H * 16 + MS_15M * 2);
     assert_eq!(confirmed.entry_price, 102.7);
     assert_eq!(confirmed.trigger, "fvg_15m_to_1h");
 }
-
 #[test]
 fn evaluate_events_uses_1h_pullback_into_4h_bullish_fvg() {
     let args = MarketVelocityEventBacktestArgs {
@@ -934,7 +859,6 @@ fn evaluate_events_uses_1h_pullback_into_4h_bullish_fvg() {
         ohlc(MS_4H * 4 + MS_1H * 2, 102.7, 103.5, 102.4, 103.0),
         ohlc(MS_4H * 4 + MS_1H * 2 + MS_15M, 103.0, 104.0, 102.8, 103.8),
     ];
-
     let report = evaluate_events(
         &[event],
         &HashMap::from([(
@@ -950,14 +874,12 @@ fn evaluate_events_uses_1h_pullback_into_4h_bullish_fvg() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-
     assert_eq!(report.confirmed.len(), 1);
     let confirmed = &report.confirmed[0];
     assert_eq!(confirmed.entry_ts, MS_4H * 4 + MS_1H * 2);
     assert_eq!(confirmed.entry_price, 102.7);
     assert_eq!(confirmed.trigger, "fvg_1h_to_4h");
 }
-
 #[test]
 fn web_sink_requires_explicit_rule_version_for_stop_reentry_mode() {
     let err = parse_cli_args_from([
@@ -967,25 +889,20 @@ fn web_sink_requires_explicit_rule_version_for_stop_reentry_mode() {
         "breakout_reclaim",
     ])
     .unwrap_err();
-
     assert!(err.to_string().contains(
         "--stop-reentry-mode with --paper-outcome-sink web requires explicit --paper-outcome-entry-rule-version"
     ));
 }
-
 #[test]
 fn default_analysis_backtest_keeps_entry_trigger_filter_unset() {
     let args = parse_cli_args_from([] as [&str; 0]).unwrap();
-
     assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Off);
     assert!(args.entry_trigger_allowlist.is_empty());
     assert!(args.entry_trigger_blocklist.is_empty());
 }
-
 #[test]
 fn web_paper_outcome_sink_defaults_to_production_entry_trigger_allowlist() {
     let args = parse_cli_args_from(["--paper-outcome-sink", "web"]).unwrap();
-
     assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
     assert_eq!(
         args.entry_trigger_allowlist,
@@ -993,7 +910,6 @@ fn web_paper_outcome_sink_defaults_to_production_entry_trigger_allowlist() {
     );
     assert!(args.entry_trigger_blocklist.is_empty());
 }
-
 #[test]
 fn explicit_all_entry_trigger_allowlist_keeps_web_paper_outcome_sink_unfiltered() {
     let args = parse_cli_args_from([
@@ -1003,12 +919,10 @@ fn explicit_all_entry_trigger_allowlist_keeps_web_paper_outcome_sink_unfiltered(
         "all",
     ])
     .unwrap();
-
     assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
     assert!(args.entry_trigger_allowlist.is_empty());
     assert!(args.entry_trigger_blocklist.is_empty());
 }
-
 #[test]
 fn parses_entry_trigger_allowlist_and_blocklist() {
     let args = parse_cli_args_from([
@@ -1018,14 +932,12 @@ fn parses_entry_trigger_allowlist_and_blocklist() {
         "pullback_hold_ema",
     ])
     .unwrap();
-
     assert_eq!(
         args.entry_trigger_allowlist,
         vec!["breakout_previous_high", "reclaim_ema"]
     );
     assert_eq!(args.entry_trigger_blocklist, vec!["pullback_hold_ema"]);
 }
-
 #[test]
 fn filters_confirmed_events_by_symbol_blocklist_before_entry_trigger() {
     let args = MarketVelocityEventBacktestArgs {
@@ -1039,19 +951,16 @@ fn filters_confirmed_events_by_symbol_blocklist_before_entry_trigger() {
     allowed_symbol.event.symbol = "JTO-USDT-SWAP".to_string();
     let mut blocked_trigger = confirmed_event(3, "reclaim_ma");
     blocked_trigger.event.symbol = "JTO-USDT-SWAP".to_string();
-
     let symbol_filtered = filter_confirmed_events_by_symbol(
         &[blocked_symbol, allowed_symbol, blocked_trigger],
         &args,
     );
     let filtered = filter_confirmed_events_by_entry_trigger(&symbol_filtered, &args);
-
     assert_eq!(symbol_filtered.len(), 2);
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].event.id, 2);
     assert_eq!(filtered[0].event.symbol, "JTO-USDT-SWAP");
 }
-
 #[test]
 fn filters_confirmed_events_by_entry_trigger_with_blocklist_precedence() {
     let args = MarketVelocityEventBacktestArgs {
@@ -1067,14 +976,11 @@ fn filters_confirmed_events_by_entry_trigger_with_blocklist_precedence() {
         confirmed_event(2, "reclaim_ema"),
         confirmed_event(3, "pullback_hold_ema"),
     ];
-
     let filtered = filter_confirmed_events_by_entry_trigger(&confirmed, &args);
-
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].event.id, 1);
     assert_eq!(filtered[0].trigger, "breakout_previous_high");
 }
-
 #[test]
 fn filters_confirmed_events_by_entry_trigger_rank_blocklist() {
     let args = MarketVelocityEventBacktestArgs {
@@ -1093,12 +999,10 @@ fn filters_confirmed_events_by_entry_trigger_rank_blocklist() {
     let same_rank_other_trigger = confirmed_event(2, "breakout_previous_high");
     let mut outside_rank = confirmed_event(3, "reclaim_ema");
     outside_rank.event.new_rank = 21;
-
     let filtered = filter_confirmed_events_by_entry_trigger(
         &[blocked, same_rank_other_trigger, outside_rank],
         &args,
     );
-
     assert_eq!(filtered.len(), 2);
     assert_eq!(
         filtered
@@ -1108,7 +1012,6 @@ fn filters_confirmed_events_by_entry_trigger_rank_blocklist() {
         vec![2, 3]
     );
 }
-
 #[test]
 fn builds_paper_outcomes_for_each_target_and_horizon_without_execution_task_payload() {
     let args = MarketVelocityEventBacktestArgs {
@@ -1151,9 +1054,7 @@ fn builds_paper_outcomes_for_each_target_and_horizon_without_execution_task_payl
             volume: 10.0,
         }],
     )]);
-
     let outcomes = build_market_velocity_paper_outcomes(&confirmed, &candles, &args);
-
     assert_eq!(outcomes.len(), 4);
     let first = &outcomes[0];
     assert_eq!(first.rank_event_id, 77);
@@ -1192,12 +1093,10 @@ fn builds_paper_outcomes_for_each_target_and_horizon_without_execution_task_payl
         first.evaluation_payload["entry_filter"]["entry_trigger_allowlist"],
         serde_json::json!(["breakout_previous_high", "reclaim_ema"])
     );
-
     let serialized = serde_json::to_string(first).unwrap();
     assert!(!serialized.contains("execution_task"));
     assert!(!serialized.contains("buyer_email"));
 }
-
 fn confirmed_event(id: i64, trigger: &str) -> ConfirmedEvent {
     ConfirmedEvent {
         event: RadarEvent {
@@ -1217,7 +1116,6 @@ fn confirmed_event(id: i64, trigger: &str) -> ConfirmedEvent {
         trigger: trigger.to_string(),
     }
 }
-
 fn radar_event_at(ts: i64) -> RadarEvent {
     RadarEvent {
         id: 99,
@@ -1231,7 +1129,6 @@ fn radar_event_at(ts: i64) -> RadarEvent {
         price_change_pct: 3.5,
     }
 }
-
 fn trend_ok_4h_candles() -> Vec<BacktestCandle> {
     vec![
         ohlc(0, 98.0, 99.0, 97.0, 98.5),

@@ -1,5 +1,4 @@
 use rust_quant_domain::entities::ExternalMarketSnapshot;
-
 #[test]
 fn external_market_snapshot_serializes_expected_fields() {
     let snapshot = ExternalMarketSnapshot {
@@ -21,7 +20,6 @@ fn external_market_snapshot_serializes_expected_fields() {
         created_at: None,
         updated_at: None,
     };
-
     let value = serde_json::to_value(&snapshot).expect("snapshot should serialize");
     assert_eq!(value["source"], "hyperliquid");
     assert_eq!(value["symbol"], "ETH");

@@ -1,9 +1,10 @@
 use super::*;
 use crate::rust_quan_web::ExecutionTask;
-use crypto_exc_all::ExchangeId;
+use crypto_exc_all::{
+    ExchangeId, Instrument, MarginMode, PositionMode, PrepareOrderSettingsRequest,
+};
 use serde_json::json;
 use std::collections::BTreeSet;
-
 fn task(payload: serde_json::Value) -> ExecutionTask {
     ExecutionTask {
         id: 42,
@@ -24,7 +25,6 @@ fn task(payload: serde_json::Value) -> ExecutionTask {
         updated_at: "2026-04-23T12:00:00".to_string(),
     }
 }
-
 #[test]
 fn redacts_sensitive_values_from_audit_payload() {
     let payload = json!({
@@ -36,10 +36,8 @@ fn redacts_sensitive_values_from_audit_payload() {
             "symbol": "BTC-USDT-SWAP"
         }
     });
-
     let redacted = redact_audit_payload(payload);
     let serialized = redacted.to_string();
-
     assert_eq!(redacted["api_key"], "***REDACTED***");
     assert_eq!(redacted["api_secret"], "***REDACTED***");
     assert_eq!(redacted["passphrase"], "***REDACTED***");
@@ -50,7 +48,6 @@ fn redacts_sensitive_values_from_audit_payload() {
     assert!(!serialized.contains("plain-passphrase"));
     assert!(!serialized.contains("plain-token"));
 }
-
 #[test]
 fn redacts_sensitive_values_from_nested_headers_and_arrays() {
     let payload = json!({
@@ -67,10 +64,8 @@ fn redacts_sensitive_values_from_nested_headers_and_arrays() {
             }
         ]
     });
-
     let redacted = redact_audit_payload(payload);
     let serialized = redacted.to_string();
-
     assert_eq!(redacted["headers"]["Authorization"], "***REDACTED***");
     assert_eq!(redacted["headers"]["X-Api-Key"], "***REDACTED***");
     assert_eq!(redacted["headers"]["Content-Type"], "application/json");
@@ -82,20 +77,16 @@ fn redacts_sensitive_values_from_nested_headers_and_arrays() {
     assert!(!serialized.contains("plain-secret-key"));
     assert!(!serialized.contains("plain-access-token"));
 }
-
 #[test]
 fn redacts_signed_url_signature_from_error_message() {
     let message = "HTTP错误: error sending request for url (https://fapi.binance.com/fapi/v3/positionRisk?symbol=ETHUSDT&timestamp=1780485895031&signature=d9abb4b3b09c375e3111a500ca91e472fce1a3837575ec3753e8038af20f2778): operation timed out";
-
     let redacted = redact_error_message(message.to_string());
-
     assert!(redacted.contains("HTTP错误"));
     assert!(redacted.contains("operation timed out"));
     assert!(redacted.contains("[signed_url_redacted]"));
     assert!(!redacted.contains("signature"));
     assert!(!redacted.contains("d9abb4"));
 }
-
 #[test]
 fn builds_dry_run_audit_payload_without_credentials() {
     let task = task(json!({
@@ -109,7 +100,6 @@ fn builds_dry_run_audit_payload_without_credentials() {
         crate::rust_quan_web::ExecutionOrderTask::from_task_with_default(&task, ExchangeId::Okx)
             .unwrap();
     let request = order_task.to_order_request().unwrap();
-
     let audit = ExchangeRequestAuditLog::success(
         &task,
         &request,
@@ -120,7 +110,6 @@ fn builds_dry_run_audit_payload_without_credentials() {
             "api_secret": "plain-api-secret"
         }),
     );
-
     assert_eq!(audit.request_id, "task-42-rqtask42");
     assert_eq!(audit.exchange, "okx");
     assert_eq!(audit.symbol, "BTC-USDT-SWAP");
@@ -141,7 +130,71 @@ fn builds_dry_run_audit_payload_without_credentials() {
         .to_string()
         .contains("plain-api-secret"));
 }
-
+#[test]
+fn builds_prepare_order_settings_audit_payload_without_credentials() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETHUSDT",
+        "api_secret": "plain-api-secret"
+    }));
+    let request = PrepareOrderSettingsRequest::new(Instrument::perp("ETH", "USDT"))
+        .with_margin_mode(MarginMode::Isolated)
+        .with_leverage("3")
+        .with_position_mode(PositionMode::Hedge)
+        .with_margin_coin("USDT")
+        .with_position_side("LONG");
+    let preflight = ExchangeRequestAuditLog::prepare_order_settings_live_mutation_preflight(
+        &task,
+        ExchangeId::Binance,
+        &request,
+        false,
+    );
+    assert_eq!(preflight.request_id, "task-42-prepare-settings-ETHUSDT");
+    assert_eq!(preflight.exchange, "binance");
+    assert_eq!(preflight.symbol, "ETHUSDT");
+    assert_eq!(
+        preflight.endpoint,
+        "account.prepare_order_settings.preflight"
+    );
+    assert_eq!(preflight.request_status, "completed");
+    assert_eq!(preflight.request_payload["dry_run"], false);
+    assert_eq!(
+        preflight.request_payload["account_settings"]["leverage"],
+        "3"
+    );
+    assert_eq!(
+        preflight.request_payload["account_settings"]["margin_coin"],
+        "USDT"
+    );
+    assert_eq!(
+        preflight.response_payload["stage"],
+        "live_prepare_order_settings_audit_preflight"
+    );
+    assert_eq!(
+        preflight.request_payload["task"]["request_payload_json"]["api_secret"],
+        "***REDACTED***"
+    );
+    assert!(!preflight
+        .request_payload
+        .to_string()
+        .contains("plain-api-secret"));
+    let completed = ExchangeRequestAuditLog::prepare_order_settings_success(
+        &task,
+        ExchangeId::Binance,
+        &request,
+        false,
+        Some(18),
+        json!({"api_secret": "plain-api-secret"}),
+    );
+    assert_eq!(completed.endpoint, "account.prepare_order_settings");
+    assert_eq!(completed.request_status, "completed");
+    assert_eq!(completed.latency_ms, Some(18));
+    assert_eq!(completed.response_payload["api_secret"], "***REDACTED***");
+    assert!(!completed
+        .response_payload
+        .to_string()
+        .contains("plain-api-secret"));
+}
 #[test]
 fn builds_worker_checkpoint_payload() {
     let checkpoint = ExecutionWorkerCheckpoint::heartbeat(
@@ -153,7 +206,6 @@ fn builds_worker_checkpoint_payload() {
             "dry_run": true
         }),
     );
-
     assert_eq!(checkpoint.worker_id, "worker-a");
     assert_eq!(checkpoint.worker_kind, "execution");
     assert_eq!(checkpoint.worker_status, "leased");
@@ -162,7 +214,6 @@ fn builds_worker_checkpoint_payload() {
     assert_eq!(checkpoint.last_task_id.as_deref(), Some("42"));
     assert_eq!(checkpoint.checkpoint_value["leased_count"], 1);
 }
-
 #[test]
 fn report_result_replay_candidate_reconstructs_report_without_order_retry() {
     let report = ExecutionTaskReportRequest {
@@ -181,13 +232,11 @@ fn report_result_replay_candidate_reconstructs_report_without_order_retry() {
         raw_payload_json: Some(r#"{"client_order_id":"rqtask42"}"#.to_string()),
     };
     let audit = ExchangeRequestAuditLog::report_result_failed(&report, "web outage");
-
     let candidate = report_result_replay_candidate_from_payload(
         audit.request_id.clone(),
         &audit.request_payload,
     )
     .unwrap();
-
     assert_eq!(candidate.request_id, "report-task-42-12345");
     assert_eq!(candidate.report.task_id, 42);
     assert_eq!(candidate.report.exchange, "binance");
@@ -206,7 +255,6 @@ fn report_result_replay_candidate_reconstructs_report_without_order_retry() {
         false
     );
 }
-
 #[test]
 fn report_result_replay_candidate_rejects_place_order_allowed_payload() {
     let payload = json!({
@@ -223,14 +271,11 @@ fn report_result_replay_candidate_rejects_place_order_allowed_payload() {
             "order_status": "FILLED"
         }
     });
-
     let err =
         report_result_replay_candidate_from_payload("report-task-42-12345".to_string(), &payload)
             .unwrap_err();
-
     assert!(err.to_string().contains("allows place_order"));
 }
-
 #[test]
 fn repository_checkpoint_columns_match_quant_core_ddl() {
     assert_insert_columns_exist_in_ddl(
@@ -249,7 +294,6 @@ fn repository_checkpoint_columns_match_quant_core_ddl() {
         ],
     );
 }
-
 #[test]
 fn repository_exchange_audit_columns_match_quant_core_ddl() {
     assert_insert_columns_exist_in_ddl(
@@ -268,7 +312,6 @@ fn repository_exchange_audit_columns_match_quant_core_ddl() {
         ],
     );
 }
-
 #[test]
 fn live_audit_readiness_documents_required_tables() {
     assert!(
@@ -277,7 +320,6 @@ fn live_audit_readiness_documents_required_tables() {
         "live audit readiness must verify both checkpoint and exchange audit tables"
     );
 }
-
 #[tokio::test]
 async fn postgres_audit_readiness_connects_before_live_execution() {
     let repository = PostgresExecutionAuditRepository::new(
@@ -287,12 +329,10 @@ async fn postgres_audit_readiness_connects_before_live_execution() {
             .connect_lazy("postgres://postgres:postgres@127.0.0.1:1/quant_core")
             .expect("lazy postgres url should parse"),
     );
-
     let error = repository
         .verify_live_audit_ready()
         .await
         .expect_err("live audit readiness must connect before allowing live execution");
-
     assert!(
         error
             .to_string()
@@ -300,26 +340,65 @@ async fn postgres_audit_readiness_connects_before_live_execution() {
         "unexpected error: {error:#}"
     );
 }
-
 #[test]
 fn report_replay_candidate_sql_applies_failure_backoff_window() {
     assert!(
         LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL
-            .contains("recent_failed.created_at > failed.created_at"),
-        "report replay SQL must ignore its original failed row while backing off newer replay failures"
+            .contains("failed.created_at <= NOW() - ($3::bigint * INTERVAL '1 second')"),
+        "report replay SQL must only retry after the latest failed row clears backoff"
+    );
+    assert!(
+        !LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL.contains("recent_failed"),
+        "report replay SQL must not evaluate backoff against older duplicate failed rows"
+    );
+}
+#[test]
+fn report_replay_candidate_sql_uses_latest_failed_row_per_request_id() {
+    assert!(
+        LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL
+            .contains("DISTINCT ON (failed.endpoint, failed.request_id)"),
+        "report replay SQL must only consider one latest failed row per request id"
     );
     assert!(
         LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL
-            .contains("recent_failed.created_at >= NOW() - ($3::bigint * INTERVAL '1 second')"),
-        "report replay SQL must exclude candidates that failed again inside the configured backoff window"
+            .contains("failed.created_at <= NOW() - ($3::bigint * INTERVAL '1 second')"),
+        "report replay backoff must be calculated from the latest failed row"
+    );
+    assert!(
+        LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL.contains(
+            "ORDER BY failed.endpoint, failed.request_id, failed.created_at DESC, failed.id DESC"
+        ),
+        "report replay SQL must break same-timestamp failures deterministically"
     );
 }
-
+#[test]
+fn report_replay_candidate_sql_scopes_target_task_ids_before_limit() {
+    assert!(
+        LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL.contains("cardinality($4::text[]) = 0"),
+        "report replay SQL must allow unscoped replay when no target ids are provided"
+    );
+    assert!(
+        LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL
+            .contains("failed.request_payload #>> '{report,task_id}' = ANY($4::text[])"),
+        "report replay SQL must apply target task ids before ORDER BY/LIMIT"
+    );
+}
+#[test]
+fn quant_core_ddl_indexes_report_replay_lookup() {
+    let ddl = include_str!("../../../../../sql/postgres_quant_core.sql");
+    assert_report_replay_index_sql(ddl, "quant_core DDL");
+}
+#[test]
+fn quant_core_migration_indexes_report_replay_lookup() {
+    let migration = include_str!(
+        "../../../../../migrations/20260622030000_add_exchange_request_audit_report_replay_index.sql"
+    );
+    assert_report_replay_index_sql(migration, "quant_core migration");
+}
 fn assert_insert_columns_exist_in_ddl(sql: &str, table: &str, expected_columns: &[&str]) {
     let ddl_columns = create_table_columns(table);
     let insert_columns = insert_columns(sql, table);
     assert_eq!(insert_columns, expected_columns);
-
     let missing_columns = insert_columns
         .iter()
         .filter(|column| !ddl_columns.contains(**column))
@@ -330,7 +409,6 @@ fn assert_insert_columns_exist_in_ddl(sql: &str, table: &str, expected_columns: 
         "{table} repository SQL uses columns missing from DDL: {missing_columns:?}"
     );
 }
-
 fn create_table_columns(table: &str) -> BTreeSet<&'static str> {
     let ddl = include_str!("../../../../../sql/postgres_quant_core.sql");
     let marker = format!("CREATE TABLE IF NOT EXISTS {table} (");
@@ -342,7 +420,6 @@ fn create_table_columns(table: &str) -> BTreeSet<&'static str> {
     let end = body
         .find("\n);")
         .unwrap_or_else(|| panic!("{table} table DDL terminator missing"));
-
     body[..end]
         .lines()
         .map(str::trim)
@@ -350,7 +427,6 @@ fn create_table_columns(table: &str) -> BTreeSet<&'static str> {
         .filter_map(|line| line.trim_end_matches(',').split_whitespace().next())
         .collect()
 }
-
 fn insert_columns<'a>(sql: &'a str, table: &str) -> Vec<&'a str> {
     let marker = format!("INSERT INTO {table} (");
     let start = sql
@@ -361,10 +437,21 @@ fn insert_columns<'a>(sql: &'a str, table: &str) -> Vec<&'a str> {
     let end = body
         .find(')')
         .unwrap_or_else(|| panic!("{table} insert SQL column terminator missing"));
-
     body[..end]
         .split(',')
         .map(str::trim)
         .filter(|column| !column.is_empty())
         .collect()
+}
+fn assert_report_replay_index_sql(sql: &str, label: &str) {
+    assert!(
+        sql.contains("idx_exchange_request_audit_report_replay"),
+        "{label} must index report replay lookup"
+    );
+    assert!(
+        sql.contains(
+            "ON exchange_request_audit_logs (endpoint, request_id, request_status, created_at DESC, id DESC)"
+        ),
+        "{label} report replay index must match endpoint/request_id/status/latest-failed lookup"
+    );
 }

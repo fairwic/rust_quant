@@ -1,17 +1,16 @@
 //! SwapOrdersDetail 实体 - sqlx 实现
 //! 从 swap_orders_detail.rs 迁移 (rbatis → sqlx)
-
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rust_quant_core::database::get_db_pool;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use tracing::{debug, info};
-
 /// 订单详情实体
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 #[serde(rename_all = "snake_case")]
 pub struct SwapOrdersDetailEntity {
+    /// 唯一标识。
     pub id: Option<i64>,
     // 内部订单id
     pub in_order_id: String,
@@ -44,12 +43,12 @@ pub struct SwapOrdersDetailEntity {
     // 更新时间
     pub update_time: Option<DateTime<Utc>>,
 }
-
 impl SwapOrdersDetailEntity {
     /// 插入订单详情
+    /// 封装当前函数，减少交易执行调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     pub async fn insert(&self) -> Result<u64> {
         let pool = get_db_pool();
-
         let inserted_id: i64 = sqlx::query_scalar(
             "INSERT INTO swap_orders_detail 
              (in_order_id, out_order_id, strategy_id, strategy_type, period, 
@@ -73,32 +72,26 @@ impl SwapOrdersDetailEntity {
         .fetch_one(pool)
         .await
         .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         info!("订单详情已插入: in_order_id={}", self.in_order_id);
         Ok(inserted_id as u64)
     }
-
     /// 根据内部订单ID查询
     pub async fn select_by_in_order_id(in_order_id: &str) -> Result<Vec<Self>> {
         let pool = get_db_pool();
-
         let orders =
             sqlx::query_as::<_, Self>("SELECT * FROM swap_orders_detail WHERE in_order_id = $1")
                 .bind(in_order_id)
                 .fetch_all(pool)
                 .await
                 .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         Ok(orders)
     }
-
     /// 根据策略ID和状态查询
     pub async fn select_by_strategy_and_status(
         strategy_id: i64,
         status: &str,
     ) -> Result<Vec<Self>> {
         let pool = get_db_pool();
-
         let orders = sqlx::query_as::<_, Self>(
             "SELECT * FROM swap_orders_detail WHERE strategy_id = $1 AND status = $2",
         )
@@ -107,14 +100,11 @@ impl SwapOrdersDetailEntity {
         .fetch_all(pool)
         .await
         .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         Ok(orders)
     }
-
     /// 获取需要更新的订单ID列表
     pub async fn get_new_update_order_id() -> Result<Vec<String>> {
         let pool = get_db_pool();
-
         let orders: Vec<(String,)> = sqlx::query_as(
             "SELECT DISTINCT in_order_id FROM swap_orders_detail 
              WHERE status = 'open' 
@@ -124,14 +114,11 @@ impl SwapOrdersDetailEntity {
         .fetch_all(pool)
         .await
         .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         Ok(orders.into_iter().map(|r| r.0).collect())
     }
-
     /// 更新订单状态
     pub async fn update_status(&self, status: &str) -> Result<u64> {
         let pool = get_db_pool();
-
         let result = sqlx::query(
             "UPDATE swap_orders_detail 
              SET status = $1, update_time = NOW()
@@ -142,44 +129,35 @@ impl SwapOrdersDetailEntity {
         .execute(pool)
         .await
         .map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
-
         Ok(result.rows_affected())
     }
-
     /// 批量更新 (通过Map参数)
     pub async fn update_by_map(
         in_order_id: &str,
         updates: std::collections::HashMap<String, String>,
     ) -> Result<u64> {
         let pool = get_db_pool();
-
         // 构建动态UPDATE语句
         let mut set_clauses = Vec::new();
         let mut values: Vec<String> = Vec::new();
-
         for (index, (key, value)) in updates.iter().enumerate() {
             set_clauses.push(format!("{} = ${}", key, index + 1));
             values.push(value.clone());
         }
-
         if set_clauses.is_empty() {
             return Ok(0);
         }
-
         let sql = format!(
             "UPDATE swap_orders_detail SET {}, update_time = NOW() WHERE in_order_id = ${}",
             set_clauses.join(", "),
             values.len() + 1
         );
-
         debug!("更新订单SQL: {}", sql);
-
         let mut query = sqlx::query(&sql);
         for value in values {
             query = query.bind(value);
         }
         query = query.bind(in_order_id);
-
         let result = query
             .execute(pool)
             .await

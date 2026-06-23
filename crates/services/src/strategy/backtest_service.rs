@@ -1,15 +1,9 @@
 //! 回测服务
 //!
 //! 负责回测日志和详情的保存，协调 BacktestLogRepository
-
 use anyhow::Result;
-use rust_quant_common::utils::time;
-use serde_json::json;
-use std::env;
-use std::str::FromStr;
-use tracing::info;
-
 use rust_quant_analytics::calculate_performance_metrics;
+use rust_quant_common::utils::time;
 use rust_quant_common::CandleItem;
 use rust_quant_domain::entities::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics};
 use rust_quant_domain::traits::{AuditLogRepository, BacktestLogRepository};
@@ -17,7 +11,10 @@ use rust_quant_domain::StrategyType;
 use rust_quant_strategies::strategy_common::{
     BackTestResult, BasicRiskStrategyConfig, TradeRecord,
 };
-
+use serde_json::json;
+use std::env;
+use std::str::FromStr;
+use tracing::info;
 /// 回测服务
 ///
 /// 职责：
@@ -28,13 +25,13 @@ use rust_quant_strategies::strategy_common::{
 /// 依赖：
 /// - BacktestLogRepository: 回测数据访问接口
 pub struct BacktestService {
+    /// repository，用于交易策略计算。
     repository: Box<dyn BacktestLogRepository>,
+    /// auditrepository；为空时表示该条件不启用。
     audit_repository: Option<Box<dyn AuditLogRepository>>,
 }
-
 impl BacktestService {
     /// 创建回测服务实例
-    ///
     /// # 参数
     /// * `repository` - BacktestLogRepository 实现（通过依赖注入）
     pub fn new(
@@ -46,9 +43,7 @@ impl BacktestService {
             audit_repository,
         }
     }
-
     /// 保存回测日志和详情
-    ///
     /// # 参数
     /// * `inst_id` - 交易对
     /// * `time` - 时间周期
@@ -57,10 +52,8 @@ impl BacktestService {
     /// * `source_candles` - K 线数据（用于统计）
     /// * `risk_strategy_config` - 风险配置
     /// * `strategy_name` - 策略名称
-    ///
     /// # 返回
     /// * 回测日志 ID
-    #[allow(clippy::too_many_arguments)]
     pub async fn save_backtest_log(
         &self,
         inst_id: &str,
@@ -71,6 +64,8 @@ impl BacktestService {
         risk_strategy_config: BasicRiskStrategyConfig,
         strategy_name: &str,
     ) -> Result<i64> {
+        // 主表先保存策略、交易对、周期、样本范围和最终资金，后续详情表都以这个 back_test_id
+        // 关联，避免一批 trade/detail 写入后找不到对应的回测汇总。
         let mut log_entity = BacktestLog::new(
             strategy_name.to_string(),
             inst_id.to_string(),
@@ -85,21 +80,19 @@ impl BacktestService {
             source_candles.last().map(|c| c.ts).unwrap_or_default(),
             source_candles.len() as i32,
         );
-
-        // 可选：写入前后可在此更新自定义胜率统计
+        // 这些 N-bar 胜率目前没有在 pipeline 中实时计算，写 0.0 明确表示“未生成该指标”，
+        // 比沿用旧值或 NULL 更容易在策略研究报表里识别口径缺口。
         log_entity.one_bar_after_win_rate = 0.0;
         log_entity.two_bar_after_win_rate = 0.0;
         log_entity.three_bar_after_win_rate = 0.0;
         log_entity.four_bar_after_win_rate = 0.0;
         log_entity.five_bar_after_win_rate = 0.0;
         log_entity.ten_bar_after_win_rate = 0.0;
-
         let back_test_id = self.repository.insert_log(&log_entity).await?;
-
-        // 如果启用了随机测试，则不保存详情和绩效指标
+        // 随机测试只用于压力/扰动验证，不能污染正式的交易明细和绩效指标表。
         if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true" {
             if !back_test_result.trade_records.is_empty() {
-                // 保存回测详情
+                // 成交明细必须在汇总行之后写入，因为详情表需要稳定的 back_test_id 做审计回溯。
                 self.save_backtest_details(
                     back_test_id,
                     StrategyType::from_str(strategy_name).unwrap_or(StrategyType::Vegas),
@@ -108,11 +101,10 @@ impl BacktestService {
                     back_test_result.trade_records.clone(),
                 )
                 .await?;
-
-                // 计算并更新绩效指标
+                // 绩效指标使用原始样本起止时间和成交明细重新计算，避免只依赖 BackTestResult
+                // 中的最终资金而丢失回撤、持仓时长等过程性指标。
                 let start_time = source_candles.first().map(|c| c.ts).unwrap_or_default();
                 let end_time = source_candles.last().map(|c| c.ts).unwrap_or_default();
-
                 self.update_performance_metrics(
                     back_test_id,
                     100.0, // 初始资金
@@ -123,8 +115,7 @@ impl BacktestService {
                 )
                 .await?;
             }
-
-            // 保存过滤信号记录 (新增)
+            // 被过滤信号不是成交，但它解释“为什么没开仓”，需要和成交记录一起保留。
             if !back_test_result.filtered_signals.is_empty() {
                 self.save_filtered_signals(
                     back_test_id,
@@ -134,7 +125,7 @@ impl BacktestService {
                 )
                 .await?;
             }
-
+            // 动态配置日志用于复盘参数漂移，只有发生快照或调整时才落库，减少无意义空记录。
             if !back_test_result.dynamic_config_logs.is_empty() {
                 self.save_dynamic_config_logs(
                     back_test_id,
@@ -144,7 +135,6 @@ impl BacktestService {
                 )
                 .await?;
             }
-
             if let Some(audit_repo) = self.audit_repository.as_ref() {
                 self.save_audit_trail(
                     audit_repo.as_ref(),
@@ -156,15 +146,13 @@ impl BacktestService {
                 .await?;
             }
         }
-
         info!(
             "回测日志保存成功: back_test_id={}, inst_id={}, period={}",
             back_test_id, inst_id, time
         );
-
         Ok(back_test_id)
     }
-
+    /// 持久化 回测与策略研究 结果，保证写入路径和幂等语义集中处理。
     async fn save_audit_trail(
         &self,
         audit_repo: &dyn AuditLogRepository,
@@ -176,9 +164,7 @@ impl BacktestService {
         use rust_quant_domain::entities::{
             OrderDecisionLog, RiskDecisionLog, SignalSnapshotLog, StrategyRun,
         };
-
         let run_id = audit_trail.run_id.clone();
-
         let run = StrategyRun {
             run_id: run_id.clone(),
             strategy_id: strategy_name.to_string(),
@@ -188,9 +174,7 @@ impl BacktestService {
             start_at: None,
             end_at: None,
         };
-
         audit_repo.insert_strategy_run(&run).await?;
-
         let snapshots: Vec<SignalSnapshotLog> = audit_trail
             .signal_snapshots
             .iter()
@@ -206,9 +190,7 @@ impl BacktestService {
                 signal_json: s.payload.clone(),
             })
             .collect();
-
         audit_repo.insert_signal_snapshots(&snapshots).await?;
-
         let risk_decisions: Vec<RiskDecisionLog> = audit_trail
             .risk_decisions
             .iter()
@@ -221,7 +203,6 @@ impl BacktestService {
             })
             .collect();
         audit_repo.insert_risk_decisions(&risk_decisions).await?;
-
         let order_decisions: Vec<OrderDecisionLog> = audit_trail
             .order_decisions
             .iter()
@@ -235,10 +216,8 @@ impl BacktestService {
             })
             .collect();
         audit_repo.insert_order_decisions(&order_decisions).await?;
-
         Ok(())
     }
-
     /// 保存过滤信号记录
     pub async fn save_filtered_signals(
         &self,
@@ -265,18 +244,15 @@ impl BacktestService {
                 signal_value: s.signal_value.clone(),
             })
             .collect();
-
         // 需要在 Repository 中实现批量插入
         // 这里假设已经有 insert_filtered_signals 方法
         let count = self.repository.insert_filtered_signals(&entities).await?;
-
         info!(
             "过滤信号记录保存成功: back_test_id={}, count={}",
             back_test_id, count
         );
         Ok(count)
     }
-
     /// 保存动态配置调整记录
     pub async fn save_dynamic_config_logs(
         &self,
@@ -296,7 +272,6 @@ impl BacktestService {
                 config_snapshot: log.config_snapshot.clone(),
             })
             .collect();
-
         let count = self
             .repository
             .insert_dynamic_config_logs(&entities)
@@ -307,16 +282,13 @@ impl BacktestService {
         );
         Ok(count)
     }
-
     /// 保存回测详情
-    ///
     /// # 参数
     /// * `back_test_id` - 回测日志 ID
     /// * `strategy_type` - 策略类型
     /// * `inst_id` - 交易对
     /// * `time` - 时间周期
     /// * `trade_records` - 交易记录列表
-    ///
     /// # 返回
     /// * 保存的记录数
     pub async fn save_backtest_details(
@@ -330,7 +302,6 @@ impl BacktestService {
         if trade_records.is_empty() {
             return Ok(0);
         }
-
         let details: Vec<BacktestDetail> = trade_records
             .into_iter()
             .map(|trade_record| {
@@ -359,7 +330,6 @@ impl BacktestService {
                 )
             })
             .collect();
-
         let count = self.repository.insert_details(&details).await?;
         info!(
             "回测详情保存成功: back_test_id={}, count={}",
@@ -367,9 +337,7 @@ impl BacktestService {
         );
         Ok(count)
     }
-
     /// 计算并更新绩效指标
-    ///
     /// # 参数
     /// * `back_test_id` - 回测日志 ID
     /// * `initial_fund` - 期初资金
@@ -377,7 +345,6 @@ impl BacktestService {
     /// * `trade_records` - 交易记录列表
     /// * `start_time` - 回测开始时间 (毫秒时间戳)
     /// * `end_time` - 回测结束时间 (毫秒时间戳)
-    ///
     /// # 返回
     /// * 更新的行数
     pub async fn update_performance_metrics(
@@ -397,7 +364,6 @@ impl BacktestService {
             start_time,
             end_time,
         );
-
         // 转换为领域模型
         let domain_metrics = BacktestPerformanceMetrics {
             sharpe_ratio: metrics.sharpe_ratio,
@@ -406,13 +372,11 @@ impl BacktestService {
             max_drawdown: metrics.max_drawdown,
             volatility: metrics.volatility,
         };
-
         // 更新数据库
         let affected = self
             .repository
             .update_performance_metrics(back_test_id, &domain_metrics)
             .await?;
-
         info!(
             "绩效指标更新成功: back_test_id={}, sharpe={:.4}, annual_return={:.2}%, max_drawdown={:.2}%, volatility={:.2}%",
             back_test_id,
@@ -421,7 +385,6 @@ impl BacktestService {
             metrics.max_drawdown * 100.0,
             metrics.volatility * 100.0
         );
-
         Ok(affected)
     }
 }

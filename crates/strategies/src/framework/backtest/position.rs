@@ -4,27 +4,22 @@ use super::types::{BasicRiskStrategyConfig, SignalResult, TradePosition, Trading
 use crate::CandleItem;
 use rust_quant_domain::enums::PositionSide;
 use tracing::error;
-
 /// 最终平仓处理
 pub fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list: &[CandleItem]) {
     let mut trade_position = match trading_state.trade_position.clone() {
         Some(p) => p,
         None => return,
     };
-
     let last_candle = match candle_item_list.last() {
         Some(c) => c,
         None => return,
     };
-
     let last_price = last_candle.c;
     trade_position.close_price = Some(last_price);
-
     let profit = match trade_position.trade_side {
         TradeSide::Long => (last_price - trade_position.open_price) * trade_position.position_nums,
         TradeSide::Short => (trade_position.open_price - last_price) * trade_position.position_nums,
     };
-
     close_position(
         trading_state,
         last_candle,
@@ -56,7 +51,6 @@ pub fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list
         profit,
     );
 }
-
 /// 开多仓
 pub fn open_long_position(
     risk_config: BasicRiskStrategyConfig,
@@ -93,20 +87,15 @@ pub fn open_long_position(
     {
         temp_trade_position.stop_loss_source = signal.stop_loss_source.clone();
     }
-
     state.trade_position = Some(temp_trade_position);
     state.open_position_times += 1;
     state.last_signal_result = None;
-
     record_trade_entry(state, PositionSide::Long.as_str().to_owned(), signal);
 }
-
 // ============================================================================
 // 止盈止损设置 - 公共逻辑
 // ============================================================================
-
 /// 设置止盈止损价格的公共逻辑（Long/Short共用）
-///
 /// 处理：信号K线止损、ATR止损、移动止损、逆势回调止盈、三级止盈价格
 fn set_stop_close_price_common(
     risk_config: &BasicRiskStrategyConfig,
@@ -115,7 +104,6 @@ fn set_stop_close_price_common(
 ) {
     let disable_signal_kline_updates = position.trade_side == TradeSide::Long
         && position.stop_loss_source.as_deref() == Some("RepairLong_NoSignalKline");
-
     // 1. 信号K线止损 + 更新历史记录
     if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) && !disable_signal_kline_updates
     {
@@ -124,7 +112,6 @@ fn set_stop_close_price_common(
                 .stop_loss_source
                 .clone()
                 .unwrap_or_else(|| "Unknown".to_string());
-
             if let Some(old_price) = position.signal_kline_stop_close_price {
                 // 这是更新操作
                 let sequence = position.stop_loss_updates.len() as i32;
@@ -147,17 +134,14 @@ fn set_stop_close_price_common(
                 );
                 position.stop_loss_updates.push(update);
             }
-
             position.signal_kline_stop_close_price = Some(new_price);
             position.stop_loss_source = Some(source);
         }
     }
-
     // 2. ATR止损
     if let Some(p) = signal.atr_stop_loss_price {
         position.atr_stop_loss_price = Some(p);
     }
-
     // 3. 三级止盈价格
     if signal.atr_take_profit_level_1.is_some() {
         position.atr_take_profit_level_1 = signal.atr_take_profit_level_1;
@@ -166,21 +150,18 @@ fn set_stop_close_price_common(
         position.reached_take_profit_level = 0;
     }
 }
-
 // ============================================================================
 // 止盈止损设置 - Long/Short 特定逻辑
 // ============================================================================
-
+/// 更新 交易执行与风控 状态，并保留调用方需要的结果或错误信息。
 pub fn set_long_stop_close_price(
     risk_config: BasicRiskStrategyConfig,
     signal: &SignalResult,
     temp_trade_position: &mut TradePosition,
 ) {
     // ============ Long特有逻辑 ============
-
     // 1. 信号止盈价格（做多）
     temp_trade_position.long_signal_take_profit_price = signal.long_signal_take_profit_price;
-
     // 2. 固定比例止盈（Long: open_price + diff * ratio）
     if let Some(fixed_take_profit_ratio) = risk_config.fixed_signal_kline_take_profit_ratio {
         if fixed_take_profit_ratio > 0.0 {
@@ -195,11 +176,9 @@ pub fn set_long_stop_close_price(
             }
         }
     }
-
     // ============ 公共逻辑 ============
     set_stop_close_price_common(&risk_config, signal, temp_trade_position);
 }
-
 /// 开空仓
 pub fn open_short_position(
     risk_config: BasicRiskStrategyConfig,
@@ -230,24 +209,20 @@ pub fn open_short_position(
     }
     //设置止盈止损价格
     set_short_stop_close_price(risk_config, signal, &mut temp_trade_position);
-
     state.trade_position = Some(temp_trade_position);
     state.open_position_times += 1;
     state.last_signal_result = None;
-
     record_trade_entry(state, PositionSide::Short.as_str().to_owned(), signal);
 }
-
+/// 更新 交易执行与风控 状态，并保留调用方需要的结果或错误信息。
 pub fn set_short_stop_close_price(
     risk_config: BasicRiskStrategyConfig,
     signal: &SignalResult,
     temp_trade_position: &mut TradePosition,
 ) {
     // ============ Short特有逻辑 ============
-
     // 1. 信号止盈价格（做空）
     temp_trade_position.short_signal_take_profit_price = signal.short_signal_take_profit_price;
-
     // 2. ATR比例止盈（Short: open_price - diff * ratio）
     if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {
         if atr_take_profit_ratio > 0.0 {
@@ -260,11 +235,9 @@ pub fn set_short_stop_close_price(
             }
         }
     }
-
     // ============ 公共逻辑 ============
     set_stop_close_price_common(&risk_config, signal, temp_trade_position);
 }
-
 /// 平仓
 pub fn close_position(
     state: &mut TradingState,
@@ -274,16 +247,13 @@ pub fn close_position(
     profit: f64,
 ) {
     use super::recording::record_trade_exit;
-
     let exit_time =
         rust_quant_common::utils::time::mill_time_to_datetime(candle.ts).unwrap_or_default();
-
     let mut trade_position = match state.trade_position.clone() {
         Some(p) => p,
         None => return,
     };
     let quantity = trade_position.position_nums;
-
     // 手续费设定0.007,假设开仓平仓各收一次 (数量*价格 *0.07%)
     let mut profit_after_fee = 0.00;
     if profit != 0.00 {
@@ -292,21 +262,17 @@ pub fn close_position(
     }
     trade_position.profit_loss = profit_after_fee;
     state.trade_position = Some(trade_position);
-
     // 更新总利润和资金
     state.total_profit_loss += profit_after_fee;
     state.funds += profit_after_fee;
-
     // 更新胜率
     if profit > 0.0 {
         state.wins += 1;
     } else if profit < 0.00 {
         state.losses += 1;
     }
-
     // 根据平仓原因和盈亏设置正确的平仓类型
     record_trade_exit(state, exit_time, signal, close_type, quantity);
-
     // 更新总利润和资金
     state.trade_position = None;
 }

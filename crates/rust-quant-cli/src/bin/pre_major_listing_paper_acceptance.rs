@@ -4,7 +4,6 @@ use rust_quant_services::strategy::pre_major_listing_perp_catchup::{
 };
 use serde::Deserialize;
 use std::fs;
-
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum PaperAcceptanceInput {
@@ -15,7 +14,8 @@ enum PaperAcceptanceInput {
         criteria: Option<ListingCatchupAcceptanceCriteria>,
     },
 }
-
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 fn main() -> Result<()> {
     let args = parse_args()?;
     let input = read_input(&args.input_path)?;
@@ -41,18 +41,21 @@ fn main() -> Result<()> {
     }
     Ok(())
 }
-
 struct CliArgs {
+    /// input路径，用于当前结构体的业务数据。
     input_path: String,
+    /// 最小tradesamples；为空时表示该条件不启用。
     min_trade_samples: Option<usize>,
+    /// 最小胜率百分比。
     min_win_rate_pct: Option<f64>,
 }
-
 struct ParsedInput {
+    /// 列表数据。
     samples: Vec<ListingCatchupPaperSample>,
+    /// criteria；为空时表示该条件不启用。
     criteria: Option<ListingCatchupAcceptanceCriteria>,
 }
-
+/// 解析输入参数并收敛为 量化核心 可使用的结构化值。
 fn parse_args() -> Result<CliArgs> {
     let mut input_path = std::env::var("PRE_MAJOR_LISTING_PAPER_INPUT").ok();
     let mut min_trade_samples = std::env::var("PRE_MAJOR_LISTING_MIN_TRADE_SAMPLES")
@@ -61,7 +64,6 @@ fn parse_args() -> Result<CliArgs> {
     let mut min_win_rate_pct = std::env::var("PRE_MAJOR_LISTING_MIN_WIN_RATE_PCT")
         .ok()
         .and_then(|value| value.parse::<f64>().ok());
-
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -79,19 +81,17 @@ fn parse_args() -> Result<CliArgs> {
             other => return Err(anyhow!("unknown argument: {other}")),
         }
     }
-
     let input_path = input_path
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("missing --input or PRE_MAJOR_LISTING_PAPER_INPUT"))?;
-
     Ok(CliArgs {
         input_path,
         min_trade_samples,
         min_win_rate_pct,
     })
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 fn read_input(path: &str) -> Result<ParsedInput> {
     let body = fs::read_to_string(path).with_context(|| format!("read paper input: {path}"))?;
     match serde_json::from_str::<PaperAcceptanceInput>(&body)
@@ -106,7 +106,7 @@ fn read_input(path: &str) -> Result<ParsedInput> {
         }
     }
 }
-
+/// 执行输出usage步骤，串起量化核心需要的状态推进和错误处理。
 fn print_usage() {
     println!(
         "Usage: pre_major_listing_paper_acceptance --input <samples.json> [--min-trade-samples 30] [--min-win-rate-pct 60]"

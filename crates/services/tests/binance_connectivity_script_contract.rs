@@ -1,5 +1,4 @@
 use std::{fs, path::PathBuf};
-
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -7,7 +6,6 @@ fn repo_root() -> PathBuf {
         .expect("services crate should live under crates/services")
         .to_path_buf()
 }
-
 #[test]
 fn connectivity_script_exposes_proxy_endpoint_retry_and_tls_diagnostics() {
     let root = repo_root();
@@ -17,7 +15,6 @@ fn connectivity_script_exposes_proxy_endpoint_retry_and_tls_diagnostics() {
         .join("check_binance_connectivity.sh");
     let script = fs::read_to_string(&script_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", script_path.display(), error));
-
     assert!(script.contains("BINANCE_REST_ENDPOINTS"));
     assert!(script.contains("BINANCE_WS_ENDPOINTS"));
     assert!(script.contains("BINANCE_CONNECTIVITY_RETRIES"));
@@ -29,7 +26,6 @@ fn connectivity_script_exposes_proxy_endpoint_retry_and_tls_diagnostics() {
     assert!(script.contains("Attempt "));
     assert!(script.contains("Connectivity summary"));
 }
-
 #[test]
 fn natural_probe_script_runs_connectivity_preflight_before_live_probe() {
     let root = repo_root();
@@ -39,7 +35,6 @@ fn natural_probe_script_runs_connectivity_preflight_before_live_probe() {
         .join("run_binance_websocket_natural_probe.sh");
     let script = fs::read_to_string(&script_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", script_path.display(), error));
-
     assert!(script.contains("BINANCE_CONNECTIVITY_PREFLIGHT"));
     assert!(script.contains("BINANCE_CONNECTIVITY_ALLOW_FAILURE"));
     assert!(script.contains("check_binance_connectivity.sh"));

@@ -3,40 +3,33 @@
 //! 实现 rust_quant_strategies 定义的 trait 接口，解决循环依赖问题
 //!
 //! 依赖关系：orchestration → strategies (单向)
-
+use crate::workflow::signal_logger::save_signal_log_async;
+use crate::workflow::strategy_runner::StrategyExecutionStateManager as InternalStateManager;
+use crate::workflow::time_checker::check_new_time as internal_check_new_time;
 use anyhow::Result;
-
 use rust_quant_strategies::framework::execution_traits::{
     ExecutionStateManager, SignalLogger, StrategyExecutionContext, TimeChecker,
 };
 use rust_quant_strategies::strategy_common::SignalResult;
 use rust_quant_strategies::StrategyType;
-
-use crate::workflow::signal_logger::save_signal_log_async;
-use crate::workflow::strategy_runner::StrategyExecutionStateManager as InternalStateManager;
-use crate::workflow::time_checker::check_new_time as internal_check_new_time;
-
 // TODO: StrategyJobSignalLog 需要迁移到新的位置
 // 暂时使用简化的日志记录
 // use rust_quant_common::model::strategy::strategy_job_signal_log::{
 //     StrategyJobSignalLog, StrategyJobSignalLogModel,
 // };
-
 /// orchestration 层的状态管理器实现
 pub struct OrchestrationStateManager;
-
 impl ExecutionStateManager for OrchestrationStateManager {
     fn try_mark_processing(&self, key: &str, timestamp: i64) -> bool {
         InternalStateManager::try_mark_processing(key, timestamp)
     }
-
     fn clear_processing(&self, key: &str) {
         // InternalStateManager 没有直接的清除方法，使用 mark_completed
         // 这里需要时间戳，但 trait 接口没有，暂时忽略
         // 在实际使用中，应该保存时间戳或者改进 trait 设计
         let _ = key; // 避免警告
     }
-
+    /// 判断 交易执行与风控 条件是否满足，给上层流程提供布尔决策。
     fn is_processing(&self, key: &str) -> bool {
         // InternalStateManager 没有直接的检查方法
         // 可以通过尝试标记来检查（副作用：会插入记录）
@@ -45,10 +38,8 @@ impl ExecutionStateManager for OrchestrationStateManager {
         false // 保守返回
     }
 }
-
 /// orchestration 层的时间检查器实现
 pub struct OrchestrationTimeChecker;
-
 impl TimeChecker for OrchestrationTimeChecker {
     fn check_new_time(
         &self,
@@ -63,19 +54,19 @@ impl TimeChecker for OrchestrationTimeChecker {
         internal_check_new_time(old_time, new_time, period, is_update, force)
     }
 }
-
 /// orchestration 层的信号日志记录器实现
 pub struct OrchestrationSignalLogger {
+    /// 类型标识。
     strategy_type: StrategyType,
 }
-
 impl OrchestrationSignalLogger {
     pub fn new(strategy_type: StrategyType) -> Self {
         Self { strategy_type }
     }
 }
-
 impl SignalLogger for OrchestrationSignalLogger {
+    /// 封装当前函数，减少交易执行调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
     fn save_signal_log(&self, inst_id: &str, period: &str, signal: &SignalResult) {
         // 使用独立的signal_logger模块实现异步保存
         save_signal_log_async(
@@ -86,15 +77,17 @@ impl SignalLogger for OrchestrationSignalLogger {
         );
     }
 }
-
 /// orchestration 层的完整执行上下文
 pub struct OrchestrationExecutionContext {
+    /// 策略执行状态管理器。
     state_manager: OrchestrationStateManager,
+    /// 策略执行时间检查器。
     time_checker: OrchestrationTimeChecker,
+    /// 策略信号日志记录器。
     signal_logger: OrchestrationSignalLogger,
 }
-
 impl OrchestrationExecutionContext {
+    /// 构建 交易执行与风控 所需实例，并集中初始化依赖和默认状态。
     pub fn new(strategy_type: StrategyType) -> Self {
         Self {
             state_manager: OrchestrationStateManager,
@@ -103,26 +96,22 @@ impl OrchestrationExecutionContext {
         }
     }
 }
-
 impl StrategyExecutionContext for OrchestrationExecutionContext {
     fn state_manager(&self) -> &dyn ExecutionStateManager {
         &self.state_manager
     }
-
     fn time_checker(&self) -> &dyn TimeChecker {
         &self.time_checker
     }
-
     fn signal_logger(&self) -> &dyn SignalLogger {
         &self.signal_logger
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 提供testcontextcreation的集中实现，避免交易执行调用方重复处理相同细节。
     fn test_context_creation() {
         let context = OrchestrationExecutionContext::new(StrategyType::Vegas);
         assert!(context.state_manager().try_mark_processing("test:1H", 1000));

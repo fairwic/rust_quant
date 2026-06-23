@@ -1,9 +1,7 @@
 //! 经济日历事件实体
 //!
 //! 存储经济日历数据，用于分析重要经济事件对市场的影响
-
 use serde::{Deserialize, Serialize};
-
 /// 经济日历事件重要性
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventImportance {
@@ -14,8 +12,8 @@ pub enum EventImportance {
     /// 高重要性 (3)
     High = 3,
 }
-
 impl From<i32> for EventImportance {
+    /// 提供from的集中实现，避免量化核心调用方重复处理相同细节。
     fn from(value: i32) -> Self {
         match value {
             1 => Self::Low,
@@ -24,8 +22,8 @@ impl From<i32> for EventImportance {
         }
     }
 }
-
 impl From<&str> for EventImportance {
+    /// 提供from的集中实现，避免量化核心调用方重复处理相同细节。
     fn from(value: &str) -> Self {
         match value {
             "1" => Self::Low,
@@ -34,7 +32,6 @@ impl From<&str> for EventImportance {
         }
     }
 }
-
 /// 经济日历事件实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EconomicEvent {
@@ -71,10 +68,8 @@ pub struct EconomicEvent {
     /// 创建时间
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
-
 impl EconomicEvent {
     /// 创建新的经济事件
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         calendar_id: String,
         event_time: i64,
@@ -105,12 +100,9 @@ impl EconomicEvent {
             created_at: None,
         }
     }
-
-    /// 判断事件是否为高重要性
     pub fn is_high_importance(&self) -> bool {
         self.importance >= 3
     }
-
     /// 判断事件是否与加密货币相关 (USD、利率决议等)
     pub fn is_crypto_relevant(&self) -> bool {
         // 高重要性 USD 相关事件对加密货币影响最大
@@ -129,7 +121,6 @@ impl EconomicEvent {
             "PCE",
             "ISM",
         ];
-
         // 货币相关
         if relevant_currencies
             .iter()
@@ -146,9 +137,7 @@ impl EconomicEvent {
         }
         false
     }
-
     /// 检查事件是否在指定时间窗口内
-    ///
     /// # Arguments
     /// * `current_time_ms` - 当前时间戳 (毫秒)
     /// * `window_before_ms` - 事件前多少毫秒开始生效
@@ -164,18 +153,17 @@ impl EconomicEvent {
         current_time_ms >= start && current_time_ms <= end
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_importance_from_str() {
         assert_eq!(EventImportance::from("1"), EventImportance::Low);
         assert_eq!(EventImportance::from("2"), EventImportance::Medium);
         assert_eq!(EventImportance::from("3"), EventImportance::High);
     }
-
     #[test]
     fn test_is_crypto_relevant() {
         let event = EconomicEvent {

@@ -1,5 +1,4 @@
 use std::{env, fs, path::PathBuf};
-
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -8,17 +7,14 @@ fn workspace_root() -> PathBuf {
         .expect("services crate should live under crypto_quant/rust_quant/crates/services")
         .to_path_buf()
 }
-
 fn read_workspace_file(path: &str) -> String {
     let path = workspace_root().join(path);
     fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
-
 #[test]
 fn web_backend_projection_keeps_core_worker_capability_semantics() {
     let source =
         read_workspace_file("rust_quan_web/backend/src/services/exchange_execution_capability.rs");
-
     for required in [
         "protection_placement",
         "unprotected_order",
@@ -36,7 +32,6 @@ fn web_backend_projection_keeps_core_worker_capability_semantics() {
         );
     }
 }
-
 #[test]
 fn admin_capability_matrix_uses_operator_copy_without_internal_live_terms() {
     let rows = read_workspace_file(
@@ -46,14 +41,12 @@ fn admin_capability_matrix_uses_operator_copy_without_internal_live_terms() {
         "rust_quant_admin/admin/playground/src/views/quant/user/ApiKeyLiveCapabilityMatrix.vue",
     );
     let combined = format!("{rows}\n{view}");
-
     for forbidden in ["MVP", "STOP_MARKET", "Worker live", "worker route"] {
         assert!(
             !combined.contains(forbidden),
             "Admin capability surface must not present internal implementation term `{forbidden}` as business closure"
         );
     }
-
     for required in [
         "已开放自动执行",
         "账户验证已接入",

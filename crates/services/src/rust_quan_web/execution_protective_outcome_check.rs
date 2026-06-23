@@ -1,33 +1,43 @@
-use anyhow::{anyhow, bail, Result};
-use crypto_exc_all::{
-    CancelOrderRequest, ExchangeId, Order, OrderSide, Position, ProtectiveOrderRequest,
-    ProtectiveOrderWorkingType,
+use super::execution_audit::{
+    redact_error_message, ExchangeRequestAuditLog, ExecutionAuditRepository,
+    PostgresExecutionAuditRepository,
 };
-use serde_json::{json, Value};
-
-use super::execution_audit::redact_error_message;
 use super::execution_payload::{parse_exchange, parse_instrument, parse_side};
 use super::execution_protection::{
     protective_order_query_candidates_from_ack, protective_order_query_to_sync_outcome,
     ProtectionSyncOutcome,
 };
 use crate::exchange::CryptoExcAllGateway;
-
+use crate::rust_quan_web::ExecutionTask;
+use anyhow::{anyhow, bail, Context, Result};
+use crypto_exc_all::{
+    CancelOrderRequest, ExchangeId, Order, OrderSide, Position, ProtectiveOrderRequest,
+    ProtectiveOrderWorkingType,
+};
+use serde_json::{json, Value};
+use std::time::Instant;
 const PROTECTIVE_OUTCOME_CONFIRM_ENV: &str = "PROTECTIVE_OUTCOME_CONFIRM";
 const PROTECTIVE_OUTCOME_CONFIRM_TOKEN: &str = "I_UNDERSTAND_LIVE_PROTECTIVE_ORDER";
-
 #[derive(Debug, Clone)]
 struct ProtectiveOutcomeCheckConfig {
+    /// 交易所名称。
     exchange: ExchangeId,
+    /// 交易对或资产符号。
     symbol: String,
+    /// 交易方向。
     side: OrderSide,
+    /// position方向；为空时使用默认值或表示不限制。
     position_side: Option<String>,
+    /// 价格数值。
     stop_price: Option<String>,
+    /// triggerfactor，用于配置运行参数。
     trigger_factor: f64,
+    /// clientorder ID。
     client_order_id: String,
 }
-
 impl ProtectiveOutcomeCheckConfig {
+    /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     fn from_env() -> Result<Self> {
         let confirmation = std::env::var(PROTECTIVE_OUTCOME_CONFIRM_ENV).ok();
         if confirmation.as_deref().map(str::trim) != Some(PROTECTIVE_OUTCOME_CONFIRM_TOKEN) {
@@ -35,7 +45,6 @@ impl ProtectiveOutcomeCheckConfig {
                 "{PROTECTIVE_OUTCOME_CONFIRM_ENV}={PROTECTIVE_OUTCOME_CONFIRM_TOKEN} is required before creating a live protective order"
             );
         }
-
         let exchange = std::env::var("PROTECTIVE_OUTCOME_EXCHANGE")
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -46,13 +55,11 @@ impl ProtectiveOutcomeCheckConfig {
                 "protective outcome check currently supports Binance standalone stop-market only"
             );
         }
-
         let symbol = std::env::var("PROTECTIVE_OUTCOME_SYMBOL")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "ETHUSDT".to_string());
         ensure_eth_only_symbol(&symbol)?;
-
         let side = std::env::var("PROTECTIVE_OUTCOME_SIDE")
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -84,7 +91,6 @@ impl ProtectiveOutcomeCheckConfig {
                     chrono::Utc::now().timestamp_millis()
                 )
             });
-
         Ok(Self {
             exchange,
             symbol,
@@ -96,36 +102,39 @@ impl ProtectiveOutcomeCheckConfig {
         })
     }
 }
-
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 返回 Result 以便错误透明上抛，统一上层降级与重试策略。
 pub async fn run_protective_order_outcome_check_from_env() -> Result<Value> {
     let config = ProtectiveOutcomeCheckConfig::from_env()?;
     let instrument = parse_instrument(&config.symbol)?;
+    let audit_repository = protective_outcome_audit_repository_from_env().await?;
+    let audit_task = protective_outcome_audit_task(&config);
     let gateway = CryptoExcAllGateway::from_env()?;
-
-    let positions = gateway
-        .positions(config.exchange, Some(&instrument))
-        .await
-        .map_err(|error| {
-            anyhow!(
-                "signed read-only position check failed: {}",
-                redact_error_message(error.to_string())
-            )
-        })?;
+    let positions = CryptoExcAllGateway::with_signed_read_only_scope(
+        gateway.positions(config.exchange, Some(&instrument)),
+    )
+    .await
+    .map_err(|error| {
+        anyhow!(
+            "signed read-only position check failed: {}",
+            redact_error_message(error.to_string())
+        )
+    })?;
     let non_zero_position_count = protective_outcome_position_preflight(&positions)?;
     ensure_protective_side_matches_existing_position(&config, &positions)?;
-
-    let open_orders = gateway
-        .open_orders(
-            config.exchange,
-            crypto_exc_all::OrderListQuery::for_instrument(instrument.clone()).with_limit(100),
+    let open_orders = CryptoExcAllGateway::with_signed_read_only_scope(gateway.open_orders(
+        config.exchange,
+        crypto_exc_all::OrderListQuery::for_instrument(instrument.clone()).with_limit(100),
+    ))
+    .await
+    .map_err(|error| {
+        anyhow!(
+            "signed read-only open-orders check failed: {}",
+            redact_error_message(error.to_string())
         )
-        .await
-        .map_err(|error| {
-            anyhow!(
-                "signed read-only open-orders check failed: {}",
-                redact_error_message(error.to_string())
-            )
-        })?;
+    })?;
     let active_open_order_count = open_orders
         .iter()
         .filter(|order| active_order_status(order.status.as_deref()))
@@ -136,7 +145,6 @@ pub async fn run_protective_order_outcome_check_from_env() -> Result<Value> {
         );
     }
     let effective_position_side = protective_position_side(&config, &positions);
-
     let ticker = gateway
         .ticker(config.exchange, &instrument)
         .await
@@ -151,7 +159,6 @@ pub async fn run_protective_order_outcome_check_from_env() -> Result<Value> {
         None => derived_stop_price(&ticker.last_price, config.trigger_factor)?,
     };
     validate_stop_price_not_immediate(config.side, &stop_price, &ticker.last_price)?;
-
     let mut request =
         ProtectiveOrderRequest::stop_market(instrument.clone(), config.side, stop_price.clone())
             .with_close_position(true)
@@ -161,16 +168,20 @@ pub async fn run_protective_order_outcome_check_from_env() -> Result<Value> {
     if let Some(position_side) = effective_position_side.as_deref() {
         request = request.with_position_side(position_side);
     }
-
-    let ack = gateway
-        .place_protective_order(config.exchange, request.clone())
-        .await
-        .map_err(|error| {
-            anyhow!(
-                "live protective order placement failed: {}",
-                redact_error_message(error.to_string())
-            )
-        })?;
+    let ack = protective_outcome_place_order_with_audit(
+        &audit_repository,
+        &audit_task,
+        &gateway,
+        config.exchange,
+        request.clone(),
+    )
+    .await
+    .map_err(|error| {
+        anyhow!(
+            "live protective order placement failed: {}",
+            redact_error_message(error.to_string())
+        )
+    })?;
     let queries = protective_order_query_candidates_from_ack(
         &instrument,
         &ack,
@@ -182,9 +193,10 @@ pub async fn run_protective_order_outcome_check_from_env() -> Result<Value> {
         "no protective order query was attempted",
     );
     for query in &queries {
-        match gateway
-            .protective_order(config.exchange, query.clone())
-            .await
+        match CryptoExcAllGateway::with_signed_read_only_scope(
+            gateway.protective_order(config.exchange, query.clone()),
+        )
+        .await
         {
             Ok(order) => {
                 outcome = protective_order_query_to_sync_outcome(Ok(order.clone()));
@@ -198,19 +210,28 @@ pub async fn run_protective_order_outcome_check_from_env() -> Result<Value> {
             break;
         }
     }
-
     let cancel_request = cancel_request_from_order_or_client_id(
         &instrument,
         queried_order.as_ref(),
         ack.order_id.as_deref(),
         &config.client_order_id,
     );
-    let cancel_result = gateway
-        .cancel_protective_order(config.exchange, cancel_request)
-        .await;
+    let cancel_result = protective_outcome_cancel_order_with_audit(
+        &audit_repository,
+        &audit_task,
+        &gateway,
+        config.exchange,
+        cancel_request,
+    )
+    .await;
     if !matches!(outcome, ProtectionSyncOutcome::Confirmed { .. }) {
-        let _ = cancel_result;
-        bail!("protective order was placed but not confirmed active: {outcome:?}");
+        let cancel_error = cancel_result
+            .err()
+            .map(|error| redact_error_message(error.to_string()));
+        bail!(
+            "{}",
+            unconfirmed_protective_order_message(&outcome, cancel_error)
+        );
     }
     let cancel_ack = cancel_result.map_err(|error| {
         anyhow!(
@@ -218,15 +239,14 @@ pub async fn run_protective_order_outcome_check_from_env() -> Result<Value> {
             redact_error_message(error.to_string())
         )
     })?;
-
-    let post_cancel_query = gateway
-        .protective_order(
+    let post_cancel_query =
+        CryptoExcAllGateway::with_signed_read_only_scope(gateway.protective_order(
             config.exchange,
             crypto_exc_all::ProtectiveOrderQuery::by_client_order_id(
                 instrument.clone(),
                 config.client_order_id.clone(),
             ),
-        )
+        ))
         .await;
     let post_cancel_active = match post_cancel_query {
         Ok(order) => active_order_status(order.status.as_deref()),
@@ -235,7 +255,6 @@ pub async fn run_protective_order_outcome_check_from_env() -> Result<Value> {
     if post_cancel_active {
         bail!("protective order is still active after cancellation");
     }
-
     Ok(json!({
         "contract_version": "v2",
         "exchange": config.exchange.as_str(),
@@ -266,7 +285,150 @@ pub async fn run_protective_order_outcome_check_from_env() -> Result<Value> {
         "protective_order_cancelled": true,
     }))
 }
-
+/// 提供protective结果auditrepositoryfrom环境变量的集中实现，避免Web 商业链路调用方重复处理相同细节。
+async fn protective_outcome_audit_repository_from_env() -> Result<PostgresExecutionAuditRepository>
+{
+    let repository = PostgresExecutionAuditRepository::from_env()?.ok_or_else(|| {
+        anyhow!("QUANT_CORE_DATABASE_URL is required for protective outcome live execution audit")
+    })?;
+    repository
+        .verify_live_audit_ready()
+        .await
+        .context("verify protective outcome live execution audit readiness")?;
+    Ok(repository)
+}
+/// 提供protective结果place订单withaudit的集中实现，避免Web 商业链路调用方重复处理相同细节。
+async fn protective_outcome_place_order_with_audit(
+    audit_repository: &PostgresExecutionAuditRepository,
+    audit_task: &ExecutionTask,
+    gateway: &CryptoExcAllGateway,
+    exchange: ExchangeId,
+    request: ProtectiveOrderRequest,
+) -> Result<crypto_exc_all::OrderAck> {
+    audit_repository
+        .insert_exchange_request_audit(
+            &ExchangeRequestAuditLog::protective_order_live_mutation_preflight(
+                audit_task, exchange, &request, false,
+            ),
+        )
+        .await
+        .context("write protective outcome place-order audit preflight")?;
+    let started_at = Instant::now();
+    let result = CryptoExcAllGateway::with_live_mutation_audit_scope(
+        gateway.place_protective_order(exchange, request.clone()),
+    )
+    .await;
+    let latency_ms = protective_outcome_elapsed_ms(started_at);
+    let audit = match &result {
+        Ok(ack) => ExchangeRequestAuditLog::protective_order_success(
+            audit_task,
+            exchange,
+            &request,
+            false,
+            latency_ms,
+            ack.raw.clone(),
+        ),
+        Err(error) => ExchangeRequestAuditLog::protective_order_failed(
+            audit_task,
+            exchange,
+            &request,
+            false,
+            latency_ms,
+            error.to_string(),
+        ),
+    };
+    audit_repository
+        .insert_exchange_request_audit(&audit)
+        .await
+        .context("write protective outcome place-order audit result")?;
+    result.map_err(|error| anyhow!(redact_error_message(error.to_string())))
+}
+/// 提供protective结果cancel订单withaudit的集中实现，避免Web 商业链路调用方重复处理相同细节。
+async fn protective_outcome_cancel_order_with_audit(
+    audit_repository: &PostgresExecutionAuditRepository,
+    audit_task: &ExecutionTask,
+    gateway: &CryptoExcAllGateway,
+    exchange: ExchangeId,
+    request: CancelOrderRequest,
+) -> Result<crypto_exc_all::OrderAck> {
+    audit_repository
+        .insert_exchange_request_audit(
+            &ExchangeRequestAuditLog::protective_cancel_live_mutation_preflight(
+                audit_task, exchange, &request, false,
+            ),
+        )
+        .await
+        .context("write protective outcome cancel-order audit preflight")?;
+    let started_at = Instant::now();
+    let result = CryptoExcAllGateway::with_live_mutation_audit_scope(
+        gateway.cancel_protective_order(exchange, request.clone()),
+    )
+    .await;
+    let latency_ms = protective_outcome_elapsed_ms(started_at);
+    let audit = match &result {
+        Ok(ack) => ExchangeRequestAuditLog::protective_cancel_success(
+            audit_task,
+            exchange,
+            &request,
+            false,
+            latency_ms,
+            ack.raw.clone(),
+        ),
+        Err(error) => ExchangeRequestAuditLog::protective_cancel_failed(
+            audit_task,
+            exchange,
+            &request,
+            false,
+            latency_ms,
+            error.to_string(),
+        ),
+    };
+    audit_repository
+        .insert_exchange_request_audit(&audit)
+        .await
+        .context("write protective outcome cancel-order audit result")?;
+    result.map_err(|error| anyhow!(redact_error_message(error.to_string())))
+}
+fn protective_outcome_elapsed_ms(started_at: Instant) -> Option<i32> {
+    i32::try_from(started_at.elapsed().as_millis()).ok()
+}
+/// 提供protective结果audittask的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn protective_outcome_audit_task(config: &ProtectiveOutcomeCheckConfig) -> ExecutionTask {
+    let now = chrono::Utc::now().to_rfc3339();
+    ExecutionTask {
+        id: chrono::Utc::now().timestamp_millis(),
+        news_signal_id: None,
+        strategy_signal_id: None,
+        combo_id: 0,
+        buyer_email: "operator_protective_outcome_check".to_string(),
+        strategy_slug: "protective_outcome_check".to_string(),
+        symbol: config.symbol.clone(),
+        task_type: "protective_outcome_check".to_string(),
+        task_status: "live_mutation_audit".to_string(),
+        priority: 0,
+        lease_owner: Some("operator".to_string()),
+        lease_until: None,
+        scheduled_at: now.clone(),
+        request_payload_json: json!({
+            "source": "protective_outcome_check",
+            "exchange": config.exchange.as_str(),
+            "symbol": config.symbol,
+            "side": match config.side {
+                OrderSide::Buy => "buy",
+                OrderSide::Sell => "sell",
+            },
+            "position_side": config.position_side,
+            "stop_price": config.stop_price,
+            "trigger_factor": config.trigger_factor,
+            "client_order_id": config.client_order_id,
+            "place_order_allowed": false,
+            "standalone_live_mutation": true,
+        }),
+        created_at: now.clone(),
+        updated_at: now,
+    }
+}
+/// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
 fn ensure_eth_only_symbol(symbol: &str) -> Result<()> {
     let normalized: String = symbol
         .trim()
@@ -274,12 +436,12 @@ fn ensure_eth_only_symbol(symbol: &str) -> Result<()> {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .map(|ch| ch.to_ascii_uppercase())
         .collect();
-    if normalized == "ETHUSDT" || normalized.starts_with("ETHUSDT") {
+    if matches!(normalized.as_str(), "ETHUSDT" | "ETHUSDTSWAP") {
         return Ok(());
     }
     bail!("protective outcome check only allows ETHUSDT / ETH-USDT-SWAP in this MVP");
 }
-
+/// 提供protective仓位side的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn protective_position_side(
     config: &ProtectiveOutcomeCheckConfig,
     positions: &[Position],
@@ -295,7 +457,7 @@ fn protective_position_side(
         OrderSide::Buy => "SHORT".to_string(),
     })
 }
-
+/// 提供protective结果仓位preflight的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn protective_outcome_position_preflight(positions: &[Position]) -> Result<usize> {
     let non_zero_position_count = positions
         .iter()
@@ -313,7 +475,7 @@ fn protective_outcome_position_preflight(positions: &[Position]) -> Result<usize
     }
     Ok(non_zero_position_count)
 }
-
+/// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
 fn ensure_protective_side_matches_existing_position(
     config: &ProtectiveOutcomeCheckConfig,
     positions: &[Position],
@@ -334,7 +496,6 @@ fn ensure_protective_side_matches_existing_position(
             );
         }
     }
-
     match requested_position_side.as_deref() {
         Some("LONG") if config.side != OrderSide::Sell => {
             bail!("ETHUSDT LONG position requires SELL protective order side")
@@ -345,7 +506,7 @@ fn ensure_protective_side_matches_existing_position(
         _ => Ok(()),
     }
 }
-
+/// 提供active仓位side的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn active_position_side(positions: &[Position]) -> Option<String> {
     positions
         .iter()
@@ -354,11 +515,10 @@ fn active_position_side(positions: &[Position]) -> Option<String> {
         .map(normalized_position_side)
         .filter(|side| !side.is_empty())
 }
-
 fn normalized_position_side(value: &str) -> String {
     value.trim().to_ascii_uppercase()
 }
-
+/// 提供binance仓位indicatehedgemode的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn binance_positions_indicate_hedge_mode(positions: &[Position]) -> bool {
     positions.iter().any(|position| {
         matches!(
@@ -371,7 +531,7 @@ fn binance_positions_indicate_hedge_mode(positions: &[Position]) -> bool {
         )
     })
 }
-
+/// 计算派生止损价格，并把公式和边界条件集中在Web 商业链路内部。
 fn derived_stop_price(last_price: &str, factor: f64) -> Result<String> {
     let last_price = last_price
         .trim()
@@ -382,7 +542,7 @@ fn derived_stop_price(last_price: &str, factor: f64) -> Result<String> {
     }
     Ok(format!("{:.2}", last_price * factor))
 }
-
+/// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
 fn validate_stop_price_not_immediate(
     side: OrderSide,
     stop_price: &str,
@@ -400,7 +560,7 @@ fn validate_stop_price_not_immediate(
         _ => Ok(()),
     }
 }
-
+/// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
 fn parse_positive_price(value: &str, label: &str) -> Result<f64> {
     let parsed = value
         .trim()
@@ -411,7 +571,7 @@ fn parse_positive_price(value: &str, label: &str) -> Result<f64> {
     }
     Ok(parsed)
 }
-
+/// 判断cancelrequestfrom订单orclientID，给Web 商业链路流程提供布尔结果。
 fn cancel_request_from_order_or_client_id(
     instrument: &crypto_exc_all::Instrument,
     order: Option<&Order>,
@@ -427,14 +587,14 @@ fn cancel_request_from_order_or_client_id(
     }
     CancelOrderRequest::by_client_order_id(instrument.clone(), client_order_id.to_string())
 }
-
+/// 提供positive小数text的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn positive_decimal_text(value: &str) -> bool {
     value
         .trim()
         .parse::<f64>()
         .is_ok_and(|parsed| parsed.is_finite() && parsed.abs() > 0.0)
 }
-
+/// 提供active订单status的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn active_order_status(status: Option<&str>) -> bool {
     let normalized = status.unwrap_or_default().trim().to_ascii_uppercase();
     !matches!(
@@ -442,15 +602,27 @@ fn active_order_status(status: Option<&str>) -> bool {
         "CANCELED" | "CANCELLED" | "FILLED" | "CLOSED" | "REJECTED" | "EXPIRED"
     )
 }
-
+/// 提供unconfirmedprotective订单message的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn unconfirmed_protective_order_message(
+    outcome: &ProtectionSyncOutcome,
+    cancel_error: Option<String>,
+) -> String {
+    match cancel_error {
+        Some(cancel_error) => format!(
+            "protective order was placed but not confirmed active: {outcome:?}; cancel_after_unconfirmed_failed=true; manual_cleanup_required=true; cancel_error={cancel_error}"
+        ),
+        None => format!(
+            "protective order was placed but not confirmed active: {outcome:?}; cancel_after_unconfirmed_attempted=true; manual_cleanup_required=false"
+        ),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn position(side: &str) -> crypto_exc_all::Position {
         position_with_size(side, "0")
     }
-
+    /// 提供仓位withsize的集中实现，避免Web 商业链路调用方重复处理相同细节。
     fn position_with_size(side: &str, size: &str) -> crypto_exc_all::Position {
         crypto_exc_all::Position {
             exchange: ExchangeId::Binance,
@@ -467,22 +639,21 @@ mod tests {
             raw: json!({"positionSide": side, "positionAmt": size}),
         }
     }
-
     #[test]
     fn protective_outcome_check_is_eth_only() {
         ensure_eth_only_symbol("ETHUSDT").unwrap();
         ensure_eth_only_symbol("ETH-USDT-SWAP").unwrap();
+        assert!(ensure_eth_only_symbol("ETHUSDTFOO").is_err());
+        assert!(ensure_eth_only_symbol("ETH-USDT-SWAP-TEST").is_err());
         assert!(ensure_eth_only_symbol("LINKUSDT").is_err());
         assert!(ensure_eth_only_symbol("BTCUSDT").is_err());
     }
-
     #[test]
     fn derived_stop_price_uses_configured_trigger_factor() {
         assert_eq!(derived_stop_price("2400.12", 0.5).unwrap(), "1200.06");
         assert_eq!(derived_stop_price("2400", 1.5).unwrap(), "3600.00");
         assert!(derived_stop_price("0", 0.5).is_err());
     }
-
     #[test]
     fn protective_position_side_infers_binance_hedge_side_from_read_only_positions() {
         let mut config = ProtectiveOutcomeCheckConfig {
@@ -498,14 +669,12 @@ mod tests {
             protective_position_side(&config, &[position("LONG"), position("SHORT")]).as_deref(),
             Some("LONG")
         );
-
         config.side = OrderSide::Buy;
         assert_eq!(
             protective_position_side(&config, &[position("LONG"), position("SHORT")]).as_deref(),
             Some("SHORT")
         );
     }
-
     #[test]
     fn protective_position_side_omits_one_way_both_side() {
         let config = ProtectiveOutcomeCheckConfig {
@@ -517,13 +686,11 @@ mod tests {
             trigger_factor: 0.5,
             client_order_id: "rq-protect-outcome-test".to_string(),
         };
-
         assert_eq!(
             protective_position_side(&config, &[position("BOTH")]).as_deref(),
             None
         );
     }
-
     #[test]
     fn protective_position_side_prefers_explicit_env_value() {
         let config = ProtectiveOutcomeCheckConfig {
@@ -535,23 +702,19 @@ mod tests {
             trigger_factor: 0.5,
             client_order_id: "rq-protect-outcome-test".to_string(),
         };
-
         assert_eq!(
             protective_position_side(&config, &[position("LONG"), position("SHORT")]).as_deref(),
             Some("BOTH")
         );
     }
-
     #[test]
     fn protective_outcome_position_preflight_rejects_flat_account_before_live_mutation() {
         let error = protective_outcome_position_preflight(&[position("LONG"), position("SHORT")])
             .expect_err("flat account must not create a close-position protective order");
-
         assert!(error
             .to_string()
             .contains("requires an existing ETHUSDT position"));
     }
-
     #[test]
     fn protective_outcome_position_preflight_allows_single_existing_position() {
         let count = protective_outcome_position_preflight(&[
@@ -559,10 +722,8 @@ mod tests {
             position("SHORT"),
         ])
         .unwrap();
-
         assert_eq!(count, 1);
     }
-
     #[test]
     fn protective_outcome_side_must_match_existing_position_direction() {
         let mut config = ProtectiveOutcomeCheckConfig {
@@ -574,13 +735,11 @@ mod tests {
             trigger_factor: 0.5,
             client_order_id: "rq-protect-outcome-test".to_string(),
         };
-
         ensure_protective_side_matches_existing_position(
             &config,
             &[position_with_size("LONG", "0.001")],
         )
         .expect("sell protective order may close long");
-
         config.side = OrderSide::Buy;
         let long_error = ensure_protective_side_matches_existing_position(
             &config,
@@ -590,7 +749,6 @@ mod tests {
         assert!(long_error
             .to_string()
             .contains("LONG position requires SELL"));
-
         config.side = OrderSide::Sell;
         let short_error = ensure_protective_side_matches_existing_position(
             &config,
@@ -601,14 +759,12 @@ mod tests {
             .to_string()
             .contains("SHORT position requires BUY"));
     }
-
     #[test]
     fn protective_stop_price_must_not_immediately_trigger() {
         validate_stop_price_not_immediate(OrderSide::Sell, "2399.99", "2400.00")
             .expect("sell stop below market is valid");
         validate_stop_price_not_immediate(OrderSide::Buy, "2400.01", "2400.00")
             .expect("buy stop above market is valid");
-
         assert!(
             validate_stop_price_not_immediate(OrderSide::Sell, "2400.00", "2400.00")
                 .expect_err("sell stop at market would trigger immediately")
@@ -621,5 +777,15 @@ mod tests {
                 .to_string()
                 .contains("would trigger immediately")
         );
+    }
+    #[test]
+    fn unconfirmed_protective_order_reports_cancel_failure_for_manual_cleanup() {
+        let message = unconfirmed_protective_order_message(
+            &ProtectionSyncOutcome::uncertain("query_protective_order", "read timeout"),
+            Some("cancel rejected".to_string()),
+        );
+        assert!(message.contains("protective order was placed but not confirmed active"));
+        assert!(message.contains("manual_cleanup_required=true"));
+        assert!(message.contains("cancel rejected"));
     }
 }

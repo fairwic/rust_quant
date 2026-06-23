@@ -1,7 +1,3 @@
-use anyhow::{anyhow, Result};
-use reqwest::header::{HeaderValue, CONTENT_TYPE};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
 use super::execution_task_contract::{
     ApiCredentialCheckSummary, ExchangeAccountSnapshotReportRequest,
     ExchangeAccountSnapshotReportResponse, ExchangeCloseFillWritebackRequest,
@@ -14,7 +10,6 @@ use super::execution_task_contract::{
     MarketVelocityPaperOutcomeResponse, StrategySignalDispatchResponse,
     StrategySignalSubmitRequest, UserExchangeConfig,
 };
-
 #[cfg(test)]
 use super::execution_task_contract::{
     ExchangeAccountBalanceSnapshotInput, ExchangeAccountBillSnapshotInput,
@@ -22,26 +17,30 @@ use super::execution_task_contract::{
     ExchangeAccountPositionSnapshotInput, ExchangeAccountTradeSnapshotInput,
     ExchangeReconciliationIssueType,
 };
-
+use anyhow::{anyhow, Result};
+use reqwest::header::{HeaderValue, CONTENT_TYPE};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct ExecutionTaskConfig {
+    /// 基础URL，用于配置运行参数。
     pub base_url: String,
+    /// internalSecret，用于配置运行参数。
     pub internal_secret: String,
 }
-
 #[derive(Debug, Clone)]
 pub struct ExecutionTaskClient {
+    /// 外部服务客户端。
     client: reqwest::Client,
+    /// 基础URL，用于记录交易或执行状态。
     base_url: String,
+    /// internalsecret；为空时表示该条件不启用。
     internal_secret: Option<String>,
 }
-
 #[derive(Debug, Deserialize)]
 struct ApiEnvelope<T> {
     success: bool,
     data: T,
 }
-
 const LEASE_TASKS_PATH: &str = "/api/commerce/internal/execution-tasks/lease";
 const LEASE_CONFIRMATION_TASKS_PATH: &str =
     "/api/commerce/internal/execution-tasks/confirmations/lease";
@@ -60,55 +59,53 @@ const MARKET_VELOCITY_LIVE_TASK_READINESS_PATH_PREFIX: &str =
 const USER_EXCHANGE_CONFIG_PATH: &str = "/api/commerce/internal/api-credentials/resolve";
 const API_CREDENTIAL_CHECK_PATH_PREFIX: &str = "/api/commerce/internal/api-credentials";
 const INTERNAL_SECRET_HEADER: &str = "x-alpha-execution-secret";
-
 impl ExecutionTaskClient {
+    /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     pub fn new(config: ExecutionTaskConfig) -> Result<Self> {
         let base_url = config.base_url.trim().trim_end_matches('/').to_string();
         if base_url.is_empty() {
             return Err(anyhow!("execution task base_url is empty"));
         }
-
         let client = reqwest::Client::builder().build()?;
         let internal_secret = {
             let secret = config.internal_secret.trim().to_string();
             (!secret.is_empty()).then_some(secret)
         };
-
         Ok(Self {
             client,
             base_url,
             internal_secret,
         })
     }
-
     pub async fn lease_tasks(
         &self,
         request: ExecutionTaskLeaseRequest,
     ) -> Result<ExecutionTaskLease> {
         self.get_json(&self.lease_url_for_request(&request)).await
     }
-
+    /// 提供lease确认tasks的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub async fn lease_confirmation_tasks(
         &self,
         limit: u32,
+        task_ids: &[i64],
     ) -> Result<ExecutionTaskConfirmationLease> {
-        self.get_json(&self.confirmation_lease_url(limit)).await
+        self.get_json(&self.confirmation_lease_url_for_task_ids(limit, task_ids))
+            .await
     }
-
     pub async fn report_result(
         &self,
         request: ExecutionTaskReportRequest,
     ) -> Result<ExecutionTaskReportResponse> {
         self.post_json(REPORT_RESULT_PATH, &request).await
     }
-
     pub async fn report_exchange_reconciliation(
         &self,
         request: ExchangeReconciliationReportRequest,
     ) -> Result<ExchangeReconciliationReportResponse> {
         self.post_json(EXCHANGE_RECONCILIATION_PATH, &request).await
     }
-
+    /// 提供报告交易所account快照的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub async fn report_exchange_account_snapshot(
         &self,
         request: ExchangeAccountSnapshotReportRequest,
@@ -116,7 +113,7 @@ impl ExecutionTaskClient {
         self.post_json(EXCHANGE_ACCOUNT_SNAPSHOT_PATH, &request)
             .await
     }
-
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     pub async fn apply_exchange_close_fill_writeback(
         &self,
         request: ExchangeCloseFillWritebackRequest,
@@ -124,14 +121,13 @@ impl ExecutionTaskClient {
         self.post_json(EXCHANGE_CLOSE_FILL_WRITEBACK_PATH, &request)
             .await
     }
-
     pub async fn submit_strategy_signal(
         &self,
         request: StrategySignalSubmitRequest,
     ) -> Result<StrategySignalDispatchResponse> {
         self.post_json(STRATEGY_SIGNAL_PATH, &request).await
     }
-
+    /// 执行提交市场动量paper结果步骤，串起Web 商业链路需要的状态推进和错误处理。
     pub async fn submit_market_velocity_paper_outcome(
         &self,
         request: MarketVelocityPaperOutcomeRequest,
@@ -139,7 +135,7 @@ impl ExecutionTaskClient {
         self.post_json(MARKET_VELOCITY_PAPER_OUTCOME_PATH, &request)
             .await
     }
-
+    /// 提供preview市场动量执行taskcreation的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub async fn preview_market_velocity_execution_task_creation(
         &self,
         request: MarketVelocityExecutionTaskCreationPreviewRequest,
@@ -147,7 +143,7 @@ impl ExecutionTaskClient {
         self.post_json(MARKET_VELOCITY_TASK_CREATION_PREVIEW_PATH, &request)
             .await
     }
-
+    /// 提供市场动量livetaskreadiness的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub async fn market_velocity_live_task_readiness(
         &self,
         task_id: i64,
@@ -155,19 +151,49 @@ impl ExecutionTaskClient {
         self.get_json(&self.market_velocity_live_task_readiness_url(task_id))
             .await
     }
-
+    /// 选择 Web 商业、会员和执行准备度 的最佳候选结果，避免选择规则分散在调用方。
     pub async fn resolve_user_exchange_config(
         &self,
         buyer_email: &str,
         exchange: &str,
     ) -> Result<UserExchangeConfig> {
+        self.resolve_user_exchange_config_with_optional_credential(buyer_email, exchange, None)
+            .await
+    }
+    /// 选择 Web 商业、会员和执行准备度 的最佳候选结果，避免选择规则分散在调用方。
+    pub async fn resolve_user_exchange_config_for_credential(
+        &self,
+        buyer_email: &str,
+        exchange: &str,
+        credential_id: i64,
+    ) -> Result<UserExchangeConfig> {
+        self.resolve_user_exchange_config_with_optional_credential(
+            buyer_email,
+            exchange,
+            Some(credential_id),
+        )
+        .await
+    }
+    /// 选择 Web 商业、会员和执行准备度 的最佳候选结果，避免选择规则分散在调用方。
+    async fn resolve_user_exchange_config_with_optional_credential(
+        &self,
+        buyer_email: &str,
+        exchange: &str,
+        credential_id: Option<i64>,
+    ) -> Result<UserExchangeConfig> {
         let mut url = reqwest::Url::parse(&self.url(USER_EXCHANGE_CONFIG_PATH))?;
-        url.query_pairs_mut()
-            .append_pair("buyer_email", buyer_email)
-            .append_pair("exchange", exchange);
+        {
+            let mut query = url.query_pairs_mut();
+            query
+                .append_pair("buyer_email", buyer_email)
+                .append_pair("exchange", exchange);
+            if let Some(credential_id) = credential_id {
+                query.append_pair("credential_id", &credential_id.to_string());
+            }
+        }
         self.get_json(url.as_str()).await
     }
-
+    /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
     pub async fn check_internal_api_credential(
         &self,
         credential_id: i64,
@@ -175,7 +201,7 @@ impl ExecutionTaskClient {
         let path = format!("{API_CREDENTIAL_CHECK_PATH_PREFIX}/{credential_id}/check");
         self.post_json(&path, &serde_json::json!({})).await
     }
-
+    /// 提供leaseURL的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub fn lease_url(&self, limit: u32) -> String {
         self.lease_url_for_request(&ExecutionTaskLeaseRequest {
             worker_id: String::new(),
@@ -185,15 +211,25 @@ impl ExecutionTaskClient {
             task_statuses: Vec::new(),
         })
     }
-
     pub fn confirmation_lease_url(&self, limit: u32) -> String {
+        self.confirmation_lease_url_for_task_ids(limit, &[])
+    }
+    /// 提供确认leaseURLfortaskids的集中实现，避免Web 商业链路调用方重复处理相同细节。
+    pub fn confirmation_lease_url_for_task_ids(&self, limit: u32, task_ids: &[i64]) -> String {
         let mut url = reqwest::Url::parse(&self.url(LEASE_CONFIRMATION_TASKS_PATH))
             .expect("execution confirmation lease URL should always be valid");
-        url.query_pairs_mut()
-            .append_pair("limit", &limit.clamp(1, 100).to_string());
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("limit", &limit.clamp(1, 100).to_string());
+            for task_id in task_ids {
+                if *task_id > 0 {
+                    query.append_pair("task_id", &task_id.to_string());
+                }
+            }
+        }
         url.to_string()
     }
-
+    /// 提供leaseURLforrequest的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub fn lease_url_for_request(&self, request: &ExecutionTaskLeaseRequest) -> String {
         let mut url = reqwest::Url::parse(&self.url(LEASE_TASKS_PATH))
             .expect("execution task lease URL should always be valid");
@@ -218,33 +254,28 @@ impl ExecutionTaskClient {
         }
         url.to_string()
     }
-
     pub fn strategy_signal_url(&self) -> String {
         self.url(STRATEGY_SIGNAL_PATH)
     }
-
     pub fn market_velocity_paper_outcome_url(&self) -> String {
         self.url(MARKET_VELOCITY_PAPER_OUTCOME_PATH)
     }
-
+    /// 提供市场动量livetaskreadinessURL的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub fn market_velocity_live_task_readiness_url(&self, task_id: i64) -> String {
         self.url(&format!(
             "{MARKET_VELOCITY_LIVE_TASK_READINESS_PATH_PREFIX}/{task_id}/live-readiness"
         ))
     }
-
     pub fn exchange_reconciliation_url(&self) -> String {
         self.url(EXCHANGE_RECONCILIATION_PATH)
     }
-
     pub fn exchange_account_snapshot_url(&self) -> String {
         self.url(EXCHANGE_ACCOUNT_SNAPSHOT_PATH)
     }
-
     pub fn exchange_close_fill_writeback_url(&self) -> String {
         self.url(EXCHANGE_CLOSE_FILL_WRITEBACK_PATH)
     }
-
+    /// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
     pub fn parse_envelope<R>(body: &str) -> Result<R>
     where
         R: DeserializeOwned,
@@ -261,11 +292,10 @@ impl ExecutionTaskClient {
         }
         Ok(envelope.data)
     }
-
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
-
+    /// 加载 Web 商业、会员和执行准备度 运行所需数据，并把缺失或异常交给调用方处理。
     async fn get_json<R>(&self, url: &str) -> Result<R>
     where
         R: DeserializeOwned,
@@ -274,7 +304,6 @@ impl ExecutionTaskClient {
         if let Some(secret) = self.internal_secret.as_deref() {
             request = request.header(INTERNAL_SECRET_HEADER, secret);
         }
-
         let response = request.send().await?;
         let status = response.status();
         let body = response.text().await?;
@@ -286,10 +315,9 @@ impl ExecutionTaskClient {
                 response_body_context(&body)
             ));
         }
-
         Self::parse_envelope(&body)
     }
-
+    /// 提供postJSON的集中实现，避免Web 商业链路调用方重复处理相同细节。
     async fn post_json<T, R>(&self, path: &str, body: &T) -> Result<R>
     where
         T: Serialize + ?Sized,
@@ -300,11 +328,9 @@ impl ExecutionTaskClient {
             .post(self.url(path))
             .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
             .json(body);
-
         if let Some(secret) = self.internal_secret.as_deref() {
             request = request.header(INTERNAL_SECRET_HEADER, secret);
         }
-
         let response = request.send().await?;
         let status = response.status();
         let body = response.text().await?;
@@ -316,25 +342,23 @@ impl ExecutionTaskClient {
                 response_body_context(&body)
             ));
         }
-
         Self::parse_envelope(&body)
     }
 }
-
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 fn response_body_context(body: &str) -> String {
     format!(
         "response_body_omitted=true body_len={}",
         body.as_bytes().len()
     )
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::Value;
-
     mod http_contract;
-
     #[test]
     fn serializes_lease_request_without_extra_noise() {
         let request = ExecutionTaskLeaseRequest {
@@ -345,14 +369,12 @@ mod tests {
             task_statuses: vec![],
         };
         let value = serde_json::to_value(&request).unwrap();
-
         assert_eq!(value["worker_id"], "worker-a");
         assert_eq!(value["limit"], 10);
         assert!(value.get("task_ids").is_none());
         assert!(value.get("task_types").is_none());
         assert!(value.get("task_statuses").is_none());
     }
-
     #[test]
     fn lease_url_matches_quant_web_internal_contract() {
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
@@ -360,13 +382,11 @@ mod tests {
             internal_secret: "secret".to_string(),
         })
         .unwrap();
-
         assert_eq!(
             client.lease_url(25),
             "https://quant-web.example/api/commerce/internal/execution-tasks/lease?limit=25"
         );
     }
-
     #[test]
     fn confirmation_lease_url_matches_dedicated_internal_contract() {
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
@@ -374,13 +394,23 @@ mod tests {
             internal_secret: "secret".to_string(),
         })
         .unwrap();
-
         assert_eq!(
             client.confirmation_lease_url(5),
             "https://quant-web.example/api/commerce/internal/execution-tasks/confirmations/lease?limit=5"
         );
     }
-
+    #[test]
+    fn confirmation_lease_url_scopes_target_task_ids() {
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "https://quant-web.example/".to_string(),
+            internal_secret: "secret".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            client.confirmation_lease_url_for_task_ids(5, &[42, -1, 43]),
+            "https://quant-web.example/api/commerce/internal/execution-tasks/confirmations/lease?limit=5&task_id=42&task_id=43"
+        );
+    }
     #[test]
     fn parses_execution_task_envelope_from_quant_web() {
         let body = r#"{
@@ -405,14 +435,11 @@ mod tests {
                 }]
             }
         }"#;
-
         let parsed: ExecutionTaskLease = ExecutionTaskClient::parse_envelope(body).unwrap();
-
         assert_eq!(parsed.tasks[0].id, 42);
         assert_eq!(parsed.tasks[0].buyer_email, "buyer@example.com");
         assert_eq!(parsed.tasks[0].request_payload_json["size"], "0.01");
     }
-
     #[test]
     fn parses_strategy_execution_task_with_nullable_news_signal_id() {
         let body = r#"{
@@ -441,9 +468,7 @@ mod tests {
                 }]
             }
         }"#;
-
         let parsed: ExecutionTaskLease = ExecutionTaskClient::parse_envelope(body).unwrap();
-
         assert_eq!(parsed.tasks[0].id, 43);
         assert_eq!(parsed.tasks[0].news_signal_id, None);
         assert_eq!(parsed.tasks[0].strategy_signal_id, Some(11));
@@ -452,7 +477,6 @@ mod tests {
             "technical_strategy"
         );
     }
-
     #[test]
     fn strategy_signal_request_matches_quant_web_contract() {
         let request = StrategySignalSubmitRequest {
@@ -470,7 +494,6 @@ mod tests {
             generated_at: Some("2026-04-23T12:00:00Z".to_string()),
         };
         let value = serde_json::to_value(&request).unwrap();
-
         assert_eq!(value["source"], "rust_quant");
         assert_eq!(value["strategy_slug"], "vegas");
         assert_eq!(value["strategy_key"], "vegas_1h");
@@ -479,7 +502,6 @@ mod tests {
             value["payload_json"],
             "{\"exchange\":\"okx\",\"side\":\"buy\",\"size\":\"0.01\"}"
         );
-
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
             base_url: "https://quant-web.example/".to_string(),
             internal_secret: "secret".to_string(),
@@ -490,7 +512,6 @@ mod tests {
             "https://quant-web.example/api/commerce/internal/strategy-signals"
         );
     }
-
     #[test]
     fn parses_execution_task_items_envelope_from_quant_web() {
         let body = r#"{
@@ -518,14 +539,11 @@ mod tests {
                 }]
             }
         }"#;
-
         let parsed: ExecutionTaskLease = ExecutionTaskClient::parse_envelope(body).unwrap();
-
         assert_eq!(parsed.tasks.len(), 1);
         assert_eq!(parsed.tasks[0].id, 42);
         assert_eq!(parsed.tasks[0].task_status, "leased");
     }
-
     #[test]
     fn report_request_matches_quant_web_order_result_contract() {
         let request = ExecutionTaskReportRequest::success(
@@ -537,14 +555,12 @@ mod tests {
             serde_json::json!({"dry_run": true}),
         );
         let value = serde_json::to_value(&request).unwrap();
-
         assert_eq!(value["task_id"], 42);
         assert_eq!(value["execution_status"], "completed");
         assert_eq!(value["external_order_id"], "order-1");
         assert_eq!(value["raw_payload_json"], "{\"dry_run\":true}");
         assert!(value.get("worker_id").is_none());
     }
-
     #[test]
     fn exchange_reconciliation_request_matches_quant_web_contract() {
         let request = ExchangeReconciliationReportRequest {
@@ -560,7 +576,6 @@ mod tests {
             message: Some("open order conflict detected".to_string()),
         };
         let value = serde_json::to_value(&request).unwrap();
-
         assert_eq!(value["combo_id"], 9);
         assert_eq!(value["buyer_email"], "buyer@example.com");
         assert_eq!(value["symbol"], "ETHUSDT");
@@ -570,7 +585,6 @@ mod tests {
             value["source_ref"],
             "rust_quant/exchange_reconciliation/exchange_open_order_conflict/combo/9/task/42/symbol/ETHUSDT"
         );
-
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
             base_url: "https://quant-web.example/".to_string(),
             internal_secret: "secret".to_string(),
@@ -581,7 +595,6 @@ mod tests {
             "https://quant-web.example/api/commerce/internal/exchange-reconciliation"
         );
     }
-
     #[test]
     fn exchange_close_fill_writeback_request_matches_quant_web_contract() {
         let request = ExchangeCloseFillWritebackRequest {
@@ -605,7 +618,6 @@ mod tests {
             writeback_authorized: true,
         };
         let value = serde_json::to_value(&request).unwrap();
-
         assert_eq!(value["task_id"], 86);
         assert_eq!(value["combo_id"], 85);
         assert_eq!(value["exchange"], "okx");
@@ -619,7 +631,6 @@ mod tests {
         assert_eq!(value["quantity_match"], true);
         assert_eq!(value["writeback_authorized"], true);
         assert!(!value.to_string().contains("buyer@example.com"));
-
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
             base_url: "https://quant-web.example/".to_string(),
             internal_secret: "secret".to_string(),
@@ -630,7 +641,6 @@ mod tests {
             "https://quant-web.example/api/commerce/internal/exchange-close-fill-writeback"
         );
     }
-
     #[test]
     fn exchange_account_snapshot_request_matches_quant_web_contract() {
         let request = ExchangeAccountSnapshotReportRequest {
@@ -723,7 +733,6 @@ mod tests {
             }],
         };
         let value = serde_json::to_value(&request).unwrap();
-
         assert_eq!(value["combo_id"], 85);
         assert_eq!(value["buyer_email"], "buyer@example.com");
         assert_eq!(
@@ -741,7 +750,6 @@ mod tests {
         assert_eq!(value["balances"][0]["equity_usdt"], 8211.49);
         assert_eq!(value["bills"][0]["external_bill_id"], "okx-bill-1");
         assert!(!value.to_string().contains("plain-api-secret"));
-
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
             base_url: "https://quant-web.example/".to_string(),
             internal_secret: "secret".to_string(),
@@ -752,7 +760,6 @@ mod tests {
             "https://quant-web.example/api/commerce/internal/exchange-account-snapshots"
         );
     }
-
     #[test]
     fn parses_user_exchange_config_envelope_without_persisting_secret() {
         let body = r#"{
@@ -766,15 +773,12 @@ mod tests {
                 "simulated": true
             }
         }"#;
-
         let config: UserExchangeConfig = ExecutionTaskClient::parse_envelope(body).unwrap();
-
         assert_eq!(config.exchange, "OKX");
         assert_eq!(config.api_key, "api-key");
         assert_eq!(config.passphrase.as_deref(), Some("passphrase"));
         assert!(config.simulated);
     }
-
     #[test]
     fn parse_envelope_error_omits_sensitive_response_body() {
         let body = r#"{
@@ -786,18 +790,15 @@ mod tests {
                 "passphrase": "plain-passphrase"
             }
         }"#;
-
         let error =
             ExecutionTaskClient::parse_envelope::<UserExchangeConfig>(body).expect_err("bad body");
         let message = error.to_string();
-
         assert!(message.contains("response_body_omitted=true"));
         assert!(message.contains("body_len="));
         assert!(!message.contains("plain-api-key"));
         assert!(!message.contains("plain-api-secret"));
         assert!(!message.contains("plain-passphrase"));
     }
-
     #[test]
     fn market_velocity_paper_outcome_request_matches_quant_web_contract() {
         let request = MarketVelocityPaperOutcomeRequest {
@@ -820,7 +821,6 @@ mod tests {
             }),
         };
         let value = serde_json::to_value(&request).unwrap();
-
         assert_eq!(value["rank_event_id"], 77);
         assert_eq!(value["exchange"], "okx");
         assert_eq!(value["symbol"], "ETH-USDT-SWAP");
@@ -831,7 +831,6 @@ mod tests {
         assert_eq!(value["generated_execution_task_count"], Value::Null);
         assert!(!value.to_string().contains("buyer_email"));
         assert!(!value.to_string().contains("execution_task"));
-
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
             base_url: "https://quant-web.example/".to_string(),
             internal_secret: "secret".to_string(),
@@ -842,7 +841,6 @@ mod tests {
             "https://quant-web.example/api/commerce/internal/market-velocity/paper-outcomes"
         );
     }
-
     #[test]
     fn validates_base_url() {
         let err = ExecutionTaskClient::new(ExecutionTaskConfig {
@@ -850,7 +848,6 @@ mod tests {
             internal_secret: "secret".to_string(),
         })
         .expect_err("empty base_url must fail");
-
         assert!(err.to_string().contains("base_url"));
     }
 }

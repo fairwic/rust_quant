@@ -7,12 +7,11 @@ use rust_quant_services::market::{DuneMarketSyncService, DuneSqlRunner};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-
 #[derive(Default)]
 struct InMemoryExternalMarketSnapshotRepository {
+    /// 键值扩展数据。
     rows: Mutex<HashMap<(String, String, String, i64), ExternalMarketSnapshot>>,
 }
-
 #[async_trait]
 impl ExternalMarketSnapshotRepository for InMemoryExternalMarketSnapshotRepository {
     async fn save(&self, snapshot: ExternalMarketSnapshot) -> Result<()> {
@@ -25,14 +24,12 @@ impl ExternalMarketSnapshotRepository for InMemoryExternalMarketSnapshotReposito
         self.rows.lock().unwrap().insert(key, snapshot);
         Ok(())
     }
-
     async fn save_batch(&self, snapshots: Vec<ExternalMarketSnapshot>) -> Result<()> {
         for snapshot in snapshots {
             self.save(snapshot).await?;
         }
         Ok(())
     }
-
     async fn find_range(
         &self,
         source: &str,
@@ -62,9 +59,7 @@ impl ExternalMarketSnapshotRepository for InMemoryExternalMarketSnapshotReposito
         Ok(rows)
     }
 }
-
 struct FakeDuneSqlRunner;
-
 #[async_trait]
 impl DuneSqlRunner for FakeDuneSqlRunner {
     async fn run_sql(
@@ -77,7 +72,6 @@ impl DuneSqlRunner for FakeDuneSqlRunner {
         assert!(sql.contains("2026-03-30T00:00:00Z"));
         assert!(sql.contains("2026-03-30T08:00:00Z"));
         assert!(sql.contains("100000"));
-
         Ok(vec![json!({
             "hour_bucket": "2026-03-30T04:00:00Z",
             "funding_rate": 0.0000123,
@@ -87,13 +81,11 @@ impl DuneSqlRunner for FakeDuneSqlRunner {
         })])
     }
 }
-
 #[tokio::test]
 async fn sync_dune_template_renders_params_and_saves_snapshots() {
     let repo = Arc::new(InMemoryExternalMarketSnapshotRepository::default());
     let runner = Arc::new(FakeDuneSqlRunner);
     let service = DuneMarketSyncService::with_repo_and_runner(repo.clone(), runner);
-
     let sql_template = r#"
         select * from some_table
         where symbol = '{{symbol}}'
@@ -101,13 +93,11 @@ async fn sync_dune_template_renders_params_and_saves_snapshots() {
           and block_time < cast('{{end_time}}' as timestamp)
           and amount_usd >= cast('{{min_usd}}' as double)
     "#;
-
     let mut params = HashMap::new();
     params.insert("symbol".to_string(), "ETH".to_string());
     params.insert("start_time".to_string(), "2026-03-30T00:00:00Z".to_string());
     params.insert("end_time".to_string(), "2026-03-30T08:00:00Z".to_string());
     params.insert("min_usd".to_string(), "100000".to_string());
-
     let saved = service
         .sync_rendered_sql(
             "hyperliquid_basis".to_string(),
@@ -118,9 +108,7 @@ async fn sync_dune_template_renders_params_and_saves_snapshots() {
         )
         .await
         .expect("sync should succeed");
-
     assert_eq!(saved, 1);
-
     let rows = repo
         .find_range(
             "dune",
@@ -148,11 +136,9 @@ async fn sync_dune_template_renders_params_and_saves_snapshots() {
         }))
     );
 }
-
 #[tokio::test]
 async fn sync_dune_template_parses_dune_utc_timestamp_format() {
     struct UtcFormatRunner;
-
     #[async_trait]
     impl DuneSqlRunner for UtcFormatRunner {
         async fn run_sql(
@@ -168,11 +154,9 @@ async fn sync_dune_template_parses_dune_utc_timestamp_format() {
             })])
         }
     }
-
     let repo = Arc::new(InMemoryExternalMarketSnapshotRepository::default());
     let runner = Arc::new(UtcFormatRunner);
     let service = DuneMarketSyncService::with_repo_and_runner(repo.clone(), runner);
-
     let saved = service
         .sync_rendered_sql(
             "hyperliquid_basis".to_string(),
@@ -183,9 +167,7 @@ async fn sync_dune_template_parses_dune_utc_timestamp_format() {
         )
         .await
         .expect("sync should parse dune UTC timestamp format");
-
     assert_eq!(saved, 1);
-
     let rows = repo
         .find_range(
             "dune",

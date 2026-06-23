@@ -1,28 +1,18 @@
-use crate::CandleItem;
-
 use super::engine::run_back_test;
 use super::types::{BackTestResult, BasicRiskStrategyConfig, SignalResult};
-
+use crate::CandleItem;
 /// 通用的“指标驱动”策略回测适配器接口
 ///
 /// 新增策略只需实现该 trait，即可复用 pipeline 回测流程。
 pub trait IndicatorStrategyBacktest {
     type IndicatorCombine;
     type IndicatorValues;
-
-    /// 最小数据长度（例如指标 warm-up 所需的蜡烛数量）
     fn min_data_length(&self) -> usize;
-
-    /// 初始化指标组合（每次回测都会获得全新的副本）
     fn init_indicator_combine(&self) -> Self::IndicatorCombine;
-
-    /// 根据传入的 K 线更新指标值
     fn build_indicator_values(
         indicator_combine: &mut Self::IndicatorCombine,
         candle: &CandleItem,
     ) -> Self::IndicatorValues;
-
-    /// 基于当前窗口/指标值生成信号
     fn generate_signal(
         &mut self,
         candles: &[CandleItem],
@@ -30,8 +20,6 @@ pub trait IndicatorStrategyBacktest {
         risk_config: &BasicRiskStrategyConfig,
     ) -> SignalResult;
 }
-
-/// 针对实现了 [`IndicatorStrategyBacktest`] 的策略，统一执行回测
 pub fn run_indicator_strategy_backtest<S>(
     inst_id: &str,
     strategy: S,
@@ -45,14 +33,12 @@ where
 {
     run_back_test(inst_id, strategy, candles_list, risk_config)
 }
-
 #[cfg(test)]
 mod tests {
     #[test]
     fn pipeline_backtest_runs_and_records_trades() {
         use crate::framework::backtest::adapter::run_indicator_strategy_backtest;
         use crate::framework::backtest::types::BasicRiskStrategyConfig;
-
         #[derive(Debug, Clone, Default)]
         struct Strategy;
         impl crate::framework::backtest::adapter::IndicatorStrategyBacktest for Strategy {
@@ -67,6 +53,7 @@ mod tests {
                 _: &crate::CandleItem,
             ) -> Self::IndicatorValues {
             }
+            /// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
             fn generate_signal(
                 &mut self,
                 candles: &[crate::CandleItem],
@@ -85,7 +72,6 @@ mod tests {
                 s
             }
         }
-
         let candles: Vec<crate::CandleItem> = (0..800)
             .map(|i| crate::CandleItem {
                 o: 100.0,
@@ -101,7 +87,6 @@ mod tests {
             max_loss_percent: 1.0,
             ..BasicRiskStrategyConfig::default()
         };
-
         let result = run_indicator_strategy_backtest("TEST", Strategy, &candles, risk);
         assert!(result.open_trades > 0);
         assert!(!result.audit_trail.signal_snapshots.is_empty());

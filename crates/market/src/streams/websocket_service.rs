@@ -1,9 +1,3 @@
-use okx::websocket::auto_reconnect_client::AutoReconnectWebsocketClient;
-use std::env;
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tracing::{info, span, Level};
-
 use crate::cache::default_provider;
 use crate::models::TickersDataEntity;
 use crate::repositories::candle_service::{CandleService, StrategyTrigger};
@@ -14,26 +8,18 @@ use okx::dto::market_dto::CandleOkxRespDto;
 use okx::dto::CandleOkxWsResDto;
 use okx::dto::CommonOkxWsResDto;
 use okx::dto::TickerOkxResWsDto;
+use okx::websocket::auto_reconnect_client::AutoReconnectWebsocketClient;
 use okx::websocket::{Args, ChannelType};
+use std::env;
+use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::debug;
 use tracing::error;
-
-/// WebSocket 服务入口
-///
-/// # 参数
-/// * `inst_ids` - 交易对列表
-/// * `times` - 时间周期列表
-/// * `strategy_trigger` - 可选的策略触发回调函数
-///
-/// # 架构说明
-/// - 如果提供 strategy_trigger，则 K线确认时会自动触发策略执行
-/// - 如果不提供，则仅处理 K线数据存储和缓存
+use tracing::{info, span, Level};
 pub async fn run_socket(inst_ids: &[String], times: &[String]) {
     run_socket_with_strategy_trigger(inst_ids, times, None).await;
 }
-
 /// 带策略触发的 WebSocket 服务
-///
 /// # 参数
 /// * `inst_ids` - 交易对列表
 /// * `times` - 时间周期列表
@@ -50,18 +36,15 @@ pub async fn run_socket_with_strategy_trigger(
     let api_secret = env::var("OKX_API_SECRET").expect("未配置OKX_API_SECRET");
     let passphrase = env::var("OKX_PASSPHRASE").expect("未配置OKX_PASSPHRASE");
     let sim_trading = env::var("OKX_SIMULATED_TRADING").expect("未配置OKX_SIMULATED_TRADING");
-
     // 🚀 [已优化] 创建批处理Worker
     info!("🚀 初始化批处理Worker...");
     let (persist_tx, persist_rx) = mpsc::unbounded_channel::<PersistTask>();
     let worker = CandlePersistWorker::new(persist_rx)
         .with_config(100, std::time::Duration::from_millis(500));
-
     // 启动Worker
     tokio::spawn(async move {
         worker.run().await;
     });
-
     // 🚀 [已优化] 创建共享的CandleService实例（带策略触发）
     let candle_service = if let Some(trigger) = strategy_trigger {
         info!("✅ 创建 CandleService 实例（启用策略触发）");
@@ -78,11 +61,9 @@ pub async fn run_socket_with_strategy_trigger(
         ))
     };
     info!("✅ CandleService实例已创建并启用批处理");
-
     // 创建自动重连客户端
     info!("📡 创建自动重连客户端...");
     let public_client = AutoReconnectWebsocketClient::new_public();
-
     let mut public_receiver = match public_client.start().await {
         Ok(rx) => {
             info!("✅ okx public websocket启动成功");
@@ -94,9 +75,7 @@ pub async fn run_socket_with_strategy_trigger(
         }
     };
     let credentials = Credentials::new(api_key, api_secret, passphrase, sim_trading);
-
     let okx_websocket_client_business = AutoReconnectWebsocketClient::new_business(credentials);
-
     let mut private_message_receiver = match okx_websocket_client_business.start().await {
         Ok(rx) => {
             info!("✅ okx private websocket启动成功");
@@ -107,7 +86,6 @@ pub async fn run_socket_with_strategy_trigger(
             return;
         }
     };
-
     // 订阅多个k线频道
     for inst_id in inst_ids.iter() {
         for time in times.iter() {
@@ -128,7 +106,6 @@ pub async fn run_socket_with_strategy_trigger(
             }
         }
     }
-
     // 订阅多个tickers频道
     for inst_id in inst_ids.iter() {
         let args = Args::new().with_inst_id(inst_id.to_string());
@@ -145,10 +122,8 @@ pub async fn run_socket_with_strategy_trigger(
             }
         }
     }
-
     let inst_filters = Arc::new(inst_ids.to_vec());
     let ticker_service = Arc::new(TickerService::new());
-
     // 持续监听并处理 ticker 消息
     {
         let inst_filters = Arc::clone(&inst_filters);
@@ -187,17 +162,14 @@ pub async fn run_socket_with_strategy_trigger(
                     "收到K线数据: inst_id={}, channel={}",
                     candle.arg.inst_id, candle.arg.channel
                 );
-
                 // 提取周期：candle2h -> 2h
                 let period = candle.arg.channel.replace("candle", "");
-
                 // 🚀 [已优化] 处理全部数据（而非只取last），使用into_iter避免clone
                 let candle_data: Vec<CandleOkxRespDto> = candle
                     .data
                     .into_iter()
                     .map(CandleOkxRespDto::from_vec)
                     .collect();
-
                 // 🚀 [已优化] 使用共享实例，批量处理
                 if let Err(e) = candle_service_clone
                     .update_candles_batch(candle_data, &candle.arg.inst_id, &period)

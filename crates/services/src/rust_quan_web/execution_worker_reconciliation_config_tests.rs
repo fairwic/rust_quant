@@ -9,12 +9,10 @@ fn live_order_confirmation_requires_exact_opt_in_token() {
     assert!(!live_order_confirmation_valid(false, Some("true")));
     assert!(!live_order_confirmation_valid(false, Some("I_UNDERSTAND")));
 }
-
 #[test]
 fn reconciliation_only_mode_is_explicit_opt_in() {
     let _guard = env_lock();
     let previous = std::env::var("EXECUTION_WORKER_RECONCILIATION_ONLY").ok();
-
     std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY");
     assert!(!reconciliation_only_mode_from_env());
     std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", "true");
@@ -23,13 +21,11 @@ fn reconciliation_only_mode_is_explicit_opt_in() {
     assert!(reconciliation_only_mode_from_env());
     std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", "false");
     assert!(!reconciliation_only_mode_from_env());
-
     match previous {
         Some(value) => std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", value),
         None => std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY"),
     }
 }
-
 #[test]
 fn reconciliation_only_symbol_guard_excludes_linkusdt() {
     assert!(is_protected_link_symbol("LINKUSDT"));
@@ -37,7 +33,6 @@ fn reconciliation_only_symbol_guard_excludes_linkusdt() {
     assert!(is_protected_link_symbol("link-usdt"));
     assert!(!is_protected_link_symbol("ETHUSDT"));
 }
-
 #[test]
 fn target_task_allowlist_rejects_unlisted_leased_task_ids() {
     let config = ExecutionWorkerConfig {
@@ -54,11 +49,9 @@ fn target_task_allowlist_rejects_unlisted_leased_task_ids() {
         report_replay_failure_backoff_seconds: 300,
         report_replay_throttle_ms: 0,
     };
-
     assert!(config.leased_task_allowed(1001));
     assert!(!config.leased_task_allowed(1002));
 }
-
 #[test]
 fn live_worker_config_requires_target_task_allowlist() {
     let live_unscoped = ExecutionWorkerConfig {
@@ -81,7 +74,6 @@ fn live_worker_config_requires_target_task_allowlist() {
     assert!(error
         .to_string()
         .contains("EXECUTION_WORKER_TARGET_TASK_IDS"));
-
     let dry_run_unscoped = ExecutionWorkerConfig {
         dry_run: true,
         ..live_unscoped
@@ -90,7 +82,54 @@ fn live_worker_config_requires_target_task_allowlist() {
         .validate_live_worker_scope()
         .expect("dry-run worker may lease broadly");
 }
-
+#[tokio::test]
+async fn run_once_rejects_programmatic_live_worker_without_target_scope_before_leasing() {
+    let _guard = env_lock();
+    let previous_reconciliation_only = std::env::var("EXECUTION_WORKER_RECONCILIATION_ONLY").ok();
+    std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY");
+    let repository = Arc::new(CapturingAuditRepository::default());
+    let worker = ExecutionWorker::new(
+        ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "http://127.0.0.1:1".to_string(),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap(),
+        CryptoExcAllGateway::dry_run(),
+        ExecutionWorkerConfig {
+            worker_id: "worker-programmatic-live-unscoped".to_string(),
+            lease_limit: 1,
+            dry_run: false,
+            default_exchange: ExchangeId::Okx,
+            task_types: vec!["execute_signal".to_string()],
+            task_statuses: vec!["pending".to_string()],
+            target_task_ids: Vec::new(),
+            confirmation_mode: false,
+            report_replay_mode: false,
+            report_replay_max_per_run: 1,
+            report_replay_failure_backoff_seconds: 300,
+            report_replay_throttle_ms: 0,
+        },
+    )
+    .with_audit_repository(repository.clone());
+    let error = worker
+        .run_once()
+        .await
+        .expect_err("programmatic live worker must fail closed without target task scope");
+    match previous_reconciliation_only {
+        Some(value) => std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", value),
+        None => std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY"),
+    }
+    assert!(
+        error
+            .to_string()
+            .contains("EXECUTION_WORKER_TARGET_TASK_IDS"),
+        "unexpected error: {error:#}"
+    );
+    assert!(
+        repository.checkpoints.lock().unwrap().is_empty(),
+        "live worker scope must be validated before checkpointing or leasing"
+    );
+}
 #[test]
 fn dry_run_result_is_reportable_without_exchange_credentials() {
     let task = task(json!({
@@ -98,10 +137,8 @@ fn dry_run_result_is_reportable_without_exchange_credentials() {
         "symbol": "BTC-USDT-SWAP",
         "signal_type": "long"
     }));
-
     let request = ExecutionOrderTask::from_task(&task).unwrap();
     let result = request.dry_run_report().unwrap();
-
     assert_eq!(result.task_id, 42);
     assert_eq!(result.execution_status, "completed");
     assert_eq!(result.exchange, "okx");

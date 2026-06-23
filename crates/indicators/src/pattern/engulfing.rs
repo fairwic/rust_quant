@@ -1,5 +1,4 @@
 use rust_quant_common::CandleItem;
-
 /// 成交量比率指标
 /// 计算当前成交量与历史n根K线的平均值的比值
 #[derive(Debug, Clone)]
@@ -9,20 +8,22 @@ pub struct KlineEngulfingIndicator {
     // 前前一根K线（用于过滤）
     prev_prev_kline: Option<CandleItem>,
 }
-
 #[derive(Debug, Clone)]
 pub struct KlineEngulfingOutput {
+    /// 是否为吞没形态。
     pub is_engulfing: bool,
+    /// body 比例。
     pub body_ratio: f64,
 }
-
 impl KlineEngulfingIndicator {
+    /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     pub fn new() -> Self {
         Self {
             last_kline: None,
             prev_prev_kline: None,
         }
     }
+    /// 推进指标到下一根 K 线，并返回最新计算结果。
     pub fn next(&mut self, current_kline: &CandleItem) -> KlineEngulfingOutput {
         if self.last_kline.is_none() {
             self.last_kline = Some(current_kline.clone());
@@ -32,14 +33,12 @@ impl KlineEngulfingIndicator {
             };
         }
         let last_kline = self.last_kline.as_ref().unwrap();
-
         //看涨吞没 ,当前k线的开盘价小于前一根k线的开盘价，且当前k线的收盘价大于前一根k线的收盘价
         let mut is_bullish = (current_kline.o <= last_kline.o || current_kline.l < last_kline.l)
             && current_kline.c >= last_kline.o
             && (current_kline.c >= last_kline.h || current_kline.c >= current_kline.h * 1.005)
             //要求上一个根k线是阴线
             && last_kline.c < last_kline.o;
-
         // 【新增过滤逻辑】
         // 如果前前根K线是大阴线（实体>2.0%），且当前反转没有吞没它，则视为无效
         if is_bullish {
@@ -57,14 +56,12 @@ impl KlineEngulfingIndicator {
                 }
             }
         }
-
         //看跌吞没，当前k线的开盘价大于前一根k线的开盘价，且当前k线的收盘价小于前一根k线的开盘价
         let mut is_bearish = (current_kline.o >= last_kline.o || current_kline.h > last_kline.h)
             && current_kline.c <= last_kline.o
             && (current_kline.c <= last_kline.l || current_kline.c <= last_kline.l * 1.005)
             //要求上一个根k线是阳线
             && last_kline.c > last_kline.o;
-
         // 【新增过滤逻辑】
         // 如果前前根K线是大阳线（实体>2.0%），且当前反转没有吞没它，则视为无效
         if is_bearish {
@@ -81,7 +78,6 @@ impl KlineEngulfingIndicator {
                 }
             }
         }
-
         let body_ratio = if is_bullish || is_bearish {
             //计算实体比例,当前k线实体部分与当前k线路的上下影线部分的比例
             let body_size = (current_kline.c - current_kline.o).abs();
@@ -94,29 +90,28 @@ impl KlineEngulfingIndicator {
         } else {
             0.0
         };
-
         // 更新历史
         self.prev_prev_kline = self.last_kline.clone();
         self.last_kline = Some(current_kline.clone());
-
         KlineEngulfingOutput {
             is_engulfing: is_bullish || is_bearish,
             body_ratio,
         }
     }
 }
-
 impl Default for KlineEngulfingIndicator {
     fn default() -> Self {
         Self::new()
     }
 }
-
 //添加测试单例
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_engulfing_indicator() {
         let mut indicator = KlineEngulfingIndicator::new();
         // 创建一个看涨吞没的例子
@@ -138,12 +133,10 @@ mod tests {
             v: 0.00,
             confirm: 0,
         };
-
         indicator.next(&kline1);
         let output = indicator.next(&kline2);
         assert!(output.is_engulfing);
         assert!(output.body_ratio > 0.0);
-
         // 创建一个看跌吞没的例子
         let kline3 = CandleItem {
             o: 100.0,
@@ -163,13 +156,11 @@ mod tests {
             v: 0.00,
             confirm: 0,
         };
-
         indicator.next(&kline3);
         let output = indicator.next(&kline4);
         println!("{:?}", output);
         assert!(output.is_engulfing);
         assert!(output.body_ratio > 0.0);
-
         // 创建一个非吞没的例子
         let kline5 = CandleItem {
             o: 100.0,
@@ -189,7 +180,6 @@ mod tests {
             v: 0.00,
             confirm: 0,
         };
-
         indicator.next(&kline5);
         let output = indicator.next(&kline6);
         assert!(!output.is_engulfing);

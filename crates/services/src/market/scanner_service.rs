@@ -1,3 +1,14 @@
+use super::market_velocity_entry::{
+    build_market_velocity_entry_confirmation_from_candles, MarketVelocityEntryConfirmation,
+    MarketVelocityEntryConfirmationDecision,
+};
+use super::market_velocity_signal::{
+    dispatch_market_velocity_strategy_signal_with_config_and_entry_confirmation,
+    market_velocity_signal_dispatch_is_enabled,
+    market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityStrategySignalConfig,
+};
+use super::CandleService;
+use crate::notification::TelegramNotifier;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::prelude::FromPrimitive;
@@ -12,35 +23,32 @@ use rust_quant_market::scanners::okx_scanner::OkxScanner;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tracing::{error, info, warn};
-
-use super::market_velocity_entry::{
-    build_market_velocity_entry_confirmation_from_candles, MarketVelocityEntryConfirmation,
-    MarketVelocityEntryConfirmationDecision,
-};
-use super::market_velocity_signal::{
-    dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
-    market_velocity_signal_dispatch_is_enabled,
-    market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityStrategySignalConfig,
-};
-use super::CandleService;
-use crate::notification::TelegramNotifier;
-
 /// 排名快照
 #[derive(Clone)]
 struct RankSnapshot {
+    /// 事件时间戳。
     timestamp: DateTime<Utc>,
+    /// 键值扩展数据。
     ranks: HashMap<String, i32>,
+    /// 键值扩展数据。
     prices: HashMap<String, Decimal>,
 }
-
 /// 扫描器服务
 /// 负责定时扫描全市场Ticker，维护 Top 150 排名，并发送 Telegram 通知
 pub struct ScannerService {
+    /// scanner，用于行情、K 线或市场扫描。
     scanner: OkxScanner,
+    /// 键值扩展数据。
     last_snapshots: HashMap<String, TickerSnapshot>,
+    /// anomalyrepo，用于行情、K 线或市场扫描。
     anomaly_repo: Arc<dyn MarketAnomalyRepository>,
+    /// 技术K 线service；为空时表示该条件不启用。
     technical_candle_service: Option<Arc<CandleService>>,
+    /// 配置项。
+    market_velocity_signal_config: Option<MarketVelocityStrategySignalConfig>,
+    /// 排名history，用于行情、K 线或市场扫描。
     rank_history: VecDeque<RankSnapshot>,
+    /// 最近top150，用于行情、K 线或市场扫描。
     last_top_150: HashSet<String>,
     /// Telegram 通知器
     telegram: Option<TelegramNotifier>,
@@ -49,10 +57,8 @@ pub struct ScannerService {
     /// 是否为首次扫描 (跳过初始化时的 Entry 通知)
     is_first_scan: bool,
 }
-
 /// 排名剧变通知阈值
 const RANK_CHANGE_THRESHOLD: i32 = 3;
-
 /// 通知冷却期 (分钟)
 /// 15分钟周期 -> 15分钟冷却
 /// 4小时周期 -> 4小时冷却
@@ -69,19 +75,29 @@ const MARKET_RANK_TECHNICAL_PERIOD: usize = 20;
 const MARKET_RANK_TECHNICAL_FETCH_LIMIT: u32 = 80;
 const MARKET_RANK_TECHNICAL_TOUCH_THRESHOLD_PCT: f64 = 0.3;
 const MARKET_VELOCITY_ENTRY_TIMEFRAME: &str = "15m";
-
 fn market_velocity_episode_stale_before(now: DateTime<Utc>) -> DateTime<Utc> {
     now - Duration::hours(MARKET_RANK_HISTORY_RETENTION_HOURS)
 }
-
 impl ScannerService {
     pub fn new(anomaly_repo: Arc<dyn MarketAnomalyRepository>) -> Result<Self> {
         Self::new_with_technical_candle_service(anomaly_repo, None)
     }
-
+    /// 提供newwithtechnicalK 线service的集中实现，避免行情数据调用方重复处理相同细节。
     pub fn new_with_technical_candle_service(
         anomaly_repo: Arc<dyn MarketAnomalyRepository>,
         technical_candle_service: Option<Arc<CandleService>>,
+    ) -> Result<Self> {
+        Self::new_with_technical_candle_service_and_market_velocity_signal_config(
+            anomaly_repo,
+            technical_candle_service,
+            None,
+        )
+    }
+    /// 提供newwithtechnicalK 线serviceand市场动量信号配置的集中实现，避免行情数据调用方重复处理相同细节。
+    pub fn new_with_technical_candle_service_and_market_velocity_signal_config(
+        anomaly_repo: Arc<dyn MarketAnomalyRepository>,
+        technical_candle_service: Option<Arc<CandleService>>,
+        market_velocity_signal_config: Option<MarketVelocityStrategySignalConfig>,
     ) -> Result<Self> {
         let telegram = match TelegramNotifier::from_env() {
             Ok(notifier) => {
@@ -93,12 +109,12 @@ impl ScannerService {
                 None
             }
         };
-
         Ok(Self {
             scanner: OkxScanner::new()?,
             last_snapshots: HashMap::new(),
             anomaly_repo,
             technical_candle_service,
+            market_velocity_signal_config,
             rank_history: VecDeque::new(),
             last_top_150: HashSet::new(),
             telegram,
@@ -106,29 +122,23 @@ impl ScannerService {
             is_first_scan: true,
         })
     }
-
     /// 初始化：从数据库恢复状态，清除过期的周期数据
     pub async fn initialize(&mut self) -> Result<()> {
         let now = Utc::now();
         let mut active_rank_fallback = VecDeque::new();
-
         // 获取数据库中最新的更新时间
         let latest_time = self.anomaly_repo.get_latest_update_time().await?;
-
         if let Some(last_update) = latest_time {
             let elapsed = now - last_update;
             let elapsed_mins = elapsed.num_minutes();
-
             info!(
                 "Database last updated {} minutes ago at {}",
                 elapsed_mins, last_update
             );
-
             // 根据时间差决定清除哪些周期的历史数据
             let clear_15m = elapsed_mins > 15;
             let clear_4h = elapsed_mins > 240; // 4 hours
             let clear_24h = elapsed_mins > 1440; // 24 hours
-
             if clear_15m || clear_4h || clear_24h {
                 info!(
                     "Clearing stale period data: 15m={}, 4h={}, 24h={}",
@@ -138,13 +148,11 @@ impl ScannerService {
                     .clear_stale_period_data(clear_15m, clear_4h, clear_24h)
                     .await?;
             }
-
             // 从数据库恢复 Top 150 列表
             let active_records = self.anomaly_repo.get_all_active().await?;
             for record in &active_records {
                 self.last_top_150.insert(record.symbol.clone());
             }
-
             // 恢复最后的排名快照（用于后续的 delta 计算）
             if !active_records.is_empty() {
                 let mut ranks = HashMap::new();
@@ -164,7 +172,6 @@ impl ScannerService {
         } else {
             info!("No existing data in database, starting fresh");
         }
-
         let snapshot_since = now - Duration::hours(MARKET_RANK_HISTORY_RETENTION_HOURS);
         match self
             .anomaly_repo
@@ -189,28 +196,23 @@ impl ScannerService {
                 self.rank_history = active_rank_fallback;
             }
         }
-
         Ok(())
     }
-
+    /// 提供scanandanalyze的集中实现，避免行情数据调用方重复处理相同细节。
     pub async fn scan_and_analyze(&mut self) -> Result<Vec<(String, Decimal)>> {
         let mut current_snapshots = self.scanner.fetch_all_tickers().await?;
         let now = Utc::now();
-
         self.close_stale_market_velocity_episodes(now).await;
-
         // 1. 按 Quote Volume 降序排名
         current_snapshots.sort_by(|a, b| {
             b.volume_24h_quote
                 .partial_cmp(&a.volume_24h_quote)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-
         let mut current_ranks: HashMap<String, i32> = HashMap::new();
         let mut current_prices: HashMap<String, Decimal> = HashMap::new();
         let mut current_volumes_24h: HashMap<String, Decimal> = HashMap::new();
         let mut current_top_150: HashSet<String> = HashSet::new();
-
         for (i, snapshot) in current_snapshots.iter().enumerate() {
             let rank = (i + 1) as i32;
             current_ranks.insert(snapshot.symbol.clone(), rank);
@@ -220,10 +222,8 @@ impl ScannerService {
                 current_top_150.insert(snapshot.symbol.clone());
             }
         }
-
         self.persist_rank_snapshots_from_scan(&current_snapshots, &current_ranks, now)
             .await;
-
         // 初始化
         if self.last_snapshots.is_empty() {
             for snapshot in &current_snapshots {
@@ -242,9 +242,7 @@ impl ScannerService {
             );
             return Ok(vec![]);
         }
-
         let previous_rank_snapshot = self.rank_history.back().cloned();
-
         // 2. 维护历史 (保留 25 小时)
         while let Some(front) = self.rank_history.front() {
             if now - front.timestamp > Duration::hours(25) {
@@ -258,12 +256,10 @@ impl ScannerService {
             ranks: current_ranks.clone(),
             prices: current_prices.clone(),
         });
-
         // 3. 获取历史排名
         let snapshot_15m = self.get_historical_snapshot(Duration::minutes(15));
         let snapshot_4h = self.get_historical_snapshot(Duration::hours(4));
         let snapshot_24h = self.get_historical_snapshot(Duration::hours(24));
-
         self.persist_top50_boundary_events(
             &current_ranks,
             &current_prices,
@@ -272,7 +268,6 @@ impl ScannerService {
             now,
         )
         .await;
-
         // 4. 处理 Top 150 Entry/Exit (首次扫描时跳过通知，避免刷屏)
         for symbol in &current_top_150 {
             if !self.last_top_150.contains(symbol) {
@@ -296,14 +291,12 @@ impl ScannerService {
                 }
             }
         }
-
         // 5. UPSERT Top 150 记录 + 排名剧变通知
         for snapshot in &current_snapshots {
             let rank = *current_ranks.get(&snapshot.symbol).unwrap_or(&9999);
             if rank > 150 {
                 continue;
             }
-
             let r15m = snapshot_15m
                 .as_ref()
                 .and_then(|item| item.ranks.get(&snapshot.symbol).cloned());
@@ -322,11 +315,9 @@ impl ScannerService {
             let p24h = snapshot_24h
                 .as_ref()
                 .and_then(|item| item.prices.get(&snapshot.symbol).cloned());
-
             let d15m = r15m.map(|r| r - rank);
             let d4h = r4h.map(|r| r - rank);
             let d24h = r24h.map(|r| r - rank);
-
             self.persist_rank_velocity_event(
                 &snapshot.symbol,
                 "15分钟",
@@ -363,7 +354,6 @@ impl ScannerService {
                 now,
             )
             .await;
-
             // 排名剧变通知 (任一周期上升 >= 3) - 带冷却期
             self.check_and_notify_rank_change(
                 &snapshot.symbol,
@@ -395,7 +385,6 @@ impl ScannerService {
                 now,
             )
             .await;
-
             let anomaly = MarketAnomaly {
                 id: None,
                 symbol: snapshot.symbol.clone(),
@@ -410,32 +399,27 @@ impl ScannerService {
                 updated_at: now,
                 status: "ACTIVE".to_string(),
             };
-
             if let Err(e) = self.anomaly_repo.save(&anomaly).await {
                 error!("Failed to save anomaly for {}: {:?}", snapshot.symbol, e);
             }
         }
-
         // 清理过期的冷却记录 (超过24小时)
         self.notification_cooldown
             .retain(|_, &mut v| now - v < Duration::hours(25));
-
         // Update State
         self.last_top_150 = current_top_150;
         for snapshot in current_snapshots {
             self.last_snapshots
                 .insert(snapshot.symbol.clone(), snapshot);
         }
-
         // 首次扫描完成后，后续扫描可以正常发送通知
         if self.is_first_scan {
             info!("First scan completed, enabling notifications for subsequent scans");
             self.is_first_scan = false;
         }
-
         Ok(vec![])
     }
-
+    /// 持久化 行情与市场数据 结果，保证写入路径和幂等语义集中处理。
     async fn persist_rank_snapshots_from_scan(
         &self,
         current_snapshots: &[TickerSnapshot],
@@ -448,7 +432,6 @@ impl ScannerService {
             error!("Failed to save market rank price snapshots: {:?}", err);
             return;
         }
-
         let retention_start = captured_at - Duration::hours(MARKET_RANK_HISTORY_RETENTION_HOURS);
         if let Err(err) = self
             .anomaly_repo
@@ -461,9 +444,7 @@ impl ScannerService {
             );
         }
     }
-
     /// 检查并发送排名变化通知 (带冷却期)
-    #[allow(clippy::too_many_arguments)]
     async fn check_and_notify_rank_change(
         &mut self,
         symbol: &str,
@@ -477,20 +458,17 @@ impl ScannerService {
         if let Some(d) = delta {
             if d >= RANK_CHANGE_THRESHOLD {
                 let cooldown_key = format!("{}:{}", symbol, timeframe);
-
                 // 检查冷却期
                 if let Some(&last_notify) = self.notification_cooldown.get(&cooldown_key) {
                     if now - last_notify < Duration::minutes(cooldown_minutes) {
                         return; // 仍在冷却期，跳过
                     }
                 }
-
                 let old = old_rank.unwrap_or(0);
                 info!(
                     "🚀 [RANK VELOCITY {}] {}: Rank {} -> {} (Delta +{})",
                     timeframe, symbol, old, new_rank, d
                 );
-
                 if let Some(ref telegram) = self.telegram {
                     if let Err(e) = telegram
                         .notify_rank_change(symbol, timeframe, old, new_rank, d)
@@ -505,7 +483,6 @@ impl ScannerService {
             }
         }
     }
-
     /// 发送榜单变动通知 (带冷却期)
     async fn send_list_change_notification(
         &mut self,
@@ -515,14 +492,12 @@ impl ScannerService {
         now: DateTime<Utc>,
     ) {
         let cooldown_key = format!("{}:LIST", symbol);
-
         // 检查冷却期
         if let Some(&last_notify) = self.notification_cooldown.get(&cooldown_key) {
             if now - last_notify < Duration::minutes(COOLDOWN_MINUTES_LIST) {
                 return; // 仍在冷却期，跳过
             }
         }
-
         if let Some(ref telegram) = self.telegram {
             if let Err(e) = telegram.notify_list_change(symbol, is_entry, rank).await {
                 error!("Failed to send Telegram list change notification: {:?}", e);
@@ -531,7 +506,7 @@ impl ScannerService {
             }
         }
     }
-
+    /// 持久化 行情与市场数据 结果，保证写入路径和幂等语义集中处理。
     async fn persist_rank_velocity_event(
         &self,
         symbol: &str,
@@ -547,7 +522,6 @@ impl ScannerService {
         if !matches!(delta, Some(d) if d >= RANK_CHANGE_THRESHOLD) {
             return;
         }
-
         let technical_capture = self
             .capture_rank_event_technical_snapshot(
                 symbol,
@@ -575,20 +549,28 @@ impl ScannerService {
                 event.id = Some(id);
                 self.attach_rank_event_to_market_velocity_episode(episode_id, id, detected_at)
                     .await;
-                let entry_confirmation = self
-                    .market_velocity_entry_confirmation_if_needed(&event)
-                    .await;
-                if let Err(e) =
-                    dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled(
-                        &event,
-                        entry_confirmation.as_ref(),
-                    )
-                    .await
-                {
-                    error!(
-                        "Failed to dispatch rank velocity strategy signal for {}: {:?}",
-                        symbol, e
-                    );
+                let signal_config = self.market_velocity_signal_config_for_event(&event);
+                let entry_confirmation = match signal_config.as_ref() {
+                    Some(config) => {
+                        self.market_velocity_entry_confirmation_if_needed(&event, config)
+                            .await
+                    }
+                    None => None,
+                };
+                if let Some(config) = signal_config.as_ref() {
+                    if let Err(e) =
+                        dispatch_market_velocity_strategy_signal_with_config_and_entry_confirmation(
+                            &event,
+                            config,
+                            entry_confirmation.as_ref(),
+                        )
+                        .await
+                    {
+                        error!(
+                            "Failed to dispatch rank velocity strategy signal for {}: {:?}",
+                            symbol, e
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -596,7 +578,7 @@ impl ScannerService {
             }
         }
     }
-
+    /// 持久化 行情与市场数据 结果，保证写入路径和幂等语义集中处理。
     async fn persist_top_list_event(
         &self,
         symbol: &str,
@@ -634,20 +616,28 @@ impl ScannerService {
                 event.id = Some(id);
                 self.attach_rank_event_to_market_velocity_episode(episode_id, id, detected_at)
                     .await;
-                let entry_confirmation = self
-                    .market_velocity_entry_confirmation_if_needed(&event)
-                    .await;
-                if let Err(e) =
-                    dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled(
-                        &event,
-                        entry_confirmation.as_ref(),
-                    )
-                    .await
-                {
-                    error!(
-                        "Failed to dispatch top list strategy signal for {}: {:?}",
-                        symbol, e
-                    );
+                let signal_config = self.market_velocity_signal_config_for_event(&event);
+                let entry_confirmation = match signal_config.as_ref() {
+                    Some(config) => {
+                        self.market_velocity_entry_confirmation_if_needed(&event, config)
+                            .await
+                    }
+                    None => None,
+                };
+                if let Some(config) = signal_config.as_ref() {
+                    if let Err(e) =
+                        dispatch_market_velocity_strategy_signal_with_config_and_entry_confirmation(
+                            &event,
+                            config,
+                            entry_confirmation.as_ref(),
+                        )
+                        .await
+                    {
+                        error!(
+                            "Failed to dispatch top list strategy signal for {}: {:?}",
+                            symbol, e
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -655,7 +645,7 @@ impl ScannerService {
             }
         }
     }
-
+    /// 提供市场动量episodeappendID的集中实现，避免行情数据调用方重复处理相同细节。
     async fn market_velocity_episode_append_id(
         &self,
         episode: &MarketVelocityEpisode,
@@ -675,7 +665,7 @@ impl ScannerService {
             }
         }
     }
-
+    /// 停止 行情与市场数据 后台流程，确保退出时不留下未释放状态。
     async fn close_stale_market_velocity_episodes(&self, now: DateTime<Utc>) {
         let stale_before = market_velocity_episode_stale_before(now);
         match self
@@ -695,7 +685,7 @@ impl ScannerService {
             }
         }
     }
-
+    /// 提供attachrankeventto市场动量episode的集中实现，避免行情数据调用方重复处理相同细节。
     async fn attach_rank_event_to_market_velocity_episode(
         &self,
         episode_id: i64,
@@ -713,7 +703,7 @@ impl ScannerService {
             );
         }
     }
-
+    /// 提供capturerankeventtechnical快照的集中实现，避免行情数据调用方重复处理相同细节。
     async fn capture_rank_event_technical_snapshot(
         &self,
         symbol: &str,
@@ -722,11 +712,9 @@ impl ScannerService {
         if !should_capture {
             return MarketRankTechnicalCapture::not_requested();
         }
-
         let Some(candle_service) = &self.technical_candle_service else {
             return MarketRankTechnicalCapture::new("not_configured", None);
         };
-
         let candles = match candle_service
             .fetch_candles_from_crypto_exc_all(
                 "okx",
@@ -747,7 +735,6 @@ impl ScannerService {
                 return MarketRankTechnicalCapture::new("fetch_failed", None);
             }
         };
-
         if !candles.is_empty() {
             if let Err(error) = candle_service.save_candles(candles.clone()).await {
                 warn!(
@@ -756,7 +743,6 @@ impl ScannerService {
                 );
             }
         }
-
         match build_market_rank_technical_snapshot_from_candles(
             MARKET_RANK_TECHNICAL_TIMEFRAME,
             MARKET_RANK_TECHNICAL_PERIOD,
@@ -766,29 +752,37 @@ impl ScannerService {
             None => MarketRankTechnicalCapture::new("insufficient_kline", None),
         }
     }
-
-    async fn market_velocity_entry_confirmation_if_needed(
+    /// 提供市场动量信号配置forevent的集中实现，避免行情数据调用方重复处理相同细节。
+    fn market_velocity_signal_config_for_event(
         &self,
         event: &MarketRankEvent,
-    ) -> Option<MarketVelocityEntryConfirmation> {
+    ) -> Option<MarketVelocityStrategySignalConfig> {
         if !market_velocity_signal_dispatch_is_enabled() {
             return None;
         }
-
-        let config = match MarketVelocityStrategySignalConfig::from_env() {
+        if let Some(config) = self.market_velocity_signal_config.as_ref() {
+            return Some(config.clone());
+        }
+        Some(match MarketVelocityStrategySignalConfig::from_env() {
             Ok(config) => config,
             Err(error) => {
                 warn!(
-                    "Market Velocity signal config invalid before entry confirmation fetch: symbol={}, event_id={:?}, error={:?}",
+                    "Market Velocity signal config invalid before event dispatch: symbol={}, event_id={:?}, error={:?}",
                     event.symbol, event.id, error
                 );
                 return None;
             }
-        };
-
-        match market_velocity_strategy_signal_needs_entry_confirmation(event, &config) {
+        })
+    }
+    /// 提供市场动量入场确认ifneeded的集中实现，避免行情数据调用方重复处理相同细节。
+    async fn market_velocity_entry_confirmation_if_needed(
+        &self,
+        event: &MarketRankEvent,
+        config: &MarketVelocityStrategySignalConfig,
+    ) -> Option<MarketVelocityEntryConfirmation> {
+        match market_velocity_strategy_signal_needs_entry_confirmation(event, config) {
             Ok(true) => {
-                self.capture_market_velocity_entry_confirmation(&event.symbol, &config)
+                self.capture_market_velocity_entry_confirmation(&event.symbol, config)
                     .await
             }
             Ok(false) => None,
@@ -801,7 +795,7 @@ impl ScannerService {
             }
         }
     }
-
+    /// 提供capture市场动量入场确认的集中实现，避免行情数据调用方重复处理相同细节。
     async fn capture_market_velocity_entry_confirmation(
         &self,
         symbol: &str,
@@ -814,7 +808,6 @@ impl ScannerService {
             );
             return None;
         };
-
         let candles = match candle_service
             .fetch_candles_from_crypto_exc_all(
                 "okx",
@@ -835,7 +828,6 @@ impl ScannerService {
                 return None;
             }
         };
-
         if !candles.is_empty() {
             if let Err(error) = candle_service.save_candles(candles.clone()).await {
                 warn!(
@@ -844,7 +836,6 @@ impl ScannerService {
                 );
             }
         }
-
         match build_market_velocity_entry_confirmation_from_candles(
             MARKET_VELOCITY_ENTRY_TIMEFRAME,
             &candles,
@@ -860,7 +851,7 @@ impl ScannerService {
             }
         }
     }
-
+    /// 持久化 行情与市场数据 结果，保证写入路径和幂等语义集中处理。
     async fn persist_top50_boundary_events(
         &self,
         current_ranks: &HashMap<String, i32>,
@@ -872,20 +863,16 @@ impl ScannerService {
         let Some(previous_snapshot) = previous_snapshot else {
             return;
         };
-
         let mut symbols: HashSet<String> = previous_snapshot.ranks.keys().cloned().collect();
         symbols.extend(current_ranks.keys().cloned());
-
         for symbol in symbols {
             let old_rank = previous_snapshot.ranks.get(&symbol).copied();
             let new_rank = current_ranks.get(&symbol).copied();
             let was_top50 = is_top50_rank(old_rank);
             let is_top50 = is_top50_rank(new_rank);
-
             if was_top50 == is_top50 {
                 continue;
             }
-
             self.persist_top_list_event(
                 &symbol,
                 is_top50,
@@ -899,12 +886,10 @@ impl ScannerService {
             .await;
         }
     }
-
     /// 获取指定时间前的排名快照
     fn get_historical_snapshot(&self, duration: Duration) -> Option<RankSnapshot> {
         let now = Utc::now();
         let target = now - duration;
-
         self.rank_history
             .iter()
             .rev()
@@ -912,7 +897,6 @@ impl ScannerService {
             .cloned()
     }
 }
-
 include!("scanner_service/rank_history_section.rs");
 include!("scanner_service/rank_event_section.rs");
 include!("scanner_service/technical_snapshot_section.rs");

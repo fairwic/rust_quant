@@ -1,27 +1,24 @@
+use super::auth::parse_headers;
 use anyhow::{Context, Result};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-
-use super::auth::parse_headers;
-
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
-
 #[derive(Debug, Clone)]
 pub struct InternalHttpJsonResponse {
+    /// 状态代码。
     pub status_code: u16,
+    /// 请求或响应体。
     pub body: Value,
 }
-
 pub(super) fn json_response(status_code: u16, body: Value) -> InternalHttpJsonResponse {
     InternalHttpJsonResponse { status_code, body }
 }
-
 pub(super) fn route_path(path: &str) -> &str {
     path.split_once('?').map(|(path, _)| path).unwrap_or(path)
 }
-
+/// 封装必需queryparam，减少量化核心调用方重复实现相同细节。
 pub(super) fn required_query_param(query: &str, names: &[&str]) -> Result<String, String> {
     let value = query_param(query, names)
         .ok_or_else(|| format!("{} is required", names.first().copied().unwrap_or("param")))?;
@@ -33,7 +30,7 @@ pub(super) fn required_query_param(query: &str, names: &[&str]) -> Result<String
     }
     Ok(value)
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 pub(super) fn query_param(query: &str, names: &[&str]) -> Option<String> {
     query
         .split('&')
@@ -47,14 +44,17 @@ pub(super) fn query_param(query: &str, names: &[&str]) -> Option<String> {
             }
         })
 }
-
 pub(super) struct HttpRequest {
+    /// HTTP 方法。
     pub(super) method: String,
+    /// 请求路径。
     pub(super) path: String,
+    /// HTTP 请求头。
     pub(super) headers: Vec<(String, String)>,
+    /// 请求或响应体。
     pub(super) body: Vec<u8>,
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 pub(super) async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest> {
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 4096];
@@ -71,7 +71,6 @@ pub(super) async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest> 
             break index;
         }
     };
-
     let header_bytes = &buffer[..header_end];
     let header = std::str::from_utf8(header_bytes).context("HTTP header不是UTF-8")?;
     let mut lines = header.lines();
@@ -84,7 +83,6 @@ pub(super) async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest> 
     if content_length > MAX_BODY_BYTES {
         anyhow::bail!("HTTP body too large");
     }
-
     let body_start = header_end + 4;
     while buffer.len() < body_start + content_length {
         let read = stream.read(&mut chunk).await?;
@@ -94,7 +92,6 @@ pub(super) async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest> 
         buffer.extend_from_slice(&chunk[..read]);
     }
     let body = buffer[body_start..body_start + content_length].to_vec();
-
     Ok(HttpRequest {
         method,
         path,
@@ -102,11 +99,10 @@ pub(super) async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest> 
         body,
     })
 }
-
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
     buffer.windows(4).position(|window| window == b"\r\n\r\n")
 }
-
+/// 解析输入参数并收敛为 量化核心 可使用的结构化值。
 fn parse_content_length(header: &str) -> Result<usize> {
     for line in header.lines().skip(1) {
         let Some((name, value)) = line.split_once(':') else {
@@ -121,7 +117,7 @@ fn parse_content_length(header: &str) -> Result<usize> {
     }
     Ok(0)
 }
-
+/// 提供writeresponse的集中实现，避免量化核心调用方重复处理相同细节。
 pub(super) async fn write_response(
     stream: &mut TcpStream,
     response: InternalHttpJsonResponse,
@@ -139,7 +135,7 @@ pub(super) async fn write_response(
     stream.shutdown().await?;
     Ok(())
 }
-
+/// 提供reasonphrase的集中实现，避免量化核心调用方重复处理相同细节。
 fn reason_phrase(status_code: u16) -> &'static str {
     match status_code {
         200 => "OK",

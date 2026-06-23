@@ -5,7 +5,8 @@ use super::{
 use anyhow::{Context, Result};
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
-
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
 pub(super) async fn load_backtest_data(
     pool: &PgPool,
     args: &MarketVelocityEventBacktestArgs,
@@ -20,7 +21,6 @@ pub(super) async fn load_backtest_data(
     let mut candles_4h = HashMap::new();
     let mut candles_15m_computed = HashMap::new();
     let mut candles_4h_computed = HashMap::new();
-
     for pair in &pairs {
         let raw_15m = load_candles(pool, &pair.candles_15m).await?;
         let raw_1h = match pair.candles_1h.as_deref() {
@@ -40,7 +40,6 @@ pub(super) async fn load_backtest_data(
         candles_1h.insert(pair.symbol.clone(), raw_1h);
         candles_4h.insert(pair.symbol.clone(), raw_4h);
     }
-
     let events = load_events(pool, &symbols, args).await?;
     Ok(BacktestDataSet {
         pairs,
@@ -52,7 +51,7 @@ pub(super) async fn load_backtest_data(
         events,
     })
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_candle_pairs(
     pool: &PgPool,
     args: &MarketVelocityEventBacktestArgs,
@@ -71,7 +70,6 @@ async fn load_candle_pairs(
         .fetch_all(pool)
         .await
         .context("load market velocity candle table pairs")?;
-
     Ok(rows
         .into_iter()
         .map(|row| CandlePair {
@@ -82,7 +80,7 @@ async fn load_candle_pairs(
         })
         .collect())
 }
-
+/// 判断候选symbolsSQL，给回测策略流程提供布尔结果。
 fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
     match args.event_source {
         MarketVelocityEventSource::Episodes => {
@@ -96,9 +94,9 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
                 AND ($2::int IS NULL OR COALESCE(max_delta_rank, latest_delta_rank, 0) <= $2)
                 AND COALESCE(best_new_rank, latest_new_rank) BETWEEN 1 AND $3
                 AND (
-                  ($10 = 'long' AND lower(price_direction) = 'up')
-                  OR ($10 = 'short' AND lower(price_direction) = 'down')
-                  OR ($10 = 'both' AND lower(price_direction) IN ('up', 'down'))
+                  ($9 = 'long' AND lower(price_direction) = 'up')
+                  OR ($9 = 'short' AND lower(price_direction) = 'down')
+                  OR ($9 = 'both' AND lower(price_direction) IN ('up', 'down'))
                 )
                 AND current_price IS NOT NULL
                 AND ($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $4)
@@ -141,9 +139,9 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
                 AND ($2::int IS NULL OR delta_rank <= $2)
                 AND new_rank BETWEEN 1 AND $3
                 AND (
-                  ($10 = 'long' AND lower(price_direction) = 'up')
-                  OR ($10 = 'short' AND lower(price_direction) = 'down')
-                  OR ($10 = 'both' AND lower(price_direction) IN ('up', 'down'))
+                  ($9 = 'long' AND lower(price_direction) = 'up')
+                  OR ($9 = 'short' AND lower(price_direction) = 'down')
+                  OR ($9 = 'both' AND lower(price_direction) IN ('up', 'down'))
                 )
                 AND current_price IS NOT NULL
                 AND ($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $4)
@@ -175,7 +173,7 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
         }
     }
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_candles(pool: &PgPool, table_name: &str) -> Result<Vec<BacktestCandle>> {
     let query = format!(
         "SELECT ts, o, h, l, c, vol FROM {} ORDER BY ts",
@@ -198,7 +196,7 @@ async fn load_candles(pool: &PgPool, table_name: &str) -> Result<Vec<BacktestCan
         })
         .collect()
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_events(
     pool: &PgPool,
     symbols: &[String],
@@ -222,7 +220,6 @@ async fn load_events(
         .fetch_all(pool)
         .await
         .context("load market velocity radar events")?;
-
     rows.into_iter()
         .map(|row| {
             Ok(RadarEvent {
@@ -239,7 +236,7 @@ async fn load_events(
         })
         .collect()
 }
-
+/// 封装事件sourcesql，减少回测策略调用方重复实现相同细节。
 fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
     match args.event_source {
         MarketVelocityEventSource::Episodes => {
@@ -370,77 +367,70 @@ fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
         }
     }
 }
-
+/// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_f64(value: &str) -> Result<f64> {
     value
         .parse::<f64>()
         .with_context(|| format!("parse numeric value {value}"))
 }
-
 fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app::market_velocity_event_backtest::{
         MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
     };
-
     #[test]
     fn episode_event_source_reads_episode_table() {
         let args = MarketVelocityEventBacktestArgs {
             event_source: MarketVelocityEventSource::Episodes,
             ..MarketVelocityEventBacktestArgs::default()
         };
-
         let sql = event_source_sql(&args);
-
         assert!(sql.contains("FROM market_velocity_episodes"));
         assert!(!sql.contains("FROM market_rank_events"));
     }
-
     #[test]
     fn raw_event_source_keeps_legacy_rank_event_table() {
         let args = MarketVelocityEventBacktestArgs {
             event_source: MarketVelocityEventSource::RawEvents,
             ..MarketVelocityEventBacktestArgs::default()
         };
-
         let sql = event_source_sql(&args);
-
         assert!(sql.contains("FROM market_rank_events"));
     }
-
     #[test]
     fn raw_state_event_source_deduplicates_scanner_hits_by_15m_candle() {
         let args = MarketVelocityEventBacktestArgs {
             event_source: MarketVelocityEventSource::RawState,
             ..MarketVelocityEventBacktestArgs::default()
         };
-
         let sql = event_source_sql(&args);
-
         assert!(sql.contains("FROM market_rank_events"));
         assert!(sql.contains("DISTINCT ON (upper(symbol), detected_15m_bucket)"));
         assert!(sql.contains("floor(extract(epoch from detected_at) / 900)"));
         assert!(sql.contains("ORDER BY upper(symbol), detected_15m_bucket, detected_at, id"));
     }
-
     #[test]
     fn episode_event_source_keeps_closed_historical_episodes_in_backtests() {
         let args = MarketVelocityEventBacktestArgs {
             event_source: MarketVelocityEventSource::Episodes,
             ..MarketVelocityEventBacktestArgs::default()
         };
-
         let candidate_sql = candidate_symbols_sql(&args);
         let event_sql = event_source_sql(&args);
-
         assert!(candidate_sql.contains("status IN ('active', 'closed')"));
         assert!(event_sql.contains("status IN ('active', 'closed')"));
         assert!(!candidate_sql.contains("status = 'active'"));
         assert!(!event_sql.contains("status = 'active'"));
+    }
+    #[test]
+    fn candidate_symbols_sql_binds_trade_direction_as_ninth_parameter() {
+        let args = MarketVelocityEventBacktestArgs::default();
+        let sql = candidate_symbols_sql(&args);
+        assert!(sql.contains("$9 = 'long'"));
+        assert!(!sql.contains("$10 = 'long'"));
     }
 }

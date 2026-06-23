@@ -1,8 +1,8 @@
 use rust_quant_common::utils::fibonacci::FIBONACCI_ZERO_POINT_THREE_EIGHT_TWO;
 use rust_quant_common::CandleItem;
 use tracing::debug;
-
 /// 计算当前K线价格的振幅
+/// 计算 计算 k line 振幅，并把公式边界留在回测策略内部。
 pub fn calculate_k_line_amplitude(data_items: &[CandleItem]) -> f64 {
     let mut amplitude = 0.0;
     if let Some(last_item) = data_items.last() {
@@ -18,7 +18,6 @@ pub fn calculate_k_line_amplitude(data_items: &[CandleItem]) -> f64 {
     }
     amplitude
 }
-
 /// 计算最优开仓价格
 pub fn calculate_best_open_price(
     data_items: &[CandleItem],
@@ -27,16 +26,13 @@ pub fn calculate_best_open_price(
 ) -> Option<f64> {
     let last_data_item = data_items.last()?;
     let amplitude = calculate_k_line_amplitude(data_items);
-
     if amplitude <= 1.2 {
         debug!("k线振幅小于1.5个点，不计算最优开仓价格");
         return None;
     }
-
     let high_price = last_data_item.h();
     let low_price = last_data_item.l();
     let diff = high_price - low_price;
-
     if should_sell {
         // 如果k线是下跌，且跌幅较大，且没有利空消息，则使用最优开仓价格
         // (当前k线最高价格-当前k线最低价格)的38.2%作为最优开仓价格
@@ -49,7 +45,6 @@ pub fn calculate_best_open_price(
         None
     }
 }
-
 /// 计算最佳止损价格
 pub fn calculate_best_stop_loss_price(
     last_data_item: &CandleItem,
@@ -68,7 +63,6 @@ pub fn calculate_best_stop_loss_price(
         None
     }
 }
-
 /// 计算最优止盈价格
 pub fn calculate_best_take_profit_price(
     last_data_item: &CandleItem,
@@ -85,7 +79,6 @@ pub fn calculate_best_take_profit_price(
         None
     }
 }
-
 /// 检查关键价位卖出信号
 pub fn check_key_price_level_sell(
     current_price: f64,
@@ -103,20 +96,17 @@ pub fn check_key_price_level_sell(
         (0.01, 0.002, 0.001, "分"),     // 0.01元级别
         (0.001, 0.001, 0.0005, "厘"),   // 0.001元级别
     ];
-
     // 从大到小遍历找到第一个小于等于当前价格的级别
     let (interval, alert_percent, pullback_percent, level_name) = PRICE_LEVELS
         .iter()
         .find(|&&(level, _, _, _)| current_price >= level)
         .unwrap_or(&(0.001, 0.001, 0.0005, "微"));
-
     // 计算下一个关键价位
     let price_unit = if *interval >= 1.0 {
         *interval / 10.0 // 对于大于1元的价格，使用十分之一作为单位
     } else {
         *interval // 对于小于1元的价格，使用当前区间作为单位
     };
-
     let next_key_level = if *interval >= 1.0 {
         let magnitude = 10f64.powi((*interval).log10().floor() as i32);
         (*interval / magnitude).floor() * magnitude
@@ -124,15 +114,12 @@ pub fn check_key_price_level_sell(
         let magnitude = 10f64.powi((1.0 / *interval).log10().ceil() as i32);
         (*interval * magnitude).floor() / magnitude
     };
-
     let distance_to_key = next_key_level - current_price;
     let alert_distance = next_key_level * alert_percent;
-
     println!(
         "价位分析 - 当前价格: {:.4}, 下一关键位: {:.4}, 距离: {:.4}, 预警距离: {:.4} [{}级别]",
         current_price, next_key_level, distance_to_key, alert_distance, level_name
     );
-
     // 如果接近关键价位且成交量增加，生成卖出信号
     if distance_to_key > 0.0 && distance_to_key < alert_distance && volume_is_increasing {
         // 动态计算建议卖出价格
@@ -143,20 +130,17 @@ pub fn check_key_price_level_sell(
             // 小额价格使用固定点位回撤
             next_key_level - (price_unit * pullback_percent)
         };
-
         // 根据价格级别确定信号类型
         let signal_type = if *interval >= 100.0 {
             "重要"
         } else {
             "普通"
         };
-
         println!("价位分析详情:");
         println!("  价格级别: {} (区间: {:.4})", level_name, interval);
         println!("  预警比例: {:.2}%", alert_percent * 100.0);
         println!("  建议回撤: {:.2}%", pullback_percent * 100.0);
         println!("  建议卖价: {:.4}", suggested_sell_price);
-
         let format_str = if *interval >= 1.0 {
             format!(
                 "{}价位卖出信号: 当前价格({:.2})接近{}级别关键位({:.2})，建议在{:.2}卖出 [回撤{:.1}%]",
@@ -170,9 +154,7 @@ pub fn check_key_price_level_sell(
                 pullback_percent * 100.0
             )
         };
-
         return Some(format_str);
     }
-
     None
 }

@@ -1,41 +1,36 @@
 //! 策略运行器 V2 - 简化版
 //!
 //! 通过 services 层调用业务逻辑，orchestration 只做调度和协调
-
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use redis::AsyncCommands;
-use std::time::{Duration, SystemTime};
-use tracing::{debug, error, info, warn};
-
 use rust_quant_core::cache::get_redis_connection;
 use rust_quant_domain::{StrategyType, Timeframe};
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
-
+use std::time::{Duration, SystemTime};
+use tracing::{debug, error, info, warn};
 /// 策略执行状态跟踪 - 用于时间戳去重
 #[derive(Debug, Clone)]
 struct StrategyExecutionState {
     #[allow(dead_code)]
+    /// 事件时间戳。
     timestamp: i64,
+    /// 开始时间。
     start_time: SystemTime,
 }
-
 /// 全局策略执行状态管理器 - 防止重复处理相同时间戳的K线
 static STRATEGY_EXECUTION_STATES: Lazy<DashMap<String, StrategyExecutionState>> =
     Lazy::new(DashMap::new);
-
 /// 策略执行状态管理器
 pub struct StrategyExecutionStateManager;
-
 impl StrategyExecutionStateManager {
     const PERSIST_TTL_SECS: u64 = 86400 * 14;
-
     fn persistent_key(key: &str, timestamp: i64) -> String {
         format!("live_confirm_candle_processed:{}:{}", key, timestamp)
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     pub async fn is_persisted_processed(key: &str, timestamp: i64) -> bool {
         let rkey = Self::persistent_key(key, timestamp);
         let mut conn = match get_redis_connection().await {
@@ -45,7 +40,6 @@ impl StrategyExecutionStateManager {
                 return false;
             }
         };
-
         match conn.get::<_, Option<String>>(&rkey).await {
             Ok(Some(_)) => true,
             Ok(None) => false,
@@ -55,7 +49,7 @@ impl StrategyExecutionStateManager {
             }
         }
     }
-
+    /// 更新 回测与策略研究 状态，并保留调用方需要的结果或错误信息。
     pub async fn mark_persisted_completed(key: &str, timestamp: i64) {
         let rkey = Self::persistent_key(key, timestamp);
         let mut conn = match get_redis_connection().await {
@@ -65,7 +59,6 @@ impl StrategyExecutionStateManager {
                 return;
             }
         };
-
         if let Err(e) = conn
             .set_ex::<_, _, ()>(&rkey, "1", Self::PERSIST_TTL_SECS)
             .await
@@ -73,29 +66,24 @@ impl StrategyExecutionStateManager {
             warn!("写入持久化去重键失败: key={}, err={}", rkey, e);
         }
     }
-
     /// 检查并标记策略执行状态
     /// 返回 true 表示可以执行，false 表示应该跳过（正在处理或已处理）
     pub fn try_mark_processing(key: &str, timestamp: i64) -> bool {
         let state_key = format!("{}_{}", key, timestamp);
-
         // 检查是否已经在处理
         if STRATEGY_EXECUTION_STATES.contains_key(&state_key) {
             debug!("跳过重复处理: key={}, timestamp={}", key, timestamp);
             return false;
         }
-
         // 标记为正在处理
         let state = StrategyExecutionState {
             timestamp,
             start_time: SystemTime::now(),
         };
-
         STRATEGY_EXECUTION_STATES.insert(state_key.clone(), state);
         info!("标记策略执行状态: key={}, timestamp={}", key, timestamp);
         true
     }
-
     /// 完成策略执行，清理状态
     pub fn mark_completed(key: &str, timestamp: i64) {
         let state_key = format!("{}_{}", key, timestamp);
@@ -110,12 +98,10 @@ impl StrategyExecutionStateManager {
             );
         }
     }
-
     /// 清理过期的执行状态（超过5分钟的记录）
     pub fn cleanup_expired_states() {
         let now = SystemTime::now();
         let mut expired_keys = Vec::new();
-
         for entry in STRATEGY_EXECUTION_STATES.iter() {
             if let Ok(duration) = now.duration_since(entry.value().start_time) {
                 if duration > Duration::from_secs(300) {
@@ -123,13 +109,11 @@ impl StrategyExecutionStateManager {
                 }
             }
         }
-
         for key in expired_keys {
             STRATEGY_EXECUTION_STATES.remove(&key);
             debug!("清理过期状态: {}", key);
         }
     }
-
     /// 获取统计信息
     pub fn get_stats() -> (usize, Vec<String>) {
         let count = STRATEGY_EXECUTION_STATES.len();
@@ -140,7 +124,7 @@ impl StrategyExecutionStateManager {
         (count, keys)
     }
 }
-
+/// 判断shouldbypasspersistedprocessedguard，为回测策略流程提供明确的布尔结果。
 fn should_bypass_persisted_processed_guard() -> bool {
     should_bypass_persisted_processed_guard_from_env(
         std::env::var("RUST_QUANT_SMOKE_FORCE_SIGNAL")
@@ -148,7 +132,7 @@ fn should_bypass_persisted_processed_guard() -> bool {
             .as_deref(),
     )
 }
-
+/// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
 fn should_bypass_persisted_processed_guard_from_env(force_signal: Option<&str>) -> bool {
     let Some(value) = force_signal
         .map(str::trim)
@@ -161,25 +145,19 @@ fn should_bypass_persisted_processed_guard_from_env(force_signal: Option<&str>) 
         "disabled" | "disable" | "false" | "0" | "none" | "off"
     )
 }
-
 /// 执行策略 - 简化版接口
-///
 /// # Arguments
 /// * `inst_id` - 交易对（如 "BTC-USDT"）
 /// * `timeframe` - 时间周期
 /// * `strategy_type` - 策略类型
 /// * `config_id` - 策略配置ID（可选）
-///
 /// # Returns
 /// 返回策略信号结果
-///
 /// # Architecture Note
 /// 本函数仅作为占位符和接口定义，实际的策略执行应该：
 /// 1. 在应用层（bootstrap）创建已配置的 service 实例
 /// 2. 通过参数传入或使用全局单例模式
 /// 3. Orchestration 层只做任务调度，不创建 service 实例
-///
-#[allow(clippy::too_many_arguments)]
 pub async fn execute_strategy(
     inst_id: &str,
     timeframe: Timeframe,
@@ -201,12 +179,10 @@ pub async fn execute_strategy(
         "{}_{:?}_{:?}_{}",
         inst_id, timeframe, strategy_type, cfg_part
     );
-
     info!(
         "🚀 开始执行策略: inst_id={}, timeframe={:?}, strategy={:?}",
         inst_id, timeframe, strategy_type
     );
-
     // 检查是否应该跳过（去重）
     // - WebSocket 触发：用“确认K线的 ts”（毫秒）作为去重维度，避免重复消息/重连导致重复执行
     // - 定时/手动触发：退化为“当前时间秒”作为并发保护（同秒重复触发会被合并）
@@ -216,7 +192,6 @@ pub async fn execute_strategy(
             .duration_since(SystemTime::UNIX_EPOCH)?
             .as_secs() as i64,
     };
-
     let bypass_persisted_guard = should_bypass_persisted_processed_guard();
     if !bypass_persisted_guard
         && StrategyExecutionStateManager::is_persisted_processed(&key, timestamp).await
@@ -233,15 +208,12 @@ pub async fn execute_strategy(
             key, timestamp
         );
     }
-
     if !StrategyExecutionStateManager::try_mark_processing(&key, timestamp) {
         debug!("策略正在执行中，跳过: {}", key);
         return Ok(());
     }
-
     let timeframe_str = timeframe.as_str();
     let strategy_name = strategy_type.as_str();
-
     // 1. 加载策略配置
     let config = if let Some(id) = config_id {
         config_service.load_config_by_id(id).await?
@@ -249,7 +221,6 @@ pub async fn execute_strategy(
         let mut configs = config_service
             .load_configs(inst_id, timeframe_str, Some(strategy_name))
             .await?;
-
         if configs.is_empty() {
             warn!(
                 "⚠️  未找到策略配置，跳过执行: inst_id={}, timeframe={}, strategy={}",
@@ -258,10 +229,8 @@ pub async fn execute_strategy(
             StrategyExecutionStateManager::mark_completed(&key, timestamp);
             return Ok(());
         }
-
         configs.remove(0)
     };
-
     // 2. 验证策略配置
     if let Err(e) = config_service.validate_config(&config) {
         error!(
@@ -273,15 +242,12 @@ pub async fn execute_strategy(
     } else {
         info!("✅ 策略配置验证成功: key={}, config_id={}", key, config.id);
     }
-
     // 3. 执行策略
     let exec_result = execution_service
         .execute_strategy(inst_id, timeframe_str, &config, snap)
         .await;
-
     // 标记完成
     StrategyExecutionStateManager::mark_completed(&key, timestamp);
-
     match exec_result {
         Ok(signal_result) => {
             StrategyExecutionStateManager::mark_persisted_completed(&key, timestamp).await;
@@ -297,7 +263,6 @@ pub async fn execute_strategy(
         }
     }
 }
-
 /// 批量执行多个策略
 pub async fn execute_multiple_strategies(
     strategies: Vec<(String, Timeframe, StrategyType, Option<i64>)>,
@@ -305,9 +270,7 @@ pub async fn execute_multiple_strategies(
     execution_service: &StrategyExecutionService,
 ) -> Result<Vec<Result<()>>> {
     info!("🚀 批量执行 {} 个策略", strategies.len());
-
     let mut results = Vec::new();
-
     for (inst_id, timeframe, strategy_type, config_id) in strategies {
         let result = execute_strategy(
             &inst_id,
@@ -322,12 +285,9 @@ pub async fn execute_multiple_strategies(
         .await;
         results.push(result);
     }
-
     Ok(results)
 }
-
 /// 测试随机策略 - 保持向后兼容
-///
 /// 这是一个兼容接口，实际通过 services 层调用
 pub async fn test_random_strategy(
     inst_id: String,
@@ -336,10 +296,8 @@ pub async fn test_random_strategy(
     execution_service: &StrategyExecutionService,
 ) -> Result<()> {
     info!("🎲 测试随机策略: inst_id={}, period={}", inst_id, period);
-
     // 解析时间周期
     let timeframe = parse_period_to_timeframe(&period)?;
-
     // 默认使用 Vegas 策略
     execute_strategy(
         &inst_id,
@@ -353,7 +311,6 @@ pub async fn test_random_strategy(
     )
     .await
 }
-
 /// 测试指定策略 - 保持向后兼容
 pub async fn test_specified_strategy(
     inst_id: String,
@@ -367,10 +324,8 @@ pub async fn test_specified_strategy(
         "🎯 测试指定策略: inst_id={}, period={}, strategy={:?}",
         inst_id, period, strategy_type
     );
-
     // 解析时间周期
     let timeframe = parse_period_to_timeframe(&period)?;
-
     execute_strategy(
         &inst_id,
         timeframe,
@@ -383,7 +338,6 @@ pub async fn test_specified_strategy(
     )
     .await
 }
-
 /// 辅助函数：解析 period 字符串到 Timeframe
 fn parse_period_to_timeframe(period: &str) -> Result<Timeframe> {
     match period {
@@ -401,13 +355,11 @@ fn parse_period_to_timeframe(period: &str) -> Result<Timeframe> {
         _ => Err(anyhow!("不支持的时间周期: {}", period)),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use redis::AsyncCommands;
     use rust_quant_core::cache::{get_redis_connection, init_redis_pool};
-
     #[test]
     fn test_parse_period() {
         match parse_period_to_timeframe("1H") {
@@ -419,25 +371,19 @@ mod tests {
             Err(e) => panic!("解析 1D 失败: {}", e),
         }
     }
-
     #[test]
     fn test_state_manager() {
         let key = "test_key";
         let ts = 12345;
-
         // 第一次应该成功
         assert!(StrategyExecutionStateManager::try_mark_processing(key, ts));
-
         // 第二次应该失败（去重）
         assert!(!StrategyExecutionStateManager::try_mark_processing(key, ts));
-
         // 清理
         StrategyExecutionStateManager::mark_completed(key, ts);
-
         // 清理后应该又可以执行
         assert!(StrategyExecutionStateManager::try_mark_processing(key, ts));
     }
-
     #[test]
     fn smoke_forced_signal_bypasses_persisted_completed_guard_only_when_enabled() {
         assert!(should_bypass_persisted_processed_guard_from_env(Some(
@@ -455,7 +401,6 @@ mod tests {
             "off"
         )));
     }
-
     #[tokio::test]
     async fn test_persisted_state_manager_roundtrip() {
         if std::env::var("REDIS_HOST").is_err() {
@@ -465,11 +410,9 @@ mod tests {
             eprintln!("skip test_persisted_state_manager_roundtrip: redis unavailable");
             return;
         }
-
         let key = "persisted_test_key";
         let ts = 67890;
         let redis_key = StrategyExecutionStateManager::persistent_key(key, ts);
-
         let mut conn = match get_redis_connection().await {
             Ok(conn) => conn,
             Err(_) => {
@@ -478,12 +421,9 @@ mod tests {
             }
         };
         let _: redis::RedisResult<()> = conn.del(&redis_key).await;
-
         assert!(!StrategyExecutionStateManager::is_persisted_processed(key, ts).await);
-
         StrategyExecutionStateManager::mark_persisted_completed(key, ts).await;
         assert!(StrategyExecutionStateManager::is_persisted_processed(key, ts).await);
-
         let _: redis::RedisResult<()> = conn.del(&redis_key).await;
     }
 }

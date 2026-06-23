@@ -1,58 +1,43 @@
 //! 策略配置实体 (Strategy Config Aggregate Root)
-
+use crate::enums::{StrategyStatus, StrategyType, Timeframe};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-
-use crate::enums::{StrategyStatus, StrategyType, Timeframe};
-
 /// 策略配置实体 - 聚合根
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyConfig {
     /// 配置ID
     pub id: i64,
-
     /// 策略类型
     pub strategy_type: StrategyType,
-
     /// 行情/执行交易所
     #[serde(default)]
     pub exchange: Option<String>,
-
     /// 交易对符号
     pub symbol: String,
-
     /// 时间周期
     pub timeframe: Timeframe,
-
     /// 策略参数 (JSON格式)
     pub parameters: JsonValue,
-
     /// 风险配置 (JSON格式)
     pub risk_config: JsonValue,
-
     /// 策略状态
     #[serde(default = "StrategyStatus::default")]
     pub status: StrategyStatus,
-
     /// 创建时间
     pub created_at: DateTime<Utc>,
-
     /// 更新时间
     pub updated_at: DateTime<Utc>,
-
     /// 回测开始时间 (可选)
     pub backtest_start: Option<i64>,
-
     /// 回测结束时间 (可选)
     pub backtest_end: Option<i64>,
-
     /// 描述
     pub description: Option<String>,
 }
-
 impl StrategyConfig {
     /// 创建新的策略配置
+    /// 初始化new，确保回测策略依赖和内部状态可直接使用。
     pub fn new(
         id: i64,
         strategy_type: StrategyType,
@@ -78,55 +63,45 @@ impl StrategyConfig {
             description: None,
         }
     }
-
     /// 启动策略
     pub fn start(&mut self) {
         self.status = StrategyStatus::Running;
         self.updated_at = Utc::now();
     }
-
     /// 停止策略
     pub fn stop(&mut self) {
         self.status = StrategyStatus::Stopped;
         self.updated_at = Utc::now();
     }
-
     /// 暂停策略
     pub fn pause(&mut self) {
         self.status = StrategyStatus::Paused;
         self.updated_at = Utc::now();
     }
-
     /// 标记为错误状态
     pub fn mark_error(&mut self) {
         self.status = StrategyStatus::Error;
         self.updated_at = Utc::now();
     }
-
     /// 更新参数
     pub fn update_parameters(&mut self, parameters: JsonValue) {
         self.parameters = parameters;
         self.updated_at = Utc::now();
     }
-
     /// 更新风险配置
     pub fn update_risk_config(&mut self, risk_config: JsonValue) {
         self.risk_config = risk_config;
         self.updated_at = Utc::now();
     }
-
     /// 设置回测时间范围
     pub fn set_backtest_range(&mut self, start: i64, end: i64) {
         self.backtest_start = Some(start);
         self.backtest_end = Some(end);
         self.updated_at = Utc::now();
     }
-
-    /// 是否正在运行
     pub fn is_running(&self) -> bool {
         self.status == StrategyStatus::Running
     }
-
     /// 是否可以启动
     pub fn can_start(&self) -> bool {
         matches!(
@@ -135,7 +110,6 @@ impl StrategyConfig {
         )
     }
 }
-
 /// 基础风险策略配置 (通用的风险管理参数)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasicRiskConfig {
@@ -146,21 +120,17 @@ pub struct BasicRiskConfig {
     /// 固定信号线的止盈比例
     #[serde(alias = "fixed_signal_kline_take_profit_ratio")]
     pub fix_signal_kline_take_profit_ratio: Option<f64>,
-
     /// 是否启用移动止损
     pub is_move_stop_loss: Option<bool>,
-
     /// 是否使用信号K线作为止损
     pub is_used_signal_k_line_stop_loss: Option<bool>,
-
     /// 最大持仓时间 (秒，可选)
     pub max_hold_time: Option<i64>,
-
     /// 最大杠杆倍数 (可选)
     pub max_leverage: Option<f64>,
 }
-
 impl Default for BasicRiskConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             max_loss_percent: 0.02,                   // 默认2%止损
@@ -173,13 +143,14 @@ impl Default for BasicRiskConfig {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_strategy_config_creation() {
         let config = StrategyConfig::new(
             1,
@@ -189,11 +160,9 @@ mod tests {
             json!({"param1": "value1"}),
             json!({"max_loss": 0.02}),
         );
-
         assert_eq!(config.strategy_type, StrategyType::Vegas);
         assert_eq!(config.status, StrategyStatus::Running);
     }
-
     #[test]
     fn test_strategy_lifecycle() {
         let mut config = StrategyConfig::new(
@@ -204,17 +173,13 @@ mod tests {
             json!({}),
             json!({}),
         );
-
         assert!(config.is_running());
         assert!(!config.can_start());
-
         config.pause();
         assert!(!config.is_running());
         assert!(config.can_start());
-
         config.start();
         assert!(config.is_running());
-
         config.stop();
         assert_eq!(config.status, StrategyStatus::Stopped);
     }

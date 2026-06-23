@@ -5,14 +5,13 @@ use rust_quant_orchestration::workflow::external_market_sync_job::ExternalMarket
 use std::collections::HashMap;
 use std::env;
 use tracing::info;
-
 #[tokio::main]
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 async fn main() -> Result<()> {
     dotenv().ok();
     env_logger::init();
-
     rust_quant_core::database::sqlx_pool::init_db_pool().await?;
-
     let symbol = env::var("DUNE_SYMBOL").unwrap_or_else(|_| "ETH".to_string());
     let start_time =
         env::var("DUNE_START_TIME").unwrap_or_else(|_| "2026-03-30T00:00:00Z".to_string());
@@ -23,18 +22,15 @@ async fn main() -> Result<()> {
     let template_path = env::var("DUNE_TEMPLATE_PATH").unwrap_or_else(|_| {
         "docs/external_market_data/dune/hyperliquid_funding_basis.sql".to_string()
     });
-
     let mut params = HashMap::new();
     params.insert("symbol".to_string(), symbol.clone());
     params.insert("start_time".to_string(), start_time.clone());
     params.insert("end_time".to_string(), end_time.clone());
     params.insert("min_usd".to_string(), min_usd.clone());
-
     info!(
         "执行 Dune 外部市场同步: metric_type={}, symbol={}, template_path={}",
         metric_type, symbol, template_path
     );
-
     ExternalMarketSyncJob::sync_dune_template(
         &metric_type,
         &symbol,
@@ -43,6 +39,5 @@ async fn main() -> Result<()> {
         DuneQueryPerformance::Medium,
     )
     .await?;
-
     Ok(())
 }

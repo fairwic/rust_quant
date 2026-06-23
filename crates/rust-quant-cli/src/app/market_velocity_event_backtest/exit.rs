@@ -1,23 +1,26 @@
 use super::{BacktestCandle, MarketVelocityTradeDirection, TradeOutcome, TradeResult};
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProfitProtection {
+    /// activateafterr，用于行情、K 线或市场扫描。
     pub activate_after_r: f64,
+    /// 止损r，用于行情、K 线或市场扫描。
     pub stop_r: f64,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RunnerExit {
+    /// targetr，用于行情、K 线或市场扫描。
     pub target_r: f64,
+    /// fraction，用于行情、K 线或市场扫描。
     pub fraction: f64,
+    /// 止损r，用于行情、K 线或市场扫描。
     pub stop_r: f64,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EarlyExit {
+    /// no收益K 线，用于行情、K 线或市场扫描。
     pub no_profit_candles: usize,
 }
-
+/// 执行模拟交易步骤，串起回测策略需要的状态推进和错误处理。
 pub fn simulate_trade(
     candles: &[BacktestCandle],
     entry_idx: usize,
@@ -48,7 +51,6 @@ pub fn simulate_trade(
     let max_ts = candles.last().map(|candle| candle.ts).unwrap_or_default();
     let mut last_seen: Option<&BacktestCandle> = None;
     let mut protected_stop: Option<(f64, f64)> = None;
-
     for (idx, candle) in candles.iter().enumerate().skip(entry_idx) {
         if candle.ts > horizon_end {
             break;
@@ -138,7 +140,6 @@ pub fn simulate_trade(
             );
         }
     }
-
     if max_ts >= horizon_end {
         let r = last_seen
             .map(|candle| r_for_price(entry_price, stop_loss_pct, candle.close, direction));
@@ -152,7 +153,6 @@ pub fn simulate_trade(
             entry_price,
         );
     }
-
     let r =
         last_seen.map(|candle| r_for_price(entry_price, stop_loss_pct, candle.close, direction));
     base_trade_result(
@@ -165,7 +165,7 @@ pub fn simulate_trade(
         entry_price,
     )
 }
-
+/// 执行模拟Runner交易步骤，串起回测策略需要的状态推进和错误处理。
 fn simulate_runner_trade(
     candles: &[BacktestCandle],
     target_hit_idx: usize,
@@ -185,7 +185,6 @@ fn simulate_runner_trade(
     let horizon_end = entry_ts + horizon_ms;
     let max_ts = candles.last().map(|candle| candle.ts).unwrap_or_default();
     let mut last_seen: Option<&BacktestCandle> = None;
-
     for candle in candles.iter().skip(target_hit_idx + 1) {
         if candle.ts > horizon_end {
             break;
@@ -224,7 +223,6 @@ fn simulate_runner_trade(
             );
         }
     }
-
     let runner_close_r =
         last_seen.map(|candle| r_for_price(entry_price, stop_loss_pct, candle.close, direction));
     if max_ts >= horizon_end {
@@ -241,7 +239,6 @@ fn simulate_runner_trade(
             entry_price,
         );
     }
-
     let r = runner_close_r
         .map(|close_r| first_profit_r + runner.fraction * close_r)
         .unwrap_or(first_profit_r);
@@ -255,7 +252,7 @@ fn simulate_runner_trade(
         entry_price,
     )
 }
-
+/// 停止 回测与策略研究 后台流程，确保退出时不留下未释放状态。
 fn stop_price_for(
     entry_price: f64,
     stop_loss_pct: f64,
@@ -267,7 +264,7 @@ fn stop_price_for(
         MarketVelocityTradeDirection::Both => entry_price,
     }
 }
-
+/// 提供目标价格for的集中实现，避免回测策略调用方重复处理相同细节。
 fn target_price_for(
     entry_price: f64,
     stop_loss_pct: f64,
@@ -280,7 +277,7 @@ fn target_price_for(
         MarketVelocityTradeDirection::Both => entry_price,
     }
 }
-
+/// 提供hit止损的集中实现，避免回测策略调用方重复处理相同细节。
 fn hit_stop(
     candle: &BacktestCandle,
     stop_price: f64,
@@ -292,7 +289,7 @@ fn hit_stop(
         MarketVelocityTradeDirection::Both => false,
     }
 }
-
+/// 提供hit目标的集中实现，避免回测策略调用方重复处理相同细节。
 fn hit_target(
     candle: &BacktestCandle,
     target_price: f64,
@@ -304,7 +301,7 @@ fn hit_target(
         MarketVelocityTradeDirection::Both => false,
     }
 }
-
+/// 提供no盈利平仓的集中实现，避免回测策略调用方重复处理相同细节。
 fn no_profit_close(
     close_price: f64,
     entry_price: f64,
@@ -316,7 +313,7 @@ fn no_profit_close(
         MarketVelocityTradeDirection::Both => false,
     }
 }
-
+/// 提供rfor价格的集中实现，避免回测策略调用方重复处理相同细节。
 fn r_for_price(
     entry_price: f64,
     stop_loss_pct: f64,
@@ -331,7 +328,7 @@ fn r_for_price(
         MarketVelocityTradeDirection::Both => 0.0,
     }
 }
-
+/// 执行 Runner交易结果步骤，串起回测策略需要的状态推进和错误处理。
 fn runner_trade_result(
     reason: &str,
     exit_ts: i64,
@@ -350,7 +347,7 @@ fn runner_trade_result(
         entry_price,
     )
 }
-
+/// 提供结果forr的集中实现，避免回测策略调用方重复处理相同细节。
 fn outcome_for_r(r: f64) -> TradeOutcome {
     if r > 0.0 {
         TradeOutcome::Win
@@ -360,7 +357,7 @@ fn outcome_for_r(r: f64) -> TradeOutcome {
         TradeOutcome::Flat
     }
 }
-
+/// 提供protected止损结果的集中实现，避免回测策略调用方重复处理相同细节。
 fn protected_stop_result(
     exit_ts: i64,
     stop_r: f64,
@@ -377,7 +374,7 @@ fn protected_stop_result(
         entry_price,
     )
 }
-
+/// 提供base交易结果的集中实现，避免回测策略调用方重复处理相同细节。
 fn base_trade_result(
     outcome: TradeOutcome,
     reason: &str,

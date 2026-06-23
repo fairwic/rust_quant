@@ -2,7 +2,7 @@ use super::types::{
     FactorBucketReport, PathImpactSummary, ResearchFilteredSignalSample, ResearchSampleKind,
     ResearchTradeSample, VolatilityTier,
 };
-
+/// 提供render报告的集中实现，避免回测策略调用方重复处理相同细节。
 pub fn render_report(
     trades: &[ResearchTradeSample],
     filtered_signals: &[ResearchFilteredSignalSample],
@@ -31,7 +31,6 @@ pub fn render_report(
         "| 因子 | 桶 | 分层 | 样本数 | 胜率 | AvgPnL | TotalPnL | SharpeProxy |".to_string(),
         "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |".to_string(),
     ];
-
     let candidates = low_sharpe_open_candidates(buckets);
     for row in candidates
         .iter()
@@ -51,7 +50,6 @@ pub fn render_report(
             row.sharpe_proxy,
         ));
     }
-
     lines.extend([
         String::new(),
         "## 低影响观察候选".to_string(),
@@ -76,7 +74,6 @@ pub fn render_report(
             row.sharpe_proxy,
         ));
     }
-
     lines.extend([
         String::new(),
         "## 已覆盖拒绝候选".to_string(),
@@ -102,7 +99,6 @@ pub fn render_report(
             row.1,
         ));
     }
-
     lines.extend([
         String::new(),
         "## 出场/止损环境候选".to_string(),
@@ -122,14 +118,12 @@ pub fn render_report(
             row.sharpe_proxy,
         ));
     }
-
     lines.extend([
         String::new(),
         "## 分桶统计表".to_string(),
         "| 因子 | 样本类型 | 桶 | 分层 | 样本数 | 胜率 | AvgPnL | SharpeProxy | 结论 |".to_string(),
         "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |".to_string(),
     ]);
-
     for row in buckets {
         lines.push(format!(
             "| {} | {} | {} | {} | {} | {:.2}% | {:.2} | {:.2} | {} |",
@@ -144,10 +138,9 @@ pub fn render_report(
             row.conclusion.label()
         ));
     }
-
     lines.join("\n")
 }
-
+/// 封装低sharpeopencandidates，减少回测策略调用方重复实现相同细节。
 fn low_sharpe_open_candidates(buckets: &[FactorBucketReport]) -> Vec<&FactorBucketReport> {
     let mut candidates: Vec<_> = buckets
         .iter()
@@ -166,7 +159,7 @@ fn low_sharpe_open_candidates(buckets: &[FactorBucketReport]) -> Vec<&FactorBuck
     });
     candidates
 }
-
+/// 提供离场environmentcandidates的集中实现，避免回测策略调用方重复处理相同细节。
 fn exit_environment_candidates(buckets: &[FactorBucketReport]) -> Vec<&FactorBucketReport> {
     let mut candidates: Vec<_> = buckets
         .iter()
@@ -185,15 +178,13 @@ fn exit_environment_candidates(buckets: &[FactorBucketReport]) -> Vec<&FactorBuc
     });
     candidates
 }
-
 fn total_pnl(row: &FactorBucketReport) -> f64 {
     row.avg_pnl * row.sample_count as f64
 }
-
 fn is_actionable_impact(row: &FactorBucketReport) -> bool {
     total_pnl(row) <= -10.0
 }
-
+/// 提供rejectedcoverage的集中实现，避免回测策略调用方重复处理相同细节。
 fn rejected_coverage(row: &FactorBucketReport) -> Option<&'static str> {
     if row.volatility_tier == VolatilityTier::Eth
         && row.bucket_name.contains("funding_negative_short")
@@ -206,7 +197,7 @@ fn rejected_coverage(row: &FactorBucketReport) -> Option<&'static str> {
         None
     }
 }
-
+/// 计算 min low sharpe samples，并把公式边界留在回测策略内部。
 fn min_low_sharpe_samples(tier: VolatilityTier) -> usize {
     match tier {
         VolatilityTier::Eth => 3,
@@ -214,7 +205,7 @@ fn min_low_sharpe_samples(tier: VolatilityTier) -> usize {
         VolatilityTier::Alt => 6,
     }
 }
-
+/// 提供tierrank的集中实现，避免回测策略调用方重复处理相同细节。
 fn tier_rank(tier: VolatilityTier) -> u8 {
     match tier {
         VolatilityTier::Eth => 0,
@@ -222,7 +213,7 @@ fn tier_rank(tier: VolatilityTier) -> u8 {
         VolatilityTier::Alt => 2,
     }
 }
-
+/// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 pub fn render_path_impact_report(summaries: &[PathImpactSummary]) -> String {
     let mut lines = vec![
         "# Vegas 路径影响评估报告".to_string(),
@@ -232,7 +223,6 @@ pub fn render_path_impact_report(summaries: &[PathImpactSummary]) -> String {
             .to_string(),
         "| ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |".to_string(),
     ];
-
     for row in summaries {
         lines.push(format!(
             "| {} | {} | {} | {} | {:.2} | {} | {:.2} | {:.2} | {:.2} | {} |",
@@ -248,7 +238,6 @@ pub fn render_path_impact_report(summaries: &[PathImpactSummary]) -> String {
             row.verdict
         ));
     }
-
     lines.push(String::new());
     lines.push("## Top Changed Trades".to_string());
     lines.push(
@@ -256,7 +245,6 @@ pub fn render_path_impact_report(summaries: &[PathImpactSummary]) -> String {
             .to_string(),
     );
     lines.push("| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | --- |".to_string());
-
     for summary in summaries {
         for change in &summary.top_changes {
             lines.push(format!(
@@ -273,10 +261,9 @@ pub fn render_path_impact_report(summaries: &[PathImpactSummary]) -> String {
             ));
         }
     }
-
     lines.join("\n")
 }
-
+/// 提供fmtoptionalf64的集中实现，避免回测策略调用方重复处理相同细节。
 fn fmt_optional_f64(value: Option<f64>) -> String {
     value
         .map(|row| format!("{row:.2}"))

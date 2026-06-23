@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn test_config() -> ReconciliationSnapshotCheckConfig {
         ReconciliationSnapshotCheckConfig {
             buyer_email: "buyer@example.com".to_string(),
@@ -9,6 +8,7 @@ mod tests {
             symbol: "BTC-USDT-SWAP".to_string(),
             combo_id: 85,
             task_id: 85,
+            credential_id: None,
             credential_ref: Some("manual".to_string()),
             report_reconciliation: false,
             include_fills: true,
@@ -16,7 +16,6 @@ mod tests {
             close_fill_writeback_intent: None,
         }
     }
-
     fn test_order(order_id: Option<&str>) -> Order {
         Order {
             exchange: ExchangeId::Okx,
@@ -36,7 +35,6 @@ mod tests {
             raw: json!({}),
         }
     }
-
     fn test_fill(trade_id: Option<&str>) -> Fill {
         Fill {
             exchange: ExchangeId::Okx,
@@ -54,7 +52,6 @@ mod tests {
             raw: json!({}),
         }
     }
-
     fn test_position_history(position_id: Option<&str>) -> crypto_exc_all::PositionHistory {
         crypto_exc_all::PositionHistory {
             exchange: ExchangeId::Okx,
@@ -81,40 +78,31 @@ mod tests {
             raw: json!({"posId": position_id}),
         }
     }
-
     #[test]
     fn okx_order_history_pagination_uses_last_order_id_for_full_page() {
         let page = vec![
             test_order(Some("order-newer")),
             test_order(Some("order-older")),
         ];
-
         let cursor = next_okx_order_history_after_cursor(&page, 2);
-
         assert_eq!(cursor.as_deref(), Some("order-older"));
     }
-
     #[test]
     fn okx_order_history_pagination_stops_on_short_page_or_missing_cursor() {
         let short_page = vec![test_order(Some("order-only"))];
         let missing_cursor_page = vec![test_order(Some("order-newer")), test_order(None)];
-
         assert_eq!(next_okx_order_history_after_cursor(&short_page, 2), None);
         assert_eq!(
             next_okx_order_history_after_cursor(&missing_cursor_page, 2),
             None
         );
     }
-
     #[test]
     fn okx_fill_history_pagination_uses_last_trade_id_for_full_page() {
         let page = vec![test_fill(Some("fill-newer")), test_fill(Some("fill-older"))];
-
         let cursor = next_okx_fill_history_after_cursor(&page, 2);
-
         assert_eq!(cursor.as_deref(), Some("fill-older"));
     }
-
     #[test]
     fn account_snapshot_report_uses_web_datetime_contract() {
         let request = build_exchange_account_snapshot_report_request(
@@ -128,7 +116,6 @@ mod tests {
             &[],
         )
         .expect("account snapshot request");
-
         let snapshot_at = request.snapshot_at.expect("snapshot_at");
         assert!(
             chrono::NaiveDateTime::parse_from_str(&snapshot_at, "%Y-%m-%dT%H:%M:%S").is_ok(),
@@ -139,15 +126,12 @@ mod tests {
             "snapshot_at must not use chrono default space separator"
         );
     }
-
     #[test]
     fn exchange_timestamps_use_web_datetime_contract() {
         let formatted =
             timestamp_millis_to_naive_string(1_774_814_400_000).expect("valid timestamp millis");
-
         assert_eq!(formatted, "2026-03-29T20:00:00");
     }
-
     #[test]
     fn account_snapshot_report_includes_symbol_scoped_account_bills() {
         let bills = vec![
@@ -197,7 +181,6 @@ mod tests {
             &[],
         )
         .expect("account snapshot request");
-
         assert_eq!(request.bills.len(), 1);
         assert_eq!(request.bills[0].external_bill_id, "okx-bill-1");
         assert_eq!(request.bills[0].asset, "USDT");
@@ -205,11 +188,9 @@ mod tests {
         assert_eq!(request.bills[0].fee_amount, Some(-0.3));
         assert_eq!(request.bills[0].pnl_amount, Some(10.0));
     }
-
     #[test]
     fn account_snapshot_report_includes_okx_position_history() {
         let position_history = vec![test_position_history(Some("okx-position-1"))];
-
         let request = build_exchange_account_snapshot_report_request(
             &test_config(),
             &[],
@@ -221,7 +202,6 @@ mod tests {
             &position_history,
         )
         .expect("account snapshot request");
-
         assert_eq!(request.position_history.len(), 1);
         let item = &request.position_history[0];
         assert_eq!(item.external_position_id, "okx-position-1");

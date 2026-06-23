@@ -8,7 +8,6 @@ use rust_quant::trading::strategy::strategy_common::{BasicRiskStrategyConfig, Si
 use rust_quant::trading::strategy::StrategyType;
 use serde_json::json;
 use tracing::error;
-
 #[tokio::test]
 async fn test_okx_order() {
     // 启用详细日志
@@ -22,12 +21,10 @@ async fn test_okx_order() {
     // builder.init();
     let inst_id = "ETH-USDT-SWAP";
     let period = "4H";
-
     println!("🧪 开始测试OKX订单功能");
     println!("📋 测试参数:");
     println!("   - 合约: {}", inst_id);
     println!("   - 周期: {}", period);
-
     let signal_result = SignalResult {
         should_buy: false,
         should_sell: true,
@@ -39,13 +36,10 @@ async fn test_okx_order() {
         single_value: None,
         single_result: None,
     };
-
     println!("📊 交易信号: {:#?}", signal_result);
-
     //执行交易
     let risk_config = BasicRiskStrategyConfig::default();
     println!("⚡ 开始执行订单...");
-
     let order = SwapOrderService::new()
         .ready_to_order(
             &StrategyType::Vegas,
@@ -62,7 +56,6 @@ async fn test_okx_order() {
         println!("order success: {:?}", order);
     }
 }
-
 // #[tokio::test]
 // async fn test_get_position() -> Result<(), AppError> {
 //     // 启用详细日志
@@ -77,7 +70,6 @@ async fn test_okx_order() {
 //     app_init().await;
 //     let inst_id = "BTC-USDT-SWAP";
 //     let period = "1H";
-
 //     // 获取当前仓位状态
 //     let account = OkxAccount::from_env()?;
 //     //todo 如有反向的仓位，应该开启异步去立即关闭

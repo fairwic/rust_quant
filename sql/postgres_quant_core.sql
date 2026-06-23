@@ -233,6 +233,8 @@ CREATE INDEX IF NOT EXISTS idx_backtest_trades_run_id
     ON backtest_trades (run_id);
 CREATE INDEX IF NOT EXISTS idx_exchange_request_audit_lookup
     ON exchange_request_audit_logs (exchange, symbol, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_exchange_request_audit_report_replay
+    ON exchange_request_audit_logs (endpoint, request_id, request_status, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_exchange_symbols_exchange_status
     ON exchange_symbols (exchange, status);
 CREATE INDEX IF NOT EXISTS idx_exchange_symbols_base_quote

@@ -1,3 +1,4 @@
+use crate::backtest::PositionStats;
 use anyhow::Result;
 use chrono::NaiveDateTime;
 use rust_quant_core::database::get_db_pool;
@@ -5,45 +6,61 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::time::Instant;
 use tracing::{info, warn};
-
-use crate::backtest::PositionStats;
-
 /// 回测日志表
 #[derive(Clone, Debug, Serialize, Deserialize, FromRow)]
 pub struct BackTestLog {
     #[sqlx(default)]
+    /// 唯一标识。
     pub id: Option<i32>,
+    /// 类型标识。
     pub strategy_type: String,
+    /// 类型标识。
     pub inst_type: String,
+    /// 时间字段。
     pub time: String,
+    /// 胜率。
     pub win_rate: String,
+    /// 金额数值。
     pub final_fund: f32,
+    /// 未平仓仓位数量。
     pub open_positions_num: i32,
+    /// 策略详情；为空时不输出详情。
     pub strategy_detail: Option<String>,
+    /// 风险配置详情，用于配置运行参数。
     pub risk_config_detail: String,
     #[sqlx(default)]
+    /// 创建时间。
     pub created_at: Option<NaiveDateTime>,
+    /// 收益值；为空时表示没有收益数据。
     pub profit: Option<f32>,
+    /// onebarafterwin 费率；为空时使用默认值或表示不限制。
     pub one_bar_after_win_rate: Option<f32>,
+    /// twobarafterwin 费率；为空时使用默认值或表示不限制。
     pub two_bar_after_win_rate: Option<f32>,
+    /// threebarafterwin 费率；为空时使用默认值或表示不限制。
     pub three_bar_after_win_rate: Option<f32>,
+    /// fourbarafterwin 费率；为空时使用默认值或表示不限制。
     pub four_bar_after_win_rate: Option<f32>,
+    /// fivebarafterwin 费率；为空时使用默认值或表示不限制。
     pub five_bar_after_win_rate: Option<f32>,
+    /// tenbarafterwin 费率；为空时使用默认值或表示不限制。
     pub ten_bar_after_win_rate: Option<f32>,
+    /// 开始时间。
     pub kline_start_time: i64,
+    /// 结束时间。
     pub kline_end_time: i64,
+    /// klinenums，用于交易策略计算。
     pub kline_nums: i32,
 }
-
 /// 基于 sqlx 的 BackTestLog Model
 pub struct BackTestLogModel;
-
 impl BackTestLogModel {
     /// 添加回测日志记录
+    /// 封装当前函数，减少风控调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     pub async fn add(&self, log: &BackTestLog) -> Result<i64> {
         let pool = get_db_pool();
         let start_time = Instant::now();
-
         let last_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO back_test_log (
@@ -77,18 +94,14 @@ impl BackTestLogModel {
         .bind(log.kline_nums)
         .fetch_one(pool)
         .await?;
-
         let duration = start_time.elapsed();
-
         info!(
             "insert_back_test_log: id={}, 耗时={}ms",
             last_id,
             duration.as_millis()
         );
-
         Ok(last_id)
     }
-
     /// 更新持仓统计数据
     pub async fn update_position_stats(
         &self,
@@ -96,7 +109,6 @@ impl BackTestLogModel {
         stats: PositionStats,
     ) -> Result<u64> {
         let pool = get_db_pool();
-
         let result = sqlx::query(
             r#"
             UPDATE back_test_log 
@@ -119,9 +131,7 @@ impl BackTestLogModel {
         .bind(back_test_id)
         .execute(pool)
         .await?;
-
         let affected = result.rows_affected();
-
         if affected == 0 {
             warn!(
                 "未能更新 back_test_id {} 的统计数据，可能ID不存在",
@@ -137,36 +147,28 @@ impl BackTestLogModel {
                 stats.ten_bar_after_win_rate * 100.0
             );
         }
-
         Ok(affected)
     }
-
     /// 根据 ID 查询回测日志
     pub async fn find_by_id(&self, id: i64) -> Result<Option<BackTestLog>> {
         let pool = get_db_pool();
-
         let log = sqlx::query_as::<_, BackTestLog>("SELECT * FROM back_test_log WHERE id = $1")
             .bind(id)
             .fetch_optional(pool)
             .await?;
-
         Ok(log)
     }
-
     /// 查询最近的回测日志
     pub async fn find_recent(&self, limit: i32) -> Result<Vec<BackTestLog>> {
         let pool = get_db_pool();
-
         let logs = sqlx::query_as::<_, BackTestLog>(
             "SELECT * FROM back_test_log ORDER BY created_at DESC LIMIT $1",
         )
         .bind(limit)
         .fetch_all(pool)
         .await?;
-
         Ok(logs)
     }
-
     /// 根据策略类型查询
     pub async fn find_by_strategy_type(
         &self,
@@ -174,7 +176,6 @@ impl BackTestLogModel {
         limit: i32,
     ) -> Result<Vec<BackTestLog>> {
         let pool = get_db_pool();
-
         let logs = sqlx::query_as::<_, BackTestLog>(
             "SELECT * FROM back_test_log WHERE strategy_type = $1 ORDER BY created_at DESC LIMIT $2",
         )
@@ -182,7 +183,6 @@ impl BackTestLogModel {
         .bind(limit)
         .fetch_all(pool)
         .await?;
-
         Ok(logs)
     }
 }

@@ -13,7 +13,6 @@ pub mod signal;
 pub mod trait_impl;
 pub mod types;
 pub mod utils;
-
 // 重新导出常用类型
 pub use crate::framework::risk::{StopLossCalculator, StopLossSide};
 pub use adapter::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};

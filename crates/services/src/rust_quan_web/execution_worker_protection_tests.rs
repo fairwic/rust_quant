@@ -1,5 +1,4 @@
 #![allow(unused_imports)]
-
 use super::execution_worker_test_support::*;
 use super::*;
 use crate::rust_quan_web::execution_payload::{
@@ -16,7 +15,6 @@ use async_trait::async_trait;
 use crypto_exc_all::{Instrument, ProtectiveOrderWorkingType};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
-
 #[tokio::test]
 async fn pending_close_task_dry_run_reports_close_candidate_result() {
     let worker = ExecutionWorker::new(
@@ -61,12 +59,10 @@ async fn pending_close_task_dry_run_reports_close_candidate_result() {
             }
         }),
     );
-
     let report = worker.execute_task(&task).await;
     let raw_payload =
         serde_json::from_str::<Value>(report.raw_payload_json.as_deref().expect("raw payload"))
             .expect("raw payload json");
-
     assert_eq!(report.execution_status, "completed");
     assert_eq!(report.exchange, "binance");
     assert_eq!(report.order_side, "close");
@@ -76,7 +72,6 @@ async fn pending_close_task_dry_run_reports_close_candidate_result() {
     assert_eq!(raw_payload["risk_control_action"], "close_candidate");
     assert_eq!(raw_payload["symbol"], "BTC-USDT-SWAP");
 }
-
 #[tokio::test]
 async fn dry_run_execute_signal_with_required_stop_loss_stays_pending_protection_sync() {
     let repository = Arc::new(CapturingAuditRepository::default());
@@ -120,12 +115,10 @@ async fn dry_run_execute_signal_with_required_stop_loss_stays_pending_protection
             "direction": "long"
         }
     }));
-
     let report = worker.execute_task(&task).await;
     let raw_payload =
         serde_json::from_str::<Value>(report.raw_payload_json.as_deref().expect("raw payload"))
             .expect("raw payload json");
-
     assert_eq!(report.execution_status, "pending_protection_sync");
     assert_eq!(report.exchange, "binance");
     assert_eq!(report.order_side, "buy");
@@ -145,7 +138,6 @@ async fn dry_run_execute_signal_with_required_stop_loss_stays_pending_protection
     assert_eq!(raw_payload["protection_sync"]["place_order_allowed"], false);
     assert_eq!(repository.audits.lock().unwrap().len(), 1);
 }
-
 #[tokio::test]
 async fn execute_signal_with_required_live_stop_loss_missing_selected_price_fails_before_order() {
     let repository = Arc::new(CapturingAuditRepository::default());
@@ -189,12 +181,10 @@ async fn execute_signal_with_required_live_stop_loss_missing_selected_price_fail
             "max_loss_percent": 0.02
         }
     }));
-
     let report = worker.execute_task(&task).await;
     let raw_payload =
         serde_json::from_str::<Value>(report.raw_payload_json.as_deref().expect("raw payload"))
             .expect("raw payload json");
-
     assert_eq!(report.execution_status, "failed");
     assert_eq!(report.exchange, "binance");
     assert_eq!(report.order_side, "buy");
@@ -210,7 +200,6 @@ async fn execute_signal_with_required_live_stop_loss_missing_selected_price_fail
     );
     assert!(repository.audits.lock().unwrap().is_empty());
 }
-
 #[tokio::test]
 async fn live_config_missing_stop_loss_short_circuits_before_gateway_audit() {
     let repository = Arc::new(CapturingAuditRepository::default());
@@ -254,12 +243,10 @@ async fn live_config_missing_stop_loss_short_circuits_before_gateway_audit() {
             "max_loss_percent": 0.02
         }
     }));
-
     let report = worker.execute_task(&task).await;
     let raw_payload =
         serde_json::from_str::<Value>(report.raw_payload_json.as_deref().expect("raw payload"))
             .expect("raw payload json");
-
     assert_eq!(report.execution_status, "failed");
     assert_eq!(report.exchange, "binance");
     assert_eq!(raw_payload["risk_contract"]["worker_dry_run"], false);
@@ -271,7 +258,66 @@ async fn live_config_missing_stop_loss_short_circuits_before_gateway_audit() {
     assert!(repository.audits.lock().unwrap().is_empty());
     assert!(repository.checkpoints.lock().unwrap().is_empty());
 }
-
+#[tokio::test]
+async fn live_open_order_without_stop_loss_contract_fails_before_api_preflight() {
+    let repository = Arc::new(CapturingAuditRepository::default());
+    let worker = ExecutionWorker::new(
+        ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "http://127.0.0.1".to_string(),
+            internal_secret: String::new(),
+        })
+        .unwrap(),
+        CryptoExcAllGateway::dry_run(),
+        ExecutionWorkerConfig {
+            worker_id: "worker-live-open-no-stop".to_string(),
+            lease_limit: 1,
+            dry_run: false,
+            default_exchange: ExchangeId::Binance,
+            task_types: vec!["execute_signal".to_string()],
+            task_statuses: vec!["pending".to_string()],
+            target_task_ids: Vec::new(),
+            confirmation_mode: false,
+            report_replay_mode: false,
+            report_replay_max_per_run: 1,
+            report_replay_failure_backoff_seconds: 300,
+            report_replay_throttle_ms: 0,
+        },
+    )
+    .with_audit_repository(repository.clone());
+    let task = task(json!({
+        "source": "rust_quan_web",
+        "symbol": "ETH-USDT-SWAP",
+        "execution": {
+            "exchange": "binance",
+            "symbol": "ETH-USDT-SWAP",
+            "side": "buy",
+            "order_type": "market",
+            "size_usdt": 35.0
+        },
+        "risk_plan": {
+            "direction": "long",
+            "entry_price": 3500.0
+        }
+    }));
+    let report = worker.execute_task(&task).await;
+    let raw_payload =
+        serde_json::from_str::<Value>(report.raw_payload_json.as_deref().expect("raw payload"))
+            .expect("raw payload json");
+    assert_eq!(report.execution_status, "failed");
+    assert!(report
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("risk_plan.selected_stop_loss_price"));
+    assert_eq!(raw_payload["risk_contract"]["worker_dry_run"], false);
+    assert_eq!(raw_payload["risk_contract"]["place_order_allowed"], false);
+    assert_eq!(
+        raw_payload["risk_contract"]["missing_field"],
+        "risk_plan.selected_stop_loss_price"
+    );
+    assert!(repository.audits.lock().unwrap().is_empty());
+    assert!(repository.checkpoints.lock().unwrap().is_empty());
+}
 #[tokio::test]
 async fn live_config_without_persistent_audit_repo_fails_closed_before_gateway() {
     let worker = ExecutionWorker::new(
@@ -314,12 +360,10 @@ async fn live_config_without_persistent_audit_repo_fails_closed_before_gateway()
             "direction": "long"
         }
     }));
-
     let report = worker.execute_task(&task).await;
     let raw_payload =
         serde_json::from_str::<Value>(report.raw_payload_json.as_deref().expect("raw payload"))
             .expect("raw payload json");
-
     assert_eq!(report.execution_status, "failed");
     assert_eq!(report.exchange, "binance");
     assert_eq!(report.order_side, "buy");
@@ -332,7 +376,6 @@ async fn live_config_without_persistent_audit_repo_fails_closed_before_gateway()
     assert_eq!(raw_payload["place_order_allowed"], false);
     assert_eq!(raw_payload["mutation_allowed"], false);
 }
-
 #[test]
 fn binance_prepare_order_settings_happens_after_prearmed_protection_guard() {
     let source = include_str!("execution_worker_live_execution_section.rs");
@@ -342,13 +385,11 @@ fn binance_prepare_order_settings_happens_after_prearmed_protection_guard() {
     let prepare_offset = source
         .find(".prepare_binance_order_settings_after_protection")
         .expect("Binance settings preparation should stay visible in execute_task");
-
     assert!(
         prearm_offset < prepare_offset,
         "Binance account settings are live mutations and must run only after prearmed protective stop-loss is confirmed"
     );
 }
-
 include!("execution_worker_protection_live_preflight_tests.rs");
 include!("execution_worker_protection_risk_contract_tests.rs");
 include!("execution_worker_protection_pending_close_tests.rs");

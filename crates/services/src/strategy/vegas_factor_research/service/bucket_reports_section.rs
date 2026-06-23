@@ -10,7 +10,7 @@ impl VegasFactorResearchService {
         "funding_volume_context",
         "price_oi_state",
     ];
-
+    /// 构建buildbucketreports，集中维护回测策略的载荷和字段组装规则。
     fn build_bucket_reports(
         &self,
         traded_samples: &[EnrichedTradeSample],
@@ -169,7 +169,6 @@ impl VegasFactorResearchService {
                     .push(pnl);
             }
         }
-
         let mut rows = Vec::new();
         for ((factor_name, bucket_name, tier, scope_label), pnls) in grouped {
             rows.push(Self::build_bucket_row(
@@ -180,7 +179,6 @@ impl VegasFactorResearchService {
                 &pnls,
             ));
         }
-
         let mut by_bucket: HashMap<(String, String, VolatilityTier, String), Vec<usize>> =
             HashMap::new();
         for (idx, row) in rows.iter().enumerate() {
@@ -201,7 +199,6 @@ impl VegasFactorResearchService {
                 rows[*idx].conclusion = conclusion;
             }
         }
-
         for sample_kind in [ResearchSampleKind::Traded, ResearchSampleKind::Filtered] {
             for factor_name in Self::SUPPORTED_FACTORS {
                 if rows
@@ -232,7 +229,6 @@ impl VegasFactorResearchService {
                 }
             }
         }
-
         rows.sort_by(|left, right| {
             left.factor_name
                 .cmp(&right.factor_name)
@@ -246,7 +242,7 @@ impl VegasFactorResearchService {
         });
         rows
     }
-
+    /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
     fn build_bucket_row(
         factor_name: String,
         bucket_name: String,
@@ -284,7 +280,6 @@ impl VegasFactorResearchService {
         } else {
             0.0
         };
-
         FactorBucketReport {
             factor_name: clean_factor_name,
             bucket_name,
@@ -312,7 +307,7 @@ impl VegasFactorResearchService {
             conclusion: FactorConclusion::Observe,
         }
     }
-
+    /// 提供bucketscope标签的集中实现，避免回测策略调用方重复处理相同细节。
     fn bucket_scope_label(inst_id: &str, tier: VolatilityTier) -> String {
         match tier {
             VolatilityTier::Alt => inst_id.split('-').next().unwrap_or(inst_id).to_string(),

@@ -1,12 +1,10 @@
 use serde::{Deserialize, Serialize};
-
 /// 时间方向
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum TimeDirect {
     BEFORE,
     AFTER,
 }
-
 /// 选择时间范围
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SelectTime {
@@ -17,7 +15,6 @@ pub struct SelectTime {
     /// 选择方向
     pub direct: TimeDirect,
 }
-
 /// 查询 K线 请求 DTO
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SelectCandleReqDto {

@@ -36,38 +36,31 @@
 //! # Ok(())
 //! # }
 //! ```
-
 pub mod entities;
 pub mod enums;
 pub mod traits;
 pub mod value_objects;
-
 // 重新导出核心类型
-
 // 实体
 pub use entities::{
     BacktestDetail, BacktestLog, BacktestWinRateStats, BasicRiskConfig, Candle, ExchangeApiConfig,
     MarginMode, Order, OrderError, Position, PositionError, PositionStatus, StrategyApiConfig,
     StrategyConfig,
 };
-
 // 值对象
 pub use value_objects::{
     Leverage, LeverageError, Percentage, PercentageError, Price, PriceError, SignalDirection,
     SignalResult, SignalStrength, Symbol, SymbolError, TradingSignal, Volume, VolumeError,
 };
-
 // 枚举
 pub use enums::{
     OrderSide, OrderStatus, OrderType, PositionSide, StrategyStatus, StrategyType, Timeframe,
 };
-
 // 接口
 pub use traits::{
     BacktestResult, Backtestable, CandleRepository, ExchangeAccount, ExchangeApiConfigRepository,
     ExchangeContracts, ExchangeMarketData, ExchangePublicData, OrderRepository, Strategy,
     StrategyApiConfigRepository, StrategyConfigRepository,
 };
-
 // 兼容旧代码的别名
 pub use BasicRiskConfig as BasicRiskStrategyConfig;

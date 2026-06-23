@@ -11,15 +11,14 @@ use rust_quant_infrastructure::{
 };
 use serde_json::json;
 use std::sync::Arc;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExternalMarketSource {
     Hyperliquid,
     Okx,
     Binance,
 }
-
 impl ExternalMarketSource {
+    /// 提供转换为字符串的集中实现，避免行情数据调用方重复处理相同细节。
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Hyperliquid => "hyperliquid",
@@ -28,7 +27,7 @@ impl ExternalMarketSource {
         }
     }
 }
-
+/// 归一化外部市场交易对，把外部输入转换成行情数据可用的内部值。
 pub fn normalize_external_market_symbol(symbol: &str) -> String {
     let normalized = symbol.trim().to_uppercase();
     if let Some((base, _)) = normalized.split_once("-USDT") {
@@ -39,7 +38,6 @@ pub fn normalize_external_market_symbol(symbol: &str) -> String {
     }
     normalized
 }
-
 #[async_trait]
 pub trait ExternalMarketDataProvider: Send + Sync {
     async fn fetch_hyperliquid_funding_history(
@@ -48,27 +46,26 @@ pub trait ExternalMarketDataProvider: Send + Sync {
         start_time: i64,
         end_time: i64,
     ) -> Result<Vec<HyperliquidFundingHistoryPoint>>;
-
     async fn fetch_hyperliquid_meta_and_asset_ctxs(
         &self,
         coin: &str,
     ) -> Result<HyperliquidAssetContextSnapshot>;
 }
-
 pub struct HyperliquidExternalMarketDataProvider {
+    /// adapter，用于行情、K 线或市场扫描。
     adapter: HyperliquidPublicAdapter,
 }
-
 impl HyperliquidExternalMarketDataProvider {
+    /// 构建 行情与市场数据 所需实例，并集中初始化依赖和默认状态。
     pub fn new() -> Result<Self> {
         Ok(Self {
             adapter: HyperliquidPublicAdapter::new()?,
         })
     }
 }
-
 #[async_trait]
 impl ExternalMarketDataProvider for HyperliquidExternalMarketDataProvider {
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_hyperliquid_funding_history(
         &self,
         coin: &str,
@@ -79,7 +76,6 @@ impl ExternalMarketDataProvider for HyperliquidExternalMarketDataProvider {
             .fetch_funding_history(coin, start_time, end_time)
             .await
     }
-
     async fn fetch_hyperliquid_meta_and_asset_ctxs(
         &self,
         coin: &str,
@@ -87,27 +83,27 @@ impl ExternalMarketDataProvider for HyperliquidExternalMarketDataProvider {
         self.adapter.fetch_meta_and_asset_ctxs(coin).await
     }
 }
-
 pub struct ExternalMarketSyncService {
+    /// repo，用于行情、K 线或市场扫描。
     repo: Arc<dyn ExternalMarketSnapshotRepository>,
+    /// 提供方。
     provider: Arc<dyn ExternalMarketDataProvider>,
 }
-
 impl ExternalMarketSyncService {
+    /// 构建 行情与市场数据 所需实例，并集中初始化依赖和默认状态。
     pub fn new() -> Result<Self> {
         let pool = get_db_pool().clone();
         let repo = Arc::new(SqlxExternalMarketSnapshotRepository::new(pool));
         let provider = Arc::new(HyperliquidExternalMarketDataProvider::new()?);
         Ok(Self { repo, provider })
     }
-
     pub fn with_repo_and_provider(
         repo: Arc<dyn ExternalMarketSnapshotRepository>,
         provider: Arc<dyn ExternalMarketDataProvider>,
     ) -> Self {
         Self { repo, provider }
     }
-
+    /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
     pub async fn sync_hyperliquid_coin(
         &self,
         coin: &str,
@@ -123,7 +119,6 @@ impl ExternalMarketSyncService {
             .provider
             .fetch_hyperliquid_meta_and_asset_ctxs(coin)
             .await?;
-
         let mut snapshots: Vec<ExternalMarketSnapshot> = funding_rows
             .into_iter()
             .map(Self::hyperliquid_funding_point_to_snapshot)
@@ -132,12 +127,11 @@ impl ExternalMarketSyncService {
             asset_ctx,
             snapshot_time,
         ));
-
         let count = snapshots.len();
         self.repo.save_batch(snapshots).await?;
         Ok(count)
     }
-
+    /// 提供hyperliquidfundingpointto快照的集中实现，避免行情数据调用方重复处理相同细节。
     pub fn hyperliquid_funding_point_to_snapshot(
         point: HyperliquidFundingHistoryPoint,
     ) -> ExternalMarketSnapshot {
@@ -157,7 +151,7 @@ impl ExternalMarketSyncService {
         }));
         snapshot
     }
-
+    /// 提供hyperliquid资产contextto快照的集中实现，避免行情数据调用方重复处理相同细节。
     pub fn hyperliquid_asset_context_to_snapshot(
         ctx: HyperliquidAssetContextSnapshot,
         metric_time: i64,

@@ -1,6 +1,8 @@
+pub mod binance_eth_micro_live_validation;
 pub mod bootstrap;
 pub mod exchange_symbol_sync;
 pub mod internal_server;
 pub mod market_velocity_backfill;
 pub mod market_velocity_event_backtest;
 pub mod market_velocity_live_handoff;
+pub mod market_velocity_strategy_config;

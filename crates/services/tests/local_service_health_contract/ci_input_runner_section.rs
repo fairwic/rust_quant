@@ -5,7 +5,6 @@ fn full_product_health_ci_wrapper_script_passes_bash_syntax_check() {
         .arg(full_product_ci_wrapper_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
@@ -14,7 +13,6 @@ fn full_product_health_ci_wrapper_script_passes_bash_syntax_check() {
 }
 fn full_product_health_ci_wrapper_is_safe_and_uses_explicit_artifacts() {
     let script = read_full_product_ci_wrapper_script();
-
     assert!(script.contains("build_full_product_health_inputs.sh"));
     assert!(script.contains("summarize_full_product_health.sh"));
     assert!(script.contains("render_full_product_health_markdown.sh"));
@@ -84,7 +82,6 @@ fn full_product_health_ci_wrapper_writes_skipped_report_and_summary_without_urls
     let artifact_dir = temp_artifact_dir("full-product-health-ci-skipped");
     let full_report_path = artifact_dir.join("full-product-health.json");
     let summary_path = artifact_dir.join("full-product-health-summary.json");
-
     let output = Command::new(full_product_ci_wrapper_path())
         .env("FULL_PRODUCT_HEALTH_CI_ARTIFACT_DIR", &artifact_dir)
         .env("FULL_PRODUCT_HEALTH_CI_FULL_REPORT_PATH", &full_report_path)
@@ -100,7 +97,6 @@ fn full_product_health_ci_wrapper_writes_skipped_report_and_summary_without_urls
         .env("ADMIN_TEST_SECRET", "admin-secret")
         .output()
         .expect("full product CI wrapper should run");
-
     assert!(
         output.status.success(),
         "missing urls should still produce skipped artifacts:\nstdout={}\nstderr={}",
@@ -115,7 +111,6 @@ fn full_product_health_ci_wrapper_writes_skipped_report_and_summary_without_urls
         summary_path.is_file(),
         "CI wrapper should write summary artifact"
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let full_body = fs::read_to_string(&full_report_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", full_report_path.display(), error));
@@ -127,7 +122,6 @@ fn full_product_health_ci_wrapper_writes_skipped_report_and_summary_without_urls
         .unwrap_or_else(|error| panic!("invalid full report json: {error}\n{full_body}"));
     let summary_payload: Value = serde_json::from_str(&summary_body)
         .unwrap_or_else(|error| panic!("invalid summary json: {error}\n{summary_body}"));
-
     assert_eq!(stdout_summary, summary_payload);
     assert_eq!(full_payload["status"], "ok");
     assert_eq!(full_payload["summary"]["p0_count"], 0);
@@ -177,7 +171,6 @@ fn full_product_health_ci_wrapper_writes_skipped_report_and_summary_without_urls
                 || alert["code"] == "PAYMENT_INPUT_SKIPPED"),
         "summary should include skipped input context: {summary_body}"
     );
-
     let combined = format!("{stdout}\n{full_body}\n{summary_body}").to_ascii_lowercase();
     for sensitive in [
         ".env",
@@ -208,14 +201,12 @@ fn full_product_health_ci_wrapper_writes_skipped_report_and_summary_without_urls
         );
     }
 }
-
 #[test]
 fn full_product_health_ci_wrapper_writes_optional_markdown_artifact_without_urls() {
     let artifact_dir = temp_artifact_dir("full-product-health-ci-markdown-skipped");
     let full_report_path = artifact_dir.join("full-product-health.json");
     let summary_path = artifact_dir.join("full-product-health-summary.json");
     let markdown_path = artifact_dir.join("full-product-health.md");
-
     let output = Command::new(full_product_ci_wrapper_path())
         .env("FULL_PRODUCT_HEALTH_CI_ARTIFACT_DIR", &artifact_dir)
         .env("FULL_PRODUCT_HEALTH_CI_FULL_REPORT_PATH", &full_report_path)
@@ -232,7 +223,6 @@ fn full_product_health_ci_wrapper_writes_optional_markdown_artifact_without_urls
         .env("ADMIN_TEST_SECRET", "admin-secret")
         .output()
         .expect("full product CI wrapper should run");
-
     assert!(
         output.status.success(),
         "missing urls should still produce optional markdown artifact:\nstdout={}\nstderr={}",
@@ -251,7 +241,6 @@ fn full_product_health_ci_wrapper_writes_optional_markdown_artifact_without_urls
         markdown_path.is_file(),
         "CI wrapper should write optional markdown artifact"
     );
-
     let markdown_body = fs::read_to_string(&markdown_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", markdown_path.display(), error));
     for expected in [
@@ -276,7 +265,6 @@ fn full_product_health_ci_wrapper_writes_optional_markdown_artifact_without_urls
             "markdown artifact should contain {expected}: {markdown_body}"
         );
     }
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let full_body = fs::read_to_string(&full_report_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", full_report_path.display(), error));
@@ -313,7 +301,6 @@ fn full_product_health_ci_wrapper_writes_optional_markdown_artifact_without_urls
         );
     }
 }
-
 #[test]
 fn full_product_health_ci_wrapper_writes_optional_validation_artifact_without_urls() {
     let artifact_dir = temp_artifact_dir("full-product-health-ci-validation-skipped");
@@ -321,7 +308,6 @@ fn full_product_health_ci_wrapper_writes_optional_validation_artifact_without_ur
     let summary_path = artifact_dir.join("full-product-health-summary.json");
     let markdown_path = artifact_dir.join("full-product-health.md");
     let validation_path = artifact_dir.join("full-product-health-validation.json");
-
     let output = Command::new(full_product_ci_wrapper_path())
         .env("FULL_PRODUCT_HEALTH_CI_ARTIFACT_DIR", &artifact_dir)
         .env("FULL_PRODUCT_HEALTH_CI_FULL_REPORT_PATH", &full_report_path)
@@ -340,7 +326,6 @@ fn full_product_health_ci_wrapper_writes_optional_validation_artifact_without_ur
         .env("ADMIN_TEST_SECRET", "admin-secret")
         .output()
         .expect("full product CI wrapper should run");
-
     assert!(
         output.status.success(),
         "validation-enabled wrapper should produce safe artifacts:\nstdout={}\nstderr={}",
@@ -363,7 +348,6 @@ fn full_product_health_ci_wrapper_writes_optional_validation_artifact_without_ur
         validation_path.is_file(),
         "CI wrapper should write optional validation artifact"
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let validation_body = fs::read_to_string(&validation_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", validation_path.display(), error));
@@ -373,7 +357,6 @@ fn full_product_health_ci_wrapper_writes_optional_validation_artifact_without_ur
     assert_eq!(validation_payload["summary"]["artifact_count"], 3);
     assert_eq!(validation_payload["summary"]["sensitive_marker_count"], 0);
     assert_eq!(validation_payload["artifacts"]["markdown"]["exists"], true);
-
     let full_body = fs::read_to_string(&full_report_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", full_report_path.display(), error));
     let summary_body = fs::read_to_string(&summary_path)
@@ -412,7 +395,6 @@ fn full_product_health_ci_wrapper_writes_optional_validation_artifact_without_ur
         );
     }
 }
-
 #[test]
 fn full_product_health_ci_wrapper_exits_from_overall_status_unless_disabled() {
     let tool_dir = fake_full_product_input_tool_dir();
@@ -424,7 +406,6 @@ fn full_product_health_ci_wrapper_exits_from_overall_status_unless_disabled() {
     let blocking_artifact_dir = temp_artifact_dir("full-product-health-ci-blocking");
     let blocking_full_report_path = blocking_artifact_dir.join("full-product-health.json");
     let blocking_summary_path = blocking_artifact_dir.join("full-product-health-summary.json");
-
     let blocking_output = Command::new(full_product_ci_wrapper_path())
         .env("PATH", &path)
         .env(
@@ -454,7 +435,6 @@ fn full_product_health_ci_wrapper_exits_from_overall_status_unless_disabled() {
         )
         .output()
         .expect("full product CI wrapper should run");
-
     assert!(
         !blocking_output.status.success(),
         "fail overall status should make the CI wrapper exit non-zero by default"
@@ -467,7 +447,6 @@ fn full_product_health_ci_wrapper_exits_from_overall_status_unless_disabled() {
         blocking_summary_path.is_file(),
         "blocking run should still write summary artifact"
     );
-
     let blocking_summary_body =
         fs::read_to_string(&blocking_summary_path).unwrap_or_else(|error| {
             panic!(
@@ -480,7 +459,6 @@ fn full_product_health_ci_wrapper_exits_from_overall_status_unless_disabled() {
         .unwrap_or_else(|error| panic!("invalid summary json: {error}\n{blocking_summary_body}"));
     assert_eq!(blocking_summary["status"], "fail");
     assert_eq!(blocking_summary["summary"]["overall_status"], "fail");
-
     let report_only_artifact_dir = temp_artifact_dir("full-product-health-ci-report-only");
     let report_only_full_report_path = report_only_artifact_dir.join("full-product-health.json");
     let report_only_summary_path =
@@ -515,7 +493,6 @@ fn full_product_health_ci_wrapper_exits_from_overall_status_unless_disabled() {
         )
         .output()
         .expect("full product CI wrapper should run");
-
     assert!(
         report_only_output.status.success(),
         "FAIL_ON_STATUS=never should keep the CI wrapper report-only:\nstdout={}\nstderr={}",
@@ -537,7 +514,6 @@ fn full_product_health_ci_wrapper_exits_from_overall_status_unless_disabled() {
     assert_eq!(report_only_summary["status"], "fail");
     assert_eq!(report_only_summary["summary"]["overall_status"], "fail");
 }
-
 #[test]
 fn full_product_health_input_runner_script_passes_bash_syntax_check() {
     let output = Command::new("bash")
@@ -545,18 +521,15 @@ fn full_product_health_input_runner_script_passes_bash_syntax_check() {
         .arg(full_product_input_runner_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
-
 #[test]
 fn full_product_health_input_runner_is_safe_and_uses_only_read_only_producers() {
     let script = read_full_product_input_runner_script();
-
     assert!(script.contains("build_full_product_health_web_input.sh"));
     assert!(script.contains("build_full_product_health_news_input.sh"));
     assert!(script.contains("build_full_product_health_admin_input.sh"));
@@ -622,7 +595,6 @@ fn full_product_health_input_runner_is_safe_and_uses_only_read_only_producers() 
         );
     }
 }
-
 #[test]
 fn full_product_health_input_runner_outputs_skipped_sections_without_urls() {
     let output = Command::new(full_product_input_runner_path())
@@ -638,18 +610,15 @@ fn full_product_health_input_runner_outputs_skipped_sections_without_urls() {
         .env("ADMIN_TEST_SECRET", "admin-secret")
         .output()
         .expect("full product input runner should run");
-
     assert!(
         output.status.success(),
         "missing urls should still produce merged json:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["schema_version"], 1);
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["summary"]["p0_count"], 0);
@@ -700,7 +669,6 @@ fn full_product_health_input_runner_outputs_skipped_sections_without_urls() {
                 && alert["section"] == "admin_readiness"),
         "admin skipped section should be represented as an INFO alert: {stdout}"
     );
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         ".env",
@@ -764,18 +732,15 @@ fn full_product_health_input_runner_calls_producers_for_explicit_read_only_urls(
         .env("ADMIN_TEST_SECRET", "admin-secret")
         .output()
         .expect("full product input runner should run");
-
     assert!(
         output.status.success(),
         "explicit urls should produce merged json:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["status"], "fail");
     assert_eq!(payload["summary"]["p0_count"], 3);
     assert_eq!(payload["summary"]["p1_count"], 2);
@@ -849,7 +814,6 @@ fn full_product_health_input_runner_calls_producers_for_explicit_read_only_urls(
                 && alert["section"] == "admin_readiness"),
         "admin producer alert should be merged: {stdout}"
     );
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         ".env",

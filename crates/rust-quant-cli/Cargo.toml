@@ -36,6 +36,9 @@ sqlx.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
 rust_decimal.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 # 应用相关
 dotenv.workspace = true

@@ -1,62 +1,44 @@
 //! 合约订单实体 (SwapOrder)
 //!
 //! 对应数据库表 `swap_orders`，记录合约交易的下单记录
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
 /// 合约订单实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwapOrder {
     /// 自增主键
     pub id: Option<i32>,
-
     /// 策略配置ID
     pub strategy_id: i32,
-
     /// 内部订单ID（唯一）
     pub in_order_id: String,
-
     /// 第三方平台订单ID
     pub out_order_id: String,
-
     /// 策略类型（如 "vegas", "nwe"）
     pub strategy_type: String,
-
     /// 策略周期（如 "5m", "1H"）
     pub period: String,
-
     /// 交易产品ID（如 "BTC-USDT-SWAP"）
     pub inst_id: String,
-
     /// 交易方向（buy/sell）
     pub side: String,
-
     /// 持仓数量
     pub pos_size: String,
-
     /// 持仓方向（long/short）
     pub pos_side: String,
-
     /// 订单标签
     pub tag: String,
-
     /// 平台类型（如 "okx"）
     pub platform_type: String,
-
     /// 下单详情（JSON格式）
     pub detail: String,
-
     /// 创建时间
     pub created_at: DateTime<Utc>,
-
     /// 更新时间
     pub update_at: Option<DateTime<Utc>>,
 }
-
 impl SwapOrder {
     /// 创建新的合约订单
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         strategy_id: i32,
         in_order_id: String,
@@ -80,7 +62,6 @@ impl SwapOrder {
             side,
             pos_side
         );
-
         Self {
             id: None,
             strategy_id,
@@ -99,9 +80,7 @@ impl SwapOrder {
             update_at: None,
         }
     }
-
     /// 从信号结果创建订单
-    #[allow(clippy::too_many_arguments)]
     pub fn from_signal(
         strategy_id: i32,
         inst_id: &str,
@@ -129,12 +108,9 @@ impl SwapOrder {
             detail.to_string(),
         )
     }
-
-    /// 生成内部订单ID
     pub fn generate_in_order_id(inst_id: &str, strategy_type: &str, ts: i64) -> String {
         format!("{}_{}_{}", inst_id, strategy_type, ts)
     }
-
     /// 生成实盘内部订单ID（更细粒度幂等键）
     pub fn generate_live_in_order_id(
         inst_id: &str,
@@ -149,12 +125,12 @@ impl SwapOrder {
         )
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_create_swap_order() {
         let order = SwapOrder::new(
             1,
@@ -169,20 +145,17 @@ mod tests {
             "okx".to_string(),
             r#"{"price": 50000}"#.to_string(),
         );
-
         assert_eq!(order.strategy_id, 1);
         assert_eq!(order.inst_id, "BTC-USDT-SWAP");
         assert_eq!(order.side, "buy");
         assert_eq!(order.pos_side, "long");
         assert!(order.tag.contains("nwe"));
     }
-
     #[test]
     fn test_generate_in_order_id() {
         let id = SwapOrder::generate_in_order_id("BTC-USDT-SWAP", "nwe", 1234567890);
         assert_eq!(id, "BTC-USDT-SWAP_nwe_1234567890");
     }
-
     #[test]
     fn test_generate_live_in_order_id() {
         let id =

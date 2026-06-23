@@ -66,7 +66,7 @@ dashmap = "6.1.0"
 chrono = { version = "0.4.38", features = ["serde"] }
 
 # === 网络通信 ===
-reqwest = { version = "0.11.27", features = ["json"] }
+reqwest = { version = "0.11.27", features = ["json", "socks"] }
 tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
 futures = "0.3.30"
 futures-channel = "0.3.30"

@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rust_quant_services::market::{
-    parse_exchange_symbol_sync_sources, ExchangeSymbolSyncService, MajorExchangeListingSignal,
+    parse_exchange_symbol_sync_sources, ExchangeSymbolAssetIconCandidate,
+    ExchangeSymbolSyncService, MajorExchangeListingSignal,
 };
 use rust_quant_services::rust_quan_web::{
     ExecutionTaskClient, ExecutionTaskConfig, StrategySignalSubmitRequest,
@@ -9,41 +10,92 @@ use rust_quant_services::rust_quan_web::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{postgres::PgPoolOptions, PgPool};
+use std::collections::BTreeSet;
 use tracing::{info, warn};
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExchangeSymbolSyncRequest {
     #[serde(default)]
+    /// 列表数据。
     pub sources: Option<Vec<String>>,
     #[serde(default)]
+    /// trigger来源；为空时使用默认值或表示不限制。
     pub trigger_source: Option<String>,
     #[serde(default)]
+    /// 是否提交信号；为空时使用默认值。
     pub submit_signals: Option<bool>,
 }
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExchangeSymbolSyncSourceReport {
+    /// 数据来源。
     pub source: String,
+    /// persisted数据行，用于展示或持久化查询结果。
     pub persisted_rows: usize,
+    /// 首次seen数据行，用于展示或持久化查询结果。
     pub first_seen_rows: usize,
+    /// majorlistingsignals，用于展示或持久化查询结果。
     pub major_listing_signals: usize,
+    /// 资产iconcandidates，用于展示或持久化查询结果。
+    pub asset_icon_candidates: usize,
 }
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExchangeSymbolSyncResponse {
+    /// run ID。
     pub run_id: String,
+    /// 当前状态。
     pub status: String,
+    /// trigger来源，用于返回接口响应。
     pub trigger_source: String,
+    /// 列表数据。
     pub requested_sources: Vec<String>,
+    /// persisted数据行，用于返回接口响应。
     pub persisted_rows: usize,
+    /// 首次seen数据行，用于返回接口响应。
     pub first_seen_rows: usize,
+    /// majorlistingsignals，用于返回接口响应。
     pub major_listing_signals: usize,
+    /// 资产iconcandidates，用于返回接口响应。
+    pub asset_icon_candidates: usize,
+    /// 列表数据。
     pub source_reports: Vec<ExchangeSymbolSyncSourceReport>,
 }
-
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssetIconRegistrySyncRequest {
+    /// 数据来源。
+    source: String,
+    /// 列表数据。
+    assets: Vec<AssetIconRegistrySyncAsset>,
+}
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssetIconRegistrySyncAsset {
+    /// 资产类别，用于当前结构体的业务数据。
+    asset_class: String,
+    /// 基础资产，用于当前结构体的业务数据。
+    base_asset: String,
+    /// 交易对或资产符号。
+    symbol: String,
+    /// 交易所名称。
+    exchange: String,
+    /// 类型标识。
+    market_type: String,
+    /// 计价资产，用于当前结构体的业务数据。
+    quote_asset: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AssetIconRegistryConfig {
+    /// 基础URL，用于配置运行参数。
+    base_url: String,
+    /// internalSecret，用于配置运行参数。
+    internal_secret: String,
+}
+const ASSET_ICON_REGISTRY_SYNC_PATH: &str = "/api/internal/asset-icons/crypto/sync";
+const INTERNAL_SECRET_HEADER: &str = "x-alpha-execution-secret";
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
 pub async fn run_exchange_symbol_sync_from_env(
     request: ExchangeSymbolSyncRequest,
 ) -> Result<ExchangeSymbolSyncResponse> {
@@ -58,19 +110,17 @@ pub async fn run_exchange_symbol_sync_from_env(
     let submit_signals = request
         .submit_signals
         .unwrap_or_else(|| env_is_true("EXCHANGE_LISTING_SIGNAL_SUBMIT"));
-
     run_exchange_symbol_sync(&sources, &trigger_source, submit_signals).await
 }
-
+/// 封装来源来源请求，减少量化核心调用方重复实现相同细节。
 fn sources_from_request(sources: Option<Vec<String>>) -> Result<Vec<String>> {
     if let Some(sources) = sources {
         return parse_exchange_symbol_sync_sources(Some(&sources.join(" ")));
     }
-
     let env_sources = std::env::var("EXCHANGE_SYMBOL_SOURCES").ok();
     parse_exchange_symbol_sync_sources(env_sources.as_deref())
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 async fn run_exchange_symbol_sync(
     sources: &[String],
     trigger_source: &str,
@@ -89,7 +139,6 @@ async fn run_exchange_symbol_sync(
         Utc::now().timestamp_millis()
     );
     insert_sync_run(&pool, &run_id, trigger_source, sources).await?;
-
     let response = match execute_sync_sources(sources, trigger_source, submit_signals).await {
         Ok(mut response) => {
             response.run_id = run_id.clone();
@@ -102,10 +151,9 @@ async fn run_exchange_symbol_sync(
             return Err(error);
         }
     };
-
     Ok(response)
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 async fn execute_sync_sources(
     sources: &[String],
     trigger_source: &str,
@@ -114,9 +162,9 @@ async fn execute_sync_sources(
     let service = ExchangeSymbolSyncService::from_env().await?;
     let mut source_reports = Vec::new();
     let mut all_signals = Vec::new();
+    let mut asset_icon_candidates = Vec::new();
     let mut persisted_rows = 0usize;
     let mut first_seen_rows = 0usize;
-
     for source in sources {
         let report = service
             .sync_source_with_report(source)
@@ -125,18 +173,20 @@ async fn execute_sync_sources(
         persisted_rows += report.persisted_count;
         first_seen_rows += report.first_seen_count;
         all_signals.extend(report.major_listing_signals.clone());
+        asset_icon_candidates.extend(report.asset_candidates.clone());
         source_reports.push(ExchangeSymbolSyncSourceReport {
             source: source.clone(),
             persisted_rows: report.persisted_count,
             first_seen_rows: report.first_seen_count,
             major_listing_signals: report.major_listing_signals.len(),
+            asset_icon_candidates: report.asset_candidates.len(),
         });
     }
-
     if submit_signals {
         submit_major_listing_signals(&all_signals).await?;
     }
-
+    let asset_icon_candidates = dedupe_asset_icon_candidates(asset_icon_candidates);
+    notify_asset_icon_registry_if_configured(&asset_icon_candidates).await;
     Ok(ExchangeSymbolSyncResponse {
         run_id: String::new(),
         status: "success".to_string(),
@@ -145,10 +195,11 @@ async fn execute_sync_sources(
         persisted_rows,
         first_seen_rows,
         major_listing_signals: all_signals.len(),
+        asset_icon_candidates: asset_icon_candidates.len(),
         source_reports,
     })
 }
-
+/// 持久化 量化核心 结果，保证写入路径和幂等语义集中处理。
 async fn insert_sync_run(
     pool: &PgPool,
     run_id: &str,
@@ -175,7 +226,7 @@ async fn insert_sync_run(
     .context("insert exchange_symbol_sync_runs running row")?;
     Ok(())
 }
-
+/// 执行结束同步运行成功步骤，串起量化核心需要的状态推进和错误处理。
 async fn finish_sync_run_success(
     pool: &PgPool,
     run_id: &str,
@@ -208,7 +259,7 @@ async fn finish_sync_run_success(
     .context("update exchange_symbol_sync_runs success row")?;
     Ok(())
 }
-
+/// 执行结束同步运行失败步骤，串起量化核心需要的状态推进和错误处理。
 async fn finish_sync_run_failed(pool: &PgPool, run_id: &str, error_message: &str) -> Result<()> {
     sqlx::query(
         r#"
@@ -229,12 +280,11 @@ async fn finish_sync_run_failed(pool: &PgPool, run_id: &str, error_message: &str
     .context("update exchange_symbol_sync_runs failed row")?;
     Ok(())
 }
-
+/// 执行提交主流上市信号步骤，串起量化核心需要的状态推进和错误处理。
 async fn submit_major_listing_signals(signals: &[MajorExchangeListingSignal]) -> Result<()> {
     if signals.is_empty() {
         return Ok(());
     }
-
     let client = ExecutionTaskClient::new(quant_web_execution_task_config_from_env()?)?;
     for signal in signals {
         let request = build_major_listing_strategy_signal_request(signal);
@@ -254,10 +304,106 @@ async fn submit_major_listing_signals(signals: &[MajorExchangeListingSignal]) ->
             response.generated_tasks.len()
         );
     }
-
     Ok(())
 }
-
+/// 发送 量化核心 通知或请求，并把投递错误留在当前边界处理。
+async fn notify_asset_icon_registry_if_configured(candidates: &[ExchangeSymbolAssetIconCandidate]) {
+    if candidates.is_empty() {
+        return;
+    }
+    let Some(config) = quant_web_asset_icon_registry_config_from_env() else {
+        return;
+    };
+    if let Err(error) = sync_asset_icon_registry_candidates(&config, candidates).await {
+        warn!(
+            "sync exchange symbol asset icon candidates to quant_web failed: {}",
+            error
+        );
+    }
+}
+/// 同步 量化核心 数据，保证本地状态与外部事实源保持一致。
+async fn sync_asset_icon_registry_candidates(
+    config: &AssetIconRegistryConfig,
+    candidates: &[ExchangeSymbolAssetIconCandidate],
+) -> Result<()> {
+    let request = build_asset_icon_registry_sync_request(candidates);
+    let url = asset_icon_registry_sync_url(&config.base_url)?;
+    reqwest::Client::new()
+        .post(url)
+        .header(INTERNAL_SECRET_HEADER, &config.internal_secret)
+        .json(&request)
+        .send()
+        .await?
+        .error_for_status()
+        .context("quant_web asset icon registry sync returned non-success status")?;
+    info!(
+        "synced exchange symbol asset icon candidates to quant_web: count={}",
+        request.assets.len()
+    );
+    Ok(())
+}
+/// 构建 量化核心 请求或响应载荷，把字段组装规则集中在同一入口。
+fn build_asset_icon_registry_sync_request(
+    candidates: &[ExchangeSymbolAssetIconCandidate],
+) -> AssetIconRegistrySyncRequest {
+    AssetIconRegistrySyncRequest {
+        source: "exchange_symbol_sync".to_string(),
+        assets: candidates
+            .iter()
+            .map(|candidate| AssetIconRegistrySyncAsset {
+                asset_class: "crypto".to_string(),
+                base_asset: candidate.base_asset.clone(),
+                symbol: candidate.symbol.clone(),
+                exchange: candidate.exchange.clone(),
+                market_type: candidate.market_type.clone(),
+                quote_asset: candidate.quote_asset.clone(),
+            })
+            .collect(),
+    }
+}
+/// 提供dedupe资产图标candidates的集中实现，避免量化核心调用方重复处理相同细节。
+fn dedupe_asset_icon_candidates(
+    candidates: Vec<ExchangeSymbolAssetIconCandidate>,
+) -> Vec<ExchangeSymbolAssetIconCandidate> {
+    candidates
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+/// 提供quantweb资产图标注册表配置from环境变量的集中实现，避免量化核心调用方重复处理相同细节。
+fn quant_web_asset_icon_registry_config_from_env() -> Option<AssetIconRegistryConfig> {
+    let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
+        .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let internal_secret = std::env::var("EXECUTION_EVENT_SECRET")
+        .or_else(|_| std::env::var("ALPHA_EXECUTION_INTERNAL_SECRET"))
+        .or_else(|_| std::env::var("RUST_QUAN_WEB_INTERNAL_SECRET"))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    match internal_secret {
+        Some(internal_secret) => Some(AssetIconRegistryConfig {
+            base_url,
+            internal_secret,
+        }),
+        None => {
+            warn!("skip quant_web asset icon registry sync: internal secret is not configured");
+            None
+        }
+    }
+}
+/// 提供资产图标注册表同步URL的集中实现，避免量化核心调用方重复处理相同细节。
+fn asset_icon_registry_sync_url(base_url: &str) -> Result<String> {
+    let base_url = base_url.trim().trim_end_matches('/');
+    if base_url.is_empty() {
+        anyhow::bail!("quant_web base_url is empty");
+    }
+    Ok(format!("{base_url}{ASSET_ICON_REGISTRY_SYNC_PATH}"))
+}
+/// 构建 量化核心 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_major_listing_strategy_signal_request(
     signal: &MajorExchangeListingSignal,
 ) -> StrategySignalSubmitRequest {
@@ -311,7 +457,7 @@ fn build_major_listing_strategy_signal_request(
         generated_at: Some(generated_at),
     }
 }
-
+/// 提供quantweb执行task配置from环境变量的集中实现，避免量化核心调用方重复处理相同细节。
 fn quant_web_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
     let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
         .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
@@ -329,7 +475,7 @@ fn quant_web_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
         internal_secret,
     })
 }
-
+/// 封装环境变量istrue，减少量化核心调用方重复实现相同细节。
 fn env_is_true(name: &str) -> bool {
     std::env::var(name)
         .map(|value| {
@@ -340,12 +486,10 @@ fn env_is_true(name: &str) -> bool {
         })
         .unwrap_or(false)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::Value;
-
     #[test]
     fn sources_from_request_normalizes_aliases_and_deduplicates() {
         let sources = sources_from_request(Some(vec![
@@ -354,10 +498,8 @@ mod tests {
             "binance".to_string(),
         ]))
         .expect("sources");
-
         assert_eq!(sources, vec!["binance", "okx", "gate"]);
     }
-
     #[test]
     fn major_listing_strategy_signal_request_targets_event_strategy() {
         let signal = MajorExchangeListingSignal {
@@ -369,10 +511,8 @@ mod tests {
             quote_asset: "USDT".to_string(),
             prior_non_mainstream_exchanges: vec!["bitget".to_string()],
         };
-
         let request = build_major_listing_strategy_signal_request(&signal);
         let payload: Value = serde_json::from_str(&request.payload_json).expect("payload json");
-
         assert_eq!(request.strategy_slug, "event_exchange_listing");
         assert_eq!(request.strategy_key, "exchange_listing");
         assert_eq!(request.symbol, "TEST-USDT-SWAP");
@@ -385,5 +525,52 @@ mod tests {
             payload["listing_catalyst"]["classification"],
             "major_exchange_listing_with_prior_non_mainstream_history"
         );
+    }
+    #[test]
+    fn asset_icon_registry_sync_request_uses_exchange_symbol_candidates() {
+        let request = build_asset_icon_registry_sync_request(&[ExchangeSymbolAssetIconCandidate {
+            exchange: "gate".to_string(),
+            market_type: "perpetual".to_string(),
+            symbol: "LAYER-USDT-SWAP".to_string(),
+            base_asset: "LAYER".to_string(),
+            quote_asset: "USDT".to_string(),
+        }]);
+        let payload = serde_json::to_value(request).expect("payload json");
+        assert_eq!(payload["source"], "exchange_symbol_sync");
+        assert_eq!(payload["assets"][0]["assetClass"], "crypto");
+        assert_eq!(payload["assets"][0]["baseAsset"], "LAYER");
+        assert_eq!(payload["assets"][0]["symbol"], "LAYER-USDT-SWAP");
+        assert_eq!(payload["assets"][0]["exchange"], "gate");
+        assert_eq!(payload["assets"][0]["marketType"], "perpetual");
+        assert_eq!(payload["assets"][0]["quoteAsset"], "USDT");
+    }
+    #[test]
+    fn asset_icon_registry_sync_url_uses_internal_endpoint_path() {
+        let url = asset_icon_registry_sync_url("http://127.0.0.1:8000/")
+            .expect("sync url should be valid");
+        assert_eq!(
+            url,
+            "http://127.0.0.1:8000/api/internal/asset-icons/crypto/sync"
+        );
+    }
+    #[test]
+    fn asset_icon_candidates_are_deduplicated_before_notify() {
+        let candidates = dedupe_asset_icon_candidates(vec![
+            ExchangeSymbolAssetIconCandidate {
+                exchange: "gate".to_string(),
+                market_type: "perpetual".to_string(),
+                symbol: "LAYER-USDT-SWAP".to_string(),
+                base_asset: "LAYER".to_string(),
+                quote_asset: "USDT".to_string(),
+            },
+            ExchangeSymbolAssetIconCandidate {
+                exchange: "gate".to_string(),
+                market_type: "perpetual".to_string(),
+                symbol: "LAYER-USDT-SWAP".to_string(),
+                base_asset: "LAYER".to_string(),
+                quote_asset: "USDT".to_string(),
+            },
+        ]);
+        assert_eq!(candidates.len(), 1);
     }
 }

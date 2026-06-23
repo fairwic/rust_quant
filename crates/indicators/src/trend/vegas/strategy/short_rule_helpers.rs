@@ -1,4 +1,5 @@
 impl VegasStrategy {
+    /// 判断isfakebreakoutreversalshortcandidate，为回测策略流程提供明确的布尔结果。
     fn is_fake_breakout_reversal_short_candidate(
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
@@ -6,14 +7,12 @@ impl VegasStrategy {
         let Some(last) = data_items.last() else {
             return false;
         };
-
         let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
         let macd_val = &vegas_indicator_signal_values.macd_value;
         let leg_val = &vegas_indicator_signal_values.leg_detection_value;
         let structure_val = &vegas_indicator_signal_values.market_structure_value;
         let fib_val = &vegas_indicator_signal_values.fib_retracement_value;
         let hammer_val = &vegas_indicator_signal_values.kline_hammer_value;
-
         last.c < last.o
             && volume_ratio >= 1.8
             && (hammer_val.is_short_signal || hammer_val.up_shadow_ratio >= 0.5)
@@ -32,7 +31,7 @@ impl VegasStrategy {
             && macd_val.histogram < 0.0
             && macd_val.histogram_decreasing
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn is_above_zero_death_cross_range_break_short_candidate(
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
@@ -40,13 +39,11 @@ impl VegasStrategy {
         if data_items.len() < 7 {
             return false;
         }
-
         let mode = env_string("VEGAS_EXPERIMENT_ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT")
             .unwrap_or_else(|| "off".to_string());
         if mode == "off" {
             return false;
         }
-
         let current = data_items.last().expect("数据不能为空");
         let prior_window = &data_items[data_items.len() - 6..data_items.len() - 1];
         let prior_range_high = prior_window
@@ -64,7 +61,6 @@ impl VegasStrategy {
         let ema_values = &vegas_indicator_signal_values.ema_values;
         let ema_distance = &vegas_indicator_signal_values.ema_distance_filter;
         let structure = &vegas_indicator_signal_values.market_structure_value;
-
         let base_match = current.c() < current.o()
             && current.body_ratio() >= 0.6
             && macd_val.above_zero
@@ -73,7 +69,6 @@ impl VegasStrategy {
             && structure.swing_trend == 1
             && !structure.internal_bearish_bos
             && !structure.swing_bearish_bos;
-
         match mode.as_str() {
             "v3" => {
                 base_match
@@ -107,7 +102,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 封装取整层级步长，减少回测策略调用方重复实现相同细节。
     fn round_level_step(price: f64) -> f64 {
         if price >= 10_000.0 {
             1_000.0
@@ -121,7 +116,7 @@ impl VegasStrategy {
             0.1
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn is_round_level_reversal_long_candidate(
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
@@ -129,7 +124,6 @@ impl VegasStrategy {
         if data_items.len() < 10 {
             return false;
         }
-
         let current = data_items.last().expect("数据不能为空");
         let prev = &data_items[data_items.len() - 2];
         let prior = &data_items[data_items.len() - 10..data_items.len() - 1];
@@ -138,13 +132,11 @@ impl VegasStrategy {
         let touch_tol = step * 0.05;
         let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
         let shock_drop_pct = ((prev.c() - current.l()) / prev.c().max(1e-9)).max(0.0);
-
         let held_above = prior.iter().all(|item| item.l() > level + touch_tol);
         let first_touch = prev.l() > level + touch_tol && current.l() <= level + touch_tol;
         let reclaim_close = current.c() >= level - touch_tol;
         let reversal_shape = current.down_shadow_ratio() >= 0.45
             && (current.c() >= current.o() || current.body_ratio() <= 0.45);
-
         held_above
             && first_touch
             && shock_drop_pct >= 0.025
@@ -158,7 +150,7 @@ impl VegasStrategy {
                 .market_structure_value
                 .swing_bearish_bos
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn is_round_level_reversal_short_candidate(
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
@@ -166,7 +158,6 @@ impl VegasStrategy {
         if data_items.len() < 10 {
             return false;
         }
-
         let current = data_items.last().expect("数据不能为空");
         let prev = &data_items[data_items.len() - 2];
         let prior = &data_items[data_items.len() - 10..data_items.len() - 1];
@@ -181,13 +172,11 @@ impl VegasStrategy {
         let shock_rise_pct = ((current.h() - prev.c()) / prev.c().max(1e-9)).max(0.0);
         let mode = env_string("VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL_SHORT_MODE")
             .unwrap_or_else(|| "v1".to_string());
-
         let held_below = prior.iter().all(|item| item.h() < level - touch_tol);
         let first_touch = prev.h() < level - touch_tol && current.h() >= level - touch_tol;
         let reject_close = current.c() <= level + touch_tol;
         let reversal_shape = current.up_shadow_ratio() >= 0.45
             && (current.c() <= current.o() || current.body_ratio() <= 0.45);
-
         let base_match = held_below
             && first_touch
             && shock_rise_pct >= 0.025
@@ -200,7 +189,6 @@ impl VegasStrategy {
             && !vegas_indicator_signal_values
                 .market_structure_value
                 .swing_bullish_bos;
-
         match mode.as_str() {
             "v2" => {
                 base_match
@@ -211,7 +199,7 @@ impl VegasStrategy {
             _ => base_match,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_exhaustion_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -223,7 +211,6 @@ impl VegasStrategy {
         let leg = &vegas_indicator_signal_values.leg_detection_value;
         let macd = &vegas_indicator_signal_values.macd_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         rsi < 25.0
             && volume.volume_ratio >= 5.0
             && !fib.in_zone
@@ -235,7 +222,7 @@ impl VegasStrategy {
             && macd.macd_line < 0.0
             && macd.signal_line < 0.0
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_bullish_leg_mean_reversion_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -247,7 +234,6 @@ impl VegasStrategy {
         let leg = &vegas_indicator_signal_values.leg_detection_value;
         let macd = &vegas_indicator_signal_values.macd_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         volume.volume_ratio >= 1.8
             && !ema_values.is_short_trend
             && leg.is_bullish_leg
@@ -263,7 +249,7 @@ impl VegasStrategy {
             && macd.histogram > 0.0
             && macd.histogram_decreasing
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_deep_negative_macd_recovery_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
         signal_price: f64,
@@ -277,10 +263,8 @@ impl VegasStrategy {
         let leg = &vegas_indicator_signal_values.leg_detection_value;
         let macd = &vegas_indicator_signal_values.macd_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         let mode = env_string("VEGAS_DEEP_NEGATIVE_MACD_SHORT_BLOCK_MODE")
             .unwrap_or_else(|| "v1".to_string());
-
         let macd_recovery_core =
             !ema_touch.is_short_signal && macd.histogram > 0.0 && macd.histogram_decreasing;
         let macd_depth_ratio = if signal_price > 0.0 {
@@ -293,7 +277,6 @@ impl VegasStrategy {
         } else {
             0.0
         };
-
         match mode.as_str() {
             "off" => false,
             "v2" => {
@@ -346,7 +329,6 @@ impl VegasStrategy {
             }
             "v8" => {
                 let use_absolute_thresholds = signal_price >= 10_000.0;
-
                 macd_recovery_core
                     && engulfing.is_valid_engulfing
                     && !fib.volume_confirmed
@@ -376,7 +358,7 @@ impl VegasStrategy {
             }
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_stc_early_weakening_short(
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
@@ -386,11 +368,9 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let Some((prev_stc, current_stc)) = compute_stc_pair(data_items) else {
             return false;
         };
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -400,7 +380,6 @@ impl VegasStrategy {
         let leg = &vegas_indicator_signal_values.leg_detection_value;
         let macd = &vegas_indicator_signal_values.macd_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 ema_values.is_short_trend
@@ -424,7 +403,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_weakening_no_structure_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -433,7 +412,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -444,7 +422,6 @@ impl VegasStrategy {
         let leg = &vegas_indicator_signal_values.leg_detection_value;
         let macd = &vegas_indicator_signal_values.macd_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 ema_values.is_short_trend
@@ -466,7 +443,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_deep_negative_weak_breakdown_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -475,7 +452,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let ema_values = &vegas_indicator_signal_values.ema_values;
@@ -485,7 +461,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 engulfing.is_valid_engulfing
@@ -508,7 +483,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_above_zero_shallow_weakening_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -517,7 +492,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -528,7 +502,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 ema_values.is_short_trend
@@ -553,7 +526,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_panic_breakdown_short(
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
@@ -563,11 +536,9 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let Some(last) = data_items.last() else {
             return false;
         };
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -579,7 +550,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 last.c < last.o
@@ -610,7 +580,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_above_zero_no_trend_hanging_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -619,7 +589,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -630,7 +599,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 !ema_values.is_short_trend
@@ -655,7 +623,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_below_zero_weakening_hanging_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -664,7 +632,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -675,7 +642,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 !ema_values.is_short_trend
@@ -699,7 +665,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_above_zero_no_trend_too_far_hanging_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -708,7 +674,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -720,7 +685,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 !ema_values.is_long_trend
@@ -745,7 +709,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_above_zero_low_volume_no_trend_hanging_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -754,7 +718,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -766,7 +729,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 !ema_values.is_long_trend
@@ -790,7 +752,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_long_trend_pullback_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -799,7 +761,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -810,7 +771,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 ema_values.is_long_trend
@@ -835,7 +795,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_long_trend_above_zero_low_volume_weakening_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
         signal_price: f64,
@@ -845,7 +805,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -860,7 +819,6 @@ impl VegasStrategy {
         } else {
             0.0
         };
-
         match mode.as_str() {
             "v1" => {
                 ema_values.is_long_trend
@@ -902,7 +860,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_long_trend_above_zero_high_rsi_early_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -911,7 +869,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
         let ema_distance = &vegas_indicator_signal_values.ema_distance_filter;
@@ -919,7 +876,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 ema_values.is_long_trend
@@ -937,7 +893,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_low_volume_neutral_rsi_macd_recovery_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
         signal_price: f64,
@@ -948,7 +904,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
         let macd = &vegas_indicator_signal_values.macd_value;
         let signal_line_ratio = if signal_price > 0.0 {
@@ -963,7 +918,6 @@ impl VegasStrategy {
             && macd.signal_line < 0.0
             && macd.macd_line > macd.signal_line
             && macd.histogram > 0.0;
-
         match mode.as_str() {
             "v1" => volume_ratio < 1.0 && rsi_is_neutral && macd_recovering_below_zero,
             "v2" => {

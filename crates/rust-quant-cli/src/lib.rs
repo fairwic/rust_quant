@@ -1,9 +1,7 @@
 //! # Rust Quant CLI
 //!
 //! 量化交易系统主程序入口
-
 pub mod app;
-
 use anyhow::Result;
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
@@ -11,43 +9,37 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use tokio_cron_scheduler::JobScheduler;
 use tracing::{error, info};
-
 // 重新导出核心依赖
 pub use rust_quant_execution::*;
 pub use rust_quant_strategies::*;
-
 /// 应用初始化
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 pub async fn app_init() -> Result<()> {
     env_logger::init();
-
     // 加载环境变量
     dotenv().ok();
-
     // 设置日志
     rust_quant_core::logger::setup_logging().await?;
-
     if should_skip_local_state_init() {
         info!(
             "Market Velocity live readiness 为只读 Web owner 检查，跳过 Core 本地 DB/Redis 初始化"
         );
         return Ok(());
     }
-
     // 初始化数据库连接
     rust_quant_core::database::init_db_pool().await?;
-
     // 初始化 Redis 连接池
     rust_quant_core::cache::init_redis_pool().await?;
-
     info!("应用初始化完成");
     Ok(())
 }
-
+/// 判断 量化核心 条件是否满足，给上层流程提供布尔决策。
 fn should_skip_local_state_init() -> bool {
     let envs: HashMap<String, String> = std::env::vars().collect();
     should_skip_local_state_init_from_map(&envs)
 }
-
+/// 判断 量化核心 条件是否满足，给上层流程提供布尔决策。
 fn should_skip_local_state_init_from_map(envs: &HashMap<String, String>) -> bool {
     envs.get("IS_RUN_MARKET_VELOCITY_LIVE_READINESS")
         .map(|value| {
@@ -58,15 +50,12 @@ fn should_skip_local_state_init_from_map(envs: &HashMap<String, String>) -> bool
         })
         .unwrap_or(false)
 }
-
 /// 全局调度器
 pub static SCHEDULER: Lazy<Arc<Mutex<Option<Arc<JobScheduler>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
-
 /// 初始化并启动调度器
 pub async fn init_scheduler() -> Result<Arc<JobScheduler>> {
     let mut scheduler_opt = SCHEDULER.lock().await;
-
     if scheduler_opt.is_none() {
         let scheduler = JobScheduler::new().await?;
         scheduler.start().await?;
@@ -74,25 +63,25 @@ pub async fn init_scheduler() -> Result<Arc<JobScheduler>> {
         *scheduler_opt = Some(Arc::clone(&arc_scheduler));
         return Ok(arc_scheduler);
     }
-
     Ok(Arc::clone(scheduler_opt.as_ref().unwrap()))
 }
-
-/// 运行主程序 - 委托给 app::bootstrap
 pub async fn run() -> Result<()> {
     app::bootstrap::run().await
 }
-
 /// 优雅关闭配置
 #[derive(Debug, Clone)]
 pub struct GracefulShutdownConfig {
+    /// 秒级时长。
     pub total_timeout_secs: u64,
+    /// 秒级时长。
     pub strategy_stop_timeout_secs: u64,
+    /// 秒级时长。
     pub scheduler_shutdown_timeout_secs: u64,
+    /// 秒级时长。
     pub db_cleanup_timeout_secs: u64,
 }
-
 impl Default for GracefulShutdownConfig {
+    /// 提供默认参数，保证 量化核心 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             total_timeout_secs: 30,
@@ -102,16 +91,12 @@ impl Default for GracefulShutdownConfig {
         }
     }
 }
-
-/// 优雅关闭
 pub async fn graceful_shutdown() -> Result<()> {
     graceful_shutdown_with_config(GracefulShutdownConfig::default()).await
 }
-
 /// 带配置的优雅关闭
 pub async fn graceful_shutdown_with_config(config: GracefulShutdownConfig) -> Result<()> {
     info!("开始优雅关闭... 总超时: {}秒", config.total_timeout_secs);
-
     let manager = rust_quant_core::config::shutdown_manager::ShutdownManager::new(
         rust_quant_core::config::shutdown_manager::ShutdownConfig {
             total_timeout: std::time::Duration::from_secs(config.total_timeout_secs),
@@ -119,7 +104,6 @@ pub async fn graceful_shutdown_with_config(config: GracefulShutdownConfig) -> Re
             force_exit_on_timeout: false,
         },
     );
-
     // 1) 关闭调度器
     let scheduler_secs = config.scheduler_shutdown_timeout_secs;
     manager
@@ -135,7 +119,6 @@ pub async fn graceful_shutdown_with_config(config: GracefulShutdownConfig) -> Re
             }
         })
         .await;
-
     // 2) 关闭数据库
     let db_secs = config.db_cleanup_timeout_secs;
     manager
@@ -152,7 +135,6 @@ pub async fn graceful_shutdown_with_config(config: GracefulShutdownConfig) -> Re
             }
         })
         .await;
-
     // 3) 关闭 Redis
     manager
         .register_shutdown_hook("redis_cleanup".to_string(), || async {
@@ -162,15 +144,12 @@ pub async fn graceful_shutdown_with_config(config: GracefulShutdownConfig) -> Re
             Ok(())
         })
         .await;
-
     // 统一执行关闭
     manager.shutdown().await
 }
-
 /// 关闭调度器
 async fn shutdown_scheduler() -> Result<()> {
     info!("正在关闭调度器...");
-
     let scheduler_guard = SCHEDULER.lock().await;
     if let Some(scheduler) = scheduler_guard.as_ref() {
         info!("调度器引用计数: {}", Arc::strong_count(scheduler));
@@ -180,15 +159,12 @@ async fn shutdown_scheduler() -> Result<()> {
     } else {
         info!("调度器未初始化，跳过关闭");
     }
-
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
-
     #[test]
     fn market_velocity_live_readiness_skips_local_state_init() {
         let mut envs = HashMap::new();
@@ -196,7 +172,6 @@ mod tests {
             "IS_RUN_MARKET_VELOCITY_LIVE_READINESS".to_string(),
             "true".to_string(),
         );
-
         assert!(should_skip_local_state_init_from_map(&envs));
     }
 }

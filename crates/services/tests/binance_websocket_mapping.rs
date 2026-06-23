@@ -4,7 +4,6 @@ use rust_quant_services::market::binance_websocket::{
     binance_kline_stream_name, parse_binance_kline_message,
 };
 use serde_json::json;
-
 #[test]
 fn maps_combined_binance_kline_to_existing_inst_id_and_timeframe() -> Result<()> {
     let message = json!({
@@ -34,9 +33,7 @@ fn maps_combined_binance_kline_to_existing_inst_id_and_timeframe() -> Result<()>
             }
         }
     });
-
     let update = parse_binance_kline_message(&message, "ETH-USDT-SWAP", "4H")?;
-
     assert_eq!(update.inst_id, "ETH-USDT-SWAP");
     assert_eq!(update.time_interval, "4H");
     assert_eq!(update.candle_entity.ts, 1_709_990_400_000);
@@ -50,10 +47,8 @@ fn maps_combined_binance_kline_to_existing_inst_id_and_timeframe() -> Result<()>
     assert_eq!(update.domain_candle.symbol, "ETH-USDT-SWAP");
     assert_eq!(update.domain_candle.timeframe, Timeframe::H4);
     assert!(update.domain_candle.confirmed);
-
     Ok(())
 }
-
 #[test]
 fn builds_binance_kline_stream_without_changing_internal_symbol() {
     assert_eq!(

@@ -2,23 +2,22 @@
 //!
 //! 从 src/trading/model/strategy/strategy_config.rs 迁移
 //! rbatis → sqlx
-
-use std::str::FromStr;
-
 use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::{FromRow, PgPool};
-use tracing::debug;
-
 use rust_quant_domain::traits::StrategyConfigRepository;
 use rust_quant_domain::{StrategyConfig, StrategyType, Timeframe};
-
+use sqlx::{FromRow, PgPool};
+use std::str::FromStr;
+use tracing::debug;
 /// 策略配置数据库实体
 #[derive(Debug, Clone, FromRow, serde::Serialize, serde::Deserialize)]
 pub struct StrategyConfigEntity {
     pub id: i32, // legacy int (32位)
+    /// 类型标识。
     pub strategy_type: String,
+    /// 交易所合约或现货交易对标识。
     pub inst_id: String,
+    /// 时间字段。
     pub time: String,
     pub value: Option<String>,         // JSON 格式的策略参数 (可为 NULL)
     pub risk_config: String,           // JSON 格式的风险配置
@@ -27,20 +26,18 @@ pub struct StrategyConfigEntity {
     pub final_fund: f32,               // legacy float (32位)
     pub is_deleted: i16,               // legacy smallint (16位)
 }
-
 impl StrategyConfigEntity {
     /// 转换为领域实体
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     pub fn to_domain(&self) -> Result<StrategyConfig> {
         let strategy_type =
             StrategyType::from_str(&self.strategy_type).unwrap_or(StrategyType::Custom(0));
-
         let timeframe = Timeframe::from_str(&self.time).unwrap_or(Timeframe::H1);
-
         // value 可能为 NULL，需要处理
         let value_str = self.value.as_deref().unwrap_or("{}");
         let parameters: serde_json::Value = serde_json::from_str(value_str)?;
         let risk_config: serde_json::Value = serde_json::from_str(&self.risk_config)?;
-
         let mut config = StrategyConfig::new(
             self.id as i64, // 转换为 i64 以匹配 domain 类型
             strategy_type,
@@ -49,30 +46,25 @@ impl StrategyConfigEntity {
             parameters,
             risk_config,
         );
-
         // 处理可选的回测时间范围
         let start_time = self.kline_start_time.unwrap_or(0);
         let end_time = self.kline_end_time.unwrap_or(0);
         config.set_backtest_range(start_time, end_time);
-
         Ok(config)
     }
 }
-
 /// 策略配置仓储实现 (基于 sqlx)
 pub struct SqlxStrategyConfigRepository {
+    /// 数据库连接池。
     pool: PgPool,
 }
-
 impl SqlxStrategyConfigRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
-
     /// 根据ID查询配置
     pub async fn get_config_by_id(&self, id: i64) -> Result<Option<StrategyConfigEntity>> {
         debug!("查询策略配置: id={}", id);
-
         let entity = sqlx::query_as::<_, StrategyConfigEntity>(
             "SELECT id, strategy_type, inst_id, time, value, risk_config,
                     kline_start_time, kline_end_time, final_fund, is_deleted
@@ -81,10 +73,8 @@ impl SqlxStrategyConfigRepository {
         .bind(id as i32)
         .fetch_optional(&self.pool)
         .await?;
-
         Ok(entity)
     }
-
     /// 获取所有未删除的配置
     pub async fn get_all(&self) -> Result<Vec<StrategyConfigEntity>> {
         let entities = sqlx::query_as::<_, StrategyConfigEntity>(
@@ -94,10 +84,8 @@ impl SqlxStrategyConfigRepository {
         )
         .fetch_all(&self.pool)
         .await?;
-
         Ok(entities)
     }
-
     /// 按周期查询配置
     pub async fn get_all_by_period(&self, period: &str) -> Result<Vec<StrategyConfigEntity>> {
         let entities = sqlx::query_as::<_, StrategyConfigEntity>(
@@ -108,10 +96,8 @@ impl SqlxStrategyConfigRepository {
         .bind(period)
         .fetch_all(&self.pool)
         .await?;
-
         Ok(entities)
     }
-
     /// 根据策略类型、产品、周期查询配置
     pub async fn get_config(
         &self,
@@ -151,7 +137,6 @@ impl SqlxStrategyConfigRepository {
                 .await?
             }
         };
-
         debug!(
             "查询策略配置: strategy_type={:?}, inst_id={}, time={}, 结果数量={}",
             strategy_type,
@@ -161,7 +146,6 @@ impl SqlxStrategyConfigRepository {
         );
         Ok(entities)
     }
-
     /// 插入新配置
     pub async fn insert(&self, entity: &StrategyConfigEntity) -> Result<u64> {
         let inserted_id = sqlx::query_scalar::<_, i64>(
@@ -184,7 +168,6 @@ impl SqlxStrategyConfigRepository {
         .await?;
         Ok(inserted_id as u64)
     }
-
     /// 更新配置
     pub async fn update(&self, id: i32, entity: &StrategyConfigEntity) -> Result<u64> {
         let result = sqlx::query(
@@ -205,13 +188,15 @@ impl SqlxStrategyConfigRepository {
         .bind(id)
         .execute(&self.pool)
         .await?;
-
         Ok(result.rows_affected())
     }
 }
-
 #[async_trait]
 impl StrategyConfigRepository for SqlxStrategyConfigRepository {
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 返回 Result 以便错误透明上抛，统一上层降级与重试策略。
     async fn find_by_id(&self, id: i64) -> Result<Option<StrategyConfig>> {
         let entity = self.get_config_by_id(id).await?;
         match entity {
@@ -219,12 +204,12 @@ impl StrategyConfigRepository for SqlxStrategyConfigRepository {
             None => Ok(None),
         }
     }
-
+    /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
     async fn find_all_enabled(&self) -> Result<Vec<StrategyConfig>> {
         let entities = self.get_all().await?;
         entities.into_iter().map(|e| e.to_domain()).collect()
     }
-
+    /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
     async fn find_by_symbol_and_timeframe(
         &self,
         symbol: &str,
@@ -233,7 +218,7 @@ impl StrategyConfigRepository for SqlxStrategyConfigRepository {
         let entities = self.get_config(None, symbol, timeframe.as_str()).await?;
         entities.into_iter().map(|e| e.to_domain()).collect()
     }
-
+    /// 提供save的集中实现，避免回测策略调用方重复处理相同细节。
     async fn save(&self, config: &StrategyConfig) -> Result<i64> {
         let entity = StrategyConfigEntity {
             id: config.id as i32, // 转换为 i32 以匹配数据库类型
@@ -247,10 +232,9 @@ impl StrategyConfigRepository for SqlxStrategyConfigRepository {
             final_fund: 0.0f32,
             is_deleted: 0i16,
         };
-
         self.insert(&entity).await.map(|id| id as i64)
     }
-
+    /// 执行更新步骤，串起回测策略需要的状态推进和错误处理。
     async fn update(&self, config: &StrategyConfig) -> Result<()> {
         let entity = StrategyConfigEntity {
             id: config.id as i32, // 转换为 i32 以匹配数据库类型
@@ -264,36 +248,31 @@ impl StrategyConfigRepository for SqlxStrategyConfigRepository {
             final_fund: 0.0f32,
             is_deleted: 0i16,
         };
-
         SqlxStrategyConfigRepository::update(self, config.id as i32, &entity).await?;
         Ok(())
     }
-
+    /// 提供delete的集中实现，避免回测策略调用方重复处理相同细节。
     async fn delete(&self, id: i64) -> Result<()> {
         sqlx::query("UPDATE strategy_config SET is_deleted = 1 WHERE id = $1")
             .bind(id as i32)
             .execute(&self.pool)
             .await?;
-
         Ok(())
     }
 }
-
 /// 提供兼容旧代码的Model接口
 ///
 /// # 架构说明
 /// 这是一个兼容层，用于向后兼容旧代码。
 /// 新代码应该直接使用 `SqlxStrategyConfigRepository` 并通过依赖注入传递。
 pub struct StrategyConfigEntityModel {
+    /// repository，用于配置运行参数。
     repository: SqlxStrategyConfigRepository,
 }
-
 impl StrategyConfigEntityModel {
     /// 创建新的Model实例（通过依赖注入）
-    ///
     /// # 参数
     /// * `pool` - 数据库连接池
-    ///
     /// # 架构说明
     /// 此方法通过构造函数注入数据库连接池，符合依赖注入原则。
     /// 调用方应该在应用入口创建 pool 并传递。
@@ -302,12 +281,9 @@ impl StrategyConfigEntityModel {
             repository: SqlxStrategyConfigRepository::new(pool),
         }
     }
-
-    /// 根据ID查询配置
     pub async fn get_config_by_id(&self, id: i64) -> Result<Option<StrategyConfigEntity>> {
         self.repository.get_config_by_id(id).await
     }
-
     /// 查询配置
     pub async fn get_config(
         &self,
@@ -319,13 +295,9 @@ impl StrategyConfigEntityModel {
             .get_config(strategy_type, inst_id, time)
             .await
     }
-
-    /// 获取所有配置
     pub async fn get_all(&self) -> Result<Vec<StrategyConfigEntity>> {
         self.repository.get_all().await
     }
-
-    /// 按周期查询
     pub async fn get_all_by_period(&self, period: &str) -> Result<Vec<StrategyConfigEntity>> {
         self.repository.get_all_by_period(period).await
     }

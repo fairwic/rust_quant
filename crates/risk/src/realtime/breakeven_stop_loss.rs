@@ -1,15 +1,11 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
-
+use super::{MarketCandle, PositionSnapshot, StopLossAmender, StrategyRiskConfigSnapshot};
 use rust_quant_common::CandleItem;
 use rust_quant_domain::enums::PositionSide;
 use rust_quant_domain::BasicRiskConfig;
-
-use super::{MarketCandle, PositionSnapshot, StopLossAmender, StrategyRiskConfigSnapshot};
-
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 /// 达到 1.5R 后将止损移动到开仓价（保本）
 ///
 /// R 的定义：\( R = |entry - initial_stop_loss| \)
@@ -23,14 +19,15 @@ pub struct BreakevenStopLossService<A: StopLossAmender> {
     amender: Arc<A>,
     inner: Arc<RwLock<InnerState>>,
 }
-
 #[derive(Debug, Clone)]
 struct StrategyKey {
+    /// 策略config ID。
     strategy_config_id: i64,
+    /// 交易所合约或现货交易对标识。
     inst_id: String,
 }
-
 impl StrategyKey {
+    /// 构建 交易执行与风控 所需实例，并集中初始化依赖和默认状态。
     fn new(strategy_config_id: i64, inst_id: String) -> Self {
         Self {
             strategy_config_id,
@@ -38,47 +35,46 @@ impl StrategyKey {
         }
     }
 }
-
 impl std::hash::Hash for StrategyKey {
+    /// 封装当前函数，减少风控调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.strategy_config_id.hash(state);
         self.inst_id.hash(state);
     }
 }
-
 impl PartialEq for StrategyKey {
     fn eq(&self, other: &Self) -> bool {
         self.strategy_config_id == other.strategy_config_id && self.inst_id == other.inst_id
     }
 }
-
 impl Eq for StrategyKey {}
-
 #[derive(Debug, Clone)]
 struct PositionRuntimeState {
+    /// 快照。
     snapshot: PositionSnapshot,
+    /// 风险。
     risk: BasicRiskConfig,
+    /// movedtobreakeven，用于记录交易或执行状态。
     moved_to_breakeven: bool,
 }
-
 #[derive(Default)]
 struct InnerState {
+    /// 键值扩展数据。
     positions: HashMap<StrategyKey, PositionRuntimeState>,
 }
-
 impl<A: StopLossAmender> BreakevenStopLossService<A> {
+    /// 构建 交易执行与风控 所需实例，并集中初始化依赖和默认状态。
     pub fn new(amender: Arc<A>) -> Self {
         Self {
             amender,
             inner: Arc::new(RwLock::new(InnerState::default())),
         }
     }
-
     /// 更新策略风险配置（热更新）
     pub async fn upsert_risk_config(&self, cfg: StrategyRiskConfigSnapshot) {
         let mut guard = self.inner.write().await;
         let key = StrategyKey::new(cfg.strategy_config_id, cfg.inst_id.clone());
-
         if let Some(st) = guard.positions.get_mut(&key) {
             st.risk = cfg.risk;
             debug!(
@@ -93,12 +89,10 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
             );
         }
     }
-
     /// 更新持仓快照
     pub async fn upsert_position(&self, snapshot: PositionSnapshot, risk: BasicRiskConfig) {
         let mut guard = self.inner.write().await;
         let key = StrategyKey::new(snapshot.strategy_config_id, snapshot.inst_id.clone());
-
         if !snapshot.is_open {
             guard.positions.remove(&key);
             debug!(
@@ -107,13 +101,11 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
             );
             return;
         }
-
         let moved = guard
             .positions
             .get(&key)
             .map(|s| s.moved_to_breakeven)
             .unwrap_or(false);
-
         guard.positions.insert(
             key,
             PositionRuntimeState {
@@ -123,13 +115,11 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
             },
         );
     }
-
     /// 处理 K线更新（可在 confirm=1 时调用）
     pub async fn on_candle(&self, market_candle: MarketCandle) {
         // 只在确认K线时触发，可以减少噪声（上层若传入未确认K线，这里不强制拦截）
         let inst_id = market_candle.inst_id.clone();
         let candle: CandleItem = market_candle.candle;
-
         let candidates = {
             let guard = self.inner.read().await;
             guard
@@ -141,16 +131,13 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
                 .map(|(k, st)| (k.clone(), st.clone()))
                 .collect::<Vec<_>>()
         };
-
         if candidates.is_empty() {
             return;
         }
-
         for (key, st) in candidates {
             if !Self::is_enabled(&st.risk) {
                 continue;
             }
-
             let ord_id = match st.snapshot.ord_id.as_deref() {
                 Some(v) if !v.is_empty() => v,
                 _ => {
@@ -161,7 +148,6 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
                     continue;
                 }
             };
-
             let (triggered, breakeven_price) = match st.snapshot.pos_side {
                 PositionSide::Long => {
                     let threshold = Self::breakeven_trigger_threshold(
@@ -186,21 +172,17 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
                     continue;
                 }
             };
-
             if !triggered {
                 continue;
             }
-
             info!(
                 "触发保本移动止损条件: strategy_config_id={}, inst_id={}, pos_side={:?}, entry={}",
                 key.strategy_config_id, key.inst_id, st.snapshot.pos_side, st.snapshot.entry_price
             );
-
             let res = self
                 .amender
                 .move_stop_loss_to_price(&key.inst_id, ord_id, breakeven_price)
                 .await;
-
             match res {
                 Ok(_) => {
                     let mut guard = self.inner.write().await;
@@ -217,11 +199,9 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
             }
         }
     }
-
     fn is_enabled(risk: &BasicRiskConfig) -> bool {
         risk.atr_take_profit_ratio.unwrap_or(0.0) > 0.0
     }
-
     /// 计算 1.5R 触发阈值
     fn breakeven_trigger_threshold(
         side: PositionSide,
@@ -237,7 +217,6 @@ impl<A: StopLossAmender> BreakevenStopLossService<A> {
         let sl = initial_stop_loss.unwrap_or(fallback_sl);
         let r = (entry_price - sl).abs();
         let trigger_r = 1.5_f64;
-
         match side {
             PositionSide::Long => entry_price + trigger_r * r,
             PositionSide::Short => entry_price - trigger_r * r,

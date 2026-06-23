@@ -1,4 +1,6 @@
 impl ExecutionWorker {
+    /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+    /// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
     async fn live_order_request(
         &self,
         gateway: &CryptoExcAllGateway,
@@ -17,15 +19,16 @@ impl ExecutionWorker {
         let filters = load_exchange_order_filters(order_task.exchange, &order_task.symbol).await?;
         order_task.to_live_order_request(Some(last_price), filters.as_ref())
     }
-
+    /// 选择 Web 商业、会员和执行准备度 的最佳候选结果，避免选择规则分散在调用方。
     async fn resolve_live_gateway(
         &self,
         buyer_email: &str,
         exchange: ExchangeId,
+        credential_id: i64,
     ) -> Result<CryptoExcAllGateway> {
         let config = self
             .client
-            .resolve_user_exchange_config(buyer_email, exchange.as_str())
+            .resolve_user_exchange_config_for_credential(buyer_email, exchange.as_str(), credential_id)
             .await?;
         CryptoExcAllGateway::from_single_exchange_credentials(
             exchange,
@@ -36,13 +39,62 @@ impl ExecutionWorker {
         )
         .map_err(Into::into)
     }
-
+    /// 选择 Web 商业、会员和执行准备度 的最佳候选结果，避免选择规则分散在调用方。
+    async fn resolve_live_gateway_for_task(
+        &self,
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+    ) -> Result<CryptoExcAllGateway> {
+        let credential_id = api_credential_id_from_task(task).ok_or_else(|| {
+            anyhow!(
+                "api_credential_id_missing: execution task does not carry api_credential_id; place_order_allowed=false; mutation_allowed=false"
+            )
+        })?;
+        self.resolve_live_gateway(&task.buyer_email, exchange, credential_id)
+            .await
+    }
+    /// 封装实盘apicredentialpreflightreport，减少Web 商业链路调用方重复实现相同细节。
     async fn live_api_credential_preflight_report(
         &self,
         task: &ExecutionTask,
         order_task: &ExecutionOrderTask,
     ) -> Option<ExecutionTaskReportRequest> {
-        let credential_id = api_credential_id_from_task(task)?;
+        self.live_api_credential_preflight_report_for_order(
+            task,
+            order_task.exchange,
+            &order_task.symbol,
+            order_side_lower(order_task.side),
+        )
+        .await
+    }
+    /// 调用 Web owner service 复核用户 API Key 的签名预检结果，只有 verified 且交易所匹配时才允许实盘下单。
+    async fn live_api_credential_preflight_report_for_order(
+        &self,
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        symbol: &str,
+        order_side: &str,
+    ) -> Option<ExecutionTaskReportRequest> {
+        // Web 任务必须携带明确的 api_credential_id，Core 不通过 buyer_email 猜测凭证，避免误用其他交易所账户。
+        let Some(credential_id) = api_credential_id_from_task(task) else {
+            return Some(ExecutionTaskReportRequest::failed(
+                task.id,
+                exchange.as_str(),
+                order_side,
+                "API credential preflight blocked live order: api_credential_id_missing: execution task does not carry api_credential_id; place_order_allowed=false; mutation_allowed=false",
+                json!({
+                    "task_id": task.id,
+                    "stage": "api_credential_preflight",
+                    "blocker_code": "api_credential_id_missing",
+                    "blocker_message": "execution task does not carry api_credential_id",
+                    "exchange": exchange.as_str(),
+                    "symbol": symbol,
+                    "place_order_allowed": false,
+                    "mutation_allowed": false,
+                }),
+            ));
+        };
+        // 这里读取的是 Web 的内部凭证状态摘要，不返回明文 secret；Core 只根据 readiness 决定是否继续。
         let checked = match self
             .client
             .check_internal_api_credential(credential_id)
@@ -52,8 +104,8 @@ impl ExecutionWorker {
             Err(error) => {
                 return Some(ExecutionTaskReportRequest::failed(
                     task.id,
-                    order_task.exchange.as_str(),
-                    order_side_lower(order_task.side),
+                    exchange.as_str(),
+                    order_side,
                     format!(
                         "API credential preflight failed before live order: {error}; place_order_allowed=false; mutation_allowed=false"
                     ),
@@ -61,42 +113,39 @@ impl ExecutionWorker {
                         "task_id": task.id,
                         "stage": "api_credential_preflight",
                         "api_credential_id": credential_id,
-                        "exchange": order_task.exchange.as_str(),
-                        "symbol": order_task.symbol,
+                        "exchange": exchange.as_str(),
+                        "symbol": symbol,
                         "place_order_allowed": false,
                         "mutation_allowed": false,
                     }),
                 ));
             }
         };
-
-        if !api_credential_exchange_matches_task(&checked.exchange, order_task.exchange) {
+        if !api_credential_exchange_matches_task(&checked.exchange, exchange) {
             return Some(ExecutionTaskReportRequest::failed(
                 task.id,
-                order_task.exchange.as_str(),
-                order_side_lower(order_task.side),
+                exchange.as_str(),
+                order_side,
                 format!(
                     "API credential preflight returned exchange {} for task exchange {}; place_order_allowed=false; mutation_allowed=false",
                     checked.exchange,
-                    order_task.exchange.as_str()
+                    exchange.as_str()
                 ),
                 json!({
                     "task_id": task.id,
                     "stage": "api_credential_preflight",
                     "api_credential_id": credential_id,
                     "credential_exchange": checked.exchange,
-                    "task_exchange": order_task.exchange.as_str(),
-                    "symbol": order_task.symbol,
+                    "task_exchange": exchange.as_str(),
+                    "symbol": symbol,
                     "place_order_allowed": false,
                     "mutation_allowed": false,
                 }),
             ));
         }
-
         if checked.execution_readiness.can_execute {
             return None;
         }
-
         let blocker_code = checked
             .execution_readiness
             .blocker_code
@@ -109,11 +158,10 @@ impl ExecutionWorker {
             .as_deref()
             .or(checked.last_check_message.as_deref())
             .unwrap_or("API credential is not ready for live execution");
-
         Some(ExecutionTaskReportRequest::failed(
             task.id,
-            order_task.exchange.as_str(),
-            order_side_lower(order_task.side),
+            exchange.as_str(),
+            order_side,
             format!(
                 "API credential preflight blocked live order: {blocker_code}: {blocker_message}; place_order_allowed=false; mutation_allowed=false"
             ),
@@ -121,8 +169,8 @@ impl ExecutionWorker {
                 "task_id": task.id,
                 "stage": "api_credential_preflight",
                 "api_credential_id": credential_id,
-                "exchange": order_task.exchange.as_str(),
-                "symbol": order_task.symbol,
+                "exchange": exchange.as_str(),
+                "symbol": symbol,
                 "last_check_code": checked.last_check_code,
                 "blocker_code": checked.execution_readiness.blocker_code,
                 "blocker_message": checked.execution_readiness.blocker_message,
@@ -131,9 +179,10 @@ impl ExecutionWorker {
             }),
         ))
     }
-
+    /// 创建 Web 商业、会员和执行准备度 资源，并在入口处完成必要的参数归一。
     async fn prepare_binance_order_settings_after_protection(
         &self,
+        task: &ExecutionTask,
         gateway: &CryptoExcAllGateway,
         order_task: &ExecutionOrderTask,
     ) -> Result<()> {
@@ -144,7 +193,6 @@ impl ExecutionWorker {
         {
             return Ok(());
         }
-
         let prepare = PrepareOrderSettingsRequest {
             instrument: parse_instrument(&order_task.symbol)?,
             margin_mode: order_task.margin_mode.clone(),
@@ -154,13 +202,12 @@ impl ExecutionWorker {
             margin_coin: order_task.margin_coin.clone(),
             position_side: order_task.position_side.clone(),
         };
-        gateway
-            .prepare_order_settings(order_task.exchange, prepare)
+        self.prepare_order_settings_with_audit(task, gateway, order_task.exchange, prepare)
             .await
             .map(|_| ())
             .map_err(Into::into)
     }
-
+    /// 用交易所订单查询结果补齐 ack，随后同步保护单状态，确保 Web 看到的是“已确认事实”而不是单纯下单返回。
     async fn confirmed_live_order_report(
         &self,
         task: &ExecutionTask,
@@ -172,6 +219,7 @@ impl ExecutionWorker {
     ) -> ExecutionTaskReportRequest {
         let task_id = task.id;
         let mut confirmed_order = None;
+        // place_order ack 只证明交易所接收请求；再次查询订单和成交明细，才能确定是否已成交、部分成交或等待确认。
         let mut report = match confirm_live_order(gateway, &ack).await {
             Ok((order, fills)) => {
                 confirmed_order = Some(order.clone());
@@ -205,7 +253,7 @@ impl ExecutionWorker {
                 )
             }
         };
-
+        // 保护单状态跟随确认后的主订单结果同步；如果保护失败，报告会保持阻塞或触发回滚，而不是直接完成任务。
         if let (Some(order_task), Some(protection)) = (
             order_task,
             ProtectionSyncContract::from_task_result(&report, protection),
@@ -226,6 +274,8 @@ impl ExecutionWorker {
                                 gateway,
                                 order_task.exchange,
                                 request,
+                                task,
+                                self,
                             )
                             .await
                         }
@@ -255,10 +305,23 @@ impl ExecutionWorker {
                     .await;
             }
         }
-
+        if let Some(order_task) = order_task {
+            if report.execution_status == "completed" && !order_task.take_profit_legs.is_empty() {
+                let outcome =
+                    sync_take_profit_orders_after_main_fill(
+                        gateway,
+                        order_task,
+                        report.filled_qty,
+                        task,
+                        self,
+                    )
+                        .await;
+                apply_take_profit_sync_outcome_to_report(&mut report, order_task, outcome);
+            }
+        }
         report
     }
-
+    /// 提供rollback之后protectivefailure的集中实现，避免Web 商业链路调用方重复处理相同细节。
     async fn rollback_after_protective_failure(
         &self,
         task: &ExecutionTask,
@@ -278,7 +341,6 @@ impl ExecutionWorker {
                 return;
             }
         };
-
         let rollback_side = order_side_lower(request.side);
         let ack = match self
             .place_order_with_audit(task, gateway, request.clone())
@@ -294,7 +356,6 @@ impl ExecutionWorker {
                 return;
             }
         };
-
         let rollback_report = match confirm_live_order(gateway, &ack).await {
             Ok((order, fills)) => build_confirmed_order_report_for_task(
                 task,
@@ -317,7 +378,7 @@ impl ExecutionWorker {
         };
         apply_protective_failure_rollback_report(report, &rollback_report);
     }
-
+    /// 提供duplicateclient订单ID报告的集中实现，避免Web 商业链路调用方重复处理相同细节。
     async fn duplicate_client_order_id_report(
         &self,
         task: &ExecutionTask,
@@ -349,7 +410,7 @@ impl ExecutionWorker {
             ),
         }
     }
-
+    /// 提供preplaceclient订单报告的集中实现，避免Web 商业链路调用方重复处理相同细节。
     async fn pre_place_client_order_report(
         &self,
         task: &ExecutionTask,
@@ -362,8 +423,11 @@ impl ExecutionWorker {
         let Some(lookup) = pre_place_client_order_lookup(request) else {
             return Ok(None);
         };
-
-        match gateway.order(request.exchange, lookup.query.clone()).await {
+        match CryptoExcAllGateway::with_signed_read_only_scope(
+            gateway.order(request.exchange, lookup.query.clone()),
+        )
+        .await
+        {
             Ok(_) => Ok(Some(
                 self.confirmed_live_order_report(
                     task, gateway, order_task, order_side, lookup.ack, protection,

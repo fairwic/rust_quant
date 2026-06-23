@@ -4,7 +4,6 @@ use rust_quant_services::strategy::pre_major_listing_perp_catchup::{
     ListingCatchupDecision, ListingCatchupInput, ListingCatchupPaperProbeSeed,
     ListingCatchupPaperSample, ListingCatchupPriceBar, ListingCatchupVenueProbe,
 };
-
 fn candidate(exchange: &str, spread_pct: f64, top5_depth_usdt: f64) -> ListingCatchupCandidate {
     ListingCatchupCandidate {
         exchange: exchange.to_string(),
@@ -14,7 +13,6 @@ fn candidate(exchange: &str, spread_pct: f64, top5_depth_usdt: f64) -> ListingCa
         response_latency_ms: 80,
     }
 }
-
 fn valid_input() -> ListingCatchupInput {
     ListingCatchupInput {
         announcement_exchange: "binance".to_string(),
@@ -32,11 +30,9 @@ fn valid_input() -> ListingCatchupInput {
         ],
     }
 }
-
 #[test]
 fn chooses_bitget_before_bybit_and_gate_when_tradeable() {
     let decision = choose_secondary_perp_venue(&valid_input());
-
     assert_eq!(
         decision,
         ListingCatchupDecision::Trade {
@@ -50,20 +46,16 @@ fn chooses_bitget_before_bybit_and_gate_when_tradeable() {
         }
     );
 }
-
 #[test]
 fn falls_back_to_bybit_when_bitget_depth_is_unready() {
     let mut input = valid_input();
     input.candidates[2].top5_depth_usdt = 20_000.0;
-
     let decision = choose_secondary_perp_venue(&input);
-
     assert!(matches!(
         decision,
         ListingCatchupDecision::Trade { exchange, .. } if exchange == "bybit"
     ));
 }
-
 #[test]
 fn rejects_stale_or_prepumped_announcements() {
     let mut stale = valid_input();
@@ -74,7 +66,6 @@ fn rejects_stale_or_prepumped_announcements() {
             reason: "listing_latency_too_high".to_string()
         }
     );
-
     let mut prepumped = valid_input();
     prepumped.pre_announcement_return_15m_pct = 21.0;
     assert_eq!(
@@ -84,7 +75,6 @@ fn rejects_stale_or_prepumped_announcements() {
         }
     );
 }
-
 #[test]
 fn rejects_thin_orderbooks_and_macro_dumping() {
     let mut thin = valid_input();
@@ -97,7 +87,6 @@ fn rejects_thin_orderbooks_and_macro_dumping() {
             reason: "secondary_perp_depth_unready".to_string()
         }
     );
-
     let mut dumping = valid_input();
     dumping.btc_5m_return_pct = -1.3;
     assert_eq!(
@@ -107,7 +96,6 @@ fn rejects_thin_orderbooks_and_macro_dumping() {
         }
     );
 }
-
 fn paper_sample(id: usize, exit_close_pct: f64) -> ListingCatchupPaperSample {
     ListingCatchupPaperSample {
         announcement_id: format!("announcement-{id}"),
@@ -123,11 +111,9 @@ fn paper_sample(id: usize, exit_close_pct: f64) -> ListingCatchupPaperSample {
         slippage_bps_per_side: 3.0,
     }
 }
-
 #[test]
 fn paper_acceptance_blocks_until_sample_size_and_profitability_are_met() {
     let samples: Vec<_> = (0..29).map(|idx| paper_sample(idx, 4.0)).collect();
-
     let report = evaluate_listing_catchup_paper(
         samples,
         ListingCatchupAcceptanceCriteria {
@@ -136,7 +122,6 @@ fn paper_acceptance_blocks_until_sample_size_and_profitability_are_met() {
             require_positive_total_net_return: true,
         },
     );
-
     assert_eq!(report.trade_samples, 29);
     assert_eq!(report.production_status, "blocked");
     assert!(report
@@ -144,13 +129,11 @@ fn paper_acceptance_blocks_until_sample_size_and_profitability_are_met() {
         .contains(&"paper_trade_samples_below_minimum".to_string()));
     assert!(!report.automatic_live_trading_allowed);
 }
-
 #[test]
 fn paper_acceptance_passes_at_sixty_percent_wins_but_keeps_live_disabled() {
     let mut samples = Vec::new();
     samples.extend((0..18).map(|idx| paper_sample(idx, 4.0)));
     samples.extend((18..30).map(|idx| paper_sample(idx, -1.0)));
-
     let report = evaluate_listing_catchup_paper(
         samples,
         ListingCatchupAcceptanceCriteria {
@@ -159,14 +142,12 @@ fn paper_acceptance_passes_at_sixty_percent_wins_but_keeps_live_disabled() {
             require_positive_total_net_return: true,
         },
     );
-
     assert_eq!(report.trade_samples, 30);
     assert_eq!(report.win_rate_pct, 60.0);
     assert!(report.total_net_return_pct > 0.0);
     assert_eq!(report.production_status, "paper_ready");
     assert!(!report.automatic_live_trading_allowed);
 }
-
 #[test]
 fn paper_acceptance_deduplicates_same_announcement_asset() {
     let first = paper_sample(1, 4.0);
@@ -175,7 +156,6 @@ fn paper_acceptance_deduplicates_same_announcement_asset() {
     duplicate.input.announcement_exchange = first.input.announcement_exchange.clone();
     duplicate.input.base_asset = first.input.base_asset.clone();
     duplicate.input.quote_asset = first.input.quote_asset.clone();
-
     let report = evaluate_listing_catchup_paper(
         vec![first, duplicate],
         ListingCatchupAcceptanceCriteria {
@@ -184,17 +164,14 @@ fn paper_acceptance_deduplicates_same_announcement_asset() {
             require_positive_total_net_return: true,
         },
     );
-
     assert_eq!(report.unique_samples, 1);
     assert_eq!(report.duplicate_samples, 1);
     assert_eq!(report.trade_samples, 1);
     assert_eq!(report.win_rate_pct, 100.0);
 }
-
 #[test]
 fn paper_acceptance_counts_fees_and_slippage_before_profitability() {
     let samples: Vec<_> = (0..30).map(|idx| paper_sample(idx, 0.05)).collect();
-
     let report = evaluate_listing_catchup_paper(
         samples,
         ListingCatchupAcceptanceCriteria {
@@ -203,7 +180,6 @@ fn paper_acceptance_counts_fees_and_slippage_before_profitability() {
             require_positive_total_net_return: true,
         },
     );
-
     assert_eq!(report.trade_samples, 30);
     assert_eq!(report.win_rate_pct, 0.0);
     assert!(report.total_net_return_pct < 0.0);
@@ -214,7 +190,6 @@ fn paper_acceptance_counts_fees_and_slippage_before_profitability() {
         .blockers
         .contains(&"paper_total_net_return_not_positive".to_string()));
 }
-
 #[test]
 fn paper_probe_seed_builds_acceptance_sample_from_orderbook_and_prices() {
     let sample = build_listing_catchup_paper_sample(ListingCatchupPaperProbeSeed {
@@ -260,7 +235,6 @@ fn paper_probe_seed_builds_acceptance_sample_from_orderbook_and_prices() {
         }],
     })
     .expect("valid probe seed should build paper sample");
-
     assert_eq!(sample.announcement_id, "binance-announcement-1");
     assert_eq!(sample.input.announcement_exchange, "binance");
     assert_eq!(sample.input.base_asset, "TEST");
@@ -272,7 +246,6 @@ fn paper_probe_seed_builds_acceptance_sample_from_orderbook_and_prices() {
     assert_eq!(sample.input.candidates[0].top5_depth_usdt, 70_000.0);
     assert_eq!(sample.price_path.len(), 1);
 }
-
 #[test]
 fn paper_probe_seed_rejects_invalid_price_inputs_before_acceptance() {
     let mut seed = ListingCatchupPaperProbeSeed {
@@ -293,10 +266,8 @@ fn paper_probe_seed_rejects_invalid_price_inputs_before_acceptance() {
         candidates: vec![],
         price_path: vec![],
     };
-
     let error = build_listing_catchup_paper_sample(seed.clone()).expect_err("zero pre price");
     assert!(error.contains("pre_announcement_price_must_be_positive"));
-
     seed.pre_announcement_price = 10.0;
     let error = build_listing_catchup_paper_sample(seed).expect_err("negative latency");
     assert!(error.contains("detected_at_before_announced_at"));

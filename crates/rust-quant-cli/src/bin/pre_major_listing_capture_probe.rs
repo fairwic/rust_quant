@@ -8,55 +8,78 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::str::FromStr;
 use std::time::Instant;
-
 #[derive(Debug, Clone, Deserialize)]
 struct CaptureRequest {
+    /// announcement ID。
     announcement_id: String,
+    /// announcement交易所，用于构建接口请求。
     announcement_exchange: String,
+    /// 基础资产，用于构建接口请求。
     base_asset: String,
+    /// 计价资产，用于构建接口请求。
     quote_asset: String,
+    /// 毫秒级时间戳或时长。
     announced_at_ms: u64,
+    /// 毫秒级时间戳或时长。
     detected_at_ms: u64,
+    /// 价格数值。
     pre_announcement_price: f64,
+    /// 价格数值。
     announcement_price: f64,
+    /// BTC 5 分钟收益率百分比。
     btc_5m_return_pct: f64,
+    /// ETH 5 分钟收益率百分比。
     eth_5m_return_pct: f64,
+    /// openingupperwickrejection，用于构建接口请求。
     opening_upper_wick_rejection: bool,
+    /// 入场价格。
     entry_price: f64,
+    /// 手续费bpsper方向，用于构建接口请求。
     fee_bps_per_side: f64,
+    /// slippagebpsper方向，用于构建接口请求。
     slippage_bps_per_side: f64,
+    /// 列表数据。
     price_path: Vec<ListingCatchupPriceBar>,
 }
-
 #[derive(Debug, Deserialize)]
 struct OrderBookFixtureEnvelope {
+    /// 列表数据。
     orderbooks: Vec<OrderBookFixture>,
 }
-
 #[derive(Debug, Deserialize)]
 struct OrderBookFixture {
+    /// 交易所名称。
     exchange: String,
+    /// 交易对或资产符号。
     symbol: String,
+    /// 列表数据。
     bids: Vec<[String; 2]>,
+    /// 列表数据。
     asks: Vec<[String; 2]>,
+    /// 毫秒级时间戳或时长。
     response_latency_ms: u64,
 }
-
 #[derive(Debug, Serialize)]
 struct CaptureOutput {
+    /// 列表数据。
     seeds: Vec<ListingCatchupPaperProbeSeed>,
+    /// 列表数据。
     warnings: Vec<String>,
+    /// 备注信息。
     production_note: &'static str,
 }
-
 #[derive(Debug)]
 struct CaptureArgs {
+    /// input路径，用于当前结构体的业务数据。
     input_path: String,
+    /// orderbookfixture路径；为空时使用默认值或表示不限制。
     orderbook_fixture_path: Option<String>,
+    /// 列表数据。
     exchanges: Vec<ExchangeId>,
 }
-
 #[tokio::main]
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 async fn main() -> Result<()> {
     let args = parse_args()?;
     let request = read_request(&args.input_path)?;
@@ -64,7 +87,6 @@ async fn main() -> Result<()> {
         Some(path) => (read_fixture_candidates(&path)?, Vec::new()),
         None => capture_live_public_orderbooks(&request, &args.exchanges).await?,
     };
-
     println!(
         "{}",
         serde_json::to_string_pretty(&CaptureOutput {
@@ -75,7 +97,7 @@ async fn main() -> Result<()> {
     );
     Ok(())
 }
-
+/// 解析输入参数并收敛为 量化核心 可使用的结构化值。
 fn parse_args() -> Result<CaptureArgs> {
     let mut input_path = std::env::var("PRE_MAJOR_LISTING_CAPTURE_INPUT").ok();
     let mut fixture_path = std::env::var("PRE_MAJOR_LISTING_ORDERBOOK_FIXTURE").ok();
@@ -83,7 +105,6 @@ fn parse_args() -> Result<CaptureArgs> {
         &std::env::var("PRE_MAJOR_LISTING_CAPTURE_EXCHANGES")
             .unwrap_or_else(|_| "bitget,bybit,gate".to_string()),
     )?;
-
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -103,7 +124,6 @@ fn parse_args() -> Result<CaptureArgs> {
             other => return Err(anyhow!("unknown argument: {other}")),
         }
     }
-
     Ok(CaptureArgs {
         input_path: input_path
             .map(|value| value.trim().to_string())
@@ -115,7 +135,7 @@ fn parse_args() -> Result<CaptureArgs> {
         exchanges,
     })
 }
-
+/// 解析输入参数并收敛为 量化核心 可使用的结构化值。
 fn parse_exchange_list(value: &str) -> Result<Vec<ExchangeId>> {
     let exchanges = value
         .split(',')
@@ -128,12 +148,12 @@ fn parse_exchange_list(value: &str) -> Result<Vec<ExchangeId>> {
     }
     Ok(exchanges)
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 fn read_request(path: &str) -> Result<CaptureRequest> {
     let body = fs::read_to_string(path).with_context(|| format!("read capture request: {path}"))?;
     serde_json::from_str(&body).with_context(|| format!("parse capture request JSON: {path}"))
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 fn read_fixture_candidates(path: &str) -> Result<Vec<ListingCatchupVenueProbe>> {
     let body =
         fs::read_to_string(path).with_context(|| format!("read orderbook fixture: {path}"))?;
@@ -145,7 +165,7 @@ fn read_fixture_candidates(path: &str) -> Result<Vec<ListingCatchupVenueProbe>> 
         .map(fixture_orderbook_to_probe)
         .collect()
 }
-
+/// 提供fixtureorderbooktoprobe的集中实现，避免量化核心调用方重复处理相同细节。
 fn fixture_orderbook_to_probe(orderbook: OrderBookFixture) -> Result<ListingCatchupVenueProbe> {
     let best_bid = best_level_price(&orderbook.bids, "bid")?;
     let best_ask = best_level_price(&orderbook.asks, "ask")?;
@@ -159,7 +179,7 @@ fn fixture_orderbook_to_probe(orderbook: OrderBookFixture) -> Result<ListingCatc
         response_latency_ms: orderbook.response_latency_ms,
     })
 }
-
+/// 提供best层级价格的集中实现，避免量化核心调用方重复处理相同细节。
 fn best_level_price(levels: &[[String; 2]], side: &str) -> Result<f64> {
     levels
         .first()
@@ -169,7 +189,7 @@ fn best_level_price(levels: &[[String; 2]], side: &str) -> Result<f64> {
         .parse::<f64>()
         .with_context(|| format!("parse {side} best price"))
 }
-
+/// 提供depthtop5USDT的集中实现，避免量化核心调用方重复处理相同细节。
 fn depth_top5_usdt(levels: &[[String; 2]]) -> Result<f64> {
     levels
         .iter()
@@ -181,7 +201,7 @@ fn depth_top5_usdt(levels: &[[String; 2]]) -> Result<f64> {
         })
         .sum()
 }
-
+/// 提供capturelivepublicorderbooks的集中实现，避免量化核心调用方重复处理相同细节。
 async fn capture_live_public_orderbooks(
     request: &CaptureRequest,
     exchanges: &[ExchangeId],
@@ -189,7 +209,6 @@ async fn capture_live_public_orderbooks(
     let mut probes = Vec::new();
     let mut warnings = Vec::new();
     let instrument = Instrument::perp(&request.base_asset, &request.quote_asset);
-
     for exchange in exchanges {
         let started_at = Instant::now();
         match public_only_gateway(*exchange) {
@@ -203,10 +222,9 @@ async fn capture_live_public_orderbooks(
             Err(error) => warnings.push(format!("{} gateway skipped: {error}", exchange)),
         }
     }
-
     Ok((probes, warnings))
 }
-
+/// 提供publiconlygateway的集中实现，避免量化核心调用方重复处理相同细节。
 fn public_only_gateway(exchange: ExchangeId) -> Result<CryptoExcAllGateway> {
     CryptoExcAllGateway::from_single_exchange_credentials(
         exchange,
@@ -217,7 +235,7 @@ fn public_only_gateway(exchange: ExchangeId) -> Result<CryptoExcAllGateway> {
     )
     .map_err(anyhow::Error::from)
 }
-
+/// 提供orderbookprobe的集中实现，避免量化核心调用方重复处理相同细节。
 async fn orderbook_probe(
     gateway: CryptoExcAllGateway,
     exchange: ExchangeId,
@@ -229,7 +247,7 @@ async fn orderbook_probe(
         .map_err(anyhow::Error::from)?;
     orderbook_to_probe(orderbook)
 }
-
+/// 提供orderbooktoprobe的集中实现，避免量化核心调用方重复处理相同细节。
 fn orderbook_to_probe(orderbook: OrderBook) -> Result<ListingCatchupVenueProbe> {
     let bids = orderbook
         .bids
@@ -241,7 +259,6 @@ fn orderbook_to_probe(orderbook: OrderBook) -> Result<ListingCatchupVenueProbe> 
         .iter()
         .map(|level| [level.price.clone(), level.size.clone()])
         .collect::<Vec<_>>();
-
     Ok(ListingCatchupVenueProbe {
         exchange: orderbook.exchange.to_string(),
         symbol: orderbook.exchange_symbol,
@@ -252,7 +269,7 @@ fn orderbook_to_probe(orderbook: OrderBook) -> Result<ListingCatchupVenueProbe> 
         response_latency_ms: 0,
     })
 }
-
+/// 构建 量化核心 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_seed(
     request: CaptureRequest,
     candidates: Vec<ListingCatchupVenueProbe>,
@@ -276,7 +293,7 @@ fn build_seed(
         price_path: request.price_path,
     }
 }
-
+/// 执行输出usage步骤，串起量化核心需要的状态推进和错误处理。
 fn print_usage() {
     println!(
         "Usage: pre_major_listing_capture_probe --input <request.json> [--orderbook-fixture <orderbooks.json>] [--exchanges bitget,bybit,gate]"

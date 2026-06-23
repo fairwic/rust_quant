@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 /// 止损更新记录
 ///
 /// 记录每次止损价格更新的详细信息,用于分析止损策略的有效性
@@ -7,26 +6,19 @@ use serde::{Deserialize, Serialize};
 pub struct StopLossUpdate {
     /// 更新序号(从0开始,0表示初始设置,1+表示后续更新)
     pub sequence: i32,
-
     /// 信号时间戳(毫秒)
     pub signal_ts: i64,
-
     /// K线时间戳(毫秒)
     pub candle_ts: i64,
-
     /// 信号来源(Engulfing/KlineHammer/ATR等)
     pub source: String,
-
     /// 旧止损价(None表示首次设置)
     pub old_price: Option<f64>,
-
     /// 新止损价
     pub new_price: f64,
-
     /// 价格变化(new - old, None表示首次设置)
     pub price_change: Option<f64>,
 }
-
 impl StopLossUpdate {
     /// 创建初始止损记录
     pub fn initial(signal_ts: i64, candle_ts: i64, source: String, price: f64) -> Self {
@@ -40,7 +32,6 @@ impl StopLossUpdate {
             price_change: None,
         }
     }
-
     /// 创建止损更新记录
     pub fn update(
         sequence: i32,
@@ -61,12 +52,11 @@ impl StopLossUpdate {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 提供testinitial止损亏损的集中实现，避免量化核心调用方重复处理相同细节。
     fn test_initial_stop_loss() {
         let update = StopLossUpdate::initial(1000, 1000, "Engulfing".to_string(), 100.0);
         assert_eq!(update.sequence, 0);
@@ -74,7 +64,6 @@ mod tests {
         assert!(update.old_price.is_none());
         assert!(update.price_change.is_none());
     }
-
     #[test]
     fn test_stop_loss_update() {
         let update = StopLossUpdate::update(1, 2000, 2000, "KlineHammer".to_string(), 100.0, 95.0);
@@ -83,7 +72,6 @@ mod tests {
         assert_eq!(update.new_price, 95.0);
         assert_eq!(update.price_change, Some(-5.0));
     }
-
     #[test]
     fn test_serialization() {
         let update = StopLossUpdate::initial(1000, 1000, "Engulfing".to_string(), 100.0);

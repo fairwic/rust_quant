@@ -1,7 +1,5 @@
 //! 策略相关枚举
-
 use serde::{Deserialize, Serialize};
-
 /// 策略类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StrategyType {
@@ -25,11 +23,14 @@ pub enum StrategyType {
     TopContract,
     /// BSC 事件套利策略
     BscEventArb,
+    /// Market Velocity 动量策略
+    MarketVelocity,
     /// 自定义策略
     Custom(u32),
 }
-
 impl StrategyType {
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
     pub fn as_str(&self) -> &str {
         match self {
             StrategyType::Vegas => "vegas",
@@ -42,14 +43,15 @@ impl StrategyType {
             StrategyType::UtBoot => "ut_boot",
             StrategyType::TopContract => "top_contract",
             StrategyType::BscEventArb => "bsc_event_arb",
+            StrategyType::MarketVelocity => "market_velocity",
             StrategyType::Custom(_) => "custom",
         }
     }
 }
-
 impl std::str::FromStr for StrategyType {
     type Err = String;
-
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "vegas" => Ok(StrategyType::Vegas),
@@ -62,11 +64,11 @@ impl std::str::FromStr for StrategyType {
             "ut_boot" => Ok(StrategyType::UtBoot),
             "top_contract" => Ok(StrategyType::TopContract),
             "bsc_event_arb" => Ok(StrategyType::BscEventArb),
+            "market_velocity" => Ok(StrategyType::MarketVelocity),
             _ => Err(format!("Unknown strategy type: {}", s)),
         }
     }
 }
-
 /// 策略状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum StrategyStatus {
@@ -80,8 +82,9 @@ pub enum StrategyStatus {
     /// 错误
     Error,
 }
-
 impl StrategyStatus {
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
     pub fn as_str(&self) -> &'static str {
         match self {
             StrategyStatus::Stopped => "stopped",
@@ -91,7 +94,6 @@ impl StrategyStatus {
         }
     }
 }
-
 /// 时间周期
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Timeframe {
@@ -122,8 +124,9 @@ pub enum Timeframe {
     /// 1月
     MN1,
 }
-
 impl Timeframe {
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
     pub fn as_str(&self) -> &'static str {
         match self {
             Timeframe::M1 => "1m",
@@ -141,7 +144,6 @@ impl Timeframe {
             Timeframe::MN1 => "1M",
         }
     }
-
     /// 获取时间周期对应的分钟数
     pub fn to_minutes(&self) -> i64 {
         match self {
@@ -161,10 +163,10 @@ impl Timeframe {
         }
     }
 }
-
 impl std::str::FromStr for Timeframe {
     type Err = String;
-
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "1m" => Ok(Timeframe::M1),
@@ -184,19 +186,21 @@ impl std::str::FromStr for Timeframe {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 提供test策略typefrom字符串的集中实现，避免回测策略调用方重复处理相同细节。
     fn test_strategy_type_from_str() {
         use std::str::FromStr;
         assert_eq!(StrategyType::from_str("vegas"), Ok(StrategyType::Vegas));
         assert_eq!(StrategyType::from_str("NWE"), Ok(StrategyType::Nwe));
+        assert_eq!(
+            StrategyType::from_str("market_velocity"),
+            Ok(StrategyType::MarketVelocity)
+        );
         assert!(StrategyType::from_str("unknown").is_err());
     }
-
     #[test]
     fn test_timeframe_conversion() {
         use std::str::FromStr;

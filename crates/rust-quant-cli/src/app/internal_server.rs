@@ -12,7 +12,6 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info};
-
 mod auth;
 mod backtest_details;
 mod backtest_logs;
@@ -20,18 +19,15 @@ mod http;
 mod json_helpers;
 mod market_rank_technical_context;
 mod strategy_configs;
-
+use crate::app::exchange_symbol_sync::{
+    run_exchange_symbol_sync_from_env, ExchangeSymbolSyncRequest,
+};
+use auth::authorize_internal_request;
 pub use backtest_details::{backtest_detail_list_query_from_path, BacktestDetailListQuery};
 pub use backtest_logs::{
     backtest_log_list_query_from_path, core_backtest_run_list_query_from_path, BacktestLogListQuery,
 };
 pub use http::InternalHttpJsonResponse;
-pub use strategy_configs::{
-    strategy_config_list_query_from_path, strategy_config_upsert_request_from_body,
-    StrategyConfigListQuery, StrategyConfigUpsertRequest,
-};
-
-use auth::authorize_internal_request;
 use http::{
     json_response, query_param, read_request, required_query_param, route_path, write_response,
 };
@@ -39,15 +35,14 @@ use json_helpers::parse_json_value_or_string;
 use market_rank_technical_context::{
     build_market_rank_technical_context, MarketRankTechnicalContext, MarketRankTechnicalSource,
 };
-
-use crate::app::exchange_symbol_sync::{
-    run_exchange_symbol_sync_from_env, ExchangeSymbolSyncRequest,
-};
 use rust_quant_orchestration::infra::strategy_config::BackTestConfig;
 use rust_quant_orchestration::workflow::backtest_runner;
 use rust_quant_services::market::{should_use_quant_core_candle_source, CandleService};
 use rust_quant_services::rust_quan_web::{run_account_snapshot_sync, AccountSnapshotSyncConfig};
-
+pub use strategy_configs::{
+    strategy_config_list_query_from_path, strategy_config_upsert_request_from_body,
+    StrategyConfigListQuery, StrategyConfigUpsertRequest,
+};
 const DEFAULT_INTERNAL_ADDR: &str = "127.0.0.1:5322";
 const MAX_BACKTEST_SIGNAL_LIMIT: i64 = 100;
 const MAX_KLINE_LIMIT: i64 = 2_000;
@@ -59,284 +54,448 @@ const DEFAULT_MARKET_RANK_EVENT_EXCHANGE: &str = "okx";
 const DEFAULT_MARKET_RANK_EVENT_LOOKBACK_MINUTES: i64 = 120;
 const MAX_MARKET_RANK_EVENT_LOOKBACK_MINUTES: i64 = 1_440;
 const MARKET_RANK_TOP_BOUNDARY: i32 = 50;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LatestBacktestQuery {
+    /// 策略运行键。
     pub strategy_key: String,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// 周期。
     pub timeframe: String,
+    /// 查询数量上限。
     pub limit: i64,
+    /// include信号载荷，用于当前结构体的业务数据。
     pub include_signal_payload: bool,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketKlineQuery {
+    /// 交易所名称。
     pub exchange: String,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// 周期。
     pub timeframe: String,
+    /// 查询数量上限。
     pub limit: i64,
+    /// 查询结束边界；为空时不限制结束时间。
     pub before: Option<i64>,
+    /// 查询开始边界；为空时不限制开始时间。
     pub after: Option<i64>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketRankEventsQuery {
+    /// 交易所名称。
     pub exchange: String,
+    /// 交易对或资产符号。
     pub symbol: Option<String>,
+    /// 类型标识。
     pub event_type: Option<String>,
+    /// 时间周期；为空时使用默认周期。
     pub timeframe: Option<String>,
+    /// 排序字段；为空时使用默认排序。
     pub sort: Option<String>,
+    /// 查询数量上限。
     pub limit: i64,
+    /// lookback 分钟数。
     pub lookback_minutes: i64,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KlineSyncRequest {
+    /// 交易所名称。
     pub exchange: String,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// 周期。
     pub timeframe: String,
+    /// 查询数量上限。
     pub limit: i64,
 }
-
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 struct LatestBacktestLogRow {
+    /// 唯一标识。
     id: i32,
+    /// 类型标识。
     strategy_type: String,
+    /// 类型标识。
     inst_type: String,
+    /// 时间字段。
     time: String,
+    /// 金额数值。
     final_fund: f64,
+    /// 收益值；为空时表示没有收益数据。
     profit: Option<f64>,
+    /// 胜率。
     win_rate: String,
+    /// 未平仓仓位数量。
     open_positions_num: i32,
+    /// onebarafterwin 费率；为空时使用默认值或表示不限制。
     one_bar_after_win_rate: Option<f64>,
+    /// twobarafterwin 费率；为空时使用默认值或表示不限制。
     two_bar_after_win_rate: Option<f64>,
+    /// threebarafterwin 费率；为空时使用默认值或表示不限制。
     three_bar_after_win_rate: Option<f64>,
+    /// fourbarafterwin 费率；为空时使用默认值或表示不限制。
     four_bar_after_win_rate: Option<f64>,
+    /// fivebarafterwin 费率；为空时使用默认值或表示不限制。
     five_bar_after_win_rate: Option<f64>,
+    /// tenbarafterwin 费率；为空时使用默认值或表示不限制。
     ten_bar_after_win_rate: Option<f64>,
+    /// 开始时间。
     kline_start_time: i64,
+    /// 结束时间。
     kline_end_time: i64,
+    /// klinenums，用于展示或持久化查询结果。
     kline_nums: i32,
+    /// Sharpe 比率；为空时使用默认值或表示不限制。
     sharpe_ratio: Option<f64>,
+    /// 年化收益率；为空时表示样本不足。
     annual_return: Option<f64>,
+    /// 总收益率；为空时表示样本不足。
     total_return: Option<f64>,
+    /// 最大回撤；为空时使用默认值或表示不限制。
     max_drawdown: Option<f64>,
+    /// 波动率；为空时表示样本不足。
     volatility: Option<f64>,
+    /// 策略详情，用于展示或持久化查询结果。
     strategy_detail: String,
+    /// 风险配置详情，用于展示或持久化查询结果。
     risk_config_detail: String,
+    /// 创建时间。
     created_at: NaiveDateTime,
 }
-
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 struct LatestBacktestSignalRow {
+    /// 唯一标识。
     id: i32,
+    /// backtest ID。
     back_test_id: i32,
+    /// 时间字段。
     time: String,
+    /// 类型标识。
     option_type: String,
+    /// 类型标识。
     close_type: String,
+    /// 开仓时间。
     open_position_time: NaiveDateTime,
+    /// 平仓时间。
     close_position_time: NaiveDateTime,
+    /// 价格数值。
     open_price: String,
+    /// 离场价格。
     close_price: Option<String>,
+    /// 收益亏损，用于展示或持久化查询结果。
     profit_loss: String,
+    /// 数量。
     quantity: String,
+    /// 信号值，用于展示或持久化查询结果。
     signal_value: String,
+    /// 信号结果；为空时使用默认值或表示不限制。
     signal_result: Option<String>,
 }
-
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 struct MarketKlineItem {
+    /// 时间字段。
     time: i64,
+    /// 开盘价。
     open: f64,
+    /// 最高价。
     high: f64,
+    /// 最低价。
     low: f64,
+    /// 收盘价。
     close: f64,
+    /// 成交量。
     volume: f64,
+    /// 时区设置。
     timezone: String,
 }
-
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 struct MarketRankEventItem {
+    /// 唯一标识。
     id: i64,
+    /// 交易所名称。
     exchange: String,
+    /// 交易对或资产符号。
     symbol: String,
+    /// 类型标识。
     event_type: String,
+    /// 时间周期；为空时使用默认周期。
     timeframe: Option<String>,
+    /// 旧排名；为空时表示没有上一期排名。
     old_rank: Option<i32>,
+    /// 新排名；为空时表示没有当前排名。
     new_rank: Option<i32>,
+    /// 排名变化值；为空时表示无法计算排名变化。
     delta_rank: Option<i32>,
+    /// 排名变化百分比。
     rank_change_pct: Option<f64>,
+    /// 24 小时计价成交额；为空时表示没有成交额。
     volume_24h_quote: Option<f64>,
+    /// 上一期 24 小时计价成交额；为空时表示没有对比基准。
     previous_volume_24h_quote: Option<f64>,
+    /// 24 小时成交量变化百分比。
     volume_24h_change_pct: Option<f64>,
+    /// 15 分钟计价成交额；为空时表示没有成交额。
     volume_15m_quote: Option<f64>,
+    /// 15 分钟成交量变化百分比。
     volume_15m_change_pct: Option<f64>,
+    /// 价格数值。
     current_price: Option<f64>,
+    /// 价格数值。
     previous_price: Option<f64>,
+    /// 价格涨跌幅百分比。
     price_change_pct: Option<f64>,
+    /// 价格方向。
     price_direction: String,
+    /// 24 小时价格涨跌幅百分比。
     price_change_24h_pct: Option<f64>,
     #[serde(skip_serializing)]
+    /// 技术指标周期；为空时使用默认周期。
     technical_timeframe: Option<String>,
     #[serde(skip_serializing)]
+    /// 技术指标计算周期；为空时使用默认周期。
     technical_period: Option<i32>,
     #[serde(skip_serializing)]
+    /// 离场价格。
     technical_close_price: Option<f64>,
     #[serde(skip_serializing)]
+    /// 技术 MA 指标值；为空时表示未计算。
     technical_ma_value: Option<f64>,
     #[serde(skip_serializing)]
+    /// 技术 EMA 指标值；为空时表示未计算。
     technical_ema_value: Option<f64>,
     #[serde(skip_serializing)]
+    /// 价格相对 MA 的距离百分比。
     technical_ma_distance_pct: Option<f64>,
     #[serde(skip_serializing)]
+    /// 价格相对 EMA 的距离百分比。
     technical_ema_distance_pct: Option<f64>,
     #[serde(skip_serializing)]
+    /// 状态值。
     technical_ma_state: Option<String>,
     #[serde(skip_serializing)]
+    /// 状态值。
     technical_ema_state: Option<String>,
     #[serde(skip_serializing)]
+    /// 技术上下文使用的 K 线数量。
     technical_candle_count: Option<i32>,
     #[serde(skip_serializing)]
+    /// 时间字段。
     technical_snapshot_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing)]
+    /// 状态值。
     technical_snapshot_status: Option<String>,
     #[sqlx(skip)]
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// 技术上下文；为空时不附加技术解释。
     technical_context: Option<MarketRankTechnicalContext>,
+    /// 时间字段。
     detected_at: DateTime<Utc>,
+    /// 数据来源。
     source: String,
+    /// 状态值。
     notification_state: String,
 }
-
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct CandleVolume15mStats {
+    /// 15 分钟计价成交额；为空时表示没有成交额。
     volume_15m_quote: Option<f64>,
+    /// 15 分钟成交量变化百分比。
     volume_15m_change_pct: Option<f64>,
 }
-
 #[derive(Debug, Serialize)]
 struct LatestBacktestSummary {
+    /// hasbacktest。
     has_backtest: bool,
+    /// backtestlog ID；为空时使用默认值或表示不限制。
     back_test_log_id: Option<i32>,
+    /// 类型标识。
     strategy_type: Option<String>,
+    /// 类型标识。
     inst_type: Option<String>,
+    /// 时间字段。
     time: Option<String>,
+    /// 金额数值。
     final_fund: Option<f64>,
+    /// 收益值；为空时表示没有收益数据。
     profit: Option<f64>,
+    /// 胜率；为空时使用默认值或表示不限制。
     win_rate: Option<String>,
+    /// 未平仓仓位数量。
     open_positions_num: Option<i32>,
+    /// onebarafterwin 费率；为空时使用默认值或表示不限制。
     one_bar_after_win_rate: Option<f64>,
+    /// twobarafterwin 费率；为空时使用默认值或表示不限制。
     two_bar_after_win_rate: Option<f64>,
+    /// threebarafterwin 费率；为空时使用默认值或表示不限制。
     three_bar_after_win_rate: Option<f64>,
+    /// fourbarafterwin 费率；为空时使用默认值或表示不限制。
     four_bar_after_win_rate: Option<f64>,
+    /// fivebarafterwin 费率；为空时使用默认值或表示不限制。
     five_bar_after_win_rate: Option<f64>,
+    /// tenbarafterwin 费率；为空时使用默认值或表示不限制。
     ten_bar_after_win_rate: Option<f64>,
+    /// 开始时间。
     kline_start_time: Option<i64>,
+    /// 结束时间。
     kline_end_time: Option<i64>,
+    /// K 线数量；为空时使用默认数量。
     kline_nums: Option<i32>,
+    /// Sharpe 比率；为空时使用默认值或表示不限制。
     sharpe_ratio: Option<f64>,
+    /// 年化收益率；为空时表示样本不足。
     annual_return: Option<f64>,
+    /// 总收益率；为空时表示样本不足。
     total_return: Option<f64>,
+    /// 最大回撤；为空时使用默认值或表示不限制。
     max_drawdown: Option<f64>,
+    /// 波动率；为空时表示样本不足。
     volatility: Option<f64>,
+    /// 创建时间。
     created_at: Option<NaiveDateTime>,
 }
-
 #[derive(Debug, Serialize)]
 struct LatestBacktestSignalItem {
+    /// 唯一标识。
     id: i32,
+    /// backtest ID。
     back_test_id: i32,
+    /// 时间字段。
     time: String,
+    /// 类型标识。
     option_type: String,
+    /// 类型标识。
     close_type: String,
+    /// 开仓时间。
     open_position_time: NaiveDateTime,
+    /// 平仓时间。
     close_position_time: NaiveDateTime,
+    /// 价格数值。
     open_price: String,
+    /// 离场价格。
     close_price: Option<String>,
+    /// 收益亏损，用于记录新闻或情报分析结果。
     profit_loss: String,
+    /// 数量。
     quantity: String,
+    /// 信号值，用于记录新闻或情报分析结果。
     signal_value: Value,
+    /// 信号结果；为空时使用默认值或表示不限制。
     signal_result: Option<String>,
 }
-
 #[derive(Debug, Serialize)]
 struct LatestBacktestResponse {
+    /// 摘要。
     summary: LatestBacktestSummary,
+    /// 策略详情，用于返回接口响应。
     strategy_detail: Value,
+    /// 风险配置详情，用于返回接口响应。
     risk_config_detail: Value,
+    /// 列表数据。
     signals: Vec<LatestBacktestSignalItem>,
+    /// 信号总数。
     signal_total: i64,
 }
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BacktestRunRequest {
     #[serde(default)]
+    /// 策略config ID；为空时使用默认值或表示不限制。
     strategy_config_id: Option<String>,
     #[serde(default)]
+    /// 策略Key，用于构建接口请求。
     strategy_key: String,
     #[serde(default)]
+    /// 交易对或资产符号。
     symbol: String,
     #[serde(default)]
+    /// 周期。
     timeframe: String,
     #[serde(alias = "config", default)]
+    /// 配置overrides，用于构建接口请求。
     config_overrides: Value,
     #[serde(default)]
+    /// Dry-runrun，用于构建接口请求。
     dry_run: bool,
 }
-
 #[derive(Debug, Deserialize)]
 struct RawKlineSyncRequest {
     #[serde(default)]
+    /// 交易所名称。
     exchange: Option<String>,
+    /// 交易对或资产符号。
     symbol: String,
     #[serde(alias = "interval", alias = "period")]
+    /// 周期。
     timeframe: String,
     #[serde(default)]
+    /// 查询数量上限。
     limit: Option<i64>,
 }
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawExchangeAccountSnapshotSyncRequest {
+    /// 买家邮箱。
     buyer_email: String,
+    /// 交易所名称。
     exchange: String,
     #[serde(default)]
+    /// API 凭证 ID。
+    credential_id: Option<i64>,
+    #[serde(default)]
+    /// 列表数据。
     combos: Vec<RawExchangeAccountSnapshotSyncCombo>,
     #[serde(default)]
+    /// 是否按账户全量范围查询。
     account_wide: bool,
     #[serde(default)]
+    /// 是否包含成交明细；为空时使用默认值。
     include_fills: Option<bool>,
     #[serde(default)]
+    /// 是否输出对账报告；为空时使用默认值。
     report_reconciliation: Option<bool>,
     #[serde(default)]
+    /// trigger来源；为空时使用默认值或表示不限制。
     trigger_source: Option<String>,
 }
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawExchangeAccountSnapshotSyncCombo {
+    /// combo ID。
     combo_id: i64,
+    /// 交易对或资产符号。
     symbol: String,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ExchangeAccountSnapshotSyncRequest {
+    /// 买家邮箱。
     buyer_email: String,
+    /// 交易所名称。
     exchange: ExchangeId,
+    /// API 凭证 ID。
+    credential_id: i64,
+    /// 列表数据。
     combos: Vec<ExchangeAccountSnapshotSyncCombo>,
+    /// 是否按账户全量范围查询。
     account_wide: bool,
+    /// 是否包含成交明细。
     include_fills: bool,
+    /// 是否生成对账报告。
     report_reconciliation: bool,
+    /// 触发来源。
     trigger_source: String,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ExchangeAccountSnapshotSyncCombo {
+    /// combo ID。
     combo_id: i64,
+    /// 交易对或资产符号。
     symbol: String,
 }
-
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 返回 Result 以便错误透明上抛，统一上层降级与重试策略。
 pub async fn run_internal_server() -> Result<()> {
     let addr =
         std::env::var("QUANT_INTERNAL_ADDR").unwrap_or_else(|_| DEFAULT_INTERNAL_ADDR.to_string());
@@ -344,7 +503,6 @@ pub async fn run_internal_server() -> Result<()> {
         .await
         .with_context(|| format!("绑定 rust_quant internal server 失败: {addr}"))?;
     info!(addr = %addr, "rust_quant internal server started");
-
     loop {
         let (stream, peer) = listener.accept().await?;
         tokio::spawn(async move {
@@ -354,7 +512,7 @@ pub async fn run_internal_server() -> Result<()> {
         });
     }
 }
-
+/// 提供最新回测查询from路径的集中实现，避免量化核心调用方重复处理相同细节。
 pub fn latest_backtest_query_from_path(path: &str) -> Result<LatestBacktestQuery, String> {
     let query = path
         .split_once('?')
@@ -382,7 +540,6 @@ pub fn latest_backtest_query_from_path(path: &str) -> Result<LatestBacktestQuery
                 )
             })
             .unwrap_or(false);
-
     if strategy_key.is_empty() {
         return Err("strategyKey is required".to_string());
     }
@@ -392,7 +549,6 @@ pub fn latest_backtest_query_from_path(path: &str) -> Result<LatestBacktestQuery
     if timeframe.is_empty() {
         return Err("timeframe is required".to_string());
     }
-
     Ok(LatestBacktestQuery {
         strategy_key,
         symbol,
@@ -401,7 +557,7 @@ pub fn latest_backtest_query_from_path(path: &str) -> Result<LatestBacktestQuery
         include_signal_payload,
     })
 }
-
+/// 提供市场K 线查询from路径的集中实现，避免量化核心调用方重复处理相同细节。
 pub fn market_kline_query_from_path(path: &str) -> Result<MarketKlineQuery, String> {
     let query = path
         .split_once('?')
@@ -423,7 +579,6 @@ pub fn market_kline_query_from_path(path: &str) -> Result<MarketKlineQuery, Stri
         .clamp(1, MAX_KLINE_LIMIT);
     let before = query_param(query, &["before"]).and_then(|value| value.parse::<i64>().ok());
     let after = query_param(query, &["after"]).and_then(|value| value.parse::<i64>().ok());
-
     if exchange.is_empty() {
         return Err("exchange is required".to_string());
     }
@@ -433,7 +588,6 @@ pub fn market_kline_query_from_path(path: &str) -> Result<MarketKlineQuery, Stri
     if timeframe.is_empty() {
         return Err("timeframe is required".to_string());
     }
-
     Ok(MarketKlineQuery {
         exchange,
         symbol,
@@ -443,7 +597,7 @@ pub fn market_kline_query_from_path(path: &str) -> Result<MarketKlineQuery, Stri
         after,
     })
 }
-
+/// 提供市场rank事件查询from路径的集中实现，避免量化核心调用方重复处理相同细节。
 pub fn market_rank_events_query_from_path(path: &str) -> Result<MarketRankEventsQuery, String> {
     let query = path
         .split_once('?')
@@ -481,11 +635,9 @@ pub fn market_rank_events_query_from_path(path: &str) -> Result<MarketRankEvents
     .and_then(|value| value.parse::<i64>().ok())
     .unwrap_or(DEFAULT_MARKET_RANK_EVENT_LOOKBACK_MINUTES)
     .clamp(1, MAX_MARKET_RANK_EVENT_LOOKBACK_MINUTES);
-
     if exchange.is_empty() {
         return Err("exchange is required".to_string());
     }
-
     Ok(MarketRankEventsQuery {
         exchange,
         symbol,
@@ -496,13 +648,12 @@ pub fn market_rank_events_query_from_path(path: &str) -> Result<MarketRankEvents
         lookback_minutes,
     })
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_market_klines_path(path: &str) -> InternalHttpJsonResponse {
     let query = match market_kline_query_from_path(path) {
         Ok(query) => query,
         Err(message) => return json_response(400, json!({ "error": message })),
     };
-
     match fetch_market_klines_response(rust_quant_core::database::get_db_pool(), &query).await {
         Ok(items) => json_response(
             200,
@@ -515,13 +666,12 @@ pub async fn handle_market_klines_path(path: &str) -> InternalHttpJsonResponse {
         Err(err) => json_response(500, json!({ "error": err.to_string() })),
     }
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_market_rank_events_path(path: &str) -> InternalHttpJsonResponse {
     let query = match market_rank_events_query_from_path(path) {
         Ok(query) => query,
         Err(message) => return json_response(400, json!({ "error": message })),
     };
-
     match fetch_market_rank_events_response(rust_quant_core::database::get_db_pool(), &query).await
     {
         Ok(items) => json_response(
@@ -535,7 +685,7 @@ pub async fn handle_market_rank_events_path(path: &str) -> InternalHttpJsonRespo
         Err(err) => json_response(500, json!({ "error": err.to_string() })),
     }
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_strategy_config_list_path(path: &str) -> InternalHttpJsonResponse {
     let query = match strategy_config_list_query_from_path(path) {
         Ok(query) => query,
@@ -545,13 +695,12 @@ pub async fn handle_strategy_config_list_path(path: &str) -> InternalHttpJsonRes
         Ok(pool) => pool,
         Err(error) => return json_response(500, json!({ "error": error.to_string() })),
     };
-
     match strategy_configs::fetch_strategy_config_list_response(&pool, &query).await {
         Ok((items, total)) => json_response(200, json!({ "items": items, "total": total })),
         Err(error) => json_response(500, json!({ "error": error.to_string() })),
     }
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_strategy_config_upsert_body(body: &[u8]) -> InternalHttpJsonResponse {
     let request = match strategy_config_upsert_request_from_body(body) {
         Ok(request) => request,
@@ -561,19 +710,17 @@ pub async fn handle_strategy_config_upsert_body(body: &[u8]) -> InternalHttpJson
         Ok(pool) => pool,
         Err(error) => return json_response(500, json!({ "error": error.to_string() })),
     };
-
     match strategy_configs::upsert_strategy_config_response(&pool, &request).await {
         Ok(item) => json_response(200, item),
         Err(error) => json_response(500, json!({ "error": error.to_string() })),
     }
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_latest_backtest_path(path: &str) -> InternalHttpJsonResponse {
     let query = match latest_backtest_query_from_path(path) {
         Ok(query) => query,
         Err(message) => return json_response(400, json!({ "error": message })),
     };
-
     match fetch_latest_backtest_response(rust_quant_core::database::get_db_pool(), &query).await {
         Ok(response) => json_response(
             200,
@@ -596,7 +743,7 @@ pub async fn handle_latest_backtest_path(path: &str) -> InternalHttpJsonResponse
         ),
     }
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_backtest_run_body(body: &[u8]) -> InternalHttpJsonResponse {
     let request = match serde_json::from_slice::<BacktestRunRequest>(body) {
         Ok(request) => request,
@@ -609,19 +756,16 @@ pub async fn handle_backtest_run_body(body: &[u8]) -> InternalHttpJsonResponse {
             );
         }
     };
-
     if let Err(message) = validate_backtest_request(&request) {
         return json_response(400, json!({ "error": message }));
     }
     if let Err(message) = validate_backtest_runtime_contract(&request) {
         return json_response(400, json!({ "error": message }));
     }
-
     let run_id = format!("rq-backtest-{}", Utc::now().timestamp_millis());
     if request.dry_run {
         return json_response(200, backtest_response_body(&run_id, "dry_run", &request));
     }
-
     let config = backtest_config_from_request(&request);
     let targets = vec![(request.symbol.clone(), request.timeframe.clone())];
     match backtest_runner::run_backtest_runner_with_config(&targets, config).await {
@@ -640,13 +784,12 @@ pub async fn handle_backtest_run_body(body: &[u8]) -> InternalHttpJsonResponse {
         ),
     }
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_kline_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
     let request = match kline_sync_request_from_body(body) {
         Ok(request) => request,
         Err(message) => return json_response(400, json!({ "error": message })),
     };
-
     match sync_kline_request(&request).await {
         Ok(saved_count) => json_response(
             200,
@@ -672,13 +815,12 @@ pub async fn handle_kline_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
         ),
     }
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
     let request = match exchange_account_snapshot_sync_request_from_body(body) {
         Ok(request) => request,
         Err(message) => return json_response(400, json!({ "error": message })),
     };
-
     let requested = request.combos.len() + usize::from(request.account_wide);
     let mut accepted = 0_usize;
     let mut skipped = 0_usize;
@@ -690,9 +832,11 @@ pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> Internal
             symbol: "ACCOUNT-WIDE".to_string(),
             combo_id: 0,
             task_id: 0,
-            credential_ref: Some(format!(
-                "{}:account-wide",
-                safe_internal_ref_component(&request.trigger_source)
+            credential_id: Some(request.credential_id),
+            credential_ref: Some(account_snapshot_sync_credential_ref(
+                request.credential_id,
+                &request.trigger_source,
+                "account-wide",
             )),
             report_reconciliation: false,
             include_fills: request.include_fills,
@@ -714,7 +858,6 @@ pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> Internal
             skipped += 1;
             continue;
         }
-
         accepted += 1;
         let config = AccountSnapshotSyncConfig {
             buyer_email: request.buyer_email.clone(),
@@ -722,10 +865,11 @@ pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> Internal
             symbol: combo.symbol,
             combo_id: combo.combo_id,
             task_id: combo.combo_id,
-            credential_ref: Some(format!(
-                "{}:{}",
-                safe_internal_ref_component(&request.trigger_source),
-                combo.combo_id
+            credential_id: Some(request.credential_id),
+            credential_ref: Some(account_snapshot_sync_credential_ref(
+                request.credential_id,
+                &request.trigger_source,
+                &combo.combo_id.to_string(),
             )),
             report_reconciliation: request.report_reconciliation,
             include_fills: request.include_fills,
@@ -742,7 +886,6 @@ pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> Internal
             }
         });
     }
-
     json_response(
         202,
         json!({
@@ -760,7 +903,7 @@ pub async fn handle_exchange_account_snapshot_sync_body(body: &[u8]) -> Internal
         }),
     )
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_exchange_symbol_sync_body(body: &[u8]) -> InternalHttpJsonResponse {
     let request = if body.is_empty() {
         ExchangeSymbolSyncRequest {
@@ -786,7 +929,6 @@ pub async fn handle_exchange_symbol_sync_body(body: &[u8]) -> InternalHttpJsonRe
             }
         }
     };
-
     match run_exchange_symbol_sync_from_env(request).await {
         Ok(response) => json_response(
             200,
@@ -806,14 +948,14 @@ pub async fn handle_exchange_symbol_sync_body(body: &[u8]) -> InternalHttpJsonRe
         ),
     }
 }
-
+/// 提供回测配置from请求体的集中实现，避免量化核心调用方重复处理相同细节。
 pub fn backtest_config_from_body(body: &[u8]) -> Result<BackTestConfig, String> {
     let request = serde_json::from_slice::<BacktestRunRequest>(body)
         .map_err(|err| format!("invalid json body: {err}"))?;
     validate_backtest_request(&request).map_err(str::to_string)?;
     Ok(backtest_config_from_request(&request))
 }
-
+/// 提供K 线同步requestfrom请求体的集中实现，避免量化核心调用方重复处理相同细节。
 pub fn kline_sync_request_from_body(body: &[u8]) -> Result<KlineSyncRequest, String> {
     let request = serde_json::from_slice::<RawKlineSyncRequest>(body)
         .map_err(|err| format!("invalid json body: {err}"))?;
@@ -828,14 +970,12 @@ pub fn kline_sync_request_from_body(body: &[u8]) -> Result<KlineSyncRequest, Str
         .limit
         .unwrap_or(DEFAULT_KLINE_LIMIT)
         .clamp(1, MAX_KLINE_LIMIT);
-
     if exchange.is_empty() {
         return Err("exchange is required".to_string());
     }
     if symbol.is_empty() {
         return Err("symbol is required".to_string());
     }
-
     Ok(KlineSyncRequest {
         exchange,
         symbol,
@@ -843,7 +983,7 @@ pub fn kline_sync_request_from_body(body: &[u8]) -> Result<KlineSyncRequest, Str
         limit,
     })
 }
-
+/// 提供交易所account快照同步requestfrom请求体的集中实现，避免量化核心调用方重复处理相同细节。
 fn exchange_account_snapshot_sync_request_from_body(
     body: &[u8],
 ) -> Result<ExchangeAccountSnapshotSyncRequest, String> {
@@ -855,10 +995,14 @@ fn exchange_account_snapshot_sync_request_from_body(
     }
     let exchange = ExchangeId::from_str(request.exchange.trim())
         .map_err(|err| format!("unsupported exchange: {err}"))?;
+    let credential_id = match request.credential_id {
+        None => return Err("credential_id is required".to_string()),
+        Some(id) if id <= 0 => return Err("credential_id must be a positive integer".to_string()),
+        Some(id) => id,
+    };
     if request.combos.is_empty() && !request.account_wide {
         return Err("combos must include at least one item".to_string());
     }
-
     let combos = request
         .combos
         .into_iter()
@@ -876,10 +1020,10 @@ fn exchange_account_snapshot_sync_request_from_body(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-
     Ok(ExchangeAccountSnapshotSyncRequest {
         buyer_email,
         exchange,
+        credential_id,
         combos,
         account_wide: request.account_wide,
         include_fills: request.include_fills.unwrap_or(true),
@@ -891,21 +1035,14 @@ fn exchange_account_snapshot_sync_request_from_body(
             .unwrap_or_else(|| "web_api_credential_ready".to_string()),
     })
 }
-
-fn safe_internal_ref_component(raw: &str) -> String {
-    let component: String = raw
-        .trim()
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
-        .take(48)
-        .collect();
-    if component.is_empty() {
-        "web_api_credential_ready".to_string()
-    } else {
-        component
-    }
+fn account_snapshot_sync_credential_ref(
+    credential_id: i64,
+    _trigger_source: &str,
+    _suffix: &str,
+) -> String {
+    format!("web_api_credential_id_{credential_id}")
 }
-
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     let request = read_request(&mut stream).await?;
     let route = route_path(&request.path);
@@ -961,7 +1098,6 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     };
     write_response(&mut stream, response).await
 }
-
 include!("internal_server/kline_sync_section.rs");
 include!("internal_server/market_read_models_section.rs");
 include!("internal_server/latest_backtest_section.rs");

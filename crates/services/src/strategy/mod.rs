@@ -1,5 +1,4 @@
 //! 策略相关服务模块
-
 pub mod backtest_service;
 pub mod bsc_event_arb_snapshot;
 pub mod live_decision;
@@ -10,7 +9,6 @@ pub mod strategy_data_service;
 pub mod strategy_execution_service;
 pub(crate) mod strategy_signal_payload;
 pub mod vegas_factor_research;
-
 pub use backtest_service::BacktestService;
 pub use bsc_event_arb_snapshot::BscEventArbSnapshotBuilder;
 pub use live_decision::{apply_live_decision, LiveDecisionOutcome};

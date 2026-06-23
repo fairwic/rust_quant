@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MarketRankTechnicalSource<'a> {
     pub timeframe: Option<&'a str>,
@@ -16,26 +15,35 @@ pub(super) struct MarketRankTechnicalSource<'a> {
     pub snapshot_at: Option<DateTime<Utc>>,
     pub snapshot_status: Option<&'a str>,
 }
-
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct MarketRankTechnicalContext {
+    /// 4 小时 MA 指标；为空时表示未计算。
     pub ma_4h: Option<MarketRankMovingAverageContext>,
+    /// 4 小时 EMA 指标；为空时表示未计算。
     pub ema_4h: Option<MarketRankMovingAverageContext>,
 }
-
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct MarketRankMovingAverageContext {
+    /// 周期。
     pub timeframe: String,
+    /// 计算周期。
     pub period: i32,
+    /// ma值，用于行情、K 线或市场扫描。
     pub ma_value: f64,
+    /// latest收盘，用于行情、K 线或市场扫描。
     pub latest_close: f64,
+    /// 距离百分比。
     pub distance_pct: f64,
+    /// 当前状态。
     pub state: String,
+    /// label，用于行情、K 线或市场扫描。
     pub label: String,
+    /// 详情。
     pub detail: String,
+    /// tone，用于行情、K 线或市场扫描。
     pub tone: String,
 }
-
+/// 构建build市场ranktechnicalcontext，集中维护行情数据的载荷和字段组装规则。
 pub(super) fn build_market_rank_technical_context(
     source: MarketRankTechnicalSource<'_>,
 ) -> Option<MarketRankTechnicalContext> {
@@ -48,7 +56,6 @@ pub(super) fn build_market_rank_technical_context(
             ema_4h: None,
         });
     }
-
     let period = source.period?;
     let latest_close = source.close_price?;
     let ma_4h = build_market_rank_moving_average_context(
@@ -73,17 +80,15 @@ pub(super) fn build_market_rank_technical_context(
         source.candle_count,
         source.snapshot_at,
     );
-
     if ma_4h.is_none() && ema_4h.is_none() {
         return captured_or_attempted.then_some(MarketRankTechnicalContext {
             ma_4h: None,
             ema_4h: None,
         });
     }
-
     Some(MarketRankTechnicalContext { ma_4h, ema_4h })
 }
-
+/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_market_rank_moving_average_context(
     average_label: &str,
     timeframe: &str,
@@ -108,7 +113,6 @@ fn build_market_rank_moving_average_context(
         format_signed_pct_text(distance_pct),
         format_snapshot_suffix(candle_count, snapshot_at)
     );
-
     Some(MarketRankMovingAverageContext {
         timeframe: timeframe.to_string(),
         period,
@@ -121,7 +125,7 @@ fn build_market_rank_moving_average_context(
         tone: tone.to_string(),
     })
 }
-
+/// 提供市场rankmovingaverage状态标签的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_rank_moving_average_state_label(state: &str) -> &'static str {
     match state {
         "breakout_up" => "突破",
@@ -132,7 +136,7 @@ fn market_rank_moving_average_state_label(state: &str) -> &'static str {
         _ => "待确认",
     }
 }
-
+/// 提供市场rankmovingaveragetone的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_rank_moving_average_tone(state: &str) -> &'static str {
     match state {
         "breakout_up" | "above" => "positive",
@@ -140,7 +144,7 @@ fn market_rank_moving_average_tone(state: &str) -> &'static str {
         _ => "neutral",
     }
 }
-
+/// 生成 行情与市场数据 需要的派生数据，供后续执行、展示或审计使用。
 fn format_compact_float(value: f64) -> String {
     if value.abs() >= 1.0 {
         format!("{value:.4}")
@@ -148,11 +152,10 @@ fn format_compact_float(value: f64) -> String {
         format!("{value:.8}")
     }
 }
-
 fn format_signed_pct_text(value: f64) -> String {
     format!("{value:+.2}%")
 }
-
+/// 生成 行情与市场数据 需要的派生数据，供后续执行、展示或审计使用。
 fn format_snapshot_suffix(candle_count: Option<i32>, snapshot_at: Option<DateTime<Utc>>) -> String {
     match (candle_count, snapshot_at) {
         (Some(candle_count), Some(snapshot_at)) => {

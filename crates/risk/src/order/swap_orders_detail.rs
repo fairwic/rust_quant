@@ -1,5 +1,4 @@
 extern crate rbatis;
-
 use rust_quant_core::database;
 use okx::dto::trade_dto::OrderDetailRespDto;
 use rbatis::impl_select;
@@ -8,7 +7,6 @@ use rbatis::{crud, impl_update, RBatis};
 use rbs::value;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-
 /// 合约订单详情表
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // #[serde(rename_all = "camelCase")]
@@ -81,8 +79,8 @@ pub struct SwapOrderDetailEntity {
     // 更新时间
     pub update_at: Option<String>,
 }
-
 impl SwapOrderDetailEntity {
+    /// 从外部输入转换为内部模型，隔离 交易执行与风控 的字段适配细节。
     pub fn from(order_detail: OrderDetailRespDto) -> Self {
         Self {
             inst_id: order_detail.inst_id,
@@ -121,25 +119,24 @@ impl SwapOrderDetailEntity {
         }
     }
 }
-
 const TABLE_NAME: &str = "swap_orders_detail";
 crud!(SwapOrderDetailEntity {}, TABLE_NAME);
 impl_select!(SwapOrderDetailEntity{select_by_in_order_id(in_order_id:String) => "`where in_order_id = #{in_order_id}`"},TABLE_NAME);
 impl_select!(SwapOrderDetailEntity{fetch_list() => ""},TABLE_NAME);
 impl_select!(SwapOrderDetailEntity{get_new_update_order_id()-> Option=> "`order by update_at desc limit 1`"},TABLE_NAME);
-
 ///模型结构体
 pub struct SwapOrderDetailEntityModel {
+    /// db，用于记录交易或执行状态。
     db: &'static RBatis,
 }
-
 impl SwapOrderDetailEntityModel {
+    /// 构建 交易执行与风控 所需实例，并集中初始化依赖和默认状态。
     pub async fn new() -> Self {
         Self {
             db: db::get_db_client(),
         }
     }
-
+    /// 提供add的集中实现，避免交易执行调用方重复处理相同细节。
     pub async fn add(
         &self,
         swap_order_entity: &SwapOrderDetailEntity,
@@ -148,7 +145,6 @@ impl SwapOrderDetailEntityModel {
         println!("insert_batch = {}", json!(data));
         Ok(data)
     }
-
     // pub async fn batch_update(
     //     &self,
     //     swap_order_entity: &SwapOrderDetailEntity,
@@ -163,6 +159,7 @@ impl SwapOrderDetailEntityModel {
     //     println!("update_batch = {}", json!(data));
     //     Ok(data)
     // }
+    /// 执行更新步骤，串起交易执行需要的状态推进和错误处理。
     pub async fn update(
         &self,
         swap_order_entity: &SwapOrderDetailEntity,
@@ -176,7 +173,7 @@ impl SwapOrderDetailEntityModel {
         println!("update_batch = {}", json!(data));
         Ok(data)
     }
-
+    /// 加载 交易执行与风控 运行所需数据，并把缺失或异常交给调用方处理。
     pub async fn get_new_update_order_id(&self) -> anyhow::Result<Option<SwapOrderDetailEntity>> {
         let res = SwapOrderDetailEntity::get_new_update_order_id(self.db).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         Ok(res)

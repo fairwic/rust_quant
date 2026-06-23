@@ -1,4 +1,5 @@
 impl VegasFactorResearchService {
+    /// 提供数据行to快照的集中实现，避免回测策略调用方重复处理相同细节。
     fn row_to_snapshot(row: SnapshotRow) -> ExternalMarketSnapshot {
         ExternalMarketSnapshot {
             id: Some(row.id),
@@ -17,7 +18,7 @@ impl VegasFactorResearchService {
             updated_at: row.updated_at,
         }
     }
-
+    /// 提供enrichsamples的集中实现，避免回测策略调用方重复处理相同细节。
     fn enrich_samples(
         &self,
         trades: Vec<ResearchTradeSample>,
@@ -29,7 +30,7 @@ impl VegasFactorResearchService {
             .map(|trade| self.enrich_trade(trade, &grouped))
             .collect()
     }
-
+    /// 提供enrichfiltered信号的集中实现，避免回测策略调用方重复处理相同细节。
     fn enrich_filtered_signals(
         &self,
         filtered_signals: Vec<ResearchFilteredSignalSample>,
@@ -41,7 +42,7 @@ impl VegasFactorResearchService {
             .map(|signal| self.enrich_filtered_signal(signal, &grouped))
             .collect()
     }
-
+    /// 提供enrich交易的集中实现，避免回测策略调用方重复处理相同细节。
     fn enrich_trade(
         &self,
         trade: ResearchTradeSample,
@@ -84,7 +85,6 @@ impl VegasFactorResearchService {
             price_oi_snapshot.and_then(|row| row.open_interest),
             previous_price_oi_snapshot.and_then(|row| row.open_interest),
         );
-
         EnrichedTradeSample {
             tier: VolatilityTier::from_symbol(&trade.inst_id),
             funding_bucket: Self::funding_bucket(funding_snapshot),
@@ -96,7 +96,7 @@ impl VegasFactorResearchService {
             trade,
         }
     }
-
+    /// 提供enrichfiltered信号的集中实现，避免回测策略调用方重复处理相同细节。
     fn enrich_filtered_signal(
         &self,
         signal: ResearchFilteredSignalSample,
@@ -139,7 +139,6 @@ impl VegasFactorResearchService {
             price_oi_snapshot.and_then(|row| row.open_interest),
             previous_price_oi_snapshot.and_then(|row| row.open_interest),
         );
-
         EnrichedFilteredSignalSample {
             tier: VolatilityTier::from_symbol(&signal.inst_id),
             funding_bucket: Self::funding_bucket(funding_snapshot),
@@ -151,7 +150,7 @@ impl VegasFactorResearchService {
             signal,
         }
     }
-
+    /// 提供groupsnapshots的集中实现，避免回测策略调用方重复处理相同细节。
     fn group_snapshots(
         snapshots: &[ExternalMarketSnapshot],
     ) -> HashMap<String, Vec<ExternalMarketSnapshot>> {
@@ -164,7 +163,7 @@ impl VegasFactorResearchService {
         }
         grouped
     }
-
+    /// 提供最新matching快照的集中实现，避免回测策略调用方重复处理相同细节。
     fn latest_matching_snapshot<F>(
         event_time: i64,
         snapshots: &[ExternalMarketSnapshot],
@@ -181,7 +180,7 @@ impl VegasFactorResearchService {
             })
             .max_by_key(|row| row.metric_time)
     }
-
+    /// 提供previousmatching快照的集中实现，避免回测策略调用方重复处理相同细节。
     fn previous_matching_snapshot<F>(
         event_time: i64,
         snapshots: &[ExternalMarketSnapshot],
@@ -198,18 +197,17 @@ impl VegasFactorResearchService {
             })
             .max_by_key(|row| row.metric_time)
     }
-
     fn snapshot_price(snapshot: &ExternalMarketSnapshot) -> Option<f64> {
         snapshot.mark_price.or(snapshot.oracle_price)
     }
-
+    /// 提供pctchange的集中实现，避免回测策略调用方重复处理相同细节。
     fn pct_change(current: Option<f64>, previous: Option<f64>) -> Option<f64> {
         match (current, previous) {
             (Some(now), Some(prev)) if prev.abs() > f64::EPSILON => Some((now - prev) / prev),
             _ => None,
         }
     }
-
+    /// 提供fundingbucket的集中实现，避免回测策略调用方重复处理相同细节。
     fn funding_bucket(snapshot: Option<&ExternalMarketSnapshot>) -> Option<String> {
         match snapshot.map(|row| (row.funding_rate, row.premium)) {
             Some((Some(funding), Some(premium))) if funding > 0.0 && premium > 0.0 => {
@@ -229,7 +227,7 @@ impl VegasFactorResearchService {
             _ => None,
         }
     }
-
+    /// 提供flowbucket的集中实现，避免回测策略调用方重复处理相同细节。
     fn flow_bucket(snapshot: Option<&ExternalMarketSnapshot>) -> Option<String> {
         let value = snapshot
             .and_then(|row| row.raw_payload.as_ref())
@@ -240,5 +238,4 @@ impl VegasFactorResearchService {
             _ => None,
         }
     }
-
 }

@@ -9,27 +9,27 @@ use rust_quant_strategies::{get_multi_indicator_values, CandleItem, IndicatorStr
 use serde_json::json;
 use sqlx::Row;
 use std::env;
-
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 fn parse_f64(row: &sqlx::postgres::PgRow, col: &str) -> Result<f64> {
     let raw: String = row.get(col);
     raw.parse::<f64>()
         .map_err(|e| anyhow!("failed to parse {}='{}': {}", col, raw, e))
 }
-
+/// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_i32(row: &sqlx::postgres::PgRow, col: &str) -> Result<i32> {
     let raw: String = row.get(col);
     raw.parse::<i32>()
         .map_err(|e| anyhow!("failed to parse {}='{}': {}", col, raw, e))
 }
-
 #[allow(clippy::type_complexity)]
+/// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_args() -> Result<(i64, String, Option<String>, Option<String>, Option<usize>)> {
     let mut back_test_id: Option<i64> = None;
     let mut time_str: Option<String> = None;
     let mut inst_id: Option<String> = None;
     let mut period: Option<String> = None;
     let mut limit: Option<usize> = None;
-
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -51,12 +51,11 @@ fn parse_args() -> Result<(i64, String, Option<String>, Option<String>, Option<u
             _ => {}
         }
     }
-
     let back_test_id = back_test_id.ok_or_else(|| anyhow!("missing --back-test-id"))?;
     let time_str = time_str.ok_or_else(|| anyhow!("missing --time"))?;
     Ok((back_test_id, time_str, inst_id, period, limit))
 }
-
+/// 提供periodtotablesuffix的集中实现，避免回测策略调用方重复处理相同细节。
 fn period_to_table_suffix(period: &str) -> Result<String> {
     let p = period.trim();
     let suffix = match p {
@@ -65,7 +64,7 @@ fn period_to_table_suffix(period: &str) -> Result<String> {
     };
     Ok(suffix)
 }
-
+/// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_shanghai_time_to_ms(time_str: &str) -> Result<i64> {
     let naive = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%d %H:%M:%S")
         .map_err(|e| anyhow!("invalid time format: {}", e))?;
@@ -76,60 +75,48 @@ fn parse_shanghai_time_to_ms(time_str: &str) -> Result<i64> {
         .ok_or_else(|| anyhow!("ambiguous local datetime"))?;
     Ok(dt.timestamp_millis())
 }
-
 #[tokio::main]
+/// 提供入口的集中实现，避免回测策略调用方重复处理相同细节。
 async fn main() -> Result<()> {
     let (back_test_id, time_str, inst_id_override, period_override, limit_override) = parse_args()?;
-
     init_db_pool().await?;
     let pool = get_db_pool();
-
     let row = sqlx::query(
         "SELECT inst_type, time, strategy_detail, risk_config_detail FROM back_test_log WHERE id=$1",
     )
     .bind(back_test_id)
     .fetch_one(pool)
     .await?;
-
     let inst_id: String = inst_id_override.unwrap_or_else(|| row.get::<String, _>("inst_type"));
     let period: String = period_override.unwrap_or_else(|| row.get::<String, _>("time"));
     let strategy_detail: String = row.get::<String, _>("strategy_detail");
     let risk_config_detail: String = row.get::<String, _>("risk_config_detail");
-
     let mut strategy: VegasStrategy = serde_json::from_str(&strategy_detail)
         .map_err(|e| anyhow!("failed to parse strategy_detail: {}", e))?;
     strategy.emit_debug = true;
-
     let risk_config: BasicRiskStrategyConfig = serde_json::from_str(&risk_config_detail)
         .map_err(|e| anyhow!("failed to parse risk_config_detail: {}", e))?;
-
     let target_ts = parse_shanghai_time_to_ms(&time_str)?;
-
     let suffix = period_to_table_suffix(&period)?;
     let table_name = quote_legacy_table_name(&format!(
         "{}_candles_{}",
         inst_id.to_ascii_lowercase(),
         suffix
     ))?;
-
     let min_len = strategy.min_k_line_num.max(1);
     let limit = limit_override.unwrap_or(min_len + 200);
-
     let query = format!(
         "SELECT ts, o, h, l, c, vol, confirm FROM {} WHERE ts <= $1 ORDER BY ts DESC LIMIT $2",
         table_name
     );
-
     let rows = sqlx::query(&query)
         .bind(target_ts)
         .bind(limit as i64)
         .fetch_all(pool)
         .await?;
-
     if rows.is_empty() {
         return Err(anyhow!("no candles found before target time"));
     }
-
     let mut candles: Vec<CandleItem> = Vec::with_capacity(rows.len());
     for r in rows {
         let candle = CandleItem {
@@ -143,9 +130,7 @@ async fn main() -> Result<()> {
         };
         candles.push(candle);
     }
-
     candles.sort_by_key(|c| c.ts);
-
     let mut adapter = VegasBacktestAdapter::new(strategy);
     let mut indicator_combine = adapter.init_indicator_combine();
     let weights = adapter
@@ -153,26 +138,20 @@ async fn main() -> Result<()> {
         .signal_weights
         .clone()
         .unwrap_or_default();
-
     let mut buffer: Vec<CandleItem> = Vec::with_capacity(limit.max(1024));
     let mut found = false;
-
     for candle in candles.iter() {
         let mut values: VegasIndicatorSignalValue =
             get_multi_indicator_values(&mut indicator_combine, candle);
         buffer.push(candle.clone());
-
         if buffer.len() < min_len {
             continue;
         }
-
         let window = &buffer[buffer.len() - min_len..];
         let mut signal = adapter.generate_signal(window, &mut values, &risk_config);
-
         if signal.single_value.is_none() {
             signal.single_value = Some(serde_json::to_string(&values).unwrap_or_default());
         }
-
         if candle.ts == target_ts {
             found = true;
             let output = json!({
@@ -197,13 +176,11 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&output)?);
             break;
         }
-
         if buffer.len() > min_len * 2 {
             let drain = buffer.len() - min_len;
             buffer.drain(0..drain);
         }
     }
-
     if !found {
         let nearest = candles
             .iter()
@@ -219,6 +196,5 @@ async fn main() -> Result<()> {
             nearest.4
         ));
     }
-
     Ok(())
 }

@@ -1,7 +1,6 @@
 //! 业务实体模块
 //!
 //! 实体是具有唯一标识的领域对象，通常作为聚合根
-
 pub mod audit;
 pub mod backtest;
 pub mod candle;
@@ -17,7 +16,6 @@ pub mod order;
 pub mod position;
 pub mod strategy_config;
 pub mod swap_order;
-
 pub use audit::{
     OrderDecisionLog, OrderStateLog, PortfolioSnapshot, PositionSnapshot, RiskDecisionLog,
     SignalSnapshotLog, StrategyRun,
@@ -36,7 +34,6 @@ pub use order::{Order, OrderError};
 pub use position::{MarginMode, Position, PositionError, PositionStatus};
 pub use strategy_config::{BasicRiskConfig, StrategyConfig};
 pub use swap_order::SwapOrder;
-
 pub mod fund_flow;
 pub use fund_flow::{
     FundFlow, FundFlowAlert, FundFlowSide, MarketAnomaly, MarketRankEvent, MarketRankEventType,

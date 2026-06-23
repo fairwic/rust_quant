@@ -1,7 +1,6 @@
 use serde_json::json;
 use std::fs;
 use std::process::Command;
-
 #[test]
 fn cli_outputs_paper_ready_report_without_enabling_live_trading() {
     let input_path = std::env::temp_dir().join(format!(
@@ -45,14 +44,12 @@ fn cli_outputs_paper_ready_report_without_enabling_live_trading() {
         }]
     });
     fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
-
     let output = Command::new(env!("CARGO_BIN_EXE_pre_major_listing_paper_acceptance"))
         .arg("--input")
         .arg(&input_path)
         .output()
         .expect("run paper acceptance cli");
     fs::remove_file(&input_path).ok();
-
     assert!(
         output.status.success(),
         "cli should pass, stderr={}",

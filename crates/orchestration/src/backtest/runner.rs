@@ -1,9 +1,3 @@
-use anyhow::{anyhow, Result};
-use std::sync::Arc;
-use tokio::sync::Semaphore;
-use tokio::time::Instant;
-use tracing::{error, info, warn};
-
 use crate::backtest::executor::BacktestExecutor;
 use crate::workflow::job_param_generator::{NweParamGenerator, ParamGenerator, ParamMergeBuilder};
 use crate::workflow::progress_manager::{
@@ -13,7 +7,7 @@ use crate::workflow::strategy_config::{
     get_nwe_strategy_config_from_db_with_selector, get_strategy_config_from_db_with_selector,
     BackTestConfig,
 };
-
+use anyhow::{anyhow, Result};
 use rust_quant_core::database::get_db_pool;
 use rust_quant_infrastructure::repositories::{
     PostgresStrategyConfigRepository, SqlxAuditRepository, SqlxBacktestRepository,
@@ -23,7 +17,10 @@ use rust_quant_market::models::{SelectTime, TimeDirect};
 use rust_quant_services::market::CandleService;
 use rust_quant_services::strategy::{BacktestService, StrategyConfigService};
 use rust_quant_strategies::implementations::nwe_strategy::NweStrategy;
-
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tokio::time::Instant;
+use tracing::{error, info, warn};
 /// 回测运行器
 ///
 /// 负责管理回测相关的服务和执行逻辑
@@ -34,10 +31,8 @@ pub struct BacktestRunner {
     /// 策略配置服务
     config_service: StrategyConfigService,
 }
-
 impl BacktestRunner {
     /// 创建新的回测运行器实例
-    ///
     /// # 架构说明
     /// - 在结构体中初始化所有服务依赖
     /// - 通过依赖注入方式创建服务实例
@@ -49,28 +44,21 @@ impl BacktestRunner {
             Box::new(backtest_repo),
             Some(Box::new(audit_repo)),
         ));
-
         let candle_repo = SqlxCandleRepository::new(pool.clone());
         let candle_service = Arc::new(CandleService::new(Box::new(candle_repo)));
-
         let config_service = create_strategy_config_service(pool)?;
-
         let executor = Arc::new(BacktestExecutor::new(backtest_service, candle_service));
-
         Ok(Self {
             executor,
             config_service,
         })
     }
-
     /// 执行回测任务
-    ///
     /// 根据环境变量控制随机/指定模式，遍历 inst_id 与 period 组合执行回测
     pub async fn run(&self, targets: &[(String, String)]) -> Result<()> {
         self.run_with_config(targets, BackTestConfig::default())
             .await
     }
-
     /// 执行回测任务，允许调用方显式传入回测模式和数据范围。
     pub async fn run_with_config(
         &self,
@@ -80,9 +68,7 @@ impl BacktestRunner {
         if targets.is_empty() {
             return Err(anyhow!("未提供任何回测目标"));
         }
-
         let mut success = 0usize;
-
         for (inst_id, period) in targets.iter() {
             match self.run_backtest_for_pair(inst_id, period, &config).await {
                 Ok(_) => success += 1,
@@ -92,23 +78,22 @@ impl BacktestRunner {
                 ),
             }
         }
-
         let total = targets.len();
-
         if success == 0 {
             return Err(anyhow!("所有回测任务都失败了，共 {} 个组合", total));
         }
-
         if success < total {
             warn!("部分回测失败，成功 {}/{}", success, total);
         } else {
             info!("全部回测执行成功，共 {} 个组合", total);
         }
-
         Ok(())
     }
 }
-
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 返回 Result 以便错误透明上抛，统一上层降级与重试策略。
 fn create_strategy_config_service(core_pool: sqlx::PgPool) -> Result<StrategyConfigService> {
     validate_strategy_config_source()?;
     info!("📚 回测策略配置来源: quant_core.strategy_configs");
@@ -116,7 +101,7 @@ fn create_strategy_config_service(core_pool: sqlx::PgPool) -> Result<StrategyCon
         PostgresStrategyConfigRepository::new(core_pool),
     )))
 }
-
+/// 校验输入和运行前置条件，提前暴露 回测与策略研究 的不可执行原因。
 fn validate_strategy_config_source() -> Result<()> {
     let source = std::env::var("STRATEGY_CONFIG_SOURCE")
         .unwrap_or_default()
@@ -133,15 +118,13 @@ fn validate_strategy_config_source() -> Result<()> {
     }
     Err(anyhow!("不支持的 STRATEGY_CONFIG_SOURCE: {}", source))
 }
-
 /// 回测执行入口（兼容性函数）
-///
 /// 根据环境变量控制随机/指定模式，遍历 inst_id 与 period 组合执行回测
 pub async fn run_backtest_runner(targets: &[(String, String)]) -> Result<()> {
     let runner = BacktestRunner::new()?;
     runner.run(targets).await
 }
-
+/// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn run_backtest_runner_with_config(
     targets: &[(String, String)],
     config: BackTestConfig,
@@ -149,7 +132,6 @@ pub async fn run_backtest_runner_with_config(
     let runner = BacktestRunner::new()?;
     runner.run_with_config(targets, config).await
 }
-
 impl BacktestRunner {
     /// 执行单个交易对的回测
     async fn run_backtest_for_pair(
@@ -163,39 +145,31 @@ impl BacktestRunner {
             "开始执行回测: inst_id={}, period={}, config={:?}",
             inst_id, period, config
         );
-
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent));
-
         let mut executed = false;
-
         if config.enable_random_test_nwe {
             executed = true;
             self.run_nwe_random_backtest(inst_id, period, semaphore.clone(), config)
                 .await?;
         }
-
         if config.enable_specified_test_nwe {
             executed = true;
             self.run_nwe_specified_backtest(inst_id, period, config, semaphore.clone())
                 .await?;
         }
-
         if config.enable_random_test_vegas {
             executed = true;
             self.run_vegas_random_backtest(inst_id, period, semaphore.clone(), config)
                 .await?;
         }
-
         if config.enable_specified_test_vegas {
             executed = true;
             self.run_vegas_specified_backtest(inst_id, period, semaphore.clone(), config)
                 .await?;
         }
-
         if !executed {
             warn!("未启用任何回测模式，inst_id={} period={}", inst_id, period);
         }
-
         let elapsed = start.elapsed();
         info!(
             "回测执行完成: inst_id={}, period={}, 耗时={}ms",
@@ -203,10 +177,8 @@ impl BacktestRunner {
             period,
             elapsed.as_millis()
         );
-
         Ok(())
     }
-
     /// 执行 NWE 随机回测
     async fn run_nwe_random_backtest(
         &self,
@@ -220,14 +192,11 @@ impl BacktestRunner {
             "[NWE 随机] 开始随机回测: inst_id={}, period={}",
             inst_id, period
         );
-
         let arc_candle_data = self
             .executor
             .load_and_convert_candle_data(inst_id, period, config.candle_limit, None)
             .await?;
-
         let random_config = build_default_nwe_random_config(config.max_concurrent);
-
         let progress = match StrategyProgressManager::load_progress(inst_id, period).await? {
             Some(saved) => {
                 if StrategyProgressManager::is_config_changed_nwe(&random_config, &saved) {
@@ -254,9 +223,7 @@ impl BacktestRunner {
                 StrategyProgressManager::create_new_progress_nwe(inst_id, period, &random_config)
             }
         };
-
         StrategyProgressManager::save_progress(&progress).await?;
-
         let mut generator = NweParamGenerator::new(
             random_config.stc_fast_length.clone(),
             random_config.stc_slow_length.clone(),
@@ -276,15 +243,12 @@ impl BacktestRunner {
             random_config.is_used_signal_k_line_stop_loss.clone(),
             random_config.k_line_hammer_shadow_ratios.clone(),
         );
-
         generator.set_current_index(progress.current_index);
-
         loop {
             let batch = generator.get_next_batch(random_config.batch_size);
             if batch.is_empty() {
                 break;
             }
-
             self.executor
                 .run_nwe_random_batch(
                     batch,
@@ -294,12 +258,9 @@ impl BacktestRunner {
                     semaphore.clone(),
                 )
                 .await;
-
             let (current_index, total_count) = generator.progress();
-
             StrategyProgressManager::update_progress(inst_id, period, current_index, current_index)
                 .await?;
-
             info!(
                 "[NWE 随机] 进度 {}/{} ({:.2}%), inst_id={}, period={}",
                 current_index,
@@ -313,9 +274,7 @@ impl BacktestRunner {
                 period
             );
         }
-
         StrategyProgressManager::mark_completed(inst_id, period).await?;
-
         let elapsed = start.elapsed();
         info!(
             "[NWE 随机] 完成随机回测 inst_id={}, period={}, 耗时={}ms",
@@ -323,10 +282,8 @@ impl BacktestRunner {
             period,
             elapsed.as_millis()
         );
-
         Ok(())
     }
-
     /// 执行 NWE 指定配置回测
     async fn run_nwe_specified_backtest(
         &self,
@@ -340,12 +297,10 @@ impl BacktestRunner {
             "[NWE 指定] 开始指定配置回测: inst_id={}, period={}",
             inst_id, period
         );
-
         let arc_candle_data = self
             .executor
             .load_and_convert_candle_data(inst_id, period, config.candle_limit, None)
             .await?;
-
         let pairs = get_nwe_strategy_config_from_db_with_selector(
             &self.config_service,
             inst_id,
@@ -360,10 +315,8 @@ impl BacktestRunner {
             );
             return Ok(());
         }
-
         let mut success = 0usize;
         let total_configs = pairs.len();
-
         for (cfg, risk_cfg) in pairs.into_iter() {
             let strategy = NweStrategy::new(cfg);
             match self
@@ -382,7 +335,6 @@ impl BacktestRunner {
                 }
             }
         }
-
         if success == 0 {
             return Err(anyhow!(
                 "NWE 指定配置回测全部失败: inst_id={}, period={}",
@@ -390,14 +342,12 @@ impl BacktestRunner {
                 period
             ));
         }
-
         if success < total_configs {
             warn!(
                 "[NWE 指定] 有策略执行失败，成功 {}/{}: inst_id={}, period={}",
                 success, total_configs, inst_id, period
             );
         }
-
         let elapsed = start.elapsed();
         info!(
             "[NWE 指定] 完成指定配置回测 inst_id={}, period={}, 成功 {}/{}，耗时={}ms",
@@ -407,10 +357,8 @@ impl BacktestRunner {
             total_configs,
             elapsed.as_millis()
         );
-
         Ok(())
     }
-
     /// 执行 Vegas 随机回测
     async fn run_vegas_random_backtest(
         &self,
@@ -424,14 +372,11 @@ impl BacktestRunner {
             "[Vegas 随机] 开始随机回测: inst_id={}, period={}",
             inst_id, period
         );
-
         let arc_candle_data = self
             .executor
             .load_and_convert_candle_data(inst_id, period, config.candle_limit, None)
             .await?;
-
         let random_config = RandomStrategyConfig::default();
-
         let progress = match StrategyProgressManager::load_progress(inst_id, period).await? {
             Some(saved) => {
                 if StrategyProgressManager::is_config_changed(&random_config, &saved) {
@@ -452,9 +397,7 @@ impl BacktestRunner {
             }
             None => StrategyProgressManager::create_new_progress(inst_id, period, &random_config),
         };
-
         StrategyProgressManager::save_progress(&progress).await?;
-
         let mut generator = ParamGenerator::new(
             random_config.bb_periods.clone(),
             random_config.shadow_ratios.clone(),
@@ -469,15 +412,12 @@ impl BacktestRunner {
             random_config.is_used_signal_k_line_stop_loss.clone(),
             random_config.fix_signal_kline_take_profit_ratios.clone(),
         );
-
         generator.set_current_index(progress.current_index);
-
         loop {
             let batch = generator.get_next_batch(random_config.batch_size);
             if batch.is_empty() {
                 break;
             }
-
             self.executor
                 .run_back_test_strategy(
                     batch,
@@ -487,12 +427,9 @@ impl BacktestRunner {
                     semaphore.clone(),
                 )
                 .await;
-
             let (current_index, total_count) = generator.progress();
-
             StrategyProgressManager::update_progress(inst_id, period, current_index, current_index)
                 .await?;
-
             info!(
                 "[Vegas 随机] 进度 {}/{} ({:.2}%), inst_id={}, period={}",
                 current_index,
@@ -506,9 +443,7 @@ impl BacktestRunner {
                 period
             );
         }
-
         StrategyProgressManager::mark_completed(inst_id, period).await?;
-
         let elapsed = start.elapsed();
         info!(
             "[Vegas 随机] 完成随机回测 inst_id={}, period={}, 耗时={}ms",
@@ -516,10 +451,8 @@ impl BacktestRunner {
             period,
             elapsed.as_millis()
         );
-
         Ok(())
     }
-
     /// 执行 Vegas 指定配置回测
     async fn run_vegas_specified_backtest(
         &self,
@@ -533,7 +466,6 @@ impl BacktestRunner {
             "[Vegas 指定] 开始指定配置回测: inst_id={}, period={}",
             inst_id, period
         );
-
         let params_batch = get_strategy_config_from_db_with_selector(
             &self.config_service,
             inst_id,
@@ -548,22 +480,18 @@ impl BacktestRunner {
             );
             return Ok(());
         }
-
         let select_time = derive_select_time(&params_batch);
         let arc_candle_data = self
             .executor
             .load_and_convert_candle_data(inst_id, period, config.candle_limit, select_time)
             .await?;
-
         info!(
             "[Vegas 指定] 找到 {} 个策略配置，开始执行回测",
             params_batch.len()
         );
-
         self.executor
             .run_back_test_strategy(params_batch, inst_id, period, arc_candle_data, semaphore)
             .await;
-
         let elapsed = start.elapsed();
         info!(
             "[Vegas 指定] 完成指定配置回测 inst_id={}, period={}, 耗时={}ms",
@@ -571,15 +499,13 @@ impl BacktestRunner {
             period,
             elapsed.as_millis()
         );
-
         Ok(())
     }
 }
-
+/// 计算 回测与策略研究 指标，保持公式和边界处理集中可审计。
 fn derive_select_time(params: &[ParamMergeBuilder]) -> Option<SelectTime> {
     let mut min_start: Option<i64> = None;
     let mut max_end: Option<i64> = None;
-
     for param in params {
         if let Some(start) = param.kline_start_time.filter(|value| *value > 0) {
             min_start = Some(min_start.map_or(start, |current| current.min(start)));
@@ -588,7 +514,6 @@ fn derive_select_time(params: &[ParamMergeBuilder]) -> Option<SelectTime> {
             max_end = Some(max_end.map_or(end, |current| current.max(end)));
         }
     }
-
     match (min_start, max_end) {
         (Some(start), Some(end)) => Some(SelectTime {
             start_time: start,
@@ -608,37 +533,29 @@ fn derive_select_time(params: &[ParamMergeBuilder]) -> Option<SelectTime> {
         (None, None) => None,
     }
 }
-
 /// 构建默认的 NWE 随机配置
 fn build_default_nwe_random_config(batch_size: usize) -> NweRandomStrategyConfig {
     NweRandomStrategyConfig {
         rsi_periods: vec![6],
         rsi_over_buy_sell: vec![(70.0, 30.0)],
-
         stc_fast_length: vec![23],
         stc_slow_length: vec![50],
         stc_cycle_length: vec![10],
         stc_d1_length: vec![3],
         stc_d2_length: vec![3],
-
         atr_periods: vec![6, 12, 24, 36, 48, 60],
         atr_multipliers: vec![2.0, 2.2, 2.5, 2.6, 2.7, 2.8, 3.0],
-
         nwe_periods: vec![6, 8, 12, 16, 20, 24],
         nwe_multi: vec![1.2, 1.4, 1.6, 1.8, 2.0],
-
         volume_bar_num: vec![3],
         volume_ratios: vec![0.8],
         batch_size,
         max_loss_percent: vec![0.02, 0.01],
-
         take_profit_ratios: vec![1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0],
-
         k_line_hammer_shadow_ratios: vec![0.65],
         is_used_signal_k_line_stop_loss: vec![false, true],
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::derive_select_time;
@@ -646,9 +563,7 @@ mod tests {
     use crate::workflow::job_param_generator::ParamMergeBuilder;
     use rust_quant_market::models::TimeDirect;
     use std::sync::Mutex;
-
     static ENV_LOCK: Mutex<()> = Mutex::new(());
-
     #[test]
     fn derive_select_time_uses_min_start_and_max_end() {
         let params = vec![
@@ -659,61 +574,50 @@ mod tests {
                 .kline_start_time(50)
                 .kline_end_time(300),
         ];
-
         let select_time = derive_select_time(&params).expect("select_time should exist");
-
         assert_eq!(select_time.start_time, 50);
         assert_eq!(select_time.end_time, Some(300));
         assert!(matches!(select_time.direct, TimeDirect::AFTER));
     }
-
     #[test]
     fn derive_select_time_returns_none_when_unset() {
         let params = vec![ParamMergeBuilder::build()];
         assert!(derive_select_time(&params).is_none());
     }
-
     #[test]
     fn quant_core_strategy_config_source_rejects_legacy_env() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
         let original_quant_core_url = std::env::var("QUANT_CORE_DATABASE_URL").ok();
-
         std::env::set_var("STRATEGY_CONFIG_SOURCE", "quant_core");
         std::env::remove_var("QUANT_CORE_DATABASE_URL");
         validate_strategy_config_source().expect("quant_core source");
-
         std::env::set_var("STRATEGY_CONFIG_SOURCE", "strategy_config");
         std::env::set_var("QUANT_CORE_DATABASE_URL", "postgres://ignored");
         assert!(validate_strategy_config_source().is_err());
-
         restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
         restore_env(
             "QUANT_CORE_DATABASE_URL",
             original_quant_core_url.as_deref(),
         );
     }
-
     #[test]
     fn quant_core_strategy_config_source_accepts_blank_env() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
         let original_quant_core_url = std::env::var("QUANT_CORE_DATABASE_URL").ok();
-
         std::env::remove_var("STRATEGY_CONFIG_SOURCE");
         std::env::set_var("QUANT_CORE_DATABASE_URL", "postgres://quant-core");
         validate_strategy_config_source().expect("blank source");
-
         std::env::set_var("QUANT_CORE_DATABASE_URL", "   ");
         validate_strategy_config_source().expect("blank source remains accepted");
-
         restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
         restore_env(
             "QUANT_CORE_DATABASE_URL",
             original_quant_core_url.as_deref(),
         );
     }
-
+    /// 提供restore环境变量的集中实现，避免回测策略调用方重复处理相同细节。
     fn restore_env(key: &str, value: Option<&str>) {
         if let Some(value) = value {
             std::env::set_var(key, value);

@@ -1,18 +1,19 @@
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 pub async fn run_reconciliation_snapshot_check_from_env() -> Result<Value> {
     let config = ReconciliationSnapshotCheckConfig::from_env()?;
     run_reconciliation_snapshot_check(config).await
 }
-
+/// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn run_account_snapshot_sync(config: AccountSnapshotSyncConfig) -> Result<Value> {
     if config.account_wide {
         return run_account_wide_snapshot_sync(config).await;
     }
     run_reconciliation_snapshot_check(config.into_reconciliation_config()).await
 }
-
 const OKX_HISTORY_PAGE_LIMIT: u32 = 100;
 const OKX_HISTORY_MAX_PAGES: usize = 20;
-
+/// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 async fn run_reconciliation_snapshot_check(
     config: ReconciliationSnapshotCheckConfig,
 ) -> Result<Value> {
@@ -27,10 +28,16 @@ async fn run_reconciliation_snapshot_check(
         base_url,
         internal_secret,
     })?;
-
     let instrument = parse_instrument(&config.symbol)?;
+    let credential_id = config.credential_id.ok_or_else(|| {
+        anyhow!("credential_id is required before signed read-only reconciliation")
+    })?;
     let user_config = client
-        .resolve_user_exchange_config(&config.buyer_email, config.exchange.as_str())
+        .resolve_user_exchange_config_for_credential(
+            &config.buyer_email,
+            config.exchange.as_str(),
+            credential_id,
+        )
         .await?;
     let gateway = CryptoExcAllGateway::from_single_exchange_credentials(
         config.exchange,
@@ -48,9 +55,9 @@ async fn run_reconciliation_snapshot_check(
     } else {
         None
     };
-
-    let positions = gateway
-        .positions(config.exchange, Some(&instrument))
+    let positions = CryptoExcAllGateway::with_signed_read_only_scope(
+        gateway.positions(config.exchange, Some(&instrument)),
+    )
         .await
         .map_err(|error| {
             anyhow!(
@@ -58,11 +65,10 @@ async fn run_reconciliation_snapshot_check(
                 redact_error_message(error.to_string())
             )
         })?;
-    let open_orders = gateway
-        .open_orders(
+    let open_orders = CryptoExcAllGateway::with_signed_read_only_scope(gateway.open_orders(
             config.exchange,
             OrderListQuery::for_instrument(instrument.clone()).with_limit(100),
-        )
+        ))
         .await
         .map_err(|error| {
             anyhow!(
@@ -72,20 +78,19 @@ async fn run_reconciliation_snapshot_check(
         })?;
     let order_history = match okx_history_window {
         Some((start_time, end_time)) => {
-            fetch_okx_order_history_pages(
+            CryptoExcAllGateway::with_signed_read_only_scope(fetch_okx_order_history_pages(
                 &gateway,
                 config.exchange,
                 Some(&instrument),
                 start_time,
                 end_time,
-            )
+            ))
             .await
         }
-        None => gateway
-            .order_history(
+        None => CryptoExcAllGateway::with_signed_read_only_scope(gateway.order_history(
                 config.exchange,
                 OrderListQuery::for_instrument(instrument.clone()).with_limit(100),
-            )
+            ))
             .await
             .map_err(anyhow::Error::from),
     }
@@ -98,20 +103,19 @@ async fn run_reconciliation_snapshot_check(
     let fills = if config.include_fills {
         match okx_history_window {
             Some((start_time, end_time)) => {
-                fetch_okx_fill_history_pages(
+                CryptoExcAllGateway::with_signed_read_only_scope(fetch_okx_fill_history_pages(
                     &gateway,
                     config.exchange,
                     Some(&instrument),
                     start_time,
                     end_time,
-                )
+                ))
                 .await
             }
-            None => gateway
-                .fills(
+            None => CryptoExcAllGateway::with_signed_read_only_scope(gateway.fills(
                     config.exchange,
                     FillListQuery::for_instrument(instrument.clone()).with_limit(20),
-                )
+                ))
                 .await
                 .map_err(anyhow::Error::from),
         }
@@ -126,20 +130,19 @@ async fn run_reconciliation_snapshot_check(
     };
     let position_history = match okx_history_window {
         Some((start_time, end_time)) => {
-            fetch_okx_position_history_pages(
+            CryptoExcAllGateway::with_signed_read_only_scope(fetch_okx_position_history_pages(
                 &gateway,
                 config.exchange,
                 Some(&instrument),
                 start_time,
                 end_time,
-            )
+            ))
             .await
         }
-        None => gateway
-            .position_history(
+        None => CryptoExcAllGateway::with_signed_read_only_scope(gateway.position_history(
                 config.exchange,
                 PositionHistoryQuery::for_instrument(instrument.clone()).with_limit(100),
-            )
+            ))
             .await
             .map_err(anyhow::Error::from),
     }
@@ -149,7 +152,9 @@ async fn run_reconciliation_snapshot_check(
             redact_error_message(error.to_string())
         )
     })?;
-    let balances = gateway.balances(config.exchange).await.map_err(|error| {
+    let balances = CryptoExcAllGateway::with_signed_read_only_scope(gateway.balances(config.exchange))
+        .await
+        .map_err(|error| {
         anyhow!(
             "signed read-only balance snapshot failed: {}",
             redact_error_message(error.to_string())
@@ -163,15 +168,14 @@ async fn run_reconciliation_snapshot_check(
         let end_time = okx_history_window
             .map(|(_, end_time)| end_time)
             .unwrap_or_else(|| now.timestamp_millis() as u64);
-        gateway
-            .account_bills(
+        CryptoExcAllGateway::with_signed_read_only_scope(gateway.account_bills(
                 config.exchange,
                 AccountBillQuery::for_instrument(instrument)
                     .with_start_time(start_time)
                     .with_end_time(end_time)
                     .with_limit(100)
                     .with_archive(true),
-            )
+            ))
             .await
             .map_err(|error| {
                 anyhow!(
@@ -182,7 +186,6 @@ async fn run_reconciliation_snapshot_check(
     } else {
         Vec::new()
     };
-
     let requests = build_reconciliation_snapshot_requests(&config, &positions, &open_orders);
     let close_fill_writeback_candidates =
         build_close_fill_writeback_candidates(&config, &positions, &open_orders, &fills);
@@ -244,7 +247,6 @@ async fn run_reconciliation_snapshot_check(
             report_responses.push(report_reconciliation(&client, request).await?);
         }
     }
-
     Ok(json!({
         "exchange": config.exchange.as_str(),
         "symbol": config.symbol,
@@ -281,12 +283,11 @@ async fn run_reconciliation_snapshot_check(
         "report_result_allowed": false,
     }))
 }
-
+/// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Result<Value> {
     if config.exchange != ExchangeId::Okx {
         bail!("account-wide exchange account snapshot sync currently supports OKX only");
     }
-
     let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
         .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
         .map_err(|_| anyhow!("RUST_QUAN_WEB_BASE_URL is required"))?;
@@ -298,9 +299,15 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
         base_url,
         internal_secret,
     })?;
-
+    let credential_id = config.credential_id.ok_or_else(|| {
+        anyhow!("credential_id is required before account-wide signed read-only snapshot sync")
+    })?;
     let user_config = client
-        .resolve_user_exchange_config(&config.buyer_email, config.exchange.as_str())
+        .resolve_user_exchange_config_for_credential(
+            &config.buyer_email,
+            config.exchange.as_str(),
+            credential_id,
+        )
         .await?;
     let gateway = CryptoExcAllGateway::from_single_exchange_credentials(
         config.exchange,
@@ -309,12 +316,12 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
         user_config.passphrase,
         user_config.simulated,
     )?;
-
     let now = chrono::Utc::now();
     let start_time = (now - chrono::Duration::days(90)).timestamp_millis() as u64;
     let end_time = now.timestamp_millis() as u64;
-    let positions = gateway
-        .positions(config.exchange, None)
+    let positions = CryptoExcAllGateway::with_signed_read_only_scope(
+        gateway.positions(config.exchange, None),
+    )
         .await
         .map_err(|error| {
             anyhow!(
@@ -322,8 +329,9 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
                 redact_error_message(error.to_string())
             )
         })?;
-    let open_orders = gateway
-        .open_orders(config.exchange, OrderListQuery::new().with_limit(100))
+    let open_orders = CryptoExcAllGateway::with_signed_read_only_scope(
+        gateway.open_orders(config.exchange, OrderListQuery::new().with_limit(100)),
+    )
         .await
         .map_err(|error| {
             anyhow!(
@@ -332,7 +340,13 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
             )
         })?;
     let order_history =
-        fetch_okx_order_history_pages(&gateway, config.exchange, None, start_time, end_time)
+        CryptoExcAllGateway::with_signed_read_only_scope(fetch_okx_order_history_pages(
+            &gateway,
+            config.exchange,
+            None,
+            start_time,
+            end_time,
+        ))
             .await
             .map_err(|error| {
                 anyhow!(
@@ -341,7 +355,13 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
                 )
             })?;
     let fills = if config.include_fills {
-        fetch_okx_fill_history_pages(&gateway, config.exchange, None, start_time, end_time)
+        CryptoExcAllGateway::with_signed_read_only_scope(fetch_okx_fill_history_pages(
+            &gateway,
+            config.exchange,
+            None,
+            start_time,
+            end_time,
+        ))
             .await
             .map_err(|error| {
                 anyhow!(
@@ -353,7 +373,13 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
         Vec::new()
     };
     let position_history =
-        fetch_okx_position_history_pages(&gateway, config.exchange, None, start_time, end_time)
+        CryptoExcAllGateway::with_signed_read_only_scope(fetch_okx_position_history_pages(
+            &gateway,
+            config.exchange,
+            None,
+            start_time,
+            end_time,
+        ))
             .await
             .map_err(|error| {
                 anyhow!(
@@ -361,14 +387,15 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
                     redact_error_message(error.to_string())
                 )
             })?;
-    let balances = gateway.balances(config.exchange).await.map_err(|error| {
+    let balances = CryptoExcAllGateway::with_signed_read_only_scope(gateway.balances(config.exchange))
+        .await
+        .map_err(|error| {
         anyhow!(
             "signed read-only account-wide balance snapshot failed: {}",
             redact_error_message(error.to_string())
         )
     })?;
-    let account_bills = gateway
-        .account_bills(
+    let account_bills = CryptoExcAllGateway::with_signed_read_only_scope(gateway.account_bills(
             config.exchange,
             AccountBillQuery::new()
                 .with_inst_type("SWAP")
@@ -376,7 +403,7 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
                 .with_end_time(end_time)
                 .with_limit(100)
                 .with_archive(true),
-        )
+        ))
         .await
         .map_err(|error| {
             anyhow!(
@@ -384,7 +411,6 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
                 redact_error_message(error.to_string())
             )
         })?;
-
     let symbols = account_snapshot_symbols(
         &positions,
         &open_orders,
@@ -403,6 +429,7 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
             symbol: symbol.clone(),
             combo_id: 0,
             task_id: 0,
+            credential_id: config.credential_id,
             credential_ref: config.credential_ref.clone(),
             report_reconciliation: false,
             include_fills: config.include_fills,
@@ -439,7 +466,6 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
                 .push(report_exchange_account_snapshot(&client, account_snapshot_request).await?);
         }
     }
-
     Ok(json!({
         "exchange": config.exchange.as_str(),
         "account_wide": true,
@@ -465,7 +491,7 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
         "report_result_allowed": false,
     }))
 }
-
+/// 加载 Web 商业、会员和执行准备度 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_okx_order_history_pages(
     gateway: &CryptoExcAllGateway,
     exchange: ExchangeId,
@@ -496,7 +522,7 @@ async fn fetch_okx_order_history_pages(
     }
     bail!("OKX order history pagination exceeded {OKX_HISTORY_MAX_PAGES} pages");
 }
-
+/// 加载 Web 商业、会员和执行准备度 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_okx_fill_history_pages(
     gateway: &CryptoExcAllGateway,
     exchange: ExchangeId,
@@ -527,7 +553,7 @@ async fn fetch_okx_fill_history_pages(
     }
     bail!("OKX fill history pagination exceeded {OKX_HISTORY_MAX_PAGES} pages");
 }
-
+/// 加载 Web 商业、会员和执行准备度 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_okx_position_history_pages(
     gateway: &CryptoExcAllGateway,
     exchange: ExchangeId,
@@ -559,7 +585,7 @@ async fn fetch_okx_position_history_pages(
     }
     bail!("OKX position history pagination exceeded {OKX_HISTORY_MAX_PAGES} pages");
 }
-
+/// 提供account快照symbols的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn account_snapshot_symbols(
     positions: &[Position],
     open_orders: &[Order],
@@ -591,28 +617,28 @@ fn account_snapshot_symbols(
     }
     symbols.into_iter().collect()
 }
-
+/// 持久化 Web 商业、会员和执行准备度 结果，保证写入路径和幂等语义集中处理。
 fn insert_account_snapshot_symbol(symbols: &mut BTreeSet<String>, symbol: &str) {
     let symbol = symbol.trim();
     if !symbol.is_empty() {
         symbols.insert(symbol.to_ascii_uppercase());
     }
 }
-
+/// 封装推进okxorderhistoryaftercursor，减少Web 商业链路调用方重复实现相同细节。
 fn next_okx_order_history_after_cursor(page: &[Order], limit: u32) -> Option<String> {
     if page.len() < limit as usize {
         return None;
     }
     page.last()?.order_id.clone()
 }
-
+/// 封装推进okxfillhistoryaftercursor，减少Web 商业链路调用方重复实现相同细节。
 fn next_okx_fill_history_after_cursor(page: &[Fill], limit: u32) -> Option<String> {
     if page.len() < limit as usize {
         return None;
     }
     page.last()?.trade_id.clone()
 }
-
+/// 封装推进okxpositionhistoryaftercursor，减少Web 商业链路调用方重复实现相同细节。
 fn next_okx_position_history_after_cursor(
     page: &[PositionHistory],
     limit: u32,
@@ -622,7 +648,7 @@ fn next_okx_position_history_after_cursor(
     }
     page.last()?.close_time.map(|value| value.to_string())
 }
-
+/// 提供报告交易所account快照的集中实现，避免Web 商业链路调用方重复处理相同细节。
 async fn report_exchange_account_snapshot(
     client: &ExecutionTaskClient,
     request: ExchangeAccountSnapshotReportRequest,
@@ -637,7 +663,7 @@ async fn report_exchange_account_snapshot(
             )
         })
 }
-
+/// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 async fn apply_close_fill_writeback(
     client: &ExecutionTaskClient,
     request: ExchangeCloseFillWritebackRequest,
@@ -652,7 +678,7 @@ async fn apply_close_fill_writeback(
             )
         })
 }
-
+/// 提供报告reconciliation的集中实现，避免Web 商业链路调用方重复处理相同细节。
 async fn report_reconciliation(
     client: &ExecutionTaskClient,
     request: &ExchangeReconciliationReportRequest,

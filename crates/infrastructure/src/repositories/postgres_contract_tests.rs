@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::Path;
-
 const ACTIVE_REPOSITORY_FILES: &[&str] = &[
     "audit_repository.rs",
     "backtest_repository.rs",
@@ -13,7 +12,6 @@ const ACTIVE_REPOSITORY_FILES: &[&str] = &[
     "strategy_config_repository.rs",
     "swap_order_repository.rs",
 ];
-
 const FORBIDDEN_TOKENS: &[&str] = &[
     concat!("Pool<", "My", "Sql>"),
     concat!("My", "Sql", "Pool"),
@@ -26,33 +24,27 @@ const FORBIDDEN_TOKENS: &[&str] = &[
     "DATE_SUB(",
     "last_insert_id()",
 ];
-
 const POSTGRES_QUANT_CORE_DDL: &str = include_str!("../../../../sql/postgres_quant_core.sql");
-
 #[test]
 fn active_repositories_do_not_use_mysql_runtime_tokens() {
     let repository_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/repositories");
-
     let mut violations = Vec::new();
     for file_name in ACTIVE_REPOSITORY_FILES {
         let file_path = repository_dir.join(file_name);
         let source = fs::read_to_string(&file_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", file_path.display(), error));
-
         for token in FORBIDDEN_TOKENS {
             if source.contains(token) {
                 violations.push(format!("{} contains {}", file_name, token));
             }
         }
     }
-
     assert!(
         violations.is_empty(),
         "repository Postgres migration contract violated:\n{}",
         violations.join("\n")
     );
 }
-
 #[test]
 fn postgres_quant_core_ddl_contains_live_strategy_order_contract() {
     for table in [
@@ -69,7 +61,6 @@ fn postgres_quant_core_ddl_contains_live_strategy_order_contract() {
             "postgres quant_core DDL must comment table {table}"
         );
     }
-
     for column in [
         "swap_orders.id",
         "swap_orders.strategy_id",
@@ -111,7 +102,6 @@ fn postgres_quant_core_ddl_contains_live_strategy_order_contract() {
         );
     }
 }
-
 #[test]
 fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
     assert!(
@@ -122,7 +112,6 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
         POSTGRES_QUANT_CORE_DDL.contains("COMMENT ON TABLE market_rank_events"),
         "postgres quant_core DDL must comment market_rank_events"
     );
-
     for column in [
         "market_rank_events.id",
         "market_rank_events.exchange",
@@ -167,7 +156,6 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
         POSTGRES_QUANT_CORE_DDL.contains("idx_market_rank_events_radar_exchange_recent"),
         "postgres quant_core DDL must index recent radar event lookups by exchange and time"
     );
-
     assert!(
         POSTGRES_QUANT_CORE_DDL.contains("CREATE TABLE IF NOT EXISTS market_rank_snapshots"),
         "postgres quant_core DDL must create market_rank_snapshots"
@@ -191,7 +179,6 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
             "postgres quant_core DDL must comment column {column}"
         );
     }
-
     assert!(
         POSTGRES_QUANT_CORE_DDL.contains("CREATE TABLE IF NOT EXISTS market_velocity_episodes"),
         "postgres quant_core DDL must create market_velocity_episodes"

@@ -4,17 +4,18 @@ use redis::AsyncCommands;
 use rust_quant_core::cache::redis_client;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RedisCandle {
+    /// 事件时间戳。
     pub ts: i64,
+    /// c，用于交易策略计算。
     pub c: String,
 }
-
 pub struct RedisOperations;
-
 impl RedisOperations {
     /// 使用提供的连接保存蜡烛图数据到Redis
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
     pub async fn save_candles_to_redis(
         con: &mut MultiplexedConnection,
         key: &str,
@@ -30,7 +31,6 @@ impl RedisOperations {
         info!("Saved {} candles to Redis", candles.len());
         Ok(())
     }
-
     /// 使用提供的连接从Redis获取蜡烛图数据
     pub async fn fetch_candles_from_redis(
         con: &mut MultiplexedConnection,
@@ -45,21 +45,17 @@ impl RedisOperations {
                 c: close_price.to_string(),
             })
             .collect();
-
         // Sort the candles by timestamp to ensure they are ordered correctly
         candles.sort_unstable_by_key(|a| a.ts);
         println!("candles: {:?}", candles);
-
         info!("Retrieved {} candles from Redis", candles.len());
         Ok(candles)
     }
-
     /// [已优化] 使用标准连接池保存蜡烛图数据到Redis
     pub async fn save_candles_to_redis_with_pool(key: &str, candles: &[RedisCandle]) -> Result<()> {
         let mut con = redis_client::get_redis_connection().await?;
         Self::save_candles_to_redis(&mut con, key, candles).await
     }
-
     /// [已优化] 使用标准连接池从Redis获取蜡烛图数据
     pub async fn fetch_candles_from_redis_with_pool(key: &str) -> Result<Vec<RedisCandle>> {
         let mut con = redis_client::get_redis_connection().await?;

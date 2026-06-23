@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 /// 动态配置调整日志实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DynamicConfigLog {

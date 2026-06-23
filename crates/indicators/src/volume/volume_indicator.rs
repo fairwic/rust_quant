@@ -13,8 +13,8 @@ pub struct VolumeRatioIndicator {
     // 是否下降
     is_decreasing_than_pre: bool,
 }
-
 impl VolumeRatioIndicator {
+    /// 初始化new，确保回测策略依赖和内部状态可直接使用。
     pub fn new(length: usize, is_fitler_last_volume: bool) -> Self {
         let mut length = length;
         if is_fitler_last_volume {
@@ -28,7 +28,7 @@ impl VolumeRatioIndicator {
             is_decreasing_than_pre: false,
         }
     }
-
+    /// 推进指标到下一根 K 线，并返回最新计算结果。
     pub fn next(&mut self, current_volume: f64) -> f64 {
         //只保留前N根K线的成交量
         if self.prev_volumes.len() > self.volume_bar_num {
@@ -44,7 +44,6 @@ impl VolumeRatioIndicator {
                 self.is_increasing_than_pre = false;
                 self.is_decreasing_than_pre = true;
             }
-
             self.prev_volumes.remove(0);
         }
         let denom = self.avg_volume();
@@ -54,9 +53,9 @@ impl VolumeRatioIndicator {
             current_volume / denom
         };
         self.prev_volumes.push(current_volume);
-
         volume_ratio
     }
+    /// 计算平均成交量，并把公式边界留在回测策略内部。
     pub fn avg_volume(&self) -> f64 {
         if self.is_filter_last_volume && self.prev_volumes.len() > 1 {
             //去除最后一根k线
@@ -76,12 +75,13 @@ impl VolumeRatioIndicator {
         self.is_decreasing_than_pre
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_volume_ratio_indicator() {
         let mut indicator = VolumeRatioIndicator::new(3, false);
         indicator.next(100.0);
@@ -97,7 +97,6 @@ mod tests {
         indicator.next(300.0);
         assert_eq!(indicator.next(400.0), 2.0);
     }
-
     #[test]
     fn test_volume_ratio_indicator_filter_last_volume() {
         let mut indicator = VolumeRatioIndicator::new(3, true);
@@ -114,7 +113,6 @@ mod tests {
         indicator.next(200.0);
         indicator.next(300.0);
         indicator.next(400.0);
-
         assert_eq!(indicator.next(400.0), 2.0);
     }
 }

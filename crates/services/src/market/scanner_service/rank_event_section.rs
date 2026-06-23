@@ -1,3 +1,4 @@
+/// 计算 compute event 价格 change pct，并把公式边界留在行情数据内部。
 fn compute_event_price_change_pct(
     current_price: Option<Decimal>,
     previous_price: Option<Decimal>,
@@ -9,7 +10,7 @@ fn compute_event_price_change_pct(
     }
     Some((current_price - previous_price) / previous_price * Decimal::new(100, 0))
 }
-
+/// 封装价格direction，减少行情数据调用方重复实现相同细节。
 fn price_direction(price_change_pct: Option<Decimal>) -> String {
     match price_change_pct {
         Some(value) if value > Decimal::ZERO => "up".to_string(),
@@ -18,34 +19,32 @@ fn price_direction(price_change_pct: Option<Decimal>) -> String {
         None => "unknown".to_string(),
     }
 }
-
 fn is_top50_rank(rank: Option<i32>) -> bool {
     rank.is_some_and(|value| value > 0 && value <= MARKET_RANK_TOP_BOUNDARY)
 }
-
 fn compute_rank_delta(old_rank: Option<i32>, new_rank: Option<i32>) -> Option<i32> {
     Some(old_rank? - new_rank?)
 }
-
 #[derive(Debug, Clone)]
 struct MarketRankTechnicalCapture {
+    /// 当前状态。
     status: String,
+    /// 策略快照；为空时使用默认值或表示不限制。
     snapshot: Option<MarketRankTechnicalSnapshot>,
 }
-
 impl MarketRankTechnicalCapture {
+    /// 构建 行情与市场数据 所需实例，并集中初始化依赖和默认状态。
     fn new(status: impl Into<String>, snapshot: Option<MarketRankTechnicalSnapshot>) -> Self {
         Self {
             status: status.into(),
             snapshot,
         }
     }
-
     fn not_requested() -> Self {
         Self::new("not_requested", None)
     }
 }
-
+/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_rank_velocity_event(
     symbol: &str,
     timeframe: &str,
@@ -80,7 +79,7 @@ fn build_rank_velocity_event(
         notification_state: "pending".to_string(),
     }
 }
-
+/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_market_velocity_episode_from_event(event: &MarketRankEvent) -> MarketVelocityEpisode {
     MarketVelocityEpisode {
         id: None,
@@ -108,7 +107,7 @@ fn build_market_velocity_episode_from_event(event: &MarketRankEvent) -> MarketVe
         last_escalated_at: None,
     }
 }
-
+/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_top_list_event(
     symbol: &str,
     is_entry: bool,

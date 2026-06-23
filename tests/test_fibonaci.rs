@@ -2,42 +2,52 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use ta::{Close, High, Low, Next, Reset};
-
 use rust_quant::trading::indicator::atr::ATR;
 use rust_quant::trading::indicator::super_trend::Supertrend;
-
 // 策略配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FibTrendConfig {
     pub factor: f64,       // 对应Pine Script的factor参数
     pub atr_period: usize, // 对应Pine Script的atrPeriod
+    /// extendbars，用于配置运行参数。
     pub extend_bars: usize,
+    /// 列表数据。
     pub fib_levels: Vec<f64>,
 }
-
 // 斐波那契趋势数据
 #[derive(Debug, Clone)]
 pub struct FibTrendData {
+    /// supertrend。
     pub supertrend: f64,
+    /// 方向。
     pub direction: i8,
+    /// upperband。
     pub upper_band: f64,
+    /// lowerband。
     pub lower_band: f64,
+    /// 列表数据。
     pub fib_levels: Vec<f64>,
+    /// extreme最高，用于当前结构体的业务数据。
     pub extreme_high: f64,
+    /// extreme最低，用于当前结构体的业务数据。
     pub extreme_low: f64,
 }
-
 // 策略处理器
 pub struct FibTrendStrategy {
+    /// 运行配置。
     config: FibTrendConfig,
+    /// supertrend。
     supertrend: Supertrend,
+    /// atr。
     atr: ATR,
     current_atr: f64, // 新增字段存储当前ATR值
+    /// extreme最高，用于当前结构体的业务数据。
     extreme_high: f64,
+    /// extreme最低，用于当前结构体的业务数据。
     extreme_low: f64,
+    /// 上一期方向。
     previous_direction: i8,
 }
-
 impl FibTrendStrategy {
     pub fn new(config: FibTrendConfig) -> Result<Self> {
         Ok(Self {
@@ -50,16 +60,13 @@ impl FibTrendStrategy {
             config,
         })
     }
-
     // 处理单个K线
     pub fn next(&mut self, high: f64, low: f64, close: f64) -> FibTrendData {
         // ✅ 正确的极值更新顺序
         let (supertrend_value, direction) = self.supertrend.next((high, low, close));
-
         // 先更新方向状态
         let direction_changed = direction != self.previous_direction;
         self.previous_direction = direction;
-
         // 更新极值
         if direction_changed {
             self.extreme_high = high;
@@ -68,10 +75,8 @@ impl FibTrendStrategy {
             self.extreme_high = self.extreme_high.max(high);
             self.extreme_low = self.extreme_low.min(low);
         }
-
         // ✅ 正确的ATR计算时机（在极值更新后）
         self.current_atr = self.atr.next(high, low, close);
-
         FibTrendData {
             supertrend: supertrend_value,
             direction,
@@ -82,7 +87,6 @@ impl FibTrendStrategy {
             extreme_low: self.extreme_low,
         }
     }
-
     // ✅ 增强的斐波那契计算
     fn calculate_fib_levels(&self, direction: i8) -> Vec<f64> {
         let (base, target) = match direction {
@@ -90,7 +94,6 @@ impl FibTrendStrategy {
             -1 => (self.extreme_high, self.extreme_low),
             _ => return vec![0.0; self.config.fib_levels.len()],
         };
-
         let range = target - base;
         self.config
             .fib_levels
@@ -98,7 +101,6 @@ impl FibTrendStrategy {
             .map(|level| base + range * level)
             .collect()
     }
-
     // 计算上轨（使用当前ATR值）
     fn calculate_upper_band(&self, high: f64, direction: i8) -> f64 {
         match direction {
@@ -106,7 +108,6 @@ impl FibTrendStrategy {
             _ => high,
         }
     }
-
     // 计算下轨（使用当前ATR值）
     fn calculate_lower_band(&self, low: f64, direction: i8) -> f64 {
         match direction {
@@ -114,7 +115,6 @@ impl FibTrendStrategy {
             _ => low,
         }
     }
-
     // 重置状态
     pub fn reset(&mut self) {
         self.supertrend.reset();
@@ -125,7 +125,6 @@ impl FibTrendStrategy {
         self.previous_direction = 0;
     }
 }
-
 // 测试模块
 #[cfg(test)]
 mod tests {
@@ -135,9 +134,7 @@ mod tests {
     use rust_quant::app_config::log::setup_logging;
     use rust_quant::trading;
     use rust_quant::trading::indicator::atr::ATR;
-
     use super::*;
-
     // 创建测试配置
     fn test_config() -> FibTrendConfig {
         FibTrendConfig {
@@ -147,13 +144,11 @@ mod tests {
             fib_levels: vec![0.236, 0.382, 0.618, 0.786],
         }
     }
-
     #[tokio::test]
     async fn test_atr_calculation() -> anyhow::Result<()> {
         dotenv().ok();
         setup_logging().await?;
         init_db().await;
-
         let mut strategy = FibTrendStrategy::new(test_config()).unwrap();
         // 设置参数
         let inst_id = "BTC-USDT-SWAP";
@@ -176,7 +171,6 @@ mod tests {
         println!("{:#?}", results);
         Ok(())
     }
-
     #[test]
     fn test_fib_levels() {
         let mut strategy = FibTrendStrategy::new(test_config()).unwrap();
@@ -187,7 +181,6 @@ mod tests {
         // }
         //
         // let data = strategy.next(TEST_DATA[3].0, TEST_DATA[3].1, TEST_DATA[3].2);
-
         // 验证斐波那契水平
         let expected_levels = vec![
             7.5 + (11.0 - 7.5) * 0.236,

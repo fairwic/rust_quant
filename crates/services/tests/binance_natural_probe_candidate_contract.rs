@@ -1,5 +1,4 @@
 use std::{fs, path::PathBuf};
-
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -7,7 +6,6 @@ fn repo_root() -> PathBuf {
         .expect("services crate should live under crates/services")
         .to_path_buf()
 }
-
 #[test]
 fn candidate_probe_script_reports_quant_core_backed_recommendations_without_force_signal() {
     let root = repo_root();
@@ -17,7 +15,6 @@ fn candidate_probe_script_reports_quant_core_backed_recommendations_without_forc
         .join("suggest_binance_natural_probe_candidates.sh");
     let script = fs::read_to_string(&script_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", script_path.display(), error));
-
     assert!(script.contains("strategy_configs"));
     assert!(script.contains("pg_tables"));
     assert!(script.contains("recommended_candidates"));

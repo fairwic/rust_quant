@@ -1,7 +1,6 @@
 mod report;
 mod service;
 mod types;
-
 pub use report::{render_path_impact_report, render_report};
 pub use service::VegasFactorResearchService;
 pub use types::{

@@ -1,3 +1,5 @@
+use super::market_velocity_backfill::build_okx_http_client;
+use super::market_velocity_strategy_config::load_market_velocity_signal_config_or_env;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use rust_quant_domain::entities::MarketRankEvent;
@@ -5,7 +7,7 @@ use rust_quant_services::market::{
     build_market_velocity_entry_confirmation_from_candles,
     build_market_velocity_strategy_signal_request_with_entry_confirmation,
     MarketVelocityEntryConfirmation, MarketVelocityEntryConfirmationDecision,
-    MarketVelocityStrategySignalConfig, MarketVelocityStrategySignalDecision,
+    MarketVelocityStrategySignalDecision,
 };
 use rust_quant_services::rust_quan_web::{
     build_market_velocity_scoped_worker_handoff_readiness,
@@ -15,24 +17,18 @@ use rust_quant_services::rust_quan_web::{
 use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
 use std::{collections::BTreeMap, time::Duration};
-
-use super::market_velocity_backfill::build_okx_http_client;
-
 mod candidates;
 mod entry_candles;
 mod handoff;
-
+use candidates::{load_market_velocity_live_candidate_events, normalize_candidate_limit};
+use entry_candles::{load_market_velocity_live_entry_candles, MarketVelocityEntryCandleLoadStatus};
+use handoff::run_market_velocity_scoped_worker_once;
 pub use handoff::{
     build_market_velocity_live_preview_request, build_market_velocity_live_worker_handoff,
     build_market_velocity_live_worker_manifest, build_market_velocity_scoped_worker_env_overrides,
     market_velocity_required_live_owner_scope, market_velocity_scope_signal_to_live_owner,
     market_velocity_scoped_worker_apply_authorized, market_velocity_task_creation_apply_authorized,
 };
-
-use candidates::{load_market_velocity_live_candidate_events, normalize_candidate_limit};
-use entry_candles::{load_market_velocity_live_entry_candles, MarketVelocityEntryCandleLoadStatus};
-use handoff::run_market_velocity_scoped_worker_once;
-
 pub const MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN: &str =
     "I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK";
 pub const MARKET_VELOCITY_REFRESH_READINESS_CONFIRM_TOKEN: &str =
@@ -41,37 +37,58 @@ pub const MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN: &str = "I_UNDERSTAND_
 const DEFAULT_OKX_REST_BASE: &str = "https://www.okx.com";
 const DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES: i64 = 45;
 const DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS: u64 = 0;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketVelocityLiveHandoffConfig {
+    /// databaseURL，用于配置运行参数。
     pub database_url: String,
+    /// web基础URL，用于配置运行参数。
     pub web_base_url: String,
+    /// internalSecret，用于配置运行参数。
     pub internal_secret: String,
+    /// 买家邮箱；为空时表示未绑定买家邮箱。
     pub buyer_email: Option<String>,
+    /// combo ID；为空时使用默认值或表示不限制。
     pub combo_id: Option<i64>,
+    /// API 凭证 ID。
     pub credential_id: Option<i64>,
+    /// event ID；为空时使用默认值或表示不限制。
     pub event_id: Option<i64>,
+    /// 小时级时长。
     pub lookback_hours: i64,
+    /// candidatelimit，用于配置运行参数。
     pub candidate_limit: u32,
+    /// 入场K 线最大staleness 分钟数。
     pub entry_candle_max_staleness_minutes: i64,
+    /// 入场K 线ondemandrefresh，用于配置运行参数。
     pub entry_candle_on_demand_refresh: bool,
+    /// 入场K 线okxrest基础，用于配置运行参数。
     pub entry_candle_okx_rest_base: String,
+    /// 入场K 线proxyURL；为空时使用默认值或表示不限制。
     pub entry_candle_proxy_url: Option<String>,
+    /// 毫秒级时间戳或时长。
     pub entry_candle_request_sleep_ms: u64,
+    /// refreshreadinessapply，用于配置运行参数。
     pub refresh_readiness_apply: bool,
+    /// 刷新准备度确认标记；为空时不执行刷新。
     pub refresh_readiness_confirm: Option<String>,
+    /// create任务apply，用于配置运行参数。
     pub create_task_apply: bool,
+    /// 创建任务确认标记；为空时不创建任务。
     pub create_task_confirm: Option<String>,
+    /// runscopedWorkerapply，用于配置运行参数。
     pub run_scoped_worker_apply: bool,
+    /// 运行限定 worker 的确认标记；为空时不启动 worker。
     pub run_scoped_worker_confirm: Option<String>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketVelocityLiveHandoffRuntimeConfig {
+    /// runonce，用于配置运行参数。
     pub run_once: bool,
+    /// 秒级时长。
     pub interval_seconds: u64,
 }
-
+/// 封装当前函数，减少行情数据调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 pub async fn run_market_velocity_live_handoff_runtime_from_env() -> Result<()> {
     let runtime_config = market_velocity_live_handoff_runtime_config_from_env()?;
     loop {
@@ -89,14 +106,13 @@ pub async fn run_market_velocity_live_handoff_runtime_from_env() -> Result<()> {
             }
             Err(error) => return Err(error),
         }
-
         if runtime_config.run_once {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_secs(runtime_config.interval_seconds)).await;
     }
 }
-
+/// 提供市场动量livehandoff配置from环境变量的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn market_velocity_live_handoff_config_from_env() -> Result<MarketVelocityLiveHandoffConfig> {
     Ok(MarketVelocityLiveHandoffConfig {
         database_url: first_non_empty_env(&[
@@ -172,13 +188,13 @@ pub fn market_velocity_live_handoff_config_from_env() -> Result<MarketVelocityLi
         ]),
     })
 }
-
+/// 提供市场动量livehandoffruntime配置from环境变量的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn market_velocity_live_handoff_runtime_config_from_env(
 ) -> Result<MarketVelocityLiveHandoffRuntimeConfig> {
     let envs = std::env::vars().collect::<BTreeMap<_, _>>();
     market_velocity_live_handoff_runtime_config_from_map(&envs)
 }
-
+/// 提供市场动量livehandoffruntime配置frommap的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_live_handoff_runtime_config_from_map(
     envs: &BTreeMap<String, String>,
 ) -> Result<MarketVelocityLiveHandoffRuntimeConfig> {
@@ -192,11 +208,10 @@ fn market_velocity_live_handoff_runtime_config_from_map(
         .max(1),
     })
 }
-
 pub async fn run_market_velocity_live_handoff_from_env() -> Result<Value> {
     run_market_velocity_live_handoff(market_velocity_live_handoff_config_from_env()?).await
 }
-
+/// 执行 行情与市场数据 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn run_market_velocity_live_handoff(
     config: MarketVelocityLiveHandoffConfig,
 ) -> Result<Value> {
@@ -227,13 +242,12 @@ pub async fn run_market_velocity_live_handoff(
         refresh_readiness["execution_readiness"] =
             json!(credential.execution_readiness.can_execute);
     }
-
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&config.database_url)
         .await
         .context("connect quant_core database for market velocity live handoff")?;
-    let signal_config = MarketVelocityStrategySignalConfig::from_env()?;
+    let signal_config = load_market_velocity_signal_config_or_env(&pool).await?;
     let candidate_events = load_market_velocity_live_candidate_events(
         &pool,
         config.event_id,
@@ -263,7 +277,6 @@ pub async fn run_market_velocity_live_handoff(
         MarketVelocityEntryCandleLoadStatus,
     )> = None;
     let explicit_event_requested = config.event_id.is_some();
-
     for event in candidate_events {
         let candle_load = match load_market_velocity_live_entry_candles(
             &pool,
@@ -345,7 +358,6 @@ pub async fn run_market_velocity_live_handoff(
         selected = Some((event, entry_confirmation, signal, candle_load.status));
         break;
     }
-
     let Some((event, entry_confirmation, signal, candle_load)) = selected else {
         let skipped_summary = summarize_skipped_candidates(&skipped_candidates);
         return Ok(json!({
@@ -483,7 +495,7 @@ pub async fn run_market_velocity_live_handoff(
     response["scoped_worker_execution"] = scoped_worker_execution;
     Ok(response)
 }
-
+/// 提供市场动量入场确认staleblocker的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_entry_confirmation_stale_blocker(
     confirmation: &MarketVelocityEntryConfirmation,
     now: DateTime<Utc>,
@@ -496,7 +508,7 @@ fn market_velocity_entry_confirmation_stale_blocker(
     (age_minutes > max_staleness_minutes)
         .then(|| format!("EntryCandleStale:{age_minutes}m>{max_staleness_minutes}m"))
 }
-
+/// 提供市场动量入场确认ageminutes的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_entry_confirmation_age_minutes(
     confirmation: &MarketVelocityEntryConfirmation,
     now: DateTime<Utc>,
@@ -507,7 +519,7 @@ fn market_velocity_entry_confirmation_age_minutes(
         .max(0);
     (age_seconds + 59) / 60
 }
-
+/// 生成 行情与市场数据 需要的派生数据，供后续执行、展示或审计使用。
 fn summarize_skipped_candidates(skipped_candidates: &[Value]) -> Value {
     let mut by_blocker_detail = BTreeMap::<String, usize>::new();
     let mut by_symbol = BTreeMap::<String, usize>::new();
@@ -529,7 +541,7 @@ fn summarize_skipped_candidates(skipped_candidates: &[Value]) -> Value {
         "by_symbol": by_symbol,
     })
 }
-
+/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_market_velocity_no_live_candidate_response(
     config: &MarketVelocityLiveHandoffConfig,
     refresh_readiness: Value,
@@ -557,14 +569,14 @@ fn build_market_velocity_no_live_candidate_response(
         "refresh_readiness": refresh_readiness,
     })
 }
-
+/// 提供首个非空环境变量的集中实现，避免行情数据调用方重复处理相同细节。
 fn first_non_empty_env(keys: &[&str]) -> Option<String> {
     keys.iter()
         .filter_map(|key| std::env::var(key).ok())
         .map(|value| value.trim().to_string())
         .find(|value| !value.is_empty())
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_optional_i64_env(keys: &[&str]) -> Result<Option<i64>> {
     first_non_empty_env(keys)
         .map(|value| {
@@ -581,7 +593,7 @@ fn parse_optional_i64_env(keys: &[&str]) -> Result<Option<i64>> {
         })
         .transpose()
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_i64_env(key: &str, default: i64) -> Result<i64> {
     std::env::var(key)
         .ok()
@@ -594,7 +606,7 @@ fn parse_i64_env(key: &str, default: i64) -> Result<i64> {
         .transpose()
         .map(|value| value.unwrap_or(default))
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_u64_env(key: &str, default: u64) -> Result<u64> {
     std::env::var(key)
         .ok()
@@ -607,7 +619,7 @@ fn parse_u64_env(key: &str, default: u64) -> Result<u64> {
         .transpose()
         .map(|value| value.unwrap_or(default))
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_bool_env(key: &str, default: bool) -> Result<bool> {
     let Some(value) = std::env::var(key).ok() else {
         return Ok(default);
@@ -618,7 +630,7 @@ fn parse_bool_env(key: &str, default: bool) -> Result<bool> {
         _ => bail!("{key} must be a boolean"),
     }
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_bool_from_map(envs: &BTreeMap<String, String>, key: &str, default: bool) -> Result<bool> {
     let Some(value) = envs.get(key) else {
         return Ok(default);
@@ -629,7 +641,7 @@ fn parse_bool_from_map(envs: &BTreeMap<String, String>, key: &str, default: bool
         _ => bail!("{key} must be a boolean"),
     }
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_u64_from_map(envs: &BTreeMap<String, String>, key: &str, default: u64) -> Result<u64> {
     envs.get(key)
         .map(|value| {
@@ -641,14 +653,12 @@ fn parse_u64_from_map(envs: &BTreeMap<String, String>, key: &str, default: u64) 
         .transpose()
         .map(|value| value.unwrap_or(default))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
     use serde_json::json;
     use std::sync::{Mutex, OnceLock};
-
     const LIVE_HANDOFF_ENV_KEYS: &[&str] = &[
         "QUANT_CORE_DATABASE_URL",
         "POSTGRES_QUANT_CORE_DATABASE_URL",
@@ -681,19 +691,19 @@ mod tests {
         "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM",
         "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
     ];
-
+    /// 封装环境变量lock，减少行情数据调用方重复实现相同细节。
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
-
+    /// 提供快照livehandoff环境变量的集中实现，避免行情数据调用方重复处理相同细节。
     fn snapshot_live_handoff_env() -> Vec<(&'static str, Option<String>)> {
         LIVE_HANDOFF_ENV_KEYS
             .iter()
             .map(|key| (*key, std::env::var(key).ok()))
             .collect()
     }
-
+    /// 提供restore环境变量的集中实现，避免行情数据调用方重复处理相同细节。
     fn restore_env(snapshot: Vec<(&'static str, Option<String>)>) {
         for (key, value) in snapshot {
             match value {
@@ -702,13 +712,13 @@ mod tests {
             }
         }
     }
-
+    /// 删除或清理 行情与市场数据 的临时数据，避免过期状态继续影响后续流程。
     fn clear_live_handoff_env() {
         for key in LIVE_HANDOFF_ENV_KEYS {
             std::env::remove_var(key);
         }
     }
-
+    /// 构造样例实盘handoffconfig，集中维护行情数据的载荷组装规则。
     fn sample_live_handoff_config() -> MarketVelocityLiveHandoffConfig {
         MarketVelocityLiveHandoffConfig {
             database_url: "postgres://postgres:postgres123@localhost:5432/quant_core".to_string(),
@@ -733,7 +743,6 @@ mod tests {
             run_scoped_worker_confirm: None,
         }
     }
-
     #[test]
     fn live_handoff_config_requires_internal_execution_secret() {
         let _guard = env_lock();
@@ -744,9 +753,7 @@ mod tests {
             "postgres://postgres:postgres123@localhost:5432/quant_core",
         );
         std::env::set_var("RUST_QUAN_WEB_BASE_URL", "http://127.0.0.1:18000");
-
         let error = market_velocity_live_handoff_config_from_env().expect_err("secret is required");
-
         restore_env(snapshot);
         assert!(
             error
@@ -755,7 +762,6 @@ mod tests {
             "unexpected error: {error:#}"
         );
     }
-
     #[test]
     fn live_handoff_config_accepts_execution_secret_from_env() {
         let _guard = env_lock();
@@ -767,15 +773,12 @@ mod tests {
         );
         std::env::set_var("RUST_QUAN_WEB_BASE_URL", "http://127.0.0.1:18000");
         std::env::set_var("EXECUTION_EVENT_SECRET", "local-dev-secret");
-
         let config = market_velocity_live_handoff_config_from_env().expect("config");
-
         restore_env(snapshot);
         assert_eq!(config.internal_secret, "local-dev-secret");
         assert_eq!(config.candidate_limit, 20);
         assert_eq!(config.lookback_hours, 24);
     }
-
     #[test]
     fn live_handoff_config_defaults_to_on_demand_entry_candle_refresh() {
         let _guard = env_lock();
@@ -787,9 +790,7 @@ mod tests {
         );
         std::env::set_var("RUST_QUAN_WEB_BASE_URL", "http://127.0.0.1:18000");
         std::env::set_var("EXECUTION_EVENT_SECRET", "local-dev-secret");
-
         let config = market_velocity_live_handoff_config_from_env().expect("config");
-
         restore_env(snapshot);
         assert!(config.entry_candle_on_demand_refresh);
         assert_eq!(config.entry_candle_okx_rest_base, "https://www.okx.com");
@@ -798,7 +799,6 @@ mod tests {
         assert!(!config.run_scoped_worker_apply);
         assert_eq!(config.run_scoped_worker_confirm, None);
     }
-
     #[test]
     fn no_live_candidate_response_is_non_error_signal_status() {
         let config = sample_live_handoff_config();
@@ -809,7 +809,6 @@ mod tests {
                 "exchange_mutation_allowed": false,
             }),
         );
-
         assert_eq!(response["status"], "no_candidate");
         assert_eq!(
             response["blocker_code"],
@@ -826,17 +825,14 @@ mod tests {
             "wait_for_next_market_velocity_event"
         );
     }
-
     #[test]
     fn live_handoff_runtime_config_defaults_to_one_shot() {
         let envs = BTreeMap::new();
         let config =
             market_velocity_live_handoff_runtime_config_from_map(&envs).expect("runtime config");
-
         assert!(config.run_once);
         assert_eq!(config.interval_seconds, 60);
     }
-
     #[test]
     fn live_handoff_runtime_config_supports_rust_native_scheduler() {
         let envs = BTreeMap::from([
@@ -851,17 +847,14 @@ mod tests {
         ]);
         let config =
             market_velocity_live_handoff_runtime_config_from_map(&envs).expect("runtime config");
-
         assert!(!config.run_once);
         assert_eq!(config.interval_seconds, 30);
     }
-
     #[test]
     fn entry_confirmation_freshness_blocks_stale_live_candles() {
         let now = Utc.with_ymd_and_hms(2026, 6, 16, 11, 30, 0).unwrap();
         let fresh = sample_entry_confirmation(now - chrono::Duration::minutes(30));
         let stale = sample_entry_confirmation(now - chrono::Duration::minutes(90));
-
         assert_eq!(
             market_velocity_entry_confirmation_stale_blocker(&fresh, now, 45),
             None
@@ -871,7 +864,6 @@ mod tests {
             Some("EntryCandleStale:90m>45m")
         );
     }
-
     #[test]
     fn skipped_candidate_summary_groups_blockers_and_symbols() {
         let summary = summarize_skipped_candidates(&[
@@ -891,14 +883,13 @@ mod tests {
                 "blocker_detail": "PriceBelowAverages"
             }),
         ]);
-
         assert_eq!(summary["total"], 3);
         assert_eq!(summary["by_blocker_detail"]["VolumeNotConfirmed"], 2);
         assert_eq!(summary["by_blocker_detail"]["PriceBelowAverages"], 1);
         assert_eq!(summary["by_symbol"]["XLM-USDT-SWAP"], 2);
         assert_eq!(summary["by_symbol"]["MRVL-USDT-SWAP"], 1);
     }
-
+    /// 构造样例entryconfirmation，集中维护行情数据的载荷组装规则。
     fn sample_entry_confirmation(snapshot_at: DateTime<Utc>) -> MarketVelocityEntryConfirmation {
         MarketVelocityEntryConfirmation {
             timeframe: "15m".to_string(),

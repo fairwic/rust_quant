@@ -4,14 +4,12 @@ use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use rust_quant_infrastructure::repositories::PostgresCandleRepository;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
-
 #[tokio::test]
 async fn upserts_and_reads_legacy_sharded_candles_from_quant_core_postgres() -> Result<()> {
     if !smoke_enabled() {
         eprintln!("skipping quant_core candle smoke; set QUANT_CORE_CANDLE_SMOKE=1");
         return Ok(());
     }
-
     let database_url =
         env::var("QUANT_CORE_DATABASE_URL").expect("QUANT_CORE_DATABASE_URL must be set");
     let pool = PgPoolOptions::new()
@@ -19,14 +17,11 @@ async fn upserts_and_reads_legacy_sharded_candles_from_quant_core_postgres() -> 
         .connect(&database_url)
         .await?;
     let repo = PostgresCandleRepository::new(pool.clone());
-
     let symbol = "ETH-USDT-SWAP";
     let timeframe = Timeframe::H4;
     let timestamp = 9_100_000_000_000_i64;
-
     repo.ensure_table(symbol, timeframe).await?;
     cleanup(&pool, timestamp).await?;
-
     let mut candle = Candle::new(
         symbol.to_string(),
         timeframe,
@@ -38,10 +33,8 @@ async fn upserts_and_reads_legacy_sharded_candles_from_quant_core_postgres() -> 
         Volume::new(123.45).unwrap(),
     );
     candle.confirm();
-
     let saved = repo.save_candles(vec![candle]).await?;
     assert_eq!(saved, 1);
-
     let candles = repo
         .find_candles(symbol, timeframe, timestamp - 1, timestamp + 1, Some(10))
         .await?;
@@ -51,14 +44,11 @@ async fn upserts_and_reads_legacy_sharded_candles_from_quant_core_postgres() -> 
     assert_eq!(candles[0].timestamp, timestamp);
     assert_eq!(candles[0].close.value(), 2050.0);
     assert!(candles[0].confirmed);
-
     let latest = repo.get_latest_candle(symbol, timeframe).await?;
     assert_eq!(latest.map(|c| c.timestamp), Some(timestamp));
-
     cleanup(&pool, timestamp).await?;
     Ok(())
 }
-
 async fn cleanup(pool: &sqlx::PgPool, timestamp: i64) -> Result<()> {
     sqlx::query(
         r#"
@@ -69,10 +59,8 @@ async fn cleanup(pool: &sqlx::PgPool, timestamp: i64) -> Result<()> {
     .bind(timestamp)
     .execute(pool)
     .await?;
-
     Ok(())
 }
-
 fn smoke_enabled() -> bool {
     env::var("QUANT_CORE_CANDLE_SMOKE")
         .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))

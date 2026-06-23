@@ -3,31 +3,41 @@
 //! 将 RSI、Volume、NWE、ATR 等指标组合在一起计算
 //!
 //! 注意：这是纯粹的计算逻辑，不包含交易决策
-
 use crate::momentum::stc::StcIndicator;
 use crate::trend::nwe_indicator::NweIndicator;
 use crate::volatility::atr_stop_loss::ATRStopLoos;
 use crate::volume::VolumeRatioIndicator;
 use rust_quant_common::CandleItem;
-
 /// NWE 指标组合配置
 #[derive(Debug, Clone)]
 pub struct NweIndicatorConfig {
+    /// STC 快线计算周期。
     pub stc_fast_length: usize,
+    /// STC 慢线计算周期。
     pub stc_slow_length: usize,
+    /// STC 循环计算周期。
     pub stc_cycle_length: usize,
+    /// STC D1 平滑计算周期。
     pub stc_d1_length: usize,
+    /// STC D2 平滑计算周期。
     pub stc_d2_length: usize,
+    /// 参与成交量计算的 K 线数量。
     pub volume_bar_num: usize,
+    /// NWE 计算周期。
     pub nwe_period: usize,
+    /// NWE 带宽倍数。
     pub nwe_multi: f64,
+    /// ATR 计算周期。
     pub atr_period: usize,
+    /// ATR 止损倍数。
     pub atr_multiplier: f64,
+    /// 锤子线影线比例。
     pub k_line_hammer_shadow_ratio: f64,
+    /// 参与形态判断的最小 K 线数量。
     pub min_k_line_num: usize,
 }
-
 impl Default for NweIndicatorConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             stc_fast_length: 23,
@@ -45,32 +55,41 @@ impl Default for NweIndicatorConfig {
         }
     }
 }
-
 /// NWE 指标值输出
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NweIndicatorValues {
+    /// stc值，用于交易策略计算。
     pub stc_value: f64,
+    /// 成交量放大比例。
     pub volume_ratio: f64,
+    /// atr值，用于交易策略计算。
     pub atr_value: f64,
+    /// atrshort止损，用于交易策略计算。
     pub atr_short_stop: f64,
+    /// atrlong止损，用于交易策略计算。
     pub atr_long_stop: f64,
+    /// nweupper，用于交易策略计算。
     pub nwe_upper: f64,
+    /// nwelower，用于交易策略计算。
     pub nwe_lower: f64,
 }
-
 /// NWE 指标组合
 ///
 /// 组合多个技术指标进行计算
 #[derive(Debug, Clone)]
 pub struct NweIndicatorCombine {
+    /// STC 指标实例；为空时表示未初始化。
     stc_indicator: Option<StcIndicator>,
+    /// 成交量指标实例；为空时表示未初始化。
     volume_indicator: Option<VolumeRatioIndicator>,
+    /// NWE 指标实例；为空时表示未初始化。
     nwe_indicator: Option<NweIndicator>,
+    /// ATR 指标实例；为空时表示未初始化。
     atr_indicator: Option<ATRStopLoos>,
 }
-
 impl NweIndicatorCombine {
     /// 创建新的指标组合
+    /// 初始化new，确保回测策略依赖和内部状态可直接使用。
     pub fn new(config: &NweIndicatorConfig) -> Self {
         // 保护 STC 参数，确保 fast < slow 且都 > 0
         let slow = config.stc_slow_length.max(2);
@@ -95,12 +114,9 @@ impl NweIndicatorCombine {
             ),
         }
     }
-
     /// 推进所有指标并返回当前值
-    ///
     /// # 参数
     /// * `candle` - 当前K线数据
-    ///
     /// # 返回
     /// * `NweIndicatorValues` - 所有指标的当前值
     pub fn next(&mut self, candle: &CandleItem) -> NweIndicatorValues {
@@ -109,26 +125,22 @@ impl NweIndicatorCombine {
         } else {
             0.0
         };
-
         let volume_ratio = if let Some(v) = &mut self.volume_indicator {
             v.next(candle.v)
         } else {
             0.0
         };
-
         let (short_stop, long_stop, atr_value) = if let Some(a) = &mut self.atr_indicator {
             a.next(candle.h, candle.l, candle.c)
         } else {
             (0.0, 0.0, 0.0)
         };
-
         let (upper, lower) = if let Some(n) = &mut self.nwe_indicator {
             // 调试特定时间戳的 NWE 计算
             n.next(candle.c)
         } else {
             (0.0, 0.0)
         };
-
         NweIndicatorValues {
             stc_value,
             volume_ratio,
@@ -139,36 +151,30 @@ impl NweIndicatorCombine {
             nwe_lower: lower,
         }
     }
-
-    /// 计算指标值（不修改内部状态的版本）
-    ///
-    /// 用于批量计算历史数据
     pub fn get_indicator_values(&mut self, data_item: &CandleItem) -> NweIndicatorValues {
         self.next(data_item)
     }
 }
-
 impl Default for NweIndicatorCombine {
     fn default() -> Self {
         Self::new(&NweIndicatorConfig::default())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_nwe_indicator_combine_creation() {
         let config = NweIndicatorConfig::default();
         let combine = NweIndicatorCombine::new(&config);
-
         assert!(combine.stc_indicator.is_some());
         assert!(combine.volume_indicator.is_some());
         assert!(combine.nwe_indicator.is_some());
         assert!(combine.atr_indicator.is_some());
     }
-
     #[test]
     fn test_nwe_indicator_combine_next() {
         let mut combine = NweIndicatorCombine::default();
@@ -181,9 +187,7 @@ mod tests {
             v: 100.5,
             confirm: 0,
         };
-
         let values = combine.next(&candle);
-
         // 基本验证：返回值应该是有效的数字
         assert!(values.stc_value.is_finite());
         assert!(values.volume_ratio.is_finite());

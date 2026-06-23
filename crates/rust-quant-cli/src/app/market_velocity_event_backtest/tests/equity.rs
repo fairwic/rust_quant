@@ -1,6 +1,5 @@
 use super::*;
 use std::collections::HashMap;
-
 #[test]
 fn framework_equity_split_report_splits_by_entry_time() {
     fn winning_candles(entry_ts: i64) -> Vec<BacktestCandle> {
@@ -12,7 +11,6 @@ fn framework_equity_split_report_splits_by_entry_time() {
         candles.push(ohlc(entry_ts + MS_15M, 106.0, 106.5, 105.0, 106.0));
         candles
     }
-
     let confirmed = vec![
         confirmed_event(1, "EARLY-USDT-SWAP", MS_15M * 505, "2026-06-01T00:00:00Z"),
         confirmed_event(2, "LATE-USDT-SWAP", MS_15M * 605, "2026-06-02T00:00:00Z"),
@@ -26,9 +24,7 @@ fn framework_equity_split_report_splits_by_entry_time() {
         stop_loss_pct: 0.03,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let splits = build_framework_equity_split_reports(&confirmed, &candles_by_symbol, 2.0, &args);
-
     assert_eq!(splits.len(), 2);
     assert_eq!(splits[0].label, "early");
     assert_eq!(splits[0].report.total_open_trades, 1);
@@ -36,7 +32,6 @@ fn framework_equity_split_report_splits_by_entry_time() {
     assert_eq!(splits[1].report.total_open_trades, 1);
     assert!(splits[0].end_entry_ts < splits[1].start_entry_ts);
 }
-
 #[test]
 fn framework_equity_quartile_report_splits_by_entry_time() {
     fn winning_candles(entry_ts: i64) -> Vec<BacktestCandle> {
@@ -48,7 +43,6 @@ fn framework_equity_quartile_report_splits_by_entry_time() {
         candles.push(ohlc(entry_ts + MS_15M, 106.0, 106.5, 105.0, 106.0));
         candles
     }
-
     let confirmed = vec![
         confirmed_event(1, "Q1-USDT-SWAP", MS_15M * 505, "2026-06-01T00:00:00Z"),
         confirmed_event(2, "Q2-USDT-SWAP", MS_15M * 605, "2026-06-02T00:00:00Z"),
@@ -66,10 +60,8 @@ fn framework_equity_quartile_report_splits_by_entry_time() {
         stop_loss_pct: 0.03,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let quartiles =
         build_framework_equity_quartile_reports(&confirmed, &candles_by_symbol, 2.0, &args);
-
     assert_eq!(quartiles.len(), 4);
     for (index, quartile) in quartiles.iter().enumerate() {
         assert_eq!(quartile.label, ["q1", "q2", "q3", "q4"][index]);
@@ -79,7 +71,6 @@ fn framework_equity_quartile_report_splits_by_entry_time() {
         .windows(2)
         .all(|items| items[0].end_entry_ts < items[1].start_entry_ts));
 }
-
 #[test]
 fn framework_equity_symbol_window_report_shows_top_symbols_by_quartile() {
     fn candles(entry_ts: i64, exit_close: f64) -> Vec<BacktestCandle> {
@@ -97,7 +88,6 @@ fn framework_equity_symbol_window_report_shows_top_symbols_by_quartile() {
         ));
         candles
     }
-
     let confirmed = vec![
         confirmed_event(1, "Q1-LOW-USDT-SWAP", MS_15M * 505, "2026-06-01T00:00:00Z"),
         confirmed_event(2, "Q1-TOP-USDT-SWAP", MS_15M * 506, "2026-06-01T01:00:00Z"),
@@ -123,7 +113,6 @@ fn framework_equity_symbol_window_report_shows_top_symbols_by_quartile() {
         stop_loss_pct: 0.03,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let windows = super::super::equity::build_framework_equity_symbol_window_reports(
         &confirmed,
         &candles_by_symbol,
@@ -131,7 +120,6 @@ fn framework_equity_symbol_window_report_shows_top_symbols_by_quartile() {
         &args,
         1,
     );
-
     assert_eq!(windows.len(), 4);
     assert_eq!(windows[0].split.label, "q1");
     assert_eq!(windows[0].top_symbols[0].symbol, "Q1-TOP-USDT-SWAP");
@@ -139,7 +127,6 @@ fn framework_equity_symbol_window_report_shows_top_symbols_by_quartile() {
     assert_eq!(windows[2].top_symbols[0].symbol, "Q3-TOP-USDT-SWAP");
     assert_eq!(windows[3].top_symbols[0].symbol, "Q4-TOP-USDT-SWAP");
 }
-
 #[test]
 fn framework_equity_trigger_report_groups_by_entry_trigger() {
     fn winning_candles(entry_ts: i64) -> Vec<BacktestCandle> {
@@ -151,7 +138,6 @@ fn framework_equity_trigger_report_groups_by_entry_trigger() {
         candles.push(ohlc(entry_ts + MS_15M, 106.0, 106.5, 105.0, 106.0));
         candles
     }
-
     let mut breakout = confirmed_event(
         1,
         "BREAKOUT-USDT-SWAP",
@@ -177,17 +163,14 @@ fn framework_equity_trigger_report_groups_by_entry_trigger() {
         stop_loss_pct: 0.03,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let triggers =
         build_framework_equity_trigger_reports(&confirmed, &candles_by_symbol, 2.0, &args);
-
     assert_eq!(triggers.len(), 2);
     assert_eq!(triggers[0].trigger, "breakout_previous_high");
     assert_eq!(triggers[0].report.total_open_trades, 1);
     assert_eq!(triggers[1].trigger, "reclaim_ema");
     assert_eq!(triggers[1].report.total_open_trades, 1);
 }
-
 #[test]
 fn framework_equity_feature_report_groups_generic_event_features() {
     fn winning_candles(entry_ts: i64) -> Vec<BacktestCandle> {
@@ -199,7 +182,6 @@ fn framework_equity_feature_report_groups_generic_event_features() {
         candles.push(ohlc(entry_ts + MS_15M, 106.0, 106.5, 105.0, 106.0));
         candles
     }
-
     let mut early = confirmed_event(1, "EARLY-USDT-SWAP", MS_15M * 505, "2026-06-01T00:00:00Z");
     early.event.delta_rank = 12;
     early.event.new_rank = 7;
@@ -223,7 +205,6 @@ fn framework_equity_feature_report_groups_generic_event_features() {
         stop_loss_pct: 0.03,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let reports = super::super::equity::build_framework_equity_feature_reports(
         &confirmed,
         &candles_by_symbol,
@@ -236,7 +217,6 @@ fn framework_equity_feature_report_groups_generic_event_features() {
             .find(|report| report.feature == feature && report.bucket == bucket)
             .unwrap()
     };
-
     assert_eq!(
         report_for("delta_rank", "12_24").report.total_open_trades,
         1
@@ -249,7 +229,6 @@ fn framework_equity_feature_report_groups_generic_event_features() {
         1
     );
 }
-
 #[test]
 fn framework_equity_concentration_report_removes_top_positive_symbols() {
     let report = FrameworkEquityReport {
@@ -295,9 +274,7 @@ fn framework_equity_concentration_report_removes_top_positive_symbols() {
             },
         ],
     };
-
     let reports = build_framework_equity_concentration_reports(&report);
-
     assert_eq!(reports[0].removed_top_positive, 1);
     assert_eq!(reports[0].removed_symbols, vec!["TOP-USDT-SWAP"]);
     assert_eq!(reports[0].removed_profit, 30.0);
@@ -307,7 +284,6 @@ fn framework_equity_concentration_report_removes_top_positive_symbols() {
     assert_eq!(reports[0].remaining_win_rate, Some(20.0));
     assert!(reports[0].remaining_meets_min_trades);
 }
-
 #[test]
 fn framework_equity_report_applies_profit_protection_stop_updates() {
     let entry_ts = MS_15M * 505;
@@ -318,7 +294,6 @@ fn framework_equity_report_applies_profit_protection_stop_updates() {
     candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
     candles.push(ohlc(entry_ts + MS_15M, 102.8, 103.2, 100.8, 102.7));
     candles.push(ohlc(entry_ts + MS_15M * 2, 100.8, 101.0, 100.5, 99.0));
-
     let confirmed = vec![confirmed_event(
         1,
         "PROTECT-USDT-SWAP",
@@ -333,15 +308,12 @@ fn framework_equity_report_applies_profit_protection_stop_updates() {
         profit_protect_stop_r: 0.2,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let report = build_framework_equity_report(&confirmed, &candles_by_symbol, 3.0, &args);
-
     assert_eq!(report.total_open_trades, 1);
     assert_eq!(report.symbols[0].wins, 1);
     assert_eq!(report.symbols[0].losses, 0);
     assert!(report.total_profit > 0.0);
 }
-
 #[test]
 fn framework_equity_report_skips_profit_protection_when_candle_closes_below_new_stop() {
     let entry_ts = MS_15M * 505;
@@ -352,7 +324,6 @@ fn framework_equity_report_skips_profit_protection_when_candle_closes_below_new_
     candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
     candles.push(ohlc(entry_ts + MS_15M, 102.0, 106.2, 100.8, 102.0));
     candles.push(ohlc(entry_ts + MS_15M * 2, 99.0, 100.0, 96.5, 97.0));
-
     let confirmed = vec![confirmed_event(
         1,
         "PROTECT-CLOSE-BELOW-USDT-SWAP",
@@ -367,15 +338,12 @@ fn framework_equity_report_skips_profit_protection_when_candle_closes_below_new_
         profit_protect_stop_r: 1.0,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let report = build_framework_equity_report(&confirmed, &candles_by_symbol, 3.0, &args);
-
     assert_eq!(report.total_open_trades, 1);
     assert_eq!(report.symbols[0].wins, 0);
     assert_eq!(report.symbols[0].losses, 1);
     assert!(report.total_profit < 0.0);
 }
-
 #[test]
 fn framework_equity_trade_report_maps_closed_trade_to_rank_event() {
     let entry_ts = MS_15M * 505;
@@ -385,7 +353,6 @@ fn framework_equity_trade_report_maps_closed_trade_to_rank_event() {
     }
     candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
     candles.push(ohlc(entry_ts + MS_15M, 106.0, 106.5, 105.0, 106.0));
-
     let mut event = confirmed_event(
         42,
         "TRADE-REPORT-USDT-SWAP",
@@ -403,9 +370,7 @@ fn framework_equity_trade_report_maps_closed_trade_to_rank_event() {
         stop_loss_pct: 0.03,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let reports = build_framework_equity_trade_reports(&confirmed, &candles_by_symbol, 2.0, &args);
-
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].event_id, 42);
     assert_eq!(reports[0].symbol, "TRADE-REPORT-USDT-SWAP");
@@ -419,7 +384,6 @@ fn framework_equity_trade_report_maps_closed_trade_to_rank_event() {
     assert!(reports[0].quantity > 0.0);
     assert!(reports[0].profit_loss > 0.0);
 }
-
 #[test]
 fn framework_equity_trade_report_applies_early_no_profit_exit() {
     let entry_ts = MS_15M * 505;
@@ -430,7 +394,6 @@ fn framework_equity_trade_report_applies_early_no_profit_exit() {
     candles.push(ohlc(entry_ts, 100.0, 101.0, 99.5, 100.4));
     candles.push(ohlc(entry_ts + MS_15M, 100.4, 101.0, 99.0, 99.8));
     candles.push(ohlc(entry_ts + MS_15M * 2, 99.8, 108.0, 99.0, 107.0));
-
     let confirmed = vec![confirmed_event(
         43,
         "EARLY-EXIT-USDT-SWAP",
@@ -444,9 +407,7 @@ fn framework_equity_trade_report_applies_early_no_profit_exit() {
         early_exit_no_profit_candles: Some(1),
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let reports = build_framework_equity_trade_reports(&confirmed, &candles_by_symbol, 2.0, &args);
-
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].event_id, 43);
     assert_eq!(reports[0].close_type, "early_exit_no_profit");
@@ -454,7 +415,6 @@ fn framework_equity_trade_report_applies_early_no_profit_exit() {
     assert!(reports[0].profit_loss < 0.0);
     assert!(reports[0].profit_loss > -1.0);
 }
-
 #[test]
 fn framework_equity_trade_report_keeps_risk_close_type_before_early_exit_signal() {
     let entry_ts = MS_15M * 505;
@@ -464,7 +424,6 @@ fn framework_equity_trade_report_keeps_risk_close_type_before_early_exit_signal(
     }
     candles.push(ohlc(entry_ts, 100.0, 101.0, 99.5, 100.4));
     candles.push(ohlc(entry_ts + MS_15M, 100.4, 101.0, 96.0, 99.8));
-
     let confirmed = vec![confirmed_event(
         44,
         "EARLY-EXIT-STOP-USDT-SWAP",
@@ -478,15 +437,12 @@ fn framework_equity_trade_report_keeps_risk_close_type_before_early_exit_signal(
         early_exit_no_profit_candles: Some(1),
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let reports = build_framework_equity_trade_reports(&confirmed, &candles_by_symbol, 2.0, &args);
-
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].event_id, 44);
     assert_eq!(reports[0].close_type, "Signal_Kline_Stop_Loss");
     assert_eq!(reports[0].outcome, "loss");
 }
-
 #[test]
 fn framework_equity_trade_report_expands_runner_close_legs() {
     let entry_ts = MS_15M * 505;
@@ -497,7 +453,6 @@ fn framework_equity_trade_report_expands_runner_close_legs() {
     candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
     candles.push(ohlc(entry_ts + MS_15M, 106.0, 106.5, 105.0, 106.0));
     candles.push(ohlc(entry_ts + MS_15M * 2, 112.0, 112.5, 111.0, 112.0));
-
     let confirmed = vec![confirmed_event(
         45,
         "RUNNER-USDT-SWAP",
@@ -513,9 +468,7 @@ fn framework_equity_trade_report_expands_runner_close_legs() {
         runner_stop_r: 0.0,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let reports = build_framework_equity_trade_reports(&confirmed, &candles_by_symbol, 2.0, &args);
-
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].event_id, 45);
     assert_eq!(reports[0].close_legs.len(), 2);
@@ -536,7 +489,6 @@ fn framework_equity_trade_report_expands_runner_close_legs() {
             .sum::<f64>()
     );
 }
-
 #[test]
 fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
     let report = FrameworkEquityTradeReport {
@@ -568,12 +520,10 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
             "rank_radar_4h_trend_15m_episode_research_03sl_24r_rank5_30_v1".to_string(),
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let details = build_market_velocity_backtest_details(&report, 123, &args).unwrap();
     let open = &details[0];
     let close = &details[1];
     let signal_value = serde_json::from_str::<serde_json::Value>(&close.signal_value).unwrap();
-
     assert_eq!(details.len(), 2);
     assert_eq!(open.back_test_id, 123);
     assert_eq!(open.inst_id, "DETAIL-USDT-SWAP");
@@ -615,7 +565,6 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
         args.paper_outcome_entry_rule_version
     );
 }
-
 #[test]
 fn framework_equity_trade_report_builds_runner_legacy_backtest_detail_payload() {
     let report = FrameworkEquityTradeReport {
@@ -670,9 +619,7 @@ fn framework_equity_trade_report_builds_runner_legacy_backtest_detail_payload() 
         runner_stop_r: 0.0,
         ..MarketVelocityEventBacktestArgs::default()
     };
-
     let details = build_market_velocity_backtest_details(&report, 456, &args).unwrap();
-
     assert_eq!(details.len(), 3);
     assert_eq!(details[0].option_type, "long");
     assert_eq!(details[1].option_type, "close");
@@ -689,7 +636,6 @@ fn framework_equity_trade_report_builds_runner_legacy_backtest_detail_payload() 
     assert_eq!(signal_value["runner_target_r"], 4.0);
     assert_eq!(signal_value["runner_fraction"], 0.3);
 }
-
 fn confirmed_event(id: i64, symbol: &str, entry_ts: i64, detected_at: &str) -> ConfirmedEvent {
     ConfirmedEvent {
         event: RadarEvent {

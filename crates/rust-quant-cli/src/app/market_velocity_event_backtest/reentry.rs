@@ -3,9 +3,8 @@ use super::{
     BacktestCandle, ConfirmedEvent, MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection,
     StopReentryDetails, StopReentryMode, TradeOutcome, TradeResult,
 };
-
 const ORIGINAL_STOP_R: f64 = -1.0;
-
+/// 判断按条件应用止损再次入场，给回测策略流程提供布尔结果。
 pub(super) fn maybe_apply_stop_reentry(
     candles: &[BacktestCandle],
     signal: &ConfirmedEvent,
@@ -21,7 +20,6 @@ pub(super) fn maybe_apply_stop_reentry(
     {
         return original;
     }
-
     match args.stop_reentry_mode {
         StopReentryMode::Off => original,
         StopReentryMode::BreakoutReclaim => {
@@ -29,7 +27,7 @@ pub(super) fn maybe_apply_stop_reentry(
         }
     }
 }
-
+/// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 fn apply_breakout_reclaim(
     candles: &[BacktestCandle],
     signal: &ConfirmedEvent,
@@ -47,7 +45,6 @@ fn apply_breakout_reclaim(
     let Some(reentry_entry) = candles.get(reentry_idx) else {
         return original;
     };
-
     let reentry = simulate_trade(
         candles,
         reentry_idx,
@@ -63,7 +60,7 @@ fn apply_breakout_reclaim(
     );
     combine_reentry_result(original, reentry, reclaim_price, args.stop_reentry_mode)
 }
-
+/// 提供首个突破收复信号的集中实现，避免回测策略调用方重复处理相同细节。
 fn first_breakout_reclaim_signal(
     candles: &[BacktestCandle],
     signal: &ConfirmedEvent,
@@ -75,7 +72,6 @@ fn first_breakout_reclaim_signal(
     let original_entry = candles.get(signal.entry_idx)?;
     let reclaim_price = confirm.high.max(original_entry.high);
     let reclaim_deadline = signal.entry_ts + horizon_ms;
-
     candles
         .iter()
         .enumerate()
@@ -88,7 +84,7 @@ fn first_breakout_reclaim_signal(
         })
         .map(|(idx, _)| (idx, reclaim_price))
 }
-
+/// 提供合并再次入场结果的集中实现，避免回测策略调用方重复处理相同细节。
 fn combine_reentry_result(
     original: TradeResult,
     reentry: TradeResult,
@@ -104,7 +100,6 @@ fn combine_reentry_result(
     };
     let original_reason = original.reason;
     let original_r = original.r;
-
     TradeResult {
         outcome,
         reason: format!("stop_reentry_{}", reentry.reason),

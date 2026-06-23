@@ -2,13 +2,11 @@ use rust_decimal::Decimal;
 use rust_quant_domain::entities::{
     MarketRankEvent, MarketRankEventType, MarketRankTechnicalSnapshot,
 };
-
 #[test]
 fn market_rank_event_type_uses_product_event_codes() {
     assert_eq!(MarketRankEventType::RankVelocity.as_str(), "rank_velocity");
     assert_eq!(MarketRankEventType::TopEntry.as_str(), "top_entry");
     assert_eq!(MarketRankEventType::TopExit.as_str(), "top_exit");
-
     assert_eq!(
         MarketRankEventType::try_from("rank_velocity").expect("rank_velocity should parse"),
         MarketRankEventType::RankVelocity
@@ -19,7 +17,6 @@ fn market_rank_event_type_uses_product_event_codes() {
     );
     assert!(MarketRankEventType::try_from("unknown").is_err());
 }
-
 #[test]
 fn market_rank_event_serializes_product_payload_fields() {
     let event = MarketRankEvent {
@@ -56,7 +53,6 @@ fn market_rank_event_serializes_product_payload_fields() {
                 .expect("valid test timestamp"),
         }),
     };
-
     let value = serde_json::to_value(&event).expect("event should serialize");
     assert_eq!(value["exchange"], "okx");
     assert_eq!(value["symbol"], "ETH-USDT-SWAP");

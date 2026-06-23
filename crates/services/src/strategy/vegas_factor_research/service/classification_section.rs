@@ -1,4 +1,5 @@
 impl VegasFactorResearchService {
+    /// 提供align最新快照的集中实现，避免回测策略调用方重复处理相同细节。
     pub fn align_latest_snapshot(
         event_time: i64,
         snapshots: &[ExternalMarketSnapshot],
@@ -10,7 +11,7 @@ impl VegasFactorResearchService {
             })
             .max_by_key(|row| row.metric_time)
     }
-
+    /// 提供classify价格oi状态的集中实现，避免回测策略调用方重复处理相同细节。
     pub fn classify_price_oi_state(
         price_change: Option<f64>,
         oi_change: Option<f64>,
@@ -23,7 +24,7 @@ impl VegasFactorResearchService {
             _ => PriceOiState::Flat,
         }
     }
-
+    /// 提供classifyfunding信号contexts的集中实现，避免回测策略调用方重复处理相同细节。
     pub fn classify_funding_signal_contexts(
         funding_bucket: Option<&str>,
         side: &str,
@@ -37,11 +38,9 @@ impl VegasFactorResearchService {
             "funding_direction_context",
             format!("{funding_bucket}_{side}"),
         )];
-
         let Some(signal_json) = signal_value.and_then(Self::parse_signal_json) else {
             return contexts;
         };
-
         if let Some(trend_bucket) = Self::trend_bucket(&signal_json) {
             contexts.push((
                 "funding_trend_context",
@@ -60,10 +59,9 @@ impl VegasFactorResearchService {
                 format!("{funding_bucket}_{side}_{volume_bucket}"),
             ));
         }
-
         contexts
     }
-
+    /// 提供classifyfunding过滤contexts的集中实现，避免回测策略调用方重复处理相同细节。
     pub fn classify_funding_filter_contexts(
         funding_bucket: Option<&str>,
         direction: &str,
@@ -83,7 +81,6 @@ impl VegasFactorResearchService {
                 format!("{funding_bucket}_{side}_{primary_reason}"),
             )];
         };
-
         let distance = Self::distance_bucket(&signal_json).unwrap_or("distance_unknown");
         let leg = Self::leg_bucket(&signal_json).unwrap_or("leg_unknown");
         vec![(
@@ -91,7 +88,7 @@ impl VegasFactorResearchService {
             format!("{funding_bucket}_{side}_{primary_reason}_{distance}_{leg}"),
         )]
     }
-
+    /// 提供classifyinternal离场contexts的集中实现，避免回测策略调用方重复处理相同细节。
     pub fn classify_internal_exit_contexts(
         side: &str,
         close_type: Option<&str>,
@@ -112,13 +109,12 @@ impl VegasFactorResearchService {
         };
         let distance = Self::distance_bucket(&signal_json).unwrap_or("distance_unknown");
         let volume = Self::volume_bucket(&signal_json).unwrap_or("volume_unknown");
-
         vec![(
             "exit_environment_context",
             format!("{exit_bucket}_{trend_alignment}_{macd_alignment}_{distance}_{volume}"),
         )]
     }
-
+    /// 封装评估factorconclusion，减少回测策略调用方重复实现相同细节。
     pub fn evaluate_factor_conclusion(reports: &[FactorBucketReport]) -> FactorConclusion {
         let traded = reports
             .iter()
@@ -126,7 +122,6 @@ impl VegasFactorResearchService {
         let filtered = reports
             .iter()
             .find(|row| row.sample_kind == ResearchSampleKind::Filtered);
-
         match (traded, filtered) {
             (Some(traded), Some(filtered))
                 if traded.volatility_tier == VolatilityTier::Eth
@@ -164,11 +159,10 @@ impl VegasFactorResearchService {
             _ => FactorConclusion::Reject,
         }
     }
-
     fn parse_signal_json(signal_value: &str) -> Option<serde_json::Value> {
         serde_json::from_str(signal_value).ok()
     }
-
+    /// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
     fn normalize_side(side: &str) -> &'static str {
         match side.to_ascii_lowercase().as_str() {
             "long" => "long",
@@ -180,7 +174,7 @@ impl VegasFactorResearchService {
             _ => "unknown",
         }
     }
-
+    /// 提供趋势bucket的集中实现，避免回测策略调用方重复处理相同细节。
     fn trend_bucket(signal: &serde_json::Value) -> Option<&'static str> {
         let ema = signal.get("ema_values")?;
         match (
@@ -193,7 +187,7 @@ impl VegasFactorResearchService {
             _ => None,
         }
     }
-
+    /// 提供MACDbucket的集中实现，避免回测策略调用方重复处理相同细节。
     fn macd_bucket(signal: &serde_json::Value) -> Option<String> {
         let macd = signal.get("macd_value")?;
         let histogram = macd.get("histogram").and_then(|value| value.as_f64());
@@ -222,10 +216,9 @@ impl VegasFactorResearchService {
         } else {
             "hist_flat"
         };
-
         Some(format!("{zone}_{momentum}"))
     }
-
+    /// 封装成交量bucket，减少回测策略调用方重复实现相同细节。
     fn volume_bucket(signal: &serde_json::Value) -> Option<&'static str> {
         let ratio = signal
             .get("volume_value")
@@ -241,7 +234,7 @@ impl VegasFactorResearchService {
             Some("volume_normal")
         }
     }
-
+    /// 提供离场bucket的集中实现，避免回测策略调用方重复处理相同细节。
     fn exit_bucket(close_type: &str) -> Option<&'static str> {
         let lower = close_type.to_ascii_lowercase();
         if close_type.contains("Signal_Kline_Stop_Loss") || lower.contains("signal_kline_stop_loss")
@@ -260,7 +253,7 @@ impl VegasFactorResearchService {
             None
         }
     }
-
+    /// 提供趋势alignmentbucket的集中实现，避免回测策略调用方重复处理相同细节。
     fn trend_alignment_bucket(signal: &serde_json::Value, side: &str) -> Option<&'static str> {
         match (Self::normalize_side(side), Self::trend_bucket(signal)?) {
             (_, "mixed_trend") => Some("mixed_trend"),
@@ -269,7 +262,7 @@ impl VegasFactorResearchService {
             _ => Some("trend_unknown"),
         }
     }
-
+    /// 提供MACDalignmentbucket的集中实现，避免回测策略调用方重复处理相同细节。
     fn macd_alignment_bucket(signal: &serde_json::Value, side: &str) -> Option<&'static str> {
         let histogram = signal
             .get("macd_value")?
@@ -283,7 +276,7 @@ impl VegasFactorResearchService {
             _ => Some("macd_unknown"),
         }
     }
-
+    /// 提供distancebucket的集中实现，避免回测策略调用方重复处理相同细节。
     fn distance_bucket(signal: &serde_json::Value) -> Option<&'static str> {
         match signal
             .get("ema_distance_filter")?
@@ -298,7 +291,7 @@ impl VegasFactorResearchService {
             _ => Some("distance_other"),
         }
     }
-
+    /// 提供legbucket的集中实现，避免回测策略调用方重复处理相同细节。
     fn leg_bucket(signal: &serde_json::Value) -> Option<&'static str> {
         let leg = signal.get("leg_detection_value")?;
         match (
@@ -311,14 +304,14 @@ impl VegasFactorResearchService {
             _ => None,
         }
     }
-
+    /// 提供primary过滤reason的集中实现，避免回测策略调用方重复处理相同细节。
     fn primary_filter_reason(filter_reasons: &str) -> Option<String> {
         serde_json::from_str::<Vec<String>>(filter_reasons)
             .ok()
             .and_then(|values| values.into_iter().next())
             .map(|value| value.to_ascii_lowercase())
     }
-
+    /// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
     fn extract_flow_value(payload: &serde_json::Value) -> Option<f64> {
         [
             "netflow_usd",
@@ -329,5 +322,4 @@ impl VegasFactorResearchService {
         .iter()
         .find_map(|key| payload.get(*key).and_then(|value| value.as_f64()))
     }
-
 }

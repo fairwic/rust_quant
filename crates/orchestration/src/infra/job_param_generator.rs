@@ -9,25 +9,31 @@ use rust_quant_indicators::trend::vegas::{
 };
 use rust_quant_indicators::volatility::BollingBandsSignalConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
-
 #[derive(Default, Clone)]
 pub struct ParamMergeBuilder {
     //bolling
     pub bb_period: i32,
+    /// 布林带倍数。
     pub bb_multiplier: f64,
     //volume
     pub volume_bar_num: usize,
+    /// 成交量increase 比例。
     pub volume_increase_ratio: f64,
+    /// 成交量decrease 比例。
     pub volume_decrease_ratio: f64,
+    /// breakthrough阈值，用于当前结构体的业务数据。
     pub breakthrough_threshold: f64,
     //rsi
     pub rsi_period: usize,
+    /// RSI 超买阈值。
     pub rsi_overbought: f64,
+    /// RSI 超卖阈值。
     pub rsi_oversold: f64,
     //hammer
     pub hammer_shadow_ratio: f64,
     //kline
     pub kline_start_time: Option<i64>,
+    /// 结束时间。
     pub kline_end_time: Option<i64>,
     //risk
     pub max_loss_percent: f64,  // 最大止损百分比
@@ -35,23 +41,39 @@ pub struct ParamMergeBuilder {
     // 固定信号线的止盈比例
     pub fix_signal_kline_take_profit_ratio: Option<f64>, // 固定信号线的止盈比例，比如当盈利超过 k线路的长度的 n 倍时，直接止盈，适用短线策略
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
+    /// dynamic入场amp阈值；为空时使用默认值或表示不限制。
     pub dynamic_entry_amp_threshold: Option<f64>,
+    /// 动态入场亏损百分比；为空时不启用动态入场亏损过滤。
     pub dynamic_entry_loss_percent: Option<f64>,
+    /// 动态入场是否要求方向不一致；为空时使用默认规则。
     pub dynamic_entry_require_direction_mismatch: Option<bool>,
+    /// 动态区间threshold；为空时表示该值未提供。
     pub dynamic_range_threshold: Option<f64>,
+    /// 动态区间亏损百分比；为空时不启用动态区间亏损过滤。
     pub dynamic_range_loss_percent: Option<f64>,
     // strategy extensions
     pub signal_weights: Option<SignalWeightsConfig>,
+    /// legdetection信号；为空时使用默认值或表示不限制。
     pub leg_detection_signal: Option<LegDetectionConfig>,
+    /// 市场structure信号；为空时使用默认值或表示不限制。
     pub market_structure_signal: Option<MarketStructureConfig>,
+    /// rangefilter信号；为空时使用默认值或表示不限制。
     pub range_filter_signal: Option<RangeFilterConfig>,
+    /// 配置项。
     pub chase_confirm_config: Option<ChaseConfirmConfig>,
+    /// extremekfilter信号；为空时使用默认值或表示不限制。
     pub extreme_k_filter_signal: Option<ExtremeKFilterConfig>,
+    /// 配置项。
     pub ema_distance_config: Option<EmaDistanceConfig>,
+    /// ATR 止损倍数；为空时使用默认倍数。
     pub atr_stop_loss_multiplier: Option<f64>,
+    /// 是否输出调试信息；为空时使用默认值。
     pub emit_debug: Option<bool>,
+    /// macd信号；为空时使用默认值或表示不限制。
     pub macd_signal: Option<MacdSignalConfig>,
+    /// fibretracement信号；为空时使用默认值或表示不限制。
     pub fib_retracement_signal: Option<FibRetracementSignalConfig>,
+    /// 配置项。
     pub entry_block_config: Option<EntryBlockConfig>,
 }
 impl ParamMergeBuilder {
@@ -59,63 +81,77 @@ impl ParamMergeBuilder {
     pub fn build() -> Self {
         Self::default()
     }
+    /// 提供bb周期的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn bb_periods(mut self, bb_period: i32) -> Self {
         self.bb_period = bb_period;
         self
     }
+    /// 提供hammershadowratio的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn hammer_shadow_ratio(mut self, shadow_ratio: f64) -> Self {
         self.hammer_shadow_ratio = shadow_ratio;
         self
     }
+    /// 提供bbmultiplier的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn bb_multiplier(mut self, bb_multiplier: f64) -> Self {
         self.bb_multiplier = bb_multiplier;
         self
     }
+    /// 封装成交量barnum，减少配置运行时调用方重复实现相同细节。
     pub fn volume_bar_num(mut self, volume_bar_num: usize) -> Self {
         self.volume_bar_num = volume_bar_num;
         self
     }
+    /// 封装成交量increaseratio，减少配置运行时调用方重复实现相同细节。
     pub fn volume_increase_ratio(mut self, volume_increase_ratio: f64) -> Self {
         self.volume_increase_ratio = volume_increase_ratio;
         self
     }
+    /// 封装成交量decreaseratio，减少配置运行时调用方重复实现相同细节。
     pub fn volume_decrease_ratio(mut self, volume_decrease_ratio: f64) -> Self {
         self.volume_decrease_ratio = volume_decrease_ratio;
         self
     }
+    /// 提供breakthroughthreshold的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn breakthrough_threshold(mut self, breakthrough_threshold: f64) -> Self {
         self.breakthrough_threshold = breakthrough_threshold;
         self
     }
+    /// 提供RSIperiod的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn rsi_period(mut self, rsi_period: usize) -> Self {
         self.rsi_period = rsi_period;
         self
     }
+    /// 提供RSIoverbought的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn rsi_overbought(mut self, rsi_overbought: f64) -> Self {
         self.rsi_overbought = rsi_overbought;
         self
     }
+    /// 提供RSIoversold的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn rsi_oversold(mut self, rsi_oversold: f64) -> Self {
         self.rsi_oversold = rsi_oversold;
         self
     }
+    /// 提供K 线start时间的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn kline_start_time(mut self, kline_start_time: i64) -> Self {
         self.kline_start_time = Some(kline_start_time);
         self
     }
+    /// 提供K 线end时间的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn kline_end_time(mut self, kline_end_time: i64) -> Self {
         self.kline_end_time = Some(kline_end_time);
         self
     }
-
+    /// 计算最大losspercent，并把公式边界留在配置运行时内部。
     pub fn max_loss_percent(mut self, max_loss_percent: f64) -> Self {
         self.max_loss_percent = max_loss_percent;
         self
     }
+    /// 提供take盈利ratio的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn take_profit_ratio(mut self, take_profit_ratio: f64) -> Self {
         self.take_profit_ratio = take_profit_ratio;
         self
     }
+    /// 判断 配置、基础设施和运行时 条件是否满足，给上层流程提供布尔决策。
     pub fn is_used_signal_k_line_stop_loss(
         mut self,
         is_used_signal_k_line_stop_loss: bool,
@@ -123,6 +159,7 @@ impl ParamMergeBuilder {
         self.is_used_signal_k_line_stop_loss = is_used_signal_k_line_stop_loss;
         self
     }
+    /// 提供fix信号K 线take盈利ratio的集中实现，避免配置运行时调用方重复处理相同细节。
     pub fn fix_signal_kline_take_profit_ratio(
         mut self,
         fix_signal_kline_take_profit_ratio: f64,
@@ -130,7 +167,6 @@ impl ParamMergeBuilder {
         self.fix_signal_kline_take_profit_ratio = Some(fix_signal_kline_take_profit_ratio);
         self
     }
-
     /// 转换为风控配置
     pub fn to_risk_config(&self) -> BasicRiskStrategyConfig {
         BasicRiskStrategyConfig {
@@ -146,7 +182,6 @@ impl ParamMergeBuilder {
             dynamic_range_loss_percent: self.dynamic_range_loss_percent,
         }
     }
-
     /// 转换为 Vegas 策略配置
     pub fn to_vegas_strategy(&self, period: String) -> VegasStrategy {
         let volume_signal = VolumeSignalConfig {
@@ -155,29 +190,24 @@ impl ParamMergeBuilder {
             volume_decrease_ratio: self.volume_decrease_ratio,
             is_open: true,
         };
-
         let rsi_signal = RsiSignalConfig {
             rsi_length: self.rsi_period,
             rsi_oversold: self.rsi_oversold,
             rsi_overbought: self.rsi_overbought,
             is_open: true,
         };
-
         let ema_touch_trend_signal = EmaTouchTrendSignalConfig {
             is_open: true,
             ..Default::default()
         };
-
         let kline_hammer_signal = KlineHammerConfig {
             up_shadow_ratio: self.hammer_shadow_ratio,
             down_shadow_ratio: self.hammer_shadow_ratio,
         };
-
         let signal_weights = self
             .signal_weights
             .clone()
             .or_else(|| Some(SignalWeightsConfig::default()));
-
         VegasStrategy {
             period,
             min_k_line_num: 3600,
@@ -221,28 +251,42 @@ impl ParamMergeBuilder {
     }
 }
 //使用构造器
-
 // 使用一个生成参数的函数，避免存储所有组合
 pub struct ParamGenerator {
+    /// 列表数据。
     bb_periods: Vec<i32>,
+    /// 列表数据。
     shadow_ratios: Vec<f64>,
+    /// 列表数据。
     bb_multipliers: Vec<f64>,
+    /// 列表数据。
     volume_bar_nums: Vec<usize>,
+    /// 列表数据。
     volume_ratios: Vec<f64>,
+    /// 列表数据。
     breakthrough_thresholds: Vec<f64>,
+    /// 列表数据。
     rsi_periods: Vec<usize>,
+    /// 列表数据。
     rsi_over_buy_sell: Vec<(f64, f64)>,
+    /// 当前索引。
     current_index: usize,
+    /// 总数量。
     total_count: usize,
     //risk
     max_loss_percent: Vec<f64>,
+    /// 列表数据。
     take_profit_ratios: Vec<f64>,
+    /// isused信号kline止损亏损。
     is_used_signal_k_line_stop_loss: Vec<bool>,
+    /// 列表数据。
     fix_signal_kline_take_profit_ratios: Vec<f64>,
 }
-
 impl ParamGenerator {
     #[allow(clippy::too_many_arguments)]
+    /// 封装当前函数，减少配置运行时调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     pub fn new(
         bb_periods: Vec<i32>,
         shadow_ratios: Vec<f64>,
@@ -269,7 +313,6 @@ impl ParamGenerator {
             * take_profit_ratios.len()
             * is_used_signal_k_line_stop_loss.len()
             * fix_signal_kline_take_profit_ratios.len();
-
         Self {
             bb_periods,
             shadow_ratios,
@@ -287,14 +330,12 @@ impl ParamGenerator {
             fix_signal_kline_take_profit_ratios,
         }
     }
-
+    /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
     pub fn get_next_batch(&mut self, batch_size: usize) -> Vec<ParamMergeBuilder> {
         let mut batch = Vec::with_capacity(batch_size);
-
         // 计算当前组合的索引
         while batch.len() < batch_size && self.current_index < self.total_count {
             let mut index = self.current_index;
-
             // 计算每个维度的索引
             let bb_p_size = self.bb_periods.len();
             let sr_size = self.shadow_ratios.len();
@@ -304,7 +345,6 @@ impl ParamGenerator {
             let bt_size = self.breakthrough_thresholds.len();
             let rp_size = self.rsi_periods.len();
             let rob_size = self.rsi_over_buy_sell.len();
-
             let _mlp_size = self.max_loss_percent.len();
             let _pt_size = self.take_profit_ratios.len();
             let _usklsl_size = self.is_used_signal_k_line_stop_loss.len();
@@ -312,42 +352,30 @@ impl ParamGenerator {
             index /= fsktpr_size;
             let i_bb_p = index % bb_p_size;
             index /= bb_p_size;
-
             let i_sr = index % sr_size;
             index /= sr_size;
-
             let i_bm = index % bm_size;
             index /= bm_size;
-
             let i_vbn = index % vbn_size;
             index /= vbn_size;
-
             let i_vir = index % vir_size;
             index /= vir_size;
-
             let i_bt = index % bt_size;
             index /= bt_size;
-
             let i_rp = index % rp_size;
             index /= rp_size;
-
             let i_rob = index % rob_size;
             index /= rob_size;
-
             let i_ros = index % self.rsi_over_buy_sell.len();
             index /= self.rsi_over_buy_sell.len();
-
             let i_mlp = index % self.max_loss_percent.len();
             index /= self.max_loss_percent.len();
-
             let i_pt = index % self.take_profit_ratios.len();
             index /= self.take_profit_ratios.len();
-
             let i_usklsl = index % self.is_used_signal_k_line_stop_loss.len();
             index /= self.is_used_signal_k_line_stop_loss.len();
             let i_fsktpr = index % self.fix_signal_kline_take_profit_ratios.len();
             // 最后一个维度，无需再除
-
             // 获取参数值
             let param = ParamMergeBuilder {
                 bb_period: self.bb_periods[i_bb_p],
@@ -386,44 +414,34 @@ impl ParamGenerator {
                 fib_retracement_signal: None,
                 entry_block_config: None,
             };
-
             batch.push(param);
             self.current_index += 1;
         }
-
         batch
     }
-
     pub fn progress(&self) -> (usize, usize) {
         (self.current_index, self.total_count)
     }
-
-    /// 设置当前索引（用于断点续传）
     pub fn set_current_index(&mut self, index: usize) {
         self.current_index = index.min(self.total_count);
     }
-
-    /// 重置到开始位置
     pub fn reset(&mut self) {
         self.current_index = 0;
     }
-
-    /// 检查是否已完成所有组合
     pub fn is_completed(&self) -> bool {
         self.current_index >= self.total_count
     }
-
-    /// 获取剩余组合数
     pub fn remaining_count(&self) -> usize {
         self.total_count.saturating_sub(self.current_index)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::ParamMergeBuilder;
-
     #[test]
+    /// 封装当前函数，减少配置运行时调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn to_risk_config_preserves_dynamic_max_loss_thresholds() {
         let params = ParamMergeBuilder {
             max_loss_percent: 0.05,
@@ -436,9 +454,7 @@ mod tests {
             dynamic_range_loss_percent: Some(0.04),
             ..Default::default()
         };
-
         let risk = params.to_risk_config();
-
         assert_eq!(risk.dynamic_entry_amp_threshold, Some(0.05));
         assert_eq!(risk.dynamic_entry_loss_percent, Some(0.03));
         assert_eq!(risk.dynamic_entry_require_direction_mismatch, Some(false));
@@ -446,39 +462,55 @@ mod tests {
         assert_eq!(risk.dynamic_range_loss_percent, Some(0.04));
     }
 }
-
 // ================================
 // NWE 参数生成器（网格/顺序遍历）
 // ================================
 #[derive(Clone)]
 pub struct NweParamGenerator {
+    /// 列表数据。
     stc_fast_length: Vec<usize>,
+    /// 列表数据。
     stc_slow_length: Vec<usize>,
+    /// 列表数据。
     stc_cycle_length: Vec<usize>,
+    /// 列表数据。
     stc_d1_length: Vec<usize>,
+    /// 列表数据。
     stc_d2_length: Vec<usize>,
+    /// 列表数据。
     rsi_periods: Vec<usize>,
+    /// 列表数据。
     rsi_over_buy_sell: Vec<(f64, f64)>,
+    /// 列表数据。
     k_line_hammer_shadow_ratios: Vec<f64>,
+    /// 列表数据。
     atr_periods: Vec<usize>,
+    /// 列表数据。
     atr_multipliers: Vec<f64>,
-
+    /// 参与成交量计算的 K 线数量 列表。
     volume_bar_num: Vec<usize>,
+    /// 列表数据。
     volume_ratios: Vec<f64>,
-
+    /// 列表数据。
     nwe_periods: Vec<usize>,
+    /// 列表数据。
     nwe_multi: Vec<f64>,
-
     // 风险参数空间
     max_loss_percent: Vec<f64>,
+    /// 列表数据。
     take_profit_ratios: Vec<f64>,
+    /// isused信号kline止损亏损。
     is_used_signal_k_line_stop_loss: Vec<bool>,
+    /// 当前索引。
     current_index: usize,
+    /// 总数量。
     total_count: usize,
 }
-
 impl NweParamGenerator {
     #[allow(clippy::too_many_arguments)]
+    /// 封装当前函数，减少配置运行时调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     pub fn new(
         stc_fast_length: Vec<usize>,
         stc_slow_length: Vec<usize>,
@@ -538,7 +570,7 @@ impl NweParamGenerator {
             total_count,
         }
     }
-
+    /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
     pub fn get_next_batch(
         &mut self,
         batch_size: usize,
@@ -593,7 +625,6 @@ impl NweParamGenerator {
             idx /= nwe_p_len;
             let i_nwe_m = idx % nwe_m_len;
             idx /= nwe_m_len;
-
             let i_mlp = idx % mlp_len;
             idx /= mlp_len;
             let i_tpr = idx % tpr_len;
@@ -619,7 +650,6 @@ impl NweParamGenerator {
             // 使用 NWE 周期作为最小数据长度的基线，确保指标有足够数据
             cfg.min_k_line_num = 500;
             cfg.k_line_hammer_shadow_ratio = self.k_line_hammer_shadow_ratios[i_kh_sr];
-
             let risk = rust_quant_strategies::strategy_common::BasicRiskStrategyConfig {
                 is_used_signal_k_line_stop_loss: Some(
                     self.is_used_signal_k_line_stop_loss[i_usklsl],
@@ -635,7 +665,6 @@ impl NweParamGenerator {
         }
         batch
     }
-
     pub fn progress(&self) -> (usize, usize) {
         (self.current_index, self.total_count)
     }

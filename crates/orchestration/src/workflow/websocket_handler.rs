@@ -1,21 +1,19 @@
-use std::str::FromStr;
-use std::sync::Arc;
-use tracing::{error, info};
-
+use super::strategy_runner;
 use rust_quant_domain::Timeframe;
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
-
-use super::strategy_runner;
-
+use std::str::FromStr;
+use std::sync::Arc;
+use tracing::{error, info};
 /// WebSocket 策略处理器
 ///
 /// 负责处理 WebSocket 接收到的 K 线数据，并触发相应的策略执行
 pub struct WebsocketStrategyHandler {
+    /// 配置service，用于配置运行参数。
     config_service: Arc<StrategyConfigService>,
+    /// 执行服务。
     execution_service: Arc<StrategyExecutionService>,
 }
-
 impl WebsocketStrategyHandler {
     /// 创建新的处理器实例
     pub fn new(
@@ -27,18 +25,15 @@ impl WebsocketStrategyHandler {
             execution_service,
         }
     }
-
     /// 处理 K 线数据
     pub async fn handle(&self, inst_id: String, time_interval: String, snap: CandlesEntity) {
         let config_service = self.config_service.clone();
         let execution_service = self.execution_service.clone();
         let candle_ts = snap.ts;
-
         info!(
             "🎯 K线确认触发策略检查: inst_id={}, time_interval={}, ts={}",
             inst_id, time_interval, candle_ts
         );
-
         // 异步执行策略检查，避免阻塞 WebSocket 线程
         tokio::spawn(async move {
             // 解析时间周期
@@ -49,7 +44,6 @@ impl WebsocketStrategyHandler {
                     return;
                 }
             };
-
             // 查询该交易对和时间周期的所有启用策略
             let configs = match config_service
                 .load_configs(&inst_id, &time_interval, None)
@@ -64,7 +58,6 @@ impl WebsocketStrategyHandler {
                     return;
                 }
             };
-
             if configs.is_empty() {
                 info!(
                     "⚠️  未找到启用的策略配置: inst_id={}, time_interval={}",
@@ -72,14 +65,11 @@ impl WebsocketStrategyHandler {
                 );
                 return;
             }
-
             info!("✅ 找到 {} 个策略配置，开始执行", configs.len());
-
             // 执行每个策略
             for config in configs {
                 let strategy_type = config.strategy_type;
                 let config_id = config.id;
-
                 if let Err(e) = strategy_runner::execute_strategy(
                     &inst_id,
                     timeframe,

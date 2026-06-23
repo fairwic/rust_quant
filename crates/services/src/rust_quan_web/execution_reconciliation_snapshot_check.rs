@@ -1,11 +1,3 @@
-use anyhow::{anyhow, bail, Result};
-use crypto_exc_all::{
-    AccountBill, AccountBillQuery, Balance, ExchangeId, Fill, FillListQuery, Order, OrderListQuery,
-    Position, PositionHistory, PositionHistoryQuery,
-};
-use serde_json::{json, Value};
-use std::collections::BTreeSet;
-
 use super::execution_audit::redact_error_message;
 use super::execution_payload::{parse_exchange, parse_instrument};
 use super::execution_task_contract::{
@@ -22,7 +14,13 @@ use crate::exchange::CryptoExcAllGateway;
 use crate::rust_quan_web::{
     ExchangeReconciliationReportRequest, ExecutionTask, ExecutionTaskClient, ExecutionTaskConfig,
 };
-
+use anyhow::{anyhow, bail, Result};
+use crypto_exc_all::{
+    AccountBill, AccountBillQuery, Balance, ExchangeId, Fill, FillListQuery, Order, OrderListQuery,
+    Position, PositionHistory, PositionHistoryQuery,
+};
+use serde_json::{json, Value};
+use std::collections::BTreeSet;
 const RECONCILIATION_SNAPSHOT_CONFIRM_ENV: &str = "RECONCILIATION_SNAPSHOT_CONFIRM";
 const RECONCILIATION_SNAPSHOT_CONFIRM_TOKEN: &str = "I_UNDERSTAND_SIGNED_READ_ONLY_RECONCILIATION";
 const CLOSE_FILL_WRITEBACK_APPLY_ENV: &str = "RECONCILIATION_SNAPSHOT_CLOSE_FILL_WRITEBACK_APPLY";
@@ -31,26 +29,36 @@ const CLOSE_FILL_WRITEBACK_CONFIRM_ENV: &str =
 const CLOSE_FILL_WRITEBACK_CONFIRM_TOKEN: &str =
     "I_UNDERSTAND_THIS_WRITES_EXCHANGE_CLOSE_FILL_TO_WEB";
 const CLOSE_FILL_WRITEBACK_INTENT_ENV: &str = "RECONCILIATION_SNAPSHOT_CLOSE_FILL_WRITEBACK_INTENT";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReconciliationSnapshotCheckConfig {
+    /// 买家邮箱。
     pub buyer_email: String,
+    /// 交易所名称。
     pub exchange: ExchangeId,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// combo ID。
     pub combo_id: i64,
+    /// 任务 ID。
     pub task_id: i64,
+    /// API 凭证 ID。
+    pub credential_id: Option<i64>,
+    /// credentialref；为空时表示该条件不启用。
     pub credential_ref: Option<String>,
+    /// 是否生成对账报告。
     pub report_reconciliation: bool,
+    /// 是否包含成交明细。
     pub include_fills: bool,
+    /// 是否closefillwritebackapply。
     pub close_fill_writeback_apply: bool,
+    /// closefillwritebackintent；为空时表示该条件不启用。
     pub close_fill_writeback_intent: Option<String>,
 }
-
 impl ReconciliationSnapshotCheckConfig {
     pub fn from_env() -> Result<Self> {
         Self::from_lookup(|key| std::env::var(key).ok())
     }
-
+    /// 从外部输入转换为内部模型，隔离 Web 商业、会员和执行准备度 的字段适配细节。
     pub fn from_lookup<F>(lookup: F) -> Result<Self>
     where
         F: Fn(&str) -> Option<String>,
@@ -61,7 +69,6 @@ impl ReconciliationSnapshotCheckConfig {
                 "{RECONCILIATION_SNAPSHOT_CONFIRM_ENV}={RECONCILIATION_SNAPSHOT_CONFIRM_TOKEN} is required before running signed read-only reconciliation"
             );
         }
-
         let buyer_email = required_trimmed(&lookup, "RECONCILIATION_SNAPSHOT_BUYER_EMAIL")?;
         let exchange = lookup("RECONCILIATION_SNAPSHOT_EXCHANGE")
             .map(|value| value.trim().to_string())
@@ -72,9 +79,15 @@ impl ReconciliationSnapshotCheckConfig {
         if is_protected_link_symbol(&symbol) {
             bail!("LINKUSDT is excluded from reconciliation snapshot live validation");
         }
-
         let combo_id = required_i64(&lookup, "RECONCILIATION_SNAPSHOT_COMBO_ID")?;
         let task_id = required_i64(&lookup, "RECONCILIATION_SNAPSHOT_TASK_ID")?;
+        let credential_id = Some(
+            optional_i64(&lookup, "RECONCILIATION_SNAPSHOT_CREDENTIAL_ID")?.ok_or_else(|| {
+                anyhow!(
+                    "RECONCILIATION_SNAPSHOT_CREDENTIAL_ID is required before signed read-only reconciliation"
+                )
+            })?,
+        );
         let credential_ref = lookup("RECONCILIATION_SNAPSHOT_CREDENTIAL_REF")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
@@ -93,7 +106,6 @@ impl ReconciliationSnapshotCheckConfig {
         let close_fill_writeback_intent = lookup(CLOSE_FILL_WRITEBACK_INTENT_ENV)
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
-
         if close_fill_writeback_apply {
             if !include_fills {
                 bail!(
@@ -113,13 +125,13 @@ impl ReconciliationSnapshotCheckConfig {
                 );
             }
         }
-
         Ok(Self {
             buyer_email,
             exchange,
             symbol,
             combo_id,
             task_id,
+            credential_id,
             credential_ref,
             report_reconciliation,
             include_fills,
@@ -128,21 +140,31 @@ impl ReconciliationSnapshotCheckConfig {
         })
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountSnapshotSyncConfig {
+    /// 买家邮箱。
     pub buyer_email: String,
+    /// 交易所名称。
     pub exchange: ExchangeId,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// combo ID。
     pub combo_id: i64,
+    /// 任务 ID。
     pub task_id: i64,
+    /// API 凭证 ID。
+    pub credential_id: Option<i64>,
+    /// credentialref；为空时表示该条件不启用。
     pub credential_ref: Option<String>,
+    /// 是否生成对账报告。
     pub report_reconciliation: bool,
+    /// 是否包含成交明细。
     pub include_fills: bool,
+    /// 是否按账户全量范围查询。
     pub account_wide: bool,
 }
-
 impl AccountSnapshotSyncConfig {
+    /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
     pub fn into_reconciliation_config(self) -> ReconciliationSnapshotCheckConfig {
         ReconciliationSnapshotCheckConfig {
             buyer_email: self.buyer_email,
@@ -150,6 +172,7 @@ impl AccountSnapshotSyncConfig {
             symbol: self.symbol,
             combo_id: self.combo_id,
             task_id: self.task_id,
+            credential_id: self.credential_id,
             credential_ref: self.credential_ref,
             report_reconciliation: self.report_reconciliation,
             include_fills: self.include_fills,
@@ -158,7 +181,9 @@ impl AccountSnapshotSyncConfig {
         }
     }
 }
-
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 pub fn build_reconciliation_snapshot_task(
     config: &ReconciliationSnapshotCheckConfig,
 ) -> ExecutionTask {
@@ -172,8 +197,12 @@ pub fn build_reconciliation_snapshot_task(
     });
     if let Some(credential_ref) = config.credential_ref.as_deref() {
         request_payload["credential_ref"] = json!(credential_ref);
+    } else if let Some(credential_id) = config.credential_id {
+        request_payload["credential_ref"] = json!(format!("web_api_credential_id_{credential_id}"));
     }
-
+    if let Some(credential_id) = config.credential_id {
+        request_payload["api_credential_id"] = json!(credential_id);
+    }
     ExecutionTask {
         id: config.task_id,
         news_signal_id: None,
@@ -193,7 +222,7 @@ pub fn build_reconciliation_snapshot_task(
         updated_at: now,
     }
 }
-
+/// 构建 Web 商业、会员和执行准备度 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_reconciliation_snapshot_requests(
     config: &ReconciliationSnapshotCheckConfig,
     positions: &[Position],
@@ -207,7 +236,7 @@ pub fn build_reconciliation_snapshot_requests(
         None,
     )
 }
-
+/// 构建 Web 商业、会员和执行准备度 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_close_fill_writeback_candidates(
     config: &ReconciliationSnapshotCheckConfig,
     positions: &[Position],
@@ -217,7 +246,6 @@ pub fn build_close_fill_writeback_candidates(
     if non_zero_position_count(positions) > 0 || active_open_order_count(open_orders) > 0 {
         return Vec::new();
     }
-
     let source_ref = build_reconciliation_snapshot_requests(config, positions, open_orders)
         .into_iter()
         .find_map(|request| request.source_ref);
@@ -228,7 +256,6 @@ pub fn build_close_fill_writeback_candidates(
         .filter(|fill| positive_decimal_option(fill.size.as_deref()))
         .collect();
     matching_fills.sort_by_key(|fill| fill.timestamp.unwrap_or(0));
-
     let mut latest_open_buy: Option<&Fill> = None;
     let mut candidates = Vec::new();
     for fill in matching_fills {
@@ -275,10 +302,9 @@ pub fn build_close_fill_writeback_candidates(
             _ => {}
         }
     }
-
     candidates
 }
-
+/// 构建 Web 商业、会员和执行准备度 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_close_fill_writeback_request_from_candidate(
     config: &ReconciliationSnapshotCheckConfig,
     candidate: &Value,
@@ -295,7 +321,6 @@ pub fn build_close_fill_writeback_request_from_candidate(
     require_candidate_bool(candidate, "web_writeback_allowed", false)?;
     require_candidate_bool(candidate, "exchange_mutation_allowed", false)?;
     require_candidate_bool(candidate, "report_result_allowed", false)?;
-
     Ok(ExchangeCloseFillWritebackRequest {
         task_id: config.task_id,
         combo_id: config.combo_id,
@@ -317,7 +342,6 @@ pub fn build_close_fill_writeback_request_from_candidate(
         writeback_authorized: true,
     })
 }
-
 include!("execution_reconciliation_snapshot_account_report_section.rs");
 include!("execution_reconciliation_snapshot_runtime_section.rs");
 include!("execution_reconciliation_snapshot_parse_helpers_section.rs");

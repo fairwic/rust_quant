@@ -1,26 +1,30 @@
 use super::{BacktestCandle, FvgEntryMode, MarketVelocityEventBacktestArgs, MS_15M, MS_1H, MS_4H};
-
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct FvgEntrySignal {
+    /// 时间戳。
     pub entry_ts: i64,
+    /// 入场价格。
     pub entry_price: f64,
+    /// 入场15midx，用于记录新闻或情报分析结果。
     pub entry_15m_idx: usize,
+    /// trigger，用于记录新闻或情报分析结果。
     pub trigger: String,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum FvgEntrySearch {
     Found(FvgEntrySignal),
     Blocked(String),
 }
-
 #[derive(Debug, Clone, PartialEq)]
 struct BullishFvgZone {
+    /// lower，用于行情、K 线或市场扫描。
     lower: f64,
+    /// upper，用于行情、K 线或市场扫描。
     upper: f64,
+    /// 时间戳。
     active_from_ts: i64,
 }
-
+/// 提供查找FVG入场的集中实现，避免回测策略调用方重复处理相同细节。
 pub(super) fn find_fvg_entry(
     mode: FvgEntryMode,
     candles_4h: &[BacktestCandle],
@@ -53,7 +57,7 @@ pub(super) fn find_fvg_entry(
         ),
     }
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 fn find_entry_for_timeframes(
     higher: &[BacktestCandle],
     lower: &[BacktestCandle],
@@ -75,7 +79,6 @@ fn find_entry_for_timeframes(
     if zones.is_empty() {
         return FvgEntrySearch::Blocked("fvg_no_recent_untouched_zone".to_string());
     }
-
     let lower_start = first_candle_closing_after(lower, event_ts, lower_ms);
     let deadline = event_ts + lower_ms * args.fvg_max_wait_candles as i64;
     for signal_idx in lower_start..lower.len() {
@@ -106,10 +109,9 @@ fn find_entry_for_timeframes(
             trigger: trigger.to_string(),
         });
     }
-
     FvgEntrySearch::Blocked("fvg_no_pullback_confirmation".to_string())
 }
-
+/// 提供最近未触碰多头区域的集中实现，避免回测策略调用方重复处理相同细节。
 fn recent_untouched_bullish_zones(
     higher: &[BacktestCandle],
     lower: &[BacktestCandle],
@@ -141,7 +143,7 @@ fn recent_untouched_bullish_zones(
     zones.reverse();
     zones
 }
-
+/// 提供区域touched之前event的集中实现，避免回测策略调用方重复处理相同细节。
 fn zone_touched_before_event(
     lower: &[BacktestCandle],
     zone: &BullishFvgZone,
@@ -154,7 +156,7 @@ fn zone_touched_before_event(
             && candle_overlaps_zone(candle, zone.lower, zone.upper)
     })
 }
-
+/// 提供首个K 线收盘之后的集中实现，避免回测策略调用方重复处理相同细节。
 fn first_candle_closing_after(candles: &[BacktestCandle], ts: i64, candle_ms: i64) -> usize {
     let mut left = 0;
     let mut right = candles.len();
@@ -168,7 +170,7 @@ fn first_candle_closing_after(candles: &[BacktestCandle], ts: i64, candle_ms: i6
     }
     left
 }
-
+/// 提供已完成K 线数量的集中实现，避免回测策略调用方重复处理相同细节。
 fn completed_candle_count(candles: &[BacktestCandle], ts: i64, candle_ms: i64) -> usize {
     let mut left = 0;
     let mut right = candles.len();
@@ -182,16 +184,15 @@ fn completed_candle_count(candles: &[BacktestCandle], ts: i64, candle_ms: i64) -
     }
     left
 }
-
+/// 提供多头中点确认的集中实现，避免回测策略调用方重复处理相同细节。
 fn bullish_midpoint_confirmation(candle: &BacktestCandle) -> bool {
     let midpoint = (candle.high + candle.low) / 2.0;
     candle.close > candle.open && candle.close >= midpoint
 }
-
 fn candle_overlaps_zone(candle: &BacktestCandle, lower: f64, upper: f64) -> bool {
     candle.low <= upper && candle.high >= lower
 }
-
+/// 提供执行索引for入场的集中实现，避免回测策略调用方重复处理相同细节。
 fn execution_index_for_entry(candles_15m: &[BacktestCandle], entry_ts: i64) -> Option<usize> {
     let mut left = 0;
     let mut right = candles_15m.len();

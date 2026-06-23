@@ -3,7 +3,7 @@ use super::{
     EvaluationReport, MarketVelocityEventBacktestArgs, TradeOutcome, TradeResult,
 };
 use std::collections::{BTreeMap, HashMap};
-
+/// 执行输出stage报告步骤，串起回测策略需要的状态推进和错误处理。
 pub(super) fn print_stage_report(data: &BacktestDataSet, evaluation: &EvaluationReport) {
     println!("candle_pairs={}", data.pairs.len());
     for pair in &data.pairs {
@@ -32,7 +32,7 @@ pub(super) fn print_stage_report(data: &BacktestDataSet, evaluation: &Evaluation
         println!("blockers\t{}\t{}", symbol, format_counter_top(counter, 10));
     }
 }
-
+/// 执行输出结果报告步骤，串起回测策略需要的状态推进和错误处理。
 pub(super) fn print_result_report(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -85,7 +85,7 @@ pub(super) fn print_result_report(
         }
     }
 }
-
+/// 提供数量outcomes的集中实现，避免回测策略调用方重复处理相同细节。
 fn count_outcomes(results: &[TradeResult]) -> BTreeMap<TradeOutcome, usize> {
     let mut counts = BTreeMap::new();
     for result in results {
@@ -93,11 +93,10 @@ fn count_outcomes(results: &[TradeResult]) -> BTreeMap<TradeOutcome, usize> {
     }
     counts
 }
-
 fn percent(numerator: usize, denominator: usize) -> Option<f64> {
     (denominator > 0).then_some(numerator as f64 / denominator as f64 * 100.0)
 }
-
+/// 提供averagecompleter的集中实现，避免回测策略调用方重复处理相同细节。
 fn average_complete_r(results: &[TradeResult]) -> Option<f64> {
     let mut count = 0;
     let mut sum = 0.0;
@@ -111,14 +110,14 @@ fn average_complete_r(results: &[TradeResult]) -> Option<f64> {
     }
     (count > 0).then_some(sum / count as f64)
 }
-
+/// 提供coverage的集中实现，避免回测策略调用方重复处理相同细节。
 fn coverage(candles: &[BacktestCandle]) -> String {
     match (candles.first(), candles.last()) {
         (Some(first), Some(last)) => format!("{}:{}-{}", candles.len(), first.ts, last.ts),
         _ => "0".to_string(),
     }
 }
-
+/// 提供coveragecomputed的集中实现，避免回测策略调用方重复处理相同细节。
 fn coverage_computed(candles: &[ComputedCandle]) -> String {
     match (candles.first(), candles.last()) {
         (Some(first), Some(last)) => {
@@ -127,7 +126,7 @@ fn coverage_computed(candles: &[ComputedCandle]) -> String {
         _ => "0".to_string(),
     }
 }
-
+/// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 fn format_counter(counter: &BTreeMap<String, usize>) -> String {
     counter
         .iter()
@@ -135,7 +134,7 @@ fn format_counter(counter: &BTreeMap<String, usize>) -> String {
         .collect::<Vec<_>>()
         .join("\t")
 }
-
+/// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 fn format_counter_top(counter: &BTreeMap<String, usize>, limit: usize) -> String {
     let mut items = counter.iter().collect::<Vec<_>>();
     items.sort_by(|(left_key, left_value), (right_key, right_value)| {
@@ -150,7 +149,7 @@ fn format_counter_top(counter: &BTreeMap<String, usize>, limit: usize) -> String
         .collect::<Vec<_>>()
         .join(",")
 }
-
+/// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 fn format_pass_by_symbol(confirmed: &[ConfirmedEvent]) -> String {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for signal in confirmed {
@@ -168,7 +167,7 @@ fn format_pass_by_symbol(confirmed: &[ConfirmedEvent]) -> String {
         .collect::<Vec<_>>()
         .join(";")
 }
-
+/// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 fn format_optional_f64(value: Option<f64>) -> String {
     value
         .map(|value| value.to_string())

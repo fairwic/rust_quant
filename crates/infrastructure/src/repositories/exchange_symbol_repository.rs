@@ -6,49 +6,80 @@ use rust_quant_domain::entities::{
 use rust_quant_domain::traits::exchange_symbol_repository::ExchangeSymbolRepository;
 use serde_json::Value;
 use sqlx::{postgres::PgRow, FromRow, PgPool, Row};
-
 #[derive(Debug, Clone)]
 struct ExchangeSymbolRow {
+    /// 唯一标识。
     id: i64,
+    /// 交易所名称。
     exchange: String,
+    /// 类型标识。
     market_type: String,
+    /// 交易所交易对，用于展示或持久化查询结果。
     exchange_symbol: String,
+    /// normalized交易对，用于展示或持久化查询结果。
     normalized_symbol: String,
+    /// 基础资产，用于展示或持久化查询结果。
     base_asset: String,
+    /// 计价资产，用于展示或持久化查询结果。
     quote_asset: String,
+    /// 当前状态。
     status: String,
+    /// 类型标识。
     contract_type: Option<String>,
+    /// 价格精度；为空时使用交易所默认值。
     price_precision: Option<i32>,
+    /// 数量精度；为空时使用交易所默认值。
     quantity_precision: Option<i32>,
+    /// 数量数值。
     min_qty: Option<String>,
+    /// 数量数值。
     max_qty: Option<String>,
+    /// 数量数值。
     tick_size: Option<String>,
+    /// 数量数值。
     step_size: Option<String>,
+    /// 最小名义金额；为空时使用交易所默认值。
     min_notional: Option<String>,
+    /// 原始 payload；为空时表示没有保留原始响应。
     raw_payload: Option<Value>,
+    /// 时间字段。
     last_synced_at: chrono::DateTime<chrono::Utc>,
+    /// 创建时间。
     created_at: chrono::DateTime<chrono::Utc>,
+    /// 最后更新时间。
     updated_at: chrono::DateTime<chrono::Utc>,
 }
-
 #[derive(Debug, Clone)]
 struct ExchangeSymbolListingEventRow {
+    /// 唯一标识。
     id: i64,
+    /// 交易所名称。
     exchange: String,
+    /// 类型标识。
     market_type: String,
+    /// 交易所交易对，用于展示或持久化查询结果。
     exchange_symbol: String,
+    /// normalized交易对，用于展示或持久化查询结果。
     normalized_symbol: String,
+    /// 基础资产，用于展示或持久化查询结果。
     base_asset: String,
+    /// 计价资产，用于展示或持久化查询结果。
     quote_asset: String,
+    /// 当前状态。
     status: String,
+    /// 时间字段。
     first_seen_at: chrono::DateTime<chrono::Utc>,
+    /// 数据来源。
     source: String,
+    /// 原始 payload；为空时表示没有保留原始响应。
     raw_payload: Option<Value>,
+    /// 创建时间。
     created_at: chrono::DateTime<chrono::Utc>,
+    /// 最后更新时间。
     updated_at: chrono::DateTime<chrono::Utc>,
 }
-
 impl<'r> FromRow<'r, PgRow> for ExchangeSymbolRow {
+    /// 从外部输入转换为内部模型，隔离 配置、基础设施和运行时 的字段适配细节。
     fn from_row(row: &'r PgRow) -> std::result::Result<Self, sqlx::Error> {
         Ok(Self {
             id: row.try_get("id")?,
@@ -74,8 +105,8 @@ impl<'r> FromRow<'r, PgRow> for ExchangeSymbolRow {
         })
     }
 }
-
 impl ExchangeSymbolRow {
+    /// 将内部模型转换为输出结构，避免 配置、基础设施和运行时 的内部字段直接外泄。
     fn into_domain(self) -> ExchangeSymbol {
         ExchangeSymbol {
             id: Some(self.id),
@@ -101,8 +132,8 @@ impl ExchangeSymbolRow {
         }
     }
 }
-
 impl<'r> FromRow<'r, PgRow> for ExchangeSymbolListingEventRow {
+    /// 从外部输入转换为内部模型，隔离 配置、基础设施和运行时 的字段适配细节。
     fn from_row(row: &'r PgRow) -> std::result::Result<Self, sqlx::Error> {
         Ok(Self {
             id: row.try_get("id")?,
@@ -121,8 +152,8 @@ impl<'r> FromRow<'r, PgRow> for ExchangeSymbolListingEventRow {
         })
     }
 }
-
 impl ExchangeSymbolListingEventRow {
+    /// 将内部模型转换为输出结构，避免 配置、基础设施和运行时 的内部字段直接外泄。
     fn into_domain(self) -> ExchangeSymbolListingEvent {
         ExchangeSymbolListingEvent {
             id: Some(self.id),
@@ -141,19 +172,21 @@ impl ExchangeSymbolListingEventRow {
         }
     }
 }
-
 pub struct PostgresExchangeSymbolRepository {
+    /// 数据库连接池。
     pool: PgPool,
 }
-
 impl PostgresExchangeSymbolRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
-
 #[async_trait]
 impl ExchangeSymbolRepository for PostgresExchangeSymbolRepository {
+    /// 封装当前函数，减少配置运行时调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 返回 Result 以便错误透明上抛，统一上层降级与重试策略。
     async fn upsert_many(&self, symbols: Vec<ExchangeSymbol>) -> Result<u64> {
         let mut affected = 0u64;
         for symbol in symbols {
@@ -223,7 +256,7 @@ impl ExchangeSymbolRepository for PostgresExchangeSymbolRepository {
         }
         Ok(affected)
     }
-
+    /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
     async fn find_by_exchange(
         &self,
         exchange: &str,
@@ -303,13 +336,12 @@ impl ExchangeSymbolRepository for PostgresExchangeSymbolRepository {
             .await
             .context("query exchange_symbols by exchange")?
         };
-
         Ok(rows
             .into_iter()
             .map(ExchangeSymbolRow::into_domain)
             .collect())
     }
-
+    /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
     async fn find_by_asset(
         &self,
         base_asset: &str,
@@ -352,13 +384,12 @@ impl ExchangeSymbolRepository for PostgresExchangeSymbolRepository {
         .fetch_all(&self.pool)
         .await
         .context("query exchange_symbols by asset")?;
-
         Ok(rows
             .into_iter()
             .map(ExchangeSymbolRow::into_domain)
             .collect())
     }
-
+    /// 持久化 配置、基础设施和运行时 结果，保证写入路径和幂等语义集中处理。
     async fn record_first_seen_many(
         &self,
         symbols: &[ExchangeSymbol],
@@ -407,15 +438,13 @@ impl ExchangeSymbolRepository for PostgresExchangeSymbolRepository {
             .fetch_optional(&self.pool)
             .await
             .context("record first seen exchange_symbol_listing_events")?;
-
             if let Some(row) = row {
                 inserted.push(row.into_domain());
             }
         }
-
         Ok(inserted)
     }
-
+    /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
     async fn find_listing_events_by_asset(
         &self,
         base_asset: &str,
@@ -451,7 +480,6 @@ impl ExchangeSymbolRepository for PostgresExchangeSymbolRepository {
         .fetch_all(&self.pool)
         .await
         .context("query exchange_symbol_listing_events by asset")?;
-
         Ok(rows
             .into_iter()
             .map(ExchangeSymbolListingEventRow::into_domain)

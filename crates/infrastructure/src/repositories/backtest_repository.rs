@@ -1,48 +1,44 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use serde_json::Value;
-use sqlx::{PgPool, Postgres, QueryBuilder};
-
 use rust_quant_domain::entities::{
     BacktestDetail, BacktestLog, BacktestPerformanceMetrics, BacktestWinRateStats, DynamicConfigLog,
 };
 use rust_quant_domain::traits::BacktestLogRepository;
-
+use serde_json::Value;
+use sqlx::{PgPool, Postgres, QueryBuilder};
 const BACKTEST_INSERT_CHUNK_ROWS: usize = 1_000;
-
 /// 基于 SQLx 的回测日志仓储实现
 pub struct SqlxBacktestRepository {
+    /// 数据库连接池。
     pool: PgPool,
 }
-
 impl SqlxBacktestRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
-
     fn pool(&self) -> &PgPool {
         &self.pool
     }
-
+    /// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
     fn parse_backtest_datetime(value: &str, field_name: &str) -> Result<NaiveDateTime> {
         NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
             .with_context(|| format!("invalid {}: {}", field_name, value))
     }
-
     fn parse_json_value(value: &str, field_name: &str) -> Result<Value> {
         serde_json::from_str(value).with_context(|| format!("invalid {}: {}", field_name, value))
     }
-
+    /// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
     fn parse_optional_json_value(value: Option<&str>, field_name: &str) -> Result<Option<Value>> {
         value
             .map(|raw| Self::parse_json_value(raw, field_name))
             .transpose()
     }
 }
-
 #[async_trait]
 impl BacktestLogRepository for SqlxBacktestRepository {
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     async fn insert_log(&self, log: &BacktestLog) -> Result<i64> {
         let final_fund = log
             .final_fund
@@ -52,7 +48,6 @@ impl BacktestLogRepository for SqlxBacktestRepository {
             .profit
             .parse::<f64>()
             .with_context(|| format!("invalid back_test_log.profit: {}", log.profit))?;
-
         let inserted_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO back_test_log (
@@ -98,15 +93,13 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         .bind(log.kline_nums)
         .fetch_one(self.pool())
         .await?;
-
         Ok(inserted_id)
     }
-
+    /// 持久化 回测与策略研究 结果，保证写入路径和幂等语义集中处理。
     async fn insert_details(&self, details: &[BacktestDetail]) -> Result<u64> {
         if details.is_empty() {
             return Ok(0);
         }
-
         let mut rows_affected = 0;
         for chunk in details.chunks(BACKTEST_INSERT_CHUNK_ROWS) {
             let parsed_times = chunk
@@ -134,10 +127,8 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                     ))
                 })
                 .collect::<Result<Vec<_>>>()?;
-
             let mut builder: QueryBuilder<Postgres> =
                 QueryBuilder::new("INSERT INTO back_test_detail (option_type, strategy_type, inst_id, time, back_test_id, open_position_time, signal_open_position_time, signal_status, close_position_time, open_price, close_price, profit_loss, quantity, full_close, close_type, win_nums, loss_nums, signal_value, signal_result, stop_loss_source, stop_loss_update_history) ");
-
             builder.push_values(
                 chunk.iter().zip(parsed_times.iter()),
                 |mut b, (detail, parsed)| {
@@ -164,14 +155,12 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                         .push_bind(&detail.stop_loss_update_history);
                 },
             );
-
             let result = builder.build().execute(self.pool()).await?;
             rows_affected += result.rows_affected();
         }
-
         Ok(rows_affected)
     }
-
+    /// 更新 回测与策略研究 状态，并保留调用方需要的结果或错误信息。
     async fn update_win_rate_stats(
         &self,
         backtest_id: i64,
@@ -198,10 +187,9 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         .bind(backtest_id)
         .execute(self.pool())
         .await?;
-
         Ok(result.rows_affected())
     }
-
+    /// 更新 回测与策略研究 状态，并保留调用方需要的结果或错误信息。
     async fn update_performance_metrics(
         &self,
         backtest_id: i64,
@@ -226,10 +214,9 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         .bind(backtest_id)
         .execute(self.pool())
         .await?;
-
         Ok(result.rows_affected())
     }
-
+    /// 持久化 回测与策略研究 结果，保证写入路径和幂等语义集中处理。
     async fn insert_filtered_signals(
         &self,
         signals: &[rust_quant_domain::entities::FilteredSignalLog],
@@ -242,7 +229,6 @@ impl BacktestLogRepository for SqlxBacktestRepository {
             "insert_filtered_signals inserting {} signals",
             signals.len()
         );
-
         // 确保表存在 (仅开发阶段便利措施，生产环境应使用 migrate)
         sqlx::query(
             r#"
@@ -280,7 +266,6 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         sqlx::query("COMMENT ON TABLE filtered_signal_log IS '被过滤策略信号日志表'")
             .execute(self.pool())
             .await?;
-
         let mut rows_affected = 0;
         for chunk in signals.chunks(BACKTEST_INSERT_CHUNK_ROWS) {
             let parsed_signals = chunk
@@ -306,11 +291,9 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                     ))
                 })
                 .collect::<Result<Vec<_>>>()?;
-
             let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO filtered_signal_log (backtest_id, inst_id, period, signal_time, direction, filter_reasons, signal_price, indicator_snapshot, theoretical_profit, theoretical_loss, final_pnl, trade_result, signal_value) ",
             );
-
             builder.push_values(
                 chunk.iter().zip(parsed_signals.iter()),
                 |mut b, (signal, parsed)| {
@@ -329,22 +312,18 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                         .push_bind(&parsed.3);
                 },
             );
-
             let result = builder.build().execute(self.pool()).await?;
             rows_affected += result.rows_affected();
         }
-
         Ok(rows_affected)
     }
-
+    /// 持久化 回测与策略研究 结果，保证写入路径和幂等语义集中处理。
     async fn insert_dynamic_config_logs(&self, logs: &[DynamicConfigLog]) -> Result<u64> {
         if logs.is_empty() {
             tracing::info!("insert_dynamic_config_logs being called with empty list");
             return Ok(0);
         }
-
         tracing::info!("insert_dynamic_config_logs inserting {} logs", logs.len());
-
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS dynamic_config_log (
@@ -379,7 +358,6 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         sqlx::query("COMMENT ON TABLE dynamic_config_log IS '动态策略配置调整日志表'")
             .execute(self.pool())
             .await?;
-
         let mut rows_affected = 0;
         for chunk in logs.chunks(BACKTEST_INSERT_CHUNK_ROWS) {
             let parsed_logs = chunk
@@ -398,11 +376,9 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                     ))
                 })
                 .collect::<Result<Vec<_>>>()?;
-
             let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO dynamic_config_log (backtest_id, inst_id, period, kline_time, adjustments, config_snapshot) ",
             );
-
             builder.push_values(
                 chunk.iter().zip(parsed_logs.iter()),
                 |mut b, (log, parsed)| {
@@ -414,24 +390,22 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                         .push_bind(&parsed.2);
                 },
             );
-
             let result = builder.build().execute(self.pool()).await?;
             rows_affected += result.rows_affected();
         }
-
         Ok(rows_affected)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::BACKTEST_INSERT_CHUNK_ROWS;
-
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn backtest_insert_chunk_keeps_postgres_bind_count_below_limit() {
         const POSTGRES_BIND_PARAM_LIMIT: usize = 65_535;
         const MAX_BACKTEST_INSERT_COLUMNS: usize = 21;
-
         assert!(
             BACKTEST_INSERT_CHUNK_ROWS * MAX_BACKTEST_INSERT_COLUMNS < POSTGRES_BIND_PARAM_LIMIT
         );

@@ -10,10 +10,12 @@ set -euo pipefail
 cat >&2 <<'MSG'
 ERROR: scripts/dev/run_binance_live_order_smoke.sh is deprecated and disabled.
 
-Use scripts/dev/run_binance_live_eth_micro_order_smoke.sh only after explicit
-live-trading authorization and after Web has an existing v3 signed-ready
-Binance credential. The legacy pending-close entrypoint must not write API
-credentials or run live exchange mutations.
+Use the Rust-native ETH micro validation only after explicit live-trading
+authorization and after Web has an existing signed-ready Binance credential:
+  cargo run -q -p rust-quant-cli --bin binance_eth_micro_live_validation
+
+The legacy pending-close entrypoint must not write API credentials or run live
+exchange mutations.
 MSG
 
 exit 2

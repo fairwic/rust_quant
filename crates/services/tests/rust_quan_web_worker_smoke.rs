@@ -1,5 +1,4 @@
 use std::{fs, path::PathBuf};
-
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -7,7 +6,6 @@ fn repo_root() -> PathBuf {
         .expect("services crate should live under crates/services")
         .to_path_buf()
 }
-
 #[test]
 fn rust_quan_web_worker_smoke_script_sets_safe_local_defaults() {
     let script_path = repo_root()
@@ -16,7 +14,6 @@ fn rust_quan_web_worker_smoke_script_sets_safe_local_defaults() {
         .join("run_execution_worker_dry_run.sh");
     let script = fs::read_to_string(&script_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", script_path.display(), error));
-
     assert!(script.contains("RUST_QUAN_WEB_BASE_URL:=\"http://127.0.0.1:8000\""));
     assert!(script.contains("EXECUTION_EVENT_SECRET:=\"local-dev-secret\""));
     assert!(script.contains("EXECUTION_WORKER_DRY_RUN:=\"true\""));
@@ -38,7 +35,6 @@ fn rust_quan_web_worker_smoke_script_sets_safe_local_defaults() {
     assert!(script.contains("rustup run \"${RUSTUP_TOOLCHAIN}\" cargo run --bin rust_quant"));
     assert!(script.contains("cargo run --bin rust_quant"));
 }
-
 #[test]
 fn pending_close_worker_e2e_smoke_hands_off_from_web_review_to_worker() {
     let script_path = repo_root()
@@ -47,7 +43,6 @@ fn pending_close_worker_e2e_smoke_hands_off_from_web_review_to_worker() {
         .join("run_pending_close_worker_e2e_smoke.sh");
     let script = fs::read_to_string(&script_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", script_path.display(), error));
-
     assert!(script.contains("smoke_risk_close_review_loop.sh"));
     assert!(script.contains("RISK_CLOSE_SMOKE_STOP_AFTER_REVIEW=1"));
     assert!(script.contains("run_execution_worker_dry_run.sh"));
@@ -66,7 +61,6 @@ fn pending_close_worker_e2e_smoke_hands_off_from_web_review_to_worker() {
     assert!(script.contains("verified rerun boundary: no new order/trade rows"));
     assert!(script.contains("pending close worker e2e smoke completed"));
 }
-
 #[test]
 fn quant_core_audit_smoke_script_runs_ddl_and_real_postgres_test() {
     let script_path = repo_root()
@@ -75,10 +69,15 @@ fn quant_core_audit_smoke_script_runs_ddl_and_real_postgres_test() {
         .join("quant_core_audit_smoke.sh");
     let script = fs::read_to_string(&script_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", script_path.display(), error));
-
     assert!(script.contains("./scripts/dev/ddl_smoke.sh"));
     assert!(script.contains("QUANT_CORE_AUDIT_SMOKE=1"));
+    assert!(script.contains(
+        "QUANT_CORE_DATABASE_URL:=\"postgres://postgres:postgres123@127.0.0.1:5432/quant_core\""
+    ));
     assert!(script.contains("QUANT_CORE_DATABASE_URL"));
+    assert!(script.contains("redact_database_url"));
+    assert!(script.contains("quant_core db: $(redact_database_url \"${QUANT_CORE_DATABASE_URL}\")"));
+    assert!(!script.contains("quant_core db: ${QUANT_CORE_DATABASE_URL}"));
     assert!(
         script.contains("cargo test -p rust-quant-services --test quant_core_audit_postgres_smoke")
     );

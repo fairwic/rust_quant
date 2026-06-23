@@ -2,11 +2,13 @@ use crypto_exc_all::{Balance, ExchangeId, Fill, Instrument, Order, Position};
 use rust_quant_services::rust_quan_web::{
     build_close_fill_writeback_candidates, build_close_fill_writeback_request_from_candidate,
     build_exchange_account_snapshot_report_request, build_reconciliation_snapshot_requests,
-    build_reconciliation_snapshot_task, ReconciliationSnapshotCheckConfig,
+    build_reconciliation_snapshot_task, AccountSnapshotSyncConfig,
+    ReconciliationSnapshotCheckConfig,
 };
 use serde_json::json;
 use std::collections::HashMap;
-
+const RECONCILIATION_SNAPSHOT_RUNTIME: &str =
+    include_str!("../src/rust_quan_web/execution_reconciliation_snapshot_runtime_section.rs");
 fn config_from(values: &[(&str, &str)]) -> anyhow::Result<ReconciliationSnapshotCheckConfig> {
     let values: HashMap<String, String> = values
         .iter()
@@ -14,7 +16,6 @@ fn config_from(values: &[(&str, &str)]) -> anyhow::Result<ReconciliationSnapshot
         .collect();
     ReconciliationSnapshotCheckConfig::from_lookup(|key| values.get(key).cloned())
 }
-
 #[test]
 fn reconciliation_snapshot_requires_explicit_signed_read_only_confirmation() {
     let err = config_from(&[
@@ -24,10 +25,8 @@ fn reconciliation_snapshot_requires_explicit_signed_read_only_confirmation() {
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "42"),
     ])
     .unwrap_err();
-
     assert!(err.to_string().contains("RECONCILIATION_SNAPSHOT_CONFIRM"));
 }
-
 #[test]
 fn reconciliation_snapshot_rejects_link_symbol() {
     let err = config_from(&[
@@ -41,10 +40,38 @@ fn reconciliation_snapshot_rejects_link_symbol() {
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "42"),
     ])
     .unwrap_err();
-
     assert!(err.to_string().contains("LINKUSDT"));
 }
-
+#[test]
+fn reconciliation_snapshot_requires_exact_credential_id_before_signed_read_only_runtime() {
+    let err = config_from(&[
+        (
+            "RECONCILIATION_SNAPSHOT_CONFIRM",
+            "I_UNDERSTAND_SIGNED_READ_ONLY_RECONCILIATION",
+        ),
+        ("RECONCILIATION_SNAPSHOT_BUYER_EMAIL", "buyer@example.com"),
+        ("RECONCILIATION_SNAPSHOT_EXCHANGE", "okx"),
+        ("RECONCILIATION_SNAPSHOT_SYMBOL", "ETH-USDT-SWAP"),
+        ("RECONCILIATION_SNAPSHOT_COMBO_ID", "98"),
+        ("RECONCILIATION_SNAPSHOT_TASK_ID", "97"),
+    ])
+    .unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID"));
+}
+#[test]
+fn reconciliation_snapshot_runtime_never_falls_back_to_buyer_exchange_credential_resolution() {
+    assert!(
+        !RECONCILIATION_SNAPSHOT_RUNTIME
+            .contains(".resolve_user_exchange_config(&config.buyer_email"),
+        "signed read-only account snapshot runtime must not resolve arbitrary buyer+exchange credentials; exact credential_id is required"
+    );
+    assert!(
+        RECONCILIATION_SNAPSHOT_RUNTIME.contains(".resolve_user_exchange_config_for_credential("),
+        "signed read-only account snapshot runtime must resolve through exact credential_id"
+    );
+}
 #[test]
 fn reconciliation_snapshot_task_uses_secret_safe_v2_source_ref_context() {
     let config = config_from(&[
@@ -57,13 +84,12 @@ fn reconciliation_snapshot_task_uses_secret_safe_v2_source_ref_context() {
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "ETHUSDT"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "7"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "42"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
         ("RECONCILIATION_SNAPSHOT_CREDENTIAL_REF", "cred_live_001"),
     ])
     .unwrap();
-
     let task = build_reconciliation_snapshot_task(&config);
     let payload = task.request_payload_json;
-
     assert_eq!(task.id, 42);
     assert_eq!(task.combo_id, 7);
     assert_eq!(task.buyer_email, "Buyer@Example.COM");
@@ -73,7 +99,6 @@ fn reconciliation_snapshot_task_uses_secret_safe_v2_source_ref_context() {
     assert_eq!(payload["symbol"], "ETHUSDT");
     assert_eq!(payload["credential_ref"], "cred_live_001");
     assert!(!payload.to_string().contains("Buyer@Example.COM"));
-
     let requests = build_reconciliation_snapshot_requests(
         &config,
         &[Position {
@@ -93,7 +118,6 @@ fn reconciliation_snapshot_task_uses_secret_safe_v2_source_ref_context() {
         &[],
     );
     let source_ref = requests[0].source_ref.as_deref().unwrap();
-
     assert!(source_ref.starts_with("rq:xrec:v2:ex=binance:"));
     assert!(source_ref.contains(":acct=email_sha256_"));
     assert!(source_ref.contains(":cred=cred_live_001:"));
@@ -101,7 +125,63 @@ fn reconciliation_snapshot_task_uses_secret_safe_v2_source_ref_context() {
     assert!(!source_ref.contains("Buyer"));
     assert!(!source_ref.contains("@"));
 }
-
+#[test]
+fn reconciliation_snapshot_config_accepts_exact_credential_id_for_runtime_resolve() {
+    let config = config_from(&[
+        (
+            "RECONCILIATION_SNAPSHOT_CONFIRM",
+            "I_UNDERSTAND_SIGNED_READ_ONLY_RECONCILIATION",
+        ),
+        ("RECONCILIATION_SNAPSHOT_BUYER_EMAIL", "buyer@example.com"),
+        ("RECONCILIATION_SNAPSHOT_EXCHANGE", "okx"),
+        ("RECONCILIATION_SNAPSHOT_SYMBOL", "ETH-USDT-SWAP"),
+        ("RECONCILIATION_SNAPSHOT_COMBO_ID", "98"),
+        ("RECONCILIATION_SNAPSHOT_TASK_ID", "97"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
+    ])
+    .unwrap();
+    assert_eq!(config.credential_id, Some(8801));
+    let requests = build_reconciliation_snapshot_requests(&config, &[], &[]);
+    let source_ref = requests[0].source_ref.as_deref().unwrap();
+    assert!(source_ref.contains(":cred=web_api_credential_id_8801:"));
+    let account_snapshot =
+        build_exchange_account_snapshot_report_request(&config, &[], &[], &[], &[], &[], &[], &[])
+            .unwrap();
+    assert!(account_snapshot
+        .source_ref
+        .contains(":cred=web_api_credential_id_8801:"));
+}
+#[test]
+fn account_snapshot_sync_config_preserves_exact_credential_id() {
+    let config = AccountSnapshotSyncConfig {
+        buyer_email: "buyer@example.com".to_string(),
+        exchange: ExchangeId::Okx,
+        symbol: "ETH-USDT-SWAP".to_string(),
+        combo_id: 98,
+        task_id: 97,
+        credential_id: Some(8801),
+        credential_ref: None,
+        report_reconciliation: false,
+        include_fills: true,
+        account_wide: false,
+    };
+    let reconciliation_config = config.into_reconciliation_config();
+    assert_eq!(reconciliation_config.credential_id, Some(8801));
+    let account_snapshot = build_exchange_account_snapshot_report_request(
+        &reconciliation_config,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+    )
+    .unwrap();
+    assert!(account_snapshot
+        .source_ref
+        .contains(":cred=web_api_credential_id_8801:"));
+}
 #[test]
 fn reconciliation_snapshot_builds_flat_position_sync_request() {
     let config = config_from(&[
@@ -114,12 +194,11 @@ fn reconciliation_snapshot_builds_flat_position_sync_request() {
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "UNI-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "83"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
         ("RECONCILIATION_SNAPSHOT_CREDENTIAL_REF", "web-cred-85"),
     ])
     .unwrap();
-
     let requests = build_reconciliation_snapshot_requests(&config, &[], &[]);
-
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].issue_type.as_str(), "exchange_position_flat");
     assert_eq!(requests[0].symbol, "UNI-USDT-SWAP");
@@ -128,7 +207,6 @@ fn reconciliation_snapshot_builds_flat_position_sync_request() {
         .as_deref()
         .is_some_and(|message| message.contains("zero position")));
 }
-
 #[test]
 fn reconciliation_snapshot_can_disable_web_report_for_read_only_evidence() {
     let config = config_from(&[
@@ -141,16 +219,15 @@ fn reconciliation_snapshot_can_disable_web_report_for_read_only_evidence() {
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "UNI-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "83"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
         ("RECONCILIATION_SNAPSHOT_REPORT", "false"),
         ("RECONCILIATION_SNAPSHOT_INCLUDE_FILLS", "true"),
     ])
     .unwrap();
-
     assert!(!config.report_reconciliation);
     assert!(config.include_fills);
     assert!(!config.close_fill_writeback_apply);
 }
-
 #[test]
 fn reconciliation_snapshot_maps_signed_read_only_account_evidence_for_web_snapshot() {
     let config = config_from(&[
@@ -163,6 +240,7 @@ fn reconciliation_snapshot_maps_signed_read_only_account_evidence_for_web_snapsh
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "BTC-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "86"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
         ("RECONCILIATION_SNAPSHOT_CREDENTIAL_REF", "web-cred-85"),
     ])
     .unwrap();
@@ -238,7 +316,6 @@ fn reconciliation_snapshot_maps_signed_read_only_account_evidence_for_web_snapsh
         frozen: Some("0".to_string()),
         raw: json!({"ccy":"USDT","eqUsd":"8211.49"}),
     };
-
     let request = build_exchange_account_snapshot_report_request(
         &config,
         &[position],
@@ -250,7 +327,6 @@ fn reconciliation_snapshot_maps_signed_read_only_account_evidence_for_web_snapsh
         &[],
     )
     .unwrap();
-
     assert_eq!(request.combo_id, 85);
     assert_eq!(request.buyer_email, "buyer@example.com");
     assert_eq!(request.exchange, "okx");
@@ -283,7 +359,6 @@ fn reconciliation_snapshot_maps_signed_read_only_account_evidence_for_web_snapsh
         .unwrap()
         .contains("api-secret"));
 }
-
 #[test]
 fn reconciliation_snapshot_close_fill_writeback_apply_requires_confirmation_and_intent() {
     let err = config_from(&[
@@ -296,15 +371,14 @@ fn reconciliation_snapshot_close_fill_writeback_apply_requires_confirmation_and_
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "ASTER-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "86"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
         ("RECONCILIATION_SNAPSHOT_INCLUDE_FILLS", "true"),
         ("RECONCILIATION_SNAPSHOT_CLOSE_FILL_WRITEBACK_APPLY", "true"),
     ])
     .unwrap_err();
-
     assert!(err
         .to_string()
         .contains("RECONCILIATION_SNAPSHOT_CLOSE_FILL_WRITEBACK_CONFIRM"));
-
     let err = config_from(&[
         (
             "RECONCILIATION_SNAPSHOT_CONFIRM",
@@ -315,6 +389,7 @@ fn reconciliation_snapshot_close_fill_writeback_apply_requires_confirmation_and_
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "ASTER-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "86"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
         ("RECONCILIATION_SNAPSHOT_INCLUDE_FILLS", "true"),
         ("RECONCILIATION_SNAPSHOT_CLOSE_FILL_WRITEBACK_APPLY", "true"),
         (
@@ -327,11 +402,9 @@ fn reconciliation_snapshot_close_fill_writeback_apply_requires_confirmation_and_
         ),
     ])
     .unwrap_err();
-
     assert!(err
         .to_string()
         .contains("RECONCILIATION_SNAPSHOT_CLOSE_FILL_WRITEBACK_INTENT"));
-
     let config = config_from(&[
         (
             "RECONCILIATION_SNAPSHOT_CONFIRM",
@@ -342,6 +415,7 @@ fn reconciliation_snapshot_close_fill_writeback_apply_requires_confirmation_and_
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "ASTER-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "86"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
         ("RECONCILIATION_SNAPSHOT_INCLUDE_FILLS", "true"),
         ("RECONCILIATION_SNAPSHOT_CLOSE_FILL_WRITEBACK_APPLY", "true"),
         (
@@ -354,14 +428,12 @@ fn reconciliation_snapshot_close_fill_writeback_apply_requires_confirmation_and_
         ),
     ])
     .unwrap();
-
     assert!(config.close_fill_writeback_apply);
     assert_eq!(
         config.close_fill_writeback_intent.as_deref(),
         Some("web-close-fill:combo=85:task=86:symbol=ASTER-USDT-SWAP")
     );
 }
-
 #[test]
 fn reconciliation_snapshot_builds_close_fill_writeback_candidate_when_flat_after_open() {
     let config = config_from(&[
@@ -374,6 +446,7 @@ fn reconciliation_snapshot_builds_close_fill_writeback_candidate_when_flat_after
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "ASTER-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "86"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
     ])
     .unwrap();
     let flat_position = Position {
@@ -422,9 +495,7 @@ fn reconciliation_snapshot_builds_close_fill_writeback_candidate_when_flat_after
             raw: json!({}),
         },
     ];
-
     let candidates = build_close_fill_writeback_candidates(&config, &[flat_position], &[], &fills);
-
     assert_eq!(candidates.len(), 1);
     assert_eq!(
         candidates[0]["candidate_type"],
@@ -450,7 +521,6 @@ fn reconciliation_snapshot_builds_close_fill_writeback_candidate_when_flat_after
         .is_some_and(|value| value.contains("task=86:sym=ASTER-USDT-SWAP")));
     assert!(!candidates[0].to_string().contains("buyer@example.com"));
 }
-
 #[test]
 fn reconciliation_snapshot_converts_close_fill_candidate_to_web_writeback_request() {
     let config = config_from(&[
@@ -463,6 +533,7 @@ fn reconciliation_snapshot_converts_close_fill_candidate_to_web_writeback_reques
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "ASTER-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "86"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
     ])
     .unwrap();
     let candidate = json!({
@@ -489,9 +560,7 @@ fn reconciliation_snapshot_converts_close_fill_candidate_to_web_writeback_reques
         "report_result_allowed": false,
         "source_ref": "rq:xrec:v2:ex=okx:combo=85:task=86:sym=ASTER-USDT-SWAP"
     });
-
     let request = build_close_fill_writeback_request_from_candidate(&config, &candidate).unwrap();
-
     assert_eq!(request.task_id, 86);
     assert_eq!(request.combo_id, 85);
     assert_eq!(request.exchange, "okx");
@@ -516,7 +585,6 @@ fn reconciliation_snapshot_converts_close_fill_candidate_to_web_writeback_reques
         .unwrap()
         .contains("buyer@example.com"));
 }
-
 #[test]
 fn reconciliation_snapshot_does_not_build_close_fill_candidate_when_position_not_flat() {
     let config = config_from(&[
@@ -529,6 +597,7 @@ fn reconciliation_snapshot_does_not_build_close_fill_candidate_when_position_not
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "ASTER-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "86"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
     ])
     .unwrap();
     let open_position = Position {
@@ -560,12 +629,9 @@ fn reconciliation_snapshot_does_not_build_close_fill_candidate_when_position_not
         timestamp: Some(1_780_731_256_364),
         raw: json!({}),
     }];
-
     let candidates = build_close_fill_writeback_candidates(&config, &[open_position], &[], &fills);
-
     assert!(candidates.is_empty());
 }
-
 #[test]
 fn reconciliation_snapshot_does_not_build_close_fill_candidate_with_active_open_order() {
     let config = config_from(&[
@@ -578,6 +644,7 @@ fn reconciliation_snapshot_does_not_build_close_fill_candidate_with_active_open_
         ("RECONCILIATION_SNAPSHOT_SYMBOL", "ASTER-USDT-SWAP"),
         ("RECONCILIATION_SNAPSHOT_COMBO_ID", "85"),
         ("RECONCILIATION_SNAPSHOT_TASK_ID", "86"),
+        ("RECONCILIATION_SNAPSHOT_CREDENTIAL_ID", "8801"),
     ])
     .unwrap();
     let open_order = Order {
@@ -629,8 +696,6 @@ fn reconciliation_snapshot_does_not_build_close_fill_candidate_with_active_open_
             raw: json!({}),
         },
     ];
-
     let candidates = build_close_fill_writeback_candidates(&config, &[], &[open_order], &fills);
-
     assert!(candidates.is_empty());
 }

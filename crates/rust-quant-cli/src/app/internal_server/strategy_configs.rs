@@ -3,57 +3,82 @@ use serde::Deserialize;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{types::Json, PgPool, Postgres, QueryBuilder};
-
 const MAX_STRATEGY_CONFIG_PAGE_SIZE: i64 = 200;
 const DEFAULT_STRATEGY_CONFIG_PAGE_SIZE: i64 = 10;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StrategyConfigListQuery {
+    /// 页码。
     pub page: i64,
+    /// 分页大小。
     pub page_size: i64,
+    /// 关键词；为空时不做关键词过滤。
     pub keyword: Option<String>,
+    /// 交易所名称。
     pub exchange: Option<String>,
+    /// 交易对或资产符号。
     pub symbol: Option<String>,
+    /// 是否启用。
     pub enabled: Option<bool>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrategyConfigUpsertRequest {
+    /// legacy ID；为空时使用默认值或表示不限制。
     pub legacy_id: Option<i64>,
+    /// 策略Key，用于构建接口请求。
     pub strategy_key: String,
+    /// 策略名称。
     pub strategy_name: Option<String>,
+    /// version；为空时表示该条件不启用。
     pub version: Option<String>,
+    /// 交易所名称。
     pub exchange: Option<String>,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// 周期。
     pub timeframe: String,
+    /// 是否启用。
     pub enabled: bool,
+    /// 运行配置。
     pub config: Value,
+    /// 配置项。
     pub risk_config: Value,
+    /// updatedby；为空时表示该条件不启用。
     pub updated_by: Option<String>,
 }
-
 #[derive(Debug, Deserialize)]
 struct RawStrategyConfigUpsertRequest {
     #[serde(rename = "legacyId", alias = "legacy_id")]
+    /// legacy ID；为空时使用默认值或表示不限制。
     legacy_id: Option<i64>,
     #[serde(rename = "strategyKey", alias = "strategy_key")]
+    /// 策略Key，用于构建接口请求。
     strategy_key: String,
     #[serde(rename = "strategyName", alias = "strategy_name")]
+    /// 策略名称。
     strategy_name: Option<String>,
+    /// version；为空时表示该条件不启用。
     version: Option<String>,
+    /// 交易所名称。
     exchange: Option<String>,
+    /// 交易对或资产符号。
     symbol: String,
+    /// 周期。
     timeframe: String,
     #[serde(default = "default_enabled")]
+    /// 是否启用。
     enabled: bool,
     #[serde(default)]
+    /// 运行配置。
     config: Value,
     #[serde(rename = "riskConfig", alias = "risk_config", default)]
+    /// 配置项。
     risk_config: Value,
     #[serde(rename = "updatedBy", alias = "updated_by")]
+    /// updatedby；为空时表示该条件不启用。
     updated_by: Option<String>,
 }
-
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 pub fn strategy_config_list_query_from_path(path: &str) -> Result<StrategyConfigListQuery, String> {
     let query = path.split_once('?').map(|(_, query)| query).unwrap_or("");
     let page = query_param(query, &["page"])
@@ -76,7 +101,6 @@ pub fn strategy_config_list_query_from_path(path: &str) -> Result<StrategyConfig
     let enabled = query_param(query, &["enabled", "status"])
         .as_deref()
         .and_then(parse_optional_enabled);
-
     Ok(StrategyConfigListQuery {
         page,
         page_size,
@@ -86,7 +110,7 @@ pub fn strategy_config_list_query_from_path(path: &str) -> Result<StrategyConfig
         enabled,
     })
 }
-
+/// 提供策略配置upsertrequestfrom请求体的集中实现，避免回测策略调用方重复处理相同细节。
 pub fn strategy_config_upsert_request_from_body(
     body: &[u8],
 ) -> Result<StrategyConfigUpsertRequest, String> {
@@ -95,7 +119,6 @@ pub fn strategy_config_upsert_request_from_body(
     let strategy_key = required_text(raw.strategy_key, "strategyKey")?;
     let symbol = required_text(raw.symbol, "symbol")?.to_ascii_uppercase();
     let timeframe = required_text(raw.timeframe, "timeframe")?;
-
     Ok(StrategyConfigUpsertRequest {
         legacy_id: raw.legacy_id,
         strategy_key,
@@ -110,7 +133,7 @@ pub fn strategy_config_upsert_request_from_body(
         updated_by: optional_text(raw.updated_by),
     })
 }
-
+/// 创建 回测与策略研究 资源，并在入口处完成必要的参数归一。
 pub(super) fn create_quant_core_internal_pool() -> Result<PgPool> {
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
         .or_else(|_| std::env::var("POSTGRES_QUANT_CORE_DATABASE_URL"))
@@ -122,7 +145,7 @@ pub(super) fn create_quant_core_internal_pool() -> Result<PgPool> {
         .connect_lazy(&database_url)
         .context("create quant_core internal database pool")
 }
-
+/// 持久化 回测与策略研究 结果，保证写入路径和幂等语义集中处理。
 pub(super) async fn upsert_strategy_config_response(
     pool: &PgPool,
     request: &StrategyConfigUpsertRequest,
@@ -175,10 +198,9 @@ pub(super) async fn upsert_strategy_config_response(
     .bind(request.updated_by.as_deref())
     .fetch_one(pool)
     .await?;
-
     Ok(row.0 .0)
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 pub(super) async fn fetch_strategy_config_list_response(
     pool: &PgPool,
     query: &StrategyConfigListQuery,
@@ -193,17 +215,15 @@ pub(super) async fn fetch_strategy_config_list_response(
         .push_bind(query.page_size)
         .push(" OFFSET ")
         .push_bind(offset);
-
     let mut count_builder =
         QueryBuilder::<Postgres>::new("SELECT COUNT(*)::bigint FROM strategy_configs WHERE 1=1");
     push_strategy_config_filters(&mut count_builder, query);
-
     let total: (i64,) = count_builder.build_query_as().fetch_one(pool).await?;
     let rows: Vec<(Json<Value>,)> = data_builder.build_query_as().fetch_all(pool).await?;
     let items = rows.into_iter().map(|(row,)| row.0).collect();
     Ok((items, total.0))
 }
-
+/// 把数据加入 回测与策略研究 聚合结果，保持集合构造逻辑集中。
 fn push_strategy_config_filters(
     builder: &mut QueryBuilder<Postgres>,
     query: &StrategyConfigListQuery,
@@ -230,7 +250,7 @@ fn push_strategy_config_filters(
         builder.push(" AND enabled = ").push_bind(enabled);
     }
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 fn query_param(query: &str, names: &[&str]) -> Option<String> {
     query
         .split('&')
@@ -244,7 +264,7 @@ fn query_param(query: &str, names: &[&str]) -> Option<String> {
             }
         })
 }
-
+/// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_optional_enabled(raw: &str) -> Option<bool> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "true" | "1" | "enabled" | "active" => Some(true),
@@ -252,7 +272,7 @@ fn parse_optional_enabled(raw: &str) -> Option<bool> {
         _ => None,
     }
 }
-
+/// 封装必需text，减少回测策略调用方重复实现相同细节。
 fn required_text(value: String, field: &str) -> Result<String, String> {
     let value = value.trim().to_string();
     if value.is_empty() {
@@ -261,13 +281,12 @@ fn required_text(value: String, field: &str) -> Result<String, String> {
         Ok(value)
     }
 }
-
+/// 提供optionaltext的集中实现，避免回测策略调用方重复处理相同细节。
 fn optional_text(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
-
 fn default_enabled() -> bool {
     true
 }

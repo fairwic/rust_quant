@@ -5,7 +5,6 @@ fn full_product_health_aggregator_fixture_is_machine_readable_and_redacted() {
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
     let payload: Value =
         serde_json::from_str(&body).unwrap_or_else(|error| panic!("invalid json: {error}\n{body}"));
-
     assert_eq!(payload["schema_version"], 1);
     assert_eq!(payload["status"], "fail");
     assert!(payload["generated_at"].as_str().is_some());
@@ -13,7 +12,6 @@ fn full_product_health_aggregator_fixture_is_machine_readable_and_redacted() {
     assert!(payload["sections"].as_object().is_some());
     assert!(payload["alerts"].as_array().is_some());
     assert!(payload["correlation"].as_object().is_some());
-
     assert_eq!(payload["summary"]["p0_count"], 1);
     assert_eq!(payload["summary"]["p1_count"], 1);
     assert_eq!(payload["summary"]["info_count"], 1);
@@ -27,7 +25,6 @@ fn full_product_health_aggregator_fixture_is_machine_readable_and_redacted() {
         .as_object()
         .is_some());
     assert!(payload["sections"]["admin_readiness"].as_object().is_some());
-
     let alerts = alerts(&payload);
     assert!(
         alerts
@@ -55,7 +52,6 @@ fn full_product_health_aggregator_fixture_is_machine_readable_and_redacted() {
             );
         }
     }
-
     let correlation = &payload["correlation"];
     for key in [
         "news_id",
@@ -74,7 +70,6 @@ fn full_product_health_aggregator_fixture_is_machine_readable_and_redacted() {
             "fixture correlation missing {key}: {body}"
         );
     }
-
     let lowered = body.to_ascii_lowercase();
     for sensitive in [
         ".env",
@@ -110,7 +105,6 @@ fn full_product_health_aggregator_fixture_script_passes_bash_syntax_check() {
         .arg(aggregator_fixture_script_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
@@ -119,7 +113,6 @@ fn full_product_health_aggregator_fixture_script_passes_bash_syntax_check() {
 }
 fn full_product_health_aggregator_fixture_script_is_read_only_and_scans_sensitive_markers() {
     let script = read_aggregator_fixture_script();
-
     assert!(script.contains("full_product_health_aggregator.fixture.json"));
     assert!(script.contains("check_local_service_health.sh"));
     assert!(script.contains("schema_version"));
@@ -167,25 +160,21 @@ fn full_product_health_aggregator_fixture_script_is_read_only_and_scans_sensitiv
         );
     }
 }
-
 #[test]
 fn full_product_health_aggregator_fixture_script_outputs_machine_readable_json() {
     let output = Command::new(aggregator_fixture_script_path())
         .env("FULL_PRODUCT_HEALTH_OUTPUT", "json")
         .output()
         .expect("fixture runner should run");
-
     assert!(
         output.status.success(),
         "fixture runner should succeed:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["schema_version"], 1);
     assert!(matches!(
         payload["status"].as_str(),
@@ -195,7 +184,6 @@ fn full_product_health_aggregator_fixture_script_outputs_machine_readable_json()
     assert!(payload["sections"].as_object().is_some());
     assert!(payload["alerts"].as_array().is_some());
     assert!(payload["correlation"].as_object().is_some());
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         ".env",
@@ -220,7 +208,6 @@ fn full_product_health_aggregator_fixture_script_outputs_machine_readable_json()
         );
     }
 }
-
 #[test]
 fn full_product_health_runner_script_passes_bash_syntax_check() {
     let output = Command::new("bash")
@@ -228,18 +215,15 @@ fn full_product_health_runner_script_passes_bash_syntax_check() {
         .arg(aggregator_runner_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
-
 #[test]
 fn full_product_health_runner_is_read_only_and_disables_unsafe_default_probes() {
     let script = read_aggregator_runner_script();
-
     assert!(script.contains("check_local_service_health.sh"));
     assert!(script.contains("full_product_health_aggregator.fixture.json"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_LOCAL_JSON_PATH"));
@@ -298,7 +282,6 @@ fn full_product_health_runner_is_read_only_and_disables_unsafe_default_probes() 
         );
     }
 }
-
 #[test]
 fn full_product_health_runner_outputs_machine_readable_json_from_read_only_inputs() {
     let local_json = temp_json_file(
@@ -373,18 +356,15 @@ fn full_product_health_runner_outputs_machine_readable_json_from_read_only_input
         .env("FULL_PRODUCT_HEALTH_NEWS_JSON_PATH", news_json)
         .output()
         .expect("full product health runner should run");
-
     assert!(
         output.status.success(),
         "runner should emit parseable json even when aggregated status is fail:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["schema_version"], 1);
     assert_eq!(payload["status"], "fail");
     assert!(payload["generated_at"].as_str().is_some());
@@ -439,7 +419,6 @@ fn full_product_health_runner_outputs_machine_readable_json_from_read_only_input
                 && alert["section"] == "news_source_ai_health"),
         "news input should contribute a P1 alert: {stdout}"
     );
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         ".env",
@@ -515,19 +494,16 @@ fn full_product_health_runner_outputs_alert_taxonomy_for_correlation_drilldown()
         .env("FULL_PRODUCT_HEALTH_ADMIN_JSON_PATH", admin_json)
         .output()
         .expect("full product health runner should run");
-
     assert!(
         output.status.success(),
         "runner should emit parseable json:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
     let taxonomy = alert_taxonomy(&payload);
-
     assert!(
         taxonomy.iter().any(|item| item["severity"] == "P0"
             && item["code"] == "WEB_ORDER_RESULT_MISSING"
@@ -552,7 +528,6 @@ fn full_product_health_runner_outputs_alert_taxonomy_for_correlation_drilldown()
                 .any(|key| key == "admin_operation_log_id")),
         "admin audit alert should expose stable action and correlation keys: {stdout}"
     );
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         ".env",
@@ -577,7 +552,6 @@ fn full_product_health_runner_outputs_alert_taxonomy_for_correlation_drilldown()
         );
     }
 }
-
 #[test]
 fn full_product_health_runner_merges_admin_readiness_input_and_correlation() {
     let admin_json = temp_json_file(
@@ -621,18 +595,15 @@ fn full_product_health_runner_merges_admin_readiness_input_and_correlation() {
         .env("FULL_PRODUCT_HEALTH_ADMIN_JSON_PATH", admin_json)
         .output()
         .expect("full product health runner should run");
-
     assert!(
         output.status.success(),
         "runner should emit parseable json with admin input:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["status"], "fail");
     assert_eq!(
         payload["sections"]["admin_readiness"]["failed_operation_count"],
@@ -662,7 +633,6 @@ fn full_product_health_runner_merges_admin_readiness_input_and_correlation() {
                 && alert["section"] == "admin_readiness"),
         "admin readiness input should contribute a P0 alert: {stdout}"
     );
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         ".env",

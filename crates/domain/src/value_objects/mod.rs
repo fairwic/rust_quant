@@ -2,7 +2,6 @@
 //!
 //! 值对象是不可变的、无身份标识的领域概念
 //! 它们通过值来识别，而不是通过ID
-
 pub mod leverage;
 pub mod percentage;
 pub mod price;
@@ -10,7 +9,6 @@ pub mod signal;
 pub mod stop_loss;
 pub mod symbol;
 pub mod volume;
-
 pub use leverage::{Leverage, LeverageError};
 pub use percentage::{Percentage, PercentageError};
 pub use price::{Price, PriceError};

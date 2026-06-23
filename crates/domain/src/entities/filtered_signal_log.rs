@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 /// 过滤信号日志实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilteredSignalLog {
@@ -30,7 +29,6 @@ pub struct FilteredSignalLog {
     /// 信号详情 (各指标值的JSON快照)
     pub signal_value: Option<String>,
 }
-
 impl FilteredSignalLog {
     /// 创建新的过滤信号日志
     pub fn new(

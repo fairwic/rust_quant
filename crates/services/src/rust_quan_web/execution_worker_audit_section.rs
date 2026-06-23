@@ -1,4 +1,6 @@
 impl ExecutionWorker {
+    /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+    /// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
     async fn record_checkpoint(
         &self,
         worker_status: &str,
@@ -22,7 +24,7 @@ impl ExecutionWorker {
             );
         }
     }
-
+    /// 持久化 Web 商业、会员和执行准备度 结果，保证写入路径和幂等语义集中处理。
     async fn record_report_result_failure(
         &self,
         task_id: i64,
@@ -55,13 +57,13 @@ impl ExecutionWorker {
         )
         .await;
     }
-
+    /// 提供write交易所requestaudit的集中实现，避免Web 商业链路调用方重复处理相同细节。
     async fn write_exchange_request_audit(&self, audit: ExchangeRequestAuditLog) -> Result<()> {
         self.audit_repository
             .insert_exchange_request_audit(&audit)
             .await
     }
-
+    /// 持久化 Web 商业、会员和执行准备度 结果，保证写入路径和幂等语义集中处理。
     async fn record_exchange_request_audit(&self, audit: ExchangeRequestAuditLog) {
         if let Err(error) = self.write_exchange_request_audit(audit.clone()).await {
             warn!(

@@ -1,8 +1,6 @@
 extern crate rbatis;
-
 use std::convert::TryInto;
 use std::sync::Arc;
-
 use rust_quant_core::database;
 use rust_quant_common::utils::time;
 use chrono::{DateTime, Utc};
@@ -12,7 +10,6 @@ use rbatis::{crud, impl_update, RBatis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
-
 /// table
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // #[serde(rename_all = "camelCase")]
@@ -43,9 +40,9 @@ pub struct SwapOrderEntity {
     // 平台类型
     pub platform_type: String, //okx,binance,huobi,bitget,
 }
-
 impl SwapOrderEntity {
     // 生成订单id
+    /// 提供gen订单ID的集中实现，避免交易执行调用方重复处理相同细节。
     pub fn gen_order_id(inst_id: &str, period: &str, side: &str, pos_side: &str) -> String {
         let time = rust_quant_common::utils::time::format_to_period_str(period);
         //btc-1d-buy-l-20250710000000
@@ -60,20 +57,18 @@ impl SwapOrderEntity {
         format!("{}{}{}{}{}", inst_id, period, side, pos_side, time)
     }
 }
-
 crud!(SwapOrderEntity {}, "swap_orders"); //crud = insert+select_by_column+update_by_column+delete_by_column
-
 impl_select!(SwapOrderEntity{select_by_in_order_id(in_order_id:String) => "`where in_order_id = #{in_order_id}`"},"swap_orders");
 impl_select!(SwapOrderEntity{fetch_list() => ""},"swap_orders");
-
 #[derive(Debug)]
 enum TimeInterval {
     OneDay,
     OneHour,
     // 其他时间类型可以在这里添加
 }
-
 impl TimeInterval {
+    /// 封装当前函数，减少交易执行调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
     fn table_name(&self) -> &'static str {
         match self {
             TimeInterval::OneDay => "btc_candles_1d",
@@ -82,23 +77,24 @@ impl TimeInterval {
         }
     }
 }
-
 pub struct SwapOrderEntityModel {
+    /// db，用于记录交易或执行状态。
     db: &'static RBatis,
 }
-
 impl SwapOrderEntityModel {
+    /// 构建 交易执行与风控 所需实例，并集中初始化依赖和默认状态。
     pub async fn new() -> Self {
         Self {
             db: db::get_db_client(),
         }
     }
-
+    /// 提供add的集中实现，避免交易执行调用方重复处理相同细节。
     pub async fn add(&self, swap_order_entity: &SwapOrderEntity) -> anyhow::Result<ExecResult> {
         let data = SwapOrderEntity::insert(self.db, &swap_order_entity).await.map_err(|e| anyhow::anyhow!("OKX错误: {:?}", e))?;
         info!("insert_batch = {}", json!(data));
         Ok(data)
     }
+    /// 加载 交易执行与风控 运行所需数据，并把缺失或异常交给调用方处理。
     pub async fn query_one(
         &self,
         inst_id: &str,

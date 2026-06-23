@@ -1,29 +1,30 @@
+use super::get_quant_core_postgres_pool;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, QueryBuilder};
-
-use super::get_quant_core_postgres_pool;
-
 /// Tickers Volume 数据表实体
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 #[serde(rename_all = "snake_case")]
 pub struct TickersVolume {
     #[sqlx(default)]
+    /// 唯一标识。
     pub id: Option<i64>,
+    /// 交易所合约或现货交易对标识。
     pub inst_id: String,
+    /// 计算周期。
     pub period: String,
+    /// 事件时间戳。
     pub ts: i64,
+    /// 持仓量。
     pub oi: String,
+    /// vol，用于行情、K 线或市场扫描。
     pub vol: String,
 }
-
 pub struct TickersVolumeModel;
-
 impl TickersVolumeModel {
     pub fn new() -> Self {
         Self
     }
-
     /// 根据 inst_id 查询
     pub async fn find_one(&self, inst_id: &str) -> Result<Vec<TickersVolume>> {
         let pool = get_quant_core_postgres_pool()?;
@@ -32,10 +33,8 @@ impl TickersVolumeModel {
                 .bind(inst_id)
                 .fetch_all(pool)
                 .await?;
-
         Ok(results)
     }
-
     /// 根据 inst_id 删除
     pub async fn delete_by_inst_id(&self, inst_id: &str) -> Result<u64> {
         let pool = get_quant_core_postgres_pool()?;
@@ -43,20 +42,16 @@ impl TickersVolumeModel {
             .bind(inst_id)
             .execute(pool)
             .await?;
-
         Ok(result.rows_affected())
     }
-
     /// 批量插入
     pub async fn add(&self, list: Vec<TickersVolume>) -> Result<u64> {
         if list.is_empty() {
             return Ok(0);
         }
-
         let pool = get_quant_core_postgres_pool()?;
         let mut query_builder: QueryBuilder<Postgres> =
             QueryBuilder::new("INSERT INTO tickers_volume (inst_id, period, ts, oi, vol) ");
-
         query_builder.push_values(list.iter(), |mut b, ticker| {
             b.push_bind(&ticker.inst_id)
                 .push_bind(&ticker.period)
@@ -64,13 +59,10 @@ impl TickersVolumeModel {
                 .push_bind(&ticker.oi)
                 .push_bind(&ticker.vol);
         });
-
         let result = query_builder.build().execute(pool).await?;
-
         Ok(result.rows_affected())
     }
 }
-
 impl Default for TickersVolumeModel {
     fn default() -> Self {
         Self::new()

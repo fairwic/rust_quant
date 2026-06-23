@@ -9,7 +9,7 @@ use sqlx::{PgPool, Row};
 pub(super) fn normalize_candidate_limit(limit: i64) -> u32 {
     limit.clamp(1, 100) as u32
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 pub(super) async fn load_market_velocity_live_candidate_events(
     pool: &PgPool,
     event_id: Option<i64>,
@@ -28,7 +28,7 @@ pub(super) async fn load_market_velocity_live_candidate_events(
         .context("load recent market velocity live candidate events")?;
     rows.into_iter().map(market_rank_event_from_row).collect()
 }
-
+/// 提供市场动量live候选事件SQL的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_live_candidate_events_sql() -> &'static str {
     r#"
         WITH eligible_events AS (
@@ -112,7 +112,7 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
         LIMIT $5
         "#
 }
-
+/// 提供市场rankeventfrom数据行的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_rank_event_from_row(row: sqlx::postgres::PgRow) -> Result<MarketRankEvent> {
     let event_type_raw: String = row.get("event_type");
     let event_type = MarketRankEventType::try_from(event_type_raw.as_str())?;
@@ -134,7 +134,6 @@ fn market_rank_event_from_row(row: sqlx::postgres::PgRow) -> Result<MarketRankEv
     } else {
         None
     };
-
     Ok(MarketRankEvent {
         id: row.get("id"),
         exchange: row.get("exchange"),
@@ -156,11 +155,9 @@ fn market_rank_event_from_row(row: sqlx::postgres::PgRow) -> Result<MarketRankEv
         notification_state: row.get("notification_state"),
     })
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn candidate_scan_limit_is_bounded_for_live_handoff() {
         assert_eq!(normalize_candidate_limit(-10), 1);
@@ -168,11 +165,9 @@ mod tests {
         assert_eq!(normalize_candidate_limit(20), 20);
         assert_eq!(normalize_candidate_limit(500), 100);
     }
-
     #[test]
     fn candidate_scan_sql_uses_latest_event_per_symbol_before_limit() {
         let sql = market_velocity_live_candidate_events_sql();
-
         assert!(
             sql.contains("DISTINCT ON (symbol)"),
             "live candidate scan must not let repeated events from a few symbols fill the limit: {sql}"

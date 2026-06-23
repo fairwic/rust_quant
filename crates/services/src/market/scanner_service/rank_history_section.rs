@@ -1,3 +1,4 @@
+/// 构建build市场ranksnapshotsfromscan，集中维护行情数据的载荷和字段组装规则。
 fn build_market_rank_snapshots_from_scan(
     current_snapshots: &[TickerSnapshot],
     current_ranks: &HashMap<String, i32>,
@@ -21,7 +22,7 @@ fn build_market_rank_snapshots_from_scan(
         })
         .collect()
 }
-
+/// 提供rankhistoryfrompersistedsnapshots的集中实现，避免行情数据调用方重复处理相同细节。
 fn rank_history_from_persisted_snapshots(
     snapshots: Vec<MarketRankSnapshot>,
 ) -> VecDeque<RankSnapshot> {
@@ -37,6 +38,5 @@ fn rank_history_from_persisted_snapshots(
         entry.ranks.insert(snapshot.symbol.clone(), snapshot.rank);
         entry.prices.insert(snapshot.symbol, snapshot.price);
     }
-
     grouped.into_values().collect()
 }

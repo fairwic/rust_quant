@@ -9,8 +9,6 @@ mod test {
     use rust_quant::{time_util, trading};
     use ta::indicators::AverageTrueRange;
     use ta::Next;
-
-    /// 使用rust_quant库的ATR
     #[tokio::test]
     async fn test_atr_calculation() -> anyhow::Result<()> {
         dotenv().ok();
@@ -37,23 +35,19 @@ mod test {
         }
         Ok(())
     }
-    /// 使用ta库的AverageTrueRange
     #[tokio::test]
     async fn test_ta_atr() -> anyhow::Result<()> {
         // 初始化环境和数据库连接
         dotenv().ok();
         init_db().await;
-
         // 设置参数
         let inst_id = "BTC-USDT-SWAP";
         let time = "1H";
         let period = 10;
-
         // 获取K线数据
         let source_candles: Vec<CandlesEntity> =
             trading::task::basic::get_candle_data_confirm(inst_id, time, 300, None).await?;
         println!("{:#?}", source_candles);
-
         // 确保有数据
         if source_candles.is_empty() {
             println!("警告: 未获取到K线数据");
@@ -68,7 +62,6 @@ mod test {
             "时间", "最高价", "最低价", "收盘价", "ATR"
         );
         println!("{}", "=".repeat(75));
-
         // 计算并显示结果
         for candle in source_candles.iter() {
             // 解析价格数据
@@ -77,17 +70,14 @@ mod test {
             let close = candle.c.parse::<f64>()?;
             // 计算ATR
             let atr_value = atr.next(&Bar::new().high(high).low(low).close(close));
-
             // 时间格式化
             let time_str = time_util::mill_time_to_datetime_shanghai(candle.ts).unwrap();
-
             // 输出结果
             println!(
                 "{:<25} {:<12.2} {:<12.2} {:<12.2} {:<12.4}",
                 time_str, high, low, close, atr_value
             );
         }
-
         Ok(())
     }
 }

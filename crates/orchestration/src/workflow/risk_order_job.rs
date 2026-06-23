@@ -1,5 +1,4 @@
 // 风险监控任务
-
 use rust_quant_execution::order_manager::order_service::OrderService;
 use rust_quant_risk::position::position_service::PositionService;
 use anyhow::{anyhow};
@@ -14,17 +13,14 @@ use okx::{OkxAccount, OkxAsset};
 use std::str::FromStr;
 use tracing::{span, Level};
 use rust_quant_common::AppError;
-
 // 常量定义
-
 /// 风险管理任务，负责仓位风险的检查
 pub struct RiskOrderJob {}
-
 impl RiskOrderJob {
     pub fn new() -> Self {
         Self {}
     }
-
+    /// 封装运行，减少交易执行调用方重复实现相同细节。
     pub async fn run(
         &self,
         inst_id: Option<&str>,
@@ -46,7 +42,6 @@ impl RiskOrderJob {
         //更新订单详情到数据库中去
         Ok(())
     }
-
     ///同步订单列表
     pub async fn sync_order_list(
         &self,
@@ -65,19 +60,20 @@ impl RiskOrderJob {
             info!("获取历史已完成的订单列表为空");
             return Ok(vec![]);
         }
-
         Ok(order_list)
     }
 }
-
 /// 测试
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app_init;
     use serde_json::json;
-
     #[tokio::test]
+    /// 封装当前函数，减少交易执行调用方重复实现相同细节。
+    /// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 采用 async 以支持数据库/网络 I/O 的并发调度，避免阻塞。
     async fn test_risk_job() {
         // 设置日志
         env_logger::init();
@@ -90,7 +86,6 @@ mod tests {
         //     .await;
         // println!("risk_job: {:?}", risk_job);
     }
-
     #[tokio::test]
     async fn test_sync_order_list() ->Result<(), AppError>{
         // 设置日志

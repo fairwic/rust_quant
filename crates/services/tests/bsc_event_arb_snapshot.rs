@@ -1,7 +1,6 @@
 use rust_quant_domain::entities::ExternalMarketSnapshot;
 use rust_quant_services::strategy::BscEventArbSnapshotBuilder;
 use serde_json::json;
-
 fn snapshot_row(
     metric_type: &str,
     metric_time: i64,
@@ -16,7 +15,6 @@ fn snapshot_row(
     row.raw_payload = Some(payload);
     row
 }
-
 #[test]
 fn builds_bsc_event_arb_snapshot_from_external_market_rows() {
     let rows = vec![
@@ -101,9 +99,7 @@ fn builds_bsc_event_arb_snapshot_from_external_market_rows() {
             }),
         ),
     ];
-
     let snapshot = BscEventArbSnapshotBuilder::build("RAVE", &rows).unwrap();
-
     assert_eq!(snapshot.chain_id, "bsc");
     assert_eq!(snapshot.event_tags, vec!["binance_alpha", "cex_listing"]);
     assert_eq!(snapshot.price_usd, 100.0);

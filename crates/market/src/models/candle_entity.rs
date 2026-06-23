@@ -2,12 +2,12 @@ use chrono::NaiveDateTime;
 use okx::dto::market_dto::CandleOkxRespDto;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-
 /// K线数据实体
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 #[serde(rename_all = "snake_case")]
 pub struct CandlesEntity {
     #[sqlx(default)]
+    /// 唯一标识。
     pub id: Option<i64>,
     pub ts: i64,         // 开始时间，Unix时间戳的毫秒数格式
     pub o: String,       // 开盘价格
@@ -18,12 +18,14 @@ pub struct CandlesEntity {
     pub vol_ccy: String, // 交易量，以币为单位
     pub confirm: String, // K线状态
     #[sqlx(default)]
+    /// 创建时间。
     pub created_at: Option<NaiveDateTime>,
     #[sqlx(default)]
+    /// 最后更新时间。
     pub updated_at: Option<NaiveDateTime>,
 }
-
 impl From<&CandleOkxRespDto> for CandlesEntity {
+    /// 从外部输入转换为内部模型，隔离 行情与市场数据 的字段适配细节。
     fn from(candle: &CandleOkxRespDto) -> Self {
         CandlesEntity {
             id: None,

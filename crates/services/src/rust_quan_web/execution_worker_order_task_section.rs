@@ -1,15 +1,24 @@
 struct PendingCloseTask {
+    /// 任务 ID。
     task_id: i64,
+    /// 交易所名称。
     exchange: ExchangeId,
+    /// 交易对或资产符号。
     symbol: String,
+    /// 类型标识。
     task_type: String,
+    /// 状态值。
     task_status: String,
+    /// 风险controlaction，用于风控判断或风险展示。
     risk_control_action: String,
+    /// 是否需要人工处理。
     manual_review: Value,
+    /// closeorderpayload；为空时表示该条件不启用。
     close_order_payload: Option<Value>,
 }
-
 impl PendingCloseTask {
+    /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     fn from_task(task: &ExecutionTask, default_exchange: ExchangeId) -> Result<Self> {
         let payload = order_payload(&task.request_payload_json);
         let exchange = payload_string(&payload, "exchange")
@@ -36,7 +45,6 @@ impl PendingCloseTask {
                 .and_then(|value| value.get("close_order"))
                 .cloned()
         });
-
         Ok(Self {
             task_id: task.id,
             exchange,
@@ -48,7 +56,7 @@ impl PendingCloseTask {
             close_order_payload,
         })
     }
-
+    /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
     fn to_order_request(&self) -> Result<Option<OrderPlacementRequest>> {
         let Some(payload) = self.close_order_payload.as_ref() else {
             return Ok(None);
@@ -63,7 +71,6 @@ impl PendingCloseTask {
             .map(|value| parse_order_type(&value))
             .transpose()?
             .unwrap_or(OrderType::Market);
-
         let position_side = payload_string(payload, "position_side");
         // Hedge-mode closes use position_side to constrain the side being reduced.
         // In that mode Binance rejects reduceOnly, while one-way close tasks should
@@ -73,7 +80,6 @@ impl PendingCloseTask {
             (ExchangeId::Binance, Some(_)) => None,
             _ => Some(true),
         };
-
         Ok(Some(OrderPlacementRequest {
             exchange,
             instrument: parse_instrument(&symbol)?,
@@ -97,7 +103,7 @@ impl PendingCloseTask {
             attached_stop_loss_price: None,
         }))
     }
-
+    /// 提供protectivecancelrequest的集中实现，避免Web 商业链路调用方重复处理相同细节。
     fn protective_cancel_request(&self) -> Result<Option<(ExchangeId, CancelOrderRequest)>> {
         let Some(payload) = self.close_order_payload.as_ref() else {
             return Ok(None);
@@ -109,7 +115,6 @@ impl PendingCloseTask {
         if client_order_id.is_none() && order_id.is_none() {
             return Ok(None);
         }
-
         let exchange = payload_string(payload, "exchange")
             .map(|value| parse_exchange(&value))
             .transpose()?
@@ -127,10 +132,9 @@ impl PendingCloseTask {
         if let Some(margin_coin) = payload_string(payload, "margin_coin") {
             request = request.with_margin_coin(margin_coin);
         }
-
         Ok(Some((exchange, request)))
     }
-
+    /// 提供dryrun报告的集中实现，避免Web 商业链路调用方重复处理相同细节。
     fn dry_run_report(&self) -> ExecutionTaskReportRequest {
         ExecutionTaskReportRequest::success(
             self.task_id,
@@ -141,11 +145,10 @@ impl PendingCloseTask {
             self.report_payload(true),
         )
     }
-
     fn missing_live_contract_message(&self) -> String {
         "pending_close task requires Web close_order payload before live execution".to_string()
     }
-
+    /// 提供报告载荷的集中实现，避免Web 商业链路调用方重复处理相同细节。
     fn report_payload(&self, dry_run: bool) -> Value {
         json!({
             "dry_run": dry_run,
@@ -158,19 +161,27 @@ impl PendingCloseTask {
         })
     }
 }
-
 #[derive(Debug, Clone)]
 struct PendingConfirmationTask {
+    /// 任务 ID。
     task_id: i64,
+    /// 交易所名称。
     exchange: ExchangeId,
+    /// 交易对或资产符号。
     symbol: String,
+    /// externalorder ID；为空时使用默认值或表示不限制。
     external_order_id: Option<String>,
+    /// clientorder ID；为空时使用默认值或表示不限制。
     client_order_id: Option<String>,
+    /// 订单方向，用于会员、订单或支付链路。
     order_side: String,
+    /// 订单状态。
     order_status: String,
 }
-
 impl PendingConfirmationTask {
+    /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn from_task_and_order_result(
         task: &ExecutionTask,
         exchange: &str,
@@ -187,7 +198,6 @@ impl PendingConfirmationTask {
             .or_else(|| Some(format!("rqtask{}", task.id)));
         let external_order_id =
             Some(external_order_id.trim().to_string()).filter(|value| !value.is_empty());
-
         Ok(Self {
             task_id: task.id,
             exchange,
@@ -200,7 +210,7 @@ impl PendingConfirmationTask {
             order_status: order_status.trim().to_string(),
         })
     }
-
+    /// 从外部输入转换为内部模型，隔离 Web 商业、会员和执行准备度 的字段适配细节。
     fn from_confirmation_item(
         task: &ExecutionTask,
         order_result: &ExchangeOrderResult,
@@ -213,7 +223,7 @@ impl PendingConfirmationTask {
             &order_result.order_status,
         )
     }
-
+    /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
     fn to_order_query(&self) -> Result<OrderQuery> {
         let instrument = parse_instrument(&self.symbol)?;
         if let Some(external_order_id) = self
@@ -238,13 +248,12 @@ impl PendingConfirmationTask {
         {
             return Ok(OrderQuery::by_client_order_id(instrument, client_order_id));
         }
-
         Err(anyhow!(
             "pending_confirmation task {} requires exchange order id or client_order_id",
             self.task_id
         ))
     }
-
+    /// 提供externalorclient订单ID的集中实现，避免Web 商业链路调用方重复处理相同细节。
     fn external_or_client_order_id(&self) -> String {
         self.external_order_id
             .as_ref()
@@ -252,7 +261,7 @@ impl PendingConfirmationTask {
             .cloned()
             .unwrap_or_else(|| format!("pending-confirmation-task-{}", self.task_id))
     }
-
+    /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
     fn to_order_ack(&self, order: Option<&Order>) -> OrderAck {
         let instrument = parse_instrument(&self.symbol)
             .expect("pending confirmation symbol was already parsed for order query");
@@ -288,7 +297,7 @@ impl PendingConfirmationTask {
             }),
         }
     }
-
+    /// 提供pending报告的集中实现，避免Web 商业链路调用方重复处理相同细节。
     fn pending_report(
         &self,
         error_message: impl Into<String>,
@@ -318,12 +327,11 @@ impl PendingConfirmationTask {
         report
     }
 }
-
 impl ExecutionOrderTask {
     pub fn from_task(task: &ExecutionTask) -> Result<Self> {
         Self::from_task_with_default(task, ExchangeId::Okx)
     }
-
+    /// 从外部输入转换为内部模型，隔离 Web 商业、会员和执行准备度 的字段适配细节。
     pub fn from_task_with_default(
         task: &ExecutionTask,
         default_exchange: ExchangeId,
@@ -340,6 +348,7 @@ impl ExecutionOrderTask {
             .map(|value| parse_side(&value))
             .transpose()?
             .unwrap_or(OrderSide::Buy);
+        let take_profit_legs = parse_take_profit_legs(payload, direction_from_order_side(side))?;
         let order_type = payload_string(payload, "order_type")
             .map(|value| parse_order_type(&value))
             .transpose()?
@@ -357,7 +366,6 @@ impl ExecutionOrderTask {
                 && entry_price > 0.0)
                 .then(|| format_order_size(size_usdt / entry_price))
         });
-
         Ok(Self {
             task_id: task.id,
             exchange,
@@ -389,9 +397,10 @@ impl ExecutionOrderTask {
             attached_stop_loss_price: selected_stop_loss_price(payload)
                 .filter(|price| price.is_finite() && *price > 0.0)
                 .map(format_order_price),
+            take_profit_legs,
         })
     }
-
+    /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
     pub fn to_order_request(&self) -> Result<OrderPlacementRequest> {
         Ok(OrderPlacementRequest {
             exchange: self.exchange,
@@ -410,7 +419,7 @@ impl ExecutionOrderTask {
             attached_stop_loss_price: self.attached_stop_loss_price.clone(),
         })
     }
-
+    /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
     pub fn to_order_request_with_last_price(
         &self,
         last_price: Option<f64>,
@@ -430,7 +439,7 @@ impl ExecutionOrderTask {
         }
         Ok(request)
     }
-
+    /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
     fn to_live_order_request(
         &self,
         last_price: Option<f64>,
@@ -442,7 +451,7 @@ impl ExecutionOrderTask {
             local_live_min_order_size_enabled(),
         )
     }
-
+    /// 将内部模型转换为输出结构，避免 Web 商业、会员和执行准备度 的内部字段直接外泄。
     fn to_live_order_request_with_local_min_size(
         &self,
         last_price: Option<f64>,
@@ -493,7 +502,7 @@ impl ExecutionOrderTask {
         }
         Ok(request)
     }
-
+    /// 提供dryrun报告的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub fn dry_run_report(&self) -> Result<ExecutionTaskReportRequest> {
         Ok(ExecutionTaskReportRequest::success(
             self.task_id,
@@ -508,7 +517,9 @@ impl ExecutionOrderTask {
         ))
     }
 }
-
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 fn local_live_min_order_size_enabled() -> bool {
     std::env::var("APP_ENV")
         .ok()

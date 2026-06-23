@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 /// 资金费率实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FundingRate {
@@ -34,7 +33,6 @@ pub struct FundingRate {
     /// 利率 (当前资金费率接口特有)
     pub interest_rate: Option<f64>,
 }
-
 impl FundingRate {
     /// 创建新的资金费率实体
     pub fn new(

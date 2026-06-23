@@ -1,7 +1,8 @@
 use super::{
-    backtest_detail_list_query_from_path, backtest_log_list_query_from_path,
-    compute_rank_change_pct, core_backtest_run_list_query_from_path,
-    exchange_account_snapshot_sync_request_from_body, finalize_market_rank_rows,
+    account_snapshot_sync_credential_ref, backtest_detail_list_query_from_path,
+    backtest_log_list_query_from_path, compute_rank_change_pct,
+    core_backtest_run_list_query_from_path, exchange_account_snapshot_sync_request_from_body,
+    finalize_market_rank_rows, handle_exchange_account_snapshot_sync_body,
     kline_sync_request_from_body, market_rank_events_query_from_path,
     market_rank_sort_can_use_recent_query, market_rank_sort_requires_legacy_volume_before_limit,
     recent_market_rank_events_sql, strategy_config_list_query_from_path,
@@ -9,7 +10,6 @@ use super::{
 };
 use chrono::{TimeZone, Utc};
 use serde_json::json;
-
 fn rank_event_row(
     id: i64,
     symbol: &str,
@@ -60,7 +60,6 @@ fn rank_event_row(
         notification_state: "pending".to_string(),
     }
 }
-
 fn rank_event_row_with_type(
     id: i64,
     symbol: &str,
@@ -87,14 +86,12 @@ fn rank_event_row_with_type(
     row.rank_change_pct = compute_rank_change_pct(row.old_rank, row.delta_rank);
     row
 }
-
 #[test]
 fn market_rank_events_query_defaults_exchange_and_caps_limit() {
     let query = market_rank_events_query_from_path(
         "/internal/market-rank-events?symbol=btc-usdt-swap&sort=volume15m&limit=999",
     )
     .expect("market rank event query should parse");
-
     assert_eq!(query.exchange, "okx");
     assert_eq!(query.symbol.as_deref(), Some("BTC-USDT-SWAP"));
     assert_eq!(query.event_type, None);
@@ -103,101 +100,125 @@ fn market_rank_events_query_defaults_exchange_and_caps_limit() {
     assert_eq!(query.limit, 200);
     assert_eq!(query.lookback_minutes, 120);
 }
-
 #[test]
 fn exchange_account_snapshot_sync_request_normalizes_symbols_and_defaults() {
     let body = json!({
         "buyerEmail": " Trader@Example.COM ",
         "exchange": "okx",
+        "credentialId": 8801,
         "combos": [
             {"comboId": 42, "symbol": " btc-usdt-swap "}
         ],
         "triggerSource": "api credential checked"
     })
     .to_string();
-
     let request =
         exchange_account_snapshot_sync_request_from_body(body.as_bytes()).expect("sync request");
-
     assert_eq!(request.buyer_email, "Trader@Example.COM");
     assert_eq!(request.exchange.as_str(), "okx");
     assert_eq!(request.combos.len(), 1);
     assert_eq!(request.combos[0].combo_id, 42);
     assert_eq!(request.combos[0].symbol, "BTC-USDT-SWAP");
+    assert_eq!(request.credential_id, 8801);
     assert!(!request.account_wide);
     assert!(request.include_fills);
     assert!(!request.report_reconciliation);
     assert_eq!(request.trigger_source, "api credential checked");
 }
-
 #[test]
 fn exchange_account_snapshot_sync_request_accepts_account_wide_without_combos() {
     let body = json!({
         "buyerEmail": "buyer@example.com",
         "exchange": "okx",
+        "credentialId": 8801,
         "accountWide": true,
         "triggerSource": "asset overview refresh"
     })
     .to_string();
-
     let request = exchange_account_snapshot_sync_request_from_body(body.as_bytes())
         .expect("account-wide sync request");
-
     assert!(request.account_wide);
     assert!(request.combos.is_empty());
+    assert_eq!(request.credential_id, 8801);
     assert_eq!(request.trigger_source, "asset overview refresh");
 }
-
+#[test]
+fn exchange_account_snapshot_sync_request_requires_exact_credential_id() {
+    let body = json!({
+        "buyerEmail": "buyer@example.com",
+        "exchange": "okx",
+        "combos": [
+            {"comboId": 42, "symbol": "BTC-USDT-SWAP"}
+        ]
+    })
+    .to_string();
+    let error = exchange_account_snapshot_sync_request_from_body(body.as_bytes())
+        .expect_err("missing exact credential id must be rejected");
+    assert_eq!(error, "credential_id is required");
+}
+#[tokio::test]
+async fn exchange_account_snapshot_sync_handler_rejects_missing_exact_credential_id() {
+    let body = json!({
+        "buyerEmail": "buyer@example.com",
+        "exchange": "okx",
+        "combos": [
+            {"comboId": 42, "symbol": "BTC-USDT-SWAP"}
+        ]
+    })
+    .to_string();
+    let response = handle_exchange_account_snapshot_sync_body(body.as_bytes()).await;
+    assert_eq!(response.status_code, 400);
+    assert_eq!(response.body["error"], "credential_id is required");
+}
+#[test]
+fn account_snapshot_sync_credential_ref_prefers_exact_credential_id() {
+    assert_eq!(
+        account_snapshot_sync_credential_ref(8801, "asset overview refresh", "account-wide"),
+        "web_api_credential_id_8801"
+    );
+}
 #[test]
 fn exchange_account_snapshot_sync_request_rejects_invalid_combos() {
     let body = json!({
         "buyerEmail": "buyer@example.com",
         "exchange": "okx",
+        "credentialId": 8801,
         "combos": [
             {"comboId": 0, "symbol": "BTC-USDT-SWAP"}
         ]
     })
     .to_string();
-
     let error = exchange_account_snapshot_sync_request_from_body(body.as_bytes())
         .expect_err("invalid combo id");
-
     assert_eq!(error, "combo_id must be a positive integer");
 }
-
 #[test]
 fn market_rank_events_query_caps_recent_lookback_window() {
     let query = market_rank_events_query_from_path(
         "/internal/market-rank-events?lookbackMinutes=99999&limit=20",
     )
     .expect("market rank event query should parse");
-
     assert_eq!(query.lookback_minutes, 1440);
 }
-
 #[test]
 fn market_rank_events_query_rejects_unknown_event_type() {
     let error =
         market_rank_events_query_from_path("/internal/market-rank-events?eventType=unknown")
             .expect_err("unknown rank event type should be rejected");
-
     assert_eq!(error, "unsupported eventType: unknown");
 }
-
 #[test]
 fn strategy_config_list_query_accepts_api_internal_prefix_and_caps_page_size() {
     let query = strategy_config_list_query_from_path(
         "/api/internal/strategy-configs?page=2&pageSize=999&keyword=vegas&exchange=binance&symbol=eth-usdt-swap",
     )
     .expect("strategy config query should parse");
-
     assert_eq!(query.page, 2);
     assert_eq!(query.page_size, 200);
     assert_eq!(query.keyword.as_deref(), Some("vegas"));
     assert_eq!(query.exchange.as_deref(), Some("binance"));
     assert_eq!(query.symbol.as_deref(), Some("ETH-USDT-SWAP"));
 }
-
 #[test]
 fn strategy_config_upsert_request_accepts_admin_payload() {
     let request = strategy_config_upsert_request_from_body(
@@ -218,7 +239,6 @@ fn strategy_config_upsert_request_accepts_admin_payload() {
         .as_bytes(),
     )
     .expect("strategy config upsert payload should parse");
-
     assert_eq!(request.legacy_id, Some(42));
     assert_eq!(request.strategy_key, "vegas");
     assert_eq!(request.strategy_name.as_deref(), Some("Vegas 4H"));
@@ -231,14 +251,12 @@ fn strategy_config_upsert_request_accepts_admin_payload() {
     assert_eq!(request.risk_config["maxLossPercent"], 0.02);
     assert_eq!(request.updated_by.as_deref(), Some("strategy-auditor"));
 }
-
 #[test]
 fn backtest_log_list_query_accepts_api_internal_prefix_and_filters() {
     let query = backtest_log_list_query_from_path(
         "/api/internal/backtests/logs?page=2&pageSize=999&keyword=vegas&status=success&exchange=okx&symbol=eth-usdt-swap",
     )
     .expect("backtest log query should parse");
-
     assert_eq!(query.page, 2);
     assert_eq!(query.page_size, 200);
     assert_eq!(query.keyword.as_deref(), Some("vegas"));
@@ -246,12 +264,10 @@ fn backtest_log_list_query_accepts_api_internal_prefix_and_filters() {
     assert_eq!(query.exchange.as_deref(), Some("okx"));
     assert_eq!(query.symbol.as_deref(), Some("ETH-USDT-SWAP"));
 }
-
 #[test]
 fn backtest_log_list_query_defaults_page_fields() {
     let query = backtest_log_list_query_from_path("/api/internal/backtests/logs")
         .expect("default backtest log query should parse");
-
     assert_eq!(
         query,
         BacktestLogListQuery {
@@ -266,14 +282,12 @@ fn backtest_log_list_query_defaults_page_fields() {
         }
     );
 }
-
 #[test]
 fn backtest_detail_list_query_accepts_api_internal_prefix_and_filters() {
     let query = backtest_detail_list_query_from_path(
         "/api/internal/backtests/details?page=2&pageSize=999&keyword=vegas&status=closed&backTestId=42&symbol=eth-usdt-swap&side=long",
     )
     .expect("backtest detail query should parse");
-
     assert_eq!(query.page, 2);
     assert_eq!(query.page_size, 200);
     assert_eq!(query.keyword.as_deref(), Some("vegas"));
@@ -282,14 +296,12 @@ fn backtest_detail_list_query_accepts_api_internal_prefix_and_filters() {
     assert_eq!(query.symbol.as_deref(), Some("ETH-USDT-SWAP"));
     assert_eq!(query.side.as_deref(), Some("long"));
 }
-
 #[test]
 fn core_backtest_run_list_query_accepts_api_internal_prefix_and_filters() {
     let query = core_backtest_run_list_query_from_path(
         "/api/internal/core/backtest-runs?page=2&pageSize=999&keyword=vegas&status=success&exchange=okx&symbol=eth-usdt-swap",
     )
     .expect("core backtest run query should parse");
-
     assert_eq!(query.page, 2);
     assert_eq!(query.page_size, 200);
     assert_eq!(query.keyword.as_deref(), Some("vegas"));
@@ -297,7 +309,6 @@ fn core_backtest_run_list_query_accepts_api_internal_prefix_and_filters() {
     assert_eq!(query.exchange.as_deref(), Some("okx"));
     assert_eq!(query.symbol.as_deref(), Some("ETH-USDT-SWAP"));
 }
-
 #[test]
 fn market_rank_rows_only_need_prelimit_legacy_volume_for_volume_15m_sort() {
     assert!(market_rank_sort_requires_legacy_volume_before_limit(Some(
@@ -314,7 +325,6 @@ fn market_rank_rows_only_need_prelimit_legacy_volume_for_volume_15m_sort() {
         "volume_24h"
     )));
 }
-
 #[test]
 fn market_rank_recent_query_is_used_for_sorts_that_do_not_need_volume_context() {
     assert!(market_rank_sort_can_use_recent_query(None));
@@ -323,7 +333,6 @@ fn market_rank_recent_query_is_used_for_sorts_that_do_not_need_volume_context() 
     assert!(!market_rank_sort_can_use_recent_query(Some("volume_24h")));
     assert!(!market_rank_sort_can_use_recent_query(Some("volume_15m")));
 }
-
 #[test]
 fn market_rank_recent_query_filters_top50_before_symbol_dedup() {
     let sql = recent_market_rank_events_sql(Some("delta_rank"));
@@ -336,7 +345,6 @@ fn market_rank_recent_query_filters_top50_before_symbol_dedup() {
     let symbol_dedup = sql
         .find("ORDER BY UPPER(symbol)")
         .expect("recent market rank SQL should dedupe by latest symbol rows");
-
     assert!(
         recency_filter < symbol_dedup,
         "freshness filter must run before DISTINCT ON symbol picks rows"
@@ -350,11 +358,9 @@ fn market_rank_recent_query_filters_top50_before_symbol_dedup() {
         "outer Top50 filter drops symbols whose latest non-Top50 event is newer"
     );
 }
-
 #[test]
 fn market_rank_recent_query_exposes_persisted_technical_snapshot_columns() {
     let sql = recent_market_rank_events_sql(Some("delta_rank"));
-
     for fragment in [
         "technical_timeframe",
         "technical_period",
@@ -375,11 +381,9 @@ fn market_rank_recent_query_exposes_persisted_technical_snapshot_columns() {
         );
     }
 }
-
 #[test]
 fn market_rank_recent_query_exposes_24h_volume_delta_fields() {
     let sql = recent_market_rank_events_sql(Some("delta_rank"));
-
     assert!(
         sql.contains("previous.previous_volume_24h_quote"),
         "recent market rank SQL should expose previous 24h volume for delta display"
@@ -397,20 +401,17 @@ fn market_rank_recent_query_exposes_24h_volume_delta_fields() {
         "recent market rank SQL must not return a fixed empty 24h volume change"
     );
 }
-
 #[test]
 fn kline_sync_request_normalizes_symbol_and_timeframe() {
     let request = kline_sync_request_from_body(
         br#"{"exchange":"OKX","symbol":"eth-usdt-swap","timeframe":"15m","limit":9999}"#,
     )
     .expect("kline sync request should parse");
-
     assert_eq!(request.exchange, "okx");
     assert_eq!(request.symbol, "ETH-USDT-SWAP");
     assert_eq!(request.timeframe, "15M");
     assert_eq!(request.limit, 2000);
 }
-
 #[test]
 fn market_rank_rows_are_deduped_by_symbol_before_sorting() {
     let rows = vec![
@@ -436,14 +437,11 @@ fn market_rank_rows_are_deduped_by_symbol_before_sorting() {
         ),
         rank_event_row(3, "ONT-USDT-SWAP", 168, 49, 119, 4_100_000.0, Some(20.0), 3),
     ];
-
     let rows = finalize_market_rank_rows(rows, Some("delta_rank"), 10);
-
     let symbols: Vec<&str> = rows.iter().map(|item| item.symbol.as_str()).collect();
     assert_eq!(symbols, vec!["JELLYJELLY-USDT-SWAP", "ONT-USDT-SWAP"]);
     assert_eq!(rows[0].id, 2);
 }
-
 #[test]
 fn market_rank_rows_sort_rank_movement_by_relative_change() {
     let rows = vec![
@@ -468,26 +466,20 @@ fn market_rank_rows_sort_rank_movement_by_relative_change() {
             2,
         ),
     ];
-
     let rows = finalize_market_rank_rows(rows, Some("delta_rank"), 10);
-
     assert_eq!(rows[0].symbol, "LOW-RANK-USDT-SWAP");
     assert!(rows[0].rank_change_pct.unwrap() > rows[1].rank_change_pct.unwrap());
 }
-
 #[test]
 fn market_rank_rows_default_to_rank_movement_sort() {
     let rows = vec![
         rank_event_row(1, "RECENT-USDT-SWAP", 80, 42, 38, 1_000_000.0, None, 2),
         rank_event_row(2, "FAST-USDT-SWAP", 20, 10, 10, 1_000_000.0, None, 1),
     ];
-
     let rows = finalize_market_rank_rows(rows, None, 10);
-
     assert_eq!(rows[0].symbol, "FAST-USDT-SWAP");
     assert!(rows[0].rank_change_pct.unwrap() > rows[1].rank_change_pct.unwrap());
 }
-
 #[test]
 fn market_rank_rows_keep_only_top50_entries_and_exits() {
     let rows = vec![
@@ -537,17 +529,14 @@ fn market_rank_rows_keep_only_top50_entries_and_exits() {
             5,
         ),
     ];
-
     let rows = finalize_market_rank_rows(rows, Some("delta_rank"), 10);
     let symbols: Vec<&str> = rows.iter().map(|item| item.symbol.as_str()).collect();
-
     assert!(symbols.contains(&"ENTERED-USDT-SWAP"));
     assert!(symbols.contains(&"TOP-ENTRY-USDT-SWAP"));
     assert!(symbols.contains(&"EXITED-USDT-SWAP"));
     assert!(!symbols.contains(&"OUTSIDE-USDT-SWAP"));
     assert!(!symbols.contains(&"TOP150-ENTRY-USDT-SWAP"));
 }
-
 #[test]
 fn market_rank_rows_sort_volume_by_change_rate_not_absolute_volume() {
     let rows = vec![
@@ -572,13 +561,10 @@ fn market_rank_rows_sort_volume_by_change_rate_not_absolute_volume() {
             2,
         ),
     ];
-
     let rows = finalize_market_rank_rows(rows, Some("volume_24h"), 10);
-
     assert_eq!(rows[0].symbol, "FAST-VOLUME-USDT-SWAP");
     assert!(rows[0].volume_24h_quote.unwrap() < rows[1].volume_24h_quote.unwrap());
 }
-
 #[test]
 fn market_rank_rows_sort_volume_by_absolute_change_rate() {
     let rows = vec![
@@ -603,8 +589,6 @@ fn market_rank_rows_sort_volume_by_absolute_change_rate() {
             2,
         ),
     ];
-
     let rows = finalize_market_rank_rows(rows, Some("volume_24h"), 10);
-
     assert_eq!(rows[0].symbol, "LARGE-DOWN-USDT-SWAP");
 }

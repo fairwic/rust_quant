@@ -1,9 +1,11 @@
 #[derive(Debug, Clone)]
 struct PrePlaceClientOrderLookup {
+    /// 查询条件。
     query: OrderQuery,
+    /// ack，用于记录交易或执行状态。
     ack: OrderAck,
 }
-
+/// 提供preplaceclient订单lookup的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn pre_place_client_order_lookup(
     request: &OrderPlacementRequest,
 ) -> Option<PrePlaceClientOrderLookup> {
@@ -23,7 +25,6 @@ fn pre_place_client_order_lookup(
     {
         query = query.with_margin_coin(margin_coin.to_string());
     }
-
     Some(PrePlaceClientOrderLookup {
         query,
         ack: OrderAck {
@@ -45,7 +46,7 @@ fn pre_place_client_order_lookup(
         },
     })
 }
-
+/// 判断 Web 商业、会员和执行准备度 条件是否满足，给上层流程提供布尔决策。
 fn is_order_not_found_for_client_order_preflight(error_message: &str) -> bool {
     let normalized = error_message.to_ascii_lowercase();
     normalized.contains("-2013")
@@ -54,7 +55,7 @@ fn is_order_not_found_for_client_order_preflight(error_message: &str) -> bool {
         || normalized.contains("not found")
         || normalized.contains("not exist")
 }
-
+/// 提供client订单IDownerviolation报告的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn client_order_id_owner_violation_report(
     task_id: i64,
     task_type: &str,
@@ -66,7 +67,6 @@ fn client_order_id_owner_violation_report(
     if owner_task_id == task_id {
         return None;
     }
-
     Some(ExecutionTaskReportRequest::failed(
         task_id,
         request.exchange.as_str(),
@@ -93,7 +93,7 @@ fn client_order_id_owner_violation_report(
         }),
     ))
 }
-
+/// 提供generatedclient订单IDownertaskID的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn generated_client_order_id_owner_task_id(task_type: &str, client_order_id: &str) -> Option<i64> {
     let prefix = match task_type {
         "execute_signal" => "rqtask",
@@ -102,7 +102,7 @@ fn generated_client_order_id_owner_task_id(task_type: &str, client_order_id: &st
     };
     parse_generated_client_order_id_owner(client_order_id, prefix)
 }
-
+/// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
 fn parse_generated_client_order_id_owner(client_order_id: &str, prefix: &str) -> Option<i64> {
     let suffix = client_order_id.trim().strip_prefix(prefix)?;
     if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
@@ -110,7 +110,7 @@ fn parse_generated_client_order_id_owner(client_order_id: &str, prefix: &str) ->
     }
     suffix.parse().ok()
 }
-
+/// 提供duplicateclient订单IDreconciliationack的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn duplicate_client_order_id_reconciliation_ack(
     request: &OrderPlacementRequest,
 ) -> Option<OrderAck> {
@@ -137,7 +137,7 @@ fn duplicate_client_order_id_reconciliation_ack(
         }),
     })
 }
-
+/// 提供confirmlive订单的集中实现，避免Web 商业链路调用方重复处理相同细节。
 async fn confirm_live_order(
     gateway: &CryptoExcAllGateway,
     ack: &OrderAck,
@@ -151,10 +151,12 @@ async fn confirm_live_order(
             "place_order ack missing order_id and client_order_id for confirmation"
         ));
     };
-
     let mut confirmed_order = None;
     for attempt in 0..3 {
-        let order = gateway.order(ack.exchange, query.clone()).await?;
+        let order = CryptoExcAllGateway::with_signed_read_only_scope(
+            gateway.order(ack.exchange, query.clone()),
+        )
+        .await?;
         let status = order.status.as_deref().unwrap_or_default();
         if status != "NEW" || attempt == 2 {
             confirmed_order = Some(order);
@@ -165,14 +167,13 @@ async fn confirm_live_order(
     let order = confirmed_order.expect("confirmation loop must set order");
     let order_id = order.order_id.as_deref().or(ack.order_id.as_deref());
     let fills = if let Some(order_id) = order_id {
-        match gateway
-            .fills(
+        match CryptoExcAllGateway::with_signed_read_only_scope(gateway.fills(
                 ack.exchange,
                 FillListQuery::for_instrument(ack.instrument.clone())
                     .with_order_id(order_id)
                     .with_limit(100),
-            )
-            .await
+            ))
+        .await
         {
             Ok(fills) => fills,
             Err(error) => {
@@ -186,10 +187,9 @@ async fn confirm_live_order(
     } else {
         Vec::new()
     };
-
     Ok((order, fills))
 }
-
+/// 构建 Web 商业、会员和执行准备度 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_confirmed_order_report(
     task_id: i64,
     order_side: &str,
@@ -216,7 +216,6 @@ fn build_confirmed_order_report(
         .or(ack.status.as_deref())
         .unwrap_or("submitted");
     let execution_status = live_order_execution_status(order_status);
-
     let filled_qty = order
         .as_ref()
         .and_then(|order| parse_optional_f64(order.filled_size.as_deref()))
@@ -229,7 +228,6 @@ fn build_confirmed_order_report(
         Some(qty * avg_price)
     });
     let fee_amount = sum_fill_fees(&fills);
-
     let raw_payload = json!({
         "ack": ack.raw,
         "order_detail": order.as_ref().map(|order| order.raw.clone()),
@@ -237,7 +235,6 @@ fn build_confirmed_order_report(
         "confirmation_error": confirmation_error,
         "execution_status": execution_status,
     });
-
     let mut report = ExecutionTaskReportRequest::success(
         task_id,
         ack.exchange.as_str(),
@@ -258,7 +255,7 @@ fn build_confirmed_order_report(
     }
     report
 }
-
+/// 构建 Web 商业、会员和执行准备度 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_confirmed_order_report_for_task(
     task: &ExecutionTask,
     order_side: &str,
@@ -280,7 +277,7 @@ fn build_confirmed_order_report_for_task(
     attach_execution_task_context_to_report(&mut report, task);
     report
 }
-
+/// 提供attach执行taskcontextto报告的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn attach_execution_task_context_to_report(
     report: &mut ExecutionTaskReportRequest,
     task: &ExecutionTask,
@@ -304,7 +301,6 @@ fn attach_execution_task_context_to_report(
                 "technical_strategy".to_string()
             }
         });
-
     raw_payload["execution_task"] = json!({
         "task_id": task.id,
         "news_signal_id": task.news_signal_id,
@@ -317,7 +313,7 @@ fn attach_execution_task_context_to_report(
     });
     report.raw_payload_json = Some(raw_payload.to_string());
 }
-
+/// 封装实盘orderexecutionstatus，减少Web 商业链路调用方重复实现相同细节。
 fn live_order_execution_status(order_status: &str) -> &'static str {
     match order_status.trim().to_ascii_uppercase().as_str() {
         "FILLED" => "completed",
@@ -325,21 +321,21 @@ fn live_order_execution_status(order_status: &str) -> &'static str {
         _ => "pending_confirmation",
     }
 }
-
+/// 提供保护结果requiresrollback的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn protection_outcome_requires_rollback(outcome: &ProtectionSyncOutcome) -> bool {
     matches!(
         outcome,
         ProtectionSyncOutcome::Failed { .. } | ProtectionSyncOutcome::Uncertain { .. }
     )
 }
-
+/// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
 fn parse_optional_f64(value: Option<&str>) -> Option<f64> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .and_then(|value| value.parse::<f64>().ok())
 }
-
+/// 提供sumfillsizes的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn sum_fill_sizes(fills: &[Fill]) -> Option<f64> {
     let mut total = 0.0;
     let mut seen = false;
@@ -351,7 +347,7 @@ fn sum_fill_sizes(fills: &[Fill]) -> Option<f64> {
     }
     seen.then_some(total)
 }
-
+/// 提供sumfillquote的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn sum_fill_quote(fills: &[Fill]) -> Option<f64> {
     let mut total = 0.0;
     let mut seen = false;
@@ -365,7 +361,7 @@ fn sum_fill_quote(fills: &[Fill]) -> Option<f64> {
     }
     seen.then_some(total)
 }
-
+/// 提供sumfillfees的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn sum_fill_fees(fills: &[Fill]) -> Option<f64> {
     let mut total = 0.0;
     let mut seen = false;

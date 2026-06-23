@@ -1,20 +1,20 @@
-use thiserror::Error;
-
 use crate::volatility::atr::ATR;
-
+use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum AtrError {
     #[error("Invalid period: {0}, must be greater than 0")]
     InvalidPeriod(usize),
 }
-
 #[derive(Debug, Clone)]
 pub struct ATRStopLoos {
+    /// multi，用于交易策略计算。
     multi: f64,
+    /// atr，用于交易策略计算。
     atr: ATR,
 }
-
 impl ATRStopLoos {
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     pub fn new(period: usize, multi: f64) -> Result<Self, AtrError> {
         if period == 0 {
             return Err(AtrError::InvalidPeriod(0));
@@ -24,15 +24,12 @@ impl ATRStopLoos {
             atr: ATR::new(period).unwrap(),
         })
     }
-
     pub fn reset(&mut self) {
         self.atr.reset();
     }
-
     /// 处理K线数据，始终返回f64：
     /// - 数据不足时返回0.00
     /// - 有效数据返回实际ATR值
-    ///
     /// 只需传入最新K线的高低收盘价，指标内部会维护所需的历史数据
     pub fn next(&mut self, high: f64, low: f64, close: f64) -> (f64, f64, f64) {
         let atr_value = self.atr.next(high, low, close);
@@ -42,6 +39,7 @@ impl ATRStopLoos {
     }
 }
 #[test]
+/// 提供testATR止损loos的集中实现，避免回测策略调用方重复处理相同细节。
 fn test_atr_stop_loos() {
     let mut atr = ATRStopLoos::new(3, 1.0).unwrap();
     let _ = atr.next(10.0, 8.0, 9.0);

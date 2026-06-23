@@ -13,7 +13,6 @@ fn duplicate_client_order_id_errors_are_reconciled_by_querying_existing_order() 
         "insufficient margin balance"
     ));
 }
-
 #[test]
 fn duplicate_client_order_id_reconciliation_ack_keeps_original_client_order_id() {
     let request = OrderPlacementRequest {
@@ -32,10 +31,8 @@ fn duplicate_client_order_id_reconciliation_ack_keeps_original_client_order_id()
         time_in_force: None,
         attached_stop_loss_price: None,
     };
-
     let ack = duplicate_client_order_id_reconciliation_ack(&request)
         .expect("stable client order id should be enough to reconcile");
-
     assert_eq!(ack.exchange, ExchangeId::Binance);
     assert_eq!(ack.order_id, None);
     assert_eq!(ack.client_order_id.as_deref(), Some("rqtask42"));
@@ -46,7 +43,6 @@ fn duplicate_client_order_id_reconciliation_ack_keeps_original_client_order_id()
     );
     assert_eq!(ack.raw["reconciliation"]["place_order_retried"], false);
 }
-
 #[test]
 fn pre_place_client_order_lookup_uses_stable_client_order_id_before_new_order() {
     let request = OrderPlacementRequest {
@@ -65,10 +61,8 @@ fn pre_place_client_order_lookup_uses_stable_client_order_id_before_new_order() 
         time_in_force: None,
         attached_stop_loss_price: None,
     };
-
     let lookup = pre_place_client_order_lookup(&request)
         .expect("stable client order id should be queried before placing a retry order");
-
     assert_eq!(lookup.query.client_order_id.as_deref(), Some("rqtask218"));
     assert_eq!(lookup.query.margin_coin.as_deref(), Some("USDT"));
     assert_eq!(lookup.ack.client_order_id.as_deref(), Some("rqtask218"));
@@ -85,7 +79,6 @@ fn pre_place_client_order_lookup_uses_stable_client_order_id_before_new_order() 
         false
     );
 }
-
 #[test]
 fn pre_place_client_order_check_only_allows_place_after_order_not_found() {
     assert!(is_order_not_found_for_client_order_preflight(
@@ -101,7 +94,6 @@ fn pre_place_client_order_check_only_allows_place_after_order_not_found() {
         "insufficient permission for order query"
     ));
 }
-
 #[test]
 fn execute_signal_blocks_foreign_rqtask_client_order_id_before_live_mutation() {
     let request = OrderPlacementRequest {
@@ -120,12 +112,10 @@ fn execute_signal_blocks_foreign_rqtask_client_order_id_before_live_mutation() {
         time_in_force: None,
         attached_stop_loss_price: None,
     };
-
     let report = client_order_id_owner_violation_report(999, "execute_signal", "buy", &request)
         .expect("foreign rqtask client id must fail closed before live mutation");
     let raw_payload: Value =
         serde_json::from_str(report.raw_payload_json.as_deref().unwrap()).unwrap();
-
     assert_eq!(report.execution_status, "failed");
     assert_eq!(report.external_order_id, "failed-task-999");
     assert_eq!(

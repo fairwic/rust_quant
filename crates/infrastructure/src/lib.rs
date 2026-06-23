@@ -27,13 +27,11 @@
 //! // 使用领域接口
 //! let candles = repo.find_candles("BTC-USDT", Timeframe::H1, start, end, None).await?;
 //! ```
-
 pub mod cache;
 pub mod exchanges;
 pub mod external_data;
 pub mod messaging;
 pub mod repositories;
-
 // 重新导出常用类型
 pub use exchanges::*;
 pub use external_data::*;
@@ -42,6 +40,5 @@ pub use repositories::{
     SignalLogEntity, SignalLogRepository, SqlxBacktestRepository, SqlxCandleRepository,
     SqlxStrategyConfigRepository, StrategyConfigEntity, StrategyConfigEntityModel,
 };
-
 // 导出通用缓存接口（泛型，不依赖业务类型）
 pub use cache::{CacheProvider, InMemoryCache, RedisCache, TwoLevelCache};

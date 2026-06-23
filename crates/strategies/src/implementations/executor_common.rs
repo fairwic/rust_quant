@@ -8,27 +8,29 @@
 //! - executor_common 依赖 trait 而非具体实现
 //!
 //! 这样实现单向依赖：orchestration → strategies
-
-use anyhow::{anyhow, Result};
-use std::collections::VecDeque;
-use tracing::{debug, info, warn};
-
 use crate::framework::config::strategy_config::StrategyConfig;
 use crate::framework::execution_traits::StrategyExecutionContext;
 use crate::strategy_common::{BasicRiskStrategyConfig, SignalResult};
 use crate::StrategyType;
+use anyhow::{anyhow, Result};
 use rust_quant_common::CandleItem;
-
+use std::collections::VecDeque;
+use tracing::{debug, info, warn};
 /// 执行上下文 - 封装策略执行的公共数据
 pub struct ExecutionContext {
+    /// 交易所合约或现货交易对标识。
     pub inst_id: String,
+    /// 计算周期。
     pub period: String,
+    /// 策略数据缓存键。
     pub hash_key: String,
+    /// 最新 K 线数据点。
     pub new_candle_item: CandleItem,
+    /// 本轮新增的 K 线数据集合。
     pub new_candle_items: VecDeque<CandleItem>,
 }
-
 /// 检查时间戳和去重（使用 trait 接口）
+/// 判断shouldexecute策略，为回测策略流程提供明确的布尔结果。
 pub fn should_execute_strategy(
     key: &str,
     old_time: i64,
@@ -44,17 +46,14 @@ pub fn should_execute_strategy(
         debug!("时间未更新，跳过策略执行");
         return Ok(false);
     }
-
     // 2. 去重检查
     let state_manager = context.state_manager();
     if !state_manager.try_mark_processing(key, new_time) {
         debug!("重复执行检测，跳过策略执行");
         return Ok(false);
     }
-
     Ok(true)
 }
-
 /// 更新K线队列
 pub fn update_candle_queue(
     candle_items: &mut VecDeque<CandleItem>,
@@ -69,14 +68,10 @@ pub fn update_candle_queue(
         }
     }
 }
-
-/// 获取最近N根K线切片
 pub fn get_recent_candles(candle_items: &VecDeque<CandleItem>, n: usize) -> Vec<CandleItem> {
     candle_items.iter().rev().take(n).cloned().rev().collect()
 }
-
 /// 处理策略信号（仅记录日志）
-///
 /// 注意：实际的订单执行应该由 orchestration 或 execution 层负责
 /// strategies 层只负责产生信号，不负责执行订单
 pub fn process_signal(
@@ -94,7 +89,6 @@ pub fn process_signal(
         );
         return Ok(());
     }
-
     warn!(
         "{} 策略信号！inst_id={}, period={}, should_buy={}, should_sell={}, ts={}",
         strategy_type.as_str(),
@@ -104,25 +98,19 @@ pub fn process_signal(
         signal_result.should_sell,
         signal_result.ts
     );
-
     // 记录信号日志（使用 trait）
     let signal_logger = context.signal_logger();
     signal_logger.save_signal_log(inst_id, period, signal_result);
-
     Ok(())
 }
-
 /// 提取风险配置
 pub fn extract_risk_config(strategy_config: &StrategyConfig) -> Result<BasicRiskStrategyConfig> {
     serde_json::from_value(strategy_config.risk_config.clone())
         .map_err(|e| anyhow!("解析风险配置失败: {}", e))
 }
-
-/// 转换K线数据为 CandleItem
 pub fn convert_candles_to_items(candles: &[CandleItem]) -> VecDeque<CandleItem> {
     candles.iter().cloned().collect()
 }
-
 /// 获取最近的 N 根 K 线数据
 pub async fn get_recent_candles_from_db(
     inst_id: &str,
@@ -134,18 +122,15 @@ pub async fn get_recent_candles_from_db(
     let _ = (inst_id, period, limit);
     Err(anyhow!("请使用 CandleRepository 获取历史数据"))
 }
-
 /// 验证K线数据
 pub fn validate_candles(candles: &[CandleItem]) -> Result<i64> {
     if candles.is_empty() {
         return Err(anyhow!("K线数据为空"));
     }
-
     let last_ts = candles
         .last()
         .ok_or_else(|| anyhow!("无法获取最后一根K线"))?
         .ts;
-
     debug!(
         "K线数据验证通过，共 {} 根，最后时间戳: {}",
         candles.len(),
@@ -153,7 +138,6 @@ pub fn validate_candles(candles: &[CandleItem]) -> Result<i64> {
     );
     Ok(last_ts)
 }
-
 /// 基础的时间戳检查（不依赖 trait）
 pub fn is_new_timestamp(old_time: i64, new_time: i64) -> bool {
     if new_time <= old_time {
@@ -162,9 +146,7 @@ pub fn is_new_timestamp(old_time: i64, new_time: i64) -> bool {
     }
     true
 }
-
 /// 获取最新K线数据（公共逻辑）
-///
 /// 优先使用传入的 snap，如果没有则返回错误（需要调用方自行获取）
 pub async fn get_latest_candle(
     _inst_id: &str,
@@ -177,12 +159,10 @@ pub async fn get_latest_candle(
         Err(anyhow!("需要提供 K 线快照数据，或通过其他方式获取最新K线"))
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::framework::execution_traits::DefaultExecutionContext;
-
     #[test]
     fn test_update_candle_queue() {
         let mut queue = VecDeque::new();
@@ -195,18 +175,15 @@ mod tests {
             v: 1000.0,
             confirm: 1,
         };
-
         update_candle_queue(&mut queue, candle, 3);
         assert_eq!(queue.len(), 1);
     }
-
     #[test]
     fn test_is_new_timestamp() {
         assert!(is_new_timestamp(1000, 2000));
         assert!(!is_new_timestamp(2000, 1000));
         assert!(!is_new_timestamp(1000, 1000));
     }
-
     #[tokio::test]
     async fn test_should_execute_strategy_with_noop() {
         let context = DefaultExecutionContext::new();

@@ -1,3 +1,5 @@
+/// 封装当前函数，减少行情数据调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 async fn sync_kline_request(request: &KlineSyncRequest) -> Result<i64> {
     let service = create_kline_sync_candle_service()?;
     let period = kline_sync_period_for_job(&request.timeframe)?;
@@ -12,7 +14,6 @@ async fn sync_kline_request(request: &KlineSyncRequest) -> Result<i64> {
             .checked_add(1)
             .and_then(|timestamp| u64::try_from(timestamp).ok())
     });
-
     let candles = service
         .fetch_candles_from_crypto_exc_all(
             &request.exchange,
@@ -26,10 +27,9 @@ async fn sync_kline_request(request: &KlineSyncRequest) -> Result<i64> {
     if candles.is_empty() {
         return Ok(0);
     }
-
     Ok(service.save_candles(candles).await? as i64)
 }
-
+/// 创建 行情与市场数据 资源，并在入口处完成必要的参数归一。
 fn create_kline_sync_candle_service() -> Result<CandleService> {
     if should_use_quant_core_candle_source()? {
         let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
@@ -40,7 +40,6 @@ fn create_kline_sync_candle_service() -> Result<CandleService> {
         let repository = PostgresCandleRepository::new(pool);
         return Ok(CandleService::new(Box::new(repository)));
     }
-
     let pool = rust_quant_core::database::get_db_pool();
     let repository = SqlxCandleRepository::new(pool.clone());
     Ok(CandleService::new(Box::new(repository)))

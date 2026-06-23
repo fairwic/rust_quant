@@ -10,7 +10,5 @@
 //! ## 解决方案
 //!
 //! 使用Newtype模式创建本地包装器，然后为包装器实现trait。
-
 pub mod candle_adapter;
-
 pub use candle_adapter::{adapt, adapt_many, CandleAdapter};

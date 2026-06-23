@@ -1,7 +1,6 @@
 use rust_quant::app_config::email::send_email;
 use tokio::time::Duration;
 use tracing::error;  
-
 #[tokio::test]
 async fn test_send_email() -> anyhow::Result<()> {
     rust_quant::app_init().await?;

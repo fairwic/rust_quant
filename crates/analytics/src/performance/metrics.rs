@@ -6,16 +6,12 @@
 //! - 绝对收益率 (Total Return): 总收益
 //! - 最大回撤 (Maximum Drawdown): 风险指标
 //! - 波动率 (Volatility): 风险指标
-
 use chrono::NaiveDateTime;
 use rust_quant_strategies::strategy_common::TradeRecord;
-
 /// 无风险利率 (年化 2%)
 const RISK_FREE_RATE: f64 = 0.02;
-
 /// 一年的天数 (用于年化计算)
 const DAYS_PER_YEAR: f64 = 365.0;
-
 /// 绩效指标计算结果
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PerformanceMetrics {
@@ -30,7 +26,6 @@ pub struct PerformanceMetrics {
     /// 波动率 (年化)
     pub volatility: f64,
 }
-
 /// 绩效计算器
 pub struct PerformanceCalculator {
     /// 期初资金
@@ -44,10 +39,8 @@ pub struct PerformanceCalculator {
     /// 回测结束时间 (毫秒时间戳)
     end_time: i64,
 }
-
 impl PerformanceCalculator {
     /// 创建绩效计算器
-    ///
     /// # 参数
     /// * `initial_fund` - 期初资金
     /// * `final_fund` - 期末资金
@@ -69,7 +62,6 @@ impl PerformanceCalculator {
             end_time,
         }
     }
-
     /// 计算所有绩效指标
     pub fn calculate(&self) -> PerformanceMetrics {
         let total_return = self.calculate_total_return();
@@ -79,7 +71,6 @@ impl PerformanceCalculator {
         let (max_drawdown, equity_curve) = self.calculate_max_drawdown();
         let volatility = self.calculate_volatility(&equity_curve, actual_trading_days);
         let sharpe_ratio = self.calculate_sharpe_ratio(annual_return, volatility);
-
         PerformanceMetrics {
             sharpe_ratio,
             annual_return,
@@ -88,17 +79,16 @@ impl PerformanceCalculator {
             volatility,
         }
     }
-
     /// 计算绝对收益率
     /// 公式: (期末资金 - 期初资金) / 期初资金
     fn calculate_total_return(&self) -> f64 {
+        // 初始资金不能作为分母时直接返回 0，避免除零并把无效资金区间视为无收益。
         if self.initial_fund <= 0.0 {
             return 0.0;
         }
         (self.final_fund - self.initial_fund) / self.initial_fund
     }
-
-    /// 计算K线数据范围的天数（备用）
+    /// 计算 K 线覆盖的天数，时间范围无效时返回最小 1 天。
     fn calculate_kline_range_days(&self) -> f64 {
         let duration_ms = self.end_time - self.start_time;
         if duration_ms <= 0 {
@@ -108,9 +98,7 @@ impl PerformanceCalculator {
         let days = duration_ms as f64 / (1000.0 * 60.0 * 60.0 * 24.0);
         days.max(1.0)
     }
-
     /// 计算实际交易周期（从第一笔开仓到最后一笔平仓）
-    ///
     /// 这比使用K线数据范围更准确，因为：
     /// 1. K线数据可能包含没有交易信号的时段
     /// 2. 实际资金运作时间应该从第一笔交易开始算起
@@ -118,20 +106,17 @@ impl PerformanceCalculator {
         if self.trade_records.is_empty() {
             return self.calculate_kline_range_days();
         }
-
         // 解析第一笔交易的开仓时间
         let first_open_time = self
             .trade_records
             .first()
             .and_then(|r| Self::parse_datetime(&r.open_position_time));
-
         // 解析最后一笔交易的平仓时间
         let last_close_time = self.trade_records.last().and_then(|r| {
             r.close_position_time
                 .as_ref()
                 .and_then(|t| Self::parse_datetime(t))
         });
-
         match (first_open_time, last_close_time) {
             (Some(start), Some(end)) => {
                 let duration = end.signed_duration_since(start);
@@ -145,7 +130,6 @@ impl PerformanceCalculator {
             }
         }
     }
-
     /// 解析日期时间字符串
     /// 支持格式: "2024-01-01 12:00:00" 或 "2024-01-01"
     fn parse_datetime(s: &str) -> Option<NaiveDateTime> {
@@ -159,7 +143,6 @@ impl PerformanceCalculator {
         }
         None
     }
-
     /// 计算年化收益率
     /// 公式: (1 + total_return)^(365/交易天数) - 1
     fn calculate_annual_return(&self, total_return: f64, trading_days: f64) -> f64 {
@@ -169,25 +152,20 @@ impl PerformanceCalculator {
         let exponent = DAYS_PER_YEAR / trading_days;
         (1.0 + total_return).powf(exponent) - 1.0
     }
-
     /// 计算最大回撤
     /// 返回 (最大回撤, 权益曲线)
-    ///
     /// 注意：当前实现基于每笔交易结算后的权益点计算。
     /// 这意味着持仓期间的浮动亏损不会被捕捉。
-    ///
     /// 改进方案：同时考虑持仓期间的潜在最大亏损
     /// 通过 open_price 和 close_price 估算持仓期间的最大浮亏
     fn calculate_max_drawdown(&self) -> (f64, Vec<f64>) {
         if self.trade_records.is_empty() {
             return (0.0, vec![self.initial_fund]);
         }
-
         // 构建权益曲线（包含持仓期间的估算低点）
         let mut equity_curve = Vec::with_capacity(self.trade_records.len() * 2 + 1);
         let mut current_equity = self.initial_fund;
         equity_curve.push(current_equity);
-
         for record in &self.trade_records {
             // 估算持仓期间的最大浮亏
             // 对于亏损交易，假设持仓期间可能经历更大的浮亏
@@ -197,16 +175,13 @@ impl PerformanceCalculator {
                 let estimated_worst = current_equity + record.profit_loss * 1.5;
                 equity_curve.push(estimated_worst.max(0.0));
             }
-
             // 记录平仓后的权益
             current_equity += record.profit_loss;
             equity_curve.push(current_equity);
         }
-
         // 计算最大回撤
         let mut max_drawdown = 0.0;
         let mut peak = self.initial_fund;
-
         for &equity in &equity_curve {
             if equity > peak {
                 peak = equity;
@@ -218,24 +193,19 @@ impl PerformanceCalculator {
                 }
             }
         }
-
         (max_drawdown, equity_curve)
     }
-
     /// 计算波动率 (年化)
-    ///
     /// 基于交易收益率计算，然后年化
     /// 公式: 交易收益率标准差 * sqrt(每年交易次数)
     fn calculate_volatility(&self, _equity_curve: &[f64], actual_trading_days: f64) -> f64 {
         if self.trade_records.len() < 2 {
             return 0.0;
         }
-
         // 直接使用交易记录计算收益率，而非权益曲线
         // 这样可以避免估算浮亏点带来的噪声
         let mut returns: Vec<f64> = Vec::with_capacity(self.trade_records.len());
         let mut running_equity = self.initial_fund;
-
         for record in &self.trade_records {
             if running_equity > 0.0 {
                 let ret = record.profit_loss / running_equity;
@@ -243,24 +213,19 @@ impl PerformanceCalculator {
             }
             running_equity += record.profit_loss;
         }
-
         if returns.is_empty() {
             return 0.0;
         }
-
         // 计算平均收益率
         let mean_return: f64 = returns.iter().sum::<f64>() / returns.len() as f64;
-
         // 计算方差
         let variance: f64 = returns
             .iter()
             .map(|r| (r - mean_return).powi(2))
             .sum::<f64>()
             / returns.len() as f64;
-
         // 标准差
         let std_dev = variance.sqrt();
-
         // 年化波动率
         // 每年交易次数 = 总交易次数 / 实际交易年数
         let trading_years = actual_trading_days / DAYS_PER_YEAR;
@@ -269,10 +234,8 @@ impl PerformanceCalculator {
         } else {
             self.trade_records.len() as f64
         };
-
         std_dev * trades_per_year.sqrt()
     }
-
     /// 计算夏普比率
     /// 公式: (年化收益率 - 无风险利率) / 年化波动率
     fn calculate_sharpe_ratio(&self, annual_return: f64, volatility: f64) -> f64 {
@@ -287,18 +250,18 @@ impl PerformanceCalculator {
         (annual_return - RISK_FREE_RATE) / volatility
     }
 }
-
 /// 便捷函数：计算回测绩效指标
-///
 /// # 参数
 /// * `initial_fund` - 期初资金
 /// * `final_fund` - 期末资金
 /// * `trade_records` - 交易记录列表
 /// * `start_time` - 回测开始时间 (毫秒时间戳)
 /// * `end_time` - 回测结束时间 (毫秒时间戳)
-///
 /// # 返回
 /// 绩效指标结构体
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 pub fn calculate_performance_metrics(
     initial_fund: f64,
     final_fund: f64,
@@ -315,11 +278,10 @@ pub fn calculate_performance_metrics(
     );
     calculator.calculate()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    /// 创建 量化核心 资源，并在入口处完成必要的参数归一。
     fn create_test_trade_record_with_time(
         profit_loss: f64,
         open_time: &str,
@@ -345,7 +307,6 @@ mod tests {
             stop_loss_update_history: None,
         }
     }
-
     #[test]
     fn test_total_return() {
         let trades = vec![
@@ -353,17 +314,13 @@ mod tests {
             create_test_trade_record_with_time(-5.0, "2024-01-15", "2024-01-20"),
             create_test_trade_record_with_time(15.0, "2024-01-25", "2024-01-30"),
         ];
-
         // K线范围30天（但实际交易只有29天：1月1日到1月30日）
         let start_time = 0i64;
         let end_time = 30 * 24 * 60 * 60 * 1000i64;
-
         let metrics = calculate_performance_metrics(100.0, 120.0, &trades, start_time, end_time);
-
         // 绝对收益率 = (120 - 100) / 100 = 0.2 = 20%
         assert!((metrics.total_return - 0.2).abs() < 0.001);
     }
-
     #[test]
     fn test_max_drawdown_with_floating_loss() {
         // 测试包含浮亏估算的最大回撤
@@ -372,19 +329,15 @@ mod tests {
             create_test_trade_record_with_time(-30.0, "2024-01-15", "2024-01-20"), // 120 -> 90
             create_test_trade_record_with_time(10.0, "2024-01-25", "2024-01-30"), // 90 -> 100
         ];
-
         let start_time = 0i64;
         let end_time = 30 * 24 * 60 * 60 * 1000i64;
-
         let metrics = calculate_performance_metrics(100.0, 100.0, &trades, start_time, end_time);
-
         // 最大回撤应该大于25%（因为包含了估算的浮亏）
         // 估算最低点 = 120 + (-30 * 1.5) = 75
         // 最大回撤 = (120 - 75) / 120 = 0.375 = 37.5%
         assert!(metrics.max_drawdown > 0.25);
         assert!((metrics.max_drawdown - 0.375).abs() < 0.001);
     }
-
     #[test]
     fn test_actual_trading_days() {
         // 测试实际交易周期计算
@@ -393,31 +346,24 @@ mod tests {
             create_test_trade_record_with_time(10.0, "2024-06-01", "2024-06-15"),
             create_test_trade_record_with_time(10.0, "2024-06-20", "2024-06-30"),
         ];
-
         // K线范围365天
         let start_time = 0i64;
         let end_time = 365 * 24 * 60 * 60 * 1000i64;
-
         let metrics = calculate_performance_metrics(100.0, 120.0, &trades, start_time, end_time);
-
         // 绝对收益率 = 20%
         assert!((metrics.total_return - 0.2).abs() < 0.001);
-
         // 年化收益率应该基于29天（6月1日到6月30日），而非365天
         // 如果用365天：(1.2)^(365/365) - 1 = 0.2 = 20%
         // 如果用29天：(1.2)^(365/29) - 1 ≈ 8.68 = 868%
         // 年化收益率应该远大于20%
         assert!(metrics.annual_return > 1.0);
     }
-
     #[test]
     fn test_empty_trades() {
         let trades: Vec<TradeRecord> = vec![];
         let start_time = 0i64;
         let end_time = 30 * 24 * 60 * 60 * 1000i64;
-
         let metrics = calculate_performance_metrics(100.0, 100.0, &trades, start_time, end_time);
-
         assert_eq!(metrics.total_return, 0.0);
         assert_eq!(metrics.max_drawdown, 0.0);
     }

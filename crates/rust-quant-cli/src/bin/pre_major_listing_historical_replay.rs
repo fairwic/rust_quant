@@ -15,7 +15,6 @@ use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::fs;
 use std::time::Instant;
-
 const DEFAULT_DATABASE_URL: &str = "postgres://postgres:postgres123@localhost:5432/quant_news";
 const DEFAULT_LIMIT: i64 = 80;
 const DEFAULT_DETECTION_LATENCY_SECS: u64 = 30;
@@ -26,14 +25,14 @@ const SLIPPAGE_BPS_PER_SIDE: f64 = 8.0;
 const PROXY_SPREAD_PCT: f64 = 0.20;
 const MIN_PROXY_DEPTH_USDT: f64 = 50_000.0;
 const DEFAULT_REPLAY_SOURCES: &str = "binance_announcements,okx_announcements";
-
 #[derive(Debug, Clone, Copy)]
 enum AnnouncementSource {
     Binance,
     Okx,
 }
-
 impl AnnouncementSource {
+    /// 封装当前函数，减少量化核心调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     fn parse(value: &str) -> Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "binance" | "binance_announcements" => Ok(Self::Binance),
@@ -43,14 +42,14 @@ impl AnnouncementSource {
             )),
         }
     }
-
+    /// 提供来源名称的集中实现，避免量化核心调用方重复处理相同细节。
     fn source_name(self) -> &'static str {
         match self {
             Self::Binance => "binance_announcements",
             Self::Okx => "okx_announcements",
         }
     }
-
+    /// 提供table名称的集中实现，避免量化核心调用方重复处理相同细节。
     fn table_name(self) -> &'static str {
         match self {
             Self::Binance => "news_items_binance_announcements",
@@ -58,67 +57,94 @@ impl AnnouncementSource {
         }
     }
 }
-
 #[derive(Debug, Clone, Deserialize)]
 struct ReplayAnnouncement {
+    /// announcement ID。
     announcement_id: String,
+    /// 数据来源。
     source: String,
+    /// 标题。
     title: String,
     #[serde(default)]
+    /// 正文内容。
     content: String,
+    /// 毫秒级时间戳或时长。
     announced_at_ms: u64,
     #[serde(default)]
+    /// detected资产，用于当前结构体的业务数据。
     detected_assets: String,
 }
-
 #[derive(Debug, Clone, Deserialize)]
 struct FixtureCandle {
+    /// 开仓时间。
     open_time: u64,
+    /// 最高价。
     high: f64,
+    /// 最低价。
     low: f64,
+    /// 收盘价。
     close: f64,
     #[serde(default)]
+    /// 数量数值。
     quote_volume: Option<f64>,
     #[serde(default)]
+    /// 成交量。
     volume: Option<f64>,
 }
-
 #[derive(Debug, Clone, Deserialize)]
 struct FixtureVenueCandles {
+    /// 交易所名称。
     exchange: String,
+    /// 基础资产，用于当前结构体的业务数据。
     base_asset: String,
+    /// 列表数据。
     candles: Vec<FixtureCandle>,
 }
-
 #[derive(Debug, Clone, Deserialize)]
 struct FixtureInput {
+    /// 列表数据。
     announcements: Vec<ReplayAnnouncement>,
     #[serde(default)]
+    /// 列表数据。
     venue_candles: Vec<FixtureVenueCandles>,
 }
-
 #[derive(Debug, Serialize)]
 struct ReplaySkipped {
+    /// announcement ID。
     announcement_id: String,
+    /// 标题。
     title: String,
+    /// 原因说明。
     reason: String,
+    /// 列表数据。
     details: Vec<String>,
 }
-
 #[derive(Debug, Serialize)]
 struct ReplayOutput {
+    /// 模式。
     mode: &'static str,
+    /// 数据来源。
     source: String,
+    /// 备注信息。
     production_note: &'static str,
+    /// 是否允许该操作。
     automatic_live_trading_allowed: bool,
+    /// 列表数据。
     limitations: Vec<&'static str>,
+    /// announcementsread。
     announcements_read: usize,
+    /// samplesbuilt。
     samples_built: usize,
+    /// 列表数据。
     skipped: Vec<ReplaySkipped>,
+    /// 报告。
     report: ListingCatchupPaperReport,
 }
-
 #[tokio::main]
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 返回 Result 以便错误透明上抛，统一上层降级与重试策略。
 async fn main() -> Result<()> {
     let args = parse_args()?;
     let criteria = ListingCatchupAcceptanceCriteria {
@@ -126,7 +152,6 @@ async fn main() -> Result<()> {
         min_win_rate_pct: args.min_win_rate_pct,
         require_positive_total_net_return: true,
     };
-
     let (source, announcements, fixture_candles) = if let Some(path) = args.fixture_path.as_deref()
     {
         let fixture = read_fixture(path)?;
@@ -148,7 +173,6 @@ async fn main() -> Result<()> {
             None,
         )
     };
-
     let gateway = if fixture_candles.is_none() {
         Some(public_gateway()?)
     } else {
@@ -162,7 +186,6 @@ async fn main() -> Result<()> {
     )
     .await?;
     let report = evaluate_listing_catchup_paper(samples, criteria);
-
     let output = ReplayOutput {
         mode: "historical_kline_proxy",
         source,
@@ -181,18 +204,24 @@ async fn main() -> Result<()> {
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
-
 #[derive(Debug)]
 struct CliArgs {
+    /// fixture路径；为空时使用默认值或表示不限制。
     fixture_path: Option<String>,
+    /// databaseURL；为空时使用默认值或表示不限制。
     database_url: Option<String>,
+    /// 列表数据。
     sources: Vec<AnnouncementSource>,
+    /// 查询数量上限。
     limit: i64,
+    /// 秒级时长。
     detection_latency_secs: u64,
+    /// 最小tradesamples，用于控制策略触发门槛。
     min_trade_samples: usize,
+    /// 最小胜率百分比。
     min_win_rate_pct: f64,
 }
-
+/// 解析输入参数并收敛为 量化核心 可使用的结构化值。
 fn parse_args() -> Result<CliArgs> {
     let mut fixture_path = None;
     let mut database_url = quant_news_database_url_from_env();
@@ -216,7 +245,6 @@ fn parse_args() -> Result<CliArgs> {
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or_default();
-
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -248,7 +276,6 @@ fn parse_args() -> Result<CliArgs> {
             other => return Err(anyhow!("unknown argument: {other}")),
         }
     }
-
     Ok(CliArgs {
         fixture_path,
         database_url,
@@ -259,12 +286,12 @@ fn parse_args() -> Result<CliArgs> {
         min_win_rate_pct,
     })
 }
-
+/// 提供quantnewsdatabaseURLfrom环境变量的集中实现，避免量化核心调用方重复处理相同细节。
 fn quant_news_database_url_from_env() -> Option<String> {
     let envs: HashMap<String, String> = std::env::vars().collect();
     quant_news_database_url_from_map(&envs)
 }
-
+/// 提供quantnewsdatabaseURLfrommap的集中实现，避免量化核心调用方重复处理相同细节。
 fn quant_news_database_url_from_map(envs: &HashMap<String, String>) -> Option<String> {
     non_empty_env(envs, "QUANT_NEWS_DATABASE_URL")
         .or_else(|| non_empty_env(envs, "POSTGRES_QUANT_NEWS_DATABASE_URL"))
@@ -274,13 +301,13 @@ fn quant_news_database_url_from_map(envs: &HashMap<String, String>) -> Option<St
         })
         .map(str::to_string)
 }
-
+/// 读取非空环境变量值，避免空字符串覆盖有效默认配置。
 fn non_empty_env<'a>(envs: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
     envs.get(key)
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
 }
-
+/// 封装数据库URL指向，减少量化核心调用方重复实现相同细节。
 fn database_url_targets(database_url: &str, database_name: &str) -> bool {
     database_url
         .split('?')
@@ -292,7 +319,7 @@ fn database_url_targets(database_url: &str, database_name: &str) -> bool {
         .map(|name| name.eq_ignore_ascii_case(database_name))
         .unwrap_or(false)
 }
-
+/// 解析输入参数并收敛为 量化核心 可使用的结构化值。
 fn parse_sources(value: &str) -> Result<Vec<AnnouncementSource>> {
     let mut sources = Vec::new();
     for raw in value
@@ -313,7 +340,7 @@ fn parse_sources(value: &str) -> Result<Vec<AnnouncementSource>> {
     }
     Ok(sources)
 }
-
+/// 提供来源names的集中实现，避免量化核心调用方重复处理相同细节。
 fn source_names(sources: &[AnnouncementSource]) -> String {
     sources
         .iter()
@@ -321,7 +348,7 @@ fn source_names(sources: &[AnnouncementSource]) -> String {
         .collect::<Vec<_>>()
         .join(",")
 }
-
+/// 解析输入参数并收敛为 量化核心 可使用的结构化值。
 fn parse_next<T>(args: &mut impl Iterator<Item = String>, name: &str) -> Result<T>
 where
     T: std::str::FromStr,
@@ -332,12 +359,12 @@ where
         .parse::<T>()
         .map_err(|err| anyhow!("invalid {name}: {err}"))
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 fn read_fixture(path: &str) -> Result<FixtureInput> {
     let body = fs::read_to_string(path).with_context(|| format!("read replay fixture: {path}"))?;
     serde_json::from_str(&body).with_context(|| format!("parse replay fixture JSON: {path}"))
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_major_listing_announcements_from_db(
     database_url: &str,
     sources: &[AnnouncementSource],
@@ -357,7 +384,7 @@ async fn load_major_listing_announcements_from_db(
     announcements.truncate(limit.max(1) as usize);
     Ok(announcements)
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_source_announcements_from_db(
     pool: &PgPool,
     source: AnnouncementSource,
@@ -392,7 +419,6 @@ async fn load_source_announcements_from_db(
         .fetch_all(pool)
         .await
         .with_context(|| format!("query {} listing rows", source.table_name()))?;
-
     rows.into_iter()
         .map(|row| {
             let published_at: DateTime<Utc> = row.try_get("published_at")?;
@@ -408,7 +434,7 @@ async fn load_source_announcements_from_db(
         .collect::<std::result::Result<Vec<_>, sqlx::Error>>()
         .map_err(Into::into)
 }
-
+/// 提供publicgateway的集中实现，避免量化核心调用方重复处理相同细节。
 fn public_gateway() -> Result<CryptoExcAllGateway> {
     let sdk = CryptoSdk::from_config(SdkConfig {
         bitget: Some(BitgetExchangeConfig {
@@ -441,7 +467,7 @@ fn public_gateway() -> Result<CryptoExcAllGateway> {
     })?;
     Ok(CryptoExcAllGateway::from_sdk(sdk))
 }
-
+/// 构建 量化核心 请求或响应载荷，把字段组装规则集中在同一入口。
 async fn build_samples(
     announcements: Vec<ReplayAnnouncement>,
     gateway: Option<&CryptoExcAllGateway>,
@@ -454,7 +480,6 @@ async fn build_samples(
     let fixture_index = fixture_candles.map(index_fixture_candles);
     let mut samples = Vec::new();
     let mut skipped = Vec::new();
-
     for announcement in announcements {
         let Some(base_asset) = extract_base_asset(&announcement) else {
             skipped.push(skip(&announcement, "base_asset_not_detected"));
@@ -464,7 +489,6 @@ async fn build_samples(
             skipped.push(skip(&announcement, "not_positive_major_listing"));
             continue;
         }
-
         let mut venue_inputs = Vec::new();
         let mut venue_failures = Vec::new();
         for exchange in [ExchangeId::Bitget, ExchangeId::Bybit, ExchangeId::Gate] {
@@ -504,7 +528,6 @@ async fn build_samples(
                 Err(reason) => venue_failures.push(format!("{}:{reason}", exchange.as_str())),
             }
         }
-
         let Some(selected) = venue_inputs.into_iter().next() else {
             skipped.push(skip_with_details(
                 &announcement,
@@ -536,19 +559,22 @@ async fn build_samples(
             Err(reason) => skipped.push(skip(&announcement, &reason)),
         }
     }
-
     Ok((samples, skipped))
 }
-
 #[derive(Debug)]
 struct VenueInput {
+    /// 价格数值。
     pre_announcement_price: f64,
+    /// 价格数值。
     announcement_price: f64,
+    /// 入场价格。
     entry_price: f64,
+    /// probe。
     probe: ListingCatchupVenueProbe,
+    /// 列表数据。
     price_path: Vec<ListingCatchupPriceBar>,
 }
-
+/// 构建 量化核心 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_venue_input(
     exchange: ExchangeId,
     base_asset: &str,
@@ -576,7 +602,6 @@ fn build_venue_input(
     if quote_volume < MIN_PROXY_DEPTH_USDT {
         return Err(format!("proxy_depth_below_min:{quote_volume:.2}"));
     }
-
     let price_path = candles
         .iter()
         .filter(|candle| candle.open_time > entry.open_time)
@@ -591,7 +616,6 @@ fn build_venue_input(
     if price_path.is_empty() {
         return Err("empty_post_entry_price_path".to_string());
     }
-
     let half_spread = PROXY_SPREAD_PCT / 100.0 / 2.0;
     Ok(VenueInput {
         pre_announcement_price: pre.close,
@@ -609,7 +633,7 @@ fn build_venue_input(
         price_path,
     })
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_candles(
     gateway: &CryptoExcAllGateway,
     exchange: ExchangeId,
@@ -630,8 +654,8 @@ async fn fetch_candles(
         .filter_map(FixtureCandle::from_sdk)
         .collect())
 }
-
 impl FixtureCandle {
+    /// 从外部输入转换为内部模型，隔离 量化核心 的字段适配细节。
     fn from_sdk(candle: Candle) -> Option<Self> {
         let open_time = candle.open_time?;
         let high = candle.high.parse::<f64>().ok()?;
@@ -650,7 +674,7 @@ impl FixtureCandle {
         })
     }
 }
-
+/// 封装索引fixturecandles，减少量化核心调用方重复实现相同细节。
 fn index_fixture_candles(
     candles: &[FixtureVenueCandles],
 ) -> HashMap<(String, String), Vec<FixtureCandle>> {
@@ -667,26 +691,23 @@ fn index_fixture_candles(
         })
         .collect()
 }
-
 fn last_at_or_before(candles: &[FixtureCandle], time: u64) -> Option<&FixtureCandle> {
     candles.iter().rev().find(|candle| candle.open_time <= time)
 }
-
 fn last_before(candles: &[FixtureCandle], time: u64) -> Option<&FixtureCandle> {
     candles.iter().rev().find(|candle| candle.open_time < time)
 }
-
 fn first_at_or_after(candles: &[FixtureCandle], time: u64) -> Option<&FixtureCandle> {
     candles.iter().find(|candle| candle.open_time >= time)
 }
-
+/// 判断K 线quote成交量，给量化核心流程提供布尔结果。
 fn candle_quote_volume(candle: &FixtureCandle) -> Option<f64> {
     candle
         .quote_volume
         .or_else(|| candle.volume.map(|volume| volume * candle.close))
         .filter(|value| value.is_finite() && *value > 0.0)
 }
-
+/// 解析输入参数并收敛为 量化核心 可使用的结构化值。
 fn extract_base_asset(announcement: &ReplayAnnouncement) -> Option<String> {
     for token in parenthesized_tokens(&announcement.title)
         .into_iter()
@@ -703,7 +724,7 @@ fn extract_base_asset(announcement: &ReplayAnnouncement) -> Option<String> {
     }
     None
 }
-
+/// 提供CSVassets的集中实现，避免量化核心调用方重复处理相同细节。
 fn csv_assets(value: &str) -> Vec<String> {
     value
         .split(',')
@@ -712,7 +733,7 @@ fn csv_assets(value: &str) -> Vec<String> {
         .map(ToOwned::to_owned)
         .collect()
 }
-
+/// 提供上市交易对tokens的集中实现，避免量化核心调用方重复处理相同细节。
 fn listing_symbol_tokens(text: &str) -> Vec<String> {
     let lower = text.to_ascii_lowercase();
     let mut tokens = Vec::new();
@@ -741,7 +762,7 @@ fn listing_symbol_tokens(text: &str) -> Vec<String> {
     }
     tokens
 }
-
+/// 提供uppercase上市交易对的集中实现，避免量化核心调用方重复处理相同细节。
 fn uppercase_listing_symbol(token: &str) -> Option<String> {
     let normalized = token
         .trim_matches(|ch: char| !ch.is_ascii_alphanumeric())
@@ -756,7 +777,7 @@ fn uppercase_listing_symbol(token: &str) -> Option<String> {
         None
     }
 }
-
+/// 提供parenthesizedtokens的集中实现，避免量化核心调用方重复处理相同细节。
 fn parenthesized_tokens(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut rest = text;
@@ -770,7 +791,7 @@ fn parenthesized_tokens(text: &str) -> Vec<String> {
     }
     tokens
 }
-
+/// 提供USDTpairtokens的集中实现，避免量化核心调用方重复处理相同细节。
 fn usdt_pair_tokens(text: &str) -> Vec<String> {
     text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '/' || ch == '-' || ch == '_'))
         .filter_map(|raw| {
@@ -786,7 +807,7 @@ fn usdt_pair_tokens(text: &str) -> Vec<String> {
         })
         .collect()
 }
-
+/// 判断 量化核心 条件是否满足，给上层流程提供布尔决策。
 fn is_plausible_base_asset(symbol: &str) -> bool {
     matches!(symbol.len(), 2..=20)
         && symbol.chars().all(|value| value.is_ascii_alphanumeric())
@@ -795,7 +816,7 @@ fn is_plausible_base_asset(symbol: &str) -> bool {
             "USD" | "USDT" | "USDC" | "BUSD" | "FDUSD" | "DAI" | "ETF" | "SEC" | "OKX" | "BINANCE"
         )
 }
-
+/// 判断 量化核心 条件是否满足，给上层流程提供布尔决策。
 fn is_positive_major_listing(announcement: &ReplayAnnouncement) -> bool {
     let text = format!(
         "{} {} {}",
@@ -842,11 +863,10 @@ fn is_positive_major_listing(announcement: &ReplayAnnouncement) -> bool {
         .iter()
         .any(|needle| text.contains(needle))
 }
-
 fn skip(announcement: &ReplayAnnouncement, reason: &str) -> ReplaySkipped {
     skip_with_details(announcement, reason, Vec::new())
 }
-
+/// 提供skipwithdetails的集中实现，避免量化核心调用方重复处理相同细节。
 fn skip_with_details(
     announcement: &ReplayAnnouncement,
     reason: &str,
@@ -859,28 +879,24 @@ fn skip_with_details(
         details,
     }
 }
-
+/// 执行输出usage步骤，串起量化核心需要的状态推进和错误处理。
 fn print_usage() {
     println!(
         "Usage: pre_major_listing_historical_replay [--database-url <url>] [--sources binance_announcements,okx_announcements] [--limit 80] [--fixture <fixture.json>] [--min-trade-samples 30] [--min-win-rate-pct 60]"
     );
 }
-
 #[cfg(test)]
 mod tests {
     use super::quant_news_database_url_from_map;
     use std::collections::HashMap;
-
     #[test]
     fn quant_news_database_url_ignores_quant_web_fallback() {
         let envs = HashMap::from([(
             "DATABASE_URL".to_string(),
             "postgres://postgres:secret@localhost:5432/quant_web".to_string(),
         )]);
-
         assert_eq!(quant_news_database_url_from_map(&envs), None);
     }
-
     #[test]
     fn quant_news_database_url_prefers_explicit_news_url() {
         let envs = HashMap::from([
@@ -893,7 +909,6 @@ mod tests {
                 "postgres://postgres:secret@localhost:5432/quant_web".to_string(),
             ),
         ]);
-
         assert_eq!(
             quant_news_database_url_from_map(&envs),
             Some("postgres://postgres:secret@localhost:5432/quant_news".to_string())

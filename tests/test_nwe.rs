@@ -6,32 +6,25 @@ use rust_quant::trading::model::entity::candles::enums::{SelectTime, TimeDirect}
 use rust_quant::{time_util, trading};
 use ta::indicators::AverageTrueRange;
 use ta::Next;
-
-/// 使用ta库的AverageTrueRange
 #[tokio::test]
 async fn test_ta_atr() -> anyhow::Result<()> {
     // 初始化环境和数据库连接
     dotenv().ok();
     init_db().await;
-
     // 设置参数
     let inst_id = "BTC-USDT-SWAP";
     let time = "5m";
     let select_time = Some(SelectTime {direct:TimeDirect::BEFORE, start_time:1760738100000, end_time: None});
-
-
     // 获取K线数据
     let source_candles: Vec<CandlesEntity> =
         trading::task::basic::get_candle_data_confirm(inst_id, time, 501, select_time).await?;
     println!("{:#?}", source_candles);
-
     // 确保有数据
     if source_candles.is_empty() {
         println!("警告: 未获取到K线数据");
         return Ok(());
     }
     let mut nwe = NweIndicator::new(8.0, 3.0, 500); // let mut sma = SMA::new(2); // 设置周期为15
-
     // 计算并显示结果
     for candle in source_candles.iter() {
         // 解析价格数据

@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -8,11 +7,9 @@ fn repo_root() -> PathBuf {
         .expect("services crate should be under rust_quant/crates/services")
         .to_path_buf()
 }
-
 fn read_repo_file(path: &str) -> String {
     fs::read_to_string(repo_root().join(path)).expect(path)
 }
-
 fn compose_service_block(compose: &str, service: &str) -> String {
     let needle = format!("  {service}:");
     let mut found = false;
@@ -32,7 +29,6 @@ fn compose_service_block(compose: &str, service: &str) -> String {
     assert!(found, "compose must contain service block `{service}`");
     lines.join("\n")
 }
-
 #[test]
 fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     let compose = read_repo_file("docker-compose.deploy.yml");
@@ -40,7 +36,6 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     let dockerfile = read_repo_file("Dockerfile.runtime");
     let promote = read_repo_file("scripts/deploy/promote_stable.sh");
     let rollback = read_repo_file("scripts/deploy/rollback.sh");
-
     for service in [
         "quant-core-schema-ensure:",
         "quant-core-market-velocity-radar:",
@@ -55,7 +50,6 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "deploy compose must define {service}"
         );
     }
-
     for rust_native_entrypoint in [
         r#"IS_RUN_MARKET_VELOCITY_RADAR: "true""#,
         r#"MARKET_VELOCITY_RADAR_ONLY: "true""#,
@@ -218,16 +212,39 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         for safety_flag in [
             "MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH",
             "MARKET_VELOCITY_CREATE_TASK_APPLY",
+            "MARKET_VELOCITY_CREATE_TASK_CONFIRM",
             "MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY",
+            "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM",
             "MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED",
             "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED",
             "EXECUTION_WORKER_DRY_RUN",
+            "EXECUTION_WORKER_TARGET_TASK_IDS",
+            "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
+            "LEGACY_DIRECT_LIVE_ORDER_CONFIRM",
+            "LEGACY_SIGNED_READ_ONLY_CONFIRM",
+            "RISK_BALANCE_LIVE_MUTATION_CONFIRM",
+            "PROTECTIVE_OUTCOME_CONFIRM",
         ] {
             assert!(
                 deploy_script.contains(safety_flag),
                 "default deploy/rollback must include runtime safety flag `{safety_flag}` in diagnostics"
             );
         }
+        assert!(
+            deploy_script.contains("assert_no_persistent_live_mutation_env_flags")
+                && deploy_script.contains(".env")
+                && deploy_script.contains("refusing deployment with persistent live mutation flag"),
+            "default deploy/rollback must fail fast when persistent live mutation flags are present in env or .env"
+        );
+        assert!(
+            deploy_script
+                .rfind("assert_no_persistent_live_mutation_env_flags")
+                .expect("live mutation env guard must be called")
+                < deploy_script
+                    .find("compose -f \"${override_file}\" up -d --no-build")
+                    .expect("deploy script starts long-running services"),
+            "default deploy/rollback must check persistent live mutation flags before starting services"
+        );
         assert!(
             deploy_script.contains("remove_conflicting_named_containers"),
             "default deploy/rollback must remove stale fixed-name containers left by failed deployments"
@@ -288,11 +305,9 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         );
     }
 }
-
 #[test]
 fn market_velocity_live_signal_defaults_use_production_momentum_preset() {
     let compose = read_repo_file("docker-compose.deploy.yml");
-
     for required in [
         "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-15}",
         "MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK: ${MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK:-30}",
@@ -316,7 +331,6 @@ fn market_velocity_live_signal_defaults_use_production_momentum_preset() {
             "deploy compose must contain `{required}`"
         );
     }
-
     assert!(
         !compose.contains(
             "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT: ${MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT:-0.02}"

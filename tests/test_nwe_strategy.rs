@@ -19,7 +19,6 @@ async fn test_nwe_strategy() -> Result<()> {
     dotenv().ok();
     setup_logging().await?;
     init_db().await;
-
     // 设置参数
     let inst_id = "BTC-USDT-SWAP";
     // let inst_id = "BTC-USDT-SWAP";
@@ -32,26 +31,20 @@ async fn test_nwe_strategy() -> Result<()> {
         end_time: None,
     };
     print!("11111111");
-
     // 获取K线数据
     let candles_list: Vec<CandlesEntity> =
         trading::task::basic::get_candle_data_confirm(inst_id, time, 501, Some(select_time))
             .await?;
-
     let mut data_items = vec![];
     // let mut strategy = VegasStrategy::new(time.to_string());
     let mut strategy = NweStrategy::new(NweStrategyConfig::default());
-
     let mut indicator_combine = strategy.get_indicator_combine();
-
     let mut nwe_signal_values = NweSignalValues::default();
     for (i, candle) in candles_list.iter().enumerate() {
         // 获取数据项
         let data_item = parse_candle_to_data_item(candle);
-
         // 获取指标的值
         data_items.push(data_item.clone());
-
         let risk_strategy_config = BasicRiskStrategyConfig::default();
         indicator_combine.get_indicator_values(&mut nwe_signal_values, &data_item);
         if data_items.len() < 500 {

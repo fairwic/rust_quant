@@ -13,19 +13,18 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
 use tracing::{error, info, warn};
-
 /// 深度流管理器
 /// 负责动态管理 WebSocket 连接，订阅/取消订阅重点币种的成交数据
 pub struct DeepStreamManager {
     // client is !Sync, so wrap in Mutex to make DeepStreamManager Sync
     client: Mutex<AutoReconnectWebsocketClient>,
+    /// 激活状态subs，用于行情、K 线或市场扫描。
     active_subs: Arc<Mutex<HashSet<String>>>,
     // 限流器状态: (上次请求时间, 剩余令牌数)
     rate_limit_state: Arc<Mutex<(Instant, u32)>>,
     // 资金流数据发送端
     flow_tx: mpsc::UnboundedSender<FundFlow>,
 }
-
 impl DeepStreamManager {
     /// 创建新的深度流管理器
     /// # Arguments
@@ -40,7 +39,6 @@ impl DeepStreamManager {
             flow_tx,
         }
     }
-
     /// 启动管理器
     pub async fn start(&self) -> Result<()> {
         info!("Starting DeepStreamManager...");
@@ -50,9 +48,7 @@ impl DeepStreamManager {
             .start()
             .await
             .map_err(|e| anyhow!("Failed to start WS client: {}", e))?;
-
         let flow_tx = self.flow_tx.clone();
-
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
                 // 解析 Trade 数据
@@ -69,102 +65,83 @@ impl DeepStreamManager {
                 }
             }
         });
-
         Ok(())
     }
-
     /// 提升关注: 订阅指定币种的 Trades
     pub async fn promote(&self, symbol: &str) -> Result<()> {
         if self.check_sub_exists(symbol).await {
             return Ok(());
         }
-
         self.wait_for_rate_limit().await;
-
         let args = Args::new().with_inst_id(symbol.to_string());
-
         let client = self.client.lock().await.clone();
         if let Err(e) = client.subscribe(ChannelType::Trades, args).await {
             error!("Failed to subscribe trades for {}: {:?}", symbol, e);
             return Err(anyhow!("Sub failed: {:?}", e));
         }
-
         let mut subs = self.active_subs.lock().await;
         subs.insert(symbol.to_string());
         info!("Promoted (Subscribed) {}", symbol);
         Ok(())
     }
-
     /// 降低关注: 取消订阅
     pub async fn demote(&self, symbol: &str) -> Result<()> {
         if !self.check_sub_exists(symbol).await {
             return Ok(());
         }
-
         self.wait_for_rate_limit().await;
-
         let args = Args::new().with_inst_id(symbol.to_string());
-
         let client = self.client.lock().await.clone();
         if let Err(e) = client.unsubscribe(ChannelType::Trades, args).await {
             error!("Failed to unsubscribe trades for {}: {:?}", symbol, e);
             return Err(anyhow!("Unsub failed: {:?}", e));
         }
-
         let mut subs = self.active_subs.lock().await;
         subs.remove(symbol);
         info!("Demoted (Unsubscribed) {}", symbol);
         Ok(())
     }
-
+    /// 校验输入和运行前置条件，提前暴露 行情与市场数据 的不可执行原因。
     async fn check_sub_exists(&self, symbol: &str) -> bool {
         let subs = self.active_subs.lock().await;
         subs.contains(symbol)
     }
-
     /// 简单的令牌桶限流 (Token Bucket)
     /// 限制订阅/取消订阅频率，防止触发 480 req/hour
     async fn wait_for_rate_limit(&self) {
         let mut state = self.rate_limit_state.lock().await;
         let now = Instant::now();
         let elapsed = now.duration_since(state.0).as_secs();
-
         // 每 10 秒恢复 1 个令牌
         let new_tokens = (elapsed / 10) as u32;
         if new_tokens > 0 {
             state.1 = std::cmp::min(state.1 + new_tokens, 20); // Max capacity 20
             state.0 = now;
         }
-
         if state.1 == 0 {
             warn!("Rate limit hit, waiting...");
             tokio::time::sleep(Duration::from_secs(5)).await;
             state.1 = 1; // Grant one after wait
             state.0 = Instant::now();
         }
-
         state.1 -= 1;
     }
-
+    /// 封装映射tofundflow，减少行情数据调用方重复实现相同细节。
     fn map_to_fund_flow(t: TradeOkxResDto) -> Result<FundFlow> {
         let price = Decimal::from_str(&t.px)?;
         let amount = Decimal::from_str(&t.sz)?;
-
         // OKX Trade side: "buy" or "sell"
         let side = match t.side.as_str() {
             "buy" => FundFlowSide::Inflow,
             "sell" => FundFlowSide::Outflow,
             _ => return Err(anyhow!("Unknown side: {}", t.side)),
         };
-
         // Timestamp
         let ts_millis = t.ts.parse::<i64>().unwrap_or(0);
         let timestamp = DateTime::from_timestamp_millis(ts_millis).unwrap_or(Utc::now());
-
         // Value estimation (Price * Amount) - NOTE: Contract multiplier might be needed for SWAP
         // For simplicity assuming Spot or 1:1 for now, or raw contract value
         let value = price * amount;
-
         Ok(FundFlow {
             symbol: t.inst_id,
             value,

@@ -6,11 +6,11 @@ mod execution_protection;
 mod execution_protective_outcome_check;
 mod execution_reconciliation_snapshot_check;
 mod execution_rollback;
+mod execution_take_profit;
 mod execution_task_client;
 mod execution_task_contract;
 mod execution_worker;
 mod market_velocity_live_readiness;
-
 pub use execution_audit::{
     redact_audit_payload, ExchangeRequestAuditLog, ExecutionAuditRepository,
     ExecutionWorkerCheckpoint, NoopExecutionAuditRepository, PostgresExecutionAuditRepository,
@@ -30,13 +30,14 @@ pub use execution_reconciliation_snapshot_check::{
 };
 pub use execution_task_client::{ExecutionTaskClient, ExecutionTaskConfig};
 pub use execution_task_contract::{
-    ExchangeAccountOrderSnapshotInput, ExchangeAccountPositionSnapshotInput,
-    ExchangeAccountSnapshotReportRequest, ExchangeAccountSnapshotReportResponse,
-    ExchangeAccountTradeSnapshotInput, ExchangeCloseFillWritebackRequest,
-    ExchangeCloseFillWritebackResponse, ExchangeOrderResult, ExchangeReconciliationIssueType,
-    ExchangeReconciliationReportRequest, ExchangeReconciliationReportResponse, ExecutionTask,
-    ExecutionTaskConfirmationLease, ExecutionTaskConfirmationLeaseItem, ExecutionTaskLease,
-    ExecutionTaskLeaseRequest, ExecutionTaskReportRequest, ExecutionTaskReportResponse,
+    ApiCredentialCheckSummary, ExchangeAccountOrderSnapshotInput,
+    ExchangeAccountPositionSnapshotInput, ExchangeAccountSnapshotReportRequest,
+    ExchangeAccountSnapshotReportResponse, ExchangeAccountTradeSnapshotInput,
+    ExchangeCloseFillWritebackRequest, ExchangeCloseFillWritebackResponse, ExchangeOrderResult,
+    ExchangeReconciliationIssueType, ExchangeReconciliationReportRequest,
+    ExchangeReconciliationReportResponse, ExecutionTask, ExecutionTaskConfirmationLease,
+    ExecutionTaskConfirmationLeaseItem, ExecutionTaskLease, ExecutionTaskLeaseRequest,
+    ExecutionTaskReportRequest, ExecutionTaskReportResponse,
     MarketVelocityExecutionTaskCreationPreviewCheck,
     MarketVelocityExecutionTaskCreationPreviewRequest,
     MarketVelocityExecutionTaskCreationPreviewResponse,

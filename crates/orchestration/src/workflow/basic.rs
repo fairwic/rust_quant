@@ -20,7 +20,6 @@
 //! let config = RandomStrategyConfig::default();
 //! test_random_strategy_with_config("BTC-USDT", "1H", semaphore, config).await?;
 //! ```
-
 // 重新导出主要的公共接口，保持向后兼容
 // TODO: 这些模块暂时被禁用
 // pub use crate::workflow::data_sync::*;

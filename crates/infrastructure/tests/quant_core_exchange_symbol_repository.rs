@@ -5,7 +5,6 @@ use rust_quant_infrastructure::repositories::PostgresExchangeSymbolRepository;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
-
 #[tokio::test]
 async fn upserts_and_reads_exchange_symbols_from_quant_core_postgres() -> Result<()> {
     if !smoke_enabled() {
@@ -14,7 +13,6 @@ async fn upserts_and_reads_exchange_symbols_from_quant_core_postgres() -> Result
         );
         return Ok(());
     }
-
     let database_url = env::var("QUANT_CORE_DATABASE_URL")
         .context("QUANT_CORE_DATABASE_URL is required for quant_core exchange symbol smoke")?;
     let pool = PgPoolOptions::new()
@@ -23,9 +21,7 @@ async fn upserts_and_reads_exchange_symbols_from_quant_core_postgres() -> Result
         .await
         .context("connect quant_core Postgres")?;
     let repository = PostgresExchangeSymbolRepository::new(pool.clone());
-
     cleanup_test_symbol(&pool, "binance", "BTCUSDT").await?;
-
     let mut symbol = ExchangeSymbol::new(
         "binance".to_string(),
         "perpetual".to_string(),
@@ -44,10 +40,8 @@ async fn upserts_and_reads_exchange_symbols_from_quant_core_postgres() -> Result
     symbol.step_size = Some("0.001".to_string());
     symbol.min_notional = Some("100".to_string());
     symbol.raw_payload = Some(json!({"source": "quant_core_exchange_symbol_repository_test"}));
-
     let affected = repository.upsert_many(vec![symbol]).await?;
     assert_eq!(affected, 1);
-
     let rows = repository
         .find_by_exchange("binance", Some("TRADING"), Some(10))
         .await?;
@@ -59,17 +53,14 @@ async fn upserts_and_reads_exchange_symbols_from_quant_core_postgres() -> Result
     assert_eq!(saved.base_asset, "BTC");
     assert_eq!(saved.quote_asset, "USDT");
     assert_eq!(saved.contract_type.as_deref(), Some("PERPETUAL"));
-
     cleanup_test_symbol(&pool, "binance", "BTCUSDT").await?;
     Ok(())
 }
-
 fn smoke_enabled() -> bool {
     env::var("QUANT_CORE_EXCHANGE_SYMBOL_SMOKE")
         .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
         .unwrap_or(false)
 }
-
 async fn cleanup_test_symbol(
     pool: &sqlx::PgPool,
     exchange: &str,

@@ -1,6 +1,6 @@
 use std::env;
-
 /// 读取布尔型环境变量：支持 true/false/1/0（大小写不敏感）
+/// 封装环境变量istrue，减少配置运行时调用方重复实现相同细节。
 pub fn env_is_true(key: &str, default: bool) -> bool {
     match env::var(key) {
         Ok(v) => {
@@ -10,7 +10,6 @@ pub fn env_is_true(key: &str, default: bool) -> bool {
         Err(_) => default,
     }
 }
-
 /// 读取字符串环境变量，若不存在则返回默认值
 pub fn env_or_default(key: &str, default: &str) -> String {
     match env::var(key) {
@@ -18,9 +17,6 @@ pub fn env_or_default(key: &str, default: &str) -> String {
         Err(_) => default.to_string(),
     }
 }
-
-
-
 /// 读取 i64 环境变量，不存在或解析失败返回默认值
 pub fn env_i64(key: &str, default: i64) -> i64 {
     match env::var(key) {
@@ -28,7 +24,6 @@ pub fn env_i64(key: &str, default: i64) -> i64 {
         Err(_) => default,
     }
 }
-
 /// K线缓存新鲜度（毫秒）优先级：
 /// 1) CANDLE_CACHE_STALENESS_{PERIOD}_MS（如：CANDLE_CACHE_STALENESS_1H_MS）
 /// 2) CANDLE_CACHE_STALENESS_MS（全局默认）

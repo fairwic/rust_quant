@@ -1,6 +1,5 @@
 //! Nwe 策略指标值缓存管理器
 //! 参考 arc_vegas_indicator_values.rs 的设计
-
 // NweIndicatorCombine 在 indicators 包中
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;
@@ -11,44 +10,49 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-
 // 定义最大容量常量
 const MAX_CANDLE_ITEMS: usize = 100;
-
 /// Nwe 策略指标值结构
 #[derive(Debug, Clone, Default)]
 pub struct ArcNweIndicatorValues {
+    /// 事件时间戳。
     pub timestamp: i64,
+    /// 交易所合约或现货交易对标识。
     pub inst_id: String,
+    /// 计算周期。
     pub period: String,
+    /// 缓存的 K 线数据点。
     pub candle_item: VecDeque<CandleItem>,
+    /// 指标组合计算结果。
     pub indicator_combines: NweIndicatorCombine,
 }
-
-/// 获取 hash key
 pub fn get_nwe_hash_key(inst_id: &str, period: &str, strategy_type: &str) -> String {
     format!("{} {} {}", inst_id, period, strategy_type)
 }
-
 /// Nwe 指标值管理器
 #[derive(Clone)]
 pub struct NweIndicatorValuesManager {
+    /// 缓存或管理器持有的值集合。
     values: Arc<DashMap<String, ArcNweIndicatorValues>>,
     metrics: Arc<DashMap<String, IndicatorMetrics>>, // 记录性能指标
     key_mutex: Arc<DashMap<String, Arc<Mutex<()>>>>, // 每键互斥，防止同键重入
 }
-
 // 指标操作的性能指标
 #[derive(Debug, Clone, Default)]
 pub struct IndicatorMetrics {
+    /// 读取次数。
     pub read_count: usize,
+    /// 写入次数。
     pub write_count: usize,
+    /// 毫秒级时间戳或时长。
     pub last_read_time_ms: u64,
+    /// 毫秒级时间戳或时长。
     pub last_write_time_ms: u64,
+    /// 毫秒级时间戳或时长。
     pub max_read_time_ms: u64,
+    /// 毫秒级时间戳或时长。
     pub max_write_time_ms: u64,
 }
-
 impl NweIndicatorValuesManager {
     /// 创建新的管理器实例
     pub fn new() -> Self {
@@ -59,13 +63,11 @@ impl NweIndicatorValuesManager {
         }
     }
 }
-
 impl Default for NweIndicatorValuesManager {
     fn default() -> Self {
         Self::new()
     }
 }
-
 impl NweIndicatorValuesManager {
     /// 获取指定键的指标值
     pub async fn get(&self, key: &str) -> Option<ArcNweIndicatorValues> {
@@ -75,7 +77,6 @@ impl NweIndicatorValuesManager {
             .await;
         result
     }
-
     /// 仅返回末 n 根K线与当前指标的轻量快照，减少大对象克隆
     pub async fn get_snapshot_last_n(
         &self,
@@ -98,7 +99,6 @@ impl NweIndicatorValuesManager {
             .await;
         result
     }
-
     /// 设置指标值
     pub async fn set(&self, key: String, value: ArcNweIndicatorValues) -> Result<(), String> {
         let start = Instant::now();
@@ -114,7 +114,6 @@ impl NweIndicatorValuesManager {
             .await;
         Ok(())
     }
-
     /// 更新指标值中的K线数据
     pub async fn update_candle_items(
         &self,
@@ -141,7 +140,6 @@ impl NweIndicatorValuesManager {
             Err(format!("键 {} 不存在", key))
         }
     }
-
     /// 更新指标计算结果
     pub async fn update_indicator_values(
         &self,
@@ -162,7 +160,6 @@ impl NweIndicatorValuesManager {
             Err(format!("键 {} 不存在", key))
         }
     }
-
     /// 原子更新：同时更新K线与指标，避免中间态
     pub async fn update_both(
         &self,
@@ -194,17 +191,12 @@ impl NweIndicatorValuesManager {
             Err(format!("键 {} 不存在", key))
         }
     }
-
-    /// 检查键是否存在
     pub async fn key_exists(&self, key: &str) -> bool {
         self.values.contains_key(key)
     }
-
-    /// 获取所有键
     pub async fn get_all_keys(&self) -> Vec<String> {
         self.values.iter().map(|e| e.key().clone()).collect()
     }
-
     /// 获取键互斥锁
     pub async fn acquire_key_mutex(&self, key: &str) -> Arc<Mutex<()>> {
         self.key_mutex
@@ -213,11 +205,9 @@ impl NweIndicatorValuesManager {
             .value()
             .clone()
     }
-
     /// 记录性能指标
     async fn record_metrics(&self, key: &str, is_read: bool, time_ms: u64) {
         let mut entry = self.metrics.entry(key.to_string()).or_default();
-
         let metrics = entry.value_mut();
         if is_read {
             metrics.read_count += 1;
@@ -229,21 +219,15 @@ impl NweIndicatorValuesManager {
             metrics.max_write_time_ms = metrics.max_write_time_ms.max(time_ms);
         }
     }
-
-    /// 获取指标性能指标
     pub async fn get_metrics(&self, key: &str) -> Option<IndicatorMetrics> {
         self.metrics.get(key).map(|r| r.value().clone())
     }
 }
-
 // 全局单例实例
 pub static NWE_INDICATOR_MANAGER: OnceCell<NweIndicatorValuesManager> = OnceCell::new();
-
-/// 获取全局 Nwe 管理器实例
 pub fn get_nwe_indicator_manager() -> &'static NweIndicatorValuesManager {
     NWE_INDICATOR_MANAGER.get_or_init(NweIndicatorValuesManager::new)
 }
-
 /// 设置 Nwe 策略指标值
 pub async fn set_nwe_strategy_indicator_values(
     inst_id: String,
@@ -260,7 +244,6 @@ pub async fn set_nwe_strategy_indicator_values(
         candle_item: candle_items,
         indicator_combines: values,
     };
-
     if let Err(e) = get_nwe_indicator_manager()
         .set(hash_key.clone(), arc_nwe_indicator_values)
         .await
@@ -270,12 +253,9 @@ pub async fn set_nwe_strategy_indicator_values(
         info!("Nwe 策略指标值已设置: {}", hash_key);
     }
 }
-
-/// 根据哈希键获取指标值
 pub async fn get_nwe_indicator_values_by_key(key: &str) -> Option<ArcNweIndicatorValues> {
     get_nwe_indicator_manager().get(key).await
 }
-
 /// 更新策略指标值中的K线数据
 pub async fn update_nwe_candle_items(
     hash_key: &str,
@@ -285,7 +265,6 @@ pub async fn update_nwe_candle_items(
         .update_candle_items(hash_key, candles)
         .await
 }
-
 /// 更新策略指标值中的指标值
 pub async fn update_nwe_indicator_values(
     hash_key: &str,

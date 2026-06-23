@@ -1,7 +1,6 @@
 use serde_json::json;
 use std::fs;
 use std::process::Command;
-
 #[test]
 fn cli_replays_fixture_announcements_without_enabling_live_trading() {
     let input_path = std::env::temp_dir().join(format!(
@@ -29,7 +28,6 @@ fn cli_replays_fixture_announcements_without_enabling_live_trading() {
         }]
     });
     fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
-
     let output = Command::new(env!("CARGO_BIN_EXE_pre_major_listing_historical_replay"))
         .arg("--fixture")
         .arg(&input_path)
@@ -40,7 +38,6 @@ fn cli_replays_fixture_announcements_without_enabling_live_trading() {
         .output()
         .expect("run historical replay cli");
     fs::remove_file(&input_path).ok();
-
     assert!(
         output.status.success(),
         "stderr={}",
@@ -57,7 +54,6 @@ fn cli_replays_fixture_announcements_without_enabling_live_trading() {
         "historical_orderbook_depth_unavailable"
     );
 }
-
 #[test]
 fn cli_replays_binance_and_okx_fixture_announcements() {
     let input_path = std::env::temp_dir().join(format!(
@@ -97,7 +93,6 @@ fn cli_replays_binance_and_okx_fixture_announcements() {
         ]
     });
     fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
-
     let output = Command::new(env!("CARGO_BIN_EXE_pre_major_listing_historical_replay"))
         .arg("--fixture")
         .arg(&input_path)
@@ -108,7 +103,6 @@ fn cli_replays_binance_and_okx_fixture_announcements() {
         .output()
         .expect("run historical replay cli");
     fs::remove_file(&input_path).ok();
-
     assert!(
         output.status.success(),
         "stderr={}",
@@ -120,7 +114,6 @@ fn cli_replays_binance_and_okx_fixture_announcements() {
     assert_eq!(payload["report"]["trade_samples"], 2);
     assert_eq!(payload["report"]["production_status"], "paper_ready");
 }
-
 #[test]
 fn cli_prefers_okx_listing_symbol_over_detected_asset_fallback() {
     let input_path = std::env::temp_dir().join(format!(
@@ -143,7 +136,6 @@ fn cli_prefers_okx_listing_symbol_over_detected_asset_fallback() {
         }]
     });
     fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
-
     let output = Command::new(env!("CARGO_BIN_EXE_pre_major_listing_historical_replay"))
         .arg("--fixture")
         .arg(&input_path)
@@ -154,7 +146,6 @@ fn cli_prefers_okx_listing_symbol_over_detected_asset_fallback() {
         .output()
         .expect("run historical replay cli");
     fs::remove_file(&input_path).ok();
-
     assert!(
         output.status.success(),
         "stderr={}",
@@ -165,7 +156,6 @@ fn cli_prefers_okx_listing_symbol_over_detected_asset_fallback() {
     assert_eq!(payload["report"]["trade_samples"], 1);
     assert_eq!(payload["report"]["trade_results"][0]["symbol"], "RLUSDUSDT");
 }
-
 #[test]
 fn cli_rejects_okx_expiry_perps_as_major_spot_listing() {
     let input_path = std::env::temp_dir().join(format!(
@@ -188,14 +178,12 @@ fn cli_rejects_okx_expiry_perps_as_major_spot_listing() {
         }]
     });
     fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
-
     let output = Command::new(env!("CARGO_BIN_EXE_pre_major_listing_historical_replay"))
         .arg("--fixture")
         .arg(&input_path)
         .output()
         .expect("run historical replay cli");
     fs::remove_file(&input_path).ok();
-
     assert!(
         output.status.success(),
         "stderr={}",
@@ -209,7 +197,6 @@ fn cli_rejects_okx_expiry_perps_as_major_spot_listing() {
         "not_positive_major_listing"
     );
 }
-
 #[test]
 fn cli_rejects_binance_trading_pair_additions() {
     let input_path = std::env::temp_dir().join(format!(
@@ -232,14 +219,12 @@ fn cli_rejects_binance_trading_pair_additions() {
         }]
     });
     fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
-
     let output = Command::new(env!("CARGO_BIN_EXE_pre_major_listing_historical_replay"))
         .arg("--fixture")
         .arg(&input_path)
         .output()
         .expect("run historical replay cli");
     fs::remove_file(&input_path).ok();
-
     assert!(
         output.status.success(),
         "stderr={}",
@@ -253,7 +238,6 @@ fn cli_rejects_binance_trading_pair_additions() {
         "not_positive_major_listing"
     );
 }
-
 fn profitable_candles(announced_at_ms: u64) -> serde_json::Value {
     json!([
         {"open_time": announced_at_ms - 900_000u64, "open": 10.0, "high": 10.1, "low": 9.9, "close": 10.0, "quote_volume": 80_000.0},

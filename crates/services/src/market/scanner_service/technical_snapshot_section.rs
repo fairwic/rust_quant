@@ -1,3 +1,4 @@
+/// 构建build市场ranktechnicalsnapshotfromcandles，集中维护行情数据的载荷和字段组装规则。
 fn build_market_rank_technical_snapshot_from_candles(
     timeframe: &str,
     period: usize,
@@ -5,7 +6,6 @@ fn build_market_rank_technical_snapshot_from_candles(
 ) -> Option<MarketRankTechnicalSnapshot> {
     let mut candles = candles.to_vec();
     candles.sort_by_key(|candle| candle.timestamp);
-
     let snapshot_at = candles.last()?.datetime;
     let closes = candles
         .iter()
@@ -13,7 +13,7 @@ fn build_market_rank_technical_snapshot_from_candles(
         .collect::<Vec<_>>();
     build_market_rank_technical_snapshot_from_closes(timeframe, period, &closes, snapshot_at)
 }
-
+/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_market_rank_technical_snapshot_from_closes(
     timeframe: &str,
     period: usize,
@@ -23,7 +23,6 @@ fn build_market_rank_technical_snapshot_from_closes(
     if period == 0 || closes.len() < period || closes.iter().any(|value| !value.is_finite()) {
         return None;
     }
-
     let latest_close = *closes.last()?;
     let ma_value = simple_moving_average(&closes[closes.len() - period..])?;
     let ema_value = exponential_moving_average(closes, period)?;
@@ -38,7 +37,6 @@ fn build_market_rank_technical_snapshot_from_closes(
     } else {
         None
     };
-
     Some(MarketRankTechnicalSnapshot {
         timeframe: timeframe.to_string(),
         period: period as i32,
@@ -53,19 +51,18 @@ fn build_market_rank_technical_snapshot_from_closes(
         snapshot_at,
     })
 }
-
+/// 提供simplemovingaverage的集中实现，避免行情数据调用方重复处理相同细节。
 fn simple_moving_average(values: &[f64]) -> Option<f64> {
     if values.is_empty() {
         return None;
     }
     Some(values.iter().sum::<f64>() / values.len() as f64)
 }
-
+/// 提供exponentialmovingaverage的集中实现，避免行情数据调用方重复处理相同细节。
 fn exponential_moving_average(values: &[f64], period: usize) -> Option<f64> {
     if values.len() < period {
         return None;
     }
-
     let mut ema = simple_moving_average(&values[..period])?;
     let multiplier = 2.0 / (period as f64 + 1.0);
     for value in &values[period..] {
@@ -73,14 +70,14 @@ fn exponential_moving_average(values: &[f64], period: usize) -> Option<f64> {
     }
     Some(ema)
 }
-
+/// 提供movingaveragedistancepct的集中实现，避免行情数据调用方重复处理相同细节。
 fn moving_average_distance_pct(close: f64, average: f64) -> Option<f64> {
     if average <= 0.0 || !average.is_finite() || !close.is_finite() {
         return None;
     }
     Some((close - average) / average * 100.0)
 }
-
+/// 提供movingaverage状态的集中实现，避免行情数据调用方重复处理相同细节。
 fn moving_average_state(
     close: f64,
     average: f64,
@@ -95,7 +92,6 @@ fn moving_average_state(
             return "breakdown_down".to_string();
         }
     }
-
     let distance_pct = moving_average_distance_pct(close, average).unwrap_or(0.0);
     if distance_pct.abs() <= MARKET_RANK_TECHNICAL_TOUCH_THRESHOLD_PCT {
         "touching".to_string()
@@ -105,7 +101,6 @@ fn moving_average_state(
         "below".to_string()
     }
 }
-
 fn decimal_from_f64(value: f64) -> Option<Decimal> {
     Decimal::from_f64(value).map(|value| value.round_dp(12))
 }

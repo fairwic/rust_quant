@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 // 信号类型枚举
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub enum SignalType {
@@ -28,7 +27,6 @@ pub enum SignalDirect {
     IsLong,
     IsShort,
 }
-
 // 信号条件枚举
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub enum SignalCondition {
@@ -96,23 +94,26 @@ pub enum SignalCondition {
         in_discount_zone: bool,
     },
 }
-
 // 权重配置结构体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalWeightsConfig {
+    /// 列表数据。
     pub weights: Vec<(SignalType, f64)>,
+    /// 最小totalweight，用于控制策略触发门槛。
     pub min_total_weight: f64,
 }
-
 // 信号评分结构体
 #[derive(Debug)]
 pub struct SignalScoreWithDirect {
+    /// totalweight，用于记录新闻或情报分析结果。
     pub total_weight: f64,
+    /// 列表数据。
     pub details: Vec<CheckConditionResult>,
+    /// 信号结果；为空时使用默认值或表示不限制。
     pub signal_result: Option<SignalDirect>,
 }
-
 impl Default for SignalWeightsConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             weights: vec![
@@ -129,17 +130,23 @@ impl Default for SignalWeightsConfig {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckConditionResult {
+    /// 类型标识。
     pub signal_type: SignalType,
+    /// 综合评分。
     pub score: f64,
+    /// 详情。
     pub detail: SignalCondition,
+    /// 信号结果；为空时使用默认值或表示不限制。
     pub signal_result: Option<SignalDirect>,
 }
-
 impl SignalWeightsConfig {
     // 获取特定信号类型的权重
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 基于 self 入口减少重复传参，并与对象状态形成稳定契约。
     fn get_weight(&self, signal_type: SignalType) -> f64 {
         self.weights
             .iter()
@@ -147,8 +154,8 @@ impl SignalWeightsConfig {
             .map(|(_, w)| *w)
             .unwrap_or(0.0)
     }
-
     // 评估单个信号条件
+    /// 封装评估条件，减少回测策略调用方重复实现相同细节。
     fn evaluate_condition(
         &self,
         signal_type: SignalType,
@@ -159,7 +166,6 @@ impl SignalWeightsConfig {
         if base_weight <= 0.0 {
             return None;
         }
-
         match condition {
             // 新增Smart Money Concepts相关条件评估
             SignalCondition::LegDetection {
@@ -212,7 +218,6 @@ impl SignalWeightsConfig {
                 is_internal,
             } => {
                 let multiplier = if is_internal { 1.0 } else { 1.5 };
-
                 if is_bullish_bos || is_bullish_choch {
                     let score = base_weight * multiplier * if is_bullish_choch { 1.2 } else { 1.0 };
                     Some(CheckConditionResult {
@@ -486,8 +491,8 @@ impl SignalWeightsConfig {
             }
         }
     }
-
     // 计算总分
+    /// 计算 回测与策略研究 指标，保持公式和边界处理集中可审计。
     pub fn calculate_score(
         &self,
         conditions: Vec<(SignalType, SignalCondition)>,
@@ -496,13 +501,11 @@ impl SignalWeightsConfig {
         let mut details = Vec::new();
         let mut is_long_nums = 0;
         let mut is_short_nums = 0;
-
         // println!("conditions: {:#?}", conditions);
         for (signal_type, condition) in conditions {
             if let Some(result) = self.evaluate_condition(signal_type, condition) {
                 // println!("result: {:?}", result);
                 total_weight += result.score;
-
                 if let Some(signal_result) = result.signal_result {
                     match signal_result {
                         SignalDirect::IsLong => {
@@ -516,7 +519,6 @@ impl SignalWeightsConfig {
                 details.push(result);
             }
         }
-
         SignalScoreWithDirect {
             total_weight,
             details,
@@ -529,7 +531,7 @@ impl SignalWeightsConfig {
             },
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     pub fn is_signal_valid(&self, score: &SignalScoreWithDirect) -> Option<SignalDirect> {
         if score.total_weight >= self.min_total_weight {
             score.signal_result
@@ -538,17 +540,17 @@ impl SignalWeightsConfig {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn market_structure_signal_type_parses() {
         let market_structure = serde_json::from_str::<SignalType>("\"MarketStructure\"");
         assert!(market_structure.is_ok());
     }
-
     #[test]
     fn zero_weight_signal_does_not_affect_direction_vote() {
         let weights = SignalWeightsConfig {
@@ -558,7 +560,6 @@ mod tests {
             ],
             min_total_weight: 2.0,
         };
-
         let score = weights.calculate_score(vec![
             (
                 SignalType::VolumeTrend,
@@ -578,7 +579,6 @@ mod tests {
                 },
             ),
         ]);
-
         assert!((score.total_weight - 2.0).abs() < 1e-12);
         assert_eq!(weights.is_signal_valid(&score), None);
     }

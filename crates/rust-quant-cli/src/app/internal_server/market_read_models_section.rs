@@ -1,3 +1,5 @@
+/// 封装当前函数，减少行情数据调用方重复实现相同细节。
+/// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
 async fn fetch_market_klines_response(
     pool: &PgPool,
     query: &MarketKlineQuery,
@@ -9,7 +11,7 @@ async fn fetch_market_klines_response(
     rows.sort_by_key(|item| item.time);
     Ok(rows)
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_market_rank_events_response(
     pool: &PgPool,
     query: &MarketRankEventsQuery,
@@ -17,11 +19,9 @@ async fn fetch_market_rank_events_response(
     if market_rank_sort_requires_legacy_volume_before_limit(query.sort.as_deref()) {
         return fetch_volume_15m_market_rank_events_response(pool, query).await;
     }
-
     if market_rank_sort_can_use_recent_query(query.sort.as_deref()) {
         return fetch_recent_market_rank_events_response(pool, query).await;
     }
-
     let sql = r#"
         SELECT
             latest.id,
@@ -130,7 +130,6 @@ async fn fetch_market_rank_events_response(
         .bind(query.lookback_minutes as i32)
         .fetch_all(pool)
         .await;
-
     match result {
         Ok(mut rows) => {
             if market_rank_sort_requires_legacy_volume_before_limit(query.sort.as_deref()) {
@@ -141,7 +140,6 @@ async fn fetch_market_rank_events_response(
                     query.limit,
                 ));
             }
-
             let mut rows = finalize_market_rank_rows(rows, query.sort.as_deref(), query.limit);
             attach_legacy_volume_15m(pool, &mut rows).await?;
             Ok(rows)
@@ -150,7 +148,7 @@ async fn fetch_market_rank_events_response(
         Err(err) => Err(err.into()),
     }
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_volume_15m_market_rank_events_response(
     pool: &PgPool,
     query: &MarketRankEventsQuery,
@@ -158,7 +156,6 @@ async fn fetch_volume_15m_market_rank_events_response(
     let mut recent_query = query.clone();
     recent_query.sort = None;
     recent_query.limit = MAX_MARKET_RANK_EVENT_LIMIT;
-
     let mut rows = fetch_recent_market_rank_events_response(pool, &recent_query).await?;
     attach_legacy_volume_15m(pool, &mut rows).await?;
     Ok(finalize_market_rank_rows(
@@ -167,13 +164,12 @@ async fn fetch_volume_15m_market_rank_events_response(
         query.limit,
     ))
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_recent_market_rank_events_response(
     pool: &PgPool,
     query: &MarketRankEventsQuery,
 ) -> Result<Vec<MarketRankEventItem>> {
     let sql = recent_market_rank_events_sql(query.sort.as_deref());
-
     let result = sqlx::query_as::<_, MarketRankEventItem>(&sql)
         .bind(&query.exchange)
         .bind(query.symbol.as_deref())
@@ -183,7 +179,6 @@ async fn fetch_recent_market_rank_events_response(
         .bind(query.limit)
         .fetch_all(pool)
         .await;
-
     match result {
         Ok(rows) => Ok(finalize_market_rank_rows(
             rows,
@@ -194,7 +189,7 @@ async fn fetch_recent_market_rank_events_response(
         Err(err) => Err(err.into()),
     }
 }
-
+/// 提供最近市场rank事件SQL的集中实现，避免行情数据调用方重复处理相同细节。
 fn recent_market_rank_events_sql(sort: Option<&str>) -> String {
     format!(
         r#"
@@ -303,11 +298,10 @@ fn recent_market_rank_events_sql(sort: Option<&str>) -> String {
         market_rank_recent_order_clause(sort)
     )
 }
-
 fn market_rank_sort_can_use_recent_query(sort: Option<&str>) -> bool {
     matches!(sort, None | Some("detected_at") | Some("delta_rank"))
 }
-
+/// 提供市场rank最近订单clause的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_rank_recent_order_clause(sort: Option<&str>) -> &'static str {
     match sort {
         None | Some("delta_rank") => {
@@ -316,11 +310,10 @@ fn market_rank_recent_order_clause(sort: Option<&str>) -> &'static str {
         _ => "detected_at DESC, id DESC",
     }
 }
-
 fn market_rank_sort_requires_legacy_volume_before_limit(sort: Option<&str>) -> bool {
     matches!(sort, Some("volume_15m"))
 }
-
+/// 提供attachlegacy成交量15m的集中实现，避免行情数据调用方重复处理相同细节。
 async fn attach_legacy_volume_15m(pool: &PgPool, rows: &mut [MarketRankEventItem]) -> Result<()> {
     for row in rows {
         let stats = fetch_legacy_volume_15m_stats(pool, &row.symbol, row.detected_at).await?;
@@ -329,7 +322,7 @@ async fn attach_legacy_volume_15m(pool: &PgPool, rows: &mut [MarketRankEventItem
     }
     Ok(())
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_legacy_volume_15m_stats(
     pool: &PgPool,
     symbol: &str,
@@ -377,20 +370,18 @@ async fn fetch_legacy_volume_15m_stats(
         LEFT JOIN baseline ON TRUE
         "#
     );
-
     let result = sqlx::query_as::<_, CandleVolume15mStats>(&sql)
         .bind(detected_at_millis)
         .bind(detected_at_secs)
         .fetch_optional(pool)
         .await;
-
     match result {
         Ok(stats) => Ok(stats),
         Err(err) if is_undefined_table_error(&err) => Ok(None),
         Err(err) => Err(err.into()),
     }
 }
-
+/// 执行收尾市场rankrows步骤，串起行情数据需要的状态推进和错误处理。
 fn finalize_market_rank_rows(
     mut rows: Vec<MarketRankEventItem>,
     sort: Option<&str>,
@@ -420,31 +411,25 @@ fn finalize_market_rank_rows(
         }
     }
     rows.retain(is_market_rank_top_boundary_row);
-
     rows.sort_by(compare_market_rank_latest);
-
     let mut seen = HashSet::new();
     rows.retain(|row| seen.insert(row.symbol.trim().to_ascii_uppercase()));
-
     match sort {
         None | Some("delta_rank") => rows.sort_by(compare_market_rank_by_rank_change_pct),
         Some("volume_24h") => rows.sort_by(compare_market_rank_by_volume_24h_change_pct),
         Some("volume_15m") => rows.sort_by(compare_market_rank_by_volume_15m_change_pct),
         _ => rows.sort_by(compare_market_rank_latest),
     }
-
     rows.truncate(limit.max(0) as usize);
     rows
 }
-
 fn is_market_rank_top_boundary_row(row: &MarketRankEventItem) -> bool {
     rank_is_within_top_boundary(row.new_rank) || rank_is_within_top_boundary(row.old_rank)
 }
-
 fn rank_is_within_top_boundary(rank: Option<i32>) -> bool {
     rank.is_some_and(|value| value > 0 && value <= MARKET_RANK_TOP_BOUNDARY)
 }
-
+/// 计算 行情与市场数据 指标，保持公式和边界处理集中可审计。
 fn compute_rank_change_pct(old_rank: Option<i32>, delta_rank: Option<i32>) -> Option<f64> {
     let old_rank = old_rank?;
     let delta_rank = delta_rank?;
@@ -453,7 +438,7 @@ fn compute_rank_change_pct(old_rank: Option<i32>, delta_rank: Option<i32>) -> Op
     }
     Some(delta_rank.abs() as f64 / old_rank as f64 * 100.0)
 }
-
+/// 计算 行情与市场数据 指标，保持公式和边界处理集中可审计。
 fn compute_change_pct(current: Option<f64>, previous: Option<f64>) -> Option<f64> {
     let current = current?;
     let previous = previous?;
@@ -462,14 +447,14 @@ fn compute_change_pct(current: Option<f64>, previous: Option<f64>) -> Option<f64
     }
     Some((current - previous) / previous * 100.0)
 }
-
+/// 提供compare市场rank最新的集中实现，避免行情数据调用方重复处理相同细节。
 fn compare_market_rank_latest(left: &MarketRankEventItem, right: &MarketRankEventItem) -> Ordering {
     right
         .detected_at
         .cmp(&left.detected_at)
         .then_with(|| right.id.cmp(&left.id))
 }
-
+/// 提供compare市场rankbyrankchangepct的集中实现，避免行情数据调用方重复处理相同细节。
 fn compare_market_rank_by_rank_change_pct(
     left: &MarketRankEventItem,
     right: &MarketRankEventItem,
@@ -480,7 +465,7 @@ fn compare_market_rank_by_rank_change_pct(
         })
         .then_with(|| compare_market_rank_latest(left, right))
 }
-
+/// 提供compare市场rankby成交量24hchangepct的集中实现，避免行情数据调用方重复处理相同细节。
 fn compare_market_rank_by_volume_24h_change_pct(
     left: &MarketRankEventItem,
     right: &MarketRankEventItem,
@@ -488,7 +473,7 @@ fn compare_market_rank_by_volume_24h_change_pct(
     compare_optional_f64_abs_desc(left.volume_24h_change_pct, right.volume_24h_change_pct)
         .then_with(|| compare_market_rank_latest(left, right))
 }
-
+/// 提供compare市场rankby成交量15mchangepct的集中实现，避免行情数据调用方重复处理相同细节。
 fn compare_market_rank_by_volume_15m_change_pct(
     left: &MarketRankEventItem,
     right: &MarketRankEventItem,
@@ -496,7 +481,7 @@ fn compare_market_rank_by_volume_15m_change_pct(
     compare_optional_f64_abs_desc(left.volume_15m_change_pct, right.volume_15m_change_pct)
         .then_with(|| compare_market_rank_latest(left, right))
 }
-
+/// 提供compareoptionalf64desc的集中实现，避免行情数据调用方重复处理相同细节。
 fn compare_optional_f64_desc(left: Option<f64>, right: Option<f64>) -> Ordering {
     match (finite_f64(left), finite_f64(right)) {
         (Some(left), Some(right)) => right.partial_cmp(&left).unwrap_or(Ordering::Equal),
@@ -505,11 +490,10 @@ fn compare_optional_f64_desc(left: Option<f64>, right: Option<f64>) -> Ordering 
         (None, None) => Ordering::Equal,
     }
 }
-
 fn finite_f64(value: Option<f64>) -> Option<f64> {
     value.filter(|item| item.is_finite())
 }
-
+/// 提供compareoptionalf64absdesc的集中实现，避免行情数据调用方重复处理相同细节。
 fn compare_optional_f64_abs_desc(left: Option<f64>, right: Option<f64>) -> Ordering {
     match (finite_f64(left), finite_f64(right)) {
         (Some(left), Some(right)) => right
@@ -521,7 +505,7 @@ fn compare_optional_f64_abs_desc(left: Option<f64>, right: Option<f64>) -> Order
         (None, None) => Ordering::Equal,
     }
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_unified_market_klines(
     pool: &PgPool,
     query: &MarketKlineQuery,
@@ -554,14 +538,13 @@ async fn fetch_unified_market_klines(
     .bind(query.limit)
     .fetch_all(pool)
     .await;
-
     match result {
         Ok(rows) => Ok(rows),
         Err(err) if is_undefined_table_error(&err) => Ok(Vec::new()),
         Err(err) => Err(err.into()),
     }
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_legacy_market_klines(
     pool: &PgPool,
     query: &MarketKlineQuery,
@@ -581,7 +564,6 @@ async fn fetch_legacy_market_klines(
         WHERE 1=1
         "#
     ));
-
     if let Some(before) = query.before {
         query_builder
             .push(" AND ts < ")
@@ -595,25 +577,23 @@ async fn fetch_legacy_market_klines(
     query_builder
         .push(" ORDER BY ts DESC LIMIT ")
         .push_bind(query.limit);
-
     let result = query_builder
         .build_query_as::<MarketKlineItem>()
         .fetch_all(pool)
         .await;
-
     match result {
         Ok(rows) => Ok(rows),
         Err(err) if is_undefined_table_error(&err) => Ok(Vec::new()),
         Err(err) => Err(err.into()),
     }
 }
-
+/// 提供legacyK 线table名称的集中实现，避免行情数据调用方重复处理相同细节。
 fn legacy_kline_table_name(symbol: &str, timeframe: &str) -> Result<String> {
     let symbol = normalize_legacy_symbol(symbol)?;
     let timeframe = normalize_legacy_timeframe(timeframe)?;
     Ok(format!("\"{}_candles_{}\"", symbol, timeframe))
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn normalize_legacy_symbol(raw: &str) -> Result<String> {
     let upper = raw.trim().to_ascii_uppercase();
     let normalized = if upper.contains('-') {
@@ -623,7 +603,6 @@ fn normalize_legacy_symbol(raw: &str) -> Result<String> {
     } else {
         anyhow::bail!("unsupported symbol for legacy kline table: {raw}");
     };
-
     let lower = normalized.to_ascii_lowercase();
     if lower
         .chars()
@@ -634,7 +613,7 @@ fn normalize_legacy_symbol(raw: &str) -> Result<String> {
         anyhow::bail!("illegal legacy kline symbol: {raw}");
     }
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn normalize_legacy_timeframe(raw: &str) -> Result<&'static str> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "1m" => Ok("1m"),
@@ -653,7 +632,7 @@ fn normalize_legacy_timeframe(raw: &str) -> Result<&'static str> {
         _ => anyhow::bail!("unsupported timeframe for legacy kline table: {raw}"),
     }
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn normalize_kline_sync_timeframe(raw: &str) -> Result<String, String> {
     let normalized = raw.trim().to_ascii_lowercase();
     match normalized.as_str() {
@@ -673,7 +652,7 @@ fn normalize_kline_sync_timeframe(raw: &str) -> Result<String, String> {
         other => Err(format!("unsupported timeframe: {other}")),
     }
 }
-
+/// 提供K 线同步periodforjob的集中实现，避免行情数据调用方重复处理相同细节。
 fn kline_sync_period_for_job(timeframe: &str) -> Result<String> {
     let period = match timeframe {
         "1M" => "1m",
@@ -686,7 +665,7 @@ fn kline_sync_period_for_job(timeframe: &str) -> Result<String> {
     };
     Ok(period.to_string())
 }
-
+/// 提供secondstolegacymillis的集中实现，避免行情数据调用方重复处理相同细节。
 fn seconds_to_legacy_millis(timestamp: i64) -> i64 {
     if timestamp > 10_000_000_000 {
         timestamp
@@ -694,7 +673,7 @@ fn seconds_to_legacy_millis(timestamp: i64) -> i64 {
         timestamp.saturating_mul(1_000)
     }
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn normalize_market_rank_event_type(raw: &str) -> Result<String, String> {
     let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
     match normalized.as_str() {
@@ -704,7 +683,7 @@ fn normalize_market_rank_event_type(raw: &str) -> Result<String, String> {
         other => Err(format!("unsupported eventType: {other}")),
     }
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn normalize_market_rank_sort(raw: &str) -> Result<String, String> {
     let normalized = raw.trim().to_ascii_lowercase().replace(['-', '.'], "_");
     match normalized.as_str() {
@@ -717,7 +696,7 @@ fn normalize_market_rank_sort(raw: &str) -> Result<String, String> {
         other => Err(format!("unsupported sort: {other}")),
     }
 }
-
+/// 判断 行情与市场数据 条件是否满足，给上层流程提供布尔决策。
 fn is_undefined_table_error(err: &sqlx::Error) -> bool {
     err.as_database_error()
         .and_then(|database_error| database_error.code())

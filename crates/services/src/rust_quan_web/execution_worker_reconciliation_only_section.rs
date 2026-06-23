@@ -1,4 +1,6 @@
 impl ExecutionWorker {
+    /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     async fn run_reconciliation_only_once(&self) -> Result<usize> {
         self.record_checkpoint(
             "leasing_reconciliation_only",
@@ -17,7 +19,6 @@ impl ExecutionWorker {
             }),
         )
         .await;
-
         let leased = match self
             .client
             .lease_tasks(ExecutionTaskLeaseRequest {
@@ -45,7 +46,6 @@ impl ExecutionWorker {
                 return Err(error);
             }
         };
-
         self.record_checkpoint(
             "reconciliation_only_leased",
             None,
@@ -60,7 +60,6 @@ impl ExecutionWorker {
             }),
         )
         .await;
-
         let mut handled = 0;
         let mut last_task_id = None;
         for task in leased.tasks {
@@ -79,12 +78,10 @@ impl ExecutionWorker {
                 .await;
                 continue;
             }
-
             self.execute_reconciliation_only_for_task(&task).await;
             last_task_id = Some(task.id);
             handled += 1;
         }
-
         self.record_checkpoint(
             "idle",
             last_task_id,
@@ -100,7 +97,7 @@ impl ExecutionWorker {
         .await;
         Ok(handled)
     }
-
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     async fn execute_reconciliation_only_for_task(&self, task: &ExecutionTask) {
         let order_task =
             match ExecutionOrderTask::from_task_with_default(task, self.config.default_exchange) {
@@ -139,7 +136,6 @@ impl ExecutionWorker {
             .await;
             return;
         }
-
         let instrument = match parse_instrument(&order_task.symbol) {
             Ok(value) => value,
             Err(error) => {
@@ -160,12 +156,11 @@ impl ExecutionWorker {
                 return;
             }
         };
-
         let live_gateway = if self.config.dry_run {
             None
         } else {
             match self
-                .resolve_live_gateway(&task.buyer_email, order_task.exchange)
+                .resolve_live_gateway_for_task(task, order_task.exchange)
                 .await
             {
                 Ok(gateway) => Some(gateway),
@@ -182,10 +177,10 @@ impl ExecutionWorker {
             }
         };
         let gateway = live_gateway.as_ref().unwrap_or(&self.gateway);
-
-        let positions = match gateway
-            .positions(order_task.exchange, Some(&instrument))
-            .await
+        let positions = match CryptoExcAllGateway::with_signed_read_only_scope(
+            gateway.positions(order_task.exchange, Some(&instrument)),
+        )
+        .await
         {
             Ok(positions) => positions,
             Err(error) => {
@@ -199,11 +194,10 @@ impl ExecutionWorker {
                 return;
             }
         };
-        let open_orders = match gateway
-            .open_orders(
+        let open_orders = match CryptoExcAllGateway::with_signed_read_only_scope(gateway.open_orders(
                 order_task.exchange,
                 OrderListQuery::for_instrument(instrument).with_limit(100),
-            )
+            ))
             .await
         {
             Ok(open_orders) => open_orders,
@@ -254,7 +248,6 @@ impl ExecutionWorker {
                 }
             }
         }
-
         self.record_checkpoint(
             "reconciliation_only_checked",
             Some(task.id),
@@ -287,6 +280,7 @@ impl ExecutionWorker {
         )
         .await;
     }
+    /// 持久化 Web 商业、会员和执行准备度 结果，保证写入路径和幂等语义集中处理。
     async fn record_reconciliation_only_read_failure(
         &self,
         task: &ExecutionTask,

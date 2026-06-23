@@ -13,176 +13,269 @@ use rust_quant_strategies::framework::backtest::{
 use rust_quant_strategies::CandleItem;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
-
 const INITIAL_FUND_PER_SYMBOL: f64 = 100.0;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquityReport {
+    /// targetr，用于展示或持久化查询结果。
     pub target_r: f64,
+    /// initial资金per交易对，用于展示或持久化查询结果。
     pub initial_fund_per_symbol: f64,
+    /// 最小trades，用于控制策略触发门槛。
     pub min_trades: usize,
+    /// total开盘trades，用于展示或持久化查询结果。
     pub total_open_trades: usize,
+    /// total收益，用于展示或持久化查询结果。
     pub total_profit: f64,
+    /// 胜率；为空时使用默认值或表示不限制。
     pub win_rate: Option<f64>,
+    /// 交易级 Sharpe；为空时表示样本不足。
     pub trade_sharpe: Option<f64>,
+    /// 最大回撤百分比。
     pub max_drawdown_pct: f64,
+    /// meets最小trades，用于展示或持久化查询结果。
     pub meets_min_trades: bool,
+    /// 列表数据。
     pub symbols: Vec<FrameworkEquitySymbolReport>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquitySymbolReport {
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// 回测过程中仍未平仓的交易记录。
     pub open_trades: usize,
+    /// 金额数值。
     pub final_fund: f64,
+    /// 收益。
     pub profit: f64,
+    /// wins，用于展示或持久化查询结果。
     pub wins: usize,
+    /// losses，用于展示或持久化查询结果。
     pub losses: usize,
+    /// 交易级 Sharpe；为空时表示样本不足。
     pub trade_sharpe: Option<f64>,
+    /// 最大回撤百分比。
     pub max_drawdown_pct: f64,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquitySplitReport {
+    /// label，用于展示或持久化查询结果。
     pub label: &'static str,
+    /// 开始时间。
     pub start_entry_ts: i64,
+    /// 结束时间。
     pub end_entry_ts: i64,
+    /// 报告。
     pub report: FrameworkEquityReport,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquityTriggerReport {
+    /// trigger，用于展示或持久化查询结果。
     pub trigger: String,
+    /// 报告。
     pub report: FrameworkEquityReport,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquityFeatureReport {
+    /// feature，用于展示或持久化查询结果。
     pub feature: &'static str,
+    /// bucket，用于展示或持久化查询结果。
     pub bucket: &'static str,
+    /// 报告。
     pub report: FrameworkEquityReport,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquitySymbolWindowReport {
+    /// split，用于展示或持久化查询结果。
     pub split: FrameworkEquitySplitReport,
+    /// 列表数据。
     pub top_symbols: Vec<FrameworkEquitySymbolReport>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquityTradeReport {
+    /// targetr，用于展示或持久化查询结果。
     pub target_r: f64,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// event ID。
     pub event_id: i64,
+    /// 时间字段。
     pub detected_at: String,
+    /// 时间戳。
     pub entry_ts: i64,
+    /// 开仓时间。
     pub signal_open_position_time: String,
+    /// 开仓时间。
     pub open_position_time: String,
+    /// 平仓时间。
     pub close_position_time: Option<String>,
+    /// 价格数值。
     pub open_price: f64,
+    /// 离场价格。
     pub close_price: Option<f64>,
+    /// 类型标识。
     pub close_type: String,
+    /// 状态值。
     pub signal_status: i32,
+    /// 收益亏损，用于展示或持久化查询结果。
     pub profit_loss: f64,
+    /// 数量。
     pub quantity: f64,
+    /// outcome，用于展示或持久化查询结果。
     pub outcome: &'static str,
+    /// trigger，用于展示或持久化查询结果。
     pub trigger: String,
+    /// new排名，用于展示或持久化查询结果。
     pub new_rank: i32,
+    /// delta排名，用于展示或持久化查询结果。
     pub delta_rank: i32,
+    /// 价格涨跌幅百分比。
     pub price_change_pct: f64,
+    /// 列表数据。
     pub close_legs: Vec<FrameworkEquityCloseLegReport>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquityCloseLegReport {
+    /// 时间戳。
     pub close_ts: i64,
+    /// 平仓时间。
     pub close_position_time: String,
+    /// 离场价格。
     pub close_price: f64,
+    /// 类型标识。
     pub close_type: String,
+    /// 收益亏损，用于展示或持久化查询结果。
     pub profit_loss: f64,
+    /// 数量。
     pub quantity: f64,
+    /// full收盘，用于展示或持久化查询结果。
     pub full_close: bool,
+    /// 原因说明。
     pub exit_reason: String,
+    /// 结果r，用于展示或持久化查询结果。
     pub result_r: f64,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquityConcentrationReport {
+    /// targetr，用于展示或持久化查询结果。
     pub target_r: f64,
+    /// 最小trades，用于控制策略触发门槛。
     pub min_trades: usize,
+    /// removedtoppositive，用于展示或持久化查询结果。
     pub removed_top_positive: usize,
+    /// 列表数据。
     pub removed_symbols: Vec<String>,
+    /// removed收益，用于展示或持久化查询结果。
     pub removed_profit: f64,
+    /// 被移除样本占比。
     pub removed_share_pct: Option<f64>,
+    /// remainingsymbols，用于展示或持久化查询结果。
     pub remaining_symbols: usize,
+    /// remaining开盘trades，用于展示或持久化查询结果。
     pub remaining_open_trades: usize,
+    /// remainingtotal收益，用于展示或持久化查询结果。
     pub remaining_total_profit: f64,
+    /// remainingwin 费率；为空时使用默认值或表示不限制。
     pub remaining_win_rate: Option<f64>,
+    /// 剩余样本最大回撤百分比。
     pub remaining_max_drawdown_pct: f64,
+    /// remainingmeets最小trades，用于展示或持久化查询结果。
     pub remaining_meets_min_trades: bool,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 struct ReplayEntry {
+    /// 入场价格。
     entry_price: f64,
+    /// event ID。
     event_id: i64,
+    /// trigger，用于行情、K 线或市场扫描。
     trigger: String,
+    /// direction，用于行情、K 线或市场扫描。
     direction: MarketVelocityTradeDirection,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 struct ReplayActivePosition {
+    /// 入场价格。
     entry_price: f64,
+    /// event ID。
     event_id: i64,
+    /// trigger，用于记录交易或执行状态。
     trigger: String,
+    /// direction，用于记录交易或执行状态。
     direction: MarketVelocityTradeDirection,
+    /// 收益protected，用于记录交易或执行状态。
     profit_protected: bool,
+    /// observedK 线，用于记录交易或执行状态。
     observed_candles: usize,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 struct ReplayOpenTrade {
+    /// event ID。
     event_id: i64,
+    /// trigger，用于记录交易或执行状态。
     trigger: String,
+    /// 开仓时间。
     open_position_time: String,
+    /// 价格数值。
     open_price: f64,
+    /// 数量。
     quantity: f64,
+    /// 状态值。
     signal_status: i32,
 }
-
 #[derive(Debug, Clone)]
 struct MarketVelocityReplayStrategy {
+    /// 时间戳。
     entries_by_ts: BTreeMap<i64, ReplayEntry>,
+    /// 止损百分比。
     stop_loss_pct: f64,
+    /// targetr，用于行情、K 线或市场扫描。
     target_r: f64,
+    /// 达到指定 R 倍数后启用利润保护；为空时不启用。
     profit_protect_after_r: Option<f64>,
+    /// 收益protect止损r，用于行情、K 线或市场扫描。
     profit_protect_stop_r: f64,
+    /// 无盈利时提前退出所需 K 线数量；为空时不启用。
     early_exit_no_profit_candles: Option<usize>,
+    /// 活动仓位；为空时表示没有活动仓位。
     active_position: Option<ReplayActivePosition>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 struct ClosedTradeStats {
+    /// wins，用于记录交易或执行状态。
     wins: usize,
+    /// losses，用于记录交易或执行状态。
     losses: usize,
+    /// 列表数据。
     returns: Vec<f64>,
+    /// 最大回撤百分比。
     max_drawdown_pct: f64,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 struct RunnerReplayTrade {
+    /// event ID。
     event_id: i64,
+    /// 开仓时间。
     open_position_time: String,
+    /// 平仓时间。
     close_position_time: String,
+    /// 价格数值。
     open_price: f64,
+    /// 离场价格。
     close_price: f64,
+    /// 数量。
     quantity: f64,
+    /// 收益亏损，用于记录交易或执行状态。
     profit_loss: f64,
+    /// 类型标识。
     close_type: String,
+    /// 结果r，用于记录交易或执行状态。
     result_r: f64,
+    /// 列表数据。
     close_legs: Vec<FrameworkEquityCloseLegReport>,
 }
-
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 pub fn build_framework_equity_report(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -195,7 +288,6 @@ pub fn build_framework_equity_report(
         .collect::<Vec<_>>();
     symbols.sort();
     symbols.dedup();
-
     let mut symbol_reports = Vec::new();
     let mut all_returns = Vec::new();
     for symbol in symbols {
@@ -266,7 +358,6 @@ pub fn build_framework_equity_report(
             max_drawdown_pct: closed_stats.max_drawdown_pct,
         });
     }
-
     let total_open_trades = symbol_reports.iter().map(|item| item.open_trades).sum();
     let wins = symbol_reports.iter().map(|item| item.wins).sum::<usize>();
     let losses = symbol_reports.iter().map(|item| item.losses).sum::<usize>();
@@ -277,7 +368,6 @@ pub fn build_framework_equity_report(
         .fold(0.0, f64::max);
     let resolved = wins + losses;
     let win_rate = (resolved > 0).then_some(wins as f64 / resolved as f64 * 100.0);
-
     FrameworkEquityReport {
         target_r,
         initial_fund_per_symbol: INITIAL_FUND_PER_SYMBOL,
@@ -291,7 +381,7 @@ pub fn build_framework_equity_report(
         symbols: symbol_reports,
     }
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_framework_equity_split_reports(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -301,7 +391,6 @@ pub fn build_framework_equity_split_reports(
     if confirmed.len() < 2 {
         return Vec::new();
     }
-
     let mut ordered = confirmed.to_vec();
     ordered.sort_by_key(|event| (event.entry_ts, event.event.id));
     let midpoint = ordered.len() / 2;
@@ -322,7 +411,7 @@ pub fn build_framework_equity_split_reports(
     })
     .collect()
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_framework_equity_quartile_reports(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -332,7 +421,6 @@ pub fn build_framework_equity_quartile_reports(
     if confirmed.len() < 4 {
         return Vec::new();
     }
-
     let mut ordered = confirmed.to_vec();
     ordered.sort_by_key(|event| (event.entry_ts, event.event.id));
     ["q1", "q2", "q3", "q4"]
@@ -353,7 +441,7 @@ pub fn build_framework_equity_quartile_reports(
         })
         .collect()
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_framework_equity_trigger_reports(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -367,7 +455,6 @@ pub fn build_framework_equity_trigger_reports(
             .or_default()
             .push(event.clone());
     }
-
     events_by_trigger
         .into_iter()
         .map(|(trigger, events)| FrameworkEquityTriggerReport {
@@ -376,7 +463,7 @@ pub fn build_framework_equity_trigger_reports(
         })
         .collect()
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_framework_equity_feature_reports(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -506,7 +593,7 @@ pub fn build_framework_equity_feature_reports(
     );
     reports
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_framework_equity_symbol_window_reports(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -530,7 +617,7 @@ pub fn build_framework_equity_symbol_window_reports(
         })
         .collect()
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_framework_equity_trade_reports(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -543,13 +630,11 @@ pub fn build_framework_equity_trade_reports(
         .collect::<Vec<_>>();
     symbols.sort();
     symbols.dedup();
-
     let confirmed_by_event_id = confirmed
         .iter()
         .map(|event| (event.event.id, event))
         .collect::<HashMap<_, _>>();
     let mut reports = Vec::new();
-
     for symbol in symbols {
         let Some(candles) = candles_15m
             .get(&symbol)
@@ -617,7 +702,6 @@ pub fn build_framework_equity_trade_reports(
         };
         let result = run_indicator_strategy_backtest(&symbol, strategy, &candle_items, risk_config);
         let mut open_trade = None;
-
         for record in &result.trade_records {
             if !record.full_close {
                 open_trade = parse_replay_open_trade(record);
@@ -657,11 +741,10 @@ pub fn build_framework_equity_trade_reports(
             });
         }
     }
-
     reports.sort_by_key(|report| (report.entry_ts, report.event_id));
     reports
 }
-
+/// 提供框架平仓type的集中实现，避免回测策略调用方重复处理相同细节。
 fn framework_close_type(record: &TradeRecord) -> String {
     if !record.close_type.starts_with("反向信号平仓") {
         return record.close_type.clone();
@@ -679,7 +762,7 @@ fn framework_close_type(record: &TradeRecord) -> String {
         .unwrap_or(&record.close_type)
         .to_string()
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_runner_replay_trades(
     events: Vec<ConfirmedEvent>,
     candles: &[BacktestCandle],
@@ -694,7 +777,6 @@ fn build_runner_replay_trades(
     if entries_by_ts.is_empty() || candles.is_empty() {
         return Vec::new();
     }
-
     let mut trades = Vec::new();
     let mut locked_until = i64::MIN;
     for (entry_ts, event) in std::mem::take(&mut entries_by_ts) {
@@ -719,7 +801,7 @@ fn build_runner_replay_trades(
     }
     trades
 }
-
+/// 执行模拟框架Runner交易步骤，串起回测策略需要的状态推进和错误处理。
 fn simulate_framework_runner_trade(
     candles: &[BacktestCandle],
     entry_idx: usize,
@@ -742,7 +824,6 @@ fn simulate_framework_runner_trade(
     let open_position_time = timestamp_ms_to_shanghai_datetime(event.entry_ts);
     let mut base_leg: Option<FrameworkEquityCloseLegReport> = None;
     let mut last_seen: Option<&BacktestCandle> = None;
-
     for candle in candles.iter().skip(entry_idx) {
         last_seen = Some(candle);
         if base_leg.is_none() {
@@ -788,7 +869,6 @@ fn simulate_framework_runner_trade(
             }
             continue;
         }
-
         let hit_stop = hit_stop(candle.low, candle.high, runner_stop_price, direction);
         let hit_target = hit_target(candle.low, candle.high, runner_target_price, direction);
         let (close_price, exit_reason, result_r) = if hit_stop && hit_target {
@@ -818,7 +898,6 @@ fn simulate_framework_runner_trade(
             vec![base_leg.expect("base leg exists"), runner_leg],
         ));
     }
-
     let last_seen = last_seen?;
     if let Some(base_leg) = base_leg {
         let close_r = r_for_price(entry_price, stop_loss_pct, last_seen.close, direction);
@@ -840,7 +919,6 @@ fn simulate_framework_runner_trade(
             vec![base_leg, runner_leg],
         ));
     }
-
     let close_r = r_for_price(entry_price, stop_loss_pct, last_seen.close, direction);
     Some(build_single_leg_runner_trade(
         event,
@@ -854,7 +932,7 @@ fn simulate_framework_runner_trade(
         close_r,
     ))
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_single_leg_runner_trade(
     event: &ConfirmedEvent,
     direction: MarketVelocityTradeDirection,
@@ -883,7 +961,7 @@ fn build_single_leg_runner_trade(
         )],
     )
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_multi_leg_runner_trade(
     event: &ConfirmedEvent,
     open_position_time: String,
@@ -916,7 +994,7 @@ fn build_multi_leg_runner_trade(
         close_legs,
     }
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_close_leg(
     direction: MarketVelocityTradeDirection,
     entry_price: f64,
@@ -949,7 +1027,7 @@ fn build_close_leg(
         result_r,
     }
 }
-
+/// 提供交易离场ts的集中实现，避免回测策略调用方重复处理相同细节。
 fn trade_exit_ts(trade: &RunnerReplayTrade) -> i64 {
     trade
         .close_legs
@@ -957,7 +1035,7 @@ fn trade_exit_ts(trade: &RunnerReplayTrade) -> i64 {
         .map(|leg| leg.close_ts)
         .unwrap_or(i64::MAX)
 }
-
+/// 停止 回测与策略研究 后台流程，确保退出时不留下未释放状态。
 fn stop_price_for(
     entry_price: f64,
     stop_loss_pct: f64,
@@ -969,7 +1047,7 @@ fn stop_price_for(
         MarketVelocityTradeDirection::Both => entry_price,
     }
 }
-
+/// 提供目标价格for的集中实现，避免回测策略调用方重复处理相同细节。
 fn target_price_for(
     entry_price: f64,
     stop_loss_pct: f64,
@@ -982,7 +1060,7 @@ fn target_price_for(
         MarketVelocityTradeDirection::Both => entry_price,
     }
 }
-
+/// 提供hit止损的集中实现，避免回测策略调用方重复处理相同细节。
 fn hit_stop(
     candle_low: f64,
     candle_high: f64,
@@ -995,7 +1073,7 @@ fn hit_stop(
         MarketVelocityTradeDirection::Both => false,
     }
 }
-
+/// 提供hit目标的集中实现，避免回测策略调用方重复处理相同细节。
 fn hit_target(
     candle_low: f64,
     candle_high: f64,
@@ -1008,7 +1086,7 @@ fn hit_target(
         MarketVelocityTradeDirection::Both => false,
     }
 }
-
+/// 停止 回测与策略研究 后台流程，确保退出时不留下未释放状态。
 fn stop_already_crossed(
     close_price: f64,
     stop_price: f64,
@@ -1020,7 +1098,7 @@ fn stop_already_crossed(
         MarketVelocityTradeDirection::Both => true,
     }
 }
-
+/// 提供no盈利平仓的集中实现，避免回测策略调用方重复处理相同细节。
 fn no_profit_close(
     close_price: f64,
     entry_price: f64,
@@ -1032,7 +1110,7 @@ fn no_profit_close(
         MarketVelocityTradeDirection::Both => false,
     }
 }
-
+/// 提供rfor价格的集中实现，避免回测策略调用方重复处理相同细节。
 fn r_for_price(
     entry_price: f64,
     stop_loss_pct: f64,
@@ -1047,7 +1125,7 @@ fn r_for_price(
         MarketVelocityTradeDirection::Both => 0.0,
     }
 }
-
+/// 把数据加入 回测与策略研究 聚合结果，保持集合构造逻辑集中。
 fn push_feature_report<F>(
     reports: &mut Vec<FrameworkEquityFeatureReport>,
     confirmed: &[ConfirmedEvent],
@@ -1073,7 +1151,7 @@ fn push_feature_report<F>(
         });
     }
 }
-
+/// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_replay_open_trade(record: &TradeRecord) -> Option<ReplayOpenTrade> {
     if record.option_type != "long" && record.option_type != "short" {
         return None;
@@ -1095,7 +1173,7 @@ fn parse_replay_open_trade(record: &TradeRecord) -> Option<ReplayOpenTrade> {
         signal_status: record.signal_status,
     })
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_market_velocity_backtest_details(
     trade: &FrameworkEquityTradeReport,
     back_test_id: i64,
@@ -1121,7 +1199,6 @@ pub fn build_market_velocity_backtest_details(
         "loss" => (0, 1),
         _ => (0, 0),
     };
-
     let mut details = vec![BacktestDetail::new(
         back_test_id,
         open_option_type.to_string(),
@@ -1145,7 +1222,6 @@ pub fn build_market_velocity_backtest_details(
         None,
         None,
     )];
-
     if trade.close_legs.is_empty() {
         details.push(BacktestDetail::new(
             back_test_id,
@@ -1172,7 +1248,6 @@ pub fn build_market_velocity_backtest_details(
         ));
         return Ok(details);
     }
-
     for leg in &trade.close_legs {
         let leg_signal_value =
             market_velocity_detail_signal_value_for_leg(trade, args, leg).to_string();
@@ -1205,10 +1280,9 @@ pub fn build_market_velocity_backtest_details(
             None,
         ));
     }
-
     Ok(details)
 }
-
+/// 提供市场动量策略type的集中实现，避免回测策略调用方重复处理相同细节。
 pub fn market_velocity_strategy_type(args: &MarketVelocityEventBacktestArgs) -> &'static str {
     match args.event_source {
         super::MarketVelocityEventSource::Episodes => "market_velocity_episode",
@@ -1216,7 +1290,7 @@ pub fn market_velocity_strategy_type(args: &MarketVelocityEventBacktestArgs) -> 
         super::MarketVelocityEventSource::RawState => "market_velocity_raw_state",
     }
 }
-
+/// 提供市场动量detail信号值的集中实现，避免回测策略调用方重复处理相同细节。
 fn market_velocity_detail_signal_value(
     trade: &FrameworkEquityTradeReport,
     args: &MarketVelocityEventBacktestArgs,
@@ -1241,7 +1315,7 @@ fn market_velocity_detail_signal_value(
         },
     })
 }
-
+/// 提供市场动量detail信号值forleg的集中实现，避免回测策略调用方重复处理相同细节。
 fn market_velocity_detail_signal_value_for_leg(
     trade: &FrameworkEquityTradeReport,
     args: &MarketVelocityEventBacktestArgs,
@@ -1267,7 +1341,7 @@ fn market_velocity_detail_signal_value_for_leg(
     }
     value
 }
-
+/// 提供timestampmstoshanghaidatetime的集中实现，避免回测策略调用方重复处理相同细节。
 fn timestamp_ms_to_shanghai_datetime(timestamp_ms: i64) -> String {
     let offset = FixedOffset::east_opt(8 * 3600).expect("valid shanghai fixed offset");
     Utc.timestamp_millis_opt(timestamp_ms)
@@ -1281,7 +1355,7 @@ fn timestamp_ms_to_shanghai_datetime(timestamp_ms: i64) -> String {
         .format("%Y-%m-%d %H:%M:%S")
         .to_string()
 }
-
+/// 提供交易结果标签的集中实现，避免回测策略调用方重复处理相同细节。
 fn trade_outcome_label(profit_loss: f64) -> &'static str {
     if profit_loss > 0.0 {
         "win"
@@ -1291,7 +1365,7 @@ fn trade_outcome_label(profit_loss: f64) -> &'static str {
         "flat"
     }
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_framework_equity_concentration_reports(
     report: &FrameworkEquityReport,
 ) -> Vec<FrameworkEquityConcentrationReport> {
@@ -1307,7 +1381,6 @@ pub fn build_framework_equity_concentration_reports(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| left.symbol.cmp(&right.symbol))
     });
-
     [1, 3, 5]
         .into_iter()
         .filter(|count| positive_symbols.len() >= *count)
@@ -1337,7 +1410,6 @@ pub fn build_framework_equity_concentration_reports(
                 .iter()
                 .map(|symbol| symbol.max_drawdown_pct)
                 .fold(0.0, f64::max);
-
             FrameworkEquityConcentrationReport {
                 target_r: report.target_r,
                 min_trades: report.min_trades,
@@ -1356,7 +1428,7 @@ pub fn build_framework_equity_concentration_reports(
         })
         .collect()
 }
-
+/// 执行输出框架equity报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_report(report: &FrameworkEquityReport, sample_limit: usize) {
     println!(
         "framework_equity_result\ttarget={}R\tmode=symbol_isolated_100u\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
@@ -1385,7 +1457,7 @@ pub fn print_framework_equity_report(report: &FrameworkEquityReport, sample_limi
         );
     }
 }
-
+/// 执行输出框架equity分组报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_split_reports(reports: &[FrameworkEquitySplitReport]) {
     for split in reports {
         let report = &split.report;
@@ -1406,7 +1478,7 @@ pub fn print_framework_equity_split_reports(reports: &[FrameworkEquitySplitRepor
         );
     }
 }
-
+/// 执行输出框架equity四分位报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_quartile_reports(reports: &[FrameworkEquitySplitReport]) {
     for split in reports {
         let report = &split.report;
@@ -1427,7 +1499,7 @@ pub fn print_framework_equity_quartile_reports(reports: &[FrameworkEquitySplitRe
         );
     }
 }
-
+/// 执行输出框架equity触发报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_trigger_reports(reports: &[FrameworkEquityTriggerReport]) {
     for trigger in reports {
         let report = &trigger.report;
@@ -1446,7 +1518,7 @@ pub fn print_framework_equity_trigger_reports(reports: &[FrameworkEquityTriggerR
         );
     }
 }
-
+/// 执行输出框架equity集中度报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_concentration_reports(
     reports: &[FrameworkEquityConcentrationReport],
 ) {
@@ -1467,7 +1539,7 @@ pub fn print_framework_equity_concentration_reports(
         );
     }
 }
-
+/// 执行输出框架equity特征报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_feature_reports(reports: &[FrameworkEquityFeatureReport]) {
     for feature in reports {
         let report = &feature.report;
@@ -1487,7 +1559,7 @@ pub fn print_framework_equity_feature_reports(reports: &[FrameworkEquityFeatureR
         );
     }
 }
-
+/// 执行输出框架equity交易对窗口报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_symbol_window_reports(reports: &[FrameworkEquitySymbolWindowReport]) {
     for window in reports {
         let report = &window.split.report;
@@ -1524,7 +1596,7 @@ pub fn print_framework_equity_symbol_window_reports(reports: &[FrameworkEquitySy
         }
     }
 }
-
+/// 执行输出框架equity交易报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_trade_reports(reports: &[FrameworkEquityTradeReport]) {
     for trade in reports {
         println!(
@@ -1552,7 +1624,7 @@ pub fn print_framework_equity_trade_reports(reports: &[FrameworkEquityTradeRepor
         );
     }
 }
-
+/// 执行输出框架equity报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_reports(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -1604,8 +1676,8 @@ pub fn print_framework_equity_reports(
         }
     }
 }
-
 impl MarketVelocityReplayStrategy {
+    /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     fn new(
         events: Vec<ConfirmedEvent>,
         stop_loss_pct: f64,
@@ -1638,7 +1710,7 @@ impl MarketVelocityReplayStrategy {
             active_position: None,
         }
     }
-
+    /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
     fn build_entry_signal(&mut self, candle_ts: i64, entry: &ReplayEntry) -> SignalResult {
         self.active_position = Some(ReplayActivePosition {
             entry_price: entry.entry_price,
@@ -1659,7 +1731,7 @@ impl MarketVelocityReplayStrategy {
             false,
         )
     }
-
+    /// 判断按条件build盈利保护信号，给回测策略流程提供布尔结果。
     fn maybe_build_profit_protection_signal(
         &mut self,
         candle: &CandleItem,
@@ -1682,7 +1754,6 @@ impl MarketVelocityReplayStrategy {
         } else {
             stop_price_for(active.entry_price, self.stop_loss_pct, active.direction)
         };
-
         if hit_stop(candle.l, candle.h, current_stop_price, active.direction)
             || hit_target(candle.l, candle.h, target_price, active.direction)
         {
@@ -1692,7 +1763,6 @@ impl MarketVelocityReplayStrategy {
         if active.profit_protected {
             return None;
         }
-
         let trigger_price = target_price_for(
             active.entry_price,
             self.stop_loss_pct,
@@ -1702,7 +1772,6 @@ impl MarketVelocityReplayStrategy {
         if !hit_target(candle.l, candle.h, trigger_price, active.direction) {
             return None;
         }
-
         let entry_price = active.entry_price;
         let event_id = active.event_id;
         let trigger = active.trigger.clone();
@@ -1728,7 +1797,7 @@ impl MarketVelocityReplayStrategy {
             true,
         ))
     }
-
+    /// 判断按条件buildearly离场信号，给回测策略流程提供布尔结果。
     fn maybe_build_early_exit_signal(&mut self, candle: &CandleItem) -> Option<SignalResult> {
         let no_profit_candles = self.early_exit_no_profit_candles?;
         let active = self.active_position.as_mut()?;
@@ -1738,7 +1807,6 @@ impl MarketVelocityReplayStrategy {
         {
             return None;
         }
-
         let event_id = active.event_id;
         let trigger = active.trigger.clone();
         let direction = active.direction;
@@ -1773,7 +1841,7 @@ impl MarketVelocityReplayStrategy {
             ..SignalResult::default()
         })
     }
-
+    /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
     fn build_entry_direction_signal(
         &self,
         candle_ts: i64,
@@ -1828,23 +1896,19 @@ impl MarketVelocityReplayStrategy {
         }
     }
 }
-
 impl IndicatorStrategyBacktest for MarketVelocityReplayStrategy {
     type IndicatorCombine = ();
     type IndicatorValues = ();
-
     fn min_data_length(&self) -> usize {
         1
     }
-
     fn init_indicator_combine(&self) -> Self::IndicatorCombine {}
-
     fn build_indicator_values(
         _: &mut Self::IndicatorCombine,
         _: &CandleItem,
     ) -> Self::IndicatorValues {
     }
-
+    /// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
     fn generate_signal(
         &mut self,
         candles: &[CandleItem],
@@ -1870,7 +1934,7 @@ impl IndicatorStrategyBacktest for MarketVelocityReplayStrategy {
         }
     }
 }
-
+/// 将内部模型转换为输出结构，避免 回测与策略研究 的内部字段直接外泄。
 fn to_candle_item(candle: &BacktestCandle) -> CandleItem {
     CandleItem {
         o: candle.open,
@@ -1882,7 +1946,7 @@ fn to_candle_item(candle: &BacktestCandle) -> CandleItem {
         confirm: 1,
     }
 }
-
+/// 封装分析closedtrades，减少回测策略调用方重复实现相同细节。
 fn analyze_closed_trades(records: &[TradeRecord]) -> ClosedTradeStats {
     let mut wins = 0;
     let mut losses = 0;
@@ -1890,7 +1954,6 @@ fn analyze_closed_trades(records: &[TradeRecord]) -> ClosedTradeStats {
     let mut peak = INITIAL_FUND_PER_SYMBOL;
     let mut max_drawdown_pct = 0.0;
     let mut returns = Vec::new();
-
     for record in records.iter().filter(|record| record.full_close) {
         if record.profit_loss > 0.0 {
             wins += 1;
@@ -1909,7 +1972,6 @@ fn analyze_closed_trades(records: &[TradeRecord]) -> ClosedTradeStats {
             }
         }
     }
-
     ClosedTradeStats {
         wins,
         losses,
@@ -1917,7 +1979,7 @@ fn analyze_closed_trades(records: &[TradeRecord]) -> ClosedTradeStats {
         max_drawdown_pct,
     }
 }
-
+/// 封装分析runnertrades，减少回测策略调用方重复实现相同细节。
 fn analyze_runner_trades(trades: &[RunnerReplayTrade]) -> ClosedTradeStats {
     let mut wins = 0;
     let mut losses = 0;
@@ -1925,7 +1987,6 @@ fn analyze_runner_trades(trades: &[RunnerReplayTrade]) -> ClosedTradeStats {
     let mut peak = INITIAL_FUND_PER_SYMBOL;
     let mut max_drawdown_pct = 0.0;
     let mut returns = Vec::new();
-
     for trade in trades {
         if trade.profit_loss > 0.0 {
             wins += 1;
@@ -1944,7 +2005,6 @@ fn analyze_runner_trades(trades: &[RunnerReplayTrade]) -> ClosedTradeStats {
             }
         }
     }
-
     ClosedTradeStats {
         wins,
         losses,
@@ -1952,7 +2012,7 @@ fn analyze_runner_trades(trades: &[RunnerReplayTrade]) -> ClosedTradeStats {
         max_drawdown_pct,
     }
 }
-
+/// 提供交易Sharpe的集中实现，避免回测策略调用方重复处理相同细节。
 fn trade_sharpe(returns: &[f64]) -> Option<f64> {
     if returns.len() < 2 {
         return None;
@@ -1961,7 +2021,7 @@ fn trade_sharpe(returns: &[f64]) -> Option<f64> {
     let stddev = sample_stddev(returns, mean);
     (stddev > 0.0).then_some(mean / stddev * (returns.len() as f64).sqrt())
 }
-
+/// 构造样例stddev，集中维护回测策略的载荷组装规则。
 fn sample_stddev(values: &[f64], mean: f64) -> f64 {
     let variance = values
         .iter()
@@ -1973,7 +2033,7 @@ fn sample_stddev(values: &[f64], mean: f64) -> f64 {
         / (values.len() - 1) as f64;
     variance.sqrt()
 }
-
+/// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 fn format_optional_f64(value: Option<f64>) -> String {
     value
         .map(|value| {

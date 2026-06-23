@@ -3,10 +3,9 @@ use super::types::{
     BscEventArbThresholds,
 };
 use crate::strategy_common::SignalResult;
-
 pub struct BscEventArbStrategy;
-
 impl BscEventArbStrategy {
+    /// 提供评估的集中实现，避免回测策略调用方重复处理相同细节。
     pub fn evaluate(
         config: &BscEventArbStrategyConfig,
         snapshot: &BscEventArbSignalSnapshot,
@@ -16,22 +15,19 @@ impl BscEventArbStrategy {
         if !exit_reasons.is_empty() {
             return Self::decision(BscEventArbAction::ForceExit, exit_reasons);
         }
-
         let blockers = Self::entry_blockers(snapshot, thresholds);
         if !blockers.is_empty() {
             return Self::decision(BscEventArbAction::Flat, blockers);
         }
-
         let confirmations = Self::entry_confirmations(snapshot, thresholds);
         if confirmations.len() == 4 {
             return Self::decision(BscEventArbAction::Long, confirmations);
         }
-
         let mut reasons = confirmations;
         reasons.push("ENTRY_CONFIRMATION_INCOMPLETE".to_string());
         Self::decision(BscEventArbAction::Flat, reasons)
     }
-
+    /// 提供空仓缺失快照的集中实现，避免回测策略调用方重复处理相同细节。
     pub fn flat_missing_snapshot(price: f64, ts: i64) -> SignalResult {
         Self::decision(
             BscEventArbAction::Flat,
@@ -39,11 +35,10 @@ impl BscEventArbStrategy {
         )
         .to_signal(price, ts)
     }
-
     fn decision(action: BscEventArbAction, reasons: Vec<String>) -> BscEventArbDecision {
         BscEventArbDecision { action, reasons }
     }
-
+    /// 提供入场阻塞原因的集中实现，避免回测策略调用方重复处理相同细节。
     fn entry_blockers(
         snapshot: &BscEventArbSignalSnapshot,
         t: &BscEventArbThresholds,
@@ -53,7 +48,7 @@ impl BscEventArbStrategy {
         Self::push_security_blockers(snapshot, t, &mut reasons);
         reasons
     }
-
+    /// 把数据加入 回测与策略研究 聚合结果，保持集合构造逻辑集中。
     fn push_candidate_blockers(
         snapshot: &BscEventArbSignalSnapshot,
         t: &BscEventArbThresholds,
@@ -72,7 +67,7 @@ impl BscEventArbStrategy {
             reasons.push("DEX_DEPTH_TOO_THIN".to_string());
         }
     }
-
+    /// 把数据加入 回测与策略研究 聚合结果，保持集合构造逻辑集中。
     fn push_security_blockers(
         snapshot: &BscEventArbSignalSnapshot,
         t: &BscEventArbThresholds,
@@ -91,7 +86,7 @@ impl BscEventArbStrategy {
             reasons.push("CONTRACT_PRIVILEGE_RISK".to_string());
         }
     }
-
+    /// 提供入场确认条件的集中实现，避免回测策略调用方重复处理相同细节。
     fn entry_confirmations(
         snapshot: &BscEventArbSignalSnapshot,
         t: &BscEventArbThresholds,
@@ -119,7 +114,7 @@ impl BscEventArbStrategy {
         );
         reasons
     }
-
+    /// 提供离场原因的集中实现，避免回测策略调用方重复处理相同细节。
     fn exit_reasons(
         snapshot: &BscEventArbSignalSnapshot,
         t: &BscEventArbThresholds,
@@ -168,7 +163,7 @@ impl BscEventArbStrategy {
         );
         reasons
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn has_event_tag(snapshot: &BscEventArbSignalSnapshot) -> bool {
         snapshot.event_tags.iter().any(|tag| {
             matches!(
@@ -182,11 +177,10 @@ impl BscEventArbStrategy {
             )
         })
     }
-
     fn has_cex_event(snapshot: &BscEventArbSignalSnapshot, t: &BscEventArbThresholds) -> bool {
         !snapshot.is_dex_only && snapshot.cex_volume_share >= t.min_cex_volume_share
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn has_momentum(snapshot: &BscEventArbSignalSnapshot, t: &BscEventArbThresholds) -> bool {
         let zscore = snapshot.volume_zscore_5m.max(snapshot.volume_zscore_15m);
         snapshot.price_change_15m_pct >= t.min_price_change_15m_pct
@@ -194,7 +188,7 @@ impl BscEventArbStrategy {
             && snapshot.price_above_15m_vwap
             && zscore >= t.min_volume_zscore
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn has_squeeze(snapshot: &BscEventArbSignalSnapshot, t: &BscEventArbThresholds) -> bool {
         let oi_growth = snapshot.oi_growth_1h_pct >= t.min_oi_growth_1h_pct
             || snapshot.oi_growth_4h_pct >= t.min_oi_growth_4h_pct;
@@ -202,7 +196,7 @@ impl BscEventArbStrategy {
             || snapshot.short_crowding_score >= t.min_short_crowding_score;
         oi_growth && short_crowded && snapshot.price_up_with_oi
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn has_whale_flow_ok(snapshot: &BscEventArbSignalSnapshot, t: &BscEventArbThresholds) -> bool {
         if snapshot.cex_net_inflow_usd < t.large_cex_flow_usd {
             return true;
@@ -210,24 +204,24 @@ impl BscEventArbStrategy {
         snapshot.price_resilient_after_inflow
             && (snapshot.cex_outflow_after_inflow || snapshot.spot_absorption)
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn has_volume_surge(snapshot: &BscEventArbSignalSnapshot, t: &BscEventArbThresholds) -> bool {
         snapshot.volume_24h_usd >= t.min_volume_24h_usd
             || snapshot.volume_1h_vs_24h_avg >= t.min_volume_1h_vs_24h_avg
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn is_bsc_chain(chain_id: &str) -> bool {
         matches!(
             chain_id.to_ascii_lowercase().as_str(),
             "bsc" | "bnb" | "bnb_chain" | "56"
         )
     }
-
+    /// 提供时间止损的集中实现，避免回测策略调用方重复处理相同细节。
     fn time_stop(snapshot: &BscEventArbSignalSnapshot, t: &BscEventArbThresholds) -> bool {
         snapshot.minutes_since_entry >= t.time_stop_minutes
             && snapshot.max_unrealized_profit_pct < t.min_time_stop_profit_pct
     }
-
+    /// 把数据加入 回测与策略研究 聚合结果，保持集合构造逻辑集中。
     fn push_if(condition: bool, reason: &str, reasons: &mut Vec<String>) {
         if condition {
             reasons.push(reason.to_string());

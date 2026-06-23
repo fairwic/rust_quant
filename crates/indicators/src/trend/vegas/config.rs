@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
-
 /// 锤子形态配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct KlineHammerConfig {
+    /// upshadow 比例。
     pub up_shadow_ratio: f64,
+    /// downshadow 比例。
     pub down_shadow_ratio: f64,
 }
-
 impl Default for KlineHammerConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             up_shadow_ratio: 0.6,
@@ -15,7 +16,6 @@ impl Default for KlineHammerConfig {
         }
     }
 }
-
 /// 吞没形态指标配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct EngulfingSignalConfig {
@@ -26,8 +26,8 @@ pub struct EngulfingSignalConfig {
     /// 是否开仓
     pub is_open: bool,
 }
-
 impl Default for EngulfingSignalConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             is_engulfing: true,
@@ -36,7 +36,6 @@ impl Default for EngulfingSignalConfig {
         }
     }
 }
-
 /// 成交量信号配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct VolumeSignalConfig {
@@ -49,8 +48,8 @@ pub struct VolumeSignalConfig {
     /// 是否开启
     pub is_open: bool,
 }
-
 impl Default for VolumeSignalConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             volume_bar_num: 4,
@@ -60,23 +59,30 @@ impl Default for VolumeSignalConfig {
         }
     }
 }
-
 /// EMA信号配置
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct EmaSignalConfig {
+    /// 第 1 条 EMA 的计算周期。
     pub ema1_length: usize,
+    /// 第 2 条 EMA 的计算周期。
     pub ema2_length: usize,
+    /// 第 3 条 EMA 的计算周期。
     pub ema3_length: usize,
+    /// 第 4 条 EMA 的计算周期。
     pub ema4_length: usize,
+    /// 第 5 条 EMA 的计算周期。
     pub ema5_length: usize,
+    /// 第 6 条 EMA 的计算周期。
     pub ema6_length: usize,
+    /// 第 7 条 EMA 的计算周期。
     pub ema7_length: usize,
     /// EMA突破价格的阈值
     pub ema_breakthrough_threshold: f64,
+    /// 是否处于打开状态。
     pub is_open: bool,
 }
-
 impl Default for EmaSignalConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             ema1_length: 12,
@@ -91,7 +97,6 @@ impl Default for EmaSignalConfig {
         }
     }
 }
-
 /// RSI信号配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct RsiSignalConfig {
@@ -104,8 +109,8 @@ pub struct RsiSignalConfig {
     /// 是否开启
     pub is_open: bool,
 }
-
 impl Default for RsiSignalConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             rsi_length: 9,
@@ -115,7 +120,6 @@ impl Default for RsiSignalConfig {
         }
     }
 }
-
 /// EMA趋势信号配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct EmaTouchTrendSignalConfig {
@@ -136,8 +140,8 @@ pub struct EmaTouchTrendSignalConfig {
     /// 是否开启
     pub is_open: bool,
 }
-
 impl Default for EmaTouchTrendSignalConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             ema1_with_ema2_ratio: 1.010,
@@ -151,7 +155,6 @@ impl Default for EmaTouchTrendSignalConfig {
         }
     }
 }
-
 /// 腿部识别系统配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct LegDetectionConfig {
@@ -160,8 +163,8 @@ pub struct LegDetectionConfig {
     /// 是否启用腿部识别
     pub is_open: bool,
 }
-
 impl Default for LegDetectionConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             size: 5,
@@ -169,7 +172,6 @@ impl Default for LegDetectionConfig {
         }
     }
 }
-
 /// 市场结构配置（SMC）
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct MarketStructureConfig {
@@ -188,8 +190,8 @@ pub struct MarketStructureConfig {
     /// 是否启用
     pub is_open: bool,
 }
-
 impl Default for MarketStructureConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             swing_length: 12,
@@ -202,7 +204,6 @@ impl Default for MarketStructureConfig {
         }
     }
 }
-
 /// 震荡/区间判断配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct RangeFilterConfig {
@@ -213,8 +214,8 @@ pub struct RangeFilterConfig {
     /// 是否启用
     pub is_open: bool,
 }
-
 impl Default for RangeFilterConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             bb_width_threshold: 0.03,
@@ -223,7 +224,6 @@ impl Default for RangeFilterConfig {
         }
     }
 }
-
 /// 极端K线过滤/放行配置
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct ExtremeKFilterConfig {
@@ -236,8 +236,8 @@ pub struct ExtremeKFilterConfig {
     /// 至少跨越的EMA条数（例如同时穿过ema2/ema3/ema4）
     pub min_cross_ema_count: usize,
 }
-
 impl Default for ExtremeKFilterConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             is_open: true,
@@ -248,11 +248,9 @@ impl Default for ExtremeKFilterConfig {
         }
     }
 }
-
 pub fn default_extreme_k_filter() -> Option<ExtremeKFilterConfig> {
     Some(ExtremeKFilterConfig::default())
 }
-
 /// 追涨追跌确认配置
 /// 当价格远离EMA144时，要求额外的确认条件才能开仓
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -273,8 +271,8 @@ pub struct ChaseConfirmConfig {
     /// 贴线止损系数（如0.998表示EMA4 * 0.998）
     pub tight_stop_loss_ratio: f64,
 }
-
 impl Default for ChaseConfirmConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             enabled: true,
@@ -287,11 +285,9 @@ impl Default for ChaseConfirmConfig {
         }
     }
 }
-
 pub fn default_chase_confirm_config() -> Option<ChaseConfirmConfig> {
     Some(ChaseConfirmConfig::default())
 }
-
 /// MACD 信号配置
 /// 用于过滤逆势交易，减少动量冲突的亏损
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -313,8 +309,8 @@ pub struct MacdSignalConfig {
     /// 是否启用做空接飞刀保护
     pub filter_falling_knife_short: bool,
 }
-
 impl Default for MacdSignalConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             is_open: true,    // 默认开启，使用新的智能过滤逻辑
@@ -327,11 +323,9 @@ impl Default for MacdSignalConfig {
         }
     }
 }
-
 pub fn default_macd_signal_config() -> Option<MacdSignalConfig> {
     Some(MacdSignalConfig::default())
 }
-
 /// Fib 回撤入场配置（趋势回调/反弹入场）
 ///
 /// 目标：只在“大小趋势一致 + 发生回撤/反弹 + 触达 Fib 区间 + 放量”时入场
@@ -364,8 +358,8 @@ pub struct FibRetracementSignalConfig {
     #[serde(default = "default_min_trend_move_pct")]
     pub min_trend_move_pct: f64,
 }
-
 impl Default for FibRetracementSignalConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             is_open: false,
@@ -382,15 +376,12 @@ impl Default for FibRetracementSignalConfig {
         }
     }
 }
-
 pub fn default_fib_retracement_signal_config() -> Option<FibRetracementSignalConfig> {
     Some(FibRetracementSignalConfig::default())
 }
-
 fn default_min_trend_move_pct() -> f64 {
     0.08
 }
-
 /// 入场硬拦截配置
 ///
 /// 默认保持既有基线；实验性拦截必须显式开启后再做回测验证。
@@ -418,8 +409,8 @@ pub struct EntryBlockConfig {
     /// EMA 距离过滤的空头分支
     pub block_ema_distance_short: bool,
 }
-
 impl Default for EntryBlockConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             block_too_far_outside_fib_short: true,
@@ -435,11 +426,9 @@ impl Default for EntryBlockConfig {
         }
     }
 }
-
 pub fn default_entry_block_config() -> EntryBlockConfig {
     EntryBlockConfig::default()
 }
-
 /// 大实体止损配置
 /// 当K线为大实体（强趋势）时，使用更紧的止损（假设回调不深）
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -455,8 +444,8 @@ pub struct LargeEntityStopLossConfig {
     /// 做空止损 = Low + (High - Low) * ratio
     pub retracement_ratio: f64,
 }
-
 impl Default for LargeEntityStopLossConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             is_open: true,
@@ -466,19 +455,15 @@ impl Default for LargeEntityStopLossConfig {
         }
     }
 }
-
 pub fn default_large_entity_stop_loss_config() -> Option<LargeEntityStopLossConfig> {
     Some(LargeEntityStopLossConfig::default())
 }
-
 #[cfg(test)]
 mod tests {
     use super::{EntryBlockConfig, MacdSignalConfig};
-
     #[test]
     fn entry_block_config_defaults_keep_existing_baseline_stable() {
         let config = EntryBlockConfig::default();
-
         assert!(config.block_ema_distance_short);
         assert!(config.block_too_far_outside_fib_short);
         assert!(config.block_counter_trend_hammer_long);
@@ -490,7 +475,6 @@ mod tests {
         assert!(!config.block_short_inside_low_volume_node_entry);
         assert!(config.block_weak_ema_trend_entry);
     }
-
     #[test]
     fn entry_block_config_can_override_specific_filter_from_json() {
         let config: EntryBlockConfig = serde_json::from_value(serde_json::json!({
@@ -503,7 +487,6 @@ mod tests {
             "block_short_inside_low_volume_node_entry": true
         }))
         .expect("entry block config should deserialize");
-
         assert!(!config.block_ema_distance_short);
         assert!(!config.block_counter_trend_hammer_long);
         assert!(!config.block_low_volume_neutral_rsi_macd_weakening_long);
@@ -515,16 +498,13 @@ mod tests {
         assert!(config.block_conflicting_too_far_new_bear_leg_short);
         assert!(config.block_weak_ema_trend_entry);
     }
-
     #[test]
     fn macd_signal_config_defaults_keep_directional_falling_knife_filters_enabled() {
         let config = MacdSignalConfig::default();
-
         assert!(config.filter_falling_knife);
         assert!(config.filter_falling_knife_long);
         assert!(config.filter_falling_knife_short);
     }
-
     #[test]
     fn macd_signal_config_can_disable_only_long_falling_knife_filter_from_json() {
         let config: MacdSignalConfig = serde_json::from_value(serde_json::json!({
@@ -532,7 +512,6 @@ mod tests {
             "filter_falling_knife_long": false
         }))
         .expect("macd signal config should deserialize");
-
         assert!(config.filter_falling_knife);
         assert!(!config.filter_falling_knife_long);
         assert!(config.filter_falling_knife_short);

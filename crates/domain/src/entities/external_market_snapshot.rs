@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 /// 外部市场数据快照
 ///
 /// 用于统一存储交易所/链上/第三方数据源在某个时间点的特征值。
@@ -34,8 +33,8 @@ pub struct ExternalMarketSnapshot {
     /// 更新时间
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
-
 impl ExternalMarketSnapshot {
+    /// 构建 行情与市场数据 所需实例，并集中初始化依赖和默认状态。
     pub fn new(source: String, symbol: String, metric_type: String, metric_time: i64) -> Self {
         Self {
             id: None,

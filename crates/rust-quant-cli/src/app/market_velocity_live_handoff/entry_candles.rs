@@ -1,26 +1,31 @@
+use super::super::market_velocity_backfill::fetch_okx_history_candles;
+use super::MarketVelocityLiveHandoffConfig;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use okx::dto::market_dto::CandleOkxRespDto;
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use serde::Serialize;
 use sqlx::{PgPool, Row};
-
-use super::super::market_velocity_backfill::fetch_okx_history_candles;
-use super::MarketVelocityLiveHandoffConfig;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MarketVelocityEntryCandleLoadStatus {
+    /// 数据来源。
     pub source: String,
+    /// refreshedfrom交易所，用于行情、K 线或市场扫描。
     pub refreshed_from_exchange: bool,
+    /// 错误信息。
     pub db_error: Option<String>,
+    /// K 线数量。
     pub candle_count: usize,
 }
-
 #[derive(Debug, Clone)]
 pub(super) struct MarketVelocityEntryCandleLoad {
+    /// 列表数据。
     pub(super) candles: Vec<Candle>,
+    /// 当前状态。
     pub(super) status: MarketVelocityEntryCandleLoadStatus,
 }
-
+/// 封装当前函数，减少行情数据调用方重复实现相同细节。
+/// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
 async fn load_market_velocity_entry_candles(
     pool: &PgPool,
     symbol: &str,
@@ -37,7 +42,6 @@ async fn load_market_velocity_entry_candles(
         .await
         .with_context(|| format!("load 15m entry candles from {table_name}"))?;
     rows.reverse();
-
     rows.into_iter()
         .map(|row| {
             let ts: i64 = row.get("ts");
@@ -56,7 +60,7 @@ async fn load_market_velocity_entry_candles(
         })
         .collect()
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 pub(super) async fn load_market_velocity_live_entry_candles(
     pool: &PgPool,
     refresh_client: Option<&reqwest::Client>,
@@ -117,7 +121,7 @@ pub(super) async fn load_market_velocity_live_entry_candles(
         }
     }
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_market_velocity_latest_entry_candles(
     client: &reqwest::Client,
     config: &MarketVelocityLiveHandoffConfig,
@@ -142,7 +146,7 @@ async fn fetch_market_velocity_latest_entry_candles(
     .with_context(|| format!("on-demand fetch latest 15m candles failed: symbol={symbol}"))?;
     okx_candles_to_market_velocity_domain(symbol, candles)
 }
-
+/// 提供OKXK 线to市场动量domain的集中实现，避免行情数据调用方重复处理相同细节。
 fn okx_candles_to_market_velocity_domain(
     symbol: &str,
     candles: Vec<CandleOkxRespDto>,
@@ -173,7 +177,7 @@ fn okx_candles_to_market_velocity_domain(
     converted.sort_by_key(|candle| candle.timestamp);
     Ok(converted)
 }
-
+/// 提供市场动量入场K 线needrefresh的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_entry_candles_need_refresh(
     candles: &[Candle],
     now: DateTime<Utc>,
@@ -192,7 +196,7 @@ fn market_velocity_entry_candles_need_refresh(
     let age_minutes = (age_seconds + 59) / 60;
     age_minutes > max_staleness_minutes
 }
-
+/// 提供quoteidentifier的集中实现，避免行情数据调用方重复处理相同细节。
 fn quote_identifier(identifier: &str) -> Result<String> {
     if identifier.is_empty()
         || !identifier
@@ -203,7 +207,7 @@ fn quote_identifier(identifier: &str) -> Result<String> {
     }
     Ok(format!("\"{}\"", identifier.replace('"', "\"\"")))
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_decimal_text(value: &str) -> Result<f64> {
     let parsed = value
         .trim()
@@ -214,24 +218,21 @@ fn parse_decimal_text(value: &str) -> Result<f64> {
     }
     Ok(parsed)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
-
     #[test]
     fn entry_candle_on_demand_refresh_only_runs_for_missing_or_stale_db_candles() {
         let now = Utc.with_ymd_and_hms(2026, 6, 16, 11, 30, 0).unwrap();
         let fresh = vec![sample_candle_at(now - chrono::Duration::minutes(30))];
         let stale = vec![sample_candle_at(now - chrono::Duration::minutes(90))];
-
         assert!(market_velocity_entry_candles_need_refresh(&[], now, 45));
         assert!(!market_velocity_entry_candles_need_refresh(&fresh, now, 45));
         assert!(market_velocity_entry_candles_need_refresh(&stale, now, 45));
         assert!(!market_velocity_entry_candles_need_refresh(&stale, now, 0));
     }
-
+    /// 构造样例K 线at，集中维护行情数据的载荷组装规则。
     fn sample_candle_at(datetime: DateTime<Utc>) -> Candle {
         let mut candle = Candle::new(
             "ASTER-USDT-SWAP".to_string(),

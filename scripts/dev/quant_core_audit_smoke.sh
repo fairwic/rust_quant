@@ -5,8 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 : "${RUSTUP_TOOLCHAIN:="1.91.1"}"
-: "${QUANT_CORE_DATABASE_URL:="postgres://postgres:postgres123@localhost:5432/quant_core"}"
+: "${QUANT_CORE_DATABASE_URL:="postgres://postgres:postgres123@127.0.0.1:5432/quant_core"}"
 : "${EXECUTION_WORKER_DRY_RUN:="true"}"
+
+redact_database_url() {
+    printf '%s' "$1" | sed -E 's#(postgres(ql)?://[^:/@]+:)[^@]+@#\1<redacted>@#g'
+}
 
 case "${EXECUTION_WORKER_DRY_RUN}" in
     true | TRUE | 1 | yes | YES) ;;
@@ -28,7 +32,7 @@ echo "Preparing quant_core DDL"
 
 echo
 echo "Running quant_core audit write smoke"
-echo "  quant_core db: ${QUANT_CORE_DATABASE_URL}"
+echo "  quant_core db: $(redact_database_url "${QUANT_CORE_DATABASE_URL}")"
 echo "  dry_run: ${EXECUTION_WORKER_DRY_RUN}"
 
 if command -v rustup >/dev/null 2>&1; then

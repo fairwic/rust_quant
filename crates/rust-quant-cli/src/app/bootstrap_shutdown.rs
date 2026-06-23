@@ -1,7 +1,8 @@
 /// 设置多种退出信号处理
+/// 封装当前函数，减少配置运行时调用方重复实现相同细节。
+/// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
 async fn setup_shutdown_signals() -> &'static str {
     use tokio::signal;
-
     #[cfg(unix)]
     {
         let mut sigterm = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
@@ -25,7 +26,6 @@ async fn setup_shutdown_signals() -> &'static str {
                 return "SIGNAL_SETUP_FAILED";
             }
         };
-
         // 注意：tokio 的 unix Signal::recv() 返回 Option<()>。
         // 在极少数情况下（底层 stream 被关闭）会立刻返回 None，如果不处理会导致程序“无信号也退出”。
         loop {
@@ -51,7 +51,6 @@ async fn setup_shutdown_signals() -> &'static str {
             }
         }
     }
-
     #[cfg(not(unix))]
     {
         if let Err(e) = signal::ctrl_c().await {

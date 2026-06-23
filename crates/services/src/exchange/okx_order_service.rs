@@ -1,5 +1,4 @@
 //! OKX交易所订单执行服务
-
 use anyhow::{anyhow, Result};
 use okx::api::api_trait::OkxApiTrait;
 use okx::dto::account_dto::{Position, TradingSwapNumResponseData};
@@ -17,29 +16,101 @@ use rust_quant_domain::entities::ExchangeApiConfig;
 use rust_quant_strategies::strategy_common::SignalResult;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
-
 /// OKX订单执行服务
 pub struct OkxOrderService;
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AutoCloseInspection {
+    /// 交易所合约或现货交易对标识。
     pub inst_id: String,
+    /// ord ID；为空时使用默认值或表示不限制。
     pub ord_id: Option<String>,
+    /// clord ID；为空时使用默认值或表示不限制。
     pub cl_ord_id: Option<String>,
+    /// 订单found，用于会员、订单或支付链路。
     pub order_found: bool,
+    /// 状态值。
     pub order_state: Option<String>,
+    /// 订单来源；为空时使用默认值或表示不限制。
     pub order_source: Option<String>,
+    /// pos方向；为空时使用默认值或表示不限制。
     pub pos_side: Option<String>,
+    /// 列表数据。
     pub attach_algo_ids: Vec<String>,
+    /// attachalgoclord ID；为空时使用默认值或表示不限制。
     pub attach_algo_cl_ord_id: Option<String>,
+    /// 列表数据。
     pub pending_algo_ids: Vec<String>,
+    /// 列表数据。
     pub history_algo_ids: Vec<String>,
+    /// hasopen仓位。
     pub has_open_position: bool,
+    /// positionclosed，用于会员、订单或支付链路。
     pub position_closed: bool,
+    /// auto收盘likely，用于会员、订单或支付链路。
     pub auto_close_likely: bool,
 }
-
 impl OkxOrderService {
+    const LEGACY_DIRECT_LIVE_ORDER_CONFIRM_ENV: &'static str = "LEGACY_DIRECT_LIVE_ORDER_CONFIRM";
+    const LEGACY_DIRECT_LIVE_ORDER_CONFIRM_TOKEN: &'static str =
+        "I_UNDERSTAND_LEGACY_DIRECT_LIVE_ORDERS";
+    const LEGACY_SIGNED_READ_ONLY_CONFIRM_ENV: &'static str = "LEGACY_SIGNED_READ_ONLY_CONFIRM";
+    const LEGACY_SIGNED_READ_ONLY_CONFIRM_TOKEN: &'static str =
+        "I_UNDERSTAND_LEGACY_SIGNED_READ_ONLY_ACCOUNT_READS";
+    /// 封装当前函数，减少交易执行调用方重复实现相同细节。
+    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
+    fn ensure_legacy_direct_live_exchange_order_allowed() -> Result<()> {
+        let confirmation = std::env::var(Self::LEGACY_DIRECT_LIVE_ORDER_CONFIRM_ENV).ok();
+        Self::ensure_legacy_direct_live_exchange_order_allowed_from_env(confirmation.as_deref())
+    }
+    /// 校验输入和运行前置条件，提前暴露 交易执行与风控 的不可执行原因。
+    fn ensure_legacy_direct_live_exchange_order_allowed_from_env(
+        confirmation: Option<&str>,
+    ) -> Result<()> {
+        if confirmation.map(str::trim) == Some(Self::LEGACY_DIRECT_LIVE_ORDER_CONFIRM_TOKEN) {
+            return Ok(());
+        }
+        Err(anyhow!(
+            "legacy direct live exchange mutation is blocked; route signals through quant_web execution tasks or set {}={} to acknowledge unaudited legacy direct order/cancel/transfer risk",
+            Self::LEGACY_DIRECT_LIVE_ORDER_CONFIRM_ENV,
+            Self::LEGACY_DIRECT_LIVE_ORDER_CONFIRM_TOKEN
+        ))
+    }
+    /// 校验输入和运行前置条件，提前暴露 交易执行与风控 的不可执行原因。
+    fn ensure_legacy_signed_read_only_allowed() -> Result<()> {
+        let signed_confirmation = std::env::var(Self::LEGACY_SIGNED_READ_ONLY_CONFIRM_ENV).ok();
+        let direct_confirmation = std::env::var(Self::LEGACY_DIRECT_LIVE_ORDER_CONFIRM_ENV).ok();
+        Self::ensure_legacy_signed_read_only_allowed_from_env(
+            signed_confirmation.as_deref(),
+            direct_confirmation.as_deref(),
+        )
+    }
+    /// 校验输入和运行前置条件，提前暴露 交易执行与风控 的不可执行原因。
+    fn ensure_legacy_signed_read_only_allowed_from_env(
+        signed_confirmation: Option<&str>,
+        direct_confirmation: Option<&str>,
+    ) -> Result<()> {
+        if signed_confirmation.map(str::trim) == Some(Self::LEGACY_SIGNED_READ_ONLY_CONFIRM_TOKEN)
+            || direct_confirmation.map(str::trim)
+                == Some(Self::LEGACY_DIRECT_LIVE_ORDER_CONFIRM_TOKEN)
+        {
+            return Ok(());
+        }
+        Err(anyhow!(
+            "legacy direct OKX signed read-only account/order query is blocked; route reads through quant_web execution reconciliation exact credential path or set {}={} to acknowledge unaudited legacy account read risk",
+            Self::LEGACY_SIGNED_READ_ONLY_CONFIRM_ENV,
+            Self::LEGACY_SIGNED_READ_ONLY_CONFIRM_TOKEN
+        ))
+    }
+    /// 校验输入和运行前置条件，提前暴露 交易执行与风控 的不可执行原因。
+    fn ensure_entry_stop_loss_present(stop_loss_trigger_px: Option<f64>) -> Result<()> {
+        match stop_loss_trigger_px {
+            Some(price) if price.is_finite() && price > 0.0 => Ok(()),
+            _ => Err(anyhow!(
+                "legacy direct entry order requires a positive stop-loss trigger price before live order placement"
+            )),
+        }
+    }
+    /// 提供collectrelatedalgoids的集中实现，避免交易执行调用方重复处理相同细节。
     fn collect_related_algo_ids(
         order: &okx::dto::trade_dto::OrderDetailRespDto,
     ) -> (Vec<String>, Option<String>) {
@@ -58,7 +129,7 @@ impl OkxOrderService {
         };
         (ids, attach_algo_cl_ord_id)
     }
-
+    /// 解析输入参数并收敛为 交易执行与风控 可使用的结构化值。
     fn extract_matching_algo_ids(
         raw: &serde_json::Value,
         target_algo_ids: &[String],
@@ -68,7 +139,6 @@ impl OkxOrderService {
         let Some(items) = raw.get("data").and_then(|v| v.as_array()) else {
             return result;
         };
-
         for item in items {
             let algo_id = item
                 .get("algoId")
@@ -82,7 +152,6 @@ impl OkxOrderService {
                 .unwrap_or_default()
                 .trim()
                 .to_string();
-
             let matched = (!algo_id.is_empty() && target_algo_ids.iter().any(|id| id == &algo_id))
                 || (!algo_cl_ord_id.is_empty()
                     && target_algo_cl_ord_id
@@ -92,12 +161,11 @@ impl OkxOrderService {
                 result.push(algo_id);
             }
         }
-
         result.sort();
         result.dedup();
         result
     }
-
+    /// 加载 交易执行与风控 运行所需数据，并把缺失或异常交给调用方处理。
     async fn get_algo_orders_raw(
         &self,
         api_config: &ExchangeApiConfig,
@@ -105,6 +173,7 @@ impl OkxOrderService {
         history: bool,
         algo_id: &str,
     ) -> Result<serde_json::Value> {
+        Self::ensure_legacy_signed_read_only_allowed()?;
         let client = Self::create_okx_client(api_config)?;
         let trade = OkxTrade::new(client);
         let path = if history {
@@ -118,7 +187,6 @@ impl OkxOrderService {
                 inst_id, algo_id
             )
         };
-
         trade
             .client()
             .send_request::<serde_json::Value>(Method::GET, &path, "")
@@ -132,7 +200,7 @@ impl OkxOrderService {
                 }
             })
     }
-
+    /// 执行 交易执行与风控 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     fn apply_request_expiration_override(client: &mut OkxClient) {
         if let Ok(expiration_ms) = std::env::var("OKX_REQUEST_EXPIRATION_MS") {
             if let Ok(expiration_ms) = expiration_ms.parse::<i64>() {
@@ -142,18 +210,15 @@ impl OkxOrderService {
             }
         }
     }
-
     /// 从API配置创建OKX客户端
     fn create_okx_client(config: &ExchangeApiConfig) -> Result<OkxClient> {
         if config.exchange_name.to_lowercase() != "okx" {
             return Err(anyhow!("不支持的交易所: {}", config.exchange_name));
         }
-
         let passphrase = config
             .passphrase
             .as_ref()
             .ok_or_else(|| anyhow!("OKX需要Passphrase"))?;
-
         use okx::config::Credentials;
         let credentials = Credentials::new(
             &config.api_key,
@@ -161,21 +226,20 @@ impl OkxOrderService {
             passphrase,
             if config.is_sandbox { "1" } else { "0" },
         );
-
         let mut client =
             OkxClient::new(credentials).map_err(|e| anyhow!("创建OKX客户端失败: {}", e))?;
         Self::apply_request_expiration_override(&mut client);
         Ok(client)
     }
-
+    /// 构建 交易执行与风控 请求或响应载荷，把字段组装规则集中在同一入口。
     pub fn build_cancel_close_algo_body(inst_id: &str, algo_ids: &[String]) -> serde_json::Value {
         serde_json::json!({
             "instId": inst_id,
             "algoIds": algo_ids,
         })
     }
-
     #[allow(clippy::too_many_arguments)]
+    /// 构建 交易执行与风控 请求或响应载荷，把字段组装规则集中在同一入口。
     pub fn build_place_close_algo_body(
         inst_id: &str,
         mgn_mode: &str,
@@ -199,7 +263,6 @@ impl OkxOrderService {
         if let Some(tag) = tag {
             body.insert("tag".to_string(), serde_json::json!(tag));
         }
-
         if let Some(tp) = take_profit_trigger_px {
             body.insert(
                 "tpTriggerPx".to_string(),
@@ -208,7 +271,6 @@ impl OkxOrderService {
             body.insert("tpOrdPx".to_string(), serde_json::json!("-1"));
             body.insert("tpTriggerPxType".to_string(), serde_json::json!("last"));
         }
-
         if let Some(sl) = stop_loss_trigger_px {
             body.insert(
                 "slTriggerPx".to_string(),
@@ -217,10 +279,8 @@ impl OkxOrderService {
             body.insert("slOrdPx".to_string(), serde_json::json!("-1"));
             body.insert("slTriggerPxType".to_string(), serde_json::json!("last"));
         }
-
         serde_json::Value::Object(body)
     }
-
     /// 执行下单操作（市价单）
     pub async fn place_order(
         &self,
@@ -231,15 +291,15 @@ impl OkxOrderService {
         size: String,
         cl_ord_id: Option<String>,
     ) -> Result<Vec<OrderResDto>> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
+        Self::ensure_entry_stop_loss_present(None)?;
         info!(
             "执行下单: exchange={}, inst_id={}, side={:?}, pos_side={:?}, size={}, cl_ord_id={:?}",
             api_config.exchange_name, inst_id, side, pos_side, size, cl_ord_id
         );
-
         // 1. 创建客户端
         let client = Self::create_okx_client(api_config)?;
         let trade = OkxTrade::new(client.clone());
-
         // 2. 构建订单请求（市价单，与原实现一致）
         let order_req = OrderReqDto {
             inst_id: inst_id.to_string(),
@@ -262,20 +322,16 @@ impl OkxOrderService {
             quick_mgn_type: None,
             stp_id: None,
         };
-
         // 3. 提交订单
         let result = trade.place_order(order_req).await.map_err(|e| {
             error!("下单失败: {}", e);
             anyhow!("下单失败: {}", e)
         })?;
-
         info!("下单成功: {:?}", result);
         Ok(result)
     }
-
     /// 下单并附带止盈/止损（attachAlgoOrds）
     /// 下单并附带止盈/止损（attachAlgoOrds）
-    #[allow(clippy::too_many_arguments)]
     pub async fn place_order_with_algo_orders(
         &self,
         api_config: &ExchangeApiConfig,
@@ -287,6 +343,8 @@ impl OkxOrderService {
         stop_loss_trigger_px: Option<f64>,
         cl_ord_id: Option<String>,
     ) -> Result<Vec<OrderResDto>> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
+        Self::ensure_entry_stop_loss_present(stop_loss_trigger_px)?;
         info!(
             "执行下单(附带止盈止损): exchange={}, inst_id={}, side={:?}, pos_side={:?}, size={}, tp={:?}, sl={:?}, cl_ord_id={:?}",
             api_config.exchange_name,
@@ -298,10 +356,8 @@ impl OkxOrderService {
             stop_loss_trigger_px,
             cl_ord_id
         );
-
         let client = Self::create_okx_client(api_config)?;
         let trade = OkxTrade::new(client.clone());
-
         let attach_algo_ords = if take_profit_trigger_px.is_some() || stop_loss_trigger_px.is_some()
         {
             Some(vec![AttachAlgoOrdReqDto::new(
@@ -314,7 +370,6 @@ impl OkxOrderService {
         } else {
             None
         };
-
         let order_req = OrderReqDto {
             inst_id: inst_id.to_string(),
             td_mode: TdModeEnum::ISOLATED.as_str().to_owned(),
@@ -336,18 +391,14 @@ impl OkxOrderService {
             quick_mgn_type: None,
             stp_id: None,
         };
-
         let result = trade.place_order(order_req).await.map_err(|e| {
             error!("下单失败(附带止盈止损): {}", e);
             anyhow!("下单失败(附带止盈止损): {}", e)
         })?;
-
         info!("下单成功(附带止盈止损): {:?}", result);
         Ok(result)
     }
-
     /// 下单并附带止损（attachAlgoOrds），用于后续“移动止损到开仓价”的改单能力
-    #[allow(clippy::too_many_arguments)]
     pub async fn place_order_with_stop_loss(
         &self,
         api_config: &ExchangeApiConfig,
@@ -358,6 +409,7 @@ impl OkxOrderService {
         stop_loss_trigger_px: f64,
         cl_ord_id: Option<String>,
     ) -> Result<Vec<OrderResDto>> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
         self.place_order_with_algo_orders(
             api_config,
             inst_id,
@@ -370,7 +422,6 @@ impl OkxOrderService {
         )
         .await
     }
-
     /// 市价平仓
     pub async fn close_position(
         &self,
@@ -379,14 +430,13 @@ impl OkxOrderService {
         pos_side: PositionSide,
         mgn_mode: &str,
     ) -> Result<()> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
         info!(
             "执行平仓: exchange={}, inst_id={}, pos_side={:?}, mgn_mode={}",
             api_config.exchange_name, inst_id, pos_side, mgn_mode
         );
-
         let client = Self::create_okx_client(api_config)?;
         let trade = OkxTrade::new(client.clone());
-
         let req = CloseOrderReqDto {
             inst_id: inst_id.to_string(),
             pos_side: Some(pos_side.as_str().to_string()),
@@ -396,16 +446,13 @@ impl OkxOrderService {
             cl_ord_id: None,
             tag: None,
         };
-
         let resp = trade.close_position(&req).await.map_err(|e| {
             error!("平仓失败: {}", e);
             anyhow!("平仓失败: {}", e)
         })?;
-
         info!("平仓请求已提交: {:?}", resp);
         Ok(())
     }
-
     /// 撤销平仓策略委托（止盈/止损）
     pub async fn cancel_close_algos(
         &self,
@@ -416,26 +463,22 @@ impl OkxOrderService {
         if algo_ids.is_empty() {
             return Ok(());
         }
-
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
         let client = Self::create_okx_client(api_config)?;
         let trade = OkxTrade::new(client);
         let body = Self::build_cancel_close_algo_body(inst_id, algo_ids);
         let body_str =
             serde_json::to_string(&body).map_err(|e| anyhow!("序列化撤单请求失败: {}", e))?;
         let path = "/api/v5/trade/cancel-algos";
-
         let resp: serde_json::Value = trade
             .client()
             .send_request(Method::POST, path, &body_str)
             .await
             .map_err(|e| anyhow!("撤销平仓策略委托失败: {}", e))?;
-
         info!("撤销平仓策略委托返回: {}", resp);
         Ok(())
     }
-
     /// 下达平仓策略委托（止盈/止损）
-    #[allow(clippy::too_many_arguments)]
     pub async fn place_close_algo(
         &self,
         api_config: &ExchangeApiConfig,
@@ -448,6 +491,7 @@ impl OkxOrderService {
         algo_cl_ord_id: Option<&str>,
         tag: Option<&str>,
     ) -> Result<Vec<String>> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
         let client = Self::create_okx_client(api_config)?;
         let trade = OkxTrade::new(client);
         let body = Self::build_place_close_algo_body(
@@ -463,13 +507,11 @@ impl OkxOrderService {
         let body_str =
             serde_json::to_string(&body).map_err(|e| anyhow!("序列化下单请求失败: {}", e))?;
         let path = "/api/v5/trade/order-algo";
-
         let resp: serde_json::Value = trade
             .client()
             .send_request(Method::POST, path, &body_str)
             .await
             .map_err(|e| anyhow!("下达平仓策略委托失败: {}", e))?;
-
         info!("下达平仓策略委托返回: {}", resp);
         let mut algo_ids = Vec::new();
         if let Some(items) = resp.get("data").and_then(|v| v.as_array()) {
@@ -485,7 +527,6 @@ impl OkxOrderService {
         }
         Ok(algo_ids)
     }
-
     /// 获取账户持仓
     pub async fn get_positions(
         &self,
@@ -493,9 +534,9 @@ impl OkxOrderService {
         inst_type: Option<&str>,
         inst_id: Option<&str>,
     ) -> Result<Vec<Position>> {
+        Self::ensure_legacy_signed_read_only_allowed()?;
         let client = Self::create_okx_client(api_config)?;
         let account = OkxAccount::new(client.clone());
-
         account
             .get_account_positions(inst_type, inst_id, None)
             .await
@@ -504,16 +545,15 @@ impl OkxOrderService {
                 anyhow!("获取持仓失败: {}", e)
             })
     }
-
     /// 获取最大可用数量
     pub async fn get_max_available_size(
         &self,
         api_config: &ExchangeApiConfig,
         inst_id: &str,
     ) -> Result<TradingSwapNumResponseData> {
+        Self::ensure_legacy_signed_read_only_allowed()?;
         let client = Self::create_okx_client(api_config)?;
         let account = OkxAccount::new(client.clone());
-
         let result = account
             .get_max_size(inst_id, TdModeEnum::ISOLATED.as_str(), None, None, None)
             .await
@@ -521,14 +561,12 @@ impl OkxOrderService {
                 error!("获取最大可用数量失败: {}", e);
                 anyhow!("获取最大可用数量失败: {}", e)
             })?;
-
         if result.is_empty() {
             return Err(anyhow!("未找到交易对 {} 的最大可用数量", inst_id));
         }
-
         Ok(result[0].clone())
     }
-
+    /// 加载 交易执行与风控 运行所需数据，并把缺失或异常交给调用方处理。
     pub async fn get_order_details(
         &self,
         api_config: &ExchangeApiConfig,
@@ -536,6 +574,7 @@ impl OkxOrderService {
         ord_id: Option<&str>,
         cl_ord_id: Option<&str>,
     ) -> Result<Vec<okx::dto::trade_dto::OrderDetailRespDto>> {
+        Self::ensure_legacy_signed_read_only_allowed()?;
         let client = Self::create_okx_client(api_config)?;
         let trade = OkxTrade::new(client);
         trade
@@ -543,7 +582,7 @@ impl OkxOrderService {
             .await
             .map_err(|e| anyhow!("获取订单详情失败: {}", e))
     }
-
+    /// 提供inspectauto平仓by订单的集中实现，避免交易执行调用方重复处理相同细节。
     pub async fn inspect_auto_close_by_order(
         &self,
         api_config: &ExchangeApiConfig,
@@ -551,16 +590,15 @@ impl OkxOrderService {
         ord_id: Option<&str>,
         cl_ord_id: Option<&str>,
     ) -> Result<AutoCloseInspection> {
+        Self::ensure_legacy_signed_read_only_allowed()?;
         let order_details = self
             .get_order_details(api_config, inst_id, ord_id, cl_ord_id)
             .await?;
         let order = order_details.first();
-
         let (attach_algo_ids, attach_algo_cl_ord_id) = match order {
             Some(order) => Self::collect_related_algo_ids(order),
             None => (Vec::new(), None),
         };
-
         let mut pending_algos = Vec::new();
         let mut history_algos = Vec::new();
         for algo_id in &attach_algo_ids {
@@ -572,7 +610,6 @@ impl OkxOrderService {
                 std::slice::from_ref(algo_id),
                 attach_algo_cl_ord_id.as_deref(),
             ));
-
             let history_raw = self
                 .get_algo_orders_raw(api_config, inst_id, true, algo_id)
                 .await?;
@@ -586,7 +623,6 @@ impl OkxOrderService {
         pending_algos.dedup();
         history_algos.sort();
         history_algos.dedup();
-
         let positions = self
             .get_positions(api_config, Some("SWAP"), Some(inst_id))
             .await?;
@@ -601,13 +637,11 @@ impl OkxOrderService {
                 .iter()
                 .any(|position| position.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12),
         };
-
         let position_closed = !has_open_position;
         let auto_close_likely = position_closed
             && (!history_algos.is_empty()
                 || (order.is_some()
                     && (!attach_algo_ids.is_empty() || attach_algo_cl_ord_id.is_some())));
-
         Ok(AutoCloseInspection {
             inst_id: inst_id.to_string(),
             ord_id: ord_id.map(|v| v.to_string()),
@@ -625,28 +659,25 @@ impl OkxOrderService {
             auto_close_likely,
         })
     }
-
+    /// 加载 交易执行与风控 运行所需数据，并把缺失或异常交给调用方处理。
     pub async fn get_trade_available_equity(
         &self,
         api_config: &ExchangeApiConfig,
         currency: &str,
     ) -> Result<f64> {
+        Self::ensure_legacy_signed_read_only_allowed()?;
         let client = Self::create_okx_client(api_config)?;
         let account = OkxAccount::new(client.clone());
-
         let balances = account
             .get_balance(Some(currency))
             .await
             .map_err(|e| anyhow!("获取交易账户余额失败: {}", e))?;
-
         let balance = balances
             .first()
             .ok_or_else(|| anyhow!("未找到交易账户中的{}余额", currency))?;
-
         if let Ok(value) = balance.avail_eq.parse::<f64>() {
             return Ok(value);
         }
-
         if let Some(detail) = balance
             .details
             .iter()
@@ -662,38 +693,35 @@ impl OkxOrderService {
                 return Ok(value);
             }
         }
-
         Err(anyhow!(
             "解析交易账户余额失败: availEq={}, currency={}",
             balance.avail_eq,
             currency
         ))
     }
-
+    /// 加载 交易执行与风控 运行所需数据，并把缺失或异常交给调用方处理。
     pub async fn get_funding_available_balance(
         &self,
         api_config: &ExchangeApiConfig,
         currency: &str,
     ) -> Result<f64> {
+        Self::ensure_legacy_signed_read_only_allowed()?;
         let client = Self::create_okx_client(api_config)?;
         let asset = OkxAsset::new(client);
         let currencies = vec![currency.to_string()];
-
         let balances = asset
             .get_balances(Some(&currencies))
             .await
             .map_err(|e| anyhow!("获取资金账户余额失败: {}", e))?;
-
         let balance = balances
             .first()
             .ok_or_else(|| anyhow!("未找到资金账户中的{}余额", currency))?;
-
         balance
             .avail_bal
             .parse::<f64>()
             .map_err(|e| anyhow!("解析资金账户余额失败: {}", e))
     }
-
+    /// 提供transferbetweenaccounts的集中实现，避免交易执行调用方重复处理相同细节。
     pub async fn transfer_between_accounts(
         &self,
         api_config: &ExchangeApiConfig,
@@ -702,6 +730,7 @@ impl OkxOrderService {
         from: AccountType,
         to: AccountType,
     ) -> Result<serde_json::Value> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
         let client = Self::create_okx_client(api_config)?;
         let asset = OkxAsset::new(client);
         let transfer_req = TransferOkxReqDto {
@@ -712,16 +741,13 @@ impl OkxOrderService {
             to,
             sub_acct: None,
         };
-
         asset
             .transfer(&transfer_req)
             .await
             .map_err(|e| anyhow!("执行账户划转失败: {}", e))
     }
-
     /// 根据信号执行订单
     /// 与原实现 swap_order_service.rs::order_swap 保持一致
-    #[allow(clippy::too_many_arguments)]
     pub async fn execute_order_from_signal(
         &self,
         api_config: &ExchangeApiConfig,
@@ -732,6 +758,8 @@ impl OkxOrderService {
         take_profit_trigger_px: Option<f64>,
         cl_ord_id: Option<String>,
     ) -> Result<Vec<OrderResDto>> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
+        Self::ensure_entry_stop_loss_present(stop_loss_trigger_px)?;
         let (side, pos_side) = if signal.should_buy {
             (Side::Buy, PositionSide::Long)
         } else if signal.should_sell {
@@ -739,7 +767,6 @@ impl OkxOrderService {
         } else {
             return Err(anyhow!("信号无效，无交易方向"));
         };
-
         if stop_loss_trigger_px.is_some() || take_profit_trigger_px.is_some() {
             self.place_order_with_algo_orders(
                 api_config,
@@ -758,3 +785,6 @@ impl OkxOrderService {
         }
     }
 }
+#[cfg(test)]
+#[path = "okx_order_service_tests.rs"]
+mod okx_order_service_tests;

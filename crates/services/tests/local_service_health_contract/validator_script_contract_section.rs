@@ -5,7 +5,6 @@ fn full_product_health_artifact_validator_script_passes_bash_syntax_check() {
         .arg(full_product_artifact_validator_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
@@ -14,7 +13,6 @@ fn full_product_health_artifact_validator_script_passes_bash_syntax_check() {
 }
 fn full_product_health_artifact_validator_is_read_only_and_scans_sensitive_markers() {
     let script = read_full_product_artifact_validator_script();
-
     assert!(script.contains("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_VALIDATION_FULL_REPORT_PATH"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_VALIDATION_SUMMARY_PATH"));
@@ -90,7 +88,6 @@ fn full_product_health_artifact_validator_uses_schema_path_for_required_fields()
     let schema_path = artifact_dir.join("custom-schema.json");
     let (full_report_path, summary_path, markdown_path) =
         write_phase45_valid_artifacts(&artifact_dir);
-
     write_phase45_validator_schema(
         &schema_path,
         &["ok", "warn", "fail"],
@@ -128,7 +125,6 @@ fn full_product_health_artifact_validator_uses_schema_path_for_required_fields()
             "## Artifact Paths",
         ],
     );
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env("FULL_PRODUCT_HEALTH_VALIDATION_SCHEMA_PATH", &schema_path)
@@ -144,7 +140,6 @@ fn full_product_health_artifact_validator_uses_schema_path_for_required_fields()
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         !output.status.success(),
         "strict validator should fail when a schema-required field is absent"

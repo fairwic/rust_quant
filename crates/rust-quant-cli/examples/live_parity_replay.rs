@@ -16,49 +16,77 @@ use sqlx::FromRow;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-
 #[derive(Debug, Clone)]
 struct ReplayArgs {
+    /// 配置 ID；为空时使用默认值或表示不限制。
     config_id: Option<i64>,
+    /// backtest ID；为空时使用默认值或表示不限制。
     backtest_id: Option<i64>,
+    /// 交易所合约或现货交易对标识。
     inst_id: Option<String>,
+    /// 计算周期。
     period: Option<String>,
+    /// 类型标识。
     strategy_type: Option<String>,
+    /// totalK 线，用于当前结构体的业务数据。
     total_candles: usize,
+    /// warmupK 线，用于当前结构体的业务数据。
     warmup_candles: usize,
+    /// 金额数值。
     initial_funds: f64,
+    /// 价格比较容差。
     price_eps: f64,
+    /// 盈亏比较容差。
     pnl_eps: f64,
+    /// output目录，用于当前结构体的业务数据。
     output_dir: String,
+    /// 是否使用回测窗口。
     use_backtest_window: bool,
 }
-
 #[derive(Debug, Clone, FromRow)]
 struct BacktestDetailRow {
+    /// 类型标识。
     option_type: String,
+    /// 开仓时间。
     open_position_time: NaiveDateTime,
+    /// 平仓时间。
     close_position_time: NaiveDateTime,
+    /// 价格数值。
     open_price: String,
+    /// 离场价格。
     close_price: Option<String>,
+    /// 收益亏损，用于展示或持久化查询结果。
     profit_loss: String,
+    /// 数量。
     quantity: String,
+    /// 类型标识。
     close_type: String,
+    /// 状态值。
     signal_status: i32,
 }
-
 #[derive(Debug, Clone, FromRow)]
 struct BacktestLogRow {
+    /// 唯一标识。
     id: i64,
+    /// 类型标识。
     strategy_type: String,
+    /// 类型标识。
     inst_type: String,
+    /// 时间字段。
     time: String,
+    /// 开始时间。
     kline_start_time: Option<i64>,
+    /// 结束时间。
     kline_end_time: Option<i64>,
+    /// K 线数量；为空时使用默认数量。
     kline_nums: Option<i32>,
+    /// 策略详情；为空时不输出详情。
     strategy_detail: Option<String>,
+    /// 风控配置详情；为空时不输出详情。
     risk_config_detail: Option<String>,
 }
-
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 fn parse_args() -> Result<ReplayArgs> {
     let mut kv = HashMap::<String, String>::new();
     let raw: Vec<String> = std::env::args().skip(1).collect();
@@ -77,7 +105,6 @@ fn parse_args() -> Result<ReplayArgs> {
         }
         i += 1;
     }
-
     Ok(ReplayArgs {
         config_id: kv.get("config-id").and_then(|v| v.parse::<i64>().ok()),
         backtest_id: kv.get("backtest-id").and_then(|v| v.parse::<i64>().ok()),
@@ -114,14 +141,14 @@ fn parse_args() -> Result<ReplayArgs> {
             .unwrap_or(true),
     })
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_config_by_id(config_id: i64) -> Result<rust_quant_domain::StrategyConfig> {
     let repo = SqlxStrategyConfigRepository::new(get_db_pool().clone());
     repo.find_by_id(config_id)
         .await?
         .ok_or_else(|| anyhow!("策略配置不存在: {}", config_id))
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_backtest_log(backtest_id: i64) -> Result<BacktestLogRow> {
     let pool = get_db_pool();
     let log = sqlx::query_as::<_, BacktestLogRow>(
@@ -133,12 +160,11 @@ async fn load_backtest_log(backtest_id: i64) -> Result<BacktestLogRow> {
     .ok_or_else(|| anyhow!("back_test_log 不存在: {}", backtest_id))?;
     Ok(log)
 }
-
+/// 选择 量化核心 的最佳候选结果，避免选择规则分散在调用方。
 async fn resolve_config_from_backtest(
     log: &BacktestLogRow,
 ) -> Result<rust_quant_domain::StrategyConfig> {
     let pool = get_db_pool();
-
     let repo = SqlxStrategyConfigRepository::new(pool.clone());
     let configs = repo
         .get_config(
@@ -151,7 +177,6 @@ async fn resolve_config_from_backtest(
         .into_iter()
         .max_by_key(|c| c.id)
         .ok_or_else(|| anyhow!("未找到对应策略配置: backtest_id={}", log.id))?;
-
     let mut config = latest.to_domain()?;
     if let Some(strategy_detail) = log.strategy_detail.as_ref() {
         config.parameters = serde_json::from_str(strategy_detail)
@@ -161,17 +186,15 @@ async fn resolve_config_from_backtest(
         config.risk_config = serde_json::from_str(risk_detail)
             .map_err(|e| anyhow!("解析 back_test_log.risk_config_detail 失败: {}", e))?;
     }
-
     if let Some(start) = log.kline_start_time.filter(|v| *v > 0) {
         config.backtest_start = Some(start);
     }
     if let Some(end) = log.kline_end_time.filter(|v| *v > 0) {
         config.backtest_end = Some(end);
     }
-
     Ok(config)
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_confirmed_candles(
     inst_id: &str,
     period: &str,
@@ -191,7 +214,7 @@ async fn load_confirmed_candles(
     candles.sort_unstable_by_key(|a| a.ts);
     Ok(candles)
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_backtest_expected_rows(
     backtest_id: i64,
 ) -> Result<Vec<rust_quant_services::strategy::ParityTradeRow>> {
@@ -201,7 +224,6 @@ async fn load_backtest_expected_rows(
     .bind(backtest_id)
     .fetch_all(get_db_pool())
     .await?;
-
     let mapped = rows
         .into_iter()
         .map(|r| {
@@ -228,7 +250,7 @@ async fn load_backtest_expected_rows(
         .collect::<Vec<_>>();
     Ok(mapped)
 }
-
+/// 构建 量化核心 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_analysis_text(
     args: &ReplayArgs,
     sim_result: &rust_quant_services::strategy::LiveReplayResult,
@@ -255,7 +277,6 @@ fn build_analysis_text(
         report.only_expected,
         report.differences.len()
     ));
-
     if report.expected_count > 0 {
         let match_ratio = if report.expected_count == 0 {
             0.0
@@ -264,7 +285,6 @@ fn build_analysis_text(
         };
         text.push_str(&format!("- parity_match_ratio: {:.4}\n\n", match_ratio));
     }
-
     text.push_str("## Timing Parity (Open/Close Time Only)\n\n");
     text.push_str(&format!(
         "- matched_time_pairs: {}\n- pair_precision: {:.4}\n- pair_recall: {:.4}\n- pair_f1: {:.4}\n- matched_open_times: {} (precision={:.4}, recall={:.4})\n- matched_close_times: {} (precision={:.4}, recall={:.4})\n\n",
@@ -279,7 +299,6 @@ fn build_analysis_text(
         timing_report.close_precision,
         timing_report.close_recall,
     ));
-
     text.push_str("### Timing Difference Samples\n\n");
     if timing_report.only_expected_pair_samples.is_empty()
         && timing_report.only_simulated_pair_samples.is_empty()
@@ -300,7 +319,6 @@ fn build_analysis_text(
         }
         text.push('\n');
     }
-
     text.push_str("## Difference Samples\n\n");
     if report.differences.is_empty() {
         text.push_str("- no differences\n");
@@ -314,13 +332,12 @@ fn build_analysis_text(
     }
     text
 }
-
 #[tokio::main]
+/// 提供入口的集中实现，避免量化核心调用方重复处理相同细节。
 async fn main() -> Result<()> {
     dotenv().ok();
     tracing_subscriber::fmt::init();
     init_db_pool().await?;
-
     let args = parse_args()?;
     if args.warmup_candles >= args.total_candles {
         return Err(anyhow!(
@@ -329,13 +346,11 @@ async fn main() -> Result<()> {
             args.total_candles
         ));
     }
-
     let backtest_log = if let Some(backtest_id) = args.backtest_id {
         Some(load_backtest_log(backtest_id).await?)
     } else {
         None
     };
-
     let config = if let Some(id) = args.config_id {
         load_config_by_id(id).await?
     } else if let Some(log) = backtest_log.as_ref() {
@@ -345,7 +360,6 @@ async fn main() -> Result<()> {
             "缺少策略配置来源。请提供 --config-id 或 --backtest-id"
         ));
     };
-
     if let Some(inst_id) = args.inst_id.as_ref() {
         if &config.symbol != inst_id {
             return Err(anyhow!(
@@ -373,7 +387,6 @@ async fn main() -> Result<()> {
             ));
         }
     }
-
     let inst_id = config.symbol.clone();
     let period = config.timeframe.as_str().to_string();
     let strategy_type = config.strategy_type;
@@ -384,7 +397,6 @@ async fn main() -> Result<()> {
         inst_id,
         period
     );
-
     let mut candle_limit = args.total_candles;
     let mut select_time = None;
     if args.use_backtest_window {
@@ -408,7 +420,6 @@ async fn main() -> Result<()> {
             }
         }
     }
-
     let candles = load_confirmed_candles(&inst_id, &period, candle_limit, select_time).await?;
     if candles.len() <= args.warmup_candles {
         return Err(anyhow!(
@@ -437,12 +448,10 @@ async fn main() -> Result<()> {
         "Replay start candle: ts={}, cn(+08)={}, utc={}",
         replay_start_ts, replay_start_cn, replay_start_utc
     );
-
     register_strategy_on_demand(&strategy_type);
     let executor = get_strategy_registry()
         .get(strategy_type.as_str())
         .map_err(|e| anyhow!("获取策略执行器失败: {}", e))?;
-
     let sim_result = replay_live_with_warmup(
         executor,
         &config,
@@ -452,13 +461,11 @@ async fn main() -> Result<()> {
     )
     .await?;
     let simulated_rows = to_parity_trade_rows(&sim_result.trade_records);
-
     let expected_rows = if let Some(backtest_id) = args.backtest_id {
         load_backtest_expected_rows(backtest_id).await?
     } else {
         Vec::new()
     };
-
     let report = compare_parity_rows(
         &simulated_rows,
         &expected_rows,
@@ -467,42 +474,34 @@ async fn main() -> Result<()> {
     );
     let timing_report = compare_timing_parity(&simulated_rows, &expected_rows, 100);
     let analysis_md = build_analysis_text(&args, &sim_result, &report, &timing_report);
-
     let mut out_dir = PathBuf::from(args.output_dir.clone());
     fs::create_dir_all(&out_dir)?;
     let run_key = format!("cfg{}_{}_{}", config.id, inst_id.replace('-', "_"), period);
-
     out_dir.push(format!("{}_sim_trade_records.json", run_key));
     fs::write(
         &out_dir,
         serde_json::to_string_pretty(&sim_result.trade_records)?,
     )?;
     out_dir.pop();
-
     out_dir.push(format!("{}_sim_paper_orders.json", run_key));
     fs::write(
         &out_dir,
         serde_json::to_string_pretty(&sim_result.paper_orders)?,
     )?;
     out_dir.pop();
-
     if !expected_rows.is_empty() {
         out_dir.push(format!("{}_expected_backtest_rows.json", run_key));
         fs::write(&out_dir, serde_json::to_string_pretty(&expected_rows)?)?;
         out_dir.pop();
     }
-
     out_dir.push(format!("{}_parity_report.json", run_key));
     fs::write(&out_dir, serde_json::to_string_pretty(&report)?)?;
     out_dir.pop();
-
     out_dir.push(format!("{}_timing_parity_report.json", run_key));
     fs::write(&out_dir, serde_json::to_string_pretty(&timing_report)?)?;
     out_dir.pop();
-
     out_dir.push(format!("{}_parity_analysis.md", run_key));
     fs::write(&out_dir, analysis_md.as_bytes())?;
-
     println!("Parity report saved: {}", out_dir.display());
     println!(
         "Summary: matched_rows={}, expected={}, differences={}",

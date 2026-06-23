@@ -1,14 +1,19 @@
+use crate::exchange::OrderPlacementRequest;
+use crate::rust_quan_web::{ExecutionTask, ExecutionTaskReportRequest};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use crypto_exc_all::{
+    CancelOrderRequest, ExchangeId, PrepareOrderSettingsRequest, ProtectiveOrderRequest,
+};
 use serde_json::{json, Map, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use crate::exchange::OrderPlacementRequest;
-use crate::rust_quan_web::{ExecutionTask, ExecutionTaskReportRequest};
-
 const REDACTED: &str = "***REDACTED***";
 const AUDIT_ENDPOINT_PLACE_ORDER: &str = "trade.place_order";
+const AUDIT_ENDPOINT_CANCEL_ORDER: &str = "trade.cancel_order";
+const AUDIT_ENDPOINT_PLACE_PROTECTIVE_ORDER: &str = "trade.place_protective_order";
+const AUDIT_ENDPOINT_CANCEL_PROTECTIVE_ORDER: &str = "trade.cancel_protective_order";
+const AUDIT_ENDPOINT_PREPARE_ORDER_SETTINGS: &str = "account.prepare_order_settings";
 const AUDIT_ENDPOINT_REPORT_RESULT: &str = "web.report_result";
 const UPSERT_WORKER_CHECKPOINT_SQL: &str = r#"
             INSERT INTO execution_worker_checkpoints (
@@ -48,28 +53,33 @@ const INSERT_EXCHANGE_REQUEST_AUDIT_SQL: &str = r#"
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             "#;
 const LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL: &str = r#"
+            WITH latest_failed AS (
+                SELECT DISTINCT ON (failed.endpoint, failed.request_id)
+                    failed.endpoint,
+                    failed.request_id,
+                    failed.request_payload,
+                    failed.created_at
+                FROM exchange_request_audit_logs failed
+                WHERE failed.endpoint = $1
+                  AND failed.request_status = 'failed'
+                  AND failed.request_payload #>> '{replay,action}' = 'retry_report_result_only'
+                  AND failed.request_payload #>> '{replay,place_order_allowed}' = 'false'
+                  AND (
+                      cardinality($4::text[]) = 0
+                      OR failed.request_payload #>> '{report,task_id}' = ANY($4::text[])
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM exchange_request_audit_logs replayed
+                      WHERE replayed.endpoint = failed.endpoint
+                        AND replayed.request_id = failed.request_id
+                        AND replayed.request_status = 'replayed'
+                  )
+                ORDER BY failed.endpoint, failed.request_id, failed.created_at DESC, failed.id DESC
+            )
             SELECT failed.request_id, failed.request_payload
-            FROM exchange_request_audit_logs failed
-            WHERE failed.endpoint = $1
-              AND failed.request_status = 'failed'
-              AND failed.request_payload #>> '{replay,action}' = 'retry_report_result_only'
-              AND failed.request_payload #>> '{replay,place_order_allowed}' = 'false'
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM exchange_request_audit_logs replayed
-                  WHERE replayed.endpoint = failed.endpoint
-                    AND replayed.request_id = failed.request_id
-                    AND replayed.request_status = 'replayed'
-              )
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM exchange_request_audit_logs recent_failed
-                  WHERE recent_failed.endpoint = failed.endpoint
-                    AND recent_failed.request_id = failed.request_id
-                    AND recent_failed.request_status = 'failed'
-                    AND recent_failed.created_at > failed.created_at
-                    AND recent_failed.created_at >= NOW() - ($3::bigint * INTERVAL '1 second')
-              )
+            FROM latest_failed failed
+            WHERE failed.created_at <= NOW() - ($3::bigint * INTERVAL '1 second')
             ORDER BY failed.created_at ASC
             LIMIT $2
             "#;
@@ -78,19 +88,27 @@ const LIVE_AUDIT_READINESS_TABLE_SQL: &str = r#"
                 to_regclass('public.execution_worker_checkpoints') IS NOT NULL AS has_worker_checkpoints,
                 to_regclass('public.exchange_request_audit_logs') IS NOT NULL AS has_exchange_audit_logs
             "#;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExecutionWorkerCheckpoint {
+    /// worker ID。
     pub worker_id: String,
+    /// 类型标识。
     pub worker_kind: String,
+    /// 状态值。
     pub worker_status: String,
+    /// 租约owner，用于记录交易或执行状态。
     pub lease_owner: String,
+    /// checkpointKey，用于记录交易或执行状态。
     pub checkpoint_key: String,
+    /// checkpoint值，用于记录交易或执行状态。
     pub checkpoint_value: Value,
+    /// 最近task ID；为空时使用默认值或表示不限制。
     pub last_task_id: Option<String>,
 }
-
 impl ExecutionWorkerCheckpoint {
+    /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     pub fn heartbeat(
         worker_id: impl Into<String>,
         worker_status: impl Into<String>,
@@ -109,21 +127,29 @@ impl ExecutionWorkerCheckpoint {
         }
     }
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExchangeRequestAuditLog {
+    /// 请求追踪 ID。
     pub request_id: String,
+    /// 交易所名称。
     pub exchange: String,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// endpoint。
     pub endpoint: String,
+    /// 状态值。
     pub request_status: String,
+    /// 毫秒级时间戳或时长。
     pub latency_ms: Option<i32>,
+    /// 请求载荷，用于构建接口请求。
     pub request_payload: Value,
+    /// 响应载荷，用于返回接口响应。
     pub response_payload: Value,
+    /// 错误消息。
     pub error_message: String,
 }
-
 impl ExchangeRequestAuditLog {
+    /// 封装成功，减少Web 商业链路调用方重复实现相同细节。
     pub fn success(
         task: &ExecutionTask,
         request: &OrderPlacementRequest,
@@ -143,7 +169,7 @@ impl ExchangeRequestAuditLog {
             error_message: String::new(),
         }
     }
-
+    /// 封装实盘mutationpreflight，减少Web 商业链路调用方重复实现相同细节。
     pub fn live_mutation_preflight(
         task: &ExecutionTask,
         request: &OrderPlacementRequest,
@@ -166,7 +192,7 @@ impl ExchangeRequestAuditLog {
             error_message: String::new(),
         }
     }
-
+    /// 封装失败，减少Web 商业链路调用方重复实现相同细节。
     pub fn failed(
         task: &ExecutionTask,
         request: &OrderPlacementRequest,
@@ -186,7 +212,7 @@ impl ExchangeRequestAuditLog {
             error_message: redact_error_message(error_message.into()),
         }
     }
-
+    /// 提供报告结果failed的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub fn report_result_failed(
         report: &ExecutionTaskReportRequest,
         error_message: impl Into<String>,
@@ -206,7 +232,79 @@ impl ExchangeRequestAuditLog {
             error_message: redact_error_message(error_message.into()),
         }
     }
-
+    /// 创建 Web 商业、会员和执行准备度 资源，并在入口处完成必要的参数归一。
+    pub fn prepare_order_settings_success(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &PrepareOrderSettingsRequest,
+        dry_run: bool,
+        latency_ms: Option<i32>,
+        response_payload: Value,
+    ) -> Self {
+        Self {
+            request_id: prepare_order_settings_request_id(task, exchange, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: AUDIT_ENDPOINT_PREPARE_ORDER_SETTINGS.to_string(),
+            request_status: "completed".to_string(),
+            latency_ms,
+            request_payload: prepare_order_settings_request_payload(
+                task, exchange, request, dry_run,
+            ),
+            response_payload: redact_audit_payload(response_payload),
+            error_message: String::new(),
+        }
+    }
+    /// 创建 Web 商业、会员和执行准备度 资源，并在入口处完成必要的参数归一。
+    pub fn prepare_order_settings_live_mutation_preflight(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &PrepareOrderSettingsRequest,
+        dry_run: bool,
+    ) -> Self {
+        Self {
+            request_id: prepare_order_settings_request_id(task, exchange, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: format!("{AUDIT_ENDPOINT_PREPARE_ORDER_SETTINGS}.preflight"),
+            request_status: "completed".to_string(),
+            latency_ms: None,
+            request_payload: prepare_order_settings_request_payload(
+                task, exchange, request, dry_run,
+            ),
+            response_payload: redact_audit_payload(json!({
+                "stage": "live_prepare_order_settings_audit_preflight",
+                "place_order_allowed": false,
+                "mutation_allowed": false,
+                "audit_write_confirmed": true,
+            })),
+            error_message: String::new(),
+        }
+    }
+    /// 创建 Web 商业、会员和执行准备度 资源，并在入口处完成必要的参数归一。
+    pub fn prepare_order_settings_failed(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &PrepareOrderSettingsRequest,
+        dry_run: bool,
+        latency_ms: Option<i32>,
+        error_message: impl Into<String>,
+    ) -> Self {
+        Self {
+            request_id: prepare_order_settings_request_id(task, exchange, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: AUDIT_ENDPOINT_PREPARE_ORDER_SETTINGS.to_string(),
+            request_status: "failed".to_string(),
+            latency_ms,
+            request_payload: prepare_order_settings_request_payload(
+                task, exchange, request, dry_run,
+            ),
+            response_payload: json!({}),
+            error_message: redact_error_message(error_message.into()),
+        }
+    }
+    /// 提供报告结果replayed的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub fn report_result_replayed(
         report: &ExecutionTaskReportRequest,
         latency_ms: Option<i32>,
@@ -228,20 +326,218 @@ impl ExchangeRequestAuditLog {
             error_message: String::new(),
         }
     }
+    /// 提供protective订单success的集中实现，避免Web 商业链路调用方重复处理相同细节。
+    pub fn protective_order_success(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &ProtectiveOrderRequest,
+        dry_run: bool,
+        latency_ms: Option<i32>,
+        response_payload: Value,
+    ) -> Self {
+        Self {
+            request_id: protective_order_request_id(task, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: AUDIT_ENDPOINT_PLACE_PROTECTIVE_ORDER.to_string(),
+            request_status: "completed".to_string(),
+            latency_ms,
+            request_payload: protective_order_request_payload(task, exchange, request, dry_run),
+            response_payload: redact_audit_payload(response_payload),
+            error_message: String::new(),
+        }
+    }
+    /// 提供protective订单livemutationpreflight的集中实现，避免Web 商业链路调用方重复处理相同细节。
+    pub fn protective_order_live_mutation_preflight(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &ProtectiveOrderRequest,
+        dry_run: bool,
+    ) -> Self {
+        Self {
+            request_id: protective_order_request_id(task, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: format!("{AUDIT_ENDPOINT_PLACE_PROTECTIVE_ORDER}.preflight"),
+            request_status: "completed".to_string(),
+            latency_ms: None,
+            request_payload: protective_order_request_payload(task, exchange, request, dry_run),
+            response_payload: redact_audit_payload(json!({
+                "stage": "live_protective_order_audit_preflight",
+                "place_order_allowed": false,
+                "mutation_allowed": false,
+                "audit_write_confirmed": true,
+            })),
+            error_message: String::new(),
+        }
+    }
+    /// 提供protective订单failed的集中实现，避免Web 商业链路调用方重复处理相同细节。
+    pub fn protective_order_failed(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &ProtectiveOrderRequest,
+        dry_run: bool,
+        latency_ms: Option<i32>,
+        error_message: impl Into<String>,
+    ) -> Self {
+        Self {
+            request_id: protective_order_request_id(task, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: AUDIT_ENDPOINT_PLACE_PROTECTIVE_ORDER.to_string(),
+            request_status: "failed".to_string(),
+            latency_ms,
+            request_payload: protective_order_request_payload(task, exchange, request, dry_run),
+            response_payload: json!({}),
+            error_message: redact_error_message(error_message.into()),
+        }
+    }
+    /// 判断cancel订单success，给Web 商业链路流程提供布尔结果。
+    pub fn cancel_order_success(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &CancelOrderRequest,
+        dry_run: bool,
+        latency_ms: Option<i32>,
+        response_payload: Value,
+    ) -> Self {
+        Self {
+            request_id: cancel_order_request_id(task, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: AUDIT_ENDPOINT_CANCEL_ORDER.to_string(),
+            request_status: "completed".to_string(),
+            latency_ms,
+            request_payload: cancel_order_request_payload(task, exchange, request, dry_run),
+            response_payload: redact_audit_payload(response_payload),
+            error_message: String::new(),
+        }
+    }
+    /// 判断cancel订单livemutationpreflight，给Web 商业链路流程提供布尔结果。
+    pub fn cancel_order_live_mutation_preflight(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &CancelOrderRequest,
+        dry_run: bool,
+    ) -> Self {
+        Self {
+            request_id: cancel_order_request_id(task, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: format!("{AUDIT_ENDPOINT_CANCEL_ORDER}.preflight"),
+            request_status: "completed".to_string(),
+            latency_ms: None,
+            request_payload: cancel_order_request_payload(task, exchange, request, dry_run),
+            response_payload: redact_audit_payload(json!({
+                "stage": "live_cancel_order_audit_preflight",
+                "place_order_allowed": false,
+                "mutation_allowed": false,
+                "audit_write_confirmed": true,
+            })),
+            error_message: String::new(),
+        }
+    }
+    /// 判断cancel订单failed，给Web 商业链路流程提供布尔结果。
+    pub fn cancel_order_failed(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &CancelOrderRequest,
+        dry_run: bool,
+        latency_ms: Option<i32>,
+        error_message: impl Into<String>,
+    ) -> Self {
+        Self {
+            request_id: cancel_order_request_id(task, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: AUDIT_ENDPOINT_CANCEL_ORDER.to_string(),
+            request_status: "failed".to_string(),
+            latency_ms,
+            request_payload: cancel_order_request_payload(task, exchange, request, dry_run),
+            response_payload: json!({}),
+            error_message: redact_error_message(error_message.into()),
+        }
+    }
+    /// 提供protectivecancelsuccess的集中实现，避免Web 商业链路调用方重复处理相同细节。
+    pub fn protective_cancel_success(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &CancelOrderRequest,
+        dry_run: bool,
+        latency_ms: Option<i32>,
+        response_payload: Value,
+    ) -> Self {
+        Self {
+            request_id: protective_cancel_request_id(task, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: AUDIT_ENDPOINT_CANCEL_PROTECTIVE_ORDER.to_string(),
+            request_status: "completed".to_string(),
+            latency_ms,
+            request_payload: protective_cancel_request_payload(task, exchange, request, dry_run),
+            response_payload: redact_audit_payload(response_payload),
+            error_message: String::new(),
+        }
+    }
+    /// 提供protectivecancellivemutationpreflight的集中实现，避免Web 商业链路调用方重复处理相同细节。
+    pub fn protective_cancel_live_mutation_preflight(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &CancelOrderRequest,
+        dry_run: bool,
+    ) -> Self {
+        Self {
+            request_id: protective_cancel_request_id(task, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: format!("{AUDIT_ENDPOINT_CANCEL_PROTECTIVE_ORDER}.preflight"),
+            request_status: "completed".to_string(),
+            latency_ms: None,
+            request_payload: protective_cancel_request_payload(task, exchange, request, dry_run),
+            response_payload: redact_audit_payload(json!({
+                "stage": "live_protective_cancel_audit_preflight",
+                "place_order_allowed": false,
+                "mutation_allowed": false,
+                "audit_write_confirmed": true,
+            })),
+            error_message: String::new(),
+        }
+    }
+    /// 提供protectivecancelfailed的集中实现，避免Web 商业链路调用方重复处理相同细节。
+    pub fn protective_cancel_failed(
+        task: &ExecutionTask,
+        exchange: ExchangeId,
+        request: &CancelOrderRequest,
+        dry_run: bool,
+        latency_ms: Option<i32>,
+        error_message: impl Into<String>,
+    ) -> Self {
+        Self {
+            request_id: protective_cancel_request_id(task, request),
+            exchange: exchange.as_str().to_string(),
+            symbol: request.instrument.symbol_for(exchange),
+            endpoint: AUDIT_ENDPOINT_CANCEL_PROTECTIVE_ORDER.to_string(),
+            request_status: "failed".to_string(),
+            latency_ms,
+            request_payload: protective_cancel_request_payload(task, exchange, request, dry_run),
+            response_payload: json!({}),
+            error_message: redact_error_message(error_message.into()),
+        }
+    }
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReportResultReplayCandidate {
+    /// 请求追踪 ID。
     pub request_id: String,
+    /// 报告。
     pub report: ExecutionTaskReportRequest,
 }
-
 #[async_trait]
 pub trait ExecutionAuditRepository: Send + Sync {
     fn can_audit_live_mutations(&self) -> bool {
         false
     }
-
+    /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
     async fn verify_live_audit_ready(&self) -> Result<()> {
         if self.can_audit_live_mutations() {
             Ok(())
@@ -251,23 +547,19 @@ pub trait ExecutionAuditRepository: Send + Sync {
             ))
         }
     }
-
     async fn upsert_worker_checkpoint(&self, checkpoint: &ExecutionWorkerCheckpoint) -> Result<()>;
-
     async fn insert_exchange_request_audit(&self, audit: &ExchangeRequestAuditLog) -> Result<()>;
-
     async fn list_report_result_replay_candidates(
         &self,
         _limit: u32,
         _failure_backoff_seconds: u64,
+        _target_task_ids: &[i64],
     ) -> Result<Vec<ReportResultReplayCandidate>> {
         Ok(Vec::new())
     }
 }
-
 #[derive(Debug, Default)]
 pub struct NoopExecutionAuditRepository;
-
 #[async_trait]
 impl ExecutionAuditRepository for NoopExecutionAuditRepository {
     async fn upsert_worker_checkpoint(
@@ -276,22 +568,20 @@ impl ExecutionAuditRepository for NoopExecutionAuditRepository {
     ) -> Result<()> {
         Ok(())
     }
-
     async fn insert_exchange_request_audit(&self, _audit: &ExchangeRequestAuditLog) -> Result<()> {
         Ok(())
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct PostgresExecutionAuditRepository {
+    /// 数据库连接池。
     pool: PgPool,
 }
-
 impl PostgresExecutionAuditRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
-
+    /// 从外部输入转换为内部模型，隔离 Web 商业、会员和执行准备度 的字段适配细节。
     pub fn from_env() -> Result<Option<Self>> {
         let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
             .or_else(|_| std::env::var("QUANT_CORE_POSTGRES_URL"))
@@ -311,13 +601,12 @@ impl PostgresExecutionAuditRepository {
         Ok(Some(Self::new(pool)))
     }
 }
-
 #[async_trait]
 impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
     fn can_audit_live_mutations(&self) -> bool {
         true
     }
-
+    /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
     async fn verify_live_audit_ready(&self) -> Result<()> {
         let row = sqlx::query(LIVE_AUDIT_READINESS_TABLE_SQL)
             .fetch_one(&self.pool)
@@ -332,7 +621,6 @@ impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
                 has_exchange_audit_logs
             ));
         }
-
         let probe_id = live_audit_preflight_id();
         let mut tx = self
             .pool
@@ -375,7 +663,7 @@ impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
             .context("rollback quant_core live audit readiness transaction")?;
         Ok(())
     }
-
+    /// 持久化 Web 商业、会员和执行准备度 结果，保证写入路径和幂等语义集中处理。
     async fn upsert_worker_checkpoint(&self, checkpoint: &ExecutionWorkerCheckpoint) -> Result<()> {
         sqlx::query(UPSERT_WORKER_CHECKPOINT_SQL)
             .bind(&checkpoint.worker_id)
@@ -389,7 +677,7 @@ impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
             .await?;
         Ok(())
     }
-
+    /// 持久化 Web 商业、会员和执行准备度 结果，保证写入路径和幂等语义集中处理。
     async fn insert_exchange_request_audit(&self, audit: &ExchangeRequestAuditLog) -> Result<()> {
         sqlx::query(INSERT_EXCHANGE_REQUEST_AUDIT_SQL)
             .bind(&audit.request_id)
@@ -405,19 +693,24 @@ impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
             .await?;
         Ok(())
     }
-
+    /// 列出 Web 商业、会员和执行准备度 的候选数据集合，并保持分页、过滤或排序语义集中。
     async fn list_report_result_replay_candidates(
         &self,
         limit: u32,
         failure_backoff_seconds: u64,
+        target_task_ids: &[i64],
     ) -> Result<Vec<ReportResultReplayCandidate>> {
+        let target_task_ids = target_task_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
         let rows = sqlx::query(LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL)
             .bind(AUDIT_ENDPOINT_REPORT_RESULT)
             .bind(i64::from(limit.clamp(1, 100)))
             .bind(i64::try_from(failure_backoff_seconds).unwrap_or(i64::MAX))
+            .bind(target_task_ids)
             .fetch_all(&self.pool)
             .await?;
-
         rows.into_iter()
             .map(|row| {
                 let request_id: String = row.try_get("request_id")?;
@@ -427,7 +720,9 @@ impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
             .collect()
     }
 }
-
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 fn live_audit_preflight_id() -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -435,7 +730,7 @@ fn live_audit_preflight_id() -> String {
         .unwrap_or_default();
     format!("live-audit-preflight-{}-{millis}", std::process::id())
 }
-
+/// 提供redactaudit载荷的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub fn redact_audit_payload(payload: Value) -> Value {
     match payload {
         Value::Object(map) => Value::Object(redact_object(map)),
@@ -445,7 +740,7 @@ pub fn redact_audit_payload(payload: Value) -> Value {
         other => other,
     }
 }
-
+/// 提供redactobject的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn redact_object(map: Map<String, Value>) -> Map<String, Value> {
     map.into_iter()
         .map(|(key, value)| {
@@ -458,7 +753,7 @@ fn redact_object(map: Map<String, Value>) -> Map<String, Value> {
         })
         .collect()
 }
-
+/// 判断 Web 商业、会员和执行准备度 条件是否满足，给上层流程提供布尔决策。
 fn is_sensitive_key(key: &str) -> bool {
     let normalized = key
         .chars()
@@ -474,7 +769,7 @@ fn is_sensitive_key(key: &str) -> bool {
         || normalized == "authorization"
         || normalized == "token"
 }
-
+/// 提供redacterrormessage的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(crate) fn redact_error_message(message: String) -> String {
     let normalized = message.to_ascii_lowercase();
     if normalized.contains("api_key")
@@ -499,20 +794,17 @@ pub(crate) fn redact_error_message(message: String) -> String {
         message
     }
 }
-
 fn redact_signature_material(message: &str) -> String {
     redact_signature_parameters(&redact_signed_urls(message))
 }
-
+/// 提供redactsignedurls的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn redact_signed_urls(message: &str) -> String {
     let lower = message.to_ascii_lowercase();
     let mut result = String::with_capacity(message.len());
     let mut cursor = 0;
-
     while let Some(url_start) = next_url_start(&lower, cursor) {
         let url_end = url_token_end(message, url_start);
         result.push_str(&message[cursor..url_start]);
-
         let token = &message[url_start..url_end];
         if token.to_ascii_lowercase().contains("signature=") {
             result.push_str("[signed_url_redacted]");
@@ -521,11 +813,10 @@ fn redact_signed_urls(message: &str) -> String {
         }
         cursor = url_end;
     }
-
     result.push_str(&message[cursor..]);
     result
 }
-
+/// 封装推进URLstart，减少Web 商业链路调用方重复实现相同细节。
 fn next_url_start(lower: &str, cursor: usize) -> Option<usize> {
     let tail = &lower[cursor..];
     let http = tail.find("http://");
@@ -537,7 +828,7 @@ fn next_url_start(lower: &str, cursor: usize) -> Option<usize> {
         (None, None) => None,
     }
 }
-
+/// 提供URLtokenend的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn url_token_end(message: &str, start: usize) -> usize {
     message[start..]
         .char_indices()
@@ -547,26 +838,25 @@ fn url_token_end(message: &str, start: usize) -> usize {
         })
         .unwrap_or(message.len())
 }
-
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 fn redact_signature_parameters(message: &str) -> String {
     let lower = message.to_ascii_lowercase();
     let mut result = String::with_capacity(message.len());
     let mut cursor = 0;
-
     while let Some(relative_start) = lower[cursor..].find("signature=") {
         let key_start = cursor + relative_start;
         let value_start = key_start + "signature=".len();
         let value_end = signature_value_end(message, value_start);
-
         result.push_str(&message[cursor..key_start]);
         result.push_str("[signed_param_redacted]");
         cursor = value_end;
     }
-
     result.push_str(&message[cursor..]);
     result
 }
-
+/// 提供signature值end的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn signature_value_end(message: &str, value_start: usize) -> usize {
     message[value_start..]
         .char_indices()
@@ -579,7 +869,7 @@ fn signature_value_end(message: &str, value_start: usize) -> usize {
         })
         .unwrap_or(message.len())
 }
-
+/// 封装请求id，减少Web 商业链路调用方重复实现相同细节。
 fn request_id(task: &ExecutionTask, request: &OrderPlacementRequest) -> String {
     request
         .client_order_id
@@ -587,7 +877,45 @@ fn request_id(task: &ExecutionTask, request: &OrderPlacementRequest) -> String {
         .map(|client_order_id| format!("task-{}-{}", task.id, client_order_id))
         .unwrap_or_else(|| format!("task-{}", task.id))
 }
-
+/// 提供protective订单requestID的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn protective_order_request_id(task: &ExecutionTask, request: &ProtectiveOrderRequest) -> String {
+    request
+        .client_order_id
+        .as_ref()
+        .map(|client_order_id| format!("task-{}-protective-{}", task.id, client_order_id))
+        .unwrap_or_else(|| format!("task-{}-protective", task.id))
+}
+/// 提供protectivecancelrequestID的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn protective_cancel_request_id(task: &ExecutionTask, request: &CancelOrderRequest) -> String {
+    request
+        .client_order_id
+        .as_ref()
+        .or(request.order_id.as_ref())
+        .map(|order_ref| format!("task-{}-protective-cancel-{}", task.id, order_ref))
+        .unwrap_or_else(|| format!("task-{}-protective-cancel", task.id))
+}
+/// 判断cancel订单requestID，给Web 商业链路流程提供布尔结果。
+fn cancel_order_request_id(task: &ExecutionTask, request: &CancelOrderRequest) -> String {
+    request
+        .client_order_id
+        .as_ref()
+        .or(request.order_id.as_ref())
+        .map(|order_ref| format!("task-{}-cancel-{}", task.id, order_ref))
+        .unwrap_or_else(|| format!("task-{}-cancel", task.id))
+}
+/// 创建 Web 商业、会员和执行准备度 资源，并在入口处完成必要的参数归一。
+fn prepare_order_settings_request_id(
+    task: &ExecutionTask,
+    exchange: ExchangeId,
+    request: &PrepareOrderSettingsRequest,
+) -> String {
+    format!(
+        "task-{}-prepare-settings-{}",
+        task.id,
+        request.instrument.symbol_for(exchange)
+    )
+}
+/// 提供订单request载荷的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn order_request_payload(
     task: &ExecutionTask,
     request: &OrderPlacementRequest,
@@ -620,7 +948,120 @@ fn order_request_payload(
         }
     }))
 }
-
+/// 提供protective订单request载荷的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn protective_order_request_payload(
+    task: &ExecutionTask,
+    exchange: ExchangeId,
+    request: &ProtectiveOrderRequest,
+    dry_run: bool,
+) -> Value {
+    redact_audit_payload(json!({
+        "dry_run": dry_run,
+        "task": {
+            "id": task.id,
+            "news_signal_id": task.news_signal_id,
+            "combo_id": task.combo_id,
+            "strategy_slug": task.strategy_slug,
+            "task_type": task.task_type,
+            "request_payload_json": task.request_payload_json,
+        },
+        "protective_order": {
+            "exchange": exchange,
+            "symbol": request.instrument.symbol_for(exchange),
+            "side": request.side,
+            "stop_price": request.stop_price,
+            "quantity": request.quantity,
+            "position_side": request.position_side,
+            "reduce_only": request.reduce_only,
+            "close_position": request.close_position,
+            "working_type": request.working_type,
+            "price_protect": request.price_protect,
+            "client_order_id": request.client_order_id,
+        }
+    }))
+}
+/// 判断cancel订单request载荷，给Web 商业链路流程提供布尔结果。
+fn cancel_order_request_payload(
+    task: &ExecutionTask,
+    exchange: ExchangeId,
+    request: &CancelOrderRequest,
+    dry_run: bool,
+) -> Value {
+    redact_audit_payload(json!({
+        "dry_run": dry_run,
+        "task": {
+            "id": task.id,
+            "news_signal_id": task.news_signal_id,
+            "combo_id": task.combo_id,
+            "strategy_slug": task.strategy_slug,
+            "task_type": task.task_type,
+            "request_payload_json": task.request_payload_json,
+        },
+        "cancel_order": {
+            "exchange": exchange,
+            "symbol": request.instrument.symbol_for(exchange),
+            "order_id": request.order_id,
+            "client_order_id": request.client_order_id,
+            "margin_coin": request.margin_coin,
+        }
+    }))
+}
+/// 提供protectivecancelrequest载荷的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn protective_cancel_request_payload(
+    task: &ExecutionTask,
+    exchange: ExchangeId,
+    request: &CancelOrderRequest,
+    dry_run: bool,
+) -> Value {
+    redact_audit_payload(json!({
+        "dry_run": dry_run,
+        "task": {
+            "id": task.id,
+            "news_signal_id": task.news_signal_id,
+            "combo_id": task.combo_id,
+            "strategy_slug": task.strategy_slug,
+            "task_type": task.task_type,
+            "request_payload_json": task.request_payload_json,
+        },
+        "protective_cancel": {
+            "exchange": exchange,
+            "symbol": request.instrument.symbol_for(exchange),
+            "order_id": request.order_id,
+            "client_order_id": request.client_order_id,
+            "margin_coin": request.margin_coin,
+        }
+    }))
+}
+/// 创建 Web 商业、会员和执行准备度 资源，并在入口处完成必要的参数归一。
+fn prepare_order_settings_request_payload(
+    task: &ExecutionTask,
+    exchange: ExchangeId,
+    request: &PrepareOrderSettingsRequest,
+    dry_run: bool,
+) -> Value {
+    redact_audit_payload(json!({
+        "dry_run": dry_run,
+        "task": {
+            "id": task.id,
+            "news_signal_id": task.news_signal_id,
+            "combo_id": task.combo_id,
+            "strategy_slug": task.strategy_slug,
+            "task_type": task.task_type,
+            "request_payload_json": task.request_payload_json,
+        },
+        "account_settings": {
+            "exchange": exchange,
+            "symbol": request.instrument.symbol_for(exchange),
+            "margin_mode": request.margin_mode,
+            "leverage": request.leverage,
+            "position_mode": request.position_mode,
+            "product_type": request.product_type,
+            "margin_coin": request.margin_coin,
+            "position_side": request.position_side,
+        }
+    }))
+}
+/// 提供报告requestID的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn report_request_id(report: &ExecutionTaskReportRequest) -> String {
     let external_order_id = report.external_order_id.trim();
     let candidate = if external_order_id.is_empty() {
@@ -630,7 +1071,7 @@ fn report_request_id(report: &ExecutionTaskReportRequest) -> String {
     };
     candidate.chars().take(128).collect()
 }
-
+/// 提供报告结果request载荷的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn report_result_request_payload(report: &ExecutionTaskReportRequest) -> Value {
     let raw_payload_json = report
         .raw_payload_json
@@ -660,7 +1101,7 @@ fn report_result_request_payload(report: &ExecutionTaskReportRequest) -> Value {
         }
     }))
 }
-
+/// 提供报告结果replay候选from载荷的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn report_result_replay_candidate_from_payload(
     request_id: String,
     request_payload: &Value,
@@ -680,11 +1121,9 @@ fn report_result_replay_candidate_from_payload(
     {
         return Err(anyhow!("report replay payload allows place_order"));
     }
-
     let report = request_payload
         .get("report")
         .ok_or_else(|| anyhow!("report replay payload missing report section"))?;
-
     Ok(ReportResultReplayCandidate {
         request_id,
         report: ExecutionTaskReportRequest {
@@ -712,14 +1151,14 @@ fn report_result_replay_candidate_from_payload(
         },
     })
 }
-
+/// 封装必需i64，减少Web 商业链路调用方重复实现相同细节。
 fn required_i64(value: &Value, field: &str) -> Result<i64> {
     value
         .get(field)
         .and_then(Value::as_i64)
         .ok_or_else(|| anyhow!("report replay payload missing numeric field: {field}"))
 }
-
+/// 封装必需字符串，减少Web 商业链路调用方重复实现相同细节。
 fn required_string(value: &Value, field: &str) -> Result<String> {
     value
         .get(field)
@@ -727,18 +1166,17 @@ fn required_string(value: &Value, field: &str) -> Result<String> {
         .map(ToString::to_string)
         .ok_or_else(|| anyhow!("report replay payload missing string field: {field}"))
 }
-
+/// 提供optionalstring的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn optional_string(value: &Value, field: &str) -> Option<String> {
     value
         .get(field)
         .and_then(Value::as_str)
         .map(ToString::to_string)
 }
-
 fn optional_f64(value: &Value, field: &str) -> Option<f64> {
     value.get(field).and_then(Value::as_f64)
 }
-
+/// 提供redact报告raw载荷JSON的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn redact_report_raw_payload_json(raw: &str) -> Value {
     match serde_json::from_str::<Value>(raw) {
         Ok(value) => redact_audit_payload(value),
@@ -746,7 +1184,7 @@ fn redact_report_raw_payload_json(raw: &str) -> Value {
         Err(_) => Value::String(raw.to_string()),
     }
 }
-
+/// 提供containssensitivemarker的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn contains_sensitive_marker(value: &str) -> bool {
     let normalized = value.to_ascii_lowercase();
     normalized.contains("api_key")
@@ -759,6 +1197,5 @@ fn contains_sensitive_marker(value: &str) -> bool {
         || normalized.contains("bearer ")
         || normalized.contains("secret")
 }
-
 #[cfg(test)]
 mod tests;

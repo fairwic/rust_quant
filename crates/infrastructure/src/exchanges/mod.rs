@@ -1,11 +1,9 @@
 //! 交易所适配器模块
 //!
 //! 实现各个交易所的adapter，统一接口
-
 mod factory;
 mod hyperliquid_adapter;
 mod okx_adapter;
-
 pub use factory::ExchangeFactory;
 pub use hyperliquid_adapter::{
     HyperliquidAssetContextSnapshot, HyperliquidFundingHistoryPoint, HyperliquidPublicAdapter,
@@ -13,7 +11,6 @@ pub use hyperliquid_adapter::{
 pub use okx_adapter::{
     OkxAccountAdapter, OkxContractsAdapter, OkxMarketDataAdapter, OkxPublicDataAdapter,
 };
-
 // 未来添加其他交易所：
 // mod binance_adapter;
 // mod bybit_adapter;

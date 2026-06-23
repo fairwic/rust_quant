@@ -2,68 +2,64 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::FromRow;
 use std::collections::HashMap;
 use std::env;
-
 #[derive(Debug, FromRow)]
 struct TradeDetail {
+    /// 交易所合约或现货交易对标识。
     inst_id: String,
+    /// 开仓时间。
     open_position_time: String,
     option_type: String, // long/short
     #[allow(dead_code)]
+    /// 价格数值。
     open_price: String,
+    /// 离场价格。
     close_price: Option<String>,
+    /// 收益亏损，用于记录交易或执行状态。
     profit_loss: String,
+    /// 止损来源；为空时使用默认值或表示不限制。
     stop_loss_source: Option<String>,
+    /// 类型标识。
     close_type: String,
 }
-
 #[tokio::main]
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
     tracing_subscriber::fmt::init();
-
     // 1. Setup DB connection
     let database_url = env::var("QUANT_CORE_DATABASE_URL")
         .or_else(|_| env::var("DATABASE_URL"))
         .expect("QUANT_CORE_DATABASE_URL or DATABASE_URL must be set in .env");
-
     println!("Connecting to DB: {}", database_url);
-
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(std::time::Duration::from_secs(10))
         .connect(&database_url)
         .await
         .map_err(|e| anyhow::anyhow!("DB Connection failed: {}", e))?;
-
     let old_id = 15650;
     let new_id = 15653;
-
     println!("Comparing Backtest ID {} (Old) vs {} (New)", old_id, new_id);
-
     // 2. Fetch Trades
     let old_trades = fetch_trades(&pool, old_id).await?;
     let new_trades = fetch_trades(&pool, new_id).await?;
-
     println!("Old Trades Count: {}", old_trades.len());
     println!("New Trades Count: {}", new_trades.len());
-
     // 3. Compare
     let mut regressions = Vec::new();
     let mut improvements = Vec::new();
     let mut large_entity_triggers = Vec::new();
-
     for (key, new_trade) in &new_trades {
         if let Some(source) = &new_trade.stop_loss_source {
             if !source.is_empty() {
                 large_entity_triggers.push(new_trade);
             }
         }
-
         if let Some(old_trade) = old_trades.get(key) {
             let new_pnl = new_trade.profit_loss.parse::<f64>().unwrap_or(0.0);
             let old_pnl = old_trade.profit_loss.parse::<f64>().unwrap_or(0.0);
             let diff = new_pnl - old_pnl;
-
             if diff < -1.0 {
                 // Significant regression
                 regressions.push((diff, old_trade, new_trade));
@@ -72,10 +68,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-
     // Sort by regression magnitude (worst first)
     regressions.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
     println!("\n=== 📉 Regressions (Worse Performance) ===");
     for (diff, old, new) in regressions.iter().take(10) {
         let old_pnl = old.profit_loss.parse::<f64>().unwrap_or(0.0);
@@ -92,7 +86,6 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or("0")
             .parse::<f64>()
             .unwrap_or(0.0);
-
         println!("--------------------------------------------------");
         println!(
             "Time: {} | Inst: {} | Side: {}",
@@ -108,7 +101,6 @@ async fn main() -> anyhow::Result<()> {
         );
         println!("  Diff: {:.2}", diff);
     }
-
     println!("\n=== 📈 Improvements (Better Performance) ===");
     for (diff, old, new) in improvements.iter().take(5) {
         let old_pnl = old.profit_loss.parse::<f64>().unwrap_or(0.0);
@@ -125,7 +117,6 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or("0")
             .parse::<f64>()
             .unwrap_or(0.0);
-
         println!("--------------------------------------------------");
         println!(
             "Time: {} | Inst: {} | Side: {}",
@@ -141,7 +132,6 @@ async fn main() -> anyhow::Result<()> {
         );
         println!("  Diff: {:.2}", diff);
     }
-
     println!(
         "\n=== 🛑 Large Entity Stop Loss Triggers (Total: {}) ===",
         large_entity_triggers.len()
@@ -158,7 +148,6 @@ async fn main() -> anyhow::Result<()> {
         negative_outcome,
         large_entity_triggers.len()
     );
-
     // Check specific examples of Large Entity triggering prematurely
     println!("\n--- Large Entity Stop Loss Examples ---");
     for trade in large_entity_triggers.iter().take(5) {
@@ -178,10 +167,9 @@ async fn main() -> anyhow::Result<()> {
             trade.open_position_time, pnl, old_pnl, close
         );
     }
-
     Ok(())
 }
-
+/// 加载 量化核心 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_trades(
     pool: &sqlx::PgPool,
     backtest_id: i64,
@@ -196,7 +184,6 @@ async fn fetch_trades(
     .bind(backtest_id)
     .fetch_all(pool)
     .await?;
-
     let mut map = HashMap::new();
     for trade in rows {
         // Key by (InstId, OpenTime) to match same trade across backtests

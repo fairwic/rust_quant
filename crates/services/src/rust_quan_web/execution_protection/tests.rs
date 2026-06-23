@@ -1,6 +1,5 @@
 use super::*;
 use crypto_exc_all::{CancelOrderRequest, OrderType};
-
 fn binance_eth_filters() -> ExchangeOrderFilters {
     ExchangeOrderFilters {
         min_qty: Some("0.001".parse().unwrap()),
@@ -14,7 +13,6 @@ fn binance_eth_filters() -> ExchangeOrderFilters {
         contract_value_currency: None,
     }
 }
-
 fn binance_buy_order_task() -> ExecutionOrderTask {
     ExecutionOrderTask {
         task_id: 42,
@@ -35,9 +33,9 @@ fn binance_buy_order_task() -> ExecutionOrderTask {
         time_in_force: None,
         size_usdt: None,
         attached_stop_loss_price: Some("2100".to_string()),
+        take_profit_legs: Vec::new(),
     }
 }
-
 fn long_protection() -> ProtectionSyncContract {
     ProtectionSyncContract {
         selected_stop_loss_price: 2100.0,
@@ -46,7 +44,6 @@ fn long_protection() -> ProtectionSyncContract {
         original_selected_stop_loss_price: None,
     }
 }
-
 fn attached_stop_loss_order_task(exchange: ExchangeId) -> ExecutionOrderTask {
     ExecutionOrderTask {
         task_id: 43,
@@ -67,9 +64,9 @@ fn attached_stop_loss_order_task(exchange: ExchangeId) -> ExecutionOrderTask {
         time_in_force: None,
         size_usdt: None,
         attached_stop_loss_price: Some("2100".to_string()),
+        take_profit_legs: Vec::new(),
     }
 }
-
 fn attached_stop_loss_ack(exchange: ExchangeId, raw: Value) -> OrderAck {
     let instrument = Instrument::perp("ETH", "USDT");
     OrderAck {
@@ -82,7 +79,6 @@ fn attached_stop_loss_ack(exchange: ExchangeId, raw: Value) -> OrderAck {
         raw,
     }
 }
-
 fn cancel_ack() -> OrderAck {
     OrderAck {
         exchange: ExchangeId::Binance,
@@ -94,7 +90,6 @@ fn cancel_ack() -> OrderAck {
         raw: json!({"algoId": 2000000953242572_i64, "clientAlgoId": "rq-sl-42"}),
     }
 }
-
 fn prearmed_protection() -> PrearmedProtectiveOrder {
     PrearmedProtectiveOrder {
         exchange: ExchangeId::Binance,
@@ -107,7 +102,6 @@ fn prearmed_protection() -> PrearmedProtectiveOrder {
         confirmation_source: "query_protective_order".to_string(),
     }
 }
-
 #[test]
 fn prearmed_protection_builds_cancel_request_from_protective_client_order_id() {
     let request = build_protective_stop_market_order_request(
@@ -116,14 +110,31 @@ fn prearmed_protection_builds_cancel_request_from_protective_client_order_id() {
         &binance_eth_filters(),
     )
     .unwrap();
-
     let cancel = prearmed_protection_cancel_request_from_request(&request).unwrap();
-
     assert_eq!(cancel.client_order_id.as_deref(), Some("rq-sl-42"));
     assert_eq!(cancel.order_id, None);
     assert_eq!(cancel.instrument.symbol_for(ExchangeId::Binance), "ETHUSDT");
 }
-
+#[test]
+fn binance_prearmed_protection_uses_fixed_size_instead_of_close_position() {
+    let request = build_protective_stop_market_order_request(
+        &binance_buy_order_task(),
+        &long_protection(),
+        &binance_eth_filters(),
+    )
+    .and_then(|request| {
+        fixed_size_prearmed_protective_order_request(
+            &binance_buy_order_task(),
+            &long_protection(),
+            &binance_eth_filters(),
+            request,
+        )
+    })
+    .unwrap();
+    assert_eq!(request.quantity.as_deref(), Some("0.01"));
+    assert_eq!(request.close_position, None);
+    assert_eq!(request.position_side.as_deref(), Some("BOTH"));
+}
 #[test]
 fn independent_stop_market_exchanges_prearm_protection_before_main_fill() {
     for exchange in [ExchangeId::Binance, ExchangeId::Bybit, ExchangeId::Gate] {
@@ -139,7 +150,6 @@ fn independent_stop_market_exchanges_prearm_protection_before_main_fill() {
         );
     }
 }
-
 #[test]
 fn protection_sync_raw_payload_declares_v2_exchange_and_order_mode() {
     for (exchange, expected_mode) in [
@@ -157,12 +167,10 @@ fn protection_sync_raw_payload_declares_v2_exchange_and_order_mode() {
             json!({"execution_status": "pending_protection_sync"}),
         );
         report.execution_status = "pending_protection_sync".to_string();
-
         protection.apply_outcome_to_report(
             &mut report,
             ProtectionSyncOutcome::confirmed("protective-43", "query_protective_order"),
         );
-
         let raw: Value = serde_json::from_str(report.raw_payload_json.as_deref().unwrap()).unwrap();
         assert_eq!(raw["protection_sync"]["contract_version"], "v2");
         assert_eq!(raw["protection_sync"]["exchange"], exchange);
@@ -174,15 +182,12 @@ fn protection_sync_raw_payload_declares_v2_exchange_and_order_mode() {
         assert_eq!(raw["protection_sync"]["repeat_open_order_allowed"], false);
     }
 }
-
 #[test]
 fn okx_generic_algo_id_without_stop_loss_fields_does_not_confirm_attached_stop_loss() {
     let order_task = attached_stop_loss_order_task(ExchangeId::Okx);
     let ack = attached_stop_loss_ack(ExchangeId::Okx, json!({"ordId": "10043", "algoId": "1"}));
-
     let outcome = attached_stop_loss_order_ack_outcome(&order_task, &ack, None)
         .expect("OKX attached stop-loss should produce an outcome");
-
     match outcome {
         ProtectionSyncOutcome::Failed { reason, .. } => {
             assert_eq!(reason, "attached_stop_loss_ack_missing");
@@ -190,7 +195,6 @@ fn okx_generic_algo_id_without_stop_loss_fields_does_not_confirm_attached_stop_l
         other => panic!("expected missing OKX stop-loss evidence failure, got {other:?}"),
     }
 }
-
 #[test]
 fn okx_stop_loss_fields_confirm_attached_stop_loss() {
     let order_task = attached_stop_loss_order_task(ExchangeId::Okx);
@@ -206,10 +210,8 @@ fn okx_stop_loss_fields_confirm_attached_stop_loss() {
             }]
         }),
     );
-
     let outcome = attached_stop_loss_order_ack_outcome(&order_task, &ack, None)
         .expect("OKX attached stop-loss should produce an outcome");
-
     match outcome {
         ProtectionSyncOutcome::Confirmed {
             protective_order_external_id,
@@ -221,7 +223,6 @@ fn okx_stop_loss_fields_confirm_attached_stop_loss() {
         other => panic!("expected OKX attached stop-loss confirmation, got {other:?}"),
     }
 }
-
 #[test]
 fn bitget_preset_stop_loss_price_confirms_attached_stop_loss() {
     let order_task = attached_stop_loss_order_task(ExchangeId::Bitget);
@@ -229,10 +230,8 @@ fn bitget_preset_stop_loss_price_confirms_attached_stop_loss() {
         ExchangeId::Bitget,
         json!({"orderId": "10043", "presetStopLossPrice": "2100"}),
     );
-
     let outcome = attached_stop_loss_order_ack_outcome(&order_task, &ack, None)
         .expect("Bitget attached stop-loss should produce an outcome");
-
     match outcome {
         ProtectionSyncOutcome::Confirmed { source, .. } => {
             assert_eq!(source, "place_order_attached_stop_loss_ack");
@@ -240,7 +239,6 @@ fn bitget_preset_stop_loss_price_confirms_attached_stop_loss() {
         other => panic!("expected Bitget attached stop-loss confirmation, got {other:?}"),
     }
 }
-
 #[test]
 fn prearmed_confirmation_is_applied_only_after_main_order_is_filled() {
     let prearmed = prearmed_protection();
@@ -254,9 +252,7 @@ fn prearmed_confirmation_is_applied_only_after_main_order_is_filled() {
     );
     filled.filled_qty = Some(0.01);
     filled.filled_quote = Some(24.0);
-
     prearmed.apply_after_main_order_report(&mut filled);
-
     let raw: Value = serde_json::from_str(filled.raw_payload_json.as_deref().unwrap()).unwrap();
     assert_eq!(filled.execution_status, "completed");
     assert_eq!(raw["protection_sync"]["status"], "completed");
@@ -268,7 +264,6 @@ fn prearmed_confirmation_is_applied_only_after_main_order_is_filled() {
         raw["protection_sync"]["confirmation_source"],
         "query_protective_order"
     );
-
     let mut pending = ExecutionTaskReportRequest::success(
         42,
         "binance",
@@ -278,9 +273,7 @@ fn prearmed_confirmation_is_applied_only_after_main_order_is_filled() {
         json!({"execution_status": "pending_confirmation"}),
     );
     pending.execution_status = "pending_confirmation".to_string();
-
     prearmed.apply_after_main_order_report(&mut pending);
-
     let raw: Value = serde_json::from_str(pending.raw_payload_json.as_deref().unwrap()).unwrap();
     assert_eq!(pending.execution_status, "pending_confirmation");
     assert!(raw.get("protection_sync").is_none());
@@ -293,7 +286,6 @@ fn prearmed_confirmation_is_applied_only_after_main_order_is_filled() {
         true
     );
 }
-
 #[test]
 fn prearmed_main_order_failure_records_protective_cancel_result() {
     let prearmed = prearmed_protection();
@@ -304,13 +296,11 @@ fn prearmed_main_order_failure_records_protective_cancel_result() {
         "main order rejected",
         json!({"stage": "place_order"}),
     );
-
     prearmed.apply_main_order_failure_cancel_result(
         &mut report,
         "main order rejected",
         Ok(cancel_ack()),
     );
-
     let raw: Value = serde_json::from_str(report.raw_payload_json.as_deref().unwrap()).unwrap();
     assert_eq!(report.execution_status, "failed");
     assert_eq!(

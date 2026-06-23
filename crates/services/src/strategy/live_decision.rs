@@ -3,7 +3,7 @@ use rust_quant_strategies::framework::backtest::{
     deal_signal, BasicRiskStrategyConfig, SignalResult, TradingState,
 };
 use rust_quant_strategies::framework::types::TradeSide;
-
+/// 提供approxeqopt的集中实现，避免回测策略调用方重复处理相同细节。
 pub(crate) fn approx_eq_opt(a: Option<f64>, b: Option<f64>, eps: f64) -> bool {
     match (a, b) {
         (None, None) => true,
@@ -11,14 +11,16 @@ pub(crate) fn approx_eq_opt(a: Option<f64>, b: Option<f64>, eps: f64) -> bool {
         _ => false,
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct LiveDecisionOutcome {
+    /// opened方向；为空时使用默认值或表示不限制。
     pub opened_side: Option<TradeSide>,
+    /// closed，用于交易策略计算。
     pub closed: bool,
+    /// closed方向；为空时使用默认值或表示不限制。
     pub closed_side: Option<TradeSide>,
 }
-
+/// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub fn apply_live_decision(
     state: &mut TradingState,
     signal: &mut SignalResult,
@@ -26,35 +28,28 @@ pub fn apply_live_decision(
     risk: BasicRiskStrategyConfig,
 ) -> LiveDecisionOutcome {
     let before = state.trade_position.clone();
-
     let updated = deal_signal(state.clone(), signal, candle, risk, &[], 0);
     let after = updated.trade_position.clone();
-
     *state = updated;
-
     let opened_side = match (&before, &after) {
         (None, Some(pos)) => Some(pos.trade_side),
         (Some(prev), Some(curr)) if prev.trade_side != curr.trade_side => Some(curr.trade_side),
         _ => None,
     };
-
     let closed_side = match (&before, &after) {
         (Some(prev), None) => Some(prev.trade_side),
         (Some(prev), Some(curr)) if prev.trade_side != curr.trade_side => Some(prev.trade_side),
         _ => None,
     };
-
     LiveDecisionOutcome {
         opened_side,
         closed: before.is_some() && (after.is_none() || opened_side.is_some()),
         closed_side,
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn blocks_open_when_filter_reason_present() {
         let mut state = TradingState::default();
@@ -78,13 +73,10 @@ mod tests {
             max_loss_percent: 0.02,
             ..Default::default()
         };
-
         let outcome = apply_live_decision(&mut state, &mut signal, &candle, risk);
-
         assert!(outcome.opened_side.is_none());
         assert!(state.trade_position.is_none());
     }
-
     #[test]
     fn stop_loss_triggers_close() {
         let mut state = TradingState {
@@ -97,7 +89,6 @@ mod tests {
             }),
             ..TradingState::default()
         };
-
         let mut signal = SignalResult {
             should_buy: false,
             should_sell: false,
@@ -117,13 +108,10 @@ mod tests {
             max_loss_percent: 0.02,
             ..Default::default()
         };
-
         let outcome = apply_live_decision(&mut state, &mut signal, &candle, risk);
-
         assert!(outcome.closed);
         assert!(state.trade_position.is_none());
     }
-
     #[test]
     fn approx_eq_opt_handles_none_and_epsilon() {
         assert!(approx_eq_opt(None, None, 1e-6));

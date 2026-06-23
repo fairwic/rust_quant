@@ -5,7 +5,6 @@ fn full_product_health_artifact_set_publisher_passes_bash_syntax_check() {
         .arg(full_product_artifact_set_publisher_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
@@ -15,7 +14,6 @@ fn full_product_health_artifact_set_publisher_passes_bash_syntax_check() {
 #[test]
 fn full_product_health_artifact_set_publisher_is_explicit_path_only_and_read_only() {
     let script = read_full_product_artifact_set_publisher_script();
-
     for required in [
         "FULL_PRODUCT_HEALTH_ARTIFACT_SET_FULL_REPORT_PATH",
         "FULL_PRODUCT_HEALTH_ARTIFACT_SET_SUMMARY_PATH",
@@ -42,7 +40,6 @@ fn full_product_health_artifact_set_publisher_is_explicit_path_only_and_read_onl
             "publisher script should document or scan marker {required}"
         );
     }
-
     for forbidden in [
         "source .env",
         "cat .env",
@@ -60,14 +57,12 @@ fn full_product_health_artifact_set_publisher_is_explicit_path_only_and_read_onl
         );
     }
 }
-
 #[test]
 fn full_product_health_artifact_set_publisher_requires_explicit_existing_paths() {
     let examples_dir = full_product_artifact_examples_dir();
     let full_report_path = examples_dir.join("full-product-health.json");
     let markdown_path = examples_dir.join("full-product-health.md");
     let missing_summary_path = examples_dir.join("missing-summary.json");
-
     let output = Command::new(full_product_artifact_set_publisher_path())
         .env("FULL_PRODUCT_HEALTH_ARTIFACT_SET_OUTPUT", "json")
         .env(
@@ -92,16 +87,13 @@ fn full_product_health_artifact_set_publisher_requires_explicit_existing_paths()
         )
         .output()
         .expect("artifact publisher should run");
-
     assert!(
         !output.status.success(),
         "publisher should fail when an explicit artifact path is missing"
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["storageStatus"], "rejected");
     assert_eq!(payload["retentionClass"], "rejected");
     assert_eq!(payload["validation"]["status"], "fail");
@@ -114,7 +106,6 @@ fn full_product_health_artifact_set_publisher_requires_explicit_existing_paths()
             .any(|item| item["code"] == "ARTIFACT_MISSING" && item["artifact"] == "summary"),
         "missing summary path should produce an ARTIFACT_MISSING finding: {stdout}"
     );
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         "postgres://",
@@ -130,7 +121,6 @@ fn full_product_health_artifact_set_publisher_requires_explicit_existing_paths()
         );
     }
 }
-
 #[test]
 fn full_product_health_artifact_set_publisher_emits_storage_ready_metadata_and_redaction_summary() {
     let examples_dir = full_product_artifact_examples_dir();
@@ -141,7 +131,6 @@ fn full_product_health_artifact_set_publisher_emits_storage_ready_metadata_and_r
         &fs::read_to_string(&summary_path).expect("summary example should be readable"),
     )
     .expect("summary example should be valid json");
-
     let output = Command::new(full_product_artifact_set_publisher_path())
         .env("FULL_PRODUCT_HEALTH_ARTIFACT_SET_OUTPUT", "json")
         .env(
@@ -183,18 +172,15 @@ fn full_product_health_artifact_set_publisher_emits_storage_ready_metadata_and_r
         )
         .output()
         .expect("artifact publisher should run");
-
     assert!(
         output.status.success(),
         "publisher should emit parseable json for complete fixtures:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["schemaVersion"], 1);
     assert_eq!(payload["storedAt"], "2026-05-07T01:03:00Z");
     assert_eq!(payload["sourceGeneratedAt"], "2026-05-07T01:00:00Z");
@@ -232,7 +218,6 @@ fn full_product_health_artifact_set_publisher_emits_storage_ready_metadata_and_r
             .starts_with("health-2026-05-07T01-00-00Z-"),
         "artifactSetId should derive from sourceGeneratedAt and content hash: {stdout}"
     );
-
     for field in [
         "artifactSetId",
         "schemaVersion",
@@ -259,7 +244,6 @@ fn full_product_health_artifact_set_publisher_emits_storage_ready_metadata_and_r
             "missing top-level field {field}: {stdout}"
         );
     }
-
     for field in [
         "summaryHash",
         "validationHash",
@@ -275,7 +259,6 @@ fn full_product_health_artifact_set_publisher_emits_storage_ready_metadata_and_r
             "{field} should contain only hex digits: {value}"
         );
     }
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         "postgres://",
@@ -298,7 +281,6 @@ fn full_product_health_artifact_set_publisher_emits_storage_ready_metadata_and_r
         );
     }
 }
-
 #[test]
 fn full_product_health_artifact_set_publisher_redacts_operator_metadata_and_urls_must_not_be_local_paths(
 ) {
@@ -306,7 +288,6 @@ fn full_product_health_artifact_set_publisher_redacts_operator_metadata_and_urls
     let full_report_path = examples_dir.join("full-product-health.json");
     let summary_path = examples_dir.join("full-product-health-summary.json");
     let markdown_path = examples_dir.join("full-product-health.md");
-
     let output = Command::new(full_product_artifact_set_publisher_path())
         .env("FULL_PRODUCT_HEALTH_ARTIFACT_SET_OUTPUT", "json")
         .env(
@@ -343,16 +324,13 @@ fn full_product_health_artifact_set_publisher_redacts_operator_metadata_and_urls
         )
         .output()
         .expect("artifact publisher should run");
-
     assert!(
         !output.status.success(),
         "publisher should reject local filesystem paths in handoff urls"
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["storageStatus"], "rejected");
     assert_eq!(payload["retentionClass"], "rejected");
     assert_eq!(payload["operatorMetadata"]["generatedBy"], "[redacted]");

@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use tracing::info;
-
 /// 策略测试进度跟踪
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyTestProgress {
+    /// 交易所合约或现货交易对标识。
     pub inst_id: String,
+    /// 时间字段。
     pub time: String,
     pub config_hash: String,           // 配置的哈希值，用于检测配置是否变化
     pub total_combinations: usize,     // 总参数组合数
@@ -17,41 +18,56 @@ pub struct StrategyTestProgress {
     pub last_update_time: i64,         // 最后更新时间
     pub status: String,                // 状态：running, completed, paused, error
 }
-
 /// NWE 随机策略测试配置
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NweRandomStrategyConfig {
+    /// 列表数据。
     pub stc_fast_length: Vec<usize>,
+    /// 列表数据。
     pub stc_slow_length: Vec<usize>,
+    /// 列表数据。
     pub stc_cycle_length: Vec<usize>,
+    /// 列表数据。
     pub stc_d1_length: Vec<usize>,
+    /// 列表数据。
     pub stc_d2_length: Vec<usize>,
-
+    /// 列表数据。
     pub rsi_periods: Vec<usize>,
+    /// 列表数据。
     pub rsi_over_buy_sell: Vec<(f64, f64)>,
+    /// 列表数据。
     pub atr_periods: Vec<usize>,
+    /// 列表数据。
     pub atr_multipliers: Vec<f64>,
+    /// 参与成交量计算的 K 线数量 列表。
     pub volume_bar_num: Vec<usize>,
+    /// 列表数据。
     pub volume_ratios: Vec<f64>,
+    /// 列表数据。
     pub nwe_periods: Vec<usize>,
+    /// 列表数据。
     pub nwe_multi: Vec<f64>,
+    /// 数量数值。
     pub batch_size: usize,
     // 风险参数（对齐 Vegas 随机参数生成）
     pub max_loss_percent: Vec<f64>,
+    /// 列表数据。
     pub take_profit_ratios: Vec<f64>,
+    /// isused信号kline止损亏损。
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
+    /// 列表数据。
     pub k_line_hammer_shadow_ratios: Vec<f64>,
 }
-
 impl NweRandomStrategyConfig {
     /// 计算配置的哈希值
+    /// 封装当前函数，减少配置运行时调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
     pub fn calculate_hash(&self) -> String {
         let config_json = serde_json::to_string(self).unwrap_or_default();
         let mut hasher = DefaultHasher::new();
         config_json.hash(&mut hasher);
         format!("{:x}", hasher.finish())
     }
-
     /// 计算总的参数组合数
     pub fn calculate_total_combinations(&self) -> usize {
         self.rsi_periods.len()
@@ -68,38 +84,47 @@ impl NweRandomStrategyConfig {
             * self.k_line_hammer_shadow_ratios.len()
     }
 }
-
 /// 随机策略测试配置
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RandomStrategyConfig {
+    /// 列表数据。
     pub bb_periods: Vec<i32>,
+    /// 列表数据。
     pub bb_multipliers: Vec<f64>,
+    /// 列表数据。
     pub shadow_ratios: Vec<f64>,
+    /// 列表数据。
     pub volume_bar_nums: Vec<usize>,
+    /// 列表数据。
     pub volume_ratios: Vec<f64>,
+    /// 列表数据。
     pub breakthrough_thresholds: Vec<f64>,
+    /// 列表数据。
     pub rsi_periods: Vec<usize>,
+    /// 列表数据。
     pub rsi_over_buy_sell: Vec<(f64, f64)>,
+    /// 数量数值。
     pub batch_size: usize,
     //risk
     pub max_loss_percent: Vec<f64>,
+    /// 列表数据。
     pub take_profit_ratios: Vec<f64>,
+    /// isused信号kline止损亏损。
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
+    /// 列表数据。
     pub k_line_hammer_shadow_ratios: Vec<f64>,
+    /// 列表数据。
     pub fix_signal_kline_take_profit_ratios: Vec<f64>,
 }
-
 impl Default for RandomStrategyConfig {
+    /// 提供默认参数，保证 配置、基础设施和运行时 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             bb_periods: vec![14, 16, 18, 20],
             bb_multipliers: vec![2.0, 2.2, 2.3, 2.5, 3.0],
-
             shadow_ratios: vec![0.65, 0.7, 0.75],
-
             volume_bar_nums: vec![4, 5, 6],
             volume_ratios: (20..=24).map(|x| x as f64 * 0.1).collect(),
-
             breakthrough_thresholds: vec![0.003],
             rsi_periods: vec![8, 9, 10, 11, 12, 13, 14, 15, 16],
             rsi_over_buy_sell: vec![(75.0, 25.0), (80.0, 20.0), (85.0, 15.0), (90.0, 10.0)],
@@ -108,22 +133,23 @@ impl Default for RandomStrategyConfig {
             max_loss_percent: vec![0.03, 0.04, 0.05],
             take_profit_ratios: vec![0.0],
             is_used_signal_k_line_stop_loss: vec![true, false],
-
             k_line_hammer_shadow_ratios: vec![0.62, 0.65, 0.7, 0.75],
             fix_signal_kline_take_profit_ratios: vec![0.0],
         }
     }
 }
-
 impl RandomStrategyConfig {
     /// 计算配置的哈希值，用于检测配置是否变化
+    /// 封装当前函数，减少配置运行时调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 基于 self 入口减少重复传参，并与对象状态形成稳定契约。
     pub fn calculate_hash(&self) -> String {
         let config_json = serde_json::to_string(self).unwrap_or_default();
         let mut hasher = DefaultHasher::new();
         config_json.hash(&mut hasher);
         format!("{:x}", hasher.finish())
     }
-
     /// 计算总的参数组合数
     pub fn calculate_total_combinations(&self) -> usize {
         self.bb_periods.len()
@@ -140,22 +166,17 @@ impl RandomStrategyConfig {
             * self.k_line_hammer_shadow_ratios.len()
     }
 }
-
 /// 进度管理器
 pub struct StrategyProgressManager;
-
 impl StrategyProgressManager {
-    /// 获取进度键
     fn get_progress_key(inst_id: &str, time: &str) -> String {
         format!("strategy_progress:{}:{}", inst_id, time)
     }
-
     /// 保存进度到 Redis
     pub async fn save_progress(progress: &StrategyTestProgress) -> Result<()> {
         let mut redis_conn = rust_quant_core::cache::get_redis_connection().await?;
         let key = Self::get_progress_key(&progress.inst_id, &progress.time);
         let progress_json = serde_json::to_string(progress)?;
-
         redis_conn
             .set_ex::<_, _, ()>(&key, progress_json, 86400 * 7)
             .await?; // 保存7天
@@ -165,12 +186,10 @@ impl StrategyProgressManager {
         );
         Ok(())
     }
-
     /// 从 Redis 加载进度
     pub async fn load_progress(inst_id: &str, time: &str) -> Result<Option<StrategyTestProgress>> {
         let mut redis_conn = rust_quant_core::cache::get_redis_connection().await?;
         let key = Self::get_progress_key(inst_id, time);
-
         let progress_json: Option<String> = redis_conn.get(&key).await?;
         if let Some(json) = progress_json {
             let progress: StrategyTestProgress = serde_json::from_str(&json)?;
@@ -183,7 +202,6 @@ impl StrategyProgressManager {
             Ok(None)
         }
     }
-
     /// 检查配置是否变化
     pub fn is_config_changed(
         current_config: &RandomStrategyConfig,
@@ -192,7 +210,6 @@ impl StrategyProgressManager {
         let current_hash = current_config.calculate_hash();
         current_hash != saved_progress.config_hash
     }
-
     /// 检查 NWE 配置是否变化
     pub fn is_config_changed_nwe(
         current_config: &NweRandomStrategyConfig,
@@ -201,7 +218,6 @@ impl StrategyProgressManager {
         let current_hash = current_config.calculate_hash();
         current_hash != saved_progress.config_hash
     }
-
     /// 创建新的进度记录
     pub fn create_new_progress(
         inst_id: &str,
@@ -219,7 +235,6 @@ impl StrategyProgressManager {
             status: "running".to_string(),
         }
     }
-
     /// 创建新的进度记录（NWE）
     pub fn create_new_progress_nwe(
         inst_id: &str,
@@ -237,7 +252,6 @@ impl StrategyProgressManager {
             status: "running".to_string(),
         }
     }
-
     /// 更新进度
     pub async fn update_progress(
         inst_id: &str,
@@ -253,7 +267,6 @@ impl StrategyProgressManager {
         }
         Ok(())
     }
-
     /// 标记完成
     pub async fn mark_completed(inst_id: &str, time: &str) -> Result<()> {
         if let Ok(Some(mut progress)) = Self::load_progress(inst_id, time).await {
@@ -266,7 +279,6 @@ impl StrategyProgressManager {
         }
         Ok(())
     }
-
     /// 清除进度（重新开始）
     pub async fn clear_progress(inst_id: &str, time: &str) -> Result<()> {
         let mut redis_conn = rust_quant_core::cache::get_redis_connection().await?;
@@ -275,7 +287,6 @@ impl StrategyProgressManager {
         info!("[断点续传] 进度已清除: {}", key);
         Ok(())
     }
-
     /// 获取进度百分比
     pub fn get_progress_percentage(progress: &StrategyTestProgress) -> f64 {
         if progress.total_combinations == 0 {
@@ -284,7 +295,6 @@ impl StrategyProgressManager {
             (progress.completed_combinations as f64 / progress.total_combinations as f64) * 100.0
         }
     }
-
     /// 估算剩余时间（基于已用时间和完成进度）
     pub fn estimate_remaining_time(
         progress: &StrategyTestProgress,
@@ -293,11 +303,9 @@ impl StrategyProgressManager {
         if progress.completed_combinations == 0 {
             return None;
         }
-
         let elapsed_time = chrono::Utc::now().timestamp_millis() - start_time;
         let progress_ratio =
             progress.completed_combinations as f64 / progress.total_combinations as f64;
-
         if progress_ratio > 0.0 {
             let estimated_total_time = elapsed_time as f64 / progress_ratio;
             let remaining_time = estimated_total_time - elapsed_time as f64;

@@ -42,7 +42,6 @@
 //! // 启动策略
 //! service.start_strategy(config_id).await?;
 //! ```
-
 pub mod exchange;
 pub mod market;
 pub mod notification;
@@ -50,7 +49,6 @@ pub mod risk;
 pub mod rust_quan_web;
 pub mod strategy;
 pub mod trading;
-
 // 重新导出常用服务
 pub use exchange::{CryptoExcAllGateway, ExchangeApiService, OrderPlacementRequest};
 pub use risk::RiskManagementService;

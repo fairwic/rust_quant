@@ -1,7 +1,6 @@
 use super::config::EmaTouchTrendSignalConfig;
 use super::signal::{EmaSignalValue, EmaTouchTrendSignalValue};
 use rust_quant_common::CandleItem;
-
 /// 检查EMA趋势
 pub fn check_ema_touch_trend(
     data_items: &[CandleItem],
@@ -10,7 +9,6 @@ pub fn check_ema_touch_trend(
 ) -> EmaTouchTrendSignalValue {
     let mut ema_touch_trend_value = EmaTouchTrendSignalValue::default();
     let _last_data_item = data_items.last().expect("数据不能为空");
-
     // if data_items.last().unwrap().ts == 1762128000000 {
     //     println!("last_data_item: {:?}", data_items.last().unwrap());
     // }
@@ -26,12 +24,10 @@ pub fn check_ema_touch_trend(
         //     println!("ema_touch_trend_value: {:?}", ema_touch_trend_value);
         // }
     }
-
     // 判断ema刚好进入死叉(比如当前k线或者前面1～2根k线触发了死叉)，不能开多
     // 判断ema刚好进入金叉，不能开空
     // 使用当前的ema_value来检测交叉
     let (has_recent_golden_cross, has_recent_death_cross) = check_recent_ema_crossover(&ema_value);
-
     // 如果刚发生死叉，禁止开多
     if has_recent_death_cross && ema_touch_trend_value.is_long_signal {
         // println!("刚发生死叉，禁止开多");
@@ -43,7 +39,6 @@ pub fn check_ema_touch_trend(
         // );
         ema_touch_trend_value.is_long_signal = false;
     }
-
     // 如果刚发生金叉，禁止开空
     if has_recent_golden_cross && ema_touch_trend_value.is_short_signal {
         // println!("刚发生金叉，禁止开空");
@@ -55,42 +50,23 @@ pub fn check_ema_touch_trend(
         // );
         ema_touch_trend_value.is_short_signal = false;
     }
-
     ema_touch_trend_value
 }
-
-/// 检查近期EMA交叉（当前或前1～2根K线是否发生了金叉或死叉）
-/// 返回: (是否发生金叉, 是否发生死叉)
-///
-/// 交叉结果在构建 `EmaSignalValue` 时计算并缓存，这里直接读取
 fn check_recent_ema_crossover(current_ema: &EmaSignalValue) -> (bool, bool) {
     (current_ema.is_golden_cross, current_ema.is_death_cross)
 }
-
-/// 判断是否为多头趋势 (短趋势)
-/// 规则: ema1 > ema2 > ema3
 pub fn is_bullish_trend(ema_value: &EmaSignalValue) -> bool {
     ema_value.ema1_value > ema_value.ema2_value && ema_value.ema2_value > ema_value.ema3_value
 }
-
-/// 判断是否为空头趋势 (短趋势)
-/// 规则: ema1 < ema2 < ema3
 pub fn is_bearish_trend(ema_value: &EmaSignalValue) -> bool {
     ema_value.ema1_value < ema_value.ema2_value && ema_value.ema2_value < ema_value.ema3_value
 }
-
-/// 判断是否为大趋势多头
-/// 规则: ema2 > ema4 && ema3 > ema4
 pub fn is_major_bullish_trend(ema_value: &EmaSignalValue) -> bool {
     ema_value.ema2_value > ema_value.ema4_value && ema_value.ema3_value > ema_value.ema4_value
 }
-
-/// 判断是否为大趋势空头
-/// 规则: ema2 < ema4 && ema3 < ema4
 pub fn is_major_bearish_trend(ema_value: &EmaSignalValue) -> bool {
     ema_value.ema2_value < ema_value.ema4_value && ema_value.ema3_value < ema_value.ema4_value
 }
-
 /// 检查多头信号
 fn check_bullish_signals(
     data_items: &[CandleItem],
@@ -99,17 +75,14 @@ fn check_bullish_signals(
     trend_value: &mut EmaTouchTrendSignalValue,
 ) {
     let last_item = data_items.last().expect("数据不能为空");
-
     // 检查EMA2触碰信号
     if check_ema2_touch_signal(last_item, ema_value, config) {
         trend_value.is_long_signal = true;
         return;
     }
-
     // 检查EMA4/EMA5触碰信号
     if check_ema45_touch_signal_bullish(last_item, ema_value, config) {
         trend_value.is_in_uptrend_touch_ema4_ema5_nums += 1;
-
         if last_item.l() <= ema_value.ema4_value {
             trend_value.is_in_uptrend_touch_ema4 = true;
         } else {
@@ -117,7 +90,6 @@ fn check_bullish_signals(
         }
         trend_value.is_long_signal = true;
     }
-
     // 检查EMA7触碰信号（短期多头vs长期空头）
     if check_ema7_touch_signal_bullish(last_item, ema_value, config) {
         trend_value.is_touch_ema7_nums += 1;
@@ -130,7 +102,6 @@ fn check_bullish_signals(
         trend_value.is_long_signal = true;
     }
 }
-
 /// 检查空头信号
 fn check_bearish_signals(
     data_items: &[CandleItem],
@@ -139,17 +110,14 @@ fn check_bearish_signals(
     trend_value: &mut EmaTouchTrendSignalValue,
 ) {
     let last_item = data_items.last().expect("数据不能为空");
-
     // 检查EMA2触碰信号
     if check_ema2_touch_signal_bearish(last_item, ema_value, config) {
         trend_value.is_short_signal = true;
         trend_value.is_touch_ema2 = true;
     }
-
     // 检查EMA4/EMA5触碰信号
     if check_ema45_touch_signal_bearish(last_item, ema_value, config) {
         trend_value.is_touch_ema4_ema5_nums += 1;
-
         if last_item.h() * config.price_with_ema_high_ratio >= ema_value.ema4_value {
             trend_value.is_touch_ema4 = true;
         } else {
@@ -157,7 +125,6 @@ fn check_bearish_signals(
         }
         trend_value.is_short_signal = true;
     }
-
     // // 检查EMA7触碰信号（短期空头vs长期多头）
     // if check_ema7_touch_signal_bearish(last_item, ema_value, config) {
     //     trend_value.is_touch_ema7_nums += 1;
@@ -176,7 +143,6 @@ fn check_bearish_signals(
         trend_value.is_short_signal = true;
     }
 }
-
 /// 检查EMA2触碰信号（多头）
 fn check_ema2_touch_signal(
     last_item: &CandleItem,
@@ -189,7 +155,6 @@ fn check_ema2_touch_signal(
         && last_item.o() > ema_value.ema2_value
         && last_item.c() > ema_value.ema2_value
 }
-
 /// 检查EMA2触碰信号（空头）
 fn check_ema2_touch_signal_bearish(
     last_item: &CandleItem,
@@ -201,7 +166,6 @@ fn check_ema2_touch_signal_bearish(
         && last_item.o() < ema_value.ema2_value
         && last_item.c() < ema_value.ema2_value
 }
-
 /// 检查EMA4/EMA5触碰信号（多头）
 fn check_ema45_touch_signal_bullish(
     last_item: &CandleItem,
@@ -213,10 +177,8 @@ fn check_ema45_touch_signal_bullish(
         || last_item.l() <= ema_value.ema5_value * config.ema4_with_ema5_ratio;
     let condition_3 = ema_value.ema4_value * config.ema3_with_ema4_ratio <= ema_value.ema3_value
         || ema_value.ema4_value * config.ema4_with_ema5_ratio <= ema_value.ema3_value;
-
     condition_1 && condition_2 && condition_3
 }
-
 /// 检查EMA4/EMA5触碰信号（空头）
 fn check_ema45_touch_signal_bearish(
     last_item: &CandleItem,
@@ -228,10 +190,8 @@ fn check_ema45_touch_signal_bearish(
         || (last_item.h() * config.price_with_ema_high_ratio >= ema_value.ema5_value);
     let condition_3 = (ema_value.ema3_value * config.ema3_with_ema4_ratio < ema_value.ema4_value)
         || (ema_value.ema3_value * config.ema3_with_ema4_ratio < ema_value.ema5_value);
-
     condition_1 && condition_2 && condition_3
 }
-
 /// 检查EMA7触碰信号（多头环境中的空头信号）
 fn check_ema7_touch_signal_bullish(
     last_item: &CandleItem,
@@ -242,11 +202,9 @@ fn check_ema7_touch_signal_bullish(
     let short_term_bullish = ema_value.ema1_value > ema_value.ema2_value
         && ema_value.ema2_value > ema_value.ema3_value
         && ema_value.ema3_value > ema_value.ema4_value;
-
     let long_term_bearish = ema_value.ema4_value < ema_value.ema5_value
         && ema_value.ema5_value < ema_value.ema6_value
         && ema_value.ema6_value < ema_value.ema7_value;
-
     if short_term_bullish && long_term_bearish {
         last_item.h() >= ema_value.ema7_value
             && ema_value.ema5_value * config.ema5_with_ema7_ratio > ema_value.ema7_value
@@ -254,9 +212,7 @@ fn check_ema7_touch_signal_bullish(
         false
     }
 }
-
 /// 检查EMA7触碰信号（空头环境中的多头信号）
-#[allow(dead_code)]
 fn check_ema7_touch_signal_bearish(
     last_item: &CandleItem,
     ema_value: &EmaSignalValue,
@@ -266,11 +222,9 @@ fn check_ema7_touch_signal_bearish(
     let short_term_bearish = ema_value.ema1_value < ema_value.ema2_value
         && ema_value.ema2_value < ema_value.ema3_value
         && ema_value.ema3_value < ema_value.ema4_value;
-
     let long_term_bullish = ema_value.ema4_value > ema_value.ema5_value
         && ema_value.ema5_value > ema_value.ema6_value
         && ema_value.ema6_value > ema_value.ema7_value;
-
     if short_term_bearish && long_term_bullish {
         last_item.l() <= ema_value.ema7_value
             && ema_value.ema7_value * config.ema5_with_ema7_ratio < ema_value.ema5_value
@@ -278,7 +232,6 @@ fn check_ema7_touch_signal_bearish(
         false
     }
 }
-
 /// 检查突破条件
 pub fn check_breakthrough_conditions(
     data_items: &[CandleItem],
@@ -288,25 +241,19 @@ pub fn check_breakthrough_conditions(
     if data_items.len() < 2 {
         return (false, false);
     }
-
     let current_price = data_items.last().expect("数据不能为空").c;
     let prev_price = data_items[data_items.len() - 2].c;
-
     // 向上突破条件：当前价格突破ema2上轨，且前一根K线价格低于EMA2
     let price_above = current_price > ema_value.ema2_value * (1.0 + breakthrough_threshold)
         && prev_price < ema_value.ema2_value;
-
     // 向下突破条件：当前价格突破ema2下轨，且前一根K线价格高于EMA2
     let price_below = (current_price < ema_value.ema1_value
         && current_price < ema_value.ema2_value * (1.0 - breakthrough_threshold)
         && prev_price > ema_value.ema2_value)
         || (current_price < ema_value.ema5_value * (1.0 - breakthrough_threshold)
             && prev_price > ema_value.ema5_value);
-
     (price_above, price_below)
 }
-
-/// 检查突破确认
 pub fn check_breakthrough_confirmation(_data_items: &[CandleItem], _is_upward: bool) -> bool {
     // 实现突破确认逻辑
     // 可以检查:
@@ -315,8 +262,6 @@ pub fn check_breakthrough_confirmation(_data_items: &[CandleItem], _is_upward: b
     // 3. 成交量配合
     true // 临时返回值
 }
-
-/// 计算动态回调幅度
 pub fn calculate_dynamic_pullback_threshold(_data_items: &[CandleItem]) -> f64 {
     // 实现动态回调幅度计算逻辑
     // 可以考虑:
@@ -325,7 +270,6 @@ pub fn calculate_dynamic_pullback_threshold(_data_items: &[CandleItem]) -> f64 {
     // 3. 成交量变化
     0.005 // 临时返回值
 }
-
 /// 获取有效的RSI
 /// 返回 None 表示检测到极端行情（大利空/利多消息），应跳过后续交易信号判断
 /// 返回 Some(rsi) 为正常 RSI 值
@@ -340,7 +284,6 @@ pub fn get_valid_rsi(
         let body = (last_candle.c() - last_candle.o()).abs();
         let total = last_candle.h() - last_candle.l();
         let body_ratio = if total > 0.0 { body / total } else { 0.0 };
-
         // RSI<30 且前一根K线跌幅>5% 且当前K线是阴线时，判断为大利空消息
         // 跳过后续交易信号判断，直接返回 None
         if rsi_value < 30.0 && data_items.len() >= 2 {
@@ -353,7 +296,6 @@ pub fn get_valid_rsi(
                 }
             }
         }
-
         // RSI>70 且前一根K线涨幅>5% 且当前K线是阳线时，判断为大利多消息
         // 跳过后续交易信号判断，直接返回 None（不做空）
         if rsi_value > 70.0 && data_items.len() >= 2 {
@@ -367,7 +309,6 @@ pub fn get_valid_rsi(
                 }
             }
         }
-
         if body_ratio > 0.8 {
             Some(50.0) // 大阳线/大阴线，不使用RSI（返回中性值）
         } else {

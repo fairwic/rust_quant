@@ -1,32 +1,27 @@
 //! PositionStage - 仓位管理阶段
-
 use crate::framework::backtest::pipeline::{BacktestContext, BacktestStage, StageResult};
 use crate::framework::backtest::signal::deal_signal;
 use crate::framework::types::TradeSide;
 use rust_quant_trading::audit::{OrderDecision, RiskDecision};
-
 /// 仓位管理阶段
 ///
 /// 处理开仓/更新仓位
 pub struct PositionStage;
-
 impl PositionStage {
     pub fn new() -> Self {
         Self
     }
 }
-
 impl Default for PositionStage {
     fn default() -> Self {
         Self::new()
     }
 }
-
 impl BacktestStage for PositionStage {
     fn name(&self) -> &'static str {
         "PositionStage"
     }
-
+    /// 执行当前回测阶段，把阶段输入转换为下一阶段上下文。
     fn process(&mut self, ctx: &mut BacktestContext) -> StageResult {
         // 对齐 legacy engine.rs 的 should_process_signal 判断：
         // 仅当存在交易信号/持仓/挂单时才进入 deal_signal
@@ -40,7 +35,6 @@ impl BacktestStage for PositionStage {
         if !(has_signal || has_position || has_pending) {
             return StageResult::Continue;
         }
-
         // 如果没有信号（None），构建一个空信号供 deal_signal 做风控/挂单处理
         let mut signal = ctx.signal.clone().unwrap_or_else(|| {
             use crate::strategy_common::SignalResult;
@@ -50,7 +44,6 @@ impl BacktestStage for PositionStage {
                 ..Default::default()
             }
         });
-
         // 统一委托给 deal_signal 处理
         // deal_signal 处理了：
         // 1. 开仓 (Open Position)
@@ -68,10 +61,8 @@ impl BacktestStage for PositionStage {
             &[], // candle_item_list 未被使用
             ctx.candle_index,
         );
-
         // 更新 Context 中的状态以供后续 Stage 使用（虽然 RiskStage 主要依赖 context check，但保持状态同步是个好习惯）
         ctx.current_position = ctx.trading_state.trade_position.clone();
-
         let curr_position = ctx.trading_state.trade_position.clone();
         match (prev_position, curr_position) {
             (None, Some(pos)) => {
@@ -110,7 +101,6 @@ impl BacktestStage for PositionStage {
             }
             _ => {}
         }
-
         StageResult::Continue
     }
 }

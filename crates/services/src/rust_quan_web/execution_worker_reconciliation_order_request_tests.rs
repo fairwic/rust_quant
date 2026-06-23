@@ -10,16 +10,13 @@ fn maps_task_payload_to_order_request() {
         "position_side": "long",
         "trade_side": "open"
     }));
-
     let request = ExecutionOrderTask::from_task(&task).unwrap();
     let order = request.to_order_request().unwrap();
-
     assert_eq!(order.exchange.as_str(), "okx");
     assert_eq!(order.instrument.symbol_for(order.exchange), "BTC-USDT-SWAP");
     assert_eq!(order.size, "0.01");
     assert_eq!(order.client_order_id.as_deref(), Some("rqtask42"));
 }
-
 #[test]
 fn maps_nested_news_signal_payload_to_order_request() {
     let task = task(json!({
@@ -27,15 +24,12 @@ fn maps_nested_news_signal_payload_to_order_request() {
         "signal_type": "buy",
         "payload_json": "{\"exchange\":\"okx\",\"side\":\"buy\",\"size\":\"0.001\",\"order_type\":\"market\",\"client_order_id\":\"smoke-dry-run-42\"}"
     }));
-
     let request = ExecutionOrderTask::from_task(&task).unwrap();
     let order = request.to_order_request().unwrap();
-
     assert_eq!(order.exchange.as_str(), "okx");
     assert_eq!(order.size, "0.001");
     assert_eq!(order.client_order_id.as_deref(), Some("smoke-dry-run-42"));
 }
-
 #[test]
 fn maps_web_execution_payload_to_order_request() {
     let task = task(json!({
@@ -57,10 +51,8 @@ fn maps_web_execution_payload_to_order_request() {
             "status": "active"
         }
     }));
-
     let request = ExecutionOrderTask::from_task(&task).unwrap();
     let order = request.to_order_request().unwrap();
-
     assert_eq!(order.exchange.as_str(), "binance");
     assert_eq!(request.symbol, "ETH-USDT-SWAP");
     assert_eq!(order.instrument.symbol_for(order.exchange), "ETHUSDT");

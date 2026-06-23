@@ -1,8 +1,6 @@
+use super::{EntryBlockConfig, RangeFilterConfig, VegasIndicatorSignalValue};
 use rust_quant_common::CandleItem;
 use rust_quant_domain::SignalResult;
-
-use super::{EntryBlockConfig, RangeFilterConfig, VegasIndicatorSignalValue};
-
 pub(crate) const LOW_VOLUME_INSIDE_RANGE_ENTRY_REASON: &str = "LOW_VOLUME_INSIDE_RANGE_BLOCK_ENTRY";
 pub(crate) const OPPOSITE_VALUE_AREA_ENTRY_REASON: &str =
     "VOLUME_PROFILE_OPPOSITE_VALUE_AREA_BLOCK_ENTRY";
@@ -12,7 +10,7 @@ pub(crate) const SHORT_INSIDE_LOW_VOLUME_NODE_ENTRY_REASON: &str =
     "VOLUME_PROFILE_SHORT_INSIDE_LOW_VOLUME_NODE_BLOCK_ENTRY";
 const LOW_VOLUME_INSIDE_RANGE_RATIO: f64 = 1.0;
 const SHALLOW_BEAR_REBOUND_RATIO: f64 = 0.20;
-
+/// 判断shouldblocklow成交量insiderangeentry，为回测策略流程提供明确的布尔结果。
 pub(crate) fn should_block_low_volume_inside_range_entry(
     last: &CandleItem,
     values: &VegasIndicatorSignalValue,
@@ -21,19 +19,16 @@ pub(crate) fn should_block_low_volume_inside_range_entry(
     if !range.is_open {
         return false;
     }
-
     let boll = &values.bollinger_value;
     if boll.middle <= 0.0 || boll.upper <= boll.lower {
         return false;
     }
-
     let bb_width_ratio = (boll.upper - boll.lower) / boll.middle;
     let close_inside_range = last.c() > boll.lower && last.c() < boll.upper;
     let low_volume = values.volume_value.volume_ratio < LOW_VOLUME_INSIDE_RANGE_RATIO;
-
     bb_width_ratio <= range.bb_width_threshold && close_inside_range && low_volume
 }
-
+/// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
 pub(crate) fn should_block_low_volume_inside_range_long_entry(
     last: &CandleItem,
     values: &VegasIndicatorSignalValue,
@@ -44,7 +39,7 @@ pub(crate) fn should_block_low_volume_inside_range_long_entry(
         && fib.major_bearish
         && fib.retracement_ratio < SHALLOW_BEAR_REBOUND_RATIO
 }
-
+/// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
 pub(crate) fn should_block_opposite_value_area_entry(
     is_long_entry: bool,
     values: &VegasIndicatorSignalValue,
@@ -56,14 +51,14 @@ pub(crate) fn should_block_opposite_value_area_entry(
         profile.close_above_value_area
     }
 }
-
+/// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
 pub(crate) fn should_block_low_volume_above_value_area_entry(
     values: &VegasIndicatorSignalValue,
 ) -> bool {
     let profile = &values.volume_profile_value;
     profile.close_above_value_area && profile.close_on_low_volume_node
 }
-
+/// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
 pub(crate) fn should_block_short_inside_low_volume_node_entry(
     is_long_entry: bool,
     values: &VegasIndicatorSignalValue,
@@ -71,7 +66,7 @@ pub(crate) fn should_block_short_inside_low_volume_node_entry(
     let profile = &values.volume_profile_value;
     !is_long_entry && profile.close_inside_value_area && profile.close_on_low_volume_node
 }
-
+/// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub(crate) fn apply_entry_block_reasons(
     signal_result: &mut SignalResult,
     config: &EntryBlockConfig,
@@ -89,7 +84,6 @@ pub(crate) fn apply_entry_block_reasons(
             .filter_reasons
             .push(LOW_VOLUME_INSIDE_RANGE_ENTRY_REASON.to_string());
     }
-
     if config.block_opposite_value_area_entry {
         let is_blocked_long = signal_result.should_buy.unwrap_or(false)
             && should_block_opposite_value_area_entry(true, values);
@@ -101,7 +95,6 @@ pub(crate) fn apply_entry_block_reasons(
                 .push(OPPOSITE_VALUE_AREA_ENTRY_REASON.to_string());
         }
     }
-
     if config.block_low_volume_above_value_area_entry
         && (signal_result.should_buy.unwrap_or(false) || signal_result.should_sell.unwrap_or(false))
         && should_block_low_volume_above_value_area_entry(values)
@@ -110,7 +103,6 @@ pub(crate) fn apply_entry_block_reasons(
             .filter_reasons
             .push(LOW_VOLUME_ABOVE_VALUE_AREA_ENTRY_REASON.to_string());
     }
-
     if config.block_short_inside_low_volume_node_entry
         && signal_result.should_sell.unwrap_or(false)
         && should_block_short_inside_low_volume_node_entry(false, values)
@@ -120,7 +112,6 @@ pub(crate) fn apply_entry_block_reasons(
             .push(SHORT_INSIDE_LOW_VOLUME_NODE_ENTRY_REASON.to_string());
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,7 +120,7 @@ mod tests {
         VolumeTrendSignalValue,
     };
     use crate::volume::VolumeProfileValue;
-
+    /// 构造测试或回测用 K 线，减少样本初始化重复代码。
     fn candle(o: f64, h: f64, l: f64, c: f64) -> CandleItem {
         CandleItem {
             o,
@@ -141,7 +132,7 @@ mod tests {
             confirm: 1,
         }
     }
-
+    /// 封装区间config，减少回测策略调用方重复实现相同细节。
     fn range_config() -> RangeFilterConfig {
         RangeFilterConfig {
             bb_width_threshold: 0.029,
@@ -149,7 +140,6 @@ mod tests {
             is_open: true,
         }
     }
-
     #[test]
     fn blocks_low_volume_close_inside_narrow_bollinger_range() {
         let last = candle(2128.67, 2158.07, 2127.61, 2144.9);
@@ -166,14 +156,12 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(should_block_low_volume_inside_range_entry(
             &last,
             &values,
             &range_config()
         ));
     }
-
     #[test]
     fn blocks_shallow_major_bearish_long_inside_range() {
         let last = candle(2128.67, 2158.07, 2127.61, 2144.9);
@@ -195,14 +183,12 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(should_block_low_volume_inside_range_long_entry(
             &last,
             &values,
             &range_config()
         ));
     }
-
     #[test]
     fn allows_deeper_major_bearish_retracement_inside_range() {
         let last = candle(2128.67, 2158.07, 2127.61, 2144.9);
@@ -224,14 +210,12 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(!should_block_low_volume_inside_range_long_entry(
             &last,
             &values,
             &range_config()
         ));
     }
-
     #[test]
     fn allows_average_volume_inside_range() {
         let last = candle(2128.67, 2158.07, 2127.61, 2144.9);
@@ -253,14 +237,12 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(!should_block_low_volume_inside_range_long_entry(
             &last,
             &values,
             &range_config()
         ));
     }
-
     #[test]
     fn allows_volume_expansion_inside_narrow_bollinger_range() {
         let last = candle(2128.67, 2158.07, 2127.61, 2144.9);
@@ -277,14 +259,12 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(!should_block_low_volume_inside_range_entry(
             &last,
             &values,
             &range_config()
         ));
     }
-
     #[test]
     fn applies_configured_volume_profile_reasons() {
         let last = candle(100.0, 105.0, 95.0, 104.0);
@@ -303,15 +283,12 @@ mod tests {
             block_low_volume_above_value_area_entry: true,
             ..EntryBlockConfig::default()
         };
-
         apply_entry_block_reasons(&mut signal, &config, &last, &values, None);
-
         assert_eq!(
             signal.filter_reasons,
             vec![LOW_VOLUME_ABOVE_VALUE_AREA_ENTRY_REASON.to_string()]
         );
     }
-
     #[test]
     fn allows_close_outside_bollinger_range() {
         let last = candle(2148.0, 2188.0, 2140.0, 2162.0);
@@ -328,14 +305,12 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(!should_block_low_volume_inside_range_entry(
             &last,
             &values,
             &range_config()
         ));
     }
-
     #[test]
     fn blocks_long_entry_below_value_area() {
         let values = VegasIndicatorSignalValue {
@@ -345,10 +320,8 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(should_block_opposite_value_area_entry(true, &values));
     }
-
     #[test]
     fn blocks_short_entry_above_value_area() {
         let values = VegasIndicatorSignalValue {
@@ -358,10 +331,8 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(should_block_opposite_value_area_entry(false, &values));
     }
-
     #[test]
     fn allows_direction_aligned_value_area_breakout() {
         let long_values = VegasIndicatorSignalValue {
@@ -378,14 +349,12 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(!should_block_opposite_value_area_entry(true, &long_values));
         assert!(!should_block_opposite_value_area_entry(
             false,
             &short_values
         ));
     }
-
     #[test]
     fn blocks_low_volume_node_above_value_area() {
         let values = VegasIndicatorSignalValue {
@@ -396,10 +365,8 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(should_block_low_volume_above_value_area_entry(&values));
     }
-
     #[test]
     fn allows_high_volume_node_above_value_area() {
         let values = VegasIndicatorSignalValue {
@@ -411,10 +378,8 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(!should_block_low_volume_above_value_area_entry(&values));
     }
-
     #[test]
     fn blocks_short_inside_low_volume_node() {
         let values = VegasIndicatorSignalValue {
@@ -425,7 +390,6 @@ mod tests {
             },
             ..VegasIndicatorSignalValue::default()
         };
-
         assert!(should_block_short_inside_low_volume_node_entry(
             false, &values
         ));

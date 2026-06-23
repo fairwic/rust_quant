@@ -5,7 +5,6 @@ fn local_service_health_script_passes_bash_syntax_check() {
         .arg(script_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
@@ -14,7 +13,6 @@ fn local_service_health_script_passes_bash_syntax_check() {
 }
 fn local_service_health_script_is_read_only_and_avoids_live_exchange_state() {
     let script = read_script();
-
     assert!(
         script.contains("HEALTH_CHECK_BINANCE:=false"),
         "Binance checks must be opt-in and disabled by default"
@@ -82,18 +80,15 @@ fn local_service_health_json_output_is_machine_readable_and_redacted() {
         .env("BINANCE_API_SECRET", "binance-secret")
         .output()
         .expect("health script should run");
-
     assert!(
         output.status.success(),
         "json health check should exit successfully without strict mode:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["output"], "json");
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["database_checks"], "true");
@@ -149,13 +144,11 @@ fn local_service_health_json_output_is_machine_readable_and_redacted() {
         );
     }
 }
-
 #[test]
 fn local_service_health_runbook_documents_read_only_and_opt_in_checks() {
     let path = runbook_path();
     let docs = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-
     assert!(docs.contains("check_local_service_health.sh"));
     assert!(docs.contains("HEALTH_CHECK_OUTPUT=json"));
     assert!(docs.contains("HEALTH_CHECK_WORKER_STALE_SECS"));
@@ -184,13 +177,11 @@ fn local_service_health_runbook_documents_read_only_and_opt_in_checks() {
     assert!(docs.contains("不调用 Binance signed/account/order/position endpoint"));
     assert!(docs.contains("不触碰 LINKUSDT"));
 }
-
 #[test]
 fn local_service_health_runbook_documents_cross_service_aggregator_contract() {
     let path = runbook_path();
     let docs = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-
     assert!(docs.contains("Cross-Service Read-Only Aggregator Contract"));
     assert!(docs.contains("check_full_product_health.sh"));
     assert!(docs.contains("FULL_PRODUCT_HEALTH_LOCAL_JSON_PATH"));
@@ -274,13 +265,11 @@ fn local_service_health_runbook_documents_cross_service_aggregator_contract() {
     assert!(docs.contains("trade_record_id"));
     assert!(docs.contains("request_id"));
 }
-
 #[test]
 fn full_product_health_admin_ci_handoff_documents_command_matrix_and_boundaries() {
     let path = full_product_admin_ci_handoff_path();
     let docs = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-
     for heading in [
         "Default CI Safe",
         "Read-Only DB Opt-In",
@@ -293,7 +282,6 @@ fn full_product_health_admin_ci_handoff_documents_command_matrix_and_boundaries(
             "handoff guide should contain heading {heading}"
         );
     }
-
     for command in [
         "FULL_PRODUCT_HEALTH_CI_RUN_LOCAL_HEALTH=false",
         "FULL_PRODUCT_HEALTH_CI_MARKDOWN_PATH=/tmp/full-product-health-ci/full-product-health.md",
@@ -315,14 +303,13 @@ fn full_product_health_admin_ci_handoff_documents_command_matrix_and_boundaries(
         "./scripts/dev/render_full_product_health_markdown.sh",
         "./scripts/dev/smoke_publish_full_product_health_admin_ingest_contract.sh",
         "FULL_PRODUCT_HEALTH_ARTIFACT_SET_FULL_REPORT_PATH=docs/dev/full_product_health_examples/full-product-health.json",
-        "./scripts/dev/run_binance_live_eth_micro_order_smoke.sh",
+        "cargo run -q -p rust-quant-cli --bin binance_eth_micro_live_validation",
     ] {
         assert!(
             docs.contains(command),
             "handoff guide should document command or env {command}"
         );
     }
-
     for boundary in [
         "no-env",
         "no-service",
@@ -351,13 +338,11 @@ fn full_product_health_admin_ci_handoff_documents_command_matrix_and_boundaries(
         );
     }
 }
-
 #[test]
 fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_mapping_and_safety() {
     let path = full_product_admin_frontend_contract_path();
     let docs = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-
     for heading in [
         "Admin / Frontend Consumption Contract",
         "Primary Artifacts",
@@ -373,7 +358,6 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
             "Admin/frontend contract should contain heading {heading}"
         );
     }
-
     for field in [
         "summary.overall_status",
         "section_statuses",
@@ -400,7 +384,6 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
             "Admin/frontend contract should document stable field {field}"
         );
     }
-
     for mapping in [
         "`ok` -> green/pass",
         "`warn` -> amber/review",
@@ -417,7 +400,6 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
             "Admin/frontend contract should document mapping {mapping}"
         );
     }
-
     for not_ready in [
         "`summary.overall_status != \"ok\"`",
         "`section_statuses.* == \"warn\"`",
@@ -438,7 +420,6 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
             "Admin/frontend contract should list non-ready condition {not_ready}"
         );
     }
-
     for safety in [
         "must not read `.env`",
         "must not call local services",
@@ -459,7 +440,6 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
             "Admin/frontend contract should document safety rule {safety}"
         );
     }
-
     for artifact in [
         "full-product-health-summary.json",
         "full-product-health.json",
@@ -475,13 +455,11 @@ fn full_product_health_admin_frontend_consumption_contract_documents_ui_ready_ma
         );
     }
 }
-
 #[test]
 fn full_product_health_latest_stored_artifact_api_contract_documents_safe_response_and_readiness() {
     let path = full_product_admin_frontend_contract_path();
     let docs = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-
     for field in [
         "GET `/admin/quant/full-product-health/latest`",
         "`artifactSetId`",
@@ -500,7 +478,6 @@ fn full_product_health_latest_stored_artifact_api_contract_documents_safe_respon
             "stored artifact API contract should document response field {field}"
         );
     }
-
     for safety in [
         "handler must not shell out",
         "handler must not read `.env`",
@@ -516,13 +493,11 @@ fn full_product_health_latest_stored_artifact_api_contract_documents_safe_respon
         );
     }
 }
-
 #[test]
 fn full_product_health_stored_artifact_contract_documents_index_hashes_sla_and_retention() {
     let path = full_product_admin_frontend_contract_path();
     let docs = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-
     for heading in [
         "Stored Artifact Storage Model",
         "Storage Index",
@@ -535,7 +510,6 @@ fn full_product_health_stored_artifact_contract_documents_index_hashes_sla_and_r
             "stored artifact contract should document heading {heading}"
         );
     }
-
     for field in [
         "`artifactSetId`",
         "`storedAt`",
@@ -555,7 +529,6 @@ fn full_product_health_stored_artifact_contract_documents_index_hashes_sla_and_r
             "stored artifact index should document field {field}"
         );
     }
-
     for operator_field in [
         "`operatorMetadata.generatedBy`",
         "`operatorMetadata.triggerType`",
@@ -568,7 +541,6 @@ fn full_product_health_stored_artifact_contract_documents_index_hashes_sla_and_r
             "stored artifact index should document operator metadata {operator_field}"
         );
     }
-
     for rule in [
         "latest valid artifact set",
         "at least 30 days",
@@ -582,13 +554,11 @@ fn full_product_health_stored_artifact_contract_documents_index_hashes_sla_and_r
         );
     }
 }
-
 #[test]
 fn full_product_health_stored_artifact_contract_documents_url_auth_and_redaction() {
     let path = full_product_admin_frontend_contract_path();
     let docs = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-
     for heading in [
         "URL Authorization",
         "Validation Finding Redaction",
@@ -599,7 +569,6 @@ fn full_product_health_stored_artifact_contract_documents_url_auth_and_redaction
             "stored artifact contract should document heading {heading}"
         );
     }
-
     for url_rule in [
         "`markdownUrl` and `fullArtifactUrl` are authorized download URLs",
         "short-lived",
@@ -613,7 +582,6 @@ fn full_product_health_stored_artifact_contract_documents_url_auth_and_redaction
             "stored artifact URL authorization should document rule {url_rule}"
         );
     }
-
     for finding_rule in [
         "validation findings only return `code`, `artifact`, `field`, and `marker`",
         "must not return source text",
@@ -629,7 +597,6 @@ fn full_product_health_stored_artifact_contract_documents_url_auth_and_redaction
             "stored artifact redaction should document finding rule {finding_rule}"
         );
     }
-
     for handler_rule in [
         "handler must not accept direct file paths from request parameters",
         "handler must not shell out",
@@ -645,7 +612,6 @@ fn full_product_health_stored_artifact_contract_documents_url_auth_and_redaction
             "stored artifact handler acceptance should document rule {handler_rule}"
         );
     }
-
     for forbidden in [
         "/fapi/v1/order",
         "/fapi/v2/account",
@@ -660,13 +626,11 @@ fn full_product_health_stored_artifact_contract_documents_url_auth_and_redaction
         );
     }
 }
-
 #[test]
 fn admin_recovery_action_guardrails_document_initial_action_and_redaction_contract() {
     let path = admin_recovery_action_guardrails_path();
     let docs = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-
     for heading in [
         "Admin Recovery Action Guardrails",
         "Non-Goals And Hard Boundaries",
@@ -684,7 +648,6 @@ fn admin_recovery_action_guardrails_document_initial_action_and_redaction_contra
             "recovery guardrail doc should contain heading {heading}"
         );
     }
-
     for action_class in [
         "read_only",
         "guarded_recovery",
@@ -696,7 +659,6 @@ fn admin_recovery_action_guardrails_document_initial_action_and_redaction_contra
             "recovery guardrail doc should define action class {action_class}"
         );
     }
-
     for requirement in [
         "reason",
         "impact_objects",
@@ -712,7 +674,6 @@ fn admin_recovery_action_guardrails_document_initial_action_and_redaction_contra
             "recovery guardrail doc should require {requirement}"
         );
     }
-
     for initial_action in [
         "notification_retry",
         "task_retry",
@@ -728,7 +689,6 @@ fn admin_recovery_action_guardrails_document_initial_action_and_redaction_contra
             "recovery guardrail doc should define initial action {initial_action}"
         );
     }
-
     for redacted in [
         ".env",
         "database_url",
@@ -750,7 +710,6 @@ fn admin_recovery_action_guardrails_document_initial_action_and_redaction_contra
             "recovery guardrail doc should list redaction or blocked marker {redacted}"
         );
     }
-
     for live_boundary in [
         "OPEN_LIVE_ORDER_PRESENT",
         "live_order_not_closed",
@@ -765,7 +724,6 @@ fn admin_recovery_action_guardrails_document_initial_action_and_redaction_contra
             "recovery guardrail doc should define live boundary {live_boundary}"
         );
     }
-
     for forbidden in [
         "/fapi/v1/order",
         "/fapi/v2/account",
@@ -780,13 +738,11 @@ fn admin_recovery_action_guardrails_document_initial_action_and_redaction_contra
         );
     }
 }
-
 #[test]
 fn admin_recovery_workbench_disabled_preview_contract_documents_server_acceptance_conditions() {
     let path = admin_recovery_action_guardrails_path();
     let docs = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-
     for heading in [
         "Disabled And Read-Only Preview Server Contract",
         "Server Acceptance Conditions",
@@ -796,7 +752,6 @@ fn admin_recovery_workbench_disabled_preview_contract_documents_server_acceptanc
             "recovery workbench contract should contain heading {heading}"
         );
     }
-
     for requirement in [
         "GET preview endpoints are read-only",
         "`enabled: false`",

@@ -10,7 +10,6 @@ fn full_product_health_docs_expose_operator_safe_payment_fixture_commands() {
     let schema_doc = fs::read_to_string(&schema_doc_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_doc_path.display(), error));
     let combined = format!("{handoff}\n{runbook}\n{schema_doc}");
-
     for required in [
         "payment-entitlement-health-skipped.json",
         "payment-entitlement-health-query-failed.json",
@@ -48,18 +47,15 @@ fn full_product_health_payment_artifact_smoke_script_passes_bash_syntax_check() 
         .arg(full_product_payment_artifact_smoke_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
-
 #[test]
 fn full_product_health_payment_artifact_smoke_is_explicit_file_only_and_no_env() {
     let script = read_full_product_payment_artifact_smoke_script();
-
     assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH"));
@@ -114,7 +110,6 @@ fn full_product_health_payment_artifact_smoke_is_explicit_file_only_and_no_env()
         );
     }
 }
-
 #[test]
 fn full_product_health_payment_artifact_smoke_generates_report_summary_and_validation() {
     let input_path =
@@ -125,7 +120,6 @@ fn full_product_health_payment_artifact_smoke_generates_report_summary_and_valid
     let markdown_path = output_dir.join("full-product-health.md");
     let validation_path = output_dir.join("full-product-health-validation.json");
     let publish_index_path = output_dir.join("full-product-health-publish-index.json");
-
     let output = Command::new(full_product_payment_artifact_smoke_path())
         .env("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_INPUT_PATH", &input_path)
         .env("FULL_PRODUCT_HEALTH_PAYMENT_SMOKE_OUTPUT_DIR", &output_dir)
@@ -135,14 +129,12 @@ fn full_product_health_payment_artifact_smoke_generates_report_summary_and_valid
         .env("DATABASE_URL", "postgres://user:secret@db/quant_core")
         .output()
         .expect("payment artifact smoke should run");
-
     assert!(
         output.status.success(),
         "payment artifact smoke should generate all artifacts:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("smoke manifest should be utf8");
     let manifest: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid smoke manifest json: {error}\n{stdout}"));
@@ -170,7 +162,6 @@ fn full_product_health_payment_artifact_smoke_generates_report_summary_and_valid
         publish_index_path.display().to_string()
     );
     assert_eq!(manifest["publish_index_status"], "current");
-
     let full_report_body = fs::read_to_string(&full_report_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", full_report_path.display(), error));
     let summary_body = fs::read_to_string(&summary_path)
@@ -182,7 +173,6 @@ fn full_product_health_payment_artifact_smoke_generates_report_summary_and_valid
     let publish_index_body = fs::read_to_string(&publish_index_path).unwrap_or_else(|error| {
         panic!("failed to read {}: {}", publish_index_path.display(), error)
     });
-
     let full_report: Value = serde_json::from_str(&full_report_body)
         .unwrap_or_else(|error| panic!("invalid full report json: {error}\n{full_report_body}"));
     let summary: Value = serde_json::from_str(&summary_body)
@@ -192,7 +182,6 @@ fn full_product_health_payment_artifact_smoke_generates_report_summary_and_valid
     let publish_index: Value = serde_json::from_str(&publish_index_body).unwrap_or_else(|error| {
         panic!("invalid publish index json: {error}\n{publish_index_body}")
     });
-
     assert_eq!(full_report["status"], "fail");
     assert_eq!(full_report["summary"]["wallet_payment_exception_count"], 2);
     assert_eq!(
@@ -244,7 +233,6 @@ fn full_product_health_payment_artifact_smoke_generates_report_summary_and_valid
             && markdown_body.contains("PAYMENT_ENTITLEMENT_BLOCKED"),
         "Markdown should expose operator playbook consumption path: {markdown_body}"
     );
-
     let combined_artifacts =
         format!("{full_report_body}\n{summary_body}\n{markdown_body}\n{validation_body}\n{publish_index_body}")
             .to_ascii_lowercase();
@@ -275,7 +263,6 @@ fn full_product_health_payment_artifact_smoke_generates_report_summary_and_valid
         );
     }
 }
-
 #[test]
 fn full_product_health_payment_artifact_smoke_rejects_missing_invalid_and_sensitive_json() {
     let missing_path =
@@ -285,7 +272,6 @@ fn full_product_health_payment_artifact_smoke_rejects_missing_invalid_and_sensit
         "full-product-health-payment-smoke-sensitive",
         r#"{"status":"ok","source":"operator","api_key":"must-not-pass"}"#,
     );
-
     for (path, expected_stderr) in [
         (&missing_path, "input file is missing"),
         (&invalid_path, "input JSON is invalid"),

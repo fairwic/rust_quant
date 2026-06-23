@@ -1,44 +1,36 @@
-use serde_json::json;
-use std::sync::Mutex;
-
 use rust_quant_cli::app::internal_server::{
     backtest_config_from_body, handle_backtest_run_body, handle_exchange_symbol_sync_body,
     latest_backtest_query_from_path, market_kline_query_from_path,
 };
-
+use serde_json::json;
+use std::sync::Mutex;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
-
 #[test]
 fn latest_backtest_query_parses_symbol_period_and_public_limit() {
     let query = latest_backtest_query_from_path(
         "/internal/backtests/latest?strategyKey=vegas&symbol=eth-usdt-swap&timeframe=4H&limit=500&includeSignalPayload=false",
     )
     .expect("query");
-
     assert_eq!(query.strategy_key, "vegas");
     assert_eq!(query.symbol, "ETH-USDT-SWAP");
     assert_eq!(query.timeframe, "4H");
     assert_eq!(query.limit, 100);
     assert!(!query.include_signal_payload);
 }
-
 #[test]
 fn latest_backtest_query_rejects_missing_symbol() {
     let error = latest_backtest_query_from_path(
         "/internal/backtests/latest?strategyKey=vegas&timeframe=4H",
     )
     .expect_err("missing symbol");
-
     assert_eq!(error, "symbol is required");
 }
-
 #[test]
 fn market_kline_query_accepts_interval_alias_and_clamps_limit() {
     let query = market_kline_query_from_path(
         "/internal/klines?symbol=eth-usdt-swap&interval=4H&limit=5000&before=1773115200&after=1577232000",
     )
     .expect("query");
-
     assert_eq!(query.exchange, "binance");
     assert_eq!(query.symbol, "ETH-USDT-SWAP");
     assert_eq!(query.timeframe, "4H");
@@ -46,15 +38,12 @@ fn market_kline_query_accepts_interval_alias_and_clamps_limit() {
     assert_eq!(query.before, Some(1_773_115_200));
     assert_eq!(query.after, Some(1_577_232_000));
 }
-
 #[test]
 fn market_kline_query_rejects_missing_symbol() {
     let error =
         market_kline_query_from_path("/internal/klines?timeframe=4H").expect_err("missing symbol");
-
     assert_eq!(error, "symbol is required");
 }
-
 #[tokio::test]
 async fn dry_run_backtest_request_returns_admin_adapter_fields() {
     let body = json!({
@@ -65,9 +54,7 @@ async fn dry_run_backtest_request_returns_admin_adapter_fields() {
         "dryRun": true
     })
     .to_string();
-
     let response = handle_backtest_run_body(body.as_bytes()).await;
-
     assert_eq!(response.status_code, 200);
     assert_eq!(response.body["status"], "dry_run");
     assert_eq!(response.body["strategyKey"], "vegas");
@@ -80,7 +67,6 @@ async fn dry_run_backtest_request_returns_admin_adapter_fields() {
         .and_then(|value| value.as_str())
         .is_some_and(|value| value.starts_with("rq-backtest-")));
 }
-
 #[tokio::test]
 async fn backtest_request_rejects_missing_required_fields() {
     let body = json!({
@@ -90,13 +76,10 @@ async fn backtest_request_rejects_missing_required_fields() {
         "dryRun": true
     })
     .to_string();
-
     let response = handle_backtest_run_body(body.as_bytes()).await;
-
     assert_eq!(response.status_code, 400);
     assert_eq!(response.body["error"], "symbol is required");
 }
-
 #[test]
 fn backtest_config_overrides_bound_manual_vegas_runs() {
     let body = json!({
@@ -110,9 +93,7 @@ fn backtest_config_overrides_bound_manual_vegas_runs() {
         "dryRun": false
     })
     .to_string();
-
     let config = backtest_config_from_body(body.as_bytes()).expect("config");
-
     assert_eq!(config.candle_limit, 360);
     assert_eq!(config.max_concurrent, 2);
     assert!(config.enable_specified_test_vegas);
@@ -120,7 +101,6 @@ fn backtest_config_overrides_bound_manual_vegas_runs() {
     assert!(!config.enable_specified_test_nwe);
     assert!(!config.enable_random_test_nwe);
 }
-
 #[test]
 fn backtest_config_accepts_admin_config_alias() {
     let body = json!({
@@ -134,14 +114,11 @@ fn backtest_config_accepts_admin_config_alias() {
         "dryRun": false
     })
     .to_string();
-
     let config = backtest_config_from_body(body.as_bytes()).expect("config");
-
     assert_eq!(config.candle_limit, 720);
     assert_eq!(config.max_concurrent, 3);
     assert!(config.enable_specified_test_vegas);
 }
-
 #[test]
 fn backtest_config_carries_strategy_config_id_for_exact_row_runs() {
     let body = json!({
@@ -155,26 +132,21 @@ fn backtest_config_carries_strategy_config_id_for_exact_row_runs() {
         "dryRun": false
     })
     .to_string();
-
     let config = backtest_config_from_body(body.as_bytes()).expect("config");
-
     assert_eq!(
         config.strategy_config_id.as_deref(),
         Some("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
     );
 }
-
 #[tokio::test]
 async fn exchange_symbol_sync_request_rejects_invalid_json_before_running_job() {
     let response = handle_exchange_symbol_sync_body(b"{not-json").await;
-
     assert_eq!(response.status_code, 400);
     assert!(response.body["error"]
         .as_str()
         .expect("error")
         .contains("invalid json body"));
 }
-
 #[tokio::test]
 async fn non_dry_run_backtest_requires_quant_core_database_url() {
     let _guard = ENV_LOCK.lock().expect("env lock");
@@ -182,7 +154,6 @@ async fn non_dry_run_backtest_requires_quant_core_database_url() {
     let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
     std::env::remove_var("QUANT_CORE_DATABASE_URL");
     std::env::remove_var("STRATEGY_CONFIG_SOURCE");
-
     let body = json!({
         "strategyKey": "vegas",
         "symbol": "ETH-USDT-SWAP",
@@ -190,19 +161,15 @@ async fn non_dry_run_backtest_requires_quant_core_database_url() {
         "dryRun": false
     })
     .to_string();
-
     let response = handle_backtest_run_body(body.as_bytes()).await;
-
     assert_eq!(response.status_code, 400);
     assert_eq!(
         response.body["error"],
         "QUANT_CORE_DATABASE_URL is required for non-dry-run backtests"
     );
-
     restore_env("QUANT_CORE_DATABASE_URL", original_quant_core.as_deref());
     restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
 }
-
 #[tokio::test]
 async fn non_dry_run_backtest_rejects_unknown_strategy_config_source() {
     let _guard = ENV_LOCK.lock().expect("env lock");
@@ -210,7 +177,6 @@ async fn non_dry_run_backtest_rejects_unknown_strategy_config_source() {
     let original_source = std::env::var("STRATEGY_CONFIG_SOURCE").ok();
     std::env::set_var("QUANT_CORE_DATABASE_URL", "postgres://quant-core");
     std::env::set_var("STRATEGY_CONFIG_SOURCE", "legacy_engine");
-
     let body = json!({
         "strategyKey": "vegas",
         "symbol": "ETH-USDT-SWAP",
@@ -218,19 +184,15 @@ async fn non_dry_run_backtest_rejects_unknown_strategy_config_source() {
         "dryRun": false
     })
     .to_string();
-
     let response = handle_backtest_run_body(body.as_bytes()).await;
-
     assert_eq!(response.status_code, 400);
     assert_eq!(
         response.body["error"],
         "STRATEGY_CONFIG_SOURCE=legacy_engine is not supported for non-dry-run backtests"
     );
-
     restore_env("QUANT_CORE_DATABASE_URL", original_quant_core.as_deref());
     restore_env("STRATEGY_CONFIG_SOURCE", original_source.as_deref());
 }
-
 fn restore_env(key: &str, value: Option<&str>) {
     if let Some(value) = value {
         std::env::set_var(key, value);

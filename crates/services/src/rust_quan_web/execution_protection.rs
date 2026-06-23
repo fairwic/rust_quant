@@ -1,15 +1,7 @@
-use anyhow::{anyhow, Result};
-use crypto_exc_all::{
-    CancelOrderRequest, ExchangeId, Instrument, Order, OrderAck, OrderSide, ProtectiveOrderQuery,
-    ProtectiveOrderRequest, ProtectiveOrderWorkingType,
-};
-use serde_json::{json, Value};
-use tokio::time::{sleep, Duration};
-
 use super::execution_audit::redact_error_message;
 use super::execution_order_filters::{
-    format_protective_stop_price_decimal, load_exchange_order_filters,
-    quantize_protective_stop_price, ExchangeOrderFilters,
+    format_order_size_decimal, format_protective_stop_price_decimal, load_exchange_order_filters,
+    quantize_order_size, quantize_protective_stop_price, ExchangeOrderFilters,
 };
 use super::execution_payload::{
     order_payload, parse_instrument, parse_protective_direction, protection_entry_price,
@@ -18,21 +10,47 @@ use super::execution_payload::{
 use super::execution_worker::ExecutionOrderTask;
 use crate::exchange::CryptoExcAllGateway;
 use crate::rust_quan_web::{ExecutionTask, ExecutionTaskReportRequest};
-
+use anyhow::{anyhow, Result};
+use crypto_exc_all::{
+    CancelOrderRequest, ExchangeId, Instrument, Order, OrderAck, OrderSide, ProtectiveOrderQuery,
+    ProtectiveOrderRequest, ProtectiveOrderWorkingType,
+};
+use rust_decimal::Decimal;
+use serde_json::{json, Value};
+use std::{future::Future, pin::Pin, str::FromStr};
+use tokio::time::{sleep, Duration};
+pub(super) trait ProtectiveOrderMutator {
+    /// 提供auditplaceprotective的集中实现，避免Web 商业链路调用方重复处理相同细节。
+    fn audit_place_protective<'a>(
+        &'a self,
+        task: &'a ExecutionTask,
+        gateway: &'a CryptoExcAllGateway,
+        exchange: ExchangeId,
+        request: ProtectiveOrderRequest,
+    ) -> Pin<Box<dyn Future<Output = crypto_exc_all::Result<OrderAck>> + Send + 'a>>;
+    /// 提供auditcancelprotective的集中实现，避免Web 商业链路调用方重复处理相同细节。
+    fn audit_cancel_protective<'a>(
+        &'a self,
+        task: &'a ExecutionTask,
+        gateway: &'a CryptoExcAllGateway,
+        exchange: ExchangeId,
+        request: CancelOrderRequest,
+    ) -> Pin<Box<dyn Future<Output = crypto_exc_all::Result<OrderAck>> + Send + 'a>>;
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProtectiveDirection {
     Long,
     Short,
 }
-
 impl ProtectiveDirection {
+    /// 提供转换为字符串的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub(super) fn as_str(self) -> &'static str {
         match self {
             ProtectiveDirection::Long => "long",
             ProtectiveDirection::Short => "short",
         }
     }
-
+    /// 提供protective订单side的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub(super) fn protective_order_side(self) -> OrderSide {
         match self {
             ProtectiveDirection::Long => OrderSide::Sell,
@@ -40,7 +58,6 @@ impl ProtectiveDirection {
         }
     }
 }
-
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ProtectionSyncOutcome {
@@ -52,14 +69,19 @@ pub(super) enum ProtectionSyncOutcome {
         reason: String,
         error_message: String,
     },
+    CancelFailed {
+        reason: String,
+        error_message: String,
+        cancel_client_order_id: Option<String>,
+    },
     Uncertain {
         reason: String,
         error_message: String,
     },
 }
-
 #[allow(dead_code)]
 impl ProtectionSyncOutcome {
+    /// 提供confirmed的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub(super) fn confirmed(
         protective_order_external_id: impl Into<String>,
         source: impl Into<String>,
@@ -69,14 +91,37 @@ impl ProtectionSyncOutcome {
             source: source.into(),
         }
     }
-
+    /// 封装失败，减少Web 商业链路调用方重复实现相同细节。
     pub(super) fn failed(reason: impl Into<String>, error_message: impl Into<String>) -> Self {
         Self::Failed {
             reason: reason.into(),
             error_message: error_message.into(),
         }
     }
-
+    /// 判断cancelfailed，给Web 商业链路流程提供布尔结果。
+    pub(super) fn cancel_failed(
+        reason: impl Into<String>,
+        error_message: impl Into<String>,
+    ) -> Self {
+        Self::CancelFailed {
+            reason: reason.into(),
+            error_message: error_message.into(),
+            cancel_client_order_id: None,
+        }
+    }
+    /// 判断cancelfailedwithclient订单ID，给Web 商业链路流程提供布尔结果。
+    pub(super) fn cancel_failed_with_client_order_id(
+        reason: impl Into<String>,
+        error_message: impl Into<String>,
+        cancel_client_order_id: Option<String>,
+    ) -> Self {
+        Self::CancelFailed {
+            reason: reason.into(),
+            error_message: error_message.into(),
+            cancel_client_order_id,
+        }
+    }
+    /// 提供uncertain的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub(super) fn uncertain(reason: impl Into<String>, error_message: impl Into<String>) -> Self {
         Self::Uncertain {
             reason: reason.into(),
@@ -84,7 +129,9 @@ impl ProtectionSyncOutcome {
         }
     }
 }
-
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 pub(super) fn attached_stop_loss_order_ack_outcome(
     order_task: &ExecutionOrderTask,
     ack: &OrderAck,
@@ -111,7 +158,6 @@ pub(super) fn attached_stop_loss_order_ack_outcome(
                     "place_order_attached_stop_loss_ack",
                 ));
             }
-
             Some(ProtectionSyncOutcome::failed(
                 "attached_stop_loss_ack_missing",
                 format!(
@@ -123,7 +169,7 @@ pub(super) fn attached_stop_loss_order_ack_outcome(
         ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => None,
     }
 }
-
+/// 提供attached止损亏损evidencepresent的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn attached_stop_loss_evidence_present(exchange: ExchangeId, value: &Value) -> bool {
     match value {
         Value::Object(fields) => fields.iter().any(|(key, value)| {
@@ -136,7 +182,7 @@ fn attached_stop_loss_evidence_present(exchange: ExchangeId, value: &Value) -> b
         _ => false,
     }
 }
-
+/// 提供attached止损亏损externalID的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn attached_stop_loss_external_id(
     exchange: ExchangeId,
     ack: &OrderAck,
@@ -146,7 +192,7 @@ fn attached_stop_loss_external_id(
         order.and_then(|order| attached_stop_loss_external_id_from_value(exchange, &order.raw))
     })
 }
-
+/// 提供attached止损亏损externalIDfrom值的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn attached_stop_loss_external_id_from_value(
     exchange: ExchangeId,
     value: &Value,
@@ -170,7 +216,6 @@ fn attached_stop_loss_external_id_from_value(
                     return Some(external_id);
                 }
             }
-
             fields
                 .values()
                 .find_map(|value| attached_stop_loss_external_id_from_value(exchange, value))
@@ -181,7 +226,7 @@ fn attached_stop_loss_external_id_from_value(
         _ => None,
     }
 }
-
+/// 提供objecthasdirectattached止损亏损evidence的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn object_has_direct_attached_stop_loss_evidence(
     exchange: ExchangeId,
     fields: &serde_json::Map<String, Value>,
@@ -190,7 +235,7 @@ fn object_has_direct_attached_stop_loss_evidence(
         attached_stop_loss_key_matches(exchange, key) && value_has_content(value)
     })
 }
-
+/// 封装字符串field来源object，减少Web 商业链路调用方重复实现相同细节。
 fn string_field_from_object(
     fields: &serde_json::Map<String, Value>,
     keys: &[&str],
@@ -204,7 +249,7 @@ fn string_field_from_object(
             .map(ToOwned::to_owned)
     })
 }
-
+/// 提供attached止损亏损keymatches的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn attached_stop_loss_key_matches(exchange: ExchangeId, key: &str) -> bool {
     let normalized = key.trim().to_ascii_lowercase().replace('_', "");
     match exchange {
@@ -217,7 +262,7 @@ fn attached_stop_loss_key_matches(exchange: ExchangeId, key: &str) -> bool {
         ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => false,
     }
 }
-
+/// 封装价值hascontent，减少Web 商业链路调用方重复实现相同细节。
 fn value_has_content(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -228,38 +273,46 @@ fn value_has_content(value: &Value) -> bool {
         Value::Object(fields) => !fields.is_empty() && fields.values().any(value_has_content),
     }
 }
-
 #[derive(Debug, Clone)]
 pub(super) struct ProtectionSyncContract {
+    /// 止损价格。
     pub(super) selected_stop_loss_price: f64,
+    /// 方向。
     direction: ProtectiveDirection,
+    /// 入场reference价格；为空时表示该过滤条件不启用。
     entry_reference_price: Option<f64>,
+    /// 止损价格。
     original_selected_stop_loss_price: Option<f64>,
 }
-
 const DEFAULT_PROTECTIVE_STOP_REBASE_RATIO: f64 = 0.02;
 const PROTECTIVE_ORDER_QUERY_ATTEMPTS: usize = 4;
 const PROTECTIVE_ORDER_QUERY_BACKOFF_MS: u64 = 250;
-
 #[derive(Debug, Clone)]
 pub(super) struct PrearmedProtectiveOrder {
+    /// 交易所名称。
     exchange: ExchangeId,
+    /// protection，用于记录交易或执行状态。
     protection: ProtectionSyncContract,
+    /// cancel请求，用于构建接口请求。
     cancel_request: CancelOrderRequest,
+    /// protective订单external ID。
     protective_order_external_id: String,
+    /// confirmation来源，用于记录交易或执行状态。
     confirmation_source: String,
 }
-
 impl PrearmedProtectiveOrder {
+    /// 判断cancel之后入口订单failure，给Web 商业链路流程提供布尔结果。
     pub(super) async fn cancel_after_main_order_failure(
         &self,
+        task: &ExecutionTask,
         gateway: &CryptoExcAllGateway,
+        mutator: &impl ProtectiveOrderMutator,
     ) -> crypto_exc_all::Result<OrderAck> {
-        gateway
-            .cancel_protective_order(self.exchange, self.cancel_request.clone())
+        mutator
+            .audit_cancel_protective(task, gateway, self.exchange, self.cancel_request.clone())
             .await
     }
-
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     pub(super) fn apply_after_main_order_report(&self, report: &mut ExecutionTaskReportRequest) {
         if report.order_status.trim().eq_ignore_ascii_case("FILLED") {
             self.apply_confirmed_to_filled_report(report);
@@ -272,7 +325,6 @@ impl PrearmedProtectiveOrder {
         {
             return;
         }
-
         let mut raw_payload = report
             .raw_payload_json
             .as_deref()
@@ -292,12 +344,11 @@ impl PrearmedProtectiveOrder {
         raw_payload["execution_status"] = json!(report.execution_status);
         report.raw_payload_json = Some(raw_payload.to_string());
     }
-
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     pub(super) fn apply_confirmed_to_filled_report(&self, report: &mut ExecutionTaskReportRequest) {
         if !report.order_status.trim().eq_ignore_ascii_case("FILLED") {
             return;
         }
-
         self.protection.apply_outcome_to_report(
             report,
             ProtectionSyncOutcome::confirmed(
@@ -318,7 +369,7 @@ impl PrearmedProtectiveOrder {
         raw_payload["execution_status"] = json!(report.execution_status);
         report.raw_payload_json = Some(raw_payload.to_string());
     }
-
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     pub(super) fn apply_main_order_failure_cancel_result(
         &self,
         report: &mut ExecutionTaskReportRequest,
@@ -332,7 +383,6 @@ impl PrearmedProtectiveOrder {
             result,
         );
     }
-
     pub(super) fn apply_pre_main_order_failure_cancel_result(
         &self,
         report: &mut ExecutionTaskReportRequest,
@@ -342,7 +392,7 @@ impl PrearmedProtectiveOrder {
     ) {
         self.apply_order_path_failure_cancel_result(report, failure_stage, failure_message, result);
     }
-
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     fn apply_order_path_failure_cancel_result(
         &self,
         report: &mut ExecutionTaskReportRequest,
@@ -372,7 +422,6 @@ impl PrearmedProtectiveOrder {
             "place_order_allowed": false,
             "repeat_open_order_allowed": false,
         });
-
         match result {
             Ok(ack) => {
                 cleanup["protective_order_cancelled"] = json!(true);
@@ -397,28 +446,25 @@ impl PrearmedProtectiveOrder {
                 ));
             }
         }
-
         raw_payload["prearmed_protection"] = cleanup;
         raw_payload["execution_status"] = json!(report.execution_status);
         report.raw_payload_json = Some(raw_payload.to_string());
     }
 }
-
 impl ProtectionSyncContract {
     pub(super) fn from_task(task: &ExecutionTask, order_side: &str) -> Option<Self> {
         Self::required_for_task(task, order_side).ok()
     }
-
     #[cfg(test)]
     pub(super) fn required(payload: Value, order_side: &str) -> Result<Self> {
         Self::required_from_payload(payload, order_side, false)
     }
-
+    /// 封装必需fortask，减少Web 商业链路调用方重复实现相同细节。
     fn required_for_task(task: &ExecutionTask, order_side: &str) -> Result<Self> {
         let payload = order_payload(&task.request_payload_json);
         Self::required_from_payload(payload, order_side, task.news_signal_id.is_some())
     }
-
+    /// 封装必需来源载荷，减少Web 商业链路调用方重复实现相同细节。
     fn required_from_payload(
         payload: Value,
         order_side: &str,
@@ -434,7 +480,6 @@ impl ProtectionSyncContract {
             Some(raw) => parse_protective_direction(&raw)?,
             None => parse_protective_direction(order_side)?,
         };
-
         Ok(Self {
             selected_stop_loss_price,
             direction,
@@ -443,7 +488,7 @@ impl ProtectionSyncContract {
             original_selected_stop_loss_price: None,
         })
     }
-
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     pub(super) fn apply_to_report(&self, report: &mut ExecutionTaskReportRequest) {
         self.apply_outcome_to_report(
             report,
@@ -453,7 +498,7 @@ impl ProtectionSyncContract {
             ),
         );
     }
-
+    /// 从外部输入转换为内部模型，隔离 Web 商业、会员和执行准备度 的字段适配细节。
     pub(super) fn from_task_result(
         report: &ExecutionTaskReportRequest,
         protection: Option<ProtectionSyncContract>,
@@ -465,7 +510,7 @@ impl ProtectionSyncContract {
             None
         }
     }
-
+    /// 提供rebased之后filled报告的集中实现，避免Web 商业链路调用方重复处理相同细节。
     fn rebased_after_filled_report(mut self, report: &ExecutionTaskReportRequest) -> Self {
         let Some(fill_price) = filled_average_price(report) else {
             return self;
@@ -477,7 +522,6 @@ impl ProtectionSyncContract {
         if !stop_would_immediately_trigger {
             return self;
         }
-
         let risk_ratio = self
             .entry_reference_price
             .and_then(|entry_price| {
@@ -501,10 +545,31 @@ impl ProtectionSyncContract {
             );
             self.selected_stop_loss_price = adjusted_stop_loss_price;
         }
-
         self
     }
-
+    /// 停止 Web 商业、会员和执行准备度 后台流程，确保退出时不留下未释放状态。
+    pub(super) fn stop_reset_for_order_task(
+        order_task: &ExecutionOrderTask,
+        selected_stop_loss_price: f64,
+    ) -> Result<Self> {
+        if !selected_stop_loss_price.is_finite() || selected_stop_loss_price <= 0.0 {
+            return Err(anyhow!("take-profit stop reset price must be positive"));
+        }
+        let direction = match order_task.side {
+            OrderSide::Buy => ProtectiveDirection::Long,
+            OrderSide::Sell => ProtectiveDirection::Short,
+        };
+        Ok(Self {
+            selected_stop_loss_price,
+            direction,
+            entry_reference_price: None,
+            original_selected_stop_loss_price: order_task
+                .attached_stop_loss_price
+                .as_deref()
+                .and_then(|value| value.trim().parse::<f64>().ok()),
+        })
+    }
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     pub(super) fn apply_outcome_to_report(
         &self,
         report: &mut ExecutionTaskReportRequest,
@@ -515,7 +580,6 @@ impl ProtectionSyncContract {
             .as_deref()
             .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
             .unwrap_or_else(|| json!({}));
-
         let mut protection_sync = json!({
             "contract_version": "v2",
             "exchange": report.exchange.trim().to_ascii_lowercase(),
@@ -533,7 +597,6 @@ impl ProtectionSyncContract {
                 json!(original_selected_stop_loss_price);
             protection_sync["stop_loss_rebased_after_fill"] = json!(true);
         }
-
         match outcome {
             ProtectionSyncOutcome::Confirmed {
                 protective_order_external_id,
@@ -563,6 +626,25 @@ impl ProtectionSyncContract {
                     .as_str()
                     .map(ToOwned::to_owned);
             }
+            ProtectionSyncOutcome::CancelFailed {
+                reason,
+                error_message,
+                cancel_client_order_id,
+            } => {
+                protection_sync["status"] = json!("protective_cancel_failed");
+                protection_sync["reason"] = json!(reason);
+                protection_sync["protective_order_confirmed"] = json!(false);
+                protection_sync["exchange_protective_order_supported"] = json!(true);
+                protection_sync["manual_cleanup_required"] = json!(true);
+                protection_sync["error_message"] = json!(error_message);
+                if let Some(cancel_client_order_id) = cancel_client_order_id {
+                    protection_sync["cancel_client_order_id"] = json!(cancel_client_order_id);
+                }
+                report.execution_status = "protective_cancel_failed".to_string();
+                report.error_message = protection_sync["error_message"]
+                    .as_str()
+                    .map(ToOwned::to_owned);
+            }
             ProtectionSyncOutcome::Uncertain {
                 reason,
                 error_message,
@@ -578,20 +660,19 @@ impl ProtectionSyncContract {
                     .map(ToOwned::to_owned);
             }
         }
-
         raw_payload["protection_sync"] = protection_sync;
         raw_payload["execution_status"] = json!(report.execution_status);
         report.raw_payload_json = Some(raw_payload.to_string());
     }
 }
-
+/// 提供protective订单modefor交易所的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn protective_order_mode_for_exchange(exchange: &str) -> &'static str {
     match exchange.trim().to_ascii_lowercase().as_str() {
         "okx" | "bitget" => "attached_stop_loss",
         _ => "independent_stop_market",
     }
 }
-
+/// 提供filledaverage价格的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn filled_average_price(report: &ExecutionTaskReportRequest) -> Option<f64> {
     let qty = report.filled_qty?;
     let quote = report.filled_quote?;
@@ -601,7 +682,7 @@ fn filled_average_price(report: &ExecutionTaskReportRequest) -> Option<f64> {
         None
     }
 }
-
+/// 停止 Web 商业、会员和执行准备度 后台流程，确保退出时不留下未释放状态。
 fn stop_loss_risk_ratio(
     entry_price: f64,
     selected_stop_loss_price: f64,
@@ -625,7 +706,7 @@ fn stop_loss_risk_ratio(
         None
     }
 }
-
+/// 构建 Web 商业、会员和执行准备度 请求或响应载荷，把字段组装规则集中在同一入口。
 pub(super) fn build_protective_stop_market_order_request(
     order_task: &ExecutionOrderTask,
     protection: &ProtectionSyncContract,
@@ -645,18 +726,43 @@ pub(super) fn build_protective_stop_market_order_request(
     .with_working_type(ProtectiveOrderWorkingType::MarkPrice)
     .with_price_protect(true)
     .with_client_order_id(protective_order_client_id(order_task.task_id));
-
     if let Some(position_side) = order_task.position_side.as_deref() {
         request = request.with_position_side(position_side);
     }
-
     Ok(request)
 }
 
+fn fixed_size_prearmed_protective_order_request(
+    order_task: &ExecutionOrderTask,
+    protection: &ProtectionSyncContract,
+    filters: &ExchangeOrderFilters,
+    mut request: ProtectiveOrderRequest,
+) -> Result<ProtectiveOrderRequest> {
+    if order_task.exchange != ExchangeId::Binance {
+        return Ok(request);
+    }
+    let requested_size = Decimal::from_str(order_task.size.trim())
+        .map_err(|_| anyhow!("prearmed protective order size must be decimal"))?;
+    let entry_price = protection
+        .entry_reference_price
+        .ok_or_else(|| anyhow!("prearmed protective order entry reference price is required"))?;
+    let last_price = Decimal::from_f64_retain(entry_price)
+        .filter(|value| *value > Decimal::ZERO)
+        .ok_or_else(|| {
+            anyhow!("prearmed protective order entry reference price must be positive")
+        })?;
+    let quantity = quantize_order_size(requested_size, last_price, filters, true)?;
+    request.close_position = None;
+    request.quantity = Some(format_order_size_decimal(quantity, filters));
+    Ok(request)
+}
+/// 提供prearmprotective订单ifrequired的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) async fn prearm_protective_order_if_required(
     gateway: &CryptoExcAllGateway,
     order_task: &ExecutionOrderTask,
     protection: Option<&ProtectionSyncContract>,
+    task: &ExecutionTask,
+    mutator: &impl ProtectiveOrderMutator,
 ) -> std::result::Result<
     Option<PrearmedProtectiveOrder>,
     (ProtectionSyncContract, ProtectionSyncOutcome),
@@ -667,7 +773,6 @@ pub(super) async fn prearm_protective_order_if_required(
     if !exchange_uses_prearmed_protective_order(order_task.exchange) {
         return Ok(None);
     }
-
     let filters = match load_exchange_order_filters(order_task.exchange, &order_task.symbol).await {
         Ok(Some(filters)) => filters,
         Ok(None) => {
@@ -706,6 +811,20 @@ pub(super) async fn prearm_protective_order_if_required(
             ));
         }
     };
+    let request = match fixed_size_prearmed_protective_order_request(
+        order_task, protection, &filters, request,
+    ) {
+        Ok(request) => request,
+        Err(error) => {
+            return Err((
+                protection.clone(),
+                ProtectionSyncOutcome::failed(
+                    "build_prearmed_protective_order_request",
+                    error.to_string(),
+                ),
+            ));
+        }
+    };
     let cancel_request = match prearmed_protection_cancel_request_from_request(&request) {
         Ok(request) => request,
         Err(error) => {
@@ -718,7 +837,9 @@ pub(super) async fn prearm_protective_order_if_required(
             ));
         }
     };
-    let outcome = place_and_confirm_protective_order(gateway, order_task.exchange, request).await;
+    let outcome =
+        place_and_confirm_protective_order(gateway, order_task.exchange, request, task, mutator)
+            .await;
     match outcome {
         ProtectionSyncOutcome::Confirmed {
             protective_order_external_id,
@@ -730,17 +851,50 @@ pub(super) async fn prearm_protective_order_if_required(
             protective_order_external_id,
             confirmation_source: source,
         })),
+        ProtectionSyncOutcome::Uncertain {
+            reason,
+            error_message,
+        } => {
+            let cancel_result = mutator
+                .audit_cancel_protective(task, gateway, order_task.exchange, cancel_request.clone())
+                .await;
+            let outcome = match cancel_result {
+                Ok(_) => ProtectionSyncOutcome::failed(
+                    reason,
+                    format!(
+                        "{error_message}; unconfirmed prearmed protective order was cancelled before main order"
+                    ),
+                ),
+                Err(error) if is_protective_order_already_absent(&error) => {
+                    ProtectionSyncOutcome::failed(
+                        reason,
+                        format!(
+                            "{error_message}; unconfirmed prearmed protective order was already absent before main order"
+                        ),
+                    )
+                }
+                Err(error) => ProtectionSyncOutcome::cancel_failed_with_client_order_id(
+                    "cancel_unconfirmed_prearmed_protective_order",
+                    format!(
+                        "prearmed protective order was placed but not confirmed active; protective cancel failed before main order: {}; original protection confirmation error: {error_message}",
+                        redact_error_message(error.to_string())
+                    ),
+                    cancel_request.client_order_id.clone(),
+                ),
+            };
+            Err((protection.clone(), outcome))
+        }
         other => Err((protection.clone(), other)),
     }
 }
-
+/// 提供交易所usesprearmedprotective订单的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) fn exchange_uses_prearmed_protective_order(exchange: ExchangeId) -> bool {
     match exchange {
         ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => true,
         ExchangeId::Okx | ExchangeId::Bitget => false,
     }
 }
-
+/// 提供prearmed保护cancelrequestfromrequest的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) fn prearmed_protection_cancel_request_from_request(
     request: &ProtectiveOrderRequest,
 ) -> Result<CancelOrderRequest> {
@@ -750,13 +904,12 @@ pub(super) fn prearmed_protection_cancel_request_from_request(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("prearmed protective order requires a stable client order id"))?;
-
     Ok(CancelOrderRequest::by_client_order_id(
         request.instrument.clone(),
         client_order_id.to_string(),
     ))
 }
-
+/// 提供protective订单结果to同步结果的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) fn protective_order_result_to_sync_outcome(
     result: crypto_exc_all::Result<OrderAck>,
 ) -> ProtectionSyncOutcome {
@@ -768,15 +921,20 @@ pub(super) fn protective_order_result_to_sync_outcome(
         Err(error) => ProtectionSyncOutcome::failed("place_protective_order", error.to_string()),
     }
 }
-
+/// 提供placeandconfirmprotective订单的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) async fn place_and_confirm_protective_order(
     gateway: &CryptoExcAllGateway,
     exchange: ExchangeId,
     request: ProtectiveOrderRequest,
+    task: &ExecutionTask,
+    mutator: &impl ProtectiveOrderMutator,
 ) -> ProtectionSyncOutcome {
     let instrument = request.instrument.clone();
     let request_client_order_id = request.client_order_id.clone();
-    let ack = match gateway.place_protective_order(exchange, request).await {
+    let ack = match mutator
+        .audit_place_protective(task, gateway, exchange, request)
+        .await
+    {
         Ok(ack) => ack,
         Err(error) => return protective_order_result_to_sync_outcome(Err(error)),
     };
@@ -790,11 +948,14 @@ pub(super) async fn place_and_confirm_protective_order(
             return ProtectionSyncOutcome::uncertain("query_protective_order", error.to_string());
         }
     };
-
     let mut last_absent_error = None;
     for attempt in 0..PROTECTIVE_ORDER_QUERY_ATTEMPTS {
         for query in queries.iter().cloned() {
-            match gateway.protective_order(exchange, query).await {
+            match CryptoExcAllGateway::with_signed_read_only_scope(
+                gateway.protective_order(exchange, query),
+            )
+            .await
+            {
                 Ok(order) => return protective_order_query_to_sync_outcome(Ok(order)),
                 Err(error) if is_protective_order_already_absent(&error) => {
                     last_absent_error = Some(error.to_string());
@@ -807,7 +968,6 @@ pub(super) async fn place_and_confirm_protective_order(
                 }
             }
         }
-
         if attempt + 1 < PROTECTIVE_ORDER_QUERY_ATTEMPTS {
             sleep(Duration::from_millis(
                 PROTECTIVE_ORDER_QUERY_BACKOFF_MS * (attempt as u64 + 1),
@@ -815,7 +975,6 @@ pub(super) async fn place_and_confirm_protective_order(
             .await;
         }
     }
-
     ProtectionSyncOutcome::uncertain(
         "query_protective_order",
         format!(
@@ -825,7 +984,7 @@ pub(super) async fn place_and_confirm_protective_order(
         ),
     )
 }
-
+/// 提供protective订单查询candidatesfromack的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) fn protective_order_query_candidates_from_ack(
     instrument: &Instrument,
     ack: &OrderAck,
@@ -856,12 +1015,11 @@ pub(super) fn protective_order_query_candidates_from_ack(
     if !queries.is_empty() {
         return Ok(queries);
     }
-
     Err(anyhow!(
         "protective order ack did not include order id or client order id"
     ))
 }
-
+/// 提供protective订单查询to同步结果的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) fn protective_order_query_to_sync_outcome(
     result: crypto_exc_all::Result<Order>,
 ) -> ProtectionSyncOutcome {
@@ -897,18 +1055,17 @@ pub(super) fn protective_order_query_to_sync_outcome(
         ),
     }
 }
-
+/// 提供protective订单statusisactive的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn protective_order_status_is_active(status: &str) -> bool {
     matches!(
         status.trim().to_ascii_uppercase().as_str(),
         "NEW" | "WORKING" | "ACCEPTED"
     )
 }
-
 fn protective_order_client_id(task_id: i64) -> String {
     format!("rq-sl-{task_id}")
 }
-
+/// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub(super) fn apply_post_close_protection_cancel_result(
     report: &mut ExecutionTaskReportRequest,
     result: crypto_exc_all::Result<OrderAck>,
@@ -918,7 +1075,6 @@ pub(super) fn apply_post_close_protection_cancel_result(
         .as_deref()
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .unwrap_or_else(|| json!({}));
-
     match result {
         Ok(ack) => {
             raw_payload["post_close_protection_cancel"] = json!({
@@ -949,12 +1105,11 @@ pub(super) fn apply_post_close_protection_cancel_result(
             }
         }
     }
-
     raw_payload["execution_status"] = json!(report.execution_status);
     report.raw_payload_json = Some(raw_payload.to_string());
 }
-
-fn is_protective_order_already_absent(error: &crypto_exc_all::Error) -> bool {
+/// 判断 Web 商业、会员和执行准备度 条件是否满足，给上层流程提供布尔决策。
+pub(super) fn is_protective_order_already_absent(error: &crypto_exc_all::Error) -> bool {
     matches!(
         error,
         crypto_exc_all::Error::Api {
@@ -964,6 +1119,5 @@ fn is_protective_order_already_absent(error: &crypto_exc_all::Error) -> bool {
         } if matches!(code.as_str(), "-2011" | "-2013")
     )
 }
-
 #[cfg(test)]
 mod tests;

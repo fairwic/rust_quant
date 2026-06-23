@@ -4,11 +4,9 @@ mod tests {
     use rust_quant_domain::entities::{
         MarketRankEventType, MarketRankSnapshot, MarketRankTechnicalSnapshot,
     };
-
     #[test]
     fn build_rank_velocity_event_uses_scanner_product_contract() {
         let detected_at = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
-
         let event = build_rank_velocity_event(
             "ETH-USDT-SWAP",
             "15分钟",
@@ -21,7 +19,6 @@ mod tests {
             detected_at,
             MarketRankTechnicalCapture::not_requested(),
         );
-
         assert_eq!(event.exchange, "okx");
         assert_eq!(event.symbol, "ETH-USDT-SWAP");
         assert_eq!(event.event_type, MarketRankEventType::RankVelocity);
@@ -36,11 +33,9 @@ mod tests {
         assert_eq!(event.source, "scanner_service");
         assert_eq!(event.notification_state, "pending");
     }
-
     #[test]
     fn build_top_list_event_uses_entry_and_exit_contract() {
         let detected_at = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
-
         let entry = build_top_list_event(
             "SOL-USDT-SWAP",
             true,
@@ -60,7 +55,6 @@ mod tests {
         assert_eq!(entry.current_price, Some(Decimal::new(180, 1)));
         assert_eq!(entry.price_direction, "unknown");
         assert_eq!(entry.source, "scanner_service");
-
         let exit = build_top_list_event(
             "DOGE-USDT-SWAP",
             false,
@@ -81,17 +75,14 @@ mod tests {
         assert_eq!(exit.price_direction, "down");
         assert_eq!(exit.notification_state, "pending");
     }
-
     #[test]
     fn build_market_rank_technical_snapshot_detects_4h_ma_and_ema_breakout() {
         let snapshot_at = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
         let mut closes = vec![100.0; 20];
         closes.push(120.0);
-
         let snapshot: MarketRankTechnicalSnapshot =
             build_market_rank_technical_snapshot_from_closes("4h", 20, &closes, snapshot_at)
                 .expect("enough candles should build technical snapshot");
-
         assert_eq!(snapshot.timeframe, "4h");
         assert_eq!(snapshot.period, 20);
         assert_eq!(snapshot.close_price, Decimal::new(120, 0));
@@ -103,17 +94,13 @@ mod tests {
         assert!(snapshot.ma_distance_pct > Decimal::ZERO);
         assert!(snapshot.ema_distance_pct > Decimal::ZERO);
     }
-
     #[test]
     fn build_market_rank_technical_snapshot_requires_enough_closes() {
         let snapshot_at = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
-
         let snapshot =
             build_market_rank_technical_snapshot_from_closes("4h", 20, &[100.0; 19], snapshot_at);
-
         assert!(snapshot.is_none());
     }
-
     #[test]
     fn rank_history_from_persisted_snapshots_restores_prices_by_scan_time() {
         let first_scan = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
@@ -140,9 +127,7 @@ mod tests {
                 created_at: second_scan,
             },
         ];
-
         let history = rank_history_from_persisted_snapshots(rows);
-
         assert_eq!(history.len(), 2);
         assert_eq!(
             history[0].prices.get("XLM-USDT-SWAP"),
@@ -153,11 +138,9 @@ mod tests {
             Some(&Decimal::new(126, 3))
         );
     }
-
     #[test]
     fn market_velocity_episode_stale_cutoff_uses_rank_history_window() {
         let now = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
-
         assert_eq!(
             market_velocity_episode_stale_before(now),
             now - Duration::hours(MARKET_RANK_HISTORY_RETENTION_HOURS)

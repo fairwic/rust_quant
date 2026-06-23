@@ -5,11 +5,11 @@ use reqwest::Client;
 use rust_quant_domain::entities::{ExchangeSymbol, ExchangeSymbolListingEvent};
 use rust_quant_domain::traits::ExchangeSymbolRepository;
 use rust_quant_infrastructure::repositories::PostgresExchangeSymbolRepository;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use std::time::Duration;
-
 const BINANCE_EXCHANGE: &str = "binance";
 const OKX_EXCHANGE: &str = "okx";
 const BITGET_EXCHANGE: &str = "bitget";
@@ -23,7 +23,8 @@ const PERPETUAL_CONTRACT_TYPE: &str = "PERPETUAL";
 const MAJOR_LISTING_EXCHANGES: &[&str] = &["binance", "okx"];
 const DEFAULT_EXCHANGE_SYMBOL_SYNC_SOURCES: &[&str] =
     &["binance", "okx", "bitget", "bybit", "gate"];
-
+/// 封装当前函数，减少行情数据调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 pub fn parse_exchange_symbol_sync_sources(input: Option<&str>) -> Result<Vec<String>> {
     let raw_sources = input.unwrap_or("binance okx bitget bybit gate");
     let mut sources = Vec::new();
@@ -36,21 +37,19 @@ pub fn parse_exchange_symbol_sync_sources(input: Option<&str>) -> Result<Vec<Str
             sources.push(normalized.to_string());
         }
     }
-
     if sources.is_empty() {
         return Err(anyhow!("exchange symbol sync sources must not be empty"));
     }
-
     Ok(sources)
 }
-
+/// 提供默认交易所交易对同步sources的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn default_exchange_symbol_sync_sources() -> Vec<String> {
     DEFAULT_EXCHANGE_SYMBOL_SYNC_SOURCES
         .iter()
         .map(|source| (*source).to_string())
         .collect()
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 pub fn normalize_exchange_symbol_sync_source(source: &str) -> Result<&'static str> {
     match source.trim().to_ascii_lowercase().as_str() {
         "" => Err(anyhow!("empty exchange symbol sync source")),
@@ -66,44 +65,41 @@ pub fn normalize_exchange_symbol_sync_source(source: &str) -> Result<&'static st
         )),
     }
 }
-
 #[async_trait]
 pub trait BinanceExchangeInfoProvider: Send + Sync {
     async fn fetch_usdm_exchange_info(&self) -> Result<Value>;
-
     async fn fetch_okx_swap_instruments(&self) -> Result<Value> {
         Err(anyhow!("OKX swap instruments provider is not configured"))
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_bitget_usdt_futures_contracts(&self) -> Result<Value> {
         Err(anyhow!(
             "Bitget USDT futures contracts provider is not configured"
         ))
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_bybit_linear_instruments(&self) -> Result<Value> {
         Err(anyhow!(
             "Bybit linear instruments provider is not configured"
         ))
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_gate_usdt_futures_contracts(&self) -> Result<Value> {
         Err(anyhow!(
             "Gate USDT futures contracts provider is not configured"
         ))
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_kucoin_futures_contracts(&self) -> Result<Value> {
         Err(anyhow!(
             "KuCoin futures contracts provider is not configured"
         ))
     }
 }
-
 pub struct LiveBinanceExchangeInfoProvider;
-
 #[async_trait]
 impl BinanceExchangeInfoProvider for LiveBinanceExchangeInfoProvider {
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_usdm_exchange_info(&self) -> Result<Value> {
         let market = BinanceMarket::new_public().context("create Binance public market client")?;
         market
@@ -111,79 +107,102 @@ impl BinanceExchangeInfoProvider for LiveBinanceExchangeInfoProvider {
             .await
             .map_err(|error| anyhow!("fetch Binance exchangeInfo failed: {}", error))
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_okx_swap_instruments(&self) -> Result<Value> {
         fetch_json("https://www.okx.com/api/v5/public/instruments?instType=SWAP")
             .await
             .context("fetch OKX swap instruments failed")
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_bitget_usdt_futures_contracts(&self) -> Result<Value> {
         fetch_json("https://api.bitget.com/api/v2/mix/market/contracts?productType=USDT-FUTURES")
             .await
             .context("fetch Bitget USDT futures contracts failed")
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_bybit_linear_instruments(&self) -> Result<Value> {
         fetch_json("https://api.bybit.com/v5/market/instruments-info?category=linear")
             .await
             .context("fetch Bybit linear instruments failed")
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_gate_usdt_futures_contracts(&self) -> Result<Value> {
         fetch_json("https://api.gateio.ws/api/v4/futures/usdt/contracts")
             .await
             .context("fetch Gate USDT futures contracts failed")
     }
-
+    /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
     async fn fetch_kucoin_futures_contracts(&self) -> Result<Value> {
         fetch_json(&kucoin_futures_contracts_url())
             .await
             .context("fetch KuCoin futures contracts failed")
     }
 }
-
 pub struct StaticExchangeInfoProvider {
+    /// 载荷。
     payload: Value,
 }
-
 impl StaticExchangeInfoProvider {
     pub fn new(payload: Value) -> Self {
         Self { payload }
     }
 }
-
 #[async_trait]
 impl BinanceExchangeInfoProvider for StaticExchangeInfoProvider {
     async fn fetch_usdm_exchange_info(&self) -> Result<Value> {
         Ok(self.payload.clone())
     }
 }
-
 pub struct ExchangeSymbolSyncService {
+    /// repo，用于行情、K 线或市场扫描。
     repo: Arc<dyn ExchangeSymbolRepository>,
+    /// 提供方。
     provider: Arc<dyn BinanceExchangeInfoProvider>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct MajorExchangeListingSignal {
+    /// 交易所名称。
     pub exchange: String,
+    /// 类型标识。
     pub market_type: String,
+    /// 交易所交易对，用于记录新闻或情报分析结果。
     pub exchange_symbol: String,
+    /// normalized交易对，用于记录新闻或情报分析结果。
     pub normalized_symbol: String,
+    /// 基础资产，用于记录新闻或情报分析结果。
     pub base_asset: String,
+    /// 计价资产，用于记录新闻或情报分析结果。
     pub quote_asset: String,
+    /// 列表数据。
     pub prior_non_mainstream_exchanges: Vec<String>,
 }
-
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
+pub struct ExchangeSymbolAssetIconCandidate {
+    /// 交易所名称。
+    pub exchange: String,
+    /// 类型标识。
+    pub market_type: String,
+    /// 交易对或资产符号。
+    pub symbol: String,
+    /// 基础资产，用于行情、K 线或市场扫描。
+    pub base_asset: String,
+    /// 计价资产，用于行情、K 线或市场扫描。
+    pub quote_asset: String,
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExchangeSymbolSyncReport {
+    /// persisted数量。
     pub persisted_count: usize,
+    /// firstseen数量。
     pub first_seen_count: usize,
+    /// 列表数据。
     pub major_listing_signals: Vec<MajorExchangeListingSignal>,
+    /// 列表数据。
+    pub asset_candidates: Vec<ExchangeSymbolAssetIconCandidate>,
 }
-
 impl ExchangeSymbolSyncService {
+    /// 从外部输入转换为内部模型，隔离 行情与市场数据 的字段适配细节。
     pub async fn from_env() -> Result<Self> {
         let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
             .context("exchange symbol sync requires QUANT_CORE_DATABASE_URL")?;
@@ -192,27 +211,25 @@ impl ExchangeSymbolSyncService {
             .connect(&database_url)
             .await
             .context("connect quant_core Postgres for exchange symbol sync")?;
-
         Ok(Self {
             repo: Arc::new(PostgresExchangeSymbolRepository::new(pool)),
             provider: Arc::new(LiveBinanceExchangeInfoProvider),
         })
     }
-
     pub fn with_repo_and_provider(
         repo: Arc<dyn ExchangeSymbolRepository>,
         provider: Arc<dyn BinanceExchangeInfoProvider>,
     ) -> Self {
         Self { repo, provider }
     }
-
+    /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
     pub async fn sync_binance_usdm_perpetual_symbols(&self) -> Result<usize> {
         Ok(self
             .sync_binance_usdm_perpetual_symbols_with_report()
             .await?
             .persisted_count)
     }
-
+    /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
     pub async fn sync_binance_usdm_perpetual_symbols_with_report(
         &self,
     ) -> Result<ExchangeSymbolSyncReport> {
@@ -224,7 +241,7 @@ impl ExchangeSymbolSyncService {
         let symbols = Self::parse_binance_usdm_exchange_info(&payload)?;
         self.persist_symbols_with_report(symbols).await
     }
-
+    /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
     pub async fn sync_okx_swap_symbols_with_report(&self) -> Result<ExchangeSymbolSyncReport> {
         let payload = self
             .provider
@@ -234,7 +251,7 @@ impl ExchangeSymbolSyncService {
         let symbols = Self::parse_okx_swap_instruments(&payload)?;
         self.persist_symbols_with_report(symbols).await
     }
-
+    /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
     pub async fn sync_bitget_usdt_futures_symbols_with_report(
         &self,
     ) -> Result<ExchangeSymbolSyncReport> {
@@ -246,7 +263,7 @@ impl ExchangeSymbolSyncService {
         let symbols = Self::parse_bitget_usdt_futures_contracts(&payload)?;
         self.persist_symbols_with_report(symbols).await
     }
-
+    /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
     pub async fn sync_bybit_linear_symbols_with_report(&self) -> Result<ExchangeSymbolSyncReport> {
         let payload = self
             .provider
@@ -256,7 +273,7 @@ impl ExchangeSymbolSyncService {
         let symbols = Self::parse_bybit_linear_instruments(&payload)?;
         self.persist_symbols_with_report(symbols).await
     }
-
+    /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
     pub async fn sync_gate_usdt_futures_symbols_with_report(
         &self,
     ) -> Result<ExchangeSymbolSyncReport> {
@@ -268,7 +285,7 @@ impl ExchangeSymbolSyncService {
         let symbols = Self::parse_gate_usdt_futures_contracts(&payload)?;
         self.persist_symbols_with_report(symbols).await
     }
-
+    /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
     pub async fn sync_kucoin_futures_symbols_with_report(
         &self,
     ) -> Result<ExchangeSymbolSyncReport> {
@@ -280,7 +297,7 @@ impl ExchangeSymbolSyncService {
         let symbols = Self::parse_kucoin_futures_contracts(&payload)?;
         self.persist_symbols_with_report(symbols).await
     }
-
+    /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
     pub async fn sync_source_with_report(&self, source: &str) -> Result<ExchangeSymbolSyncReport> {
         match normalize_exchange_symbol_sync_source(source)? {
             "binance" => self.sync_binance_usdm_perpetual_symbols_with_report().await,
@@ -294,15 +311,15 @@ impl ExchangeSymbolSyncService {
             )),
         }
     }
-
+    /// 持久化 行情与市场数据 结果，保证写入路径和幂等语义集中处理。
     async fn persist_symbols_with_report(
         &self,
         symbols: Vec<ExchangeSymbol>,
     ) -> Result<ExchangeSymbolSyncReport> {
         let count = symbols.len();
+        let asset_candidates = exchange_symbol_asset_icon_candidates(&symbols);
         let first_seen = self.repo.record_first_seen_many(&symbols).await?;
         self.repo.upsert_many(symbols).await?;
-
         let mut major_listing_signals = Vec::new();
         for listing in &first_seen {
             let history = self
@@ -329,20 +346,19 @@ impl ExchangeSymbolSyncService {
                 major_listing_signals.push(signal);
             }
         }
-
         Ok(ExchangeSymbolSyncReport {
             persisted_count: count,
             first_seen_count: first_seen.len(),
             major_listing_signals,
+            asset_candidates,
         })
     }
-
+    /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
     pub fn parse_binance_usdm_exchange_info(payload: &Value) -> Result<Vec<ExchangeSymbol>> {
         let symbols = payload
             .get("symbols")
             .and_then(Value::as_array)
             .context("Binance exchangeInfo missing symbols array")?;
-
         let mut rows = Vec::new();
         for symbol in symbols {
             let contract_type = symbol
@@ -352,12 +368,10 @@ impl ExchangeSymbolSyncService {
             if contract_type != PERPETUAL_CONTRACT_TYPE {
                 continue;
             }
-
             let exchange_symbol = required_str(symbol, "symbol")?.to_string();
             let base_asset = required_str(symbol, "baseAsset")?.to_uppercase();
             let quote_asset = required_str(symbol, "quoteAsset")?.to_uppercase();
             let status = required_str(symbol, "status")?.to_string();
-
             let mut row = ExchangeSymbol::new(
                 BINANCE_EXCHANGE.to_string(),
                 PERPETUAL_MARKET_TYPE.to_string(),
@@ -367,7 +381,6 @@ impl ExchangeSymbolSyncService {
                 quote_asset,
                 status,
             );
-
             row.contract_type = Some(contract_type.to_string());
             row.price_precision = symbol
                 .get("pricePrecision")
@@ -385,16 +398,14 @@ impl ExchangeSymbolSyncService {
             row.raw_payload = Some(symbol.clone());
             rows.push(row);
         }
-
         Ok(rows)
     }
-
+    /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
     pub fn parse_okx_swap_instruments(payload: &Value) -> Result<Vec<ExchangeSymbol>> {
         let instruments = payload
             .get("data")
             .and_then(Value::as_array)
             .context("OKX instruments missing data array")?;
-
         let mut rows = Vec::new();
         for instrument in instruments {
             let inst_type = instrument
@@ -404,7 +415,6 @@ impl ExchangeSymbolSyncService {
             if inst_type != "SWAP" {
                 continue;
             }
-
             let exchange_symbol =
                 required_str_for(instrument, "instId", "OKX instruments")?.to_string();
             let base_asset =
@@ -412,7 +422,6 @@ impl ExchangeSymbolSyncService {
             let quote_asset =
                 required_str_for(instrument, "quoteCcy", "OKX instruments")?.to_uppercase();
             let status = required_str_for(instrument, "state", "OKX instruments")?.to_string();
-
             let mut row = ExchangeSymbol::new(
                 OKX_EXCHANGE.to_string(),
                 PERPETUAL_MARKET_TYPE.to_string(),
@@ -430,16 +439,14 @@ impl ExchangeSymbolSyncService {
             row.raw_payload = Some(instrument.clone());
             rows.push(row);
         }
-
         Ok(rows)
     }
-
+    /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
     pub fn parse_bitget_usdt_futures_contracts(payload: &Value) -> Result<Vec<ExchangeSymbol>> {
         let contracts = payload
             .get("data")
             .and_then(Value::as_array)
             .context("Bitget contracts missing data array")?;
-
         let mut rows = Vec::new();
         for contract in contracts {
             let exchange_symbol =
@@ -450,7 +457,6 @@ impl ExchangeSymbolSyncService {
                 required_str_for(contract, "quoteCoin", "Bitget contracts")?.to_uppercase();
             let status =
                 required_str_for(contract, "symbolStatus", "Bitget contracts")?.to_string();
-
             let mut row = ExchangeSymbol::new(
                 BITGET_EXCHANGE.to_string(),
                 PERPETUAL_MARKET_TYPE.to_string(),
@@ -470,17 +476,15 @@ impl ExchangeSymbolSyncService {
             row.raw_payload = Some(contract.clone());
             rows.push(row);
         }
-
         Ok(rows)
     }
-
+    /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
     pub fn parse_bybit_linear_instruments(payload: &Value) -> Result<Vec<ExchangeSymbol>> {
         let instruments = payload
             .get("result")
             .and_then(|result| result.get("list"))
             .and_then(Value::as_array)
             .context("Bybit instruments missing result.list array")?;
-
         let mut rows = Vec::new();
         for instrument in instruments {
             let quote_asset =
@@ -488,18 +492,15 @@ impl ExchangeSymbolSyncService {
             if quote_asset != "USDT" {
                 continue;
             }
-
             let contract_type = optional_string(instrument, "contractType").unwrap_or_default();
             if !contract_type.to_ascii_lowercase().contains("perpetual") {
                 continue;
             }
-
             let exchange_symbol =
                 required_str_for(instrument, "symbol", "Bybit instruments")?.to_string();
             let base_asset =
                 required_str_for(instrument, "baseCoin", "Bybit instruments")?.to_uppercase();
             let status = required_str_for(instrument, "status", "Bybit instruments")?.to_string();
-
             let mut row = ExchangeSymbol::new(
                 BYBIT_EXCHANGE.to_string(),
                 PERPETUAL_MARKET_TYPE.to_string(),
@@ -522,22 +523,19 @@ impl ExchangeSymbolSyncService {
             row.raw_payload = Some(instrument.clone());
             rows.push(row);
         }
-
         Ok(rows)
     }
-
+    /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
     pub fn parse_gate_usdt_futures_contracts(payload: &Value) -> Result<Vec<ExchangeSymbol>> {
         let contracts = payload
             .as_array()
             .context("Gate contracts missing root array")?;
-
         let mut rows = Vec::new();
         for contract in contracts {
             let contract_type = optional_string(contract, "contract_type").unwrap_or_default();
             if contract_type.eq_ignore_ascii_case("stocks") {
                 continue;
             }
-
             let exchange_symbol = required_str_for(contract, "name", "Gate contracts")?.to_string();
             let Some((base_asset, quote_asset)) = exchange_symbol
                 .split_once('_')
@@ -549,7 +547,6 @@ impl ExchangeSymbolSyncService {
                 continue;
             }
             let status = required_str_for(contract, "status", "Gate contracts")?.to_string();
-
             let mut row = ExchangeSymbol::new(
                 GATE_EXCHANGE.to_string(),
                 PERPETUAL_MARKET_TYPE.to_string(),
@@ -568,16 +565,14 @@ impl ExchangeSymbolSyncService {
             row.raw_payload = Some(contract.clone());
             rows.push(row);
         }
-
         Ok(rows)
     }
-
+    /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
     pub fn parse_kucoin_futures_contracts(payload: &Value) -> Result<Vec<ExchangeSymbol>> {
         let contracts = payload
             .get("data")
             .and_then(Value::as_array)
             .context("KuCoin contracts missing data array")?;
-
         let mut rows = Vec::new();
         for contract in contracts {
             let quote_asset =
@@ -585,13 +580,11 @@ impl ExchangeSymbolSyncService {
             if quote_asset != "USDT" {
                 continue;
             }
-
             let exchange_symbol =
                 required_str_for(contract, "symbol", "KuCoin contracts")?.to_string();
             let base_asset =
                 required_str_for(contract, "baseCurrency", "KuCoin contracts")?.to_uppercase();
             let status = required_str_for(contract, "status", "KuCoin contracts")?.to_string();
-
             let mut row = ExchangeSymbol::new(
                 KUCOIN_EXCHANGE.to_string(),
                 PERPETUAL_MARKET_TYPE.to_string(),
@@ -608,17 +601,15 @@ impl ExchangeSymbolSyncService {
             row.raw_payload = Some(contract.clone());
             rows.push(row);
         }
-
         Ok(rows)
     }
-
     pub fn detect_major_exchange_listing(
         new_listing: &ExchangeSymbolListingEvent,
         history: &[ExchangeSymbolListingEvent],
     ) -> Option<MajorExchangeListingSignal> {
         Self::detect_major_exchange_listing_with_current_symbols(new_listing, history, &[])
     }
-
+    /// 封装识别majorexchangelistingwithcurrentsymbols，减少行情数据调用方重复实现相同细节。
     pub fn detect_major_exchange_listing_with_current_symbols(
         new_listing: &ExchangeSymbolListingEvent,
         history: &[ExchangeSymbolListingEvent],
@@ -627,7 +618,6 @@ impl ExchangeSymbolSyncService {
         if !is_major_listing_exchange(&new_listing.exchange) {
             return None;
         }
-
         let mut prior_non_mainstream_exchanges = Vec::new();
         for event in history.iter().filter(|event| {
             event
@@ -646,7 +636,6 @@ impl ExchangeSymbolSyncService {
             }
             push_unique_exchange(&mut prior_non_mainstream_exchanges, &event.exchange);
         }
-
         for symbol in current_symbols.iter().filter(|symbol| {
             symbol
                 .base_asset
@@ -664,11 +653,9 @@ impl ExchangeSymbolSyncService {
             }
             push_unique_exchange(&mut prior_non_mainstream_exchanges, &symbol.exchange);
         }
-
         if prior_non_mainstream_exchanges.is_empty() {
             return None;
         }
-
         Some(MajorExchangeListingSignal {
             exchange: normalize_exchange(&new_listing.exchange),
             market_type: new_listing.market_type.clone(),
@@ -680,43 +667,58 @@ impl ExchangeSymbolSyncService {
         })
     }
 }
-
+/// 提供交易所交易对资产图标candidates的集中实现，避免行情数据调用方重复处理相同细节。
+fn exchange_symbol_asset_icon_candidates(
+    symbols: &[ExchangeSymbol],
+) -> Vec<ExchangeSymbolAssetIconCandidate> {
+    symbols
+        .iter()
+        .map(|symbol| ExchangeSymbolAssetIconCandidate {
+            exchange: normalize_exchange(&symbol.exchange),
+            market_type: symbol.market_type.trim().to_ascii_lowercase(),
+            symbol: symbol.normalized_symbol.trim().to_ascii_uppercase(),
+            base_asset: symbol.base_asset.trim().to_ascii_uppercase(),
+            quote_asset: symbol.quote_asset.trim().to_ascii_uppercase(),
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
 fn normalize_exchange(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
-
+/// 判断 行情与市场数据 条件是否满足，给上层流程提供布尔决策。
 fn is_major_listing_exchange(exchange: &str) -> bool {
     let exchange = normalize_exchange(exchange);
     MAJOR_LISTING_EXCHANGES
         .iter()
         .any(|candidate| candidate == &exchange)
 }
-
+/// 把数据加入 行情与市场数据 聚合结果，保持集合构造逻辑集中。
 fn push_unique_exchange(exchanges: &mut Vec<String>, raw_exchange: &str) {
     let exchange = normalize_exchange(raw_exchange);
     if !exchange.is_empty() && !exchanges.iter().any(|existing| existing == &exchange) {
         exchanges.push(exchange);
     }
 }
-
 fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
     required_str_for(value, key, "Binance exchangeInfo")
 }
-
+/// 封装必需strfor，减少行情数据调用方重复实现相同细节。
 fn required_str_for<'a>(value: &'a Value, key: &str, context: &str) -> Result<&'a str> {
     value
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("missing {} field: {}", context, key))
 }
-
+/// 提供optionalstring的集中实现，避免行情数据调用方重复处理相同细节。
 fn optional_string(value: &Value, key: &str) -> Option<String> {
     value
         .get(key)
         .and_then(Value::as_str)
         .map(ToString::to_string)
 }
-
+/// 提供optionalscalarstring的集中实现，避免行情数据调用方重复处理相同细节。
 fn optional_scalar_string(value: &Value, key: &str) -> Option<String> {
     let raw = value.get(key)?;
     raw.as_str()
@@ -725,14 +727,14 @@ fn optional_scalar_string(value: &Value, key: &str) -> Option<String> {
         .or_else(|| raw.as_u64().map(|value| value.to_string()))
         .or_else(|| raw.as_f64().map(|value| trim_float_string(value)))
 }
-
+/// 提供optionali32的集中实现，避免行情数据调用方重复处理相同细节。
 fn optional_i32(value: &Value, key: &str) -> Option<i32> {
     value
         .get(key)
         .and_then(|raw| raw.as_i64().or_else(|| raw.as_str()?.parse::<i64>().ok()))
         .and_then(|value| i32::try_from(value).ok())
 }
-
+/// 提供trimfloatstring的集中实现，避免行情数据调用方重复处理相同细节。
 fn trim_float_string(value: f64) -> String {
     let value = value.to_string();
     value
@@ -740,7 +742,7 @@ fn trim_float_string(value: f64) -> String {
         .map(ToString::to_string)
         .unwrap_or(value)
 }
-
+/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn normalize_swap_symbol(
     base_asset: &str,
     quote_asset: &str,
@@ -757,7 +759,7 @@ fn normalize_swap_symbol(
         quote_asset.to_ascii_uppercase()
     )
 }
-
+/// 解析过滤值，把外部输入转换成行情数据可用的内部值。
 fn filter_value(symbol: &Value, filter_type: &str, field_names: &[&str]) -> Option<String> {
     let filters = symbol.get("filters")?.as_array()?;
     let filter = filters.iter().find(|candidate| {
@@ -767,7 +769,6 @@ fn filter_value(symbol: &Value, filter_type: &str, field_names: &[&str]) -> Opti
             .map(|value| value == filter_type)
             .unwrap_or(false)
     })?;
-
     field_names.iter().find_map(|field_name| {
         filter
             .get(*field_name)
@@ -775,7 +776,7 @@ fn filter_value(symbol: &Value, filter_type: &str, field_names: &[&str]) -> Opti
             .map(ToString::to_string)
     })
 }
-
+/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_json(url: &str) -> Result<Value> {
     Client::builder()
         .timeout(Duration::from_secs(20))
@@ -788,7 +789,7 @@ async fn fetch_json(url: &str) -> Result<Value> {
         .await
         .map_err(Into::into)
 }
-
+/// 提供kucoinfuturescontractsURL的集中实现，避免行情数据调用方重复处理相同细节。
 fn kucoin_futures_contracts_url() -> String {
     let base_url = std::env::var(KUCOIN_FUTURES_BASE_URL_ENV)
         .ok()

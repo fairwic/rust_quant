@@ -1,3 +1,4 @@
+/// 提供仓位summaries的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn position_summaries(positions: &[Position]) -> Vec<Value> {
     positions
         .iter()
@@ -16,7 +17,7 @@ fn position_summaries(positions: &[Position]) -> Vec<Value> {
         })
         .collect()
 }
-
+/// 提供fillsummaries的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn fill_summaries(fills: &[Fill]) -> Vec<Value> {
     fills
         .iter()
@@ -37,7 +38,7 @@ fn fill_summaries(fills: &[Fill]) -> Vec<Value> {
         })
         .collect()
 }
-
+/// 提供开仓订单summaries的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn open_order_summaries(open_orders: &[Order]) -> Vec<Value> {
     open_orders
         .iter()
@@ -56,31 +57,31 @@ fn open_order_summaries(open_orders: &[Order]) -> Vec<Value> {
         })
         .collect()
 }
-
+/// 封装非零轴positioncount，减少Web 商业链路调用方重复实现相同细节。
 fn non_zero_position_count(positions: &[Position]) -> usize {
     positions
         .iter()
         .filter(|position| positive_decimal_text(&position.size))
         .count()
 }
-
+/// 提供active开仓订单数量的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn active_open_order_count(open_orders: &[Order]) -> usize {
     open_orders
         .iter()
         .filter(|order| active_open_order_status(order.status.as_deref()))
         .count()
 }
-
 fn same_exchange_symbol(left: &str, right: &str) -> bool {
     left.trim().eq_ignore_ascii_case(right.trim())
 }
-
+/// 提供交易所account快照来源ref的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn exchange_account_snapshot_source_ref(config: &ReconciliationSnapshotCheckConfig) -> String {
     let account_hash = anonymized_account_ref(&config.buyer_email);
     let credential_ref = config
         .credential_ref
         .as_deref()
         .map(safe_source_ref_component)
+        .or_else(|| config.credential_id.map(|id| format!("web_api_credential_id_{id}")))
         .unwrap_or_else(|| "cred_unknown".to_string());
     format!(
         "rq:acct:v1:ex={}:acct={}:cred={}:combo={}:task={}:sym={}",
@@ -92,13 +93,13 @@ fn exchange_account_snapshot_source_ref(config: &ReconciliationSnapshotCheckConf
         safe_source_ref_component(&config.symbol),
     )
 }
-
+/// 提供anonymizedaccountref的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn anonymized_account_ref(raw: &str) -> String {
     let normalized = raw.trim().to_ascii_lowercase();
     let digest = rust_quant_common::utils::function::sha256(&normalized);
     format!("email_sha256_{}", &digest[..16])
 }
-
+/// 提供safe来源refcomponent的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn safe_source_ref_component(raw: &str) -> String {
     let component: String = raw
         .trim()
@@ -112,18 +113,18 @@ fn safe_source_ref_component(raw: &str) -> String {
         component
     }
 }
-
+/// 提供trimmedoptional的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn trimmed_optional(raw: Option<&str>) -> Option<String> {
     raw.map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
 }
-
+/// 提供小数option的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn decimal_option(raw: Option<&str>) -> Option<f64> {
     raw.and_then(|value| value.trim().parse::<f64>().ok())
         .filter(|value| value.is_finite())
 }
-
+/// 提供余额equityUSDT的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn balance_equity_usdt(balance: &Balance, wallet_balance: Option<f64>) -> Option<f64> {
     raw_number_field(
         &balance.raw,
@@ -138,7 +139,7 @@ fn balance_equity_usdt(balance: &Balance, wallet_balance: Option<f64>) -> Option
         }
     })
 }
-
+/// 提供rawnumber字段的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn raw_number_field(value: &Value, keys: &[&str]) -> Option<f64> {
     keys.iter().find_map(|key| {
         let raw = value.get(*key)?;
@@ -147,24 +148,23 @@ fn raw_number_field(value: &Value, keys: &[&str]) -> Option<f64> {
             .filter(|parsed| parsed.is_finite())
     })
 }
-
+/// 提供multiplyoptional的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn multiply_optional(left: Option<f64>, right: Option<f64>) -> Option<f64> {
     let value = left? * right?;
     value
         .is_finite()
         .then_some((value * 100_000_000.0).round() / 100_000_000.0)
 }
-
+/// 提供timestampmillistonaivestring的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn timestamp_millis_to_naive_string(timestamp_millis: u64) -> Option<String> {
     let timestamp_millis = i64::try_from(timestamp_millis).ok()?;
     chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_millis)
         .map(|value| web_naive_datetime_string(value.naive_utc()))
 }
-
 fn web_naive_datetime_string(value: chrono::NaiveDateTime) -> String {
     value.format("%Y-%m-%dT%H:%M:%S").to_string()
 }
-
+/// 解析归一化fillside，把外部输入转换成Web 商业链路可用的内部值。
 fn normalized_fill_side(fill: &Fill) -> Option<String> {
     fill.side
         .as_deref()
@@ -172,11 +172,10 @@ fn normalized_fill_side(fill: &Fill) -> Option<String> {
         .filter(|side| !side.is_empty())
         .map(str::to_ascii_lowercase)
 }
-
 fn positive_decimal_option(value: Option<&str>) -> bool {
     value.is_some_and(positive_decimal_text)
 }
-
+/// 提供小数textsequal的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn decimal_texts_equal(left: Option<&str>, right: Option<&str>) -> bool {
     let Some(left) = left else {
         return false;
@@ -192,14 +191,14 @@ fn decimal_texts_equal(left: Option<&str>, right: Option<&str>) -> bool {
     };
     left.is_finite() && right.is_finite() && (left - right).abs() < 1e-12
 }
-
+/// 提供positive小数text的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn positive_decimal_text(value: &str) -> bool {
     value
         .trim()
         .parse::<f64>()
         .is_ok_and(|parsed| parsed.is_finite() && parsed.abs() > 0.0)
 }
-
+/// 提供active开仓订单status的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn active_open_order_status(status: Option<&str>) -> bool {
     let normalized = status.unwrap_or_default().trim().to_ascii_lowercase();
     !matches!(

@@ -1,10 +1,12 @@
 use rust_quant_common::constants;
 use rust_quant_risk::order::SwapOrderEntity;
 use rust_quant_strategies::StrategyType;
-
 pub struct OrderSignal {
+    /// 交易所合约或现货交易对标识。
     pub inst_id: String,
+    /// 是否应该触发卖出。
     pub should_sell: bool,
+    /// 价格。
     pub price: f64,
 }
 use rust_quant_common::AppError;
@@ -23,21 +25,18 @@ use okx::dto::PositionSide;
 use okx::{Error, OkxAccount, OkxTrade};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
-
 /// [已优化] 配置化的风控参数
 pub struct OrderSizeConfig {
     /// 安全系数：实际使用最大可用量的百分比
     /// 默认 0.9 表示使用 90%
     pub safety_factor: f64,
-
     /// 最小下单量
     pub min_order_size: f64,
-
     /// 精度（小数位数）
     pub precision: u32,
 }
-
 impl Default for OrderSizeConfig {
+    /// 提供默认参数，保证 交易执行与风控 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             safety_factor: 0.9,  // 90% 安全边际
@@ -46,33 +45,86 @@ impl Default for OrderSizeConfig {
         }
     }
 }
-
 pub struct SwapOrderService {}
+const LEGACY_DIRECT_LIVE_ORDER_CONFIRM_ENV: &str = "LEGACY_DIRECT_LIVE_ORDER_CONFIRM";
+const LEGACY_DIRECT_LIVE_ORDER_CONFIRM_TOKEN: &str = "I_UNDERSTAND_LEGACY_DIRECT_LIVE_ORDERS";
 impl SwapOrderService {
     pub fn new() -> Self {
         Self {}
     }
 }
-
 impl Default for SwapOrderService {
     fn default() -> Self {
         Self::new()
     }
 }
-
 impl SwapOrderService {
+    /// 提供legacydirectlive交易所订单allowed的集中实现，避免交易执行调用方重复处理相同细节。
+    fn legacy_direct_live_exchange_order_allowed() -> bool {
+        let confirmation = std::env::var(LEGACY_DIRECT_LIVE_ORDER_CONFIRM_ENV).ok();
+        confirmation.as_deref().map(str::trim) == Some(LEGACY_DIRECT_LIVE_ORDER_CONFIRM_TOKEN)
+    }
+    /// 提供legacydirectlive交易所订单errormessage的集中实现，避免交易执行调用方重复处理相同细节。
+    fn legacy_direct_live_exchange_order_error_message() -> String {
+        format!(
+            "{}={} is required before using legacy rust_quant_execution SwapOrderService live mutations; use the quant_web execution worker path instead",
+            LEGACY_DIRECT_LIVE_ORDER_CONFIRM_ENV,
+            LEGACY_DIRECT_LIVE_ORDER_CONFIRM_TOKEN
+        )
+    }
+    /// 校验输入和运行前置条件，提前暴露 交易执行与风控 的不可执行原因。
+    fn ensure_legacy_direct_live_exchange_order_allowed() -> Result<(), AppError> {
+        if Self::legacy_direct_live_exchange_order_allowed() {
+            Ok(())
+        } else {
+            Err(AppError::Config(
+                Self::legacy_direct_live_exchange_order_error_message(),
+            ))
+        }
+    }
+    /// 校验输入和运行前置条件，提前暴露 交易执行与风控 的不可执行原因。
+    fn ensure_legacy_direct_live_exchange_order_allowed_sdk() -> Result<(), Error> {
+        if Self::legacy_direct_live_exchange_order_allowed() {
+            Ok(())
+        } else {
+            Err(Error::ConfigError(
+                Self::legacy_direct_live_exchange_order_error_message(),
+            ))
+        }
+    }
+    /// 校验输入和运行前置条件，提前暴露 交易执行与风控 的不可执行原因。
+    fn ensure_positive_finite_price(label: &str, price: f64) -> Result<(), AppError> {
+        if price.is_finite() && price > 0.0 {
+            Ok(())
+        } else {
+            Err(AppError::BizError(format!(
+                "{label} must be a positive finite price before legacy live order placement"
+            )))
+        }
+    }
+    /// 校验输入和运行前置条件，提前暴露 交易执行与风控 的不可执行原因。
+    fn ensure_max_loss_percent_ratio(max_loss_percent: f64) -> Result<(), AppError> {
+        if max_loss_percent.is_finite() && max_loss_percent > 0.0 && max_loss_percent < 1.0 {
+            Ok(())
+        } else {
+            Err(AppError::BizError(format!(
+                "max_loss_percent must be a finite ratio greater than 0 and less than 1 before legacy live order placement; got {max_loss_percent}"
+            )))
+        }
+    }
     //下单现货
+    /// 提供place订单spot的集中实现，避免交易执行调用方重复处理相同细节。
     pub async fn place_order_spot(
         &self,
         inst_id: &str,
         side: Side,
         _px: f64,
     ) -> Result<Vec<OrderResDto>, Error> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed_sdk()?;
         //todo 获取当前可以开仓的数量
         let sz = 1;
         //todo 设置止盈止损
         let px = 3000.00;
-
         let order_params = OrderReqDto {
             inst_id: inst_id.to_string(),
             td_mode: TdModeEnum::CASH.as_str().to_owned(),
@@ -94,7 +146,6 @@ impl SwapOrderService {
                 sz: None,
                 amend_px_on_trigger_type: Some(0),
             }]),
-
             ban_amend: None,
             tgt_ccy: None,
             pos_side: None,
@@ -108,14 +159,11 @@ impl SwapOrderService {
         };
         //下单
         let result = OkxTrade::from_env()?.place_order(order_params).await;
-
         // okx_response: {"code":"1","data":[{"clOrdId":"","ordId":"","sCode":"51094","sMsg":"You can't place TP limit orders in spot, margin, or options trading.","tag":"","ts":"1718339551210"}],"inTime":"1718339551209444","msg":"All operations failed","outTime":"1718339551210787"}
         // okx_response: {"code":"0","data":[{"clOrdId":"","ordId":"1538100941143183360","sCode":"0","sMsg":"Order placed","tag":"","ts":"1718341380112"}],"inTime":"1718341380111025","msg":"","outTime":"1718341380112306"}
-
         info!("Order result: {:#?}", result);
         result
     }
-
     /// 平仓
     pub async fn close_position(
         &self,
@@ -123,6 +171,7 @@ impl SwapOrderService {
         inst_id: &str,
         pos_side: &PositionSide,
     ) -> Result<bool, Error> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed_sdk()?;
         let already_have_position = !position_list.is_empty();
         //是否已经有反向仓位
         let mut have_another_position = false;
@@ -157,9 +206,7 @@ impl SwapOrderService {
         }
         Ok(have_another_position)
     }
-
     /// [已优化] 获取下单数量 - 统一风控策略
-    ///
     /// 风控策略：使用最大可用量的指定百分比（默认90%）
     /// - 安全边际：避免因市场波动导致下单失败
     /// - 精度保留：直接使用f64计算，减少字符串转换
@@ -173,29 +220,23 @@ impl SwapOrderService {
             error!("解析max_buy失败: value={}, error={}", valid_num.max_buy, e);
             AppError::BizError(format!("Invalid max_buy: {}", valid_num.max_buy))
         })?;
-
         // 2. 验证有效性
         if !max_buy.is_finite() {
             warn!("max_buy非有限值: {}", max_buy);
             return Ok("0".to_string());
         }
-
         if max_buy < 0.0 {
             warn!("max_buy为负数: {}", max_buy);
             return Ok("0".to_string());
         }
-
         // 3. 应用安全系数（一次性计算）
         let order_size = max_buy * safety_factor;
-
         // 4. 向下取整到交易所要求的精度（2位小数）
         let order_size_rounded = (order_size * 100.0).floor() / 100.0;
-
         info!(
             "计算下单量: max_buy={}, safety_factor={}, result={}",
             max_buy, safety_factor, order_size_rounded
         );
-
         Ok(order_size_rounded.to_string())
     }
     /// 准备下单
@@ -212,6 +253,8 @@ impl SwapOrderService {
         if !(signal.should_buy || signal.should_sell) {
             return Ok(());
         }
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
+        Self::ensure_max_loss_percent_ratio(risk_config.max_loss_percent)?;
         // 幂等校验前置：同品种×周期×方向×持仓方向的在途单直接返回
         // TODO: SwapOrderEntity需要实现query_one方法
         /*
@@ -231,7 +274,6 @@ impl SwapOrderService {
             return Ok(vec![]);
         }
         */
-
         // 临时跳过幂等校验
         // warn!("幂等校验暂时禁用");
         // 获取当前仓位状态与可开仓数量（并发请求，降低总时延）
@@ -250,7 +292,6 @@ impl SwapOrderService {
             AppError::OkxApiError(e.to_string())
         })?;
         info!("current okx position_count: {}", position_list.len());
-
         if max_avail_size.is_empty() || max_avail_size[0].inst_id != inst_id {
             error!("max_avail_size is empty or inst_id not match");
             return Err(AppError::BizError(
@@ -262,7 +303,6 @@ impl SwapOrderService {
             "max_avail_size(inst_id={}): max_buy={}",
             inst_id, trad_swap_nums.max_buy
         );
-
         // 处理下单数量
         let pos_size = self
             .get_place_order_num_optimized(&trad_swap_nums, 0.9)
@@ -286,7 +326,6 @@ impl SwapOrderService {
         };
         self.async_ready_close_order(inst_id, period, &position_list, &pos_side)
             .await?;
-
         let (order_result, side, pos_side) = if signal.should_buy {
             //买入开多
             let in_order_id = SwapOrderEntity::gen_order_id(
@@ -340,7 +379,6 @@ impl SwapOrderService {
         } else {
             (Ok(vec![]), Side::Buy, PositionSide::Long) // 默认值，不会被使用
         };
-
         if let Ok(order_result) = order_result {
             // 记录到订单中
             self.record_order(
@@ -357,8 +395,8 @@ impl SwapOrderService {
         }
         Ok(())
     }
-
     //同步平掉现有的已经存在的反向仓位
+    /// 提供asyncready平仓订单的集中实现，避免交易执行调用方重复处理相同细节。
     pub async fn async_ready_close_order(
         &self,
         inst_id: &str,
@@ -366,28 +404,25 @@ impl SwapOrderService {
         position_list: &[Position],
         close_pos_side: &PositionSide,
     ) -> Result<(), AppError> {
-        // 开启异步去平掉现有的已经存在的反向仓位（移动 owned 数据进入任务，满足 'static）
-        let inst_id_owned = inst_id.to_string();
-        let close_pos_side_owned = *close_pos_side;
-        let position_list_owned = position_list.to_owned();
-        tokio::spawn(async move {
-            let res = SwapOrderService::new()
-                .close_position(
-                    &position_list_owned,
-                    inst_id_owned.as_str(),
-                    &close_pos_side_owned,
-                )
-                .await;
-            if res.is_err() {
-                error!("判断关闭反向仓位失败 position error: {:?}", res);
-            } else {
-                debug!("判断关闭反向仓位结束");
-            }
+        let needs_close = position_list.iter().any(|position| {
+            position.inst_id == inst_id
+                && position.pos != "0"
+                && position.pos_side == close_pos_side.as_str()
         });
+        if !needs_close {
+            debug!("no reverse position needs closing before opening order");
+            return Ok(());
+        }
+        self.close_position(position_list, inst_id, close_pos_side)
+            .await
+            .map_err(|error| {
+                error!("判断关闭反向仓位失败 position error: {:?}", error);
+                AppError::OkxApiError(error.to_string())
+            })?;
+        debug!("判断关闭反向仓位结束");
         Ok(())
     }
     /// 开始下单
-    #[allow(clippy::too_many_arguments)]
     pub async fn start_to_order(
         &self,
         inst_id: &str,
@@ -423,7 +458,6 @@ impl SwapOrderService {
         // }
         let price = signal.open_price;
         let _ts = signal.ts;
-
         //todo 当前下单数量不足的时候自动划转交易资金
         // 下单
         let order_result = self
@@ -438,11 +472,10 @@ impl SwapOrderService {
                 risk_config,
             )
             .await?;
-
         Ok(order_result)
     }
-
     #[allow(clippy::too_many_arguments)]
+    /// 持久化 交易执行与风控 结果，保证写入路径和幂等语义集中处理。
     pub async fn record_order(
         &self,
         strategy_type: &StrategyType,
@@ -481,7 +514,7 @@ impl SwapOrderService {
         }
         Ok(())
     }
-
+    /// 生成 交易执行与风控 需要的派生数据，供后续执行、展示或审计使用。
     pub fn generate_fibonacci_take_profit_orders(
         &self,
         _entry_price: f64,
@@ -497,16 +530,12 @@ impl SwapOrderService {
         //         Side::Sell => entry_price * (1.0 - level),
         //         Side::Buy => entry_price * (1.0 + level),
         //     };
-
         // fn set_to_multiple(value: &mut i32, multiple_of: i32) {
         // *value = (*value / multiple_of) * multiple_of;
         // }
-
         // let order_size = (size.parse::<f64>().unwrap() * (level / fib_levels.iter().sum::<f64>())).ceil();
         // let order_size_str = format!("{:.2}", order_size);
-
         // let tp_ord_px = tp_trigger_px - 100.0; // 根据你的需求调整价格
-
         // }
         //-1 表示市价
         let mut order = AttachAlgoOrdReqDto::new(
@@ -520,18 +549,16 @@ impl SwapOrderService {
             order.tp_ord_px = Some("-1".to_string());
             order.tp_trigger_px = Some(price.to_string());
         }
-
         orders.push(order);
         orders
     }
-
     //判断开仓产品是否时btc
     pub fn is_btc_swap(&self, inst_id: &str) -> bool {
         inst_id.contains(constants::common_enums::BTC_SWAP_INST_ID)
     }
-
     //下单合约
     #[allow(clippy::too_many_arguments)]
+    /// 提供订单swap的集中实现，避免交易执行调用方重复处理相同细节。
     pub async fn order_swap(
         &self,
         inst_id: &str,
@@ -543,8 +570,11 @@ impl SwapOrderService {
         signal: &SignalResult,
         risk_config: &BasicRiskStrategyConfig,
     ) -> Result<Vec<OrderResDto>, AppError> {
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
+        Self::ensure_positive_finite_price("entry_price", entry_price)?;
         //最大止损
         let max_loss_percent = risk_config.max_loss_percent;
+        Self::ensure_max_loss_percent_ratio(max_loss_percent)?;
         let tp_price = signal.atr_take_profit_level_1;
         let max_loss_stop: f64 = match side {
             Side::Sell => entry_price * (1.0 + max_loss_percent),
@@ -562,6 +592,7 @@ impl SwapOrderService {
         };
         let stop_loss_price = StopLossCalculator::select(sl_side, entry_price, &candidates)
             .ok_or_else(|| AppError::BizError("no valid stop_loss candidate".to_string()))?;
+        Self::ensure_positive_finite_price("stop-loss", stop_loss_price)?;
         //valid 如果是做空，开仓价格要<止损价格,否则不进行下单
         //valid 如果是做多，开仓价格要>止损价格,否则不进行下单
         if pos_side == PositionSide::Short && entry_price > stop_loss_price {
@@ -585,7 +616,6 @@ impl SwapOrderService {
             &side,
         );
         debug!("place order attach_algo_ords{:?}", attach_algo_ords);
-
         let order_params = OrderReqDto {
             inst_id: inst_id.to_string(),
             td_mode: TdModeEnum::ISOLATED.as_str().to_owned(),
@@ -623,16 +653,239 @@ impl SwapOrderService {
         Ok(result)
     }
 }
-
 #[cfg(test)]
 mod tests {
-    use super::{StopLossCalculator, StopLossSide};
-
+    use super::{
+        BasicRiskStrategyConfig, SignalResult, StopLossCalculator, StopLossSide, SwapOrderService,
+    };
+    use okx::dto::account_dto::Position;
+    use okx::dto::common::Side;
+    use okx::dto::PositionSide;
+    use serde_json::json;
+    use std::sync::{Mutex, OnceLock};
+    const TEST_DIRECT_CONFIRM_ENV: &str = "LEGACY_DIRECT_LIVE_ORDER_CONFIRM";
+    /// 封装当前函数，减少交易执行调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+    struct EnvSnapshot {
+        /// direct确认标记；为空时表示该条件不启用。
+        direct_confirm: Option<String>,
+    }
+    impl EnvSnapshot {
+        /// 提供capture的集中实现，避免交易执行调用方重复处理相同细节。
+        fn capture() -> Self {
+            Self {
+                direct_confirm: std::env::var(TEST_DIRECT_CONFIRM_ENV).ok(),
+            }
+        }
+    }
+    impl Drop for EnvSnapshot {
+        /// 封装释放，减少交易执行调用方重复实现相同细节。
+        fn drop(&mut self) {
+            match &self.direct_confirm {
+                Some(value) => std::env::set_var(TEST_DIRECT_CONFIRM_ENV, value),
+                None => std::env::remove_var(TEST_DIRECT_CONFIRM_ENV),
+            }
+        }
+    }
+    /// 判断 交易执行与风控 条件是否满足，给上层流程提供布尔决策。
+    fn allow_legacy_direct_live_order_for_test() -> EnvSnapshot {
+        let snapshot = EnvSnapshot::capture();
+        std::env::set_var(
+            TEST_DIRECT_CONFIRM_ENV,
+            "I_UNDERSTAND_LEGACY_DIRECT_LIVE_ORDERS",
+        );
+        snapshot
+    }
     #[test]
     fn select_tightest_short_stop() {
         let entry = 100.0;
         let candidates = vec![105.0, 103.0, 110.0];
         let selected = StopLossCalculator::select(StopLossSide::Short, entry, &candidates);
         assert_eq!(selected, Some(103.0));
+    }
+    /// 提供OKX仓位的集中实现，避免交易执行调用方重复处理相同细节。
+    fn okx_position(inst_id: &str, pos_side: &str, pos: &str) -> Position {
+        serde_json::from_value(json!({
+            "instType": "SWAP",
+            "mgnMode": "isolated",
+            "posId": "test-position",
+            "posSide": pos_side,
+            "pos": pos,
+            "instId": inst_id
+        }))
+        .expect("test position payload should deserialize")
+    }
+    #[tokio::test]
+    async fn ready_close_order_propagates_close_guard_failure_for_reverse_position() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _snapshot = EnvSnapshot::capture();
+        std::env::remove_var(TEST_DIRECT_CONFIRM_ENV);
+        let position = okx_position("ETH-USDT-SWAP", "short", "1");
+        let error = SwapOrderService::new()
+            .async_ready_close_order("ETH-USDT-SWAP", "4h", &[position], &PositionSide::Short)
+            .await
+            .expect_err("reverse position close failure must block opening the next order");
+        let message = error.to_string();
+        assert!(message.contains("LEGACY_DIRECT_LIVE_ORDER_CONFIRM"));
+        assert!(message.contains("I_UNDERSTAND_LEGACY_DIRECT_LIVE_ORDERS"));
+    }
+    #[tokio::test]
+    async fn legacy_swap_order_requires_confirmation_before_okx_env() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _snapshot = EnvSnapshot::capture();
+        std::env::remove_var(TEST_DIRECT_CONFIRM_ENV);
+        let signal = SignalResult {
+            should_buy: true,
+            open_price: 100.0,
+            atr_take_profit_level_1: Some(104.0),
+            ..Default::default()
+        };
+        let risk_config = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            is_used_signal_k_line_stop_loss: Some(false),
+            ..Default::default()
+        };
+        let error = super::SwapOrderService::new()
+            .order_swap(
+                "ETH-USDT-SWAP",
+                "legacy-test-order".to_string(),
+                Side::Buy,
+                PositionSide::Long,
+                100.0,
+                "1".to_string(),
+                &signal,
+                &risk_config,
+            )
+            .await
+            .expect_err("legacy direct swap order must be blocked without confirmation");
+        let message = error.to_string();
+        assert!(message.contains("LEGACY_DIRECT_LIVE_ORDER_CONFIRM"));
+        assert!(message.contains("I_UNDERSTAND_LEGACY_DIRECT_LIVE_ORDERS"));
+    }
+    #[tokio::test]
+    async fn legacy_swap_order_rejects_long_out_of_range_max_loss_percent_before_okx_env() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _snapshot = allow_legacy_direct_live_order_for_test();
+        let signal = SignalResult {
+            should_buy: true,
+            open_price: 100.0,
+            ..Default::default()
+        };
+        let risk_config = BasicRiskStrategyConfig {
+            max_loss_percent: 1.5,
+            is_used_signal_k_line_stop_loss: Some(false),
+            ..Default::default()
+        };
+        let error = SwapOrderService::new()
+            .order_swap(
+                "ETH-USDT-SWAP",
+                "legacy-test-order".to_string(),
+                Side::Buy,
+                PositionSide::Long,
+                100.0,
+                "1".to_string(),
+                &signal,
+                &risk_config,
+            )
+            .await
+            .expect_err("legacy direct swap order must reject out-of-range max loss");
+        let message = error.to_string();
+        assert!(
+            message.contains("max_loss_percent"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            !message.contains("OKX"),
+            "max-loss guard must run before OKX env/client initialization: {message}"
+        );
+    }
+    #[tokio::test]
+    async fn legacy_swap_order_rejects_out_of_range_max_loss_percent_before_okx_env() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _snapshot = allow_legacy_direct_live_order_for_test();
+        let signal = SignalResult {
+            should_sell: true,
+            open_price: 100.0,
+            ..Default::default()
+        };
+        let risk_config = BasicRiskStrategyConfig {
+            max_loss_percent: 1.5,
+            is_used_signal_k_line_stop_loss: Some(false),
+            ..Default::default()
+        };
+        let error = SwapOrderService::new()
+            .order_swap(
+                "ETH-USDT-SWAP",
+                "legacy-test-order".to_string(),
+                Side::Sell,
+                PositionSide::Short,
+                100.0,
+                "1".to_string(),
+                &signal,
+                &risk_config,
+            )
+            .await
+            .expect_err("legacy direct swap order must reject out-of-range max loss");
+        let message = error.to_string();
+        assert!(
+            message.contains("max_loss_percent"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            !message.contains("OKX"),
+            "max-loss guard must run before OKX env/client initialization: {message}"
+        );
+    }
+    #[tokio::test]
+    async fn legacy_swap_order_rejects_non_positive_entry_before_okx_env() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _snapshot = allow_legacy_direct_live_order_for_test();
+        let signal = SignalResult {
+            should_buy: true,
+            open_price: 0.0,
+            ..Default::default()
+        };
+        let risk_config = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            is_used_signal_k_line_stop_loss: Some(false),
+            ..Default::default()
+        };
+        let error = SwapOrderService::new()
+            .order_swap(
+                "ETH-USDT-SWAP",
+                "legacy-test-order".to_string(),
+                Side::Buy,
+                PositionSide::Long,
+                0.0,
+                "1".to_string(),
+                &signal,
+                &risk_config,
+            )
+            .await
+            .expect_err("legacy direct swap order must reject non-positive entry");
+        let message = error.to_string();
+        assert!(
+            message.contains("entry_price"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            !message.contains("OKX"),
+            "entry guard must run before OKX env/client initialization: {message}"
+        );
     }
 }

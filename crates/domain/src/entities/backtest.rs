@@ -2,9 +2,7 @@
 //!
 //! 与 legacy `back_test_log`、`back_test_detail` 表保持字段兼容，
 //! 但通过领域实体抽象提供更明确的含义。
-
 use serde::{Deserialize, Serialize};
-
 /// 回测日志聚合
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestLog {
@@ -57,9 +55,9 @@ pub struct BacktestLog {
     /// 波动率(年化)
     pub volatility: Option<f64>,
 }
-
 impl BacktestLog {
     #[allow(clippy::too_many_arguments)]
+    /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     pub fn new(
         strategy_type: String,
         inst_id: String,
@@ -102,39 +100,57 @@ impl BacktestLog {
         }
     }
 }
-
 /// 回测明细
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestDetail {
     /// 自增主键
     pub id: Option<i64>,
+    /// backtest ID。
     pub back_test_id: i64,
+    /// 类型标识。
     pub option_type: String,
+    /// 类型标识。
     pub strategy_type: String,
+    /// 交易所合约或现货交易对标识。
     pub inst_id: String,
+    /// 周期。
     pub timeframe: String,
+    /// 开仓时间。
     pub open_position_time: String,
+    /// 开仓时间。
     pub signal_open_position_time: Option<String>,
+    /// 状态值。
     pub signal_status: i32,
+    /// 平仓时间。
     pub close_position_time: String,
+    /// 价格数值。
     pub open_price: String,
+    /// 离场价格。
     pub close_price: Option<String>,
+    /// 收益亏损，用于交易策略计算。
     pub profit_loss: String,
+    /// 数量。
     pub quantity: String,
+    /// full收盘，用于交易策略计算。
     pub full_close: String,
+    /// 类型标识。
     pub close_type: String,
+    /// winnums，用于交易策略计算。
     pub win_nums: i64,
+    /// 亏损nums，用于交易策略计算。
     pub loss_nums: i64,
+    /// 信号值，用于交易策略计算。
     pub signal_value: String,
+    /// 信号结果，用于交易策略计算。
     pub signal_result: String,
     /// 止损来源（如 "Engulfing", "KlineHammer" 等）
     pub stop_loss_source: Option<String>,
     /// 止损更新历史(JSON序列化的Vec<StopLossUpdate>)
     pub stop_loss_update_history: Option<String>,
 }
-
 impl BacktestDetail {
     #[allow(clippy::too_many_arguments)]
+    /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     pub fn new(
         back_test_id: i64,
         option_type: String,
@@ -184,18 +200,22 @@ impl BacktestDetail {
         }
     }
 }
-
 /// 回测胜率统计
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct BacktestWinRateStats {
+    /// onebarafterwin 费率。
     pub one_bar_after_win_rate: f32,
+    /// twobarafterwin 费率。
     pub two_bar_after_win_rate: f32,
+    /// threebarafterwin 费率。
     pub three_bar_after_win_rate: f32,
+    /// fourbarafterwin 费率。
     pub four_bar_after_win_rate: f32,
+    /// fivebarafterwin 费率。
     pub five_bar_after_win_rate: f32,
+    /// tenbarafterwin 费率。
     pub ten_bar_after_win_rate: f32,
 }
-
 /// 回测绩效指标
 ///
 /// 包含夏普比率、年化收益率、最大回撤、波动率等核心风险收益指标

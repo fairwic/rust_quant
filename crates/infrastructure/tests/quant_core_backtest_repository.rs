@@ -7,14 +7,12 @@ use rust_quant_domain::traits::BacktestLogRepository;
 use rust_quant_infrastructure::repositories::SqlxBacktestRepository;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
-
 #[tokio::test]
 async fn inserts_backtest_log_numeric_columns_into_quant_core_postgres() -> Result<()> {
     if !smoke_enabled() {
         eprintln!("skipping quant_core backtest log smoke; set QUANT_CORE_BACKTEST_LOG_SMOKE=1");
         return Ok(());
     }
-
     let database_url =
         env::var("QUANT_CORE_DATABASE_URL").context("QUANT_CORE_DATABASE_URL must be set")?;
     let pool = PgPoolOptions::new()
@@ -23,7 +21,6 @@ async fn inserts_backtest_log_numeric_columns_into_quant_core_postgres() -> Resu
         .await
         .context("connect quant_core Postgres")?;
     let repository = SqlxBacktestRepository::new(pool.clone());
-
     let log = BacktestLog::new(
         "vegas".to_string(),
         "ETH-USDT-SWAP".to_string(),
@@ -38,9 +35,7 @@ async fn inserts_backtest_log_numeric_columns_into_quant_core_postgres() -> Resu
         1_748_736_000_000,
         42,
     );
-
     let inserted_id = repository.insert_log(&log).await?;
-
     let row = sqlx::query_as::<_, (f64, f64)>(
         "SELECT final_fund, profit FROM back_test_log WHERE id = $1",
     )
@@ -48,21 +43,17 @@ async fn inserts_backtest_log_numeric_columns_into_quant_core_postgres() -> Resu
     .fetch_one(&pool)
     .await
     .context("load inserted back_test_log row")?;
-
     assert_eq!(row.0, 123.45);
     assert_eq!(row.1, 23.45);
-
     cleanup(&pool, inserted_id).await?;
     Ok(())
 }
-
 #[tokio::test]
 async fn inserts_backtest_detail_timestamp_columns_into_quant_core_postgres() -> Result<()> {
     if !smoke_enabled() {
         eprintln!("skipping quant_core backtest detail smoke; set QUANT_CORE_BACKTEST_LOG_SMOKE=1");
         return Ok(());
     }
-
     let database_url =
         env::var("QUANT_CORE_DATABASE_URL").context("QUANT_CORE_DATABASE_URL must be set")?;
     let pool = PgPoolOptions::new()
@@ -71,7 +62,6 @@ async fn inserts_backtest_detail_timestamp_columns_into_quant_core_postgres() ->
         .await
         .context("connect quant_core Postgres")?;
     let repository = SqlxBacktestRepository::new(pool.clone());
-
     let back_test_id: i64 = sqlx::query_scalar(
         r#"
         INSERT INTO back_test_log (
@@ -114,7 +104,6 @@ async fn inserts_backtest_detail_timestamp_columns_into_quant_core_postgres() ->
     .fetch_one(&pool)
     .await
     .context("insert parent back_test_log row")?;
-
     let detail = BacktestDetail::new(
         back_test_id,
         "close".to_string(),
@@ -138,9 +127,7 @@ async fn inserts_backtest_detail_timestamp_columns_into_quant_core_postgres() ->
         None,
         None,
     );
-
     repository.insert_details(&[detail]).await?;
-
     let row = sqlx::query_as::<_, (NaiveDateTime, Option<NaiveDateTime>, NaiveDateTime)>(
         "SELECT open_position_time, signal_open_position_time, close_position_time FROM back_test_detail WHERE back_test_id = $1",
     )
@@ -148,7 +135,6 @@ async fn inserts_backtest_detail_timestamp_columns_into_quant_core_postgres() ->
     .fetch_one(&pool)
     .await
     .context("load inserted back_test_detail row")?;
-
     assert_eq!(
         row.0,
         NaiveDateTime::parse_from_str("2026-05-11 18:00:00", "%Y-%m-%d %H:%M:%S")?
@@ -164,19 +150,16 @@ async fn inserts_backtest_detail_timestamp_columns_into_quant_core_postgres() ->
         row.2,
         NaiveDateTime::parse_from_str("2026-05-11 19:00:00", "%Y-%m-%d %H:%M:%S")?
     );
-
     cleanup_details(&pool, back_test_id).await?;
     cleanup(&pool, back_test_id).await?;
     Ok(())
 }
-
 #[tokio::test]
 async fn inserts_filtered_signal_timestamp_columns_into_quant_core_postgres() -> Result<()> {
     if !smoke_enabled() {
         eprintln!("skipping quant_core filtered signal smoke; set QUANT_CORE_BACKTEST_LOG_SMOKE=1");
         return Ok(());
     }
-
     let database_url =
         env::var("QUANT_CORE_DATABASE_URL").context("QUANT_CORE_DATABASE_URL must be set")?;
     let pool = PgPoolOptions::new()
@@ -186,7 +169,6 @@ async fn inserts_filtered_signal_timestamp_columns_into_quant_core_postgres() ->
         .context("connect quant_core Postgres")?;
     let repository = SqlxBacktestRepository::new(pool.clone());
     let back_test_id = insert_parent_log(&pool).await?;
-
     let signal = FilteredSignalLog::new(
         back_test_id,
         "ETH-USDT-SWAP".to_string(),
@@ -196,9 +178,7 @@ async fn inserts_filtered_signal_timestamp_columns_into_quant_core_postgres() ->
         "[\"trend_filter\"]".to_string(),
         3200.5,
     );
-
     repository.insert_filtered_signals(&[signal]).await?;
-
     let row = sqlx::query_as::<_, (NaiveDateTime,)>(
         "SELECT signal_time FROM filtered_signal_log WHERE backtest_id = $1",
     )
@@ -206,24 +186,20 @@ async fn inserts_filtered_signal_timestamp_columns_into_quant_core_postgres() ->
     .fetch_one(&pool)
     .await
     .context("load inserted filtered_signal_log row")?;
-
     assert_eq!(
         row.0,
         NaiveDateTime::parse_from_str("2026-05-11 18:30:00", "%Y-%m-%d %H:%M:%S")?
     );
-
     cleanup_filtered_signals(&pool, back_test_id).await?;
     cleanup(&pool, back_test_id).await?;
     Ok(())
 }
-
 #[tokio::test]
 async fn inserts_dynamic_config_timestamp_columns_into_quant_core_postgres() -> Result<()> {
     if !smoke_enabled() {
         eprintln!("skipping quant_core dynamic config smoke; set QUANT_CORE_BACKTEST_LOG_SMOKE=1");
         return Ok(());
     }
-
     let database_url =
         env::var("QUANT_CORE_DATABASE_URL").context("QUANT_CORE_DATABASE_URL must be set")?;
     let pool = PgPoolOptions::new()
@@ -233,7 +209,6 @@ async fn inserts_dynamic_config_timestamp_columns_into_quant_core_postgres() -> 
         .context("connect quant_core Postgres")?;
     let repository = SqlxBacktestRepository::new(pool.clone());
     let back_test_id = insert_parent_log(&pool).await?;
-
     let log = DynamicConfigLog {
         backtest_id: back_test_id,
         inst_id: "ETH-USDT-SWAP".to_string(),
@@ -242,9 +217,7 @@ async fn inserts_dynamic_config_timestamp_columns_into_quant_core_postgres() -> 
         adjustments: "{\"atr_stop\":1.8}".to_string(),
         config_snapshot: Some("{\"risk\":\"tight\"}".to_string()),
     };
-
     repository.insert_dynamic_config_logs(&[log]).await?;
-
     let row = sqlx::query_as::<_, (NaiveDateTime,)>(
         "SELECT kline_time FROM dynamic_config_log WHERE backtest_id = $1",
     )
@@ -252,17 +225,14 @@ async fn inserts_dynamic_config_timestamp_columns_into_quant_core_postgres() -> 
     .fetch_one(&pool)
     .await
     .context("load inserted dynamic_config_log row")?;
-
     assert_eq!(
         row.0,
         NaiveDateTime::parse_from_str("2026-05-11 18:45:00", "%Y-%m-%d %H:%M:%S")?
     );
-
     cleanup_dynamic_config_logs(&pool, back_test_id).await?;
     cleanup(&pool, back_test_id).await?;
     Ok(())
 }
-
 async fn cleanup(pool: &sqlx::PgPool, id: i64) -> Result<()> {
     sqlx::query("DELETE FROM back_test_log WHERE id = $1")
         .bind(id)
@@ -271,7 +241,6 @@ async fn cleanup(pool: &sqlx::PgPool, id: i64) -> Result<()> {
         .context("delete test back_test_log row")?;
     Ok(())
 }
-
 async fn cleanup_details(pool: &sqlx::PgPool, back_test_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM back_test_detail WHERE back_test_id = $1")
         .bind(back_test_id)
@@ -280,7 +249,6 @@ async fn cleanup_details(pool: &sqlx::PgPool, back_test_id: i64) -> Result<()> {
         .context("delete test back_test_detail row")?;
     Ok(())
 }
-
 async fn cleanup_filtered_signals(pool: &sqlx::PgPool, back_test_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM filtered_signal_log WHERE backtest_id = $1")
         .bind(back_test_id)
@@ -289,7 +257,6 @@ async fn cleanup_filtered_signals(pool: &sqlx::PgPool, back_test_id: i64) -> Res
         .context("delete test filtered_signal_log row")?;
     Ok(())
 }
-
 async fn cleanup_dynamic_config_logs(pool: &sqlx::PgPool, back_test_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM dynamic_config_log WHERE backtest_id = $1")
         .bind(back_test_id)
@@ -298,7 +265,6 @@ async fn cleanup_dynamic_config_logs(pool: &sqlx::PgPool, back_test_id: i64) -> 
         .context("delete test dynamic_config_log row")?;
     Ok(())
 }
-
 async fn insert_parent_log(pool: &sqlx::PgPool) -> Result<i64> {
     let back_test_id: i64 = sqlx::query_scalar(
         r#"
@@ -344,7 +310,6 @@ async fn insert_parent_log(pool: &sqlx::PgPool) -> Result<i64> {
     .context("insert parent back_test_log row")?;
     Ok(back_test_id)
 }
-
 fn smoke_enabled() -> bool {
     env::var("QUANT_CORE_BACKTEST_LOG_SMOKE")
         .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))

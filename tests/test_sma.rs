@@ -11,52 +11,40 @@ use rust_quant::trading::indicator::squeeze_momentum::squeeze_config::SqueezeCon
 use rust_quant::trading::model::entity::candles::enums::{SelectTime, TimeDirect};
 use ta::indicators::SimpleMovingAverage;
 use ta::Next;
-
 // tests/squeeze_test.rs
 #[tokio::test]
 async fn test_sma() -> Result<()> {
     dotenv().ok();
     setup_logging().await?;
     init_db().await;
-
     let mut sma = Sma::new(2);
-
     let select_time = SelectTime {start_time:1732392000000,direct:TimeDirect::BEFORE, end_time: todo!() };
-
     let candles =
         trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "4H", 2, Some(select_time))
             .await?;
-
     let mut sma_value = 0.00;
     for candle in candles {
         sma_value = sma.next(candle.c.parse::<f64>().unwrap());
     }
     assert_eq!(format!("{:2}", sma_value), "97611.05");
-
     //测试2
-
     let mut sma = Sma::new(10);
     let select_time = SelectTime {start_time:1732392000000,direct:TimeDirect::BEFORE, end_time: todo!() };
-
     let candles =
         trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "4H", 10, Some(select_time))
             .await?;
-
     let mut sma_value = 0.00;
     for candle in candles {
         sma_value = sma.next(candle.c.parse::<f64>().unwrap());
     }
     assert_eq!(format!("{:2}", sma_value), "98485.93");
-
     //测试3
     println!("测试3");
     let mut sma = SimpleMovingAverage::new(10).unwrap();
     let select_time = SelectTime {start_time:1732392000000,direct:TimeDirect::BEFORE, end_time: todo!() };
-
     let candles =
         trading::task::basic::get_candle_data_confirm("BTC-USDT-SWAP", "4H", 10, Some(select_time))
             .await?;
-
     let mut sma_value = 0.00;
     for candle in candles {
         sma_value = sma.next(&Bar::new().close(candle.c.parse::<f64>().unwrap()));
@@ -64,7 +52,6 @@ async fn test_sma() -> Result<()> {
     }
     assert_eq!(format!("{:2}", sma_value), "98485.93");
     println!("测试通过-------");
-
     println!("测试通过-------");
     Ok(())
 }

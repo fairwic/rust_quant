@@ -9,26 +9,26 @@ use rust_quant_strategies::{get_multi_indicator_values, CandleItem, IndicatorStr
 use serde_json::json;
 use sqlx::Row;
 use std::env;
-
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 fn parse_f64(row: &sqlx::postgres::PgRow, col: &str) -> Result<f64> {
     let raw: String = row.get(col);
     raw.parse::<f64>()
         .map_err(|e| anyhow!("failed to parse {}='{}': {}", col, raw, e))
 }
-
+/// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_i32(row: &sqlx::postgres::PgRow, col: &str) -> Result<i32> {
     let raw: String = row.get(col);
     raw.parse::<i32>()
         .map_err(|e| anyhow!("failed to parse {}='{}': {}", col, raw, e))
 }
-
 #[allow(clippy::type_complexity)]
+/// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_args() -> Result<(i64, Option<String>, Option<String>, Option<usize>)> {
     let mut back_test_id: Option<i64> = None;
     let mut inst_id: Option<String> = None;
     let mut period: Option<String> = None;
     let mut limit: Option<usize> = None;
-
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -43,18 +43,17 @@ fn parse_args() -> Result<(i64, Option<String>, Option<String>, Option<usize>)> 
             _ => {}
         }
     }
-
     let back_test_id = back_test_id.ok_or_else(|| anyhow!("missing --back-test-id"))?;
     Ok((back_test_id, inst_id, period, limit))
 }
-
+/// 提供periodtotablesuffix的集中实现，避免回测策略调用方重复处理相同细节。
 fn period_to_table_suffix(period: &str) -> String {
     match period.trim() {
         "1M" => "1M".to_string(),
         other => other.to_ascii_lowercase(),
     }
 }
-
+/// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
 fn is_above_zero_death_cross_range_break_short_candidate(
     data_items: &[CandleItem],
     values: &VegasIndicatorSignalValue,
@@ -62,7 +61,6 @@ fn is_above_zero_death_cross_range_break_short_candidate(
     if data_items.len() < 7 {
         return false;
     }
-
     let current = data_items.last().expect("data items cannot be empty");
     let prior_window = &data_items[data_items.len() - 6..data_items.len() - 1];
     let prior_range_high = prior_window
@@ -80,7 +78,6 @@ fn is_above_zero_death_cross_range_break_short_candidate(
     let ema_values = &values.ema_values;
     let ema_distance = &values.ema_distance_filter;
     let structure = &values.market_structure_value;
-
     current.c < current.o
         && current.body_ratio() >= 0.6
         && volume_ratio >= 1.5
@@ -96,40 +93,33 @@ fn is_above_zero_death_cross_range_break_short_candidate(
         && prior_range_width <= 0.03
         && close_break_pct >= 0.01
 }
-
 #[tokio::main]
+/// 提供入口的集中实现，避免回测策略调用方重复处理相同细节。
 async fn main() -> Result<()> {
     let (back_test_id, inst_id_override, period_override, limit_override) = parse_args()?;
-
     init_db_pool().await?;
     let pool = get_db_pool();
-
     let row = sqlx::query(
         "SELECT inst_type, time, strategy_detail, risk_config_detail FROM back_test_log WHERE id=$1",
     )
     .bind(back_test_id)
     .fetch_one(pool)
     .await?;
-
     let inst_id: String = inst_id_override.unwrap_or_else(|| row.get::<String, _>("inst_type"));
     let period: String = period_override.unwrap_or_else(|| row.get::<String, _>("time"));
     let strategy_detail: String = row.get::<String, _>("strategy_detail");
     let risk_config_detail: String = row.get::<String, _>("risk_config_detail");
-
     let mut strategy: VegasStrategy = serde_json::from_str(&strategy_detail)
         .map_err(|e| anyhow!("failed to parse strategy_detail: {}", e))?;
     strategy.emit_debug = false;
-
     let risk_config: BasicRiskStrategyConfig = serde_json::from_str(&risk_config_detail)
         .map_err(|e| anyhow!("failed to parse risk_config_detail: {}", e))?;
-
     let suffix = period_to_table_suffix(&period);
     let table_name = quote_legacy_table_name(&format!(
         "{}_candles_{}",
         inst_id.to_ascii_lowercase(),
         suffix
     ))?;
-
     let limit = limit_override.unwrap_or(50_000);
     let query = format!(
         "SELECT ts, o, h, l, c, vol, confirm FROM {} ORDER BY ts ASC LIMIT $1",
@@ -139,7 +129,6 @@ async fn main() -> Result<()> {
         .bind(limit as i64)
         .fetch_all(pool)
         .await?;
-
     let mut candles: Vec<CandleItem> = Vec::with_capacity(rows.len());
     for r in rows {
         candles.push(CandleItem {
@@ -152,13 +141,11 @@ async fn main() -> Result<()> {
             confirm: parse_i32(&r, "confirm")?,
         });
     }
-
     let min_len = strategy.min_k_line_num.max(1);
     let mut adapter = VegasBacktestAdapter::new(strategy);
     let mut indicator_combine = adapter.init_indicator_combine();
     let mut buffer: Vec<CandleItem> = Vec::with_capacity(4096);
     let mut matches = Vec::new();
-
     for candle in candles.iter() {
         let values: VegasIndicatorSignalValue =
             get_multi_indicator_values(&mut indicator_combine, candle);
@@ -166,10 +153,8 @@ async fn main() -> Result<()> {
         if buffer.len() < min_len {
             continue;
         }
-
         let window = &buffer[buffer.len() - min_len..];
         let signal = adapter.generate_signal(window, &mut values.clone(), &risk_config);
-
         if is_above_zero_death_cross_range_break_short_candidate(window, &values) {
             let signal_time = chrono::DateTime::from_timestamp_millis(candle.ts)
                 .map(|dt| {
@@ -189,7 +174,6 @@ async fn main() -> Result<()> {
                 .fold(f64::MAX, f64::min);
             let prior_range_width = (prior_high - prior_low) / candle.c.max(1e-9);
             let close_break_pct = (prior_low - candle.c).max(0.0) / candle.c.max(1e-9);
-
             matches.push(json!({
                 "time_ms": candle.ts,
                 "signal_time": signal_time,
@@ -210,13 +194,11 @@ async fn main() -> Result<()> {
                 "baseline_filter_reasons": signal.filter_reasons,
             }));
         }
-
         if buffer.len() > min_len * 2 {
             let drain = buffer.len() - min_len;
             buffer.drain(0..drain);
         }
     }
-
     let output = json!({
         "back_test_id": back_test_id,
         "inst_id": inst_id,
@@ -225,6 +207,5 @@ async fn main() -> Result<()> {
         "matches": matches,
     });
     println!("{}", serde_json::to_string_pretty(&output)?);
-
     Ok(())
 }

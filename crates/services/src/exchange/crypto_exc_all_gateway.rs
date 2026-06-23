@@ -8,26 +8,39 @@ use crypto_exc_all::{
     ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
 };
 use serde_json::json;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrderPlacementRequest {
+    /// 交易所名称。
     pub exchange: ExchangeId,
+    /// instrument，用于构建接口请求。
     pub instrument: Instrument,
+    /// 交易方向。
     pub side: OrderSide,
+    /// 类型标识。
     pub order_type: OrderType,
+    /// 数量数值。
     pub size: String,
+    /// 价格。
     pub price: Option<String>,
+    /// 保证金模式；为空时使用交易所默认模式。
     pub margin_mode: Option<MarginMode>,
+    /// margincoin；为空时表示该条件不启用。
     pub margin_coin: Option<String>,
+    /// position方向；为空时使用默认值或表示不限制。
     pub position_side: Option<String>,
+    /// trade方向；为空时使用默认值或表示不限制。
     pub trade_side: Option<String>,
+    /// clientorder ID；为空时使用默认值或表示不限制。
     pub client_order_id: Option<String>,
+    /// reduceonly；为空时表示该条件不启用。
     pub reduce_only: Option<bool>,
+    /// timeinforce；为空时表示该条件不启用。
     pub time_in_force: Option<TimeInForce>,
+    /// 止损价格。
     pub attached_stop_loss_price: Option<String>,
 }
-
 impl OrderPlacementRequest {
+    /// 将内部模型转换为输出结构，避免 量化核心 的内部字段直接外泄。
     pub fn into_place_order_request(self) -> PlaceOrderRequest {
         PlaceOrderRequest {
             instrument: self.instrument,
@@ -46,35 +59,38 @@ impl OrderPlacementRequest {
         }
     }
 }
-
 enum GatewayMode {
     Live(CryptoSdk),
     DryRun,
 }
-
 pub struct CryptoExcAllGateway {
+    /// 模式。
     mode: GatewayMode,
 }
-
+tokio::task_local! {
+    static LIVE_MUTATION_AUDIT_SCOPE_ACTIVE: ();
+    static SIGNED_READ_ONLY_SCOPE_ACTIVE: ();
+}
 impl CryptoExcAllGateway {
+    /// 从外部输入转换为内部模型，隔离 量化核心 的字段适配细节。
     pub fn from_env() -> Result<Self> {
         Ok(Self {
             mode: GatewayMode::Live(CryptoSdk::from_env()?),
         })
     }
-
+    /// 从外部输入转换为内部模型，隔离 量化核心 的字段适配细节。
     pub fn from_sdk(sdk: CryptoSdk) -> Self {
         Self {
             mode: GatewayMode::Live(sdk),
         }
     }
-
+    /// 提供dryrun的集中实现，避免量化核心调用方重复处理相同细节。
     pub fn dry_run() -> Self {
         Self {
             mode: GatewayMode::DryRun,
         }
     }
-
+    /// 从外部输入转换为内部模型，隔离 量化核心 的字段适配细节。
     pub fn from_single_exchange_credentials(
         exchange: ExchangeId,
         api_key: impl Into<String>,
@@ -151,17 +167,60 @@ impl CryptoExcAllGateway {
                 ..SdkConfig::default()
             },
         };
-
         Ok(Self::from_sdk(CryptoSdk::from_config(config)?))
     }
-
+    pub(crate) async fn with_live_mutation_audit_scope<F, T>(future: F) -> T
+    where
+        F: std::future::Future<Output = T>,
+    {
+        LIVE_MUTATION_AUDIT_SCOPE_ACTIVE.scope((), future).await
+    }
+    pub(crate) async fn with_signed_read_only_scope<F, T>(future: F) -> T
+    where
+        F: std::future::Future<Output = T>,
+    {
+        SIGNED_READ_ONLY_SCOPE_ACTIVE.scope((), future).await
+    }
+    /// 校验输入和运行前置条件，提前暴露 量化核心 的不可执行原因。
+    fn ensure_live_mutation_audit_scope(&self, capability: &str) -> Result<()> {
+        if matches!(&self.mode, GatewayMode::DryRun) {
+            return Ok(());
+        }
+        Self::ensure_live_mutation_audit_scope_active(capability)
+    }
+    /// 校验输入和运行前置条件，提前暴露 量化核心 的不可执行原因。
+    fn ensure_live_mutation_audit_scope_active(capability: &str) -> Result<()> {
+        if LIVE_MUTATION_AUDIT_SCOPE_ACTIVE.try_with(|_| ()).is_ok() {
+            return Ok(());
+        }
+        Err(Error::Config(format!(
+            "live exchange mutation {capability} requires worker exchange_request_audit_logs preflight scope"
+        )))
+    }
+    /// 校验输入和运行前置条件，提前暴露 量化核心 的不可执行原因。
+    fn ensure_signed_read_only_scope(&self, capability: &str) -> Result<()> {
+        if matches!(&self.mode, GatewayMode::DryRun) {
+            return Ok(());
+        }
+        Self::ensure_signed_read_only_scope_active(capability)
+    }
+    /// 校验输入和运行前置条件，提前暴露 量化核心 的不可执行原因。
+    fn ensure_signed_read_only_scope_active(capability: &str) -> Result<()> {
+        if SIGNED_READ_ONLY_SCOPE_ACTIVE.try_with(|_| ()).is_ok() {
+            return Ok(());
+        }
+        Err(Error::Config(format!(
+            "live exchange signed read-only {capability} requires worker signed read-only scope"
+        )))
+    }
+    /// 提供configuredexchanges的集中实现，避免量化核心调用方重复处理相同细节。
     pub fn configured_exchanges(&self) -> Vec<ExchangeId> {
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.configured_exchanges(),
             GatewayMode::DryRun => Vec::new(),
         }
     }
-
+    /// 提供ticker的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn ticker(&self, exchange: ExchangeId, instrument: &Instrument) -> Result<Ticker> {
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.market(exchange)?.ticker(instrument).await,
@@ -171,7 +230,7 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供tickers的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn tickers(
         &self,
         exchange: ExchangeId,
@@ -182,7 +241,7 @@ impl CryptoExcAllGateway {
             capability: "bulk tickers via crypto_exc_all",
         })
     }
-
+    /// 提供orderbook的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn orderbook(
         &self,
         exchange: ExchangeId,
@@ -196,7 +255,7 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 判断K 线，给量化核心流程提供布尔结果。
     pub async fn candles(&self, exchange: ExchangeId, query: CandleQuery) -> Result<Vec<Candle>> {
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.market(exchange)?.candles(query).await,
@@ -206,12 +265,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 创建 量化核心 资源，并在入口处完成必要的参数归一。
     pub async fn prepare_order_settings(
         &self,
         exchange: ExchangeId,
         request: PrepareOrderSettingsRequest,
     ) -> Result<PrepareOrderSettingsResult> {
+        self.ensure_live_mutation_audit_scope("account.prepare_order_settings")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.account(exchange)?.prepare_order_settings(request).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -220,8 +280,9 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供place订单的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn place_order(&self, request: OrderPlacementRequest) -> Result<OrderAck> {
+        self.ensure_live_mutation_audit_scope("trade.place_order")?;
         match &self.mode {
             GatewayMode::Live(sdk) => {
                 let trade = sdk.trade(request.exchange)?;
@@ -251,12 +312,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供placeprotective订单的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn place_protective_order(
         &self,
         exchange: ExchangeId,
         request: ProtectiveOrderRequest,
     ) -> Result<OrderAck> {
+        self.ensure_live_mutation_audit_scope("trade.place_protective_order")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.trade(exchange)?.place_protective_order(request).await,
             GatewayMode::DryRun => Ok(OrderAck {
@@ -277,6 +339,7 @@ impl CryptoExcAllGateway {
                     "protective": true,
                     "side": request.side,
                     "stop_price": request.stop_price,
+                    "quantity": request.quantity,
                     "position_side": request.position_side,
                     "reduce_only": request.reduce_only,
                     "close_position": request.close_position,
@@ -286,8 +349,9 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供订单的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn order(&self, exchange: ExchangeId, query: OrderQuery) -> Result<Order> {
+        self.ensure_signed_read_only_scope("orders.order")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.orders(exchange)?.get(query).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -296,12 +360,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供protective订单的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn protective_order(
         &self,
         exchange: ExchangeId,
         query: ProtectiveOrderQuery,
     ) -> Result<Order> {
+        self.ensure_signed_read_only_scope("orders.protective_order")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.orders(exchange)?.get_protective_order(query).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -310,12 +375,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供开仓订单的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn open_orders(
         &self,
         exchange: ExchangeId,
         query: OrderListQuery,
     ) -> Result<Vec<Order>> {
+        self.ensure_signed_read_only_scope("orders.open_orders")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.orders(exchange)?.open(query).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -324,12 +390,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供订单history的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn order_history(
         &self,
         exchange: ExchangeId,
         query: OrderListQuery,
     ) -> Result<Vec<Order>> {
+        self.ensure_signed_read_only_scope("orders.order_history")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.orders(exchange)?.history(query).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -338,12 +405,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供仓位history的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn position_history(
         &self,
         exchange: ExchangeId,
         query: PositionHistoryQuery,
     ) -> Result<Vec<PositionHistory>> {
+        self.ensure_signed_read_only_scope("positions.position_history")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.positions(exchange)?.history(query).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -352,8 +420,9 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供fills的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn fills(&self, exchange: ExchangeId, query: FillListQuery) -> Result<Vec<Fill>> {
+        self.ensure_signed_read_only_scope("fills.list")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.fills(exchange)?.list(query).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -362,8 +431,9 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供balances的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn balances(&self, exchange: ExchangeId) -> Result<Vec<Balance>> {
+        self.ensure_signed_read_only_scope("account.balances")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.account(exchange)?.balances().await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -372,12 +442,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供accountbills的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn account_bills(
         &self,
         exchange: ExchangeId,
         query: AccountBillQuery,
     ) -> Result<Vec<AccountBill>> {
+        self.ensure_signed_read_only_scope("account.bills")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.account(exchange)?.bills(query).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -386,12 +457,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 提供仓位的集中实现，避免量化核心调用方重复处理相同细节。
     pub async fn positions(
         &self,
         exchange: ExchangeId,
         instrument: Option<&Instrument>,
     ) -> Result<Vec<Position>> {
+        self.ensure_signed_read_only_scope("positions.list")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.positions(exchange)?.list(instrument).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -400,12 +472,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 判断cancel订单，给量化核心流程提供布尔结果。
     pub async fn cancel_order(
         &self,
         exchange: ExchangeId,
         request: CancelOrderRequest,
     ) -> Result<OrderAck> {
+        self.ensure_live_mutation_audit_scope("trade.cancel_order")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.trade(exchange)?.cancel_order(request).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -414,12 +487,13 @@ impl CryptoExcAllGateway {
             }),
         }
     }
-
+    /// 判断cancelprotective订单，给量化核心流程提供布尔结果。
     pub async fn cancel_protective_order(
         &self,
         exchange: ExchangeId,
         request: CancelOrderRequest,
     ) -> Result<OrderAck> {
+        self.ensure_live_mutation_audit_scope("trade.cancel_protective_order")?;
         match &self.mode {
             GatewayMode::Live(sdk) => sdk.trade(exchange)?.cancel_protective_order(request).await,
             GatewayMode::DryRun => Err(Error::Unsupported {
@@ -429,33 +503,33 @@ impl CryptoExcAllGateway {
         }
     }
 }
-
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 fn binance_proxy_url_from_env() -> Option<String> {
     std::env::var("BINANCE_PROXY_URL")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
-
+/// 提供OKXrequestexpirationmsfrom环境变量的集中实现，避免量化核心调用方重复处理相同细节。
 fn okx_request_expiration_ms_from_env() -> Option<i64> {
     std::env::var("OKX_REQUEST_EXPIRATION_MS")
         .ok()
         .and_then(|value| value.trim().parse::<i64>().ok())
         .filter(|value| *value > 0)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
-
+    /// 封装环境变量lock，减少量化核心调用方重复实现相同细节。
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
             .lock()
             .expect("env lock")
     }
-
     #[test]
     fn maps_our_request_to_crypto_exc_all_request() {
         let request = OrderPlacementRequest {
@@ -474,7 +548,6 @@ mod tests {
             time_in_force: Some(TimeInForce::Gtc),
             attached_stop_loss_price: Some("2200.5".to_string()),
         };
-
         let mapped = request.clone().into_place_order_request();
         assert_eq!(mapped.instrument, request.instrument);
         assert_eq!(mapped.side, request.side);
@@ -493,7 +566,6 @@ mod tests {
             request.attached_stop_loss_price
         );
     }
-
     #[tokio::test]
     async fn dry_run_place_order_returns_simulated_ack_without_credentials() {
         let gateway = CryptoExcAllGateway::dry_run();
@@ -513,9 +585,7 @@ mod tests {
             time_in_force: None,
             attached_stop_loss_price: Some("2200.5".to_string()),
         };
-
         let ack = gateway.place_order(request).await.unwrap();
-
         assert_eq!(ack.exchange, ExchangeId::Okx);
         assert_eq!(ack.exchange_symbol, "BTC-USDT-SWAP");
         assert_eq!(ack.client_order_id.as_deref(), Some("rq-dry-run"));
@@ -523,7 +593,6 @@ mod tests {
         assert_eq!(ack.raw["dry_run"], true);
         assert_eq!(ack.raw["attached_stop_loss_price"], "2200.5");
     }
-
     #[tokio::test]
     async fn dry_run_place_protective_order_returns_simulated_ack_without_credentials() {
         let gateway = CryptoExcAllGateway::dry_run();
@@ -531,12 +600,10 @@ mod tests {
         let request = ProtectiveOrderRequest::stop_market(instrument, OrderSide::Sell, "2200")
             .with_close_position(true)
             .with_client_order_id("rq-sl-42");
-
         let ack = gateway
             .place_protective_order(ExchangeId::Binance, request)
             .await
             .unwrap();
-
         assert_eq!(ack.exchange, ExchangeId::Binance);
         assert_eq!(ack.exchange_symbol, "ETHUSDT");
         assert_eq!(ack.client_order_id.as_deref(), Some("rq-sl-42"));
@@ -544,12 +611,57 @@ mod tests {
         assert_eq!(ack.raw["protective"], true);
         assert_eq!(ack.raw["close_position"], true);
     }
-
+    #[tokio::test]
+    async fn live_mutation_audit_scope_is_required_by_default() {
+        let error =
+            CryptoExcAllGateway::ensure_live_mutation_audit_scope_active("trade.place_order")
+                .expect_err("live mutation should require worker audit scope by default");
+        assert!(error
+            .to_string()
+            .contains("exchange_request_audit_logs preflight scope"));
+    }
+    #[tokio::test]
+    async fn live_mutation_audit_scope_allows_scoped_gateway_call() {
+        CryptoExcAllGateway::with_live_mutation_audit_scope(async {
+            CryptoExcAllGateway::ensure_live_mutation_audit_scope_active("trade.place_order")
+                .expect("worker audit scope should allow live mutation call");
+        })
+        .await;
+    }
+    #[tokio::test]
+    async fn live_signed_read_only_scope_is_required_by_default() {
+        let error = CryptoExcAllGateway::ensure_signed_read_only_scope_active("orders.open_orders")
+            .expect_err("live signed read-only should require worker scope by default");
+        assert!(error.to_string().contains("signed read-only scope"));
+    }
+    #[tokio::test]
+    async fn live_signed_read_only_scope_allows_scoped_gateway_call() {
+        CryptoExcAllGateway::with_signed_read_only_scope(async {
+            CryptoExcAllGateway::ensure_signed_read_only_scope_active("orders.open_orders")
+                .expect("worker signed read-only scope should allow live read");
+        })
+        .await;
+    }
+    #[tokio::test]
+    async fn direct_live_signed_read_only_query_requires_scope_before_network() {
+        let gateway = CryptoExcAllGateway::from_single_exchange_credentials(
+            ExchangeId::Binance,
+            "test-api-key",
+            "test-api-secret",
+            Option::<String>::None,
+            false,
+        )
+        .unwrap();
+        let error = gateway
+            .balances(ExchangeId::Binance)
+            .await
+            .expect_err("direct live signed read-only query must be blocked before network");
+        assert!(error.to_string().contains("signed read-only scope"));
+    }
     #[tokio::test]
     async fn dry_run_rejects_live_account_and_cancel_queries() {
         let gateway = CryptoExcAllGateway::dry_run();
         let instrument = Instrument::perp("eth", "usdt").with_settlement("usdt");
-
         assert!(gateway
             .ticker(ExchangeId::Binance, &instrument)
             .await
@@ -574,7 +686,6 @@ mod tests {
             .await
             .is_err());
     }
-
     #[test]
     fn builds_gateway_from_single_okx_runtime_config() {
         let gateway = CryptoExcAllGateway::from_single_exchange_credentials(
@@ -585,41 +696,32 @@ mod tests {
             true,
         )
         .unwrap();
-
         assert_eq!(gateway.configured_exchanges(), vec![ExchangeId::Okx]);
     }
-
     #[test]
     fn single_exchange_okx_runtime_config_does_not_force_request_expiration_window() {
         let _guard = env_lock();
         let previous = std::env::var("OKX_REQUEST_EXPIRATION_MS").ok();
-
         std::env::remove_var("OKX_REQUEST_EXPIRATION_MS");
         assert_eq!(okx_request_expiration_ms_from_env(), None);
-
         std::env::set_var("OKX_REQUEST_EXPIRATION_MS", "450000");
         assert_eq!(okx_request_expiration_ms_from_env(), Some(450_000));
-
         std::env::set_var("OKX_REQUEST_EXPIRATION_MS", "0");
         assert_eq!(okx_request_expiration_ms_from_env(), None);
-
         match previous {
             Some(value) => std::env::set_var("OKX_REQUEST_EXPIRATION_MS", value),
             None => std::env::remove_var("OKX_REQUEST_EXPIRATION_MS"),
         }
     }
-
     #[test]
     fn single_exchange_binance_runtime_config_reads_proxy_env() {
         let _guard = env_lock();
         let previous = std::env::var("BINANCE_PROXY_URL").ok();
-
         std::env::set_var("BINANCE_PROXY_URL", " http://127.0.0.1:7897 ");
         assert_eq!(
             binance_proxy_url_from_env().as_deref(),
             Some("http://127.0.0.1:7897")
         );
-
         match previous {
             Some(value) => std::env::set_var("BINANCE_PROXY_URL", value),
             None => std::env::remove_var("BINANCE_PROXY_URL"),

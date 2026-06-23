@@ -10,17 +10,16 @@ use rust_quant_domain::traits::fund_monitoring_repository::{
     FundFlowAlertRepository, MarketAnomalyRepository,
 };
 use sqlx::{PgPool, Row};
-
 pub struct SqlxMarketAnomalyRepository {
+    /// 数据库连接池。
     pool: PgPool,
 }
-
 impl SqlxMarketAnomalyRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
-
+/// 提供rankimproved的集中实现，避免配置运行时调用方重复处理相同细节。
 fn rank_improved(new_rank: Option<i32>, old_best_rank: Option<i32>) -> bool {
     match (new_rank, old_best_rank) {
         (Some(new_rank), Some(old_best_rank)) => new_rank < old_best_rank,
@@ -28,7 +27,7 @@ fn rank_improved(new_rank: Option<i32>, old_best_rank: Option<i32>) -> bool {
         _ => false,
     }
 }
-
+/// 提供deltaimproved的集中实现，避免配置运行时调用方重复处理相同细节。
 fn delta_improved(new_delta: Option<i32>, old_max_delta: Option<i32>) -> bool {
     match (new_delta, old_max_delta) {
         (Some(new_delta), Some(old_max_delta)) => new_delta > old_max_delta,
@@ -36,9 +35,9 @@ fn delta_improved(new_delta: Option<i32>, old_max_delta: Option<i32>) -> bool {
         _ => false,
     }
 }
-
 #[async_trait]
 impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
+    /// 提供save的集中实现，避免配置运行时调用方重复处理相同细节。
     async fn save(&self, anomaly: &MarketAnomaly) -> Result<i64> {
         let inserted_id = sqlx::query_scalar::<_, i64>(
             r#"
@@ -73,10 +72,9 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .bind(&anomaly.status)
         .fetch_one(&self.pool)
         .await?;
-
         Ok(inserted_id)
     }
-
+    /// 更新 配置、基础设施和运行时 状态，并保留调用方需要的结果或错误信息。
     async fn mark_exited(&self, symbol: &str) -> Result<()> {
         sqlx::query(
             r#"
@@ -89,14 +87,13 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .await?;
         Ok(())
     }
-
+    /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
     async fn get_latest_update_time(&self) -> Result<Option<DateTime<Utc>>> {
         let row = sqlx::query(
             r#"SELECT MAX(updated_at) as max_time FROM market_anomalies WHERE status = 'ACTIVE'"#,
         )
         .fetch_optional(&self.pool)
         .await?;
-
         if let Some(row) = row {
             let max_time: Option<DateTime<Utc>> = row.try_get("max_time").ok();
             Ok(max_time)
@@ -104,7 +101,7 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
             Ok(None)
         }
     }
-
+    /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
     async fn get_all_active(&self) -> Result<Vec<MarketAnomaly>> {
         let rows = sqlx::query(
             r#"
@@ -117,7 +114,6 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         )
         .fetch_all(&self.pool)
         .await?;
-
         let mut result = Vec::new();
         for row in rows {
             result.push(MarketAnomaly {
@@ -139,7 +135,7 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         }
         Ok(result)
     }
-
+    /// 删除或清理 配置、基础设施和运行时 的临时数据，避免过期状态继续影响后续流程。
     async fn clear_stale_period_data(
         &self,
         clear_15m: bool,
@@ -156,11 +152,9 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         if clear_24h {
             updates.push("rank_24h_ago = NULL, delta_24h = NULL");
         }
-
         if updates.is_empty() {
             return Ok(());
         }
-
         let sql = format!(
             "UPDATE market_anomalies SET {} WHERE status = 'ACTIVE'",
             updates.join(", ")
@@ -168,7 +162,7 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         sqlx::query(&sql).execute(&self.pool).await?;
         Ok(())
     }
-
+    /// 持久化 配置、基础设施和运行时 结果，保证写入路径和幂等语义集中处理。
     async fn save_rank_event(&self, event: &MarketRankEvent) -> Result<i64> {
         let technical_snapshot = event.technical_snapshot.as_ref();
         let inserted_id = sqlx::query_scalar::<_, i64>(
@@ -216,10 +210,9 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .bind(&event.notification_state)
         .fetch_one(&self.pool)
         .await?;
-
         Ok(inserted_id)
     }
-
+    /// 持久化 配置、基础设施和运行时 结果，保证写入路径和幂等语义集中处理。
     async fn upsert_market_velocity_episode(
         &self,
         episode: &MarketVelocityEpisode,
@@ -243,7 +236,6 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .bind(&episode.timeframe)
         .fetch_optional(&mut *tx)
         .await?;
-
         let Some(row) = existing else {
             let id = sqlx::query_scalar::<_, i64>(
                 r#"
@@ -278,13 +270,11 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
             tx.commit().await?;
             return Ok((id, MarketVelocityEpisodeWrite::Created));
         };
-
         let id: i64 = row.try_get("id")?;
         let old_best_rank: Option<i32> = row.try_get("best_new_rank")?;
         let old_max_delta: Option<i32> = row.try_get("max_delta_rank")?;
         let escalated = rank_improved(episode.latest_new_rank, old_best_rank)
             || delta_improved(episode.latest_delta_rank, old_max_delta);
-
         sqlx::query(
             r#"
             UPDATE market_velocity_episodes
@@ -327,7 +317,6 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-
         let write = if escalated {
             MarketVelocityEpisodeWrite::Escalated
         } else {
@@ -335,7 +324,7 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         };
         Ok((id, write))
     }
-
+    /// 提供attachrankeventto市场动量episode的集中实现，避免配置运行时调用方重复处理相同细节。
     async fn attach_rank_event_to_market_velocity_episode(
         &self,
         episode_id: i64,
@@ -358,7 +347,7 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .await?;
         Ok(())
     }
-
+    /// 停止 配置、基础设施和运行时 后台流程，确保退出时不留下未释放状态。
     async fn close_stale_market_velocity_episodes(
         &self,
         exchange: &str,
@@ -380,12 +369,11 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .await?;
         Ok(result.rows_affected())
     }
-
+    /// 持久化 配置、基础设施和运行时 结果，保证写入路径和幂等语义集中处理。
     async fn save_rank_snapshots(&self, snapshots: &[MarketRankSnapshot]) -> Result<()> {
         if snapshots.is_empty() {
             return Ok(());
         }
-
         let mut tx = self.pool.begin().await?;
         for snapshot in snapshots {
             sqlx::query(
@@ -411,7 +399,7 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         tx.commit().await?;
         Ok(())
     }
-
+    /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
     async fn load_recent_rank_snapshots(
         &self,
         exchange: &str,
@@ -430,7 +418,6 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         .bind(since)
         .fetch_all(&self.pool)
         .await?;
-
         let mut snapshots = Vec::with_capacity(rows.len());
         for row in rows {
             snapshots.push(MarketRankSnapshot {
@@ -446,7 +433,7 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         }
         Ok(snapshots)
     }
-
+    /// 删除或清理 配置、基础设施和运行时 的临时数据，避免过期状态继续影响后续流程。
     async fn delete_rank_snapshots_before(&self, before: DateTime<Utc>) -> Result<()> {
         sqlx::query(
             r#"
@@ -460,25 +447,23 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         Ok(())
     }
 }
-
 pub struct SqlxFundFlowAlertRepository {
+    /// 数据库连接池。
     pool: PgPool,
 }
-
 impl SqlxFundFlowAlertRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
-
 #[async_trait]
 impl FundFlowAlertRepository for SqlxFundFlowAlertRepository {
+    /// 提供save的集中实现，避免配置运行时调用方重复处理相同细节。
     async fn save(&self, alert: &FundFlowAlert) -> Result<i64> {
         let side_str = match alert.side {
             FundFlowSide::Inflow => "INFLOW",
             FundFlowSide::Outflow => "OUTFLOW",
         };
-
         let inserted_id = sqlx::query_scalar::<_, i64>(
             r#"
             INSERT INTO fund_flow_alerts (symbol, net_inflow, total_volume, side, window_secs, alert_at)
@@ -494,7 +479,6 @@ impl FundFlowAlertRepository for SqlxFundFlowAlertRepository {
         .bind(alert.alert_at)
         .fetch_one(&self.pool)
         .await?;
-
         Ok(inserted_id)
     }
 }

@@ -1,24 +1,30 @@
+use super::{json_response, query_param, strategy_configs, InternalHttpJsonResponse};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use sqlx::PgPool;
-
-use super::{json_response, query_param, strategy_configs, InternalHttpJsonResponse};
-
 const DEFAULT_PAGE_SIZE: usize = 20;
 const MAX_PAGE_SIZE: usize = 200;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BacktestLogListQuery {
+    /// 页码。
     pub page: usize,
+    /// 分页大小。
     pub page_size: usize,
+    /// 关键词；为空时不做关键词过滤。
     pub keyword: Option<String>,
+    /// 当前状态。
     pub status: Option<String>,
+    /// 交易所名称。
     pub exchange: Option<String>,
+    /// 交易对或资产符号。
     pub symbol: Option<String>,
+    /// 开始时间。
     pub start_time: Option<String>,
+    /// 结束时间。
     pub end_time: Option<String>,
 }
-
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 pub fn backtest_log_list_query_from_path(path: &str) -> Result<BacktestLogListQuery, String> {
     let query = path
         .split_once('?')
@@ -32,7 +38,6 @@ pub fn backtest_log_list_query_from_path(path: &str) -> Result<BacktestLogListQu
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .clamp(1, MAX_PAGE_SIZE);
-
     Ok(BacktestLogListQuery {
         page,
         page_size,
@@ -44,11 +49,10 @@ pub fn backtest_log_list_query_from_path(path: &str) -> Result<BacktestLogListQu
         end_time: optional_text(query, &["endTime", "end_time"]),
     })
 }
-
 pub fn core_backtest_run_list_query_from_path(path: &str) -> Result<BacktestLogListQuery, String> {
     backtest_log_list_query_from_path(path)
 }
-
+/// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub(super) async fn handle_backtest_log_list_path(path: &str) -> InternalHttpJsonResponse {
     let query = match backtest_log_list_query_from_path(path) {
         Ok(query) => query,
@@ -58,13 +62,12 @@ pub(super) async fn handle_backtest_log_list_path(path: &str) -> InternalHttpJso
         Ok(pool) => pool,
         Err(error) => return json_response(503, json!({ "error": error.to_string() })),
     };
-
     match backtest_logs_response(&pool, &query).await {
         Ok(response) => json_response(200, response),
         Err(error) => json_response(500, json!({ "error": error.to_string() })),
     }
 }
-
+/// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub(super) async fn handle_core_backtest_run_list_path(path: &str) -> InternalHttpJsonResponse {
     let query = match core_backtest_run_list_query_from_path(path) {
         Ok(query) => query,
@@ -74,13 +77,12 @@ pub(super) async fn handle_core_backtest_run_list_path(path: &str) -> InternalHt
         Ok(pool) => pool,
         Err(error) => return json_response(503, json!({ "error": error.to_string() })),
     };
-
     match core_backtest_runs_response(&pool, &query).await {
         Ok(response) => json_response(200, response),
         Err(error) => json_response(500, json!({ "error": error.to_string() })),
     }
 }
-
+/// 提供回测logsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn backtest_logs_response(pool: &PgPool, query: &BacktestLogListQuery) -> Result<Value> {
     let legacy_exists = table_exists(pool, "back_test_log").await?;
     if legacy_exists {
@@ -92,7 +94,6 @@ async fn backtest_logs_response(pool: &PgPool, query: &BacktestLogListQuery) -> 
         {
             return Ok(legacy_response);
         }
-
         if table_exists(pool, "backtest_runs").await? {
             let modern_response = modern_backtest_logs_response(pool, query).await?;
             if modern_response
@@ -105,11 +106,9 @@ async fn backtest_logs_response(pool: &PgPool, query: &BacktestLogListQuery) -> 
         }
         return Ok(legacy_response);
     }
-
     if table_exists(pool, "backtest_runs").await? {
         return modern_backtest_logs_response(pool, query).await;
     }
-
     Ok(json!({
         "items": [],
         "total": 0,
@@ -120,7 +119,7 @@ async fn backtest_logs_response(pool: &PgPool, query: &BacktestLogListQuery) -> 
         }
     }))
 }
-
+/// 提供core回测runsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn core_backtest_runs_response(pool: &PgPool, query: &BacktestLogListQuery) -> Result<Value> {
     let modern_exists = table_exists(pool, "backtest_runs").await?;
     if modern_exists {
@@ -132,7 +131,6 @@ async fn core_backtest_runs_response(pool: &PgPool, query: &BacktestLogListQuery
         {
             return Ok(modern_response);
         }
-
         if table_exists(pool, "back_test_log").await? {
             let legacy_response = legacy_core_backtest_runs_response(pool, query).await?;
             if legacy_response
@@ -145,11 +143,9 @@ async fn core_backtest_runs_response(pool: &PgPool, query: &BacktestLogListQuery
         }
         return Ok(modern_response);
     }
-
     if table_exists(pool, "back_test_log").await? {
         return legacy_core_backtest_runs_response(pool, query).await;
     }
-
     Ok(json!({
         "items": [],
         "total": 0,
@@ -160,7 +156,7 @@ async fn core_backtest_runs_response(pool: &PgPool, query: &BacktestLogListQuery
         }
     }))
 }
-
+/// 提供legacy回测logsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn legacy_backtest_logs_response(
     pool: &PgPool,
     query: &BacktestLogListQuery,
@@ -186,7 +182,6 @@ async fn legacy_backtest_logs_response(
     .fetch_one(pool)
     .await
     .context("count legacy backtest logs")?;
-
     let items = sqlx::query_scalar::<_, Value>(
         r#"
         SELECT to_jsonb(row)
@@ -241,10 +236,9 @@ async fn legacy_backtest_logs_response(
     .fetch_all(pool)
     .await
     .context("list legacy backtest logs")?;
-
     Ok(json!({ "items": items, "total": usize::try_from(total).unwrap_or(0) }))
 }
-
+/// 提供legacycore回测runsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn legacy_core_backtest_runs_response(
     pool: &PgPool,
     query: &BacktestLogListQuery,
@@ -270,7 +264,6 @@ async fn legacy_core_backtest_runs_response(
     .fetch_one(pool)
     .await
     .context("count legacy core backtest runs")?;
-
     let items = sqlx::query_scalar::<_, Value>(
         r#"
         SELECT to_jsonb(row)
@@ -316,10 +309,9 @@ async fn legacy_core_backtest_runs_response(
     .fetch_all(pool)
     .await
     .context("list legacy core backtest runs")?;
-
     Ok(json!({ "items": items, "total": usize::try_from(total).unwrap_or(0) }))
 }
-
+/// 提供modern回测logsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn modern_backtest_logs_response(
     pool: &PgPool,
     query: &BacktestLogListQuery,
@@ -331,7 +323,7 @@ async fn modern_backtest_logs_response(
         modern_backtest_logs_without_results_response(pool, query).await
     }
 }
-
+/// 提供moderncore回测runsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn modern_core_backtest_runs_response(
     pool: &PgPool,
     query: &BacktestLogListQuery,
@@ -343,7 +335,7 @@ async fn modern_core_backtest_runs_response(
         modern_core_backtest_runs_without_results_response(pool, query).await
     }
 }
-
+/// 提供modern回测logswithresultsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn modern_backtest_logs_with_results_response(
     pool: &PgPool,
     query: &BacktestLogListQuery,
@@ -416,10 +408,9 @@ async fn modern_backtest_logs_with_results_response(
     .fetch_all(pool)
     .await
     .context("list modern backtest logs")?;
-
     Ok(json!({ "items": items, "total": total }))
 }
-
+/// 提供moderncore回测runswithresultsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn modern_core_backtest_runs_with_results_response(
     pool: &PgPool,
     query: &BacktestLogListQuery,
@@ -477,10 +468,9 @@ async fn modern_core_backtest_runs_with_results_response(
     .fetch_all(pool)
     .await
     .context("list modern core backtest runs")?;
-
     Ok(json!({ "items": items, "total": total }))
 }
-
+/// 提供modern回测logswithoutresultsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn modern_backtest_logs_without_results_response(
     pool: &PgPool,
     query: &BacktestLogListQuery,
@@ -546,10 +536,9 @@ async fn modern_backtest_logs_without_results_response(
     .fetch_all(pool)
     .await
     .context("list modern backtest logs without results")?;
-
     Ok(json!({ "items": items, "total": total }))
 }
-
+/// 提供moderncore回测runswithoutresultsresponse的集中实现，避免回测策略调用方重复处理相同细节。
 async fn modern_core_backtest_runs_without_results_response(
     pool: &PgPool,
     query: &BacktestLogListQuery,
@@ -600,10 +589,9 @@ async fn modern_core_backtest_runs_without_results_response(
     .fetch_all(pool)
     .await
     .context("list modern core backtest runs without results")?;
-
     Ok(json!({ "items": items, "total": total }))
 }
-
+/// 提供modern回测runs数量的集中实现，避免回测策略调用方重复处理相同细节。
 async fn modern_backtest_runs_count(pool: &PgPool, query: &BacktestLogListQuery) -> Result<usize> {
     let total = sqlx::query_scalar::<_, i64>(
         r#"
@@ -626,10 +614,9 @@ async fn modern_backtest_runs_count(pool: &PgPool, query: &BacktestLogListQuery)
     .fetch_one(pool)
     .await
     .context("count modern backtest runs")?;
-
     Ok(usize::try_from(total).unwrap_or(0))
 }
-
+/// 提供tableexists的集中实现，避免回测策略调用方重复处理相同细节。
 async fn table_exists(pool: &PgPool, table_name: &str) -> Result<bool> {
     let regclass = sqlx::query_scalar::<_, Option<String>>("SELECT to_regclass($1)::TEXT")
         .bind(format!("public.{table_name}"))
@@ -638,7 +625,7 @@ async fn table_exists(pool: &PgPool, table_name: &str) -> Result<bool> {
         .with_context(|| format!("check table exists: {table_name}"))?;
     Ok(regclass.is_some())
 }
-
+/// 提供optionaltext的集中实现，避免回测策略调用方重复处理相同细节。
 fn optional_text(query: &str, names: &[&str]) -> Option<String> {
     query_param(query, names).and_then(|value| {
         let trimmed = value.trim().to_string();
@@ -649,7 +636,6 @@ fn optional_text(query: &str, names: &[&str]) -> Option<String> {
         }
     })
 }
-
 fn offset(query: &BacktestLogListQuery) -> i64 {
     ((query.page.saturating_sub(1)) * query.page_size) as i64
 }

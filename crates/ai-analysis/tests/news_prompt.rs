@@ -1,5 +1,4 @@
 use rust_quant_ai_analysis::news_prompt::{build_news_analysis_prompt, NewsAnalysisPromptInput};
-
 #[test]
 fn news_analysis_prompt_marks_fast_path_requirements() {
     let prompt = build_news_analysis_prompt(&NewsAnalysisPromptInput {
@@ -8,7 +7,6 @@ fn news_analysis_prompt_marks_fast_path_requirements() {
         source: "jinse".to_string(),
         published_at: "2026-04-21T10:00:00Z".to_string(),
     });
-
     assert!(prompt.system.contains("高置信历史模式快速通道"));
     assert!(prompt.system.contains("fast_path"));
     assert!(prompt.system.contains("historical_pattern"));
@@ -16,14 +14,12 @@ fn news_analysis_prompt_marks_fast_path_requirements() {
     assert!(prompt.system.contains("confidence"));
     assert!(prompt.system.contains("ETF"));
     assert!(prompt.system.contains("只输出 JSON"));
-
     assert!(prompt.user.contains("SEC 批准现货比特币 ETF"));
     assert!(prompt
         .user
         .contains("美国 SEC 已批准多只现货比特币 ETF 上市交易。"));
     assert!(prompt.user.contains("jinse"));
 }
-
 #[test]
 fn news_analysis_prompt_details_fast_path_event_rules() {
     let prompt = build_news_analysis_prompt(&NewsAnalysisPromptInput {
@@ -32,7 +28,6 @@ fn news_analysis_prompt_details_fast_path_event_rules() {
         source: "test".to_string(),
         published_at: "2026-04-21T10:00:00Z".to_string(),
     });
-
     let system = prompt.system;
     for required in [
         "触发词",

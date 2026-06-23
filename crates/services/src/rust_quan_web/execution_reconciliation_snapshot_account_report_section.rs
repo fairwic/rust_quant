@@ -1,3 +1,4 @@
+/// 构建buildexchangeaccountsnapshotreport请求，集中维护Web 商业链路的载荷和字段组装规则。
 pub fn build_exchange_account_snapshot_report_request(
     config: &ReconciliationSnapshotCheckConfig,
     positions: &[Position],
@@ -33,7 +34,6 @@ pub fn build_exchange_account_snapshot_report_request(
             .or(order.created_at)
             .and_then(timestamp_millis_to_naive_string)
             .or_else(|| Some(snapshot_at.clone()));
-
         orders.push(ExchangeAccountOrderSnapshotInput {
             external_order_id,
             order_side,
@@ -55,7 +55,6 @@ pub fn build_exchange_account_snapshot_report_request(
             observed_at,
         });
     }
-
     let trades = fills
         .iter()
         .filter(|fill| fill.exchange == config.exchange)
@@ -91,7 +90,6 @@ pub fn build_exchange_account_snapshot_report_request(
             })
         })
         .collect();
-
     let positions = positions
         .iter()
         .filter(|position| position.exchange == config.exchange)
@@ -127,7 +125,6 @@ pub fn build_exchange_account_snapshot_report_request(
             })
         })
         .collect();
-
     let position_history = position_history
         .iter()
         .filter(|position| position.exchange == config.exchange)
@@ -169,7 +166,6 @@ pub fn build_exchange_account_snapshot_report_request(
             })
         })
         .collect();
-
     let balances = balances
         .iter()
         .filter(|balance| balance.exchange == config.exchange)
@@ -199,7 +195,6 @@ pub fn build_exchange_account_snapshot_report_request(
             })
         })
         .collect();
-
     let bills = account_bills
         .iter()
         .filter(|bill| bill.exchange == config.exchange)
@@ -250,7 +245,6 @@ pub fn build_exchange_account_snapshot_report_request(
             })
         })
         .collect();
-
     Ok(ExchangeAccountSnapshotReportRequest {
         combo_id: config.combo_id,
         buyer_email: config.buyer_email.clone(),

@@ -1,7 +1,6 @@
 use serde_json::Value;
 use std::fs;
 use std::process::Command;
-
 #[test]
 fn cli_builds_probe_seed_from_orderbook_fixture_without_live_trading() {
     let dir = std::env::temp_dir();
@@ -13,7 +12,6 @@ fn cli_builds_probe_seed_from_orderbook_fixture_without_live_trading() {
         "pre_major_listing_capture_orderbooks_{}.json",
         std::process::id()
     ));
-
     fs::write(
         &request_path,
         r#"
@@ -61,7 +59,6 @@ fn cli_builds_probe_seed_from_orderbook_fixture_without_live_trading() {
         "#,
     )
     .expect("write orderbook fixture");
-
     let output = Command::new(env!("CARGO_BIN_EXE_pre_major_listing_capture_probe"))
         .arg("--input")
         .arg(&request_path)
@@ -69,10 +66,8 @@ fn cli_builds_probe_seed_from_orderbook_fixture_without_live_trading() {
         .arg(&orderbook_path)
         .output()
         .expect("run pre_major_listing_capture_probe");
-
     fs::remove_file(&request_path).ok();
     fs::remove_file(&orderbook_path).ok();
-
     assert!(
         output.status.success(),
         "stderr={}",

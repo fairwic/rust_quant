@@ -6,7 +6,6 @@ fn full_product_health_operator_playbook_summary_drift_contract_spans_examples_a
     let summary_path = examples_dir.join("full-product-health-summary.json");
     let markdown_path = examples_dir.join("full-product-health.md");
     let admin_ingest_path = full_product_admin_ingest_fixture_path();
-
     let schema_body = fs::read_to_string(&schema_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_path.display(), error));
     let schema: Value = serde_json::from_str(&schema_body)
@@ -23,7 +22,6 @@ fn full_product_health_operator_playbook_summary_drift_contract_spans_examples_a
     let admin_ingest: Value = serde_json::from_str(&admin_ingest_body).unwrap_or_else(|error| {
         panic!("invalid admin ingest example: {error}\n{admin_ingest_body}")
     });
-
     let playbook_contract = &schema["consumer_contracts"]["operator_playbook_summary"];
     assert_eq!(
         playbook_contract["compatibility_contract_version"], 1,
@@ -49,7 +47,6 @@ fn full_product_health_operator_playbook_summary_drift_contract_spans_examples_a
             "operator playbook drift contract should require {required_path}"
         );
     }
-
     assert_required_nested_fields(
         &schema,
         "summary",
@@ -71,7 +68,6 @@ fn full_product_health_operator_playbook_summary_drift_contract_spans_examples_a
         markdown_body.contains("## Operator Playbook Summary"),
         "Markdown example should keep the operator playbook section marker"
     );
-
     let artifact_dir = temp_artifact_dir("full-product-health-validator-playbook-drift");
     let temp_full_report_path = artifact_dir.join("full-product-health.json");
     let temp_summary_path = artifact_dir.join("full-product-health-summary.json");
@@ -92,7 +88,6 @@ fn full_product_health_operator_playbook_summary_drift_contract_spans_examples_a
             error
         )
     });
-
     let mut summary_without_items = summary.clone();
     summary_without_items["operator_playbook_summary"]
         .as_object_mut()
@@ -103,7 +98,6 @@ fn full_product_health_operator_playbook_summary_drift_contract_spans_examples_a
         serde_json::to_string_pretty(&summary_without_items).expect("summary json"),
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", temp_summary_path.display(), error));
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env(
@@ -121,7 +115,6 @@ fn full_product_health_operator_playbook_summary_drift_contract_spans_examples_a
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         !output.status.success(),
         "strict validator should reject summary artifacts missing operator_playbook_summary nested fields"

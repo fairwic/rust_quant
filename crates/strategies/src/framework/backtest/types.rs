@@ -18,29 +18,33 @@
 //! ## 配置类型
 //! - [`BasicRiskStrategyConfig`] - 风控配置
 //! - [`MoveStopLoss`] - 移动止损
-
 use super::super::types::TradeSide;
 use rust_quant_trading::audit::AuditTrail;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-
 // ============================================================================
 // 回测结果类型
 // ============================================================================
-
 /// 回测结果
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BackTestResult {
+    /// 金额数值。
     pub funds: f64,
+    /// 胜率。
     pub win_rate: f64,
+    /// 回测过程中仍未平仓的交易记录。
     pub open_trades: usize,
+    /// 列表数据。
     pub trade_records: Vec<TradeRecord>,
+    /// 列表数据。
     pub filtered_signals: Vec<FilteredSignal>,
+    /// 列表数据。
     pub dynamic_config_logs: Vec<DynamicConfigLog>,
+    /// 回测审计轨迹，用于还原关键计算步骤。
     pub audit_trail: AuditTrail,
 }
-
 impl Default for BackTestResult {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         BackTestResult {
             funds: 0.0,
@@ -53,7 +57,6 @@ impl Default for BackTestResult {
         }
     }
 }
-
 /// 交易记录
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TradeRecord {
@@ -92,15 +95,15 @@ pub struct TradeRecord {
     //止损更新历史(JSON序列化的Vec<StopLossUpdate>)
     pub stop_loss_update_history: Option<String>,
 }
-
 // ============================================================================
 // 信号类型
 // ============================================================================
-
 /// 信号结果
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SignalResult {
+    /// 是否应该触发买入。
     pub should_buy: bool,
+    /// 是否应该触发卖出。
     pub should_sell: bool,
     //开仓价格
     pub open_price: f64,
@@ -108,27 +111,26 @@ pub struct SignalResult {
     pub signal_kline_stop_loss_price: Option<f64>,
     /// 止损来源标记（如 "Engulfing", "KlineHammer" 等）
     pub stop_loss_source: Option<String>,
+    /// 价格数值。
     pub best_open_price: Option<f64>,
-
     //ATR止盈价格(通常设置为信号线的价差的2倍率) 1:2 1:3 1:4 1:5
     pub atr_take_profit_ratio_price: Option<f64>,
+    /// 止损价格。
     pub atr_stop_loss_price: Option<f64>,
-
     //做多指标动态止盈价格，比如当触发nwe突破信号线的时候。或者价格到达布林带的时候
     pub long_signal_take_profit_price: Option<f64>,
-
     //做空指标动态止盈价格，比如当触发nwe突破信号线的时候。或者价格到达布林带的时候
     pub short_signal_take_profit_price: Option<f64>,
+    /// 事件时间戳。
     pub ts: i64,
+    /// 单项信号值；为空时表示本次没有单值结果。
     pub single_value: Option<String>,
+    /// single结果；为空时使用默认值或表示不限制。
     pub single_result: Option<String>,
-
     /// 是否均线空头排列（用于判断是否逆势做多）
     pub is_ema_short_trend: Option<bool>,
-
     /// 是否均线多头排列（用于判断是否逆势做空）
     pub is_ema_long_trend: Option<bool>,
-
     /// 三级止盈价格（基于ATR倍数）
     /// 第一级：1.5倍ATR，触达后移动止损到开仓价
     pub atr_take_profit_level_1: Option<f64>,
@@ -136,23 +138,18 @@ pub struct SignalResult {
     pub atr_take_profit_level_2: Option<f64>,
     /// 第三级：5倍ATR，完全平仓
     pub atr_take_profit_level_3: Option<f64>,
-
     /// 过滤原因（如 MACD_FALLING_KNIFE, RSI_OVERBOUGHT 等）
     pub filter_reasons: Vec<String>,
-
     /// 动态配置调整标签（如 RANGE_TP_ONE_TO_ONE）
     pub dynamic_adjustments: Vec<String>,
     /// 动态配置快照(JSON)
     pub dynamic_config_snapshot: Option<String>,
-
     /// 信号方向
     pub direction: rust_quant_domain::SignalDirection,
 }
-
 // ============================================================================
 // 过滤信号与影子交易类型
 // ============================================================================
-
 /// 被过滤的信号记录（用于分析验证）
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FilteredSignal {
@@ -179,7 +176,6 @@ pub struct FilteredSignal {
     /// 信号详情 (各指标值的JSON快照)
     pub signal_value: Option<String>,
 }
-
 /// 动态配置调整记录（每根K线一次）
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DynamicConfigLog {
@@ -190,7 +186,6 @@ pub struct DynamicConfigLog {
     /// 动态配置快照(JSON)
     pub config_snapshot: Option<String>,
 }
-
 /// 影子交易状态（用于模拟被过滤信号的理论盈亏）
 #[derive(Debug, Clone)]
 pub struct ShadowTrade {
@@ -211,8 +206,8 @@ pub struct ShadowTrade {
     /// 最大浮亏
     pub max_unrealized_loss: f64,
 }
-
 impl Default for SignalResult {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             should_buy: false,
@@ -240,11 +235,9 @@ impl Default for SignalResult {
         }
     }
 }
-
 // ============================================================================
 // 仓位与状态类型
 // ============================================================================
-
 /// 持仓信息
 #[derive(Debug, Clone, Default)]
 pub struct TradePosition {
@@ -276,36 +269,31 @@ pub struct TradePosition {
     pub atr_take_ratio_profit_price: Option<f64>,
     /// 动态止盈价格（来自策略信号）
     pub long_signal_take_profit_price: Option<f64>,
+    /// 止盈价格。
     pub short_signal_take_profit_price: Option<f64>,
-
     //触发K线开仓价格止损(当达到一个特定的价格位置的时候，移动止损线到开仓价格)
     pub move_stop_open_price: Option<f64>,
     //信号状态
     pub signal_status: i32,
     //信号线最高最低价差
     pub signal_high_low_diff: f64,
-
     /// 入场K线振幅比例 (high-low / low)
     pub entry_kline_amplitude: Option<f64>,
-
     /// 入场K线收盘位置 (0-1)
     pub entry_kline_close_pos: Option<f64>,
-
     /// 三级止盈价格
     pub atr_take_profit_level_1: Option<f64>,
+    /// ATR 第二档止盈价；为空时表示未启用该档位。
     pub atr_take_profit_level_2: Option<f64>,
+    /// ATR 第三档止盈价；为空时表示未启用该档位。
     pub atr_take_profit_level_3: Option<f64>,
-
     /// 已触达的止盈级别（用于跟踪止盈进度）
     pub reached_take_profit_level: u8,
-
     /// 止损来源（如 "Engulfing", "KlineHammer" 等）
     pub stop_loss_source: Option<String>,
-
     /// 止损更新历史
     pub stop_loss_updates: Vec<rust_quant_domain::value_objects::StopLossUpdate>,
 }
-
 /// 交易状态
 #[derive(Debug, Clone)]
 pub struct TradingState {
@@ -326,8 +314,8 @@ pub struct TradingState {
     //交易持仓
     pub trade_position: Option<TradePosition>,
 }
-
 impl Default for TradingState {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             funds: 100.0,
@@ -341,11 +329,9 @@ impl Default for TradingState {
         }
     }
 }
-
 // ============================================================================
 // 配置类型
 // ============================================================================
-
 /// 止盈止损策略配置
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct BasicRiskStrategyConfig {
@@ -360,7 +346,6 @@ pub struct BasicRiskStrategyConfig {
     //固定信号线的止盈比例
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fixed_signal_kline_take_profit_ratio: Option<f64>, //固定信号线的止盈比例，比如当盈利超过 k线路的长度的 n 倍时，直接止盈，适用短线策略
-
     /// 高波动动态降损开关（原先由环境变量 DYNAMIC_MAX_LOSS 控制）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_max_loss: Option<bool>,
@@ -380,8 +365,8 @@ pub struct BasicRiskStrategyConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_range_loss_percent: Option<f64>,
 }
-
 impl Default for BasicRiskStrategyConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             max_loss_percent: 0.02, // 默认2%止损
@@ -397,26 +382,28 @@ impl Default for BasicRiskStrategyConfig {
         }
     }
 }
-
 /// 移动止损
 pub struct MoveStopLoss {
+    /// 是否为多头方向。
     pub is_long: bool,
+    /// 是否为空头方向。
     pub is_short: bool,
+    /// 价格。
     pub price: f64,
 }
-
 #[cfg(test)]
 mod tests {
     use super::{BasicRiskStrategyConfig, SignalResult};
-
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn signal_result_has_no_counter_trend_field() {
         let value = serde_json::to_value(SignalResult::default()).expect("serialize SignalResult");
         assert!(value
             .get("counter_trend_pullback_take_profit_price")
             .is_none());
     }
-
     #[test]
     fn risk_config_has_no_move_or_one_k_flags() {
         let value = serde_json::to_value(BasicRiskStrategyConfig::default())
@@ -426,7 +413,6 @@ mod tests {
             .get("is_move_stop_open_price_when_touch_price")
             .is_none());
     }
-
     #[test]
     fn risk_config_has_no_validate_or_tighten_flags() {
         let value = serde_json::to_value(BasicRiskStrategyConfig::default())

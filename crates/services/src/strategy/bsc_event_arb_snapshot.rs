@@ -2,10 +2,9 @@ use rust_quant_domain::entities::ExternalMarketSnapshot;
 use rust_quant_strategies::implementations::BscEventArbSignalSnapshot;
 use serde_json::Value;
 use std::collections::HashMap;
-
 pub struct BscEventArbSnapshotBuilder;
-
 impl BscEventArbSnapshotBuilder {
+    /// 构建build，集中维护回测策略的载荷和字段组装规则。
     pub fn build(
         symbol: &str,
         rows: &[ExternalMarketSnapshot],
@@ -14,7 +13,6 @@ impl BscEventArbSnapshotBuilder {
         if latest.is_empty() {
             return None;
         }
-
         let mut snapshot = BscEventArbSignalSnapshot::default();
         Self::apply_pair(latest.get("bsc_pair").copied(), &mut snapshot);
         Self::apply_security(latest.get("bsc_security").copied(), &mut snapshot);
@@ -24,7 +22,7 @@ impl BscEventArbSnapshotBuilder {
         Self::apply_holder(latest.get("holder_concentration").copied(), &mut snapshot);
         Some(snapshot)
     }
-
+    /// 提供最新bymetrictype的集中实现，避免回测策略调用方重复处理相同细节。
     fn latest_by_metric_type<'a>(
         symbol: &str,
         rows: &'a [ExternalMarketSnapshot],
@@ -45,7 +43,7 @@ impl BscEventArbSnapshotBuilder {
         }
         latest
     }
-
+    /// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     fn apply_pair(row: Option<&ExternalMarketSnapshot>, snapshot: &mut BscEventArbSignalSnapshot) {
         let Some(payload) = row.and_then(Self::payload) else {
             return;
@@ -58,7 +56,7 @@ impl BscEventArbSnapshotBuilder {
         snapshot.depth_2pct_usd = Self::f64_value(payload, "depth_2pct_usd");
         snapshot.is_dex_only = Self::bool_value(payload, "is_dex_only");
     }
-
+    /// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     fn apply_security(
         row: Option<&ExternalMarketSnapshot>,
         snapshot: &mut BscEventArbSignalSnapshot,
@@ -73,7 +71,7 @@ impl BscEventArbSnapshotBuilder {
         snapshot.has_pause_risk = Self::bool_value(payload, "has_pause_risk");
         snapshot.has_mint_risk = Self::bool_value(payload, "has_mint_risk");
     }
-
+    /// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     fn apply_cex_market(
         row: Option<&ExternalMarketSnapshot>,
         snapshot: &mut BscEventArbSignalSnapshot,
@@ -94,7 +92,7 @@ impl BscEventArbSnapshotBuilder {
         snapshot.price_change_from_entry_pct =
             Self::f64_value(payload, "price_change_from_entry_pct");
     }
-
+    /// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     fn apply_derivatives(
         row: Option<&ExternalMarketSnapshot>,
         snapshot: &mut BscEventArbSignalSnapshot,
@@ -114,7 +112,7 @@ impl BscEventArbSnapshotBuilder {
         snapshot.funding_flipped_positive = Self::payload_bool(payload, "funding_flipped_positive");
         snapshot.price_making_new_high = Self::payload_bool(payload, "price_making_new_high");
     }
-
+    /// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     fn apply_cex_flow(
         row: Option<&ExternalMarketSnapshot>,
         snapshot: &mut BscEventArbSignalSnapshot,
@@ -130,7 +128,7 @@ impl BscEventArbSnapshotBuilder {
         snapshot.cex_withdrawal_or_trading_restriction =
             Self::bool_value(payload, "cex_withdrawal_or_trading_restriction");
     }
-
+    /// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     fn apply_holder(
         row: Option<&ExternalMarketSnapshot>,
         snapshot: &mut BscEventArbSignalSnapshot,
@@ -141,26 +139,23 @@ impl BscEventArbSnapshotBuilder {
         snapshot.top_holder_or_lp_abnormal_outflow =
             Self::bool_value(payload, "top_holder_or_lp_abnormal_outflow");
     }
-
     fn payload(row: &ExternalMarketSnapshot) -> Option<&Value> {
         row.raw_payload.as_ref()
     }
-
     fn f64_value(payload: &Value, key: &str) -> f64 {
         payload.get(key).and_then(Value::as_f64).unwrap_or_default()
     }
-
+    /// 提供bool值的集中实现，避免回测策略调用方重复处理相同细节。
     fn bool_value(payload: &Value, key: &str) -> bool {
         payload
             .get(key)
             .and_then(Value::as_bool)
             .unwrap_or_default()
     }
-
     fn i64_value(payload: &Value, key: &str) -> i64 {
         payload.get(key).and_then(Value::as_i64).unwrap_or_default()
     }
-
+    /// 提供字符串值的集中实现，避免回测策略调用方重复处理相同细节。
     fn str_value(payload: &Value, key: &str) -> String {
         payload
             .get(key)
@@ -168,7 +163,7 @@ impl BscEventArbSnapshotBuilder {
             .unwrap_or_default()
             .to_string()
     }
-
+    /// 封装字符串array，减少回测策略调用方重复实现相同细节。
     fn string_array(payload: &Value, key: &str) -> Vec<String> {
         payload
             .get(key)
@@ -179,13 +174,13 @@ impl BscEventArbSnapshotBuilder {
             .map(ToString::to_string)
             .collect()
     }
-
+    /// 构造载荷f64，集中维护回测策略的载荷组装规则。
     fn payload_f64(payload: Option<&Value>, key: &str) -> f64 {
         payload
             .map(|value| Self::f64_value(value, key))
             .unwrap_or_default()
     }
-
+    /// 构造载荷bool，集中维护回测策略的载荷组装规则。
     fn payload_bool(payload: Option<&Value>, key: &str) -> bool {
         payload
             .map(|value| Self::bool_value(value, key))

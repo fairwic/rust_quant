@@ -1,26 +1,23 @@
-use std::env;
-
-use anyhow::{anyhow, Result};
-use tracing::warn;
-
 use crate::workflow::job_param_generator::ParamMergeBuilder;
+use anyhow::{anyhow, Result};
 use rust_quant_domain::StrategyConfig;
 use rust_quant_indicators::trend::vegas::VegasStrategy;
 use rust_quant_services::strategy::StrategyConfigService;
 use rust_quant_strategies::implementations::nwe_strategy::NweStrategyConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
-
+use std::env;
+use tracing::warn;
 /// Vegas 策略回测配置
 #[derive(Debug, Clone)]
 pub struct BackTestConfig {
-    /// 指定单条策略配置ID，支持 quant_core UUID 或 legacy_id/runtime_id。
+    /// 策略配置id；为空时表示该条件不启用。
     pub strategy_config_id: Option<String>,
     /// 最大并发数
     pub max_concurrent: usize,
     /// K线数据限制
     pub candle_limit: usize,
+    /// enablerandomtest，用于配置运行参数。
     pub enable_random_test: bool,
-
     /// 是否启用随机策略测试
     pub enable_random_test_vegas: bool,
     /// 是否启用指定策略测试
@@ -30,8 +27,8 @@ pub struct BackTestConfig {
     /// 是否启用NWE指定配置回测
     pub enable_specified_test_nwe: bool,
 }
-
 impl Default for BackTestConfig {
+    /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
     fn default() -> Self {
         Self {
             strategy_config_id: None,
@@ -43,7 +40,6 @@ impl Default for BackTestConfig {
             enable_specified_test_vegas: env::var("ENABLE_SPECIFIED_TEST_VEGAS")
                 .unwrap_or_default()
                 == "true",
-
             enable_random_test_nwe: env::var("ENABLE_RANDOM_TEST_NWE").unwrap_or_default()
                 == "true",
             enable_specified_test_nwe: env::var("ENABLE_SPECIFIED_TEST_NWE").unwrap_or_default()
@@ -51,12 +47,6 @@ impl Default for BackTestConfig {
         }
     }
 }
-
-/// 获取指定的产品策略配置
-///
-/// # 架构说明
-/// - 通过 services 层获取配置，不直接调用基础设施层
-/// - 返回 domain 层的 StrategyConfig，而不是 infrastructure 层的 StrategyConfigEntity
 pub async fn get_strate_config(
     config_service: &StrategyConfigService,
     inst_id: &str,
@@ -65,7 +55,6 @@ pub async fn get_strate_config(
 ) -> Result<Vec<StrategyConfig>> {
     get_strate_config_with_selector(config_service, inst_id, time, strategy_type, None).await
 }
-
 /// 获取指定产品策略配置，支持按 Admin 行ID精确选择单条配置。
 pub async fn get_strate_config_with_selector(
     config_service: &StrategyConfigService,
@@ -81,7 +70,6 @@ pub async fn get_strate_config_with_selector(
         validate_selected_strategy_config(&config, inst_id, time, strategy_type)?;
         return Ok(vec![config]);
     }
-
     let strategy_configs = config_service
         .load_configs(inst_id, time, strategy_type)
         .await?;
@@ -91,7 +79,7 @@ pub async fn get_strate_config_with_selector(
     }
     Ok(strategy_configs)
 }
-
+/// 封装非空trimmed，减少回测策略调用方重复实现相同细节。
 fn non_empty_trimmed(value: &str) -> Option<&str> {
     let value = value.trim();
     if value.is_empty() {
@@ -100,7 +88,7 @@ fn non_empty_trimmed(value: &str) -> Option<&str> {
         Some(value)
     }
 }
-
+/// 校验输入和运行前置条件，提前暴露 回测与策略研究 的不可执行原因。
 fn validate_selected_strategy_config(
     config: &StrategyConfig,
     inst_id: &str,
@@ -115,7 +103,6 @@ fn validate_selected_strategy_config(
             inst_id
         ));
     }
-
     let timeframe = time
         .parse()
         .map_err(|_| anyhow!("无效的时间周期: {}", time))?;
@@ -127,7 +114,6 @@ fn validate_selected_strategy_config(
             time
         ));
     }
-
     if let Some(strategy_type) = strategy_type {
         let expected = strategy_type
             .parse()
@@ -141,14 +127,8 @@ fn validate_selected_strategy_config(
             ));
         }
     }
-
     Ok(())
 }
-
-/// 从数据库获取策略配置
-///
-/// # 架构说明
-/// - 通过 services 层获取配置，不直接调用基础设施层
 pub async fn get_strategy_config_from_db(
     config_service: &StrategyConfigService,
     inst_id: &str,
@@ -156,7 +136,7 @@ pub async fn get_strategy_config_from_db(
 ) -> Result<Vec<ParamMergeBuilder>> {
     get_strategy_config_from_db_with_selector(config_service, inst_id, time, None).await
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 pub async fn get_strategy_config_from_db_with_selector(
     config_service: &StrategyConfigService,
     inst_id: &str,
@@ -172,13 +152,11 @@ pub async fn get_strategy_config_from_db_with_selector(
     )
     .await
     .map_err(|e| anyhow!("获取策略配置失败: {}", e))?;
-
     if strategy_configs.is_empty() {
         warn!("未找到策略配置: inst_id={}, time={}", inst_id, time);
         return Ok(vec![]);
     }
     let mut params_batch = Vec::with_capacity(strategy_configs.len());
-
     tracing::info!("找到 {} 个策略配置", strategy_configs.len());
     for config in strategy_configs.iter() {
         match convert_strategy_config_to_param(config) {
@@ -190,7 +168,6 @@ pub async fn get_strategy_config_from_db_with_selector(
     }
     Ok(params_batch)
 }
-
 #[cfg(test)]
 mod selected_config_tests {
     use super::*;
@@ -199,11 +176,10 @@ mod selected_config_tests {
     use rust_quant_domain::traits::StrategyConfigRepository;
     use rust_quant_domain::{StrategyConfig, StrategyType, Timeframe};
     use serde_json::json;
-
     struct FakeStrategyConfigRepository;
-
     #[async_trait]
     impl StrategyConfigRepository for FakeStrategyConfigRepository {
+        /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
         async fn find_by_id(&self, id: i64) -> Result<Option<StrategyConfig>> {
             Ok(Some(test_strategy_config(
                 id,
@@ -211,7 +187,7 @@ mod selected_config_tests {
                 Timeframe::H4,
             )))
         }
-
+        /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
         async fn find_by_external_id(&self, id: &str) -> Result<Option<StrategyConfig>> {
             if id == "admin-row-43" {
                 Ok(Some(test_strategy_config(
@@ -223,11 +199,10 @@ mod selected_config_tests {
                 Ok(None)
             }
         }
-
         async fn find_all_enabled(&self) -> Result<Vec<StrategyConfig>> {
             Ok(vec![])
         }
-
+        /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
         async fn find_by_symbol_and_timeframe(
             &self,
             _symbol: &str,
@@ -238,24 +213,19 @@ mod selected_config_tests {
                 test_strategy_config(43, "ETH-USDT-SWAP", Timeframe::H4),
             ])
         }
-
         async fn save(&self, config: &StrategyConfig) -> Result<i64> {
             Ok(config.id)
         }
-
         async fn update(&self, _config: &StrategyConfig) -> Result<()> {
             Ok(())
         }
-
         async fn delete(&self, _id: i64) -> Result<()> {
             Ok(())
         }
     }
-
     #[tokio::test]
     async fn selected_strategy_config_id_loads_one_exact_config() {
         let service = StrategyConfigService::new(Box::new(FakeStrategyConfigRepository));
-
         let configs = get_strate_config_with_selector(
             &service,
             "ETH-USDT-SWAP",
@@ -265,11 +235,10 @@ mod selected_config_tests {
         )
         .await
         .expect("selected config");
-
         assert_eq!(configs.len(), 1);
         assert_eq!(configs[0].id, 43);
     }
-
+    /// 提供test策略配置的集中实现，避免回测策略调用方重复处理相同细节。
     fn test_strategy_config(id: i64, symbol: &str, timeframe: Timeframe) -> StrategyConfig {
         StrategyConfig::new(
             id,
@@ -299,7 +268,6 @@ mod selected_config_tests {
         )
     }
 }
-
 /// 测试指定策略配置
 pub async fn test_specified_strategy_with_config(
     _inst_id: &str,
@@ -338,9 +306,7 @@ pub async fn test_specified_strategy_with_config(
         .is_used_signal_k_line_stop_loss(true)];
     Ok(params_batch)
 }
-
 /// 转换策略配置为参数的辅助函数
-///
 /// # 架构说明
 /// - 接受 domain 层的 StrategyConfig，而不是 infrastructure 层的 StrategyConfigEntity
 fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMergeBuilder> {
@@ -349,7 +315,6 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
         .map_err(|e| anyhow!("序列化策略配置JSON失败: {}", e))?;
     let vegas_strategy = serde_json::from_str::<VegasStrategy>(&value_str)
         .map_err(|e| anyhow!("解析策略配置JSON失败: {}", e))?;
-
     let signal_weights = vegas_strategy.signal_weights.clone();
     let leg_detection_signal = vegas_strategy.leg_detection_signal;
     let market_structure_signal = vegas_strategy.market_structure_signal;
@@ -361,34 +326,27 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     let ema_distance_config = vegas_strategy.ema_distance_config;
     let atr_stop_loss_multiplier = vegas_strategy.atr_stop_loss_multiplier;
     let emit_debug = vegas_strategy.emit_debug;
-
     // println!("config.risk_config: {:#?}", config.risk_config);
     let risk_config = serde_json::from_value::<BasicRiskStrategyConfig>(config.risk_config.clone())
         .map_err(|e| anyhow!("解析风险配置JSON失败: {}", e))?;
     // println!("risk_config: {:#?}", risk_config);
-
     // 安全地提取配置值，避免unwrap
     let kline_hammer = vegas_strategy
         .kline_hammer_signal
         .ok_or_else(|| anyhow!("缺少kline_hammer_signal配置"))?;
-
     let ema_signal = vegas_strategy
         .ema_signal
         .ok_or_else(|| anyhow!("缺少ema_signal配置"))?;
-
     let bolling_signal = vegas_strategy
         .bolling_signal
         .as_ref()
         .ok_or_else(|| anyhow!("缺少bolling_signal配置"))?;
-
     let volume_signal = vegas_strategy
         .volume_signal
         .ok_or_else(|| anyhow!("缺少volume_signal配置"))?;
-
     let rsi_signal = vegas_strategy
         .rsi_signal
         .ok_or_else(|| anyhow!("缺少rsi_signal配置"))?;
-
     let mut param = ParamMergeBuilder::build()
         .hammer_shadow_ratio(kline_hammer.up_shadow_ratio)
         .breakthrough_threshold(ema_signal.ema_breakthrough_threshold)
@@ -408,7 +366,6 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
         .is_used_signal_k_line_stop_loss(
             risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false),
         );
-
     param.signal_weights = signal_weights;
     param.leg_detection_signal = leg_detection_signal;
     param.market_structure_signal = market_structure_signal;
@@ -427,12 +384,9 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
         risk_config.dynamic_entry_require_direction_mismatch;
     param.dynamic_range_threshold = risk_config.dynamic_range_threshold;
     param.dynamic_range_loss_percent = risk_config.dynamic_range_loss_percent;
-
     Ok(param)
 }
-
 /// 将数据库中的策略配置转换为 NWE 策略配置与风险配置
-///
 /// # 架构说明
 /// - 接受 domain 层的 StrategyConfig，而不是 infrastructure 层的 StrategyConfigEntity
 pub fn convert_strategy_config_to_nwe(
@@ -441,7 +395,6 @@ pub fn convert_strategy_config_to_nwe(
     // parameters 是 JsonValue，需要转换为字符串再解析
     let value_str = serde_json::to_string(&config.parameters)
         .map_err(|e| anyhow!("序列化策略配置JSON失败: {}", e))?;
-
     let nwe_cfg = serde_json::from_str::<NweStrategyConfig>(&value_str).map_err(|e| {
         // 输出详细错误信息便于调试
         tracing::error!(
@@ -452,16 +405,10 @@ pub fn convert_strategy_config_to_nwe(
         );
         anyhow!("{}", e)
     })?;
-
     let risk_cfg = serde_json::from_value::<BasicRiskStrategyConfig>(config.risk_config.clone())
         .map_err(|e| anyhow!("解析风险配置JSON失败: {}", e))?;
     Ok((nwe_cfg, risk_cfg))
 }
-
-/// 从数据库获取 NWE 指定策略配置
-///
-/// # 架构说明
-/// - 通过 services 层获取配置，不直接调用基础设施层
 pub async fn get_nwe_strategy_config_from_db(
     config_service: &StrategyConfigService,
     inst_id: &str,
@@ -469,7 +416,7 @@ pub async fn get_nwe_strategy_config_from_db(
 ) -> Result<Vec<(NweStrategyConfig, BasicRiskStrategyConfig)>> {
     get_nwe_strategy_config_from_db_with_selector(config_service, inst_id, time, None).await
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 pub async fn get_nwe_strategy_config_from_db_with_selector(
     config_service: &StrategyConfigService,
     inst_id: &str,
@@ -485,12 +432,10 @@ pub async fn get_nwe_strategy_config_from_db_with_selector(
     )
     .await
     .map_err(|e| anyhow!("获取策略配置失败: {}", e))?;
-
     if strategy_configs.is_empty() {
         warn!("未找到NWE策略配置: inst_id={}, time={}", inst_id, time);
         return Ok(vec![]);
     }
-
     let mut result = Vec::with_capacity(strategy_configs.len());
     tracing::info!("找到 {} 个NWE策略配置", strategy_configs.len());
     for cfg in strategy_configs.iter() {

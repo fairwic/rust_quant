@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-
 /// Nadaraya–Watson Envelope (non-repainting)
 /// - Gaussian-kernel weighted mean as the centerline ("out")
 /// - Envelope width is SMA of absolute error |src - out| over (window - 1), scaled by `mult`
@@ -11,7 +10,9 @@ use std::collections::VecDeque;
 ///   only available weights and re-normalizes by the partial weight sum.
 #[derive(Debug, Clone)]
 pub struct NweIndicator {
+    /// bandwidthh，用于交易策略计算。
     bandwidth_h: f64,
+    /// mult，用于交易策略计算。
     mult: f64,
     window: usize,           // max bars back for kernel mean (<= 500 is recommended)
     mae_period: usize,       // typically window - 1
@@ -20,13 +21,12 @@ pub struct NweIndicator {
     abs_errs: VecDeque<f64>, // buffer for |src - out| to compute MAE
     abs_err_sum: f64,        // rolling sum for MAE
 }
-
 impl NweIndicator {
+    /// 初始化new，确保回测策略依赖和内部状态可直接使用。
     pub fn new(bandwidth_h: f64, mult: f64, window: usize) -> Self {
         let win = window.clamp(2, 500);
         let mae_period = (win - 1).max(1);
         let weights = Self::precompute_weights(bandwidth_h, win);
-
         Self {
             bandwidth_h,
             mult,
@@ -38,7 +38,7 @@ impl NweIndicator {
             abs_err_sum: 0.0,
         }
     }
-
+    /// 封装预计算权重，减少回测策略调用方重复实现相同细节。
     fn precompute_weights(h: f64, window: usize) -> Vec<f64> {
         // Gaussian: exp(-(x^2) / (2 h^2)) with x = lag index
         // i = 0 corresponds to current bar (largest weight)
@@ -53,7 +53,6 @@ impl NweIndicator {
             .map(|i| (-(i as f64 * i as f64) / denom).exp())
             .collect()
     }
-
     /// Push one new close value and get (upper, lower).
     /// Returns (0.0, 0.0) until the MAE window is fully populated.
     pub fn next(&mut self, close: f64) -> (f64, f64) {
@@ -61,14 +60,12 @@ impl NweIndicator {
         if self.values.len() > self.window {
             self.values.pop_front();
         }
-
         // Compute kernel mean using available values and corresponding weights
         let m = self.values.len();
         let (out, ok) = self.kernel_mean(m);
         if !ok {
             return (0.0, 0.0);
         }
-
         // Update MAE buffer
         let abs_err = (close - out).abs();
         self.abs_errs.push_back(abs_err);
@@ -78,19 +75,16 @@ impl NweIndicator {
                 self.abs_err_sum -= removed;
             }
         }
-
         // Require full MAE period to produce stable envelope
         if self.abs_errs.len() < self.mae_period {
             return (0.0, 0.0);
         }
-
         // MAE = 平均绝对误差 × 倍数（对齐 PineScript: ta.sma(abs(src - out), 499) * mult）
         let mae = (self.abs_err_sum / self.mae_period as f64) * self.mult;
         let upper = out + mae;
         let lower = out - mae;
         (upper, lower)
     }
-
     /// 获取当前状态的调试信息
     pub fn debug_info(&self) -> NweDebugInfo {
         NweDebugInfo {
@@ -106,7 +100,7 @@ impl NweIndicator {
             weights_sum: self.weights.iter().sum(),
         }
     }
-
+    /// 封装核均值，减少回测策略调用方重复实现相同细节。
     fn kernel_mean(&self, available: usize) -> (f64, bool) {
         if available == 0 {
             return (0.0, false);
@@ -115,7 +109,6 @@ impl NweIndicator {
         // weights: w[0] aligns with newest (lag 0)
         let mut sum = 0.0;
         let mut sumw = 0.0;
-
         // Iterate lag j from 0..available
         // 对齐 PineScript: src[j] × weights[j], j=0 是最新
         for j in 0..available {
@@ -124,40 +117,49 @@ impl NweIndicator {
             sum += price * w;
             sumw += w;
         }
-
         if sumw == 0.0 {
             return (0.0, false);
         }
         (sum / sumw, true)
     }
-
+    /// 重置指标内部状态，便于重新开始一段计算窗口。
     pub fn reset(&mut self) {
         self.values.clear();
         self.abs_errs.clear();
         self.abs_err_sum = 0.0;
     }
 }
-
 /// NWE 指标调试信息
 #[derive(Debug, Clone)]
 pub struct NweDebugInfo {
+    /// bandwidthh，用于交易策略计算。
     pub bandwidth_h: f64,
+    /// mult，用于交易策略计算。
     pub mult: f64,
+    /// window，用于交易策略计算。
     pub window: usize,
+    /// mae周期，用于交易策略计算。
     pub mae_period: usize,
+    /// 值集合len，用于交易策略计算。
     pub values_len: usize,
+    /// abserrslen，用于交易策略计算。
     pub abs_errs_len: usize,
+    /// abserrsum，用于交易策略计算。
     pub abs_err_sum: f64,
+    /// 首次weight，用于交易策略计算。
     pub first_weight: f64,
+    /// 最近weight，用于交易策略计算。
     pub last_weight: f64,
+    /// weightssum，用于交易策略计算。
     pub weights_sum: f64,
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_nwe_basic_progression() {
         let mut nwe = NweIndicator::new(8.0, 3.0, 500);
         // Feed a simple ramp; initial outputs will be (0,0) until MAE window fills

@@ -5,7 +5,6 @@ fn full_product_health_summary_script_passes_bash_syntax_check() {
         .arg(full_product_summary_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
@@ -14,7 +13,6 @@ fn full_product_health_summary_script_passes_bash_syntax_check() {
 }
 fn full_product_health_summary_script_is_read_only_and_redacts_sensitive_markers() {
     let script = read_full_product_summary_script();
-
     assert!(script.contains("FULL_PRODUCT_HEALTH_SUMMARY_JSON_PATH"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_SUMMARY_TOP_ALERT_LIMIT"));
     assert!(script.contains("checklist"));
@@ -153,7 +151,6 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
   }
 }"#,
     );
-
     let output = Command::new(full_product_summary_path())
         .env("FULL_PRODUCT_HEALTH_SUMMARY_OUTPUT", "json")
         .env("FULL_PRODUCT_HEALTH_SUMMARY_JSON_PATH", health_json)
@@ -162,18 +159,15 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
         .env("BINANCE_API_SECRET", "binance-secret")
         .output()
         .expect("full product health summary should run");
-
     assert!(
         output.status.success(),
         "summary should emit parseable json:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["schema_version"], 1);
     assert_eq!(payload["source_schema_version"], 1);
     assert_eq!(payload["status"], "fail");
@@ -190,7 +184,6 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
         "warn"
     );
     assert_eq!(payload["section_statuses"]["admin_readiness"], "fail");
-
     let checklist = payload["checklist"]
         .as_array()
         .expect("summary checklist should be an array");
@@ -212,7 +205,6 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
                 && item["action_required"] == true),
         "admin readiness should remain visible in the checklist: {stdout}"
     );
-
     let top_alerts = payload["top_alerts"]
         .as_array()
         .expect("top_alerts should be an array");
@@ -235,7 +227,6 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
     assert_eq!(top_alerts[0]["blocker_code"], "protective_order_failed");
     assert_eq!(top_alerts[1]["code"], "NEWS_SOURCE_DEGRADED");
     assert_eq!(top_alerts[1]["severity"], "P1");
-
     let required_actions = payload["required_operator_actions"]
         .as_array()
         .expect("required_operator_actions should be an array");
@@ -319,7 +310,6 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
                 && item["admin_link_target"] == "admin.full_product_health.web_task_order_health"),
         "operator playbook should map P0 alert to metadata registry: {stdout}"
     );
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         ".env",
@@ -352,7 +342,6 @@ fn full_product_health_summary_outputs_ci_checklist_artifact_from_full_product_j
         );
     }
 }
-
 #[test]
 fn full_product_health_markdown_script_passes_bash_syntax_check() {
     let output = Command::new("bash")
@@ -360,18 +349,15 @@ fn full_product_health_markdown_script_passes_bash_syntax_check() {
         .arg(full_product_markdown_path())
         .output()
         .expect("bash -n should be available");
-
     assert!(
         output.status.success(),
         "bash -n syntax check failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
-
 #[test]
 fn full_product_health_markdown_script_is_read_only_and_redacts_sensitive_markers() {
     let script = read_full_product_markdown_script();
-
     assert!(script.contains("FULL_PRODUCT_HEALTH_MARKDOWN_OUTPUT"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_MARKDOWN_SUMMARY_JSON_PATH"));
     assert!(script.contains("FULL_PRODUCT_HEALTH_MARKDOWN_FULL_REPORT_PATH"));
@@ -422,7 +408,6 @@ fn full_product_health_markdown_script_is_read_only_and_redacts_sensitive_marker
         );
     }
 }
-
 #[test]
 fn full_product_health_markdown_renders_operator_readable_artifact_from_summary_json() {
     let summary_json = temp_json_file(
@@ -560,7 +545,6 @@ fn full_product_health_markdown_renders_operator_readable_artifact_from_summary_
   }
 }"#,
     );
-
     let output = Command::new(full_product_markdown_path())
         .env("FULL_PRODUCT_HEALTH_MARKDOWN_OUTPUT", "markdown")
         .env(
@@ -583,14 +567,12 @@ fn full_product_health_markdown_renders_operator_readable_artifact_from_summary_
         .env("BINANCE_API_SECRET", "binance-secret")
         .output()
         .expect("full product health markdown renderer should run");
-
     assert!(
         output.status.success(),
         "markdown renderer should succeed:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let stdout = String::from_utf8(output.stdout).expect("markdown output should be utf8");
     for expected in [
         "# Full Product Health",
@@ -626,7 +608,6 @@ fn full_product_health_markdown_renders_operator_readable_artifact_from_summary_
             "markdown output should contain {expected}: {stdout}"
         );
     }
-
     let lowered = stdout.to_ascii_lowercase();
     for sensitive in [
         ".env",

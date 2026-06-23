@@ -1,6 +1,7 @@
 #![allow(dead_code)]
-
 use serde_json::Value;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     env, fs,
     io::{Read, Write},
@@ -11,114 +12,92 @@ use std::{
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
-
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 include!("local_service_health_contract/paths_section.rs");
-
 fn read_script() -> String {
     let path = script_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_aggregator_fixture_script() -> String {
     let path = aggregator_fixture_script_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_aggregator_runner_script() -> String {
     let path = aggregator_runner_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_input_runner_script() -> String {
     let path = full_product_input_runner_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_summary_script() -> String {
     let path = full_product_summary_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_markdown_script() -> String {
     let path = full_product_markdown_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_ci_wrapper_script() -> String {
     let path = full_product_ci_wrapper_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_artifact_validator_script() -> String {
     let path = full_product_artifact_validator_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_artifact_set_publisher_script() -> String {
     let path = full_product_artifact_set_publisher_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_admin_ingest_smoke_script() -> String {
     let path = full_product_admin_ingest_smoke_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_admin_ingest_mock_receiver_script() -> String {
     let path = full_product_admin_ingest_mock_receiver_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_admin_ingest_contract_smoke_script() -> String {
     let path = full_product_admin_ingest_contract_smoke_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_web_input_producer_script() -> String {
     let path = web_input_producer_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_payment_input_producer_script() -> String {
     let path = payment_input_producer_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_full_product_payment_artifact_smoke_script() -> String {
     let path = full_product_payment_artifact_smoke_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_news_input_producer_script() -> String {
     let path = news_input_producer_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn read_admin_input_producer_script() -> String {
     let path = admin_input_producer_path();
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error))
 }
-
 fn temp_json_file(prefix: &str, body: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -129,7 +108,6 @@ fn temp_json_file(prefix: &str, body: &str) -> PathBuf {
         .unwrap_or_else(|error| panic!("failed to write {}: {}", path.display(), error));
     path
 }
-
 fn temp_artifact_dir(prefix: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -140,7 +118,6 @@ fn temp_artifact_dir(prefix: &str) -> PathBuf {
         .unwrap_or_else(|error| panic!("failed to create {}: {}", dir.display(), error));
     dir
 }
-
 fn write_phase45_validator_schema(
     path: &Path,
     status_values: &[&str],
@@ -198,12 +175,10 @@ fn write_phase45_validator_schema(
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", path.display(), error));
 }
-
 fn write_phase45_valid_artifacts(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let full_report_path = dir.join("full-product-health.json");
     let summary_path = dir.join("full-product-health-summary.json");
     let markdown_path = dir.join("full-product-health.md");
-
     fs::write(
         &full_report_path,
         r#"{
@@ -260,10 +235,8 @@ fn write_phase45_valid_artifacts(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
         "# Full Product Health\n\n**Status:** ok\n\n## Counts\n\n## Top Alerts\n\n## Operator Playbook Summary\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
-
     (full_report_path, summary_path, markdown_path)
 }
-
 fn write_executable(path: &Path, body: &str) {
     fs::write(path, body).unwrap_or_else(|error| {
         panic!("failed to write {}: {}", path.display(), error);
@@ -279,7 +252,6 @@ fn write_executable(path: &Path, body: &str) {
         });
     }
 }
-
 fn schema_string_array(schema: &Value, key: &str) -> Vec<String> {
     schema[key]
         .as_array()
@@ -292,7 +264,6 @@ fn schema_string_array(schema: &Value, key: &str) -> Vec<String> {
         })
         .collect()
 }
-
 fn artifact_schema_string_array(schema: &Value, artifact: &str, key: &str) -> Vec<String> {
     schema["artifact_schemas"][artifact][key]
         .as_array()
@@ -307,7 +278,6 @@ fn artifact_schema_string_array(schema: &Value, artifact: &str, key: &str) -> Ve
         })
         .collect()
 }
-
 fn assert_required_top_level_fields(schema: &Value, artifact: &str, payload: &Value) {
     for field in artifact_schema_string_array(schema, artifact, "required_top_level") {
         assert!(
@@ -316,7 +286,6 @@ fn assert_required_top_level_fields(schema: &Value, artifact: &str, payload: &Va
         );
     }
 }
-
 fn assert_required_nested_fields(
     schema: &Value,
     artifact: &str,
@@ -334,7 +303,6 @@ fn assert_required_nested_fields(
         );
     }
 }
-
 fn assert_enum_value(schema: &Value, enum_key: &str, value: &Value, label: &str) {
     let allowed = schema_string_array(schema, enum_key);
     let actual = value
@@ -345,7 +313,6 @@ fn assert_enum_value(schema: &Value, enum_key: &str, value: &Value, label: &str)
         "{label} should be one of {allowed:?}, got {actual}"
     );
 }
-
 fn assert_json_array_enum(schema: &Value, enum_key: &str, items: &Value, field: &str, label: &str) {
     let allowed = schema_string_array(schema, enum_key);
     let items = items
@@ -361,7 +328,6 @@ fn assert_json_array_enum(schema: &Value, enum_key: &str, items: &Value, field: 
         );
     }
 }
-
 fn alert_metadata<'a>(schema: &'a Value, section: &str, code: &str) -> &'a Value {
     schema["alert_code_metadata"]
         .get(section)
@@ -375,7 +341,6 @@ fn alert_metadata<'a>(schema: &'a Value, section: &str, code: &str) -> &'a Value
             panic!("alert_code_metadata.{section}.{code} or alert_code_metadata.global.{code} should exist")
         })
 }
-
 fn assert_alert_code_metadata_alignment(schema: &Value) {
     let code_values = schema["alert_code_values"]
         .as_object()
@@ -383,7 +348,6 @@ fn assert_alert_code_metadata_alignment(schema: &Value) {
     let metadata = schema["alert_code_metadata"]
         .as_object()
         .expect("alert_code_metadata should be an object");
-
     for (section, codes) in code_values {
         let codes = codes
             .as_array()
@@ -399,7 +363,6 @@ fn assert_alert_code_metadata_alignment(schema: &Value) {
             .get(section)
             .and_then(|value| value.as_object())
             .unwrap_or_else(|| panic!("alert_code_metadata.{section} should be an object"));
-
         for code in &code_strings {
             let item = section_metadata
                 .get(*code)
@@ -420,7 +383,6 @@ fn assert_alert_code_metadata_alignment(schema: &Value) {
                 );
             }
         }
-
         for code in section_metadata.keys() {
             assert!(
                 code_strings
@@ -431,7 +393,6 @@ fn assert_alert_code_metadata_alignment(schema: &Value) {
         }
     }
 }
-
 fn assert_alert_taxonomy_metadata_matches_registry(schema: &Value, items: &Value, label: &str) {
     let items = items
         .as_array()
@@ -452,7 +413,6 @@ fn assert_alert_taxonomy_metadata_matches_registry(schema: &Value, items: &Value
         }
     }
 }
-
 fn fake_tool_dir() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -465,7 +425,6 @@ fn fake_tool_dir() -> PathBuf {
     ));
     fs::create_dir_all(&dir)
         .unwrap_or_else(|error| panic!("failed to create {}: {}", dir.display(), error));
-
     write_executable(
         &dir.join("curl"),
         r#"#!/usr/bin/env bash
@@ -506,10 +465,8 @@ else
 fi
 "#,
     );
-
     dir
 }
-
 fn fake_web_tool_dir() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -522,7 +479,6 @@ fn fake_web_tool_dir() -> PathBuf {
     ));
     fs::create_dir_all(&dir)
         .unwrap_or_else(|error| panic!("failed to create {}: {}", dir.display(), error));
-
     write_executable(
         &dir.join("psql"),
         r#"#!/usr/bin/env bash
@@ -553,10 +509,8 @@ cat <<'JSON'
 JSON
 "#,
     );
-
     dir
 }
-
 fn fake_news_tool_dir() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -569,7 +523,6 @@ fn fake_news_tool_dir() -> PathBuf {
     ));
     fs::create_dir_all(&dir)
         .unwrap_or_else(|error| panic!("failed to create {}: {}", dir.display(), error));
-
     write_executable(
         &dir.join("psql"),
         r#"#!/usr/bin/env bash
@@ -612,10 +565,8 @@ cat <<'JSON'
 JSON
 "#,
     );
-
     dir
 }
-
 fn fake_admin_tool_dir() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -628,7 +579,6 @@ fn fake_admin_tool_dir() -> PathBuf {
     ));
     fs::create_dir_all(&dir)
         .unwrap_or_else(|error| panic!("failed to create {}: {}", dir.display(), error));
-
     write_executable(
         &dir.join("psql"),
         r#"#!/usr/bin/env bash
@@ -676,10 +626,8 @@ cat <<'JSON'
 JSON
 "#,
     );
-
     dir
 }
-
 fn fake_full_product_input_tool_dir() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -692,7 +640,6 @@ fn fake_full_product_input_tool_dir() -> PathBuf {
     ));
     fs::create_dir_all(&dir)
         .unwrap_or_else(|error| panic!("failed to create {}: {}", dir.display(), error));
-
     write_executable(
         &dir.join("psql"),
         r#"#!/usr/bin/env bash
@@ -747,10 +694,8 @@ JSON
 fi
 "#,
     );
-
     dir
 }
-
 fn fake_payment_tool_dir() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -763,7 +708,6 @@ fn fake_payment_tool_dir() -> PathBuf {
     ));
     fs::create_dir_all(&dir)
         .unwrap_or_else(|error| panic!("failed to create {}: {}", dir.display(), error));
-
     write_executable(
         &dir.join("psql"),
         r#"#!/usr/bin/env bash
@@ -815,22 +759,18 @@ cat <<'JSON'
 JSON
 "#,
     );
-
     dir
 }
-
 fn alerts(payload: &Value) -> &[Value] {
     payload["alerts"]
         .as_array()
         .expect("alerts should be an array")
 }
-
 fn alert_taxonomy(payload: &Value) -> &[Value] {
     payload["alert_taxonomy"]
         .as_array()
         .expect("alert_taxonomy should be an array")
 }
-
 include!("local_service_health_contract/local_and_docs_section.rs");
 include!("local_service_health_contract/aggregator_runner_section.rs");
 include!("local_service_health_contract/render_artifacts_section.rs");

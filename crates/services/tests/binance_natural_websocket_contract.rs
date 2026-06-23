@@ -1,5 +1,4 @@
 use std::{fs, path::PathBuf};
-
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -7,7 +6,6 @@ fn repo_root() -> PathBuf {
         .expect("services crate should live under crates/services")
         .to_path_buf()
 }
-
 #[test]
 fn natural_binance_websocket_probe_script_stays_dry_run_and_does_not_force_signal() {
     let root = repo_root();
@@ -17,7 +15,6 @@ fn natural_binance_websocket_probe_script_stays_dry_run_and_does_not_force_signa
         .join("run_binance_websocket_natural_probe.sh");
     let script = fs::read_to_string(&script_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", script_path.display(), error));
-
     assert!(script.contains("IS_RUN_REAL_STRATEGY=true"));
     assert!(script.contains("IS_OPEN_SOCKET=true"));
     assert!(script.contains("STRATEGY_SIGNAL_DISPATCH_MODE=web"));

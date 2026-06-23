@@ -1,8 +1,6 @@
+use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
-
-use serde_json::Value;
-
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -10,7 +8,6 @@ fn repo_root() -> PathBuf {
         .expect("services crate should live under crates/services")
         .to_path_buf()
 }
-
 fn load_schema() -> Value {
     let path = repo_root().join("docs/dev/full_product_health_artifact_schema.json");
     let body = fs::read_to_string(&path)
@@ -18,7 +15,6 @@ fn load_schema() -> Value {
     serde_json::from_str(&body)
         .unwrap_or_else(|err| panic!("parse schema {}: {err}", path.display()))
 }
-
 #[test]
 fn full_product_health_schema_registers_known_producer_alert_codes() {
     let schema = load_schema();
@@ -91,7 +87,6 @@ fn full_product_health_schema_registers_known_producer_alert_codes() {
             ],
         ),
     ];
-
     for (section, codes) in expected {
         let values = schema["alert_code_values"][section]
             .as_array()
@@ -99,7 +94,6 @@ fn full_product_health_schema_registers_known_producer_alert_codes() {
         let metadata = schema["alert_code_metadata"][section]
             .as_object()
             .unwrap_or_else(|| panic!("alert_code_metadata.{section} should be an object"));
-
         for code in *codes {
             assert!(
                 values.iter().any(|value| value == code),

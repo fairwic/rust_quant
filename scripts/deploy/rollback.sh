@@ -163,12 +163,94 @@ remove_conflicting_named_containers() {
   done
 }
 
+normalize_live_mutation_env_value() {
+  local value="${1:-}"
+  value="$(printf '%s' "${value}" | sed -e 's/[[:space:]]#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  case "${value}" in
+    \"*\") value="${value#\"}"; value="${value%\"}" ;;
+    \'*\') value="${value#\'}"; value="${value%\'}" ;;
+  esac
+  printf '%s' "${value}"
+}
+
+live_mutation_env_value_is_dangerous() {
+  local key="$1"
+  local value
+  value="$(normalize_live_mutation_env_value "${2:-}")"
+
+  case "${key}" in
+    MARKET_VELOCITY_CREATE_TASK_APPLY|MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY|MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED)
+      [ "$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')" = "true" ]
+      ;;
+    MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED|EXECUTION_WORKER_DRY_RUN)
+      [ "$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')" = "false" ]
+      ;;
+    MARKET_VELOCITY_CREATE_TASK_CONFIRM|MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM|EXECUTION_WORKER_TARGET_TASK_IDS|EXECUTION_WORKER_LIVE_ORDER_CONFIRM|LEGACY_DIRECT_LIVE_ORDER_CONFIRM|LEGACY_SIGNED_READ_ONLY_CONFIRM|RISK_BALANCE_LIVE_MUTATION_CONFIRM|PROTECTIVE_OUTCOME_CONFIRM)
+      [ -n "${value}" ]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+read_dotenv_value() {
+  local key="$1"
+  local env_file="$2"
+  local line
+  line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "${env_file}" | tail -n 1 || true)"
+  [ -n "${line}" ] || return 1
+  printf '%s' "${line#*=}"
+}
+
+assert_no_persistent_live_mutation_env_flags() {
+  local env_file=".env"
+  local found=0
+  local key value
+  local live_mutation_keys=(
+    MARKET_VELOCITY_CREATE_TASK_APPLY
+    MARKET_VELOCITY_CREATE_TASK_CONFIRM
+    MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY
+    MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM
+    MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED
+    MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED
+    EXECUTION_WORKER_DRY_RUN
+    EXECUTION_WORKER_TARGET_TASK_IDS
+    EXECUTION_WORKER_LIVE_ORDER_CONFIRM
+    LEGACY_DIRECT_LIVE_ORDER_CONFIRM
+    LEGACY_SIGNED_READ_ONLY_CONFIRM
+    RISK_BALANCE_LIVE_MUTATION_CONFIRM
+    PROTECTIVE_OUTCOME_CONFIRM
+  )
+
+  for key in "${live_mutation_keys[@]}"; do
+    value="${!key:-}"
+    if live_mutation_env_value_is_dangerous "${key}" "${value}"; then
+      echo "refusing deployment with persistent live mutation flag in process env: ${key}" >&2
+      found=1
+    fi
+
+    if [ -f "${env_file}" ]; then
+      value="$(read_dotenv_value "${key}" "${env_file}" || true)"
+      if [ -n "${value}" ] && live_mutation_env_value_is_dangerous "${key}" "${value}"; then
+        echo "refusing deployment with persistent live mutation flag in .env: ${key}" >&2
+        found=1
+      fi
+    fi
+  done
+
+  if [ "${found}" = "1" ]; then
+    echo "remove persistent live mutation flags from env/.env; use scoped run-once handoff for reviewed live execution" >&2
+    exit 1
+  fi
+}
+
 print_runtime_safety_flags() {
   local override_file="$1"
   shift
 
   local service container_id
-  local flags_pattern='^(MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH|MARKET_VELOCITY_CREATE_TASK_APPLY|MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY|MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED|MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED|EXECUTION_WORKER_DRY_RUN)='
+  local flags_pattern='^(MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH|MARKET_VELOCITY_CREATE_TASK_APPLY|MARKET_VELOCITY_CREATE_TASK_CONFIRM|MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY|MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM|MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED|MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED|EXECUTION_WORKER_DRY_RUN|EXECUTION_WORKER_TARGET_TASK_IDS|EXECUTION_WORKER_LIVE_ORDER_CONFIRM|LEGACY_DIRECT_LIVE_ORDER_CONFIRM|LEGACY_SIGNED_READ_ONLY_CONFIRM|RISK_BALANCE_LIVE_MUTATION_CONFIRM|PROTECTIVE_OUTCOME_CONFIRM)='
   for service in "$@"; do
     service="$(printf '%s' "${service}" | xargs)"
     [ -z "${service}" ] && continue
@@ -200,6 +282,7 @@ override_file=".deploy/quant-core.rollback.override.yml"
   done
 } > "${override_file}"
 
+assert_no_persistent_live_mutation_env_flags
 compose -f "${override_file}" pull "${services[@]}" || true
 remove_conflicting_named_containers "${services[@]}"
 compose -f "${override_file}" up -d --no-build "${services[@]}"

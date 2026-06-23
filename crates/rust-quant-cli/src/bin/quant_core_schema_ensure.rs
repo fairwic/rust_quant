@@ -1,29 +1,25 @@
 use anyhow::{Context, Result};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
-
 const POSTGRES_QUANT_CORE_DDL: &str = include_str!("../../../../sql/postgres_quant_core.sql");
-
 #[tokio::main]
+/// 封装当前函数，减少量化核心调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     rust_quant_core::logger::setup_logging().await?;
-
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
         .or_else(|_| std::env::var("POSTGRES_QUANT_CORE_DATABASE_URL"))
         .context("QUANT_CORE_DATABASE_URL or POSTGRES_QUANT_CORE_DATABASE_URL must be set")?;
-
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(&database_url)
         .await
         .context("connect quant_core database for schema ensure")?;
-
     sqlx::raw_sql(POSTGRES_QUANT_CORE_DDL)
         .execute(&pool)
         .await
         .context("apply quant_core postgres schema DDL")?;
-
     let checked_tables = [
         "market_rank_events",
         "market_velocity_episodes",
@@ -42,9 +38,7 @@ async fn main() -> Result<()> {
     .fetch_one(&pool)
     .await
     .context("verify quant_core schema ensure tables")?;
-
     pool.close().await;
-
     println!(
         "{}",
         json!({
@@ -54,6 +48,5 @@ async fn main() -> Result<()> {
             "existing_checked_table_count": existing_count,
         })
     );
-
     Ok(())
 }

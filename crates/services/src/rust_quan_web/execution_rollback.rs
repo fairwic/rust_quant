@@ -1,12 +1,11 @@
-use anyhow::{anyhow, Result};
-use crypto_exc_all::{ExchangeId, OrderSide, OrderType};
-use serde_json::{json, Value};
-
 use super::execution_payload::{format_order_size, parse_instrument};
 use super::execution_worker::ExecutionOrderTask;
 use crate::exchange::OrderPlacementRequest;
 use crate::rust_quan_web::ExecutionTaskReportRequest;
-
+use anyhow::{anyhow, Result};
+use crypto_exc_all::{ExchangeId, OrderSide, OrderType};
+use serde_json::{json, Value};
+/// 构建buildprotectivefailurerollbackorder请求，集中维护Web 商业链路的载荷和字段组装规则。
 pub(super) fn build_protective_failure_rollback_order_request(
     order_task: &ExecutionOrderTask,
     report: &ExecutionTaskReportRequest,
@@ -18,14 +17,12 @@ pub(super) fn build_protective_failure_rollback_order_request(
         .filled_qty
         .filter(|qty| qty.is_finite() && *qty > 0.0)
         .ok_or_else(|| anyhow!("filled order rollback requires positive filled_qty"))?;
-
     let position_side = order_task.position_side.clone();
     let reduce_only = match (order_task.exchange, position_side.as_deref()) {
         (ExchangeId::Okx, _) => None,
         (ExchangeId::Binance, Some(_)) => None,
         _ => Some(true),
     };
-
     Ok(Some(OrderPlacementRequest {
         exchange: order_task.exchange,
         instrument: parse_instrument(&order_task.symbol)?,
@@ -43,7 +40,7 @@ pub(super) fn build_protective_failure_rollback_order_request(
         attached_stop_loss_price: None,
     }))
 }
-
+/// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub(super) fn apply_protective_failure_rollback_report(
     report: &mut ExecutionTaskReportRequest,
     rollback_report: &ExecutionTaskReportRequest,
@@ -69,7 +66,7 @@ pub(super) fn apply_protective_failure_rollback_report(
     raw_payload["execution_status"] = json!(report.execution_status);
     report.raw_payload_json = Some(raw_payload.to_string());
 }
-
+/// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub(super) fn apply_protective_failure_rollback_error(
     report: &mut ExecutionTaskReportRequest,
     reason: impl Into<String>,
@@ -96,14 +93,14 @@ pub(super) fn apply_protective_failure_rollback_error(
     ));
     report.raw_payload_json = Some(raw_payload.to_string());
 }
-
+/// 封装反向orderside，减少Web 商业链路调用方重复实现相同细节。
 fn opposite_order_side(side: OrderSide) -> OrderSide {
     match side {
         OrderSide::Buy => OrderSide::Sell,
         OrderSide::Sell => OrderSide::Buy,
     }
 }
-
+/// 提供报告raw载荷的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn report_raw_payload(report: &ExecutionTaskReportRequest) -> Value {
     report
         .raw_payload_json
@@ -111,16 +108,13 @@ fn report_raw_payload(report: &ExecutionTaskReportRequest) -> Value {
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .unwrap_or_else(|| json!({}))
 }
-
 #[cfg(test)]
 mod tests {
-    use crypto_exc_all::{ExchangeId, MarginMode, OrderSide, OrderType};
-
     use super::{
         apply_protective_failure_rollback_report, build_protective_failure_rollback_order_request,
     };
     use crate::rust_quan_web::{ExecutionOrderTask, ExecutionTaskReportRequest};
-
+    use crypto_exc_all::{ExchangeId, MarginMode, OrderSide, OrderType};
     #[test]
     fn rollback_request_closes_binance_hedge_long_after_protection_failure() {
         let order_task = ExecutionOrderTask {
@@ -142,6 +136,7 @@ mod tests {
             time_in_force: None,
             size_usdt: None,
             attached_stop_loss_price: None,
+            take_profit_legs: Vec::new(),
         };
         let mut report = ExecutionTaskReportRequest::success(
             42,
@@ -154,11 +149,9 @@ mod tests {
         report.execution_status = "protective_order_failed".to_string();
         report.filled_qty = Some(0.011);
         report.filled_quote = Some(22.0);
-
         let request = build_protective_failure_rollback_order_request(&order_task, &report)
             .expect("rollback request should build")
             .expect("filled protected failure should require rollback");
-
         assert_eq!(request.exchange, ExchangeId::Binance);
         assert_eq!(
             request.instrument.symbol_for(ExchangeId::Binance),
@@ -173,7 +166,6 @@ mod tests {
         assert_eq!(request.reduce_only, None);
         assert_eq!(request.attached_stop_loss_price, None);
     }
-
     #[test]
     fn rollback_report_preserves_protective_failure_status_and_records_close_evidence() {
         let mut report = ExecutionTaskReportRequest::success(
@@ -189,7 +181,6 @@ mod tests {
         );
         report.execution_status = "protective_order_failed".to_string();
         report.error_message = Some("STOP_MARKET rejected".to_string());
-
         let rollback_report = ExecutionTaskReportRequest::success(
             42,
             "binance",
@@ -199,12 +190,10 @@ mod tests {
             serde_json::json!({"order_detail":{"reduceOnly":false}}),
         );
         apply_protective_failure_rollback_report(&mut report, &rollback_report);
-
         let raw = serde_json::from_str::<serde_json::Value>(
             report.raw_payload_json.as_deref().expect("raw payload"),
         )
         .expect("valid raw json");
-
         assert_eq!(report.execution_status, "protective_order_failed");
         assert_eq!(
             raw["protective_failure_rollback"]["status"],

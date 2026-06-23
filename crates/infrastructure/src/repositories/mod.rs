@@ -1,7 +1,6 @@
 //! 数据访问层模块
 //!
 //! 实现 domain 层定义的 Repository 接口
-
 pub mod audit_repository;
 pub mod backtest_repository;
 pub mod candle_repository;
@@ -12,14 +11,12 @@ pub mod external_market_snapshot_repository;
 pub mod fund_monitoring_repository;
 pub mod funding_rate_repository;
 pub mod position_repository;
+#[cfg(test)]
+mod postgres_contract_tests;
 pub mod signal_log_repository;
 pub mod strategy_config_postgres_repository;
 pub mod strategy_config_repository;
 pub mod swap_order_repository;
-
-#[cfg(test)]
-mod postgres_contract_tests;
-
 pub use audit_repository::SqlxAuditRepository;
 pub use backtest_repository::SqlxBacktestRepository;
 pub use candle_repository::{PostgresCandleRepository, SqlxCandleRepository};

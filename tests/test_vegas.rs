@@ -15,7 +15,6 @@ async fn test_vegas() -> Result<()> {
     dotenv().ok();
     setup_logging().await?;
     init_db().await;
-
     // 设置参数
     let inst_id = "ETH-USDT-SWAP";
     // let inst_id = "BTC-USDT-SWAP";
@@ -27,15 +26,12 @@ async fn test_vegas() -> Result<()> {
         direct: TimeDirect::BEFORE,
         end_time: None,
     };
-
     // 获取K线数据
     let candles_list: Vec<CandlesEntity> =
         trading::task::basic::get_candle_data_confirm(inst_id, time, 7000, Some(select_time))
             .await?;
-
     let mut data_items = vec![];
     let mut strategy = VegasStrategy::new(time.to_string());
-
     // 设置布林带参数
     strategy.bolling_signal.as_mut().unwrap().multiplier = 3.0;
     strategy.bolling_signal.as_mut().unwrap().period = 15;
@@ -73,19 +69,15 @@ async fn test_vegas() -> Result<()> {
     strategy.volume_signal.as_mut().unwrap().volume_bar_num = 4;
     //engulfing
     strategy.engulfing_signal.as_mut().unwrap().body_ratio = 0.4;
-
     println!("strategy: {:#?}", strategy);
     let mut indicator_combine = strategy.get_indicator_combine();
-
     for (i, candle) in candles_list.iter().enumerate() {
         // 获取数据项
         let data_item = parse_candle_to_data_item(candle);
-
         // 获取指标的值
         let mut multi_indicator_values =
             get_multi_indicator_values(&mut indicator_combine, &data_item);
         data_items.push(data_item);
-
         let signal_weights = strategy.signal_weights.as_ref().unwrap().clone();
         if i == (candles_list.len() - 1) {
             println!(
@@ -93,9 +85,7 @@ async fn test_vegas() -> Result<()> {
                 multi_indicator_values
             );
         }
-
         let risk_strategy_config = BasicRiskStrategyConfig::default();
-
         let result = strategy.get_trade_signal(
             &data_items,
             &mut multi_indicator_values,
@@ -106,6 +96,5 @@ async fn test_vegas() -> Result<()> {
             println!("交易信号结果: {:#?}", result);
         }
     }
-
     Ok(())
 }

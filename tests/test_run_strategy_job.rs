@@ -6,16 +6,13 @@ use rust_quant::trading::indicator::vegas_indicator::VegasStrategy;
 use rust_quant::trading::strategy::order::strategy_config::StrategyConfig;
 use rust_quant::trading::strategy::strategy_common::BasicRiskStrategyConfig;
 use rust_quant::trading::task::basic;
-
 #[tokio::test]
 async fn test_run_strategy_job() -> Result<()> {
     // 初始化环境和数据库连接
     dotenv().ok();
     setup_logging().await?;
     init_db().await;
-
     let mut strategy = VegasStrategy::default();
-
     // 设置布林带参数
     strategy.bolling_signal.as_mut().unwrap().multiplier = 2.0;
     strategy.bolling_signal.as_mut().unwrap().period = 10;
@@ -53,9 +50,7 @@ async fn test_run_strategy_job() -> Result<()> {
     strategy.volume_signal.as_mut().unwrap().volume_bar_num = 6;
     //engulfing
     strategy.engulfing_signal.as_mut().unwrap().body_ratio = 0.4;
-
     println!("strategy: {:#?}", strategy);
-
     let risk_config: BasicRiskStrategyConfig = BasicRiskStrategyConfig::default();
     let strategy_config = StrategyConfig::new(
         5,

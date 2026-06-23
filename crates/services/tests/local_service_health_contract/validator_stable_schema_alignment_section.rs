@@ -7,7 +7,6 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
     let summary_path = examples_dir.join("full-product-health-summary.json");
     let markdown_path = examples_dir.join("full-product-health.md");
     let validation_path = examples_dir.join("full-product-health-validation.json");
-
     let schema_body = fs::read_to_string(&schema_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", schema_path.display(), error));
     let schema: Value = serde_json::from_str(&schema_body)
@@ -22,14 +21,12 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         .unwrap_or_else(|error| panic!("failed to read {}: {}", markdown_path.display(), error));
     let validation_body = fs::read_to_string(&validation_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", validation_path.display(), error));
-
     let full_report: Value = serde_json::from_str(&full_report_body)
         .unwrap_or_else(|error| panic!("invalid full report example: {error}\n{full_report_body}"));
     let summary: Value = serde_json::from_str(&summary_body)
         .unwrap_or_else(|error| panic!("invalid summary example: {error}\n{summary_body}"));
     let validation: Value = serde_json::from_str(&validation_body)
         .unwrap_or_else(|error| panic!("invalid validation example: {error}\n{validation_body}"));
-
     assert_eq!(schema["schema_version"], 1);
     for required_doc_token in [
         "full_product_health_artifact_schema.json",
@@ -64,7 +61,6 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
             "schema doc should mention {required_doc_token}"
         );
     }
-
     let status_values = schema["status_values"]
         .as_array()
         .expect("status_values should be an array");
@@ -116,7 +112,6 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         );
     }
     assert_alert_code_metadata_alignment(&schema);
-
     assert_required_top_level_fields(&schema, "full_report", &full_report);
     assert_required_top_level_fields(&schema, "summary", &summary);
     assert_required_top_level_fields(&schema, "validation", &validation);
@@ -128,7 +123,6 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         &summary["operator_playbook_summary"],
     );
     assert_required_nested_fields(&schema, "validation", "summary", &validation["summary"]);
-
     assert_enum_value(
         &schema,
         "status_values",
@@ -255,7 +249,6 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
                 && item["admin_link_target"] == "admin.full_product_health.news_source_ai_health"),
         "summary example should expose registry-backed playbook items: {summary_body}"
     );
-
     for marker in schema["markdown_required_markers"]
         .as_array()
         .expect("markdown_required_markers should be an array")
@@ -266,7 +259,6 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
             "markdown example should contain marker {marker}: {markdown_body}"
         );
     }
-
     let examples_combined =
         format!("{full_report_body}\n{summary_body}\n{markdown_body}\n{validation_body}")
             .to_ascii_lowercase();
@@ -302,7 +294,6 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
             "example artifacts must not contain forbidden marker {forbidden}: {examples_combined}"
         );
     }
-
     let validator_script = read_full_product_artifact_validator_script();
     for required in [
         "allowed_status_values",
@@ -320,7 +311,6 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
             "validator should enforce schema enum {required}"
         );
     }
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env(
@@ -335,7 +325,6 @@ fn full_product_health_stable_artifact_schema_examples_and_validator_are_aligned
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run against examples");
-
     assert!(
         output.status.success(),
         "validator should accept schema examples:\nstdout={}\nstderr={}",

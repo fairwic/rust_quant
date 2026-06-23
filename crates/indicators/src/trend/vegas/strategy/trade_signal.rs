@@ -40,7 +40,6 @@ impl VegasStrategy {
                 dynamic_config_snapshot: None,
             };
         }
-
         let last_data_item = match data_items.last() {
             Some(item) => item,
             None => {
@@ -75,7 +74,6 @@ impl VegasStrategy {
                 };
             }
         };
-
         // 初始化交易信号
         let mut signal_result = SignalResult {
             should_buy: Some(false),
@@ -106,12 +104,10 @@ impl VegasStrategy {
             dynamic_adjustments: vec![],
             dynamic_config_snapshot: None,
         };
-
         let mut conditions = Vec::with_capacity(10);
         let mut valid_rsi_value: Option<f64> = None;
         let mut dynamic_adjustments: Vec<String> = Vec::new();
         let mut range_snapshot: Option<serde_json::Value> = None;
-
         // 优先判断成交量
         if let Some(_volume_signal) = &self.volume_signal {
             let is_than_vol_ratio =
@@ -124,11 +120,9 @@ impl VegasStrategy {
                 },
             ));
         }
-
         // 检查EMA2被突破
         let (price_above, price_below) = self
             .check_breakthrough_conditions(data_items, vegas_indicator_signal_values.ema_values);
-
         if price_above || price_below {
             conditions.push((
                 SignalType::SimpleBreakEma2through,
@@ -138,12 +132,10 @@ impl VegasStrategy {
                 },
             ));
         }
-
         // 检查EMA排列，回调触碰关键均线位置
         let ema_trend =
             self.check_ema_touch_trend(data_items, vegas_indicator_signal_values.ema_values);
         vegas_indicator_signal_values.ema_touch_value = ema_trend;
-
         if ema_trend.is_long_signal || ema_trend.is_short_signal {
             conditions.push((
                 SignalType::EmaTrend,
@@ -153,7 +145,6 @@ impl VegasStrategy {
                 },
             ));
         }
-
         // 计算RSI
         if let Some(rsi_signal) = &self.rsi_signal {
             let current_rsi_opt = self.get_valid_rsi(
@@ -161,7 +152,6 @@ impl VegasStrategy {
                 &vegas_indicator_signal_values.rsi_value,
                 vegas_indicator_signal_values.ema_values,
             );
-
             // 如果返回 None，表示检测到极端行情（大利空/利多消息），跳过后续交易信号判断
             let current_rsi = match current_rsi_opt {
                 Some(rsi) => rsi,
@@ -182,9 +172,7 @@ impl VegasStrategy {
                     return signal_result;
                 }
             };
-
             valid_rsi_value = Some(current_rsi);
-
             conditions.push((
                 SignalType::Rsi,
                 SignalCondition::RsiLevel {
@@ -195,7 +183,6 @@ impl VegasStrategy {
                 },
             ));
         }
-
         // 判断布林带
         if let Some(_bollinger_signal) = &self.bolling_signal {
             let bollinger_value =
@@ -210,13 +197,10 @@ impl VegasStrategy {
                 },
             ));
         }
-
         // 检查突破的持续性
         let _breakthrough_confirmed = self.check_breakthrough_confirmation(data_items, price_above);
-
         // 计算振幅
         let _k_line_amplitude = utils::calculate_k_line_amplitude(data_items);
-
         // 计算吞没形态
         self.check_engulfing_signal(
             data_items,
@@ -224,7 +208,6 @@ impl VegasStrategy {
             &mut conditions,
             vegas_indicator_signal_values.ema_values,
         );
-
         // 添加锤子形态
         self.check_kline_hammer_signal(
             data_items,
@@ -232,7 +215,6 @@ impl VegasStrategy {
             &mut conditions,
             vegas_indicator_signal_values.ema_values,
         );
-
         // 腿部识别（可选）：只在 is_open 时参与条件打分
         if let Some(leg_detection_signal) = &self.leg_detection_signal {
             if leg_detection_signal.is_open {
@@ -249,7 +231,6 @@ impl VegasStrategy {
                 }
             }
         }
-
         if let Some(market_structure_signal) = &self.market_structure_signal {
             if market_structure_signal.is_open {
                 let structure_value = &vegas_indicator_signal_values.market_structure_value;
@@ -261,12 +242,10 @@ impl VegasStrategy {
                     || structure_value.internal_bearish_bos
                     || structure_value.internal_bullish_choch
                     || structure_value.internal_bearish_choch;
-
                 let can_use_swing = market_structure_signal.enable_swing_signal && has_swing_signal;
                 let can_use_internal = market_structure_signal.enable_internal_signal
                     && has_internal_signal
                     && (!market_structure_signal.enable_swing_signal || !has_swing_signal);
-
                 if can_use_swing || can_use_internal {
                     let use_internal = !can_use_swing && can_use_internal;
                     let (bullish_bos, bearish_bos, bullish_choch, bearish_choch) = if use_internal {
@@ -284,7 +263,6 @@ impl VegasStrategy {
                             structure_value.swing_bearish_choch,
                         )
                     };
-
                     conditions.push((
                         SignalType::MarketStructure,
                         SignalCondition::MarketStructure {
@@ -298,7 +276,6 @@ impl VegasStrategy {
                 }
             }
         }
-
         // ================================================================
         // 【新增】EMA距离过滤
         // ================================================================
@@ -309,7 +286,6 @@ impl VegasStrategy {
             &ema_distance_config,
         );
         vegas_indicator_signal_values.ema_distance_filter = ema_distance_filter;
-
         // ================================================================
         // 【新增】MACD 计算
         // ================================================================
@@ -318,19 +294,16 @@ impl VegasStrategy {
             {
                 use ta::indicators::MovingAverageConvergenceDivergence;
                 use ta::Next;
-
                 let mut macd = MovingAverageConvergenceDivergence::new(
                     macd_cfg.fast_period,
                     macd_cfg.slow_period,
                     macd_cfg.signal_period,
                 )
                 .unwrap();
-
                 let mut prev_macd = 0.0f64;
                 let mut prev_signal = 0.0f64;
                 let mut prev_histogram = 0.0f64;
                 let mut prev_prev_histogram = 0.0f64;
-
                 // 计算所有 K 线的 MACD
                 for item in data_items.iter() {
                     let macd_output = macd.next(item.c);
@@ -339,20 +312,16 @@ impl VegasStrategy {
                     prev_signal = macd_output.signal;
                     prev_macd = macd_output.macd;
                 }
-
                 let histogram = prev_macd - prev_signal;
-
                 // 判断金叉死叉：当前 histogram > 0 且前一根 < 0
                 let is_golden_cross = histogram > 0.0 && prev_prev_histogram <= 0.0;
                 let is_death_cross = histogram < 0.0 && prev_prev_histogram >= 0.0;
-
                 // 判断柱状图趋势
                 let histogram_increasing = histogram > prev_prev_histogram;
                 let histogram_decreasing = histogram < prev_prev_histogram;
                 // 判断动量是否正在改善（用于识别触底反弹）
                 // 对于负区域：histogram > prev_histogram 表示负值在变小，动量改善
                 let histogram_improving = histogram > prev_histogram;
-
                 vegas_indicator_signal_values.macd_value = super::signal::MacdSignalValue {
                     macd_line: prev_macd,
                     signal_line: prev_signal,
@@ -367,7 +336,6 @@ impl VegasStrategy {
                 };
             }
         }
-
         // ================================================================
         // 【新增】Fib 回撤入场信号（Swing + Fib + 放量）
         // ================================================================
@@ -386,12 +354,10 @@ impl VegasStrategy {
                 .fib_retracement_value
                 .volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
         }
-
         // ================================================================
         // 计算得分
         // ================================================================
         let score = weights.calculate_score(conditions.clone());
-
         // 计算分数到达指定值
         // 计算分数到达指定值
         let mut signal_direction = weights.is_signal_valid(&score);
@@ -404,7 +370,6 @@ impl VegasStrategy {
             } else {
                 None
             };
-
             // Fib 触发时优先使用 Fib 方向（即使原权重系统没有达到阈值）
             if fib_direction.is_some() {
                 signal_direction = fib_direction;
@@ -413,7 +378,6 @@ impl VegasStrategy {
                 signal_direction = None;
             }
         }
-
         if signal_direction.is_none()
             && env_flag("VEGAS_EXPERIMENT_EXPANSION_CONTINUATION_LONG")
             && Self::is_expansion_continuation_long_candidate(
@@ -425,7 +389,6 @@ impl VegasStrategy {
             signal_direction = Some(SignalDirect::IsLong);
             dynamic_adjustments.push("EXPANSION_CONTINUATION_LONG".to_string());
         }
-
         if signal_direction.is_none()
             && env_flag("VEGAS_EXPERIMENT_FAKE_BREAKOUT_REVERSAL_SHORT")
             && Self::is_fake_breakout_reversal_short_candidate(
@@ -436,7 +399,6 @@ impl VegasStrategy {
             signal_direction = Some(SignalDirect::IsShort);
             dynamic_adjustments.push("FAKE_BREAKOUT_REVERSAL_SHORT".to_string());
         }
-
         if signal_direction.is_none()
             && Self::is_above_zero_death_cross_range_break_short_candidate(
                 data_items,
@@ -446,7 +408,6 @@ impl VegasStrategy {
             signal_direction = Some(SignalDirect::IsShort);
             dynamic_adjustments.push("ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT".to_string());
         }
-
         if env_flag("VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL") {
             let round_level_long_candidate = Self::is_round_level_reversal_long_candidate(
                 data_items,
@@ -456,7 +417,6 @@ impl VegasStrategy {
                 data_items,
                 vegas_indicator_signal_values,
             );
-
             if round_level_long_candidate && !round_level_short_candidate {
                 signal_direction = Some(SignalDirect::IsLong);
                 dynamic_adjustments.push("ROUND_LEVEL_REVERSAL_LONG".to_string());
@@ -465,7 +425,6 @@ impl VegasStrategy {
                 dynamic_adjustments.push("ROUND_LEVEL_REVERSAL_SHORT".to_string());
             }
         }
-
         if let Some(signal_direction) = signal_direction {
             // 计算 ATR 用于止损价格
             let mut atr = ATR::new(14).unwrap();
@@ -474,18 +433,15 @@ impl VegasStrategy {
             }
             let atr_value = atr.value();
             let atr_multiplier = self.atr_stop_loss_multiplier.max(0.0);
-
             // 检查大实体（Large Entity）状态
             let mut is_large_entity = false;
             let mut large_entity_retracement_sl: Option<f64> = None;
-
             if let Some(large_entity_cfg) = &self.large_entity_stop_loss_config {
                 if large_entity_cfg.is_open {
                     let body_ratio = last_data_item.body_ratio();
                     let move_pct =
                         (last_data_item.c - last_data_item.o).abs() / last_data_item.o.max(1e-9);
                     let range = last_data_item.h - last_data_item.l;
-
                     if body_ratio >= large_entity_cfg.min_body_ratio
                         && move_pct >= large_entity_cfg.min_move_pct
                     {
@@ -510,7 +466,6 @@ impl VegasStrategy {
                     }
                 }
             }
-
             match signal_direction {
                 SignalDirect::IsLong => {
                     signal_result.should_buy = Some(true);
@@ -520,7 +475,6 @@ impl VegasStrategy {
                         signal_result.atr_stop_loss_price =
                             Some(last_data_item.c - atr_value * atr_multiplier);
                     }
-
                     // Fib 回撤入场：优先写入 swing 止损（可配置）
                     if fib_cfg.is_open
                         && fib_cfg.use_swing_stop_loss
@@ -538,11 +492,9 @@ impl VegasStrategy {
                             signal_result.stop_loss_source = Some("FibRetracement".to_string());
                         }
                     }
-
                     // 【成交量确认形态止损】只在成交量放大时启用形态止损
                     let volume_confirmed =
                         vegas_indicator_signal_values.volume_value.volume_ratio > 1.5;
-
                     // 1. 优先检查大实体止损（强趋势保护）
                     // 用户规则优化：如果macd是绿柱（histogram > 0），且快线大于慢线（macd > signal），就不启用大实体止损
                     let macd_val = &vegas_indicator_signal_values.macd_value;
@@ -552,7 +504,6 @@ impl VegasStrategy {
                         vegas_indicator_signal_values,
                         valid_rsi_value,
                     );
-
                     if is_repair_long {
                         // 暴跌后的修复 long 更容易被后续信号止损过早打掉，
                         // 用标记交给持仓层忽略后续信号止损更新，保留 ATR/最大亏损止损。
@@ -578,7 +529,6 @@ impl VegasStrategy {
                                 Some("Engulfing_Volume_Rejected".to_string());
                         }
                     }
-
                     // 3. 最后检查锤子线形态 + 成交量确认(如果还没有设置止损)
                     if signal_result.signal_kline_stop_loss_price.is_none()
                         && vegas_indicator_signal_values
@@ -603,7 +553,6 @@ impl VegasStrategy {
                         signal_result.atr_stop_loss_price =
                             Some(last_data_item.c + atr_value * atr_multiplier);
                     }
-
                     // Fib 回撤入场：优先写入 swing 止损（可配置）
                     if fib_cfg.is_open
                         && fib_cfg.use_swing_stop_loss
@@ -621,11 +570,9 @@ impl VegasStrategy {
                             signal_result.stop_loss_source = Some("FibRetracement".to_string());
                         }
                     }
-
                     // 【成交量确认形态止损】只在成交量放大时启用形态止损
                     let volume_confirmed =
                         vegas_indicator_signal_values.volume_value.volume_ratio > 1.5;
-
                     // 1. 优先检查大实体止损（强趋势保护）
                     // if is_large_entity && large_entity_retracement_sl.is_some() {
                     //    signal_result.signal_kline_stop_loss_price = large_entity_retracement_sl;
@@ -643,7 +590,6 @@ impl VegasStrategy {
                                 Some("Engulfing_Volume_Rejected".to_string());
                         }
                     }
-
                     // 3. 最后检查锤子线形态 + 成交量确认(如果还没有设置止损)
                     if signal_result.signal_kline_stop_loss_price.is_none()
                         && vegas_indicator_signal_values
@@ -661,14 +607,11 @@ impl VegasStrategy {
                     }
                 }
             }
-
             // 信号产生时立即记录指标快照（在过滤逻辑之前）
             // 这样即使信号后续被过滤，filtered_signal_log 也能记录当时的指标状态
-
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
             signal_result.single_result = Some(json!(conditions).to_string());
         }
-
         self.apply_post_signal_entry_filters(
             data_items,
             last_data_item,
@@ -681,7 +624,6 @@ impl VegasStrategy {
             &mut dynamic_adjustments,
             &mut range_snapshot,
         );
-
         if signal_result.signal_kline_stop_loss_price.is_some() {
             dynamic_adjustments.push("STOP_LOSS_SIGNAL_KLINE".to_string());
         }
@@ -713,7 +655,6 @@ impl VegasStrategy {
             })
             .to_string(),
         );
-
         // 可选：添加详细信息到结果中
         if self.emit_debug
             && (signal_result.should_buy.unwrap_or(false)
@@ -727,7 +668,6 @@ impl VegasStrategy {
                     &conditions,
                     vegas_indicator_signal_values,
                 );
-
                 if signal_result.direction == rust_quant_domain::SignalDirection::Short
                     && matches!(
                         signal_result.stop_loss_source.as_deref(),
@@ -752,7 +692,6 @@ impl VegasStrategy {
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
             signal_result.single_result = Some(json!(conditions).to_string());
         }
-
         signal_result
     }
 }

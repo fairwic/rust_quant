@@ -1,5 +1,4 @@
 use crate::framework::backtest::types::{BasicRiskStrategyConfig, SignalResult};
-
 /// 将 domain 层的 `SignalResult` 转换为 strategies 可用的 `SignalResult`
 pub fn convert_domain_signal(domain_signal: rust_quant_domain::SignalResult) -> SignalResult {
     SignalResult {
@@ -27,7 +26,6 @@ pub fn convert_domain_signal(domain_signal: rust_quant_domain::SignalResult) -> 
         direction: domain_signal.direction,
     }
 }
-
 /// 将 strategies 的基础风控配置转换为 domain 层所需结构
 pub fn to_domain_basic_risk_config(
     cfg: &BasicRiskStrategyConfig,

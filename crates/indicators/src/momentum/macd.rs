@@ -1,10 +1,9 @@
 use rust_quant_market::models::CandlesEntity;
 use ta::indicators::MovingAverageConvergenceDivergence;
 use ta::Next;
-
 pub struct MacdSimpleIndicator {}
-
 impl MacdSimpleIndicator {
+    /// 计算 计算 macd，并把公式边界留在回测策略内部。
     pub fn calculate_macd(
         candles: &[CandlesEntity],
         fast_period: usize,

@@ -3,14 +3,16 @@ use rust_quant_services::strategy::{
     FactorBucketReport, FactorConclusion, PriceOiState, ResearchFilteredSignalSample,
     ResearchSampleKind, ResearchTradeSample, VegasFactorResearchService, VolatilityTier,
 };
-
 struct SnapshotMetrics {
+    /// 资金费率；为空时使用默认值或表示不限制。
     funding_rate: Option<f64>,
+    /// 溢价率；为空时表示交易所未返回该指标。
     premium: Option<f64>,
+    /// 未平仓量；为空时表示交易所未返回该指标。
     open_interest: Option<f64>,
+    /// 价格数值。
     mark_price: Option<f64>,
 }
-
 fn snapshot(
     source: &str,
     symbol: &str,
@@ -30,7 +32,6 @@ fn snapshot(
     row.mark_price = metrics.mark_price;
     row
 }
-
 #[test]
 fn maps_symbol_to_expected_volatility_tier() {
     assert_eq!(
@@ -46,7 +47,6 @@ fn maps_symbol_to_expected_volatility_tier() {
         VolatilityTier::Alt
     );
 }
-
 #[test]
 fn aligns_latest_snapshot_within_four_hour_window() {
     let event_time = 1_744_000_000_000_i64;
@@ -76,14 +76,11 @@ fn aligns_latest_snapshot_within_four_hour_window() {
             },
         ),
     ];
-
     let aligned =
         VegasFactorResearchService::align_latest_snapshot(event_time, &snapshots).expect("aligned");
-
     assert_eq!(aligned.metric_time, event_time - 30 * 60 * 1000);
     assert_eq!(aligned.open_interest, Some(1_100.0));
 }
-
 #[test]
 fn classifies_price_and_open_interest_state() {
     assert_eq!(
@@ -103,7 +100,6 @@ fn classifies_price_and_open_interest_state() {
         PriceOiState::LongUnwinding
     );
 }
-
 #[test]
 fn classifies_funding_signal_context_buckets() {
     let signal_value = r#"{
@@ -116,13 +112,11 @@ fn classifies_funding_signal_context_buckets() {
         },
         "volume_value": {"volume_ratio": 1.62}
     }"#;
-
     let contexts = VegasFactorResearchService::classify_funding_signal_contexts(
         Some("funding_positive"),
         "LONG",
         Some(signal_value),
     );
-
     assert!(contexts.contains(&(
         "funding_direction_context",
         "funding_positive_long".to_string()
@@ -140,21 +134,18 @@ fn classifies_funding_signal_context_buckets() {
         "funding_positive_long_volume_expansion".to_string()
     )));
 }
-
 #[test]
 fn classifies_funding_filter_context_buckets() {
     let signal_value = r#"{
         "ema_distance_filter": {"state": "TooFar"},
         "leg_detection_value": {"is_bullish_leg": true, "is_bearish_leg": false}
     }"#;
-
     let contexts = VegasFactorResearchService::classify_funding_filter_contexts(
         Some("funding_positive"),
         "LONG",
         Some(r#"["MACD_FALLING_KNIFE_LONG"]"#),
         Some(signal_value),
     );
-
     assert_eq!(
         contexts,
         vec![(
@@ -164,7 +155,6 @@ fn classifies_funding_filter_context_buckets() {
         )]
     );
 }
-
 #[test]
 fn classifies_internal_exit_environment_context_buckets() {
     let signal_value = r#"{
@@ -173,14 +163,12 @@ fn classifies_internal_exit_environment_context_buckets() {
         "ema_distance_filter": {"state": "TooFar"},
         "volume_value": {"volume_ratio": 2.05}
     }"#;
-
     let contexts = VegasFactorResearchService::classify_internal_exit_contexts(
         "short",
         Some("Signal_Kline_Stop_Loss"),
         Some("Engulfing_Volume_Confirmed"),
         Some(signal_value),
     );
-
     assert_eq!(
         contexts,
         vec![(
@@ -189,7 +177,6 @@ fn classifies_internal_exit_environment_context_buckets() {
         )]
     );
 }
-
 #[test]
 fn evaluates_factor_conclusion_using_eth_first_gate() {
     let eligible_traded = FactorBucketReport {
@@ -227,7 +214,6 @@ fn evaluates_factor_conclusion_using_eth_first_gate() {
         ]),
         FactorConclusion::Candidate
     );
-
     let rejected_traded = FactorBucketReport {
         factor_name: "funding_premium_divergence".to_string(),
         bucket_name: "divergent_bear".to_string(),
@@ -263,7 +249,6 @@ fn evaluates_factor_conclusion_using_eth_first_gate() {
         ]),
         FactorConclusion::Reject
     );
-
     let positive_filtered_only = FactorBucketReport {
         factor_name: "funding_filter_context".to_string(),
         bucket_name: "funding_positive_long_macd_falling_knife_long_distance_too_far_bullish_leg"
@@ -284,7 +269,6 @@ fn evaluates_factor_conclusion_using_eth_first_gate() {
         FactorConclusion::Candidate
     );
 }
-
 #[test]
 fn renders_report_with_required_sections() {
     let trades = vec![ResearchTradeSample {
@@ -398,9 +382,7 @@ fn renders_report_with_required_sections() {
             conclusion: FactorConclusion::Reject,
         },
     ];
-
     let report = VegasFactorResearchService::render_report(&trades, &filtered_signals, &buckets);
-
     assert!(report.contains("因子概览表"));
     assert!(report.contains("分桶统计表"));
     assert!(report.contains("BTC / ETH / 其他币种"));
@@ -438,7 +420,6 @@ fn renders_report_with_required_sections() {
     assert!(!report
         .contains("| funding_volume_context | funding_positive_long_volume_normal | BTC | 3 |"));
 }
-
 fn trade_sample(
     backtest_id: i64,
     inst_id: &str,
@@ -460,7 +441,6 @@ fn trade_sample(
         signal_result: Some("{}".to_string()),
     }
 }
-
 #[test]
 fn summarizes_path_impact_for_missing_new_and_common_trades() {
     let baseline = vec![
@@ -471,10 +451,8 @@ fn summarizes_path_impact_for_missing_new_and_common_trades() {
         trade_sample(1450, "ETH-USDT-SWAP", "short", 2_000, -20.0),
         trade_sample(1450, "ETH-USDT-SWAP", "long", 3_000, -10.0),
     ];
-
     let summary =
         VegasFactorResearchService::summarize_path_impact(1428, 1450, &baseline, &experiment, 10);
-
     assert_eq!(summary.missing_count, 1);
     assert_eq!(summary.missing_pnl, 100.0);
     assert_eq!(summary.missing_wins, 1);
@@ -488,7 +466,6 @@ fn summarizes_path_impact_for_missing_new_and_common_trades() {
     assert_eq!(summary.verdict, "path_degraded");
     assert_eq!(summary.top_changes.len(), 3);
 }
-
 #[test]
 fn renders_path_impact_report_with_required_sections() {
     let summary = VegasFactorResearchService::summarize_path_impact(
@@ -498,9 +475,7 @@ fn renders_path_impact_report_with_required_sections() {
         &[trade_sample(1450, "ETH-USDT-SWAP", "long", 2_000, -10.0)],
         10,
     );
-
     let report = VegasFactorResearchService::render_path_impact_report(&[summary]);
-
     assert!(report.contains("路径影响评估表"));
     assert!(report.contains("Top Changed Trades"));
     assert!(report.contains("1428"));

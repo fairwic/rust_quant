@@ -1,6 +1,5 @@
 use super::types::{SignalResult, TradeRecord, TradingState};
 use std::env;
-
 /// 记录交易入场
 pub fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
     // 批量回测的时候不进行记录
@@ -29,7 +28,6 @@ pub fn record_trade_entry(state: &mut TradingState, option_type: String, signal:
         stop_loss_update_history: None, // 开仓时不记录止损更新历史
     });
 }
-
 /// 记录交易出场
 pub fn record_trade_exit(
     state: &mut TradingState,

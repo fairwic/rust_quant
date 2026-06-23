@@ -4,7 +4,8 @@ use rust_quant_services::strategy::{
     PathImpactQuery, VegasFactorResearchQuery, VegasFactorResearchService,
 };
 use std::fs;
-
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 fn parse_baseline_ids(raw: &str) -> Result<Vec<i64>> {
     raw.split(',')
         .map(str::trim)
@@ -16,7 +17,7 @@ fn parse_baseline_ids(raw: &str) -> Result<Vec<i64>> {
         })
         .collect()
 }
-
+/// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_usize_env(name: &str, default_value: usize) -> Result<usize> {
     match std::env::var(name) {
         Ok(raw) => raw
@@ -25,17 +26,14 @@ fn parse_usize_env(name: &str, default_value: usize) -> Result<usize> {
         Err(_) => Ok(default_value),
     }
 }
-
 #[tokio::main]
+/// 提供入口的集中实现，避免回测策略调用方重复处理相同细节。
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     tracing_subscriber::fmt::init();
-
     init_db_pool().await?;
-
     let timeframe = std::env::var("VEGAS_RESEARCH_TIMEFRAME").unwrap_or_else(|_| "4H".to_string());
     let output_path = std::env::var("VEGAS_RESEARCH_OUTPUT_PATH").ok();
-
     let service = VegasFactorResearchService::new()?;
     let report = if let Ok(raw_baseline_id) = std::env::var("VEGAS_RESEARCH_PATH_BASELINE_ID") {
         let baseline_id = raw_baseline_id.parse::<i64>().map_err(|e| {
@@ -70,14 +68,11 @@ async fn main() -> Result<()> {
             })
             .await?
     };
-
     println!("{}", report);
-
     if let Some(path) = output_path {
         fs::write(&path, &report)?;
         println!("\nreport_saved={}", path);
     }
-
     close_db_pool().await?;
     Ok(())
 }

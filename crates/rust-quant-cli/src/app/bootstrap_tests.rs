@@ -1,7 +1,6 @@
 use super::*;
 use chrono::Utc;
 use rust_quant_domain::{StrategyConfig, StrategyStatus, Timeframe};
-
 fn test_config(id: i64, symbol: &str, timeframe: Timeframe) -> StrategyConfig {
     StrategyConfig {
         id,
@@ -19,7 +18,6 @@ fn test_config(id: i64, symbol: &str, timeframe: Timeframe) -> StrategyConfig {
         description: None,
     }
 }
-
 #[test]
 fn test_derive_ws_targets_from_configs_dedup() {
     let configs = vec![
@@ -27,7 +25,6 @@ fn test_derive_ws_targets_from_configs_dedup() {
         test_config(2, "BTC-USDT-SWAP", Timeframe::H4),
         test_config(3, "ETH-USDT-SWAP", Timeframe::H1),
     ];
-
     let (inst_ids, periods) = derive_ws_targets_from_configs(&configs);
     assert_eq!(
         inst_ids,
@@ -35,7 +32,6 @@ fn test_derive_ws_targets_from_configs_dedup() {
     );
     assert_eq!(periods, vec!["1H".to_string(), "4H".to_string()]);
 }
-
 #[test]
 fn test_derive_ws_targets_from_configs_empty() {
     let configs = vec![];
@@ -43,18 +39,25 @@ fn test_derive_ws_targets_from_configs_empty() {
     assert!(inst_ids.is_empty());
     assert!(periods.is_empty());
 }
-
 #[test]
 fn test_derive_market_data_exchange_from_configs_prefers_strategy_exchange() {
     let mut config = test_config(1, "ETH-USDT-SWAP", Timeframe::H4);
     config.exchange = Some("binance".to_string());
-
     assert_eq!(
         derive_market_data_exchange_from_configs(&[config], Some("okx")),
         Some("binance".to_string())
     );
 }
-
+#[test]
+fn test_filter_live_strategy_configs_skips_market_velocity_event_strategy() {
+    let vegas = test_config(1, "ETH-USDT-SWAP", Timeframe::H4);
+    let mut market_velocity = test_config(2, "all", Timeframe::M15);
+    market_velocity.strategy_type = StrategyType::MarketVelocity;
+    let filtered = filter_live_strategy_configs(vec![vegas, market_velocity]);
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].strategy_type, StrategyType::Vegas);
+    assert_eq!(filtered[0].symbol, "ETH-USDT-SWAP");
+}
 #[test]
 fn test_default_backtest_targets_keep_enabled_4h_symbols() {
     let targets = default_backtest_targets();
@@ -68,25 +71,18 @@ fn test_default_backtest_targets_keep_enabled_4h_symbols() {
         ]
     );
 }
-
 #[test]
 fn test_override_periods_from_csv_replaces_default_periods() {
     let periods = vec!["4H".to_string(), "1H".to_string()];
-
     let overridden = override_periods_from_csv(periods, Some("1m,4H"));
-
     assert_eq!(overridden, vec!["1m".to_string(), "4H".to_string()]);
 }
-
 #[test]
 fn test_override_periods_from_csv_keeps_defaults_when_empty() {
     let periods = vec!["4H".to_string(), "1H".to_string()];
-
     let overridden = override_periods_from_csv(periods.clone(), Some("  ,  "));
-
     assert_eq!(overridden, periods);
 }
-
 #[test]
 fn test_parse_dune_sync_requests_from_map_single_job_env() {
     let mut envs = std::collections::HashMap::new();
@@ -109,9 +105,7 @@ fn test_parse_dune_sync_requests_from_map_single_job_env() {
         "hyperliquid_basis".to_string(),
     );
     envs.insert("DUNE_MIN_USD".to_string(), "100000".to_string());
-
     let requests = parse_dune_sync_requests_from_map(&envs).expect("should parse dune sync env");
-
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].metric_type, "hyperliquid_basis");
     assert_eq!(requests[0].symbol, "ETH");
@@ -128,7 +122,6 @@ fn test_parse_dune_sync_requests_from_map_single_job_env() {
         Some(&"100000".to_string())
     );
 }
-
 #[test]
 fn test_parse_dune_sync_requests_from_map_batch_jobs() {
     let mut envs = std::collections::HashMap::new();
@@ -139,9 +132,7 @@ fn test_parse_dune_sync_requests_from_map_batch_jobs() {
 eth_whale_transfer|ETH|docs/external_market_data/dune/eth_whale_transfer.sql|2026-02-21T20:00:00Z|2026-02-22T00:00:00Z|large|250000"
                 .to_string(),
         );
-
     let requests = parse_dune_sync_requests_from_map(&envs).expect("should parse batch jobs");
-
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].metric_type, "hyperliquid_basis");
     assert_eq!(requests[0].performance, DuneQueryPerformance::Medium);
@@ -152,37 +143,28 @@ eth_whale_transfer|ETH|docs/external_market_data/dune/eth_whale_transfer.sql|202
         Some(&"250000".to_string())
     );
 }
-
 #[test]
 fn test_should_skip_market_data_sync_from_map_enabled() {
     let mut envs = std::collections::HashMap::new();
     envs.insert("SYNC_SKIP_MARKET_DATA".to_string(), "true".to_string());
-
     assert!(should_skip_market_data_sync_from_map(&envs));
 }
-
 #[test]
 fn test_should_skip_market_data_sync_from_map_disabled_by_default() {
     let envs = std::collections::HashMap::new();
-
     assert!(!should_skip_market_data_sync_from_map(&envs));
 }
-
 #[test]
 fn test_should_run_funding_rate_sync_from_map_enabled() {
     let mut envs = std::collections::HashMap::new();
     envs.insert("IS_RUN_FUNDING_RATE_JOB".to_string(), "true".to_string());
-
     assert!(should_run_funding_rate_sync_from_map(&envs));
 }
-
 #[test]
 fn test_should_run_funding_rate_sync_from_map_disabled_by_default() {
     let envs = std::collections::HashMap::new();
-
     assert!(!should_run_funding_rate_sync_from_map(&envs));
 }
-
 #[test]
 fn test_should_run_market_velocity_radar_from_map_enabled() {
     let mut envs = std::collections::HashMap::new();
@@ -190,17 +172,13 @@ fn test_should_run_market_velocity_radar_from_map_enabled() {
         "IS_RUN_MARKET_VELOCITY_RADAR".to_string(),
         "true".to_string(),
     );
-
     assert!(should_run_market_velocity_radar_from_map(&envs));
 }
-
 #[test]
 fn test_should_run_market_velocity_radar_from_map_disabled_by_default() {
     let envs = std::collections::HashMap::new();
-
     assert!(!should_run_market_velocity_radar_from_map(&envs));
 }
-
 #[test]
 fn test_market_velocity_live_readiness_exits_as_one_shot() {
     let mut envs = std::collections::HashMap::new();
@@ -208,12 +186,10 @@ fn test_market_velocity_live_readiness_exits_as_one_shot() {
         "IS_RUN_MARKET_VELOCITY_LIVE_READINESS".to_string(),
         "true".to_string(),
     );
-
     assert!(should_exit_after_market_velocity_live_readiness_from_map(
         &envs
     ));
 }
-
 #[test]
 fn execution_worker_entrypoints_verify_live_audit_before_polling() {
     let source = include_str!("bootstrap.rs");
@@ -226,7 +202,6 @@ fn execution_worker_entrypoints_verify_live_audit_before_polling() {
     let sync_start = source
         .find("async fn run_exchange_symbol_sync_worker_from_env")
         .expect("next worker entrypoint should exist");
-
     let single_entrypoint = &source[single_start..loop_start];
     assert!(
         single_entrypoint
@@ -236,7 +211,6 @@ fn execution_worker_entrypoints_verify_live_audit_before_polling() {
                 .find("worker.run_once().await?")
                 .expect("single-run entrypoint should run worker after readiness")
     );
-
     let loop_entrypoint = &source[loop_start..sync_start];
     assert!(
         loop_entrypoint
@@ -246,4 +220,25 @@ fn execution_worker_entrypoints_verify_live_audit_before_polling() {
                 .find("loop {")
                 .expect("loop entrypoint should start polling after readiness")
     );
+}
+#[test]
+fn execution_worker_poll_interval_never_allows_zero_second_loop() {
+    let envs = std::collections::HashMap::new();
+    assert_eq!(execution_worker_poll_interval_secs_from_map(&envs), 5);
+    let mut envs = std::collections::HashMap::new();
+    envs.insert(
+        "EXECUTION_WORKER_POLL_INTERVAL_SECS".to_string(),
+        "abc".to_string(),
+    );
+    assert_eq!(execution_worker_poll_interval_secs_from_map(&envs), 5);
+    envs.insert(
+        "EXECUTION_WORKER_POLL_INTERVAL_SECS".to_string(),
+        "0".to_string(),
+    );
+    assert_eq!(execution_worker_poll_interval_secs_from_map(&envs), 1);
+    envs.insert(
+        "EXECUTION_WORKER_POLL_INTERVAL_SECS".to_string(),
+        " 2 ".to_string(),
+    );
+    assert_eq!(execution_worker_poll_interval_secs_from_map(&envs), 2);
 }

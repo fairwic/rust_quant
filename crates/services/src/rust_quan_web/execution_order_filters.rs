@@ -1,22 +1,30 @@
+use super::execution_protection::ProtectiveDirection;
 use anyhow::{anyhow, Result};
 use crypto_exc_all::ExchangeId;
 use rust_decimal::{Decimal, RoundingStrategy};
-
-use super::execution_protection::ProtectiveDirection;
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct ExchangeOrderFilters {
+    /// 数量数值。
     pub(super) min_qty: Option<Decimal>,
+    /// 数量数值。
     pub(super) max_qty: Option<Decimal>,
+    /// 数量数值。
     pub(super) step_size: Option<Decimal>,
+    /// 最小名义金额；为空时使用交易所默认值。
     pub(super) min_notional: Option<Decimal>,
+    /// 数量精度；为空时使用交易所默认值。
     pub(super) quantity_precision: Option<u32>,
+    /// 数量数值。
     pub(super) tick_size: Option<Decimal>,
+    /// 价格精度；为空时使用交易所默认值。
     pub(super) price_precision: Option<u32>,
+    /// contract值；为空时表示该条件不启用。
     pub(super) contract_value: Option<Decimal>,
+    /// contract值currency；为空时表示该条件不启用。
     pub(super) contract_value_currency: Option<String>,
 }
-
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
 pub(super) async fn load_exchange_order_filters(
     exchange: ExchangeId,
     symbol: &str,
@@ -66,7 +74,6 @@ pub(super) async fn load_exchange_order_filters(
     .fetch_optional(&pool)
     .await?;
     pool.close().await;
-
     row.map(
         |(
             min_qty,
@@ -99,7 +106,7 @@ pub(super) async fn load_exchange_order_filters(
     )
     .transpose()
 }
-
+/// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
 fn parse_optional_decimal(raw: Option<&str>, label: &str) -> Result<Option<Decimal>> {
     raw.map(str::trim)
         .filter(|value| !value.is_empty())
@@ -110,7 +117,7 @@ fn parse_optional_decimal(raw: Option<&str>, label: &str) -> Result<Option<Decim
         })
         .transpose()
 }
-
+/// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
 pub(super) fn parse_positive_decimal(raw: &str, label: &str) -> Result<Decimal> {
     let value = raw
         .trim()
@@ -121,7 +128,7 @@ pub(super) fn parse_positive_decimal(raw: &str, label: &str) -> Result<Decimal> 
     }
     Ok(value)
 }
-
+/// 提供小数fromf64的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) fn decimal_from_f64(raw: f64) -> Result<Decimal> {
     if !raw.is_finite() || raw <= 0.0 {
         return Err(anyhow!("price must be a positive finite number"));
@@ -130,14 +137,14 @@ pub(super) fn decimal_from_f64(raw: f64) -> Result<Decimal> {
         .parse::<Decimal>()
         .map_err(|error| anyhow!("invalid decimal price {raw}: {error}"))
 }
-
+/// 提供floortostep的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn floor_to_step(value: Decimal, step: Decimal) -> Decimal {
     if step <= Decimal::ZERO {
         return value;
     }
     (value / step).floor() * step
 }
-
+/// 提供ceiltostep的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn ceil_to_step(value: Decimal, step: Decimal) -> Decimal {
     if step <= Decimal::ZERO {
         return value;
@@ -149,7 +156,7 @@ fn ceil_to_step(value: Decimal, step: Decimal) -> Decimal {
         floored + step
     }
 }
-
+/// 提供notionalpersizeunit的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn notional_per_size_unit(last_price: Decimal, filters: &ExchangeOrderFilters) -> Decimal {
     let Some(contract_value) = filters
         .contract_value
@@ -157,14 +164,13 @@ fn notional_per_size_unit(last_price: Decimal, filters: &ExchangeOrderFilters) -
     else {
         return last_price;
     };
-
     match filters.contract_value_currency.as_deref() {
         Some("USDT" | "USD") => contract_value,
         Some(_) => contract_value * last_price,
         None => last_price,
     }
 }
-
+/// 提供量化订单size的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) fn quantize_order_size(
     requested_size: Decimal,
     last_price: Decimal,
@@ -174,14 +180,12 @@ pub(super) fn quantize_order_size(
     if requested_size <= Decimal::ZERO {
         return Err(anyhow!("order size must be positive"));
     }
-
     let mut size = requested_size;
     if let Some(step) = filters.step_size.filter(|value| *value > Decimal::ZERO) {
         size = floor_to_step(size, step);
     } else if let Some(precision) = filters.quantity_precision {
         size = size.round_dp_with_strategy(precision, RoundingStrategy::ToZero);
     }
-
     if size <= Decimal::ZERO {
         return Err(anyhow!(
             "order size is below exchange step size after quantization"
@@ -217,10 +221,9 @@ pub(super) fn quantize_order_size(
             }
         }
     }
-
     Ok(size)
 }
-
+/// 计算最小订单size，并把公式和边界条件集中在Web 商业链路内部。
 pub(super) fn minimum_order_size(
     last_price: Decimal,
     filters: &ExchangeOrderFilters,
@@ -231,29 +234,25 @@ pub(super) fn minimum_order_size(
             "last_price must be positive for minimum order size"
         ));
     }
-
     let mut size = filters.min_qty.unwrap_or(Decimal::ZERO);
     if enforce_min_notional {
         if let Some(min_notional) = filters.min_notional.filter(|value| *value > Decimal::ZERO) {
             size = size.max(min_notional / notional_per_size_unit(last_price, filters));
         }
     }
-
     if let Some(step) = filters.step_size.filter(|value| *value > Decimal::ZERO) {
         size = ceil_to_step(size, step);
     } else if let Some(precision) = filters.quantity_precision {
         size = ceil_to_step(size, Decimal::new(1, precision));
     }
-
     if size <= Decimal::ZERO {
         return Err(anyhow!(
             "exchange filters do not define a positive minimum order size"
         ));
     }
-
     quantize_order_size(size, last_price, filters, enforce_min_notional)
 }
-
+/// 生成 Web 商业、会员和执行准备度 需要的派生数据，供后续执行、展示或审计使用。
 pub(super) fn format_order_size_decimal(size: Decimal, filters: &ExchangeOrderFilters) -> String {
     let precision = filters
         .quantity_precision
@@ -265,7 +264,7 @@ pub(super) fn format_order_size_decimal(size: Decimal, filters: &ExchangeOrderFi
     .normalize();
     normalized.to_string()
 }
-
+/// 提供量化protective止损价格的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) fn quantize_protective_stop_price(
     price: f64,
     direction: ProtectiveDirection,
@@ -283,7 +282,6 @@ pub(super) fn quantize_protective_stop_price(
     let Some(step) = step else {
         return Ok(price);
     };
-
     let normalized = match direction {
         ProtectiveDirection::Long => floor_to_step(price, step),
         ProtectiveDirection::Short => ceil_to_step(price, step),
@@ -295,7 +293,7 @@ pub(super) fn quantize_protective_stop_price(
     }
     Ok(normalized)
 }
-
+/// 生成 Web 商业、会员和执行准备度 需要的派生数据，供后续执行、展示或审计使用。
 pub(super) fn format_protective_stop_price_decimal(
     price: Decimal,
     filters: &ExchangeOrderFilters,

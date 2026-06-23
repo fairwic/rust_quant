@@ -1,7 +1,6 @@
 use serde_json::Value;
 use std::fs;
 use std::process::Command;
-
 #[test]
 fn cli_converts_major_listing_announcement_to_capture_request() {
     let dir = std::env::temp_dir();
@@ -9,7 +8,6 @@ fn cli_converts_major_listing_announcement_to_capture_request() {
         "pre_major_listing_announcement_{}.json",
         std::process::id()
     ));
-
     fs::write(
         &input_path,
         r#"
@@ -33,7 +31,6 @@ fn cli_converts_major_listing_announcement_to_capture_request() {
         "#,
     )
     .expect("write announcement input");
-
     let output = Command::new(env!(
         "CARGO_BIN_EXE_pre_major_listing_announcement_to_capture"
     ))
@@ -41,9 +38,7 @@ fn cli_converts_major_listing_announcement_to_capture_request() {
     .arg(&input_path)
     .output()
     .expect("run pre_major_listing_announcement_to_capture");
-
     fs::remove_file(&input_path).ok();
-
     assert!(
         output.status.success(),
         "stderr={}",

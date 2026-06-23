@@ -16,7 +16,6 @@ fn local_service_health_json_contract_keeps_backward_compatible_admin_ci_fields(
         .env("HEALTH_CHECK_WORKER_STALE_LEVEL", "fail")
         .output()
         .expect("health script should run");
-
     assert!(
         !output.status.success(),
         "expected worker failure should produce non-zero exit status"
@@ -24,7 +23,6 @@ fn local_service_health_json_contract_keeps_backward_compatible_admin_ci_fields(
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     for key in [
         "output",
         "status",
@@ -52,7 +50,6 @@ fn local_service_health_json_contract_keeps_backward_compatible_admin_ci_fields(
             "json contract missing top-level field {key}: {stdout}"
         );
     }
-
     for key in [
         "expected_worker_failures",
         "expected_worker_warnings",
@@ -105,7 +102,6 @@ fn local_service_health_json_contract_keeps_backward_compatible_admin_ci_fields(
         }
     }
 }
-
 #[test]
 fn local_service_health_execution_audit_opt_in_is_read_only_and_alerts_on_audit_failures() {
     let tool_dir = fake_tool_dir();
@@ -124,7 +120,6 @@ fn local_service_health_execution_audit_opt_in_is_read_only_and_alerts_on_audit_
         .env("HEALTH_CHECK_WORKER_STALE_SECS", "60")
         .output()
         .expect("health script should run");
-
     assert!(
         output.status.success(),
         "execution audit warnings should not fail without strict mode:\nstdout={}\nstderr={}",
@@ -134,7 +129,6 @@ fn local_service_health_execution_audit_opt_in_is_read_only_and_alerts_on_audit_
     let stdout = String::from_utf8(output.stdout).expect("json output should be utf8");
     let payload: Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{stdout}"));
-
     assert_eq!(payload["status"], "warn");
     assert_eq!(payload["execution_audit_check"], "true");
     assert_eq!(payload["summary"]["execution_audit_recent_failures"], 2);
@@ -183,7 +177,6 @@ fn local_service_health_execution_audit_opt_in_is_read_only_and_alerts_on_audit_
         );
     }
 }
-
 #[test]
 fn local_service_health_expected_worker_stale_can_warn_or_fail_without_old_workers() {
     let tool_dir = fake_tool_dir();
@@ -192,7 +185,6 @@ fn local_service_health_expected_worker_stale_can_warn_or_fail_without_old_worke
         tool_dir.display(),
         env::var("PATH").unwrap_or_default()
     );
-
     let warn_output = Command::new(script_path())
         .env("PATH", &path)
         .env("HEALTH_CHECK_OUTPUT", "json")
@@ -202,7 +194,6 @@ fn local_service_health_expected_worker_stale_can_warn_or_fail_without_old_worke
         .env("HEALTH_CHECK_EXPECTED_WORKERS", "worker_stale")
         .output()
         .expect("health script should run");
-
     assert!(
         warn_output.status.success(),
         "expected stale worker should warn but not fail by default:\nstdout={}\nstderr={}",
@@ -212,7 +203,6 @@ fn local_service_health_expected_worker_stale_can_warn_or_fail_without_old_worke
     let warn_stdout = String::from_utf8(warn_output.stdout).expect("json output should be utf8");
     let warn_payload: Value = serde_json::from_str(&warn_stdout)
         .unwrap_or_else(|error| panic!("invalid json: {error}\n{warn_stdout}"));
-
     assert_eq!(warn_payload["status"], "warn");
     assert_eq!(warn_payload["worker_mode"], "expected");
     assert_eq!(warn_payload["expected_workers"], "worker_stale");
@@ -252,7 +242,6 @@ fn local_service_health_expected_worker_stale_can_warn_or_fail_without_old_worke
                     .contains("expected_stale_worker_id=worker_stale")),
         "expected stale warning should produce a P1 alert: {warn_stdout}"
     );
-
     let fail_output = Command::new(script_path())
         .env("PATH", path)
         .env("HEALTH_CHECK_OUTPUT", "json")
@@ -263,7 +252,6 @@ fn local_service_health_expected_worker_stale_can_warn_or_fail_without_old_worke
         .env("HEALTH_CHECK_WORKER_STALE_LEVEL", "fail")
         .output()
         .expect("health script should run");
-
     assert!(
         !fail_output.status.success(),
         "expected stale worker should fail when stale level is fail"
@@ -302,7 +290,6 @@ fn local_service_health_expected_worker_stale_can_warn_or_fail_without_old_worke
         "expected stale failure should produce a P0 alert: {fail_stdout}"
     );
 }
-
 #[test]
 fn local_service_health_script_redacts_sensitive_runtime_values() {
     let script = read_script();
@@ -314,7 +301,6 @@ fn local_service_health_script_redacts_sensitive_runtime_values() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-
     assert!(script.contains("redact_value()"));
     assert!(
         !printed_lines.contains("${QUANT_CORE_DATABASE_URL}")
@@ -327,11 +313,9 @@ fn local_service_health_script_redacts_sensitive_runtime_values() {
         "script must not print raw database URLs or secrets"
     );
 }
-
 #[test]
 fn local_service_health_script_surfaces_worker_checkpoint_observability() {
     let script = read_script();
-
     assert!(script.contains("execution_worker_checkpoints"));
     assert!(script.contains("exchange_request_audit_logs"));
     assert!(script.contains("worker_id"));
@@ -351,11 +335,9 @@ fn local_service_health_script_surfaces_worker_checkpoint_observability() {
         "execution health diagnostics must not write audit tables"
     );
 }
-
 #[test]
 fn local_service_health_script_can_use_local_postgres_container_without_raw_urls() {
     let script = read_script();
-
     assert!(script.contains("POSTGRES_CONTAINER"));
     assert!(script.contains("podman exec"));
     assert!(script.contains("QUANT_CORE_POSTGRES_DB"));

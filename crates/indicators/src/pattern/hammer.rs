@@ -1,9 +1,10 @@
 use rust_quant_common::CandleItem;
-
 /// 锤子/上吊线形态指标
 #[derive(Debug, Clone)]
 pub struct KlineHammerIndicator {
+    /// standerdownshadow 比例。
     stander_down_shadow_ratio: f64,
+    /// standerupshadow 比例。
     stander_up_shadow_ratio: f64,
 }
 impl Default for KlineHammerIndicator {
@@ -25,14 +26,15 @@ pub struct KlineHammerIndicatorOutput {
     //实体比例
     pub body_ratio: f64,
 }
-
 impl KlineHammerIndicator {
+    /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     pub fn new(low_shadow_ratio: f64, up_shadow_ratio: f64) -> Self {
         Self {
             stander_down_shadow_ratio: low_shadow_ratio,
             stander_up_shadow_ratio: up_shadow_ratio,
         }
     }
+    /// 推进指标到下一根 K 线，并返回最新计算结果。
     pub fn next(&mut self, current_kline: &CandleItem) -> KlineHammerIndicatorOutput {
         //计算下影线比例
         let down_shadow_ratio = if current_kline.o > current_kline.c {
@@ -57,22 +59,18 @@ impl KlineHammerIndicator {
         } else {
             (current_kline.h - current_kline.c) / (current_kline.h - current_kline.l)
         };
-
         //计算实体比例
         let body_ratio = if current_kline.c > current_kline.o {
             (current_kline.c - current_kline.o) / (current_kline.h - current_kline.l)
         } else {
             (current_kline.o - current_kline.c) / (current_kline.h - current_kline.l)
         };
-
         //是否是长下影线
         let is_hammer = down_shadow_ratio > self.stander_down_shadow_ratio
             && down_shadow_ratio > up_shadow_ratio;
-
         //是否是长上影线
         let is_hanging_man =
             up_shadow_ratio > self.stander_up_shadow_ratio && up_shadow_ratio > down_shadow_ratio;
-
         KlineHammerIndicatorOutput {
             is_hammer,
             is_hanging_man,
@@ -82,13 +80,14 @@ impl KlineHammerIndicator {
         }
     }
 }
-
 //添加测试单例
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+    /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     fn test_kline_hammer_indicator() {
         let mut indicator = KlineHammerIndicator::new(0.7, 0.7);
         let kline = CandleItem {
@@ -108,7 +107,6 @@ mod tests {
     #[test]
     fn test_engulfing_indicator() {
         let mut indicator = KlineHammerIndicator::new(0.7, 0.7);
-
         // 价格下跌，一个锤子形态（长下影线）
         let kline = CandleItem {
             o: 100.0,
@@ -122,7 +120,6 @@ mod tests {
         let output = indicator.next(&kline);
         assert!(output.is_hammer);
         assert!(!output.is_hanging_man);
-
         // 价格上涨，一个锤子形态（长下影线）
         let kline = CandleItem {
             o: 100.0,
@@ -136,7 +133,6 @@ mod tests {
         let output = indicator.next(&kline);
         assert!(output.is_hammer);
         assert!(!output.is_hanging_man);
-
         // 价格上涨，上吊线形态（长上影线）
         let kline = CandleItem {
             o: 100.0,
@@ -150,7 +146,6 @@ mod tests {
         let output = indicator.next(&kline);
         assert!(!output.is_hammer);
         assert!(output.is_hanging_man);
-
         // 上下影线都不够长：非锤子/上吊线
         let kline = CandleItem {
             o: 100.0,
@@ -164,7 +159,6 @@ mod tests {
         let output = indicator.next(&kline);
         assert!(!output.is_hammer);
         assert!(!output.is_hanging_man);
-
         // 平头上涨锤子形态
         let kline = CandleItem {
             o: 100.0,

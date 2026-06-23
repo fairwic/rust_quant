@@ -1,6 +1,6 @@
 pub struct ProfitStopLoss {}
-
 impl ProfitStopLoss {
+    /// 提供getfibonacci层级的集中实现，避免回测策略调用方重复处理相同细节。
     pub fn get_fibonacci_level(inst_id: &str, period: &str) -> Vec<f64> {
         let multiplier = match period {
             "5m" | "1H" => {
@@ -41,7 +41,6 @@ impl ProfitStopLoss {
             }
             _ => 1.0, // 默认不改变倍率
         };
-
         let mut array = vec![0.00186, 0.00382, 0.005, 0.00618, 0.00786, 0.01];
         array.iter_mut().for_each(|x| *x *= multiplier);
         array

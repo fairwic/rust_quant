@@ -1,7 +1,6 @@
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-
 pub mod back_test;
 pub mod okx;
 pub mod test_predicting;
@@ -9,16 +8,13 @@ pub mod email;
 pub mod test_nwe;
 pub mod test_nwe_strategy;
 pub mod test_id;
-
 #[tokio::test]
 async fn test_mspc_job() -> anyhow::Result<()> {
     // 创建一个mpsc通道
     // let (tx, rx) = mpsc::channel();
     // 创建一个所
     let key = Arc::new(Mutex::new(0));
-
     let mut handles = vec![];
-
     for i in 0..10 {
         // let tx2 = tx.clone();
         let key = key.clone();

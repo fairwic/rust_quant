@@ -1,7 +1,10 @@
 impl ExecutionWorker {
+    /// 执行 worker 的一次主循环：先确定运行模式，再租约任务、执行、回写结果。
+    /// 实盘路径必须从这里统一记录 checkpoint，避免交易所侧已发生动作但 Web 状态缺少证据。
     pub async fn run_once(&self) -> Result<usize> {
+        self.validate_runtime_scope()?;
         self.ensure_live_audit_repository()?;
-
+        // 三种维护模式都不允许继续进入普通租约路径，避免重放报告、确认订单或只读对账时误触发下单。
         if self.config.report_replay_mode {
             return self.run_report_replay_once().await;
         }
@@ -11,7 +14,6 @@ impl ExecutionWorker {
         if reconciliation_only_mode_from_env() {
             return self.run_reconciliation_only_once().await;
         }
-
         self.record_checkpoint(
             "leasing",
             None,
@@ -25,7 +27,8 @@ impl ExecutionWorker {
             }),
         )
         .await;
-
+        // 租约由 Web owner service 发放，Core 只处理拿到租约的任务；这样同一任务不会被多个 worker
+        // 并发执行，也能把 task_types/statuses 的筛选规则集中在 Web 的状态机里。
         let leased = match self
             .client
             .lease_tasks(ExecutionTaskLeaseRequest {
@@ -51,7 +54,6 @@ impl ExecutionWorker {
                 return Err(error);
             }
         };
-
         self.record_checkpoint(
             "leased",
             None,
@@ -62,10 +64,11 @@ impl ExecutionWorker {
             }),
         )
         .await;
-
         let mut handled = 0;
         let mut last_task_id = None;
         for task in leased.tasks {
+            // live worker 可以额外配置 task allowlist，用于人工排障或高风险实盘验证；
+            // 即使 Web 租约返回了任务，也要在本地再拦一次，避免环境变量作用域配置错误。
             if !self.config.leased_task_allowed(task.id) {
                 warn!(
                     task_id = task.id,
@@ -84,9 +87,9 @@ impl ExecutionWorker {
                 .await;
                 continue;
             }
-
             let report = self.execute_task(&task).await;
             let report_status = report.execution_status.clone();
+            // 交易执行结果必须回写 Web；回写失败不重试下单，只记录可重放证据，避免重复 mutation。
             if let Err(error) = self.client.report_result(report.clone()).await {
                 error!(task_id = task.id, "回写执行任务结果失败: {}", error);
                 self.record_report_result_failure(
@@ -121,7 +124,7 @@ impl ExecutionWorker {
         .await;
         Ok(handled)
     }
-
+    /// 提供报告交易所reconciliationfortask的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub async fn report_exchange_reconciliation_for_task(
         &self,
         task: &ExecutionTask,
@@ -151,7 +154,7 @@ impl ExecutionWorker {
         .await;
         Ok(response)
     }
-
+    /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
     async fn check_exchange_reconciliation_before_live_order(
         &self,
         task: &ExecutionTask,
@@ -159,8 +162,11 @@ impl ExecutionWorker {
         gateway: &CryptoExcAllGateway,
     ) -> Result<Option<ExecutionTaskReportRequest>> {
         let instrument = parse_instrument(&order_task.symbol)?;
-        let positions = gateway
-            .positions(order_task.exchange, Some(&instrument))
+        // 真实下单前先做 signed read-only 对账，用交易所当前仓位阻断重复开仓或脏状态；
+        // 这里失败时返回 blocker，而不是继续尝试 place_order。
+        let positions = CryptoExcAllGateway::with_signed_read_only_scope(
+            gateway.positions(order_task.exchange, Some(&instrument)),
+        )
             .await
             .map_err(|error| {
                 anyhow!(
@@ -168,11 +174,11 @@ impl ExecutionWorker {
                     error
                 )
             })?;
-        let open_orders = gateway
-            .open_orders(
+        // open orders 和 positions 一起判断，避免已有挂单尚未成交时再次提交同方向订单。
+        let open_orders = CryptoExcAllGateway::with_signed_read_only_scope(gateway.open_orders(
                 order_task.exchange,
                 OrderListQuery::for_instrument(instrument).with_limit(100),
-            )
+            ))
             .await
             .map_err(|error| {
                 anyhow!(
@@ -189,7 +195,6 @@ impl ExecutionWorker {
         if requests.is_empty() {
             return Ok(None);
         }
-
         for request in &requests {
             self.client
                 .report_exchange_reconciliation(request.clone())
@@ -210,21 +215,22 @@ impl ExecutionWorker {
             )
             .await;
         }
-
         Ok(Some(
             build_live_order_blocked_by_exchange_reconciliation_report(task, order_task, &requests),
         ))
     }
-
+    /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
     async fn check_exchange_read_only_before_pending_close(
         &self,
         task: &ExecutionTask,
         request: &OrderPlacementRequest,
         gateway: &CryptoExcAllGateway,
+        planned_protective_cancel: Option<&(ExchangeId, CancelOrderRequest)>,
     ) -> Result<()> {
         let instrument = request.instrument.clone();
-        let positions = gateway
-            .positions(request.exchange, Some(&instrument))
+        let positions = CryptoExcAllGateway::with_signed_read_only_scope(
+            gateway.positions(request.exchange, Some(&instrument)),
+        )
             .await
             .map_err(|error| {
                 anyhow!(
@@ -232,11 +238,10 @@ impl ExecutionWorker {
                     error
                 )
             })?;
-        let open_orders = gateway
-            .open_orders(
+        let open_orders = CryptoExcAllGateway::with_signed_read_only_scope(gateway.open_orders(
                 request.exchange,
                 OrderListQuery::for_instrument(instrument.clone()).with_limit(100),
-            )
+            ))
             .await
             .map_err(|error| {
                 anyhow!(
@@ -244,6 +249,67 @@ impl ExecutionWorker {
                     error
                 )
             })?;
+        let matching_position_count = positions
+            .iter()
+            .filter(|position| pending_close_has_matching_position(position, request))
+            .count();
+        let conflicting_open_order_count = open_orders
+            .iter()
+            .filter(|order| {
+                pending_close_has_conflicting_open_order(
+                    order,
+                    request,
+                    planned_protective_cancel.map(|(_, request)| request),
+                )
+            })
+            .count();
+        if matching_position_count == 0 {
+            self.record_checkpoint(
+                "pending_close_exchange_reconciliation_read_only_blocked",
+                Some(task.id),
+                json!({
+                    "stage": "pending_close_exchange_reconciliation_read_only",
+                    "exchange": request.exchange.as_str(),
+                    "symbol": instrument.symbol_for(request.exchange),
+                    "position_count": positions.len(),
+                    "open_order_count": open_orders.len(),
+                    "matching_position_count": matching_position_count,
+                    "blocker_code": "pending_close_no_matching_position",
+                    "place_order_allowed": false,
+                    "mutation_allowed": false,
+                }),
+            )
+            .await;
+            return Err(anyhow!(
+                "pending_close_no_matching_position: signed account has no matching non-zero position for {} {}; place_order_allowed=false; mutation_allowed=false",
+                request.exchange.as_str(),
+                instrument.symbol_for(request.exchange)
+            ));
+        }
+        if conflicting_open_order_count > 0 {
+            self.record_checkpoint(
+                "pending_close_exchange_reconciliation_read_only_blocked",
+                Some(task.id),
+                json!({
+                    "stage": "pending_close_exchange_reconciliation_read_only",
+                    "exchange": request.exchange.as_str(),
+                    "symbol": instrument.symbol_for(request.exchange),
+                    "position_count": positions.len(),
+                    "open_order_count": open_orders.len(),
+                    "matching_position_count": matching_position_count,
+                    "conflicting_open_order_count": conflicting_open_order_count,
+                    "blocker_code": "pending_close_active_close_order_conflict",
+                    "place_order_allowed": false,
+                    "mutation_allowed": false,
+                }),
+            )
+            .await;
+            return Err(anyhow!(
+                "pending_close_active_close_order_conflict: signed account already has active close-side open orders for {} {}; place_order_allowed=false; mutation_allowed=false",
+                request.exchange.as_str(),
+                instrument.symbol_for(request.exchange)
+            ));
+        }
         self.record_checkpoint(
             "pending_close_exchange_reconciliation_read_only_checked",
             Some(task.id),
@@ -253,15 +319,16 @@ impl ExecutionWorker {
                 "symbol": instrument.symbol_for(request.exchange),
                 "position_count": positions.len(),
                 "open_order_count": open_orders.len(),
-                "place_order_allowed": true,
+                "matching_position_count": matching_position_count,
+                "conflicting_open_order_count": conflicting_open_order_count,
+                "place_order_allowed": false,
                 "mutation_allowed": false,
             }),
         )
         .await;
-
         Ok(())
     }
-
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     async fn run_confirmation_once(&self) -> Result<usize> {
         self.record_checkpoint(
             "leasing_confirmations",
@@ -273,10 +340,9 @@ impl ExecutionWorker {
             }),
         )
         .await;
-
         let leased = match self
             .client
-            .lease_confirmation_tasks(self.config.lease_limit)
+            .lease_confirmation_tasks(self.config.lease_limit, &self.config.target_task_ids)
             .await
         {
             Ok(leased) => leased,
@@ -293,7 +359,6 @@ impl ExecutionWorker {
                 return Err(error);
             }
         };
-
         self.record_checkpoint(
             "confirmations_leased",
             None,
@@ -304,7 +369,6 @@ impl ExecutionWorker {
             }),
         )
         .await;
-
         let mut handled = 0;
         let mut last_task_id = None;
         for item in leased.items {
@@ -326,7 +390,6 @@ impl ExecutionWorker {
                 .await;
                 continue;
             }
-
             let report = self.execute_pending_confirmation_item(&item).await;
             let report_status = report.execution_status.clone();
             if let Err(error) = self.client.report_result(report.clone()).await {
@@ -352,7 +415,6 @@ impl ExecutionWorker {
             last_task_id = Some(item.task.id);
             handled += 1;
         }
-
         self.record_checkpoint(
             "idle",
             last_task_id,
@@ -364,7 +426,7 @@ impl ExecutionWorker {
         .await;
         Ok(handled)
     }
-
+    /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     async fn run_report_replay_once(&self) -> Result<usize> {
         let replay_limit = self.config.report_replay_limit();
         let failure_backoff_seconds = self.config.report_replay_failure_backoff_seconds;
@@ -383,13 +445,15 @@ impl ExecutionWorker {
             }),
         )
         .await;
-
         let candidates = self
             .audit_repository
-            .list_report_result_replay_candidates(replay_limit, failure_backoff_seconds)
+            .list_report_result_replay_candidates(
+                replay_limit,
+                failure_backoff_seconds,
+                &self.config.target_task_ids,
+            )
             .await?;
         let leased_count = candidates.len();
-
         self.record_checkpoint(
             "report_replays_leased",
             None,
@@ -404,7 +468,6 @@ impl ExecutionWorker {
             }),
         )
         .await;
-
         let mut handled = 0;
         let mut replayed = 0;
         let mut failed = 0;
@@ -433,7 +496,6 @@ impl ExecutionWorker {
                 .await;
                 continue;
             }
-
             if handled > 0 && throttle_ms > 0 {
                 sleep(Duration::from_millis(throttle_ms)).await;
             }
@@ -476,13 +538,11 @@ impl ExecutionWorker {
                         "report_replay",
                     )
                     .await;
-                }
-            }
-
+    }
+}
             last_task_id = Some(task_id);
             handled += 1;
         }
-
         let health_status = if failed > 0 { "warn" } else { "ok" };
         let health_code = if failed > 0 {
             "QUANT_REPORT_REPLAY_FAILED"
@@ -534,5 +594,126 @@ impl ExecutionWorker {
             .await;
         Ok(handled)
     }
-
+}
+/// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
+fn pending_close_has_matching_position(position: &Position, request: &OrderPlacementRequest) -> bool {
+    if position.exchange != request.exchange {
+        return false;
+    }
+    if !position
+        .exchange_symbol
+        .eq_ignore_ascii_case(&request.instrument.symbol_for(request.exchange))
+    {
+        return false;
+    }
+    let Some(size) = position_size(&position.size).filter(|size| *size != 0.0) else {
+        return false;
+    };
+    let Some(request_size) = position_size(&request.size).filter(|size| *size > 0.0) else {
+        return false;
+    };
+    if request_size > size.abs() + f64::EPSILON {
+        return false;
+    }
+    let expected_side = pending_close_expected_position_side(request);
+    let actual_side = normalized_position_side(position.side.as_deref(), size);
+    match (expected_side.as_deref(), actual_side.as_deref()) {
+        (Some(expected), Some(actual)) => expected == actual,
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+/// 提供pending平仓hasconflicting开仓订单的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn pending_close_has_conflicting_open_order(
+    order: &Order,
+    request: &OrderPlacementRequest,
+    planned_protective_cancel: Option<&CancelOrderRequest>,
+) -> bool {
+    if order.exchange != request.exchange {
+        return false;
+    }
+    if !order
+        .exchange_symbol
+        .eq_ignore_ascii_case(&request.instrument.symbol_for(request.exchange))
+    {
+        return false;
+    }
+    if !active_open_order_status(order.status.as_deref()) {
+        return false;
+    }
+    if !pending_close_order_side_matches_request(order.side.as_deref(), request.side) {
+        return false;
+    }
+    if planned_protective_cancel
+        .is_some_and(|cancel| open_order_matches_cancel_request(order, cancel))
+    {
+        return false;
+    }
+    true
+}
+/// 提供pending平仓订单sidematchesrequest的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn pending_close_order_side_matches_request(order_side: Option<&str>, request_side: OrderSide) -> bool {
+    let Some(order_side) = order_side.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    matches!(
+        (order_side.to_ascii_lowercase().as_str(), request_side),
+        ("buy", OrderSide::Buy) | ("sell", OrderSide::Sell)
+    )
+}
+/// 提供开仓订单matchescancelrequest的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn open_order_matches_cancel_request(order: &Order, cancel: &CancelOrderRequest) -> bool {
+    if order.instrument != cancel.instrument {
+        return false;
+    }
+    if let Some(cancel_client_id) = cancel.client_order_id.as_deref() {
+        if order.client_order_id.as_deref() == Some(cancel_client_id) {
+            return true;
+        }
+    }
+    if let Some(cancel_order_id) = cancel.order_id.as_deref() {
+        if order.order_id.as_deref() == Some(cancel_order_id) {
+            return true;
+        }
+    }
+    false
+}
+/// 提供仓位size的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn position_size(value: &str) -> Option<f64> {
+    value
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|size| size.is_finite())
+}
+/// 提供pending平仓expected仓位side的集中实现，避免Web 商业链路调用方重复处理相同细节。
+fn pending_close_expected_position_side(request: &OrderPlacementRequest) -> Option<String> {
+    if let Some(position_side) = request
+        .position_side
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let normalized = position_side.to_ascii_lowercase();
+        if matches!(normalized.as_str(), "long" | "short") {
+            return Some(normalized);
+        }
+    }
+    match request.side {
+        OrderSide::Sell => Some("long".to_string()),
+        OrderSide::Buy => Some("short".to_string()),
+    }
+}
+/// 解析归一化仓位方向，把外部输入转换成Web 商业链路可用的内部值。
+fn normalized_position_side(side: Option<&str>, size: f64) -> Option<String> {
+    let side = side.map(str::trim).filter(|value| !value.is_empty());
+    match side.map(|value| value.to_ascii_lowercase()).as_deref() {
+        Some("long") => Some("long".to_string()),
+        Some("short") => Some("short".to_string()),
+        Some("net" | "both") | None if size > 0.0 => Some("long".to_string()),
+        Some("net" | "both") | None if size < 0.0 => Some("short".to_string()),
+        _ => None,
+    }
 }

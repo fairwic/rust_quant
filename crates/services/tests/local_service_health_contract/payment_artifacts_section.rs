@@ -36,21 +36,18 @@ fn full_product_health_aggregator_accepts_payment_entitlement_input_and_builds_p
   }
 }"#,
     );
-
     let output = Command::new(aggregator_runner_path())
         .env("FULL_PRODUCT_HEALTH_OUTPUT", "json")
         .env("FULL_PRODUCT_HEALTH_RUN_LOCAL_HEALTH", "false")
         .env("FULL_PRODUCT_HEALTH_PAYMENT_JSON_PATH", &payment_input_path)
         .output()
         .expect("full product health aggregator should run");
-
     assert!(
         output.status.success(),
         "payment entitlement input should produce a full report:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
     let full_report_body = String::from_utf8(output.stdout).expect("json output should be utf8");
     let full_report: Value = serde_json::from_str(&full_report_body)
         .unwrap_or_else(|error| panic!("invalid full report json: {error}\n{full_report_body}"));
@@ -103,7 +100,6 @@ fn full_product_health_aggregator_accepts_payment_entitlement_input_and_builds_p
                     .any(|key| key == "payment_exception_id")),
         "full report taxonomy should expose payment entitlement correlation keys: {full_report_body}"
     );
-
     let full_report_path = temp_json_file(
         "full-product-health-payment-entitlement-report",
         &full_report_body,
@@ -114,14 +110,12 @@ fn full_product_health_aggregator_accepts_payment_entitlement_input_and_builds_p
         .env("FULL_PRODUCT_HEALTH_SUMMARY_TOP_ALERT_LIMIT", "10")
         .output()
         .expect("full product health summary should run");
-
     assert!(
         summary_output.status.success(),
         "payment entitlement full report should summarize:\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&summary_output.stdout),
         String::from_utf8_lossy(&summary_output.stderr)
     );
-
     let summary_body = String::from_utf8(summary_output.stdout).expect("summary should be utf8");
     let summary: Value = serde_json::from_str(&summary_body)
         .unwrap_or_else(|error| panic!("invalid summary json: {error}\n{summary_body}"));
@@ -132,7 +126,6 @@ fn full_product_health_aggregator_accepts_payment_entitlement_input_and_builds_p
     );
     assert_eq!(summary["summary"]["wallet_payment_exception_count"], 2);
     assert_eq!(summary["summary"]["payment_entitlement_blocker_count"], 1);
-
     let playbook_items = summary["operator_playbook_summary"]["items"]
         .as_array()
         .expect("operator playbook items should be an array");
@@ -149,7 +142,6 @@ fn full_product_health_aggregator_accepts_payment_entitlement_input_and_builds_p
             && item["metadata"]["payment_entitlement_blocker_count"] == 1),
         "operator playbook should expose payment entitlement owner/action/link/metadata: {summary_body}"
     );
-
     let combined = format!("{full_report_body}\n{summary_body}").to_ascii_lowercase();
     for sensitive in [
         ".env",
@@ -190,7 +182,6 @@ fn full_product_health_schema_registers_payment_entitlement_playbook_codes() {
         .unwrap_or_else(|error| panic!("failed to read {}: {}", doc_path.display(), error));
     let schema: Value = serde_json::from_str(&schema_body)
         .unwrap_or_else(|error| panic!("invalid schema json: {error}\n{schema_body}"));
-
     let payment_codes = schema["alert_code_values"]["payment_entitlement_health"]
         .as_array()
         .expect("payment_entitlement_health codes should be registered");
@@ -258,10 +249,8 @@ fn full_product_health_schema_documents_payment_entitlement_three_state_contract
         .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
     let runbook = fs::read_to_string(&runbook_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", runbook_path.display(), error));
-
     let contract = &schema["consumer_contracts"]["payment_entitlement_health_states"];
     assert_eq!(contract["compatibility_contract_version"], 1);
-
     for required_path in [
         "sections.payment_entitlement_health.skipped",
         "sections.payment_entitlement_health.query_failed",
@@ -279,7 +268,6 @@ fn full_product_health_schema_documents_payment_entitlement_three_state_contract
             "payment entitlement state contract should require path {required_path}"
         );
     }
-
     let states = contract["states"]
         .as_array()
         .expect("payment state contract should list stable states");
@@ -299,7 +287,6 @@ fn full_product_health_schema_documents_payment_entitlement_three_state_contract
             "payment health state {state_name} should lock alert code semantics"
         );
     }
-
     for required_doc_token in [
         "payment_entitlement_health_states",
         "skipped",
@@ -319,7 +306,6 @@ fn full_product_health_schema_documents_payment_entitlement_three_state_contract
         );
     }
 }
-
 #[test]
 fn full_product_health_schema_documents_admin_latest_readiness_envelope_contract() {
     let schema_path = full_product_artifact_schema_json_path();
@@ -341,10 +327,8 @@ fn full_product_health_schema_documents_admin_latest_readiness_envelope_contract
     });
     let handoff = fs::read_to_string(&handoff_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
-
     let contract = &schema["consumer_contracts"]["admin_latest_artifact_readiness_envelope"];
     assert_eq!(contract["compatibility_contract_version"], 1);
-
     for required_path in [
         "latest.ready",
         "latest.stale",
@@ -372,7 +356,6 @@ fn full_product_health_schema_documents_admin_latest_readiness_envelope_contract
             "Admin readiness contract should require path {required_path}"
         );
     }
-
     for prohibited in [
         "shell_out_from_admin_request",
         "call_signed_exchange_endpoint",
@@ -392,12 +375,10 @@ fn full_product_health_schema_documents_admin_latest_readiness_envelope_contract
             "Admin readiness contract should prohibit {prohibited}"
         );
     }
-
     assert!(
         schema_doc.contains("admin_latest_artifact_readiness_envelope"),
         "schema doc should name the Admin latest readiness envelope contract"
     );
-
     for required_doc_token in [
         "paymentPublishIndex",
         "readyToRender",
@@ -415,7 +396,6 @@ fn full_product_health_schema_documents_admin_latest_readiness_envelope_contract
         );
     }
 }
-
 #[test]
 fn full_product_health_schema_documents_admin_wallet_payment_config_env_snapshot_only_contract() {
     let schema_path = full_product_artifact_schema_json_path();
@@ -437,10 +417,8 @@ fn full_product_health_schema_documents_admin_wallet_payment_config_env_snapshot
     });
     let handoff = fs::read_to_string(&handoff_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
-
     let contract = &schema["consumer_contracts"]["admin_wallet_payment_config_env_snapshot"];
     assert_eq!(contract["compatibility_contract_version"], 1);
-
     for required_path in [
         "latest.walletPaymentConfig",
         "latest.walletPaymentConfig.source",
@@ -457,7 +435,6 @@ fn full_product_health_schema_documents_admin_wallet_payment_config_env_snapshot
             "walletPaymentConfig contract should require path {required_path}"
         );
     }
-
     for required_rule in [
         "walletPaymentConfig.source.kind must be one of admin_process_env_snapshot or admin_managed_config_draft",
         "walletPaymentConfig is an Admin-only config snapshot or draft",
@@ -473,7 +450,6 @@ fn full_product_health_schema_documents_admin_wallet_payment_config_env_snapshot
             "walletPaymentConfig contract should document rule {required_rule}"
         );
     }
-
     for required_doc_token in [
         "walletPaymentConfig",
         "admin_process_env_snapshot",
@@ -491,7 +467,6 @@ fn full_product_health_schema_documents_admin_wallet_payment_config_env_snapshot
         );
     }
 }
-
 #[test]
 fn full_product_health_schema_locks_admin_wallet_payment_config_not_ready_decision_table() {
     let schema_path = full_product_artifact_schema_json_path();
@@ -513,9 +488,7 @@ fn full_product_health_schema_locks_admin_wallet_payment_config_not_ready_decisi
     });
     let handoff = fs::read_to_string(&handoff_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
-
     let contract = &schema["consumer_contracts"]["admin_wallet_payment_config_env_snapshot"];
-
     for allowed_source in ["admin_process_env_snapshot", "admin_managed_config_draft"] {
         assert!(
             contract["source_kind_allowed_values"]
@@ -526,7 +499,6 @@ fn full_product_health_schema_locks_admin_wallet_payment_config_not_ready_decisi
             "walletPaymentConfig contract should allow source kind {allowed_source}"
         );
     }
-
     for not_ready_case in [
         "source_kind_missing_or_not_allowed_admin_config_source",
         "status_configured_without_web_wallet_provider_readiness",
@@ -547,7 +519,6 @@ fn full_product_health_schema_locks_admin_wallet_payment_config_not_ready_decisi
             "walletPaymentConfig contract should mark {not_ready_case} as not ready"
         );
     }
-
     for required_doc_token in [
         "source_kind_missing_or_not_allowed_admin_config_source",
         "status_configured_without_web_wallet_provider_readiness",
@@ -566,7 +537,6 @@ fn full_product_health_schema_locks_admin_wallet_payment_config_not_ready_decisi
         );
     }
 }
-
 #[test]
 fn full_product_health_schema_does_not_expose_wallet_payment_config_operator_next_action() {
     let schema_path = full_product_artifact_schema_json_path();
@@ -588,16 +558,13 @@ fn full_product_health_schema_does_not_expose_wallet_payment_config_operator_nex
     });
     let handoff = fs::read_to_string(&handoff_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", handoff_path.display(), error));
-
     let contract = schema["consumer_contracts"]["admin_wallet_payment_config_env_snapshot"]
         .as_object()
         .expect("walletPaymentConfig consumer contract should be an object");
-
     assert!(
         !contract.contains_key("operatorNextAction"),
         "walletPaymentConfig should not expose a redundant operatorNextAction"
     );
-
     for removed_doc_token in [
         "operatorNextAction",
         "verify_web_wallet_provider_readiness",
@@ -611,7 +578,6 @@ fn full_product_health_schema_does_not_expose_wallet_payment_config_operator_nex
         );
     }
 }
-
 #[test]
 fn full_product_health_payment_entitlement_tri_state_examples_are_schema_declared_and_redacted() {
     let schema_path = full_product_artifact_schema_json_path();
@@ -623,7 +589,6 @@ fn full_product_health_payment_entitlement_tri_state_examples_are_schema_declare
     let examples = contract["example_fixtures"]
         .as_array()
         .expect("payment entitlement state contract should declare example_fixtures");
-
     for state_name in ["skipped", "query_failed", "real_count"] {
         let example = examples
             .iter()
@@ -642,14 +607,12 @@ fn full_product_health_payment_entitlement_tri_state_examples_are_schema_declare
             .unwrap_or_else(|error| panic!("failed to read {}: {}", fixture_path.display(), error));
         let payload: Value = serde_json::from_str(&body)
             .unwrap_or_else(|error| panic!("invalid fixture json: {error}\n{body}"));
-
         assert_eq!(payload["contract_state"], state_name);
         assert_eq!(payload["section"], "payment_entitlement_health");
         assert!(payload["status"].as_str().is_some());
         assert!(payload["read_only_input"].is_boolean());
         assert!(payload["wallet_payment_exception_count"].is_u64());
         assert!(payload["payment_entitlement_blocker_count"].is_u64());
-
         match state_name {
             "skipped" => {
                 assert_eq!(payload["status"], "warn");
@@ -693,7 +656,6 @@ fn full_product_health_payment_entitlement_tri_state_examples_are_schema_declare
             }
             _ => unreachable!(),
         }
-
         let lowered = body.to_ascii_lowercase();
         for sensitive in [
             ".env",
@@ -730,14 +692,12 @@ fn full_product_health_payment_entitlement_tri_state_examples_are_schema_declare
         }
     }
 }
-
 #[test]
 fn full_product_health_artifact_validator_rejects_payment_entitlement_state_drift() {
     let artifact_dir = temp_artifact_dir("full-product-health-validator-payment-state-drift");
     let full_report_path = artifact_dir.join("full-product-health.json");
     let summary_path = artifact_dir.join("full-product-health-summary.json");
     let markdown_path = artifact_dir.join("full-product-health.md");
-
     fs::write(
         &full_report_path,
         r#"{
@@ -850,7 +810,6 @@ fn full_product_health_artifact_validator_rejects_payment_entitlement_state_drif
         "# Full Product Health\n\n**Status:** warn\n\n## Counts\n\n## Top Alerts\n\n## Operator Playbook Summary\n\n## Checklist\n\n## Artifact Paths\n\n## Skipped Sections\n",
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {}", markdown_path.display(), error));
-
     let output = Command::new(full_product_artifact_validator_path())
         .env("FULL_PRODUCT_HEALTH_VALIDATION_OUTPUT", "json")
         .env(
@@ -865,7 +824,6 @@ fn full_product_health_artifact_validator_rejects_payment_entitlement_state_drif
         .env("FULL_PRODUCT_HEALTH_VALIDATION_STRICT", "true")
         .output()
         .expect("full product artifact validator should run");
-
     assert!(
         !output.status.success(),
         "strict validator should reject skipped payment artifacts carrying real counts"
@@ -883,6 +841,5 @@ fn full_product_health_artifact_validator_rejects_payment_entitlement_state_drif
         "validator should identify skipped/query_failed/real_count drift: {stdout}"
     );
 }
-
 include!("payment_artifact_smoke_section.rs");
 include!("payment_input_producer_section.rs");

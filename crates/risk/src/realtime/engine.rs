@@ -1,16 +1,12 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use tokio::sync::{mpsc, RwLock};
-use tracing::debug;
-
-use rust_quant_domain::BasicRiskConfig;
-
 use super::{
     BreakevenStopLossService, MarketCandle, PositionSnapshot, RealtimeRiskEvent, StopLossAmender,
     StrategyRiskConfigSnapshot,
 };
-
+use rust_quant_domain::BasicRiskConfig;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
+use tracing::debug;
 /// 实时风控引擎（事件驱动）
 ///
 /// 当前内置：
@@ -19,15 +15,14 @@ pub struct RealtimeRiskEngine<A: StopLossAmender> {
     breakeven: BreakevenStopLossService<A>,
     risk_cache: Arc<RwLock<HashMap<(i64, String), BasicRiskConfig>>>,
 }
-
 impl<A: StopLossAmender> RealtimeRiskEngine<A> {
+    /// 构建 交易执行与风控 所需实例，并集中初始化依赖和默认状态。
     pub fn new(amender: Arc<A>) -> Self {
         Self {
             breakeven: BreakevenStopLossService::new(amender),
             risk_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-
     /// 运行事件循环（上层负责把 K线/持仓/配置事件推送进 rx）
     pub async fn run(&self, mut rx: mpsc::Receiver<RealtimeRiskEvent>) {
         while let Some(ev) = rx.recv().await {
@@ -44,7 +39,7 @@ impl<A: StopLossAmender> RealtimeRiskEngine<A> {
             }
         }
     }
-
+    /// 封装处理riskconfig，减少风控调用方重复实现相同细节。
     async fn on_risk_config(&self, cfg: StrategyRiskConfigSnapshot) {
         {
             let mut guard = self.risk_cache.write().await;
@@ -55,7 +50,7 @@ impl<A: StopLossAmender> RealtimeRiskEngine<A> {
         }
         self.breakeven.upsert_risk_config(cfg).await;
     }
-
+    /// 封装处理position，减少风控调用方重复实现相同细节。
     async fn on_position(&self, pos: PositionSnapshot) {
         let risk = {
             let guard = self.risk_cache.read().await;
@@ -64,15 +59,12 @@ impl<A: StopLossAmender> RealtimeRiskEngine<A> {
                 .cloned()
                 .unwrap_or_else(BasicRiskConfig::default)
         };
-
         debug!(
             "收到持仓更新: strategy_config_id={}, inst_id={}, open={}, side={:?}",
             pos.strategy_config_id, pos.inst_id, pos.is_open, pos.pos_side
         );
-
         self.breakeven.upsert_position(pos, risk).await;
     }
-
     async fn on_candle(&self, candle: MarketCandle) {
         self.breakeven.on_candle(candle).await;
     }

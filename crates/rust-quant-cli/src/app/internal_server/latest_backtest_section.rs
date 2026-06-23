@@ -1,3 +1,5 @@
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
 async fn fetch_latest_backtest_response(
     pool: &PgPool,
     query: &LatestBacktestQuery,
@@ -11,7 +13,6 @@ async fn fetch_latest_backtest_response(
             signal_total: 0,
         });
     };
-
     let (signals, signal_total) = fetch_latest_backtest_signals(pool, log.id, query).await?;
     Ok(LatestBacktestResponse {
         summary: latest_backtest_summary_from_log(&log),
@@ -21,6 +22,7 @@ async fn fetch_latest_backtest_response(
         signal_total,
     })
 }
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_latest_backtest_log(
     pool: &PgPool,
     query: &LatestBacktestQuery,
@@ -72,10 +74,9 @@ async fn fetch_latest_backtest_log(
     .bind(&query.timeframe)
     .fetch_optional(pool)
     .await?;
-
     Ok(row)
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_latest_backtest_signals(
     pool: &PgPool,
     back_test_id: i32,
@@ -108,14 +109,12 @@ async fn fetch_latest_backtest_signals(
     .bind(query.limit)
     .fetch_all(pool)
     .await?;
-
     let total: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM back_test_detail WHERE back_test_id = $1 AND LOWER(option_type) <> 'close'",
     )
     .bind(back_test_id)
     .fetch_one(pool)
     .await?;
-
     let signals = rows
         .into_iter()
         .map(|row| LatestBacktestSignalItem {
@@ -142,10 +141,9 @@ async fn fetch_latest_backtest_signals(
             },
         })
         .collect::<Vec<_>>();
-
     Ok((signals, total.0))
 }
-
+/// 校验输入和运行前置条件，提前暴露 回测与策略研究 的不可执行原因。
 fn validate_backtest_request(request: &BacktestRunRequest) -> Result<(), &'static str> {
     if request.strategy_key.trim().is_empty() {
         return Err("strategyKey is required");
@@ -158,12 +156,11 @@ fn validate_backtest_request(request: &BacktestRunRequest) -> Result<(), &'stati
     }
     Ok(())
 }
-
+/// 校验输入和运行前置条件，提前暴露 回测与策略研究 的不可执行原因。
 fn validate_backtest_runtime_contract(request: &BacktestRunRequest) -> Result<(), String> {
     if request.dry_run {
         return Ok(());
     }
-
     let source = std::env::var("STRATEGY_CONFIG_SOURCE")
         .unwrap_or_default()
         .trim()
@@ -179,7 +176,6 @@ fn validate_backtest_runtime_contract(request: &BacktestRunRequest) -> Result<()
             source
         ));
     }
-
     let quant_core_database_url = std::env::var("QUANT_CORE_DATABASE_URL")
         .unwrap_or_default()
         .trim()
@@ -187,10 +183,9 @@ fn validate_backtest_runtime_contract(request: &BacktestRunRequest) -> Result<()
     if quant_core_database_url.is_empty() {
         return Err("QUANT_CORE_DATABASE_URL is required for non-dry-run backtests".to_string());
     }
-
     Ok(())
 }
-
+/// 提供回测配置fromrequest的集中实现，避免回测策略调用方重复处理相同细节。
 fn backtest_config_from_request(request: &BacktestRunRequest) -> BackTestConfig {
     let mut config = BackTestConfig::default();
     config.strategy_config_id = request
@@ -211,13 +206,11 @@ fn backtest_config_from_request(request: &BacktestRunRequest) -> BackTestConfig 
     ) {
         config.max_concurrent = max_concurrent;
     }
-
     config.enable_random_test = false;
     config.enable_random_test_vegas = false;
     config.enable_specified_test_vegas = false;
     config.enable_random_test_nwe = false;
     config.enable_specified_test_nwe = false;
-
     if request.strategy_key.trim().eq_ignore_ascii_case("nwe") {
         config.enable_specified_test_nwe = true;
     } else {
@@ -225,7 +218,7 @@ fn backtest_config_from_request(request: &BacktestRunRequest) -> BackTestConfig 
     }
     config
 }
-
+/// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 fn read_usize_override(overrides: &Value, keys: &[&str]) -> Option<usize> {
     keys.iter()
         .filter_map(|key| overrides.get(*key))
@@ -233,7 +226,7 @@ fn read_usize_override(overrides: &Value, keys: &[&str]) -> Option<usize> {
         .and_then(|value| usize::try_from(value).ok())
         .filter(|value| *value > 0)
 }
-
+/// 提供回测response请求体的集中实现，避免回测策略调用方重复处理相同细节。
 fn backtest_response_body(run_id: &str, status: &str, request: &BacktestRunRequest) -> Value {
     json!({
         "runId": run_id,
@@ -246,7 +239,7 @@ fn backtest_response_body(run_id: &str, status: &str, request: &BacktestRunReque
         "dryRun": request.dry_run
     })
 }
-
+/// 提供最新回测summaryfromlog的集中实现，避免回测策略调用方重复处理相同细节。
 fn latest_backtest_summary_from_log(log: &LatestBacktestLogRow) -> LatestBacktestSummary {
     LatestBacktestSummary {
         has_backtest: true,
@@ -275,7 +268,7 @@ fn latest_backtest_summary_from_log(log: &LatestBacktestLogRow) -> LatestBacktes
         created_at: Some(log.created_at),
     }
 }
-
+/// 提供默认最新回测summary的集中实现，避免回测策略调用方重复处理相同细节。
 fn default_latest_backtest_summary(back_test_log_id: Option<i32>) -> LatestBacktestSummary {
     LatestBacktestSummary {
         has_backtest: false,

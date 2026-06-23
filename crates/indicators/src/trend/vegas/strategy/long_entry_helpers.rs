@@ -1,4 +1,5 @@
 impl VegasStrategy {
+    /// 判断isexpansioncontinuationlongcandidate，为回测策略流程提供明确的布尔结果。
     fn is_expansion_continuation_long_candidate(
         data_items: &[CandleItem],
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
@@ -7,13 +8,11 @@ impl VegasStrategy {
         let Some(last) = data_items.last() else {
             return false;
         };
-
         let volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
         let macd_val = &vegas_indicator_signal_values.macd_value;
         let leg_val = &vegas_indicator_signal_values.leg_detection_value;
         let structure_val = &vegas_indicator_signal_values.market_structure_value;
         let fib_val = &vegas_indicator_signal_values.fib_retracement_value;
-
         last.c > last.o
             && last.body_ratio() >= 0.65
             && volume_ratio >= 3.0
@@ -28,7 +27,7 @@ impl VegasStrategy {
             && fib_val.volume_confirmed
             && (leg_val.is_bullish_leg || structure_val.internal_bullish_bos)
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_weak_breakout_no_trend_long(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -37,7 +36,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -49,7 +47,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 !ema_values.is_long_trend
@@ -73,7 +70,7 @@ impl VegasStrategy {
             _ => false,
         }
     }
-
+    /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_ranging_no_trend_weak_hammer_long(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
     ) -> bool {
@@ -82,7 +79,6 @@ impl VegasStrategy {
         if mode == "off" {
             return false;
         }
-
         let volume = &vegas_indicator_signal_values.volume_value;
         let fib = &vegas_indicator_signal_values.fib_retracement_value;
         let boll = &vegas_indicator_signal_values.bollinger_value;
@@ -93,7 +89,6 @@ impl VegasStrategy {
         let macd = &vegas_indicator_signal_values.macd_value;
         let market = &vegas_indicator_signal_values.market_structure_value;
         let rsi = vegas_indicator_signal_values.rsi_value.rsi_value;
-
         match mode.as_str() {
             "v1" => {
                 !ema_values.is_long_trend

@@ -1,14 +1,11 @@
 //! 策略框架类型定义
 //!
 //! 提供策略特有的类型定义
-
 use rust_quant_domain::OrderSide;
 use serde::{Deserialize, Serialize};
-
 // ⭐ 类型别名：统一命名
 pub use rust_quant_domain::BacktestResult as BackTestResult;
 pub use rust_quant_domain::BasicRiskConfig as BasicRiskStrategyConfig;
-
 /// 交易方向（策略层使用）
 ///
 /// 提供更语义化的方向命名
@@ -20,15 +17,15 @@ pub enum TradeSide {
     /// 做空 / 卖出
     Short,
 }
-
 impl TradeSide {
+    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
+    /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
     pub fn as_str(&self) -> &'static str {
         match self {
             TradeSide::Long => "long",
             TradeSide::Short => "short",
         }
     }
-
     /// 转换为 OrderSide
     pub fn to_order_side(&self) -> OrderSide {
         match self {
@@ -36,7 +33,6 @@ impl TradeSide {
             TradeSide::Short => OrderSide::Sell,
         }
     }
-
     /// 从 OrderSide 转换
     pub fn from_order_side(side: OrderSide) -> Self {
         match side {
@@ -45,16 +41,14 @@ impl TradeSide {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
+    /// 提供test交易sideconversion的集中实现，避免回测策略调用方重复处理相同细节。
     fn test_trade_side_conversion() {
         assert_eq!(TradeSide::Long.to_order_side(), OrderSide::Buy);
         assert_eq!(TradeSide::Short.to_order_side(), OrderSide::Sell);
-
         assert_eq!(TradeSide::from_order_side(OrderSide::Buy), TradeSide::Long);
         assert_eq!(
             TradeSide::from_order_side(OrderSide::Sell),

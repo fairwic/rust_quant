@@ -9,7 +9,6 @@ use rust_quant_services::rust_quan_web::{
 use serde_json::json;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::collections::{BTreeMap, HashMap};
-
 mod args;
 mod data;
 mod equity;
@@ -41,69 +40,93 @@ pub use exit::{simulate_trade, EarlyExit, ProfitProtection, RunnerExit};
 use fvg::{find_fvg_entry, FvgEntrySearch};
 use reentry::maybe_apply_stop_reentry;
 use report::{print_result_report, print_stage_report};
-
 pub const MS_15M: i64 = 15 * 60 * 1_000;
 pub const MS_1H: i64 = 60 * 60 * 1_000;
 pub const MS_4H: i64 = 4 * 60 * 60 * 1_000;
-
 const TOUCH_THRESHOLD_PCT: f64 = 0.3;
 const PAPER_OUTCOME_HORIZONS: &[(i32, i64)] =
     &[(24, 24 * 60 * 60 * 1_000), (48, 48 * 60 * 60 * 1_000)];
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketVelocityEventBacktestConfig {
+    /// databaseURL，用于配置运行参数。
     pub database_url: String,
+    /// args，用于配置运行参数。
     pub args: MarketVelocityEventBacktestArgs,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct BacktestCandle {
+    /// 事件时间戳。
     pub ts: i64,
+    /// 开盘价。
     pub open: f64,
+    /// 最高价。
     pub high: f64,
+    /// 最低价。
     pub low: f64,
+    /// 收盘价。
     pub close: f64,
+    /// 成交量。
     pub volume: f64,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedCandle {
+    /// K 线。
     pub candle: BacktestCandle,
+    /// SMA 指标值；为空时表示未计算。
     pub sma: Option<f64>,
+    /// EMA；为空时使用默认值或表示不限制。
     pub ema: Option<f64>,
+    /// previous成交量平均；为空时使用默认值或表示不限制。
     pub previous_volume_avg: Option<f64>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 struct CandlePair {
+    /// 交易对或资产符号。
     symbol: String,
+    /// K 线15m，用于行情、K 线或市场扫描。
     candles_15m: String,
+    /// 1 小时 K 线集合；为空时表示未加载。
     candles_1h: Option<String>,
+    /// K 线4h，用于行情、K 线或市场扫描。
     candles_4h: String,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct RadarEvent {
+    /// 唯一标识。
     pub id: i64,
+    /// 交易所名称。
     pub exchange: String,
+    /// 交易对或资产符号。
     pub symbol: String,
+    /// 事件时间戳。
     pub ts: i64,
+    /// 时间字段。
     pub detected_at: String,
+    /// new排名，用于行情、K 线或市场扫描。
     pub new_rank: i32,
+    /// delta排名，用于行情、K 线或市场扫描。
     pub delta_rank: i32,
+    /// 价格数值。
     pub current_price: f64,
+    /// 价格涨跌幅百分比。
     pub price_change_pct: f64,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfirmedEvent {
+    /// event，用于行情、K 线或市场扫描。
     pub event: RadarEvent,
+    /// 时间戳。
     pub entry_ts: i64,
+    /// 入场价格。
     pub entry_price: f64,
+    /// 入场idx，用于行情、K 线或市场扫描。
     pub entry_idx: usize,
+    /// trigger，用于行情、K 线或市场扫描。
     pub trigger: String,
 }
-
+/// 封装当前函数，减少回测策略调用方重复实现相同细节。
+/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
+/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 pub(super) fn trade_direction_for_event(event: &RadarEvent) -> MarketVelocityTradeDirection {
     if event.price_change_pct < 0.0 {
         MarketVelocityTradeDirection::Short
@@ -111,7 +134,6 @@ pub(super) fn trade_direction_for_event(event: &RadarEvent) -> MarketVelocityTra
         MarketVelocityTradeDirection::Long
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TradeOutcome {
     Win,
@@ -120,8 +142,8 @@ pub enum TradeOutcome {
     Timeout,
     Incomplete,
 }
-
 impl TradeOutcome {
+    /// 提供标签的集中实现，避免回测策略调用方重复处理相同细节。
     fn label(self) -> &'static str {
         match self {
             Self::Win => "win",
@@ -132,55 +154,83 @@ impl TradeOutcome {
         }
     }
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct TradeResult {
+    /// outcome，用于记录交易或执行状态。
     pub outcome: TradeOutcome,
+    /// 原因说明。
     pub reason: String,
+    /// 时间戳。
     pub exit_ts: i64,
+    /// R 倍数；为空时表示无有效风险单位。
     pub r: Option<f64>,
+    /// complete，用于记录交易或执行状态。
     pub complete: bool,
+    /// 交易对或资产符号。
     pub symbol: Option<String>,
+    /// event ID；为空时使用默认值或表示不限制。
     pub event_id: Option<i64>,
+    /// 时间字段。
     pub detected_at: Option<String>,
+    /// 时间戳。
     pub entry_ts: i64,
+    /// 入场价格。
     pub entry_price: f64,
+    /// 触发原因；为空时表示无触发来源。
     pub trigger: Option<String>,
+    /// 再次入场标记；为空时表示非再次入场。
     pub reentry: Option<StopReentryDetails>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct StopReentryDetails {
+    /// 模式。
     pub mode: StopReentryMode,
+    /// 时间戳。
     pub original_entry_ts: i64,
+    /// original入场价格。
     pub original_entry_price: f64,
+    /// 时间戳。
     pub original_exit_ts: i64,
+    /// 原因说明。
     pub original_reason: String,
+    /// 原始 R 倍数；为空时表示无原始风险单位。
     pub original_r: Option<f64>,
+    /// 时间戳。
     pub signal_ts: i64,
+    /// 价格数值。
     pub reclaim_price: f64,
+    /// 原因说明。
     pub reentry_exit_reason: String,
+    /// 再次入场 R 倍数；为空时表示未再次入场。
     pub reentry_r: Option<f64>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct BacktestDataSet {
+    /// 列表数据。
     pairs: Vec<CandlePair>,
+    /// 列表数据。
     candles_15m: HashMap<String, Vec<BacktestCandle>>,
+    /// 列表数据。
     candles_1h: HashMap<String, Vec<BacktestCandle>>,
+    /// 列表数据。
     candles_4h: HashMap<String, Vec<BacktestCandle>>,
+    /// 列表数据。
     candles_15m_computed: HashMap<String, Vec<ComputedCandle>>,
+    /// 列表数据。
     candles_4h_computed: HashMap<String, Vec<ComputedCandle>>,
+    /// 列表数据。
     events: Vec<RadarEvent>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct EvaluationReport {
+    /// 列表数据。
     pub confirmed: Vec<ConfirmedEvent>,
+    /// 键值扩展数据。
     pub stage_counts: BTreeMap<String, usize>,
+    /// 键值扩展数据。
     pub blockers: BTreeMap<String, BTreeMap<String, usize>>,
 }
-
+/// 提供配置from环境变量andargs的集中实现，避免回测策略调用方重复处理相同细节。
 pub fn config_from_env_and_args(
     args: MarketVelocityEventBacktestArgs,
 ) -> Result<MarketVelocityEventBacktestConfig> {
@@ -191,7 +241,7 @@ pub fn config_from_env_and_args(
     .context("market velocity event backtest requires QUANT_CORE_DATABASE_URL")?;
     Ok(MarketVelocityEventBacktestConfig { database_url, args })
 }
-
+/// 执行 回测与策略研究 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn run_market_velocity_event_backtest(
     config: MarketVelocityEventBacktestConfig,
 ) -> Result<()> {
@@ -246,7 +296,7 @@ pub async fn run_market_velocity_event_backtest(
     }
     Ok(())
 }
-
+/// 持久化 回测与策略研究 结果，保证写入路径和幂等语义集中处理。
 async fn save_market_velocity_backtest_detail(
     pool: &PgPool,
     confirmed: &[ConfirmedEvent],
@@ -256,7 +306,6 @@ async fn save_market_velocity_backtest_detail(
     let repository = SqlxBacktestRepository::new(pool.clone());
     let (kline_start_time, kline_end_time, kline_nums) = market_velocity_kline_window(candles_15m);
     let strategy_type = market_velocity_strategy_type(args).to_string();
-
     for target_r in &args.target_rs {
         let report = build_framework_equity_report(confirmed, candles_15m, *target_r, args);
         let trade_reports =
@@ -268,7 +317,6 @@ async fn save_market_velocity_backtest_detail(
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
-
         let backtest_log = BacktestLog::new(
             strategy_type.clone(),
             "MULTI_SYMBOL".to_string(),
@@ -303,10 +351,9 @@ async fn save_market_velocity_backtest_detail(
             inserted,
         );
     }
-
     Ok(())
 }
-
+/// 提供市场动量finalfund的集中实现，避免回测策略调用方重复处理相同细节。
 fn market_velocity_final_fund(report: &FrameworkEquityReport) -> f64 {
     report
         .symbols
@@ -314,27 +361,25 @@ fn market_velocity_final_fund(report: &FrameworkEquityReport) -> f64 {
         .map(|symbol| symbol.final_fund)
         .sum::<f64>()
 }
-
+/// 提供市场动量K 线窗口的集中实现，避免回测策略调用方重复处理相同细节。
 fn market_velocity_kline_window(
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
 ) -> (i64, i64, i32) {
     let mut start = i64::MAX;
     let mut end = i64::MIN;
     let mut nums = 0i32;
-
     for candle in candles_15m.values().flatten() {
         start = start.min(candle.ts);
         end = end.max(candle.ts);
         nums = nums.saturating_add(1);
     }
-
     if nums == 0 {
         (0, 0, 0)
     } else {
         (start, end, nums)
     }
 }
-
+/// 提供市场动量策略detail的集中实现，避免回测策略调用方重复处理相同细节。
 fn market_velocity_strategy_detail(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
     json!({
         "source": "market_velocity_event_backtest",
@@ -369,7 +414,7 @@ fn market_velocity_strategy_detail(args: &MarketVelocityEventBacktestArgs) -> se
         "symbol_blocklist": &args.symbol_blocklist,
     })
 }
-
+/// 提供市场动量风控配置detail的集中实现，避免回测策略调用方重复处理相同细节。
 fn market_velocity_risk_config_detail(
     args: &MarketVelocityEventBacktestArgs,
     target_r: f64,
@@ -391,7 +436,7 @@ fn market_velocity_risk_config_detail(
         "fvg_max_wait_candles": args.fvg_max_wait_candles,
     })
 }
-
+/// 解析过滤confirmed事件by入场触发，把外部输入转换成回测策略可用的内部值。
 pub fn filter_confirmed_events_by_entry_trigger(
     confirmed: &[ConfirmedEvent],
     args: &MarketVelocityEventBacktestArgs,
@@ -402,7 +447,7 @@ pub fn filter_confirmed_events_by_entry_trigger(
         .cloned()
         .collect()
 }
-
+/// 解析过滤confirmed事件by交易对，把外部输入转换成回测策略可用的内部值。
 pub fn filter_confirmed_events_by_symbol(
     confirmed: &[ConfirmedEvent],
     args: &MarketVelocityEventBacktestArgs,
@@ -413,7 +458,7 @@ pub fn filter_confirmed_events_by_symbol(
         .cloned()
         .collect()
 }
-
+/// 提供交易对allowed的集中实现，避免回测策略调用方重复处理相同细节。
 fn symbol_allowed(symbol: &str, args: &MarketVelocityEventBacktestArgs) -> bool {
     let normalized = normalize_symbol(symbol);
     !args
@@ -421,7 +466,7 @@ fn symbol_allowed(symbol: &str, args: &MarketVelocityEventBacktestArgs) -> bool 
         .iter()
         .any(|blocked| normalize_symbol(blocked) == normalized)
 }
-
+/// 提供入场触发allowed的集中实现，避免回测策略调用方重复处理相同细节。
 fn entry_trigger_allowed(event: &ConfirmedEvent, args: &MarketVelocityEventBacktestArgs) -> bool {
     let normalized = normalize_entry_trigger(&event.trigger);
     if !args.entry_trigger_allowlist.is_empty()
@@ -445,7 +490,7 @@ fn entry_trigger_allowed(event: &ConfirmedEvent, args: &MarketVelocityEventBackt
             && event.event.new_rank <= blocked.max_new_rank
     })
 }
-
+/// 执行输出交易对过滤报告步骤，串起回测策略需要的状态推进和错误处理。
 fn print_symbol_filter_report(
     before: &[ConfirmedEvent],
     after: &[ConfirmedEvent],
@@ -461,7 +506,7 @@ fn print_symbol_filter_report(
         args.symbol_blocklist.join(",")
     );
 }
-
+/// 执行输出入场触发过滤报告步骤，串起回测策略需要的状态推进和错误处理。
 fn print_entry_trigger_filter_report(
     before: &[ConfirmedEvent],
     after: &[ConfirmedEvent],
@@ -482,12 +527,11 @@ fn print_entry_trigger_filter_report(
         format_entry_trigger_rank_blocklist(&args.entry_trigger_rank_blocklist)
     );
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Vec<ComputedCandle> {
     let mut computed = Vec::with_capacity(candles.len());
     let mut ema: Option<f64> = None;
     let multiplier = 2.0 / (period as f64 + 1.0);
-
     for i in 0..candles.len() {
         let sma = if i + 1 >= period {
             simple_average(
@@ -511,7 +555,6 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
         } else {
             None
         };
-
         computed.push(ComputedCandle {
             candle: candles[i].clone(),
             sma,
@@ -519,10 +562,9 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
             previous_volume_avg,
         });
     }
-
     computed
 }
-
+/// 提供趋势确认的集中实现，避免回测策略调用方重复处理相同细节。
 pub fn trend_confirmation(
     candles: &[ComputedCandle],
     event_ts: i64,
@@ -533,7 +575,6 @@ pub fn trend_confirmation(
     if idx == 0 {
         return (false, "no_completed_4h".to_string());
     }
-
     let latest_completed_at = candles[idx - 1].candle.ts + MS_4H;
     if event_ts - latest_completed_at > args.max_4h_staleness_min * 60 * 1_000 {
         return (false, "stale_4h".to_string());
@@ -541,7 +582,6 @@ pub fn trend_confirmation(
     if idx < args.entry_period {
         return (false, "insufficient_4h".to_string());
     }
-
     let latest = &candles[idx - 1];
     let Some(sma) = latest.sma else {
         return (false, "invalid_4h_average".to_string());
@@ -581,10 +621,9 @@ pub fn trend_confirmation(
             return (false, "weak_4h_average_distance".to_string());
         }
     }
-
     (confirmed, format!("4h_{sma_state}_{ema_state}"))
 }
-
+/// 提供入场确认的集中实现，避免回测策略调用方重复处理相同细节。
 pub fn entry_confirmation(
     candles: &[ComputedCandle],
     event_ts: i64,
@@ -595,7 +634,6 @@ pub fn entry_confirmation(
     if idx == 0 {
         return (false, "no_completed_15m".to_string());
     }
-
     let latest_completed_at = candles[idx - 1].candle.ts + MS_15M;
     if event_ts - latest_completed_at > args.max_15m_staleness_min * 60 * 1_000 {
         return (false, "stale_15m".to_string());
@@ -603,7 +641,6 @@ pub fn entry_confirmation(
     if idx <= args.entry_period {
         return (false, "insufficient_15m".to_string());
     }
-
     let latest = &candles[idx - 1];
     let previous = &candles[idx - 2];
     let Some(sma) = latest.sma else {
@@ -628,7 +665,6 @@ pub fn entry_confirmation(
         }
         _ => {}
     }
-
     let Some(sma_distance) = moving_average_distance_pct(latest.candle.close, sma) else {
         return (false, "invalid_15m_distance".to_string());
     };
@@ -641,7 +677,6 @@ pub fn entry_confirmation(
     {
         return (false, "overextended_15m_average".to_string());
     }
-
     let volume_ratio = latest
         .previous_volume_avg
         .filter(|average| *average > 0.0)
@@ -651,7 +686,6 @@ pub fn entry_confirmation(
     {
         return (false, "volume_not_confirmed".to_string());
     }
-
     match direction {
         MarketVelocityTradeDirection::Long => {
             if previous.ema.is_some_and(|previous_ema| {
@@ -697,10 +731,9 @@ pub fn entry_confirmation(
         }
         MarketVelocityTradeDirection::Both => {}
     }
-
     (false, "timing_not_confirmed".to_string())
 }
-
+/// 封装评估events，减少回测策略调用方重复实现相同细节。
 pub fn evaluate_events(
     events: &[RadarEvent],
     candles_4h: &HashMap<String, Vec<ComputedCandle>>,
@@ -713,7 +746,6 @@ pub fn evaluate_events(
     let mut stage_counts = BTreeMap::new();
     let mut blockers: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
     let mut confirmed = Vec::new();
-
     for event in events {
         increment(&mut stage_counts, "raw");
         let Some(symbol_4h) = candles_4h
@@ -732,7 +764,6 @@ pub fn evaluate_events(
             increment_nested(&mut blockers, &event.symbol, "no_15m_rows");
             continue;
         };
-
         let direction = trade_direction_for_event(event);
         let (trend_ok, trend_reason) = trend_confirmation(symbol_4h, event.ts, direction, args);
         if !trend_ok {
@@ -741,7 +772,6 @@ pub fn evaluate_events(
             continue;
         }
         increment(&mut stage_counts, "trend_pass");
-
         match args.fvg_entry_mode {
             FvgEntryMode::Off => {
                 let (entry_ok, entry_reason) =
@@ -752,7 +782,6 @@ pub fn evaluate_events(
                     continue;
                 }
                 increment(&mut stage_counts, "entry_pass");
-
                 let Some(entry_idx) = next_entry_candle_idx(symbol_15m, event.ts) else {
                     increment(&mut stage_counts, "no_next_entry_candle");
                     increment_nested(&mut blockers, &event.symbol, "no_next_entry_candle");
@@ -792,13 +821,11 @@ pub fn evaluate_events(
                     increment_nested(&mut blockers, &event.symbol, "no_4h_rows");
                     continue;
                 };
-
                 if direction == MarketVelocityTradeDirection::Short {
                     increment(&mut stage_counts, "entry_blocked");
                     increment_nested(&mut blockers, &event.symbol, "short_fvg_not_supported");
                     continue;
                 }
-
                 match find_fvg_entry(
                     fvg_mode,
                     symbol_4h_raw,
@@ -825,14 +852,13 @@ pub fn evaluate_events(
             }
         }
     }
-
     EvaluationReport {
         confirmed,
         stage_counts,
         blockers,
     }
 }
-
+/// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 fn summarize_target(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -843,7 +869,6 @@ fn summarize_target(
     let mut lock_until: HashMap<String, i64> = HashMap::new();
     let mut results = Vec::new();
     let mut skipped_lock = 0;
-
     for signal in confirmed {
         let symbol = &signal.event.symbol;
         if signal.event.ts <= *lock_until.get(symbol).unwrap_or(&-1) {
@@ -889,10 +914,9 @@ fn summarize_target(
         );
         results.push(result);
     }
-
     (results, skipped_lock)
 }
-
+/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_market_velocity_paper_outcomes(
     confirmed: &[ConfirmedEvent],
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
@@ -904,7 +928,6 @@ pub fn build_market_velocity_paper_outcomes(
         .collect::<HashMap<_, _>>();
     let mut outcomes = Vec::new();
     let entry_trigger_filter_version = entry_trigger_filter_version(args);
-
     for target_r in &args.target_rs {
         for (horizon_hours, horizon_ms) in PAPER_OUTCOME_HORIZONS {
             let (results, skipped_lock) =
@@ -981,10 +1004,9 @@ pub fn build_market_velocity_paper_outcomes(
             }
         }
     }
-
     outcomes
 }
-
+/// 提供FVG入场载荷的集中实现，避免回测策略调用方重复处理相同细节。
 fn fvg_entry_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
     json!({
         "mode": args.fvg_entry_mode.label(),
@@ -992,7 +1014,7 @@ fn fvg_entry_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Valu
         "max_wait_candles": args.fvg_max_wait_candles,
     })
 }
-
+/// 提供盈利保护载荷的集中实现，避免回测策略调用方重复处理相同细节。
 fn profit_protection_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
     json!({
         "enabled": args.profit_protect_after_r.is_some(),
@@ -1000,7 +1022,7 @@ fn profit_protection_payload(args: &MarketVelocityEventBacktestArgs) -> serde_js
         "stop_r": args.profit_protect_stop_r,
     })
 }
-
+/// 执行 Runner离场载荷步骤，串起回测策略需要的状态推进和错误处理。
 fn runner_exit_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
     json!({
         "enabled": args.runner_target_r.is_some(),
@@ -1009,14 +1031,14 @@ fn runner_exit_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Va
         "stop_r": args.runner_stop_r,
     })
 }
-
+/// 提供early离场载荷的集中实现，避免回测策略调用方重复处理相同细节。
 fn early_exit_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
     json!({
         "enabled": args.early_exit_no_profit_candles.is_some(),
         "no_profit_candles": args.early_exit_no_profit_candles,
     })
 }
-
+/// 提供盈利保护for目标的集中实现，避免回测策略调用方重复处理相同细节。
 pub(crate) fn profit_protection_for_target(
     args: &MarketVelocityEventBacktestArgs,
     target_r: f64,
@@ -1027,7 +1049,7 @@ pub(crate) fn profit_protection_for_target(
         stop_r: args.profit_protect_stop_r,
     })
 }
-
+/// 执行 Runner离场for目标步骤，串起回测策略需要的状态推进和错误处理。
 pub(crate) fn runner_exit_for_target(
     args: &MarketVelocityEventBacktestArgs,
     target_r: f64,
@@ -1039,12 +1061,12 @@ pub(crate) fn runner_exit_for_target(
         stop_r: args.runner_stop_r,
     })
 }
-
+/// 提供early离场的集中实现，避免回测策略调用方重复处理相同细节。
 pub(crate) fn early_exit(args: &MarketVelocityEventBacktestArgs) -> Option<EarlyExit> {
     args.early_exit_no_profit_candles
         .map(|no_profit_candles| EarlyExit { no_profit_candles })
 }
-
+/// 停止 回测与策略研究 后台流程，确保退出时不留下未释放状态。
 fn stop_reentry_payload(
     result: &TradeResult,
     args: &MarketVelocityEventBacktestArgs,
@@ -1069,7 +1091,7 @@ fn stop_reentry_payload(
         "reentry_r": reentry.reentry_r,
     })
 }
-
+/// 提供入场触发过滤version的集中实现，避免回测策略调用方重复处理相同细节。
 fn entry_trigger_filter_version(args: &MarketVelocityEventBacktestArgs) -> &'static str {
     entry_trigger_filter_version_label(
         !args.entry_trigger_allowlist.is_empty(),
@@ -1077,7 +1099,7 @@ fn entry_trigger_filter_version(args: &MarketVelocityEventBacktestArgs) -> &'sta
         !args.entry_trigger_rank_blocklist.is_empty(),
     )
 }
-
+/// 执行输出市场动量paperoutcomesjsonl步骤，串起回测策略需要的状态推进和错误处理。
 fn print_market_velocity_paper_outcomes_jsonl(
     outcomes: &[MarketVelocityPaperOutcomeRequest],
 ) -> Result<()> {
@@ -1090,7 +1112,7 @@ fn print_market_velocity_paper_outcomes_jsonl(
     println!("paper_outcomes_generated={}", outcomes.len());
     Ok(())
 }
-
+/// 执行提交市场动量paperoutcomes步骤，串起回测策略需要的状态推进和错误处理。
 async fn submit_market_velocity_paper_outcomes(
     outcomes: &[MarketVelocityPaperOutcomeRequest],
 ) -> Result<usize> {
@@ -1098,7 +1120,6 @@ async fn submit_market_velocity_paper_outcomes(
         println!("paper_outcomes_submitted=0");
         return Ok(0);
     }
-
     let client = ExecutionTaskClient::new(quant_web_execution_task_config_from_env()?)?;
     let mut submitted = 0;
     for outcome in outcomes {
@@ -1122,7 +1143,7 @@ async fn submit_market_velocity_paper_outcomes(
     println!("paper_outcomes_submitted={submitted}");
     Ok(submitted)
 }
-
+/// 提供已完成K 线数量的集中实现，避免回测策略调用方重复处理相同细节。
 fn completed_candle_count(candles: &[ComputedCandle], event_ts: i64, candle_ms: i64) -> usize {
     let mut left = 0;
     let mut right = candles.len();
@@ -1136,7 +1157,7 @@ fn completed_candle_count(candles: &[ComputedCandle], event_ts: i64, candle_ms: 
     }
     left
 }
-
+/// 封装推进entryK 线idx，减少回测策略调用方重复实现相同细节。
 fn next_entry_candle_idx(candles: &[ComputedCandle], event_ts: i64) -> Option<usize> {
     let mut left = 0;
     let mut right = candles.len();
@@ -1150,7 +1171,7 @@ fn next_entry_candle_idx(candles: &[ComputedCandle], event_ts: i64) -> Option<us
     }
     (left < candles.len()).then_some(left)
 }
-
+/// 提供movingaverage状态的集中实现，避免回测策略调用方重复处理相同细节。
 fn moving_average_state(
     close: f64,
     average: f64,
@@ -1165,7 +1186,6 @@ fn moving_average_state(
             return "breakdown_down";
         }
     }
-
     if moving_average_distance_pct(close, average)
         .is_some_and(|distance_pct| distance_pct.abs() <= TOUCH_THRESHOLD_PCT)
     {
@@ -1177,14 +1197,14 @@ fn moving_average_state(
         "below"
     }
 }
-
+/// 提供movingaveragedistancepct的集中实现，避免回测策略调用方重复处理相同细节。
 fn moving_average_distance_pct(close: f64, average: f64) -> Option<f64> {
     if average <= 0.0 || !average.is_finite() || !close.is_finite() {
         return None;
     }
     Some((close - average) / average * 100.0)
 }
-
+/// 提供simpleaverage的集中实现，避免回测策略调用方重复处理相同细节。
 fn simple_average(values: impl Iterator<Item = f64>) -> Option<f64> {
     let mut count = 0;
     let mut sum = 0.0;
@@ -1197,11 +1217,10 @@ fn simple_average(values: impl Iterator<Item = f64>) -> Option<f64> {
     }
     (count > 0).then_some(sum / count as f64)
 }
-
 fn valid_positive(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
-
+/// 提供timestampmstorfc3339的集中实现，避免回测策略调用方重复处理相同细节。
 fn timestamp_ms_to_rfc3339(ts: i64) -> String {
     Utc.timestamp_millis_opt(ts)
         .single()
@@ -1212,7 +1231,7 @@ fn timestamp_ms_to_rfc3339(ts: i64) -> String {
         })
         .to_rfc3339_opts(SecondsFormat::Secs, true)
 }
-
+/// 提供quantweb执行task配置from环境变量的集中实现，避免回测策略调用方重复处理相同细节。
 fn quant_web_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
     let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
         .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
@@ -1228,7 +1247,7 @@ fn quant_web_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
         internal_secret,
     })
 }
-
+/// 提供首个非空环境变量的集中实现，避免回测策略调用方重复处理相同细节。
 fn first_non_empty_env(keys: &[&str]) -> Option<String> {
     keys.iter().find_map(|key| {
         std::env::var(key)
@@ -1237,11 +1256,9 @@ fn first_non_empty_env(keys: &[&str]) -> Option<String> {
             .filter(|value| !value.is_empty())
     })
 }
-
 fn increment(counter: &mut BTreeMap<String, usize>, key: &str) {
     *counter.entry(key.to_string()).or_default() += 1;
 }
-
 fn increment_nested(
     counters: &mut BTreeMap<String, BTreeMap<String, usize>>,
     symbol: &str,
@@ -1249,6 +1266,5 @@ fn increment_nested(
 ) {
     increment(counters.entry(symbol.to_string()).or_default(), reason);
 }
-
 #[cfg(test)]
 mod tests;

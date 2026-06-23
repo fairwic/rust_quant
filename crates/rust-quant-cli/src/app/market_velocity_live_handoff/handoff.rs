@@ -1,3 +1,6 @@
+use super::{
+    MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN, MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN,
+};
 use anyhow::{anyhow, bail, Result};
 use rust_quant_services::rust_quan_web::{
     build_market_velocity_scoped_execution_worker_env,
@@ -8,11 +11,7 @@ use rust_quant_services::rust_quan_web::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-
-use super::{
-    MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN, MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN,
-};
-
+/// 构建build市场动量实盘preview请求，集中维护行情数据的载荷和字段组装规则。
 pub fn build_market_velocity_live_preview_request(
     signal: &StrategySignalSubmitRequest,
     buyer_email: Option<&str>,
@@ -26,7 +25,6 @@ pub fn build_market_velocity_live_preview_request(
     if payload_string(&payload, "source_signal_type").as_deref() != Some("market_velocity") {
         bail!("payload source_signal_type must be market_velocity");
     }
-
     let exchange = payload_string(&payload, "exchange").unwrap_or_else(|| {
         signal
             .strategy_key
@@ -43,7 +41,6 @@ pub fn build_market_velocity_live_preview_request(
     let entry_trigger_filter_version = payload
         .get("entry_filter")
         .and_then(|value| payload_string(value, "entry_trigger_filter_version"));
-
     Ok(MarketVelocityExecutionTaskCreationPreviewRequest {
         rank_event_id: payload_i64(&payload, "rank_event_id"),
         buyer_email: buyer_email
@@ -60,14 +57,14 @@ pub fn build_market_velocity_live_preview_request(
         risk_adjusted_win_rate_edge: None,
     })
 }
-
+/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_market_velocity_live_worker_manifest(task_id: i64) -> Value {
     json!({
         "execution_path": market_velocity_existing_execution_worker_path(),
         "next_worker_env": build_market_velocity_scoped_execution_worker_env(task_id)
     })
 }
-
+/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_market_velocity_live_worker_handoff(
     task_id: i64,
     web_readiness: MarketVelocityExecutionTaskLiveReadinessResponse,
@@ -88,7 +85,7 @@ pub fn build_market_velocity_live_worker_handoff(
         "worker_handoff_readiness": worker_handoff_readiness,
     })
 }
-
+/// 提供市场动量requiredliveownerscope的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn market_velocity_required_live_owner_scope(
     buyer_email: Option<&str>,
     combo_id: Option<i64>,
@@ -102,10 +99,9 @@ pub fn market_velocity_required_live_owner_scope(
     let combo_id = combo_id.filter(|value| *value > 0).ok_or_else(|| {
         anyhow!("MARKET_VELOCITY_LIVE_COMBO_ID is required for live task creation")
     })?;
-
     Ok((buyer_email, combo_id))
 }
-
+/// 提供市场动量scope信号toliveowner的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn market_velocity_scope_signal_to_live_owner(
     mut signal: StrategySignalSubmitRequest,
     buyer_email: &str,
@@ -125,21 +121,19 @@ pub fn market_velocity_scope_signal_to_live_owner(
     signal.payload_json = serde_json::to_string(&payload)?;
     Ok(signal)
 }
-
 pub fn market_velocity_task_creation_apply_authorized(
     apply: bool,
     confirmation: Option<&str>,
 ) -> bool {
     apply && confirmation.map(str::trim) == Some(MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN)
 }
-
 pub fn market_velocity_scoped_worker_apply_authorized(
     apply: bool,
     confirmation: Option<&str>,
 ) -> bool {
     apply && confirmation.map(str::trim) == Some(MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN)
 }
-
+/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_market_velocity_scoped_worker_env_overrides(
     task_id: i64,
     confirmation: &str,
@@ -153,7 +147,6 @@ pub fn build_market_velocity_scoped_worker_env_overrides(
             MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN
         );
     }
-
     Ok(BTreeMap::from([
         ("IS_RUN_EXECUTION_WORKER", "true".to_string()),
         ("EXECUTION_WORKER_ONLY", "true".to_string()),
@@ -179,7 +172,7 @@ pub fn build_market_velocity_scoped_worker_env_overrides(
         ),
     ]))
 }
-
+/// 执行 行情与市场数据 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub(super) async fn run_market_velocity_scoped_worker_once(
     task_id: i64,
     confirmation: &str,
@@ -190,12 +183,12 @@ pub(super) async fn run_market_velocity_scoped_worker_once(
     worker.verify_live_audit_ready().await?;
     worker.run_once().await
 }
-
 struct EnvOverrideGuard {
+    /// 列表数据。
     previous: Vec<(&'static str, Option<String>)>,
 }
-
 impl EnvOverrideGuard {
+    /// 封装应用，减少行情数据调用方重复实现相同细节。
     fn apply(overrides: &BTreeMap<&'static str, String>) -> Self {
         let previous = overrides
             .iter()
@@ -208,8 +201,8 @@ impl EnvOverrideGuard {
         Self { previous }
     }
 }
-
 impl Drop for EnvOverrideGuard {
+    /// 封装释放，减少行情数据调用方重复实现相同细节。
     fn drop(&mut self) {
         for (key, value) in self.previous.drain(..).rev() {
             match value {
@@ -219,7 +212,7 @@ impl Drop for EnvOverrideGuard {
         }
     }
 }
-
+/// 构造载荷字符串，集中维护行情数据的载荷组装规则。
 fn payload_string(payload: &Value, key: &str) -> Option<String> {
     payload.get(key).and_then(|value| match value {
         Value::String(raw) => Some(raw.trim().to_string()).filter(|value| !value.is_empty()),
@@ -227,7 +220,7 @@ fn payload_string(payload: &Value, key: &str) -> Option<String> {
         _ => None,
     })
 }
-
+/// 构造载荷i64，集中维护行情数据的载荷组装规则。
 fn payload_i64(payload: &Value, key: &str) -> Option<i64> {
     payload.get(key).and_then(|value| match value {
         Value::Number(number) => number.as_i64(),
@@ -235,13 +228,13 @@ fn payload_i64(payload: &Value, key: &str) -> Option<i64> {
         _ => None,
     })
 }
-
+/// 封装嵌套载荷i64，减少行情数据调用方重复实现相同细节。
 fn nested_payload_i64(payload: &Value, parent: &str, key: &str) -> Option<i64> {
     payload
         .get(parent)
         .and_then(|value| payload_i64(value, key))
 }
-
+/// 构造载荷f64，集中维护行情数据的载荷组装规则。
 fn payload_f64(payload: &Value, key: &str) -> Option<f64> {
     payload.get(key).and_then(|value| match value {
         Value::Number(number) => number.as_f64(),
@@ -249,13 +242,12 @@ fn payload_f64(payload: &Value, key: &str) -> Option<f64> {
         _ => None,
     })
 }
-
+/// 封装嵌套载荷f64，减少行情数据调用方重复实现相同细节。
 fn nested_payload_f64(payload: &Value, parent: &str, key: &str) -> Option<f64> {
     payload
         .get(parent)
         .and_then(|value| payload_f64(value, key))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,7 +256,7 @@ mod tests {
         MarketVelocityExecutionTaskLiveReadinessResponse, StrategySignalSubmitRequest,
     };
     use serde_json::json;
-
+    /// 构造样例信号请求，集中维护行情数据的载荷组装规则。
     fn sample_signal_request() -> StrategySignalSubmitRequest {
         StrategySignalSubmitRequest {
             source: "rust_quant".to_string(),
@@ -295,7 +287,7 @@ mod tests {
             generated_at: Some("2026-06-16T09:30:00Z".to_string()),
         }
     }
-
+    /// 构造样例实盘taskreadiness，集中维护行情数据的载荷组装规则。
     fn sample_live_task_readiness(
         task_id: i64,
     ) -> MarketVelocityExecutionTaskLiveReadinessResponse {
@@ -309,7 +301,7 @@ mod tests {
             blocker_codes: Vec::new(),
         }
     }
-
+    /// 构造样例executiontask，集中维护行情数据的载荷组装规则。
     fn sample_execution_task(task_id: i64) -> ExecutionTask {
         ExecutionTask {
             id: task_id,
@@ -361,7 +353,6 @@ mod tests {
             updated_at: "2026-06-16T09:30:00Z".to_string(),
         }
     }
-
     #[test]
     fn scoped_worker_auto_run_requires_exact_live_order_confirmation() {
         assert!(!market_velocity_scoped_worker_apply_authorized(false, None));
@@ -375,7 +366,6 @@ mod tests {
             Some(MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN)
         ));
     }
-
     #[test]
     fn scoped_worker_env_overrides_force_one_reviewed_live_task() {
         let overrides = build_market_velocity_scoped_worker_env_overrides(
@@ -383,7 +373,6 @@ mod tests {
             MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN,
         )
         .expect("overrides");
-
         assert_eq!(overrides["IS_RUN_EXECUTION_WORKER"], "true");
         assert_eq!(overrides["EXECUTION_WORKER_ONLY"], "true");
         assert_eq!(overrides["EXECUTION_WORKER_RUN_ONCE"], "true");
@@ -400,7 +389,6 @@ mod tests {
             "I_UNDERSTAND_LIVE_ORDERS"
         );
     }
-
     #[test]
     fn scoped_worker_verifies_live_audit_before_run_once() {
         let source = include_str!("handoff.rs");
@@ -411,7 +399,6 @@ mod tests {
             .find("struct EnvOverrideGuard")
             .expect("env override guard should follow scoped worker entrypoint");
         let worker_entrypoint = &source[worker_start..guard_start];
-
         assert!(
             worker_entrypoint
                 .find("worker.verify_live_audit_ready().await?")
@@ -421,7 +408,6 @@ mod tests {
                     .expect("scoped live worker should run after readiness")
         );
     }
-
     #[test]
     fn preview_request_is_derived_from_rust_market_velocity_signal_payload() {
         let preview = build_market_velocity_live_preview_request(
@@ -430,7 +416,6 @@ mod tests {
             Some(85),
         )
         .expect("preview request");
-
         assert_eq!(preview.rank_event_id, Some(2042663));
         assert_eq!(preview.buyer_email.as_deref(), Some("buyer@example.com"));
         assert_eq!(preview.combo_id, Some(85));
@@ -447,12 +432,10 @@ mod tests {
             Some("entry_trigger_allowlist_v1")
         );
     }
-
     #[test]
     fn live_worker_manifest_reuses_existing_execution_worker_without_scripts() {
         let manifest = build_market_velocity_live_worker_manifest(228);
         let encoded = serde_json::to_string(&manifest).expect("manifest json");
-
         assert_eq!(
             manifest["execution_path"]["kind"],
             "existing_execution_worker"
@@ -478,16 +461,13 @@ mod tests {
             "production handoff manifest must not point to shell scripts: {encoded}"
         );
     }
-
     #[test]
     fn live_worker_handoff_includes_web_and_worker_readiness() {
         let web_readiness = sample_live_task_readiness(228);
         let worker_readiness =
             build_market_velocity_scoped_worker_handoff_readiness(&web_readiness);
-
         let handoff =
             build_market_velocity_live_worker_handoff(228, web_readiness, worker_readiness);
-
         assert_eq!(handoff["status"], "ready_for_scoped_live_worker");
         assert_eq!(handoff["read_only"], true);
         assert_eq!(handoff["mutation_allowed"], false);
@@ -508,7 +488,6 @@ mod tests {
             "ready_for_scoped_live_worker"
         );
     }
-
     #[test]
     fn live_task_creation_requires_owner_scope() {
         assert!(market_velocity_required_live_owner_scope(None, Some(85)).is_err());
@@ -519,7 +498,6 @@ mod tests {
             market_velocity_required_live_owner_scope(Some("buyer@example.com"), Some(85)).is_ok()
         );
     }
-
     #[test]
     fn live_task_signal_payload_is_scoped_to_owner_combo_before_submit() {
         let signal = market_velocity_scope_signal_to_live_owner(
@@ -529,7 +507,6 @@ mod tests {
         )
         .expect("scoped signal");
         let payload: Value = serde_json::from_str(&signal.payload_json).expect("payload json");
-
         assert_eq!(payload["target_buyer_email"], "buyer@example.com");
         assert_eq!(payload["target_combo_id"], 85);
         assert_eq!(
@@ -537,7 +514,6 @@ mod tests {
             "market_velocity_live_handoff"
         );
     }
-
     #[test]
     fn task_creation_apply_requires_explicit_confirmation() {
         assert!(!market_velocity_task_creation_apply_authorized(

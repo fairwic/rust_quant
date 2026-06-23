@@ -1,30 +1,26 @@
-use std::time::Duration;
-
 use crypto_exc_all::{ExchangeId, Instrument, MarginMode, OrderSide, OrderType};
 use okx::dto::trade::trade_dto::OrderResDto;
 use rust_quant_domain::entities::ExchangeApiConfig;
 use rust_quant_risk::realtime::{OkxStopLossAmender, StopLossAmender};
 use rust_quant_services::exchange::{CryptoExcAllGateway, OkxOrderService, OrderPlacementRequest};
 use rust_quant_strategies::strategy_common::SignalResult;
-
+use std::time::Duration;
 #[derive(serde::Deserialize)]
 struct OkxTickerResponse {
+    /// 列表数据。
     data: Vec<OkxTickerData>,
 }
-
 #[derive(serde::Deserialize)]
 struct OkxTickerData {
+    /// 最近。
     last: String,
 }
-
 fn env_or_default(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
-
 fn env_required(key: &str) -> anyhow::Result<String> {
     std::env::var(key).map_err(|_| anyhow::anyhow!("missing env var: {}", key))
 }
-
 // 获取最新价格
 async fn fetch_last_price(inst_id: &str) -> anyhow::Result<f64> {
     let url = format!(
@@ -45,7 +41,6 @@ async fn fetch_last_price(inst_id: &str) -> anyhow::Result<f64> {
         .map_err(|e| anyhow::anyhow!("invalid last price '{}': {}", last_str, e))?;
     Ok(last)
 }
-
 fn build_simulated_api_config() -> anyhow::Result<ExchangeApiConfig> {
     Ok(ExchangeApiConfig::new(
         0,
@@ -58,7 +53,6 @@ fn build_simulated_api_config() -> anyhow::Result<ExchangeApiConfig> {
         Some("integration-test".to_string()),
     ))
 }
-
 fn build_signal(side: &str, open_price: f64) -> SignalResult {
     let ts = chrono::Utc::now().timestamp_millis();
     let (should_buy, should_sell, direction) = match side {
@@ -66,7 +60,6 @@ fn build_signal(side: &str, open_price: f64) -> SignalResult {
         "sell" => (false, true, rust_quant_domain::SignalDirection::Short),
         _ => (false, false, rust_quant_domain::SignalDirection::None),
     };
-
     SignalResult {
         should_buy,
         should_sell,
@@ -76,7 +69,6 @@ fn build_signal(side: &str, open_price: f64) -> SignalResult {
         ..Default::default()
     }
 }
-
 fn compute_tp_sl(last: f64, side: &str) -> (Option<f64>, Option<f64>) {
     // Keep triggers far away to avoid immediate fills during the test.
     // Override via env if you want tighter behavior.
@@ -86,14 +78,12 @@ fn compute_tp_sl(last: f64, side: &str) -> (Option<f64>, Option<f64>) {
     let sl_pct: f64 = env_or_default("OKX_TEST_SL_PCT", "0.10")
         .parse()
         .unwrap_or(0.10);
-
     match side {
         "buy" => (Some(last * (1.0 + tp_pct)), Some(last * (1.0 - sl_pct))),
         "sell" => (Some(last * (1.0 - tp_pct)), Some(last * (1.0 + sl_pct))),
         _ => (None, None),
     }
 }
-
 #[test]
 fn build_cancel_close_algo_body_contains_ids() {
     let body = OkxOrderService::build_cancel_close_algo_body(
@@ -104,7 +94,6 @@ fn build_cancel_close_algo_body_contains_ids() {
     assert_eq!(body["algoIds"][0], "1");
     assert_eq!(body["algoIds"][1], "2");
 }
-
 #[test]
 fn build_place_close_algo_body_includes_tp_sl_when_present() {
     let body = OkxOrderService::build_place_close_algo_body(
@@ -132,7 +121,6 @@ fn build_place_close_algo_body_includes_tp_sl_when_present() {
     assert_eq!(body["algoClOrdId"], "rq-1-123");
     assert_eq!(body["tag"], "rq-1");
 }
-
 #[test]
 fn build_place_close_algo_body_omits_tp_sl_when_none() {
     let body = OkxOrderService::build_place_close_algo_body(
@@ -148,7 +136,6 @@ fn build_place_close_algo_body_omits_tp_sl_when_none() {
     assert!(body.get("tpTriggerPx").is_none());
     assert!(body.get("slTriggerPx").is_none());
 }
-
 async fn get_position_mgn_mode(
     okx: &OkxOrderService,
     api: &ExchangeApiConfig,
@@ -171,7 +158,6 @@ async fn get_position_mgn_mode(
     }
     Ok(None)
 }
-
 async fn wait_for_position(
     okx: &OkxOrderService,
     api: &ExchangeApiConfig,
@@ -183,7 +169,6 @@ async fn wait_for_position(
     let sleep_ms: u64 = env_or_default("OKX_TEST_RETRY_SLEEP_MS", "500")
         .parse()
         .unwrap_or(500);
-
     for _ in 0..max_tries {
         let exists = get_position_mgn_mode(okx, api, inst_id, pos_side)
             .await?
@@ -194,7 +179,6 @@ async fn wait_for_position(
         }
         tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
     }
-
     anyhow::bail!(
         "position state did not converge: inst_id={}, pos_side={}, expected_exist={}",
         inst_id,
@@ -202,7 +186,6 @@ async fn wait_for_position(
         should_exist
     );
 }
-
 async fn place_order(
     okx: &OkxOrderService,
     api: &ExchangeApiConfig,
@@ -214,17 +197,14 @@ async fn place_order(
 ) -> anyhow::Result<OrderResDto> {
     let signal = build_signal(side, fetch_last_price(inst_id).await?);
     let cl_ord_id = format!("t{}", chrono::Utc::now().timestamp_millis());
-
     let res = okx
         .execute_order_from_signal(api, inst_id, &signal, size, sl, tp, Some(cl_ord_id))
         .await?;
     println!("res: {:?}", res);
-
     let first = res
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("empty order response"))?;
-
     if first.s_code != "0" {
         anyhow::bail!(
             "place order failed: s_code={}, s_msg={:?}",
@@ -235,67 +215,42 @@ async fn place_order(
     if first.ord_id.trim().is_empty() {
         anyhow::bail!("place order returned empty ord_id");
     }
-
     Ok(first)
 }
-
-/// OKX simulated trading end-to-end integration test.
-///
-/// Run manually:
-/// - `RUN_OKX_SIMULATED_E2E=1 cargo test -p rust-quant-services --test okx_simulated_order_flow -- --ignored --nocapture`
-///
-/// Env knobs:
-/// - `OKX_TEST_INST_ID` (default: `ETH-USDT-SWAP`)
-/// - `OKX_TEST_SIDE` (default: `buy`, values: `buy`/`sell`)
-/// - `OKX_TEST_ORDER_SIZE` (default: `1`)
-/// - `OKX_TEST_TP_PCT` / `OKX_TEST_SL_PCT` (default: `0.10`)
-/// - `OKX_TEST_RETRY` / `OKX_TEST_RETRY_SLEEP_MS` (polling)
 #[tokio::test]
 #[ignore]
 async fn okx_simulated_order_flow_place_amend_close() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
-
     // 给 OKX 请求稍微多一点时间窗口，避免 local time 比服务器慢导致 expTime 过期。
     std::env::set_var("OKX_REQUEST_EXPIRATION_MS", "300000");
-
     if env_or_default("RUN_OKX_SIMULATED_E2E", "0") != "1" {
         return Ok(());
     }
-
     // Safety: do not run under prod
     if env_or_default("APP_ENV", "local").eq_ignore_ascii_case("prod") {
         anyhow::bail!("refuse to run in APP_ENV=prod");
     }
-
     let inst_id = env_or_default("OKX_TEST_INST_ID", "ETH-USDT-SWAP");
     let side = env_or_default("OKX_TEST_SIDE", "buy");
     let size = env_or_default("OKX_TEST_ORDER_SIZE", "1");
-
     let api = build_simulated_api_config()?;
     api.validate().map_err(|e| anyhow::anyhow!(e))?;
-
     let okx = OkxOrderService;
-
     let last = fetch_last_price(&inst_id).await?;
     println!("last: {}", last);
     let (tp, sl) = compute_tp_sl(last, &side);
     println!("tp: {:?}, sl: {:?}", tp, sl);
-
     let pos_side = if side == "buy" { "long" } else { "short" };
-
     print!("{:?}", tp);
     print!("{:?}", sl);
     // Place order (with TP/SL attachAlgo)
     let order = place_order(&okx, &api, &inst_id, &side, size, tp, sl).await?;
     println!("order.ord_id: {}", order.ord_id);
-
     // Wait until position shows up
     wait_for_position(&okx, &api, &inst_id, pos_side, true).await?;
-
     // Move stop loss to breakeven (amend-order)
     // For test stability, use the previously fetched price as "breakeven" reference.
     let entry_price = last;
-
     let amender = OkxStopLossAmender::from_exchange_api_config(&api)?;
     if let Err(e) = amender
         .move_stop_loss_to_price(&inst_id, &order.ord_id, entry_price)
@@ -309,7 +264,6 @@ async fn okx_simulated_order_flow_place_amend_close() -> anyhow::Result<()> {
             eprintln!("⚠️ stop-loss amend skipped: {}", msg);
         }
     }
-
     // Close position (market close_position)
     let mgn_mode = get_position_mgn_mode(&okx, &api, &inst_id, pos_side)
         .await?
@@ -321,10 +275,8 @@ async fn okx_simulated_order_flow_place_amend_close() -> anyhow::Result<()> {
     };
     okx.close_position(&api, &inst_id, okx_pos_side, &mgn_mode)
         .await?;
-
     // Wait until position disappears
     wait_for_position(&okx, &api, &inst_id, pos_side, false).await?;
-
     let inspection = okx
         .inspect_auto_close_by_order(&api, &inst_id, Some(&order.ord_id), None)
         .await?;
@@ -333,179 +285,39 @@ async fn okx_simulated_order_flow_place_amend_close() -> anyhow::Result<()> {
         inspection.position_closed,
         "expected position to be closed after close_position"
     );
-
     Ok(())
 }
-
-/// OKX simulated reduce-only close order E2E test.
-///
-/// Validates the `CryptoExcAllGateway` close path used by the execution worker's
-/// `pending_close` task: open a position, then close it via the same gateway that
-/// `execute_pending_close_task` uses in live mode.
-///
-/// OKX hedge mode uses position_side (not reduce_only) to specify close direction.
-/// reduce_only is only applicable in OKX net (one-way) mode.
-///
-/// Run manually:
-/// - `RUN_OKX_SIMULATED_E2E=1 cargo test -p rust-quant-services --test okx_simulated_order_flow -- okx_simulated_reduce_only_close --ignored --nocapture`
-///
-/// Env knobs: same as `okx_simulated_order_flow_place_amend_close`.
 #[tokio::test]
-#[ignore]
-async fn okx_simulated_reduce_only_close_via_gateway() -> anyhow::Result<()> {
-    dotenv::dotenv().ok();
-
-    std::env::set_var("OKX_REQUEST_EXPIRATION_MS", "300000");
-
-    if env_or_default("RUN_OKX_SIMULATED_E2E", "0") != "1" {
-        return Ok(());
-    }
-
-    if env_or_default("APP_ENV", "local").eq_ignore_ascii_case("prod") {
-        anyhow::bail!("refuse to run in APP_ENV=prod");
-    }
-
-    let inst_id = env_or_default("OKX_TEST_INST_ID", "ETH-USDT-SWAP");
-    let side = env_or_default("OKX_TEST_SIDE", "buy");
-    let size = env_or_default("OKX_TEST_ORDER_SIZE", "1");
-
-    // Build gateway using the same code path as resolve_live_gateway in the execution worker.
+async fn direct_live_gateway_close_requires_audit_scope_before_network() -> anyhow::Result<()> {
     let gateway = CryptoExcAllGateway::from_single_exchange_credentials(
         ExchangeId::Okx,
-        env_required("OKX_SIMULATED_API_KEY")?,
-        env_required("OKX_SIMULATED_API_SECRET")?,
-        Some(env_required("OKX_SIMULATED_PASSPHRASE")?),
-        true, // simulated=true
+        "test-api-key",
+        "test-api-secret",
+        Some("test-passphrase"),
+        true,
     )?;
-
-    // Also build OkxOrderService for position polling and cleanup.
-    let api = build_simulated_api_config()?;
-    let okx = OkxOrderService;
-
-    let pos_side = if side == "buy" { "long" } else { "short" };
-    let close_side = if side == "buy" {
-        OrderSide::Sell
-    } else {
-        OrderSide::Buy
-    };
-
-    // Parse instrument from inst_id (e.g. "ETH-USDT-SWAP" → perp("ETH", "USDT")).
-    let parts: Vec<&str> = inst_id.split('-').collect();
-    anyhow::ensure!(
-        parts.len() >= 2,
-        "OKX_TEST_INST_ID must be in BASE-QUOTE[-SWAP] format, got: {}",
-        inst_id
-    );
-    let instrument = Instrument::perp(parts[0], parts[1]);
-
-    // Step 0: clean up any leftover positions from previous test runs.
-    let positions = okx
-        .get_positions(&api, Some("SWAP"), Some(&inst_id))
-        .await?;
-    for p in &positions {
-        if p.inst_id != inst_id {
-            continue;
-        }
-        let qty = p.pos.parse::<f64>().unwrap_or(0.0);
-        if qty.abs() < 1e-12 {
-            continue;
-        }
-        println!(
-            "cleanup: closing leftover position pos_side={} qty={} mgn_mode={}",
-            p.pos_side, p.pos, p.mgn_mode
-        );
-        let cleanup_pos_side = if p.pos_side == "long" {
-            okx::dto::PositionSide::Long
-        } else {
-            okx::dto::PositionSide::Short
-        };
-        if let Err(e) = okx
-            .close_position(&api, &inst_id, cleanup_pos_side, &p.mgn_mode)
-            .await
-        {
-            println!("cleanup close_position error (ignored): {}", e);
-        }
-    }
-    if !positions.is_empty() {
-        // Give OKX a moment to process cleanup orders.
-        tokio::time::sleep(Duration::from_millis(2000)).await;
-    }
-
-    // Step 1: open position via OkxOrderService (same as existing test).
-    let last = fetch_last_price(&inst_id).await?;
-    println!("last price: {}", last);
-    let (tp, sl) = compute_tp_sl(last, &side);
-    let open_order = place_order(&okx, &api, &inst_id, &side, size.clone(), tp, sl).await?;
-    println!("open order_id: {}", open_order.ord_id);
-
-    // Step 2: wait for position to appear.
-    wait_for_position(&okx, &api, &inst_id, pos_side, true).await?;
-    println!(
-        "position confirmed open: inst_id={} pos_side={}",
-        inst_id, pos_side
-    );
-
-    // Snapshot position size so we can verify it decreases after close.
-    let pos_before = okx
-        .get_positions(&api, Some("SWAP"), Some(&inst_id))
-        .await?
-        .into_iter()
-        .find(|p| p.inst_id == inst_id && p.pos_side == pos_side)
-        .map(|p| p.pos.parse::<f64>().unwrap_or(0.0))
-        .unwrap_or(0.0);
-    println!("position size before close: {}", pos_before);
-
-    // Step 3: close via CryptoExcAllGateway — mirrors execute_pending_close_task live path.
-    // OKX hedge mode: use position_side to specify close direction; do NOT set reduce_only
-    // (only applicable in net/one-way mode). The execution worker applies the same logic.
     let close_request = OrderPlacementRequest {
         exchange: ExchangeId::Okx,
-        instrument: instrument.clone(),
-        side: close_side,
+        instrument: Instrument::perp("eth", "usdt"),
+        side: OrderSide::Sell,
         order_type: OrderType::Market,
-        size: size.clone(),
+        size: "1".to_string(),
         price: None,
         margin_mode: Some(MarginMode::Isolated),
         margin_coin: None,
-        position_side: Some(pos_side.to_string()),
+        position_side: Some("long".to_string()),
         trade_side: Some("close".to_string()),
-        client_order_id: Some(format!("rqclose{}", chrono::Utc::now().timestamp_millis())),
-        reduce_only: None, // OKX hedge mode: position_side handles close direction
+        client_order_id: Some("rqclose-audit-scope-required".to_string()),
+        reduce_only: None,
         time_in_force: None,
         attached_stop_loss_price: None,
     };
-
-    println!(
-        "placing close order: side={:?} pos_side={} reduce_only=None (OKX hedge mode)",
-        close_request.side, pos_side
-    );
-    let close_ack = gateway.place_order(close_request).await?;
-    println!(
-        "close ack: exchange={:?} order_id={:?} status={:?}",
-        close_ack.exchange, close_ack.order_id, close_ack.status
-    );
-
-    anyhow::ensure!(
-        close_ack.order_id.is_some(),
-        "close order must return an order_id from OKX"
-    );
-
-    // Step 4: wait for position to disappear.
-    wait_for_position(&okx, &api, &inst_id, pos_side, false).await?;
-    println!(
-        "position confirmed closed: inst_id={} pos_side={}",
-        inst_id, pos_side
-    );
-
-    // Step 5: verify via inspect_auto_close.
-    let inspection = okx
-        .inspect_auto_close_by_order(&api, &inst_id, Some(&open_order.ord_id), None)
-        .await?;
-    println!("inspection: {:?}", inspection);
-    anyhow::ensure!(
-        inspection.position_closed,
-        "expected position to be closed after gateway close order"
-    );
-
+    let error = gateway
+        .place_order(close_request)
+        .await
+        .expect_err("direct live gateway close must be blocked before network");
+    assert!(error
+        .to_string()
+        .contains("exchange_request_audit_logs preflight scope"));
     Ok(())
 }
