@@ -377,17 +377,25 @@ async fn live_config_without_persistent_audit_repo_fails_closed_before_gateway()
     assert_eq!(raw_payload["mutation_allowed"], false);
 }
 #[test]
-fn binance_prepare_order_settings_happens_after_prearmed_protection_guard() {
+fn prepare_order_settings_happens_after_prearmed_protection_guard() {
     let source = include_str!("execution_worker_live_execution_section.rs");
     let prearm_offset = source
         .find("match prearm_protective_order_if_required")
         .expect("execute_task should prearm protective order before main order");
     let prepare_offset = source
-        .find(".prepare_binance_order_settings_after_protection")
-        .expect("Binance settings preparation should stay visible in execute_task");
+        .find(".prepare_order_settings_after_protection")
+        .expect("settings preparation should stay visible in execute_task");
     assert!(
         prearm_offset < prepare_offset,
-        "Binance account settings are live mutations and must run only after prearmed protective stop-loss is confirmed"
+        "account settings are live mutations and must run only after prearmed protective stop-loss is confirmed"
+    );
+}
+#[test]
+fn live_prepare_order_settings_is_not_binance_only() {
+    let source = include_str!("execution_worker_live_execution_support_section.rs");
+    assert!(
+        !source.contains("order_task.exchange != ExchangeId::Binance"),
+        "OKX and Binance must both prepare isolated leverage before the main order"
     );
 }
 include!("execution_worker_protection_live_preflight_tests.rs");

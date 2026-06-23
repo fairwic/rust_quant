@@ -180,16 +180,15 @@ impl ExecutionWorker {
         ))
     }
     /// 创建 Web 商业、会员和执行准备度 资源，并在入口处完成必要的参数归一。
-    async fn prepare_binance_order_settings_after_protection(
+    async fn prepare_order_settings_after_protection(
         &self,
         task: &ExecutionTask,
         gateway: &CryptoExcAllGateway,
         order_task: &ExecutionOrderTask,
     ) -> Result<()> {
-        if order_task.exchange != ExchangeId::Binance
-            || (order_task.margin_mode.is_none()
-                && order_task.leverage.is_none()
-                && order_task.position_mode.is_none())
+        if order_task.margin_mode.is_none()
+            && order_task.leverage.is_none()
+            && order_task.position_mode.is_none()
         {
             return Ok(());
         }

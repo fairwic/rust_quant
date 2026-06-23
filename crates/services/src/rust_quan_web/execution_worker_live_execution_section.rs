@@ -241,10 +241,10 @@ impl ExecutionWorker {
         } else {
             protection.clone()
         };
-        // Binance 的杠杆/保证金/持仓模式属于账户 mutation，必须放在保护单路径确定之后；
+        // 杠杆/保证金/持仓模式属于账户 mutation，必须放在保护单路径确定之后；
         // 如果这里失败，要撤销已预挂的保护单，避免留下孤立风控订单。
         if let Err(error) = self
-            .prepare_binance_order_settings_after_protection(task, &gateway, &order_task)
+            .prepare_order_settings_after_protection(task, &gateway, &order_task)
             .await
         {
             let mut report = ExecutionTaskReportRequest::failed(
