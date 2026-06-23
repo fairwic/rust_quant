@@ -37,6 +37,7 @@ services:
       REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
       IS_RUN_INTERNAL_SERVER: "true"
       QUANT_INTERNAL_ADDR: 0.0.0.0:5322
+      RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
       EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
 
   quant-core-market-velocity-radar:

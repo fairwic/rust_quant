@@ -153,6 +153,15 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             && schema_ensure_block.contains("- quant-core-external"),
         "schema ensure service must join the same networks as deployed Core services"
     );
+    let internal_server_block = compose_service_block(&compose, "quant-core-internal-server");
+    assert!(
+        internal_server_block.contains(
+            "RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}"
+        ) && internal_server_block.contains(
+            "EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}"
+        ),
+        "Core internal server must be able to call Quant Web internal writeback APIs"
+    );
     assert!(
         workflow.contains("market_velocity_production_deploy_contract"),
         "CI verify must run the production deploy contract"
