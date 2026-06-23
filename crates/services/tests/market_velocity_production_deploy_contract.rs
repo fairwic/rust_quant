@@ -257,6 +257,12 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "default deploy/rollback must fail fast when persistent live mutation flags are present in env or .env"
         );
         assert!(
+            deploy_script.contains("assert_no_pinned_redis_host_env")
+                && deploy_script.contains(".env.deploy")
+                && deploy_script.contains("refusing deployment with pinned Redis container IP"),
+            "default deploy/rollback must fail fast when REDIS_HOST is pinned to a disposable container IP instead of Docker DNS"
+        );
+        assert!(
             deploy_script
                 .rfind("assert_no_persistent_live_mutation_env_flags")
                 .expect("live mutation env guard must be called")
@@ -274,8 +280,14 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "stale container cleanup must target exact service container names only"
         );
         assert!(
-            deploy_script.contains("up -d --no-build --remove-orphans"),
-            "default deploy/rollback must remove compose orphan services so retired live workers cannot keep running after they are removed from the repository compose"
+            !deploy_script.contains("--remove-orphans"),
+            "default deploy/rollback must not use broad compose orphan cleanup because shared dependencies such as Redis can live outside the current Core deploy compose"
+        );
+        assert!(
+            deploy_script.contains(
+                "retired_services_csv=\"${DEPLOY_RETIRED_SERVICES:-quant-core-vegas-eth-4h-live}\""
+            ) && deploy_script.contains("remove_retired_deployment_containers"),
+            "default deploy/rollback must explicitly remove retired live worker containers without deleting unrelated compose services"
         );
     }
     assert!(

@@ -9,6 +9,7 @@ set -euo pipefail
 compose_file="${DEPLOY_COMPOSE_FILE:-docker-compose.deploy.yml}"
 compose_source_file="${DEPLOY_COMPOSE_SOURCE_FILE:-docker-compose.deploy.yml}"
 services_csv="${DEPLOY_SERVICES:-quant-core-internal-server,quant-core-market-velocity-radar,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker}"
+retired_services_csv="${DEPLOY_RETIRED_SERVICES:-quant-core-vegas-eth-4h-live}"
 ghcr_username="${DEPLOY_GHCR_USERNAME:-}"
 ghcr_token="${DEPLOY_GHCR_TOKEN:-}"
 ssh_host_input="${DEPLOY_SSH_HOST}"
@@ -51,13 +52,15 @@ ssh -p "${ssh_port}" "${DEPLOY_SSH_USER}@${ssh_host}" \
   "${SERVER_APP_PATH}" \
   "${remote_compose_file}" \
   "${services_csv}" \
-  "${DEPLOY_IMAGE}" <<'REMOTE'
+  "${DEPLOY_IMAGE}" \
+  "${retired_services_csv}" <<'REMOTE'
 set -euo pipefail
 
 server_app_path="$1"
 compose_file="$2"
 services_csv="$3"
 target_image="$4"
+retired_services_csv="$5"
 ghcr_username="${DEPLOY_GHCR_USERNAME:-}"
 ghcr_token="${DEPLOY_GHCR_TOKEN:-}"
 
@@ -167,6 +170,20 @@ remove_conflicting_named_containers() {
   done
 }
 
+remove_retired_deployment_containers() {
+  local service existing_container_id
+  for service in "$@"; do
+    service="$(printf '%s' "${service}" | xargs)"
+    [ -z "${service}" ] && continue
+
+    existing_container_id="$(docker ps -aq --filter "name=^/${service}$" | head -n 1 || true)"
+    [ -z "${existing_container_id}" ] && continue
+
+    echo "removing retired deployment container: ${service} (${existing_container_id})" >&2
+    docker rm -f "${existing_container_id}"
+  done
+}
+
 normalize_live_mutation_env_value() {
   local value="${1:-}"
   value="$(printf '%s' "${value}" | sed -e 's/[[:space:]]#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -205,6 +222,37 @@ read_dotenv_value() {
   line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "${env_file}" | tail -n 1 || true)"
   [ -n "${line}" ] || return 1
   printf '%s' "${line#*=}"
+}
+
+redis_host_value_is_pinned_ip() {
+  local value
+  value="$(normalize_live_mutation_env_value "${1:-}")"
+  [[ "${value}" =~ ^redis://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?/?$ ]]
+}
+
+assert_no_pinned_redis_host_env() {
+  local found=0
+  local value env_file
+
+  value="${REDIS_HOST:-}"
+  if [ -n "${value}" ] && redis_host_value_is_pinned_ip "${value}"; then
+    echo "refusing deployment with pinned Redis container IP in process env: REDIS_HOST" >&2
+    found=1
+  fi
+
+  for env_file in .env .env.deploy; do
+    [ -f "${env_file}" ] || continue
+    value="$(read_dotenv_value "REDIS_HOST" "${env_file}" || true)"
+    if [ -n "${value}" ] && redis_host_value_is_pinned_ip "${value}"; then
+      echo "refusing deployment with pinned Redis container IP in ${env_file}: REDIS_HOST" >&2
+      found=1
+    fi
+  done
+
+  if [ "${found}" = "1" ]; then
+    echo "use a stable Docker DNS name such as redis://redis:6379/ or an explicitly managed external Redis host" >&2
+    exit 1
+  fi
 }
 
 assert_no_persistent_live_mutation_env_flags() {
@@ -282,6 +330,7 @@ require_internal_server_deploy_service() {
 }
 
 IFS=',' read -r -a services <<< "${services_csv}"
+IFS=',' read -r -a retired_services <<< "${retired_services_csv}"
 require_internal_server_deploy_service "${services[@]}"
 override_file=".deploy/quant-core.release.override.yml"
 schema_service="quant-core-schema-ensure"
@@ -309,10 +358,12 @@ run_schema_ensure() {
 }
 
 assert_no_persistent_live_mutation_env_flags
+assert_no_pinned_redis_host_env
 compose -f "${override_file}" pull "${schema_service}" "${services[@]}"
 run_schema_ensure
 remove_conflicting_named_containers "${services[@]}"
-compose -f "${override_file}" up -d --no-build --remove-orphans "${services[@]}"
+remove_retired_deployment_containers "${retired_services[@]}"
+compose -f "${override_file}" up -d --no-build "${services[@]}"
 assert_services_running "${compose_file}" "${override_file}" "${services[@]}"
 print_runtime_safety_flags "${override_file}" "${services[@]}"
 compose -f "${override_file}" ps --all "${services[@]}"
