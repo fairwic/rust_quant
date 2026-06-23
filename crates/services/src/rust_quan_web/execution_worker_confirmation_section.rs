@@ -234,6 +234,8 @@ fn build_confirmed_order_report(
         "fills": fills.iter().map(|fill| fill.raw.clone()).collect::<Vec<_>>(),
         "confirmation_error": confirmation_error,
         "execution_status": execution_status,
+        "place_order_allowed": false,
+        "repeat_open_order_allowed": false,
     });
     let mut report = ExecutionTaskReportRequest::success(
         task_id,

@@ -49,6 +49,37 @@ fn pending_confirmation_task_uses_stable_client_order_id_when_order_id_is_missin
     assert_eq!(query.client_order_id.as_deref(), Some("rqtask42"));
 }
 #[test]
+fn pending_confirmation_lookup_failure_blocks_replay_open_order() {
+    let task = task_with_metadata(
+        "execute_signal",
+        "confirming",
+        json!({
+            "exchange": "binance",
+            "symbol": "ETH-USDT-SWAP",
+            "side": "buy",
+            "size": "0.009"
+        }),
+    );
+    let pending = PendingConfirmationTask::from_task_and_order_result(
+        &task,
+        "binance",
+        "123456789",
+        "buy",
+        "NEW",
+    )
+    .unwrap();
+    let report = pending.pending_report(
+        "exchange order lookup timed out",
+        json!({"confirmation_stage": "query_order"}),
+    );
+    let raw_payload =
+        serde_json::from_str::<serde_json::Value>(report.raw_payload_json.as_deref().unwrap())
+            .unwrap();
+    assert_eq!(report.execution_status, "pending_confirmation");
+    assert_eq!(raw_payload["place_order_allowed"], false);
+    assert_eq!(raw_payload["repeat_open_order_allowed"], false);
+}
+#[test]
 fn derives_market_order_size_from_size_usdt_and_last_price() {
     let task = task(json!({
         "source": "rust_quan_web",

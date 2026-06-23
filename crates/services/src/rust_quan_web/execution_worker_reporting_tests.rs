@@ -885,6 +885,9 @@ fn confirmed_live_order_report_keeps_unfilled_order_pending_confirmation() {
     let raw = report.raw_payload_json.unwrap();
     assert!(raw.contains("order_detail"));
     assert!(raw.contains("pending_confirmation"));
+    let raw_payload = serde_json::from_str::<serde_json::Value>(&raw).unwrap();
+    assert_eq!(raw_payload["place_order_allowed"], false);
+    assert_eq!(raw_payload["repeat_open_order_allowed"], false);
 }
 include!("execution_worker_reporting_client_order_tests.rs");
 include!("execution_worker_reporting_audit_tests.rs");

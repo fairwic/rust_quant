@@ -308,6 +308,8 @@ impl PendingConfirmationTask {
                 "execution_status".to_string(),
                 json!("pending_confirmation"),
             );
+            payload.insert("place_order_allowed".to_string(), json!(false));
+            payload.insert("repeat_open_order_allowed".to_string(), json!(false));
             payload.insert(
                 "external_order_id".to_string(),
                 json!(self.external_order_id),
