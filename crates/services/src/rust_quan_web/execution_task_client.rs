@@ -2,7 +2,8 @@ use super::execution_task_contract::{
     ApiCredentialCheckSummary, ExchangeAccountSnapshotReportRequest,
     ExchangeAccountSnapshotReportResponse, ExchangeCloseFillWritebackRequest,
     ExchangeCloseFillWritebackResponse, ExchangeReconciliationReportRequest,
-    ExchangeReconciliationReportResponse, ExecutionTaskConfirmationLease, ExecutionTaskLease,
+    ExchangeReconciliationReportResponse, ExecutionRiskReservationRequest,
+    ExecutionRiskReservationResponse, ExecutionTaskConfirmationLease, ExecutionTaskLease,
     ExecutionTaskLeaseExtendRequest, ExecutionTaskLeaseExtendResponse, ExecutionTaskLeaseRequest,
     ExecutionTaskReportRequest, ExecutionTaskReportResponse,
     MarketVelocityExecutionTaskCreationPreviewRequest,
@@ -43,6 +44,7 @@ struct ApiEnvelope<T> {
     data: T,
 }
 const LEASE_TASKS_PATH: &str = "/api/commerce/internal/execution-tasks/lease";
+const EXECUTION_TASKS_PATH_PREFIX: &str = "/api/commerce/internal/execution-tasks";
 const LEASE_CONFIRMATION_TASKS_PATH: &str =
     "/api/commerce/internal/execution-tasks/confirmations/lease";
 const REPORT_RESULT_PATH: &str = "/api/commerce/internal/execution-results";
@@ -91,6 +93,14 @@ impl ExecutionTaskClient {
         request: ExecutionTaskLeaseExtendRequest,
     ) -> Result<ExecutionTaskLeaseExtendResponse> {
         self.post_json(&self.lease_extend_path(task_id), &request)
+            .await
+    }
+    pub async fn reserve_execution_risk_budget(
+        &self,
+        task_id: i64,
+        request: ExecutionRiskReservationRequest,
+    ) -> Result<ExecutionRiskReservationResponse> {
+        self.post_json(&self.risk_reservation_path(task_id), &request)
             .await
     }
     /// 提供lease确认tasks的集中实现，避免Web 商业链路调用方重复处理相同细节。
@@ -223,11 +233,17 @@ impl ExecutionTaskClient {
     pub fn lease_extend_url(&self, task_id: i64) -> String {
         self.url(&self.lease_extend_path(task_id))
     }
+    pub fn risk_reservation_url(&self, task_id: i64) -> String {
+        self.url(&self.risk_reservation_path(task_id))
+    }
     pub fn confirmation_lease_url(&self, limit: u32) -> String {
         self.confirmation_lease_url_for_task_ids(limit, &[])
     }
     fn lease_extend_path(&self, task_id: i64) -> String {
-        format!("/api/commerce/internal/execution-tasks/{task_id}/lease/extend")
+        format!("{EXECUTION_TASKS_PATH_PREFIX}/{task_id}/lease/extend")
+    }
+    fn risk_reservation_path(&self, task_id: i64) -> String {
+        format!("{EXECUTION_TASKS_PATH_PREFIX}/{task_id}/risk-reservation")
     }
     /// 提供确认leaseURLfortaskids的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub fn confirmation_lease_url_for_task_ids(&self, limit: u32, task_ids: &[i64]) -> String {
@@ -424,6 +440,18 @@ mod tests {
         assert_eq!(
             client.lease_extend_url(42),
             "https://quant-web.example/api/commerce/internal/execution-tasks/42/lease/extend"
+        );
+    }
+    #[test]
+    fn risk_reservation_url_matches_quant_web_internal_contract() {
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "https://quant-web.example/".to_string(),
+            internal_secret: "secret".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            client.risk_reservation_url(42),
+            "https://quant-web.example/api/commerce/internal/execution-tasks/42/risk-reservation"
         );
     }
     #[test]

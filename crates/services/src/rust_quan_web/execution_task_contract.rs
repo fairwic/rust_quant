@@ -195,6 +195,40 @@ pub struct ExecutionTaskReportResponse {
     /// traderecord；为空时表示该条件不启用。
     pub trade_record: Option<Value>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct ExecutionRiskReservationRequest {
+    /// 交易所最小名义金额；为空时由 Core 本地 symbol filters 校验。
+    pub minimum_notional_usdt: Option<f64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExecutionRiskReservationResponse {
+    /// 任务 ID。
+    pub task_id: i64,
+    /// buyeremail，用于记录交易或执行状态。
+    pub buyer_email: String,
+    /// 交易所名称。
+    pub exchange: String,
+    /// API 凭证 ID。
+    pub api_credential_id: Option<i64>,
+    /// 同批风险预算标识。
+    pub risk_budget_batch_id: Option<String>,
+    /// allocation模式，用于记录交易或执行状态。
+    pub allocation_mode: String,
+    /// 最终允许名义仓位 USDT。
+    pub allowed_notional_usdt: f64,
+    /// 最终逐仓保证金 USDT。
+    pub required_margin_usdt: f64,
+    /// 最终止损风险 USDT。
+    pub stop_risk_usdt: f64,
+    /// 杠杆倍数。
+    pub leverage: f64,
+    /// margin模式。
+    pub margin_mode: String,
+    /// position模式。
+    pub position_mode: String,
+}
 impl ExecutionTaskReportRequest {
     /// 封装成功，减少Web 商业链路调用方重复实现相同细节。
     pub fn success(

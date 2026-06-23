@@ -1,4 +1,19 @@
 impl ExecutionWorker {
+    /// 下主单前向 Web owner service 原子预留最终风险预算；失败时调用方必须 fail closed。
+    async fn reserve_live_execution_risk_budget(
+        &self,
+        task: &ExecutionTask,
+        _order_task: &ExecutionOrderTask,
+    ) -> Result<ExecutionRiskReservationResponse> {
+        self.client
+            .reserve_execution_risk_budget(
+                task.id,
+                ExecutionRiskReservationRequest {
+                    minimum_notional_usdt: None,
+                },
+            )
+            .await
+    }
     /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
     /// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
     async fn live_order_request(
