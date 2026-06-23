@@ -312,7 +312,7 @@ assert_no_persistent_live_mutation_env_flags
 compose -f "${override_file}" pull "${schema_service}" "${services[@]}"
 run_schema_ensure
 remove_conflicting_named_containers "${services[@]}"
-compose -f "${override_file}" up -d --no-build "${services[@]}"
+compose -f "${override_file}" up -d --no-build --remove-orphans "${services[@]}"
 assert_services_running "${compose_file}" "${override_file}" "${services[@]}"
 print_runtime_safety_flags "${override_file}" "${services[@]}"
 compose -f "${override_file}" ps --all "${services[@]}"

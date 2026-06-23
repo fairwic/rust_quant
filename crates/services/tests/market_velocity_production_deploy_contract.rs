@@ -273,7 +273,17 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             deploy_script.contains(r#"--filter "name=^/${service}$""#),
             "stale container cleanup must target exact service container names only"
         );
+        assert!(
+            deploy_script.contains("up -d --no-build --remove-orphans"),
+            "default deploy/rollback must remove compose orphan services so retired live workers cannot keep running after they are removed from the repository compose"
+        );
     }
+    assert!(
+        !compose.contains("quant-core-vegas-eth-4h-live")
+            && !compose.contains("VEGAS_QUANT_CORE_IMAGE")
+            && !compose.contains("VEGAS_STRATEGY_SIGNAL_DISPATCH_MODE"),
+        "production compose must not reintroduce the retired legacy Vegas live service; Vegas signals must flow through Web execution tasks and the unified execution worker"
+    );
     assert!(
         promote.contains("run_schema_ensure")
             && promote.contains("quant-core-schema-ensure")
