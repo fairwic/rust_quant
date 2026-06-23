@@ -31,14 +31,8 @@ impl ExecutionWorker {
         }
         let instrument = parse_instrument(&order_task.symbol)?;
         let ticker = gateway.ticker(order_task.exchange, &instrument).await?;
-        let last_price = ticker.last_price.trim().parse::<f64>().map_err(|err| {
-            anyhow!(
-                "invalid ticker last_price for {} on {}: {}",
-                order_task.symbol,
-                order_task.exchange.as_str(),
-                err
-            )
-        })?;
+        let reference_price =
+            live_order_reference_price(&ticker, order_task.side, current_time_millis_u64())?;
         let filters = load_exchange_order_filters(order_task.exchange, &order_task.symbol)
             .await?
             .ok_or_else(|| {
@@ -48,7 +42,11 @@ impl ExecutionWorker {
                     order_task.exchange.as_str()
                 )
             })?;
-        minimum_order_notional_usdt(decimal_from_f64(last_price)?, &filters, enforce_min_notional)
+        minimum_order_notional_usdt(
+            decimal_from_f64(reference_price)?,
+            &filters,
+            enforce_min_notional,
+        )
     }
     /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。
     /// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
@@ -59,16 +57,10 @@ impl ExecutionWorker {
     ) -> Result<OrderPlacementRequest> {
         let instrument = parse_instrument(&order_task.symbol)?;
         let ticker = gateway.ticker(order_task.exchange, &instrument).await?;
-        let last_price = ticker.last_price.trim().parse::<f64>().map_err(|err| {
-            anyhow!(
-                "invalid ticker last_price for {} on {}: {}",
-                order_task.symbol,
-                order_task.exchange.as_str(),
-                err
-            )
-        })?;
+        let reference_price =
+            live_order_reference_price(&ticker, order_task.side, current_time_millis_u64())?;
         let filters = load_exchange_order_filters(order_task.exchange, &order_task.symbol).await?;
-        order_task.to_live_order_request(Some(last_price), filters.as_ref())
+        order_task.to_live_order_request(Some(reference_price), filters.as_ref())
     }
     /// 选择 Web 商业、会员和执行准备度 的最佳候选结果，避免选择规则分散在调用方。
     async fn resolve_live_gateway(

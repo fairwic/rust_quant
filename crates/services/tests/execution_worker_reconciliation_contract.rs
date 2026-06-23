@@ -87,20 +87,20 @@ fn execution_worker_reconciliation_contract_fail_closes_when_read_only_read_fail
 #[test]
 fn prepare_order_settings_uses_worker_live_mutation_audit() {
     let prepare_start = EXECUTION_WORKER
-        .find("async fn prepare_binance_order_settings_after_protection")
-        .expect("Binance settings preparation path must exist");
+        .find("async fn prepare_order_settings_after_protection")
+        .expect("settings preparation path must exist");
     let prepare_end = EXECUTION_WORKER[prepare_start..]
         .find("async fn confirmed_live_order_report")
         .map(|offset| prepare_start + offset)
-        .expect("Binance settings preparation section end must exist");
+        .expect("settings preparation section end must exist");
     let prepare_section = &EXECUTION_WORKER[prepare_start..prepare_end];
     assert!(
         prepare_section.contains(".prepare_order_settings_with_audit("),
-        "Binance account settings mutation must go through the worker live audit wrapper"
+        "account settings mutation must go through the worker live audit wrapper"
     );
     assert!(
         !prepare_section.contains(".prepare_order_settings(order_task.exchange, prepare)"),
-        "Binance account settings mutation must not bypass worker live mutation audit"
+        "account settings mutation must not bypass worker live mutation audit"
     );
     assert!(
         EXECUTION_AUDIT.contains("account.prepare_order_settings"),

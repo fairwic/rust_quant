@@ -495,24 +495,34 @@ impl ExecutionOrderTask {
                 self.exchange.as_str()
             )
         })?;
-        let last_price = decimal_from_f64(last_price.ok_or_else(|| {
+        let reference_price = last_price.ok_or_else(|| {
             anyhow!(
                 "missing ticker last_price for {} on {} before live order size validation",
                 self.symbol,
                 self.exchange.as_str()
             )
-        })?)?;
+        })?;
+        let reference_price = decimal_from_f64(reference_price)?;
         let size = parse_positive_decimal(&request.size, "order size")?;
         let enforce_min_notional = !request.reduce_only.unwrap_or(false)
             && !matches!(
                 request.trade_side.as_deref().map(|value| value.to_ascii_lowercase()),
                 Some(value) if value == "close"
             );
-        let normalized_size = if use_local_min_order_size && enforce_min_notional && !self.risk_reserved {
-            minimum_order_size(last_price, filters, enforce_min_notional)?
+        let normalized_size = if use_local_min_order_size
+            && enforce_min_notional
+            && !self.risk_reserved
+        {
+            minimum_order_size(reference_price, filters, enforce_min_notional)?
         } else {
-            quantize_order_size(size, last_price, filters, enforce_min_notional)?
+            quantize_order_size(size, reference_price, filters, enforce_min_notional)?
         };
+        validate_live_order_notional_within_reservation(
+            self,
+            normalized_size,
+            reference_price,
+            filters,
+        )?;
         request.size = format_order_size_decimal(normalized_size, filters);
         if let Some(stop_loss_price) = request.attached_stop_loss_price.as_deref() {
             let stop_loss_price = stop_loss_price
@@ -523,6 +533,11 @@ impl ExecutionOrderTask {
                 stop_loss_price,
                 direction_from_order_side(self.side),
                 filters,
+            )?;
+            validate_live_stop_loss_price(
+                normalized_stop_loss,
+                reference_price,
+                direction_from_order_side(self.side),
             )?;
             request.attached_stop_loss_price = Some(format_protective_stop_price_decimal(
                 normalized_stop_loss,
@@ -544,6 +559,130 @@ impl ExecutionOrderTask {
                 "symbol": self.symbol,
             }),
         ))
+    }
+}
+fn current_time_millis_u64() -> u64 {
+    u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or(0)
+}
+fn live_order_reference_price(ticker: &Ticker, side: OrderSide, now_ms: u64) -> Result<f64> {
+    validate_live_ticker_freshness(ticker, now_ms)?;
+    if let Some(price) = match side {
+        OrderSide::Buy => parse_optional_positive_f64(ticker.ask_price.as_deref(), "ask_price")?,
+        OrderSide::Sell => parse_optional_positive_f64(ticker.bid_price.as_deref(), "bid_price")?,
+    } {
+        return Ok(price);
+    }
+    let last_price = parse_required_positive_f64(&ticker.last_price, "last_price")?;
+    let reference_price = match side {
+        OrderSide::Buy => last_price * (1.0 + LIVE_LAST_PRICE_FALLBACK_BUFFER_RATIO),
+        OrderSide::Sell => last_price * (1.0 - LIVE_LAST_PRICE_FALLBACK_BUFFER_RATIO),
+    };
+    if reference_price.is_finite() && reference_price > 0.0 {
+        Ok(reference_price)
+    } else {
+        Err(anyhow!("live_reference_price_invalid"))
+    }
+}
+fn validate_live_ticker_freshness(ticker: &Ticker, now_ms: u64) -> Result<()> {
+    let Some(timestamp) = ticker.timestamp else {
+        return Err(anyhow!("missing_live_ticker_timestamp"));
+    };
+    if timestamp > now_ms.saturating_add(LIVE_TICKER_MAX_AGE_MS) {
+        return Err(anyhow!("future_live_ticker_timestamp"));
+    }
+    if now_ms.saturating_sub(timestamp) > LIVE_TICKER_MAX_AGE_MS {
+        return Err(anyhow!("stale_live_ticker"));
+    }
+    Ok(())
+}
+fn parse_optional_positive_f64(raw: Option<&str>, label: &str) -> Result<Option<f64>> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| parse_required_positive_f64(value, label))
+        .transpose()
+}
+fn parse_required_positive_f64(raw: &str, label: &str) -> Result<f64> {
+    let value = raw
+        .trim()
+        .parse::<f64>()
+        .map_err(|error| anyhow!("invalid live ticker {label} {raw}: {error}"))?;
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
+    } else {
+        Err(anyhow!("live ticker {label} must be positive"))
+    }
+}
+fn validate_live_order_notional_within_reservation(
+    order_task: &ExecutionOrderTask,
+    size: rust_decimal::Decimal,
+    reference_price: rust_decimal::Decimal,
+    filters: &ExchangeOrderFilters,
+) -> Result<()> {
+    if !order_task.risk_reserved {
+        return Ok(());
+    }
+    let Some(allowed_notional) = order_task
+        .size_usdt
+        .filter(|value| value.is_finite() && *value > 0.0)
+    else {
+        return Err(anyhow!("live_order_reserved_notional_missing"));
+    };
+    let notional = order_notional_usdt(size, reference_price, filters)?;
+    if notional > allowed_notional + 0.000_001 {
+        return Err(anyhow!(
+            "live_order_notional_exceeds_reservation: notional={} allowed={}",
+            notional,
+            allowed_notional
+        ));
+    }
+    Ok(())
+}
+fn validate_live_stop_loss_price(
+    stop_loss_price: rust_decimal::Decimal,
+    reference_price: rust_decimal::Decimal,
+    direction: ProtectiveDirection,
+) -> Result<()> {
+    let stop_loss_price = decimal_to_f64(stop_loss_price, "stop_loss_price")?;
+    let reference_price = decimal_to_f64(reference_price, "reference_price")?;
+    let distance_ratio = match direction {
+        ProtectiveDirection::Long if stop_loss_price < reference_price => {
+            (reference_price - stop_loss_price) / reference_price
+        }
+        ProtectiveDirection::Short if stop_loss_price > reference_price => {
+            (stop_loss_price - reference_price) / reference_price
+        }
+        _ => {
+            return Err(anyhow!(
+                "live_stop_loss_price_invalid: direction={} reference_price={} stop_loss_price={}",
+                direction.as_str(),
+                reference_price,
+                stop_loss_price
+            ))
+        }
+    };
+    if !distance_ratio.is_finite()
+        || !(LIVE_STOP_LOSS_MIN_DISTANCE_RATIO..=LIVE_STOP_LOSS_MAX_DISTANCE_RATIO)
+            .contains(&distance_ratio)
+    {
+        return Err(anyhow!(
+            "live_stop_loss_distance_out_of_range: distance_ratio={} min={} max={}",
+            distance_ratio,
+            LIVE_STOP_LOSS_MIN_DISTANCE_RATIO,
+            LIVE_STOP_LOSS_MAX_DISTANCE_RATIO
+        ));
+    }
+    Ok(())
+}
+fn decimal_to_f64(value: rust_decimal::Decimal, label: &str) -> Result<f64> {
+    let value = value
+        .normalize()
+        .to_string()
+        .parse::<f64>()
+        .map_err(|error| anyhow!("invalid {label} decimal {value}: {error}"))?;
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
+    } else {
+        Err(anyhow!("{label} must be positive"))
     }
 }
 /// 封装当前函数，减少Web 商业链路调用方重复实现相同细节。

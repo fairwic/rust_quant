@@ -2,8 +2,8 @@ use crate::exchange::{CryptoExcAllGateway, OrderPlacementRequest};
 use crate::rust_quan_web::execution_order_filters::{
     decimal_from_f64, format_order_size_decimal, format_protective_stop_price_decimal,
     load_exchange_order_filters, minimum_order_notional_usdt, minimum_order_size,
-    parse_positive_decimal, quantize_order_size, quantize_protective_stop_price,
-    ExchangeOrderFilters,
+    order_notional_usdt, parse_positive_decimal, quantize_order_size,
+    quantize_protective_stop_price, ExchangeOrderFilters,
 };
 use crate::rust_quan_web::execution_payload::{
     close_order_side, direction_from_order_side, ensure_live_order_confirmation,
@@ -18,7 +18,7 @@ use crate::rust_quan_web::execution_protection::{
     apply_post_close_protection_cancel_result, attached_stop_loss_order_ack_outcome,
     build_protective_stop_market_order_request, place_and_confirm_protective_order,
     prearm_protective_order_if_required, ProtectionSyncContract, ProtectionSyncOutcome,
-    ProtectiveOrderMutator,
+    ProtectiveDirection, ProtectiveOrderMutator,
 };
 use crate::rust_quan_web::execution_rollback::{
     apply_protective_failure_rollback_error, apply_protective_failure_rollback_report,
@@ -54,12 +54,17 @@ use anyhow::{anyhow, Result};
 use crypto_exc_all::{
     CancelOrderRequest, Error as CryptoExchangeError, ExchangeId, Fill, FillListQuery, MarginMode,
     Order, OrderAck, OrderListQuery, OrderQuery, OrderSide, OrderType, Position, PositionMode,
-    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderRequest, TimeInForce,
+    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderRequest, Ticker,
+    TimeInForce,
 };
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Instant};
 use tokio::time::{sleep, Duration};
 use tracing::{error, warn};
+const LIVE_TICKER_MAX_AGE_MS: u64 = 30_000;
+const LIVE_LAST_PRICE_FALLBACK_BUFFER_RATIO: f64 = 0.001;
+const LIVE_STOP_LOSS_MIN_DISTANCE_RATIO: f64 = 0.0005;
+const LIVE_STOP_LOSS_MAX_DISTANCE_RATIO: f64 = 0.50;
 #[derive(Debug, Clone)]
 pub struct ExecutionWorkerConfig {
     /// worker ID。

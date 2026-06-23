@@ -170,6 +170,24 @@ fn notional_per_size_unit(last_price: Decimal, filters: &ExchangeOrderFilters) -
         None => last_price,
     }
 }
+/// 按交易所合约规则计算订单名义金额，用于校验最终订单没有超过 Web 预留预算。
+pub(super) fn order_notional_usdt(
+    size: Decimal,
+    last_price: Decimal,
+    filters: &ExchangeOrderFilters,
+) -> Result<f64> {
+    let notional = size * notional_per_size_unit(last_price, filters);
+    let value = notional
+        .normalize()
+        .to_string()
+        .parse::<f64>()
+        .map_err(|error| anyhow!("invalid order notional {notional}: {error}"))?;
+    if value.is_finite() && value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(anyhow!("order notional must be finite and non-negative"))
+    }
+}
 /// 提供量化订单size的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub(super) fn quantize_order_size(
     requested_size: Decimal,

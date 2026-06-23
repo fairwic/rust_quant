@@ -165,6 +165,96 @@ fn exchange_minimum_notional_is_derived_for_risk_reservation() {
     assert_eq!(minimum, Some(20.70342));
 }
 #[test]
+fn live_order_reference_price_uses_side_quote_from_fresh_ticker() {
+    let now_ms = 1_772_000_000_000_u64;
+    let ticker = live_ticker("100", Some("99"), Some("101"), Some(now_ms - 1_000));
+    assert_eq!(
+        live_order_reference_price(&ticker, OrderSide::Buy, now_ms).unwrap(),
+        101.0
+    );
+    assert_eq!(
+        live_order_reference_price(&ticker, OrderSide::Sell, now_ms).unwrap(),
+        99.0
+    );
+}
+#[test]
+fn stale_live_ticker_is_rejected_before_live_order_sizing() {
+    let now_ms = 1_772_000_000_000_u64;
+    let ticker = live_ticker(
+        "100",
+        Some("99"),
+        Some("101"),
+        Some(now_ms - LIVE_TICKER_MAX_AGE_MS - 1),
+    );
+    let error = live_order_reference_price(&ticker, OrderSide::Buy, now_ms).unwrap_err();
+    assert!(error.to_string().contains("stale_live_ticker"));
+}
+#[test]
+fn live_order_revalidates_stop_loss_against_current_reference_price() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "order_type": "market",
+        "size_usdt": 100.0,
+        "client_order_id": "rqtest-live-stop",
+        "risk_plan": {
+            "entry_price": 110.0,
+            "selected_stop_loss_price": 101.0,
+            "direction": "long"
+        }
+    }));
+    let request = ExecutionOrderTask::from_task(&task).unwrap();
+    let error = request
+        .to_live_order_request(Some(100.0), Some(&binance_eth_filters()))
+        .expect_err("long stop-loss above current reference price must fail closed");
+    assert!(error.to_string().contains("live_stop_loss_price_invalid"));
+}
+#[test]
+fn live_order_rejects_stop_loss_distance_that_is_too_small() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "order_type": "market",
+        "size_usdt": 100.0,
+        "client_order_id": "rqtest-tight-stop",
+        "risk_plan": {
+            "entry_price": 100.0,
+            "selected_stop_loss_price": 99.99,
+            "direction": "long"
+        }
+    }));
+    let request = ExecutionOrderTask::from_task(&task).unwrap();
+    let error = request
+        .to_live_order_request(Some(100.0), Some(&binance_eth_filters()))
+        .expect_err("stop-loss too close to current reference price must fail closed");
+    assert!(error.to_string().contains("live_stop_loss_distance_out_of_range"));
+}
+#[test]
+fn risk_reserved_live_order_rejects_notional_above_reserved_budget() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "order_type": "market",
+        "size": "2",
+        "client_order_id": "rqtest-budget-boundary",
+        "risk_plan": {
+            "entry_price": 100.0,
+            "selected_stop_loss_price": 95.0,
+            "direction": "long"
+        }
+    }));
+    let mut request = ExecutionOrderTask::from_task(&task).unwrap();
+    request.risk_reserved = true;
+    request.size_usdt = Some(100.0);
+    let error = request
+        .to_live_order_request(Some(100.0), Some(&binance_eth_filters()))
+        .expect_err("risk-reserved order notional must not exceed allowed budget");
+    assert!(error.to_string().contains("live_order_notional_exceeds_reservation"));
+}
+#[test]
 fn strategy_size_usdt_payload_waits_for_live_ticker_and_filters() {
     let task = task(json!({
         "source": "rust_quant",
@@ -463,7 +553,7 @@ fn take_profit_ack_record_keeps_requested_client_order_id_when_ack_omits_it() {
     let ack = OrderAck {
         exchange: ExchangeId::Binance,
         exchange_symbol: "ETHUSDT".to_string(),
-        instrument: Instrument::perp("ETH", "USDT"),
+        instrument: crypto_exc_all::Instrument::perp("ETH", "USDT"),
         order_id: Some("tp-1".to_string()),
         client_order_id: None,
         status: Some("NEW".to_string()),
@@ -887,4 +977,33 @@ fn live_order_size_rejects_notional_below_exchange_minimum() {
     )
     .unwrap_err();
     assert!(error.to_string().contains("min_notional"));
+}
+fn live_ticker(
+    last_price: &str,
+    bid_price: Option<&str>,
+    ask_price: Option<&str>,
+    timestamp: Option<u64>,
+) -> crypto_exc_all::Ticker {
+    crypto_exc_all::Ticker {
+        exchange: ExchangeId::Binance,
+        instrument: Instrument::perp("ETH", "USDT"),
+        instrument_type: Some("swap".to_string()),
+        exchange_symbol: "ETHUSDT".to_string(),
+        last_price: last_price.to_string(),
+        last_size: None,
+        bid_price: bid_price.map(str::to_string),
+        bid_size: None,
+        ask_price: ask_price.map(str::to_string),
+        ask_size: None,
+        open_24h: None,
+        high_24h: None,
+        low_24h: None,
+        volume_24h: None,
+        base_volume_24h: None,
+        quote_volume_24h: None,
+        sod_utc0: None,
+        sod_utc8: None,
+        timestamp,
+        raw: json!({}),
+    }
 }
