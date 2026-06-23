@@ -12,9 +12,9 @@ mod execution_task_contract;
 mod execution_worker;
 mod market_velocity_live_readiness;
 pub use execution_audit::{
-    redact_audit_payload, ExchangeRequestAuditLog, ExecutionAuditRepository,
-    ExecutionWorkerCheckpoint, NoopExecutionAuditRepository, PostgresExecutionAuditRepository,
-    ReportResultReplayCandidate,
+    redact_audit_payload, ExchangeRequestAuditLog, ExchangeRequestControlGuard,
+    ExecutionAuditRepository, ExecutionWorkerCheckpoint, NoopExecutionAuditRepository,
+    PostgresExecutionAuditRepository, ReportResultReplayCandidate,
 };
 pub use execution_capability::{
     worker_live_capability_for_exchange, worker_live_capability_matrix, LiveWorkerCapabilityStatus,
@@ -36,9 +36,9 @@ pub use execution_task_contract::{
     ExchangeCloseFillWritebackRequest, ExchangeCloseFillWritebackResponse, ExchangeOrderResult,
     ExchangeReconciliationIssueType, ExchangeReconciliationReportRequest,
     ExchangeReconciliationReportResponse, ExecutionTask, ExecutionTaskConfirmationLease,
-    ExecutionTaskConfirmationLeaseItem, ExecutionTaskLease, ExecutionTaskLeaseRequest,
-    ExecutionTaskReportRequest, ExecutionTaskReportResponse,
-    MarketVelocityExecutionTaskCreationPreviewCheck,
+    ExecutionTaskConfirmationLeaseItem, ExecutionTaskLease, ExecutionTaskLeaseExtendRequest,
+    ExecutionTaskLeaseExtendResponse, ExecutionTaskLeaseRequest, ExecutionTaskReportRequest,
+    ExecutionTaskReportResponse, MarketVelocityExecutionTaskCreationPreviewCheck,
     MarketVelocityExecutionTaskCreationPreviewRequest,
     MarketVelocityExecutionTaskCreationPreviewResponse,
     MarketVelocityExecutionTaskLiveReadinessCheck,

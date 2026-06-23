@@ -15,6 +15,11 @@ const AUDIT_ENDPOINT_PLACE_PROTECTIVE_ORDER: &str = "trade.place_protective_orde
 const AUDIT_ENDPOINT_CANCEL_PROTECTIVE_ORDER: &str = "trade.cancel_protective_order";
 const AUDIT_ENDPOINT_PREPARE_ORDER_SETTINGS: &str = "account.prepare_order_settings";
 const AUDIT_ENDPOINT_REPORT_RESULT: &str = "web.report_result";
+const DEFAULT_EXCHANGE_REQUEST_WINDOW_SECONDS: i64 = 60;
+const DEFAULT_EXCHANGE_REQUEST_MAX_PER_WINDOW: i32 = 60;
+const DEFAULT_EXCHANGE_CIRCUIT_FAILURE_THRESHOLD: i32 = 3;
+const DEFAULT_EXCHANGE_CIRCUIT_OPEN_SECONDS: i64 = 60;
+const DEFAULT_EXCHANGE_REQUEST_AUDIT_RETENTION_DAYS: i64 = 30;
 const UPSERT_WORKER_CHECKPOINT_SQL: &str = r#"
             INSERT INTO execution_worker_checkpoints (
                 worker_id,
@@ -52,6 +57,90 @@ const INSERT_EXCHANGE_REQUEST_AUDIT_SQL: &str = r#"
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             "#;
+const DELETE_EXCHANGE_REQUEST_AUDIT_RETENTION_SQL: &str = r#"
+            DELETE FROM exchange_request_audit_logs
+            WHERE created_at < NOW() - ($1::bigint * INTERVAL '1 day')
+            "#;
+const SELECT_EXCHANGE_REQUEST_CIRCUIT_SQL: &str = r#"
+            SELECT
+                state,
+                opened_until,
+                opened_until > NOW() AS circuit_open
+            FROM exchange_request_circuit_breakers
+            WHERE exchange = $1
+              AND credential_key = $2
+              AND endpoint_family = $3
+            FOR UPDATE
+            "#;
+const ACQUIRE_EXCHANGE_REQUEST_PERMIT_SQL: &str = r#"
+            INSERT INTO exchange_request_rate_limits (
+                exchange,
+                credential_key,
+                endpoint_family,
+                window_started_at,
+                window_seconds,
+                request_count,
+                max_requests,
+                updated_at
+            )
+            VALUES ($1, $2, $3, NOW(), $4, 1, $5, NOW())
+            ON CONFLICT (exchange, credential_key, endpoint_family) DO UPDATE SET
+                window_started_at = CASE
+                    WHEN exchange_request_rate_limits.window_started_at <= NOW() - ($4::bigint * INTERVAL '1 second')
+                    THEN NOW()
+                    ELSE exchange_request_rate_limits.window_started_at
+                END,
+                request_count = CASE
+                    WHEN exchange_request_rate_limits.window_started_at <= NOW() - ($4::bigint * INTERVAL '1 second')
+                    THEN 1
+                    ELSE exchange_request_rate_limits.request_count + 1
+                END,
+                window_seconds = $4,
+                max_requests = $5,
+                updated_at = NOW()
+            RETURNING request_count
+            "#;
+const RECORD_EXCHANGE_REQUEST_OUTCOME_SQL: &str = r#"
+            INSERT INTO exchange_request_circuit_breakers (
+                exchange,
+                credential_key,
+                endpoint_family,
+                state,
+                failure_count,
+                opened_until,
+                last_error,
+                updated_at
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                CASE WHEN $4 THEN 'closed' WHEN $5 <= 1 THEN 'open' ELSE 'closed' END,
+                CASE WHEN $4 THEN 0 ELSE 1 END,
+                CASE WHEN $4 THEN NULL WHEN $5 <= 1 THEN NOW() + ($6::bigint * INTERVAL '1 second') ELSE NULL END,
+                $7,
+                NOW()
+            )
+            ON CONFLICT (exchange, credential_key, endpoint_family) DO UPDATE SET
+                state = CASE
+                    WHEN $4 THEN 'closed'
+                    WHEN exchange_request_circuit_breakers.failure_count + 1 >= $5 THEN 'open'
+                    ELSE 'closed'
+                END,
+                failure_count = CASE
+                    WHEN $4 THEN 0
+                    ELSE exchange_request_circuit_breakers.failure_count + 1
+                END,
+                opened_until = CASE
+                    WHEN $4 THEN NULL
+                    WHEN exchange_request_circuit_breakers.failure_count + 1 >= $5
+                    THEN NOW() + ($6::bigint * INTERVAL '1 second')
+                    ELSE exchange_request_circuit_breakers.opened_until
+                END,
+                last_error = $7,
+                updated_at = NOW()
+            RETURNING state
+            "#;
 const LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL: &str = r#"
             WITH latest_failed AS (
                 SELECT DISTINCT ON (failed.endpoint, failed.request_id)
@@ -86,7 +175,9 @@ const LIST_REPORT_RESULT_REPLAY_CANDIDATES_SQL: &str = r#"
 const LIVE_AUDIT_READINESS_TABLE_SQL: &str = r#"
             SELECT
                 to_regclass('public.execution_worker_checkpoints') IS NOT NULL AS has_worker_checkpoints,
-                to_regclass('public.exchange_request_audit_logs') IS NOT NULL AS has_exchange_audit_logs
+                to_regclass('public.exchange_request_audit_logs') IS NOT NULL AS has_exchange_audit_logs,
+                to_regclass('public.exchange_request_rate_limits') IS NOT NULL AS has_exchange_rate_limits,
+                to_regclass('public.exchange_request_circuit_breakers') IS NOT NULL AS has_exchange_circuit_breakers
             "#;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExecutionWorkerCheckpoint {
@@ -147,6 +238,40 @@ pub struct ExchangeRequestAuditLog {
     pub response_payload: Value,
     /// 错误消息。
     pub error_message: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExchangeRequestControlGuard {
+    pub exchange: String,
+    pub credential_key: String,
+    pub endpoint_family: String,
+    pub window_seconds: i64,
+    pub max_requests: i32,
+    pub circuit_failure_threshold: i32,
+    pub circuit_open_seconds: i64,
+}
+impl ExchangeRequestControlGuard {
+    pub fn for_task(task: &ExecutionTask, exchange: ExchangeId, endpoint: &str) -> Self {
+        Self {
+            exchange: exchange.as_str().to_string(),
+            credential_key: task
+                .request_payload_json
+                .get("api_credential_id")
+                .and_then(|value| {
+                    value
+                        .as_i64()
+                        .map(|id| id.to_string())
+                        .or_else(|| value.as_str().map(str::to_string))
+                })
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| format!("credential:{}", value.trim()))
+                .unwrap_or_else(|| "credential:unknown".to_string()),
+            endpoint_family: endpoint.trim().to_string(),
+            window_seconds: DEFAULT_EXCHANGE_REQUEST_WINDOW_SECONDS,
+            max_requests: DEFAULT_EXCHANGE_REQUEST_MAX_PER_WINDOW,
+            circuit_failure_threshold: DEFAULT_EXCHANGE_CIRCUIT_FAILURE_THRESHOLD,
+            circuit_open_seconds: DEFAULT_EXCHANGE_CIRCUIT_OPEN_SECONDS,
+        }
+    }
 }
 impl ExchangeRequestAuditLog {
     /// 封装成功，减少Web 商业链路调用方重复实现相同细节。
@@ -549,6 +674,20 @@ pub trait ExecutionAuditRepository: Send + Sync {
     }
     async fn upsert_worker_checkpoint(&self, checkpoint: &ExecutionWorkerCheckpoint) -> Result<()>;
     async fn insert_exchange_request_audit(&self, audit: &ExchangeRequestAuditLog) -> Result<()>;
+    async fn acquire_exchange_request_permit(
+        &self,
+        _guard: &ExchangeRequestControlGuard,
+    ) -> Result<()> {
+        Ok(())
+    }
+    async fn record_exchange_request_outcome(
+        &self,
+        _guard: &ExchangeRequestControlGuard,
+        _succeeded: bool,
+        _error_message: Option<&str>,
+    ) -> Result<()> {
+        Ok(())
+    }
     async fn list_report_result_replay_candidates(
         &self,
         _limit: u32,
@@ -556,6 +695,9 @@ pub trait ExecutionAuditRepository: Send + Sync {
         _target_task_ids: &[i64],
     ) -> Result<Vec<ReportResultReplayCandidate>> {
         Ok(Vec::new())
+    }
+    async fn prune_exchange_request_audit_logs(&self, _retention_days: i64) -> Result<u64> {
+        Ok(0)
     }
 }
 #[derive(Debug, Default)]
@@ -614,11 +756,19 @@ impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
             .context("connect quant_core live audit database")?;
         let has_worker_checkpoints: bool = row.try_get("has_worker_checkpoints")?;
         let has_exchange_audit_logs: bool = row.try_get("has_exchange_audit_logs")?;
-        if !has_worker_checkpoints || !has_exchange_audit_logs {
+        let has_exchange_rate_limits: bool = row.try_get("has_exchange_rate_limits")?;
+        let has_exchange_circuit_breakers: bool = row.try_get("has_exchange_circuit_breakers")?;
+        if !has_worker_checkpoints
+            || !has_exchange_audit_logs
+            || !has_exchange_rate_limits
+            || !has_exchange_circuit_breakers
+        {
             return Err(anyhow!(
-                "quant_core live audit tables are not ready: execution_worker_checkpoints={}, exchange_request_audit_logs={}",
+                "quant_core live audit tables are not ready: execution_worker_checkpoints={}, exchange_request_audit_logs={}, exchange_request_rate_limits={}, exchange_request_circuit_breakers={}",
                 has_worker_checkpoints,
-                has_exchange_audit_logs
+                has_exchange_audit_logs,
+                has_exchange_rate_limits,
+                has_exchange_circuit_breakers
             ));
         }
         let probe_id = live_audit_preflight_id();
@@ -661,6 +811,9 @@ impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
         tx.rollback()
             .await
             .context("rollback quant_core live audit readiness transaction")?;
+        self.prune_exchange_request_audit_logs(exchange_request_audit_retention_days())
+            .await
+            .context("prune stale exchange_request_audit_logs")?;
         Ok(())
     }
     /// 持久化 Web 商业、会员和执行准备度 结果，保证写入路径和幂等语义集中处理。
@@ -690,6 +843,79 @@ impl ExecutionAuditRepository for PostgresExecutionAuditRepository {
             .bind(&audit.response_payload)
             .bind(&audit.error_message)
             .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+    async fn prune_exchange_request_audit_logs(&self, retention_days: i64) -> Result<u64> {
+        let retention_days = retention_days.max(1);
+        let result = sqlx::query(DELETE_EXCHANGE_REQUEST_AUDIT_RETENTION_SQL)
+            .bind(retention_days)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+    async fn acquire_exchange_request_permit(
+        &self,
+        guard: &ExchangeRequestControlGuard,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        if let Some(row) = sqlx::query(SELECT_EXCHANGE_REQUEST_CIRCUIT_SQL)
+            .bind(&guard.exchange)
+            .bind(&guard.credential_key)
+            .bind(&guard.endpoint_family)
+            .fetch_optional(&mut *tx)
+            .await?
+        {
+            let circuit_open: bool = row.try_get("circuit_open")?;
+            if circuit_open {
+                tx.rollback().await?;
+                return Err(anyhow!(
+                    "exchange request circuit open for {}/{}/{}",
+                    guard.exchange,
+                    guard.credential_key,
+                    guard.endpoint_family
+                ));
+            }
+        }
+        let row = sqlx::query(ACQUIRE_EXCHANGE_REQUEST_PERMIT_SQL)
+            .bind(&guard.exchange)
+            .bind(&guard.credential_key)
+            .bind(&guard.endpoint_family)
+            .bind(guard.window_seconds)
+            .bind(guard.max_requests)
+            .fetch_one(&mut *tx)
+            .await?;
+        let request_count: i32 = row.try_get("request_count")?;
+        if request_count > guard.max_requests {
+            tx.rollback().await?;
+            return Err(anyhow!(
+                "exchange request rate limit exceeded for {}/{}/{}: {}/{} per {}s",
+                guard.exchange,
+                guard.credential_key,
+                guard.endpoint_family,
+                request_count,
+                guard.max_requests,
+                guard.window_seconds
+            ));
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+    async fn record_exchange_request_outcome(
+        &self,
+        guard: &ExchangeRequestControlGuard,
+        succeeded: bool,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(RECORD_EXCHANGE_REQUEST_OUTCOME_SQL)
+            .bind(&guard.exchange)
+            .bind(&guard.credential_key)
+            .bind(&guard.endpoint_family)
+            .bind(succeeded)
+            .bind(guard.circuit_failure_threshold)
+            .bind(guard.circuit_open_seconds)
+            .bind(error_message.unwrap_or(""))
+            .fetch_one(&self.pool)
             .await?;
         Ok(())
     }
@@ -729,6 +955,14 @@ fn live_audit_preflight_id() -> String {
         .map(|duration| duration.as_millis())
         .unwrap_or_default();
     format!("live-audit-preflight-{}-{millis}", std::process::id())
+}
+
+fn exchange_request_audit_retention_days() -> i64 {
+    std::env::var("QUANT_CORE_EXCHANGE_AUDIT_RETENTION_DAYS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_EXCHANGE_REQUEST_AUDIT_RETENTION_DAYS)
 }
 /// 提供redactaudit载荷的集中实现，避免Web 商业链路调用方重复处理相同细节。
 pub fn redact_audit_payload(payload: Value) -> Value {

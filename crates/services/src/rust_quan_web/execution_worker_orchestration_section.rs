@@ -87,6 +87,67 @@ impl ExecutionWorker {
                 .await;
                 continue;
             }
+            if let Err(error) = self
+                .client
+                .extend_task_lease(
+                    task.id,
+                    ExecutionTaskLeaseExtendRequest {
+                        worker_id: self.config.worker_id.clone(),
+                        extend_seconds: Some(120),
+                    },
+                )
+                .await
+            {
+                let report = ExecutionTaskReportRequest::failed(
+                    task.id,
+                    self.config.default_exchange.as_str(),
+                    "unknown",
+                    format!("execution task lease heartbeat failed: {error}"),
+                    json!({
+                        "task_id": task.id,
+                        "stage": "execution_task_lease_extend",
+                        "mutation_allowed": false,
+                        "place_order_allowed": false,
+                    }),
+                );
+                if let Err(report_error) = self.client.report_result(report.clone()).await {
+                    error!(
+                        task_id = task.id,
+                        "回写执行任务租约续租失败结果失败: {}", report_error
+                    );
+                    self.record_report_result_failure(
+                        task.id,
+                        &report,
+                        report_error.to_string(),
+                        "lease_extend_failed_report_result",
+                    )
+                    .await;
+                } else {
+                    self.record_checkpoint(
+                        "lease_extend_failed",
+                        Some(task.id),
+                        json!({
+                            "stage": "execution_task_lease_extend",
+                            "error": error.to_string(),
+                            "place_order_allowed": false,
+                            "mutation_allowed": false,
+                        }),
+                    )
+                    .await;
+                }
+                last_task_id = Some(task.id);
+                handled += 1;
+                continue;
+            }
+            self.record_checkpoint(
+                "lease_extended",
+                Some(task.id),
+                json!({
+                    "stage": "execution_task_lease_extend",
+                    "extend_seconds": 120,
+                }),
+            )
+            .await;
             let report = self.execute_task(&task).await;
             let report_status = report.execution_status.clone();
             // 交易执行结果必须回写 Web；回写失败不重试下单，只记录可重放证据，避免重复 mutation。

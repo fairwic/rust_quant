@@ -190,6 +190,30 @@ CREATE TABLE IF NOT EXISTS exchange_request_audit_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS exchange_request_rate_limits (
+    exchange VARCHAR(64) NOT NULL,
+    credential_key VARCHAR(128) NOT NULL,
+    endpoint_family VARCHAR(128) NOT NULL,
+    window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    window_seconds INTEGER NOT NULL DEFAULT 60,
+    request_count INTEGER NOT NULL DEFAULT 0,
+    max_requests INTEGER NOT NULL DEFAULT 60,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (exchange, credential_key, endpoint_family)
+);
+
+CREATE TABLE IF NOT EXISTS exchange_request_circuit_breakers (
+    exchange VARCHAR(64) NOT NULL,
+    credential_key VARCHAR(128) NOT NULL,
+    endpoint_family VARCHAR(128) NOT NULL,
+    state VARCHAR(32) NOT NULL DEFAULT 'closed',
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    opened_until TIMESTAMPTZ,
+    last_error TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (exchange, credential_key, endpoint_family)
+);
+
 CREATE TABLE IF NOT EXISTS exchange_symbols (
     id BIGSERIAL PRIMARY KEY,
     exchange VARCHAR(64) NOT NULL,
@@ -235,6 +259,9 @@ CREATE INDEX IF NOT EXISTS idx_exchange_request_audit_lookup
     ON exchange_request_audit_logs (exchange, symbol, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_exchange_request_audit_report_replay
     ON exchange_request_audit_logs (endpoint, request_id, request_status, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_exchange_request_circuit_opened_until
+    ON exchange_request_circuit_breakers (opened_until)
+    WHERE opened_until IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_exchange_symbols_exchange_status
     ON exchange_symbols (exchange, status);
 CREATE INDEX IF NOT EXISTS idx_exchange_symbols_base_quote
@@ -243,6 +270,24 @@ CREATE INDEX IF NOT EXISTS idx_exchange_symbols_updated_at
     ON exchange_symbols (updated_at DESC);
 
 COMMENT ON TABLE exchange_symbols IS '交易所原始可交易交易对事实表，由 rust_quant 同步维护';
+COMMENT ON TABLE exchange_request_rate_limits IS '交易所 API 分布式限频窗口表，由 quant_core live worker 按 exchange、credential、endpoint 维度维护';
+COMMENT ON COLUMN exchange_request_rate_limits.exchange IS '交易所标识，如 binance、okx';
+COMMENT ON COLUMN exchange_request_rate_limits.credential_key IS '凭证维度键，使用 credential:ID 形式避免存储明文 API Key';
+COMMENT ON COLUMN exchange_request_rate_limits.endpoint_family IS '接口族，如 trade.place_order、trade.cancel_order';
+COMMENT ON COLUMN exchange_request_rate_limits.window_started_at IS '当前限频窗口开始时间';
+COMMENT ON COLUMN exchange_request_rate_limits.window_seconds IS '限频窗口秒数';
+COMMENT ON COLUMN exchange_request_rate_limits.request_count IS '当前窗口内已占用请求数';
+COMMENT ON COLUMN exchange_request_rate_limits.max_requests IS '当前窗口允许的最大请求数';
+COMMENT ON COLUMN exchange_request_rate_limits.updated_at IS '更新时间';
+COMMENT ON TABLE exchange_request_circuit_breakers IS '交易所 API 熔断状态表，由 quant_core live worker 按 exchange、credential、endpoint 维度维护';
+COMMENT ON COLUMN exchange_request_circuit_breakers.exchange IS '交易所标识，如 binance、okx';
+COMMENT ON COLUMN exchange_request_circuit_breakers.credential_key IS '凭证维度键，使用 credential:ID 形式避免存储明文 API Key';
+COMMENT ON COLUMN exchange_request_circuit_breakers.endpoint_family IS '接口族，如 trade.place_order、trade.cancel_order';
+COMMENT ON COLUMN exchange_request_circuit_breakers.state IS '熔断状态：closed 或 open';
+COMMENT ON COLUMN exchange_request_circuit_breakers.failure_count IS '连续失败次数';
+COMMENT ON COLUMN exchange_request_circuit_breakers.opened_until IS '熔断开启到期时间；为空表示未打开';
+COMMENT ON COLUMN exchange_request_circuit_breakers.last_error IS '最近一次失败摘要，必须是脱敏后的错误';
+COMMENT ON COLUMN exchange_request_circuit_breakers.updated_at IS '更新时间';
 COMMENT ON COLUMN exchange_symbols.id IS '自增主键';
 COMMENT ON COLUMN exchange_symbols.exchange IS '交易所标识，如 binance、okx';
 COMMENT ON COLUMN exchange_symbols.market_type IS '市场类型，如 perpetual、spot';

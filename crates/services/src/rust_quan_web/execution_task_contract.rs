@@ -17,11 +17,27 @@ pub struct ExecutionTaskLeaseRequest {
     /// 列表数据。
     pub task_statuses: Vec<String>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExecutionTaskLeaseExtendRequest {
+    /// worker ID。
+    pub worker_id: String,
+    /// 续租秒数。
+    pub extend_seconds: Option<i64>,
+}
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExecutionTaskLease {
     /// 列表数据。
     pub tasks: Vec<ExecutionTask>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct ExecutionTaskLeaseExtendResponse {
+    /// 任务。
+    pub task: ExecutionTask,
+    /// 续租后的租约到期时间。
+    pub lease_until: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

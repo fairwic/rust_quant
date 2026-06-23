@@ -42,10 +42,11 @@ use crate::rust_quan_web::execution_take_profit::{
 use crate::rust_quan_web::{
     worker_live_capability_for_exchange, ExchangeOrderResult, ExchangeReconciliationIssueType,
     ExchangeReconciliationReportRequest, ExchangeReconciliationReportResponse,
-    ExchangeRequestAuditLog, ExecutionAuditRepository, ExecutionTask, ExecutionTaskClient,
-    ExecutionTaskConfig, ExecutionTaskConfirmationLeaseItem, ExecutionTaskLeaseRequest,
-    ExecutionTaskReportRequest, ExecutionWorkerCheckpoint, NoopExecutionAuditRepository,
-    PostgresExecutionAuditRepository, ProtectionPlacementMode,
+    ExchangeRequestAuditLog, ExchangeRequestControlGuard, ExecutionAuditRepository, ExecutionTask,
+    ExecutionTaskClient, ExecutionTaskConfig, ExecutionTaskConfirmationLeaseItem,
+    ExecutionTaskLeaseExtendRequest, ExecutionTaskLeaseRequest, ExecutionTaskReportRequest,
+    ExecutionWorkerCheckpoint, NoopExecutionAuditRepository, PostgresExecutionAuditRepository,
+    ProtectionPlacementMode,
 };
 use anyhow::{anyhow, Result};
 use crypto_exc_all::{

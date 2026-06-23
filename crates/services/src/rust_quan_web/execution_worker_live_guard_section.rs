@@ -65,6 +65,44 @@ fn live_mutation_capability_report(
         payload,
     ))
 }
+async fn acquire_exchange_request_control(
+    &self,
+    task: &ExecutionTask,
+    exchange: ExchangeId,
+    endpoint_family: &str,
+) -> crypto_exc_all::Result<Option<ExchangeRequestControlGuard>> {
+    if !self.live_order_mode_requires_audit() {
+        return Ok(None);
+    }
+    let guard = ExchangeRequestControlGuard::for_task(task, exchange, endpoint_family);
+    self.audit_repository
+        .acquire_exchange_request_permit(&guard)
+        .await
+        .map_err(exchange_request_control_error)?;
+    Ok(Some(guard))
+}
+async fn record_exchange_request_control_outcome(
+    &self,
+    guard: Option<&ExchangeRequestControlGuard>,
+    succeeded: bool,
+    error_message: Option<String>,
+) {
+    let Some(guard) = guard else {
+        return;
+    };
+    if let Err(error) = self
+        .audit_repository
+        .record_exchange_request_outcome(guard, succeeded, error_message.as_deref())
+        .await
+    {
+        warn!(
+            exchange = guard.exchange,
+            credential_key = guard.credential_key,
+            endpoint_family = guard.endpoint_family,
+            "记录交易所限频/熔断结果失败: {}", error
+        );
+    }
+}
 /// 提供place订单withaudit的集中实现，避免Web 商业链路调用方重复处理相同细节。
 async fn place_order_with_audit(
     &self,
@@ -92,10 +130,19 @@ async fn place_order_with_audit(
         .await
         .map_err(live_audit_write_error)?;
     }
+    let control_guard = self
+        .acquire_exchange_request_control(task, request.exchange, "trade.place_order")
+        .await?;
     let started_at = Instant::now();
     let result =
         CryptoExcAllGateway::with_live_mutation_audit_scope(gateway.place_order(request.clone()))
             .await;
+    self.record_exchange_request_control_outcome(
+        control_guard.as_ref(),
+        result.is_ok(),
+        result.as_ref().err().map(ToString::to_string),
+    )
+    .await;
     let latency_ms = elapsed_ms(started_at);
     // 成功和失败都写同一套审计结构，后续 replay/人工排障不需要再根据异常路径拼证据。
     let audit = match &result {
@@ -160,9 +207,18 @@ pub(super) async fn cancel_order_with_audit(
         .await
         .map_err(live_audit_write_error)?;
     }
+    let control_guard = self
+        .acquire_exchange_request_control(task, exchange, "trade.cancel_order")
+        .await?;
     let started_at = Instant::now();
     let result = CryptoExcAllGateway::with_live_mutation_audit_scope(
         gateway.cancel_order(exchange, request.clone()),
+    )
+    .await;
+    self.record_exchange_request_control_outcome(
+        control_guard.as_ref(),
+        result.is_ok(),
+        result.as_ref().err().map(ToString::to_string),
     )
     .await;
     let latency_ms = elapsed_ms(started_at);
@@ -222,9 +278,18 @@ pub(super) async fn prepare_order_settings_with_audit(
         .await
         .map_err(live_audit_write_error)?;
     }
+    let control_guard = self
+        .acquire_exchange_request_control(task, exchange, "account.prepare_order_settings")
+        .await?;
     let started_at = Instant::now();
     let result = CryptoExcAllGateway::with_live_mutation_audit_scope(
         gateway.prepare_order_settings(exchange, request.clone()),
+    )
+    .await;
+    self.record_exchange_request_control_outcome(
+        control_guard.as_ref(),
+        result.is_ok(),
+        result.as_ref().err().map(ToString::to_string),
     )
     .await;
     let latency_ms = elapsed_ms(started_at);
@@ -284,9 +349,18 @@ pub(super) async fn place_protective_order_with_audit(
         .await
         .map_err(live_audit_write_error)?;
     }
+    let control_guard = self
+        .acquire_exchange_request_control(task, exchange, "trade.place_protective_order")
+        .await?;
     let started_at = Instant::now();
     let result = CryptoExcAllGateway::with_live_mutation_audit_scope(
         gateway.place_protective_order(exchange, request.clone()),
+    )
+    .await;
+    self.record_exchange_request_control_outcome(
+        control_guard.as_ref(),
+        result.is_ok(),
+        result.as_ref().err().map(ToString::to_string),
     )
     .await;
     let latency_ms = elapsed_ms(started_at);
@@ -346,9 +420,18 @@ pub(super) async fn cancel_protective_order_with_audit(
         .await
         .map_err(live_audit_write_error)?;
     }
+    let control_guard = self
+        .acquire_exchange_request_control(task, exchange, "trade.cancel_protective_order")
+        .await?;
     let started_at = Instant::now();
     let result = CryptoExcAllGateway::with_live_mutation_audit_scope(
         gateway.cancel_protective_order(exchange, request.clone()),
+    )
+    .await;
+    self.record_exchange_request_control_outcome(
+        control_guard.as_ref(),
+        result.is_ok(),
+        result.as_ref().err().map(ToString::to_string),
     )
     .await;
     let latency_ms = elapsed_ms(started_at);
@@ -379,6 +462,9 @@ pub(super) async fn cancel_protective_order_with_audit(
     }
     result
 }
+}
+fn exchange_request_control_error(error: anyhow::Error) -> CryptoExchangeError {
+    CryptoExchangeError::Config(format!("exchange request control blocked: {error}"))
 }
 impl TakeProfitOrderPlacer for ExecutionWorker {
     fn place_take_profit_order<'a>(

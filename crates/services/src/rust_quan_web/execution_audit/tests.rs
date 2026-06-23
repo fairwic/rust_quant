@@ -215,6 +215,53 @@ fn builds_worker_checkpoint_payload() {
     assert_eq!(checkpoint.checkpoint_value["leased_count"], 1);
 }
 #[test]
+fn exchange_request_control_key_uses_exchange_credential_and_endpoint_family() {
+    let task = task(json!({
+        "api_credential_id": 88,
+        "exchange": "okx",
+        "symbol": "BTC-USDT-SWAP"
+    }));
+    let guard = ExchangeRequestControlGuard::for_task(&task, ExchangeId::Okx, "trade.place_order");
+    assert_eq!(guard.exchange, "okx");
+    assert_eq!(guard.credential_key, "credential:88");
+    assert_eq!(guard.endpoint_family, "trade.place_order");
+    assert_eq!(guard.window_seconds, 60);
+    assert_eq!(guard.max_requests, 60);
+}
+#[test]
+fn exchange_request_control_tables_are_part_of_quant_core_schema() {
+    let ddl = include_str!("../../../../../sql/postgres_quant_core.sql");
+    for required in [
+        "CREATE TABLE IF NOT EXISTS exchange_request_rate_limits",
+        "CREATE TABLE IF NOT EXISTS exchange_request_circuit_breakers",
+        "PRIMARY KEY (exchange, credential_key, endpoint_family)",
+        "COMMENT ON TABLE exchange_request_rate_limits",
+        "COMMENT ON TABLE exchange_request_circuit_breakers",
+    ] {
+        assert!(
+            ddl.contains(required),
+            "quant_core schema must include distributed exchange request control artifact `{required}`"
+        );
+    }
+}
+#[test]
+fn postgres_exchange_request_control_uses_row_locking_and_circuit_state() {
+    for required in [
+        "FOR UPDATE",
+        "exchange_request_rate_limits",
+        "exchange_request_circuit_breakers",
+        "opened_until > NOW()",
+        "request_count",
+    ] {
+        assert!(
+            ACQUIRE_EXCHANGE_REQUEST_PERMIT_SQL.contains(required)
+                || SELECT_EXCHANGE_REQUEST_CIRCUIT_SQL.contains(required)
+                || RECORD_EXCHANGE_REQUEST_OUTCOME_SQL.contains(required),
+            "exchange request control SQL must coordinate distributed workers with `{required}`"
+        );
+    }
+}
+#[test]
 fn report_result_replay_candidate_reconstructs_report_without_order_retry() {
     let report = ExecutionTaskReportRequest {
         task_id: 42,
@@ -311,6 +358,12 @@ fn repository_exchange_audit_columns_match_quant_core_ddl() {
             "error_message",
         ],
     );
+}
+#[test]
+fn exchange_request_audit_retention_deletes_by_created_at() {
+    assert!(DELETE_EXCHANGE_REQUEST_AUDIT_RETENTION_SQL.contains("exchange_request_audit_logs"));
+    assert!(DELETE_EXCHANGE_REQUEST_AUDIT_RETENTION_SQL.contains("created_at"));
+    assert!(DELETE_EXCHANGE_REQUEST_AUDIT_RETENTION_SQL.contains("INTERVAL '1 day'"));
 }
 #[test]
 fn live_audit_readiness_documents_required_tables() {

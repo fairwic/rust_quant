@@ -248,6 +248,82 @@ async fn report_replay_mode_reposts_stored_report_without_order_placement() {
         .all(|checkpoint| checkpoint.checkpoint_value["place_order_allowed"] != true));
 }
 #[tokio::test]
+async fn normal_worker_extends_task_lease_before_execution_report() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::time::{Duration as StdDuration, Instant as StdInstant};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let server = tokio::task::spawn_blocking(move || {
+        let started_at = StdInstant::now();
+        let mut requests = Vec::new();
+        while started_at.elapsed() < StdDuration::from_secs(15) && requests.len() < 3 {
+            let Ok((mut stream, _)) = listener.accept() else {
+                std::thread::sleep(StdDuration::from_millis(10));
+                continue;
+            };
+            let mut buffer = [0_u8; 8192];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+            let body = if request.starts_with("GET /api/commerce/internal/execution-tasks/lease") {
+                r#"{"success":true,"data":{"items":[{"task":{"id":42,"news_signal_id":null,"strategy_signal_id":11,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"vegas","symbol":"BTC-USDT-SWAP","task_type":"execute_signal","task_status":"leased","priority":3,"lease_owner":"worker-heartbeat","lease_until":"2026-04-23T12:02:00","scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{\"exchange\":\"okx\",\"side\":\"buy\",\"size\":\"0.01\"}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"api_credentials":[]}]}}"#
+            } else if request.starts_with(
+                "POST /api/commerce/internal/execution-tasks/42/lease/extend",
+            ) {
+                r#"{"success":true,"data":{"task":{"id":42,"news_signal_id":null,"strategy_signal_id":11,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"vegas","symbol":"BTC-USDT-SWAP","task_type":"execute_signal","task_status":"leased","priority":3,"lease_owner":"worker-heartbeat","lease_until":"2026-04-23T12:04:00","scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"lease_until":"2026-04-23T12:04:00"}}"#
+            } else {
+                r#"{"success":true,"data":{"task":{"id":42,"news_signal_id":null,"strategy_signal_id":11,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"vegas","symbol":"BTC-USDT-SWAP","task_type":"execute_signal","task_status":"completed","priority":3,"lease_owner":"worker-heartbeat","lease_until":null,"scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"attempt":{},"order_result":{},"trade_record":null}}"#
+            };
+            requests.push(request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+        tx.send(requests).unwrap();
+    });
+    let worker = ExecutionWorker::new(
+        ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "local-dev-secret".to_string(),
+        })
+        .unwrap(),
+        CryptoExcAllGateway::dry_run(),
+        ExecutionWorkerConfig {
+            worker_id: "worker-heartbeat".to_string(),
+            lease_limit: 1,
+            dry_run: true,
+            default_exchange: ExchangeId::Okx,
+            task_types: vec!["execute_signal".to_string()],
+            task_statuses: vec!["pending".to_string()],
+            target_task_ids: vec![42],
+            confirmation_mode: false,
+            report_replay_mode: false,
+            report_replay_max_per_run: 1,
+            report_replay_failure_backoff_seconds: 300,
+            report_replay_throttle_ms: 0,
+        },
+    );
+    let handled = worker.run_once().await.unwrap();
+    server.await.unwrap();
+    let requests = rx.recv().unwrap();
+    assert_eq!(handled, 1);
+    assert_eq!(requests.len(), 3, "worker should lease, extend, then report");
+    assert!(requests[0].starts_with("GET /api/commerce/internal/execution-tasks/lease"));
+    assert!(
+        requests[1].starts_with("POST /api/commerce/internal/execution-tasks/42/lease/extend"),
+        "second request must refresh the active lease before slow exchange work, got {}",
+        requests[1].lines().next().unwrap_or("")
+    );
+    assert!(requests[1].contains(r#""worker_id":"worker-heartbeat""#));
+    assert!(requests[2].starts_with("POST /api/commerce/internal/execution-results"));
+}
+#[tokio::test]
 async fn report_replay_mode_scopes_candidates_to_target_task_ids_before_limit() {
     use std::io::{Read, Write};
     use std::net::TcpListener;

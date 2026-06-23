@@ -3,7 +3,8 @@ use super::execution_task_contract::{
     ExchangeAccountSnapshotReportResponse, ExchangeCloseFillWritebackRequest,
     ExchangeCloseFillWritebackResponse, ExchangeReconciliationReportRequest,
     ExchangeReconciliationReportResponse, ExecutionTaskConfirmationLease, ExecutionTaskLease,
-    ExecutionTaskLeaseRequest, ExecutionTaskReportRequest, ExecutionTaskReportResponse,
+    ExecutionTaskLeaseExtendRequest, ExecutionTaskLeaseExtendResponse, ExecutionTaskLeaseRequest,
+    ExecutionTaskReportRequest, ExecutionTaskReportResponse,
     MarketVelocityExecutionTaskCreationPreviewRequest,
     MarketVelocityExecutionTaskCreationPreviewResponse,
     MarketVelocityExecutionTaskLiveReadinessResponse, MarketVelocityPaperOutcomeRequest,
@@ -83,6 +84,14 @@ impl ExecutionTaskClient {
         request: ExecutionTaskLeaseRequest,
     ) -> Result<ExecutionTaskLease> {
         self.get_json(&self.lease_url_for_request(&request)).await
+    }
+    pub async fn extend_task_lease(
+        &self,
+        task_id: i64,
+        request: ExecutionTaskLeaseExtendRequest,
+    ) -> Result<ExecutionTaskLeaseExtendResponse> {
+        self.post_json(&self.lease_extend_path(task_id), &request)
+            .await
     }
     /// 提供lease确认tasks的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub async fn lease_confirmation_tasks(
@@ -211,8 +220,14 @@ impl ExecutionTaskClient {
             task_statuses: Vec::new(),
         })
     }
+    pub fn lease_extend_url(&self, task_id: i64) -> String {
+        self.url(&self.lease_extend_path(task_id))
+    }
     pub fn confirmation_lease_url(&self, limit: u32) -> String {
         self.confirmation_lease_url_for_task_ids(limit, &[])
+    }
+    fn lease_extend_path(&self, task_id: i64) -> String {
+        format!("/api/commerce/internal/execution-tasks/{task_id}/lease/extend")
     }
     /// 提供确认leaseURLfortaskids的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub fn confirmation_lease_url_for_task_ids(&self, limit: u32, task_ids: &[i64]) -> String {
@@ -398,6 +413,28 @@ mod tests {
             client.confirmation_lease_url(5),
             "https://quant-web.example/api/commerce/internal/execution-tasks/confirmations/lease?limit=5"
         );
+    }
+    #[test]
+    fn lease_extend_url_matches_quant_web_internal_contract() {
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "https://quant-web.example/".to_string(),
+            internal_secret: "secret".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            client.lease_extend_url(42),
+            "https://quant-web.example/api/commerce/internal/execution-tasks/42/lease/extend"
+        );
+    }
+    #[test]
+    fn lease_extend_request_serializes_worker_and_seconds() {
+        let request = ExecutionTaskLeaseExtendRequest {
+            worker_id: "worker-a".to_string(),
+            extend_seconds: Some(180),
+        };
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(value["worker_id"], "worker-a");
+        assert_eq!(value["extend_seconds"], 180);
     }
     #[test]
     fn confirmation_lease_url_scopes_target_task_ids() {
