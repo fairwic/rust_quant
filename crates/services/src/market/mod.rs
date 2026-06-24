@@ -299,6 +299,12 @@ fn crypto_exc_all_gateway_from_env(exchange: ExchangeId) -> Result<crate::Crypto
 }
 /// 提供cryptoexcallK 线period的集中实现，避免行情数据调用方重复处理相同细节。
 fn crypto_exc_all_candle_period(exchange: ExchangeId, period: &str) -> String {
+    if exchange == ExchangeId::Binance {
+        return match period.trim().to_ascii_lowercase().as_str() {
+            "1dutc" => "1d".to_string(),
+            value => value.to_string(),
+        };
+    }
     if exchange != ExchangeId::Okx {
         return period.to_string();
     }
@@ -741,6 +747,18 @@ mod tests {
         assert_eq!(
             crypto_exc_all_candle_period(ExchangeId::Binance, "4h"),
             "4h"
+        );
+        assert_eq!(
+            crypto_exc_all_candle_period(ExchangeId::Binance, "1H"),
+            "1h"
+        );
+        assert_eq!(
+            crypto_exc_all_candle_period(ExchangeId::Binance, "4H"),
+            "4h"
+        );
+        assert_eq!(
+            crypto_exc_all_candle_period(ExchangeId::Binance, "1DUTC"),
+            "1d"
         );
     }
 }
