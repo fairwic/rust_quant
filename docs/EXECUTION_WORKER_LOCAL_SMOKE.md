@@ -107,6 +107,32 @@ EXECUTION_WORKER_LIVE_ORDER_CONFIRM=I_UNDERSTAND_LIVE_ORDERS
 Web lease 过滤条件、用户 API Key、交易所环境（模拟盘或真实盘）、下单数量和
 `risk_control_close_candidate` 的 reduce-only 平仓合约。
 
+实盘 `execute_signal` 还必须带可验证的保护止损合同。即使 payload 没有显式设置
+`protective_stop_loss_required=true`，只要 worker 处于 `EXECUTION_WORKER_DRY_RUN=false`，
+也会要求 `risk_plan.selected_stop_loss_price` 为正数并且方向合法；缺失或无效时会在
+API credential preflight、审计写入和任何交易所 mutation 之前失败关闭。
+
+## 分批止盈实盘安全语义
+
+策略 payload 带 `risk_plan.take_profit_legs` 时，live worker 只在主订单确认
+`completed` 且有有效 `filled_qty` 后提交 reduce-only limit 止盈单。止盈单使用
+稳定 client order id，重试前先按 client order id 查询已有订单，避免重复挂同一
+止盈腿。
+
+止盈单 ACK 和重试前查到的已有止盈单必须处于可接受状态，例如 `NEW`、`OPEN`、
+`LIVE`、`PARTIALLY_FILLED`、`FILLED`、OKX 成功码 `0` 或本地 `dry_run`。如果 ACK 是
+`REJECTED`、`EXPIRED`、`CANCELED` 等终态失败，worker 不会把 TP 同步标记为完成；
+已有终态失败订单只作为证据记录，并继续尝试重新挂该止盈腿。
+
+如果止盈单同步失败，主订单回报仍保留 `completed`，但 raw payload 会标记
+`take_profit_sync.status=take_profit_order_retry_required` 和
+`retry_required=true`。Web 会把 task 保持在 `pending_take_profit_sync`，confirmation
+worker 后续继续 lease 并重试止盈单同步。
+
+如果某个止盈腿成交后需要把 runner 止损移动到新价位，worker 必须先确认新的
+保护止损单，再撤旧保护止损单。新止损未确认时旧止损保持不撤；旧止损撤单失败时，
+新止损已经生效，raw payload 会记录 `manual_cleanup_required=true` 供人工清理。
+
 ## Market Velocity Rust-native handoff
 
 Market Velocity 生产 handoff 不再使用 `scripts/dev/*.sh`。Core 只负责从
@@ -189,9 +215,11 @@ cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
   --sample-limit 0
 ```
 
-生产默认参数是 `delta_rank >= 10`、`new_rank <= 30`、追高过滤
-`new_rank <= 10 && price_change_pct >= 8%`、止损 `3%`，并同时统计 `1.5R`
-和 `2R` 在 `24h`、`48h` 两个窗口内的结果。
+当前生产观察 preset 是 `delta_rank >= 15`、`new_rank <= 30`、4h 均线保持多头确认、
+15m 入场均线距离最多 `4%`、追高过滤
+`new_rank <= 10 && price_change_pct >= 8%`、止损 `3%`，默认统计
+`2.0R` 在 `24h`、`48h` 两个窗口内的结果。`48h` 是事件触发后的最大观察窗口：
+先触发止盈或止损就立即结算，48 小时内都未触发才记为 timeout。
 
 如果要对比不同 15m 入场触发的后验质量，可以在确认事件之后、生成收益统计和
 paper outcome 之前加入口径过滤：
@@ -209,17 +237,52 @@ cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
 QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
 cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
   --sample-limit 0 \
-  --entry-trigger-blocklist pullback_hold_ema
+  --entry-trigger-blocklist reclaim_ma
 ```
 
-2026-06-15 本地 `quant_core` 对照结果：baseline confirmed `3210`，锁仓后
-`1.5R/24h` resolved `61.90%`，`2R/24h` resolved `56.10%`；只保留
-`breakout_previous_high` 后 confirmed `2182`，锁仓后 `1.5R/24h` resolved
-`66.67%`，`2R/24h` resolved `65.52%`；保留
-`breakout_previous_high,reclaim_ema` 后 confirmed `2867`，锁仓后 `1.5R/24h`
-resolved `64.86%`，`2R/24h` resolved `61.11%`。当前生产 signal-only 默认已接入
-`breakout_previous_high,reclaim_ema` 作为信号降噪口径，继续保持 paper observation，
-不直接升自动执行。
+2026-06-20 本地 `quant_core` 对照结果：使用现有通用 backtest pipeline 的
+`symbol_isolated_100u` 口径复核后，上一轮 `delta_rank >= 20`、4h 均线距离至少
+`4%` 的高胜率组合只有 `16` 次 framework 开仓，未达到最低 `30` 次观察门槛。
+上一轮默认 `breakout_previous_high,reclaim_ema,pullback_hold_ema`、`2.4R` 的
+framework 胜率只有 `54.72%`，不满足 65% 胜率目标。当前生产默认改为不过拟合的
+`momentum_03sl_20r_v5`：`breakout_previous_high,reclaim_ema`、
+`delta_rank >= 15`、15m 均线距离最多 `4%`、止损 `3%`、目标 `2.0R`，
+不默认使用历史 symbol blocklist，且关闭 stop-reentry，避免当前样本里出现的二次止损放大亏损。2026-06-21 补齐
+`BICO-USDT-SWAP,RE-USDT-SWAP,RESOLV-USDT-SWAP,SAND-USDT-SWAP,O-USDT-SWAP`
+的 15m K 线后，该组合扫描约 `62514` 个原始候选事件、覆盖
+`55` 个 candle-pair symbols，技术入场通过 `2912` 个事件，entry trigger allowlist 后
+剩余 `2494` 个确认事件。framework 开仓 `41` 次、覆盖 `27` 个实际交易 symbols、胜率
+`65.85365853658537%`、`trade_sharpe=4.608339744751571`、`max_drawdown_pct=3.40882238`、
+`total_profit=122.47823444`；48h 事件级结果为 `trades=41`、`win=26`、`loss=11`、
+`timeout=1`、`incomplete=3`、`resolved_win_rate=70.27027027027027%`、
+`avg_r_complete=1.090933346468652`。
+
+2026-06-21 继续做通用不过拟合扫描：全排名 `price_change_pct` 过热 cap、放宽
+`max_new_rank`、加入 `reclaim_ma` 或 `pullback_hold_ema`、提高 target R、调整止损宽度、
+FVG 入场、放宽 15m 均线距离，都没有同时满足 framework 开仓不少于 `30`、胜率不少于
+`65%`、高 Sharpe、最大回撤不超过 `30%`、总盈利不低于 `150U`。不要为了达到
+150U 把历史 symbol blocklist 或单日/单币种过滤升为生产默认。
+
+本轮新增研究参数 `--max-delta-rank`，用于验证极端 `delta_rank` 是否更像追涨噪声。
+它默认关闭，不改变生产观察 preset。当前较稳结果是
+`--max-delta-rank 70 --target-rs 2.0`：framework 开仓 `31` 次、胜率
+`70.96774193548387%`、late split 胜率 `72.72727272727273%`、回撤
+`3.40882238%`，但总盈利只有 `102.83844164U`；`--max-delta-rank 79`
+总盈利也只有 `106.11559397U`。因此它只能作为降噪研究工具，不能替换当前默认。
+放宽 15m 均线距离到 `8%` 的最高利润组合可到约 `141.21U`，但 full 胜率
+`51.43%`、late 胜率 `50.0%`，明确拒绝。
+
+过拟合验证可以追加 `--equity-split-report`，它不会改变策略，只会把同一个
+`symbol_isolated_100u` framework replay 按入场时间切成 early/late 两段。2026-06-21
+当前默认 split：early `trades=14`、`win_rate=71.42857142857143%`、
+`total_profit=51.29822363`；late `trades=28`、`win_rate=64.28571428571429%`、
+`total_profit=76.63505327`。历史高收益 `stop_reentry_03sl_30r_v3` + symbol blocklist
+当前复跑 full `total_profit=169.73251503` 但 `win_rate=61.224489795918366%`，
+late split `win_rate=59.375%`，不能作为不过拟合默认。
+
+上一轮带历史 symbol blocklist 的 `stop_reentry_03sl_30r_v3` 可达到
+`total_profit=178.84826603`，但这是研究性高利润候选，不作为生产默认，避免把历史差币种过滤器过拟合到未来。继续保持 signal-only /
+paper observation，不直接升自动执行。
 
 需要把纸面结果写入 Web 观察表时，先确认 Web backend 已加载当前代码和
 `market_velocity_paper_outcomes` 迁移，再执行：
@@ -499,6 +562,7 @@ Web backend 侧应能看到：
 - `risk_control_close_candidate` 任务在 Web lease 能返回后，会从 pending_close/leased 变成 completed。
 - execution result 被写入。
 - dry-run order/trade 结果回写成功，order status 通常为 `dry_run`。有 `close_order` 的 `pending_close` 会按 close order 回写真实方向，例如 long position 平仓回写 `order_side=sell`；尚未补齐 `close_order` 的旧任务才会退回 `order_side=close`。
+- live `pending_close` 在真实 mutation 前会做 signed read-only 仓位对账；如果交易所账户没有匹配 `exchange + symbol + 持仓方向` 的非零仓位，会以 `pending_close_no_matching_position` 阻断，不会继续下平仓单。
 
 如果 handled 为 `0`，常见原因有两类：
 

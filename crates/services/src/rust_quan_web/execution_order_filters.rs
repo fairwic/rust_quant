@@ -333,6 +333,35 @@ pub(super) fn quantize_protective_stop_price(
     }
     Ok(normalized)
 }
+/// 按交易方向把开仓 limit 价格归一到交易所 tick，避免扩大用户给出的最差成交价。
+pub(super) fn quantize_limit_order_price(
+    raw: &str,
+    side: crypto_exc_all::OrderSide,
+    filters: &ExchangeOrderFilters,
+) -> Result<Decimal> {
+    let price = parse_positive_decimal(raw, "limit price")?;
+    let step = filters
+        .tick_size
+        .filter(|value| *value > Decimal::ZERO)
+        .or_else(|| {
+            filters
+                .price_precision
+                .map(|precision| Decimal::new(1, precision))
+        });
+    let Some(step) = step else {
+        return Ok(price);
+    };
+    let normalized = match side {
+        crypto_exc_all::OrderSide::Buy => floor_to_step(price, step),
+        crypto_exc_all::OrderSide::Sell => ceil_to_step(price, step),
+    };
+    if normalized <= Decimal::ZERO {
+        return Err(anyhow!(
+            "limit price is below exchange tick size after quantization"
+        ));
+    }
+    Ok(normalized)
+}
 /// 生成 Web 商业、会员和执行准备度 需要的派生数据，供后续执行、展示或审计使用。
 pub(super) fn format_protective_stop_price_decimal(
     price: Decimal,
@@ -347,4 +376,8 @@ pub(super) fn format_protective_stop_price_decimal(
     }
     .normalize();
     normalized.to_string()
+}
+/// 生成普通订单价格字符串，复用交易所价格精度和 tick 规则。
+pub(super) fn format_order_price_decimal(price: Decimal, filters: &ExchangeOrderFilters) -> String {
+    format_protective_stop_price_decimal(price, filters)
 }

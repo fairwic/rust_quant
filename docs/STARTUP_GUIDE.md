@@ -134,9 +134,20 @@ IS_RUN_REAL_STRATEGY=false \
 # 运行实盘策略
 IS_RUN_SYNC_DATA_JOB=false \
 IS_BACK_TEST=false \
+STRATEGY_SIGNAL_DISPATCH_MODE=web \
+RUST_QUAN_WEB_BASE_URL=http://127.0.0.1:8000 \
 IS_RUN_REAL_STRATEGY=true \
 ./target/release/rust-quant
 ```
+
+实盘策略默认必须使用 `STRATEGY_SIGNAL_DISPATCH_MODE=web`，把信号提交到
+`rust_quan_web` 生成 execution task，再由 execution worker 处理交易所 mutation。
+不要使用 `legacy` / `direct` / `local` 模式直连交易所；旧直连路径会被
+`LEGACY_DIRECT_LIVE_ORDER_CONFIRM=I_UNDERSTAND_LEGACY_DIRECT_LIVE_ORDERS`
+阻断，只有人工明确接受 legacy direct 风险时才允许继续。
+旧账户/订单 signed read-only 查询路径也会被
+`LEGACY_SIGNED_READ_ONLY_CONFIRM=I_UNDERSTAND_LEGACY_SIGNED_READ_ONLY_ACCOUNT_READS`
+阻断；生产只读对账应走 execution reconciliation exact credential 路径。
 
 ---
 
@@ -263,13 +274,17 @@ APP_ENV=prod
 IS_RUN_SYNC_DATA_JOB=false
 IS_BACK_TEST=false
 IS_OPEN_SOCKET=true
+STRATEGY_SIGNAL_DISPATCH_MODE=web
+RUST_QUAN_WEB_BASE_URL=http://127.0.0.1:8000
 IS_RUN_REAL_STRATEGY=true
 ```
 
 **特点**:
-- ⚠️ 需要 OKX API (交易权限)
-- ⚠️ 会执行真实交易
-- ⚠️ 需要充足的风险控制
+- ⚠️ 需要已验证 API Key、精确 credential id、风控快照和保护单计划
+- ✅ 策略信号先进入 `rust_quan_web` execution task，不走 Core legacy direct 下单
+- ⚠️ execution worker 只有在 `EXECUTION_WORKER_DRY_RUN=false` 且确认 token 有效时才会执行真实交易
+- ⚠️ legacy direct 路径需要额外 `LEGACY_DIRECT_LIVE_ORDER_CONFIRM=I_UNDERSTAND_LEGACY_DIRECT_LIVE_ORDERS`，默认不作为生产路径使用
+- ⚠️ legacy signed read-only 路径需要额外 `LEGACY_SIGNED_READ_ONLY_CONFIRM=I_UNDERSTAND_LEGACY_SIGNED_READ_ONLY_ACCOUNT_READS`，默认不作为生产对账路径使用
 
 **使用场景**:
 - 实盘交易

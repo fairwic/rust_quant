@@ -1,0 +1,10 @@
+**/.git
+**/target
+**/.env
+**/.DS_Store
+**/node_modules
+**/output
+**/log_files
+**/__pycache__
+**/*.bak
+**/*.backup

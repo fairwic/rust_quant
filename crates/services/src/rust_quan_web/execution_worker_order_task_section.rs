@@ -415,6 +415,14 @@ impl ExecutionOrderTask {
                 self.task_id
             ));
         }
+        let reservation_exchange = parse_exchange(&reservation.exchange)?;
+        if reservation_exchange != self.exchange {
+            return Err(anyhow!(
+                "risk reservation exchange mismatch: reservation={} order_task={}",
+                reservation.exchange,
+                self.exchange.as_str()
+            ));
+        }
         if !reservation.allowed_notional_usdt.is_finite()
             || reservation.allowed_notional_usdt <= 0.0
         {
@@ -422,6 +430,13 @@ impl ExecutionOrderTask {
         }
         if !reservation.leverage.is_finite() || reservation.leverage <= 0.0 {
             return Err(anyhow!("risk reservation leverage is invalid"));
+        }
+        if !reservation
+            .margin_mode
+            .trim()
+            .eq_ignore_ascii_case("isolated")
+        {
+            return Err(anyhow!("risk reservation margin_mode must be isolated"));
         }
         self.size_usdt = Some(reservation.allowed_notional_usdt);
         self.size = "0".to_string();
@@ -526,6 +541,16 @@ impl ExecutionOrderTask {
             filters,
         )?;
         request.size = format_order_size_decimal(normalized_size, filters);
+        if enforce_min_notional && request.order_type == OrderType::Limit {
+            let limit_price = request
+                .price
+                .as_deref()
+                .ok_or_else(|| anyhow!("live_limit_price_required"))?;
+            let normalized_limit_price =
+                quantize_limit_order_price(limit_price, self.side, filters)?;
+            validate_live_limit_order_price(normalized_limit_price, reference_price)?;
+            request.price = Some(format_order_price_decimal(normalized_limit_price, filters));
+        }
         if let Some(stop_loss_price) = request.attached_stop_loss_price.as_deref() {
             let stop_loss_price = stop_loss_price
                 .trim()
@@ -770,6 +795,24 @@ fn validate_live_stop_loss_price(
             distance_ratio,
             LIVE_STOP_LOSS_MIN_DISTANCE_RATIO,
             LIVE_STOP_LOSS_MAX_DISTANCE_RATIO
+        ));
+    }
+    Ok(())
+}
+fn validate_live_limit_order_price(
+    limit_price: rust_decimal::Decimal,
+    reference_price: rust_decimal::Decimal,
+) -> Result<()> {
+    let limit_price = decimal_to_f64(limit_price, "limit_price")?;
+    let reference_price = decimal_to_f64(reference_price, "reference_price")?;
+    let distance_ratio = ((limit_price - reference_price) / reference_price).abs();
+    if !distance_ratio.is_finite() || distance_ratio > LIVE_ORDERBOOK_MAX_SPREAD_RATIO {
+        return Err(anyhow!(
+            "live_limit_price_out_of_range: distance_ratio={} max={} reference_price={} limit_price={}",
+            distance_ratio,
+            LIVE_ORDERBOOK_MAX_SPREAD_RATIO,
+            reference_price,
+            limit_price
         ));
     }
     Ok(())

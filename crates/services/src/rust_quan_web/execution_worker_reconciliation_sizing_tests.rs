@@ -144,6 +144,74 @@ fn risk_reservation_overrides_payload_derived_live_order_size() {
     assert_eq!(order.size, "2.5");
 }
 #[test]
+fn risk_reservation_exchange_mismatch_fails_closed() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "order_type": "market",
+        "size_usdt": 500.0,
+        "risk_plan": {
+            "entry_price": 100.0,
+            "selected_stop_loss_price": 90.0,
+            "direction": "long"
+        }
+    }));
+    let mut request = ExecutionOrderTask::from_task(&task).unwrap();
+    let error = request
+        .apply_risk_reservation(&ExecutionRiskReservationResponse {
+            task_id: task.id,
+            buyer_email: task.buyer_email.clone(),
+            exchange: "okx".to_string(),
+            api_credential_id: Some(8801),
+            risk_budget_batch_id: Some("batch-1".to_string()),
+            allocation_mode: "equal_batch_split".to_string(),
+            allowed_notional_usdt: 250.0,
+            required_margin_usdt: 50.0,
+            stop_risk_usdt: 25.0,
+            leverage: 5.0,
+            margin_mode: "isolated".to_string(),
+            position_mode: "one_way".to_string(),
+        })
+        .expect_err("risk reservation exchange must match the live order task");
+    assert!(error.to_string().contains("risk reservation exchange mismatch"));
+}
+#[test]
+fn risk_reservation_requires_isolated_margin_mode() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "order_type": "market",
+        "size_usdt": 500.0,
+        "risk_plan": {
+            "entry_price": 100.0,
+            "selected_stop_loss_price": 90.0,
+            "direction": "long"
+        }
+    }));
+    let mut request = ExecutionOrderTask::from_task(&task).unwrap();
+    let error = request
+        .apply_risk_reservation(&ExecutionRiskReservationResponse {
+            task_id: task.id,
+            buyer_email: task.buyer_email.clone(),
+            exchange: "binance".to_string(),
+            api_credential_id: Some(8801),
+            risk_budget_batch_id: Some("batch-1".to_string()),
+            allocation_mode: "equal_batch_split".to_string(),
+            allowed_notional_usdt: 250.0,
+            required_margin_usdt: 50.0,
+            stop_risk_usdt: 25.0,
+            leverage: 5.0,
+            margin_mode: "cross".to_string(),
+            position_mode: "one_way".to_string(),
+        })
+        .expect_err("v1 live execution only supports isolated margin reservation");
+    assert!(error
+        .to_string()
+        .contains("risk reservation margin_mode must be isolated"));
+}
+#[test]
 fn risk_reserved_live_order_below_exchange_minimum_fails_closed_even_with_local_min_size() {
     let task = task(json!({
         "source": "rust_quan_web",
@@ -328,6 +396,50 @@ fn live_order_rejects_stop_loss_distance_that_is_too_small() {
         .to_live_order_request(Some(100.0), Some(&binance_eth_filters()))
         .expect_err("stop-loss too close to current reference price must fail closed");
     assert!(error.to_string().contains("live_stop_loss_distance_out_of_range"));
+}
+#[test]
+fn live_entry_limit_price_too_far_from_current_quote_fails_closed() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "order_type": "limit",
+        "price": "110",
+        "size_usdt": 100.0,
+        "client_order_id": "rqtest-stale-limit",
+        "risk_plan": {
+            "entry_price": 100.0,
+            "selected_stop_loss_price": 95.0,
+            "direction": "long"
+        }
+    }));
+    let request = ExecutionOrderTask::from_task(&task).unwrap();
+    let error = request
+        .to_live_order_request(Some(100.0), Some(&binance_eth_filters()))
+        .expect_err("entry limit price must be bounded against the current quote");
+    assert!(error.to_string().contains("live_limit_price_out_of_range"));
+}
+#[test]
+fn live_entry_limit_price_is_quantized_to_exchange_tick() {
+    let task = task(json!({
+        "exchange": "binance",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "order_type": "limit",
+        "price": "100.129",
+        "size_usdt": 100.0,
+        "client_order_id": "rqtest-limit-tick",
+        "risk_plan": {
+            "entry_price": 100.0,
+            "selected_stop_loss_price": 95.0,
+            "direction": "long"
+        }
+    }));
+    let request = ExecutionOrderTask::from_task(&task).unwrap();
+    let order = request
+        .to_live_order_request(Some(100.0), Some(&binance_eth_filters()))
+        .unwrap();
+    assert_eq!(order.price.as_deref(), Some("100.12"));
 }
 #[test]
 fn risk_reserved_live_order_rejects_notional_above_reserved_budget() {

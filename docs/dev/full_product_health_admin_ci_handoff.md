@@ -40,7 +40,7 @@ not shell out from a request handler and should not parse free-form log text.
 | News section sampling | no | yes | no | `FULL_PRODUCT_HEALTH_NEWS_DATABASE_URL=postgres://readonly@host/quant_news ./scripts/dev/build_full_product_health_news_input.sh` |
 | Admin section sampling | no | yes | no | `FULL_PRODUCT_HEALTH_ADMIN_DATABASE_URL=postgres://readonly@host/quant_admin ./scripts/dev/build_full_product_health_admin_input.sh` |
 | Local worker health child process | no | local explicit opt-in only | no | `FULL_PRODUCT_HEALTH_CI_RUN_LOCAL_HEALTH=true ./scripts/dev/run_full_product_health_ci.sh` |
-| Binance live ETH micro smoke | no | no | yes | `./scripts/dev/run_binance_live_eth_micro_order_smoke.sh` |
+| Binance Rust-native ETH micro live validation | no | no | yes | `cargo run -q -p rust-quant-cli --bin binance_eth_micro_live_validation` |
 | Binance legacy live order smoke | no | no | yes | `./scripts/dev/run_binance_live_order_smoke.sh` |
 
 ## Default CI Safe
@@ -227,7 +227,8 @@ can be used as a non-blocking report.
 
 The following commands are explicitly outside the default Admin/CI handoff lane:
 
-- `./scripts/dev/run_binance_live_eth_micro_order_smoke.sh`
+- `cargo run -q -p rust-quant-cli --bin binance_eth_micro_live_validation`
+- `./scripts/dev/run_binance_live_eth_micro_order_smoke.sh` (deprecated fail-fast guard)
 - `./scripts/dev/run_binance_live_order_smoke.sh`
 - `HEALTH_CHECK_BINANCE=true ./scripts/dev/check_local_service_health.sh`
 - Any command that reads `.env`.
