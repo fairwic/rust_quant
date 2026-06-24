@@ -348,6 +348,16 @@ pub enum MarketVelocityStrategySignalDecision {
     Submit(StrategySignalSubmitRequest),
     Blocked(MarketVelocityStrategySignalBlocker),
 }
+#[derive(Clone, Debug, PartialEq)]
+struct MarketVelocityStrategySignalLogContext {
+    external_id: String,
+    source_signal_type: String,
+    rank_event_id: Option<i64>,
+    exchange: String,
+    symbol: String,
+    entry_rule_version: Option<String>,
+    production_stage: Option<String>,
+}
 pub async fn dispatch_market_velocity_strategy_signal_if_enabled(
     event: &MarketRankEvent,
 ) -> Result<Option<StrategySignalDispatchResponse>> {
@@ -393,7 +403,17 @@ pub async fn dispatch_market_velocity_strategy_signal_with_config_and_entry_conf
             return Ok(None);
         }
     };
-    let external_id = request.external_id.clone();
+    let log_context = market_velocity_strategy_signal_log_context(&request);
+    info!(
+        external_id = %log_context.external_id,
+        source_signal_type = %log_context.source_signal_type,
+        rank_event_id = ?log_context.rank_event_id,
+        exchange = %log_context.exchange,
+        symbol = %log_context.symbol,
+        entry_rule_version = ?log_context.entry_rule_version,
+        production_stage = ?log_context.production_stage,
+        "Market Velocity strategy signal promoted to quant_web"
+    );
     let client = ExecutionTaskClient::new(market_velocity_execution_task_config_from_env()?)?;
     let timeout_secs = parse_env_u64("MARKET_VELOCITY_SIGNAL_DISPATCH_TIMEOUT_SECS", 5)?;
     let response = tokio::time::timeout(
@@ -402,12 +422,69 @@ pub async fn dispatch_market_velocity_strategy_signal_with_config_and_entry_conf
     )
     .await
     .map_err(|_| anyhow!("submit market velocity strategy signal timeout"))??;
+    let generated_task_ids: Vec<i64> = response
+        .generated_tasks
+        .iter()
+        .map(|task| task.id)
+        .collect();
     info!(
-        "Submitted Market Velocity strategy signal to rust_quan_web: external_id={}, generated_tasks={}",
-        external_id,
-        response.generated_tasks.len()
+        external_id = %log_context.external_id,
+        source_signal_type = %log_context.source_signal_type,
+        rank_event_id = ?log_context.rank_event_id,
+        exchange = %log_context.exchange,
+        symbol = %log_context.symbol,
+        strategy_signal_id = response.inbox.id,
+        generated_task_count = response.generated_tasks.len(),
+        generated_task_ids = ?generated_task_ids,
+        "Submitted Market Velocity strategy signal to rust_quan_web"
     );
     Ok(Some(response))
+}
+fn market_velocity_strategy_signal_log_context(
+    request: &StrategySignalSubmitRequest,
+) -> MarketVelocityStrategySignalLogContext {
+    let payload = serde_json::from_str::<Value>(&request.payload_json).unwrap_or(Value::Null);
+    let source_signal_type = payload
+        .get("source_signal_type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let exchange = payload
+        .get("exchange")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| request.strategy_key.split(':').nth(1).unwrap_or(""))
+        .to_ascii_lowercase();
+    let symbol = payload
+        .get("symbol")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&request.symbol)
+        .to_ascii_uppercase();
+    let entry_rule_version = payload
+        .get("entry_rule_version")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let production_stage = payload
+        .get("execution_policy")
+        .and_then(|value| value.get("production_stage"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    MarketVelocityStrategySignalLogContext {
+        external_id: request.external_id.clone(),
+        source_signal_type,
+        rank_event_id: payload.get("rank_event_id").and_then(Value::as_i64),
+        exchange,
+        symbol,
+        entry_rule_version,
+        production_stage,
+    }
 }
 /// 提供市场动量信号dispatchisenabled的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn market_velocity_signal_dispatch_is_enabled() -> bool {

@@ -2,6 +2,7 @@ use super::{
     build_market_velocity_strategy_signal_request,
     build_market_velocity_strategy_signal_request_with_entry_confirmation,
     dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
+    market_velocity_strategy_signal_log_context,
     should_dispatch_market_velocity_signal_to_quant_web_from_env, MarketVelocityEntryConfirmation,
     MarketVelocityStrategySignalBlocker, MarketVelocityStrategySignalConfig,
     MarketVelocityStrategySignalDecision,
@@ -603,6 +604,44 @@ fn live_execution_authorized_mode_marks_payload_as_live_allowed() {
     assert_eq!(
         payload["entry_confirmation"]["trigger"],
         "breakout_previous_high"
+    );
+}
+#[test]
+fn market_velocity_strategy_signal_log_context_carries_chain_identifiers() {
+    let config = MarketVelocityStrategySignalConfig {
+        automation_mode: "live_execution_authorized".to_string(),
+        live_order_allowed: true,
+        paper_trade_required: false,
+        ..MarketVelocityStrategySignalConfig::default()
+    };
+    let event = rank_event(
+        MarketRankEventType::RankVelocity,
+        "up",
+        Some(Decimal::new(3400, 0)),
+    );
+    let decision = build_market_velocity_strategy_signal_request_with_entry_confirmation(
+        &event,
+        &config,
+        Some(&entry_confirmation()),
+    )
+    .expect("valid market velocity event should be evaluated");
+    let MarketVelocityStrategySignalDecision::Submit(request) = decision else {
+        panic!("live execution authorized mode should submit a strategy signal");
+    };
+    let context = market_velocity_strategy_signal_log_context(&request);
+
+    assert_eq!(context.source_signal_type, "market_velocity");
+    assert_eq!(context.rank_event_id, event.id);
+    assert_eq!(context.external_id, request.external_id);
+    assert_eq!(context.exchange, "okx");
+    assert_eq!(context.symbol, event.symbol);
+    assert_eq!(
+        context.entry_rule_version.as_deref(),
+        Some("rank_radar_4h_trend_15m_momentum_03sl_20r_v5")
+    );
+    assert_eq!(
+        context.production_stage.as_deref(),
+        Some("live_execution_allowed")
     );
 }
 #[test]

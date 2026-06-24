@@ -60,7 +60,7 @@ use crypto_exc_all::{
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Instant};
 use tokio::time::{sleep, Duration};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 const LIVE_TICKER_MAX_AGE_MS: u64 = 30_000;
 const LIVE_LAST_PRICE_FALLBACK_BUFFER_RATIO: f64 = 0.001;
 const LIVE_STOP_LOSS_MIN_DISTANCE_RATIO: f64 = 0.0005;

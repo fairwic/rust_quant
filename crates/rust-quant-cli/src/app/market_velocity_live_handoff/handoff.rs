@@ -4,7 +4,7 @@ use super::{
 use anyhow::{anyhow, bail, Result};
 use rust_quant_services::rust_quan_web::{
     build_market_velocity_scoped_execution_worker_env,
-    market_velocity_existing_execution_worker_path, ExecutionWorker,
+    market_velocity_existing_execution_worker_path, ExecutionTask, ExecutionWorker,
     MarketVelocityExecutionTaskCreationPreviewRequest,
     MarketVelocityExecutionTaskLiveReadinessResponse, MarketVelocityWorkerHandoffReadiness,
     StrategySignalSubmitRequest,
@@ -63,6 +63,57 @@ pub fn build_market_velocity_live_worker_manifest(task_id: i64) -> Value {
         "execution_path": market_velocity_existing_execution_worker_path(),
         "next_worker_env": build_market_velocity_scoped_execution_worker_env(task_id)
     })
+}
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct MarketVelocityHandoffLogContext {
+    pub(super) external_id: String,
+    pub(super) source_signal_type: String,
+    pub(super) rank_event_id: Option<i64>,
+    pub(super) strategy_signal_id: Option<i64>,
+    pub(super) execution_task_id: Option<i64>,
+    pub(super) combo_id: Option<i64>,
+    pub(super) buyer_email: Option<String>,
+    pub(super) exchange: String,
+    pub(super) symbol: String,
+}
+pub(super) fn market_velocity_handoff_log_context(
+    signal: &StrategySignalSubmitRequest,
+    task: Option<&ExecutionTask>,
+) -> MarketVelocityHandoffLogContext {
+    let payload = serde_json::from_str::<Value>(&signal.payload_json).unwrap_or(Value::Null);
+    let task_payload = task.map(|task| &task.request_payload_json);
+    let source_signal_type = payload_string(&payload, "source_signal_type")
+        .or_else(|| task_payload.and_then(|payload| payload_string(payload, "source_signal_type")))
+        .unwrap_or_else(|| "unknown".to_string());
+    let exchange = payload_string(&payload, "exchange")
+        .or_else(|| task_payload.and_then(|payload| payload_string(payload, "exchange")))
+        .unwrap_or_else(|| {
+            signal
+                .strategy_key
+                .split(':')
+                .nth(1)
+                .unwrap_or("")
+                .to_string()
+        })
+        .trim()
+        .to_ascii_lowercase();
+    let symbol = payload_string(&payload, "symbol")
+        .or_else(|| task_payload.and_then(|payload| payload_string(payload, "symbol")))
+        .unwrap_or_else(|| signal.symbol.clone())
+        .trim()
+        .to_ascii_uppercase();
+    MarketVelocityHandoffLogContext {
+        external_id: signal.external_id.clone(),
+        source_signal_type,
+        rank_event_id: payload_i64(&payload, "rank_event_id")
+            .or_else(|| task_payload.and_then(|payload| payload_i64(payload, "rank_event_id"))),
+        strategy_signal_id: task.and_then(|task| task.strategy_signal_id),
+        execution_task_id: task.map(|task| task.id),
+        combo_id: task.map(|task| task.combo_id),
+        buyer_email: task.map(|task| task.buyer_email.clone()),
+        exchange,
+        symbol,
+    }
 }
 /// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_market_velocity_live_worker_handoff(
@@ -513,6 +564,22 @@ mod tests {
             payload["target_scope_source"],
             "market_velocity_live_handoff"
         );
+    }
+    #[test]
+    fn market_velocity_handoff_log_context_carries_task_chain_identifiers() {
+        let signal = sample_signal_request();
+        let task = sample_execution_task(228);
+        let context = market_velocity_handoff_log_context(&signal, Some(&task));
+
+        assert_eq!(context.external_id, "rust_quant:market_velocity:2042663");
+        assert_eq!(context.rank_event_id, Some(2042663));
+        assert_eq!(context.strategy_signal_id, Some(991));
+        assert_eq!(context.execution_task_id, Some(228));
+        assert_eq!(context.combo_id, Some(85));
+        assert_eq!(context.buyer_email.as_deref(), Some("buyer@example.com"));
+        assert_eq!(context.exchange, "okx");
+        assert_eq!(context.symbol, "ASTER-USDT-SWAP");
+        assert_eq!(context.source_signal_type, "market_velocity");
     }
     #[test]
     fn task_creation_apply_requires_explicit_confirmation() {

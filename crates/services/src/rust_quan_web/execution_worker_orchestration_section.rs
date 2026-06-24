@@ -64,6 +64,21 @@ impl ExecutionWorker {
             }),
         )
         .await;
+        if !leased.tasks.is_empty() {
+            let leased_task_ids: Vec<i64> = leased.tasks.iter().map(|task| task.id).collect();
+            let strategy_signal_ids: Vec<Option<i64>> =
+                leased.tasks.iter().map(|task| task.strategy_signal_id).collect();
+            info!(
+                worker_id = %self.config.worker_id,
+                dry_run = self.config.dry_run,
+                leased_task_count = leased.tasks.len(),
+                leased_task_ids = ?leased_task_ids,
+                strategy_signal_ids = ?strategy_signal_ids,
+                task_types = ?self.config.task_types,
+                task_statuses = ?self.config.task_statuses,
+                "execution worker leased tasks from quant_web"
+            );
+        }
         let mut handled = 0;
         let mut last_task_id = None;
         for task in leased.tasks {
@@ -87,6 +102,20 @@ impl ExecutionWorker {
                 .await;
                 continue;
             }
+            info!(
+                worker_id = %self.config.worker_id,
+                execution_task_id = task.id,
+                strategy_signal_id = ?task.strategy_signal_id,
+                news_signal_id = ?task.news_signal_id,
+                combo_id = task.combo_id,
+                buyer_email = %task.buyer_email,
+                strategy_slug = %task.strategy_slug,
+                symbol = %task.symbol,
+                task_type = %task.task_type,
+                task_status = %task.task_status,
+                dry_run = self.config.dry_run,
+                "execution worker starts leased task"
+            );
             if let Err(error) = self
                 .client
                 .extend_task_lease(
@@ -170,6 +199,14 @@ impl ExecutionWorker {
                     }),
                 )
                 .await;
+                info!(
+                    worker_id = %self.config.worker_id,
+                    execution_task_id = task.id,
+                    strategy_signal_id = ?task.strategy_signal_id,
+                    combo_id = task.combo_id,
+                    report_status = %report_status,
+                    "execution worker reported task result to quant_web"
+                );
             }
             last_task_id = Some(task.id);
             handled += 1;

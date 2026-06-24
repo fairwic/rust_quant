@@ -19,6 +19,18 @@ impl ExecutionWorker {
                     );
                 }
             };
+        info!(
+            worker_id = %self.config.worker_id,
+            execution_task_id = task.id,
+            strategy_signal_id = ?task.strategy_signal_id,
+            combo_id = task.combo_id,
+            exchange = %order_task.exchange.as_str(),
+            symbol = %order_task.symbol.as_str(),
+            order_side = %order_side_lower(order_task.side),
+            trade_side = ?order_task.trade_side.as_deref(),
+            dry_run = self.config.dry_run,
+            "execution worker parsed execution task payload"
+        );
         // 风险合同校验在任何交易所调用之前执行；缺 stop-loss、方向、入场价等关键字段时直接阻断。
         if let Err(mut violation) =
             validate_execute_signal_risk_contract(task, &order_task, !self.config.dry_run)
@@ -113,6 +125,16 @@ impl ExecutionWorker {
                 ),
             };
         }
+        info!(
+            worker_id = %self.config.worker_id,
+            execution_task_id = task.id,
+            strategy_signal_id = ?task.strategy_signal_id,
+            combo_id = task.combo_id,
+            exchange = %order_task.exchange.as_str(),
+            symbol = %order_task.symbol.as_str(),
+            order_side = %order_side_lower(order_task.side),
+            "execution worker enters live execution gates"
+        );
         // 交易所能力、用户凭证和 gateway 解析都在真实下单前完成，任何一步失败都必须返回阻断原因。
         if let Some(report) = self.live_exchange_capability_report(task, &order_task) {
             return report;
@@ -201,6 +223,21 @@ impl ExecutionWorker {
                 );
             }
         };
+        info!(
+            worker_id = %self.config.worker_id,
+            execution_task_id = task.id,
+            strategy_signal_id = ?task.strategy_signal_id,
+            combo_id = task.combo_id,
+            exchange = %order_task.exchange.as_str(),
+            symbol = %order_task.symbol.as_str(),
+            allowed_notional_usdt = reservation.allowed_notional_usdt,
+            required_margin_usdt = reservation.required_margin_usdt,
+            stop_risk_usdt = reservation.stop_risk_usdt,
+            leverage = reservation.leverage,
+            margin_mode = %reservation.margin_mode,
+            position_mode = %reservation.position_mode,
+            "execution worker reserved live risk budget"
+        );
         if let Err(error) = order_task.apply_risk_reservation(&reservation) {
             return ExecutionTaskReportRequest::failed(
                 task.id,
@@ -235,6 +272,19 @@ impl ExecutionWorker {
                 );
             }
         };
+        info!(
+            worker_id = %self.config.worker_id,
+            execution_task_id = task.id,
+            strategy_signal_id = ?task.strategy_signal_id,
+            combo_id = task.combo_id,
+            exchange = %order_task.exchange.as_str(),
+            symbol = %order_task.symbol.as_str(),
+            client_order_id = ?request.client_order_id.as_deref(),
+            order_size = %request.size.as_str(),
+            order_type = ?&request.order_type,
+            attached_stop_loss_price = ?request.attached_stop_loss_price.as_deref(),
+            "execution worker built live order request"
+        );
         let protection = ProtectionSyncContract::from_task(task, order_side_lower(order_task.side));
         // 下单前查询同 client_order_id 的订单，用交易所事实处理“上一轮已下单但回写失败”的幂等场景。
         match self
@@ -339,6 +389,17 @@ impl ExecutionWorker {
             return report;
         }
         // 主订单是整条链路唯一的开仓 mutation 点；失败时只做预挂保护单清理，不重新提交主订单。
+        info!(
+            worker_id = %self.config.worker_id,
+            execution_task_id = task.id,
+            strategy_signal_id = ?task.strategy_signal_id,
+            combo_id = task.combo_id,
+            exchange = %order_task.exchange.as_str(),
+            symbol = %order_task.symbol.as_str(),
+            client_order_id = ?request.client_order_id.as_deref(),
+            prearmed_protective_order = prearmed_protection.is_some(),
+            "execution worker submitting live main order"
+        );
         match self
             .place_order_with_audit(task, &gateway, request.clone())
             .await

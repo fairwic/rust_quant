@@ -22,13 +22,13 @@ mod entry_candles;
 mod handoff;
 use candidates::{load_market_velocity_live_candidate_events, normalize_candidate_limit};
 use entry_candles::{load_market_velocity_live_entry_candles, MarketVelocityEntryCandleLoadStatus};
-use handoff::run_market_velocity_scoped_worker_once;
 pub use handoff::{
     build_market_velocity_live_preview_request, build_market_velocity_live_worker_handoff,
     build_market_velocity_live_worker_manifest, build_market_velocity_scoped_worker_env_overrides,
     market_velocity_required_live_owner_scope, market_velocity_scope_signal_to_live_owner,
     market_velocity_scoped_worker_apply_authorized, market_velocity_task_creation_apply_authorized,
 };
+use handoff::{market_velocity_handoff_log_context, run_market_velocity_scoped_worker_once};
 pub const MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN: &str =
     "I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK";
 pub const MARKET_VELOCITY_REFRESH_READINESS_CONFIRM_TOKEN: &str =
@@ -256,6 +256,13 @@ pub async fn run_market_velocity_live_handoff(
         &signal_config,
     )
     .await?;
+    tracing::info!(
+        candidate_count = candidate_events.len(),
+        explicit_event_id = ?config.event_id,
+        lookback_hours = config.lookback_hours,
+        candidate_limit = config.candidate_limit,
+        "Market Velocity live handoff candidate scan completed"
+    );
     if candidate_events.is_empty() {
         return Ok(build_market_velocity_no_live_candidate_response(
             &config,
@@ -374,6 +381,17 @@ pub async fn run_market_velocity_live_handoff(
             "refresh_readiness": refresh_readiness,
         }));
     };
+    let log_context = market_velocity_handoff_log_context(&signal, None);
+    tracing::info!(
+        external_id = %log_context.external_id,
+        source_signal_type = %log_context.source_signal_type,
+        rank_event_id = ?log_context.rank_event_id,
+        exchange = %log_context.exchange,
+        symbol = %log_context.symbol,
+        skipped_candidate_count = skipped_candidates.len(),
+        entry_trigger = %entry_confirmation.trigger,
+        "Market Velocity live handoff selected signal candidate"
+    );
     let preview_request = build_market_velocity_live_preview_request(
         &signal,
         config.buyer_email.as_deref(),
@@ -382,6 +400,18 @@ pub async fn run_market_velocity_live_handoff(
     let preview = client
         .preview_market_velocity_execution_task_creation(preview_request)
         .await?;
+    tracing::info!(
+        external_id = %log_context.external_id,
+        source_signal_type = %log_context.source_signal_type,
+        rank_event_id = ?log_context.rank_event_id,
+        exchange = %log_context.exchange,
+        symbol = %log_context.symbol,
+        preview_status = %preview.status,
+        would_create_execution_task = preview.would_create_execution_task,
+        generated_execution_task_count = preview.generated_execution_task_count,
+        blocker_codes = ?preview.blocker_codes,
+        "Market Velocity live handoff owner preview completed"
+    );
     let skipped_summary = summarize_skipped_candidates(&skipped_candidates);
     let mut response = json!({
         "status": if preview.blocker_codes.is_empty() { "ready_for_task_creation" } else { "blocked" },
@@ -431,7 +461,29 @@ pub async fn run_market_velocity_live_handoff(
     }
     let signal =
         market_velocity_scope_signal_to_live_owner(signal, target_buyer_email, target_combo_id)?;
+    let dispatch_log_signal = signal.clone();
     let dispatch = client.submit_strategy_signal(signal).await?;
+    let generated_task_ids: Vec<i64> = dispatch
+        .generated_tasks
+        .iter()
+        .map(|task| task.id)
+        .collect();
+    let task_log_context =
+        market_velocity_handoff_log_context(&dispatch_log_signal, dispatch.generated_tasks.first());
+    tracing::info!(
+        external_id = %task_log_context.external_id,
+        source_signal_type = %task_log_context.source_signal_type,
+        rank_event_id = ?task_log_context.rank_event_id,
+        strategy_signal_id = dispatch.inbox.id,
+        first_execution_task_id = ?task_log_context.execution_task_id,
+        combo_id = ?task_log_context.combo_id,
+        buyer_email = ?task_log_context.buyer_email,
+        exchange = %task_log_context.exchange,
+        symbol = %task_log_context.symbol,
+        generated_task_count = dispatch.generated_tasks.len(),
+        generated_task_ids = ?generated_task_ids,
+        "Market Velocity live handoff created Web execution task"
+    );
     let next_worker = match dispatch.generated_tasks.first() {
         Some(task) => {
             let web_readiness = client.market_velocity_live_task_readiness(task.id).await?;
@@ -473,6 +525,11 @@ pub async fn run_market_velocity_live_handoff(
                 .unwrap_or(MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN),
         )
         .await?;
+        tracing::info!(
+            execution_task_id = task.id,
+            handled,
+            "Market Velocity scoped execution worker run completed"
+        );
         json!({
             "apply": true,
             "status": "scoped_worker_ran_once",
