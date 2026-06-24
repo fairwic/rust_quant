@@ -10,6 +10,20 @@ use super::{
 };
 use chrono::{TimeZone, Utc};
 use serde_json::json;
+
+#[test]
+fn strategy_catalog_exposes_market_velocity_as_standard_core_strategy() {
+    let items = super::standard_strategy_catalog_items();
+    let market_velocity = items
+        .iter()
+        .find(|item| item.strategy_key == "market_velocity")
+        .expect("market_velocity strategy catalog item");
+
+    assert_eq!(market_velocity.product_slug, "market-velocity-radar");
+    assert_eq!(market_velocity.display_name, "市场动能雷达");
+    assert!(market_velocity.supported_symbols.contains(&"ALL"));
+    assert!(market_velocity.timeframes.contains(&"15m"));
+}
 fn rank_event_row(
     id: i64,
     symbol: &str,

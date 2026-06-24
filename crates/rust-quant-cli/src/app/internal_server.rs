@@ -18,6 +18,7 @@ mod backtest_logs;
 mod http;
 mod json_helpers;
 mod market_rank_technical_context;
+mod strategy_catalog;
 mod strategy_configs;
 use crate::app::exchange_symbol_sync::{
     run_exchange_symbol_sync_from_env, ExchangeSymbolSyncRequest,
@@ -39,6 +40,7 @@ use rust_quant_orchestration::infra::strategy_config::BackTestConfig;
 use rust_quant_orchestration::workflow::backtest_runner;
 use rust_quant_services::market::{should_use_quant_core_candle_source, CandleService};
 use rust_quant_services::rust_quan_web::{run_account_snapshot_sync, AccountSnapshotSyncConfig};
+pub use strategy_catalog::standard_strategy_catalog_items;
 pub use strategy_configs::{
     strategy_config_list_query_from_path, strategy_config_upsert_request_from_body,
     StrategyConfigListQuery, StrategyConfigUpsertRequest,
@@ -716,6 +718,12 @@ pub async fn handle_strategy_config_upsert_body(body: &[u8]) -> InternalHttpJson
     }
 }
 /// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
+pub async fn handle_strategy_catalog_path() -> InternalHttpJsonResponse {
+    let items = standard_strategy_catalog_items();
+    let total = items.len();
+    json_response(200, json!({ "items": items, "total": total }))
+}
+/// 执行 量化核心 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn handle_latest_backtest_path(path: &str) -> InternalHttpJsonResponse {
     let query = match latest_backtest_query_from_path(path) {
         Ok(query) => query,
@@ -1083,6 +1091,7 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
         ("GET", "/api/internal/strategy-configs") => {
             handle_strategy_config_list_path(&request.path).await
         }
+        ("GET", "/api/internal/strategy-catalog") => handle_strategy_catalog_path().await,
         ("POST", "/api/internal/strategy-configs") => {
             handle_strategy_config_upsert_body(&request.body).await
         }
