@@ -166,6 +166,12 @@ impl CryptoExcAllGateway {
                 }),
                 ..SdkConfig::default()
             },
+            ExchangeId::Hyperliquid => {
+                return Err(Error::Unsupported {
+                    exchange,
+                    capability: "single-exchange runtime credentials",
+                });
+            }
         };
         Ok(Self::from_sdk(CryptoSdk::from_config(config)?))
     }
@@ -726,5 +732,25 @@ mod tests {
             Some(value) => std::env::set_var("BINANCE_PROXY_URL", value),
             None => std::env::remove_var("BINANCE_PROXY_URL"),
         }
+    }
+    #[test]
+    fn single_exchange_hyperliquid_runtime_config_is_explicitly_unsupported() {
+        let result = CryptoExcAllGateway::from_single_exchange_credentials(
+            ExchangeId::Hyperliquid,
+            "user-address",
+            "unused-secret",
+            Option::<String>::None,
+            false,
+        );
+        let Err(error) = result else {
+            panic!("Hyperliquid live trade gateway should stay unsupported");
+        };
+        assert!(matches!(
+            error,
+            Error::Unsupported {
+                exchange: ExchangeId::Hyperliquid,
+                capability: "single-exchange runtime credentials",
+            }
+        ));
     }
 }

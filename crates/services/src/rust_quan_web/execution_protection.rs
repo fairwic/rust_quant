@@ -166,7 +166,9 @@ pub(super) fn attached_stop_loss_order_ack_outcome(
                 ),
             ))
         }
-        ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => None,
+        ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate | ExchangeId::Hyperliquid => {
+            None
+        }
     }
 }
 /// 提供attached止损亏损evidencepresent的集中实现，避免Web 商业链路调用方重复处理相同细节。
@@ -210,7 +212,10 @@ fn attached_stop_loss_external_id_from_value(
                         "algoId",
                     ],
                     ExchangeId::Bitget => &["orderId", "clientOid", "client_order_id"],
-                    ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => &[],
+                    ExchangeId::Binance
+                    | ExchangeId::Bybit
+                    | ExchangeId::Gate
+                    | ExchangeId::Hyperliquid => &[],
                 };
                 if let Some(external_id) = string_field_from_object(fields, keys) {
                     return Some(external_id);
@@ -259,7 +264,9 @@ fn attached_stop_loss_key_matches(exchange: ExchangeId, key: &str) -> bool {
                 || normalized == "sltriggerpxtype"
         }
         ExchangeId::Bitget => normalized == "presetstoplossprice" || normalized == "stoplossprice",
-        ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => false,
+        ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate | ExchangeId::Hyperliquid => {
+            false
+        }
     }
 }
 /// 封装价值hascontent，减少Web 商业链路调用方重复实现相同细节。
@@ -891,7 +898,7 @@ pub(super) async fn prearm_protective_order_if_required(
 pub(super) fn exchange_uses_prearmed_protective_order(exchange: ExchangeId) -> bool {
     match exchange {
         ExchangeId::Binance | ExchangeId::Bybit | ExchangeId::Gate => true,
-        ExchangeId::Okx | ExchangeId::Bitget => false,
+        ExchangeId::Okx | ExchangeId::Bitget | ExchangeId::Hyperliquid => false,
     }
 }
 /// 提供prearmed保护cancelrequestfromrequest的集中实现，避免Web 商业链路调用方重复处理相同细节。

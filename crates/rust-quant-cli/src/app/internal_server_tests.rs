@@ -24,6 +24,26 @@ fn strategy_catalog_exposes_market_velocity_as_standard_core_strategy() {
     assert!(market_velocity.supported_symbols.contains(&"ALL"));
     assert!(market_velocity.timeframes.contains(&"15m"));
 }
+#[test]
+fn strategy_catalog_exposes_display_defaults_for_admin_product_form() {
+    let items = super::standard_strategy_catalog_items();
+    let market_velocity = items
+        .iter()
+        .find(|item| item.strategy_key == "market_velocity")
+        .expect("market_velocity strategy catalog item");
+
+    assert_eq!(market_velocity.risk_level, "中高");
+    assert!(market_velocity.description.contains("全市场"));
+    assert!(market_velocity.detail.contains("成交额跃迁"));
+    assert_eq!(
+        market_velocity.cover_image,
+        "/strategy-covers/strategy-quant-core.svg"
+    );
+    assert_eq!(market_velocity.display_total_return_pct, Some(118.40));
+    assert_eq!(market_velocity.display_sharpe_ratio, Some(2.18));
+    assert_eq!(market_velocity.display_trade_count, Some(204));
+    assert_eq!(market_velocity.display_max_drawdown_pct, Some(20.30));
+}
 fn rank_event_row(
     id: i64,
     symbol: &str,
@@ -247,6 +267,14 @@ fn strategy_config_upsert_request_accepts_admin_payload() {
             "enabled": false,
             "config": {"ema": 144},
             "riskConfig": {"maxLossPercent": 0.02},
+            "riskLevel": "高",
+            "description": "运营简介",
+            "detail": "运营详情",
+            "coverImage": "/strategy-covers/custom.svg",
+            "displayTotalReturnPct": 120.5,
+            "displaySharpeRatio": 2.34,
+            "displayTradeCount": 321,
+            "displayMaxDrawdownPct": 12.8,
             "updatedBy": "strategy-auditor"
         })
         .to_string()
@@ -263,6 +291,17 @@ fn strategy_config_upsert_request_accepts_admin_payload() {
     assert!(!request.enabled);
     assert_eq!(request.config["ema"], 144);
     assert_eq!(request.risk_config["maxLossPercent"], 0.02);
+    assert_eq!(request.risk_level.as_deref(), Some("高"));
+    assert_eq!(request.description.as_deref(), Some("运营简介"));
+    assert_eq!(request.detail.as_deref(), Some("运营详情"));
+    assert_eq!(
+        request.cover_image.as_deref(),
+        Some("/strategy-covers/custom.svg")
+    );
+    assert_eq!(request.display_total_return_pct, Some(120.5));
+    assert_eq!(request.display_sharpe_ratio, Some(2.34));
+    assert_eq!(request.display_trade_count, Some(321));
+    assert_eq!(request.display_max_drawdown_pct, Some(12.8));
     assert_eq!(request.updated_by.as_deref(), Some("strategy-auditor"));
 }
 #[test]

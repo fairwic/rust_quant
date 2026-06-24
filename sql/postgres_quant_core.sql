@@ -18,6 +18,14 @@ CREATE TABLE IF NOT EXISTS strategy_configs (
     enabled BOOLEAN NOT NULL DEFAULT true,
     config JSONB NOT NULL DEFAULT '{}'::jsonb,
     risk_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    risk_level TEXT,
+    description TEXT,
+    detail TEXT,
+    cover_image TEXT,
+    display_total_return_pct NUMERIC(12,4),
+    display_sharpe_ratio NUMERIC(12,4),
+    display_trade_count INT,
+    display_max_drawdown_pct NUMERIC(12,4),
     created_by TEXT,
     updated_by TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -27,6 +35,15 @@ CREATE TABLE IF NOT EXISTS strategy_configs (
 
 ALTER TABLE strategy_configs
     ADD COLUMN IF NOT EXISTS legacy_id BIGINT;
+ALTER TABLE strategy_configs
+    ADD COLUMN IF NOT EXISTS risk_level TEXT,
+    ADD COLUMN IF NOT EXISTS description TEXT,
+    ADD COLUMN IF NOT EXISTS detail TEXT,
+    ADD COLUMN IF NOT EXISTS cover_image TEXT,
+    ADD COLUMN IF NOT EXISTS display_total_return_pct NUMERIC(12,4),
+    ADD COLUMN IF NOT EXISTS display_sharpe_ratio NUMERIC(12,4),
+    ADD COLUMN IF NOT EXISTS display_trade_count INT,
+    ADD COLUMN IF NOT EXISTS display_max_drawdown_pct NUMERIC(12,4);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_strategy_configs_legacy_id
     ON strategy_configs(legacy_id)
@@ -826,6 +843,14 @@ COMMENT ON COLUMN strategy_configs.timeframe IS 'K线周期';
 COMMENT ON COLUMN strategy_configs.enabled IS '是否启用';
 COMMENT ON COLUMN strategy_configs.config IS '配置内容';
 COMMENT ON COLUMN strategy_configs.risk_config IS '风控配置';
+COMMENT ON COLUMN strategy_configs.risk_level IS '策略商品默认展示风险等级，可由 Admin 商品配置覆盖';
+COMMENT ON COLUMN strategy_configs.description IS '策略商品默认简介，可由 Admin 商品配置覆盖';
+COMMENT ON COLUMN strategy_configs.detail IS '策略商品默认详情，可由 Admin 商品配置覆盖';
+COMMENT ON COLUMN strategy_configs.cover_image IS '策略商品默认展示图路径，可由 Admin 商品配置覆盖';
+COMMENT ON COLUMN strategy_configs.display_total_return_pct IS '策略商品默认展示总收益率百分比，可由 Admin 商品配置覆盖';
+COMMENT ON COLUMN strategy_configs.display_sharpe_ratio IS '策略商品默认展示夏普比率，可由 Admin 商品配置覆盖';
+COMMENT ON COLUMN strategy_configs.display_trade_count IS '策略商品默认展示累计交易笔数，可由 Admin 商品配置覆盖';
+COMMENT ON COLUMN strategy_configs.display_max_drawdown_pct IS '策略商品默认展示最大回撤百分比，可由 Admin 商品配置覆盖';
 COMMENT ON COLUMN strategy_configs.created_by IS '创建者用户名';
 COMMENT ON COLUMN strategy_configs.updated_by IS '最后一次编辑者用户名';
 COMMENT ON COLUMN strategy_configs.created_at IS '创建时间';

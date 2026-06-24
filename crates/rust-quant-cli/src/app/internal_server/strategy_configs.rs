@@ -42,6 +42,22 @@ pub struct StrategyConfigUpsertRequest {
     pub config: Value,
     /// 配置项。
     pub risk_config: Value,
+    /// 展示风险等级；为空时由商品侧自行降级展示。
+    pub risk_level: Option<String>,
+    /// 策略简介。
+    pub description: Option<String>,
+    /// 策略详情。
+    pub detail: Option<String>,
+    /// 策略展示图。
+    pub cover_image: Option<String>,
+    /// 展示总收益率百分比。
+    pub display_total_return_pct: Option<f64>,
+    /// 展示夏普比率。
+    pub display_sharpe_ratio: Option<f64>,
+    /// 展示累计交易笔数。
+    pub display_trade_count: Option<i32>,
+    /// 展示最大回撤百分比。
+    pub display_max_drawdown_pct: Option<f64>,
     /// updatedby；为空时表示该条件不启用。
     pub updated_by: Option<String>,
 }
@@ -73,6 +89,28 @@ struct RawStrategyConfigUpsertRequest {
     #[serde(rename = "riskConfig", alias = "risk_config", default)]
     /// 配置项。
     risk_config: Value,
+    #[serde(rename = "riskLevel", alias = "risk_level")]
+    /// 展示风险等级；为空时由商品侧自行降级展示。
+    risk_level: Option<String>,
+    /// 策略简介。
+    description: Option<String>,
+    /// 策略详情。
+    detail: Option<String>,
+    #[serde(rename = "coverImage", alias = "cover_image")]
+    /// 策略展示图。
+    cover_image: Option<String>,
+    #[serde(rename = "displayTotalReturnPct", alias = "display_total_return_pct")]
+    /// 展示总收益率百分比。
+    display_total_return_pct: Option<f64>,
+    #[serde(rename = "displaySharpeRatio", alias = "display_sharpe_ratio")]
+    /// 展示夏普比率。
+    display_sharpe_ratio: Option<f64>,
+    #[serde(rename = "displayTradeCount", alias = "display_trade_count")]
+    /// 展示累计交易笔数。
+    display_trade_count: Option<i32>,
+    #[serde(rename = "displayMaxDrawdownPct", alias = "display_max_drawdown_pct")]
+    /// 展示最大回撤百分比。
+    display_max_drawdown_pct: Option<f64>,
     #[serde(rename = "updatedBy", alias = "updated_by")]
     /// updatedby；为空时表示该条件不启用。
     updated_by: Option<String>,
@@ -130,6 +168,14 @@ pub fn strategy_config_upsert_request_from_body(
         enabled: raw.enabled,
         config: raw.config,
         risk_config: raw.risk_config,
+        risk_level: optional_text(raw.risk_level),
+        description: optional_text(raw.description),
+        detail: optional_text(raw.detail),
+        cover_image: optional_text(raw.cover_image),
+        display_total_return_pct: raw.display_total_return_pct,
+        display_sharpe_ratio: raw.display_sharpe_ratio,
+        display_trade_count: raw.display_trade_count,
+        display_max_drawdown_pct: raw.display_max_drawdown_pct,
         updated_by: optional_text(raw.updated_by),
     })
 }
@@ -169,10 +215,18 @@ pub(super) async fn upsert_strategy_config_response(
             enabled,
             config,
             risk_config,
+            risk_level,
+            description,
+            detail,
+            cover_image,
+            display_total_return_pct,
+            display_sharpe_ratio,
+            display_trade_count,
+            display_max_drawdown_pct,
             created_by,
             updated_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $19)
         ON CONFLICT (strategy_key, version, exchange, symbol, timeframe)
         DO UPDATE SET
             legacy_id = EXCLUDED.legacy_id,
@@ -180,6 +234,14 @@ pub(super) async fn upsert_strategy_config_response(
             enabled = EXCLUDED.enabled,
             config = EXCLUDED.config,
             risk_config = EXCLUDED.risk_config,
+            risk_level = EXCLUDED.risk_level,
+            description = EXCLUDED.description,
+            detail = EXCLUDED.detail,
+            cover_image = EXCLUDED.cover_image,
+            display_total_return_pct = EXCLUDED.display_total_return_pct,
+            display_sharpe_ratio = EXCLUDED.display_sharpe_ratio,
+            display_trade_count = EXCLUDED.display_trade_count,
+            display_max_drawdown_pct = EXCLUDED.display_max_drawdown_pct,
             updated_by = EXCLUDED.updated_by,
             updated_at = NOW()
         RETURNING to_jsonb(strategy_configs) AS row
@@ -195,6 +257,14 @@ pub(super) async fn upsert_strategy_config_response(
     .bind(request.enabled)
     .bind(Json(request.config.clone()))
     .bind(Json(request.risk_config.clone()))
+    .bind(request.risk_level.as_deref())
+    .bind(request.description.as_deref())
+    .bind(request.detail.as_deref())
+    .bind(request.cover_image.as_deref())
+    .bind(request.display_total_return_pct)
+    .bind(request.display_sharpe_ratio)
+    .bind(request.display_trade_count)
+    .bind(request.display_max_drawdown_pct)
     .bind(request.updated_by.as_deref())
     .fetch_one(pool)
     .await?;

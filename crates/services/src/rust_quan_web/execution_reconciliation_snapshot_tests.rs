@@ -221,4 +221,10 @@ mod tests {
         assert_eq!(item.opened_at.as_deref(), Some("2026-06-09T04:42:21"));
         assert_eq!(item.closed_at.as_deref(), Some("2026-06-10T20:09:12"));
     }
+    #[test]
+    fn account_wide_snapshot_supports_binance_and_okx_only() {
+        assert!(account_wide_snapshot_exchange_supported(ExchangeId::Binance));
+        assert!(account_wide_snapshot_exchange_supported(ExchangeId::Okx));
+        assert!(!account_wide_snapshot_exchange_supported(ExchangeId::Bitget));
+    }
 }

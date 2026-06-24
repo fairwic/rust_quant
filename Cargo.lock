@@ -1500,6 +1500,7 @@ dependencies = [
  "bybit_rs",
  "dotenv",
  "gate_rs",
+ "hyperliquid_rs",
  "okx",
  "serde",
  "serde_json",
@@ -2623,6 +2624,17 @@ dependencies = [
  "tower-service",
  "tracing",
  "windows-registry",
+]
+
+[[package]]
+name = "hyperliquid_rs"
+version = "0.1.0"
+dependencies = [
+ "dotenv",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.16",
 ]
 
 [[package]]

@@ -151,6 +151,16 @@ fn independent_stop_market_exchanges_prearm_protection_before_main_fill() {
             "{exchange:?} uses attached stop-loss evidence on the main order"
         );
     }
+    assert!(
+        !exchange_uses_prearmed_protective_order(ExchangeId::Hyperliquid),
+        "Hyperliquid live mutation is unsupported and must not claim a protection mode"
+    );
+}
+#[test]
+fn hyperliquid_does_not_confirm_attached_stop_loss_from_order_ack() {
+    let order_task = attached_stop_loss_order_task(ExchangeId::Hyperliquid);
+    let ack = attached_stop_loss_ack(ExchangeId::Hyperliquid, json!({"oid": "10043"}));
+    assert!(attached_stop_loss_order_ack_outcome(&order_task, &ack, None).is_none());
 }
 #[test]
 fn protection_sync_raw_payload_declares_v2_exchange_and_order_mode() {

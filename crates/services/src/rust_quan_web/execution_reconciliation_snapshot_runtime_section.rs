@@ -285,8 +285,10 @@ async fn run_reconciliation_snapshot_check(
 }
 /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Result<Value> {
-    if config.exchange != ExchangeId::Okx {
-        bail!("account-wide exchange account snapshot sync currently supports OKX only");
+    if !account_wide_snapshot_exchange_supported(config.exchange) {
+        bail!(
+            "account-wide exchange account snapshot sync currently supports OKX and Binance only"
+        );
     }
     let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
         .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
@@ -316,6 +318,10 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
         user_config.passphrase,
         user_config.simulated,
     )?;
+    if config.exchange == ExchangeId::Binance {
+        return run_binance_account_wide_snapshot_sync(config, client, gateway, has_internal_secret)
+            .await;
+    }
     let now = chrono::Utc::now();
     let start_time = (now - chrono::Duration::days(90)).timestamp_millis() as u64;
     let end_time = now.timestamp_millis() as u64;
@@ -483,6 +489,118 @@ async fn run_account_wide_snapshot_sync(config: AccountSnapshotSyncConfig) -> Re
         "fill_snapshot_enabled": config.include_fills,
         "fill_count": fills.len(),
         "account_bill_count": account_bills.len(),
+        "account_snapshot_counts": account_snapshot_counts,
+        "account_snapshot_writeback_enabled": has_internal_secret,
+        "account_snapshot_writeback_responses": account_snapshot_responses,
+        "place_order_allowed": false,
+        "mutation_allowed": false,
+        "report_result_allowed": false,
+    }))
+}
+/// 判断账户级快照支持的交易所，避免 Core 对未完成 SDK 合约的交易所发起 signed read-only 调用。
+fn account_wide_snapshot_exchange_supported(exchange: ExchangeId) -> bool {
+    matches!(exchange, ExchangeId::Okx | ExchangeId::Binance)
+}
+/// 执行 Binance 账户级 signed read-only 快照；Binance 历史订单/成交接口仍要求具体 symbol，这里只同步账户级余额、仓位和当前挂单。
+async fn run_binance_account_wide_snapshot_sync(
+    config: AccountSnapshotSyncConfig,
+    client: ExecutionTaskClient,
+    gateway: CryptoExcAllGateway,
+    has_internal_secret: bool,
+) -> Result<Value> {
+    let positions = CryptoExcAllGateway::with_signed_read_only_scope(
+        gateway.positions(config.exchange, None),
+    )
+    .await
+    .map_err(|error| {
+        anyhow!(
+            "signed read-only account-wide position snapshot failed: {}",
+            redact_error_message(error.to_string())
+        )
+    })?;
+    let open_orders = CryptoExcAllGateway::with_signed_read_only_scope(
+        gateway.open_orders(config.exchange, OrderListQuery::new().with_limit(100)),
+    )
+    .await
+    .map_err(|error| {
+        anyhow!(
+            "signed read-only account-wide open-orders snapshot failed: {}",
+            redact_error_message(error.to_string())
+        )
+    })?;
+    let balances =
+        CryptoExcAllGateway::with_signed_read_only_scope(gateway.balances(config.exchange))
+            .await
+            .map_err(|error| {
+                anyhow!(
+                    "signed read-only account-wide balance snapshot failed: {}",
+                    redact_error_message(error.to_string())
+                )
+            })?;
+    let symbols = account_snapshot_symbols(&positions, &open_orders, &[], &[], &[], &[]);
+    let mut account_snapshot_counts = Vec::new();
+    let mut account_snapshot_responses = Vec::new();
+    for (index, symbol) in symbols.iter().enumerate() {
+        let symbol_config = ReconciliationSnapshotCheckConfig {
+            buyer_email: config.buyer_email.clone(),
+            exchange: config.exchange,
+            symbol: symbol.clone(),
+            combo_id: 0,
+            task_id: 0,
+            credential_id: config.credential_id,
+            credential_ref: config.credential_ref.clone(),
+            report_reconciliation: false,
+            include_fills: false,
+            close_fill_writeback_apply: false,
+            close_fill_writeback_intent: None,
+        };
+        let balances_for_symbol = if index == 0 {
+            balances.as_slice()
+        } else {
+            &[]
+        };
+        let account_snapshot_request = build_exchange_account_snapshot_report_request(
+            &symbol_config,
+            &positions,
+            &open_orders,
+            &[],
+            &[],
+            balances_for_symbol,
+            &[],
+            &[],
+        )?;
+        account_snapshot_counts.push(json!({
+            "symbol": symbol,
+            "orders": account_snapshot_request.orders.len(),
+            "trades": account_snapshot_request.trades.len(),
+            "positions": account_snapshot_request.positions.len(),
+            "position_history": account_snapshot_request.position_history.len(),
+            "balances": account_snapshot_request.balances.len(),
+            "bills": account_snapshot_request.bills.len(),
+            "source_ref": account_snapshot_request.source_ref,
+        }));
+        if has_internal_secret {
+            account_snapshot_responses
+                .push(report_exchange_account_snapshot(&client, account_snapshot_request).await?);
+        }
+    }
+    Ok(json!({
+        "exchange": config.exchange.as_str(),
+        "account_wide": true,
+        "symbol": config.symbol,
+        "combo_id": 0,
+        "task_id": 0,
+        "symbol_count": symbols.len(),
+        "symbols": symbols,
+        "position_count": positions.len(),
+        "position_history_count": 0,
+        "non_zero_position_count": non_zero_position_count(&positions),
+        "open_order_count": open_orders.len(),
+        "order_history_count": 0,
+        "active_open_order_count": active_open_order_count(&open_orders),
+        "fill_snapshot_enabled": false,
+        "fill_count": 0,
+        "account_bill_count": 0,
         "account_snapshot_counts": account_snapshot_counts,
         "account_snapshot_writeback_enabled": has_internal_secret,
         "account_snapshot_writeback_responses": account_snapshot_responses,
