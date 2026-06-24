@@ -121,19 +121,19 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     }
     assert!(
         dockerfile.contains(
-            "COPY --from=builder /app/rust_quant/target/release/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill"
+            "COPY --from=builder /app/rust_quant/bin/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill"
         ),
         "runtime image must include the Rust-native Market Velocity candle backfill binary"
     );
     assert!(
         dockerfile.contains(
-            "COPY --from=builder /app/rust_quant/target/release/market_velocity_live_handoff /usr/local/bin/market_velocity_live_handoff"
+            "COPY --from=builder /app/rust_quant/bin/market_velocity_live_handoff /usr/local/bin/market_velocity_live_handoff"
         ),
         "runtime image must include the Rust-native Market Velocity live handoff binary"
     );
     assert!(
         dockerfile.contains(
-            "COPY --from=builder /app/rust_quant/target/release/quant_core_schema_ensure /usr/local/bin/quant_core_schema_ensure"
+            "COPY --from=builder /app/rust_quant/bin/quant_core_schema_ensure /usr/local/bin/quant_core_schema_ensure"
         ),
         "runtime image must include the Rust-native quant_core schema ensure binary"
     );
