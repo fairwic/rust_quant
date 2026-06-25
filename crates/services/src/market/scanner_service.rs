@@ -172,10 +172,10 @@ impl ScannerService {
         } else {
             info!("No existing data in database, starting fresh");
         }
-        let snapshot_since = now - Duration::hours(MARKET_RANK_HISTORY_RETENTION_HOURS);
+        let restore_targets = market_rank_history_restore_targets(now);
         match self
             .anomaly_repo
-            .load_recent_rank_snapshots("okx", snapshot_since)
+            .load_rank_snapshots_for_restore("okx", &restore_targets)
             .await
         {
             Ok(rows) if !rows.is_empty() => {
@@ -431,17 +431,6 @@ impl ScannerService {
         if let Err(err) = self.anomaly_repo.save_rank_snapshots(&snapshots).await {
             error!("Failed to save market rank price snapshots: {:?}", err);
             return;
-        }
-        let retention_start = captured_at - Duration::hours(MARKET_RANK_HISTORY_RETENTION_HOURS);
-        if let Err(err) = self
-            .anomaly_repo
-            .delete_rank_snapshots_before(retention_start)
-            .await
-        {
-            warn!(
-                "Failed to prune stale market rank price snapshots: {:?}",
-                err
-            );
         }
     }
     /// 检查并发送排名变化通知 (带冷却期)

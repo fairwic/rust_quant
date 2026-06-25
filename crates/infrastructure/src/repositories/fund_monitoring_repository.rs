@@ -400,22 +400,44 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         Ok(())
     }
     /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
-    async fn load_recent_rank_snapshots(
+    async fn load_rank_snapshots_for_restore(
         &self,
         exchange: &str,
-        since: DateTime<Utc>,
+        targets: &[DateTime<Utc>],
     ) -> Result<Vec<MarketRankSnapshot>> {
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let exchange_key = exchange.to_ascii_lowercase();
+        let restore_targets = targets.to_vec();
         let rows = sqlx::query(
             r#"
+            WITH restore_targets AS (
+                SELECT UNNEST($2::TIMESTAMPTZ[]) AS target_at
+            ),
+            selected_capture_times AS (
+                SELECT DISTINCT ON (target_at)
+                    target_at,
+                    snapshots.captured_at
+                FROM restore_targets
+                JOIN market_rank_snapshots snapshots
+                  ON snapshots.exchange = $1
+                 AND snapshots.captured_at <= restore_targets.target_at
+                ORDER BY target_at, snapshots.captured_at DESC
+            ),
+            capture_times AS (
+                SELECT DISTINCT captured_at
+                FROM selected_capture_times
+            )
             SELECT id, exchange, symbol, rank, price, volume_24h_quote, captured_at, created_at
-            FROM market_rank_snapshots
-            WHERE LOWER(exchange) = LOWER($1)
-              AND captured_at >= $2
-            ORDER BY captured_at ASC, rank ASC, symbol ASC
+            FROM market_rank_snapshots snapshots
+            JOIN capture_times USING (captured_at)
+            WHERE snapshots.exchange = $1
+            ORDER BY snapshots.captured_at ASC, snapshots.rank ASC, snapshots.symbol ASC
             "#,
         )
-        .bind(exchange)
-        .bind(since)
+        .bind(exchange_key)
+        .bind(restore_targets)
         .fetch_all(&self.pool)
         .await?;
         let mut snapshots = Vec::with_capacity(rows.len());
@@ -434,13 +456,20 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
         Ok(snapshots)
     }
     /// 删除或清理 配置、基础设施和运行时 的临时数据，避免过期状态继续影响后续流程。
-    async fn delete_rank_snapshots_before(&self, before: DateTime<Utc>) -> Result<()> {
+    async fn delete_rank_snapshots_before(
+        &self,
+        exchange: &str,
+        before: DateTime<Utc>,
+    ) -> Result<()> {
+        let exchange_key = exchange.to_ascii_lowercase();
         sqlx::query(
             r#"
             DELETE FROM market_rank_snapshots
-            WHERE captured_at < $1
+            WHERE exchange = $1
+              AND captured_at < $2
             "#,
         )
+        .bind(exchange_key)
         .bind(before)
         .execute(&self.pool)
         .await?;

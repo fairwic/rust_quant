@@ -191,6 +191,25 @@ fn test_market_velocity_live_readiness_exits_as_one_shot() {
     ));
 }
 #[test]
+fn market_velocity_radar_starts_maintenance_scheduler_in_same_process() {
+    let source = include_str!("bootstrap.rs");
+    let radar_start = source
+        .find("async fn run_market_velocity_radar_worker_from_env")
+        .expect("radar worker entrypoint should exist");
+    let websocket_start = source
+        .find("/// WebSocket数据监听")
+        .expect("next entrypoint should exist");
+    let radar_entrypoint = &source[radar_start..websocket_start];
+    assert!(
+        radar_entrypoint.contains("start_core_maintenance_scheduler"),
+        "radar worker should start a logical maintenance scheduler in the same process"
+    );
+    assert!(
+        radar_entrypoint.contains("MarketRankSnapshotPruneJob"),
+        "market rank snapshot pruning should be registered as a logical job, not a new container"
+    );
+}
+#[test]
 fn execution_worker_entrypoints_verify_live_audit_before_polling() {
     let source = include_str!("bootstrap.rs");
     let single_start = source

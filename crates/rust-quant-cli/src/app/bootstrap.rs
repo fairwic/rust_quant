@@ -9,6 +9,7 @@ use crate::app::market_velocity_strategy_config::load_market_velocity_signal_con
 use anyhow::{anyhow, Context, Result};
 use rust_quant_core::config::env_is_true;
 use rust_quant_core::database::get_db_pool;
+use rust_quant_domain::traits::fund_monitoring_repository::MarketAnomalyRepository;
 use rust_quant_domain::{StrategyConfig, StrategyType};
 use rust_quant_infrastructure::external_data::DuneQueryPerformance;
 use rust_quant_infrastructure::repositories::fund_monitoring_repository::{
@@ -19,6 +20,9 @@ use rust_quant_infrastructure::repositories::{
 };
 use rust_quant_market::streams;
 use rust_quant_orchestration::jobs::data::fund_monitor_job::FundMonitorJob;
+use rust_quant_orchestration::jobs::maintenance::{
+    MaintenanceScheduler, MarketRankSnapshotPruneJob,
+};
 use rust_quant_orchestration::workflow::{
     backtest_runner, data_sync, external_market_sync_job::ExternalMarketSyncJob, funding_rate_job,
     tickets_job,
@@ -402,7 +406,9 @@ async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
         .connect(&database_url)
         .await
         .context("连接 quant_core 数据库失败，无法启动市场动能雷达")?;
-    let anomaly_repo = Arc::new(SqlxMarketAnomalyRepository::new(pool.clone()));
+    let anomaly_repo: Arc<dyn MarketAnomalyRepository> =
+        Arc::new(SqlxMarketAnomalyRepository::new(pool.clone()));
+    let maintenance_anomaly_repo = Arc::clone(&anomaly_repo);
     let candle_service = Arc::new(CandleService::new(Box::new(PostgresCandleRepository::new(
         pool.clone(),
     ))));
@@ -420,6 +426,7 @@ async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
             Some(candle_service),
             market_velocity_signal_config,
         )?;
+    start_core_maintenance_scheduler(maintenance_anomaly_repo);
     tokio::spawn(async move {
         analyzer.run().await;
     });
@@ -439,6 +446,13 @@ async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
     }
     job.run_loop().await;
     Ok(())
+}
+fn start_core_maintenance_scheduler(anomaly_repo: Arc<dyn MarketAnomalyRepository>) {
+    let mut scheduler = MaintenanceScheduler::new(tokio::time::Duration::from_secs(60));
+    scheduler.register_job(MarketRankSnapshotPruneJob::new("okx", anomaly_repo));
+    tokio::spawn(async move {
+        scheduler.run_forever().await;
+    });
 }
 /// WebSocket数据监听
 /// 启动WebSocket连接，监听实时行情和K线数据

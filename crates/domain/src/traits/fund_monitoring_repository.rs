@@ -34,12 +34,16 @@ pub trait MarketAnomalyRepository: Send + Sync {
         stale_before: DateTime<Utc>,
     ) -> Result<u64>;
     async fn save_rank_snapshots(&self, snapshots: &[MarketRankSnapshot]) -> Result<()>;
-    async fn load_recent_rank_snapshots(
+    async fn load_rank_snapshots_for_restore(
         &self,
         exchange: &str,
-        since: DateTime<Utc>,
+        targets: &[DateTime<Utc>],
     ) -> Result<Vec<MarketRankSnapshot>>;
-    async fn delete_rank_snapshots_before(&self, before: DateTime<Utc>) -> Result<()>;
+    async fn delete_rank_snapshots_before(
+        &self,
+        exchange: &str,
+        before: DateTime<Utc>,
+    ) -> Result<()>;
 }
 #[async_trait]
 pub trait FundFlowAlertRepository: Send + Sync {

@@ -139,11 +139,39 @@ mod tests {
         );
     }
     #[test]
+    fn market_rank_history_restore_targets_only_cover_required_horizons() {
+        let now = DateTime::from_timestamp(1_774_900_000, 0).expect("valid test timestamp");
+        assert_eq!(
+            market_rank_history_restore_targets(now),
+            [
+                now - Duration::hours(24),
+                now - Duration::hours(4),
+                now - Duration::minutes(15),
+                now,
+            ]
+        );
+    }
+    #[test]
     fn market_velocity_episode_stale_cutoff_uses_rank_history_window() {
         let now = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
         assert_eq!(
             market_velocity_episode_stale_before(now),
             now - Duration::hours(MARKET_RANK_HISTORY_RETENTION_HOURS)
+        );
+    }
+    #[test]
+    fn market_rank_snapshot_prune_is_not_a_scanner_side_effect() {
+        let service_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/market/scanner_service.rs");
+        let source = std::fs::read_to_string(&service_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", service_path.display(), error));
+        assert!(
+            !source.contains("delete_rank_snapshots_before"),
+            "scanner service should only persist rank snapshots; pruning belongs to the maintenance scheduler"
+        );
+        assert!(
+            !source.contains("last_rank_snapshot_pruned_at"),
+            "scanner service should not own maintenance job state"
         );
     }
 }

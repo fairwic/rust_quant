@@ -22,6 +22,15 @@ fn build_market_rank_snapshots_from_scan(
         })
         .collect()
 }
+/// 启动恢复只需要这些 horizon 前最近一帧，而不是 25 小时内每一帧。
+fn market_rank_history_restore_targets(now: DateTime<Utc>) -> [DateTime<Utc>; 4] {
+    [
+        now - Duration::hours(24),
+        now - Duration::hours(4),
+        now - Duration::minutes(15),
+        now,
+    ]
+}
 /// 提供rankhistoryfrompersistedsnapshots的集中实现，避免行情数据调用方重复处理相同细节。
 fn rank_history_from_persisted_snapshots(
     snapshots: Vec<MarketRankSnapshot>,

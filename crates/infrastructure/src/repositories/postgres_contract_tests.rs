@@ -224,3 +224,37 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
         );
     }
 }
+
+#[test]
+fn market_rank_snapshot_restore_query_samples_target_scans_instead_of_full_window() {
+    let repository_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/repositories/fund_monitoring_repository.rs");
+    let source = fs::read_to_string(&repository_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", repository_path.display(), error));
+    assert!(
+        source.contains("restore_targets"),
+        "market rank snapshot restore should select target scan times instead of loading every row in the retention window"
+    );
+    assert!(
+        source.contains("DISTINCT ON (target_at)"),
+        "market rank snapshot restore should select the latest scan at or before each target horizon"
+    );
+    assert!(
+        !source.contains(
+            "AND captured_at >= $2\n            ORDER BY captured_at ASC, rank ASC, symbol ASC"
+        ),
+        "market rank snapshot restore must not fetch the full 25h snapshot window"
+    );
+}
+
+#[test]
+fn market_rank_snapshot_prune_query_is_exchange_scoped_for_index_use() {
+    let repository_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/repositories/fund_monitoring_repository.rs");
+    let source = fs::read_to_string(&repository_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {}", repository_path.display(), error));
+    assert!(
+        source.contains("DELETE FROM market_rank_snapshots\n            WHERE exchange = $1\n              AND captured_at < $2"),
+        "market rank snapshot pruning must scope by exchange so it can use the exchange/captured_at index"
+    );
+}
