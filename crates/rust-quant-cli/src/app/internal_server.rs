@@ -42,8 +42,8 @@ use rust_quant_services::market::{should_use_quant_core_candle_source, CandleSer
 use rust_quant_services::rust_quan_web::{run_account_snapshot_sync, AccountSnapshotSyncConfig};
 pub use strategy_catalog::standard_strategy_catalog_items;
 pub use strategy_configs::{
-    strategy_config_list_query_from_path, strategy_config_upsert_request_from_body,
-    StrategyConfigListQuery, StrategyConfigUpsertRequest,
+    strategy_config_list_query_from_path, strategy_config_risk_config_update_value,
+    strategy_config_upsert_request_from_body, StrategyConfigListQuery, StrategyConfigUpsertRequest,
 };
 const DEFAULT_INTERNAL_ADDR: &str = "127.0.0.1:5322";
 const MAX_BACKTEST_SIGNAL_LIMIT: i64 = 100;

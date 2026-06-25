@@ -6,7 +6,8 @@ use super::{
     kline_sync_request_from_body, market_rank_events_query_from_path,
     market_rank_sort_can_use_recent_query, market_rank_sort_requires_legacy_volume_before_limit,
     recent_market_rank_events_sql, strategy_config_list_query_from_path,
-    strategy_config_upsert_request_from_body, BacktestLogListQuery, MarketRankEventItem,
+    strategy_config_risk_config_update_value, strategy_config_upsert_request_from_body,
+    BacktestLogListQuery, MarketRankEventItem,
 };
 use chrono::{TimeZone, Utc};
 use serde_json::json;
@@ -303,6 +304,27 @@ fn strategy_config_upsert_request_accepts_admin_payload() {
     assert_eq!(request.display_trade_count, Some(321));
     assert_eq!(request.display_max_drawdown_pct, Some(12.8));
     assert_eq!(request.updated_by.as_deref(), Some("strategy-auditor"));
+}
+#[test]
+fn strategy_config_upsert_omits_absent_risk_config_from_updates() {
+    let request = strategy_config_upsert_request_from_body(
+        json!({
+            "strategyKey": "vegas",
+            "strategyName": "Vegas 4H",
+            "version": "admin-upsert",
+            "exchange": "okx",
+            "symbol": "btc-usdt-swap",
+            "timeframe": "4H",
+            "enabled": false,
+            "config": {"ema": 144},
+            "updatedBy": "strategy-auditor"
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .expect("strategy config upsert payload should parse without riskConfig");
+
+    assert!(strategy_config_risk_config_update_value(&request).is_none());
 }
 #[test]
 fn backtest_log_list_query_accepts_api_internal_prefix_and_filters() {

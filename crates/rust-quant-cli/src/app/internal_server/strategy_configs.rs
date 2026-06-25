@@ -179,6 +179,15 @@ pub fn strategy_config_upsert_request_from_body(
         updated_by: optional_text(raw.updated_by),
     })
 }
+pub fn strategy_config_risk_config_update_value(
+    request: &StrategyConfigUpsertRequest,
+) -> Option<&Value> {
+    if request.risk_config.is_null() {
+        None
+    } else {
+        Some(&request.risk_config)
+    }
+}
 /// 创建 回测与策略研究 资源，并在入口处完成必要的参数归一。
 pub(super) fn create_quant_core_internal_pool() -> Result<PgPool> {
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
@@ -202,6 +211,9 @@ pub(super) async fn upsert_strategy_config_response(
         .strategy_name
         .as_deref()
         .unwrap_or(request.strategy_key.as_str());
+    let risk_config = strategy_config_risk_config_update_value(request)
+        .cloned()
+        .map(Json);
     let row: (Json<Value>,) = sqlx::query_as(
         r#"
         INSERT INTO strategy_configs (
@@ -226,14 +238,14 @@ pub(super) async fn upsert_strategy_config_response(
             created_by,
             updated_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $19)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::jsonb, '{}'::jsonb), $11, $12, $13, $14, $15, $16, $17, $18, $19, $19)
         ON CONFLICT (strategy_key, version, exchange, symbol, timeframe)
         DO UPDATE SET
             legacy_id = EXCLUDED.legacy_id,
             strategy_name = EXCLUDED.strategy_name,
             enabled = EXCLUDED.enabled,
             config = EXCLUDED.config,
-            risk_config = EXCLUDED.risk_config,
+            risk_config = COALESCE($10::jsonb, strategy_configs.risk_config),
             risk_level = EXCLUDED.risk_level,
             description = EXCLUDED.description,
             detail = EXCLUDED.detail,
@@ -256,7 +268,7 @@ pub(super) async fn upsert_strategy_config_response(
     .bind(&request.timeframe)
     .bind(request.enabled)
     .bind(Json(request.config.clone()))
-    .bind(Json(request.risk_config.clone()))
+    .bind(risk_config)
     .bind(request.risk_level.as_deref())
     .bind(request.description.as_deref())
     .bind(request.detail.as_deref())
