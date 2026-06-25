@@ -3,14 +3,13 @@ use crate::models::TickersDataEntity;
 use crate::repositories::candle_service::{CandleService, StrategyTrigger};
 use crate::repositories::persist_worker::{CandlePersistWorker, PersistTask};
 use crate::repositories::ticker_service::TickerService;
-use okx::config::Credentials;
+use okx::config::CONFIG;
 use okx::dto::market_dto::CandleOkxRespDto;
 use okx::dto::CandleOkxWsResDto;
 use okx::dto::CommonOkxWsResDto;
 use okx::dto::TickerOkxResWsDto;
-use okx::websocket::auto_reconnect_client::AutoReconnectWebsocketClient;
+use okx::websocket::auto_reconnect_client::{AutoReconnectWebsocketClient, ReconnectConfig};
 use okx::websocket::{Args, ChannelType};
-use std::env;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -31,11 +30,6 @@ pub async fn run_socket_with_strategy_trigger(
 ) {
     let span = span!(Level::DEBUG, "socket_logic");
     let _enter = span.enter();
-    // 模拟盘的请求的header里面需要添加 "x-simulated-trading: 1"。
-    let api_key = env::var("OKX_API_KEY").expect("未配置OKX_API_KEY");
-    let api_secret = env::var("OKX_API_SECRET").expect("未配置OKX_API_SECRET");
-    let passphrase = env::var("OKX_PASSPHRASE").expect("未配置OKX_PASSPHRASE");
-    let sim_trading = env::var("OKX_SIMULATED_TRADING").expect("未配置OKX_SIMULATED_TRADING");
     // 🚀 [已优化] 创建批处理Worker
     info!("🚀 初始化批处理Worker...");
     let (persist_tx, persist_rx) = mpsc::unbounded_channel::<PersistTask>();
@@ -74,15 +68,18 @@ pub async fn run_socket_with_strategy_trigger(
             return;
         }
     };
-    let credentials = Credentials::new(api_key, api_secret, passphrase, sim_trading);
-    let okx_websocket_client_business = AutoReconnectWebsocketClient::new_business(credentials);
-    let mut private_message_receiver = match okx_websocket_client_business.start().await {
+    let business_client = AutoReconnectWebsocketClient::new_with_config(
+        &CONFIG.business_websocket_url,
+        None,
+        ReconnectConfig::default(),
+    );
+    let mut business_receiver = match business_client.start().await {
         Ok(rx) => {
-            info!("✅ okx private websocket启动成功");
+            info!("✅ okx business public websocket启动成功");
             rx
         }
         Err(e) => {
-            error!("❌ okx private websocket启动失败: {}", e);
+            error!("❌ okx business public websocket启动失败: {}", e);
             return;
         }
     };
@@ -92,8 +89,7 @@ pub async fn run_socket_with_strategy_trigger(
             let args = Args::new()
                 .with_inst_id(inst_id.to_string())
                 .with_param("period".to_string(), time.to_string());
-            // 用私有client订阅k线频道
-            let task = okx_websocket_client_business
+            let task = business_client
                 .subscribe(ChannelType::Candle(time.to_string()), args.clone())
                 .await;
             match task {
@@ -155,7 +151,7 @@ pub async fn run_socket_with_strategy_trigger(
     // 🚀 [已优化] 复用service实例 + 消除二次序列化
     let candle_service_clone = Arc::clone(&candle_service);
     tokio::spawn(async move {
-        while let Some(msg) = private_message_receiver.recv().await {
+        while let Some(msg) = business_receiver.recv().await {
             // 🚀 [已优化] 直接从 Value 解析，避免 to_string() 序列化
             if let Ok(candle) = serde_json::from_value::<CandleOkxWsResDto>(msg.clone()) {
                 debug!(

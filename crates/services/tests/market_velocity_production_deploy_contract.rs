@@ -34,6 +34,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     let compose = read_repo_file("docker-compose.deploy.yml");
     let workflow = read_repo_file(".github/workflows/cicd.yml");
     let dockerfile = read_repo_file("Dockerfile.runtime");
+    let okx_websocket = read_repo_file("crates/market/src/streams/websocket_service.rs");
     let promote = read_repo_file("scripts/deploy/promote_stable.sh");
     let rollback = read_repo_file("scripts/deploy/rollback.sh");
     for service in [
@@ -168,6 +169,17 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}"
         ),
         "Core internal server must be able to call Quant Web internal writeback APIs"
+    );
+    let exchange_symbol_sync_block =
+        compose_service_block(&compose, "quant-core-exchange-symbol-sync-worker");
+    assert!(
+        exchange_symbol_sync_block.contains("REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}"),
+        "exchange symbol sync worker must use the deployed Redis endpoint instead of falling back to localhost"
+    );
+    assert!(
+        okx_websocket.contains("new_with_config(\n        &CONFIG.business_websocket_url,\n        None,")
+            && !okx_websocket.contains("expect(\"未配置OKX_API_KEY\")"),
+        "OKX candle websocket must use the business public endpoint without requiring global OKX private credentials"
     );
     assert!(
         workflow.contains("market_velocity_production_deploy_contract"),

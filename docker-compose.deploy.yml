@@ -55,6 +55,7 @@ services:
       RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
       QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
       DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
       IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER: "true"
       EXCHANGE_SYMBOL_SYNC_WORKER_ONLY: "true"
       EXCHANGE_SYMBOL_SYNC_RUN_ONCE: "false"
