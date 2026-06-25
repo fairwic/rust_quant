@@ -1,5 +1,6 @@
 pub mod binance_eth_micro_live_validation;
 pub mod bootstrap;
+pub(crate) mod env_parse;
 pub mod exchange_symbol_sync;
 pub mod internal_server;
 pub mod market_velocity_backfill;
