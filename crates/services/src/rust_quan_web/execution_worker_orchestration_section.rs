@@ -77,8 +77,15 @@ impl ExecutionWorker {
         let mut handled = 0;
         let mut last_task_id = None;
         for task in leased.tasks {
+            let lease_extend_worker_id = task
+                .lease_owner
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(self.config.worker_id.as_str());
             info!(
                 worker_id = %self.config.worker_id,
+                lease_owner = %lease_extend_worker_id,
                 execution_task_id = task.id,
                 strategy_signal_id = ?task.strategy_signal_id,
                 news_signal_id = ?task.news_signal_id,
@@ -96,7 +103,7 @@ impl ExecutionWorker {
                 .extend_task_lease(
                     task.id,
                     ExecutionTaskLeaseExtendRequest {
-                        worker_id: self.config.worker_id.clone(),
+                        worker_id: lease_extend_worker_id.to_string(),
                         extend_seconds: Some(120),
                     },
                 )

@@ -248,7 +248,7 @@ async fn report_replay_mode_reposts_stored_report_without_order_placement() {
         .all(|checkpoint| checkpoint.checkpoint_value["place_order_allowed"] != true));
 }
 #[tokio::test]
-async fn normal_worker_extends_task_lease_before_execution_report() {
+async fn normal_worker_extends_task_lease_with_web_owner_before_execution_report() {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
@@ -269,13 +269,13 @@ async fn normal_worker_extends_task_lease_before_execution_report() {
             let bytes = stream.read(&mut buffer).unwrap();
             let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
             let body = if request.starts_with("GET /api/commerce/internal/execution-tasks/lease") {
-                r#"{"success":true,"data":{"items":[{"task":{"id":42,"news_signal_id":null,"strategy_signal_id":11,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"vegas","symbol":"BTC-USDT-SWAP","task_type":"execute_signal","task_status":"leased","priority":3,"lease_owner":"worker-heartbeat","lease_until":"2026-04-23T12:02:00","scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{\"exchange\":\"okx\",\"side\":\"buy\",\"size\":\"0.01\"}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"api_credentials":[]}]}}"#
+                r#"{"success":true,"data":{"items":[{"task":{"id":42,"news_signal_id":null,"strategy_signal_id":11,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"vegas","symbol":"BTC-USDT-SWAP","task_type":"execute_signal","task_status":"leased","priority":3,"lease_owner":"rust_quant","lease_until":"2026-04-23T12:02:00","scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{\"exchange\":\"okx\",\"side\":\"buy\",\"size\":\"0.01\"}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"api_credentials":[]}]}}"#
             } else if request.starts_with(
                 "POST /api/commerce/internal/execution-tasks/42/lease/extend",
             ) {
-                r#"{"success":true,"data":{"task":{"id":42,"news_signal_id":null,"strategy_signal_id":11,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"vegas","symbol":"BTC-USDT-SWAP","task_type":"execute_signal","task_status":"leased","priority":3,"lease_owner":"worker-heartbeat","lease_until":"2026-04-23T12:04:00","scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"lease_until":"2026-04-23T12:04:00"}}"#
+                r#"{"success":true,"data":{"task":{"id":42,"news_signal_id":null,"strategy_signal_id":11,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"vegas","symbol":"BTC-USDT-SWAP","task_type":"execute_signal","task_status":"leased","priority":3,"lease_owner":"rust_quant","lease_until":"2026-04-23T12:04:00","scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"lease_until":"2026-04-23T12:04:00"}}"#
             } else {
-                r#"{"success":true,"data":{"task":{"id":42,"news_signal_id":null,"strategy_signal_id":11,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"vegas","symbol":"BTC-USDT-SWAP","task_type":"execute_signal","task_status":"completed","priority":3,"lease_owner":"worker-heartbeat","lease_until":null,"scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"attempt":{},"order_result":{},"trade_record":null}}"#
+                r#"{"success":true,"data":{"task":{"id":42,"news_signal_id":null,"strategy_signal_id":11,"combo_id":9,"buyer_email":"buyer@example.com","strategy_slug":"vegas","symbol":"BTC-USDT-SWAP","task_type":"execute_signal","task_status":"completed","priority":3,"lease_owner":"rust_quant","lease_until":null,"scheduled_at":"2026-04-23T12:00:00","request_payload_json":"{}","created_at":"2026-04-23T12:00:00","updated_at":"2026-04-23T12:00:00"},"attempt":{},"order_result":{},"trade_record":null}}"#
             };
             requests.push(request);
             let response = format!(
@@ -295,7 +295,7 @@ async fn normal_worker_extends_task_lease_before_execution_report() {
         .unwrap(),
         CryptoExcAllGateway::dry_run(),
         ExecutionWorkerConfig {
-            worker_id: "worker-heartbeat".to_string(),
+            worker_id: "quant-core-worker-prod".to_string(),
             lease_limit: 1,
             dry_run: true,
             default_exchange: ExchangeId::Okx,
@@ -320,7 +320,7 @@ async fn normal_worker_extends_task_lease_before_execution_report() {
         "second request must refresh the active lease before slow exchange work, got {}",
         requests[1].lines().next().unwrap_or("")
     );
-    assert!(requests[1].contains(r#""worker_id":"worker-heartbeat""#));
+    assert!(requests[1].contains(r#""worker_id":"rust_quant""#));
     assert!(requests[2].starts_with("POST /api/commerce/internal/execution-results"));
 }
 #[tokio::test]
