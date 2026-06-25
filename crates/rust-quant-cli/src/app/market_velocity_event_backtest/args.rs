@@ -76,6 +76,14 @@ impl MarketVelocityEventSource {
             other => bail!("unknown --event-source: {other}"),
         }
     }
+    /// 提供标签的集中实现，避免回测策略调用方重复处理相同细节。
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Episodes => "episodes",
+            Self::RawEvents => "raw_events",
+            Self::RawState => "raw_state",
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarketVelocityTradeDirection {

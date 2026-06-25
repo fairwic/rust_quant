@@ -13,7 +13,7 @@ use rust_quant_common::CandleItem;
 use rust_quant_core::cache::get_redis_connection;
 use rust_quant_domain::entities::SwapOrder;
 use rust_quant_domain::traits::SwapOrderRepository;
-use rust_quant_domain::StrategyConfig;
+use rust_quant_domain::{OrderSide, PositionSide, StrategyConfig};
 use rust_quant_strategies::framework::backtest::{
     compute_current_targets, BasicRiskStrategyConfig, ExitTargets, TradingState,
 };
@@ -591,13 +591,9 @@ impl StrategyExecutionService {
             return Ok(());
         }
         // 1. 确定交易方向
-        let (side, pos_side) = if signal.should_buy {
-            ("buy", "long")
-        } else if signal.should_sell {
-            ("sell", "short")
-        } else {
-            return Err(anyhow!("信号无效，无交易方向"));
-        };
+        let (order_side, position_side) = Self::trade_sides_from_signal(signal)?;
+        let side = order_side.as_str();
+        let pos_side = position_side.as_str();
         info!("交易方向: side={}, pos_side={}", side, pos_side);
         if Self::should_dispatch_strategy_signal_to_quant_web() {
             info!(
@@ -650,7 +646,8 @@ impl StrategyExecutionService {
         // 4.1 实盘仓位治理（可选）：同向不加仓/反向先平仓
         let skip_same_side = Self::env_enabled("LIVE_SKIP_IF_SAME_SIDE_POSITION");
         let close_opposite_side = Self::env_enabled("LIVE_CLOSE_OPPOSITE_POSITION");
-        let opposite_pos_side = if pos_side == "long" { "short" } else { "long" };
+        let opposite_position_side = PositionSide::from_order_side(order_side.opposite());
+        let opposite_pos_side = opposite_position_side.as_str();
         let same_side_exists = positions.iter().any(|p| {
             p.inst_id == inst_id
                 && p.pos_side.eq_ignore_ascii_case(pos_side)
@@ -670,7 +667,7 @@ impl StrategyExecutionService {
                     && p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12
             }) {
                 let mgn_mode = p.mgn_mode.clone();
-                let close_pos_side = if opposite_pos_side == "long" {
+                let close_pos_side = if opposite_position_side == PositionSide::Long {
                     okx::dto::PositionSide::Long
                 } else {
                     okx::dto::PositionSide::Short
@@ -687,7 +684,7 @@ impl StrategyExecutionService {
         }
         // 5. 计算下单数量（使用90%的安全系数）
         let safety_factor = 0.9;
-        let max_size_str = if side == "buy" {
+        let max_size_str = if order_side == OrderSide::Buy {
             max_size.max_buy.as_str()
         } else {
             max_size.max_sell.as_str()
@@ -719,8 +716,8 @@ impl StrategyExecutionService {
         info!("计算的下单数量: {}", order_size);
         // 6. 计算止损止盈价格
         let entry_price = signal.open_price;
-        let stop_candidates = Self::build_stop_loss_candidates(side, signal, risk_config)?;
-        let stop_side = if side == "sell" {
+        let stop_candidates = Self::build_stop_loss_candidates(order_side, signal, risk_config)?;
+        let stop_side = if order_side == OrderSide::Sell {
             StopLossSide::Short
         } else {
             StopLossSide::Long
@@ -729,14 +726,14 @@ impl StrategyExecutionService {
             .ok_or_else(|| anyhow!("无有效止损价"))?;
         let take_profit_trigger_px: Option<f64> = None;
         // 验证止损价格合理性
-        if pos_side == "short" && entry_price > final_stop_loss {
+        if position_side == PositionSide::Short && entry_price > final_stop_loss {
             error!(
                 "做空开仓价 > 止损价，不下单: entry={}, stop_loss={}",
                 entry_price, final_stop_loss
             );
             return Err(anyhow!("止损价格不合理"));
         }
-        if pos_side == "long" && entry_price < final_stop_loss {
+        if position_side == PositionSide::Long && entry_price < final_stop_loss {
             error!(
                 "做多开仓价 < 止损价，不下单: entry={}, stop_loss={}",
                 entry_price, final_stop_loss

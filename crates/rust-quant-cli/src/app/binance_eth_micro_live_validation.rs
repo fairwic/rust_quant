@@ -1,3 +1,7 @@
+use super::env_parse::{
+    first_non_empty_env, parse_bool_env_reject_empty as parse_bool_env,
+    parse_i64_env_default_on_empty as parse_i64_env,
+};
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use crypto_exc_all::ExchangeId;
@@ -941,27 +945,6 @@ fn parse_optional_i64_env(key: &str) -> Result<Option<i64>> {
         _ => Ok(None),
     }
 }
-/// 从环境变量解析 i64 值。
-fn parse_i64_env(key: &str, default: i64) -> Result<i64> {
-    match std::env::var(key) {
-        Ok(raw) if !raw.trim().is_empty() => raw
-            .trim()
-            .parse::<i64>()
-            .with_context(|| format!("{key} must be i64")),
-        _ => Ok(default),
-    }
-}
-/// 从环境变量解析布尔值。
-fn parse_bool_env(key: &str, default: bool) -> Result<bool> {
-    match std::env::var(key) {
-        Ok(raw) => match raw.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Ok(true),
-            "0" | "false" | "no" | "off" => Ok(false),
-            _ => bail!("{key} must be boolean"),
-        },
-        Err(_) => Ok(default),
-    }
-}
 /// 从环境变量读取 HTTP/SOCKS 代理；设置不支持的 scheme 时 fail closed。
 fn parse_optional_proxy_env(key: &str) -> Result<Option<String>> {
     let Some(value) = first_non_empty_env(&[key]) else {
@@ -979,13 +962,4 @@ fn normalize_proxy_url(key: &str, value: String) -> Result<String> {
         return Ok(value);
     }
     bail!("{key} must start with http://, https://, socks5://, or socks5h://");
-}
-/// 按优先级读取第一个非空环境变量。
-fn first_non_empty_env(keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        std::env::var(key)
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-    })
 }

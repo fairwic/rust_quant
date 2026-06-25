@@ -129,28 +129,22 @@
     #[test]
     fn test_trade_direction_buy() {
         let signal = create_buy_signal(50000.0, 1234567890);
-        let (side, pos_side) = if signal.should_buy {
-            ("buy", "long")
-        } else if signal.should_sell {
-            ("sell", "short")
-        } else {
-            panic!("信号无效");
-        };
-        assert_eq!(side, "buy");
-        assert_eq!(pos_side, "long");
+        let (side, pos_side) =
+            StrategyExecutionService::trade_sides_from_signal(&signal).unwrap();
+        assert_eq!(side, OrderSide::Buy);
+        assert_eq!(side.as_str(), "buy");
+        assert_eq!(pos_side, PositionSide::Long);
+        assert_eq!(pos_side.as_str(), "long");
     }
     #[test]
     fn test_trade_direction_sell() {
         let signal = create_sell_signal(50000.0, 1234567890);
-        let (side, pos_side) = if signal.should_buy {
-            ("buy", "long")
-        } else if signal.should_sell {
-            ("sell", "short")
-        } else {
-            panic!("信号无效");
-        };
-        assert_eq!(side, "sell");
-        assert_eq!(pos_side, "short");
+        let (side, pos_side) =
+            StrategyExecutionService::trade_sides_from_signal(&signal).unwrap();
+        assert_eq!(side, OrderSide::Sell);
+        assert_eq!(side.as_str(), "sell");
+        assert_eq!(pos_side, PositionSide::Short);
+        assert_eq!(pos_side.as_str(), "short");
     }
     #[test]
     fn test_invalid_signal() {
@@ -159,8 +153,9 @@
             should_sell: false,
             ..create_buy_signal(50000.0, 1234567890)
         };
-        let has_signal = signal.should_buy || signal.should_sell;
-        assert!(!has_signal, "应该识别为无效信号");
+        let error = StrategyExecutionService::trade_sides_from_signal(&signal)
+            .expect_err("应该识别为无效信号");
+        assert!(error.to_string().contains("信号无效"));
     }
     #[test]
     fn test_order_detail_json() {

@@ -1,3 +1,4 @@
+use super::env_parse::first_non_empty_env;
 use anyhow::{bail, Context, Result};
 use chrono::{SecondsFormat, TimeZone, Utc};
 use rust_quant_domain::entities::BacktestLog;
@@ -12,8 +13,10 @@ use std::collections::{BTreeMap, HashMap};
 mod args;
 mod data;
 mod equity;
+mod equity_stats;
 mod exit;
 mod fvg;
+mod manifest;
 mod reentry;
 mod report;
 use args::{
@@ -38,6 +41,7 @@ pub use equity::{
 };
 pub use exit::{simulate_trade, EarlyExit, ProfitProtection, RunnerExit};
 use fvg::{find_fvg_entry, FvgEntrySearch};
+pub use manifest::{market_velocity_paper_strategy_preset_manifest, MarketVelocityPresetManifest};
 use reentry::maybe_apply_stop_reentry;
 use report::{print_result_report, print_stage_report};
 pub const MS_15M: i64 = 15 * 60 * 1_000;
@@ -1245,15 +1249,6 @@ fn quant_web_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
     Ok(ExecutionTaskConfig {
         base_url,
         internal_secret,
-    })
-}
-/// 提供首个非空环境变量的集中实现，避免回测策略调用方重复处理相同细节。
-fn first_non_empty_env(keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        std::env::var(key)
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
     })
 }
 fn increment(counter: &mut BTreeMap<String, usize>, key: &str) {

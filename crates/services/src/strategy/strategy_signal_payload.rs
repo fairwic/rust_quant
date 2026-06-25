@@ -1,6 +1,7 @@
 use crate::rust_quan_web::StrategySignalSubmitRequest;
 use anyhow::{anyhow, Result};
 use chrono::SecondsFormat;
+use rust_quant_domain::{OrderSide, PositionSide};
 use rust_quant_strategies::framework::risk::{StopLossCalculator, StopLossSide};
 use rust_quant_strategies::strategy_common::SignalResult;
 use serde_json::{json, Value};
@@ -38,12 +39,15 @@ pub(crate) fn build_strategy_signal_submit_request(
     client_order_id: &str,
     options: StrategySignalPayloadBuildOptions,
 ) -> Result<StrategySignalSubmitRequest> {
-    let direction = match pos_side {
-        "long" | "short" => pos_side.to_string(),
-        other => {
+    let position_side = pos_side
+        .parse::<PositionSide>()
+        .map_err(|_| anyhow!("unsupported strategy signal position side: {}", pos_side))?;
+    let direction = match position_side {
+        PositionSide::Long | PositionSide::Short => position_side.as_str().to_string(),
+        PositionSide::Both => {
             return Err(anyhow!(
                 "unsupported strategy signal position side: {}",
-                other
+                pos_side
             ))
         }
     };
@@ -62,14 +66,14 @@ pub(crate) fn build_strategy_signal_submit_request(
         "symbol": inst_id,
         "exchange": exchange.map(str::to_ascii_lowercase),
         "side": side,
-        "position_side": pos_side,
+            "position_side": &direction,
         "trade_side": "open",
         "order_type": "market",
         "client_order_id": client_order_id,
         "risk_plan": {
             "entry_price": entry_price,
             "selected_stop_loss_price": selected_stop_loss,
-            "direction": pos_side,
+            "direction": &direction,
             "protective_stop_loss_required": true,
         },
         "signal": signal,
@@ -153,22 +157,27 @@ fn select_strategy_signal_stop_loss(
         return Err(anyhow!("策略信号开仓价无效: {}", entry_price));
     }
     validate_max_loss_percent(risk_config.max_loss_percent)?;
-    let stop_side = match side {
-        "buy" => StopLossSide::Long,
-        "sell" => StopLossSide::Short,
-        other => return Err(anyhow!("unsupported strategy signal side: {}", other)),
+    let order_side = side
+        .parse::<OrderSide>()
+        .map_err(|_| anyhow!("unsupported strategy signal side: {}", side))?;
+    let position_side = pos_side
+        .parse::<PositionSide>()
+        .map_err(|_| anyhow!("unsupported strategy signal position side: {}", pos_side))?;
+    let stop_side = match order_side {
+        OrderSide::Buy => StopLossSide::Long,
+        OrderSide::Sell => StopLossSide::Short,
     };
-    let stop_candidates = build_stop_loss_candidates(side, signal, risk_config);
+    let stop_candidates = build_stop_loss_candidates(order_side, signal, risk_config);
     let selected_stop_loss = StopLossCalculator::select(stop_side, entry_price, &stop_candidates)
         .ok_or_else(|| anyhow!("无有效止损价"))?;
-    if pos_side == "short" && entry_price > selected_stop_loss {
+    if position_side == PositionSide::Short && entry_price > selected_stop_loss {
         return Err(anyhow!(
             "做空开仓价 > 止损价，不提交Web信号: entry={}, stop_loss={}",
             entry_price,
             selected_stop_loss
         ));
     }
-    if pos_side == "long" && entry_price < selected_stop_loss {
+    if position_side == PositionSide::Long && entry_price < selected_stop_loss {
         return Err(anyhow!(
             "做多开仓价 < 止损价，不提交Web信号: entry={}, stop_loss={}",
             entry_price,
@@ -190,13 +199,13 @@ pub(crate) fn validate_max_loss_percent(max_loss_percent: f64) -> Result<()> {
 }
 /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_stop_loss_candidates(
-    side: &str,
+    side: OrderSide,
     signal: &SignalResult,
     risk_config: &rust_quant_domain::BasicRiskConfig,
 ) -> Vec<f64> {
     let entry_price = signal.open_price;
     let max_loss_percent = risk_config.max_loss_percent;
-    let max_loss_stop = if side == "sell" {
+    let max_loss_stop = if side == OrderSide::Sell {
         entry_price * (1.0 + max_loss_percent)
     } else {
         entry_price * (1.0 - max_loss_percent)

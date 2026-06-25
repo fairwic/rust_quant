@@ -3,11 +3,11 @@ use super::{
     backtest_log_list_query_from_path, compute_rank_change_pct,
     core_backtest_run_list_query_from_path, exchange_account_snapshot_sync_request_from_body,
     finalize_market_rank_rows, handle_exchange_account_snapshot_sync_body,
-    kline_sync_request_from_body, market_rank_events_query_from_path,
-    market_rank_sort_can_use_recent_query, market_rank_sort_requires_legacy_volume_before_limit,
-    recent_market_rank_events_sql, strategy_config_list_query_from_path,
-    strategy_config_risk_config_update_value, strategy_config_upsert_request_from_body,
-    BacktestLogListQuery, MarketRankEventItem,
+    handle_market_velocity_paper_strategy_preset_manifest_path, kline_sync_request_from_body,
+    market_rank_events_query_from_path, market_rank_sort_can_use_recent_query,
+    market_rank_sort_requires_legacy_volume_before_limit, recent_market_rank_events_sql,
+    strategy_config_list_query_from_path, strategy_config_risk_config_update_value,
+    strategy_config_upsert_request_from_body, BacktestLogListQuery, MarketRankEventItem,
 };
 use chrono::{TimeZone, Utc};
 use serde_json::json;
@@ -44,6 +44,31 @@ fn strategy_catalog_exposes_display_defaults_for_admin_product_form() {
     assert_eq!(market_velocity.display_sharpe_ratio, Some(2.18));
     assert_eq!(market_velocity.display_trade_count, Some(204));
     assert_eq!(market_velocity.display_max_drawdown_pct, Some(20.30));
+}
+#[tokio::test]
+async fn market_velocity_preset_manifest_endpoint_returns_canonical_manifest_hash() {
+    let response = handle_market_velocity_paper_strategy_preset_manifest_path(
+        "/api/internal/market-velocity/paper-strategy-preset-manifest?preset=research_momentum_0375sl_27r_reclaim13_22_v1",
+    )
+    .await;
+
+    assert_eq!(response.status_code, 200);
+    assert_eq!(response.body["productSlug"], "market-velocity-radar");
+    assert_eq!(response.body["symbol"], "ALL");
+    assert_eq!(response.body["channel"], "production_default");
+    assert_eq!(response.body["strategyKey"], "market_velocity");
+    assert_eq!(
+        response.body["manifestJson"]["preset"],
+        "research_momentum_0375sl_27r_reclaim13_22_v1"
+    );
+    assert!(response.body["canonicalJson"]
+        .as_str()
+        .unwrap()
+        .contains("\"manifest_schema_version\":1"));
+    assert!(response.body["manifestHash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
 }
 fn rank_event_row(
     id: i64,

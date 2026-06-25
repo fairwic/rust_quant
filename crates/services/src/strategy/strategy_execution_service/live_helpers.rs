@@ -134,6 +134,17 @@ impl StrategyExecutionService {
             )),
         }
     }
+    /// 将策略信号转换为统一订单方向，避免交易执行链路散落 buy/sell/long/short 字符串判断。
+    fn trade_sides_from_signal(signal: &SignalResult) -> Result<(OrderSide, PositionSide)> {
+        let order_side = if signal.should_buy {
+            OrderSide::Buy
+        } else if signal.should_sell {
+            OrderSide::Sell
+        } else {
+            return Err(anyhow!("信号无效，无交易方向"));
+        };
+        Ok((order_side, PositionSide::from_order_side(order_side)))
+    }
     /// 提供quantweb执行task配置from环境变量的集中实现，避免交易执行调用方重复处理相同细节。
     fn quant_web_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
         let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
@@ -624,14 +635,14 @@ impl StrategyExecutionService {
     }
     /// 构建止损候选价列表（由上层选择最紧止损）
     fn build_stop_loss_candidates(
-        side: &str,
+        side: OrderSide,
         signal: &SignalResult,
         risk_config: &rust_quant_domain::BasicRiskConfig,
     ) -> Result<Vec<f64>> {
         let entry_price = signal.open_price;
         let max_loss_percent = risk_config.max_loss_percent;
         strategy_signal_payload::validate_max_loss_percent(max_loss_percent)?;
-        let max_loss_stop = if side == "sell" {
+        let max_loss_stop = if side == OrderSide::Sell {
             entry_price * (1.0 + max_loss_percent)
         } else {
             entry_price * (1.0 - max_loss_percent)

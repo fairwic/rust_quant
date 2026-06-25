@@ -23,6 +23,7 @@ mod strategy_configs;
 use crate::app::exchange_symbol_sync::{
     run_exchange_symbol_sync_from_env, ExchangeSymbolSyncRequest,
 };
+use crate::app::market_velocity_event_backtest::market_velocity_paper_strategy_preset_manifest;
 use auth::authorize_internal_request;
 pub use backtest_details::{backtest_detail_list_query_from_path, BacktestDetailListQuery};
 pub use backtest_logs::{
@@ -1092,6 +1093,9 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
             handle_strategy_config_list_path(&request.path).await
         }
         ("GET", "/api/internal/strategy-catalog") => handle_strategy_catalog_path().await,
+        ("GET", "/api/internal/market-velocity/paper-strategy-preset-manifest") => {
+            handle_market_velocity_paper_strategy_preset_manifest_path(&request.path).await
+        }
         ("POST", "/api/internal/strategy-configs") => {
             handle_strategy_config_upsert_body(&request.body).await
         }
@@ -1106,6 +1110,33 @@ async fn handle_connection(mut stream: TcpStream) -> Result<()> {
         _ => json_response(405, json!({ "error": "method not allowed" })),
     };
     write_response(&mut stream, response).await
+}
+async fn handle_market_velocity_paper_strategy_preset_manifest_path(
+    path: &str,
+) -> InternalHttpJsonResponse {
+    let query = path.split_once('?').map(|(_, query)| query).unwrap_or("");
+    let preset = match required_query_param(query, &["preset", "paperStrategyPreset"]) {
+        Ok(value) => value,
+        Err(error) => return json_response(400, json!({ "error": error })),
+    };
+    match market_velocity_paper_strategy_preset_manifest(&preset) {
+        Ok(manifest) => json_response(
+            200,
+            json!({
+                "productSlug": manifest.product_slug,
+                "symbol": manifest.symbol,
+                "channel": manifest.channel,
+                "manifestHash": manifest.manifest_hash,
+                "strategyKey": manifest.strategy_key,
+                "humanLabel": manifest.human_label,
+                "riskLevel": manifest.risk_level,
+                "manifestStatus": manifest.manifest_status,
+                "manifestJson": manifest.manifest_json,
+                "canonicalJson": manifest.canonical_json,
+            }),
+        ),
+        Err(error) => json_response(400, json!({ "error": error.to_string() })),
+    }
 }
 include!("internal_server/kline_sync_section.rs");
 include!("internal_server/market_read_models_section.rs");

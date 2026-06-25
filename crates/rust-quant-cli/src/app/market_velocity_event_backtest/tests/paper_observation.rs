@@ -1,6 +1,7 @@
 use super::super::{
-    parse_paper_observation_args_from, parse_paper_observation_command_from,
-    MarketVelocityEventSource, MarketVelocityPaperOutcomeSink, StopReentryMode,
+    market_velocity_paper_strategy_preset_manifest, parse_paper_observation_args_from,
+    parse_paper_observation_command_from, MarketVelocityEventSource,
+    MarketVelocityPaperOutcomeSink, StopReentryMode,
 };
 #[test]
 fn paper_observation_args_force_web_sink_and_production_entry_trigger_allowlist() {
@@ -80,6 +81,46 @@ fn paper_observation_args_apply_reclaim_midrank_research_preset() {
     assert_eq!(args.entry_trigger_rank_blocklist[0].trigger, "reclaim_ema");
     assert_eq!(args.entry_trigger_rank_blocklist[0].min_new_rank, 13);
     assert_eq!(args.entry_trigger_rank_blocklist[0].max_new_rank, 22);
+}
+#[test]
+fn paper_observation_preset_manifest_is_canonical_and_hashable() {
+    let manifest = market_velocity_paper_strategy_preset_manifest(
+        "research_momentum_0375sl_27r_reclaim13_22_v1",
+    )
+    .unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-radar");
+    assert_eq!(manifest.symbol, "ALL");
+    assert_eq!(manifest.channel, "production_default");
+    assert_eq!(manifest.strategy_key, "market_velocity");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity 0.0375SL 2.7R reclaim13-22 v1"
+    );
+    assert_eq!(manifest.risk_level, "high");
+    assert_eq!(manifest.manifest_json["strategy_key"], "market_velocity");
+    assert_eq!(
+        manifest.manifest_json["preset"],
+        "research_momentum_0375sl_27r_reclaim13_22_v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["execution"]["service_mode"],
+        "signal_only"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["stop_loss_pct"],
+        0.0375
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["target_r"], 2.7);
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_rank_blocklist"][0]["trigger"],
+        "reclaim_ema"
+    );
+    assert!(manifest
+        .canonical_json
+        .contains("\"manifest_schema_version\":1"));
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
 }
 #[test]
 fn paper_observation_args_apply_episode_research_preset() {

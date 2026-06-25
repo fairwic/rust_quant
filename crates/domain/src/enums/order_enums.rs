@@ -25,6 +25,19 @@ impl OrderSide {
         }
     }
 }
+
+impl std::str::FromStr for OrderSide {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "buy" => Ok(Self::Buy),
+            "sell" => Ok(Self::Sell),
+            other => Err(format!("unsupported order side: {other}")),
+        }
+    }
+}
+
 /// 订单类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderType {
@@ -130,6 +143,20 @@ impl PositionSide {
         }
     }
 }
+
+impl std::str::FromStr for PositionSide {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "long" => Ok(Self::Long),
+            "short" => Ok(Self::Short),
+            "both" => Ok(Self::Both),
+            other => Err(format!("unsupported position side: {other}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +178,18 @@ mod tests {
         assert!(OrderStatus::Pending.can_cancel());
         assert!(OrderStatus::Submitted.can_cancel());
         assert!(!OrderStatus::Filled.can_cancel());
+    }
+
+    #[test]
+    fn parses_order_and_position_sides_from_contract_strings() {
+        assert_eq!("buy".parse::<OrderSide>().unwrap(), OrderSide::Buy);
+        assert_eq!("sell".parse::<OrderSide>().unwrap(), OrderSide::Sell);
+        assert_eq!("long".parse::<PositionSide>().unwrap(), PositionSide::Long);
+        assert_eq!(
+            "short".parse::<PositionSide>().unwrap(),
+            PositionSide::Short
+        );
+        assert!("hold".parse::<OrderSide>().is_err());
+        assert!("flat".parse::<PositionSide>().is_err());
     }
 }

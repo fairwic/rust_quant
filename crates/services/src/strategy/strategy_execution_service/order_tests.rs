@@ -86,15 +86,9 @@
             ..create_buy_signal(50000.0, 1234567890)
         };
         // 验证无效信号应该返回错误
-        let (side, pos_side) = if signal.should_buy {
-            ("buy", "long")
-        } else if signal.should_sell {
-            ("sell", "short")
-        } else {
-            ("invalid", "invalid")
-        };
-        assert_eq!(side, "invalid");
-        assert_eq!(pos_side, "invalid");
+        let error = StrategyExecutionService::trade_sides_from_signal(&signal)
+            .expect_err("无效信号应该返回错误");
+        assert!(error.to_string().contains("信号无效"));
     }
     #[test]
     fn test_execute_order_internal_zero_size_skip() {

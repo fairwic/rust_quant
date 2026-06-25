@@ -1,3 +1,4 @@
+use super::equity_stats::{analyze_profit_losses, format_optional_f64, trade_sharpe};
 use super::{
     runner_exit_for_target, trade_direction_for_event, BacktestCandle, ConfirmedEvent,
     MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection, RunnerExit,
@@ -240,17 +241,6 @@ struct MarketVelocityReplayStrategy {
     active_position: Option<ReplayActivePosition>,
 }
 #[derive(Debug, Clone, PartialEq)]
-struct ClosedTradeStats {
-    /// wins，用于记录交易或执行状态。
-    wins: usize,
-    /// losses，用于记录交易或执行状态。
-    losses: usize,
-    /// 列表数据。
-    returns: Vec<f64>,
-    /// 最大回撤百分比。
-    max_drawdown_pct: f64,
-}
-#[derive(Debug, Clone, PartialEq)]
 struct RunnerReplayTrade {
     /// event ID。
     event_id: i64,
@@ -309,7 +299,10 @@ pub fn build_framework_equity_report(
                 args,
                 runner,
             );
-            let closed_stats = analyze_runner_trades(&trades);
+            let closed_stats = analyze_profit_losses(
+                trades.iter().map(|trade| trade.profit_loss),
+                INITIAL_FUND_PER_SYMBOL,
+            );
             let profit = trades.iter().map(|trade| trade.profit_loss).sum::<f64>();
             all_returns.extend(closed_stats.returns.iter().copied());
             symbol_reports.push(FrameworkEquitySymbolReport {
@@ -344,7 +337,14 @@ pub fn build_framework_equity_report(
             ..BasicRiskStrategyConfig::default()
         };
         let result = run_indicator_strategy_backtest(&symbol, strategy, &candle_items, risk_config);
-        let closed_stats = analyze_closed_trades(&result.trade_records);
+        let closed_stats = analyze_profit_losses(
+            result
+                .trade_records
+                .iter()
+                .filter(|record| record.full_close)
+                .map(|record| record.profit_loss),
+            INITIAL_FUND_PER_SYMBOL,
+        );
         let profit = result.funds - INITIAL_FUND_PER_SYMBOL;
         all_returns.extend(closed_stats.returns.iter().copied());
         symbol_reports.push(FrameworkEquitySymbolReport {
@@ -1945,103 +1945,4 @@ fn to_candle_item(candle: &BacktestCandle) -> CandleItem {
         ts: candle.ts,
         confirm: 1,
     }
-}
-/// 封装分析closedtrades，减少回测策略调用方重复实现相同细节。
-fn analyze_closed_trades(records: &[TradeRecord]) -> ClosedTradeStats {
-    let mut wins = 0;
-    let mut losses = 0;
-    let mut equity = INITIAL_FUND_PER_SYMBOL;
-    let mut peak = INITIAL_FUND_PER_SYMBOL;
-    let mut max_drawdown_pct = 0.0;
-    let mut returns = Vec::new();
-    for record in records.iter().filter(|record| record.full_close) {
-        if record.profit_loss > 0.0 {
-            wins += 1;
-        } else if record.profit_loss < 0.0 {
-            losses += 1;
-        }
-        if equity > 0.0 {
-            returns.push(record.profit_loss / equity);
-        }
-        equity += record.profit_loss;
-        peak = peak.max(equity);
-        if peak > 0.0 {
-            let drawdown_pct = (peak - equity) / peak * 100.0;
-            if drawdown_pct > max_drawdown_pct {
-                max_drawdown_pct = drawdown_pct;
-            }
-        }
-    }
-    ClosedTradeStats {
-        wins,
-        losses,
-        returns,
-        max_drawdown_pct,
-    }
-}
-/// 封装分析runnertrades，减少回测策略调用方重复实现相同细节。
-fn analyze_runner_trades(trades: &[RunnerReplayTrade]) -> ClosedTradeStats {
-    let mut wins = 0;
-    let mut losses = 0;
-    let mut equity = INITIAL_FUND_PER_SYMBOL;
-    let mut peak = INITIAL_FUND_PER_SYMBOL;
-    let mut max_drawdown_pct = 0.0;
-    let mut returns = Vec::new();
-    for trade in trades {
-        if trade.profit_loss > 0.0 {
-            wins += 1;
-        } else if trade.profit_loss < 0.0 {
-            losses += 1;
-        }
-        if equity > 0.0 {
-            returns.push(trade.profit_loss / equity);
-        }
-        equity += trade.profit_loss;
-        peak = peak.max(equity);
-        if peak > 0.0 {
-            let drawdown_pct = (peak - equity) / peak * 100.0;
-            if drawdown_pct > max_drawdown_pct {
-                max_drawdown_pct = drawdown_pct;
-            }
-        }
-    }
-    ClosedTradeStats {
-        wins,
-        losses,
-        returns,
-        max_drawdown_pct,
-    }
-}
-/// 提供交易Sharpe的集中实现，避免回测策略调用方重复处理相同细节。
-fn trade_sharpe(returns: &[f64]) -> Option<f64> {
-    if returns.len() < 2 {
-        return None;
-    }
-    let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-    let stddev = sample_stddev(returns, mean);
-    (stddev > 0.0).then_some(mean / stddev * (returns.len() as f64).sqrt())
-}
-/// 构造样例stddev，集中维护回测策略的载荷组装规则。
-fn sample_stddev(values: &[f64], mean: f64) -> f64 {
-    let variance = values
-        .iter()
-        .map(|value| {
-            let diff = value - mean;
-            diff * diff
-        })
-        .sum::<f64>()
-        / (values.len() - 1) as f64;
-    variance.sqrt()
-}
-/// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
-fn format_optional_f64(value: Option<f64>) -> String {
-    value
-        .map(|value| {
-            if value.fract() == 0.0 {
-                format!("{value:.0}")
-            } else {
-                format!("{value}")
-            }
-        })
-        .unwrap_or_else(|| "NA".to_string())
 }
