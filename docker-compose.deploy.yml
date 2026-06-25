@@ -40,6 +40,58 @@ services:
       RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
       EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
 
+  quant-core-exchange-symbol-sync-worker:
+    container_name: quant-core-exchange-symbol-sync-worker
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER: "true"
+      EXCHANGE_SYMBOL_SYNC_WORKER_ONLY: "true"
+      EXCHANGE_SYMBOL_SYNC_RUN_ONCE: "false"
+      EXCHANGE_SYMBOL_SYNC_INTERVAL_SECS: ${EXCHANGE_SYMBOL_SYNC_INTERVAL_SECS:-3600}
+      EXCHANGE_SYMBOL_SOURCES: ${EXCHANGE_SYMBOL_SOURCES:-okx}
+      EXCHANGE_LISTING_SIGNAL_SUBMIT: ${EXCHANGE_LISTING_SIGNAL_SUBMIT:-0}
+
+  quant-core-vegas-eth-4h-worker:
+    container_name: quant-core-vegas-eth-4h-worker
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
+      IS_RUN_REAL_STRATEGY: "true"
+      IS_OPEN_SOCKET: "true"
+      IS_RUN_SYNC_DATA_JOB: "false"
+      IS_RUN_EXECUTION_WORKER: "false"
+      IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER: "false"
+      IS_RUN_MARKET_VELOCITY_RADAR: "false"
+      LIVE_STRATEGY_ONLY_INST_IDS: ${VEGAS_ETH_4H_INST_ID:-ETH-USDT-SWAP}
+      LIVE_STRATEGY_ONLY_PERIODS: ${VEGAS_ETH_4H_PERIOD:-4H}
+      MARKET_DATA_EXCHANGE: ${VEGAS_ETH_4H_MARKET_DATA_EXCHANGE:-okx}
+      DEFAULT_EXCHANGE: ${VEGAS_ETH_4H_MARKET_DATA_EXCHANGE:-okx}
+      STRATEGY_SIGNAL_DISPATCH_MODE: ${VEGAS_STRATEGY_SIGNAL_DISPATCH_MODE:-web}
+      RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
+      EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
+
   quant-core-market-velocity-radar:
     container_name: quant-core-market-velocity-radar
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}

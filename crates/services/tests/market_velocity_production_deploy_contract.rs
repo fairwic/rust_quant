@@ -39,6 +39,8 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     for service in [
         "quant-core-schema-ensure:",
         "quant-core-internal-server:",
+        "quant-core-exchange-symbol-sync-worker:",
+        "quant-core-vegas-eth-4h-worker:",
         "quant-core-market-velocity-radar:",
         "quant-core-market-velocity-candle-backfill-scheduler:",
         "quant-core-market-velocity-paper-observation-scheduler:",
@@ -52,6 +54,15 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         );
     }
     for rust_native_entrypoint in [
+        r#"IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER: "true""#,
+        r#"EXCHANGE_SYMBOL_SYNC_WORKER_ONLY: "true""#,
+        r#"EXCHANGE_SYMBOL_SYNC_RUN_ONCE: "false""#,
+        "EXCHANGE_SYMBOL_SOURCES: ${EXCHANGE_SYMBOL_SOURCES:-okx}",
+        r#"IS_RUN_REAL_STRATEGY: "true""#,
+        r#"IS_OPEN_SOCKET: "true""#,
+        "LIVE_STRATEGY_ONLY_INST_IDS: ${VEGAS_ETH_4H_INST_ID:-ETH-USDT-SWAP}",
+        "LIVE_STRATEGY_ONLY_PERIODS: ${VEGAS_ETH_4H_PERIOD:-4H}",
+        "STRATEGY_SIGNAL_DISPATCH_MODE: ${VEGAS_STRATEGY_SIGNAL_DISPATCH_MODE:-web}",
         r#"IS_RUN_MARKET_VELOCITY_RADAR: "true""#,
         r#"MARKET_VELOCITY_RADAR_ONLY: "true""#,
         "market_velocity_candle_backfill",
@@ -96,6 +107,8 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     );
     for service in [
         "quant-core-internal-server",
+        "quant-core-exchange-symbol-sync-worker",
+        "quant-core-vegas-eth-4h-worker",
         "quant-core-market-velocity-radar",
         "quant-core-market-velocity-paper-observation-scheduler",
         "quant-core-market-velocity-live-handoff-scheduler",
@@ -160,7 +173,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         workflow.contains("market_velocity_production_deploy_contract"),
         "CI verify must run the production deploy contract"
     );
-    let default_deploy_services = "quant-core-internal-server,quant-core-market-velocity-radar,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
+    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
     for deploy_script in [&promote, &rollback] {
         assert!(
             deploy_script.contains(default_deploy_services),
@@ -295,7 +308,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     assert!(
         !compose.contains("quant-core-vegas-eth-4h-live")
             && !compose.contains("VEGAS_QUANT_CORE_IMAGE")
-            && !compose.contains("VEGAS_STRATEGY_SIGNAL_DISPATCH_MODE"),
+            && compose.contains("quant-core-vegas-eth-4h-worker"),
         "production compose must not reintroduce the retired legacy Vegas live service; Vegas signals must flow through Web execution tasks and the unified execution worker"
     );
     assert!(
