@@ -154,16 +154,9 @@ impl MarketVelocityStrategySignalConfig {
                 "MARKET_VELOCITY_SIGNAL_MAX_HOLDING_HOURS",
                 DEFAULT_MAX_HOLDING_HOURS,
             )?,
-            automation_mode: std::env::var("MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string()),
-            live_order_allowed: parse_env_bool("MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED", false)?,
-            paper_trade_required: parse_env_bool(
-                "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED",
-                true,
-            )?,
+            automation_mode: DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string(),
+            live_order_allowed: DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED,
+            paper_trade_required: DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED,
             require_technical_confirmation: parse_env_bool(
                 "MARKET_VELOCITY_SIGNAL_REQUIRE_TECHNICAL_CONFIRMATION",
                 true,
@@ -322,36 +315,16 @@ impl MarketVelocityStrategySignalConfig {
 fn market_velocity_execution_policy_stage(
     config: &MarketVelocityStrategySignalConfig,
 ) -> &'static str {
-    let mode = config.automation_mode.trim().to_ascii_lowercase();
-    if mode.contains("dry_run") || mode.contains("dry-run") {
-        "execution_task_dry_run"
-    } else {
-        "live_execution_allowed"
-    }
+    let _ = config;
+    "live_execution_allowed"
 }
 
 fn normalize_market_velocity_live_execution_policy(
     config: &mut MarketVelocityStrategySignalConfig,
 ) {
-    let mode = config.automation_mode.trim().to_ascii_lowercase();
-    let is_dry_run = mode.contains("dry_run") || mode.contains("dry-run");
-    if is_dry_run {
-        config.live_order_allowed = true;
-        config.paper_trade_required = false;
-        return;
-    }
-    if mode.is_empty()
-        || matches!(
-            mode.as_str(),
-            "signal_only" | "signal-only" | "paper_only" | "paper"
-        )
-        || !config.live_order_allowed
-        || config.paper_trade_required
-    {
-        config.automation_mode = DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string();
-        config.live_order_allowed = DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED;
-        config.paper_trade_required = DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED;
-    }
+    config.automation_mode = DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string();
+    config.live_order_allowed = DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED;
+    config.paper_trade_required = DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED;
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarketVelocityStrategySignalBlocker {
@@ -791,11 +764,11 @@ fn build_market_velocity_strategy_signal_submit_request(
         "position_side": "long",
         "trade_side": "open",
         "order_type": "market",
-        "auto_execution_allowed": config.live_order_allowed,
+        "auto_execution_allowed": DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED,
         "execution_policy": {
-            "mode": &config.automation_mode,
-            "live_order_allowed": config.live_order_allowed,
-            "paper_trade_required": config.paper_trade_required,
+            "mode": DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE,
+            "live_order_allowed": DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED,
+            "paper_trade_required": DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED,
             "production_stage": market_velocity_execution_policy_stage(config),
         },
         "risk_plan": risk_plan,

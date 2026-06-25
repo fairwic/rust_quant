@@ -1,9 +1,7 @@
 #![allow(unused_imports)]
 use super::execution_worker_test_support::*;
 use super::*;
-use crate::rust_quan_web::execution_payload::{
-    live_order_confirmation_valid, protective_stop_loss_required,
-};
+use crate::rust_quan_web::execution_payload::protective_stop_loss_required;
 use crate::rust_quan_web::execution_protection::{
     protective_order_query_candidates_from_ack, protective_order_query_to_sync_outcome,
     protective_order_result_to_sync_outcome,
@@ -14,13 +12,7 @@ use crate::rust_quan_web::{
 use async_trait::async_trait;
 use crypto_exc_all::{Instrument, ProtectiveOrderWorkingType};
 use serde_json::json;
-use std::sync::{Arc, Mutex, OnceLock};
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("env lock")
-}
+use std::sync::Arc;
 #[test]
 fn position_stale_reconciliation_request_from_task_uses_idempotent_source_ref() {
     let task = task(json!({

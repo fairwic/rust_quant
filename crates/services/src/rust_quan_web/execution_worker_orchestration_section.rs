@@ -4,15 +4,12 @@ impl ExecutionWorker {
     pub async fn run_once(&self) -> Result<usize> {
         self.validate_runtime_scope()?;
         self.ensure_live_audit_repository()?;
-        // 三种维护模式都不允许继续进入普通租约路径，避免重放报告、确认订单或只读对账时误触发下单。
+        // 维护模式不进入普通租约路径，避免重放报告或确认订单时误触发新下单。
         if self.config.report_replay_mode {
             return self.run_report_replay_once().await;
         }
         if self.config.confirmation_mode {
             return self.run_confirmation_once().await;
-        }
-        if reconciliation_only_mode_from_env() {
-            return self.run_reconciliation_only_once().await;
         }
         self.record_checkpoint(
             "leasing",
@@ -23,7 +20,6 @@ impl ExecutionWorker {
                 "default_exchange": self.config.default_exchange.as_str(),
                 "task_types": self.config.task_types.clone(),
                 "task_statuses": self.config.task_statuses.clone(),
-                "target_task_ids": self.config.target_task_ids.clone(),
             }),
         )
         .await;
@@ -34,7 +30,7 @@ impl ExecutionWorker {
             .lease_tasks(ExecutionTaskLeaseRequest {
                 worker_id: self.config.worker_id.clone(),
                 limit: self.config.lease_limit,
-                task_ids: self.config.target_task_ids.clone(),
+                task_ids: Vec::new(),
                 task_types: self.config.task_types.clone(),
                 task_statuses: self.config.task_statuses.clone(),
             })
@@ -60,7 +56,6 @@ impl ExecutionWorker {
             json!({
                 "leased_count": leased.tasks.len(),
                 "lease_limit": self.config.lease_limit,
-                "target_task_ids": self.config.target_task_ids.clone(),
             }),
         )
         .await;
@@ -82,26 +77,6 @@ impl ExecutionWorker {
         let mut handled = 0;
         let mut last_task_id = None;
         for task in leased.tasks {
-            // live worker 可以额外配置 task allowlist，用于人工排障或高风险实盘验证；
-            // 即使 Web 租约返回了任务，也要在本地再拦一次，避免环境变量作用域配置错误。
-            if !self.config.leased_task_allowed(task.id) {
-                warn!(
-                    task_id = task.id,
-                    target_task_ids = ?self.config.target_task_ids,
-                    "leased execution task is outside EXECUTION_WORKER_TARGET_TASK_IDS; skipping order execution"
-                );
-                self.record_checkpoint(
-                    "skipped_target_task_mismatch",
-                    Some(task.id),
-                    json!({
-                        "stage": "target_task_allowlist",
-                        "task_id": task.id,
-                        "target_task_ids": self.config.target_task_ids.clone(),
-                    }),
-                )
-                .await;
-                continue;
-            }
             info!(
                 worker_id = %self.config.worker_id,
                 execution_task_id = task.id,
@@ -434,13 +409,12 @@ impl ExecutionWorker {
             json!({
                 "lease_limit": self.config.lease_limit,
                 "dry_run": self.config.dry_run,
-                "target_task_ids": self.config.target_task_ids.clone(),
             }),
         )
         .await;
         let leased = match self
             .client
-            .lease_confirmation_tasks(self.config.lease_limit, &self.config.target_task_ids)
+            .lease_confirmation_tasks(self.config.lease_limit, &[])
             .await
         {
             Ok(leased) => leased,
@@ -463,31 +437,12 @@ impl ExecutionWorker {
             json!({
                 "leased_count": leased.items.len(),
                 "lease_limit": self.config.lease_limit,
-                "target_task_ids": self.config.target_task_ids.clone(),
             }),
         )
         .await;
         let mut handled = 0;
         let mut last_task_id = None;
         for item in leased.items {
-            if !self.config.leased_task_allowed(item.task.id) {
-                warn!(
-                    task_id = item.task.id,
-                    target_task_ids = ?self.config.target_task_ids,
-                    "leased pending confirmation task is outside EXECUTION_WORKER_TARGET_TASK_IDS; skipping confirmation"
-                );
-                self.record_checkpoint(
-                    "skipped_target_task_mismatch",
-                    Some(item.task.id),
-                    json!({
-                        "stage": "confirmation_target_task_allowlist",
-                        "task_id": item.task.id,
-                        "target_task_ids": self.config.target_task_ids.clone(),
-                    }),
-                )
-                .await;
-                continue;
-            }
             let report = self.execute_pending_confirmation_item(&item).await;
             let report_status = report.execution_status.clone();
             if let Err(error) = self.client.report_result(report.clone()).await {
@@ -577,7 +532,7 @@ impl ExecutionWorker {
         let mut skipped_request_ids = Vec::new();
         for candidate in candidates {
             request_ids.push(candidate.request_id.clone());
-            if !self.config.leased_task_allowed(candidate.report.task_id) {
+            if !self.config.report_replay_task_allowed(candidate.report.task_id) {
                 skipped_target_task_mismatch += 1;
                 skipped_request_ids.push(candidate.request_id.clone());
                 self.record_checkpoint(

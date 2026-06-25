@@ -1,9 +1,7 @@
 #![allow(unused_imports)]
 use super::execution_worker_test_support::*;
 use super::*;
-use crate::rust_quan_web::execution_payload::{
-    live_order_confirmation_valid, protective_stop_loss_required,
-};
+use crate::rust_quan_web::execution_payload::protective_stop_loss_required;
 use crate::rust_quan_web::execution_protection::{
     protective_order_query_candidates_from_ack, protective_order_query_to_sync_outcome,
     protective_order_result_to_sync_outcome,

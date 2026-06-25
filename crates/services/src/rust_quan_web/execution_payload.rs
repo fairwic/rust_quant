@@ -7,9 +7,6 @@ use anyhow::{anyhow, Result};
 use crypto_exc_all::{ExchangeId, Instrument, OrderSide, OrderType, PositionMode, TimeInForce};
 use serde_json::{json, Value};
 use std::str::FromStr;
-use tracing::warn;
-const LIVE_ORDER_CONFIRM_ENV: &str = "EXECUTION_WORKER_LIVE_ORDER_CONFIRM";
-const LIVE_ORDER_CONFIRM_TOKEN: &str = "I_UNDERSTAND_LIVE_ORDERS";
 #[derive(Debug, Clone)]
 pub(super) struct RiskContractViolation {
     /// 提示信息。
@@ -428,33 +425,6 @@ pub(super) fn parse_env_list(key: &str, defaults: &[&str]) -> Vec<String> {
     }
 }
 /// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
-pub(super) fn parse_env_i64_list(key: &str) -> Vec<i64> {
-    let Some(raw) = std::env::var(key).ok() else {
-        return Vec::new();
-    };
-    let mut values = Vec::new();
-    let mut invalid_values = Vec::new();
-    for value in raw
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        match value.parse::<i64>() {
-            Ok(parsed) => values.push(parsed),
-            Err(_) => invalid_values.push(value.to_string()),
-        }
-    }
-    if !invalid_values.is_empty() {
-        warn!(
-            env_key = key,
-            invalid_values = ?invalid_values,
-            "invalid execution worker target task ids; denying all leased tasks"
-        );
-        return vec![i64::MIN];
-    }
-    values
-}
-/// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
 pub(super) fn parse_env_u32(key: &str, default: u32) -> u32 {
     std::env::var(key)
         .ok()
@@ -468,26 +438,6 @@ pub(super) fn parse_env_u64(key: &str, default: u64) -> u64 {
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .unwrap_or(default)
-}
-/// 封装实盘orderconfirmationvalid，减少Web 商业链路调用方重复实现相同细节。
-pub(super) fn live_order_confirmation_valid(dry_run: bool, confirmation: Option<&str>) -> bool {
-    dry_run
-        || confirmation
-            .map(str::trim)
-            .is_some_and(|value| value == LIVE_ORDER_CONFIRM_TOKEN)
-}
-/// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
-pub(super) fn ensure_live_order_confirmation() -> Result<()> {
-    let confirmation = std::env::var(LIVE_ORDER_CONFIRM_ENV).ok();
-    if live_order_confirmation_valid(false, confirmation.as_deref()) {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "refusing live exchange orders: set {}={} after validating API keys, task filters, and exchange environment",
-            LIVE_ORDER_CONFIRM_ENV,
-            LIVE_ORDER_CONFIRM_TOKEN
-        ))
-    }
 }
 /// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
 pub(crate) fn parse_exchange(raw: &str) -> Result<ExchangeId> {

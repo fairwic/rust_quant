@@ -1,3 +1,4 @@
+use super::env_parse::{first_non_empty_env, parse_bool_env, parse_i64_env, parse_u64_env};
 use super::market_velocity_backfill::build_okx_http_client;
 use super::market_velocity_strategy_config::load_market_velocity_signal_config_or_env;
 use anyhow::{anyhow, bail, Context, Result};
@@ -22,18 +23,12 @@ mod entry_candles;
 mod handoff;
 use candidates::{load_market_velocity_live_candidate_events, normalize_candidate_limit};
 use entry_candles::{load_market_velocity_live_entry_candles, MarketVelocityEntryCandleLoadStatus};
+use handoff::market_velocity_handoff_log_context;
 pub use handoff::{
     build_market_velocity_live_preview_request, build_market_velocity_live_worker_handoff,
-    build_market_velocity_live_worker_manifest, build_market_velocity_scoped_worker_env_overrides,
-    market_velocity_required_live_owner_scope, market_velocity_scope_signal_to_live_owner,
-    market_velocity_scoped_worker_apply_authorized, market_velocity_task_creation_apply_authorized,
+    build_market_velocity_live_worker_manifest, market_velocity_required_live_owner_scope,
+    market_velocity_scope_signal_to_live_owner,
 };
-use handoff::{market_velocity_handoff_log_context, run_market_velocity_scoped_worker_once};
-pub const MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN: &str =
-    "I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK";
-pub const MARKET_VELOCITY_REFRESH_READINESS_CONFIRM_TOKEN: &str =
-    "I_UNDERSTAND_THIS_REFRESHES_OKX_READONLY_TASK_READINESS";
-pub const MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN: &str = "I_UNDERSTAND_LIVE_ORDERS";
 const DEFAULT_OKX_REST_BASE: &str = "https://www.okx.com";
 const DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES: i64 = 45;
 const DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS: u64 = 0;
@@ -67,18 +62,6 @@ pub struct MarketVelocityLiveHandoffConfig {
     pub entry_candle_proxy_url: Option<String>,
     /// 毫秒级时间戳或时长。
     pub entry_candle_request_sleep_ms: u64,
-    /// refreshreadinessapply，用于配置运行参数。
-    pub refresh_readiness_apply: bool,
-    /// 刷新准备度确认标记；为空时不执行刷新。
-    pub refresh_readiness_confirm: Option<String>,
-    /// create任务apply，用于配置运行参数。
-    pub create_task_apply: bool,
-    /// 创建任务确认标记；为空时不创建任务。
-    pub create_task_confirm: Option<String>,
-    /// runscopedWorkerapply，用于配置运行参数。
-    pub run_scoped_worker_apply: bool,
-    /// 运行限定 worker 的确认标记；为空时不启动 worker。
-    pub run_scoped_worker_confirm: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketVelocityLiveHandoffRuntimeConfig {
@@ -168,24 +151,6 @@ pub fn market_velocity_live_handoff_config_from_env() -> Result<MarketVelocityLi
             "MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS",
             DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS,
         )?,
-        refresh_readiness_apply: parse_bool_env(
-            "MARKET_VELOCITY_TASK_READINESS_REFRESH_APPLY",
-            false,
-        )?,
-        refresh_readiness_confirm: first_non_empty_env(&[
-            "MARKET_VELOCITY_TASK_READINESS_REFRESH_CONFIRM",
-            "MARKET_VELOCITY_REFRESH_READINESS_CONFIRM",
-        ]),
-        create_task_apply: parse_bool_env("MARKET_VELOCITY_CREATE_TASK_APPLY", false)?,
-        create_task_confirm: first_non_empty_env(&[
-            "MARKET_VELOCITY_CREATE_TASK_CONFIRM",
-            "MARKET_VELOCITY_SIGNAL_REPLAY_CONFIRM",
-        ]),
-        run_scoped_worker_apply: parse_bool_env("MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY", false)?,
-        run_scoped_worker_confirm: first_non_empty_env(&[
-            "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM",
-            "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
-        ]),
     })
 }
 /// 提供市场动量livehandoffruntime配置from环境变量的集中实现，避免行情数据调用方重复处理相同细节。
@@ -220,22 +185,11 @@ pub async fn run_market_velocity_live_handoff(
         internal_secret: config.internal_secret.clone(),
     })?;
     let mut refresh_readiness = json!({
-        "apply": config.refresh_readiness_apply,
+        "apply": config.credential_id.is_some(),
         "mutation_scope": "web_signed_readonly_preflight_snapshot_refresh_only",
         "exchange_mutation_allowed": false,
     });
-    if config.refresh_readiness_apply {
-        let credential_id = config
-            .credential_id
-            .ok_or_else(|| anyhow!("MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID is required"))?;
-        if config.refresh_readiness_confirm.as_deref().map(str::trim)
-            != Some(MARKET_VELOCITY_REFRESH_READINESS_CONFIRM_TOKEN)
-        {
-            bail!(
-                "MARKET_VELOCITY_TASK_READINESS_REFRESH_CONFIRM={} is required",
-                MARKET_VELOCITY_REFRESH_READINESS_CONFIRM_TOKEN
-            );
-        }
+    if let Some(credential_id) = config.credential_id {
         let credential = client.check_internal_api_credential(credential_id).await?;
         refresh_readiness["credential_id"] = json!(credential.id);
         refresh_readiness["last_check_code"] = json!(credential.last_check_code);
@@ -415,8 +369,8 @@ pub async fn run_market_velocity_live_handoff(
     let skipped_summary = summarize_skipped_candidates(&skipped_candidates);
     let mut response = json!({
         "status": if preview.blocker_codes.is_empty() { "ready_for_task_creation" } else { "blocked" },
-        "read_only": !config.create_task_apply,
-        "mutation_allowed": config.create_task_apply,
+        "read_only": false,
+        "mutation_allowed": true,
         "exchange_mutation_allowed": false,
         "creates_new_order_system": false,
         "candidate_scan": {
@@ -437,20 +391,6 @@ pub async fn run_market_velocity_live_handoff(
         "execution_path": market_velocity_existing_execution_worker_path(),
         "refresh_readiness": refresh_readiness,
     });
-    if !config.create_task_apply {
-        response["next_apply_confirm"] = json!(MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN);
-        return Ok(response);
-    }
-    if !market_velocity_task_creation_apply_authorized(true, config.create_task_confirm.as_deref())
-    {
-        bail!(
-            "MARKET_VELOCITY_CREATE_TASK_CONFIRM={} is required",
-            MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN
-        );
-    }
-    if !signal_config.live_order_allowed || signal_config.paper_trade_required {
-        bail!("live task creation requires MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED=true and MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED=false");
-    }
     let (target_buyer_email, target_combo_id) =
         market_velocity_required_live_owner_scope(config.buyer_email.as_deref(), config.combo_id)?;
     if !preview.blocker_codes.is_empty() {
@@ -497,59 +437,12 @@ pub async fn run_market_velocity_live_handoff(
         }
         None => None,
     };
-    let scoped_worker_execution = if config.run_scoped_worker_apply {
-        if !market_velocity_scoped_worker_apply_authorized(
-            true,
-            config.run_scoped_worker_confirm.as_deref(),
-        ) {
-            bail!(
-                "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM={} is required before running scoped live worker",
-                MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN
-            );
-        }
-        let task = dispatch
-            .generated_tasks
-            .first()
-            .ok_or_else(|| anyhow!("live task creation returned no execution task"))?;
-        let handoff = next_worker
-            .as_ref()
-            .ok_or_else(|| anyhow!("scoped live worker handoff is unavailable"))?;
-        if handoff.get("status").and_then(Value::as_str) != Some("ready_for_scoped_live_worker") {
-            bail!("scoped live worker readiness is blocked; refusing live worker run");
-        }
-        let handled = run_market_velocity_scoped_worker_once(
-            task.id,
-            config
-                .run_scoped_worker_confirm
-                .as_deref()
-                .unwrap_or(MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN),
-        )
-        .await?;
-        tracing::info!(
-            execution_task_id = task.id,
-            handled,
-            "Market Velocity scoped execution worker run completed"
-        );
-        json!({
-            "apply": true,
-            "status": "scoped_worker_ran_once",
-            "task_id": task.id,
-            "handled": handled,
-        })
-    } else {
-        json!({
-            "apply": false,
-            "status": "not_requested",
-            "next_apply_confirm": MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN,
-        })
-    };
     response["status"] = json!("execution_task_created");
     response["read_only"] = json!(false);
     response["mutation_allowed"] = json!(true);
     response["strategy_signal_id"] = json!(dispatch.inbox.id);
     response["generated_tasks"] = json!(dispatch.generated_tasks);
     response["next_worker_handoff"] = next_worker.unwrap_or_else(|| json!(null));
-    response["scoped_worker_execution"] = scoped_worker_execution;
     Ok(response)
 }
 /// 提供市场动量入场确认staleblocker的集中实现，避免行情数据调用方重复处理相同细节。
@@ -617,21 +510,12 @@ fn build_market_velocity_no_live_candidate_response(
             "explicit_event_id": config.event_id,
         },
         "automation": {
-            "task_creation_apply": config.create_task_apply,
-            "scoped_worker_apply": config.run_scoped_worker_apply,
             "entry_candle_on_demand_refresh": config.entry_candle_on_demand_refresh,
         },
         "next_action": "wait_for_next_market_velocity_event",
         "execution_path": market_velocity_existing_execution_worker_path(),
         "refresh_readiness": refresh_readiness,
     })
-}
-/// 提供首个非空环境变量的集中实现，避免行情数据调用方重复处理相同细节。
-fn first_non_empty_env(keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .filter_map(|key| std::env::var(key).ok())
-        .map(|value| value.trim().to_string())
-        .find(|value| !value.is_empty())
 }
 /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_optional_i64_env(keys: &[&str]) -> Result<Option<i64>> {
@@ -649,43 +533,6 @@ fn parse_optional_i64_env(keys: &[&str]) -> Result<Option<i64>> {
                 })
         })
         .transpose()
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_i64_env(key: &str, default: i64) -> Result<i64> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            value
-                .trim()
-                .parse::<i64>()
-                .map_err(|error| anyhow!("{key} must be an integer: {error}"))
-        })
-        .transpose()
-        .map(|value| value.unwrap_or(default))
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_u64_env(key: &str, default: u64) -> Result<u64> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            value
-                .trim()
-                .parse::<u64>()
-                .map_err(|error| anyhow!("{key} must be an unsigned integer: {error}"))
-        })
-        .transpose()
-        .map(|value| value.unwrap_or(default))
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_bool_env(key: &str, default: bool) -> Result<bool> {
-    let Some(value) = std::env::var(key).ok() else {
-        return Ok(default);
-    };
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "y" | "on" => Ok(true),
-        "0" | "false" | "no" | "n" | "off" | "" => Ok(false),
-        _ => bail!("{key} must be a boolean"),
-    }
 }
 /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_bool_from_map(envs: &BTreeMap<String, String>, key: &str, default: bool) -> Result<bool> {
@@ -738,15 +585,6 @@ mod tests {
         "MARKET_VELOCITY_ENTRY_CANDLE_OKX_REST_BASE",
         "MARKET_VELOCITY_ENTRY_CANDLE_PROXY_URL",
         "MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS",
-        "MARKET_VELOCITY_TASK_READINESS_REFRESH_APPLY",
-        "MARKET_VELOCITY_TASK_READINESS_REFRESH_CONFIRM",
-        "MARKET_VELOCITY_REFRESH_READINESS_CONFIRM",
-        "MARKET_VELOCITY_CREATE_TASK_APPLY",
-        "MARKET_VELOCITY_CREATE_TASK_CONFIRM",
-        "MARKET_VELOCITY_SIGNAL_REPLAY_CONFIRM",
-        "MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY",
-        "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM",
-        "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
     ];
     /// 封装环境变量lock，减少行情数据调用方重复实现相同细节。
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -792,12 +630,6 @@ mod tests {
             entry_candle_okx_rest_base: DEFAULT_OKX_REST_BASE.to_string(),
             entry_candle_proxy_url: None,
             entry_candle_request_sleep_ms: 0,
-            refresh_readiness_apply: false,
-            refresh_readiness_confirm: None,
-            create_task_apply: false,
-            create_task_confirm: None,
-            run_scoped_worker_apply: false,
-            run_scoped_worker_confirm: None,
         }
     }
     #[test]
@@ -853,8 +685,6 @@ mod tests {
         assert_eq!(config.entry_candle_okx_rest_base, "https://www.okx.com");
         assert_eq!(config.entry_candle_proxy_url, None);
         assert_eq!(config.entry_candle_request_sleep_ms, 0);
-        assert!(!config.run_scoped_worker_apply);
-        assert_eq!(config.run_scoped_worker_confirm, None);
     }
     #[test]
     fn no_live_candidate_response_is_non_error_signal_status() {

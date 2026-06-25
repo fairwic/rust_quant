@@ -176,7 +176,7 @@ fn execution_worker_from_env_requires_non_empty_internal_secret() {
     );
 }
 #[test]
-fn signed_read_only_reconciliation_worker_requires_explicit_target_scope() {
+fn execution_worker_does_not_keep_live_mode_switch_gates() {
     let worker_source = read_repo_file(&[
         "crates",
         "services",
@@ -192,14 +192,12 @@ fn signed_read_only_reconciliation_worker_requires_explicit_target_scope() {
         "execution_worker_orchestration_section.rs",
     ]);
     assert!(
-        worker_source.contains("if !config.dry_run {\n            config.validate_live_worker_scope()?;"),
-        "signed read-only worker modes must require EXECUTION_WORKER_TARGET_TASK_IDS whenever dry-run is disabled"
+        !worker_source.contains("validate_live_worker_scope"),
+        "execution worker must not keep a target-scope live switch gate"
     );
     assert!(
-        !worker_source.contains(
-            "if !reconciliation_only_mode {\n            config.validate_live_worker_scope()?;"
-        ),
-        "reconciliation-only signed read-only mode must not bypass target task scoping"
+        !worker_source.contains("reconciliation_only_mode"),
+        "execution worker must not keep reconciliation-only mode switch"
     );
     assert!(worker_source.contains("fn validate_runtime_scope(&self) -> Result<()>"));
     let audit_ready_start = worker_source
@@ -297,7 +295,7 @@ fn legacy_signed_read_only_queries_require_confirmation_gate() {
     assert_signed_read_gate_before(
         "okx_adapter.rs",
         &infrastructure_okx_adapter,
-        "impl OkxAccountAdapter {\n    pub fn new() -> Result<Self>",
+        "impl OkxAccountAdapter",
         "OkxAccount::from_env",
     );
     assert_signed_read_gate_before(

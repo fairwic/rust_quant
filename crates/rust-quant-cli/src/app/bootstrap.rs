@@ -312,11 +312,8 @@ async fn run_execution_worker_loop() -> Result<()> {
     let envs: HashMap<String, String> = std::env::vars().collect();
     let poll_interval_secs = execution_worker_poll_interval_secs_from_map(&envs);
     info!(
-        "🧾 execution worker 后台轮询启动: interval={}s, dry_run={}",
+        "🧾 execution worker 后台轮询启动: interval={}s, mode=live",
         poll_interval_secs,
-        std::env::var("EXECUTION_WORKER_DRY_RUN")
-            .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
-            .unwrap_or(true),
     );
     loop {
         match worker.run_once().await {

@@ -1,16 +1,12 @@
-use super::{
-    MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN, MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN,
-};
 use anyhow::{anyhow, bail, Result};
 use rust_quant_services::rust_quan_web::{
     build_market_velocity_scoped_execution_worker_env,
-    market_velocity_existing_execution_worker_path, ExecutionTask, ExecutionWorker,
+    market_velocity_existing_execution_worker_path, ExecutionTask,
     MarketVelocityExecutionTaskCreationPreviewRequest,
     MarketVelocityExecutionTaskLiveReadinessResponse, MarketVelocityWorkerHandoffReadiness,
     StrategySignalSubmitRequest,
 };
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 /// 构建build市场动量实盘preview请求，集中维护行情数据的载荷和字段组装规则。
 pub fn build_market_velocity_live_preview_request(
     signal: &StrategySignalSubmitRequest,
@@ -126,8 +122,8 @@ pub fn build_market_velocity_live_worker_handoff(
         "read_only": true,
         "mutation_allowed": false,
         "status": if web_readiness.status == "ready_for_live_worker"
-            && worker_handoff_readiness.status == "ready_for_scoped_live_worker" {
-            "ready_for_scoped_live_worker"
+            && worker_handoff_readiness.status == "ready_for_live_worker" {
+            "ready_for_live_worker"
         } else {
             "blocked"
         },
@@ -171,97 +167,6 @@ pub fn market_velocity_scope_signal_to_live_owner(
     );
     signal.payload_json = serde_json::to_string(&payload)?;
     Ok(signal)
-}
-pub fn market_velocity_task_creation_apply_authorized(
-    apply: bool,
-    confirmation: Option<&str>,
-) -> bool {
-    apply && confirmation.map(str::trim) == Some(MARKET_VELOCITY_CREATE_TASK_CONFIRM_TOKEN)
-}
-pub fn market_velocity_scoped_worker_apply_authorized(
-    apply: bool,
-    confirmation: Option<&str>,
-) -> bool {
-    apply && confirmation.map(str::trim) == Some(MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN)
-}
-/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
-pub fn build_market_velocity_scoped_worker_env_overrides(
-    task_id: i64,
-    confirmation: &str,
-) -> Result<BTreeMap<&'static str, String>> {
-    if task_id <= 0 {
-        bail!("scoped live worker task_id must be positive");
-    }
-    if !market_velocity_scoped_worker_apply_authorized(true, Some(confirmation)) {
-        bail!(
-            "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM={} is required before running scoped live worker",
-            MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN
-        );
-    }
-    Ok(BTreeMap::from([
-        ("IS_RUN_EXECUTION_WORKER", "true".to_string()),
-        ("EXECUTION_WORKER_ONLY", "true".to_string()),
-        ("EXECUTION_WORKER_RUN_ONCE", "true".to_string()),
-        ("EXECUTION_WORKER_DRY_RUN", "false".to_string()),
-        (
-            "EXECUTION_WORKER_ID",
-            "market_velocity_scoped_live_worker".to_string(),
-        ),
-        ("EXECUTION_WORKER_LEASE_LIMIT", "1".to_string()),
-        ("EXECUTION_WORKER_TARGET_TASK_IDS", task_id.to_string()),
-        ("EXECUTION_WORKER_TASK_TYPES", "execute_signal".to_string()),
-        (
-            "EXECUTION_WORKER_TASK_STATUSES",
-            "pending,leased".to_string(),
-        ),
-        ("EXECUTION_WORKER_CONFIRMATION_MODE", "false".to_string()),
-        ("EXECUTION_WORKER_RECONCILIATION_ONLY", "false".to_string()),
-        ("EXECUTION_WORKER_REPORT_REPLAY_MODE", "false".to_string()),
-        (
-            "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
-            MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN.to_string(),
-        ),
-    ]))
-}
-/// 执行 行情与市场数据 主流程，并把外部依赖调用、状态推进和错误返回串起来。
-pub(super) async fn run_market_velocity_scoped_worker_once(
-    task_id: i64,
-    confirmation: &str,
-) -> Result<usize> {
-    let overrides = build_market_velocity_scoped_worker_env_overrides(task_id, confirmation)?;
-    let _guard = EnvOverrideGuard::apply(&overrides);
-    let worker = ExecutionWorker::from_env()?;
-    worker.verify_live_audit_ready().await?;
-    worker.run_once().await
-}
-struct EnvOverrideGuard {
-    /// 列表数据。
-    previous: Vec<(&'static str, Option<String>)>,
-}
-impl EnvOverrideGuard {
-    /// 封装应用，减少行情数据调用方重复实现相同细节。
-    fn apply(overrides: &BTreeMap<&'static str, String>) -> Self {
-        let previous = overrides
-            .iter()
-            .map(|(key, value)| {
-                let previous = std::env::var(key).ok();
-                std::env::set_var(key, value);
-                (*key, previous)
-            })
-            .collect();
-        Self { previous }
-    }
-}
-impl Drop for EnvOverrideGuard {
-    /// 封装释放，减少行情数据调用方重复实现相同细节。
-    fn drop(&mut self) {
-        for (key, value) in self.previous.drain(..).rev() {
-            match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-        }
-    }
 }
 /// 构造载荷字符串，集中维护行情数据的载荷组装规则。
 fn payload_string(payload: &Value, key: &str) -> Option<String> {
@@ -405,61 +310,6 @@ mod tests {
         }
     }
     #[test]
-    fn scoped_worker_auto_run_requires_exact_live_order_confirmation() {
-        assert!(!market_velocity_scoped_worker_apply_authorized(false, None));
-        assert!(!market_velocity_scoped_worker_apply_authorized(true, None));
-        assert!(!market_velocity_scoped_worker_apply_authorized(
-            true,
-            Some("true")
-        ));
-        assert!(market_velocity_scoped_worker_apply_authorized(
-            true,
-            Some(MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN)
-        ));
-    }
-    #[test]
-    fn scoped_worker_env_overrides_force_one_reviewed_live_task() {
-        let overrides = build_market_velocity_scoped_worker_env_overrides(
-            2042663,
-            MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM_TOKEN,
-        )
-        .expect("overrides");
-        assert_eq!(overrides["IS_RUN_EXECUTION_WORKER"], "true");
-        assert_eq!(overrides["EXECUTION_WORKER_ONLY"], "true");
-        assert_eq!(overrides["EXECUTION_WORKER_RUN_ONCE"], "true");
-        assert_eq!(overrides["EXECUTION_WORKER_DRY_RUN"], "false");
-        assert_eq!(overrides["EXECUTION_WORKER_TARGET_TASK_IDS"], "2042663");
-        assert_eq!(overrides["EXECUTION_WORKER_LEASE_LIMIT"], "1");
-        assert_eq!(overrides["EXECUTION_WORKER_TASK_TYPES"], "execute_signal");
-        assert_eq!(
-            overrides["EXECUTION_WORKER_TASK_STATUSES"],
-            "pending,leased"
-        );
-        assert_eq!(
-            overrides["EXECUTION_WORKER_LIVE_ORDER_CONFIRM"],
-            "I_UNDERSTAND_LIVE_ORDERS"
-        );
-    }
-    #[test]
-    fn scoped_worker_verifies_live_audit_before_run_once() {
-        let source = include_str!("handoff.rs");
-        let worker_start = source
-            .find("async fn run_market_velocity_scoped_worker_once")
-            .expect("scoped worker entrypoint should exist");
-        let guard_start = source
-            .find("struct EnvOverrideGuard")
-            .expect("env override guard should follow scoped worker entrypoint");
-        let worker_entrypoint = &source[worker_start..guard_start];
-        assert!(
-            worker_entrypoint
-                .find("worker.verify_live_audit_ready().await?")
-                .expect("scoped live worker should verify live audit readiness")
-                < worker_entrypoint
-                    .find("worker.run_once().await")
-                    .expect("scoped live worker should run after readiness")
-        );
-    }
-    #[test]
     fn preview_request_is_derived_from_rust_market_velocity_signal_payload() {
         let preview = build_market_velocity_live_preview_request(
             &sample_signal_request(),
@@ -499,14 +349,13 @@ mod tests {
             manifest["execution_path"]["creates_new_order_system"],
             false
         );
-        assert_eq!(
-            manifest["next_worker_env"]["EXECUTION_WORKER_TARGET_TASK_IDS"],
-            "228"
-        );
-        assert_eq!(
-            manifest["next_worker_env"]["EXECUTION_WORKER_DRY_RUN"],
-            "false"
-        );
+        assert_eq!(manifest["next_worker_env"]["reference_task_id"], 228);
+        assert!(manifest["next_worker_env"]
+            .get("EXECUTION_WORKER_TARGET_TASK_IDS")
+            .is_none());
+        assert!(manifest["next_worker_env"]
+            .get("EXECUTION_WORKER_DRY_RUN")
+            .is_none());
         assert!(
             !encoded.contains(".sh") && !encoded.contains("scripts/dev"),
             "production handoff manifest must not point to shell scripts: {encoded}"
@@ -519,7 +368,7 @@ mod tests {
             build_market_velocity_scoped_worker_handoff_readiness(&web_readiness);
         let handoff =
             build_market_velocity_live_worker_handoff(228, web_readiness, worker_readiness);
-        assert_eq!(handoff["status"], "ready_for_scoped_live_worker");
+        assert_eq!(handoff["status"], "ready_for_live_worker");
         assert_eq!(handoff["read_only"], true);
         assert_eq!(handoff["mutation_allowed"], false);
         assert_eq!(
@@ -527,8 +376,8 @@ mod tests {
             "vegas_style_execution_task_worker"
         );
         assert_eq!(
-            handoff["manifest"]["next_worker_env"]["EXECUTION_WORKER_TARGET_TASK_IDS"],
-            "228"
+            handoff["manifest"]["next_worker_env"]["reference_task_id"],
+            228
         );
         assert_eq!(
             handoff["web_owner_readiness"]["status"],
@@ -536,7 +385,7 @@ mod tests {
         );
         assert_eq!(
             handoff["worker_handoff_readiness"]["status"],
-            "ready_for_scoped_live_worker"
+            "ready_for_live_worker"
         );
     }
     #[test]
@@ -580,17 +429,5 @@ mod tests {
         assert_eq!(context.exchange, "okx");
         assert_eq!(context.symbol, "ASTER-USDT-SWAP");
         assert_eq!(context.source_signal_type, "market_velocity");
-    }
-    #[test]
-    fn task_creation_apply_requires_explicit_confirmation() {
-        assert!(!market_velocity_task_creation_apply_authorized(
-            true,
-            Some("wrong")
-        ));
-        assert!(market_velocity_task_creation_apply_authorized(
-            true,
-            Some("I_UNDERSTAND_THIS_CREATES_WEB_EXECUTION_TASK")
-        ));
-        assert!(!market_velocity_task_creation_apply_authorized(false, None));
     }
 }

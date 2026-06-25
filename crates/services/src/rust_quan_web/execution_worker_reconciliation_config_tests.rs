@@ -1,32 +1,4 @@
 #[test]
-fn live_order_confirmation_requires_exact_opt_in_token() {
-    assert!(live_order_confirmation_valid(
-        false,
-        Some("I_UNDERSTAND_LIVE_ORDERS")
-    ));
-    assert!(live_order_confirmation_valid(true, None));
-    assert!(!live_order_confirmation_valid(false, None));
-    assert!(!live_order_confirmation_valid(false, Some("true")));
-    assert!(!live_order_confirmation_valid(false, Some("I_UNDERSTAND")));
-}
-#[test]
-fn reconciliation_only_mode_is_explicit_opt_in() {
-    let _guard = env_lock();
-    let previous = std::env::var("EXECUTION_WORKER_RECONCILIATION_ONLY").ok();
-    std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY");
-    assert!(!reconciliation_only_mode_from_env());
-    std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", "true");
-    assert!(reconciliation_only_mode_from_env());
-    std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", "yes");
-    assert!(reconciliation_only_mode_from_env());
-    std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", "false");
-    assert!(!reconciliation_only_mode_from_env());
-    match previous {
-        Some(value) => std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", value),
-        None => std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY"),
-    }
-}
-#[test]
 fn reconciliation_only_symbol_guard_excludes_linkusdt() {
     assert!(is_protected_link_symbol("LINKUSDT"));
     assert!(is_protected_link_symbol("LINK-USDT-SWAP"));
@@ -34,26 +6,7 @@ fn reconciliation_only_symbol_guard_excludes_linkusdt() {
     assert!(!is_protected_link_symbol("ETHUSDT"));
 }
 #[test]
-fn target_task_allowlist_rejects_unlisted_leased_task_ids() {
-    let config = ExecutionWorkerConfig {
-        worker_id: "worker-targeted".to_string(),
-        lease_limit: 1,
-        dry_run: false,
-        default_exchange: ExchangeId::Binance,
-        task_types: vec!["risk_control_close_candidate".to_string()],
-        task_statuses: vec!["pending_close".to_string()],
-        target_task_ids: vec![1001],
-        confirmation_mode: false,
-        report_replay_mode: false,
-        report_replay_max_per_run: 1,
-        report_replay_failure_backoff_seconds: 300,
-        report_replay_throttle_ms: 0,
-    };
-    assert!(config.leased_task_allowed(1001));
-    assert!(!config.leased_task_allowed(1002));
-}
-#[test]
-fn live_worker_config_requires_target_task_allowlist() {
+fn live_worker_config_allows_unscoped_database_enabled_tasks() {
     let live_unscoped = ExecutionWorkerConfig {
         worker_id: "worker-live-unscoped".to_string(),
         lease_limit: 1,
@@ -68,25 +21,12 @@ fn live_worker_config_requires_target_task_allowlist() {
         report_replay_failure_backoff_seconds: 300,
         report_replay_throttle_ms: 0,
     };
-    let error = live_unscoped
-        .validate_live_worker_scope()
-        .expect_err("live worker without target task ids must fail closed");
-    assert!(error
-        .to_string()
-        .contains("EXECUTION_WORKER_TARGET_TASK_IDS"));
-    let dry_run_unscoped = ExecutionWorkerConfig {
-        dry_run: true,
-        ..live_unscoped
-    };
-    dry_run_unscoped
-        .validate_live_worker_scope()
-        .expect("dry-run worker may lease broadly");
+    live_unscoped
+        .validate_lease_limit()
+        .expect("unscoped persistent live worker lets Web/database enabled tasks decide eligibility");
 }
 #[tokio::test]
-async fn run_once_rejects_programmatic_live_worker_without_target_scope_before_leasing() {
-    let _guard = env_lock();
-    let previous_reconciliation_only = std::env::var("EXECUTION_WORKER_RECONCILIATION_ONLY").ok();
-    std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY");
+async fn verify_live_audit_ready_allows_unscoped_database_enabled_tasks() {
     let repository = Arc::new(CapturingAuditRepository::default());
     let worker = ExecutionWorker::new(
         ExecutionTaskClient::new(ExecutionTaskConfig {
@@ -111,23 +51,13 @@ async fn run_once_rejects_programmatic_live_worker_without_target_scope_before_l
         },
     )
     .with_audit_repository(repository.clone());
-    let error = worker
-        .run_once()
+    worker
+        .verify_live_audit_ready()
         .await
-        .expect_err("programmatic live worker must fail closed without target task scope");
-    match previous_reconciliation_only {
-        Some(value) => std::env::set_var("EXECUTION_WORKER_RECONCILIATION_ONLY", value),
-        None => std::env::remove_var("EXECUTION_WORKER_RECONCILIATION_ONLY"),
-    }
-    assert!(
-        error
-            .to_string()
-            .contains("EXECUTION_WORKER_TARGET_TASK_IDS"),
-        "unexpected error: {error:#}"
-    );
+        .expect("unscoped persistent live worker should pass local live readiness");
     assert!(
         repository.checkpoints.lock().unwrap().is_empty(),
-        "live worker scope must be validated before checkpointing or leasing"
+        "readiness verification must not lease or mutate execution tasks"
     );
 }
 #[test]

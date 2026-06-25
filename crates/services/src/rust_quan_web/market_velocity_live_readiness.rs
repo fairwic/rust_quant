@@ -1,10 +1,5 @@
-use super::execution_payload::{
-    order_payload, order_side_lower, payload_bool, payload_string,
-    validate_execute_signal_risk_contract,
-};
-use super::execution_worker::{
-    is_protected_link_symbol, validate_worker_mode_bool_envs, ExecutionOrderTask,
-};
+use super::execution_payload::{order_side_lower, validate_execute_signal_risk_contract};
+use super::execution_worker::ExecutionOrderTask;
 use super::{
     ExecutionTask, ExecutionTaskClient, ExecutionTaskConfig, ExecutionWorkerConfig,
     MarketVelocityExecutionTaskLiveReadinessCheck,
@@ -50,9 +45,8 @@ impl MarketVelocityLiveReadinessConfig {
             .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
             .map_err(|_| anyhow!("RUST_QUAN_WEB_BASE_URL is required"))?;
         let internal_secret = required_internal_secret_from_env()?;
-        validate_worker_mode_bool_envs()?;
+        let target_task_id = market_velocity_live_readiness_task_id_from_env()?;
         let worker_config = ExecutionWorkerConfig::from_env();
-        let target_task_id = single_market_velocity_target_task_id(&worker_config)?;
         Ok(Self {
             base_url,
             internal_secret,
@@ -73,6 +67,21 @@ fn required_internal_secret_from_env() -> Result<String> {
             anyhow!("EXECUTION_EVENT_SECRET or RUST_QUAN_WEB_INTERNAL_SECRET is required")
         })
 }
+/// 解析只读 readiness 要检查的执行任务；它是诊断参数，不参与常驻 worker 租约过滤。
+fn market_velocity_live_readiness_task_id_from_env() -> Result<i64> {
+    let raw = std::env::var("MARKET_VELOCITY_LIVE_READINESS_TASK_ID")
+        .map_err(|_| anyhow!("MARKET_VELOCITY_LIVE_READINESS_TASK_ID is required"))?;
+    let task_id = raw.trim().parse::<i64>().map_err(|_| {
+        anyhow!("MARKET_VELOCITY_LIVE_READINESS_TASK_ID must be a positive task id")
+    })?;
+    if task_id > 0 {
+        Ok(task_id)
+    } else {
+        Err(anyhow!(
+            "MARKET_VELOCITY_LIVE_READINESS_TASK_ID must be a positive task id"
+        ))
+    }
+}
 /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
 pub async fn run_market_velocity_live_readiness_from_env() -> Result<Value> {
     let config = MarketVelocityLiveReadinessConfig::from_env()?;
@@ -86,9 +95,9 @@ pub async fn run_market_velocity_live_readiness_from_env() -> Result<Value> {
     let handoff_readiness =
         build_market_velocity_worker_handoff_readiness(&web_readiness, &config.worker_config);
     let status = if web_readiness.status == "ready_for_live_worker"
-        && handoff_readiness.status == "ready_for_scoped_live_worker"
+        && handoff_readiness.status == "ready_for_live_worker"
     {
-        "ready_for_scoped_live_worker"
+        "ready_for_live_worker"
     } else {
         "blocked"
     };
@@ -117,14 +126,12 @@ pub fn market_velocity_existing_execution_worker_path() -> Value {
 /// 构建 Web 商业、会员和执行准备度 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_market_velocity_scoped_execution_worker_env(task_id: i64) -> Value {
     json!({
+        "reference_task_id": task_id,
         "IS_RUN_EXECUTION_WORKER": "true",
         "EXECUTION_WORKER_ONLY": "true",
-        "EXECUTION_WORKER_RUN_ONCE": "true",
-        "EXECUTION_WORKER_DRY_RUN": "false",
-        "EXECUTION_WORKER_TARGET_TASK_IDS": task_id.to_string(),
-        "EXECUTION_WORKER_TASK_TYPES": "execute_signal",
-        "EXECUTION_WORKER_TASK_STATUSES": "pending,leased",
-        "EXECUTION_WORKER_LIVE_ORDER_CONFIRM": "I_UNDERSTAND_LIVE_ORDERS"
+        "EXECUTION_WORKER_RUN_ONCE": "false",
+        "EXECUTION_WORKER_TASK_TYPES": "execute_signal,close_position",
+        "EXECUTION_WORKER_TASK_STATUSES": "pending,pending_close"
     })
 }
 /// 构建 Web 商业、会员和执行准备度 请求或响应载荷，把字段组装规则集中在同一入口。
@@ -148,7 +155,7 @@ pub fn build_market_velocity_scoped_execution_worker_config(
         default_exchange,
         task_types: vec!["execute_signal".to_string()],
         task_statuses: vec!["pending".to_string(), "leased".to_string()],
-        target_task_ids: vec![task.id],
+        target_task_ids: Vec::new(),
         confirmation_mode: false,
         report_replay_mode: false,
         report_replay_max_per_run: 1,
@@ -162,13 +169,7 @@ pub(crate) fn build_market_velocity_worker_handoff_readiness(
     worker_config: &ExecutionWorkerConfig,
 ) -> MarketVelocityWorkerHandoffReadiness {
     let task = &web_readiness.task;
-    let mut checks = vec![
-        web_owner_readiness_check(web_readiness),
-        target_task_scope_check(task.id, worker_config),
-        worker_live_mode_check(worker_config),
-        market_velocity_payload_check(task),
-        protected_symbol_check(task),
-    ];
+    let mut checks = vec![web_owner_readiness_check(web_readiness)];
     checks.push(worker_order_contract_check(
         task,
         worker_config.default_exchange,
@@ -178,7 +179,7 @@ pub(crate) fn build_market_velocity_worker_handoff_readiness(
         .filter_map(|check| check.blocker_code.clone())
         .collect::<Vec<_>>();
     let status = if blocker_codes.is_empty() {
-        "ready_for_scoped_live_worker"
+        "ready_for_live_worker"
     } else {
         "blocked"
     }
@@ -191,18 +192,6 @@ pub(crate) fn build_market_velocity_worker_handoff_readiness(
         web_owner_status: web_readiness.status.clone(),
         checks,
         blocker_codes,
-    }
-}
-/// 提供single市场动量目标taskID的集中实现，避免Web 商业链路调用方重复处理相同细节。
-fn single_market_velocity_target_task_id(config: &ExecutionWorkerConfig) -> Result<i64> {
-    match config.target_task_ids.as_slice() {
-        [task_id] if *task_id > 0 => Ok(*task_id),
-        [] => Err(anyhow!(
-            "EXECUTION_WORKER_TARGET_TASK_IDS must contain exactly one reviewed Market Velocity task id"
-        )),
-        _ => Err(anyhow!(
-            "Market Velocity live readiness requires exactly one positive target task id"
-        )),
     }
 }
 /// 提供webownerreadiness检查的集中实现，避免Web 商业链路调用方重复处理相同细节。
@@ -221,122 +210,6 @@ fn web_owner_readiness_check(
             "Web owner readiness",
             "web_owner_readiness_blocked",
             "Web owner live readiness is blocked; do not start live worker.",
-        )
-    }
-}
-/// 提供目标taskscope检查的集中实现，避免Web 商业链路调用方重复处理相同细节。
-fn target_task_scope_check(
-    task_id: i64,
-    config: &ExecutionWorkerConfig,
-) -> MarketVelocityExecutionTaskLiveReadinessCheck {
-    if config.target_task_ids == vec![task_id] {
-        passed_check(
-            "target_task_scope",
-            "Target task scope",
-            "Worker is scoped to the same reviewed execution task id.",
-        )
-    } else {
-        blocked_check(
-            "target_task_scope",
-            "Target task scope",
-            "execution_worker_target_scope_mismatch",
-            "EXECUTION_WORKER_TARGET_TASK_IDS must contain only the reviewed readiness task id.",
-        )
-    }
-}
-/// 提供workerlivemode检查的集中实现，避免Web 商业链路调用方重复处理相同细节。
-fn worker_live_mode_check(
-    config: &ExecutionWorkerConfig,
-) -> MarketVelocityExecutionTaskLiveReadinessCheck {
-    if config.dry_run {
-        return blocked_check(
-            "worker_live_mode",
-            "Worker live mode",
-            "execution_worker_dry_run_still_enabled",
-            "Production live handoff requires EXECUTION_WORKER_DRY_RUN=false.",
-        );
-    }
-    match config
-        .validate_lease_limit()
-        .and_then(|_| config.validate_target_task_ids())
-        .and_then(|_| config.validate_live_worker_scope())
-    {
-        Ok(()) => passed_check(
-            "worker_live_mode",
-            "Worker live mode",
-            "Worker is in live mode and still scoped to explicit target task ids.",
-        ),
-        Err(error) => blocked_check(
-            "worker_live_mode",
-            "Worker live mode",
-            "execution_worker_live_config_invalid",
-            &error.to_string(),
-        ),
-    }
-}
-/// 提供市场动量载荷检查的集中实现，避免Web 商业链路调用方重复处理相同细节。
-fn market_velocity_payload_check(
-    task: &ExecutionTask,
-) -> MarketVelocityExecutionTaskLiveReadinessCheck {
-    let payload = order_payload(&task.request_payload_json);
-    let source_signal_type = payload_string(&payload, "source_signal_type");
-    let auto_execution_allowed = payload_bool(&payload, "auto_execution_allowed").unwrap_or(false);
-    let live_order_allowed = payload
-        .get("execution_policy")
-        .and_then(|value| payload_bool(value, "live_order_allowed"))
-        .unwrap_or(false);
-    let paper_trade_required = payload
-        .get("execution_policy")
-        .and_then(|value| payload_bool(value, "paper_trade_required"))
-        .unwrap_or(true);
-    let policy_mode = payload
-        .get("execution_policy")
-        .and_then(|value| payload_string(value, "mode"));
-    let production_stage = payload
-        .get("execution_policy")
-        .and_then(|value| payload_string(value, "production_stage"));
-    let dry_run_policy = policy_mode
-        .as_deref()
-        .map(|value| value.to_ascii_lowercase())
-        .is_some_and(|value| value.contains("dry_run") || value.contains("dry-run"))
-        || production_stage.as_deref() == Some("execution_task_dry_run");
-    if source_signal_type.as_deref() == Some("market_velocity")
-        && auto_execution_allowed
-        && live_order_allowed
-        && !paper_trade_required
-        && !dry_run_policy
-        && production_stage.as_deref() == Some("live_execution_allowed")
-    {
-        passed_check(
-            "market_velocity_payload",
-            "Market Velocity payload",
-            "Payload is a live-authorized Market Velocity signal.",
-        )
-    } else {
-        blocked_check(
-            "market_velocity_payload",
-            "Market Velocity payload",
-            "market_velocity_payload_not_live_authorized",
-            "Payload must be source_signal_type=market_velocity, live-authorized, not paper-only, and production_stage=live_execution_allowed.",
-        )
-    }
-}
-/// 提供protected交易对检查的集中实现，避免Web 商业链路调用方重复处理相同细节。
-fn protected_symbol_check(task: &ExecutionTask) -> MarketVelocityExecutionTaskLiveReadinessCheck {
-    let payload = order_payload(&task.request_payload_json);
-    let symbol = payload_string(&payload, "symbol").unwrap_or_else(|| task.symbol.clone());
-    if is_protected_link_symbol(&symbol) || is_protected_link_symbol(&task.symbol) {
-        blocked_check(
-            "protected_symbol_policy",
-            "Protected symbol policy",
-            "link_symbol_requires_separate_authorization",
-            "LINKUSDT remains blocked unless separately authorized for live mutation.",
-        )
-    } else {
-        passed_check(
-            "protected_symbol_policy",
-            "Protected symbol policy",
-            "Task is not scoped to the protected LINKUSDT live position.",
         )
     }
 }
@@ -362,14 +235,6 @@ fn worker_order_contract_check(
             "Worker order contract",
             "execution_worker_risk_contract_rejected",
             &error.message,
-        );
-    }
-    if is_protected_link_symbol(&order_task.symbol) {
-        return blocked_check(
-            "worker_order_contract",
-            "Worker order contract",
-            "link_symbol_requires_separate_authorization",
-            "Parsed worker order target is LINKUSDT and requires separate authorization.",
         );
     }
     passed_check(
@@ -436,112 +301,70 @@ mod tests {
     }
     #[test]
     fn worker_handoff_readiness_passes_existing_worker_contract() {
-        let worker_config = worker_config(false, vec![228]);
+        let worker_config = worker_config(false);
         let web_readiness = web_readiness(task(live_payload("ETHUSDT")), "ready_for_live_worker");
         let readiness =
             build_market_velocity_worker_handoff_readiness(&web_readiness, &worker_config);
-        assert_eq!(readiness.status, "ready_for_scoped_live_worker");
+        assert_eq!(readiness.status, "ready_for_live_worker");
         assert!(readiness.blocker_codes.is_empty());
-        assert_check(&readiness, "target_task_scope", "passed", None);
         assert_check(&readiness, "worker_order_contract", "passed", None);
     }
     #[test]
     fn scoped_worker_readiness_can_be_derived_from_created_task() {
         let web_readiness = web_readiness(task(live_payload("ETHUSDT")), "ready_for_live_worker");
         let readiness = build_market_velocity_scoped_worker_handoff_readiness(&web_readiness);
-        assert_eq!(readiness.status, "ready_for_scoped_live_worker");
+        assert_eq!(readiness.status, "ready_for_live_worker");
         assert_eq!(readiness.task_id, 228);
         assert!(readiness.blocker_codes.is_empty());
-        assert_check(&readiness, "target_task_scope", "passed", None);
-        assert_check(&readiness, "worker_live_mode", "passed", None);
         assert_check(&readiness, "worker_order_contract", "passed", None);
     }
     #[test]
-    fn worker_handoff_readiness_blocks_dry_run_live_node() {
-        let worker_config = worker_config(true, vec![228]);
-        let web_readiness = web_readiness(task(live_payload("ETHUSDT")), "ready_for_live_worker");
-        let readiness =
-            build_market_velocity_worker_handoff_readiness(&web_readiness, &worker_config);
-        assert_eq!(readiness.status, "blocked");
-        assert!(readiness
-            .blocker_codes
-            .contains(&"execution_worker_dry_run_still_enabled".to_string()));
-    }
-    #[test]
-    fn worker_handoff_readiness_blocks_invalid_worker_lease_limit() {
-        let mut worker_config = worker_config(false, vec![228]);
-        worker_config.lease_limit = 0;
-        let web_readiness = web_readiness(task(live_payload("ETHUSDT")), "ready_for_live_worker");
-        let readiness =
-            build_market_velocity_worker_handoff_readiness(&web_readiness, &worker_config);
-        assert_eq!(readiness.status, "blocked");
-        assert!(readiness
-            .blocker_codes
-            .contains(&"execution_worker_live_config_invalid".to_string()));
-        assert_check(
-            &readiness,
-            "worker_live_mode",
-            "blocked",
-            Some("execution_worker_live_config_invalid"),
-        );
-    }
-    #[test]
-    fn worker_handoff_readiness_blocks_target_scope_mismatch() {
-        let worker_config = worker_config(false, vec![229]);
-        let web_readiness = web_readiness(task(live_payload("ETHUSDT")), "ready_for_live_worker");
-        let readiness =
-            build_market_velocity_worker_handoff_readiness(&web_readiness, &worker_config);
-        assert_eq!(readiness.status, "blocked");
-        assert!(readiness
-            .blocker_codes
-            .contains(&"execution_worker_target_scope_mismatch".to_string()));
-    }
-    #[test]
-    fn worker_handoff_readiness_blocks_dry_run_policy_stage() {
-        let worker_config = worker_config(false, vec![228]);
+    fn worker_handoff_readiness_ignores_payload_dry_run_policy_switches() {
+        let worker_config = worker_config(false);
         let mut payload = live_payload("ETHUSDT");
         payload["execution_policy"]["mode"] = json!("execution_task_dry_run");
         payload["execution_policy"]["production_stage"] = json!("execution_task_dry_run");
         let web_readiness = web_readiness(task(payload), "ready_for_live_worker");
         let readiness =
             build_market_velocity_worker_handoff_readiness(&web_readiness, &worker_config);
-        assert_eq!(readiness.status, "blocked");
-        assert!(readiness
-            .blocker_codes
-            .contains(&"market_velocity_payload_not_live_authorized".to_string()));
+        assert_eq!(readiness.status, "ready_for_live_worker");
+        assert!(readiness.blocker_codes.is_empty());
     }
     #[test]
-    fn worker_handoff_readiness_blocks_link_symbol() {
-        let worker_config = worker_config(false, vec![228]);
+    fn worker_handoff_readiness_allows_any_supported_symbol_with_stop_loss() {
+        let worker_config = worker_config(false);
         let web_readiness = web_readiness(task(live_payload("LINKUSDT")), "ready_for_live_worker");
         let readiness =
             build_market_velocity_worker_handoff_readiness(&web_readiness, &worker_config);
-        assert_eq!(readiness.status, "blocked");
-        assert!(readiness
-            .blocker_codes
-            .contains(&"link_symbol_requires_separate_authorization".to_string()));
+        assert_eq!(readiness.status, "ready_for_live_worker");
+        assert!(readiness.blocker_codes.is_empty());
     }
     #[test]
     fn scoped_worker_env_reuses_existing_worker_without_shell_entrypoint() {
         let env = build_market_velocity_scoped_execution_worker_env(228);
         let encoded = serde_json::to_string(&env).expect("worker env json");
+        assert_eq!(env["reference_task_id"], 228);
         assert_eq!(env["IS_RUN_EXECUTION_WORKER"], "true");
         assert_eq!(env["EXECUTION_WORKER_ONLY"], "true");
-        assert_eq!(env["EXECUTION_WORKER_RUN_ONCE"], "true");
-        assert_eq!(env["EXECUTION_WORKER_DRY_RUN"], "false");
-        assert_eq!(env["EXECUTION_WORKER_TARGET_TASK_IDS"], "228");
-        assert_eq!(env["EXECUTION_WORKER_TASK_TYPES"], "execute_signal");
+        assert_eq!(env["EXECUTION_WORKER_RUN_ONCE"], "false");
         assert_eq!(
-            env["EXECUTION_WORKER_LIVE_ORDER_CONFIRM"],
-            "I_UNDERSTAND_LIVE_ORDERS"
+            env["EXECUTION_WORKER_TASK_TYPES"],
+            "execute_signal,close_position"
         );
+        assert_eq!(
+            env["EXECUTION_WORKER_TASK_STATUSES"],
+            "pending,pending_close"
+        );
+        assert!(env.get("EXECUTION_WORKER_DRY_RUN").is_none());
+        assert!(env.get("EXECUTION_WORKER_TARGET_TASK_IDS").is_none());
+        assert!(env.get("EXECUTION_WORKER_LIVE_ORDER_CONFIRM").is_none());
         assert!(
             !encoded.contains(".sh") && !encoded.contains("scripts/dev"),
             "Market Velocity live handoff must not point to shell scripts: {encoded}"
         );
     }
     /// 提供worker配置的集中实现，避免Web 商业链路调用方重复处理相同细节。
-    fn worker_config(dry_run: bool, target_task_ids: Vec<i64>) -> ExecutionWorkerConfig {
+    fn worker_config(dry_run: bool) -> ExecutionWorkerConfig {
         ExecutionWorkerConfig {
             worker_id: "readiness-test".to_string(),
             lease_limit: 1,
@@ -549,7 +372,7 @@ mod tests {
             default_exchange: ExchangeId::Binance,
             task_types: vec!["execute_signal".to_string()],
             task_statuses: vec!["pending".to_string(), "leased".to_string()],
-            target_task_ids,
+            target_task_ids: Vec::new(),
             confirmation_mode: false,
             report_replay_mode: false,
             report_replay_max_per_run: 1,

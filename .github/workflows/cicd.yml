@@ -85,7 +85,6 @@ jobs:
           cargo test -p rust-quant-services market_velocity_signal --lib -- --nocapture
           cargo test -p rust-quant-services strategy_signal --lib -- --nocapture
           cargo test -p rust-quant-services target_task --lib -- --nocapture
-          cargo test -p rust-quant-services live_order_confirmation --lib -- --nocapture
 
   build-and-push:
     name: Build & Push Image

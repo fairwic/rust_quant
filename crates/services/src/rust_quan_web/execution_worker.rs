@@ -6,12 +6,11 @@ use crate::rust_quan_web::execution_order_filters::{
     quantize_order_size, quantize_protective_stop_price, ExchangeOrderFilters,
 };
 use crate::rust_quan_web::execution_payload::{
-    close_order_side, direction_from_order_side, ensure_live_order_confirmation,
-    format_order_price, format_order_size, is_duplicate_client_order_id_error,
-    is_pending_close_task, is_zero_order_size, order_payload, order_side_lower, parse_env_i64_list,
-    parse_env_list, parse_env_u32, parse_env_u64, parse_exchange, parse_instrument,
-    parse_order_type, parse_position_mode, parse_side, parse_time_in_force, payload_bool,
-    payload_f64, payload_string, protection_entry_price, selected_stop_loss_price,
+    close_order_side, direction_from_order_side, format_order_price, format_order_size,
+    is_duplicate_client_order_id_error, is_pending_close_task, is_zero_order_size, order_payload,
+    order_side_lower, parse_env_list, parse_env_u32, parse_env_u64, parse_exchange,
+    parse_instrument, parse_order_type, parse_position_mode, parse_side, parse_time_in_force,
+    payload_bool, payload_f64, payload_string, protection_entry_price, selected_stop_loss_price,
     validate_execute_signal_risk_contract,
 };
 use crate::rust_quan_web::execution_protection::{
@@ -111,7 +110,7 @@ impl ExecutionWorkerConfig {
                 .unwrap_or(0),
             Err(_) => 10,
         };
-        let dry_run = parse_env_bool("EXECUTION_WORKER_DRY_RUN", true);
+        let dry_run = false;
         let default_exchange = std::env::var("EXECUTION_WORKER_DEFAULT_EXCHANGE")
             .ok()
             .and_then(|value| parse_exchange(&value).ok())
@@ -124,7 +123,7 @@ impl ExecutionWorkerConfig {
             "EXECUTION_WORKER_TASK_STATUSES",
             &["pending", "pending_close"],
         );
-        let target_task_ids = parse_env_i64_list("EXECUTION_WORKER_TARGET_TASK_IDS");
+        let target_task_ids = Vec::new();
         let confirmation_mode = parse_env_bool("EXECUTION_WORKER_CONFIRMATION_MODE", false);
         let report_replay_mode = parse_env_bool("EXECUTION_WORKER_REPORT_REPLAY_MODE", false);
         let report_replay_max_per_run =
@@ -150,17 +149,8 @@ impl ExecutionWorkerConfig {
             report_replay_throttle_ms,
         }
     }
-    fn leased_task_allowed(&self, task_id: i64) -> bool {
+    fn report_replay_task_allowed(&self, task_id: i64) -> bool {
         self.target_task_ids.is_empty() || self.target_task_ids.contains(&task_id)
-    }
-    /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
-    pub(crate) fn validate_target_task_ids(&self) -> Result<()> {
-        if self.target_task_ids.iter().all(|task_id| *task_id > 0) {
-            return Ok(());
-        }
-        Err(anyhow!(
-            "EXECUTION_WORKER_TARGET_TASK_IDS must contain only positive task ids"
-        ))
     }
     /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
     pub(crate) fn validate_lease_limit(&self) -> Result<()> {
@@ -169,15 +159,6 @@ impl ExecutionWorkerConfig {
         }
         Err(anyhow!(
             "EXECUTION_WORKER_LEASE_LIMIT must be greater than zero"
-        ))
-    }
-    /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
-    pub(crate) fn validate_live_worker_scope(&self) -> Result<()> {
-        if self.dry_run || !self.target_task_ids.is_empty() {
-            return Ok(());
-        }
-        Err(anyhow!(
-            "refusing live execution worker without EXECUTION_WORKER_TARGET_TASK_IDS; live workers must be scoped to explicit reviewed task ids"
         ))
     }
     /// 提供报告replaylimit的集中实现，避免Web 商业链路调用方重复处理相同细节。
@@ -191,7 +172,6 @@ impl ExecutionWorkerConfig {
 /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 pub(super) fn validate_worker_mode_bool_envs() -> Result<()> {
     for key in [
-        "EXECUTION_WORKER_RECONCILIATION_ONLY",
         "EXECUTION_WORKER_REPORT_REPLAY_MODE",
         "EXECUTION_WORKER_CONFIRMATION_MODE",
     ] {
@@ -210,9 +190,6 @@ fn validate_bool_env_value(key: &str) -> Result<()> {
         },
         Err(_) => Ok(()),
     }
-}
-fn reconciliation_only_mode_from_env() -> bool {
-    parse_env_bool("EXECUTION_WORKER_RECONCILIATION_ONLY", false)
 }
 /// 解析输入参数并收敛为 Web 商业、会员和执行准备度 可使用的结构化值。
 fn parse_env_bool(key: &str, default: bool) -> bool {
@@ -302,15 +279,11 @@ impl ExecutionWorker {
         self
     }
     fn live_order_mode_requires_audit(&self) -> bool {
-        !self.config.dry_run && !reconciliation_only_mode_from_env()
+        !self.config.dry_run
     }
     /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
     fn validate_runtime_scope(&self) -> Result<()> {
         self.config.validate_lease_limit()?;
-        self.config.validate_target_task_ids()?;
-        if !self.config.dry_run {
-            self.config.validate_live_worker_scope()?;
-        }
         Ok(())
     }
     /// 校验输入和运行前置条件，提前暴露 Web 商业、会员和执行准备度 的不可执行原因。
@@ -373,26 +346,20 @@ impl ExecutionWorker {
         validate_worker_mode_bool_envs()?;
         let config = ExecutionWorkerConfig::from_env();
         config.validate_lease_limit()?;
-        config.validate_target_task_ids()?;
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
             base_url,
             internal_secret,
         })?;
-        let reconciliation_only_mode = reconciliation_only_mode_from_env();
-        if !config.dry_run {
-            config.validate_live_worker_scope()?;
-        }
         let audit_repository = PostgresExecutionAuditRepository::from_env()?;
-        let live_order_mode = !config.dry_run && !reconciliation_only_mode;
+        let live_order_mode = !config.dry_run;
         if live_order_mode && audit_repository.is_none() {
             return Err(anyhow!(
                 "QUANT_CORE_DATABASE_URL is required for live execution audit"
             ));
         }
-        let gateway = if config.dry_run || reconciliation_only_mode {
+        let gateway = if config.dry_run {
             CryptoExcAllGateway::dry_run()
         } else {
-            ensure_live_order_confirmation()?;
             CryptoExcAllGateway::from_env()?
         };
         let mut worker = Self::new(client, gateway, config);
@@ -407,7 +374,6 @@ include!("execution_worker_audit_section.rs");
 include!("execution_worker_live_guard_section.rs");
 include!("execution_worker_live_execution_section.rs");
 include!("execution_worker_live_execution_support_section.rs");
-include!("execution_worker_reconciliation_only_section.rs");
 include!("execution_worker_reconciliation_section.rs");
 include!("execution_worker_order_task_section.rs");
 include!("execution_worker_confirmation_section.rs");

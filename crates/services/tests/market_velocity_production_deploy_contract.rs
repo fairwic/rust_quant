@@ -61,14 +61,8 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         r#"EXECUTION_WORKER_ONLY: "true""#,
         "market_velocity_live_handoff",
         "EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}",
-        "EXECUTION_WORKER_CONFIRMATION_MODE: ${EXECUTION_WORKER_CONFIRMATION_MODE:-false}",
-        "EXECUTION_WORKER_REPORT_REPLAY_MODE: ${EXECUTION_WORKER_REPORT_REPLAY_MODE:-false}",
         "MARKET_VELOCITY_LIVE_BUYER_EMAIL: ${MARKET_VELOCITY_LIVE_BUYER_EMAIL:-}",
         "MARKET_VELOCITY_LIVE_COMBO_ID: ${MARKET_VELOCITY_LIVE_COMBO_ID:-}",
-        "MARKET_VELOCITY_CREATE_TASK_APPLY: ${MARKET_VELOCITY_CREATE_TASK_APPLY:-false}",
-        "MARKET_VELOCITY_CREATE_TASK_CONFIRM: ${MARKET_VELOCITY_CREATE_TASK_CONFIRM:-}",
-        "MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY: ${MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY:-false}",
-        "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM: ${MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM:-}",
         r#"MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE: "false""#,
         "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS: ${MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS:-60}",
     ] {
@@ -231,15 +225,6 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         );
         for safety_flag in [
             "MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH",
-            "MARKET_VELOCITY_CREATE_TASK_APPLY",
-            "MARKET_VELOCITY_CREATE_TASK_CONFIRM",
-            "MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY",
-            "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM",
-            "MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED",
-            "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED",
-            "EXECUTION_WORKER_DRY_RUN",
-            "EXECUTION_WORKER_TARGET_TASK_IDS",
-            "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
             "LEGACY_DIRECT_LIVE_ORDER_CONFIRM",
             "LEGACY_SIGNED_READ_ONLY_CONFIRM",
             "RISK_BALANCE_LIVE_MUTATION_CONFIRM",
@@ -248,6 +233,23 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             assert!(
                 deploy_script.contains(safety_flag),
                 "default deploy/rollback must include runtime safety flag `{safety_flag}` in diagnostics"
+            );
+        }
+        for removed_flag in [
+            "MARKET_VELOCITY_CREATE_TASK_APPLY",
+            "MARKET_VELOCITY_CREATE_TASK_CONFIRM",
+            "MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY",
+            "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM",
+            "MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED",
+            "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED",
+            "EXECUTION_WORKER_DRY_RUN",
+            "EXECUTION_WORKER_ALLOW_GLOBAL_LIVE_SCOPE",
+            "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
+            "EXECUTION_WORKER_RECONCILIATION_ONLY",
+        ] {
+            assert!(
+                !deploy_script.contains(removed_flag),
+                "default deploy/rollback must not keep removed runtime switch `{removed_flag}`"
             );
         }
         assert!(
@@ -339,7 +341,6 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "cargo test -p rust-quant-services market_velocity_signal --lib -- --nocapture",
         "cargo test -p rust-quant-services strategy_signal --lib -- --nocapture",
         "cargo test -p rust-quant-services target_task --lib -- --nocapture",
-        "cargo test -p rust-quant-services live_order_confirmation --lib -- --nocapture",
     ] {
         assert!(
             workflow.contains(rust_native_contract),
@@ -363,14 +364,29 @@ fn market_velocity_live_signal_defaults_use_production_momentum_preset() {
         "MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH: ${MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH:-true}",
         "MARKET_VELOCITY_ENTRY_CANDLE_OKX_REST_BASE: ${MARKET_VELOCITY_ENTRY_CANDLE_OKX_REST_BASE:-https://www.okx.com}",
         "MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS: ${MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS:-0}",
-        "MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE: ${MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE:-live_execution_authorized}",
-        "MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED: ${MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED:-true}",
-        "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED: ${MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED:-false}",
-        "EXECUTION_WORKER_TARGET_TASK_IDS: ${EXECUTION_WORKER_TARGET_TASK_IDS:-}",
     ] {
         assert!(
             compose.contains(required),
             "deploy compose must contain `{required}`"
+        );
+    }
+    for removed in [
+        "MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE",
+        "MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED",
+        "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED",
+        "MARKET_VELOCITY_CREATE_TASK_APPLY",
+        "MARKET_VELOCITY_CREATE_TASK_CONFIRM",
+        "MARKET_VELOCITY_RUN_SCOPED_WORKER_APPLY",
+        "MARKET_VELOCITY_RUN_SCOPED_WORKER_CONFIRM",
+        "EXECUTION_WORKER_DRY_RUN",
+        "EXECUTION_WORKER_TARGET_TASK_IDS",
+        "EXECUTION_WORKER_ALLOW_GLOBAL_LIVE_SCOPE",
+        "EXECUTION_WORKER_LIVE_ORDER_CONFIRM",
+        "EXECUTION_WORKER_RECONCILIATION_ONLY",
+    ] {
+        assert!(
+            !compose.contains(removed),
+            "deploy compose must not keep removed runtime switch `{removed}`"
         );
     }
     assert!(

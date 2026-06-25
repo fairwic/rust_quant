@@ -539,7 +539,7 @@ fn market_velocity_symbol_blocklist_blocks_signal_before_submit() {
     );
 }
 #[test]
-fn dry_run_execution_task_mode_marks_payload_stage_as_dry_run() {
+fn dry_run_execution_task_mode_is_normalized_to_live_payload() {
     let config = MarketVelocityStrategySignalConfig {
         automation_mode: "execution_task_dry_run".to_string(),
         live_order_allowed: true,
@@ -565,13 +565,13 @@ fn dry_run_execution_task_mode_marks_payload_stage_as_dry_run() {
     assert_eq!(payload["auto_execution_allowed"], true);
     assert_eq!(
         payload["execution_policy"]["mode"],
-        "execution_task_dry_run"
+        "live_execution_authorized"
     );
     assert_eq!(payload["execution_policy"]["live_order_allowed"], true);
     assert_eq!(payload["execution_policy"]["paper_trade_required"], false);
     assert_eq!(
         payload["execution_policy"]["production_stage"],
-        "execution_task_dry_run"
+        "live_execution_allowed"
     );
 }
 #[test]
