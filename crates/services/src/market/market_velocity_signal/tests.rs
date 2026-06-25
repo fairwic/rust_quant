@@ -106,13 +106,16 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
     assert_eq!(payload["side"], "buy");
     assert_eq!(payload["position_side"], "long");
     assert_eq!(payload["order_type"], "market");
-    assert_eq!(payload["auto_execution_allowed"], false);
-    assert_eq!(payload["execution_policy"]["mode"], "signal_only");
-    assert_eq!(payload["execution_policy"]["live_order_allowed"], false);
-    assert_eq!(payload["execution_policy"]["paper_trade_required"], true);
+    assert_eq!(payload["auto_execution_allowed"], true);
+    assert_eq!(
+        payload["execution_policy"]["mode"],
+        "live_execution_authorized"
+    );
+    assert_eq!(payload["execution_policy"]["live_order_allowed"], true);
+    assert_eq!(payload["execution_policy"]["paper_trade_required"], false);
     assert_eq!(
         payload["execution_policy"]["production_stage"],
-        "signal_only_paper"
+        "live_execution_allowed"
     );
     assert_eq!(payload["paper_strategy_preset"], "momentum_03sl_20r_v5");
     assert_eq!(
@@ -228,6 +231,9 @@ fn default_market_velocity_signal_payload_uses_momentum_profit_preset() {
     assert_eq!(config.stop_loss_pct, 0.03);
     assert_eq!(config.take_profit_r, 2.0);
     assert_eq!(config.max_holding_hours, 48);
+    assert_eq!(config.automation_mode, "live_execution_authorized");
+    assert!(config.live_order_allowed);
+    assert!(!config.paper_trade_required);
     assert!(
         config.symbol_blocklist.is_empty(),
         "production default must not depend on historical symbol blocklist"
@@ -314,6 +320,9 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
     assert_eq!(config.entry_confirmation_fetch_limit, 90);
     assert_eq!(config.entry_max_average_distance_pct, 3.6);
     assert_eq!(config.entry_min_volume_ratio, 1.15);
+    assert_eq!(config.automation_mode, "live_execution_authorized");
+    assert!(config.live_order_allowed);
+    assert!(!config.paper_trade_required);
     assert_eq!(
         config.entry_trigger_allowlist,
         vec!["breakout_previous_high"]

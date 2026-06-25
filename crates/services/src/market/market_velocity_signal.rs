@@ -29,6 +29,9 @@ const DEFAULT_TAKE_PROFIT_R: f64 = 2.0;
 const DEFAULT_MAX_HOLDING_HOURS: u32 = 48;
 const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 4.0;
 const DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT: f64 = 0.0;
+const DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE: &str = "live_execution_authorized";
+const DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED: bool = true;
+const DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED: bool = false;
 #[derive(Clone, Debug, PartialEq)]
 pub struct MarketVelocityStrategySignalConfig {
     /// 策略slug，用于配置运行参数。
@@ -99,9 +102,9 @@ impl Default for MarketVelocityStrategySignalConfig {
             runner_fraction: 0.0,
             runner_stop_r: 0.0,
             max_holding_hours: DEFAULT_MAX_HOLDING_HOURS,
-            automation_mode: "signal_only".to_string(),
-            live_order_allowed: false,
-            paper_trade_required: true,
+            automation_mode: DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string(),
+            live_order_allowed: DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED,
+            paper_trade_required: DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED,
             require_technical_confirmation: true,
             require_entry_confirmation: true,
             chasing_risk_top_rank: 10,
@@ -120,7 +123,7 @@ impl Default for MarketVelocityStrategySignalConfig {
 impl MarketVelocityStrategySignalConfig {
     /// 从外部输入转换为内部模型，隔离 行情与市场数据 的字段适配细节。
     pub fn from_env() -> Result<Self> {
-        Ok(Self {
+        let mut parsed = Self {
             strategy_slug: std::env::var("MARKET_VELOCITY_STRATEGY_SLUG")
                 .ok()
                 .map(|value| value.trim().to_string())
@@ -155,7 +158,7 @@ impl MarketVelocityStrategySignalConfig {
                 .ok()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| "signal_only".to_string()),
+                .unwrap_or_else(|| DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string()),
             live_order_allowed: parse_env_bool("MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED", false)?,
             paper_trade_required: parse_env_bool(
                 "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED",
@@ -197,7 +200,9 @@ impl MarketVelocityStrategySignalConfig {
                 "MARKET_VELOCITY_SYMBOL_BLOCKLIST",
                 DEFAULT_SYMBOL_BLOCKLIST,
             )?,
-        })
+        };
+        normalize_market_velocity_live_execution_policy(&mut parsed);
+        Ok(parsed)
     }
     /// 从外部输入转换为内部模型，隔离 行情与市场数据 的字段适配细节。
     pub fn from_strategy_config_json(config: &Value, risk_config: &Value) -> Result<Self> {
@@ -299,6 +304,7 @@ impl MarketVelocityStrategySignalConfig {
         if let Some(value) = json_u32(risk_config, "max_holding_hours")? {
             parsed.max_holding_hours = value;
         }
+        normalize_market_velocity_live_execution_policy(&mut parsed);
         Ok(parsed)
     }
     /// 提供入场确认配置的集中实现，避免行情数据调用方重复处理相同细节。
@@ -319,10 +325,32 @@ fn market_velocity_execution_policy_stage(
     let mode = config.automation_mode.trim().to_ascii_lowercase();
     if mode.contains("dry_run") || mode.contains("dry-run") {
         "execution_task_dry_run"
-    } else if config.live_order_allowed {
-        "live_execution_allowed"
     } else {
-        "signal_only_paper"
+        "live_execution_allowed"
+    }
+}
+
+fn normalize_market_velocity_live_execution_policy(
+    config: &mut MarketVelocityStrategySignalConfig,
+) {
+    let mode = config.automation_mode.trim().to_ascii_lowercase();
+    let is_dry_run = mode.contains("dry_run") || mode.contains("dry-run");
+    if is_dry_run {
+        config.live_order_allowed = true;
+        config.paper_trade_required = false;
+        return;
+    }
+    if mode.is_empty()
+        || matches!(
+            mode.as_str(),
+            "signal_only" | "signal-only" | "paper_only" | "paper"
+        )
+        || !config.live_order_allowed
+        || config.paper_trade_required
+    {
+        config.automation_mode = DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string();
+        config.live_order_allowed = DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED;
+        config.paper_trade_required = DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED;
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -642,6 +670,9 @@ fn build_market_velocity_strategy_signal_submit_request(
     config: &MarketVelocityStrategySignalConfig,
     entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
 ) -> Result<MarketVelocityStrategySignalDecision> {
+    let mut effective_config = config.clone();
+    normalize_market_velocity_live_execution_policy(&mut effective_config);
+    let config = &effective_config;
     let entry_price = decimal_to_positive_f64(event.current_price)
         .ok_or_else(|| anyhow!("market velocity event current_price is missing"))?;
     let selected_stop_loss_price = round_price(entry_price * (1.0 - config.stop_loss_pct));
