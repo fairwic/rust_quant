@@ -546,6 +546,173 @@ fn local_okx_swap_min_order_size_uses_contract_units_without_static_min_notional
     assert_eq!(order.size, "1");
 }
 #[test]
+fn market_velocity_ip_signal_builds_minimal_okx_live_order_request() {
+    let task = task(json!({
+        "exchange": "okx",
+        "symbol": "IP-USDT-SWAP",
+        "side": "buy",
+        "trade_side": "open",
+        "position_mode": "one_way",
+        "order_type": "market",
+        "size_usdt": 5.0,
+        "client_order_id": "rqtask41",
+        "risk_plan": {
+            "protective_stop_loss_required": true,
+            "selected_stop_loss_price": 0.369958,
+            "direction": "long"
+        }
+    }));
+    let filters = ExchangeOrderFilters {
+        min_qty: Some("1".parse().unwrap()),
+        max_qty: None,
+        step_size: Some("1".parse().unwrap()),
+        min_notional: None,
+        quantity_precision: None,
+        tick_size: Some("0.0001".parse().unwrap()),
+        price_precision: Some(4),
+        contract_value: Some("1".parse().unwrap()),
+        contract_value_currency: Some("IP".to_string()),
+    };
+    let mut order_task = ExecutionOrderTask::from_task(&task).unwrap();
+    order_task
+        .apply_risk_reservation(&ExecutionRiskReservationResponse {
+            task_id: task.id,
+            buyer_email: task.buyer_email.clone(),
+            exchange: "okx".to_string(),
+            api_credential_id: Some(1001),
+            risk_budget_batch_id: Some("market-velocity-ip".to_string()),
+            allocation_mode: "equal_batch_split".to_string(),
+            allowed_notional_usdt: 5.0,
+            required_margin_usdt: 5.0,
+            stop_risk_usdt: 0.15,
+            leverage: 1.0,
+            margin_mode: "isolated".to_string(),
+            position_mode: "one_way".to_string(),
+        })
+        .unwrap();
+
+    let order = order_task
+        .to_live_order_request(Some(0.3814), Some(&filters))
+        .unwrap();
+
+    assert_eq!(order.exchange, ExchangeId::Okx);
+    assert_eq!(order.instrument.symbol_for(ExchangeId::Okx), "IP-USDT-SWAP");
+    assert_eq!(order.size, "13");
+    assert_eq!(order.margin_mode, Some(MarginMode::Isolated));
+    assert_eq!(order.attached_stop_loss_price.as_deref(), Some("0.3699"));
+}
+#[tokio::test]
+#[ignore]
+async fn okx_live_market_velocity_min_order_places_with_attached_stop_loss() -> anyhow::Result<()> {
+    dotenv::dotenv().ok();
+    if std::env::var("RUN_OKX_LIVE_MIN_ORDER_E2E").as_deref() != Ok("1") {
+        eprintln!("skip live OKX order smoke: RUN_OKX_LIVE_MIN_ORDER_E2E!=1");
+        return Ok(());
+    }
+    if std::env::var("OKX_LIVE_MIN_ORDER_ACK").as_deref()
+        != Ok("I_UNDERSTAND_THIS_PLACES_A_REAL_ORDER")
+    {
+        anyhow::bail!("OKX_LIVE_MIN_ORDER_ACK must explicitly confirm real order placement");
+    }
+
+    let api_key = std::env::var("OKX_API_KEY")?;
+    let api_secret = std::env::var("OKX_API_SECRET")?;
+    let passphrase = std::env::var("OKX_PASSPHRASE")?;
+    let symbol = std::env::var("OKX_LIVE_MIN_ORDER_SYMBOL")
+        .unwrap_or_else(|_| "IP-USDT-SWAP".to_string());
+    let instrument = parse_instrument(&symbol)?;
+    let gateway = CryptoExcAllGateway::from_single_exchange_credentials(
+        ExchangeId::Okx,
+        api_key,
+        api_secret,
+        Some(passphrase),
+        false,
+    )?;
+    let ticker = gateway.ticker(ExchangeId::Okx, &instrument).await?;
+    let now_ms = current_time_millis_u64();
+    let reference_price = live_order_reference_price(&ticker, OrderSide::Buy, now_ms)?;
+    let stop_loss_price = reference_price * 0.97;
+    let allowed_notional_usdt = reference_price * 1.05;
+    let filters = ExchangeOrderFilters {
+        min_qty: Some("1".parse().unwrap()),
+        max_qty: None,
+        step_size: Some("1".parse().unwrap()),
+        min_notional: None,
+        quantity_precision: None,
+        tick_size: Some("0.0001".parse().unwrap()),
+        price_precision: Some(4),
+        contract_value: Some("1".parse().unwrap()),
+        contract_value_currency: Some("IP".to_string()),
+    };
+    let task = task(json!({
+        "exchange": "okx",
+        "symbol": symbol,
+        "side": "buy",
+        "trade_side": "open",
+        "position_mode": "one_way",
+        "order_type": "market",
+        "size_usdt": allowed_notional_usdt,
+        "client_order_id": format!("rqlivemin{}", now_ms),
+        "risk_plan": {
+            "protective_stop_loss_required": true,
+            "selected_stop_loss_price": stop_loss_price,
+            "direction": "long"
+        }
+    }));
+    let mut order_task = ExecutionOrderTask::from_task(&task)?;
+    order_task.apply_risk_reservation(&ExecutionRiskReservationResponse {
+        task_id: task.id,
+        buyer_email: task.buyer_email.clone(),
+        exchange: "okx".to_string(),
+        api_credential_id: Some(1),
+        risk_budget_batch_id: Some(format!("live-min-{now_ms}")),
+        allocation_mode: "one_contract_min_smoke".to_string(),
+        allowed_notional_usdt,
+        required_margin_usdt: allowed_notional_usdt,
+        stop_risk_usdt: allowed_notional_usdt * 0.03,
+        leverage: 1.0,
+        margin_mode: "isolated".to_string(),
+        position_mode: "one_way".to_string(),
+    })?;
+    let request = order_task.to_live_order_request(Some(reference_price), Some(&filters))?;
+    assert_eq!(request.size, "1");
+    assert!(request.attached_stop_loss_price.is_some());
+
+    let orderbook = gateway
+        .orderbook(
+            ExchangeId::Okx,
+            OrderBookQuery::new(instrument.clone()).with_limit(LIVE_ORDERBOOK_DEPTH_LIMIT),
+        )
+        .await?;
+    validate_live_orderbook_execution_boundary(
+        &orderbook,
+        &request,
+        reference_price,
+        &filters,
+        now_ms,
+    )?;
+    CryptoExcAllGateway::with_live_mutation_audit_scope(gateway.prepare_order_settings(
+        ExchangeId::Okx,
+        PrepareOrderSettingsRequest::new(instrument)
+            .with_margin_mode(MarginMode::Isolated)
+            .with_leverage("1")
+            .with_position_mode(PositionMode::OneWay)
+            .with_product_type("SWAP")
+            .with_margin_coin("USDT"),
+    ))
+    .await?;
+    let ack =
+        CryptoExcAllGateway::with_live_mutation_audit_scope(gateway.place_order(request)).await?;
+    assert!(ack.order_id.is_some() || ack.client_order_id.is_some());
+    eprintln!(
+        "placed minimal OKX live smoke order: symbol={}, size=1, status={:?}, order_id_present={}",
+        orderbook.exchange_symbol,
+        ack.status,
+        ack.order_id.is_some()
+    );
+    Ok(())
+}
+#[test]
 fn okx_swap_contract_value_is_used_for_notional_validation() {
     let filters = ExchangeOrderFilters {
         min_qty: Some("1".parse().unwrap()),
