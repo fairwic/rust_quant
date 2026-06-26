@@ -240,6 +240,18 @@ fn market_rank_snapshot_restore_query_samples_target_scans_instead_of_full_windo
         "market rank snapshot restore should select the latest scan at or before each target horizon"
     );
     assert!(
+        source.contains("CROSS JOIN LATERAL"),
+        "market rank snapshot restore should use indexed per-target lookup instead of joining every historical snapshot before each target"
+    );
+    assert!(
+        source.contains("ORDER BY snapshots.captured_at DESC\n                    LIMIT 1"),
+        "market rank snapshot restore should stop after the latest scan time for each target"
+    );
+    assert!(
+        !source.contains("JOIN market_rank_snapshots snapshots\n                  ON snapshots.exchange = $1\n                 AND snapshots.captured_at <= restore_targets.target_at"),
+        "market rank snapshot restore must not join each target against all earlier snapshot rows"
+    );
+    assert!(
         !source.contains(
             "AND captured_at >= $2\n            ORDER BY captured_at ASC, rank ASC, symbol ASC"
         ),

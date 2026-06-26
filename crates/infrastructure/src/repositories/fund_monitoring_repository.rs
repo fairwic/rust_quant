@@ -417,13 +417,18 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
             ),
             selected_capture_times AS (
                 SELECT DISTINCT ON (target_at)
-                    target_at,
-                    snapshots.captured_at
+                    restore_targets.target_at,
+                    selected.captured_at
                 FROM restore_targets
-                JOIN market_rank_snapshots snapshots
-                  ON snapshots.exchange = $1
-                 AND snapshots.captured_at <= restore_targets.target_at
-                ORDER BY target_at, snapshots.captured_at DESC
+                CROSS JOIN LATERAL (
+                    SELECT snapshots.captured_at
+                    FROM market_rank_snapshots snapshots
+                    WHERE snapshots.exchange = $1
+                      AND snapshots.captured_at <= restore_targets.target_at
+                    ORDER BY snapshots.captured_at DESC
+                    LIMIT 1
+                ) selected
+                ORDER BY restore_targets.target_at, selected.captured_at DESC
             ),
             capture_times AS (
                 SELECT DISTINCT captured_at
