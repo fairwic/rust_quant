@@ -134,6 +134,22 @@ pub struct ConfirmedEvent {
     /// trigger，用于行情、K 线或市场扫描。
     pub trigger: String,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarketVelocityLiveEntryShellSelection {
+    /// 原始 signal 在 15m 计算序列中的索引。
+    pub signal_idx: usize,
+    /// 原始 signal trigger。
+    pub signal_trigger: String,
+    /// 实际 live entry 在 15m 计算序列中的索引。
+    pub entry_idx: usize,
+    /// 实际 live entry 时间戳。
+    pub entry_ts: i64,
+    /// 实际 live entry 价格。
+    pub entry_price: f64,
+    /// 实际 live entry trigger。
+    pub entry_trigger: String,
+}
 /// 封装当前函数，减少回测策略调用方重复实现相同细节。
 /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
 /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
@@ -788,6 +804,104 @@ fn entry_signal_pullback_block_reason(
         _ => 0.0,
     };
     (pullback_pct > max_pullback_pct).then(|| "entry_signal_pullback_too_deep".to_string())
+}
+
+pub fn select_live_entry_from_signal_shell(
+    event_ts: i64,
+    current_price: f64,
+    candles_15m: &[BacktestCandle],
+    args: &MarketVelocityEventBacktestArgs,
+) -> Result<MarketVelocityLiveEntryShellSelection, String> {
+    let computed = build_computed_candles(candles_15m.to_vec(), args.entry_period);
+    let direction = MarketVelocityTradeDirection::Long;
+    let (entry_ok, signal_trigger) = entry_confirmation(&computed, event_ts, direction, args);
+    if !entry_ok {
+        return Err(signal_trigger);
+    }
+    let signal_idx = completed_candle_count(&computed, event_ts, MS_15M)
+        .checked_sub(1)
+        .ok_or_else(|| "no_completed_15m".to_string())?;
+    let event = RadarEvent {
+        id: 0,
+        exchange: "okx".to_string(),
+        symbol: String::new(),
+        ts: event_ts,
+        detected_at: String::new(),
+        new_rank: 0,
+        delta_rank: 0,
+        current_price,
+        price_change_pct: 0.0,
+    };
+    let finalize = |entry_idx: usize,
+                    entry_ts: i64,
+                    entry_price: f64,
+                    entry_trigger: String|
+     -> Result<MarketVelocityLiveEntryShellSelection, String> {
+        if let Some(reason) =
+            entry_signal_pullback_block_reason(&event, entry_price, direction, args)
+        {
+            return Err(reason);
+        }
+        Ok(MarketVelocityLiveEntryShellSelection {
+            signal_idx,
+            signal_trigger: signal_trigger.clone(),
+            entry_idx,
+            entry_ts,
+            entry_price,
+            entry_trigger,
+        })
+    };
+    match args.fvg_entry_mode {
+        FvgEntryMode::M15ImpulseRetrace => {
+            match find_15m_impulse_fvg_retrace_after_signal(
+                candles_15m,
+                &computed,
+                event_ts,
+                &signal_trigger,
+                args,
+            ) {
+                FvgEntrySearch::Found(entry) => finalize(
+                    entry.entry_15m_idx,
+                    entry.entry_ts,
+                    entry.entry_price,
+                    entry.trigger,
+                ),
+                FvgEntrySearch::Blocked(reason) if args.entry_retest_after_signal => {
+                    let fallback = find_retest_entry_after_signal(
+                        &computed,
+                        signal_idx,
+                        direction,
+                        &signal_trigger,
+                        args,
+                    )
+                    .map_err(|fallback_reason| format!("{reason}_then_{fallback_reason}"))?;
+                    finalize(
+                        fallback.entry_idx,
+                        fallback.entry_ts,
+                        fallback.entry_price,
+                        format!("{}+fvg_fallback", fallback.trigger),
+                    )
+                }
+                FvgEntrySearch::Blocked(reason) => Err(reason),
+            }
+        }
+        FvgEntryMode::Off if args.entry_retest_after_signal => {
+            let fallback = find_retest_entry_after_signal(
+                &computed,
+                signal_idx,
+                direction,
+                &signal_trigger,
+                args,
+            )?;
+            finalize(
+                fallback.entry_idx,
+                fallback.entry_ts,
+                fallback.entry_price,
+                fallback.trigger,
+            )
+        }
+        _ => Err("live_signal_shell_requires_hybrid_retest_mode".to_string()),
+    }
 }
 /// 封装评估events，减少回测策略调用方重复实现相同细节。
 pub fn evaluate_events(

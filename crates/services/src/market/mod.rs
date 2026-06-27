@@ -50,11 +50,13 @@ mod market_velocity_signal;
 pub use market_velocity_signal::{
     build_market_velocity_strategy_signal_request,
     build_market_velocity_strategy_signal_request_with_entry_confirmation,
+    build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry,
     dispatch_market_velocity_strategy_signal_if_enabled,
     dispatch_market_velocity_strategy_signal_with_config_and_entry_confirmation,
     dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
     market_velocity_signal_dispatch_is_enabled,
-    market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityStrategySignalBlocker,
+    market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityFvgEntryMode,
+    MarketVelocitySelectedEntry, MarketVelocityStrategySignalBlocker,
     MarketVelocityStrategySignalConfig, MarketVelocityStrategySignalDecision,
 };
 mod flow_analyzer;

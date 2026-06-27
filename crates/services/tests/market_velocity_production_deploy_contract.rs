@@ -374,17 +374,31 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     }
 }
 #[test]
-fn market_velocity_live_signal_defaults_use_production_momentum_preset() {
+fn market_velocity_live_signal_defaults_use_latest_hybrid_research_preset() {
     let compose = read_repo_file("docker-compose.deploy.yml");
     for required in [
-        "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-15}",
+        "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-20}",
+        "MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK:-40}",
+        "MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT: ${MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT:-5.0}",
+        "MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT: ${MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT:-10.0}",
         "MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT:-0.0}",
-        "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT: ${MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT:-0.03}",
-        "MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R: ${MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R:-2.0}",
+        "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT: ${MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT:-0.04}",
+        "MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R: ${MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R:-1.8}",
         "MARKET_VELOCITY_SIGNAL_MAX_HOLDING_HOURS: ${MARKET_VELOCITY_SIGNAL_MAX_HOLDING_HOURS:-48}",
-        "MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET: ${MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET:-momentum_03sl_20r_v5}",
-        "MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION: ${MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION:-rank_radar_4h_trend_15m_momentum_03sl_20r_v5}",
-        "MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT:-4.0}",
+        "MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET: ${MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET:-research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION: ${MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION:-rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2}",
+        "MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT:-5.0}",
+        "MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO: ${MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO:-1.1}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT: ${MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT:-3.0}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_TOLERANCE_PCT: ${MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_TOLERANCE_PCT:-0.3}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_AFTER_SIGNAL: ${MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_AFTER_SIGNAL:-true}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MAX_WAIT_CANDLES: ${MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MAX_WAIT_CANDLES:-1}",
+        "MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE: ${MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE:-m15_impulse_retrace}",
+        "MARKET_VELOCITY_SIGNAL_FVG_LOOKBACK_CANDLES: ${MARKET_VELOCITY_SIGNAL_FVG_LOOKBACK_CANDLES:-40}",
+        "MARKET_VELOCITY_SIGNAL_FVG_MAX_WAIT_CANDLES: ${MARKET_VELOCITY_SIGNAL_FVG_MAX_WAIT_CANDLES:-24}",
+        "MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_FILL_PCT: ${MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_FILL_PCT:-20.0}",
+        "MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_MIN_WAIT_CANDLES: ${MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_MIN_WAIT_CANDLES:-0}",
+        "MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST: ${MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST:-reclaim_ema}",
         "MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH: ${MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH:-true}",
         "MARKET_VELOCITY_ENTRY_CANDLE_OKX_REST_BASE: ${MARKET_VELOCITY_ENTRY_CANDLE_OKX_REST_BASE:-https://www.okx.com}",
         "MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS: ${MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS:-0}",
@@ -426,6 +440,18 @@ fn market_velocity_live_signal_defaults_use_production_momentum_preset() {
         "deploy compose must not keep the old 2.5% stop default for Market Velocity live signal"
     );
     assert!(
+        !compose.contains(
+            "MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET: ${MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET:-momentum_03sl_20r_v5}"
+        ),
+        "deploy compose must not keep the legacy momentum live preset after hybrid promotion"
+    );
+    assert!(
+        !compose.contains(
+            "MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION: ${MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION:-rank_radar_4h_trend_15m_momentum_03sl_20r_v5}"
+        ),
+        "deploy compose must not keep the legacy momentum live entry rule after hybrid promotion"
+    );
+    assert!(
         !compose.contains("MARKET_VELOCITY_SYMBOL_BLOCKLIST: ${MARKET_VELOCITY_SYMBOL_BLOCKLIST:-"),
         "deploy compose must not default to a historical symbol blocklist"
     );
@@ -449,13 +475,7 @@ fn market_velocity_live_signal_defaults_use_production_momentum_preset() {
         !compose.contains(
             "MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT:-3.0}"
         ),
-        "deploy compose must not keep the lower-profit 3% entry-distance filter"
-    );
-    assert!(
-        !compose.contains(
-            "MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT:-5.0}"
-        ),
-        "deploy compose must not keep the lower-win 5% entry-distance filter"
+        "deploy compose must not keep the pre-hybrid 3% entry-distance filter"
     );
     assert!(
         !compose.contains(
@@ -465,15 +485,21 @@ fn market_velocity_live_signal_defaults_use_production_momentum_preset() {
     );
     assert!(
         !compose.contains(
-            "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-20}"
+            "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-15}"
         ),
-        "deploy compose must not revert to the low-trade rank delta gate"
+        "deploy compose must not keep the older momentum rank delta gate"
     );
     assert!(
         !compose.contains(
             "MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT:-4.0}"
         ),
         "deploy compose must not revert to the low-trade 4h distance gate"
+    );
+    assert!(
+        !compose.contains(
+            "MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE: ${MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE:-off}"
+        ),
+        "deploy compose must not leave the live handoff runtime on the legacy non-FVG shell"
     );
     assert!(
         !compose.contains("MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK"),

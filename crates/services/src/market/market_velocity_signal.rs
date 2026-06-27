@@ -8,12 +8,13 @@ use crate::strategy::strategy_signal_payload::{
     build_strategy_signal_submit_request, StrategySignalPayloadBuildOptions,
 };
 use anyhow::{anyhow, Result};
-use chrono::SecondsFormat;
+use chrono::{DateTime, SecondsFormat, Utc};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use rust_quant_domain::entities::{MarketRankEvent, MarketRankEventType};
 use rust_quant_domain::{BasicRiskConfig, SignalDirection};
 use rust_quant_strategies::strategy_common::SignalResult;
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tracing::info;
@@ -32,6 +33,44 @@ const DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT: f64 = 0.0;
 const DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE: &str = "live_execution_authorized";
 const DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED: bool = true;
 const DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED: bool = false;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketVelocityFvgEntryMode {
+    Off,
+    M15ImpulseRetrace,
+}
+
+impl MarketVelocityFvgEntryMode {
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "off" | "none" | "disabled" | "0" | "false" => Ok(Self::Off),
+            "m15_impulse_retrace" | "15m_impulse_retrace" | "15m-impulse-retrace" => {
+                Ok(Self::M15ImpulseRetrace)
+            }
+            other => Err(anyhow!(
+                "unsupported market velocity fvg entry mode: {other}"
+            )),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::M15ImpulseRetrace => "m15_impulse_retrace",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct MarketVelocitySelectedEntry {
+    pub entry_price: f64,
+    pub entry_ts: DateTime<Utc>,
+    pub trigger: String,
+    pub entry_path: String,
+    pub signal_pullback_pct: Option<f64>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MarketVelocityStrategySignalConfig {
     /// 策略slug，用于配置运行参数。
@@ -42,6 +81,10 @@ pub struct MarketVelocityStrategySignalConfig {
     pub entry_rule_version: String,
     /// 最小delta排名，用于控制策略触发门槛。
     pub min_delta_rank: i32,
+    /// 最大delta排名；为空时不限制。
+    pub max_delta_rank: Option<i32>,
+    /// 最小价格涨跌幅百分比；为空时不限制。
+    pub min_price_change_pct: Option<f64>,
     /// 最大价格涨跌幅百分比；为空时不限制，用于避免追高。
     pub max_price_change_pct: Option<f64>,
     /// 止损百分比。
@@ -76,6 +119,28 @@ pub struct MarketVelocityStrategySignalConfig {
     pub entry_max_average_distance_pct: f64,
     /// 入场最小volume 比例。
     pub entry_min_volume_ratio: f64,
+    /// signal 当前价到实际入场价允许的最大回撤百分比；为空时不启用。
+    pub entry_max_signal_pullback_pct: Option<f64>,
+    /// 前高回踩确认允许的价格容差百分比。
+    pub entry_retest_tolerance_pct: f64,
+    /// 是否等待原始入场信号后的结构回踩确认。
+    pub entry_retest_after_signal: bool,
+    /// 原始入场信号后等待结构回踩确认的最大 15m K 线数量。
+    pub entry_retest_max_wait_candles: usize,
+    /// 回踩确认后下一根入场开盘相对确认收盘的最小 gap 百分比；为空时不启用。
+    pub entry_retest_min_entry_open_gap_pct: Option<f64>,
+    /// 回踩确认后下一根开盘若弱于确认收盘，允许用更高确认量能作为例外通行；为空时不启用。
+    pub entry_retest_open_fade_min_volume_ratio: Option<f64>,
+    /// FVG 入场模式。
+    pub fvg_entry_mode: MarketVelocityFvgEntryMode,
+    /// FVG 查找向前回看 K 线数量。
+    pub fvg_lookback_candles: usize,
+    /// FVG 最大等待 K 线数量。
+    pub fvg_max_wait_candles: usize,
+    /// m15 impulse retrace 挂单距离 FVG 下沿的百分比。
+    pub fvg_impulse_retrace_fill_pct: f64,
+    /// m15 impulse retrace 从 signal 到允许 fill 之间至少等待的完整 15m K 线数量。
+    pub fvg_impulse_retrace_min_wait_candles: usize,
     /// 列表数据。
     pub entry_trigger_allowlist: Vec<String>,
     /// 列表数据。
@@ -91,6 +156,8 @@ impl Default for MarketVelocityStrategySignalConfig {
             strategy_preset: DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET.to_string(),
             entry_rule_version: DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION.to_string(),
             min_delta_rank: 15,
+            max_delta_rank: None,
+            min_price_change_pct: None,
             max_price_change_pct: None,
             stop_loss_pct: DEFAULT_STOP_LOSS_PCT,
             take_profit_r: DEFAULT_TAKE_PROFIT_R,
@@ -108,6 +175,17 @@ impl Default for MarketVelocityStrategySignalConfig {
             entry_confirmation_fetch_limit: 80,
             entry_max_average_distance_pct: DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT,
             entry_min_volume_ratio: 1.0,
+            entry_max_signal_pullback_pct: None,
+            entry_retest_tolerance_pct: 0.3,
+            entry_retest_after_signal: false,
+            entry_retest_max_wait_candles: 8,
+            entry_retest_min_entry_open_gap_pct: None,
+            entry_retest_open_fade_min_volume_ratio: None,
+            fvg_entry_mode: MarketVelocityFvgEntryMode::Off,
+            fvg_lookback_candles: 40,
+            fvg_max_wait_candles: 24,
+            fvg_impulse_retrace_fill_pct: 20.0,
+            fvg_impulse_retrace_min_wait_candles: 0,
             entry_trigger_allowlist: default_entry_trigger_allowlist(),
             entry_trigger_blocklist: Vec::new(),
             symbol_blocklist: default_symbol_blocklist(),
@@ -132,6 +210,10 @@ impl MarketVelocityStrategySignalConfig {
                 DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION,
             ),
             min_delta_rank: parse_env_i32("MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK", 15)?,
+            max_delta_rank: parse_env_optional_i32("MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK")?,
+            min_price_change_pct: parse_env_optional_f64(
+                "MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT",
+            )?,
             max_price_change_pct: parse_env_optional_f64(
                 "MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT",
             )?,
@@ -172,6 +254,47 @@ impl MarketVelocityStrategySignalConfig {
                 DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT,
             )?,
             entry_min_volume_ratio: parse_env_f64("MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO", 1.0)?,
+            entry_max_signal_pullback_pct: parse_env_optional_f64(
+                "MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT",
+            )?,
+            entry_retest_tolerance_pct: parse_env_f64(
+                "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_TOLERANCE_PCT",
+                0.3,
+            )?,
+            entry_retest_after_signal: parse_env_bool(
+                "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_AFTER_SIGNAL",
+                false,
+            )?,
+            entry_retest_max_wait_candles: parse_env_usize(
+                "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MAX_WAIT_CANDLES",
+                8,
+            )?,
+            entry_retest_min_entry_open_gap_pct: parse_env_optional_f64(
+                "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MIN_ENTRY_OPEN_GAP_PCT",
+            )?,
+            entry_retest_open_fade_min_volume_ratio: parse_env_optional_f64(
+                "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_OPEN_FADE_MIN_VOLUME_RATIO",
+            )?,
+            fvg_entry_mode: parse_env_fvg_entry_mode(
+                "MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE",
+                MarketVelocityFvgEntryMode::Off,
+            )?,
+            fvg_lookback_candles: parse_env_usize(
+                "MARKET_VELOCITY_SIGNAL_FVG_LOOKBACK_CANDLES",
+                40,
+            )?,
+            fvg_max_wait_candles: parse_env_usize(
+                "MARKET_VELOCITY_SIGNAL_FVG_MAX_WAIT_CANDLES",
+                24,
+            )?,
+            fvg_impulse_retrace_fill_pct: parse_env_f64(
+                "MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_FILL_PCT",
+                20.0,
+            )?,
+            fvg_impulse_retrace_min_wait_candles: parse_env_usize(
+                "MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_MIN_WAIT_CANDLES",
+                0,
+            )?,
             entry_trigger_allowlist: parse_env_entry_trigger_list(
                 "MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST",
                 DEFAULT_ENTRY_TRIGGER_ALLOWLIST,
@@ -202,6 +325,12 @@ impl MarketVelocityStrategySignalConfig {
         }
         if let Some(value) = json_i32(config, "min_delta_rank")? {
             parsed.min_delta_rank = value;
+        }
+        if let Some(value) = json_i32(config, "max_delta_rank")? {
+            parsed.max_delta_rank = Some(value);
+        }
+        if let Some(value) = json_f64(config, "min_price_change_pct")? {
+            parsed.min_price_change_pct = Some(value);
         }
         if let Some(value) = json_f64(config, "max_price_change_pct")? {
             parsed.max_price_change_pct = Some(value);
@@ -244,6 +373,39 @@ impl MarketVelocityStrategySignalConfig {
         }
         if let Some(value) = json_f64(config, "entry_min_volume_ratio")? {
             parsed.entry_min_volume_ratio = value;
+        }
+        if let Some(value) = json_f64(config, "entry_max_signal_pullback_pct")? {
+            parsed.entry_max_signal_pullback_pct = Some(value);
+        }
+        if let Some(value) = json_f64(config, "entry_retest_tolerance_pct")? {
+            parsed.entry_retest_tolerance_pct = value;
+        }
+        if let Some(value) = json_bool(config, "entry_retest_after_signal")? {
+            parsed.entry_retest_after_signal = value;
+        }
+        if let Some(value) = json_usize(config, "entry_retest_max_wait_candles")? {
+            parsed.entry_retest_max_wait_candles = value;
+        }
+        if let Some(value) = json_f64(config, "entry_retest_min_entry_open_gap_pct")? {
+            parsed.entry_retest_min_entry_open_gap_pct = Some(value);
+        }
+        if let Some(value) = json_f64(config, "entry_retest_open_fade_min_volume_ratio")? {
+            parsed.entry_retest_open_fade_min_volume_ratio = Some(value);
+        }
+        if let Some(value) = json_fvg_entry_mode(config, "fvg_entry_mode")? {
+            parsed.fvg_entry_mode = value;
+        }
+        if let Some(value) = json_usize(config, "fvg_lookback_candles")? {
+            parsed.fvg_lookback_candles = value;
+        }
+        if let Some(value) = json_usize(config, "fvg_max_wait_candles")? {
+            parsed.fvg_max_wait_candles = value;
+        }
+        if let Some(value) = json_f64(config, "fvg_impulse_retrace_fill_pct")? {
+            parsed.fvg_impulse_retrace_fill_pct = value;
+        }
+        if let Some(value) = json_usize(config, "fvg_impulse_retrace_min_wait_candles")? {
+            parsed.fvg_impulse_retrace_min_wait_candles = value;
         }
         if let Some(value) = json_entry_trigger_list(config, "entry_trigger_allowlist")? {
             parsed.entry_trigger_allowlist = value;
@@ -292,6 +454,12 @@ impl MarketVelocityStrategySignalConfig {
             max_average_distance_pct: self.entry_max_average_distance_pct,
             min_volume_ratio: self.entry_min_volume_ratio,
         }
+    }
+
+    pub fn hybrid_live_entry_enabled(&self) -> bool {
+        self.fvg_entry_mode != MarketVelocityFvgEntryMode::Off
+            || self.entry_retest_after_signal
+            || self.entry_max_signal_pullback_pct.is_some()
     }
 }
 /// 封装当前函数，减少行情数据调用方重复实现相同细节。
@@ -545,13 +713,32 @@ pub fn build_market_velocity_strategy_signal_request_with_entry_confirmation(
     config: &MarketVelocityStrategySignalConfig,
     entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
 ) -> Result<MarketVelocityStrategySignalDecision> {
+    build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry(
+        event,
+        config,
+        entry_confirmation,
+        None,
+    )
+}
+
+pub fn build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry(
+    event: &MarketRankEvent,
+    config: &MarketVelocityStrategySignalConfig,
+    entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
+    selected_entry: Option<&MarketVelocitySelectedEntry>,
+) -> Result<MarketVelocityStrategySignalDecision> {
     if let Some(blocker) = pre_entry_signal_blocker(event, config)? {
         return Ok(MarketVelocityStrategySignalDecision::Blocked(blocker));
     }
     if let Some(blocker) = entry_confirmation_blocker(entry_confirmation, config) {
         return Ok(MarketVelocityStrategySignalDecision::Blocked(blocker));
     }
-    build_market_velocity_strategy_signal_submit_request(event, config, entry_confirmation)
+    build_market_velocity_strategy_signal_submit_request(
+        event,
+        config,
+        entry_confirmation,
+        selected_entry,
+    )
 }
 /// 提供pre入场信号blocker的集中实现，避免行情数据调用方重复处理相同细节。
 fn pre_entry_signal_blocker(
@@ -568,6 +755,24 @@ fn pre_entry_signal_blocker(
     }
     if !matches!(event.delta_rank, Some(delta) if delta >= config.min_delta_rank) {
         return Ok(Some(MarketVelocityStrategySignalBlocker::RankDeltaTooWeak));
+    }
+    if matches!(
+        (event.delta_rank, config.max_delta_rank),
+        (Some(delta), Some(max_delta_rank)) if delta > max_delta_rank
+    ) {
+        return Ok(Some(MarketVelocityStrategySignalBlocker::RankDeltaTooWeak));
+    }
+    if let Some(min_price_change_pct) = config.min_price_change_pct {
+        let price_change_pct = event
+            .price_change_pct
+            .and_then(decimal_to_f64)
+            .unwrap_or_default()
+            .abs();
+        if price_change_pct < min_price_change_pct {
+            return Ok(Some(
+                MarketVelocityStrategySignalBlocker::PriceChangeTooHigh,
+            ));
+        }
     }
     if let Some(max_price_change_pct) = config.max_price_change_pct {
         let price_change_pct = event
@@ -630,12 +835,17 @@ fn build_market_velocity_strategy_signal_submit_request(
     event: &MarketRankEvent,
     config: &MarketVelocityStrategySignalConfig,
     entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
+    selected_entry: Option<&MarketVelocitySelectedEntry>,
 ) -> Result<MarketVelocityStrategySignalDecision> {
     let mut effective_config = config.clone();
     normalize_market_velocity_live_execution_policy(&mut effective_config);
     let config = &effective_config;
-    let entry_price = decimal_to_positive_f64(event.current_price)
+    let event_current_price = decimal_to_positive_f64(event.current_price)
         .ok_or_else(|| anyhow!("market velocity event current_price is missing"))?;
+    let entry_price = selected_entry
+        .map(|entry| entry.entry_price)
+        .filter(|price| price.is_finite() && *price > 0.0)
+        .unwrap_or(event_current_price);
     let selected_stop_loss_price = round_price(entry_price * (1.0 - config.stop_loss_pct));
     let selected_take_profit_price =
         round_price(entry_price + (entry_price - selected_stop_loss_price) * config.take_profit_r);
@@ -677,14 +887,16 @@ fn build_market_velocity_strategy_signal_submit_request(
     let event_type = event.event_type.as_str();
     let period = market_velocity_strategy_signal_period(event, entry_confirmation);
     let config_id = rank_event_id.unwrap_or_else(|| event.detected_at.timestamp_millis());
-    let client_order_id =
-        market_velocity_client_order_id(rank_event_id, event.detected_at.timestamp_millis());
+    let signal_ts = selected_entry
+        .map(|entry| entry.entry_ts.timestamp_millis())
+        .unwrap_or_else(|| event.detected_at.timestamp_millis());
+    let client_order_id = market_velocity_client_order_id(rank_event_id, signal_ts);
     let signal = market_velocity_signal_result(
         config,
         entry_price,
         selected_stop_loss_price,
         selected_take_profit_price,
-        event.detected_at.timestamp_millis(),
+        signal_ts,
     );
     let risk_config = market_velocity_risk_config(config);
     let mut risk_plan = json!({
@@ -707,6 +919,42 @@ fn build_market_velocity_strategy_signal_submit_request(
     ) {
         risk_plan["take_profit_legs"] = take_profit_legs;
     }
+    let entry_filter = json!({
+        "status": "confirmed",
+        "mode": DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE,
+        "entry_rule_version": config.entry_rule_version.trim(),
+        "paper_strategy_preset": config.strategy_preset.trim(),
+        "technical_confirmation_required": config.require_technical_confirmation,
+        "entry_confirmation_required": config.require_entry_confirmation,
+        "min_delta_rank": config.min_delta_rank,
+        "max_delta_rank": config.max_delta_rank,
+        "min_price_change_pct": config.min_price_change_pct,
+        "max_price_change_pct": config.max_price_change_pct,
+        "trend_min_average_distance_pct": config.trend_min_average_distance_pct,
+        "entry_max_average_distance_pct": config.entry_max_average_distance_pct,
+        "entry_min_volume_ratio": config.entry_min_volume_ratio,
+        "entry_max_signal_pullback_pct": config.entry_max_signal_pullback_pct,
+        "entry_retest_tolerance_pct": config.entry_retest_tolerance_pct,
+        "entry_retest_after_signal": config.entry_retest_after_signal,
+        "entry_retest_max_wait_candles": config.entry_retest_max_wait_candles,
+        "entry_retest_min_entry_open_gap_pct": config.entry_retest_min_entry_open_gap_pct,
+        "entry_retest_open_fade_min_volume_ratio": config.entry_retest_open_fade_min_volume_ratio,
+        "fvg_entry_mode": config.fvg_entry_mode.label(),
+        "fvg_lookback_candles": config.fvg_lookback_candles,
+        "fvg_max_wait_candles": config.fvg_max_wait_candles,
+        "fvg_impulse_retrace_fill_pct": config.fvg_impulse_retrace_fill_pct,
+        "fvg_impulse_retrace_min_wait_candles": config.fvg_impulse_retrace_min_wait_candles,
+        "entry_trigger_filter_version": ENTRY_TRIGGER_FILTER_VERSION,
+        "entry_trigger_allowlist": &config.entry_trigger_allowlist,
+        "entry_trigger_blocklist": &config.entry_trigger_blocklist,
+        "symbol_blocklist": &config.symbol_blocklist,
+    });
+    let execution_policy = json!({
+        "mode": DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE,
+        "live_order_allowed": DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED,
+        "paper_trade_required": DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED,
+        "production_stage": market_velocity_execution_policy_stage(config),
+    });
     let payload_overlay = json!({
         "source": "rust_quant",
         "source_signal_type": "market_velocity",
@@ -722,41 +970,21 @@ fn build_market_velocity_strategy_signal_submit_request(
         "new_rank": event.new_rank,
         "delta_rank": event.delta_rank,
         "volume_24h_quote": event.volume_24h_quote.and_then(decimal_to_f64),
-        "current_price": entry_price,
+        "current_price": event_current_price,
         "previous_price": event.previous_price.and_then(decimal_to_f64),
         "price_change_pct": event.price_change_pct.and_then(decimal_to_f64),
         "price_direction": &event.price_direction,
         "technical_snapshot_status": &event.technical_snapshot_status,
         "technical_snapshot": &event.technical_snapshot,
-        "entry_filter": {
-            "status": "confirmed",
-            "mode": DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE,
-            "entry_rule_version": config.entry_rule_version.trim(),
-            "paper_strategy_preset": config.strategy_preset.trim(),
-            "technical_confirmation_required": config.require_technical_confirmation,
-            "entry_confirmation_required": config.require_entry_confirmation,
-            "min_delta_rank": config.min_delta_rank,
-            "max_price_change_pct": config.max_price_change_pct,
-            "trend_min_average_distance_pct": config.trend_min_average_distance_pct,
-            "entry_max_average_distance_pct": config.entry_max_average_distance_pct,
-            "entry_min_volume_ratio": config.entry_min_volume_ratio,
-            "entry_trigger_filter_version": ENTRY_TRIGGER_FILTER_VERSION,
-            "entry_trigger_allowlist": &config.entry_trigger_allowlist,
-            "entry_trigger_blocklist": &config.entry_trigger_blocklist,
-            "symbol_blocklist": &config.symbol_blocklist,
-        },
+        "entry_filter": entry_filter,
         "entry_confirmation": entry_confirmation,
+        "selected_entry": selected_entry,
         "side": "buy",
         "position_side": "long",
         "trade_side": "open",
         "order_type": "market",
         "auto_execution_allowed": DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED,
-        "execution_policy": {
-            "mode": DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE,
-            "live_order_allowed": DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED,
-            "paper_trade_required": DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED,
-            "production_stage": market_velocity_execution_policy_stage(config),
-        },
+        "execution_policy": execution_policy,
         "risk_plan": risk_plan,
         "detected_at": generated_at.as_deref(),
     });
@@ -1134,6 +1362,13 @@ fn json_string(value: &Value, key: &str) -> Result<Option<String>> {
     };
     Ok((!text.is_empty()).then_some(text))
 }
+
+fn json_fvg_entry_mode(value: &Value, key: &str) -> Result<Option<MarketVelocityFvgEntryMode>> {
+    let Some(value) = json_string(value, key)? else {
+        return Ok(None);
+    };
+    MarketVelocityFvgEntryMode::from_str(&value).map(Some)
+}
 /// 提供JSONi64的集中实现，避免行情数据调用方重复处理相同细节。
 fn json_i64(value: &Value, key: &str) -> Result<Option<i64>> {
     let Some(field) = json_field(value, key) else {
@@ -1276,6 +1511,24 @@ fn parse_env_i32(key: &str, default: i32) -> Result<i32> {
         .transpose()
         .map(|value| value.unwrap_or(default))
 }
+
+fn parse_env_optional_i32(key: &str) -> Result<Option<i32>> {
+    std::env::var(key)
+        .ok()
+        .map(|value| {
+            let value = value.trim();
+            if value.is_empty() {
+                Ok(None)
+            } else {
+                value
+                    .parse::<i32>()
+                    .map(Some)
+                    .map_err(|error| anyhow!("{key} must be an integer: {error}"))
+            }
+        })
+        .transpose()
+        .map(Option::flatten)
+}
 /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_env_u64(key: &str, default: u64) -> Result<u64> {
     std::env::var(key)
@@ -1355,6 +1608,19 @@ fn parse_env_bool(key: &str, default: bool) -> Result<bool> {
         return Ok(default);
     }
     parse_bool_text(&value, key)
+}
+
+fn parse_env_fvg_entry_mode(
+    key: &str,
+    default: MarketVelocityFvgEntryMode,
+) -> Result<MarketVelocityFvgEntryMode> {
+    let Some(value) = std::env::var(key).ok() else {
+        return Ok(default);
+    };
+    if value.trim().is_empty() {
+        return Ok(default);
+    }
+    MarketVelocityFvgEntryMode::from_str(&value)
 }
 /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_bool_text(value: &str, key: &str) -> Result<bool> {

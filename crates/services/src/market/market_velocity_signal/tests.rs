@@ -1,11 +1,12 @@
 use super::{
     build_market_velocity_strategy_signal_request,
     build_market_velocity_strategy_signal_request_with_entry_confirmation,
+    build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry,
     dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
     market_velocity_strategy_signal_log_context,
     should_dispatch_market_velocity_signal_to_quant_web_from_env, MarketVelocityEntryConfirmation,
-    MarketVelocityStrategySignalBlocker, MarketVelocityStrategySignalConfig,
-    MarketVelocityStrategySignalDecision,
+    MarketVelocityFvgEntryMode, MarketVelocitySelectedEntry, MarketVelocityStrategySignalBlocker,
+    MarketVelocityStrategySignalConfig, MarketVelocityStrategySignalDecision,
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -67,6 +68,16 @@ fn entry_confirmation_with_trigger(trigger: &str) -> MarketVelocityEntryConfirma
         volume_ratio: Some(1.2),
         candle_count: 80,
         snapshot_at: DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp"),
+    }
+}
+
+fn selected_entry(trigger: &str, entry_price: f64) -> MarketVelocitySelectedEntry {
+    MarketVelocitySelectedEntry {
+        entry_price,
+        entry_ts: DateTime::from_timestamp(1_774_818_000, 0).expect("valid test timestamp"),
+        trigger: trigger.to_string(),
+        entry_path: "retest_after_signal".to_string(),
+        signal_pullback_pct: Some(2.286),
     }
 }
 #[test]
@@ -232,6 +243,53 @@ fn market_velocity_payload_reuses_strategy_signal_live_entry_contract() {
     assert_eq!(payload["risk_plan"]["target_r"], 2.0);
     assert_eq!(payload["risk_plan"]["max_holding_hours"], 48);
 }
+
+#[test]
+fn market_velocity_live_selected_entry_overrides_signal_open_price_without_losing_event_snapshot() {
+    let config = MarketVelocityStrategySignalConfig {
+        require_technical_confirmation: false,
+        stop_loss_pct: 0.04,
+        take_profit_r: 1.8,
+        ..MarketVelocityStrategySignalConfig::default()
+    };
+    let event = rank_event(
+        MarketRankEventType::RankVelocity,
+        "up",
+        Some(Decimal::new(105, 0)),
+    );
+    let confirmation = entry_confirmation_with_trigger("reclaim_ema");
+    let decision =
+        build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry(
+            &event,
+            &config,
+            Some(&confirmation),
+            Some(&selected_entry(
+                "reclaim_ema+retest_after_signal+fvg_fallback",
+                102.6,
+            )),
+        )
+        .expect("selected live entry should build a strategy signal");
+    let MarketVelocityStrategySignalDecision::Submit(request) = decision else {
+        panic!("selected live entry should submit a strategy signal");
+    };
+    let payload: Value =
+        serde_json::from_str(&request.payload_json).expect("payload should be valid json");
+    assert_eq!(payload["current_price"], 105.0);
+    assert_eq!(payload["selected_entry"]["entry_price"], 102.6);
+    assert_eq!(
+        payload["selected_entry"]["trigger"],
+        "reclaim_ema+retest_after_signal+fvg_fallback"
+    );
+    assert_eq!(
+        payload["selected_entry"]["entry_path"],
+        "retest_after_signal"
+    );
+    assert_eq!(payload["entry_confirmation"]["trigger"], "reclaim_ema");
+    assert_eq!(payload["signal"]["open_price"], 102.6);
+    assert_eq!(payload["risk_plan"]["entry_price"], 102.6);
+    assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 98.496);
+    assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 109.9872);
+}
 #[test]
 fn default_market_velocity_signal_payload_uses_momentum_profit_preset() {
     let config = MarketVelocityStrategySignalConfig::default();
@@ -290,6 +348,8 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
             "strategy_preset": "momentum_03sl_20r_v5",
             "entry_rule_version": "rank_radar_4h_trend_15m_momentum_03sl_20r_v5",
             "min_delta_rank": 12,
+            "max_delta_rank": 40,
+            "min_price_change_pct": 5.0,
             "max_price_change_pct": 10.0,
             "automation_mode": "signal_only",
             "live_order_allowed": false,
@@ -301,6 +361,15 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
             "entry_confirmation_fetch_limit": 90,
             "entry_max_average_distance_pct": 3.6,
             "entry_min_volume_ratio": 1.15,
+            "entry_max_signal_pullback_pct": 3.0,
+            "entry_retest_tolerance_pct": 0.3,
+            "entry_retest_after_signal": true,
+            "entry_retest_max_wait_candles": 1,
+            "fvg_entry_mode": "m15_impulse_retrace",
+            "fvg_lookback_candles": 40,
+            "fvg_max_wait_candles": 24,
+            "fvg_impulse_retrace_fill_pct": 20.0,
+            "fvg_impulse_retrace_min_wait_candles": 0,
             "entry_trigger_allowlist": ["breakout_previous_high"],
             "entry_trigger_blocklist": ["pullback_hold_ema"],
             "symbol_blocklist": ["DOGE-USDT-SWAP"]
@@ -337,11 +406,25 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
     assert_eq!(config.take_profit_r, 2.7);
     assert_eq!(config.max_holding_hours, 36);
     assert_eq!(config.min_delta_rank, 12);
+    assert_eq!(config.max_delta_rank, Some(40));
+    assert_eq!(config.min_price_change_pct, Some(5.0));
     assert_eq!(config.max_price_change_pct, Some(10.0));
     assert_eq!(config.entry_confirmation_period, 18);
     assert_eq!(config.entry_confirmation_fetch_limit, 90);
     assert_eq!(config.entry_max_average_distance_pct, 3.6);
     assert_eq!(config.entry_min_volume_ratio, 1.15);
+    assert_eq!(config.entry_max_signal_pullback_pct, Some(3.0));
+    assert_eq!(config.entry_retest_tolerance_pct, 0.3);
+    assert!(config.entry_retest_after_signal);
+    assert_eq!(config.entry_retest_max_wait_candles, 1);
+    assert_eq!(
+        config.fvg_entry_mode,
+        MarketVelocityFvgEntryMode::M15ImpulseRetrace
+    );
+    assert_eq!(config.fvg_lookback_candles, 40);
+    assert_eq!(config.fvg_max_wait_candles, 24);
+    assert_eq!(config.fvg_impulse_retrace_fill_pct, 20.0);
+    assert_eq!(config.fvg_impulse_retrace_min_wait_candles, 0);
     assert_eq!(config.automation_mode, "live_execution_authorized");
     assert!(config.live_order_allowed);
     assert!(!config.paper_trade_required);
@@ -357,6 +440,13 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
     assert_eq!(
         payload["entry_filter"]["entry_trigger_allowlist"],
         json!(["breakout_previous_high"])
+    );
+    assert_eq!(payload["entry_filter"]["max_delta_rank"], 40);
+    assert_eq!(payload["entry_filter"]["min_price_change_pct"], 5.0);
+    assert_eq!(payload["entry_filter"]["entry_retest_after_signal"], true);
+    assert_eq!(
+        payload["entry_filter"]["fvg_entry_mode"],
+        "m15_impulse_retrace"
     );
     assert_eq!(payload["entry_filter"]["max_price_change_pct"], 10.0);
 }

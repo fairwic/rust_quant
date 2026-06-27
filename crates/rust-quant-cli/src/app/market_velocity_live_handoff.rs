@@ -1,13 +1,19 @@
 use super::env_parse::{first_non_empty_env, parse_bool_env, parse_i64_env, parse_u64_env};
 use super::market_velocity_backfill::build_okx_http_client;
+use super::market_velocity_event_backtest::{
+    select_live_entry_from_signal_shell, FvgEntryMode, MarketVelocityEventBacktestArgs,
+};
 use super::market_velocity_strategy_config::load_market_velocity_signal_config_or_env;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
+use rust_decimal::prelude::ToPrimitive;
 use rust_quant_domain::entities::MarketRankEvent;
+use rust_quant_domain::Candle;
 use rust_quant_services::market::{
     build_market_velocity_entry_confirmation_from_candles,
-    build_market_velocity_strategy_signal_request_with_entry_confirmation,
+    build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry,
     MarketVelocityEntryConfirmation, MarketVelocityEntryConfirmationDecision,
+    MarketVelocityFvgEntryMode, MarketVelocitySelectedEntry, MarketVelocityStrategySignalConfig,
     MarketVelocityStrategySignalDecision,
 };
 use rust_quant_services::rust_quan_web::{
@@ -234,6 +240,7 @@ pub async fn run_market_velocity_live_handoff(
     let mut selected: Option<(
         MarketRankEvent,
         MarketVelocityEntryConfirmation,
+        Option<MarketVelocitySelectedEntry>,
         StrategySignalSubmitRequest,
         MarketVelocityEntryCandleLoadStatus,
     )> = None;
@@ -268,58 +275,102 @@ pub async fn run_market_velocity_live_handoff(
             Err(error) => return Err(error),
         };
         let candles = candle_load.candles.clone();
-        let entry_confirmation = match build_market_velocity_entry_confirmation_from_candles(
-            "15m",
-            &candles,
-            &signal_config.entry_confirmation_config(),
-        ) {
-            MarketVelocityEntryConfirmationDecision::Confirmed(confirmation) => confirmation,
-            MarketVelocityEntryConfirmationDecision::Blocked(blocker) => {
+        let now = Utc::now();
+        let (entry_confirmation, selected_entry) = if signal_config.hybrid_live_entry_enabled() {
+            match select_market_velocity_live_entry(&event, &candles, &signal_config) {
+                Ok(selection) => {
+                    if let Some(blocker_detail) = market_velocity_selected_entry_stale_blocker(
+                        &selection.selected_entry,
+                        now,
+                        config.entry_candle_max_staleness_minutes,
+                    ) {
+                        skipped_candidates.push(json!({
+                            "event_id": event.id,
+                            "symbol": event.symbol,
+                            "blocker_code": "market_velocity_selected_entry_stale",
+                            "blocker_detail": blocker_detail,
+                            "selected_entry": selection.selected_entry,
+                            "entry_candles": candle_load.status,
+                        }));
+                        continue;
+                    }
+                    (selection.entry_confirmation, Some(selection.selected_entry))
+                }
+                Err(blocker_detail) => {
+                    skipped_candidates.push(json!({
+                        "event_id": event.id,
+                        "symbol": event.symbol,
+                        "blocker_code": "market_velocity_live_entry_shell_blocked",
+                        "blocker_detail": blocker_detail,
+                        "entry_candles": candle_load.status,
+                    }));
+                    continue;
+                }
+            }
+        } else {
+            let entry_confirmation = match build_market_velocity_entry_confirmation_from_candles(
+                "15m",
+                &candles,
+                &signal_config.entry_confirmation_config(),
+            ) {
+                MarketVelocityEntryConfirmationDecision::Confirmed(confirmation) => confirmation,
+                MarketVelocityEntryConfirmationDecision::Blocked(blocker) => {
+                    skipped_candidates.push(json!({
+                        "event_id": event.id,
+                        "symbol": event.symbol,
+                        "blocker_code": "market_velocity_entry_confirmation_blocked",
+                        "blocker_detail": format!("{:?}", blocker),
+                        "entry_candles": candle_load.status,
+                    }));
+                    continue;
+                }
+            };
+            if let Some(blocker_detail) = market_velocity_entry_confirmation_stale_blocker(
+                &entry_confirmation,
+                now,
+                config.entry_candle_max_staleness_minutes,
+            ) {
                 skipped_candidates.push(json!({
                     "event_id": event.id,
                     "symbol": event.symbol,
-                    "blocker_code": "market_velocity_entry_confirmation_blocked",
-                    "blocker_detail": format!("{:?}", blocker),
+                    "blocker_code": "market_velocity_entry_confirmation_stale",
+                    "blocker_detail": blocker_detail,
+                    "snapshot_at": entry_confirmation.snapshot_at,
                     "entry_candles": candle_load.status,
                 }));
                 continue;
             }
+            (entry_confirmation, None)
         };
-        if let Some(blocker_detail) = market_velocity_entry_confirmation_stale_blocker(
-            &entry_confirmation,
-            Utc::now(),
-            config.entry_candle_max_staleness_minutes,
-        ) {
-            skipped_candidates.push(json!({
-                "event_id": event.id,
-                "symbol": event.symbol,
-                "blocker_code": "market_velocity_entry_confirmation_stale",
-                "blocker_detail": blocker_detail,
-                "snapshot_at": entry_confirmation.snapshot_at,
-                "entry_candles": candle_load.status,
-            }));
-            continue;
-        }
-        let signal = match build_market_velocity_strategy_signal_request_with_entry_confirmation(
-            &event,
-            &signal_config,
-            Some(&entry_confirmation),
-        )? {
+        let signal =
+            match build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry(
+                &event,
+                &signal_config,
+                Some(&entry_confirmation),
+                selected_entry.as_ref(),
+            )? {
             MarketVelocityStrategySignalDecision::Submit(signal) => signal,
             MarketVelocityStrategySignalDecision::Blocked(blocker) => {
                 skipped_candidates.push(json!({
                     "event_id": event.id,
                     "symbol": event.symbol,
                     "blocker_code": format!("market_velocity_signal_{:?}", blocker),
+                    "selected_entry": selected_entry,
                     "entry_candles": candle_load.status,
                 }));
                 continue;
             }
         };
-        selected = Some((event, entry_confirmation, signal, candle_load.status));
+        selected = Some((
+            event,
+            entry_confirmation,
+            selected_entry,
+            signal,
+            candle_load.status,
+        ));
         break;
     }
-    let Some((event, entry_confirmation, signal, candle_load)) = selected else {
+    let Some((event, entry_confirmation, selected_entry, signal, candle_load)) = selected else {
         let skipped_summary = summarize_skipped_candidates(&skipped_candidates);
         return Ok(json!({
             "status": "blocked",
@@ -343,7 +394,10 @@ pub async fn run_market_velocity_live_handoff(
         exchange = %log_context.exchange,
         symbol = %log_context.symbol,
         skipped_candidate_count = skipped_candidates.len(),
-        entry_trigger = %entry_confirmation.trigger,
+        entry_trigger = %selected_entry
+            .as_ref()
+            .map(|entry| entry.trigger.as_str())
+            .unwrap_or(entry_confirmation.trigger.as_str()),
         "Market Velocity live handoff selected signal candidate"
     );
     let preview_request = build_market_velocity_live_preview_request(
@@ -385,6 +439,7 @@ pub async fn run_market_velocity_live_handoff(
             "exchange": event.exchange,
             "symbol": event.symbol,
             "entry_confirmation": entry_confirmation,
+            "selected_entry": selected_entry,
             "entry_candles": candle_load,
         },
         "web_owner_preview": preview,
@@ -468,6 +523,147 @@ fn market_velocity_entry_confirmation_age_minutes(
         .num_seconds()
         .max(0);
     (age_seconds + 59) / 60
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MarketVelocityHybridLiveSelection {
+    entry_confirmation: MarketVelocityEntryConfirmation,
+    selected_entry: MarketVelocitySelectedEntry,
+}
+
+fn select_market_velocity_live_entry(
+    event: &MarketRankEvent,
+    candles: &[Candle],
+    config: &MarketVelocityStrategySignalConfig,
+) -> Result<MarketVelocityHybridLiveSelection, String> {
+    let event_ts = event.detected_at.timestamp_millis();
+    let current_price = event
+        .current_price
+        .and_then(|value| value.to_f64())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or_else(|| "live_signal_shell_missing_current_price".to_string())?;
+    let backtest_args = market_velocity_live_shell_args(config);
+    let raw_candles = candles_to_backtest_candles(candles);
+    let selection =
+        select_live_entry_from_signal_shell(event_ts, current_price, &raw_candles, &backtest_args)?;
+    let signal_candles = candles
+        .get(..=selection.signal_idx)
+        .ok_or_else(|| "live_signal_shell_missing_signal_candles".to_string())?;
+    let entry_confirmation = match build_market_velocity_entry_confirmation_from_candles(
+        "15m",
+        signal_candles,
+        &config.entry_confirmation_config(),
+    ) {
+        MarketVelocityEntryConfirmationDecision::Confirmed(confirmation) => confirmation,
+        MarketVelocityEntryConfirmationDecision::Blocked(blocker) => {
+            return Err(format!(
+                "live_signal_shell_confirmation_rebuild_{:?}",
+                blocker
+            ))
+        }
+    };
+    if entry_confirmation.trigger != selection.signal_trigger {
+        return Err(format!(
+            "live_signal_shell_trigger_mismatch:{}!={}",
+            entry_confirmation.trigger, selection.signal_trigger
+        ));
+    }
+    let entry_ts = DateTime::from_timestamp_millis(selection.entry_ts)
+        .ok_or_else(|| "live_signal_shell_invalid_entry_ts".to_string())?;
+    Ok(MarketVelocityHybridLiveSelection {
+        entry_confirmation,
+        selected_entry: MarketVelocitySelectedEntry {
+            entry_price: selection.entry_price,
+            entry_ts,
+            trigger: selection.entry_trigger.clone(),
+            entry_path: market_velocity_selected_entry_path(&selection.entry_trigger),
+            signal_pullback_pct: market_velocity_selected_entry_pullback_pct(
+                current_price,
+                selection.entry_price,
+            ),
+        },
+    })
+}
+
+fn market_velocity_live_shell_args(
+    config: &MarketVelocityStrategySignalConfig,
+) -> MarketVelocityEventBacktestArgs {
+    MarketVelocityEventBacktestArgs {
+        entry_period: config.entry_confirmation_period,
+        entry_max_distance_pct: config.entry_max_average_distance_pct,
+        entry_min_volume_ratio: config.entry_min_volume_ratio,
+        entry_max_signal_pullback_pct: config.entry_max_signal_pullback_pct,
+        entry_retest_tolerance_pct: config.entry_retest_tolerance_pct,
+        entry_retest_after_signal: config.entry_retest_after_signal,
+        entry_retest_max_wait_candles: config.entry_retest_max_wait_candles,
+        entry_retest_min_entry_open_gap_pct: config.entry_retest_min_entry_open_gap_pct,
+        entry_retest_open_fade_min_volume_ratio: config.entry_retest_open_fade_min_volume_ratio,
+        fvg_entry_mode: match config.fvg_entry_mode {
+            MarketVelocityFvgEntryMode::Off => FvgEntryMode::Off,
+            MarketVelocityFvgEntryMode::M15ImpulseRetrace => FvgEntryMode::M15ImpulseRetrace,
+        },
+        fvg_lookback_candles: config.fvg_lookback_candles,
+        fvg_max_wait_candles: config.fvg_max_wait_candles,
+        fvg_impulse_retrace_fill_pct: config.fvg_impulse_retrace_fill_pct,
+        fvg_impulse_retrace_min_wait_candles: config.fvg_impulse_retrace_min_wait_candles,
+        max_15m_staleness_min: DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES,
+        ..MarketVelocityEventBacktestArgs::default()
+    }
+}
+
+fn candles_to_backtest_candles(
+    candles: &[Candle],
+) -> Vec<super::market_velocity_event_backtest::BacktestCandle> {
+    candles
+        .iter()
+        .map(
+            |candle| super::market_velocity_event_backtest::BacktestCandle {
+                ts: candle.timestamp,
+                open: candle.open.value(),
+                high: candle.high.value(),
+                low: candle.low.value(),
+                close: candle.close.value(),
+                volume: candle.volume.value(),
+            },
+        )
+        .collect()
+}
+
+fn market_velocity_selected_entry_stale_blocker(
+    selected_entry: &MarketVelocitySelectedEntry,
+    now: DateTime<Utc>,
+    max_staleness_minutes: i64,
+) -> Option<String> {
+    if max_staleness_minutes <= 0 {
+        return None;
+    }
+    let age_seconds = now
+        .signed_duration_since(selected_entry.entry_ts)
+        .num_seconds()
+        .max(0);
+    let age_minutes = (age_seconds + 59) / 60;
+    (age_minutes > max_staleness_minutes)
+        .then(|| format!("SelectedEntryStale:{age_minutes}m>{max_staleness_minutes}m"))
+}
+
+fn market_velocity_selected_entry_path(trigger: &str) -> String {
+    if trigger.contains("+fvg_15m_impulse_retrace") {
+        "fvg_15m_impulse_retrace".to_string()
+    } else if trigger.contains("+retest_after_signal") {
+        "retest_after_signal".to_string()
+    } else {
+        "signal_confirmation".to_string()
+    }
+}
+
+fn market_velocity_selected_entry_pullback_pct(
+    current_price: f64,
+    entry_price: f64,
+) -> Option<f64> {
+    if current_price <= 0.0 || entry_price <= 0.0 || entry_price >= current_price {
+        return None;
+    }
+    Some(((current_price - entry_price) / current_price * 100.0 * 1000.0).round() / 1000.0)
 }
 /// 生成 行情与市场数据 需要的派生数据，供后续执行、展示或审计使用。
 fn summarize_skipped_candidates(skipped_candidates: &[Value]) -> Value {
@@ -560,7 +756,10 @@ fn parse_u64_from_map(envs: &BTreeMap<String, String>, key: &str, default: u64) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::market_velocity_event_backtest::MS_15M;
     use chrono::TimeZone;
+    use rust_decimal::Decimal;
+    use rust_quant_domain::{Price, Timeframe, Volume};
     use serde_json::json;
     use std::sync::{Mutex, OnceLock};
     const LIVE_HANDOFF_ENV_KEYS: &[&str] = &[
@@ -631,6 +830,69 @@ mod tests {
             entry_candle_proxy_url: None,
             entry_candle_request_sleep_ms: 0,
         }
+    }
+
+    fn sample_hybrid_signal_config() -> MarketVelocityStrategySignalConfig {
+        MarketVelocityStrategySignalConfig {
+            require_technical_confirmation: false,
+            require_entry_confirmation: true,
+            entry_confirmation_period: 3,
+            entry_max_average_distance_pct: 20.0,
+            entry_min_volume_ratio: 1.2,
+            entry_max_signal_pullback_pct: Some(3.0),
+            entry_retest_tolerance_pct: 0.3,
+            entry_retest_after_signal: true,
+            entry_retest_max_wait_candles: 1,
+            fvg_entry_mode: MarketVelocityFvgEntryMode::M15ImpulseRetrace,
+            fvg_max_wait_candles: 6,
+            entry_trigger_allowlist: vec!["reclaim_ema".to_string()],
+            ..MarketVelocityStrategySignalConfig::default()
+        }
+    }
+
+    fn sample_live_event(ts: i64, current_price: f64) -> MarketRankEvent {
+        MarketRankEvent {
+            id: Some(99),
+            exchange: "okx".to_string(),
+            symbol: "ETH-USDT-SWAP".to_string(),
+            event_type: rust_quant_domain::entities::MarketRankEventType::RankVelocity,
+            timeframe: Some("15分钟".to_string()),
+            old_rank: Some(30),
+            new_rank: Some(18),
+            delta_rank: Some(22),
+            volume_24h_quote: Some(Decimal::new(120_000_000, 0)),
+            current_price: Some(Decimal::from_f64_retain(current_price).unwrap()),
+            previous_price: Some(Decimal::new(100, 0)),
+            price_change_pct: Some(Decimal::new(650, 2)),
+            price_direction: "up".to_string(),
+            technical_snapshot_status: "captured".to_string(),
+            technical_snapshot: None,
+            detected_at: DateTime::from_timestamp_millis(ts).unwrap(),
+            source: "scanner_service".to_string(),
+            notification_state: "pending".to_string(),
+        }
+    }
+
+    fn sample_entry_candle(
+        ts: i64,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+        volume: f64,
+    ) -> Candle {
+        let mut candle = Candle::new(
+            "ETH-USDT-SWAP".to_string(),
+            Timeframe::M15,
+            ts,
+            Price::new(open).unwrap(),
+            Price::new(high).unwrap(),
+            Price::new(low).unwrap(),
+            Price::new(close).unwrap(),
+            Volume::new(volume).unwrap(),
+        );
+        candle.confirm();
+        candle
     }
     #[test]
     fn live_handoff_config_requires_internal_execution_secret() {
@@ -750,6 +1012,67 @@ mod tests {
             market_velocity_entry_confirmation_stale_blocker(&stale, now, 45).as_deref(),
             Some("EntryCandleStale:90m>45m")
         );
+    }
+
+    #[test]
+    fn live_entry_shell_uses_impulse_fvg_primary_when_fill_arrives() {
+        let mut config = sample_hybrid_signal_config();
+        config.entry_trigger_allowlist = vec!["breakout_previous_high".to_string()];
+        let base_ts = 4 * 60 * 60 * 1_000 * 4;
+        let event = sample_live_event(base_ts + 15 * 60 * 1_000 * 6, 105.0);
+        let candles = vec![
+            sample_entry_candle(base_ts, 100.0, 101.0, 99.5, 100.5, 10.0),
+            sample_entry_candle(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5, 10.0),
+            sample_entry_candle(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5, 20.0),
+            sample_entry_candle(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0, 30.0),
+            sample_entry_candle(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0, 40.0),
+            sample_entry_candle(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4, 50.0),
+            sample_entry_candle(base_ts + MS_15M * 6, 108.5, 110.0, 107.2, 108.0, 60.0),
+            sample_entry_candle(base_ts + MS_15M * 7, 108.0, 108.4, 104.9, 105.6, 30.0),
+            sample_entry_candle(base_ts + MS_15M * 8, 105.2, 105.4, 104.4, 104.6, 20.0),
+            sample_entry_candle(base_ts + MS_15M * 9, 104.6, 106.0, 104.4, 105.5, 10.0),
+        ];
+        let selection = select_market_velocity_live_entry(&event, &candles, &config)
+            .expect("hybrid live entry selection");
+        assert_eq!(
+            selection.entry_confirmation.trigger,
+            "breakout_previous_high"
+        );
+        assert_eq!(selection.selected_entry.entry_price, 104.5);
+        assert_eq!(
+            selection.selected_entry.trigger,
+            "breakout_previous_high+fvg_15m_impulse_retrace"
+        );
+        assert_eq!(
+            selection.selected_entry.entry_path,
+            "fvg_15m_impulse_retrace"
+        );
+    }
+
+    #[test]
+    fn live_entry_shell_falls_back_to_retest_after_signal() {
+        let config = sample_hybrid_signal_config();
+        let base_ts = 4 * 60 * 60 * 1_000 * 4;
+        let event = sample_live_event(base_ts + MS_15M * 5, 105.0);
+        let candles = vec![
+            sample_entry_candle(base_ts, 100.0, 101.0, 99.5, 100.5, 10.0),
+            sample_entry_candle(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5, 10.0),
+            sample_entry_candle(base_ts + MS_15M * 2, 101.5, 103.0, 100.8, 102.6, 20.0),
+            sample_entry_candle(base_ts + MS_15M * 3, 102.7, 103.2, 100.4, 100.9, 30.0),
+            sample_entry_candle(base_ts + MS_15M * 4, 101.0, 103.6, 100.9, 103.1, 40.0),
+            sample_entry_candle(base_ts + MS_15M * 5, 102.3, 103.4, 102.0, 103.0, 50.0),
+            sample_entry_candle(base_ts + MS_15M * 6, 102.6, 103.5, 102.4, 103.2, 10.0),
+        ];
+        let selection = select_market_velocity_live_entry(&event, &candles, &config)
+            .expect("hybrid live fallback selection");
+        assert_eq!(selection.entry_confirmation.trigger, "reclaim_ema");
+        assert_eq!(selection.selected_entry.entry_price, 102.6);
+        assert_eq!(
+            selection.selected_entry.trigger,
+            "reclaim_ema+retest_after_signal+fvg_fallback"
+        );
+        assert_eq!(selection.selected_entry.entry_path, "retest_after_signal");
+        assert_eq!(selection.selected_entry.signal_pullback_pct, Some(2.286));
     }
     #[test]
     fn skipped_candidate_summary_groups_blockers_and_symbols() {
