@@ -144,7 +144,7 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
         "momentum_03sl_20r_v5"
     );
     assert_eq!(payload["entry_filter"]["min_delta_rank"], 15);
-    assert_eq!(payload["entry_filter"]["max_new_rank"], 30);
+    assert!(payload["entry_filter"].get("max_new_rank").is_none());
     assert_eq!(
         payload["entry_filter"]["trend_min_average_distance_pct"],
         0.0
@@ -166,6 +166,30 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
         payload["entry_confirmation"]["trigger"],
         "breakout_previous_high"
     );
+}
+#[test]
+fn market_velocity_signal_does_not_block_by_new_rank() {
+    let config = MarketVelocityStrategySignalConfig::default();
+    let mut event = rank_event(
+        MarketRankEventType::RankVelocity,
+        "up",
+        Some(Decimal::new(3400, 0)),
+    );
+    event.new_rank = Some(80);
+    event.price_change_pct = Some(Decimal::new(625, 2));
+    let decision = build_market_velocity_strategy_signal_request_with_entry_confirmation(
+        &event,
+        &config,
+        Some(&entry_confirmation()),
+    )
+    .expect("valid market velocity event should be evaluated");
+    let MarketVelocityStrategySignalDecision::Submit(request) = decision else {
+        panic!("new_rank is diagnostic only and must not block entry: {decision:?}");
+    };
+    let payload: Value =
+        serde_json::from_str(&request.payload_json).expect("payload should be valid json");
+    assert_eq!(payload["new_rank"], 80);
+    assert!(payload["entry_filter"].get("max_new_rank").is_none());
 }
 #[test]
 fn market_velocity_payload_reuses_strategy_signal_live_entry_contract() {
@@ -266,14 +290,12 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
             "strategy_preset": "momentum_03sl_20r_v5",
             "entry_rule_version": "rank_radar_4h_trend_15m_momentum_03sl_20r_v5",
             "min_delta_rank": 12,
-            "max_new_rank": 35,
+            "max_price_change_pct": 10.0,
             "automation_mode": "signal_only",
             "live_order_allowed": false,
             "paper_trade_required": true,
             "require_technical_confirmation": true,
             "require_entry_confirmation": true,
-            "chasing_risk_top_rank": 8,
-            "chasing_risk_price_change_pct": 7.5,
             "trend_min_average_distance_pct": 0.2,
             "entry_confirmation_period": 18,
             "entry_confirmation_fetch_limit": 90,
@@ -315,7 +337,7 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
     assert_eq!(config.take_profit_r, 2.7);
     assert_eq!(config.max_holding_hours, 36);
     assert_eq!(config.min_delta_rank, 12);
-    assert_eq!(config.max_new_rank, 35);
+    assert_eq!(config.max_price_change_pct, Some(10.0));
     assert_eq!(config.entry_confirmation_period, 18);
     assert_eq!(config.entry_confirmation_fetch_limit, 90);
     assert_eq!(config.entry_max_average_distance_pct, 3.6);
@@ -336,6 +358,7 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
         payload["entry_filter"]["entry_trigger_allowlist"],
         json!(["breakout_previous_high"])
     );
+    assert_eq!(payload["entry_filter"]["max_price_change_pct"], 10.0);
 }
 #[test]
 fn strategy_config_json_builds_partial_take_profit_legs_for_runner() {
@@ -675,7 +698,7 @@ fn market_velocity_blocks_missing_technical_confirmation() {
     );
 }
 #[test]
-fn market_velocity_blocks_chasing_top_rank_after_large_price_jump() {
+fn market_velocity_signal_does_not_block_by_top_rank_chase_bucket() {
     let config = MarketVelocityStrategySignalConfig::default();
     let mut event = rank_event(
         MarketRankEventType::RankVelocity,
@@ -684,6 +707,29 @@ fn market_velocity_blocks_chasing_top_rank_after_large_price_jump() {
     );
     event.new_rank = Some(8);
     event.price_change_pct = Some(Decimal::new(850, 2));
+    let decision = build_market_velocity_strategy_signal_request_with_entry_confirmation(
+        &event,
+        &config,
+        Some(&entry_confirmation()),
+    )
+    .expect("event should be evaluated");
+    assert!(
+        matches!(decision, MarketVelocityStrategySignalDecision::Submit(_)),
+        "new_rank-based chase bucket is diagnostic only and must not block entry: {decision:?}"
+    );
+}
+#[test]
+fn market_velocity_signal_blocks_above_max_price_change_pct() {
+    let config = MarketVelocityStrategySignalConfig {
+        max_price_change_pct: Some(10.0),
+        ..MarketVelocityStrategySignalConfig::default()
+    };
+    let mut event = rank_event(
+        MarketRankEventType::RankVelocity,
+        "up",
+        Some(Decimal::new(3400, 0)),
+    );
+    event.price_change_pct = Some(Decimal::new(1001, 2));
     assert_eq!(
         build_market_velocity_strategy_signal_request_with_entry_confirmation(
             &event,
@@ -692,7 +738,7 @@ fn market_velocity_blocks_chasing_top_rank_after_large_price_jump() {
         )
         .expect("event should be evaluated"),
         MarketVelocityStrategySignalDecision::Blocked(
-            MarketVelocityStrategySignalBlocker::ChasingRisk
+            MarketVelocityStrategySignalBlocker::PriceChangeTooHigh
         )
     );
 }

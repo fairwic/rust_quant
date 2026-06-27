@@ -378,7 +378,6 @@ fn market_velocity_live_signal_defaults_use_production_momentum_preset() {
     let compose = read_repo_file("docker-compose.deploy.yml");
     for required in [
         "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-15}",
-        "MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK: ${MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK:-30}",
         "MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT:-0.0}",
         "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT: ${MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT:-0.03}",
         "MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R: ${MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R:-2.0}",
@@ -477,7 +476,36 @@ fn market_velocity_live_signal_defaults_use_production_momentum_preset() {
         "deploy compose must not revert to the low-trade 4h distance gate"
     );
     assert!(
-        !compose.contains("MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK: ${MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK:-50}"),
-        "deploy compose must not keep the old wider top-rank window for Market Velocity live signal"
+        !compose.contains("MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK"),
+        "deploy compose must not expose new_rank as a Market Velocity live signal parameter"
     );
+}
+
+#[test]
+fn market_velocity_paper_observation_defaults_use_latest_hybrid_research_preset() {
+    let compose = read_repo_file("docker-compose.deploy.yml");
+    let observation_block =
+        compose_service_block(&compose, "quant-core-market-velocity-paper-observation");
+    let scheduler_block = compose_service_block(
+        &compose,
+        "quant-core-market-velocity-paper-observation-scheduler",
+    );
+    let expected_preset =
+        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2";
+
+    for service_block in [&observation_block, &scheduler_block] {
+        assert!(
+            service_block.contains("market_velocity_paper_observation"),
+            "paper observation services must keep the Rust-native observation entrypoint"
+        );
+        assert!(
+            service_block.contains("--paper-strategy-preset")
+                && service_block.contains(expected_preset),
+            "paper observation services must default to the latest verified hybrid reclaim FVG preset"
+        );
+        assert!(
+            !service_block.contains("momentum_03sl_20r_v5"),
+            "paper observation services must not keep the legacy momentum_03sl_20r_v5 preset after promotion"
+        );
+    }
 }

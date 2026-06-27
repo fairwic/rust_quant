@@ -42,8 +42,8 @@ pub struct MarketVelocityStrategySignalConfig {
     pub entry_rule_version: String,
     /// 最小delta排名，用于控制策略触发门槛。
     pub min_delta_rank: i32,
-    /// 最大new排名，用于控制策略触发门槛。
-    pub max_new_rank: i32,
+    /// 最大价格涨跌幅百分比；为空时不限制，用于避免追高。
+    pub max_price_change_pct: Option<f64>,
     /// 止损百分比。
     pub stop_loss_pct: f64,
     /// 止盈收益r，用于配置运行参数。
@@ -66,10 +66,6 @@ pub struct MarketVelocityStrategySignalConfig {
     pub require_technical_confirmation: bool,
     /// require入场confirmation，用于配置运行参数。
     pub require_entry_confirmation: bool,
-    /// chasing风险top排名，用于配置运行参数。
-    pub chasing_risk_top_rank: i32,
-    /// chasingrisk价格变化百分比。
-    pub chasing_risk_price_change_pct: f64,
     /// 趋势过滤的最小平均距离百分比。
     pub trend_min_average_distance_pct: f64,
     /// 入场confirmation周期，用于配置运行参数。
@@ -95,7 +91,7 @@ impl Default for MarketVelocityStrategySignalConfig {
             strategy_preset: DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET.to_string(),
             entry_rule_version: DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION.to_string(),
             min_delta_rank: 15,
-            max_new_rank: 30,
+            max_price_change_pct: None,
             stop_loss_pct: DEFAULT_STOP_LOSS_PCT,
             take_profit_r: DEFAULT_TAKE_PROFIT_R,
             runner_target_r: None,
@@ -107,8 +103,6 @@ impl Default for MarketVelocityStrategySignalConfig {
             paper_trade_required: DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED,
             require_technical_confirmation: true,
             require_entry_confirmation: true,
-            chasing_risk_top_rank: 10,
-            chasing_risk_price_change_pct: 8.0,
             trend_min_average_distance_pct: DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT,
             entry_confirmation_period: 20,
             entry_confirmation_fetch_limit: 80,
@@ -138,7 +132,9 @@ impl MarketVelocityStrategySignalConfig {
                 DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION,
             ),
             min_delta_rank: parse_env_i32("MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK", 15)?,
-            max_new_rank: parse_env_i32("MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK", 30)?,
+            max_price_change_pct: parse_env_optional_f64(
+                "MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT",
+            )?,
             stop_loss_pct: parse_env_f64(
                 "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT",
                 DEFAULT_STOP_LOSS_PCT,
@@ -164,11 +160,6 @@ impl MarketVelocityStrategySignalConfig {
             require_entry_confirmation: parse_env_bool(
                 "MARKET_VELOCITY_SIGNAL_REQUIRE_ENTRY_CONFIRMATION",
                 true,
-            )?,
-            chasing_risk_top_rank: parse_env_i32("MARKET_VELOCITY_CHASING_RISK_TOP_RANK", 10)?,
-            chasing_risk_price_change_pct: parse_env_f64(
-                "MARKET_VELOCITY_CHASING_RISK_PRICE_CHANGE_PCT",
-                8.0,
             )?,
             trend_min_average_distance_pct: parse_env_f64(
                 "MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT",
@@ -212,8 +203,8 @@ impl MarketVelocityStrategySignalConfig {
         if let Some(value) = json_i32(config, "min_delta_rank")? {
             parsed.min_delta_rank = value;
         }
-        if let Some(value) = json_i32(config, "max_new_rank")? {
-            parsed.max_new_rank = value;
+        if let Some(value) = json_f64(config, "max_price_change_pct")? {
+            parsed.max_price_change_pct = Some(value);
         }
         if let Some(value) = json_f64(config, "stop_loss_pct")? {
             parsed.stop_loss_pct = value;
@@ -238,12 +229,6 @@ impl MarketVelocityStrategySignalConfig {
         }
         if let Some(value) = json_bool(config, "require_entry_confirmation")? {
             parsed.require_entry_confirmation = value;
-        }
-        if let Some(value) = json_i32(config, "chasing_risk_top_rank")? {
-            parsed.chasing_risk_top_rank = value;
-        }
-        if let Some(value) = json_f64(config, "chasing_risk_price_change_pct")? {
-            parsed.chasing_risk_price_change_pct = value;
         }
         if let Some(value) = json_f64(config, "trend_min_average_distance_pct")? {
             parsed.trend_min_average_distance_pct = value;
@@ -330,19 +315,18 @@ fn normalize_market_velocity_live_execution_policy(
 pub enum MarketVelocityStrategySignalBlocker {
     UnsupportedEventType,
     RankDeltaTooWeak,
-    RankOutsideTradeWindow,
     PriceDirectionNotUp,
     MissingCurrentPrice,
     SymbolFiltered,
     InvalidStopLossConfig,
     InvalidRiskRewardConfig,
-    ChasingRisk,
     TechnicalConfirmationMissing,
     TechnicalTrendNotConfirmed,
     EntryTimingMissing,
     EntryTimingNotConfirmed,
     EntryTimingOverextended,
     EntryTriggerFiltered,
+    PriceChangeTooHigh,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum MarketVelocityStrategySignalDecision {
@@ -585,13 +569,20 @@ fn pre_entry_signal_blocker(
     if !matches!(event.delta_rank, Some(delta) if delta >= config.min_delta_rank) {
         return Ok(Some(MarketVelocityStrategySignalBlocker::RankDeltaTooWeak));
     }
+    if let Some(max_price_change_pct) = config.max_price_change_pct {
+        let price_change_pct = event
+            .price_change_pct
+            .and_then(decimal_to_f64)
+            .unwrap_or_default()
+            .abs();
+        if price_change_pct > max_price_change_pct {
+            return Ok(Some(
+                MarketVelocityStrategySignalBlocker::PriceChangeTooHigh,
+            ));
+        }
+    }
     if symbol_is_blocked(&event.symbol, config) {
         return Ok(Some(MarketVelocityStrategySignalBlocker::SymbolFiltered));
-    }
-    if !matches!(event.new_rank, Some(rank) if rank > 0 && rank <= config.max_new_rank) {
-        return Ok(Some(
-            MarketVelocityStrategySignalBlocker::RankOutsideTradeWindow,
-        ));
     }
     if event.price_direction.trim().to_ascii_lowercase() != "up" {
         return Ok(Some(
@@ -628,9 +619,6 @@ fn pre_entry_signal_blocker(
         return Ok(Some(
             MarketVelocityStrategySignalBlocker::InvalidStopLossConfig,
         ));
-    }
-    if is_chasing_risk(event, config) {
-        return Ok(Some(MarketVelocityStrategySignalBlocker::ChasingRisk));
     }
     if let Some(blocker) = technical_confirmation_blocker(event, config) {
         return Ok(Some(blocker));
@@ -748,9 +736,7 @@ fn build_market_velocity_strategy_signal_submit_request(
             "technical_confirmation_required": config.require_technical_confirmation,
             "entry_confirmation_required": config.require_entry_confirmation,
             "min_delta_rank": config.min_delta_rank,
-            "max_new_rank": config.max_new_rank,
-            "anti_chase_top_rank": config.chasing_risk_top_rank,
-            "anti_chase_price_change_pct": config.chasing_risk_price_change_pct,
+            "max_price_change_pct": config.max_price_change_pct,
             "trend_min_average_distance_pct": config.trend_min_average_distance_pct,
             "entry_max_average_distance_pct": config.entry_max_average_distance_pct,
             "entry_min_volume_ratio": config.entry_min_volume_ratio,
@@ -881,19 +867,6 @@ fn market_velocity_risk_config(config: &MarketVelocityStrategySignalConfig) -> B
         max_hold_time: Some(i64::from(config.max_holding_hours) * 60 * 60),
         max_leverage: None,
     }
-}
-/// 判断 行情与市场数据 条件是否满足，给上层流程提供布尔决策。
-fn is_chasing_risk(event: &MarketRankEvent, config: &MarketVelocityStrategySignalConfig) -> bool {
-    if config.chasing_risk_top_rank <= 0 || config.chasing_risk_price_change_pct <= 0.0 {
-        return false;
-    }
-    let rank_is_chasing_zone =
-        matches!(event.new_rank, Some(rank) if rank > 0 && rank <= config.chasing_risk_top_rank);
-    let price_is_extended = event
-        .price_change_pct
-        .and_then(decimal_to_f64)
-        .is_some_and(|value| value >= config.chasing_risk_price_change_pct);
-    rank_is_chasing_zone && price_is_extended
 }
 /// 提供technical确认blocker的集中实现，避免行情数据调用方重复处理相同细节。
 fn technical_confirmation_blocker(

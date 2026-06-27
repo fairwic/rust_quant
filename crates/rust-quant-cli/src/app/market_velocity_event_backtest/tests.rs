@@ -121,6 +121,475 @@ fn entry_confirmation_accepts_breakdown_below_averages_with_volume_for_short() {
     assert_eq!(reason, "breakdown_previous_low");
 }
 #[test]
+fn entry_confirmation_requires_latest_volume_for_reclaim_ema() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_min_volume_ratio: 1.2,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let candles = vec![
+        candle(0, 100.0, 10.0),
+        candle(MS_15M, 102.0, 10.0),
+        candle(MS_15M * 2, 104.0, 20.0),
+        BacktestCandle {
+            ts: MS_15M * 3,
+            open: 104.2,
+            high: 104.5,
+            low: 100.8,
+            close: 101.0,
+            volume: 30.0,
+        },
+        BacktestCandle {
+            ts: MS_15M * 4,
+            open: 101.2,
+            high: 104.6,
+            low: 101.0,
+            close: 104.0,
+            volume: 10.0,
+        },
+    ];
+    let computed = build_computed_candles(candles, args.entry_period);
+    let event_ts = MS_15M * 5;
+    let (ok, reason) = entry_confirmation(
+        &computed,
+        event_ts,
+        MarketVelocityTradeDirection::Long,
+        &args,
+    );
+    assert!(!ok);
+    assert_eq!(reason, "volume_not_confirmed");
+}
+#[test]
+fn entry_confirmation_still_requires_latest_volume_for_breakout() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_min_volume_ratio: 1.2,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let candles = vec![
+        candle(0, 100.0, 10.0),
+        candle(MS_15M, 101.0, 10.0),
+        candle(MS_15M * 2, 102.0, 20.0),
+        BacktestCandle {
+            ts: MS_15M * 3,
+            open: 102.0,
+            high: 103.4,
+            low: 101.8,
+            close: 103.0,
+            volume: 30.0,
+        },
+        BacktestCandle {
+            ts: MS_15M * 4,
+            open: 103.1,
+            high: 106.0,
+            low: 103.0,
+            close: 105.0,
+            volume: 10.0,
+        },
+    ];
+    let computed = build_computed_candles(candles, args.entry_period);
+    let event_ts = MS_15M * 5;
+    let (ok, reason) = entry_confirmation(
+        &computed,
+        event_ts,
+        MarketVelocityTradeDirection::Long,
+        &args,
+    );
+    assert!(!ok);
+    assert_eq!(reason, "volume_not_confirmed");
+}
+#[test]
+fn parses_entry_gap_without_retest_controls() {
+    let args = parse_cli_args_from([
+        "--entry-max-gap-without-retest-pct",
+        "0.8",
+        "--entry-retest-tolerance-pct",
+        "0.3",
+    ])
+    .unwrap();
+    assert_eq!(args.entry_max_gap_without_retest_pct, Some(0.8));
+    assert_eq!(args.entry_retest_tolerance_pct, 0.3);
+}
+#[test]
+fn evaluate_events_blocks_large_entry_gap_without_known_retest() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_max_gap_without_retest_pct: Some(0.8),
+        entry_retest_tolerance_pct: 0.3,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5 + 1);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        candle(base_ts, 100.0, 10.0),
+        candle(base_ts + MS_15M, 101.0, 10.0),
+        candle(base_ts + MS_15M * 2, 102.0, 10.0),
+        ohlc(base_ts + MS_15M * 3, 101.5, 102.4, 101.0, 102.0),
+        ohlc(base_ts + MS_15M * 4, 102.0, 106.0, 101.8, 105.0),
+        ohlc(base_ts + MS_15M * 5, 105.0, 106.0, 104.8, 105.5),
+        ohlc(base_ts + MS_15M * 6, 106.5, 108.0, 106.0, 107.0),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("entry_gap_without_retest")),
+        Some(&1)
+    );
+}
+#[test]
+fn evaluate_events_allows_large_entry_gap_after_known_retest() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_max_gap_without_retest_pct: Some(0.8),
+        entry_retest_tolerance_pct: 0.3,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5 + 1);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        candle(base_ts, 100.0, 10.0),
+        candle(base_ts + MS_15M, 101.0, 10.0),
+        candle(base_ts + MS_15M * 2, 102.0, 10.0),
+        ohlc(base_ts + MS_15M * 3, 101.5, 102.4, 101.0, 102.0),
+        ohlc(base_ts + MS_15M * 4, 102.0, 106.0, 101.8, 105.0),
+        ohlc(base_ts + MS_15M * 5, 105.0, 106.0, 102.6, 103.0),
+        ohlc(base_ts + MS_15M * 6, 106.5, 108.0, 106.0, 107.0),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    assert_eq!(report.confirmed[0].entry_ts, base_ts + MS_15M * 6);
+    assert_eq!(report.confirmed[0].entry_price, 106.5);
+}
+#[test]
+fn evaluate_events_blocks_entry_when_signal_pullback_is_too_deep() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_max_signal_pullback_pct: Some(3.0),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5 + 1);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        candle(base_ts, 100.0, 10.0),
+        candle(base_ts + MS_15M, 101.0, 10.0),
+        candle(base_ts + MS_15M * 2, 102.0, 10.0),
+        ohlc(base_ts + MS_15M * 3, 101.5, 102.4, 101.0, 102.0),
+        ohlc(base_ts + MS_15M * 4, 102.0, 106.0, 101.8, 105.0),
+        ohlc(base_ts + MS_15M * 5, 104.8, 105.2, 104.0, 104.6),
+        ohlc(base_ts + MS_15M * 6, 100.0, 101.0, 99.0, 100.5),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("entry_signal_pullback_too_deep")),
+        Some(&1)
+    );
+}
+#[test]
+fn evaluate_events_allows_entry_when_signal_pullback_stays_within_limit() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_max_signal_pullback_pct: Some(3.0),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5 + 1);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        candle(base_ts, 100.0, 10.0),
+        candle(base_ts + MS_15M, 101.0, 10.0),
+        candle(base_ts + MS_15M * 2, 102.0, 10.0),
+        ohlc(base_ts + MS_15M * 3, 101.5, 102.4, 101.0, 102.0),
+        ohlc(base_ts + MS_15M * 4, 102.0, 106.0, 101.8, 105.0),
+        ohlc(base_ts + MS_15M * 5, 104.8, 105.2, 104.0, 104.6),
+        ohlc(base_ts + MS_15M * 6, 103.0, 104.0, 102.0, 103.5),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    assert_eq!(report.confirmed[0].entry_ts, base_ts + MS_15M * 6);
+    assert_eq!(report.confirmed[0].entry_price, 103.0);
+}
+#[test]
+fn evaluate_events_waits_for_breakout_retest_after_signal() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_retest_after_signal: true,
+        entry_retest_max_wait_candles: 6,
+        entry_retest_tolerance_pct: 0.3,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 107.0, 105.5, 106.3),
+        ohlc(base_ts + MS_15M * 6, 104.1, 106.4, 103.8, 106.0),
+        ohlc(base_ts + MS_15M * 7, 106.1, 107.0, 105.8, 106.7),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    let confirmed = &report.confirmed[0];
+    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 7);
+    assert_eq!(confirmed.entry_price, 106.1);
+    assert_eq!(
+        confirmed.trigger,
+        "breakout_previous_high+retest_after_signal"
+    );
+}
+#[test]
+fn evaluate_events_blocks_retest_entry_when_next_open_fades_confirmation() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_retest_after_signal: true,
+        entry_retest_max_wait_candles: 6,
+        entry_retest_tolerance_pct: 0.3,
+        entry_retest_min_entry_open_gap_pct: Some(0.0),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 107.0, 105.5, 106.3),
+        ohlc(base_ts + MS_15M * 6, 104.1, 106.4, 103.8, 106.0),
+        ohlc(base_ts + MS_15M * 7, 105.9, 107.0, 105.8, 106.7),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
+    assert_eq!(
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("entry_retest_entry_open_faded_confirmation")),
+        Some(&1)
+    );
+}
+#[test]
+fn evaluate_events_allows_retest_entry_open_fade_with_volume_rescue() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_retest_after_signal: true,
+        entry_retest_max_wait_candles: 6,
+        entry_retest_tolerance_pct: 0.3,
+        entry_retest_min_entry_open_gap_pct: Some(0.0),
+        entry_retest_open_fade_min_volume_ratio: Some(2.0),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 107.0, 105.5, 106.3),
+        BacktestCandle {
+            ts: base_ts + MS_15M * 6,
+            open: 104.1,
+            high: 106.4,
+            low: 103.8,
+            close: 106.0,
+            volume: 30.0,
+        },
+        ohlc(base_ts + MS_15M * 7, 105.9, 107.0, 105.8, 106.7),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    let confirmed = &report.confirmed[0];
+    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 7);
+    assert_eq!(confirmed.entry_price, 105.9);
+    assert_eq!(
+        confirmed.trigger,
+        "breakout_previous_high+retest_after_signal"
+    );
+}
+#[test]
+fn evaluate_events_blocks_retest_entry_open_fade_when_volume_rescue_is_too_small() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_retest_after_signal: true,
+        entry_retest_max_wait_candles: 6,
+        entry_retest_tolerance_pct: 0.3,
+        entry_retest_min_entry_open_gap_pct: Some(0.0),
+        entry_retest_open_fade_min_volume_ratio: Some(2.0),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 107.0, 105.5, 106.3),
+        BacktestCandle {
+            ts: base_ts + MS_15M * 6,
+            open: 104.1,
+            high: 106.4,
+            low: 103.8,
+            close: 106.0,
+            volume: 15.0,
+        },
+        ohlc(base_ts + MS_15M * 7, 105.9, 107.0, 105.8, 106.7),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
+    assert_eq!(
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("entry_retest_entry_open_faded_confirmation")),
+        Some(&1)
+    );
+}
+#[test]
 fn trend_confirmation_blocks_weak_4h_average_distance_when_required() {
     let mut candles = Vec::new();
     for index in 0..20 {
@@ -564,9 +1033,6 @@ fn event_backtest_defaults_match_production_market_velocity_policy() {
     assert_eq!(args.target_rs, vec![1.5, 2.0]);
     assert_eq!(args.min_delta_rank, 10);
     assert_eq!(args.max_delta_rank, None);
-    assert_eq!(args.max_new_rank, 30);
-    assert_eq!(args.tail_new_rank_threshold, None);
-    assert_eq!(args.tail_rank_min_price_change_pct, None);
     assert_eq!(
         args.paper_outcome_entry_rule_version,
         "rank_radar_4h_trend_15m_timing_v1"
@@ -743,6 +1209,32 @@ fn parses_early_exit_no_profit_controls() {
     assert_eq!(args.early_exit_no_profit_candles, Some(2));
 }
 #[test]
+fn parses_ignore_entry_signal_updates_while_open() {
+    let args = parse_cli_args_from(["--ignore-entry-signal-updates-while-open"]).unwrap();
+    assert!(args.ignore_entry_signal_updates_while_open);
+}
+#[test]
+fn parses_entry_retest_after_signal_controls() {
+    let args = parse_cli_args_from([
+        "--entry-retest-after-signal",
+        "--entry-retest-max-wait-candles",
+        "6",
+    ])
+    .unwrap();
+    assert!(args.entry_retest_after_signal);
+    assert_eq!(args.entry_retest_max_wait_candles, 6);
+}
+#[test]
+fn parses_retest_entry_open_gap_control() {
+    let args = parse_cli_args_from(["--entry-retest-min-entry-open-gap-pct", "0.0"]).unwrap();
+    assert_eq!(args.entry_retest_min_entry_open_gap_pct, Some(0.0));
+}
+#[test]
+fn parses_retest_open_fade_volume_rescue_control() {
+    let args = parse_cli_args_from(["--entry-retest-open-fade-min-volume-ratio", "2.0"]).unwrap();
+    assert_eq!(args.entry_retest_open_fade_min_volume_ratio, Some(2.0));
+}
+#[test]
 fn rejects_runner_fraction_outside_position_share() {
     let err =
         parse_cli_args_from(["--runner-target-r", "4.0", "--runner-fraction", "1.0"]).unwrap_err();
@@ -777,6 +1269,16 @@ fn parses_fvg_entry_mode_and_wait_controls() {
     assert_eq!(args.fvg_entry_mode, FvgEntryMode::M15To1h);
     assert_eq!(args.fvg_lookback_candles, 12);
     assert_eq!(args.fvg_max_wait_candles, 8);
+}
+#[test]
+fn parses_15m_self_fvg_after_signal_entry_mode() {
+    let args = parse_cli_args_from(["--fvg-entry-mode", "15m_self_after_signal"]).unwrap();
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::M15SelfAfterSignal);
+}
+#[test]
+fn parses_15m_impulse_fvg_retrace_entry_mode() {
+    let args = parse_cli_args_from(["--fvg-entry-mode", "15m_impulse_retrace"]).unwrap();
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::M15ImpulseRetrace);
 }
 #[test]
 fn evaluate_events_uses_15m_pullback_into_1h_bullish_fvg() {
@@ -829,6 +1331,593 @@ fn evaluate_events_uses_15m_pullback_into_1h_bullish_fvg() {
     assert_eq!(confirmed.entry_ts, MS_1H * 16 + MS_15M * 2);
     assert_eq!(confirmed.entry_price, 102.7);
     assert_eq!(confirmed.trigger, "fvg_15m_to_1h");
+}
+#[test]
+fn evaluate_events_waits_for_15m_self_fvg_after_original_entry_signal() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15SelfAfterSignal,
+        fvg_max_wait_candles: 8,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        candle(base_ts, 100.0, 10.0),
+        candle(base_ts + MS_15M, 101.0, 10.0),
+        candle(base_ts + MS_15M * 2, 102.0, 10.0),
+        ohlc(base_ts + MS_15M * 3, 101.5, 102.4, 101.0, 102.0),
+        ohlc(base_ts + MS_15M * 4, 102.0, 106.0, 101.8, 105.0),
+        ohlc(base_ts + MS_15M * 5, 105.0, 106.0, 104.8, 105.5),
+        ohlc(base_ts + MS_15M * 6, 106.2, 108.0, 106.1, 107.4),
+        ohlc(base_ts + MS_15M * 7, 107.5, 108.2, 106.4, 107.9),
+        ohlc(base_ts + MS_15M * 8, 106.7, 107.5, 102.7, 106.9),
+        ohlc(base_ts + MS_15M * 9, 107.0, 108.0, 106.8, 107.6),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    let confirmed = &report.confirmed[0];
+    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 9);
+    assert_eq!(confirmed.entry_price, 107.0);
+    assert_eq!(
+        confirmed.trigger,
+        "breakout_previous_high+fvg_15m_self_after_signal"
+    );
+}
+#[test]
+fn evaluate_events_waits_for_15m_impulse_fvg_retrace_into_lower_band() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4),
+        ohlc(base_ts + MS_15M * 6, 108.5, 110.0, 107.2, 108.0),
+        ohlc(base_ts + MS_15M * 7, 108.0, 108.4, 104.9, 105.6),
+        ohlc(base_ts + MS_15M * 8, 105.2, 105.4, 104.4, 104.6),
+        ohlc(base_ts + MS_15M * 9, 104.6, 106.0, 104.4, 105.5),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    let confirmed = &report.confirmed[0];
+    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 8);
+    assert_eq!(confirmed.entry_idx, 8);
+    assert_eq!(confirmed.entry_price, 104.5);
+    assert_eq!(
+        confirmed.trigger,
+        "breakout_previous_high+fvg_15m_impulse_retrace"
+    );
+}
+#[test]
+fn evaluate_events_falls_back_to_retest_after_signal_when_impulse_fvg_has_no_gap() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_min_volume_ratio: 1.2,
+        entry_retest_after_signal: true,
+        entry_retest_max_wait_candles: 1,
+        entry_retest_tolerance_pct: 0.3,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        BacktestCandle {
+            ts: base_ts,
+            open: 100.0,
+            high: 101.0,
+            low: 99.5,
+            close: 100.5,
+            volume: 10.0,
+        },
+        BacktestCandle {
+            ts: base_ts + MS_15M,
+            open: 100.5,
+            high: 102.0,
+            low: 100.0,
+            close: 101.5,
+            volume: 10.0,
+        },
+        BacktestCandle {
+            ts: base_ts + MS_15M * 2,
+            open: 101.5,
+            high: 103.0,
+            low: 100.8,
+            close: 102.6,
+            volume: 20.0,
+        },
+        BacktestCandle {
+            ts: base_ts + MS_15M * 3,
+            open: 102.7,
+            high: 103.2,
+            low: 100.4,
+            close: 100.9,
+            volume: 30.0,
+        },
+        BacktestCandle {
+            ts: base_ts + MS_15M * 4,
+            open: 101.0,
+            high: 103.6,
+            low: 100.9,
+            close: 103.1,
+            volume: 40.0,
+        },
+        BacktestCandle {
+            ts: base_ts + MS_15M * 5,
+            open: 102.3,
+            high: 103.4,
+            low: 102.0,
+            close: 103.0,
+            volume: 50.0,
+        },
+        BacktestCandle {
+            ts: base_ts + MS_15M * 6,
+            open: 102.6,
+            high: 103.5,
+            low: 102.4,
+            close: 103.2,
+            volume: 10.0,
+        },
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    let confirmed = &report.confirmed[0];
+    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 6);
+    assert_eq!(confirmed.entry_idx, 6);
+    assert_eq!(confirmed.entry_price, 102.6);
+    assert_eq!(
+        confirmed.trigger,
+        "reclaim_ema+retest_after_signal+fvg_fallback"
+    );
+}
+#[test]
+fn evaluate_events_blocks_deeper_15m_impulse_retrace_fill_when_pullback_only_hits_20pct_band() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        fvg_impulse_retrace_fill_pct: 10.0,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4),
+        ohlc(base_ts + MS_15M * 6, 108.5, 110.0, 107.2, 108.0),
+        ohlc(base_ts + MS_15M * 7, 108.0, 108.4, 104.9, 105.6),
+        ohlc(base_ts + MS_15M * 8, 105.2, 105.4, 104.4, 104.6),
+        ohlc(base_ts + MS_15M * 9, 104.6, 106.0, 104.4, 105.5),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
+    assert_eq!(
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("fvg_no_15m_impulse_limit_fill")),
+        Some(&1)
+    );
+}
+#[test]
+fn evaluate_events_uses_deeper_15m_impulse_retrace_fill_pct() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        fvg_impulse_retrace_fill_pct: 10.0,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4),
+        ohlc(base_ts + MS_15M * 6, 108.5, 110.0, 107.2, 108.0),
+        ohlc(base_ts + MS_15M * 7, 108.0, 108.4, 104.9, 105.6),
+        ohlc(base_ts + MS_15M * 8, 105.2, 105.4, 104.2, 104.6),
+        ohlc(base_ts + MS_15M * 9, 104.6, 106.0, 104.4, 105.5),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    let confirmed = &report.confirmed[0];
+    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 8);
+    assert_eq!(confirmed.entry_idx, 8);
+    assert!((confirmed.entry_price - 104.25).abs() < 1e-9);
+    assert_eq!(
+        confirmed.trigger,
+        "breakout_previous_high+fvg_15m_impulse_retrace"
+    );
+}
+#[test]
+fn evaluate_events_waits_for_minimum_impulse_retrace_delay() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        fvg_impulse_retrace_min_wait_candles: 1,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4),
+        ohlc(base_ts + MS_15M * 6, 108.5, 110.0, 107.2, 108.0),
+        ohlc(base_ts + MS_15M * 7, 108.0, 108.4, 104.9, 105.6),
+        ohlc(base_ts + MS_15M * 8, 105.2, 105.4, 104.4, 104.6),
+        ohlc(base_ts + MS_15M * 9, 104.6, 106.0, 104.4, 105.5),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    let confirmed = &report.confirmed[0];
+    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 8);
+    assert_eq!(confirmed.entry_idx, 8);
+}
+#[test]
+fn evaluate_events_blocks_impulse_retrace_fill_when_min_wait_skips_all_available_retests() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        fvg_impulse_retrace_min_wait_candles: 4,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4),
+        ohlc(base_ts + MS_15M * 6, 108.5, 110.0, 107.2, 108.0),
+        ohlc(base_ts + MS_15M * 7, 108.0, 108.4, 104.9, 105.6),
+        ohlc(base_ts + MS_15M * 8, 105.2, 105.4, 104.4, 104.6),
+        ohlc(base_ts + MS_15M * 9, 104.6, 106.0, 104.4, 105.5),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
+    assert_eq!(
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("fvg_no_15m_impulse_limit_fill")),
+        Some(&1)
+    );
+}
+#[test]
+fn evaluate_events_uses_recent_impulse_fvg_created_before_signal_candle() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        fvg_lookback_candles: 6,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 105.6, 102.3, 105.2),
+        ohlc(base_ts + MS_15M * 4, 105.3, 107.0, 105.0, 106.8),
+        ohlc(base_ts + MS_15M * 5, 106.9, 109.0, 105.7, 108.2),
+        ohlc(base_ts + MS_15M * 6, 108.3, 109.2, 107.0, 107.8),
+        ohlc(base_ts + MS_15M * 7, 106.3, 106.5, 105.8, 105.9),
+        ohlc(base_ts + MS_15M * 8, 104.0, 106.4, 103.4, 106.0),
+        ohlc(base_ts + MS_15M * 9, 106.1, 107.0, 105.9, 106.6),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    let confirmed = &report.confirmed[0];
+    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 8);
+    assert_eq!(confirmed.entry_idx, 8);
+    assert!((confirmed.entry_price - 105.62).abs() < 1e-9);
+    assert_eq!(
+        confirmed.trigger,
+        "breakout_previous_high+fvg_15m_impulse_retrace"
+    );
+}
+#[test]
+fn evaluate_events_blocks_15m_impulse_fvg_retrace_when_pullback_stays_above_lower_band() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4),
+        ohlc(base_ts + MS_15M * 6, 108.5, 110.0, 107.2, 108.0),
+        ohlc(base_ts + MS_15M * 7, 108.0, 108.4, 104.9, 105.6),
+        ohlc(base_ts + MS_15M * 8, 104.9, 105.4, 104.6, 105.1),
+        ohlc(base_ts + MS_15M * 9, 105.2, 106.0, 105.0, 105.7),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
+    assert_eq!(
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("fvg_no_15m_impulse_limit_fill")),
+        Some(&1)
+    );
+}
+#[test]
+fn evaluate_events_requires_breakout_failure_before_impulse_fvg_fill() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        fvg_lookback_candles: 6,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4),
+        ohlc(base_ts + MS_15M * 6, 106.0, 106.2, 104.4, 105.8),
+        ohlc(base_ts + MS_15M * 7, 105.7, 106.5, 104.8, 105.5),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
+    assert_eq!(
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("fvg_no_breakout_failure_before_fill")),
+        Some(&1)
+    );
+}
+#[test]
+fn evaluate_events_allows_breakout_impulse_fvg_retrace_after_breakout_failure() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        fvg_lookback_candles: 6,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4),
+        ohlc(base_ts + MS_15M * 6, 105.4, 105.8, 104.8, 104.9),
+        ohlc(base_ts + MS_15M * 7, 104.9, 106.1, 104.4, 105.6),
+        ohlc(base_ts + MS_15M * 8, 105.5, 106.0, 104.9, 105.8),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert_eq!(report.confirmed.len(), 1);
+    let confirmed = &report.confirmed[0];
+    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 7);
+    assert_eq!(confirmed.entry_idx, 7);
+    assert_eq!(confirmed.entry_price, 104.5);
+    assert_eq!(
+        confirmed.trigger,
+        "breakout_previous_high+fvg_15m_impulse_retrace"
+    );
 }
 #[test]
 fn evaluate_events_uses_1h_pullback_into_4h_bullish_fvg() {
@@ -982,34 +2071,21 @@ fn filters_confirmed_events_by_entry_trigger_with_blocklist_precedence() {
     assert_eq!(filtered[0].trigger, "breakout_previous_high");
 }
 #[test]
-fn filters_confirmed_events_by_entry_trigger_rank_blocklist() {
+fn filters_composite_entry_trigger_by_base_trigger() {
     let args = MarketVelocityEventBacktestArgs {
-        entry_trigger_allowlist: vec![
-            "breakout_previous_high".to_string(),
-            "reclaim_ema".to_string(),
-        ],
-        entry_trigger_rank_blocklist: vec![EntryTriggerRankBlock {
-            trigger: "reclaim_ema".to_string(),
-            min_new_rank: 11,
-            max_new_rank: 20,
-        }],
+        entry_trigger_allowlist: vec!["breakout_previous_high".to_string()],
         ..MarketVelocityEventBacktestArgs::default()
     };
-    let blocked = confirmed_event(1, "reclaim_ema");
-    let same_rank_other_trigger = confirmed_event(2, "breakout_previous_high");
-    let mut outside_rank = confirmed_event(3, "reclaim_ema");
-    outside_rank.event.new_rank = 21;
-    let filtered = filter_confirmed_events_by_entry_trigger(
-        &[blocked, same_rank_other_trigger, outside_rank],
-        &args,
-    );
-    assert_eq!(filtered.len(), 2);
+    let confirmed = vec![
+        confirmed_event(1, "breakout_previous_high+fvg_15m_self_after_signal"),
+        confirmed_event(2, "reclaim_ema+fvg_15m_self_after_signal"),
+    ];
+    let filtered = filter_confirmed_events_by_entry_trigger(&confirmed, &args);
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].event.id, 1);
     assert_eq!(
-        filtered
-            .iter()
-            .map(|event| event.event.id)
-            .collect::<Vec<_>>(),
-        vec![2, 3]
+        filtered[0].trigger,
+        "breakout_previous_high+fvg_15m_self_after_signal"
     );
 }
 #[test]

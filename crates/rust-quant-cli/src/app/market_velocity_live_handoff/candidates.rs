@@ -19,7 +19,6 @@ pub(super) async fn load_market_velocity_live_candidate_events(
 ) -> Result<Vec<MarketRankEvent>> {
     let rows = sqlx::query(market_velocity_live_candidate_events_sql())
         .bind(config.min_delta_rank)
-        .bind(config.max_new_rank)
         .bind(event_id)
         .bind(lookback_hours.to_string())
         .bind(i64::from(normalize_candidate_limit(i64::from(limit))))
@@ -64,14 +63,12 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
           FROM market_rank_events
           WHERE event_type IN ('rank_velocity', 'top_entry')
             AND delta_rank >= $1
-            AND new_rank > 0
-            AND new_rank <= $2
             AND lower(price_direction) = 'up'
             AND current_price IS NOT NULL
             AND lower(exchange) = 'okx'
             AND upper(replace(symbol, '-', '')) NOT LIKE 'LINKUSDT%'
-            AND ($3::bigint IS NULL OR id = $3)
-            AND detected_at >= NOW() - ($4::text || ' hours')::interval
+            AND ($2::bigint IS NULL OR id = $2)
+            AND detected_at >= NOW() - ($3::text || ' hours')::interval
         ),
         latest_per_symbol AS (
           SELECT DISTINCT ON (symbol) *
@@ -109,7 +106,7 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
           notification_state
         FROM latest_per_symbol
         ORDER BY detected_at DESC, id DESC
-        LIMIT $5
+        LIMIT $4
         "#
 }
 /// 提供市场rankeventfrom数据行的集中实现，避免行情数据调用方重复处理相同细节。
@@ -180,5 +177,11 @@ mod tests {
             sql.contains("FROM latest_per_symbol"),
             "global live scan should order already deduplicated symbols: {sql}"
         );
+    }
+    #[test]
+    fn candidate_scan_sql_does_not_filter_by_new_rank() {
+        let sql = market_velocity_live_candidate_events_sql();
+        assert!(!sql.contains("new_rank <="));
+        assert!(!sql.contains("new_rank >"));
     }
 }

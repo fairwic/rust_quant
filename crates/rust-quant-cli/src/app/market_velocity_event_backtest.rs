@@ -20,15 +20,15 @@ mod manifest;
 mod reentry;
 mod report;
 use args::{
-    entry_trigger_filter_version_label, format_entry_trigger_filter_list,
-    format_entry_trigger_rank_blocklist, normalize_entry_trigger, normalize_symbol,
+    entry_trigger_filter_version_label, format_entry_trigger_filter_list, normalize_entry_trigger,
+    normalize_symbol,
 };
 pub use args::{
     parse_cli_args_from, parse_paper_observation_args_from, parse_paper_observation_command_from,
     print_market_velocity_event_backtest_usage, print_market_velocity_paper_observation_usage,
-    EntryTriggerRankBlock, FvgEntryMode, MarketVelocityEventBacktestArgs,
-    MarketVelocityEventSource, MarketVelocityPaperObservationCommand,
-    MarketVelocityPaperOutcomeSink, MarketVelocityTradeDirection, StopReentryMode,
+    FvgEntryMode, MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
+    MarketVelocityPaperObservationCommand, MarketVelocityPaperOutcomeSink,
+    MarketVelocityTradeDirection, StopReentryMode,
 };
 use data::load_backtest_data;
 pub use equity::{
@@ -40,10 +40,16 @@ pub use equity::{
     FrameworkEquitySymbolReport, FrameworkEquityTradeReport,
 };
 pub use exit::{simulate_trade, EarlyExit, ProfitProtection, RunnerExit};
-use fvg::{find_fvg_entry, FvgEntrySearch};
+use fvg::{
+    find_15m_impulse_fvg_retrace_after_signal, find_15m_self_fvg_entry_after_signal,
+    find_fvg_entry, FvgEntrySearch,
+};
 pub use manifest::{market_velocity_paper_strategy_preset_manifest, MarketVelocityPresetManifest};
 use reentry::maybe_apply_stop_reentry;
-use report::{print_result_report, print_stage_report};
+use report::{
+    print_effective_entry_report, print_result_report, print_stage_report,
+    print_trigger_quality_report, print_trigger_variant_quality_report,
+};
 pub const MS_15M: i64 = 15 * 60 * 1_000;
 pub const MS_1H: i64 = 60 * 60 * 1_000;
 pub const MS_4H: i64 = 4 * 60 * 60 * 1_000;
@@ -269,6 +275,19 @@ pub async fn run_market_velocity_event_backtest(
     print_symbol_filter_report(&evaluation.confirmed, &symbol_filtered, &config.args);
     let confirmed = filter_confirmed_events_by_entry_trigger(&symbol_filtered, &config.args);
     print_entry_trigger_filter_report(&symbol_filtered, &confirmed, &config.args);
+    print_effective_entry_report(data.events.len(), &evaluation, &symbol_filtered, &confirmed);
+    print_trigger_quality_report(
+        "before_trigger_filter",
+        &symbol_filtered,
+        &data.candles_15m,
+        &config.args,
+    );
+    print_trigger_variant_quality_report(
+        "after_trigger_filter",
+        &confirmed,
+        &data.candles_15m,
+        &config.args,
+    );
     print_result_report(&confirmed, &data.candles_15m, &config.args);
     if config.args.equity_report
         || config.args.equity_split_report
@@ -397,24 +416,21 @@ fn market_velocity_strategy_detail(args: &MarketVelocityEventBacktestArgs) -> se
         "entry_period": args.entry_period,
         "entry_max_distance_pct": args.entry_max_distance_pct,
         "entry_min_volume_ratio": args.entry_min_volume_ratio,
+        "entry_max_signal_pullback_pct": args.entry_max_signal_pullback_pct,
+        "entry_max_gap_without_retest_pct": args.entry_max_gap_without_retest_pct,
+        "entry_retest_tolerance_pct": args.entry_retest_tolerance_pct,
+        "entry_retest_after_signal": args.entry_retest_after_signal,
+        "entry_retest_max_wait_candles": args.entry_retest_max_wait_candles,
+        "entry_retest_min_entry_open_gap_pct": args.entry_retest_min_entry_open_gap_pct,
+        "entry_retest_open_fade_min_volume_ratio": args.entry_retest_open_fade_min_volume_ratio,
+        "fvg_impulse_retrace_fill_pct": args.fvg_impulse_retrace_fill_pct,
+        "fvg_impulse_retrace_min_wait_candles": args.fvg_impulse_retrace_min_wait_candles,
         "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
         "min_delta_rank": args.min_delta_rank,
         "max_delta_rank": args.max_delta_rank,
-        "max_new_rank": args.max_new_rank,
         "min_price_change_pct": args.min_price_change_pct,
-        "tail_new_rank_threshold": args.tail_new_rank_threshold,
-        "tail_rank_min_price_change_pct": args.tail_rank_min_price_change_pct,
-        "chase_top_rank": args.chase_top_rank,
-        "chase_price_change_pct": args.chase_price_change_pct,
         "entry_trigger_allowlist": &args.entry_trigger_allowlist,
         "entry_trigger_blocklist": &args.entry_trigger_blocklist,
-        "entry_trigger_rank_blocklist": args.entry_trigger_rank_blocklist.iter().map(|block| {
-            json!({
-                "trigger": &block.trigger,
-                "min_new_rank": block.min_new_rank,
-                "max_new_rank": block.max_new_rank,
-            })
-        }).collect::<Vec<_>>(),
         "symbol_blocklist": &args.symbol_blocklist,
     })
 }
@@ -472,7 +488,7 @@ fn symbol_allowed(symbol: &str, args: &MarketVelocityEventBacktestArgs) -> bool 
 }
 /// 提供入场触发allowed的集中实现，避免回测策略调用方重复处理相同细节。
 fn entry_trigger_allowed(event: &ConfirmedEvent, args: &MarketVelocityEventBacktestArgs) -> bool {
-    let normalized = normalize_entry_trigger(&event.trigger);
+    let normalized = base_entry_trigger(&event.trigger);
     if !args.entry_trigger_allowlist.is_empty()
         && !args
             .entry_trigger_allowlist
@@ -488,11 +504,15 @@ fn entry_trigger_allowed(event: &ConfirmedEvent, args: &MarketVelocityEventBackt
     {
         return false;
     }
-    !args.entry_trigger_rank_blocklist.iter().any(|blocked| {
-        blocked.trigger == normalized
-            && event.event.new_rank >= blocked.min_new_rank
-            && event.event.new_rank <= blocked.max_new_rank
-    })
+    true
+}
+fn base_entry_trigger(trigger: &str) -> String {
+    normalize_entry_trigger(trigger)
+        .split_once('+')
+        .map_or_else(
+            || normalize_entry_trigger(trigger),
+            |(base, _)| base.to_string(),
+        )
 }
 /// 执行输出交易对过滤报告步骤，串起回测策略需要的状态推进和错误处理。
 fn print_symbol_filter_report(
@@ -516,19 +536,15 @@ fn print_entry_trigger_filter_report(
     after: &[ConfirmedEvent],
     args: &MarketVelocityEventBacktestArgs,
 ) {
-    if args.entry_trigger_allowlist.is_empty()
-        && args.entry_trigger_blocklist.is_empty()
-        && args.entry_trigger_rank_blocklist.is_empty()
-    {
+    if args.entry_trigger_allowlist.is_empty() && args.entry_trigger_blocklist.is_empty() {
         return;
     }
     println!(
-        "entry_trigger_filter\tbefore={}\tafter={}\tallowlist={}\tblocklist={}\trank_blocklist={}",
+        "entry_trigger_filter\tbefore={}\tafter={}\tallowlist={}\tblocklist={}",
         before.len(),
         after.len(),
         format_entry_trigger_filter_list(&args.entry_trigger_allowlist),
-        format_entry_trigger_filter_list(&args.entry_trigger_blocklist),
-        format_entry_trigger_rank_blocklist(&args.entry_trigger_rank_blocklist)
+        format_entry_trigger_filter_list(&args.entry_trigger_blocklist)
     );
 }
 /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
@@ -681,6 +697,34 @@ pub fn entry_confirmation(
     {
         return (false, "overextended_15m_average".to_string());
     }
+    let reclaim_ema_candidate = matches!(direction, MarketVelocityTradeDirection::Long)
+        && previous.ema.is_some_and(|previous_ema| {
+            previous.candle.close <= previous_ema && latest.candle.close > ema
+        });
+    let reclaim_ma_candidate = matches!(direction, MarketVelocityTradeDirection::Long)
+        && previous.sma.is_some_and(|previous_sma| {
+            previous.candle.close <= previous_sma && latest.candle.close > sma
+        });
+    let breakout_previous_high_candidate = matches!(direction, MarketVelocityTradeDirection::Long)
+        && latest.candle.close > previous.candle.high;
+    let pullback_hold_ema_candidate = matches!(direction, MarketVelocityTradeDirection::Long)
+        && latest.candle.low <= ema
+        && latest.candle.close > latest.candle.open
+        && latest.candle.close > ema;
+    let reject_ema_candidate = matches!(direction, MarketVelocityTradeDirection::Short)
+        && previous.ema.is_some_and(|previous_ema| {
+            previous.candle.close >= previous_ema && latest.candle.close < ema
+        });
+    let reject_ma_candidate = matches!(direction, MarketVelocityTradeDirection::Short)
+        && previous.sma.is_some_and(|previous_sma| {
+            previous.candle.close >= previous_sma && latest.candle.close < sma
+        });
+    let breakdown_previous_low_candidate = matches!(direction, MarketVelocityTradeDirection::Short)
+        && latest.candle.close < previous.candle.low;
+    let pullback_reject_ema_candidate = matches!(direction, MarketVelocityTradeDirection::Short)
+        && latest.candle.high >= ema
+        && latest.candle.close < latest.candle.open
+        && latest.candle.close < ema;
     let volume_ratio = latest
         .previous_volume_avg
         .filter(|average| *average > 0.0)
@@ -692,50 +736,58 @@ pub fn entry_confirmation(
     }
     match direction {
         MarketVelocityTradeDirection::Long => {
-            if previous.ema.is_some_and(|previous_ema| {
-                previous.candle.close <= previous_ema && latest.candle.close > ema
-            }) {
+            if reclaim_ema_candidate {
                 return (true, "reclaim_ema".to_string());
             }
-            if previous.sma.is_some_and(|previous_sma| {
-                previous.candle.close <= previous_sma && latest.candle.close > sma
-            }) {
+            if reclaim_ma_candidate {
                 return (true, "reclaim_ma".to_string());
             }
-            if latest.candle.close > previous.candle.high {
+            if breakout_previous_high_candidate {
                 return (true, "breakout_previous_high".to_string());
             }
-            if latest.candle.low <= ema
-                && latest.candle.close > latest.candle.open
-                && latest.candle.close > ema
-            {
+            if pullback_hold_ema_candidate {
                 return (true, "pullback_hold_ema".to_string());
             }
         }
         MarketVelocityTradeDirection::Short => {
-            if previous.ema.is_some_and(|previous_ema| {
-                previous.candle.close >= previous_ema && latest.candle.close < ema
-            }) {
+            if reject_ema_candidate {
                 return (true, "reject_ema".to_string());
             }
-            if previous.sma.is_some_and(|previous_sma| {
-                previous.candle.close >= previous_sma && latest.candle.close < sma
-            }) {
+            if reject_ma_candidate {
                 return (true, "reject_ma".to_string());
             }
-            if latest.candle.close < previous.candle.low {
+            if breakdown_previous_low_candidate {
                 return (true, "breakdown_previous_low".to_string());
             }
-            if latest.candle.high >= ema
-                && latest.candle.close < latest.candle.open
-                && latest.candle.close < ema
-            {
+            if pullback_reject_ema_candidate {
                 return (true, "pullback_reject_ema".to_string());
             }
         }
         MarketVelocityTradeDirection::Both => {}
     }
     (false, "timing_not_confirmed".to_string())
+}
+
+fn entry_signal_pullback_block_reason(
+    event: &RadarEvent,
+    entry_price: f64,
+    direction: MarketVelocityTradeDirection,
+    args: &MarketVelocityEventBacktestArgs,
+) -> Option<String> {
+    let max_pullback_pct = args.entry_max_signal_pullback_pct?;
+    if event.current_price <= 0.0 || entry_price <= 0.0 {
+        return None;
+    }
+    let pullback_pct = match direction {
+        MarketVelocityTradeDirection::Long if entry_price < event.current_price => {
+            (event.current_price - entry_price) / event.current_price * 100.0
+        }
+        MarketVelocityTradeDirection::Short if entry_price > event.current_price => {
+            (entry_price - event.current_price) / event.current_price * 100.0
+        }
+        _ => 0.0,
+    };
+    (pullback_pct > max_pullback_pct).then(|| "entry_signal_pullback_too_deep".to_string())
 }
 /// 封装评估events，减少回测策略调用方重复实现相同细节。
 pub fn evaluate_events(
@@ -785,13 +837,63 @@ pub fn evaluate_events(
                     increment_nested(&mut blockers, &event.symbol, &entry_reason);
                     continue;
                 }
-                increment(&mut stage_counts, "entry_pass");
+                let signal_idx = completed_candle_count(symbol_15m, event.ts, MS_15M) - 1;
+                if args.entry_retest_after_signal {
+                    match find_retest_entry_after_signal(
+                        symbol_15m,
+                        signal_idx,
+                        direction,
+                        &entry_reason,
+                        args,
+                    ) {
+                        Ok(entry) => {
+                            if let Some(reason) = entry_signal_pullback_block_reason(
+                                event,
+                                entry.entry_price,
+                                direction,
+                                args,
+                            ) {
+                                increment(&mut stage_counts, "entry_blocked");
+                                increment_nested(&mut blockers, &event.symbol, &reason);
+                                continue;
+                            }
+                            increment(&mut stage_counts, "entry_pass");
+                            confirmed.push(ConfirmedEvent {
+                                event: event.clone(),
+                                entry_ts: entry.entry_ts,
+                                entry_price: entry.entry_price,
+                                entry_idx: entry.entry_idx,
+                                trigger: entry.trigger,
+                            });
+                        }
+                        Err(reason) => {
+                            increment(&mut stage_counts, "entry_blocked");
+                            increment_nested(&mut blockers, &event.symbol, &reason);
+                        }
+                    }
+                    continue;
+                }
                 let Some(entry_idx) = next_entry_candle_idx(symbol_15m, event.ts) else {
                     increment(&mut stage_counts, "no_next_entry_candle");
                     increment_nested(&mut blockers, &event.symbol, "no_next_entry_candle");
                     continue;
                 };
+                if let Some(reason) =
+                    entry_gap_without_retest_block_reason(symbol_15m, signal_idx, entry_idx, args)
+                {
+                    increment(&mut stage_counts, "entry_blocked");
+                    increment_nested(&mut blockers, &event.symbol, &reason);
+                    continue;
+                }
                 let entry = &symbol_15m[entry_idx].candle;
+                if let Some(reason) =
+                    entry_signal_pullback_block_reason(event, entry.open, direction, args)
+                {
+                    increment(&mut stage_counts, "entry_blocked");
+                    increment_nested(&mut blockers, &event.symbol, &reason);
+                    continue;
+                }
+                increment(&mut stage_counts, "entry_pass");
                 confirmed.push(ConfirmedEvent {
                     event: event.clone(),
                     entry_ts: entry.ts,
@@ -799,6 +901,153 @@ pub fn evaluate_events(
                     entry_idx,
                     trigger: entry_reason,
                 });
+            }
+            FvgEntryMode::M15SelfAfterSignal => {
+                let (entry_ok, entry_reason) =
+                    entry_confirmation(symbol_15m, event.ts, direction, args);
+                if !entry_ok {
+                    increment(&mut stage_counts, "entry_blocked");
+                    increment_nested(&mut blockers, &event.symbol, &entry_reason);
+                    continue;
+                }
+                let Some(symbol_15m_raw) = raw_candles_15m
+                    .get(&event.symbol)
+                    .filter(|candles| !candles.is_empty())
+                else {
+                    increment(&mut stage_counts, "no_15m_rows");
+                    increment_nested(&mut blockers, &event.symbol, "no_15m_rows");
+                    continue;
+                };
+                if direction == MarketVelocityTradeDirection::Short {
+                    increment(&mut stage_counts, "entry_blocked");
+                    increment_nested(&mut blockers, &event.symbol, "short_fvg_not_supported");
+                    continue;
+                }
+                match find_15m_self_fvg_entry_after_signal(
+                    symbol_15m_raw,
+                    event.ts,
+                    &entry_reason,
+                    args,
+                ) {
+                    FvgEntrySearch::Found(entry) => {
+                        if let Some(reason) = entry_signal_pullback_block_reason(
+                            event,
+                            entry.entry_price,
+                            direction,
+                            args,
+                        ) {
+                            increment(&mut stage_counts, "entry_blocked");
+                            increment_nested(&mut blockers, &event.symbol, &reason);
+                            continue;
+                        }
+                        increment(&mut stage_counts, "entry_pass");
+                        confirmed.push(ConfirmedEvent {
+                            event: event.clone(),
+                            entry_ts: entry.entry_ts,
+                            entry_price: entry.entry_price,
+                            entry_idx: entry.entry_15m_idx,
+                            trigger: entry.trigger,
+                        });
+                    }
+                    FvgEntrySearch::Blocked(reason) => {
+                        increment(&mut stage_counts, "entry_blocked");
+                        increment_nested(&mut blockers, &event.symbol, &reason);
+                    }
+                }
+            }
+            FvgEntryMode::M15ImpulseRetrace => {
+                let (entry_ok, entry_reason) =
+                    entry_confirmation(symbol_15m, event.ts, direction, args);
+                if !entry_ok {
+                    increment(&mut stage_counts, "entry_blocked");
+                    increment_nested(&mut blockers, &event.symbol, &entry_reason);
+                    continue;
+                }
+                let signal_idx = completed_candle_count(symbol_15m, event.ts, MS_15M) - 1;
+                let Some(symbol_15m_raw) = raw_candles_15m
+                    .get(&event.symbol)
+                    .filter(|candles| !candles.is_empty())
+                else {
+                    increment(&mut stage_counts, "no_15m_rows");
+                    increment_nested(&mut blockers, &event.symbol, "no_15m_rows");
+                    continue;
+                };
+                if direction == MarketVelocityTradeDirection::Short {
+                    increment(&mut stage_counts, "entry_blocked");
+                    increment_nested(&mut blockers, &event.symbol, "short_fvg_not_supported");
+                    continue;
+                }
+                match find_15m_impulse_fvg_retrace_after_signal(
+                    symbol_15m_raw,
+                    symbol_15m,
+                    event.ts,
+                    &entry_reason,
+                    args,
+                ) {
+                    FvgEntrySearch::Found(entry) => {
+                        if let Some(reason) = entry_signal_pullback_block_reason(
+                            event,
+                            entry.entry_price,
+                            direction,
+                            args,
+                        ) {
+                            increment(&mut stage_counts, "entry_blocked");
+                            increment_nested(&mut blockers, &event.symbol, &reason);
+                            continue;
+                        }
+                        increment(&mut stage_counts, "entry_pass");
+                        confirmed.push(ConfirmedEvent {
+                            event: event.clone(),
+                            entry_ts: entry.entry_ts,
+                            entry_price: entry.entry_price,
+                            entry_idx: entry.entry_15m_idx,
+                            trigger: entry.trigger,
+                        });
+                    }
+                    FvgEntrySearch::Blocked(reason) => {
+                        if args.entry_retest_after_signal {
+                            match find_retest_entry_after_signal(
+                                symbol_15m,
+                                signal_idx,
+                                direction,
+                                &entry_reason,
+                                args,
+                            ) {
+                                Ok(entry) => {
+                                    if let Some(reason) = entry_signal_pullback_block_reason(
+                                        event,
+                                        entry.entry_price,
+                                        direction,
+                                        args,
+                                    ) {
+                                        increment(&mut stage_counts, "entry_blocked");
+                                        increment_nested(&mut blockers, &event.symbol, &reason);
+                                        continue;
+                                    }
+                                    increment(&mut stage_counts, "entry_pass");
+                                    confirmed.push(ConfirmedEvent {
+                                        event: event.clone(),
+                                        entry_ts: entry.entry_ts,
+                                        entry_price: entry.entry_price,
+                                        entry_idx: entry.entry_idx,
+                                        trigger: format!("{}+fvg_fallback", entry.trigger),
+                                    });
+                                }
+                                Err(fallback_reason) => {
+                                    increment(&mut stage_counts, "entry_blocked");
+                                    increment_nested(
+                                        &mut blockers,
+                                        &event.symbol,
+                                        &format!("{reason}_then_{fallback_reason}"),
+                                    );
+                                }
+                            }
+                        } else {
+                            increment(&mut stage_counts, "entry_blocked");
+                            increment_nested(&mut blockers, &event.symbol, &reason);
+                        }
+                    }
+                }
             }
             fvg_mode => {
                 let Some(symbol_15m_raw) = raw_candles_15m
@@ -839,6 +1088,16 @@ pub fn evaluate_events(
                     args,
                 ) {
                     FvgEntrySearch::Found(entry) => {
+                        if let Some(reason) = entry_signal_pullback_block_reason(
+                            event,
+                            entry.entry_price,
+                            direction,
+                            args,
+                        ) {
+                            increment(&mut stage_counts, "entry_blocked");
+                            increment_nested(&mut blockers, &event.symbol, &reason);
+                            continue;
+                        }
                         increment(&mut stage_counts, "entry_pass");
                         confirmed.push(ConfirmedEvent {
                             event: event.clone(),
@@ -861,6 +1120,140 @@ pub fn evaluate_events(
         stage_counts,
         blockers,
     }
+}
+#[derive(Debug, Clone, PartialEq)]
+struct RetestEntrySignal {
+    entry_ts: i64,
+    entry_price: f64,
+    entry_idx: usize,
+    trigger: String,
+}
+fn find_retest_entry_after_signal(
+    candles: &[ComputedCandle],
+    signal_idx: usize,
+    direction: MarketVelocityTradeDirection,
+    original_trigger: &str,
+    args: &MarketVelocityEventBacktestArgs,
+) -> Result<RetestEntrySignal, String> {
+    if direction == MarketVelocityTradeDirection::Short {
+        return Err("entry_retest_short_not_supported".to_string());
+    }
+    let signal = candles
+        .get(signal_idx)
+        .ok_or_else(|| "entry_retest_missing_signal".to_string())?;
+    let base_trigger = base_entry_trigger(original_trigger);
+    let retest_level = match base_trigger.as_str() {
+        "breakout_previous_high" => signal_idx
+            .checked_sub(1)
+            .and_then(|previous_idx| candles.get(previous_idx))
+            .map(|previous| previous.candle.high),
+        "reclaim_ema" => signal.ema,
+        _ => return Err("entry_retest_unsupported_trigger".to_string()),
+    }
+    .filter(|level| level.is_finite() && *level > 0.0)
+    .ok_or_else(|| "entry_retest_invalid_level".to_string())?;
+    let last_confirmation_idx =
+        (signal_idx + args.entry_retest_max_wait_candles).min(candles.len().saturating_sub(1));
+    for confirmation_idx in signal_idx + 1..=last_confirmation_idx {
+        let confirmation = &candles[confirmation_idx];
+        if !retest_confirmation_matches(confirmation, retest_level, args) {
+            continue;
+        }
+        let entry_idx = confirmation_idx + 1;
+        let Some(entry) = candles.get(entry_idx) else {
+            return Err("entry_retest_no_next_entry_candle".to_string());
+        };
+        let volume_ratio = confirmation
+            .previous_volume_avg
+            .filter(|average| *average > 0.0)
+            .map(|average| confirmation.candle.volume / average);
+        if let Some(min_gap_pct) = args.entry_retest_min_entry_open_gap_pct {
+            let gap_pct = moving_average_distance_pct(entry.candle.open, confirmation.candle.close)
+                .ok_or_else(|| "entry_retest_invalid_entry_gap".to_string())?;
+            if gap_pct < min_gap_pct {
+                let rescued =
+                    args.entry_retest_open_fade_min_volume_ratio
+                        .is_some_and(|min_volume_ratio| {
+                            volume_ratio.is_some_and(|ratio| ratio >= min_volume_ratio)
+                        });
+                if !rescued {
+                    return Err("entry_retest_entry_open_faded_confirmation".to_string());
+                }
+            }
+        }
+        return Ok(RetestEntrySignal {
+            entry_ts: entry.candle.ts,
+            entry_price: entry.candle.open,
+            entry_idx,
+            trigger: format!("{base_trigger}+retest_after_signal"),
+        });
+    }
+    Err("entry_retest_no_pullback_confirmation".to_string())
+}
+fn retest_confirmation_matches(
+    confirmation: &ComputedCandle,
+    retest_level: f64,
+    args: &MarketVelocityEventBacktestArgs,
+) -> bool {
+    let candle = &confirmation.candle;
+    let tolerance = 1.0 + args.entry_retest_tolerance_pct / 100.0;
+    if candle.low > retest_level * tolerance
+        || candle.close < retest_level
+        || candle.close <= candle.open
+    {
+        return false;
+    }
+    let (Some(sma), Some(ema)) = (confirmation.sma, confirmation.ema) else {
+        return false;
+    };
+    if candle.close <= sma || candle.close <= ema {
+        return false;
+    }
+    let Some(sma_distance) = moving_average_distance_pct(candle.close, sma) else {
+        return false;
+    };
+    let Some(ema_distance) = moving_average_distance_pct(candle.close, ema) else {
+        return false;
+    };
+    if args.entry_max_distance_pct > 0.0
+        && (sma_distance.abs() > args.entry_max_distance_pct
+            || ema_distance.abs() > args.entry_max_distance_pct)
+    {
+        return false;
+    }
+    let volume_ratio = confirmation
+        .previous_volume_avg
+        .filter(|average| *average > 0.0)
+        .map(|average| candle.volume / average);
+    args.entry_min_volume_ratio <= 0.0
+        || volume_ratio.is_some_and(|ratio| ratio >= args.entry_min_volume_ratio)
+}
+fn entry_gap_without_retest_block_reason(
+    candles: &[ComputedCandle],
+    signal_idx: usize,
+    entry_idx: usize,
+    args: &MarketVelocityEventBacktestArgs,
+) -> Option<String> {
+    let max_gap_pct = args.entry_max_gap_without_retest_pct?;
+    let signal = candles.get(signal_idx)?;
+    let previous = signal_idx
+        .checked_sub(1)
+        .and_then(|previous_idx| candles.get(previous_idx))?;
+    let entry = candles.get(entry_idx)?;
+    let gap_pct = moving_average_distance_pct(entry.candle.open, signal.candle.close)?;
+    if gap_pct <= max_gap_pct {
+        return None;
+    }
+    let retest_level = previous.candle.high;
+    let tolerance = 1.0 + args.entry_retest_tolerance_pct / 100.0;
+    let has_known_retest = candles
+        .get(signal_idx + 1..entry_idx)
+        .unwrap_or(&[])
+        .iter()
+        .any(|candle| {
+            candle.candle.low <= retest_level * tolerance && candle.candle.close >= retest_level
+        });
+    (!has_known_retest).then(|| "entry_gap_without_retest".to_string())
 }
 /// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 fn summarize_target(
@@ -986,19 +1379,20 @@ pub fn build_market_velocity_paper_outcomes(
                             "entry_trigger_filter_version": entry_trigger_filter_version,
                             "entry_trigger_allowlist": &args.entry_trigger_allowlist,
                             "entry_trigger_blocklist": &args.entry_trigger_blocklist,
-                            "entry_trigger_rank_blocklist": format_entry_trigger_rank_blocklist(&args.entry_trigger_rank_blocklist),
                         },
                         "filters": {
                             "min_delta_rank": args.min_delta_rank,
                             "max_delta_rank": args.max_delta_rank,
-                            "max_new_rank": args.max_new_rank,
                             "min_price_change_pct": args.min_price_change_pct,
-                            "tail_new_rank_threshold": args.tail_new_rank_threshold,
-                            "tail_rank_min_price_change_pct": args.tail_rank_min_price_change_pct,
-                            "chase_top_rank": args.chase_top_rank,
-                            "chase_price_change_pct": args.chase_price_change_pct,
+                            "max_price_change_pct": args.max_price_change_pct,
                             "entry_max_distance_pct": args.entry_max_distance_pct,
                             "entry_min_volume_ratio": args.entry_min_volume_ratio,
+                            "entry_max_gap_without_retest_pct": args.entry_max_gap_without_retest_pct,
+                            "entry_retest_tolerance_pct": args.entry_retest_tolerance_pct,
+                            "entry_retest_after_signal": args.entry_retest_after_signal,
+                            "entry_retest_max_wait_candles": args.entry_retest_max_wait_candles,
+                            "entry_retest_min_entry_open_gap_pct": args.entry_retest_min_entry_open_gap_pct,
+                            "entry_retest_open_fade_min_volume_ratio": args.entry_retest_open_fade_min_volume_ratio,
                             "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
                             "max_15m_staleness_min": args.max_15m_staleness_min,
                             "max_4h_staleness_min": args.max_4h_staleness_min
@@ -1100,7 +1494,6 @@ fn entry_trigger_filter_version(args: &MarketVelocityEventBacktestArgs) -> &'sta
     entry_trigger_filter_version_label(
         !args.entry_trigger_allowlist.is_empty(),
         !args.entry_trigger_blocklist.is_empty(),
-        !args.entry_trigger_rank_blocklist.is_empty(),
     )
 }
 /// 执行输出市场动量paperoutcomesjsonl步骤，串起回测策略需要的状态推进和错误处理。

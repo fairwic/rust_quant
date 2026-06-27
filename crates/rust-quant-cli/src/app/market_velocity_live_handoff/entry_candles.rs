@@ -4,8 +4,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use okx::dto::market_dto::CandleOkxRespDto;
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
+use rust_quant_infrastructure::repositories::PostgresCandleRepository;
 use serde::Serialize;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, QueryBuilder, Row};
+use tracing::warn;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MarketVelocityEntryCandleLoadStatus {
     /// 数据来源。
@@ -16,6 +18,12 @@ pub struct MarketVelocityEntryCandleLoadStatus {
     pub db_error: Option<String>,
     /// K 线数量。
     pub candle_count: usize,
+    /// 是否已把刷新得到的 K 线落库。
+    pub persisted_to_db: bool,
+    /// 落库影响行数。
+    pub rows_upserted: u64,
+    /// 落库错误；不阻断本次内存入场判断。
+    pub persist_error: Option<String>,
 }
 #[derive(Debug, Clone)]
 pub(super) struct MarketVelocityEntryCandleLoad {
@@ -86,6 +94,9 @@ pub(super) async fn load_market_velocity_live_entry_candles(
                     refreshed_from_exchange: false,
                     db_error: None,
                     candle_count,
+                    persisted_to_db: false,
+                    rows_upserted: 0,
+                    persist_error: None,
                 },
             })
         }
@@ -101,6 +112,9 @@ pub(super) async fn load_market_velocity_live_entry_candles(
                             refreshed_from_exchange: false,
                             db_error: None,
                             candle_count,
+                            persisted_to_db: false,
+                            rows_upserted: 0,
+                            persist_error: None,
                         },
                     }
                 });
@@ -109,6 +123,19 @@ pub(super) async fn load_market_velocity_live_entry_candles(
                 fetch_market_velocity_latest_entry_candles(client, config, symbol, limit.max(1))
                     .await?;
             let candle_count = candles.len();
+            let persist_result =
+                persist_market_velocity_entry_candles(pool, &candles, db_error.is_some()).await;
+            let (persisted_to_db, rows_upserted, persist_error) = match persist_result {
+                Ok(rows_upserted) => (!candles.is_empty(), rows_upserted, None),
+                Err(error) => {
+                    warn!(
+                        symbol,
+                        error = %error,
+                        "failed to persist on-demand Market Velocity entry candles"
+                    );
+                    (false, 0, Some(error.to_string()))
+                }
+            };
             Ok(MarketVelocityEntryCandleLoad {
                 candles,
                 status: MarketVelocityEntryCandleLoadStatus {
@@ -116,6 +143,9 @@ pub(super) async fn load_market_velocity_live_entry_candles(
                     refreshed_from_exchange: true,
                     db_error,
                     candle_count,
+                    persisted_to_db,
+                    rows_upserted,
+                    persist_error,
                 },
             })
         }
@@ -218,10 +248,84 @@ fn parse_decimal_text(value: &str) -> Result<f64> {
     }
     Ok(parsed)
 }
+/// 提供入场K线持久化目标的集中实现，避免调用方重复推断 symbol 与周期。
+fn entry_candle_persist_target(candles: &[Candle]) -> Result<Option<(&str, Timeframe)>> {
+    let Some(first) = candles.first() else {
+        return Ok(None);
+    };
+    if first.timeframe != Timeframe::M15 {
+        bail!("entry candle persist target requires 15m candles");
+    }
+    if candles
+        .iter()
+        .any(|candle| candle.timeframe != Timeframe::M15)
+    {
+        bail!("entry candle persist target requires 15m candles");
+    }
+    if let Some(mixed) = candles.iter().find(|candle| candle.symbol != first.symbol) {
+        bail!(
+            "entry candle persist target does not support mixed symbols: {} vs {}",
+            first.symbol,
+            mixed.symbol
+        );
+    }
+    Ok(Some((first.symbol.as_str(), first.timeframe)))
+}
+/// 持久化按需刷新的入场 K 线；失败由调用方降级，不阻断本次内存判断。
+async fn persist_market_velocity_entry_candles(
+    pool: &PgPool,
+    candles: &[Candle],
+    ensure_table: bool,
+) -> Result<u64> {
+    let Some((symbol, timeframe)) = entry_candle_persist_target(candles)? else {
+        return Ok(0);
+    };
+    if ensure_table {
+        let repository = PostgresCandleRepository::new(pool.clone());
+        repository.ensure_table(symbol, timeframe).await?;
+    }
+    let table_name = PostgresCandleRepository::quoted_table_name(symbol, timeframe)?;
+    let mut query_builder = build_entry_candle_batch_upsert_query(&table_name, candles);
+    let result = query_builder.build().execute(pool).await?;
+    Ok(result.rows_affected())
+}
+/// 构造单条批量 upsert，避免按每根 K 线逐条写库。
+fn build_entry_candle_batch_upsert_query<'a>(
+    table_name: &str,
+    candles: &'a [Candle],
+) -> QueryBuilder<'a, Postgres> {
+    let mut query_builder = QueryBuilder::new(format!(
+        "INSERT INTO {} (ts, o, h, l, c, vol, vol_ccy, confirm) ",
+        table_name
+    ));
+    query_builder.push_values(candles.iter(), |mut row, candle| {
+        row.push_bind(candle.timestamp)
+            .push_bind(candle.open.value().to_string())
+            .push_bind(candle.high.value().to_string())
+            .push_bind(candle.low.value().to_string())
+            .push_bind(candle.close.value().to_string())
+            .push_bind(candle.volume.value().to_string())
+            .push_bind(candle.volume.value().to_string())
+            .push_bind(if candle.confirmed { "1" } else { "0" });
+    });
+    query_builder.push(
+        " ON CONFLICT (ts) DO UPDATE SET
+            o = EXCLUDED.o,
+            h = EXCLUDED.h,
+            l = EXCLUDED.l,
+            c = EXCLUDED.c,
+            vol = EXCLUDED.vol,
+            vol_ccy = EXCLUDED.vol_ccy,
+            confirm = EXCLUDED.confirm,
+            updated_at = CURRENT_TIMESTAMP",
+    );
+    query_builder
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use sqlx::Execute;
     #[test]
     fn entry_candle_on_demand_refresh_only_runs_for_missing_or_stale_db_candles() {
         let now = Utc.with_ymd_and_hms(2026, 6, 16, 11, 30, 0).unwrap();
@@ -232,11 +336,59 @@ mod tests {
         assert!(market_velocity_entry_candles_need_refresh(&stale, now, 45));
         assert!(!market_velocity_entry_candles_need_refresh(&stale, now, 0));
     }
+    #[test]
+    fn entry_candle_persist_target_requires_single_symbol_and_15m() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 16, 11, 30, 0).unwrap();
+        let cap = sample_symbol_candle_at("CAP-USDT-SWAP", Timeframe::M15, now);
+        let ip = sample_symbol_candle_at("IP-USDT-SWAP", Timeframe::M15, now);
+        let cap_4h = sample_symbol_candle_at("CAP-USDT-SWAP", Timeframe::H4, now);
+
+        assert_eq!(
+            entry_candle_persist_target(&[cap.clone()]).unwrap(),
+            Some(("CAP-USDT-SWAP", Timeframe::M15))
+        );
+        assert!(entry_candle_persist_target(&[cap.clone(), ip])
+            .unwrap_err()
+            .to_string()
+            .contains("mixed symbols"));
+        assert!(entry_candle_persist_target(&[cap_4h])
+            .unwrap_err()
+            .to_string()
+            .contains("15m"));
+        assert_eq!(entry_candle_persist_target(&[]).unwrap(), None);
+    }
+    #[test]
+    fn entry_candle_persist_query_uses_single_batch_upsert() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 16, 11, 30, 0).unwrap();
+        let candles = vec![
+            sample_symbol_candle_at("CAP-USDT-SWAP", Timeframe::M15, now),
+            sample_symbol_candle_at(
+                "CAP-USDT-SWAP",
+                Timeframe::M15,
+                now + chrono::Duration::minutes(15),
+            ),
+        ];
+        let mut query_builder =
+            build_entry_candle_batch_upsert_query("\"cap-usdt-swap_candles_15m\"", &candles);
+        let sql = query_builder.build().sql().to_string();
+
+        assert_eq!(sql.matches("INSERT INTO").count(), 1);
+        assert_eq!(sql.matches("ON CONFLICT (ts) DO UPDATE").count(), 1);
+        assert!(sql.contains("\"cap-usdt-swap_candles_15m\""));
+    }
     /// 构造样例K 线at，集中维护行情数据的载荷组装规则。
     fn sample_candle_at(datetime: DateTime<Utc>) -> Candle {
+        sample_symbol_candle_at("ASTER-USDT-SWAP", Timeframe::M15, datetime)
+    }
+    /// 构造样例K 线at，集中维护行情数据的载荷组装规则。
+    fn sample_symbol_candle_at(
+        symbol: &str,
+        timeframe: Timeframe,
+        datetime: DateTime<Utc>,
+    ) -> Candle {
         let mut candle = Candle::new(
-            "ASTER-USDT-SWAP".to_string(),
-            Timeframe::M15,
+            symbol.to_string(),
+            timeframe,
             datetime.timestamp_millis(),
             Price::new(100.0).unwrap(),
             Price::new(103.0).unwrap(),
