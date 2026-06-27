@@ -19,16 +19,25 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tracing::info;
 const ENTRY_TRIGGER_FILTER_VERSION: &str = "entry_trigger_allowlist_v1";
-const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] = &["breakout_previous_high", "reclaim_ema"];
+const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] = &["reclaim_ema"];
 const DEFAULT_SYMBOL_BLOCKLIST: &[&str] = &[];
-const DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET: &str = "momentum_03sl_20r_v5";
+const DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET: &str =
+    "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2";
 const DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION: &str =
-    "rank_radar_4h_trend_15m_momentum_03sl_20r_v5";
-const DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE: &str = "rank_radar_4h_trend_15m_momentum";
-const DEFAULT_STOP_LOSS_PCT: f64 = 0.03;
-const DEFAULT_TAKE_PROFIT_R: f64 = 2.0;
+    "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2";
+const DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE: &str = "rank_radar_4h15m_hybrid_fvg_retest";
+const DEFAULT_MIN_DELTA_RANK: i32 = 20;
+const DEFAULT_MAX_DELTA_RANK: i32 = 40;
+const DEFAULT_MIN_PRICE_CHANGE_PCT: f64 = 5.0;
+const DEFAULT_MAX_PRICE_CHANGE_PCT: f64 = 10.0;
+const DEFAULT_STOP_LOSS_PCT: f64 = 0.04;
+const DEFAULT_TAKE_PROFIT_R: f64 = 1.8;
 const DEFAULT_MAX_HOLDING_HOURS: u32 = 48;
-const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 4.0;
+const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 5.0;
+const DEFAULT_ENTRY_MIN_VOLUME_RATIO: f64 = 1.1;
+const DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT: f64 = 3.0;
+const DEFAULT_ENTRY_RETEST_AFTER_SIGNAL: bool = true;
+const DEFAULT_ENTRY_RETEST_MAX_WAIT_CANDLES: usize = 1;
 const DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT: f64 = 0.0;
 const DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE: &str = "live_execution_authorized";
 const DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED: bool = true;
@@ -155,10 +164,10 @@ impl Default for MarketVelocityStrategySignalConfig {
             strategy_slug: "market_velocity".to_string(),
             strategy_preset: DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET.to_string(),
             entry_rule_version: DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION.to_string(),
-            min_delta_rank: 15,
-            max_delta_rank: None,
-            min_price_change_pct: None,
-            max_price_change_pct: None,
+            min_delta_rank: DEFAULT_MIN_DELTA_RANK,
+            max_delta_rank: Some(DEFAULT_MAX_DELTA_RANK),
+            min_price_change_pct: Some(DEFAULT_MIN_PRICE_CHANGE_PCT),
+            max_price_change_pct: Some(DEFAULT_MAX_PRICE_CHANGE_PCT),
             stop_loss_pct: DEFAULT_STOP_LOSS_PCT,
             take_profit_r: DEFAULT_TAKE_PROFIT_R,
             runner_target_r: None,
@@ -174,14 +183,14 @@ impl Default for MarketVelocityStrategySignalConfig {
             entry_confirmation_period: 20,
             entry_confirmation_fetch_limit: 80,
             entry_max_average_distance_pct: DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT,
-            entry_min_volume_ratio: 1.0,
-            entry_max_signal_pullback_pct: None,
+            entry_min_volume_ratio: DEFAULT_ENTRY_MIN_VOLUME_RATIO,
+            entry_max_signal_pullback_pct: Some(DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT),
             entry_retest_tolerance_pct: 0.3,
-            entry_retest_after_signal: false,
-            entry_retest_max_wait_candles: 8,
+            entry_retest_after_signal: DEFAULT_ENTRY_RETEST_AFTER_SIGNAL,
+            entry_retest_max_wait_candles: DEFAULT_ENTRY_RETEST_MAX_WAIT_CANDLES,
             entry_retest_min_entry_open_gap_pct: None,
             entry_retest_open_fade_min_volume_ratio: None,
-            fvg_entry_mode: MarketVelocityFvgEntryMode::Off,
+            fvg_entry_mode: MarketVelocityFvgEntryMode::M15ImpulseRetrace,
             fvg_lookback_candles: 40,
             fvg_max_wait_candles: 24,
             fvg_impulse_retrace_fill_pct: 20.0,
@@ -209,14 +218,20 @@ impl MarketVelocityStrategySignalConfig {
                 "MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION",
                 DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION,
             ),
-            min_delta_rank: parse_env_i32("MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK", 15)?,
-            max_delta_rank: parse_env_optional_i32("MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK")?,
+            min_delta_rank: parse_env_i32(
+                "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK",
+                DEFAULT_MIN_DELTA_RANK,
+            )?,
+            max_delta_rank: parse_env_optional_i32("MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK")?
+                .or(Some(DEFAULT_MAX_DELTA_RANK)),
             min_price_change_pct: parse_env_optional_f64(
                 "MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT",
-            )?,
+            )?
+            .or(Some(DEFAULT_MIN_PRICE_CHANGE_PCT)),
             max_price_change_pct: parse_env_optional_f64(
                 "MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT",
-            )?,
+            )?
+            .or(Some(DEFAULT_MAX_PRICE_CHANGE_PCT)),
             stop_loss_pct: parse_env_f64(
                 "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT",
                 DEFAULT_STOP_LOSS_PCT,
@@ -253,21 +268,25 @@ impl MarketVelocityStrategySignalConfig {
                 "MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT",
                 DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT,
             )?,
-            entry_min_volume_ratio: parse_env_f64("MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO", 1.0)?,
+            entry_min_volume_ratio: parse_env_f64(
+                "MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO",
+                DEFAULT_ENTRY_MIN_VOLUME_RATIO,
+            )?,
             entry_max_signal_pullback_pct: parse_env_optional_f64(
                 "MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT",
-            )?,
+            )?
+            .or(Some(DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT)),
             entry_retest_tolerance_pct: parse_env_f64(
                 "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_TOLERANCE_PCT",
                 0.3,
             )?,
             entry_retest_after_signal: parse_env_bool(
                 "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_AFTER_SIGNAL",
-                false,
+                DEFAULT_ENTRY_RETEST_AFTER_SIGNAL,
             )?,
             entry_retest_max_wait_candles: parse_env_usize(
                 "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MAX_WAIT_CANDLES",
-                8,
+                DEFAULT_ENTRY_RETEST_MAX_WAIT_CANDLES,
             )?,
             entry_retest_min_entry_open_gap_pct: parse_env_optional_f64(
                 "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MIN_ENTRY_OPEN_GAP_PCT",
@@ -277,7 +296,7 @@ impl MarketVelocityStrategySignalConfig {
             )?,
             fvg_entry_mode: parse_env_fvg_entry_mode(
                 "MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE",
-                MarketVelocityFvgEntryMode::Off,
+                MarketVelocityFvgEntryMode::M15ImpulseRetrace,
             )?,
             fvg_lookback_candles: parse_env_usize(
                 "MARKET_VELOCITY_SIGNAL_FVG_LOOKBACK_CANDLES",
@@ -688,6 +707,12 @@ pub fn market_velocity_strategy_signal_needs_entry_confirmation(
 ) -> Result<bool> {
     Ok(pre_entry_signal_blocker(event, config)?.is_none() && config.require_entry_confirmation)
 }
+
+pub fn market_velocity_signal_direct_dispatch_allowed(
+    config: &MarketVelocityStrategySignalConfig,
+) -> bool {
+    !config.hybrid_live_entry_enabled()
+}
 /// 提供市场动量执行task配置from环境变量的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
     let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
@@ -905,7 +930,7 @@ fn build_market_velocity_strategy_signal_submit_request(
         "selected_take_profit_price": selected_take_profit_price,
         "direction": "long",
         "protective_stop_loss_required": true,
-        "stop_loss_source": "market_velocity_default_stop_loss_pct",
+        "stop_loss_source": market_velocity_stop_loss_source(config.stop_loss_pct),
         "stop_loss_percent": config.stop_loss_pct,
         "target_r": config.take_profit_r,
         "max_holding_hours": config.max_holding_hours,
@@ -1055,7 +1080,7 @@ fn market_velocity_signal_result(
         should_sell: false,
         open_price: entry_price,
         signal_kline_stop_loss_price: Some(selected_stop_loss_price),
-        stop_loss_source: Some("market_velocity_fixed_03sl".to_string()),
+        stop_loss_source: Some(market_velocity_stop_loss_source(config.stop_loss_pct)),
         best_open_price: None,
         atr_take_profit_ratio_price: None,
         atr_stop_loss_price: None,
@@ -1083,6 +1108,14 @@ fn market_velocity_signal_result(
         ),
         direction: SignalDirection::Long,
     }
+}
+
+fn market_velocity_stop_loss_source(stop_loss_pct: f64) -> String {
+    let basis_points = (stop_loss_pct * 10_000.0).round() as i64;
+    let tag = format!("{basis_points:04}")
+        .trim_end_matches('0')
+        .to_string();
+    format!("market_velocity_fixed_{tag}sl")
 }
 /// 提供市场动量风控配置的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_risk_config(config: &MarketVelocityStrategySignalConfig) -> BasicRiskConfig {

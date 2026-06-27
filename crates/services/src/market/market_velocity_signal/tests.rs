@@ -3,7 +3,7 @@ use super::{
     build_market_velocity_strategy_signal_request_with_entry_confirmation,
     build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry,
     dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
-    market_velocity_strategy_signal_log_context,
+    market_velocity_signal_direct_dispatch_allowed, market_velocity_strategy_signal_log_context,
     should_dispatch_market_velocity_signal_to_quant_web_from_env, MarketVelocityEntryConfirmation,
     MarketVelocityFvgEntryMode, MarketVelocitySelectedEntry, MarketVelocityStrategySignalBlocker,
     MarketVelocityStrategySignalConfig, MarketVelocityStrategySignalDecision,
@@ -51,7 +51,7 @@ fn rank_event(
     }
 }
 fn entry_confirmation() -> MarketVelocityEntryConfirmation {
-    entry_confirmation_with_trigger("breakout_previous_high")
+    entry_confirmation_with_trigger("reclaim_ema")
 }
 fn entry_confirmation_with_trigger(trigger: &str) -> MarketVelocityEntryConfirmation {
     MarketVelocityEntryConfirmation {
@@ -79,6 +79,36 @@ fn selected_entry(trigger: &str, entry_price: f64) -> MarketVelocitySelectedEntr
         entry_path: "retest_after_signal".to_string(),
         signal_pullback_pct: Some(2.286),
     }
+}
+#[test]
+fn market_velocity_default_config_promotes_latest_hybrid_live_shell() {
+    let config = MarketVelocityStrategySignalConfig::default();
+    assert_eq!(
+        config.strategy_preset,
+        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
+    );
+    assert_eq!(
+        config.entry_rule_version,
+        "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2"
+    );
+    assert_eq!(config.min_delta_rank, 20);
+    assert_eq!(config.max_delta_rank, Some(40));
+    assert_eq!(config.min_price_change_pct, Some(5.0));
+    assert_eq!(config.max_price_change_pct, Some(10.0));
+    assert_eq!(config.stop_loss_pct, 0.04);
+    assert_eq!(config.take_profit_r, 1.8);
+    assert_eq!(config.entry_max_average_distance_pct, 5.0);
+    assert_eq!(config.entry_min_volume_ratio, 1.1);
+    assert_eq!(config.entry_max_signal_pullback_pct, Some(3.0));
+    assert!(config.entry_retest_after_signal);
+    assert_eq!(config.entry_retest_max_wait_candles, 1);
+    assert_eq!(
+        config.fvg_entry_mode,
+        MarketVelocityFvgEntryMode::M15ImpulseRetrace
+    );
+    assert_eq!(config.entry_trigger_allowlist, vec!["reclaim_ema"]);
+    assert!(config.hybrid_live_entry_enabled());
+    assert!(!market_velocity_signal_direct_dispatch_allowed(&config));
 }
 #[test]
 fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
@@ -128,33 +158,36 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
         payload["execution_policy"]["production_stage"],
         "live_execution_allowed"
     );
-    assert_eq!(payload["paper_strategy_preset"], "momentum_03sl_20r_v5");
+    assert_eq!(
+        payload["paper_strategy_preset"],
+        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
+    );
     assert_eq!(
         payload["entry_rule_version"],
-        "rank_radar_4h_trend_15m_momentum_03sl_20r_v5"
+        "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2"
     );
     assert_eq!(payload["risk_plan"]["entry_price"], 3400.0);
-    assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3298.0);
-    assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 3604.0);
-    assert_eq!(payload["risk_plan"]["stop_loss_percent"], 0.03);
-    assert_eq!(payload["risk_plan"]["target_r"], 2.0);
+    assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3264.0);
+    assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 3644.8);
+    assert_eq!(payload["risk_plan"]["stop_loss_percent"], 0.04);
+    assert_eq!(payload["risk_plan"]["target_r"], 1.8);
     assert_eq!(payload["risk_plan"]["max_holding_hours"], 48);
     assert_eq!(payload["risk_plan"]["reward_to_risk_mode"], "fixed_r");
     assert_eq!(payload["risk_plan"]["protective_stop_loss_required"], true);
     assert_eq!(payload["entry_filter"]["status"], "confirmed");
     assert_eq!(
         payload["entry_filter"]["mode"],
-        "rank_radar_4h_trend_15m_momentum"
+        "rank_radar_4h15m_hybrid_fvg_retest"
     );
     assert_eq!(
         payload["entry_filter"]["entry_rule_version"],
-        "rank_radar_4h_trend_15m_momentum_03sl_20r_v5"
+        "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2"
     );
     assert_eq!(
         payload["entry_filter"]["paper_strategy_preset"],
-        "momentum_03sl_20r_v5"
+        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
     );
-    assert_eq!(payload["entry_filter"]["min_delta_rank"], 15);
+    assert_eq!(payload["entry_filter"]["min_delta_rank"], 20);
     assert!(payload["entry_filter"].get("max_new_rank").is_none());
     assert_eq!(
         payload["entry_filter"]["trend_min_average_distance_pct"],
@@ -166,17 +199,14 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
     );
     assert_eq!(
         payload["entry_filter"]["entry_trigger_allowlist"],
-        json!(["breakout_previous_high", "reclaim_ema"])
+        json!(["reclaim_ema"])
     );
     assert_eq!(
         payload["entry_filter"]["entry_trigger_blocklist"],
         json!([])
     );
     assert_eq!(payload["entry_confirmation"]["timeframe"], "15m");
-    assert_eq!(
-        payload["entry_confirmation"]["trigger"],
-        "breakout_previous_high"
-    );
+    assert_eq!(payload["entry_confirmation"]["trigger"], "reclaim_ema");
 }
 #[test]
 fn market_velocity_signal_does_not_block_by_new_rank() {
@@ -232,15 +262,15 @@ fn market_velocity_payload_reuses_strategy_signal_live_entry_contract() {
     assert_eq!(payload["signal"]["should_buy"], true);
     assert_eq!(payload["signal"]["should_sell"], false);
     assert_eq!(payload["signal"]["open_price"], 3400.0);
-    assert_eq!(payload["signal"]["signal_kline_stop_loss_price"], 3298.0);
-    assert_eq!(payload["signal"]["long_signal_take_profit_price"], 3604.0);
+    assert_eq!(payload["signal"]["signal_kline_stop_loss_price"], 3264.0);
+    assert_eq!(payload["signal"]["long_signal_take_profit_price"], 3644.8);
     assert_eq!(
         payload["signal"]["stop_loss_source"],
-        "market_velocity_fixed_03sl"
+        "market_velocity_fixed_04sl"
     );
-    assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3298.0);
-    assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 3604.0);
-    assert_eq!(payload["risk_plan"]["target_r"], 2.0);
+    assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3264.0);
+    assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 3644.8);
+    assert_eq!(payload["risk_plan"]["target_r"], 1.8);
     assert_eq!(payload["risk_plan"]["max_holding_hours"], 48);
 }
 
@@ -290,8 +320,52 @@ fn market_velocity_live_selected_entry_overrides_signal_open_price_without_losin
     assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 98.496);
     assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 109.9872);
 }
+
 #[test]
-fn default_market_velocity_signal_payload_uses_momentum_profit_preset() {
+fn hybrid_live_entry_config_disables_direct_scanner_dispatch() {
+    let config = MarketVelocityStrategySignalConfig {
+        entry_max_signal_pullback_pct: Some(3.0),
+        entry_retest_after_signal: true,
+        entry_retest_max_wait_candles: 1,
+        fvg_entry_mode: MarketVelocityFvgEntryMode::M15ImpulseRetrace,
+        ..MarketVelocityStrategySignalConfig::default()
+    };
+    assert!(
+        !market_velocity_signal_direct_dispatch_allowed(&config),
+        "hybrid live entry configs must not let scanner_service bypass the live handoff shell"
+    );
+}
+
+#[test]
+fn legacy_momentum_config_keeps_direct_scanner_dispatch_enabled() {
+    let config = MarketVelocityStrategySignalConfig {
+        strategy_preset: "momentum_03sl_20r_v5".to_string(),
+        entry_rule_version: "rank_radar_4h_trend_15m_momentum_03sl_20r_v5".to_string(),
+        min_delta_rank: 15,
+        max_delta_rank: None,
+        min_price_change_pct: None,
+        max_price_change_pct: None,
+        stop_loss_pct: 0.03,
+        take_profit_r: 2.0,
+        entry_max_average_distance_pct: 4.0,
+        entry_min_volume_ratio: 1.0,
+        entry_max_signal_pullback_pct: None,
+        entry_retest_after_signal: false,
+        entry_retest_max_wait_candles: 8,
+        fvg_entry_mode: MarketVelocityFvgEntryMode::Off,
+        entry_trigger_allowlist: vec![
+            "breakout_previous_high".to_string(),
+            "reclaim_ema".to_string(),
+        ],
+        ..MarketVelocityStrategySignalConfig::default()
+    };
+    assert!(
+        market_velocity_signal_direct_dispatch_allowed(&config),
+        "legacy non-hybrid configs may still use direct scanner dispatch"
+    );
+}
+#[test]
+fn default_market_velocity_signal_payload_uses_latest_hybrid_preset() {
     let config = MarketVelocityStrategySignalConfig::default();
     let event = rank_event(
         MarketRankEventType::RankVelocity,
@@ -310,8 +384,8 @@ fn default_market_velocity_signal_payload_uses_momentum_profit_preset() {
     };
     let payload: Value =
         serde_json::from_str(&request.payload_json).expect("payload should be valid json");
-    assert_eq!(config.stop_loss_pct, 0.03);
-    assert_eq!(config.take_profit_r, 2.0);
+    assert_eq!(config.stop_loss_pct, 0.04);
+    assert_eq!(config.take_profit_r, 1.8);
     assert_eq!(config.max_holding_hours, 48);
     assert_eq!(config.automation_mode, "live_execution_authorized");
     assert!(config.live_order_allowed);
@@ -320,24 +394,27 @@ fn default_market_velocity_signal_payload_uses_momentum_profit_preset() {
         config.symbol_blocklist.is_empty(),
         "production default must not depend on historical symbol blocklist"
     );
-    assert_eq!(config.entry_max_average_distance_pct, 4.0);
-    assert_eq!(payload["paper_strategy_preset"], "momentum_03sl_20r_v5");
+    assert_eq!(config.entry_max_average_distance_pct, 5.0);
+    assert_eq!(
+        payload["paper_strategy_preset"],
+        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
+    );
     assert_eq!(
         payload["entry_rule_version"],
-        "rank_radar_4h_trend_15m_momentum_03sl_20r_v5"
+        "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2"
     );
     assert_eq!(
         payload["entry_filter"]["mode"],
-        "rank_radar_4h_trend_15m_momentum"
+        "rank_radar_4h15m_hybrid_fvg_retest"
     );
-    assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3298.0);
-    assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 3604.0);
-    assert_eq!(payload["risk_plan"]["stop_loss_percent"], 0.03);
-    assert_eq!(payload["risk_plan"]["target_r"], 2.0);
+    assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3264.0);
+    assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 3644.8);
+    assert_eq!(payload["risk_plan"]["stop_loss_percent"], 0.04);
+    assert_eq!(payload["risk_plan"]["target_r"], 1.8);
     assert_eq!(payload["risk_plan"]["max_holding_hours"], 48);
     assert_eq!(
         payload["entry_filter"]["entry_max_average_distance_pct"],
-        4.0
+        5.0
     );
 }
 #[test]
@@ -387,7 +464,7 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
         "up",
         Some(Decimal::new(3400, 0)),
     );
-    let mut confirmation = entry_confirmation();
+    let mut confirmation = entry_confirmation_with_trigger("breakout_previous_high");
     confirmation.period = 18;
     let decision = build_market_velocity_strategy_signal_request_with_entry_confirmation(
         &event,
@@ -518,7 +595,7 @@ fn market_velocity_default_entry_filter_blocks_overextended_15m_confirmation() {
         Some(Decimal::new(3400, 0)),
     );
     let mut confirmation = entry_confirmation();
-    confirmation.ema_distance_pct = 4.01;
+    confirmation.ema_distance_pct = 5.01;
     assert_eq!(
         build_market_velocity_strategy_signal_request_with_entry_confirmation(
             &event,
@@ -723,10 +800,7 @@ fn live_execution_authorized_mode_marks_payload_as_live_allowed() {
         "live_execution_allowed"
     );
     assert_eq!(payload["risk_plan"]["protective_stop_loss_required"], true);
-    assert_eq!(
-        payload["entry_confirmation"]["trigger"],
-        "breakout_previous_high"
-    );
+    assert_eq!(payload["entry_confirmation"]["trigger"], "reclaim_ema");
 }
 #[test]
 fn market_velocity_strategy_signal_log_context_carries_chain_identifiers() {
@@ -759,7 +833,7 @@ fn market_velocity_strategy_signal_log_context_carries_chain_identifiers() {
     assert_eq!(context.symbol, event.symbol);
     assert_eq!(
         context.entry_rule_version.as_deref(),
-        Some("rank_radar_4h_trend_15m_momentum_03sl_20r_v5")
+        Some("rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2")
     );
     assert_eq!(
         context.production_stage.as_deref(),

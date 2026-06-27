@@ -377,6 +377,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
 fn market_velocity_live_signal_defaults_use_latest_hybrid_research_preset() {
     let compose = read_repo_file("docker-compose.deploy.yml");
     for required in [
+        "MARKET_VELOCITY_SIGNAL_DISPATCH_MODE: ${MARKET_VELOCITY_SIGNAL_DISPATCH_MODE:-disabled}",
         "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-20}",
         "MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK:-40}",
         "MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT: ${MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT:-5.0}",
@@ -427,6 +428,12 @@ fn market_velocity_live_signal_defaults_use_latest_hybrid_research_preset() {
             "deploy compose must not keep removed runtime switch `{removed}`"
         );
     }
+    assert!(
+        !compose.contains(
+            "MARKET_VELOCITY_SIGNAL_DISPATCH_MODE: ${MARKET_VELOCITY_SIGNAL_DISPATCH_MODE:-web}"
+        ),
+        "deploy compose must not let the radar bypass the hybrid live handoff shell with direct Web signal dispatch"
+    );
     assert!(
         !compose.contains(
             "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT: ${MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT:-0.02}"
@@ -504,6 +511,23 @@ fn market_velocity_live_signal_defaults_use_latest_hybrid_research_preset() {
     assert!(
         !compose.contains("MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK"),
         "deploy compose must not expose new_rank as a Market Velocity live signal parameter"
+    );
+}
+
+#[test]
+fn market_velocity_runtime_strategy_loader_prefers_promoted_preset_over_legacy_default_row() {
+    let source = read_repo_file("crates/rust-quant-cli/src/app/market_velocity_strategy_config.rs");
+    assert!(
+        source.contains("preferred_market_velocity_signal_strategy_preset"),
+        "runtime strategy loader must derive a promoted preset selector before falling back to legacy default rows"
+    );
+    assert!(
+        source.contains("select_default_market_velocity_signal_config_row"),
+        "runtime strategy loader must choose the default row in Rust so the promoted preset can outrank an older version=default record"
+    );
+    assert!(
+        !source.contains("CASE version WHEN 'default' THEN 0 ELSE 1 END"),
+        "runtime strategy loader must not hard-prioritize version=default over the promoted hybrid preset"
     );
 }
 

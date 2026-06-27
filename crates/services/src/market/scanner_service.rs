@@ -4,7 +4,7 @@ use super::market_velocity_entry::{
 };
 use super::market_velocity_signal::{
     dispatch_market_velocity_strategy_signal_with_config_and_entry_confirmation,
-    market_velocity_signal_dispatch_is_enabled,
+    market_velocity_signal_direct_dispatch_allowed, market_velocity_signal_dispatch_is_enabled,
     market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityStrategySignalConfig,
 };
 use super::CandleService;
@@ -539,14 +539,18 @@ impl ScannerService {
                 self.attach_rank_event_to_market_velocity_episode(episode_id, id, detected_at)
                     .await;
                 let signal_config = self.market_velocity_signal_config_for_event(&event);
-                let entry_confirmation = match signal_config.as_ref() {
+                let direct_dispatch_config = self.market_velocity_direct_dispatch_config_for_event(
+                    &event,
+                    signal_config.as_ref(),
+                );
+                let entry_confirmation = match direct_dispatch_config {
                     Some(config) => {
                         self.market_velocity_entry_confirmation_if_needed(&event, config)
                             .await
                     }
                     None => None,
                 };
-                if let Some(config) = signal_config.as_ref() {
+                if let Some(config) = direct_dispatch_config {
                     if let Err(e) =
                         dispatch_market_velocity_strategy_signal_with_config_and_entry_confirmation(
                             &event,
@@ -606,14 +610,18 @@ impl ScannerService {
                 self.attach_rank_event_to_market_velocity_episode(episode_id, id, detected_at)
                     .await;
                 let signal_config = self.market_velocity_signal_config_for_event(&event);
-                let entry_confirmation = match signal_config.as_ref() {
+                let direct_dispatch_config = self.market_velocity_direct_dispatch_config_for_event(
+                    &event,
+                    signal_config.as_ref(),
+                );
+                let entry_confirmation = match direct_dispatch_config {
                     Some(config) => {
                         self.market_velocity_entry_confirmation_if_needed(&event, config)
                             .await
                     }
                     None => None,
                 };
-                if let Some(config) = signal_config.as_ref() {
+                if let Some(config) = direct_dispatch_config {
                     if let Err(e) =
                         dispatch_market_velocity_strategy_signal_with_config_and_entry_confirmation(
                             &event,
@@ -762,6 +770,25 @@ impl ScannerService {
                 return None;
             }
         })
+    }
+
+    fn market_velocity_direct_dispatch_config_for_event<'a>(
+        &self,
+        event: &MarketRankEvent,
+        config: Option<&'a MarketVelocityStrategySignalConfig>,
+    ) -> Option<&'a MarketVelocityStrategySignalConfig> {
+        let config = config?;
+        if market_velocity_signal_direct_dispatch_allowed(config) {
+            return Some(config);
+        }
+        info!(
+            symbol = %event.symbol,
+            event_id = ?event.id,
+            entry_rule_version = %config.entry_rule_version,
+            strategy_preset = %config.strategy_preset,
+            "Skip direct Market Velocity scanner dispatch because hybrid live handoff owns signal emission"
+        );
+        None
     }
     /// 提供市场动量入场确认ifneeded的集中实现，避免行情数据调用方重复处理相同细节。
     async fn market_velocity_entry_confirmation_if_needed(

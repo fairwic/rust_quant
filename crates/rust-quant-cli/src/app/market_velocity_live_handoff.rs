@@ -756,7 +756,7 @@ fn parse_u64_from_map(envs: &BTreeMap<String, String>, key: &str, default: u64) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::market_velocity_event_backtest::MS_15M;
+    use crate::app::market_velocity_event_backtest::{parse_paper_observation_args_from, MS_15M};
     use chrono::TimeZone;
     use rust_decimal::Decimal;
     use rust_quant_domain::{Price, Timeframe, Volume};
@@ -1074,6 +1074,99 @@ mod tests {
         assert_eq!(selection.selected_entry.entry_path, "retest_after_signal");
         assert_eq!(selection.selected_entry.signal_pullback_pct, Some(2.286));
     }
+
+    #[test]
+    fn production_default_hybrid_live_shell_matches_paper_preset_contract() {
+        let preset = parse_paper_observation_args_from([
+            "--paper-strategy-preset",
+            "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2",
+        ])
+        .expect("paper preset");
+        let config = MarketVelocityStrategySignalConfig::from_strategy_config_json(
+            &json!({
+                "strategy_slug": "market_velocity",
+                "strategy_preset": "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2",
+                "entry_rule_version": "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2",
+                "min_delta_rank": 20,
+                "max_delta_rank": 40,
+                "min_price_change_pct": 5.0,
+                "max_price_change_pct": 10.0,
+                "stop_loss_pct": 0.04,
+                "take_profit_r": 1.8,
+                "max_holding_hours": 48,
+                "require_technical_confirmation": true,
+                "require_entry_confirmation": true,
+                "trend_min_average_distance_pct": 0.0,
+                "entry_confirmation_period": 20,
+                "entry_confirmation_fetch_limit": 80,
+                "entry_max_average_distance_pct": 5.0,
+                "entry_min_volume_ratio": 1.1,
+                "entry_max_signal_pullback_pct": 3.0,
+                "entry_retest_tolerance_pct": 0.3,
+                "entry_retest_after_signal": true,
+                "entry_retest_max_wait_candles": 1,
+                "fvg_entry_mode": "m15_impulse_retrace",
+                "fvg_lookback_candles": 40,
+                "fvg_max_wait_candles": 24,
+                "fvg_impulse_retrace_fill_pct": 20.0,
+                "fvg_impulse_retrace_min_wait_candles": 0,
+                "entry_trigger_allowlist": ["reclaim_ema"],
+            }),
+            &json!({
+                "max_loss_percent": 0.04,
+                "take_profit_r": 1.8,
+                "max_holding_hours": 48,
+            }),
+        )
+        .expect("live strategy config");
+        let live_shell = market_velocity_live_shell_args(&config);
+
+        assert_eq!(live_shell.entry_period, preset.entry_period);
+        assert_eq!(
+            live_shell.entry_max_distance_pct,
+            preset.entry_max_distance_pct
+        );
+        assert_eq!(
+            live_shell.entry_min_volume_ratio,
+            preset.entry_min_volume_ratio
+        );
+        assert_eq!(
+            live_shell.entry_max_signal_pullback_pct,
+            preset.entry_max_signal_pullback_pct
+        );
+        assert_eq!(
+            live_shell.entry_retest_tolerance_pct,
+            preset.entry_retest_tolerance_pct
+        );
+        assert_eq!(
+            live_shell.entry_retest_after_signal,
+            preset.entry_retest_after_signal
+        );
+        assert_eq!(
+            live_shell.entry_retest_max_wait_candles,
+            preset.entry_retest_max_wait_candles
+        );
+        assert_eq!(
+            live_shell.entry_retest_min_entry_open_gap_pct,
+            preset.entry_retest_min_entry_open_gap_pct
+        );
+        assert_eq!(
+            live_shell.entry_retest_open_fade_min_volume_ratio,
+            preset.entry_retest_open_fade_min_volume_ratio
+        );
+        assert_eq!(live_shell.fvg_entry_mode, preset.fvg_entry_mode);
+        assert_eq!(live_shell.fvg_lookback_candles, preset.fvg_lookback_candles);
+        assert_eq!(live_shell.fvg_max_wait_candles, preset.fvg_max_wait_candles);
+        assert_eq!(
+            live_shell.fvg_impulse_retrace_fill_pct,
+            preset.fvg_impulse_retrace_fill_pct
+        );
+        assert_eq!(
+            live_shell.fvg_impulse_retrace_min_wait_candles,
+            preset.fvg_impulse_retrace_min_wait_candles
+        );
+    }
+
     #[test]
     fn skipped_candidate_summary_groups_blockers_and_symbols() {
         let summary = summarize_skipped_candidates(&[
