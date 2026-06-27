@@ -290,6 +290,13 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "default deploy/rollback must fail fast when REDIS_HOST is pinned to a disposable container IP instead of Docker DNS"
         );
         assert!(
+            deploy_script.contains("assert_no_legacy_market_velocity_dispatch_mode_override")
+                && deploy_script.contains("MARKET_VELOCITY_SIGNAL_DISPATCH_MODE")
+                && deploy_script.contains(".env.deploy")
+                && deploy_script.contains("hybrid live handoff owns signal emission"),
+            "default deploy/rollback must fail fast when persistent env files pin Market Velocity back to legacy direct Web dispatch"
+        );
+        assert!(
             deploy_script
                 .rfind("assert_no_persistent_live_mutation_env_flags")
                 .expect("live mutation env guard must be called")
@@ -297,6 +304,15 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
                     .find("compose -f \"${override_file}\" up -d --no-build")
                     .expect("deploy script starts long-running services"),
             "default deploy/rollback must check persistent live mutation flags before starting services"
+        );
+        assert!(
+            deploy_script
+                .rfind("assert_no_legacy_market_velocity_dispatch_mode_override")
+                .expect("market velocity dispatch mode guard must be called")
+                < deploy_script
+                    .find("compose -f \"${override_file}\" up -d --no-build")
+                    .expect("deploy script starts long-running services"),
+            "default deploy/rollback must reject legacy Market Velocity direct dispatch overrides before starting services"
         );
         assert!(
             deploy_script.contains("remove_conflicting_named_containers"),

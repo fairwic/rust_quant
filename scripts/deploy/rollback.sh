@@ -278,6 +278,44 @@ assert_no_persistent_live_mutation_env_flags() {
   fi
 }
 
+market_velocity_dispatch_mode_is_legacy_web_override() {
+  local value
+  value="$(normalize_live_mutation_env_value "${1:-}")"
+  case "${value}" in
+    web|quant_web|execution_tasks|enabled|true|1)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+assert_no_legacy_market_velocity_dispatch_mode_override() {
+  local found=0
+  local value env_file
+
+  value="${MARKET_VELOCITY_SIGNAL_DISPATCH_MODE:-}"
+  if [ -n "${value}" ] && market_velocity_dispatch_mode_is_legacy_web_override "${value}"; then
+    echo "refusing deployment with legacy Market Velocity direct dispatch mode in process env: MARKET_VELOCITY_SIGNAL_DISPATCH_MODE=${value}" >&2
+    found=1
+  fi
+
+  for env_file in .env .env.deploy; do
+    [ -f "${env_file}" ] || continue
+    value="$(read_dotenv_value "MARKET_VELOCITY_SIGNAL_DISPATCH_MODE" "${env_file}" || true)"
+    if [ -n "${value}" ] && market_velocity_dispatch_mode_is_legacy_web_override "${value}"; then
+      echo "refusing deployment with legacy Market Velocity direct dispatch mode in ${env_file}: MARKET_VELOCITY_SIGNAL_DISPATCH_MODE=${value}" >&2
+      found=1
+    fi
+  done
+
+  if [ "${found}" = "1" ]; then
+    echo "remove persistent MARKET_VELOCITY_SIGNAL_DISPATCH_MODE web override from env/.env.deploy; hybrid live handoff owns signal emission" >&2
+    exit 1
+  fi
+}
+
 print_runtime_safety_flags() {
   local override_file="$1"
   shift
@@ -332,6 +370,7 @@ override_file=".deploy/quant-core.rollback.override.yml"
 
 assert_no_persistent_live_mutation_env_flags
 assert_no_pinned_redis_host_env
+assert_no_legacy_market_velocity_dispatch_mode_override
 compose -f "${override_file}" pull "${services[@]}" || true
 remove_conflicting_named_containers "${services[@]}"
 remove_retired_deployment_containers "${retired_services[@]}"
