@@ -65,7 +65,7 @@ const SELECT_EXCHANGE_REQUEST_CIRCUIT_SQL: &str = r#"
             SELECT
                 state,
                 opened_until,
-                opened_until > NOW() AS circuit_open
+                COALESCE(opened_until > NOW(), FALSE) AS circuit_open
             FROM exchange_request_circuit_breakers
             WHERE exchange = $1
               AND credential_key = $2

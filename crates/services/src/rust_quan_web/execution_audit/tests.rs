@@ -262,6 +262,14 @@ fn postgres_exchange_request_control_uses_row_locking_and_circuit_state() {
     }
 }
 #[test]
+fn postgres_exchange_request_circuit_null_opened_until_is_closed() {
+    assert!(
+        SELECT_EXCHANGE_REQUEST_CIRCUIT_SQL
+            .contains("COALESCE(opened_until > NOW(), FALSE) AS circuit_open"),
+        "closed circuit rows with NULL opened_until must decode as a non-null false bool"
+    );
+}
+#[test]
 fn report_result_replay_candidate_reconstructs_report_without_order_retry() {
     let report = ExecutionTaskReportRequest {
         task_id: 42,
