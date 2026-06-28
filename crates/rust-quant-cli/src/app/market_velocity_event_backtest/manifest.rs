@@ -153,6 +153,12 @@ fn human_label_for_preset(preset: &str) -> &str {
         "research_momentum_04sl_18r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1" => {
             "Market Velocity 0.04SL 1.8R reclaim retest1 dist3 pullback3 vol11 delta20-40 pchg5-10 v1"
         }
+        "research_momentum_04sl_18r_breakout_reclaim_retest1_delta20_40_pchg5_10_v1" => {
+            "Market Velocity 0.04SL 1.8R breakout reclaim retest1 vol10 delta20-40 pchg5-10 v1"
+        }
+        "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1" => {
+            "Market Velocity 0.04SL 1.8R breakout reclaim fvg retest1 vol10 delta20-40 pchg5-8 v1"
+        }
         "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_minwait1_delta15_40_pchg5_12_v1" => {
             "Market Velocity 0.04SL 2.0R breakout reclaim fvg wait10 minwait1 delta15-40 pchg5-12 v1"
         }

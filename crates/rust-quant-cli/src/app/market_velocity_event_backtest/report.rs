@@ -8,11 +8,15 @@ use std::collections::{BTreeMap, HashMap};
 pub(super) struct EffectiveEntrySummary {
     pub(super) raw_events: usize,
     pub(super) trend_pass: usize,
+    pub(super) entry_signal_pass: usize,
+    pub(super) entry_execution_pass: usize,
     pub(super) entry_pass_before_filters: usize,
     pub(super) symbol_after: usize,
     pub(super) trigger_after: usize,
     pub(super) raw_open_rate_pct: Option<f64>,
     pub(super) trend_open_rate_pct: Option<f64>,
+    pub(super) signal_execution_rate_pct: Option<f64>,
+    pub(super) signal_open_rate_pct: Option<f64>,
     pub(super) trigger_keep_pct: Option<f64>,
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -62,22 +66,35 @@ pub(super) fn print_effective_entry_report(
     symbol_filtered: &[ConfirmedEvent],
     trigger_filtered: &[ConfirmedEvent],
 ) {
+    let entry_signal_pass = *evaluation
+        .stage_counts
+        .get("entry_signal_pass")
+        .unwrap_or(&0);
+    let entry_execution_pass = *evaluation
+        .stage_counts
+        .get("entry_execution_pass")
+        .unwrap_or(&0);
     let summary = effective_entry_summary(
         raw_events,
         *evaluation.stage_counts.get("trend_pass").unwrap_or(&0),
-        evaluation.confirmed.len(),
+        entry_signal_pass,
+        entry_execution_pass,
         symbol_filtered.len(),
         trigger_filtered.len(),
     );
     println!(
-        "effective_entry\traw={}\ttrend_pass={}\tentry_pass_before_filters={}\tsymbol_after={}\ttrigger_after={}\traw_open_rate_pct={}\ttrend_open_rate_pct={}\ttrigger_keep_pct={}",
+        "effective_entry\traw={}\ttrend_pass={}\tentry_signal_pass={}\tentry_execution_pass={}\tentry_pass_before_filters={}\tsymbol_after={}\ttrigger_after={}\traw_open_rate_pct={}\ttrend_open_rate_pct={}\tsignal_execution_rate_pct={}\tsignal_open_rate_pct={}\ttrigger_keep_pct={}",
         summary.raw_events,
         summary.trend_pass,
+        summary.entry_signal_pass,
+        summary.entry_execution_pass,
         summary.entry_pass_before_filters,
         summary.symbol_after,
         summary.trigger_after,
         format_optional_f64(summary.raw_open_rate_pct),
         format_optional_f64(summary.trend_open_rate_pct),
+        format_optional_f64(summary.signal_execution_rate_pct),
+        format_optional_f64(summary.signal_open_rate_pct),
         format_optional_f64(summary.trigger_keep_pct)
     );
 }
@@ -219,19 +236,24 @@ fn percent(numerator: usize, denominator: usize) -> Option<f64> {
 fn effective_entry_summary(
     raw_events: usize,
     trend_pass: usize,
-    entry_pass_before_filters: usize,
+    entry_signal_pass: usize,
+    entry_execution_pass: usize,
     symbol_after: usize,
     trigger_after: usize,
 ) -> EffectiveEntrySummary {
     EffectiveEntrySummary {
         raw_events,
         trend_pass,
-        entry_pass_before_filters,
+        entry_signal_pass,
+        entry_execution_pass,
+        entry_pass_before_filters: entry_execution_pass,
         symbol_after,
         trigger_after,
         raw_open_rate_pct: percent(trigger_after, raw_events),
         trend_open_rate_pct: percent(trigger_after, trend_pass),
-        trigger_keep_pct: percent(trigger_after, entry_pass_before_filters),
+        signal_execution_rate_pct: percent(entry_execution_pass, entry_signal_pass),
+        signal_open_rate_pct: percent(trigger_after, entry_signal_pass),
+        trigger_keep_pct: percent(trigger_after, entry_execution_pass),
     }
 }
 /// 提供按基础触发器聚合结果的集中实现，避免回测策略调用方重复处理后缀触发变体。
@@ -397,22 +419,31 @@ mod tests {
 
     #[test]
     fn effective_entry_summary_uses_trigger_filtered_count_for_real_open_rate() {
-        let summary = effective_entry_summary(3026, 1976, 43, 43, 8);
+        let summary = effective_entry_summary(3026, 1976, 184, 45, 45, 8);
         assert_eq!(summary.raw_events, 3026);
         assert_eq!(summary.trend_pass, 1976);
-        assert_eq!(summary.entry_pass_before_filters, 43);
-        assert_eq!(summary.symbol_after, 43);
+        assert_eq!(summary.entry_signal_pass, 184);
+        assert_eq!(summary.entry_execution_pass, 45);
+        assert_eq!(summary.entry_pass_before_filters, 45);
+        assert_eq!(summary.symbol_after, 45);
         assert_eq!(summary.trigger_after, 8);
         assert_eq!(summary.raw_open_rate_pct, Some(8.0 / 3026.0 * 100.0));
         assert_eq!(summary.trend_open_rate_pct, Some(8.0 / 1976.0 * 100.0));
-        assert_eq!(summary.trigger_keep_pct, Some(8.0 / 43.0 * 100.0));
+        assert_eq!(
+            summary.signal_execution_rate_pct,
+            Some(45.0 / 184.0 * 100.0)
+        );
+        assert_eq!(summary.signal_open_rate_pct, Some(8.0 / 184.0 * 100.0));
+        assert_eq!(summary.trigger_keep_pct, Some(8.0 / 45.0 * 100.0));
     }
 
     #[test]
     fn effective_entry_summary_returns_none_when_denominator_is_zero() {
-        let summary = effective_entry_summary(0, 0, 0, 0, 0);
+        let summary = effective_entry_summary(0, 0, 0, 0, 0, 0);
         assert_eq!(summary.raw_open_rate_pct, None);
         assert_eq!(summary.trend_open_rate_pct, None);
+        assert_eq!(summary.signal_execution_rate_pct, None);
+        assert_eq!(summary.signal_open_rate_pct, None);
         assert_eq!(summary.trigger_keep_pct, None);
     }
 

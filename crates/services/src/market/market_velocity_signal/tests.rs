@@ -85,20 +85,20 @@ fn market_velocity_default_config_promotes_latest_hybrid_live_shell() {
     let config = MarketVelocityStrategySignalConfig::default();
     assert_eq!(
         config.strategy_preset,
-        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
+        "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1"
     );
     assert_eq!(
         config.entry_rule_version,
-        "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2"
+        "rank_radar_4h15m_r04_18r_brk_rcm_fvg_rt1_vol10_d20_40_p5_8_v1"
     );
     assert_eq!(config.min_delta_rank, 20);
     assert_eq!(config.max_delta_rank, Some(40));
     assert_eq!(config.min_price_change_pct, Some(5.0));
-    assert_eq!(config.max_price_change_pct, Some(10.0));
+    assert_eq!(config.max_price_change_pct, Some(8.0));
     assert_eq!(config.stop_loss_pct, 0.04);
     assert_eq!(config.take_profit_r, 1.8);
     assert_eq!(config.entry_max_average_distance_pct, 5.0);
-    assert_eq!(config.entry_min_volume_ratio, 1.1);
+    assert_eq!(config.entry_min_volume_ratio, 1.0);
     assert_eq!(config.entry_max_signal_pullback_pct, Some(3.0));
     assert!(config.entry_retest_after_signal);
     assert_eq!(config.entry_retest_max_wait_candles, 1);
@@ -106,7 +106,10 @@ fn market_velocity_default_config_promotes_latest_hybrid_live_shell() {
         config.fvg_entry_mode,
         MarketVelocityFvgEntryMode::M15ImpulseRetrace
     );
-    assert_eq!(config.entry_trigger_allowlist, vec!["reclaim_ema"]);
+    assert_eq!(
+        config.entry_trigger_allowlist,
+        vec!["breakout_previous_high", "reclaim_ema"]
+    );
     assert!(config.hybrid_live_entry_enabled());
     assert!(!market_velocity_signal_direct_dispatch_allowed(&config));
 }
@@ -138,7 +141,7 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
     assert_eq!(request.symbol, "ETH-USDT-SWAP");
     assert_eq!(request.signal_type, "entry");
     assert_eq!(request.direction, "long");
-    assert_eq!(request.confidence, Some(0.83));
+    assert_eq!(request.confidence, Some(0.78));
     let payload: Value =
         serde_json::from_str(&request.payload_json).expect("payload should be valid json");
     assert_eq!(payload["source_signal_type"], "market_velocity");
@@ -160,11 +163,11 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
     );
     assert_eq!(
         payload["paper_strategy_preset"],
-        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
+        "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1"
     );
     assert_eq!(
         payload["entry_rule_version"],
-        "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2"
+        "rank_radar_4h15m_r04_18r_brk_rcm_fvg_rt1_vol10_d20_40_p5_8_v1"
     );
     assert_eq!(payload["risk_plan"]["entry_price"], 3400.0);
     assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3264.0);
@@ -181,11 +184,11 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
     );
     assert_eq!(
         payload["entry_filter"]["entry_rule_version"],
-        "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2"
+        "rank_radar_4h15m_r04_18r_brk_rcm_fvg_rt1_vol10_d20_40_p5_8_v1"
     );
     assert_eq!(
         payload["entry_filter"]["paper_strategy_preset"],
-        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
+        "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1"
     );
     assert_eq!(payload["entry_filter"]["min_delta_rank"], 20);
     assert!(payload["entry_filter"].get("max_new_rank").is_none());
@@ -199,7 +202,7 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
     );
     assert_eq!(
         payload["entry_filter"]["entry_trigger_allowlist"],
-        json!(["reclaim_ema"])
+        json!(["breakout_previous_high", "reclaim_ema"])
     );
     assert_eq!(
         payload["entry_filter"]["entry_trigger_blocklist"],
@@ -397,11 +400,11 @@ fn default_market_velocity_signal_payload_uses_latest_hybrid_preset() {
     assert_eq!(config.entry_max_average_distance_pct, 5.0);
     assert_eq!(
         payload["paper_strategy_preset"],
-        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
+        "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1"
     );
     assert_eq!(
         payload["entry_rule_version"],
-        "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2"
+        "rank_radar_4h15m_r04_18r_brk_rcm_fvg_rt1_vol10_d20_40_p5_8_v1"
     );
     assert_eq!(
         payload["entry_filter"]["mode"],
@@ -833,7 +836,7 @@ fn market_velocity_strategy_signal_log_context_carries_chain_identifiers() {
     assert_eq!(context.symbol, event.symbol);
     assert_eq!(
         context.entry_rule_version.as_deref(),
-        Some("rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2")
+        Some("rank_radar_4h15m_r04_18r_brk_rcm_fvg_rt1_vol10_d20_40_p5_8_v1")
     );
     assert_eq!(
         context.production_stage.as_deref(),
@@ -870,16 +873,22 @@ fn market_velocity_signal_does_not_block_by_top_rank_chase_bucket() {
         Some(Decimal::new(3400, 0)),
     );
     event.new_rank = Some(8);
-    event.price_change_pct = Some(Decimal::new(850, 2));
+    event.price_change_pct = Some(Decimal::new(750, 2));
     let decision = build_market_velocity_strategy_signal_request_with_entry_confirmation(
         &event,
         &config,
         Some(&entry_confirmation()),
     )
     .expect("event should be evaluated");
-    assert!(
-        matches!(decision, MarketVelocityStrategySignalDecision::Submit(_)),
-        "new_rank-based chase bucket is diagnostic only and must not block entry: {decision:?}"
+    let MarketVelocityStrategySignalDecision::Submit(request) = decision else {
+        panic!(
+            "new_rank-based chase bucket is diagnostic only and must not block entry: {decision:?}"
+        );
+    };
+    assert_eq!(
+        request.confidence,
+        Some(0.79),
+        "new_rank-based chase bucket must not add confidence bonus"
     );
 }
 #[test]

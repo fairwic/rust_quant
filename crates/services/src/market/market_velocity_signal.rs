@@ -19,22 +19,22 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tracing::info;
 const ENTRY_TRIGGER_FILTER_VERSION: &str = "entry_trigger_allowlist_v1";
-const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] = &["reclaim_ema"];
+const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] = &["breakout_previous_high", "reclaim_ema"];
 const DEFAULT_SYMBOL_BLOCKLIST: &[&str] = &[];
 const DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET: &str =
-    "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2";
+    "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1";
 const DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION: &str =
-    "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2";
+    "rank_radar_4h15m_r04_18r_brk_rcm_fvg_rt1_vol10_d20_40_p5_8_v1";
 const DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE: &str = "rank_radar_4h15m_hybrid_fvg_retest";
 const DEFAULT_MIN_DELTA_RANK: i32 = 20;
 const DEFAULT_MAX_DELTA_RANK: i32 = 40;
 const DEFAULT_MIN_PRICE_CHANGE_PCT: f64 = 5.0;
-const DEFAULT_MAX_PRICE_CHANGE_PCT: f64 = 10.0;
+const DEFAULT_MAX_PRICE_CHANGE_PCT: f64 = 8.0;
 const DEFAULT_STOP_LOSS_PCT: f64 = 0.04;
 const DEFAULT_TAKE_PROFIT_R: f64 = 1.8;
 const DEFAULT_MAX_HOLDING_HOURS: u32 = 48;
 const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 5.0;
-const DEFAULT_ENTRY_MIN_VOLUME_RATIO: f64 = 1.1;
+const DEFAULT_ENTRY_MIN_VOLUME_RATIO: f64 = 1.0;
 const DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT: f64 = 3.0;
 const DEFAULT_ENTRY_RETEST_AFTER_SIGNAL: bool = true;
 const DEFAULT_ENTRY_RETEST_MAX_WAIT_CANDLES: usize = 1;
@@ -1297,12 +1297,7 @@ fn market_velocity_confidence(event: &MarketRankEvent) -> f64 {
         .max(0.0)
         .min(10.0)
         * 0.005;
-    let top_rank_component = if matches!(event.new_rank, Some(rank) if rank <= 50) {
-        0.05
-    } else {
-        0.0
-    };
-    let confidence = 0.55 + delta_component + price_component + top_rank_component;
+    let confidence = 0.55 + delta_component + price_component;
     ((confidence.min(0.95)) * 100.0).round() / 100.0
 }
 /// 提供默认入场触发allowlist的集中实现，避免行情数据调用方重复处理相同细节。

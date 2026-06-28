@@ -535,6 +535,79 @@ fn paper_observation_args_apply_reclaim_retest1_pullback3_04sl_18r_delta20_40_re
 }
 
 #[test]
+fn paper_observation_args_apply_breakout_reclaim_retest1_04sl_18r_delta20_40_research_preset() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_momentum_04sl_18r_breakout_reclaim_retest1_delta20_40_pchg5_10_v1",
+    ])
+    .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
+    assert_eq!(
+        args.entry_trigger_allowlist,
+        vec!["breakout_previous_high", "reclaim_ema"]
+    );
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "rank_radar_4h15m_r04_18r_brk_rcm_rt1_vol10_d20_40_p5_10_v1"
+    );
+    assert_eq!(args.stop_loss_pct, 0.04);
+    assert_eq!(args.target_rs, vec![1.8]);
+    assert_eq!(args.entry_max_distance_pct, 5.0);
+    assert_eq!(args.entry_min_volume_ratio, 1.0);
+    assert_eq!(args.entry_max_signal_pullback_pct, Some(3.0));
+    assert!(args.entry_retest_after_signal);
+    assert_eq!(args.entry_retest_max_wait_candles, 1);
+    assert_eq!(args.entry_retest_tolerance_pct, 0.3);
+    assert_eq!(args.entry_retest_min_entry_open_gap_pct, None);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 20);
+    assert_eq!(args.max_delta_rank, Some(40));
+    assert_eq!(args.min_price_change_pct, Some(5.0));
+    assert_eq!(args.max_price_change_pct, Some(10.0));
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::Off);
+    assert!(args.ignore_entry_signal_updates_while_open);
+}
+
+#[test]
+fn paper_observation_args_apply_breakout_reclaim_hybrid_04sl_18r_delta20_40_pchg5_8_research_preset(
+) {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1",
+    ])
+    .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
+    assert_eq!(
+        args.entry_trigger_allowlist,
+        vec!["breakout_previous_high", "reclaim_ema"]
+    );
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "rank_radar_4h15m_r04_18r_brk_rcm_fvg_rt1_vol10_d20_40_p5_8_v1"
+    );
+    assert_eq!(args.stop_loss_pct, 0.04);
+    assert_eq!(args.target_rs, vec![1.8]);
+    assert_eq!(args.entry_max_distance_pct, 5.0);
+    assert_eq!(args.entry_min_volume_ratio, 1.0);
+    assert_eq!(args.entry_max_signal_pullback_pct, Some(3.0));
+    assert!(args.entry_retest_after_signal);
+    assert_eq!(args.entry_retest_max_wait_candles, 1);
+    assert_eq!(args.entry_retest_tolerance_pct, 0.3);
+    assert_eq!(args.min_delta_rank, 20);
+    assert_eq!(args.max_delta_rank, Some(40));
+    assert_eq!(args.min_price_change_pct, Some(5.0));
+    assert_eq!(args.max_price_change_pct, Some(8.0));
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::M15ImpulseRetrace);
+    assert_eq!(args.fvg_lookback_candles, 40);
+    assert_eq!(args.fvg_max_wait_candles, 24);
+    assert_eq!(args.fvg_impulse_retrace_fill_pct, 20.0);
+    assert_eq!(args.fvg_impulse_retrace_min_wait_candles, 0);
+    assert!(args.ignore_entry_signal_updates_while_open);
+}
+
+#[test]
 fn paper_observation_args_apply_breakout_reclaim_fvg_wait10_minwait1_04sl_delta15_40_research_preset(
 ) {
     let args = parse_paper_observation_args_from([
@@ -587,6 +660,8 @@ fn paper_observation_entry_rule_versions_fit_quant_web_contract() {
         "research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_pullback3_delta20_40_pchg5_10_v3",
         "research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_openfadevol2_pullback3_delta20_40_pchg5_10_v4",
         "research_momentum_04sl_18r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1",
+        "research_momentum_04sl_18r_breakout_reclaim_retest1_delta20_40_pchg5_10_v1",
+        "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1",
         "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_minwait1_delta15_40_pchg5_12_v1",
         "research_episode_momentum_03sl_24r_rank5_30_v1",
         "research_episode_runner_03sl_24r_8r30_v1",

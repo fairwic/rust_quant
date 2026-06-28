@@ -426,6 +426,62 @@ fn evaluate_events_waits_for_breakout_retest_after_signal() {
         confirmed.trigger,
         "breakout_previous_high+retest_after_signal"
     );
+    assert_eq!(report.stage_counts.get("trend_pass"), Some(&1));
+    assert_eq!(report.stage_counts.get("entry_signal_pass"), Some(&1));
+    assert_eq!(report.stage_counts.get("entry_execution_pass"), Some(&1));
+    assert_eq!(report.stage_counts.get("entry_pass"), Some(&1));
+}
+
+#[test]
+fn evaluate_events_counts_retest_shell_failure_after_signal_confirmation() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_retest_after_signal: true,
+        entry_retest_max_wait_candles: 2,
+        entry_retest_tolerance_pct: 0.3,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 107.0, 105.5, 106.3),
+        ohlc(base_ts + MS_15M * 6, 106.4, 107.2, 106.1, 106.8),
+        ohlc(base_ts + MS_15M * 7, 106.7, 107.4, 106.4, 107.0),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("trend_pass"), Some(&1));
+    assert_eq!(report.stage_counts.get("entry_signal_pass"), Some(&1));
+    assert_eq!(report.stage_counts.get("entry_execution_blocked"), Some(&1));
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
+    assert_eq!(
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("entry_retest_no_pullback_confirmation")),
+        Some(&1)
+    );
 }
 #[test]
 fn evaluate_events_blocks_retest_entry_when_next_open_fades_confirmation() {

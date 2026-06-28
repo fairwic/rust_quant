@@ -948,9 +948,11 @@ pub fn evaluate_events(
                     entry_confirmation(symbol_15m, event.ts, direction, args);
                 if !entry_ok {
                     increment(&mut stage_counts, "entry_blocked");
+                    increment(&mut stage_counts, "entry_signal_blocked");
                     increment_nested(&mut blockers, &event.symbol, &entry_reason);
                     continue;
                 }
+                increment(&mut stage_counts, "entry_signal_pass");
                 let signal_idx = completed_candle_count(symbol_15m, event.ts, MS_15M) - 1;
                 if args.entry_retest_after_signal {
                     match find_retest_entry_after_signal(
@@ -968,10 +970,12 @@ pub fn evaluate_events(
                                 args,
                             ) {
                                 increment(&mut stage_counts, "entry_blocked");
+                                increment(&mut stage_counts, "entry_execution_blocked");
                                 increment_nested(&mut blockers, &event.symbol, &reason);
                                 continue;
                             }
                             increment(&mut stage_counts, "entry_pass");
+                            increment(&mut stage_counts, "entry_execution_pass");
                             confirmed.push(ConfirmedEvent {
                                 event: event.clone(),
                                 entry_ts: entry.entry_ts,
@@ -982,6 +986,7 @@ pub fn evaluate_events(
                         }
                         Err(reason) => {
                             increment(&mut stage_counts, "entry_blocked");
+                            increment(&mut stage_counts, "entry_execution_blocked");
                             increment_nested(&mut blockers, &event.symbol, &reason);
                         }
                     }
@@ -989,6 +994,7 @@ pub fn evaluate_events(
                 }
                 let Some(entry_idx) = next_entry_candle_idx(symbol_15m, event.ts) else {
                     increment(&mut stage_counts, "no_next_entry_candle");
+                    increment(&mut stage_counts, "entry_execution_blocked");
                     increment_nested(&mut blockers, &event.symbol, "no_next_entry_candle");
                     continue;
                 };
@@ -996,6 +1002,7 @@ pub fn evaluate_events(
                     entry_gap_without_retest_block_reason(symbol_15m, signal_idx, entry_idx, args)
                 {
                     increment(&mut stage_counts, "entry_blocked");
+                    increment(&mut stage_counts, "entry_execution_blocked");
                     increment_nested(&mut blockers, &event.symbol, &reason);
                     continue;
                 }
@@ -1004,10 +1011,12 @@ pub fn evaluate_events(
                     entry_signal_pullback_block_reason(event, entry.open, direction, args)
                 {
                     increment(&mut stage_counts, "entry_blocked");
+                    increment(&mut stage_counts, "entry_execution_blocked");
                     increment_nested(&mut blockers, &event.symbol, &reason);
                     continue;
                 }
                 increment(&mut stage_counts, "entry_pass");
+                increment(&mut stage_counts, "entry_execution_pass");
                 confirmed.push(ConfirmedEvent {
                     event: event.clone(),
                     entry_ts: entry.ts,
@@ -1021,9 +1030,11 @@ pub fn evaluate_events(
                     entry_confirmation(symbol_15m, event.ts, direction, args);
                 if !entry_ok {
                     increment(&mut stage_counts, "entry_blocked");
+                    increment(&mut stage_counts, "entry_signal_blocked");
                     increment_nested(&mut blockers, &event.symbol, &entry_reason);
                     continue;
                 }
+                increment(&mut stage_counts, "entry_signal_pass");
                 let Some(symbol_15m_raw) = raw_candles_15m
                     .get(&event.symbol)
                     .filter(|candles| !candles.is_empty())
@@ -1051,10 +1062,12 @@ pub fn evaluate_events(
                             args,
                         ) {
                             increment(&mut stage_counts, "entry_blocked");
+                            increment(&mut stage_counts, "entry_execution_blocked");
                             increment_nested(&mut blockers, &event.symbol, &reason);
                             continue;
                         }
                         increment(&mut stage_counts, "entry_pass");
+                        increment(&mut stage_counts, "entry_execution_pass");
                         confirmed.push(ConfirmedEvent {
                             event: event.clone(),
                             entry_ts: entry.entry_ts,
@@ -1065,6 +1078,7 @@ pub fn evaluate_events(
                     }
                     FvgEntrySearch::Blocked(reason) => {
                         increment(&mut stage_counts, "entry_blocked");
+                        increment(&mut stage_counts, "entry_execution_blocked");
                         increment_nested(&mut blockers, &event.symbol, &reason);
                     }
                 }
@@ -1074,9 +1088,11 @@ pub fn evaluate_events(
                     entry_confirmation(symbol_15m, event.ts, direction, args);
                 if !entry_ok {
                     increment(&mut stage_counts, "entry_blocked");
+                    increment(&mut stage_counts, "entry_signal_blocked");
                     increment_nested(&mut blockers, &event.symbol, &entry_reason);
                     continue;
                 }
+                increment(&mut stage_counts, "entry_signal_pass");
                 let signal_idx = completed_candle_count(symbol_15m, event.ts, MS_15M) - 1;
                 let Some(symbol_15m_raw) = raw_candles_15m
                     .get(&event.symbol)
@@ -1106,10 +1122,12 @@ pub fn evaluate_events(
                             args,
                         ) {
                             increment(&mut stage_counts, "entry_blocked");
+                            increment(&mut stage_counts, "entry_execution_blocked");
                             increment_nested(&mut blockers, &event.symbol, &reason);
                             continue;
                         }
                         increment(&mut stage_counts, "entry_pass");
+                        increment(&mut stage_counts, "entry_execution_pass");
                         confirmed.push(ConfirmedEvent {
                             event: event.clone(),
                             entry_ts: entry.entry_ts,
@@ -1135,10 +1153,12 @@ pub fn evaluate_events(
                                         args,
                                     ) {
                                         increment(&mut stage_counts, "entry_blocked");
+                                        increment(&mut stage_counts, "entry_execution_blocked");
                                         increment_nested(&mut blockers, &event.symbol, &reason);
                                         continue;
                                     }
                                     increment(&mut stage_counts, "entry_pass");
+                                    increment(&mut stage_counts, "entry_execution_pass");
                                     confirmed.push(ConfirmedEvent {
                                         event: event.clone(),
                                         entry_ts: entry.entry_ts,
@@ -1149,6 +1169,7 @@ pub fn evaluate_events(
                                 }
                                 Err(fallback_reason) => {
                                     increment(&mut stage_counts, "entry_blocked");
+                                    increment(&mut stage_counts, "entry_execution_blocked");
                                     increment_nested(
                                         &mut blockers,
                                         &event.symbol,
@@ -1158,6 +1179,7 @@ pub fn evaluate_events(
                             }
                         } else {
                             increment(&mut stage_counts, "entry_blocked");
+                            increment(&mut stage_counts, "entry_execution_blocked");
                             increment_nested(&mut blockers, &event.symbol, &reason);
                         }
                     }
@@ -1209,10 +1231,12 @@ pub fn evaluate_events(
                             args,
                         ) {
                             increment(&mut stage_counts, "entry_blocked");
+                            increment(&mut stage_counts, "entry_execution_blocked");
                             increment_nested(&mut blockers, &event.symbol, &reason);
                             continue;
                         }
                         increment(&mut stage_counts, "entry_pass");
+                        increment(&mut stage_counts, "entry_execution_pass");
                         confirmed.push(ConfirmedEvent {
                             event: event.clone(),
                             entry_ts: entry.entry_ts,
@@ -1223,6 +1247,7 @@ pub fn evaluate_events(
                     }
                     FvgEntrySearch::Blocked(reason) => {
                         increment(&mut stage_counts, "entry_blocked");
+                        increment(&mut stage_counts, "entry_execution_blocked");
                         increment_nested(&mut blockers, &event.symbol, &reason);
                     }
                 }
