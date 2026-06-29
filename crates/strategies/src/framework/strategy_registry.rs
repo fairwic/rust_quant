@@ -3,7 +3,8 @@
 //! 管理所有已注册的策略，提供策略的自动检测和获取功能
 use super::strategy_trait::StrategyExecutor;
 use crate::implementations::{
-    BscEventArbStrategyExecutor, NweStrategyExecutor, VegasStrategyExecutor,
+    BearShortStackStrategyExecutor, BscEventArbStrategyExecutor,
+    BtcEthLiquidityScalperStrategyExecutor, NweStrategyExecutor, VegasStrategyExecutor,
 };
 use crate::StrategyType;
 use anyhow::{anyhow, Result};
@@ -119,13 +120,28 @@ impl StrategyRegistry {
         removed
     }
 }
-/// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
-/// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
+/// Normalizes executor lookup names only; external `strategy_key` parsing remains version-strict.
 fn normalize_strategy_lookup_name(name: &str) -> String {
-    name.chars()
+    let normalized: String = name
+        .chars()
         .filter(|ch| *ch != '_' && *ch != '-' && !ch.is_whitespace())
         .flat_map(char::to_lowercase)
-        .collect()
+        .collect();
+    strip_version_suffix(&normalized).to_string()
+}
+
+/// Removes a trailing numeric executor version so `*_v1` keys can find Rust executor names.
+/// This is not a compatibility alias: product keys are still validated in `StrategyType::from_str`
+/// and each executor's `can_handle` implementation.
+fn strip_version_suffix(name: &str) -> &str {
+    let Some(version_start) = name.rfind('v') else {
+        return name;
+    };
+    let suffix = &name[version_start + 1..];
+    if version_start == 0 || suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        return name;
+    }
+    &name[..version_start]
 }
 /// 初始化策略注册中心（空注册表，按需加载）
 /// 策略将在首次使用时自动注册，而不是预先注册所有策略
@@ -164,10 +180,12 @@ pub fn register_default_strategies() {
 }
 /// 注册 回测与策略研究 组件，使运行时可以按类型或名称找到对应实现。
 fn register_builtin_strategies(registry: &StrategyRegistry) {
-    const DEFAULT_TYPES: [StrategyType; 3] = [
+    const DEFAULT_TYPES: [StrategyType; 5] = [
         StrategyType::Vegas,
         StrategyType::Nwe,
         StrategyType::BscEventArb,
+        StrategyType::BtcEthLiquidityScalper,
+        StrategyType::BearShortStack,
     ];
     for strategy_type in DEFAULT_TYPES.iter() {
         register_executor_for_type(registry, strategy_type);
@@ -179,6 +197,8 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
         StrategyType::Vegas => "Vegas",
         StrategyType::Nwe => "Nwe",
         StrategyType::BscEventArb => "BscEventArb",
+        StrategyType::BtcEthLiquidityScalper => "BtcEthLiquidityScalper",
+        StrategyType::BearShortStack => "BearShortStack",
         _ => strategy_type.as_str(),
     };
     if registry.contains(key) {
@@ -196,6 +216,14 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
         StrategyType::BscEventArb => {
             registry.register(Arc::new(BscEventArbStrategyExecutor::new()));
             info!("✅ 注册策略: BscEventArb");
+        }
+        StrategyType::BtcEthLiquidityScalper => {
+            registry.register(Arc::new(BtcEthLiquidityScalperStrategyExecutor::new()));
+            info!("✅ 注册策略: BtcEthLiquidityScalper");
+        }
+        StrategyType::BearShortStack => {
+            registry.register(Arc::new(BearShortStackStrategyExecutor::new()));
+            info!("✅ 注册策略: BearShortStack");
         }
         _ => {
             warn!("⚠️  策略类型 {:?} 暂未实现执行器，跳过注册", strategy_type);

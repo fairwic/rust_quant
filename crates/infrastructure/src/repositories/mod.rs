@@ -26,7 +26,9 @@ pub use exchange_api_config_repository::{
 // pub use position_repository::{PositionEntity, SqlxPositionRepository};
 pub use economic_event_repository::SqlxEconomicEventRepository;
 pub use exchange_symbol_repository::PostgresExchangeSymbolRepository;
-pub use external_market_snapshot_repository::SqlxExternalMarketSnapshotRepository;
+pub use external_market_snapshot_repository::{
+    ShardedExternalMarketSnapshotRepository, SqlxExternalMarketSnapshotRepository,
+};
 pub use funding_rate_repository::SqlxFundingRateRepository;
 pub use signal_log_repository::{SignalLogEntity, SignalLogRepository};
 pub use strategy_config_postgres_repository::PostgresStrategyConfigRepository;

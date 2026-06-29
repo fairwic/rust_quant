@@ -7,7 +7,7 @@ use rust_quant_infrastructure::{
     exchanges::{
         HyperliquidAssetContextSnapshot, HyperliquidFundingHistoryPoint, HyperliquidPublicAdapter,
     },
-    repositories::SqlxExternalMarketSnapshotRepository,
+    repositories::ShardedExternalMarketSnapshotRepository,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -93,7 +93,7 @@ impl ExternalMarketSyncService {
     /// 构建 行情与市场数据 所需实例，并集中初始化依赖和默认状态。
     pub fn new() -> Result<Self> {
         let pool = get_db_pool().clone();
-        let repo = Arc::new(SqlxExternalMarketSnapshotRepository::new(pool));
+        let repo = Arc::new(ShardedExternalMarketSnapshotRepository::new(pool));
         let provider = Arc::new(HyperliquidExternalMarketDataProvider::new()?);
         Ok(Self { repo, provider })
     }

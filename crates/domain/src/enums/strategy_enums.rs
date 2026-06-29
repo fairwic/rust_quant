@@ -25,6 +25,10 @@ pub enum StrategyType {
     BscEventArb,
     /// Market Velocity 动量策略
     MarketVelocity,
+    /// BTC/ETH 流动性剥头皮策略
+    BtcEthLiquidityScalper,
+    /// BTC/ETH 做空策略栈
+    BearShortStack,
     /// 自定义策略
     Custom(u32),
 }
@@ -44,6 +48,8 @@ impl StrategyType {
             StrategyType::TopContract => "top_contract",
             StrategyType::BscEventArb => "bsc_event_arb",
             StrategyType::MarketVelocity => "market_velocity",
+            StrategyType::BtcEthLiquidityScalper => "btc_eth_liquidity_scalper_v1",
+            StrategyType::BearShortStack => "bear_short_stack_v1",
             StrategyType::Custom(_) => "custom",
         }
     }
@@ -65,6 +71,11 @@ impl std::str::FromStr for StrategyType {
             "top_contract" => Ok(StrategyType::TopContract),
             "bsc_event_arb" => Ok(StrategyType::BscEventArb),
             "market_velocity" => Ok(StrategyType::MarketVelocity),
+            // 新策略只接受带版本的 key，避免回测、paper 和 live 结果混在同一个无版本标识下。
+            "btc_eth_liquidity_scalper_v1" => Ok(StrategyType::BtcEthLiquidityScalper),
+            "bear_short_stack_v1" | "bear_breakdown_short_v1" | "exhaustion_fade_short_v1" => {
+                Ok(StrategyType::BearShortStack)
+            }
             _ => Err(format!("Unknown strategy type: {}", s)),
         }
     }
@@ -198,6 +209,14 @@ mod tests {
         assert_eq!(
             StrategyType::from_str("market_velocity"),
             Ok(StrategyType::MarketVelocity)
+        );
+        assert_eq!(
+            StrategyType::from_str("btc_eth_liquidity_scalper_v1"),
+            Ok(StrategyType::BtcEthLiquidityScalper)
+        );
+        assert_eq!(
+            StrategyType::from_str("exhaustion_fade_short_v1"),
+            Ok(StrategyType::BearShortStack)
         );
         assert!(StrategyType::from_str("unknown").is_err());
     }

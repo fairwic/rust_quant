@@ -249,6 +249,9 @@ pub struct TradePosition {
     pub close_price: Option<f64>,
     //盈亏
     pub profit_loss: f64,
+    /// 回测交易手续费率，按开仓名义价值扣减。
+    /// None 表示使用历史默认费率，保留旧回测兼容口径。
+    pub trade_fee_rate: Option<f64>,
     //斐波那契触发价格
     pub triggered_fib_levels: HashSet<usize>,
     //交易方向
@@ -364,6 +367,10 @@ pub struct BasicRiskStrategyConfig {
     /// 运行中K线振幅规则触发后的最大止损比例
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_range_loss_percent: Option<f64>,
+    /// 回测交易手续费率，按开仓名义价值扣减。
+    /// None 表示沿用历史默认费率，避免旧回测结果静默变口径。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trade_fee_rate: Option<f64>,
 }
 impl Default for BasicRiskStrategyConfig {
     /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
@@ -379,6 +386,7 @@ impl Default for BasicRiskStrategyConfig {
             dynamic_entry_require_direction_mismatch: None,
             dynamic_range_threshold: None,
             dynamic_range_loss_percent: None,
+            trade_fee_rate: None,
         }
     }
 }

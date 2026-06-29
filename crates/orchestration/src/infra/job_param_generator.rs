@@ -180,6 +180,7 @@ impl ParamMergeBuilder {
             dynamic_entry_require_direction_mismatch: self.dynamic_entry_require_direction_mismatch,
             dynamic_range_threshold: self.dynamic_range_threshold,
             dynamic_range_loss_percent: self.dynamic_range_loss_percent,
+            trade_fee_rate: None,
         }
     }
     /// 转换为 Vegas 策略配置

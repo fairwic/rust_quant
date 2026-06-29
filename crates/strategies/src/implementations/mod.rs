@@ -8,14 +8,18 @@ pub mod profit_stop_loss;
 // 具体策略实现
 pub mod engulfing_strategy;
 // 执行器
+pub mod bear_short_stack;
 pub mod bsc_event_arb;
+pub mod btc_eth_liquidity_scalper;
 pub mod nwe_executor;
 pub mod vegas_backtest;
 pub mod vegas_executor;
 // NWE 策略子模块
 pub mod nwe_strategy;
 // 重新导出
+pub use bear_short_stack::*;
 pub use bsc_event_arb::*;
+pub use btc_eth_liquidity_scalper::*;
 pub use engulfing_strategy::*;
 pub use executor_common::*;
 pub use executor_common_lite::ExecutionContext as LiteExecutionContext; // 避免冲突

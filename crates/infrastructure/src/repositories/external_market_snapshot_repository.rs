@@ -4,6 +4,7 @@ use rust_quant_domain::entities::ExternalMarketSnapshot;
 use rust_quant_domain::traits::ExternalMarketSnapshotRepository;
 use serde_json::Value;
 use sqlx::{types::Json, FromRow, PgPool};
+use std::collections::BTreeMap;
 use tracing::error;
 #[derive(Debug, Clone, FromRow)]
 struct ExternalMarketSnapshotEntity {
@@ -67,6 +68,186 @@ pub struct SqlxExternalMarketSnapshotRepository {
 impl SqlxExternalMarketSnapshotRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+}
+/// Stores external market context in one physical table per source/symbol/metric.
+pub struct ShardedExternalMarketSnapshotRepository {
+    /// 数据库连接池。
+    pool: PgPool,
+}
+impl ShardedExternalMarketSnapshotRepository {
+    /// Creates a repository over the quant_core Postgres pool.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+    /// Returns a safely quoted table name for dynamic SQL against sharded context tables.
+    pub fn quoted_table_name(source: &str, symbol: &str, metric_type: &str) -> Result<String> {
+        Ok(Self::quote_identifier(&Self::table_name(
+            source,
+            symbol,
+            metric_type,
+        )?))
+    }
+    fn table_name(source: &str, symbol: &str, metric_type: &str) -> Result<String> {
+        let table_name = format!(
+            "{}_{}_{}_market_snapshots",
+            Self::table_part(source, "source")?,
+            Self::table_part(symbol, "symbol")?,
+            Self::table_part(metric_type, "metric_type")?
+        );
+        if table_name.len() > 63 {
+            return Err(anyhow!("市场上下文分表名过长: {}", table_name));
+        }
+        Ok(table_name)
+    }
+    fn quote_identifier(table_name: &str) -> String {
+        format!("\"{}\"", table_name)
+    }
+    fn table_part(value: &str, field: &str) -> Result<String> {
+        let mut normalized = String::new();
+        let mut last_underscore = false;
+        for ch in value.trim().to_ascii_lowercase().chars() {
+            if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+                normalized.push(ch);
+                last_underscore = false;
+            } else if !last_underscore {
+                normalized.push('_');
+                last_underscore = true;
+            }
+        }
+        let normalized = normalized.trim_matches('_').to_string();
+        if normalized.is_empty() {
+            return Err(anyhow!("非法市场上下文分表{}: {}", field, value));
+        }
+        Ok(normalized)
+    }
+    async fn ensure_table(&self, source: &str, symbol: &str, metric_type: &str) -> Result<String> {
+        let raw_table_name = Self::table_name(source, symbol, metric_type)?;
+        let existed = sqlx::query_scalar::<_, bool>("SELECT to_regclass($1) IS NOT NULL")
+            .bind(&raw_table_name)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("检查市场上下文分表是否存在失败: {}", e);
+                anyhow!("检查市场上下文分表是否存在失败: {}", e)
+            })?;
+        let table_name = Self::quote_identifier(&raw_table_name);
+        let create_table_sql = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {} (
+                id BIGSERIAL PRIMARY KEY,
+                source VARCHAR(64) NOT NULL,
+                symbol VARCHAR(64) NOT NULL,
+                metric_type VARCHAR(96) NOT NULL,
+                metric_time BIGINT NOT NULL,
+                funding_rate VARCHAR(64),
+                premium VARCHAR(64),
+                open_interest VARCHAR(64),
+                oracle_price VARCHAR(64),
+                mark_price VARCHAR(64),
+                long_short_ratio VARCHAR(64),
+                raw_payload JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (source, symbol, metric_type, metric_time)
+            )
+            "#,
+            table_name
+        );
+        sqlx::query(&create_table_sql)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("创建市场上下文分表失败: {}", e);
+                anyhow!("创建市场上下文分表失败: {}", e)
+            })?;
+        if !existed {
+            self.comment_table(&table_name).await?;
+        }
+        Ok(table_name)
+    }
+    /// Writes table and column comments only once when a new shard is created.
+    async fn comment_table(&self, table_name: &str) -> Result<()> {
+        let table_comment_sql = format!("COMMENT ON TABLE {} IS '市场上下文快照分表'", table_name);
+        sqlx::query(&table_comment_sql)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("写入市场上下文分表注释失败: {}", e);
+                anyhow!("写入市场上下文分表注释失败: {}", e)
+            })?;
+        for (column, comment) in [
+            ("id", "主键ID"),
+            ("source", "数据来源"),
+            ("symbol", "交易标的"),
+            ("metric_type", "指标类型"),
+            ("metric_time", "指标时间戳"),
+            ("funding_rate", "资金费率"),
+            ("premium", "溢价率"),
+            ("open_interest", "未平仓量"),
+            ("oracle_price", "预言机价格"),
+            ("mark_price", "标记价格"),
+            ("long_short_ratio", "多空比"),
+            ("raw_payload", "原始响应"),
+            ("created_at", "创建时间"),
+            ("updated_at", "更新时间"),
+        ] {
+            let column_comment_sql = format!(
+                "COMMENT ON COLUMN {}.{} IS '{}'",
+                table_name, column, comment
+            );
+            sqlx::query(&column_comment_sql)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    error!("写入市场上下文分表字段注释失败: {}", e);
+                    anyhow!("写入市场上下文分表字段注释失败: {}", e)
+                })?;
+        }
+        Ok(())
+    }
+    async fn insert_snapshot(
+        &self,
+        table_name: &str,
+        snapshot: ExternalMarketSnapshot,
+    ) -> Result<()> {
+        let query = format!(
+            r#"
+            INSERT INTO {} (
+                source, symbol, metric_type, metric_time, funding_rate, premium, open_interest,
+                oracle_price, mark_price, long_short_ratio, raw_payload
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (source, symbol, metric_type, metric_time) DO UPDATE SET
+                funding_rate = EXCLUDED.funding_rate,
+                premium = EXCLUDED.premium,
+                open_interest = EXCLUDED.open_interest,
+                oracle_price = EXCLUDED.oracle_price,
+                mark_price = EXCLUDED.mark_price,
+                long_short_ratio = EXCLUDED.long_short_ratio,
+                raw_payload = EXCLUDED.raw_payload,
+                updated_at = CURRENT_TIMESTAMP
+            "#,
+            table_name
+        );
+        sqlx::query(&query)
+            .bind(snapshot.source)
+            .bind(snapshot.symbol)
+            .bind(snapshot.metric_type)
+            .bind(snapshot.metric_time)
+            .bind(snapshot.funding_rate.map(|v| v.to_string()))
+            .bind(snapshot.premium.map(|v| v.to_string()))
+            .bind(snapshot.open_interest.map(|v| v.to_string()))
+            .bind(snapshot.oracle_price.map(|v| v.to_string()))
+            .bind(snapshot.mark_price.map(|v| v.to_string()))
+            .bind(snapshot.long_short_ratio.map(|v| v.to_string()))
+            .bind(snapshot.raw_payload.map(Json))
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("保存市场上下文分表快照失败: {}", e);
+                anyhow!("保存市场上下文分表快照失败: {}", e)
+            })?;
+        Ok(())
     }
 }
 #[async_trait]
@@ -154,10 +335,89 @@ impl ExternalMarketSnapshotRepository for SqlxExternalMarketSnapshotRepository {
         Ok(rows.into_iter().map(|row| row.to_domain()).collect())
     }
 }
+#[async_trait]
+impl ExternalMarketSnapshotRepository for ShardedExternalMarketSnapshotRepository {
+    async fn save(&self, snapshot: ExternalMarketSnapshot) -> Result<()> {
+        let table_name = self
+            .ensure_table(&snapshot.source, &snapshot.symbol, &snapshot.metric_type)
+            .await?;
+        self.insert_snapshot(&table_name, snapshot).await
+    }
+    async fn save_batch(&self, snapshots: Vec<ExternalMarketSnapshot>) -> Result<()> {
+        let mut by_table = BTreeMap::<(String, String, String), Vec<ExternalMarketSnapshot>>::new();
+        for snapshot in snapshots {
+            by_table
+                .entry((
+                    snapshot.source.clone(),
+                    snapshot.symbol.clone(),
+                    snapshot.metric_type.clone(),
+                ))
+                .or_default()
+                .push(snapshot);
+        }
+        for ((source, symbol, metric_type), table_snapshots) in by_table {
+            let table_name = self.ensure_table(&source, &symbol, &metric_type).await?;
+            for snapshot in table_snapshots {
+                self.insert_snapshot(&table_name, snapshot).await?;
+            }
+        }
+        Ok(())
+    }
+    async fn find_range(
+        &self,
+        source: &str,
+        symbol: &str,
+        metric_type: &str,
+        start_time: i64,
+        end_time: i64,
+        limit: Option<i64>,
+    ) -> Result<Vec<ExternalMarketSnapshot>> {
+        let table_name = self.ensure_table(source, symbol, metric_type).await?;
+        let limit = limit.unwrap_or(500);
+        let query = format!(
+            r#"
+            SELECT *
+            FROM {}
+            WHERE source = $1
+              AND symbol = $2
+              AND metric_type = $3
+              AND metric_time >= $4
+              AND metric_time <= $5
+            ORDER BY metric_time ASC
+            LIMIT $6
+            "#,
+            table_name
+        );
+        let rows = sqlx::query_as::<_, ExternalMarketSnapshotEntity>(&query)
+            .bind(source)
+            .bind(symbol)
+            .bind(metric_type)
+            .bind(start_time)
+            .bind(end_time)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("查询市场上下文分表快照失败: {}", e);
+                anyhow!("查询市场上下文分表快照失败: {}", e)
+            })?;
+        Ok(rows.into_iter().map(|row| row.to_domain()).collect())
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn sharded_external_market_snapshot_table_name_uses_source_symbol_and_metric() {
+        let table = ShardedExternalMarketSnapshotRepository::quoted_table_name(
+            "okx",
+            "BTC-USDT-SWAP",
+            "funding_rate",
+        )
+        .expect("valid market context table name");
+        assert_eq!(table, "\"okx_btc_usdt_swap_funding_rate_market_snapshots\"");
+    }
     #[test]
     /// 封装当前函数，减少行情数据调用方重复实现相同细节。
     /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。

@@ -4,6 +4,10 @@ use super::types::{BasicRiskStrategyConfig, SignalResult, TradePosition, Trading
 use crate::CandleItem;
 use rust_quant_domain::enums::PositionSide;
 use tracing::error;
+
+/// Historical backtest fee rate used when a strategy has not opted into a newer cost model.
+const LEGACY_BACKTEST_TRADE_FEE_RATE: f64 = 0.0007;
+
 /// 最终平仓处理
 pub fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list: &[CandleItem]) {
     let mut trade_position = match trading_state.trade_position.clone() {
@@ -70,6 +74,7 @@ pub fn open_long_position(
             .unwrap_or_default(),
         signal_open_position_time: signal_open_time,
         trade_side: TradeSide::Long,
+        trade_fee_rate: risk_config.trade_fee_rate,
         ..Default::default()
     };
     // 记录入场K线振幅，用于固定比例止盈计算
@@ -197,6 +202,7 @@ pub fn open_short_position(
             .unwrap_or_default(),
         signal_open_position_time: signal_open_time,
         trade_side: TradeSide::Short,
+        trade_fee_rate: risk_config.trade_fee_rate,
         ..Default::default()
     };
     // 记录入场K线振幅，用于固定比例止盈计算
@@ -254,10 +260,12 @@ pub fn close_position(
         None => return,
     };
     let quantity = trade_position.position_nums;
-    // 手续费设定0.007,假设开仓平仓各收一次 (数量*价格 *0.07%)
+    let fee_rate = trade_position
+        .trade_fee_rate
+        .unwrap_or(LEGACY_BACKTEST_TRADE_FEE_RATE);
     let mut profit_after_fee = 0.00;
     if profit != 0.00 {
-        let fee = quantity * trade_position.open_price * 0.0007;
+        let fee = quantity * trade_position.open_price * fee_rate;
         profit_after_fee = profit - fee;
     }
     trade_position.profit_loss = profit_after_fee;
@@ -275,4 +283,93 @@ pub fn close_position(
     record_trade_exit(state, exit_time, signal, close_type, quantity);
     // 更新总利润和资金
     state.trade_position = None;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_quant_domain::SignalDirection;
+
+    fn candle(ts: i64, close: f64) -> CandleItem {
+        CandleItem {
+            ts,
+            o: close,
+            h: close + 1.0,
+            l: close - 1.0,
+            c: close,
+            v: 1.0,
+            confirm: 1,
+        }
+    }
+
+    fn signal(ts: i64, price: f64, direction: SignalDirection) -> SignalResult {
+        SignalResult {
+            should_buy: direction == SignalDirection::Long,
+            should_sell: direction == SignalDirection::Short,
+            open_price: price,
+            ts,
+            direction,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn close_position_uses_configured_trade_fee_rate() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            trade_fee_rate: Some(0.00005),
+            ..Default::default()
+        };
+        open_long_position(
+            risk,
+            &mut state,
+            &candle(1, 100.0),
+            &signal(1, 100.0, SignalDirection::Long),
+            None,
+        );
+        state.trade_position.as_mut().unwrap().close_price = Some(102.0);
+
+        close_position(
+            &mut state,
+            &candle(2, 102.0),
+            &signal(2, 102.0, SignalDirection::Long),
+            "test",
+            2.0,
+        );
+
+        let close_record = state
+            .trade_records
+            .iter()
+            .find(|record| record.full_close)
+            .expect("close record");
+        assert!((close_record.profit_loss - 1.995).abs() < 1e-9);
+    }
+
+    #[test]
+    fn close_position_keeps_legacy_fee_rate_when_not_configured() {
+        let mut state = TradingState::default();
+        open_long_position(
+            BasicRiskStrategyConfig::default(),
+            &mut state,
+            &candle(1, 100.0),
+            &signal(1, 100.0, SignalDirection::Long),
+            None,
+        );
+        state.trade_position.as_mut().unwrap().close_price = Some(102.0);
+
+        close_position(
+            &mut state,
+            &candle(2, 102.0),
+            &signal(2, 102.0, SignalDirection::Long),
+            "test",
+            2.0,
+        );
+
+        let close_record = state
+            .trade_records
+            .iter()
+            .find(|record| record.full_close)
+            .expect("close record");
+        assert!((close_record.profit_loss - 1.93).abs() < 1e-9);
+    }
 }
