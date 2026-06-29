@@ -37,7 +37,7 @@ pub use handoff::{
 };
 const DEFAULT_OKX_REST_BASE: &str = "https://www.okx.com";
 const DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES: i64 = 45;
-const DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS: u64 = 0;
+const DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS: u64 = 150;
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketVelocityLiveHandoffConfig {
     /// databaseURL，用于配置运行参数。
@@ -946,7 +946,7 @@ mod tests {
         assert!(config.entry_candle_on_demand_refresh);
         assert_eq!(config.entry_candle_okx_rest_base, "https://www.okx.com");
         assert_eq!(config.entry_candle_proxy_url, None);
-        assert_eq!(config.entry_candle_request_sleep_ms, 0);
+        assert_eq!(config.entry_candle_request_sleep_ms, 150);
     }
     #[test]
     fn no_live_candidate_response_is_non_error_signal_status() {

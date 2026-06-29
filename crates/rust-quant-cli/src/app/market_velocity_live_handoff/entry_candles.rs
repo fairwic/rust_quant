@@ -7,7 +7,10 @@ use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use rust_quant_infrastructure::repositories::PostgresCandleRepository;
 use serde::Serialize;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
+use std::{future::Future, time::Duration};
+use tokio::time::sleep;
 use tracing::warn;
+const ENTRY_CANDLE_FETCH_MAX_ATTEMPTS: usize = 3;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MarketVelocityEntryCandleLoadStatus {
     /// 数据来源。
@@ -162,19 +165,61 @@ async fn fetch_market_velocity_latest_entry_candles(
     let candle_window_ms = i64::from(limit.max(1)) * 15 * 60 * 1_000;
     let start_ms = now_ms - candle_window_ms.saturating_mul(2);
     let page_limit = usize::try_from(limit.min(100)).unwrap_or(100).max(1);
-    let candles = fetch_okx_history_candles(
-        client,
-        &config.entry_candle_okx_rest_base,
-        symbol,
-        "15m",
-        start_ms,
-        now_ms,
-        page_limit,
+    let candles = fetch_entry_candles_with_retry(
+        || {
+            fetch_okx_history_candles(
+                client,
+                &config.entry_candle_okx_rest_base,
+                symbol,
+                "15m",
+                start_ms,
+                now_ms,
+                page_limit,
+                config.entry_candle_request_sleep_ms,
+            )
+        },
         config.entry_candle_request_sleep_ms,
     )
     .await
     .with_context(|| format!("on-demand fetch latest 15m candles failed: symbol={symbol}"))?;
     okx_candles_to_market_velocity_domain(symbol, candles)
+}
+/// 对 OKX 公共 K 线做有限重试，降低临时限频/网络抖动对 live handoff 的误阻断。
+async fn fetch_entry_candles_with_retry<F, Fut>(
+    mut fetch: F,
+    request_sleep_ms: u64,
+) -> Result<Vec<CandleOkxRespDto>>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<Vec<CandleOkxRespDto>>>,
+{
+    let mut last_error = None;
+    for attempt in 1..=ENTRY_CANDLE_FETCH_MAX_ATTEMPTS {
+        match fetch().await {
+            Ok(candles) => return Ok(candles),
+            Err(error) => {
+                if attempt == ENTRY_CANDLE_FETCH_MAX_ATTEMPTS {
+                    return Err(error).with_context(|| {
+                        format!("OKX history-candles failed after {attempt} attempts")
+                    });
+                }
+                warn!(
+                    attempt,
+                    max_attempts = ENTRY_CANDLE_FETCH_MAX_ATTEMPTS,
+                    error = %error,
+                    "retrying Market Velocity entry candle fetch after transient failure"
+                );
+                last_error = Some(error);
+                let delay_ms = request_sleep_ms.saturating_mul(attempt as u64);
+                if delay_ms > 0 {
+                    sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+    }
+    Err(last_error
+        .map(|error| anyhow!("OKX history-candles failed: {error}"))
+        .unwrap_or_else(|| anyhow!("OKX history-candles failed before first attempt")))
 }
 /// 提供OKXK 线to市场动量domain的集中实现，避免行情数据调用方重复处理相同细节。
 fn okx_candles_to_market_velocity_domain(
@@ -326,6 +371,10 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use sqlx::Execute;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
     #[test]
     fn entry_candle_on_demand_refresh_only_runs_for_missing_or_stale_db_candles() {
         let now = Utc.with_ymd_and_hms(2026, 6, 16, 11, 30, 0).unwrap();
@@ -376,6 +425,31 @@ mod tests {
         assert_eq!(sql.matches("ON CONFLICT (ts) DO UPDATE").count(), 1);
         assert!(sql.contains("\"cap-usdt-swap_candles_15m\""));
     }
+    #[tokio::test]
+    async fn entry_candle_fetch_retry_recovers_from_first_transient_failure() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_for_fetch = Arc::clone(&attempts);
+
+        let candles = fetch_entry_candles_with_retry(
+            || {
+                let attempts_for_fetch = Arc::clone(&attempts_for_fetch);
+                async move {
+                    let attempt = attempts_for_fetch.fetch_add(1, Ordering::SeqCst);
+                    if attempt == 0 {
+                        return Err(anyhow!("temporary OKX history-candles failure"));
+                    }
+                    Ok(vec![sample_okx_candle_row(1_781_503_200_000)])
+                }
+            },
+            0,
+        )
+        .await
+        .expect("second attempt should recover");
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(candles.len(), 1);
+        assert_eq!(candles[0].ts, "1781503200000");
+    }
     /// 构造样例K 线at，集中维护行情数据的载荷组装规则。
     fn sample_candle_at(datetime: DateTime<Utc>) -> Candle {
         sample_symbol_candle_at("ASTER-USDT-SWAP", Timeframe::M15, datetime)
@@ -398,5 +472,19 @@ mod tests {
         );
         candle.confirm();
         candle
+    }
+    /// 构造 OKX 样例 K 线行，避免测试依赖真实网络。
+    fn sample_okx_candle_row(ts: i64) -> CandleOkxRespDto {
+        CandleOkxRespDto {
+            ts: ts.to_string(),
+            o: "100".to_string(),
+            h: "103".to_string(),
+            l: "99".to_string(),
+            c: "102".to_string(),
+            v: "10000".to_string(),
+            vol_ccy: "10000".to_string(),
+            vol_ccy_quote: "1020000".to_string(),
+            confirm: "1".to_string(),
+        }
     }
 }
