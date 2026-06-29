@@ -71,6 +71,8 @@ pub struct BearShortStackThresholds {
 #[serde(default)]
 /// 回测调参面，只用于 research/backtest，不作为 live 策略 key 兼容层。
 pub struct BearShortStackBacktestTuning {
+    /// 是否允许使用合成 OI/funding/多空比上下文；只能用于 pipeline 接线测试，不能作为商品绩效证据。
+    pub allow_synthetic_market_context: bool,
     /// 同一交易对连续开仓后的冷却 K 线数量。
     pub cooldown_candles: usize,
     /// 主跌初始破位所需的最小波动倍数。
@@ -117,6 +119,7 @@ pub struct BearShortStackBacktestMarketContext {
 impl Default for BearShortStackBacktestTuning {
     fn default() -> Self {
         Self {
+            allow_synthetic_market_context: false,
             cooldown_candles: 12,
             breakdown_initial_move_range_mult: 1.35,
             breakdown_initial_volume_mult: 1.25,

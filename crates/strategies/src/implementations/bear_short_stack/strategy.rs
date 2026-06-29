@@ -464,6 +464,12 @@ impl BearShortStackBacktestAdapter {
         values: &BearShortStackBacktestValues,
         setup: BearBreakdownBacktestSetup,
     ) -> Option<BearShortSignalSnapshot> {
+        let context = self.context_at(last.ts);
+        if context.is_none()
+            && (self.market_context.is_some() || !self.tuning.allow_synthetic_market_context)
+        {
+            return None;
+        }
         let mut snapshot = BearShortSignalSnapshot {
             exchange: "okx".to_string(),
             symbol: self.symbol.clone(),
@@ -482,13 +488,11 @@ impl BearShortStackBacktestAdapter {
             downside_extension_atr: setup.downside_extension_atr,
             ..Default::default()
         };
-        if let Some(context) = self.context_at(last.ts) {
+        if let Some(context) = context {
             snapshot.price_down_with_oi_up = context.oi_growth_pct > 0.0;
             snapshot.oi_growth_pct = context.oi_growth_pct;
             snapshot.funding_rate = context.funding_rate;
             snapshot.long_short_ratio = context.long_short_ratio;
-        } else if self.market_context.is_some() {
-            return None;
         }
         Some(snapshot)
     }
@@ -540,6 +544,12 @@ impl BearShortStackBacktestAdapter {
         values: &BearShortStackBacktestValues,
         setup: ExhaustionBacktestSetup,
     ) -> Option<BearShortSignalSnapshot> {
+        let context = self.context_at(last.ts);
+        if context.is_none()
+            && (self.market_context.is_some() || !self.tuning.allow_synthetic_market_context)
+        {
+            return None;
+        }
         // 反转狙击风险高于主跌顺势，固定为 ExhaustionFade 后信号层会携带 HALF_RISK。
         let mut snapshot = BearShortSignalSnapshot {
             exchange: "binance".to_string(),
@@ -556,12 +566,10 @@ impl BearShortStackBacktestAdapter {
             pullback_failed_below_vwap: true,
             ..Default::default()
         };
-        if let Some(context) = self.context_at(last.ts) {
+        if let Some(context) = context {
             snapshot.oi_growth_pct = context.oi_growth_pct.abs();
             snapshot.funding_rate = context.funding_rate;
             snapshot.taker_flow_diverged = context.taker_sell_volume >= context.taker_buy_volume;
-        } else if self.market_context.is_some() {
-            return None;
         }
         Some(snapshot)
     }

@@ -275,6 +275,20 @@ fn stale_exhaustion_failed_retest_candles(count: usize, start: f64) -> Vec<Candl
     candles
 }
 
+fn scalper_synthetic_tuning() -> BtcEthLiquidityScalperBacktestTuning {
+    BtcEthLiquidityScalperBacktestTuning {
+        allow_synthetic_market_context: true,
+        ..Default::default()
+    }
+}
+
+fn bear_synthetic_tuning() -> BearShortStackBacktestTuning {
+    BearShortStackBacktestTuning {
+        allow_synthetic_market_context: true,
+        ..Default::default()
+    }
+}
+
 #[test]
 fn strategy_type_accepts_new_strategy_keys() {
     assert_eq!(
@@ -415,15 +429,17 @@ fn scalper_runs_existing_backtest_pipeline_for_btc_and_eth() {
         max_loss_percent: 2.0,
         ..BasicRiskStrategyConfig::default()
     };
-    let btc = BtcEthLiquidityScalperStrategy.run_test(
+    let btc = BtcEthLiquidityScalperStrategy.run_test_with_tuning(
         "BTC-USDT-SWAP",
         &scalper_impulse_pullback_candles(560, 100_000.0),
         risk,
+        scalper_synthetic_tuning(),
     );
-    let eth = BtcEthLiquidityScalperStrategy.run_test(
+    let eth = BtcEthLiquidityScalperStrategy.run_test_with_tuning(
         "ETH-USDT-SWAP",
         &scalper_impulse_pullback_candles(560, 3_000.0),
         risk,
+        scalper_synthetic_tuning(),
     );
 
     assert!(btc.open_trades > 0);
@@ -436,6 +452,22 @@ fn scalper_runs_existing_backtest_pipeline_for_btc_and_eth() {
     assert!(!eth.trade_records.is_empty());
     assert!(!btc.audit_trail.signal_snapshots.is_empty());
     assert!(!eth.audit_trail.signal_snapshots.is_empty());
+}
+
+#[test]
+fn scalper_default_backtest_fails_closed_without_market_context() {
+    let result = BtcEthLiquidityScalperStrategy.run_test(
+        "BTC-USDT-SWAP",
+        &scalper_impulse_pullback_candles(560, 100_000.0),
+        BasicRiskStrategyConfig::default(),
+    );
+
+    assert_eq!(result.open_trades, 0);
+    assert!(result.audit_trail.signal_snapshots.iter().any(|snapshot| {
+        snapshot
+            .filter_reasons
+            .contains(&"MISSING_MARKET_SNAPSHOT".to_string())
+    }));
 }
 
 #[test]
@@ -454,16 +486,18 @@ fn scalper_backtest_tuning_is_research_only_and_can_relax_impulse_volume() {
     let mut candles = scalper_impulse_pullback_candles(560, 100_000.0);
     candles[520].v = 3_000.0;
 
-    let default_result = BtcEthLiquidityScalperStrategy.run_test(
+    let default_result = BtcEthLiquidityScalperStrategy.run_test_with_tuning(
         "BTC-USDT-SWAP",
         &candles,
         BasicRiskStrategyConfig::default(),
+        scalper_synthetic_tuning(),
     );
     let tuned_result = BtcEthLiquidityScalperStrategy.run_test_with_tuning(
         "BTC-USDT-SWAP",
         &candles,
         BasicRiskStrategyConfig::default(),
         BtcEthLiquidityScalperBacktestTuning {
+            allow_synthetic_market_context: true,
             impulse_min_volume_mult: 0.5,
             ..Default::default()
         },
@@ -476,10 +510,11 @@ fn scalper_backtest_tuning_is_research_only_and_can_relax_impulse_volume() {
 #[test]
 fn scalper_context_backtest_blocks_hot_funding_instead_of_using_placeholder_snapshot() {
     let candles = scalper_impulse_pullback_candles(560, 100_000.0);
-    let baseline = BtcEthLiquidityScalperStrategy.run_test(
+    let baseline = BtcEthLiquidityScalperStrategy.run_test_with_tuning(
         "BTC-USDT-SWAP",
         &candles,
         BasicRiskStrategyConfig::default(),
+        scalper_synthetic_tuning(),
     );
     let context = candles
         .iter()
@@ -549,16 +584,18 @@ fn scalper_backtest_tuning_can_require_oi_confirmation_when_size_scaling_is_unmo
 #[test]
 fn scalper_backtest_tuning_can_shorten_trend_windows_for_1m_frequency() {
     let candles = scalper_short_window_impulse_pullback_candles(560, 100_000.0);
-    let default_result = BtcEthLiquidityScalperStrategy.run_test(
+    let default_result = BtcEthLiquidityScalperStrategy.run_test_with_tuning(
         "BTC-USDT-SWAP",
         &candles,
         BasicRiskStrategyConfig::default(),
+        scalper_synthetic_tuning(),
     );
     let tuned_result = BtcEthLiquidityScalperStrategy.run_test_with_tuning(
         "BTC-USDT-SWAP",
         &candles,
         BasicRiskStrategyConfig::default(),
         BtcEthLiquidityScalperBacktestTuning {
+            allow_synthetic_market_context: true,
             trend_fast_window: 13,
             trend_slow_window: 34,
             ..Default::default()
@@ -571,7 +608,11 @@ fn scalper_backtest_tuning_can_shorten_trend_windows_for_1m_frequency() {
 
 #[test]
 fn bear_breakdown_runs_existing_backtest_pipeline_as_short_strategy() {
-    let result = BearShortStackStrategy::for_preset(BearShortPreset::BearBreakdown).run_test(
+    let result = BearShortStackStrategy::for_preset_with_tuning(
+        BearShortPreset::BearBreakdown,
+        bear_synthetic_tuning(),
+    )
+    .run_test(
         "ETH-USDT-SWAP",
         &bear_breakdown_failed_reclaim_candles(560, 4_000.0),
         BasicRiskStrategyConfig::default(),
@@ -583,6 +624,22 @@ fn bear_breakdown_runs_existing_backtest_pipeline_as_short_strategy() {
         .iter()
         .any(|record| record.option_type == "short"));
     assert!(!result.audit_trail.signal_snapshots.is_empty());
+}
+
+#[test]
+fn bear_short_default_backtest_fails_closed_without_market_context() {
+    let result = BearShortStackStrategy::for_preset(BearShortPreset::BearBreakdown).run_test(
+        "ETH-USDT-SWAP",
+        &bear_breakdown_failed_reclaim_candles(560, 4_000.0),
+        BasicRiskStrategyConfig::default(),
+    );
+
+    assert_eq!(result.open_trades, 0);
+    assert!(result.audit_trail.signal_snapshots.iter().any(|snapshot| {
+        snapshot
+            .filter_reasons
+            .contains(&"MISSING_MARKET_SNAPSHOT".to_string())
+    }));
 }
 
 #[test]
@@ -601,15 +658,19 @@ fn bear_breakdown_backtest_tuning_can_relax_initial_breakdown_volume() {
     let mut candles = bear_breakdown_failed_reclaim_candles(560, 4_000.0);
     candles[553].v = 1.0;
 
-    let default_result = BearShortStackStrategy::for_preset(BearShortPreset::BearBreakdown)
-        .run_test(
-            "ETH-USDT-SWAP",
-            &candles,
-            BasicRiskStrategyConfig::default(),
-        );
+    let default_result = BearShortStackStrategy::for_preset_with_tuning(
+        BearShortPreset::BearBreakdown,
+        bear_synthetic_tuning(),
+    )
+    .run_test(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
     let tuned_result = BearShortStackStrategy::for_preset_with_tuning(
         BearShortPreset::BearBreakdown,
         BearShortStackBacktestTuning {
+            allow_synthetic_market_context: true,
             breakdown_initial_volume_mult: 0.0,
             ..Default::default()
         },
@@ -627,7 +688,11 @@ fn bear_breakdown_backtest_tuning_can_relax_initial_breakdown_volume() {
 #[test]
 fn bear_breakdown_context_backtest_blocks_deeply_negative_funding() {
     let candles = bear_breakdown_failed_reclaim_candles(560, 4_000.0);
-    let baseline = BearShortStackStrategy::for_preset(BearShortPreset::BearBreakdown).run_test(
+    let baseline = BearShortStackStrategy::for_preset_with_tuning(
+        BearShortPreset::BearBreakdown,
+        bear_synthetic_tuning(),
+    )
+    .run_test(
         "ETH-USDT-SWAP",
         &candles,
         BasicRiskStrategyConfig::default(),
@@ -658,7 +723,11 @@ fn bear_breakdown_context_backtest_blocks_deeply_negative_funding() {
 
 #[test]
 fn exhaustion_fade_runs_existing_backtest_pipeline_as_half_risk_short_strategy() {
-    let result = BearShortStackStrategy::for_preset(BearShortPreset::ExhaustionFade).run_test(
+    let result = BearShortStackStrategy::for_preset_with_tuning(
+        BearShortPreset::ExhaustionFade,
+        bear_synthetic_tuning(),
+    )
+    .run_test(
         "BTC-USDT-SWAP",
         &exhaustion_failed_retest_candles(560, 100_000.0),
         BasicRiskStrategyConfig::default(),
@@ -682,6 +751,7 @@ fn exhaustion_fade_backtest_closes_stale_short_before_sample_end() {
     let result = BearShortStackStrategy::for_preset_with_tuning(
         BearShortPreset::ExhaustionFade,
         BearShortStackBacktestTuning {
+            allow_synthetic_market_context: true,
             exhaustion_max_holding_candles: 8,
             ..Default::default()
         },
@@ -759,15 +829,19 @@ fn bear_short_backtest_tuning_is_research_only_and_can_relax_exhaustion_volume()
         candle.v = 2_400.0;
     }
 
-    let default_result = BearShortStackStrategy::for_preset(BearShortPreset::ExhaustionFade)
-        .run_test(
-            "BTC-USDT-SWAP",
-            &candles,
-            BasicRiskStrategyConfig::default(),
-        );
+    let default_result = BearShortStackStrategy::for_preset_with_tuning(
+        BearShortPreset::ExhaustionFade,
+        bear_synthetic_tuning(),
+    )
+    .run_test(
+        "BTC-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
     let tuned_result = BearShortStackStrategy::for_preset_with_tuning(
         BearShortPreset::ExhaustionFade,
         BearShortStackBacktestTuning {
+            allow_synthetic_market_context: true,
             exhaustion_new_high_range_mult: 0.5,
             exhaustion_min_body_ratio: 0.1,
             exhaustion_min_volume_mult: 0.1,

@@ -355,6 +355,12 @@ impl BtcEthLiquidityScalperBacktestAdapter {
         values: &BtcEthLiquidityScalperBacktestValues,
         setup: ScalperBacktestSetup,
     ) -> Option<BtcEthLiquidityScalperSignalSnapshot> {
+        let context = self.context_at(last.ts);
+        if context.is_none()
+            && (self.market_context.is_some() || !self.tuning.allow_synthetic_market_context)
+        {
+            return None;
+        }
         let mut snapshot = BtcEthLiquidityScalperSignalSnapshot {
             exchange: "binance".to_string(),
             symbol: self.symbol.clone(),
@@ -374,15 +380,13 @@ impl BtcEthLiquidityScalperBacktestAdapter {
             depth_usd: 25_000_000.0,
             breakout_candle_atr: values.breakout_candle_atr,
         };
-        if let Some(context) = self.context_at(last.ts) {
+        if let Some(context) = context {
             snapshot.funding_rate = context.funding_rate;
             snapshot.oi_expansion_pct = context.oi_expansion_pct;
             snapshot.taker_aggression = taker_aggression_for_bias(context, setup.bias);
             snapshot.orderbook_imbalance = context.orderbook_imbalance;
             snapshot.spread_bps = context.spread_bps;
             snapshot.depth_usd = context.depth_usd;
-        } else if self.market_context.is_some() {
-            return None;
         }
         Some(snapshot)
     }
