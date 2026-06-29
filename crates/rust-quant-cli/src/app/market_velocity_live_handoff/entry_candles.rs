@@ -122,9 +122,13 @@ pub(super) async fn load_market_velocity_live_entry_candles(
                     }
                 });
             };
-            let candles =
+            let fetch_result =
                 fetch_market_velocity_latest_entry_candles(client, config, symbol, limit.max(1))
-                    .await?;
+                    .await;
+            if config.entry_candle_request_sleep_ms > 0 {
+                sleep(Duration::from_millis(config.entry_candle_request_sleep_ms)).await;
+            }
+            let candles = fetch_result?;
             let candle_count = candles.len();
             let persist_result =
                 persist_market_velocity_entry_candles(pool, &candles, db_error.is_some()).await;
@@ -165,7 +169,7 @@ async fn fetch_market_velocity_latest_entry_candles(
     let candle_window_ms = i64::from(limit.max(1)) * 15 * 60 * 1_000;
     let start_ms = now_ms - candle_window_ms.saturating_mul(2);
     let page_limit = usize::try_from(limit.min(100)).unwrap_or(100).max(1);
-    let candles = fetch_entry_candles_with_retry(
+    let candles = match fetch_entry_candles_with_retry(
         || {
             fetch_okx_history_candles(
                 client,
@@ -181,7 +185,12 @@ async fn fetch_market_velocity_latest_entry_candles(
         config.entry_candle_request_sleep_ms,
     )
     .await
-    .with_context(|| format!("on-demand fetch latest 15m candles failed: symbol={symbol}"))?;
+    {
+        Ok(candles) => candles,
+        Err(error) => {
+            bail!("on-demand fetch latest 15m candles failed: symbol={symbol}: {error:#}");
+        }
+    };
     okx_candles_to_market_velocity_domain(symbol, candles)
 }
 /// 对 OKX 公共 K 线做有限重试，降低临时限频/网络抖动对 live handoff 的误阻断。
