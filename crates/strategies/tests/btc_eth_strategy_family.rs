@@ -335,9 +335,9 @@ fn bear_breakdown_emits_protected_short_signal() {
     assert!(!signal.should_buy);
     assert_eq!(signal.direction, SignalDirection::Short);
     assert_eq!(signal.signal_kline_stop_loss_price, Some(3_484.7));
-    assert_eq!(signal.atr_take_profit_level_1, Some(3_298.36));
-    assert_eq!(signal.atr_take_profit_level_2, Some(3_196.72));
-    assert_eq!(signal.atr_take_profit_level_3, Some(3_298.36));
+    assert_eq!(signal.atr_take_profit_level_1, Some(3_332.24));
+    assert_eq!(signal.atr_take_profit_level_2, Some(3_264.48));
+    assert_eq!(signal.atr_take_profit_level_3, Some(3_332.24));
 }
 
 #[test]

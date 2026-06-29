@@ -1221,14 +1221,14 @@ fn bear_tuning_for_report_family(
 
 fn context_breakdown_tuning() -> BearShortStackBacktestTuning {
     BearShortStackBacktestTuning {
-        cooldown_candles: 8,
-        breakdown_initial_move_range_mult: 0.90,
-        breakdown_initial_volume_mult: 0.80,
+        cooldown_candles: 6,
+        breakdown_initial_move_range_mult: 0.75,
+        breakdown_initial_volume_mult: 0.70,
         breakdown_min_reclaim_distance_atr: 0.15,
         breakdown_max_reclaim_distance_atr: 1.20,
         breakdown_min_support_break_range: 0.15,
         breakdown_min_body_ratio: 0.30,
-        breakdown_min_volume_mult: 1.20,
+        breakdown_min_volume_mult: 1.00,
         ..Default::default()
     }
 }

@@ -141,8 +141,8 @@ impl Default for BearShortStackThresholds {
             max_downside_extension_atr: 1.5,
             min_long_short_ratio: 1.0,
             breakdown_stop_atr_buffer: 0.35,
-            breakdown_target_r_1: 1.2,
-            breakdown_target_r_2: 2.4,
+            breakdown_target_r_1: 0.8,
+            breakdown_target_r_2: 1.6,
             exhaustion_min_oi_growth_pct: 0.5,
             exhaustion_hot_funding_rate: 0.0,
             exhaustion_stop_atr_buffer: 0.5,
@@ -258,8 +258,18 @@ impl BearShortDecision {
 
     fn apply_short_signal(&self, signal: &mut SignalResult, price: f64) {
         let stop = reason_value(&self.reasons, "STOP_PRICE").unwrap_or(price);
-        let target_r_1 = reason_value(&self.reasons, "TARGET_R_1").unwrap_or(1.2);
-        let target_r_2 = reason_value(&self.reasons, "TARGET_R_2").unwrap_or(2.4);
+        let defaults = BearShortStackThresholds::default();
+        let (default_target_r_1, default_target_r_2) = match self.preset {
+            BearShortPreset::BearBreakdown => {
+                (defaults.breakdown_target_r_1, defaults.breakdown_target_r_2)
+            }
+            BearShortPreset::ExhaustionFade => (
+                defaults.exhaustion_target_r_1,
+                defaults.exhaustion_target_r_2,
+            ),
+        };
+        let target_r_1 = reason_value(&self.reasons, "TARGET_R_1").unwrap_or(default_target_r_1);
+        let target_r_2 = reason_value(&self.reasons, "TARGET_R_2").unwrap_or(default_target_r_2);
         let risk = (stop - price).max(0.0);
         signal.should_sell = true;
         signal.direction = SignalDirection::Short;

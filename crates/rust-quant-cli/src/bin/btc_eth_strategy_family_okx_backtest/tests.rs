@@ -660,11 +660,11 @@ fn context_breakdown_uses_cli_tuning_without_changing_global_defaults() {
     assert_ne!(context_tuning, default_tuning);
     assert_eq!(default_tuning.cooldown_candles, 12);
     assert_eq!(default_tuning.breakdown_initial_move_range_mult, 1.35);
-    assert_eq!(context_tuning.cooldown_candles, 8);
-    assert_eq!(context_tuning.breakdown_initial_move_range_mult, 0.90);
-    assert_eq!(context_tuning.breakdown_initial_volume_mult, 0.80);
+    assert_eq!(context_tuning.cooldown_candles, 6);
+    assert_eq!(context_tuning.breakdown_initial_move_range_mult, 0.75);
+    assert_eq!(context_tuning.breakdown_initial_volume_mult, 0.70);
     assert_eq!(context_tuning.breakdown_min_body_ratio, 0.30);
-    assert_eq!(context_tuning.breakdown_min_volume_mult, 1.20);
+    assert_eq!(context_tuning.breakdown_min_volume_mult, 1.00);
     assert_eq!(
         bear_tuning_for_context_run(StrategyFamily::Exhaustion, None),
         BearShortStackBacktestTuning {
