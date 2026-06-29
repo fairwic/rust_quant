@@ -156,7 +156,8 @@ pub fn market_velocity_live_handoff_config_from_env() -> Result<MarketVelocityLi
         entry_candle_request_sleep_ms: parse_u64_env(
             "MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS",
             DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS,
-        )?,
+        )?
+        .max(DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS),
     })
 }
 /// 提供市场动量livehandoffruntime配置from环境变量的集中实现，避免行情数据调用方重复处理相同细节。
@@ -947,6 +948,25 @@ mod tests {
         assert_eq!(config.entry_candle_okx_rest_base, "https://www.okx.com");
         assert_eq!(config.entry_candle_proxy_url, None);
         assert_eq!(config.entry_candle_request_sleep_ms, 150);
+    }
+    #[test]
+    fn live_handoff_config_keeps_entry_candle_fetch_throttled_when_env_is_zero() {
+        let _guard = env_lock();
+        let snapshot = snapshot_live_handoff_env();
+        clear_live_handoff_env();
+        std::env::set_var(
+            "QUANT_CORE_DATABASE_URL",
+            "postgres://postgres:postgres123@localhost:5432/quant_core",
+        );
+        std::env::set_var("RUST_QUAN_WEB_BASE_URL", "http://127.0.0.1:18000");
+        std::env::set_var("EXECUTION_EVENT_SECRET", "local-dev-secret");
+        std::env::set_var("MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS", "0");
+        let config = market_velocity_live_handoff_config_from_env().expect("config");
+        restore_env(snapshot);
+        assert_eq!(
+            config.entry_candle_request_sleep_ms,
+            DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS
+        );
     }
     #[test]
     fn no_live_candidate_response_is_non_error_signal_status() {
