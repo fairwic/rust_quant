@@ -58,6 +58,8 @@ pub struct MarketVelocityBackfillCliArgs {
     pub days: Option<u64>,
     /// 时间周期；为空时使用默认周期。
     pub timeframe: Option<String>,
+    /// 调度器需要顺序补齐的多个周期；为空时保持单周期兼容。
+    pub timeframes: Option<Vec<String>>,
     /// proxyURL；为空时使用默认值或表示不限制。
     pub proxy_url: Option<Option<String>>,
     /// 是否要求 4 小时级别数据；为空时使用默认策略。
@@ -128,6 +130,9 @@ where
             "--symbols" => parsed.symbols = Some(parse_symbol_list(&next_arg(&mut args, &arg)?)),
             "--days" => parsed.days = Some(parse_next(&mut args, &arg)?),
             "--timeframe" => parsed.timeframe = Some(next_arg(&mut args, &arg)?),
+            "--timeframes" => {
+                parsed.timeframes = Some(parse_timeframe_list(&next_arg(&mut args, &arg)?))
+            }
             "--proxy-url" => parsed.proxy_url = Some(Some(next_arg(&mut args, &arg)?)),
             "--no-proxy" => parsed.proxy_url = Some(None),
             "--require-4h" => parsed.require_4h = Some(true),
@@ -165,9 +170,24 @@ where
 /// 执行输出市场动量backfillusage步骤，串起行情数据需要的状态推进和错误处理。
 pub fn print_market_velocity_backfill_usage() {
     println!(
-        "Usage: market_velocity_candle_backfill [--symbols BTC-USDT-SWAP,ETH-USDT-SWAP] [--days 60] [--timeframe 1m|5m|15m|1h|4h] [--proxy-url http://127.0.0.1:7897] [--dry-run|--write] [--all-radar-symbols] [--loop-interval-seconds 300]"
+        "Usage: market_velocity_candle_backfill [--symbols BTC-USDT-SWAP,ETH-USDT-SWAP] [--days 60] [--timeframe 1m|5m|15m|1h|4h] [--timeframes 1m,5m,15m] [--proxy-url http://127.0.0.1:7897] [--dry-run|--write] [--all-radar-symbols] [--loop-interval-seconds 300]"
     );
 }
+/// 把单进程调度器参数展开成多个周期配置，避免为每个小周期新增一个容器。
+pub fn configs_from_env_and_args(
+    cli_args: MarketVelocityBackfillCliArgs,
+) -> Result<Vec<MarketVelocityBackfillConfig>> {
+    let timeframes = resolve_backfill_timeframes(&cli_args)?;
+    let mut configs = Vec::with_capacity(timeframes.len());
+    for timeframe in timeframes {
+        let mut scoped_args = cli_args.clone();
+        scoped_args.timeframe = Some(timeframe);
+        scoped_args.timeframes = None;
+        configs.push(config_from_env_and_args(scoped_args)?);
+    }
+    Ok(configs)
+}
+
 /// 提供配置from环境变量andargs的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn config_from_env_and_args(
     cli_args: MarketVelocityBackfillCliArgs,
@@ -577,6 +597,51 @@ pub fn parse_symbol_list(value: &str) -> Vec<String> {
     symbols.dedup();
     symbols
 }
+/// 解析多个 K 线周期，并保持配置顺序，便于调度器按低周期优先补齐。
+pub fn parse_timeframe_list(value: &str) -> Vec<String> {
+    let mut timeframes = Vec::new();
+    for timeframe in value
+        .split(',')
+        .map(str::trim)
+        .filter(|timeframe| !timeframe.is_empty())
+        .map(|timeframe| timeframe.to_ascii_lowercase())
+    {
+        if !timeframes.contains(&timeframe) {
+            timeframes.push(timeframe);
+        }
+    }
+    timeframes
+}
+
+/// 根据 CLI 与环境变量解析最终周期列表，CLI 明确参数优先于环境默认值。
+fn resolve_backfill_timeframes(cli_args: &MarketVelocityBackfillCliArgs) -> Result<Vec<String>> {
+    if cli_args.timeframe.is_some() && cli_args.timeframes.is_some() {
+        bail!("use only one of --timeframe or --timeframes");
+    }
+    let timeframes = if let Some(timeframes) = &cli_args.timeframes {
+        timeframes.clone()
+    } else if let Some(timeframe) = &cli_args.timeframe {
+        vec![timeframe.trim().to_ascii_lowercase()]
+    } else if let Some(env_timeframes) =
+        first_non_empty_env(&["MARKET_VELOCITY_BACKFILL_TIMEFRAMES"])
+    {
+        parse_timeframe_list(&env_timeframes)
+    } else {
+        vec![
+            env_or_default("MARKET_VELOCITY_BACKFILL_TIMEFRAME", DEFAULT_TIMEFRAME)
+                .trim()
+                .to_ascii_lowercase(),
+        ]
+    };
+    if timeframes.is_empty() {
+        bail!("market velocity candle backfill requires at least one timeframe");
+    }
+    for timeframe in &timeframes {
+        candle_interval_ms(timeframe)?;
+    }
+    Ok(timeframes)
+}
+
 /// 封装推进arg，减少行情数据调用方重复实现相同细节。
 fn next_arg(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String> {
     args.next()
@@ -692,6 +757,14 @@ mod tests {
                 .to_string()
                 .contains("--loop-interval-seconds must be greater than 0"),
             "unexpected error: {error:#}"
+        );
+    }
+    #[test]
+    fn cli_args_support_multiple_scheduler_timeframes() {
+        let args = parse_cli_args_from(["--timeframes", "1m, 5m,15m"]).unwrap();
+        assert_eq!(
+            args.timeframes,
+            Some(vec!["1m".to_string(), "5m".to_string(), "15m".to_string()])
         );
     }
     #[test]

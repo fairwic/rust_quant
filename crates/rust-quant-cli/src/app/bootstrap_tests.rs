@@ -49,6 +49,22 @@ fn test_derive_market_data_exchange_from_configs_prefers_strategy_exchange() {
     );
 }
 #[test]
+fn test_filter_live_strategy_configs_supports_exchange_filter() {
+    let mut okx = test_config(1, "BTC-USDT-SWAP", Timeframe::M5);
+    okx.exchange = Some("okx".to_string());
+    let mut binance = test_config(2, "BTC-USDT-SWAP", Timeframe::M5);
+    binance.exchange = Some("binance".to_string());
+    let filtered = filter_live_strategy_configs_with_filters(
+        vec![okx, binance],
+        &std::collections::BTreeSet::from(["BTC-USDT-SWAP".to_string()]),
+        &std::collections::BTreeSet::from(["5m".to_string()]),
+        &std::collections::BTreeSet::from(["okx".to_string()]),
+        "okx",
+    );
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].exchange.as_deref(), Some("okx"));
+}
+#[test]
 fn test_filter_live_strategy_configs_skips_market_velocity_event_strategy() {
     let vegas = test_config(1, "ETH-USDT-SWAP", Timeframe::H4);
     let mut market_velocity = test_config(2, "all", Timeframe::M15);

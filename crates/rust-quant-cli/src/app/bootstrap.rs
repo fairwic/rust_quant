@@ -531,10 +531,38 @@ fn csv_filter_values(raw: Option<String>) -> BTreeSet<String> {
         .map(ToOwned::to_owned)
         .collect()
 }
+/// 解析大小写不敏感的过滤值，避免交易所名称大小写导致生产策略误加载。
+fn csv_lower_filter_values(raw: Option<String>) -> BTreeSet<String> {
+    raw.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
 /// 解析过滤live策略配置，把外部输入转换成配置运行时可用的内部值。
 fn filter_live_strategy_configs(configs: Vec<StrategyConfig>) -> Vec<StrategyConfig> {
     let inst_ids = csv_filter_values(std::env::var("LIVE_STRATEGY_ONLY_INST_IDS").ok());
     let periods = csv_filter_values(std::env::var("LIVE_STRATEGY_ONLY_PERIODS").ok());
+    let exchanges = csv_lower_filter_values(std::env::var("LIVE_STRATEGY_ONLY_EXCHANGES").ok());
+    let fallback_exchange = market_data_exchange();
+    filter_live_strategy_configs_with_filters(
+        configs,
+        &inst_ids,
+        &periods,
+        &exchanges,
+        &fallback_exchange,
+    )
+}
+
+/// 应用 live 策略过滤规则，确保单一 WebSocket worker 不混用多个交易所行情源。
+fn filter_live_strategy_configs_with_filters(
+    configs: Vec<StrategyConfig>,
+    inst_ids: &BTreeSet<String>,
+    periods: &BTreeSet<String>,
+    exchanges: &BTreeSet<String>,
+    fallback_exchange: &str,
+) -> Vec<StrategyConfig> {
     let before_event_driven_filter = configs.len();
     let configs: Vec<StrategyConfig> = configs
         .into_iter()
@@ -547,23 +575,32 @@ fn filter_live_strategy_configs(configs: Vec<StrategyConfig>) -> Vec<StrategyCon
             configs.len()
         );
     }
-    if inst_ids.is_empty() && periods.is_empty() {
+    if inst_ids.is_empty() && periods.is_empty() && exchanges.is_empty() {
         return configs;
     }
     let before = configs.len();
     let filtered: Vec<StrategyConfig> = configs
         .into_iter()
         .filter(|config| {
+            let config_exchange = config
+                .exchange
+                .as_deref()
+                .map(str::trim)
+                .filter(|exchange| !exchange.is_empty() && !exchange.eq_ignore_ascii_case("all"))
+                .map(|exchange| exchange.to_ascii_lowercase())
+                .unwrap_or_else(|| fallback_exchange.trim().to_ascii_lowercase());
             (inst_ids.is_empty() || inst_ids.contains(&config.symbol))
                 && (periods.is_empty() || periods.contains(config.timeframe.as_str()))
+                && (exchanges.is_empty() || exchanges.contains(&config_exchange))
         })
         .collect();
     info!(
-        "🎯 实时策略过滤后剩余: before={}, after={}, inst_ids={:?}, periods={:?}",
+        "🎯 实时策略过滤后剩余: before={}, after={}, inst_ids={:?}, periods={:?}, exchanges={:?}",
         before,
         filtered.len(),
         inst_ids,
-        periods
+        periods,
+        exchanges
     );
     filtered
 }

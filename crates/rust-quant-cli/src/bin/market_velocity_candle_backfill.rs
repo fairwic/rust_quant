@@ -1,6 +1,7 @@
 use anyhow::Result;
 use rust_quant_cli::app::market_velocity_backfill::{
-    config_from_env_and_args, parse_cli_args_from, run_market_velocity_backfill,
+    configs_from_env_and_args, parse_cli_args_from, run_market_velocity_backfill,
+    MarketVelocityBackfillConfig,
 };
 use std::time::Duration;
 use tokio::time::sleep;
@@ -12,19 +13,22 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli_args = parse_cli_args_from(std::env::args().skip(1))?;
     let loop_interval_seconds = cli_args.loop_interval_seconds;
-    let config = config_from_env_and_args(cli_args)?;
+    let configs = configs_from_env_and_args(cli_args)?;
     if let Some(interval_seconds) = loop_interval_seconds {
         loop {
             tracing::info!(
                 interval_seconds,
                 "starting market velocity candle backfill cycle"
             );
-            match run_market_velocity_backfill(config.clone()).await {
-                Ok(report) => print_report(&report),
-                Err(error) => tracing::error!(
-                    error = %error,
-                    "market velocity candle backfill cycle failed"
-                ),
+            for config in &configs {
+                match run_market_velocity_backfill(config.clone()).await {
+                    Ok(report) => print_report(config, &report),
+                    Err(error) => tracing::error!(
+                        timeframe = %config.timeframe,
+                        error = %error,
+                        "market velocity candle backfill timeframe cycle failed"
+                    ),
+                }
             }
             tracing::info!(
                 interval_seconds,
@@ -33,16 +37,20 @@ async fn main() -> Result<()> {
             sleep(Duration::from_secs(interval_seconds)).await;
         }
     }
-    let report = run_market_velocity_backfill(config).await?;
-    print_report(&report);
+    for config in configs {
+        let report = run_market_velocity_backfill(config.clone()).await?;
+        print_report(&config, &report);
+    }
     Ok(())
 }
 /// 执行输出报告步骤，串起行情数据需要的状态推进和错误处理。
 fn print_report(
+    config: &MarketVelocityBackfillConfig,
     report: &rust_quant_cli::app::market_velocity_backfill::MarketVelocityBackfillReport,
 ) {
     println!(
-        "market_velocity_candle_backfill: symbols_total={} symbols_attempted={} symbols_failed={} candles_fetched={} rows_upserted={} dry_run={}",
+        "market_velocity_candle_backfill: timeframe={} symbols_total={} symbols_attempted={} symbols_failed={} candles_fetched={} rows_upserted={} dry_run={}",
+        config.timeframe,
         report.symbols_total,
         report.symbols_attempted,
         report.failed_symbols.len(),

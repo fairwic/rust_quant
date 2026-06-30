@@ -61,12 +61,17 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "EXCHANGE_SYMBOL_SOURCES: ${EXCHANGE_SYMBOL_SOURCES:-okx}",
         r#"IS_RUN_REAL_STRATEGY: "true""#,
         r#"IS_OPEN_SOCKET: "true""#,
-        "LIVE_STRATEGY_ONLY_INST_IDS: ${VEGAS_ETH_4H_INST_ID:-ETH-USDT-SWAP}",
-        "LIVE_STRATEGY_ONLY_PERIODS: ${VEGAS_ETH_4H_PERIOD:-4H}",
-        "STRATEGY_SIGNAL_DISPATCH_MODE: ${VEGAS_STRATEGY_SIGNAL_DISPATCH_MODE:-web}",
+        "LIVE_STRATEGY_ONLY_EXCHANGES: ${LIVE_STRATEGY_ONLY_EXCHANGES:-okx}",
+        "LIVE_STRATEGY_ONLY_INST_IDS: ${LIVE_STRATEGY_ONLY_INST_IDS:-ETH-USDT-SWAP,BTC-USDT-SWAP}",
+        "LIVE_STRATEGY_ONLY_PERIODS: ${LIVE_STRATEGY_ONLY_PERIODS:-4H,1m,5m,15m}",
+        "MARKET_DATA_EXCHANGE: ${LIVE_STRATEGY_MARKET_DATA_EXCHANGE:-okx}",
+        "DEFAULT_EXCHANGE: ${LIVE_STRATEGY_MARKET_DATA_EXCHANGE:-okx}",
+        "STRATEGY_SIGNAL_DISPATCH_MODE: ${LIVE_STRATEGY_SIGNAL_DISPATCH_MODE:-web}",
         r#"IS_RUN_MARKET_VELOCITY_RADAR: "true""#,
         r#"MARKET_VELOCITY_RADAR_ONLY: "true""#,
         "market_velocity_candle_backfill",
+        "--timeframes",
+        "MARKET_VELOCITY_BACKFILL_TIMEFRAMES:-1m,5m,15m",
         "--loop-interval-seconds",
         "MARKET_VELOCITY_CANDLE_BACKFILL_INTERVAL_SECS",
         r#"IS_RUN_EXECUTION_WORKER: "true""#,
@@ -111,6 +116,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-exchange-symbol-sync-worker",
         "quant-core-vegas-eth-4h-worker",
         "quant-core-market-velocity-radar",
+        "quant-core-market-velocity-candle-backfill-scheduler",
         "quant-core-market-velocity-paper-observation-scheduler",
         "quant-core-market-velocity-live-handoff-scheduler",
         "quant-core-execution-worker",
@@ -185,7 +191,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         workflow.contains("market_velocity_production_deploy_contract"),
         "CI verify must run the production deploy contract"
     );
-    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
+    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
     for deploy_script in [&promote, &rollback] {
         assert!(
             deploy_script.contains(default_deploy_services),
@@ -199,14 +205,9 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "default deploy/rollback must fail fast if DEPLOY_SERVICES omits the Web-facing Core internal server"
         );
         assert!(
-            !deploy_script.contains(
-                "quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler"
-            ),
-            "default Core deployment must not reintroduce global candle backfill as a live prerequisite"
-        );
-        assert!(
             deploy_script.contains("--profile observation-scheduler")
                 && deploy_script.contains("--profile live-handoff-scheduler")
+                && deploy_script.contains("--profile candle-backfill-scheduler")
                 && deploy_script.contains("--profile schema-ensure"),
             "default deploy/rollback must enable required production profiles explicitly"
         );
