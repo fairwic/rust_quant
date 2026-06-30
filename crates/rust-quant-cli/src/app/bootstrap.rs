@@ -487,6 +487,7 @@ async fn run_websocket(
             rust_quant_orchestration::workflow::websocket_handler::WebsocketStrategyHandler::new(
                 config_service,
                 execution_service,
+                Some(market_exchange.to_string()),
             ),
         );
         Arc::new(

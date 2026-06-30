@@ -1,5 +1,5 @@
 use super::strategy_runner;
-use rust_quant_domain::Timeframe;
+use rust_quant_domain::{StrategyConfig, Timeframe};
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use std::str::FromStr;
@@ -13,22 +13,27 @@ pub struct WebsocketStrategyHandler {
     config_service: Arc<StrategyConfigService>,
     /// 执行服务。
     execution_service: Arc<StrategyExecutionService>,
+    /// 当前 WebSocket 行情源交易所，用于避免同周期配置跨交易所重复执行。
+    market_exchange: Option<String>,
 }
 impl WebsocketStrategyHandler {
     /// 创建新的处理器实例
     pub fn new(
         config_service: Arc<StrategyConfigService>,
         execution_service: Arc<StrategyExecutionService>,
+        market_exchange: Option<String>,
     ) -> Self {
         Self {
             config_service,
             execution_service,
+            market_exchange,
         }
     }
     /// 处理 K 线数据
     pub async fn handle(&self, inst_id: String, time_interval: String, snap: CandlesEntity) {
         let config_service = self.config_service.clone();
         let execution_service = self.execution_service.clone();
+        let market_exchange = self.market_exchange.clone();
         let candle_ts = snap.ts;
         info!(
             "🎯 K线确认触发策略检查: inst_id={}, time_interval={}, ts={}",
@@ -58,6 +63,7 @@ impl WebsocketStrategyHandler {
                     return;
                 }
             };
+            let configs = filter_configs_for_market_exchange(configs, market_exchange.as_deref());
             if configs.is_empty() {
                 info!(
                     "⚠️  未找到启用的策略配置: inst_id={}, time_interval={}",
@@ -94,5 +100,68 @@ impl WebsocketStrategyHandler {
                 }
             }
         });
+    }
+}
+
+/// 按当前 WebSocket 行情源过滤策略配置，避免 OKX 行情触发 Binance 配置等跨交易所重复执行。
+fn filter_configs_for_market_exchange(
+    configs: Vec<StrategyConfig>,
+    market_exchange: Option<&str>,
+) -> Vec<StrategyConfig> {
+    let Some(market_exchange) = market_exchange
+        .map(str::trim)
+        .filter(|exchange| !exchange.is_empty())
+    else {
+        return configs;
+    };
+
+    configs
+        .into_iter()
+        .filter(|config| {
+            config
+                .exchange
+                .as_deref()
+                .map(str::trim)
+                .filter(|exchange| !exchange.is_empty() && !exchange.eq_ignore_ascii_case("all"))
+                .map(|exchange| exchange.eq_ignore_ascii_case(market_exchange))
+                .unwrap_or(true)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use rust_quant_domain::{StrategyConfig, StrategyStatus, StrategyType};
+
+    fn test_config(id: i64, exchange: Option<&str>) -> StrategyConfig {
+        StrategyConfig {
+            id,
+            strategy_type: StrategyType::BearShortStack,
+            exchange: exchange.map(ToOwned::to_owned),
+            symbol: "BTC-USDT-SWAP".to_string(),
+            timeframe: Timeframe::M5,
+            parameters: serde_json::json!({}),
+            risk_config: serde_json::json!({}),
+            status: StrategyStatus::Running,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            backtest_start: None,
+            backtest_end: None,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn filters_runtime_configs_to_current_market_exchange() {
+        let okx = test_config(1, Some("okx"));
+        let binance = test_config(2, Some("binance"));
+
+        let filtered = filter_configs_for_market_exchange(vec![okx, binance], Some("okx"));
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, 1);
+        assert_eq!(filtered[0].exchange.as_deref(), Some("okx"));
     }
 }
