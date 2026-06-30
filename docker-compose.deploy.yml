@@ -165,7 +165,7 @@ services:
       - ${MARKET_VELOCITY_BACKFILL_DAYS:-2}
       - --write
       - --request-sleep-ms
-      - ${MARKET_VELOCITY_BACKFILL_REQUEST_SLEEP_MS:-150}
+      - ${MARKET_VELOCITY_BACKFILL_REQUEST_SLEEP_MS:-500}
       - --continue-on-error
       - --loop-interval-seconds
       - ${MARKET_VELOCITY_CANDLE_BACKFILL_INTERVAL_SECS:-300}

@@ -72,6 +72,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "market_velocity_candle_backfill",
         "--timeframes",
         "MARKET_VELOCITY_BACKFILL_TIMEFRAMES:-1m,5m,15m",
+        "MARKET_VELOCITY_BACKFILL_REQUEST_SLEEP_MS:-500",
         "--loop-interval-seconds",
         "MARKET_VELOCITY_CANDLE_BACKFILL_INTERVAL_SECS",
         r#"IS_RUN_EXECUTION_WORKER: "true""#,
@@ -248,6 +249,10 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         assert!(
             deploy_script.contains("print_runtime_safety_flags"),
             "default deploy/rollback must print non-secret runtime safety flags after stable readiness"
+        );
+        assert!(
+            deploy_script.contains("up -d --no-build --pull never"),
+            "default deploy/rollback must not re-pull images after stale containers are removed"
         );
         for safety_flag in [
             "MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH",

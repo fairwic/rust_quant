@@ -2,7 +2,7 @@ use super::env_parse::first_non_empty_env;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use okx::dto::market_dto::CandleOkxRespDto;
-use reqwest::{Client, Proxy, Url};
+use reqwest::{Client, Proxy, StatusCode, Url};
 use rust_quant_market::models::CandlesModel;
 use serde::Deserialize;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
@@ -15,7 +15,9 @@ const DEFAULT_TIMEFRAME: &str = "15m";
 const DEFAULT_DAYS: u64 = 60;
 const DEFAULT_PAGE_LIMIT: usize = 100;
 const DEFAULT_BATCH_SIZE: usize = 500;
-const DEFAULT_REQUEST_SLEEP_MS: u64 = 150;
+const DEFAULT_REQUEST_SLEEP_MS: u64 = 500;
+const OKX_RATE_LIMIT_BACKOFF_MS: u64 = 2_000;
+const OKX_RATE_LIMIT_MAX_RETRIES: usize = 3;
 const CANDLE_1M_MS: i64 = 60 * 1_000;
 const CANDLE_5M_MS: i64 = 5 * 60 * 1_000;
 const CANDLE_15M_MS: i64 = 15 * 60 * 1_000;
@@ -343,6 +345,9 @@ pub async fn run_market_velocity_backfill(
                 });
             }
         }
+        if index + 1 < total && config.request_sleep_ms > 0 {
+            sleep(Duration::from_millis(config.request_sleep_ms)).await;
+        }
     }
     Ok(report)
 }
@@ -400,19 +405,7 @@ pub async fn fetch_okx_history_candles(
     let max_pages = max_history_pages(start_ms, end_ms, candle_ms, limit);
     for page_index in 0..max_pages {
         let url = build_okx_history_candles_url(okx_rest_base, symbol, okx_bar, after_ms, limit)?;
-        let payload = client
-            .get(url)
-            .header("User-Agent", "rust-quant-market-velocity-backfill/1.0")
-            .send()
-            .await
-            .with_context(|| format!("request OKX history-candles failed: symbol={symbol}"))?
-            .error_for_status()
-            .with_context(|| format!("OKX history-candles HTTP status failed: symbol={symbol}"))?
-            .json::<OkxHistoryCandlesResponse>()
-            .await
-            .with_context(|| {
-                format!("decode OKX history-candles response failed: symbol={symbol}")
-            })?;
+        let payload = request_okx_history_candles_page(client, url, symbol).await?;
         if payload.code != "0" {
             bail!(
                 "OKX history-candles returned code={} msg={} symbol={}",
@@ -452,6 +445,47 @@ pub async fn fetch_okx_history_candles(
         }
     }
     Ok(candles_by_ts.into_values().collect())
+}
+
+/// 请求单页 OKX 历史 K 线，并对 429 做同页退避重试，避免短周期批量补数放大限频失败。
+async fn request_okx_history_candles_page(
+    client: &Client,
+    url: Url,
+    symbol: &str,
+) -> Result<OkxHistoryCandlesResponse> {
+    for attempt in 0..=OKX_RATE_LIMIT_MAX_RETRIES {
+        let response = client
+            .get(url.clone())
+            .header("User-Agent", "rust-quant-market-velocity-backfill/1.0")
+            .send()
+            .await
+            .with_context(|| format!("request OKX history-candles failed: symbol={symbol}"))?;
+
+        if response.status() == StatusCode::TOO_MANY_REQUESTS
+            && attempt < OKX_RATE_LIMIT_MAX_RETRIES
+        {
+            let backoff_ms = OKX_RATE_LIMIT_BACKOFF_MS * (attempt as u64 + 1);
+            warn!(
+                "OKX history-candles rate limited; retrying page: symbol={}, attempt={}, backoff_ms={}",
+                symbol,
+                attempt + 1,
+                backoff_ms
+            );
+            sleep(Duration::from_millis(backoff_ms)).await;
+            continue;
+        }
+
+        return response
+            .error_for_status()
+            .with_context(|| format!("OKX history-candles HTTP status failed: symbol={symbol}"))?
+            .json::<OkxHistoryCandlesResponse>()
+            .await
+            .with_context(|| {
+                format!("decode OKX history-candles response failed: symbol={symbol}")
+            });
+    }
+
+    unreachable!("OKX history-candles retry loop always returns on the final attempt")
 }
 /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 pub async fn load_market_velocity_backfill_symbols(

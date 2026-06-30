@@ -375,7 +375,7 @@ assert_no_legacy_market_velocity_dispatch_mode_override
 compose -f "${override_file}" pull "${services[@]}" || true
 remove_conflicting_named_containers "${services[@]}"
 remove_retired_deployment_containers "${retired_services[@]}"
-compose -f "${override_file}" up -d --no-build "${services[@]}"
+compose -f "${override_file}" up -d --no-build --pull never "${services[@]}"
 assert_services_running "${compose_file}" "${override_file}" "${services[@]}"
 print_runtime_safety_flags "${override_file}" "${services[@]}"
 compose -f "${override_file}" ps --all "${services[@]}"
