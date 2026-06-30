@@ -19,22 +19,22 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tracing::info;
 const ENTRY_TRIGGER_FILTER_VERSION: &str = "entry_trigger_allowlist_v1";
-const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] = &["breakout_previous_high", "reclaim_ema"];
+const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] = &["reclaim_ema"];
 const DEFAULT_SYMBOL_BLOCKLIST: &[&str] = &[];
 const DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET: &str =
-    "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1";
+    "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2";
 const DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION: &str =
-    "rank_radar_4h15m_r04_18r_brk_rcm_fvg_rt1_vol10_d20_40_p5_8_v1";
+    "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2";
 const DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE: &str = "rank_radar_4h15m_hybrid_fvg_retest";
 const DEFAULT_MIN_DELTA_RANK: i32 = 20;
 const DEFAULT_MAX_DELTA_RANK: i32 = 40;
 const DEFAULT_MIN_PRICE_CHANGE_PCT: f64 = 5.0;
-const DEFAULT_MAX_PRICE_CHANGE_PCT: f64 = 8.0;
+const DEFAULT_MAX_PRICE_CHANGE_PCT: f64 = 10.0;
 const DEFAULT_STOP_LOSS_PCT: f64 = 0.04;
 const DEFAULT_TAKE_PROFIT_R: f64 = 1.8;
 const DEFAULT_MAX_HOLDING_HOURS: u32 = 48;
 const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 5.0;
-const DEFAULT_ENTRY_MIN_VOLUME_RATIO: f64 = 1.0;
+const DEFAULT_ENTRY_MIN_VOLUME_RATIO: f64 = 1.1;
 const DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT: f64 = 3.0;
 const DEFAULT_ENTRY_RETEST_AFTER_SIGNAL: bool = true;
 const DEFAULT_ENTRY_RETEST_MAX_WAIT_CANDLES: usize = 1;
@@ -71,6 +71,35 @@ impl MarketVelocityFvgEntryMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketVelocityStopLossMode {
+    FixedPct,
+    StructureOrFixed,
+    StructureWithCap,
+}
+
+impl MarketVelocityStopLossMode {
+    pub fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "fixed_pct" | "fixed" | "pct" => Ok(Self::FixedPct),
+            "structure_or_fixed" | "structure" | "hybrid_structure" => Ok(Self::StructureOrFixed),
+            "structure_with_cap" | "structure_capped" => Ok(Self::StructureWithCap),
+            other => Err(anyhow!(
+                "unsupported market velocity stop loss mode: {other}"
+            )),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FixedPct => "fixed_pct",
+            Self::StructureOrFixed => "structure_or_fixed",
+            Self::StructureWithCap => "structure_with_cap",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MarketVelocitySelectedEntry {
     pub entry_price: f64,
@@ -78,6 +107,8 @@ pub struct MarketVelocitySelectedEntry {
     pub trigger: String,
     pub entry_path: String,
     pub signal_pullback_pct: Option<f64>,
+    pub structure_stop_loss_price: Option<f64>,
+    pub structure_stop_loss_source: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -96,8 +127,12 @@ pub struct MarketVelocityStrategySignalConfig {
     pub min_price_change_pct: Option<f64>,
     /// 最大价格涨跌幅百分比；为空时不限制，用于避免追高。
     pub max_price_change_pct: Option<f64>,
-    /// 止损百分比。
+    /// 止损百分比；在 structure_with_cap 模式下也作为最大风险上限。
     pub stop_loss_pct: f64,
+    /// 止损模式。
+    pub stop_loss_mode: MarketVelocityStopLossMode,
+    /// 结构止损最小百分比；0 表示不对结构锚点额外放宽。
+    pub structure_stop_min_pct: f64,
     /// 止盈收益r，用于配置运行参数。
     pub take_profit_r: f64,
     /// runnertargetR 倍数；为空时表示该条件不启用。
@@ -169,6 +204,8 @@ impl Default for MarketVelocityStrategySignalConfig {
             min_price_change_pct: Some(DEFAULT_MIN_PRICE_CHANGE_PCT),
             max_price_change_pct: Some(DEFAULT_MAX_PRICE_CHANGE_PCT),
             stop_loss_pct: DEFAULT_STOP_LOSS_PCT,
+            stop_loss_mode: MarketVelocityStopLossMode::FixedPct,
+            structure_stop_min_pct: 0.0,
             take_profit_r: DEFAULT_TAKE_PROFIT_R,
             runner_target_r: None,
             runner_fraction: 0.0,
@@ -235,6 +272,14 @@ impl MarketVelocityStrategySignalConfig {
             stop_loss_pct: parse_env_f64(
                 "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT",
                 DEFAULT_STOP_LOSS_PCT,
+            )?,
+            stop_loss_mode: parse_env_stop_loss_mode(
+                "MARKET_VELOCITY_SIGNAL_STOP_LOSS_MODE",
+                MarketVelocityStopLossMode::FixedPct,
+            )?,
+            structure_stop_min_pct: parse_env_f64(
+                "MARKET_VELOCITY_SIGNAL_STRUCTURE_STOP_MIN_PCT",
+                0.0,
             )?,
             take_profit_r: parse_env_f64(
                 "MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R",
@@ -357,6 +402,12 @@ impl MarketVelocityStrategySignalConfig {
         if let Some(value) = json_f64(config, "stop_loss_pct")? {
             parsed.stop_loss_pct = value;
         }
+        if let Some(value) = json_stop_loss_mode(config, "stop_loss_mode")? {
+            parsed.stop_loss_mode = value;
+        }
+        if let Some(value) = json_f64(config, "structure_stop_min_pct")? {
+            parsed.structure_stop_min_pct = value;
+        }
         if let Some(value) = json_f64(config, "take_profit_r")? {
             parsed.take_profit_r = value;
         }
@@ -437,6 +488,12 @@ impl MarketVelocityStrategySignalConfig {
         }
         if let Some(value) = json_f64_any(risk_config, &["max_loss_percent", "stop_loss_pct"])? {
             parsed.stop_loss_pct = value;
+        }
+        if let Some(value) = json_stop_loss_mode(risk_config, "stop_loss_mode")? {
+            parsed.stop_loss_mode = value;
+        }
+        if let Some(value) = json_f64(risk_config, "structure_stop_min_pct")? {
+            parsed.structure_stop_min_pct = value;
         }
         if let Some(value) = json_f64_any(
             risk_config,
@@ -829,6 +886,19 @@ fn pre_entry_signal_blocker(
             MarketVelocityStrategySignalBlocker::InvalidStopLossConfig,
         ));
     }
+    if !(0.0..1.0).contains(&config.structure_stop_min_pct) && config.structure_stop_min_pct != 0.0
+    {
+        return Ok(Some(
+            MarketVelocityStrategySignalBlocker::InvalidStopLossConfig,
+        ));
+    }
+    if config.stop_loss_mode == MarketVelocityStopLossMode::StructureWithCap
+        && config.structure_stop_min_pct > config.stop_loss_pct
+    {
+        return Ok(Some(
+            MarketVelocityStrategySignalBlocker::InvalidStopLossConfig,
+        ));
+    }
     if config.take_profit_r <= 0.0 || !config.take_profit_r.is_finite() {
         return Ok(Some(
             MarketVelocityStrategySignalBlocker::InvalidRiskRewardConfig,
@@ -871,10 +941,11 @@ fn build_market_velocity_strategy_signal_submit_request(
         .map(|entry| entry.entry_price)
         .filter(|price| price.is_finite() && *price > 0.0)
         .unwrap_or(event_current_price);
-    let selected_stop_loss_price = round_price(entry_price * (1.0 - config.stop_loss_pct));
+    let selected_stop_loss =
+        select_market_velocity_stop_loss(config, entry_price, entry_confirmation, selected_entry)?;
     let selected_take_profit_price =
-        round_price(entry_price + (entry_price - selected_stop_loss_price) * config.take_profit_r);
-    if selected_stop_loss_price <= 0.0 || selected_stop_loss_price >= entry_price {
+        round_price(entry_price + (entry_price - selected_stop_loss.price) * config.take_profit_r);
+    if selected_stop_loss.price <= 0.0 || selected_stop_loss.price >= entry_price {
         return Ok(MarketVelocityStrategySignalDecision::Blocked(
             MarketVelocityStrategySignalBlocker::InvalidStopLossConfig,
         ));
@@ -919,19 +990,44 @@ fn build_market_velocity_strategy_signal_submit_request(
     let signal = market_velocity_signal_result(
         config,
         entry_price,
-        selected_stop_loss_price,
+        selected_stop_loss.price,
+        selected_stop_loss.source.as_str(),
+        selected_stop_loss.pct,
         selected_take_profit_price,
         signal_ts,
     );
-    let risk_config = market_velocity_risk_config(config);
+    let risk_config = market_velocity_risk_config(config, selected_stop_loss.pct);
+    let selected_entry_payload = selected_entry.map(|entry| {
+        let (structure_stop_loss_price, structure_stop_loss_source) =
+            market_velocity_structure_stop_loss(entry_price, entry_confirmation, Some(entry))
+                .map(|(price, source)| (Some(price), Some(source)))
+                .unwrap_or((
+                    entry.structure_stop_loss_price,
+                    entry.structure_stop_loss_source.clone(),
+                ));
+        json!({
+            "entry_price": entry.entry_price,
+            "entry_ts": entry.entry_ts,
+            "trigger": entry.trigger,
+            "entry_path": entry.entry_path,
+            "signal_pullback_pct": entry.signal_pullback_pct,
+            "structure_stop_loss_price": structure_stop_loss_price,
+            "structure_stop_loss_source": structure_stop_loss_source,
+        })
+    });
     let mut risk_plan = json!({
         "entry_price": entry_price,
-        "selected_stop_loss_price": selected_stop_loss_price,
+        "selected_stop_loss_price": selected_stop_loss.price,
+        "selected_stop_loss_source": selected_stop_loss.source,
+        "selected_stop_loss_percent": selected_stop_loss.pct,
         "selected_take_profit_price": selected_take_profit_price,
         "direction": "long",
         "protective_stop_loss_required": true,
-        "stop_loss_source": market_velocity_stop_loss_source(config.stop_loss_pct),
-        "stop_loss_percent": config.stop_loss_pct,
+        "structure_stop_min_pct": config.structure_stop_min_pct,
+        "stop_loss_source": selected_stop_loss.source,
+        "stop_loss_percent": selected_stop_loss.pct,
+        "configured_stop_loss_percent": config.stop_loss_pct,
+        "stop_loss_selection_mode": config.stop_loss_mode.label(),
         "target_r": config.take_profit_r,
         "max_holding_hours": config.max_holding_hours,
         "reward_to_risk_mode": "fixed_r",
@@ -939,7 +1035,7 @@ fn build_market_velocity_strategy_signal_submit_request(
     if let Some(take_profit_legs) = market_velocity_take_profit_legs(
         config,
         entry_price,
-        selected_stop_loss_price,
+        selected_stop_loss.price,
         selected_take_profit_price,
     ) {
         risk_plan["take_profit_legs"] = take_profit_legs;
@@ -1003,7 +1099,7 @@ fn build_market_velocity_strategy_signal_submit_request(
         "technical_snapshot": &event.technical_snapshot,
         "entry_filter": entry_filter,
         "entry_confirmation": entry_confirmation,
-        "selected_entry": selected_entry,
+        "selected_entry": selected_entry_payload,
         "side": "buy",
         "position_side": "long",
         "trade_side": "open",
@@ -1072,6 +1168,8 @@ fn market_velocity_signal_result(
     config: &MarketVelocityStrategySignalConfig,
     entry_price: f64,
     selected_stop_loss_price: f64,
+    selected_stop_loss_source: &str,
+    selected_stop_loss_pct: f64,
     selected_take_profit_price: f64,
     signal_ts: i64,
 ) -> SignalResult {
@@ -1080,7 +1178,7 @@ fn market_velocity_signal_result(
         should_sell: false,
         open_price: entry_price,
         signal_kline_stop_loss_price: Some(selected_stop_loss_price),
-        stop_loss_source: Some(market_velocity_stop_loss_source(config.stop_loss_pct)),
+        stop_loss_source: Some(selected_stop_loss_source.to_string()),
         best_open_price: None,
         atr_take_profit_ratio_price: None,
         atr_stop_loss_price: None,
@@ -1100,7 +1198,10 @@ fn market_velocity_signal_result(
             json!({
                 "strategy_preset": config.strategy_preset.trim(),
                 "entry_rule_version": config.entry_rule_version.trim(),
-                "stop_loss_pct": config.stop_loss_pct,
+                "configured_stop_loss_pct": config.stop_loss_pct,
+                "selected_stop_loss_pct": selected_stop_loss_pct,
+                "stop_loss_mode": config.stop_loss_mode.label(),
+                "structure_stop_min_pct": config.structure_stop_min_pct,
                 "take_profit_r": config.take_profit_r,
                 "max_holding_hours": config.max_holding_hours,
             })
@@ -1110,7 +1211,7 @@ fn market_velocity_signal_result(
     }
 }
 
-fn market_velocity_stop_loss_source(stop_loss_pct: f64) -> String {
+fn market_velocity_fixed_stop_loss_source(stop_loss_pct: f64) -> String {
     let basis_points = (stop_loss_pct * 10_000.0).round() as i64;
     let tag = format!("{basis_points:04}")
         .trim_end_matches('0')
@@ -1118,15 +1219,152 @@ fn market_velocity_stop_loss_source(stop_loss_pct: f64) -> String {
     format!("market_velocity_fixed_{tag}sl")
 }
 /// 提供市场动量风控配置的集中实现，避免行情数据调用方重复处理相同细节。
-fn market_velocity_risk_config(config: &MarketVelocityStrategySignalConfig) -> BasicRiskConfig {
+fn market_velocity_risk_config(
+    config: &MarketVelocityStrategySignalConfig,
+    selected_stop_loss_pct: f64,
+) -> BasicRiskConfig {
     BasicRiskConfig {
-        max_loss_percent: config.stop_loss_pct,
+        max_loss_percent: selected_stop_loss_pct,
         atr_take_profit_ratio: None,
         fix_signal_kline_take_profit_ratio: Some(config.take_profit_r),
         is_move_stop_loss: None,
         is_used_signal_k_line_stop_loss: Some(true),
         max_hold_time: Some(i64::from(config.max_holding_hours) * 60 * 60),
         max_leverage: None,
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct MarketVelocitySelectedStopLoss {
+    price: f64,
+    pct: f64,
+    source: String,
+}
+
+fn select_market_velocity_stop_loss(
+    config: &MarketVelocityStrategySignalConfig,
+    entry_price: f64,
+    entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
+    selected_entry: Option<&MarketVelocitySelectedEntry>,
+) -> Result<MarketVelocitySelectedStopLoss> {
+    let fixed_price = round_price(entry_price * (1.0 - config.stop_loss_pct));
+    let fixed_source = market_velocity_fixed_stop_loss_source(config.stop_loss_pct);
+    let structure =
+        market_velocity_structure_stop_loss(entry_price, entry_confirmation, selected_entry).map(
+            |(price, source)| {
+                apply_structure_stop_min_pct_floor(
+                    entry_price,
+                    price,
+                    source,
+                    config.structure_stop_min_pct,
+                )
+            },
+        );
+    let (price, source) = match (config.stop_loss_mode, structure) {
+        (
+            MarketVelocityStopLossMode::StructureOrFixed,
+            Some((structure_price, structure_source)),
+        ) if structure_price > fixed_price => (structure_price, structure_source),
+        (
+            MarketVelocityStopLossMode::StructureWithCap,
+            Some((structure_price, structure_source)),
+        ) => apply_structure_stop_max_pct_cap(
+            entry_price,
+            structure_price,
+            structure_source,
+            config.stop_loss_pct,
+        ),
+        _ => (fixed_price, fixed_source),
+    };
+    let pct = round_price((entry_price - price) / entry_price);
+    if !pct.is_finite() || pct <= 0.0 || pct >= 1.0 {
+        return Err(anyhow!(
+            "invalid market velocity selected stop loss percent"
+        ));
+    }
+    Ok(MarketVelocitySelectedStopLoss { price, pct, source })
+}
+
+fn apply_structure_stop_min_pct_floor(
+    entry_price: f64,
+    structure_price: f64,
+    structure_source: String,
+    structure_stop_min_pct: f64,
+) -> (f64, String) {
+    if structure_stop_min_pct <= 0.0 {
+        return (structure_price, structure_source);
+    }
+    let floor_price = round_price(entry_price * (1.0 - structure_stop_min_pct));
+    if structure_price > floor_price {
+        (floor_price, format!("{structure_source}+min_pct_floor"))
+    } else {
+        (structure_price, structure_source)
+    }
+}
+
+fn apply_structure_stop_max_pct_cap(
+    entry_price: f64,
+    structure_price: f64,
+    structure_source: String,
+    stop_loss_pct: f64,
+) -> (f64, String) {
+    let cap_price = round_price(entry_price * (1.0 - stop_loss_pct));
+    if structure_price < cap_price {
+        (cap_price, format!("{structure_source}+max_pct_cap"))
+    } else {
+        (structure_price, structure_source)
+    }
+}
+
+fn market_velocity_structure_stop_loss(
+    entry_price: f64,
+    entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
+    selected_entry: Option<&MarketVelocitySelectedEntry>,
+) -> Option<(f64, String)> {
+    let selected_entry = selected_entry?;
+    let explicit_price = selected_entry
+        .structure_stop_loss_price
+        .filter(|price| price.is_finite() && *price > 0.0 && *price < entry_price);
+    if let Some(price) = explicit_price {
+        let source = selected_entry
+            .structure_stop_loss_source
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "selected_entry_structure".to_string());
+        return Some((round_price(price), source));
+    }
+    let confirmation = entry_confirmation?;
+    let base_trigger = market_velocity_base_entry_trigger(
+        selected_entry.trigger.as_str(),
+        confirmation.trigger.as_str(),
+    );
+    match base_trigger.as_str() {
+        "reclaim_ema" => Some((
+            round_price(confirmation.ema_value),
+            "entry_confirmation_ema".to_string(),
+        )),
+        "breakout_previous_high" => confirmation
+            .previous_high
+            .map(round_price)
+            .map(|price| (price, "entry_confirmation_previous_high".to_string())),
+        _ => None,
+    }
+    .filter(|(price, _)| price.is_finite() && *price > 0.0 && *price < entry_price)
+}
+
+fn market_velocity_base_entry_trigger(
+    selected_entry_trigger: &str,
+    confirmation_trigger: &str,
+) -> String {
+    let base = selected_entry_trigger
+        .split_once('+')
+        .map(|(base, _)| base)
+        .unwrap_or(selected_entry_trigger)
+        .trim();
+    if base.is_empty() {
+        confirmation_trigger.trim().to_string()
+    } else {
+        base.to_string()
     }
 }
 /// 提供technical确认blocker的集中实现，避免行情数据调用方重复处理相同细节。
@@ -1397,6 +1635,13 @@ fn json_fvg_entry_mode(value: &Value, key: &str) -> Result<Option<MarketVelocity
     };
     MarketVelocityFvgEntryMode::from_str(&value).map(Some)
 }
+
+fn json_stop_loss_mode(value: &Value, key: &str) -> Result<Option<MarketVelocityStopLossMode>> {
+    let Some(value) = json_string(value, key)? else {
+        return Ok(None);
+    };
+    MarketVelocityStopLossMode::from_str(&value).map(Some)
+}
 /// 提供JSONi64的集中实现，避免行情数据调用方重复处理相同细节。
 fn json_i64(value: &Value, key: &str) -> Result<Option<i64>> {
     let Some(field) = json_field(value, key) else {
@@ -1649,6 +1894,19 @@ fn parse_env_fvg_entry_mode(
         return Ok(default);
     }
     MarketVelocityFvgEntryMode::from_str(&value)
+}
+
+fn parse_env_stop_loss_mode(
+    key: &str,
+    default: MarketVelocityStopLossMode,
+) -> Result<MarketVelocityStopLossMode> {
+    let Some(value) = std::env::var(key).ok() else {
+        return Ok(default);
+    };
+    if value.trim().is_empty() {
+        return Ok(default);
+    }
+    MarketVelocityStopLossMode::from_str(&value)
 }
 /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_bool_text(value: &str, key: &str) -> Result<bool> {

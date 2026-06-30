@@ -1,7 +1,8 @@
 use super::{
-    early_exit, profit_protection_for_target, runner_exit_for_target, simulate_trade,
-    BacktestCandle, ConfirmedEvent, MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection,
-    StopReentryDetails, StopReentryMode, TradeOutcome, TradeResult,
+    early_exit, profit_protection_for_target, runner_exit_for_target,
+    select_stop_loss_for_confirmed_signal, simulate_trade, BacktestCandle, ConfirmedEvent,
+    MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection, StopReentryDetails,
+    StopReentryMode, TradeOutcome, TradeResult,
 };
 const ORIGINAL_STOP_R: f64 = -1.0;
 /// 判断按条件应用止损再次入场，给回测策略流程提供布尔结果。
@@ -45,13 +46,14 @@ fn apply_breakout_reclaim(
     let Some(reentry_entry) = candles.get(reentry_idx) else {
         return original;
     };
+    let selected_stop_loss = select_stop_loss_for_confirmed_signal(signal, args);
     let reentry = simulate_trade(
         candles,
         reentry_idx,
         reentry_entry.ts,
         reentry_entry.open,
         MarketVelocityTradeDirection::Long,
-        args.stop_loss_pct,
+        selected_stop_loss.stop_loss_pct,
         target_r,
         horizon_ms,
         profit_protection_for_target(args, target_r),

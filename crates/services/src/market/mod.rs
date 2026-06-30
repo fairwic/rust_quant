@@ -56,7 +56,7 @@ pub use market_velocity_signal::{
     dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
     market_velocity_signal_direct_dispatch_allowed, market_velocity_signal_dispatch_is_enabled,
     market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityFvgEntryMode,
-    MarketVelocitySelectedEntry, MarketVelocityStrategySignalBlocker,
+    MarketVelocitySelectedEntry, MarketVelocityStopLossMode, MarketVelocityStrategySignalBlocker,
     MarketVelocityStrategySignalConfig, MarketVelocityStrategySignalDecision,
 };
 mod flow_analyzer;
@@ -236,28 +236,8 @@ pub async fn get_confirmed_candles_for_backtest(
     limit: usize,
     select_time: Option<rust_quant_market::models::SelectTime>,
 ) -> Result<Vec<rust_quant_market::models::CandlesEntity>> {
-    if should_use_quant_core_candle_source()? {
-        return get_quant_core_sharded_candles_for_backtest(inst_id, period, limit, select_time)
-            .await;
-    }
-    use rust_quant_market::models::{CandlesModel, SelectCandleReqDto};
-    let dto = SelectCandleReqDto {
-        inst_id: inst_id.to_string(),
-        time_interval: period.to_string(),
-        limit,
-        select_time,
-        confirm: Some(1),
-    };
-    let model = CandlesModel::new();
-    let candles = model.fetch_candles_from_postgres(dto).await?;
-    if candles.is_empty() {
-        return Err(anyhow::anyhow!(
-            "K线数据为空: inst_id={}, period={}",
-            inst_id,
-            period
-        ));
-    }
-    Ok(candles)
+    should_use_quant_core_candle_source()?;
+    get_quant_core_sharded_candles_for_backtest(inst_id, period, limit, select_time).await
 }
 /// 判断 行情与市场数据 条件是否满足，给上层流程提供布尔决策。
 pub fn should_use_quant_core_candle_source() -> Result<bool> {

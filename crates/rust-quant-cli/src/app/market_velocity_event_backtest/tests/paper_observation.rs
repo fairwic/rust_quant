@@ -1,8 +1,9 @@
 use super::super::{
     market_velocity_paper_strategy_preset_manifest, parse_paper_observation_args_from,
     parse_paper_observation_command_from, FvgEntryMode, MarketVelocityEventSource,
-    MarketVelocityPaperOutcomeSink, StopReentryMode,
+    MarketVelocityPaperOutcomeSink, MarketVelocityStopLossMode, StopReentryMode,
 };
+use serde_json::Value;
 #[test]
 fn paper_observation_args_force_web_sink_and_production_entry_trigger_allowlist() {
     let args = parse_paper_observation_args_from([] as [&str; 0]).unwrap();
@@ -255,6 +256,76 @@ fn paper_observation_args_apply_breakout_reclaim_fvg_wait10_04sl_delta15_40_rese
 }
 
 #[test]
+fn paper_observation_args_apply_breakout_reclaim_fvg_wait10_04sl_delta15_40_runner6r20_stop1_research_preset(
+) {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner6r20_stop1_v1",
+    ])
+    .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
+    assert_eq!(
+        args.entry_trigger_allowlist,
+        vec!["breakout_previous_high", "reclaim_ema"]
+    );
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "rank_radar_4h15m_r04_20r_brk_rcm_fvg10_d15_40_p5_12_r6f20_s1_v1"
+    );
+    assert_eq!(args.stop_loss_pct, 0.04);
+    assert_eq!(args.target_rs, vec![2.0]);
+    assert_eq!(args.entry_max_distance_pct, 5.0);
+    assert_eq!(args.entry_min_volume_ratio, 1.0);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 15);
+    assert_eq!(args.max_delta_rank, Some(40));
+    assert_eq!(args.min_price_change_pct, Some(5.0));
+    assert_eq!(args.max_price_change_pct, Some(12.0));
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::M15ImpulseRetrace);
+    assert_eq!(args.fvg_max_wait_candles, 10);
+    assert!(args.ignore_entry_signal_updates_while_open);
+    assert_eq!(args.runner_target_r, Some(6.0));
+    assert_eq!(args.runner_fraction, 0.2);
+    assert_eq!(args.runner_stop_r, 1.0);
+}
+
+#[test]
+fn paper_observation_args_apply_breakout_reclaim_fvg_wait10_04sl_delta15_40_runner8r20_stop1_research_preset(
+) {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner8r20_stop1_v1",
+    ])
+    .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
+    assert_eq!(
+        args.entry_trigger_allowlist,
+        vec!["breakout_previous_high", "reclaim_ema"]
+    );
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "rank_radar_4h15m_r04_20r_brk_rcm_fvg10_d15_40_p5_12_r8f20_s1_v1"
+    );
+    assert_eq!(args.stop_loss_pct, 0.04);
+    assert_eq!(args.target_rs, vec![2.0]);
+    assert_eq!(args.entry_max_distance_pct, 5.0);
+    assert_eq!(args.entry_min_volume_ratio, 1.0);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 15);
+    assert_eq!(args.max_delta_rank, Some(40));
+    assert_eq!(args.min_price_change_pct, Some(5.0));
+    assert_eq!(args.max_price_change_pct, Some(12.0));
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::M15ImpulseRetrace);
+    assert_eq!(args.fvg_max_wait_candles, 10);
+    assert!(args.ignore_entry_signal_updates_while_open);
+    assert_eq!(args.runner_target_r, Some(8.0));
+    assert_eq!(args.runner_fraction, 0.2);
+    assert_eq!(args.runner_stop_r, 1.0);
+}
+
+#[test]
 fn paper_observation_args_apply_reclaim_fvg_wait10_04sl_delta15_40_research_preset() {
     let args = parse_paper_observation_args_from([
         "--paper-strategy-preset",
@@ -412,6 +483,8 @@ fn paper_observation_args_apply_reclaim_fvg_wait14_retest1_pullback3_04sl_18r_de
         "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2"
     );
     assert_eq!(args.stop_loss_pct, 0.04);
+    assert_eq!(args.stop_loss_mode, MarketVelocityStopLossMode::FixedPct);
+    assert_eq!(args.structure_stop_min_pct, 0.0);
     assert_eq!(args.target_rs, vec![1.8]);
     assert_eq!(args.entry_max_distance_pct, 5.0);
     assert_eq!(args.entry_min_volume_ratio, 1.1);
@@ -428,6 +501,9 @@ fn paper_observation_args_apply_reclaim_fvg_wait14_retest1_pullback3_04sl_18r_de
     assert_eq!(args.max_price_change_pct, Some(10.0));
     assert_eq!(args.fvg_entry_mode, FvgEntryMode::M15ImpulseRetrace);
     assert_eq!(args.fvg_max_wait_candles, 24);
+    assert_eq!(args.runner_target_r, None);
+    assert_eq!(args.runner_fraction, 0.0);
+    assert_eq!(args.runner_stop_r, 0.0);
     assert!(args.ignore_entry_signal_updates_while_open);
 }
 
@@ -518,6 +594,38 @@ fn paper_observation_args_apply_reclaim_retest1_pullback3_04sl_18r_delta20_40_re
     );
     assert_eq!(args.stop_loss_pct, 0.04);
     assert_eq!(args.target_rs, vec![1.8]);
+    assert_eq!(args.entry_max_distance_pct, 3.0);
+    assert_eq!(args.entry_min_volume_ratio, 1.1);
+    assert_eq!(args.entry_max_signal_pullback_pct, Some(3.0));
+    assert!(args.entry_retest_after_signal);
+    assert_eq!(args.entry_retest_max_wait_candles, 1);
+    assert_eq!(args.entry_retest_tolerance_pct, 0.3);
+    assert_eq!(args.entry_retest_min_entry_open_gap_pct, None);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 20);
+    assert_eq!(args.max_delta_rank, Some(40));
+    assert_eq!(args.min_price_change_pct, Some(5.0));
+    assert_eq!(args.max_price_change_pct, Some(10.0));
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::Off);
+    assert!(args.ignore_entry_signal_updates_while_open);
+}
+
+#[test]
+fn paper_observation_args_apply_reclaim_retest1_pullback3_04sl_20r_delta20_40_research_preset() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_momentum_04sl_20r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1",
+    ])
+    .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
+    assert_eq!(args.entry_trigger_allowlist, vec!["reclaim_ema"]);
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "rank_radar_4h15m_r04_20r_rcm_rt1_d3_pb3_vol11_d20_40_p5_10_v1"
+    );
+    assert_eq!(args.stop_loss_pct, 0.04);
+    assert_eq!(args.target_rs, vec![2.0]);
     assert_eq!(args.entry_max_distance_pct, 3.0);
     assert_eq!(args.entry_min_volume_ratio, 1.1);
     assert_eq!(args.entry_max_signal_pullback_pct, Some(3.0));
@@ -651,6 +759,8 @@ fn paper_observation_entry_rule_versions_fit_quant_web_contract() {
         "research_momentum_0375sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1",
         "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1",
         "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_v1",
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner6r20_stop1_v1",
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner8r20_stop1_v1",
         "research_momentum_04sl_20r_reclaim_fvgwait10_delta15_40_pchg5_12_v1",
         "research_momentum_04sl_18r_reclaim_fvgwait10_delta15_40_pchg5_12_v1",
         "research_momentum_04sl_18r_reclaim_fvgwait10_delta20_40_pchg5_10_v1",
@@ -660,10 +770,13 @@ fn paper_observation_entry_rule_versions_fit_quant_web_contract() {
         "research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_pullback3_delta20_40_pchg5_10_v3",
         "research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_openfadevol2_pullback3_delta20_40_pchg5_10_v4",
         "research_momentum_04sl_18r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1",
+        "research_momentum_04sl_20r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1",
         "research_momentum_04sl_18r_breakout_reclaim_retest1_delta20_40_pchg5_10_v1",
         "research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1",
         "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_minwait1_delta15_40_pchg5_12_v1",
         "research_episode_momentum_03sl_24r_rank5_30_v1",
+        "research_episode_momentum_05sl_20r_rank5_v1",
+        "research_episode_momentum_05sl_30r_rank5_v1",
         "research_episode_runner_03sl_24r_8r30_v1",
     ];
     for preset in presets {
@@ -942,6 +1055,86 @@ fn paper_observation_breakout_reclaim_fvg_wait10_04sl_delta15_40_preset_manifest
 }
 
 #[test]
+fn paper_observation_breakout_reclaim_fvg_wait10_04sl_delta15_40_runner6r20_stop1_preset_manifest_is_canonical_and_hashable(
+) {
+    let manifest = market_velocity_paper_strategy_preset_manifest(
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner6r20_stop1_v1",
+    )
+    .unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-radar");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity 0.04SL 2.0R breakout reclaim fvg wait10 delta15-40 pchg5-12 runner6R20 stop1 v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["preset"],
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner6r20_stop1_v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["event_source"],
+        "raw_state"
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["stop_loss_pct"], 0.04);
+    assert_eq!(manifest.manifest_json["parameters"]["target_r"], 2.0);
+    assert_eq!(manifest.manifest_json["parameters"]["min_delta_rank"], 15);
+    assert_eq!(manifest.manifest_json["parameters"]["max_delta_rank"], 40);
+    assert_eq!(manifest.manifest_json["parameters"]["runner_target_r"], 6.0);
+    assert_eq!(manifest.manifest_json["parameters"]["runner_fraction"], 0.2);
+    assert_eq!(manifest.manifest_json["parameters"]["runner_stop_r"], 1.0);
+    assert_eq!(
+        manifest.manifest_json["parameters"]["fvg_entry_mode"],
+        "m15_impulse_retrace"
+    );
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_allowlist"],
+        serde_json::json!(["breakout_previous_high", "reclaim_ema"])
+    );
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
+}
+
+#[test]
+fn paper_observation_breakout_reclaim_fvg_wait10_04sl_delta15_40_runner8r20_stop1_preset_manifest_is_canonical_and_hashable(
+) {
+    let manifest = market_velocity_paper_strategy_preset_manifest(
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner8r20_stop1_v1",
+    )
+    .unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-radar");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity 0.04SL 2.0R breakout reclaim fvg wait10 delta15-40 pchg5-12 runner8R20 stop1 v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["preset"],
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner8r20_stop1_v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["event_source"],
+        "raw_state"
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["stop_loss_pct"], 0.04);
+    assert_eq!(manifest.manifest_json["parameters"]["target_r"], 2.0);
+    assert_eq!(manifest.manifest_json["parameters"]["min_delta_rank"], 15);
+    assert_eq!(manifest.manifest_json["parameters"]["max_delta_rank"], 40);
+    assert_eq!(manifest.manifest_json["parameters"]["runner_target_r"], 8.0);
+    assert_eq!(manifest.manifest_json["parameters"]["runner_fraction"], 0.2);
+    assert_eq!(manifest.manifest_json["parameters"]["runner_stop_r"], 1.0);
+    assert_eq!(
+        manifest.manifest_json["parameters"]["fvg_entry_mode"],
+        "m15_impulse_retrace"
+    );
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_allowlist"],
+        serde_json::json!(["breakout_previous_high", "reclaim_ema"])
+    );
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
+}
+
+#[test]
 fn paper_observation_reclaim_fvg_wait10_04sl_delta15_40_preset_manifest_is_canonical_and_hashable()
 {
     let manifest = market_velocity_paper_strategy_preset_manifest(
@@ -1148,6 +1341,20 @@ fn paper_observation_reclaim_fvg_wait14_retest1_pullback3_04sl_18r_delta20_40_pr
         "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
     );
     assert_eq!(
+        manifest.manifest_json["parameters"]["stop_loss_mode"],
+        "fixed_pct"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["structure_stop_min_pct"],
+        0.0
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["runner_target_r"],
+        Value::Null
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["runner_fraction"], 0.0);
+    assert_eq!(manifest.manifest_json["parameters"]["runner_stop_r"], 0.0);
+    assert_eq!(
         manifest.manifest_json["parameters"]["entry_max_signal_pullback_pct"],
         3.0
     );
@@ -1335,6 +1542,43 @@ fn paper_observation_reclaim_retest1_pullback3_04sl_18r_delta20_40_preset_manife
 }
 
 #[test]
+fn paper_observation_reclaim_retest1_pullback3_04sl_20r_delta20_40_preset_manifest_is_canonical_and_hashable(
+) {
+    let manifest = market_velocity_paper_strategy_preset_manifest(
+        "research_momentum_04sl_20r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1",
+    )
+    .unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-radar");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity 0.04SL 2.0R reclaim retest1 dist3 pullback3 vol11 delta20-40 pchg5-10 v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["preset"],
+        "research_momentum_04sl_20r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["entry_max_signal_pullback_pct"],
+        3.0
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["entry_retest_after_signal"],
+        true
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["entry_retest_max_wait_candles"],
+        1
+    );
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_allowlist"],
+        serde_json::json!(["reclaim_ema"])
+    );
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
+}
+
+#[test]
 fn paper_observation_breakout_reclaim_fvg_wait10_minwait1_04sl_delta15_40_preset_manifest_is_canonical_and_hashable(
 ) {
     let manifest = market_velocity_paper_strategy_preset_manifest(
@@ -1356,6 +1600,14 @@ fn paper_observation_breakout_reclaim_fvg_wait10_minwait1_04sl_delta15_40_preset
         "raw_state"
     );
     assert_eq!(manifest.manifest_json["parameters"]["stop_loss_pct"], 0.04);
+    assert_eq!(
+        manifest.manifest_json["parameters"]["stop_loss_mode"],
+        "fixed_pct"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["structure_stop_min_pct"],
+        0.0
+    );
     assert_eq!(manifest.manifest_json["parameters"]["target_r"], 2.0);
     assert_eq!(
         manifest.manifest_json["parameters"]["fvg_impulse_retrace_min_wait_candles"],
@@ -1390,6 +1642,120 @@ fn paper_observation_args_apply_episode_research_preset() {
     assert_eq!(args.min_price_change_pct, None);
     assert_eq!(args.profit_protect_after_r, None);
     assert_eq!(args.runner_target_r, None);
+}
+#[test]
+fn paper_observation_args_apply_episode_05sl_20r_research_preset() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_episode_momentum_05sl_20r_rank5_v1",
+    ])
+    .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::Episodes);
+    assert!(args.entry_trigger_allowlist.is_empty());
+    assert!(args.entry_trigger_blocklist.is_empty());
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "rank_radar_4h_trend_15m_episode_research_05sl_20r_rank5_v1"
+    );
+    assert_eq!(args.stop_reentry_mode, StopReentryMode::Off);
+    assert_eq!(args.stop_loss_pct, 0.05);
+    assert_eq!(args.target_rs, vec![2.0]);
+    assert_eq!(args.entry_max_distance_pct, 7.0);
+    assert_eq!(args.entry_min_volume_ratio, 0.8);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 5);
+    assert_eq!(args.max_delta_rank, None);
+    assert_eq!(args.min_price_change_pct, None);
+    assert_eq!(args.profit_protect_after_r, None);
+    assert_eq!(args.runner_target_r, None);
+}
+#[test]
+fn paper_observation_args_apply_episode_05sl_30r_research_preset() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_episode_momentum_05sl_30r_rank5_v1",
+    ])
+    .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::Episodes);
+    assert!(args.entry_trigger_allowlist.is_empty());
+    assert!(args.entry_trigger_blocklist.is_empty());
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "rank_radar_4h_trend_15m_episode_research_05sl_30r_rank5_v1"
+    );
+    assert_eq!(args.stop_reentry_mode, StopReentryMode::Off);
+    assert_eq!(args.stop_loss_pct, 0.05);
+    assert_eq!(args.target_rs, vec![3.0]);
+    assert_eq!(args.entry_max_distance_pct, 7.0);
+    assert_eq!(args.entry_min_volume_ratio, 0.8);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 5);
+    assert_eq!(args.max_delta_rank, None);
+    assert_eq!(args.min_price_change_pct, None);
+    assert_eq!(args.profit_protect_after_r, None);
+    assert_eq!(args.runner_target_r, None);
+}
+#[test]
+fn paper_observation_episode_05sl_20r_preset_manifest_is_canonical_and_hashable() {
+    let manifest = market_velocity_paper_strategy_preset_manifest(
+        "research_episode_momentum_05sl_20r_rank5_v1",
+    )
+    .unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-radar");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity episode 0.05SL 2.0R rank5 v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["preset"],
+        "research_episode_momentum_05sl_20r_rank5_v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["event_source"],
+        "episodes"
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["stop_loss_pct"], 0.05);
+    assert_eq!(manifest.manifest_json["parameters"]["target_r"], 2.0);
+    assert_eq!(manifest.manifest_json["parameters"]["min_delta_rank"], 5);
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_allowlist"],
+        serde_json::json!([])
+    );
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
+}
+#[test]
+fn paper_observation_episode_05sl_30r_preset_manifest_is_canonical_and_hashable() {
+    let manifest = market_velocity_paper_strategy_preset_manifest(
+        "research_episode_momentum_05sl_30r_rank5_v1",
+    )
+    .unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-radar");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity episode 0.05SL 3.0R rank5 v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["preset"],
+        "research_episode_momentum_05sl_30r_rank5_v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["event_source"],
+        "episodes"
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["stop_loss_pct"], 0.05);
+    assert_eq!(manifest.manifest_json["parameters"]["target_r"], 3.0);
+    assert_eq!(manifest.manifest_json["parameters"]["min_delta_rank"], 5);
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_allowlist"],
+        serde_json::json!([])
+    );
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
 }
 #[test]
 fn paper_observation_args_apply_episode_runner_research_preset() {

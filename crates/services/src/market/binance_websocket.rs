@@ -4,7 +4,7 @@ use crypto_exc_all::raw::binance::config::{Config, DEFAULT_WS_STREAM_URL};
 use rust_quant_domain::traits::CandleRepository;
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use rust_quant_infrastructure::repositories::PostgresCandleRepository;
-use rust_quant_market::models::{CandlesEntity, CandlesModel};
+use rust_quant_market::models::CandlesEntity;
 use rust_quant_market::repositories::StrategyTrigger;
 use serde::Deserialize;
 use serde_json::Value;
@@ -71,56 +71,35 @@ struct BinanceKlinePayload {
     /// closed，用于行情、K 线或市场扫描。
     closed: bool,
 }
-enum BinanceCandlePersister {
-    QuantCore(PostgresCandleRepository),
-    LegacyCompatTables,
+struct BinanceCandlePersister {
+    repository: PostgresCandleRepository,
 }
 impl BinanceCandlePersister {
     /// 封装当前函数，减少行情数据调用方重复实现相同细节。
     /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     async fn from_env() -> Result<Self> {
-        if super::should_use_quant_core_candle_source()? {
-            let database_url = env::var("QUANT_CORE_DATABASE_URL")
-                .context("CANDLE_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")?;
-            let pool = PgPoolOptions::new()
-                .max_connections(5)
-                .connect_lazy(&database_url)
-                .context("创建 quant_core Postgres K线连接池失败")?;
-            Ok(Self::QuantCore(PostgresCandleRepository::new(pool)))
-        } else {
-            Ok(Self::LegacyCompatTables)
-        }
+        super::should_use_quant_core_candle_source()?;
+        let database_url = env::var("QUANT_CORE_DATABASE_URL")
+            .context("CANDLE_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")?;
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect_lazy(&database_url)
+            .context("创建 quant_core Postgres K线连接池失败")?;
+        Ok(Self {
+            repository: PostgresCandleRepository::new(pool),
+        })
     }
     /// 提供persist的集中实现，避免行情数据调用方重复处理相同细节。
     async fn persist(&self, update: &BinanceKlineUpdate) -> Result<()> {
-        match self {
-            Self::QuantCore(repository) => {
-                repository
-                    .save_candles(vec![update.domain_candle.clone()])
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "保存 Binance K线到 quant_core 分表失败: {} {}",
-                            update.inst_id, update.time_interval
-                        )
-                    })?;
-            }
-            Self::LegacyCompatTables => {
-                CandlesModel::new()
-                    .upsert_entities_batch(
-                        vec![update.candle_entity.clone()],
-                        &update.inst_id,
-                        &update.time_interval,
-                    )
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "保存 Binance K线到 Postgres 分表失败: {} {}",
-                            update.inst_id, update.time_interval
-                        )
-                    })?;
-            }
-        }
+        self.repository
+            .save_candles(vec![update.domain_candle.clone()])
+            .await
+            .with_context(|| {
+                format!(
+                    "保存 Binance K线到 quant_core 分表失败: {} {}",
+                    update.inst_id, update.time_interval
+                )
+            })?;
         Ok(())
     }
 }

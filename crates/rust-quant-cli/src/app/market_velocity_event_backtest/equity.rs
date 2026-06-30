@@ -1,7 +1,8 @@
 use super::equity_stats::{analyze_profit_losses, format_optional_f64, trade_sharpe};
 use super::{
-    runner_exit_for_target, trade_direction_for_event, BacktestCandle, ConfirmedEvent,
-    MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection, RunnerExit,
+    runner_exit_for_target, select_stop_loss_for_confirmed_signal, trade_direction_for_event,
+    BacktestCandle, ConfirmedEvent, MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection,
+    RunnerExit,
 };
 use anyhow::Result;
 use chrono::{FixedOffset, TimeZone, Utc};
@@ -193,6 +194,12 @@ struct ReplayEntry {
     trigger: String,
     /// direction，用于行情、K 线或市场扫描。
     direction: MarketVelocityTradeDirection,
+    /// 止损百分比。
+    stop_loss_pct: f64,
+    /// 止损价格。
+    stop_loss_price: f64,
+    /// 止损来源。
+    stop_loss_source: String,
 }
 #[derive(Debug, Clone, PartialEq)]
 struct ReplayActivePosition {
@@ -204,6 +211,12 @@ struct ReplayActivePosition {
     trigger: String,
     /// direction，用于记录交易或执行状态。
     direction: MarketVelocityTradeDirection,
+    /// 止损百分比。
+    stop_loss_pct: f64,
+    /// 止损价格。
+    stop_loss_price: f64,
+    /// 止损来源。
+    stop_loss_source: String,
     /// 收益protected，用于记录交易或执行状态。
     profit_protected: bool,
     /// observedK 线，用于记录交易或执行状态。
@@ -228,8 +241,6 @@ struct ReplayOpenTrade {
 struct MarketVelocityReplayStrategy {
     /// 时间戳。
     entries_by_ts: BTreeMap<i64, ReplayEntry>,
-    /// 止损百分比。
-    stop_loss_pct: f64,
     /// targetr，用于行情、K 线或市场扫描。
     target_r: f64,
     /// 达到指定 R 倍数后启用利润保护；为空时不启用。
@@ -325,7 +336,7 @@ pub fn build_framework_equity_report(
                 .filter(|event| event.event.symbol == symbol)
                 .cloned()
                 .collect(),
-            args.stop_loss_pct,
+            args,
             target_r,
             args.profit_protect_after_r,
             args.profit_protect_stop_r,
@@ -650,7 +661,7 @@ pub fn build_framework_equity_trade_reports(
                 .filter(|event| event.event.symbol == symbol)
                 .cloned()
                 .collect(),
-            args.stop_loss_pct,
+            args,
             target_r,
             args.profit_protect_after_r,
             args.profit_protect_stop_r,
@@ -753,12 +764,13 @@ fn build_runner_replay_trades(
         let Some(entry_idx) = candles.iter().position(|candle| candle.ts == entry_ts) else {
             continue;
         };
+        let selected_stop_loss = select_stop_loss_for_confirmed_signal(&event, args);
         let Some(trade) = simulate_framework_runner_trade(
             candles,
             entry_idx,
             &event,
             target_r,
-            args.stop_loss_pct,
+            selected_stop_loss.stop_loss_pct,
             runner,
         ) else {
             continue;
@@ -1653,7 +1665,7 @@ impl MarketVelocityReplayStrategy {
     /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     fn new(
         events: Vec<ConfirmedEvent>,
-        stop_loss_pct: f64,
+        args: &MarketVelocityEventBacktestArgs,
         target_r: f64,
         profit_protect_after_r: Option<f64>,
         profit_protect_stop_r: f64,
@@ -1663,6 +1675,7 @@ impl MarketVelocityReplayStrategy {
         let entries_by_ts = events
             .into_iter()
             .map(|event| {
+                let selected_stop_loss = select_stop_loss_for_confirmed_signal(&event, args);
                 (
                     event.entry_ts,
                     ReplayEntry {
@@ -1670,13 +1683,15 @@ impl MarketVelocityReplayStrategy {
                         event_id: event.event.id,
                         trigger: event.trigger,
                         direction: trade_direction_for_event(&event.event),
+                        stop_loss_pct: selected_stop_loss.stop_loss_pct,
+                        stop_loss_price: selected_stop_loss.price,
+                        stop_loss_source: selected_stop_loss.source,
                     },
                 )
             })
             .collect();
         Self {
             entries_by_ts,
-            stop_loss_pct,
             target_r,
             profit_protect_after_r,
             profit_protect_stop_r,
@@ -1692,14 +1707,18 @@ impl MarketVelocityReplayStrategy {
             event_id: entry.event_id,
             trigger: entry.trigger.clone(),
             direction: entry.direction,
+            stop_loss_pct: entry.stop_loss_pct,
+            stop_loss_price: entry.stop_loss_price,
+            stop_loss_source: entry.stop_loss_source.clone(),
             profit_protected: false,
             observed_candles: 0,
         });
         self.build_entry_direction_signal(
             candle_ts,
             entry.entry_price,
-            stop_price_for(entry.entry_price, self.stop_loss_pct, entry.direction),
-            "MarketVelocityFixedRisk",
+            entry.stop_loss_price,
+            entry.stop_loss_pct,
+            &entry.stop_loss_source,
             entry.event_id,
             &entry.trigger,
             entry.direction,
@@ -1715,19 +1734,19 @@ impl MarketVelocityReplayStrategy {
         let active = self.active_position.as_mut()?;
         let target_price = target_price_for(
             active.entry_price,
-            self.stop_loss_pct,
+            active.stop_loss_pct,
             self.target_r,
             active.direction,
         );
         let current_stop_price = if active.profit_protected {
             target_price_for(
                 active.entry_price,
-                self.stop_loss_pct,
+                active.stop_loss_pct,
                 self.profit_protect_stop_r,
                 active.direction,
             )
         } else {
-            stop_price_for(active.entry_price, self.stop_loss_pct, active.direction)
+            active.stop_loss_price
         };
         if hit_stop(candle.l, candle.h, current_stop_price, active.direction)
             || hit_target(candle.l, candle.h, target_price, active.direction)
@@ -1740,7 +1759,7 @@ impl MarketVelocityReplayStrategy {
         }
         let trigger_price = target_price_for(
             active.entry_price,
-            self.stop_loss_pct,
+            active.stop_loss_pct,
             after_r,
             active.direction,
         );
@@ -1751,9 +1770,10 @@ impl MarketVelocityReplayStrategy {
         let event_id = active.event_id;
         let trigger = active.trigger.clone();
         let direction = active.direction;
+        let stop_loss_pct = active.stop_loss_pct;
         let protected_stop_price = target_price_for(
             entry_price,
-            self.stop_loss_pct,
+            stop_loss_pct,
             self.profit_protect_stop_r,
             direction,
         );
@@ -1765,6 +1785,7 @@ impl MarketVelocityReplayStrategy {
             candle.ts,
             entry_price,
             protected_stop_price,
+            stop_loss_pct,
             "MarketVelocityProfitProtect",
             event_id,
             &trigger,
@@ -1820,19 +1841,19 @@ impl MarketVelocityReplayStrategy {
         let should_clear = self.active_position.as_ref().is_some_and(|active| {
             let target_price = target_price_for(
                 active.entry_price,
-                self.stop_loss_pct,
+                active.stop_loss_pct,
                 self.target_r,
                 active.direction,
             );
             let stop_price = if active.profit_protected {
                 target_price_for(
                     active.entry_price,
-                    self.stop_loss_pct,
+                    active.stop_loss_pct,
                     self.profit_protect_stop_r,
                     active.direction,
                 )
             } else {
-                stop_price_for(active.entry_price, self.stop_loss_pct, active.direction)
+                active.stop_loss_price
             };
             hit_stop(candle.l, candle.h, stop_price, active.direction)
                 || hit_target(candle.l, candle.h, target_price, active.direction)
@@ -1854,6 +1875,7 @@ impl MarketVelocityReplayStrategy {
         candle_ts: i64,
         entry_price: f64,
         stop_loss_price: f64,
+        stop_loss_pct: f64,
         stop_loss_source: &str,
         event_id: i64,
         trigger: &str,
@@ -1869,14 +1891,14 @@ impl MarketVelocityReplayStrategy {
             long_signal_take_profit_price: (direction == MarketVelocityTradeDirection::Long)
                 .then_some(target_price_for(
                     entry_price,
-                    self.stop_loss_pct,
+                    stop_loss_pct,
                     self.target_r,
                     direction,
                 )),
             short_signal_take_profit_price: (direction == MarketVelocityTradeDirection::Short)
                 .then_some(target_price_for(
                     entry_price,
-                    self.stop_loss_pct,
+                    stop_loss_pct,
                     self.target_r,
                     direction,
                 )),
@@ -1888,7 +1910,7 @@ impl MarketVelocityReplayStrategy {
                     "entry_trigger": trigger,
                     "trade_direction": direction.label(),
                     "target_r": self.target_r,
-                    "stop_loss_pct": self.stop_loss_pct,
+                    "stop_loss_pct": stop_loss_pct,
                     "profit_protected": profit_protected,
                 })
                 .to_string(),

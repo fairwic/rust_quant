@@ -582,6 +582,8 @@ fn select_market_velocity_live_entry(
                 current_price,
                 selection.entry_price,
             ),
+            structure_stop_loss_price: selection.structure_stop_loss_price,
+            structure_stop_loss_source: selection.structure_stop_loss_source,
         },
     })
 }
@@ -1067,6 +1069,13 @@ mod tests {
             selection.selected_entry.entry_path,
             "fvg_15m_impulse_retrace"
         );
+        let selected_entry_json =
+            serde_json::to_value(&selection.selected_entry).expect("selected entry json");
+        assert_eq!(selected_entry_json["structure_stop_loss_price"], 104.0);
+        assert_eq!(
+            selected_entry_json["structure_stop_loss_source"],
+            "fvg_15m_impulse_lower"
+        );
     }
 
     #[test]
@@ -1093,6 +1102,16 @@ mod tests {
         );
         assert_eq!(selection.selected_entry.entry_path, "retest_after_signal");
         assert_eq!(selection.selected_entry.signal_pullback_pct, Some(2.286));
+        let selected_entry_json =
+            serde_json::to_value(&selection.selected_entry).expect("selected entry json");
+        let structure_stop = selected_entry_json["structure_stop_loss_price"]
+            .as_f64()
+            .expect("selected entry should carry structure stop");
+        assert!((structure_stop - selection.entry_confirmation.ema_value).abs() < 1e-6);
+        assert_eq!(
+            selected_entry_json["structure_stop_loss_source"],
+            "entry_confirmation_ema"
+        );
     }
 
     #[test]

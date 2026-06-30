@@ -6,7 +6,7 @@
 //! - 通过service层访问所有业务功能
 use anyhow::Result;
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
-use rust_quant_infrastructure::repositories::{PostgresCandleRepository, SqlxCandleRepository};
+use rust_quant_infrastructure::repositories::PostgresCandleRepository;
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::market::{
     should_use_quant_core_candle_source, CandleService as CandleMarketService, DataSyncService,
@@ -40,18 +40,14 @@ impl CandlesJob {
     /// # Architecture
     /// 统一创建 CandleService 实例，使用依赖注入模式
     fn create_candle_service() -> Result<CandleMarketService> {
-        if should_use_quant_core_candle_source()? {
-            let database_url = std::env::var("QUANT_CORE_DATABASE_URL").map_err(|_| {
-                anyhow::anyhow!("CANDLE_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")
-            })?;
-            let pool = PgPoolOptions::new()
-                .max_connections(5)
-                .connect_lazy(&database_url)?;
-            let repository = PostgresCandleRepository::new(pool);
-            return Ok(CandleMarketService::new(Box::new(repository)));
-        }
-        let pool = rust_quant_core::database::get_db_pool();
-        let repository = SqlxCandleRepository::new(pool.clone());
+        should_use_quant_core_candle_source()?;
+        let database_url = std::env::var("QUANT_CORE_DATABASE_URL").map_err(|_| {
+            anyhow::anyhow!("CANDLE_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")
+        })?;
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect_lazy(&database_url)?;
+        let repository = PostgresCandleRepository::new(pool);
         Ok(CandleMarketService::new(Box::new(repository)))
     }
     /// 同步最新的K线数据

@@ -16,6 +16,8 @@ const DEFAULT_DAYS: u64 = 60;
 const DEFAULT_PAGE_LIMIT: usize = 100;
 const DEFAULT_BATCH_SIZE: usize = 500;
 const DEFAULT_REQUEST_SLEEP_MS: u64 = 150;
+const CANDLE_1M_MS: i64 = 60 * 1_000;
+const CANDLE_5M_MS: i64 = 5 * 60 * 1_000;
 const CANDLE_15M_MS: i64 = 15 * 60 * 1_000;
 const CANDLE_1H_MS: i64 = 60 * 60 * 1_000;
 const CANDLE_4H_MS: i64 = 4 * 60 * 60 * 1_000;
@@ -163,7 +165,7 @@ where
 /// 执行输出市场动量backfillusage步骤，串起行情数据需要的状态推进和错误处理。
 pub fn print_market_velocity_backfill_usage() {
     println!(
-        "Usage: market_velocity_candle_backfill [--symbols BTC-USDT-SWAP,ETH-USDT-SWAP] [--days 60] [--proxy-url http://127.0.0.1:7897] [--dry-run|--write] [--all-radar-symbols] [--loop-interval-seconds 300]"
+        "Usage: market_velocity_candle_backfill [--symbols BTC-USDT-SWAP,ETH-USDT-SWAP] [--days 60] [--timeframe 1m|5m|15m|1h|4h] [--proxy-url http://127.0.0.1:7897] [--dry-run|--write] [--all-radar-symbols] [--loop-interval-seconds 300]"
     );
 }
 /// 提供配置from环境变量andargs的集中实现，避免行情数据调用方重复处理相同细节。
@@ -507,22 +509,28 @@ pub fn build_okx_http_client(proxy_url: Option<&str>) -> Result<Client> {
 /// 判断K 线intervalms，给行情数据流程提供布尔结果。
 pub fn candle_interval_ms(timeframe: &str) -> Result<i64> {
     match timeframe.trim().to_ascii_lowercase().as_str() {
+        "1m" => Ok(CANDLE_1M_MS),
+        "5m" => Ok(CANDLE_5M_MS),
         "15m" => Ok(CANDLE_15M_MS),
         "1h" => Ok(CANDLE_1H_MS),
         "4h" => Ok(CANDLE_4H_MS),
         other => bail!(
-            "unsupported market velocity candle backfill timeframe: {other}; supported: 15m, 1h, 4h"
+            "unsupported market velocity candle backfill timeframe: {other}; supported: 1m, 5m, 15m, 1h, 4h"
         ),
     }
 }
 /// 提供OKXbarfortimeframe的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn okx_bar_for_timeframe(timeframe: &str) -> Result<&'static str> {
     match timeframe.trim().to_ascii_lowercase().as_str() {
+        "1m" => Ok("1m"),
+        "5m" => Ok("5m"),
         "15m" => Ok("15m"),
         "1h" => Ok("1H"),
         "4h" => Ok("4H"),
         other => {
-            bail!("unsupported market velocity OKX candle bar: {other}; supported: 15m, 1h, 4h")
+            bail!(
+                "unsupported market velocity OKX candle bar: {other}; supported: 1m, 5m, 15m, 1h, 4h"
+            )
         }
     }
 }
@@ -696,7 +704,10 @@ mod tests {
             100,
         )
         .unwrap();
-        assert_eq!(url.as_str(), "https://www.okx.com/api/v5/market/history-candles?instId=XAG-USDT-SWAP&bar=15m&limit=100&after=1781500000000");
+        assert_eq!(
+            url.as_str(),
+            "https://www.okx.com/api/v5/market/history-candles?instId=XAG-USDT-SWAP&bar=15m&limit=100&after=1781500000000"
+        );
     }
     #[test]
     fn parse_okx_candle_row_matches_existing_dto_mapping() {
@@ -737,10 +748,21 @@ mod tests {
         assert_eq!(candle_interval_ms("1h").unwrap(), 60 * 60 * 1_000);
     }
     #[test]
+    fn candle_interval_ms_supports_1m_scalper_backfill() {
+        assert_eq!(candle_interval_ms("1m").unwrap(), 60 * 1_000);
+        assert_eq!(okx_bar_for_timeframe("1m").unwrap(), "1m");
+    }
+    #[test]
     fn okx_bar_for_timeframe_uses_okx_hour_case() {
+        assert_eq!(okx_bar_for_timeframe("5m").unwrap(), "5m");
         assert_eq!(okx_bar_for_timeframe("15m").unwrap(), "15m");
         assert_eq!(okx_bar_for_timeframe("1h").unwrap(), "1H");
         assert_eq!(okx_bar_for_timeframe("4h").unwrap(), "4H");
+    }
+    #[test]
+    fn max_history_pages_has_buffer_for_60_days_of_5m_candles() {
+        let pages = max_history_pages(0, 60 * 24 * 60 * 60 * 1_000, CANDLE_5M_MS, 100);
+        assert_eq!(pages, 180);
     }
     #[test]
     fn max_history_pages_has_buffer_for_60_days_of_1h_candles() {

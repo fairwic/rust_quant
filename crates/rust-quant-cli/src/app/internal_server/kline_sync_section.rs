@@ -31,16 +31,12 @@ async fn sync_kline_request(request: &KlineSyncRequest) -> Result<i64> {
 }
 /// 创建 行情与市场数据 资源，并在入口处完成必要的参数归一。
 fn create_kline_sync_candle_service() -> Result<CandleService> {
-    if should_use_quant_core_candle_source()? {
-        let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
-            .context("CANDLE_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")?;
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect_lazy(&database_url)?;
-        let repository = PostgresCandleRepository::new(pool);
-        return Ok(CandleService::new(Box::new(repository)));
-    }
-    let pool = rust_quant_core::database::get_db_pool();
-    let repository = SqlxCandleRepository::new(pool.clone());
+    should_use_quant_core_candle_source()?;
+    let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
+        .context("CANDLE_SOURCE=quant_core 时必须设置 QUANT_CORE_DATABASE_URL")?;
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect_lazy(&database_url)?;
+    let repository = PostgresCandleRepository::new(pool);
     Ok(CandleService::new(Box::new(repository)))
 }

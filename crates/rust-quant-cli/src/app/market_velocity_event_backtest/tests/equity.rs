@@ -520,6 +520,51 @@ fn framework_equity_trade_report_applies_early_no_profit_exit() {
     assert!(reports[0].profit_loss < 0.0);
     assert!(reports[0].profit_loss > -1.0);
 }
+
+#[test]
+fn framework_equity_trade_report_uses_structure_stop_when_enabled() {
+    let entry_ts = MS_15M * 505;
+    let mut candles = Vec::new();
+    for index in 0..505 {
+        candles.push(ohlc(MS_15M * index, 100.0, 100.5, 99.5, 100.0));
+    }
+    candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
+    candles.push(ohlc(entry_ts + MS_15M, 100.0, 100.5, 97.8, 98.2));
+    candles.push(ohlc(entry_ts + MS_15M * 2, 107.8, 108.4, 107.5, 108.0));
+    let mut event = confirmed_event(
+        46,
+        "STRUCTURE-STOP-USDT-SWAP",
+        entry_ts,
+        "2026-06-01T00:00:00Z",
+    );
+    event.structure_stop_loss_price = Some(98.0);
+    event.structure_stop_loss_source = Some("entry_confirmation_ema".to_string());
+    let confirmed = vec![event];
+    let candles_by_symbol = HashMap::from([("STRUCTURE-STOP-USDT-SWAP".to_string(), candles)]);
+
+    let fixed_args = MarketVelocityEventBacktestArgs {
+        min_trades: 1,
+        stop_loss_pct: 0.04,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let fixed_reports =
+        build_framework_equity_trade_reports(&confirmed, &candles_by_symbol, 2.0, &fixed_args);
+    assert_eq!(fixed_reports.len(), 1);
+    assert_eq!(fixed_reports[0].outcome, "win");
+    assert!(fixed_reports[0].profit_loss > 0.0);
+
+    let structure_args = MarketVelocityEventBacktestArgs {
+        stop_loss_mode: MarketVelocityStopLossMode::StructureOrFixed,
+        ..fixed_args
+    };
+    let structure_reports =
+        build_framework_equity_trade_reports(&confirmed, &candles_by_symbol, 2.0, &structure_args);
+    assert_eq!(structure_reports.len(), 1);
+    assert_eq!(structure_reports[0].close_type, "Signal_Kline_Stop_Loss");
+    assert_eq!(structure_reports[0].outcome, "loss");
+    assert!(structure_reports[0].profit_loss < 0.0);
+}
+
 #[test]
 fn framework_equity_trade_report_keeps_risk_close_type_before_early_exit_signal() {
     let entry_ts = MS_15M * 505;
@@ -805,5 +850,7 @@ fn confirmed_event(id: i64, symbol: &str, entry_ts: i64, detected_at: &str) -> C
         entry_price: 100.0,
         entry_idx: 505,
         trigger: "breakout_previous_high".to_string(),
+        structure_stop_loss_price: None,
+        structure_stop_loss_source: None,
     }
 }

@@ -50,6 +50,8 @@ pub fn market_velocity_paper_strategy_preset_manifest(
             "event_source": args.event_source.label(),
             "trade_direction": args.trade_direction.label(),
             "stop_loss_pct": args.stop_loss_pct,
+            "stop_loss_mode": args.stop_loss_mode.label(),
+            "structure_stop_min_pct": args.structure_stop_min_pct,
             "target_r": args.target_rs.first().copied(),
             "entry_period": args.entry_period,
             "entry_max_distance_pct": args.entry_max_distance_pct,
@@ -126,6 +128,12 @@ fn human_label_for_preset(preset: &str) -> &str {
         "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_v1" => {
             "Market Velocity 0.04SL 2.0R breakout reclaim fvg wait10 delta15-40 pchg5-12 v1"
         }
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner6r20_stop1_v1" => {
+            "Market Velocity 0.04SL 2.0R breakout reclaim fvg wait10 delta15-40 pchg5-12 runner6R20 stop1 v1"
+        }
+        "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner8r20_stop1_v1" => {
+            "Market Velocity 0.04SL 2.0R breakout reclaim fvg wait10 delta15-40 pchg5-12 runner8R20 stop1 v1"
+        }
         "research_momentum_04sl_20r_reclaim_fvgwait10_delta15_40_pchg5_12_v1" => {
             "Market Velocity 0.04SL 2.0R reclaim fvg wait10 delta15-40 pchg5-12 v1"
         }
@@ -153,6 +161,9 @@ fn human_label_for_preset(preset: &str) -> &str {
         "research_momentum_04sl_18r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1" => {
             "Market Velocity 0.04SL 1.8R reclaim retest1 dist3 pullback3 vol11 delta20-40 pchg5-10 v1"
         }
+        "research_momentum_04sl_20r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1" => {
+            "Market Velocity 0.04SL 2.0R reclaim retest1 dist3 pullback3 vol11 delta20-40 pchg5-10 v1"
+        }
         "research_momentum_04sl_18r_breakout_reclaim_retest1_delta20_40_pchg5_10_v1" => {
             "Market Velocity 0.04SL 1.8R breakout reclaim retest1 vol10 delta20-40 pchg5-10 v1"
         }
@@ -165,6 +176,12 @@ fn human_label_for_preset(preset: &str) -> &str {
         "momentum_03sl_20r_v5" => "Market Velocity 0.03SL 2.0R momentum v5",
         "research_episode_momentum_03sl_24r_rank5_30_v1" => {
             "Market Velocity episode 0.03SL 2.4R rank5-30 v1"
+        }
+        "research_episode_momentum_05sl_20r_rank5_v1" => {
+            "Market Velocity episode 0.05SL 2.0R rank5 v1"
+        }
+        "research_episode_momentum_05sl_30r_rank5_v1" => {
+            "Market Velocity episode 0.05SL 3.0R rank5 v1"
         }
         "research_episode_runner_03sl_24r_8r30_v1" => {
             "Market Velocity episode runner 0.03SL 2.4R 8R30 v1"

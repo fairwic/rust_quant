@@ -1001,6 +1001,8 @@ fn summarize_target_can_reenter_after_stop_on_breakout_reclaim() {
         entry_price: 102.0,
         entry_idx: 1,
         trigger: "breakout_previous_high".to_string(),
+        structure_stop_loss_price: None,
+        structure_stop_loss_source: None,
     }];
     let candles = HashMap::from([(
         "BSB-USDT-SWAP".to_string(),
@@ -1082,6 +1084,67 @@ fn summarize_target_can_reenter_after_stop_on_breakout_reclaim() {
     assert_eq!(reentry.signal_ts, MS_15M * 4);
     assert_eq!(reentry.reclaim_price, 103.0);
 }
+
+#[test]
+fn select_stop_loss_for_confirmed_signal_applies_structure_stop_min_pct_floor() {
+    let args = MarketVelocityEventBacktestArgs {
+        stop_loss_pct: 0.04,
+        stop_loss_mode: MarketVelocityStopLossMode::StructureOrFixed,
+        structure_stop_min_pct: 0.01,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let mut signal = confirmed_event(89, "reclaim_ema+fvg_15m_impulse_retrace");
+    signal.entry_price = 100.0;
+    signal.structure_stop_loss_price = Some(99.8);
+    signal.structure_stop_loss_source = Some("entry_confirmation_ema".to_string());
+
+    let selected = select_stop_loss_for_confirmed_signal(&signal, &args);
+
+    assert_eq!(selected.price, 99.0);
+    assert_eq!(selected.stop_loss_pct, 0.01);
+    assert_eq!(selected.source, "entry_confirmation_ema+min_pct_floor");
+}
+
+#[test]
+fn select_stop_loss_for_confirmed_signal_uses_structure_with_cap_inside_bounds() {
+    let args = MarketVelocityEventBacktestArgs {
+        stop_loss_pct: 0.05,
+        stop_loss_mode: MarketVelocityStopLossMode::StructureWithCap,
+        structure_stop_min_pct: 0.02,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let mut signal = confirmed_event(89, "reclaim_ema+fvg_15m_impulse_retrace");
+    signal.entry_price = 100.0;
+    signal.structure_stop_loss_price = Some(96.5);
+    signal.structure_stop_loss_source = Some("fvg_15m_impulse_lower".to_string());
+
+    let selected = select_stop_loss_for_confirmed_signal(&signal, &args);
+
+    assert_eq!(selected.price, 96.5);
+    assert_eq!(selected.stop_loss_pct, 0.035);
+    assert_eq!(selected.source, "fvg_15m_impulse_lower");
+}
+
+#[test]
+fn select_stop_loss_for_confirmed_signal_caps_structure_with_cap_at_max_pct() {
+    let args = MarketVelocityEventBacktestArgs {
+        stop_loss_pct: 0.05,
+        stop_loss_mode: MarketVelocityStopLossMode::StructureWithCap,
+        structure_stop_min_pct: 0.02,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let mut signal = confirmed_event(89, "reclaim_ema+fvg_15m_impulse_retrace");
+    signal.entry_price = 100.0;
+    signal.structure_stop_loss_price = Some(94.0);
+    signal.structure_stop_loss_source = Some("fvg_15m_impulse_lower".to_string());
+
+    let selected = select_stop_loss_for_confirmed_signal(&signal, &args);
+
+    assert_eq!(selected.price, 95.0);
+    assert_eq!(selected.stop_loss_pct, 0.05);
+    assert_eq!(selected.source, "fvg_15m_impulse_lower+max_pct_cap");
+}
+
 #[test]
 fn event_backtest_defaults_match_production_market_velocity_policy() {
     let args = MarketVelocityEventBacktestArgs::default();
@@ -1154,6 +1217,8 @@ fn framework_equity_report_uses_100u_funds_and_min_trade_gate() {
         entry_price: 100.0,
         entry_idx: 505,
         trigger: "breakout_previous_high".to_string(),
+        structure_stop_loss_price: None,
+        structure_stop_loss_source: None,
     }];
     let candles_by_symbol = HashMap::from([("TEST-USDT-SWAP".to_string(), candles)]);
     let args = MarketVelocityEventBacktestArgs {
@@ -1195,6 +1260,8 @@ fn framework_equity_report_calculates_trade_sharpe_and_max_drawdown() {
             entry_price: 100.0,
             entry_idx: 505,
             trigger: "breakout_previous_high".to_string(),
+            structure_stop_loss_price: None,
+            structure_stop_loss_source: None,
         },
         ConfirmedEvent {
             event: RadarEvent {
@@ -1212,6 +1279,8 @@ fn framework_equity_report_calculates_trade_sharpe_and_max_drawdown() {
             entry_price: 100.0,
             entry_idx: 507,
             trigger: "reclaim_ema".to_string(),
+            structure_stop_loss_price: None,
+            structure_stop_loss_source: None,
         },
     ];
     let candles_by_symbol = HashMap::from([("TEST-USDT-SWAP".to_string(), candles)]);
@@ -1259,6 +1328,25 @@ fn parses_runner_exit_controls() {
     assert_eq!(args.runner_fraction, 0.5);
     assert_eq!(args.runner_stop_r, 0.0);
 }
+
+#[test]
+fn parses_structure_with_cap_stop_loss_mode() {
+    let args = parse_cli_args_from([
+        "--stop-loss-pct",
+        "0.05",
+        "--stop-loss-mode",
+        "structure_with_cap",
+        "--structure-stop-min-pct",
+        "0.02",
+    ])
+    .unwrap();
+    assert_eq!(args.stop_loss_pct, 0.05);
+    assert_eq!(
+        args.stop_loss_mode,
+        MarketVelocityStopLossMode::StructureWithCap
+    );
+    assert_eq!(args.structure_stop_min_pct, 0.02);
+}
 #[test]
 fn parses_early_exit_no_profit_controls() {
     let args = parse_cli_args_from(["--early-exit-no-profit-candles", "2"]).unwrap();
@@ -1297,6 +1385,22 @@ fn rejects_runner_fraction_outside_position_share() {
     assert!(err
         .to_string()
         .contains("--runner-fraction must be greater than 0 and lower than 1"));
+}
+
+#[test]
+fn rejects_structure_floor_above_cap_for_structure_with_cap() {
+    let err = parse_cli_args_from([
+        "--stop-loss-pct",
+        "0.04",
+        "--stop-loss-mode",
+        "structure_with_cap",
+        "--structure-stop-min-pct",
+        "0.05",
+    ])
+    .unwrap_err();
+    assert!(err.to_string().contains(
+        "--structure-stop-min-pct must be lower than or equal to --stop-loss-pct when --stop-loss-mode=structure_with_cap"
+    ));
 }
 #[test]
 fn rejects_profit_protection_stop_at_or_above_activation() {
@@ -2174,6 +2278,8 @@ fn builds_paper_outcomes_for_each_target_and_horizon_without_execution_task_payl
         entry_price: 100.0,
         entry_idx: 0,
         trigger: "breakout_previous_high".to_string(),
+        structure_stop_loss_price: None,
+        structure_stop_loss_source: None,
     }];
     let candles = HashMap::from([(
         "ETH-USDT-SWAP".to_string(),
@@ -2246,6 +2352,8 @@ fn confirmed_event(id: i64, trigger: &str) -> ConfirmedEvent {
         entry_price: 100.0,
         entry_idx: 0,
         trigger: trigger.to_string(),
+        structure_stop_loss_price: None,
+        structure_stop_loss_source: None,
     }
 }
 fn radar_event_at(ts: i64) -> RadarEvent {

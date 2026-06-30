@@ -108,6 +108,87 @@ fn live_strategy_startup_uses_candle_service_for_quant_core_source() {
     assert!(!bootstrap.contains("CandlesModel::new()"));
 }
 #[test]
+fn kline_backtest_and_sync_paths_do_not_keep_legacy_candle_table_fallbacks() {
+    let market_mod = read_repo_file(&["crates", "services", "src", "market", "mod.rs"]);
+    assert!(market_mod.contains("get_quant_core_sharded_candles_for_backtest"));
+    assert!(
+        !market_mod.contains("fetch_candles_from_postgres(dto)"),
+        "backtest candle loading must read quant_core symbol/timeframe sharded tables only"
+    );
+
+    let binance_websocket = read_repo_file(&[
+        "crates",
+        "services",
+        "src",
+        "market",
+        "binance_websocket.rs",
+    ]);
+    assert!(
+        !binance_websocket.contains("LegacyCompatTables"),
+        "websocket candle persistence must not keep legacy table fallback"
+    );
+
+    let candles_job = read_repo_file(&[
+        "crates",
+        "orchestration",
+        "src",
+        "jobs",
+        "data",
+        "candles_job.rs",
+    ]);
+    assert!(
+        !candles_job.contains("SqlxCandleRepository"),
+        "scheduled candle sync must not keep legacy repository fallback"
+    );
+
+    let kline_sync_section = read_repo_file(&[
+        "crates",
+        "rust-quant-cli",
+        "src",
+        "app",
+        "internal_server",
+        "kline_sync_section.rs",
+    ]);
+    assert!(
+        !kline_sync_section.contains("SqlxCandleRepository"),
+        "internal kline sync must not keep legacy repository fallback"
+    );
+}
+#[test]
+fn external_market_sync_defaults_to_sharded_market_context_tables() {
+    let external_market_sync = read_repo_file(&[
+        "crates",
+        "services",
+        "src",
+        "market",
+        "external_market_sync_service.rs",
+    ]);
+    assert!(
+        external_market_sync.contains("ShardedExternalMarketSnapshotRepository"),
+        "external market sync must default to sharded market context tables"
+    );
+    assert!(
+        !external_market_sync.contains("SqlxExternalMarketSnapshotRepository::new(pool)"),
+        "external market sync must not default to external_market_snapshots"
+    );
+
+    let dune_market_sync = read_repo_file(&[
+        "crates",
+        "services",
+        "src",
+        "market",
+        "dune_market_sync_service.rs",
+    ]);
+    assert!(
+        dune_market_sync.contains("ShardedExternalMarketSnapshotRepository"),
+        "dune market sync must default to sharded market context tables"
+    );
+    assert!(
+        !dune_market_sync.contains("SqlxExternalMarketSnapshotRepository::new(pool)"),
+        "dune market sync must not default to external_market_snapshots"
+    );
+}
+#[test]
 fn live_strategy_quant_core_smoke_script_is_safe_and_bounded() {
     let root = repo_root();
     let script_path = root

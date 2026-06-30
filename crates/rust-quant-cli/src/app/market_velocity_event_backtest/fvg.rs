@@ -12,6 +12,10 @@ pub(super) struct FvgEntrySignal {
     pub entry_15m_idx: usize,
     /// trigger，用于记录新闻或情报分析结果。
     pub trigger: String,
+    /// 结构止损价格；为空时表示没有结构锚点。
+    pub structure_stop_loss_price: Option<f64>,
+    /// 结构止损来源；为空时表示没有结构锚点。
+    pub structure_stop_loss_source: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum FvgEntrySearch {
@@ -106,6 +110,8 @@ pub(super) fn find_15m_impulse_fvg_retrace_after_signal(
             entry_price: lower_band_upper,
             entry_15m_idx: retest_idx,
             trigger: format!("{original_trigger}+fvg_15m_impulse_retrace"),
+            structure_stop_loss_price: Some(zone.lower),
+            structure_stop_loss_source: Some("fvg_15m_impulse_lower".to_string()),
         });
     }
     FvgEntrySearch::Blocked("fvg_no_15m_impulse_limit_fill".to_string())
@@ -198,6 +204,8 @@ pub(super) fn find_15m_self_fvg_entry_after_signal(
                 entry_price: entry.open,
                 entry_15m_idx: entry_idx,
                 trigger: format!("{original_trigger}+fvg_15m_self_after_signal"),
+                structure_stop_loss_price: Some(anchor.high),
+                structure_stop_loss_source: Some("fvg_15m_self_lower".to_string()),
             });
         }
     }
@@ -235,7 +243,7 @@ fn find_entry_for_timeframes(
         if !bullish_midpoint_confirmation(signal) {
             continue;
         }
-        let Some(_zone) = zones
+        let Some(zone) = zones
             .iter()
             .find(|zone| candle_overlaps_zone(signal, zone.lower, zone.upper))
         else {
@@ -253,6 +261,8 @@ fn find_entry_for_timeframes(
             entry_price: entry.open,
             entry_15m_idx,
             trigger: trigger.to_string(),
+            structure_stop_loss_price: Some(zone.lower),
+            structure_stop_loss_source: Some("fvg_zone_lower".to_string()),
         });
     }
     FvgEntrySearch::Blocked("fvg_no_pullback_confirmation".to_string())

@@ -28,7 +28,7 @@ pub use args::{
     print_market_velocity_event_backtest_usage, print_market_velocity_paper_observation_usage,
     FvgEntryMode, MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
     MarketVelocityPaperObservationCommand, MarketVelocityPaperOutcomeSink,
-    MarketVelocityTradeDirection, StopReentryMode,
+    MarketVelocityStopLossMode, MarketVelocityTradeDirection, StopReentryMode,
 };
 use data::load_backtest_data;
 pub use equity::{
@@ -133,6 +133,10 @@ pub struct ConfirmedEvent {
     pub entry_idx: usize,
     /// trigger，用于行情、K 线或市场扫描。
     pub trigger: String,
+    /// 结构止损价格；为空时表示只能回退到固定百分比止损。
+    pub structure_stop_loss_price: Option<f64>,
+    /// 结构止损来源；为空时表示没有结构锚点。
+    pub structure_stop_loss_source: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,6 +153,10 @@ pub struct MarketVelocityLiveEntryShellSelection {
     pub entry_price: f64,
     /// 实际 live entry trigger。
     pub entry_trigger: String,
+    /// 结构止损价格；为空时表示没有结构锚点。
+    pub structure_stop_loss_price: Option<f64>,
+    /// 结构止损来源；为空时表示没有结构锚点。
+    pub structure_stop_loss_source: Option<String>,
 }
 /// 封装当前函数，减少回测策略调用方重复实现相同细节。
 /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
@@ -835,7 +843,9 @@ pub fn select_live_entry_from_signal_shell(
     let finalize = |entry_idx: usize,
                     entry_ts: i64,
                     entry_price: f64,
-                    entry_trigger: String|
+                    entry_trigger: String,
+                    structure_stop_loss_price: Option<f64>,
+                    structure_stop_loss_source: Option<String>|
      -> Result<MarketVelocityLiveEntryShellSelection, String> {
         if let Some(reason) =
             entry_signal_pullback_block_reason(&event, entry_price, direction, args)
@@ -849,6 +859,8 @@ pub fn select_live_entry_from_signal_shell(
             entry_ts,
             entry_price,
             entry_trigger,
+            structure_stop_loss_price,
+            structure_stop_loss_source,
         })
     };
     match args.fvg_entry_mode {
@@ -865,6 +877,8 @@ pub fn select_live_entry_from_signal_shell(
                     entry.entry_ts,
                     entry.entry_price,
                     entry.trigger,
+                    entry.structure_stop_loss_price,
+                    entry.structure_stop_loss_source,
                 ),
                 FvgEntrySearch::Blocked(reason) if args.entry_retest_after_signal => {
                     let fallback = find_retest_entry_after_signal(
@@ -880,6 +894,8 @@ pub fn select_live_entry_from_signal_shell(
                         fallback.entry_ts,
                         fallback.entry_price,
                         format!("{}+fvg_fallback", fallback.trigger),
+                        fallback.structure_stop_loss_price,
+                        fallback.structure_stop_loss_source,
                     )
                 }
                 FvgEntrySearch::Blocked(reason) => Err(reason),
@@ -898,6 +914,8 @@ pub fn select_live_entry_from_signal_shell(
                 fallback.entry_ts,
                 fallback.entry_price,
                 fallback.trigger,
+                fallback.structure_stop_loss_price,
+                fallback.structure_stop_loss_source,
             )
         }
         _ => Err("live_signal_shell_requires_hybrid_retest_mode".to_string()),
@@ -982,6 +1000,8 @@ pub fn evaluate_events(
                                 entry_price: entry.entry_price,
                                 entry_idx: entry.entry_idx,
                                 trigger: entry.trigger,
+                                structure_stop_loss_price: entry.structure_stop_loss_price,
+                                structure_stop_loss_source: entry.structure_stop_loss_source,
                             });
                         }
                         Err(reason) => {
@@ -1023,6 +1043,8 @@ pub fn evaluate_events(
                     entry_price: entry.open,
                     entry_idx,
                     trigger: entry_reason,
+                    structure_stop_loss_price: None,
+                    structure_stop_loss_source: None,
                 });
             }
             FvgEntryMode::M15SelfAfterSignal => {
@@ -1074,6 +1096,8 @@ pub fn evaluate_events(
                             entry_price: entry.entry_price,
                             entry_idx: entry.entry_15m_idx,
                             trigger: entry.trigger,
+                            structure_stop_loss_price: entry.structure_stop_loss_price,
+                            structure_stop_loss_source: entry.structure_stop_loss_source,
                         });
                     }
                     FvgEntrySearch::Blocked(reason) => {
@@ -1134,6 +1158,8 @@ pub fn evaluate_events(
                             entry_price: entry.entry_price,
                             entry_idx: entry.entry_15m_idx,
                             trigger: entry.trigger,
+                            structure_stop_loss_price: entry.structure_stop_loss_price,
+                            structure_stop_loss_source: entry.structure_stop_loss_source,
                         });
                     }
                     FvgEntrySearch::Blocked(reason) => {
@@ -1165,6 +1191,9 @@ pub fn evaluate_events(
                                         entry_price: entry.entry_price,
                                         entry_idx: entry.entry_idx,
                                         trigger: format!("{}+fvg_fallback", entry.trigger),
+                                        structure_stop_loss_price: entry.structure_stop_loss_price,
+                                        structure_stop_loss_source: entry
+                                            .structure_stop_loss_source,
                                     });
                                 }
                                 Err(fallback_reason) => {
@@ -1243,6 +1272,8 @@ pub fn evaluate_events(
                             entry_price: entry.entry_price,
                             entry_idx: entry.entry_15m_idx,
                             trigger: entry.trigger,
+                            structure_stop_loss_price: entry.structure_stop_loss_price,
+                            structure_stop_loss_source: entry.structure_stop_loss_source,
                         });
                     }
                     FvgEntrySearch::Blocked(reason) => {
@@ -1266,6 +1297,8 @@ struct RetestEntrySignal {
     entry_price: f64,
     entry_idx: usize,
     trigger: String,
+    structure_stop_loss_price: Option<f64>,
+    structure_stop_loss_source: Option<String>,
 }
 fn find_retest_entry_after_signal(
     candles: &[ComputedCandle],
@@ -1325,6 +1358,12 @@ fn find_retest_entry_after_signal(
             entry_price: entry.candle.open,
             entry_idx,
             trigger: format!("{base_trigger}+retest_after_signal"),
+            structure_stop_loss_price: Some(retest_level),
+            structure_stop_loss_source: Some(match base_trigger.as_str() {
+                "reclaim_ema" => "entry_confirmation_ema".to_string(),
+                "breakout_previous_high" => "entry_confirmation_previous_high".to_string(),
+                _ => "entry_confirmation_structure".to_string(),
+            }),
         });
     }
     Err("entry_retest_no_pullback_confirmation".to_string())
@@ -1414,13 +1453,14 @@ fn summarize_target(
         let Some(candles) = candles_15m.get(symbol) else {
             continue;
         };
+        let selected_stop_loss = select_stop_loss_for_confirmed_signal(signal, args);
         let mut result = simulate_trade(
             candles,
             signal.entry_idx,
             signal.entry_ts,
             signal.entry_price,
             trade_direction_for_event(&signal.event),
-            args.stop_loss_pct,
+            selected_stop_loss.stop_loss_pct,
             target_r,
             horizon_ms,
             profit_protection_for_target(args, target_r),
@@ -1480,6 +1520,7 @@ pub fn build_market_velocity_paper_outcomes(
                     .clone()
                     .unwrap_or_else(|| signal.event.symbol.clone());
                 let entry_trigger = result.trigger.clone();
+                let selected_stop_loss = select_stop_loss_for_confirmed_signal(signal, args);
                 outcomes.push(MarketVelocityPaperOutcomeRequest {
                     rank_event_id: event_id,
                     exchange: signal.event.exchange.trim().to_ascii_lowercase(),
@@ -1502,6 +1543,10 @@ pub fn build_market_velocity_paper_outcomes(
                         "horizon_hours": horizon_hours,
                         "trade_direction": trade_direction_for_event(&signal.event).label(),
                         "stop_loss_pct": args.stop_loss_pct,
+                        "stop_loss_mode": args.stop_loss_mode.label(),
+                        "selected_stop_loss_pct": selected_stop_loss.stop_loss_pct,
+                        "selected_stop_loss_price": selected_stop_loss.price,
+                        "selected_stop_loss_source": selected_stop_loss.source,
                         "entry_period": args.entry_period,
                         "entry_trigger": entry_trigger,
                         "entry_trigger_filter_version": entry_trigger_filter_version,
@@ -1550,6 +1595,93 @@ fn fvg_entry_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Valu
         "lookback_candles": args.fvg_lookback_candles,
         "max_wait_candles": args.fvg_max_wait_candles,
     })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SelectedStopLossForSignal {
+    price: f64,
+    stop_loss_pct: f64,
+    source: String,
+}
+
+fn select_stop_loss_for_confirmed_signal(
+    signal: &ConfirmedEvent,
+    args: &MarketVelocityEventBacktestArgs,
+) -> SelectedStopLossForSignal {
+    let fixed_price = signal.entry_price * (1.0 - args.stop_loss_pct);
+    let fixed_source = fixed_stop_loss_source(args.stop_loss_pct);
+    let structure = signal
+        .structure_stop_loss_price
+        .filter(|price| price.is_finite() && *price > 0.0 && *price < signal.entry_price)
+        .zip(signal.structure_stop_loss_source.clone())
+        .map(|(price, source)| {
+            apply_structure_stop_min_pct_floor(
+                signal.entry_price,
+                price,
+                source,
+                args.structure_stop_min_pct,
+            )
+        });
+    let (price, source) = match (args.stop_loss_mode, structure) {
+        (
+            MarketVelocityStopLossMode::StructureOrFixed,
+            Some((structure_price, structure_source)),
+        ) if structure_price > fixed_price => (structure_price, structure_source),
+        (
+            MarketVelocityStopLossMode::StructureWithCap,
+            Some((structure_price, structure_source)),
+        ) => apply_structure_stop_max_pct_cap(
+            signal.entry_price,
+            structure_price,
+            structure_source,
+            args.stop_loss_pct,
+        ),
+        _ => (fixed_price, fixed_source),
+    };
+    SelectedStopLossForSignal {
+        price,
+        stop_loss_pct: (signal.entry_price - price) / signal.entry_price,
+        source,
+    }
+}
+
+fn apply_structure_stop_min_pct_floor(
+    entry_price: f64,
+    structure_price: f64,
+    structure_source: String,
+    structure_stop_min_pct: f64,
+) -> (f64, String) {
+    if structure_stop_min_pct <= 0.0 {
+        return (structure_price, structure_source);
+    }
+    let floor_price = entry_price * (1.0 - structure_stop_min_pct);
+    if structure_price > floor_price {
+        (floor_price, format!("{structure_source}+min_pct_floor"))
+    } else {
+        (structure_price, structure_source)
+    }
+}
+
+fn apply_structure_stop_max_pct_cap(
+    entry_price: f64,
+    structure_price: f64,
+    structure_source: String,
+    stop_loss_pct: f64,
+) -> (f64, String) {
+    let cap_price = entry_price * (1.0 - stop_loss_pct);
+    if structure_price < cap_price {
+        (cap_price, format!("{structure_source}+max_pct_cap"))
+    } else {
+        (structure_price, structure_source)
+    }
+}
+
+fn fixed_stop_loss_source(stop_loss_pct: f64) -> String {
+    let basis_points = (stop_loss_pct * 10_000.0).round() as i64;
+    let tag = format!("{basis_points:04}")
+        .trim_end_matches('0')
+        .to_string();
+    format!("market_velocity_fixed_{tag}sl")
 }
 /// 提供盈利保护载荷的集中实现，避免回测策略调用方重复处理相同细节。
 fn profit_protection_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {

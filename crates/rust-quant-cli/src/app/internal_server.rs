@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use crypto_exc_all::ExchangeId;
 use rust_quant_domain::Timeframe;
-use rust_quant_infrastructure::repositories::{PostgresCandleRepository, SqlxCandleRepository};
+use rust_quant_infrastructure::repositories::PostgresCandleRepository;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
