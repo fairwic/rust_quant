@@ -29,6 +29,10 @@ pub enum StrategyType {
     BtcEthLiquidityScalper,
     /// BTC/ETH 做空策略栈
     BearShortStack,
+    /// BTC/ETH 短周期均值回归剥头皮策略
+    RangeReversionScalper,
+    /// BTC/ETH 短周期动量突破回踩策略
+    MomentumBreakoutScalper,
     /// 自定义策略
     Custom(u32),
 }
@@ -50,6 +54,8 @@ impl StrategyType {
             StrategyType::MarketVelocity => "market_velocity",
             StrategyType::BtcEthLiquidityScalper => "btc_eth_liquidity_scalper_v1",
             StrategyType::BearShortStack => "bear_short_stack_v1",
+            StrategyType::RangeReversionScalper => "range_reversion_scalper_v1",
+            StrategyType::MomentumBreakoutScalper => "momentum_breakout_scalper_v1",
             StrategyType::Custom(_) => "custom",
         }
     }
@@ -76,6 +82,8 @@ impl std::str::FromStr for StrategyType {
             "bear_short_stack_v1" | "bear_breakdown_short_v1" | "exhaustion_fade_short_v1" => {
                 Ok(StrategyType::BearShortStack)
             }
+            "range_reversion_scalper_v1" => Ok(StrategyType::RangeReversionScalper),
+            "momentum_breakout_scalper_v1" => Ok(StrategyType::MomentumBreakoutScalper),
             _ => Err(format!("Unknown strategy type: {}", s)),
         }
     }

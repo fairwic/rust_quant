@@ -40,13 +40,53 @@ impl BearShortStackStrategy {
         )
     }
 
-    pub fn flat_missing_snapshot(price: f64, ts: i64) -> SignalResult {
+    /// Builds a flat signal when live/backtest cannot provide the required market snapshot.
+    pub fn flat_missing_snapshot(price: f64, ts: i64, preset: BearShortPreset) -> SignalResult {
         Self::decision(
             BearShortAction::Flat,
-            BearShortPreset::BearBreakdown,
+            preset,
             vec!["MISSING_MARKET_SNAPSHOT".to_string()],
         )
         .to_signal(price, ts)
+    }
+
+    /// Builds the same technical snapshot live execution needs after Core has loaded real market context.
+    pub fn build_live_snapshot_from_context(
+        preset: BearShortPreset,
+        symbol: &str,
+        candles: &[CandleItem],
+        market_context: BearShortStackBacktestMarketContext,
+    ) -> Option<BearShortSignalSnapshot> {
+        let last = candles.last()?;
+        let mut indicator_combine = ();
+        let values =
+            <BearShortStackBacktestAdapter as IndicatorStrategyBacktest>::build_indicator_values(
+                &mut indicator_combine,
+                last,
+            );
+        let adapter = BearShortStackBacktestAdapter {
+            preset,
+            symbol: symbol.to_string(),
+            cooldown_remaining: 0,
+            tuning: BearShortStackBacktestTuning::real_context_default(preset),
+            market_context: Some(vec![market_context]),
+            exhaustion_entry_index: None,
+        };
+        let mut snapshot = match preset {
+            BearShortPreset::BearBreakdown => {
+                let setup = adapter.breakdown_setup(candles, &values)?;
+                adapter.breakdown_snapshot(last, &values, setup)
+            }
+            BearShortPreset::ExhaustionFade => {
+                let setup = adapter.exhaustion_setup(candles, &values)?;
+                adapter.exhaustion_snapshot(last, &values, setup)
+            }
+        }?;
+        if matches!(preset, BearShortPreset::ExhaustionFade) {
+            // Live v1 does not load orderbook divergence yet; require real taker flow instead.
+            snapshot.orderbook_imbalance_diverged = false;
+        }
+        Some(snapshot)
     }
 
     pub fn for_preset(preset: BearShortPreset) -> BearShortStackBacktestPreset {
@@ -366,22 +406,44 @@ impl IndicatorStrategyBacktest for BearShortStackBacktestAdapter {
                     return SignalResult::default();
                 };
                 let Some(snapshot) = self.breakdown_snapshot(last, values, setup) else {
-                    return BearShortStackStrategy::flat_missing_snapshot(last.c, last.ts);
+                    return BearShortStackStrategy::flat_missing_snapshot(
+                        last.c,
+                        last.ts,
+                        BearShortPreset::BearBreakdown,
+                    );
                 };
                 snapshot
             }
             BearShortPreset::ExhaustionFade => {
-                let Some(setup) = self.exhaustion_setup(candles) else {
+                let Some(setup) = self.exhaustion_setup(candles, values) else {
                     return SignalResult::default();
                 };
                 let Some(snapshot) = self.exhaustion_snapshot(last, values, setup) else {
-                    return BearShortStackStrategy::flat_missing_snapshot(last.c, last.ts);
+                    return BearShortStackStrategy::flat_missing_snapshot(
+                        last.c,
+                        last.ts,
+                        BearShortPreset::ExhaustionFade,
+                    );
                 };
                 snapshot
             }
         };
+        let mut thresholds = BearShortStackThresholds::default();
+        match self.preset {
+            BearShortPreset::BearBreakdown => {
+                thresholds.breakdown_stop_atr_buffer = self.tuning.breakdown_stop_atr_buffer;
+                thresholds.breakdown_target_r_1 = self.tuning.breakdown_target_r_1;
+                thresholds.breakdown_target_r_2 = self.tuning.breakdown_target_r_2;
+            }
+            BearShortPreset::ExhaustionFade => {
+                thresholds.exhaustion_stop_atr_buffer = self.tuning.exhaustion_stop_atr_buffer;
+                thresholds.exhaustion_target_r_1 = self.tuning.exhaustion_target_r_1;
+                thresholds.exhaustion_target_r_2 = self.tuning.exhaustion_target_r_2;
+            }
+        }
         let config = BearShortStackConfig {
             preset: self.preset,
+            thresholds,
             ..Default::default()
         };
         let decision = BearShortStackStrategy::evaluate(&config, &snapshot);
@@ -497,7 +559,11 @@ impl BearShortStackBacktestAdapter {
         Some(snapshot)
     }
 
-    fn exhaustion_setup(&self, candles: &[CandleItem]) -> Option<ExhaustionBacktestSetup> {
+    fn exhaustion_setup(
+        &self,
+        candles: &[CandleItem],
+        values: &BearShortStackBacktestValues,
+    ) -> Option<ExhaustionBacktestSetup> {
         if candles.len() < 48 {
             return None;
         }
@@ -524,6 +590,10 @@ impl BearShortStackBacktestAdapter {
             return None;
         }
         if last.h >= spike.1.h || last.c >= spike.1.c {
+            return None;
+        }
+        let rejection_atr = (spike.1.h - last.c) / values.atr_15m.max(0.0001);
+        if rejection_atr < self.tuning.exhaustion_min_rejection_atr {
             return None;
         }
         let recent_volume = average_volume(recent).max(0.0001);

@@ -88,6 +88,61 @@ impl ShardedExternalMarketSnapshotRepository {
             metric_type,
         )?))
     }
+
+    /// Reads an existing shard without creating it, so live preflight can fail closed on missing data.
+    pub async fn find_range_existing(
+        &self,
+        source: &str,
+        symbol: &str,
+        metric_type: &str,
+        start_time: i64,
+        end_time: i64,
+        limit: Option<i64>,
+    ) -> Result<Vec<ExternalMarketSnapshot>> {
+        let raw_table_name = Self::table_name(source, symbol, metric_type)?;
+        let existed = sqlx::query_scalar::<_, bool>("SELECT to_regclass($1) IS NOT NULL")
+            .bind(&raw_table_name)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("检查市场上下文分表是否存在失败: {}", e);
+                anyhow!("检查市场上下文分表是否存在失败: {}", e)
+            })?;
+        if !existed {
+            return Ok(Vec::new());
+        }
+        let table_name = Self::quote_identifier(&raw_table_name);
+        let limit = limit.unwrap_or(500);
+        let query = format!(
+            r#"
+            SELECT *
+            FROM {}
+            WHERE source = $1
+              AND symbol = $2
+              AND metric_type = $3
+              AND metric_time >= $4
+              AND metric_time <= $5
+            ORDER BY metric_time ASC
+            LIMIT $6
+            "#,
+            table_name
+        );
+        let rows = sqlx::query_as::<_, ExternalMarketSnapshotEntity>(&query)
+            .bind(source)
+            .bind(symbol)
+            .bind(metric_type)
+            .bind(start_time)
+            .bind(end_time)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("查询市场上下文分表快照失败: {}", e);
+                anyhow!("查询市场上下文分表快照失败: {}", e)
+            })?;
+        Ok(rows.into_iter().map(|row| row.to_domain()).collect())
+    }
+
     fn table_name(source: &str, symbol: &str, metric_type: &str) -> Result<String> {
         let table_name = format!(
             "{}_{}_{}_market_snapshots",

@@ -85,6 +85,112 @@ impl ExecutionWorker {
         )?;
         Ok(request)
     }
+    /// 在实盘订单 mutation 前用交易所账户事实限制最终 size；只允许裁剪变小，不能放大策略或风控预算。
+    async fn apply_live_max_order_size_gate(
+        &self,
+        task: &ExecutionTask,
+        gateway: &CryptoExcAllGateway,
+        order_task: &mut ExecutionOrderTask,
+        request: &mut OrderPlacementRequest,
+    ) -> Result<Option<MaxOrderSizeGateOutcome>> {
+        let is_close_or_reduce_only = request.reduce_only.unwrap_or(false)
+            || matches!(
+                request.trade_side.as_deref().map(|value| value.to_ascii_lowercase()),
+                Some(value) if value == "close"
+            );
+        if is_close_or_reduce_only {
+            return Ok(None);
+        }
+        let instrument = parse_instrument(&order_task.symbol)?;
+        let now_ms = current_time_millis_u64();
+        let ticker = gateway.ticker(order_task.exchange, &instrument).await?;
+        let reference_price =
+            live_order_reference_price(&ticker, order_task.side, now_ms)?;
+        let filters =
+            load_exchange_order_filters(order_task.exchange, &order_task.symbol)
+                .await?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "missing exchange symbol filters for {} on {}; run exchange symbol sync before live max-size preflight",
+                        order_task.symbol,
+                        order_task.exchange.as_str()
+                    )
+                })?;
+        let reference_price = decimal_from_f64(reference_price)?;
+        let margin_mode = request
+            .margin_mode
+            .clone()
+            .or_else(|| order_task.margin_mode.clone())
+            .ok_or_else(|| anyhow!("live_max_order_size_margin_mode_missing"))?;
+        let mut max_size_request = MaxOrderSizeRequest::new(instrument, margin_mode);
+        if let Some(margin_coin) = request
+            .margin_coin
+            .as_ref()
+            .or(order_task.margin_coin.as_ref())
+            .filter(|value| !value.trim().is_empty())
+        {
+            max_size_request = max_size_request.with_margin_coin(margin_coin.clone());
+        }
+        let price = request
+            .price
+            .clone()
+            .unwrap_or_else(|| format_order_price_decimal(reference_price, &filters));
+        max_size_request = max_size_request.with_price(price);
+        if let Some(leverage) = order_task
+            .leverage
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            max_size_request = max_size_request.with_leverage(leverage.clone());
+        }
+        let max_order_size = CryptoExcAllGateway::with_signed_read_only_scope(
+            gateway.max_order_size(order_task.exchange, max_size_request),
+        )
+        .await?;
+        let raw_max_size = match request.side {
+            OrderSide::Buy => max_order_size.max_buy.as_str(),
+            OrderSide::Sell => max_order_size.max_sell.as_str(),
+        };
+        let available_size = parse_positive_decimal(raw_max_size, "exchange max order size")?;
+        let outcome = apply_exchange_max_order_size_to_request(
+            request,
+            available_size,
+            reference_price,
+            &filters,
+        )?;
+        if outcome.clipped {
+            order_task.size = request.size.clone();
+            info!(
+                worker_id = %self.config.worker_id,
+                execution_task_id = task.id,
+                strategy_signal_id = ?task.strategy_signal_id,
+                combo_id = task.combo_id,
+                exchange = %order_task.exchange.as_str(),
+                symbol = %order_task.symbol.as_str(),
+                requested_size = %outcome.requested_size,
+                max_available_size = %outcome.max_available_size,
+                normalized_size = %outcome.normalized_size,
+                "execution worker clipped live order size by exchange max-size preflight"
+            );
+            self.record_checkpoint(
+                "live_max_order_size_clipped",
+                Some(task.id),
+                json!({
+                    "stage": "max_order_size_preflight",
+                    "exchange": order_task.exchange.as_str(),
+                    "symbol": order_task.symbol,
+                    "side": order_side_lower(order_task.side),
+                    "requested_size": outcome.requested_size,
+                    "max_available_size": outcome.max_available_size,
+                    "normalized_size": outcome.normalized_size,
+                    "place_order_allowed": true,
+                    "mutation_allowed": false,
+                }),
+            )
+            .await;
+        }
+        Ok(Some(outcome))
+    }
     /// 选择 Web 商业、会员和执行准备度 的最佳候选结果，避免选择规则分散在调用方。
     async fn resolve_live_gateway(
         &self,
@@ -245,8 +351,8 @@ impl ExecutionWorker {
             }),
         ))
     }
-    /// 创建 Web 商业、会员和执行准备度 资源，并在入口处完成必要的参数归一。
-    async fn prepare_order_settings_after_protection(
+    /// 在查询账户最大可下单数量前应用策略对应的账户杠杆、保证金和持仓模式。
+    async fn prepare_order_settings_for_live_order(
         &self,
         task: &ExecutionTask,
         gateway: &CryptoExcAllGateway,
@@ -510,4 +616,61 @@ impl ExecutionWorker {
             )),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MaxOrderSizeGateOutcome {
+    /// 原始订单 size，已是本地过滤器量化后的下单单位。
+    requested_size: String,
+    /// 交易所账户返回的当前最大可下单数量。
+    max_available_size: String,
+    /// 应用交易所最大可下单数量和本地过滤器后的最终 size。
+    normalized_size: String,
+    /// 是否因为交易所账户可用数量不足而裁剪订单。
+    clipped: bool,
+}
+
+/// 将交易所最大可下单数量应用到最终下单请求；只允许把订单 size 向下裁剪。
+fn apply_exchange_max_order_size_to_request(
+    request: &mut OrderPlacementRequest,
+    max_available_size: rust_decimal::Decimal,
+    reference_price: rust_decimal::Decimal,
+    filters: &ExchangeOrderFilters,
+) -> Result<MaxOrderSizeGateOutcome> {
+    let requested_size = parse_positive_decimal(&request.size, "order size")?;
+    let max_available_size_text = max_available_size.normalize().to_string();
+    if max_available_size <= rust_decimal::Decimal::ZERO {
+        return Err(anyhow!(
+            "max_available_order_size_below_exchange_minimum: exchange max order size must be positive"
+        ));
+    }
+    let enforce_min_notional = !request.reduce_only.unwrap_or(false)
+        && !matches!(
+            request.trade_side.as_deref().map(|value| value.to_ascii_lowercase()),
+            Some(value) if value == "close"
+        );
+    let limited_size = requested_size.min(max_available_size);
+    let normalized_size = quantize_order_size(
+        limited_size,
+        reference_price,
+        filters,
+        enforce_min_notional,
+    )
+    .map_err(|error| {
+        anyhow!(
+            "max_available_order_size_below_exchange_minimum: {}",
+            error
+        )
+    })?;
+    let clipped = normalized_size < requested_size;
+    let normalized_size_text = format_order_size_decimal(normalized_size, filters);
+    if clipped {
+        request.size = normalized_size_text.clone();
+    }
+    Ok(MaxOrderSizeGateOutcome {
+        requested_size: format_order_size_decimal(requested_size, filters),
+        max_available_size: max_available_size_text,
+        normalized_size: normalized_size_text,
+        clipped,
+    })
 }

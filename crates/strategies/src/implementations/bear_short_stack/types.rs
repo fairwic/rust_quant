@@ -89,12 +89,26 @@ pub struct BearShortStackBacktestTuning {
     pub breakdown_min_body_ratio: f64,
     /// failed reclaim 执行 K 线所需的最小量能倍数。
     pub breakdown_min_volume_mult: f64,
+    /// 主跌顺势止损缓冲 ATR 倍数，用于研究回测扫描风险边界。
+    pub breakdown_stop_atr_buffer: f64,
+    /// 主跌顺势第一止盈目标 R 倍数，用于研究回测扫描 exit 空间。
+    pub breakdown_target_r_1: f64,
+    /// 主跌顺势第二止盈目标 R 倍数，用于研究回测扫描 exit 空间。
+    pub breakdown_target_r_2: f64,
     /// 衰竭吹顶所需的创新高扩张倍数。
     pub exhaustion_new_high_range_mult: f64,
     /// 衰竭失败回落 K 线所需的最小实体比例。
     pub exhaustion_min_body_ratio: f64,
     /// 衰竭失败回落 K 线所需的最小量能倍数。
     pub exhaustion_min_volume_mult: f64,
+    /// 衰竭失败回落距离相对 ATR 的最小倍数，用于过滤创新高后回落不足的噪音。
+    pub exhaustion_min_rejection_atr: f64,
+    /// 衰竭反转止损缓冲 ATR 倍数，用于研究回测扫描风险边界。
+    pub exhaustion_stop_atr_buffer: f64,
+    /// 衰竭反转第一止盈目标 R 倍数，用于研究回测扫描 exit 空间。
+    pub exhaustion_target_r_1: f64,
+    /// 衰竭反转第二止盈目标 R 倍数，用于研究回测扫描 exit 空间。
+    pub exhaustion_target_r_2: f64,
     /// 衰竭反转最大持仓 K 线数，避免反转失败后长时间占用仓位。
     pub exhaustion_max_holding_candles: usize,
 }
@@ -128,10 +142,37 @@ impl Default for BearShortStackBacktestTuning {
             breakdown_min_support_break_range: 0.15,
             breakdown_min_body_ratio: 0.45,
             breakdown_min_volume_mult: 1.8,
+            breakdown_stop_atr_buffer: 0.35,
+            breakdown_target_r_1: 0.8,
+            breakdown_target_r_2: 1.6,
             exhaustion_new_high_range_mult: 1.35,
             exhaustion_min_body_ratio: 0.35,
             exhaustion_min_volume_mult: 1.3,
+            exhaustion_min_rejection_atr: 0.0,
+            exhaustion_stop_atr_buffer: 0.5,
+            exhaustion_target_r_1: 0.8,
+            exhaustion_target_r_2: 1.6,
             exhaustion_max_holding_candles: 32,
+        }
+    }
+}
+
+impl BearShortStackBacktestTuning {
+    /// Returns the validated real-market-context tuning used by live and OKX context backtests.
+    pub fn real_context_default(preset: BearShortPreset) -> Self {
+        match preset {
+            BearShortPreset::BearBreakdown => Self::default(),
+            BearShortPreset::ExhaustionFade => Self {
+                cooldown_candles: 12,
+                exhaustion_new_high_range_mult: 1.25,
+                exhaustion_min_body_ratio: 0.30,
+                exhaustion_min_volume_mult: 1.30,
+                exhaustion_min_rejection_atr: 1.40,
+                exhaustion_stop_atr_buffer: 0.35,
+                exhaustion_target_r_1: 1.0,
+                exhaustion_target_r_2: 2.0,
+                ..Default::default()
+            },
         }
     }
 }
@@ -147,10 +188,10 @@ impl Default for BearShortStackThresholds {
             breakdown_target_r_1: 0.8,
             breakdown_target_r_2: 1.6,
             exhaustion_min_oi_growth_pct: 0.5,
-            exhaustion_hot_funding_rate: 0.0,
-            exhaustion_stop_atr_buffer: 0.5,
-            exhaustion_target_r_1: 0.8,
-            exhaustion_target_r_2: 1.6,
+            exhaustion_hot_funding_rate: 0.00003,
+            exhaustion_stop_atr_buffer: 0.35,
+            exhaustion_target_r_1: 1.0,
+            exhaustion_target_r_2: 2.0,
         }
     }
 }
@@ -166,6 +207,15 @@ pub struct BearShortStackConfig {
     pub thresholds: BearShortStackThresholds,
     /// 上游聚合后的做空市场快照；缺失时返回 flat。
     pub snapshot: Option<BearShortSignalSnapshot>,
+}
+
+impl BearShortStackConfig {
+    /// Normalizes product-level child strategy keys into the preset used by evaluation.
+    pub fn apply_strategy_key_preset(&mut self) {
+        if self.strategy_key.as_deref() == Some("exhaustion_fade_short_v1") {
+            self.preset = BearShortPreset::ExhaustionFade;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -28,12 +28,17 @@ impl BtcEthLiquidityScalperStrategy {
             "short" => BtcEthLiquidityScalperAction::Short,
             _ => BtcEthLiquidityScalperAction::Flat,
         };
+        // 把止损价 + 三档 R 倍数同时塞进 reasons：apply_long/short_signal 会从这里反解，
+        // 保证 live 与 backtest 共享同一份目标，回测调优可以直接落地 live 信号。
         let mut reasons = vec![
             "BTC_ETH_LIQUIDITY_SCALP_CONFIRMED".to_string(),
             format!(
                 "STOP_PRICE:{}",
                 Self::stop_price(snapshot, thresholds, action)
             ),
+            format!("TARGET_R_1:{}", thresholds.target_r_1),
+            format!("TARGET_R_2:{}", thresholds.target_r_2),
+            format!("TARGET_R_3:{}", thresholds.target_r_3),
         ];
         if snapshot.oi_expansion_pct < thresholds.min_oi_expansion_pct {
             reasons.push("OI_NOT_CONFIRMED_REDUCE_SIZE".to_string());
@@ -211,12 +216,14 @@ impl BtcEthLiquidityScalperStrategy {
         t: &BtcEthLiquidityScalperThresholds,
         action: BtcEthLiquidityScalperAction,
     ) -> f64 {
+        // 止损缓冲走 stop_atr_buffer，与 max_anchor_distance_atr（入场距离门槛）解耦，
+        // 否则扫描入场距离会牵连止损宽度，无法独立评估 frequency / risk 的关系。
         match action {
             BtcEthLiquidityScalperAction::Long => {
-                round_price(snapshot.anchor_price - snapshot.atr_5m * t.max_anchor_distance_atr)
+                round_price(snapshot.anchor_price - snapshot.atr_5m * t.stop_atr_buffer)
             }
             BtcEthLiquidityScalperAction::Short => {
-                round_price(snapshot.anchor_price + snapshot.atr_5m * t.max_anchor_distance_atr)
+                round_price(snapshot.anchor_price + snapshot.atr_5m * t.stop_atr_buffer)
             }
             BtcEthLiquidityScalperAction::Flat => snapshot.price,
         }
@@ -325,7 +332,15 @@ impl IndicatorStrategyBacktest for BtcEthLiquidityScalperBacktestAdapter {
         };
         // 订单流、盘口、OI 和 funding 在默认回测中是 pipeline 验证用占位证据；
         // context-aware 回测会用调用方传入的历史市场上下文替代这些值。
-        let config = BtcEthLiquidityScalperConfig::default();
+        // tuning 的 R 倍数注入 thresholds，让回测找到的目标在 live 同样有效（消除双口径）。
+        let mut thresholds = BtcEthLiquidityScalperThresholds::default();
+        thresholds.target_r_1 = self.tuning.target_r_1;
+        thresholds.target_r_2 = self.tuning.target_r_2;
+        thresholds.target_r_3 = self.tuning.target_r_3;
+        let config = BtcEthLiquidityScalperConfig {
+            thresholds,
+            ..Default::default()
+        };
         if self.tuning.require_oi_confirmation
             && snapshot.oi_expansion_pct < config.thresholds.min_oi_expansion_pct
         {
@@ -340,7 +355,8 @@ impl IndicatorStrategyBacktest for BtcEthLiquidityScalperBacktestAdapter {
         let decision = BtcEthLiquidityScalperStrategy::evaluate(&config, &snapshot);
         let mut signal = decision.to_signal(snapshot.price, last.ts);
         if signal.should_buy || signal.should_sell {
-            apply_backtest_exit_tuning(&mut signal, self.tuning);
+            // tuning 的 R 倍数已经通过 thresholds → evaluate reasons → apply_*_signal 注入 level_1/2/3，
+            // 这里只保留 cooldown 副作用，避免出现"二次覆盖 level_3 等于 level_2"的旧口径。
             self.cooldown_remaining = self.tuning.cooldown_candles;
         }
         signal.single_value = Some(json!(snapshot).to_string());
@@ -605,61 +621,56 @@ fn sma_close(candles: &[CandleItem]) -> f64 {
     candles.iter().map(|candle| candle.c).sum::<f64>() / candles.len() as f64
 }
 
-fn apply_backtest_exit_tuning(
-    signal: &mut SignalResult,
-    tuning: BtcEthLiquidityScalperBacktestTuning,
-) {
-    let Some(stop) = signal.signal_kline_stop_loss_price else {
-        return;
-    };
-    let risk = (signal.open_price - stop).abs();
-    if risk <= 0.0 {
-        return;
-    }
-    if signal.should_buy {
-        signal.atr_take_profit_level_1 =
-            Some(round_price(signal.open_price + risk * tuning.target_r_1));
-        signal.atr_take_profit_level_2 =
-            Some(round_price(signal.open_price + risk * tuning.target_r_2));
-        signal.atr_take_profit_level_3 = signal.atr_take_profit_level_2;
-    } else if signal.should_sell {
-        signal.atr_take_profit_level_1 =
-            Some(round_price(signal.open_price - risk * tuning.target_r_1));
-        signal.atr_take_profit_level_2 =
-            Some(round_price(signal.open_price - risk * tuning.target_r_2));
-        signal.atr_take_profit_level_3 = signal.atr_take_profit_level_2;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_quant_domain::SignalDirection;
 
     #[test]
-    fn backtest_exit_tuning_rewrites_scalper_take_profit_levels() {
-        let mut signal = SignalResult {
-            should_buy: true,
-            direction: SignalDirection::Long,
-            open_price: 100.0,
-            signal_kline_stop_loss_price: Some(99.0),
-            atr_take_profit_level_1: Some(100.8),
-            atr_take_profit_level_2: Some(101.6),
-            atr_take_profit_level_3: Some(101.6),
-            ..Default::default()
-        };
-
-        apply_backtest_exit_tuning(
-            &mut signal,
-            BtcEthLiquidityScalperBacktestTuning {
-                target_r_1: 0.4,
-                target_r_2: 0.8,
+    fn evaluate_writes_target_r_into_reasons_and_take_profit_levels() {
+        // 验证 evaluate 把 thresholds 的三档 R 倍数同时塞进 reasons 与 take_profit_level，
+        // 这是消除 live/backtest 双口径的关键链路。
+        let config = BtcEthLiquidityScalperConfig {
+            thresholds: BtcEthLiquidityScalperThresholds {
+                target_r_1: 1.0,
+                target_r_2: 2.2,
+                target_r_3: 3.0,
                 ..Default::default()
             },
-        );
-
-        assert_eq!(signal.atr_take_profit_level_1, Some(100.4));
-        assert_eq!(signal.atr_take_profit_level_2, Some(100.8));
-        assert_eq!(signal.atr_take_profit_level_3, Some(100.8));
+            ..Default::default()
+        };
+        let snapshot = BtcEthLiquidityScalperSignalSnapshot {
+            exchange: "binance".to_string(),
+            symbol: "BTC-USDT-SWAP".to_string(),
+            price: 100_000.0,
+            anchor_price: 99_700.0,
+            atr_5m: 500.0,
+            trend_4h: "long".to_string(),
+            trend_1h: "long".to_string(),
+            execution_bias: "long".to_string(),
+            volume_impulse_confirmed: true,
+            pullback_to_anchor: true,
+            taker_aggression: 0.62,
+            orderbook_imbalance: 0.58,
+            oi_expansion_pct: 1.4,
+            funding_rate: 0.00008,
+            spread_bps: 1.2,
+            depth_usd: 25_000_000.0,
+            breakout_candle_atr: 0.9,
+            ..Default::default()
+        };
+        let decision = BtcEthLiquidityScalperStrategy::evaluate(&config, &snapshot);
+        assert!(decision
+            .reasons
+            .iter()
+            .any(|r| r.starts_with("TARGET_R_1:")));
+        let signal = decision.to_signal(snapshot.price, 0);
+        // stop = anchor - atr*stop_atr_buffer = 99700 - 500*0.7 = 99350
+        // risk = 100000 - 99350 = 650
+        // level_1 = 100000 + 650*1   = 100_650
+        // level_2 = 100000 + 650*2.2 = 101_430
+        // level_3 = 100000 + 650*3   = 101_950
+        assert_eq!(signal.atr_take_profit_level_1, Some(100_650.0));
+        assert_eq!(signal.atr_take_profit_level_2, Some(101_430.0));
+        assert_eq!(signal.atr_take_profit_level_3, Some(101_950.0));
     }
 }

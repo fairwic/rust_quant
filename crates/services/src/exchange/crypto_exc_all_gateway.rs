@@ -1,11 +1,11 @@
 use crypto_exc_all::{
     AccountBill, AccountBillQuery, Balance, BinanceExchangeConfig, BitgetExchangeConfig,
     BybitExchangeConfig, CancelOrderRequest, Candle, CandleQuery, CryptoSdk, Error, ExchangeId,
-    Fill, FillListQuery, GateExchangeConfig, Instrument, MarginMode, OkxExchangeConfig, Order,
-    OrderAck, OrderBook, OrderBookQuery, OrderListQuery, OrderQuery, OrderSide, OrderType,
-    PlaceOrderRequest, Position, PositionHistory, PositionHistoryQuery,
-    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderQuery,
-    ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
+    Fill, FillListQuery, GateExchangeConfig, Instrument, MarginMode, MaxOrderSize,
+    MaxOrderSizeRequest, OkxExchangeConfig, Order, OrderAck, OrderBook, OrderBookQuery,
+    OrderListQuery, OrderQuery, OrderSide, OrderType, PlaceOrderRequest, Position, PositionHistory,
+    PositionHistoryQuery, PrepareOrderSettingsRequest, PrepareOrderSettingsResult,
+    ProtectiveOrderQuery, ProtectiveOrderRequest, Result, SdkConfig, Ticker, TimeInForce,
 };
 use serde_json::json;
 #[derive(Debug, Clone, PartialEq)]
@@ -445,6 +445,21 @@ impl CryptoExcAllGateway {
             GatewayMode::DryRun => Err(Error::Unsupported {
                 exchange,
                 capability: "dry-run balance query",
+            }),
+        }
+    }
+    /// 读取账户当前最大可下单数量；调用方必须在策略杠杆/保证金设置完成后进入 signed read-only scope。
+    pub async fn max_order_size(
+        &self,
+        exchange: ExchangeId,
+        request: MaxOrderSizeRequest,
+    ) -> Result<MaxOrderSize> {
+        self.ensure_signed_read_only_scope("account.max_order_size")?;
+        match &self.mode {
+            GatewayMode::Live(sdk) => sdk.account(exchange)?.max_order_size(request).await,
+            GatewayMode::DryRun => Err(Error::Unsupported {
+                exchange,
+                capability: "dry-run account max order size",
             }),
         }
     }

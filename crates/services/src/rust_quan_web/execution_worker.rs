@@ -53,9 +53,10 @@ use crate::rust_quan_web::{
 use anyhow::{anyhow, Result};
 use crypto_exc_all::{
     CancelOrderRequest, Error as CryptoExchangeError, ExchangeId, Fill, FillListQuery, MarginMode,
-    Order, OrderAck, OrderBook, OrderBookLevel, OrderBookQuery, OrderListQuery, OrderQuery,
-    OrderSide, OrderType, Position, PositionMode, PrepareOrderSettingsRequest,
-    PrepareOrderSettingsResult, ProtectiveOrderRequest, Ticker, TimeInForce,
+    MaxOrderSizeRequest, Order, OrderAck, OrderBook, OrderBookLevel, OrderBookQuery,
+    OrderListQuery, OrderQuery, OrderSide, OrderType, Position, PositionMode,
+    PrepareOrderSettingsRequest, PrepareOrderSettingsResult, ProtectiveOrderRequest, Ticker,
+    TimeInForce,
 };
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Instant};

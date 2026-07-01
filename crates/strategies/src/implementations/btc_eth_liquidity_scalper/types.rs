@@ -20,6 +20,8 @@ pub enum BtcEthLiquidityScalperAction {
 pub struct BtcEthLiquidityScalperThresholds {
     /// 回踩距离上限，单位为 5m ATR 倍数；超过后视为追高或追低。
     pub max_anchor_distance_atr: f64,
+    /// 锚点到止损的 ATR 缓冲倍数；与 `max_anchor_distance_atr` 解耦，便于独立扫描止损宽度。
+    pub stop_atr_buffer: f64,
     /// 同向 taker 主动成交强度门槛，0-1 区间。
     pub min_taker_aggression: f64,
     /// 同向盘口失衡门槛，0-1 区间。
@@ -34,12 +36,19 @@ pub struct BtcEthLiquidityScalperThresholds {
     pub min_depth_usd: f64,
     /// 突破 K 线实体上限，单位为 ATR 倍数，用于防止追过度扩张。
     pub max_breakout_candle_atr: f64,
+    /// 第一止盈目标，单位 R；live 与 backtest 共用同一份配置避免双口径。
+    pub target_r_1: f64,
+    /// 第二止盈目标，单位 R。
+    pub target_r_2: f64,
+    /// 第三止盈目标，单位 R；用于实现完整三档止盈，而不是 level_2 的拷贝。
+    pub target_r_3: f64,
 }
 
 impl Default for BtcEthLiquidityScalperThresholds {
     fn default() -> Self {
         Self {
             max_anchor_distance_atr: 0.7,
+            stop_atr_buffer: 0.7,
             min_taker_aggression: 0.55,
             min_orderbook_imbalance: 0.55,
             min_oi_expansion_pct: 0.5,
@@ -47,6 +56,9 @@ impl Default for BtcEthLiquidityScalperThresholds {
             max_spread_bps: 3.0,
             min_depth_usd: 10_000_000.0,
             max_breakout_candle_atr: 1.5,
+            target_r_1: 0.8,
+            target_r_2: 1.6,
+            target_r_3: 2.4,
         }
     }
 }
@@ -89,6 +101,8 @@ pub struct BtcEthLiquidityScalperBacktestTuning {
     pub target_r_1: f64,
     /// 第二止盈目标，单位 R。
     pub target_r_2: f64,
+    /// 第三止盈目标，单位 R；默认应严格大于 target_r_2。
+    pub target_r_3: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -132,6 +146,7 @@ impl Default for BtcEthLiquidityScalperBacktestTuning {
             require_oi_confirmation: false,
             target_r_1: 0.8,
             target_r_2: 1.6,
+            target_r_3: 2.4,
         }
     }
 }
@@ -236,25 +251,36 @@ impl BtcEthLiquidityScalperDecision {
 
     fn apply_long_signal(&self, signal: &mut SignalResult, price: f64) {
         let stop = reason_value(&self.reasons, "STOP_PRICE").unwrap_or(price);
+        let defaults = BtcEthLiquidityScalperThresholds::default();
+        // 与 bear_short_stack 保持一致：止盈 R 倍数优先从 reasons 解析（live/backtest 同源），
+        // 缺失时回退到 thresholds 默认值，避免回测扫到的目标在 live 被静默丢弃。
+        let target_r_1 = reason_value(&self.reasons, "TARGET_R_1").unwrap_or(defaults.target_r_1);
+        let target_r_2 = reason_value(&self.reasons, "TARGET_R_2").unwrap_or(defaults.target_r_2);
+        let target_r_3 = reason_value(&self.reasons, "TARGET_R_3").unwrap_or(defaults.target_r_3);
         let risk = (price - stop).max(0.0);
         signal.should_buy = true;
         signal.direction = SignalDirection::Long;
         signal.signal_kline_stop_loss_price = Some(round_price(stop));
-        signal.atr_take_profit_level_1 = Some(round_price(price + risk * 0.8));
-        signal.atr_take_profit_level_2 = Some(round_price(price + risk * 1.6));
-        signal.atr_take_profit_level_3 = signal.atr_take_profit_level_2;
+        signal.atr_take_profit_level_1 = Some(round_price(price + risk * target_r_1));
+        signal.atr_take_profit_level_2 = Some(round_price(price + risk * target_r_2));
+        signal.atr_take_profit_level_3 = Some(round_price(price + risk * target_r_3));
         signal.dynamic_adjustments = self.dynamic_adjustments();
     }
 
     fn apply_short_signal(&self, signal: &mut SignalResult, price: f64) {
         let stop = reason_value(&self.reasons, "STOP_PRICE").unwrap_or(price);
+        let defaults = BtcEthLiquidityScalperThresholds::default();
+        // 同 apply_long_signal：把 R 倍数集中到 reasons，让 backtest tuning 和 live 走同一份配置。
+        let target_r_1 = reason_value(&self.reasons, "TARGET_R_1").unwrap_or(defaults.target_r_1);
+        let target_r_2 = reason_value(&self.reasons, "TARGET_R_2").unwrap_or(defaults.target_r_2);
+        let target_r_3 = reason_value(&self.reasons, "TARGET_R_3").unwrap_or(defaults.target_r_3);
         let risk = (stop - price).max(0.0);
         signal.should_sell = true;
         signal.direction = SignalDirection::Short;
         signal.signal_kline_stop_loss_price = Some(round_price(stop));
-        signal.atr_take_profit_level_1 = Some(round_price(price - risk * 0.8));
-        signal.atr_take_profit_level_2 = Some(round_price(price - risk * 1.6));
-        signal.atr_take_profit_level_3 = signal.atr_take_profit_level_2;
+        signal.atr_take_profit_level_1 = Some(round_price(price - risk * target_r_1));
+        signal.atr_take_profit_level_2 = Some(round_price(price - risk * target_r_2));
+        signal.atr_take_profit_level_3 = Some(round_price(price - risk * target_r_3));
         signal.dynamic_adjustments = self.dynamic_adjustments();
     }
 

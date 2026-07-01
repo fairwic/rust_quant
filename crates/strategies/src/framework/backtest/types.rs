@@ -371,6 +371,11 @@ pub struct BasicRiskStrategyConfig {
     /// None 表示沿用历史默认费率，避免旧回测结果静默变口径。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trade_fee_rate: Option<f64>,
+    /// 仓位杠杆倍数，用于将策略 edge 按比例放大（同时放大盈亏与风险）。
+    /// None 或 1.0 = 无杠杆；2.0 = 双倍仓位；5.0 = 五倍仓位。
+    /// 回测时 position_nums 乘以该倍数，盈亏与回撤同步放大。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_leverage: Option<f64>,
 }
 impl Default for BasicRiskStrategyConfig {
     /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
@@ -387,6 +392,7 @@ impl Default for BasicRiskStrategyConfig {
             dynamic_range_threshold: None,
             dynamic_range_loss_percent: None,
             trade_fee_rate: None,
+            position_leverage: None,
         }
     }
 }

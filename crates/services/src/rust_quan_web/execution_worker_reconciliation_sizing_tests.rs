@@ -798,6 +798,58 @@ fn okx_swap_contract_value_is_used_for_notional_validation() {
     assert_eq!(ok.to_string(), "3");
 }
 #[test]
+fn max_order_size_gate_clips_live_request_to_exchange_available_size() {
+    let filters = ExchangeOrderFilters {
+        min_qty: Some("1".parse().unwrap()),
+        max_qty: Some("2700".parse().unwrap()),
+        step_size: Some("1".parse().unwrap()),
+        min_notional: Some("5".parse().unwrap()),
+        quantity_precision: None,
+        tick_size: Some("0.01".parse().unwrap()),
+        price_precision: Some(2),
+        contract_value: Some("0.01".parse().unwrap()),
+        contract_value_currency: Some("ETH".to_string()),
+    };
+    let mut request = live_order_request("buy", "10");
+    let outcome = apply_exchange_max_order_size_to_request(
+        &mut request,
+        "7.8".parse().unwrap(),
+        "2300".parse().unwrap(),
+        &filters,
+    )
+    .unwrap();
+    assert_eq!(request.size, "7");
+    assert!(outcome.clipped);
+    assert_eq!(outcome.max_available_size, "7.8");
+    assert_eq!(outcome.normalized_size, "7");
+}
+#[test]
+fn max_order_size_gate_fails_closed_when_available_size_is_below_exchange_minimum() {
+    let filters = ExchangeOrderFilters {
+        min_qty: Some("1".parse().unwrap()),
+        max_qty: Some("2700".parse().unwrap()),
+        step_size: Some("1".parse().unwrap()),
+        min_notional: Some("5".parse().unwrap()),
+        quantity_precision: None,
+        tick_size: Some("0.01".parse().unwrap()),
+        price_precision: Some(2),
+        contract_value: Some("0.01".parse().unwrap()),
+        contract_value_currency: Some("ETH".to_string()),
+    };
+    let mut request = live_order_request("sell", "10");
+    let error = apply_exchange_max_order_size_to_request(
+        &mut request,
+        "0.8".parse().unwrap(),
+        "2300".parse().unwrap(),
+        &filters,
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("max_available_order_size_below_exchange_minimum"));
+    assert_eq!(request.size, "10");
+}
+#[test]
 fn non_local_live_order_size_keeps_strategy_sizing() {
     let task = task(json!({
         "exchange": "binance",

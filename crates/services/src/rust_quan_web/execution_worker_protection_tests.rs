@@ -375,17 +375,34 @@ async fn live_config_without_persistent_audit_repo_fails_closed_before_gateway()
     assert_eq!(raw_payload["mutation_allowed"], false);
 }
 #[test]
-fn prepare_order_settings_happens_after_prearmed_protection_guard() {
+fn live_max_order_size_preflight_happens_after_account_settings_and_before_order_mutations() {
     let source = include_str!("execution_worker_live_execution_section.rs");
-    let prearm_offset = source
+    let live_source = &source[source
+        .find("// live_order_request")
+        .expect("source should keep the final live request section visible")..];
+    let prepare_offset = live_source
+        .find(".prepare_order_settings_for_live_order")
+        .expect("settings preparation should stay visible in execute_task");
+    let max_size_offset = live_source
+        .find(".apply_live_max_order_size_gate")
+        .expect("live order should query exchange max-size after leverage is prepared");
+    let prearm_offset = live_source
         .find("match prearm_protective_order_if_required")
         .expect("execute_task should prearm protective order before main order");
-    let prepare_offset = source
-        .find(".prepare_order_settings_after_protection")
-        .expect("settings preparation should stay visible in execute_task");
+    let place_offset = live_source
+        .find(".place_order_with_audit")
+        .expect("execute_task should submit the main order through audited live guard");
     assert!(
-        prearm_offset < prepare_offset,
-        "account settings are live mutations and must run only after prearmed protective stop-loss is confirmed"
+        prepare_offset < max_size_offset,
+        "strategy leverage and margin settings must be applied before querying exchange max-size"
+    );
+    assert!(
+        max_size_offset < prearm_offset,
+        "exchange max-size preflight must happen before prearmed protection mutation"
+    );
+    assert!(
+        max_size_offset < place_offset,
+        "exchange max-size preflight must happen before the main live order mutation"
     );
 }
 #[test]

@@ -50,6 +50,33 @@ mod tests {
         assert_eq!(config.exchange.as_deref(), Some("binance"));
         assert_eq!(config.symbol, "ETH-USDT-SWAP");
     }
+
+    #[test]
+    /// quant_core.strategy_configs 顶层 strategy_key 是 live 子策略入口，需注入 parameters 供执行器选择 preset。
+    fn quant_core_row_injects_top_level_strategy_key_into_parameters() {
+        let row = QuantCoreStrategyConfigRow {
+            id: "6f9619ff-8b86-d011-b42d-00cf4fc964ff".to_string(),
+            legacy_id: Some(43),
+            strategy_key: "exhaustion_fade_short_v1".to_string(),
+            exchange: "binance".to_string(),
+            symbol: "BTC-USDT-SWAP".to_string(),
+            timeframe: "5m".to_string(),
+            enabled: true,
+            config: json!({"thresholds": {"exhaustion_min_oi_growth_pct": 0.7}}),
+            risk_config: json!({"max_loss_percent": 0.01}),
+        };
+        let config = row.to_domain().expect("row should map to domain config");
+
+        assert_eq!(config.strategy_type, StrategyType::BearShortStack);
+        assert_eq!(
+            config.parameters["strategy_key"],
+            "exhaustion_fade_short_v1"
+        );
+        assert_eq!(
+            config.parameters["thresholds"]["exhaustion_min_oi_growth_pct"],
+            0.7
+        );
+    }
 }
 impl QuantCoreStrategyConfigRow {
     /// 封装当前函数，减少回测策略调用方重复实现相同细节。
@@ -64,12 +91,18 @@ impl QuantCoreStrategyConfigRow {
             .map_err(|error| anyhow!("无效的 strategy_key: {} ({})", self.strategy_key, error))?;
         let timeframe = Timeframe::from_str(&self.timeframe)
             .map_err(|error| anyhow!("无效的 timeframe: {} ({})", self.timeframe, error))?;
+        let mut parameters = self.config.clone();
+        if let Value::Object(fields) = &mut parameters {
+            fields
+                .entry("strategy_key".to_string())
+                .or_insert_with(|| Value::String(self.strategy_key.clone()));
+        }
         let mut config = StrategyConfig::new(
             self.runtime_id(),
             strategy_type,
             self.symbol.clone(),
             timeframe,
-            self.config.clone(),
+            parameters,
             self.risk_config.clone(),
         );
         config.exchange = normalize_exchange(&self.exchange);

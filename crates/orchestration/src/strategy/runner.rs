@@ -11,6 +11,8 @@ use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use std::time::{Duration, SystemTime};
 use tracing::{debug, error, info, warn};
+
+use super::bear_short_live_snapshot::enrich_bear_short_live_snapshot;
 /// 策略执行状态跟踪 - 用于时间戳去重
 #[derive(Debug, Clone)]
 struct StrategyExecutionState {
@@ -243,8 +245,20 @@ pub async fn execute_strategy(
         info!("✅ 策略配置验证成功: key={}, config_id={}", key, config.id);
     }
     // 3. 执行策略
+    let execution_config =
+        match enrich_bear_short_live_snapshot(&config, inst_id, timeframe_str, snap.as_ref()).await
+        {
+            Ok(enriched) => enriched,
+            Err(e) => {
+                warn!(
+                    "BearShortStack live snapshot enrich 失败: key={}, config_id={}, error={}",
+                    key, config.id, e
+                );
+                config.clone()
+            }
+        };
     let exec_result = execution_service
-        .execute_strategy(inst_id, timeframe_str, &config, snap)
+        .execute_strategy(inst_id, timeframe_str, &execution_config, snap)
         .await;
     // 标记完成
     StrategyExecutionStateManager::mark_completed(&key, timestamp);

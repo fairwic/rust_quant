@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use rust_quant_domain::{SignalDirection, StrategyType};
+use rust_quant_domain::{SignalDirection, StrategyConfig, StrategyType, Timeframe};
 use rust_quant_strategies::framework::backtest::types::BasicRiskStrategyConfig;
 use rust_quant_strategies::framework::strategy_registry::get_strategy_registry;
 use rust_quant_strategies::framework::strategy_trait::StrategyExecutor;
@@ -113,31 +113,32 @@ fn falling_candles(count: usize, start: f64) -> Vec<CandleItem> {
 
 fn scalper_impulse_pullback_candles(count: usize, start: f64) -> Vec<CandleItem> {
     let mut candles = rising_candles(count, start);
+    let price_scale = (start / 3_000.0).max(1.0);
     for (i, candle) in candles.iter_mut().enumerate() {
         if i == 520 {
-            candle.o = start + 1_040.0;
-            candle.c = candle.o + 120.0;
-            candle.h = candle.c + 8.0;
-            candle.l = candle.o - 8.0;
+            candle.o = start + 1_040.0 * price_scale;
+            candle.c = candle.o + 120.0 * price_scale;
+            candle.h = candle.c + 8.0 * price_scale;
+            candle.l = candle.o - 8.0 * price_scale;
             candle.v *= 4.0;
         } else if i == 521 {
-            candle.o = start + 1_160.0;
-            candle.c = candle.o - 34.0;
-            candle.h = candle.o + 10.0;
-            candle.l = candle.c - 10.0;
+            candle.o = start + 1_160.0 * price_scale;
+            candle.c = candle.o - 34.0 * price_scale;
+            candle.h = candle.o + 10.0 * price_scale;
+            candle.l = candle.c - 10.0 * price_scale;
             candle.v *= 1.7;
         } else if i == 522 {
-            candle.o = start + 1_126.0;
-            candle.c = candle.o + 18.0;
-            candle.h = candle.c + 7.0;
-            candle.l = candle.o - 11.0;
+            candle.o = start + 1_126.0 * price_scale;
+            candle.c = candle.o + 18.0 * price_scale;
+            candle.h = candle.c + 7.0 * price_scale;
+            candle.l = candle.o - 11.0 * price_scale;
             candle.v *= 1.5;
         } else if i > 522 {
-            let open = start + 1_144.0 + (i - 522) as f64 * 28.0;
+            let open = start + (1_144.0 + (i - 522) as f64 * 28.0) * price_scale;
             candle.o = open;
-            candle.c = open + 18.0;
-            candle.h = candle.c + 9.0;
-            candle.l = candle.o - 9.0;
+            candle.c = open + 18.0 * price_scale;
+            candle.h = candle.c + 9.0 * price_scale;
+            candle.l = candle.o - 9.0 * price_scale;
             candle.v *= 1.2;
         }
     }
@@ -275,6 +276,18 @@ fn stale_exhaustion_failed_retest_candles(count: usize, start: f64) -> Vec<Candl
     candles
 }
 
+fn live_exhaustion_failed_retest_candles(start: f64) -> Vec<CandleItem> {
+    let mut candles = exhaustion_failed_retest_candles(523, start);
+    if let Some(last) = candles.last_mut() {
+        last.o = start + 950.0;
+        last.c = start + 820.0;
+        last.h = start + 970.0;
+        last.l = start + 790.0;
+        last.v *= 3.0;
+    }
+    candles
+}
+
 fn scalper_synthetic_tuning() -> BtcEthLiquidityScalperBacktestTuning {
     BtcEthLiquidityScalperBacktestTuning {
         allow_synthetic_market_context: true,
@@ -322,7 +335,8 @@ fn scalper_requires_btc_eth_binance_or_okx_and_emits_long_signal() {
     assert_eq!(signal.signal_kline_stop_loss_price, Some(99_350.0));
     assert_eq!(signal.atr_take_profit_level_1, Some(100_520.0));
     assert_eq!(signal.atr_take_profit_level_2, Some(101_040.0));
-    assert_eq!(signal.atr_take_profit_level_3, Some(101_040.0));
+    // level_3 不再是 level_2 的拷贝：target_r_3 默认 2.4，因此第三档止盈独立 = 100_000 + 650*2.4
+    assert_eq!(signal.atr_take_profit_level_3, Some(101_560.0));
 }
 
 #[test]
@@ -364,7 +378,10 @@ fn exhaustion_fade_uses_half_risk_short_signal() {
     assert_eq!(decision.action, BearShortAction::Short);
     assert_eq!(decision.preset, BearShortPreset::ExhaustionFade);
     assert_eq!(signal.direction, SignalDirection::Short);
-    assert_eq!(signal.atr_take_profit_level_3, Some(100_752.0));
+    assert_eq!(signal.signal_kline_stop_loss_price, Some(103_452.0));
+    assert_eq!(signal.atr_take_profit_level_1, Some(100_548.0));
+    assert_eq!(signal.atr_take_profit_level_2, Some(99_096.0));
+    assert_eq!(signal.atr_take_profit_level_3, Some(100_548.0));
     assert!(signal
         .dynamic_adjustments
         .contains(&"HALF_RISK".to_string()));
@@ -387,12 +404,80 @@ fn bear_short_blocks_tail_end_when_funding_is_deeply_negative() {
 }
 
 #[test]
+fn exhaustion_fade_requires_warm_funding_by_default() {
+    let config = BearShortStackConfig::default();
+    let mut snapshot = exhaustion_snapshot();
+    snapshot.funding_rate = 0.00002;
+
+    let decision = BearShortStackStrategy::evaluate(&config, &snapshot);
+
+    assert_eq!(decision.action, BearShortAction::Flat);
+    assert!(decision.has_reason("FUNDING_NOT_HOT_ENOUGH"));
+}
+
+#[test]
 fn bear_short_config_accepts_child_strategy_key_as_preset_alias() {
     let config: BearShortStackConfig =
         serde_json::from_str(r#"{"preset":"exhaustion_fade_short_v1","snapshot":{"price":1.0}}"#)
             .unwrap();
 
     assert_eq!(config.preset, BearShortPreset::ExhaustionFade);
+}
+
+#[test]
+fn bear_short_real_context_tuning_uses_validated_exhaustion_preset() {
+    let tuning =
+        BearShortStackBacktestTuning::real_context_default(BearShortPreset::ExhaustionFade);
+    let breakdown_tuning =
+        BearShortStackBacktestTuning::real_context_default(BearShortPreset::BearBreakdown);
+
+    assert_eq!(breakdown_tuning, BearShortStackBacktestTuning::default());
+    assert_eq!(tuning.cooldown_candles, 12);
+    assert_eq!(tuning.exhaustion_new_high_range_mult, 1.25);
+    assert_eq!(tuning.exhaustion_min_body_ratio, 0.30);
+    assert_eq!(tuning.exhaustion_min_volume_mult, 1.30);
+    assert_eq!(tuning.exhaustion_min_rejection_atr, 1.40);
+    assert_eq!(tuning.exhaustion_stop_atr_buffer, 0.35);
+    assert_eq!(tuning.exhaustion_target_r_1, 1.0);
+    assert_eq!(tuning.exhaustion_target_r_2, 2.0);
+}
+
+#[tokio::test]
+async fn bear_short_executor_preserves_child_strategy_key_when_snapshot_missing() {
+    let executor = BearShortStackStrategyExecutor::new();
+    let config = StrategyConfig::new(
+        11,
+        StrategyType::BearShortStack,
+        "BTC-USDT-SWAP".to_string(),
+        Timeframe::M5,
+        serde_json::json!({"strategy_key": "exhaustion_fade_short_v1"}),
+        serde_json::json!({}),
+    );
+    let signal = executor
+        .execute(
+            "BTC-USDT-SWAP",
+            "5m",
+            &config,
+            Some(CandleItem {
+                o: 100_000.0,
+                h: 100_100.0,
+                l: 99_900.0,
+                c: 100_000.0,
+                v: 2_000.0,
+                ts: 1_783_000_000_000,
+                confirm: 1,
+            }),
+        )
+        .await
+        .expect("missing snapshot should be a flat signal");
+
+    assert!(signal
+        .filter_reasons
+        .contains(&"MISSING_MARKET_SNAPSHOT".to_string()));
+    assert!(signal
+        .single_result
+        .expect("single result")
+        .contains("\"preset\":\"exhaustion_fade_short_v1\""));
 }
 
 #[test]
@@ -722,6 +807,36 @@ fn bear_breakdown_context_backtest_blocks_deeply_negative_funding() {
 }
 
 #[test]
+fn bear_breakdown_live_snapshot_uses_market_context_before_evaluate() {
+    let candles = bear_breakdown_failed_reclaim_candles(560, 4_000.0);
+    let last = candles.last().expect("fixture has candles");
+    let snapshot = BearShortStackStrategy::build_live_snapshot_from_context(
+        BearShortPreset::BearBreakdown,
+        "ETH-USDT-SWAP",
+        &candles,
+        BearShortStackBacktestMarketContext {
+            ts: last.ts,
+            funding_rate: 0.00003,
+            oi_growth_pct: 2.1,
+            long_short_ratio: 1.18,
+            taker_buy_volume: 1.0,
+            taker_sell_volume: 10.0,
+        },
+    )
+    .expect("market context should produce a live breakdown snapshot");
+
+    let decision = BearShortStackStrategy::evaluate(&BearShortStackConfig::default(), &snapshot);
+    let signal = decision.to_signal(snapshot.price, last.ts);
+
+    assert_eq!(decision.action, BearShortAction::Short);
+    assert!(signal.should_sell);
+    assert_eq!(signal.direction, SignalDirection::Short);
+    assert!(signal.signal_kline_stop_loss_price.is_some());
+    assert!(snapshot.price_down_with_oi_up);
+    assert_eq!(snapshot.funding_rate, 0.00003);
+}
+
+#[test]
 fn exhaustion_fade_runs_existing_backtest_pipeline_as_half_risk_short_strategy() {
     let result = BearShortStackStrategy::for_preset_with_tuning(
         BearShortPreset::ExhaustionFade,
@@ -744,6 +859,155 @@ fn exhaustion_fade_runs_existing_backtest_pipeline_as_half_risk_short_strategy()
         .trade_records
         .iter()
         .any(|record| record.option_type == "short"));
+}
+
+#[test]
+fn breakdown_backtest_tuning_can_override_exit_r_targets_and_stop_buffer() {
+    let stop_price = |buffer: f64| {
+        let result = BearShortStackStrategy::for_preset_with_tuning(
+            BearShortPreset::BearBreakdown,
+            BearShortStackBacktestTuning {
+                allow_synthetic_market_context: true,
+                breakdown_stop_atr_buffer: buffer,
+                breakdown_target_r_1: 1.0,
+                breakdown_target_r_2: 2.2,
+                ..Default::default()
+            },
+        )
+        .run_test(
+            "BTC-USDT-SWAP",
+            &bear_breakdown_failed_reclaim_candles(560, 100_000.0),
+            BasicRiskStrategyConfig::default(),
+        );
+
+        let entry = result
+            .trade_records
+            .iter()
+            .find(|record| !record.full_close)
+            .expect("entry record");
+        let payload = entry.signal_result.as_deref().expect("signal payload");
+        assert!(payload.contains("TARGET_R_1:1"));
+        assert!(payload.contains("TARGET_R_2:2.2"));
+        payload
+            .split("STOP_PRICE:")
+            .nth(1)
+            .and_then(|rest| {
+                rest.split(|ch: char| !ch.is_ascii_digit() && ch != '.')
+                    .next()
+            })
+            .and_then(|value| value.parse::<f64>().ok())
+            .expect("stop price reason")
+    };
+
+    let tight_stop = stop_price(0.25);
+    let loose_stop = stop_price(0.75);
+
+    assert!(loose_stop > tight_stop);
+}
+
+#[test]
+fn exhaustion_backtest_tuning_can_override_exit_r_targets_and_stop_buffer() {
+    let stop_price = |buffer: f64| {
+        let result = BearShortStackStrategy::for_preset_with_tuning(
+            BearShortPreset::ExhaustionFade,
+            BearShortStackBacktestTuning {
+                allow_synthetic_market_context: true,
+                exhaustion_stop_atr_buffer: buffer,
+                exhaustion_target_r_1: 1.0,
+                exhaustion_target_r_2: 2.2,
+                ..Default::default()
+            },
+        )
+        .run_test(
+            "BTC-USDT-SWAP",
+            &exhaustion_failed_retest_candles(560, 100_000.0),
+            BasicRiskStrategyConfig::default(),
+        );
+
+        let entry = result
+            .trade_records
+            .iter()
+            .find(|record| !record.full_close)
+            .expect("entry record");
+        let payload = entry.signal_result.as_deref().expect("signal payload");
+        assert!(payload.contains("TARGET_R_1:1"));
+        assert!(payload.contains("TARGET_R_2:2.2"));
+        payload
+            .split("STOP_PRICE:")
+            .nth(1)
+            .and_then(|rest| {
+                rest.split(|ch: char| !ch.is_ascii_digit() && ch != '.')
+                    .next()
+            })
+            .and_then(|value| value.parse::<f64>().ok())
+            .expect("stop price reason")
+    };
+
+    let tight_stop = stop_price(0.25);
+    let loose_stop = stop_price(1.0);
+
+    assert!(loose_stop > tight_stop);
+}
+
+#[test]
+fn exhaustion_backtest_tuning_can_override_exit_r_targets() {
+    let result = BearShortStackStrategy::for_preset_with_tuning(
+        BearShortPreset::ExhaustionFade,
+        BearShortStackBacktestTuning {
+            allow_synthetic_market_context: true,
+            exhaustion_target_r_1: 1.0,
+            exhaustion_target_r_2: 2.2,
+            ..Default::default()
+        },
+    )
+    .run_test(
+        "BTC-USDT-SWAP",
+        &exhaustion_failed_retest_candles(560, 100_000.0),
+        BasicRiskStrategyConfig::default(),
+    );
+
+    let entry = result
+        .trade_records
+        .iter()
+        .find(|record| !record.full_close)
+        .expect("entry record");
+    let payload = entry.signal_result.as_deref().expect("signal payload");
+
+    assert!(payload.contains("TARGET_R_1:1"));
+    assert!(payload.contains("TARGET_R_2:2.2"));
+}
+
+#[test]
+fn exhaustion_backtest_tuning_can_require_rejection_distance() {
+    let loose_result = BearShortStackStrategy::for_preset_with_tuning(
+        BearShortPreset::ExhaustionFade,
+        BearShortStackBacktestTuning {
+            allow_synthetic_market_context: true,
+            exhaustion_min_rejection_atr: 0.0,
+            ..Default::default()
+        },
+    )
+    .run_test(
+        "BTC-USDT-SWAP",
+        &exhaustion_failed_retest_candles(560, 100_000.0),
+        BasicRiskStrategyConfig::default(),
+    );
+    let strict_result = BearShortStackStrategy::for_preset_with_tuning(
+        BearShortPreset::ExhaustionFade,
+        BearShortStackBacktestTuning {
+            allow_synthetic_market_context: true,
+            exhaustion_min_rejection_atr: 10.0,
+            ..Default::default()
+        },
+    )
+    .run_test(
+        "BTC-USDT-SWAP",
+        &exhaustion_failed_retest_candles(560, 100_000.0),
+        BasicRiskStrategyConfig::default(),
+    );
+
+    assert!(loose_result.open_trades > 0);
+    assert_eq!(strict_result.open_trades, 0);
 }
 
 #[test]
@@ -793,6 +1057,63 @@ fn exhaustion_fade_context_backtest_accepts_okx_warm_funding_and_daily_oi_unwind
             );
 
     assert!(result.open_trades > 0);
+}
+
+#[test]
+fn exhaustion_live_snapshot_uses_taker_divergence_before_evaluate() {
+    let candles = live_exhaustion_failed_retest_candles(100_000.0);
+    let last = candles.last().expect("fixture has candles");
+    let snapshot = BearShortStackStrategy::build_live_snapshot_from_context(
+        BearShortPreset::ExhaustionFade,
+        "BTC-USDT-SWAP",
+        &candles,
+        BearShortStackBacktestMarketContext {
+            ts: last.ts,
+            funding_rate: 0.00004,
+            oi_growth_pct: -4.0,
+            long_short_ratio: 1.2,
+            taker_buy_volume: 1.0,
+            taker_sell_volume: 10.0,
+        },
+    )
+    .expect("market context should produce a live exhaustion snapshot");
+
+    let decision = BearShortStackStrategy::evaluate(&BearShortStackConfig::default(), &snapshot);
+    let signal = decision.to_signal(snapshot.price, last.ts);
+
+    assert_eq!(decision.action, BearShortAction::Short);
+    assert!(signal.should_sell);
+    assert_eq!(signal.direction, SignalDirection::Short);
+    assert!(signal.signal_kline_stop_loss_price.is_some());
+    assert!(snapshot.taker_flow_diverged);
+    assert!(snapshot.oi_growth_pct > 0.0);
+}
+
+#[test]
+fn exhaustion_live_snapshot_does_not_bypass_missing_taker_divergence() {
+    let candles = live_exhaustion_failed_retest_candles(100_000.0);
+    let last = candles.last().expect("fixture has candles");
+    let snapshot = BearShortStackStrategy::build_live_snapshot_from_context(
+        BearShortPreset::ExhaustionFade,
+        "BTC-USDT-SWAP",
+        &candles,
+        BearShortStackBacktestMarketContext {
+            ts: last.ts,
+            funding_rate: 0.00004,
+            oi_growth_pct: -4.0,
+            long_short_ratio: 1.2,
+            taker_buy_volume: 10.0,
+            taker_sell_volume: 1.0,
+        },
+    )
+    .expect("technical structure should still be represented as a snapshot");
+
+    let decision = BearShortStackStrategy::evaluate(&BearShortStackConfig::default(), &snapshot);
+
+    assert_eq!(decision.action, BearShortAction::Flat);
+    assert!(decision.has_reason("FLOW_DIVERGENCE_MISSING"));
+    assert!(!snapshot.taker_flow_diverged);
+    assert!(!snapshot.orderbook_imbalance_diverged);
 }
 
 #[test]
@@ -856,4 +1177,44 @@ fn bear_short_backtest_tuning_is_research_only_and_can_relax_exhaustion_volume()
 
     assert_eq!(default_result.open_trades, 0);
     assert!(tuned_result.open_trades > 0);
+}
+
+#[test]
+fn scalper_backtest_tuning_can_independently_scan_take_profit_r_targets() {
+    // 锁定契约：tuning 改 target_r_1/2/3 时，回测和 live 的 take_profit_level 必须同步变化，
+    // 这是消除"live 永远 0.8R/1.6R、回测调参无效"的双口径风险。
+    let take_profit = |target_r_3: f64| -> f64 {
+        let result = BtcEthLiquidityScalperStrategy.run_test_with_tuning(
+            "BTC-USDT-SWAP",
+            &scalper_impulse_pullback_candles(560, 100_000.0),
+            BasicRiskStrategyConfig::default(),
+            BtcEthLiquidityScalperBacktestTuning {
+                allow_synthetic_market_context: true,
+                target_r_1: 1.0,
+                target_r_2: 2.0,
+                target_r_3,
+                ..Default::default()
+            },
+        );
+        let entry = result
+            .trade_records
+            .iter()
+            .find(|record| !record.full_close)
+            .expect("entry record");
+        let payload = entry.signal_result.as_deref().expect("signal payload");
+        assert!(payload.contains("TARGET_R_1:1"));
+        assert!(payload.contains("TARGET_R_2:2"));
+        payload
+            .split("TARGET_R_3:")
+            .nth(1)
+            .and_then(|rest| {
+                rest.split(|ch: char| !ch.is_ascii_digit() && ch != '.')
+                    .next()
+            })
+            .and_then(|value| value.parse::<f64>().ok())
+            .expect("target_r_3 reason")
+    };
+
+    assert_eq!(take_profit(2.4), 2.4);
+    assert_eq!(take_profit(3.5), 3.5);
 }

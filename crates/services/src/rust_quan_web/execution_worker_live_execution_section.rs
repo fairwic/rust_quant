@@ -318,6 +318,46 @@ impl ExecutionWorker {
                 );
             }
         }
+        // 先应用策略对应的账户设置；后续交易所 max-size 查询必须基于已生效的杠杆/保证金模式。
+        if let Err(error) = self
+            .prepare_order_settings_for_live_order(task, &gateway, &order_task)
+            .await
+        {
+            return ExecutionTaskReportRequest::failed(
+                task.id,
+                order_task.exchange.as_str(),
+                order_side_lower(order_task.side),
+                error.to_string(),
+                json!({
+                    "task_id": task.id,
+                    "stage": "prepare_order_settings",
+                    "main_order_placed": false,
+                    "place_order_allowed": false,
+                    "mutation_allowed": false,
+                }),
+            );
+        }
+        // 杠杆/保证金设置完成后，再读取账户当前最大可下单数量；失败或低于最小交易单位时 fail closed。
+        if let Err(error) = self
+            .apply_live_max_order_size_gate(task, &gateway, &mut order_task, &mut request)
+            .await
+        {
+            return ExecutionTaskReportRequest::failed(
+                task.id,
+                order_task.exchange.as_str(),
+                order_side_lower(order_task.side),
+                error.to_string(),
+                json!({
+                    "task_id": task.id,
+                    "stage": "max_order_size_preflight",
+                    "exchange": order_task.exchange.as_str(),
+                    "symbol": order_task.symbol,
+                    "main_order_placed": false,
+                    "place_order_allowed": false,
+                    "mutation_allowed": false,
+                }),
+            );
+        }
         // 对要求保护单的实盘开仓，先尝试预挂保护单；保护单未确认时拒绝主订单，避免裸仓进入市场。
         let prearmed_protection = match prearm_protective_order_if_required(
             &gateway,
@@ -355,39 +395,6 @@ impl ExecutionWorker {
         } else {
             protection.clone()
         };
-        // 杠杆/保证金/持仓模式属于账户 mutation，必须放在保护单路径确定之后；
-        // 如果这里失败，要撤销已预挂的保护单，避免留下孤立风控订单。
-        if let Err(error) = self
-            .prepare_order_settings_after_protection(task, &gateway, &order_task)
-            .await
-        {
-            let mut report = ExecutionTaskReportRequest::failed(
-                task.id,
-                order_task.exchange.as_str(),
-                order_side_lower(order_task.side),
-                error.to_string(),
-                json!({
-                    "task_id": task.id,
-                    "stage": "prepare_order_settings",
-                    "prearmed_protective_order": prearmed_protection.is_some(),
-                    "main_order_placed": false,
-                    "place_order_allowed": false,
-                    "mutation_allowed": false,
-                }),
-            );
-            if let Some(prearmed) = &prearmed_protection {
-                let cancel_result = prearmed
-                    .cancel_after_main_order_failure(task, &gateway, self)
-                    .await;
-                prearmed.apply_pre_main_order_failure_cancel_result(
-                    &mut report,
-                    "prepare_order_settings",
-                    &error.to_string(),
-                    cancel_result,
-                );
-            }
-            return report;
-        }
         // 主订单是整条链路唯一的开仓 mutation 点；失败时只做预挂保护单清理，不重新提交主订单。
         info!(
             worker_id = %self.config.worker_id,

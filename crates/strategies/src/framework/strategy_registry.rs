@@ -4,7 +4,8 @@
 use super::strategy_trait::StrategyExecutor;
 use crate::implementations::{
     BearShortStackStrategyExecutor, BscEventArbStrategyExecutor,
-    BtcEthLiquidityScalperStrategyExecutor, NweStrategyExecutor, VegasStrategyExecutor,
+    BtcEthLiquidityScalperStrategyExecutor, MomentumBreakoutScalperStrategyExecutor,
+    NweStrategyExecutor, RangeReversionScalperStrategyExecutor, VegasStrategyExecutor,
 };
 use crate::StrategyType;
 use anyhow::{anyhow, Result};
@@ -180,12 +181,14 @@ pub fn register_default_strategies() {
 }
 /// 注册 回测与策略研究 组件，使运行时可以按类型或名称找到对应实现。
 fn register_builtin_strategies(registry: &StrategyRegistry) {
-    const DEFAULT_TYPES: [StrategyType; 5] = [
+    const DEFAULT_TYPES: [StrategyType; 7] = [
         StrategyType::Vegas,
         StrategyType::Nwe,
         StrategyType::BscEventArb,
         StrategyType::BtcEthLiquidityScalper,
         StrategyType::BearShortStack,
+        StrategyType::RangeReversionScalper,
+        StrategyType::MomentumBreakoutScalper,
     ];
     for strategy_type in DEFAULT_TYPES.iter() {
         register_executor_for_type(registry, strategy_type);
@@ -199,6 +202,8 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
         StrategyType::BscEventArb => "BscEventArb",
         StrategyType::BtcEthLiquidityScalper => "BtcEthLiquidityScalper",
         StrategyType::BearShortStack => "BearShortStack",
+        StrategyType::RangeReversionScalper => "RangeReversionScalper",
+        StrategyType::MomentumBreakoutScalper => "MomentumBreakoutScalper",
         _ => strategy_type.as_str(),
     };
     if registry.contains(key) {
@@ -224,6 +229,14 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
         StrategyType::BearShortStack => {
             registry.register(Arc::new(BearShortStackStrategyExecutor::new()));
             info!("✅ 注册策略: BearShortStack");
+        }
+        StrategyType::RangeReversionScalper => {
+            registry.register(Arc::new(RangeReversionScalperStrategyExecutor::new()));
+            info!("✅ 注册策略: RangeReversionScalper");
+        }
+        StrategyType::MomentumBreakoutScalper => {
+            registry.register(Arc::new(MomentumBreakoutScalperStrategyExecutor::new()));
+            info!("✅ 注册策略: MomentumBreakoutScalper");
         }
         _ => {
             warn!("⚠️  策略类型 {:?} 暂未实现执行器，跳过注册", strategy_type);

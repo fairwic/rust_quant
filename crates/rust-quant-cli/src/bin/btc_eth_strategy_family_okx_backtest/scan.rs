@@ -110,56 +110,66 @@ pub(super) fn print_breakdown_scan(
         }
         let summary =
             summarize_breakdown_candidate_reports(&non_breakdown_reports, &breakdown_reports);
-        raw_candidates.push(ScanCandidateReport {
-            tuning,
-            ..summary.clone()
+        let case_reports = format_case_reports(&breakdown_reports);
+        raw_candidates.push(ScanCandidateWithCases {
+            report: ScanCandidateReport {
+                tuning,
+                ..summary.clone()
+            },
+            case_reports: case_reports.clone(),
         });
-        if summary.win_rate_pct >= 60.0
-            && summary.max_drawdown_pct < 15.0
-            && summary.pnl > 0.0
-            && summary.remove_top5_pnl > 0.0
-        {
-            candidates.push(ScanCandidateReport { tuning, ..summary });
+        if short_candidate_reports_meet_constraints(&summary, &breakdown_reports) {
+            candidates.push(ScanCandidateWithCases {
+                report: ScanCandidateReport { tuning, ..summary },
+                case_reports,
+            });
         }
     }
 
     raw_candidates.sort_by(|left, right| {
         right
+            .report
             .trades_per_day
-            .total_cmp(&left.trades_per_day)
-            .then_with(|| right.pnl.total_cmp(&left.pnl))
+            .total_cmp(&left.report.trades_per_day)
+            .then_with(|| right.report.pnl.total_cmp(&left.report.pnl))
     });
     for candidate in raw_candidates.iter().take(5) {
+        let report = &candidate.report;
         println!(
-            "breakdown_raw_top cooldown={} initial_move={:.2} initial_volume={:.2} min_reclaim={:.2} max_reclaim={:.2} support_break={:.2} body={:.2} volume={:.2} entries={} wins={} losses={} win_rate={:.2}% pnl={:.4} max_dd={:.2}% trades_per_day={:.2} early_wr={:.2}% early_pnl={:.4} late_wr={:.2}% late_pnl={:.4} remove_top5_pnl={:.4}",
-            candidate.tuning.cooldown_candles,
-            candidate.tuning.breakdown_initial_move_range_mult,
-            candidate.tuning.breakdown_initial_volume_mult,
-            candidate.tuning.breakdown_min_reclaim_distance_atr,
-            candidate.tuning.breakdown_max_reclaim_distance_atr,
-            candidate.tuning.breakdown_min_support_break_range,
-            candidate.tuning.breakdown_min_body_ratio,
-            candidate.tuning.breakdown_min_volume_mult,
-            candidate.entries,
-            candidate.wins,
-            candidate.losses,
-            candidate.win_rate_pct,
-            candidate.pnl,
-            candidate.max_drawdown_pct,
-            candidate.trades_per_day,
-            candidate.early_win_rate_pct,
-            candidate.early_pnl,
-            candidate.late_win_rate_pct,
-            candidate.late_pnl,
-            candidate.remove_top5_pnl
+            "breakdown_raw_top cooldown={} initial_move={:.2} initial_volume={:.2} min_reclaim={:.2} max_reclaim={:.2} support_break={:.2} body={:.2} volume={:.2} stop_buffer={:.2} target_r_1={:.2} target_r_2={:.2} entries={} wins={} losses={} win_rate={:.2}% pnl={:.4} max_dd={:.2}% trades_per_day={:.2} early_wr={:.2}% early_pnl={:.4} late_wr={:.2}% late_pnl={:.4} remove_top5_pnl={:.4} cases={}",
+            report.tuning.cooldown_candles,
+            report.tuning.breakdown_initial_move_range_mult,
+            report.tuning.breakdown_initial_volume_mult,
+            report.tuning.breakdown_min_reclaim_distance_atr,
+            report.tuning.breakdown_max_reclaim_distance_atr,
+            report.tuning.breakdown_min_support_break_range,
+            report.tuning.breakdown_min_body_ratio,
+            report.tuning.breakdown_min_volume_mult,
+            report.tuning.breakdown_stop_atr_buffer,
+            report.tuning.breakdown_target_r_1,
+            report.tuning.breakdown_target_r_2,
+            report.entries,
+            report.wins,
+            report.losses,
+            report.win_rate_pct,
+            report.pnl,
+            report.max_drawdown_pct,
+            report.trades_per_day,
+            report.early_win_rate_pct,
+            report.early_pnl,
+            report.late_win_rate_pct,
+            report.late_pnl,
+            report.remove_top5_pnl,
+            candidate.case_reports
         );
     }
 
     candidates.sort_by(|left, right| {
         right
+            .report
             .trades_per_day
-            .total_cmp(&left.trades_per_day)
-            .then_with(|| right.pnl.total_cmp(&left.pnl))
+            .total_cmp(&left.report.trades_per_day)
+            .then_with(|| right.report.pnl.total_cmp(&left.report.pnl))
     });
     if candidates.is_empty() {
         println!(
@@ -168,30 +178,41 @@ pub(super) fn print_breakdown_scan(
         return;
     }
     for candidate in candidates.iter().take(20) {
+        let report = &candidate.report;
         println!(
-            "breakdown_candidate cooldown={} initial_move={:.2} initial_volume={:.2} min_reclaim={:.2} max_reclaim={:.2} support_break={:.2} body={:.2} volume={:.2} entries={} wins={} losses={} win_rate={:.2}% pnl={:.4} max_dd={:.2}% trades_per_day={:.2} early_wr={:.2}% early_pnl={:.4} late_wr={:.2}% late_pnl={:.4} remove_top5_pnl={:.4}",
-            candidate.tuning.cooldown_candles,
-            candidate.tuning.breakdown_initial_move_range_mult,
-            candidate.tuning.breakdown_initial_volume_mult,
-            candidate.tuning.breakdown_min_reclaim_distance_atr,
-            candidate.tuning.breakdown_max_reclaim_distance_atr,
-            candidate.tuning.breakdown_min_support_break_range,
-            candidate.tuning.breakdown_min_body_ratio,
-            candidate.tuning.breakdown_min_volume_mult,
-            candidate.entries,
-            candidate.wins,
-            candidate.losses,
-            candidate.win_rate_pct,
-            candidate.pnl,
-            candidate.max_drawdown_pct,
-            candidate.trades_per_day,
-            candidate.early_win_rate_pct,
-            candidate.early_pnl,
-            candidate.late_win_rate_pct,
-            candidate.late_pnl,
-            candidate.remove_top5_pnl
+            "breakdown_candidate cooldown={} initial_move={:.2} initial_volume={:.2} min_reclaim={:.2} max_reclaim={:.2} support_break={:.2} body={:.2} volume={:.2} stop_buffer={:.2} target_r_1={:.2} target_r_2={:.2} entries={} wins={} losses={} win_rate={:.2}% pnl={:.4} max_dd={:.2}% trades_per_day={:.2} early_wr={:.2}% early_pnl={:.4} late_wr={:.2}% late_pnl={:.4} remove_top5_pnl={:.4} cases={}",
+            report.tuning.cooldown_candles,
+            report.tuning.breakdown_initial_move_range_mult,
+            report.tuning.breakdown_initial_volume_mult,
+            report.tuning.breakdown_min_reclaim_distance_atr,
+            report.tuning.breakdown_max_reclaim_distance_atr,
+            report.tuning.breakdown_min_support_break_range,
+            report.tuning.breakdown_min_body_ratio,
+            report.tuning.breakdown_min_volume_mult,
+            report.tuning.breakdown_stop_atr_buffer,
+            report.tuning.breakdown_target_r_1,
+            report.tuning.breakdown_target_r_2,
+            report.entries,
+            report.wins,
+            report.losses,
+            report.win_rate_pct,
+            report.pnl,
+            report.max_drawdown_pct,
+            report.trades_per_day,
+            report.early_win_rate_pct,
+            report.early_pnl,
+            report.late_win_rate_pct,
+            report.late_pnl,
+            report.remove_top5_pnl,
+            candidate.case_reports
         );
     }
+}
+
+#[derive(Debug, Clone)]
+struct ScanCandidateWithCases {
+    report: ScanCandidateReport,
+    case_reports: String,
 }
 
 /// Returns a deliberately narrow breakdown grid around the current context preset.
@@ -203,17 +224,55 @@ pub(super) fn breakdown_scan_tunings() -> Vec<BearShortStackBacktestTuning> {
             for initial_volume in [0.70, 0.80] {
                 for body_ratio in [0.30, 0.35] {
                     for volume_mult in [1.00, 1.20] {
-                        tunings.push(BearShortStackBacktestTuning {
-                            cooldown_candles: cooldown,
-                            breakdown_initial_move_range_mult: initial_move,
-                            breakdown_initial_volume_mult: initial_volume,
-                            breakdown_min_reclaim_distance_atr: 0.15,
-                            breakdown_max_reclaim_distance_atr: 1.20,
-                            breakdown_min_support_break_range: 0.15,
-                            breakdown_min_body_ratio: body_ratio,
-                            breakdown_min_volume_mult: volume_mult,
-                            ..Default::default()
-                        });
+                        for stop_buffer in [0.25, 0.35, 0.50] {
+                            for (target_r_1, target_r_2) in [(0.8, 1.6), (1.0, 2.0), (1.2, 2.4)] {
+                                tunings.push(BearShortStackBacktestTuning {
+                                    cooldown_candles: cooldown,
+                                    breakdown_initial_move_range_mult: initial_move,
+                                    breakdown_initial_volume_mult: initial_volume,
+                                    breakdown_min_reclaim_distance_atr: 0.15,
+                                    breakdown_max_reclaim_distance_atr: 1.20,
+                                    breakdown_min_support_break_range: 0.15,
+                                    breakdown_min_body_ratio: body_ratio,
+                                    breakdown_min_volume_mult: volume_mult,
+                                    breakdown_stop_atr_buffer: stop_buffer,
+                                    breakdown_target_r_1: target_r_1,
+                                    breakdown_target_r_2: target_r_2,
+                                    ..Default::default()
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    tunings
+}
+
+/// Builds the exhaustion-fade grid, including exit R targets for fee-aware research scans.
+pub(super) fn exhaustion_scan_tunings() -> Vec<BearShortStackBacktestTuning> {
+    let mut tunings = Vec::new();
+    for cooldown in [8_usize, 10, 12] {
+        for new_high_mult in [1.25, 1.35, 1.5] {
+            for body_ratio in [0.30, 0.35] {
+                for volume_mult in [1.3, 1.4] {
+                    for min_rejection_atr in [1.2, 1.4, 1.6] {
+                        for stop_buffer in [0.35, 0.65] {
+                            for (target_r_1, target_r_2) in [(0.8, 1.6), (1.0, 2.0)] {
+                                tunings.push(BearShortStackBacktestTuning {
+                                    cooldown_candles: cooldown,
+                                    exhaustion_new_high_range_mult: new_high_mult,
+                                    exhaustion_min_body_ratio: body_ratio,
+                                    exhaustion_min_volume_mult: volume_mult,
+                                    exhaustion_min_rejection_atr: min_rejection_atr,
+                                    exhaustion_stop_atr_buffer: stop_buffer,
+                                    exhaustion_target_r_1: target_r_1,
+                                    exhaustion_target_r_2: target_r_2,
+                                    ..Default::default()
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -235,38 +294,16 @@ pub(super) fn print_exhaustion_scan(
         .filter(|loaded| matches!(loaded.case.family, StrategyFamily::Exhaustion))
         .collect::<Vec<_>>();
     let mut candidates = Vec::new();
-    for cooldown in [12_usize, 16, 20, 24] {
-        for new_high_mult in [1.25, 1.35, 1.5] {
-            for body_ratio in [0.30, 0.35, 0.40] {
-                for volume_mult in [1.3, 1.4, 1.5, 1.6] {
-                    let tuning = BearShortStackBacktestTuning {
-                        cooldown_candles: cooldown,
-                        exhaustion_new_high_range_mult: new_high_mult,
-                        exhaustion_min_body_ratio: body_ratio,
-                        exhaustion_min_volume_mult: volume_mult,
-                        ..Default::default()
-                    };
-                    let mut exhaustion_reports = Vec::with_capacity(exhaustion_cases.len());
-                    for loaded in &exhaustion_cases {
-                        let result = run_loaded_case(loaded, risk, None, Some(tuning));
-                        exhaustion_reports.push(build_report(
-                            loaded.case.label,
-                            &loaded.candles,
-                            &result,
-                        ));
-                    }
-                    let summary = summarize_exhaustion_candidate_reports(
-                        &non_exhaustion_reports,
-                        &exhaustion_reports,
-                    );
-                    if summary.win_rate_pct >= 60.0
-                        && summary.max_drawdown_pct < 15.0
-                        && summary.pnl > 0.0
-                    {
-                        candidates.push(ScanCandidateReport { tuning, ..summary });
-                    }
-                }
-            }
+    for tuning in exhaustion_scan_tunings() {
+        let mut exhaustion_reports = Vec::with_capacity(exhaustion_cases.len());
+        for loaded in &exhaustion_cases {
+            let result = run_loaded_case(loaded, risk, None, Some(tuning));
+            exhaustion_reports.push(build_report(loaded.case.label, &loaded.candles, &result));
+        }
+        let summary =
+            summarize_exhaustion_candidate_reports(&non_exhaustion_reports, &exhaustion_reports);
+        if short_candidate_reports_meet_constraints(&summary, &exhaustion_reports) {
+            candidates.push(ScanCandidateReport { tuning, ..summary });
         }
     }
     candidates.sort_by(|left, right| {
@@ -277,11 +314,15 @@ pub(super) fn print_exhaustion_scan(
     });
     for candidate in candidates.iter().take(20) {
         println!(
-            "candidate cooldown={} new_high_mult={:.2} body_ratio={:.2} volume_mult={:.2} entries={} wins={} losses={} win_rate={:.2}% pnl={:.4} max_dd={:.2}% trades_per_day={:.2} early_wr={:.2}% early_pnl={:.4} late_wr={:.2}% late_pnl={:.4} remove_top5_pnl={:.4}",
+            "candidate cooldown={} new_high_mult={:.2} body_ratio={:.2} volume_mult={:.2} min_rejection_atr={:.2} stop_buffer={:.2} target_r_1={:.2} target_r_2={:.2} entries={} wins={} losses={} win_rate={:.2}% pnl={:.4} max_dd={:.2}% trades_per_day={:.2} early_wr={:.2}% early_pnl={:.4} late_wr={:.2}% late_pnl={:.4} remove_top5_pnl={:.4}",
             candidate.tuning.cooldown_candles,
             candidate.tuning.exhaustion_new_high_range_mult,
             candidate.tuning.exhaustion_min_body_ratio,
             candidate.tuning.exhaustion_min_volume_mult,
+            candidate.tuning.exhaustion_min_rejection_atr,
+            candidate.tuning.exhaustion_stop_atr_buffer,
+            candidate.tuning.exhaustion_target_r_1,
+            candidate.tuning.exhaustion_target_r_2,
             candidate.entries,
             candidate.wins,
             candidate.losses,
@@ -294,6 +335,11 @@ pub(super) fn print_exhaustion_scan(
             candidate.late_win_rate_pct,
             candidate.late_pnl,
             candidate.remove_top5_pnl
+        );
+    }
+    if candidates.is_empty() {
+        println!(
+            "no_exhaustion_candidates source=quant_core_sharded constraints=win_rate>=60,max_dd<15,pnl>0,remove_top5_pnl>0"
         );
     }
 }

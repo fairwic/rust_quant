@@ -1,5 +1,5 @@
-use super::strategy::BearShortStackStrategy;
-use super::types::BearShortStackConfig;
+use super::strategy::RangeReversionScalperStrategy;
+use super::types::{RangeReversionSignalSnapshot, RangeReversionThresholds};
 use crate::framework::config::strategy_config::StrategyConfig;
 use crate::framework::strategy_trait::{StrategyDataResult, StrategyExecutor};
 use crate::strategy_common::SignalResult;
@@ -7,37 +7,48 @@ use crate::StrategyType;
 use anyhow::Result;
 use async_trait::async_trait;
 use rust_quant_common::CandleItem;
+use serde::Deserialize;
 use serde_json::Value;
 
-pub struct BearShortStackStrategyExecutor;
+/// Range Reversion Scalper 的 live/paper 执行器；只识别带版本的 v1 key。
+pub struct RangeReversionScalperStrategyExecutor;
 
-impl BearShortStackStrategyExecutor {
+impl RangeReversionScalperStrategyExecutor {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl Default for BearShortStackStrategyExecutor {
+impl Default for RangeReversionScalperStrategyExecutor {
     fn default() -> Self {
         Self::new()
     }
 }
 
+/// live 执行配置：thresholds + 上游聚合的快照。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct RangeReversionExecConfig {
+    thresholds: RangeReversionThresholds,
+    snapshot: Option<RangeReversionSignalSnapshot>,
+}
+
 #[async_trait]
-impl StrategyExecutor for BearShortStackStrategyExecutor {
+impl StrategyExecutor for RangeReversionScalperStrategyExecutor {
     fn name(&self) -> &'static str {
-        "BearShortStack"
+        "RangeReversionScalper"
     }
 
     fn strategy_type(&self) -> StrategyType {
-        StrategyType::BearShortStack
+        StrategyType::RangeReversionScalper
     }
 
     fn can_handle(&self, strategy_config: &str) -> bool {
         let Ok(value) = serde_json::from_str::<Value>(strategy_config) else {
             return false;
         };
-        strategy_key(&value).is_some_and(is_bear_short_key)
+        // 只识别 v1 key，避免手写无版本别名绕过策略版本审计。
+        strategy_key(&value).is_some_and(|key| matches!(key, "range_reversion_scalper_v1"))
     }
 
     async fn initialize_data(
@@ -60,22 +71,19 @@ impl StrategyExecutor for BearShortStackStrategyExecutor {
         strategy_config: &StrategyConfig,
         snap: Option<CandleItem>,
     ) -> Result<SignalResult> {
-        let mut config: BearShortStackConfig =
+        let config: RangeReversionExecConfig =
             serde_json::from_value(strategy_config.parameters.clone())?;
-        config.apply_strategy_key_preset();
         let price = snap.as_ref().map(|candle| candle.c).unwrap_or_default();
         let ts = snap.as_ref().map(|candle| candle.ts).unwrap_or_default();
         let Some(mut snapshot) = config.snapshot.clone() else {
-            return Ok(BearShortStackStrategy::flat_missing_snapshot(
-                price,
-                ts,
-                config.preset,
+            return Ok(RangeReversionScalperStrategy::flat_missing_snapshot(
+                price, ts,
             ));
         };
         if snapshot.price <= 0.0 {
             snapshot.price = price;
         }
-        let decision = BearShortStackStrategy::evaluate(&config, &snapshot);
+        let decision = RangeReversionScalperStrategy::evaluate(&config.thresholds, &snapshot);
         Ok(decision.to_signal(snapshot.price, ts))
     }
 }
@@ -86,12 +94,4 @@ fn strategy_key(value: &Value) -> Option<&str> {
         .or_else(|| value.get("strategy_type"))
         .or_else(|| value.get("strategy_name"))
         .and_then(Value::as_str)
-}
-
-fn is_bear_short_key(key: &str) -> bool {
-    // 允许父策略 key 和两个子预设 key，但不接受无版本别名。
-    matches!(
-        key,
-        "bear_short_stack_v1" | "bear_breakdown_short_v1" | "exhaustion_fade_short_v1"
-    )
 }

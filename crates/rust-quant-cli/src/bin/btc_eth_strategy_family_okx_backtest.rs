@@ -18,6 +18,7 @@ use rust_quant_strategies::implementations::{
     BtcEthLiquidityScalperBacktestTuning, BtcEthLiquidityScalperStrategy,
 };
 use rust_quant_strategies::CandleItem;
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -31,7 +32,7 @@ mod scan;
 use micro_scalper_1m::micro_scalper_scan_tunings;
 use micro_scalper_1m::{print_micro_scalper_scan, run_micro_scalper_1m};
 #[cfg(test)]
-use scan::breakdown_scan_tunings;
+use scan::{breakdown_scan_tunings, exhaustion_scan_tunings};
 use scan::{
     print_breakdown_scan, print_exhaustion_scan, scalper_narrow_scan_tunings, scalper_scan_tunings,
 };
@@ -108,6 +109,7 @@ struct CaseReport {
     trades: Vec<ClosedTradeDebug>,
     filtered_signals: usize,
     filtered_reason_counts: Vec<(String, usize)>,
+    filtered_signal_snapshots: Vec<FilteredSignalDebug>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +196,25 @@ struct ClosedTradeDebug {
     close_price: Option<f64>,
     pnl: f64,
     close_type: String,
+    entry_snapshot: Option<EntrySnapshotDebug>,
+    entry_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EntrySnapshotDebug {
+    stop_distance_pct: f64,
+    atr_pct: f64,
+    oi_growth_pct: f64,
+    funding_rate: f64,
+    long_short_ratio: f64,
+    taker_sell_buy_ratio: f64,
+}
+
+#[derive(Debug, Clone)]
+struct FilteredSignalDebug {
+    ts: i64,
+    reasons: Vec<String>,
+    snapshot: EntrySnapshotDebug,
 }
 
 #[tokio::main]
@@ -1220,30 +1241,21 @@ fn bear_tuning_for_report_family(
 }
 
 fn context_breakdown_tuning() -> BearShortStackBacktestTuning {
-    BearShortStackBacktestTuning {
-        cooldown_candles: 6,
-        breakdown_initial_move_range_mult: 0.75,
-        breakdown_initial_volume_mult: 0.70,
-        breakdown_min_reclaim_distance_atr: 0.15,
-        breakdown_max_reclaim_distance_atr: 1.20,
-        breakdown_min_support_break_range: 0.15,
-        breakdown_min_body_ratio: 0.30,
-        breakdown_min_volume_mult: 1.00,
-        ..Default::default()
-    }
+    BearShortStackBacktestTuning::real_context_default(BearShortPreset::BearBreakdown)
 }
 
 fn context_exhaustion_tuning() -> BearShortStackBacktestTuning {
-    BearShortStackBacktestTuning {
-        cooldown_candles: 24,
-        exhaustion_new_high_range_mult: 1.25,
-        exhaustion_min_body_ratio: 0.30,
-        ..Default::default()
-    }
+    BearShortStackBacktestTuning::real_context_default(BearShortPreset::ExhaustionFade)
 }
 
 fn build_report(label: &str, candles: &[CandleItem], result: &BackTestResult) -> CaseReport {
     let closed = closed_records(result).collect::<Vec<_>>();
+    let entry_records = result
+        .trade_records
+        .iter()
+        .filter(|record| !record.full_close)
+        .map(|record| (record.open_position_time.as_str(), record))
+        .collect::<BTreeMap<_, _>>();
     let wins = closed
         .iter()
         .filter(|record| record.profit_loss > 0.0)
@@ -1274,7 +1286,14 @@ fn build_report(label: &str, candles: &[CandleItem], result: &BackTestResult) ->
         },
         trades: closed
             .iter()
-            .map(|record| closed_trade_debug(record))
+            .map(|record| {
+                closed_trade_debug(
+                    record,
+                    entry_records
+                        .get(record.open_position_time.as_str())
+                        .copied(),
+                )
+            })
             .collect(),
         filtered_signals: result
             .audit_trail
@@ -1283,6 +1302,7 @@ fn build_report(label: &str, candles: &[CandleItem], result: &BackTestResult) ->
             .filter(|snapshot| snapshot.filtered)
             .count(),
         filtered_reason_counts: filtered_reason_counts(result),
+        filtered_signal_snapshots: filtered_signal_snapshots(result),
     }
 }
 
@@ -1303,7 +1323,10 @@ fn filtered_reason_counts(result: &BackTestResult) -> Vec<(String, usize)> {
     counts
 }
 
-fn closed_trade_debug(record: &TradeRecord) -> ClosedTradeDebug {
+fn closed_trade_debug(
+    record: &TradeRecord,
+    entry_record: Option<&TradeRecord>,
+) -> ClosedTradeDebug {
     ClosedTradeDebug {
         open_time: record.open_position_time.clone(),
         close_time: record.close_position_time.clone(),
@@ -1311,7 +1334,79 @@ fn closed_trade_debug(record: &TradeRecord) -> ClosedTradeDebug {
         close_price: record.close_price,
         pnl: record.profit_loss,
         close_type: record.close_type.clone(),
+        entry_snapshot: entry_record
+            .and_then(|entry| entry.signal_value.as_deref())
+            .and_then(parse_entry_snapshot_debug),
+        entry_reasons: entry_record
+            .and_then(|entry| entry.signal_result.as_deref())
+            .map(parse_entry_reasons)
+            .unwrap_or_default(),
     }
+}
+
+fn filtered_signal_snapshots(result: &BackTestResult) -> Vec<FilteredSignalDebug> {
+    result
+        .audit_trail
+        .signal_snapshots
+        .iter()
+        .filter(|signal| signal.filtered)
+        .filter_map(|signal| {
+            let snapshot = parse_filtered_snapshot_debug(&signal.payload)?;
+            Some(FilteredSignalDebug {
+                ts: signal.ts,
+                reasons: signal.filter_reasons.clone(),
+                snapshot,
+            })
+        })
+        .collect()
+}
+
+fn parse_filtered_snapshot_debug(payload: &str) -> Option<EntrySnapshotDebug> {
+    let value = serde_json::from_str::<Value>(payload).ok()?;
+    let single_value = value.get("single_value")?.as_str()?;
+    parse_entry_snapshot_debug(single_value)
+}
+
+fn parse_entry_snapshot_debug(payload: &str) -> Option<EntrySnapshotDebug> {
+    let value = serde_json::from_str::<Value>(payload).ok()?;
+    let price = json_number(&value, "price")?;
+    if price <= 0.0 {
+        return None;
+    }
+    let failed_reclaim_high = json_number(&value, "failed_reclaim_high")?;
+    let atr_15m = json_number(&value, "atr_15m")?;
+    let taker_buy_volume = json_number(&value, "taker_buy_volume").unwrap_or(0.0);
+    let taker_sell_volume = json_number(&value, "taker_sell_volume").unwrap_or(0.0);
+    Some(EntrySnapshotDebug {
+        stop_distance_pct: (failed_reclaim_high - price).max(0.0) / price * 100.0,
+        atr_pct: atr_15m / price * 100.0,
+        oi_growth_pct: json_number(&value, "oi_growth_pct").unwrap_or(0.0),
+        funding_rate: json_number(&value, "funding_rate").unwrap_or(0.0),
+        long_short_ratio: json_number(&value, "long_short_ratio").unwrap_or(0.0),
+        taker_sell_buy_ratio: if taker_buy_volume > 0.0 {
+            taker_sell_volume / taker_buy_volume
+        } else {
+            0.0
+        },
+    })
+}
+
+fn json_number(value: &Value, field: &str) -> Option<f64> {
+    value.get(field)?.as_f64()
+}
+
+fn parse_entry_reasons(payload: &str) -> Vec<String> {
+    serde_json::from_str::<Value>(payload)
+        .ok()
+        .and_then(|value| {
+            value.get("reasons")?.as_array().map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
 }
 
 fn closed_records(result: &BackTestResult) -> impl Iterator<Item = &TradeRecord> {
@@ -1398,6 +1493,19 @@ fn print_reports(reports: &[CaseReport], debug_trades: bool) {
                     report.filtered_signals,
                     format_reason_counts(&report.filtered_reason_counts)
                 );
+                for filtered in report.filtered_signal_snapshots.iter().take(6) {
+                    println!(
+                        "    filtered_signal ts={} reasons={} stop_dist={:.4}% atr={:.4}% oi_growth={:.4}% funding={:.6} long_short={:.4} taker_sell_buy={:.4}",
+                        filtered.ts,
+                        filtered.reasons.join(","),
+                        filtered.snapshot.stop_distance_pct,
+                        filtered.snapshot.atr_pct,
+                        filtered.snapshot.oi_growth_pct,
+                        filtered.snapshot.funding_rate,
+                        filtered.snapshot.long_short_ratio,
+                        filtered.snapshot.taker_sell_buy_ratio
+                    );
+                }
             }
             for trade in &report.trades {
                 println!(
@@ -1409,6 +1517,20 @@ fn print_reports(reports: &[CaseReport], debug_trades: bool) {
                     trade.pnl,
                     trade.close_type
                 );
+                if let Some(snapshot) = trade.entry_snapshot {
+                    println!(
+                        "    entry_snapshot stop_dist={:.4}% atr={:.4}% oi_growth={:.4}% funding={:.6} long_short={:.4} taker_sell_buy={:.4}",
+                        snapshot.stop_distance_pct,
+                        snapshot.atr_pct,
+                        snapshot.oi_growth_pct,
+                        snapshot.funding_rate,
+                        snapshot.long_short_ratio,
+                        snapshot.taker_sell_buy_ratio
+                    );
+                }
+                if !trade.entry_reasons.is_empty() {
+                    println!("    entry_reasons={}", trade.entry_reasons.join(","));
+                }
             }
         }
     }
@@ -1736,11 +1858,7 @@ fn print_scalper_scan_with_tunings(
             remove_top5_pnl: summary.remove_top5_pnl,
             filtered_reason_counts: filtered_reason_counts.clone(),
         });
-        if summary.win_rate_pct >= 60.0
-            && summary.max_drawdown_pct < 15.0
-            && summary.pnl > 0.0
-            && summary.remove_top5_pnl > 0.0
-        {
+        if short_scan_candidate_meets_constraints(&summary) {
             candidates.push(ScalperScanCandidateReport {
                 tuning,
                 entries: summary.entries,
@@ -1949,6 +2067,67 @@ fn summarize_reports(reports: &[CaseReport]) -> ScanCandidateReport {
         late_win_rate_pct,
         late_pnl,
         remove_top5_pnl,
+    }
+}
+
+fn short_scan_candidate_meets_constraints(summary: &ScanCandidateReport) -> bool {
+    summary.win_rate_pct >= 60.0
+        && summary.max_drawdown_pct < 15.0
+        && summary.pnl > 0.0
+        && summary.remove_top5_pnl > 0.0
+}
+
+fn short_candidate_reports_meet_constraints(
+    summary: &ScanCandidateReport,
+    reports: &[CaseReport],
+) -> bool {
+    short_scan_candidate_meets_constraints(summary)
+        && reports.iter().all(|report| {
+            report.entries == 0
+                || (report.pnl > 0.0 && (report.entries < 10 || report.win_rate_pct >= 60.0))
+        })
+}
+
+fn format_case_reports(reports: &[CaseReport]) -> String {
+    let mut reports = reports.iter().collect::<Vec<_>>();
+    reports.sort_by(|left, right| {
+        right
+            .entries
+            .cmp(&left.entries)
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    reports
+        .into_iter()
+        .map(|report| {
+            let (avg_win, avg_loss) = average_trade_pnls(&report.trades);
+            format!(
+                "{}:e{}/wr{:.2}/pnl{:.4}/aw{:.4}/al{:.4}",
+                report.label, report.entries, report.win_rate_pct, report.pnl, avg_win, avg_loss
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+fn average_trade_pnls(trades: &[ClosedTradeDebug]) -> (f64, f64) {
+    let wins = trades
+        .iter()
+        .filter(|trade| trade.pnl > 0.0)
+        .map(|trade| trade.pnl)
+        .collect::<Vec<_>>();
+    let losses = trades
+        .iter()
+        .filter(|trade| trade.pnl < 0.0)
+        .map(|trade| trade.pnl)
+        .collect::<Vec<_>>();
+    (average_or_zero(&wins), average_or_zero(&losses))
+}
+
+fn average_or_zero(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        0.0
+    } else {
+        values.iter().sum::<f64>() / values.len() as f64
     }
 }
 

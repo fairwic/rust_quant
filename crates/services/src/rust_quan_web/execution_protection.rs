@@ -390,15 +390,6 @@ impl PrearmedProtectiveOrder {
             result,
         );
     }
-    pub(super) fn apply_pre_main_order_failure_cancel_result(
-        &self,
-        report: &mut ExecutionTaskReportRequest,
-        failure_stage: &str,
-        failure_message: &str,
-        result: crypto_exc_all::Result<OrderAck>,
-    ) {
-        self.apply_order_path_failure_cancel_result(report, failure_stage, failure_message, result);
-    }
     /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     fn apply_order_path_failure_cancel_result(
         &self,

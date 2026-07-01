@@ -345,6 +345,7 @@ fn merge_filtered_reason_counts_orders_by_frequency() {
             trades: Vec::new(),
             filtered_signals: 0,
             filtered_reason_counts: vec![("LOW".to_string(), 1), ("HIGH".to_string(), 3)],
+            filtered_signal_snapshots: Vec::new(),
         },
         CaseReport {
             label: "b".to_string(),
@@ -362,6 +363,7 @@ fn merge_filtered_reason_counts_orders_by_frequency() {
             trades: Vec::new(),
             filtered_signals: 0,
             filtered_reason_counts: vec![("LOW".to_string(), 2)],
+            filtered_signal_snapshots: Vec::new(),
         },
     ];
 
@@ -394,6 +396,7 @@ fn merge_filtered_reason_counts_excludes_confirmed_signal_metadata() {
             ("OI_NOT_CONFIRMED_REDUCE_SIZE".to_string(), 2),
             ("MICROSTRUCTURE_CONFIRMATION_MISSING".to_string(), 5),
         ],
+        filtered_signal_snapshots: Vec::new(),
     }];
 
     assert_eq!(
@@ -420,6 +423,7 @@ fn scalper_filter_counts_ignore_non_scalper_baseline_reports() {
         trades: Vec::new(),
         filtered_signals: 0,
         filtered_reason_counts: vec![("EXHAUSTION_FADE_SHORT_V1_CONFIRMED".to_string(), 10)],
+        filtered_signal_snapshots: Vec::new(),
     }];
     let scalper = vec![CaseReport {
         label: "scalper_btc_1m".to_string(),
@@ -437,6 +441,7 @@ fn scalper_filter_counts_ignore_non_scalper_baseline_reports() {
         trades: Vec::new(),
         filtered_signals: 0,
         filtered_reason_counts: vec![("MICROSTRUCTURE_CONFIRMATION_MISSING".to_string(), 3)],
+        filtered_signal_snapshots: Vec::new(),
     }];
 
     assert_eq!(
@@ -485,6 +490,199 @@ fn exhaustion_candidate_summary_ignores_profitable_non_exhaustion_reports() {
     assert_eq!(summary.losses, 3);
     assert_eq!(summary.win_rate_pct, 40.0);
     assert_eq!(summary.pnl, -1.5);
+}
+
+#[test]
+fn build_report_attaches_entry_snapshot_debug_to_closed_trades() {
+    let entry = trade_record(
+        "short",
+        "2026-06-01 00:00:00",
+        false,
+        100.0,
+        0.0,
+        Some(
+            serde_json::json!({
+                "price": 100.0,
+                "failed_reclaim_high": 102.0,
+                "atr_15m": 1.5,
+                "oi_growth_pct": 4.0,
+                "funding_rate": 0.0004,
+                "long_short_ratio": 1.3,
+                "taker_buy_volume": 2.0,
+                "taker_sell_volume": 5.0
+            })
+            .to_string(),
+        ),
+        Some(
+            serde_json::json!({
+                "reasons": ["STOP_PRICE:102.5", "TARGET_R_1:1"]
+            })
+            .to_string(),
+        ),
+    );
+    let close = trade_record(
+        "close",
+        "2026-06-01 00:00:00",
+        true,
+        100.0,
+        -0.2,
+        None,
+        None,
+    );
+    let result = BackTestResult {
+        funds: 99.8,
+        open_trades: 1,
+        trade_records: vec![entry, close],
+        ..BackTestResult::default()
+    };
+    let candles = vec![CandleItem {
+        o: 100.0,
+        h: 101.0,
+        l: 99.0,
+        c: 100.0,
+        v: 1.0,
+        ts: 1_783_000_000_000,
+        confirm: 1,
+    }];
+
+    let report = build_report("exhaustion_btc_5m", &candles, &result);
+    let trade = report.trades.first().expect("closed trade debug");
+    let snapshot = trade.entry_snapshot.expect("entry snapshot debug");
+
+    assert_eq!(
+        trade.entry_reasons,
+        vec!["STOP_PRICE:102.5", "TARGET_R_1:1"]
+    );
+    assert!((snapshot.stop_distance_pct - 2.0).abs() < 1e-9);
+    assert!((snapshot.atr_pct - 1.5).abs() < 1e-9);
+    assert!((snapshot.oi_growth_pct - 4.0).abs() < 1e-9);
+    assert!((snapshot.funding_rate - 0.0004).abs() < 1e-12);
+    assert!((snapshot.long_short_ratio - 1.3).abs() < 1e-9);
+    assert!((snapshot.taker_sell_buy_ratio - 2.5).abs() < 1e-9);
+}
+
+#[test]
+fn build_report_attaches_filtered_signal_snapshot_debug() {
+    let signal_snapshot = serde_json::json!({
+        "price": 100.0,
+        "failed_reclaim_high": 103.0,
+        "atr_15m": 2.0,
+        "oi_growth_pct": 0.2,
+        "funding_rate": -0.0001,
+        "long_short_ratio": 0.9,
+        "taker_buy_volume": 4.0,
+        "taker_sell_volume": 5.0
+    })
+    .to_string();
+    let result: BackTestResult = serde_json::from_value(serde_json::json!({
+        "funds": 0.0,
+        "win_rate": 0.0,
+        "open_trades": 0,
+        "trade_records": [],
+        "filtered_signals": [],
+        "dynamic_config_logs": [],
+        "audit_trail": {
+            "run_id": "",
+            "signal_snapshots": [{
+                "ts": 1_783_000_000_000i64,
+                "payload": serde_json::json!({
+                    "single_value": signal_snapshot
+                }).to_string(),
+                "filtered": true,
+                "filter_reasons": ["OI_GROWTH_MISSING"]
+            }],
+            "risk_decisions": [],
+            "order_decisions": []
+        }
+    }))
+    .expect("backtest result");
+    let candles = vec![CandleItem {
+        o: 100.0,
+        h: 101.0,
+        l: 99.0,
+        c: 100.0,
+        v: 1.0,
+        ts: 1_783_000_000_000,
+        confirm: 1,
+    }];
+
+    let report = build_report("breakdown_btc_5m", &candles, &result);
+    let filtered = report
+        .filtered_signal_snapshots
+        .first()
+        .expect("filtered signal debug");
+
+    assert_eq!(filtered.reasons, vec!["OI_GROWTH_MISSING"]);
+    assert_eq!(filtered.ts, 1_783_000_000_000);
+    assert!((filtered.snapshot.stop_distance_pct - 3.0).abs() < 1e-9);
+    assert!((filtered.snapshot.atr_pct - 2.0).abs() < 1e-9);
+    assert!((filtered.snapshot.oi_growth_pct - 0.2).abs() < 1e-9);
+    assert!((filtered.snapshot.funding_rate + 0.0001).abs() < 1e-12);
+    assert!((filtered.snapshot.long_short_ratio - 0.9).abs() < 1e-9);
+    assert!((filtered.snapshot.taker_sell_buy_ratio - 1.25).abs() < 1e-9);
+}
+
+#[test]
+fn short_scan_candidate_requires_profit_after_removing_top_trades() {
+    let fragile = ScanCandidateReport {
+        tuning: BearShortStackBacktestTuning::default(),
+        entries: 30,
+        wins: 20,
+        losses: 10,
+        win_rate_pct: 66.67,
+        pnl: 8.0,
+        max_drawdown_pct: 4.0,
+        trades_per_day: 1.0,
+        early_win_rate_pct: 60.0,
+        early_pnl: 2.0,
+        late_win_rate_pct: 70.0,
+        late_pnl: 6.0,
+        remove_top5_pnl: -0.1,
+    };
+
+    assert!(!short_scan_candidate_meets_constraints(&fragile));
+}
+
+#[test]
+fn short_scan_candidate_rejects_active_subcase_below_win_rate() {
+    let reports = vec![
+        scan_case_report("exhaustion_btc_5m", 20, 16, 4, 5.0),
+        scan_case_report("exhaustion_eth_5m", 20, 10, 10, 1.0),
+    ];
+    let summary = ScanCandidateReport {
+        tuning: BearShortStackBacktestTuning::default(),
+        entries: 40,
+        wins: 26,
+        losses: 14,
+        win_rate_pct: 65.0,
+        pnl: 6.0,
+        max_drawdown_pct: 2.0,
+        trades_per_day: 1.0,
+        early_win_rate_pct: 60.0,
+        early_pnl: 1.0,
+        late_win_rate_pct: 70.0,
+        late_pnl: 5.0,
+        remove_top5_pnl: 1.0,
+    };
+
+    assert!(short_scan_candidate_meets_constraints(&summary));
+    assert!(!short_candidate_reports_meet_constraints(
+        &summary, &reports
+    ));
+}
+
+#[test]
+fn format_case_reports_shows_subcase_frequency_win_rate_and_pnl() {
+    let reports = vec![
+        scan_case_report_with_pnls("breakdown_btc_5m", &[0.45, 0.30, -0.80]),
+        scan_case_report("breakdown_eth_5m", 0, 0, 0, 0.0),
+        scan_case_report_with_pnls("breakdown_btc_15m", &[0.25, -0.50, -0.25]),
+    ];
+
+    assert_eq!(
+        format_case_reports(&reports),
+        "breakdown_btc_15m:e3/wr33.33/pnl-0.5000/aw0.2500/al-0.3750;breakdown_btc_5m:e3/wr66.67/pnl-0.0500/aw0.3750/al-0.8000;breakdown_eth_5m:e0/wr0.00/pnl0.0000/aw0.0000/al0.0000"
+    );
 }
 
 #[test]
@@ -556,14 +754,50 @@ fn scalper_diagnostic_reasons_are_sorted_by_frequency() {
 fn breakdown_scan_tunings_stay_in_context_neighborhood() {
     let tunings = breakdown_scan_tunings();
 
-    assert!(tunings.len() <= 128);
-    assert!(tunings.contains(&context_breakdown_tuning()));
+    assert!(tunings.len() <= 512);
+    assert_eq!(
+        context_breakdown_tuning(),
+        BearShortStackBacktestTuning::default()
+    );
+    assert!(!tunings.contains(&context_breakdown_tuning()));
     assert!(tunings
         .iter()
         .any(|tuning| tuning.breakdown_initial_move_range_mult < 0.90));
     assert!(tunings
         .iter()
         .any(|tuning| tuning.breakdown_min_volume_mult < 1.20));
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.breakdown_stop_atr_buffer < 0.35));
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.breakdown_target_r_2 > 1.6));
+}
+
+#[test]
+fn exhaustion_scan_tunings_cover_exit_r_targets() {
+    let tunings = exhaustion_scan_tunings();
+
+    assert!(tunings.len() <= 512);
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.exhaustion_target_r_2 > 1.6));
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.exhaustion_target_r_1 >= 1.0));
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.exhaustion_stop_atr_buffer < 0.5));
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.exhaustion_stop_atr_buffer > 0.5));
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.exhaustion_min_rejection_atr >= 1.4));
+    assert!(tunings.iter().any(|tuning| tuning.cooldown_candles < 12));
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.exhaustion_min_rejection_atr < 1.4));
 }
 
 #[test]
@@ -645,7 +879,15 @@ fn run_loaded_case_requires_market_context_instead_of_placeholder_snapshot() {
     };
     let risk = BasicRiskStrategyConfig::default();
 
-    let baseline_result = run_loaded_case(&baseline, risk, None, None);
+    let baseline_result = run_loaded_case(
+        &baseline,
+        risk,
+        Some(BtcEthLiquidityScalperBacktestTuning {
+            allow_synthetic_market_context: true,
+            ..Default::default()
+        }),
+        None,
+    );
     let guarded_result = run_loaded_case(&guarded, risk, None, None);
 
     assert!(baseline_result.open_trades > 0);
@@ -653,24 +895,24 @@ fn run_loaded_case_requires_market_context_instead_of_placeholder_snapshot() {
 }
 
 #[test]
-fn context_breakdown_uses_cli_tuning_without_changing_global_defaults() {
+fn context_breakdown_keeps_strict_default_until_validated() {
     let context_tuning = bear_tuning_for_context_run(StrategyFamily::Breakdown, None);
     let default_tuning = BearShortStackBacktestTuning::default();
 
-    assert_ne!(context_tuning, default_tuning);
+    assert_eq!(context_tuning, default_tuning);
     assert_eq!(default_tuning.cooldown_candles, 12);
     assert_eq!(default_tuning.breakdown_initial_move_range_mult, 1.35);
-    assert_eq!(context_tuning.cooldown_candles, 6);
-    assert_eq!(context_tuning.breakdown_initial_move_range_mult, 0.75);
-    assert_eq!(context_tuning.breakdown_initial_volume_mult, 0.70);
-    assert_eq!(context_tuning.breakdown_min_body_ratio, 0.30);
-    assert_eq!(context_tuning.breakdown_min_volume_mult, 1.00);
     assert_eq!(
         bear_tuning_for_context_run(StrategyFamily::Exhaustion, None),
         BearShortStackBacktestTuning {
-            cooldown_candles: 24,
+            cooldown_candles: 12,
             exhaustion_new_high_range_mult: 1.25,
             exhaustion_min_body_ratio: 0.30,
+            exhaustion_min_volume_mult: 1.30,
+            exhaustion_min_rejection_atr: 1.40,
+            exhaustion_stop_atr_buffer: 0.35,
+            exhaustion_target_r_1: 1.0,
+            exhaustion_target_r_2: 2.0,
             ..Default::default()
         }
     );
@@ -817,5 +1059,57 @@ fn scan_case_report(
         trades: Vec::new(),
         filtered_signals: 0,
         filtered_reason_counts: Vec::new(),
+        filtered_signal_snapshots: Vec::new(),
+    }
+}
+
+fn scan_case_report_with_pnls(label: &str, pnls: &[f64]) -> CaseReport {
+    let wins = pnls.iter().filter(|pnl| **pnl > 0.0).count();
+    let losses = pnls.iter().filter(|pnl| **pnl < 0.0).count();
+    let pnl = pnls.iter().sum::<f64>();
+    let mut report = scan_case_report(label, pnls.len(), wins, losses, pnl);
+    report.trades = pnls
+        .iter()
+        .map(|pnl| ClosedTradeDebug {
+            open_time: String::new(),
+            close_time: None,
+            open_price: 0.0,
+            close_price: None,
+            pnl: *pnl,
+            close_type: String::new(),
+            entry_snapshot: None,
+            entry_reasons: Vec::new(),
+        })
+        .collect();
+    report
+}
+
+fn trade_record(
+    option_type: &str,
+    open_time: &str,
+    full_close: bool,
+    open_price: f64,
+    profit_loss: f64,
+    signal_value: Option<String>,
+    signal_result: Option<String>,
+) -> TradeRecord {
+    TradeRecord {
+        option_type: option_type.to_string(),
+        open_position_time: open_time.to_string(),
+        signal_open_position_time: None,
+        close_position_time: Some(open_time.to_string()),
+        open_price,
+        signal_status: 0,
+        close_price: Some(open_price),
+        profit_loss,
+        quantity: 1.0,
+        full_close,
+        close_type: String::new(),
+        win_num: 0,
+        loss_num: 0,
+        signal_value,
+        signal_result,
+        stop_loss_source: None,
+        stop_loss_update_history: None,
     }
 }

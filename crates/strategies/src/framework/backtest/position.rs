@@ -67,8 +67,9 @@ pub fn open_long_position(
     if state.last_signal_result.is_some() {
         return;
     }
+    let leverage = risk_config.position_leverage.unwrap_or(1.0).max(1.0);
     let mut temp_trade_position = TradePosition {
-        position_nums: state.funds / signal.open_price,
+        position_nums: (state.funds / signal.open_price) * leverage,
         open_price: signal.open_price,
         open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
             .unwrap_or_default(),
@@ -195,8 +196,9 @@ pub fn open_short_position(
     if state.last_signal_result.is_some() {
         return;
     }
+    let leverage = risk_config.position_leverage.unwrap_or(1.0).max(1.0);
     let mut temp_trade_position = TradePosition {
-        position_nums: state.funds / signal.open_price,
+        position_nums: (state.funds / signal.open_price) * leverage,
         open_price: signal.open_price,
         open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
             .unwrap_or_default(),
@@ -263,20 +265,18 @@ pub fn close_position(
     let fee_rate = trade_position
         .trade_fee_rate
         .unwrap_or(LEGACY_BACKTEST_TRADE_FEE_RATE);
-    let mut profit_after_fee = 0.00;
-    if profit != 0.00 {
-        let fee = quantity * trade_position.open_price * fee_rate;
-        profit_after_fee = profit - fee;
-    }
+    let close_price = trade_position.close_price.unwrap_or(signal.open_price);
+    let fee = quantity * (trade_position.open_price + close_price) * fee_rate;
+    let profit_after_fee = profit - fee;
     trade_position.profit_loss = profit_after_fee;
     state.trade_position = Some(trade_position);
     // 更新总利润和资金
     state.total_profit_loss += profit_after_fee;
     state.funds += profit_after_fee;
     // 更新胜率
-    if profit > 0.0 {
+    if profit_after_fee > 0.0 {
         state.wins += 1;
-    } else if profit < 0.00 {
+    } else if profit_after_fee < 0.00 {
         state.losses += 1;
     }
     // 根据平仓原因和盈亏设置正确的平仓类型
@@ -342,7 +342,7 @@ mod tests {
             .iter()
             .find(|record| record.full_close)
             .expect("close record");
-        assert!((close_record.profit_loss - 1.995).abs() < 1e-9);
+        assert!((close_record.profit_loss - 1.9899).abs() < 1e-9);
     }
 
     #[test]
@@ -370,6 +370,34 @@ mod tests {
             .iter()
             .find(|record| record.full_close)
             .expect("close record");
-        assert!((close_record.profit_loss - 1.93).abs() < 1e-9);
+        assert!((close_record.profit_loss - 1.8586).abs() < 1e-9);
+    }
+
+    #[test]
+    fn close_position_counts_fee_adjusted_loss_as_loss() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            trade_fee_rate: Some(0.00005),
+            ..Default::default()
+        };
+        open_long_position(
+            risk,
+            &mut state,
+            &candle(1, 100.0),
+            &signal(1, 100.0, SignalDirection::Long),
+            None,
+        );
+        state.trade_position.as_mut().unwrap().close_price = Some(100.005);
+
+        close_position(
+            &mut state,
+            &candle(2, 100.005),
+            &signal(2, 100.005, SignalDirection::Long),
+            "test",
+            0.005,
+        );
+
+        assert_eq!(state.wins, 0);
+        assert_eq!(state.losses, 1);
     }
 }
