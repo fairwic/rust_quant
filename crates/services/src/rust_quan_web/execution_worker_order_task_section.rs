@@ -504,7 +504,7 @@ impl ExecutionOrderTask {
         filters: Option<&ExchangeOrderFilters>,
         use_local_min_order_size: bool,
     ) -> Result<OrderPlacementRequest> {
-        let mut request = self.to_order_request_with_last_price(last_price)?;
+        let mut request = self.to_order_request()?;
         let filters = filters.ok_or_else(|| {
             anyhow!(
                 "missing exchange symbol filters for {} on {}; run exchange symbol sync before live order",
@@ -520,6 +520,20 @@ impl ExecutionOrderTask {
             )
         })?;
         let reference_price = decimal_from_f64(reference_price)?;
+        if is_zero_order_size(&request.size) {
+            if let Some(size_usdt) = self.size_usdt {
+                if size_usdt.is_finite() && size_usdt > 0.0 {
+                    request.size = format_order_size_decimal(
+                        order_size_from_notional_usdt(
+                            decimal_from_f64(size_usdt)?,
+                            reference_price,
+                            filters,
+                        )?,
+                        filters,
+                    );
+                }
+            }
+        }
         let size = parse_positive_decimal(&request.size, "order size")?;
         let enforce_min_notional = !request.reduce_only.unwrap_or(false)
             && !matches!(

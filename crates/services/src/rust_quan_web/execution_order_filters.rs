@@ -170,6 +170,22 @@ fn notional_per_size_unit(last_price: Decimal, filters: &ExchangeOrderFilters) -
         None => last_price,
     }
 }
+/// 将 Web 预留的 USDT 名义金额换算成交易所订单 size 单位。
+/// OKX SWAP 的 size 是合约张数，必须除以每张合约的 USDT 名义价值，不能直接用币本位数量。
+pub(super) fn order_size_from_notional_usdt(
+    notional_usdt: Decimal,
+    last_price: Decimal,
+    filters: &ExchangeOrderFilters,
+) -> Result<Decimal> {
+    if notional_usdt <= Decimal::ZERO {
+        return Err(anyhow!("order notional must be positive"));
+    }
+    let unit_notional = notional_per_size_unit(last_price, filters);
+    if unit_notional <= Decimal::ZERO {
+        return Err(anyhow!("order size unit notional must be positive"));
+    }
+    Ok(notional_usdt / unit_notional)
+}
 /// 按交易所合约规则计算订单名义金额，用于校验最终订单没有超过 Web 预留预算。
 pub(super) fn order_notional_usdt(
     size: Decimal,

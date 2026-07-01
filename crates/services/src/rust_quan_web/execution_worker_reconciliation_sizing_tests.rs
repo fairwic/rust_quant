@@ -601,6 +601,61 @@ fn market_velocity_ip_signal_builds_minimal_okx_live_order_request() {
     assert_eq!(order.margin_mode, Some(MarginMode::Isolated));
     assert_eq!(order.attached_stop_loss_price.as_deref(), Some("0.3699"));
 }
+#[test]
+fn okx_eth_swap_risk_reserved_notional_converts_to_contract_size() {
+    let task = task(json!({
+        "exchange": "okx",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "trade_side": "open",
+        "position_mode": "one_way",
+        "order_type": "market",
+        "size_usdt": 5.0,
+        "client_order_id": "rqtask66",
+        "risk_plan": {
+            "protective_stop_loss_required": true,
+            "selected_stop_loss_price": 1500.0,
+            "direction": "long"
+        }
+    }));
+    let filters = ExchangeOrderFilters {
+        min_qty: Some("0.01".parse().unwrap()),
+        max_qty: None,
+        step_size: Some("0.01".parse().unwrap()),
+        min_notional: None,
+        quantity_precision: None,
+        tick_size: Some("0.01".parse().unwrap()),
+        price_precision: None,
+        contract_value: Some("0.1".parse().unwrap()),
+        contract_value_currency: Some("ETH".to_string()),
+    };
+    let mut order_task = ExecutionOrderTask::from_task(&task).unwrap();
+    order_task
+        .apply_risk_reservation(&ExecutionRiskReservationResponse {
+            task_id: task.id,
+            buyer_email: task.buyer_email.clone(),
+            exchange: "okx".to_string(),
+            api_credential_id: Some(1001),
+            risk_budget_batch_id: Some("vegas-eth-4h".to_string()),
+            allocation_mode: "equal_batch_split".to_string(),
+            allowed_notional_usdt: 5.0,
+            required_margin_usdt: 2.5,
+            stop_risk_usdt: 0.25,
+            leverage: 2.0,
+            margin_mode: "isolated".to_string(),
+            position_mode: "one_way".to_string(),
+        })
+        .unwrap();
+
+    let order = order_task
+        .to_live_order_request(Some(1575.54), Some(&filters))
+        .unwrap();
+
+    assert_eq!(order.exchange, ExchangeId::Okx);
+    assert_eq!(order.instrument.symbol_for(ExchangeId::Okx), "ETH-USDT-SWAP");
+    assert_eq!(order.size, "0.03");
+    assert_eq!(order.attached_stop_loss_price.as_deref(), Some("1500"));
+}
 #[tokio::test]
 #[ignore]
 async fn okx_live_market_velocity_min_order_places_with_attached_stop_loss() -> anyhow::Result<()> {
