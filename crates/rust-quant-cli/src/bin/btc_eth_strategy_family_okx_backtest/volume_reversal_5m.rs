@@ -140,19 +140,13 @@ pub(super) fn volume_reversal_risk_config(
     risk
 }
 
-/// Applies optional partial-take-profit ratios for tiered research runs.
+/// Applies the supported shared risk config for all volume-reversal tuning runs.
 pub(super) fn volume_reversal_risk_config_for_tuning(
     risk: BasicRiskStrategyConfig,
-    tuning: EthVolumeReversal5mTuning,
+    _tuning: EthVolumeReversal5mTuning,
 ) -> BasicRiskStrategyConfig {
-    let mut risk = volume_reversal_risk_config(risk);
-    if tuning.tiered_take_profit {
-        risk.tiered_take_profit_level_1_close_ratio =
-            Some(tuning.partial_take_profit_level_1_close_ratio);
-        risk.tiered_take_profit_level_2_close_ratio =
-            Some(tuning.partial_take_profit_level_2_close_ratio);
-    }
-    risk
+    // 分批止盈研究已停用；保持风险配置只使用主线支持的 10x 与触发 K 止损字段。
+    volume_reversal_risk_config(risk)
 }
 
 /// Tunable thresholds for the ETH 5m volume-reversal research preset.

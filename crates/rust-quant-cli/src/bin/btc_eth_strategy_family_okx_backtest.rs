@@ -39,11 +39,14 @@ mod volume_reversal_5m;
 use micro_scalper_1m::micro_scalper_scan_tunings;
 use micro_scalper_1m::{print_micro_scalper_scan, run_micro_scalper_1m};
 use scalper_analysis::{
-    format_case_reports, format_scalper_diagnostic_reasons, merge_filtered_reason_counts,
-    print_scalper_diagnostics, print_scalper_scan, print_scalper_scan_with_tunings,
-    scalper_filter_counts, scalper_setup_diagnostics, short_candidate_reports_meet_constraints,
-    short_scan_candidate_meets_constraints, sort_scalper_raw_candidates,
+    format_case_reports, print_scalper_diagnostics, print_scalper_scan,
+    print_scalper_scan_with_tunings, short_candidate_reports_meet_constraints,
     summarize_breakdown_candidate_reports, summarize_exhaustion_candidate_reports,
+};
+#[cfg(test)]
+use scalper_analysis::{
+    format_scalper_diagnostic_reasons, merge_filtered_reason_counts, scalper_filter_counts,
+    scalper_setup_diagnostics, short_scan_candidate_meets_constraints, sort_scalper_raw_candidates,
     summarize_scalper_candidate_reports,
 };
 #[cfg(test)]
