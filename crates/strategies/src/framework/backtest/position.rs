@@ -1,5 +1,5 @@
 use super::super::types::TradeSide;
-use super::recording::record_trade_entry;
+use super::recording::{record_trade_entry, record_trade_exit_with_full_close};
 use super::types::{BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState};
 use crate::CandleItem;
 use rust_quant_domain::enums::PositionSide;
@@ -268,21 +268,63 @@ pub fn close_position(
     let close_price = trade_position.close_price.unwrap_or(signal.open_price);
     let fee = quantity * (trade_position.open_price + close_price) * fee_rate;
     let profit_after_fee = profit - fee;
+    let trade_profit_after_fee = trade_position.profit_loss + profit_after_fee;
     trade_position.profit_loss = profit_after_fee;
     state.trade_position = Some(trade_position);
     // 更新总利润和资金
     state.total_profit_loss += profit_after_fee;
     state.funds += profit_after_fee;
     // 更新胜率
-    if profit_after_fee > 0.0 {
+    if trade_profit_after_fee > 0.0 {
         state.wins += 1;
-    } else if profit_after_fee < 0.00 {
+    } else if trade_profit_after_fee < 0.00 {
         state.losses += 1;
     }
     // 根据平仓原因和盈亏设置正确的平仓类型
     record_trade_exit(state, exit_time, signal, close_type, quantity);
     // 更新总利润和资金
     state.trade_position = None;
+}
+
+/// 部分平仓并保留剩余仓位，供显式启用的分批止盈回测使用。
+pub fn partial_close_position(
+    state: &mut TradingState,
+    candle: &CandleItem,
+    signal: &SignalResult,
+    close_type: &str,
+    close_price: f64,
+    closing_quantity: f64,
+) {
+    let exit_time =
+        rust_quant_common::utils::time::mill_time_to_datetime(candle.ts).unwrap_or_default();
+    let mut trade_position = match state.trade_position.clone() {
+        Some(p) => p,
+        None => return,
+    };
+    let quantity = closing_quantity.min(trade_position.position_nums).max(0.0);
+    if quantity <= 0.0 || trade_position.position_nums <= 0.0 {
+        return;
+    }
+    let fee_rate = trade_position
+        .trade_fee_rate
+        .unwrap_or(LEGACY_BACKTEST_TRADE_FEE_RATE);
+    let gross_profit = match trade_position.trade_side {
+        TradeSide::Long => (close_price - trade_position.open_price) * quantity,
+        TradeSide::Short => (trade_position.open_price - close_price) * quantity,
+    };
+    let fee = quantity * (trade_position.open_price + close_price) * fee_rate;
+    let profit_after_fee = gross_profit - fee;
+    let cumulative_profit_after_fee = trade_position.profit_loss + profit_after_fee;
+    trade_position.position_nums -= quantity;
+    trade_position.close_price = Some(close_price);
+    trade_position.profit_loss = profit_after_fee;
+    state.trade_position = Some(trade_position);
+    state.total_profit_loss += profit_after_fee;
+    state.funds += profit_after_fee;
+    record_trade_exit_with_full_close(state, exit_time, signal, close_type, quantity, false);
+    if let Some(position) = state.trade_position.as_mut() {
+        position.profit_loss = cumulative_profit_after_fee;
+    }
 }
 
 #[cfg(test)]

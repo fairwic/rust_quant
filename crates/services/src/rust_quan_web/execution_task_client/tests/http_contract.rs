@@ -267,6 +267,44 @@ async fn check_internal_api_credential_uses_internal_post_contract() {
     assert!(summary.execution_readiness.can_execute);
 }
 #[tokio::test]
+async fn check_internal_api_credential_preserves_structured_blocker_code() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::task::spawn_blocking(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buffer = [0_u8; 4096];
+        let _ = stream.read(&mut buffer).unwrap();
+        let body = r#"{"success":false,"code":"MEMBERSHIP_EXPIRED","message":"内部校验 API Key 失败: 会员已过期"}"#;
+        let response = format!(
+            "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+        base_url: format!("http://{}", addr),
+        internal_secret: "dev-secret".to_string(),
+    })
+    .unwrap();
+
+    let error = client
+        .check_internal_api_credential(42)
+        .await
+        .expect_err("structured Web blocker should remain an error");
+    server.await.unwrap();
+    let client_error = error
+        .downcast_ref::<QuantWebClientError>()
+        .expect("structured Web error");
+
+    assert_eq!(client_error.error_code(), Some("MEMBERSHIP_EXPIRED"));
+    assert!(error.to_string().contains("code=MEMBERSHIP_EXPIRED"));
+    assert!(error.to_string().contains("response_body_omitted=true"));
+    assert!(!error.to_string().contains("会员已过期"));
+}
+#[tokio::test]
 async fn preview_market_velocity_task_creation_uses_internal_owner_route() {
     use std::io::{Read, Write};
     use std::net::TcpListener;

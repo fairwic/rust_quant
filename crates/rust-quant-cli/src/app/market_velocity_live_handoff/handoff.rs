@@ -148,6 +148,25 @@ pub fn market_velocity_required_live_owner_scope(
     })?;
     Ok((buyer_email, combo_id))
 }
+/// 判断 live handoff 是否配置了完整 owner scope；未配置时保持广播信号，由 Web 按订阅 fan-out。
+pub fn market_velocity_live_owner_scope(
+    buyer_email: Option<&str>,
+    combo_id: Option<i64>,
+) -> Result<Option<(&str, i64)>> {
+    match (
+        buyer_email.map(str::trim).filter(|value| !value.is_empty()),
+        combo_id.filter(|value| *value > 0),
+    ) {
+        (None, None) => Ok(None),
+        (Some(buyer_email), Some(combo_id)) => Ok(Some((buyer_email, combo_id))),
+        (Some(_), None) => {
+            bail!("MARKET_VELOCITY_LIVE_COMBO_ID is required when buyer scope is configured")
+        }
+        (None, Some(_)) => {
+            bail!("MARKET_VELOCITY_LIVE_BUYER_EMAIL is required when combo scope is configured")
+        }
+    }
+}
 /// 提供市场动量scope信号toliveowner的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn market_velocity_scope_signal_to_live_owner(
     mut signal: StrategySignalSubmitRequest,
@@ -167,6 +186,39 @@ pub fn market_velocity_scope_signal_to_live_owner(
     );
     signal.payload_json = serde_json::to_string(&payload)?;
     Ok(signal)
+}
+/// 仅在配置了完整 owner scope 时给信号绑定单一用户；否则保留未绑定信号，让 Web owner service fan-out。
+pub fn market_velocity_scope_signal_to_live_owner_if_configured(
+    signal: StrategySignalSubmitRequest,
+    buyer_email: Option<&str>,
+    combo_id: Option<i64>,
+) -> Result<StrategySignalSubmitRequest> {
+    match market_velocity_live_owner_scope(buyer_email, combo_id)? {
+        Some((buyer_email, combo_id)) => {
+            market_velocity_scope_signal_to_live_owner(signal, buyer_email, combo_id)
+        }
+        None => Ok(signal),
+    }
+}
+/// 未绑定用户的广播信号只忽略“缺少 user context”类 preview blocker；产品、符号和交易所能力仍阻断。
+pub fn market_velocity_handoff_hard_preview_blockers(
+    blocker_codes: &[String],
+    owner_scope_configured: bool,
+) -> Vec<String> {
+    blocker_codes
+        .iter()
+        .filter(|code| {
+            owner_scope_configured
+                || !matches!(
+                    code.as_str(),
+                    "user_context_missing_for_risk_filters"
+                        | "user_context_missing_for_entitlement"
+                        | "user_context_missing_for_api_key_readiness"
+                        | "user_context_missing_for_signed_preflight"
+                )
+        })
+        .cloned()
+        .collect()
 }
 /// 构造载荷字符串，集中维护行情数据的载荷组装规则。
 fn payload_string(payload: &Value, key: &str) -> Option<String> {
@@ -399,11 +451,24 @@ mod tests {
         );
     }
     #[test]
-    fn live_task_signal_payload_is_scoped_to_owner_combo_before_submit() {
-        let signal = market_velocity_scope_signal_to_live_owner(
+    fn live_task_signal_payload_stays_unscoped_without_owner_combo() {
+        let signal = market_velocity_scope_signal_to_live_owner_if_configured(
             sample_signal_request(),
-            "buyer@example.com",
-            85,
+            None,
+            None,
+        )
+        .expect("unscoped signal");
+        let payload: Value = serde_json::from_str(&signal.payload_json).expect("payload json");
+        assert!(payload.get("target_buyer_email").is_none());
+        assert!(payload.get("target_combo_id").is_none());
+        assert!(payload.get("target_scope_source").is_none());
+    }
+    #[test]
+    fn live_task_signal_payload_is_scoped_to_owner_combo_before_submit() {
+        let signal = market_velocity_scope_signal_to_live_owner_if_configured(
+            sample_signal_request(),
+            Some("buyer@example.com"),
+            Some(85),
         )
         .expect("scoped signal");
         let payload: Value = serde_json::from_str(&signal.payload_json).expect("payload json");
@@ -412,6 +477,39 @@ mod tests {
         assert_eq!(
             payload["target_scope_source"],
             "market_velocity_live_handoff"
+        );
+    }
+    #[test]
+    fn live_task_signal_payload_rejects_partial_owner_scope() {
+        assert!(market_velocity_scope_signal_to_live_owner_if_configured(
+            sample_signal_request(),
+            Some("buyer@example.com"),
+            None,
+        )
+        .is_err());
+        assert!(market_velocity_scope_signal_to_live_owner_if_configured(
+            sample_signal_request(),
+            None,
+            Some(85),
+        )
+        .is_err());
+    }
+    #[test]
+    fn unscoped_preview_ignores_user_context_missing_blockers_only() {
+        let blockers = vec![
+            "user_context_missing_for_risk_filters".to_string(),
+            "user_context_missing_for_entitlement".to_string(),
+            "user_context_missing_for_api_key_readiness".to_string(),
+            "user_context_missing_for_signed_preflight".to_string(),
+            "strategy_product_not_published".to_string(),
+        ];
+        assert_eq!(
+            market_velocity_handoff_hard_preview_blockers(&blockers, false),
+            vec!["strategy_product_not_published".to_string()]
+        );
+        assert_eq!(
+            market_velocity_handoff_hard_preview_blockers(&blockers, true),
+            blockers
         );
     }
     #[test]

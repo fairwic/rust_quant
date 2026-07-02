@@ -19,7 +19,7 @@ use rust_quant_services::market::{
 use rust_quant_services::rust_quan_web::{
     build_market_velocity_scoped_worker_handoff_readiness,
     market_velocity_existing_execution_worker_path, ExecutionTaskClient, ExecutionTaskConfig,
-    StrategySignalSubmitRequest,
+    QuantWebClientError, StrategySignalSubmitRequest,
 };
 use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
@@ -32,8 +32,10 @@ use entry_candles::{load_market_velocity_live_entry_candles, MarketVelocityEntry
 use handoff::market_velocity_handoff_log_context;
 pub use handoff::{
     build_market_velocity_live_preview_request, build_market_velocity_live_worker_handoff,
-    build_market_velocity_live_worker_manifest, market_velocity_required_live_owner_scope,
+    build_market_velocity_live_worker_manifest, market_velocity_handoff_hard_preview_blockers,
+    market_velocity_live_owner_scope, market_velocity_required_live_owner_scope,
     market_velocity_scope_signal_to_live_owner,
+    market_velocity_scope_signal_to_live_owner_if_configured,
 };
 const DEFAULT_OKX_REST_BASE: &str = "https://www.okx.com";
 const DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES: i64 = 45;
@@ -75,6 +77,13 @@ pub struct MarketVelocityLiveHandoffRuntimeConfig {
     pub run_once: bool,
     /// 秒级时长。
     pub interval_seconds: u64,
+}
+impl MarketVelocityLiveHandoffConfig {
+    /// 判断是否进入单 combo canary 模式；默认空 scope 走 Web 订阅 fan-out。
+    fn owner_scope_configured(&self) -> Result<bool> {
+        market_velocity_live_owner_scope(self.buyer_email.as_deref(), self.combo_id)
+            .map(|scope| scope.is_some())
+    }
 }
 /// 封装当前函数，减少行情数据调用方重复实现相同细节。
 /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
@@ -191,17 +200,38 @@ pub async fn run_market_velocity_live_handoff(
         base_url: config.web_base_url.clone(),
         internal_secret: config.internal_secret.clone(),
     })?;
+    let owner_scope_configured = config.owner_scope_configured()?;
+    let credential_readiness_applies = config.credential_id.is_some() && owner_scope_configured;
     let mut refresh_readiness = json!({
-        "apply": config.credential_id.is_some(),
+        "apply": credential_readiness_applies,
         "mutation_scope": "web_signed_readonly_preflight_snapshot_refresh_only",
         "exchange_mutation_allowed": false,
     });
-    if let Some(credential_id) = config.credential_id {
-        let credential = client.check_internal_api_credential(credential_id).await?;
-        refresh_readiness["credential_id"] = json!(credential.id);
-        refresh_readiness["last_check_code"] = json!(credential.last_check_code);
-        refresh_readiness["execution_readiness"] =
-            json!(credential.execution_readiness.can_execute);
+    if let (true, Some(credential_id)) = (credential_readiness_applies, config.credential_id) {
+        match client.check_internal_api_credential(credential_id).await {
+            Ok(credential) => {
+                refresh_readiness["credential_id"] = json!(credential.id);
+                refresh_readiness["last_check_code"] = json!(credential.last_check_code);
+                refresh_readiness["execution_readiness"] =
+                    json!(credential.execution_readiness.can_execute);
+            }
+            Err(error) => {
+                let Some(blocker_code) = api_credential_readiness_blocker_code(&error) else {
+                    return Err(error);
+                };
+                refresh_readiness["credential_id"] = json!(credential_id);
+                refresh_readiness["status"] = json!("blocked");
+                refresh_readiness["blocker_code"] = json!(blocker_code);
+                refresh_readiness["execution_readiness"] = json!(false);
+                return Ok(
+                    build_market_velocity_api_credential_readiness_blocked_response(
+                        &config,
+                        refresh_readiness,
+                        &blocker_code,
+                    ),
+                );
+            }
+        }
     }
     let pool = PgPoolOptions::new()
         .max_connections(2)
@@ -421,13 +451,19 @@ pub async fn run_market_velocity_live_handoff(
         blocker_codes = ?preview.blocker_codes,
         "Market Velocity live handoff owner preview completed"
     );
+    let hard_preview_blockers = market_velocity_handoff_hard_preview_blockers(
+        &preview.blocker_codes,
+        owner_scope_configured,
+    );
     let skipped_summary = summarize_skipped_candidates(&skipped_candidates);
     let mut response = json!({
-        "status": if preview.blocker_codes.is_empty() { "ready_for_task_creation" } else { "blocked" },
+        "status": if hard_preview_blockers.is_empty() { "ready_for_task_creation" } else { "blocked" },
         "read_only": false,
         "mutation_allowed": true,
         "exchange_mutation_allowed": false,
         "creates_new_order_system": false,
+        "owner_scope_configured": owner_scope_configured,
+        "hard_preview_blocker_codes": hard_preview_blockers.clone(),
         "candidate_scan": {
             "limit": config.candidate_limit,
             "skipped": skipped_candidates.len(),
@@ -447,16 +483,17 @@ pub async fn run_market_velocity_live_handoff(
         "execution_path": market_velocity_existing_execution_worker_path(),
         "refresh_readiness": refresh_readiness,
     });
-    let (target_buyer_email, target_combo_id) =
-        market_velocity_required_live_owner_scope(config.buyer_email.as_deref(), config.combo_id)?;
-    if !preview.blocker_codes.is_empty() {
+    if !hard_preview_blockers.is_empty() {
         bail!(
             "Web owner preview blocked task creation: {:?}",
-            preview.blocker_codes
+            hard_preview_blockers
         );
     }
-    let signal =
-        market_velocity_scope_signal_to_live_owner(signal, target_buyer_email, target_combo_id)?;
+    let signal = market_velocity_scope_signal_to_live_owner_if_configured(
+        signal,
+        config.buyer_email.as_deref(),
+        config.combo_id,
+    )?;
     let dispatch_log_signal = signal.clone();
     let dispatch = client.submit_strategy_signal(signal).await?;
     let generated_task_ids: Vec<i64> = dispatch
@@ -500,6 +537,39 @@ pub async fn run_market_velocity_live_handoff(
     response["generated_tasks"] = json!(dispatch.generated_tasks);
     response["next_worker_handoff"] = next_worker.unwrap_or_else(|| json!(null));
     Ok(response)
+}
+/// 将 Web 的 API Key 业务 blocker 降级为 live handoff 的正常 blocked 响应，避免 scheduler 重复刷 ERROR。
+fn api_credential_readiness_blocker_code(error: &anyhow::Error) -> Option<String> {
+    error
+        .downcast_ref::<QuantWebClientError>()
+        .and_then(QuantWebClientError::error_code)
+        .filter(|code| matches!(*code, "ACTIVE_MEMBERSHIP_REQUIRED" | "MEMBERSHIP_EXPIRED"))
+        .map(str::to_string)
+}
+
+/// 构造 API Key readiness blocked 响应；不连接 Core DB，也不创建信号或执行任务。
+fn build_market_velocity_api_credential_readiness_blocked_response(
+    config: &MarketVelocityLiveHandoffConfig,
+    refresh_readiness: Value,
+    blocker_code: &str,
+) -> Value {
+    json!({
+        "status": "blocked",
+        "blocker_code": blocker_code,
+        "read_only": true,
+        "mutation_allowed": false,
+        "exchange_mutation_allowed": false,
+        "candidate_scan": {
+            "limit": config.candidate_limit,
+            "evaluated": 0,
+            "lookback_hours": config.lookback_hours,
+            "skipped": 0,
+            "explicit_event_id": config.event_id,
+        },
+        "refresh_readiness": refresh_readiness,
+        "execution_path": market_velocity_existing_execution_worker_path(),
+        "next_action": "restore_api_credential_readiness_before_live_handoff",
+    })
 }
 /// 提供市场动量入场确认staleblocker的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_entry_confirmation_stale_blocker(
@@ -971,6 +1041,25 @@ mod tests {
         );
     }
     #[test]
+    fn live_handoff_config_without_owner_scope_is_broadcast_even_with_legacy_credential_id() {
+        let mut config = sample_live_handoff_config();
+        config.buyer_email = None;
+        config.combo_id = None;
+        config.credential_id = Some(1);
+
+        assert!(!config.owner_scope_configured().expect("owner scope"));
+    }
+    #[test]
+    fn live_handoff_config_rejects_partial_owner_scope() {
+        let mut missing_combo = sample_live_handoff_config();
+        missing_combo.combo_id = None;
+        assert!(missing_combo.owner_scope_configured().is_err());
+
+        let mut missing_buyer = sample_live_handoff_config();
+        missing_buyer.buyer_email = None;
+        assert!(missing_buyer.owner_scope_configured().is_err());
+    }
+    #[test]
     fn no_live_candidate_response_is_non_error_signal_status() {
         let config = sample_live_handoff_config();
         let response = build_market_velocity_no_live_candidate_response(
@@ -995,6 +1084,46 @@ mod tests {
             response["next_action"],
             "wait_for_next_market_velocity_event"
         );
+    }
+    #[tokio::test]
+    async fn live_handoff_returns_blocked_when_api_credential_membership_expired() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::task::spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 4096];
+            let request = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..request]).to_string();
+            assert!(
+                request.starts_with("POST /api/commerce/internal/api-credentials/1/check HTTP/1.1")
+            );
+            let body = r#"{"success":false,"code":"MEMBERSHIP_EXPIRED","message":"内部校验 API Key 失败: 会员已过期"}"#;
+            let response = format!(
+                "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        let mut config = sample_live_handoff_config();
+        config.web_base_url = format!("http://{}", addr);
+        config.database_url = "postgres://invalid:invalid@127.0.0.1:1/quant_core".to_string();
+
+        let response = run_market_velocity_live_handoff(config)
+            .await
+            .expect("membership blocker should be a readiness response, not a scheduler error");
+        server.await.unwrap();
+
+        assert_eq!(response["status"], "blocked");
+        assert_eq!(response["blocker_code"], "MEMBERSHIP_EXPIRED");
+        assert_eq!(response["refresh_readiness"]["status"], "blocked");
+        assert_eq!(
+            response["refresh_readiness"]["blocker_code"],
+            "MEMBERSHIP_EXPIRED"
+        );
+        assert_eq!(response["mutation_allowed"], false);
     }
     #[test]
     fn live_handoff_runtime_config_defaults_to_one_shot() {

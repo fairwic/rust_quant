@@ -21,7 +21,9 @@ use super::execution_task_contract::{
 };
 use anyhow::{anyhow, Result};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
+use reqwest::StatusCode;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{error::Error, fmt};
 #[derive(Debug, Clone)]
 pub struct ExecutionTaskConfig {
     /// 基础URL，用于配置运行参数。
@@ -43,6 +45,59 @@ struct ApiEnvelope<T> {
     success: bool,
     data: T,
 }
+#[derive(Debug, Deserialize)]
+struct ApiErrorEnvelope {
+    code: Option<String>,
+}
+#[derive(Debug, Clone)]
+pub struct QuantWebClientError {
+    method: &'static str,
+    target: String,
+    status: StatusCode,
+    code: Option<String>,
+    body_len: usize,
+}
+
+impl QuantWebClientError {
+    /// 保存 Web owner service 的结构化错误码，同时继续隐藏响应正文，避免泄露凭证或内部信息。
+    fn from_response(
+        method: &'static str,
+        target: impl Into<String>,
+        status: StatusCode,
+        body: &str,
+    ) -> Self {
+        Self {
+            method,
+            target: target.into(),
+            status,
+            code: parse_api_error_code(body),
+            body_len: body.as_bytes().len(),
+        }
+    }
+
+    pub fn error_code(&self) -> Option<&str> {
+        self.code.as_deref()
+    }
+}
+
+impl fmt::Display for QuantWebClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {} returned {}; {}",
+            self.method,
+            self.target,
+            self.status,
+            response_body_context_for_len(self.body_len)
+        )?;
+        if let Some(code) = self.code.as_deref() {
+            write!(f, "; code={code}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Error for QuantWebClientError {}
 const LEASE_TASKS_PATH: &str = "/api/commerce/internal/execution-tasks/lease";
 const EXECUTION_TASKS_PATH_PREFIX: &str = "/api/commerce/internal/execution-tasks";
 const LEASE_CONFIRMATION_TASKS_PATH: &str =
@@ -339,12 +394,7 @@ impl ExecutionTaskClient {
         let status = response.status();
         let body = response.text().await?;
         if !status.is_success() {
-            return Err(anyhow!(
-                "GET {} returned {}; {}",
-                url,
-                status,
-                response_body_context(&body)
-            ));
+            return Err(QuantWebClientError::from_response("GET", url, status, &body).into());
         }
         Self::parse_envelope(&body)
     }
@@ -366,12 +416,7 @@ impl ExecutionTaskClient {
         let status = response.status();
         let body = response.text().await?;
         if !status.is_success() {
-            return Err(anyhow!(
-                "{} returned {}; {}",
-                path,
-                status,
-                response_body_context(&body)
-            ));
+            return Err(QuantWebClientError::from_response("POST", path, status, &body).into());
         }
         Self::parse_envelope(&body)
     }
@@ -380,10 +425,19 @@ impl ExecutionTaskClient {
 /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
 /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
 fn response_body_context(body: &str) -> String {
-    format!(
-        "response_body_omitted=true body_len={}",
-        body.as_bytes().len()
-    )
+    response_body_context_for_len(body.as_bytes().len())
+}
+
+fn response_body_context_for_len(body_len: usize) -> String {
+    format!("response_body_omitted=true body_len={}", body_len)
+}
+
+fn parse_api_error_code(body: &str) -> Option<String> {
+    serde_json::from_str::<ApiErrorEnvelope>(body)
+        .ok()
+        .and_then(|envelope| envelope.code)
+        .map(|code| code.trim().to_string())
+        .filter(|code| !code.is_empty())
 }
 #[cfg(test)]
 mod tests {

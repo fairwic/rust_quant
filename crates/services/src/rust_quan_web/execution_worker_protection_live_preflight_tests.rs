@@ -85,6 +85,84 @@ async fn live_execute_signal_checks_api_credential_before_resolving_gateway() {
     assert!(repository.audits.lock().unwrap().is_empty());
 }
 #[tokio::test]
+async fn live_execute_signal_records_structured_api_credential_membership_blocker() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let server = tokio::task::spawn_blocking(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buffer = [0_u8; 4096];
+        let bytes = stream.read(&mut buffer).unwrap();
+        let request = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+        tx.send(request).unwrap();
+        let body = r#"{"success":false,"code":"MEMBERSHIP_EXPIRED","message":"内部校验 API Key 失败: 会员已过期"}"#;
+        let response = format!(
+            "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    let repository = Arc::new(CapturingAuditRepository::default());
+    let worker = ExecutionWorker::new(
+        ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: format!("http://{}", addr),
+            internal_secret: "dev-secret".to_string(),
+        })
+        .unwrap(),
+        CryptoExcAllGateway::dry_run(),
+        ExecutionWorkerConfig {
+            worker_id: "worker-live-api-credential-membership-blocker".to_string(),
+            lease_limit: 1,
+            dry_run: false,
+            default_exchange: ExchangeId::Binance,
+            task_types: vec!["execute_signal".to_string()],
+            task_statuses: vec!["pending".to_string()],
+            target_task_ids: Vec::new(),
+            confirmation_mode: false,
+            report_replay_mode: false,
+            report_replay_max_per_run: 1,
+            report_replay_failure_backoff_seconds: 300,
+            report_replay_throttle_ms: 0,
+        },
+    )
+    .with_audit_repository(repository.clone());
+    let task = task(json!({
+        "source": "rust_quan_web",
+        "api_credential_id": 7789,
+        "symbol": "ETHUSDT",
+        "execution": {
+            "exchange": "binance",
+            "symbol": "ETHUSDT",
+            "side": "buy",
+            "order_type": "market",
+            "size_usdt": 35.0
+        },
+        "risk_plan": {
+            "protective_stop_loss_required": true,
+            "selected_stop_loss_price": 3400.0,
+            "entry_price": 3500.0,
+            "direction": "long"
+        }
+    }));
+    let report = worker.execute_task(&task).await;
+    server.await.unwrap();
+    let request = rx.recv().unwrap();
+    let raw_payload =
+        serde_json::from_str::<Value>(report.raw_payload_json.as_deref().expect("raw payload"))
+            .expect("raw payload json");
+    assert!(request.starts_with("POST /api/commerce/internal/api-credentials/7789/check HTTP/1.1"));
+    assert_eq!(report.execution_status, "failed");
+    assert_eq!(raw_payload["stage"], "api_credential_preflight");
+    assert_eq!(raw_payload["blocker_code"], "MEMBERSHIP_EXPIRED");
+    assert_eq!(raw_payload["place_order_allowed"], false);
+    assert_eq!(raw_payload["mutation_allowed"], false);
+    assert!(repository.audits.lock().unwrap().is_empty());
+}
+#[tokio::test]
 async fn live_execute_signal_rejects_ready_api_credential_for_wrong_exchange_before_resolve() {
     use std::io::{Read, Write};
     use std::net::TcpListener;

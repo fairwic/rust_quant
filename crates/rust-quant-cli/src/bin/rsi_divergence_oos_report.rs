@@ -267,6 +267,8 @@ fn risk_config() -> BasicRiskStrategyConfig {
         dynamic_range_loss_percent: None,
         trade_fee_rate: Some(MAKER_FEE_RATE),
         position_leverage: None,
+        tiered_take_profit_level_1_close_ratio: None,
+        tiered_take_profit_level_2_close_ratio: None,
     }
 }
 

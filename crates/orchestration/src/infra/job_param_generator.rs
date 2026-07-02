@@ -182,6 +182,8 @@ impl ParamMergeBuilder {
             dynamic_range_loss_percent: self.dynamic_range_loss_percent,
             trade_fee_rate: None,
             position_leverage: None,
+            tiered_take_profit_level_1_close_ratio: None,
+            tiered_take_profit_level_2_close_ratio: None,
         }
     }
     /// 转换为 Vegas 策略配置

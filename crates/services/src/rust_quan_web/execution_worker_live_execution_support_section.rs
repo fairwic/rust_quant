@@ -104,8 +104,7 @@ impl ExecutionWorker {
         let instrument = parse_instrument(&order_task.symbol)?;
         let now_ms = current_time_millis_u64();
         let ticker = gateway.ticker(order_task.exchange, &instrument).await?;
-        let reference_price =
-            live_order_reference_price(&ticker, order_task.side, now_ms)?;
+        let reference_price = live_order_reference_price(&ticker, order_task.side, now_ms)?;
         let filters =
             load_exchange_order_filters(order_task.exchange, &order_task.symbol)
                 .await?
@@ -274,6 +273,10 @@ impl ExecutionWorker {
         {
             Ok(checked) => checked,
             Err(error) => {
+                let blocker_code = quant_web_readiness_blocker_code(&error).map(str::to_string);
+                let blocker_message = blocker_code
+                    .as_deref()
+                    .map(|code| format!("Web API credential readiness blocked with {code}"));
                 return Some(ExecutionTaskReportRequest::failed(
                     task.id,
                     exchange.as_str(),
@@ -287,6 +290,8 @@ impl ExecutionWorker {
                         "api_credential_id": credential_id,
                         "exchange": exchange.as_str(),
                         "symbol": symbol,
+                        "blocker_code": blocker_code,
+                        "blocker_message": blocker_message,
                         "place_order_allowed": false,
                         "mutation_allowed": false,
                     }),
@@ -616,6 +621,14 @@ impl ExecutionWorker {
             )),
         }
     }
+}
+
+/// 识别 Web owner service 已结构化的 API Key readiness blocker，未知 400 仍按错误处理。
+fn quant_web_readiness_blocker_code(error: &anyhow::Error) -> Option<&str> {
+    error
+        .downcast_ref::<QuantWebClientError>()
+        .and_then(QuantWebClientError::error_code)
+        .filter(|code| matches!(*code, "ACTIVE_MEMBERSHIP_REQUIRED" | "MEMBERSHIP_EXPIRED"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

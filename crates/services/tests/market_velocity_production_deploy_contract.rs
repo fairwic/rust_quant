@@ -33,6 +33,7 @@ fn compose_service_block(compose: &str, service: &str) -> String {
 fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     let compose = read_repo_file("docker-compose.deploy.yml");
     let workflow = read_repo_file(".github/workflows/cicd.yml");
+    let production_gate = read_repo_file(".github/workflows/market_velocity_production_gate.yml");
     let dockerfile = read_repo_file("Dockerfile.runtime");
     let okx_websocket = read_repo_file("crates/market/src/streams/websocket_service.rs");
     let promote = read_repo_file("scripts/deploy/promote_stable.sh");
@@ -191,6 +192,24 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     assert!(
         workflow.contains("market_velocity_production_deploy_contract"),
         "CI verify must run the production deploy contract"
+    );
+    assert!(
+        production_gate.contains(
+            "Optional canary buyer email; leave empty to fan out by active Web subscriptions"
+        ) && production_gate.contains(
+            "Optional canary combo id; must be provided together with buyer_email"
+        ),
+        "production gate must make buyer/combo scope optional so Market Velocity can fan out by Web subscriptions"
+    );
+    assert!(
+        !production_gate.contains("MARKET_VELOCITY_LIVE_BUYER_EMAIL:?buyer_email is required")
+            && !production_gate.contains("MARKET_VELOCITY_LIVE_COMBO_ID:?combo_id is required"),
+        "production gate must not require a single buyer/combo for the default fan-out path"
+    );
+    assert!(
+        production_gate.contains("buyer_email and combo_id must be provided together")
+            && production_gate.contains("Web fan-out resolves credentials per subscription"),
+        "production gate must keep canary scope explicit and leave credentials to Web fan-out when unscoped"
     );
     let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
     for deploy_script in [&promote, &rollback] {

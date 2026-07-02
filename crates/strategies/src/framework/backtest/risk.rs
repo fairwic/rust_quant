@@ -1,5 +1,5 @@
 use super::super::types::TradeSide;
-use super::position::close_position;
+use super::position::{close_position, partial_close_position};
 use super::types::{BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState};
 use crate::CandleItem;
 // ============================================================================
@@ -94,6 +94,12 @@ enum ExitResult {
     Exit { price: f64, reason: &'static str },
     /// 触发出场，返回平仓价格和动态原因
     ExitDynamic { price: f64, reason: String },
+    /// 触发部分平仓，返回价格、原因和按当前仓位计算的平仓比例
+    PartialExit {
+        price: f64,
+        reason: &'static str,
+        close_ratio: f64,
+    },
     /// 未触发
     None,
 }
@@ -363,7 +369,18 @@ fn check_atr_trailing_stop(ctx: &ExitContext, position: &TradePosition) -> ExitR
 // ============================================================================
 /// 更新三级ATR止盈系统的级别和移动止损线
 /// 返回是否触发第三级完全平仓
-fn update_atr_tiered_levels(ctx: &ExitContext, position: &mut TradePosition) -> ExitResult {
+fn normalized_close_ratio(value: Option<f64>) -> Option<f64> {
+    value
+        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+        .map(|ratio| ratio.min(1.0))
+}
+
+/// 更新三级ATR止盈系统的级别；配置了平仓比例时会返回部分平仓动作。
+fn update_atr_tiered_levels(
+    ctx: &ExitContext,
+    position: &mut TradePosition,
+    risk_config: &BasicRiskStrategyConfig,
+) -> ExitResult {
     let (level_1, level_2, level_3) = match (
         position.atr_take_profit_level_1,
         position.atr_take_profit_level_2,
@@ -384,11 +401,29 @@ fn update_atr_tiered_levels(ctx: &ExitContext, position: &mut TradePosition) -> 
     if current_level < 2 && ctx.is_take_profit_hit(level_2) {
         position.reached_take_profit_level = 2;
         position.move_stop_open_price = Some(level_1);
+        if let Some(close_ratio) =
+            normalized_close_ratio(risk_config.tiered_take_profit_level_2_close_ratio)
+        {
+            return ExitResult::PartialExit {
+                price: level_2,
+                reason: "分批止盈(级别2)",
+                close_ratio,
+            };
+        }
     }
     // 第一级：1.5倍ATR，移动止损到开仓价
     if current_level < 1 && ctx.is_take_profit_hit(level_1) {
         position.reached_take_profit_level = 1;
         position.move_stop_open_price = Some(ctx.entry);
+        if let Some(close_ratio) =
+            normalized_close_ratio(risk_config.tiered_take_profit_level_1_close_ratio)
+        {
+            return ExitResult::PartialExit {
+                price: level_1,
+                reason: "分批止盈(级别1)",
+                close_ratio,
+            };
+        }
     }
     ExitResult::None
 }
@@ -488,8 +523,11 @@ fn run_take_profit_checks(
     position: &mut TradePosition,
 ) -> ExitResult {
     // 1. 三级ATR止盈（同时更新级别）
-    let result = update_atr_tiered_levels(ctx, position);
-    if matches!(result, ExitResult::Exit { .. }) {
+    let result = update_atr_tiered_levels(ctx, position, risk_config);
+    if matches!(
+        result,
+        ExitResult::Exit { .. } | ExitResult::PartialExit { .. }
+    ) {
         return result;
     }
     // 2. ATR比例止盈
@@ -564,6 +602,16 @@ pub fn check_risk_config(
     let tp_result = run_take_profit_checks(&ctx, risk_config, &mut trade_position);
     if matches!(tp_result, ExitResult::Exit { .. }) {
         return finalize_exit(
+            trading_state,
+            trade_position,
+            candle,
+            signal,
+            &ctx,
+            tp_result,
+        );
+    }
+    if let ExitResult::PartialExit { .. } = tp_result {
+        return finalize_partial_exit(
             trading_state,
             trade_position,
             candle,
@@ -757,6 +805,16 @@ pub fn check_risk_config_with_r_system(
             tp_result,
         );
     }
+    if let ExitResult::PartialExit { .. } = tp_result {
+        return finalize_partial_exit(
+            trading_state,
+            trade_position,
+            candle,
+            signal,
+            &ctx,
+            tp_result,
+        );
+    }
     // 更新仓位状态
     trading_state.trade_position = Some(trade_position);
     trading_state
@@ -776,12 +834,43 @@ fn finalize_exit(
     let (price, reason) = match result {
         ExitResult::Exit { price, reason } => (price, reason.to_string()),
         ExitResult::ExitDynamic { price, reason } => (price, reason),
+        ExitResult::PartialExit { .. } => return trading_state,
         ExitResult::None => return trading_state,
     };
     trade_position.close_price = Some(price);
     trading_state.trade_position = Some(trade_position);
     let profit = ctx.profit(price);
     close_position(&mut trading_state, candle, signal, &reason, profit);
+    trading_state
+}
+
+/// 执行部分平仓并保留更新后的移动止损状态。
+fn finalize_partial_exit(
+    mut trading_state: TradingState,
+    trade_position: TradePosition,
+    candle: &CandleItem,
+    signal: &SignalResult,
+    ctx: &ExitContext,
+    result: ExitResult,
+) -> TradingState {
+    let ExitResult::PartialExit {
+        price,
+        reason,
+        close_ratio,
+    } = result
+    else {
+        return trading_state;
+    };
+    let closing_quantity = (ctx.qty * close_ratio).min(ctx.qty).max(0.0);
+    trading_state.trade_position = Some(trade_position);
+    partial_close_position(
+        &mut trading_state,
+        candle,
+        signal,
+        reason,
+        price,
+        closing_quantity,
+    );
     trading_state
 }
 #[cfg(test)]

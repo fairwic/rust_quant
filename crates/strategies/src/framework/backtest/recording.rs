@@ -36,6 +36,18 @@ pub fn record_trade_exit(
     close_type: &str,
     closing_quantity: f64,
 ) {
+    record_trade_exit_with_full_close(state, exit_time, signal, close_type, closing_quantity, true);
+}
+
+/// 记录交易出场，并显式区分部分平仓与最终平仓。
+pub fn record_trade_exit_with_full_close(
+    state: &mut TradingState,
+    exit_time: String,
+    signal: &SignalResult,
+    close_type: &str,
+    closing_quantity: f64,
+    full_close: bool,
+) {
     let trade_position = state.trade_position.clone().unwrap();
     // 随机测试的时候不记录详情日志了
     if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true" {
@@ -51,7 +63,7 @@ pub fn record_trade_exit(
         signal_status: trade_position.signal_status,
         profit_loss: trade_position.profit_loss,
         quantity: closing_quantity,
-        full_close: true,
+        full_close,
         close_type: close_type.to_string(),
         win_num: state.wins,
         loss_num: state.losses,

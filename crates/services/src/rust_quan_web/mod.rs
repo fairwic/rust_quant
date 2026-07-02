@@ -28,7 +28,7 @@ pub use execution_reconciliation_snapshot_check::{
     run_reconciliation_snapshot_check_from_env, AccountSnapshotSyncConfig,
     ReconciliationSnapshotCheckConfig,
 };
-pub use execution_task_client::{ExecutionTaskClient, ExecutionTaskConfig};
+pub use execution_task_client::{ExecutionTaskClient, ExecutionTaskConfig, QuantWebClientError};
 pub use execution_task_contract::{
     ApiCredentialCheckSummary, ExchangeAccountOrderSnapshotInput,
     ExchangeAccountPositionSnapshotInput, ExchangeAccountSnapshotReportRequest,

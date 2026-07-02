@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       buyer_email:
-        description: "Target buyer email"
-        required: true
+        description: "Optional canary buyer email; leave empty to fan out by active Web subscriptions"
+        required: false
         type: string
       combo_id:
-        description: "Target combo id"
-        required: true
+        description: "Optional canary combo id; must be provided together with buyer_email"
+        required: false
         type: string
       credential_id:
         description: "Web API credential id for readiness refresh"
@@ -78,8 +78,15 @@ jobs:
           : "${DEPLOY_SSH_USER:?DEPLOY_SSH_USER is required}"
           : "${DEPLOY_SSH_HOST:?DEPLOY_SSH_HOST is required}"
           : "${SERVER_APP_PATH:?SERVER_APP_PATH is required}"
-          : "${MARKET_VELOCITY_LIVE_BUYER_EMAIL:?buyer_email is required}"
-          : "${MARKET_VELOCITY_LIVE_COMBO_ID:?combo_id is required}"
+          if { [ -n "${MARKET_VELOCITY_LIVE_BUYER_EMAIL}" ] && [ -z "${MARKET_VELOCITY_LIVE_COMBO_ID}" ]; } ||
+            { [ -z "${MARKET_VELOCITY_LIVE_BUYER_EMAIL}" ] && [ -n "${MARKET_VELOCITY_LIVE_COMBO_ID}" ]; }; then
+            echo "::error::buyer_email and combo_id must be provided together for a Market Velocity canary scope" >&2
+            exit 1
+          fi
+          if [ -n "${MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID}" ] &&
+            { [ -z "${MARKET_VELOCITY_LIVE_BUYER_EMAIL}" ] || [ -z "${MARKET_VELOCITY_LIVE_COMBO_ID}" ]; }; then
+            echo "::warning::credential_id is ignored without buyer_email/combo_id; Web fan-out resolves credentials per subscription"
+          fi
 
           ssh_host_input="${DEPLOY_SSH_HOST}"
           ssh_port="${DEPLOY_SSH_PORT:-22}"

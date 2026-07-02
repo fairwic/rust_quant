@@ -376,6 +376,12 @@ pub struct BasicRiskStrategyConfig {
     /// 回测时 position_nums 乘以该倍数，盈亏与回撤同步放大。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_leverage: Option<f64>,
+    /// 第一档止盈触发时的部分平仓比例，按当前剩余仓位计算。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tiered_take_profit_level_1_close_ratio: Option<f64>,
+    /// 第二档止盈触发时的部分平仓比例，按当前剩余仓位计算。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tiered_take_profit_level_2_close_ratio: Option<f64>,
 }
 impl Default for BasicRiskStrategyConfig {
     /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
@@ -393,6 +399,8 @@ impl Default for BasicRiskStrategyConfig {
             dynamic_range_loss_percent: None,
             trade_fee_rate: None,
             position_leverage: None,
+            tiered_take_profit_level_1_close_ratio: None,
+            tiered_take_profit_level_2_close_ratio: None,
         }
     }
 }

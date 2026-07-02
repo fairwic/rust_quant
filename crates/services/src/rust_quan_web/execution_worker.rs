@@ -48,7 +48,7 @@ use crate::rust_quan_web::{
     ExecutionTaskClient, ExecutionTaskConfig, ExecutionTaskConfirmationLeaseItem,
     ExecutionTaskLeaseExtendRequest, ExecutionTaskLeaseRequest, ExecutionTaskReportRequest,
     ExecutionWorkerCheckpoint, NoopExecutionAuditRepository, PostgresExecutionAuditRepository,
-    ProtectionPlacementMode,
+    ProtectionPlacementMode, QuantWebClientError,
 };
 use anyhow::{anyhow, Result};
 use crypto_exc_all::{
