@@ -1,4 +1,5 @@
 use super::*;
+use std::str::FromStr;
 
 fn candle_entity(ts: i64) -> CandlesEntity {
     CandlesEntity {
@@ -113,6 +114,191 @@ fn cli_scalper_short_window_impulse_pullback_candles(count: usize, start: f64) -
     candles
 }
 
+fn eth_volume_reversal_candles(trigger_ts: i64) -> Vec<CandleItem> {
+    let count = 720;
+    let start_ts = trigger_ts - (count as i64 - 1) * 300_000;
+    let mut candles = (0..count)
+        .map(|i| CandleItem {
+            o: 1_600.0,
+            h: 1_602.0,
+            l: 1_598.0,
+            c: 1_600.0,
+            v: 1_000.0,
+            ts: start_ts + i as i64 * 300_000,
+            confirm: 1,
+        })
+        .collect::<Vec<_>>();
+    let trigger = candles.last_mut().expect("trigger candle");
+    trigger.o = 1_572.0;
+    trigger.h = 1_574.0;
+    trigger.l = 1_552.0;
+    trigger.c = 1_564.0;
+    trigger.v = 3_500.0;
+    candles
+}
+
+fn eth_volume_reversal_weak_compact_rebound_candles(trigger_ts: i64) -> Vec<CandleItem> {
+    let mut candles = eth_volume_reversal_candles(trigger_ts);
+    let trigger = candles.last_mut().expect("trigger candle");
+    trigger.o = 1_563.0;
+    trigger.h = 1_566.0;
+    trigger.l = 1_556.0;
+    trigger.c = 1_564.0;
+    trigger.v = 3_500.0;
+    candles
+}
+
+fn eth_volume_reversal_fib_candles(trigger_ts: i64) -> Vec<CandleItem> {
+    let mut candles = eth_volume_reversal_candles(trigger_ts);
+    let trigger_index = candles.len() - 1;
+    candles[trigger_index].o = 1_570.0;
+    candles[trigger_index].h = 1_572.0;
+    candles[trigger_index].l = 1_558.0;
+    candles[trigger_index].c = 1_566.0;
+    candles[trigger_index].v = 3_500.0;
+
+    let fib_low_index = trigger_index - 120;
+    candles[fib_low_index].l = 1_552.0;
+    candles[fib_low_index].o = 1_560.0;
+    candles[fib_low_index].c = 1_558.0;
+    candles[fib_low_index].h = 1_562.0;
+
+    let morning_high_index = candles
+        .iter()
+        .position(|candle| candle.ts >= 1_782_874_800_000)
+        .expect("morning high candle");
+    candles[morning_high_index].h = 1_602.0;
+    candles[morning_high_index].o = 1_585.0;
+    candles[morning_high_index].c = 1_598.0;
+    candles
+}
+
+fn eth_volume_reversal_inverted_v_candles(trigger_ts: i64) -> Vec<CandleItem> {
+    let count = 720;
+    let start_ts = trigger_ts - (count as i64 - 1) * 300_000;
+    let mut candles = (0..count)
+        .map(|i| CandleItem {
+            o: 1_620.0,
+            h: 1_622.0,
+            l: 1_618.0,
+            c: 1_620.0,
+            v: 1_000.0,
+            ts: start_ts + i as i64 * 300_000,
+            confirm: 1,
+        })
+        .collect::<Vec<_>>();
+    let base = candles.len() - 8;
+    let leg = [
+        (1_620.0, 1_626.0, 1_619.0, 1_625.0, 1_400.0),
+        (1_625.0, 1_633.0, 1_624.0, 1_632.0, 1_800.0),
+        (1_632.0, 1_642.0, 1_631.0, 1_640.0, 2_200.0),
+        (1_640.0, 1_650.0, 1_638.0, 1_647.0, 2_800.0),
+        (1_647.0, 1_660.0, 1_635.0, 1_638.0, 3_800.0),
+        (1_638.0, 1_640.0, 1_610.0, 1_612.0, 4_500.0),
+        (1_612.0, 1_618.0, 1_602.0, 1_608.0, 900.0),
+        (1_608.0, 1_612.0, 1_598.0, 1_602.0, 2_200.0),
+    ];
+    for (offset, (o, h, l, c, v)) in leg.into_iter().enumerate() {
+        let candle = &mut candles[base + offset];
+        candle.o = o;
+        candle.h = h;
+        candle.l = l;
+        candle.c = c;
+        candle.v = v;
+    }
+    candles
+}
+
+fn eth_volume_reversal_inverted_v_snapback_candles(trigger_ts: i64) -> Vec<CandleItem> {
+    let mut candles = eth_volume_reversal_inverted_v_candles(trigger_ts);
+    let snapback = candles.len() - 2;
+    candles[snapback].o = 1_612.0;
+    candles[snapback].h = 1_636.0;
+    candles[snapback].l = 1_608.0;
+    candles[snapback].c = 1_632.0;
+    candles[snapback].v = 3_200.0;
+    candles
+}
+
+fn eth_volume_reversal_soft_short_contraction_candles(trigger_ts: i64) -> Vec<CandleItem> {
+    let mut candles = eth_volume_reversal_inverted_v_candles(trigger_ts);
+    let base = candles.len() - 8;
+    let leg = [
+        (1_620.0, 1_624.0, 1_619.0, 1_623.0, 1_150.0),
+        (1_623.0, 1_628.0, 1_622.0, 1_627.0, 1_250.0),
+        (1_627.0, 1_633.0, 1_626.0, 1_632.0, 1_300.0),
+        (1_632.0, 1_641.0, 1_631.0, 1_638.0, 1_450.0),
+        (1_638.0, 1_641.0, 1_634.0, 1_636.0, 1_700.0),
+        (1_636.0, 1_638.0, 1_620.0, 1_624.0, 2_600.0),
+        (1_624.0, 1_626.0, 1_614.0, 1_620.0, 700.0),
+        (1_620.0, 1_622.0, 1_610.0, 1_616.0, 1_500.0),
+    ];
+    for (offset, (o, h, l, c, v)) in leg.into_iter().enumerate() {
+        let candle = &mut candles[base + offset];
+        candle.o = o;
+        candle.h = h;
+        candle.l = l;
+        candle.c = c;
+        candle.v = v;
+    }
+    candles
+}
+
+fn eth_volume_reversal_soft_short_active_confirm_volume_candles(
+    trigger_ts: i64,
+) -> Vec<CandleItem> {
+    let mut candles = eth_volume_reversal_soft_short_contraction_candles(trigger_ts);
+    let confirm = candles.len() - 2;
+    candles[confirm].v = 1_900.0;
+    candles
+}
+
+fn eth_volume_reversal_soft_short_rearms_after_active_confirm_candles(
+    trigger_ts: i64,
+) -> Vec<CandleItem> {
+    let mut candles = eth_volume_reversal_soft_short_contraction_candles(trigger_ts);
+    let active_confirm = candles.len() - 2;
+    candles[active_confirm].o = 1_624.0;
+    candles[active_confirm].h = 1_626.0;
+    candles[active_confirm].l = 1_605.0;
+    candles[active_confirm].c = 1_610.0;
+    candles[active_confirm].v = 3_200.0;
+
+    let rearm_confirm = candles.len() - 1;
+    candles[rearm_confirm].o = 1_610.0;
+    candles[rearm_confirm].h = 1_612.0;
+    candles[rearm_confirm].l = 1_600.0;
+    candles[rearm_confirm].c = 1_606.0;
+    candles[rearm_confirm].v = 700.0;
+    candles
+}
+
+fn eth_volume_reversal_entry(result: &BackTestResult) -> &TradeRecord {
+    result
+        .trade_records
+        .iter()
+        .find(|record| !record.full_close)
+        .expect("entry record")
+}
+
+fn eth_volume_reversal_entry_value(result: &BackTestResult) -> serde_json::Value {
+    serde_json::from_str(
+        eth_volume_reversal_entry(result)
+            .signal_value
+            .as_deref()
+            .expect("entry signal value"),
+    )
+    .expect("entry signal json")
+}
+
+fn eth_volume_reversal_short_entry(result: &BackTestResult) -> &TradeRecord {
+    result
+        .trade_records
+        .iter()
+        .find(|record| record.option_type == "short")
+        .expect("short entry record")
+}
+
 #[test]
 fn parses_cli_defaults_and_limit() {
     let args = parse_args(Vec::<String>::new()).unwrap();
@@ -124,9 +310,11 @@ fn parses_cli_defaults_and_limit() {
     assert!(!args.scan_breakdown);
     assert!(!args.scan_exhaustion);
     assert!(!args.scan_micro);
+    assert!(!args.scan_volume_reversal);
     assert!(!args.scan_scalper);
     assert!(!args.scan_scalper_narrow);
     assert!(!args.diagnose_scalper);
+    assert!(!args.diagnose_volume_reversal);
     assert!(!args.use_market_context);
     assert!(!args.backfill_okx_market_context);
     assert_eq!(args.case_label, None);
@@ -155,8 +343,14 @@ fn parses_cli_defaults_and_limit() {
     let args = parse_args(["--scan-micro".to_string()]).unwrap();
     assert!(args.scan_micro);
 
+    let args = parse_args(["--scan-volume-reversal".to_string()]).unwrap();
+    assert!(args.scan_volume_reversal);
+
     let args = parse_args(["--diagnose-scalper".to_string()]).unwrap();
     assert!(args.diagnose_scalper);
+
+    let args = parse_args(["--diagnose-volume-reversal".to_string()]).unwrap();
+    assert!(args.diagnose_volume_reversal);
 
     let args = parse_args(["--use-market-context".to_string()]).unwrap();
     assert!(args.use_market_context);
@@ -166,6 +360,364 @@ fn parses_cli_defaults_and_limit() {
 
     let args = parse_args(["--case-label".to_string(), "scalper_btc_1m".to_string()]).unwrap();
     assert_eq!(args.case_label.as_deref(), Some("scalper_btc_1m"));
+}
+
+#[test]
+fn strategy_type_accepts_eth_volume_reversal_dual_research_key() {
+    assert_eq!(
+        StrategyType::from_str("eth_volume_reversal_dual_5m_v1_research"),
+        Ok(StrategyType::EthVolumeReversalDual5mV1Research)
+    );
+    assert_eq!(
+        StrategyType::EthVolumeReversalDual5mV1Research.as_str(),
+        "eth_volume_reversal_dual_5m_v1_research"
+    );
+}
+
+#[test]
+fn strategy_type_accepts_btc_volume_reversal_dual_research_key() {
+    assert_eq!(
+        StrategyType::from_str("btc_volume_reversal_dual_5m_v1_research"),
+        Ok(StrategyType::BtcVolumeReversalDual5mV1Research)
+    );
+    assert_eq!(
+        StrategyType::BtcVolumeReversalDual5mV1Research.as_str(),
+        "btc_volume_reversal_dual_5m_v1_research"
+    );
+}
+
+#[test]
+fn eth_volume_reversal_enters_on_spike_without_waiting_for_support_reclaim() {
+    let candles = eth_volume_reversal_candles(1_782_869_700_000);
+    let result = volume_reversal_5m::run_eth_volume_reversal_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+    let entry_value = eth_volume_reversal_entry_value(&result);
+
+    assert_eq!(result.open_trades, 1);
+    assert_eq!(eth_volume_reversal_entry(&result).open_price, 1_564.0);
+    assert_eq!(
+        entry_value["reasons"][0].as_str(),
+        Some("ETH_VOLUME_REVERSAL_5M_SPIKE")
+    );
+    assert_eq!(
+        entry_value["entry_mode"].as_str(),
+        Some("left_utc_after_one")
+    );
+}
+
+#[test]
+fn eth_volume_reversal_uses_trigger_low_ema696_target_and_10x_leverage() {
+    let candles = eth_volume_reversal_candles(1_782_869_700_000);
+    let result = volume_reversal_5m::run_eth_volume_reversal_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+    let entry = eth_volume_reversal_entry(&result);
+    let entry_value = eth_volume_reversal_entry_value(&result);
+
+    assert!((entry.quantity - (100.0 / 1_564.0) * 10.0).abs() < 1e-9);
+    assert_eq!(entry_value["stop_price"].as_f64(), Some(1_552.0));
+    assert_eq!(entry_value["target_source"].as_str(), Some("ema696"));
+    assert!(entry_value["target_price"].as_f64().unwrap() > 1_564.0);
+}
+
+#[test]
+fn eth_volume_reversal_can_filter_when_ema696_room_is_too_small() {
+    let candles = eth_volume_reversal_candles(1_782_869_700_000);
+    let result = volume_reversal_5m::run_eth_volume_reversal_5m_with_tuning(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+        volume_reversal_5m::EthVolumeReversal5mTuning {
+            min_ema_distance_pct: Some(99.0),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(result.open_trades, 0);
+}
+
+#[test]
+fn eth_volume_reversal_default_uses_shape_stability_filters() {
+    let tuning = volume_reversal_5m::EthVolumeReversal5mTuning::default();
+
+    assert_eq!(tuning.volume_spike_mult, 3.0);
+    assert_eq!(tuning.min_rebound_close_pos, 0.50);
+    assert_eq!(tuning.weak_rebound_body_pct, Some(0.12));
+    assert_eq!(tuning.weak_rebound_range_pct, Some(0.80));
+    assert_eq!(tuning.max_stop_pct, Some(0.012));
+    assert_eq!(tuning.min_ema_distance_pct, Some(1.5));
+    assert_eq!(tuning.min_target_r, 1.5);
+    assert!(tuning.use_utc_day_fib);
+    assert!(!tuning.tiered_take_profit);
+    assert!(tuning.allow_utc_after_one);
+    assert!(tuning.allow_us_premarket_fib);
+    assert!(!tuning.allow_beijing_midnight);
+}
+
+#[test]
+fn eth_volume_reversal_default_rejects_beijing_midnight_after_shape_diagnosis() {
+    let candles = eth_volume_reversal_candles(1_782_922_200_000);
+    let result = volume_reversal_5m::run_eth_volume_reversal_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+
+    assert_eq!(result.open_trades, 0);
+}
+
+#[test]
+fn eth_volume_reversal_rejects_weak_compact_left_rebound() {
+    let candles = eth_volume_reversal_weak_compact_rebound_candles(1_782_869_700_000);
+    let result = volume_reversal_5m::run_eth_volume_reversal_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+
+    assert_eq!(result.open_trades, 0);
+}
+
+#[test]
+fn eth_volume_reversal_dual_waits_for_short_continuation_after_inverted_v() {
+    let candles = eth_volume_reversal_inverted_v_candles(1_782_922_200_000);
+    let long_only = volume_reversal_5m::run_eth_volume_reversal_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+    let dual = volume_reversal_5m::run_eth_volume_reversal_dual_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+    let entry = eth_volume_reversal_short_entry(&dual);
+    let entry_value: serde_json::Value =
+        serde_json::from_str(entry.signal_value.as_deref().expect("short signal value"))
+            .expect("short signal json");
+
+    assert_eq!(long_only.open_trades, 0);
+    assert_eq!(dual.open_trades, 1);
+    assert_eq!(entry.open_price, 1_608.0);
+    assert_eq!(
+        entry_value["entry_mode"].as_str(),
+        Some("short_beijing_inverted_v_confirmed")
+    );
+    assert_eq!(entry_value["stop_price"].as_f64(), Some(1_640.0));
+    assert_eq!(entry_value["target_r"].as_f64(), Some(1.5));
+    assert_eq!(
+        entry_value["reasons"][0].as_str(),
+        Some("ETH_VOLUME_REVERSAL_DUAL_5M_INVERTED_V_SHORT")
+    );
+}
+
+#[test]
+fn eth_volume_reversal_dual_rejects_short_when_next_candle_snaps_back() {
+    let candles = eth_volume_reversal_inverted_v_snapback_candles(1_782_922_200_000);
+    let dual = volume_reversal_5m::run_eth_volume_reversal_dual_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+
+    assert_eq!(dual.open_trades, 0);
+}
+
+#[test]
+fn eth_volume_reversal_dual_accepts_soft_short_when_confirmation_volume_contracts() {
+    let candles = eth_volume_reversal_soft_short_contraction_candles(1_782_922_200_000);
+    let dual = volume_reversal_5m::run_eth_volume_reversal_dual_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+    let entry = eth_volume_reversal_short_entry(&dual);
+    let entry_value: serde_json::Value =
+        serde_json::from_str(entry.signal_value.as_deref().expect("short signal value"))
+            .expect("short signal json");
+
+    assert_eq!(dual.open_trades, 1);
+    assert_eq!(entry.open_price, 1_620.0);
+    assert_eq!(entry_value["target_r"].as_f64(), Some(1.5));
+    assert_eq!(
+        entry_value["entry_mode"].as_str(),
+        Some("short_beijing_inverted_v_confirmed")
+    );
+    assert!(
+        entry_value["confirmation_volume_ratio"].as_f64().unwrap() <= 0.35,
+        "soft short requires confirmation volume contraction"
+    );
+}
+
+#[test]
+fn eth_volume_reversal_dual_rejects_soft_short_when_confirmation_volume_stays_active() {
+    let candles = eth_volume_reversal_soft_short_active_confirm_volume_candles(1_782_922_200_000);
+    let dual = volume_reversal_5m::run_eth_volume_reversal_dual_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+
+    assert_eq!(dual.open_trades, 0);
+}
+
+#[test]
+fn eth_volume_reversal_dual_rearms_after_active_confirmation_candle() {
+    let candles =
+        eth_volume_reversal_soft_short_rearms_after_active_confirm_candles(1_782_922_200_000);
+    let dual = volume_reversal_5m::run_eth_volume_reversal_dual_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+    let entry = eth_volume_reversal_short_entry(&dual);
+    let entry_value: serde_json::Value =
+        serde_json::from_str(entry.signal_value.as_deref().expect("short signal value"))
+            .expect("short signal json");
+
+    assert_eq!(dual.open_trades, 1);
+    assert_eq!(entry.open_price, 1_606.0);
+    assert_eq!(entry_value["trigger_price"].as_f64(), Some(1_610.0));
+    assert!(
+        entry_value["confirmation_volume_ratio"].as_f64().unwrap() <= 0.35,
+        "the second confirmation should be the low-volume continuation candle"
+    );
+}
+
+#[test]
+fn eth_volume_reversal_dual_persists_as_independent_strategy_type() {
+    let case = StrategyCase {
+        label: "eth_volume_reversal_dual_5m",
+        symbol: "ETH-USDT-SWAP",
+        period: "5m",
+        family: StrategyFamily::EthVolumeReversalDual5m,
+    };
+
+    assert_eq!(
+        strategy_type_for_persistence(&case),
+        Some(StrategyType::EthVolumeReversalDual5mV1Research)
+    );
+}
+
+#[test]
+fn eth_volume_reversal_can_research_beijing_midnight_when_enabled() {
+    let candles = eth_volume_reversal_candles(1_782_922_200_000);
+    let result = volume_reversal_5m::run_eth_volume_reversal_5m_with_tuning(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+        volume_reversal_5m::EthVolumeReversal5mTuning {
+            allow_utc_after_one: false,
+            allow_us_premarket_fib: false,
+            allow_beijing_midnight: true,
+            ..Default::default()
+        },
+    );
+    let entry_value = eth_volume_reversal_entry_value(&result);
+
+    assert_eq!(result.open_trades, 1);
+    assert_eq!(
+        entry_value["entry_mode"].as_str(),
+        Some("left_beijing_after_midnight")
+    );
+}
+
+#[test]
+fn eth_volume_reversal_enters_immediately_on_fib_retracement_spike() {
+    let candles = eth_volume_reversal_fib_candles(1_782_910_200_000);
+    let result = volume_reversal_5m::run_eth_volume_reversal_5m(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+    let entry_value = eth_volume_reversal_entry_value(&result);
+
+    assert_eq!(result.open_trades, 1);
+    assert_eq!(
+        entry_value["entry_mode"].as_str(),
+        Some("right_us_premarket_fib")
+    );
+    assert_eq!(
+        entry_value["target_source"].as_str(),
+        Some("prior_utc_morning_impulse")
+    );
+    assert!(entry_value["fib_0236"].as_f64().unwrap() >= 1_558.0);
+}
+
+#[test]
+fn eth_volume_reversal_tiered_take_profit_records_partial_close() {
+    let mut candles = eth_volume_reversal_candles(1_782_869_700_000);
+    candles.push(CandleItem {
+        o: 1_564.0,
+        h: 1_577.0,
+        l: 1_563.0,
+        c: 1_576.0,
+        v: 1_200.0,
+        ts: 1_782_870_000_000,
+        confirm: 1,
+    });
+    let result = volume_reversal_5m::run_eth_volume_reversal_5m_with_tuning(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+        volume_reversal_5m::EthVolumeReversal5mTuning {
+            tiered_take_profit: true,
+            target_r_override: Some(3.0),
+            min_target_r: 1.0,
+            ..Default::default()
+        },
+    );
+
+    let partial_close = result
+        .trade_records
+        .iter()
+        .find(|record| record.option_type == "close" && !record.full_close)
+        .expect("partial close record");
+    assert_eq!(partial_close.close_type, "分批止盈(级别1)");
+    assert_eq!(partial_close.close_price, Some(1_576.0));
+    assert!(result.trade_records.iter().any(|record| record.full_close));
+}
+
+#[test]
+fn report_summary_includes_partial_close_profit_legs() {
+    let mut candles = eth_volume_reversal_candles(1_782_869_700_000);
+    candles.push(CandleItem {
+        o: 1_564.0,
+        h: 1_577.0,
+        l: 1_563.0,
+        c: 1_576.0,
+        v: 1_200.0,
+        ts: 1_782_870_000_000,
+        confirm: 1,
+    });
+    let result = volume_reversal_5m::run_eth_volume_reversal_5m_with_tuning(
+        "ETH-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+        volume_reversal_5m::EthVolumeReversal5mTuning {
+            tiered_take_profit: true,
+            target_r_override: Some(3.0),
+            min_target_r: 1.0,
+            ..Default::default()
+        },
+    );
+    let exit_pnl = result
+        .trade_records
+        .iter()
+        .filter(|record| record.option_type == "close")
+        .map(|record| record.profit_loss)
+        .sum::<f64>();
+
+    let report = build_report("eth_volume_reversal_5m", &candles, &result);
+
+    assert_eq!(report.closed, 2);
+    assert!((report.pnl - exit_pnl).abs() < 1e-9);
+    assert_eq!(report.wins + report.losses, 1);
 }
 
 #[test]
@@ -179,10 +731,52 @@ fn strategy_cases_include_1m_scalper_for_short_cycle_frequency() {
     assert!(labels.contains(&"scalper_eth_1m"));
     assert!(labels.contains(&"micro_scalper_btc_1m"));
     assert!(labels.contains(&"micro_scalper_eth_1m"));
+    assert!(labels.contains(&"eth_volume_reversal_5m"));
+    assert!(labels.contains(&"btc_volume_reversal_dual_5m"));
+    assert!(labels.contains(&"sol_volume_reversal_dual_5m"));
     assert!(labels.contains(&"breakdown_btc_5m"));
     assert!(labels.contains(&"breakdown_eth_5m"));
     assert!(labels.contains(&"exhaustion_btc_5m"));
     assert!(labels.contains(&"exhaustion_eth_5m"));
+}
+
+#[test]
+fn eth_volume_reversal_persistence_uses_research_strategy_type() {
+    let case = strategy_cases_for_filter(Some("eth_volume_reversal_5m"), false).unwrap()[0].clone();
+
+    assert_eq!(
+        strategy_type_for_persistence(&case).unwrap(),
+        StrategyType::EthVolumeReversal5mV1Research
+    );
+}
+
+#[test]
+fn run_report_backtests_retains_trade_records_for_persistence() {
+    let case = strategy_cases_for_filter(Some("eth_volume_reversal_5m"), false).unwrap()[0].clone();
+    let loaded = LoadedCase {
+        case,
+        candles: eth_volume_reversal_candles(1_782_869_700_000),
+        context: BacktestMarketContext::default(),
+        context_required: false,
+    };
+
+    let runs = run_report_backtests(&[loaded], 2.0, None, ReportTuningOverrides::default());
+
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].report.label, "eth_volume_reversal_5m");
+    assert!(!runs[0].result.trade_records.is_empty());
+}
+
+#[test]
+fn eth_volume_reversal_persistence_risk_config_records_10x_contract() {
+    let risk = risk_config_for_persistence(
+        StrategyFamily::EthVolumeReversal5m,
+        strategy_family_risk_config(2.0, None),
+    );
+
+    assert_eq!(risk.position_leverage, Some(10.0));
+    assert_eq!(risk.is_used_signal_k_line_stop_loss, Some(true));
+    assert_eq!(risk.dynamic_max_loss, Some(false));
 }
 
 #[test]
@@ -206,6 +800,108 @@ fn micro_scalper_scan_tunings_are_fee_aware_without_short_cycle_trade_cap() {
     assert!(tunings.iter().any(|tuning| !tuning.allow_short));
     assert!(tunings.iter().any(|tuning| tuning.target_r_2 >= 2.5));
     assert!(tunings.iter().any(|tuning| tuning.cooldown_candles <= 4));
+}
+
+#[test]
+fn volume_reversal_scan_tunings_cover_day_fib_without_tiered_take_profit() {
+    let tunings = volume_reversal_5m::volume_reversal_scan_tunings();
+
+    assert!(tunings.iter().any(|tuning| tuning.use_utc_day_fib));
+    assert!(tunings.iter().all(|tuning| !tuning.tiered_take_profit));
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.target_r_override.is_some()));
+}
+
+#[test]
+fn volume_reversal_scan_tunings_cover_no_tiered_low_r_winrate_candidates() {
+    let tunings = volume_reversal_5m::volume_reversal_scan_tunings();
+
+    assert!(tunings
+        .iter()
+        .any(|tuning| { !tuning.tiered_take_profit && tuning.target_r_override == Some(1.0) }));
+    assert!(tunings
+        .iter()
+        .any(|tuning| { !tuning.tiered_take_profit && tuning.target_r_override == Some(1.2) }));
+    assert!(tunings.iter().any(|tuning| {
+        tuning.allow_utc_after_one
+            && !tuning.allow_us_premarket_fib
+            && !tuning.allow_beijing_midnight
+    }));
+    assert!(tunings.iter().any(|tuning| {
+        !tuning.allow_utc_after_one
+            && !tuning.allow_us_premarket_fib
+            && tuning.allow_beijing_midnight
+    }));
+    assert!(tunings
+        .iter()
+        .any(|tuning| tuning.min_ema_distance_pct == Some(1.0)));
+}
+
+#[test]
+fn btc_volume_reversal_frequency_scan_tunings_cover_more_trade_candidates() {
+    let tunings = volume_reversal_5m::btc_volume_reversal_frequency_scan_tunings();
+
+    assert!(tunings.iter().any(|tuning| {
+        tuning.volume_spike_mult == 4.0
+            && tuning.target_r_override == Some(3.0)
+            && tuning.weak_rebound_body_pct == None
+            && tuning.weak_rebound_range_pct == None
+    }));
+    assert!(tunings.iter().any(|tuning| {
+        tuning.volume_spike_mult == 3.5
+            && tuning.target_r_override == Some(2.5)
+            && tuning.min_ema_distance_pct == Some(1.0)
+    }));
+    assert!(tunings.iter().any(|tuning| tuning.cooldown_candles <= 4));
+    assert!(tunings.iter().all(|tuning| {
+        tuning.allow_utc_after_one
+            && tuning.allow_us_premarket_fib
+            && !tuning.allow_beijing_midnight
+    }));
+}
+
+#[test]
+fn parses_btc_volume_reversal_frequency_scan_flag() {
+    let args = parse_args([
+        "--scan-btc-volume-reversal".to_string(),
+        "--limit".to_string(),
+        "50000".to_string(),
+    ])
+    .unwrap();
+
+    assert!(args.scan_btc_volume_reversal);
+    assert_eq!(args.limit, 50_000);
+}
+
+#[test]
+fn volume_reversal_diagnostic_tunings_compare_utc_only_against_utc_bj() {
+    let tunings = volume_reversal_5m::volume_reversal_diagnostic_tunings();
+
+    assert!(tunings.iter().any(|(label, tuning)| {
+        *label == "utc_only_3r"
+            && !tuning.tiered_take_profit
+            && tuning.target_r_override == Some(3.0)
+            && tuning.allow_utc_after_one
+            && !tuning.allow_us_premarket_fib
+            && !tuning.allow_beijing_midnight
+    }));
+    assert!(tunings.iter().any(|(label, tuning)| {
+        *label == "utc_bj_3r"
+            && !tuning.tiered_take_profit
+            && tuning.target_r_override == Some(3.0)
+            && tuning.allow_utc_after_one
+            && !tuning.allow_us_premarket_fib
+            && tuning.allow_beijing_midnight
+    }));
+    assert!(tunings.iter().any(|(label, tuning)| {
+        *label == "bj_only_3r"
+            && !tuning.tiered_take_profit
+            && tuning.target_r_override == Some(3.0)
+            && !tuning.allow_utc_after_one
+            && !tuning.allow_us_premarket_fib
+            && tuning.allow_beijing_midnight
+    }));
 }
 
 #[test]
@@ -244,9 +940,133 @@ fn default_case_filter_excludes_failed_research_micro_scalper() {
 
     assert!(!default_labels.contains(&"micro_scalper_btc_1m"));
     assert!(!default_labels.contains(&"micro_scalper_eth_1m"));
+    assert!(!default_labels.contains(&"btc_volume_reversal_dual_5m"));
+    assert!(!default_labels.contains(&"sol_volume_reversal_dual_5m"));
     assert!(research_labels.contains(&"micro_scalper_btc_1m"));
     assert!(research_labels.contains(&"micro_scalper_eth_1m"));
+    assert!(research_labels.contains(&"btc_volume_reversal_dual_5m"));
+    assert!(research_labels.contains(&"sol_volume_reversal_dual_5m"));
     assert_eq!(explicit_micro[0].label, "micro_scalper_btc_1m");
+}
+
+#[test]
+fn alt_symbol_volume_reversal_cases_persist_as_dual_research_type() {
+    let sol_case =
+        strategy_cases_for_filter(Some("sol_volume_reversal_dual_5m"), false).unwrap()[0].clone();
+
+    assert_eq!(sol_case.symbol, "SOL-USDT-SWAP");
+    assert!(matches!(
+        sol_case.family,
+        StrategyFamily::EthVolumeReversalDual5m
+    ));
+    assert_eq!(
+        strategy_type_for_persistence(&sol_case).unwrap(),
+        StrategyType::EthVolumeReversalDual5mV1Research
+    );
+}
+
+#[test]
+fn btc_volume_reversal_case_uses_dedicated_research_type() {
+    let btc_case =
+        strategy_cases_for_filter(Some("btc_volume_reversal_dual_5m"), false).unwrap()[0].clone();
+
+    assert_eq!(btc_case.symbol, "BTC-USDT-SWAP");
+    assert!(matches!(
+        btc_case.family,
+        StrategyFamily::BtcVolumeReversalDual5m
+    ));
+    assert_eq!(
+        strategy_type_for_persistence(&btc_case).unwrap(),
+        StrategyType::BtcVolumeReversalDual5mV1Research
+    );
+}
+
+#[test]
+fn btc_volume_reversal_hybrid_case_uses_dedicated_research_type() {
+    let btc_case =
+        strategy_cases_for_filter(Some("btc_volume_reversal_hybrid_5m"), false).unwrap()[0].clone();
+
+    assert_eq!(btc_case.symbol, "BTC-USDT-SWAP");
+    assert!(matches!(
+        btc_case.family,
+        StrategyFamily::BtcVolumeReversalHybrid5m
+    ));
+    assert_eq!(
+        strategy_type_for_persistence(&btc_case).unwrap(),
+        StrategyType::BtcVolumeReversalHybrid5mV1Research
+    );
+}
+
+#[test]
+fn btc_volume_reversal_tuning_keeps_mechanics_and_limits_weak_bounces() {
+    let eth = volume_reversal_5m::EthVolumeReversal5mTuning::default();
+    let btc = volume_reversal_5m::btc_volume_reversal_5m_tuning();
+
+    assert_eq!(btc.volume_window, eth.volume_window);
+    assert_eq!(btc.ema_window, eth.ema_window);
+    assert_eq!(btc.sweep_lookback, eth.sweep_lookback);
+    assert_eq!(btc.fib_lookback, eth.fib_lookback);
+    assert_eq!(btc.volume_spike_mult, 4.0);
+    assert_eq!(
+        btc.min_downside_excursion_pct,
+        eth.min_downside_excursion_pct
+    );
+    assert_eq!(btc.min_rebound_close_pos, eth.min_rebound_close_pos);
+    assert_eq!(btc.weak_rebound_body_pct, Some(0.20));
+    assert_eq!(btc.weak_rebound_range_pct, Some(1.00));
+    assert_eq!(btc.target_r_override, Some(3.0));
+    assert_eq!(btc.min_target_r, 3.0);
+    assert_eq!(btc.max_stop_pct, eth.max_stop_pct);
+    assert_eq!(btc.allow_utc_after_one, eth.allow_utc_after_one);
+    assert_eq!(btc.allow_us_premarket_fib, eth.allow_us_premarket_fib);
+    assert_eq!(btc.allow_beijing_midnight, eth.allow_beijing_midnight);
+}
+
+#[test]
+fn btc_volume_reversal_hybrid_shorts_confirmed_failed_weak_rebound() {
+    let mut candles = eth_volume_reversal_weak_compact_rebound_candles(1_782_869_700_000);
+    candles.last_mut().expect("trigger candle").v = 4_500.0;
+    let pending = volume_reversal_5m::failed_weak_rebound_short_setup(
+        &candles,
+        volume_reversal_5m::btc_volume_reversal_5m_tuning(),
+        volume_reversal_5m::BtcFailedWeakReboundShortTuning::default(),
+    )
+    .expect("weak rebound pending short setup");
+    candles.push(CandleItem {
+        o: 1_563.0,
+        h: 1_565.0,
+        l: 1_548.0,
+        c: 1_550.0,
+        v: 800.0,
+        ts: 1_782_870_000_000,
+        confirm: 1,
+    });
+    assert!(
+        volume_reversal_5m::confirmed_failed_weak_rebound_short_signal(
+            &candles,
+            pending,
+            volume_reversal_5m::BtcFailedWeakReboundShortTuning::default(),
+        )
+        .is_some()
+    );
+
+    let result = volume_reversal_5m::run_btc_volume_reversal_hybrid_5m(
+        "BTC-USDT-SWAP",
+        &candles,
+        BasicRiskStrategyConfig::default(),
+    );
+    let entry = eth_volume_reversal_entry(&result);
+    let entry_value: serde_json::Value =
+        serde_json::from_str(entry.signal_value.as_deref().expect("hybrid signal value"))
+            .expect("hybrid signal json");
+
+    assert_eq!(result.open_trades, 1);
+    assert_eq!(entry.option_type, "short");
+    assert_eq!(
+        entry_value["entry_mode"].as_str(),
+        Some("short_failed_weak_rebound_confirmed")
+    );
+    assert_eq!(entry_value["target_r"].as_f64(), Some(1.5));
 }
 
 #[test]
@@ -559,6 +1379,36 @@ fn build_report_attaches_entry_snapshot_debug_to_closed_trades() {
     assert!((snapshot.funding_rate - 0.0004).abs() < 1e-12);
     assert!((snapshot.long_short_ratio - 1.3).abs() < 1e-9);
     assert!((snapshot.taker_sell_buy_ratio - 2.5).abs() < 1e-9);
+}
+
+#[test]
+fn parses_volume_reversal_entry_shape_snapshot_debug() {
+    let snapshot = parse_entry_snapshot_debug(
+        &serde_json::json!({
+            "price": 1_564.0,
+            "stop_price": 1_552.0,
+            "target_r": 3.0,
+            "ema696": 1_600.0,
+            "volume_multiple": 5.2,
+            "downside_excursion_pct": 1.1,
+            "rebound_close_pos": 0.72,
+            "candle_range_pct": 1.5,
+            "body_pct": 0.4,
+            "lower_wick_pct": 0.9,
+            "upper_wick_pct": 0.2
+        })
+        .to_string(),
+    )
+    .expect("volume reversal snapshot");
+
+    assert!((snapshot.stop_distance_pct - 0.7672634271099744).abs() < 1e-9);
+    assert!((snapshot.target_r - 3.0).abs() < 1e-9);
+    assert!((snapshot.ema_distance_pct - 2.301790281329923).abs() < 1e-9);
+    assert!((snapshot.volume_multiple - 5.2).abs() < 1e-9);
+    assert!((snapshot.downside_excursion_pct - 1.1).abs() < 1e-9);
+    assert!((snapshot.rebound_close_pos - 0.72).abs() < 1e-9);
+    assert!((snapshot.lower_wick_pct - 0.9).abs() < 1e-9);
+    assert!((snapshot.upper_wick_pct - 0.2).abs() < 1e-9);
 }
 
 #[test]

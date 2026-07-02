@@ -33,6 +33,14 @@ pub enum StrategyType {
     RangeReversionScalper,
     /// BTC/ETH 短周期动量突破回踩策略
     MomentumBreakoutScalper,
+    /// ETH 5m 放量反转研究策略
+    EthVolumeReversal5mV1Research,
+    /// ETH 5m 多空放量反转研究策略
+    EthVolumeReversalDual5mV1Research,
+    /// BTC 5m 多空放量反转研究策略
+    BtcVolumeReversalDual5mV1Research,
+    /// BTC 5m 放量反转混合研究策略
+    BtcVolumeReversalHybrid5mV1Research,
     /// 自定义策略
     Custom(u32),
 }
@@ -56,6 +64,16 @@ impl StrategyType {
             StrategyType::BearShortStack => "bear_short_stack_v1",
             StrategyType::RangeReversionScalper => "range_reversion_scalper_v1",
             StrategyType::MomentumBreakoutScalper => "momentum_breakout_scalper_v1",
+            StrategyType::EthVolumeReversal5mV1Research => "eth_volume_reversal_5m_v1_research",
+            StrategyType::EthVolumeReversalDual5mV1Research => {
+                "eth_volume_reversal_dual_5m_v1_research"
+            }
+            StrategyType::BtcVolumeReversalDual5mV1Research => {
+                "btc_volume_reversal_dual_5m_v1_research"
+            }
+            StrategyType::BtcVolumeReversalHybrid5mV1Research => {
+                "btc_volume_reversal_hybrid_5m_v1_research"
+            }
             StrategyType::Custom(_) => "custom",
         }
     }
@@ -84,6 +102,16 @@ impl std::str::FromStr for StrategyType {
             }
             "range_reversion_scalper_v1" => Ok(StrategyType::RangeReversionScalper),
             "momentum_breakout_scalper_v1" => Ok(StrategyType::MomentumBreakoutScalper),
+            "eth_volume_reversal_5m_v1_research" => Ok(StrategyType::EthVolumeReversal5mV1Research),
+            "eth_volume_reversal_dual_5m_v1_research" => {
+                Ok(StrategyType::EthVolumeReversalDual5mV1Research)
+            }
+            "btc_volume_reversal_dual_5m_v1_research" => {
+                Ok(StrategyType::BtcVolumeReversalDual5mV1Research)
+            }
+            "btc_volume_reversal_hybrid_5m_v1_research" => {
+                Ok(StrategyType::BtcVolumeReversalHybrid5mV1Research)
+            }
             _ => Err(format!("Unknown strategy type: {}", s)),
         }
     }
@@ -226,7 +254,47 @@ mod tests {
             StrategyType::from_str("exhaustion_fade_short_v1"),
             Ok(StrategyType::BearShortStack)
         );
+        assert_eq!(
+            StrategyType::from_str("eth_volume_reversal_5m_v1_research"),
+            Ok(StrategyType::EthVolumeReversal5mV1Research)
+        );
         assert!(StrategyType::from_str("unknown").is_err());
+    }
+    #[test]
+    fn strategy_type_round_trips_eth_volume_reversal_research_key() {
+        use std::str::FromStr;
+        assert_eq!(
+            StrategyType::EthVolumeReversal5mV1Research.as_str(),
+            "eth_volume_reversal_5m_v1_research"
+        );
+        assert_eq!(
+            StrategyType::from_str("eth_volume_reversal_5m_v1_research").unwrap(),
+            StrategyType::EthVolumeReversal5mV1Research
+        );
+    }
+    #[test]
+    fn strategy_type_round_trips_btc_volume_reversal_research_key() {
+        use std::str::FromStr;
+        assert_eq!(
+            StrategyType::BtcVolumeReversalDual5mV1Research.as_str(),
+            "btc_volume_reversal_dual_5m_v1_research"
+        );
+        assert_eq!(
+            StrategyType::from_str("btc_volume_reversal_dual_5m_v1_research").unwrap(),
+            StrategyType::BtcVolumeReversalDual5mV1Research
+        );
+    }
+    #[test]
+    fn strategy_type_round_trips_btc_volume_reversal_hybrid_research_key() {
+        use std::str::FromStr;
+        assert_eq!(
+            StrategyType::BtcVolumeReversalHybrid5mV1Research.as_str(),
+            "btc_volume_reversal_hybrid_5m_v1_research"
+        );
+        assert_eq!(
+            StrategyType::from_str("btc_volume_reversal_hybrid_5m_v1_research").unwrap(),
+            StrategyType::BtcVolumeReversalHybrid5mV1Research
+        );
     }
     #[test]
     fn test_timeframe_conversion() {

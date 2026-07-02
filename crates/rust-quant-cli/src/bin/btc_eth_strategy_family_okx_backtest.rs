@@ -4,9 +4,12 @@ use crypto_exc_all::{
     MarketStatsQuery, OkxExchangeConfig, SdkConfig, TakerBuySellVolume,
 };
 use okx::api::account::OkxContracts;
-use rust_quant_domain::entities::ExternalMarketSnapshot;
-use rust_quant_domain::traits::ExternalMarketSnapshotRepository;
-use rust_quant_infrastructure::repositories::ShardedExternalMarketSnapshotRepository;
+use rust_quant_domain::entities::{BacktestDetail, BacktestLog, ExternalMarketSnapshot};
+use rust_quant_domain::traits::{BacktestLogRepository, ExternalMarketSnapshotRepository};
+use rust_quant_domain::StrategyType;
+use rust_quant_infrastructure::repositories::{
+    ShardedExternalMarketSnapshotRepository, SqlxBacktestRepository,
+};
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::market::get_confirmed_candles_for_backtest;
 use rust_quant_strategies::framework::backtest::types::{
@@ -18,23 +21,40 @@ use rust_quant_strategies::implementations::{
     BtcEthLiquidityScalperBacktestTuning, BtcEthLiquidityScalperStrategy,
 };
 use rust_quant_strategies::CandleItem;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 #[path = "btc_eth_strategy_family_okx_backtest/micro_scalper_1m.rs"]
 mod micro_scalper_1m;
+#[path = "btc_eth_strategy_family_okx_backtest/scalper_analysis.rs"]
+mod scalper_analysis;
 #[path = "btc_eth_strategy_family_okx_backtest/scan.rs"]
 mod scan;
+#[path = "btc_eth_strategy_family_okx_backtest/volume_reversal_5m.rs"]
+mod volume_reversal_5m;
 
 #[cfg(test)]
 use micro_scalper_1m::micro_scalper_scan_tunings;
 use micro_scalper_1m::{print_micro_scalper_scan, run_micro_scalper_1m};
+use scalper_analysis::{
+    format_case_reports, format_scalper_diagnostic_reasons, merge_filtered_reason_counts,
+    print_scalper_diagnostics, print_scalper_scan, print_scalper_scan_with_tunings,
+    scalper_filter_counts, scalper_setup_diagnostics, short_candidate_reports_meet_constraints,
+    short_scan_candidate_meets_constraints, sort_scalper_raw_candidates,
+    summarize_breakdown_candidate_reports, summarize_exhaustion_candidate_reports,
+    summarize_scalper_candidate_reports,
+};
 #[cfg(test)]
 use scan::{breakdown_scan_tunings, exhaustion_scan_tunings};
 use scan::{
     print_breakdown_scan, print_exhaustion_scan, scalper_narrow_scan_tunings, scalper_scan_tunings,
+};
+use volume_reversal_5m::{
+    print_btc_volume_reversal_frequency_scan, print_volume_reversal_diagnostics,
+    print_volume_reversal_scan, run_btc_volume_reversal_hybrid_5m, run_eth_volume_reversal_5m,
+    run_eth_volume_reversal_dual_5m,
 };
 
 const DEFAULT_LIMIT: usize = 30_000;
@@ -58,9 +78,12 @@ struct Args {
     trade_fee_rate: Option<f64>,
     debug_trades: bool,
     scan_micro: bool,
+    scan_volume_reversal: bool,
+    scan_btc_volume_reversal: bool,
     scan_scalper: bool,
     scan_scalper_narrow: bool,
     diagnose_scalper: bool,
+    diagnose_volume_reversal: bool,
     scan_breakdown: bool,
     scan_exhaustion: bool,
     use_market_context: bool,
@@ -88,6 +111,10 @@ struct LoadedCase {
 enum StrategyFamily {
     Scalper,
     MicroScalper1m,
+    EthVolumeReversal5m,
+    EthVolumeReversalDual5m,
+    BtcVolumeReversalDual5m,
+    BtcVolumeReversalHybrid5m,
     Breakdown,
     Exhaustion,
 }
@@ -110,6 +137,13 @@ struct CaseReport {
     filtered_signals: usize,
     filtered_reason_counts: Vec<(String, usize)>,
     filtered_signal_snapshots: Vec<FilteredSignalDebug>,
+}
+
+#[derive(Debug)]
+/// Holds both printable summary and raw backtest output so persistence can save trade details.
+struct CaseBacktestRun {
+    report: CaseReport,
+    result: BackTestResult,
 }
 
 #[derive(Debug, Clone)]
@@ -208,6 +242,15 @@ struct EntrySnapshotDebug {
     funding_rate: f64,
     long_short_ratio: f64,
     taker_sell_buy_ratio: f64,
+    target_r: f64,
+    ema_distance_pct: f64,
+    volume_multiple: f64,
+    downside_excursion_pct: f64,
+    rebound_close_pos: f64,
+    candle_range_pct: f64,
+    body_pct: f64,
+    lower_wick_pct: f64,
+    upper_wick_pct: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -223,11 +266,19 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let args = parse_args(std::env::args().skip(1))?;
+    let load_case_label = args.case_label.as_deref().or_else(|| {
+        if args.scan_btc_volume_reversal {
+            Some("btc_volume_reversal_dual_5m")
+        } else {
+            (args.scan_volume_reversal || args.diagnose_volume_reversal)
+                .then_some("eth_volume_reversal_5m")
+        }
+    });
     let mut loaded = load_cases(
         args.limit,
         false,
-        args.case_label.as_deref(),
-        args.scan_micro,
+        load_case_label,
+        args.scan_micro || args.scan_volume_reversal || args.scan_btc_volume_reversal,
     )
     .await?;
     if args.backfill_okx_market_context {
@@ -236,7 +287,13 @@ async fn main() -> Result<()> {
     if args.use_market_context {
         attach_sharded_market_context(&mut loaded).await?;
     }
-    if args.scan_micro {
+    if args.diagnose_volume_reversal {
+        print_volume_reversal_diagnostics(&loaded, args.risk_percent, args.trade_fee_rate);
+    } else if args.scan_btc_volume_reversal {
+        print_btc_volume_reversal_frequency_scan(&loaded, args.risk_percent, args.trade_fee_rate);
+    } else if args.scan_volume_reversal {
+        print_volume_reversal_scan(&loaded, args.risk_percent, args.trade_fee_rate);
+    } else if args.scan_micro {
         print_micro_scalper_scan(&loaded, args.risk_percent, args.trade_fee_rate);
     } else if args.scan_scalper_narrow {
         print_scalper_scan_with_tunings(
@@ -255,12 +312,14 @@ async fn main() -> Result<()> {
     } else if args.scan_exhaustion {
         print_exhaustion_scan(&loaded, args.risk_percent, args.trade_fee_rate);
     } else {
-        let reports = run_reports(
+        let risk_config = strategy_family_risk_config(args.risk_percent, args.trade_fee_rate);
+        let runs = run_report_backtests(
             &loaded,
             args.risk_percent,
             args.trade_fee_rate,
             ReportTuningOverrides::default(),
         );
+        let reports = persist_case_backtest_runs(&loaded, runs, risk_config).await?;
         print_reports(&reports, args.debug_trades);
     }
     Ok(())
@@ -291,9 +350,12 @@ where
     let mut trade_fee_rate = None;
     let mut debug_trades = false;
     let mut scan_micro = false;
+    let mut scan_volume_reversal = false;
+    let mut scan_btc_volume_reversal = false;
     let mut scan_scalper = false;
     let mut scan_scalper_narrow = false;
     let mut diagnose_scalper = false;
+    let mut diagnose_volume_reversal = false;
     let mut scan_breakdown = false;
     let mut scan_exhaustion = false;
     let mut use_market_context = false;
@@ -331,9 +393,12 @@ where
             }
             "--debug-trades" => debug_trades = true,
             "--scan-micro" => scan_micro = true,
+            "--scan-volume-reversal" => scan_volume_reversal = true,
+            "--scan-btc-volume-reversal" => scan_btc_volume_reversal = true,
             "--scan-scalper" => scan_scalper = true,
             "--scan-scalper-narrow" => scan_scalper_narrow = true,
             "--diagnose-scalper" => diagnose_scalper = true,
+            "--diagnose-volume-reversal" => diagnose_volume_reversal = true,
             "--scan-breakdown" => scan_breakdown = true,
             "--scan-exhaustion" => scan_exhaustion = true,
             "--use-market-context" => use_market_context = true,
@@ -370,9 +435,12 @@ where
         trade_fee_rate,
         debug_trades,
         scan_micro,
+        scan_volume_reversal,
+        scan_btc_volume_reversal,
         scan_scalper,
         scan_scalper_narrow,
         diagnose_scalper,
+        diagnose_volume_reversal,
         scan_breakdown,
         scan_exhaustion,
         use_market_context,
@@ -391,11 +459,13 @@ fn print_usage() {
          require OKX sharded funding/OI/taker context when evaluating signals. Add\n\
          --backfill-okx-market-context to fetch OKX public 1D context into sharded tables. Use\n\
          market_velocity_candle_backfill to backfill the sharded candle tables before running this report.\n\
-         Use --case-label scalper_btc_1m to run or scan one case only."
+         Use --case-label scalper_btc_1m to run or scan one case only. Use --scan-volume-reversal\n\
+         to scan the research-only ETH 5m volume reversal preset; use --diagnose-volume-reversal\n\
+         to print win/loss candle-shape diagnostics for the strongest research candidates."
     );
 }
 
-const STRATEGY_CASE_DEFS: [(&str, &str, &str, StrategyFamily); 14] = [
+const STRATEGY_CASE_DEFS: [(&str, &str, &str, StrategyFamily); 19] = [
     (
         "scalper_btc_1m",
         "BTC-USDT-SWAP",
@@ -431,6 +501,36 @@ const STRATEGY_CASE_DEFS: [(&str, &str, &str, StrategyFamily); 14] = [
         "ETH-USDT-SWAP",
         "5m",
         StrategyFamily::Scalper,
+    ),
+    (
+        "eth_volume_reversal_5m",
+        "ETH-USDT-SWAP",
+        "5m",
+        StrategyFamily::EthVolumeReversal5m,
+    ),
+    (
+        "eth_volume_reversal_dual_5m",
+        "ETH-USDT-SWAP",
+        "5m",
+        StrategyFamily::EthVolumeReversalDual5m,
+    ),
+    (
+        "btc_volume_reversal_dual_5m",
+        "BTC-USDT-SWAP",
+        "5m",
+        StrategyFamily::BtcVolumeReversalDual5m,
+    ),
+    (
+        "btc_volume_reversal_hybrid_5m",
+        "BTC-USDT-SWAP",
+        "5m",
+        StrategyFamily::BtcVolumeReversalHybrid5m,
+    ),
+    (
+        "sol_volume_reversal_dual_5m",
+        "SOL-USDT-SWAP",
+        "5m",
+        StrategyFamily::EthVolumeReversalDual5m,
     ),
     (
         "breakdown_btc_5m",
@@ -482,7 +582,7 @@ const STRATEGY_CASE_DEFS: [(&str, &str, &str, StrategyFamily); 14] = [
     ),
 ];
 
-fn strategy_cases() -> [StrategyCase; 14] {
+fn strategy_cases() -> [StrategyCase; 19] {
     STRATEGY_CASE_DEFS.map(|(label, symbol, period, family)| StrategyCase {
         label,
         symbol,
@@ -493,7 +593,7 @@ fn strategy_cases() -> [StrategyCase; 14] {
 
 fn strategy_cases_for_filter(
     case_label: Option<&str>,
-    include_research_micro: bool,
+    include_research_cases: bool,
 ) -> Result<Vec<StrategyCase>> {
     let cases = strategy_cases()
         .into_iter()
@@ -501,7 +601,10 @@ fn strategy_cases_for_filter(
             if let Some(label) = case_label {
                 return case.label == label;
             }
-            include_research_micro || !is_research_micro_case(case)
+            if is_research_case(case) {
+                return include_research_cases;
+            }
+            !is_research_case(case)
         })
         .collect::<Vec<_>>();
     if cases.is_empty() {
@@ -513,17 +616,24 @@ fn strategy_cases_for_filter(
     Ok(cases)
 }
 
-fn is_research_micro_case(case: &StrategyCase) -> bool {
-    matches!(case.family, StrategyFamily::MicroScalper1m)
+fn is_research_case(case: &StrategyCase) -> bool {
+    matches!(
+        case.family,
+        StrategyFamily::MicroScalper1m
+            | StrategyFamily::EthVolumeReversal5m
+            | StrategyFamily::EthVolumeReversalDual5m
+            | StrategyFamily::BtcVolumeReversalDual5m
+            | StrategyFamily::BtcVolumeReversalHybrid5m
+    )
 }
 
 async fn load_cases(
     limit: usize,
     use_market_context: bool,
     case_label: Option<&str>,
-    include_research_micro: bool,
+    include_research_cases: bool,
 ) -> Result<Vec<LoadedCase>> {
-    let cases = strategy_cases_for_filter(case_label, include_research_micro)?;
+    let cases = strategy_cases_for_filter(case_label, include_research_cases)?;
     let context_repo = if use_market_context {
         Some(connect_sharded_market_context_repository()?)
     } else {
@@ -906,12 +1016,13 @@ fn okx_base_coin(symbol: &str) -> String {
         .to_ascii_uppercase()
 }
 
-fn run_reports(
+/// Runs normal report cases without discarding trade records required by back_test_detail.
+fn run_report_backtests(
     loaded_cases: &[LoadedCase],
     risk_percent: f64,
     trade_fee_rate: Option<f64>,
     tunings: ReportTuningOverrides,
-) -> Vec<CaseReport> {
+) -> Vec<CaseBacktestRun> {
     let risk = strategy_family_risk_config(risk_percent, trade_fee_rate);
 
     loaded_cases
@@ -924,7 +1035,8 @@ fn run_reports(
             };
             let bear_tuning = bear_tuning_for_report_family(loaded.case.family, tunings);
             let result = run_loaded_case(loaded, risk, scalper_tuning, bear_tuning);
-            build_report(loaded.case.label, &loaded.candles, &result)
+            let report = build_report(loaded.case.label, &loaded.candles, &result);
+            CaseBacktestRun { report, result }
         })
         .collect()
 }
@@ -937,6 +1049,202 @@ fn strategy_family_risk_config(
         max_loss_percent: risk_percent,
         trade_fee_rate,
         ..BasicRiskStrategyConfig::default()
+    }
+}
+
+/// Returns the exact risk contract that should be serialized with a persisted backtest.
+fn risk_config_for_persistence(
+    family: StrategyFamily,
+    risk: BasicRiskStrategyConfig,
+) -> BasicRiskStrategyConfig {
+    match family {
+        StrategyFamily::EthVolumeReversal5m
+        | StrategyFamily::EthVolumeReversalDual5m
+        | StrategyFamily::BtcVolumeReversalDual5m
+        | StrategyFamily::BtcVolumeReversalHybrid5m => {
+            volume_reversal_5m::volume_reversal_risk_config(risk)
+        }
+        StrategyFamily::Scalper
+        | StrategyFamily::MicroScalper1m
+        | StrategyFamily::Breakdown
+        | StrategyFamily::Exhaustion => risk,
+    }
+}
+
+/// Saves normal report runs to back_test_log and back_test_detail using the shared repository.
+async fn persist_case_backtest_runs(
+    loaded_cases: &[LoadedCase],
+    runs: Vec<CaseBacktestRun>,
+    base_risk_config: BasicRiskStrategyConfig,
+) -> Result<Vec<CaseReport>> {
+    if loaded_cases.len() != runs.len() {
+        return Err(anyhow!(
+            "backtest persistence case/result length mismatch: cases={} runs={}",
+            loaded_cases.len(),
+            runs.len()
+        ));
+    }
+
+    let repository = connect_backtest_repository()?;
+    let mut reports = Vec::with_capacity(runs.len());
+    for (loaded, run) in loaded_cases.iter().zip(runs.into_iter()) {
+        let Some(strategy_type) = strategy_type_for_persistence(&loaded.case) else {
+            println!(
+                "backtest_persistence_skipped label={} reason=unsupported_strategy_type",
+                loaded.case.label
+            );
+            reports.push(run.report);
+            continue;
+        };
+        let strategy_detail = strategy_detail_for_persistence(&loaded.case, &run.report);
+        let risk_config = risk_config_for_persistence(loaded.case.family, base_risk_config);
+        let result = run.result;
+        let log = backtest_log_for_persistence(
+            &loaded.case,
+            &loaded.candles,
+            strategy_type,
+            strategy_detail,
+            risk_config,
+            &result,
+        );
+        let back_test_id = repository.insert_log(&log).await.with_context(|| {
+            format!(
+                "persist backtest log failed: label={} strategy_type={}",
+                loaded.case.label,
+                strategy_type.as_str()
+            )
+        })?;
+        let details = backtest_details_for_persistence(
+            back_test_id,
+            strategy_type,
+            &loaded.case,
+            result.trade_records,
+        );
+        let details_inserted = repository.insert_details(&details).await.with_context(|| {
+            format!(
+                "persist backtest details failed: label={} strategy_type={} back_test_id={}",
+                loaded.case.label,
+                strategy_type.as_str(),
+                back_test_id
+            )
+        })?;
+        println!(
+            "backtest_persisted label={} strategy_type={} back_test_log_id={} details_inserted={}",
+            loaded.case.label,
+            strategy_type.as_str(),
+            back_test_id,
+            details_inserted
+        );
+        reports.push(run.report);
+    }
+    Ok(reports)
+}
+
+/// Builds the quant_core repository used by default backtest persistence.
+fn connect_backtest_repository() -> Result<SqlxBacktestRepository> {
+    let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
+        .or_else(|_| std::env::var("POSTGRES_QUANT_CORE_DATABASE_URL"))
+        .context("missing QUANT_CORE_DATABASE_URL for backtest persistence")?;
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_lazy(&database_url)
+        .context("create quant_core postgres pool for backtest persistence")?;
+    Ok(SqlxBacktestRepository::new(pool))
+}
+
+/// Builds the back_test_log row for the normal report persistence path.
+fn backtest_log_for_persistence(
+    case: &StrategyCase,
+    candles: &[CandleItem],
+    strategy_type: StrategyType,
+    strategy_detail: Value,
+    risk_config: BasicRiskStrategyConfig,
+    result: &BackTestResult,
+) -> BacktestLog {
+    BacktestLog::new(
+        strategy_type.as_str().to_string(),
+        case.symbol.to_string(),
+        case.period.to_string(),
+        result.win_rate.to_string(),
+        result.funds.to_string(),
+        result.open_trades as i32,
+        Some(strategy_detail.to_string()),
+        json!(risk_config).to_string(),
+        (result.funds - 100.0).to_string(),
+        candles.first().map(|candle| candle.ts).unwrap_or_default(),
+        candles.last().map(|candle| candle.ts).unwrap_or_default(),
+        candles.len() as i32,
+    )
+}
+
+/// Builds back_test_detail rows from framework trade records without writing auxiliary tables.
+fn backtest_details_for_persistence(
+    back_test_id: i64,
+    strategy_type: StrategyType,
+    case: &StrategyCase,
+    trade_records: Vec<TradeRecord>,
+) -> Vec<BacktestDetail> {
+    trade_records
+        .into_iter()
+        .map(|trade_record| {
+            BacktestDetail::new(
+                back_test_id,
+                trade_record.option_type,
+                strategy_type.as_str().to_string(),
+                case.symbol.to_string(),
+                case.period.to_string(),
+                trade_record.open_position_time,
+                trade_record.signal_open_position_time,
+                trade_record.signal_status,
+                trade_record.close_position_time.unwrap_or_default(),
+                trade_record.open_price.to_string(),
+                trade_record.close_price.map(|price| price.to_string()),
+                trade_record.profit_loss.to_string(),
+                trade_record.quantity.to_string(),
+                trade_record.full_close.to_string(),
+                trade_record.close_type,
+                trade_record.win_num,
+                trade_record.loss_num,
+                trade_record.signal_value.unwrap_or_default(),
+                trade_record.signal_result.unwrap_or_default(),
+                trade_record.stop_loss_source,
+                trade_record.stop_loss_update_history,
+            )
+        })
+        .collect()
+}
+
+/// Captures the report metadata that explains which CLI case produced a persisted row.
+fn strategy_detail_for_persistence(case: &StrategyCase, report: &CaseReport) -> Value {
+    json!({
+        "source": "btc_eth_strategy_family_okx_backtest",
+        "case_label": case.label,
+        "symbol": case.symbol,
+        "period": case.period,
+        "strategy_family": strategy_family_key(case.family),
+        "candles": report.candles,
+        "entries": report.entries,
+        "closed": report.closed,
+        "wins": report.wins,
+        "losses": report.losses,
+        "win_rate_pct": report.win_rate_pct,
+        "pnl": report.pnl,
+        "max_drawdown_pct": report.max_drawdown_pct,
+        "trades_per_day": report.trades_per_day,
+    })
+}
+
+/// Provides stable family labels for strategy_detail JSON without changing StrategyType values.
+fn strategy_family_key(family: StrategyFamily) -> &'static str {
+    match family {
+        StrategyFamily::Scalper => "btc_eth_liquidity_scalper",
+        StrategyFamily::MicroScalper1m => "micro_scalper_1m",
+        StrategyFamily::EthVolumeReversal5m => "eth_volume_reversal_5m",
+        StrategyFamily::EthVolumeReversalDual5m => "eth_volume_reversal_dual_5m",
+        StrategyFamily::BtcVolumeReversalDual5m => "btc_volume_reversal_dual_5m",
+        StrategyFamily::BtcVolumeReversalHybrid5m => "btc_volume_reversal_hybrid_5m",
+        StrategyFamily::Breakdown => "bear_breakdown_short",
+        StrategyFamily::Exhaustion => "exhaustion_fade_short",
     }
 }
 
@@ -1144,6 +1452,18 @@ fn run_loaded_case(
     let candles = loaded.candles.as_slice();
     match case.family {
         StrategyFamily::MicroScalper1m => run_micro_scalper_1m(case.symbol, candles, risk),
+        StrategyFamily::EthVolumeReversal5m => {
+            run_eth_volume_reversal_5m(case.symbol, candles, risk)
+        }
+        StrategyFamily::EthVolumeReversalDual5m => {
+            run_eth_volume_reversal_dual_5m(case.symbol, candles, risk)
+        }
+        StrategyFamily::BtcVolumeReversalDual5m => {
+            volume_reversal_5m::run_btc_volume_reversal_dual_5m(case.symbol, candles, risk)
+        }
+        StrategyFamily::BtcVolumeReversalHybrid5m => {
+            run_btc_volume_reversal_hybrid_5m(case.symbol, candles, risk)
+        }
         StrategyFamily::Scalper => {
             if loaded.context_required {
                 BtcEthLiquidityScalperStrategy.run_test_with_tuning_and_context(
@@ -1236,7 +1556,33 @@ fn bear_tuning_for_report_family(
     match family {
         StrategyFamily::Breakdown => tunings.breakdown,
         StrategyFamily::Exhaustion => tunings.exhaustion,
-        StrategyFamily::Scalper | StrategyFamily::MicroScalper1m => None,
+        StrategyFamily::Scalper
+        | StrategyFamily::MicroScalper1m
+        | StrategyFamily::EthVolumeReversal5m
+        | StrategyFamily::EthVolumeReversalDual5m
+        | StrategyFamily::BtcVolumeReversalDual5m
+        | StrategyFamily::BtcVolumeReversalHybrid5m => None,
+    }
+}
+
+/// Maps a report case to the versioned strategy type stored in backtest tables.
+fn strategy_type_for_persistence(case: &StrategyCase) -> Option<StrategyType> {
+    match case.family {
+        StrategyFamily::Scalper => Some(StrategyType::BtcEthLiquidityScalper),
+        StrategyFamily::EthVolumeReversal5m => Some(StrategyType::EthVolumeReversal5mV1Research),
+        StrategyFamily::EthVolumeReversalDual5m => {
+            Some(StrategyType::EthVolumeReversalDual5mV1Research)
+        }
+        StrategyFamily::BtcVolumeReversalDual5m => {
+            Some(StrategyType::BtcVolumeReversalDual5mV1Research)
+        }
+        StrategyFamily::BtcVolumeReversalHybrid5m => {
+            Some(StrategyType::BtcVolumeReversalHybrid5mV1Research)
+        }
+        StrategyFamily::Breakdown | StrategyFamily::Exhaustion => {
+            Some(StrategyType::BearShortStack)
+        }
+        StrategyFamily::MicroScalper1m => None,
     }
 }
 
@@ -1253,17 +1599,12 @@ fn build_report(label: &str, candles: &[CandleItem], result: &BackTestResult) ->
     let entry_records = result
         .trade_records
         .iter()
-        .filter(|record| !record.full_close)
+        .filter(|record| !is_exit_record(record))
         .map(|record| (record.open_position_time.as_str(), record))
         .collect::<BTreeMap<_, _>>();
-    let wins = closed
-        .iter()
-        .filter(|record| record.profit_loss > 0.0)
-        .count();
-    let losses = closed
-        .iter()
-        .filter(|record| record.profit_loss < 0.0)
-        .count();
+    let trade_outcomes = closed_trade_outcomes(&closed);
+    let wins = trade_outcomes.iter().filter(|pnl| **pnl > 0.0).count();
+    let losses = trade_outcomes.iter().filter(|pnl| **pnl < 0.0).count();
     let pnl = closed.iter().map(|record| record.profit_loss).sum::<f64>();
     let win_rate_pct = ratio_pct(wins, wins + losses);
     let days = candle_span_days(candles);
@@ -1373,12 +1714,18 @@ fn parse_entry_snapshot_debug(payload: &str) -> Option<EntrySnapshotDebug> {
     if price <= 0.0 {
         return None;
     }
-    let failed_reclaim_high = json_number(&value, "failed_reclaim_high")?;
-    let atr_15m = json_number(&value, "atr_15m")?;
+    let failed_reclaim_high = json_number(&value, "failed_reclaim_high").unwrap_or(price);
+    let stop_distance_pct = json_number(&value, "stop_price")
+        .map(|stop_price| (price - stop_price).abs() / price * 100.0)
+        .unwrap_or_else(|| (failed_reclaim_high - price).max(0.0) / price * 100.0);
+    let atr_15m = json_number(&value, "atr_15m").unwrap_or(0.0);
     let taker_buy_volume = json_number(&value, "taker_buy_volume").unwrap_or(0.0);
     let taker_sell_volume = json_number(&value, "taker_sell_volume").unwrap_or(0.0);
+    let ema_distance_pct = json_number(&value, "ema696")
+        .map(|ema696| (ema696 - price) / price * 100.0)
+        .unwrap_or(0.0);
     Some(EntrySnapshotDebug {
-        stop_distance_pct: (failed_reclaim_high - price).max(0.0) / price * 100.0,
+        stop_distance_pct,
         atr_pct: atr_15m / price * 100.0,
         oi_growth_pct: json_number(&value, "oi_growth_pct").unwrap_or(0.0),
         funding_rate: json_number(&value, "funding_rate").unwrap_or(0.0),
@@ -1388,6 +1735,15 @@ fn parse_entry_snapshot_debug(payload: &str) -> Option<EntrySnapshotDebug> {
         } else {
             0.0
         },
+        target_r: json_number(&value, "target_r").unwrap_or(0.0),
+        ema_distance_pct,
+        volume_multiple: json_number(&value, "volume_multiple").unwrap_or(0.0),
+        downside_excursion_pct: json_number(&value, "downside_excursion_pct").unwrap_or(0.0),
+        rebound_close_pos: json_number(&value, "rebound_close_pos").unwrap_or(0.0),
+        candle_range_pct: json_number(&value, "candle_range_pct").unwrap_or(0.0),
+        body_pct: json_number(&value, "body_pct").unwrap_or(0.0),
+        lower_wick_pct: json_number(&value, "lower_wick_pct").unwrap_or(0.0),
+        upper_wick_pct: json_number(&value, "upper_wick_pct").unwrap_or(0.0),
     })
 }
 
@@ -1413,7 +1769,21 @@ fn closed_records(result: &BackTestResult) -> impl Iterator<Item = &TradeRecord>
     result
         .trade_records
         .iter()
-        .filter(|record| record.full_close)
+        .filter(|record| is_exit_record(record))
+}
+
+fn closed_trade_outcomes(closed: &[&TradeRecord]) -> Vec<f64> {
+    let mut outcomes = BTreeMap::<&str, f64>::new();
+    for record in closed {
+        *outcomes
+            .entry(record.open_position_time.as_str())
+            .or_default() += record.profit_loss;
+    }
+    outcomes.into_values().collect()
+}
+
+fn is_exit_record(record: &TradeRecord) -> bool {
+    record.option_type == "close"
 }
 
 fn ratio_pct(numerator: usize, denominator: usize) -> f64 {
@@ -1548,594 +1918,6 @@ fn format_reason_counts(counts: &[(String, usize)]) -> String {
         .map(|(reason, count)| format!("{reason}:{count}"))
         .collect::<Vec<_>>()
         .join(",")
-}
-
-/// Prints candle-structure rejection counts for scalper cases without running trades.
-fn print_scalper_diagnostics(loaded_cases: &[LoadedCase]) {
-    for loaded in loaded_cases
-        .iter()
-        .filter(|loaded| matches!(loaded.case.family, StrategyFamily::Scalper))
-    {
-        let diagnostics = scalper_setup_diagnostics(
-            &loaded.candles,
-            BtcEthLiquidityScalperBacktestTuning::default(),
-        );
-        println!(
-            "scalper_diagnostics label={} candles={} samples={} classified={} confirmed={} no_trend={} top_reasons={}",
-            loaded.case.label,
-            loaded.candles.len(),
-            diagnostics.samples,
-            diagnostics.classified_windows(),
-            diagnostics.confirmed,
-            diagnostics.reason_count("NO_TREND"),
-            format_scalper_diagnostic_reasons(&diagnostics)
-        );
-    }
-}
-
-/// Counts scalper candle-structure setup outcomes without changing strategy output.
-fn scalper_setup_diagnostics(
-    candles: &[CandleItem],
-    tuning: BtcEthLiquidityScalperBacktestTuning,
-) -> ScalperSetupDiagnostics {
-    let mut diagnostics = ScalperSetupDiagnostics::default();
-    let window = scalper_diagnostic_window(tuning);
-    for index in BACKTEST_SIGNAL_WARMUP_CANDLES..candles.len() {
-        let end = index + 1;
-        if end < window {
-            continue;
-        }
-        let start = end - window;
-        diagnostics.samples += 1;
-        match diagnose_scalper_setup_window(&candles[start..end], &tuning) {
-            Ok(()) => diagnostics.confirmed += 1,
-            Err(reason) => *diagnostics.reasons.entry(reason).or_default() += 1,
-        }
-    }
-    diagnostics
-}
-
-fn scalper_diagnostic_window(tuning: BtcEthLiquidityScalperBacktestTuning) -> usize {
-    tuning
-        .trend_slow_window
-        .max(tuning.trend_fast_window)
-        .max(12)
-}
-
-/// Formats the most frequent rejection reasons first so the next scan is evidence-led.
-fn format_scalper_diagnostic_reasons(diagnostics: &ScalperSetupDiagnostics) -> String {
-    let mut reasons = diagnostics
-        .reasons
-        .iter()
-        .map(|(reason, count)| (*reason, *count))
-        .collect::<Vec<_>>();
-    reasons.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(right.0)));
-    reasons
-        .iter()
-        .take(6)
-        .map(|(reason, count)| format!("{reason}:{count}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-/// Classifies one rolling scalper setup window using the same stage order as the strategy.
-fn diagnose_scalper_setup_window(
-    candles: &[CandleItem],
-    tuning: &BtcEthLiquidityScalperBacktestTuning,
-) -> Result<(), &'static str> {
-    if candles.len() < scalper_diagnostic_window(*tuning) {
-        return Err("INSUFFICIENT_DATA");
-    }
-    let Some(last) = candles.last() else {
-        return Err("INSUFFICIENT_DATA");
-    };
-    let trend_fast_window = tuning.trend_fast_window.max(1).min(candles.len());
-    let trend_slow_window = tuning.trend_slow_window.max(1).min(candles.len());
-    let fast_trend = scalper_sma_close(&candles[candles.len() - trend_fast_window..]);
-    let slow_trend = scalper_sma_close(&candles[candles.len() - trend_slow_window..]);
-    let bias = if last.c > fast_trend && fast_trend > slow_trend {
-        "long"
-    } else if last.c < fast_trend && fast_trend < slow_trend {
-        "short"
-    } else {
-        return Err("NO_TREND");
-    };
-    if bias == "short" && !tuning.allow_short {
-        return Err("SHORT_DISABLED");
-    }
-    let slow_directional_ratio = scalper_directional_move_ratio(candles, trend_slow_window, bias);
-    let fast_directional_ratio = scalper_directional_move_ratio(candles, trend_fast_window, bias);
-    if slow_directional_ratio < tuning.min_directional_ratio_48
-        || fast_directional_ratio < tuning.min_directional_ratio_24
-    {
-        return Err("WEAK_DIRECTIONAL_MOVE");
-    }
-    let impulse_index =
-        scalper_recent_impulse_index(candles, bias, tuning).ok_or("MISSING_VOLUME_IMPULSE")?;
-    if !scalper_has_pullback_and_resume(candles, impulse_index, bias, tuning) {
-        return Err("PULLBACK_RESUME_MISSING");
-    }
-    if tuning.require_previous_extreme_break && !scalper_breaks_previous_candle(candles, bias) {
-        return Err("PREVIOUS_EXTREME_MISSING");
-    }
-    Ok(())
-}
-
-/// Finds the recent directional impulse required before a scalper pullback can be traded.
-fn scalper_recent_impulse_index(
-    candles: &[CandleItem],
-    bias: &str,
-    tuning: &BtcEthLiquidityScalperBacktestTuning,
-) -> Option<usize> {
-    let start = candles.len().saturating_sub(12).max(1);
-    let end = candles.len().saturating_sub(1);
-    let avg_range = scalper_average_range(&candles[start - 1..end]).max(0.0001);
-    let avg_volume = scalper_average_volume(&candles[start - 1..end]).max(0.0001);
-    (start..end).rev().find(|index| {
-        let current = &candles[*index];
-        let previous = &candles[*index - 1];
-        let move_size = current.c - previous.c;
-        let range = (current.h - current.l).abs().max(0.0001);
-        let body_ratio = (current.c - current.o).abs() / range;
-        let volume_ok = current.v >= avg_volume * tuning.impulse_min_volume_mult;
-        match bias {
-            "long" => {
-                move_size >= avg_range * tuning.impulse_move_range_mult
-                    && current.c > current.o
-                    && body_ratio >= tuning.impulse_min_body_ratio
-                    && volume_ok
-            }
-            "short" => {
-                move_size <= -avg_range * tuning.impulse_move_range_mult
-                    && current.c < current.o
-                    && body_ratio >= tuning.impulse_min_body_ratio
-                    && volume_ok
-            }
-            _ => false,
-        }
-    })
-}
-
-/// Checks whether price pulled back after the impulse and then resumed without chasing too far.
-fn scalper_has_pullback_and_resume(
-    candles: &[CandleItem],
-    impulse_index: usize,
-    bias: &str,
-    tuning: &BtcEthLiquidityScalperBacktestTuning,
-) -> bool {
-    let Some(last) = candles.last() else {
-        return false;
-    };
-    let impulse = &candles[impulse_index];
-    let after_impulse = &candles[impulse_index + 1..];
-    if after_impulse.len() < 2 {
-        return false;
-    }
-    let body = (impulse.c - impulse.o).abs().max(0.0001);
-    match bias {
-        "long" => {
-            let pullback_low = after_impulse
-                .iter()
-                .map(|candle| candle.l)
-                .fold(f64::INFINITY, f64::min);
-            let depth = (impulse.c - pullback_low) / body;
-            (tuning.pullback_min_depth..=tuning.pullback_max_depth).contains(&depth)
-                && last.c > last.o
-                && last.c <= impulse.h + body * tuning.resume_extension_body_mult
-        }
-        "short" => {
-            let pullback_high = after_impulse
-                .iter()
-                .map(|candle| candle.h)
-                .fold(f64::NEG_INFINITY, f64::max);
-            let depth = (pullback_high - impulse.c) / body;
-            (tuning.pullback_min_depth..=tuning.pullback_max_depth).contains(&depth)
-                && last.c < last.o
-                && last.c >= impulse.l - body * tuning.resume_extension_body_mult
-        }
-        _ => false,
-    }
-}
-
-/// Keeps diagnostics aligned with the strategy's previous-candle break requirement.
-fn scalper_breaks_previous_candle(candles: &[CandleItem], bias: &str) -> bool {
-    if candles.len() < 2 {
-        return false;
-    }
-    let last = &candles[candles.len() - 1];
-    let previous = &candles[candles.len() - 2];
-    match bias {
-        "long" => last.c > previous.h,
-        "short" => last.c < previous.l,
-        _ => false,
-    }
-}
-
-/// Measures how much of the lookback movement is in the execution bias direction.
-fn scalper_directional_move_ratio(candles: &[CandleItem], lookback: usize, bias: &str) -> f64 {
-    if candles.len() < 2 {
-        return 0.0;
-    }
-    let lookback = lookback.min(candles.len() - 1);
-    let start = candles.len() - lookback - 1;
-    let window = &candles[start..];
-    let Some(first) = window.first() else {
-        return 0.0;
-    };
-    let Some(last) = window.last() else {
-        return 0.0;
-    };
-    let directional_move = match bias {
-        "long" => last.c - first.c,
-        "short" => first.c - last.c,
-        _ => return 0.0,
-    };
-    if directional_move <= 0.0 {
-        return 0.0;
-    }
-    let total_move = window
-        .windows(2)
-        .map(|pair| (pair[1].c - pair[0].c).abs())
-        .sum::<f64>();
-    directional_move / total_move.max(0.0001)
-}
-
-/// Calculates the local range baseline used by the diagnostic impulse gate.
-fn scalper_average_range(candles: &[CandleItem]) -> f64 {
-    if candles.is_empty() {
-        return 0.0;
-    }
-    candles
-        .iter()
-        .map(|candle| (candle.h - candle.l).abs())
-        .sum::<f64>()
-        / candles.len() as f64
-}
-
-/// Calculates the local volume baseline used by the diagnostic impulse gate.
-fn scalper_average_volume(candles: &[CandleItem]) -> f64 {
-    if candles.is_empty() {
-        return 0.0;
-    }
-    candles.iter().map(|candle| candle.v).sum::<f64>() / candles.len() as f64
-}
-
-/// Calculates the simple moving average used by the diagnostic trend gate.
-fn scalper_sma_close(candles: &[CandleItem]) -> f64 {
-    if candles.is_empty() {
-        return 0.0;
-    }
-    candles.iter().map(|candle| candle.c).sum::<f64>() / candles.len() as f64
-}
-
-fn print_scalper_scan(loaded_cases: &[LoadedCase], risk_percent: f64, trade_fee_rate: Option<f64>) {
-    print_scalper_scan_with_tunings(
-        loaded_cases,
-        risk_percent,
-        trade_fee_rate,
-        scalper_scan_tunings(),
-        "no_scalper_candidates",
-    );
-}
-
-fn print_scalper_scan_with_tunings(
-    loaded_cases: &[LoadedCase],
-    risk_percent: f64,
-    trade_fee_rate: Option<f64>,
-    tunings: Vec<BtcEthLiquidityScalperBacktestTuning>,
-    empty_prefix: &str,
-) {
-    let risk = strategy_family_risk_config(risk_percent, trade_fee_rate);
-    let non_scalper_reports = Vec::new();
-    let scalper_cases = loaded_cases
-        .iter()
-        .filter(|loaded| matches!(loaded.case.family, StrategyFamily::Scalper))
-        .collect::<Vec<_>>();
-    let mut candidates = Vec::new();
-    let mut raw_candidates = Vec::new();
-    for tuning in tunings {
-        let mut scalper_reports = Vec::with_capacity(scalper_cases.len());
-        for loaded in &scalper_cases {
-            let result = run_loaded_case(loaded, risk, Some(tuning), None);
-            let report = build_report(loaded.case.label, &loaded.candles, &result);
-            scalper_reports.push(report);
-        }
-        let summary = summarize_scalper_candidate_reports(&non_scalper_reports, &scalper_reports);
-        let filtered_reason_counts = scalper_filter_counts(&non_scalper_reports, &scalper_reports);
-        raw_candidates.push(ScalperScanCandidateReport {
-            tuning,
-            entries: summary.entries,
-            wins: summary.wins,
-            losses: summary.losses,
-            win_rate_pct: summary.win_rate_pct,
-            pnl: summary.pnl,
-            max_drawdown_pct: summary.max_drawdown_pct,
-            trades_per_day: summary.trades_per_day,
-            early_win_rate_pct: summary.early_win_rate_pct,
-            early_pnl: summary.early_pnl,
-            late_win_rate_pct: summary.late_win_rate_pct,
-            late_pnl: summary.late_pnl,
-            remove_top5_pnl: summary.remove_top5_pnl,
-            filtered_reason_counts: filtered_reason_counts.clone(),
-        });
-        if short_scan_candidate_meets_constraints(&summary) {
-            candidates.push(ScalperScanCandidateReport {
-                tuning,
-                entries: summary.entries,
-                wins: summary.wins,
-                losses: summary.losses,
-                win_rate_pct: summary.win_rate_pct,
-                pnl: summary.pnl,
-                max_drawdown_pct: summary.max_drawdown_pct,
-                trades_per_day: summary.trades_per_day,
-                early_win_rate_pct: summary.early_win_rate_pct,
-                early_pnl: summary.early_pnl,
-                late_win_rate_pct: summary.late_win_rate_pct,
-                late_pnl: summary.late_pnl,
-                remove_top5_pnl: summary.remove_top5_pnl,
-                filtered_reason_counts,
-            });
-        }
-    }
-    sort_scalper_raw_candidates(&mut raw_candidates);
-    for candidate in raw_candidates.iter().take(5) {
-        println!(
-            "scalper_raw_top allow_short={} require_oi={} trend_fast={} trend_slow={} cooldown={} dir48={:.2} dir24={:.2} impulse_move={:.2} body={:.2} volume={:.2} resume_ext={:.2} break_prev={} r1={:.2} r2={:.2} entries={} wins={} losses={} win_rate={:.2}% pnl={:.4} max_dd={:.2}% trades_per_day={:.2} early_wr={:.2}% early_pnl={:.4} late_wr={:.2}% late_pnl={:.4} remove_top5_pnl={:.4} top_filters={}",
-            candidate.tuning.allow_short,
-            candidate.tuning.require_oi_confirmation,
-            candidate.tuning.trend_fast_window,
-            candidate.tuning.trend_slow_window,
-            candidate.tuning.cooldown_candles,
-            candidate.tuning.min_directional_ratio_48,
-            candidate.tuning.min_directional_ratio_24,
-            candidate.tuning.impulse_move_range_mult,
-            candidate.tuning.impulse_min_body_ratio,
-            candidate.tuning.impulse_min_volume_mult,
-            candidate.tuning.resume_extension_body_mult,
-            candidate.tuning.require_previous_extreme_break,
-            candidate.tuning.target_r_1,
-            candidate.tuning.target_r_2,
-            candidate.entries,
-            candidate.wins,
-            candidate.losses,
-            candidate.win_rate_pct,
-            candidate.pnl,
-            candidate.max_drawdown_pct,
-            candidate.trades_per_day,
-            candidate.early_win_rate_pct,
-            candidate.early_pnl,
-            candidate.late_win_rate_pct,
-            candidate.late_pnl,
-            candidate.remove_top5_pnl,
-            format_reason_counts(&candidate.filtered_reason_counts)
-        );
-    }
-    candidates.sort_by(|left, right| {
-        right
-            .trades_per_day
-            .total_cmp(&left.trades_per_day)
-            .then_with(|| right.pnl.total_cmp(&left.pnl))
-    });
-    if candidates.is_empty() {
-        println!(
-            "{empty_prefix} source=quant_core_sharded constraints=win_rate>=60,max_dd<15,pnl>0,remove_top5_pnl>0"
-        );
-        return;
-    }
-    for candidate in candidates.iter().take(20) {
-        println!(
-            "scalper_candidate allow_short={} require_oi={} trend_fast={} trend_slow={} cooldown={} dir48={:.2} dir24={:.2} impulse_move={:.2} body={:.2} volume={:.2} resume_ext={:.2} break_prev={} r1={:.2} r2={:.2} entries={} wins={} losses={} win_rate={:.2}% pnl={:.4} max_dd={:.2}% trades_per_day={:.2} early_wr={:.2}% early_pnl={:.4} late_wr={:.2}% late_pnl={:.4} remove_top5_pnl={:.4} top_filters={}",
-            candidate.tuning.allow_short,
-            candidate.tuning.require_oi_confirmation,
-            candidate.tuning.trend_fast_window,
-            candidate.tuning.trend_slow_window,
-            candidate.tuning.cooldown_candles,
-            candidate.tuning.min_directional_ratio_48,
-            candidate.tuning.min_directional_ratio_24,
-            candidate.tuning.impulse_move_range_mult,
-            candidate.tuning.impulse_min_body_ratio,
-            candidate.tuning.impulse_min_volume_mult,
-            candidate.tuning.resume_extension_body_mult,
-            candidate.tuning.require_previous_extreme_break,
-            candidate.tuning.target_r_1,
-            candidate.tuning.target_r_2,
-            candidate.entries,
-            candidate.wins,
-            candidate.losses,
-            candidate.win_rate_pct,
-            candidate.pnl,
-            candidate.max_drawdown_pct,
-            candidate.trades_per_day,
-            candidate.early_win_rate_pct,
-            candidate.early_pnl,
-            candidate.late_win_rate_pct,
-            candidate.late_pnl,
-            candidate.remove_top5_pnl,
-            format_reason_counts(&candidate.filtered_reason_counts)
-        );
-    }
-}
-
-/// Summarizes only scalper reports so short-stack profits cannot validate a weak scalper preset.
-fn summarize_scalper_candidate_reports(
-    _non_scalper_reports: &[CaseReport],
-    scalper_reports: &[CaseReport],
-) -> ScanCandidateReport {
-    summarize_isolated_candidate_reports(scalper_reports)
-}
-
-/// Summarizes only breakdown reports so exhaustion or scalper profits cannot validate it.
-fn summarize_breakdown_candidate_reports(
-    _non_breakdown_reports: &[CaseReport],
-    breakdown_reports: &[CaseReport],
-) -> ScanCandidateReport {
-    summarize_isolated_candidate_reports(breakdown_reports)
-}
-
-/// Summarizes only exhaustion reports so other short-stack presets cannot validate it.
-fn summarize_exhaustion_candidate_reports(
-    _non_exhaustion_reports: &[CaseReport],
-    exhaustion_reports: &[CaseReport],
-) -> ScanCandidateReport {
-    summarize_isolated_candidate_reports(exhaustion_reports)
-}
-
-/// Shared scan helper for strategy-family isolation; default combo reports stay separate.
-fn summarize_isolated_candidate_reports(candidate_reports: &[CaseReport]) -> ScanCandidateReport {
-    summarize_reports(candidate_reports)
-}
-
-fn merge_filtered_reason_counts(reports: &[CaseReport]) -> Vec<(String, usize)> {
-    let mut counts = BTreeMap::<String, usize>::new();
-    for report in reports {
-        for (reason, count) in &report.filtered_reason_counts {
-            if !is_blocking_filter_reason(reason) {
-                continue;
-            }
-            *counts.entry(reason.clone()).or_default() += *count;
-        }
-    }
-    let mut counts = counts.into_iter().collect::<Vec<_>>();
-    counts.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-    counts
-}
-
-fn scalper_filter_counts(
-    _non_scalper_reports: &[CaseReport],
-    scalper_reports: &[CaseReport],
-) -> Vec<(String, usize)> {
-    merge_filtered_reason_counts(scalper_reports)
-}
-
-fn is_blocking_filter_reason(reason: &str) -> bool {
-    !matches!(
-        reason,
-        "BTC_ETH_LIQUIDITY_SCALP_CONFIRMED" | "OI_NOT_CONFIRMED_REDUCE_SIZE"
-    ) && !reason.starts_with("STOP_PRICE:")
-}
-
-fn sort_scalper_raw_candidates(candidates: &mut [ScalperScanCandidateReport]) {
-    candidates.sort_by(|left, right| {
-        right
-            .trades_per_day
-            .total_cmp(&left.trades_per_day)
-            .then_with(|| right.win_rate_pct.total_cmp(&left.win_rate_pct))
-            .then_with(|| right.pnl.total_cmp(&left.pnl))
-    });
-}
-
-fn summarize_reports(reports: &[CaseReport]) -> ScanCandidateReport {
-    let wins = reports.iter().map(|report| report.wins).sum::<usize>();
-    let losses = reports.iter().map(|report| report.losses).sum::<usize>();
-    let pnl = reports.iter().map(|report| report.pnl).sum::<f64>();
-    let entries = reports.iter().map(|report| report.entries).sum::<usize>();
-    let max_drawdown_pct = reports
-        .iter()
-        .map(|report| report.max_drawdown_pct)
-        .fold(0.0, f64::max);
-    let combo_days = reports.iter().map(|report| report.days).fold(0.0, f64::max);
-    let mut trades = reports
-        .iter()
-        .flat_map(|report| report.trades.iter().cloned())
-        .collect::<Vec<_>>();
-    trades.sort_unstable_by(|left, right| left.open_time.cmp(&right.open_time));
-    let mid = trades.len() / 2;
-    let (early_win_rate_pct, early_pnl) = summarize_trade_debug(&trades[..mid]);
-    let (late_win_rate_pct, late_pnl) = summarize_trade_debug(&trades[mid..]);
-    let mut without_top5 = trades.clone();
-    without_top5.sort_unstable_by(|left, right| right.pnl.total_cmp(&left.pnl));
-    let remove_top5_pnl = without_top5
-        .iter()
-        .skip(5)
-        .map(|trade| trade.pnl)
-        .sum::<f64>();
-    ScanCandidateReport {
-        tuning: BearShortStackBacktestTuning::default(),
-        entries,
-        wins,
-        losses,
-        win_rate_pct: ratio_pct(wins, wins + losses),
-        pnl,
-        max_drawdown_pct,
-        trades_per_day: if combo_days > 0.0 {
-            entries as f64 / combo_days
-        } else {
-            0.0
-        },
-        early_win_rate_pct,
-        early_pnl,
-        late_win_rate_pct,
-        late_pnl,
-        remove_top5_pnl,
-    }
-}
-
-fn short_scan_candidate_meets_constraints(summary: &ScanCandidateReport) -> bool {
-    summary.win_rate_pct >= 60.0
-        && summary.max_drawdown_pct < 15.0
-        && summary.pnl > 0.0
-        && summary.remove_top5_pnl > 0.0
-}
-
-fn short_candidate_reports_meet_constraints(
-    summary: &ScanCandidateReport,
-    reports: &[CaseReport],
-) -> bool {
-    short_scan_candidate_meets_constraints(summary)
-        && reports.iter().all(|report| {
-            report.entries == 0
-                || (report.pnl > 0.0 && (report.entries < 10 || report.win_rate_pct >= 60.0))
-        })
-}
-
-fn format_case_reports(reports: &[CaseReport]) -> String {
-    let mut reports = reports.iter().collect::<Vec<_>>();
-    reports.sort_by(|left, right| {
-        right
-            .entries
-            .cmp(&left.entries)
-            .then_with(|| left.label.cmp(&right.label))
-    });
-    reports
-        .into_iter()
-        .map(|report| {
-            let (avg_win, avg_loss) = average_trade_pnls(&report.trades);
-            format!(
-                "{}:e{}/wr{:.2}/pnl{:.4}/aw{:.4}/al{:.4}",
-                report.label, report.entries, report.win_rate_pct, report.pnl, avg_win, avg_loss
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
-fn average_trade_pnls(trades: &[ClosedTradeDebug]) -> (f64, f64) {
-    let wins = trades
-        .iter()
-        .filter(|trade| trade.pnl > 0.0)
-        .map(|trade| trade.pnl)
-        .collect::<Vec<_>>();
-    let losses = trades
-        .iter()
-        .filter(|trade| trade.pnl < 0.0)
-        .map(|trade| trade.pnl)
-        .collect::<Vec<_>>();
-    (average_or_zero(&wins), average_or_zero(&losses))
-}
-
-fn average_or_zero(values: &[f64]) -> f64 {
-    if values.is_empty() {
-        0.0
-    } else {
-        values.iter().sum::<f64>() / values.len() as f64
-    }
-}
-
-fn summarize_trade_debug(trades: &[ClosedTradeDebug]) -> (f64, f64) {
-    let wins = trades.iter().filter(|trade| trade.pnl > 0.0).count();
-    let losses = trades.iter().filter(|trade| trade.pnl < 0.0).count();
-    let pnl = trades.iter().map(|trade| trade.pnl).sum::<f64>();
-    (ratio_pct(wins, wins + losses), pnl)
 }
 
 #[cfg(test)]
