@@ -67,7 +67,7 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
             AND current_price IS NOT NULL
             AND lower(exchange) = 'okx'
             AND upper(replace(symbol, '-', '')) NOT LIKE 'LINKUSDT%'
-            AND COALESCE(live_handoff_state, 'pending') NOT IN ('created', 'expired')
+            AND COALESCE(live_handoff_state, 'pending') = 'pending'
             AND ($2::bigint IS NULL OR id = $2)
             AND detected_at >= NOW() - ($3::text || ' hours')::interval
         ),
@@ -191,15 +191,15 @@ mod tests {
     }
 
     #[test]
-    fn candidate_scan_sql_skips_terminal_live_handoff_states() {
+    fn candidate_scan_sql_only_consumes_pending_live_handoff_states() {
         let sql = market_velocity_live_candidate_events_sql();
         assert!(
             sql.contains("live_handoff_state"),
             "candidate scan must read the trade handoff state separately from notification_state"
         );
         assert!(
-            sql.contains("NOT IN ('created', 'expired')"),
-            "created and expired candidates must not be reprocessed forever: {sql}"
+            sql.contains("COALESCE(live_handoff_state, 'pending') = 'pending'"),
+            "blocked, created, expired and failed candidates must not be reprocessed forever: {sql}"
         );
     }
 }
