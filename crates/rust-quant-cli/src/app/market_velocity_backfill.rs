@@ -18,6 +18,7 @@ const DEFAULT_BATCH_SIZE: usize = 500;
 const DEFAULT_REQUEST_SLEEP_MS: u64 = 500;
 const OKX_RATE_LIMIT_BACKOFF_MS: u64 = 2_000;
 const OKX_RATE_LIMIT_MAX_RETRIES: usize = 3;
+const OKX_MISSING_INSTRUMENT_CODE: &str = "51001";
 const CANDLE_1M_MS: i64 = 60 * 1_000;
 const CANDLE_5M_MS: i64 = 5 * 60 * 1_000;
 const CANDLE_15M_MS: i64 = 15 * 60 * 1_000;
@@ -319,7 +320,7 @@ pub async fn run_market_velocity_backfill(
             total,
             symbol
         );
-        match backfill_symbol_candles(&client, &config, symbol, start_ms, end_ms).await {
+        match backfill_symbol_candles(&pool, &client, &config, symbol, start_ms, end_ms).await {
             Ok(symbol_report) => {
                 report.symbols_attempted += 1;
                 report.candles_fetched += symbol_report.fetched;
@@ -353,13 +354,14 @@ pub async fn run_market_velocity_backfill(
 }
 /// 同步 行情与市场数据 数据，保证本地状态与外部事实源保持一致。
 async fn backfill_symbol_candles(
+    pool: &PgPool,
     client: &Client,
     config: &MarketVelocityBackfillConfig,
     symbol: &str,
     start_ms: i64,
     end_ms: i64,
 ) -> Result<SymbolBackfillReport> {
-    let candles = fetch_okx_history_candles(
+    let candles = match fetch_okx_history_candles(
         client,
         &config.okx_rest_base,
         symbol,
@@ -369,7 +371,23 @@ async fn backfill_symbol_candles(
         config.page_limit,
         config.request_sleep_ms,
     )
-    .await?;
+    .await
+    {
+        Ok(candles) => candles,
+        Err(error) => {
+            if is_okx_missing_instrument_error(&error) {
+                let rows = mark_okx_exchange_symbol_deleted(pool, symbol)
+                    .await
+                    .with_context(|| format!("mark OKX exchange symbol deleted: {symbol}"))?;
+                warn!(
+                    symbol,
+                    rows_affected = rows,
+                    "marked OKX exchange symbol deleted after missing instrument response"
+                );
+            }
+            return Err(error);
+        }
+    };
     let fetched = candles.len();
     let mut upserted = 0;
     if !config.dry_run {
@@ -407,12 +425,11 @@ pub async fn fetch_okx_history_candles(
         let url = build_okx_history_candles_url(okx_rest_base, symbol, okx_bar, after_ms, limit)?;
         let payload = request_okx_history_candles_page(client, url, symbol).await?;
         if payload.code != "0" {
-            bail!(
-                "OKX history-candles returned code={} msg={} symbol={}",
-                payload.code,
-                payload.msg,
+            bail!(okx_history_candles_api_error(
+                &payload.code,
+                &payload.msg,
                 symbol
-            );
+            ));
         }
         if payload.data.is_empty() {
             break;
@@ -487,11 +504,57 @@ async fn request_okx_history_candles_page(
 
     unreachable!("OKX history-candles retry loop always returns on the final attempt")
 }
+/// 组装 OKX K 线接口错误文本，并保留 code/msg/symbol 供上层识别可落库的永久不可用交易对。
+fn okx_history_candles_api_error(code: &str, msg: &str, symbol: &str) -> String {
+    format!("OKX history-candles returned code={code} msg={msg} symbol={symbol}")
+}
+
+/// 判断 OKX 是否明确返回交易对不存在；这是永久阻塞，应写回 DB 状态避免反复重试。
+pub fn is_okx_missing_instrument_error(error: &anyhow::Error) -> bool {
+    let error_text = format!("{error:#}");
+    error_text.contains(&format!("code={OKX_MISSING_INSTRUMENT_CODE}"))
+        && error_text.to_ascii_lowercase().contains("instrument")
+}
+
+/// 标记 OKX 永续交易对为删除状态，后续候选查询只读取 trading/live 可用状态。
+pub async fn mark_okx_exchange_symbol_deleted(pool: &PgPool, symbol: &str) -> Result<u64> {
+    let result = sqlx::query(mark_okx_exchange_symbol_deleted_sql())
+        .bind(symbol.trim().to_ascii_uppercase())
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
+/// 集中维护 OKX 交易对删除标记 SQL，便于 backfill 与 live handoff 共用同一 contract。
+fn mark_okx_exchange_symbol_deleted_sql() -> &'static str {
+    r#"
+        UPDATE exchange_symbols
+        SET status = 'deleted',
+            updated_at = NOW()
+        WHERE exchange = 'okx'
+          AND market_type = 'perpetual'
+          AND (
+            upper(exchange_symbol) = upper($1)
+            OR upper(normalized_symbol) = upper($1)
+          )
+        "#
+}
+
 /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 pub async fn load_market_velocity_backfill_symbols(
     pool: &PgPool,
     require_4h: bool,
 ) -> Result<Vec<String>> {
+    let query = load_market_velocity_backfill_symbols_sql(require_4h);
+    let rows = sqlx::query(&query).fetch_all(pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("symbol"))
+        .collect())
+}
+
+/// 生成 Market Velocity 补 K 线候选查询；只允许 OKX 当前可交易的永续合约进入补数链路。
+fn load_market_velocity_backfill_symbols_sql(require_4h: bool) -> String {
     let join_4h = if require_4h {
         r#"
         JOIN (
@@ -504,7 +567,7 @@ pub async fn load_market_velocity_backfill_symbols(
     } else {
         ""
     };
-    let query = format!(
+    format!(
         r#"
         WITH candidates AS (
           SELECT DISTINCT upper(symbol) AS symbol
@@ -515,18 +578,21 @@ pub async fn load_market_velocity_backfill_symbols(
             AND lower(price_direction) = 'up'
             AND current_price IS NOT NULL
             AND NOT (new_rank <= 10 AND COALESCE(price_change_pct, 0) >= 8.0)
+        ),
+        available_okx_symbols AS (
+          SELECT DISTINCT upper(normalized_symbol) AS symbol
+          FROM exchange_symbols
+          WHERE exchange = 'okx'
+            AND market_type = 'perpetual'
+            AND lower(status) IN ('trading', 'live')
         )
         SELECT candidates.symbol
         FROM candidates
+        JOIN available_okx_symbols USING (symbol)
         {join_4h}
         ORDER BY candidates.symbol
         "#
-    );
-    let rows = sqlx::query(&query).fetch_all(pool).await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| row.get::<String, _>("symbol"))
-        .collect())
+    )
 }
 /// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_okx_history_candles_url(
@@ -880,5 +946,53 @@ mod tests {
     fn max_history_pages_has_buffer_for_60_days_of_4h_candles() {
         let pages = max_history_pages(0, 60 * 24 * 60 * 60 * 1_000, 4 * 60 * 60 * 1_000, 100);
         assert_eq!(pages, 11);
+    }
+    #[test]
+    fn backfill_symbol_scan_uses_only_active_okx_symbols() {
+        let sql = load_market_velocity_backfill_symbols_sql(false);
+        assert!(
+            sql.contains("exchange_symbols"),
+            "backfill must consult exchange_symbols before requesting OKX candles: {sql}"
+        );
+        assert!(
+            sql.contains("available_okx_symbols"),
+            "backfill should use a dedicated available-symbol CTE before selecting candidates: {sql}"
+        );
+        let normalized_sql = sql.to_ascii_lowercase();
+        assert!(
+            normalized_sql.contains("lower(status) in ('trading', 'live')"),
+            "deleted or unsupported OKX symbols must be excluded by status: {sql}"
+        );
+        assert!(
+            sql.contains("JOIN available_okx_symbols USING (symbol)"),
+            "unavailable OKX symbols must not reach history-candles requests: {sql}"
+        );
+    }
+
+    #[test]
+    fn okx_51001_is_missing_instrument_error() {
+        let error = anyhow!(okx_history_candles_api_error(
+            "51001",
+            "Instrument ID doesn't exist.",
+            "IP-USDT-SWAP"
+        ));
+        assert!(is_okx_missing_instrument_error(&error));
+        let transient = anyhow!(okx_history_candles_api_error(
+            "50011",
+            "Rate limit reached.",
+            "BTC-USDT-SWAP"
+        ));
+        assert!(!is_okx_missing_instrument_error(&transient));
+    }
+
+    #[test]
+    fn okx_missing_instrument_mark_sql_sets_deleted_status() {
+        let sql = mark_okx_exchange_symbol_deleted_sql().to_ascii_lowercase();
+        assert!(sql.contains("update exchange_symbols"));
+        assert!(sql.contains("set status = 'deleted'"));
+        assert!(sql.contains("exchange = 'okx'"));
+        assert!(sql.contains("market_type = 'perpetual'"));
+        assert!(sql.contains("upper(exchange_symbol) = upper($1)"));
+        assert!(sql.contains("upper(normalized_symbol) = upper($1)"));
     }
 }

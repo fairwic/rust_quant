@@ -1,4 +1,6 @@
-use super::super::market_velocity_backfill::fetch_okx_history_candles;
+use super::super::market_velocity_backfill::{
+    fetch_okx_history_candles, is_okx_missing_instrument_error, mark_okx_exchange_symbol_deleted,
+};
 use super::MarketVelocityLiveHandoffConfig;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
@@ -122,9 +124,14 @@ pub(super) async fn load_market_velocity_live_entry_candles(
                     }
                 });
             };
-            let fetch_result =
-                fetch_market_velocity_latest_entry_candles(client, config, symbol, limit.max(1))
-                    .await;
+            let fetch_result = fetch_market_velocity_latest_entry_candles(
+                pool,
+                client,
+                config,
+                symbol,
+                limit.max(1),
+            )
+            .await;
             if config.entry_candle_request_sleep_ms > 0 {
                 sleep(Duration::from_millis(config.entry_candle_request_sleep_ms)).await;
             }
@@ -160,6 +167,7 @@ pub(super) async fn load_market_velocity_live_entry_candles(
 }
 /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_market_velocity_latest_entry_candles(
+    pool: &PgPool,
     client: &reqwest::Client,
     config: &MarketVelocityLiveHandoffConfig,
     symbol: &str,
@@ -188,6 +196,20 @@ async fn fetch_market_velocity_latest_entry_candles(
     {
         Ok(candles) => candles,
         Err(error) => {
+            if is_okx_missing_instrument_error(&error) {
+                match mark_okx_exchange_symbol_deleted(pool, symbol).await {
+                    Ok(rows) => warn!(
+                        symbol,
+                        rows_affected = rows,
+                        "marked OKX exchange symbol deleted after on-demand missing instrument response"
+                    ),
+                    Err(mark_error) => warn!(
+                        symbol,
+                        error = %mark_error,
+                        "failed to mark OKX exchange symbol deleted after on-demand missing instrument response"
+                    ),
+                }
+            }
             bail!("on-demand fetch latest 15m candles failed: symbol={symbol}: {error:#}");
         }
     };

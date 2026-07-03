@@ -30,11 +30,18 @@ pub(super) async fn load_market_velocity_live_candidate_events(
 /// 提供市场动量live候选事件SQL的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_live_candidate_events_sql() -> &'static str {
     r#"
-        WITH eligible_events AS (
+        WITH available_okx_symbols AS (
+          SELECT DISTINCT upper(normalized_symbol) AS symbol
+          FROM exchange_symbols
+          WHERE exchange = 'okx'
+            AND market_type = 'perpetual'
+            AND lower(status) IN ('trading', 'live')
+        ),
+        eligible_events AS (
           SELECT
-            id,
-            lower(exchange) AS exchange,
-            upper(symbol) AS symbol,
+            market_rank_events.id,
+            lower(market_rank_events.exchange) AS exchange,
+            upper(market_rank_events.symbol) AS symbol,
             event_type,
             timeframe,
             old_rank,
@@ -61,14 +68,16 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
             source,
             notification_state
           FROM market_rank_events
+          JOIN available_okx_symbols
+            ON available_okx_symbols.symbol = upper(market_rank_events.symbol)
           WHERE event_type IN ('rank_velocity', 'top_entry')
             AND delta_rank >= $1
             AND lower(price_direction) = 'up'
             AND current_price IS NOT NULL
-            AND lower(exchange) = 'okx'
-            AND upper(replace(symbol, '-', '')) NOT LIKE 'LINKUSDT%'
+            AND lower(market_rank_events.exchange) = 'okx'
+            AND upper(replace(market_rank_events.symbol, '-', '')) NOT LIKE 'LINKUSDT%'
             AND COALESCE(live_handoff_state, 'pending') = 'pending'
-            AND ($2::bigint IS NULL OR id = $2)
+            AND ($2::bigint IS NULL OR market_rank_events.id = $2)
             AND detected_at >= NOW() - ($3::text || ' hours')::interval
         ),
         earliest_per_symbol AS (
@@ -200,6 +209,28 @@ mod tests {
         assert!(
             sql.contains("COALESCE(live_handoff_state, 'pending') = 'pending'"),
             "blocked, created, expired and failed candidates must not be reprocessed forever: {sql}"
+        );
+    }
+
+    #[test]
+    fn candidate_scan_sql_uses_only_active_okx_symbols() {
+        let sql = market_velocity_live_candidate_events_sql();
+        assert!(
+            sql.contains("exchange_symbols"),
+            "live handoff must consult exchange_symbols before refreshing entry candles: {sql}"
+        );
+        assert!(
+            sql.contains("available_okx_symbols"),
+            "live handoff should use a dedicated available-symbol CTE before selecting candidates: {sql}"
+        );
+        let normalized_sql = sql.to_ascii_lowercase();
+        assert!(
+            normalized_sql.contains("lower(status) in ('trading', 'live')"),
+            "deleted or unsupported OKX symbols must be excluded by status: {sql}"
+        );
+        assert!(
+            sql.contains("JOIN available_okx_symbols"),
+            "unavailable OKX symbols must not reach entry candle refresh or task handoff: {sql}"
         );
     }
 }
