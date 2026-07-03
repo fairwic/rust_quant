@@ -107,6 +107,9 @@ pub fn market_velocity_paper_strategy_preset_manifest(
 
 fn human_label_for_preset(preset: &str) -> &str {
     match preset {
+        "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1" => {
+            "Market Velocity 0.0375SL 1.7R reclaim/MA/pullback delta18-42 pchg5-10 v1"
+        }
         "research_momentum_0375sl_27r_reclaim13_22_v1" => {
             "Market Velocity 0.0375SL 2.7R reclaim13-22 v1"
         }
@@ -118,6 +121,9 @@ fn human_label_for_preset(preset: &str) -> &str {
         }
         "research_momentum_0375sl_20r_reclaim_fvgwait5_delta20_40_pchg5_12_v1" => {
             "Market Velocity 0.0375SL 2.0R reclaim fvg wait5 delta20-40 pchg5-12 v1"
+        }
+        "research_momentum_0375sl_20r_reclaim_delta13_72_pchg5_v1" => {
+            "Market Velocity 0.0375SL 2.0R reclaim delta13-72 pchg5 v1"
         }
         "research_momentum_0375sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1" => {
             "Market Velocity 0.0375SL 2.0R breakout reclaim fvg wait10 delta20-40 pchg5-12 v1"

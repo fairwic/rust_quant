@@ -415,32 +415,32 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     }
 }
 #[test]
-fn market_velocity_live_signal_defaults_use_latest_hybrid_research_preset() {
+fn market_velocity_live_signal_defaults_use_stable_production_preset() {
     let compose = read_repo_file("docker-compose.deploy.yml");
     for required in [
         "MARKET_VELOCITY_SIGNAL_DISPATCH_MODE: ${MARKET_VELOCITY_SIGNAL_DISPATCH_MODE:-disabled}",
-        "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-20}",
-        "MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK:-40}",
+        "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-18}",
+        "MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK:-42}",
         "MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT: ${MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT:-5.0}",
         "MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT: ${MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT:-10.0}",
         "MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT:-0.0}",
-        "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT: ${MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT:-0.04}",
-        "MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R: ${MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R:-1.8}",
+        "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT: ${MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT:-0.0375}",
+        "MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R: ${MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R:-1.7}",
         "MARKET_VELOCITY_SIGNAL_MAX_HOLDING_HOURS: ${MARKET_VELOCITY_SIGNAL_MAX_HOLDING_HOURS:-48}",
-        "MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET: ${MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET:-research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2}",
-        "MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION: ${MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION:-rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2}",
-        "MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT:-5.0}",
-        "MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO: ${MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO:-1.1}",
-        "MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT: ${MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT:-3.0}",
+        "MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET: ${MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET:-momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION: ${MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION:-rank_radar_4h15m_mom0375_17r_rcm_ma_pb_d18_42_p5_10_v1}",
+        "MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT:-5.5}",
+        "MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO: ${MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO:-1.0}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT: ${MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT:-}",
         "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_TOLERANCE_PCT: ${MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_TOLERANCE_PCT:-0.3}",
-        "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_AFTER_SIGNAL: ${MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_AFTER_SIGNAL:-true}",
-        "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MAX_WAIT_CANDLES: ${MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MAX_WAIT_CANDLES:-1}",
-        "MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE: ${MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE:-m15_impulse_retrace}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_AFTER_SIGNAL: ${MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_AFTER_SIGNAL:-false}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MAX_WAIT_CANDLES: ${MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_MAX_WAIT_CANDLES:-8}",
+        "MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE: ${MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE:-off}",
         "MARKET_VELOCITY_SIGNAL_FVG_LOOKBACK_CANDLES: ${MARKET_VELOCITY_SIGNAL_FVG_LOOKBACK_CANDLES:-40}",
         "MARKET_VELOCITY_SIGNAL_FVG_MAX_WAIT_CANDLES: ${MARKET_VELOCITY_SIGNAL_FVG_MAX_WAIT_CANDLES:-24}",
         "MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_FILL_PCT: ${MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_FILL_PCT:-20.0}",
         "MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_MIN_WAIT_CANDLES: ${MARKET_VELOCITY_SIGNAL_FVG_IMPULSE_RETRACE_MIN_WAIT_CANDLES:-0}",
-        "MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST: ${MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST:-reclaim_ema}",
+        "MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST: ${MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST:-reclaim_ema,reclaim_ma,pullback_hold_ema}",
         "MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH: ${MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH:-true}",
         "MARKET_VELOCITY_ENTRY_CANDLE_OKX_REST_BASE: ${MARKET_VELOCITY_ENTRY_CANDLE_OKX_REST_BASE:-https://www.okx.com}",
         "MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS: ${MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS:-0}",
@@ -491,7 +491,7 @@ fn market_velocity_live_signal_defaults_use_latest_hybrid_research_preset() {
         !compose.contains(
             "MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET: ${MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET:-momentum_03sl_20r_v5}"
         ),
-        "deploy compose must not keep the legacy momentum live preset after hybrid promotion"
+        "deploy compose must not keep the legacy momentum live preset after stable promotion"
     );
     assert!(
         !compose.contains(
@@ -512,6 +512,12 @@ fn market_velocity_live_signal_defaults_use_latest_hybrid_research_preset() {
             "MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R: ${MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R:-2.4}"
         ),
         "deploy compose must not keep the old 2.4R take-profit default for Market Velocity live signal"
+    );
+    assert!(
+        !compose.contains(
+            "MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R: ${MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R:-1.8}"
+        ),
+        "deploy compose must not keep the old 1.8R take-profit default for Market Velocity live signal"
     );
     assert!(
         !compose.contains(
@@ -539,15 +545,15 @@ fn market_velocity_live_signal_defaults_use_latest_hybrid_research_preset() {
     );
     assert!(
         !compose.contains(
-            "MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT:-4.0}"
+            "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK:-20}"
         ),
-        "deploy compose must not revert to the low-trade 4h distance gate"
+        "deploy compose must not keep the older hybrid rank delta gate"
     );
     assert!(
         !compose.contains(
-            "MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE: ${MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE:-off}"
+            "MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT:-4.0}"
         ),
-        "deploy compose must not leave the live handoff runtime on the legacy non-FVG shell"
+        "deploy compose must not revert to the low-trade 4h distance gate"
     );
     assert!(
         !compose.contains("MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK"),
@@ -573,7 +579,7 @@ fn market_velocity_runtime_strategy_loader_prefers_promoted_preset_over_legacy_d
 }
 
 #[test]
-fn market_velocity_paper_observation_defaults_use_latest_hybrid_research_preset() {
+fn market_velocity_paper_observation_defaults_use_stable_production_preset() {
     let compose = read_repo_file("docker-compose.deploy.yml");
     let observation_block =
         compose_service_block(&compose, "quant-core-market-velocity-paper-observation");
@@ -581,8 +587,7 @@ fn market_velocity_paper_observation_defaults_use_latest_hybrid_research_preset(
         &compose,
         "quant-core-market-velocity-paper-observation-scheduler",
     );
-    let expected_preset =
-        "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2";
+    let expected_preset = "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1";
 
     for service_block in [&observation_block, &scheduler_block] {
         assert!(
@@ -592,7 +597,7 @@ fn market_velocity_paper_observation_defaults_use_latest_hybrid_research_preset(
         assert!(
             service_block.contains("--paper-strategy-preset")
                 && service_block.contains(expected_preset),
-            "paper observation services must default to the latest verified hybrid reclaim FVG preset"
+            "paper observation services must default to the stable reclaim/MA/pullback preset"
         );
         assert!(
             !service_block.contains("momentum_03sl_20r_v5"),

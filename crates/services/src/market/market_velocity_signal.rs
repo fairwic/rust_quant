@@ -19,25 +19,26 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tracing::info;
 const ENTRY_TRIGGER_FILTER_VERSION: &str = "entry_trigger_allowlist_v1";
-const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] = &["reclaim_ema"];
+const DEFAULT_ENTRY_TRIGGER_ALLOWLIST: &[&str] =
+    &["reclaim_ema", "reclaim_ma", "pullback_hold_ema"];
 const DEFAULT_SYMBOL_BLOCKLIST: &[&str] = &[];
 const DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET: &str =
-    "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2";
+    "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1";
 const DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION: &str =
-    "rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2";
-const DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE: &str = "rank_radar_4h15m_hybrid_fvg_retest";
-const DEFAULT_MIN_DELTA_RANK: i32 = 20;
-const DEFAULT_MAX_DELTA_RANK: i32 = 40;
+    "rank_radar_4h15m_mom0375_17r_rcm_ma_pb_d18_42_p5_10_v1";
+const DEFAULT_MARKET_VELOCITY_ENTRY_FILTER_MODE: &str = "rank_radar_4h15m_reclaim_ma_pullback";
+const DEFAULT_MIN_DELTA_RANK: i32 = 18;
+const DEFAULT_MAX_DELTA_RANK: i32 = 42;
 const DEFAULT_MIN_PRICE_CHANGE_PCT: f64 = 5.0;
 const DEFAULT_MAX_PRICE_CHANGE_PCT: f64 = 10.0;
-const DEFAULT_STOP_LOSS_PCT: f64 = 0.04;
-const DEFAULT_TAKE_PROFIT_R: f64 = 1.8;
+const DEFAULT_STOP_LOSS_PCT: f64 = 0.0375;
+const DEFAULT_TAKE_PROFIT_R: f64 = 1.7;
 const DEFAULT_MAX_HOLDING_HOURS: u32 = 48;
-const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 5.0;
-const DEFAULT_ENTRY_MIN_VOLUME_RATIO: f64 = 1.1;
-const DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT: f64 = 3.0;
-const DEFAULT_ENTRY_RETEST_AFTER_SIGNAL: bool = true;
-const DEFAULT_ENTRY_RETEST_MAX_WAIT_CANDLES: usize = 1;
+const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 5.5;
+const DEFAULT_ENTRY_MIN_VOLUME_RATIO: f64 = 1.0;
+const DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT: Option<f64> = None;
+const DEFAULT_ENTRY_RETEST_AFTER_SIGNAL: bool = false;
+const DEFAULT_ENTRY_RETEST_MAX_WAIT_CANDLES: usize = 8;
 const DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT: f64 = 0.0;
 const DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE: &str = "live_execution_authorized";
 const DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED: bool = true;
@@ -221,13 +222,13 @@ impl Default for MarketVelocityStrategySignalConfig {
             entry_confirmation_fetch_limit: 80,
             entry_max_average_distance_pct: DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT,
             entry_min_volume_ratio: DEFAULT_ENTRY_MIN_VOLUME_RATIO,
-            entry_max_signal_pullback_pct: Some(DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT),
+            entry_max_signal_pullback_pct: DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT,
             entry_retest_tolerance_pct: 0.3,
             entry_retest_after_signal: DEFAULT_ENTRY_RETEST_AFTER_SIGNAL,
             entry_retest_max_wait_candles: DEFAULT_ENTRY_RETEST_MAX_WAIT_CANDLES,
             entry_retest_min_entry_open_gap_pct: None,
             entry_retest_open_fade_min_volume_ratio: None,
-            fvg_entry_mode: MarketVelocityFvgEntryMode::M15ImpulseRetrace,
+            fvg_entry_mode: MarketVelocityFvgEntryMode::Off,
             fvg_lookback_candles: 40,
             fvg_max_wait_candles: 24,
             fvg_impulse_retrace_fill_pct: 20.0,
@@ -320,7 +321,7 @@ impl MarketVelocityStrategySignalConfig {
             entry_max_signal_pullback_pct: parse_env_optional_f64(
                 "MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT",
             )?
-            .or(Some(DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT)),
+            .or(DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT),
             entry_retest_tolerance_pct: parse_env_f64(
                 "MARKET_VELOCITY_SIGNAL_ENTRY_RETEST_TOLERANCE_PCT",
                 0.3,
@@ -341,7 +342,7 @@ impl MarketVelocityStrategySignalConfig {
             )?,
             fvg_entry_mode: parse_env_fvg_entry_mode(
                 "MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE",
-                MarketVelocityFvgEntryMode::M15ImpulseRetrace,
+                MarketVelocityFvgEntryMode::Off,
             )?,
             fvg_lookback_candles: parse_env_usize(
                 "MARKET_VELOCITY_SIGNAL_FVG_LOOKBACK_CANDLES",
@@ -768,7 +769,7 @@ pub fn market_velocity_strategy_signal_needs_entry_confirmation(
 pub fn market_velocity_signal_direct_dispatch_allowed(
     config: &MarketVelocityStrategySignalConfig,
 ) -> bool {
-    !config.hybrid_live_entry_enabled()
+    !config.require_entry_confirmation && !config.hybrid_live_entry_enabled()
 }
 /// 提供市场动量执行task配置from环境变量的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {

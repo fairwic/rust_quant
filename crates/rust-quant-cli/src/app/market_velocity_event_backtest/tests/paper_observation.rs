@@ -4,19 +4,38 @@ use super::super::{
     MarketVelocityPaperOutcomeSink, MarketVelocityStopLossMode, StopReentryMode,
 };
 use serde_json::Value;
+
+const STABLE_PRODUCTION_PRESET: &str =
+    "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1";
+const STABLE_PRODUCTION_ENTRY_RULE_VERSION: &str =
+    "rank_radar_4h15m_mom0375_17r_rcm_ma_pb_d18_42_p5_10_v1";
+
 #[test]
 fn paper_observation_args_force_web_sink_and_production_entry_trigger_allowlist() {
     let args = parse_paper_observation_args_from([] as [&str; 0]).unwrap();
     assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
     assert_eq!(
         args.entry_trigger_allowlist,
-        vec!["breakout_previous_high", "reclaim_ema"]
+        vec!["reclaim_ema", "reclaim_ma", "pullback_hold_ema"]
     );
     assert!(args.entry_trigger_blocklist.is_empty());
     assert_eq!(
         args.paper_outcome_entry_rule_version,
-        "rank_radar_4h_trend_15m_timing_v1"
+        STABLE_PRODUCTION_ENTRY_RULE_VERSION
     );
+    assert_eq!(args.stop_loss_pct, 0.0375);
+    assert_eq!(args.target_rs, vec![1.7]);
+    assert_eq!(args.entry_max_distance_pct, 5.5);
+    assert_eq!(args.entry_min_volume_ratio, 1.0);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 18);
+    assert_eq!(args.max_delta_rank, Some(42));
+    assert_eq!(args.min_price_change_pct, Some(5.0));
+    assert_eq!(args.max_price_change_pct, Some(10.0));
+    assert_eq!(args.entry_max_signal_pullback_pct, None);
+    assert!(!args.entry_retest_after_signal);
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::Off);
     assert!(
         args.symbol_blocklist.is_empty(),
         "production paper observation must not default to a historical symbol blocklist"
@@ -50,6 +69,36 @@ fn paper_observation_args_apply_momentum_profit_preset() {
     assert_eq!(args.profit_protect_after_r, None);
     assert_eq!(args.runner_target_r, None);
 }
+
+#[test]
+fn paper_observation_args_apply_stable_production_preset() {
+    let args =
+        parse_paper_observation_args_from(["--paper-strategy-preset", STABLE_PRODUCTION_PRESET])
+            .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
+    assert_eq!(
+        args.entry_trigger_allowlist,
+        vec!["reclaim_ema", "reclaim_ma", "pullback_hold_ema"]
+    );
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        STABLE_PRODUCTION_ENTRY_RULE_VERSION
+    );
+    assert_eq!(args.stop_loss_pct, 0.0375);
+    assert_eq!(args.target_rs, vec![1.7]);
+    assert_eq!(args.entry_max_distance_pct, 5.5);
+    assert_eq!(args.entry_min_volume_ratio, 1.0);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 18);
+    assert_eq!(args.max_delta_rank, Some(42));
+    assert_eq!(args.min_price_change_pct, Some(5.0));
+    assert_eq!(args.max_price_change_pct, Some(10.0));
+    assert_eq!(args.entry_max_signal_pullback_pct, None);
+    assert!(!args.entry_retest_after_signal);
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::Off);
+}
+
 #[test]
 fn paper_observation_args_apply_reclaim_midrank_research_preset() {
     let args = parse_paper_observation_args_from([
@@ -752,6 +801,7 @@ fn paper_observation_args_apply_breakout_reclaim_fvg_wait10_minwait1_04sl_delta1
 fn paper_observation_entry_rule_versions_fit_quant_web_contract() {
     let presets = [
         "momentum_03sl_20r_v5",
+        "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1",
         "research_momentum_0375sl_27r_reclaim13_22_v1",
         "research_momentum_0375sl_26r_gap05_retest03_reclaim13_22_v1",
         "research_momentum_0375sl_15r_signal_retest2_delta24_34_pchg5_10_v1",
@@ -2004,8 +2054,14 @@ fn paper_observation_command_defaults_to_one_shot() {
     );
     assert_eq!(
         command.backtest_args.entry_trigger_allowlist,
-        vec!["breakout_previous_high", "reclaim_ema"]
+        vec!["reclaim_ema", "reclaim_ma", "pullback_hold_ema"]
     );
+    assert_eq!(
+        command.backtest_args.paper_outcome_entry_rule_version,
+        STABLE_PRODUCTION_ENTRY_RULE_VERSION
+    );
+    assert_eq!(command.backtest_args.stop_loss_pct, 0.0375);
+    assert_eq!(command.backtest_args.target_rs, vec![1.7]);
     assert_eq!(command.loop_interval_seconds, None);
 }
 #[test]

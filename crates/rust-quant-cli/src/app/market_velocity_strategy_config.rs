@@ -147,23 +147,15 @@ fn select_default_market_velocity_signal_config_row(
     rows: Vec<MarketVelocityStrategyConfigRow>,
     preferred_preset: &str,
 ) -> Option<MarketVelocityStrategyConfigRow> {
-    let mut latest_row = None;
-    let mut default_version_row = None;
     for row in rows {
-        if latest_row.is_none() {
-            latest_row = Some(row.clone());
-        }
         if config_strategy_preset(&row.config)
             .map(|preset| preset.eq_ignore_ascii_case(preferred_preset))
             .unwrap_or(false)
         {
             return Some(row);
         }
-        if default_version_row.is_none() && row.version.trim().eq_ignore_ascii_case("default") {
-            default_version_row = Some(row);
-        }
     }
-    default_version_row.or(latest_row)
+    None
 }
 
 fn config_strategy_preset(config: &Value) -> Option<&str> {
@@ -195,10 +187,10 @@ mod tests {
     }
 
     #[test]
-    fn preferred_market_velocity_signal_strategy_preset_defaults_to_promoted_hybrid_preset() {
+    fn preferred_market_velocity_signal_strategy_preset_defaults_to_stable_production_preset() {
         assert_eq!(
             preferred_market_velocity_signal_strategy_preset_from_value(None),
-            "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2"
+            "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1"
         );
     }
 
@@ -207,30 +199,27 @@ mod tests {
         let rows = vec![
             strategy_row("default", "momentum_03sl_20r_v5"),
             strategy_row(
-                "research_hybrid_v2",
-                "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2",
+                "stable_production_v1",
+                "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1",
             ),
         ];
 
         let selected = select_default_market_velocity_signal_config_row(
             rows,
-            "research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2",
+            "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1",
         )
         .expect("selector should pick a row");
 
-        assert_eq!(selected.version, "research_hybrid_v2");
+        assert_eq!(selected.version, "stable_production_v1");
     }
 
     #[test]
-    fn select_default_market_velocity_signal_config_row_falls_back_to_default_version() {
+    fn select_default_market_velocity_signal_config_row_ignores_legacy_default_version() {
         let rows = vec![
             strategy_row("default", "momentum_03sl_20r_v5"),
             strategy_row("research_hybrid_v2", "different_preset"),
         ];
 
-        let selected = select_default_market_velocity_signal_config_row(rows, "missing_preset")
-            .expect("selector should pick a row");
-
-        assert_eq!(selected.version, "default");
+        assert!(select_default_market_velocity_signal_config_row(rows, "missing_preset").is_none());
     }
 }
