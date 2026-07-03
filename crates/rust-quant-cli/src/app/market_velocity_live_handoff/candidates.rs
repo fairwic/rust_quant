@@ -67,13 +67,14 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
             AND current_price IS NOT NULL
             AND lower(exchange) = 'okx'
             AND upper(replace(symbol, '-', '')) NOT LIKE 'LINKUSDT%'
+            AND COALESCE(live_handoff_state, 'pending') NOT IN ('created', 'expired')
             AND ($2::bigint IS NULL OR id = $2)
             AND detected_at >= NOW() - ($3::text || ' hours')::interval
         ),
-        latest_per_symbol AS (
+        earliest_per_symbol AS (
           SELECT DISTINCT ON (symbol) *
           FROM eligible_events
-          ORDER BY symbol, detected_at DESC, id DESC
+          ORDER BY symbol, detected_at ASC, id ASC
         )
         SELECT
           id,
@@ -104,8 +105,8 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
           detected_at,
           source,
           notification_state
-        FROM latest_per_symbol
-        ORDER BY detected_at DESC, id DESC
+        FROM earliest_per_symbol
+        ORDER BY detected_at ASC, id ASC
         LIMIT $4
         "#
 }
@@ -163,19 +164,23 @@ mod tests {
         assert_eq!(normalize_candidate_limit(500), 100);
     }
     #[test]
-    fn candidate_scan_sql_uses_latest_event_per_symbol_before_limit() {
+    fn candidate_scan_sql_uses_earliest_event_per_symbol_before_limit() {
         let sql = market_velocity_live_candidate_events_sql();
         assert!(
             sql.contains("DISTINCT ON (symbol)"),
             "live candidate scan must not let repeated events from a few symbols fill the limit: {sql}"
         );
         assert!(
-            sql.contains("ORDER BY symbol, detected_at DESC, id DESC"),
-            "latest event per symbol must be selected before global ordering: {sql}"
+            sql.contains("ORDER BY symbol, detected_at ASC, id ASC"),
+            "earliest generated event per symbol must be selected before global ordering: {sql}"
         );
         assert!(
-            sql.contains("FROM latest_per_symbol"),
+            sql.contains("FROM earliest_per_symbol"),
             "global live scan should order already deduplicated symbols: {sql}"
+        );
+        assert!(
+            sql.contains("ORDER BY detected_at ASC, id ASC"),
+            "global handoff must evaluate selected symbols by generated time first: {sql}"
         );
     }
     #[test]
@@ -183,5 +188,18 @@ mod tests {
         let sql = market_velocity_live_candidate_events_sql();
         assert!(!sql.contains("new_rank <="));
         assert!(!sql.contains("new_rank >"));
+    }
+
+    #[test]
+    fn candidate_scan_sql_skips_terminal_live_handoff_states() {
+        let sql = market_velocity_live_candidate_events_sql();
+        assert!(
+            sql.contains("live_handoff_state"),
+            "candidate scan must read the trade handoff state separately from notification_state"
+        );
+        assert!(
+            sql.contains("NOT IN ('created', 'expired')"),
+            "created and expired candidates must not be reprocessed forever: {sql}"
+        );
     }
 }

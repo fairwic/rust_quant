@@ -1314,14 +1314,42 @@ CREATE TABLE IF NOT EXISTS market_rank_events (
     detected_at TIMESTAMPTZ NOT NULL,
     source VARCHAR(64) NOT NULL,
     notification_state VARCHAR(32) NOT NULL DEFAULT 'pending',
+    live_handoff_state VARCHAR(32) NOT NULL DEFAULT 'pending',
+    live_handoff_blocker_code VARCHAR(128),
+    live_handoff_blocker_detail TEXT,
+    live_handoff_last_evaluated_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_market_rank_events_event_type
         CHECK (event_type IN ('rank_velocity', 'top_entry', 'top_exit')),
     CONSTRAINT chk_market_rank_events_price_direction
         CHECK (price_direction IN ('up', 'down', 'flat', 'unknown')),
     CONSTRAINT chk_market_rank_events_notification_state
-        CHECK (notification_state IN ('pending', 'sent', 'skipped', 'failed'))
+        CHECK (notification_state IN ('pending', 'sent', 'skipped', 'failed')),
+    CONSTRAINT chk_market_rank_events_live_handoff_state
+        CHECK (live_handoff_state IN ('pending', 'blocked', 'expired', 'created', 'failed'))
 );
+
+ALTER TABLE market_rank_events
+    ADD COLUMN IF NOT EXISTS live_handoff_state VARCHAR(32) NOT NULL DEFAULT 'pending';
+ALTER TABLE market_rank_events
+    ADD COLUMN IF NOT EXISTS live_handoff_blocker_code VARCHAR(128);
+ALTER TABLE market_rank_events
+    ADD COLUMN IF NOT EXISTS live_handoff_blocker_detail TEXT;
+ALTER TABLE market_rank_events
+    ADD COLUMN IF NOT EXISTS live_handoff_last_evaluated_at TIMESTAMPTZ;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_market_rank_events_live_handoff_state'
+          AND conrelid = 'market_rank_events'::regclass
+    ) THEN
+        ALTER TABLE market_rank_events
+            ADD CONSTRAINT chk_market_rank_events_live_handoff_state
+            CHECK (live_handoff_state IN ('pending', 'blocked', 'expired', 'created', 'failed'));
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_market_rank_events_detected_at
     ON market_rank_events (detected_at DESC);
@@ -1332,6 +1360,9 @@ CREATE INDEX IF NOT EXISTS idx_market_rank_events_type_timeframe
 CREATE INDEX IF NOT EXISTS idx_market_rank_events_radar_exchange_recent
     ON market_rank_events (LOWER(exchange), detected_at DESC, id DESC)
     WHERE new_rank <= 50 OR old_rank <= 50;
+CREATE INDEX IF NOT EXISTS idx_market_rank_events_live_handoff_last_evaluated_at
+    ON market_rank_events (live_handoff_last_evaluated_at DESC, id DESC)
+    WHERE live_handoff_last_evaluated_at IS NOT NULL;
 
 COMMENT ON TABLE market_rank_events IS '市场速度雷达排名事件流水表，用于用户产品时间线、通知和Admin诊断';
 COMMENT ON COLUMN market_rank_events.id IS '自增主键';
@@ -1362,6 +1393,10 @@ COMMENT ON COLUMN market_rank_events.technical_snapshot_status IS '排名事件�
 COMMENT ON COLUMN market_rank_events.detected_at IS '扫描器检测到事件的时间';
 COMMENT ON COLUMN market_rank_events.source IS '事件生成来源，如 scanner_service';
 COMMENT ON COLUMN market_rank_events.notification_state IS '通知投递状态：pending、sent、skipped、failed';
+COMMENT ON COLUMN market_rank_events.live_handoff_state IS '交易 live handoff 最近评估状态：pending、blocked、expired、created、failed；独立于通知投递状态';
+COMMENT ON COLUMN market_rank_events.live_handoff_blocker_code IS '交易 live handoff 最近一次阻塞或失败的结构化原因码';
+COMMENT ON COLUMN market_rank_events.live_handoff_blocker_detail IS '交易 live handoff 最近一次阻塞或失败的详细说明';
+COMMENT ON COLUMN market_rank_events.live_handoff_last_evaluated_at IS '交易 live handoff 最近一次评估时间';
 COMMENT ON COLUMN market_rank_events.created_at IS '记录创建时间';
 
 CREATE TABLE IF NOT EXISTS market_velocity_episodes (

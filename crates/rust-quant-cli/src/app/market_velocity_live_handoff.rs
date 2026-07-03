@@ -22,7 +22,7 @@ use rust_quant_services::rust_quan_web::{
     QuantWebClientError, StrategySignalSubmitRequest,
 };
 use serde_json::{json, Value};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::{collections::BTreeMap, time::Duration};
 mod candidates;
 mod entry_candles;
@@ -77,6 +77,27 @@ pub struct MarketVelocityLiveHandoffRuntimeConfig {
     pub run_once: bool,
     /// 秒级时长。
     pub interval_seconds: u64,
+}
+
+/// 表示 rank event 最近一次 live handoff 评估结果，独立于通知投递状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarketVelocityLiveHandoffState {
+    Blocked,
+    Expired,
+    Created,
+    Failed,
+}
+
+impl MarketVelocityLiveHandoffState {
+    /// 返回数据库状态字面量，避免 SQL 更新和测试各自硬编码。
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Blocked => "blocked",
+            Self::Expired => "expired",
+            Self::Created => "created",
+            Self::Failed => "failed",
+        }
+    }
 }
 impl MarketVelocityLiveHandoffConfig {
     /// 判断是否进入单 combo canary 模式；默认空 scope 走 Web 订阅 fan-out。
@@ -288,11 +309,20 @@ pub async fn run_market_velocity_live_handoff(
         {
             Ok(candles) => candles,
             Err(error) if !explicit_event_requested => {
+                let blocker_code = "market_velocity_entry_candles_unavailable";
+                let blocker_detail = error.to_string();
+                record_market_velocity_live_handoff_blocker(
+                    &pool,
+                    &event,
+                    blocker_code,
+                    &blocker_detail,
+                )
+                .await?;
                 skipped_candidates.push(json!({
                     "event_id": event.id,
                     "symbol": event.symbol,
-                    "blocker_code": "market_velocity_entry_candles_unavailable",
-                    "blocker_detail": error.to_string(),
+                    "blocker_code": blocker_code,
+                    "blocker_detail": blocker_detail,
                     "entry_candles": {
                         "source": "unavailable",
                         "refresh_attempted": config.entry_candle_on_demand_refresh,
@@ -303,7 +333,18 @@ pub async fn run_market_velocity_live_handoff(
                 }));
                 continue;
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                let blocker_code = "market_velocity_entry_candles_unavailable";
+                let blocker_detail = error.to_string();
+                record_market_velocity_live_handoff_blocker(
+                    &pool,
+                    &event,
+                    blocker_code,
+                    &blocker_detail,
+                )
+                .await?;
+                return Err(error);
+            }
         };
         let candles = candle_load.candles.clone();
         let now = Utc::now();
@@ -315,10 +356,18 @@ pub async fn run_market_velocity_live_handoff(
                         now,
                         config.entry_candle_max_staleness_minutes,
                     ) {
+                        let blocker_code = "market_velocity_selected_entry_stale";
+                        record_market_velocity_live_handoff_blocker(
+                            &pool,
+                            &event,
+                            blocker_code,
+                            &blocker_detail,
+                        )
+                        .await?;
                         skipped_candidates.push(json!({
                             "event_id": event.id,
                             "symbol": event.symbol,
-                            "blocker_code": "market_velocity_selected_entry_stale",
+                            "blocker_code": blocker_code,
                             "blocker_detail": blocker_detail,
                             "selected_entry": selection.selected_entry,
                             "entry_candles": candle_load.status,
@@ -328,10 +377,18 @@ pub async fn run_market_velocity_live_handoff(
                     (selection.entry_confirmation, Some(selection.selected_entry))
                 }
                 Err(blocker_detail) => {
+                    let blocker_code = "market_velocity_live_entry_shell_blocked";
+                    record_market_velocity_live_handoff_blocker(
+                        &pool,
+                        &event,
+                        blocker_code,
+                        &blocker_detail,
+                    )
+                    .await?;
                     skipped_candidates.push(json!({
                         "event_id": event.id,
                         "symbol": event.symbol,
-                        "blocker_code": "market_velocity_live_entry_shell_blocked",
+                        "blocker_code": blocker_code,
                         "blocker_detail": blocker_detail,
                         "entry_candles": candle_load.status,
                     }));
@@ -346,11 +403,20 @@ pub async fn run_market_velocity_live_handoff(
             ) {
                 MarketVelocityEntryConfirmationDecision::Confirmed(confirmation) => confirmation,
                 MarketVelocityEntryConfirmationDecision::Blocked(blocker) => {
+                    let blocker_code = "market_velocity_entry_confirmation_blocked";
+                    let blocker_detail = format!("{:?}", blocker);
+                    record_market_velocity_live_handoff_blocker(
+                        &pool,
+                        &event,
+                        blocker_code,
+                        &blocker_detail,
+                    )
+                    .await?;
                     skipped_candidates.push(json!({
                         "event_id": event.id,
                         "symbol": event.symbol,
-                        "blocker_code": "market_velocity_entry_confirmation_blocked",
-                        "blocker_detail": format!("{:?}", blocker),
+                        "blocker_code": blocker_code,
+                        "blocker_detail": blocker_detail,
                         "entry_candles": candle_load.status,
                     }));
                     continue;
@@ -361,10 +427,18 @@ pub async fn run_market_velocity_live_handoff(
                 now,
                 config.entry_candle_max_staleness_minutes,
             ) {
+                let blocker_code = "market_velocity_entry_confirmation_stale";
+                record_market_velocity_live_handoff_blocker(
+                    &pool,
+                    &event,
+                    blocker_code,
+                    &blocker_detail,
+                )
+                .await?;
                 skipped_candidates.push(json!({
                     "event_id": event.id,
                     "symbol": event.symbol,
-                    "blocker_code": "market_velocity_entry_confirmation_stale",
+                    "blocker_code": blocker_code,
                     "blocker_detail": blocker_detail,
                     "snapshot_at": entry_confirmation.snapshot_at,
                     "entry_candles": candle_load.status,
@@ -382,10 +456,20 @@ pub async fn run_market_velocity_live_handoff(
             )? {
             MarketVelocityStrategySignalDecision::Submit(signal) => signal,
             MarketVelocityStrategySignalDecision::Blocked(blocker) => {
+                let blocker_code = format!("market_velocity_signal_{:?}", blocker);
+                let blocker_detail = blocker_code.clone();
+                record_market_velocity_live_handoff_blocker(
+                    &pool,
+                    &event,
+                    &blocker_code,
+                    &blocker_detail,
+                )
+                .await?;
                 skipped_candidates.push(json!({
                     "event_id": event.id,
                     "symbol": event.symbol,
-                    "blocker_code": format!("market_velocity_signal_{:?}", blocker),
+                    "blocker_code": blocker_code,
+                    "blocker_detail": blocker_detail,
                     "selected_entry": selected_entry,
                     "entry_candles": candle_load.status,
                 }));
@@ -484,10 +568,24 @@ pub async fn run_market_velocity_live_handoff(
         "refresh_readiness": refresh_readiness,
     });
     if !hard_preview_blockers.is_empty() {
-        bail!(
-            "Web owner preview blocked task creation: {:?}",
-            hard_preview_blockers
-        );
+        let blocker_code = "market_velocity_owner_preview_blocked";
+        let blocker_detail = hard_preview_blockers.join(",");
+        let event_id = event
+            .id
+            .context("market rank event missing id for live handoff preview blocker update")?;
+        update_market_velocity_live_handoff_status(
+            &pool,
+            event_id,
+            MarketVelocityLiveHandoffState::Blocked,
+            Some(blocker_code),
+            Some(&blocker_detail),
+        )
+        .await?;
+        response["blocker_code"] = json!(blocker_code);
+        response["blocker_detail"] = json!(blocker_detail);
+        response["read_only"] = json!(true);
+        response["mutation_allowed"] = json!(false);
+        return Ok(response);
     }
     let signal = market_velocity_scope_signal_to_live_owner_if_configured(
         signal,
@@ -495,7 +593,35 @@ pub async fn run_market_velocity_live_handoff(
         config.combo_id,
     )?;
     let dispatch_log_signal = signal.clone();
-    let dispatch = client.submit_strategy_signal(signal).await?;
+    let dispatch = match client.submit_strategy_signal(signal).await {
+        Ok(dispatch) => dispatch,
+        Err(error) => {
+            let event_id = event
+                .id
+                .context("market rank event missing id for live handoff submit failure update")?;
+            let blocker_detail = error.to_string();
+            update_market_velocity_live_handoff_status(
+                &pool,
+                event_id,
+                MarketVelocityLiveHandoffState::Failed,
+                Some("market_velocity_submit_strategy_signal_failed"),
+                Some(&blocker_detail),
+            )
+            .await?;
+            return Err(error);
+        }
+    };
+    let event_id = event
+        .id
+        .context("market rank event missing id for live handoff created update")?;
+    update_market_velocity_live_handoff_status(
+        &pool,
+        event_id,
+        MarketVelocityLiveHandoffState::Created,
+        None,
+        None,
+    )
+    .await?;
     let generated_task_ids: Vec<i64> = dispatch
         .generated_tasks
         .iter()
@@ -571,6 +697,71 @@ fn build_market_velocity_api_credential_readiness_blocked_response(
         "next_action": "restore_api_credential_readiness_before_live_handoff",
     })
 }
+
+/// 根据 blocker 语义映射 handoff 状态；过期类 blocker 是终态，不再反复重扫。
+fn market_velocity_live_handoff_state_for_blocker(
+    blocker_code: &str,
+) -> MarketVelocityLiveHandoffState {
+    if blocker_code.contains("_stale") {
+        MarketVelocityLiveHandoffState::Expired
+    } else {
+        MarketVelocityLiveHandoffState::Blocked
+    }
+}
+
+/// 更新 rank event 的交易 handoff 状态；不复用通知状态，避免混淆诊断语义。
+fn market_velocity_live_handoff_status_update_sql() -> &'static str {
+    r#"
+        UPDATE market_rank_events
+        SET live_handoff_state = $2,
+            live_handoff_blocker_code = $3,
+            live_handoff_blocker_detail = $4,
+            live_handoff_last_evaluated_at = NOW()
+        WHERE id = $1
+        "#
+}
+
+/// 持久化单个候选最近一次 live handoff 评估结果，供后续扫描和排障使用。
+async fn update_market_velocity_live_handoff_status(
+    pool: &PgPool,
+    event_id: i64,
+    state: MarketVelocityLiveHandoffState,
+    blocker_code: Option<&str>,
+    blocker_detail: Option<&str>,
+) -> Result<()> {
+    let result = sqlx::query(market_velocity_live_handoff_status_update_sql())
+        .bind(event_id)
+        .bind(state.as_str())
+        .bind(blocker_code)
+        .bind(blocker_detail)
+        .execute(pool)
+        .await
+        .context("update market velocity live handoff state")?;
+    if result.rows_affected() == 0 {
+        bail!("market_rank_events row not found for live handoff status update: {event_id}");
+    }
+    Ok(())
+}
+
+/// 将当前候选的 blocker 写回 rank event，避免同一过期候选永久停在 pending。
+async fn record_market_velocity_live_handoff_blocker(
+    pool: &PgPool,
+    event: &MarketRankEvent,
+    blocker_code: &str,
+    blocker_detail: &str,
+) -> Result<()> {
+    let event_id = event
+        .id
+        .context("market rank event missing id for live handoff status update")?;
+    update_market_velocity_live_handoff_status(
+        pool,
+        event_id,
+        market_velocity_live_handoff_state_for_blocker(blocker_code),
+        Some(blocker_code),
+        Some(blocker_detail),
+    )
+    .await
+}
 /// 提供市场动量入场确认staleblocker的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_entry_confirmation_stale_blocker(
     confirmation: &MarketVelocityEntryConfirmation,
@@ -630,7 +821,7 @@ fn select_market_velocity_live_entry(
             return Err(format!(
                 "live_signal_shell_confirmation_rebuild_{:?}",
                 blocker
-            ))
+            ));
         }
     };
     if entry_confirmation.trigger != selection.signal_trigger {
@@ -1359,6 +1550,43 @@ mod tests {
         assert_eq!(summary["by_blocker_detail"]["PriceBelowAverages"], 1);
         assert_eq!(summary["by_symbol"]["XLM-USDT-SWAP"], 2);
         assert_eq!(summary["by_symbol"]["MRVL-USDT-SWAP"], 1);
+    }
+
+    #[test]
+    fn live_handoff_status_update_sql_does_not_reuse_notification_state() {
+        let sql = market_velocity_live_handoff_status_update_sql();
+        assert!(sql.contains("UPDATE market_rank_events"));
+        assert!(sql.contains("live_handoff_state"));
+        assert!(sql.contains("live_handoff_blocker_code"));
+        assert!(sql.contains("live_handoff_blocker_detail"));
+        assert!(sql.contains("live_handoff_last_evaluated_at"));
+        assert!(
+            !sql.contains("notification_state"),
+            "live handoff state must not overload notification delivery state"
+        );
+    }
+
+    #[test]
+    fn stale_live_handoff_blockers_are_recorded_as_expired() {
+        assert_eq!(
+            market_velocity_live_handoff_state_for_blocker("market_velocity_selected_entry_stale")
+                .as_str(),
+            "expired"
+        );
+        assert_eq!(
+            market_velocity_live_handoff_state_for_blocker(
+                "market_velocity_entry_confirmation_stale"
+            )
+            .as_str(),
+            "expired"
+        );
+        assert_eq!(
+            market_velocity_live_handoff_state_for_blocker(
+                "market_velocity_live_entry_shell_blocked"
+            )
+            .as_str(),
+            "blocked"
+        );
     }
     /// 构造样例entryconfirmation，集中维护行情数据的载荷组装规则。
     fn sample_entry_confirmation(snapshot_at: DateTime<Utc>) -> MarketVelocityEntryConfirmation {

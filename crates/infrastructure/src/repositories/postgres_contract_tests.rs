@@ -138,6 +138,10 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
         "market_rank_events.technical_candle_count",
         "market_rank_events.technical_snapshot_at",
         "market_rank_events.technical_snapshot_status",
+        "market_rank_events.live_handoff_state",
+        "market_rank_events.live_handoff_blocker_code",
+        "market_rank_events.live_handoff_blocker_detail",
+        "market_rank_events.live_handoff_last_evaluated_at",
         "market_rank_events.detected_at",
         "market_rank_events.source",
         "market_rank_events.notification_state",
@@ -151,6 +155,14 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
     assert!(
         POSTGRES_QUANT_CORE_DDL.contains("chk_market_rank_events_price_direction"),
         "postgres quant_core DDL must constrain market rank event price direction"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("chk_market_rank_events_live_handoff_state"),
+        "postgres quant_core DDL must constrain live handoff state separately from notification state"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("idx_market_rank_events_live_handoff_last_evaluated_at"),
+        "postgres quant_core DDL must index live handoff diagnostics by latest evaluation time"
     );
     assert!(
         POSTGRES_QUANT_CORE_DDL.contains("idx_market_rank_events_radar_exchange_recent"),
