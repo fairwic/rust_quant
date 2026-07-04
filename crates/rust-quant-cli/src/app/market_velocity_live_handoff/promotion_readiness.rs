@@ -14,6 +14,10 @@ pub struct MarketVelocityPromotionCriteria {
 /// Web paper outcome 表中推进评估所需的最小字段投影。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketVelocityPaperOutcomeSample {
+    /// paper 评估目标 R。
+    pub target_r: f64,
+    /// paper 评估持仓窗口小时数。
+    pub horizon_hours: i32,
     /// 结果状态，例如 win、loss、timeout。
     pub outcome_status: String,
     /// 以 R 表示的 paper 结果；为空的未决样本不计入交易样本。
@@ -23,6 +27,10 @@ pub struct MarketVelocityPaperOutcomeSample {
 /// 破位做空 paper readiness 报告；只表达是否可进入下一步 cutover 评审，不触发实盘。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketVelocityPromotionReadinessReport {
+    /// 被评估的目标 R 桶。
+    pub target_r: f64,
+    /// 被评估的持仓窗口小时数。
+    pub horizon_hours: i32,
     /// 有效交易样本数。
     pub trade_samples: usize,
     /// 胜利样本数。
@@ -44,9 +52,54 @@ pub struct MarketVelocityPromotionReadinessReport {
 }
 
 /// 根据已落库的 paper outcome 评估破位做空是否具备 live cutover 评审条件。
+/// 调用方如果同时传入多个 target/horizon，应使用 select_breakdown_short_paper_readiness_bucket。
 pub fn evaluate_breakdown_short_paper_readiness(
     outcomes: &[MarketVelocityPaperOutcomeSample],
     criteria: MarketVelocityPromotionCriteria,
+) -> MarketVelocityPromotionReadinessReport {
+    let target_r = outcomes.first().map_or(0.0, |outcome| outcome.target_r);
+    let horizon_hours = outcomes.first().map_or(0, |outcome| outcome.horizon_hours);
+    evaluate_breakdown_short_paper_readiness_bucket(outcomes, criteria, target_r, horizon_hours)
+}
+
+/// 从多个 target/horizon paper outcome 桶中选择最接近 promotion review 的候选桶。
+pub fn select_breakdown_short_paper_readiness_bucket(
+    outcomes: &[MarketVelocityPaperOutcomeSample],
+    criteria: MarketVelocityPromotionCriteria,
+) -> Option<MarketVelocityPromotionReadinessReport> {
+    let mut keys = Vec::new();
+    for outcome in outcomes {
+        if !keys.iter().any(|(target_r, horizon_hours)| {
+            same_target(*target_r, outcome.target_r) && *horizon_hours == outcome.horizon_hours
+        }) {
+            keys.push((outcome.target_r, outcome.horizon_hours));
+        }
+    }
+    keys.into_iter()
+        .map(|(target_r, horizon_hours)| {
+            let bucket_outcomes = outcomes
+                .iter()
+                .filter(|outcome| {
+                    same_target(outcome.target_r, target_r)
+                        && outcome.horizon_hours == horizon_hours
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            evaluate_breakdown_short_paper_readiness_bucket(
+                &bucket_outcomes,
+                criteria,
+                target_r,
+                horizon_hours,
+            )
+        })
+        .max_by(compare_readiness_report)
+}
+
+fn evaluate_breakdown_short_paper_readiness_bucket(
+    outcomes: &[MarketVelocityPaperOutcomeSample],
+    criteria: MarketVelocityPromotionCriteria,
+    target_r: f64,
+    horizon_hours: i32,
 ) -> MarketVelocityPromotionReadinessReport {
     let trade_results: Vec<f64> = outcomes
         .iter()
@@ -90,6 +143,8 @@ pub fn evaluate_breakdown_short_paper_readiness(
     }
     let promotion_review_ready = blockers.is_empty();
     MarketVelocityPromotionReadinessReport {
+        target_r,
+        horizon_hours,
         trade_samples,
         wins,
         losses,
@@ -104,6 +159,31 @@ pub fn evaluate_breakdown_short_paper_readiness(
         blockers,
         promotion_review_ready,
     }
+}
+
+fn compare_readiness_report(
+    left: &MarketVelocityPromotionReadinessReport,
+    right: &MarketVelocityPromotionReadinessReport,
+) -> std::cmp::Ordering {
+    right
+        .blockers
+        .len()
+        .cmp(&left.blockers.len())
+        .then_with(|| {
+            left.total_r
+                .partial_cmp(&right.total_r)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .then_with(|| {
+            left.win_rate_pct
+                .partial_cmp(&right.win_rate_pct)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .then_with(|| left.trade_samples.cmp(&right.trade_samples))
+}
+
+fn same_target(left: f64, right: f64) -> bool {
+    (left - right).abs() < 0.0001
 }
 
 fn max_drawdown_pct_from_r(results: &[f64]) -> f64 {
@@ -190,8 +270,52 @@ mod tests {
         assert!(report.blockers.is_empty());
     }
 
+    #[test]
+    fn breakdown_short_readiness_selects_best_target_horizon_bucket_without_mixing_outcomes() {
+        let mut outcomes = Vec::new();
+        outcomes.extend((0..8).map(|_| bucketed_paper_outcome(1.0, 24, "win", 1.0)));
+        outcomes.extend((0..7).map(|_| bucketed_paper_outcome(1.0, 24, "loss", -1.0)));
+        outcomes.extend((0..7).map(|_| bucketed_paper_outcome(1.0, 48, "win", 1.0)));
+        outcomes.extend((0..8).map(|_| bucketed_paper_outcome(1.0, 48, "loss", -1.0)));
+
+        let report = select_breakdown_short_paper_readiness_bucket(
+            &outcomes,
+            MarketVelocityPromotionCriteria {
+                min_trade_samples: 10,
+                min_win_rate_pct: 50.0,
+                max_drawdown_pct: 15.0,
+                min_total_r: 0.0,
+            },
+        )
+        .expect("best bucket");
+
+        assert_eq!(report.target_r, 1.0);
+        assert_eq!(report.horizon_hours, 24);
+        assert_eq!(report.trade_samples, 15);
+        assert_eq!(report.wins, 8);
+        assert_eq!(report.losses, 7);
+        assert_eq!(report.total_r, 1.0);
+        assert!(report.promotion_review_ready);
+    }
+
     fn paper_outcome(status: &str, result_r: f64) -> MarketVelocityPaperOutcomeSample {
         MarketVelocityPaperOutcomeSample {
+            target_r: 1.0,
+            horizon_hours: 24,
+            outcome_status: status.to_string(),
+            result_r: Some(result_r),
+        }
+    }
+
+    fn bucketed_paper_outcome(
+        target_r: f64,
+        horizon_hours: i32,
+        status: &str,
+        result_r: f64,
+    ) -> MarketVelocityPaperOutcomeSample {
+        MarketVelocityPaperOutcomeSample {
+            target_r,
+            horizon_hours,
             outcome_status: status.to_string(),
             result_r: Some(result_r),
         }
