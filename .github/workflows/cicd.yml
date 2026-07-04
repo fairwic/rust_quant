@@ -83,6 +83,7 @@ jobs:
           cargo check -p rust-quant-cli --bin market_velocity_candle_backfill
           cargo test -p rust-quant-cli market_velocity_kline_scanner --lib -- --nocapture
           cargo check -p rust-quant-cli --bin market_velocity_kline_scanner
+          cargo check -p rust-quant-cli --bin market_velocity_event_backtest
           cargo test -p rust-quant-services --test market_velocity_production_deploy_contract -- --nocapture
           cargo test -p rust-quant-services market_velocity_signal --lib -- --nocapture
           cargo test -p rust-quant-services strategy_signal --lib -- --nocapture

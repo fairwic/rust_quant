@@ -154,6 +154,12 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     );
     assert!(
         dockerfile.contains(
+            "COPY --from=builder /app/rust_quant/bin/market_velocity_event_backtest /usr/local/bin/market_velocity_event_backtest"
+        ),
+        "runtime image must include the read-only Market Velocity event backtest binary for production audit"
+    );
+    assert!(
+        dockerfile.contains(
             "COPY --from=builder /app/rust_quant/bin/market_velocity_live_handoff /usr/local/bin/market_velocity_live_handoff"
         ),
         "runtime image must include the Rust-native Market Velocity live handoff binary"
@@ -458,6 +464,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "cargo check -p rust-quant-cli --bin market_velocity_candle_backfill",
         "cargo test -p rust-quant-cli market_velocity_kline_scanner --lib -- --nocapture",
         "cargo check -p rust-quant-cli --bin market_velocity_kline_scanner",
+        "cargo check -p rust-quant-cli --bin market_velocity_event_backtest",
         "cargo test -p rust-quant-services market_velocity_signal --lib -- --nocapture",
         "cargo test -p rust-quant-services strategy_signal --lib -- --nocapture",
         "cargo test -p rust-quant-services target_task --lib -- --nocapture",
