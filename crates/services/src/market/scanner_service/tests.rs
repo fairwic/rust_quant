@@ -34,6 +34,51 @@ mod tests {
         assert_eq!(event.notification_state, "pending");
     }
     #[test]
+    fn build_kline_15m_rank_velocity_event_uses_handoff_compatible_contract() {
+        let candle_open_ts_ms = 1_777_824_000_000;
+        let event = build_kline_15m_rank_velocity_event(
+            "ETH-USDT-SWAP",
+            candle_open_ts_ms,
+            Decimal::new(100, 0),
+            Decimal::new(104, 0),
+        )
+        .expect("valid 15m candle should build an event");
+        assert_eq!(event.exchange, "okx");
+        assert_eq!(event.symbol, "ETH-USDT-SWAP");
+        assert_eq!(event.event_type, MarketRankEventType::RankVelocity);
+        assert_eq!(event.timeframe.as_deref(), Some("15分钟"));
+        assert_eq!(event.old_rank, None);
+        assert_eq!(event.new_rank, Some(0));
+        assert_eq!(event.delta_rank, Some(0));
+        assert_eq!(event.current_price, Some(Decimal::new(104, 0)));
+        assert_eq!(event.previous_price, Some(Decimal::new(100, 0)));
+        assert_eq!(event.price_change_pct, Some(Decimal::new(4, 0)));
+        assert_eq!(event.price_direction, "up");
+        assert_eq!(event.technical_snapshot_status, "not_requested");
+        assert!(event.technical_snapshot.is_none());
+        assert_eq!(
+            event.detected_at,
+            DateTime::from_timestamp_millis(candle_open_ts_ms + 15 * 60 * 1000)
+                .expect("valid detected_at")
+        );
+        assert_eq!(event.source, "kline_15m_scanner");
+        assert_eq!(event.notification_state, "pending");
+    }
+    #[test]
+    fn build_kline_15m_rank_velocity_event_rejects_invalid_open_price() {
+        let error = build_kline_15m_rank_velocity_event(
+            "ETH-USDT-SWAP",
+            1_777_824_000_000,
+            Decimal::ZERO,
+            Decimal::new(104, 0),
+        )
+        .expect_err("zero open price should be rejected");
+        assert!(
+            error.to_string().contains("15m candle open price"),
+            "unexpected error: {error}"
+        );
+    }
+    #[test]
     fn build_top_list_event_uses_entry_and_exit_contract() {
         let detected_at = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
         let entry = build_top_list_event(

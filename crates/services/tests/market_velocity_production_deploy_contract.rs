@@ -45,6 +45,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-vegas-eth-4h-worker:",
         "quant-core-market-velocity-radar:",
         "quant-core-market-velocity-candle-backfill-scheduler:",
+        "quant-core-market-velocity-kline-scanner-scheduler:",
         "quant-core-market-velocity-paper-observation-scheduler:",
         "quant-core-market-velocity-live-handoff:",
         "quant-core-market-velocity-live-handoff-scheduler:",
@@ -76,6 +77,9 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "MARKET_VELOCITY_BACKFILL_REQUEST_SLEEP_MS:-500",
         "--loop-interval-seconds",
         "MARKET_VELOCITY_CANDLE_BACKFILL_INTERVAL_SECS",
+        "market_velocity_kline_scanner",
+        "MARKET_VELOCITY_KLINE_SCANNER_INTERVAL_SECS",
+        "MARKET_VELOCITY_KLINE_SCANNER_MIN_PRICE_CHANGE_PCT",
         r#"IS_RUN_EXECUTION_WORKER: "true""#,
         r#"EXECUTION_WORKER_ONLY: "true""#,
         "market_velocity_live_handoff",
@@ -119,6 +123,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-vegas-eth-4h-worker",
         "quant-core-market-velocity-radar",
         "quant-core-market-velocity-candle-backfill-scheduler",
+        "quant-core-market-velocity-kline-scanner-scheduler",
         "quant-core-market-velocity-paper-observation-scheduler",
         "quant-core-market-velocity-live-handoff-scheduler",
         "quant-core-execution-worker",
@@ -140,6 +145,12 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "COPY --from=builder /app/rust_quant/bin/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill"
         ),
         "runtime image must include the Rust-native Market Velocity candle backfill binary"
+    );
+    assert!(
+        dockerfile.contains(
+            "COPY --from=builder /app/rust_quant/bin/market_velocity_kline_scanner /usr/local/bin/market_velocity_kline_scanner"
+        ),
+        "runtime image must include the Rust-native Market Velocity 15m K-line scanner binary"
     );
     assert!(
         dockerfile.contains(
@@ -211,7 +222,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             && production_gate.contains("Web fan-out resolves credentials per subscription"),
         "production gate must keep canary scope explicit and leave credentials to Web fan-out when unscoped"
     );
-    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
+    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
     for deploy_script in [&promote, &rollback] {
         assert!(
             deploy_script.contains(default_deploy_services),
@@ -228,6 +239,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             deploy_script.contains("--profile observation-scheduler")
                 && deploy_script.contains("--profile live-handoff-scheduler")
                 && deploy_script.contains("--profile candle-backfill-scheduler")
+                && deploy_script.contains("--profile kline-scanner-scheduler")
                 && deploy_script.contains("--profile schema-ensure"),
             "default deploy/rollback must enable required production profiles explicitly"
         );
@@ -404,6 +416,8 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "cargo check -p rust-quant-cli --bin quant_core_schema_ensure",
         "cargo test -p rust-quant-cli market_velocity_backfill --lib -- --nocapture",
         "cargo check -p rust-quant-cli --bin market_velocity_candle_backfill",
+        "cargo test -p rust-quant-cli market_velocity_kline_scanner --lib -- --nocapture",
+        "cargo check -p rust-quant-cli --bin market_velocity_kline_scanner",
         "cargo test -p rust-quant-services market_velocity_signal --lib -- --nocapture",
         "cargo test -p rust-quant-services strategy_signal --lib -- --nocapture",
         "cargo test -p rust-quant-services target_task --lib -- --nocapture",
@@ -602,6 +616,40 @@ fn market_velocity_paper_observation_defaults_use_stable_production_preset() {
         assert!(
             !service_block.contains("momentum_03sl_20r_v5"),
             "paper observation services must not keep the legacy momentum_03sl_20r_v5 preset after promotion"
+        );
+    }
+}
+
+#[test]
+fn market_velocity_kline15m_challenger_has_isolated_paper_scheduler() {
+    let compose = read_repo_file("docker-compose.deploy.yml");
+    let promote = read_repo_file("scripts/deploy/promote_stable.sh");
+    let rollback = read_repo_file("scripts/deploy/rollback.sh");
+    let service_name = "quant-core-market-velocity-kline15m-paper-observation-scheduler";
+    let service_block = compose_service_block(&compose, service_name);
+
+    assert!(
+        service_block.contains("market_velocity_paper_observation"),
+        "kline15m challenger must use the same observation-only binary"
+    );
+    assert!(
+        service_block.contains("kline15m-paper-observation-scheduler"),
+        "kline15m challenger must be behind an explicit opt-in compose profile"
+    );
+    assert!(
+        service_block.contains("--paper-strategy-preset")
+            && service_block
+                .contains("research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1"),
+        "kline15m challenger scheduler must run the 0.52R fvg50 preset"
+    );
+    assert!(
+        service_block.contains("MARKET_VELOCITY_KLINE15M_PAPER_OBSERVATION_INTERVAL_SECS"),
+        "kline15m challenger must have an independent observation interval knob"
+    );
+    for deploy_script in [promote, rollback] {
+        assert!(
+            !deploy_script.contains(service_name),
+            "kline15m challenger must not be part of default production deploy services"
         );
     }
 }

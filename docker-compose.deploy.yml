@@ -179,6 +179,35 @@ services:
       MARKET_VELOCITY_BACKFILL_BATCH_SIZE: ${MARKET_VELOCITY_BACKFILL_BATCH_SIZE:-500}
       MARKET_VELOCITY_BACKFILL_MAX_SYMBOLS: ${MARKET_VELOCITY_BACKFILL_MAX_SYMBOLS:-}
 
+  quant-core-market-velocity-kline-scanner-scheduler:
+    container_name: quant-core-market-velocity-kline-scanner-scheduler
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    profiles:
+      - kline-scanner-scheduler
+    restart: unless-stopped
+    command:
+      - market_velocity_kline_scanner
+      - --lookback-minutes
+      - ${MARKET_VELOCITY_KLINE_SCANNER_LOOKBACK_MINUTES:-30}
+      - --min-price-change-pct
+      - ${MARKET_VELOCITY_KLINE_SCANNER_MIN_PRICE_CHANGE_PCT:-0.0}
+      - --per-symbol-limit
+      - ${MARKET_VELOCITY_KLINE_SCANNER_PER_SYMBOL_LIMIT:-4}
+      - --write
+      - --loop-interval-seconds
+      - ${MARKET_VELOCITY_KLINE_SCANNER_INTERVAL_SECS:-60}
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+
   quant-core-market-velocity-paper-observation:
     container_name: quant-core-market-velocity-paper-observation
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
@@ -221,6 +250,32 @@ services:
       - momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1
       - --loop-interval-seconds
       - ${MARKET_VELOCITY_PAPER_OBSERVATION_INTERVAL_SECS:-21600}
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
+      EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
+
+  quant-core-market-velocity-kline15m-paper-observation-scheduler:
+    container_name: quant-core-market-velocity-kline15m-paper-observation-scheduler
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    profiles:
+      - kline15m-paper-observation-scheduler
+    restart: unless-stopped
+    command:
+      - market_velocity_paper_observation
+      - --paper-strategy-preset
+      - research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1
+      - --loop-interval-seconds
+      - ${MARKET_VELOCITY_KLINE15M_PAPER_OBSERVATION_INTERVAL_SECS:-21600}
     environment:
       APP_ENV: ${APP_ENV:-production}
       RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}

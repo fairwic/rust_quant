@@ -3,6 +3,7 @@ use std::collections::HashMap;
 mod args;
 mod equity;
 mod paper_observation;
+mod paper_observation_manifest;
 fn candle(ts: i64, close: f64, volume: f64) -> BacktestCandle {
     BacktestCandle {
         ts,
@@ -23,6 +24,58 @@ fn ohlc(ts: i64, open: f64, high: f64, low: f64, close: f64) -> BacktestCandle {
         volume: 10.0,
     }
 }
+fn ohlcv(ts: i64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> BacktestCandle {
+    BacktestCandle {
+        ts,
+        open,
+        high,
+        low,
+        close,
+        volume,
+    }
+}
+fn fast_momentum_breakout_candles() -> Vec<BacktestCandle> {
+    let closes = [
+        100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 120.0, 116.0, 110.0, 104.0, 100.0,
+        102.0, 104.0, 106.0, 108.0, 110.0, 112.0, 114.0, 115.0, 135.0,
+    ];
+    closes
+        .iter()
+        .enumerate()
+        .map(|(idx, close)| {
+            let volume = if idx == closes.len() - 1 { 30.0 } else { 10.0 };
+            BacktestCandle {
+                ts: MS_15M * idx as i64,
+                open: close - 1.0,
+                high: close + 1.0,
+                low: close - 1.0,
+                close: *close,
+                volume,
+            }
+        })
+        .collect()
+}
+fn fast_momentum_breakout_without_drawdown_candles() -> Vec<BacktestCandle> {
+    let closes = [
+        100.0, 100.2, 100.4, 100.6, 100.8, 101.0, 101.2, 101.4, 101.6, 101.8, 102.0, 102.2, 102.4,
+        102.6, 102.8, 103.0, 103.2, 103.4, 103.6, 103.8, 104.0, 112.0,
+    ];
+    closes
+        .iter()
+        .enumerate()
+        .map(|(idx, close)| {
+            let volume = if idx == closes.len() - 1 { 30.0 } else { 10.0 };
+            BacktestCandle {
+                ts: MS_15M * idx as i64,
+                open: close - 0.2,
+                high: close + 0.5,
+                low: close - 0.5,
+                close: *close,
+                volume,
+            }
+        })
+        .collect()
+}
 #[test]
 fn precomputes_sma_ema_and_previous_volume_average() {
     let candles = vec![
@@ -39,6 +92,19 @@ fn precomputes_sma_ema_and_previous_volume_average() {
     assert_eq!(computed[3].ema, Some(3.0));
     assert_eq!(computed[3].previous_volume_avg, Some(20.0));
     assert_eq!(computed[4].ema, Some(4.0));
+}
+#[test]
+fn precomputes_rsi14_and_bollinger20_for_fast_filters() {
+    let candles = (0..22)
+        .map(|idx| candle(MS_15M * idx, 100.0 + idx as f64, 10.0))
+        .collect::<Vec<_>>();
+    let computed = build_computed_candles(candles, 3);
+    assert!(computed[14].rsi14.is_some());
+    assert!(computed[19].bollinger_upper.is_some());
+    assert!(computed[19].bollinger_middle.is_some());
+    assert!(computed[19].bollinger_lower.is_some());
+    assert!(computed[19].bollinger_bandwidth_pct.is_some());
+    assert!(computed[21].rsi14.unwrap() > 50.0);
 }
 #[test]
 fn entry_confirmation_accepts_breakout_above_averages_with_volume() {
@@ -81,6 +147,75 @@ fn entry_confirmation_accepts_breakout_above_averages_with_volume() {
     assert_eq!(reason, "breakout_previous_high");
 }
 #[test]
+fn entry_confirmation_blocks_when_rsi_is_above_fast_momentum_max() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 50.0,
+        entry_min_volume_ratio: 1.2,
+        entry_max_rsi: Some(50.0),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let candles = fast_momentum_breakout_candles();
+    let computed = build_computed_candles(candles, args.entry_period);
+    let event_ts = MS_15M * 22;
+    let (ok, reason) = entry_confirmation(
+        &computed,
+        event_ts,
+        MarketVelocityTradeDirection::Long,
+        &args,
+    );
+    assert!(!ok);
+    assert_eq!(reason, "rsi_above_max");
+}
+#[test]
+fn entry_confirmation_accepts_bollinger_breakout_after_recent_drawdown() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 50.0,
+        entry_min_volume_ratio: 1.2,
+        entry_min_rsi: Some(50.0),
+        entry_max_rsi: Some(100.0),
+        entry_bollinger_breakout: true,
+        entry_min_recent_drawdown_pct: Some(10.0),
+        entry_recent_drawdown_lookback_candles: 12,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let candles = fast_momentum_breakout_candles();
+    let computed = build_computed_candles(candles, args.entry_period);
+    let event_ts = MS_15M * 22;
+    let (ok, reason) = entry_confirmation(
+        &computed,
+        event_ts,
+        MarketVelocityTradeDirection::Long,
+        &args,
+    );
+    assert!(ok);
+    assert_eq!(reason, "breakout_previous_high");
+}
+#[test]
+fn entry_confirmation_blocks_without_recent_drawdown() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 50.0,
+        entry_min_volume_ratio: 1.2,
+        entry_bollinger_breakout: true,
+        entry_min_recent_drawdown_pct: Some(10.0),
+        entry_recent_drawdown_lookback_candles: 12,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let candles = fast_momentum_breakout_without_drawdown_candles();
+    let computed = build_computed_candles(candles, args.entry_period);
+    let event_ts = MS_15M * 22;
+    let (ok, reason) = entry_confirmation(
+        &computed,
+        event_ts,
+        MarketVelocityTradeDirection::Long,
+        &args,
+    );
+    assert!(!ok);
+    assert_eq!(reason, "recent_drawdown_not_confirmed");
+}
+#[test]
 fn entry_confirmation_accepts_breakdown_below_averages_with_volume_for_short() {
     let args = MarketVelocityEventBacktestArgs {
         entry_period: 3,
@@ -119,6 +254,63 @@ fn entry_confirmation_accepts_breakdown_below_averages_with_volume_for_short() {
     );
     assert!(ok);
     assert_eq!(reason, "breakdown_previous_low");
+}
+#[test]
+fn entry_confirmation_labels_sideways_range_breakdown_with_volume_for_short() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_min_volume_ratio: 1.2,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let candles = vec![
+        ohlc(0, 100.0, 101.0, 99.5, 100.4),
+        ohlc(MS_15M, 100.4, 101.1, 99.7, 100.6),
+        ohlc(MS_15M * 2, 100.6, 101.2, 99.8, 100.7),
+        ohlc(MS_15M * 3, 100.7, 101.3, 99.9, 100.8),
+        ohlc(MS_15M * 4, 100.8, 101.2, 99.8, 100.4),
+        ohlc(MS_15M * 5, 100.4, 101.0, 99.6, 100.2),
+        ohlc(MS_15M * 6, 100.2, 101.1, 99.7, 100.5),
+        ohlc(MS_15M * 7, 100.5, 101.0, 99.7, 100.1),
+        ohlcv(MS_15M * 8, 99.8, 100.2, 96.8, 97.4, 24.0),
+    ];
+    let computed = build_computed_candles(candles, args.entry_period);
+    let event_ts = MS_15M * 9;
+    let (ok, reason) = entry_confirmation(
+        &computed,
+        event_ts,
+        MarketVelocityTradeDirection::Short,
+        &args,
+    );
+    assert!(ok);
+    assert_eq!(reason, "breakdown_range_low");
+}
+#[test]
+fn entry_confirmation_does_not_label_top_shoulder_as_breakdown_short() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_min_volume_ratio: 1.2,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let candles = vec![
+        ohlc(0, 100.0, 101.0, 99.5, 100.5),
+        ohlc(MS_15M, 100.5, 103.0, 100.2, 102.6),
+        ohlc(MS_15M * 2, 102.6, 107.0, 102.0, 105.8),
+        ohlc(MS_15M * 3, 105.8, 106.0, 101.8, 102.4),
+        ohlc(MS_15M * 4, 102.4, 104.8, 101.9, 104.0),
+        ohlc(MS_15M * 5, 104.0, 104.4, 100.0, 100.8),
+        ohlcv(MS_15M * 6, 100.7, 102.1, 99.4, 100.1, 26.0),
+    ];
+    let computed = build_computed_candles(candles, args.entry_period);
+    let event_ts = MS_15M * 7;
+    let (_, reason) = entry_confirmation(
+        &computed,
+        event_ts,
+        MarketVelocityTradeDirection::Short,
+        &args,
+    );
+    assert_ne!(reason, "top_shoulder_volume_fade");
 }
 #[test]
 fn entry_confirmation_requires_latest_volume_for_reclaim_ema() {
@@ -687,6 +879,75 @@ fn trend_confirmation_accepts_short_trend_below_averages() {
     );
     assert!(ok);
     assert_eq!(reason, "4h_below_below");
+}
+#[test]
+fn evaluate_events_can_skip_higher_timeframe_trend_for_fast_15m_momentum() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_min_volume_ratio: 1.0,
+        trend_timeframe: MarketVelocityTrendTimeframe::Off,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5);
+    let raw_4h = trend_blocking_4h_candles();
+    let raw_15m = momentum_15m_entry_candles(base_ts);
+
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+
+    assert_eq!(report.confirmed.len(), 1);
+    assert_eq!(report.stage_counts.get("trend_pass"), Some(&1));
+    assert_eq!(report.stage_counts.get("trend_blocked"), None);
+}
+#[test]
+fn evaluate_events_can_use_1h_trend_instead_of_4h_trend() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        entry_min_volume_ratio: 1.0,
+        trend_timeframe: MarketVelocityTrendTimeframe::OneHour,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 5);
+    let raw_4h = trend_blocking_4h_candles();
+    let raw_1h = trend_ok_1h_candles(base_ts);
+    let raw_15m = momentum_15m_entry_candles(base_ts);
+
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_1h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+
+    assert_eq!(report.confirmed.len(), 1);
+    assert_eq!(report.stage_counts.get("trend_pass"), Some(&1));
+    assert_eq!(report.stage_counts.get("trend_blocked"), None);
 }
 #[test]
 fn simulate_trade_treats_same_candle_stop_and_target_as_loss() {
@@ -2211,6 +2472,43 @@ fn filters_confirmed_events_by_symbol_blocklist_before_entry_trigger() {
     assert_eq!(filtered[0].event.symbol, "JTO-USDT-SWAP");
 }
 #[test]
+fn filters_confirmed_events_by_symbol_cooldown() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_symbol_cooldown_candles: Some(4),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let mut first = confirmed_event(1, "breakout_previous_high");
+    first.event.symbol = "DYDX-USDT-SWAP".to_string();
+    first.entry_ts = MS_15M;
+    let mut skipped_same_symbol = confirmed_event(2, "breakout_previous_high");
+    skipped_same_symbol.event.symbol = "DYDX-USDT-SWAP".to_string();
+    skipped_same_symbol.entry_ts = MS_15M * 3;
+    let mut other_symbol = confirmed_event(3, "breakout_previous_high");
+    other_symbol.event.symbol = "ZBT-USDT-SWAP".to_string();
+    other_symbol.entry_ts = MS_15M * 3;
+    let mut allowed_same_symbol = confirmed_event(4, "breakout_previous_high");
+    allowed_same_symbol.event.symbol = "DYDX-USDT-SWAP".to_string();
+    allowed_same_symbol.entry_ts = MS_15M * 5;
+
+    let filtered = filter_confirmed_events_by_symbol_cooldown(
+        &[
+            first,
+            skipped_same_symbol,
+            other_symbol,
+            allowed_same_symbol,
+        ],
+        &args,
+    );
+
+    assert_eq!(
+        filtered
+            .iter()
+            .map(|event| event.event.id)
+            .collect::<Vec<_>>(),
+        vec![1, 3, 4]
+    );
+}
+#[test]
 fn filters_confirmed_events_by_entry_trigger_with_blocklist_precedence() {
     let args = MarketVelocityEventBacktestArgs {
         entry_trigger_allowlist: vec![
@@ -2375,5 +2673,40 @@ fn trend_ok_4h_candles() -> Vec<BacktestCandle> {
         ohlc(MS_4H, 99.0, 100.0, 98.0, 99.5),
         ohlc(MS_4H * 2, 100.0, 101.0, 99.0, 100.5),
         ohlc(MS_4H * 3, 104.0, 106.0, 103.0, 105.0),
+    ]
+}
+fn trend_blocking_4h_candles() -> Vec<BacktestCandle> {
+    vec![
+        ohlc(0, 105.0, 106.0, 104.0, 105.0),
+        ohlc(MS_4H, 104.0, 105.0, 103.0, 104.0),
+        ohlc(MS_4H * 2, 103.0, 104.0, 102.0, 103.0),
+        ohlc(MS_4H * 3, 99.0, 100.0, 98.0, 99.0),
+    ]
+}
+fn trend_ok_1h_candles(base_ts: i64) -> Vec<BacktestCandle> {
+    vec![
+        ohlc(base_ts - MS_1H * 4, 100.0, 101.0, 99.0, 100.0),
+        ohlc(base_ts - MS_1H * 3, 101.0, 102.0, 100.0, 101.0),
+        ohlc(base_ts - MS_1H * 2, 102.0, 103.0, 101.0, 102.0),
+        ohlc(base_ts - MS_1H, 105.0, 107.0, 104.0, 106.0),
+        ohlc(base_ts, 106.0, 108.0, 105.0, 107.0),
+    ]
+}
+fn momentum_15m_entry_candles(base_ts: i64) -> Vec<BacktestCandle> {
+    vec![
+        candle(base_ts, 100.0, 10.0),
+        candle(base_ts + MS_15M, 101.0, 10.0),
+        candle(base_ts + MS_15M * 2, 102.0, 10.0),
+        ohlc(base_ts + MS_15M * 3, 101.5, 102.4, 101.0, 102.0),
+        BacktestCandle {
+            ts: base_ts + MS_15M * 4,
+            open: 102.0,
+            high: 106.0,
+            low: 101.8,
+            close: 105.0,
+            volume: 20.0,
+        },
+        ohlc(base_ts + MS_15M * 5, 105.0, 106.0, 104.8, 105.5),
+        ohlc(base_ts + MS_15M * 6, 105.5, 107.0, 105.0, 106.0),
     ]
 }

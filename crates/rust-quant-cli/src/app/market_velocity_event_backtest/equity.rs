@@ -1267,6 +1267,7 @@ pub fn market_velocity_strategy_type(args: &MarketVelocityEventBacktestArgs) -> 
         super::MarketVelocityEventSource::Episodes => "market_velocity_episode",
         super::MarketVelocityEventSource::RawEvents => "market_velocity_raw_events",
         super::MarketVelocityEventSource::RawState => "market_velocity_raw_state",
+        super::MarketVelocityEventSource::Kline15m => "market_velocity_kline_15m",
     }
 }
 /// 提供市场动量detail信号值的集中实现，避免回测策略调用方重复处理相同细节。
@@ -1291,6 +1292,7 @@ fn market_velocity_detail_signal_value(
             super::MarketVelocityEventSource::Episodes => "episodes",
             super::MarketVelocityEventSource::RawEvents => "raw_events",
             super::MarketVelocityEventSource::RawState => "raw_state",
+            super::MarketVelocityEventSource::Kline15m => "kline_15m",
         },
     })
 }

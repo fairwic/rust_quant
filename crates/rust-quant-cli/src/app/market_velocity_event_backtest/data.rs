@@ -1,10 +1,13 @@
 use super::{
-    build_computed_candles, BacktestCandle, BacktestDataSet, CandlePair,
-    MarketVelocityEventBacktestArgs, MarketVelocityEventSource, RadarEvent,
+    build_computed_candles, BacktestCandle, BacktestDataSet, CandlePair, FvgEntryMode,
+    MarketVelocityEventBacktestArgs, MarketVelocityEventSource, MarketVelocityTrendTimeframe,
+    RadarEvent, FAST_MOMENTUM_BOLLINGER_PERIOD, FAST_MOMENTUM_RSI_PERIOD, MS_15M, MS_1H, MS_4H,
+    PAPER_OUTCOME_HORIZONS,
 };
 use anyhow::{Context, Result};
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
+const FAST_15M_CONTEXT_WARMUP_CANDLES: usize = 96;
 /// 封装当前函数，减少回测策略调用方重复实现相同细节。
 /// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
 pub(super) async fn load_backtest_data(
@@ -16,18 +19,26 @@ pub(super) async fn load_backtest_data(
         .iter()
         .map(|pair| pair.symbol.clone())
         .collect::<Vec<_>>();
+    let events = load_events(pool, &symbols, args).await?;
+    let candle_window = candle_load_window_ms(args, &events);
     let mut candles_15m = HashMap::new();
     let mut candles_1h = HashMap::new();
     let mut candles_4h = HashMap::new();
     let mut candles_15m_computed = HashMap::new();
     let mut candles_4h_computed = HashMap::new();
+    let load_1h_candles = should_load_1h_candles(args);
+    let load_4h_candles = should_load_4h_candles(args);
     for pair in &pairs {
-        let raw_15m = load_candles(pool, &pair.candles_15m).await?;
-        let raw_1h = match pair.candles_1h.as_deref() {
-            Some(table_name) => load_candles(pool, table_name).await?,
-            None => Vec::new(),
+        let raw_15m = load_candles(pool, &pair.candles_15m, candle_window).await?;
+        let raw_1h = match (load_1h_candles, pair.candles_1h.as_deref()) {
+            (true, Some(table_name)) => load_candles(pool, table_name, candle_window).await?,
+            _ => Vec::new(),
         };
-        let raw_4h = load_candles(pool, &pair.candles_4h).await?;
+        let raw_4h = if load_4h_candles {
+            load_candles(pool, &pair.candles_4h, candle_window).await?
+        } else {
+            Vec::new()
+        };
         candles_15m_computed.insert(
             pair.symbol.clone(),
             build_computed_candles(raw_15m.clone(), args.entry_period),
@@ -40,7 +51,6 @@ pub(super) async fn load_backtest_data(
         candles_1h.insert(pair.symbol.clone(), raw_1h);
         candles_4h.insert(pair.symbol.clone(), raw_4h);
     }
-    let events = load_events(pool, &symbols, args).await?;
     Ok(BacktestDataSet {
         pairs,
         candles_15m,
@@ -57,14 +67,20 @@ async fn load_candle_pairs(
     args: &MarketVelocityEventBacktestArgs,
 ) -> Result<Vec<CandlePair>> {
     let sql = candidate_symbols_sql(args);
-    let rows = sqlx::query(sql)
+    let mut query = sqlx::query(sql)
         .bind(args.min_delta_rank)
         .bind(args.max_delta_rank)
         .bind(args.min_price_change_pct)
         .bind(args.max_price_change_pct)
         .bind(args.trade_direction.label())
         .bind(args.event_start_ms)
-        .bind(args.event_end_ms)
+        .bind(args.event_end_ms);
+    if args.event_source == MarketVelocityEventSource::Kline15m {
+        query = query
+            .bind(i64::try_from(args.sample_limit).unwrap_or(i64::MAX))
+            .bind(args.sample_seed.as_str());
+    }
+    let rows = query
         .fetch_all(pool)
         .await
         .context("load market velocity candle table pairs")?;
@@ -98,8 +114,8 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
                 AND current_price IS NOT NULL
                 AND ($3::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $3)
                 AND ($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) <= $4)
-                AND ($6::bigint IS NULL OR floor(extract(epoch from started_at) * 1000)::bigint >= $6)
-                AND ($7::bigint IS NULL OR floor(extract(epoch from started_at) * 1000)::bigint <= $7)
+                AND ($6::bigint IS NULL OR started_at >= to_timestamp($6::double precision / 1000.0))
+                AND ($7::bigint IS NULL OR started_at <= to_timestamp($7::double precision / 1000.0))
             )
             SELECT
               candidates.symbol,
@@ -124,7 +140,8 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
             WITH candidates AS (
               SELECT DISTINCT upper(symbol) AS symbol
               FROM market_rank_events
-              WHERE event_type IN ('rank_velocity', 'top_entry')
+              WHERE event_type = 'rank_velocity'
+                AND COALESCE(timeframe, '') = '15分钟'
                 AND delta_rank >= $1
                 AND ($2::int IS NULL OR delta_rank <= $2)
                 AND (
@@ -135,8 +152,8 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
                 AND current_price IS NOT NULL
                 AND ($3::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $3)
                 AND ($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) <= $4)
-                AND ($6::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint >= $6)
-                AND ($7::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint <= $7)
+                AND ($6::bigint IS NULL OR detected_at >= to_timestamp($6::double precision / 1000.0))
+                AND ($7::bigint IS NULL OR detected_at <= to_timestamp($7::double precision / 1000.0))
             )
             SELECT
               candidates.symbol,
@@ -156,18 +173,57 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
             ORDER BY candidates.symbol
             "#
         }
+        MarketVelocityEventSource::Kline15m => {
+            r#"
+            WITH candidates AS (
+              SELECT
+                upper(replace(table_name, '_candles_15m', '')) AS symbol,
+                table_name AS candles_15m
+              FROM information_schema.tables
+              WHERE table_schema = 'public'
+                AND table_name LIKE '%\_candles\_15m' ESCAPE '\'
+            )
+            SELECT
+              candidates.symbol,
+              candidates.candles_15m,
+              t1.table_name AS candles_1h,
+              COALESCE(t4.table_name, candidates.candles_15m) AS candles_4h
+            FROM candidates
+            LEFT JOIN information_schema.tables t1
+              ON t1.table_schema = 'public'
+             AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
+            LEFT JOIN information_schema.tables t4
+              ON t4.table_schema = 'public'
+             AND t4.table_name = lower(candidates.symbol) || '_candles_4h'
+            ORDER BY md5($9::text || ':' || candidates.symbol)
+            LIMIT $8
+            "#
+        }
     }
 }
 /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
-async fn load_candles(pool: &PgPool, table_name: &str) -> Result<Vec<BacktestCandle>> {
-    let query = format!(
-        "SELECT ts, o, h, l, c, vol FROM {} ORDER BY ts",
-        quote_identifier(table_name)
-    );
-    let rows = sqlx::query(&query)
-        .fetch_all(pool)
-        .await
-        .with_context(|| format!("load candles from {table_name}"))?;
+async fn load_candles(
+    pool: &PgPool,
+    table_name: &str,
+    window_ms: Option<(i64, i64)>,
+) -> Result<Vec<BacktestCandle>> {
+    let table_name = quote_identifier(table_name);
+    let rows = match window_ms {
+        Some((start_ms, end_ms)) => {
+            let query =
+                format!("SELECT ts, o, h, l, c, vol FROM {table_name} WHERE ts >= $1 AND ts <= $2 ORDER BY ts");
+            sqlx::query(&query)
+                .bind(start_ms)
+                .bind(end_ms)
+                .fetch_all(pool)
+                .await
+        }
+        None => {
+            let query = format!("SELECT ts, o, h, l, c, vol FROM {table_name} ORDER BY ts");
+            sqlx::query(&query).fetch_all(pool).await
+        }
+    }
+    .with_context(|| format!("load candles from {table_name}"))?;
     rows.into_iter()
         .map(|row| {
             Ok(BacktestCandle {
@@ -181,6 +237,120 @@ async fn load_candles(pool: &PgPool, table_name: &str) -> Result<Vec<BacktestCan
         })
         .collect()
 }
+/// 判断当前研究参数是否需要读取 1H K 线，避免纯 15m/4h 方案反复拉取无用数据。
+fn should_load_1h_candles(args: &MarketVelocityEventBacktestArgs) -> bool {
+    args.trend_timeframe == MarketVelocityTrendTimeframe::OneHour
+        || matches!(
+            args.fvg_entry_mode,
+            FvgEntryMode::M15To1h | FvgEntryMode::H1To4h
+        )
+}
+/// 判断当前研究参数是否需要读取 4H K 线，避免无高周期门槛时被历史 4H 数据拖慢。
+fn should_load_4h_candles(args: &MarketVelocityEventBacktestArgs) -> bool {
+    args.trend_timeframe == MarketVelocityTrendTimeframe::FourHour
+        || matches!(args.fvg_entry_mode, FvgEntryMode::H1To4h)
+}
+/// 根据实际候选事件裁剪 K 线加载范围，避免参数扫描时反复拉取全量历史 K 线。
+fn candle_load_window_ms(
+    args: &MarketVelocityEventBacktestArgs,
+    events: &[RadarEvent],
+) -> Option<(i64, i64)> {
+    let first_event_ts = events.iter().map(|event| event.ts).min()?;
+    let last_event_ts = events.iter().map(|event| event.ts).max()?;
+    let warmup_ms = trend_warmup_ms(args)
+        .max(entry_warmup_ms(args))
+        .max(fvg_warmup_ms(args));
+    let max_outcome_horizon_ms = PAPER_OUTCOME_HORIZONS
+        .iter()
+        .map(|(_, horizon_ms)| *horizon_ms)
+        .max()
+        .unwrap_or(0);
+    let post_signal_wait_ms = fvg_post_signal_wait_ms(args)
+        .max(retest_post_signal_wait_ms(args))
+        .saturating_add(candle_window_tail_buffer_ms(args));
+    Some((
+        first_event_ts.saturating_sub(warmup_ms),
+        last_event_ts
+            .saturating_add(max_outcome_horizon_ms)
+            .saturating_add(post_signal_wait_ms),
+    ))
+}
+fn trend_warmup_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
+    match args.trend_timeframe {
+        MarketVelocityTrendTimeframe::FourHour => candle_count_ms(args.entry_period + 3, MS_4H),
+        MarketVelocityTrendTimeframe::OneHour => candle_count_ms(args.entry_period + 3, MS_1H),
+        MarketVelocityTrendTimeframe::Off => 0,
+    }
+}
+fn entry_warmup_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
+    let mut warmup_candles = args
+        .entry_period
+        .saturating_add(3)
+        .max(FAST_15M_CONTEXT_WARMUP_CANDLES);
+    if args.entry_min_rsi.is_some()
+        || args.entry_max_rsi.is_some()
+        || args.entry_min_rsi_delta.is_some()
+    {
+        warmup_candles = warmup_candles.max(
+            FAST_MOMENTUM_RSI_PERIOD
+                .saturating_add(args.entry_rsi_delta_lookback_candles)
+                .saturating_add(3),
+        );
+    }
+    if args.entry_bollinger_breakout || args.entry_min_bollinger_bandwidth_expansion_pct.is_some() {
+        warmup_candles = warmup_candles.max(FAST_MOMENTUM_BOLLINGER_PERIOD.saturating_add(3));
+    }
+    if args.entry_min_recent_drawdown_pct.is_some() {
+        warmup_candles = warmup_candles.max(
+            args.entry_recent_drawdown_lookback_candles
+                .saturating_add(3),
+        );
+    }
+    candle_count_ms(warmup_candles, MS_15M)
+}
+fn fvg_warmup_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
+    match args.fvg_entry_mode {
+        FvgEntryMode::Off => 0,
+        FvgEntryMode::M15SelfAfterSignal | FvgEntryMode::M15ImpulseRetrace => {
+            candle_count_ms(args.fvg_lookback_candles.saturating_add(3), MS_15M)
+        }
+        FvgEntryMode::M15To1h => {
+            candle_count_ms(args.fvg_lookback_candles.saturating_add(3), MS_1H)
+        }
+        FvgEntryMode::H1To4h => candle_count_ms(args.fvg_lookback_candles.saturating_add(3), MS_4H),
+    }
+}
+fn fvg_post_signal_wait_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
+    match args.fvg_entry_mode {
+        FvgEntryMode::Off => 0,
+        FvgEntryMode::M15To1h
+        | FvgEntryMode::M15SelfAfterSignal
+        | FvgEntryMode::M15ImpulseRetrace => candle_count_ms(args.fvg_max_wait_candles, MS_15M),
+        FvgEntryMode::H1To4h => candle_count_ms(args.fvg_max_wait_candles, MS_1H),
+    }
+}
+fn retest_post_signal_wait_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
+    if args.entry_retest_after_signal {
+        candle_count_ms(args.entry_retest_max_wait_candles, MS_15M)
+    } else {
+        0
+    }
+}
+fn candle_window_tail_buffer_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
+    if should_load_4h_candles(args) {
+        MS_4H
+    } else if should_load_1h_candles(args) {
+        MS_1H
+    } else {
+        MS_15M
+    }
+}
+/// 将 K 线根数转换成毫秒跨度，溢出时按 i64 上限饱和，避免极端参数破坏窗口计算。
+fn candle_count_ms(count: usize, candle_ms: i64) -> i64 {
+    i64::try_from(count)
+        .unwrap_or(i64::MAX / candle_ms)
+        .saturating_mul(candle_ms)
+}
 /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_events(
     pool: &PgPool,
@@ -189,6 +359,9 @@ async fn load_events(
 ) -> Result<Vec<RadarEvent>> {
     if symbols.is_empty() {
         return Ok(Vec::new());
+    }
+    if args.event_source == MarketVelocityEventSource::Kline15m {
+        return load_kline_15m_events(pool, symbols, args).await;
     }
     let sql = event_source_sql(args);
     let rows = sqlx::query(sql)
@@ -248,8 +421,8 @@ fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
               AND current_price IS NOT NULL
               AND ($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $4)
               AND ($5::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) <= $5)
-              AND ($7::bigint IS NULL OR floor(extract(epoch from started_at) * 1000)::bigint >= $7)
-              AND ($8::bigint IS NULL OR floor(extract(epoch from started_at) * 1000)::bigint <= $8)
+              AND ($7::bigint IS NULL OR started_at >= to_timestamp($7::double precision / 1000.0))
+              AND ($8::bigint IS NULL OR started_at <= to_timestamp($8::double precision / 1000.0))
             ORDER BY started_at, id
             "#
         }
@@ -267,7 +440,8 @@ fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
               COALESCE(price_change_pct, 0)::text AS price_change_pct
             FROM market_rank_events
             WHERE upper(symbol) = ANY($1)
-              AND event_type IN ('rank_velocity', 'top_entry')
+              AND event_type = 'rank_velocity'
+              AND COALESCE(timeframe, '') = '15分钟'
               AND delta_rank >= $2
               AND ($3::int IS NULL OR delta_rank <= $3)
               AND (
@@ -278,8 +452,8 @@ fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
               AND current_price IS NOT NULL
               AND ($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $4)
               AND ($5::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) <= $5)
-              AND ($7::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint >= $7)
-              AND ($8::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint <= $8)
+              AND ($7::bigint IS NULL OR detected_at >= to_timestamp($7::double precision / 1000.0))
+              AND ($8::bigint IS NULL OR detected_at <= to_timestamp($8::double precision / 1000.0))
             ORDER BY detected_at, id
             "#
         }
@@ -298,7 +472,8 @@ fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
                 floor(extract(epoch from detected_at) / 900) AS detected_15m_bucket
               FROM market_rank_events
               WHERE upper(symbol) = ANY($1)
-                AND event_type IN ('rank_velocity', 'top_entry')
+                AND event_type = 'rank_velocity'
+                AND COALESCE(timeframe, '') = '15分钟'
                 AND delta_rank >= $2
                 AND ($3::int IS NULL OR delta_rank <= $3)
                 AND (
@@ -309,8 +484,8 @@ fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
                 AND current_price IS NOT NULL
                 AND ($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) >= $4)
                 AND ($5::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) <= $5)
-                AND ($7::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint >= $7)
-                AND ($8::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint <= $8)
+                AND ($7::bigint IS NULL OR detected_at >= to_timestamp($7::double precision / 1000.0))
+                AND ($8::bigint IS NULL OR detected_at <= to_timestamp($8::double precision / 1000.0))
             )
             SELECT *
             FROM (
@@ -330,7 +505,109 @@ fn event_source_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
             ORDER BY detected_ms, id
             "#
         }
+        MarketVelocityEventSource::Kline15m => "SELECT 1::bigint AS id WHERE false",
     }
+}
+/// 从已抽样的 15m K 线表直接生成 synthetic radar events，用来验证信号逻辑本身。
+async fn load_kline_15m_events(
+    pool: &PgPool,
+    symbols: &[String],
+    args: &MarketVelocityEventBacktestArgs,
+) -> Result<Vec<RadarEvent>> {
+    let mut events = Vec::new();
+    for symbol in symbols {
+        let table_name = format!("{}_candles_15m", symbol.to_ascii_lowercase());
+        let query = kline_15m_events_sql(&table_name);
+        let rows = sqlx::query(&query)
+            .bind(args.event_start_ms)
+            .bind(args.event_end_ms)
+            .bind(args.min_price_change_pct)
+            .bind(args.max_price_change_pct)
+            .bind(args.trade_direction.label())
+            .fetch_all(pool)
+            .await
+            .with_context(|| format!("load synthetic 15m kline events from {table_name}"))?;
+        for row in rows {
+            let detected_ms: i64 = row.get("detected_ms");
+            let open = parse_f64(row.get::<String, _>("open_price").as_str())?;
+            let close = parse_f64(row.get::<String, _>("current_price").as_str())?;
+            let price_change_pct = kline_event_price_change_pct(open, close, args);
+            events.push(RadarEvent {
+                id: synthetic_kline_event_id(symbol, detected_ms),
+                exchange: "okx".to_string(),
+                symbol: symbol.to_string(),
+                ts: detected_ms,
+                detected_at: row.get("detected_at"),
+                new_rank: 0,
+                delta_rank: 0,
+                current_price: close,
+                price_change_pct,
+            });
+        }
+    }
+    events.sort_by_key(|event| (event.ts, event.id));
+    Ok(events)
+}
+/// 生成单个 15m K 线表的 synthetic event 查询；表名必须先经过 identifier quoting。
+fn kline_15m_events_sql(table_name: &str) -> String {
+    let table_name = quote_identifier(table_name);
+    format!(
+        r#"
+        SELECT
+          ts + 900000 AS detected_ms,
+          to_timestamp((ts + 900000)::double precision / 1000.0)::text AS detected_at,
+          o::text AS open_price,
+          c::text AS current_price
+        FROM {table_name}
+        WHERE ($1::bigint IS NULL OR ts + 900000 >= $1)
+          AND ($2::bigint IS NULL OR ts + 900000 <= $2)
+          AND o::double precision > 0
+          AND (
+            ($5 = 'long' AND c::double precision > o::double precision)
+            OR ($5 = 'short' AND c::double precision < o::double precision)
+            OR ($5 = 'both' AND c::double precision <> o::double precision)
+          )
+          AND ($3::double precision IS NULL OR CASE
+            WHEN $5 = 'short' THEN (o::double precision - c::double precision) / o::double precision * 100.0
+            WHEN $5 = 'both' THEN ABS((c::double precision - o::double precision) / o::double precision * 100.0)
+            ELSE (c::double precision - o::double precision) / o::double precision * 100.0
+          END >= $3)
+          AND ($4::double precision IS NULL OR CASE
+            WHEN $5 = 'short' THEN (o::double precision - c::double precision) / o::double precision * 100.0
+            WHEN $5 = 'both' THEN ABS((c::double precision - o::double precision) / o::double precision * 100.0)
+            ELSE (c::double precision - o::double precision) / o::double precision * 100.0
+          END <= $4)
+        ORDER BY ts
+        "#
+    )
+}
+/// 按研究方向给 synthetic event 写入方向性，后续复用既有 long/short 入口评估。
+fn kline_event_price_change_pct(
+    open: f64,
+    close: f64,
+    args: &MarketVelocityEventBacktestArgs,
+) -> f64 {
+    let raw = valid_open_price(open)
+        .then_some((close - open) / open * 100.0)
+        .unwrap_or(0.0);
+    match args.trade_direction {
+        super::MarketVelocityTradeDirection::Long => raw.abs(),
+        super::MarketVelocityTradeDirection::Short => -raw.abs(),
+        super::MarketVelocityTradeDirection::Both => raw,
+    }
+}
+fn valid_open_price(open: f64) -> bool {
+    open.is_finite() && open > 0.0
+}
+fn synthetic_kline_event_id(symbol: &str, detected_ms: i64) -> i64 {
+    let mut hash = 17_i64;
+    for byte in symbol.as_bytes() {
+        hash = hash.wrapping_mul(31).wrapping_add(i64::from(*byte));
+    }
+    let symbol_component = (hash.unsigned_abs() % 1_000_000) as i64;
+    symbol_component
+        .saturating_mul(10_000_000)
+        .saturating_add((detected_ms / MS_15M).rem_euclid(10_000_000))
 }
 /// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_f64(value: &str) -> Result<f64> {
@@ -345,7 +622,8 @@ fn quote_identifier(identifier: &str) -> String {
 mod tests {
     use super::*;
     use crate::app::market_velocity_event_backtest::{
-        MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
+        FvgEntryMode, MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
+        MarketVelocityTrendTimeframe, MS_15M, MS_1H, MS_4H,
     };
     #[test]
     fn episode_event_source_reads_episode_table() {
@@ -379,6 +657,104 @@ mod tests {
         assert!(sql.contains("ORDER BY upper(symbol), detected_15m_bucket, detected_at, id"));
     }
     #[test]
+    fn raw_rank_event_sources_only_consume_15m_rank_velocity_events() {
+        for event_source in [
+            MarketVelocityEventSource::RawEvents,
+            MarketVelocityEventSource::RawState,
+        ] {
+            let args = MarketVelocityEventBacktestArgs {
+                event_source,
+                ..MarketVelocityEventBacktestArgs::default()
+            };
+            let candidate_sql = candidate_symbols_sql(&args);
+            let event_sql = event_source_sql(&args);
+
+            assert!(candidate_sql.contains("event_type = 'rank_velocity'"));
+            assert!(event_sql.contains("event_type = 'rank_velocity'"));
+            assert!(candidate_sql.contains("COALESCE(timeframe, '') = '15分钟'"));
+            assert!(event_sql.contains("COALESCE(timeframe, '') = '15分钟'"));
+            assert!(!candidate_sql.contains("event_type IN ('rank_velocity', 'top_entry')"));
+            assert!(!event_sql.contains("event_type IN ('rank_velocity', 'top_entry')"));
+        }
+    }
+    #[test]
+    fn kline_15m_event_source_reads_candle_tables_without_market_rank_events() {
+        let args = MarketVelocityEventBacktestArgs {
+            event_source: MarketVelocityEventSource::Kline15m,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let candidate_sql = candidate_symbols_sql(&args);
+        let event_sql = kline_15m_events_sql("btc-usdt-swap_candles_15m");
+
+        assert!(candidate_sql.contains("information_schema.tables"));
+        assert!(candidate_sql.contains("LIKE '%\\_candles\\_15m' ESCAPE '\\'"));
+        assert!(candidate_sql.contains("ORDER BY md5($9::text || ':' || candidates.symbol)"));
+        assert!(candidate_sql.contains("LIMIT $8"));
+        assert!(!candidate_sql.contains("market_rank_events"));
+        assert!(event_sql.contains("ts + 900000 AS detected_ms"));
+        assert!(!event_sql.contains("market_rank_events"));
+    }
+    #[test]
+    fn kline_15m_event_source_filters_completed_candles_by_trade_direction() {
+        let event_sql = kline_15m_events_sql("btc-usdt-swap_candles_15m");
+
+        assert!(event_sql.contains("$5 = 'long' AND c::double precision > o::double precision"));
+        assert!(event_sql.contains("$5 = 'short' AND c::double precision < o::double precision"));
+        assert!(event_sql.contains("$5 = 'both' AND c::double precision <> o::double precision"));
+    }
+    #[test]
+    fn candle_loader_skips_1h_when_trend_and_fvg_do_not_need_it() {
+        let args = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            fvg_entry_mode: FvgEntryMode::Off,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+
+        assert!(!should_load_1h_candles(&args));
+    }
+    #[test]
+    fn candle_loader_reads_1h_for_1h_trend_or_cross_timeframe_fvg() {
+        let one_hour_trend = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::OneHour,
+            fvg_entry_mode: FvgEntryMode::Off,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let fvg_15m_to_1h = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::FourHour,
+            fvg_entry_mode: FvgEntryMode::M15To1h,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+
+        assert!(should_load_1h_candles(&one_hour_trend));
+        assert!(should_load_1h_candles(&fvg_15m_to_1h));
+    }
+    #[test]
+    fn candle_loader_skips_4h_when_trend_and_fvg_do_not_need_it() {
+        let args = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            fvg_entry_mode: FvgEntryMode::Off,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+
+        assert!(!should_load_4h_candles(&args));
+    }
+    #[test]
+    fn candle_loader_reads_4h_for_4h_trend_or_1h_to_4h_fvg() {
+        let four_hour_trend = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::FourHour,
+            fvg_entry_mode: FvgEntryMode::Off,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let fvg_1h_to_4h = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            fvg_entry_mode: FvgEntryMode::H1To4h,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+
+        assert!(should_load_4h_candles(&four_hour_trend));
+        assert!(should_load_4h_candles(&fvg_1h_to_4h));
+    }
+    #[test]
     fn raw_state_event_source_filters_by_max_price_change_pct() {
         let args = MarketVelocityEventBacktestArgs {
             event_source: MarketVelocityEventSource::RawState,
@@ -401,17 +777,19 @@ mod tests {
         let candidate_sql = candidate_symbols_sql(&args);
         let event_sql = event_source_sql(&args);
         assert!(candidate_sql.contains(
-            "($6::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint >= $6)"
+            "($6::bigint IS NULL OR detected_at >= to_timestamp($6::double precision / 1000.0))"
         ));
         assert!(candidate_sql.contains(
-            "($7::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint <= $7)"
+            "($7::bigint IS NULL OR detected_at <= to_timestamp($7::double precision / 1000.0))"
         ));
         assert!(event_sql.contains(
-            "($7::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint >= $7)"
+            "($7::bigint IS NULL OR detected_at >= to_timestamp($7::double precision / 1000.0))"
         ));
         assert!(event_sql.contains(
-            "($8::bigint IS NULL OR floor(extract(epoch from detected_at) * 1000)::bigint <= $8)"
+            "($8::bigint IS NULL OR detected_at <= to_timestamp($8::double precision / 1000.0))"
         ));
+        assert!(!candidate_sql.contains("floor(extract(epoch from detected_at) * 1000)"));
+        assert!(!event_sql.contains("floor(extract(epoch from detected_at) * 1000)::bigint >="));
     }
     #[test]
     fn episode_event_source_filters_by_event_time_window() {
@@ -424,17 +802,19 @@ mod tests {
         let candidate_sql = candidate_symbols_sql(&args);
         let event_sql = event_source_sql(&args);
         assert!(candidate_sql.contains(
-            "($6::bigint IS NULL OR floor(extract(epoch from started_at) * 1000)::bigint >= $6)"
+            "($6::bigint IS NULL OR started_at >= to_timestamp($6::double precision / 1000.0))"
         ));
         assert!(candidate_sql.contains(
-            "($7::bigint IS NULL OR floor(extract(epoch from started_at) * 1000)::bigint <= $7)"
+            "($7::bigint IS NULL OR started_at <= to_timestamp($7::double precision / 1000.0))"
         ));
         assert!(event_sql.contains(
-            "($7::bigint IS NULL OR floor(extract(epoch from started_at) * 1000)::bigint >= $7)"
+            "($7::bigint IS NULL OR started_at >= to_timestamp($7::double precision / 1000.0))"
         ));
         assert!(event_sql.contains(
-            "($8::bigint IS NULL OR floor(extract(epoch from started_at) * 1000)::bigint <= $8)"
+            "($8::bigint IS NULL OR started_at <= to_timestamp($8::double precision / 1000.0))"
         ));
+        assert!(!candidate_sql.contains("floor(extract(epoch from started_at) * 1000)"));
+        assert!(!event_sql.contains("floor(extract(epoch from started_at) * 1000)::bigint >="));
     }
     #[test]
     fn raw_event_source_does_not_filter_by_new_rank() {
@@ -481,5 +861,81 @@ mod tests {
         let sql = candidate_symbols_sql(&args);
         assert!(sql.contains("$5 = 'long'"));
         assert!(!sql.contains("$9 = 'long'"));
+    }
+    #[test]
+    fn candle_load_window_covers_indicator_warmup_and_outcome_horizon() {
+        let args = MarketVelocityEventBacktestArgs {
+            entry_period: 20,
+            trend_timeframe: MarketVelocityTrendTimeframe::FourHour,
+            fvg_entry_mode: FvgEntryMode::Off,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let first_event_ts = 2_000_000_000_000;
+        let last_event_ts = first_event_ts + 900_000;
+        let events = vec![sample_event(first_event_ts), sample_event(last_event_ts)];
+
+        let (start_ms, end_ms) = candle_load_window_ms(&args, &events).unwrap();
+
+        assert!(start_ms <= first_event_ts - 23 * MS_4H);
+        assert!(start_ms <= first_event_ts - 23 * MS_15M);
+        assert!(end_ms >= last_event_ts + 48 * 60 * 60 * 1_000 + MS_4H);
+    }
+    #[test]
+    fn candle_load_window_covers_fvg_warmup_and_wait_only_when_fvg_enabled() {
+        let args = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            fvg_entry_mode: FvgEntryMode::H1To4h,
+            fvg_lookback_candles: 40,
+            fvg_max_wait_candles: 24,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let first_event_ts = 2_000_000_000_000;
+        let last_event_ts = first_event_ts + 900_000;
+        let events = vec![sample_event(first_event_ts), sample_event(last_event_ts)];
+
+        let (start_ms, end_ms) = candle_load_window_ms(&args, &events).unwrap();
+
+        assert!(start_ms <= first_event_ts - 43 * MS_4H);
+        assert!(end_ms >= last_event_ts + 48 * 60 * 60 * 1_000 + 24 * MS_1H + MS_4H);
+    }
+    #[test]
+    fn candle_load_window_skips_unused_4h_warmup_for_fast_15m_backtests() {
+        let args = MarketVelocityEventBacktestArgs {
+            entry_period: 20,
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            fvg_entry_mode: FvgEntryMode::Off,
+            fvg_lookback_candles: 40,
+            fvg_max_wait_candles: 24,
+            entry_retest_after_signal: false,
+            entry_retest_max_wait_candles: 8,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let first_event_ts = 2_000_000_000_000;
+        let last_event_ts = first_event_ts + 900_000;
+        let events = vec![sample_event(first_event_ts), sample_event(last_event_ts)];
+
+        let (start_ms, end_ms) = candle_load_window_ms(&args, &events).unwrap();
+
+        assert_eq!(start_ms, first_event_ts - 96 * MS_15M);
+        assert_eq!(end_ms, last_event_ts + 48 * 60 * 60 * 1_000 + MS_15M);
+    }
+    #[test]
+    fn candle_load_window_returns_none_without_events() {
+        let args = MarketVelocityEventBacktestArgs::default();
+
+        assert!(candle_load_window_ms(&args, &[]).is_none());
+    }
+    fn sample_event(ts: i64) -> RadarEvent {
+        RadarEvent {
+            id: ts,
+            exchange: "okx".to_string(),
+            symbol: "BTC-USDT-SWAP".to_string(),
+            ts,
+            detected_at: "2033-05-18T03:33:20Z".to_string(),
+            new_rank: 1,
+            delta_rank: 11,
+            current_price: 100.0,
+            price_change_pct: 4.0,
+        }
     }
 }

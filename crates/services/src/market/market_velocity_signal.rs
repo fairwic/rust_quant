@@ -37,6 +37,8 @@ const DEFAULT_MAX_HOLDING_HOURS: u32 = 48;
 const DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT: f64 = 5.5;
 const DEFAULT_ENTRY_MIN_VOLUME_RATIO: f64 = 1.0;
 const DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT: Option<f64> = None;
+const DEFAULT_ENTRY_RSI_DELTA_LOOKBACK_CANDLES: usize = 3;
+const DEFAULT_ENTRY_RECENT_DRAWDOWN_LOOKBACK_CANDLES: usize = 12;
 const DEFAULT_ENTRY_RETEST_AFTER_SIGNAL: bool = false;
 const DEFAULT_ENTRY_RETEST_MAX_WAIT_CANDLES: usize = 8;
 const DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT: f64 = 0.0;
@@ -164,6 +166,22 @@ pub struct MarketVelocityStrategySignalConfig {
     pub entry_max_average_distance_pct: f64,
     /// 入场最小volume 比例。
     pub entry_min_volume_ratio: f64,
+    /// 15m 入场 RSI 下限；为空时不启用。
+    pub entry_min_rsi: Option<f64>,
+    /// 15m 入场 RSI 上限；为空时不启用。
+    pub entry_max_rsi: Option<f64>,
+    /// 15m 入场 RSI 增量下限；为空时不启用。
+    pub entry_min_rsi_delta: Option<f64>,
+    /// RSI 增量回看 K 线数量。
+    pub entry_rsi_delta_lookback_candles: usize,
+    /// 是否要求 15m 布林上轨突破。
+    pub entry_bollinger_breakout: bool,
+    /// 布林带宽扩张百分比下限；为空时不启用。
+    pub entry_min_bollinger_bandwidth_expansion_pct: Option<f64>,
+    /// 入场前 recent drawdown 百分比下限；为空时不启用。
+    pub entry_min_recent_drawdown_pct: Option<f64>,
+    /// recent drawdown 回看 K 线数量。
+    pub entry_recent_drawdown_lookback_candles: usize,
     /// signal 当前价到实际入场价允许的最大回撤百分比；为空时不启用。
     pub entry_max_signal_pullback_pct: Option<f64>,
     /// 前高回踩确认允许的价格容差百分比。
@@ -222,6 +240,14 @@ impl Default for MarketVelocityStrategySignalConfig {
             entry_confirmation_fetch_limit: 80,
             entry_max_average_distance_pct: DEFAULT_ENTRY_MAX_AVERAGE_DISTANCE_PCT,
             entry_min_volume_ratio: DEFAULT_ENTRY_MIN_VOLUME_RATIO,
+            entry_min_rsi: None,
+            entry_max_rsi: None,
+            entry_min_rsi_delta: None,
+            entry_rsi_delta_lookback_candles: DEFAULT_ENTRY_RSI_DELTA_LOOKBACK_CANDLES,
+            entry_bollinger_breakout: false,
+            entry_min_bollinger_bandwidth_expansion_pct: None,
+            entry_min_recent_drawdown_pct: None,
+            entry_recent_drawdown_lookback_candles: DEFAULT_ENTRY_RECENT_DRAWDOWN_LOOKBACK_CANDLES,
             entry_max_signal_pullback_pct: DEFAULT_ENTRY_MAX_SIGNAL_PULLBACK_PCT,
             entry_retest_tolerance_pct: 0.3,
             entry_retest_after_signal: DEFAULT_ENTRY_RETEST_AFTER_SIGNAL,
@@ -318,6 +344,27 @@ impl MarketVelocityStrategySignalConfig {
                 "MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO",
                 DEFAULT_ENTRY_MIN_VOLUME_RATIO,
             )?,
+            entry_min_rsi: parse_env_optional_f64("MARKET_VELOCITY_ENTRY_MIN_RSI")?,
+            entry_max_rsi: parse_env_optional_f64("MARKET_VELOCITY_ENTRY_MAX_RSI")?,
+            entry_min_rsi_delta: parse_env_optional_f64("MARKET_VELOCITY_ENTRY_MIN_RSI_DELTA")?,
+            entry_rsi_delta_lookback_candles: parse_env_usize(
+                "MARKET_VELOCITY_ENTRY_RSI_DELTA_LOOKBACK_CANDLES",
+                DEFAULT_ENTRY_RSI_DELTA_LOOKBACK_CANDLES,
+            )?,
+            entry_bollinger_breakout: parse_env_bool(
+                "MARKET_VELOCITY_ENTRY_BOLLINGER_BREAKOUT",
+                false,
+            )?,
+            entry_min_bollinger_bandwidth_expansion_pct: parse_env_optional_f64(
+                "MARKET_VELOCITY_ENTRY_MIN_BOLLINGER_BANDWIDTH_EXPANSION_PCT",
+            )?,
+            entry_min_recent_drawdown_pct: parse_env_optional_f64(
+                "MARKET_VELOCITY_ENTRY_MIN_RECENT_DRAWDOWN_PCT",
+            )?,
+            entry_recent_drawdown_lookback_candles: parse_env_usize(
+                "MARKET_VELOCITY_ENTRY_RECENT_DRAWDOWN_LOOKBACK_CANDLES",
+                DEFAULT_ENTRY_RECENT_DRAWDOWN_LOOKBACK_CANDLES,
+            )?,
             entry_max_signal_pullback_pct: parse_env_optional_f64(
                 "MARKET_VELOCITY_SIGNAL_ENTRY_MAX_SIGNAL_PULLBACK_PCT",
             )?
@@ -391,13 +438,17 @@ impl MarketVelocityStrategySignalConfig {
         if let Some(value) = json_i32(config, "min_delta_rank")? {
             parsed.min_delta_rank = value;
         }
-        if let Some(value) = json_i32(config, "max_delta_rank")? {
+        if json_value_is_null(config, "max_delta_rank") {
+            parsed.max_delta_rank = None;
+        } else if let Some(value) = json_i32(config, "max_delta_rank")? {
             parsed.max_delta_rank = Some(value);
         }
         if let Some(value) = json_f64(config, "min_price_change_pct")? {
             parsed.min_price_change_pct = Some(value);
         }
-        if let Some(value) = json_f64(config, "max_price_change_pct")? {
+        if json_value_is_null(config, "max_price_change_pct") {
+            parsed.max_price_change_pct = None;
+        } else if let Some(value) = json_f64(config, "max_price_change_pct")? {
             parsed.max_price_change_pct = Some(value);
         }
         if let Some(value) = json_f64(config, "stop_loss_pct")? {
@@ -444,6 +495,30 @@ impl MarketVelocityStrategySignalConfig {
         }
         if let Some(value) = json_f64(config, "entry_min_volume_ratio")? {
             parsed.entry_min_volume_ratio = value;
+        }
+        if let Some(value) = json_f64(config, "entry_min_rsi")? {
+            parsed.entry_min_rsi = Some(value);
+        }
+        if let Some(value) = json_f64(config, "entry_max_rsi")? {
+            parsed.entry_max_rsi = Some(value);
+        }
+        if let Some(value) = json_f64(config, "entry_min_rsi_delta")? {
+            parsed.entry_min_rsi_delta = Some(value);
+        }
+        if let Some(value) = json_usize(config, "entry_rsi_delta_lookback_candles")? {
+            parsed.entry_rsi_delta_lookback_candles = value;
+        }
+        if let Some(value) = json_bool(config, "entry_bollinger_breakout")? {
+            parsed.entry_bollinger_breakout = value;
+        }
+        if let Some(value) = json_f64(config, "entry_min_bollinger_bandwidth_expansion_pct")? {
+            parsed.entry_min_bollinger_bandwidth_expansion_pct = Some(value);
+        }
+        if let Some(value) = json_f64(config, "entry_min_recent_drawdown_pct")? {
+            parsed.entry_min_recent_drawdown_pct = Some(value);
+        }
+        if let Some(value) = json_usize(config, "entry_recent_drawdown_lookback_candles")? {
+            parsed.entry_recent_drawdown_lookback_candles = value;
         }
         if let Some(value) = json_f64(config, "entry_max_signal_pullback_pct")? {
             parsed.entry_max_signal_pullback_pct = Some(value);
@@ -537,6 +612,12 @@ impl MarketVelocityStrategySignalConfig {
         self.fvg_entry_mode != MarketVelocityFvgEntryMode::Off
             || self.entry_retest_after_signal
             || self.entry_max_signal_pullback_pct.is_some()
+            || self.entry_min_rsi.is_some()
+            || self.entry_max_rsi.is_some()
+            || self.entry_min_rsi_delta.is_some()
+            || self.entry_bollinger_breakout
+            || self.entry_min_bollinger_bandwidth_expansion_pct.is_some()
+            || self.entry_min_recent_drawdown_pct.is_some()
     }
 }
 /// 封装当前函数，减少行情数据调用方重复实现相同细节。
@@ -1055,6 +1136,14 @@ fn build_market_velocity_strategy_signal_submit_request(
         "trend_min_average_distance_pct": config.trend_min_average_distance_pct,
         "entry_max_average_distance_pct": config.entry_max_average_distance_pct,
         "entry_min_volume_ratio": config.entry_min_volume_ratio,
+        "entry_min_rsi": config.entry_min_rsi,
+        "entry_max_rsi": config.entry_max_rsi,
+        "entry_min_rsi_delta": config.entry_min_rsi_delta,
+        "entry_rsi_delta_lookback_candles": config.entry_rsi_delta_lookback_candles,
+        "entry_bollinger_breakout": config.entry_bollinger_breakout,
+        "entry_min_bollinger_bandwidth_expansion_pct": config.entry_min_bollinger_bandwidth_expansion_pct,
+        "entry_min_recent_drawdown_pct": config.entry_min_recent_drawdown_pct,
+        "entry_recent_drawdown_lookback_candles": config.entry_recent_drawdown_lookback_candles,
         "entry_max_signal_pullback_pct": config.entry_max_signal_pullback_pct,
         "entry_retest_tolerance_pct": config.entry_retest_tolerance_pct,
         "entry_retest_after_signal": config.entry_retest_after_signal,
@@ -1617,6 +1706,9 @@ fn normalize_symbol(value: &str) -> String {
 }
 fn json_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     value.get(key).filter(|field| !field.is_null())
+}
+fn json_value_is_null(value: &Value, key: &str) -> bool {
+    value.get(key).is_some_and(Value::is_null)
 }
 /// 提供JSONstring的集中实现，避免行情数据调用方重复处理相同细节。
 fn json_string(value: &Value, key: &str) -> Result<Option<String>> {

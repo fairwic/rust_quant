@@ -12,13 +12,16 @@ observation-only rows into Web `market_velocity_paper_outcomes`.
 - The production observation entry owns the paper outcome sink and entry-trigger
   filter. Experimental filter overrides must use `market_velocity_event_backtest`
   outside this production runbook.
-- The production observation command is locked to the named strategy preset
-  `momentum_03sl_20r_v5`. Do not pass ad-hoc target R, stop-loss, reentry,
+- The default production observation command is locked to the named stable preset
+  `momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1`.
+  Do not pass ad-hoc target R, stop-loss, reentry,
   FVG, profit-protection, or runner-exit parameters to the production observer.
 - 当前 preset 也固定本轮优化后的入场过滤：`min_delta_rank=15`、
   `trend_min_average_distance_pct=0.0`、`entry_max_distance_pct=4.0`。
 - 生产默认不带历史 symbol blocklist；如果要研究性复现历史黑名单结果，只能在
   `market_velocity_event_backtest` 中显式传 `--symbol-blocklist`。
+- `kline15m 0.52R/fvg50` 是独立 paper/shadow challenger。不要覆盖默认 observer；
+  使用 `kline15m-paper-observation-scheduler` profile 单独启动。
 
 ## Required Environment
 
@@ -27,12 +30,14 @@ QUANT_CORE_DATABASE_URL=postgres://...
 RUST_QUAN_WEB_BASE_URL=https://...
 EXECUTION_EVENT_SECRET=...
 MARKET_VELOCITY_PAPER_OBSERVATION_INTERVAL_SECS=21600
+MARKET_VELOCITY_KLINE15M_PAPER_OBSERVATION_INTERVAL_SECS=21600
 ```
 
 `DATABASE_URL` may also be set to the same value as `QUANT_CORE_DATABASE_URL`
 for compatibility with existing Core deployment conventions.
-`MARKET_VELOCITY_PAPER_OBSERVATION_INTERVAL_SECS` is optional and defaults to
-21600 seconds, or 6 hours, in the deploy compose scheduler service.
+`MARKET_VELOCITY_PAPER_OBSERVATION_INTERVAL_SECS` and
+`MARKET_VELOCITY_KLINE15M_PAPER_OBSERVATION_INTERVAL_SECS` are optional and
+default to 21600 seconds, or 6 hours, in the deploy compose scheduler services.
 
 ## Production Image Requirement
 
@@ -56,8 +61,476 @@ does not start with the live radar or execution worker services. The compose
 command runs:
 
 ```bash
-market_velocity_paper_observation --paper-strategy-preset momentum_03sl_20r_v5
+market_velocity_paper_observation --paper-strategy-preset momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1
 ```
+
+## 15m K 线直抽样研究验证 - 2026-07-04
+
+本轮动量候选不再把“异动雷达”作为策略本体的一部分验证，而是直接从
+本地 15m K 线表中按 seed 抽样 20 个交易对，复用同一套 15m 入场逻辑：
+
+- `event_source=kline_15m`
+- `sample_limit=20`
+- `sample_seed=kline15m_fvg30_v1`
+- `trend_timeframe=off`
+- `stop_loss_pct=0.04`
+- `target_r=0.5`
+- `entry_max_distance_pct=14.0`
+- `entry_min_volume_ratio=1.3`
+- `entry_min_rsi=50`
+- `entry_max_rsi=90`
+- `entry_bollinger_breakout=true`
+- `entry_min_recent_drawdown_pct=3.5`
+- `entry_recent_drawdown_lookback_candles=12`
+- `entry_symbol_cooldown_candles=4`
+- `entry_trigger_allowlist=breakout_previous_high`
+- `fvg_entry_mode=m15_impulse_retrace`
+- `fvg_impulse_retrace_fill_pct=30`
+- `fvg_impulse_retrace_min_wait_candles=0`
+
+对应 preset 已登记为：
+
+```text
+paper_strategy_preset=research_momentum_04sl_05r_kline15m_breakout_fvg30_vol13_dd35_v1
+entry_rule_version=kline15m_mom04_05r_brk_fvg30_vol13_dd35_v1
+```
+
+`0.55R` 扩样复核后的上一版 challenger preset 为：
+
+```text
+paper_strategy_preset=research_momentum_04sl_055r_kline15m_breakout_fvg30_vol13_dd35_v1
+entry_rule_version=kline15m_mom04_055r_brk_fvg30_vol13_dd35_v1
+```
+
+`0.52R + fvg50` 在 100 币种扩样后升级为当前主候选 preset：
+
+```text
+paper_strategy_preset=research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1
+entry_rule_version=kline15m_mom04_052r_brk_fvg50_vol13_dd35_v1
+```
+
+production-parity 修正：
+
+- `kline_15m` synthetic event 已按 trade direction 过滤完成 K 线；当前 long
+  主候选只生成 `close > open` 的上涨 K 线事件，和
+  `market_velocity_kline_scanner` 的生产发现层一致。
+- 旧实现用 `ABS(15m change)` 生成候选，long 回测会把下跌 K 线也送入后续 entry
+  过滤。复测显示这些额外 raw candidate 基本被 15m entry 挡掉，交易结果没有变化，
+  但 raw/open-rate 口径已改为 scanner parity。
+
+本地显式窗口验证使用北京时间 `2026-05-04 00:00:00` 到
+`2026-07-04 00:00:00`。下面保留初始 `0.5R/fvg30` 探索命令；复测当前主候选时要同时使用
+`--target-rs 0.52` 与 `--fvg-impulse-retrace-fill-pct 50`，并按扩样验证使用
+`--sample-limit 100`：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+./target/debug/market_velocity_event_backtest \
+  --event-source kline_15m \
+  --sample-limit 20 \
+  --sample-seed kline15m_fvg30_v1 \
+  --event-start-ms 1777824000000 \
+  --event-end-ms 1783094400000 \
+  --trend-timeframe off \
+  --target-rs 0.5 \
+  --stop-loss-pct 0.04 \
+  --entry-max-distance-pct 14 \
+  --entry-min-volume-ratio 1.3 \
+  --entry-min-rsi 50 \
+  --entry-max-rsi 90 \
+  --entry-bollinger-breakout \
+  --entry-min-recent-drawdown-pct 3.5 \
+  --entry-recent-drawdown-lookback-candles 12 \
+  --entry-symbol-cooldown-candles 4 \
+  --entry-trigger-allowlist breakout_previous_high \
+  --fvg-entry-mode 15m_impulse_retrace \
+  --fvg-impulse-retrace-fill-pct 30 \
+  --fvg-impulse-retrace-min-wait-candles 0 \
+  --equity-report \
+  --equity-trigger-report \
+  --equity-concentration-report \
+  --equity-symbol-window-report \
+  --min-trades 1
+```
+
+初始 `0.5R` 固定 seed 结果：
+
+```text
+raw_candidate_events=79743
+effective_open_rate=0.1216%
+24h outcome: trades=97 win=73 loss=23 timeout=1 complete_win_rate=75.26%
+framework: trades=97 win_rate=73.20% max_drawdown=13.98% total_profit=23.43U
+window q1/q2/q3/q4 win_rate=83.33%/58.33%/79.17%/72.00%
+```
+
+多 seed 稳定性检查显示 `0.5R + fvg30` 比上一轮 `0.6R + fvg20` 更贴近
+快进快出目标，且 4 个 seed 都满足 `win_rate > 60%`、`max_drawdown < 15%`：
+
+```text
+seed=kline15m_fvg30_v1 framework_win=73.20% max_drawdown=13.98% profit=23.43U
+seed=batch_a framework_win=71.26% max_drawdown=13.98% profit=11.14U
+seed=batch_b framework_win=74.77% max_drawdown=12.86% profit=36.96U
+seed=batch_c framework_win=78.05% max_drawdown=9.09% profit=45.45U
+```
+
+`0.5R` 在 50 个币种扩样时发现 `batch_b` 框架总收益为负，因此进一步扫
+`0.55R/0.58R/0.6R`。当时 `0.55R + fvg30` 是更稳的折中：它修复了
+`batch_b` 的负收益，同时没有触发 `0.58R/0.6R` 在 `batch_a` 上的回撤超线。
+
+`0.55R` 上一版 challenger 在修正后的 long-only synthetic event 口径下，20 币种多 seed
+结果为：
+
+```text
+sample_limit=20 seed=kline15m_fvg30_v1 target=0.55R raw=38265 trades=97 framework_win=72.16% max_drawdown=13.81% profit=31.81U
+sample_limit=20 seed=batch_a target=0.55R raw=40091 trades=87 framework_win=68.97% max_drawdown=13.81% profit=10.64U
+sample_limit=20 seed=batch_b target=0.55R raw=38912 trades=107 framework_win=72.90% max_drawdown=12.17% profit=40.12U
+sample_limit=20 seed=batch_c target=0.55R raw=31871 trades=82 framework_win=75.61% max_drawdown=8.38% profit=45.69U
+```
+
+```text
+sample_limit=50 seed=kline15m_fvg30_v1 target=0.55R raw=93367 trades=208 framework_win=72.60% max_drawdown=13.81% profit=76.16U remove_top5_profit=2.10U
+sample_limit=50 seed=batch_a target=0.55R raw=85428 trades=173 framework_win=71.68% max_drawdown=13.81% profit=53.36U remove_top3_profit=7.73U
+sample_limit=50 seed=batch_b target=0.55R raw=93716 trades=214 framework_win=67.29% max_drawdown=13.81% profit=4.98U remove_top1_profit=-8.03U
+```
+
+`fvg_fill_pct=50` 明显降低 concentration，`target=0.60 + fill50` 在 50 币种
+样本中表现更强，但 100 币种 `batch_a` 的 `max_drawdown=15.55%` 超过目标线，
+因此未升级为主候选。`target=0.52 + fill50` 在三组 100 币种样本均满足
+`win_rate > 60%`、`max_drawdown < 15%`，且 remove_top5 后仍为正：
+
+```text
+sample_limit=100 seed=kline15m_fvg30_v1 target=0.52R fill=50 trades=367 framework_win=73.84% max_drawdown=12.24% profit=126.94U remove_top5_profit=60.94U q1/q2/q3/q4_profit=82.21U/20.08U/5.81U/22.22U
+sample_limit=100 seed=batch_a target=0.52R fill=50 trades=360 framework_win=72.78% max_drawdown=13.91% profit=100.68U remove_top5_profit=35.06U q1/q2/q3/q4_profit=40.62U/11.62U/35.29U/16.46U
+sample_limit=100 seed=batch_b target=0.52R fill=50 trades=341 framework_win=73.61% max_drawdown=13.91% profit=113.35U remove_top5_profit=63.37U q1/q2/q3/q4_profit=36.42U/25.03U/37.42U/16.81U
+```
+
+对比结论：
+
+```text
+target=0.5R batch_b sample_limit=50 framework_win=68.69% max_drawdown=13.98% profit=-5.15U
+target=0.55R batch_b sample_limit=50 framework_win=67.29% max_drawdown=13.81% profit=4.98U
+target=0.58R batch_a sample_limit=50 framework_win=69.36% max_drawdown=17.28% profit=44.20U
+target=0.6R batch_a sample_limit=50 framework_win=69.36% max_drawdown=17.22% profit=54.25U
+```
+
+结论：
+
+1. 15m K 线直抽样可以作为策略本体回测口径，不需要依赖 `market_rank_events`
+   或生产异动雷达。
+2. 当前 `04sl_052r/fvg50` 比 `04sl_055r/fvg30` 更适合作为 paper/shadow
+   主候选：三组 100 币种随机样本均满足 `win_rate > 60%`、`max_drawdown < 15%`、
+   remove_top5 后仍为正，且四分窗口总收益均为正。
+3. 该版本仍只能进入 paper/shadow。生产 live promote 仍需 fresh paper outcomes、
+   scanner/handoff E2E parity、重复 symbol 暴露复核和明确 promote approval。
+4. 生产触发层仍应只负责低成本发现候选交易对；后续要用 15m K 线扫描事件替代
+   旧 rank-velocity 雷达输入，避免把资源节省层误当成策略信号本体。
+
+### 15m K 线扫描触发实现 - 2026-07-04
+
+已新增 Rust-native `market_velocity_kline_scanner`：
+
+- 输入只依赖 quant_core 已有的 `{symbol}_candles_15m` 分表和 `exchange_symbols`
+  可交易 OKX perpetual 白名单。
+- 默认 `dry-run`；生产 compose 使用 `--write`，但只写
+  `market_rank_events` 候选事件，不生成执行任务、不触发下单。
+- 事件合同保持 handoff 兼容：`event_type=rank_velocity`、`timeframe=15分钟`、
+  `new_rank=0`、`delta_rank=0`、`source=kline_15m_scanner`、`detected_at`
+  为该根 15m K 线收盘时间。
+- 现有稳定生产 preset 默认 `MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK=18`，会自然忽略
+  `delta_rank=0` 的 K 线扫描事件；只有显式切换到 `min_delta_rank=0` 的新
+  paper/shadow/live 候选配置后，handoff 才会消费该来源。
+- scanner 写入使用 `INSERT ... WHERE NOT EXISTS` 按
+  `exchange + symbol + event_type + timeframe + detected_at + source` 去重，避免
+  1 分钟调度重复写入同一根 15m K 线。
+
+本地只读验证：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+./target/debug/market_velocity_kline_scanner \
+  --dry-run \
+  --max-symbols 20 \
+  --lookback-minutes 4320 \
+  --min-price-change-pct 0.0 \
+  --per-symbol-limit 4
+```
+
+结果：
+
+```text
+market_velocity_kline_scanner: symbols_total=20 candidate_events=76 events_inserted=0 duplicate_events=0 lookback_minutes=4320 min_price_change_pct=0 max_price_change_pct=None per_symbol_limit=4 dry_run=true
+```
+
+生产拓扑已补齐：
+
+- runtime 镜像复制 `/usr/local/bin/market_velocity_kline_scanner`。
+- `docker-compose.deploy.yml` 新增
+  `quant-core-market-velocity-kline-scanner-scheduler`，profile 为
+  `kline-scanner-scheduler`，默认每 60 秒扫描最近 30 分钟已完成 15m K 线。
+- `promote_stable.sh` / `rollback.sh` 默认服务列表和 compose profile 已包含该
+  scheduler；CI production deploy contract 已固定二进制、compose 和 workflow 检查。
+
+### kline15m 主候选 runtime 配置合同 - 2026-07-04
+
+`MarketVelocityStrategySignalConfig` 已能从 `strategy_configs.config` 承载并传递
+kline15m 主候选的 fast filters 到 `market_velocity_live_handoff` 的 live shell：
+
+- `entry_min_rsi`
+- `entry_max_rsi`
+- `entry_min_rsi_delta`
+- `entry_rsi_delta_lookback_candles`
+- `entry_bollinger_breakout`
+- `entry_min_bollinger_bandwidth_expansion_pct`
+- `entry_min_recent_drawdown_pct`
+- `entry_recent_drawdown_lookback_candles`
+
+可用于 paper/shadow 的配置片段：
+
+```json
+{
+  "strategy_slug": "market_velocity",
+  "strategy_preset": "research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1",
+  "entry_rule_version": "kline15m_mom04_052r_brk_fvg50_vol13_dd35_v1",
+  "min_delta_rank": 0,
+  "max_delta_rank": null,
+  "min_price_change_pct": 0.0,
+  "max_price_change_pct": null,
+  "stop_loss_pct": 0.04,
+  "take_profit_r": 0.52,
+  "max_holding_hours": 24,
+  "require_technical_confirmation": false,
+  "require_entry_confirmation": true,
+  "trend_min_average_distance_pct": 0.0,
+  "entry_confirmation_period": 20,
+  "entry_confirmation_fetch_limit": 80,
+  "entry_max_average_distance_pct": 14.0,
+  "entry_min_volume_ratio": 1.3,
+  "entry_min_rsi": 50.0,
+  "entry_max_rsi": 90.0,
+  "entry_bollinger_breakout": true,
+  "entry_min_recent_drawdown_pct": 3.5,
+  "entry_recent_drawdown_lookback_candles": 12,
+  "fvg_entry_mode": "m15_impulse_retrace",
+  "fvg_lookback_candles": 40,
+  "fvg_max_wait_candles": 24,
+  "fvg_impulse_retrace_fill_pct": 50.0,
+  "fvg_impulse_retrace_min_wait_candles": 0,
+  "entry_trigger_allowlist": ["breakout_previous_high"]
+}
+```
+
+注意：本地 backtest 的 `entry_symbol_cooldown_candles=4` 是跨事件状态过滤，
+当前 live handoff 单次 shell 不直接表达它；生产链路依赖 `live_handoff_state`
+和 earliest-per-symbol 去重降低重复消费。切换到 live 前仍应先用该配置做
+paper/shadow forward observation，并复核重复 symbol 暴露。
+
+## Latest Local Research Verification
+
+The production default above is unchanged. The following command is the latest
+local owner-side verification for the current low-frequency `reclaim_ema`
+research mainline, which adds a research-only `entry_max_signal_pullback_pct`
+gate so late FVG fills cannot drift too far below the original signal price,
+and now also tightens `entry_max_distance_pct` from `5.0` to `3.0` without
+changing the realized owner-side trade set. A later verification also tightened
+`entry_min_volume_ratio` from `1.0` to `1.1`, and then tightened
+`fvg_impulse_retrace_fill_pct` from the default `20` to `10`, still without
+changing the realized owner-side trade set.
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+RUST_QUAN_WEB_BASE_URL=http://127.0.0.1:8000 \
+EXECUTION_EVENT_SECRET=local-dev-secret \
+cargo run -q -p rust-quant-cli --bin market_velocity_paper_observation -- \
+  --paper-strategy-preset research_momentum_04sl_18r_reclaim_fvgwait14_pullback3_delta20_40_pchg5_10_v1
+```
+
+Verified on 2026-06-26 with owner-side Web writeback:
+
+```text
+entry_trigger_filter before=11 after=5
+24h: trades=5 win=5 loss=0 timeout=0 avg_r_complete=1.8
+48h: trades=5 win=5 loss=0 timeout=0 avg_r_complete=1.8
+paper_outcomes_submitted=10
+```
+
+The matching Web summary for
+`rank_radar_4h15m_r04_18r_rcm_fvg14_d3_pb3_vol11_fp10_d20_40_p5_10_v1` then returned:
+
+```text
+total_count=10
+generated_execution_task_count=0
+```
+
+## Latest Hybrid FVG Plus Retest Verification
+
+The current research follow-up keeps the same low-frequency `reclaim_ema`
+shell, still uses `15m_impulse_retrace` as the first entry path, and only falls
+back to `retest_after_signal` when the FVG branch does not fill. A same-day
+de-coupling scan then confirmed that `pullback3` and `vol1.1` are still useful,
+but the tighter `dist3` cap and explicit `fill10` are not needed for the final
+owner-side trade set. The current preset therefore keeps:
+
+- `entry_max_distance_pct=5.0`
+- `entry_min_volume_ratio=1.1`
+- `entry_max_signal_pullback_pct=3.0`
+- default `fvg_impulse_retrace_fill_pct=20`
+
+This is now
+captured by:
+
+```text
+paper_strategy_preset=research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2
+entry_rule_version=rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2
+```
+
+Local owner-side verification command:
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+RUST_QUAN_WEB_BASE_URL=http://127.0.0.1:8000 \
+EXECUTION_EVENT_SECRET=local-dev-secret \
+CARGO_TARGET_DIR=/tmp/rust_quant_target_tdd \
+cargo run -q -p rust-quant-cli --bin market_velocity_paper_observation -- \
+  --paper-strategy-preset research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2
+```
+
+The old explicit `fvg_max_wait_candles=14` was removed after replay showed
+`wait24` (the default) keeps the same `8 trades / 8 win / 1.8R` realized set,
+so the preset no longer carries a redundant wait-specific coupling.
+
+Verified on 2026-06-27:
+
+```text
+entry_trigger_filter before=43 after=8
+24h: trades=8 win=8 loss=0 timeout=0 avg_r_complete=1.8
+48h: trades=8 win=8 loss=0 timeout=0 avg_r_complete=1.8
+paper_outcomes_submitted=16
+```
+
+Current realized set shows the expected split:
+
+- FVG primary: `HMSTR / ORDI / BASED / AMD / CHIP`
+- FVG fallback retest: `EIGEN / SLX / INJ`
+
+The fallback rows are recorded with
+`entry_trigger=reclaim_ema+retest_after_signal+fvg_fallback`, so downstream
+analysis can distinguish them from the primary
+`reclaim_ema+fvg_15m_impulse_retrace` fills.
+
+## Current Production Shell TP/SL Recheck - 2026-06-28
+
+在当前生产默认壳
+`research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2`
+上，又补跑了一轮只改风控、不改入场语义的低耦合 TP/SL 扫描。
+
+固定 `4%` 止损下的目标位结果：
+
+- `1.6R`：`8 笔 / 8 胜 / 50.64U`
+- `1.8R`：`8 笔 / 8 胜 / 57.04U`
+- `2.0R`：`6 胜 1 负 1 timeout(48h) / 51.44U`
+- `2.2R`：`4 胜 3 负 1 timeout(48h) / 31.44U`
+- `2.4R`：`4 胜 3 负 1 timeout(48h) / 35.44U`
+- `2.6R`：`4 胜 3 负 1 timeout(48h) / 39.44U`
+- `3.0R`：`3 胜 4 负 1 timeout(48h) / 31.44U`
+
+固定 `1.8R` 目标位下的止损宽度结果：
+
+- `3%`：`5 胜 3 负 / 17.44U`
+- `4%`：`8 胜 0 负 / 57.04U`
+- `5%`：`4 胜 3 负 1 timeout(48h) / 29.44U`
+- `6%`：`4 胜 2 负 2 timeout(48h) / 35.44U`
+
+又补了一轮低耦合盈利保护，主要验证更高目标位能否靠简单保本/锁盈反超：
+
+- `2.0R + protect_after=1R, stop=0R`：`55.51U`
+- `2.0R + protect_after=1R, stop=0.5R`：`51.44U`
+- `2.2R + protect_after=1R, stop=0R`：`34.92U`
+- `2.2R + protect_after=1R, stop=0.5R`：`35.84U`
+
+结论收敛为：
+
+1. 当前生产壳里，最优且最低耦合的组合仍然是 `固定 4% 止损 + 固定 1.8R 全平`。
+2. 更高目标位即便加简单盈利保护，也没有超过 `1.8R` 基线，因此暂不升级默认止盈。
+3. `structure_or_fixed` 与 runner 在这个壳上都不应默认开启。前者本质上只会把止损收紧；而当前
+   `15m FVG / retest fallback` 的结构锚点又偏近，容易把本来能完成 `1.8R` 的单子提前打掉。
+
+继续按“不过度耦合”的方向，又补了一轮更圆整、更简单的复核：
+
+- 固定 `1.8R` 下的整数止损宽度：
+  - `3%`：`5 胜 3 负 / 17.44U`
+  - `4%`：`8 胜 0 负 / 57.04U`
+  - `5%`：`4 胜 3 负 1 timeout(48h) / 29.44U`
+- 固定 `4%` 止损下的简单目标位：
+  - `1.5R`：`8 胜 0 负 / 47.44U`
+  - `1.8R`：`8 胜 0 负 / 57.04U`
+  - `2.0R`：`6 胜 1 负 1 timeout(48h) / 51.44U`
+  - `3.0R`：`3 胜 4 负 1 timeout(48h) / 31.44U`
+
+这说明如果硬要把目标位简化成更“圆”的档位，当前壳里也仍然要为简化付出明确代价：
+
+- `1.5R` 比 `1.8R` 少 `9.60U`
+- `2.0R` 比 `1.8R` 少 `5.60U`
+
+最后又测了一组最简单的两段止盈，保持基础目标仍是 `1.8R`，只让 `10%-20%` 的 runner 去看
+`3R` 或 `4R`，runner stop 只用 `0R` 或 `1R`：
+
+- `runner 10% -> 3R, stop 0R`：`54.915U`
+- `runner 10% -> 3R, stop 1R`：`55.28U`
+- `runner 20% -> 3R, stop 0R`：`52.79U`
+- `runner 20% -> 3R, stop 1R`：`53.52U`
+- `runner 10% -> 4R, stop 0R`：`55.66007682U`
+- `runner 10% -> 4R, stop 1R`：`55.22507682U`
+- `runner 20% -> 4R, stop 0R`：`54.28015365U`
+- `runner 20% -> 4R, stop 1R`：`53.41015365U`
+
+这 8 档全部低于 `1.8R 全平` 的 `57.04U`，而且都会把 `48h` 结果引入 `1-2` 笔 timeout。
+另外这轮顺手复核了回测实现语义：`result ... horizon=48h` 这条统计链路在 runner 打到 base target 后，
+会继续用 `48h` horizon 约束剩余 runner；但 `framework_equity_result` 的 runner replay 路径当前不带
+`24h/48h` horizon 约束，而且把正收益的 runner timeout / forward_data_incomplete 按正 PnL 记成 win。
+因此 runner 方向的 `framework total_profit / framework win_rate` 对当前壳来说是偏乐观的，真正比较
+runner 是否值得开启时，应优先看 `result ... horizon=48h` 的 `win/loss/timeout/avg_r_complete`。在这个更严格口径下，
+上述 8 档 simple runner 仍然全部低于 `1.8R 全平`，所以“不启用 runner” 的结论反而更稳。
+
+因此当前生产壳的收敛结论可以再强化一层：
+
+1. `固定 4% 止损 + 固定 1.8R 全平` 仍然是当前最优的低耦合默认。
+2. 如果为了“更圆整”强行改成 `1.5R / 2R`，收益会可验证地下滑。
+3. 即便把分批止盈限制到最简单的 runner 版本，也没有超过 `1.8R 全平`。
+
+又把当前 hybrid 壳按入场子分支拆开复核了一次：
+
+- `FVG-only`：
+  - 做法：`fvg_entry_mode=15m_impulse_retrace`，关闭 `entry_retest_after_signal`
+  - realized set：`5` 笔
+  - `4% + 1.6R`：`31.65U`
+  - `4% + 1.8R`：`35.65U`
+  - `4% + 2.0R`：`27.65U`，并引入 `1 loss + 1 timeout`
+  - 结论：FVG 主分支本身就明显更适合 `4% + 1.8R`
+- `retest-only`：
+  - 做法：`fvg_entry_mode=off`，开启 `entry_retest_after_signal`
+  - realized set：`3` 笔
+  - `4% + 1.8R`：`21.39U`
+  - `4% + 2.0R`：`23.79U`
+  - `4% + 2.2R`：`13.39U`
+  - 结论：fallback retest 这 `3` 笔样本里，`4% + 2.0R` 比 `1.8R` 略强，但再往上就开始掉队
+
+因此当前总壳的 `4% + 1.8R` 更准确的定义不是“每个子分支各自都最优”，而是：
+
+1. 对当前样本量更大的 `FVG` 主分支，它本身就是最优点。
+2. 对 `retest fallback`，`2.0R` 有轻微优势，但样本只有 `3` 笔。
+3. 如果为了榨出这点优势，把止盈按 `entry subtype` 分成 `FVG=1.8R / retest=2.0R`，就会引入新的策略耦合。
+
+所以在“找到更优 TP/SL，但不要过度耦合”的前提下，当前默认仍应保持：
+
+- `固定 4% 止损 + 固定 1.8R 全平`
+
+而唯一值得继续观察的轻度耦合候选，不是 runner，也不是结构止损，而是：
+
+- 已单独固化的 research preset：
+  `research_momentum_04sl_20r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1`
+  - `entry_rule_version=rank_radar_4h15m_r04_20r_rcm_rt1_d3_pb3_vol11_d20_40_p5_10_v1`
+  - 作用：只作为 `retest fallback` 的 paper challenger，不参与当前默认版本切换
+- 仅当未来更长历史证明稳定时，才考虑 `FVG primary = 1.8R`、`retest fallback = 2.0R`
 
 ## Production Scheduler
 
@@ -68,7 +541,7 @@ podman compose -f docker-compose.deploy.yml --profile observation-scheduler up -
 ```
 
 This starts `market_velocity_paper_observation --paper-strategy-preset
-momentum_03sl_20r_v5 --loop-interval-seconds
+momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1 --loop-interval-seconds
 ${MARKET_VELOCITY_PAPER_OBSERVATION_INTERVAL_SECS:-21600}` with `restart:
 unless-stopped`. A failed observation cycle is logged and retried after the next
 interval; missing startup configuration still fails fast.
@@ -83,6 +556,98 @@ a container and that Docker reports `.State.Running=true`; otherwise the deploy
 or rollback exits non-zero instead of only printing `docker compose ps`.
 If production overrides `DEPLOY_SERVICES`, keep
 `quant-core-market-velocity-paper-observation-scheduler` in that list.
+
+## kline15m 0.52R Challenger Scheduler
+
+The `0.52R + fvg50` 15m-only candidate is available as an opt-in paper/shadow
+observer. It is intentionally not part of the default deploy service list.
+
+```bash
+podman compose -f docker-compose.deploy.yml \
+  --profile kline15m-paper-observation-scheduler \
+  up -d quant-core-market-velocity-kline15m-paper-observation-scheduler
+```
+
+This starts:
+
+```bash
+market_velocity_paper_observation \
+  --paper-strategy-preset research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1 \
+  --loop-interval-seconds ${MARKET_VELOCITY_KLINE15M_PAPER_OBSERVATION_INTERVAL_SECS:-21600}
+```
+
+Use this for forward paper/shadow evidence only. Promotion to live still requires
+fresh paper outcomes, trigger-layer end-to-end parity, duplicate-symbol exposure
+review, and explicit promote approval.
+
+### Local one-shot shadow verification - 2026-07-04
+
+Current code was verified with a local mock Web endpoint before production
+promotion. The one-shot command used the current challenger preset and local
+`quant_core`, while `RUST_QUAN_WEB_BASE_URL` pointed at a local mock HTTP server
+instead of production Web.
+
+Observed output:
+
+```text
+candle_pairs=20
+raw_candidate_events=43273
+stage_counts entry_blocked=43167 entry_execution_blocked=640 entry_execution_pass=106 entry_pass=106 entry_signal_blocked=42527 entry_signal_pass=746 raw=43273 trend_pass=43273
+paper_outcomes_submitted=150
+```
+
+The mock received exactly 150 requests, all on
+`POST /api/commerce/internal/market-velocity/paper-outcomes`, all with
+`entry_rule_version=kline15m_mom04_052r_brk_fvg50_vol13_dd35_v1`,
+`target_r=0.52`, and horizons `24/48`. The mocked Web response returned
+`generated_execution_task_count=0` for every request, which exercises the
+observation-only guard in the Core submission path.
+
+### Production readiness check - 2026-07-04
+
+Production was checked before starting the opt-in scheduler. The running Core
+image was `ghcr.io/fairwic/quant-core-worker:sha-5cd6c4a71bd00018315fbf92d7a683fce4505437`.
+That image's `market_velocity_paper_observation --help` output did not include
+the `research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1` preset,
+and the remote production compose files did not contain
+`quant-core-market-velocity-kline15m-paper-observation-scheduler`.
+
+Do not start the production kline15m paper/shadow observer until this working
+tree is committed, built by CI/CD, deployed through the normal promote flow, and
+the production image/compose are rechecked for this preset and profile.
+
+### Release staging checklist - 2026-07-04
+
+When committing this challenger for CI/CD, use path-limited staging. The required
+runtime/build set includes:
+
+- `.github/workflows/cicd.yml`
+- `Dockerfile.runtime`
+- `docker-compose.deploy.yml`
+- `scripts/deploy/promote_stable.sh`
+- `scripts/deploy/rollback.sh`
+- `crates/rust-quant-cli/src/app/market_velocity_backfill.rs`
+- `crates/rust-quant-cli/src/app/market_velocity_event_backtest.rs`
+- `crates/rust-quant-cli/src/app/market_velocity_event_backtest/`
+- `crates/rust-quant-cli/src/app/market_velocity_kline_scanner.rs`
+- `crates/rust-quant-cli/src/bin/market_velocity_kline_scanner.rs`
+- `crates/rust-quant-cli/src/app/market_velocity_live_handoff.rs`
+- `crates/rust-quant-cli/src/app/market_velocity_live_handoff/`
+- `crates/rust-quant-cli/src/app/mod.rs`
+- `crates/services/src/market/market_velocity_signal.rs`
+- `crates/services/src/market/mod.rs`
+- `crates/services/src/market/scanner_service/`
+- `crates/services/tests/market_velocity_production_deploy_contract.rs`
+- `docs/dev/market_velocity_paper_observation_runbook.md`
+
+Do not include `.DS_Store` or `AGENTS.md` in the strategy release commit. Current
+working tree also contains research/reference artifacts that are not required to
+ship the kline15m paper/shadow observer:
+
+- `docs/BTC_ETH_STRATEGY_FAMILY_ITERATION_LOG.md`
+- `docs/VEGAS_NWE_BACKTEST_ANALYSIS.md`
+- `crates/strategies/src/implementations/*DEPRECATED*.md`
+- `scripts/research/market_velocity_5m_*`
 
 ## Success Criteria
 
@@ -1832,3 +2397,1628 @@ where entry_rule_version = 'rank_radar_4h_trend_15m_momentum_03sl_20r_v5'
 order by entry_at desc
 limit 20;
 ```
+
+## Signal Retest Low-Frequency Iteration - 2026-06-26
+
+本轮目标是把 Market Velocity 动量策略从“信号后直接追”收敛到更低频、更高胜率的
+结构回踩入场，并移除 `new_rank` 作为策略筛选参数。`new_rank` 仍可作为诊断字段输出，
+但不再参与 candidate SQL、preset 参数、manifest filters、服务层信号准入或 live handoff
+候选池过滤。
+
+最终候选 preset：
+
+```text
+research_momentum_0375sl_15r_signal_retest2_delta24_34_pchg5_10_v1
+entry_rule_version=rank_radar_4h15m_r0375_15r_sigrt2_d24_34_p5_10_v1
+event_source=raw_state
+trade_direction=long
+stop_loss_pct=0.0375
+target_r=1.5
+entry_max_distance_pct=5.0
+entry_min_volume_ratio=1.0
+entry_retest_after_signal=true
+entry_retest_max_wait_candles=2
+entry_retest_tolerance_pct=0.3
+entry_retest_min_entry_open_gap_pct=0.0
+min_delta_rank=24
+max_delta_rank=34
+min_price_change_pct=5.0
+max_price_change_pct=10.0
+entry_trigger_allowlist=breakout_previous_high,reclaim_ema
+ignore_entry_signal_updates_while_open=true
+```
+
+本地只读复核命令：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://.../quant_core \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --event-source raw_state \
+  --trade-direction long \
+  --paper-outcome-entry-rule-version rank_radar_4h15m_r0375_15r_sigrt2_d24_34_p5_10_v1 \
+  --stop-loss-pct 0.0375 \
+  --target-rs 1.5 \
+  --entry-max-distance-pct 5.0 \
+  --entry-min-volume-ratio 1.0 \
+  --entry-retest-after-signal \
+  --entry-retest-max-wait-candles 2 \
+  --entry-retest-tolerance-pct 0.3 \
+  --entry-retest-min-entry-open-gap-pct 0.0 \
+  --trend-min-average-distance-pct 0.0 \
+  --min-delta-rank 24 \
+  --max-delta-rank 34 \
+  --min-price-change-pct 5.0 \
+  --max-price-change-pct 10.0 \
+  --entry-trigger-allowlist breakout_previous_high,reclaim_ema \
+  --ignore-entry-signal-updates-while-open \
+  --equity-report \
+  --equity-split-report \
+  --equity-concentration-report \
+  --min-trades 10
+```
+
+2026-06-26 本地样本结果：
+
+```text
+raw_candidate_events=1633
+stage_counts: raw=1633, trend_pass=1045, entry_pass=18
+24h fixed outcome: trades=14, win=12, loss=1, timeout=1, resolved_win_rate=92.3077%
+48h fixed outcome: trades=14, win=12, loss=1, incomplete=1, resolved_win_rate=92.3077%
+framework equity: trades=14, win_rate=92.8571%, trade_sharpe=7.0323,
+  max_drawdown_pct=3.82000000, total_profit=66.36922179
+early split: trades=7, win_rate=100.0%, total_profit=38.88500000
+late split: trades=7, win_rate=85.7143%, total_profit=27.48422179
+trigger split: breakout_previous_high=11 trades / 81.8182% / 40.32922179,
+  reclaim_ema=4 trades / 100.0% / 22.22000000
+remove top3 positive symbols: remaining_trades=11, remaining_win_rate=90.9091%,
+  remaining_total_profit=49.70422179
+remove top5 positive symbols: remaining_trades=9, remaining_win_rate=88.8889%,
+  remaining_total_profit=38.59422179
+```
+
+对照结论：
+
+- `delta25-50 / 1.5R`：53 trades，framework win_rate `67.9245%`，
+  total_profit `134.64027438`，remove top3 后 win_rate `62.2222%`。
+- `delta25-39 / 1.5R`：43 trades，framework win_rate `69.7674%`，
+  total_profit `115.95597225`，remove top3 后 win_rate `63.8889%`。
+- `delta25-34 / 1.5R`：34 trades，framework win_rate `76.4706%`，
+  total_profit `112.80006479`，remove top3 后 win_rate `71.4286%`。
+- `delta25-34 / 2.0R`：33 trades，framework win_rate `69.6970%`，
+  total_profit `127.47825501`，remove top3 后 win_rate `62.9630%`。
+- `delta25-34 / 1.5R + retest4 + entry_open_gap>=0`：27 trades，framework win_rate
+  `81.4815%`，total_profit `101.79776154`，remove top3 后 win_rate `76.1905%`。
+- `delta25-34 / 1.5R + retest1 + entry_open_gap>=0`：16 trades，framework win_rate
+  `87.5%`，total_profit `68.41280204`，remove top3 后 win_rate `83.3333%`。
+- `delta25-34 / 1.5R + retest2 + entry_open_gap>=0`：20 trades，framework win_rate
+  `85.0%`，total_profit `81.56638229`，remove top3 后 win_rate `80.0%`。
+- `delta24-34 / 1.5R + retest2 + entry_open_gap>=0`：22 trades，framework win_rate
+  `86.3636%`，total_profit `92.67638229`，remove top3 后 win_rate `82.3529%`，
+  remove top5 后 win_rate `80.0%`。
+- `delta24-34 / 1.5R + retest2 + entry_open_gap>=0 + price_change_pct<=10`：
+  14 trades，framework win_rate `92.8571%`，total_profit `66.36922179`，
+  early split `100.0%`，late split `85.7143%`，remove top3 后仍有 11 trades、
+  win_rate `90.9091%`，是本轮低频高胜率主候选。
+- `delta24-34 / 1.5R + retest2 + entry_open_gap>=0 + price_change_pct<=15`：
+  19 trades，framework win_rate `84.2105%`，early split 降到 `77.7778%`，
+  remove top3 后 win_rate `80.0%`；真实 SQL cap 扫描劣于 cap10，不采用。
+- `delta23-34 / 1.5R + retest2 + entry_open_gap>=0`：23 trades，framework win_rate
+  `86.9565%`，total_profit `98.23138229`，remove top3 后 win_rate `83.3333%`，
+  remove top5 后 win_rate `81.25%`；作为 challenger，不作为主 preset。
+- `delta22-34 / 1.5R + retest2 + entry_open_gap>=0`：25 trades，framework win_rate
+  `84.0%`，total_profit `99.96638229`，remove top3 后 win_rate `80.0%`。
+- `delta24-35/36 / 1.5R + retest2 + entry_open_gap>=0`：23 trades，framework win_rate
+  `82.6087%`，early split 降到 `75.0%/76.9231%`，remove top3 后 win_rate
+  `77.7778%`，不采用。
+- `delta25-34 / 1.8R + retest2 + entry_open_gap>=0`：20 trades，framework win_rate
+  `75.0%`，early split win_rate `60.0%`，remove top3 后 win_rate `66.6667%`。
+- `delta25-34 / 2.0R + retest2 + entry_open_gap>=0`：20 trades，framework win_rate
+  `75.0%`，early split win_rate `60.0%`，remove top3 后 win_rate `66.6667%`。
+- `delta25-34 / 1.8R + retest4 + entry_open_gap>=0`：27 trades，framework win_rate
+  `74.0741%`，early split win_rate `61.5385%`，remove top3 后 win_rate `68.1818%`。
+- `delta25-34 / 2.0R + retest4 + entry_open_gap>=0`：27 trades，framework win_rate
+  `74.0741%`，early split win_rate `61.5385%`，remove top3 后 win_rate `68.1818%`。
+
+当前策略定位是低频观察，因此优先采用 `delta24-34 / 1.5R + retest2 +
+entry_open_gap>=0 + price_change_pct<=10`：相对无 cap 的 22 笔版本，交易数降到 14 笔，
+但胜率从 `86.3636%` 提升到 `92.8571%`，TOP3 去除后仍有 11 笔且 win_rate
+`90.9091%`。`price_change_pct<=12` 与 `<=10` 得到相同交易集合，最终用整数 10
+作为更清晰的“不追高”上限。`price_change_pct<=15` 虽然看似更宽，但真实 SQL 扫描会
+重新选择部分同 15m bucket 内事件，胜率反而降到 `84.2105%`，因此不固化。`delta23-34`
+样本内指标略高，但只比无 cap 候选多 1 笔，且 lower-bound 进一步放宽更容易吸收样本
+拟合噪声，因此保留为 challenger，不固化为主 preset。`1.8R` / `2.0R` 在 `retest2`
+下会把 early split 和 TOP3 去除后的胜率压到约 `60%/66.7%`，不符合本轮“低频高胜率
+优先”的目标。
+
+`entry_open_gap>=0` 的含义是回踩确认后，下一根 15m 开盘不能低于确认 K 收盘价，用来
+过滤“确认后立刻走弱”的进场，不依赖 `new_rank`。`retest2` 的含义是信号后最多等待
+2 根 15m K 线完成回踩确认；逐笔逆向分析中，`retest4` 的剩余亏损更集中在较晚完成
+确认的样本上，因此本轮把最大等待从 4 收紧到 2。UTC `12-17` 与周末样本表现偏弱，
+但这类时间过滤样本量不足、容易过拟合，本轮不固化为策略参数。
+
+### Retest2 loss attribution follow-up - 2026-06-26
+
+补跑逐笔报告：
+
+```text
+/tmp/mv_retest2_delta_24_34_trade_report.txt
+```
+
+`delta24-34 / retest2 / 1.5R` 无 cap 版本的 3 笔 framework 亏损均来自
+`breakout_previous_high+retest_after_signal`，其中两笔属于 `price_change_pct > 15`
+的追高样本：
+
+```text
+BILL-USDT-SWAP, event=1781287, delta=33, price_change_pct=15.37260468, latency=29.7m
+AI-USDT-SWAP, event=2175842, delta=30, price_change_pct=15.01925546, latency=29.8m
+IP-USDT-SWAP, event=2638659, delta=24, price_change_pct=5.64404432, latency=4.0m
+```
+
+加入 `price_change_pct<=10` 后，BILL 和 AI 被过滤；当前 cap10 候选只剩
+`IP-USDT-SWAP` 一笔 framework 亏损，且回测报告时间已带 `+08:00` 时区后缀，避免
+把上海时间 open_time 误读成 UTC 后认为回踩入场延迟 8 小时。
+
+用当前代码的 15m `SMA/EMA/previous_volume_avg` 逻辑重建 signal / confirmation /
+entry 后，没有找到足够干净的下一条入场过滤：
+
+- `retest1`：16 trades，framework win_rate `87.5%`，但仍亏 BILL/IP，且 early/late
+  各只有 8 笔，不满足当前主 preset 的样本稳健性要求。
+- 更低目标 `1.0R/1.2R/1.3R`：framework win_rate 没有超过 `1.5R`，但总利润从
+  `81.56638229` 降到 `55.32667960/64.24249800/70.68676050`，因此不替换 `1.5R`。
+- 提高 `entry_min_volume_ratio`：`1.2` 直接降到 14 trades、win_rate `71.4286%`；
+  `1.5/2.0` 只剩 5/4 笔，样本量不足，不固化。
+- 15m self FVG 入场不替代 retest2：`min_delta=20 / wait2` 只有 10 trades、
+  win_rate `60.0%`，remove top3 后降到 `42.8571%`；wait4/8/12/24 都在
+  `45%-49%` 附近，不符合低频高胜率目标。
+- reclaim-only 不替代：`min_delta=5 / max_delta=34/39` 只有 15 trades、
+  win_rate `60.0%`，remove top3 后约 `50.0%`，会破坏高胜率属性。
+- `breakout_previous_high` 的胜率低于 `reclaim_ema`，但 reclaim 当前只有 4 笔；
+  直接只保留 reclaim 会把策略压成极低样本观察，不适合替代主 preset。
+
+当前结论：固化
+`research_momentum_0375sl_15r_signal_retest2_delta24_34_pchg5_10_v1`，不要再把
+`new_rank` 当作参数，也不要在单个剩余亏损样本上继续追加时间、成交量或中段涨幅过滤。
+下一轮优先等待 forward observation 或扩展历史样本，再判断是否需要做 trigger-specific
+的 breakout / reclaim 入场分流。
+
+### Removed live `new_rank` gate - 2026-06-26
+
+`new_rank` 参数已从实时信号链路移除：
+
+- `MarketVelocityStrategySignalConfig` 不再读取 `MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK`，
+  也不再解析策略配置 JSON 中的 `max_new_rank` / `chasing_risk_top_rank` /
+  `chasing_risk_price_change_pct`。
+- 服务层不再用 `new_rank <= max_new_rank` 或 top-rank chasing bucket 阻断信号。
+  `new_rank` 仍保留在 payload 顶层，作为后续复盘的原始事实字段。
+- 不追高改由 `max_price_change_pct` 表达；服务层可从策略配置 JSON 或
+  `MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT` 读取该上限，并在入场前阻断超过上限的
+  信号。
+- `market_velocity_live_handoff` 候选 SQL 不再按 `new_rank` 过滤，只保留
+  `delta_rank`、方向、价格、交易所和去重/limit 边界。
+- `docker-compose.deploy.yml` 不再暴露 `MARKET_VELOCITY_SIGNAL_MAX_NEW_RANK`。
+
+### Reclaim passive FVG wait5 preset - 2026-06-26
+
+在继续做 15m passive impulse FVG 回踩研究时，逐笔检查显示真正需要收紧的不是
+`fill_pct` 或 `min_wait`，而是过晚才回填成交的 stale fill。因此把
+`fvg_max_wait_candles` 从 `24` 收到更紧的区间后，再围绕更简单的 round-number 区间做只读重放。
+
+本轮结论：
+
+- `delta12-24 + wait8` 会引入新的 `H-USDT-SWAP` 亏损，不采用。
+- `delta20-40 + wait8 + pchg5-12` 与 `pchg5-10` 在当前样本上 trade set 完全一致，
+  但边界更自然，可替代 `cap10`。
+- `cap15` 和 no-cap 都会额外引入 `TAO` 亏损，把 `2R` 从
+  `4 trades / 100% / 29.72` 降回 `5 trades / 80% / 25.9`，不采用。
+- `fvg_max_wait_candles=1/2` 只保留 `AMD`、`CHIP` 两笔；
+  `3/4` 会补回 `BASED` 但仍丢掉 `ARM`；`5-11` 保持同一组
+  `BASED/AMD/CHIP/ARM`；`12` 开始重新放进 `HMSTR` 亏损单。
+  因此最终选择最小稳定值 `wait5`，而不是把 `wait8` 当成神奇参数。
+
+最终固化的 research preset：
+
+```text
+research_momentum_0375sl_20r_reclaim_fvgwait5_delta20_40_pchg5_12_v1
+entry_rule_version=rank_radar_4h15m_r0375_20r_rcm_fvg5_d20_40_p5_12_v1
+event_source=raw_state
+trade_direction=long
+stop_loss_pct=0.0375
+target_r=2.0
+entry_max_distance_pct=5.0
+entry_min_volume_ratio=1.0
+trend_min_average_distance_pct=0.0
+min_delta_rank=20
+max_delta_rank=40
+min_price_change_pct=5.0
+max_price_change_pct=12.0
+entry_trigger_allowlist=reclaim_ema
+fvg_entry_mode=m15_impulse_retrace
+fvg_max_wait_candles=5
+ignore_entry_signal_updates_while_open=true
+```
+
+本地只读复核命令：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://.../quant_core \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --event-source raw_state \
+  --trade-direction long \
+  --paper-outcome-entry-rule-version rank_radar_4h15m_r0375_20r_rcm_fvg5_d20_40_p5_12_v1 \
+  --stop-loss-pct 0.0375 \
+  --target-rs 2.0,3.0 \
+  --entry-max-distance-pct 5.0 \
+  --entry-min-volume-ratio 1.0 \
+  --trend-min-average-distance-pct 0.0 \
+  --min-delta-rank 20 \
+  --max-delta-rank 40 \
+  --min-price-change-pct 5.0 \
+  --max-price-change-pct 12.0 \
+  --entry-trigger-allowlist reclaim_ema \
+  --ignore-entry-signal-updates-while-open \
+  --fvg-entry-mode 15m_impulse_retrace \
+  --fvg-max-wait-candles 5 \
+  --equity-report \
+  --equity-concentration-report \
+  --equity-trade-report \
+  --min-trades 1
+```
+
+当前口径下，`2R` 的 framework result 为 `4 trades / win_rate 100% / total_profit 29.72`；
+remove top1 后 `22.29`，remove top3 后仍有 `7.43`。`3R` 虽然也有
+`4 trades / 75% / 29.72`，但对低频策略目标，当前更推荐先用 `2R` 观察 forward sample。
+
+### Breakout + reclaim delayed FVG preset - 2026-06-26
+
+继续沿着“第一次短时再突破是假，真正机会在回踩进 15m FVG 后”的思路做结构归因后，
+先对比了两条现成路径：
+
+- `15m_self_after_signal`：交易数会显著增多，但在 `delta20-40 + pchg5-12`
+  口径下，`reclaim_ema` 单独时只有 `6-12` 笔且胜率 `33%-50%`，
+  `breakout_previous_high` 单独时虽然可到 `35-48` 笔，但胜率也只有
+  `34%-44%`，不适合当前“低频高胜率”的目标。
+- `15m_impulse_retrace`：`breakout_previous_high` 单独仍然偏弱，但只要和
+  `reclaim_ema` 合并，再要求延迟回踩进 FVG，结果会明显改善。
+
+对 `breakout_previous_high,reclaim_ema + m15_impulse_retrace` 再扫
+`fvg_max_wait_candles=5..12` 后，结论是：
+
+- `wait5`：`2R = 6 trades / 66.67% / 22.08`
+- `wait6-7`：补进 `INJ` 盈利单，`2R = 7 trades / 71.43% / 29.51`
+- `wait8-9`：再补进 `USELESS` 盈利单，`2R = 8 trades / 75% / 36.94`
+- `wait10-11`：再加入 `APR` 胜单和 `ORDI` 亏单，`2R = 10 trades / 70% / 40.55`
+- `wait12`：重新放进 `HMSTR`、`EDEN` 等亏损样本，退化成
+  `2R = 12 trades / 58.33% / 32.91`
+
+在 `wait8` 和 `wait10` 之间，虽然 `wait8` 胜率更高，但 `wait10` 的
+trade set 更分散：`remove top5 positive symbols` 后仍保留 `3.40` 利润，
+而 `wait8` 在同口径下已经回到 `-0.21`。因此这里优先保留 `wait10` 作为
+更稳健、也更 round-number 的候选。
+
+最终固化的 research preset：
+
+```text
+research_momentum_0375sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1
+entry_rule_version=rank_radar_4h15m_r0375_20r_brk_rcm_fvg10_d20_40_p5_12_v1
+event_source=raw_state
+trade_direction=long
+stop_loss_pct=0.0375
+target_r=2.0
+entry_max_distance_pct=5.0
+entry_min_volume_ratio=1.0
+trend_min_average_distance_pct=0.0
+min_delta_rank=20
+max_delta_rank=40
+min_price_change_pct=5.0
+max_price_change_pct=12.0
+entry_trigger_allowlist=breakout_previous_high,reclaim_ema
+fvg_entry_mode=m15_impulse_retrace
+fvg_max_wait_candles=10
+ignore_entry_signal_updates_while_open=true
+```
+
+本地只读复核命令：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://.../quant_core \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --event-source raw_state \
+  --trade-direction long \
+  --paper-outcome-entry-rule-version rank_radar_4h15m_r0375_20r_brk_rcm_fvg10_d20_40_p5_12_v1 \
+  --stop-loss-pct 0.0375 \
+  --target-rs 2.0,3.0 \
+  --entry-max-distance-pct 5.0 \
+  --entry-min-volume-ratio 1.0 \
+  --trend-min-average-distance-pct 0.0 \
+  --min-delta-rank 20 \
+  --max-delta-rank 40 \
+  --min-price-change-pct 5.0 \
+  --max-price-change-pct 12.0 \
+  --entry-trigger-allowlist breakout_previous_high,reclaim_ema \
+  --ignore-entry-signal-updates-while-open \
+  --fvg-entry-mode 15m_impulse_retrace \
+  --fvg-max-wait-candles 10 \
+  --equity-report \
+  --equity-concentration-report \
+  --equity-trade-report \
+  --min-trades 1
+```
+
+当前口径下，`2R` 为 `10 trades / win_rate 70% / total_profit 40.55`；
+remove top1 后 `33.12`，remove top3 后 `18.26`，remove top5 后仍有 `3.40`。
+这说明“突破信号本身不是问题，问题在于必须配合更晚的 FVG 回踩入场”。
+
+### Breakout + reclaim delayed FVG 0.04SL preset - 2026-06-26
+
+在上面这条 `breakout_previous_high,reclaim_ema + m15_impulse_retrace + wait10`
+结构确认后，又继续对 `stop_loss × target_r` 做了邻域扫描。目标不是继续找更复杂的小数，
+而是确认哪一段是稳定平台，避免把偶然点位误当最优。
+
+粗网格结果：
+
+- `SL=0.0325/0.035`：无论 `target_r=1.8..2.3`，胜率基本都卡在 `60%`
+- `SL=0.0375`：`target_r=1.8..2.1` 升到 `70%`，其中 `2.1R = 43.175`
+- `SL=0.04`：`target_r=1.8/1.9/2.0` 都稳定在 `80%`，其中 `2.0R = 55.30`
+- `SL=0.04` 之后继续把 `target_r` 提到 `2.1+`，胜率反而掉回 `60%`
+
+随后把 `target_r=2.0` 固定，只扫 stop 边界：
+
+- `SL=0.038`：`10 trades / 80% / 52.50`
+- `SL=0.039`：`10 trades / 80% / 53.90`
+- `SL=0.040`：`10 trades / 80% / 55.30`
+- `SL=0.041`：`10 trades / 80% / 56.70`
+- `SL=0.0425`：直接退化成 `10 trades / 60% / 33.30`
+- `SL=0.045`：`10 trades / 60% / 35.30`
+- `SL=0.050`：`10 trades / 60% / 39.30`
+
+这说明 `0.038-0.041` 是同一段稳定平台，而 `0.0425` 开始跨过了结构阈值。
+因此这里不追 `0.041` 这种更细小数，而是选 round-number、同时仍处于稳定平台内的 `0.04`。
+
+最终固化的更强 research preset：
+
+```text
+research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1
+entry_rule_version=rank_radar_4h15m_r04_20r_brk_rcm_fvg10_d20_40_p5_12_v1
+event_source=raw_state
+trade_direction=long
+stop_loss_pct=0.04
+target_r=2.0
+entry_max_distance_pct=5.0
+entry_min_volume_ratio=1.0
+trend_min_average_distance_pct=0.0
+min_delta_rank=20
+max_delta_rank=40
+min_price_change_pct=5.0
+max_price_change_pct=12.0
+entry_trigger_allowlist=breakout_previous_high,reclaim_ema
+fvg_entry_mode=m15_impulse_retrace
+fvg_max_wait_candles=10
+ignore_entry_signal_updates_while_open=true
+```
+
+本地只读复核命令：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://.../quant_core \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --event-source raw_state \
+  --trade-direction long \
+  --paper-outcome-entry-rule-version rank_radar_4h15m_r04_20r_brk_rcm_fvg10_d20_40_p5_12_v1 \
+  --stop-loss-pct 0.04 \
+  --target-rs 2.0 \
+  --entry-max-distance-pct 5.0 \
+  --entry-min-volume-ratio 1.0 \
+  --trend-min-average-distance-pct 0.0 \
+  --min-delta-rank 20 \
+  --max-delta-rank 40 \
+  --min-price-change-pct 5.0 \
+  --max-price-change-pct 12.0 \
+  --entry-trigger-allowlist breakout_previous_high,reclaim_ema \
+  --ignore-entry-signal-updates-while-open \
+  --fvg-entry-mode 15m_impulse_retrace \
+  --fvg-max-wait-candles 10 \
+  --equity-report \
+  --equity-concentration-report \
+  --equity-trade-report \
+  --min-trades 1
+```
+
+当前口径下，`2R` 为 `10 trades / win_rate 80% / total_profit 55.30`；
+remove top1 后 `47.37`，remove top3 后 `31.51`，remove top5 后仍有 `15.65`。
+相对 `0.0375SL` 版本，最大的变化不是样本数增加，而是 `ORDI` 从亏损翻成盈利，
+同时整体 trade set 的集中度明显改善。
+
+### Breakout + reclaim delayed FVG 0.04SL delta15-40 preset - 2026-06-26
+
+在 `0.04SL + 2.0R + breakout_previous_high,reclaim_ema + wait10` 稳定后，
+又回头扫了 `delta` 与 `price_change` 的边界，目标是确认当前最强解是不是还能在
+不破坏高胜率的前提下继续扩样。
+
+`delta` 邻域结果：
+
+- `delta15-35`：`12 trades / 83.33% / 71.16`
+- `delta15-40`：`13 trades / 84.62% / 79.09`
+- `delta15-45`：与 `delta15-40` 完全一致
+- `delta15-50`：退化成 `15 trades / 73.33% / 70.95`
+- `delta20-40`：旧基线，`10 trades / 80% / 55.30`
+
+这说明 `delta15-40` 已经把有价值的更低 delta 样本接进来了，而继续放到 `50`
+会开始引入更差的样本；`15-45` 既然和 `15-40` 没区别，就没有必要额外放宽。
+
+`price_change` 邻域结果（固定 `delta15-40`）：
+
+- `pchg5-10`：`12 trades / 83.33% / 71.16`
+- `pchg5-12`：`13 trades / 84.62% / 79.09`
+- `pchg5-15`：`14 trades / 78.57% / 75.02`
+- `pchg4-12`：`16 trades / 68.75% / 66.88`
+- `pchg6-12`：`11 trades / 81.82% / 63.23`
+- `pchg5-no-cap`：`17 trades / 64.71% / 62.16`
+
+因此 `pchg5-12` 仍然是当前最优边界：既没有像 `5-10` 那样错过额外盈利样本，
+也没有像 `5-15` / no-cap 那样开始明显牺牲胜率。
+
+最终固化的当前最强 research preset：
+
+```text
+research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_v1
+entry_rule_version=rank_radar_4h15m_r04_20r_brk_rcm_fvg10_d15_40_p5_12_v1
+event_source=raw_state
+trade_direction=long
+stop_loss_pct=0.04
+target_r=2.0
+entry_max_distance_pct=5.0
+entry_min_volume_ratio=1.0
+trend_min_average_distance_pct=0.0
+min_delta_rank=15
+max_delta_rank=40
+min_price_change_pct=5.0
+max_price_change_pct=12.0
+entry_trigger_allowlist=breakout_previous_high,reclaim_ema
+fvg_entry_mode=m15_impulse_retrace
+fvg_max_wait_candles=10
+ignore_entry_signal_updates_while_open=true
+```
+
+本地只读复核命令：
+
+```bash
+QUANT_CORE_DATABASE_URL=postgres://.../quant_core \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --event-source raw_state \
+  --trade-direction long \
+  --paper-outcome-entry-rule-version rank_radar_4h15m_r04_20r_brk_rcm_fvg10_d15_40_p5_12_v1 \
+  --stop-loss-pct 0.04 \
+  --target-rs 2.0 \
+  --entry-max-distance-pct 5.0 \
+  --entry-min-volume-ratio 1.0 \
+  --trend-min-average-distance-pct 0.0 \
+  --min-delta-rank 15 \
+  --max-delta-rank 40 \
+  --min-price-change-pct 5.0 \
+  --max-price-change-pct 12.0 \
+  --entry-trigger-allowlist breakout_previous_high,reclaim_ema \
+  --ignore-entry-signal-updates-while-open \
+  --fvg-entry-mode 15m_impulse_retrace \
+  --fvg-max-wait-candles 10 \
+  --equity-report \
+  --equity-concentration-report \
+  --equity-trade-report \
+  --min-trades 1
+```
+
+当前口径下，`2R` 为 `13 trades / win_rate 84.62% / total_profit 79.09`；
+remove top1 后 `71.16`，remove top3 后 `55.30`，remove top5 后仍有 `39.44`。
+相对 `delta20-40` 版本，新增的主要是 `SAHARA`、`HOME`、`UNI` 这类更低 delta 但仍然
+符合 delayed FVG 回踩结构的盈利样本。
+
+同一外壳下把 FVG 入场模式做 A/B 后，结论也比较明确：
+
+- `fvg_entry_mode=off`：`133 trades / 40.60% / 99.43`
+- `fvg_entry_mode=15m_self_after_signal wait5`：`52 trades / 36.54% / 13.20`
+- `fvg_entry_mode=15m_self_after_signal wait10`：`81 trades / 37.04% / 23.38`
+- `fvg_entry_mode=15m_impulse_retrace wait5`：`7 trades / 71.43% / 31.51`
+- `fvg_entry_mode=15m_impulse_retrace wait10`：`13 trades / 84.62% / 79.09`
+
+所以“15 分钟自己的 FVG”在当前实现口径下不是更优入口，反而会明显放宽样本，
+把胜率压到 `40%` 以下。相反，先允许第一次突破失败，再等更晚出现的
+`15m_impulse_retrace` 回踩，才更符合“假突破后回撤到 FVG 底部附近再拉升”的交易
+结构。结合现有 FVG 单测全部通过，这一轮没有发现 FVG 回测逻辑明显错配的证据，
+当前更像是入口模式本身的优劣差异。
+
+继续把“更靠近 FVG 底部”和“不要太快回踩成交”拆开扫后，结论更细：
+
+- `fvg_impulse_retrace_fill_pct=35/50/65` 三档结果完全一致，都是
+  `12 trades / 83.33% / 71.16`
+- 基线 `fill_pct=20` 仍然最好：`13 trades / 84.62% / 79.09`
+- `fvg_impulse_retrace_min_wait_candles=1`：`15 trades / 80% / 82.95`
+- `fvg_impulse_retrace_min_wait_candles=2`：`20 trades / 65% / 73.95`
+- `fvg_impulse_retrace_min_wait_candles=3`：`20 trades / 65% / 74.58`
+
+这说明更深的 FVG 填充并没有带来更好结果，反而是“至少等 1 根 15m K”
+这个时间约束有效过滤掉了第一次过快的回踩噪音；一旦继续等到 `2-3` 根，
+又会开始把后续更宽的追入样本放回来。
+
+因此当前更新后的最强 research preset 为：
+
+```text
+research_momentum_04sl_20r_breakout_reclaim_fvgwait10_minwait1_delta15_40_pchg5_12_v1
+entry_rule_version=rank_radar_4h15m_r04_20r_brk_rcm_fvg10_mw1_d15_40_p5_12_v1
+event_source=raw_state
+trade_direction=long
+stop_loss_pct=0.04
+target_r=2.0
+entry_max_distance_pct=5.0
+entry_min_volume_ratio=1.0
+trend_min_average_distance_pct=0.0
+min_delta_rank=15
+max_delta_rank=40
+min_price_change_pct=5.0
+max_price_change_pct=12.0
+entry_trigger_allowlist=breakout_previous_high,reclaim_ema
+fvg_entry_mode=m15_impulse_retrace
+fvg_max_wait_candles=10
+fvg_impulse_retrace_fill_pct=20
+fvg_impulse_retrace_min_wait_candles=1
+ignore_entry_signal_updates_while_open=true
+```
+
+本地只读复核结果：
+
+- `2R`：`15 trades / win_rate 80% / total_profit 82.95`
+- remove top1：`75.02`
+- remove top3：`59.16`
+- remove top5：`43.30`
+
+在这条 `minwait1` 主线上继续扫 `target_r` 后，结论也比较直接：
+
+- `1.8R`：`15 trades / 80% / 73.35`
+- `1.9R`：`15 trades / 80% / 78.15`
+- `2.0R`：`15 trades / 80% / 82.95`
+- `2.1R`：`15 trades / 66.67% / 62.95`
+- `2.2R`：`15 trades / 66.67% / 66.95`
+- `2.3R`：`15 trades / 66.67% / 70.95`
+- `2.4R`：`15 trades / 66.67% / 74.95`
+- `2.5R`：`15 trades / 66.67% / 78.95`
+- `2.6R`：`15 trades / 53.33% / 54.15`
+
+因此它并不是适合继续推高 RR 的壳子。`2.0R` 依然是当前最好的平衡点；
+一旦上到 `2.1R+`，胜率会立刻从 `80%` 掉到 `66.67%`。
+
+进一步补扫 `profit_protect` 后，也没有找到比当前基线更强的折中：
+
+- `after=1.0R stop=0.0R`：`15 trades / 83.33% / 71.16`
+- `after=1.0R stop=0.5R`：`15 trades / 86.67% / 58.95`
+- `after=1.2R stop=0.0R`：`15 trades / 83.33% / 71.16`
+- `after=1.2R stop=0.3R`：`15 trades / 86.67% / 67.75`
+- `after=1.2R stop=0.5R`：`15 trades / 86.67% / 64.95`
+- `after=1.4R stop=0.5R`：与基线一致，`15 trades / 80% / 82.95`
+- `after=1.5R stop=0.5R`：与基线一致，`15 trades / 80% / 82.95`
+- `after=1.5R stop=1.0R`：`15 trades / 80% / 66.95`
+
+集中度也支持同样结论：
+
+- 基线 `2.0R` remove top5：`43.30`
+- `after=1.0R stop=0.0R` remove top5：`31.51`
+- `after=1.0R stop=0.5R` remove top5：`19.30`
+
+也就是说，保护止盈确实可以继续抬胜率，但它拿掉的主要是当前样本中最有价值的
+尾部盈利腿，并没有改善稳健性。按“低频时优先高胜率，但 RR 不必被过度牺牲”的
+口径，当前仍保留 `2.0R + no profit protect` 作为最强主候选。
+
+把 `minwait1` 与上一版 `minwait0` 做逐笔审计后，差异也更清楚了：
+
+- 新增胜单：`SLX +7.93`
+- 新增亏单：`BILL -4.07`
+- `AMD`、`CHIP` 只是顺延到更晚一根 15m K 线入场，结果没变
+
+也就是说，`minwait1` 的净提升并不是来自大规模结构重塑，而是
+`+1 win / +1 loss / 两笔顺延` 的组合，净收益约 `+3.86`。时间切分也支持这个判断：
+
+- `minwait0` early：`7 trades / 85.71% / 43.51`
+- `minwait0` late：`6 trades / 83.33% / 35.58`
+- `minwait1` early：`8 trades / 87.5% / 51.44`
+- `minwait1` late：`7 trades / 71.43% / 31.51`
+
+因此 `minwait1` 是“净改善但仍需继续控制等待窗口”的候选，而不是无条件更稳的版本。
+
+顺着这条线继续扫 `minwait1 × fvg_max_wait_candles` 后，结果很明确：
+
+- `wait5`：`8 trades / 75% / 39.44`
+- `wait6`：`9 trades / 77.78% / 47.37`
+- `wait7`：`10 trades / 80% / 55.30`
+- `wait8`：`11 trades / 81.82% / 63.23`
+- `wait9`：`13 trades / 76.92% / 67.09`
+- `wait10`：`15 trades / 80% / 82.95`
+- `wait11`：`16 trades / 75% / 78.88`
+- `wait12`：`18 trades / 66.67% / 70.74`
+
+这说明 `wait10` 在 `minwait1` 结构下不是偶然，而是很清晰的顶点：
+更短会错过有效 delayed retrace，更长又会重新放进噪音回踩。
+
+最后再把 `fill_pct` 在 `20` 周围补完邻域扫描：
+
+- `fill_pct=10`：`14 trades / 78.57% / 75.02`
+- `fill_pct=15`：`14 trades / 78.57% / 75.02`
+- `fill_pct=20`：`15 trades / 80% / 82.95`
+- `fill_pct=25`：`15 trades / 80% / 82.95`
+- `fill_pct=30`：`15 trades / 80% / 82.95`
+
+因此当前没有证据支持继续把 entry 压到更深 FVG 底部。相反，`20-30`
+已经形成稳定平台，说明这部分参数不敏感，不需要继续围绕它做细粒度耦合优化。
+
+补上本地 `quant_web.market_velocity_paper_outcomes` 真实落库验证后，结论又进一步收敛了一层：
+replay 最强的 `minwait1`，并不等于 paper outcome 最强。
+
+三条 `0.04SL + 2.0R + delta15-40 + pchg5-12 + 15m impulse retrace` 候选的本地 paper outcome
+对比如下：
+
+- `breakout+reclaim + wait10`
+  - `24h`：`13 trades / resolved_win_rate 87.50% / avg_r_complete 1.2939`
+  - `48h`：`13 trades / resolved_win_rate 83.33% / avg_r_complete 1.5158`
+- `breakout+reclaim + wait10 + minwait1`
+  - `24h`：`15 trades / resolved_win_rate 80.00% / avg_r_complete 1.1866`
+  - `48h`：`15 trades / resolved_win_rate 78.57% / avg_r_complete 1.3798`
+- `reclaim-only + wait10`
+  - `24h`：`4 trades / resolved_win_rate 100% / avg_r_complete 1.6787`
+  - `48h`：`4 trades / resolved_win_rate 100% / avg_r_complete 1.9262`
+
+其中 `reclaim-only` 的 4 笔信号分别是 `BASED`、`AMD`、`CHIP`、`ARM`：
+
+- `BASED`：`24h/48h` 都 hit `2R`
+- `CHIP`：`24h/48h` 都 hit `2R`
+- `ARM`：`24h timeout`，但 `48h` hit `2R`
+- `AMD`：`24h/48h` 都是高 R timeout，`1.51R / 1.70R`
+
+也就是说，`reclaim_ema + 15m FVG` 这条分支本地没有出现任何 `stop_hit`，亏损全来自
+`breakout_previous_high` 分支。`minwait1` 在 replay 里多拿到了一笔 `SLX` 胜单，但在
+paper outcome 里同时多带入 `BILL` 亏单，最终整体质量反而低于 `minwait0`，更明显低于
+`reclaim-only`。
+
+从实时筛选过程看，这个 `reclaim-only` 候选也符合“低频高胜率”的目标函数：
+在 `17` 个 entry-pass 候选里，`entry_trigger_allowlist=reclaim_ema` 最终只保留了 `4`
+个信号，占比约 `23.5%`。如果按“开仓占比低时优先高胜率、不过度追 RR”的口径，这条线
+比 `breakout+reclaim` 更一致。
+
+继续只在 `reclaim-only` 主线上扫 `target_r` 后，结构也比较明确：
+
+- `1.6R`：`24h 3 win + 1 timeout`，`48h 4/4 win`
+- `1.7R`：`24h 3 win + 1 timeout`，`48h 4/4 win`
+- `1.8R`：`24h 3 win + 1 timeout`，`48h 4/4 win`
+- `1.9R`：`24h 2 win + 2 timeout`，`48h 3 win + 1 timeout`
+- `2.0R`：`24h 2 win + 2 timeout`，`48h 3 win + 1 timeout`
+- `2.1R`：`48h` 已经退化成 `2 win + 1 loss + 1 timeout`
+
+也就是说，`1.8R` 是当前这条低频 reclaim 分支里，仍然保留相对更高 RR、同时又能把
+`48h` 的 `AMD` 从 timeout 释放成完成赢单的最高 target。更低的 `1.6/1.7R` 只是继续让
+RR 变低，并没有带来更多样本或额外完成度；更高的 `1.9/2.0R` 则会重新回到 `AMD` timeout。
+
+继续沿用户“去掉过耦合数字”的要求，把这条 `1.8R reclaim-only` 主线做 round-number
+去耦合后，也得到了一致结果：
+
+- `delta20-40 + pchg5-10` 的 owner-side 结果与当前 `delta15-40 + pchg5-12` 完全相同
+- trade set 仍是 `AMD / ARM / BASED / CHIP`
+- `24h` 仍是 `3 win + 1 timeout`
+- `48h` 仍是 `4/4 win`
+
+这说明 `15-40` 和 `5-12` 在当前主线上并不是必要条件，只是更宽的等价边界。既然
+`20-40` 与 `5-10` 可以得到相同结果，就没有必要继续把更细的参数留在 preset 里。
+
+但在这条已经简化过的 `1.8R + delta20-40 + pchg5-10` 主线上，`fvg_max_wait_candles`
+重新变得有信息量：
+
+- `wait10`：`24h 4 trades / 3 win / 0 loss / 1 timeout`，`48h 4/4 win`
+- `wait12`：`24h 5 trades / 4 win / 0 loss / 1 timeout`，`48h 5/5 win`
+- `wait14+`：会继续放进 `ORDI` 胜单，但同时把 `USELESS` 亏损也带回来
+
+因此 `wait12` 是当前这条 reclaim-only 主线上新的甜点位。它不是靠放松风险去换交易数，
+而是只新增了一笔 `HMSTR` 的完成赢单，并且没有引入任何 `stop_hit`。
+
+继续把这三个边界样本和 `delta15` 带回来的 `EDGE` 逐笔对齐后，`wait12` 的结论更稳：
+
+- `HMSTR`：`detected_at=2026-06-07 05:30:24+00`，`entry_ts=2026-06-07 08:15:00+00`，
+  延迟 `164.59m = 10.97` 根 `15m`，刚好落在 `wait12` 内，是这一轮新增的干净赢单。
+- `ORDI`：`detected_at=2026-06-11 09:04:05+00`，`entry_ts=2026-06-11 12:15:00+00`，
+  延迟 `190.91m = 12.73` 根 `15m`，只有把窗口放到 `14` 才会进来。
+- `USELESS`：`detected_at=2026-06-13 22:30:12+00`，`entry_ts=2026-06-14 01:45:00+00`，
+  延迟 `194.79m = 12.99` 根 `15m`，和 `ORDI` 几乎是同一档晚填充样本，但结果是 `stop_hit`。
+- `EDGE`：`detected_at=2026-06-13 08:01:12+00`，`entry_ts=2026-06-13 10:30:00+00`，
+  延迟 `148.79m = 9.92` 根 `15m`，问题不在等待窗口，而在它的 `delta_rank=16`；这正是
+  `min_delta_rank` 从 `20` 放到 `15` 后会立刻引入的亏损样本。
+
+也就是说，`wait12 -> wait14` 的边际扩张并不是“再多等两根就会多拿一个稳定赢单”，而是会
+把 `ORDI` 和 `USELESS` 这一对几乎同延迟的样本一起带进来；单靠时间窗口本身没有干净分界。
+因此当前最小、最稳的结论仍然是保留 `wait12 + delta20-40`，不要为了多拿 `ORDI` 再次放宽。
+
+顺手也把这版实现的回测逻辑重新核了一遍。聚焦 `market_velocity_event_backtest` 的
+`raw_state -> evaluate_events -> m15_impulse_retrace` 主链路后，没有发现新的明显逻辑错误：
+
+- `raw_state` 仍然是按 `symbol + 15m bucket` 去重，避免同一根扫描 candle 重复开仓。
+- `reclaim_ema + m15_impulse_retrace` 仍然在原始 `15m` K 线上找 signal 前最近未回补的 impulse gap，
+  然后等后续 candle 回填到 lower-band 附近再成交。
+- 当前 entry price 仍然是“回补 candle 触达 lower-band 的限价成交”，不是下一根开盘追单；
+  这是一种偏保守的 `FVG` 挂单建模假设，不是这轮结果变化的 bug 来源。
+
+所以这轮的新信息不是“FVG 回测逻辑有错”，而是 `stale fill` 的边界比上一轮更清楚了：超过
+`12` 根 `15m` 以后，确实会开始混入质量不足的回补样本。
+
+因此当前 paper observation 主推候选再次更新为：
+
+```text
+research_momentum_04sl_18r_reclaim_fvgwait12_delta20_40_pchg5_10_v1
+entry_rule_version=rank_radar_4h15m_r04_18r_rcm_fvg12_d20_40_p5_10_v1
+event_source=raw_state
+trade_direction=long
+stop_loss_pct=0.04
+target_r=1.8
+entry_max_distance_pct=5.0
+entry_min_volume_ratio=1.0
+trend_min_average_distance_pct=0.0
+min_delta_rank=20
+max_delta_rank=40
+min_price_change_pct=5.0
+max_price_change_pct=10.0
+entry_trigger_allowlist=reclaim_ema
+fvg_entry_mode=m15_impulse_retrace
+fvg_max_wait_candles=12
+ignore_entry_signal_updates_while_open=true
+```
+
+本地 owner-side paper outcome 结果：
+
+- `24h`：`5 trades / 4 win / 0 loss / 1 timeout / resolved_win_rate 100% / avg_r_complete 1.6802`
+- `48h`：`5 trades / 5 win / 0 loss / 0 timeout / resolved_win_rate 100% / avg_r_complete 1.8`
+
+而 `research_momentum_04sl_20r_breakout_reclaim_fvgwait10_minwait1_delta15_40_pchg5_12_v1`
+继续保留为 replay 侧的高收益对照组；`research_momentum_04sl_20r_reclaim_fvgwait10_delta15_40_pchg5_12_v1`
+、`research_momentum_04sl_18r_reclaim_fvgwait10_delta15_40_pchg5_12_v1` 与
+`research_momentum_04sl_18r_reclaim_fvgwait10_delta20_40_pchg5_10_v1` 则都降级为旧口径备选，
+不再作为当前 paper outcome 主线。
+
+## Immediate Reclaim vs FVG Entry - 2026-06-27
+
+在当前最新 owner-side 主线
+`rank_radar_4h15m_r04_18r_rcm_fvg14_d3_pb3_vol11_fp10_d20_40_p5_10_v1`
+上，又补了一轮专门针对“是不是第一次突破触发本身就该降权”的对照。
+
+先用完全相同的壳，只关闭 `FVG` 等待，直接跑 immediate reclaim：
+
+```text
+compare_reclaim_immediate_r04_18r_d3_vol11_pb3_d20_40_p5_10_v1
+event_source=raw_state
+stop_loss_pct=0.04
+target_r=1.8
+entry_max_distance_pct=3.0
+entry_min_volume_ratio=1.1
+entry_max_signal_pullback_pct=3.0
+min_delta_rank=20
+max_delta_rank=40
+min_price_change_pct=5.0
+max_price_change_pct=10.0
+entry_trigger_allowlist=reclaim_ema
+fvg_entry_mode=off
+ignore_entry_signal_updates_while_open=true
+```
+
+结果直接退化成：
+
+- `entry_trigger_filter before=109 after=28`
+- `24h`: `23 trades / 12 win / 7 loss / 3 timeout / 1 incomplete / avg_r_complete 0.7268`
+- `48h`: `23 trades / 12 win / 8 loss / 1 timeout / 2 incomplete / avg_r_complete 0.6639`
+
+而当前 owner-side 主线仍然是：
+
+- `entry_trigger_filter before=10 after=5`
+- `24h/48h`: `5 trades / 5 win / 0 loss / 0 timeout / avg_r_complete 1.8`
+
+所以这里的结论不是简单的“FVG 让频率更低”，而是它确实在修正 entry quality。
+
+把这 5 个共享 event 逐笔对齐后，差异更具体：
+
+- `HMSTR`：immediate reclaim `2026-06-07 05:45` 入场，`stop_hit=-1R`；当前 `FVG` 延后到
+  `2026-06-07 08:15`，结果变成 `target_hit=1.8R`
+- `BASED`：immediate reclaim `2026-06-12 04:45` 入场，`stop_hit=-1R`；当前 `FVG`
+  延后到 `2026-06-12 05:00`，结果变成 `target_hit=1.8R`
+- `ORDI`：两边都赢，但 immediate 只延后 `10.91m`，当前 `FVG` 延后 `190.91m`
+- `AMD / CHIP`：两边都还是赢单
+
+也就是说，当前这条 `reclaim_ema + m15_impulse_retrace` 主线不是只靠“少做单”显得漂亮，
+而是真的把 `HMSTR / BASED` 这类 immediate 会被打掉的样本，改造成了可完成的赢单。
+
+顺着这个假设，又补扫了当前主线的
+`fvg_impulse_retrace_min_wait_candles=0/1/2`：
+
+- `minwait0`：`entry_pass=10`，`after=5`，`24h/48h: 5/5 win`
+- `minwait1`：`entry_pass=12`，`after=5`，`24h/48h: 5/5 win`
+- `minwait2`：`entry_pass=14`，`after=5`，`24h/48h: 5/5 win`
+
+所以“强制多等 1-2 根 15m”在当前 realized sample 上没有带来任何额外收益，只是把更多后来
+仍会被锁跳过的候选重新放回池子。当前继续保留 `minwait0`，不要为了语义上的“更像二次回踩”
+就把候选边界放宽。
+
+最后又把用户之前提过的 `15m_self_after_signal` 用同样 tight shell 重新测了一遍：
+
+- `entry_pass=72`
+- `entry_trigger_filter before=72 after=18`
+- `24h`: `16 trades / 7 win / 5 loss / 3 timeout / 1 incomplete / avg_r_complete 0.5956`
+- `48h`: `16 trades / 7 win / 6 loss / 2 timeout / 1 incomplete / avg_r_complete 0.5139`
+
+这比当前 `m15_impulse_retrace` 主线明显更差，所以在最新
+`0.04SL + 1.8R + d3 + vol11 + pb3 + delta20-40 + pchg5-10`
+外壳下，`15m self FVG` 仍然不是更优替代。
+
+在此基础上，又把当前主线的 `fvg_impulse_retrace_fill_pct` 扫成整数邻域
+`5 / 10 / 20 / 30 / 50`：
+
+- 五档 owner-side realized trade set 完全一致，`24h/48h` 都还是 `5 trades / 5 win / avg_r 1.8`
+- `5 / 10` 两档的 `entry_pass=11`，`20 / 30 / 50` 三档的 `entry_pass=10`
+- 但 `5 / 10` 的共享 5 笔赢单 entry price 会更贴近 FVG 底部，例如
+  `HMSTR 0.00017758 < 0.00017766`、`ORDI 3.1088 < 3.1096`
+
+随后用独立 rule version
+`rank_radar_4h15m_r04_18r_rcm_fvg14_d3_pb3_vol11_fp10_d20_40_p5_10_v1`
+做了 owner-side Web 写回验证，结果仍然是：
+
+- `paper_outcomes_submitted=10`
+- Web summary 回读 `total_count=10`、`generated_execution_task_count=0`
+- `24h/48h` 仍然都是 `5 trades / 5 win / avg_r 1.8`
+
+因此当前同名 research preset 再次做了一个不改变 trade set 的小收紧：
+显式把 `fvg_impulse_retrace_fill_pct` 从默认 `20` 调到 `10`。这一步不是为了增加样本，
+而是让当前已验证有效的 5 笔 reclaim FVG 入场，尽量更靠近用户想要的 “FVG 底部左右”
+成交位置。
+
+随后把前一轮分析确认过的 reclaim 次级进场分支固化成一个独立 preset：
+
+- preset:
+  `research_momentum_04sl_18r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1`
+- rule version:
+  `rank_radar_4h15m_r04_18r_rcm_rt1_d3_pb3_vol11_d20_40_p5_10_v1`
+
+它锁定的外壳和当前 FVG 主线一致：
+
+- `event_source=raw_state`
+- `stop_loss_pct=0.04`
+- `target_r=1.8`
+- `entry_max_distance_pct=3.0`
+- `entry_min_volume_ratio=1.1`
+- `entry_max_signal_pullback_pct=3.0`
+- `min_delta_rank=20`
+- `max_delta_rank=40`
+- `min_price_change_pct=5.0`
+- `max_price_change_pct=10.0`
+- `entry_trigger_allowlist=reclaim_ema`
+- `ignore_entry_signal_updates_while_open=true`
+
+唯一变化是把入场方式改成：
+
+- `fvg_entry_mode=off`
+- `entry_retest_after_signal=true`
+- `entry_retest_max_wait_candles=1`
+- `entry_retest_tolerance_pct=0.3`
+
+本地重新验证：
+
+```bash
+CARGO_TARGET_DIR=/tmp/rust_quant_target_tdd \
+QUANT_CORE_DATABASE_URL=postgres://postgres:postgres123@localhost:5432/quant_core \
+cargo run -q -p rust-quant-cli --bin market_velocity_event_backtest -- \
+  --event-source raw_state \
+  --stop-loss-pct 0.04 \
+  --target-rs 1.8 \
+  --entry-max-distance-pct 3.0 \
+  --entry-min-volume-ratio 1.1 \
+  --entry-max-signal-pullback-pct 3.0 \
+  --entry-retest-after-signal \
+  --entry-retest-max-wait-candles 1 \
+  --entry-retest-tolerance-pct 0.3 \
+  --trend-min-average-distance-pct 0.0 \
+  --min-delta-rank 20 \
+  --max-delta-rank 40 \
+  --min-price-change-pct 5.0 \
+  --max-price-change-pct 10.0 \
+  --entry-trigger-allowlist reclaim_ema \
+  --ignore-entry-signal-updates-while-open \
+  --fvg-entry-mode off \
+  --paper-outcome-sink jsonl \
+  --paper-outcome-entry-rule-version \
+    rank_radar_4h15m_r04_18r_rcm_rt1_d3_pb3_vol11_d20_40_p5_10_v1
+```
+
+结果仍然稳定：
+
+- `24h`: `3 trades / 3 win / 0 loss / avg_r_complete 1.8`
+- `48h`: `3 trades / 3 win / 0 loss / avg_r_complete 1.8`
+- 48h realized set:
+  - `EIGEN-USDT-SWAP`
+  - `SLX-USDT-SWAP`
+  - `INJ-USDT-SWAP`
+
+这 3 笔与当前 `fill10` FVG 主线的 5 笔
+`HMSTR / ORDI / BASED / AMD / CHIP`
+完全不重叠，所以当前更合理的定位不是“用 retest 替换 FVG”，而是把它当成 reclaim-only 的高质量补充分支。
+
+## TP/SL Simplification Recheck - 2026-06-28
+
+针对当前最强 hybrid 外壳，又补了一轮只看简单整数/整档参数的止盈止损复核，目标是回答：
+
+- 当前默认止损是不是仍该保留 `4%`
+- 低频样本下，基础止盈是该压到 `1.5R`，还是保留 `2R`
+- 分批止盈是否值得升成默认
+- 结构止损是否真的能和分批止盈形成正增益
+
+本轮固定的外壳不变：
+
+```text
+event_source=raw_state
+trade_direction=long
+entry_rule_version=rank_radar_4h15m_r04_20r_brk_rcm_fvg10_d15_40_p5_12_v1
+entry_max_distance_pct=5.0
+entry_min_volume_ratio=1.0
+trend_min_average_distance_pct=0.0
+min_delta_rank=15
+max_delta_rank=40
+min_price_change_pct=5.0
+max_price_change_pct=12.0
+entry_trigger_allowlist=breakout_previous_high,reclaim_ema
+fvg_entry_mode=m15_impulse_retrace
+fvg_max_wait_candles=10
+ignore_entry_signal_updates_while_open=true
+```
+
+样本仍然是同一组 `13` 笔交易，入场时间覆盖 `2026-06-01` 到 `2026-06-16`。
+
+### 固定止损宽度对照
+
+基础止盈固定 `2R`，只扫简单止损宽度：
+
+- `3% + 2R`：`profit 23.09U`，`win_rate 53.85%`，`Sharpe 1.3713`，`max_dd 3.07%`
+- `4% + 2R`：`profit 79.09U`，`win_rate 84.62%`，`Sharpe 4.8677`，`max_dd 4.07%`
+- `5% + 2R`：`profit 69.09U`，`win_rate 69.23%`，`Sharpe 2.6593`，`max_dd 5.07%`
+
+结论很直接：当前壳里 `4%` 明显优于 `3%` 和 `5%`。`3%` 太紧，会把大量原始赢单提前打成止损；`5%`
+虽然还能盈利，但已经开始用更宽回撤去换结果，收益质量不如 `4%`。
+
+### 基础止盈对照
+
+固定止损锁定 `4%` 后，再看简单目标位：
+
+- `4% + 1.5R`：`profit 57.09U`，`win_rate 84.62%`，`Sharpe 4.2164`
+- `4% + 2R`：`profit 79.09U`，`win_rate 84.62%`，`Sharpe 4.8677`
+- `4% + 3R`：`profit 43.09U`，`win_rate 46.15%`，`Sharpe 1.4395`
+
+这说明当前低频样本里，没必要为了“更高胜率”把基础止盈压到 `1.5R`，因为它并没有提升 framework
+胜率，只是直接少赚；而 `3R` 又明显过高，会把大量本来能完成的样本重新拖回超时或止损。
+
+因此当前基础止盈最优点仍然是 `2R`。
+
+### 分批止盈对照
+
+继续锁定当前最优固定止损 `4%`，对比：
+
+- `4% + 2R 全平`：`profit 79.09U`，`win_rate 84.62%`，`Sharpe 4.8677`
+- `4% + 2R base + 6R/20% runner + 1R runner stop`：
+  `profit 80.68666560U`，`win_rate 84.62%`，`Sharpe 4.6761`
+
+所以 runner 版本不是无效，而是一个很明确的 trade-off：
+
+- 总利润多 `1.59666560U`
+- 胜率没有提高
+- Sharpe 下降
+
+如果只看总利润，`runner6R20 stop1` 是当前最好的低耦合增强版；但如果看风险调整后的默认口径，
+`4% + 2R 全平` 仍然更干净。
+
+### 集中度复核
+
+同一轮 fresh concentration 结果也支持上面的判断。
+
+`4% + 2R 全平`：
+
+- remove top1 后剩余 `71.16U`
+- remove top3 后剩余 `55.30U`
+- remove top5 后剩余 `39.44U`
+
+`4% + 2R base + 6R/20% runner + 1R runner stop`：
+
+- remove top1 后剩余 `69.55666560U`
+- remove top3 后剩余 `49.80651195U`
+- remove top5 后剩余 `34.64U`
+
+runner 版本的额外利润更依赖头部样本，尤其是 `UNI / USELESS / AMD` 这类尾部放大利润的交易。
+因此它适合继续做 paper/research 候选，但暂时不适合替代 `2R` 成为默认版本。
+
+### 结构止损 + 分批止盈复核
+
+现有实现里，`structure_or_fixed` 只会把初始止损收紧，不会放宽。因此它和 runner 组合以后，
+本质是在拿更窄的 breathing room 去换更早的 base TP/runner 触发。
+
+实际回测结果很差：
+
+- `structure + runner6`，`structure_stop_min_pct=0`：
+  `profit -0.95393177U`，`win_rate 15.38%`，`Sharpe -2.5443`
+- `structure + runner6`，`min_pct_floor=1%`：
+  `profit 6.69U`，`win_rate 53.85%`，`Sharpe 1.1969`
+- `structure + runner6`，`min_pct_floor=2%`：
+  `profit 18.29U`，`win_rate 53.85%`，`Sharpe 1.4769`
+- `structure + runner6`，`min_pct_floor=3%`：
+  `profit 27.68666560U`，`win_rate 53.85%`，`Sharpe 1.5052`
+
+即便取这组里最不差的 `3% floor`，它也仍然远弱于：
+
+- `4% + 2R 全平`
+- `4% + 2R base + 6R/20% runner + 1R runner stop`
+
+逐笔对照能看到，`SAHARA / ORDI / BASED / CHIP` 这类原本能完成 base TP 的赢单，
+在 `structure + floor 3%` 下被更早打成 `stop_hit`。因此这个方向先停止推进，不作为当前主壳的可用止损优化。
+
+### 当前结论
+
+截至这轮复核，当前 hybrid 壳上最优、且不过度耦合的止盈止损结论可以收敛为两档：
+
+1. 默认低耦合版本：
+   `固定 4% 止损 + 2R 全平`
+2. 继续 forward paper observation 的利润增强候选：
+   `固定 4% 止损 + 2R base + 6R/20% runner + 1R runner stop`
+
+而 `3%`、`5%`、`1.5R`、`3R`、`结构止损 + runner` 这几个方向，在当前主壳上都已经有了明确负证据，
+后续不再优先重复扫描。
+
+当前库里 `raw_state` 可用历史只覆盖 `2026-05-27` 到 `2026-06-28`。在这个边界内，再按时间切成三段：
+
+- `w1`: `2026-05-27 ~ 2026-06-05`
+- `w2`: `2026-06-06 ~ 2026-06-15`
+- `w3`: `2026-06-16 ~ 2026-06-28`
+
+对当前 hybrid 主壳继续做窗口化复核：
+
+`4% + 2R 全平`
+
+- `w1`: `2 trades / 100% / 15.86U`
+- `w2`: `8 trades / 75% / 39.44U`
+- `w3`: `3 trades / 100% / 23.79U`
+
+`4% + 2R base + 6R/20% runner + 1R stop`
+
+- `w1`: `2 trades / 100% / 18.26U`
+- `w2`: `8 trades / 75% / 36.13015365U`
+- `w3`: `3 trades / 100% / 26.29651195U`
+
+这说明 runner6 不是“每个窗口都更优”的版本：
+
+- 在 `w1 / w3` 它比 `2R` 多赚
+- 在 `w2` 它反而少赚
+
+所以当前对 hybrid 壳更稳的表述应该是：
+
+1. `4% + 2R` 是当前主壳的默认低耦合基线
+2. `runner6R20 stop1` 是当前主壳的弱增强候选，存在轻微 regime 依赖
+3. 它可以继续 forward paper observation，但还不应替代 `2R` 成为默认
+
+再往上游事实源追了一层，当前“不能继续扩长历史”的原因也基本明确了：
+
+- `market_rank_events`：`2026-05-27` 到 `2026-06-28`
+- `market_rank_snapshots`：`2026-06-27` 到 `2026-06-28`
+- `signal_snapshot_log`：`2026-05-29` 到 `2026-06-02`
+- `market_snapshots` / `indicator_snapshots` / 通用 `market_candles`：当前为空
+
+代码侧也说明，这不是 `market_velocity_event_backtest` 自己的人为截断：
+
+- scanner 恢复排名历史只需要 `24h / 4h / 15m / now` 四个目标帧
+- `delete_rank_snapshots_before(...)` 目前只存在于 repository 实现里，当前代码路径里没有实际调用证据
+
+因此当前约束应表述为：
+
+1. 现有 TP/SL 结论已经在“当前可用的 ranking/signal fact history”里做到尽量充分
+2. 如果要继续提升置信度，下一步不是继续抠 TP/SL 参数，而是先扩充上游可审计事实历史
+3. 在没有更长 `market_rank_events` / `market_rank_snapshots` / 等价 rank history 之前，无法对当前
+   raw_state 壳做更长周期的同口径验证
+
+### Current Selection Matrix - 2026-06-28
+
+基于当前可验证证据，TP/SL 先按“策略壳”分别收敛，不再追求统一默认：
+
+| 壳 | preset / 组合 | 当前定位 | 原因 |
+|---|---|---|---|
+| hybrid raw_state | `research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_v1` | 默认基线 | `4% + 2R` 在当前壳里 Sharpe 最高，集中度更低，窗口化结果也最稳 |
+| hybrid raw_state | `research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner6r20_stop1_v1` | paper challenger | 总利润略高，但 `w2` 窗口弱于 `2R`，存在轻微 regime 依赖 |
+| episode | `research_episode_momentum_05sl_20r_rank5_v1` | 低耦合 baseline | 比 `3%/4%` 更稳，但 win rate 仍低，不作为当前 production default |
+| episode | `research_episode_momentum_05sl_30r_rank5_v1` | profit-seeking research | Sharpe / profit 更强，但收益更偏后半段 regime，不外推到其他壳 |
+
+因此当前推进策略应该是：
+
+1. 生产 / 默认只保留当前 hybrid 壳的 `4% + 2R`
+2. hybrid 的 `runner6R20 stop1` 继续做 forward paper observation
+3. episode 两档 preset 保留为独立研究入口，不参与当前 hybrid 默认升级
+
+### Cross-Regime Recheck: Episode Shell
+
+为了避免把当前 `13` 笔 hybrid 样本上的结论误判成通用规律，又把同样的“简化 TP/SL”
+思路放到旧的 `episodes` 壳上重跑了一轮。
+
+这一轮固定的是 episode research 壳：
+
+```text
+event_source=episodes
+trade_direction=long
+entry_max_distance_pct=7.0
+entry_min_volume_ratio=0.8
+trend_min_average_distance_pct=0.0
+min_delta_rank=5
+entry_trigger_allowlist=all
+```
+
+48h 框架样本大约是 `53-54` 笔，明显比当前 hybrid 壳更宽、波动也更大。
+
+先固定 `target=2R`，扫描止损：
+
+- `3% + 2R`：`profit 40.72240394U`，`win_rate 42.59%`，`Sharpe 1.2628`
+- `4% + 2R`：`profit 68.04949295U`，`win_rate 43.40%`，`Sharpe 1.5325`
+- `5% + 2R`：`profit 96.59975405U`，`win_rate 45.28%`，`Sharpe 1.7585`
+
+在这个更宽的旧壳里，`5%` 反而优于 `4%`。因此“固定 4% 止损”不是跨所有壳的普适最优，
+而是当前 hybrid 主壳下的最优点。
+
+再固定 `5%` 止损，扫描基础目标位：
+
+- `5% + 1.5R`：`profit 53.51197074U`，`win_rate 47.17%`，`Sharpe 1.1617`
+- `5% + 2R`：`profit 96.59975405U`，`win_rate 45.28%`，`Sharpe 1.7585`
+- `5% + 2.4R`：`profit 100.75475005U`，`win_rate 41.51%`，`Sharpe 1.6914`
+- `5% + 3R`：`profit 154.40596384U`，`win_rate 41.51%`，`Sharpe 2.2339`
+
+这说明旧 `episodes` 壳的尾部收益更重要，目标位越高，收益反而越强；这和当前 hybrid 壳里
+`2R` 最优的结论明显不同。
+
+继续把 `5% + 2R` 和 `5% + 3R` 做 early/late 与 concentration 对照后，这个差异更清楚：
+
+`5% + 2R`：
+
+- early half：`29 trades / win_rate 34.48% / profit 3.23769600U / Sharpe 0.0760`
+- late half：`24 trades / win_rate 58.33% / profit 92.10052790U / Sharpe 2.5756`
+- remove top1 后剩余 `69.46586011U`
+- remove top3 后剩余 `49.60586011U`
+- remove top5 后剩余 `29.74586011U`
+
+`5% + 3R`：
+
+- early half：`29 trades / win_rate 27.59% / profit 12.98419600U / Sharpe 0.2647`
+- late half：`24 trades / win_rate 58.33% / profit 142.08152119U / Sharpe 3.0826`
+- remove top1 后剩余 `139.47596384U`
+- remove top3 后剩余 `109.61596384U`
+- remove top5 后剩余 `79.75596384U`
+
+因此 `3R` 不是靠单一头部交易撑起来的，它在 episode 壳里的 tail capture 确实更强；但它的收益
+主要仍集中在后半段 regime，`q1` 甚至是 `-26.19U`。所以它更适合作为 episode 壳的
+profit-seeking 研究候选，而不是可以无脑推广到其他 momentum 壳的默认止盈。
+
+同样的 `runner6R20 stop1` 也补跑了一次：
+
+- `5% + 2R base + 6R/20% runner + 1R stop`：
+  `profit 94.00392495U`，`win_rate 45.28%`，`Sharpe 1.7113`
+
+它不但没有超过 `5% + 2R 全平`，而且 concentration 更高：
+
+- remove top1 后剩余 `76.14392495U`
+- remove top3 后剩余 `48.28392495U`
+- remove top5 后剩余 `24.27411632U`
+
+因此 cross-regime 证据可以再收敛一层：
+
+1. `4% + 2R` 是当前 hybrid 主壳的最优默认，不应轻易改。
+2. `runner6R20 stop1` 只能算当前主壳上的利润增强候选，不是跨壳通用增强器。
+3. 旧 `episodes` 壳更像“更宽止损 + 更高目标位”的结构，说明当前 repo 里不存在一个对所有
+   momentum 壳都同样最优的单一 TP/SL 组合。
+4. 因此后续如果要做生产默认推进，应该按策略壳分别固化，而不是继续追求一个全家族统一止盈止损。
+
+为避免后续继续手工拼参数，当前把 episode 壳的两档研究入口也单独固化成 preset：
+
+- 低耦合 baseline：
+  `research_episode_momentum_05sl_20r_rank5_v1`
+  - `entry_rule_version=rank_radar_4h_trend_15m_episode_research_05sl_20r_rank5_v1`
+  - 用途：旧壳上更稳的简单 baseline，对照当前 hybrid 主壳的 `4% + 2R`
+- 利润优先候选：
+  `research_episode_momentum_05sl_30r_rank5_v1`
+  - `entry_rule_version=rank_radar_4h_trend_15m_episode_research_05sl_30r_rank5_v1`
+  - 用途：旧壳上更强的 profit-seeking 研究入口，但不作为当前 hybrid 默认的替代
+
+### Jackknife Robustness Check
+
+为了进一步减少“当前结论只是靠少数交易对撑起来”的风险，又补了一轮按 `symbol` 的
+leave-one-out / jackknife 检查。
+
+#### hybrid: `4% + 2R` vs `4% + 2R base + 6R/20% runner + 1R stop`
+
+`4% + 2R`：
+
+- total `79.09U`
+- leave-one-out 最差剩余 `71.16U`
+- leave-one-out 中位数 `71.16U`
+- `13/13` 个 symbol 被移除后，剩余收益仍为正
+
+`runner6R20 stop1`：
+
+- total `80.68666560U`
+- leave-one-out 最差剩余 `69.55666560U`
+- leave-one-out 中位数 `73.55666560U`
+- `13/13` 个 symbol 被移除后，剩余收益仍为正
+
+两者逐 symbol 对比后：
+
+- `runner6` 相对 `2R` 的总优势只有 `+1.59666560U`
+- 在 `13` 个 leave-one-out 场景里，`runner6` 仅在 `11` 个场景更优，`2` 个场景更差
+- 这两个反转点正好是 `UNI` 和 `USELESS`，去掉任一后，`runner6` 都会比 `2R` 少
+  `1.60333440U`
+
+因此 `runner6` 的增强是存在的，但它对少数尾部赢家仍有明显依赖，不适合作为默认基线。
+
+#### episode: `5% + 2R` vs `5% + 3R`
+
+`5% + 2R`：
+
+- total `96.59975404U`
+- leave-one-out 最差剩余 `69.46586010U`
+- leave-one-out 中位数 `93.65745613U`
+- `43/43` 个 symbol 被移除后，剩余收益仍为正
+
+`5% + 3R`：
+
+- total `154.40596383U`
+- leave-one-out 最差剩余 `139.47596383U`
+- leave-one-out 中位数 `151.46366592U`
+- `43/43` 个 symbol 被移除后，剩余收益仍为正
+
+更关键的是，两者逐 symbol leave-one-out 对比里：
+
+- `5% + 3R` 相对 `5% + 2R` 的优势是 `+57.80620979U`
+- 在 `43/43` 个 leave-one-out 场景里，`3R` 都仍然优于 `2R`
+
+这说明 `episodes` 壳里的 `3R` 不是靠单一头部交易撑出来的，而是整个壳的 profit structure
+本身更偏向高目标位。
+
+### 2026-06-28 Hybrid 1.8R TP/SL Follow-up
+
+针对当前最强的 hybrid `raw_state` 主壳，又补了一轮只围绕出场侧的 fresh 复核。壳保持不变：
+
+- `event_source=raw_state`
+- `stop_loss_pct=0.04`
+- `entry_trigger_allowlist=reclaim_ema`
+- `entry_retest_after_signal=true`
+- `entry_retest_max_wait_candles=1`
+- `entry_retest_tolerance_pct=0.3`
+- `fvg_entry_mode=m15_impulse_retrace`
+- `ignore_entry_signal_updates_while_open=true`
+
+基线仍然是：
+
+- `4% fixed SL + 1.8R full exit`
+  - `48h`: `8 trades / 8 win / 0 loss / 0 timeout`
+  - `avg_r_complete=1.8`
+  - `framework total_profit=57.04U`
+
+#### structure stop + staged TP
+
+继续复核了 `structure_or_fixed + runner 4R/10%/0R stop`：
+
+- `floor=0%`: `2W / 6L / 0T`, `avg_r_complete=-0.345`, `3.05215088U`
+- `floor=1%`: `4W / 4L / 0T`, `avg_r_complete=0.41`, `4.58169353U`
+- `floor=2%`: `4W / 3L / 1T`, `avg_r_complete=0.7801192505311001`, `12.79775968U`
+- `floor=3%`: `4W / 3L / 1T`, `avg_r_complete=0.7159128336874001`, `17.161U`
+
+这说明当前壳上“结构止损 + 分批止盈”不是弱一点，而是方向性错误。`structure_or_fixed`
+只会把初始止损收紧，而这套 FVG/retest 入场正好需要给 pullback 留 breathing room。
+
+#### structure stop only
+
+又把 `runner` 完全关掉，只保留 `structure_or_fixed`，补扫了最简单的一组
+`target = 1.5R / 1.8R / 2.0R` 与 `structure_stop_min_pct = 0 / 1% / 2% / 3%`。
+
+先确认语义边界：当前实现里，`structure_or_fixed` 只有当结构止损比固定 `4%` 更靠近入场时才会被采用；
+如果结构止损更宽，则直接回退到固定 `4%`。因此这个模式本质上是“只会收紧，不会放宽”。
+
+回测结果也和这个语义一致：
+
+- `floor=0%`
+  - `1.5R`: `2W / 6L / 0T`, `2.86258867U`
+  - `1.8R`: `2W / 6L / 0T`, `3.89138499U`
+  - `2.0R`: `2W / 6L / 0T`, `4.57724920U`
+- `floor=1%`
+  - `1.5R`: `5W / 3L / 0T`, `5.61260022U`
+  - `1.8R`: `4W / 4L / 0T`, `4.75033349U`
+  - `2.0R`: `3W / 5L / 0T`, `2.84215568U`
+- `floor=2%`
+  - `1.5R`: `5W / 3L / 0T`, `9.12866637U`
+  - `1.8R`: `5W / 3L / 0T`, `12.26639964U`
+  - `2.0R`: `5W / 3L / 0T`, `14.35822182U`
+- `floor=3%`
+  - `1.5R`: `5W / 3L / 0T`, `12.94000000U`
+  - `1.8R`: `5W / 3L / 0T`, `17.44000000U`
+  - `2.0R`: `5W / 3L / 0T`, `20.44000000U`
+
+即便取 structure-only 里最好的 `floor=3% + 2.0R`，它也仍然显著弱于当前基线
+`4% fixed SL + 1.8R full exit = 57.04U`。因此当前 hybrid 主壳上，`structure_or_fixed`
+不只是“不适合和 runner 组合”，而是连单独作为默认止损模式也不成立。
+
+#### profit protect
+
+同壳补扫 `profit_protect` 后，结论也很直接：
+
+- `after=1.0 / stop=0.0`: 与基线完全一致，`57.04U`
+- `after=1.2 / stop=0.3`: 与基线完全一致，`57.04U`
+- `after=1.4 / stop=0.5`: `46.64U`
+- `after=1.6 / stop=0.8`: `53.04U`
+
+也就是说，这 8 笔里保护止盈要么没有触发实质差异，要么只是提前把盈利压掉，没有超过
+`1.8R 全平`。
+
+#### target_r neighborhood
+
+继续只扫低耦合的 `target_r` 邻域：
+
+- `1.7R`: `8W / 0L / 0T`, `53.84U`
+- `1.8R`: `8W / 0L / 0T`, `57.04U`
+- `1.9R`: `6W / 1L / 1T`, `48.64U`
+- `2.0R`: `6W / 1L / 1T`, `51.44U`
+
+因此 whole-shell 的局部峰值仍然在 `1.8R`，不是 `1.9R/2.0R`。
+
+#### branch split
+
+`1.9R` 和 `2.0R` 之所以输给 `1.8R`，仍然主要输在 FVG 分支，而不是 fallback retest：
+
+- `target=1.9R`, `48h`
+  - `reclaim_ema+fvg_15m_impulse_retrace`: `5 trades / 3W / 1L / 1T`, `avg_r_complete=1.280954004248801`
+  - `reclaim_ema+retest_after_signal+fvg_fallback`: `3 trades / 3W`, `avg_r_complete=1.9`
+- `target=2.0R`, `48h`
+  - `reclaim_ema+fvg_15m_impulse_retrace`: `5 trades / 3W / 1L / 1T`, `avg_r_complete=1.3409540042488008`
+  - `reclaim_ema+retest_after_signal+fvg_fallback`: `3 trades / 3W`, `avg_r_complete=2.0`
+
+因此当前唯一还值得继续观察的轻耦合 challenger，仍然不是新的 stop/runner 组合，而是：
+
+- whole-shell 默认继续保持 `4% + 1.8R`
+- retest fallback 单独看 `2.0R`
+
+但把 exit target 按 entry path 分裂，已经属于新增耦合；在样本只有 `3` 笔 fallback 时，还不应直接升成默认。
+
+#### regime split
+
+同壳又按 `market_rank_events` 的自然周窗口做了一次 fresh 重跑，仍只比较低耦合候选：
+
+- `t17 = 4% fixed SL + 1.7R full exit`
+- `t18 = 4% fixed SL + 1.8R full exit`
+- `t20 = 4% fixed SL + 2.0R full exit`
+- `t18pp = 4% fixed SL + 1.8R + profit_protect_after=1.6R / stop=0.8R`
+
+按周结果：
+
+- `w1 = 2026-05-25 ~ 2026-05-31`
+  - 四档都 `0 trades`
+- `w2 = 2026-06-01 ~ 2026-06-07`
+  - `t17`: `1 trade / 1W / 0L / 0T`, `6.73U`
+  - `t18`: `1 trade / 1W / 0L / 0T`, `7.13U`
+  - `t20`: `1 trade / 0W / 1L / 0T`, `-4.07U`
+  - `t18pp`: `1 trade / 1W / 0L / 0T`, `3.13U`
+- `w3 = 2026-06-08 ~ 2026-06-14`
+  - `t17`: `6 trades / 6W / 0L / 0T`, `40.38U`
+  - `t18`: `6 trades / 6W / 0L / 0T`, `42.78U`
+  - `t20`: `6 trades / 5W / 0L / 1T`, `47.58U`
+  - `t18pp`: `6 trades / 6W / 0L / 0T`, `42.78U`
+- `w4 = 2026-06-15 ~ 2026-06-21`
+  - `t17`: `1 trade / 1W / 0L / 0T`, `6.73U`
+  - `t18`: `1 trade / 1W / 0L / 0T`, `7.13U`
+  - `t20`: `1 trade / 1W / 0L / 0T`, `7.93U`
+  - `t18pp`: `1 trade / 1W / 0L / 0T`, `7.13U`
+- `w5 = 2026-06-22 ~ 2026-06-28`
+  - 四档都 `0 trades`
+
+所以当前结论可以明确为：
+
+1. 在现有可用历史内，最优且不过度耦合的默认 TP/SL 仍然是 `4% fixed SL + 1.8R full exit`
+2. `structure stop + staged TP` 在当前 hybrid 主壳上已有明确负证据
+3. `profit_protect` 在当前主壳上仍没有带来更优折中；它从未在 active week 里超过 `1.8R 全平`
+4. `2.0R` 只在更强的一周 `w3` 和单笔样本的 `w4` 上更高，但在 `w2` 直接退化成完整亏损；
+   如果不引入额外 regime 分类器，这个 trade-off 不适合升为默认
+5. 因此当前 weekly rerun 已经把“只靠单一窗口支撑”的风险降下来，但样本仍只有 `8` 笔 active trades；
+   后续若要继续验证默认稳健性，优先级仍然是补更早的 event history，而不是继续在这 8 笔上微调
+
+#### data-source boundary
+
+本地 `quant_core` 里又补查了一次数据源边界：
+
+- `market_rank_events`:
+  - `rank_velocity + top_entry`
+  - `min(detected_at)=2026-05-27 03:29:52.854632+00`
+  - `max(detected_at)=2026-06-28 16:35:21.980053+00`
+  - `count(*)=4584585`
+  - weekly row counts:
+    - `2026-05-25`: `918049`
+    - `2026-06-01`: `886781`
+    - `2026-06-08`: `1034739`
+    - `2026-06-15`: `865540`
+    - `2026-06-22`: `879458`
+- `market_velocity_episodes`:
+  - `min(started_at)=2026-05-27 03:29:52.854632+00`
+  - `max(started_at)=2026-06-22 03:53:27.945416+00`
+  - `count(*)=4521`
+- schema 中没有额外的 `market_rank_events_*` 或 `market_velocity_episodes_*` archive / partition 表可继续向前扩
+
+因此当前 `raw_state/raw_events` 已经能覆盖到 `2026-06-28`；问题不再是“6 月后半段没有 event history”，
+而是同一壳在这段历史里真正满足全部过滤并最终开仓的样本，仍集中在很少几个自然周。
+如果要继续做更强的跨 regime 复核，真正缺的是 `2026-05-27` 之前的 event history，而不是更长的 candles。
+
+同一时期 candles 明显更早，说明瓶颈也不在 K 线分表。例如：
+
+- `aave-usdt-swap_candles_15m`: `2025-12-29 07:15:00+00 ~ 2026-06-27 07:00:00+00`
+- `based-usdt-swap_candles_15m`: `2026-04-16 08:30:00+00 ~ 2026-06-21 05:45:00+00`
+- `aave-usdt-swap_candles_4h`: `2026-04-16 12:00:00+00 ~ 2026-06-28 12:00:00+00`
+
+所以如果要继续做同壳跨 regime 验证，真正缺的仍是更早的 event history，而不是更长的 candles。
+
+#### raw_events proxy stability check
+
+由于 `raw_state` 无法再向前扩历史，又补跑了一次同参数 `raw_events` proxy。目的不是替代生产壳，
+而是验证 `1.8R` 的局部峰值，是否只是 `raw_state` 15m 去重的人为现象。
+
+结果：
+
+- `raw_events`, `1.8R`
+  - `effective_entry`: `raw=51983`, `entry_pass_before_filters=794`, `trigger_after=97`
+  - `48h`: `8 trades / skipped_lock=89 / 8W / 0L / 0T`
+  - `total_profit=57.04U`
+- `raw_events`, `1.9R`
+  - `48h`: `8 trades / skipped_lock=89 / 6W / 1L / 1T`
+  - `total_profit=48.64U`
+- `raw_events`, `2.0R`
+  - `48h`: `8 trades / skipped_lock=89 / 6W / 1L / 1T`
+  - `total_profit=51.44U`
+
+也就是说，虽然 `raw_events` 原始 event 数被放大了很多，但在
+`ignore_entry_signal_updates_while_open=true` 的当前壳语义下，重复 scanner hit 最后都会被
+`skipped_lock` 吸收掉，最终成交的仍然是和 `raw_state` 相同的 `8` 笔。
+
+这让当前结论更稳一层：
+
+1. `1.8R` 的 whole-shell 峰值不是 `raw_state` 15m 去重带来的假象
+2. 当前 source history 里，whole-shell 默认依旧保持 `4% + 1.8R`
+3. 如果后续要进一步推进，不该继续在 `1.7/1.8/1.9/2.0` 附近反复微调，而应优先补更长的
+   `market_rank_events` 历史，再用同一壳重跑
+
+#### early_exit_no_profit_candles
+
+最后又补了一组之前还没扫过的低耦合 exit：`early_exit_no_profit_candles`。它不改入场、
+不拆 target，也不引入 structure stop，因此是当前主壳上最后一个值得补证据的简单出场族。
+
+同壳 `4% + 1.8R` 下的结果：
+
+- `early_exit=1`:
+  - `48h`: `2W / 6L / 0T`
+  - `avg_r_complete=0.3974095089242428`
+  - `total_profit=12.15710429U`
+- `early_exit=2`:
+  - `48h`: `3W / 5L / 0T`
+  - `avg_r_complete=0.6302833787923322`
+  - `total_profit=19.60906812U`
+- `early_exit=3`:
+  - `48h`: `3W / 5L / 0T`
+  - `avg_r_complete=0.5909786035048251`
+  - `total_profit=18.35131531U`
+- `early_exit=4`:
+  - `48h`: `4W / 4L / 0T`
+  - `avg_r_complete=0.7800677449527064`
+  - `total_profit=24.40216784U`
+
+即便是这组里相对最不差的 `4` 根 15m 无利润早退，也仍然远弱于基线：
+
+- baseline `4% + 1.8R full exit`: `8W / 0L / 0T`, `57.04U`
+
+这说明当前主壳的有效单子并不是“短时间不盈利就说明错了”的结构；相反，它们经常需要给
+`1h` 左右的 pullback / rebuild 时间，才能走完后面的 `1.8R`。因此 `early_exit_no_profit_candles`
+在当前壳上也属于明确负证据，不进入默认候选。
+
+#### local alternative history audit
+
+由于当前 whole-shell 结论仍然缺跨 regime 的更长 event history，又继续盘点了一轮本地
+`quant_core` 里所有可能相关的表，看看是否存在不用引入新合成逻辑、就能直接扩样本的候选源。
+
+本地可见的 rank / velocity / signal 相关表包括：
+
+- `market_rank_events`
+- `market_velocity_episodes`
+- `market_rank_snapshots`
+- `signal_snapshot_log`
+- `strategy_signals`
+- `strategy_job_signal_log`
+- `filtered_signal_log`
+
+逐个核对后：
+
+- `market_rank_events`
+  - 当前 market velocity 回测主源
+  - 当前本地覆盖 `2026-05-27 03:29:52+00 ~ 2026-06-28 16:35:21+00`
+  - `rank_velocity + top_entry` 共 `4584585` 行
+- `market_velocity_episodes`
+  - 当前去重 episode 源
+  - 当前本地覆盖 `2026-05-27 03:29:52+00 ~ 2026-06-22 03:53:27+00`
+  - 共 `4521` 行
+- `market_rank_snapshots`
+  - 结构上只含 `exchange/symbol/rank/price/volume/captured_at`
+  - 当前本地数据仅 `2026-06-27 15:37:48+00 ~ 2026-06-28 16:37:25+00`
+  - 共 `449120` 行
+  - 不足以恢复更长 rank velocity 历史
+- `signal_snapshot_log`
+  - 只有 `run_id/kline_ts/filtered/filter_reasons/signal_json`
+  - 当前本地 `created_at` 仅 `2026-05-29 ~ 2026-06-02`
+  - 样本 `filter_reasons` 已出现 `MACD_FALLING_KNIFE_LONG`，不属于当前 market velocity / rank radar 合同
+- `strategy_signals`
+  - 当前本地为空表
+- `strategy_job_signal_log`
+  - 当前本地只有 `2026-06-15` 的 `vegas` smoke 记录，共 `6` 行
+  - 与当前 market velocity 壳无关
+- `filtered_signal_log`
+  - 当前本地 `created_at` 为 `2026-05-21 ~ 2026-06-02`
+  - 字段与样本都来自旧 `4H` Vegas 过滤日志；抽样记录为 `ETH-USDT-SWAP / period=4H`
+  - 不能作为 current market velocity shell 的同构历史样本
+
+另外还补查了 retention 侧代码：
+
+- `market_rank_snapshot_prune_job` 在本地默认保留 `90` 天，生产保留 `7` 天
+- 当前本地 `market_rank_snapshots` 只有两天，并不是被本地 prune 成这样；更可能是该表本身就刚开始写
+
+所以到这一步，本地可以确定：
+
+1. 当前 repo/本地 DB 中不存在更长、且与 current market velocity shell 同构的历史事件源
+2. `filtered_signal_log` 虽然长，但属于旧 Vegas 体系，不能拿来证明当前壳的 TP/SL
+3. 在不引入新合成数据逻辑、也不读取其他环境数据的前提下，当前 whole-shell 结论已经到达本地证据上限
+
+#### local quant_web paper outcome cross-check
+
+虽然 `quant_core` 里没有更早、同构的 event history，但同一套本地 PostgreSQL 还挂着 `quant_web`，
+并且存在 `market_velocity_paper_outcomes`。这张表是 forward paper observation 的 owner-side 后验结果，
+因此可以作为“当前默认壳是否至少和已写入的 paper 证据一致”的补充校验。
+
+先看当前默认版本：
+
+- `entry_rule_version=rank_radar_4h15m_r04_18r_rcm_fvg_rt1_pb3_vol11_d20_40_p5_10_v2`
+- `target_r=1.8`
+- `horizon_hours=48`
+
+本地 `quant_web.market_velocity_paper_outcomes` 中对应结果：
+
+- `entry_at`: `2026-06-07 08:15:00 ~ 2026-06-16 03:30:00`
+- 共 `8` 条
+- `outcome_status`: `8 win / 0 loss / 0 timeout / 0 incomplete`
+- `entry_trigger` 分布：
+  - `reclaim_ema+fvg_15m_impulse_retrace`: `5 win`
+  - `reclaim_ema+retest_after_signal+fvg_fallback`: `3 win`
+
+逐笔也与本地回测一致：
+
+- `HMSTR-USDT-SWAP`
+- `ORDI-USDT-SWAP`
+- `BASED-USDT-SWAP`
+- `AMD-USDT-SWAP`
+- `EIGEN-USDT-SWAP`
+- `CHIP-USDT-SWAP`
+- `SLX-USDT-SWAP`
+- `INJ-USDT-SWAP`
+
+这说明当前默认 `1.8R` 不是只停留在 CLI 回测里“看起来正确”；本地 `quant_web` 已持久化的
+forward paper 结果也与 `5 笔 FVG + 3 笔 fallback retest` 的回测 realized set 完全对齐。
+
+再看最接近的 `2.0R` paper 邻域。注意这里没有与当前 `v2` 完全同壳的 `2.0R` paper 版本，
+所以以下只能作为近邻参考，不能直接当成严格 A/B：
+
+- `rank_radar_4h15m_r04_20r_rcm_fvg10_d15_40_p5_12_v1`
+  - `48h`: `3 win / 1 timeout`
+- `rank_radar_4h15m_r04_20r_brk_rcm_fvg10_d15_40_p5_12_v1`
+  - `48h`: `10 win / 2 loss / 1 timeout`
+
+其中第二条还包含 `breakout_previous_high` 分支，壳比当前默认更宽，因此不能据此宣称 `2.0R`
+优于 `1.8R`；但它至少说明：即便把壳放宽，`2.0R` 在 owner-side paper 后验里也不是一个干净的
+“全 win / 零 timeout” 默认候选。
+
+所以到这一步，本地可得出的最强结论可以再收敛一层：
+
+1. 当前默认 `4% fixed SL + 1.8R full exit` 同时被本地回测、cross-week rerun、以及
+   `quant_web.market_velocity_paper_outcomes` 的 owner-side 结果支持
+2. 当前并不存在同壳、同阶段、同口径且更强的 `2.0R` paper 证据可以推翻它
+3. 若要继续挑战 `1.8R` 默认，下一步不该继续抠本地小样本，而应补更早的 event history，
+   或积累同壳 `2.0R` 的真实 forward paper observation

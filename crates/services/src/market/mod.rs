@@ -36,6 +36,7 @@ use rust_quant_domain::traits::CandleRepository;
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
 use rust_quant_infrastructure::repositories::PostgresCandleRepository;
 use rust_quant_market::models::{tickers::TickersDataEntity, CandlesEntity};
+pub use scanner_service::{build_kline_15m_rank_velocity_event, KLINE_15M_SCANNER_SOURCE};
 use sqlx::{postgres::PgPoolOptions, Postgres, QueryBuilder};
 use std::str::FromStr;
 mod scanner_service;

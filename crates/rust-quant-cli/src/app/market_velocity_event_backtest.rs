@@ -19,6 +19,7 @@ mod fvg;
 mod manifest;
 mod reentry;
 mod report;
+mod short_entry;
 use args::{
     entry_trigger_filter_version_label, format_entry_trigger_filter_list, normalize_entry_trigger,
     normalize_symbol,
@@ -28,7 +29,8 @@ pub use args::{
     print_market_velocity_event_backtest_usage, print_market_velocity_paper_observation_usage,
     FvgEntryMode, MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
     MarketVelocityPaperObservationCommand, MarketVelocityPaperOutcomeSink,
-    MarketVelocityStopLossMode, MarketVelocityTradeDirection, StopReentryMode,
+    MarketVelocityStopLossMode, MarketVelocityTradeDirection, MarketVelocityTrendTimeframe,
+    StopReentryMode,
 };
 use data::load_backtest_data;
 pub use equity::{
@@ -50,10 +52,14 @@ use report::{
     print_effective_entry_report, print_result_report, print_stage_report,
     print_trigger_quality_report, print_trigger_variant_quality_report,
 };
+use short_entry::sideways_range_breakdown_candidate;
 pub const MS_15M: i64 = 15 * 60 * 1_000;
 pub const MS_1H: i64 = 60 * 60 * 1_000;
 pub const MS_4H: i64 = 4 * 60 * 60 * 1_000;
 const TOUCH_THRESHOLD_PCT: f64 = 0.3;
+const FAST_MOMENTUM_RSI_PERIOD: usize = 14;
+const FAST_MOMENTUM_BOLLINGER_PERIOD: usize = 20;
+const FAST_MOMENTUM_BOLLINGER_STDDEV: f64 = 2.0;
 const PAPER_OUTCOME_HORIZONS: &[(i32, i64)] =
     &[(24, 24 * 60 * 60 * 1_000), (48, 48 * 60 * 60 * 1_000)];
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +94,16 @@ pub struct ComputedCandle {
     pub ema: Option<f64>,
     /// previous成交量平均；为空时使用默认值或表示不限制。
     pub previous_volume_avg: Option<f64>,
+    /// RSI14；为空时表示样本不足或价格无效。
+    pub rsi14: Option<f64>,
+    /// 布林带20期中轨；为空时表示样本不足或价格无效。
+    pub bollinger_middle: Option<f64>,
+    /// 布林带20期上轨；为空时表示样本不足或价格无效。
+    pub bollinger_upper: Option<f64>,
+    /// 布林带20期下轨；为空时表示样本不足或价格无效。
+    pub bollinger_lower: Option<f64>,
+    /// 布林带宽度百分比；为空时表示中轨无效。
+    pub bollinger_bandwidth_pct: Option<f64>,
 }
 #[derive(Debug, Clone, PartialEq)]
 struct CandlePair {
@@ -297,8 +313,10 @@ pub async fn run_market_velocity_event_backtest(
     print_stage_report(&data, &evaluation);
     let symbol_filtered = filter_confirmed_events_by_symbol(&evaluation.confirmed, &config.args);
     print_symbol_filter_report(&evaluation.confirmed, &symbol_filtered, &config.args);
-    let confirmed = filter_confirmed_events_by_entry_trigger(&symbol_filtered, &config.args);
-    print_entry_trigger_filter_report(&symbol_filtered, &confirmed, &config.args);
+    let trigger_filtered = filter_confirmed_events_by_entry_trigger(&symbol_filtered, &config.args);
+    print_entry_trigger_filter_report(&symbol_filtered, &trigger_filtered, &config.args);
+    let confirmed = filter_confirmed_events_by_symbol_cooldown(&trigger_filtered, &config.args);
+    print_symbol_cooldown_filter_report(&trigger_filtered, &confirmed, &config.args);
     print_effective_entry_report(data.events.len(), &evaluation, &symbol_filtered, &confirmed);
     print_trigger_quality_report(
         "before_trigger_filter",
@@ -434,12 +452,22 @@ fn market_velocity_strategy_detail(args: &MarketVelocityEventBacktestArgs) -> se
             MarketVelocityEventSource::Episodes => "episodes",
             MarketVelocityEventSource::RawEvents => "raw_events",
             MarketVelocityEventSource::RawState => "raw_state",
+            MarketVelocityEventSource::Kline15m => "kline_15m",
         },
         "trade_direction": args.trade_direction.label(),
         "entry_rule_version": &args.paper_outcome_entry_rule_version,
         "entry_period": args.entry_period,
         "entry_max_distance_pct": args.entry_max_distance_pct,
         "entry_min_volume_ratio": args.entry_min_volume_ratio,
+        "entry_min_rsi": args.entry_min_rsi,
+        "entry_max_rsi": args.entry_max_rsi,
+        "entry_min_rsi_delta": args.entry_min_rsi_delta,
+        "entry_rsi_delta_lookback_candles": args.entry_rsi_delta_lookback_candles,
+        "entry_bollinger_breakout": args.entry_bollinger_breakout,
+        "entry_min_bollinger_bandwidth_expansion_pct": args.entry_min_bollinger_bandwidth_expansion_pct,
+        "entry_min_recent_drawdown_pct": args.entry_min_recent_drawdown_pct,
+        "entry_recent_drawdown_lookback_candles": args.entry_recent_drawdown_lookback_candles,
+        "entry_symbol_cooldown_candles": args.entry_symbol_cooldown_candles,
         "entry_max_signal_pullback_pct": args.entry_max_signal_pullback_pct,
         "entry_max_gap_without_retest_pct": args.entry_max_gap_without_retest_pct,
         "entry_retest_tolerance_pct": args.entry_retest_tolerance_pct,
@@ -449,6 +477,7 @@ fn market_velocity_strategy_detail(args: &MarketVelocityEventBacktestArgs) -> se
         "entry_retest_open_fade_min_volume_ratio": args.entry_retest_open_fade_min_volume_ratio,
         "fvg_impulse_retrace_fill_pct": args.fvg_impulse_retrace_fill_pct,
         "fvg_impulse_retrace_min_wait_candles": args.fvg_impulse_retrace_min_wait_candles,
+        "trend_timeframe": args.trend_timeframe.label(),
         "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
         "min_delta_rank": args.min_delta_rank,
         "max_delta_rank": args.max_delta_rank,
@@ -501,6 +530,31 @@ pub fn filter_confirmed_events_by_symbol(
         .filter(|event| symbol_allowed(&event.event.symbol, args))
         .cloned()
         .collect()
+}
+/// 按同交易对冷却窗口过滤已确认信号，用于研究连续追同一币对的集中度风险。
+pub fn filter_confirmed_events_by_symbol_cooldown(
+    confirmed: &[ConfirmedEvent],
+    args: &MarketVelocityEventBacktestArgs,
+) -> Vec<ConfirmedEvent> {
+    let Some(cooldown_candles) = args.entry_symbol_cooldown_candles else {
+        return confirmed.to_vec();
+    };
+    let cooldown_ms = MS_15M.saturating_mul(cooldown_candles as i64);
+    let mut last_kept_entry_ts_by_symbol = HashMap::new();
+    let mut filtered = Vec::with_capacity(confirmed.len());
+    for event in confirmed {
+        let symbol = normalize_symbol(&event.event.symbol);
+        let keep = last_kept_entry_ts_by_symbol
+            .get(&symbol)
+            .is_none_or(|last_entry_ts| {
+                event.entry_ts.saturating_sub(*last_entry_ts) >= cooldown_ms
+            });
+        if keep {
+            last_kept_entry_ts_by_symbol.insert(symbol, event.entry_ts);
+            filtered.push(event.clone());
+        }
+    }
+    filtered
 }
 /// 提供交易对allowed的集中实现，避免回测策略调用方重复处理相同细节。
 fn symbol_allowed(symbol: &str, args: &MarketVelocityEventBacktestArgs) -> bool {
@@ -571,10 +625,27 @@ fn print_entry_trigger_filter_report(
         format_entry_trigger_filter_list(&args.entry_trigger_blocklist)
     );
 }
+/// 输出同交易对冷却窗口的过滤效果，便于判断 15m 快进快出是否过度追同一币种。
+fn print_symbol_cooldown_filter_report(
+    before: &[ConfirmedEvent],
+    after: &[ConfirmedEvent],
+    args: &MarketVelocityEventBacktestArgs,
+) {
+    let Some(cooldown_candles) = args.entry_symbol_cooldown_candles else {
+        return;
+    };
+    println!(
+        "symbol_cooldown_filter\tbefore={}\tafter={}\tcooldown_candles={}",
+        before.len(),
+        after.len(),
+        cooldown_candles
+    );
+}
 /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Vec<ComputedCandle> {
     let mut computed = Vec::with_capacity(candles.len());
     let mut ema: Option<f64> = None;
+    let mut rsi_average_gain_loss: Option<(f64, f64)> = None;
     let multiplier = 2.0 / (period as f64 + 1.0);
     for i in 0..candles.len() {
         let sma = if i + 1 >= period {
@@ -599,14 +670,115 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
         } else {
             None
         };
+        let rsi14 = rsi_average_gain_loss_at(&candles, i, &mut rsi_average_gain_loss).and_then(
+            |(average_gain, average_loss)| rsi_from_average_gain_loss(average_gain, average_loss),
+        );
+        let (bollinger_middle, bollinger_upper, bollinger_lower, bollinger_bandwidth_pct) =
+            bollinger_bands_at(&candles, i)
+                .map(|bands| (Some(bands.0), Some(bands.1), Some(bands.2), bands.3))
+                .unwrap_or((None, None, None, None));
         computed.push(ComputedCandle {
             candle: candles[i].clone(),
             sma,
             ema,
             previous_volume_avg,
+            rsi14,
+            bollinger_middle,
+            bollinger_upper,
+            bollinger_lower,
+            bollinger_bandwidth_pct,
         });
     }
     computed
+}
+/// 按 Wilder RSI 的平滑方式维护 RSI14 的平均涨跌幅，避免每根 K 线重复扫描历史。
+fn rsi_average_gain_loss_at(
+    candles: &[BacktestCandle],
+    idx: usize,
+    previous_average: &mut Option<(f64, f64)>,
+) -> Option<(f64, f64)> {
+    if idx < FAST_MOMENTUM_RSI_PERIOD {
+        return None;
+    }
+    if idx == FAST_MOMENTUM_RSI_PERIOD {
+        let mut gain_sum = 0.0;
+        let mut loss_sum = 0.0;
+        for window_idx in 1..=FAST_MOMENTUM_RSI_PERIOD {
+            let delta = candles[window_idx].close - candles[window_idx - 1].close;
+            if !delta.is_finite() {
+                return None;
+            }
+            if delta >= 0.0 {
+                gain_sum += delta;
+            } else {
+                loss_sum += delta.abs();
+            }
+        }
+        let average = (
+            gain_sum / FAST_MOMENTUM_RSI_PERIOD as f64,
+            loss_sum / FAST_MOMENTUM_RSI_PERIOD as f64,
+        );
+        *previous_average = Some(average);
+        return Some(average);
+    }
+    let (previous_gain, previous_loss) = (*previous_average)?;
+    let delta = candles[idx].close - candles[idx - 1].close;
+    if !delta.is_finite() {
+        *previous_average = None;
+        return None;
+    }
+    let gain = delta.max(0.0);
+    let loss = (-delta).max(0.0);
+    let period = FAST_MOMENTUM_RSI_PERIOD as f64;
+    let average = (
+        (previous_gain * (period - 1.0) + gain) / period,
+        (previous_loss * (period - 1.0) + loss) / period,
+    );
+    *previous_average = Some(average);
+    Some(average)
+}
+/// 将 RSI 的平均涨跌幅转换为 0-100 分值，并处理单边上涨或无波动样本。
+fn rsi_from_average_gain_loss(average_gain: f64, average_loss: f64) -> Option<f64> {
+    if !average_gain.is_finite()
+        || !average_loss.is_finite()
+        || average_gain < 0.0
+        || average_loss < 0.0
+    {
+        return None;
+    }
+    if average_loss == 0.0 {
+        return Some(if average_gain == 0.0 { 50.0 } else { 100.0 });
+    }
+    let relative_strength = average_gain / average_loss;
+    Some(100.0 - 100.0 / (1.0 + relative_strength))
+}
+/// 计算 20 期布林带和带宽，用于 15m 内生突破过滤而不是依赖高周期均线。
+fn bollinger_bands_at(
+    candles: &[BacktestCandle],
+    idx: usize,
+) -> Option<(f64, f64, f64, Option<f64>)> {
+    if idx + 1 < FAST_MOMENTUM_BOLLINGER_PERIOD {
+        return None;
+    }
+    let start = idx + 1 - FAST_MOMENTUM_BOLLINGER_PERIOD;
+    let closes = candles[start..=idx]
+        .iter()
+        .map(|candle| candle.close)
+        .collect::<Vec<_>>();
+    let middle = simple_average(closes.iter().copied())?;
+    let variance = closes
+        .iter()
+        .map(|close| (close - middle).powi(2))
+        .sum::<f64>()
+        / FAST_MOMENTUM_BOLLINGER_PERIOD as f64;
+    if !variance.is_finite() || variance < 0.0 {
+        return None;
+    }
+    let deviation = variance.sqrt() * FAST_MOMENTUM_BOLLINGER_STDDEV;
+    let upper = middle + deviation;
+    let lower = middle - deviation;
+    let bandwidth = valid_positive(middle).then_some((upper - lower) / middle * 100.0);
+    Some((middle, upper, lower, bandwidth))
 }
 /// 提供趋势确认的集中实现，避免回测策略调用方重复处理相同细节。
 pub fn trend_confirmation(
@@ -615,23 +787,43 @@ pub fn trend_confirmation(
     direction: MarketVelocityTradeDirection,
     args: &MarketVelocityEventBacktestArgs,
 ) -> (bool, String) {
-    let idx = completed_candle_count(candles, event_ts, MS_4H);
+    trend_confirmation_for_timeframe(
+        candles,
+        event_ts,
+        direction,
+        args,
+        MS_4H,
+        "4h",
+        args.max_4h_staleness_min,
+    )
+}
+/// 复用原 4H 趋势确认逻辑，以显式周期参数支持 1H 对照但不改变默认 4H 行为。
+fn trend_confirmation_for_timeframe(
+    candles: &[ComputedCandle],
+    event_ts: i64,
+    direction: MarketVelocityTradeDirection,
+    args: &MarketVelocityEventBacktestArgs,
+    candle_ms: i64,
+    timeframe_label: &str,
+    max_staleness_min: i64,
+) -> (bool, String) {
+    let idx = completed_candle_count(candles, event_ts, candle_ms);
     if idx == 0 {
-        return (false, "no_completed_4h".to_string());
+        return (false, format!("no_completed_{timeframe_label}"));
     }
-    let latest_completed_at = candles[idx - 1].candle.ts + MS_4H;
-    if event_ts - latest_completed_at > args.max_4h_staleness_min * 60 * 1_000 {
-        return (false, "stale_4h".to_string());
+    let latest_completed_at = candles[idx - 1].candle.ts + candle_ms;
+    if event_ts - latest_completed_at > max_staleness_min * 60 * 1_000 {
+        return (false, format!("stale_{timeframe_label}"));
     }
     if idx < args.entry_period {
-        return (false, "insufficient_4h".to_string());
+        return (false, format!("insufficient_{timeframe_label}"));
     }
     let latest = &candles[idx - 1];
     let Some(sma) = latest.sma else {
-        return (false, "invalid_4h_average".to_string());
+        return (false, format!("invalid_{timeframe_label}_average"));
     };
     let Some(ema) = latest.ema else {
-        return (false, "invalid_4h_average".to_string());
+        return (false, format!("invalid_{timeframe_label}_average"));
     };
     let previous = idx
         .checked_sub(2)
@@ -654,18 +846,21 @@ pub fn trend_confirmation(
     };
     if confirmed && args.trend_min_average_distance_pct > 0.0 {
         let Some(sma_distance) = moving_average_distance_pct(latest.candle.close, sma) else {
-            return (false, "invalid_4h_distance".to_string());
+            return (false, format!("invalid_{timeframe_label}_distance"));
         };
         let Some(ema_distance) = moving_average_distance_pct(latest.candle.close, ema) else {
-            return (false, "invalid_4h_distance".to_string());
+            return (false, format!("invalid_{timeframe_label}_distance"));
         };
         if sma_distance.abs() < args.trend_min_average_distance_pct
             || ema_distance.abs() < args.trend_min_average_distance_pct
         {
-            return (false, "weak_4h_average_distance".to_string());
+            return (false, format!("weak_{timeframe_label}_average_distance"));
         }
     }
-    (confirmed, format!("4h_{sma_state}_{ema_state}"))
+    (
+        confirmed,
+        format!("{timeframe_label}_{sma_state}_{ema_state}"),
+    )
 }
 /// 提供入场确认的集中实现，避免回测策略调用方重复处理相同细节。
 pub fn entry_confirmation(
@@ -693,6 +888,10 @@ pub fn entry_confirmation(
     let Some(ema) = latest.ema else {
         return (false, "invalid_15m_average".to_string());
     };
+    let volume_ratio = latest
+        .previous_volume_avg
+        .filter(|average| *average > 0.0)
+        .map(|average| latest.candle.volume / average);
     match direction {
         MarketVelocityTradeDirection::Long
             if latest.candle.close <= sma || latest.candle.close <= ema =>
@@ -749,14 +948,15 @@ pub fn entry_confirmation(
         && latest.candle.high >= ema
         && latest.candle.close < latest.candle.open
         && latest.candle.close < ema;
-    let volume_ratio = latest
-        .previous_volume_avg
-        .filter(|average| *average > 0.0)
-        .map(|average| latest.candle.volume / average);
+    let breakdown_range_low_candidate = matches!(direction, MarketVelocityTradeDirection::Short)
+        && sideways_range_breakdown_candidate(candles, idx - 1);
     if args.entry_min_volume_ratio > 0.0
         && !volume_ratio.is_some_and(|ratio| ratio >= args.entry_min_volume_ratio)
     {
         return (false, "volume_not_confirmed".to_string());
+    }
+    if let Some(reason) = fast_momentum_entry_filter_reason(candles, idx, direction, args) {
+        return (false, reason.to_string());
     }
     match direction {
         MarketVelocityTradeDirection::Long => {
@@ -774,6 +974,9 @@ pub fn entry_confirmation(
             }
         }
         MarketVelocityTradeDirection::Short => {
+            if breakdown_range_low_candidate {
+                return (true, "breakdown_range_low".to_string());
+            }
             if reject_ema_candidate {
                 return (true, "reject_ema".to_string());
             }
@@ -790,6 +993,121 @@ pub fn entry_confirmation(
         MarketVelocityTradeDirection::Both => {}
     }
     (false, "timing_not_confirmed".to_string())
+}
+
+/// 聚合 15m 快动量研究过滤：RSI、布林突破和入场前跌幅均只在显式配置时启用。
+fn fast_momentum_entry_filter_reason(
+    candles: &[ComputedCandle],
+    completed_count: usize,
+    direction: MarketVelocityTradeDirection,
+    args: &MarketVelocityEventBacktestArgs,
+) -> Option<&'static str> {
+    let latest_idx = completed_count.checked_sub(1)?;
+    let latest = candles.get(latest_idx)?;
+    if args.entry_min_rsi.is_some()
+        || args.entry_max_rsi.is_some()
+        || args.entry_min_rsi_delta.is_some()
+    {
+        let Some(latest_rsi) = latest.rsi14 else {
+            return Some("rsi_not_ready");
+        };
+        if args
+            .entry_min_rsi
+            .is_some_and(|min_rsi| latest_rsi < min_rsi)
+        {
+            return Some("rsi_below_min");
+        }
+        if args
+            .entry_max_rsi
+            .is_some_and(|max_rsi| latest_rsi > max_rsi)
+        {
+            return Some("rsi_above_max");
+        }
+        if let Some(min_delta) = args.entry_min_rsi_delta {
+            let Some(previous_idx) = latest_idx.checked_sub(args.entry_rsi_delta_lookback_candles)
+            else {
+                return Some("rsi_delta_not_ready");
+            };
+            let Some(previous_rsi) = candles.get(previous_idx).and_then(|candle| candle.rsi14)
+            else {
+                return Some("rsi_delta_not_ready");
+            };
+            if latest_rsi - previous_rsi < min_delta {
+                return Some("rsi_delta_not_confirmed");
+            }
+        }
+    }
+    if args.entry_bollinger_breakout {
+        let breakout_ok = match direction {
+            MarketVelocityTradeDirection::Long => latest
+                .bollinger_upper
+                .is_some_and(|upper| latest.candle.close > upper),
+            MarketVelocityTradeDirection::Short => latest
+                .bollinger_lower
+                .is_some_and(|lower| latest.candle.close < lower),
+            MarketVelocityTradeDirection::Both => false,
+        };
+        if !breakout_ok {
+            return Some("bollinger_breakout_not_confirmed");
+        }
+    }
+    if let Some(min_expansion_pct) = args.entry_min_bollinger_bandwidth_expansion_pct {
+        let Some(previous_idx) = latest_idx.checked_sub(1) else {
+            return Some("bollinger_bandwidth_not_ready");
+        };
+        let Some(latest_bandwidth) = latest.bollinger_bandwidth_pct else {
+            return Some("bollinger_bandwidth_not_ready");
+        };
+        let Some(previous_bandwidth) = candles
+            .get(previous_idx)
+            .and_then(|candle| candle.bollinger_bandwidth_pct)
+        else {
+            return Some("bollinger_bandwidth_not_ready");
+        };
+        if !valid_positive(previous_bandwidth) {
+            return Some("bollinger_bandwidth_not_ready");
+        }
+        let expansion_pct = (latest_bandwidth - previous_bandwidth) / previous_bandwidth * 100.0;
+        if expansion_pct < min_expansion_pct {
+            return Some("bollinger_bandwidth_expansion_not_confirmed");
+        }
+    }
+    if let Some(min_drawdown_pct) = args.entry_min_recent_drawdown_pct {
+        let Some(drawdown_pct) = recent_entry_drawdown_pct(
+            candles,
+            latest_idx,
+            args.entry_recent_drawdown_lookback_candles,
+        ) else {
+            return Some("recent_drawdown_not_ready");
+        };
+        if drawdown_pct < min_drawdown_pct {
+            return Some("recent_drawdown_not_confirmed");
+        }
+    }
+    None
+}
+
+/// 计算当前突破 K 线之前的回看跌幅，避免把已经连续拉升的末端动量当作首轮机会。
+fn recent_entry_drawdown_pct(
+    candles: &[ComputedCandle],
+    latest_idx: usize,
+    lookback_candles: usize,
+) -> Option<f64> {
+    let start = latest_idx.checked_sub(lookback_candles)?;
+    let history = candles.get(start..latest_idx)?;
+    if history.is_empty() {
+        return None;
+    }
+    let mut highest_high = f64::NEG_INFINITY;
+    let mut lowest_low = f64::INFINITY;
+    for candle in history {
+        if !candle.candle.high.is_finite() || !candle.candle.low.is_finite() {
+            return None;
+        }
+        highest_high = highest_high.max(candle.candle.high);
+        lowest_low = lowest_low.min(candle.candle.low);
+    }
+    valid_positive(highest_high).then_some((highest_high - lowest_low) / highest_high * 100.0)
 }
 
 fn entry_signal_pullback_block_reason(
@@ -934,16 +1252,23 @@ pub fn evaluate_events(
     let mut stage_counts = BTreeMap::new();
     let mut blockers: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
     let mut confirmed = Vec::new();
+    let candles_1h_computed: HashMap<String, Vec<ComputedCandle>> =
+        if args.trend_timeframe == MarketVelocityTrendTimeframe::OneHour {
+            raw_candles_1h
+                .iter()
+                .filter(|(_, candles)| !candles.is_empty())
+                .map(|(symbol, candles)| {
+                    (
+                        symbol.clone(),
+                        build_computed_candles(candles.clone(), args.entry_period),
+                    )
+                })
+                .collect()
+        } else {
+            HashMap::new()
+        };
     for event in events {
         increment(&mut stage_counts, "raw");
-        let Some(symbol_4h) = candles_4h
-            .get(&event.symbol)
-            .filter(|candles| !candles.is_empty())
-        else {
-            increment(&mut stage_counts, "no_4h_rows");
-            increment_nested(&mut blockers, &event.symbol, "no_4h_rows");
-            continue;
-        };
         let Some(symbol_15m) = candles_15m
             .get(&event.symbol)
             .filter(|candles| !candles.is_empty())
@@ -953,7 +1278,33 @@ pub fn evaluate_events(
             continue;
         };
         let direction = trade_direction_for_event(event);
-        let (trend_ok, trend_reason) = trend_confirmation(symbol_4h, event.ts, direction, args);
+        let (trend_ok, trend_reason) = match args.trend_timeframe {
+            MarketVelocityTrendTimeframe::FourHour => {
+                let Some(symbol_4h) = candles_4h
+                    .get(&event.symbol)
+                    .filter(|candles| !candles.is_empty())
+                else {
+                    increment(&mut stage_counts, "no_4h_rows");
+                    increment_nested(&mut blockers, &event.symbol, "no_4h_rows");
+                    continue;
+                };
+                trend_confirmation(symbol_4h, event.ts, direction, args)
+            }
+            MarketVelocityTrendTimeframe::OneHour => {
+                let Some(symbol_1h) = candles_1h_computed
+                    .get(&event.symbol)
+                    .filter(|candles| !candles.is_empty())
+                else {
+                    increment(&mut stage_counts, "no_1h_rows");
+                    increment_nested(&mut blockers, &event.symbol, "no_1h_rows");
+                    continue;
+                };
+                trend_confirmation_for_timeframe(
+                    symbol_1h, event.ts, direction, args, MS_1H, "1h", 60,
+                )
+            }
+            MarketVelocityTrendTimeframe::Off => (true, "trend_off".to_string()),
+        };
         if !trend_ok {
             increment(&mut stage_counts, "trend_blocked");
             increment_nested(&mut blockers, &event.symbol, &trend_reason);

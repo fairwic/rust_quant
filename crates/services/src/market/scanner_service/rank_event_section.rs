@@ -19,6 +19,8 @@ fn price_direction(price_change_pct: Option<Decimal>) -> String {
         None => "unknown".to_string(),
     }
 }
+pub const KLINE_15M_SCANNER_SOURCE: &str = "kline_15m_scanner";
+const KLINE_15M_CANDLE_MS: i64 = 15 * 60 * 1000;
 fn is_top50_rank(rank: Option<i32>) -> bool {
     rank.is_some_and(|value| value > 0 && value <= MARKET_RANK_TOP_BOUNDARY)
 }
@@ -78,6 +80,43 @@ fn build_rank_velocity_event(
         source: "scanner_service".to_string(),
         notification_state: "pending".to_string(),
     }
+}
+/// Builds a synthetic rank-velocity event from a completed 15m candle.
+///
+/// The handoff path already consumes `market_rank_events`, so this keeps the
+/// event shape compatible while isolating K-line events with a zero rank delta
+/// and a dedicated source.
+pub fn build_kline_15m_rank_velocity_event(
+    symbol: &str,
+    candle_open_ts_ms: i64,
+    open_price: Decimal,
+    close_price: Decimal,
+) -> Result<MarketRankEvent> {
+    if open_price <= Decimal::ZERO {
+        anyhow::bail!("15m candle open price must be positive for {symbol}");
+    }
+    if close_price <= Decimal::ZERO {
+        anyhow::bail!("15m candle close price must be positive for {symbol}");
+    }
+    let detected_at_ts_ms = candle_open_ts_ms
+        .checked_add(KLINE_15M_CANDLE_MS)
+        .ok_or_else(|| anyhow::anyhow!("15m candle timestamp overflows for {symbol}"))?;
+    let detected_at = DateTime::from_timestamp_millis(detected_at_ts_ms)
+        .ok_or_else(|| anyhow::anyhow!("invalid 15m candle timestamp for {symbol}"))?;
+    let mut event = build_rank_velocity_event(
+        symbol,
+        "15分钟",
+        None,
+        0,
+        Some(0),
+        None,
+        Some(close_price),
+        Some(open_price),
+        detected_at,
+        MarketRankTechnicalCapture::not_requested(),
+    );
+    event.source = KLINE_15M_SCANNER_SOURCE.to_string();
+    Ok(event)
 }
 /// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 fn build_market_velocity_episode_from_event(event: &MarketRankEvent) -> MarketVelocityEpisode {

@@ -558,7 +558,7 @@ async fn load_candle_continuity_status(
     let earliest_ts = row.get::<Option<i64>, _>("earliest_ts");
     let latest_ts = row.get::<Option<i64>, _>("latest_ts");
     let actual_count = row.get::<i64, _>("actual_count");
-    let expected_count = expected_candle_count(earliest_ts, latest_ts, candle_ms);
+    let expected_count = expected_candle_count(Some(start_ms), latest_ts, candle_ms);
     let earliest_gap_start_ts = row.get::<Option<i64>, _>("earliest_gap_start_ts");
     Ok(CandleContinuityStatus {
         earliest_ts,
@@ -579,6 +579,15 @@ fn resolve_incremental_backfill_window(
         return IncrementalBackfillWindow {
             fetch_start_ms: configured_start_ms,
             reason: BackfillWindowReason::EmptyOrMissingTable,
+        };
+    }
+    if continuity
+        .earliest_ts
+        .is_some_and(|earliest_ts| earliest_ts > configured_start_ms)
+    {
+        return IncrementalBackfillWindow {
+            fetch_start_ms: configured_start_ms,
+            reason: BackfillWindowReason::GapRepair,
         };
     }
     if continuity.has_missing_candles() {
@@ -1138,7 +1147,7 @@ mod tests {
             5_000_000,
             CANDLE_15M_MS,
             CandleContinuityStatus {
-                earliest_ts: Some(1_200_000),
+                earliest_ts: Some(1_000_000),
                 latest_ts: Some(4_800_000),
                 actual_count: 4,
                 expected_count: 5,
@@ -1149,13 +1158,30 @@ mod tests {
         assert_eq!(window.reason, BackfillWindowReason::GapRepair);
     }
     #[test]
+    fn backfill_window_repairs_leading_gap_from_configured_start() {
+        let window = resolve_incremental_backfill_window(
+            1_000_000,
+            5_000_000,
+            CANDLE_15M_MS,
+            CandleContinuityStatus {
+                earliest_ts: Some(3_000_000),
+                latest_ts: Some(4_800_000),
+                actual_count: 3,
+                expected_count: 3,
+                earliest_gap_start_ts: None,
+            },
+        );
+        assert_eq!(window.fetch_start_ms, 1_000_000);
+        assert_eq!(window.reason, BackfillWindowReason::GapRepair);
+    }
+    #[test]
     fn backfill_window_uses_latest_candle_overlap_when_local_series_is_continuous() {
         let window = resolve_incremental_backfill_window(
             1_000_000,
             5_000_000,
             CANDLE_15M_MS,
             CandleContinuityStatus {
-                earliest_ts: Some(1_200_000),
+                earliest_ts: Some(1_000_000),
                 latest_ts: Some(4_800_000),
                 actual_count: 5,
                 expected_count: 5,

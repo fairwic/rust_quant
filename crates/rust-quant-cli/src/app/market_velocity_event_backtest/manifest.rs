@@ -30,6 +30,17 @@ pub fn market_velocity_paper_strategy_preset_manifest(
     let has_blocklist = !args.entry_trigger_blocklist.is_empty();
     let allowlist_label = format_entry_trigger_filter_list(&args.entry_trigger_allowlist);
     let blocklist_label = format_entry_trigger_filter_list(&args.entry_trigger_blocklist);
+    let fast_momentum_filters_json = json!({
+        "entry_min_rsi": args.entry_min_rsi,
+        "entry_max_rsi": args.entry_max_rsi,
+        "entry_min_rsi_delta": args.entry_min_rsi_delta,
+        "entry_rsi_delta_lookback_candles": args.entry_rsi_delta_lookback_candles,
+        "entry_bollinger_breakout": args.entry_bollinger_breakout,
+        "entry_min_bollinger_bandwidth_expansion_pct": args.entry_min_bollinger_bandwidth_expansion_pct,
+        "entry_min_recent_drawdown_pct": args.entry_min_recent_drawdown_pct,
+        "entry_recent_drawdown_lookback_candles": args.entry_recent_drawdown_lookback_candles,
+        "entry_symbol_cooldown_candles": args.entry_symbol_cooldown_candles,
+    });
     let manifest_json = json!({
         "manifest_schema_version": 1,
         "strategy_key": "market_velocity",
@@ -56,6 +67,7 @@ pub fn market_velocity_paper_strategy_preset_manifest(
             "entry_period": args.entry_period,
             "entry_max_distance_pct": args.entry_max_distance_pct,
             "entry_min_volume_ratio": args.entry_min_volume_ratio,
+            "fast_momentum_filters": fast_momentum_filters_json,
             "entry_max_signal_pullback_pct": args.entry_max_signal_pullback_pct,
             "entry_max_gap_without_retest_pct": args.entry_max_gap_without_retest_pct,
             "entry_retest_tolerance_pct": args.entry_retest_tolerance_pct,
@@ -63,6 +75,7 @@ pub fn market_velocity_paper_strategy_preset_manifest(
             "entry_retest_max_wait_candles": args.entry_retest_max_wait_candles,
             "entry_retest_min_entry_open_gap_pct": args.entry_retest_min_entry_open_gap_pct,
             "entry_retest_open_fade_min_volume_ratio": args.entry_retest_open_fade_min_volume_ratio,
+            "trend_timeframe": args.trend_timeframe.label(),
             "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
             "min_delta_rank": args.min_delta_rank,
             "max_delta_rank": args.max_delta_rank,
@@ -128,6 +141,15 @@ fn human_label_for_preset(preset: &str) -> &str {
         "research_momentum_0375sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1" => {
             "Market Velocity 0.0375SL 2.0R breakout reclaim fvg wait10 delta20-40 pchg5-12 v1"
         }
+        "research_momentum_0375sl_10r_breakout_reclaim_delta11_72_pchg4_12_dist14_vol11_v1" => {
+            "Market Velocity 0.0375SL 1.0R breakout reclaim delta11-72 pchg4-12 dist14 vol11 v1"
+        }
+        "research_momentum_0375sl_10r_breakout_reclaim_ma_delta11_72_pchg4_12_dist14_vol11_ignore_v1" => {
+            "Market Velocity 0.0375SL 1.0R breakout reclaim_ma ignore delta11-72 pchg4-12 dist14 vol11 v1"
+        }
+        "research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1" => {
+            "Market Velocity short 0.0375SL 1.0R 15m support breakdown delta5-72 pchg1.5-12 vol13 v1"
+        }
         "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1" => {
             "Market Velocity 0.04SL 2.0R breakout reclaim fvg wait10 delta20-40 pchg5-12 v1"
         }
@@ -178,6 +200,21 @@ fn human_label_for_preset(preset: &str) -> &str {
         }
         "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_minwait1_delta15_40_pchg5_12_v1" => {
             "Market Velocity 0.04SL 2.0R breakout reclaim fvg wait10 minwait1 delta15-40 pchg5-12 v1"
+        }
+        "research_momentum_04sl_10r_kline15m_breakout_fvg20_vol13_dd35_v1" => {
+            "Market Velocity 15m kline 0.04SL 1.0R breakout fvg20 vol13 dd35 v1"
+        }
+        "research_momentum_04sl_06r_kline15m_breakout_fvg20_vol13_dd35_v1" => {
+            "Market Velocity 15m kline 0.04SL 0.6R breakout fvg20 vol13 dd35 v1"
+        }
+        "research_momentum_04sl_05r_kline15m_breakout_fvg30_vol13_dd35_v1" => {
+            "Market Velocity 15m kline 0.04SL 0.5R breakout fvg30 vol13 dd35 v1"
+        }
+        "research_momentum_04sl_055r_kline15m_breakout_fvg30_vol13_dd35_v1" => {
+            "Market Velocity 15m kline 0.04SL 0.55R breakout fvg30 vol13 dd35 v1"
+        }
+        "research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1" => {
+            "Market Velocity 15m kline 0.04SL 0.52R breakout fvg50 vol13 dd35 v1"
         }
         "momentum_03sl_20r_v5" => "Market Velocity 0.03SL 2.0R momentum v5",
         "research_episode_momentum_03sl_24r_rank5_30_v1" => {

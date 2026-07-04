@@ -30,6 +30,7 @@ const PAPER_OBSERVATION_OWNED_FLAGS: &[&str] = &[
     "--runner-fraction",
     "--runner-stop-r",
     "--early-exit-no-profit-candles",
+    "--trend-timeframe",
     "--event-start-ms",
     "--event-end-ms",
     "--save-backtest-detail",
@@ -39,6 +40,7 @@ pub enum MarketVelocityEventSource {
     Episodes,
     RawEvents,
     RawState,
+    Kline15m,
 }
 impl MarketVelocityEventSource {
     /// 封装当前函数，减少回测策略调用方重复实现相同细节。
@@ -48,6 +50,7 @@ impl MarketVelocityEventSource {
             "episodes" | "episode" | "market_velocity_episodes" => Ok(Self::Episodes),
             "raw_events" | "raw" => Ok(Self::RawEvents),
             "raw_state" | "state" | "signal_state" => Ok(Self::RawState),
+            "kline_15m" | "klines_15m" | "candles_15m" | "15m_klines" => Ok(Self::Kline15m),
             other => bail!("unknown --event-source: {other}"),
         }
     }
@@ -57,6 +60,7 @@ impl MarketVelocityEventSource {
             Self::Episodes => "episodes",
             Self::RawEvents => "raw_events",
             Self::RawState => "raw_state",
+            Self::Kline15m => "kline_15m",
         }
     }
 }
@@ -85,6 +89,31 @@ impl MarketVelocityTradeDirection {
             Self::Long => "long",
             Self::Short => "short",
             Self::Both => "both",
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketVelocityTrendTimeframe {
+    FourHour,
+    OneHour,
+    Off,
+}
+impl MarketVelocityTrendTimeframe {
+    /// 解析研究回测的趋势过滤周期，默认旧策略仍使用 4H。
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "4h" | "h4" | "four_hour" | "four-hour" => Ok(Self::FourHour),
+            "1h" | "h1" | "one_hour" | "one-hour" => Ok(Self::OneHour),
+            "off" | "none" | "disabled" | "0" | "false" => Ok(Self::Off),
+            other => bail!("unknown --trend-timeframe: {other}"),
+        }
+    }
+    /// 提供参数标签，便于 manifest 和回测报告审计不同趋势门槛。
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::FourHour => "4h",
+            Self::OneHour => "1h",
+            Self::Off => "off",
         }
     }
 }
@@ -178,1082 +207,6 @@ impl FvgEntryMode {
         }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PaperStrategyPreset {
-    Momentum03Sl20R,
-    Momentum0375Sl17RReclaimMaPullbackDelta18To42,
-    ResearchMomentum0375Sl27RReclaim13To22,
-    ResearchMomentum0375Sl26RGap05Retest03Reclaim13To22,
-    ResearchMomentum0375Sl15RSignalRetest2Delta24To34,
-    ResearchMomentum0375Sl20RReclaimFvgWait5Delta20To40,
-    ResearchMomentum0375Sl20RReclaimOnlyDelta13To72,
-    ResearchMomentum0375Sl20RBreakoutReclaimFvgWait10Delta20To40,
-    ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta20To40,
-    ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40,
-    ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner6R20Stop1,
-    ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner8R20Stop1,
-    ResearchMomentum04Sl20RReclaimFvgWait10Delta15To40,
-    ResearchMomentum04Sl18RReclaimFvgWait10Delta15To40,
-    ResearchMomentum04Sl18RReclaimFvgWait10Delta20To40,
-    ResearchMomentum04Sl18RReclaimFvgWait12Delta20To40,
-    ResearchMomentum04Sl18RReclaimFvgWait14Pullback3Delta20To40,
-    ResearchMomentum04Sl18RReclaimFvgWait14Retest1Pullback3Delta20To40,
-    ResearchMomentum04Sl18RReclaimFvgWait14Retest1Gap0Pullback3Delta20To40,
-    ResearchMomentum04Sl18RReclaimFvgWait14Retest1Gap0OpenFadeVol2Pullback3Delta20To40,
-    ResearchMomentum04Sl18RReclaimRetest1Pullback3Delta20To40,
-    ResearchMomentum04Sl20RReclaimRetest1Pullback3Delta20To40,
-    ResearchMomentum04Sl18RBreakoutReclaimRetest1Delta20To40,
-    ResearchMomentum04Sl18RBreakoutReclaimFvgRetest1Delta20To40Pchg5To8,
-    ResearchMomentum04Sl20RBreakoutReclaimFvgWait10MinWait1Delta15To40,
-    ResearchEpisodeMomentum03Sl24RRank5To30,
-    ResearchEpisodeMomentum05Sl20RRank5,
-    ResearchEpisodeMomentum05Sl30RRank5,
-    ResearchEpisodeRunner03Sl24R8R30,
-}
-impl PaperStrategyPreset {
-    /// 封装当前函数，减少回测策略调用方重复实现相同细节。
-    /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
-    /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。
-    /// 返回 Result 以便错误透明上抛，统一上层降级与重试策略。
-    fn from_str(value: &str) -> Result<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            MOMENTUM_PROFIT_PRESET => Ok(Self::Momentum03Sl20R),
-            MOMENTUM_STABLE_RECLAIM_MA_PULLBACK_PRESET => {
-                Ok(Self::Momentum0375Sl17RReclaimMaPullbackDelta18To42)
-            }
-            MOMENTUM_RECLAIM_MIDRANK_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum0375Sl27RReclaim13To22)
-            }
-            MOMENTUM_RECLAIM_GAP_RETEST_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum0375Sl26RGap05Retest03Reclaim13To22)
-            }
-            MOMENTUM_SIGNAL_RETEST_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum0375Sl15RSignalRetest2Delta24To34)
-            }
-            MOMENTUM_RECLAIM_FVG_WAIT5_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum0375Sl20RReclaimFvgWait5Delta20To40)
-            }
-            MOMENTUM_RECLAIM_ONLY_0375SL_20R_DELTA13_72_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum0375Sl20RReclaimOnlyDelta13To72)
-            }
-            MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum0375Sl20RBreakoutReclaimFvgWait10Delta20To40)
-            }
-            MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta20To40)
-            }
-            MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40)
-            }
-            MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RUNNER6R20_STOP1_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner6R20Stop1)
-            }
-            MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RUNNER8R20_STOP1_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner8R20Stop1)
-            }
-            MOMENTUM_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl20RReclaimFvgWait10Delta15To40)
-            }
-            MOMENTUM_RECLAIM_FVG_WAIT10_04SL_18R_DELTA15_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RReclaimFvgWait10Delta15To40)
-            }
-            MOMENTUM_RECLAIM_FVG_WAIT10_04SL_18R_DELTA20_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RReclaimFvgWait10Delta20To40)
-            }
-            MOMENTUM_RECLAIM_FVG_WAIT12_04SL_18R_DELTA20_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RReclaimFvgWait12Delta20To40)
-            }
-            MOMENTUM_RECLAIM_FVG_WAIT14_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RReclaimFvgWait14Pullback3Delta20To40)
-            }
-            MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RReclaimFvgWait14Retest1Pullback3Delta20To40)
-            }
-            MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_GAP0_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RReclaimFvgWait14Retest1Gap0Pullback3Delta20To40)
-            }
-            MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_GAP0_OPEN_FADE_VOL2_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RReclaimFvgWait14Retest1Gap0OpenFadeVol2Pullback3Delta20To40)
-            }
-            MOMENTUM_RECLAIM_RETEST1_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RReclaimRetest1Pullback3Delta20To40)
-            }
-            MOMENTUM_RECLAIM_RETEST1_04SL_20R_PULLBACK3_DELTA20_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl20RReclaimRetest1Pullback3Delta20To40)
-            }
-            MOMENTUM_BREAKOUT_RECLAIM_RETEST1_04SL_18R_DELTA20_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RBreakoutReclaimRetest1Delta20To40)
-            }
-            MOMENTUM_BREAKOUT_RECLAIM_FVG_RETEST1_04SL_18R_DELTA20_40_PCHG5_8_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl18RBreakoutReclaimFvgRetest1Delta20To40Pchg5To8)
-            }
-            MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_MINWAIT1_04SL_DELTA15_40_RESEARCH_PRESET => {
-                Ok(Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10MinWait1Delta15To40)
-            }
-            EPISODE_MOMENTUM_RESEARCH_PRESET => Ok(Self::ResearchEpisodeMomentum03Sl24RRank5To30),
-            EPISODE_MOMENTUM_05SL_20R_RESEARCH_PRESET => {
-                Ok(Self::ResearchEpisodeMomentum05Sl20RRank5)
-            }
-            EPISODE_MOMENTUM_05SL_30R_RESEARCH_PRESET => {
-                Ok(Self::ResearchEpisodeMomentum05Sl30RRank5)
-            }
-            EPISODE_RUNNER_RESEARCH_PRESET => Ok(Self::ResearchEpisodeRunner03Sl24R8R30),
-            other => bail!("unknown {PAPER_STRATEGY_PRESET_FLAG}: {other}"),
-        }
-    }
-    /// 把数据加入 回测与策略研究 聚合结果，保持集合构造逻辑集中。
-    fn append_args(self, args: &mut Vec<String>) {
-        match self {
-            Self::Momentum03Sl20R => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_PROFIT_ENTRY_RULE_VERSION.to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.03".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "4.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "15".to_string(),
-                ]);
-            }
-            Self::Momentum0375Sl17RReclaimMaPullbackDelta18To42 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_STABLE_RECLAIM_MA_PULLBACK_ENTRY_RULE_VERSION.to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.0375".to_string(),
-                    "--target-rs".to_string(),
-                    "1.7".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.5".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "18".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "42".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema,reclaim_ma,pullback_hold_ema".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum0375Sl27RReclaim13To22 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_MIDRANK_RESEARCH_ENTRY_RULE_VERSION.to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.0375".to_string(),
-                    "--target-rs".to_string(),
-                    "2.7".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.5".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "13".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "72".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum0375Sl26RGap05Retest03Reclaim13To22 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_GAP_RETEST_RESEARCH_ENTRY_RULE_VERSION.to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.0375".to_string(),
-                    "--target-rs".to_string(),
-                    "2.6".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.5".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--entry-max-gap-without-retest-pct".to_string(),
-                    "0.5".to_string(),
-                    "--entry-retest-tolerance-pct".to_string(),
-                    "0.3".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "13".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "75".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum0375Sl15RSignalRetest2Delta24To34 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_SIGNAL_RETEST_RESEARCH_ENTRY_RULE_VERSION.to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.0375".to_string(),
-                    "--target-rs".to_string(),
-                    "1.5".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--entry-retest-after-signal".to_string(),
-                    "--entry-retest-max-wait-candles".to_string(),
-                    "2".to_string(),
-                    "--entry-retest-tolerance-pct".to_string(),
-                    "0.3".to_string(),
-                    "--entry-retest-min-entry-open-gap-pct".to_string(),
-                    "0.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "24".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "34".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum0375Sl20RReclaimFvgWait5Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_FVG_WAIT5_RESEARCH_ENTRY_RULE_VERSION.to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.0375".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "12.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "5".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum0375Sl20RReclaimOnlyDelta13To72 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_ONLY_0375SL_20R_DELTA13_72_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.0375".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.5".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "13".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "72".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum0375Sl20RBreakoutReclaimFvgWait10Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_RESEARCH_ENTRY_RULE_VERSION.to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.0375".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "12.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "breakout_previous_high,reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "10".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "12.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "breakout_previous_high,reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "10".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "15".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "12.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "breakout_previous_high,reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "10".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner6R20Stop1 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RUNNER6R20_STOP1_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "15".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "12.0".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "10".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                    "--runner-target-r".to_string(),
-                    "6.0".to_string(),
-                    "--runner-fraction".to_string(),
-                    "0.2".to_string(),
-                    "--runner-stop-r".to_string(),
-                    "1.0".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner8R20Stop1 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RUNNER8R20_STOP1_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "15".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "12.0".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "10".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                    "--runner-target-r".to_string(),
-                    "8.0".to_string(),
-                    "--runner-fraction".to_string(),
-                    "0.2".to_string(),
-                    "--runner-stop-r".to_string(),
-                    "1.0".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl20RReclaimFvgWait10Delta15To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "15".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "12.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "10".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RReclaimFvgWait10Delta15To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_FVG_WAIT10_04SL_18R_DELTA15_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "15".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "12.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "10".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RReclaimFvgWait10Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_FVG_WAIT10_04SL_18R_DELTA20_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "10".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RReclaimFvgWait12Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_FVG_WAIT12_04SL_18R_DELTA20_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "12".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RReclaimFvgWait14Pullback3Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_FVG_WAIT14_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.1".to_string(),
-                    "--entry-max-signal-pullback-pct".to_string(),
-                    "3.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "m15_impulse_retrace".to_string(),
-                    "--fvg-impulse-retrace-fill-pct".to_string(),
-                    "10.0".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "14".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RReclaimFvgWait14Retest1Pullback3Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.1".to_string(),
-                    "--entry-max-signal-pullback-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-retest-after-signal".to_string(),
-                    "--entry-retest-max-wait-candles".to_string(),
-                    "1".to_string(),
-                    "--entry-retest-tolerance-pct".to_string(),
-                    "0.3".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "m15_impulse_retrace".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RReclaimFvgWait14Retest1Gap0Pullback3Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_GAP0_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.1".to_string(),
-                    "--entry-max-signal-pullback-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-retest-after-signal".to_string(),
-                    "--entry-retest-max-wait-candles".to_string(),
-                    "1".to_string(),
-                    "--entry-retest-min-entry-open-gap-pct".to_string(),
-                    "0.0".to_string(),
-                    "--entry-retest-tolerance-pct".to_string(),
-                    "2.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "m15_impulse_retrace".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RReclaimFvgWait14Retest1Gap0OpenFadeVol2Pullback3Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_GAP0_OPEN_FADE_VOL2_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.1".to_string(),
-                    "--entry-max-signal-pullback-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-retest-after-signal".to_string(),
-                    "--entry-retest-max-wait-candles".to_string(),
-                    "1".to_string(),
-                    "--entry-retest-min-entry-open-gap-pct".to_string(),
-                    "0.0".to_string(),
-                    "--entry-retest-open-fade-min-volume-ratio".to_string(),
-                    "2.0".to_string(),
-                    "--entry-retest-tolerance-pct".to_string(),
-                    "2.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "m15_impulse_retrace".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RReclaimRetest1Pullback3Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_RETEST1_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.1".to_string(),
-                    "--entry-max-signal-pullback-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-retest-after-signal".to_string(),
-                    "--entry-retest-max-wait-candles".to_string(),
-                    "1".to_string(),
-                    "--entry-retest-tolerance-pct".to_string(),
-                    "0.3".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl20RReclaimRetest1Pullback3Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_RECLAIM_RETEST1_04SL_20R_PULLBACK3_DELTA20_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.1".to_string(),
-                    "--entry-max-signal-pullback-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-retest-after-signal".to_string(),
-                    "--entry-retest-max-wait-candles".to_string(),
-                    "1".to_string(),
-                    "--entry-retest-tolerance-pct".to_string(),
-                    "0.3".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "reclaim_ema".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RBreakoutReclaimRetest1Delta20To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_BREAKOUT_RECLAIM_RETEST1_04SL_18R_DELTA20_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--entry-max-signal-pullback-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-retest-after-signal".to_string(),
-                    "--entry-retest-max-wait-candles".to_string(),
-                    "1".to_string(),
-                    "--entry-retest-tolerance-pct".to_string(),
-                    "0.3".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "10.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "breakout_previous_high,reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "off".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl18RBreakoutReclaimFvgRetest1Delta20To40Pchg5To8 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_BREAKOUT_RECLAIM_FVG_RETEST1_04SL_18R_DELTA20_40_PCHG5_8_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "1.8".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--entry-max-signal-pullback-pct".to_string(),
-                    "3.0".to_string(),
-                    "--entry-retest-after-signal".to_string(),
-                    "--entry-retest-max-wait-candles".to_string(),
-                    "1".to_string(),
-                    "--entry-retest-tolerance-pct".to_string(),
-                    "0.3".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "20".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "8.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "breakout_previous_high,reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "m15_impulse_retrace".to_string(),
-                    "--fvg-lookback-candles".to_string(),
-                    "40".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "24".to_string(),
-                    "--fvg-impulse-retrace-fill-pct".to_string(),
-                    "20.0".to_string(),
-                    "--fvg-impulse-retrace-min-wait-candles".to_string(),
-                    "0".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10MinWait1Delta15To40 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_MINWAIT1_04SL_DELTA15_40_RESEARCH_ENTRY_RULE_VERSION
-                        .to_string(),
-                    "--event-source".to_string(),
-                    "raw_state".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.04".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "5.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "1.0".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "15".to_string(),
-                    "--max-delta-rank".to_string(),
-                    "40".to_string(),
-                    "--min-price-change-pct".to_string(),
-                    "5.0".to_string(),
-                    "--max-price-change-pct".to_string(),
-                    "12.0".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "breakout_previous_high,reclaim_ema".to_string(),
-                    "--fvg-entry-mode".to_string(),
-                    "15m_impulse_retrace".to_string(),
-                    "--fvg-max-wait-candles".to_string(),
-                    "10".to_string(),
-                    "--fvg-impulse-retrace-min-wait-candles".to_string(),
-                    "1".to_string(),
-                    "--ignore-entry-signal-updates-while-open".to_string(),
-                ]);
-            }
-            Self::ResearchEpisodeMomentum03Sl24RRank5To30 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    EPISODE_MOMENTUM_RESEARCH_ENTRY_RULE_VERSION.to_string(),
-                    "--event-source".to_string(),
-                    "episodes".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.03".to_string(),
-                    "--target-rs".to_string(),
-                    "2.4".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "7.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "0.8".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "5".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "all".to_string(),
-                ]);
-            }
-            Self::ResearchEpisodeMomentum05Sl20RRank5 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    EPISODE_MOMENTUM_05SL_20R_RESEARCH_ENTRY_RULE_VERSION.to_string(),
-                    "--event-source".to_string(),
-                    "episodes".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.05".to_string(),
-                    "--target-rs".to_string(),
-                    "2.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "7.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "0.8".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "5".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "all".to_string(),
-                ]);
-            }
-            Self::ResearchEpisodeMomentum05Sl30RRank5 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    EPISODE_MOMENTUM_05SL_30R_RESEARCH_ENTRY_RULE_VERSION.to_string(),
-                    "--event-source".to_string(),
-                    "episodes".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.05".to_string(),
-                    "--target-rs".to_string(),
-                    "3.0".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "7.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "0.8".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "5".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "all".to_string(),
-                ]);
-            }
-            Self::ResearchEpisodeRunner03Sl24R8R30 => {
-                args.extend([
-                    "--paper-outcome-entry-rule-version".to_string(),
-                    EPISODE_RUNNER_RESEARCH_ENTRY_RULE_VERSION.to_string(),
-                    "--event-source".to_string(),
-                    "episodes".to_string(),
-                    "--stop-loss-pct".to_string(),
-                    "0.03".to_string(),
-                    "--target-rs".to_string(),
-                    "2.4".to_string(),
-                    "--entry-max-distance-pct".to_string(),
-                    "7.0".to_string(),
-                    "--entry-min-volume-ratio".to_string(),
-                    "0.8".to_string(),
-                    "--trend-min-average-distance-pct".to_string(),
-                    "0.0".to_string(),
-                    "--min-delta-rank".to_string(),
-                    "5".to_string(),
-                    "--entry-trigger-allowlist".to_string(),
-                    "all".to_string(),
-                    "--runner-target-r".to_string(),
-                    "8.0".to_string(),
-                    "--runner-fraction".to_string(),
-                    "0.3".to_string(),
-                    "--runner-stop-r".to_string(),
-                    "0.0".to_string(),
-                ]);
-            }
-        }
-    }
-}
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketVelocityEventBacktestArgs {
     /// 止损百分比；在 structure_with_cap 模式下也作为最大风险上限。
@@ -1270,6 +223,24 @@ pub struct MarketVelocityEventBacktestArgs {
     pub entry_max_distance_pct: f64,
     /// 入场最小volume 比例。
     pub entry_min_volume_ratio: f64,
+    /// RSI14 下限；为空时不启用 RSI 下限过滤。
+    pub entry_min_rsi: Option<f64>,
+    /// RSI14 上限；为空时不启用 RSI 上限过滤。
+    pub entry_max_rsi: Option<f64>,
+    /// 当前 RSI14 相对回看 K 线的最小抬升幅度；为空时不启用。
+    pub entry_min_rsi_delta: Option<f64>,
+    /// RSI 抬升确认回看 15m K 线数量。
+    pub entry_rsi_delta_lookback_candles: usize,
+    /// 是否要求 15m 收盘价突破布林带外轨。
+    pub entry_bollinger_breakout: bool,
+    /// 布林带宽度相对上一根的最小扩张百分比；为空时不启用。
+    pub entry_min_bollinger_bandwidth_expansion_pct: Option<f64>,
+    /// 入场前回看窗口内要求出现的最小回撤幅度；为空时不启用。
+    pub entry_min_recent_drawdown_pct: Option<f64>,
+    /// 近期回撤确认回看 15m K 线数量，不包含当前突破 K 线。
+    pub entry_recent_drawdown_lookback_candles: usize,
+    /// 同一交易对再次入场前需要等待的 15m K 线数量；为空时不启用。
+    pub entry_symbol_cooldown_candles: Option<usize>,
     /// signal 当前价到实际入场价允许的最大回撤百分比；为空时不启用。
     pub entry_max_signal_pullback_pct: Option<f64>,
     /// 未发生前高回踩时，允许的最大信号后跳空入场百分比；为空时不启用。
@@ -1286,6 +257,8 @@ pub struct MarketVelocityEventBacktestArgs {
     pub entry_retest_open_fade_min_volume_ratio: Option<f64>,
     /// 趋势过滤的最小平均距离百分比。
     pub trend_min_average_distance_pct: f64,
+    /// 趋势过滤周期；off 表示只用 15m 入场确认，不再要求更高周期趋势。
+    pub trend_timeframe: MarketVelocityTrendTimeframe,
     /// 最小delta排名，用于控制策略触发门槛。
     pub min_delta_rank: i32,
     /// 最大排名变化；为空时不限制。
@@ -1304,6 +277,8 @@ pub struct MarketVelocityEventBacktestArgs {
     pub max_4h_staleness_min: i64,
     /// samplelimit，用于行情、K 线或市场扫描。
     pub sample_limit: usize,
+    /// K 线样本抽样种子；仅对 kline_15m 数据源生效，保证随机样本可复现。
+    pub sample_seed: String,
     /// event来源，用于行情、K 线或市场扫描。
     pub event_source: MarketVelocityEventSource,
     /// tradedirection，用于行情、K 线或市场扫描。
@@ -1376,6 +351,15 @@ impl Default for MarketVelocityEventBacktestArgs {
             entry_period: 20,
             entry_max_distance_pct: 3.0,
             entry_min_volume_ratio: 1.0,
+            entry_min_rsi: None,
+            entry_max_rsi: None,
+            entry_min_rsi_delta: None,
+            entry_rsi_delta_lookback_candles: 3,
+            entry_bollinger_breakout: false,
+            entry_min_bollinger_bandwidth_expansion_pct: None,
+            entry_min_recent_drawdown_pct: None,
+            entry_recent_drawdown_lookback_candles: 12,
+            entry_symbol_cooldown_candles: None,
             entry_max_signal_pullback_pct: None,
             entry_max_gap_without_retest_pct: None,
             entry_retest_tolerance_pct: 0.3,
@@ -1384,6 +368,7 @@ impl Default for MarketVelocityEventBacktestArgs {
             entry_retest_min_entry_open_gap_pct: None,
             entry_retest_open_fade_min_volume_ratio: None,
             trend_min_average_distance_pct: 0.0,
+            trend_timeframe: MarketVelocityTrendTimeframe::FourHour,
             min_delta_rank: 10,
             max_delta_rank: None,
             min_price_change_pct: None,
@@ -1393,6 +378,7 @@ impl Default for MarketVelocityEventBacktestArgs {
             max_15m_staleness_min: 30,
             max_4h_staleness_min: 240,
             sample_limit: 5,
+            sample_seed: "default".to_string(),
             event_source: MarketVelocityEventSource::Episodes,
             trade_direction: MarketVelocityTradeDirection::Long,
             paper_outcome_sink: MarketVelocityPaperOutcomeSink::Off,
@@ -1465,6 +451,28 @@ where
             "--entry-min-volume-ratio" => {
                 parsed.entry_min_volume_ratio = parse_next(&mut args, &arg)?
             }
+            "--entry-min-rsi" => parsed.entry_min_rsi = Some(parse_next(&mut args, &arg)?),
+            "--entry-max-rsi" => parsed.entry_max_rsi = Some(parse_next(&mut args, &arg)?),
+            "--entry-min-rsi-delta" => {
+                parsed.entry_min_rsi_delta = Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-rsi-delta-lookback-candles" => {
+                parsed.entry_rsi_delta_lookback_candles = parse_next(&mut args, &arg)?
+            }
+            "--entry-bollinger-breakout" => parsed.entry_bollinger_breakout = true,
+            "--entry-min-bollinger-bandwidth-expansion-pct" => {
+                parsed.entry_min_bollinger_bandwidth_expansion_pct =
+                    Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-min-recent-drawdown-pct" => {
+                parsed.entry_min_recent_drawdown_pct = Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-recent-drawdown-lookback-candles" => {
+                parsed.entry_recent_drawdown_lookback_candles = parse_next(&mut args, &arg)?
+            }
+            "--entry-symbol-cooldown-candles" => {
+                parsed.entry_symbol_cooldown_candles = Some(parse_next(&mut args, &arg)?)
+            }
             "--entry-max-signal-pullback-pct" => {
                 parsed.entry_max_signal_pullback_pct = Some(parse_next(&mut args, &arg)?)
             }
@@ -1487,6 +495,10 @@ where
             "--trend-min-average-distance-pct" => {
                 parsed.trend_min_average_distance_pct = parse_next(&mut args, &arg)?
             }
+            "--trend-timeframe" => {
+                parsed.trend_timeframe =
+                    MarketVelocityTrendTimeframe::from_str(&next_arg(&mut args, &arg)?)?
+            }
             "--min-delta-rank" => parsed.min_delta_rank = parse_next(&mut args, &arg)?,
             "--max-delta-rank" => parsed.max_delta_rank = Some(parse_next(&mut args, &arg)?),
             "--min-price-change-pct" => {
@@ -1502,6 +514,7 @@ where
             }
             "--max-4h-staleness-min" => parsed.max_4h_staleness_min = parse_next(&mut args, &arg)?,
             "--sample-limit" => parsed.sample_limit = parse_next(&mut args, &arg)?,
+            "--sample-seed" => parsed.sample_seed = next_arg(&mut args, &arg)?,
             "--event-source" => {
                 parsed.event_source =
                     MarketVelocityEventSource::from_str(&next_arg(&mut args, &arg)?)?
@@ -1625,6 +638,46 @@ fn validate_args(
     }
     if parsed.entry_retest_tolerance_pct < 0.0 {
         bail!("--entry-retest-tolerance-pct must be zero or greater");
+    }
+    if let Some(min_rsi) = parsed.entry_min_rsi {
+        if !(0.0..=100.0).contains(&min_rsi) {
+            bail!("--entry-min-rsi must be between 0 and 100");
+        }
+    }
+    if let Some(max_rsi) = parsed.entry_max_rsi {
+        if !(0.0..=100.0).contains(&max_rsi) {
+            bail!("--entry-max-rsi must be between 0 and 100");
+        }
+        if parsed
+            .entry_min_rsi
+            .is_some_and(|min_rsi| max_rsi < min_rsi)
+        {
+            bail!("--entry-max-rsi must be greater than or equal to --entry-min-rsi");
+        }
+    }
+    if let Some(min_delta) = parsed.entry_min_rsi_delta {
+        if min_delta < 0.0 {
+            bail!("--entry-min-rsi-delta must be zero or greater");
+        }
+    }
+    if parsed.entry_rsi_delta_lookback_candles == 0 {
+        bail!("--entry-rsi-delta-lookback-candles must be greater than 0");
+    }
+    if let Some(min_expansion) = parsed.entry_min_bollinger_bandwidth_expansion_pct {
+        if min_expansion < 0.0 {
+            bail!("--entry-min-bollinger-bandwidth-expansion-pct must be zero or greater");
+        }
+    }
+    if let Some(min_drawdown) = parsed.entry_min_recent_drawdown_pct {
+        if min_drawdown < 0.0 {
+            bail!("--entry-min-recent-drawdown-pct must be zero or greater");
+        }
+    }
+    if parsed.entry_recent_drawdown_lookback_candles == 0 {
+        bail!("--entry-recent-drawdown-lookback-candles must be greater than 0");
+    }
+    if parsed.entry_symbol_cooldown_candles == Some(0) {
+        bail!("--entry-symbol-cooldown-candles must be greater than 0");
     }
     if let Some(min_volume_ratio) = parsed.entry_retest_open_fade_min_volume_ratio {
         if min_volume_ratio < 0.0 {
@@ -1852,13 +905,13 @@ fn normalized_arg_flag(arg: &str) -> &str {
 /// 执行输出市场动量event回测usage步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_market_velocity_event_backtest_usage() {
     println!(
-        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state] [--trade-direction long|short|both] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02 --stop-loss-mode fixed_pct|structure_or_fixed|structure_with_cap --structure-stop-min-pct 0.01] [--entry-period 20] [--entry-max-signal-pullback-pct 3.0] [--entry-max-gap-without-retest-pct 0.8 --entry-retest-tolerance-pct 0.3 --entry-retest-after-signal --entry-retest-max-wait-candles 8 --entry-retest-min-entry-open-gap-pct 0.0 --entry-retest-open-fade-min-volume-ratio 2.0] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--event-start-ms 1717200000000 --event-end-ms 1719791999999] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--ignore-entry-signal-updates-while-open] [--fvg-entry-mode off|15m_to_1h|1h_to_4h|15m_self_after_signal|15m_impulse_retrace --fvg-impulse-retrace-fill-pct 20 --fvg-impulse-retrace-min-wait-candles 0] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
+        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state|kline_15m] [--trade-direction long|short|both] [--sample-limit 20 --sample-seed batch_a] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02 --stop-loss-mode fixed_pct|structure_or_fixed|structure_with_cap --structure-stop-min-pct 0.01] [--entry-period 20] [--entry-min-rsi 55 --entry-max-rsi 78 --entry-min-rsi-delta 3 --entry-rsi-delta-lookback-candles 3 --entry-bollinger-breakout --entry-min-bollinger-bandwidth-expansion-pct 12 --entry-min-recent-drawdown-pct 3.5 --entry-recent-drawdown-lookback-candles 12 --entry-symbol-cooldown-candles 8] [--entry-max-signal-pullback-pct 3.0] [--entry-max-gap-without-retest-pct 0.8 --entry-retest-tolerance-pct 0.3 --entry-retest-after-signal --entry-retest-max-wait-candles 8 --entry-retest-min-entry-open-gap-pct 0.0 --entry-retest-open-fade-min-volume-ratio 2.0] [--trend-timeframe 4h|1h|off] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--event-start-ms 1717200000000 --event-end-ms 1719791999999] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--ignore-entry-signal-updates-while-open] [--fvg-entry-mode off|15m_to_1h|1h_to_4h|15m_self_after_signal|15m_impulse_retrace --fvg-impulse-retrace-fill-pct 20 --fvg-impulse-retrace-min-wait-candles 0] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
     );
 }
 /// 执行输出市场动量paperobservationusage步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_market_velocity_paper_observation_usage() {
     println!(
-        "Usage: market_velocity_paper_observation [--loop-interval-seconds 21600] [--paper-strategy-preset momentum_03sl_20r_v5|momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1|research_momentum_0375sl_27r_reclaim13_22_v1|research_momentum_0375sl_26r_gap05_retest03_reclaim13_22_v1|research_momentum_0375sl_15r_signal_retest2_delta24_34_pchg5_10_v1|research_momentum_0375sl_20r_reclaim_fvgwait5_delta20_40_pchg5_12_v1|research_momentum_0375sl_20r_reclaim_delta13_72_pchg5_v1|research_momentum_0375sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner6r20_stop1_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner8r20_stop1_v1|research_momentum_04sl_20r_reclaim_fvgwait10_delta15_40_pchg5_12_v1|research_momentum_04sl_18r_reclaim_fvgwait10_delta15_40_pchg5_12_v1|research_momentum_04sl_18r_reclaim_fvgwait10_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_reclaim_fvgwait12_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_reclaim_fvgwait14_pullback3_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2|research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_pullback3_delta20_40_pchg5_10_v3|research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_openfadevol2_pullback3_delta20_40_pchg5_10_v4|research_momentum_04sl_18r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1|research_momentum_04sl_20r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_breakout_reclaim_retest1_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_minwait1_delta15_40_pchg5_12_v1|research_episode_momentum_03sl_24r_rank5_30_v1|research_episode_momentum_05sl_20r_rank5_v1|research_episode_momentum_05sl_30r_rank5_v1|research_episode_runner_03sl_24r_8r30_v1] [--target-rs 2.0] [--stop-loss-pct 0.03] [--entry-period 20]"
+        "Usage: market_velocity_paper_observation [--loop-interval-seconds 21600] [--paper-strategy-preset momentum_03sl_20r_v5|momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1|research_momentum_0375sl_27r_reclaim13_22_v1|research_momentum_0375sl_26r_gap05_retest03_reclaim13_22_v1|research_momentum_0375sl_15r_signal_retest2_delta24_34_pchg5_10_v1|research_momentum_0375sl_20r_reclaim_fvgwait5_delta20_40_pchg5_12_v1|research_momentum_0375sl_20r_reclaim_delta13_72_pchg5_v1|research_momentum_0375sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1|research_momentum_0375sl_10r_breakout_reclaim_delta11_72_pchg4_12_dist14_vol11_v1|research_momentum_0375sl_10r_breakout_reclaim_ma_delta11_72_pchg4_12_dist14_vol11_ignore_v1|research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner6r20_stop1_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner8r20_stop1_v1|research_momentum_04sl_20r_reclaim_fvgwait10_delta15_40_pchg5_12_v1|research_momentum_04sl_18r_reclaim_fvgwait10_delta15_40_pchg5_12_v1|research_momentum_04sl_18r_reclaim_fvgwait10_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_reclaim_fvgwait12_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_reclaim_fvgwait14_pullback3_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2|research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_pullback3_delta20_40_pchg5_10_v3|research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_openfadevol2_pullback3_delta20_40_pchg5_10_v4|research_momentum_04sl_18r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1|research_momentum_04sl_20r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_breakout_reclaim_retest1_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_minwait1_delta15_40_pchg5_12_v1|research_momentum_04sl_10r_kline15m_breakout_fvg20_vol13_dd35_v1|research_momentum_04sl_06r_kline15m_breakout_fvg20_vol13_dd35_v1|research_momentum_04sl_05r_kline15m_breakout_fvg30_vol13_dd35_v1|research_momentum_04sl_055r_kline15m_breakout_fvg30_vol13_dd35_v1|research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1|research_episode_momentum_03sl_24r_rank5_30_v1|research_episode_momentum_05sl_20r_rank5_v1|research_episode_momentum_05sl_30r_rank5_v1|research_episode_runner_03sl_24r_8r30_v1] [--target-rs 2.0] [--stop-loss-pct 0.03] [--entry-period 20]"
     );
 }
 /// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。

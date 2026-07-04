@@ -853,9 +853,20 @@ fn market_velocity_live_shell_args(
     config: &MarketVelocityStrategySignalConfig,
 ) -> MarketVelocityEventBacktestArgs {
     MarketVelocityEventBacktestArgs {
+        stop_loss_pct: config.stop_loss_pct,
+        target_rs: vec![config.take_profit_r],
         entry_period: config.entry_confirmation_period,
         entry_max_distance_pct: config.entry_max_average_distance_pct,
         entry_min_volume_ratio: config.entry_min_volume_ratio,
+        entry_min_rsi: config.entry_min_rsi,
+        entry_max_rsi: config.entry_max_rsi,
+        entry_min_rsi_delta: config.entry_min_rsi_delta,
+        entry_rsi_delta_lookback_candles: config.entry_rsi_delta_lookback_candles,
+        entry_bollinger_breakout: config.entry_bollinger_breakout,
+        entry_min_bollinger_bandwidth_expansion_pct: config
+            .entry_min_bollinger_bandwidth_expansion_pct,
+        entry_min_recent_drawdown_pct: config.entry_min_recent_drawdown_pct,
+        entry_recent_drawdown_lookback_candles: config.entry_recent_drawdown_lookback_candles,
         entry_max_signal_pullback_pct: config.entry_max_signal_pullback_pct,
         entry_retest_tolerance_pct: config.entry_retest_tolerance_pct,
         entry_retest_after_signal: config.entry_retest_after_signal,
@@ -870,6 +881,9 @@ fn market_velocity_live_shell_args(
         fvg_max_wait_candles: config.fvg_max_wait_candles,
         fvg_impulse_retrace_fill_pct: config.fvg_impulse_retrace_fill_pct,
         fvg_impulse_retrace_min_wait_candles: config.fvg_impulse_retrace_min_wait_candles,
+        entry_trigger_allowlist: config.entry_trigger_allowlist.clone(),
+        entry_trigger_blocklist: config.entry_trigger_blocklist.clone(),
+        symbol_blocklist: config.symbol_blocklist.clone(),
         max_15m_staleness_min: DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES,
         ..MarketVelocityEventBacktestArgs::default()
     }
@@ -1512,6 +1526,98 @@ mod tests {
         assert_eq!(
             live_shell.entry_retest_open_fade_min_volume_ratio,
             preset.entry_retest_open_fade_min_volume_ratio
+        );
+        assert_eq!(live_shell.fvg_entry_mode, preset.fvg_entry_mode);
+        assert_eq!(live_shell.fvg_lookback_candles, preset.fvg_lookback_candles);
+        assert_eq!(live_shell.fvg_max_wait_candles, preset.fvg_max_wait_candles);
+        assert_eq!(
+            live_shell.fvg_impulse_retrace_fill_pct,
+            preset.fvg_impulse_retrace_fill_pct
+        );
+        assert_eq!(
+            live_shell.fvg_impulse_retrace_min_wait_candles,
+            preset.fvg_impulse_retrace_min_wait_candles
+        );
+    }
+
+    #[test]
+    fn kline15m_fast_live_shell_matches_paper_preset_contract() {
+        let preset = parse_paper_observation_args_from([
+            "--paper-strategy-preset",
+            "research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1",
+        ])
+        .expect("paper preset");
+        let config = MarketVelocityStrategySignalConfig::from_strategy_config_json(
+            &json!({
+                "strategy_slug": "market_velocity",
+                "strategy_preset": "research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1",
+                "entry_rule_version": "kline15m_mom04_052r_brk_fvg50_vol13_dd35_v1",
+                "min_delta_rank": 0,
+                "max_delta_rank": null,
+                "min_price_change_pct": 0.0,
+                "max_price_change_pct": null,
+                "stop_loss_pct": 0.04,
+                "take_profit_r": 0.52,
+                "max_holding_hours": 24,
+                "require_technical_confirmation": false,
+                "require_entry_confirmation": true,
+                "trend_min_average_distance_pct": 0.0,
+                "entry_confirmation_period": 20,
+                "entry_confirmation_fetch_limit": 80,
+                "entry_max_average_distance_pct": 14.0,
+                "entry_min_volume_ratio": 1.3,
+                "entry_min_rsi": 50.0,
+                "entry_max_rsi": 90.0,
+                "entry_bollinger_breakout": true,
+                "entry_min_recent_drawdown_pct": 3.5,
+                "entry_recent_drawdown_lookback_candles": 12,
+                "fvg_entry_mode": "m15_impulse_retrace",
+                "fvg_lookback_candles": 40,
+                "fvg_max_wait_candles": 24,
+                "fvg_impulse_retrace_fill_pct": 50.0,
+                "fvg_impulse_retrace_min_wait_candles": 0,
+                "entry_trigger_allowlist": ["breakout_previous_high"],
+            }),
+            &json!({
+                "max_loss_percent": 0.04,
+                "take_profit_r": 0.52,
+                "max_holding_hours": 24,
+            }),
+        )
+        .expect("live strategy config");
+        assert_eq!(config.take_profit_r, 0.52);
+        assert_eq!(config.max_delta_rank, None);
+        assert_eq!(config.max_price_change_pct, None);
+        let live_shell = market_velocity_live_shell_args(&config);
+
+        assert_eq!(live_shell.stop_loss_pct, preset.stop_loss_pct);
+        assert_eq!(live_shell.target_rs, preset.target_rs);
+        assert_eq!(live_shell.entry_period, preset.entry_period);
+        assert_eq!(
+            live_shell.entry_max_distance_pct,
+            preset.entry_max_distance_pct
+        );
+        assert_eq!(
+            live_shell.entry_min_volume_ratio,
+            preset.entry_min_volume_ratio
+        );
+        assert_eq!(live_shell.entry_min_rsi, preset.entry_min_rsi);
+        assert_eq!(live_shell.entry_max_rsi, preset.entry_max_rsi);
+        assert_eq!(
+            live_shell.entry_bollinger_breakout,
+            preset.entry_bollinger_breakout
+        );
+        assert_eq!(
+            live_shell.entry_min_recent_drawdown_pct,
+            preset.entry_min_recent_drawdown_pct
+        );
+        assert_eq!(
+            live_shell.entry_recent_drawdown_lookback_candles,
+            preset.entry_recent_drawdown_lookback_candles
+        );
+        assert_eq!(
+            live_shell.entry_trigger_allowlist,
+            preset.entry_trigger_allowlist
         );
         assert_eq!(live_shell.fvg_entry_mode, preset.fvg_entry_mode);
         assert_eq!(live_shell.fvg_lookback_candles, preset.fvg_lookback_candles);

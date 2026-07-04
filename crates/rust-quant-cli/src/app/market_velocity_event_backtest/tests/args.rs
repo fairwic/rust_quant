@@ -1,5 +1,14 @@
-use super::super::parse_cli_args_from;
-use super::super::{MarketVelocityEventSource, MarketVelocityTradeDirection};
+use super::super::{
+    market_velocity_paper_strategy_preset_manifest, parse_cli_args_from,
+    parse_paper_observation_args_from, FvgEntryMode, MarketVelocityEventSource,
+    MarketVelocityPaperOutcomeSink, MarketVelocityTradeDirection, MarketVelocityTrendTimeframe,
+};
+
+const RECLAIM_ONLY_RESEARCH_PRESET: &str =
+    "research_momentum_0375sl_20r_reclaim_delta13_72_pchg5_v1";
+const RECLAIM_ONLY_RESEARCH_ENTRY_RULE_VERSION: &str =
+    "rank_radar_4h15m_r0375_20r_rcm_d13_72_p5_v1";
+
 #[test]
 fn defaults_to_episode_event_source_for_clean_backtests() {
     let args = parse_cli_args_from([] as [&str; 0]).unwrap();
@@ -9,6 +18,79 @@ fn defaults_to_episode_event_source_for_clean_backtests() {
 fn defaults_to_long_trade_direction() {
     let args = parse_cli_args_from([] as [&str; 0]).unwrap();
     assert_eq!(args.trade_direction, MarketVelocityTradeDirection::Long);
+}
+#[test]
+fn defaults_to_4h_trend_timeframe() {
+    let args = parse_cli_args_from([] as [&str; 0]).unwrap();
+    assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::FourHour);
+}
+#[test]
+fn parses_1h_trend_timeframe() {
+    let args = parse_cli_args_from(["--trend-timeframe", "1h"]).unwrap();
+    assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::OneHour);
+}
+#[test]
+fn parses_off_trend_timeframe() {
+    let args = parse_cli_args_from(["--trend-timeframe", "off"]).unwrap();
+    assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::Off);
+}
+#[test]
+fn rejects_unknown_trend_timeframe() {
+    let err = parse_cli_args_from(["--trend-timeframe", "2h"]).unwrap_err();
+    assert!(err.to_string().contains("unknown --trend-timeframe"));
+}
+#[test]
+fn parses_fast_momentum_entry_filters() {
+    let args = parse_cli_args_from([
+        "--entry-min-rsi",
+        "55",
+        "--entry-max-rsi",
+        "78",
+        "--entry-min-rsi-delta",
+        "3",
+        "--entry-rsi-delta-lookback-candles",
+        "3",
+        "--entry-bollinger-breakout",
+        "--entry-min-bollinger-bandwidth-expansion-pct",
+        "12",
+        "--entry-min-recent-drawdown-pct",
+        "3.5",
+        "--entry-recent-drawdown-lookback-candles",
+        "12",
+    ])
+    .unwrap();
+    assert_eq!(args.entry_min_rsi, Some(55.0));
+    assert_eq!(args.entry_max_rsi, Some(78.0));
+    assert_eq!(args.entry_min_rsi_delta, Some(3.0));
+    assert_eq!(args.entry_rsi_delta_lookback_candles, 3);
+    assert!(args.entry_bollinger_breakout);
+    assert_eq!(args.entry_min_bollinger_bandwidth_expansion_pct, Some(12.0));
+    assert_eq!(args.entry_min_recent_drawdown_pct, Some(3.5));
+    assert_eq!(args.entry_recent_drawdown_lookback_candles, 12);
+}
+#[test]
+fn parses_entry_symbol_cooldown_filter() {
+    let args = parse_cli_args_from(["--entry-symbol-cooldown-candles", "8"]).unwrap();
+    assert_eq!(args.entry_symbol_cooldown_candles, Some(8));
+}
+#[test]
+fn rejects_invalid_fast_momentum_entry_filters() {
+    let err = parse_cli_args_from(["--entry-min-rsi", "80", "--entry-max-rsi", "60"]).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("--entry-max-rsi must be greater than or equal to --entry-min-rsi"));
+    let err = parse_cli_args_from(["--entry-rsi-delta-lookback-candles", "0"]).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("--entry-rsi-delta-lookback-candles must be greater than 0"));
+    let err = parse_cli_args_from(["--entry-recent-drawdown-lookback-candles", "0"]).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("--entry-recent-drawdown-lookback-candles must be greater than 0"));
+    let err = parse_cli_args_from(["--entry-symbol-cooldown-candles", "0"]).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("--entry-symbol-cooldown-candles must be greater than 0"));
 }
 #[test]
 fn parses_short_trade_direction() {
@@ -34,6 +116,26 @@ fn parses_raw_event_source_for_legacy_research() {
 fn parses_raw_state_event_source_for_signal_state_research() {
     let args = parse_cli_args_from(["--event-source", "raw_state"]).unwrap();
     assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
+}
+#[test]
+fn parses_kline_15m_event_source_for_signal_logic_research() {
+    let args = parse_cli_args_from(["--event-source", "kline_15m"]).unwrap();
+    assert_eq!(args.event_source, MarketVelocityEventSource::Kline15m);
+}
+#[test]
+fn parses_kline_15m_sample_seed_for_reproducible_random_samples() {
+    let args = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--sample-limit",
+        "20",
+        "--sample-seed",
+        "batch_a",
+    ])
+    .unwrap();
+    assert_eq!(args.event_source, MarketVelocityEventSource::Kline15m);
+    assert_eq!(args.sample_limit, 20);
+    assert_eq!(args.sample_seed, "batch_a");
 }
 #[test]
 fn rejects_unknown_event_source() {
@@ -86,6 +188,89 @@ fn rejects_removed_new_rank_strategy_filters() {
         let err = parse_cli_args_from([flag, "1"]).unwrap_err();
         assert!(err.to_string().contains("unknown argument"));
     }
+}
+
+#[test]
+fn paper_observation_args_apply_reclaim_only_0375sl_20r_delta13_72_research_preset() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        RECLAIM_ONLY_RESEARCH_PRESET,
+    ])
+    .unwrap();
+
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
+    assert_eq!(args.entry_trigger_allowlist, vec!["reclaim_ema"]);
+    assert!(args.entry_trigger_blocklist.is_empty());
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        RECLAIM_ONLY_RESEARCH_ENTRY_RULE_VERSION
+    );
+    assert_eq!(args.stop_loss_pct, 0.0375);
+    assert_eq!(args.target_rs, vec![2.0]);
+    assert_eq!(args.entry_max_distance_pct, 5.5);
+    assert_eq!(args.entry_min_volume_ratio, 1.0);
+    assert_eq!(args.trend_min_average_distance_pct, 0.0);
+    assert_eq!(args.min_delta_rank, 13);
+    assert_eq!(args.max_delta_rank, Some(72));
+    assert_eq!(args.min_price_change_pct, Some(5.0));
+    assert_eq!(args.max_price_change_pct, None);
+    assert!(!args.entry_retest_after_signal);
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::Off);
+}
+
+#[test]
+fn paper_observation_reclaim_only_entry_rule_version_fits_quant_web_contract() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        RECLAIM_ONLY_RESEARCH_PRESET,
+    ])
+    .unwrap();
+
+    assert!(
+        args.paper_outcome_entry_rule_version.len() <= 80,
+        "preset {} entry_rule_version too long for quant_web contract: {} ({})",
+        RECLAIM_ONLY_RESEARCH_PRESET,
+        args.paper_outcome_entry_rule_version,
+        args.paper_outcome_entry_rule_version.len()
+    );
+}
+
+#[test]
+fn paper_observation_reclaim_only_preset_manifest_is_canonical_and_hashable() {
+    let manifest =
+        market_velocity_paper_strategy_preset_manifest(RECLAIM_ONLY_RESEARCH_PRESET).unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-radar");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity 0.0375SL 2.0R reclaim delta13-72 pchg5 v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["preset"],
+        RECLAIM_ONLY_RESEARCH_PRESET
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["event_source"],
+        "raw_state"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["stop_loss_pct"],
+        0.0375
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["target_r"], 2.0);
+    assert_eq!(manifest.manifest_json["parameters"]["min_delta_rank"], 13);
+    assert_eq!(manifest.manifest_json["parameters"]["max_delta_rank"], 72);
+    assert_eq!(
+        manifest.manifest_json["parameters"]["fvg_entry_mode"],
+        "off"
+    );
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_allowlist"],
+        serde_json::json!(["reclaim_ema"])
+    );
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
 }
 #[test]
 fn parses_equity_quartile_report() {
