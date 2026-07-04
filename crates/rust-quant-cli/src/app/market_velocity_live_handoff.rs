@@ -27,6 +27,7 @@ use std::{collections::BTreeMap, time::Duration};
 mod candidates;
 mod entry_candles;
 mod handoff;
+pub mod promotion_readiness;
 use candidates::{load_market_velocity_live_candidate_events, normalize_candidate_limit};
 use entry_candles::{load_market_velocity_live_entry_candles, MarketVelocityEntryCandleLoadStatus};
 use handoff::market_velocity_handoff_log_context;
