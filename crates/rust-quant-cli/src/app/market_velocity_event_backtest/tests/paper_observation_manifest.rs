@@ -1145,7 +1145,8 @@ fn paper_observation_short_15m_support_breakdown_preset_manifest_is_canonical_an
     )
     .unwrap();
 
-    assert_eq!(manifest.product_slug, "market-velocity-radar");
+    assert_eq!(manifest.product_slug, "market-velocity-breakdown-short");
+    assert_eq!(manifest.strategy_key, "market_velocity_breakdown_short");
     assert_eq!(
         manifest.human_label,
         "Market Velocity short 0.0375SL 1.0R 15m support breakdown delta5-72 pchg1.5-12 vol13 v1"
@@ -1157,6 +1158,22 @@ fn paper_observation_short_15m_support_breakdown_preset_manifest_is_canonical_an
     assert_eq!(
         manifest.manifest_json["parameters"]["trade_direction"],
         "short"
+    );
+    assert_eq!(
+        manifest.manifest_json["strategy_key"],
+        "market_velocity_breakdown_short"
+    );
+    assert_eq!(
+        manifest.manifest_json["strategy_family"],
+        "market_velocity_breakdown_short"
+    );
+    assert_eq!(
+        manifest.manifest_json["product"]["slug"],
+        "market-velocity-breakdown-short"
+    );
+    assert_eq!(
+        manifest.manifest_json["execution"]["source_signal_type"],
+        "market_velocity_breakdown_short"
     );
     assert_eq!(
         manifest.manifest_json["parameters"]["stop_loss_pct"],

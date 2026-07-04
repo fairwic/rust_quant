@@ -5,8 +5,13 @@ use std::collections::BTreeMap;
 
 use super::args::{
     entry_trigger_filter_version_label, format_entry_trigger_filter_list,
-    parse_paper_observation_args_from,
+    parse_paper_observation_args_from, MarketVelocityTradeDirection,
 };
+
+const MARKET_VELOCITY_STRATEGY_KEY: &str = "market_velocity";
+const MARKET_VELOCITY_PRODUCT_SLUG: &str = "market-velocity-radar";
+const MARKET_VELOCITY_BREAKDOWN_SHORT_STRATEGY_KEY: &str = "market_velocity_breakdown_short";
+const MARKET_VELOCITY_BREAKDOWN_SHORT_PRODUCT_SLUG: &str = "market-velocity-breakdown-short";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketVelocityPresetManifest {
@@ -30,6 +35,17 @@ pub fn market_velocity_paper_strategy_preset_manifest(
     let has_blocklist = !args.entry_trigger_blocklist.is_empty();
     let allowlist_label = format_entry_trigger_filter_list(&args.entry_trigger_allowlist);
     let blocklist_label = format_entry_trigger_filter_list(&args.entry_trigger_blocklist);
+    let is_breakdown_short = args.trade_direction == MarketVelocityTradeDirection::Short;
+    let strategy_key = if is_breakdown_short {
+        MARKET_VELOCITY_BREAKDOWN_SHORT_STRATEGY_KEY
+    } else {
+        MARKET_VELOCITY_STRATEGY_KEY
+    };
+    let product_slug = if is_breakdown_short {
+        MARKET_VELOCITY_BREAKDOWN_SHORT_PRODUCT_SLUG
+    } else {
+        MARKET_VELOCITY_PRODUCT_SLUG
+    };
     let fast_momentum_filters_json = json!({
         "entry_min_rsi": args.entry_min_rsi,
         "entry_max_rsi": args.entry_max_rsi,
@@ -43,18 +59,18 @@ pub fn market_velocity_paper_strategy_preset_manifest(
     });
     let manifest_json = json!({
         "manifest_schema_version": 1,
-        "strategy_key": "market_velocity",
-        "strategy_family": "market_velocity",
+        "strategy_key": strategy_key,
+        "strategy_family": strategy_key,
         "preset": preset,
         "rule_version": args.paper_outcome_entry_rule_version,
         "product": {
-            "slug": "market-velocity-radar",
+            "slug": product_slug,
             "symbol": "ALL",
             "timeframe": "15m",
         },
         "execution": {
             "service_mode": "signal_only",
-            "source_signal_type": "market_velocity",
+            "source_signal_type": strategy_key,
             "paper_outcome_sink": "web",
         },
         "parameters": {
@@ -105,11 +121,11 @@ pub fn market_velocity_paper_strategy_preset_manifest(
     });
     let canonical_json = canonical_manifest_json(&manifest_json)?;
     Ok(MarketVelocityPresetManifest {
-        product_slug: "market-velocity-radar".to_string(),
+        product_slug: product_slug.to_string(),
         symbol: "ALL".to_string(),
         channel: "production_default".to_string(),
         manifest_hash: sha256_manifest_hash(&canonical_json),
-        strategy_key: "market_velocity".to_string(),
+        strategy_key: strategy_key.to_string(),
         human_label: human_label_for_preset(preset).to_string(),
         risk_level: "high".to_string(),
         manifest_status: "production".to_string(),
