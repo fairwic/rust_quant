@@ -1,7 +1,8 @@
 use super::super::{
-    parse_paper_observation_args_from, parse_paper_observation_command_from, FvgEntryMode,
-    MarketVelocityEventSource, MarketVelocityPaperOutcomeSink, MarketVelocityStopLossMode,
-    MarketVelocityTradeDirection, MarketVelocityTrendTimeframe, StopReentryMode,
+    market_velocity_paper_observation_usage, parse_paper_observation_args_from,
+    parse_paper_observation_command_from, FvgEntryMode, MarketVelocityEventSource,
+    MarketVelocityPaperOutcomeSink, MarketVelocityStopLossMode, MarketVelocityTradeDirection,
+    MarketVelocityTrendTimeframe, StopReentryMode,
 };
 const STABLE_PRODUCTION_PRESET: &str =
     "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1";
@@ -1189,6 +1190,16 @@ fn paper_observation_args_apply_short_15m_support_breakdown_v5_preset() {
     assert_eq!(args.max_price_change_pct, Some(12.0));
     assert_eq!(args.fvg_entry_mode, FvgEntryMode::Off);
     assert!(args.ignore_entry_signal_updates_while_open);
+}
+
+#[test]
+fn paper_observation_usage_lists_short_15m_support_breakdown_v5_preset() {
+    assert!(
+        market_velocity_paper_observation_usage().contains(
+            "research_momentum_short_04sl_065r_15m_support_breakdown_d1_100_pchg0p5_12_vol10_dist14_v5"
+        ),
+        "paper observation usage must list the production v5 breakdown-short preset"
+    );
 }
 
 #[test]

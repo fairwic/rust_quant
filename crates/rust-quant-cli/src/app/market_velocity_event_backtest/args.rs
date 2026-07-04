@@ -908,11 +908,59 @@ pub fn print_market_velocity_event_backtest_usage() {
         "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state|kline_15m] [--trade-direction long|short|both] [--sample-limit 20 --sample-seed batch_a] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02 --stop-loss-mode fixed_pct|structure_or_fixed|structure_with_cap --structure-stop-min-pct 0.01] [--entry-period 20] [--entry-min-rsi 55 --entry-max-rsi 78 --entry-min-rsi-delta 3 --entry-rsi-delta-lookback-candles 3 --entry-bollinger-breakout --entry-min-bollinger-bandwidth-expansion-pct 12 --entry-min-recent-drawdown-pct 3.5 --entry-recent-drawdown-lookback-candles 12 --entry-symbol-cooldown-candles 8] [--entry-max-signal-pullback-pct 3.0] [--entry-max-gap-without-retest-pct 0.8 --entry-retest-tolerance-pct 0.3 --entry-retest-after-signal --entry-retest-max-wait-candles 8 --entry-retest-min-entry-open-gap-pct 0.0 --entry-retest-open-fade-min-volume-ratio 2.0] [--trend-timeframe 4h|1h|off] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--event-start-ms 1717200000000 --event-end-ms 1719791999999] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--ignore-entry-signal-updates-while-open] [--fvg-entry-mode off|15m_to_1h|1h_to_4h|15m_self_after_signal|15m_impulse_retrace --fvg-impulse-retrace-fill-pct 20 --fvg-impulse-retrace-min-wait-candles 0] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
     );
 }
+/// 返回 paper observation CLI usage，并让 preset 列表复用解析常量，避免可运行 preset 漏出帮助文本。
+pub(crate) fn market_velocity_paper_observation_usage() -> String {
+    let presets = [
+        MOMENTUM_PROFIT_PRESET,
+        MOMENTUM_STABLE_RECLAIM_MA_PULLBACK_PRESET,
+        MOMENTUM_RECLAIM_MIDRANK_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_GAP_RETEST_RESEARCH_PRESET,
+        MOMENTUM_SIGNAL_RETEST_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_FVG_WAIT5_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_ONLY_0375SL_20R_DELTA13_72_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_LOW_TARGET_0375SL_DELTA11_72_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_MA_IGNORE_LOW_TARGET_0375SL_DELTA11_72_RESEARCH_PRESET,
+        MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_0375SL_DELTA5_72_RESEARCH_PRESET,
+        MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_DELTA5_72_V2_RESEARCH_PRESET,
+        MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_06R_DELTA5_72_V3_RESEARCH_PRESET,
+        MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_06R_DELTA5_72_V4_RESEARCH_PRESET,
+        MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_065R_DELTA1_100_V5_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RUNNER6R20_STOP1_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RUNNER8R20_STOP1_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_FVG_WAIT10_04SL_18R_DELTA15_40_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_FVG_WAIT10_04SL_18R_DELTA20_40_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_FVG_WAIT12_04SL_18R_DELTA20_40_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_FVG_WAIT14_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_GAP0_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_GAP0_OPEN_FADE_VOL2_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_RETEST1_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET,
+        MOMENTUM_RECLAIM_RETEST1_04SL_20R_PULLBACK3_DELTA20_40_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_RETEST1_04SL_18R_DELTA20_40_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_FVG_RETEST1_04SL_18R_DELTA20_40_PCHG5_8_RESEARCH_PRESET,
+        MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_MINWAIT1_04SL_DELTA15_40_RESEARCH_PRESET,
+        MOMENTUM_KLINE15M_BREAKOUT_FVG20_04SL_10R_RESEARCH_PRESET,
+        MOMENTUM_KLINE15M_BREAKOUT_FVG20_04SL_06R_RESEARCH_PRESET,
+        MOMENTUM_KLINE15M_BREAKOUT_FVG30_04SL_05R_RESEARCH_PRESET,
+        MOMENTUM_KLINE15M_BREAKOUT_FVG30_04SL_055R_RESEARCH_PRESET,
+        MOMENTUM_KLINE15M_BREAKOUT_FVG50_04SL_052R_RESEARCH_PRESET,
+        EPISODE_MOMENTUM_RESEARCH_PRESET,
+        EPISODE_MOMENTUM_05SL_20R_RESEARCH_PRESET,
+        EPISODE_MOMENTUM_05SL_30R_RESEARCH_PRESET,
+        EPISODE_RUNNER_RESEARCH_PRESET,
+    ];
+    format!(
+        "Usage: market_velocity_paper_observation [--loop-interval-seconds 21600] [--paper-strategy-preset {}] [--target-rs 2.0] [--stop-loss-pct 0.03] [--entry-period 20]",
+        presets.join("|")
+    )
+}
 /// 执行输出市场动量paperobservationusage步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_market_velocity_paper_observation_usage() {
-    println!(
-        "Usage: market_velocity_paper_observation [--loop-interval-seconds 21600] [--paper-strategy-preset momentum_03sl_20r_v5|momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1|research_momentum_0375sl_27r_reclaim13_22_v1|research_momentum_0375sl_26r_gap05_retest03_reclaim13_22_v1|research_momentum_0375sl_15r_signal_retest2_delta24_34_pchg5_10_v1|research_momentum_0375sl_20r_reclaim_fvgwait5_delta20_40_pchg5_12_v1|research_momentum_0375sl_20r_reclaim_delta13_72_pchg5_v1|research_momentum_0375sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1|research_momentum_0375sl_10r_breakout_reclaim_delta11_72_pchg4_12_dist14_vol11_v1|research_momentum_0375sl_10r_breakout_reclaim_ma_delta11_72_pchg4_12_dist14_vol11_ignore_v1|research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1|research_momentum_short_04sl_10r_15m_support_breakdown_d5_72_pchg1p5_12_vol11_prevlow_v2|research_momentum_short_04sl_06r_15m_support_breakdown_d5_72_pchg1p5_12_vol11_dist5_v3|research_momentum_short_04sl_06r_15m_support_breakdown_d5_72_pchg1_12_vol10_dist8_v4|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner6r20_stop1_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta15_40_pchg5_12_runner8r20_stop1_v1|research_momentum_04sl_20r_reclaim_fvgwait10_delta15_40_pchg5_12_v1|research_momentum_04sl_18r_reclaim_fvgwait10_delta15_40_pchg5_12_v1|research_momentum_04sl_18r_reclaim_fvgwait10_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_reclaim_fvgwait12_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_reclaim_fvgwait14_pullback3_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_reclaim_fvg_retest1_pullback3_delta20_40_pchg5_10_v2|research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_pullback3_delta20_40_pchg5_10_v3|research_momentum_04sl_18r_reclaim_fvg_retest1_gap0_openfadevol2_pullback3_delta20_40_pchg5_10_v4|research_momentum_04sl_18r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1|research_momentum_04sl_20r_reclaim_retest1_pullback3_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_breakout_reclaim_retest1_delta20_40_pchg5_10_v1|research_momentum_04sl_18r_breakout_reclaim_fvg_retest1_delta20_40_pchg5_8_v1|research_momentum_04sl_20r_breakout_reclaim_fvgwait10_minwait1_delta15_40_pchg5_12_v1|research_momentum_04sl_10r_kline15m_breakout_fvg20_vol13_dd35_v1|research_momentum_04sl_06r_kline15m_breakout_fvg20_vol13_dd35_v1|research_momentum_04sl_05r_kline15m_breakout_fvg30_vol13_dd35_v1|research_momentum_04sl_055r_kline15m_breakout_fvg30_vol13_dd35_v1|research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1|research_episode_momentum_03sl_24r_rank5_30_v1|research_episode_momentum_05sl_20r_rank5_v1|research_episode_momentum_05sl_30r_rank5_v1|research_episode_runner_03sl_24r_8r30_v1] [--target-rs 2.0] [--stop-loss-pct 0.03] [--entry-period 20]"
-    );
+    println!("{}", market_velocity_paper_observation_usage());
 }
 /// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 fn parse_target_rs(value: &str) -> Result<Vec<f64>> {

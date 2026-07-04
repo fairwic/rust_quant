@@ -19,6 +19,8 @@ mod reentry;
 mod report;
 mod short_entry;
 mod stop_loss;
+#[cfg(test)]
+pub(crate) use args::market_velocity_paper_observation_usage;
 use args::{format_entry_trigger_filter_list, normalize_entry_trigger, normalize_symbol};
 pub use args::{
     parse_cli_args_from, parse_paper_observation_args_from, parse_paper_observation_command_from,
