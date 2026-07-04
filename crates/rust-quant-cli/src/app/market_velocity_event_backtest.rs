@@ -1,12 +1,9 @@
 use super::env_parse::first_non_empty_env;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use chrono::{SecondsFormat, TimeZone, Utc};
 use rust_quant_domain::entities::BacktestLog;
 use rust_quant_domain::traits::BacktestLogRepository;
 use rust_quant_infrastructure::SqlxBacktestRepository;
-use rust_quant_services::rust_quan_web::{
-    ExecutionTaskClient, ExecutionTaskConfig, MarketVelocityPaperOutcomeRequest,
-};
 use serde_json::json;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::collections::{BTreeMap, HashMap};
@@ -17,13 +14,12 @@ mod equity_stats;
 mod exit;
 mod fvg;
 mod manifest;
+mod paper_outcome;
 mod reentry;
 mod report;
 mod short_entry;
-use args::{
-    entry_trigger_filter_version_label, format_entry_trigger_filter_list, normalize_entry_trigger,
-    normalize_symbol,
-};
+mod stop_loss;
+use args::{format_entry_trigger_filter_list, normalize_entry_trigger, normalize_symbol};
 pub use args::{
     parse_cli_args_from, parse_paper_observation_args_from, parse_paper_observation_command_from,
     print_market_velocity_event_backtest_usage, print_market_velocity_paper_observation_usage,
@@ -47,12 +43,17 @@ use fvg::{
     find_fvg_entry, FvgEntrySearch,
 };
 pub use manifest::{market_velocity_paper_strategy_preset_manifest, MarketVelocityPresetManifest};
+pub use paper_outcome::build_market_velocity_paper_outcomes;
+use paper_outcome::{
+    print_market_velocity_paper_outcomes_jsonl, submit_market_velocity_paper_outcomes,
+};
 use reentry::maybe_apply_stop_reentry;
 use report::{
     print_effective_entry_report, print_result_report, print_stage_report,
     print_trigger_quality_report, print_trigger_variant_quality_report,
 };
 use short_entry::sideways_range_breakdown_candidate;
+pub(crate) use stop_loss::select_stop_loss_for_confirmed_signal;
 pub const MS_15M: i64 = 15 * 60 * 1_000;
 pub const MS_1H: i64 = 60 * 60 * 1_000;
 pub const MS_4H: i64 = 4 * 60 * 60 * 1_000;
@@ -1843,293 +1844,6 @@ fn summarize_target(
     }
     (results, skipped_lock)
 }
-/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
-pub fn build_market_velocity_paper_outcomes(
-    confirmed: &[ConfirmedEvent],
-    candles_15m: &HashMap<String, Vec<BacktestCandle>>,
-    args: &MarketVelocityEventBacktestArgs,
-) -> Vec<MarketVelocityPaperOutcomeRequest> {
-    let confirmed_by_event_id = confirmed
-        .iter()
-        .map(|signal| (signal.event.id, signal))
-        .collect::<HashMap<_, _>>();
-    let mut outcomes = Vec::new();
-    let entry_trigger_filter_version = entry_trigger_filter_version(args);
-    for target_r in &args.target_rs {
-        for (horizon_hours, horizon_ms) in PAPER_OUTCOME_HORIZONS {
-            let (results, skipped_lock) =
-                summarize_target(confirmed, candles_15m, *target_r, *horizon_ms, args);
-            for result in results {
-                let Some(event_id) = result.event_id else {
-                    continue;
-                };
-                let Some(signal) = confirmed_by_event_id.get(&event_id) else {
-                    continue;
-                };
-                let symbol = result
-                    .symbol
-                    .clone()
-                    .unwrap_or_else(|| signal.event.symbol.clone());
-                let entry_trigger = result.trigger.clone();
-                let selected_stop_loss = select_stop_loss_for_confirmed_signal(signal, args);
-                outcomes.push(MarketVelocityPaperOutcomeRequest {
-                    rank_event_id: event_id,
-                    exchange: signal.event.exchange.trim().to_ascii_lowercase(),
-                    symbol,
-                    target_r: *target_r,
-                    horizon_hours: *horizon_hours,
-                    entry_rule_version: args.paper_outcome_entry_rule_version.clone(),
-                    entry_trigger: entry_trigger.clone(),
-                    entry_price: result.entry_price,
-                    entry_at: timestamp_ms_to_rfc3339(result.entry_ts),
-                    outcome_status: result.outcome.label().to_string(),
-                    exit_reason: result.reason.clone(),
-                    result_r: result.r,
-                    evaluated_at: timestamp_ms_to_rfc3339(result.exit_ts),
-                    evaluation_payload: json!({
-                        "source": "market_velocity_event_backtest",
-                        "rank_event_id": event_id,
-                        "detected_at": signal.event.detected_at,
-                        "target_r": target_r,
-                        "horizon_hours": horizon_hours,
-                        "trade_direction": trade_direction_for_event(&signal.event).label(),
-                        "stop_loss_pct": args.stop_loss_pct,
-                        "stop_loss_mode": args.stop_loss_mode.label(),
-                        "selected_stop_loss_pct": selected_stop_loss.stop_loss_pct,
-                        "selected_stop_loss_price": selected_stop_loss.price,
-                        "selected_stop_loss_source": selected_stop_loss.source,
-                        "entry_period": args.entry_period,
-                        "entry_trigger": entry_trigger,
-                        "entry_trigger_filter_version": entry_trigger_filter_version,
-                        "trade_complete": result.complete,
-                        "exit_ts": result.exit_ts,
-                        "skipped_lock_count": skipped_lock,
-                        "entry_rule_version": &args.paper_outcome_entry_rule_version,
-                        "stop_reentry": stop_reentry_payload(&result, args),
-                        "fvg_entry": fvg_entry_payload(args),
-                        "profit_protection": profit_protection_payload(args),
-                        "runner_exit": runner_exit_payload(args),
-                        "early_exit": early_exit_payload(args),
-                        "entry_filter": {
-                            "entry_trigger_filter_version": entry_trigger_filter_version,
-                            "entry_trigger_allowlist": &args.entry_trigger_allowlist,
-                            "entry_trigger_blocklist": &args.entry_trigger_blocklist,
-                        },
-                        "filters": {
-                            "min_delta_rank": args.min_delta_rank,
-                            "max_delta_rank": args.max_delta_rank,
-                            "min_price_change_pct": args.min_price_change_pct,
-                            "max_price_change_pct": args.max_price_change_pct,
-                            "entry_max_distance_pct": args.entry_max_distance_pct,
-                            "entry_min_volume_ratio": args.entry_min_volume_ratio,
-                            "entry_max_gap_without_retest_pct": args.entry_max_gap_without_retest_pct,
-                            "entry_retest_tolerance_pct": args.entry_retest_tolerance_pct,
-                            "entry_retest_after_signal": args.entry_retest_after_signal,
-                            "entry_retest_max_wait_candles": args.entry_retest_max_wait_candles,
-                            "entry_retest_min_entry_open_gap_pct": args.entry_retest_min_entry_open_gap_pct,
-                            "entry_retest_open_fade_min_volume_ratio": args.entry_retest_open_fade_min_volume_ratio,
-                            "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
-                            "max_15m_staleness_min": args.max_15m_staleness_min,
-                            "max_4h_staleness_min": args.max_4h_staleness_min
-                        }
-                    }),
-                });
-            }
-        }
-    }
-    outcomes
-}
-/// 提供FVG入场载荷的集中实现，避免回测策略调用方重复处理相同细节。
-fn fvg_entry_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
-    json!({
-        "mode": args.fvg_entry_mode.label(),
-        "lookback_candles": args.fvg_lookback_candles,
-        "max_wait_candles": args.fvg_max_wait_candles,
-    })
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct SelectedStopLossForSignal {
-    price: f64,
-    stop_loss_pct: f64,
-    source: String,
-}
-
-fn select_stop_loss_for_confirmed_signal(
-    signal: &ConfirmedEvent,
-    args: &MarketVelocityEventBacktestArgs,
-) -> SelectedStopLossForSignal {
-    let direction = trade_direction_for_event(&signal.event);
-    let fixed_price =
-        stop_loss_price_for_direction(signal.entry_price, args.stop_loss_pct, direction);
-    let fixed_source = fixed_stop_loss_source(args.stop_loss_pct);
-    let structure = signal
-        .structure_stop_loss_price
-        .filter(|price| {
-            price.is_finite()
-                && *price > 0.0
-                && is_loss_side_stop_price(signal.entry_price, *price, direction)
-        })
-        .zip(signal.structure_stop_loss_source.clone())
-        .map(|(price, source)| {
-            apply_structure_stop_min_pct_floor(
-                signal.entry_price,
-                price,
-                source,
-                args.structure_stop_min_pct,
-                direction,
-            )
-        });
-    let (price, source) = match (args.stop_loss_mode, structure) {
-        (
-            MarketVelocityStopLossMode::StructureOrFixed,
-            Some((structure_price, structure_source)),
-        ) if should_use_structure_stop(
-            signal.entry_price,
-            structure_price,
-            fixed_price,
-            direction,
-        ) =>
-        {
-            (structure_price, structure_source)
-        }
-        (
-            MarketVelocityStopLossMode::StructureWithCap,
-            Some((structure_price, structure_source)),
-        ) => apply_structure_stop_max_pct_cap(
-            signal.entry_price,
-            structure_price,
-            structure_source,
-            args.stop_loss_pct,
-            direction,
-        ),
-        _ => (fixed_price, fixed_source),
-    };
-    SelectedStopLossForSignal {
-        price,
-        stop_loss_pct: (price - signal.entry_price).abs() / signal.entry_price,
-        source,
-    }
-}
-
-fn stop_loss_price_for_direction(
-    entry_price: f64,
-    stop_loss_pct: f64,
-    direction: MarketVelocityTradeDirection,
-) -> f64 {
-    match direction {
-        MarketVelocityTradeDirection::Short => entry_price * (1.0 + stop_loss_pct),
-        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both => {
-            entry_price * (1.0 - stop_loss_pct)
-        }
-    }
-}
-
-fn is_loss_side_stop_price(
-    entry_price: f64,
-    stop_price: f64,
-    direction: MarketVelocityTradeDirection,
-) -> bool {
-    match direction {
-        MarketVelocityTradeDirection::Short => stop_price > entry_price,
-        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both => {
-            stop_price < entry_price
-        }
-    }
-}
-
-fn should_use_structure_stop(
-    entry_price: f64,
-    structure_price: f64,
-    fixed_price: f64,
-    direction: MarketVelocityTradeDirection,
-) -> bool {
-    match direction {
-        MarketVelocityTradeDirection::Short => {
-            structure_price > entry_price && structure_price < fixed_price
-        }
-        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both => {
-            structure_price < entry_price && structure_price > fixed_price
-        }
-    }
-}
-
-fn apply_structure_stop_min_pct_floor(
-    entry_price: f64,
-    structure_price: f64,
-    structure_source: String,
-    structure_stop_min_pct: f64,
-    direction: MarketVelocityTradeDirection,
-) -> (f64, String) {
-    if structure_stop_min_pct <= 0.0 {
-        return (structure_price, structure_source);
-    }
-    let floor_price = stop_loss_price_for_direction(entry_price, structure_stop_min_pct, direction);
-    match direction {
-        MarketVelocityTradeDirection::Short if structure_price < floor_price => {
-            (floor_price, format!("{structure_source}+min_pct_floor"))
-        }
-        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both
-            if structure_price > floor_price =>
-        {
-            (floor_price, format!("{structure_source}+min_pct_floor"))
-        }
-        _ => (structure_price, structure_source),
-    }
-}
-
-fn apply_structure_stop_max_pct_cap(
-    entry_price: f64,
-    structure_price: f64,
-    structure_source: String,
-    stop_loss_pct: f64,
-    direction: MarketVelocityTradeDirection,
-) -> (f64, String) {
-    let cap_price = stop_loss_price_for_direction(entry_price, stop_loss_pct, direction);
-    match direction {
-        MarketVelocityTradeDirection::Short if structure_price > cap_price => {
-            (cap_price, format!("{structure_source}+max_pct_cap"))
-        }
-        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both
-            if structure_price < cap_price =>
-        {
-            (cap_price, format!("{structure_source}+max_pct_cap"))
-        }
-        _ => (structure_price, structure_source),
-    }
-}
-
-fn fixed_stop_loss_source(stop_loss_pct: f64) -> String {
-    let basis_points = (stop_loss_pct * 10_000.0).round() as i64;
-    let tag = format!("{basis_points:04}")
-        .trim_end_matches('0')
-        .to_string();
-    format!("market_velocity_fixed_{tag}sl")
-}
-/// 提供盈利保护载荷的集中实现，避免回测策略调用方重复处理相同细节。
-fn profit_protection_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
-    json!({
-        "enabled": args.profit_protect_after_r.is_some(),
-        "activate_after_r": args.profit_protect_after_r,
-        "stop_r": args.profit_protect_stop_r,
-    })
-}
-/// 执行 Runner离场载荷步骤，串起回测策略需要的状态推进和错误处理。
-fn runner_exit_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
-    json!({
-        "enabled": args.runner_target_r.is_some(),
-        "target_r": args.runner_target_r,
-        "fraction": args.runner_fraction,
-        "stop_r": args.runner_stop_r,
-    })
-}
-/// 提供early离场载荷的集中实现，避免回测策略调用方重复处理相同细节。
-fn early_exit_payload(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
-    json!({
-        "enabled": args.early_exit_no_profit_candles.is_some(),
-        "no_profit_candles": args.early_exit_no_profit_candles,
-    })
-}
 /// 提供盈利保护for目标的集中实现，避免回测策略调用方重复处理相同细节。
 pub(crate) fn profit_protection_for_target(
     args: &MarketVelocityEventBacktestArgs,
@@ -2157,82 +1871,6 @@ pub(crate) fn runner_exit_for_target(
 pub(crate) fn early_exit(args: &MarketVelocityEventBacktestArgs) -> Option<EarlyExit> {
     args.early_exit_no_profit_candles
         .map(|no_profit_candles| EarlyExit { no_profit_candles })
-}
-/// 停止 回测与策略研究 后台流程，确保退出时不留下未释放状态。
-fn stop_reentry_payload(
-    result: &TradeResult,
-    args: &MarketVelocityEventBacktestArgs,
-) -> serde_json::Value {
-    let Some(reentry) = &result.reentry else {
-        return json!({
-            "mode": args.stop_reentry_mode.label(),
-            "triggered": false,
-        });
-    };
-    json!({
-        "mode": reentry.mode.label(),
-        "triggered": true,
-        "original_entry_ts": reentry.original_entry_ts,
-        "original_entry_price": reentry.original_entry_price,
-        "original_exit_ts": reentry.original_exit_ts,
-        "original_reason": reentry.original_reason,
-        "original_r": reentry.original_r,
-        "signal_ts": reentry.signal_ts,
-        "reclaim_price": reentry.reclaim_price,
-        "reentry_exit_reason": reentry.reentry_exit_reason,
-        "reentry_r": reentry.reentry_r,
-    })
-}
-/// 提供入场触发过滤version的集中实现，避免回测策略调用方重复处理相同细节。
-fn entry_trigger_filter_version(args: &MarketVelocityEventBacktestArgs) -> &'static str {
-    entry_trigger_filter_version_label(
-        !args.entry_trigger_allowlist.is_empty(),
-        !args.entry_trigger_blocklist.is_empty(),
-    )
-}
-/// 执行输出市场动量paperoutcomesjsonl步骤，串起回测策略需要的状态推进和错误处理。
-fn print_market_velocity_paper_outcomes_jsonl(
-    outcomes: &[MarketVelocityPaperOutcomeRequest],
-) -> Result<()> {
-    for outcome in outcomes {
-        println!(
-            "paper_outcome_json\t{}",
-            serde_json::to_string(outcome).context("serialize market velocity paper outcome")?
-        );
-    }
-    println!("paper_outcomes_generated={}", outcomes.len());
-    Ok(())
-}
-/// 执行提交市场动量paperoutcomes步骤，串起回测策略需要的状态推进和错误处理。
-async fn submit_market_velocity_paper_outcomes(
-    outcomes: &[MarketVelocityPaperOutcomeRequest],
-) -> Result<usize> {
-    if outcomes.is_empty() {
-        println!("paper_outcomes_submitted=0");
-        return Ok(0);
-    }
-    let client = ExecutionTaskClient::new(quant_web_execution_task_config_from_env()?)?;
-    let mut submitted = 0;
-    for outcome in outcomes {
-        let response = client
-            .submit_market_velocity_paper_outcome(outcome.clone())
-            .await
-            .with_context(|| {
-                format!(
-                    "submit market velocity paper outcome rank_event_id={} target={}R horizon={}h",
-                    outcome.rank_event_id, outcome.target_r, outcome.horizon_hours
-                )
-            })?;
-        if response.generated_execution_task_count != 0 {
-            bail!(
-                "market velocity paper outcome endpoint generated {} execution tasks; expected observation-only",
-                response.generated_execution_task_count
-            );
-        }
-        submitted += 1;
-    }
-    println!("paper_outcomes_submitted={submitted}");
-    Ok(submitted)
 }
 /// 提供已完成K 线数量的集中实现，避免回测策略调用方重复处理相同细节。
 fn completed_candle_count(candles: &[ComputedCandle], event_ts: i64, candle_ms: i64) -> usize {
@@ -2321,22 +1959,6 @@ fn timestamp_ms_to_rfc3339(ts: i64) -> String {
                 .expect("unix epoch timestamp should be valid")
         })
         .to_rfc3339_opts(SecondsFormat::Secs, true)
-}
-/// 提供quantweb执行task配置from环境变量的集中实现，避免回测策略调用方重复处理相同细节。
-fn quant_web_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
-    let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
-        .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
-        .context("--paper-outcome-sink web requires RUST_QUAN_WEB_BASE_URL/QUANT_WEB_BASE_URL")?;
-    let internal_secret = std::env::var("EXECUTION_EVENT_SECRET")
-        .or_else(|_| std::env::var("RUST_QUAN_WEB_INTERNAL_SECRET"))
-        .or_else(|_| std::env::var("ALPHA_EXECUTION_INTERNAL_SECRET"))
-        .context(
-            "--paper-outcome-sink web requires EXECUTION_EVENT_SECRET/RUST_QUAN_WEB_INTERNAL_SECRET/ALPHA_EXECUTION_INTERNAL_SECRET",
-        )?;
-    Ok(ExecutionTaskConfig {
-        base_url,
-        internal_secret,
-    })
 }
 fn increment(counter: &mut BTreeMap<String, usize>, key: &str) {
     *counter.entry(key.to_string()).or_default() += 1;
