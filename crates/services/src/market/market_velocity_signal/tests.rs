@@ -12,12 +12,22 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_quant_domain::entities::{MarketRankEvent, MarketRankEventType};
 use serde_json::{json, Value};
+use std::sync::{Mutex, OnceLock};
 
 const STABLE_PRODUCTION_PRESET: &str =
     "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1";
 const STABLE_PRODUCTION_ENTRY_RULE_VERSION: &str =
     "rank_radar_4h15m_mom0375_17r_rcm_ma_pb_d18_42_p5_10_v1";
 const STABLE_PRODUCTION_ENTRY_FILTER_MODE: &str = "rank_radar_4h15m_reclaim_ma_pullback";
+const ENV_OPTIONAL_LIMIT_KEYS: &[&str] = &[
+    "MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK",
+    "MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT",
+];
+
+fn env_mutex() -> &'static Mutex<()> {
+    static ENV_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+    ENV_MUTEX.get_or_init(|| Mutex::new(()))
+}
 
 fn rank_event(
     event_type: MarketRankEventType,
@@ -115,6 +125,29 @@ fn market_velocity_default_config_promotes_stable_production_preset() {
     );
     assert!(!config.hybrid_live_entry_enabled());
     assert!(!market_velocity_signal_direct_dispatch_allowed(&config));
+}
+
+#[test]
+fn market_velocity_env_config_allows_explicitly_unbounded_rank_and_price_limits() {
+    let _guard = env_mutex().lock().expect("env guard");
+    for key in ENV_OPTIONAL_LIMIT_KEYS {
+        std::env::remove_var(key);
+    }
+    let default_config =
+        MarketVelocityStrategySignalConfig::from_env().expect("default env config");
+    assert_eq!(default_config.max_delta_rank, Some(42));
+    assert_eq!(default_config.max_price_change_pct, Some(10.0));
+
+    std::env::set_var("MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK", "none");
+    std::env::set_var("MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT", "none");
+    let unbounded_config =
+        MarketVelocityStrategySignalConfig::from_env().expect("unbounded env config");
+    assert_eq!(unbounded_config.max_delta_rank, None);
+    assert_eq!(unbounded_config.max_price_change_pct, None);
+
+    for key in ENV_OPTIONAL_LIMIT_KEYS {
+        std::env::remove_var(key);
+    }
 }
 #[test]
 fn rank_velocity_up_event_builds_quant_web_strategy_signal() {

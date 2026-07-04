@@ -286,16 +286,18 @@ impl MarketVelocityStrategySignalConfig {
                 "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK",
                 DEFAULT_MIN_DELTA_RANK,
             )?,
-            max_delta_rank: parse_env_optional_i32("MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK")?
-                .or(Some(DEFAULT_MAX_DELTA_RANK)),
+            max_delta_rank: parse_env_optional_i32_with_default(
+                "MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK",
+                DEFAULT_MAX_DELTA_RANK,
+            )?,
             min_price_change_pct: parse_env_optional_f64(
                 "MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT",
             )?
             .or(Some(DEFAULT_MIN_PRICE_CHANGE_PCT)),
-            max_price_change_pct: parse_env_optional_f64(
+            max_price_change_pct: parse_env_optional_f64_with_default(
                 "MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT",
-            )?
-            .or(Some(DEFAULT_MAX_PRICE_CHANGE_PCT)),
+                DEFAULT_MAX_PRICE_CHANGE_PCT,
+            )?,
             stop_loss_pct: parse_env_f64(
                 "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT",
                 DEFAULT_STOP_LOSS_PCT,
@@ -1878,22 +1880,20 @@ fn parse_env_i32(key: &str, default: i32) -> Result<i32> {
         .map(|value| value.unwrap_or(default))
 }
 
-fn parse_env_optional_i32(key: &str) -> Result<Option<i32>> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            let value = value.trim();
-            if value.is_empty() {
-                Ok(None)
-            } else {
-                value
-                    .parse::<i32>()
-                    .map(Some)
-                    .map_err(|error| anyhow!("{key} must be an integer: {error}"))
-            }
-        })
-        .transpose()
-        .map(Option::flatten)
+/// 解析带默认值的可选整数；显式 none/null/off 表示无上限，缺省才使用默认值。
+fn parse_env_optional_i32_with_default(key: &str, default: i32) -> Result<Option<i32>> {
+    let Some(value) = std::env::var(key).ok() else {
+        return Ok(Some(default));
+    };
+    let value = value.trim();
+    if env_optional_value_is_none(value) {
+        Ok(None)
+    } else {
+        value
+            .parse::<i32>()
+            .map(Some)
+            .map_err(|error| anyhow!("{key} must be an integer or none: {error}"))
+    }
 }
 /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_env_u64(key: &str, default: u64) -> Result<u64> {
@@ -1953,7 +1953,7 @@ fn parse_env_optional_f64(key: &str) -> Result<Option<f64>> {
         .ok()
         .map(|value| {
             let value = value.trim();
-            if value.is_empty() {
+            if env_optional_value_is_none(value) {
                 Ok(None)
             } else {
                 value
@@ -1964,6 +1964,29 @@ fn parse_env_optional_f64(key: &str) -> Result<Option<f64>> {
         })
         .transpose()
         .map(Option::flatten)
+}
+
+/// 解析带默认值的可选小数；显式 none/null/off 表示无上限，缺省才使用默认值。
+fn parse_env_optional_f64_with_default(key: &str, default: f64) -> Result<Option<f64>> {
+    let Some(value) = std::env::var(key).ok() else {
+        return Ok(Some(default));
+    };
+    let value = value.trim();
+    if env_optional_value_is_none(value) {
+        Ok(None)
+    } else {
+        value
+            .parse::<f64>()
+            .map(Some)
+            .map_err(|error| anyhow!("{key} must be a number or none: {error}"))
+    }
+}
+
+fn env_optional_value_is_none(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "none" | "null" | "off"
+    )
 }
 /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_env_bool(key: &str, default: bool) -> Result<bool> {
