@@ -175,6 +175,9 @@ fn human_label_for_preset(preset: &str) -> &str {
         "research_momentum_short_04sl_06r_15m_support_breakdown_d5_72_pchg1_12_vol10_dist8_v4" => {
             "Market Velocity 15m short 0.04SL 0.6R support breakdown d5-72 pchg1-12 vol1.0 dist8 v4"
         }
+        "research_momentum_short_04sl_065r_15m_support_breakdown_d1_100_pchg0p5_12_vol10_dist14_v5" => {
+            "Market Velocity 15m short 0.04SL 0.65R support breakdown d1-100 pchg0.5-12 vol1.0 dist14 v5"
+        }
         "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1" => {
             "Market Velocity 0.04SL 2.0R breakout reclaim fvg wait10 delta20-40 pchg5-12 v1"
         }

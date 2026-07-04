@@ -1107,6 +1107,45 @@ fn paper_observation_short_15m_support_breakdown_v4_manifest_is_canonical_and_ha
     assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
 }
 
+// 验证 v5 破位做空 manifest 可审计，并保持独立产品 slug。
+#[test]
+fn paper_observation_short_15m_support_breakdown_v5_manifest_is_canonical_and_hashable() {
+    let manifest = market_velocity_paper_strategy_preset_manifest(
+        "research_momentum_short_04sl_065r_15m_support_breakdown_d1_100_pchg0p5_12_vol10_dist14_v5",
+    )
+    .unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-breakdown-short");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity 15m short 0.04SL 0.65R support breakdown d1-100 pchg0.5-12 vol1.0 dist14 v5"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["event_source"],
+        "raw_state"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["trade_direction"],
+        "short"
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["stop_loss_pct"], 0.04);
+    assert_eq!(manifest.manifest_json["parameters"]["target_r"], 0.65);
+    assert_eq!(
+        manifest.manifest_json["parameters"]["entry_max_distance_pct"],
+        14.0
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["entry_min_volume_ratio"],
+        1.0
+    );
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_allowlist"],
+        serde_json::json!(["breakdown_range_low"])
+    );
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
+}
+
 #[test]
 fn paper_observation_breakout_reclaim_10r_0375sl_delta11_72_dist14_preset_manifest_is_canonical_and_hashable(
 ) {
