@@ -268,7 +268,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             && production_gate.contains("Web fan-out resolves credentials per subscription"),
         "production gate must keep canary scope explicit and leave credentials to Web fan-out when unscoped"
     );
-    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
+    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
     for deploy_script in [&promote, &rollback] {
         assert!(
             deploy_script.contains(default_deploy_services),
@@ -283,6 +283,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         );
         assert!(
             deploy_script.contains("--profile observation-scheduler")
+                && deploy_script.contains("--profile breakdown-short-paper-observation-scheduler")
                 && deploy_script.contains("--profile live-handoff-scheduler")
                 && deploy_script.contains("--profile candle-backfill-scheduler")
                 && deploy_script.contains("--profile kline-scanner-scheduler")
@@ -764,8 +765,9 @@ fn market_velocity_breakdown_short_has_isolated_paper_scheduler_without_live_han
     );
     for deploy_script in [promote, rollback] {
         assert!(
-            !deploy_script.contains(service_name),
-            "breakdown-short challenger must not be part of default production deploy services"
+            deploy_script.contains(service_name)
+                && deploy_script.contains("--profile breakdown-short-paper-observation-scheduler"),
+            "breakdown-short paper scheduler must be managed by default deploys with its paper-only profile"
         );
     }
 }
