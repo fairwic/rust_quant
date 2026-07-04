@@ -292,7 +292,7 @@ services:
 
   quant-core-market-velocity-breakdown-short-paper-observation-scheduler:
     container_name: quant-core-market-velocity-breakdown-short-paper-observation-scheduler
-    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    image: ${QUANT_CORE_CHALLENGER_IMAGE:-ghcr.io/fairwic/quant-core-worker:missing-breakdown-short-challenger-image}
     pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -753,6 +753,11 @@ fn market_velocity_breakdown_short_has_isolated_paper_scheduler_without_live_han
         "breakdown-short challenger must have an independent observation interval knob"
     );
     assert!(
+        service_block.contains("image: ${QUANT_CORE_CHALLENGER_IMAGE:-ghcr.io/fairwic/quant-core-worker:missing-breakdown-short-challenger-image}")
+            && !service_block.contains("quant-core-worker:latest"),
+        "breakdown-short paper scheduler must use an explicit challenger image or a failing sentinel instead of falling back to latest"
+    );
+    assert!(
         !service_block.contains("market_velocity_live_handoff")
             && !service_block.contains("MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED"),
         "breakdown-short paper scheduler must not enable live handoff or live-order flags"
