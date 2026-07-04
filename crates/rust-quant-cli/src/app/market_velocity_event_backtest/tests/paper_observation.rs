@@ -1079,6 +1079,36 @@ fn paper_observation_args_apply_short_15m_support_breakdown_research_preset() {
 }
 
 #[test]
+fn paper_observation_args_apply_short_15m_support_breakdown_v2_preset() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_momentum_short_04sl_10r_15m_support_breakdown_d5_72_pchg1p5_12_vol11_prevlow_v2",
+    ])
+    .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::RawState);
+    assert_eq!(args.trade_direction, MarketVelocityTradeDirection::Short);
+    assert_eq!(
+        args.entry_trigger_allowlist,
+        vec!["breakdown_range_low", "breakdown_previous_low"]
+    );
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "rank_radar_15m_short_r04_10r_15msup_brkdn_d5_72_p1p5_12_vol11_prev_v2"
+    );
+    assert_eq!(args.stop_loss_pct, 0.04);
+    assert_eq!(args.target_rs, vec![1.0]);
+    assert_eq!(args.entry_max_distance_pct, 8.0);
+    assert_eq!(args.entry_min_volume_ratio, 1.1);
+    assert_eq!(args.min_delta_rank, 5);
+    assert_eq!(args.max_delta_rank, Some(72));
+    assert_eq!(args.min_price_change_pct, Some(1.5));
+    assert_eq!(args.max_price_change_pct, Some(12.0));
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::Off);
+    assert!(args.ignore_entry_signal_updates_while_open);
+}
+
+#[test]
 fn paper_observation_entry_rule_versions_fit_quant_web_contract() {
     let presets = [
         "momentum_03sl_20r_v5",
@@ -1108,6 +1138,7 @@ fn paper_observation_entry_rule_versions_fit_quant_web_contract() {
         "research_momentum_0375sl_10r_breakout_reclaim_delta11_72_pchg4_12_dist14_vol11_v1",
         "research_momentum_0375sl_10r_breakout_reclaim_ma_delta11_72_pchg4_12_dist14_vol11_ignore_v1",
         "research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1",
+        "research_momentum_short_04sl_10r_15m_support_breakdown_d5_72_pchg1p5_12_vol11_prevlow_v2",
         "research_momentum_04sl_10r_kline15m_breakout_fvg20_vol13_dd35_v1",
         "research_momentum_04sl_06r_kline15m_breakout_fvg20_vol13_dd35_v1",
         "research_momentum_04sl_05r_kline15m_breakout_fvg30_vol13_dd35_v1",

@@ -745,7 +745,7 @@ fn market_velocity_breakdown_short_has_isolated_paper_scheduler_without_live_han
     assert!(
         service_block.contains("--paper-strategy-preset")
             && service_block.contains(
-                "research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1"
+                "research_momentum_short_04sl_10r_15m_support_breakdown_d5_72_pchg1p5_12_vol11_prevlow_v2"
             ),
         "breakdown-short scheduler must run the paper-only short breakdown preset"
     );

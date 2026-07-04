@@ -1207,6 +1207,71 @@ fn paper_observation_short_15m_support_breakdown_preset_manifest_is_canonical_an
 }
 
 #[test]
+fn paper_observation_short_15m_support_breakdown_v2_manifest_is_canonical_and_hashable() {
+    let manifest = market_velocity_paper_strategy_preset_manifest(
+        "research_momentum_short_04sl_10r_15m_support_breakdown_d5_72_pchg1p5_12_vol11_prevlow_v2",
+    )
+    .unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-breakdown-short");
+    assert_eq!(manifest.strategy_key, "market_velocity_breakdown_short");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity short 0.04SL 1.0R 15m support breakdown delta5-72 pchg1.5-12 vol11 prevlow v2"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["event_source"],
+        "raw_state"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["trade_direction"],
+        "short"
+    );
+    assert_eq!(
+        manifest.manifest_json["strategy_key"],
+        "market_velocity_breakdown_short"
+    );
+    assert_eq!(
+        manifest.manifest_json["strategy_family"],
+        "market_velocity_breakdown_short"
+    );
+    assert_eq!(
+        manifest.manifest_json["product"]["slug"],
+        "market-velocity-breakdown-short"
+    );
+    assert_eq!(
+        manifest.manifest_json["execution"]["source_signal_type"],
+        "market_velocity_breakdown_short"
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["stop_loss_pct"], 0.04);
+    assert_eq!(manifest.manifest_json["parameters"]["target_r"], 1.0);
+    assert_eq!(
+        manifest.manifest_json["parameters"]["entry_max_distance_pct"],
+        8.0
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["entry_min_volume_ratio"],
+        1.1
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["min_delta_rank"], 5);
+    assert_eq!(manifest.manifest_json["parameters"]["max_delta_rank"], 72);
+    assert_eq!(
+        manifest.manifest_json["parameters"]["min_price_change_pct"],
+        1.5
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["max_price_change_pct"],
+        12.0
+    );
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_allowlist"],
+        serde_json::json!(["breakdown_range_low", "breakdown_previous_low"])
+    );
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
+}
+
+#[test]
 fn paper_observation_episode_05sl_20r_preset_manifest_is_canonical_and_hashable() {
     let manifest = market_velocity_paper_strategy_preset_manifest(
         "research_episode_momentum_05sl_20r_rank5_v1",

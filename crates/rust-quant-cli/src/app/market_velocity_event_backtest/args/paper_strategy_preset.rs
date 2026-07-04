@@ -44,6 +44,10 @@ pub(super) const MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_0375SL_DELTA5_72_RESEARCH_
     "research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1";
 pub(super) const MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_0375SL_DELTA5_72_RESEARCH_ENTRY_RULE_VERSION:
     &str = "rank_radar_15m_short_r0375_10r_15msup_brkdn_d5_72_p1p5_12_v1";
+pub(super) const MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_DELTA5_72_V2_RESEARCH_PRESET: &str =
+    "research_momentum_short_04sl_10r_15m_support_breakdown_d5_72_pchg1p5_12_vol11_prevlow_v2";
+pub(super) const MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_DELTA5_72_V2_RESEARCH_ENTRY_RULE_VERSION:
+    &str = "rank_radar_15m_short_r04_10r_15msup_brkdn_d5_72_p1p5_12_vol11_prev_v2";
 pub(super) const MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_PRESET: &str =
     "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1";
 pub(super) const MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_ENTRY_RULE_VERSION: &str =
@@ -196,6 +200,7 @@ pub(super) enum PaperStrategyPreset {
     ResearchMomentum0375Sl10RBreakoutReclaimDelta11To72Dist14,
     ResearchMomentum0375Sl10RBreakoutReclaimMaIgnoreDelta11To72Dist14,
     ResearchMomentumShort0375Sl10r15mSupportBreakdownDelta5To72,
+    ResearchMomentumShort04Sl10r15mSupportBreakdownDelta5To72V2,
     ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta20To40,
     ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40,
     ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner6R20Stop1,
@@ -260,6 +265,9 @@ impl PaperStrategyPreset {
             }
             MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_0375SL_DELTA5_72_RESEARCH_PRESET => {
                 Ok(Self::ResearchMomentumShort0375Sl10r15mSupportBreakdownDelta5To72)
+            }
+            MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_DELTA5_72_V2_RESEARCH_PRESET => {
+                Ok(Self::ResearchMomentumShort04Sl10r15mSupportBreakdownDelta5To72V2)
             }
             MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_PRESET => {
                 Ok(Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta20To40)
@@ -647,6 +655,40 @@ impl PaperStrategyPreset {
                     "12.0".to_string(),
                     "--entry-trigger-allowlist".to_string(),
                     "breakdown_range_low".to_string(),
+                    "--ignore-entry-signal-updates-while-open".to_string(),
+                ]);
+            }
+            Self::ResearchMomentumShort04Sl10r15mSupportBreakdownDelta5To72V2 => {
+                args.extend([
+                    "--paper-outcome-entry-rule-version".to_string(),
+                    MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_DELTA5_72_V2_RESEARCH_ENTRY_RULE_VERSION
+                        .to_string(),
+                    "--event-source".to_string(),
+                    "raw_state".to_string(),
+                    "--trade-direction".to_string(),
+                    "short".to_string(),
+                    "--stop-loss-pct".to_string(),
+                    "0.04".to_string(),
+                    "--target-rs".to_string(),
+                    "1.0".to_string(),
+                    "--entry-max-distance-pct".to_string(),
+                    "8.0".to_string(),
+                    "--entry-min-volume-ratio".to_string(),
+                    "1.1".to_string(),
+                    "--trend-timeframe".to_string(),
+                    "off".to_string(),
+                    "--trend-min-average-distance-pct".to_string(),
+                    "0.0".to_string(),
+                    "--min-delta-rank".to_string(),
+                    "5".to_string(),
+                    "--max-delta-rank".to_string(),
+                    "72".to_string(),
+                    "--min-price-change-pct".to_string(),
+                    "1.5".to_string(),
+                    "--max-price-change-pct".to_string(),
+                    "12.0".to_string(),
+                    "--entry-trigger-allowlist".to_string(),
+                    "breakdown_range_low,breakdown_previous_low".to_string(),
                     "--ignore-entry-signal-updates-while-open".to_string(),
                 ]);
             }
