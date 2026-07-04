@@ -1959,11 +1959,17 @@ fn select_stop_loss_for_confirmed_signal(
     signal: &ConfirmedEvent,
     args: &MarketVelocityEventBacktestArgs,
 ) -> SelectedStopLossForSignal {
-    let fixed_price = signal.entry_price * (1.0 - args.stop_loss_pct);
+    let direction = trade_direction_for_event(&signal.event);
+    let fixed_price =
+        stop_loss_price_for_direction(signal.entry_price, args.stop_loss_pct, direction);
     let fixed_source = fixed_stop_loss_source(args.stop_loss_pct);
     let structure = signal
         .structure_stop_loss_price
-        .filter(|price| price.is_finite() && *price > 0.0 && *price < signal.entry_price)
+        .filter(|price| {
+            price.is_finite()
+                && *price > 0.0
+                && is_loss_side_stop_price(signal.entry_price, *price, direction)
+        })
         .zip(signal.structure_stop_loss_source.clone())
         .map(|(price, source)| {
             apply_structure_stop_min_pct_floor(
@@ -1971,13 +1977,22 @@ fn select_stop_loss_for_confirmed_signal(
                 price,
                 source,
                 args.structure_stop_min_pct,
+                direction,
             )
         });
     let (price, source) = match (args.stop_loss_mode, structure) {
         (
             MarketVelocityStopLossMode::StructureOrFixed,
             Some((structure_price, structure_source)),
-        ) if structure_price > fixed_price => (structure_price, structure_source),
+        ) if should_use_structure_stop(
+            signal.entry_price,
+            structure_price,
+            fixed_price,
+            direction,
+        ) =>
+        {
+            (structure_price, structure_source)
+        }
         (
             MarketVelocityStopLossMode::StructureWithCap,
             Some((structure_price, structure_source)),
@@ -1986,13 +2001,56 @@ fn select_stop_loss_for_confirmed_signal(
             structure_price,
             structure_source,
             args.stop_loss_pct,
+            direction,
         ),
         _ => (fixed_price, fixed_source),
     };
     SelectedStopLossForSignal {
         price,
-        stop_loss_pct: (signal.entry_price - price) / signal.entry_price,
+        stop_loss_pct: (price - signal.entry_price).abs() / signal.entry_price,
         source,
+    }
+}
+
+fn stop_loss_price_for_direction(
+    entry_price: f64,
+    stop_loss_pct: f64,
+    direction: MarketVelocityTradeDirection,
+) -> f64 {
+    match direction {
+        MarketVelocityTradeDirection::Short => entry_price * (1.0 + stop_loss_pct),
+        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both => {
+            entry_price * (1.0 - stop_loss_pct)
+        }
+    }
+}
+
+fn is_loss_side_stop_price(
+    entry_price: f64,
+    stop_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Short => stop_price > entry_price,
+        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both => {
+            stop_price < entry_price
+        }
+    }
+}
+
+fn should_use_structure_stop(
+    entry_price: f64,
+    structure_price: f64,
+    fixed_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Short => {
+            structure_price > entry_price && structure_price < fixed_price
+        }
+        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both => {
+            structure_price < entry_price && structure_price > fixed_price
+        }
     }
 }
 
@@ -2001,15 +2059,22 @@ fn apply_structure_stop_min_pct_floor(
     structure_price: f64,
     structure_source: String,
     structure_stop_min_pct: f64,
+    direction: MarketVelocityTradeDirection,
 ) -> (f64, String) {
     if structure_stop_min_pct <= 0.0 {
         return (structure_price, structure_source);
     }
-    let floor_price = entry_price * (1.0 - structure_stop_min_pct);
-    if structure_price > floor_price {
-        (floor_price, format!("{structure_source}+min_pct_floor"))
-    } else {
-        (structure_price, structure_source)
+    let floor_price = stop_loss_price_for_direction(entry_price, structure_stop_min_pct, direction);
+    match direction {
+        MarketVelocityTradeDirection::Short if structure_price < floor_price => {
+            (floor_price, format!("{structure_source}+min_pct_floor"))
+        }
+        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both
+            if structure_price > floor_price =>
+        {
+            (floor_price, format!("{structure_source}+min_pct_floor"))
+        }
+        _ => (structure_price, structure_source),
     }
 }
 
@@ -2018,12 +2083,19 @@ fn apply_structure_stop_max_pct_cap(
     structure_price: f64,
     structure_source: String,
     stop_loss_pct: f64,
+    direction: MarketVelocityTradeDirection,
 ) -> (f64, String) {
-    let cap_price = entry_price * (1.0 - stop_loss_pct);
-    if structure_price < cap_price {
-        (cap_price, format!("{structure_source}+max_pct_cap"))
-    } else {
-        (structure_price, structure_source)
+    let cap_price = stop_loss_price_for_direction(entry_price, stop_loss_pct, direction);
+    match direction {
+        MarketVelocityTradeDirection::Short if structure_price > cap_price => {
+            (cap_price, format!("{structure_source}+max_pct_cap"))
+        }
+        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Both
+            if structure_price < cap_price =>
+        {
+            (cap_price, format!("{structure_source}+max_pct_cap"))
+        }
+        _ => (structure_price, structure_source),
     }
 }
 

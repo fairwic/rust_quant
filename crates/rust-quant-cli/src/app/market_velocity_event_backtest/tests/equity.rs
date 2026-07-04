@@ -341,6 +341,35 @@ fn framework_equity_report_skips_profit_protection_when_candle_closes_below_new_
     assert_eq!(report.symbols[0].losses, 1);
     assert!(report.total_profit < 0.0);
 }
+
+#[test]
+fn framework_equity_report_counts_short_fixed_stop_loss_as_drawdown() {
+    let entry_ts = MS_15M * 505;
+    let mut candles = Vec::new();
+    for index in 0..505 {
+        candles.push(ohlc(MS_15M * index, 100.0, 100.5, 99.5, 100.0));
+    }
+    candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
+    candles.push(ohlc(entry_ts + MS_15M, 102.0, 103.5, 99.0, 103.2));
+    let mut event = confirmed_event(44, "SHORT-STOP-USDT-SWAP", entry_ts, "2026-06-01T00:00:00Z");
+    event.event.price_change_pct = -3.0;
+    event.trigger = "breakdown_range_low".to_string();
+    let confirmed = vec![event];
+    let candles_by_symbol = HashMap::from([("SHORT-STOP-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 1,
+        stop_loss_pct: 0.03,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let report = build_framework_equity_report(&confirmed, &candles_by_symbol, 2.0, &args);
+
+    assert_eq!(report.total_open_trades, 1);
+    assert_eq!(report.symbols[0].wins, 0);
+    assert_eq!(report.symbols[0].losses, 1);
+    assert!(report.total_profit < 0.0);
+    assert!(report.max_drawdown_pct > 0.0);
+}
 #[test]
 fn framework_equity_trade_report_maps_closed_trade_to_rank_event() {
     let entry_ts = MS_15M * 505;

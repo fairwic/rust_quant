@@ -1367,6 +1367,23 @@ fn select_stop_loss_for_confirmed_signal_applies_structure_stop_min_pct_floor() 
 }
 
 #[test]
+fn select_stop_loss_for_confirmed_signal_places_fixed_stop_above_entry_for_short() {
+    let args = MarketVelocityEventBacktestArgs {
+        stop_loss_pct: 0.04,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let mut signal = confirmed_event(90, "breakdown_range_low");
+    signal.entry_price = 100.0;
+    signal.event.price_change_pct = -3.5;
+
+    let selected = select_stop_loss_for_confirmed_signal(&signal, &args);
+
+    assert_eq!(selected.price, 104.0);
+    assert!((selected.stop_loss_pct - 0.04).abs() < f64::EPSILON);
+    assert_eq!(selected.source, "market_velocity_fixed_04sl");
+}
+
+#[test]
 fn select_stop_loss_for_confirmed_signal_uses_structure_with_cap_inside_bounds() {
     let args = MarketVelocityEventBacktestArgs {
         stop_loss_pct: 0.05,
