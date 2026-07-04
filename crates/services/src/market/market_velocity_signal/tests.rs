@@ -5,8 +5,9 @@ use super::{
     dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
     market_velocity_signal_direct_dispatch_allowed, market_velocity_strategy_signal_log_context,
     should_dispatch_market_velocity_signal_to_quant_web_from_env, MarketVelocityEntryConfirmation,
-    MarketVelocityFvgEntryMode, MarketVelocitySelectedEntry, MarketVelocityStrategySignalBlocker,
-    MarketVelocityStrategySignalConfig, MarketVelocityStrategySignalDecision,
+    MarketVelocityFvgEntryMode, MarketVelocitySelectedEntry, MarketVelocitySignalTradeDirection,
+    MarketVelocityStrategySignalBlocker, MarketVelocityStrategySignalConfig,
+    MarketVelocityStrategySignalDecision,
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -83,6 +84,24 @@ fn entry_confirmation_with_trigger(trigger: &str) -> MarketVelocityEntryConfirma
         ma_distance_pct: 1.49,
         ema_distance_pct: 1.49,
         volume_ratio: Some(1.2),
+        candle_count: 80,
+        snapshot_at: DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp"),
+    }
+}
+
+fn short_entry_confirmation() -> MarketVelocityEntryConfirmation {
+    MarketVelocityEntryConfirmation {
+        timeframe: "15m".to_string(),
+        period: 20,
+        trigger: "breakdown_range_low".to_string(),
+        latest_close: 3320.0,
+        previous_close: Some(3380.0),
+        previous_high: Some(3410.0),
+        ma_value: 3350.0,
+        ema_value: 3348.0,
+        ma_distance_pct: 0.9,
+        ema_distance_pct: 0.84,
+        volume_ratio: Some(1.4),
         candle_count: 80,
         snapshot_at: DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp"),
     }
@@ -243,6 +262,95 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
     );
     assert_eq!(payload["entry_confirmation"]["timeframe"], "15m");
     assert_eq!(payload["entry_confirmation"]["trigger"], "reclaim_ema");
+}
+
+#[test]
+fn breakdown_short_config_builds_short_signal_without_live_handoff_contract() {
+    let config = MarketVelocityStrategySignalConfig {
+        strategy_slug: "market_velocity_breakdown_short".to_string(),
+        strategy_preset:
+            "research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1"
+                .to_string(),
+        entry_rule_version: "rank_radar_15m_short_r0375_10r_15msup_brkdn_d5_72_p1p5_12_v1"
+            .to_string(),
+        trade_direction: MarketVelocitySignalTradeDirection::Short,
+        min_delta_rank: 5,
+        max_delta_rank: Some(72),
+        min_price_change_pct: Some(1.5),
+        max_price_change_pct: Some(12.0),
+        take_profit_r: 1.0,
+        entry_trigger_allowlist: vec!["breakdown_range_low".to_string()],
+        require_technical_confirmation: true,
+        require_entry_confirmation: true,
+        ..MarketVelocityStrategySignalConfig::default()
+    };
+    let mut event = rank_event(
+        MarketRankEventType::RankVelocity,
+        "down",
+        Some(Decimal::new(3400, 0)),
+    );
+    event.price_change_pct = Some(Decimal::new(-625, 2));
+    let snapshot = event
+        .technical_snapshot
+        .as_mut()
+        .expect("test event has technical snapshot");
+    snapshot.close_price = Decimal::new(3400, 0);
+    snapshot.ma_value = Decimal::new(3500, 0);
+    snapshot.ema_value = Decimal::new(3480, 0);
+    snapshot.ma_state = "below".to_string();
+    snapshot.ema_state = "breakdown_down".to_string();
+    snapshot.ma_distance_pct = Decimal::new(286, 2);
+    snapshot.ema_distance_pct = Decimal::new(230, 2);
+
+    let decision = build_market_velocity_strategy_signal_request_with_entry_confirmation(
+        &event,
+        &config,
+        Some(&short_entry_confirmation()),
+    )
+    .expect("valid market velocity breakdown event should be evaluated");
+    let MarketVelocityStrategySignalDecision::Submit(request) = decision else {
+        panic!("breakdown event should submit a short strategy signal: {decision:?}");
+    };
+    assert_eq!(request.strategy_slug, "market_velocity_breakdown_short");
+    assert_eq!(
+        request.strategy_key,
+        "market_velocity_breakdown_short:ETH-USDT-SWAP:15m:991"
+    );
+    assert_eq!(request.direction, "short");
+    assert_eq!(request.title, "Market Velocity short signal ETH-USDT-SWAP");
+    let payload: Value =
+        serde_json::from_str(&request.payload_json).expect("payload should be valid json");
+    assert_eq!(
+        payload["source_signal_type"],
+        "market_velocity_breakdown_short"
+    );
+    assert_eq!(payload["strategy_slug"], "market_velocity_breakdown_short");
+    assert_eq!(payload["side"], "sell");
+    assert_eq!(payload["position_side"], "short");
+    assert_eq!(payload["auto_execution_allowed"], false);
+    assert_eq!(payload["execution_policy"]["mode"], "signal_only");
+    assert_eq!(payload["execution_policy"]["live_order_allowed"], false);
+    assert_eq!(payload["execution_policy"]["paper_trade_required"], true);
+    assert_eq!(
+        payload["execution_policy"]["production_stage"],
+        "paper_signal_only"
+    );
+    assert_eq!(payload["risk_plan"]["direction"], "short");
+    assert_eq!(payload["risk_plan"]["entry_price"], 3400.0);
+    assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3527.5);
+    assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 3272.5);
+    assert_eq!(payload["risk_plan"]["protective_stop_loss_required"], true);
+    assert_eq!(payload["signal"]["should_buy"], false);
+    assert_eq!(payload["signal"]["should_sell"], true);
+    assert_eq!(payload["signal"]["open_price"], 3400.0);
+    assert_eq!(payload["signal"]["signal_kline_stop_loss_price"], 3527.5);
+    assert_eq!(payload["signal"]["short_signal_take_profit_price"], 3272.5);
+    assert_eq!(payload["signal"]["direction"], "Short");
+    assert_eq!(payload["entry_filter"]["trade_direction"], "short");
+    assert_eq!(
+        payload["entry_filter"]["entry_trigger_allowlist"],
+        json!(["breakdown_range_low"])
+    );
 }
 #[test]
 fn market_velocity_signal_does_not_block_by_new_rank() {

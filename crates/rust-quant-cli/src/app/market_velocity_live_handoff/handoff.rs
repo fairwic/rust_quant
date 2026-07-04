@@ -385,6 +385,36 @@ mod tests {
             Some("entry_trigger_allowlist_v1")
         );
     }
+
+    #[test]
+    fn preview_request_rejects_breakdown_short_strategy_before_live_handoff_cutover() {
+        let mut signal = sample_signal_request();
+        signal.strategy_slug = "market_velocity_breakdown_short".to_string();
+        signal.direction = "short".to_string();
+        signal.payload_json = json!({
+            "source_signal_type": "market_velocity_breakdown_short",
+            "rank_event_id": 2042663,
+            "exchange": "okx",
+            "symbol": "ASTER-USDT-SWAP",
+            "entry_rule_version": "rank_radar_15m_short_r0375_10r_15msup_brkdn_d5_72_p1p5_12_v1",
+            "risk_plan": {
+                "direction": "short",
+                "target_r": 1.0,
+                "max_holding_hours": 48
+            }
+        })
+        .to_string();
+
+        let error = build_market_velocity_live_preview_request(
+            &signal,
+            Some("buyer@example.com"),
+            Some(85),
+        )
+        .expect_err("breakdown short must not be accepted by live handoff yet");
+        assert!(error
+            .to_string()
+            .contains("only accepts strategy_slug=market_velocity"));
+    }
     #[test]
     fn live_worker_manifest_reuses_existing_execution_worker_without_scripts() {
         let manifest = build_market_velocity_live_worker_manifest(228);

@@ -48,6 +48,7 @@ pub use market_velocity_entry::{
     MarketVelocityEntryConfirmationDecision,
 };
 mod market_velocity_signal;
+mod market_velocity_signal_config_parse;
 pub use market_velocity_signal::{
     build_market_velocity_strategy_signal_request,
     build_market_velocity_strategy_signal_request_with_entry_confirmation,

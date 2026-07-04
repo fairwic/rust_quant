@@ -1,5 +1,6 @@
 pub use super::market_velocity_entry::MarketVelocityEntryConfirmation;
 use super::market_velocity_entry::MarketVelocityEntryConfirmationConfig;
+use super::market_velocity_signal_config_parse::*;
 use crate::rust_quan_web::{
     ExecutionTaskClient, ExecutionTaskConfig, StrategySignalDispatchResponse,
     StrategySignalSubmitRequest,
@@ -54,7 +55,7 @@ pub enum MarketVelocityFvgEntryMode {
 }
 
 impl MarketVelocityFvgEntryMode {
-    fn from_str(value: &str) -> Result<Self> {
+    pub(super) fn from_str(value: &str) -> Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "" | "off" | "none" | "disabled" | "0" | "false" => Ok(Self::Off),
             "m15_impulse_retrace" | "15m_impulse_retrace" | "15m-impulse-retrace" => {
@@ -103,6 +104,61 @@ impl MarketVelocityStopLossMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketVelocitySignalTradeDirection {
+    Long,
+    Short,
+}
+
+impl MarketVelocitySignalTradeDirection {
+    /// 从配置字符串解析交易方向，保持旧配置缺省为多头。
+    pub fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "long" | "buy" => Ok(Self::Long),
+            "short" | "sell" => Ok(Self::Short),
+            other => Err(anyhow!(
+                "unsupported market velocity signal trade direction: {other}"
+            )),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Long => "long",
+            Self::Short => "short",
+        }
+    }
+
+    fn order_side(self) -> &'static str {
+        match self {
+            Self::Long => "buy",
+            Self::Short => "sell",
+        }
+    }
+
+    fn expected_price_direction(self) -> &'static str {
+        match self {
+            Self::Long => "up",
+            Self::Short => "down",
+        }
+    }
+
+    fn source_signal_type(self, strategy_slug: &str) -> String {
+        match self {
+            Self::Long => "market_velocity".to_string(),
+            Self::Short => strategy_slug.trim().to_string(),
+        }
+    }
+
+    fn signal_direction(self) -> SignalDirection {
+        match self {
+            Self::Long => SignalDirection::Long,
+            Self::Short => SignalDirection::Short,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MarketVelocitySelectedEntry {
     pub entry_price: f64,
@@ -122,6 +178,8 @@ pub struct MarketVelocityStrategySignalConfig {
     pub strategy_preset: String,
     /// 入场ruleversion，用于配置运行参数。
     pub entry_rule_version: String,
+    /// 交易方向；默认沿用旧动量多头，显式 short 时生成做空信号。
+    pub trade_direction: MarketVelocitySignalTradeDirection,
     /// 最小delta排名，用于控制策略触发门槛。
     pub min_delta_rank: i32,
     /// 最大delta排名；为空时不限制。
@@ -218,6 +276,7 @@ impl Default for MarketVelocityStrategySignalConfig {
             strategy_slug: "market_velocity".to_string(),
             strategy_preset: DEFAULT_MARKET_VELOCITY_STRATEGY_PRESET.to_string(),
             entry_rule_version: DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION.to_string(),
+            trade_direction: MarketVelocitySignalTradeDirection::Long,
             min_delta_rank: DEFAULT_MIN_DELTA_RANK,
             max_delta_rank: Some(DEFAULT_MAX_DELTA_RANK),
             min_price_change_pct: Some(DEFAULT_MIN_PRICE_CHANGE_PCT),
@@ -282,6 +341,10 @@ impl MarketVelocityStrategySignalConfig {
                 "MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION",
                 DEFAULT_MARKET_VELOCITY_ENTRY_RULE_VERSION,
             ),
+            trade_direction: parse_env_signal_trade_direction(
+                "MARKET_VELOCITY_SIGNAL_TRADE_DIRECTION",
+                MarketVelocitySignalTradeDirection::Long,
+            )?,
             min_delta_rank: parse_env_i32(
                 "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK",
                 DEFAULT_MIN_DELTA_RANK,
@@ -436,6 +499,11 @@ impl MarketVelocityStrategySignalConfig {
         }
         if let Some(value) = json_string(config, "entry_rule_version")? {
             parsed.entry_rule_version = value;
+        }
+        if let Some(value) = json_signal_trade_direction(config, "trade_direction")? {
+            parsed.trade_direction = value;
+        } else if let Some(value) = json_signal_trade_direction(config, "direction")? {
+            parsed.trade_direction = value;
         }
         if let Some(value) = json_i32(config, "min_delta_rank")? {
             parsed.min_delta_rank = value;
@@ -628,16 +696,27 @@ impl MarketVelocityStrategySignalConfig {
 fn market_velocity_execution_policy_stage(
     config: &MarketVelocityStrategySignalConfig,
 ) -> &'static str {
-    let _ = config;
-    "live_execution_allowed"
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => "live_execution_allowed",
+        MarketVelocitySignalTradeDirection::Short => "paper_signal_only",
+    }
 }
 
 fn normalize_market_velocity_live_execution_policy(
     config: &mut MarketVelocityStrategySignalConfig,
 ) {
-    config.automation_mode = DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string();
-    config.live_order_allowed = DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED;
-    config.paper_trade_required = DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED;
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => {
+            config.automation_mode = DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string();
+            config.live_order_allowed = DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED;
+            config.paper_trade_required = DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED;
+        }
+        MarketVelocitySignalTradeDirection::Short => {
+            config.automation_mode = "signal_only".to_string();
+            config.live_order_allowed = false;
+            config.paper_trade_required = true;
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarketVelocityStrategySignalBlocker {
@@ -955,7 +1034,9 @@ fn pre_entry_signal_blocker(
     if symbol_is_blocked(&event.symbol, config) {
         return Ok(Some(MarketVelocityStrategySignalBlocker::SymbolFiltered));
     }
-    if event.price_direction.trim().to_ascii_lowercase() != "up" {
+    if event.price_direction.trim().to_ascii_lowercase()
+        != config.trade_direction.expected_price_direction()
+    {
         return Ok(Some(
             MarketVelocityStrategySignalBlocker::PriceDirectionNotUp,
         ));
@@ -998,8 +1079,9 @@ fn pre_entry_signal_blocker(
             MarketVelocityStrategySignalBlocker::InvalidRiskRewardConfig,
         ));
     }
-    let selected_stop_loss_price = round_price(entry_price * (1.0 - config.stop_loss_pct));
-    if selected_stop_loss_price <= 0.0 || selected_stop_loss_price >= entry_price {
+    let selected_stop_loss_price =
+        market_velocity_stop_loss_price_for_direction(entry_price, config.stop_loss_pct, config);
+    if !market_velocity_stop_loss_is_loss_side(entry_price, selected_stop_loss_price, config) {
         return Ok(Some(
             MarketVelocityStrategySignalBlocker::InvalidStopLossConfig,
         ));
@@ -1028,13 +1110,14 @@ fn build_market_velocity_strategy_signal_submit_request(
     let selected_stop_loss =
         select_market_velocity_stop_loss(config, entry_price, entry_confirmation, selected_entry)?;
     let selected_take_profit_price =
-        round_price(entry_price + (entry_price - selected_stop_loss.price) * config.take_profit_r);
-    if selected_stop_loss.price <= 0.0 || selected_stop_loss.price >= entry_price {
+        market_velocity_take_profit_price(config, entry_price, selected_stop_loss.price);
+    if !market_velocity_stop_loss_is_loss_side(entry_price, selected_stop_loss.price, config) {
         return Ok(MarketVelocityStrategySignalDecision::Blocked(
             MarketVelocityStrategySignalBlocker::InvalidStopLossConfig,
         ));
     }
-    if selected_take_profit_price <= entry_price {
+    if !market_velocity_take_profit_is_profit_side(entry_price, selected_take_profit_price, config)
+    {
         return Ok(MarketVelocityStrategySignalDecision::Blocked(
             MarketVelocityStrategySignalBlocker::InvalidRiskRewardConfig,
         ));
@@ -1051,12 +1134,15 @@ fn build_market_velocity_strategy_signal_submit_request(
     if strategy_slug.is_empty() {
         return Err(anyhow!("market velocity strategy_slug is empty"));
     }
+    let direction = config.trade_direction.label();
+    let side = config.trade_direction.order_side();
+    let source_signal_type = config.trade_direction.source_signal_type(strategy_slug);
     let rank_event_id = event.id;
     let external_id = rank_event_id
-        .map(|id| format!("rust_quant:market_velocity:{id}"))
+        .map(|id| format!("rust_quant:{source_signal_type}:{id}"))
         .unwrap_or_else(|| {
             format!(
-                "rust_quant:market_velocity:{}:{}:{}",
+                "rust_quant:{source_signal_type}:{}:{}:{}",
                 exchange,
                 symbol,
                 event.detected_at.timestamp_millis()
@@ -1083,12 +1169,17 @@ fn build_market_velocity_strategy_signal_submit_request(
     let risk_config = market_velocity_risk_config(config, selected_stop_loss.pct);
     let selected_entry_payload = selected_entry.map(|entry| {
         let (structure_stop_loss_price, structure_stop_loss_source) =
-            market_velocity_structure_stop_loss(entry_price, entry_confirmation, Some(entry))
-                .map(|(price, source)| (Some(price), Some(source)))
-                .unwrap_or((
-                    entry.structure_stop_loss_price,
-                    entry.structure_stop_loss_source.clone(),
-                ));
+            market_velocity_structure_stop_loss(
+                config,
+                entry_price,
+                entry_confirmation,
+                Some(entry),
+            )
+            .map(|(price, source)| (Some(price), Some(source)))
+            .unwrap_or((
+                entry.structure_stop_loss_price,
+                entry.structure_stop_loss_source.clone(),
+            ));
         json!({
             "entry_price": entry.entry_price,
             "entry_ts": entry.entry_ts,
@@ -1105,7 +1196,7 @@ fn build_market_velocity_strategy_signal_submit_request(
         "selected_stop_loss_source": selected_stop_loss.source,
         "selected_stop_loss_percent": selected_stop_loss.pct,
         "selected_take_profit_price": selected_take_profit_price,
-        "direction": "long",
+        "direction": direction,
         "protective_stop_loss_required": true,
         "structure_stop_min_pct": config.structure_stop_min_pct,
         "stop_loss_source": selected_stop_loss.source,
@@ -1158,19 +1249,20 @@ fn build_market_velocity_strategy_signal_submit_request(
         "fvg_impulse_retrace_fill_pct": config.fvg_impulse_retrace_fill_pct,
         "fvg_impulse_retrace_min_wait_candles": config.fvg_impulse_retrace_min_wait_candles,
         "entry_trigger_filter_version": ENTRY_TRIGGER_FILTER_VERSION,
+        "trade_direction": direction,
         "entry_trigger_allowlist": &config.entry_trigger_allowlist,
         "entry_trigger_blocklist": &config.entry_trigger_blocklist,
         "symbol_blocklist": &config.symbol_blocklist,
     });
     let execution_policy = json!({
-        "mode": DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE,
-        "live_order_allowed": DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED,
-        "paper_trade_required": DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED,
+        "mode": config.automation_mode.trim(),
+        "live_order_allowed": config.live_order_allowed,
+        "paper_trade_required": config.paper_trade_required,
         "production_stage": market_velocity_execution_policy_stage(config),
     });
     let payload_overlay = json!({
         "source": "rust_quant",
-        "source_signal_type": "market_velocity",
+        "source_signal_type": &source_signal_type,
         "rank_event_id": rank_event_id,
         "event_type": event_type,
         "strategy_slug": strategy_slug,
@@ -1192,11 +1284,11 @@ fn build_market_velocity_strategy_signal_submit_request(
         "entry_filter": entry_filter,
         "entry_confirmation": entry_confirmation,
         "selected_entry": selected_entry_payload,
-        "side": "buy",
-        "position_side": "long",
+        "side": side,
+        "position_side": direction,
         "trade_side": "open",
         "order_type": "market",
-        "auto_execution_allowed": DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED,
+        "auto_execution_allowed": config.live_order_allowed,
         "execution_policy": execution_policy,
         "risk_plan": risk_plan,
         "detected_at": generated_at.as_deref(),
@@ -1209,16 +1301,16 @@ fn build_market_velocity_strategy_signal_submit_request(
         config_id,
         strategy_slug,
         Some(&exchange),
-        "buy",
-        "long",
+        side,
+        direction,
         &client_order_id,
         StrategySignalPayloadBuildOptions {
-            source_signal_type: "market_velocity".to_string(),
+            source_signal_type,
             external_id_override: Some(external_id),
             payload_overlay: Some(payload_overlay),
         },
     )?;
-    request.title = format!("Market Velocity long signal {symbol}");
+    request.title = format!("Market Velocity {direction} signal {symbol}");
     request.summary = Some(format!(
         "{} ranking improved from {:?} to {:?}, delta {:?}, price direction {}",
         symbol, event.old_rank, event.new_rank, event.delta_rank, event.price_direction
@@ -1265,17 +1357,18 @@ fn market_velocity_signal_result(
     selected_take_profit_price: f64,
     signal_ts: i64,
 ) -> SignalResult {
+    let is_short = config.trade_direction == MarketVelocitySignalTradeDirection::Short;
     SignalResult {
-        should_buy: true,
-        should_sell: false,
+        should_buy: !is_short,
+        should_sell: is_short,
         open_price: entry_price,
         signal_kline_stop_loss_price: Some(selected_stop_loss_price),
         stop_loss_source: Some(selected_stop_loss_source.to_string()),
         best_open_price: None,
         atr_take_profit_ratio_price: None,
         atr_stop_loss_price: None,
-        long_signal_take_profit_price: Some(selected_take_profit_price),
-        short_signal_take_profit_price: None,
+        long_signal_take_profit_price: (!is_short).then_some(selected_take_profit_price),
+        short_signal_take_profit_price: is_short.then_some(selected_take_profit_price),
         ts: signal_ts,
         single_value: None,
         single_result: None,
@@ -1299,7 +1392,7 @@ fn market_velocity_signal_result(
             })
             .to_string(),
         ),
-        direction: SignalDirection::Long,
+        direction: config.trade_direction.signal_direction(),
     }
 }
 
@@ -1333,30 +1426,115 @@ struct MarketVelocitySelectedStopLoss {
     source: String,
 }
 
+fn market_velocity_stop_loss_price_for_direction(
+    entry_price: f64,
+    stop_loss_pct: f64,
+    config: &MarketVelocityStrategySignalConfig,
+) -> f64 {
+    let multiplier = match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => 1.0 - stop_loss_pct,
+        MarketVelocitySignalTradeDirection::Short => 1.0 + stop_loss_pct,
+    };
+    round_price(entry_price * multiplier)
+}
+
+fn market_velocity_stop_loss_is_loss_side(
+    entry_price: f64,
+    stop_loss_price: f64,
+    config: &MarketVelocityStrategySignalConfig,
+) -> bool {
+    if !stop_loss_price.is_finite() || stop_loss_price <= 0.0 {
+        return false;
+    }
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => stop_loss_price < entry_price,
+        MarketVelocitySignalTradeDirection::Short => stop_loss_price > entry_price,
+    }
+}
+
+fn market_velocity_take_profit_price(
+    config: &MarketVelocityStrategySignalConfig,
+    entry_price: f64,
+    stop_loss_price: f64,
+) -> f64 {
+    let risk_per_unit = (entry_price - stop_loss_price).abs();
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => {
+            round_price(entry_price + risk_per_unit * config.take_profit_r)
+        }
+        MarketVelocitySignalTradeDirection::Short => {
+            round_price(entry_price - risk_per_unit * config.take_profit_r)
+        }
+    }
+}
+
+fn market_velocity_take_profit_is_profit_side(
+    entry_price: f64,
+    take_profit_price: f64,
+    config: &MarketVelocityStrategySignalConfig,
+) -> bool {
+    if !take_profit_price.is_finite() || take_profit_price <= 0.0 {
+        return false;
+    }
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => take_profit_price > entry_price,
+        MarketVelocitySignalTradeDirection::Short => take_profit_price < entry_price,
+    }
+}
+
+fn market_velocity_should_use_structure_stop(
+    entry_price: f64,
+    structure_price: f64,
+    fixed_price: f64,
+    config: &MarketVelocityStrategySignalConfig,
+) -> bool {
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => {
+            structure_price < entry_price && structure_price > fixed_price
+        }
+        MarketVelocitySignalTradeDirection::Short => {
+            structure_price > entry_price && structure_price < fixed_price
+        }
+    }
+}
+
 fn select_market_velocity_stop_loss(
     config: &MarketVelocityStrategySignalConfig,
     entry_price: f64,
     entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
     selected_entry: Option<&MarketVelocitySelectedEntry>,
 ) -> Result<MarketVelocitySelectedStopLoss> {
-    let fixed_price = round_price(entry_price * (1.0 - config.stop_loss_pct));
+    let fixed_price =
+        market_velocity_stop_loss_price_for_direction(entry_price, config.stop_loss_pct, config);
     let fixed_source = market_velocity_fixed_stop_loss_source(config.stop_loss_pct);
-    let structure =
-        market_velocity_structure_stop_loss(entry_price, entry_confirmation, selected_entry).map(
-            |(price, source)| {
-                apply_structure_stop_min_pct_floor(
-                    entry_price,
-                    price,
-                    source,
-                    config.structure_stop_min_pct,
-                )
-            },
-        );
+    let structure = market_velocity_structure_stop_loss(
+        config,
+        entry_price,
+        entry_confirmation,
+        selected_entry,
+    )
+    .map(|(price, source)| {
+        apply_structure_stop_min_pct_floor(
+            entry_price,
+            price,
+            source,
+            config.structure_stop_min_pct,
+            config,
+        )
+    });
     let (price, source) = match (config.stop_loss_mode, structure) {
         (
             MarketVelocityStopLossMode::StructureOrFixed,
             Some((structure_price, structure_source)),
-        ) if structure_price > fixed_price => (structure_price, structure_source),
+        ) if market_velocity_should_use_structure_stop(
+            entry_price,
+            structure_price,
+            fixed_price,
+            config,
+        ) =>
+        {
+            (structure_price, structure_source)
+        }
         (
             MarketVelocityStopLossMode::StructureWithCap,
             Some((structure_price, structure_source)),
@@ -1365,10 +1543,11 @@ fn select_market_velocity_stop_loss(
             structure_price,
             structure_source,
             config.stop_loss_pct,
+            config,
         ),
         _ => (fixed_price, fixed_source),
     };
-    let pct = round_price((entry_price - price) / entry_price);
+    let pct = round_price((entry_price - price).abs() / entry_price);
     if !pct.is_finite() || pct <= 0.0 || pct >= 1.0 {
         return Err(anyhow!(
             "invalid market velocity selected stop loss percent"
@@ -1382,15 +1561,21 @@ fn apply_structure_stop_min_pct_floor(
     structure_price: f64,
     structure_source: String,
     structure_stop_min_pct: f64,
+    config: &MarketVelocityStrategySignalConfig,
 ) -> (f64, String) {
     if structure_stop_min_pct <= 0.0 {
         return (structure_price, structure_source);
     }
-    let floor_price = round_price(entry_price * (1.0 - structure_stop_min_pct));
-    if structure_price > floor_price {
-        (floor_price, format!("{structure_source}+min_pct_floor"))
-    } else {
-        (structure_price, structure_source)
+    let floor_price =
+        market_velocity_stop_loss_price_for_direction(entry_price, structure_stop_min_pct, config);
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Short if structure_price < floor_price => {
+            (floor_price, format!("{structure_source}+min_pct_floor"))
+        }
+        MarketVelocitySignalTradeDirection::Long if structure_price > floor_price => {
+            (floor_price, format!("{structure_source}+min_pct_floor"))
+        }
+        _ => (structure_price, structure_source),
     }
 }
 
@@ -1399,16 +1584,23 @@ fn apply_structure_stop_max_pct_cap(
     structure_price: f64,
     structure_source: String,
     stop_loss_pct: f64,
+    config: &MarketVelocityStrategySignalConfig,
 ) -> (f64, String) {
-    let cap_price = round_price(entry_price * (1.0 - stop_loss_pct));
-    if structure_price < cap_price {
-        (cap_price, format!("{structure_source}+max_pct_cap"))
-    } else {
-        (structure_price, structure_source)
+    let cap_price =
+        market_velocity_stop_loss_price_for_direction(entry_price, stop_loss_pct, config);
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Short if structure_price > cap_price => {
+            (cap_price, format!("{structure_source}+max_pct_cap"))
+        }
+        MarketVelocitySignalTradeDirection::Long if structure_price < cap_price => {
+            (cap_price, format!("{structure_source}+max_pct_cap"))
+        }
+        _ => (structure_price, structure_source),
     }
 }
 
 fn market_velocity_structure_stop_loss(
+    config: &MarketVelocityStrategySignalConfig,
     entry_price: f64,
     entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
     selected_entry: Option<&MarketVelocitySelectedEntry>,
@@ -1416,7 +1608,7 @@ fn market_velocity_structure_stop_loss(
     let selected_entry = selected_entry?;
     let explicit_price = selected_entry
         .structure_stop_loss_price
-        .filter(|price| price.is_finite() && *price > 0.0 && *price < entry_price);
+        .filter(|price| market_velocity_stop_loss_is_loss_side(entry_price, *price, config));
     if let Some(price) = explicit_price {
         let source = selected_entry
             .structure_stop_loss_source
@@ -1435,13 +1627,25 @@ fn market_velocity_structure_stop_loss(
             round_price(confirmation.ema_value),
             "entry_confirmation_ema".to_string(),
         )),
+        "reclaim_ma" => Some((
+            round_price(confirmation.ma_value),
+            "entry_confirmation_ma".to_string(),
+        )),
         "breakout_previous_high" => confirmation
             .previous_high
             .map(round_price)
             .map(|price| (price, "entry_confirmation_previous_high".to_string())),
+        "reject_ema" | "breakdown_range_low" => Some((
+            round_price(confirmation.ema_value),
+            "entry_confirmation_ema".to_string(),
+        )),
+        "reject_ma" => Some((
+            round_price(confirmation.ma_value),
+            "entry_confirmation_ma".to_string(),
+        )),
         _ => None,
     }
-    .filter(|(price, _)| price.is_finite() && *price > 0.0 && *price < entry_price)
+    .filter(|(price, _)| market_velocity_stop_loss_is_loss_side(entry_price, *price, config))
 }
 
 fn market_velocity_base_entry_trigger(
@@ -1473,10 +1677,21 @@ fn technical_confirmation_blocker(
     let Some(snapshot) = event.technical_snapshot.as_ref() else {
         return Some(MarketVelocityStrategySignalBlocker::TechnicalConfirmationMissing);
     };
-    if !moving_average_state_is_positive(&snapshot.ma_state)
-        || !moving_average_state_is_positive(&snapshot.ema_state)
-    {
-        return Some(MarketVelocityStrategySignalBlocker::TechnicalTrendNotConfirmed);
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => {
+            if !moving_average_state_is_positive(&snapshot.ma_state)
+                || !moving_average_state_is_positive(&snapshot.ema_state)
+            {
+                return Some(MarketVelocityStrategySignalBlocker::TechnicalTrendNotConfirmed);
+            }
+        }
+        MarketVelocitySignalTradeDirection::Short => {
+            if !moving_average_state_is_negative(&snapshot.ma_state)
+                || !moving_average_state_is_negative(&snapshot.ema_state)
+            {
+                return Some(MarketVelocityStrategySignalBlocker::TechnicalTrendNotConfirmed);
+            }
+        }
     }
     if config.trend_min_average_distance_pct > 0.0 {
         let Some(ma_distance_pct) = decimal_to_f64(snapshot.ma_distance_pct) else {
@@ -1507,8 +1722,7 @@ fn entry_confirmation_blocker(
     if !confirmation.timeframe.eq_ignore_ascii_case("15m")
         || confirmation.period != config.entry_confirmation_period
         || confirmation.trigger.trim().is_empty()
-        || confirmation.latest_close <= confirmation.ma_value
-        || confirmation.latest_close <= confirmation.ema_value
+        || !entry_confirmation_price_structure_is_confirmed(confirmation, config)
     {
         return Some(MarketVelocityStrategySignalBlocker::EntryTimingNotConfirmed);
     }
@@ -1551,6 +1765,29 @@ fn moving_average_state_is_positive(value: &str) -> bool {
         value.trim().to_ascii_lowercase().as_str(),
         "above" | "breakout_up"
     )
+}
+
+fn moving_average_state_is_negative(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "below" | "breakdown_down"
+    )
+}
+
+fn entry_confirmation_price_structure_is_confirmed(
+    confirmation: &MarketVelocityEntryConfirmation,
+    config: &MarketVelocityStrategySignalConfig,
+) -> bool {
+    match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => {
+            confirmation.latest_close > confirmation.ma_value
+                && confirmation.latest_close > confirmation.ema_value
+        }
+        MarketVelocitySignalTradeDirection::Short => {
+            confirmation.latest_close < confirmation.ma_value
+                && confirmation.latest_close < confirmation.ema_value
+        }
+    }
 }
 fn decimal_to_f64(value: Decimal) -> Option<f64> {
     value.to_f64().filter(|number| number.is_finite())
@@ -1595,7 +1832,14 @@ fn market_velocity_take_profit_legs(
     if !risk_per_unit.is_finite() || risk_per_unit <= 0.0 {
         return None;
     }
-    let runner_price = round_price(entry_price + risk_per_unit * runner_target_r);
+    let runner_price = match config.trade_direction {
+        MarketVelocitySignalTradeDirection::Long => {
+            round_price(entry_price + risk_per_unit * runner_target_r)
+        }
+        MarketVelocitySignalTradeDirection::Short => {
+            round_price(entry_price - risk_per_unit * runner_target_r)
+        }
+    };
     Some(json!([
         {
             "leg_index": 1,
@@ -1624,6 +1868,7 @@ fn market_velocity_confidence(event: &MarketRankEvent) -> f64 {
         .price_change_pct
         .and_then(decimal_to_f64)
         .unwrap_or_default()
+        .abs()
         .max(0.0)
         .min(10.0)
         * 0.005;
@@ -1652,394 +1897,11 @@ fn symbol_is_blocked(symbol: &str, config: &MarketVelocityStrategySignalConfig) 
         .iter()
         .any(|blocked| normalize_symbol(blocked) == normalized)
 }
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_entry_trigger_list(key: &str, default: &[&str]) -> Result<Vec<String>> {
-    let Some(value) = std::env::var(key).ok() else {
-        return Ok(default.iter().map(|value| (*value).to_string()).collect());
-    };
-    let normalized = value.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return Ok(default.iter().map(|value| (*value).to_string()).collect());
-    }
-    if matches!(normalized.as_str(), "all" | "*" | "none") {
-        return Ok(Vec::new());
-    }
-    let mut triggers = Vec::new();
-    for trigger in value.split(',').map(normalize_entry_trigger) {
-        if trigger.is_empty() || triggers.contains(&trigger) {
-            continue;
-        }
-        triggers.push(trigger);
-    }
-    if triggers.is_empty() {
-        return Err(anyhow!("{key} must contain at least one entry trigger"));
-    }
-    Ok(triggers)
-}
 fn normalize_entry_trigger(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_symbol_list(key: &str, default: &[&str]) -> Result<Vec<String>> {
-    let Some(value) = std::env::var(key).ok() else {
-        return Ok(default.iter().map(|value| (*value).to_string()).collect());
-    };
-    let normalized = value.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return Ok(default.iter().map(|value| (*value).to_string()).collect());
-    }
-    if matches!(normalized.as_str(), "all" | "*" | "none") {
-        return Ok(Vec::new());
-    }
-    let mut symbols = Vec::new();
-    for symbol in value.split(',').map(normalize_symbol) {
-        if symbol.is_empty() || symbols.contains(&symbol) {
-            continue;
-        }
-        symbols.push(symbol);
-    }
-    if symbols.is_empty() {
-        return Err(anyhow!("{key} must contain at least one symbol"));
-    }
-    Ok(symbols)
-}
 fn normalize_symbol(value: &str) -> String {
     value.trim().to_ascii_uppercase()
-}
-fn json_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    value.get(key).filter(|field| !field.is_null())
-}
-fn json_value_is_null(value: &Value, key: &str) -> bool {
-    value.get(key).is_some_and(Value::is_null)
-}
-/// 提供JSONstring的集中实现，避免行情数据调用方重复处理相同细节。
-fn json_string(value: &Value, key: &str) -> Result<Option<String>> {
-    let Some(field) = json_field(value, key) else {
-        return Ok(None);
-    };
-    let text = match field {
-        Value::String(value) => value.trim().to_string(),
-        _ => return Err(anyhow!("{key} must be a string")),
-    };
-    Ok((!text.is_empty()).then_some(text))
-}
-
-fn json_fvg_entry_mode(value: &Value, key: &str) -> Result<Option<MarketVelocityFvgEntryMode>> {
-    let Some(value) = json_string(value, key)? else {
-        return Ok(None);
-    };
-    MarketVelocityFvgEntryMode::from_str(&value).map(Some)
-}
-
-fn json_stop_loss_mode(value: &Value, key: &str) -> Result<Option<MarketVelocityStopLossMode>> {
-    let Some(value) = json_string(value, key)? else {
-        return Ok(None);
-    };
-    MarketVelocityStopLossMode::from_str(&value).map(Some)
-}
-/// 提供JSONi64的集中实现，避免行情数据调用方重复处理相同细节。
-fn json_i64(value: &Value, key: &str) -> Result<Option<i64>> {
-    let Some(field) = json_field(value, key) else {
-        return Ok(None);
-    };
-    match field {
-        Value::Number(number) => number
-            .as_i64()
-            .ok_or_else(|| anyhow!("{key} must be an integer"))
-            .map(Some),
-        Value::String(value) => value
-            .trim()
-            .parse::<i64>()
-            .map(Some)
-            .map_err(|error| anyhow!("{key} must be an integer: {error}")),
-        _ => Err(anyhow!("{key} must be an integer")),
-    }
-}
-/// 提供JSONi32的集中实现，避免行情数据调用方重复处理相同细节。
-fn json_i32(value: &Value, key: &str) -> Result<Option<i32>> {
-    json_i64(value, key)?
-        .map(|value| {
-            i32::try_from(value).map_err(|error| anyhow!("{key} is out of i32 range: {error}"))
-        })
-        .transpose()
-}
-/// 提供JSONu32的集中实现，避免行情数据调用方重复处理相同细节。
-fn json_u32(value: &Value, key: &str) -> Result<Option<u32>> {
-    json_i64(value, key)?
-        .map(|value| {
-            u32::try_from(value).map_err(|error| anyhow!("{key} is out of u32 range: {error}"))
-        })
-        .transpose()
-}
-/// 提供JSONusize的集中实现，避免行情数据调用方重复处理相同细节。
-fn json_usize(value: &Value, key: &str) -> Result<Option<usize>> {
-    json_i64(value, key)?
-        .map(|value| {
-            usize::try_from(value).map_err(|error| anyhow!("{key} is out of usize range: {error}"))
-        })
-        .transpose()
-}
-/// 提供JSONf64的集中实现，避免行情数据调用方重复处理相同细节。
-fn json_f64(value: &Value, key: &str) -> Result<Option<f64>> {
-    let Some(field) = json_field(value, key) else {
-        return Ok(None);
-    };
-    match field {
-        Value::Number(number) => number
-            .as_f64()
-            .ok_or_else(|| anyhow!("{key} must be a number"))
-            .map(Some),
-        Value::String(value) => value
-            .trim()
-            .parse::<f64>()
-            .map(Some)
-            .map_err(|error| anyhow!("{key} must be a number: {error}")),
-        _ => Err(anyhow!("{key} must be a number")),
-    }
-}
-/// 提供JSONf64any的集中实现，避免行情数据调用方重复处理相同细节。
-fn json_f64_any(value: &Value, keys: &[&str]) -> Result<Option<f64>> {
-    for key in keys {
-        if let Some(value) = json_f64(value, key)? {
-            return Ok(Some(value));
-        }
-    }
-    Ok(None)
-}
-/// 提供JSONbool的集中实现，避免行情数据调用方重复处理相同细节。
-fn json_bool(value: &Value, key: &str) -> Result<Option<bool>> {
-    let Some(field) = json_field(value, key) else {
-        return Ok(None);
-    };
-    match field {
-        Value::Bool(value) => Ok(Some(*value)),
-        Value::String(value) => parse_bool_text(value, key).map(Some),
-        _ => Err(anyhow!("{key} must be a boolean")),
-    }
-}
-fn json_entry_trigger_list(value: &Value, key: &str) -> Result<Option<Vec<String>>> {
-    json_string_list(value, key, normalize_entry_trigger)
-}
-fn json_symbol_list(value: &Value, key: &str) -> Result<Option<Vec<String>>> {
-    json_string_list(value, key, normalize_symbol)
-}
-/// 提供JSONstringlist的集中实现，避免行情数据调用方重复处理相同细节。
-fn json_string_list(
-    value: &Value,
-    key: &str,
-    normalize: fn(&str) -> String,
-) -> Result<Option<Vec<String>>> {
-    let Some(field) = json_field(value, key) else {
-        return Ok(None);
-    };
-    let raw_items = match field {
-        Value::Array(items) => items
-            .iter()
-            .map(|item| match item {
-                Value::String(value) => Ok(value.as_str()),
-                _ => Err(anyhow!("{key} must be an array of strings")),
-            })
-            .collect::<Result<Vec<_>>>()?,
-        Value::String(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            if matches!(normalized.as_str(), "" | "all" | "*" | "none") {
-                return Ok(Some(Vec::new()));
-            }
-            value.split(',').collect()
-        }
-        _ => return Err(anyhow!("{key} must be an array of strings or csv string")),
-    };
-    let mut values = Vec::new();
-    for item in raw_items.into_iter().map(normalize) {
-        if item.is_empty() || values.contains(&item) {
-            continue;
-        }
-        values.push(item);
-    }
-    Ok(Some(values))
-}
-/// 计算最大holdinghours来源seconds，并把公式边界留在行情数据内部。
-fn max_holding_hours_from_seconds(seconds: i64) -> Result<u32> {
-    if seconds <= 0 {
-        return Err(anyhow!("max_hold_time must be positive"));
-    }
-    let hours = (seconds + 3_599) / 3_600;
-    u32::try_from(hours).map_err(|error| anyhow!("max_hold_time is out of u32 range: {error}"))
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_i32(key: &str, default: i32) -> Result<i32> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            value
-                .trim()
-                .parse::<i32>()
-                .map_err(|error| anyhow!("{key} must be an integer: {error}"))
-        })
-        .transpose()
-        .map(|value| value.unwrap_or(default))
-}
-
-/// 解析带默认值的可选整数；显式 none/null/off 表示无上限，缺省才使用默认值。
-fn parse_env_optional_i32_with_default(key: &str, default: i32) -> Result<Option<i32>> {
-    let Some(value) = std::env::var(key).ok() else {
-        return Ok(Some(default));
-    };
-    let value = value.trim();
-    if env_optional_value_is_none(value) {
-        Ok(None)
-    } else {
-        value
-            .parse::<i32>()
-            .map(Some)
-            .map_err(|error| anyhow!("{key} must be an integer or none: {error}"))
-    }
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_u64(key: &str, default: u64) -> Result<u64> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            value
-                .trim()
-                .parse::<u64>()
-                .map_err(|error| anyhow!("{key} must be an integer: {error}"))
-        })
-        .transpose()
-        .map(|value| value.unwrap_or(default))
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_u32(key: &str, default: u32) -> Result<u32> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            value
-                .trim()
-                .parse::<u32>()
-                .map_err(|error| anyhow!("{key} must be an integer: {error}"))
-        })
-        .transpose()
-        .map(|value| value.unwrap_or(default))
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_usize(key: &str, default: usize) -> Result<usize> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            value
-                .trim()
-                .parse::<usize>()
-                .map_err(|error| anyhow!("{key} must be an integer: {error}"))
-        })
-        .transpose()
-        .map(|value| value.unwrap_or(default))
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_f64(key: &str, default: f64) -> Result<f64> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            value
-                .trim()
-                .parse::<f64>()
-                .map_err(|error| anyhow!("{key} must be a number: {error}"))
-        })
-        .transpose()
-        .map(|value| value.unwrap_or(default))
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_optional_f64(key: &str) -> Result<Option<f64>> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            let value = value.trim();
-            if env_optional_value_is_none(value) {
-                Ok(None)
-            } else {
-                value
-                    .parse::<f64>()
-                    .map(Some)
-                    .map_err(|error| anyhow!("{key} must be a number: {error}"))
-            }
-        })
-        .transpose()
-        .map(Option::flatten)
-}
-
-/// 解析带默认值的可选小数；显式 none/null/off 表示无上限，缺省才使用默认值。
-fn parse_env_optional_f64_with_default(key: &str, default: f64) -> Result<Option<f64>> {
-    let Some(value) = std::env::var(key).ok() else {
-        return Ok(Some(default));
-    };
-    let value = value.trim();
-    if env_optional_value_is_none(value) {
-        Ok(None)
-    } else {
-        value
-            .parse::<f64>()
-            .map(Some)
-            .map_err(|error| anyhow!("{key} must be a number or none: {error}"))
-    }
-}
-
-fn env_optional_value_is_none(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "" | "none" | "null" | "off"
-    )
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_bool(key: &str, default: bool) -> Result<bool> {
-    let Some(value) = std::env::var(key).ok() else {
-        return Ok(default);
-    };
-    if value.trim().is_empty() {
-        return Ok(default);
-    }
-    parse_bool_text(&value, key)
-}
-
-fn parse_env_fvg_entry_mode(
-    key: &str,
-    default: MarketVelocityFvgEntryMode,
-) -> Result<MarketVelocityFvgEntryMode> {
-    let Some(value) = std::env::var(key).ok() else {
-        return Ok(default);
-    };
-    if value.trim().is_empty() {
-        return Ok(default);
-    }
-    MarketVelocityFvgEntryMode::from_str(&value)
-}
-
-fn parse_env_stop_loss_mode(
-    key: &str,
-    default: MarketVelocityStopLossMode,
-) -> Result<MarketVelocityStopLossMode> {
-    let Some(value) = std::env::var(key).ok() else {
-        return Ok(default);
-    };
-    if value.trim().is_empty() {
-        return Ok(default);
-    }
-    MarketVelocityStopLossMode::from_str(&value)
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_bool_text(value: &str, key: &str) -> Result<bool> {
-    let normalized = value.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "1" | "true" | "yes" | "y" | "on" | "enabled" => Ok(true),
-        "0" | "false" | "no" | "n" | "off" | "disabled" => Ok(false),
-        _ => Err(anyhow!("{key} must be a boolean")),
-    }
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-fn parse_env_string(key: &str, default: &str) -> String {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| default.to_string())
 }
 #[cfg(test)]
 mod tests;
