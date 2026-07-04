@@ -290,6 +290,32 @@ services:
       RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
       EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
 
+  quant-core-market-velocity-breakdown-short-paper-observation-scheduler:
+    container_name: quant-core-market-velocity-breakdown-short-paper-observation-scheduler
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    profiles:
+      - breakdown-short-paper-observation-scheduler
+    restart: unless-stopped
+    command:
+      - market_velocity_paper_observation
+      - --paper-strategy-preset
+      - research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1
+      - --loop-interval-seconds
+      - ${MARKET_VELOCITY_BREAKDOWN_SHORT_PAPER_OBSERVATION_INTERVAL_SECS:-21600}
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
+      EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
+
   quant-core-market-velocity-live-handoff:
     container_name: quant-core-market-velocity-live-handoff
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}

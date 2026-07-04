@@ -724,3 +724,43 @@ fn market_velocity_kline15m_challenger_has_isolated_paper_scheduler() {
         );
     }
 }
+
+#[test]
+fn market_velocity_breakdown_short_has_isolated_paper_scheduler_without_live_handoff() {
+    let compose = read_repo_file("docker-compose.deploy.yml");
+    let promote = read_repo_file("scripts/deploy/promote_stable.sh");
+    let rollback = read_repo_file("scripts/deploy/rollback.sh");
+    let service_name = "quant-core-market-velocity-breakdown-short-paper-observation-scheduler";
+    let service_block = compose_service_block(&compose, service_name);
+
+    assert!(
+        service_block.contains("market_velocity_paper_observation"),
+        "breakdown-short challenger must use the paper-only observation binary"
+    );
+    assert!(
+        service_block.contains("breakdown-short-paper-observation-scheduler"),
+        "breakdown-short challenger must be behind an explicit opt-in compose profile"
+    );
+    assert!(
+        service_block.contains("--paper-strategy-preset")
+            && service_block.contains(
+                "research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1"
+            ),
+        "breakdown-short scheduler must run the paper-only short breakdown preset"
+    );
+    assert!(
+        service_block.contains("MARKET_VELOCITY_BREAKDOWN_SHORT_PAPER_OBSERVATION_INTERVAL_SECS"),
+        "breakdown-short challenger must have an independent observation interval knob"
+    );
+    assert!(
+        !service_block.contains("market_velocity_live_handoff")
+            && !service_block.contains("MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED"),
+        "breakdown-short paper scheduler must not enable live handoff or live-order flags"
+    );
+    for deploy_script in [promote, rollback] {
+        assert!(
+            !deploy_script.contains(service_name),
+            "breakdown-short challenger must not be part of default production deploy services"
+        );
+    }
+}
