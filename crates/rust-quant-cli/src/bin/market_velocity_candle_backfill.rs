@@ -49,13 +49,15 @@ fn print_report(
     report: &rust_quant_cli::app::market_velocity_backfill::MarketVelocityBackfillReport,
 ) {
     println!(
-        "market_velocity_candle_backfill: timeframe={} symbols_total={} symbols_attempted={} symbols_failed={} candles_fetched={} rows_upserted={} dry_run={}",
+        "market_velocity_candle_backfill: timeframe={} symbols_total={} symbols_attempted={} symbols_failed={} candles_fetched={} rows_upserted={} missing_candles_detected={} gap_repair_symbols={} dry_run={}",
         config.timeframe,
         report.symbols_total,
         report.symbols_attempted,
         report.failed_symbols.len(),
         report.candles_fetched,
         report.rows_upserted,
+        report.missing_candles_detected,
+        report.gap_repair_symbols,
         report.dry_run
     );
 }

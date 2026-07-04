@@ -3,7 +3,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use okx::dto::market_dto::CandleOkxRespDto;
 use reqwest::{Client, Proxy, StatusCode, Url};
-use rust_quant_market::models::CandlesModel;
+use rust_quant_market::models::{quote_legacy_table_name, CandlesModel};
 use serde::Deserialize;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::collections::BTreeMap;
@@ -92,6 +92,10 @@ pub struct MarketVelocityBackfillReport {
     pub candles_fetched: usize,
     /// 数据行upserted，用于展示或持久化查询结果。
     pub rows_upserted: u64,
+    /// 本轮通过 bounds/count 判定缺失的 K 线数量。
+    pub missing_candles_detected: i64,
+    /// 本轮触发 gap 修复的交易对数量。
+    pub gap_repair_symbols: usize,
     /// Dry-runrun，用于展示或持久化查询结果。
     pub dry_run: bool,
     /// 列表数据。
@@ -105,6 +109,51 @@ pub struct SymbolBackfillReport {
     pub fetched: usize,
     /// upserted，用于展示或持久化查询结果。
     pub upserted: u64,
+    /// 本地连续性检查发现的缺失 K 线数量。
+    pub missing_candles_detected: i64,
+    /// 本次 OKX 拉取窗口的起点，Unix 毫秒时间戳。
+    pub fetch_start_ms: i64,
+    /// 说明本次拉取是完整补数、增量尾部更新还是 gap 修复。
+    pub fetch_reason: BackfillWindowReason,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackfillWindowReason {
+    /// 本地表不存在或窗口内没有 K 线，只能按配置窗口完整补数。
+    EmptyOrMissingTable,
+    /// 本地窗口内 bounds/count 不匹配，需要从最早断点附近重新拉取。
+    GapRepair,
+    /// 本地窗口连续，只需要从最新 K 线附近做尾部增量刷新。
+    IncrementalTail,
+}
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CandleContinuityStatus {
+    /// 目标窗口内最早一根本地 K 线时间，Unix 毫秒时间戳。
+    pub earliest_ts: Option<i64>,
+    /// 目标窗口内最新一根本地 K 线时间，Unix 毫秒时间戳。
+    pub latest_ts: Option<i64>,
+    /// 目标窗口内实际存在的 K 线数量。
+    pub actual_count: i64,
+    /// 根据 earliest/latest 与周期长度计算出的理论 K 线数量。
+    pub expected_count: i64,
+    /// 确认缺失后用于缩小修复范围的最早断点后一根 K 线时间。
+    pub earliest_gap_start_ts: Option<i64>,
+}
+impl CandleContinuityStatus {
+    /// 使用 bounds/count 作为连续性事实源；断点位置只用于决定最小修复窗口。
+    pub fn has_missing_candles(&self) -> bool {
+        self.expected_count > self.actual_count
+    }
+
+    fn missing_candle_count(&self) -> i64 {
+        self.expected_count.saturating_sub(self.actual_count)
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IncrementalBackfillWindow {
+    /// 本轮实际请求 OKX 的起始时间，Unix 毫秒时间戳。
+    pub fetch_start_ms: i64,
+    /// 本轮窗口选择原因，用于日志和运行态诊断。
+    pub reason: BackfillWindowReason,
 }
 #[derive(Debug, Deserialize)]
 struct OkxHistoryCandlesResponse {
@@ -302,6 +351,8 @@ pub async fn run_market_velocity_backfill(
         symbols_attempted: 0,
         candles_fetched: 0,
         rows_upserted: 0,
+        missing_candles_detected: 0,
+        gap_repair_symbols: 0,
         dry_run: config.dry_run,
         failed_symbols: Vec::new(),
     };
@@ -325,9 +376,18 @@ pub async fn run_market_velocity_backfill(
                 report.symbols_attempted += 1;
                 report.candles_fetched += symbol_report.fetched;
                 report.rows_upserted += symbol_report.upserted;
+                report.missing_candles_detected += symbol_report.missing_candles_detected;
+                if symbol_report.fetch_reason == BackfillWindowReason::GapRepair {
+                    report.gap_repair_symbols += 1;
+                }
                 info!(
-                    "market velocity candle backfill symbol done: symbol={}, fetched={}, upserted={}",
-                    symbol_report.symbol, symbol_report.fetched, symbol_report.upserted
+                    "market velocity candle backfill symbol done: symbol={}, fetched={}, upserted={}, missing_detected={}, fetch_start_ms={}, fetch_reason={:?}",
+                    symbol_report.symbol,
+                    symbol_report.fetched,
+                    symbol_report.upserted,
+                    symbol_report.missing_candles_detected,
+                    symbol_report.fetch_start_ms,
+                    symbol_report.fetch_reason
                 );
             }
             Err(error) if config.continue_on_error => {
@@ -361,12 +421,29 @@ async fn backfill_symbol_candles(
     start_ms: i64,
     end_ms: i64,
 ) -> Result<SymbolBackfillReport> {
+    let candle_ms = candle_interval_ms(&config.timeframe)?;
+    let continuity =
+        load_candle_continuity_status(pool, symbol, &config.timeframe, start_ms, end_ms, candle_ms)
+            .await?;
+    let backfill_window =
+        resolve_incremental_backfill_window(start_ms, end_ms, candle_ms, continuity.clone());
+    info!(
+        "market velocity candle backfill window resolved: symbol={}, timeframe={}, reason={:?}, fetch_start_ms={}, latest_ts={:?}, actual_count={}, expected_count={}, earliest_gap_start_ts={:?}",
+        symbol,
+        config.timeframe,
+        backfill_window.reason,
+        backfill_window.fetch_start_ms,
+        continuity.latest_ts,
+        continuity.actual_count,
+        continuity.expected_count,
+        continuity.earliest_gap_start_ts
+    );
     let candles = match fetch_okx_history_candles(
         client,
         &config.okx_rest_base,
         symbol,
         &config.timeframe,
-        start_ms,
+        backfill_window.fetch_start_ms,
         end_ms,
         config.page_limit,
         config.request_sleep_ms,
@@ -403,7 +480,138 @@ async fn backfill_symbol_candles(
         symbol: symbol.to_string(),
         fetched,
         upserted,
+        missing_candles_detected: continuity.missing_candle_count(),
+        fetch_start_ms: backfill_window.fetch_start_ms,
+        fetch_reason: backfill_window.reason,
     })
+}
+/// 读取本地 K 线窗口的连续性摘要，先用 bounds/count 判定是否缺失，再记录最早断点用于缩小修复范围。
+async fn load_candle_continuity_status(
+    pool: &PgPool,
+    symbol: &str,
+    timeframe: &str,
+    start_ms: i64,
+    end_ms: i64,
+    candle_ms: i64,
+) -> Result<CandleContinuityStatus> {
+    let table_name = CandlesModel::get_table_name(symbol, timeframe);
+    let table_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name = $1
+        )",
+    )
+    .bind(&table_name)
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("check candle table exists: {table_name}"))?;
+    if !table_exists {
+        return Ok(CandleContinuityStatus::default());
+    }
+
+    let quoted_table_name = quote_legacy_table_name(&table_name)?;
+    let query = format!(
+        r#"
+        WITH windowed AS (
+          SELECT ts
+          FROM {quoted_table_name}
+          WHERE ts >= $1
+            AND ts <= $2
+        ),
+        bounds AS (
+          SELECT
+            MIN(ts) AS earliest_ts,
+            MAX(ts) AS latest_ts,
+            COUNT(*)::BIGINT AS actual_count
+          FROM windowed
+        ),
+        ordered AS (
+          SELECT
+            ts,
+            LAG(ts) OVER (ORDER BY ts) AS prev_ts
+          FROM windowed
+        ),
+        gaps AS (
+          SELECT MIN(ts) AS earliest_gap_start_ts
+          FROM ordered
+          WHERE prev_ts IS NOT NULL
+            AND ts - prev_ts > $3
+        )
+        SELECT
+          bounds.earliest_ts,
+          bounds.latest_ts,
+          bounds.actual_count,
+          gaps.earliest_gap_start_ts
+        FROM bounds
+        CROSS JOIN gaps
+        "#
+    );
+    let row = sqlx::query(&query)
+        .bind(start_ms)
+        .bind(end_ms)
+        .bind(candle_ms)
+        .fetch_one(pool)
+        .await
+        .with_context(|| format!("load candle continuity status: {table_name}"))?;
+    let earliest_ts = row.get::<Option<i64>, _>("earliest_ts");
+    let latest_ts = row.get::<Option<i64>, _>("latest_ts");
+    let actual_count = row.get::<i64, _>("actual_count");
+    let expected_count = expected_candle_count(earliest_ts, latest_ts, candle_ms);
+    let earliest_gap_start_ts = row.get::<Option<i64>, _>("earliest_gap_start_ts");
+    Ok(CandleContinuityStatus {
+        earliest_ts,
+        latest_ts,
+        actual_count,
+        expected_count,
+        earliest_gap_start_ts,
+    })
+}
+
+fn resolve_incremental_backfill_window(
+    configured_start_ms: i64,
+    _end_ms: i64,
+    candle_ms: i64,
+    continuity: CandleContinuityStatus,
+) -> IncrementalBackfillWindow {
+    if continuity.latest_ts.is_none() {
+        return IncrementalBackfillWindow {
+            fetch_start_ms: configured_start_ms,
+            reason: BackfillWindowReason::EmptyOrMissingTable,
+        };
+    }
+    if continuity.has_missing_candles() {
+        let repair_anchor = continuity
+            .earliest_gap_start_ts
+            .or(continuity.earliest_ts)
+            .unwrap_or(configured_start_ms);
+        return IncrementalBackfillWindow {
+            fetch_start_ms: overlap_start_ms(repair_anchor, configured_start_ms, candle_ms),
+            reason: BackfillWindowReason::GapRepair,
+        };
+    }
+    IncrementalBackfillWindow {
+        fetch_start_ms: overlap_start_ms(
+            continuity.latest_ts.unwrap_or(configured_start_ms),
+            configured_start_ms,
+            candle_ms,
+        ),
+        reason: BackfillWindowReason::IncrementalTail,
+    }
+}
+
+fn expected_candle_count(earliest_ts: Option<i64>, latest_ts: Option<i64>, candle_ms: i64) -> i64 {
+    match (earliest_ts, latest_ts) {
+        (Some(earliest_ts), Some(latest_ts)) if latest_ts >= earliest_ts && candle_ms > 0 => {
+            ((latest_ts - earliest_ts) / candle_ms) + 1
+        }
+        _ => 0,
+    }
+}
+
+fn overlap_start_ms(anchor_ms: i64, configured_start_ms: i64, candle_ms: i64) -> i64 {
+    anchor_ms.saturating_sub(candle_ms).max(configured_start_ms)
 }
 /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 pub async fn fetch_okx_history_candles(
@@ -911,6 +1119,73 @@ mod tests {
     fn max_history_pages_has_buffer_for_60_days_of_15m_candles() {
         let pages = max_history_pages(0, 60 * 24 * 60 * 60 * 1_000, CANDLE_15M_MS, 100);
         assert_eq!(pages, 65);
+    }
+    #[test]
+    fn backfill_window_uses_full_range_when_no_local_candles_exist() {
+        let window = resolve_incremental_backfill_window(
+            1_000_000,
+            2_000_000,
+            CANDLE_15M_MS,
+            CandleContinuityStatus::default(),
+        );
+        assert_eq!(window.fetch_start_ms, 1_000_000);
+        assert_eq!(window.reason, BackfillWindowReason::EmptyOrMissingTable);
+    }
+    #[test]
+    fn backfill_window_repairs_earliest_detected_gap_with_overlap() {
+        let window = resolve_incremental_backfill_window(
+            1_000_000,
+            5_000_000,
+            CANDLE_15M_MS,
+            CandleContinuityStatus {
+                earliest_ts: Some(1_200_000),
+                latest_ts: Some(4_800_000),
+                actual_count: 4,
+                expected_count: 5,
+                earliest_gap_start_ts: Some(3_000_000),
+            },
+        );
+        assert_eq!(window.fetch_start_ms, 3_000_000 - CANDLE_15M_MS);
+        assert_eq!(window.reason, BackfillWindowReason::GapRepair);
+    }
+    #[test]
+    fn backfill_window_uses_latest_candle_overlap_when_local_series_is_continuous() {
+        let window = resolve_incremental_backfill_window(
+            1_000_000,
+            5_000_000,
+            CANDLE_15M_MS,
+            CandleContinuityStatus {
+                earliest_ts: Some(1_200_000),
+                latest_ts: Some(4_800_000),
+                actual_count: 5,
+                expected_count: 5,
+                earliest_gap_start_ts: None,
+            },
+        );
+        assert_eq!(window.fetch_start_ms, 4_800_000 - CANDLE_15M_MS);
+        assert_eq!(window.reason, BackfillWindowReason::IncrementalTail);
+    }
+    #[test]
+    fn candle_continuity_uses_bounds_and_count_to_detect_missing_rows() {
+        let status = CandleContinuityStatus {
+            earliest_ts: Some(1_000_000),
+            latest_ts: Some(1_000_000 + CANDLE_15M_MS * 4),
+            actual_count: 4,
+            expected_count: 5,
+            earliest_gap_start_ts: None,
+        };
+        assert!(status.has_missing_candles());
+    }
+    #[test]
+    fn candle_continuity_treats_matching_bounds_and_count_as_continuous() {
+        let status = CandleContinuityStatus {
+            earliest_ts: Some(1_000_000),
+            latest_ts: Some(1_000_000 + CANDLE_15M_MS * 4),
+            actual_count: 5,
+            expected_count: 5,
+            earliest_gap_start_ts: None,
+        };
+        assert!(!status.has_missing_candles());
     }
     #[test]
     fn candle_interval_ms_supports_4h_trend_backfill() {
