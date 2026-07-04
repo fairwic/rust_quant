@@ -25,6 +25,31 @@ fn strategy_catalog_exposes_market_velocity_as_standard_core_strategy() {
     assert!(market_velocity.supported_symbols.contains(&"ALL"));
     assert!(market_velocity.timeframes.contains(&"15m"));
 }
+
+#[test]
+fn strategy_catalog_exposes_breakdown_short_as_distinct_signal_only_strategy() {
+    let items = super::standard_strategy_catalog_items();
+    let breakdown_short = items
+        .iter()
+        .find(|item| item.strategy_key == "market_velocity_breakdown_short")
+        .expect("market_velocity_breakdown_short strategy catalog item");
+
+    assert_eq!(
+        breakdown_short.product_slug,
+        "market-velocity-breakdown-short"
+    );
+    assert_eq!(breakdown_short.display_name, "动量破位做空");
+    assert_eq!(breakdown_short.category, "动量做空");
+    assert!(breakdown_short.supported_symbols.contains(&"ALL"));
+    assert!(breakdown_short.timeframes.contains(&"15m"));
+    assert!(breakdown_short.description.contains("横盘"));
+    assert!(breakdown_short.detail.contains("signal-only"));
+    assert!(breakdown_short.detail.contains("live handoff"));
+    assert_eq!(breakdown_short.display_total_return_pct, None);
+    assert_eq!(breakdown_short.display_sharpe_ratio, None);
+    assert_eq!(breakdown_short.display_trade_count, None);
+    assert_eq!(breakdown_short.display_max_drawdown_pct, None);
+}
 #[test]
 fn strategy_catalog_exposes_display_defaults_for_admin_product_form() {
     let items = super::standard_strategy_catalog_items();

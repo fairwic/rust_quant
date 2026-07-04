@@ -56,5 +56,22 @@ pub fn standard_strategy_catalog_items() -> Vec<StandardStrategyCatalogItem> {
             supported_symbols: &["ALL"],
             timeframes: &["15m"],
         },
+        StandardStrategyCatalogItem {
+            strategy_key: "market_velocity_breakdown_short",
+            product_slug: "market-velocity-breakdown-short",
+            display_name: "动量破位做空",
+            category: "动量做空",
+            risk_level: "高",
+            description: "基于 Market Velocity 动量异动候选，等待 15m 横盘下沿或反复支撑位放量跌破后生成做空观察信号。",
+            detail: "动量破位做空是独立于 market_velocity 多头主策略的新策略，只复用动量异动作为信号来源；当前仅用于 signal-only / paper 观察，尚未接入 live handoff，也不会生成实盘执行任务。",
+            cover_image: "/strategy-covers/strategy-quant-core.svg",
+            display_total_return_pct: None,
+            display_sharpe_ratio: None,
+            display_trade_count: None,
+            display_max_drawdown_pct: None,
+            supported_exchanges: &["okx"],
+            supported_symbols: &["ALL"],
+            timeframes: &["15m"],
+        },
     ]
 }
