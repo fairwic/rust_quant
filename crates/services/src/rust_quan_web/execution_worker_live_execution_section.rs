@@ -323,18 +323,29 @@ impl ExecutionWorker {
             .prepare_order_settings_for_live_order(task, &gateway, &order_task)
             .await
         {
+            let blocker = prepare_order_settings_blocker(&error);
+            let error_message = blocker
+                .as_ref()
+                .map(|(_, message)| message.clone())
+                .unwrap_or_else(|| error.to_string());
+            let mut raw_payload = json!({
+                "task_id": task.id,
+                "stage": "prepare_order_settings",
+                "exchange_error_message": error.to_string(),
+                "main_order_placed": false,
+                "place_order_allowed": false,
+                "mutation_allowed": false,
+            });
+            if let Some((code, message)) = blocker {
+                raw_payload["blocker_code"] = json!(code);
+                raw_payload["blocker_message"] = json!(message);
+            }
             return ExecutionTaskReportRequest::failed(
                 task.id,
                 order_task.exchange.as_str(),
                 order_side_lower(order_task.side),
-                error.to_string(),
-                json!({
-                    "task_id": task.id,
-                    "stage": "prepare_order_settings",
-                    "main_order_placed": false,
-                    "place_order_allowed": false,
-                    "mutation_allowed": false,
-                }),
+                error_message,
+                raw_payload,
             );
         }
         // 杠杆/保证金设置完成后，再读取账户当前最大可下单数量；失败或低于最小交易单位时 fail closed。
@@ -924,4 +935,36 @@ impl ExecutionWorker {
         }
         report
     }
+}
+
+fn prepare_order_settings_blocker(error: &anyhow::Error) -> Option<(&'static str, String)> {
+    let mapped = error.downcast_ref::<CryptoExchangeError>().is_some_and(|exchange_error| {
+        matches!(
+            exchange_error,
+            CryptoExchangeError::Api {
+                exchange: ExchangeId::Okx,
+                code,
+                message,
+                ..
+            } if code == "59000" && okx_position_mode_switch_restriction(message)
+        )
+    });
+    let rendered = error.to_string();
+    if mapped
+        || (rendered.contains("code=59000")
+            && okx_position_mode_switch_restriction(rendered.as_str()))
+    {
+        return Some((
+            "okx_position_mode_switch_blocked_by_existing_exposure",
+            "OKX 当前账户还不是双向持仓模式，系统尝试通过 API 开启双向持仓时被交易所拒绝：请先取消挂单、关闭相关持仓并停止交易机器人后重试；本次已在下单前阻断。"
+                .to_string(),
+        ));
+    }
+    None
+}
+
+fn okx_position_mode_switch_restriction(message: &str) -> bool {
+    message.contains("Cancel any open orders")
+        || message.contains("close positions")
+        || message.contains("stop trading bots")
 }

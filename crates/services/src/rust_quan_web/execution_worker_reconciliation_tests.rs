@@ -14,6 +14,27 @@ use crypto_exc_all::{Instrument, ProtectiveOrderWorkingType};
 use serde_json::json;
 use std::sync::Arc;
 #[test]
+fn okx_position_mode_switch_restriction_maps_structured_blocker() {
+    let error: anyhow::Error = crypto_exc_all::Error::Api {
+        exchange: ExchangeId::Okx,
+        status: None,
+        code: "59000".to_string(),
+        message:
+            "Setting failed. Cancel any open orders, close positions, and stop trading bots first."
+                .to_string(),
+    }
+    .into();
+
+    let (code, message) = prepare_order_settings_blocker(&error).expect("blocker");
+
+    assert_eq!(
+        code,
+        "okx_position_mode_switch_blocked_by_existing_exposure"
+    );
+    assert!(message.contains("本次已在下单前阻断"));
+}
+
+#[test]
 fn position_stale_reconciliation_request_from_task_uses_idempotent_source_ref() {
     let task = task(json!({
         "exchange": "binance",
@@ -194,6 +215,58 @@ fn read_only_exchange_snapshot_builds_reconciliation_requests_without_live_mutat
     assert!(rendered.contains("place_order_allowed=false"));
     assert!(!rendered.contains("position-raw-should-not-render"));
     assert!(!rendered.contains("open-order-raw-should-not-render"));
+}
+#[test]
+fn hedge_position_side_entry_does_not_block_on_existing_position_or_open_order() {
+    let task = task(json!({
+        "exchange": "okx",
+        "symbol": "ETH-USDT-SWAP",
+        "side": "buy",
+        "credential_ref": "web-cred-42",
+        "execution": {
+            "position_mode": "hedge",
+            "position_side": "long"
+        }
+    }));
+    let instrument = Instrument::perp("ETH", "USDT");
+    let positions = vec![Position {
+        exchange: ExchangeId::Okx,
+        instrument: instrument.clone(),
+        exchange_symbol: "ETH-USDT-SWAP".to_string(),
+        side: Some("long".to_string()),
+        size: "0.01".to_string(),
+        entry_price: Some("1750".to_string()),
+        mark_price: Some("1755".to_string()),
+        unrealized_pnl: None,
+        leverage: None,
+        margin_mode: None,
+        liquidation_price: None,
+        raw: json!({"secret":"position-raw-should-not-render"}),
+    }];
+    let open_orders = vec![Order {
+        exchange: ExchangeId::Okx,
+        instrument,
+        exchange_symbol: "ETH-USDT-SWAP".to_string(),
+        order_id: Some("protective-1".to_string()),
+        client_order_id: Some("client-protective-1".to_string()),
+        side: Some("sell".to_string()),
+        order_type: Some("stop_market".to_string()),
+        price: None,
+        size: Some("0.01".to_string()),
+        filled_size: Some("0".to_string()),
+        average_price: None,
+        status: Some("live".to_string()),
+        created_at: Some(1),
+        updated_at: Some(2),
+        raw: json!({"secret":"open-order-raw-should-not-render"}),
+    }];
+    let requests = build_exchange_reconciliation_requests_from_read_only_snapshot(
+        &task,
+        &positions,
+        &open_orders,
+        Some("2026-05-15T10:00:00Z".to_string()),
+    );
+    assert!(requests.is_empty());
 }
 #[test]
 fn read_only_exchange_snapshot_blocker_builder_does_not_emit_flat_sync() {

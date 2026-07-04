@@ -28,6 +28,9 @@ pub(crate) fn build_exchange_reconciliation_requests_from_read_only_snapshot(
     open_orders: &[Order],
     detected_at: Option<String>,
 ) -> Vec<ExchangeReconciliationReportRequest> {
+    if task_allows_parallel_hedge_entry(task) {
+        return Vec::new();
+    }
     let mut requests = Vec::new();
     let position_count = positions
         .iter()
@@ -58,6 +61,40 @@ pub(crate) fn build_exchange_reconciliation_requests_from_read_only_snapshot(
         ));
     }
     requests
+}
+/// 明确的 hedge 开仓任务允许同币种多策略多腿，不用已有仓位或保护挂单阻断新腿。
+fn task_allows_parallel_hedge_entry(task: &ExecutionTask) -> bool {
+    if !task.task_type.eq_ignore_ascii_case("execute_signal") {
+        return false;
+    }
+    let payload = &task.request_payload_json;
+    let position_mode = json_string_path(&payload, &["execution", "position_mode"])
+        .or_else(|| json_string_path(&payload, &["position_mode"]))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !matches!(
+        position_mode.as_str(),
+        "hedge" | "hedge_mode" | "long_short_mode"
+    ) {
+        return false;
+    }
+    let position_side = json_string_path(&payload, &["execution", "position_side"])
+        .or_else(|| json_string_path(&payload, &["position_side"]))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(position_side.as_str(), "long" | "short")
+}
+/// 从 JSON path 读取非空字符串，避免直接暴露 payload 里可能存在的原始交易所字段。
+fn json_string_path(value: &Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 /// 构建 Web 商业、会员和执行准备度 请求或响应载荷，把字段组装规则集中在同一入口。
 pub(crate) fn build_exchange_reconciliation_sync_requests_from_read_only_snapshot(

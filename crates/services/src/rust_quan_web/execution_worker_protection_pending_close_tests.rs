@@ -537,3 +537,68 @@ fn pending_close_reconciliation_blocks_extra_active_close_orders_but_allows_plan
         Some(&protective_cancel)
     ));
 }
+
+#[test]
+fn pending_close_reconciliation_allows_reserved_take_profit_within_position_size() {
+    let request = OrderPlacementRequest {
+        exchange: ExchangeId::Binance,
+        instrument: Instrument::perp("eth", "usdt").with_settlement("usdt"),
+        side: OrderSide::Sell,
+        order_type: OrderType::Market,
+        size: "0.6".to_string(),
+        price: None,
+        margin_mode: None,
+        margin_coin: None,
+        position_side: Some("long".to_string()),
+        trade_side: Some("close".to_string()),
+        client_order_id: Some("rqclose42".to_string()),
+        reduce_only: None,
+        time_in_force: None,
+        attached_stop_loss_price: None,
+    };
+    let take_profit_order = Order {
+        exchange: ExchangeId::Binance,
+        instrument: request.instrument.clone(),
+        exchange_symbol: "ETHUSDT".to_string(),
+        order_id: Some("tp-external-42".to_string()),
+        client_order_id: Some("rq-tp-42-1".to_string()),
+        side: Some("SELL".to_string()),
+        order_type: Some("LIMIT".to_string()),
+        price: Some("3500".to_string()),
+        size: Some("0.4".to_string()),
+        filled_size: Some("0".to_string()),
+        average_price: None,
+        status: Some("NEW".to_string()),
+        created_at: None,
+        updated_at: None,
+        raw: json!({}),
+    };
+    assert!(!pending_close_has_close_order_quantity_conflict(
+        &[take_profit_order.clone()],
+        &request,
+        None,
+        1.0,
+    ));
+
+    let oversized_take_profit_order = Order {
+        size: Some("0.5".to_string()),
+        ..take_profit_order.clone()
+    };
+    assert!(pending_close_has_close_order_quantity_conflict(
+        &[oversized_take_profit_order],
+        &request,
+        None,
+        1.0,
+    ));
+
+    let unknown_size_take_profit_order = Order {
+        size: None,
+        ..take_profit_order
+    };
+    assert!(pending_close_has_close_order_quantity_conflict(
+        &[unknown_size_take_profit_order],
+        &request,
+        None,
+        1.0,
+    ));
+}

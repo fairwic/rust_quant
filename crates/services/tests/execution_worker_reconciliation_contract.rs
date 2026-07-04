@@ -126,7 +126,7 @@ fn live_order_request_checks_orderbook_before_main_order_settings_mutation() {
 #[test]
 fn prepare_order_settings_uses_worker_live_mutation_audit() {
     let prepare_start = EXECUTION_WORKER
-        .find("async fn prepare_order_settings_after_protection")
+        .find("async fn prepare_order_settings_for_live_order")
         .expect("settings preparation path must exist");
     let prepare_end = EXECUTION_WORKER[prepare_start..]
         .find("async fn confirmed_live_order_report")
@@ -308,9 +308,11 @@ fn execution_worker_reconciliation_contract_pending_close_requires_matching_posi
         "missing matching position must be a fail-closed blocker before close order mutation"
     );
     assert!(
-        check_section.contains("pending_close_has_conflicting_open_order")
+        check_section.contains("pending_close_has_close_order_quantity_conflict")
+            && check_section.contains("active_close_order_reserved_qty")
+            && check_section.contains("unknown_active_close_order_count")
             && check_section.contains("pending_close_active_close_order_conflict"),
-        "pending close read-only reconciliation must block duplicate active close-side open orders before close order mutation"
+        "pending close read-only reconciliation must block only when close-side open orders plus requested close size exceed the matching position before mutation"
     );
     assert!(
         !check_section.contains("\"place_order_allowed\": true"),

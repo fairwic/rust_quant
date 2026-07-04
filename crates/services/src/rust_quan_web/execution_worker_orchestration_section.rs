@@ -254,7 +254,7 @@ impl ExecutionWorker {
                     error
                 )
             })?;
-        // open orders 和 positions 一起判断，避免已有挂单尚未成交时再次提交同方向订单。
+        // read-only snapshot 仍会读取挂单；明确 hedge + position_side 的多腿任务由 reconciliation builder 放行。
         let open_orders = CryptoExcAllGateway::with_signed_read_only_scope(gateway.open_orders(
                 order_task.exchange,
                 OrderListQuery::for_instrument(instrument).with_limit(100),
@@ -329,20 +329,27 @@ impl ExecutionWorker {
                     error
                 )
             })?;
-        let matching_position_count = positions
+        let matching_positions: Vec<&Position> = positions
             .iter()
             .filter(|position| pending_close_has_matching_position(position, request))
-            .count();
-        let conflicting_open_order_count = open_orders
+            .collect();
+        let matching_position_count = matching_positions.len();
+        let matching_position_size = matching_positions
             .iter()
-            .filter(|order| {
-                pending_close_has_conflicting_open_order(
-                    order,
-                    request,
-                    planned_protective_cancel.map(|(_, request)| request),
-                )
-            })
-            .count();
+            .filter_map(|position| position_size(&position.size))
+            .map(f64::abs)
+            .sum::<f64>();
+        let close_order_reservations = pending_close_open_order_reservations(
+            &open_orders,
+            request,
+            planned_protective_cancel.map(|(_, request)| request),
+        );
+        let close_order_quantity_conflict = pending_close_has_close_order_quantity_conflict(
+            &open_orders,
+            request,
+            planned_protective_cancel.map(|(_, request)| request),
+            matching_position_size,
+        );
         if matching_position_count == 0 {
             self.record_checkpoint(
                 "pending_close_exchange_reconciliation_read_only_blocked",
@@ -366,7 +373,7 @@ impl ExecutionWorker {
                 instrument.symbol_for(request.exchange)
             ));
         }
-        if conflicting_open_order_count > 0 {
+        if close_order_quantity_conflict {
             self.record_checkpoint(
                 "pending_close_exchange_reconciliation_read_only_blocked",
                 Some(task.id),
@@ -377,7 +384,11 @@ impl ExecutionWorker {
                     "position_count": positions.len(),
                     "open_order_count": open_orders.len(),
                     "matching_position_count": matching_position_count,
-                    "conflicting_open_order_count": conflicting_open_order_count,
+                    "matching_position_size": matching_position_size,
+                    "request_close_qty": position_size(&request.size).unwrap_or_default(),
+                    "active_close_order_count": close_order_reservations.active_close_order_count,
+                    "active_close_order_reserved_qty": close_order_reservations.reserved_qty,
+                    "unknown_active_close_order_count": close_order_reservations.unknown_size_count,
                     "blocker_code": "pending_close_active_close_order_conflict",
                     "place_order_allowed": false,
                     "mutation_allowed": false,
@@ -385,7 +396,7 @@ impl ExecutionWorker {
             )
             .await;
             return Err(anyhow!(
-                "pending_close_active_close_order_conflict: signed account already has active close-side open orders for {} {}; place_order_allowed=false; mutation_allowed=false",
+                "pending_close_active_close_order_conflict: signed account close-side open orders plus requested close size exceed matching position for {} {}; place_order_allowed=false; mutation_allowed=false",
                 request.exchange.as_str(),
                 instrument.symbol_for(request.exchange)
             ));
@@ -400,7 +411,11 @@ impl ExecutionWorker {
                 "position_count": positions.len(),
                 "open_order_count": open_orders.len(),
                 "matching_position_count": matching_position_count,
-                "conflicting_open_order_count": conflicting_open_order_count,
+                "matching_position_size": matching_position_size,
+                "request_close_qty": position_size(&request.size).unwrap_or_default(),
+                "active_close_order_count": close_order_reservations.active_close_order_count,
+                "active_close_order_reserved_qty": close_order_reservations.reserved_qty,
+                "unknown_active_close_order_count": close_order_reservations.unknown_size_count,
                 "place_order_allowed": false,
                 "mutation_allowed": false,
             }),
@@ -712,6 +727,63 @@ fn pending_close_has_conflicting_open_order(
         return false;
     }
     true
+}
+
+/// 汇总同方向 close-side 挂单已经占用的真实交易所数量，避免把合法 TP 余量误判成冲突。
+#[derive(Debug, Clone, Copy, Default)]
+struct PendingCloseOpenOrderReservations {
+    /// 活跃 close-side 挂单数量，不含本次计划取消的保护单。
+    active_close_order_count: usize,
+    /// 能从交易所回包解析出的活跃 close-side 挂单总数量。
+    reserved_qty: f64,
+    /// 缺少 size 的活跃 close-side 挂单数量；无法证明安全时仍 fail closed。
+    unknown_size_count: usize,
+}
+
+/// 对 pending close 来说，已有 TP 挂单不是天然冲突；只有总关闭数量超过真实仓位才阻断。
+fn pending_close_has_close_order_quantity_conflict(
+    open_orders: &[Order],
+    request: &OrderPlacementRequest,
+    planned_protective_cancel: Option<&CancelOrderRequest>,
+    matching_position_size: f64,
+) -> bool {
+    let Some(request_size) = position_size(&request.size).filter(|size| *size > 0.0) else {
+        return true;
+    };
+    if matching_position_size <= 0.0 {
+        return true;
+    }
+    let reservations =
+        pending_close_open_order_reservations(open_orders, request, planned_protective_cancel);
+    if reservations.unknown_size_count > 0 {
+        return true;
+    }
+    request_size + reservations.reserved_qty > matching_position_size + f64::EPSILON
+}
+
+/// 只统计与本次 pending close 同交易所、同交易对、同 close side 的活跃挂单。
+fn pending_close_open_order_reservations(
+    open_orders: &[Order],
+    request: &OrderPlacementRequest,
+    planned_protective_cancel: Option<&CancelOrderRequest>,
+) -> PendingCloseOpenOrderReservations {
+    let mut reservations = PendingCloseOpenOrderReservations::default();
+    for order in open_orders {
+        if !pending_close_has_conflicting_open_order(order, request, planned_protective_cancel) {
+            continue;
+        }
+        reservations.active_close_order_count += 1;
+        match order
+            .size
+            .as_deref()
+            .and_then(position_size)
+            .filter(|size| *size > 0.0)
+        {
+            Some(size) => reservations.reserved_qty += size,
+            None => reservations.unknown_size_count += 1,
+        }
+    }
+    reservations
 }
 /// 提供pending平仓订单sidematchesrequest的集中实现，避免Web 商业链路调用方重复处理相同细节。
 fn pending_close_order_side_matches_request(order_side: Option<&str>, request_side: OrderSide) -> bool {
