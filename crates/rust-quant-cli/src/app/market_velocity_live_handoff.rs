@@ -260,6 +260,7 @@ pub async fn run_market_velocity_live_handoff(
         .await
         .context("connect quant_core database for market velocity live handoff")?;
     let signal_config = load_market_velocity_signal_config_or_env(&pool).await?;
+    validate_market_velocity_live_handoff_signal_config(&signal_config)?;
     let candidate_events = load_market_velocity_live_candidate_events(
         &pool,
         config.event_id,
@@ -663,6 +664,32 @@ pub async fn run_market_velocity_live_handoff(
     response["generated_tasks"] = json!(dispatch.generated_tasks);
     response["next_worker_handoff"] = next_worker.unwrap_or_else(|| json!(null));
     Ok(response)
+}
+/// 在 Core live handoff 入口阻断仍处于 paper-only 的破位做空配置，避免误配置绕过 compose/Web 门禁。
+fn validate_market_velocity_live_handoff_signal_config(
+    config: &MarketVelocityStrategySignalConfig,
+) -> Result<()> {
+    let normalized = [
+        config.strategy_slug.as_str(),
+        config.strategy_preset.as_str(),
+        config.entry_rule_version.as_str(),
+    ]
+    .join(" ")
+    .to_ascii_lowercase();
+    if [
+        "market_velocity_breakdown_short",
+        "support_breakdown",
+        "breakdown_short",
+        "15m_short",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        bail!(
+            "market_velocity_live_handoff rejects paper-only breakdown short signal config; run market_velocity_paper_observation instead"
+        );
+    }
+    Ok(())
 }
 /// 将 Web 的 API Key 业务 blocker 降级为 live handoff 的正常 blocked 响应，避免 scheduler 重复刷 ERROR。
 fn api_credential_readiness_blocker_code(error: &anyhow::Error) -> Option<String> {
@@ -1263,6 +1290,27 @@ mod tests {
         let mut missing_buyer = sample_live_handoff_config();
         missing_buyer.buyer_email = None;
         assert!(missing_buyer.owner_scope_configured().is_err());
+    }
+    #[test]
+    fn live_handoff_rejects_breakdown_short_signal_config_before_candidate_scan() {
+        let config = MarketVelocityStrategySignalConfig::from_strategy_config_json(
+            &json!({
+                "strategy_slug": "market_velocity_breakdown_short",
+                "strategy_preset": "research_momentum_short_0375sl_10r_15m_support_breakdown_delta5_72_pchg1p5_12_vol13_v1",
+                "entry_rule_version": "rank_radar_15m_short_r0375_10r_15msup_brkdn_d5_72_p1p5_12_v1",
+                "trade_direction": "short"
+            }),
+            &json!({}),
+        )
+        .expect("short config");
+
+        let error = validate_market_velocity_live_handoff_signal_config(&config)
+            .expect_err("breakdown short must stay out of live handoff");
+
+        assert!(
+            error.to_string().contains("paper-only breakdown short"),
+            "unexpected error: {error:#}"
+        );
     }
     #[test]
     fn no_live_candidate_response_is_non_error_signal_status() {
