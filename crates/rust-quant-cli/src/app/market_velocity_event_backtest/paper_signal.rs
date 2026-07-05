@@ -17,7 +17,10 @@ use rust_quant_services::market::{
 use rust_quant_services::rust_quan_web::{
     ExecutionTaskClient, ExecutionTaskConfig, StrategySignalSubmitRequest,
 };
-use std::time::Duration;
+use std::{
+    io::{self, Write},
+    time::Duration,
+};
 use tokio::time::timeout;
 
 const BREAKDOWN_SHORT_STRATEGY_SLUG: &str = "market_velocity_breakdown_short";
@@ -54,7 +57,7 @@ pub async fn submit_market_velocity_paper_strategy_signals(
         return Ok(());
     }
     if confirmed.is_empty() {
-        println!("paper_strategy_signals_submitted=0");
+        print_paper_strategy_signal_submission_summary(0, 0)?;
         return Ok(());
     }
     let client = ExecutionTaskClient::new(paper_strategy_signal_execution_task_config()?)?;
@@ -89,15 +92,34 @@ pub async fn submit_market_velocity_paper_strategy_signals(
             }
         }
     }
-    println!(
-        "paper_strategy_signals_submitted={submitted}\tpaper_strategy_signals_failed={}",
-        failures.len()
-    );
+    print_paper_strategy_signal_submission_summary(submitted, failures.len())?;
     if !failures.is_empty() {
         let detail = failures.join("; ").chars().take(1_000).collect::<String>();
         bail!("paper strategy signal submissions failed: {detail}");
     }
     Ok(())
+}
+
+/// 输出并立即刷新 paper 策略信号提交摘要，确保生产容器日志能稳定暴露本轮结果。
+fn print_paper_strategy_signal_submission_summary(
+    submitted: usize,
+    failed: usize,
+) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    write_paper_strategy_signal_submission_summary(&mut stdout, submitted, failed)
+}
+
+/// 写入 paper 策略信号提交摘要并 flush，便于测试覆盖容器 stdout 缓冲边界。
+fn write_paper_strategy_signal_submission_summary<W: Write>(
+    writer: &mut W,
+    submitted: usize,
+    failed: usize,
+) -> io::Result<()> {
+    writeln!(
+        writer,
+        "paper_strategy_signals_submitted={submitted}\tpaper_strategy_signals_failed={failed}"
+    )?;
+    writer.flush()
 }
 
 fn paper_strategy_signal_config_from_args(
@@ -291,4 +313,49 @@ fn paper_strategy_signal_execution_task_config() -> Result<ExecutionTaskConfig> 
         base_url,
         internal_secret,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{self, Write};
+
+    struct FlushTrackingWriter {
+        bytes: Vec<u8>,
+        flush_count: usize,
+    }
+
+    impl FlushTrackingWriter {
+        fn new() -> Self {
+            Self {
+                bytes: Vec::new(),
+                flush_count: 0,
+            }
+        }
+    }
+
+    impl Write for FlushTrackingWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.flush_count += 1;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn submission_summary_writer_flushes_after_line() {
+        let mut writer = FlushTrackingWriter::new();
+
+        write_paper_strategy_signal_submission_summary(&mut writer, 3, 2).unwrap();
+
+        assert_eq!(
+            String::from_utf8(writer.bytes).unwrap(),
+            "paper_strategy_signals_submitted=3\tpaper_strategy_signals_failed=2\n"
+        );
+        assert_eq!(writer.flush_count, 1);
+    }
 }
