@@ -1547,7 +1547,7 @@ fn select_market_velocity_stop_loss(
         ),
         _ => (fixed_price, fixed_source),
     };
-    let pct = round_price((entry_price - price).abs() / entry_price);
+    let pct = round_ratio((entry_price - price).abs() / entry_price);
     if !pct.is_finite() || pct <= 0.0 || pct >= 1.0 {
         return Err(anyhow!(
             "invalid market velocity selected stop loss percent"
@@ -1812,6 +1812,10 @@ fn round_price(value: f64) -> f64 {
         MARKET_VELOCITY_PRICE_ROUND_SCALE
     };
     (value * scale).round() / scale
+}
+
+fn round_ratio(value: f64) -> f64 {
+    (value * MARKET_VELOCITY_PRICE_ROUND_SCALE).round() / MARKET_VELOCITY_PRICE_ROUND_SCALE
 }
 /// 执行 Runner配置valid步骤，串起行情数据需要的状态推进和错误处理。
 fn runner_config_valid(config: &MarketVelocityStrategySignalConfig) -> bool {
