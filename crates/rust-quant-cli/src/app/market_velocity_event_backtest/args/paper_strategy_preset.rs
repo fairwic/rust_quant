@@ -61,6 +61,10 @@ pub(super) const MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_065R_DELTA1_100_V5_RE
     "research_momentum_short_04sl_065r_15m_support_breakdown_d1_100_pchg0p5_12_vol10_dist14_v5";
 pub(super) const MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_065R_DELTA1_100_V5_RESEARCH_ENTRY_RULE_VERSION:
     &str = "rank_radar_15m_short_r04_065r_15msup_brkdn_d1_100_p0p5_12_vol10_d14_v5";
+pub(super) const MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_10R_DELTA5_100_V6_RESEARCH_PRESET: &str =
+    "research_momentum_short_04sl_10r_15m_support_breakdown_d5_100_pchg2_12_vol10_dist14_v6";
+pub(super) const MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_10R_DELTA5_100_V6_RESEARCH_ENTRY_RULE_VERSION:
+    &str = "rank_radar_15m_short_r04_10r_15msup_brkdn_d5_100_p2_12_vol10_d14_v6";
 pub(super) const MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_PRESET: &str =
     "research_momentum_04sl_20r_breakout_reclaim_fvgwait10_delta20_40_pchg5_12_v1";
 pub(super) const MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_ENTRY_RULE_VERSION: &str =
@@ -217,6 +221,7 @@ pub(super) enum PaperStrategyPreset {
     ResearchMomentumShort04Sl06r15mSupportBreakdownDelta5To72V3,
     ResearchMomentumShort04Sl06r15mSupportBreakdownDelta5To72V4,
     ResearchMomentumShort04Sl065r15mSupportBreakdownDelta1To100V5,
+    ResearchMomentumShort04Sl10r15mSupportBreakdownDelta5To100V6,
     ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta20To40,
     ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40,
     ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner6R20Stop1,
@@ -288,6 +293,9 @@ impl PaperStrategyPreset {
             }
             Self::ResearchMomentumShort04Sl065r15mSupportBreakdownDelta1To100V5 => {
                 MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_065R_DELTA1_100_V5_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumShort04Sl10r15mSupportBreakdownDelta5To100V6 => {
+                MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_10R_DELTA5_100_V6_RESEARCH_PRESET
             }
             Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta20To40 => {
                 MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_PRESET
@@ -410,6 +418,9 @@ impl PaperStrategyPreset {
             }
             MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_065R_DELTA1_100_V5_RESEARCH_PRESET => {
                 Ok(Self::ResearchMomentumShort04Sl065r15mSupportBreakdownDelta1To100V5)
+            }
+            MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_10R_DELTA5_100_V6_RESEARCH_PRESET => {
+                Ok(Self::ResearchMomentumShort04Sl10r15mSupportBreakdownDelta5To100V6)
             }
             MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_PRESET => {
                 Ok(Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta20To40)
@@ -929,6 +940,40 @@ impl PaperStrategyPreset {
                     "100".to_string(),
                     "--min-price-change-pct".to_string(),
                     "0.5".to_string(),
+                    "--max-price-change-pct".to_string(),
+                    "12.0".to_string(),
+                    "--entry-trigger-allowlist".to_string(),
+                    "breakdown_range_low".to_string(),
+                    "--ignore-entry-signal-updates-while-open".to_string(),
+                ]);
+            }
+            Self::ResearchMomentumShort04Sl10r15mSupportBreakdownDelta5To100V6 => {
+                args.extend([
+                    "--paper-outcome-entry-rule-version".to_string(),
+                    MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_10R_DELTA5_100_V6_RESEARCH_ENTRY_RULE_VERSION
+                        .to_string(),
+                    "--event-source".to_string(),
+                    "raw_state".to_string(),
+                    "--trade-direction".to_string(),
+                    "short".to_string(),
+                    "--stop-loss-pct".to_string(),
+                    "0.04".to_string(),
+                    "--target-rs".to_string(),
+                    "1.0".to_string(),
+                    "--entry-max-distance-pct".to_string(),
+                    "14.0".to_string(),
+                    "--entry-min-volume-ratio".to_string(),
+                    "1.0".to_string(),
+                    "--trend-timeframe".to_string(),
+                    "off".to_string(),
+                    "--trend-min-average-distance-pct".to_string(),
+                    "0.0".to_string(),
+                    "--min-delta-rank".to_string(),
+                    "5".to_string(),
+                    "--max-delta-rank".to_string(),
+                    "100".to_string(),
+                    "--min-price-change-pct".to_string(),
+                    "2.0".to_string(),
                     "--max-price-change-pct".to_string(),
                     "12.0".to_string(),
                     "--entry-trigger-allowlist".to_string(),
