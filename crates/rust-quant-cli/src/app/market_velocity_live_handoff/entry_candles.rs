@@ -44,20 +44,35 @@ async fn load_market_velocity_entry_candles(
     symbol: &str,
     limit: u32,
 ) -> Result<Vec<Candle>> {
-    let table_name = format!("{}_candles_15m", symbol.trim().to_ascii_lowercase());
-    let query = entry_candle_load_sql(&quote_identifier(&table_name)?);
+    load_market_velocity_live_candles_from_db(pool, symbol, Timeframe::M15, limit).await
+}
+/// 按周期从 quant_core K 线分表读取 live 判断所需数据，并保留交易所 confirm 状态。
+async fn load_market_velocity_live_candles_from_db(
+    pool: &PgPool,
+    symbol: &str,
+    timeframe: Timeframe,
+    limit: u32,
+) -> Result<Vec<Candle>> {
+    let table_name = market_velocity_live_candle_table_name(symbol, timeframe)?;
+    let query = live_candle_load_sql(&table_name);
     let mut rows = sqlx::query(&query)
         .bind(i64::from(limit.max(1)))
         .fetch_all(pool)
         .await
-        .with_context(|| format!("load 15m entry candles from {table_name}"))?;
+        .with_context(|| {
+            format!(
+                "load {} live candles from {}",
+                timeframe.as_str(),
+                table_name
+            )
+        })?;
     rows.reverse();
     rows.into_iter()
         .map(|row| {
             let ts: i64 = row.get("ts");
             let mut candle = Candle::new(
                 symbol.to_string(),
-                Timeframe::M15,
+                timeframe,
                 ts,
                 Price::new(parse_decimal_text(row.get::<String, _>("o").as_str())?)?,
                 Price::new(parse_decimal_text(row.get::<String, _>("h").as_str())?)?,
@@ -73,8 +88,12 @@ async fn load_market_velocity_entry_candles(
         .collect()
 }
 /// DB candles can include an in-progress latest row, so live entry checks must read exchange confirmation state.
-fn entry_candle_load_sql(table_name: &str) -> String {
+fn live_candle_load_sql(table_name: &str) -> String {
     format!("SELECT ts, o, h, l, c, vol, confirm FROM {table_name} ORDER BY ts DESC LIMIT $1")
+}
+/// 使用仓储统一表名规则，避免非 15m live 读数绕过 confirm 字段。
+fn market_velocity_live_candle_table_name(symbol: &str, timeframe: Timeframe) -> Result<String> {
+    PostgresCandleRepository::quoted_table_name(symbol, timeframe)
 }
 /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 pub(super) async fn load_market_velocity_live_entry_candles(
@@ -305,17 +324,6 @@ fn market_velocity_entry_candles_need_refresh(
     let age_minutes = (age_seconds + 59) / 60;
     age_minutes > max_staleness_minutes
 }
-/// 提供quoteidentifier的集中实现，避免行情数据调用方重复处理相同细节。
-fn quote_identifier(identifier: &str) -> Result<String> {
-    if identifier.is_empty()
-        || !identifier
-            .chars()
-            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
-    {
-        bail!("unsafe table identifier: {identifier}");
-    }
-    Ok(format!("\"{}\"", identifier.replace('"', "\"\"")))
-}
 /// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 fn parse_decimal_text(value: &str) -> Result<f64> {
     let parsed = value
@@ -461,8 +469,21 @@ mod tests {
     }
     #[test]
     fn entry_candle_db_load_query_reads_exchange_confirm_state() {
-        let sql = entry_candle_load_sql("\"cap-usdt-swap_candles_15m\"");
+        let table_name =
+            market_velocity_live_candle_table_name("CAP-USDT-SWAP", Timeframe::M15).unwrap();
+        let sql = live_candle_load_sql(&table_name);
 
+        assert!(sql.contains("\"cap-usdt-swap_candles_15m\""));
+        assert!(sql.contains("confirm"));
+        assert!(sql.contains("ORDER BY ts DESC LIMIT $1"));
+    }
+    #[test]
+    fn live_candle_db_load_query_reads_confirm_for_requested_timeframe() {
+        let table_name =
+            market_velocity_live_candle_table_name("CAP-USDT-SWAP", Timeframe::H4).unwrap();
+        let sql = live_candle_load_sql(&table_name);
+
+        assert!(sql.contains("\"cap-usdt-swap_candles_4h\""));
         assert!(sql.contains("confirm"));
         assert!(sql.contains("ORDER BY ts DESC LIMIT $1"));
     }
