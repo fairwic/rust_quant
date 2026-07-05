@@ -45,10 +45,7 @@ async fn load_market_velocity_entry_candles(
     limit: u32,
 ) -> Result<Vec<Candle>> {
     let table_name = format!("{}_candles_15m", symbol.trim().to_ascii_lowercase());
-    let query = format!(
-        "SELECT ts, o, h, l, c, vol FROM {} ORDER BY ts DESC LIMIT $1",
-        quote_identifier(&table_name)?
-    );
+    let query = entry_candle_load_sql(&quote_identifier(&table_name)?);
     let mut rows = sqlx::query(&query)
         .bind(i64::from(limit.max(1)))
         .fetch_all(pool)
@@ -68,10 +65,16 @@ async fn load_market_velocity_entry_candles(
                 Price::new(parse_decimal_text(row.get::<String, _>("c").as_str())?)?,
                 Volume::new(parse_decimal_text(row.get::<String, _>("vol").as_str())?)?,
             );
-            candle.confirm();
+            if row.get::<String, _>("confirm").trim() == "1" {
+                candle.confirm();
+            }
             Ok(candle)
         })
         .collect()
+}
+/// DB candles can include an in-progress latest row, so live entry checks must read exchange confirmation state.
+fn entry_candle_load_sql(table_name: &str) -> String {
+    format!("SELECT ts, o, h, l, c, vol, confirm FROM {table_name} ORDER BY ts DESC LIMIT $1")
 }
 /// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
 pub(super) async fn load_market_velocity_live_entry_candles(
@@ -455,6 +458,13 @@ mod tests {
         assert_eq!(sql.matches("INSERT INTO").count(), 1);
         assert_eq!(sql.matches("ON CONFLICT (ts) DO UPDATE").count(), 1);
         assert!(sql.contains("\"cap-usdt-swap_candles_15m\""));
+    }
+    #[test]
+    fn entry_candle_db_load_query_reads_exchange_confirm_state() {
+        let sql = entry_candle_load_sql("\"cap-usdt-swap_candles_15m\"");
+
+        assert!(sql.contains("confirm"));
+        assert!(sql.contains("ORDER BY ts DESC LIMIT $1"));
     }
     #[tokio::test]
     async fn entry_candle_fetch_retry_recovers_from_first_transient_failure() {

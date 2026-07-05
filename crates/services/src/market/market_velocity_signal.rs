@@ -485,7 +485,7 @@ impl MarketVelocityStrategySignalConfig {
                 DEFAULT_SYMBOL_BLOCKLIST,
             )?,
         };
-        normalize_market_velocity_live_execution_policy(&mut parsed);
+        apply_market_velocity_trade_direction_safety(&mut parsed);
         Ok(parsed)
     }
     /// 从外部输入转换为内部模型，隔离 行情与市场数据 的字段适配细节。
@@ -666,7 +666,7 @@ impl MarketVelocityStrategySignalConfig {
         if let Some(value) = json_u32(risk_config, "max_holding_hours")? {
             parsed.max_holding_hours = value;
         }
-        normalize_market_velocity_live_execution_policy(&mut parsed);
+        apply_market_velocity_trade_direction_safety(&mut parsed);
         Ok(parsed)
     }
     /// 提供入场确认配置的集中实现，避免行情数据调用方重复处理相同细节。
@@ -696,27 +696,44 @@ impl MarketVelocityStrategySignalConfig {
 fn market_velocity_execution_policy_stage(
     config: &MarketVelocityStrategySignalConfig,
 ) -> &'static str {
-    match config.trade_direction {
-        MarketVelocitySignalTradeDirection::Long => "live_execution_allowed",
-        MarketVelocitySignalTradeDirection::Short => "paper_signal_only",
+    if config.paper_trade_required {
+        return "paper_signal_only";
+    }
+    if market_velocity_auto_execution_allowed(config) {
+        return "live_execution_allowed";
+    }
+    "signal_only"
+}
+
+/// Short-side Market Velocity is still research-only; long-side configs keep their explicit live/paper policy.
+fn apply_market_velocity_trade_direction_safety(config: &mut MarketVelocityStrategySignalConfig) {
+    if matches!(
+        config.trade_direction,
+        MarketVelocitySignalTradeDirection::Short
+    ) {
+        config.automation_mode = "signal_only".to_string();
+        config.live_order_allowed = false;
+        config.paper_trade_required = true;
     }
 }
 
-fn normalize_market_velocity_live_execution_policy(
-    config: &mut MarketVelocityStrategySignalConfig,
-) {
-    match config.trade_direction {
-        MarketVelocitySignalTradeDirection::Long => {
-            config.automation_mode = DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE.to_string();
-            config.live_order_allowed = DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED;
-            config.paper_trade_required = DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED;
-        }
-        MarketVelocitySignalTradeDirection::Short => {
-            config.automation_mode = "signal_only".to_string();
-            config.live_order_allowed = false;
-            config.paper_trade_required = true;
-        }
-    }
+/// Normalize runtime safety flags so direct struct construction follows the same rules as env/json config parsing.
+fn normalized_market_velocity_strategy_signal_config(
+    config: &MarketVelocityStrategySignalConfig,
+) -> MarketVelocityStrategySignalConfig {
+    let mut config = config.clone();
+    apply_market_velocity_trade_direction_safety(&mut config);
+    config
+}
+
+/// Web task generation should only auto-execute when the strategy policy explicitly authorizes live orders.
+fn market_velocity_auto_execution_allowed(config: &MarketVelocityStrategySignalConfig) -> bool {
+    config.live_order_allowed
+        && !config.paper_trade_required
+        && config
+            .automation_mode
+            .trim()
+            .eq_ignore_ascii_case(DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE)
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarketVelocityStrategySignalBlocker {
@@ -733,6 +750,7 @@ pub enum MarketVelocityStrategySignalBlocker {
     EntryTimingNotConfirmed,
     EntryTimingOverextended,
     EntryTriggerFiltered,
+    PriceChangeTooLow,
     PriceChangeTooHigh,
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -972,15 +990,16 @@ pub fn build_market_velocity_strategy_signal_request_with_entry_confirmation_and
     entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
     selected_entry: Option<&MarketVelocitySelectedEntry>,
 ) -> Result<MarketVelocityStrategySignalDecision> {
-    if let Some(blocker) = pre_entry_signal_blocker(event, config)? {
+    let config = normalized_market_velocity_strategy_signal_config(config);
+    if let Some(blocker) = pre_entry_signal_blocker(event, &config)? {
         return Ok(MarketVelocityStrategySignalDecision::Blocked(blocker));
     }
-    if let Some(blocker) = entry_confirmation_blocker(entry_confirmation, config) {
+    if let Some(blocker) = entry_confirmation_blocker(entry_confirmation, &config) {
         return Ok(MarketVelocityStrategySignalDecision::Blocked(blocker));
     }
     build_market_velocity_strategy_signal_submit_request(
         event,
-        config,
+        &config,
         entry_confirmation,
         selected_entry,
     )
@@ -1014,9 +1033,7 @@ fn pre_entry_signal_blocker(
             .unwrap_or_default()
             .abs();
         if price_change_pct < min_price_change_pct {
-            return Ok(Some(
-                MarketVelocityStrategySignalBlocker::PriceChangeTooHigh,
-            ));
+            return Ok(Some(MarketVelocityStrategySignalBlocker::PriceChangeTooLow));
         }
     }
     if let Some(max_price_change_pct) = config.max_price_change_pct {
@@ -1098,9 +1115,6 @@ fn build_market_velocity_strategy_signal_submit_request(
     entry_confirmation: Option<&MarketVelocityEntryConfirmation>,
     selected_entry: Option<&MarketVelocitySelectedEntry>,
 ) -> Result<MarketVelocityStrategySignalDecision> {
-    let mut effective_config = config.clone();
-    normalize_market_velocity_live_execution_policy(&mut effective_config);
-    let config = &effective_config;
     let event_current_price = decimal_to_positive_f64(event.current_price)
         .ok_or_else(|| anyhow!("market velocity event current_price is missing"))?;
     let entry_price = selected_entry
@@ -1138,11 +1152,17 @@ fn build_market_velocity_strategy_signal_submit_request(
     let side = config.trade_direction.order_side();
     let source_signal_type = config.trade_direction.source_signal_type(strategy_slug);
     let rank_event_id = event.id;
+    let strategy_preset_id = market_velocity_external_id_segment(&config.strategy_preset);
+    let entry_rule_version_id = market_velocity_external_id_segment(&config.entry_rule_version);
     let external_id = rank_event_id
-        .map(|id| format!("rust_quant:{source_signal_type}:{id}"))
+        .map(|id| {
+            format!(
+                "rust_quant:{source_signal_type}:{id}:{strategy_preset_id}:{entry_rule_version_id}"
+            )
+        })
         .unwrap_or_else(|| {
             format!(
-                "rust_quant:{source_signal_type}:{}:{}:{}",
+                "rust_quant:{source_signal_type}:{}:{}:{}:{strategy_preset_id}:{entry_rule_version_id}",
                 exchange,
                 symbol,
                 event.detected_at.timestamp_millis()
@@ -1288,7 +1308,7 @@ fn build_market_velocity_strategy_signal_submit_request(
         "position_side": direction,
         "trade_side": "open",
         "order_type": "market",
-        "auto_execution_allowed": config.live_order_allowed,
+        "auto_execution_allowed": market_velocity_auto_execution_allowed(config),
         "execution_policy": execution_policy,
         "risk_plan": risk_plan,
         "detected_at": generated_at.as_deref(),
@@ -1317,6 +1337,25 @@ fn build_market_velocity_strategy_signal_submit_request(
     ));
     request.confidence = Some(confidence);
     Ok(MarketVelocityStrategySignalDecision::Submit(request))
+}
+/// Keep Core/Web idempotency stable while making same-event strategy versions distinguishable.
+fn market_velocity_external_id_segment(value: &str) -> String {
+    let segment: String = value
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if segment.is_empty() {
+        "unversioned".to_string()
+    } else {
+        segment
+    }
 }
 /// 提供市场动量策略信号period的集中实现，避免行情数据调用方重复处理相同细节。
 fn market_velocity_strategy_signal_period(

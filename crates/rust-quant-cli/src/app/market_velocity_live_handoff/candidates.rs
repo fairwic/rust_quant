@@ -85,7 +85,7 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
             AND upper(replace(market_rank_events.symbol, '-', '')) NOT LIKE 'LINKUSDT%'
             AND COALESCE(live_handoff_state, 'pending') = 'pending'
             AND ($5::bigint IS NULL OR market_rank_events.id = $5)
-            AND detected_at >= NOW() - ($6::text || ' hours')::interval
+            AND ($5::bigint IS NOT NULL OR detected_at >= NOW() - ($6::text || ' hours')::interval)
         ),
         earliest_per_symbol AS (
           SELECT DISTINCT ON (symbol) *
@@ -254,6 +254,17 @@ mod tests {
                 "($4::double precision IS NULL OR ABS(COALESCE(price_change_pct, 0)) <= $4)"
             ),
             "live handoff should not refresh candles for events above max_price_change_pct: {sql}"
+        );
+    }
+
+    #[test]
+    fn candidate_scan_sql_explicit_event_id_bypasses_lookback_window() {
+        let sql = market_velocity_live_candidate_events_sql();
+        assert!(
+            sql.contains(
+                "AND ($5::bigint IS NOT NULL OR detected_at >= NOW() - ($6::text || ' hours')::interval)"
+            ),
+            "manual event replay must not silently disappear because the event is outside the scan lookback: {sql}"
         );
     }
 

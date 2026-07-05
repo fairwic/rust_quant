@@ -35,6 +35,28 @@ fn parses_off_trend_timeframe() {
     assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::Off);
 }
 #[test]
+fn kline_15m_event_source_defaults_to_no_higher_timeframe_trend() {
+    let args = parse_cli_args_from(["--event-source", "kline_15m"]).unwrap();
+    assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::Off);
+}
+#[test]
+fn kline_15m_event_source_preserves_explicit_4h_trend() {
+    let args =
+        parse_cli_args_from(["--event-source", "kline_15m", "--trend-timeframe", "4h"]).unwrap();
+    assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::FourHour);
+}
+#[test]
+fn kline_15m_event_source_preserves_default_4h_when_trend_threshold_is_explicit() {
+    let args = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--trend-min-average-distance-pct",
+        "0.5",
+    ])
+    .unwrap();
+    assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::FourHour);
+}
+#[test]
 fn rejects_unknown_trend_timeframe() {
     let err = parse_cli_args_from(["--trend-timeframe", "2h"]).unwrap_err();
     assert!(err.to_string().contains("unknown --trend-timeframe"));

@@ -173,6 +173,32 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
             ORDER BY candidates.symbol
             "#
         }
+        MarketVelocityEventSource::Kline15m if should_load_4h_candles(args) => {
+            r#"
+            WITH candidates AS (
+              SELECT
+                upper(replace(table_name, '_candles_15m', '')) AS symbol,
+                table_name AS candles_15m
+              FROM information_schema.tables
+              WHERE table_schema = 'public'
+                AND table_name LIKE '%\_candles\_15m' ESCAPE '\'
+            )
+            SELECT
+              candidates.symbol,
+              candidates.candles_15m,
+              t1.table_name AS candles_1h,
+              t4.table_name AS candles_4h
+            FROM candidates
+            LEFT JOIN information_schema.tables t1
+              ON t1.table_schema = 'public'
+             AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
+            JOIN information_schema.tables t4
+              ON t4.table_schema = 'public'
+             AND t4.table_name = lower(candidates.symbol) || '_candles_4h'
+            ORDER BY md5($9::text || ':' || candidates.symbol)
+            LIMIT $8
+            "#
+        }
         MarketVelocityEventSource::Kline15m => {
             r#"
             WITH candidates AS (
@@ -187,14 +213,11 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
               candidates.symbol,
               candidates.candles_15m,
               t1.table_name AS candles_1h,
-              COALESCE(t4.table_name, candidates.candles_15m) AS candles_4h
+              candidates.candles_15m AS candles_4h
             FROM candidates
             LEFT JOIN information_schema.tables t1
               ON t1.table_schema = 'public'
              AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
-            LEFT JOIN information_schema.tables t4
-              ON t4.table_schema = 'public'
-             AND t4.table_name = lower(candidates.symbol) || '_candles_4h'
             ORDER BY md5($9::text || ':' || candidates.symbol)
             LIMIT $8
             "#
@@ -622,8 +645,8 @@ fn quote_identifier(identifier: &str) -> String {
 mod tests {
     use super::*;
     use crate::app::market_velocity_event_backtest::{
-        FvgEntryMode, MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
-        MarketVelocityTrendTimeframe, MS_15M, MS_1H, MS_4H,
+        parse_cli_args_from, FvgEntryMode, MarketVelocityEventBacktestArgs,
+        MarketVelocityEventSource, MarketVelocityTrendTimeframe, MS_15M, MS_1H, MS_4H,
     };
     #[test]
     fn episode_event_source_reads_episode_table() {
@@ -693,6 +716,44 @@ mod tests {
         assert!(!candidate_sql.contains("market_rank_events"));
         assert!(event_sql.contains("ts + 900000 AS detected_ms"));
         assert!(!event_sql.contains("market_rank_events"));
+    }
+    #[test]
+    fn kline_15m_event_source_requires_real_4h_table_when_4h_trend_is_enabled() {
+        let args = MarketVelocityEventBacktestArgs {
+            event_source: MarketVelocityEventSource::Kline15m,
+            trend_timeframe: MarketVelocityTrendTimeframe::FourHour,
+            fvg_entry_mode: FvgEntryMode::Off,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let candidate_sql = candidate_symbols_sql(&args);
+
+        assert!(candidate_sql.contains("JOIN information_schema.tables t4"));
+        assert!(candidate_sql.contains("t4.table_name AS candles_4h"));
+        assert!(
+            !candidate_sql.contains("COALESCE(t4.table_name, candidates.candles_15m)"),
+            "4h trend backtests must fail closed when the 4h table is missing"
+        );
+    }
+    #[test]
+    fn kline_15m_cli_default_allows_missing_4h_table_when_trend_not_requested() {
+        let args = parse_cli_args_from(["--event-source", "kline_15m"]).unwrap();
+        let candidate_sql = candidate_symbols_sql(&args);
+
+        assert!(candidate_sql.contains("candidates.candles_15m AS candles_4h"));
+        assert!(!candidate_sql.contains("JOIN information_schema.tables t4"));
+    }
+    #[test]
+    fn kline_15m_event_source_allows_missing_4h_table_when_4h_data_is_unused() {
+        let args = MarketVelocityEventBacktestArgs {
+            event_source: MarketVelocityEventSource::Kline15m,
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            fvg_entry_mode: FvgEntryMode::Off,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let candidate_sql = candidate_symbols_sql(&args);
+
+        assert!(candidate_sql.contains("candidates.candles_15m AS candles_4h"));
+        assert!(!candidate_sql.contains("JOIN information_schema.tables t4"));
     }
     #[test]
     fn kline_15m_event_source_filters_completed_candles_by_trade_direction() {

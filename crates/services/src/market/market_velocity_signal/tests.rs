@@ -187,7 +187,10 @@ fn rank_velocity_up_event_builds_quant_web_strategy_signal() {
         panic!("strong rank velocity event should submit a strategy signal");
     };
     assert_eq!(request.source, "rust_quant");
-    assert_eq!(request.external_id, "rust_quant:market_velocity:991");
+    assert_eq!(
+        request.external_id,
+        "rust_quant:market_velocity:991:momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1:rank_radar_4h15m_mom0375_17r_rcm_ma_pb_d18_42_p5_10_v1"
+    );
     assert_eq!(request.strategy_slug, "market_velocity");
     assert_eq!(
         request.strategy_key,
@@ -947,9 +950,9 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
     assert_eq!(config.fvg_max_wait_candles, 24);
     assert_eq!(config.fvg_impulse_retrace_fill_pct, 20.0);
     assert_eq!(config.fvg_impulse_retrace_min_wait_candles, 0);
-    assert_eq!(config.automation_mode, "live_execution_authorized");
-    assert!(config.live_order_allowed);
-    assert!(!config.paper_trade_required);
+    assert_eq!(config.automation_mode, "signal_only");
+    assert!(!config.live_order_allowed);
+    assert!(config.paper_trade_required);
     assert_eq!(
         config.entry_trigger_allowlist,
         vec!["breakout_previous_high"]
@@ -971,6 +974,10 @@ fn strategy_config_json_overrides_market_velocity_signal_defaults() {
         "m15_impulse_retrace"
     );
     assert_eq!(payload["entry_filter"]["max_price_change_pct"], 10.0);
+    assert_eq!(payload["auto_execution_allowed"], false);
+    assert_eq!(payload["execution_policy"]["mode"], "signal_only");
+    assert_eq!(payload["execution_policy"]["live_order_allowed"], false);
+    assert_eq!(payload["execution_policy"]["paper_trade_required"], true);
 }
 #[test]
 fn strategy_config_json_builds_partial_take_profit_legs_for_runner() {
@@ -1174,7 +1181,7 @@ fn market_velocity_symbol_blocklist_blocks_signal_before_submit() {
     );
 }
 #[test]
-fn dry_run_execution_task_mode_is_normalized_to_live_payload() {
+fn dry_run_execution_task_mode_does_not_authorize_auto_execution() {
     let config = MarketVelocityStrategySignalConfig {
         automation_mode: "execution_task_dry_run".to_string(),
         live_order_allowed: true,
@@ -1197,16 +1204,16 @@ fn dry_run_execution_task_mode_is_normalized_to_live_payload() {
     };
     let payload: Value =
         serde_json::from_str(&request.payload_json).expect("payload should be valid json");
-    assert_eq!(payload["auto_execution_allowed"], true);
+    assert_eq!(payload["auto_execution_allowed"], false);
     assert_eq!(
         payload["execution_policy"]["mode"],
-        "live_execution_authorized"
+        "execution_task_dry_run"
     );
     assert_eq!(payload["execution_policy"]["live_order_allowed"], true);
     assert_eq!(payload["execution_policy"]["paper_trade_required"], false);
     assert_eq!(
         payload["execution_policy"]["production_stage"],
-        "live_execution_allowed"
+        "signal_only"
     );
 }
 #[test]
@@ -1354,6 +1361,30 @@ fn market_velocity_signal_blocks_above_max_price_change_pct() {
         .expect("event should be evaluated"),
         MarketVelocityStrategySignalDecision::Blocked(
             MarketVelocityStrategySignalBlocker::PriceChangeTooHigh
+        )
+    );
+}
+#[test]
+fn market_velocity_signal_blocks_below_min_price_change_pct_with_weak_label() {
+    let config = MarketVelocityStrategySignalConfig {
+        min_price_change_pct: Some(5.0),
+        ..MarketVelocityStrategySignalConfig::default()
+    };
+    let mut event = rank_event(
+        MarketRankEventType::RankVelocity,
+        "up",
+        Some(Decimal::new(3400, 0)),
+    );
+    event.price_change_pct = Some(Decimal::new(499, 2));
+    assert_eq!(
+        build_market_velocity_strategy_signal_request_with_entry_confirmation(
+            &event,
+            &config,
+            Some(&entry_confirmation()),
+        )
+        .expect("event should be evaluated"),
+        MarketVelocityStrategySignalDecision::Blocked(
+            MarketVelocityStrategySignalBlocker::PriceChangeTooLow
         )
     );
 }

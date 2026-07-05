@@ -8,6 +8,7 @@ const EXECUTION_WORKER_ENV_KEYS: &[&str] = &[
     "RUST_QUAN_WEB_INTERNAL_SECRET",
     "MARKET_VELOCITY_LIVE_READINESS_TASK_ID",
     "EXECUTION_WORKER_LEASE_LIMIT",
+    "EXECUTION_WORKER_DRY_RUN",
     "EXECUTION_WORKER_CONFIRMATION_MODE",
     "EXECUTION_WORKER_REPORT_REPLAY_MODE",
     "QUANT_CORE_DATABASE_URL",
@@ -45,6 +46,7 @@ impl Drop for EnvSnapshot {
 fn configure_base_worker_env() {
     std::env::set_var("RUST_QUAN_WEB_BASE_URL", "http://127.0.0.1:18000");
     std::env::set_var("EXECUTION_EVENT_SECRET", "local-test-secret");
+    std::env::remove_var("EXECUTION_WORKER_DRY_RUN");
     std::env::remove_var("QUANT_CORE_DATABASE_URL");
     std::env::remove_var("QUANT_CORE_POSTGRES_URL");
     std::env::remove_var("POSTGRES_QUANT_CORE_DATABASE_URL");
@@ -63,6 +65,19 @@ fn live_worker_from_env_requires_persistent_audit_repository() {
             .to_string()
             .contains("QUANT_CORE_DATABASE_URL is required for live execution audit"),
         "unexpected error: {error:#}"
+    );
+}
+#[test]
+fn dry_run_worker_from_env_does_not_require_live_audit_repository() {
+    let _guard = env_lock().lock().expect("env lock poisoned");
+    let _snapshot = EnvSnapshot::capture(EXECUTION_WORKER_ENV_KEYS);
+    configure_base_worker_env();
+    std::env::set_var("EXECUTION_WORKER_DRY_RUN", "true");
+    let worker = ExecutionWorker::from_env()
+        .expect("dry-run worker should start without live audit repository");
+    assert!(
+        worker.config.dry_run,
+        "EXECUTION_WORKER_DRY_RUN=true must select the dry-run gateway path"
     );
 }
 #[test]
@@ -107,6 +122,7 @@ fn worker_from_env_rejects_invalid_execution_mode_booleans_before_path_selection
     let _guard = env_lock().lock().expect("env lock poisoned");
     let _snapshot = EnvSnapshot::capture(EXECUTION_WORKER_ENV_KEYS);
     for key in [
+        "EXECUTION_WORKER_DRY_RUN",
         "EXECUTION_WORKER_REPORT_REPLAY_MODE",
         "EXECUTION_WORKER_CONFIRMATION_MODE",
     ] {

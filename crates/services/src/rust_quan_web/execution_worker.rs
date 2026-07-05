@@ -112,7 +112,7 @@ impl ExecutionWorkerConfig {
                 .unwrap_or(0),
             Err(_) => 10,
         };
-        let dry_run = false;
+        let dry_run = parse_env_bool("EXECUTION_WORKER_DRY_RUN", false);
         let default_exchange = std::env::var("EXECUTION_WORKER_DEFAULT_EXCHANGE")
             .ok()
             .and_then(|value| parse_exchange(&value).ok())
@@ -174,6 +174,7 @@ impl ExecutionWorkerConfig {
 /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 pub(super) fn validate_worker_mode_bool_envs() -> Result<()> {
     for key in [
+        "EXECUTION_WORKER_DRY_RUN",
         "EXECUTION_WORKER_REPORT_REPLAY_MODE",
         "EXECUTION_WORKER_CONFIRMATION_MODE",
     ] {

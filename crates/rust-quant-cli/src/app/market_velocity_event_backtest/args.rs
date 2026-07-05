@@ -453,6 +453,7 @@ where
     let mut entry_trigger_allowlist_explicit = false;
     let mut entry_trigger_blocklist_explicit = false;
     let mut paper_outcome_entry_rule_version_explicit = false;
+    let mut higher_timeframe_trend_control_explicit = false;
     let mut args = args.into_iter().map(Into::into);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -514,9 +515,11 @@ where
                 parsed.entry_retest_open_fade_min_volume_ratio = Some(parse_next(&mut args, &arg)?)
             }
             "--trend-min-average-distance-pct" => {
+                higher_timeframe_trend_control_explicit = true;
                 parsed.trend_min_average_distance_pct = parse_next(&mut args, &arg)?
             }
             "--trend-timeframe" => {
+                higher_timeframe_trend_control_explicit = true;
                 parsed.trend_timeframe =
                     MarketVelocityTrendTimeframe::from_str(&next_arg(&mut args, &arg)?)?
             }
@@ -614,6 +617,11 @@ where
             }
             other => bail!("unknown argument: {other}"),
         }
+    }
+    if parsed.event_source == MarketVelocityEventSource::Kline15m
+        && !higher_timeframe_trend_control_explicit
+    {
+        parsed.trend_timeframe = MarketVelocityTrendTimeframe::Off;
     }
     if parsed.paper_outcome_sink == MarketVelocityPaperOutcomeSink::Web
         && !entry_trigger_allowlist_explicit
