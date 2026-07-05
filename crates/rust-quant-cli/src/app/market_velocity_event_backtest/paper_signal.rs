@@ -17,9 +17,12 @@ use rust_quant_services::market::{
 use rust_quant_services::rust_quan_web::{
     ExecutionTaskClient, ExecutionTaskConfig, StrategySignalSubmitRequest,
 };
+use std::time::Duration;
+use tokio::time::timeout;
 
 const BREAKDOWN_SHORT_STRATEGY_SLUG: &str = "market_velocity_breakdown_short";
 const DEFAULT_MARKET_VELOCITY_STRATEGY_SLUG: &str = "market_velocity";
+const PAPER_STRATEGY_SIGNAL_SUBMIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 将 paper observation 已确认入场转换为 Web 策略信号请求，保持观察信号和执行任务解耦。
 pub fn build_market_velocity_paper_strategy_signal_request(
@@ -56,18 +59,44 @@ pub async fn submit_market_velocity_paper_strategy_signals(
     }
     let client = ExecutionTaskClient::new(paper_strategy_signal_execution_task_config()?)?;
     let mut submitted = 0usize;
+    let mut failures = Vec::new();
     for event in confirmed {
         let request = build_market_velocity_paper_strategy_signal_request(event, args)?;
-        let response = client.submit_strategy_signal(request).await?;
-        if !response.generated_tasks.is_empty() {
-            bail!(
-                "paper strategy signal generated {} execution tasks; expected signal-only",
-                response.generated_tasks.len()
-            );
+        match timeout(
+            PAPER_STRATEGY_SIGNAL_SUBMIT_TIMEOUT,
+            client.submit_strategy_signal(request),
+        )
+        .await
+        {
+            Ok(Ok(response)) => {
+                if !response.generated_tasks.is_empty() {
+                    bail!(
+                        "paper strategy signal generated {} execution tasks; expected signal-only",
+                        response.generated_tasks.len()
+                    );
+                }
+                submitted += 1;
+            }
+            Ok(Err(error)) => {
+                failures.push(format!("event_id={}: {error}", event.event.id));
+            }
+            Err(_) => {
+                failures.push(format!(
+                    "event_id={}: timed out after {}s",
+                    event.event.id,
+                    PAPER_STRATEGY_SIGNAL_SUBMIT_TIMEOUT.as_secs()
+                ));
+            }
         }
-        submitted += 1;
     }
-    println!("paper_strategy_signals_submitted={submitted}");
+    println!(
+        "paper_strategy_signals_submitted={submitted}\tpaper_strategy_signals_failed={}",
+        failures.len()
+    );
+    if !failures.is_empty() {
+        let detail = failures.join("; ").chars().take(1_000).collect::<String>();
+        bail!("paper strategy signal submissions failed: {detail}");
+    }
     Ok(())
 }
 
