@@ -165,6 +165,37 @@ fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
         "postgres quant_core DDL must index live handoff diagnostics by latest evaluation time"
     );
     assert!(
+        POSTGRES_QUANT_CORE_DDL
+            .contains("CREATE TABLE IF NOT EXISTS market_velocity_live_handoff_states"),
+        "postgres quant_core DDL must create strategy-scoped live handoff state table"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("uidx_market_velocity_live_handoff_states_contract"),
+        "postgres quant_core DDL must keep one live handoff state per rank event and strategy contract"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("idx_market_velocity_live_handoff_states_pending"),
+        "postgres quant_core DDL must index pending strategy-scoped live handoff scans"
+    );
+    for column in [
+        "market_velocity_live_handoff_states.id",
+        "market_velocity_live_handoff_states.rank_event_id",
+        "market_velocity_live_handoff_states.strategy_slug",
+        "market_velocity_live_handoff_states.strategy_preset",
+        "market_velocity_live_handoff_states.entry_rule_version",
+        "market_velocity_live_handoff_states.handoff_state",
+        "market_velocity_live_handoff_states.blocker_code",
+        "market_velocity_live_handoff_states.blocker_detail",
+        "market_velocity_live_handoff_states.last_evaluated_at",
+        "market_velocity_live_handoff_states.created_at",
+        "market_velocity_live_handoff_states.updated_at",
+    ] {
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(&format!("COMMENT ON COLUMN {column}")),
+            "postgres quant_core DDL must comment column {column}"
+        );
+    }
+    assert!(
         POSTGRES_QUANT_CORE_DDL.contains("idx_market_rank_events_radar_exchange_recent"),
         "postgres quant_core DDL must index recent radar event lookups by exchange and time"
     );

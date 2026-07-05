@@ -317,6 +317,7 @@ pub async fn run_market_velocity_live_handoff(
                 record_market_velocity_live_handoff_blocker(
                     &pool,
                     &event,
+                    &signal_config,
                     blocker_code,
                     &blocker_detail,
                 )
@@ -342,6 +343,7 @@ pub async fn run_market_velocity_live_handoff(
                 record_market_velocity_live_handoff_blocker(
                     &pool,
                     &event,
+                    &signal_config,
                     blocker_code,
                     &blocker_detail,
                 )
@@ -363,6 +365,7 @@ pub async fn run_market_velocity_live_handoff(
                         record_market_velocity_live_handoff_blocker(
                             &pool,
                             &event,
+                            &signal_config,
                             blocker_code,
                             &blocker_detail,
                         )
@@ -384,6 +387,7 @@ pub async fn run_market_velocity_live_handoff(
                     record_market_velocity_live_handoff_blocker(
                         &pool,
                         &event,
+                        &signal_config,
                         blocker_code,
                         &blocker_detail,
                     )
@@ -411,6 +415,7 @@ pub async fn run_market_velocity_live_handoff(
                     record_market_velocity_live_handoff_blocker(
                         &pool,
                         &event,
+                        &signal_config,
                         blocker_code,
                         &blocker_detail,
                     )
@@ -434,6 +439,7 @@ pub async fn run_market_velocity_live_handoff(
                 record_market_velocity_live_handoff_blocker(
                     &pool,
                     &event,
+                    &signal_config,
                     blocker_code,
                     &blocker_detail,
                 )
@@ -464,6 +470,7 @@ pub async fn run_market_velocity_live_handoff(
                 record_market_velocity_live_handoff_blocker(
                     &pool,
                     &event,
+                    &signal_config,
                     &blocker_code,
                     &blocker_detail,
                 )
@@ -579,6 +586,7 @@ pub async fn run_market_velocity_live_handoff(
         update_market_velocity_live_handoff_status(
             &pool,
             event_id,
+            &signal_config,
             MarketVelocityLiveHandoffState::Blocked,
             Some(blocker_code),
             Some(&blocker_detail),
@@ -606,6 +614,7 @@ pub async fn run_market_velocity_live_handoff(
             update_market_velocity_live_handoff_status(
                 &pool,
                 event_id,
+                &signal_config,
                 MarketVelocityLiveHandoffState::Failed,
                 Some("market_velocity_submit_strategy_signal_failed"),
                 Some(&blocker_detail),
@@ -620,6 +629,7 @@ pub async fn run_market_velocity_live_handoff(
     update_market_velocity_live_handoff_status(
         &pool,
         event_id,
+        &signal_config,
         MarketVelocityLiveHandoffState::Created,
         None,
         None,
@@ -742,12 +752,38 @@ fn market_velocity_live_handoff_state_for_blocker(
 /// 更新 rank event 的交易 handoff 状态；不复用通知状态，避免混淆诊断语义。
 fn market_velocity_live_handoff_status_update_sql() -> &'static str {
     r#"
+        WITH strategy_handoff AS (
+            INSERT INTO market_velocity_live_handoff_states (
+                rank_event_id,
+                strategy_slug,
+                strategy_preset,
+                entry_rule_version,
+                handoff_state,
+                blocker_code,
+                blocker_detail,
+                last_evaluated_at,
+                updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+            ON CONFLICT (rank_event_id, strategy_slug, strategy_preset, entry_rule_version)
+            DO UPDATE SET
+                handoff_state = EXCLUDED.handoff_state,
+                blocker_code = EXCLUDED.blocker_code,
+                blocker_detail = EXCLUDED.blocker_detail,
+                last_evaluated_at = NOW(),
+                updated_at = NOW()
+            RETURNING rank_event_id
+        )
         UPDATE market_rank_events
-        SET live_handoff_state = $2,
-            live_handoff_blocker_code = $3,
-            live_handoff_blocker_detail = $4,
-            live_handoff_last_evaluated_at = NOW()
-        WHERE id = $1
+        SET live_handoff_state =
+                CASE WHEN $2 = 'market_velocity' THEN $5 ELSE live_handoff_state END,
+            live_handoff_blocker_code =
+                CASE WHEN $2 = 'market_velocity' THEN $6 ELSE live_handoff_blocker_code END,
+            live_handoff_blocker_detail =
+                CASE WHEN $2 = 'market_velocity' THEN $7 ELSE live_handoff_blocker_detail END,
+            live_handoff_last_evaluated_at =
+                CASE WHEN $2 = 'market_velocity' THEN NOW() ELSE live_handoff_last_evaluated_at END
+        WHERE id = (SELECT rank_event_id FROM strategy_handoff)
         "#
 }
 
@@ -755,12 +791,16 @@ fn market_velocity_live_handoff_status_update_sql() -> &'static str {
 async fn update_market_velocity_live_handoff_status(
     pool: &PgPool,
     event_id: i64,
+    config: &MarketVelocityStrategySignalConfig,
     state: MarketVelocityLiveHandoffState,
     blocker_code: Option<&str>,
     blocker_detail: Option<&str>,
 ) -> Result<()> {
     let result = sqlx::query(market_velocity_live_handoff_status_update_sql())
         .bind(event_id)
+        .bind(config.strategy_slug.trim())
+        .bind(config.strategy_preset.trim())
+        .bind(config.entry_rule_version.trim())
         .bind(state.as_str())
         .bind(blocker_code)
         .bind(blocker_detail)
@@ -777,6 +817,7 @@ async fn update_market_velocity_live_handoff_status(
 async fn record_market_velocity_live_handoff_blocker(
     pool: &PgPool,
     event: &MarketRankEvent,
+    config: &MarketVelocityStrategySignalConfig,
     blocker_code: &str,
     blocker_detail: &str,
 ) -> Result<()> {
@@ -786,6 +827,7 @@ async fn record_market_velocity_live_handoff_blocker(
     update_market_velocity_live_handoff_status(
         pool,
         event_id,
+        config,
         market_velocity_live_handoff_state_for_blocker(blocker_code),
         Some(blocker_code),
         Some(blocker_detail),
@@ -1731,11 +1773,19 @@ mod tests {
     #[test]
     fn live_handoff_status_update_sql_does_not_reuse_notification_state() {
         let sql = market_velocity_live_handoff_status_update_sql();
+        assert!(sql.contains("INSERT INTO market_velocity_live_handoff_states"));
+        assert!(sql.contains(
+            "ON CONFLICT (rank_event_id, strategy_slug, strategy_preset, entry_rule_version)"
+        ));
         assert!(sql.contains("UPDATE market_rank_events"));
         assert!(sql.contains("live_handoff_state"));
         assert!(sql.contains("live_handoff_blocker_code"));
         assert!(sql.contains("live_handoff_blocker_detail"));
         assert!(sql.contains("live_handoff_last_evaluated_at"));
+        assert!(
+            sql.contains("CASE WHEN $2 = 'market_velocity' THEN $5 ELSE live_handoff_state END"),
+            "legacy market_rank_events live handoff fields must only mirror the generic scheduler after strategy-scoped state is introduced"
+        );
         assert!(
             !sql.contains("notification_state"),
             "live handoff state must not overload notification delivery state"

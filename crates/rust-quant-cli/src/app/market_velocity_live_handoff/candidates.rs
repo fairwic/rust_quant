@@ -22,6 +22,9 @@ pub(super) async fn load_market_velocity_live_candidate_events(
         .bind(config.max_delta_rank)
         .bind(config.min_price_change_pct)
         .bind(config.max_price_change_pct)
+        .bind(config.strategy_slug.trim())
+        .bind(config.strategy_preset.trim())
+        .bind(config.entry_rule_version.trim())
         .bind(event_id)
         .bind(lookback_hours.to_string())
         .bind(i64::from(normalize_candidate_limit(i64::from(limit))))
@@ -73,6 +76,11 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
           FROM market_rank_events
           JOIN available_okx_symbols
             ON available_okx_symbols.symbol = upper(market_rank_events.symbol)
+          LEFT JOIN market_velocity_live_handoff_states live_handoff
+            ON live_handoff.rank_event_id = market_rank_events.id
+           AND live_handoff.strategy_slug = $5
+           AND live_handoff.strategy_preset = $6
+           AND live_handoff.entry_rule_version = $7
           WHERE event_type = 'rank_velocity'
             AND COALESCE(timeframe, '') = '15分钟'
             AND delta_rank >= $1
@@ -83,9 +91,12 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
             AND current_price IS NOT NULL
             AND lower(market_rank_events.exchange) = 'okx'
             AND upper(replace(market_rank_events.symbol, '-', '')) NOT LIKE 'LINKUSDT%'
-            AND COALESCE(live_handoff_state, 'pending') = 'pending'
-            AND ($5::bigint IS NULL OR market_rank_events.id = $5)
-            AND ($5::bigint IS NOT NULL OR detected_at >= NOW() - ($6::text || ' hours')::interval)
+            AND COALESCE(
+                  live_handoff.handoff_state,
+                  CASE WHEN $5 = 'market_velocity' THEN market_rank_events.live_handoff_state ELSE 'pending' END
+                ) = 'pending'
+            AND ($8::bigint IS NULL OR market_rank_events.id = $8)
+            AND ($8::bigint IS NOT NULL OR detected_at >= NOW() - ($9::text || ' hours')::interval)
         ),
         earliest_per_symbol AS (
           SELECT DISTINCT ON (symbol) *
@@ -123,7 +134,7 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
           notification_state
         FROM earliest_per_symbol
         ORDER BY detected_at ASC, id ASC
-        LIMIT $7
+        LIMIT $10
         "#
 }
 /// 提供市场rankeventfrom数据行的集中实现，避免行情数据调用方重复处理相同细节。
@@ -210,12 +221,34 @@ mod tests {
     fn candidate_scan_sql_only_consumes_pending_live_handoff_states() {
         let sql = market_velocity_live_candidate_events_sql();
         assert!(
-            sql.contains("live_handoff_state"),
-            "candidate scan must read the trade handoff state separately from notification_state"
+            sql.contains("market_velocity_live_handoff_states"),
+            "candidate scan must read strategy-scoped live handoff state separately from notification_state"
         );
         assert!(
-            sql.contains("COALESCE(live_handoff_state, 'pending') = 'pending'"),
-            "blocked, created, expired and failed candidates must not be reprocessed forever: {sql}"
+            sql.contains("COALESCE(")
+                && sql.contains("live_handoff.handoff_state,")
+                && sql.contains(") = 'pending'"),
+            "blocked, created, expired and failed candidates must not be reprocessed forever for the same strategy contract: {sql}"
+        );
+        assert!(
+            sql.contains("live_handoff.strategy_slug = $5")
+                && sql.contains("live_handoff.strategy_preset = $6")
+                && sql.contains("live_handoff.entry_rule_version = $7"),
+            "live handoff state must be scoped by strategy slug, preset and entry rule so one strategy does not consume another strategy's candidates: {sql}"
+        );
+        assert!(
+            !sql.contains("COALESCE(market_rank_events.live_handoff_state"),
+            "candidate scan must not use the legacy shared market_rank_events live_handoff_state as the authoritative strategy-scoped gate: {sql}"
+        );
+    }
+
+    #[test]
+    fn candidate_scan_sql_preserves_legacy_generic_handoff_state_without_blocking_other_strategies()
+    {
+        let sql = market_velocity_live_candidate_events_sql();
+        assert!(
+            sql.contains("CASE WHEN $5 = 'market_velocity' THEN market_rank_events.live_handoff_state ELSE 'pending' END"),
+            "generic market_velocity must honor pre-migration shared state, while strategy-specific schedulers ignore it: {sql}"
         );
     }
 
@@ -262,7 +295,7 @@ mod tests {
         let sql = market_velocity_live_candidate_events_sql();
         assert!(
             sql.contains(
-                "AND ($5::bigint IS NOT NULL OR detected_at >= NOW() - ($6::text || ' hours')::interval)"
+                "AND ($8::bigint IS NOT NULL OR detected_at >= NOW() - ($9::text || ' hours')::interval)"
             ),
             "manual event replay must not silently disappear because the event is outside the scan lookback: {sql}"
         );

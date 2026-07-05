@@ -22,6 +22,7 @@ async fn main() -> Result<()> {
         .context("apply quant_core postgres schema DDL")?;
     let checked_tables = [
         "market_rank_events",
+        "market_velocity_live_handoff_states",
         "market_velocity_episodes",
         "market_rank_snapshots",
         "execution_worker_checkpoints",
