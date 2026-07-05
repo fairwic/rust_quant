@@ -49,6 +49,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-market-velocity-paper-observation-scheduler:",
         "quant-core-market-velocity-live-handoff:",
         "quant-core-market-velocity-live-handoff-scheduler:",
+        "quant-core-market-velocity-breakdown-short-live-handoff-scheduler:",
         "quant-core-execution-worker:",
     ] {
         assert!(
@@ -126,6 +127,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-market-velocity-kline-scanner-scheduler",
         "quant-core-market-velocity-paper-observation-scheduler",
         "quant-core-market-velocity-live-handoff-scheduler",
+        "quant-core-market-velocity-breakdown-short-live-handoff-scheduler",
         "quant-core-execution-worker",
     ] {
         let service_block = compose_service_block(&compose, service);
@@ -268,7 +270,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             && production_gate.contains("Web fan-out resolves credentials per subscription"),
         "production gate must keep canary scope explicit and leave credentials to Web fan-out when unscoped"
     );
-    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
+    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-market-velocity-breakdown-short-live-handoff-scheduler,quant-core-execution-worker";
     for deploy_script in [&promote, &rollback] {
         assert!(
             deploy_script.contains(default_deploy_services),
@@ -285,6 +287,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             deploy_script.contains("--profile observation-scheduler")
                 && deploy_script.contains("--profile breakdown-short-paper-observation-scheduler")
                 && deploy_script.contains("--profile live-handoff-scheduler")
+                && deploy_script.contains("--profile breakdown-short-live-handoff-scheduler")
                 && deploy_script.contains("--profile candle-backfill-scheduler")
                 && deploy_script.contains("--profile kline-scanner-scheduler")
                 && deploy_script.contains("--profile schema-ensure"),
@@ -769,6 +772,85 @@ fn market_velocity_breakdown_short_has_isolated_paper_scheduler_without_live_han
             deploy_script.contains(service_name)
                 && deploy_script.contains("--profile breakdown-short-paper-observation-scheduler"),
             "breakdown-short paper scheduler must be managed by default deploys with its paper-only profile"
+        );
+    }
+}
+
+#[test]
+fn market_velocity_breakdown_short_has_isolated_live_handoff_scheduler() {
+    let compose = read_repo_file("docker-compose.deploy.yml");
+    let promote = read_repo_file("scripts/deploy/promote_stable.sh");
+    let rollback = read_repo_file("scripts/deploy/rollback.sh");
+    let service_name = "quant-core-market-velocity-breakdown-short-live-handoff-scheduler";
+    let service_block = compose_service_block(&compose, service_name);
+
+    assert!(
+        service_block.contains("market_velocity_live_handoff"),
+        "breakdown-short live scheduler must use the live handoff binary"
+    );
+    assert!(
+        service_block.contains("breakdown-short-live-handoff-scheduler"),
+        "breakdown-short live scheduler must be behind its own compose profile"
+    );
+    assert!(
+        service_block.contains("image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}")
+            && !service_block.contains("QUANT_CORE_CHALLENGER_IMAGE"),
+        "breakdown-short live scheduler must deploy the stable Core image, not the challenger image"
+    );
+    for required in [
+        r#"MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE: "false""#,
+        "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS: ${MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_HANDOFF_INTERVAL_SECS:-300}",
+        "MARKET_VELOCITY_LIVE_BUYER_EMAIL: ${MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_BUYER_EMAIL:-}",
+        "MARKET_VELOCITY_LIVE_COMBO_ID: ${MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_COMBO_ID:-}",
+        "MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID: ${MARKET_VELOCITY_BREAKDOWN_SHORT_TASK_READINESS_CREDENTIAL_ID:-}",
+        "MARKET_VELOCITY_SIGNAL_LOOKBACK_HOURS: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_LOOKBACK_HOURS:-24}",
+        "MARKET_VELOCITY_LIVE_CANDIDATE_LIMIT: ${MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_CANDIDATE_LIMIT:-100}",
+        "MARKET_VELOCITY_STRATEGY_SLUG: ${MARKET_VELOCITY_BREAKDOWN_SHORT_STRATEGY_SLUG:-market_velocity_breakdown_short}",
+        "MARKET_VELOCITY_SIGNAL_TRADE_DIRECTION: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_TRADE_DIRECTION:-short}",
+        "MARKET_VELOCITY_SIGNAL_STRATEGY_PRESET: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_STRATEGY_PRESET:-research_momentum_short_04sl_10r_15m_support_breakdown_d5_100_pchg2_12_vol10_dist14_v6}",
+        "MARKET_VELOCITY_SIGNAL_ENTRY_RULE_VERSION: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_ENTRY_RULE_VERSION:-rank_radar_15m_short_r04_10r_15msup_brkdn_d5_100_p2_12_vol10_d14_v6}",
+        "MARKET_VELOCITY_SIGNAL_MIN_DELTA_RANK: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_MIN_DELTA_RANK:-5}",
+        "MARKET_VELOCITY_SIGNAL_MAX_DELTA_RANK: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_MAX_DELTA_RANK:--100}",
+        "MARKET_VELOCITY_SIGNAL_MIN_PRICE_CHANGE_PCT: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_MIN_PRICE_CHANGE_PCT:-2.0}",
+        "MARKET_VELOCITY_SIGNAL_MAX_PRICE_CHANGE_PCT: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_MAX_PRICE_CHANGE_PCT:-12.0}",
+        "MARKET_VELOCITY_SIGNAL_STOP_LOSS_PCT: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_STOP_LOSS_PCT:-0.04}",
+        "MARKET_VELOCITY_SIGNAL_TAKE_PROFIT_R: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_TAKE_PROFIT_R:-1.0}",
+        "MARKET_VELOCITY_SIGNAL_MAX_HOLDING_HOURS: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_MAX_HOLDING_HOURS:-24}",
+        "MARKET_VELOCITY_SIGNAL_REQUIRE_TECHNICAL_CONFIRMATION: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_REQUIRE_TECHNICAL_CONFIRMATION:-false}",
+        "MARKET_VELOCITY_SIGNAL_REQUIRE_ENTRY_CONFIRMATION: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_REQUIRE_ENTRY_CONFIRMATION:-false}",
+        "MARKET_VELOCITY_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_BREAKDOWN_SHORT_SIGNAL_TREND_MIN_AVERAGE_DISTANCE_PCT:-0.0}",
+        "MARKET_VELOCITY_ENTRY_MAX_AVERAGE_DISTANCE_PCT: ${MARKET_VELOCITY_BREAKDOWN_SHORT_ENTRY_MAX_AVERAGE_DISTANCE_PCT:-14.0}",
+        "MARKET_VELOCITY_ENTRY_MIN_VOLUME_RATIO: ${MARKET_VELOCITY_BREAKDOWN_SHORT_ENTRY_MIN_VOLUME_RATIO:-1.0}",
+        "MARKET_VELOCITY_ENTRY_TRIGGER_ALLOWLIST: ${MARKET_VELOCITY_BREAKDOWN_SHORT_ENTRY_TRIGGER_ALLOWLIST:-breakdown_range_low}",
+        "MARKET_VELOCITY_ENTRY_CANDLE_MAX_STALENESS_MINUTES: ${MARKET_VELOCITY_BREAKDOWN_SHORT_ENTRY_CANDLE_MAX_STALENESS_MINUTES:-45}",
+        "MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH: ${MARKET_VELOCITY_BREAKDOWN_SHORT_ENTRY_CANDLE_ON_DEMAND_REFRESH:-true}",
+        "MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS: ${MARKET_VELOCITY_BREAKDOWN_SHORT_ENTRY_CANDLE_REQUEST_SLEEP_MS:-0}",
+    ] {
+        assert!(
+            service_block.contains(required),
+            "breakdown-short live scheduler must default exact v6 live field `{required}`"
+        );
+    }
+    for forbidden in [
+        "MARKET_VELOCITY_SIGNAL_DISPATCH_MODE",
+        "MARKET_VELOCITY_SIGNAL_AUTOMATION_MODE",
+        "MARKET_VELOCITY_SIGNAL_LIVE_ORDER_ALLOWED",
+        "MARKET_VELOCITY_SIGNAL_PAPER_TRADE_REQUIRED",
+        "MARKET_VELOCITY_ENTRY_MIN_RSI",
+        "MARKET_VELOCITY_ENTRY_MAX_RSI",
+        "MARKET_VELOCITY_ENTRY_BOLLINGER_BREAKOUT",
+        "MARKET_VELOCITY_SIGNAL_FVG_ENTRY_MODE",
+    ] {
+        assert!(
+            !service_block.contains(forbidden),
+            "breakdown-short live scheduler must not inherit unrelated live switch/filter `{forbidden}`"
+        );
+    }
+    for deploy_script in [promote, rollback] {
+        assert!(
+            deploy_script.contains(service_name)
+                && deploy_script.contains("--profile breakdown-short-live-handoff-scheduler"),
+            "breakdown-short live scheduler must be managed by default deploys with its own profile"
         );
     }
 }
