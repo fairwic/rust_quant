@@ -2,6 +2,7 @@ impl StrategyExecutionService {
     const LEGACY_DIRECT_LIVE_ORDER_CONFIRM_ENV: &'static str = "LEGACY_DIRECT_LIVE_ORDER_CONFIRM";
     const LEGACY_DIRECT_LIVE_ORDER_CONFIRM_TOKEN: &'static str =
         "I_UNDERSTAND_LEGACY_DIRECT_LIVE_ORDERS";
+    const STARTUP_CLOSE_ALGO_COMPENSATION_TTL_MS: i64 = 10_000;
     /// 判断shoulddispatch策略信号toquantweb，为交易执行流程提供明确的布尔结果。
     fn should_dispatch_strategy_signal_to_quant_web() -> bool {
         Self::should_dispatch_strategy_signal_to_quant_web_from_env(
@@ -356,12 +357,112 @@ impl StrategyExecutionService {
             .and_then(Self::parse_f64_value);
         (stop_loss, take_profit)
     }
+    /// 判断持久化保护单是否还有需要启动补偿处理的计划。
+    fn close_algo_detail_has_compensation_plan(detail: &str) -> bool {
+        if !Self::extract_close_algo_ids(detail).is_empty() {
+            return true;
+        }
+        let (stop_loss, take_profit) = Self::extract_close_algo_targets(detail);
+        stop_loss.is_some() || take_profit.is_some()
+    }
+    /// 从订单详情或幂等订单号中提取信号时间，用于限制启动补偿有效期。
+    fn close_algo_order_signal_ts(order: &SwapOrder) -> Option<i64> {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&order.detail) {
+            let detail_ts = value
+                .get("signal_ts")
+                .and_then(Self::parse_i64_value)
+                .or_else(|| {
+                    value
+                        .get("signal")
+                        .and_then(|signal| signal.get("ts"))
+                        .and_then(Self::parse_i64_value)
+                });
+            if detail_ts.is_some() {
+                return detail_ts;
+            }
+        }
+        order
+            .in_order_id
+            .rsplit('_')
+            .next()
+            .and_then(|value| value.parse::<i64>().ok())
+    }
+    /// 判断启动补偿是否仍在 10 秒信号有效期内，避免重启后处理过期任务。
+    fn close_algo_order_is_compensable(order: &SwapOrder, now_ms: i64) -> bool {
+        let Some(signal_ts) = Self::close_algo_order_signal_ts(order) else {
+            return true;
+        };
+        signal_ts > 0
+            && now_ms <= signal_ts.saturating_add(Self::STARTUP_CLOSE_ALGO_COMPENSATION_TTL_MS)
+    }
+    /// 将过期启动补偿计划写入审计字段，同时移除可执行的 close_algo 任务。
+    fn mark_close_algo_detail_expired(
+        detail: &str,
+        reason: &str,
+        signal_ts: Option<i64>,
+        expired_at: i64,
+        timeframe: rust_quant_domain::Timeframe,
+    ) -> String {
+        let mut map = Self::parse_detail_object(detail);
+        let close_algo = map.remove("close_algo").unwrap_or(serde_json::Value::Null);
+        let mut expired = serde_json::Map::new();
+        expired.insert(
+            "reason".to_string(),
+            serde_json::Value::String(reason.to_string()),
+        );
+        expired.insert(
+            "signal_ts".to_string(),
+            signal_ts
+                .map(serde_json::Number::from)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        expired.insert(
+            "expired_at".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(expired_at)),
+        );
+        expired.insert(
+            "ttl_ms".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                Self::STARTUP_CLOSE_ALGO_COMPENSATION_TTL_MS,
+            )),
+        );
+        expired.insert(
+            "timeframe".to_string(),
+            serde_json::Value::String(timeframe.as_str().to_string()),
+        );
+        if let Some(ids) = close_algo.get("ids").cloned() {
+            expired.insert("ids".to_string(), ids);
+        }
+        if let Some(tag) = close_algo.get("tag").cloned() {
+            expired.insert("tag".to_string(), tag);
+        }
+        if let Some(stop_loss) = close_algo.get("stop_loss").cloned() {
+            expired.insert("stop_loss".to_string(), stop_loss);
+        }
+        if let Some(take_profit) = close_algo.get("take_profit").cloned() {
+            expired.insert("take_profit".to_string(), take_profit);
+        }
+        map.insert(
+            "close_algo_expired".to_string(),
+            serde_json::Value::Object(expired),
+        );
+        serde_json::Value::Object(map).to_string()
+    }
     /// 解析输入参数并收敛为 交易执行与风控 可使用的结构化值。
     fn extract_entry_price(detail: &str) -> Option<f64> {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(detail) else {
             return None;
         };
         value.get("entry_price").and_then(Self::parse_f64_value)
+    }
+    /// 解析 JSON 数值或字符串为毫秒时间戳。
+    fn parse_i64_value(value: &serde_json::Value) -> Option<i64> {
+        match value {
+            serde_json::Value::Number(n) => n.as_i64(),
+            serde_json::Value::String(s) => s.parse::<i64>().ok(),
+            _ => None,
+        }
     }
     fn parse_opt_f64(input: Option<&str>) -> Option<f64> {
         input.and_then(|v| v.parse::<f64>().ok())

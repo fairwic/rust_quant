@@ -223,12 +223,57 @@ impl StrategyExecutionService {
     }
     /// 提供compensate平仓algosonstart的集中实现，避免交易执行调用方重复处理相同细节。
     pub async fn compensate_close_algos_on_start(&self, config: &StrategyConfig) -> Result<()> {
-        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
-        use crate::exchange::create_exchange_api_service;
-        use crate::exchange::OkxOrderService;
         let inst_id = config.symbol.as_str();
         let period = config.timeframe.as_str();
         let pos_sides = ["long", "short"];
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut persisted_by_side: Vec<(&str, Option<SwapOrder>)> = Vec::with_capacity(2);
+        let mut has_compensable_plan = false;
+        for pos_side in pos_sides {
+            let mut persisted_order = self
+                .load_persisted_close_algos(config.id, inst_id, period, pos_side)
+                .await?;
+            if let Some(order) = persisted_order.as_ref() {
+                if Self::close_algo_detail_has_compensation_plan(&order.detail) {
+                    if Self::close_algo_order_is_compensable(order, now_ms) {
+                        has_compensable_plan = true;
+                    } else {
+                        let signal_ts = Self::close_algo_order_signal_ts(order);
+                        let mut updated = order.clone();
+                        updated.detail = Self::mark_close_algo_detail_expired(
+                            &updated.detail,
+                            "signal_ttl_exceeded",
+                            signal_ts,
+                            now_ms,
+                            config.timeframe,
+                        );
+                        if let Err(e) = self.swap_order_repository.update(&updated).await {
+                            warn!(
+                                "⚠️ 启动补偿撤单过期标记失败: inst_id={}, config_id={}, pos_side={}, signal_ts={:?}, err={}",
+                                inst_id, config.id, pos_side, signal_ts, e
+                            );
+                        } else {
+                            info!(
+                                "启动补偿撤单已过期并清理: inst_id={}, config_id={}, pos_side={}, signal_ts={:?}, ttl_ms={}",
+                                inst_id,
+                                config.id,
+                                pos_side,
+                                signal_ts,
+                                Self::STARTUP_CLOSE_ALGO_COMPENSATION_TTL_MS
+                            );
+                        }
+                        persisted_order = None;
+                    }
+                }
+            }
+            persisted_by_side.push((pos_side, persisted_order));
+        }
+        if !has_compensable_plan {
+            return Ok(());
+        }
+        Self::ensure_legacy_direct_live_exchange_order_allowed()?;
+        use crate::exchange::create_exchange_api_service;
+        use crate::exchange::OkxOrderService;
         let api_service = create_exchange_api_service();
         let api_config = match api_service.get_first_api_config(config.id as i32).await {
             Ok(cfg) => cfg,
@@ -245,15 +290,12 @@ impl StrategyExecutionService {
             .get_positions(&api_config, Some("SWAP"), Some(inst_id))
             .await
             .map_err(|e| anyhow!("获取账户数据失败: {}", e))?;
-        for pos_side in pos_sides {
+        for (pos_side, persisted_order) in persisted_by_side {
             let position = positions.iter().find(|p| {
                 p.inst_id == inst_id
                     && p.pos_side.eq_ignore_ascii_case(pos_side)
                     && p.pos.parse::<f64>().unwrap_or(0.0).abs() > 1e-12
             });
-            let persisted_order = self
-                .load_persisted_close_algos(config.id, inst_id, period, pos_side)
-                .await?;
             if position.is_none() {
                 if let Some(order) = persisted_order {
                     let algo_ids = Self::extract_close_algo_ids(&order.detail);
