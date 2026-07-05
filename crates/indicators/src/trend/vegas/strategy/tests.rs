@@ -4,13 +4,14 @@
         KlineHammerSignalValue, MacdSignalValue, RsiSignalValue, VolumeTrendSignalValue,
     };
     use super::{
-        EmaDistanceState, EmaSignalValue, FibRetracementSignalConfig, FibRetracementSignalValue,
-        RsiSignalConfig, SignalCondition, SignalType, SignalWeightsConfig,
+        EmaDistanceState, EmaSignalValue, EntryBlockConfig, FibRetracementSignalConfig,
+        FibRetracementSignalValue, RsiSignalConfig, SignalCondition, SignalType,
+        SignalWeightsConfig,
         VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
     };
     use crate::leg_detection_indicator::LegDetectionValue;
     use rust_quant_common::CandleItem;
-    use rust_quant_domain::BasicRiskStrategyConfig;
+    use rust_quant_domain::{BasicRiskStrategyConfig, SignalResult};
     fn candle(o: f64, h: f64, l: f64, c: f64, ts: i64) -> CandleItem {
         CandleItem {
             o,
@@ -92,6 +93,285 @@
             "reason should include swing_pct suffix, got: {}",
             reason
         );
+    }
+    #[test]
+    fn bearish_fvg_pressure_long_block_detects_rejection_inside_overhead_gap() {
+        let candles = vec![
+            candle(120.0, 122.0, 110.0, 111.0, 1),
+            candle(111.0, 112.0, 100.0, 101.0, 2),
+            candle(100.0, 101.0, 90.0, 95.0, 3),
+            candle(96.0, 99.0, 94.0, 98.0, 4),
+            candle(98.0, 103.0, 97.0, 102.0, 5),
+        ];
+
+        assert!(VegasStrategy::should_block_bearish_fvg_pressure_long(
+            &candles, 20, 0.005, 0.0
+        ));
+    }
+    #[test]
+    fn bearish_fvg_pressure_long_block_regresses_2026_07_04_eth_signal() {
+        let candles = vec![
+            candle(1820.0, 1840.0, 1810.30, 1812.0, 1781539200000),
+            candle(1812.0, 1816.0, 1804.0, 1806.0, 1781553600000),
+            candle(1800.0, 1802.73, 1784.0, 1790.0, 1781568000000),
+            candle(1757.48, 1764.74, 1754.0, 1757.27, 1783152000000),
+            candle(1757.28, 1803.33, 1757.28, 1790.57, 1783166400000),
+        ];
+
+        assert!(VegasStrategy::should_block_bearish_fvg_pressure_long(
+            &candles, 240, 0.003, 0.001
+        ));
+    }
+    #[test]
+    fn bearish_fvg_pressure_long_block_allows_clean_close_above_gap() {
+        let candles = vec![
+            candle(120.0, 122.0, 110.0, 111.0, 1),
+            candle(111.0, 112.0, 100.0, 101.0, 2),
+            candle(100.0, 101.0, 90.0, 95.0, 3),
+            candle(96.0, 99.0, 94.0, 98.0, 4),
+            candle(98.0, 112.0, 97.0, 111.0, 5),
+        ];
+
+        assert!(!VegasStrategy::should_block_bearish_fvg_pressure_long(
+            &candles, 20, 0.005, 0.0
+        ));
+    }
+    #[test]
+    fn bearish_fvg_pressure_long_context_requires_conflicting_chase_shape() {
+        let values = VegasIndicatorSignalValue {
+            engulfing_value: EngulfingSignalValue {
+                is_valid_engulfing: true,
+                ..EngulfingSignalValue::default()
+            },
+            bollinger_value: BollingerSignalValue {
+                is_short_signal: true,
+                ..BollingerSignalValue::default()
+            },
+            leg_detection_value: LegDetectionValue {
+                is_bullish_leg: true,
+                ..LegDetectionValue::default()
+            },
+            ema_distance_filter: EmaDistanceFilter {
+                should_filter_long: true,
+                ..EmaDistanceFilter::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(VegasStrategy::is_bearish_fvg_pressure_chase_long_context(
+            &values
+        ));
+    }
+    #[test]
+    fn bearish_fvg_pressure_long_context_ignores_non_bollinger_pressure() {
+        let values = VegasIndicatorSignalValue {
+            engulfing_value: EngulfingSignalValue {
+                is_valid_engulfing: true,
+                ..EngulfingSignalValue::default()
+            },
+            leg_detection_value: LegDetectionValue {
+                is_bullish_leg: true,
+                ..LegDetectionValue::default()
+            },
+            ema_distance_filter: EmaDistanceFilter {
+                should_filter_long: true,
+                ..EmaDistanceFilter::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(!VegasStrategy::is_bearish_fvg_pressure_chase_long_context(
+            &values
+        ));
+    }
+    #[test]
+    fn weak_bollinger_context_blocks_long_against_upper_pressure() {
+        let values = VegasIndicatorSignalValue {
+            bollinger_value: BollingerSignalValue {
+                is_short_signal: true,
+                ..BollingerSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(VegasStrategy::should_block_weak_bollinger_context_long(
+            &values
+        ));
+    }
+    #[test]
+    fn weak_bollinger_context_blocks_short_without_bollinger_edge() {
+        let values = VegasIndicatorSignalValue::default();
+
+        assert!(VegasStrategy::should_block_weak_bollinger_context_short(
+            &values
+        ));
+    }
+    #[test]
+    fn weak_bollinger_context_keeps_short_with_bollinger_short_edge() {
+        let values = VegasIndicatorSignalValue {
+            bollinger_value: BollingerSignalValue {
+                is_short_signal: true,
+                ..BollingerSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+
+        assert!(!VegasStrategy::should_block_weak_bollinger_context_short(
+            &values
+        ));
+    }
+    #[test]
+    fn entry_block_config_enables_weak_bollinger_context_filter_without_env() {
+        let strategy = VegasStrategy {
+            entry_block_config: EntryBlockConfig {
+                block_weak_bollinger_context_entry: true,
+                ..EntryBlockConfig::default()
+            },
+            ..VegasStrategy::default()
+        };
+        let candles = vec![candle(100.0, 102.0, 99.0, 101.0, 1)];
+        let mut signal = SignalResult {
+            should_buy: Some(true),
+            open_price: Some(101.0),
+            ..SignalResult::empty()
+        };
+        let values = VegasIndicatorSignalValue {
+            bollinger_value: BollingerSignalValue {
+                is_short_signal: true,
+                ..BollingerSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+        let mut dynamic_adjustments = Vec::new();
+        let mut range_snapshot = None;
+
+        strategy.apply_post_signal_entry_filters(
+            &candles,
+            candles.last().expect("last candle"),
+            &values,
+            &[],
+            FibRetracementSignalConfig {
+                is_open: false,
+                strict_major_trend: false,
+                ..FibRetracementSignalConfig::default()
+            },
+            EmaDistanceFilter::default(),
+            None,
+            &mut signal,
+            &mut dynamic_adjustments,
+            &mut range_snapshot,
+        );
+
+        assert_eq!(signal.should_buy, Some(false));
+        assert!(signal
+            .filter_reasons
+            .contains(&"WEAK_BOLLINGER_CONTEXT_LONG_BLOCK".to_string()));
+    }
+    #[test]
+    fn entry_block_config_keeps_weak_bollinger_filter_off_by_default() {
+        let strategy = VegasStrategy::default();
+        let candles = vec![candle(100.0, 102.0, 99.0, 101.0, 1)];
+        let mut signal = SignalResult {
+            should_buy: Some(true),
+            open_price: Some(101.0),
+            ..SignalResult::empty()
+        };
+        let values = VegasIndicatorSignalValue {
+            bollinger_value: BollingerSignalValue {
+                is_short_signal: true,
+                ..BollingerSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+        let mut dynamic_adjustments = Vec::new();
+        let mut range_snapshot = None;
+
+        strategy.apply_post_signal_entry_filters(
+            &candles,
+            candles.last().expect("last candle"),
+            &values,
+            &[],
+            FibRetracementSignalConfig {
+                is_open: false,
+                strict_major_trend: false,
+                ..FibRetracementSignalConfig::default()
+            },
+            EmaDistanceFilter::default(),
+            None,
+            &mut signal,
+            &mut dynamic_adjustments,
+            &mut range_snapshot,
+        );
+
+        assert_eq!(signal.should_buy, Some(true));
+        assert!(!signal
+            .filter_reasons
+            .contains(&"WEAK_BOLLINGER_CONTEXT_LONG_BLOCK".to_string()));
+    }
+    #[test]
+    fn entry_block_config_enables_bearish_fvg_pressure_filter_without_env() {
+        let strategy = VegasStrategy {
+            entry_block_config: EntryBlockConfig {
+                block_bearish_fvg_pressure_long: true,
+                ..EntryBlockConfig::default()
+            },
+            ..VegasStrategy::default()
+        };
+        let candles = vec![
+            candle(1820.0, 1840.0, 1810.30, 1812.0, 1781539200000),
+            candle(1812.0, 1816.0, 1804.0, 1806.0, 1781553600000),
+            candle(1800.0, 1802.73, 1784.0, 1790.0, 1781568000000),
+            candle(1757.48, 1764.74, 1754.0, 1757.27, 1783152000000),
+            candle(1757.28, 1803.33, 1757.28, 1790.57, 1783166400000),
+        ];
+        let mut signal = SignalResult {
+            should_buy: Some(true),
+            open_price: Some(1790.57),
+            ..SignalResult::empty()
+        };
+        let values = VegasIndicatorSignalValue {
+            engulfing_value: EngulfingSignalValue {
+                is_valid_engulfing: true,
+                ..EngulfingSignalValue::default()
+            },
+            bollinger_value: BollingerSignalValue {
+                is_short_signal: true,
+                ..BollingerSignalValue::default()
+            },
+            leg_detection_value: LegDetectionValue {
+                is_bullish_leg: true,
+                ..LegDetectionValue::default()
+            },
+            ema_distance_filter: EmaDistanceFilter {
+                should_filter_long: true,
+                ..EmaDistanceFilter::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+        let mut dynamic_adjustments = Vec::new();
+        let mut range_snapshot = None;
+
+        strategy.apply_post_signal_entry_filters(
+            &candles,
+            candles.last().expect("last candle"),
+            &values,
+            &[],
+            FibRetracementSignalConfig {
+                is_open: false,
+                strict_major_trend: false,
+                ..FibRetracementSignalConfig::default()
+            },
+            EmaDistanceFilter::default(),
+            None,
+            &mut signal,
+            &mut dynamic_adjustments,
+            &mut range_snapshot,
+        );
+
+        assert_eq!(signal.should_buy, Some(false));
+        assert!(signal
+            .filter_reasons
+            .contains(&"BEARISH_FVG_PRESSURE_LONG_BLOCK".to_string()));
     }
     #[test]
     fn deep_negative_hammer_long_candidate_helper_matches_expected_shape() {

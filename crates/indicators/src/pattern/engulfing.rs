@@ -1,31 +1,4 @@
 use rust_quant_common::CandleItem;
-const MIN_PREVIOUS_BODY_RATIO: f64 = 0.001;
-const MIN_PREVIOUS_BODY_ABS: f64 = 1.0;
-
-/// 判断前一根 K 线实体是否足够承载反转形态；比例适配低价币，绝对值兜底高价币。
-fn has_meaningful_previous_body(kline: &CandleItem) -> bool {
-    let body = (kline.c - kline.o).abs();
-    let body_ratio = body / kline.o.abs().max(1e-9);
-    body_ratio >= MIN_PREVIOUS_BODY_RATIO || body >= MIN_PREVIOUS_BODY_ABS
-}
-
-/// 判断多头实体吞没：当前阳线实体必须完整覆盖前一根有意义的阴线实体。
-fn is_bullish_body_engulfing(current: &CandleItem, previous: &CandleItem) -> bool {
-    previous.c < previous.o
-        && has_meaningful_previous_body(previous)
-        && current.c > current.o
-        && current.o <= previous.c
-        && current.c >= previous.o
-}
-
-/// 判断空头实体吞没：当前阴线实体必须完整覆盖前一根有意义的阳线实体。
-fn is_bearish_body_engulfing(current: &CandleItem, previous: &CandleItem) -> bool {
-    previous.c > previous.o
-        && has_meaningful_previous_body(previous)
-        && current.c < current.o
-        && current.o >= previous.c
-        && current.c <= previous.o
-}
 /// 成交量比率指标
 /// 计算当前成交量与历史n根K线的平均值的比值
 #[derive(Debug, Clone)]
@@ -60,8 +33,12 @@ impl KlineEngulfingIndicator {
             };
         }
         let last_kline = self.last_kline.as_ref().unwrap();
-        // 吞没只认可实体吞没实体；前一根实体太小视为噪声，不作为反转形态基础。
-        let mut is_bullish = is_bullish_body_engulfing(current_kline, last_kline);
+        //看涨吞没 ,当前k线的开盘价小于前一根k线的开盘价，且当前k线的收盘价大于前一根k线的收盘价
+        let mut is_bullish = (current_kline.o <= last_kline.o || current_kline.l < last_kline.l)
+            && current_kline.c >= last_kline.o
+            && (current_kline.c >= last_kline.h || current_kline.c >= current_kline.h * 1.005)
+            //要求上一个根k线是阴线
+            && last_kline.c < last_kline.o;
         // 【新增过滤逻辑】
         // 如果前前根K线是大阴线（实体>2.0%），且当前反转没有吞没它，则视为无效
         if is_bullish {
@@ -79,7 +56,12 @@ impl KlineEngulfingIndicator {
                 }
             }
         }
-        let mut is_bearish = is_bearish_body_engulfing(current_kline, last_kline);
+        //看跌吞没，当前k线的开盘价大于前一根k线的开盘价，且当前k线的收盘价小于前一根k线的开盘价
+        let mut is_bearish = (current_kline.o >= last_kline.o || current_kline.h > last_kline.h)
+            && current_kline.c <= last_kline.o
+            && (current_kline.c <= last_kline.l || current_kline.c <= last_kline.l * 1.005)
+            //要求上一个根k线是阳线
+            && last_kline.c > last_kline.o;
         // 【新增过滤逻辑】
         // 如果前前根K线是大阳线（实体>2.0%），且当前反转没有吞没它，则视为无效
         if is_bearish {
@@ -200,64 +182,6 @@ mod tests {
         };
         indicator.next(&kline5);
         let output = indicator.next(&kline6);
-        assert!(!output.is_engulfing);
-        assert_eq!(output.body_ratio, 0.0);
-    }
-
-    #[test]
-    fn tiny_previous_body_does_not_create_bullish_engulfing_signal() {
-        let mut indicator = KlineEngulfingIndicator::new();
-        let previous = CandleItem {
-            o: 1757.48,
-            h: 1764.74,
-            l: 1754.0,
-            c: 1757.27,
-            ts: 1783152000000,
-            v: 403529760.17518,
-            confirm: 1,
-        };
-        let current = CandleItem {
-            o: 1757.28,
-            h: 1803.33,
-            l: 1757.28,
-            c: 1790.57,
-            ts: 1783166400000,
-            v: 1774457283.17251,
-            confirm: 1,
-        };
-
-        indicator.next(&previous);
-        let output = indicator.next(&current);
-
-        assert!(!output.is_engulfing);
-        assert_eq!(output.body_ratio, 0.0);
-    }
-
-    #[test]
-    fn bullish_engulfing_requires_current_body_to_cover_previous_body() {
-        let mut indicator = KlineEngulfingIndicator::new();
-        let previous = CandleItem {
-            o: 100.0,
-            h: 104.0,
-            l: 96.0,
-            c: 98.0,
-            ts: 10,
-            v: 1.0,
-            confirm: 1,
-        };
-        let current_closes_over_high_without_body_engulfing = CandleItem {
-            o: 98.5,
-            h: 105.0,
-            l: 98.0,
-            c: 104.5,
-            ts: 11,
-            v: 1.0,
-            confirm: 1,
-        };
-
-        indicator.next(&previous);
-        let output = indicator.next(&current_closes_over_high_without_body_engulfing);
-
         assert!(!output.is_engulfing);
         assert_eq!(output.body_ratio, 0.0);
     }

@@ -408,6 +408,10 @@ pub struct EntryBlockConfig {
     pub block_short_inside_low_volume_node_entry: bool,
     /// EMA 距离过滤的空头分支
     pub block_ema_distance_short: bool,
+    /// ETH 4H id102：做多打入上方 bearish FVG 压力区但未收复时拦截
+    pub block_bearish_fvg_pressure_long: bool,
+    /// ETH 4H id102：布林方向缺少入场支持时拦截多空追单
+    pub block_weak_bollinger_context_entry: bool,
 }
 impl Default for EntryBlockConfig {
     /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
@@ -423,6 +427,8 @@ impl Default for EntryBlockConfig {
             block_low_volume_above_value_area_entry: false,
             block_short_inside_low_volume_node_entry: false,
             block_ema_distance_short: true,
+            block_bearish_fvg_pressure_long: false,
+            block_weak_bollinger_context_entry: false,
         }
     }
 }
@@ -473,6 +479,8 @@ mod tests {
         assert!(!config.block_opposite_value_area_entry);
         assert!(!config.block_low_volume_above_value_area_entry);
         assert!(!config.block_short_inside_low_volume_node_entry);
+        assert!(!config.block_bearish_fvg_pressure_long);
+        assert!(!config.block_weak_bollinger_context_entry);
         assert!(config.block_weak_ema_trend_entry);
     }
     #[test]
@@ -484,7 +492,9 @@ mod tests {
             "block_low_volume_inside_range_entry": true,
             "block_opposite_value_area_entry": true,
             "block_low_volume_above_value_area_entry": true,
-            "block_short_inside_low_volume_node_entry": true
+            "block_short_inside_low_volume_node_entry": true,
+            "block_bearish_fvg_pressure_long": true,
+            "block_weak_bollinger_context_entry": true
         }))
         .expect("entry block config should deserialize");
         assert!(!config.block_ema_distance_short);
@@ -494,6 +504,8 @@ mod tests {
         assert!(config.block_opposite_value_area_entry);
         assert!(config.block_low_volume_above_value_area_entry);
         assert!(config.block_short_inside_low_volume_node_entry);
+        assert!(config.block_bearish_fvg_pressure_long);
+        assert!(config.block_weak_bollinger_context_entry);
         assert!(config.block_too_far_outside_fib_short);
         assert!(config.block_conflicting_too_far_new_bear_leg_short);
         assert!(config.block_weak_ema_trend_entry);

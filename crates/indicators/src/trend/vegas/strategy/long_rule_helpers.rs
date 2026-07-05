@@ -877,6 +877,71 @@ impl VegasStrategy {
             }
         }
     }
+    /// 判断做多是否正打进上方 bearish FVG 压力区但没有有效收复上沿。
+    fn should_block_bearish_fvg_pressure_long(
+        data_items: &[CandleItem],
+        lookback_candles: usize,
+        min_gap_pct: f64,
+        touch_tolerance_pct: f64,
+    ) -> bool {
+        if data_items.len() < 4 || lookback_candles < 3 {
+            return false;
+        }
+        let current = data_items.last().expect("数据不能为空");
+        if current.c >= current.h {
+            return false;
+        }
+        let last_index = data_items.len() - 1;
+        let start = last_index.saturating_sub(lookback_candles).max(2);
+        for third_index in start..last_index {
+            let first = &data_items[third_index - 2];
+            let third = &data_items[third_index];
+            if first.l <= third.h {
+                continue;
+            }
+            let lower = third.h;
+            let upper = first.l;
+            let gap_pct = (upper - lower) / lower.max(1e-9);
+            if gap_pct < min_gap_pct {
+                continue;
+            }
+            // bearish FVG 的下沿被触及但收盘仍低于上沿，说明多头只是回补压力区而非完成突破。
+            let touched_pressure = current.h >= lower * (1.0 - touch_tolerance_pct.max(0.0));
+            if touched_pressure && current.c < upper {
+                return true;
+            }
+        }
+        false
+    }
+    /// 判断做多信号是否属于冲击上方压力区的追多上下文。
+    fn is_bearish_fvg_pressure_chase_long_context(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let engulfing = &vegas_indicator_signal_values.engulfing_value;
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        let leg = &vegas_indicator_signal_values.leg_detection_value;
+        let ema_distance = &vegas_indicator_signal_values.ema_distance_filter;
+        let ema_values = &vegas_indicator_signal_values.ema_values;
+        engulfing.is_valid_engulfing
+            && boll.is_short_signal
+            && leg.is_bullish_leg
+            && ema_distance.should_filter_long
+            && !ema_values.is_long_trend
+    }
+    /// 判断做多是否缺少布林方向支持，避免在上轨压力处继续追多。
+    fn should_block_weak_bollinger_context_long(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        boll.is_short_signal && !boll.is_long_signal
+    }
+    /// 判断做空是否缺少布林方向支持，避免在无下轨边缘时追空。
+    fn should_block_weak_bollinger_context_short(
+        vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+    ) -> bool {
+        let boll = &vegas_indicator_signal_values.bollinger_value;
+        !boll.is_short_signal && !boll.is_long_signal
+    }
     /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn is_rebound_protect_long_candidate(
         data_items: &[CandleItem],

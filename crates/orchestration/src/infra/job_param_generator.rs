@@ -51,6 +51,8 @@ pub struct ParamMergeBuilder {
     pub dynamic_range_threshold: Option<f64>,
     /// 动态区间亏损百分比；为空时不启用动态区间亏损过滤。
     pub dynamic_range_loss_percent: Option<f64>,
+    /// 仓位乘数；小于 1 用于标准化非全仓回测，大于 1 用于杠杆压力测试。
+    pub position_leverage: Option<f64>,
     // strategy extensions
     pub signal_weights: Option<SignalWeightsConfig>,
     /// legdetection信号；为空时使用默认值或表示不限制。
@@ -181,7 +183,7 @@ impl ParamMergeBuilder {
             dynamic_range_threshold: self.dynamic_range_threshold,
             dynamic_range_loss_percent: self.dynamic_range_loss_percent,
             trade_fee_rate: None,
-            position_leverage: None,
+            position_leverage: self.position_leverage,
             tiered_take_profit_level_1_close_ratio: None,
             tiered_take_profit_level_2_close_ratio: None,
         }
@@ -405,6 +407,7 @@ impl ParamGenerator {
                 dynamic_entry_require_direction_mismatch: None,
                 dynamic_range_threshold: None,
                 dynamic_range_loss_percent: None,
+                position_leverage: None,
                 signal_weights: None,
                 leg_detection_signal: None,
                 market_structure_signal: None,
@@ -456,6 +459,7 @@ mod tests {
             dynamic_entry_require_direction_mismatch: Some(false),
             dynamic_range_threshold: Some(0.08),
             dynamic_range_loss_percent: Some(0.04),
+            position_leverage: Some(0.6),
             ..Default::default()
         };
         let risk = params.to_risk_config();
@@ -464,6 +468,7 @@ mod tests {
         assert_eq!(risk.dynamic_entry_require_direction_mismatch, Some(false));
         assert_eq!(risk.dynamic_range_threshold, Some(0.08));
         assert_eq!(risk.dynamic_range_loss_percent, Some(0.04));
+        assert_eq!(risk.position_leverage, Some(0.6));
     }
 }
 // ================================

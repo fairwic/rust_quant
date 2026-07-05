@@ -660,6 +660,18 @@ impl VegasStrategy {
                 .filter_reasons
                 .push("HIGH_VOLUME_RANGING_RECOVERY_SHORT_BLOCK".to_string());
         }
+        if signal_result.should_sell.unwrap_or(false)
+            && (self
+                .entry_block_config
+                .block_weak_bollinger_context_entry
+                || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_ENTRY_BLOCK"))
+            && Self::should_block_weak_bollinger_context_short(vegas_indicator_signal_values)
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("WEAK_BOLLINGER_CONTEXT_SHORT_BLOCK".to_string());
+        }
         // 缩量 + RSI 中性 + MACD 零轴上方转弱时，避免过早逆势做多。
         // 典型场景是上涨后的回落修复，参与度不足且死叉刚开始，不适合抢多。
         if self
@@ -701,6 +713,29 @@ impl VegasStrategy {
             signal_result
                 .filter_reasons
                 .push("RECENT_UPPER_SHADOW_PRESSURE_LONG_BLOCK".to_string());
+        }
+        if signal_result.should_buy.unwrap_or(false)
+            && (self.entry_block_config.block_bearish_fvg_pressure_long
+                || env_flag("VEGAS_BEARISH_FVG_PRESSURE_LONG_BLOCK"))
+            && Self::is_bearish_fvg_pressure_chase_long_context(vegas_indicator_signal_values)
+            && Self::should_block_bearish_fvg_pressure_long(data_items, 240, 0.003, 0.001)
+        {
+            signal_result.should_buy = Some(false);
+            signal_result
+                .filter_reasons
+                .push("BEARISH_FVG_PRESSURE_LONG_BLOCK".to_string());
+        }
+        if signal_result.should_buy.unwrap_or(false)
+            && (self
+                .entry_block_config
+                .block_weak_bollinger_context_entry
+                || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_ENTRY_BLOCK"))
+            && Self::should_block_weak_bollinger_context_long(vegas_indicator_signal_values)
+        {
+            signal_result.should_buy = Some(false);
+            signal_result
+                .filter_reasons
+                .push("WEAK_BOLLINGER_CONTEXT_LONG_BLOCK".to_string());
         }
         if signal_result.should_buy.unwrap_or(false)
             && Self::should_block_weak_breakout_no_trend_long(vegas_indicator_signal_values)

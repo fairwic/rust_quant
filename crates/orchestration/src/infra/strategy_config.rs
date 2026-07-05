@@ -384,6 +384,7 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
         risk_config.dynamic_entry_require_direction_mismatch;
     param.dynamic_range_threshold = risk_config.dynamic_range_threshold;
     param.dynamic_range_loss_percent = risk_config.dynamic_range_loss_percent;
+    param.position_leverage = risk_config.position_leverage;
     Ok(param)
 }
 /// 将数据库中的策略配置转换为 NWE 策略配置与风险配置
@@ -445,4 +446,46 @@ pub async fn get_nwe_strategy_config_from_db_with_selector(
         }
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_quant_domain::{StrategyType, Timeframe};
+    use rust_quant_indicators::trend::vegas::{
+        EmaSignalConfig, KlineHammerConfig, RsiSignalConfig, VolumeSignalConfig,
+    };
+    use rust_quant_indicators::volatility::BollingBandsSignalConfig;
+    use serde_json::json;
+
+    #[test]
+    fn vegas_config_conversion_preserves_position_leverage() {
+        let vegas_strategy = VegasStrategy {
+            period: "4H".to_string(),
+            ema_signal: Some(EmaSignalConfig::default()),
+            volume_signal: Some(VolumeSignalConfig::default()),
+            rsi_signal: Some(RsiSignalConfig::default()),
+            bolling_signal: Some(BollingBandsSignalConfig::default()),
+            kline_hammer_signal: Some(KlineHammerConfig::default()),
+            ..VegasStrategy::default()
+        };
+        let config = StrategyConfig::new(
+            1,
+            StrategyType::Vegas,
+            "ETH-USDT-SWAP".to_string(),
+            Timeframe::H4,
+            serde_json::to_value(vegas_strategy).expect("vegas strategy json"),
+            json!({
+                "max_loss_percent": 0.04,
+                "atr_take_profit_ratio": 3.0,
+                "is_used_signal_k_line_stop_loss": true,
+                "position_leverage": 0.6
+            }),
+        );
+
+        let param = convert_strategy_config_to_param(&config).expect("convert vegas config");
+        let risk = param.to_risk_config();
+
+        assert_eq!(risk.position_leverage, Some(0.6));
+    }
 }

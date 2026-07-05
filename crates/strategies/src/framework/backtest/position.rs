@@ -8,6 +8,14 @@ use tracing::error;
 /// Historical backtest fee rate used when a strategy has not opted into a newer cost model.
 const LEGACY_BACKTEST_TRADE_FEE_RATE: f64 = 0.0007;
 
+/// 返回回测仓位乘数；允许 0 到 1 之间的值用于非全仓标准化回测。
+fn position_size_multiplier(risk_config: &BasicRiskStrategyConfig) -> f64 {
+    risk_config
+        .position_leverage
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(1.0)
+}
+
 /// 最终平仓处理
 pub fn finalize_trading_state(trading_state: &mut TradingState, candle_item_list: &[CandleItem]) {
     let mut trade_position = match trading_state.trade_position.clone() {
@@ -67,7 +75,7 @@ pub fn open_long_position(
     if state.last_signal_result.is_some() {
         return;
     }
-    let leverage = risk_config.position_leverage.unwrap_or(1.0).max(1.0);
+    let leverage = position_size_multiplier(&risk_config);
     let mut temp_trade_position = TradePosition {
         position_nums: (state.funds / signal.open_price) * leverage,
         open_price: signal.open_price,
@@ -196,7 +204,7 @@ pub fn open_short_position(
     if state.last_signal_result.is_some() {
         return;
     }
-    let leverage = risk_config.position_leverage.unwrap_or(1.0).max(1.0);
+    let leverage = position_size_multiplier(&risk_config);
     let mut temp_trade_position = TradePosition {
         position_nums: (state.funds / signal.open_price) * leverage,
         open_price: signal.open_price,
@@ -353,6 +361,46 @@ mod tests {
             direction,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn open_long_position_allows_fractional_position_leverage() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            position_leverage: Some(0.6),
+            ..Default::default()
+        };
+
+        open_long_position(
+            risk,
+            &mut state,
+            &candle(1, 100.0),
+            &signal(1, 100.0, SignalDirection::Long),
+            None,
+        );
+
+        let position = state.trade_position.expect("position should open");
+        assert!((position.position_nums - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn open_short_position_allows_fractional_position_leverage() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            position_leverage: Some(0.6),
+            ..Default::default()
+        };
+
+        open_short_position(
+            risk,
+            &mut state,
+            &candle(1, 100.0),
+            &signal(1, 100.0, SignalDirection::Short),
+            None,
+        );
+
+        let position = state.trade_position.expect("position should open");
+        assert!((position.position_nums - 0.6).abs() < 1e-9);
     }
 
     #[test]
