@@ -138,6 +138,21 @@ impl MarketVelocityPaperOutcomeSink {
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketVelocityPaperStrategySignalSink {
+    Off,
+    Web,
+}
+impl MarketVelocityPaperStrategySignalSink {
+    /// 解析 paper observation 的策略信号输出目标；默认关闭，避免观察任务误接实盘链路。
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" | "none" | "disabled" | "0" | "false" => Ok(Self::Off),
+            "web" | "quant_web" | "submit" => Ok(Self::Web),
+            other => bail!("unknown --paper-strategy-signal-sink: {other}"),
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReentryMode {
     Off,
     BreakoutReclaim,
@@ -285,6 +300,10 @@ pub struct MarketVelocityEventBacktestArgs {
     pub trade_direction: MarketVelocityTradeDirection,
     /// 模拟盘outcomesink，用于行情、K 线或市场扫描。
     pub paper_outcome_sink: MarketVelocityPaperOutcomeSink,
+    /// 观察任务是否把确认后的策略信号写入 Web signal-only 订阅日志。
+    pub paper_strategy_signal_sink: MarketVelocityPaperStrategySignalSink,
+    /// paper strategy preset 名称，用于提交给 Web 的可审计信号 payload。
+    pub paper_strategy_preset: String,
     /// 模拟盘outcome入场ruleversion，用于行情、K 线或市场扫描。
     pub paper_outcome_entry_rule_version: String,
     /// 列表数据。
@@ -382,6 +401,8 @@ impl Default for MarketVelocityEventBacktestArgs {
             event_source: MarketVelocityEventSource::Episodes,
             trade_direction: MarketVelocityTradeDirection::Long,
             paper_outcome_sink: MarketVelocityPaperOutcomeSink::Off,
+            paper_strategy_signal_sink: MarketVelocityPaperStrategySignalSink::Off,
+            paper_strategy_preset: String::new(),
             paper_outcome_entry_rule_version: DEFAULT_PAPER_OUTCOME_ENTRY_RULE_VERSION.to_string(),
             entry_trigger_allowlist: Vec::new(),
             entry_trigger_blocklist: Vec::new(),
@@ -526,6 +547,10 @@ where
             "--paper-outcome-sink" => {
                 parsed.paper_outcome_sink =
                     MarketVelocityPaperOutcomeSink::from_str(&next_arg(&mut args, &arg)?)?
+            }
+            "--paper-strategy-signal-sink" => {
+                parsed.paper_strategy_signal_sink =
+                    MarketVelocityPaperStrategySignalSink::from_str(&next_arg(&mut args, &arg)?)?
             }
             "--paper-outcome-entry-rule-version" => {
                 paper_outcome_entry_rule_version_explicit = true;
@@ -690,6 +715,11 @@ fn validate_args(
     if parsed.min_trades == 0 {
         bail!("--min-trades must be greater than 0");
     }
+    if parsed.paper_strategy_signal_sink == MarketVelocityPaperStrategySignalSink::Web
+        && parsed.trade_direction == MarketVelocityTradeDirection::Both
+    {
+        bail!("--paper-strategy-signal-sink web requires a single trade direction");
+    }
     if let Some(max_delta_rank) = parsed.max_delta_rank {
         if max_delta_rank < parsed.min_delta_rank {
             bail!("--max-delta-rank must be greater than or equal to --min-delta-rank");
@@ -798,7 +828,11 @@ where
         preset.append_args(&mut parsed_args);
     }
     parsed_args.extend(user_args);
-    parse_cli_args_from(parsed_args)
+    let mut parsed = parse_cli_args_from(parsed_args)?;
+    if let Some(preset) = effective_preset {
+        parsed.paper_strategy_preset = preset.name().to_string();
+    }
+    Ok(parsed)
 }
 /// 解析输入参数并收敛为 回测与策略研究 可使用的结构化值。
 pub fn parse_paper_observation_command_from<I, S>(

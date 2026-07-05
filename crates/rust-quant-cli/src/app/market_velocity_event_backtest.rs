@@ -15,6 +15,7 @@ mod exit;
 mod fvg;
 mod manifest;
 mod paper_outcome;
+mod paper_signal;
 mod reentry;
 mod report;
 mod short_entry;
@@ -27,8 +28,8 @@ pub use args::{
     print_market_velocity_event_backtest_usage, print_market_velocity_paper_observation_usage,
     FvgEntryMode, MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
     MarketVelocityPaperObservationCommand, MarketVelocityPaperOutcomeSink,
-    MarketVelocityStopLossMode, MarketVelocityTradeDirection, MarketVelocityTrendTimeframe,
-    StopReentryMode,
+    MarketVelocityPaperStrategySignalSink, MarketVelocityStopLossMode,
+    MarketVelocityTradeDirection, MarketVelocityTrendTimeframe, StopReentryMode,
 };
 use data::load_backtest_data;
 pub use equity::{
@@ -49,6 +50,8 @@ pub use paper_outcome::build_market_velocity_paper_outcomes;
 use paper_outcome::{
     print_market_velocity_paper_outcomes_jsonl, submit_market_velocity_paper_outcomes,
 };
+pub use paper_signal::build_market_velocity_paper_strategy_signal_request;
+use paper_signal::submit_market_velocity_paper_strategy_signals;
 use reentry::maybe_apply_stop_reentry;
 use report::{
     print_effective_entry_report, print_result_report, print_stage_report,
@@ -362,6 +365,7 @@ pub async fn run_market_velocity_event_backtest(
             submit_market_velocity_paper_outcomes(&outcomes).await?;
         }
     }
+    submit_market_velocity_paper_strategy_signals(&confirmed, &config.args).await?;
     Ok(())
 }
 /// 持久化 回测与策略研究 结果，保证写入路径和幂等语义集中处理。

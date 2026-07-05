@@ -58,8 +58,9 @@ pub use market_velocity_signal::{
     dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
     market_velocity_signal_direct_dispatch_allowed, market_velocity_signal_dispatch_is_enabled,
     market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityFvgEntryMode,
-    MarketVelocitySelectedEntry, MarketVelocityStopLossMode, MarketVelocityStrategySignalBlocker,
-    MarketVelocityStrategySignalConfig, MarketVelocityStrategySignalDecision,
+    MarketVelocitySelectedEntry, MarketVelocitySignalTradeDirection, MarketVelocityStopLossMode,
+    MarketVelocityStrategySignalBlocker, MarketVelocityStrategySignalConfig,
+    MarketVelocityStrategySignalDecision,
 };
 mod flow_analyzer;
 pub use flow_analyzer::FlowAnalyzer;

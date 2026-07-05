@@ -306,6 +306,8 @@ services:
       - market_velocity_paper_observation
       - --paper-strategy-preset
       - research_momentum_short_04sl_065r_15m_support_breakdown_d1_100_pchg0p5_12_vol10_dist14_v5
+      - --paper-strategy-signal-sink
+      - web
       - --loop-interval-seconds
       - ${MARKET_VELOCITY_BREAKDOWN_SHORT_PAPER_OBSERVATION_INTERVAL_SECS:-21600}
     environment:

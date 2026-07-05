@@ -245,6 +245,123 @@ pub(super) enum PaperStrategyPreset {
     ResearchEpisodeRunner03Sl24R8R30,
 }
 impl PaperStrategyPreset {
+    /// 返回 preset 的稳定名称，供 signal payload 与 manifest 保持同一审计口径。
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Momentum03Sl20R => MOMENTUM_PROFIT_PRESET,
+            Self::Momentum0375Sl17RReclaimMaPullbackDelta18To42 => {
+                MOMENTUM_STABLE_RECLAIM_MA_PULLBACK_PRESET
+            }
+            Self::ResearchMomentum0375Sl27RReclaim13To22 => MOMENTUM_RECLAIM_MIDRANK_RESEARCH_PRESET,
+            Self::ResearchMomentum0375Sl26RGap05Retest03Reclaim13To22 => {
+                MOMENTUM_RECLAIM_GAP_RETEST_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum0375Sl15RSignalRetest2Delta24To34 => {
+                MOMENTUM_SIGNAL_RETEST_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum0375Sl20RReclaimFvgWait5Delta20To40 => {
+                MOMENTUM_RECLAIM_FVG_WAIT5_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum0375Sl20RReclaimOnlyDelta13To72 => {
+                MOMENTUM_RECLAIM_ONLY_0375SL_20R_DELTA13_72_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum0375Sl20RBreakoutReclaimFvgWait10Delta20To40 => {
+                MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum0375Sl10RBreakoutReclaimDelta11To72Dist14 => {
+                MOMENTUM_BREAKOUT_RECLAIM_LOW_TARGET_0375SL_DELTA11_72_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum0375Sl10RBreakoutReclaimMaIgnoreDelta11To72Dist14 => {
+                MOMENTUM_BREAKOUT_RECLAIM_MA_IGNORE_LOW_TARGET_0375SL_DELTA11_72_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumShort0375Sl10r15mSupportBreakdownDelta5To72 => {
+                MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_0375SL_DELTA5_72_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumShort04Sl10r15mSupportBreakdownDelta5To72V2 => {
+                MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_DELTA5_72_V2_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumShort04Sl06r15mSupportBreakdownDelta5To72V3 => {
+                MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_06R_DELTA5_72_V3_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumShort04Sl06r15mSupportBreakdownDelta5To72V4 => {
+                MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_06R_DELTA5_72_V4_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumShort04Sl065r15mSupportBreakdownDelta1To100V5 => {
+                MOMENTUM_SHORT_15M_SUPPORT_BREAKDOWN_04SL_065R_DELTA1_100_V5_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta20To40 => {
+                MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40 => {
+                MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner6R20Stop1 => {
+                MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RUNNER6R20_STOP1_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10Delta15To40Runner8R20Stop1 => {
+                MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RUNNER8R20_STOP1_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl20RReclaimFvgWait10Delta15To40 => {
+                MOMENTUM_RECLAIM_FVG_WAIT10_04SL_DELTA15_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RReclaimFvgWait10Delta15To40 => {
+                MOMENTUM_RECLAIM_FVG_WAIT10_04SL_18R_DELTA15_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RReclaimFvgWait10Delta20To40 => {
+                MOMENTUM_RECLAIM_FVG_WAIT10_04SL_18R_DELTA20_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RReclaimFvgWait12Delta20To40 => {
+                MOMENTUM_RECLAIM_FVG_WAIT12_04SL_18R_DELTA20_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RReclaimFvgWait14Pullback3Delta20To40 => {
+                MOMENTUM_RECLAIM_FVG_WAIT14_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RReclaimFvgWait14Retest1Pullback3Delta20To40 => {
+                MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RReclaimFvgWait14Retest1Gap0Pullback3Delta20To40 => {
+                MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_GAP0_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RReclaimFvgWait14Retest1Gap0OpenFadeVol2Pullback3Delta20To40 => {
+                MOMENTUM_RECLAIM_FVG_WAIT14_RETEST1_GAP0_OPEN_FADE_VOL2_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RReclaimRetest1Pullback3Delta20To40 => {
+                MOMENTUM_RECLAIM_RETEST1_04SL_18R_PULLBACK3_DELTA20_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl20RReclaimRetest1Pullback3Delta20To40 => {
+                MOMENTUM_RECLAIM_RETEST1_04SL_20R_PULLBACK3_DELTA20_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RBreakoutReclaimRetest1Delta20To40 => {
+                MOMENTUM_BREAKOUT_RECLAIM_RETEST1_04SL_18R_DELTA20_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl18RBreakoutReclaimFvgRetest1Delta20To40Pchg5To8 => {
+                MOMENTUM_BREAKOUT_RECLAIM_FVG_RETEST1_04SL_18R_DELTA20_40_PCHG5_8_RESEARCH_PRESET
+            }
+            Self::ResearchMomentum04Sl20RBreakoutReclaimFvgWait10MinWait1Delta15To40 => {
+                MOMENTUM_BREAKOUT_RECLAIM_FVG_WAIT10_MINWAIT1_04SL_DELTA15_40_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumKline15mBreakoutFvg20Sl04R10 => {
+                MOMENTUM_KLINE15M_BREAKOUT_FVG20_04SL_10R_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumKline15mBreakoutFvg20Sl04R06 => {
+                MOMENTUM_KLINE15M_BREAKOUT_FVG20_04SL_06R_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumKline15mBreakoutFvg30Sl04R05 => {
+                MOMENTUM_KLINE15M_BREAKOUT_FVG30_04SL_05R_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumKline15mBreakoutFvg30Sl04R055 => {
+                MOMENTUM_KLINE15M_BREAKOUT_FVG30_04SL_055R_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumKline15mBreakoutFvg50Sl04R052 => {
+                MOMENTUM_KLINE15M_BREAKOUT_FVG50_04SL_052R_RESEARCH_PRESET
+            }
+            Self::ResearchEpisodeMomentum03Sl24RRank5To30 => EPISODE_MOMENTUM_RESEARCH_PRESET,
+            Self::ResearchEpisodeMomentum05Sl20RRank5 => EPISODE_MOMENTUM_05SL_20R_RESEARCH_PRESET,
+            Self::ResearchEpisodeMomentum05Sl30RRank5 => EPISODE_MOMENTUM_05SL_30R_RESEARCH_PRESET,
+            Self::ResearchEpisodeRunner03Sl24R8R30 => EPISODE_RUNNER_RESEARCH_PRESET,
+        }
+    }
+
     /// 封装当前函数，减少回测策略调用方重复实现相同细节。
     /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
     /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。

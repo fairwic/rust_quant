@@ -2650,6 +2650,75 @@ fn builds_paper_outcomes_for_each_target_and_horizon_without_execution_task_payl
     assert!(!serialized.contains("execution_task"));
     assert!(!serialized.contains("buyer_email"));
 }
+
+#[test]
+fn builds_breakdown_short_paper_strategy_signal_as_signal_only_request() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_momentum_short_04sl_065r_15m_support_breakdown_d1_100_pchg0p5_12_vol10_dist14_v5",
+        "--paper-strategy-signal-sink",
+        "web",
+    ])
+    .unwrap();
+    let confirmed = ConfirmedEvent {
+        event: RadarEvent {
+            id: 7701,
+            exchange: "okx".to_string(),
+            symbol: "ETH-USDT-SWAP".to_string(),
+            ts: MS_15M,
+            detected_at: "2026-06-24 19:45:00+00".to_string(),
+            new_rank: 8,
+            delta_rank: 12,
+            current_price: 100.0,
+            price_change_pct: -1.2,
+        },
+        entry_ts: MS_15M * 2,
+        entry_price: 99.0,
+        entry_idx: 2,
+        trigger: "breakdown_range_low".to_string(),
+        structure_stop_loss_price: Some(102.0),
+        structure_stop_loss_source: Some("range_high".to_string()),
+    };
+
+    let request = build_market_velocity_paper_strategy_signal_request(&confirmed, &args).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&request.payload_json).unwrap();
+
+    assert_eq!(request.strategy_slug, "market_velocity_breakdown_short");
+    assert_eq!(request.symbol, "ETH-USDT-SWAP");
+    assert_eq!(request.direction, "short");
+    assert_eq!(
+        payload["source_signal_type"],
+        "market_velocity_breakdown_short"
+    );
+    assert_eq!(payload["side"], "sell");
+    assert_eq!(payload["position_side"], "short");
+    assert_eq!(payload["execution_policy"]["mode"], "signal_only");
+    assert_eq!(payload["execution_policy"]["live_order_allowed"], false);
+    assert_eq!(payload["execution_policy"]["paper_trade_required"], true);
+    assert_eq!(
+        payload["entry_filter"]["entry_rule_version"],
+        args.paper_outcome_entry_rule_version
+    );
+    assert_eq!(
+        payload["entry_filter"]["entry_trigger_allowlist"][0],
+        "breakdown_range_low"
+    );
+    assert_eq!(payload["selected_entry"]["trigger"], "breakdown_range_low");
+    assert_eq!(payload["risk_plan"]["direction"], "short");
+    assert!(
+        payload["risk_plan"]["selected_stop_loss_price"]
+            .as_f64()
+            .unwrap()
+            > 99.0
+    );
+    assert!(
+        payload["risk_plan"]["selected_take_profit_price"]
+            .as_f64()
+            .unwrap()
+            < 99.0
+    );
+}
+
 fn confirmed_event(id: i64, trigger: &str) -> ConfirmedEvent {
     ConfirmedEvent {
         event: RadarEvent {

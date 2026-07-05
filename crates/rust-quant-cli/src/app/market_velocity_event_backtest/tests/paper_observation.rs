@@ -1,8 +1,9 @@
 use super::super::{
     market_velocity_paper_observation_usage, parse_paper_observation_args_from,
     parse_paper_observation_command_from, FvgEntryMode, MarketVelocityEventSource,
-    MarketVelocityPaperOutcomeSink, MarketVelocityStopLossMode, MarketVelocityTradeDirection,
-    MarketVelocityTrendTimeframe, StopReentryMode,
+    MarketVelocityPaperOutcomeSink, MarketVelocityPaperStrategySignalSink,
+    MarketVelocityStopLossMode, MarketVelocityTradeDirection, MarketVelocityTrendTimeframe,
+    StopReentryMode,
 };
 const STABLE_PRODUCTION_PRESET: &str =
     "momentum_0375sl_17r_reclaim_ma_pullback_delta18_42_pchg5_10_v1";
@@ -1591,7 +1592,25 @@ fn paper_observation_command_defaults_to_one_shot() {
     );
     assert_eq!(command.backtest_args.stop_loss_pct, 0.0375);
     assert_eq!(command.backtest_args.target_rs, vec![1.7]);
+    assert_eq!(
+        command.backtest_args.paper_strategy_signal_sink,
+        MarketVelocityPaperStrategySignalSink::Off
+    );
     assert_eq!(command.loop_interval_seconds, None);
+}
+#[test]
+fn paper_observation_command_accepts_strategy_signal_web_sink() {
+    let command = parse_paper_observation_command_from([
+        "--paper-strategy-preset",
+        "research_momentum_short_04sl_065r_15m_support_breakdown_d1_100_pchg0p5_12_vol10_dist14_v5",
+        "--paper-strategy-signal-sink",
+        "web",
+    ])
+    .unwrap();
+    assert_eq!(
+        command.backtest_args.paper_strategy_signal_sink,
+        MarketVelocityPaperStrategySignalSink::Web
+    );
 }
 #[test]
 fn paper_observation_command_parses_loop_interval_without_losing_tunables() {
