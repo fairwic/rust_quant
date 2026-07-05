@@ -720,8 +720,9 @@ fn market_velocity_kline15m_challenger_has_isolated_paper_scheduler() {
     );
     for deploy_script in [promote, rollback] {
         assert!(
-            !deploy_script.contains(service_name),
-            "kline15m challenger must not be part of default production deploy services"
+            deploy_script.contains(service_name)
+                && deploy_script.contains("--profile kline15m-paper-observation-scheduler"),
+            "kline15m paper scheduler must be managed by default deploys once enabled in production"
         );
     }
 }
