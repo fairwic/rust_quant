@@ -1798,8 +1798,20 @@ fn decimal_to_positive_f64(value: Option<Decimal>) -> Option<f64> {
         .and_then(decimal_to_f64)
         .filter(|number| *number > 0.0)
 }
+const MARKET_VELOCITY_PRICE_ROUND_SCALE: f64 = 1_000_000.0;
+const MARKET_VELOCITY_LOW_PRICE_ROUND_SCALE: f64 = 1_000_000_000_000.0;
+const MARKET_VELOCITY_LOW_PRICE_THRESHOLD: f64 = 1.0;
+
 fn round_price(value: f64) -> f64 {
-    (value * 1_000_000.0).round() / 1_000_000.0
+    if !value.is_finite() {
+        return value;
+    }
+    let scale = if value.abs() < MARKET_VELOCITY_LOW_PRICE_THRESHOLD {
+        MARKET_VELOCITY_LOW_PRICE_ROUND_SCALE
+    } else {
+        MARKET_VELOCITY_PRICE_ROUND_SCALE
+    };
+    (value * scale).round() / scale
 }
 /// 执行 Runner配置valid步骤，串起行情数据需要的状态推进和错误处理。
 fn runner_config_valid(config: &MarketVelocityStrategySignalConfig) -> bool {

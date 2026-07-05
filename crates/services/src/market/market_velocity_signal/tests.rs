@@ -352,6 +352,54 @@ fn breakdown_short_config_builds_short_signal_without_live_handoff_contract() {
         json!(["breakdown_range_low"])
     );
 }
+
+#[test]
+fn breakdown_short_low_price_signal_keeps_stop_loss_above_entry() {
+    let config = MarketVelocityStrategySignalConfig {
+        strategy_slug: "market_velocity_breakdown_short".to_string(),
+        strategy_preset: "research_momentum_short_04sl_065r_15m_support_breakdown_v5".to_string(),
+        entry_rule_version: "rank_radar_15m_short_r04_065r_15msup_brkdn_v5".to_string(),
+        trade_direction: MarketVelocitySignalTradeDirection::Short,
+        min_delta_rank: 1,
+        max_delta_rank: Some(100),
+        min_price_change_pct: Some(0.5),
+        max_price_change_pct: Some(12.0),
+        stop_loss_pct: 0.04,
+        take_profit_r: 0.65,
+        entry_trigger_allowlist: vec!["breakdown_range_low".to_string()],
+        require_technical_confirmation: false,
+        require_entry_confirmation: false,
+        ..MarketVelocityStrategySignalConfig::default()
+    };
+    let mut event = rank_event(
+        MarketRankEventType::RankVelocity,
+        "down",
+        Some(Decimal::new(2263, 9)),
+    );
+    event.price_change_pct = Some(Decimal::new(-122217372, 8));
+    let mut selected = selected_entry("breakdown_range_low", 0.000002257);
+    selected.structure_stop_loss_price = None;
+
+    let decision =
+        build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry(
+            &event,
+            &config,
+            None,
+            Some(&selected),
+        )
+        .expect("low-price breakdown short event should be evaluated");
+    let MarketVelocityStrategySignalDecision::Submit(request) = decision else {
+        panic!("low-price breakdown short should submit a signal: {decision:?}");
+    };
+    let payload: Value =
+        serde_json::from_str(&request.payload_json).expect("payload should be valid json");
+    let stop = payload["risk_plan"]["selected_stop_loss_price"]
+        .as_f64()
+        .expect("stop loss should be numeric");
+
+    assert!(stop > selected.entry_price);
+    assert_eq!(payload["execution_policy"]["live_order_allowed"], false);
+}
 #[test]
 fn market_velocity_signal_does_not_block_by_new_rank() {
     let config = MarketVelocityStrategySignalConfig::default();
