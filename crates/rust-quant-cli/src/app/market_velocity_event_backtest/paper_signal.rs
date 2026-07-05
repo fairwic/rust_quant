@@ -26,6 +26,7 @@ use tokio::time::timeout;
 const BREAKDOWN_SHORT_STRATEGY_SLUG: &str = "market_velocity_breakdown_short";
 const DEFAULT_MARKET_VELOCITY_STRATEGY_SLUG: &str = "market_velocity";
 const PAPER_STRATEGY_SIGNAL_SUBMIT_TIMEOUT: Duration = Duration::from_secs(10);
+const PAPER_STRATEGY_SIGNAL_FAILURE_DETAIL_LIMIT: usize = 1_000;
 
 /// 将 paper observation 已确认入场转换为 Web 策略信号请求，保持观察信号和执行任务解耦。
 pub fn build_market_velocity_paper_strategy_signal_request(
@@ -64,7 +65,11 @@ pub async fn submit_market_velocity_paper_strategy_signals(
     let mut submitted = 0usize;
     let mut failures = Vec::new();
     for event in confirmed {
-        let request = build_market_velocity_paper_strategy_signal_request(event, args)?;
+        let Some(request) =
+            build_paper_strategy_signal_request_for_submission(event, args, &mut failures)
+        else {
+            continue;
+        };
         match timeout(
             PAPER_STRATEGY_SIGNAL_SUBMIT_TIMEOUT,
             client.submit_strategy_signal(request),
@@ -94,10 +99,29 @@ pub async fn submit_market_velocity_paper_strategy_signals(
     }
     print_paper_strategy_signal_submission_summary(submitted, failures.len())?;
     if !failures.is_empty() {
-        let detail = failures.join("; ").chars().take(1_000).collect::<String>();
+        let detail = paper_strategy_signal_failure_detail(&failures);
+        print_paper_strategy_signal_submission_failures(&detail)?;
         bail!("paper strategy signal submissions failed: {detail}");
     }
     Ok(())
+}
+
+/// 构建单条提交请求；构建失败写入 failures，避免单条异常吞掉整轮生产摘要。
+fn build_paper_strategy_signal_request_for_submission(
+    event: &ConfirmedEvent,
+    args: &MarketVelocityEventBacktestArgs,
+    failures: &mut Vec<String>,
+) -> Option<StrategySignalSubmitRequest> {
+    match build_market_velocity_paper_strategy_signal_request(event, args) {
+        Ok(request) => Some(request),
+        Err(error) => {
+            failures.push(format!(
+                "event_id={}: build request failed: {error:#}",
+                event.event.id
+            ));
+            None
+        }
+    }
 }
 
 /// 输出并立即刷新 paper 策略信号提交摘要，确保生产容器日志能稳定暴露本轮结果。
@@ -119,6 +143,30 @@ fn write_paper_strategy_signal_submission_summary<W: Write>(
         writer,
         "paper_strategy_signals_submitted={submitted}\tpaper_strategy_signals_failed={failed}"
     )?;
+    writer.flush()
+}
+
+/// 生成截断后的失败明细，避免生产日志过长但保留排障关键字段。
+fn paper_strategy_signal_failure_detail(failures: &[String]) -> String {
+    failures
+        .join("; ")
+        .chars()
+        .take(PAPER_STRATEGY_SIGNAL_FAILURE_DETAIL_LIMIT)
+        .collect()
+}
+
+/// 输出并刷新失败明细，补足 tracing 未开启时的生产排障证据。
+fn print_paper_strategy_signal_submission_failures(detail: &str) -> io::Result<()> {
+    let mut stderr = io::stderr().lock();
+    write_paper_strategy_signal_submission_failures(&mut stderr, detail)
+}
+
+/// 写入 paper 策略信号失败明细并 flush，确保容器 stderr 可直接看到根因。
+fn write_paper_strategy_signal_submission_failures<W: Write>(
+    writer: &mut W,
+    detail: &str,
+) -> io::Result<()> {
+    writeln!(writer, "paper_strategy_signal_failures={detail}")?;
     writer.flush()
 }
 
@@ -318,6 +366,7 @@ fn paper_strategy_signal_execution_task_config() -> Result<ExecutionTaskConfig> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::market_velocity_event_backtest::{RadarEvent, MS_15M};
     use std::io::{self, Write};
 
     struct FlushTrackingWriter {
@@ -357,5 +406,58 @@ mod tests {
             "paper_strategy_signals_submitted=3\tpaper_strategy_signals_failed=2\n"
         );
         assert_eq!(writer.flush_count, 1);
+    }
+
+    #[test]
+    fn submission_failure_writer_flushes_detail_line() {
+        let mut writer = FlushTrackingWriter::new();
+
+        write_paper_strategy_signal_submission_failures(&mut writer, "event_id=42: failed")
+            .unwrap();
+
+        assert_eq!(
+            String::from_utf8(writer.bytes).unwrap(),
+            "paper_strategy_signal_failures=event_id=42: failed\n"
+        );
+        assert_eq!(writer.flush_count, 1);
+    }
+
+    #[test]
+    fn submission_request_builder_records_build_error() {
+        let args = MarketVelocityEventBacktestArgs {
+            trade_direction: MarketVelocityTradeDirection::Short,
+            target_rs: vec![0.65],
+            paper_outcome_entry_rule_version: "paper_short_v1".to_string(),
+            entry_trigger_allowlist: vec!["breakdown_range_low".to_string()],
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let confirmed = ConfirmedEvent {
+            event: RadarEvent {
+                id: 42,
+                exchange: "okx".to_string(),
+                symbol: "ETH-USDT-SWAP".to_string(),
+                ts: MS_15M,
+                detected_at: "not-a-timestamp".to_string(),
+                new_rank: 8,
+                delta_rank: 12,
+                current_price: 100.0,
+                price_change_pct: -1.2,
+            },
+            entry_ts: MS_15M * 2,
+            entry_price: 99.0,
+            entry_idx: 2,
+            trigger: "breakdown_range_low".to_string(),
+            structure_stop_loss_price: Some(102.0),
+            structure_stop_loss_source: Some("range_high".to_string()),
+        };
+        let mut failures = Vec::new();
+
+        let request =
+            build_paper_strategy_signal_request_for_submission(&confirmed, &args, &mut failures);
+
+        assert!(request.is_none());
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("event_id=42"));
+        assert!(failures[0].contains("build request failed"));
     }
 }
