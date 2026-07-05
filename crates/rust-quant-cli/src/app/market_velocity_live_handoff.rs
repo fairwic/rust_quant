@@ -12,8 +12,9 @@ use rust_quant_domain::Candle;
 use rust_quant_services::market::{
     build_market_velocity_entry_confirmation_from_candles,
     build_market_velocity_strategy_signal_request_with_entry_confirmation_and_selected_entry,
-    MarketVelocityEntryConfirmation, MarketVelocityEntryConfirmationDecision,
-    MarketVelocityFvgEntryMode, MarketVelocitySelectedEntry, MarketVelocityStrategySignalConfig,
+    market_velocity_breakdown_short_live_cutover_authorized, MarketVelocityEntryConfirmation,
+    MarketVelocityEntryConfirmationDecision, MarketVelocityFvgEntryMode,
+    MarketVelocitySelectedEntry, MarketVelocityStrategySignalConfig,
     MarketVelocityStrategySignalDecision,
 };
 use rust_quant_services::rust_quan_web::{
@@ -666,7 +667,7 @@ pub async fn run_market_velocity_live_handoff(
     response["next_worker_handoff"] = next_worker.unwrap_or_else(|| json!(null));
     Ok(response)
 }
-/// 在 Core live handoff 入口阻断仍处于 paper-only 的破位做空配置，避免误配置绕过 compose/Web 门禁。
+/// 在 Core live handoff 入口阻断非 v6 live-cutover 的破位做空配置，避免误配置绕过 compose/Web 门禁。
 fn validate_market_velocity_live_handoff_signal_config(
     config: &MarketVelocityStrategySignalConfig,
 ) -> Result<()> {
@@ -685,9 +686,10 @@ fn validate_market_velocity_live_handoff_signal_config(
     ]
     .iter()
     .any(|marker| normalized.contains(marker))
+        && !market_velocity_breakdown_short_live_cutover_authorized(config)
     {
         bail!(
-            "market_velocity_live_handoff rejects paper-only breakdown short signal config; run market_velocity_paper_observation instead"
+            "market_velocity_live_handoff rejects breakdown short config unless it matches the v6 live-cutover contract; run market_velocity_paper_observation instead"
         );
     }
     Ok(())
@@ -1309,9 +1311,28 @@ mod tests {
             .expect_err("breakdown short must stay out of live handoff");
 
         assert!(
-            error.to_string().contains("paper-only breakdown short"),
+            error.to_string().contains("v6 live-cutover contract"),
             "unexpected error: {error:#}"
         );
+    }
+    #[test]
+    fn live_handoff_accepts_breakdown_short_v6_live_cutover_config() {
+        let config = MarketVelocityStrategySignalConfig::from_strategy_config_json(
+            &json!({
+                "strategy_slug": "market_velocity_breakdown_short",
+                "strategy_preset": "research_momentum_short_04sl_10r_15m_support_breakdown_d5_100_pchg2_12_vol10_dist14_v6",
+                "entry_rule_version": "rank_radar_15m_short_r04_10r_15msup_brkdn_d5_100_p2_12_vol10_d14_v6",
+                "trade_direction": "short",
+                "automation_mode": "live_execution_authorized",
+                "live_order_allowed": true,
+                "paper_trade_required": false
+            }),
+            &json!({}),
+        )
+        .expect("v6 short live cutover config");
+
+        validate_market_velocity_live_handoff_signal_config(&config)
+            .expect("v6 live cutover should be accepted by live handoff");
     }
     #[test]
     fn no_live_candidate_response_is_non_error_signal_status() {

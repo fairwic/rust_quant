@@ -357,6 +357,92 @@ fn breakdown_short_config_builds_short_signal_without_live_handoff_contract() {
 }
 
 #[test]
+fn breakdown_short_v6_live_cutover_config_builds_live_short_signal() {
+    let config = MarketVelocityStrategySignalConfig {
+        strategy_slug: "market_velocity_breakdown_short".to_string(),
+        strategy_preset:
+            "research_momentum_short_04sl_10r_15m_support_breakdown_d5_100_pchg2_12_vol10_dist14_v6"
+                .to_string(),
+        entry_rule_version: "rank_radar_15m_short_r04_10r_15msup_brkdn_d5_100_p2_12_vol10_d14_v6"
+            .to_string(),
+        trade_direction: MarketVelocitySignalTradeDirection::Short,
+        min_delta_rank: 5,
+        max_delta_rank: Some(100),
+        min_price_change_pct: Some(2.0),
+        max_price_change_pct: Some(12.0),
+        stop_loss_pct: 0.04,
+        take_profit_r: 1.0,
+        entry_max_average_distance_pct: 14.0,
+        entry_min_volume_ratio: 1.0,
+        automation_mode: "live_execution_authorized".to_string(),
+        live_order_allowed: true,
+        paper_trade_required: false,
+        entry_trigger_allowlist: vec!["breakdown_range_low".to_string()],
+        require_technical_confirmation: true,
+        require_entry_confirmation: true,
+        ..MarketVelocityStrategySignalConfig::default()
+    };
+    let mut event = rank_event(
+        MarketRankEventType::RankVelocity,
+        "down",
+        Some(Decimal::new(3400, 0)),
+    );
+    event.price_change_pct = Some(Decimal::new(-625, 2));
+    let snapshot = event
+        .technical_snapshot
+        .as_mut()
+        .expect("test event has technical snapshot");
+    snapshot.close_price = Decimal::new(3400, 0);
+    snapshot.ma_value = Decimal::new(3500, 0);
+    snapshot.ema_value = Decimal::new(3480, 0);
+    snapshot.ma_state = "below".to_string();
+    snapshot.ema_state = "breakdown_down".to_string();
+    snapshot.ma_distance_pct = Decimal::new(286, 2);
+    snapshot.ema_distance_pct = Decimal::new(230, 2);
+
+    let decision = build_market_velocity_strategy_signal_request_with_entry_confirmation(
+        &event,
+        &config,
+        Some(&short_entry_confirmation()),
+    )
+    .expect("valid v6 breakdown short event should be evaluated");
+    let MarketVelocityStrategySignalDecision::Submit(request) = decision else {
+        panic!("v6 breakdown short live cutover should submit a signal: {decision:?}");
+    };
+    let payload: Value =
+        serde_json::from_str(&request.payload_json).expect("payload should be valid json");
+
+    assert_eq!(request.strategy_slug, "market_velocity_breakdown_short");
+    assert_eq!(request.direction, "short");
+    assert_eq!(
+        payload["source_signal_type"],
+        "market_velocity_breakdown_short"
+    );
+    assert_eq!(payload["side"], "sell");
+    assert_eq!(payload["position_side"], "short");
+    assert_eq!(payload["auto_execution_allowed"], true);
+    assert_eq!(
+        payload["execution_policy"]["mode"],
+        "live_execution_authorized"
+    );
+    assert_eq!(payload["execution_policy"]["live_order_allowed"], true);
+    assert_eq!(payload["execution_policy"]["paper_trade_required"], false);
+    assert_eq!(
+        payload["execution_policy"]["production_stage"],
+        "live_execution_allowed"
+    );
+    assert_eq!(payload["risk_plan"]["protective_stop_loss_required"], true);
+    assert_eq!(payload["risk_plan"]["direction"], "short");
+    assert_eq!(payload["risk_plan"]["entry_price"], 3400.0);
+    assert_eq!(payload["risk_plan"]["selected_stop_loss_price"], 3536.0);
+    assert_eq!(payload["risk_plan"]["selected_take_profit_price"], 3264.0);
+    assert_eq!(
+        payload["entry_filter"]["entry_trigger_allowlist"],
+        json!(["breakdown_range_low"])
+    );
+}
+
+#[test]
 fn breakdown_short_low_price_signal_keeps_stop_loss_above_entry() {
     let config = MarketVelocityStrategySignalConfig {
         strategy_slug: "market_velocity_breakdown_short".to_string(),

@@ -46,6 +46,11 @@ const DEFAULT_TREND_MIN_AVERAGE_DISTANCE_PCT: f64 = 0.0;
 const DEFAULT_MARKET_VELOCITY_AUTOMATION_MODE: &str = "live_execution_authorized";
 const DEFAULT_MARKET_VELOCITY_LIVE_ORDER_ALLOWED: bool = true;
 const DEFAULT_MARKET_VELOCITY_PAPER_TRADE_REQUIRED: bool = false;
+pub const MARKET_VELOCITY_BREAKDOWN_SHORT_STRATEGY_SLUG: &str = "market_velocity_breakdown_short";
+pub const MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_CUTOVER_PRESET: &str =
+    "research_momentum_short_04sl_10r_15m_support_breakdown_d5_100_pchg2_12_vol10_dist14_v6";
+pub const MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_CUTOVER_ENTRY_RULE_VERSION: &str =
+    "rank_radar_15m_short_r04_10r_15msup_brkdn_d5_100_p2_12_vol10_d14_v6";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -705,16 +710,33 @@ fn market_velocity_execution_policy_stage(
     "signal_only"
 }
 
-/// Short-side Market Velocity is still research-only; long-side configs keep their explicit live/paper policy.
+/// Only the verified v6 breakdown-short cutover is allowed to keep live flags; every other short config stays paper-only.
 fn apply_market_velocity_trade_direction_safety(config: &mut MarketVelocityStrategySignalConfig) {
     if matches!(
         config.trade_direction,
         MarketVelocitySignalTradeDirection::Short
-    ) {
+    ) && !market_velocity_breakdown_short_live_cutover_authorized(config)
+    {
         config.automation_mode = "signal_only".to_string();
         config.live_order_allowed = false;
         config.paper_trade_required = true;
     }
+}
+/// 判断破位做空是否匹配当前已验证的 v6 实盘切换合同。
+pub fn market_velocity_breakdown_short_live_cutover_authorized(
+    config: &MarketVelocityStrategySignalConfig,
+) -> bool {
+    matches!(
+        config.trade_direction,
+        MarketVelocitySignalTradeDirection::Short
+    ) && config
+        .strategy_slug
+        .trim()
+        .eq_ignore_ascii_case(MARKET_VELOCITY_BREAKDOWN_SHORT_STRATEGY_SLUG)
+        && config.strategy_preset.trim() == MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_CUTOVER_PRESET
+        && config.entry_rule_version.trim()
+            == MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_CUTOVER_ENTRY_RULE_VERSION
+        && market_velocity_auto_execution_allowed(config)
 }
 
 /// Normalize runtime safety flags so direct struct construction follows the same rules as env/json config parsing.

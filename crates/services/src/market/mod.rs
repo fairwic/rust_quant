@@ -56,11 +56,15 @@ pub use market_velocity_signal::{
     dispatch_market_velocity_strategy_signal_if_enabled,
     dispatch_market_velocity_strategy_signal_with_config_and_entry_confirmation,
     dispatch_market_velocity_strategy_signal_with_entry_confirmation_if_enabled,
+    market_velocity_breakdown_short_live_cutover_authorized,
     market_velocity_signal_direct_dispatch_allowed, market_velocity_signal_dispatch_is_enabled,
     market_velocity_strategy_signal_needs_entry_confirmation, MarketVelocityFvgEntryMode,
     MarketVelocitySelectedEntry, MarketVelocitySignalTradeDirection, MarketVelocityStopLossMode,
     MarketVelocityStrategySignalBlocker, MarketVelocityStrategySignalConfig,
     MarketVelocityStrategySignalDecision,
+    MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_CUTOVER_ENTRY_RULE_VERSION,
+    MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_CUTOVER_PRESET,
+    MARKET_VELOCITY_BREAKDOWN_SHORT_STRATEGY_SLUG,
 };
 mod flow_analyzer;
 pub use flow_analyzer::FlowAnalyzer;

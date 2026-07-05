@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use rust_quant_services::market::MARKET_VELOCITY_BREAKDOWN_SHORT_STRATEGY_SLUG;
 use rust_quant_services::rust_quan_web::{
     build_market_velocity_scoped_execution_worker_env,
     market_velocity_existing_execution_worker_path, ExecutionTask,
@@ -13,13 +14,26 @@ pub fn build_market_velocity_live_preview_request(
     buyer_email: Option<&str>,
     combo_id: Option<i64>,
 ) -> Result<MarketVelocityExecutionTaskCreationPreviewRequest> {
-    if signal.strategy_slug.trim() != "market_velocity" {
-        bail!("Market Velocity live handoff only accepts strategy_slug=market_velocity");
-    }
     let payload: Value = serde_json::from_str(&signal.payload_json)
         .map_err(|error| anyhow!("parse market velocity signal payload_json failed: {error}"))?;
-    if payload_string(&payload, "source_signal_type").as_deref() != Some("market_velocity") {
-        bail!("payload source_signal_type must be market_velocity");
+    let strategy_slug = signal.strategy_slug.trim();
+    let source_signal_type = payload_string(&payload, "source_signal_type");
+    match strategy_slug {
+        "market_velocity" => {
+            if source_signal_type.as_deref() != Some("market_velocity") {
+                bail!("payload source_signal_type must be market_velocity");
+            }
+        }
+        MARKET_VELOCITY_BREAKDOWN_SHORT_STRATEGY_SLUG => {
+            if source_signal_type.as_deref() != Some(MARKET_VELOCITY_BREAKDOWN_SHORT_STRATEGY_SLUG)
+            {
+                bail!("payload source_signal_type must be market_velocity_breakdown_short");
+            }
+            if !breakdown_short_live_preview_payload_allowed(&payload) {
+                bail!("breakdown short preview requires live-authorized execution_policy");
+            }
+        }
+        _ => bail!("Market Velocity live handoff only accepts market_velocity strategies"),
     }
     let exchange = payload_string(&payload, "exchange").unwrap_or_else(|| {
         signal
@@ -52,6 +66,23 @@ pub fn build_market_velocity_live_preview_request(
         entry_trigger_filter_version,
         risk_adjusted_win_rate_edge: None,
     })
+}
+/// 校验破位做空 preview payload 已显式进入 live 执行合同。
+fn breakdown_short_live_preview_payload_allowed(payload: &Value) -> bool {
+    let execution_policy = payload.get("execution_policy").unwrap_or(&Value::Null);
+    payload
+        .get("auto_execution_allowed")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && payload_string(execution_policy, "mode").as_deref() == Some("live_execution_authorized")
+        && execution_policy
+            .get("live_order_allowed")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && execution_policy
+            .get("paper_trade_required")
+            .and_then(Value::as_bool)
+            == Some(false)
 }
 /// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_market_velocity_live_worker_manifest(task_id: i64) -> Value {
@@ -413,7 +444,54 @@ mod tests {
         .expect_err("breakdown short must not be accepted by live handoff yet");
         assert!(error
             .to_string()
-            .contains("only accepts strategy_slug=market_velocity"));
+            .contains("requires live-authorized execution_policy"));
+    }
+    #[test]
+    fn preview_request_accepts_live_authorized_breakdown_short_signal() {
+        let mut signal = sample_signal_request();
+        signal.external_id = "rust_quant:market_velocity_breakdown_short:2042663".to_string();
+        signal.strategy_slug = "market_velocity_breakdown_short".to_string();
+        signal.strategy_key = "market_velocity_breakdown_short:okx:ASTER-USDT-SWAP".to_string();
+        signal.direction = "short".to_string();
+        signal.payload_json = json!({
+            "source_signal_type": "market_velocity_breakdown_short",
+            "rank_event_id": 2042663,
+            "exchange": "okx",
+            "symbol": "ASTER-USDT-SWAP",
+            "entry_rule_version": "rank_radar_15m_short_r04_10r_15msup_brkdn_d5_100_p2_12_vol10_d14_v6",
+            "auto_execution_allowed": true,
+            "execution_policy": {
+                "mode": "live_execution_authorized",
+                "live_order_allowed": true,
+                "paper_trade_required": false,
+                "production_stage": "live_execution_allowed"
+            },
+            "risk_plan": {
+                "direction": "short",
+                "target_r": 1.0,
+                "max_holding_hours": 24,
+                "selected_stop_loss_price": 3536.0,
+                "protective_stop_loss_required": true
+            }
+        })
+        .to_string();
+
+        let request = build_market_velocity_live_preview_request(
+            &signal,
+            Some("buyer@example.com"),
+            Some(85),
+        )
+        .expect("live-authorized breakdown short should be accepted by preview");
+
+        assert_eq!(request.rank_event_id, Some(2042663));
+        assert_eq!(request.exchange, "okx");
+        assert_eq!(request.symbol, "ASTER-USDT-SWAP");
+        assert_eq!(request.target_r, 1.0);
+        assert_eq!(request.horizon_hours, 24);
+        assert_eq!(
+            request.entry_rule_version.as_deref(),
+            Some("rank_radar_15m_short_r04_10r_15msup_brkdn_d5_100_p2_12_vol10_d14_v6")
+        );
     }
     #[test]
     fn live_worker_manifest_reuses_existing_execution_worker_without_scripts() {
