@@ -120,15 +120,20 @@ pub fn market_velocity_paper_strategy_preset_manifest(
         },
     });
     let canonical_json = canonical_manifest_json(&manifest_json)?;
+    let (channel, manifest_status) = if is_breakdown_short {
+        ("paper_observing", "paper_observing")
+    } else {
+        ("production_default", "production")
+    };
     Ok(MarketVelocityPresetManifest {
         product_slug: product_slug.to_string(),
         symbol: "ALL".to_string(),
-        channel: "production_default".to_string(),
+        channel: channel.to_string(),
         manifest_hash: sha256_manifest_hash(&canonical_json),
         strategy_key: strategy_key.to_string(),
         human_label: human_label_for_preset(preset).to_string(),
         risk_level: "high".to_string(),
-        manifest_status: "production".to_string(),
+        manifest_status: manifest_status.to_string(),
         manifest_json,
         canonical_json,
     })

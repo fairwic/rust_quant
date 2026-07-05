@@ -1116,6 +1116,8 @@ fn paper_observation_short_15m_support_breakdown_v5_manifest_is_canonical_and_ha
     .unwrap();
 
     assert_eq!(manifest.product_slug, "market-velocity-breakdown-short");
+    assert_eq!(manifest.channel, "paper_observing");
+    assert_eq!(manifest.manifest_status, "paper_observing");
     assert_eq!(
         manifest.human_label,
         "Market Velocity 15m short 0.04SL 0.65R support breakdown d1-100 pchg0.5-12 vol1.0 dist14 v5"
