@@ -268,7 +268,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             && production_gate.contains("Web fan-out resolves credentials per subscription"),
         "production gate must keep canary scope explicit and leave credentials to Web fan-out when unscoped"
     );
-    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
+    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-execution-worker";
     for deploy_script in [&promote, &rollback] {
         assert!(
             deploy_script.contains(default_deploy_services),
