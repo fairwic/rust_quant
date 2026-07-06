@@ -401,6 +401,78 @@
         assert!(extracted_after_clear.is_empty());
     }
     #[test]
+    fn startup_close_algo_compensation_expires_after_ten_seconds() {
+        use chrono::{TimeZone, Utc};
+
+        let signal_ts = Utc
+            .with_ymd_and_hms(2026, 7, 4, 12, 0, 0)
+            .unwrap()
+            .timestamp_millis();
+        let order = SwapOrder::new(
+            42,
+            SwapOrder::generate_live_in_order_id(
+                "ETH-USDT-SWAP",
+                "vegas",
+                42,
+                "4H",
+                signal_ts,
+            ),
+            "okx-order-1".to_string(),
+            "vegas".to_string(),
+            "4H".to_string(),
+            "ETH-USDT-SWAP".to_string(),
+            "buy".to_string(),
+            "1".to_string(),
+            "long".to_string(),
+            "okx".to_string(),
+            StrategyExecutionService::upsert_close_algo_detail(
+                "{}",
+                &["algo-1".to_string()],
+                "rq-42",
+                Some(1757.28),
+                None,
+            ),
+        );
+
+        assert!(StrategyExecutionService::close_algo_order_is_compensable(
+            &order,
+            signal_ts + 10_000,
+        ));
+        assert!(!StrategyExecutionService::close_algo_order_is_compensable(
+            &order,
+            signal_ts + 10_001,
+        ));
+    }
+    #[test]
+    fn expired_startup_close_algo_detail_removes_task_and_keeps_audit_marker() {
+        use rust_quant_domain::Timeframe;
+
+        let detail = StrategyExecutionService::upsert_close_algo_detail(
+            r#"{"entry_price":1800.0}"#,
+            &["algo-1".to_string(), "algo-2".to_string()],
+            "rq-42",
+            Some(1757.28),
+            None,
+        );
+        let expired = StrategyExecutionService::mark_close_algo_detail_expired(
+            &detail,
+            "signal_ttl_exceeded",
+            Some(1_783_166_400_000),
+            1_783_180_800_000,
+            Timeframe::H4,
+        );
+        let value: serde_json::Value = serde_json::from_str(&expired).unwrap();
+
+        assert!(value.get("close_algo").is_none());
+        assert_eq!(
+            value["close_algo_expired"]["reason"],
+            "signal_ttl_exceeded"
+        );
+        assert_eq!(value["close_algo_expired"]["ids"][0], "algo-1");
+        assert_eq!(value["close_algo_expired"]["stop_loss"], 1757.28);
+        assert_eq!(value["close_algo_expired"]["timeframe"], "4H");
+    }
+    #[test]
     fn test_min_execution_interval() {
         use rust_quant_domain::Timeframe;
         let service = create_test_service();

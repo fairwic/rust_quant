@@ -62,6 +62,8 @@ pub(crate) use stop_loss::select_stop_loss_for_confirmed_signal;
 pub const MS_15M: i64 = 15 * 60 * 1_000;
 pub const MS_1H: i64 = 60 * 60 * 1_000;
 pub const MS_4H: i64 = 4 * 60 * 60 * 1_000;
+/// 信号生成后允许生产补偿入场判断的最大时间窗，避免回测用未来 K 线补造入场。
+const ENTRY_DECISION_MAX_DELAY_MS: i64 = 10_000;
 const TOUCH_THRESHOLD_PCT: f64 = 0.3;
 const FAST_MOMENTUM_RSI_PERIOD: usize = 14;
 const FAST_MOMENTUM_BOLLINGER_PERIOD: usize = 20;
@@ -1139,13 +1141,90 @@ fn entry_signal_pullback_block_reason(
     (pullback_pct > max_pullback_pct).then(|| "entry_signal_pullback_too_deep".to_string())
 }
 
+/// 返回信号入场判断的最后可接受时间戳。
+fn entry_decision_deadline_ts(event_ts: i64) -> i64 {
+    event_ts.saturating_add(ENTRY_DECISION_MAX_DELAY_MS)
+}
+
+/// 统计在信号时间点之前已经完整收盘、生产可见的原始 K 线数量。
+fn completed_raw_candle_count(candles: &[BacktestCandle], event_ts: i64, candle_ms: i64) -> usize {
+    let mut left = 0;
+    let mut right = candles.len();
+    while left < right {
+        let mid = left + (right - left) / 2;
+        if candles[mid].ts + candle_ms <= event_ts {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    left
+}
+
+/// 截断原始 K 线到信号当时可见范围，禁止入场判断读取后续 K 线。
+fn raw_candles_visible_at_signal(
+    candles: &[BacktestCandle],
+    event_ts: i64,
+    candle_ms: i64,
+) -> &[BacktestCandle] {
+    let visible_count = completed_raw_candle_count(candles, event_ts, candle_ms);
+    &candles[..visible_count]
+}
+
+/// 截断已计算指标 K 线到信号当时可见范围，禁止指标确认读取后续 K 线。
+fn computed_candles_visible_at_signal(
+    candles: &[ComputedCandle],
+    event_ts: i64,
+) -> &[ComputedCandle] {
+    let visible_count = completed_candle_count(candles, event_ts, MS_15M);
+    &candles[..visible_count]
+}
+
+/// 找到入场后用于收益/止损模拟的第一根 K 线；该函数只服务 outcome，不参与入场决策。
+fn outcome_start_candle_idx(candles: &[ComputedCandle], entry_ts: i64) -> Option<usize> {
+    let mut left = 0;
+    let mut right = candles.len();
+    while left < right {
+        let mid = left + (right - left) / 2;
+        if candles[mid].candle.ts < entry_ts {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    (left < candles.len()).then_some(left)
+}
+
+/// 使用信号时点价格构造即时入场，避免无 retest 模式使用下一根 K 线开盘价。
+fn immediate_entry_from_signal(
+    event: &RadarEvent,
+    candles: &[ComputedCandle],
+    trigger: String,
+) -> Result<ConfirmedEvent, String> {
+    if !event.current_price.is_finite() || event.current_price <= 0.0 {
+        return Err("entry_current_price_invalid".to_string());
+    }
+    let entry_idx = outcome_start_candle_idx(candles, event.ts)
+        .ok_or_else(|| "no_entry_outcome_candle".to_string())?;
+    Ok(ConfirmedEvent {
+        event: event.clone(),
+        entry_ts: event.ts,
+        entry_price: event.current_price,
+        entry_idx,
+        trigger,
+        structure_stop_loss_price: None,
+        structure_stop_loss_source: None,
+    })
+}
+
 pub fn select_live_entry_from_signal_shell(
     event_ts: i64,
     current_price: f64,
     candles_15m: &[BacktestCandle],
     args: &MarketVelocityEventBacktestArgs,
 ) -> Result<MarketVelocityLiveEntryShellSelection, String> {
-    let computed = build_computed_candles(candles_15m.to_vec(), args.entry_period);
+    let visible_candles = raw_candles_visible_at_signal(candles_15m, event_ts, MS_15M);
+    let computed = build_computed_candles(visible_candles.to_vec(), args.entry_period);
     let direction = MarketVelocityTradeDirection::Long;
     let (entry_ok, signal_trigger) = entry_confirmation(&computed, event_ts, direction, args);
     if !entry_ok {
@@ -1172,6 +1251,9 @@ pub fn select_live_entry_from_signal_shell(
                     structure_stop_loss_price: Option<f64>,
                     structure_stop_loss_source: Option<String>|
      -> Result<MarketVelocityLiveEntryShellSelection, String> {
+        if entry_ts > entry_decision_deadline_ts(event_ts) {
+            return Err("entry_decision_window_expired".to_string());
+        }
         if let Some(reason) =
             entry_signal_pullback_block_reason(&event, entry_price, direction, args)
         {
@@ -1191,7 +1273,7 @@ pub fn select_live_entry_from_signal_shell(
     match args.fvg_entry_mode {
         FvgEntryMode::M15ImpulseRetrace => {
             match find_15m_impulse_fvg_retrace_after_signal(
-                candles_15m,
+                visible_candles,
                 &computed,
                 event_ts,
                 &signal_trigger,
@@ -1284,6 +1366,7 @@ pub fn evaluate_events(
             increment_nested(&mut blockers, &event.symbol, "no_15m_rows");
             continue;
         };
+        let signal_visible_15m = computed_candles_visible_at_signal(symbol_15m, event.ts);
         let direction = trade_direction_for_event(event);
         let (trend_ok, trend_reason) = match args.trend_timeframe {
             MarketVelocityTrendTimeframe::FourHour => {
@@ -1321,7 +1404,7 @@ pub fn evaluate_events(
         match args.fvg_entry_mode {
             FvgEntryMode::Off => {
                 let (entry_ok, entry_reason) =
-                    entry_confirmation(symbol_15m, event.ts, direction, args);
+                    entry_confirmation(signal_visible_15m, event.ts, direction, args);
                 if !entry_ok {
                     increment(&mut stage_counts, "entry_blocked");
                     increment(&mut stage_counts, "entry_signal_blocked");
@@ -1329,10 +1412,10 @@ pub fn evaluate_events(
                     continue;
                 }
                 increment(&mut stage_counts, "entry_signal_pass");
-                let signal_idx = completed_candle_count(symbol_15m, event.ts, MS_15M) - 1;
+                let signal_idx = completed_candle_count(signal_visible_15m, event.ts, MS_15M) - 1;
                 if args.entry_retest_after_signal {
                     match find_retest_entry_after_signal(
-                        symbol_15m,
+                        signal_visible_15m,
                         signal_idx,
                         direction,
                         &entry_reason,
@@ -1370,44 +1453,22 @@ pub fn evaluate_events(
                     }
                     continue;
                 }
-                let Some(entry_idx) = next_entry_candle_idx(symbol_15m, event.ts) else {
-                    increment(&mut stage_counts, "no_next_entry_candle");
-                    increment(&mut stage_counts, "entry_execution_blocked");
-                    increment_nested(&mut blockers, &event.symbol, "no_next_entry_candle");
-                    continue;
-                };
-                if let Some(reason) =
-                    entry_gap_without_retest_block_reason(symbol_15m, signal_idx, entry_idx, args)
-                {
-                    increment(&mut stage_counts, "entry_blocked");
-                    increment(&mut stage_counts, "entry_execution_blocked");
-                    increment_nested(&mut blockers, &event.symbol, &reason);
-                    continue;
+                match immediate_entry_from_signal(event, symbol_15m, entry_reason) {
+                    Ok(confirmed_event) => {
+                        increment(&mut stage_counts, "entry_pass");
+                        increment(&mut stage_counts, "entry_execution_pass");
+                        confirmed.push(confirmed_event);
+                    }
+                    Err(reason) => {
+                        increment(&mut stage_counts, "entry_blocked");
+                        increment(&mut stage_counts, "entry_execution_blocked");
+                        increment_nested(&mut blockers, &event.symbol, &reason);
+                    }
                 }
-                let entry = &symbol_15m[entry_idx].candle;
-                if let Some(reason) =
-                    entry_signal_pullback_block_reason(event, entry.open, direction, args)
-                {
-                    increment(&mut stage_counts, "entry_blocked");
-                    increment(&mut stage_counts, "entry_execution_blocked");
-                    increment_nested(&mut blockers, &event.symbol, &reason);
-                    continue;
-                }
-                increment(&mut stage_counts, "entry_pass");
-                increment(&mut stage_counts, "entry_execution_pass");
-                confirmed.push(ConfirmedEvent {
-                    event: event.clone(),
-                    entry_ts: entry.ts,
-                    entry_price: entry.open,
-                    entry_idx,
-                    trigger: entry_reason,
-                    structure_stop_loss_price: None,
-                    structure_stop_loss_source: None,
-                });
             }
             FvgEntryMode::M15SelfAfterSignal => {
                 let (entry_ok, entry_reason) =
-                    entry_confirmation(symbol_15m, event.ts, direction, args);
+                    entry_confirmation(signal_visible_15m, event.ts, direction, args);
                 if !entry_ok {
                     increment(&mut stage_counts, "entry_blocked");
                     increment(&mut stage_counts, "entry_signal_blocked");
@@ -1428,6 +1489,8 @@ pub fn evaluate_events(
                     increment_nested(&mut blockers, &event.symbol, "short_fvg_not_supported");
                     continue;
                 }
+                let symbol_15m_raw =
+                    raw_candles_visible_at_signal(symbol_15m_raw, event.ts, MS_15M);
                 match find_15m_self_fvg_entry_after_signal(
                     symbol_15m_raw,
                     event.ts,
@@ -1467,7 +1530,7 @@ pub fn evaluate_events(
             }
             FvgEntryMode::M15ImpulseRetrace => {
                 let (entry_ok, entry_reason) =
-                    entry_confirmation(symbol_15m, event.ts, direction, args);
+                    entry_confirmation(signal_visible_15m, event.ts, direction, args);
                 if !entry_ok {
                     increment(&mut stage_counts, "entry_blocked");
                     increment(&mut stage_counts, "entry_signal_blocked");
@@ -1475,7 +1538,7 @@ pub fn evaluate_events(
                     continue;
                 }
                 increment(&mut stage_counts, "entry_signal_pass");
-                let signal_idx = completed_candle_count(symbol_15m, event.ts, MS_15M) - 1;
+                let signal_idx = completed_candle_count(signal_visible_15m, event.ts, MS_15M) - 1;
                 let Some(symbol_15m_raw) = raw_candles_15m
                     .get(&event.symbol)
                     .filter(|candles| !candles.is_empty())
@@ -1489,9 +1552,11 @@ pub fn evaluate_events(
                     increment_nested(&mut blockers, &event.symbol, "short_fvg_not_supported");
                     continue;
                 }
+                let symbol_15m_raw =
+                    raw_candles_visible_at_signal(symbol_15m_raw, event.ts, MS_15M);
                 match find_15m_impulse_fvg_retrace_after_signal(
                     symbol_15m_raw,
-                    symbol_15m,
+                    signal_visible_15m,
                     event.ts,
                     &entry_reason,
                     args,
@@ -1523,7 +1588,7 @@ pub fn evaluate_events(
                     FvgEntrySearch::Blocked(reason) => {
                         if args.entry_retest_after_signal {
                             match find_retest_entry_after_signal(
-                                symbol_15m,
+                                signal_visible_15m,
                                 signal_idx,
                                 direction,
                                 &entry_reason,
@@ -1602,6 +1667,10 @@ pub fn evaluate_events(
                     increment_nested(&mut blockers, &event.symbol, "short_fvg_not_supported");
                     continue;
                 }
+                let symbol_4h_raw = raw_candles_visible_at_signal(symbol_4h_raw, event.ts, MS_4H);
+                let symbol_1h_raw = raw_candles_visible_at_signal(symbol_1h_raw, event.ts, MS_1H);
+                let symbol_15m_raw =
+                    raw_candles_visible_at_signal(symbol_15m_raw, event.ts, MS_15M);
                 match find_fvg_entry(
                     fvg_mode,
                     symbol_4h_raw,
@@ -1764,33 +1833,6 @@ fn retest_confirmation_matches(
     args.entry_min_volume_ratio <= 0.0
         || volume_ratio.is_some_and(|ratio| ratio >= args.entry_min_volume_ratio)
 }
-fn entry_gap_without_retest_block_reason(
-    candles: &[ComputedCandle],
-    signal_idx: usize,
-    entry_idx: usize,
-    args: &MarketVelocityEventBacktestArgs,
-) -> Option<String> {
-    let max_gap_pct = args.entry_max_gap_without_retest_pct?;
-    let signal = candles.get(signal_idx)?;
-    let previous = signal_idx
-        .checked_sub(1)
-        .and_then(|previous_idx| candles.get(previous_idx))?;
-    let entry = candles.get(entry_idx)?;
-    let gap_pct = moving_average_distance_pct(entry.candle.open, signal.candle.close)?;
-    if gap_pct <= max_gap_pct {
-        return None;
-    }
-    let retest_level = previous.candle.high;
-    let tolerance = 1.0 + args.entry_retest_tolerance_pct / 100.0;
-    let has_known_retest = candles
-        .get(signal_idx + 1..entry_idx)
-        .unwrap_or(&[])
-        .iter()
-        .any(|candle| {
-            candle.candle.low <= retest_level * tolerance && candle.candle.close >= retest_level
-        });
-    (!has_known_retest).then(|| "entry_gap_without_retest".to_string())
-}
 /// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 fn summarize_target(
     confirmed: &[ConfirmedEvent],
@@ -1891,20 +1933,6 @@ fn completed_candle_count(candles: &[ComputedCandle], event_ts: i64, candle_ms: 
         }
     }
     left
-}
-/// 封装推进entryK 线idx，减少回测策略调用方重复实现相同细节。
-fn next_entry_candle_idx(candles: &[ComputedCandle], event_ts: i64) -> Option<usize> {
-    let mut left = 0;
-    let mut right = candles.len();
-    while left < right {
-        let mid = left + (right - left) / 2;
-        if candles[mid].candle.ts <= event_ts {
-            left = mid + 1;
-        } else {
-            right = mid;
-        }
-    }
-    (left < candles.len()).then_some(left)
 }
 /// 提供movingaverage状态的集中实现，避免回测策略调用方重复处理相同细节。
 fn moving_average_state(

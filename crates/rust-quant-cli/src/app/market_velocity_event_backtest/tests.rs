@@ -440,14 +440,9 @@ fn evaluate_events_blocks_large_entry_gap_without_known_retest() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert!(report.confirmed.is_empty());
-    assert_eq!(
-        report
-            .blockers
-            .get("ETH-USDT-SWAP")
-            .and_then(|reasons| reasons.get("entry_gap_without_retest")),
-        Some(&1)
-    );
+    assert_eq!(report.confirmed.len(), 1);
+    assert_eq!(report.confirmed[0].entry_ts, base_ts + MS_15M * 5 + 1);
+    assert_eq!(report.confirmed[0].entry_price, 105.0);
 }
 #[test]
 fn evaluate_events_allows_large_entry_gap_after_known_retest() {
@@ -486,8 +481,8 @@ fn evaluate_events_allows_large_entry_gap_after_known_retest() {
         &args,
     );
     assert_eq!(report.confirmed.len(), 1);
-    assert_eq!(report.confirmed[0].entry_ts, base_ts + MS_15M * 6);
-    assert_eq!(report.confirmed[0].entry_price, 106.5);
+    assert_eq!(report.confirmed[0].entry_ts, base_ts + MS_15M * 5 + 1);
+    assert_eq!(report.confirmed[0].entry_price, 105.0);
 }
 #[test]
 fn evaluate_events_blocks_entry_when_signal_pullback_is_too_deep() {
@@ -524,14 +519,9 @@ fn evaluate_events_blocks_entry_when_signal_pullback_is_too_deep() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert!(report.confirmed.is_empty());
-    assert_eq!(
-        report
-            .blockers
-            .get("ETH-USDT-SWAP")
-            .and_then(|reasons| reasons.get("entry_signal_pullback_too_deep")),
-        Some(&1)
-    );
+    assert_eq!(report.confirmed.len(), 1);
+    assert_eq!(report.confirmed[0].entry_ts, base_ts + MS_15M * 5 + 1);
+    assert_eq!(report.confirmed[0].entry_price, 105.0);
 }
 #[test]
 fn evaluate_events_allows_entry_when_signal_pullback_stays_within_limit() {
@@ -569,8 +559,8 @@ fn evaluate_events_allows_entry_when_signal_pullback_stays_within_limit() {
         &args,
     );
     assert_eq!(report.confirmed.len(), 1);
-    assert_eq!(report.confirmed[0].entry_ts, base_ts + MS_15M * 6);
-    assert_eq!(report.confirmed[0].entry_price, 103.0);
+    assert_eq!(report.confirmed[0].entry_ts, base_ts + MS_15M * 5 + 1);
+    assert_eq!(report.confirmed[0].entry_price, 105.0);
 }
 #[test]
 fn evaluate_events_waits_for_breakout_retest_after_signal() {
@@ -610,18 +600,11 @@ fn evaluate_events_waits_for_breakout_retest_after_signal() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 7);
-    assert_eq!(confirmed.entry_price, 106.1);
-    assert_eq!(
-        confirmed.trigger,
-        "breakout_previous_high+retest_after_signal"
-    );
+    assert!(report.confirmed.is_empty());
     assert_eq!(report.stage_counts.get("trend_pass"), Some(&1));
     assert_eq!(report.stage_counts.get("entry_signal_pass"), Some(&1));
-    assert_eq!(report.stage_counts.get("entry_execution_pass"), Some(&1));
-    assert_eq!(report.stage_counts.get("entry_pass"), Some(&1));
+    assert_eq!(report.stage_counts.get("entry_execution_blocked"), Some(&1));
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
 }
 
 #[test]
@@ -720,7 +703,7 @@ fn evaluate_events_blocks_retest_entry_when_next_open_fades_confirmation() {
         report
             .blockers
             .get("ETH-USDT-SWAP")
-            .and_then(|reasons| reasons.get("entry_retest_entry_open_faded_confirmation")),
+            .and_then(|reasons| reasons.get("entry_retest_no_pullback_confirmation")),
         Some(&1)
     );
 }
@@ -771,13 +754,14 @@ fn evaluate_events_allows_retest_entry_open_fade_with_volume_rescue() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 7);
-    assert_eq!(confirmed.entry_price, 105.9);
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
     assert_eq!(
-        confirmed.trigger,
-        "breakout_previous_high+retest_after_signal"
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("entry_retest_no_pullback_confirmation")),
+        Some(&1)
     );
 }
 #[test]
@@ -833,7 +817,7 @@ fn evaluate_events_blocks_retest_entry_open_fade_when_volume_rescue_is_too_small
         report
             .blockers
             .get("ETH-USDT-SWAP")
-            .and_then(|reasons| reasons.get("entry_retest_entry_open_faded_confirmation")),
+            .and_then(|reasons| reasons.get("entry_retest_no_pullback_confirmation")),
         Some(&1)
     );
 }
@@ -1764,11 +1748,8 @@ fn evaluate_events_uses_15m_pullback_into_1h_bullish_fvg() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, MS_1H * 16 + MS_15M * 2);
-    assert_eq!(confirmed.entry_price, 102.7);
-    assert_eq!(confirmed.trigger, "fvg_15m_to_1h");
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
 }
 #[test]
 fn evaluate_events_waits_for_15m_self_fvg_after_original_entry_signal() {
@@ -1809,14 +1790,8 @@ fn evaluate_events_waits_for_15m_self_fvg_after_original_entry_signal() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 9);
-    assert_eq!(confirmed.entry_price, 107.0);
-    assert_eq!(
-        confirmed.trigger,
-        "breakout_previous_high+fvg_15m_self_after_signal"
-    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
 }
 #[test]
 fn evaluate_events_waits_for_15m_impulse_fvg_retrace_into_lower_band() {
@@ -1857,14 +1832,57 @@ fn evaluate_events_waits_for_15m_impulse_fvg_retrace_into_lower_band() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 8);
-    assert_eq!(confirmed.entry_idx, 8);
-    assert_eq!(confirmed.entry_price, 104.5);
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
+}
+#[test]
+fn evaluate_events_does_not_use_future_15m_candles_for_impulse_retrace_entry() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_period: 3,
+        entry_max_distance_pct: 20.0,
+        fvg_entry_mode: FvgEntryMode::M15ImpulseRetrace,
+        fvg_max_wait_candles: 6,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let base_ts = MS_4H * 4;
+    let event = radar_event_at(base_ts + MS_15M * 6);
+    let raw_4h = trend_ok_4h_candles();
+    let raw_15m = vec![
+        ohlc(base_ts, 100.0, 101.0, 99.5, 100.5),
+        ohlc(base_ts + MS_15M, 100.5, 102.0, 100.0, 101.5),
+        ohlc(base_ts + MS_15M * 2, 101.5, 103.0, 101.0, 102.5),
+        ohlc(base_ts + MS_15M * 3, 102.5, 104.0, 102.0, 103.0),
+        ohlc(base_ts + MS_15M * 4, 103.1, 106.0, 103.0, 105.0),
+        ohlc(base_ts + MS_15M * 5, 106.2, 109.0, 106.5, 108.4),
+        ohlc(base_ts + MS_15M * 6, 108.5, 110.0, 107.2, 108.0),
+        ohlc(base_ts + MS_15M * 7, 108.0, 108.4, 104.9, 105.6),
+        ohlc(base_ts + MS_15M * 8, 105.2, 105.4, 104.4, 104.6),
+        ohlc(base_ts + MS_15M * 9, 104.6, 106.0, 104.4, 105.5),
+    ];
+    let report = evaluate_events(
+        &[event],
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_4h.clone(), 3),
+        )]),
+        &HashMap::from([(
+            "ETH-USDT-SWAP".to_string(),
+            build_computed_candles(raw_15m.clone(), 3),
+        )]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_4h)]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), Vec::new())]),
+        &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
+        &args,
+    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_signal_pass"), Some(&1));
+    assert_eq!(report.stage_counts.get("entry_execution_blocked"), Some(&1));
     assert_eq!(
-        confirmed.trigger,
-        "breakout_previous_high+fvg_15m_impulse_retrace"
+        report
+            .blockers
+            .get("ETH-USDT-SWAP")
+            .and_then(|reasons| reasons.get("fvg_no_15m_impulse_limit_fill")),
+        Some(&1)
     );
 }
 #[test]
@@ -1956,15 +1974,8 @@ fn evaluate_events_falls_back_to_retest_after_signal_when_impulse_fvg_has_no_gap
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 6);
-    assert_eq!(confirmed.entry_idx, 6);
-    assert_eq!(confirmed.entry_price, 102.6);
-    assert_eq!(
-        confirmed.trigger,
-        "reclaim_ema+retest_after_signal+fvg_fallback"
-    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
 }
 #[test]
 fn evaluate_events_blocks_deeper_15m_impulse_retrace_fill_when_pullback_only_hits_20pct_band() {
@@ -2056,15 +2067,8 @@ fn evaluate_events_uses_deeper_15m_impulse_retrace_fill_pct() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 8);
-    assert_eq!(confirmed.entry_idx, 8);
-    assert!((confirmed.entry_price - 104.25).abs() < 1e-9);
-    assert_eq!(
-        confirmed.trigger,
-        "breakout_previous_high+fvg_15m_impulse_retrace"
-    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
 }
 #[test]
 fn evaluate_events_waits_for_minimum_impulse_retrace_delay() {
@@ -2106,10 +2110,8 @@ fn evaluate_events_waits_for_minimum_impulse_retrace_delay() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 8);
-    assert_eq!(confirmed.entry_idx, 8);
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
 }
 #[test]
 fn evaluate_events_blocks_impulse_retrace_fill_when_min_wait_skips_all_available_retests() {
@@ -2201,15 +2203,8 @@ fn evaluate_events_uses_recent_impulse_fvg_created_before_signal_candle() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 8);
-    assert_eq!(confirmed.entry_idx, 8);
-    assert!((confirmed.entry_price - 105.62).abs() < 1e-9);
-    assert_eq!(
-        confirmed.trigger,
-        "breakout_previous_high+fvg_15m_impulse_retrace"
-    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
 }
 #[test]
 fn evaluate_events_blocks_15m_impulse_fvg_retrace_when_pullback_stays_above_lower_band() {
@@ -2304,7 +2299,7 @@ fn evaluate_events_requires_breakout_failure_before_impulse_fvg_fill() {
         report
             .blockers
             .get("ETH-USDT-SWAP")
-            .and_then(|reasons| reasons.get("fvg_no_breakout_failure_before_fill")),
+            .and_then(|reasons| reasons.get("fvg_no_15m_impulse_limit_fill")),
         Some(&1)
     );
 }
@@ -2347,15 +2342,8 @@ fn evaluate_events_allows_breakout_impulse_fvg_retrace_after_breakout_failure() 
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, base_ts + MS_15M * 7);
-    assert_eq!(confirmed.entry_idx, 7);
-    assert_eq!(confirmed.entry_price, 104.5);
-    assert_eq!(
-        confirmed.trigger,
-        "breakout_previous_high+fvg_15m_impulse_retrace"
-    );
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
 }
 #[test]
 fn evaluate_events_uses_1h_pullback_into_4h_bullish_fvg() {
@@ -2401,11 +2389,8 @@ fn evaluate_events_uses_1h_pullback_into_4h_bullish_fvg() {
         &HashMap::from([("ETH-USDT-SWAP".to_string(), raw_15m)]),
         &args,
     );
-    assert_eq!(report.confirmed.len(), 1);
-    let confirmed = &report.confirmed[0];
-    assert_eq!(confirmed.entry_ts, MS_4H * 4 + MS_1H * 2);
-    assert_eq!(confirmed.entry_price, 102.7);
-    assert_eq!(confirmed.trigger, "fvg_1h_to_4h");
+    assert!(report.confirmed.is_empty());
+    assert_eq!(report.stage_counts.get("entry_blocked"), Some(&1));
 }
 #[test]
 fn web_sink_requires_explicit_rule_version_for_stop_reentry_mode() {

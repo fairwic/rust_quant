@@ -42,6 +42,7 @@ pub use handoff::{
 const DEFAULT_OKX_REST_BASE: &str = "https://www.okx.com";
 const DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES: i64 = 45;
 const DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS: u64 = 150;
+const MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS: i64 = 10_000;
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketVelocityLiveHandoffConfig {
     /// databaseURL，用于配置运行参数。
@@ -486,6 +487,28 @@ pub async fn run_market_velocity_live_handoff(
                 continue;
             }
         };
+        if let Some(blocker_detail) =
+            market_velocity_live_signal_expired_blocker(&event, Utc::now())
+        {
+            let blocker_code = "market_velocity_live_signal_expired";
+            record_market_velocity_live_handoff_blocker(
+                &pool,
+                &event,
+                &signal_config,
+                blocker_code,
+                &blocker_detail,
+            )
+            .await?;
+            skipped_candidates.push(json!({
+                "event_id": event.id,
+                "symbol": event.symbol,
+                "blocker_code": blocker_code,
+                "blocker_detail": blocker_detail,
+                "selected_entry": selected_entry,
+                "entry_candles": candle_load.status,
+            }));
+            continue;
+        }
         selected = Some((
             event,
             entry_confirmation,
@@ -742,7 +765,7 @@ fn build_market_velocity_api_credential_readiness_blocked_response(
 fn market_velocity_live_handoff_state_for_blocker(
     blocker_code: &str,
 ) -> MarketVelocityLiveHandoffState {
-    if blocker_code.contains("_stale") {
+    if blocker_code.contains("_stale") || blocker_code.contains("_expired") {
         MarketVelocityLiveHandoffState::Expired
     } else {
         MarketVelocityLiveHandoffState::Blocked
@@ -857,6 +880,19 @@ fn market_velocity_entry_confirmation_age_minutes(
         .num_seconds()
         .max(0);
     (age_seconds + 59) / 60
+}
+
+/// 后置阻断超过 10 秒的 live handoff 信号，避免补拉 K 线后继续提交过期实盘任务。
+fn market_velocity_live_signal_expired_blocker(
+    event: &MarketRankEvent,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    let age_ms = now
+        .signed_duration_since(event.detected_at)
+        .num_milliseconds()
+        .max(0);
+    (age_ms > MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS)
+        .then(|| format!("SignalExpired:{age_ms}ms>{MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS}ms"))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1483,7 +1519,29 @@ mod tests {
     }
 
     #[test]
-    fn live_entry_shell_uses_impulse_fvg_primary_when_fill_arrives() {
+    fn live_signal_ttl_allows_ten_seconds_and_expires_after() {
+        let detected_at = Utc.with_ymd_and_hms(2026, 6, 16, 11, 30, 0).unwrap();
+        let event = sample_live_event(detected_at.timestamp_millis(), 105.0);
+
+        assert_eq!(
+            market_velocity_live_signal_expired_blocker(
+                &event,
+                detected_at + chrono::Duration::seconds(10)
+            ),
+            None
+        );
+        assert_eq!(
+            market_velocity_live_signal_expired_blocker(
+                &event,
+                detected_at + chrono::Duration::milliseconds(10_001)
+            )
+            .as_deref(),
+            Some("SignalExpired:10001ms>10000ms")
+        );
+    }
+
+    #[test]
+    fn live_entry_shell_blocks_impulse_fvg_fill_arriving_after_signal() {
         let mut config = sample_hybrid_signal_config();
         config.entry_trigger_allowlist = vec!["breakout_previous_high".to_string()];
         let base_ts = 4 * 60 * 60 * 1_000 * 4;
@@ -1500,32 +1558,16 @@ mod tests {
             sample_entry_candle(base_ts + MS_15M * 8, 105.2, 105.4, 104.4, 104.6, 20.0),
             sample_entry_candle(base_ts + MS_15M * 9, 104.6, 106.0, 104.4, 105.5, 10.0),
         ];
-        let selection = select_market_velocity_live_entry(&event, &candles, &config)
-            .expect("hybrid live entry selection");
+        let err = select_market_velocity_live_entry(&event, &candles, &config)
+            .expect_err("future impulse FVG fill must not become live entry");
         assert_eq!(
-            selection.entry_confirmation.trigger,
-            "breakout_previous_high"
-        );
-        assert_eq!(selection.selected_entry.entry_price, 104.5);
-        assert_eq!(
-            selection.selected_entry.trigger,
-            "breakout_previous_high+fvg_15m_impulse_retrace"
-        );
-        assert_eq!(
-            selection.selected_entry.entry_path,
-            "fvg_15m_impulse_retrace"
-        );
-        let selected_entry_json =
-            serde_json::to_value(&selection.selected_entry).expect("selected entry json");
-        assert_eq!(selected_entry_json["structure_stop_loss_price"], 104.0);
-        assert_eq!(
-            selected_entry_json["structure_stop_loss_source"],
-            "fvg_15m_impulse_lower"
+            err,
+            "fvg_no_15m_impulse_limit_fill_then_entry_retest_no_pullback_confirmation"
         );
     }
 
     #[test]
-    fn live_entry_shell_falls_back_to_retest_after_signal() {
+    fn live_entry_shell_blocks_retest_fallback_arriving_after_signal() {
         let config = sample_hybrid_signal_config();
         let base_ts = 4 * 60 * 60 * 1_000 * 4;
         let event = sample_live_event(base_ts + MS_15M * 5, 105.0);
@@ -1538,25 +1580,11 @@ mod tests {
             sample_entry_candle(base_ts + MS_15M * 5, 102.3, 103.4, 102.0, 103.0, 50.0),
             sample_entry_candle(base_ts + MS_15M * 6, 102.6, 103.5, 102.4, 103.2, 10.0),
         ];
-        let selection = select_market_velocity_live_entry(&event, &candles, &config)
-            .expect("hybrid live fallback selection");
-        assert_eq!(selection.entry_confirmation.trigger, "reclaim_ema");
-        assert_eq!(selection.selected_entry.entry_price, 102.6);
+        let err = select_market_velocity_live_entry(&event, &candles, &config)
+            .expect_err("future retest fallback must not become live entry");
         assert_eq!(
-            selection.selected_entry.trigger,
-            "reclaim_ema+retest_after_signal+fvg_fallback"
-        );
-        assert_eq!(selection.selected_entry.entry_path, "retest_after_signal");
-        assert_eq!(selection.selected_entry.signal_pullback_pct, Some(2.286));
-        let selected_entry_json =
-            serde_json::to_value(&selection.selected_entry).expect("selected entry json");
-        let structure_stop = selected_entry_json["structure_stop_loss_price"]
-            .as_f64()
-            .expect("selected entry should carry structure stop");
-        assert!((structure_stop - selection.entry_confirmation.ema_value).abs() < 1e-6);
-        assert_eq!(
-            selected_entry_json["structure_stop_loss_source"],
-            "entry_confirmation_ema"
+            err,
+            "fvg_no_recent_15m_impulse_gap_then_entry_retest_no_pullback_confirmation"
         );
     }
 
@@ -1812,6 +1840,11 @@ mod tests {
             )
             .as_str(),
             "blocked"
+        );
+        assert_eq!(
+            market_velocity_live_handoff_state_for_blocker("market_velocity_live_signal_expired")
+                .as_str(),
+            "expired"
         );
     }
     /// 构造样例entryconfirmation，集中维护行情数据的载荷组装规则。
