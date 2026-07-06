@@ -27,7 +27,7 @@ fn strategy_catalog_exposes_market_velocity_as_standard_core_strategy() {
 }
 
 #[test]
-fn strategy_catalog_exposes_breakdown_short_as_distinct_signal_only_strategy() {
+fn strategy_catalog_exposes_breakdown_short_as_live_handoff_strategy() {
     let items = super::standard_strategy_catalog_items();
     let breakdown_short = items
         .iter()
@@ -43,8 +43,9 @@ fn strategy_catalog_exposes_breakdown_short_as_distinct_signal_only_strategy() {
     assert!(breakdown_short.supported_symbols.contains(&"ALL"));
     assert!(breakdown_short.timeframes.contains(&"15m"));
     assert!(breakdown_short.description.contains("横盘"));
-    assert!(breakdown_short.detail.contains("signal-only"));
     assert!(breakdown_short.detail.contains("live handoff"));
+    assert!(breakdown_short.supported_exchanges.contains(&"binance"));
+    assert!(breakdown_short.supported_exchanges.contains(&"hyperliquid"));
     assert_eq!(breakdown_short.display_total_return_pct, None);
     assert_eq!(breakdown_short.display_sharpe_ratio, None);
     assert_eq!(breakdown_short.display_trade_count, None);

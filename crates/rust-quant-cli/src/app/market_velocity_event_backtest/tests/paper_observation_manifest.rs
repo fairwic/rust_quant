@@ -1157,8 +1157,8 @@ fn paper_observation_short_15m_support_breakdown_v6_manifest_is_canonical_and_ha
     .unwrap();
 
     assert_eq!(manifest.product_slug, "market-velocity-breakdown-short");
-    assert_eq!(manifest.channel, "paper_observing");
-    assert_eq!(manifest.manifest_status, "paper_observing");
+    assert_eq!(manifest.channel, "production_default");
+    assert_eq!(manifest.manifest_status, "production");
     assert_eq!(
         manifest.human_label,
         "Market Velocity 15m short 0.04SL 1.0R support breakdown d5-100 pchg2-12 vol1.0 dist14 v6"
@@ -1190,6 +1190,10 @@ fn paper_observation_short_15m_support_breakdown_v6_manifest_is_canonical_and_ha
     assert_eq!(
         manifest.manifest_json["filters"]["entry_trigger_allowlist"],
         serde_json::json!(["breakdown_range_low"])
+    );
+    assert_eq!(
+        manifest.manifest_json["execution"]["service_mode"],
+        "api_trade_enabled"
     );
     assert!(manifest.manifest_hash.starts_with("sha256:"));
     assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);

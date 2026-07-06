@@ -3,6 +3,8 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
+use rust_quant_services::market::MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_CUTOVER_PRESET;
+
 use super::args::{
     entry_trigger_filter_version_label, format_entry_trigger_filter_list,
     parse_paper_observation_args_from, MarketVelocityTradeDirection,
@@ -46,6 +48,21 @@ pub fn market_velocity_paper_strategy_preset_manifest(
     } else {
         MARKET_VELOCITY_PRODUCT_SLUG
     };
+    let is_breakdown_short_live_cutover =
+        is_breakdown_short && preset == MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_CUTOVER_PRESET;
+    let execution_json = if is_breakdown_short_live_cutover {
+        json!({
+            "service_mode": "api_trade_enabled",
+            "source_signal_type": strategy_key,
+            "live_handoff": "market_velocity_live_handoff",
+        })
+    } else {
+        json!({
+            "service_mode": "signal_only",
+            "source_signal_type": strategy_key,
+            "paper_outcome_sink": "web",
+        })
+    };
     let fast_momentum_filters_json = json!({
         "entry_min_rsi": args.entry_min_rsi,
         "entry_max_rsi": args.entry_max_rsi,
@@ -68,11 +85,7 @@ pub fn market_velocity_paper_strategy_preset_manifest(
             "symbol": "ALL",
             "timeframe": "15m",
         },
-        "execution": {
-            "service_mode": "signal_only",
-            "source_signal_type": strategy_key,
-            "paper_outcome_sink": "web",
-        },
+        "execution": execution_json,
         "parameters": {
             "event_source": args.event_source.label(),
             "trade_direction": args.trade_direction.label(),
@@ -120,7 +133,9 @@ pub fn market_velocity_paper_strategy_preset_manifest(
         },
     });
     let canonical_json = canonical_manifest_json(&manifest_json)?;
-    let (channel, manifest_status) = if is_breakdown_short {
+    let (channel, manifest_status) = if is_breakdown_short_live_cutover {
+        ("production_default", "production")
+    } else if is_breakdown_short {
         ("paper_observing", "paper_observing")
     } else {
         ("production_default", "production")
