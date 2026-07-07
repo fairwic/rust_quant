@@ -102,6 +102,21 @@ fn postgres_quant_core_ddl_contains_live_strategy_order_contract() {
         );
     }
 }
+
+#[test]
+fn postgres_quant_core_ddl_uses_unbounded_strategy_signal_log_payload() {
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains("strategy_result TEXT NOT NULL"),
+        "strategy_job_signal_log.strategy_result must be TEXT so large Vegas signal JSON can be audited"
+    );
+    assert!(
+        POSTGRES_QUANT_CORE_DDL.contains(
+            "ALTER TABLE IF EXISTS strategy_job_signal_log\n    ALTER COLUMN strategy_result TYPE TEXT"
+        ),
+        "quant_core schema ensure must widen existing strategy_job_signal_log.strategy_result columns"
+    );
+}
+
 #[test]
 fn postgres_quant_core_ddl_contains_market_velocity_radar_contract() {
     assert!(
