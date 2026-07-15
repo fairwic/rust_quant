@@ -161,17 +161,3 @@ async fn shutdown_scheduler() -> Result<()> {
     }
     Ok(())
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-    #[test]
-    fn market_velocity_live_readiness_skips_local_state_init() {
-        let mut envs = HashMap::new();
-        envs.insert(
-            "IS_RUN_MARKET_VELOCITY_LIVE_READINESS".to_string(),
-            "true".to_string(),
-        );
-        assert!(should_skip_local_state_init_from_map(&envs));
-    }
-}

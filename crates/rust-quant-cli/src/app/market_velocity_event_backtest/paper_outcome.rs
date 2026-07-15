@@ -39,6 +39,31 @@ pub fn build_market_velocity_paper_outcomes(
                     .unwrap_or_else(|| signal.event.symbol.clone());
                 let entry_trigger = result.trigger.clone();
                 let selected_stop_loss = select_stop_loss_for_confirmed_signal(signal, args);
+                let entry_filter_payload = json!({
+                    "entry_trigger_filter_version": entry_trigger_filter_version,
+                    "entry_trigger_allowlist": &args.entry_trigger_allowlist,
+                    "entry_trigger_blocklist": &args.entry_trigger_blocklist,
+                });
+                let filters_payload = json!({
+                    "min_delta_rank": args.min_delta_rank,
+                    "max_delta_rank": args.max_delta_rank,
+                    "min_price_change_pct": args.min_price_change_pct,
+                    "max_price_change_pct": args.max_price_change_pct,
+                    "entry_max_distance_pct": args.entry_max_distance_pct,
+                    "entry_min_volume_ratio": args.entry_min_volume_ratio,
+                    "entry_max_gap_without_retest_pct": args.entry_max_gap_without_retest_pct,
+                    "entry_retest_tolerance_pct": args.entry_retest_tolerance_pct,
+                    "entry_retest_after_signal": args.entry_retest_after_signal,
+                    "entry_retest_max_wait_candles": args.entry_retest_max_wait_candles,
+                    "entry_retest_min_entry_open_gap_pct": args.entry_retest_min_entry_open_gap_pct,
+                    "entry_retest_open_fade_min_volume_ratio": args.entry_retest_open_fade_min_volume_ratio,
+                    "entry_min_body_ratio_pct": args.entry_min_body_ratio_pct,
+                    "entry_min_close_position_pct": args.entry_min_close_position_pct,
+                    "entry_min_range_expansion_ratio": args.entry_min_range_expansion_ratio,
+                    "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
+                    "max_15m_staleness_min": args.max_15m_staleness_min,
+                    "max_4h_staleness_min": args.max_4h_staleness_min,
+                });
                 outcomes.push(MarketVelocityPaperOutcomeRequest {
                     rank_event_id: event_id,
                     exchange: signal.event.exchange.trim().to_ascii_lowercase(),
@@ -83,28 +108,8 @@ pub fn build_market_velocity_paper_outcomes(
                         "profit_protection": profit_protection_payload(args),
                         "runner_exit": runner_exit_payload(args),
                         "early_exit": early_exit_payload(args),
-                        "entry_filter": {
-                            "entry_trigger_filter_version": entry_trigger_filter_version,
-                            "entry_trigger_allowlist": &args.entry_trigger_allowlist,
-                            "entry_trigger_blocklist": &args.entry_trigger_blocklist,
-                        },
-                        "filters": {
-                            "min_delta_rank": args.min_delta_rank,
-                            "max_delta_rank": args.max_delta_rank,
-                            "min_price_change_pct": args.min_price_change_pct,
-                            "max_price_change_pct": args.max_price_change_pct,
-                            "entry_max_distance_pct": args.entry_max_distance_pct,
-                            "entry_min_volume_ratio": args.entry_min_volume_ratio,
-                            "entry_max_gap_without_retest_pct": args.entry_max_gap_without_retest_pct,
-                            "entry_retest_tolerance_pct": args.entry_retest_tolerance_pct,
-                            "entry_retest_after_signal": args.entry_retest_after_signal,
-                            "entry_retest_max_wait_candles": args.entry_retest_max_wait_candles,
-                            "entry_retest_min_entry_open_gap_pct": args.entry_retest_min_entry_open_gap_pct,
-                            "entry_retest_open_fade_min_volume_ratio": args.entry_retest_open_fade_min_volume_ratio,
-                            "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
-                            "max_15m_staleness_min": args.max_15m_staleness_min,
-                            "max_4h_staleness_min": args.max_4h_staleness_min
-                        }
+                        "entry_filter": entry_filter_payload,
+                        "filters": filters_payload
                     }),
                 });
             }

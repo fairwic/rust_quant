@@ -1039,6 +1039,58 @@ fn paper_observation_kline15m_breakout_fvg50_04sl_052r_preset_manifest_is_canoni
 }
 
 #[test]
+fn paper_observation_kline15m_direct_shape_04sl_10r_preset_manifest_is_canonical_and_hashable() {
+    let manifest = market_velocity_paper_strategy_preset_manifest(
+        "research_momentum_04sl_10r_kline15m_direct_shape_reclaimema_vol12_body65_close80_rng15_v1",
+    )
+    .unwrap();
+
+    assert_eq!(manifest.product_slug, "market-velocity-radar");
+    assert_eq!(
+        manifest.human_label,
+        "Market Velocity 15m kline direct shape reclaim EMA 0.04SL 1.0R vol12 body65 close80 range1.5 v1"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["event_source"],
+        "kline_15m"
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["trend_timeframe"],
+        "off"
+    );
+    assert_eq!(manifest.manifest_json["parameters"]["stop_loss_pct"], 0.04);
+    assert_eq!(manifest.manifest_json["parameters"]["target_r"], 1.0);
+    assert_eq!(
+        manifest.manifest_json["parameters"]["entry_min_volume_ratio"],
+        1.2
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["fast_momentum_filters"]["entry_min_body_ratio_pct"],
+        65.0
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["fast_momentum_filters"]
+            ["entry_min_close_position_pct"],
+        80.0
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["fast_momentum_filters"]
+            ["entry_min_range_expansion_ratio"],
+        1.5
+    );
+    assert_eq!(
+        manifest.manifest_json["parameters"]["fvg_entry_mode"],
+        "off"
+    );
+    assert_eq!(
+        manifest.manifest_json["filters"]["entry_trigger_allowlist"],
+        serde_json::json!(["reclaim_ema"])
+    );
+    assert!(manifest.manifest_hash.starts_with("sha256:"));
+    assert_eq!(manifest.manifest_hash.len(), "sha256:".len() + 64);
+}
+
+#[test]
 fn paper_observation_short_15m_support_breakdown_v3_manifest_is_canonical_and_hashable() {
     let manifest = market_velocity_paper_strategy_preset_manifest(
         "research_momentum_short_04sl_06r_15m_support_breakdown_d5_72_pchg1p5_12_vol11_dist5_v3",

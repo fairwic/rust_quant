@@ -250,6 +250,12 @@ pub struct MarketVelocityEventBacktestArgs {
     pub entry_bollinger_breakout: bool,
     /// 布林带宽度相对上一根的最小扩张百分比；为空时不启用。
     pub entry_min_bollinger_bandwidth_expansion_pct: Option<f64>,
+    /// 当前 15m K 线实体占全振幅的最小百分比；为空时不启用。
+    pub entry_min_body_ratio_pct: Option<f64>,
+    /// 当前 15m K 线收盘贴近方向极值的最小百分比；为空时不启用。
+    pub entry_min_close_position_pct: Option<f64>,
+    /// 当前 15m K 线振幅相对前置窗口平均振幅的最小倍数；为空时不启用。
+    pub entry_min_range_expansion_ratio: Option<f64>,
     /// 入场前回看窗口内要求出现的最小回撤幅度；为空时不启用。
     pub entry_min_recent_drawdown_pct: Option<f64>,
     /// 近期回撤确认回看 15m K 线数量，不包含当前突破 K 线。
@@ -376,6 +382,9 @@ impl Default for MarketVelocityEventBacktestArgs {
             entry_rsi_delta_lookback_candles: 3,
             entry_bollinger_breakout: false,
             entry_min_bollinger_bandwidth_expansion_pct: None,
+            entry_min_body_ratio_pct: None,
+            entry_min_close_position_pct: None,
+            entry_min_range_expansion_ratio: None,
             entry_min_recent_drawdown_pct: None,
             entry_recent_drawdown_lookback_candles: 12,
             entry_symbol_cooldown_candles: None,
@@ -485,6 +494,15 @@ where
             "--entry-min-bollinger-bandwidth-expansion-pct" => {
                 parsed.entry_min_bollinger_bandwidth_expansion_pct =
                     Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-min-body-ratio-pct" => {
+                parsed.entry_min_body_ratio_pct = Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-min-close-position-pct" => {
+                parsed.entry_min_close_position_pct = Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-min-range-expansion-ratio" => {
+                parsed.entry_min_range_expansion_ratio = Some(parse_next(&mut args, &arg)?)
             }
             "--entry-min-recent-drawdown-pct" => {
                 parsed.entry_min_recent_drawdown_pct = Some(parse_next(&mut args, &arg)?)
@@ -699,6 +717,21 @@ fn validate_args(
     if let Some(min_expansion) = parsed.entry_min_bollinger_bandwidth_expansion_pct {
         if min_expansion < 0.0 {
             bail!("--entry-min-bollinger-bandwidth-expansion-pct must be zero or greater");
+        }
+    }
+    if let Some(min_body_ratio) = parsed.entry_min_body_ratio_pct {
+        if !(0.0..=100.0).contains(&min_body_ratio) {
+            bail!("--entry-min-body-ratio-pct must be between 0 and 100");
+        }
+    }
+    if let Some(min_close_position) = parsed.entry_min_close_position_pct {
+        if !(0.0..=100.0).contains(&min_close_position) {
+            bail!("--entry-min-close-position-pct must be between 0 and 100");
+        }
+    }
+    if let Some(min_range_expansion) = parsed.entry_min_range_expansion_ratio {
+        if min_range_expansion < 0.0 {
+            bail!("--entry-min-range-expansion-ratio must be zero or greater");
         }
     }
     if let Some(min_drawdown) = parsed.entry_min_recent_drawdown_pct {
@@ -947,7 +980,7 @@ fn normalized_arg_flag(arg: &str) -> &str {
 /// 执行输出市场动量event回测usage步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_market_velocity_event_backtest_usage() {
     println!(
-        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state|kline_15m] [--trade-direction long|short|both] [--sample-limit 20 --sample-seed batch_a] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02 --stop-loss-mode fixed_pct|structure_or_fixed|structure_with_cap --structure-stop-min-pct 0.01] [--entry-period 20] [--entry-min-rsi 55 --entry-max-rsi 78 --entry-min-rsi-delta 3 --entry-rsi-delta-lookback-candles 3 --entry-bollinger-breakout --entry-min-bollinger-bandwidth-expansion-pct 12 --entry-min-recent-drawdown-pct 3.5 --entry-recent-drawdown-lookback-candles 12 --entry-symbol-cooldown-candles 8] [--entry-max-signal-pullback-pct 3.0] [--entry-max-gap-without-retest-pct 0.8 --entry-retest-tolerance-pct 0.3 --entry-retest-after-signal --entry-retest-max-wait-candles 8 --entry-retest-min-entry-open-gap-pct 0.0 --entry-retest-open-fade-min-volume-ratio 2.0] [--trend-timeframe 4h|1h|off] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--event-start-ms 1717200000000 --event-end-ms 1719791999999] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--ignore-entry-signal-updates-while-open] [--fvg-entry-mode off|15m_to_1h|1h_to_4h|15m_self_after_signal|15m_impulse_retrace --fvg-impulse-retrace-fill-pct 20 --fvg-impulse-retrace-min-wait-candles 0] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
+        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state|kline_15m] [--trade-direction long|short|both] [--sample-limit 20 --sample-seed batch_a] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02 --stop-loss-mode fixed_pct|structure_or_fixed|structure_with_cap --structure-stop-min-pct 0.01] [--entry-period 20] [--entry-min-rsi 55 --entry-max-rsi 78 --entry-min-rsi-delta 3 --entry-rsi-delta-lookback-candles 3 --entry-bollinger-breakout --entry-min-bollinger-bandwidth-expansion-pct 12 --entry-min-body-ratio-pct 65 --entry-min-close-position-pct 80 --entry-min-range-expansion-ratio 1.5 --entry-min-recent-drawdown-pct 3.5 --entry-recent-drawdown-lookback-candles 12 --entry-symbol-cooldown-candles 8] [--entry-max-signal-pullback-pct 3.0] [--entry-max-gap-without-retest-pct 0.8 --entry-retest-tolerance-pct 0.3 --entry-retest-after-signal --entry-retest-max-wait-candles 8 --entry-retest-min-entry-open-gap-pct 0.0 --entry-retest-open-fade-min-volume-ratio 2.0] [--trend-timeframe 4h|1h|off] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--event-start-ms 1717200000000 --event-end-ms 1719791999999] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--ignore-entry-signal-updates-while-open] [--fvg-entry-mode off|15m_to_1h|1h_to_4h|15m_self_after_signal|15m_impulse_retrace --fvg-impulse-retrace-fill-pct 20 --fvg-impulse-retrace-min-wait-candles 0] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
     );
 }
 /// 返回 paper observation CLI usage，并让 preset 列表复用解析常量，避免可运行 preset 漏出帮助文本。
@@ -991,6 +1024,7 @@ pub(crate) fn market_velocity_paper_observation_usage() -> String {
         MOMENTUM_KLINE15M_BREAKOUT_FVG30_04SL_05R_RESEARCH_PRESET,
         MOMENTUM_KLINE15M_BREAKOUT_FVG30_04SL_055R_RESEARCH_PRESET,
         MOMENTUM_KLINE15M_BREAKOUT_FVG50_04SL_052R_RESEARCH_PRESET,
+        MOMENTUM_KLINE15M_DIRECT_SHAPE_04SL_10R_RESEARCH_PRESET,
         EPISODE_MOMENTUM_RESEARCH_PRESET,
         EPISODE_MOMENTUM_05SL_20R_RESEARCH_PRESET,
         EPISODE_MOMENTUM_05SL_30R_RESEARCH_PRESET,

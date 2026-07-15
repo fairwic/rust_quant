@@ -993,6 +993,41 @@ fn paper_observation_args_apply_kline15m_breakout_fvg50_04sl_052r_research_prese
 }
 
 #[test]
+fn paper_observation_args_apply_kline15m_direct_shape_04sl_10r_research_preset() {
+    let args = parse_paper_observation_args_from([
+        "--paper-strategy-preset",
+        "research_momentum_04sl_10r_kline15m_direct_shape_reclaimema_vol12_body65_close80_rng15_v1",
+    ])
+    .unwrap();
+    assert_eq!(args.paper_outcome_sink, MarketVelocityPaperOutcomeSink::Web);
+    assert_eq!(args.event_source, MarketVelocityEventSource::Kline15m);
+    assert_eq!(args.entry_trigger_allowlist, vec!["reclaim_ema"]);
+    assert_eq!(
+        args.paper_outcome_entry_rule_version,
+        "kline15m_direct_rcmema_04sl_10r_v12_b65_c80_r15_v1"
+    );
+    assert_eq!(args.stop_loss_pct, 0.04);
+    assert_eq!(args.target_rs, vec![1.0]);
+    assert_eq!(args.entry_max_distance_pct, 14.0);
+    assert_eq!(args.entry_min_volume_ratio, 1.2);
+    assert_eq!(args.entry_min_body_ratio_pct, Some(65.0));
+    assert_eq!(args.entry_min_close_position_pct, Some(80.0));
+    assert_eq!(args.entry_min_range_expansion_ratio, Some(1.5));
+    assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::Off);
+    assert_eq!(args.min_delta_rank, 0);
+    assert_eq!(args.max_delta_rank, None);
+    assert_eq!(args.min_price_change_pct, Some(0.8));
+    assert_eq!(args.max_price_change_pct, Some(8.0));
+    assert_eq!(args.sample_limit, 40);
+    assert_eq!(args.sample_seed, "kline15m_direct_shape_v1");
+    assert_eq!(args.entry_min_rsi, Some(50.0));
+    assert_eq!(args.entry_max_rsi, Some(92.0));
+    assert_eq!(args.entry_symbol_cooldown_candles, Some(4));
+    assert_eq!(args.fvg_entry_mode, FvgEntryMode::Off);
+    assert!(args.ignore_entry_signal_updates_while_open);
+}
+
+#[test]
 fn paper_observation_args_apply_breakout_reclaim_10r_0375sl_delta11_72_dist14_research_preset() {
     let args = parse_paper_observation_args_from([
         "--paper-strategy-preset",
@@ -1242,6 +1277,16 @@ fn paper_observation_usage_lists_short_15m_support_breakdown_v6_preset() {
 }
 
 #[test]
+fn paper_observation_usage_lists_kline15m_direct_shape_preset() {
+    assert!(
+        market_velocity_paper_observation_usage().contains(
+            "research_momentum_04sl_10r_kline15m_direct_shape_reclaimema_vol12_body65_close80_rng15_v1"
+        ),
+        "paper observation usage must list the direct 15m kline shape research preset"
+    );
+}
+
+#[test]
 fn paper_observation_entry_rule_versions_fit_quant_web_contract() {
     let presets = [
         "momentum_03sl_20r_v5",
@@ -1279,6 +1324,7 @@ fn paper_observation_entry_rule_versions_fit_quant_web_contract() {
         "research_momentum_04sl_10r_kline15m_breakout_fvg20_vol13_dd35_v1",
         "research_momentum_04sl_06r_kline15m_breakout_fvg20_vol13_dd35_v1",
         "research_momentum_04sl_05r_kline15m_breakout_fvg30_vol13_dd35_v1",
+        "research_momentum_04sl_10r_kline15m_direct_shape_reclaimema_vol12_body65_close80_rng15_v1",
         "research_episode_momentum_03sl_24r_rank5_30_v1",
         "research_episode_momentum_05sl_20r_rank5_v1",
         "research_episode_momentum_05sl_30r_rank5_v1",

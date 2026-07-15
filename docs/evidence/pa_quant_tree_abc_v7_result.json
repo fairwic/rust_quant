@@ -1,0 +1,153 @@
+{
+  "artifact_kind": "immutable_aggregate_transcription_of_single_successful_cli_run",
+  "protocol_version": "pa-diagnostic-v7-abc-counterfactual",
+  "experiment_id": "pa-v7-abc-counterfactual-once",
+  "training_only": true,
+  "promotion_eligible": false,
+  "single_run_exit_code": 0,
+  "source_identity": {
+    "git_head": "d502eca668a84c4e1b8efb38fdb131234c3c5ba6",
+    "source_fingerprint": "sha256:ae87ec802d43947551387a548f6c540a0e2b94b1183b50221e305a00dba8adfe",
+    "dirty": true
+  },
+  "dataset_fingerprint": "sha256:a94427809907a45402b4dde29c25f7811c35793a52661d4b911152606686adf4",
+  "candle_dataset_fingerprint": "sha256:2104caaef43352418afb8d94cd658e2959cde75ecdcdee1d61b241bac193f533",
+  "funding_dataset_fingerprint": "sha256:54ba0abaac9f5772e7b3d9fbd4a9d4568906dde51c065a4f16a146e26a17069f",
+  "common_start_ts": 1752544800000,
+  "common_end_ts": 1784079000000,
+  "b_tradable": false,
+  "b_diagnostic_only": true,
+  "a": {
+    "trade_count": 2350,
+    "mean_net_r": -0.274021970338736,
+    "win_rate": 0.39574468085106385,
+    "profit_factor": 0.6441763608244198,
+    "double_cost_mean_net_r": -0.5416609619540674
+  },
+  "b": {
+    "trade_count": 255,
+    "mean_net_r": -0.07744510589564547,
+    "win_rate": 0.5019607843137255,
+    "profit_factor": 0.8823446797446524,
+    "double_cost_mean_net_r": -0.42940001571286157
+  },
+  "c": {
+    "trade_count": 255,
+    "mean_net_r": -0.4142886632534213,
+    "win_rate": 0.3333333333333333,
+    "profit_factor": 0.5001523424435833,
+    "double_cost_mean_net_r": -0.6717145814088037
+  },
+  "b_vs_a_selection_mean_delta_r": 0.19657686444309053,
+  "strict_pair_mean_delay_delta_net_r": -0.336843557357776,
+  "strict_pair_mean_delay_delta_double_cost_net_r": -0.2423145656959425,
+  "symbols": [
+    {
+      "symbol": "BTC-USDT-SWAP",
+      "candles": 35039,
+      "setups": 575,
+      "a_count": 575,
+      "a_mean_net_r": -0.3887878052214892,
+      "b_count": 64,
+      "b_mean_net_r": -0.08535331349811535,
+      "c_count": 64,
+      "c_mean_net_r": -0.26370282041465826,
+      "c_win_rate": 0.4375,
+      "c_profit_factor": 0.6615282377661601,
+      "c_double_cost_mean_net_r": -0.6602181408293173,
+      "mean_delay_delta_net_r": -0.17834950691654303,
+      "confirmation_rejected": 511
+    },
+    {
+      "symbol": "ETH-USDT-SWAP",
+      "candles": 35039,
+      "setups": 552,
+      "a_count": 552,
+      "a_mean_net_r": -0.22401387865091474,
+      "b_count": 48,
+      "b_mean_net_r": -0.19006530775919062,
+      "c_count": 48,
+      "c_mean_net_r": -0.41627381079894676,
+      "c_win_rate": 0.3333333333333333,
+      "c_profit_factor": 0.4977959172873546,
+      "c_double_cost_mean_net_r": -0.6658809549312267,
+      "mean_delay_delta_net_r": -0.22620850303975604,
+      "confirmation_rejected": 504
+    },
+    {
+      "symbol": "SOL-USDT-SWAP",
+      "candles": 35039,
+      "setups": 622,
+      "a_count": 621,
+      "a_mean_net_r": -0.2121524880103151,
+      "b_count": 78,
+      "b_mean_net_r": -0.06000821101592571,
+      "c_count": 78,
+      "c_mean_net_r": -0.378952386039346,
+      "c_win_rate": 0.32051282051282054,
+      "c_profit_factor": 0.5267307182799827,
+      "c_double_cost_mean_net_r": -0.5591868233607435,
+      "mean_delay_delta_net_r": -0.3189441750234203,
+      "confirmation_rejected": 544,
+      "a_unresolved": 1
+    },
+    {
+      "symbol": "BCH-USDT-SWAP",
+      "candles": 35039,
+      "setups": 602,
+      "a_count": 602,
+      "a_mean_net_r": -0.2740802096743531,
+      "b_count": 65,
+      "b_mean_net_r": -0.00741714935118284,
+      "c_count": 65,
+      "c_mean_net_r": -0.6034953783640911,
+      "c_win_rate": 0.24615384615384617,
+      "c_profit_factor": 0.33790270131121825,
+      "c_double_cost_mean_net_r": -0.8223753721127969,
+      "mean_delay_delta_net_r": -0.5960782290129083,
+      "confirmation_rejected": 537
+    }
+  ],
+  "bootstrap": {
+    "observed_mean_r": -0.4142886632534214,
+    "lower_bound_95": -0.6040838305653812,
+    "resamples": 10000
+  },
+  "top_five_removed_mean_net_r": -0.45122797484462995,
+  "portfolio": {
+    "initial_equity": 100.0,
+    "final_equity": 82.00083216460514,
+    "max_drawdown_ratio": 0.18005523948032162
+  },
+  "hypotheses": [
+    {
+      "experiment_id": "pa-v7-abc-c-expectancy",
+      "raw_one_sided_p": 1.0,
+      "holm_adjusted_p": 1.0
+    },
+    {
+      "experiment_id": "pa-v7-abc-delay-preservation",
+      "raw_one_sided_p": 1.0,
+      "holm_adjusted_p": 1.0
+    }
+  ],
+  "gate_facts": {
+    "strict_pair_count": 255,
+    "covered_market_count": 4,
+    "positive_markets_with_30_trades": 0,
+    "all_b_paths_diagnostic_only": true
+  },
+  "failed_gates": [
+    "c_win_rate_not_above_60pct",
+    "c_profit_factor_not_above_1_2",
+    "c_base_cost_mean_not_positive",
+    "c_double_cost_mean_not_positive",
+    "bootstrap_lower_bound_not_positive",
+    "holm_adjusted_expectancy_p_above_0_05",
+    "top_five_removed_mean_not_positive",
+    "positive_markets_with_30_trades_below_3",
+    "portfolio_max_drawdown_not_below_15pct",
+    "c_minus_b_delay_delta_negative"
+  ],
+  "decision": "archive_pa_standalone"
+}

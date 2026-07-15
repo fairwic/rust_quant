@@ -8,11 +8,13 @@ use serde_json::json;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::collections::{BTreeMap, HashMap};
 mod args;
+mod computed_candles;
 mod data;
 mod equity;
 mod equity_stats;
 mod exit;
 mod fvg;
+mod kline_shape;
 mod manifest;
 mod paper_outcome;
 mod paper_signal;
@@ -45,6 +47,7 @@ use fvg::{
     find_15m_impulse_fvg_retrace_after_signal, find_15m_self_fvg_entry_after_signal,
     find_fvg_entry, FvgEntrySearch,
 };
+use kline_shape::direct_kline_momentum_shape_filter_reason;
 pub use manifest::{market_velocity_paper_strategy_preset_manifest, MarketVelocityPresetManifest};
 pub use paper_outcome::build_market_velocity_paper_outcomes;
 use paper_outcome::{
@@ -65,9 +68,8 @@ pub const MS_4H: i64 = 4 * 60 * 60 * 1_000;
 /// 信号生成后允许生产补偿入场判断的最大时间窗，避免回测用未来 K 线补造入场。
 const ENTRY_DECISION_MAX_DELAY_MS: i64 = 10_000;
 const TOUCH_THRESHOLD_PCT: f64 = 0.3;
-const FAST_MOMENTUM_RSI_PERIOD: usize = 14;
-const FAST_MOMENTUM_BOLLINGER_PERIOD: usize = 20;
-const FAST_MOMENTUM_BOLLINGER_STDDEV: f64 = 2.0;
+pub use computed_candles::build_computed_candles;
+pub(crate) use computed_candles::{FAST_MOMENTUM_BOLLINGER_PERIOD, FAST_MOMENTUM_RSI_PERIOD};
 const PAPER_OUTCOME_HORIZONS: &[(i32, i64)] =
     &[(24, 24 * 60 * 60 * 1_000), (48, 48 * 60 * 60 * 1_000)];
 #[derive(Debug, Clone, PartialEq)]
@@ -102,6 +104,8 @@ pub struct ComputedCandle {
     pub ema: Option<f64>,
     /// previous成交量平均；为空时使用默认值或表示不限制。
     pub previous_volume_avg: Option<f64>,
+    /// previous振幅平均；为空时表示样本不足或振幅无效。
+    pub previous_range_avg: Option<f64>,
     /// RSI14；为空时表示样本不足或价格无效。
     pub rsi14: Option<f64>,
     /// 布林带20期中轨；为空时表示样本不足或价格无效。
@@ -650,145 +654,6 @@ fn print_symbol_cooldown_filter_report(
         cooldown_candles
     );
 }
-/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
-pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Vec<ComputedCandle> {
-    let mut computed = Vec::with_capacity(candles.len());
-    let mut ema: Option<f64> = None;
-    let mut rsi_average_gain_loss: Option<(f64, f64)> = None;
-    let multiplier = 2.0 / (period as f64 + 1.0);
-    for i in 0..candles.len() {
-        let sma = if i + 1 >= period {
-            simple_average(
-                candles[i + 1 - period..=i]
-                    .iter()
-                    .map(|candle| candle.close),
-            )
-        } else {
-            None
-        };
-        ema = match (i + 1, ema, sma) {
-            (count, _, Some(value)) if count == period => Some(value),
-            (count, Some(previous), _) if count > period && valid_positive(candles[i].close) => {
-                Some((candles[i].close - previous) * multiplier + previous)
-            }
-            (count, previous, _) if count > period => previous.and(None),
-            _ => None,
-        };
-        let previous_volume_avg = if i >= period {
-            simple_average(candles[i - period..i].iter().map(|candle| candle.volume))
-        } else {
-            None
-        };
-        let rsi14 = rsi_average_gain_loss_at(&candles, i, &mut rsi_average_gain_loss).and_then(
-            |(average_gain, average_loss)| rsi_from_average_gain_loss(average_gain, average_loss),
-        );
-        let (bollinger_middle, bollinger_upper, bollinger_lower, bollinger_bandwidth_pct) =
-            bollinger_bands_at(&candles, i)
-                .map(|bands| (Some(bands.0), Some(bands.1), Some(bands.2), bands.3))
-                .unwrap_or((None, None, None, None));
-        computed.push(ComputedCandle {
-            candle: candles[i].clone(),
-            sma,
-            ema,
-            previous_volume_avg,
-            rsi14,
-            bollinger_middle,
-            bollinger_upper,
-            bollinger_lower,
-            bollinger_bandwidth_pct,
-        });
-    }
-    computed
-}
-/// 按 Wilder RSI 的平滑方式维护 RSI14 的平均涨跌幅，避免每根 K 线重复扫描历史。
-fn rsi_average_gain_loss_at(
-    candles: &[BacktestCandle],
-    idx: usize,
-    previous_average: &mut Option<(f64, f64)>,
-) -> Option<(f64, f64)> {
-    if idx < FAST_MOMENTUM_RSI_PERIOD {
-        return None;
-    }
-    if idx == FAST_MOMENTUM_RSI_PERIOD {
-        let mut gain_sum = 0.0;
-        let mut loss_sum = 0.0;
-        for window_idx in 1..=FAST_MOMENTUM_RSI_PERIOD {
-            let delta = candles[window_idx].close - candles[window_idx - 1].close;
-            if !delta.is_finite() {
-                return None;
-            }
-            if delta >= 0.0 {
-                gain_sum += delta;
-            } else {
-                loss_sum += delta.abs();
-            }
-        }
-        let average = (
-            gain_sum / FAST_MOMENTUM_RSI_PERIOD as f64,
-            loss_sum / FAST_MOMENTUM_RSI_PERIOD as f64,
-        );
-        *previous_average = Some(average);
-        return Some(average);
-    }
-    let (previous_gain, previous_loss) = (*previous_average)?;
-    let delta = candles[idx].close - candles[idx - 1].close;
-    if !delta.is_finite() {
-        *previous_average = None;
-        return None;
-    }
-    let gain = delta.max(0.0);
-    let loss = (-delta).max(0.0);
-    let period = FAST_MOMENTUM_RSI_PERIOD as f64;
-    let average = (
-        (previous_gain * (period - 1.0) + gain) / period,
-        (previous_loss * (period - 1.0) + loss) / period,
-    );
-    *previous_average = Some(average);
-    Some(average)
-}
-/// 将 RSI 的平均涨跌幅转换为 0-100 分值，并处理单边上涨或无波动样本。
-fn rsi_from_average_gain_loss(average_gain: f64, average_loss: f64) -> Option<f64> {
-    if !average_gain.is_finite()
-        || !average_loss.is_finite()
-        || average_gain < 0.0
-        || average_loss < 0.0
-    {
-        return None;
-    }
-    if average_loss == 0.0 {
-        return Some(if average_gain == 0.0 { 50.0 } else { 100.0 });
-    }
-    let relative_strength = average_gain / average_loss;
-    Some(100.0 - 100.0 / (1.0 + relative_strength))
-}
-/// 计算 20 期布林带和带宽，用于 15m 内生突破过滤而不是依赖高周期均线。
-fn bollinger_bands_at(
-    candles: &[BacktestCandle],
-    idx: usize,
-) -> Option<(f64, f64, f64, Option<f64>)> {
-    if idx + 1 < FAST_MOMENTUM_BOLLINGER_PERIOD {
-        return None;
-    }
-    let start = idx + 1 - FAST_MOMENTUM_BOLLINGER_PERIOD;
-    let closes = candles[start..=idx]
-        .iter()
-        .map(|candle| candle.close)
-        .collect::<Vec<_>>();
-    let middle = simple_average(closes.iter().copied())?;
-    let variance = closes
-        .iter()
-        .map(|close| (close - middle).powi(2))
-        .sum::<f64>()
-        / FAST_MOMENTUM_BOLLINGER_PERIOD as f64;
-    if !variance.is_finite() || variance < 0.0 {
-        return None;
-    }
-    let deviation = variance.sqrt() * FAST_MOMENTUM_BOLLINGER_STDDEV;
-    let upper = middle + deviation;
-    let lower = middle - deviation;
-    let bandwidth = valid_positive(middle).then_some((upper - lower) / middle * 100.0);
-    Some((middle, upper, lower, bandwidth))
-}
 /// 提供趋势确认的集中实现，避免回测策略调用方重复处理相同细节。
 pub fn trend_confirmation(
     candles: &[ComputedCandle],
@@ -967,39 +832,30 @@ pub fn entry_confirmation(
     if let Some(reason) = fast_momentum_entry_filter_reason(candles, idx, direction, args) {
         return (false, reason.to_string());
     }
-    match direction {
-        MarketVelocityTradeDirection::Long => {
-            if reclaim_ema_candidate {
-                return (true, "reclaim_ema".to_string());
-            }
-            if reclaim_ma_candidate {
-                return (true, "reclaim_ma".to_string());
-            }
-            if breakout_previous_high_candidate {
-                return (true, "breakout_previous_high".to_string());
-            }
-            if pullback_hold_ema_candidate {
-                return (true, "pullback_hold_ema".to_string());
-            }
+    let confirmed_trigger = match direction {
+        MarketVelocityTradeDirection::Long if reclaim_ema_candidate => Some("reclaim_ema"),
+        MarketVelocityTradeDirection::Long if reclaim_ma_candidate => Some("reclaim_ma"),
+        MarketVelocityTradeDirection::Long if breakout_previous_high_candidate => {
+            Some("breakout_previous_high")
         }
-        MarketVelocityTradeDirection::Short => {
-            if breakdown_range_low_candidate {
-                return (true, "breakdown_range_low".to_string());
-            }
-            if reject_ema_candidate {
-                return (true, "reject_ema".to_string());
-            }
-            if reject_ma_candidate {
-                return (true, "reject_ma".to_string());
-            }
-            if breakdown_previous_low_candidate {
-                return (true, "breakdown_previous_low".to_string());
-            }
-            if pullback_reject_ema_candidate {
-                return (true, "pullback_reject_ema".to_string());
-            }
+        MarketVelocityTradeDirection::Long if pullback_hold_ema_candidate => {
+            Some("pullback_hold_ema")
         }
-        MarketVelocityTradeDirection::Both => {}
+        MarketVelocityTradeDirection::Short if breakdown_range_low_candidate => {
+            Some("breakdown_range_low")
+        }
+        MarketVelocityTradeDirection::Short if reject_ema_candidate => Some("reject_ema"),
+        MarketVelocityTradeDirection::Short if reject_ma_candidate => Some("reject_ma"),
+        MarketVelocityTradeDirection::Short if breakdown_previous_low_candidate => {
+            Some("breakdown_previous_low")
+        }
+        MarketVelocityTradeDirection::Short if pullback_reject_ema_candidate => {
+            Some("pullback_reject_ema")
+        }
+        _ => None,
+    };
+    if let Some(trigger) = confirmed_trigger {
+        return (true, trigger.to_string());
     }
     (false, "timing_not_confirmed".to_string())
 }
@@ -1013,6 +869,9 @@ fn fast_momentum_entry_filter_reason(
 ) -> Option<&'static str> {
     let latest_idx = completed_count.checked_sub(1)?;
     let latest = candles.get(latest_idx)?;
+    if let Some(reason) = direct_kline_momentum_shape_filter_reason(latest, direction, args) {
+        return Some(reason);
+    }
     if args.entry_min_rsi.is_some()
         || args.entry_max_rsi.is_some()
         || args.entry_min_rsi_delta.is_some()
@@ -1095,7 +954,6 @@ fn fast_momentum_entry_filter_reason(
     }
     None
 }
-
 /// 计算当前突破 K 线之前的回看跌幅，避免把已经连续拉升的末端动量当作首轮机会。
 fn recent_entry_drawdown_pct(
     candles: &[ComputedCandle],
@@ -1967,19 +1825,6 @@ fn moving_average_distance_pct(close: f64, average: f64) -> Option<f64> {
     }
     Some((close - average) / average * 100.0)
 }
-/// 提供simpleaverage的集中实现，避免回测策略调用方重复处理相同细节。
-fn simple_average(values: impl Iterator<Item = f64>) -> Option<f64> {
-    let mut count = 0;
-    let mut sum = 0.0;
-    for value in values {
-        if !valid_positive(value) {
-            return None;
-        }
-        count += 1;
-        sum += value;
-    }
-    (count > 0).then_some(sum / count as f64)
-}
 fn valid_positive(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
@@ -2004,5 +1849,7 @@ fn increment_nested(
 ) {
     increment(counters.entry(symbol.to_string()).or_default(), reason);
 }
+#[cfg(test)]
+mod direct_kline_tests;
 #[cfg(test)]
 mod tests;

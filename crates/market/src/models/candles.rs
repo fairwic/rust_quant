@@ -327,6 +327,24 @@ impl CandlesModel {
         debug!("查询最新 K线: {:?}", result);
         Ok(result)
     }
+    /// 获取最新一根已确认 K 线，供触发 watchdog 做只读补偿检查。
+    pub async fn get_latest_confirmed_data(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+    ) -> Result<Option<CandlesEntity>> {
+        let table_name = Self::get_table_name(inst_id, time_interval);
+        let quoted_table_name = quote_legacy_table_name(&table_name)?;
+        let pool = get_quant_core_postgres_pool()?;
+        let result = sqlx::query_as::<_, CandlesEntity>(&format!(
+            "SELECT id, ts, o, h, l, c, vol, vol_ccy, confirm, created_at, updated_at
+             FROM {} WHERE confirm = '1' ORDER BY ts DESC LIMIT 1",
+            quoted_table_name
+        ))
+        .fetch_optional(pool)
+        .await?;
+        Ok(result)
+    }
     /// 根据时间戳获取一条 K线数据
     pub async fn get_one_by_ts(
         &self,

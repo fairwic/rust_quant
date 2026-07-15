@@ -70,6 +70,9 @@ pub fn market_velocity_paper_strategy_preset_manifest(
         "entry_rsi_delta_lookback_candles": args.entry_rsi_delta_lookback_candles,
         "entry_bollinger_breakout": args.entry_bollinger_breakout,
         "entry_min_bollinger_bandwidth_expansion_pct": args.entry_min_bollinger_bandwidth_expansion_pct,
+        "entry_min_body_ratio_pct": args.entry_min_body_ratio_pct,
+        "entry_min_close_position_pct": args.entry_min_close_position_pct,
+        "entry_min_range_expansion_ratio": args.entry_min_range_expansion_ratio,
         "entry_min_recent_drawdown_pct": args.entry_min_recent_drawdown_pct,
         "entry_recent_drawdown_lookback_candles": args.entry_recent_drawdown_lookback_candles,
         "entry_symbol_cooldown_candles": args.entry_symbol_cooldown_candles,
@@ -266,6 +269,9 @@ fn human_label_for_preset(preset: &str) -> &str {
         }
         "research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1" => {
             "Market Velocity 15m kline 0.04SL 0.52R breakout fvg50 vol13 dd35 v1"
+        }
+        "research_momentum_04sl_10r_kline15m_direct_shape_reclaimema_vol12_body65_close80_rng15_v1" => {
+            "Market Velocity 15m kline direct shape reclaim EMA 0.04SL 1.0R vol12 body65 close80 range1.5 v1"
         }
         "momentum_03sl_20r_v5" => "Market Velocity 0.03SL 2.0R momentum v5",
         "research_episode_momentum_03sl_24r_rank5_30_v1" => {

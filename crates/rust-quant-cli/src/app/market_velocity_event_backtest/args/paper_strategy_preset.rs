@@ -153,6 +153,10 @@ pub(super) const MOMENTUM_KLINE15M_BREAKOUT_FVG50_04SL_052R_RESEARCH_PRESET: &st
     "research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1";
 pub(super) const MOMENTUM_KLINE15M_BREAKOUT_FVG50_04SL_052R_RESEARCH_ENTRY_RULE_VERSION: &str =
     "kline15m_mom04_052r_brk_fvg50_vol13_dd35_v1";
+pub(super) const MOMENTUM_KLINE15M_DIRECT_SHAPE_04SL_10R_RESEARCH_PRESET: &str =
+    "research_momentum_04sl_10r_kline15m_direct_shape_reclaimema_vol12_body65_close80_rng15_v1";
+pub(super) const MOMENTUM_KLINE15M_DIRECT_SHAPE_04SL_10R_RESEARCH_ENTRY_RULE_VERSION: &str =
+    "kline15m_direct_rcmema_04sl_10r_v12_b65_c80_r15_v1";
 pub(super) const EPISODE_MOMENTUM_RESEARCH_PRESET: &str =
     "research_episode_momentum_03sl_24r_rank5_30_v1";
 pub(super) const EPISODE_MOMENTUM_RESEARCH_ENTRY_RULE_VERSION: &str =
@@ -190,6 +194,9 @@ pub(super) const PAPER_STRATEGY_PRESET_LOCKED_FLAGS: &[&str] = &[
     "--entry-rsi-delta-lookback-candles",
     "--entry-bollinger-breakout",
     "--entry-min-bollinger-bandwidth-expansion-pct",
+    "--entry-min-body-ratio-pct",
+    "--entry-min-close-position-pct",
+    "--entry-min-range-expansion-ratio",
     "--entry-min-recent-drawdown-pct",
     "--entry-recent-drawdown-lookback-candles",
     "--entry-symbol-cooldown-candles",
@@ -244,6 +251,7 @@ pub(super) enum PaperStrategyPreset {
     ResearchMomentumKline15mBreakoutFvg30Sl04R05,
     ResearchMomentumKline15mBreakoutFvg30Sl04R055,
     ResearchMomentumKline15mBreakoutFvg50Sl04R052,
+    ResearchMomentumKline15mDirectShapeSl04R10,
     ResearchEpisodeMomentum03Sl24RRank5To30,
     ResearchEpisodeMomentum05Sl20RRank5,
     ResearchEpisodeMomentum05Sl30RRank5,
@@ -362,6 +370,9 @@ impl PaperStrategyPreset {
             }
             Self::ResearchMomentumKline15mBreakoutFvg50Sl04R052 => {
                 MOMENTUM_KLINE15M_BREAKOUT_FVG50_04SL_052R_RESEARCH_PRESET
+            }
+            Self::ResearchMomentumKline15mDirectShapeSl04R10 => {
+                MOMENTUM_KLINE15M_DIRECT_SHAPE_04SL_10R_RESEARCH_PRESET
             }
             Self::ResearchEpisodeMomentum03Sl24RRank5To30 => EPISODE_MOMENTUM_RESEARCH_PRESET,
             Self::ResearchEpisodeMomentum05Sl20RRank5 => EPISODE_MOMENTUM_05SL_20R_RESEARCH_PRESET,
@@ -487,6 +498,9 @@ impl PaperStrategyPreset {
             }
             MOMENTUM_KLINE15M_BREAKOUT_FVG50_04SL_052R_RESEARCH_PRESET => {
                 Ok(Self::ResearchMomentumKline15mBreakoutFvg50Sl04R052)
+            }
+            MOMENTUM_KLINE15M_DIRECT_SHAPE_04SL_10R_RESEARCH_PRESET => {
+                Ok(Self::ResearchMomentumKline15mDirectShapeSl04R10)
             }
             EPISODE_MOMENTUM_RESEARCH_PRESET => Ok(Self::ResearchEpisodeMomentum03Sl24RRank5To30),
             EPISODE_MOMENTUM_05SL_20R_RESEARCH_PRESET => {
@@ -1701,6 +1715,54 @@ impl PaperStrategyPreset {
                     fvg_fill_pct.to_string(),
                     "--fvg-impulse-retrace-min-wait-candles".to_string(),
                     "0".to_string(),
+                    "--ignore-entry-signal-updates-while-open".to_string(),
+                ]);
+            }
+            Self::ResearchMomentumKline15mDirectShapeSl04R10 => {
+                args.extend([
+                    "--paper-outcome-entry-rule-version".to_string(),
+                    MOMENTUM_KLINE15M_DIRECT_SHAPE_04SL_10R_RESEARCH_ENTRY_RULE_VERSION
+                        .to_string(),
+                    "--event-source".to_string(),
+                    "kline_15m".to_string(),
+                    "--sample-limit".to_string(),
+                    "40".to_string(),
+                    "--sample-seed".to_string(),
+                    "kline15m_direct_shape_v1".to_string(),
+                    "--stop-loss-pct".to_string(),
+                    "0.04".to_string(),
+                    "--target-rs".to_string(),
+                    "1.0".to_string(),
+                    "--entry-max-distance-pct".to_string(),
+                    "14.0".to_string(),
+                    "--entry-min-volume-ratio".to_string(),
+                    "1.2".to_string(),
+                    "--entry-min-rsi".to_string(),
+                    "50.0".to_string(),
+                    "--entry-max-rsi".to_string(),
+                    "92.0".to_string(),
+                    "--entry-min-body-ratio-pct".to_string(),
+                    "65.0".to_string(),
+                    "--entry-min-close-position-pct".to_string(),
+                    "80.0".to_string(),
+                    "--entry-min-range-expansion-ratio".to_string(),
+                    "1.5".to_string(),
+                    "--entry-symbol-cooldown-candles".to_string(),
+                    "4".to_string(),
+                    "--trend-timeframe".to_string(),
+                    "off".to_string(),
+                    "--trend-min-average-distance-pct".to_string(),
+                    "0.0".to_string(),
+                    "--min-delta-rank".to_string(),
+                    "0".to_string(),
+                    "--min-price-change-pct".to_string(),
+                    "0.8".to_string(),
+                    "--max-price-change-pct".to_string(),
+                    "8.0".to_string(),
+                    "--entry-trigger-allowlist".to_string(),
+                    "reclaim_ema".to_string(),
+                    "--fvg-entry-mode".to_string(),
+                    "off".to_string(),
                     "--ignore-entry-signal-updates-while-open".to_string(),
                 ]);
             }

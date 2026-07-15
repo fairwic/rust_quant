@@ -4,8 +4,10 @@
 use super::strategy_trait::StrategyExecutor;
 use crate::implementations::{
     BearShortStackStrategyExecutor, BscEventArbStrategyExecutor,
-    BtcEthLiquidityScalperStrategyExecutor, MomentumBreakoutScalperStrategyExecutor,
-    NweStrategyExecutor, RangeReversionScalperStrategyExecutor, VegasStrategyExecutor,
+    BtcEthLiquidityScalperStrategyExecutor, KeltnerChannelScalperStrategyExecutor,
+    MomentumBreakoutScalperStrategyExecutor, NweStrategyExecutor,
+    RangeReversionScalperStrategyExecutor, SmartMoneyConceptsStrategyExecutor,
+    VegasStrategyExecutor,
 };
 use crate::StrategyType;
 use anyhow::{anyhow, Result};
@@ -128,7 +130,10 @@ fn normalize_strategy_lookup_name(name: &str) -> String {
         .filter(|ch| *ch != '_' && *ch != '-' && !ch.is_whitespace())
         .flat_map(char::to_lowercase)
         .collect();
-    strip_version_suffix(&normalized).to_string()
+    let without_research = normalized
+        .strip_suffix("research")
+        .unwrap_or(normalized.as_str());
+    strip_version_suffix(without_research).to_string()
 }
 
 /// Removes a trailing numeric executor version so `*_v1` keys can find Rust executor names.
@@ -204,6 +209,8 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
         StrategyType::BearShortStack => "BearShortStack",
         StrategyType::RangeReversionScalper => "RangeReversionScalper",
         StrategyType::MomentumBreakoutScalper => "MomentumBreakoutScalper",
+        StrategyType::SmartMoneyConceptsV1Research => "SmartMoneyConcepts",
+        StrategyType::KeltnerChannelScalper1mV1Research => "KeltnerChannelScalper1m",
         _ => strategy_type.as_str(),
     };
     if registry.contains(key) {
@@ -237,6 +244,14 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
         StrategyType::MomentumBreakoutScalper => {
             registry.register(Arc::new(MomentumBreakoutScalperStrategyExecutor::new()));
             info!("✅ 注册策略: MomentumBreakoutScalper");
+        }
+        StrategyType::SmartMoneyConceptsV1Research => {
+            registry.register(Arc::new(SmartMoneyConceptsStrategyExecutor::new()));
+            info!("✅ 注册策略: SmartMoneyConcepts");
+        }
+        StrategyType::KeltnerChannelScalper1mV1Research => {
+            registry.register(Arc::new(KeltnerChannelScalperStrategyExecutor::new()));
+            info!("✅ 注册策略: KeltnerChannelScalper1m");
         }
         _ => {
             warn!("⚠️  策略类型 {:?} 暂未实现执行器，跳过注册", strategy_type);
@@ -278,5 +293,28 @@ mod tests {
         let strategies = registry.list_strategies();
         assert!(strategies.iter().any(|s| s == "Vegas"));
         assert!(strategies.iter().any(|s| s == "Nwe"));
+    }
+
+    #[test]
+    fn research_strategies_are_not_registered_by_default() {
+        let registry = StrategyRegistry::new();
+        super::register_builtin_strategies(&registry);
+
+        assert!(!registry.contains("SmartMoneyConcepts"));
+        assert!(!registry.contains("KeltnerChannelScalper1m"));
+    }
+
+    #[test]
+    fn research_strategies_remain_available_by_explicit_registration() {
+        let registry = StrategyRegistry::new();
+
+        super::register_executor_for_type(&registry, &StrategyType::SmartMoneyConceptsV1Research);
+        super::register_executor_for_type(
+            &registry,
+            &StrategyType::KeltnerChannelScalper1mV1Research,
+        );
+
+        assert!(registry.contains("SmartMoneyConcepts"));
+        assert!(registry.contains("KeltnerChannelScalper1m"));
     }
 }

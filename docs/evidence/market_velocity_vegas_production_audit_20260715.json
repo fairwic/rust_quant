@@ -1,0 +1,108 @@
+{
+  "artifact_kind": "production_read_only_evidence_audit",
+  "audit_id": "prod-mv-vegas-chain-audit-20260715",
+  "audit_window_utc": {
+    "start": "2026-07-15T13:18:48Z",
+    "end": "2026-07-15T13:36:18Z"
+  },
+  "mutation_count": 0,
+  "identities": {
+    "core_revision": "d502eca668a84c4e1b8efb38fdb131234c3c5ba6",
+    "web_revision": "54f535973d83edffbbd7585dbfc0a85d059d764f",
+    "core_revision_matches_local_head": true,
+    "web_revision_is_local_head_ancestor": true
+  },
+  "runtime": {
+    "all_inspected_roles_running": true,
+    "all_inspected_roles_restart_count_zero": true,
+    "schedules_seconds": {
+      "market_velocity_radar": 10,
+      "candle_backfill": 300,
+      "kline_scanner": 60,
+      "market_velocity_live_handoff": 60,
+      "breakdown_short_live_handoff": 300,
+      "paper_observation": 21600,
+      "exchange_symbol_sync": 3600,
+      "execution_worker_observed_poll": 5
+    }
+  },
+  "freshness": {
+    "market_rank_snapshot_age_seconds_approx": 15,
+    "market_rank_snapshot_rows": 12700670,
+    "market_rank_events_last_24h": 7308,
+    "active_market_velocity_episodes": 448,
+    "candle_latest_utc": {
+      "BTC-USDT-SWAP_1m": "2026-06-30T05:16:00Z",
+      "BTC-USDT-SWAP_5m": "2026-07-05T06:10:00Z",
+      "BTC-USDT-SWAP_15m": "2026-07-05T06:00:00Z",
+      "ETH-USDT-SWAP_15m": "2026-07-05T06:00:00Z",
+      "SOL-USDT-SWAP_15m": "2026-06-20T01:00:00Z",
+      "BCH-USDT-SWAP_15m": "2026-07-15T13:15:00Z",
+      "ETH-USDT-SWAP_4h": "2026-07-15T12:00:00Z"
+    },
+    "backfill_symbol_count_observed": 126,
+    "scanner_symbol_count_observed": 269,
+    "okx_symbol_filters_last_sync_utc": "2026-07-15T12:36:22Z",
+    "okx_symbol_filters_persisted_rows": 423
+  },
+  "handoff_last_7d": {
+    "market_velocity": {
+      "blocked": 29211,
+      "passed_or_dispatched": 0
+    },
+    "market_velocity_breakdown_short": {
+      "blocked": 409,
+      "passed_or_dispatched": 0
+    }
+  },
+  "identity_readiness": {
+    "configured_market_velocity_combo_id": 4,
+    "configured_market_velocity_combo_effective": false,
+    "current_market_velocity_combo_id": 7,
+    "current_market_velocity_combo_effective": true,
+    "current_market_velocity_signed_snapshot_fresh": false,
+    "current_vegas_combo_id": 6,
+    "current_vegas_combo_effective": true,
+    "current_vegas_signed_snapshot_fresh": false,
+    "breakdown_runtime_slug": "market_velocity_breakdown_short",
+    "breakdown_product_and_api_combo_slug": "market-velocity-breakdown-short",
+    "breakdown_product_status": "DRAFT",
+    "breakdown_production_pointer_active": true
+  },
+  "execution": {
+    "tasks_created_since_current_core_start": 0,
+    "market_velocity_historical_tasks": {
+      "failed": 5,
+      "completed": 0
+    },
+    "vegas_historical_tasks": {
+      "failed": 4,
+      "completed": 1
+    },
+    "historical_success": {
+      "task_id": 68,
+      "combo_id": 2,
+      "symbol": "ETH-USDT-SWAP",
+      "side": "long",
+      "filled_qty": "0.02000000",
+      "filled_quote_usdt": "35.74760000",
+      "task_status": "completed",
+      "order_status": "filled",
+      "position_leg_status": "active",
+      "position_leg_protection_status": "confirmed",
+      "position_leg_updated_at_utc": "2026-07-06T16:00:07.806830Z",
+      "latest_position_snapshot_source": "execution_result",
+      "latest_position_snapshot_at_utc": "2026-07-06T16:00:07.851932Z",
+      "latest_position_snapshot_protective_order_status": null,
+      "current_exchange_signed_position_or_open_order_evidence_present": false,
+      "delivery_api_execution_status": "pending",
+      "delivery_updated_at_utc": "2026-07-06T16:00:11.157532Z"
+    }
+  },
+  "decision": {
+    "audit_status": "blocked_by_runtime_contract_and_evidence_drift",
+    "new_strategy_development_allowed": false,
+    "only_next_validation_id": "prod-vegas-open-leg-readonly-reconciliation-20260715",
+    "only_next_validation_mutation_allowed": false
+  }
+}

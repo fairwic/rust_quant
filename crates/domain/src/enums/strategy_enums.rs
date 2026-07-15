@@ -33,6 +33,10 @@ pub enum StrategyType {
     RangeReversionScalper,
     /// BTC/ETH 短周期动量突破回踩策略
     MomentumBreakoutScalper,
+    /// Smart Money Concepts 结构突破研究策略
+    SmartMoneyConceptsV1Research,
+    /// Keltner Channel 1m 剥头皮研究策略
+    KeltnerChannelScalper1mV1Research,
     /// ETH 5m 放量反转研究策略
     EthVolumeReversal5mV1Research,
     /// ETH 5m 多空放量反转研究策略
@@ -64,6 +68,10 @@ impl StrategyType {
             StrategyType::BearShortStack => "bear_short_stack_v1",
             StrategyType::RangeReversionScalper => "range_reversion_scalper_v1",
             StrategyType::MomentumBreakoutScalper => "momentum_breakout_scalper_v1",
+            StrategyType::SmartMoneyConceptsV1Research => "smart_money_concepts_v1_research",
+            StrategyType::KeltnerChannelScalper1mV1Research => {
+                "keltner_channel_scalper_1m_v1_research"
+            }
             StrategyType::EthVolumeReversal5mV1Research => "eth_volume_reversal_5m_v1_research",
             StrategyType::EthVolumeReversalDual5mV1Research => {
                 "eth_volume_reversal_dual_5m_v1_research"
@@ -102,6 +110,10 @@ impl std::str::FromStr for StrategyType {
             }
             "range_reversion_scalper_v1" => Ok(StrategyType::RangeReversionScalper),
             "momentum_breakout_scalper_v1" => Ok(StrategyType::MomentumBreakoutScalper),
+            "smart_money_concepts_v1_research" => Ok(StrategyType::SmartMoneyConceptsV1Research),
+            "keltner_channel_scalper_1m_v1_research" => {
+                Ok(StrategyType::KeltnerChannelScalper1mV1Research)
+            }
             "eth_volume_reversal_5m_v1_research" => Ok(StrategyType::EthVolumeReversal5mV1Research),
             "eth_volume_reversal_dual_5m_v1_research" => {
                 Ok(StrategyType::EthVolumeReversalDual5mV1Research)

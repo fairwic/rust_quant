@@ -36,3 +36,6 @@ uuid.workspace = true
 futures.workspace = true
 futures-util.workspace = true
 ndarray.workspace = true
+
+[dev-dependencies]
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio-native-tls", "macros"] }

@@ -169,12 +169,12 @@ mod tests {
     fn long_signal_on_lower_band_and_oversold_rsi() {
         let thresholds = BbRsiThresholds::default();
         let snapshot = BbRsiSignalSnapshot {
-            price: 98.0,
+            price: 97.9,
             rsi: 25.0, // 超卖
             atr: 1.0,
             bb_upper: 102.0,
             bb_middle: 100.0,
-            bb_lower: 98.0, // 价格触及下轨
+            bb_lower: 98.0, // 价格严格跌破下轨
             bb_width: 4.0,
             price_bb_position: 0.0,
         };
@@ -186,7 +186,7 @@ mod tests {
     fn short_signal_on_upper_band_and_overbought_rsi() {
         let thresholds = BbRsiThresholds::default();
         let snapshot = BbRsiSignalSnapshot {
-            price: 102.0, // 触及上轨
+            price: 102.1, // 严格突破上轨
             rsi: 75.0,    // 超买
             atr: 1.0,
             bb_upper: 102.0,

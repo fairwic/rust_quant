@@ -1,10 +1,9 @@
 use crate::cache::{default_provider, LatestCandleCacheProvider};
 use crate::models::{CandlesEntity, CandlesModel};
 use crate::repositories::persist_worker::PersistTask;
+use crate::streams::{timeframe_duration_ms, CandleRuntimeRegistry, WatchdogDecision};
 use chrono::Utc;
-use dashmap::DashMap;
 use okx::dto::market_dto::CandleOkxRespDto;
-use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -22,10 +21,9 @@ pub struct CandleService {
     /// - 通过回调函数实现解耦
     /// - 由上层（orchestration/services）注入策略触发逻辑
     strategy_trigger: Option<StrategyTrigger>,
+    /// WebSocket 与 DB watchdog 共用的触发幂等和运行态状态。
+    runtime_registry: Arc<CandleRuntimeRegistry>,
 }
-/// 确认K线触发去重：确保同一 (inst_id, time_interval) 的同一根确认K线只触发一次
-/// key = "{inst_id}:{time_interval}" -> last_triggered_confirmed_ts(ms)
-static LAST_TRIGGERED_CONFIRMED_TS: Lazy<DashMap<String, i64>> = Lazy::new(DashMap::new);
 impl CandleService {
     /// 构建 行情与市场数据 所需实例，并集中初始化依赖和默认状态。
     pub fn new() -> Self {
@@ -33,6 +31,7 @@ impl CandleService {
             cache: default_provider(),
             persist_sender: None,
             strategy_trigger: None,
+            runtime_registry: Arc::new(CandleRuntimeRegistry::default()),
         }
     }
     /// 提供newwithcache的集中实现，避免行情数据调用方重复处理相同细节。
@@ -41,6 +40,7 @@ impl CandleService {
             cache,
             persist_sender: None,
             strategy_trigger: None,
+            runtime_registry: Arc::new(CandleRuntimeRegistry::default()),
         }
     }
     /// [已优化] 创建带批处理Worker的服务实例
@@ -52,6 +52,20 @@ impl CandleService {
             cache,
             persist_sender: Some(persist_sender),
             strategy_trigger: None,
+            runtime_registry: Arc::new(CandleRuntimeRegistry::default()),
+        }
+    }
+    /// 创建带批处理 Worker 和共享运行态 registry 的服务实例。
+    pub fn new_with_persist_worker_and_runtime(
+        cache: Arc<dyn LatestCandleCacheProvider>,
+        persist_sender: mpsc::UnboundedSender<PersistTask>,
+        runtime_registry: Arc<CandleRuntimeRegistry>,
+    ) -> Self {
+        Self {
+            cache,
+            persist_sender: Some(persist_sender),
+            strategy_trigger: None,
+            runtime_registry,
         }
     }
     /// 创建带策略触发回调的服务实例
@@ -71,7 +85,154 @@ impl CandleService {
             cache,
             persist_sender,
             strategy_trigger: Some(strategy_trigger),
+            runtime_registry: Arc::new(CandleRuntimeRegistry::default()),
         }
+    }
+    /// 创建带策略触发和共享运行态 registry 的服务实例。
+    pub fn new_with_strategy_trigger_and_runtime(
+        cache: Arc<dyn LatestCandleCacheProvider>,
+        persist_sender: Option<mpsc::UnboundedSender<PersistTask>>,
+        strategy_trigger: StrategyTrigger,
+        runtime_registry: Arc<CandleRuntimeRegistry>,
+    ) -> Self {
+        Self {
+            cache,
+            persist_sender,
+            strategy_trigger: Some(strategy_trigger),
+            runtime_registry,
+        }
+    }
+
+    /// 通过统一幂等门禁触发确认 K 线，供 WS 与 DB watchdog 共用。
+    pub fn trigger_confirmed_candle(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+        snap: CandlesEntity,
+        source: &str,
+    ) -> bool {
+        self.trigger_confirmed_candle_at(
+            inst_id,
+            time_interval,
+            snap,
+            source,
+            Utc::now().timestamp_millis(),
+        )
+    }
+
+    /// 使用显式观察时间执行统一触发门禁，便于固定十秒边界测试。
+    fn trigger_confirmed_candle_at(
+        &self,
+        inst_id: &str,
+        time_interval: &str,
+        snap: CandlesEntity,
+        source: &str,
+        observed_at_ms: i64,
+    ) -> bool {
+        self.runtime_registry.record_confirmed_candle(
+            inst_id,
+            time_interval,
+            snap.ts,
+            observed_at_ms,
+        );
+        if self
+            .runtime_registry
+            .is_at_or_before_startup_baseline(inst_id, time_interval, snap.ts)
+        {
+            debug!(
+                "跳过启动前确认K线: inst_id={}, time_interval={}, ts={}, source={}",
+                inst_id, time_interval, snap.ts, source
+            );
+            return false;
+        }
+        let timeframe_ms = match timeframe_duration_ms(time_interval) {
+            Ok(value) => value,
+            Err(error) => {
+                error!(
+                    event = "confirmed_candle_invalid_timeframe",
+                    inst_id,
+                    time_interval,
+                    candle_ts = snap.ts,
+                    source,
+                    error = %error,
+                    "确认 K 线周期非法，拒绝进入策略回调"
+                );
+                return false;
+            }
+        };
+        let last_handled = self
+            .runtime_registry
+            .latest_handled_candle_ts(inst_id, time_interval);
+        match WatchdogDecision::for_confirmed_candle(
+            snap.ts,
+            timeframe_ms,
+            observed_at_ms,
+            last_handled,
+        ) {
+            WatchdogDecision::AlreadyHandled => {
+                debug!(
+                    "跳过重复确认K线触发: inst_id={}, time_interval={}, ts={}, source={}",
+                    inst_id, time_interval, snap.ts, source
+                );
+                return false;
+            }
+            WatchdogDecision::NotDue => {
+                warn!(
+                    event = "confirmed_candle_before_close_boundary",
+                    inst_id,
+                    time_interval,
+                    candle_ts = snap.ts,
+                    source,
+                    "确认 K 线早于本地收盘边界，暂不进入策略回调"
+                );
+                return false;
+            }
+            WatchdogDecision::Expired => {
+                if self
+                    .runtime_registry
+                    .record_expired(inst_id, time_interval, snap.ts)
+                {
+                    error!(
+                        event = "expired_missed_trigger",
+                        inst_id,
+                        time_interval,
+                        candle_ts = snap.ts,
+                        source,
+                        age_after_close_ms =
+                            observed_at_ms.saturating_sub(snap.ts.saturating_add(timeframe_ms)),
+                        action = "audit_only_no_execution_task",
+                        "确认 K 线超过十秒时效窗口，禁止补执行和补下单"
+                    );
+                }
+                return false;
+            }
+            WatchdogDecision::Trigger => {}
+        }
+        if !self
+            .runtime_registry
+            .try_claim_trigger(inst_id, time_interval, snap.ts)
+        {
+            return false;
+        }
+        let Some(trigger) = &self.strategy_trigger else {
+            warn!(
+                "未注入策略触发回调，跳过策略执行: inst_id={}, time_interval={}, ts={}, source={}",
+                inst_id, time_interval, snap.ts, source
+            );
+            return false;
+        };
+        info!(
+            "K线确认，触发策略执行: inst_id={}, time_interval={}, ts={}, source={}",
+            inst_id, time_interval, snap.ts, source
+        );
+        trigger(inst_id.to_string(), time_interval.to_string(), snap.clone());
+        self.runtime_registry.record_trigger_success(
+            inst_id,
+            time_interval,
+            snap.ts,
+            Utc::now().timestamp_millis(),
+        );
+        true
     }
     /// [已优化] 批量处理K线数据（处理完整数据集）
     /// 性能提升：处理所有历史数据，确保数据完整性
@@ -130,42 +291,7 @@ impl CandleService {
             self.cache.set_both(inst_id, time_interval, &snap).await;
             // 🚀 K线确认时触发策略执行
             if snap.confirm == "1" {
-                // 只触发一次：同 ts 的确认K线重复推送（重连/补发）会被抑制
-                let trigger_key = format!("{}:{}", inst_id, time_interval);
-                let last_ts = LAST_TRIGGERED_CONFIRMED_TS
-                    .get(&trigger_key)
-                    .map(|v| *v.value());
-                let should_trigger = match last_ts {
-                    Some(old) => new_ts > old,
-                    None => true,
-                };
-                if !should_trigger {
-                    debug!(
-                        "跳过重复确认K线触发: inst_id={}, time_interval={}, ts={}, last_ts={:?}",
-                        inst_id, time_interval, new_ts, last_ts
-                    );
-                } else {
-                    LAST_TRIGGERED_CONFIRMED_TS.insert(trigger_key, new_ts);
-                    info!(
-                        "📈 K线确认，触发策略执行: inst_id={}, time_interval={}, ts={}",
-                        inst_id, time_interval, new_ts
-                    );
-                    // 如果注入了策略触发回调，则异步触发
-                    if let Some(trigger) = &self.strategy_trigger {
-                        let inst_id_owned = inst_id.to_string();
-                        let time_interval_owned = time_interval.to_string();
-                        let snap_clone = snap.clone();
-                        let trigger_clone = Arc::clone(trigger);
-                        tokio::spawn(async move {
-                            trigger_clone(inst_id_owned, time_interval_owned, snap_clone);
-                        });
-                    } else {
-                        warn!(
-                            "⚠️  未注入策略触发回调，跳过策略执行: inst_id={}, time_interval={}",
-                            inst_id, time_interval
-                        );
-                    }
-                }
+                self.trigger_confirmed_candle(inst_id, time_interval, snap.clone(), "websocket");
             }
             // 🚀 发送到批处理队列（如果启用）或直接写库
             if let Some(sender) = &self.persist_sender {
@@ -216,5 +342,78 @@ impl CandleService {
 impl Default for CandleService {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// 构造确认 K 线测试数据。
+    fn confirmed_candle(ts: i64) -> CandlesEntity {
+        CandlesEntity {
+            id: None,
+            ts,
+            o: "100".to_string(),
+            h: "101".to_string(),
+            l: "99".to_string(),
+            c: "100".to_string(),
+            vol: "1".to_string(),
+            vol_ccy: "100".to_string(),
+            confirm: "1".to_string(),
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    /// 构造只记录调用次数的策略触发服务。
+    fn service_with_trigger_counter(counter: Arc<AtomicUsize>) -> CandleService {
+        let trigger: StrategyTrigger = Arc::new(move |_, _, _| {
+            counter.fetch_add(1, Ordering::Relaxed);
+        });
+        CandleService::new_with_strategy_trigger_and_runtime(
+            default_provider(),
+            None,
+            trigger,
+            Arc::new(CandleRuntimeRegistry::default()),
+        )
+    }
+
+    #[test]
+    fn expired_confirmation_never_calls_strategy_trigger() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let service = service_with_trigger_counter(Arc::clone(&counter));
+
+        assert!(!service.trigger_confirmed_candle_at(
+            "ETH-USDT-SWAP",
+            "1m",
+            confirmed_candle(1_000),
+            "test",
+            71_001,
+        ));
+        assert_eq!(counter.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn exact_ten_second_confirmation_calls_strategy_trigger_once() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let service = service_with_trigger_counter(Arc::clone(&counter));
+
+        assert!(service.trigger_confirmed_candle_at(
+            "ETH-USDT-SWAP",
+            "1m",
+            confirmed_candle(1_000),
+            "test",
+            71_000,
+        ));
+        assert!(!service.trigger_confirmed_candle_at(
+            "ETH-USDT-SWAP",
+            "1m",
+            confirmed_candle(1_000),
+            "test",
+            71_000,
+        ));
+        assert_eq!(counter.load(Ordering::Relaxed), 1);
     }
 }

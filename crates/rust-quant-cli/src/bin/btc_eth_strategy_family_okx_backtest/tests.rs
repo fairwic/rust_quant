@@ -310,10 +310,13 @@ fn parses_cli_defaults_and_limit() {
     assert!(!args.scan_breakdown);
     assert!(!args.scan_exhaustion);
     assert!(!args.scan_micro);
+    assert!(!args.scan_keltner);
     assert!(!args.scan_volume_reversal);
+    assert!(!args.scan_smc);
     assert!(!args.scan_scalper);
     assert!(!args.scan_scalper_narrow);
     assert!(!args.diagnose_scalper);
+    assert!(!args.diagnose_keltner);
     assert!(!args.diagnose_volume_reversal);
     assert!(!args.use_market_context);
     assert!(!args.backfill_okx_market_context);
@@ -343,11 +346,20 @@ fn parses_cli_defaults_and_limit() {
     let args = parse_args(["--scan-micro".to_string()]).unwrap();
     assert!(args.scan_micro);
 
+    let args = parse_args(["--scan-keltner".to_string()]).unwrap();
+    assert!(args.scan_keltner);
+
     let args = parse_args(["--scan-volume-reversal".to_string()]).unwrap();
     assert!(args.scan_volume_reversal);
 
+    let args = parse_args(["--scan-smc".to_string()]).unwrap();
+    assert!(args.scan_smc);
+
     let args = parse_args(["--diagnose-scalper".to_string()]).unwrap();
     assert!(args.diagnose_scalper);
+
+    let args = parse_args(["--diagnose-keltner".to_string()]).unwrap();
+    assert!(args.diagnose_keltner);
 
     let args = parse_args(["--diagnose-volume-reversal".to_string()]).unwrap();
     assert!(args.diagnose_volume_reversal);
@@ -360,6 +372,20 @@ fn parses_cli_defaults_and_limit() {
 
     let args = parse_args(["--case-label".to_string(), "scalper_btc_1m".to_string()]).unwrap();
     assert_eq!(args.case_label.as_deref(), Some("scalper_btc_1m"));
+}
+
+#[test]
+fn smc_research_cases_are_filterable_without_default_report_persistence() {
+    let cases = strategy_cases_for_filter(Some("smc_btc_5m"), true).unwrap();
+
+    assert_eq!(cases.len(), 1);
+    assert_eq!(cases[0].symbol, "BTC-USDT-SWAP");
+    assert_eq!(cases[0].period, "5m");
+    assert!(matches!(
+        cases[0].family,
+        StrategyFamily::SmartMoneyConcepts
+    ));
+    assert!(is_research_case(&cases[0]));
 }
 
 #[test]
@@ -1857,6 +1883,7 @@ fn scan_case_report_with_pnls(label: &str, pnls: &[f64]) -> CaseReport {
             pnl: *pnl,
             close_type: String::new(),
             entry_snapshot: None,
+            keltner_snapshot: None,
             entry_reasons: Vec::new(),
         })
         .collect();

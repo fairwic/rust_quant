@@ -515,12 +515,15 @@ async fn run_websocket(
             error!("❌ Binance WebSocket启动失败: {}", error);
         }
     } else {
-        streams::run_socket_with_strategy_trigger(
+        if let Err(error) = streams::run_socket_with_strategy_trigger(
             &inst_ids_vec,
             &periods_vec,
             Some(strategy_trigger),
         )
-        .await;
+        .await
+        {
+            error!("❌ OKX WebSocket 运行时退出: {}", error);
+        }
     }
 }
 /// 提供CSV过滤值的集中实现，避免配置运行时调用方重复处理相同细节。

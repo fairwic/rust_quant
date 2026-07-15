@@ -1,3 +1,4 @@
+use super::report_output::format_reason_counts;
 use super::*;
 
 /// Prints candle-structure rejection counts for scalper cases without running trades.

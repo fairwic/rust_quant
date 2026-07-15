@@ -19,6 +19,7 @@ use rust_quant_strategies::implementations::{
     BearShortPreset, BearShortStackBacktestMarketContext, BearShortStackBacktestTuning,
     BearShortStackStrategy, BtcEthLiquidityScalperBacktestMarketContext,
     BtcEthLiquidityScalperBacktestTuning, BtcEthLiquidityScalperStrategy,
+    SmartMoneyConceptsStrategy,
 };
 use rust_quant_strategies::CandleItem;
 use serde_json::{json, Value};
@@ -26,18 +27,33 @@ use sqlx::postgres::PgPoolOptions;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[path = "btc_eth_strategy_family_okx_backtest/case_defs.rs"]
+mod case_defs;
+#[path = "btc_eth_strategy_family_okx_backtest/keltner_channel_scalper_1m.rs"]
+mod keltner_channel_scalper_1m;
 #[path = "btc_eth_strategy_family_okx_backtest/micro_scalper_1m.rs"]
 mod micro_scalper_1m;
+#[path = "btc_eth_strategy_family_okx_backtest/report_output.rs"]
+mod report_output;
 #[path = "btc_eth_strategy_family_okx_backtest/scalper_analysis.rs"]
 mod scalper_analysis;
 #[path = "btc_eth_strategy_family_okx_backtest/scan.rs"]
 mod scan;
+#[path = "btc_eth_strategy_family_okx_backtest/smc_scan.rs"]
+mod smc_scan;
 #[path = "btc_eth_strategy_family_okx_backtest/volume_reversal_5m.rs"]
 mod volume_reversal_5m;
 
 #[cfg(test)]
+use keltner_channel_scalper_1m::keltner_channel_scalper_scan_tunings;
+use keltner_channel_scalper_1m::{
+    load_keltner_channel_scalper_cases, print_keltner_channel_scalper_diagnostics,
+    print_keltner_channel_scalper_scan, run_keltner_channel_scalper_1m,
+};
+#[cfg(test)]
 use micro_scalper_1m::micro_scalper_scan_tunings;
 use micro_scalper_1m::{print_micro_scalper_scan, run_micro_scalper_1m};
+use report_output::print_reports;
 use scalper_analysis::{
     format_case_reports, print_scalper_diagnostics, print_scalper_scan,
     print_scalper_scan_with_tunings, short_candidate_reports_meet_constraints,
@@ -54,6 +70,7 @@ use scan::{breakdown_scan_tunings, exhaustion_scan_tunings};
 use scan::{
     print_breakdown_scan, print_exhaustion_scan, scalper_narrow_scan_tunings, scalper_scan_tunings,
 };
+use smc_scan::{load_smc_cases, print_smc_scan};
 use volume_reversal_5m::{
     print_btc_volume_reversal_frequency_scan, print_volume_reversal_diagnostics,
     print_volume_reversal_scan, run_btc_volume_reversal_hybrid_5m, run_eth_volume_reversal_5m,
@@ -81,11 +98,14 @@ struct Args {
     trade_fee_rate: Option<f64>,
     debug_trades: bool,
     scan_micro: bool,
+    scan_keltner: bool,
     scan_volume_reversal: bool,
     scan_btc_volume_reversal: bool,
+    scan_smc: bool,
     scan_scalper: bool,
     scan_scalper_narrow: bool,
     diagnose_scalper: bool,
+    diagnose_keltner: bool,
     diagnose_volume_reversal: bool,
     scan_breakdown: bool,
     scan_exhaustion: bool,
@@ -110,16 +130,18 @@ struct LoadedCase {
     context_required: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StrategyFamily {
     Scalper,
     MicroScalper1m,
+    KeltnerChannelScalper1m,
     EthVolumeReversal5m,
     EthVolumeReversalDual5m,
     BtcVolumeReversalDual5m,
     BtcVolumeReversalHybrid5m,
     Breakdown,
     Exhaustion,
+    SmartMoneyConcepts,
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +256,7 @@ struct ClosedTradeDebug {
     pnl: f64,
     close_type: String,
     entry_snapshot: Option<EntrySnapshotDebug>,
+    keltner_snapshot: Option<KeltnerEntrySnapshotDebug>,
     entry_reasons: Vec<String>,
 }
 
@@ -254,6 +277,18 @@ struct EntrySnapshotDebug {
     body_pct: f64,
     lower_wick_pct: f64,
     upper_wick_pct: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct KeltnerEntrySnapshotDebug {
+    adx: f64,
+    basis_slope_atr: f64,
+    reclaim_atr: f64,
+    reentry_body_ratio: f64,
+    rejection_wick_ratio: f64,
+    reentry_close_progress_ratio: f64,
+    breakout_reentry_candles: f64,
+    atr_pct: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -277,25 +312,37 @@ async fn main() -> Result<()> {
                 .then_some("eth_volume_reversal_5m")
         }
     });
-    let mut loaded = load_cases(
-        args.limit,
-        false,
-        load_case_label,
-        args.scan_micro || args.scan_volume_reversal || args.scan_btc_volume_reversal,
-    )
-    .await?;
+    let mut loaded = if args.scan_smc {
+        load_smc_cases(args.limit, args.case_label.as_deref()).await?
+    } else if args.scan_keltner || args.diagnose_keltner {
+        load_keltner_channel_scalper_cases(args.limit, args.case_label.as_deref()).await?
+    } else {
+        load_cases(
+            args.limit,
+            false,
+            load_case_label,
+            args.scan_micro || args.scan_volume_reversal || args.scan_btc_volume_reversal,
+        )
+        .await?
+    };
     if args.backfill_okx_market_context {
         backfill_okx_market_context(&loaded).await?;
     }
     if args.use_market_context {
         attach_sharded_market_context(&mut loaded).await?;
     }
-    if args.diagnose_volume_reversal {
+    if args.diagnose_keltner {
+        print_keltner_channel_scalper_diagnostics(&loaded, args.risk_percent, args.trade_fee_rate);
+    } else if args.diagnose_volume_reversal {
         print_volume_reversal_diagnostics(&loaded, args.risk_percent, args.trade_fee_rate);
     } else if args.scan_btc_volume_reversal {
         print_btc_volume_reversal_frequency_scan(&loaded, args.risk_percent, args.trade_fee_rate);
     } else if args.scan_volume_reversal {
         print_volume_reversal_scan(&loaded, args.risk_percent, args.trade_fee_rate);
+    } else if args.scan_smc {
+        print_smc_scan(&loaded, args.risk_percent, args.trade_fee_rate);
+    } else if args.scan_keltner {
+        print_keltner_channel_scalper_scan(&loaded, args.risk_percent, args.trade_fee_rate);
     } else if args.scan_micro {
         print_micro_scalper_scan(&loaded, args.risk_percent, args.trade_fee_rate);
     } else if args.scan_scalper_narrow {
@@ -353,11 +400,14 @@ where
     let mut trade_fee_rate = None;
     let mut debug_trades = false;
     let mut scan_micro = false;
+    let mut scan_keltner = false;
     let mut scan_volume_reversal = false;
     let mut scan_btc_volume_reversal = false;
+    let mut scan_smc = false;
     let mut scan_scalper = false;
     let mut scan_scalper_narrow = false;
     let mut diagnose_scalper = false;
+    let mut diagnose_keltner = false;
     let mut diagnose_volume_reversal = false;
     let mut scan_breakdown = false;
     let mut scan_exhaustion = false;
@@ -396,11 +446,14 @@ where
             }
             "--debug-trades" => debug_trades = true,
             "--scan-micro" => scan_micro = true,
+            "--scan-keltner" => scan_keltner = true,
             "--scan-volume-reversal" => scan_volume_reversal = true,
             "--scan-btc-volume-reversal" => scan_btc_volume_reversal = true,
+            "--scan-smc" => scan_smc = true,
             "--scan-scalper" => scan_scalper = true,
             "--scan-scalper-narrow" => scan_scalper_narrow = true,
             "--diagnose-scalper" => diagnose_scalper = true,
+            "--diagnose-keltner" => diagnose_keltner = true,
             "--diagnose-volume-reversal" => diagnose_volume_reversal = true,
             "--scan-breakdown" => scan_breakdown = true,
             "--scan-exhaustion" => scan_exhaustion = true,
@@ -438,11 +491,14 @@ where
         trade_fee_rate,
         debug_trades,
         scan_micro,
+        scan_keltner,
         scan_volume_reversal,
         scan_btc_volume_reversal,
+        scan_smc,
         scan_scalper,
         scan_scalper_narrow,
         diagnose_scalper,
+        diagnose_keltner,
         diagnose_volume_reversal,
         scan_breakdown,
         scan_exhaustion,
@@ -454,7 +510,7 @@ where
 
 fn print_usage() {
     println!(
-        "btc_eth_strategy_family_okx_backtest [--limit N] [--risk-percent P] [--trade-fee-rate RATE] [--debug-trades] [--scan-micro] [--scan-scalper] [--scan-scalper-narrow] [--diagnose-scalper] [--scan-breakdown] [--scan-exhaustion]\n\
+        "btc_eth_strategy_family_okx_backtest [--limit N] [--risk-percent P] [--trade-fee-rate RATE] [--debug-trades] [--scan-micro] [--scan-keltner] [--diagnose-keltner] [--scan-smc] [--scan-scalper] [--scan-scalper-narrow] [--diagnose-scalper] [--scan-breakdown] [--scan-exhaustion]\n\
          \n\
          Reads quant_core sharded candle tables such as btc-usdt-swap_candles_5m and\n\
          eth-usdt-swap_candles_15m, then runs the new BTC/ETH strategy family through\n\
@@ -463,130 +519,14 @@ fn print_usage() {
          --backfill-okx-market-context to fetch OKX public 1D context into sharded tables. Use\n\
          market_velocity_candle_backfill to backfill the sharded candle tables before running this report.\n\
          Use --case-label scalper_btc_1m to run or scan one case only. Use --scan-volume-reversal\n\
-         to scan the research-only ETH 5m volume reversal preset; use --diagnose-volume-reversal\n\
+         to scan the research-only ETH 5m volume reversal preset; use --diagnose-keltner\n\
+         to run the strongest Keltner raw tuning and print per-case diagnostics; use --diagnose-volume-reversal\n\
          to print win/loss candle-shape diagnostics for the strongest research candidates."
     );
 }
 
-const STRATEGY_CASE_DEFS: [(&str, &str, &str, StrategyFamily); 19] = [
-    (
-        "scalper_btc_1m",
-        "BTC-USDT-SWAP",
-        "1m",
-        StrategyFamily::Scalper,
-    ),
-    (
-        "scalper_eth_1m",
-        "ETH-USDT-SWAP",
-        "1m",
-        StrategyFamily::Scalper,
-    ),
-    (
-        "micro_scalper_btc_1m",
-        "BTC-USDT-SWAP",
-        "1m",
-        StrategyFamily::MicroScalper1m,
-    ),
-    (
-        "micro_scalper_eth_1m",
-        "ETH-USDT-SWAP",
-        "1m",
-        StrategyFamily::MicroScalper1m,
-    ),
-    (
-        "scalper_btc_5m",
-        "BTC-USDT-SWAP",
-        "5m",
-        StrategyFamily::Scalper,
-    ),
-    (
-        "scalper_eth_5m",
-        "ETH-USDT-SWAP",
-        "5m",
-        StrategyFamily::Scalper,
-    ),
-    (
-        "eth_volume_reversal_5m",
-        "ETH-USDT-SWAP",
-        "5m",
-        StrategyFamily::EthVolumeReversal5m,
-    ),
-    (
-        "eth_volume_reversal_dual_5m",
-        "ETH-USDT-SWAP",
-        "5m",
-        StrategyFamily::EthVolumeReversalDual5m,
-    ),
-    (
-        "btc_volume_reversal_dual_5m",
-        "BTC-USDT-SWAP",
-        "5m",
-        StrategyFamily::BtcVolumeReversalDual5m,
-    ),
-    (
-        "btc_volume_reversal_hybrid_5m",
-        "BTC-USDT-SWAP",
-        "5m",
-        StrategyFamily::BtcVolumeReversalHybrid5m,
-    ),
-    (
-        "sol_volume_reversal_dual_5m",
-        "SOL-USDT-SWAP",
-        "5m",
-        StrategyFamily::EthVolumeReversalDual5m,
-    ),
-    (
-        "breakdown_btc_5m",
-        "BTC-USDT-SWAP",
-        "5m",
-        StrategyFamily::Breakdown,
-    ),
-    (
-        "breakdown_eth_5m",
-        "ETH-USDT-SWAP",
-        "5m",
-        StrategyFamily::Breakdown,
-    ),
-    (
-        "exhaustion_btc_5m",
-        "BTC-USDT-SWAP",
-        "5m",
-        StrategyFamily::Exhaustion,
-    ),
-    (
-        "exhaustion_eth_5m",
-        "ETH-USDT-SWAP",
-        "5m",
-        StrategyFamily::Exhaustion,
-    ),
-    (
-        "breakdown_btc_15m",
-        "BTC-USDT-SWAP",
-        "15m",
-        StrategyFamily::Breakdown,
-    ),
-    (
-        "breakdown_eth_15m",
-        "ETH-USDT-SWAP",
-        "15m",
-        StrategyFamily::Breakdown,
-    ),
-    (
-        "exhaustion_btc_15m",
-        "BTC-USDT-SWAP",
-        "15m",
-        StrategyFamily::Exhaustion,
-    ),
-    (
-        "exhaustion_eth_15m",
-        "ETH-USDT-SWAP",
-        "15m",
-        StrategyFamily::Exhaustion,
-    ),
-];
-
-fn strategy_cases() -> [StrategyCase; 19] {
-    STRATEGY_CASE_DEFS.map(|(label, symbol, period, family)| StrategyCase {
+fn strategy_cases() -> [StrategyCase; 31] {
+    case_defs::STRATEGY_CASE_DEFS.map(|(label, symbol, period, family)| StrategyCase {
         label,
         symbol,
         period,
@@ -623,10 +563,12 @@ fn is_research_case(case: &StrategyCase) -> bool {
     matches!(
         case.family,
         StrategyFamily::MicroScalper1m
+            | StrategyFamily::KeltnerChannelScalper1m
             | StrategyFamily::EthVolumeReversal5m
             | StrategyFamily::EthVolumeReversalDual5m
             | StrategyFamily::BtcVolumeReversalDual5m
             | StrategyFamily::BtcVolumeReversalHybrid5m
+            | StrategyFamily::SmartMoneyConcepts
     )
 }
 
@@ -1068,9 +1010,11 @@ fn risk_config_for_persistence(
             volume_reversal_5m::volume_reversal_risk_config(risk)
         }
         StrategyFamily::Scalper
+        | StrategyFamily::KeltnerChannelScalper1m
         | StrategyFamily::MicroScalper1m
         | StrategyFamily::Breakdown
-        | StrategyFamily::Exhaustion => risk,
+        | StrategyFamily::Exhaustion
+        | StrategyFamily::SmartMoneyConcepts => risk,
     }
 }
 
@@ -1242,12 +1186,14 @@ fn strategy_family_key(family: StrategyFamily) -> &'static str {
     match family {
         StrategyFamily::Scalper => "btc_eth_liquidity_scalper",
         StrategyFamily::MicroScalper1m => "micro_scalper_1m",
+        StrategyFamily::KeltnerChannelScalper1m => "keltner_channel_scalper_1m_v1_research",
         StrategyFamily::EthVolumeReversal5m => "eth_volume_reversal_5m",
         StrategyFamily::EthVolumeReversalDual5m => "eth_volume_reversal_dual_5m",
         StrategyFamily::BtcVolumeReversalDual5m => "btc_volume_reversal_dual_5m",
         StrategyFamily::BtcVolumeReversalHybrid5m => "btc_volume_reversal_hybrid_5m",
         StrategyFamily::Breakdown => "bear_breakdown_short",
         StrategyFamily::Exhaustion => "exhaustion_fade_short",
+        StrategyFamily::SmartMoneyConcepts => "smart_money_concepts_v1_research",
     }
 }
 
@@ -1454,6 +1400,9 @@ fn run_loaded_case(
     let case = &loaded.case;
     let candles = loaded.candles.as_slice();
     match case.family {
+        StrategyFamily::KeltnerChannelScalper1m => {
+            run_keltner_channel_scalper_1m(case.symbol, candles, risk)
+        }
         StrategyFamily::MicroScalper1m => run_micro_scalper_1m(case.symbol, candles, risk),
         StrategyFamily::EthVolumeReversal5m => {
             run_eth_volume_reversal_5m(case.symbol, candles, risk)
@@ -1533,6 +1482,9 @@ fn run_loaded_case(
                 )
             }
         }
+        StrategyFamily::SmartMoneyConcepts => {
+            SmartMoneyConceptsStrategy.run_test(case.symbol, candles, risk)
+        }
     }
 }
 
@@ -1560,11 +1512,13 @@ fn bear_tuning_for_report_family(
         StrategyFamily::Breakdown => tunings.breakdown,
         StrategyFamily::Exhaustion => tunings.exhaustion,
         StrategyFamily::Scalper
+        | StrategyFamily::KeltnerChannelScalper1m
         | StrategyFamily::MicroScalper1m
         | StrategyFamily::EthVolumeReversal5m
         | StrategyFamily::EthVolumeReversalDual5m
         | StrategyFamily::BtcVolumeReversalDual5m
-        | StrategyFamily::BtcVolumeReversalHybrid5m => None,
+        | StrategyFamily::BtcVolumeReversalHybrid5m
+        | StrategyFamily::SmartMoneyConcepts => None,
     }
 }
 
@@ -1585,7 +1539,8 @@ fn strategy_type_for_persistence(case: &StrategyCase) -> Option<StrategyType> {
         StrategyFamily::Breakdown | StrategyFamily::Exhaustion => {
             Some(StrategyType::BearShortStack)
         }
-        StrategyFamily::MicroScalper1m => None,
+        StrategyFamily::SmartMoneyConcepts => Some(StrategyType::SmartMoneyConceptsV1Research),
+        StrategyFamily::MicroScalper1m | StrategyFamily::KeltnerChannelScalper1m => None,
     }
 }
 
@@ -1671,6 +1626,7 @@ fn closed_trade_debug(
     record: &TradeRecord,
     entry_record: Option<&TradeRecord>,
 ) -> ClosedTradeDebug {
+    let entry_signal_value = entry_record.and_then(|entry| entry.signal_value.as_deref());
     ClosedTradeDebug {
         open_time: record.open_position_time.clone(),
         close_time: record.close_position_time.clone(),
@@ -1678,9 +1634,8 @@ fn closed_trade_debug(
         close_price: record.close_price,
         pnl: record.profit_loss,
         close_type: record.close_type.clone(),
-        entry_snapshot: entry_record
-            .and_then(|entry| entry.signal_value.as_deref())
-            .and_then(parse_entry_snapshot_debug),
+        entry_snapshot: entry_signal_value.and_then(parse_entry_snapshot_debug),
+        keltner_snapshot: entry_signal_value.and_then(parse_keltner_entry_snapshot_debug),
         entry_reasons: entry_record
             .and_then(|entry| entry.signal_result.as_deref())
             .map(parse_entry_reasons)
@@ -1703,6 +1658,35 @@ fn filtered_signal_snapshots(result: &BackTestResult) -> Vec<FilteredSignalDebug
             })
         })
         .collect()
+}
+
+fn parse_keltner_entry_snapshot_debug(payload: &str) -> Option<KeltnerEntrySnapshotDebug> {
+    let value = serde_json::from_str::<Value>(payload).ok()?;
+    let price = json_number(&value, "price")?;
+    let atr = json_number(&value, "atr")?;
+    if price <= 0.0 || atr <= f64::EPSILON {
+        return None;
+    }
+    let returned_lower = json_bool(&value, "returned_inside_inner_lower").unwrap_or(false);
+    let returned_upper = json_bool(&value, "returned_inside_inner_upper").unwrap_or(false);
+    let reclaim_atr = if returned_lower {
+        (price - json_number(&value, "inner_lower")?) / atr
+    } else if returned_upper {
+        (json_number(&value, "inner_upper")? - price) / atr
+    } else {
+        0.0
+    };
+    Some(KeltnerEntrySnapshotDebug {
+        adx: json_number(&value, "adx").unwrap_or(0.0),
+        basis_slope_atr: json_number(&value, "basis_slope_atr").unwrap_or(0.0),
+        reclaim_atr,
+        reentry_body_ratio: json_number(&value, "reentry_body_ratio").unwrap_or(0.0),
+        rejection_wick_ratio: json_number(&value, "rejection_wick_ratio").unwrap_or(0.0),
+        reentry_close_progress_ratio: json_number(&value, "reentry_close_progress_ratio")
+            .unwrap_or(0.0),
+        breakout_reentry_candles: json_number(&value, "breakout_reentry_candles").unwrap_or(0.0),
+        atr_pct: atr / price * 100.0,
+    })
 }
 
 fn parse_filtered_snapshot_debug(payload: &str) -> Option<EntrySnapshotDebug> {
@@ -1752,6 +1736,10 @@ fn parse_entry_snapshot_debug(payload: &str) -> Option<EntrySnapshotDebug> {
 
 fn json_number(value: &Value, field: &str) -> Option<f64> {
     value.get(field)?.as_f64()
+}
+
+fn json_bool(value: &Value, field: &str) -> Option<bool> {
+    value.get(field)?.as_bool()
 }
 
 fn parse_entry_reasons(payload: &str) -> Vec<String> {
@@ -1827,102 +1815,9 @@ fn max_drawdown_pct(result: &BackTestResult) -> f64 {
     max_drawdown
 }
 
-fn print_reports(reports: &[CaseReport], debug_trades: bool) {
-    let total_wins = reports.iter().map(|report| report.wins).sum::<usize>();
-    let total_losses = reports.iter().map(|report| report.losses).sum::<usize>();
-    let total_pnl = reports.iter().map(|report| report.pnl).sum::<f64>();
-    let total_entries = reports.iter().map(|report| report.entries).sum::<usize>();
-    let max_drawdown = reports
-        .iter()
-        .map(|report| report.max_drawdown_pct)
-        .fold(0.0, f64::max);
-    let combo_days = reports.iter().map(|report| report.days).fold(0.0, f64::max);
-    let trades_per_day = if combo_days > 0.0 {
-        total_entries as f64 / combo_days
-    } else {
-        0.0
-    };
-
-    for report in reports {
-        println!(
-            "{} source=quant_core_sharded candles={} entries={} closed={} wins={} losses={} win_rate={:.2}% pnl={:.4} final_funds={:.4} max_dd={:.2}% days={:.2} trades_per_day={:.2}",
-            report.label,
-            report.candles,
-            report.entries,
-            report.closed,
-            report.wins,
-            report.losses,
-            report.win_rate_pct,
-            report.pnl,
-            report.final_funds,
-            report.max_drawdown_pct,
-            report.days,
-            report.trades_per_day
-        );
-        if debug_trades {
-            if report.filtered_signals > 0 {
-                println!(
-                    "  filtered_signals={} top_reasons={}",
-                    report.filtered_signals,
-                    format_reason_counts(&report.filtered_reason_counts)
-                );
-                for filtered in report.filtered_signal_snapshots.iter().take(6) {
-                    println!(
-                        "    filtered_signal ts={} reasons={} stop_dist={:.4}% atr={:.4}% oi_growth={:.4}% funding={:.6} long_short={:.4} taker_sell_buy={:.4}",
-                        filtered.ts,
-                        filtered.reasons.join(","),
-                        filtered.snapshot.stop_distance_pct,
-                        filtered.snapshot.atr_pct,
-                        filtered.snapshot.oi_growth_pct,
-                        filtered.snapshot.funding_rate,
-                        filtered.snapshot.long_short_ratio,
-                        filtered.snapshot.taker_sell_buy_ratio
-                    );
-                }
-            }
-            for trade in &report.trades {
-                println!(
-                    "  trade open={} close={:?} open_price={:.4} close_price={:?} pnl={:.4} close_type={}",
-                    trade.open_time,
-                    trade.close_time,
-                    trade.open_price,
-                    trade.close_price,
-                    trade.pnl,
-                    trade.close_type
-                );
-                if let Some(snapshot) = trade.entry_snapshot {
-                    println!(
-                        "    entry_snapshot stop_dist={:.4}% atr={:.4}% oi_growth={:.4}% funding={:.6} long_short={:.4} taker_sell_buy={:.4}",
-                        snapshot.stop_distance_pct,
-                        snapshot.atr_pct,
-                        snapshot.oi_growth_pct,
-                        snapshot.funding_rate,
-                        snapshot.long_short_ratio,
-                        snapshot.taker_sell_buy_ratio
-                    );
-                }
-                if !trade.entry_reasons.is_empty() {
-                    println!("    entry_reasons={}", trade.entry_reasons.join(","));
-                }
-            }
-        }
-    }
-
-    println!(
-        "combined source=quant_core_sharded entries={total_entries} wins={total_wins} losses={total_losses} win_rate={:.2}% pnl={total_pnl:.4} max_dd={max_drawdown:.2}% days={combo_days:.2} trades_per_day={trades_per_day:.2}",
-        ratio_pct(total_wins, total_wins + total_losses)
-    );
-}
-
-fn format_reason_counts(counts: &[(String, usize)]) -> String {
-    counts
-        .iter()
-        .take(6)
-        .map(|(reason, count)| format!("{reason}:{count}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
 #[cfg(test)]
 #[path = "btc_eth_strategy_family_okx_backtest/tests.rs"]
 mod btc_eth_strategy_family_okx_backtest_tests;
+#[cfg(test)]
+#[path = "btc_eth_strategy_family_okx_backtest/keltner_tests.rs"]
+mod keltner_tests;
