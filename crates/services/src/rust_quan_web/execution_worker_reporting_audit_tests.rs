@@ -31,6 +31,41 @@ fn idle_checkpoint_is_throttled_between_empty_poll_cycles() {
 }
 
 #[tokio::test]
+async fn empty_report_replay_polls_share_idle_checkpoint_throttle() {
+    let repository = Arc::new(CapturingAuditRepository::default());
+    let worker = ExecutionWorker::new(
+        ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "http://127.0.0.1".to_string(),
+            internal_secret: String::new(),
+        })
+        .unwrap(),
+        CryptoExcAllGateway::dry_run(),
+        ExecutionWorkerConfig {
+            worker_id: "idle-replay-worker".to_string(),
+            lease_limit: 1,
+            dry_run: false,
+            default_exchange: ExchangeId::Okx,
+            task_types: vec!["execute_signal".to_string()],
+            task_statuses: vec!["pending_confirmation".to_string()],
+            target_task_ids: Vec::new(),
+            confirmation_mode: false,
+            report_replay_mode: true,
+            report_replay_max_per_run: 1,
+            report_replay_failure_backoff_seconds: 300,
+            report_replay_throttle_ms: 0,
+        },
+    )
+    .with_audit_repository(repository.clone());
+
+    assert_eq!(worker.run_once().await.unwrap(), 0);
+    assert_eq!(worker.run_once().await.unwrap(), 0);
+    let checkpoints = repository.checkpoints.lock().unwrap();
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0].worker_status, "idle");
+    assert_eq!(checkpoints[0].checkpoint_value["report_replay_mode"], true);
+}
+
+#[tokio::test]
 async fn dry_run_worker_records_audit_and_checkpoint_through_repository() {
     let repository = Arc::new(CapturingAuditRepository::default());
     let worker = ExecutionWorker::new(

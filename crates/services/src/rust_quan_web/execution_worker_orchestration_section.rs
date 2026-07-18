@@ -427,15 +427,6 @@ impl ExecutionWorker {
     }
     /// 执行 Web 商业、会员和执行准备度 主流程，并把外部依赖调用、状态推进和错误返回串起来。
     async fn run_confirmation_once(&self) -> Result<usize> {
-        self.record_checkpoint(
-            "leasing_confirmations",
-            None,
-            json!({
-                "lease_limit": self.config.lease_limit,
-                "dry_run": self.config.dry_run,
-            }),
-        )
-        .await;
         let leased = match self
             .client
             .lease_confirmation_tasks(self.config.lease_limit, &[])
@@ -455,6 +446,20 @@ impl ExecutionWorker {
                 return Err(error);
             }
         };
+        if leased.items.is_empty() {
+            if self.should_record_idle_checkpoint() {
+                self.record_checkpoint(
+                    "idle",
+                    None,
+                    json!({
+                        "handled": 0,
+                        "confirmation_mode": true,
+                    }),
+                )
+                .await;
+            }
+            return Ok(0);
+        }
         self.record_checkpoint(
             "confirmations_leased",
             None,
@@ -508,20 +513,6 @@ impl ExecutionWorker {
         let replay_limit = self.config.report_replay_limit();
         let failure_backoff_seconds = self.config.report_replay_failure_backoff_seconds;
         let throttle_ms = self.config.report_replay_throttle_ms;
-        self.record_checkpoint(
-            "leasing_report_replays",
-            None,
-            json!({
-                "lease_limit": self.config.lease_limit,
-                "replay_limit": replay_limit,
-                "report_replay_max_per_run": self.config.report_replay_max_per_run,
-                "failure_backoff_seconds": failure_backoff_seconds,
-                "throttle_ms": throttle_ms,
-                "target_task_ids": self.config.target_task_ids.clone(),
-                "place_order_allowed": false,
-            }),
-        )
-        .await;
         let candidates = self
             .audit_repository
             .list_report_result_replay_candidates(
@@ -531,6 +522,21 @@ impl ExecutionWorker {
             )
             .await?;
         let leased_count = candidates.len();
+        if candidates.is_empty() {
+            if self.should_record_idle_checkpoint() {
+                self.record_checkpoint(
+                    "idle",
+                    None,
+                    json!({
+                        "handled": 0,
+                        "report_replay_mode": true,
+                        "place_order_allowed": false,
+                    }),
+                )
+                .await;
+            }
+            return Ok(0);
+        }
         self.record_checkpoint(
             "report_replays_leased",
             None,
