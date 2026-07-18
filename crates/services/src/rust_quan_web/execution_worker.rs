@@ -59,7 +59,10 @@ use crypto_exc_all::{
     TimeInForce,
 };
 use serde_json::{json, Value};
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 const LIVE_TICKER_MAX_AGE_MS: u64 = 30_000;
@@ -258,6 +261,8 @@ pub struct ExecutionWorker {
     config: ExecutionWorkerConfig,
     /// 审计repository，用于记录交易或执行状态。
     audit_repository: Arc<dyn ExecutionAuditRepository>,
+    /// 空轮询 checkpoint 最近写入时间，避免无任务时持续放大数据库写入。
+    last_idle_checkpoint_at: Mutex<Option<Instant>>,
 }
 impl ExecutionWorker {
     /// 构建 Web 商业、会员和执行准备度 所需实例，并集中初始化依赖和默认状态。
@@ -271,7 +276,25 @@ impl ExecutionWorker {
             gateway,
             config,
             audit_repository: Arc::new(NoopExecutionAuditRepository),
+            last_idle_checkpoint_at: Mutex::new(None),
         }
+    }
+
+    /// 空闲 heartbeat 最多每 30 秒落库一次；任务处理和失败路径仍即时记录。
+    fn should_record_idle_checkpoint(&self) -> bool {
+        const IDLE_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(30);
+        let Ok(mut last_recorded_at) = self.last_idle_checkpoint_at.lock() else {
+            return true;
+        };
+        let now = Instant::now();
+        if last_recorded_at
+            .as_ref()
+            .is_some_and(|last| now.duration_since(*last) < IDLE_CHECKPOINT_INTERVAL)
+        {
+            return false;
+        }
+        *last_recorded_at = Some(now);
+        true
     }
     /// 提供withauditrepository的集中实现，避免Web 商业链路调用方重复处理相同细节。
     pub fn with_audit_repository(

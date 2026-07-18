@@ -51,6 +51,8 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-market-velocity-live-handoff-scheduler:",
         "quant-core-market-velocity-breakdown-short-live-handoff-scheduler:",
         "quant-core-execution-worker:",
+        "quant-core-execution-confirmation-worker:",
+        "quant-core-execution-report-replay-worker:",
     ] {
         assert!(
             compose.contains(service),
@@ -88,7 +90,8 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "MARKET_VELOCITY_LIVE_BUYER_EMAIL: ${MARKET_VELOCITY_LIVE_BUYER_EMAIL:-}",
         "MARKET_VELOCITY_LIVE_COMBO_ID: ${MARKET_VELOCITY_LIVE_COMBO_ID:-}",
         r#"MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE: "false""#,
-        "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS: ${MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS:-60}",
+        "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS: ${MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS:-5}",
+        "MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS: ${MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS:-10000}",
     ] {
         assert!(
             compose.contains(rust_native_entrypoint),
@@ -129,6 +132,8 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-market-velocity-live-handoff-scheduler",
         "quant-core-market-velocity-breakdown-short-live-handoff-scheduler",
         "quant-core-execution-worker",
+        "quant-core-execution-confirmation-worker",
+        "quant-core-execution-report-replay-worker",
     ] {
         let service_block = compose_service_block(&compose, service);
         assert!(
@@ -142,6 +147,27 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "default deployed service `{service}` must join both the Core compose network and the external app network"
         );
     }
+    let execution_worker = compose_service_block(&compose, "quant-core-execution-worker");
+    assert!(
+        execution_worker.contains(
+            "EXECUTION_WORKER_TASK_TYPES: ${EXECUTION_WORKER_TASK_TYPES:-execute_signal,risk_control_close_candidate}"
+        ),
+        "normal execution worker must lease the task type emitted for risk-control closes"
+    );
+    let confirmation_worker =
+        compose_service_block(&compose, "quant-core-execution-confirmation-worker");
+    assert!(
+        confirmation_worker.contains(r#"EXECUTION_WORKER_CONFIRMATION_MODE: "true""#)
+            && confirmation_worker.contains(r#"EXECUTION_WORKER_REPORT_REPLAY_MODE: "false""#),
+        "production must keep a dedicated confirmation worker for pending exchange orders"
+    );
+    let replay_worker =
+        compose_service_block(&compose, "quant-core-execution-report-replay-worker");
+    assert!(
+        replay_worker.contains(r#"EXECUTION_WORKER_CONFIRMATION_MODE: "false""#)
+            && replay_worker.contains(r#"EXECUTION_WORKER_REPORT_REPLAY_MODE: "true""#),
+        "production must keep a dedicated report replay worker for failed Web writebacks"
+    );
     assert!(
         dockerfile.contains(
             "COPY --from=builder /app/rust_quant/bin/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill"
@@ -270,7 +296,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             && production_gate.contains("Web fan-out resolves credentials per subscription"),
         "production gate must keep canary scope explicit and leave credentials to Web fan-out when unscoped"
     );
-    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-market-velocity-breakdown-short-live-handoff-scheduler,quant-core-execution-worker";
+    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-market-velocity-breakdown-short-live-handoff-scheduler,quant-core-execution-worker,quant-core-execution-confirmation-worker,quant-core-execution-report-replay-worker";
     for deploy_script in [&promote, &rollback] {
         assert!(
             deploy_script.contains(default_deploy_services),
@@ -799,7 +825,8 @@ fn market_velocity_breakdown_short_has_isolated_live_handoff_scheduler() {
     );
     for required in [
         r#"MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE: "false""#,
-        "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS: ${MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_HANDOFF_INTERVAL_SECS:-300}",
+        "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS: ${MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_HANDOFF_INTERVAL_SECS:-5}",
+        "MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS: ${MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_HANDOFF_SIGNAL_TTL_MS:-10000}",
         "MARKET_VELOCITY_LIVE_BUYER_EMAIL: ${MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_BUYER_EMAIL:-}",
         "MARKET_VELOCITY_LIVE_COMBO_ID: ${MARKET_VELOCITY_BREAKDOWN_SHORT_LIVE_COMBO_ID:-}",
         "MARKET_VELOCITY_TASK_READINESS_CREDENTIAL_ID: ${MARKET_VELOCITY_BREAKDOWN_SHORT_TASK_READINESS_CREDENTIAL_ID:-}",

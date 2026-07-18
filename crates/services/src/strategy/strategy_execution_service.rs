@@ -182,8 +182,10 @@ impl StrategyExecutionService {
         // 1. 验证配置
         self.validate_config(config)?;
         // 1.1 对账：如果交易所已经通过止损/止盈把仓位关掉，本地先清状态并回补交易桶。
-        self.reconcile_external_flat_close(config, inst_id, period)
-            .await?;
+        if !Self::should_dispatch_strategy_signal_to_quant_web() {
+            self.reconcile_external_flat_close(config, inst_id, period)
+                .await?;
+        }
         // 2. 获取策略实现
         // 必须严格使用配置中的 strategy_type 路由执行器：
         // - detect_strategy 基于参数“猜策略”，在参数为空/通用字段时会误判
@@ -257,6 +259,29 @@ impl StrategyExecutionService {
             );
             return Ok(signal);
         };
+        // Web 分发模式下，持仓和出场任务由 rust_quan_web/执行 worker 按用户凭证管理。
+        // Core 只提交原始开仓信号，不能提前写入本地持仓，也不能走 legacy 直连平仓路径。
+        if Self::should_dispatch_strategy_signal_to_quant_web() {
+            if raw_has_signal {
+                self.execute_order_internal(
+                    inst_id,
+                    period,
+                    &signal,
+                    &risk_config,
+                    config.id,
+                    config.strategy_type.as_str(),
+                    config.exchange.as_deref(),
+                )
+                .await?;
+                info!("✅ {:?} 策略信号已提交 Web 执行链路", config.strategy_type);
+            } else {
+                info!(
+                    "无交易信号，跳过 Web 分发 - 策略类型：{:?}, 交易周期：{}",
+                    config.strategy_type, period
+                );
+            }
+            return Ok(signal);
+        }
         let outcome = self
             .handle_live_decision(
                 inst_id,

@@ -15,6 +15,7 @@ pub(super) async fn load_market_velocity_live_candidate_events(
     event_id: Option<i64>,
     lookback_hours: i64,
     limit: u32,
+    signal_ttl_ms: u64,
     config: &MarketVelocityStrategySignalConfig,
 ) -> Result<Vec<MarketRankEvent>> {
     let rows = sqlx::query(market_velocity_live_candidate_events_sql())
@@ -27,6 +28,7 @@ pub(super) async fn load_market_velocity_live_candidate_events(
         .bind(config.entry_rule_version.trim())
         .bind(event_id)
         .bind(lookback_hours.to_string())
+        .bind(i64::try_from(signal_ttl_ms).unwrap_or(i64::MAX))
         .bind(i64::from(normalize_candidate_limit(i64::from(limit))))
         .fetch_all(pool)
         .await
@@ -96,12 +98,18 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
                   CASE WHEN $5 = 'market_velocity' THEN market_rank_events.live_handoff_state ELSE 'pending' END
                 ) = 'pending'
             AND ($8::bigint IS NULL OR market_rank_events.id = $8)
-            AND ($8::bigint IS NOT NULL OR detected_at >= NOW() - ($9::text || ' hours')::interval)
+            AND (
+                  $8::bigint IS NOT NULL
+                  OR detected_at >= GREATEST(
+                      NOW() - ($9::text || ' hours')::interval,
+                      NOW() - ($10::bigint * INTERVAL '1 millisecond')
+                  )
+                )
         ),
-        earliest_per_symbol AS (
+        latest_per_symbol AS (
           SELECT DISTINCT ON (symbol) *
           FROM eligible_events
-          ORDER BY symbol, detected_at ASC, id ASC
+          ORDER BY symbol, detected_at DESC, id DESC
         )
         SELECT
           id,
@@ -132,9 +140,9 @@ fn market_velocity_live_candidate_events_sql() -> &'static str {
           detected_at,
           source,
           notification_state
-        FROM earliest_per_symbol
-        ORDER BY detected_at ASC, id ASC
-        LIMIT $10
+        FROM latest_per_symbol
+        ORDER BY detected_at DESC, id DESC
+        LIMIT $11
         "#
 }
 /// 提供市场rankeventfrom数据行的集中实现，避免行情数据调用方重复处理相同细节。
@@ -191,23 +199,27 @@ mod tests {
         assert_eq!(normalize_candidate_limit(500), 100);
     }
     #[test]
-    fn candidate_scan_sql_uses_earliest_event_per_symbol_before_limit() {
+    fn candidate_scan_sql_uses_latest_fresh_event_per_symbol_before_limit() {
         let sql = market_velocity_live_candidate_events_sql();
         assert!(
             sql.contains("DISTINCT ON (symbol)"),
             "live candidate scan must not let repeated events from a few symbols fill the limit: {sql}"
         );
         assert!(
-            sql.contains("ORDER BY symbol, detected_at ASC, id ASC"),
-            "earliest generated event per symbol must be selected before global ordering: {sql}"
+            sql.contains("ORDER BY symbol, detected_at DESC, id DESC"),
+            "latest generated event per symbol must be selected before global ordering: {sql}"
         );
         assert!(
-            sql.contains("FROM earliest_per_symbol"),
+            sql.contains("FROM latest_per_symbol"),
             "global live scan should order already deduplicated symbols: {sql}"
         );
         assert!(
-            sql.contains("ORDER BY detected_at ASC, id ASC"),
-            "global handoff must evaluate selected symbols by generated time first: {sql}"
+            sql.contains("ORDER BY detected_at DESC, id DESC"),
+            "global handoff must evaluate freshest selected symbols first: {sql}"
+        );
+        assert!(
+            sql.contains("NOW() - ($10::bigint * INTERVAL '1 millisecond')"),
+            "non-explicit scans must reject expired candidates before candle loading: {sql}"
         );
     }
     #[test]
@@ -294,9 +306,9 @@ mod tests {
     fn candidate_scan_sql_explicit_event_id_bypasses_lookback_window() {
         let sql = market_velocity_live_candidate_events_sql();
         assert!(
-            sql.contains(
-                "AND ($8::bigint IS NOT NULL OR detected_at >= NOW() - ($9::text || ' hours')::interval)"
-            ),
+            sql.contains("$8::bigint IS NOT NULL")
+                && sql.contains("NOW() - ($9::text || ' hours')::interval")
+                && sql.contains("NOW() - ($10::bigint * INTERVAL '1 millisecond')"),
             "manual event replay must not silently disappear because the event is outside the scan lookback: {sql}"
         );
     }

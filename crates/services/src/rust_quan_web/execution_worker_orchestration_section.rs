@@ -11,18 +11,6 @@ impl ExecutionWorker {
         if self.config.confirmation_mode {
             return self.run_confirmation_once().await;
         }
-        self.record_checkpoint(
-            "leasing",
-            None,
-            json!({
-                "lease_limit": self.config.lease_limit,
-                "dry_run": self.config.dry_run,
-                "default_exchange": self.config.default_exchange.as_str(),
-                "task_types": self.config.task_types.clone(),
-                "task_statuses": self.config.task_statuses.clone(),
-            }),
-        )
-        .await;
         // 租约由 Web owner service 发放，Core 只处理拿到租约的任务；这样同一任务不会被多个 worker
         // 并发执行，也能把 task_types/statuses 的筛选规则集中在 Web 的状态机里。
         let leased = match self
@@ -50,6 +38,20 @@ impl ExecutionWorker {
                 return Err(error);
             }
         };
+        if leased.tasks.is_empty() {
+            if self.should_record_idle_checkpoint() {
+                self.record_checkpoint(
+                    "idle",
+                    None,
+                    json!({
+                        "handled": 0,
+                        "dry_run": self.config.dry_run,
+                    }),
+                )
+                .await;
+            }
+            return Ok(0);
+        }
         self.record_checkpoint(
             "leased",
             None,
@@ -59,7 +61,7 @@ impl ExecutionWorker {
             }),
         )
         .await;
-        if !leased.tasks.is_empty() {
+        {
             let leased_task_ids: Vec<i64> = leased.tasks.iter().map(|task| task.id).collect();
             let strategy_signal_ids: Vec<Option<i64>> =
                 leased.tasks.iter().map(|task| task.strategy_signal_id).collect();

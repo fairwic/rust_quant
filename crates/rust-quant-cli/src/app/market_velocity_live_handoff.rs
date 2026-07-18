@@ -42,7 +42,7 @@ pub use handoff::{
 const DEFAULT_OKX_REST_BASE: &str = "https://www.okx.com";
 const DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES: i64 = 45;
 const DEFAULT_ENTRY_CANDLE_REQUEST_SLEEP_MS: u64 = 150;
-const MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS: i64 = 10_000;
+const DEFAULT_MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS: u64 = 10_000;
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketVelocityLiveHandoffConfig {
     /// databaseURL，用于配置运行参数。
@@ -63,6 +63,8 @@ pub struct MarketVelocityLiveHandoffConfig {
     pub lookback_hours: i64,
     /// candidatelimit，用于配置运行参数。
     pub candidate_limit: u32,
+    /// live 信号从检测到提交允许经过的最长毫秒数。
+    pub signal_ttl_ms: u64,
     /// 入场K 线最大staleness 分钟数。
     pub entry_candle_max_staleness_minutes: i64,
     /// 入场K 线ondemandrefresh，用于配置运行参数。
@@ -113,8 +115,10 @@ impl MarketVelocityLiveHandoffConfig {
 /// 返回 Result 以便错误透明上抛、统一降级处理，便于后续重试和观测。
 pub async fn run_market_velocity_live_handoff_runtime_from_env() -> Result<()> {
     let runtime_config = market_velocity_live_handoff_runtime_config_from_env()?;
+    let config = market_velocity_live_handoff_config_from_env()?;
+    let dependencies = MarketVelocityLiveHandoffDependencies::new(&config)?;
     loop {
-        match run_market_velocity_live_handoff_from_env().await {
+        match run_market_velocity_live_handoff_with_dependencies(&config, &dependencies).await {
             Ok(report) => println!("{}", serde_json::to_string_pretty(&report)?),
             Err(error) if !runtime_config.run_once => {
                 eprintln!(
@@ -170,6 +174,11 @@ pub fn market_velocity_live_handoff_config_from_env() -> Result<MarketVelocityLi
             "MARKET_VELOCITY_LIVE_CANDIDATE_LIMIT",
             20,
         )?),
+        signal_ttl_ms: parse_u64_env(
+            "MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS",
+            DEFAULT_MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS,
+        )?
+        .max(1),
         entry_candle_max_staleness_minutes: parse_i64_env(
             "MARKET_VELOCITY_ENTRY_CANDLE_MAX_STALENESS_MINUTES",
             DEFAULT_ENTRY_CANDLE_MAX_STALENESS_MINUTES,
@@ -203,14 +212,23 @@ pub fn market_velocity_live_handoff_runtime_config_from_env(
 fn market_velocity_live_handoff_runtime_config_from_map(
     envs: &BTreeMap<String, String>,
 ) -> Result<MarketVelocityLiveHandoffRuntimeConfig> {
+    let run_once = parse_bool_from_map(envs, "MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE", true)?;
+    let interval_seconds =
+        parse_u64_from_map(envs, "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS", 60)?.max(1);
+    let signal_ttl_ms = parse_u64_from_map(
+        envs,
+        "MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS",
+        DEFAULT_MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS,
+    )?
+    .max(1);
+    if !run_once && interval_seconds.saturating_mul(1_000) > signal_ttl_ms {
+        bail!(
+            "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS ({interval_seconds}s) must not exceed signal TTL ({signal_ttl_ms}ms)"
+        );
+    }
     Ok(MarketVelocityLiveHandoffRuntimeConfig {
-        run_once: parse_bool_from_map(envs, "MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE", true)?,
-        interval_seconds: parse_u64_from_map(
-            envs,
-            "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS",
-            60,
-        )?
-        .max(1),
+        run_once,
+        interval_seconds,
     })
 }
 pub async fn run_market_velocity_live_handoff_from_env() -> Result<Value> {
@@ -220,10 +238,44 @@ pub async fn run_market_velocity_live_handoff_from_env() -> Result<Value> {
 pub async fn run_market_velocity_live_handoff(
     config: MarketVelocityLiveHandoffConfig,
 ) -> Result<Value> {
-    let client = ExecutionTaskClient::new(ExecutionTaskConfig {
-        base_url: config.web_base_url.clone(),
-        internal_secret: config.internal_secret.clone(),
-    })?;
+    let dependencies = MarketVelocityLiveHandoffDependencies::new(&config)?;
+    run_market_velocity_live_handoff_with_dependencies(&config, &dependencies).await
+}
+
+struct MarketVelocityLiveHandoffDependencies {
+    client: ExecutionTaskClient,
+    pool: PgPool,
+    entry_candle_refresh_client: Option<reqwest::Client>,
+}
+
+impl MarketVelocityLiveHandoffDependencies {
+    fn new(config: &MarketVelocityLiveHandoffConfig) -> Result<Self> {
+        let client = ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: config.web_base_url.clone(),
+            internal_secret: config.internal_secret.clone(),
+        })?;
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect_lazy(&config.database_url)
+            .context("configure quant_core database for market velocity live handoff")?;
+        let entry_candle_refresh_client = config
+            .entry_candle_on_demand_refresh
+            .then(|| build_okx_http_client(config.entry_candle_proxy_url.as_deref()))
+            .transpose()?;
+        Ok(Self {
+            client,
+            pool,
+            entry_candle_refresh_client,
+        })
+    }
+}
+
+async fn run_market_velocity_live_handoff_with_dependencies(
+    config: &MarketVelocityLiveHandoffConfig,
+    dependencies: &MarketVelocityLiveHandoffDependencies,
+) -> Result<Value> {
+    let client = &dependencies.client;
+    let pool = &dependencies.pool;
     let owner_scope_configured = config.owner_scope_configured()?;
     let credential_readiness_applies = config.credential_id.is_some() && owner_scope_configured;
     let mut refresh_readiness = json!({
@@ -257,11 +309,6 @@ pub async fn run_market_velocity_live_handoff(
             }
         }
     }
-    let pool = PgPoolOptions::new()
-        .max_connections(2)
-        .connect(&config.database_url)
-        .await
-        .context("connect quant_core database for market velocity live handoff")?;
     let signal_config = load_market_velocity_signal_config_or_env(&pool).await?;
     validate_market_velocity_live_handoff_signal_config(&signal_config)?;
     let candidate_events = load_market_velocity_live_candidate_events(
@@ -269,6 +316,7 @@ pub async fn run_market_velocity_live_handoff(
         config.event_id,
         config.lookback_hours,
         config.candidate_limit,
+        config.signal_ttl_ms,
         &signal_config,
     )
     .await?;
@@ -285,13 +333,7 @@ pub async fn run_market_velocity_live_handoff(
             refresh_readiness,
         ));
     }
-    let entry_candle_refresh_client = if config.entry_candle_on_demand_refresh {
-        Some(build_okx_http_client(
-            config.entry_candle_proxy_url.as_deref(),
-        )?)
-    } else {
-        None
-    };
+    let entry_candle_refresh_client = dependencies.entry_candle_refresh_client.as_ref();
     let mut skipped_candidates = Vec::new();
     let mut selected: Option<(
         MarketRankEvent,
@@ -302,9 +344,30 @@ pub async fn run_market_velocity_live_handoff(
     )> = None;
     let explicit_event_requested = config.event_id.is_some();
     for event in candidate_events {
+        if let Some(blocker_detail) =
+            market_velocity_live_signal_expired_blocker(&event, Utc::now(), config.signal_ttl_ms)
+        {
+            let blocker_code = "market_velocity_live_signal_expired";
+            record_market_velocity_live_handoff_blocker(
+                &pool,
+                &event,
+                &signal_config,
+                blocker_code,
+                &blocker_detail,
+            )
+            .await?;
+            skipped_candidates.push(json!({
+                "event_id": event.id,
+                "symbol": event.symbol,
+                "blocker_code": blocker_code,
+                "blocker_detail": blocker_detail,
+                "entry_candles": null,
+            }));
+            continue;
+        }
         let candle_load = match load_market_velocity_live_entry_candles(
             &pool,
-            entry_candle_refresh_client.as_ref(),
+            entry_candle_refresh_client,
             &config,
             &event.symbol,
             signal_config.entry_confirmation_fetch_limit,
@@ -488,7 +551,7 @@ pub async fn run_market_velocity_live_handoff(
             }
         };
         if let Some(blocker_detail) =
-            market_velocity_live_signal_expired_blocker(&event, Utc::now())
+            market_velocity_live_signal_expired_blocker(&event, Utc::now(), config.signal_ttl_ms)
         {
             let blocker_code = "market_velocity_live_signal_expired";
             record_market_velocity_live_handoff_blocker(
@@ -886,13 +949,14 @@ fn market_velocity_entry_confirmation_age_minutes(
 fn market_velocity_live_signal_expired_blocker(
     event: &MarketRankEvent,
     now: DateTime<Utc>,
+    signal_ttl_ms: u64,
 ) -> Option<String> {
     let age_ms = now
         .signed_duration_since(event.detected_at)
         .num_milliseconds()
         .max(0);
-    (age_ms > MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS)
-        .then(|| format!("SignalExpired:{age_ms}ms>{MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS}ms"))
+    let signal_ttl_ms = i64::try_from(signal_ttl_ms).unwrap_or(i64::MAX);
+    (age_ms > signal_ttl_ms).then(|| format!("SignalExpired:{age_ms}ms>{signal_ttl_ms}ms"))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1210,6 +1274,7 @@ mod tests {
             event_id: None,
             lookback_hours: 24,
             candidate_limit: 20,
+            signal_ttl_ms: DEFAULT_MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS,
             entry_candle_max_staleness_minutes: 45,
             entry_candle_on_demand_refresh: true,
             entry_candle_okx_rest_base: DEFAULT_OKX_REST_BASE.to_string(),
@@ -1495,13 +1560,29 @@ mod tests {
             ),
             (
                 "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS".to_string(),
-                "30".to_string(),
+                "5".to_string(),
             ),
         ]);
         let config =
             market_velocity_live_handoff_runtime_config_from_map(&envs).expect("runtime config");
         assert!(!config.run_once);
-        assert_eq!(config.interval_seconds, 30);
+        assert_eq!(config.interval_seconds, 5);
+    }
+    #[test]
+    fn live_handoff_runtime_rejects_interval_longer_than_signal_ttl() {
+        let envs = BTreeMap::from([
+            (
+                "MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS".to_string(),
+                "60".to_string(),
+            ),
+        ]);
+        let error = market_velocity_live_handoff_runtime_config_from_map(&envs)
+            .expect_err("scheduler slower than TTL must fail fast");
+        assert!(error.to_string().contains("must not exceed signal TTL"));
     }
     #[test]
     fn entry_confirmation_freshness_blocks_stale_live_candles() {
@@ -1526,14 +1607,16 @@ mod tests {
         assert_eq!(
             market_velocity_live_signal_expired_blocker(
                 &event,
-                detected_at + chrono::Duration::seconds(10)
+                detected_at + chrono::Duration::seconds(10),
+                10_000,
             ),
             None
         );
         assert_eq!(
             market_velocity_live_signal_expired_blocker(
                 &event,
-                detected_at + chrono::Duration::milliseconds(10_001)
+                detected_at + chrono::Duration::milliseconds(10_001),
+                10_000,
             )
             .as_deref(),
             Some("SignalExpired:10001ms>10000ms")

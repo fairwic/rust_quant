@@ -9,7 +9,7 @@ use rust_quant_domain::entities::{
 use rust_quant_domain::traits::fund_monitoring_repository::{
     FundFlowAlertRepository, MarketAnomalyRepository,
 };
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 pub struct SqlxMarketAnomalyRepository {
     /// 数据库连接池。
     pool: PgPool,
@@ -375,26 +375,27 @@ impl MarketAnomalyRepository for SqlxMarketAnomalyRepository {
             return Ok(());
         }
         let mut tx = self.pool.begin().await?;
-        for snapshot in snapshots {
-            sqlx::query(
-                r#"
-                INSERT INTO market_rank_snapshots
-                    (exchange, symbol, rank, price, volume_24h_quote, captured_at)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (exchange, symbol, captured_at) DO UPDATE SET
-                    rank = EXCLUDED.rank,
-                    price = EXCLUDED.price,
-                    volume_24h_quote = EXCLUDED.volume_24h_quote
-                "#,
-            )
-            .bind(&snapshot.exchange)
-            .bind(&snapshot.symbol)
-            .bind(snapshot.rank)
-            .bind(snapshot.price)
-            .bind(snapshot.volume_24h_quote)
-            .bind(snapshot.captured_at)
-            .execute(&mut *tx)
-            .await?;
+        // PostgreSQL 单条语句最多 65,535 个 bind；每行 6 个参数，5,000 行一批留足余量。
+        for chunk in snapshots.chunks(5_000) {
+            let mut query = QueryBuilder::<Postgres>::new(
+                "INSERT INTO market_rank_snapshots \
+                 (exchange, symbol, rank, price, volume_24h_quote, captured_at) ",
+            );
+            query.push_values(chunk, |mut row, snapshot| {
+                row.push_bind(&snapshot.exchange)
+                    .push_bind(&snapshot.symbol)
+                    .push_bind(snapshot.rank)
+                    .push_bind(snapshot.price)
+                    .push_bind(snapshot.volume_24h_quote)
+                    .push_bind(snapshot.captured_at);
+            });
+            query.push(
+                " ON CONFLICT (exchange, symbol, captured_at) DO UPDATE SET \
+                  rank = EXCLUDED.rank, \
+                  price = EXCLUDED.price, \
+                  volume_24h_quote = EXCLUDED.volume_24h_quote",
+            );
+            query.build().execute(&mut *tx).await?;
         }
         tx.commit().await?;
         Ok(())

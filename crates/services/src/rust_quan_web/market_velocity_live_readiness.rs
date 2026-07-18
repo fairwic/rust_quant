@@ -130,7 +130,7 @@ pub fn build_market_velocity_scoped_execution_worker_env(task_id: i64) -> Value 
         "IS_RUN_EXECUTION_WORKER": "true",
         "EXECUTION_WORKER_ONLY": "true",
         "EXECUTION_WORKER_RUN_ONCE": "false",
-        "EXECUTION_WORKER_TASK_TYPES": "execute_signal,close_position",
+        "EXECUTION_WORKER_TASK_TYPES": "execute_signal,risk_control_close_candidate",
         "EXECUTION_WORKER_TASK_STATUSES": "pending,pending_close"
     })
 }
@@ -349,7 +349,7 @@ mod tests {
         assert_eq!(env["EXECUTION_WORKER_RUN_ONCE"], "false");
         assert_eq!(
             env["EXECUTION_WORKER_TASK_TYPES"],
-            "execute_signal,close_position"
+            "execute_signal,risk_control_close_candidate"
         );
         assert_eq!(
             env["EXECUTION_WORKER_TASK_STATUSES"],

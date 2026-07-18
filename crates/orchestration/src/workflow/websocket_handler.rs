@@ -39,67 +39,63 @@ impl WebsocketStrategyHandler {
             "🎯 K线确认触发策略检查: inst_id={}, time_interval={}, ts={}",
             inst_id, time_interval, candle_ts
         );
-        // 异步执行策略检查，避免阻塞 WebSocket 线程
-        tokio::spawn(async move {
-            // 解析时间周期
-            let timeframe = match Timeframe::from_str(&time_interval) {
-                Ok(tf) => tf,
-                Err(_) => {
-                    error!("❌ 无效的时间周期: {}", time_interval);
-                    return;
-                }
-            };
-            // 查询该交易对和时间周期的所有启用策略
-            let configs = match config_service
-                .load_configs(&inst_id, &time_interval, None)
-                .await
-            {
-                Ok(configs) => configs,
-                Err(e) => {
-                    error!(
-                        "❌ 加载策略配置失败: inst_id={}, time_interval={}, error={}",
-                        inst_id, time_interval, e
-                    );
-                    return;
-                }
-            };
-            let configs = filter_configs_for_market_exchange(configs, market_exchange.as_deref());
-            if configs.is_empty() {
-                info!(
-                    "⚠️  未找到启用的策略配置: inst_id={}, time_interval={}",
-                    inst_id, time_interval
+        // 调用方已经把该回调派发到独立任务，这里直接执行，避免每根 K 线重复 spawn。
+        let timeframe = match Timeframe::from_str(&time_interval) {
+            Ok(tf) => tf,
+            Err(_) => {
+                error!("❌ 无效的时间周期: {}", time_interval);
+                return;
+            }
+        };
+        // 查询该交易对和时间周期的所有启用策略
+        let configs = match config_service
+            .load_configs(&inst_id, &time_interval, None)
+            .await
+        {
+            Ok(configs) => configs,
+            Err(e) => {
+                error!(
+                    "❌ 加载策略配置失败: inst_id={}, time_interval={}, error={}",
+                    inst_id, time_interval, e
                 );
                 return;
             }
-            info!("✅ 找到 {} 个策略配置，开始执行", configs.len());
-            // 执行每个策略
-            for config in configs {
-                let strategy_type = config.strategy_type;
-                let config_id = config.id;
-                if let Err(e) = strategy_runner::execute_strategy(
-                    &inst_id,
-                    timeframe,
-                    strategy_type,
-                    Some(config_id),
-                    None,
-                    Some(snap.clone()),
-                    &config_service,
-                    &execution_service,
-                )
-                .await
-                {
-                    error!(
-                        "❌ 策略执行失败: inst_id={}, time_interval={}, strategy={:?}, error={}",
-                        inst_id, time_interval, strategy_type, e
-                    );
-                } else {
-                    info!(
-                        "✅ 策略执行完成: inst_id={}, time_interval={}, strategy={:?}",
-                        inst_id, time_interval, strategy_type
-                    );
-                }
+        };
+        let configs = filter_configs_for_market_exchange(configs, market_exchange.as_deref());
+        if configs.is_empty() {
+            info!(
+                "⚠️  未找到启用的策略配置: inst_id={}, time_interval={}",
+                inst_id, time_interval
+            );
+            return;
+        }
+        info!("✅ 找到 {} 个策略配置，开始执行", configs.len());
+        for config in configs {
+            let strategy_type = config.strategy_type;
+            let config_id = config.id;
+            if let Err(e) = strategy_runner::execute_strategy(
+                &inst_id,
+                timeframe,
+                strategy_type,
+                Some(config_id),
+                None,
+                Some(snap.clone()),
+                &config_service,
+                &execution_service,
+            )
+            .await
+            {
+                error!(
+                    "❌ 策略执行失败: inst_id={}, time_interval={}, strategy={:?}, error={}",
+                    inst_id, time_interval, strategy_type, e
+                );
+            } else {
+                info!(
+                    "✅ 策略执行完成: inst_id={}, time_interval={}, strategy={:?}",
+                    inst_id, time_interval, strategy_type
+                );
             }
-        });
+        }
     }
 }
 

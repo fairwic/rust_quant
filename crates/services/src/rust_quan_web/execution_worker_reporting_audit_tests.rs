@@ -1,3 +1,35 @@
+#[test]
+fn idle_checkpoint_is_throttled_between_empty_poll_cycles() {
+    let worker = ExecutionWorker::new(
+        ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url: "http://127.0.0.1".to_string(),
+            internal_secret: String::new(),
+        })
+        .unwrap(),
+        CryptoExcAllGateway::dry_run(),
+        ExecutionWorkerConfig {
+            worker_id: "idle-worker".to_string(),
+            lease_limit: 1,
+            dry_run: true,
+            default_exchange: ExchangeId::Okx,
+            task_types: vec!["execute_signal".to_string()],
+            task_statuses: vec!["pending".to_string()],
+            target_task_ids: Vec::new(),
+            confirmation_mode: false,
+            report_replay_mode: false,
+            report_replay_max_per_run: 1,
+            report_replay_failure_backoff_seconds: 300,
+            report_replay_throttle_ms: 0,
+        },
+    );
+
+    assert!(worker.should_record_idle_checkpoint());
+    assert!(!worker.should_record_idle_checkpoint());
+    *worker.last_idle_checkpoint_at.lock().unwrap() =
+        Some(Instant::now() - Duration::from_secs(31));
+    assert!(worker.should_record_idle_checkpoint());
+}
+
 #[tokio::test]
 async fn dry_run_worker_records_audit_and_checkpoint_through_repository() {
     let repository = Arc::new(CapturingAuditRepository::default());
