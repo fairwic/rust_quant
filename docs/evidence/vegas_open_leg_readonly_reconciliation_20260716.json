@@ -1,0 +1,57 @@
+{
+  "validation_id": "prod-vegas-open-leg-readonly-reconciliation-20260715",
+  "evaluated_at_utc": "2026-07-16T06:10:42Z",
+  "status": "failed_before_exchange_probe",
+  "failure_code": "mutation_safe_execution_path_unavailable",
+  "target": {
+    "strategy": "vegas",
+    "task_id": 68,
+    "combo_id": 2,
+    "exchange": "OKX",
+    "symbol": "ETH-USDT-SWAP",
+    "historical_web_position": {
+      "side": "long",
+      "quantity": "0.02",
+      "status": "active",
+      "protection_status": "confirmed"
+    }
+  },
+  "production_core": {
+    "revision": "d502eca668a84c4e1b8efb38fdb131234c3c5ba6",
+    "credential_resolution_requires_internal_secret": true,
+    "reconciliation_report_flag_controls_account_snapshot_writeback": false,
+    "account_snapshot_writeback_trigger": "non_empty_internal_secret",
+    "account_snapshot_endpoint": "/api/commerce/internal/exchange-account-snapshots"
+  },
+  "preregistered_safety_boundary": {
+    "signed_read_only_only": true,
+    "web_writeback_allowed": false,
+    "production_restart_allowed": false,
+    "production_config_change_allowed": false,
+    "required_mutation_count": 0
+  },
+  "execution_counts": {
+    "reconciliation_process_started": 0,
+    "signed_exchange_requests": 0,
+    "web_write_requests": 0,
+    "task_mutations": 0,
+    "order_mutations": 0,
+    "position_mutations": 0,
+    "production_restarts": 0,
+    "production_config_changes": 0,
+    "total_mutations": 0
+  },
+  "current_exchange_facts": {
+    "position": null,
+    "open_orders": null,
+    "recent_fills": null,
+    "protective_order": null,
+    "reason": "No signed exchange request was made because the deployed entry cannot meet the zero-write boundary."
+  },
+  "decision": {
+    "action": "stop_without_probe",
+    "rerun_allowed_under_current_contract": false,
+    "side_path_allowed": false,
+    "code_change_or_deploy_authorized_by_this_validation": false
+  }
+}

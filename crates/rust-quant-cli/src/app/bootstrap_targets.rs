@@ -30,21 +30,22 @@ fn should_exit_after_market_velocity_live_readiness_from_map(
 fn default_backtest_targets() -> Vec<(String, String)> {
     vec![
         // ("ETH-USDT-SWAP".to_string(), "15m".to_string()),
-        ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
-        // ("ETH-USDT-SWAP".to_string(), "1H".to_string()),
+        // ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
+        ("ETH-USDT-SWAP".to_string(), "1H".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "5m".to_string()),
         // ("ETH-USDT-SWAP".to_string(), "1Dutc".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "5m".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "15m".to_string()),
-        // ("BTC-USDT-SWAP".to_string(), "1H".to_string()),
-        ("BTC-USDT-SWAP".to_string(), "4H".to_string()),
+        ("BTC-USDT-SWAP".to_string(), "1H".to_string()),
+        // ("BTC-USDT-SWAP".to_string(), "4H".to_string()),
         // ("BTC-USDT-SWAP".to_string(), "1Dutc".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "5m".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "15m".to_string()),
-        // ("SOL-USDT-SWAP".to_string(), "1H".to_string()),
-        ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
+        ("SOL-USDT-SWAP".to_string(), "1H".to_string()),
+        // ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
         // ("SOL-USDT-SWAP".to_string(), "1Dutc".to_string()),
-        ("BCH-USDT-SWAP".to_string(), "4H".to_string()),
+        ("BCH-USDT-SWAP".to_string(), "1H".to_string()),
+        // ("BCH-USDT-SWAP".to_string(), "4H".to_string()),
     ]
 }
 /// 提供override周期fromCSV的集中实现，避免配置运行时调用方重复处理相同细节。

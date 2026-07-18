@@ -212,7 +212,7 @@ where
     /// 接收 tracing 事件并按级别写入自定义统计或通知队列。
     fn on_event(&self, event: &Event, _: tracing_subscriber::layer::Context<S>) {
         let level = *event.metadata().level();
-        if level == Level::ERROR {
+        if level == Level::ERROR && env::var("APP_ENV").unwrap() == "prod" {
             let event_message = format!("{:?}", event);
             // 使用优化的邮件发送器
             tokio::spawn(async move {

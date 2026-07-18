@@ -1,6 +1,33 @@
 use super::*;
 use std::collections::HashMap;
 #[test]
+fn framework_equity_report_replays_raw_event_at_next_15m_candle() {
+    let mut candles = (0..505)
+        .map(|index| ohlc(MS_15M * index, 100.0, 101.0, 99.0, 100.0))
+        .collect::<Vec<_>>();
+    candles.push(ohlc(MS_15M * 505, 100.0, 101.0, 99.0, 100.0));
+    candles.push(ohlc(MS_15M * 506, 106.0, 106.5, 105.0, 106.0));
+    let entry_ts = MS_15M * 504 + MS_15M / 2;
+    let confirmed = vec![confirmed_event(
+        1,
+        "RAW-EVENT-USDT-SWAP",
+        entry_ts,
+        "2026-06-01T00:07:30Z",
+    )];
+    let candles_by_symbol = HashMap::from([("RAW-EVENT-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 1,
+        stop_loss_pct: 0.03,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let report = build_framework_equity_report(&confirmed, &candles_by_symbol, 2.0, &args);
+
+    assert_eq!(report.total_open_trades, 1);
+    assert_eq!(report.win_rate, Some(100.0));
+    assert!(report.total_profit > 5.0);
+}
+#[test]
 fn framework_equity_split_report_splits_by_entry_time() {
     fn winning_candles(entry_ts: i64) -> Vec<BacktestCandle> {
         let mut candles = Vec::new();

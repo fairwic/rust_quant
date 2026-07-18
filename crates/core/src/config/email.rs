@@ -26,7 +26,8 @@ pub async fn send_email(title: &str, body: String) {
 /// 带配置的邮件发送函数
 pub async fn send_email_with_config(title: &str, body: String, config: EmailConfig) {
     let title = title.to_string(); // 转换为 owned String
-                                   // 在独立的阻塞任务中执行邮件发送，避免阻塞异步运行时
+
+    // 在独立的阻塞任务中执行邮件发送，避免阻塞异步运行时
     let result =
         tokio::task::spawn_blocking(move || send_email_blocking(&title, body, config)).await;
     match result {

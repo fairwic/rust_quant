@@ -15,8 +15,9 @@ use rust_quant_strategies::framework::backtest::{
 use rust_quant_strategies::CandleItem;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
+mod replay_candles;
+use replay_candles::{framework_replay_candle_items, replay_entry_candle_ts};
 const INITIAL_FUND_PER_SYMBOL: f64 = 100.0;
-const FRAMEWORK_SIGNAL_WARMUP_CANDLES: usize = 500;
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquityReport {
     /// targetr，用于展示或持久化查询结果。
@@ -336,6 +337,7 @@ pub fn build_framework_equity_report(
                 .filter(|event| event.event.symbol == symbol)
                 .cloned()
                 .collect(),
+            candles,
             args,
             target_r,
             args.profit_protect_after_r,
@@ -661,6 +663,7 @@ pub fn build_framework_equity_trade_reports(
                 .filter(|event| event.event.symbol == symbol)
                 .cloned()
                 .collect(),
+            candles,
             args,
             target_r,
             args.profit_protect_after_r,
@@ -1667,6 +1670,7 @@ impl MarketVelocityReplayStrategy {
     /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
     fn new(
         events: Vec<ConfirmedEvent>,
+        candles: &[BacktestCandle],
         args: &MarketVelocityEventBacktestArgs,
         target_r: f64,
         profit_protect_after_r: Option<f64>,
@@ -1676,10 +1680,10 @@ impl MarketVelocityReplayStrategy {
     ) -> Self {
         let entries_by_ts = events
             .into_iter()
-            .map(|event| {
+            .filter_map(|event| {
                 let selected_stop_loss = select_stop_loss_for_confirmed_signal(&event, args);
-                (
-                    event.entry_ts,
+                Some((
+                    replay_entry_candle_ts(candles, event.entry_ts)?,
                     ReplayEntry {
                         entry_price: event.entry_price,
                         event_id: event.event.id,
@@ -1689,7 +1693,7 @@ impl MarketVelocityReplayStrategy {
                         stop_loss_price: selected_stop_loss.price,
                         stop_loss_source: selected_stop_loss.source,
                     },
-                )
+                ))
             })
             .collect();
         Self {
@@ -1969,43 +1973,4 @@ impl IndicatorStrategyBacktest for MarketVelocityReplayStrategy {
             ..SignalResult::default()
         }
     }
-}
-/// 将内部模型转换为输出结构，避免 回测与策略研究 的内部字段直接外泄。
-fn to_candle_item(candle: &BacktestCandle) -> CandleItem {
-    CandleItem {
-        o: candle.open,
-        h: candle.high,
-        l: candle.low,
-        c: candle.close,
-        v: candle.volume,
-        ts: candle.ts,
-        confirm: 1,
-    }
-}
-fn framework_replay_candle_items(candles: &[BacktestCandle]) -> Vec<CandleItem> {
-    let Some(first) = candles.first() else {
-        return Vec::new();
-    };
-    let interval_ms = candles
-        .get(1)
-        .map(|second| second.ts - first.ts)
-        .filter(|interval| *interval > 0)
-        .unwrap_or(super::MS_15M);
-    let mut items = Vec::with_capacity(candles.len() + FRAMEWORK_SIGNAL_WARMUP_CANDLES);
-    for offset in (1..=FRAMEWORK_SIGNAL_WARMUP_CANDLES).rev() {
-        let ts = first
-            .ts
-            .saturating_sub(interval_ms.saturating_mul(offset as i64));
-        items.push(CandleItem {
-            o: first.open,
-            h: first.open,
-            l: first.open,
-            c: first.open,
-            v: 0.0,
-            ts,
-            confirm: 1,
-        });
-    }
-    items.extend(candles.iter().map(to_candle_item));
-    items
 }
