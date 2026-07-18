@@ -410,8 +410,22 @@ pub struct EntryBlockConfig {
     pub block_ema_distance_short: bool,
     /// ETH 4H id102：做多打入上方 bearish FVG 压力区但未收复时拦截
     pub block_bearish_fvg_pressure_long: bool,
-    /// ETH 4H id102：布林方向缺少入场支持时拦截多空追单
+    /// 布林方向缺少入场支持时拦截多空追单
     pub block_weak_bollinger_context_entry: bool,
+    /// 仅拦截布林方向缺少支持的做多信号
+    pub block_weak_bollinger_context_long: bool,
+    /// 仅拦截布林方向缺少支持的做空信号
+    pub block_weak_bollinger_context_short: bool,
+    /// 启用弱布林过滤所需的最小 ATR/收盘价；0 表示不限制波动
+    pub weak_bollinger_min_atr_ratio: f64,
+    /// 普通距离、牛腿但缺少布林和成交量确认时拦截做多
+    pub block_normal_bull_leg_no_confirm_long: bool,
+    /// 深负 MACD 环境下的弱锤子线做多拦截
+    pub block_deep_negative_hammer_long: bool,
+    /// 零轴上方、无趋势且缩量的上吊线做空拦截
+    pub block_above_zero_low_volume_no_trend_hanging_short: bool,
+    /// 多头趋势深回调但缺少做空结构确认时拦截做空
+    pub block_long_trend_pullback_short: bool,
 }
 impl Default for EntryBlockConfig {
     /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
@@ -429,6 +443,13 @@ impl Default for EntryBlockConfig {
             block_ema_distance_short: true,
             block_bearish_fvg_pressure_long: false,
             block_weak_bollinger_context_entry: false,
+            block_weak_bollinger_context_long: false,
+            block_weak_bollinger_context_short: false,
+            weak_bollinger_min_atr_ratio: 0.0,
+            block_normal_bull_leg_no_confirm_long: false,
+            block_deep_negative_hammer_long: false,
+            block_above_zero_low_volume_no_trend_hanging_short: false,
+            block_long_trend_pullback_short: false,
         }
     }
 }
@@ -481,6 +502,13 @@ mod tests {
         assert!(!config.block_short_inside_low_volume_node_entry);
         assert!(!config.block_bearish_fvg_pressure_long);
         assert!(!config.block_weak_bollinger_context_entry);
+        assert!(!config.block_weak_bollinger_context_long);
+        assert!(!config.block_weak_bollinger_context_short);
+        assert_eq!(config.weak_bollinger_min_atr_ratio, 0.0);
+        assert!(!config.block_normal_bull_leg_no_confirm_long);
+        assert!(!config.block_deep_negative_hammer_long);
+        assert!(!config.block_above_zero_low_volume_no_trend_hanging_short);
+        assert!(!config.block_long_trend_pullback_short);
         assert!(config.block_weak_ema_trend_entry);
     }
     #[test]
@@ -494,7 +522,14 @@ mod tests {
             "block_low_volume_above_value_area_entry": true,
             "block_short_inside_low_volume_node_entry": true,
             "block_bearish_fvg_pressure_long": true,
-            "block_weak_bollinger_context_entry": true
+            "block_weak_bollinger_context_entry": true,
+            "block_weak_bollinger_context_long": true,
+            "block_weak_bollinger_context_short": true,
+            "weak_bollinger_min_atr_ratio": 0.02,
+            "block_normal_bull_leg_no_confirm_long": true,
+            "block_deep_negative_hammer_long": true,
+            "block_above_zero_low_volume_no_trend_hanging_short": true,
+            "block_long_trend_pullback_short": true
         }))
         .expect("entry block config should deserialize");
         assert!(!config.block_ema_distance_short);
@@ -506,6 +541,13 @@ mod tests {
         assert!(config.block_short_inside_low_volume_node_entry);
         assert!(config.block_bearish_fvg_pressure_long);
         assert!(config.block_weak_bollinger_context_entry);
+        assert!(config.block_weak_bollinger_context_long);
+        assert!(config.block_weak_bollinger_context_short);
+        assert_eq!(config.weak_bollinger_min_atr_ratio, 0.02);
+        assert!(config.block_normal_bull_leg_no_confirm_long);
+        assert!(config.block_deep_negative_hammer_long);
+        assert!(config.block_above_zero_low_volume_no_trend_hanging_short);
+        assert!(config.block_long_trend_pullback_short);
         assert!(config.block_too_far_outside_fib_short);
         assert!(config.block_conflicting_too_far_new_bear_leg_short);
         assert!(config.block_weak_ema_trend_entry);

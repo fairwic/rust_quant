@@ -384,6 +384,32 @@ mod tests {
     }
 
     #[test]
+    fn repair_long_ignores_later_signal_kline_stop_updates() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            is_used_signal_k_line_stop_loss: Some(true),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Long);
+        entry.stop_loss_source = Some("RepairLong_NoSignalKline".to_string());
+
+        open_long_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let mut later_signal = signal(2, 105.0, SignalDirection::Long);
+        later_signal.signal_kline_stop_loss_price = Some(103.0);
+        later_signal.stop_loss_source = Some("Engulfing_Volume_Confirmed".to_string());
+        let position = state.trade_position.as_mut().expect("position should open");
+        set_long_stop_close_price(risk, &later_signal, position);
+
+        assert_eq!(position.signal_kline_stop_close_price, None);
+        assert_eq!(
+            position.stop_loss_source.as_deref(),
+            Some("RepairLong_NoSignalKline")
+        );
+        assert!(position.stop_loss_updates.is_empty());
+    }
+
+    #[test]
     fn open_short_position_allows_fractional_position_leverage() {
         let mut state = TradingState::default();
         let risk = BasicRiskStrategyConfig {

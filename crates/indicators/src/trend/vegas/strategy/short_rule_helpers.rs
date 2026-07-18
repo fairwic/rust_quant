@@ -712,9 +712,10 @@ impl VegasStrategy {
     /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_above_zero_low_volume_no_trend_hanging_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+        config_enabled: bool,
     ) -> bool {
         let mode = env_string("VEGAS_ABOVE_ZERO_LOW_VOLUME_NO_TREND_HANGING_SHORT_BLOCK")
-            .unwrap_or_else(|| "off".to_string());
+            .unwrap_or_else(|| if config_enabled { "v1" } else { "off" }.to_string());
         if mode == "off" {
             return false;
         }
@@ -755,9 +756,10 @@ impl VegasStrategy {
     /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_long_trend_pullback_short(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+        config_enabled: bool,
     ) -> bool {
         let mode = env_string("VEGAS_LONG_TREND_PULLBACK_SHORT_BLOCK")
-            .unwrap_or_else(|| "off".to_string());
+            .unwrap_or_else(|| if config_enabled { "v1" } else { "off" }.to_string());
         if mode == "off" {
             return false;
         }

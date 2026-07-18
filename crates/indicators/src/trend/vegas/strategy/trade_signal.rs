@@ -530,7 +530,8 @@ impl VegasStrategy {
                         }
                     }
                     // 3. 最后检查锤子线形态 + 成交量确认(如果还没有设置止损)
-                    if signal_result.signal_kline_stop_loss_price.is_none()
+                    if !is_repair_long
+                        && signal_result.signal_kline_stop_loss_price.is_none()
                         && vegas_indicator_signal_values
                             .kline_hammer_value
                             .is_long_signal

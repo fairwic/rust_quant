@@ -99,6 +99,9 @@ fn env_string(name: &str) -> Option<String> {
         Some(trimmed)
     }
 }
+fn env_f64(name: &str) -> Option<f64> {
+    std::env::var(name).ok()?.trim().parse().ok()
+}
 /// 计算 回测与策略研究 指标，保持公式和边界处理集中可审计。
 fn compute_stc_pair(data_items: &[CandleItem]) -> Option<(f64, f64)> {
     if data_items.len() < 60 {

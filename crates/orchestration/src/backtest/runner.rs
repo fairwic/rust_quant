@@ -8,7 +8,7 @@ use crate::workflow::strategy_config::{
     BackTestConfig,
 };
 use anyhow::{anyhow, Result};
-use rust_quant_core::database::get_db_pool;
+use rust_quant_core::{config::env_is_true, database::get_db_pool};
 use rust_quant_infrastructure::repositories::{
     PostgresStrategyConfigRepository, SqlxAuditRepository, SqlxBacktestRepository,
     SqlxCandleRepository,
@@ -39,10 +39,16 @@ impl BacktestRunner {
     pub fn new() -> Result<Self> {
         let pool = get_db_pool().clone();
         let backtest_repo = SqlxBacktestRepository::new(pool.clone());
-        let audit_repo = SqlxAuditRepository::new(pool.clone());
+        let audit_repository = if env_is_true("BACKTEST_FAST_MODE", false) {
+            info!("⚡ 回测快速迭代模式已启用：跳过逐 K 线审计日志持久化");
+            None
+        } else {
+            Some(Box::new(SqlxAuditRepository::new(pool.clone()))
+                as Box<dyn rust_quant_domain::traits::AuditLogRepository>)
+        };
         let backtest_service = Arc::new(BacktestService::new(
             Box::new(backtest_repo),
-            Some(Box::new(audit_repo)),
+            audit_repository,
         ));
         let candle_repo = SqlxCandleRepository::new(pool.clone());
         let candle_service = Arc::new(CandleService::new(Box::new(candle_repo)));

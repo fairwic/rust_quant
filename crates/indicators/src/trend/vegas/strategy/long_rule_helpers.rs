@@ -409,9 +409,10 @@ impl VegasStrategy {
     /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_normal_bull_leg_no_confirm_long(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+        config_enabled: bool,
     ) -> bool {
         let mode = env_string("VEGAS_NORMAL_BULL_LEG_NO_CONFIRM_LONG_BLOCK")
-            .unwrap_or_else(|| "off".to_string());
+            .unwrap_or_else(|| if config_enabled { "v1" } else { "off" }.to_string());
         if mode == "off" {
             return false;
         }
@@ -745,9 +746,10 @@ impl VegasStrategy {
     /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
     fn should_block_deep_negative_hammer_long(
         vegas_indicator_signal_values: &VegasIndicatorSignalValue,
+        config_enabled: bool,
     ) -> bool {
         let mode = env_string("VEGAS_DEEP_NEGATIVE_HAMMER_LONG_BLOCK")
-            .unwrap_or_else(|| "off".to_string());
+            .unwrap_or_else(|| if config_enabled { "v1" } else { "off" }.to_string());
         if mode == "off" {
             return false;
         }

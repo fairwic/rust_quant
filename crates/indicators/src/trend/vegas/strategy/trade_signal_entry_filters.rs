@@ -1,4 +1,26 @@
 impl VegasStrategy {
+    fn weak_bollinger_volatility_allows_filter(&self, data_items: &[CandleItem]) -> bool {
+        let min_atr_ratio = env_f64("VEGAS_WEAK_BOLLINGER_MIN_ATR_RATIO")
+            .unwrap_or(self.entry_block_config.weak_bollinger_min_atr_ratio)
+            .max(0.0);
+        if min_atr_ratio == 0.0 {
+            return true;
+        }
+
+        let Some(last) = data_items.last() else {
+            return false;
+        };
+        if last.c <= 0.0 {
+            return false;
+        }
+
+        let mut atr = ATR::new(14).expect("ATR period is fixed and valid");
+        for item in data_items.iter().rev().take(15).rev() {
+            atr.next(item.h, item.l, item.c);
+        }
+        atr.value() / last.c >= min_atr_ratio
+    }
+
     /// 执行应用post信号entryfilters步骤，串起回测策略需要的状态推进和错误处理。
     fn apply_post_signal_entry_filters(
         &self,
@@ -606,6 +628,8 @@ impl VegasStrategy {
         if signal_result.should_sell.unwrap_or(false)
             && Self::should_block_above_zero_low_volume_no_trend_hanging_short(
                 vegas_indicator_signal_values,
+                self.entry_block_config
+                    .block_above_zero_low_volume_no_trend_hanging_short,
             )
         {
             signal_result.should_sell = Some(false);
@@ -614,7 +638,10 @@ impl VegasStrategy {
                 .push("ABOVE_ZERO_LOW_VOLUME_NO_TREND_HANGING_SHORT_BLOCK".to_string());
         }
         if signal_result.should_sell.unwrap_or(false)
-            && Self::should_block_long_trend_pullback_short(vegas_indicator_signal_values)
+            && Self::should_block_long_trend_pullback_short(
+                vegas_indicator_signal_values,
+                self.entry_block_config.block_long_trend_pullback_short,
+            )
         {
             signal_result.should_sell = Some(false);
             signal_result
@@ -664,7 +691,12 @@ impl VegasStrategy {
             && (self
                 .entry_block_config
                 .block_weak_bollinger_context_entry
-                || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_ENTRY_BLOCK"))
+                || self
+                    .entry_block_config
+                    .block_weak_bollinger_context_short
+                || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_ENTRY_BLOCK")
+                || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_SHORT_BLOCK"))
+            && self.weak_bollinger_volatility_allows_filter(data_items)
             && Self::should_block_weak_bollinger_context_short(vegas_indicator_signal_values)
         {
             signal_result.should_sell = Some(false);
@@ -696,7 +728,10 @@ impl VegasStrategy {
             }
         }
         if signal_result.should_buy.unwrap_or(false)
-            && Self::should_block_deep_negative_hammer_long(vegas_indicator_signal_values)
+            && Self::should_block_deep_negative_hammer_long(
+                vegas_indicator_signal_values,
+                self.entry_block_config.block_deep_negative_hammer_long,
+            )
         {
             signal_result.should_buy = Some(false);
             signal_result
@@ -729,7 +764,10 @@ impl VegasStrategy {
             && (self
                 .entry_block_config
                 .block_weak_bollinger_context_entry
-                || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_ENTRY_BLOCK"))
+                || self.entry_block_config.block_weak_bollinger_context_long
+                || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_ENTRY_BLOCK")
+                || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_LONG_BLOCK"))
+            && self.weak_bollinger_volatility_allows_filter(data_items)
             && Self::should_block_weak_bollinger_context_long(vegas_indicator_signal_values)
         {
             signal_result.should_buy = Some(false);
@@ -833,7 +871,11 @@ impl VegasStrategy {
                 .push("SHORT_TREND_NO_BOLLINGER_REBOUND_LONG_BLOCK".to_string());
         }
         if signal_result.should_buy.unwrap_or(false)
-            && Self::should_block_normal_bull_leg_no_confirm_long(vegas_indicator_signal_values)
+            && Self::should_block_normal_bull_leg_no_confirm_long(
+                vegas_indicator_signal_values,
+                self.entry_block_config
+                    .block_normal_bull_leg_no_confirm_long,
+            )
         {
             signal_result.should_buy = Some(false);
             signal_result

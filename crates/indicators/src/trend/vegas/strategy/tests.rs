@@ -24,6 +24,25 @@
         }
     }
     #[test]
+    fn weak_bollinger_filter_uses_normalized_atr_instead_of_symbol_name() {
+        let strategy = VegasStrategy {
+            entry_block_config: EntryBlockConfig {
+                weak_bollinger_min_atr_ratio: 0.0225,
+                ..EntryBlockConfig::default()
+            },
+            ..VegasStrategy::default()
+        };
+        let low_volatility = (0..15)
+            .map(|ts| candle(100.0, 100.2, 99.8, 100.0, ts))
+            .collect::<Vec<_>>();
+        let high_volatility = (0..15)
+            .map(|ts| candle(100.0, 103.0, 97.0, 100.0, ts))
+            .collect::<Vec<_>>();
+
+        assert!(!strategy.weak_bollinger_volatility_allows_filter(&low_volatility));
+        assert!(strategy.weak_bollinger_volatility_allows_filter(&high_volatility));
+    }
+    #[test]
     fn fib_strict_reason_includes_swing_pct_suffix() {
         let strategy = VegasStrategy {
             period: "4H".to_string(),

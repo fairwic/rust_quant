@@ -66,6 +66,8 @@ impl PipelineRunner {
             risk_config,
             TradingState::default(),
         );
+        let collect_dynamic_config_logs =
+            !rust_quant_core::config::env_is_true("BACKTEST_FAST_MODE", false);
         let mut dynamic_config_logs: Vec<DynamicConfigLog> = Vec::new();
         // 按原始 K 线顺序逐根推进，保证信号、过滤和成交记录共享同一个时间轴；
         // reset_for_next_candle 只切换当前 candle，不清空跨 candle 的持仓状态。
@@ -75,16 +77,19 @@ impl PipelineRunner {
             }
             let _result = self.process_candle(&mut ctx);
             // 动态参数调整属于解释性证据，不参与成交计算，但需要随 candle 保存，
-            // 否则回放某笔交易时无法判断当时使用的是哪一份策略配置。
-            if let Some(signal) = &ctx.signal {
-                if signal.dynamic_config_snapshot.is_some()
-                    || !signal.dynamic_adjustments.is_empty()
-                {
-                    dynamic_config_logs.push(DynamicConfigLog {
-                        ts: ctx.candle.ts,
-                        adjustments: signal.dynamic_adjustments.clone(),
-                        config_snapshot: signal.dynamic_config_snapshot.clone(),
-                    });
+            // 否则回放某笔交易时无法判断当时使用的是哪一份策略配置；快速迭代模式
+            // 只关闭这类逐 K 线诊断产物，不改变信号与成交状态推进。
+            if collect_dynamic_config_logs {
+                if let Some(signal) = &ctx.signal {
+                    if signal.dynamic_config_snapshot.is_some()
+                        || !signal.dynamic_adjustments.is_empty()
+                    {
+                        dynamic_config_logs.push(DynamicConfigLog {
+                            ts: ctx.candle.ts,
+                            adjustments: signal.dynamic_adjustments.clone(),
+                            config_snapshot: signal.dynamic_config_snapshot.clone(),
+                        });
+                    }
                 }
             }
         }
