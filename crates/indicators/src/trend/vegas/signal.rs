@@ -150,8 +150,20 @@ pub struct FibRetracementSignalValue {
     pub fib_price_high: f64,
     /// 成交量比值（当前/均量）
     pub volume_ratio: f64,
+    /// 当前相对成交量在前序滚动窗口中的分位数。
+    #[serde(default)]
+    pub volume_percentile: f64,
+    /// Swing 振幅相对于当前 ATR 的倍数。
+    #[serde(default)]
+    pub swing_atr_multiple: f64,
     /// 成交量confirmed，用于记录新闻或情报分析结果。
     pub volume_confirmed: bool,
+    /// true 表示本次 Fib 信号由前序量价冲击补充成交量确认，而不是当前 K 线自身达标。
+    #[serde(default)]
+    pub used_delayed_volume_confirmation: bool,
+    /// 被采用的量价冲击距离当前已确认 K 线的根数。
+    #[serde(default)]
+    pub delayed_volume_activation_bars_ago: Option<usize>,
     /// 大趋势方向
     pub major_bullish: bool,
     /// majorbearish，用于记录新闻或情报分析结果。
@@ -164,6 +176,29 @@ pub struct FibRetracementSignalValue {
     pub swing_is_upswing: bool,
     /// 建议止损位（基于 swing high/low + buffer）
     pub suggested_stop_loss: f64,
+}
+
+/// 跨币种自适应阈值在当前已确认 K 线上的计算快照。
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
+pub struct CrossAssetAdaptiveThresholdValue {
+    /// true 表示当前策略版本启用了自适应阈值；false 表示沿用旧阈值。
+    pub enabled: bool,
+    /// true 表示 ATR 与成交量窗口完整；false 时自适应门禁拒绝开仓，避免静默回退。
+    pub is_ready: bool,
+    /// 当前 ATR 绝对值。
+    pub atr_value: f64,
+    /// 当前 ATR 相对收盘价的比例。
+    pub atr_ratio: f64,
+    /// 当前 K 线振幅相对于 ATR 的倍数。
+    pub candle_range_atr_multiple: f64,
+    /// 当前 K 线实体相对于 ATR 的倍数。
+    pub candle_body_atr_multiple: f64,
+    /// 当前成交量相对近期均量的比率。
+    pub relative_volume_ratio: f64,
+    /// 当前相对成交量比率在前序窗口中的经验分位数。
+    pub volume_percentile: f64,
+    /// 实际参与相对成交量分位数计算的历史样本数量。
+    pub volume_sample_size: usize,
 }
 /// EMA趋势信号值
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
@@ -240,6 +275,9 @@ pub struct VegasIndicatorSignalValue {
     /// Fib 回撤入场信号值（新增）
     #[serde(default)]
     pub fib_retracement_value: FibRetracementSignalValue,
+    /// 跨币种 ATR 与成交量分位数快照。
+    #[serde(default)]
+    pub cross_asset_adaptive_value: CrossAssetAdaptiveThresholdValue,
 }
 /// 检查均线交叉
 pub struct EmaCross {

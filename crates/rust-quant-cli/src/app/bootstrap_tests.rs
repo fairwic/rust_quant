@@ -4,6 +4,7 @@ use rust_quant_domain::{StrategyConfig, StrategyStatus, Timeframe};
 fn test_config(id: i64, symbol: &str, timeframe: Timeframe) -> StrategyConfig {
     StrategyConfig {
         id,
+        version: "default".to_string(),
         strategy_type: StrategyType::Vegas,
         exchange: None,
         symbol: symbol.to_string(),

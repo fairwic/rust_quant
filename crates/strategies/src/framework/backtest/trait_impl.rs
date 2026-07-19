@@ -31,7 +31,7 @@ impl BackTestAbleStrategyTrait for NweStrategy {
 }
 impl BackTestAbleStrategyTrait for VegasBacktestAdapter {
     fn strategy_type(&self) -> crate::StrategyType {
-        crate::StrategyType::Vegas
+        self.strategy_type()
     }
     fn config_json(&self) -> Option<String> {
         serde_json::to_string(self.strategy()).ok()

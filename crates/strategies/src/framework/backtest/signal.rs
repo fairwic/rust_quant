@@ -36,7 +36,7 @@ fn rebound_short_protect_mode() -> ReboundShortProtectMode {
 /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
 fn should_block_long_entry(signal: &SignalResult) -> bool {
     signal.filter_reasons.iter().any(|r| {
-        r == BLOCK_LONG_ENTRY_REASON
+        r.starts_with(BLOCK_LONG_ENTRY_REASON)
             || r == LOW_VOLUME_INSIDE_RANGE_ENTRY_REASON
             || r == OPPOSITE_VALUE_AREA_ENTRY_REASON
             || r == LOW_VOLUME_ABOVE_VALUE_AREA_ENTRY_REASON
@@ -45,7 +45,7 @@ fn should_block_long_entry(signal: &SignalResult) -> bool {
 /// 判断 回测与策略研究 条件是否满足，给上层流程提供布尔决策。
 fn should_block_short_entry(signal: &SignalResult) -> bool {
     signal.filter_reasons.iter().any(|r| {
-        r == BLOCK_SHORT_ENTRY_REASON
+        r.starts_with(BLOCK_SHORT_ENTRY_REASON)
             || r == LOW_VOLUME_INSIDE_RANGE_ENTRY_REASON
             || r == OPPOSITE_VALUE_AREA_ENTRY_REASON
             || r == LOW_VOLUME_ABOVE_VALUE_AREA_ENTRY_REASON
@@ -407,6 +407,36 @@ mod tests {
     #[test]
     fn low_volume_inside_range_blocks_new_long_entry() {
         let mut signal = low_volume_inside_range_buy_signal(100.0, 1);
+        let state = deal_signal(
+            TradingState::default(),
+            &mut signal,
+            &candle(100.0, 1),
+            BasicRiskStrategyConfig::default(),
+            &[],
+            0,
+        );
+        assert!(state.trade_position.is_none());
+        assert_eq!(state.open_position_times, 0);
+    }
+    #[test]
+    fn fib_major_trend_reason_with_context_blocks_new_long_entry() {
+        let reason = format!("{}(swing_pct=12.50%)", BLOCK_LONG_ENTRY_REASON);
+        let mut signal = blocked_buy_signal(100.0, 1, &reason);
+        let state = deal_signal(
+            TradingState::default(),
+            &mut signal,
+            &candle(100.0, 1),
+            BasicRiskStrategyConfig::default(),
+            &[],
+            0,
+        );
+        assert!(state.trade_position.is_none());
+        assert_eq!(state.open_position_times, 0);
+    }
+    #[test]
+    fn fib_major_trend_reason_with_context_blocks_new_short_entry() {
+        let reason = format!("{}(swing_pct=12.50%)", BLOCK_SHORT_ENTRY_REASON);
+        let mut signal = blocked_sell_signal(100.0, 1, &reason);
         let state = deal_signal(
             TradingState::default(),
             &mut signal,

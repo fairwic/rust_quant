@@ -59,6 +59,161 @@ impl Default for VolumeSignalConfig {
         }
     }
 }
+
+/// 中间震荡波动带过滤，只在 ATR 比率落入指定区间时提高成交量确认门槛。
+/// 默认关闭，避免现有研究与生产配置因新增字段改变结果。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct ChoppyVolatilityFilterConfig {
+    /// true 只在指定 ATR 区间提高成交量门槛；false 不改变基础分位数。
+    pub is_open: bool,
+    /// 震荡区间下界，使用 ATR/收盘价的无量纲比率，包含该边界。
+    pub min_atr_ratio: f64,
+    /// 震荡区间上界，使用 ATR/收盘价的无量纲比率，不包含该边界。
+    pub max_atr_ratio: f64,
+    /// 震荡区间内要求的最低滚动相对成交量分位数，取值范围为 0 到 1。
+    pub min_volume_percentile: f64,
+}
+
+impl Default for ChoppyVolatilityFilterConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            min_atr_ratio: 0.018,
+            max_atr_ratio: 0.032,
+            min_volume_percentile: 119.0 / 120.0,
+        }
+    }
+}
+
+/// 跨币种自适应阈值配置。
+///
+/// 该配置默认关闭，避免改变现有生产版本；研究版本显式开启后，使用 ATR 倍数和
+/// 滚动成交量分位数替代依赖币价、成交量绝对量级或固定涨跌幅的判断。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct CrossAssetAdaptiveThresholdConfig {
+    /// true 使用 ATR 与成交量分位数；false 保留旧版本固定阈值行为。
+    pub is_open: bool,
+    /// ATR 计算周期。
+    pub atr_period: usize,
+    /// 成交量分位数使用的前序已确认 K 线数量。
+    pub volume_lookback_bars: usize,
+    /// 当前相对成交量至少达到的滚动分位数，取值范围为 0 到 1。
+    pub min_volume_percentile: f64,
+    /// Fib swing 振幅至少达到的 ATR 倍数。
+    pub min_swing_atr_multiple: f64,
+    /// 中间震荡波动带的额外成交量确认；默认关闭以保持现有策略结果不变。
+    pub choppy_volatility_filter: ChoppyVolatilityFilterConfig,
+}
+
+impl Default for CrossAssetAdaptiveThresholdConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            atr_period: 14,
+            volume_lookback_bars: 120,
+            min_volume_percentile: 0.95,
+            min_swing_atr_multiple: 4.0,
+            choppy_volatility_filter: ChoppyVolatilityFilterConfig::default(),
+        }
+    }
+}
+
+impl CrossAssetAdaptiveThresholdConfig {
+    /// 返回当前 ATR 波动状态对应的成交量门槛；区间无效时回退基础值，避免错误配置扩大开仓范围。
+    pub fn effective_min_volume_percentile(&self, atr_ratio: f64) -> f64 {
+        let base = self.min_volume_percentile.clamp(0.0, 1.0);
+        let filter = self.choppy_volatility_filter;
+        if !filter.is_open
+            || !atr_ratio.is_finite()
+            || !filter.min_atr_ratio.is_finite()
+            || !filter.max_atr_ratio.is_finite()
+            || filter.max_atr_ratio <= filter.min_atr_ratio
+            || atr_ratio < filter.min_atr_ratio
+            || atr_ratio >= filter.max_atr_ratio
+        {
+            return base;
+        }
+        base.max(filter.min_volume_percentile.clamp(0.0, 1.0))
+    }
+}
+/// Vegas 信号与触发动量 K 线的方向关系。
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CandleMomentumDirectionMode {
+    /// 不限制 Vegas 信号与触发 K 线的方向关系。
+    #[default]
+    Any,
+    /// Vegas 信号必须与触发 K 线同向。
+    Same,
+    /// Vegas 信号必须与触发 K 线反向，用于验证放量冲击后的反转假设。
+    Opposite,
+}
+
+/// 基于已确认 4H K 线生成动量激活窗口的研究配置。
+///
+/// 该窗口是历史回放时对上游动量事件的因果代理；默认关闭，不改变现有 Vegas 行为。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct CandleMomentumActivationConfig {
+    /// 是否要求近期出现过归一化的量价波动事件。
+    pub is_open: bool,
+    /// 当前 Fib K 线量能不足时，是否允许近期激活事件替代当根成交量确认。
+    ///
+    /// 开启后不再把动量窗口作为所有 Vegas 信号的总门禁，只补充 Fib 入场；默认关闭以保持旧语义。
+    #[serde(default)]
+    pub allow_delayed_fib_volume_confirmation: bool,
+    /// 是否只在现有中波动带内允许延迟 Fib 确认，复用 ATR 边界而不新增数值参数。
+    #[serde(default)]
+    pub restrict_delayed_fib_to_choppy_band: bool,
+    /// 中波动带限制开启时，是否额外允许高波动环境中的延迟做空；延迟做多仍受上界约束。
+    #[serde(default)]
+    pub allow_high_volatility_delayed_short: bool,
+    /// 计算成交量和振幅基线使用的已确认 K 线数量。
+    pub baseline_bars: usize,
+    /// 激活事件产生后允许 Vegas 寻找入场的 4H K 线数量。
+    pub valid_for_bars: usize,
+    /// 触发后至少等待的完整 4H K 线数量；默认 1 表示不在冲击当根追单。
+    #[serde(default = "default_candle_momentum_min_wait_bars")]
+    pub min_wait_bars: usize,
+    /// 触发 K 线成交量相对前序基线均量的最小倍数。
+    pub min_volume_ratio: f64,
+    /// 触发 K 线振幅相对前序基线平均振幅的最小倍数。
+    pub min_range_ratio: f64,
+    /// true 允许在触发 K 线收盘时开仓；false 从下一根已确认 K 线开始等待 Vegas 信号。
+    pub allow_trigger_bar_entry: bool,
+    /// Vegas 信号与触发动量 K 线之间允许的方向关系。
+    #[serde(default)]
+    pub direction_mode: CandleMomentumDirectionMode,
+    /// 动量激活后允许开仓的 RSI 下界（含边界、无量纲）；None 表示不限制下界。
+    #[serde(default)]
+    pub min_entry_rsi: Option<f64>,
+    /// 动量激活后允许开仓的 RSI 上界（不含边界、无量纲）；None 表示不限制上界。
+    #[serde(default)]
+    pub max_entry_rsi: Option<f64>,
+}
+fn default_candle_momentum_min_wait_bars() -> usize {
+    1
+}
+impl Default for CandleMomentumActivationConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            allow_delayed_fib_volume_confirmation: false,
+            restrict_delayed_fib_to_choppy_band: false,
+            allow_high_volatility_delayed_short: false,
+            baseline_bars: 20,
+            valid_for_bars: 6,
+            min_wait_bars: default_candle_momentum_min_wait_bars(),
+            min_volume_ratio: 2.0,
+            min_range_ratio: 1.5,
+            allow_trigger_bar_entry: false,
+            direction_mode: CandleMomentumDirectionMode::Any,
+            min_entry_rsi: None,
+            max_entry_rsi: None,
+        }
+    }
+}
 /// EMA信号配置
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct EmaSignalConfig {
@@ -408,6 +563,8 @@ pub struct EntryBlockConfig {
     pub block_short_inside_low_volume_node_entry: bool,
     /// EMA 距离过滤的空头分支
     pub block_ema_distance_short: bool,
+    /// 做空入场时允许的最大 EMA2/EMA4 距离；None 表示不启用
+    pub max_short_ema_distance_ratio: Option<f64>,
     /// ETH 4H id102：做多打入上方 bearish FVG 压力区但未收复时拦截
     pub block_bearish_fvg_pressure_long: bool,
     /// 布林方向缺少入场支持时拦截多空追单
@@ -441,6 +598,7 @@ impl Default for EntryBlockConfig {
             block_low_volume_above_value_area_entry: false,
             block_short_inside_low_volume_node_entry: false,
             block_ema_distance_short: true,
+            max_short_ema_distance_ratio: None,
             block_bearish_fvg_pressure_long: false,
             block_weak_bollinger_context_entry: false,
             block_weak_bollinger_context_long: false,
@@ -487,7 +645,32 @@ pub fn default_large_entity_stop_loss_config() -> Option<LargeEntityStopLossConf
 }
 #[cfg(test)]
 mod tests {
-    use super::{EntryBlockConfig, MacdSignalConfig};
+    use super::{
+        ChoppyVolatilityFilterConfig, CrossAssetAdaptiveThresholdConfig, EntryBlockConfig,
+        MacdSignalConfig,
+    };
+
+    #[test]
+    fn choppy_volatility_filter_only_raises_threshold_inside_configured_band() {
+        let config = CrossAssetAdaptiveThresholdConfig {
+            min_volume_percentile: 0.95,
+            choppy_volatility_filter: ChoppyVolatilityFilterConfig {
+                is_open: true,
+                min_atr_ratio: 0.018,
+                max_atr_ratio: 0.032,
+                min_volume_percentile: 119.0 / 120.0,
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(config.effective_min_volume_percentile(0.0179), 0.95);
+        assert_eq!(config.effective_min_volume_percentile(0.018), 119.0 / 120.0);
+        assert_eq!(
+            config.effective_min_volume_percentile(0.0319),
+            119.0 / 120.0
+        );
+        assert_eq!(config.effective_min_volume_percentile(0.032), 0.95);
+    }
     #[test]
     fn entry_block_config_defaults_keep_existing_baseline_stable() {
         let config = EntryBlockConfig::default();

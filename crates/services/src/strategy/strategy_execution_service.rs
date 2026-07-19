@@ -270,6 +270,7 @@ impl StrategyExecutionService {
                     &risk_config,
                     config.id,
                     config.strategy_type.as_str(),
+                    &config.version,
                     config.exchange.as_deref(),
                 )
                 .await?;
@@ -356,6 +357,7 @@ impl StrategyExecutionService {
                     order_risk,
                     config.id,
                     config.strategy_type.as_str(),
+                    &config.version,
                     config.exchange.as_deref(),
                 )
                 .await
@@ -585,6 +587,7 @@ impl StrategyExecutionService {
         risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
         strategy_type: &str,
+        strategy_version: &str,
         exchange: Option<&str>,
     ) -> Result<()> {
         #[cfg(test)]
@@ -632,6 +635,7 @@ impl StrategyExecutionService {
                 risk_config,
                 config_id,
                 strategy_type,
+                strategy_version,
                 exchange,
                 side,
                 pos_side,

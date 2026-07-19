@@ -30,6 +30,72 @@ fn idle_checkpoint_is_throttled_between_empty_poll_cycles() {
     assert!(worker.should_record_idle_checkpoint());
 }
 
+/// 启动只返回空租约的本地 Web owner stub，用真实 HTTP 轮询固定 worker 的空闲落库契约。
+fn spawn_empty_lease_server(
+    response_body: &'static str,
+    request_count: usize,
+) -> (String, tokio::task::JoinHandle<()>) {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::task::spawn_blocking(move || {
+        for _ in 0..request_count {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 4096];
+            let bytes = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]);
+            assert!(request.starts_with("GET "));
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+    });
+    (format!("http://{addr}"), server)
+}
+
+#[tokio::test]
+async fn empty_confirmation_worker_polls_share_idle_checkpoint_throttle() {
+    let (base_url, server) =
+        spawn_empty_lease_server(r#"{"success":true,"data":{"items":[]}}"#, 2);
+    let repository = Arc::new(CapturingAuditRepository::default());
+    let worker = ExecutionWorker::new(
+        ExecutionTaskClient::new(ExecutionTaskConfig {
+            base_url,
+            internal_secret: "local-dev-secret".to_string(),
+        })
+        .unwrap(),
+        CryptoExcAllGateway::dry_run(),
+        ExecutionWorkerConfig {
+            worker_id: "idle-confirmation-worker".to_string(),
+            lease_limit: 1,
+            dry_run: false,
+            default_exchange: ExchangeId::Okx,
+            task_types: vec!["execute_signal".to_string()],
+            task_statuses: vec!["pending_confirmation".to_string()],
+            target_task_ids: Vec::new(),
+            confirmation_mode: true,
+            report_replay_mode: false,
+            report_replay_max_per_run: 1,
+            report_replay_failure_backoff_seconds: 300,
+            report_replay_throttle_ms: 0,
+        },
+    )
+    .with_audit_repository(repository.clone());
+
+    assert_eq!(worker.run_once().await.unwrap(), 0);
+    assert_eq!(worker.run_once().await.unwrap(), 0);
+    server.await.unwrap();
+    let checkpoints = repository.checkpoints.lock().unwrap();
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0].worker_status, "idle");
+    assert_eq!(checkpoints[0].checkpoint_value["confirmation_mode"], true);
+}
+
 #[tokio::test]
 async fn empty_report_replay_polls_share_idle_checkpoint_throttle() {
     let repository = Arc::new(CapturingAuditRepository::default());

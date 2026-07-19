@@ -10,6 +10,9 @@ pub struct StrategyConfig {
     pub id: i64,
     /// 策略类型
     pub strategy_type: StrategyType,
+    /// 不可变策略版本；同一策略族的新行为必须使用新版本。
+    #[serde(default = "default_strategy_version")]
+    pub version: String,
     /// 行情/执行交易所
     #[serde(default)]
     pub exchange: Option<String>,
@@ -50,6 +53,7 @@ impl StrategyConfig {
         Self {
             id,
             strategy_type,
+            version: default_strategy_version(),
             exchange: None,
             symbol,
             timeframe,
@@ -109,6 +113,10 @@ impl StrategyConfig {
             StrategyStatus::Stopped | StrategyStatus::Paused
         )
     }
+}
+
+fn default_strategy_version() -> String {
+    "default".to_string()
 }
 /// 基础风险策略配置 (通用的风险管理参数)
 #[derive(Debug, Clone, Serialize, Deserialize)]

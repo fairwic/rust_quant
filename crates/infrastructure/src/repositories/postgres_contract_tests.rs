@@ -25,6 +25,9 @@ const FORBIDDEN_TOKENS: &[&str] = &[
     "last_insert_id()",
 ];
 const POSTGRES_QUANT_CORE_DDL: &str = include_str!("../../../../sql/postgres_quant_core.sql");
+const BACKTEST_INITIAL_R_MIGRATION: &str = include_str!(
+    "../../../../migrations/20260719120500_add_back_test_detail_initial_r_contract.sql"
+);
 #[test]
 fn active_repositories_do_not_use_mysql_runtime_tokens() {
     let repository_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/repositories");
@@ -327,4 +330,54 @@ fn market_rank_snapshot_prune_query_is_exchange_scoped_for_index_use() {
         source.contains("DELETE FROM market_rank_snapshots\n            WHERE exchange = $1\n              AND captured_at < $2"),
         "market rank snapshot pruning must scope by exchange so it can use the exchange/captured_at index"
     );
+}
+
+#[test]
+fn backtest_detail_ddl_freezes_initial_risk_contract() {
+    for column in [
+        "initial_stop_price DOUBLE PRECISION",
+        "initial_risk_amount DOUBLE PRECISION",
+        "net_profit_r DOUBLE PRECISION",
+    ] {
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(column),
+            "back_test_detail DDL must include {column}"
+        );
+    }
+    for column in [
+        "back_test_detail.initial_stop_price",
+        "back_test_detail.initial_risk_amount",
+        "back_test_detail.net_profit_r",
+    ] {
+        assert!(
+            POSTGRES_QUANT_CORE_DDL.contains(&format!("COMMENT ON COLUMN {column}")),
+            "back_test_detail risk column must be documented: {column}"
+        );
+    }
+}
+
+#[test]
+/// 生产迁移必须幂等补齐初始止损/R 字段及其数据库注释，不能只修改基线建表 SQL。
+fn backtest_initial_r_contract_has_a_production_migration() {
+    assert!(BACKTEST_INITIAL_R_MIGRATION.contains("ALTER TABLE IF EXISTS back_test_detail"));
+    for column in [
+        "ADD COLUMN IF NOT EXISTS initial_stop_price DOUBLE PRECISION",
+        "ADD COLUMN IF NOT EXISTS initial_risk_amount DOUBLE PRECISION",
+        "ADD COLUMN IF NOT EXISTS net_profit_r DOUBLE PRECISION",
+    ] {
+        assert!(
+            BACKTEST_INITIAL_R_MIGRATION.contains(column),
+            "production migration must add {column}"
+        );
+    }
+    for column in [
+        "back_test_detail.initial_stop_price",
+        "back_test_detail.initial_risk_amount",
+        "back_test_detail.net_profit_r",
+    ] {
+        assert!(
+            BACKTEST_INITIAL_R_MIGRATION.contains(&format!("COMMENT ON COLUMN {column}")),
+            "production migration must document {column}"
+        );
+    }
 }

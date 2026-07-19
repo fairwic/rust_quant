@@ -57,6 +57,40 @@ fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_short() {
     assert_eq!(targets.stop_loss, Some(103.0));
     assert_eq!(targets.take_profit, Some(90.0));
 }
+
+#[test]
+fn base_stop_uses_max_loss_when_signal_stop_is_looser() {
+    let position = TradePosition {
+        trade_side: TradeSide::Long,
+        open_price: 100.0,
+        position_nums: 1.0,
+        signal_kline_stop_close_price: Some(95.0),
+        ..TradePosition::default()
+    };
+    let candle = CandleItem {
+        o: 100.0,
+        h: 101.0,
+        l: 94.0,
+        c: 96.0,
+        v: 1.0,
+        ts: 1,
+        confirm: 1,
+    };
+    let risk = BasicRiskStrategyConfig {
+        max_loss_percent: 0.02,
+        dynamic_max_loss: Some(false),
+        ..Default::default()
+    };
+    let result =
+        check_base_protective_stop(&ExitContext::new(&position, &candle), &position, &risk);
+    assert!(matches!(
+        result,
+        ExitResult::Exit {
+            price,
+            reason: "最大亏损止损"
+        } if (price - 98.0).abs() < 1e-9
+    ));
+}
 #[test]
 fn effective_max_loss_keeps_default_entry_mismatch_tightening() {
     let position = TradePosition {

@@ -1,4 +1,23 @@
 impl VegasStrategy {
+    /// Fib-only 配置由 Fib 直接决定是否入场，不再执行失去决策权的加权评分。
+    fn resolve_signal_direction(
+        fib_cfg: FibRetracementSignalConfig,
+        fib_direction: Option<SignalDirect>,
+        weighted_direction: impl FnOnce() -> Option<SignalDirect>,
+    ) -> Option<SignalDirect> {
+        if !fib_cfg.is_open {
+            return weighted_direction();
+        }
+        if fib_direction.is_some() {
+            return fib_direction;
+        }
+        if fib_cfg.only_on_fib {
+            None
+        } else {
+            weighted_direction()
+        }
+    }
+
     /// 获取交易信号
     /// data_items: 数据列表，在突破策略中要考虑到前一根k线
     pub fn get_trade_signal(
@@ -108,10 +127,14 @@ impl VegasStrategy {
         let mut valid_rsi_value: Option<f64> = None;
         let mut dynamic_adjustments: Vec<String> = Vec::new();
         let mut range_snapshot: Option<serde_json::Value> = None;
+        vegas_indicator_signal_values.cross_asset_adaptive_value =
+            self.calculate_cross_asset_adaptive_value(data_items);
         // 优先判断成交量
         if let Some(_volume_signal) = &self.volume_signal {
-            let is_than_vol_ratio =
-                self.check_volume_trend(&vegas_indicator_signal_values.volume_value);
+            let is_than_vol_ratio = self.check_volume_trend(
+                &vegas_indicator_signal_values.volume_value,
+                &vegas_indicator_signal_values.cross_asset_adaptive_value,
+            );
             conditions.push((
                 SignalType::VolumeTrend,
                 SignalCondition::Volume {
@@ -304,8 +327,8 @@ impl VegasStrategy {
                 let mut prev_signal = 0.0f64;
                 let mut prev_histogram = 0.0f64;
                 let mut prev_prev_histogram = 0.0f64;
-                // 计算所有 K 线的 MACD
-                for item in data_items.iter() {
+                let replay_period = macd_cfg.slow_period.saturating_add(macd_cfg.signal_period);
+                for item in recent_indicator_replay_window(data_items, replay_period) {
                     let macd_output = macd.next(item.c);
                     prev_prev_histogram = prev_histogram;
                     prev_histogram = macd_output.macd - macd_output.signal;
@@ -341,12 +364,27 @@ impl VegasStrategy {
         // ================================================================
         let fib_cfg = self.fib_retracement_signal.unwrap_or_default();
         if fib_cfg.is_open {
+            let atr_ratio = vegas_indicator_signal_values
+                .cross_asset_adaptive_value
+                .atr_ratio;
+            let delayed_long_volume_activation_bars_ago = self
+                .delayed_fib_atr_allowed(atr_ratio, true)
+                .then(|| self.delayed_fib_volume_activation_bars_ago(data_items, true))
+                .flatten();
+            let delayed_short_volume_activation_bars_ago = self
+                .delayed_fib_atr_allowed(atr_ratio, false)
+                .then(|| self.delayed_fib_volume_activation_bars_ago(data_items, false))
+                .flatten();
             vegas_indicator_signal_values.fib_retracement_value =
                 super::swing_fib::generate_fib_retracement_signal(
                     data_items,
                     &vegas_indicator_signal_values.ema_values,
                     &vegas_indicator_signal_values.leg_detection_value,
                     vegas_indicator_signal_values.volume_value.volume_ratio,
+                    &vegas_indicator_signal_values.cross_asset_adaptive_value,
+                    &self.cross_asset_adaptive_threshold,
+                    delayed_long_volume_activation_bars_ago,
+                    delayed_short_volume_activation_bars_ago,
                     &fib_cfg,
                 );
         } else {
@@ -354,30 +392,18 @@ impl VegasStrategy {
                 .fib_retracement_value
                 .volume_ratio = vegas_indicator_signal_values.volume_value.volume_ratio;
         }
-        // ================================================================
-        // 计算得分
-        // ================================================================
-        let score = weights.calculate_score(conditions.clone());
-        // 计算分数到达指定值
-        // 计算分数到达指定值
-        let mut signal_direction = weights.is_signal_valid(&score);
-        if fib_cfg.is_open {
-            let fib_val = vegas_indicator_signal_values.fib_retracement_value;
-            let fib_direction = if fib_val.is_long_signal {
-                Some(SignalDirect::IsLong)
-            } else if fib_val.is_short_signal {
-                Some(SignalDirect::IsShort)
-            } else {
-                None
-            };
-            // Fib 触发时优先使用 Fib 方向（即使原权重系统没有达到阈值）
-            if fib_direction.is_some() {
-                signal_direction = fib_direction;
-            } else if fib_cfg.only_on_fib {
-                // 仅Fib模式：未触发Fib则不允许开仓
-                signal_direction = None;
-            }
-        }
+        let fib_val = vegas_indicator_signal_values.fib_retracement_value;
+        let fib_direction = if fib_val.is_long_signal {
+            Some(SignalDirect::IsLong)
+        } else if fib_val.is_short_signal {
+            Some(SignalDirect::IsShort)
+        } else {
+            None
+        };
+        let mut signal_direction = Self::resolve_signal_direction(fib_cfg, fib_direction, || {
+            let score = weights.calculate_score(conditions.clone());
+            weights.is_signal_valid(&score)
+        });
         if signal_direction.is_none()
             && env_flag("VEGAS_EXPERIMENT_EXPANSION_CONTINUATION_LONG")
             && Self::is_expansion_continuation_long_candidate(
@@ -428,7 +454,7 @@ impl VegasStrategy {
         if let Some(signal_direction) = signal_direction {
             // 计算 ATR 用于止损价格
             let mut atr = ATR::new(14).unwrap();
-            for item in data_items.iter() {
+            for item in data_items {
                 atr.next(item.h, item.l, item.c);
             }
             let atr_value = atr.value();
@@ -625,6 +651,11 @@ impl VegasStrategy {
             &mut dynamic_adjustments,
             &mut range_snapshot,
         );
+        // 吞没形态与 Vegas 最终方向不一致时，信号棒开盘价会落在止损错误一侧；
+        // 若不剔除，下一棒可能以行情范围外的价格产生虚假盈利平仓。
+        if Self::reject_non_protective_signal_stop(&mut signal_result) {
+            dynamic_adjustments.push("STOP_LOSS_SIGNAL_DIRECTION_REJECTED".to_string());
+        }
         if signal_result.signal_kline_stop_loss_price.is_some() {
             dynamic_adjustments.push("STOP_LOSS_SIGNAL_KLINE".to_string());
         }

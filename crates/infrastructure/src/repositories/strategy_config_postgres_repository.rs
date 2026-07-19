@@ -15,6 +15,8 @@ struct QuantCoreStrategyConfigRow {
     legacy_id: Option<i64>,
     /// 策略Key，用于展示或持久化查询结果。
     strategy_key: String,
+    /// 不可变策略版本。
+    version: String,
     /// 交易所名称。
     exchange: String,
     /// 交易对或资产符号。
@@ -39,6 +41,7 @@ mod tests {
             id: "6f9619ff-8b86-d011-b42d-00cf4fc964ff".to_string(),
             legacy_id: Some(42),
             strategy_key: "vegas".to_string(),
+            version: "eth_4h_v2".to_string(),
             exchange: "binance".to_string(),
             symbol: "ETH-USDT-SWAP".to_string(),
             timeframe: "4H".to_string(),
@@ -49,6 +52,7 @@ mod tests {
         let config = row.to_domain().expect("row should map to domain config");
         assert_eq!(config.exchange.as_deref(), Some("binance"));
         assert_eq!(config.symbol, "ETH-USDT-SWAP");
+        assert_eq!(config.version, "eth_4h_v2");
     }
 
     #[test]
@@ -58,6 +62,7 @@ mod tests {
             id: "6f9619ff-8b86-d011-b42d-00cf4fc964ff".to_string(),
             legacy_id: Some(43),
             strategy_key: "exhaustion_fade_short_v1".to_string(),
+            version: "v1".to_string(),
             exchange: "binance".to_string(),
             symbol: "BTC-USDT-SWAP".to_string(),
             timeframe: "5m".to_string(),
@@ -106,6 +111,7 @@ impl QuantCoreStrategyConfigRow {
             self.risk_config.clone(),
         );
         config.exchange = normalize_exchange(&self.exchange);
+        config.version = self.version.clone();
         config.status = if self.enabled {
             StrategyStatus::Running
         } else {
@@ -165,7 +171,7 @@ impl PostgresStrategyConfigRepository {
         debug!("查询 quant_core 策略配置: external_id={}", id);
         sqlx::query_as::<_, QuantCoreStrategyConfigRow>(
             r#"
-            SELECT id::text AS id, legacy_id, strategy_key, exchange, symbol, timeframe, enabled, config, risk_config
+            SELECT id::text AS id, legacy_id, strategy_key, version, exchange, symbol, timeframe, enabled, config, risk_config
             FROM strategy_configs
             WHERE id::text = $1
                OR legacy_id::text = $1
@@ -182,7 +188,7 @@ impl PostgresStrategyConfigRepository {
         debug!("查询 quant_core 策略配置: legacy_id={}", id);
         sqlx::query_as::<_, QuantCoreStrategyConfigRow>(
             r#"
-            SELECT id::text AS id, legacy_id, strategy_key, exchange, symbol, timeframe, enabled, config, risk_config
+            SELECT id::text AS id, legacy_id, strategy_key, version, exchange, symbol, timeframe, enabled, config, risk_config
             FROM strategy_configs
             WHERE legacy_id = $1
             LIMIT 1
@@ -197,7 +203,7 @@ impl PostgresStrategyConfigRepository {
     async fn fetch_runtime_rows(&self) -> Result<Vec<QuantCoreStrategyConfigRow>> {
         sqlx::query_as::<_, QuantCoreStrategyConfigRow>(
             r#"
-            SELECT id::text AS id, legacy_id, strategy_key, exchange, symbol, timeframe, enabled, config, risk_config
+            SELECT id::text AS id, legacy_id, strategy_key, version, exchange, symbol, timeframe, enabled, config, risk_config
             FROM strategy_configs
             ORDER BY created_at ASC
             "#,
@@ -218,12 +224,13 @@ impl PostgresStrategyConfigRepository {
             UPDATE strategy_configs
             SET strategy_key = $2,
                 strategy_name = $3,
-                exchange = $4,
-                symbol = $5,
-                timeframe = $6,
-                enabled = $7,
-                config = $8,
-                risk_config = $9,
+                version = $4,
+                exchange = $5,
+                symbol = $6,
+                timeframe = $7,
+                enabled = $8,
+                config = $9,
+                risk_config = $10,
                 updated_at = NOW()
             WHERE id = $1::uuid
             "#,
@@ -231,6 +238,7 @@ impl PostgresStrategyConfigRepository {
         .bind(row_id)
         .bind(config.strategy_type.as_str())
         .bind(config.strategy_type.as_str())
+        .bind(&config.version)
         .bind(config.exchange.as_deref().unwrap_or("all"))
         .bind(&config.symbol)
         .bind(config.timeframe.as_str())
@@ -266,7 +274,7 @@ impl StrategyConfigRepository for PostgresStrategyConfigRepository {
     async fn find_all_enabled(&self) -> Result<Vec<StrategyConfig>> {
         let rows = sqlx::query_as::<_, QuantCoreStrategyConfigRow>(
             r#"
-            SELECT id::text AS id, legacy_id, strategy_key, exchange, symbol, timeframe, enabled, config, risk_config
+            SELECT id::text AS id, legacy_id, strategy_key, version, exchange, symbol, timeframe, enabled, config, risk_config
             FROM strategy_configs
             WHERE enabled = true
             ORDER BY created_at ASC
@@ -285,7 +293,7 @@ impl StrategyConfigRepository for PostgresStrategyConfigRepository {
     ) -> Result<Vec<StrategyConfig>> {
         let rows = sqlx::query_as::<_, QuantCoreStrategyConfigRow>(
             r#"
-            SELECT id::text AS id, legacy_id, strategy_key, exchange, symbol, timeframe, enabled, config, risk_config
+            SELECT id::text AS id, legacy_id, strategy_key, version, exchange, symbol, timeframe, enabled, config, risk_config
             FROM strategy_configs
             WHERE enabled = true
               AND symbol = $1
@@ -322,7 +330,7 @@ impl StrategyConfigRepository for PostgresStrategyConfigRepository {
                 config,
                 risk_config
             )
-            VALUES ($1, $2, $3, 'default', $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (strategy_key, version, exchange, symbol, timeframe)
             DO UPDATE SET
                 legacy_id = EXCLUDED.legacy_id,
@@ -336,6 +344,7 @@ impl StrategyConfigRepository for PostgresStrategyConfigRepository {
         .bind(config.id)
         .bind(config.strategy_type.as_str())
         .bind(config.strategy_type.as_str())
+        .bind(&config.version)
         .bind(config.exchange.as_deref().unwrap_or("all"))
         .bind(&config.symbol)
         .bind(config.timeframe.as_str())
@@ -354,12 +363,13 @@ impl StrategyConfigRepository for PostgresStrategyConfigRepository {
             UPDATE strategy_configs
             SET strategy_key = $2,
                 strategy_name = $3,
-                exchange = $4,
-                symbol = $5,
-                timeframe = $6,
-                enabled = $7,
-                config = $8,
-                risk_config = $9,
+                version = $4,
+                exchange = $5,
+                symbol = $6,
+                timeframe = $7,
+                enabled = $8,
+                config = $9,
+                risk_config = $10,
                 updated_at = NOW()
             WHERE legacy_id = $1
             "#,
@@ -367,6 +377,7 @@ impl StrategyConfigRepository for PostgresStrategyConfigRepository {
         .bind(config.id)
         .bind(config.strategy_type.as_str())
         .bind(config.strategy_type.as_str())
+        .bind(&config.version)
         .bind(config.exchange.as_deref().unwrap_or("all"))
         .bind(&config.symbol)
         .bind(config.timeframe.as_str())

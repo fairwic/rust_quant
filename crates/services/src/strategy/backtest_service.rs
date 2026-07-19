@@ -327,6 +327,9 @@ impl BacktestService {
                     trade_record.signal_result.unwrap_or_default(),
                     trade_record.stop_loss_source,
                     trade_record.stop_loss_update_history,
+                    trade_record.initial_stop_price,
+                    trade_record.initial_risk_amount,
+                    trade_record.net_profit_r,
                 )
             })
             .collect();

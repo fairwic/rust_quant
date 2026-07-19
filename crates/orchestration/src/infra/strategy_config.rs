@@ -12,6 +12,8 @@ use tracing::warn;
 pub struct BackTestConfig {
     /// 策略配置id；为空时表示该条件不启用。
     pub strategy_config_id: Option<String>,
+    /// 指定配置回测使用的独立策略 Key。
+    pub strategy_key: Option<String>,
     /// 最大并发数
     pub max_concurrent: usize,
     /// K线数据限制
@@ -32,6 +34,7 @@ impl Default for BackTestConfig {
     fn default() -> Self {
         Self {
             strategy_config_id: None,
+            strategy_key: None,
             max_concurrent: 30,
             candle_limit: 40000,
             enable_random_test: env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true",
@@ -143,11 +146,29 @@ pub async fn get_strategy_config_from_db_with_selector(
     time: &str,
     strategy_config_id: Option<&str>,
 ) -> Result<Vec<ParamMergeBuilder>> {
+    get_strategy_config_from_db_with_strategy_selector(
+        config_service,
+        inst_id,
+        time,
+        "vegas",
+        strategy_config_id,
+    )
+    .await
+}
+
+/// 加载共享 Vegas 引擎下指定独立策略身份的配置。
+pub async fn get_strategy_config_from_db_with_strategy_selector(
+    config_service: &StrategyConfigService,
+    inst_id: &str,
+    time: &str,
+    strategy_key: &str,
+    strategy_config_id: Option<&str>,
+) -> Result<Vec<ParamMergeBuilder>> {
     let strategy_configs = get_strate_config_with_selector(
         config_service,
         inst_id,
         time,
-        Some("vegas"),
+        Some(strategy_key),
         strategy_config_id,
     )
     .await
@@ -238,6 +259,215 @@ mod selected_config_tests {
         assert_eq!(configs.len(), 1);
         assert_eq!(configs[0].id, 43);
     }
+    #[test]
+    fn vegas_config_conversion_preserves_candle_momentum_activation() {
+        let expected = rust_quant_indicators::trend::vegas::CandleMomentumActivationConfig {
+            is_open: true,
+            allow_delayed_fib_volume_confirmation: false,
+            restrict_delayed_fib_to_choppy_band: false,
+            allow_high_volatility_delayed_short: false,
+            baseline_bars: 20,
+            valid_for_bars: 6,
+            min_wait_bars: 3,
+            min_volume_ratio: 2.0,
+            min_range_ratio: 1.5,
+            allow_trigger_bar_entry: false,
+            direction_mode:
+                rust_quant_indicators::trend::vegas::CandleMomentumDirectionMode::Opposite,
+            min_entry_rsi: Some(25.0),
+            max_entry_rsi: Some(55.0),
+        };
+        let mut vegas = VegasStrategy::new("4H".to_string());
+        vegas.candle_momentum_activation = expected;
+        let config = StrategyConfig::new(
+            44,
+            StrategyType::Vegas,
+            "ETH-USDT-SWAP".to_string(),
+            Timeframe::H4,
+            serde_json::to_value(vegas).expect("vegas config"),
+            serde_json::to_value(BasicRiskStrategyConfig::default()).expect("risk config"),
+        );
+
+        let converted = convert_strategy_config_to_param(&config)
+            .expect("convert config")
+            .to_vegas_strategy("4H".to_string());
+
+        assert_eq!(
+            converted.candle_momentum_activation.is_open,
+            expected.is_open
+        );
+        assert_eq!(
+            converted.candle_momentum_activation.valid_for_bars,
+            expected.valid_for_bars
+        );
+        assert_eq!(
+            converted.candle_momentum_activation.min_wait_bars,
+            expected.min_wait_bars
+        );
+        assert_eq!(
+            converted.candle_momentum_activation.min_volume_ratio,
+            expected.min_volume_ratio
+        );
+        assert_eq!(
+            converted.candle_momentum_activation.min_range_ratio,
+            expected.min_range_ratio
+        );
+        assert_eq!(
+            converted.candle_momentum_activation.direction_mode,
+            expected.direction_mode
+        );
+        assert_eq!(
+            converted.candle_momentum_activation.min_entry_rsi,
+            expected.min_entry_rsi
+        );
+        assert_eq!(
+            converted.candle_momentum_activation.max_entry_rsi,
+            expected.max_entry_rsi
+        );
+    }
+
+    #[test]
+    fn vegas_config_conversion_preserves_cross_asset_adaptive_threshold() {
+        let expected = rust_quant_indicators::trend::vegas::CrossAssetAdaptiveThresholdConfig {
+            is_open: true,
+            atr_period: 21,
+            volume_lookback_bars: 180,
+            min_volume_percentile: 0.8,
+            min_swing_atr_multiple: 5.0,
+            choppy_volatility_filter:
+                rust_quant_indicators::trend::vegas::ChoppyVolatilityFilterConfig {
+                    is_open: true,
+                    min_atr_ratio: 0.02,
+                    max_atr_ratio: 0.03,
+                    min_volume_percentile: 0.99,
+                },
+        };
+        let mut vegas = VegasStrategy::new("4H".to_string());
+        vegas.cross_asset_adaptive_threshold = expected;
+        let config = StrategyConfig::new(
+            45,
+            StrategyType::Vegas,
+            "ETH-USDT-SWAP".to_string(),
+            Timeframe::H4,
+            serde_json::to_value(vegas).expect("vegas config"),
+            serde_json::to_value(BasicRiskStrategyConfig::default()).expect("risk config"),
+        );
+
+        let converted = convert_strategy_config_to_param(&config)
+            .expect("convert config")
+            .to_vegas_strategy("4H".to_string())
+            .cross_asset_adaptive_threshold;
+
+        assert!(converted.is_open);
+        assert_eq!(converted.atr_period, expected.atr_period);
+        assert_eq!(
+            converted.volume_lookback_bars,
+            expected.volume_lookback_bars
+        );
+        assert_eq!(
+            converted.min_volume_percentile,
+            expected.min_volume_percentile
+        );
+        assert_eq!(
+            converted.min_swing_atr_multiple,
+            expected.min_swing_atr_multiple
+        );
+        assert_eq!(
+            converted.choppy_volatility_filter.min_volume_percentile,
+            expected.choppy_volatility_filter.min_volume_percentile
+        );
+    }
+
+    #[test]
+    fn vegas_config_conversion_preserves_min_k_line_num() {
+        let mut vegas = VegasStrategy::new("4H".to_string());
+        vegas.min_k_line_num = 720;
+        let ema = vegas.ema_signal.as_mut().expect("EMA config");
+        ema.ema6_length = 576;
+        ema.ema7_length = 676;
+        let config = StrategyConfig::new(
+            47,
+            StrategyType::Vegas,
+            "ALLO-USDT-SWAP".to_string(),
+            Timeframe::H4,
+            serde_json::to_value(vegas).expect("vegas config"),
+            serde_json::to_value(BasicRiskStrategyConfig::default()).expect("risk config"),
+        );
+
+        let converted = convert_strategy_config_to_param(&config)
+            .expect("convert config")
+            .to_vegas_strategy("4H".to_string());
+
+        assert_eq!(converted.min_k_line_num, 720);
+        let converted_ema = converted.ema_signal.expect("converted EMA config");
+        assert_eq!(converted_ema.ema6_length, 576);
+        assert_eq!(converted_ema.ema7_length, 676);
+    }
+
+    #[test]
+    fn vegas_config_conversion_preserves_disabled_optional_indicators() {
+        let mut vegas = VegasStrategy::new("4H".to_string());
+        vegas
+            .engulfing_signal
+            .as_mut()
+            .expect("engulfing config")
+            .is_open = false;
+        vegas
+            .ema_touch_trend_signal
+            .as_mut()
+            .expect("EMA touch config")
+            .is_open = false;
+        let config = StrategyConfig::new(
+            48,
+            StrategyType::Vegas,
+            "ETH-USDT-SWAP".to_string(),
+            Timeframe::H4,
+            serde_json::to_value(vegas).expect("vegas config"),
+            serde_json::to_value(BasicRiskStrategyConfig::default()).expect("risk config"),
+        );
+
+        let converted = convert_strategy_config_to_param(&config)
+            .expect("convert config")
+            .to_vegas_strategy("4H".to_string());
+
+        assert!(
+            !converted
+                .engulfing_signal
+                .expect("converted engulfing config")
+                .is_open
+        );
+        assert!(
+            !converted
+                .ema_touch_trend_signal
+                .expect("converted EMA touch config")
+                .is_open
+        );
+    }
+
+    #[test]
+    fn vegas_config_conversion_preserves_optional_risk_controls() {
+        let vegas = VegasStrategy::new("4H".to_string());
+        let risk = BasicRiskStrategyConfig {
+            fixed_signal_kline_take_profit_ratio: Some(0.25),
+            dynamic_max_loss: Some(false),
+            ..BasicRiskStrategyConfig::default()
+        };
+        let config = StrategyConfig::new(
+            46,
+            StrategyType::Vegas,
+            "ETH-USDT-SWAP".to_string(),
+            Timeframe::H4,
+            serde_json::to_value(vegas).expect("vegas config"),
+            serde_json::to_value(risk).expect("risk config"),
+        );
+
+        let converted = convert_strategy_config_to_param(&config)
+            .expect("convert config")
+            .to_risk_config();
+
+        assert_eq!(converted.fixed_signal_kline_take_profit_ratio, Some(0.25));
+        assert_eq!(converted.dynamic_max_loss, Some(false));
+    }
     /// 提供test策略配置的集中实现，避免回测策略调用方重复处理相同细节。
     fn test_strategy_config(id: i64, symbol: &str, timeframe: Timeframe) -> StrategyConfig {
         StrategyConfig::new(
@@ -316,6 +546,8 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     let vegas_strategy = serde_json::from_str::<VegasStrategy>(&value_str)
         .map_err(|e| anyhow!("解析策略配置JSON失败: {}", e))?;
     let signal_weights = vegas_strategy.signal_weights.clone();
+    let engulfing_signal = vegas_strategy.engulfing_signal;
+    let ema_touch_trend_signal = vegas_strategy.ema_touch_trend_signal;
     let leg_detection_signal = vegas_strategy.leg_detection_signal;
     let market_structure_signal = vegas_strategy.market_structure_signal;
     let range_filter_signal = vegas_strategy.range_filter_signal;
@@ -323,6 +555,8 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     let extreme_k_filter_signal = vegas_strategy.extreme_k_filter_signal;
     let fib_retracement_signal = vegas_strategy.fib_retracement_signal;
     let entry_block_config = vegas_strategy.entry_block_config;
+    let candle_momentum_activation = vegas_strategy.candle_momentum_activation;
+    let cross_asset_adaptive_threshold = vegas_strategy.cross_asset_adaptive_threshold;
     let ema_distance_config = vegas_strategy.ema_distance_config;
     let atr_stop_loss_multiplier = vegas_strategy.atr_stop_loss_multiplier;
     let emit_debug = vegas_strategy.emit_debug;
@@ -367,6 +601,10 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
             risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false),
         );
     param.signal_weights = signal_weights;
+    param.engulfing_signal = engulfing_signal;
+    param.ema_touch_trend_signal = ema_touch_trend_signal;
+    param.ema_signal = Some(ema_signal);
+    param.min_k_line_num = Some(vegas_strategy.min_k_line_num);
     param.leg_detection_signal = leg_detection_signal;
     param.market_structure_signal = market_structure_signal;
     param.range_filter_signal = range_filter_signal;
@@ -374,10 +612,14 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     param.extreme_k_filter_signal = extreme_k_filter_signal;
     param.fib_retracement_signal = fib_retracement_signal;
     param.entry_block_config = Some(entry_block_config);
+    param.candle_momentum_activation = Some(candle_momentum_activation);
+    param.cross_asset_adaptive_threshold = Some(cross_asset_adaptive_threshold);
     param.ema_distance_config = Some(ema_distance_config);
     param.atr_stop_loss_multiplier = Some(atr_stop_loss_multiplier);
     param.emit_debug = Some(emit_debug);
     param.macd_signal = vegas_strategy.macd_signal;
+    param.fix_signal_kline_take_profit_ratio = risk_config.fixed_signal_kline_take_profit_ratio;
+    param.dynamic_max_loss = risk_config.dynamic_max_loss;
     param.dynamic_entry_amp_threshold = risk_config.dynamic_entry_amp_threshold;
     param.dynamic_entry_loss_percent = risk_config.dynamic_entry_loss_percent;
     param.dynamic_entry_require_direction_mismatch =

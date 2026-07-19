@@ -77,13 +77,6 @@ impl ExitContext {
             TradeSide::Short => self.entry * (1.0 + loss_pct),
         }
     }
-    /// 计算收益率
-    fn profit_pct(&self) -> f64 {
-        match self.side {
-            TradeSide::Long => (self.adverse_price - self.entry) / self.entry,
-            TradeSide::Short => (self.entry - self.adverse_price) / self.entry,
-        }
-    }
 }
 // ============================================================================
 // 出场结果
@@ -201,6 +194,48 @@ fn select_tightest_stop(side: TradeSide, candidates: &[f64]) -> Option<f64> {
             .unwrap(),
     })
 }
+
+/// 计算入场时的有效保护价，只使用入场时已经可见的配置和信号止损。
+pub fn compute_initial_stop_price(
+    position: &TradePosition,
+    risk: &BasicRiskStrategyConfig,
+) -> Option<f64> {
+    if !position.open_price.is_finite() || position.open_price <= 0.0 {
+        return None;
+    }
+    let mut effective_max_loss = risk.max_loss_percent;
+    if risk.dynamic_max_loss.unwrap_or(true) {
+        if let (Some(entry_amp), Some(entry_close_pos)) = (
+            position.entry_kline_amplitude,
+            position.entry_kline_close_pos,
+        ) {
+            let threshold = risk.dynamic_entry_amp_threshold.unwrap_or(0.03);
+            let require_mismatch = risk
+                .dynamic_entry_require_direction_mismatch
+                .unwrap_or(true);
+            let direction_mismatch = match position.trade_side {
+                TradeSide::Long => entry_close_pos < 0.5,
+                TradeSide::Short => entry_close_pos > 0.5,
+            };
+            if entry_amp > threshold && (!require_mismatch || direction_mismatch) {
+                effective_max_loss =
+                    effective_max_loss.min(risk.dynamic_entry_loss_percent.unwrap_or(0.03));
+            }
+        }
+    }
+    if !effective_max_loss.is_finite() || effective_max_loss <= 0.0 {
+        return None;
+    }
+    let max_loss_stop = match position.trade_side {
+        TradeSide::Long => position.open_price * (1.0 - effective_max_loss),
+        TradeSide::Short => position.open_price * (1.0 + effective_max_loss),
+    };
+    let mut candidates = vec![max_loss_stop];
+    if let Some(signal_stop) = position.signal_kline_stop_close_price {
+        candidates.push(signal_stop);
+    }
+    select_tightest_stop(position.trade_side, &candidates)
+}
 /// 选择 交易执行与风控 的最佳候选结果，避免选择规则分散在调用方。
 fn select_nearest_tp(side: TradeSide, entry: f64, candidates: &[f64]) -> Option<f64> {
     let values: Vec<f64> = candidates
@@ -282,8 +317,8 @@ pub fn compute_current_targets(
 // ============================================================================
 // 止损检查函数
 // ============================================================================
-/// 检查最大损失止损
-fn check_max_loss_stop(
+/// 在信号止损和最大亏损止损之间选择离入场价更近的保护价，避免同棒穿越时按更差价格成交。
+fn check_base_protective_stop(
     ctx: &ExitContext,
     position: &TradePosition,
     risk_config: &BasicRiskStrategyConfig,
@@ -295,10 +330,21 @@ fn check_max_loss_stop(
         risk_config.dynamic_max_loss.unwrap_or(true),
         risk_config,
     );
-    if ctx.profit_pct() < -effective_max_loss {
-        let stop_price = ctx.stop_loss_price(effective_max_loss);
+    let max_loss_stop = ctx.stop_loss_price(effective_max_loss);
+    let signal_stop = position.signal_kline_stop_close_price;
+    let mut candidates = vec![max_loss_stop];
+    if let Some(price) = signal_stop {
+        candidates.push(price);
+    }
+    let Some(selected) = select_tightest_stop(ctx.side, &candidates) else {
+        return ExitResult::None;
+    };
+    if signal_stop.is_some_and(|price| price == selected) {
+        return check_signal_kline_stop(ctx, Some(selected));
+    }
+    if ctx.is_stop_loss_hit(selected) {
         ExitResult::Exit {
-            price: stop_price,
+            price: selected,
             reason: "最大亏损止损",
         }
     } else {
@@ -496,19 +542,11 @@ fn run_stop_loss_checks(
 ) -> ExitResult {
     // 1. 信号K线止损 (最高优先级：优先遵从各策略的特定止损逻辑)
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_signal_kline_stop(ctx, position.signal_kline_stop_close_price)
+        check_base_protective_stop(ctx, position, risk_config)
     {
         return result;
     }
-    // 2. 最大损失止损
-    let result = check_max_loss_stop(ctx, position, risk_config);
-    if matches!(
-        result,
-        ExitResult::Exit { .. } | ExitResult::ExitDynamic { .. }
-    ) {
-        return result;
-    }
-    // 3. 移动止损（三级ATR系统）
+    // 2. 移动止损（三级ATR系统）
     check_atr_trailing_stop(ctx, position)
 }
 /// 止盈检查链（优先级从高到低）
@@ -693,9 +731,9 @@ pub fn check_risk_config_with_r_system(
     // ========================================================================
     // 止损检查（优先级最高）
     // ========================================================================
-    // 1. 最大损失止损（最高优先级）
+    // 1. 入场基础保护止损（信号止损与最大亏损中取更紧者）
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_max_loss_stop(&ctx, &trade_position, risk_config)
+        check_base_protective_stop(&ctx, &trade_position, risk_config)
     {
         r_runtime.r_state = None; // 平仓后清除R系统状态
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
@@ -779,13 +817,6 @@ pub fn check_risk_config_with_r_system(
     // 4. 移动止损（三级ATR系统）
     if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
         check_atr_trailing_stop(&ctx, &trade_position)
-    {
-        r_runtime.r_state = None;
-        return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);
-    }
-    // 5. 信号K线止损
-    if let result @ ExitResult::Exit { .. } | result @ ExitResult::ExitDynamic { .. } =
-        check_signal_kline_stop(&ctx, trade_position.signal_kline_stop_close_price)
     {
         r_runtime.r_state = None;
         return finalize_exit(trading_state, trade_position, candle, signal, &ctx, result);

@@ -1,5 +1,17 @@
 use super::types::{SignalResult, TradeRecord, TradingState};
 use std::env;
+
+/// 按记录数量计算冻结初始止损对应的价格风险金额。
+fn initial_risk_amount(
+    initial_stop_price: Option<f64>,
+    open_price: f64,
+    quantity: f64,
+) -> Option<f64> {
+    initial_stop_price
+        .filter(|price| price.is_finite())
+        .map(|price| (open_price - price).abs() * quantity)
+        .filter(|risk| risk.is_finite() && *risk > 0.0)
+}
 /// 记录交易入场
 pub fn record_trade_entry(state: &mut TradingState, option_type: String, signal: &SignalResult) {
     // 批量回测的时候不进行记录
@@ -26,6 +38,13 @@ pub fn record_trade_entry(state: &mut TradingState, option_type: String, signal:
         signal_result: signal.single_result.clone(),
         stop_loss_source: None,         // 开仓时不记录止损来源
         stop_loss_update_history: None, // 开仓时不记录止损更新历史
+        initial_stop_price: trade_position.initial_stop_price,
+        initial_risk_amount: initial_risk_amount(
+            trade_position.initial_stop_price,
+            trade_position.open_price,
+            trade_position.position_nums,
+        ),
+        net_profit_r: None,
     });
 }
 /// 记录交易出场
@@ -53,6 +72,11 @@ pub fn record_trade_exit_with_full_close(
     if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true" {
         return;
     }
+    let risk_amount = initial_risk_amount(
+        trade_position.initial_stop_price,
+        trade_position.open_price,
+        closing_quantity,
+    );
     state.trade_records.push(TradeRecord {
         option_type: "close".to_string(),
         open_position_time: trade_position.open_position_time.clone(),
@@ -81,5 +105,8 @@ pub fn record_trade_exit_with_full_close(
         } else {
             Some(serde_json::to_string(&trade_position.stop_loss_updates).unwrap_or_default())
         },
+        initial_stop_price: trade_position.initial_stop_price,
+        initial_risk_amount: risk_amount,
+        net_profit_r: risk_amount.map(|risk| trade_position.profit_loss / risk),
     });
 }

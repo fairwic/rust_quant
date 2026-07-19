@@ -168,6 +168,7 @@ impl StrategyExecutionService {
         risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
         strategy_type: &str,
+        strategy_version: &str,
         exchange: Option<&str>,
         side: &str,
         pos_side: &str,
@@ -184,7 +185,13 @@ impl StrategyExecutionService {
             side,
             pos_side,
             client_order_id,
-            StrategySignalPayloadBuildOptions::default(),
+            StrategySignalPayloadBuildOptions {
+                payload_overlay: Some(serde_json::json!({
+                    "strategy_version": strategy_version,
+                    "entry_rule_version": strategy_version,
+                })),
+                ..Default::default()
+            },
         )
     }
     #[cfg(test)]
@@ -215,6 +222,7 @@ impl StrategyExecutionService {
         risk_config: &rust_quant_domain::BasicRiskConfig,
         config_id: i64,
         strategy_type: &str,
+        strategy_version: &str,
         exchange: Option<&str>,
         side: &str,
         pos_side: &str,
@@ -228,6 +236,7 @@ impl StrategyExecutionService {
             risk_config,
             config_id,
             strategy_type,
+            strategy_version,
             exchange,
             side,
             pos_side,

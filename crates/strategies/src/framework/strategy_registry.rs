@@ -186,8 +186,9 @@ pub fn register_default_strategies() {
 }
 /// 注册 回测与策略研究 组件，使运行时可以按类型或名称找到对应实现。
 fn register_builtin_strategies(registry: &StrategyRegistry) {
-    const DEFAULT_TYPES: [StrategyType; 7] = [
+    const DEFAULT_TYPES: [StrategyType; 8] = [
         StrategyType::Vegas,
+        StrategyType::VegasUniversal4h,
         StrategyType::Nwe,
         StrategyType::BscEventArb,
         StrategyType::BtcEthLiquidityScalper,
@@ -203,6 +204,7 @@ fn register_builtin_strategies(registry: &StrategyRegistry) {
 fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &StrategyType) {
     let key = match strategy_type {
         StrategyType::Vegas => "Vegas",
+        StrategyType::VegasUniversal4h => "VegasUniversal4h",
         StrategyType::Nwe => "Nwe",
         StrategyType::BscEventArb => "BscEventArb",
         StrategyType::BtcEthLiquidityScalper => "BtcEthLiquidityScalper",
@@ -220,6 +222,10 @@ fn register_executor_for_type(registry: &StrategyRegistry, strategy_type: &Strat
         StrategyType::Vegas => {
             registry.register(Arc::new(VegasStrategyExecutor::new()));
             info!("✅ 注册策略: Vegas");
+        }
+        StrategyType::VegasUniversal4h => {
+            registry.register(Arc::new(VegasStrategyExecutor::universal_4h()));
+            info!("✅ 注册策略: VegasUniversal4h");
         }
         StrategyType::Nwe => {
             registry.register(Arc::new(NweStrategyExecutor::new()));
@@ -283,9 +289,11 @@ mod tests {
         let registry = StrategyRegistry::new();
         super::register_executor_for_type(&registry, &StrategyType::Vegas);
         assert!(registry.contains("Vegas"));
+        super::register_executor_for_type(&registry, &StrategyType::VegasUniversal4h);
+        assert!(registry.contains("VegasUniversal4h"));
         super::register_executor_for_type(&registry, &StrategyType::Nwe);
         assert!(registry.contains("Nwe"));
-        assert_eq!(registry.count(), 2);
+        assert_eq!(registry.count(), 3);
     }
     #[test]
     fn test_list_strategies_contains_defaults() {

@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub enum StrategyType {
     /// Vegas 策略
     Vegas,
+    /// Vegas 全市场自适应 4H 策略
+    VegasUniversal4h,
     /// NWE 策略
     Nwe,
     /// MACD+KDJ 策略
@@ -54,6 +56,7 @@ impl StrategyType {
     pub fn as_str(&self) -> &str {
         match self {
             StrategyType::Vegas => "vegas",
+            StrategyType::VegasUniversal4h => "vegas_universal_4h",
             StrategyType::Nwe => "nwe",
             StrategyType::MacdKdj => "macd_kdj",
             StrategyType::Engulfing => "engulfing",
@@ -93,6 +96,7 @@ impl std::str::FromStr for StrategyType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "vegas" => Ok(StrategyType::Vegas),
+            "vegas_universal_4h" => Ok(StrategyType::VegasUniversal4h),
             "nwe" => Ok(StrategyType::Nwe),
             "macd_kdj" => Ok(StrategyType::MacdKdj),
             "engulfing" => Ok(StrategyType::Engulfing),
@@ -253,6 +257,10 @@ mod tests {
     fn test_strategy_type_from_str() {
         use std::str::FromStr;
         assert_eq!(StrategyType::from_str("vegas"), Ok(StrategyType::Vegas));
+        assert_eq!(
+            StrategyType::from_str("vegas_universal_4h"),
+            Ok(StrategyType::VegasUniversal4h)
+        );
         assert_eq!(StrategyType::from_str("NWE"), Ok(StrategyType::Nwe));
         assert_eq!(
             StrategyType::from_str("market_velocity"),

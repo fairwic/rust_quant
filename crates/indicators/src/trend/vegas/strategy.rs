@@ -18,12 +18,18 @@ use serde_json::json;
 pub struct VegasStrategy {
     /// 周期
     pub period: String,
-    /// 最小需要的k线数量
+    /// 回测首次允许产生信号、实盘重启预热及单次信号计算共用的当前周期 K 线根数。
     pub min_k_line_num: usize,
     /// EMA信号配置
     pub ema_signal: Option<EmaSignalConfig>,
     /// 成交量信号配置
     pub volume_signal: Option<VolumeSignalConfig>,
+    /// 4H 动量事件激活代理；默认关闭，仅在显式配置后限制开仓窗口
+    #[serde(default)]
+    pub candle_momentum_activation: CandleMomentumActivationConfig,
+    /// 跨币种 ATR 与成交量分位数阈值；默认关闭，研究版本显式开启。
+    #[serde(default)]
+    pub cross_asset_adaptive_threshold: CrossAssetAdaptiveThresholdConfig,
     /// EMA趋势配置
     pub ema_touch_trend_signal: Option<EmaTouchTrendSignalConfig>,
     /// RSI信号配置
@@ -110,12 +116,22 @@ fn compute_stc_pair(data_items: &[CandleItem]) -> Option<(f64, f64)> {
     let mut stc = StcIndicator::new(23, 50, 10, 3, 3);
     let mut prev = None;
     let mut current = None;
-    for item in data_items {
+    for item in recent_indicator_replay_window(data_items, 50) {
         let value = stc.next(item.c);
         prev = current;
         current = Some(value);
     }
     Some((prev?, current?))
+}
+
+/// 为每根 K 线临时重建 MACD/STC 时，只回放最长周期的 10 倍数据，降低重复扫描成本。
+/// 该窗口是动量过滤器的收敛近似，不可复用于 ATR、EMA 等会直接改变止损或入场边界的指标。
+fn recent_indicator_replay_window(
+    data_items: &[CandleItem],
+    longest_period: usize,
+) -> &[CandleItem] {
+    let replay_bars = longest_period.max(1).saturating_mul(10);
+    &data_items[data_items.len().saturating_sub(replay_bars)..]
 }
 impl VegasStrategy {
     /// 构建 回测与策略研究 所需实例，并集中初始化依赖和默认状态。
@@ -125,6 +141,8 @@ impl VegasStrategy {
             min_k_line_num: 7000,
             ema_signal: Some(EmaSignalConfig::default()),
             volume_signal: Some(VolumeSignalConfig::default()),
+            candle_momentum_activation: CandleMomentumActivationConfig::default(),
+            cross_asset_adaptive_threshold: CrossAssetAdaptiveThresholdConfig::default(),
             ema_touch_trend_signal: Some(EmaTouchTrendSignalConfig::default()),
             rsi_signal: Some(RsiSignalConfig::default()),
             bolling_signal: Some(BollingBandsSignalConfig::default()),
@@ -161,6 +179,8 @@ impl VegasStrategy {
 include!("strategy/short_rule_helpers.rs");
 include!("strategy/long_rule_helpers.rs");
 include!("strategy/long_entry_helpers.rs");
+include!("strategy/momentum_activation.rs");
+include!("strategy/adaptive_thresholds.rs");
 include!("strategy/trade_signal_entry_filters.rs");
 include!("strategy/trade_signal.rs");
 include!("strategy/indicator_helpers.rs");

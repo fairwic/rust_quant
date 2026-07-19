@@ -14,7 +14,14 @@ WORKDIR /app/rust_quant
 RUN --mount=type=cache,id=quant-core-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=quant-core-cargo-git,target=/usr/local/cargo/git \
     --mount=type=cache,id=quant-core-target,target=/app/rust_quant/target \
-    cargo build --release -p rust-quant-cli --bins \
+    cargo build --release -p rust-quant-cli \
+      --bin rust_quant \
+      --bin market_velocity_candle_backfill \
+      --bin market_velocity_kline_scanner \
+      --bin market_velocity_event_backtest \
+      --bin market_velocity_paper_observation \
+      --bin market_velocity_live_handoff \
+      --bin quant_core_schema_ensure \
     && mkdir -p /app/rust_quant/bin \
     && cp target/release/rust_quant /app/rust_quant/bin/rust_quant \
     && cp target/release/market_velocity_candle_backfill /app/rust_quant/bin/market_velocity_candle_backfill \

@@ -257,6 +257,7 @@
         };
         let _config = StrategyConfig {
             id: config_id,
+            version: "default".to_string(),
             strategy_type: StrategyType::Vegas,
             exchange: None,
             symbol: "BTC-USDT".to_string(),
@@ -587,6 +588,7 @@
                 &risk_config,
                 config_id,
                 strategy_type,
+                "default",
                 None,
             )
             .await?;

@@ -15,6 +15,8 @@ fn build_exchange_reconciliation_report_request(
         combo_id: task.combo_id,
         buyer_email: task.buyer_email.clone(),
         symbol,
+        exchange: Some(exchange),
+        api_credential_id: api_credential_id_from_task(task),
         issue_type,
         detected_at,
         source_ref: Some(source_ref),

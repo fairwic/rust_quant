@@ -1,9 +1,10 @@
 use super::super::types::TradeSide;
 use super::recording::{record_trade_entry, record_trade_exit_with_full_close};
+use super::risk::compute_initial_stop_price;
 use super::types::{BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState};
 use crate::CandleItem;
 use rust_quant_domain::enums::PositionSide;
-use tracing::error;
+use tracing::debug;
 
 /// Historical backtest fee rate used when a strategy has not opted into a newer cost model.
 const LEGACY_BACKTEST_TRADE_FEE_RATE: f64 = 0.0007;
@@ -96,6 +97,8 @@ pub fn open_long_position(
     }
     //设置止盈止损价格
     set_long_stop_close_price(risk_config, signal, &mut temp_trade_position);
+    temp_trade_position.initial_stop_price =
+        compute_initial_stop_price(&temp_trade_position, &risk_config);
     if signal.signal_kline_stop_loss_price.is_none()
         && signal.stop_loss_source.as_deref() == Some("RepairLong_NoSignalKline")
     {
@@ -109,6 +112,16 @@ pub fn open_long_position(
 // ============================================================================
 // 止盈止损设置 - 公共逻辑
 // ============================================================================
+/// 判断信号止损是否位于当前信号价格的保护一侧；移动止损可越过原始入场价。
+fn is_protective_signal_stop(trade_side: TradeSide, reference_price: f64, stop_price: f64) -> bool {
+    stop_price.is_finite()
+        && reference_price.is_finite()
+        && match trade_side {
+            TradeSide::Long => stop_price < reference_price,
+            TradeSide::Short => stop_price > reference_price,
+        }
+}
+
 /// 设置止盈止损价格的公共逻辑（Long/Short共用）
 /// 处理：信号K线止损、ATR止损、移动止损、逆势回调止盈、三级止盈价格
 fn set_stop_close_price_common(
@@ -121,7 +134,9 @@ fn set_stop_close_price_common(
     // 1. 信号K线止损 + 更新历史记录
     if risk_config.is_used_signal_k_line_stop_loss.unwrap_or(false) && !disable_signal_kline_updates
     {
-        if let Some(new_price) = signal.signal_kline_stop_loss_price {
+        if let Some(new_price) = signal.signal_kline_stop_loss_price.filter(|price| {
+            is_protective_signal_stop(position.trade_side, signal.open_price, *price)
+        }) {
             let source = signal
                 .stop_loss_source
                 .clone()
@@ -186,7 +201,7 @@ pub fn set_long_stop_close_price(
                         + temp_trade_position.signal_high_low_diff * fixed_take_profit_ratio,
                 );
             } else {
-                error!("signal_kline_stop_loss_price is none");
+                debug!("skip fixed take profit: protective signal stop is unavailable");
             }
         }
     }
@@ -225,6 +240,8 @@ pub fn open_short_position(
     }
     //设置止盈止损价格
     set_short_stop_close_price(risk_config, signal, &mut temp_trade_position);
+    temp_trade_position.initial_stop_price =
+        compute_initial_stop_price(&temp_trade_position, &risk_config);
     state.trade_position = Some(temp_trade_position);
     state.open_position_times += 1;
     state.last_signal_result = None;
@@ -247,7 +264,7 @@ pub fn set_short_stop_close_price(
                 temp_trade_position.atr_take_ratio_profit_price =
                     Some(signal.open_price - (diff_price * atr_take_profit_ratio));
             } else {
-                error!("atr_stop_loss_price is none");
+                debug!("skip ATR take profit: ATR stop is unavailable");
             }
         }
     }
@@ -427,6 +444,64 @@ mod tests {
 
         let position = state.trade_position.expect("position should open");
         assert!((position.position_nums - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn open_positions_reject_signal_stops_on_the_profit_side() {
+        let risk = BasicRiskStrategyConfig {
+            is_used_signal_k_line_stop_loss: Some(true),
+            ..Default::default()
+        };
+        let mut long_state = TradingState::default();
+        let mut long_signal = signal(1, 100.0, SignalDirection::Long);
+        long_signal.signal_kline_stop_loss_price = Some(101.0);
+        open_long_position(risk, &mut long_state, &candle(1, 100.0), &long_signal, None);
+        let long_position = long_state.trade_position.expect("long position");
+        assert_eq!(long_position.signal_kline_stop_close_price, None);
+        assert!(long_position.stop_loss_updates.is_empty());
+
+        let mut short_state = TradingState::default();
+        let mut short_signal = signal(1, 100.0, SignalDirection::Short);
+        short_signal.signal_kline_stop_loss_price = Some(99.0);
+        open_short_position(
+            risk,
+            &mut short_state,
+            &candle(1, 100.0),
+            &short_signal,
+            None,
+        );
+        let short_position = short_state.trade_position.expect("short position");
+        assert_eq!(short_position.signal_kline_stop_close_price, None);
+        assert!(short_position.stop_loss_updates.is_empty());
+    }
+
+    #[test]
+    fn trade_records_freeze_initial_stop_and_net_profit_r() {
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            is_used_signal_k_line_stop_loss: Some(true),
+            trade_fee_rate: Some(0.0),
+            ..Default::default()
+        };
+        let mut state = TradingState::default();
+        let mut entry = signal(1, 100.0, SignalDirection::Long);
+        entry.signal_kline_stop_loss_price = Some(99.0);
+
+        open_long_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+        let entry_record = state.trade_records.first().expect("entry record");
+        assert_eq!(entry_record.initial_stop_price, Some(99.0));
+        assert_eq!(entry_record.initial_risk_amount, Some(1.0));
+        assert_eq!(entry_record.net_profit_r, None);
+
+        if let Some(position) = state.trade_position.as_mut() {
+            position.close_price = Some(102.0);
+        }
+        close_position(&mut state, &candle(2, 102.0), &entry, "test", 2.0);
+
+        let close_record = state.trade_records.last().expect("close record");
+        assert_eq!(close_record.initial_stop_price, Some(99.0));
+        assert_eq!(close_record.initial_risk_amount, Some(1.0));
+        assert_eq!(close_record.net_profit_r, Some(2.0));
     }
 
     #[test]

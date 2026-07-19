@@ -10,10 +10,15 @@ impl VegasStrategy {
         use crate::pattern::engulfing::KlineEngulfingIndicator;
         use crate::pattern::hammer::KlineHammerIndicator;
         use crate::volatility::bollinger::BollingBandsPlusIndicator;
+        use crate::volume::VolumeProfileIndicator;
         use crate::volume_indicator::VolumeRatioIndicator;
         let mut indicator_combine = IndicatorCombine::default();
         // 添加吞没形态
-        if let Some(_engulfing_signal) = &self.engulfing_signal {
+        if self
+            .engulfing_signal
+            .as_ref()
+            .is_some_and(|config| config.is_open)
+        {
             indicator_combine.engulfing_indicator = Some(KlineEngulfingIndicator::new());
         }
         // 添加EMA
@@ -70,8 +75,18 @@ impl VegasStrategy {
                         market_structure_signal.internal_length,
                         market_structure_signal.swing_threshold,
                         market_structure_signal.internal_threshold,
-                    ));
+                ));
             }
+        }
+        if self.entry_block_config.block_opposite_value_area_entry
+            || self
+                .entry_block_config
+                .block_low_volume_above_value_area_entry
+            || self
+                .entry_block_config
+                .block_short_inside_low_volume_node_entry
+        {
+            indicator_combine.volume_profile_indicator = Some(VolumeProfileIndicator::default());
         }
         indicator_combine
     }
@@ -92,9 +107,16 @@ impl VegasStrategy {
     }
     // 私有辅助方法
     /// 校验输入和运行前置条件，提前暴露 回测与策略研究 的不可执行原因。
-    fn check_volume_trend(&self, volume_trend: &VolumeTrendSignalValue) -> bool {
+    fn check_volume_trend(
+        &self,
+        volume_trend: &VolumeTrendSignalValue,
+        adaptive_value: &CrossAssetAdaptiveThresholdValue,
+    ) -> bool {
         if let Some(volume_signal_config) = &self.volume_signal {
-            return volume_trend.volume_ratio > volume_signal_config.volume_increase_ratio;
+            return self.adaptive_volume_confirmed(
+                adaptive_value,
+                volume_trend.volume_ratio > volume_signal_config.volume_increase_ratio,
+            );
         }
         false
     }
@@ -120,7 +142,11 @@ impl VegasStrategy {
         data_items: &[CandleItem],
         ema_value: EmaSignalValue,
     ) -> EmaTouchTrendSignalValue {
-        if let Some(ema_touch_trend_signal) = &self.ema_touch_trend_signal {
+        if let Some(ema_touch_trend_signal) = self
+            .ema_touch_trend_signal
+            .as_ref()
+            .filter(|config| config.is_open)
+        {
             trend::check_ema_touch_trend(data_items, ema_value, ema_touch_trend_signal)
         } else {
             EmaTouchTrendSignalValue::default()
@@ -214,7 +240,11 @@ impl VegasStrategy {
     ) {
         let mut is_engulfing = false;
         let last_data_item = data_items.last().expect("数据不能为空");
-        if let Some(engulfing_signal) = &self.engulfing_signal {
+        if let Some(engulfing_signal) = self
+            .engulfing_signal
+            .as_ref()
+            .filter(|config| config.is_open)
+        {
             if vegas_indicator_signal_value.engulfing_value.is_engulfing
                 && vegas_indicator_signal_value.engulfing_value.body_ratio
                     > engulfing_signal.body_ratio
@@ -518,6 +548,27 @@ impl VegasStrategy {
         }
         Some(entry_price + (current_stop - entry_price) * 0.5)
     }
+    /// 移除位于入场价错误一侧的信号止损，保留 ATR 与最大亏损保护作为后备。
+    fn reject_non_protective_signal_stop(signal_result: &mut SignalResult) -> bool {
+        let (Some(entry_price), Some(stop_price)) = (
+            signal_result.open_price,
+            signal_result.signal_kline_stop_loss_price,
+        ) else {
+            return false;
+        };
+        let is_protective = match signal_result.direction {
+            rust_quant_domain::SignalDirection::Long => stop_price < entry_price,
+            rust_quant_domain::SignalDirection::Short => stop_price > entry_price,
+            rust_quant_domain::SignalDirection::None
+            | rust_quant_domain::SignalDirection::Close => true,
+        };
+        if is_protective {
+            return false;
+        }
+        signal_result.signal_kline_stop_loss_price = None;
+        signal_result.stop_loss_source = Some("SignalStop_DirectionRejected".to_string());
+        true
+    }
     /// 计算 回测与策略研究 指标，保持公式和边界处理集中可审计。
     fn calculate_best_stop_loss_price(
         &self,
@@ -551,7 +602,17 @@ impl VegasStrategy {
                 && signal_result.direction == rust_quant_domain::SignalDirection::Long)
             && !conflicting_long_engulfing_stop_raise
         {
-            signal_result.signal_kline_stop_loss_price = Some(last_data_item.o());
+            let candidate = last_data_item.o();
+            let entry_price = signal_result.open_price.unwrap_or(last_data_item.c());
+            let is_protective = match signal_result.direction {
+                rust_quant_domain::SignalDirection::Long => candidate < entry_price,
+                rust_quant_domain::SignalDirection::Short => candidate > entry_price,
+                rust_quant_domain::SignalDirection::None
+                | rust_quant_domain::SignalDirection::Close => false,
+            };
+            if is_protective {
+                signal_result.signal_kline_stop_loss_price = Some(candidate);
+            }
         }
         // 【已禁用】只保留吞没形态止损，其他情况不设置信号线止损
         // if let Some(stop_loss_price) = utils::calculate_best_stop_loss_price(

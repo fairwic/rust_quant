@@ -135,6 +135,9 @@ async fn backtest_details_response(
                 loss_nums,
                 stop_loss_source,
                 stop_loss_update_history,
+                initial_stop_price,
+                initial_risk_amount,
+                net_profit_r,
                 'back_test_detail'::text AS source_table
             FROM back_test_detail
             WHERE ($1::TEXT IS NULL OR strategy_type ILIKE '%' || $1 || '%' OR inst_id ILIKE '%' || $1 || '%' OR time ILIKE '%' || $1 || '%' OR option_type ILIKE '%' || $1 || '%' OR close_type ILIKE '%' || $1 || '%')

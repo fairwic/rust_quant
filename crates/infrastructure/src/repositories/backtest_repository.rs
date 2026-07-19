@@ -128,7 +128,7 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 })
                 .collect::<Result<Vec<_>>>()?;
             let mut builder: QueryBuilder<Postgres> =
-                QueryBuilder::new("INSERT INTO back_test_detail (option_type, strategy_type, inst_id, time, back_test_id, open_position_time, signal_open_position_time, signal_status, close_position_time, open_price, close_price, profit_loss, quantity, full_close, close_type, win_nums, loss_nums, signal_value, signal_result, stop_loss_source, stop_loss_update_history) ");
+                QueryBuilder::new("INSERT INTO back_test_detail (option_type, strategy_type, inst_id, time, back_test_id, open_position_time, signal_open_position_time, signal_status, close_position_time, open_price, close_price, profit_loss, quantity, full_close, close_type, win_nums, loss_nums, signal_value, signal_result, stop_loss_source, stop_loss_update_history, initial_stop_price, initial_risk_amount, net_profit_r) ");
             builder.push_values(
                 chunk.iter().zip(parsed_times.iter()),
                 |mut b, (detail, parsed)| {
@@ -152,7 +152,10 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                         .push_bind(&detail.signal_value)
                         .push_bind(&detail.signal_result)
                         .push_bind(&detail.stop_loss_source)
-                        .push_bind(&detail.stop_loss_update_history);
+                        .push_bind(&detail.stop_loss_update_history)
+                        .push_bind(detail.initial_stop_price)
+                        .push_bind(detail.initial_risk_amount)
+                        .push_bind(detail.net_profit_r);
                 },
             );
             let result = builder.build().execute(self.pool()).await?;

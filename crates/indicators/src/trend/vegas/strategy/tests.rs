@@ -4,9 +4,10 @@
         KlineHammerSignalValue, MacdSignalValue, RsiSignalValue, VolumeTrendSignalValue,
     };
     use super::{
-        EmaDistanceState, EmaSignalValue, EntryBlockConfig, FibRetracementSignalConfig,
-        FibRetracementSignalValue, RsiSignalConfig, SignalCondition, SignalType,
-        SignalWeightsConfig,
+        recent_indicator_replay_window, CandleMomentumActivationConfig, EmaDistanceState,
+        EmaSignalValue, EmaTouchTrendSignalConfig, EngulfingSignalConfig, EntryBlockConfig,
+        FibRetracementSignalConfig, FibRetracementSignalValue, MarketStructureConfig,
+        RsiSignalConfig, SignalCondition, SignalDirect, SignalType, SignalWeightsConfig,
         VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
     };
     use crate::leg_detection_indicator::LegDetectionValue;
@@ -41,6 +42,124 @@
 
         assert!(!strategy.weak_bollinger_volatility_allows_filter(&low_volatility));
         assert!(strategy.weak_bollinger_volatility_allows_filter(&high_volatility));
+    }
+
+    #[test]
+    fn disabled_optional_indicators_are_not_initialized() {
+        let strategy = VegasStrategy {
+            engulfing_signal: Some(EngulfingSignalConfig {
+                is_open: false,
+                ..EngulfingSignalConfig::default()
+            }),
+            market_structure_signal: Some(MarketStructureConfig {
+                is_open: false,
+                ..MarketStructureConfig::default()
+            }),
+            ..VegasStrategy::default()
+        };
+
+        let indicators = strategy.get_indicator_combine();
+        assert!(indicators.engulfing_indicator.is_none());
+        assert!(indicators.market_structure_indicator.is_none());
+        assert!(indicators.volume_profile_indicator.is_none());
+    }
+
+    #[test]
+    fn volume_profile_is_initialized_only_for_enabled_profile_filters() {
+        let strategy = VegasStrategy {
+            entry_block_config: EntryBlockConfig {
+                block_opposite_value_area_entry: true,
+                ..EntryBlockConfig::default()
+            },
+            ..VegasStrategy::default()
+        };
+
+        assert!(strategy
+            .get_indicator_combine()
+            .volume_profile_indicator
+            .is_some());
+    }
+
+    #[test]
+    fn disabled_ema_touch_returns_no_trend_signal() {
+        let strategy = VegasStrategy {
+            ema_touch_trend_signal: Some(EmaTouchTrendSignalConfig {
+                is_open: false,
+                ..EmaTouchTrendSignalConfig::default()
+            }),
+            ..VegasStrategy::default()
+        };
+
+        let value = strategy.check_ema_touch_trend(
+            &[candle(100.0, 101.0, 99.0, 100.0, 1)],
+            EmaSignalValue::default(),
+        );
+        assert!(!value.is_uptrend);
+        assert!(!value.is_downtrend);
+        assert!(!value.is_long_signal);
+        assert!(!value.is_short_signal);
+    }
+    #[test]
+    fn short_distance_limit_is_opt_in_and_blocks_overextended_short() {
+        let strategy = VegasStrategy {
+            entry_block_config: EntryBlockConfig {
+                max_short_ema_distance_ratio: Some(0.15),
+                ..EntryBlockConfig::default()
+            },
+            ..VegasStrategy::default()
+        };
+        let candles = vec![candle(100.0, 101.0, 99.0, 100.0, 1)];
+        let mut signal = SignalResult {
+            should_sell: Some(true),
+            open_price: Some(100.0),
+            ..SignalResult::empty()
+        };
+        let values = VegasIndicatorSignalValue {
+            ema_values: EmaSignalValue {
+                is_short_trend: true,
+                ..EmaSignalValue::default()
+            },
+            ..VegasIndicatorSignalValue::default()
+        };
+        let mut dynamic_adjustments = Vec::new();
+        let mut range_snapshot = None;
+
+        strategy.apply_post_signal_entry_filters(
+            &candles,
+            candles.last().expect("last candle"),
+            &values,
+            &[],
+            FibRetracementSignalConfig {
+                is_open: false,
+                strict_major_trend: false,
+                ..FibRetracementSignalConfig::default()
+            },
+            EmaDistanceFilter {
+                distance_ratio: 0.151,
+                ..EmaDistanceFilter::default()
+            },
+            None,
+            &mut signal,
+            &mut dynamic_adjustments,
+            &mut range_snapshot,
+        );
+
+        assert_eq!(signal.should_sell, Some(false));
+        assert!(signal
+            .filter_reasons
+            .contains(&"SHORT_EMA_DISTANCE_LIMIT".to_string()));
+    }
+    #[test]
+    fn indicator_replay_window_keeps_ten_periods_from_the_tail() {
+        let candles = (0..1_000)
+            .map(|ts| candle(100.0, 101.0, 99.0, 100.0, ts))
+            .collect::<Vec<_>>();
+
+        let replay = recent_indicator_replay_window(&candles, 14);
+
+        assert_eq!(replay.len(), 140);
+        assert_eq!(replay.first().map(|item| item.ts), Some(860));
+        assert_eq!(replay.last().map(|item| item.ts), Some(999));
     }
     #[test]
     fn fib_strict_reason_includes_swing_pct_suffix() {
@@ -326,6 +445,64 @@
         assert!(!signal
             .filter_reasons
             .contains(&"WEAK_BOLLINGER_CONTEXT_LONG_BLOCK".to_string()));
+    }
+    #[test]
+    fn momentum_rsi_range_blocks_an_activated_entry_at_the_upper_bound() {
+        let mut strategy = VegasStrategy::default();
+        strategy.candle_momentum_activation = CandleMomentumActivationConfig {
+            is_open: true,
+            baseline_bars: 4,
+            valid_for_bars: 3,
+            min_wait_bars: 1,
+            min_volume_ratio: 2.0,
+            min_range_ratio: 1.5,
+            allow_trigger_bar_entry: false,
+            min_entry_rsi: Some(25.0),
+            max_entry_rsi: Some(55.0),
+            ..CandleMomentumActivationConfig::default()
+        };
+        let mut candles = vec![
+            candle(100.0, 101.0, 99.0, 100.0, 1),
+            candle(100.0, 101.0, 99.0, 100.0, 2),
+            candle(100.0, 101.0, 99.0, 100.0, 3),
+            candle(100.0, 101.0, 99.0, 100.0, 4),
+            candle(98.0, 102.0, 98.0, 102.0, 5),
+            candle(100.0, 101.0, 99.0, 100.0, 6),
+        ];
+        for candle in &mut candles[..4] {
+            candle.v = 100.0;
+        }
+        candles[4].v = 250.0;
+        candles[5].v = 100.0;
+        let mut signal = SignalResult {
+            should_buy: Some(true),
+            open_price: Some(100.0),
+            ..SignalResult::empty()
+        };
+        let mut dynamic_adjustments = Vec::new();
+        let mut range_snapshot = None;
+
+        strategy.apply_post_signal_entry_filters(
+            &candles,
+            candles.last().expect("last candle"),
+            &VegasIndicatorSignalValue::default(),
+            &[],
+            FibRetracementSignalConfig {
+                is_open: false,
+                strict_major_trend: false,
+                ..FibRetracementSignalConfig::default()
+            },
+            EmaDistanceFilter::default(),
+            Some(55.0),
+            &mut signal,
+            &mut dynamic_adjustments,
+            &mut range_snapshot,
+        );
+
+        assert_eq!(signal.should_buy, Some(false));
+        assert!(signal
+            .filter_reasons
+            .contains(&"CANDLE_MOMENTUM_RSI_RANGE_REQUIRED".to_string()));
     }
     #[test]
     fn entry_block_config_enables_bearish_fvg_pressure_filter_without_env() {
@@ -1210,4 +1387,76 @@
         assert!(
             !VegasStrategy::should_block_too_far_uptrend_opposing_hammer_short(&signal_values,)
         );
+    }
+
+    #[test]
+    fn non_protective_signal_stops_are_rejected_for_both_directions() {
+        let mut long_signal = SignalResult::empty();
+        long_signal.direction = rust_quant_domain::SignalDirection::Long;
+        long_signal.open_price = Some(100.0);
+        long_signal.signal_kline_stop_loss_price = Some(101.0);
+        assert!(VegasStrategy::reject_non_protective_signal_stop(
+            &mut long_signal
+        ));
+        assert_eq!(long_signal.signal_kline_stop_loss_price, None);
+
+        let mut short_signal = SignalResult::empty();
+        short_signal.direction = rust_quant_domain::SignalDirection::Short;
+        short_signal.open_price = Some(100.0);
+        short_signal.signal_kline_stop_loss_price = Some(99.0);
+        assert!(VegasStrategy::reject_non_protective_signal_stop(
+            &mut short_signal
+        ));
+        assert_eq!(short_signal.signal_kline_stop_loss_price, None);
+    }
+
+    #[test]
+    fn fib_only_direction_skips_weighted_score_when_fib_is_absent() {
+        let weighted_score_called = std::cell::Cell::new(false);
+        let direction = VegasStrategy::resolve_signal_direction(
+            FibRetracementSignalConfig {
+                is_open: true,
+                only_on_fib: true,
+                ..FibRetracementSignalConfig::default()
+            },
+            None,
+            || {
+                weighted_score_called.set(true);
+                Some(SignalDirect::IsLong)
+            },
+        );
+
+        assert_eq!(direction, None);
+        assert!(!weighted_score_called.get());
+    }
+
+    #[test]
+    fn fib_direction_overrides_and_skips_weighted_score() {
+        let weighted_score_called = std::cell::Cell::new(false);
+        let direction = VegasStrategy::resolve_signal_direction(
+            FibRetracementSignalConfig {
+                is_open: true,
+                only_on_fib: false,
+                ..FibRetracementSignalConfig::default()
+            },
+            Some(SignalDirect::IsLong),
+            || {
+                weighted_score_called.set(true);
+                Some(SignalDirect::IsShort)
+            },
+        );
+
+        assert_eq!(direction, Some(SignalDirect::IsLong));
+        assert!(!weighted_score_called.get());
+    }
+
+    #[test]
+    fn non_fib_mode_keeps_weighted_direction() {
+        let direction = VegasStrategy::resolve_signal_direction(
+            FibRetracementSignalConfig::default(),
+            None,
+            || Some(SignalDirect::IsShort),
+        );
+
+        assert_eq!(direction, Some(SignalDirect::IsShort));
     }

@@ -134,6 +134,7 @@ mod tests {
     fn test_config(id: i64, exchange: Option<&str>) -> StrategyConfig {
         StrategyConfig {
             id,
+            version: "default".to_string(),
             strategy_type: StrategyType::BearShortStack,
             exchange: exchange.map(ToOwned::to_owned),
             symbol: "BTC-USDT-SWAP".to_string(),

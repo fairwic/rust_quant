@@ -35,6 +35,13 @@ impl VegasStrategy {
         dynamic_adjustments: &mut Vec<String>,
         range_snapshot: &mut Option<serde_json::Value>,
     ) {
+        self.apply_candle_momentum_entry_gate(
+            data_items,
+            &vegas_indicator_signal_values.fib_retracement_value,
+            valid_rsi_value,
+            signal_result,
+            dynamic_adjustments,
+        );
         // ================================================================
         // Fib 严格大趋势过滤：禁开反向仓
         // 只有当 swing 波动幅度足够大时，才应用此过滤，避免窄幅震荡中过度过滤
@@ -57,21 +64,41 @@ impl VegasStrategy {
                 0.0
             };
             // 只有在 swing 数据有效且波动幅度足够大时才应用过滤
-            let is_trend_move_significant =
-                swing_low > 0.0 && swing_move_pct >= fib_cfg.min_trend_move_pct;
+            let adaptive_value = vegas_indicator_signal_values.cross_asset_adaptive_value;
+            let is_trend_move_significant = if self.cross_asset_adaptive_threshold.is_open {
+                adaptive_value.is_ready
+                    && vegas_indicator_signal_values
+                        .fib_retracement_value
+                        .swing_atr_multiple
+                        >= self
+                            .cross_asset_adaptive_threshold
+                            .min_swing_atr_multiple
+                            .max(0.0)
+            } else {
+                swing_low > 0.0 && swing_move_pct >= fib_cfg.min_trend_move_pct
+            };
             // 注意：这里仅记录"禁止开仓"的原因，不直接清空 should_buy/should_sell。
             // 这样回测/实盘可以在 backtest/position 层实现"反向信号仅平仓，不反手开仓"的行为。
             if is_trend_move_significant {
+                let move_suffix = if self.cross_asset_adaptive_threshold.is_open {
+                    format!(
+                        "swing_atr={:.2}",
+                        vegas_indicator_signal_values
+                            .fib_retracement_value
+                            .swing_atr_multiple
+                    )
+                } else {
+                    format!("swing_pct={:.2}%", swing_move_pct * 100.0)
+                };
                 if major_bear && signal_result.should_buy.unwrap_or(false) {
-                    signal_result.filter_reasons.push(format!(
-                        "FIB_STRICT_MAJOR_BEAR_BLOCK_LONG(swing_pct={:.2}%)",
-                        swing_move_pct * 100.0
-                    ));
+                    signal_result
+                        .filter_reasons
+                        .push(format!("FIB_STRICT_MAJOR_BEAR_BLOCK_LONG({})", move_suffix));
                 }
                 if major_bull && signal_result.should_sell.unwrap_or(false) {
                     signal_result.filter_reasons.push(format!(
-                        "FIB_STRICT_MAJOR_BULL_BLOCK_SHORT(swing_pct={:.2}%)",
-                        swing_move_pct * 100.0
+                        "FIB_STRICT_MAJOR_BULL_BLOCK_SHORT({})",
+                        move_suffix
                     ));
                 }
             }
@@ -244,6 +271,21 @@ impl VegasStrategy {
             signal_result
                 .filter_reasons
                 .push("EMA_DISTANCE_FILTER_SHORT".to_string());
+        }
+        if signal_result.should_sell.unwrap_or(false)
+            && self
+                .entry_block_config
+                .max_short_ema_distance_ratio
+                .is_some_and(|max_distance| {
+                    max_distance.is_finite()
+                        && max_distance > 0.0
+                        && ema_distance_filter.distance_ratio > max_distance
+                })
+        {
+            signal_result.should_sell = Some(false);
+            signal_result
+                .filter_reasons
+                .push("SHORT_EMA_DISTANCE_LIMIT".to_string());
         }
         // ================================================================
         // 【追涨/追跌确认K线条件】
@@ -688,12 +730,8 @@ impl VegasStrategy {
                 .push("HIGH_VOLUME_RANGING_RECOVERY_SHORT_BLOCK".to_string());
         }
         if signal_result.should_sell.unwrap_or(false)
-            && (self
-                .entry_block_config
-                .block_weak_bollinger_context_entry
-                || self
-                    .entry_block_config
-                    .block_weak_bollinger_context_short
+            && (self.entry_block_config.block_weak_bollinger_context_entry
+                || self.entry_block_config.block_weak_bollinger_context_short
                 || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_ENTRY_BLOCK")
                 || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_SHORT_BLOCK"))
             && self.weak_bollinger_volatility_allows_filter(data_items)
@@ -761,9 +799,7 @@ impl VegasStrategy {
                 .push("BEARISH_FVG_PRESSURE_LONG_BLOCK".to_string());
         }
         if signal_result.should_buy.unwrap_or(false)
-            && (self
-                .entry_block_config
-                .block_weak_bollinger_context_entry
+            && (self.entry_block_config.block_weak_bollinger_context_entry
                 || self.entry_block_config.block_weak_bollinger_context_long
                 || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_ENTRY_BLOCK")
                 || env_flag("VEGAS_WEAK_BOLLINGER_CONTEXT_LONG_BLOCK"))

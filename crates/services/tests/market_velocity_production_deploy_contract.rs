@@ -38,6 +38,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     let okx_websocket = read_repo_file("crates/market/src/streams/websocket_service.rs");
     let promote = read_repo_file("scripts/deploy/promote_stable.sh");
     let rollback = read_repo_file("scripts/deploy/rollback.sh");
+    let verify = read_repo_file("scripts/deploy/verify_production.sh");
     for service in [
         "quant-core-schema-ensure:",
         "quant-core-internal-server:",
@@ -168,6 +169,44 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             && replay_worker.contains(r#"EXECUTION_WORKER_REPORT_REPLAY_MODE: "true""#),
         "production must keep a dedicated report replay worker for failed Web writebacks"
     );
+    assert!(
+        !dockerfile.contains("--bins"),
+        "runtime image must not compile research and backtest binaries that are absent from the final image"
+    );
+    let copied_production_binaries = dockerfile.lines().filter_map(|line| {
+        line.trim()
+            .strip_prefix("COPY --from=builder /app/rust_quant/bin/")
+            .and_then(|paths| paths.split_whitespace().next())
+    });
+    for production_binary in copied_production_binaries {
+        assert!(
+            dockerfile.contains(&format!("--bin {production_binary}")),
+            "runtime image must compile production binary `{production_binary}` explicitly"
+        );
+    }
+    for read_only_evidence in [
+        "org.opencontainers.image.revision",
+        "docker inspect",
+        "docker logs --since",
+        "execution_worker_checkpoints",
+        "VERIFICATION=PASS",
+    ] {
+        assert!(
+            verify.contains(read_only_evidence),
+            "production verifier must collect read-only evidence `{read_only_evidence}`"
+        );
+    }
+    for forbidden_mutation in [
+        "docker rm",
+        "docker restart",
+        "docker compose up",
+        "curl -X",
+    ] {
+        assert!(
+            !verify.contains(forbidden_mutation),
+            "production verifier must stay read-only and exclude `{forbidden_mutation}`"
+        );
+    }
     assert!(
         dockerfile.contains(
             "COPY --from=builder /app/rust_quant/bin/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill"

@@ -147,6 +147,12 @@ pub struct BacktestDetail {
     pub stop_loss_source: Option<String>,
     /// 止损更新历史(JSON序列化的Vec<StopLossUpdate>)
     pub stop_loss_update_history: Option<String>,
+    /// 入场时冻结的有效保护价。
+    pub initial_stop_price: Option<f64>,
+    /// 本条记录对应数量的初始价格风险金额。
+    pub initial_risk_amount: Option<f64>,
+    /// 扣除回测手续费后的出场收益 R 倍数。
+    pub net_profit_r: Option<f64>,
 }
 impl BacktestDetail {
     #[allow(clippy::too_many_arguments)]
@@ -173,6 +179,9 @@ impl BacktestDetail {
         signal_result: String,
         stop_loss_source: Option<String>,
         stop_loss_update_history: Option<String>,
+        initial_stop_price: Option<f64>,
+        initial_risk_amount: Option<f64>,
+        net_profit_r: Option<f64>,
     ) -> Self {
         Self {
             id: None,
@@ -197,6 +206,9 @@ impl BacktestDetail {
             signal_result,
             stop_loss_source,
             stop_loss_update_history,
+            initial_stop_price,
+            initial_risk_amount,
+            net_profit_r,
         }
     }
 }

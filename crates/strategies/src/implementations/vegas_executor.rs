@@ -24,7 +24,10 @@ use tracing::{debug, info};
 // use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;
 use rust_quant_common::CandleItem;
 /// Vegas 策略执行器
-pub struct VegasStrategyExecutor;
+pub struct VegasStrategyExecutor {
+    strategy_type: StrategyType,
+    name: &'static str,
+}
 impl Default for VegasStrategyExecutor {
     fn default() -> Self {
         Self::new()
@@ -32,16 +35,27 @@ impl Default for VegasStrategyExecutor {
 }
 impl VegasStrategyExecutor {
     pub fn new() -> Self {
-        Self
+        Self {
+            strategy_type: StrategyType::Vegas,
+            name: "Vegas",
+        }
+    }
+
+    /// Vegas 全市场自适应 4H 与经典 Vegas 共用信号引擎，但保留独立运行身份与缓存。
+    pub fn universal_4h() -> Self {
+        Self {
+            strategy_type: StrategyType::VegasUniversal4h,
+            name: "VegasUniversal4h",
+        }
     }
 }
 #[async_trait]
 impl StrategyExecutor for VegasStrategyExecutor {
     fn name(&self) -> &'static str {
-        "Vegas"
+        self.name
     }
     fn strategy_type(&self) -> StrategyType {
-        StrategyType::Vegas
+        self.strategy_type
     }
     fn can_handle(&self, strategy_config: &str) -> bool {
         serde_json::from_str::<VegasStrategy>(strategy_config).is_ok()
@@ -68,7 +82,7 @@ impl StrategyExecutor for VegasStrategyExecutor {
             get_multi_indicator_values(&mut multi_strategy_indicators, item);
         }
         // 4. 生成存储键并保存数据
-        let hash_key = get_hash_key(inst_id, period, StrategyType::Vegas.as_str());
+        let hash_key = get_hash_key(inst_id, period, self.strategy_type.as_str());
         set_strategy_indicator_values(
             inst_id.to_string(),
             period.to_string(),
@@ -99,7 +113,7 @@ impl StrategyExecutor for VegasStrategyExecutor {
     ) -> Result<SignalResult> {
         const MAX_HISTORY_SIZE: usize = 4000;
         // 1. 获取哈希键和管理n
-        let key = get_hash_key(inst_id, period, StrategyType::Vegas.as_str());
+        let key = get_hash_key(inst_id, period, self.strategy_type.as_str());
         let manager = get_indicator_manager();
         // 2. 获取最新K线数据（使用公共函数）
         let new_candle_data = get_latest_candle(inst_id, period, snap).await?;

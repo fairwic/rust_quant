@@ -1,7 +1,8 @@
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
     default_chase_confirm_config, default_extreme_k_filter, default_fib_retracement_signal_config,
-    default_large_entity_stop_loss_config, default_macd_signal_config, ChaseConfirmConfig,
+    default_large_entity_stop_loss_config, default_macd_signal_config,
+    CandleMomentumActivationConfig, ChaseConfirmConfig, CrossAssetAdaptiveThresholdConfig,
     EmaDistanceConfig, EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig,
     EntryBlockConfig, ExtremeKFilterConfig, FibRetracementSignalConfig, KlineHammerConfig,
     LegDetectionConfig, MacdSignalConfig, MarketStructureConfig, RangeFilterConfig,
@@ -23,6 +24,8 @@ pub struct ParamMergeBuilder {
     pub volume_decrease_ratio: f64,
     /// breakthrough阈值，用于当前结构体的业务数据。
     pub breakthrough_threshold: f64,
+    /// 完整 EMA 参数；为空时沿用旧参数生成器，只覆盖突破阈值。
+    pub ema_signal: Option<EmaSignalConfig>,
     //rsi
     pub rsi_period: usize,
     /// RSI 超买阈值。
@@ -35,12 +38,16 @@ pub struct ParamMergeBuilder {
     pub kline_start_time: Option<i64>,
     /// 结束时间。
     pub kline_end_time: Option<i64>,
+    /// Vegas 的预热与信号滚动窗口 K 线根数；为空时保持既有的 3600 根。
+    pub min_k_line_num: Option<usize>,
     //risk
     pub max_loss_percent: f64,  // 最大止损百分比
     pub take_profit_ratio: f64, // 盈利阈值，用于动态止盈
     // 固定信号线的止盈比例
     pub fix_signal_kline_take_profit_ratio: Option<f64>, // 固定信号线的止盈比例，比如当盈利超过 k线路的长度的 n 倍时，直接止盈，适用短线策略
     pub is_used_signal_k_line_stop_loss: bool, //是否使用最低价止损,当价格低于入场k线的最低价时,止损。或者空单的时候,价格高于入场k线的最高价时,止损
+    /// 动态最大亏损开关：true 收紧异常波动止损，false 固定使用配置止损；None 为兼容旧配置仍按 true 处理。
+    pub dynamic_max_loss: Option<bool>,
     /// dynamic入场amp阈值；为空时使用默认值或表示不限制。
     pub dynamic_entry_amp_threshold: Option<f64>,
     /// 动态入场亏损百分比；为空时不启用动态入场亏损过滤。
@@ -55,6 +62,10 @@ pub struct ParamMergeBuilder {
     pub position_leverage: Option<f64>,
     // strategy extensions
     pub signal_weights: Option<SignalWeightsConfig>,
+    /// 吞没形态配置；显式关闭时必须传递到运行时，避免转换层重新启用指标。
+    pub engulfing_signal: Option<EngulfingSignalConfig>,
+    /// EMA Touch 趋势配置；显式关闭时必须传递到运行时。
+    pub ema_touch_trend_signal: Option<EmaTouchTrendSignalConfig>,
     /// legdetection信号；为空时使用默认值或表示不限制。
     pub leg_detection_signal: Option<LegDetectionConfig>,
     /// 市场structure信号；为空时使用默认值或表示不限制。
@@ -77,6 +88,10 @@ pub struct ParamMergeBuilder {
     pub fib_retracement_signal: Option<FibRetracementSignalConfig>,
     /// 配置项。
     pub entry_block_config: Option<EntryBlockConfig>,
+    /// 4H 动量激活代理；为空时保持默认关闭。
+    pub candle_momentum_activation: Option<CandleMomentumActivationConfig>,
+    /// 跨币种 ATR 与成交量分位数阈值；为空时保持默认关闭。
+    pub cross_asset_adaptive_threshold: Option<CrossAssetAdaptiveThresholdConfig>,
 }
 impl ParamMergeBuilder {
     //使用构造器
@@ -176,7 +191,7 @@ impl ParamMergeBuilder {
             atr_take_profit_ratio: Some(self.take_profit_ratio),
             fixed_signal_kline_take_profit_ratio: self.fix_signal_kline_take_profit_ratio,
             is_used_signal_k_line_stop_loss: Some(self.is_used_signal_k_line_stop_loss),
-            dynamic_max_loss: Some(true),
+            dynamic_max_loss: self.dynamic_max_loss.or(Some(true)),
             dynamic_entry_amp_threshold: self.dynamic_entry_amp_threshold,
             dynamic_entry_loss_percent: self.dynamic_entry_loss_percent,
             dynamic_entry_require_direction_mismatch: self.dynamic_entry_require_direction_mismatch,
@@ -202,10 +217,6 @@ impl ParamMergeBuilder {
             rsi_overbought: self.rsi_overbought,
             is_open: true,
         };
-        let ema_touch_trend_signal = EmaTouchTrendSignalConfig {
-            is_open: true,
-            ..Default::default()
-        };
         let kline_hammer_signal = KlineHammerConfig {
             up_shadow_ratio: self.hammer_shadow_ratio,
             down_shadow_ratio: self.hammer_shadow_ratio,
@@ -216,15 +227,17 @@ impl ParamMergeBuilder {
             .or_else(|| Some(SignalWeightsConfig::default()));
         VegasStrategy {
             period,
-            min_k_line_num: 3600,
-            engulfing_signal: Some(EngulfingSignalConfig::default()),
-            ema_signal: Some(EmaSignalConfig {
+            min_k_line_num: self.min_k_line_num.unwrap_or(3600),
+            engulfing_signal: Some(self.engulfing_signal.unwrap_or_default()),
+            ema_signal: Some(self.ema_signal.unwrap_or(EmaSignalConfig {
                 ema_breakthrough_threshold: self.breakthrough_threshold,
                 ..EmaSignalConfig::default()
-            }),
+            })),
             signal_weights,
             volume_signal: Some(volume_signal),
-            ema_touch_trend_signal: Some(ema_touch_trend_signal),
+            candle_momentum_activation: self.candle_momentum_activation.unwrap_or_default(),
+            cross_asset_adaptive_threshold: self.cross_asset_adaptive_threshold.unwrap_or_default(),
+            ema_touch_trend_signal: Some(self.ema_touch_trend_signal.unwrap_or_default()),
             rsi_signal: Some(rsi_signal),
             bolling_signal: Some(BollingBandsSignalConfig {
                 period: self.bb_period as usize,
@@ -391,17 +404,20 @@ impl ParamGenerator {
                 volume_increase_ratio: self.volume_ratios[i_vir],
                 volume_decrease_ratio: self.volume_ratios[i_vir],
                 breakthrough_threshold: self.breakthrough_thresholds[i_bt],
+                ema_signal: None,
                 rsi_period: self.rsi_periods[i_rp],
                 rsi_overbought: self.rsi_over_buy_sell[i_rob].0,
                 rsi_oversold: self.rsi_over_buy_sell[i_ros].1,
                 kline_start_time: None,
                 kline_end_time: None,
+                min_k_line_num: None,
                 max_loss_percent: self.max_loss_percent[i_mlp],
                 take_profit_ratio: self.take_profit_ratios[i_pt],
                 is_used_signal_k_line_stop_loss: self.is_used_signal_k_line_stop_loss[i_usklsl],
                 fix_signal_kline_take_profit_ratio: Some(
                     self.fix_signal_kline_take_profit_ratios[i_fsktpr],
                 ),
+                dynamic_max_loss: None,
                 dynamic_entry_amp_threshold: None,
                 dynamic_entry_loss_percent: None,
                 dynamic_entry_require_direction_mismatch: None,
@@ -409,6 +425,8 @@ impl ParamGenerator {
                 dynamic_range_loss_percent: None,
                 position_leverage: None,
                 signal_weights: None,
+                engulfing_signal: None,
+                ema_touch_trend_signal: None,
                 leg_detection_signal: None,
                 market_structure_signal: None,
                 range_filter_signal: None,
@@ -420,6 +438,8 @@ impl ParamGenerator {
                 macd_signal: None,
                 fib_retracement_signal: None,
                 entry_block_config: None,
+                candle_momentum_activation: None,
+                cross_asset_adaptive_threshold: None,
             };
             batch.push(param);
             self.current_index += 1;
@@ -454,6 +474,8 @@ mod tests {
             max_loss_percent: 0.05,
             take_profit_ratio: 5.0,
             is_used_signal_k_line_stop_loss: true,
+            fix_signal_kline_take_profit_ratio: Some(0.25),
+            dynamic_max_loss: Some(false),
             dynamic_entry_amp_threshold: Some(0.05),
             dynamic_entry_loss_percent: Some(0.03),
             dynamic_entry_require_direction_mismatch: Some(false),
@@ -463,6 +485,8 @@ mod tests {
             ..Default::default()
         };
         let risk = params.to_risk_config();
+        assert_eq!(risk.fixed_signal_kline_take_profit_ratio, Some(0.25));
+        assert_eq!(risk.dynamic_max_loss, Some(false));
         assert_eq!(risk.dynamic_entry_amp_threshold, Some(0.05));
         assert_eq!(risk.dynamic_entry_loss_percent, Some(0.03));
         assert_eq!(risk.dynamic_entry_require_direction_mismatch, Some(false));

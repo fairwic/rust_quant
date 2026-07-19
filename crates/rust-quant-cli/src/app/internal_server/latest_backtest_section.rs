@@ -194,6 +194,7 @@ fn backtest_config_from_request(request: &BacktestRunRequest) -> BackTestConfig 
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    config.strategy_key = Some(request.strategy_key.trim().to_ascii_lowercase());
     if let Some(candle_limit) = read_usize_override(
         &request.config_overrides,
         &["kline_nums", "klineNums", "candle_limit", "candleLimit"],

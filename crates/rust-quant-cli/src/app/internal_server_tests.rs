@@ -27,6 +27,22 @@ fn strategy_catalog_exposes_market_velocity_as_standard_core_strategy() {
 }
 
 #[test]
+fn strategy_catalog_exposes_universal_vegas_as_independent_strategy() {
+    let items = super::standard_strategy_catalog_items();
+    let strategy = items
+        .iter()
+        .find(|item| item.strategy_key == "vegas_universal_4h")
+        .expect("universal Vegas strategy catalog item");
+
+    assert_eq!(strategy.product_slug, "vegas-universal-4h");
+    assert_eq!(strategy.display_name, "Vegas 全市场自适应 4H");
+    assert!(strategy.supported_symbols.contains(&"ALL"));
+    assert!(strategy.timeframes.contains(&"4H"));
+    assert_eq!(strategy.display_total_return_pct, Some(110.33));
+    assert_eq!(strategy.display_trade_count, Some(154));
+}
+
+#[test]
 fn strategy_catalog_exposes_breakdown_short_as_live_handoff_strategy() {
     let items = super::standard_strategy_catalog_items();
     let breakdown_short = items

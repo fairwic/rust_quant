@@ -3,7 +3,6 @@ use rust_quant_indicators::trend::ema_indicator::EmaIndicator;
 use rust_quant_indicators::trend::vegas::{
     EmaSignalValue, IndicatorCombine, KlineHammerSignalValue, VegasIndicatorSignalValue,
 };
-use rust_quant_indicators::volume::VolumeProfileIndicator;
 use std::time::Instant;
 use ta::Next; // ⭐ 需要导入Next trait才能使用next方法
 use tracing::{info, warn};
@@ -99,16 +98,16 @@ pub fn get_multi_indicator_values(
             "计算Volume"
         );
     }
-    let volume_profile_start = Instant::now();
-    let volume_profile_indicator = indicator_combine
-        .volume_profile_indicator
-        .get_or_insert_with(VolumeProfileIndicator::default);
-    vegas_indicator_signal_value.volume_profile_value = volume_profile_indicator.next(data_item);
-    if volume_profile_start.elapsed().as_millis() > 10 {
-        warn!(
-            duration_ms = volume_profile_start.elapsed().as_millis(),
-            "计算VolumeProfile"
-        );
+    if let Some(volume_profile_indicator) = &mut indicator_combine.volume_profile_indicator {
+        let volume_profile_start = Instant::now();
+        vegas_indicator_signal_value.volume_profile_value =
+            volume_profile_indicator.next(data_item);
+        if volume_profile_start.elapsed().as_millis() > 10 {
+            warn!(
+                duration_ms = volume_profile_start.elapsed().as_millis(),
+                "计算VolumeProfile"
+            );
+        }
     }
     // 计算RSI
     let rsi_start = Instant::now();
@@ -207,7 +206,10 @@ mod tests {
     }
     #[test]
     fn get_multi_indicator_values_populates_volume_profile() {
+        use rust_quant_indicators::volume::VolumeProfileIndicator;
+
         let mut combine = IndicatorCombine::default();
+        combine.volume_profile_indicator = Some(VolumeProfileIndicator::default());
         get_multi_indicator_values(&mut combine, &candle(100.0, 110.0, 100.0, 108.0, 10.0, 1));
         get_multi_indicator_values(&mut combine, &candle(108.0, 120.0, 108.0, 118.0, 30.0, 2));
         let value =

@@ -308,6 +308,12 @@ pub struct ExchangeReconciliationReportRequest {
     pub buyer_email: String,
     /// 交易对或资产符号。
     pub symbol: String,
+    /// 交易所账户范围；flat 对账必须避免清理其他交易所的持仓腿。
+    #[serde(default)]
+    pub exchange: Option<String>,
+    /// Web API 凭证 ID；与 exchange 一起确定唯一账户范围。
+    #[serde(default)]
+    pub api_credential_id: Option<i64>,
     /// 类型标识。
     pub issue_type: ExchangeReconciliationIssueType,
     /// 时间字段。

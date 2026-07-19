@@ -277,6 +277,7 @@
             &risk_config,
             42,
             config.strategy_type.as_str(),
+            "eth_4h_id102_live_v2",
             Some("binance"),
             "buy",
             "long",
@@ -303,6 +304,8 @@
         assert_eq!(payload["source"], "rust_quant");
         assert_eq!(payload["config_id"], 42);
         assert_eq!(payload["strategy_type"], "vegas");
+        assert_eq!(payload["strategy_version"], "eth_4h_id102_live_v2");
+        assert_eq!(payload["entry_rule_version"], "eth_4h_id102_live_v2");
         assert_eq!(payload["period"], "4H");
         assert_eq!(payload["symbol"], "ETH-USDT-SWAP");
         assert_eq!(payload["exchange"], "binance");
@@ -328,6 +331,7 @@
             &risk_config,
             42,
             "vegas",
+            "eth_4h_id102_live_v2",
             Some("binance"),
             "sell",
             "short",
@@ -352,6 +356,7 @@
             &risk_config,
             42,
             "vegas",
+            "eth_4h_id102_live_v2",
             Some("binance"),
             "sell",
             "short",
@@ -488,6 +493,7 @@
         let service = create_test_service();
         let config = StrategyConfig {
             id: 1,
+            version: "default".to_string(),
             strategy_type: StrategyType::Vegas,
             exchange: None,
             symbol: "BTC-USDT".to_string(),
@@ -514,6 +520,7 @@
         let service = StrategyExecutionService::new(repo.clone());
         let config = StrategyConfig {
             id: 42,
+            version: "default".to_string(),
             strategy_type: StrategyType::Vegas,
             exchange: None,
             symbol: "BTC-USDT".to_string(),
@@ -573,6 +580,7 @@
         service.configure_open_failure_for_test(true);
         let config = StrategyConfig {
             id: 4200,
+            version: "default".to_string(),
             strategy_type: StrategyType::Vegas,
             exchange: None,
             symbol: "BTC-USDT-SWAP".to_string(),
@@ -684,6 +692,7 @@
         let service = create_test_service();
         let config = StrategyConfig {
             id: 999,
+            version: "default".to_string(),
             strategy_type: StrategyType::Vegas,
             exchange: None,
             symbol: "BTC-USDT-SWAP".to_string(),
@@ -741,6 +750,7 @@
         let service = create_test_service();
         let config = StrategyConfig {
             id: 1000,
+            version: "default".to_string(),
             strategy_type: StrategyType::Vegas,
             exchange: None,
             symbol: "BTC-USDT-SWAP".to_string(),

@@ -94,6 +94,12 @@ pub struct TradeRecord {
     pub stop_loss_source: Option<String>,
     //止损更新历史(JSON序列化的Vec<StopLossUpdate>)
     pub stop_loss_update_history: Option<String>,
+    /// 入场时冻结的有效保护价；后续移动止损不得改写该值。
+    pub initial_stop_price: Option<f64>,
+    /// 本条记录对应数量在初始保护价处的价格风险金额，不含手续费。
+    pub initial_risk_amount: Option<f64>,
+    /// 扣除回测手续费后的本条出场收益除以初始风险金额；入场记录为空。
+    pub net_profit_r: Option<f64>,
 }
 // ============================================================================
 // 信号类型
@@ -296,6 +302,8 @@ pub struct TradePosition {
     pub stop_loss_source: Option<String>,
     /// 止损更新历史
     pub stop_loss_updates: Vec<rust_quant_domain::value_objects::StopLossUpdate>,
+    /// 入场时冻结的有效保护价，是整笔交易 R 的唯一分母来源。
+    pub initial_stop_price: Option<f64>,
 }
 /// 交易状态
 #[derive(Debug, Clone)]

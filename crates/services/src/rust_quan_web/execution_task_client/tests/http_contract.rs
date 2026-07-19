@@ -395,6 +395,8 @@ async fn report_exchange_reconciliation_uses_internal_post_contract() {
             combo_id: 9,
             buyer_email: "buyer@example.com".to_string(),
             symbol: "ETHUSDT".to_string(),
+            exchange: None,
+            api_credential_id: None,
             issue_type: ExchangeReconciliationIssueType::ExchangeOpenOrderConflict,
             detected_at: Some("2026-05-15T09:30:00Z".to_string()),
             source_ref: Some(

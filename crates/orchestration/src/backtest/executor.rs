@@ -6,6 +6,7 @@ use crate::workflow::job_param_generator::ParamMergeBuilder;
 use anyhow::{anyhow, Result};
 use futures::future::join_all;
 use rust_quant_common::CandleItem;
+use rust_quant_domain::StrategyType;
 use rust_quant_indicators::trend::vegas::VegasStrategy;
 use rust_quant_market::models::SelectTime;
 use rust_quant_services::market::CandleService;
@@ -55,6 +56,20 @@ impl BacktestExecutor {
         source_candles: Arc<Vec<CandleItem>>,
     ) -> Result<i64> {
         let adapter = VegasBacktestAdapter::new(strategy);
+        self.run_strategy_backtest(inst_id, time, adapter, risk_strategy_config, source_candles)
+            .await
+    }
+    /// 使用独立策略身份运行共享 Vegas 引擎。
+    pub async fn run_vegas_test_as(
+        &self,
+        inst_id: &str,
+        time: &str,
+        strategy: VegasStrategy,
+        strategy_type: StrategyType,
+        risk_strategy_config: BasicRiskStrategyConfig,
+        source_candles: Arc<Vec<CandleItem>>,
+    ) -> Result<i64> {
+        let adapter = VegasBacktestAdapter::with_strategy_type(strategy, strategy_type);
         self.run_strategy_backtest(inst_id, time, adapter, risk_strategy_config, source_candles)
             .await
     }
@@ -147,6 +162,7 @@ impl BacktestExecutor {
         params_batch: Vec<ParamMergeBuilder>,
         inst_id: &str,
         time: &str,
+        strategy_type: StrategyType,
         arc_candle_item_clone: Arc<Vec<CandleItem>>,
         semaphore: Arc<Semaphore>,
     ) {
@@ -156,6 +172,7 @@ impl BacktestExecutor {
             let strategy = param.to_vegas_strategy(time.to_string());
             let inst_id = inst_id.to_string();
             let time = time.to_string();
+            let strategy_type = strategy_type;
             let source_candles = Arc::clone(&arc_candle_item_clone);
             let permit = Arc::clone(&semaphore);
             // 创建任务
@@ -163,10 +180,11 @@ impl BacktestExecutor {
             batch_tasks.push(tokio::spawn(async move {
                 let _permit: tokio::sync::SemaphorePermit<'_> = permit.acquire().await.unwrap();
                 match executor
-                    .run_vegas_test(
+                    .run_vegas_test_as(
                         &inst_id,
                         &time,
                         strategy,
+                        strategy_type,
                         risk_strategy_config,
                         source_candles,
                     )

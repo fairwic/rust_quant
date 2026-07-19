@@ -309,6 +309,7 @@ fn read_only_exchange_snapshot_sync_builder_emits_flat_position_report() {
         ExchangeReconciliationIssueType::ExchangePositionFlat
     );
     assert_eq!(requests[0].symbol, "UNI-USDT-SWAP");
+    assert_eq!(requests[0].exchange.as_deref(), Some("okx"));
     assert_eq!(
         requests[0].source_ref.as_deref(),
         Some(

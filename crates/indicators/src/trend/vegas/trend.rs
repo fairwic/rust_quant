@@ -133,12 +133,6 @@ fn check_bearish_signals(
     //     trend_value.is_short_signal = false;
     // }
     //如果k线是大实体阴线，则做空
-    if data_items.last().unwrap().ts == 1763049600000 {
-        println!("last_item: {:?}", last_item);
-        println!("body_ratio: {:?}", last_item.body_ratio());
-        println!("o: {:?}", last_item.o());
-        println!("c: {:?}", last_item.c());
-    }
     if last_item.body_ratio() > 0.8 && last_item.o() > last_item.c() {
         trend_value.is_short_signal = true;
     }

@@ -466,8 +466,20 @@ CREATE TABLE IF NOT EXISTS back_test_detail (
     win_nums INTEGER NOT NULL,
     loss_nums INTEGER,
     stop_loss_source VARCHAR(255),
-    stop_loss_update_history TEXT
+    stop_loss_update_history TEXT,
+    initial_stop_price DOUBLE PRECISION,
+    initial_risk_amount DOUBLE PRECISION,
+    net_profit_r DOUBLE PRECISION
 );
+
+ALTER TABLE IF EXISTS back_test_detail
+    ADD COLUMN IF NOT EXISTS initial_stop_price DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS initial_risk_amount DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS net_profit_r DOUBLE PRECISION;
+
+COMMENT ON COLUMN back_test_detail.initial_stop_price IS '入场时冻结的有效保护价，后续移动止损不得覆盖';
+COMMENT ON COLUMN back_test_detail.initial_risk_amount IS '本条记录对应数量在初始保护价处的价格风险金额';
+COMMENT ON COLUMN back_test_detail.net_profit_r IS '扣除回测手续费后的出场收益除以初始风险金额';
 
 CREATE INDEX IF NOT EXISTS idx_back_test_detail_back_test_id
     ON back_test_detail (back_test_id);

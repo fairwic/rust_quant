@@ -4,8 +4,8 @@ use crate::workflow::progress_manager::{
     NweRandomStrategyConfig, RandomStrategyConfig, StrategyProgressManager,
 };
 use crate::workflow::strategy_config::{
-    get_nwe_strategy_config_from_db_with_selector, get_strategy_config_from_db_with_selector,
-    BackTestConfig,
+    get_nwe_strategy_config_from_db_with_selector,
+    get_strategy_config_from_db_with_strategy_selector, BackTestConfig,
 };
 use anyhow::{anyhow, Result};
 use rust_quant_core::{config::env_is_true, database::get_db_pool};
@@ -429,6 +429,7 @@ impl BacktestRunner {
                     batch,
                     inst_id,
                     period,
+                    rust_quant_domain::StrategyType::Vegas,
                     arc_candle_data.clone(),
                     semaphore.clone(),
                 )
@@ -472,10 +473,15 @@ impl BacktestRunner {
             "[Vegas 指定] 开始指定配置回测: inst_id={}, period={}",
             inst_id, period
         );
-        let params_batch = get_strategy_config_from_db_with_selector(
+        let strategy_key = config.strategy_key.as_deref().unwrap_or("vegas");
+        let strategy_type = strategy_key
+            .parse()
+            .map_err(|_| anyhow!("无效的 Vegas 策略 Key: {}", strategy_key))?;
+        let params_batch = get_strategy_config_from_db_with_strategy_selector(
             &self.config_service,
             inst_id,
             period,
+            strategy_key,
             config.strategy_config_id.as_deref(),
         )
         .await?;
@@ -496,7 +502,14 @@ impl BacktestRunner {
             params_batch.len()
         );
         self.executor
-            .run_back_test_strategy(params_batch, inst_id, period, arc_candle_data, semaphore)
+            .run_back_test_strategy(
+                params_batch,
+                inst_id,
+                period,
+                strategy_type,
+                arc_candle_data,
+                semaphore,
+            )
             .await;
         let elapsed = start.elapsed();
         info!(

@@ -3,6 +3,7 @@ use crate::framework::backtest::conversions::{convert_domain_signal, to_domain_b
 use crate::framework::backtest::types::{BasicRiskStrategyConfig, SignalResult};
 use crate::strategy_common::get_multi_indicator_values;
 use crate::CandleItem;
+use rust_quant_domain::StrategyType;
 use rust_quant_indicators::trend::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
     IndicatorCombine, VegasIndicatorSignalValue, VegasStrategy,
@@ -17,6 +18,8 @@ pub struct VegasBacktestAdapter {
     strategy: VegasStrategy,
     /// 信号weights，用于交易策略计算。
     signal_weights: SignalWeightsConfig,
+    /// 回测结果使用的独立策略身份。
+    strategy_type: StrategyType,
 }
 impl VegasBacktestAdapter {
     /// 初始化new，确保回测策略依赖和内部状态可直接使用。
@@ -25,7 +28,16 @@ impl VegasBacktestAdapter {
         Self {
             strategy,
             signal_weights,
+            strategy_type: StrategyType::Vegas,
         }
+    }
+    pub fn with_strategy_type(strategy: VegasStrategy, strategy_type: StrategyType) -> Self {
+        let mut adapter = Self::new(strategy);
+        adapter.strategy_type = strategy_type;
+        adapter
+    }
+    pub fn strategy_type(&self) -> StrategyType {
+        self.strategy_type
     }
     pub fn strategy(&self) -> &VegasStrategy {
         &self.strategy

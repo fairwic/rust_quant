@@ -94,12 +94,28 @@ fn backtest_config_overrides_bound_manual_vegas_runs() {
     })
     .to_string();
     let config = backtest_config_from_body(body.as_bytes()).expect("config");
+    assert_eq!(config.strategy_key.as_deref(), Some("vegas"));
     assert_eq!(config.candle_limit, 360);
     assert_eq!(config.max_concurrent, 2);
     assert!(config.enable_specified_test_vegas);
     assert!(!config.enable_random_test_vegas);
     assert!(!config.enable_specified_test_nwe);
     assert!(!config.enable_random_test_nwe);
+}
+
+#[test]
+fn backtest_config_preserves_universal_vegas_identity() {
+    let body = json!({
+        "strategyKey": "vegas_universal_4h",
+        "symbol": "BTC-USDT-SWAP",
+        "timeframe": "4H",
+        "dryRun": false
+    })
+    .to_string();
+
+    let config = backtest_config_from_body(body.as_bytes()).expect("config");
+    assert_eq!(config.strategy_key.as_deref(), Some("vegas_universal_4h"));
+    assert!(config.enable_specified_test_vegas);
 }
 #[test]
 fn backtest_config_accepts_admin_config_alias() {
