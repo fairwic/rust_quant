@@ -60,10 +60,28 @@ fn test_filter_live_strategy_configs_supports_exchange_filter() {
         &std::collections::BTreeSet::from(["BTC-USDT-SWAP".to_string()]),
         &std::collections::BTreeSet::from(["5m".to_string()]),
         &std::collections::BTreeSet::from(["okx".to_string()]),
+        &std::collections::BTreeSet::new(),
         "okx",
     );
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].exchange.as_deref(), Some("okx"));
+}
+
+#[test]
+fn test_filter_live_strategy_configs_supports_strategy_type_filter() {
+    let legacy = test_config(1, "ETH-USDT-SWAP", Timeframe::H4);
+    let mut universal = test_config(2, "ETH-USDT-SWAP", Timeframe::H4);
+    universal.strategy_type = StrategyType::VegasUniversal4h;
+    let filtered = filter_live_strategy_configs_with_filters(
+        vec![legacy, universal],
+        &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::from(["4H".to_string()]),
+        &std::collections::BTreeSet::from(["okx".to_string()]),
+        &std::collections::BTreeSet::from(["vegas_universal_4h".to_string()]),
+        "okx",
+    );
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].strategy_type, StrategyType::VegasUniversal4h);
 }
 #[test]
 fn test_filter_live_strategy_configs_skips_market_velocity_event_strategy() {

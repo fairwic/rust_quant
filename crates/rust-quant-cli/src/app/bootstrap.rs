@@ -549,12 +549,14 @@ fn filter_live_strategy_configs(configs: Vec<StrategyConfig>) -> Vec<StrategyCon
     let inst_ids = csv_filter_values(std::env::var("LIVE_STRATEGY_ONLY_INST_IDS").ok());
     let periods = csv_filter_values(std::env::var("LIVE_STRATEGY_ONLY_PERIODS").ok());
     let exchanges = csv_lower_filter_values(std::env::var("LIVE_STRATEGY_ONLY_EXCHANGES").ok());
+    let strategy_types = csv_lower_filter_values(std::env::var("LIVE_STRATEGY_ONLY_TYPES").ok());
     let fallback_exchange = market_data_exchange();
     filter_live_strategy_configs_with_filters(
         configs,
         &inst_ids,
         &periods,
         &exchanges,
+        &strategy_types,
         &fallback_exchange,
     )
 }
@@ -565,6 +567,7 @@ fn filter_live_strategy_configs_with_filters(
     inst_ids: &BTreeSet<String>,
     periods: &BTreeSet<String>,
     exchanges: &BTreeSet<String>,
+    strategy_types: &BTreeSet<String>,
     fallback_exchange: &str,
 ) -> Vec<StrategyConfig> {
     let before_event_driven_filter = configs.len();
@@ -579,7 +582,11 @@ fn filter_live_strategy_configs_with_filters(
             configs.len()
         );
     }
-    if inst_ids.is_empty() && periods.is_empty() && exchanges.is_empty() {
+    if inst_ids.is_empty()
+        && periods.is_empty()
+        && exchanges.is_empty()
+        && strategy_types.is_empty()
+    {
         return configs;
     }
     let before = configs.len();
@@ -596,15 +603,18 @@ fn filter_live_strategy_configs_with_filters(
             (inst_ids.is_empty() || inst_ids.contains(&config.symbol))
                 && (periods.is_empty() || periods.contains(config.timeframe.as_str()))
                 && (exchanges.is_empty() || exchanges.contains(&config_exchange))
+                && (strategy_types.is_empty()
+                    || strategy_types.contains(config.strategy_type.as_str()))
         })
         .collect();
     info!(
-        "🎯 实时策略过滤后剩余: before={}, after={}, inst_ids={:?}, periods={:?}, exchanges={:?}",
+        "🎯 实时策略过滤后剩余: before={}, after={}, inst_ids={:?}, periods={:?}, exchanges={:?}, strategy_types={:?}",
         before,
         filtered.len(),
         inst_ids,
         periods,
-        exchanges
+        exchanges,
+        strategy_types
     );
     filtered
 }

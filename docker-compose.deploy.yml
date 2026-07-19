@@ -88,9 +88,42 @@ services:
       LIVE_STRATEGY_ONLY_EXCHANGES: ${LIVE_STRATEGY_ONLY_EXCHANGES:-okx}
       LIVE_STRATEGY_ONLY_INST_IDS: ${LIVE_STRATEGY_ONLY_INST_IDS:-ETH-USDT-SWAP}
       LIVE_STRATEGY_ONLY_PERIODS: ${LIVE_STRATEGY_ONLY_PERIODS:-4H}
+      LIVE_STRATEGY_ONLY_TYPES: vegas
       MARKET_DATA_EXCHANGE: ${LIVE_STRATEGY_MARKET_DATA_EXCHANGE:-okx}
       DEFAULT_EXCHANGE: ${LIVE_STRATEGY_MARKET_DATA_EXCHANGE:-okx}
       STRATEGY_SIGNAL_DISPATCH_MODE: ${LIVE_STRATEGY_SIGNAL_DISPATCH_MODE:-web}
+      RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
+      EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
+
+  quant-core-vegas-universal-4h-worker:
+    container_name: quant-core-vegas-universal-4h-worker
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
+      IS_RUN_REAL_STRATEGY: "true"
+      IS_OPEN_SOCKET: "true"
+      IS_RUN_SYNC_DATA_JOB: "false"
+      IS_RUN_EXECUTION_WORKER: "false"
+      IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER: "false"
+      IS_RUN_MARKET_VELOCITY_RADAR: "false"
+      LIVE_STRATEGY_ONLY_EXCHANGES: okx
+      LIVE_STRATEGY_ONLY_INST_IDS: ${VEGAS_UNIVERSAL_4H_INST_IDS:-}
+      LIVE_STRATEGY_ONLY_PERIODS: 4H
+      LIVE_STRATEGY_ONLY_TYPES: vegas_universal_4h
+      MARKET_DATA_EXCHANGE: okx
+      DEFAULT_EXCHANGE: okx
+      STRATEGY_SIGNAL_DISPATCH_MODE: web
       RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
       EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
 
