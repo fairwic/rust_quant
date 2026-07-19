@@ -39,6 +39,7 @@ lease_events=0
 containers=(
   quant-core-internal-server
   quant-core-vegas-eth-4h-worker
+  quant-core-vegas-universal-4h-worker
   quant-core-market-velocity-radar
   quant-core-market-velocity-live-handoff-scheduler
   quant-core-market-velocity-breakdown-short-live-handoff-scheduler
@@ -85,6 +86,8 @@ assert_env() {
 }
 
 assert_env quant-core-execution-worker EXECUTION_WORKER_TASK_TYPES "execute_signal,risk_control_close_candidate"
+assert_env quant-core-vegas-eth-4h-worker LIVE_STRATEGY_ONLY_TYPES "vegas"
+assert_env quant-core-vegas-universal-4h-worker LIVE_STRATEGY_ONLY_TYPES "vegas_universal_4h"
 assert_env quant-core-execution-worker EXECUTION_WORKER_TASK_STATUSES "pending,pending_close"
 assert_env quant-core-execution-worker EXECUTION_WORKER_CONFIRMATION_MODE "false"
 assert_env quant-core-execution-worker EXECUTION_WORKER_REPORT_REPLAY_MODE "false"

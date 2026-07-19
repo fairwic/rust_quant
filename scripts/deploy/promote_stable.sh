@@ -8,7 +8,7 @@ set -euo pipefail
 
 compose_file="${DEPLOY_COMPOSE_FILE:-docker-compose.deploy.yml}"
 compose_source_file="${DEPLOY_COMPOSE_SOURCE_FILE:-docker-compose.deploy.yml}"
-services_csv="${DEPLOY_SERVICES:-quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-market-velocity-breakdown-short-live-handoff-scheduler,quant-core-execution-worker,quant-core-execution-confirmation-worker,quant-core-execution-report-replay-worker}"
+services_csv="${DEPLOY_SERVICES:-quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-vegas-universal-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-market-velocity-breakdown-short-live-handoff-scheduler,quant-core-execution-worker,quant-core-execution-confirmation-worker,quant-core-execution-report-replay-worker}"
 retired_services_csv="${DEPLOY_RETIRED_SERVICES:-quant-core-vegas-eth-4h-live}"
 ghcr_username="${DEPLOY_GHCR_USERNAME:-}"
 ghcr_token="${DEPLOY_GHCR_TOKEN:-}"
