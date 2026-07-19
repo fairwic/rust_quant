@@ -1203,6 +1203,9 @@ pub fn build_market_velocity_backtest_details(
         signal_result.clone(),
         None,
         None,
+        None,
+        None,
+        None,
     )];
     if trade.close_legs.is_empty() {
         details.push(BacktestDetail::new(
@@ -1225,6 +1228,9 @@ pub fn build_market_velocity_backtest_details(
             loss_nums,
             signal_value,
             signal_result,
+            None,
+            None,
+            None,
             None,
             None,
         ));
@@ -1258,6 +1264,9 @@ pub fn build_market_velocity_backtest_details(
             leg_loss_nums,
             leg_signal_value,
             signal_result.clone(),
+            None,
+            None,
+            None,
             None,
             None,
         ));
