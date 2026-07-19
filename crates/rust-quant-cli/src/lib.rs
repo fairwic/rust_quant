@@ -1,6 +1,8 @@
 //! # Rust Quant CLI
 //!
 //! 量化交易系统主程序入口
+#![recursion_limit = "256"]
+
 pub mod app;
 use anyhow::Result;
 use dotenv::dotenv;

@@ -422,6 +422,8 @@ async fn backfill_symbol_candles(
     end_ms: i64,
 ) -> Result<SymbolBackfillReport> {
     let candle_ms = candle_interval_ms(&config.timeframe)?;
+    let listed_at_ms = load_okx_symbol_list_time_ms(pool, symbol).await?;
+    let start_ms = aligned_symbol_start_ms(start_ms, listed_at_ms, candle_ms);
     let continuity =
         load_candle_continuity_status(pool, symbol, &config.timeframe, start_ms, end_ms, candle_ms)
             .await?;
@@ -485,6 +487,45 @@ async fn backfill_symbol_candles(
         fetch_reason: backfill_window.reason,
     })
 }
+
+/// 上市前不会存在 K 线；用交易所上市时间收窄补数窗口，避免把正常的前置空白反复当成缺口。
+async fn load_okx_symbol_list_time_ms(pool: &PgPool, symbol: &str) -> Result<Option<i64>> {
+    sqlx::query_scalar(
+        r#"
+        SELECT NULLIF(raw_payload ->> 'listTime', '')::BIGINT
+        FROM exchange_symbols
+        WHERE exchange = 'okx'
+          AND market_type = 'perpetual'
+          AND exchange_symbol = $1
+        "#,
+    )
+    .bind(symbol)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("load OKX symbol list time: {symbol}"))
+    .map(Option::flatten)
+}
+
+fn aligned_symbol_start_ms(
+    configured_start_ms: i64,
+    listed_at_ms: Option<i64>,
+    candle_ms: i64,
+) -> i64 {
+    let available_start_ms = listed_at_ms
+        .unwrap_or(configured_start_ms)
+        .max(configured_start_ms);
+    align_up_to_candle_boundary(available_start_ms, candle_ms)
+}
+
+fn align_up_to_candle_boundary(timestamp_ms: i64, candle_ms: i64) -> i64 {
+    let remainder = timestamp_ms.rem_euclid(candle_ms);
+    if remainder == 0 {
+        timestamp_ms
+    } else {
+        timestamp_ms.saturating_add(candle_ms - remainder)
+    }
+}
+
 /// 读取本地 K 线窗口的连续性摘要，先用 bounds/count 判定是否缺失，再记录最早断点用于缩小修复范围。
 async fn load_candle_continuity_status(
     pool: &PgPool,
@@ -681,27 +722,48 @@ pub async fn fetch_okx_history_candles(
     Ok(candles_by_ts.into_values().collect())
 }
 
-/// 请求单页 OKX 历史 K 线，并对 429 做同页退避重试，避免短周期批量补数放大限频失败。
+/// 请求单页 OKX 历史 K 线，并对限频、服务端错误和瞬时传输失败做同页退避重试。
 async fn request_okx_history_candles_page(
     client: &Client,
     url: Url,
     symbol: &str,
 ) -> Result<OkxHistoryCandlesResponse> {
     for attempt in 0..=OKX_RATE_LIMIT_MAX_RETRIES {
-        let response = client
+        let response = match client
             .get(url.clone())
             .header("User-Agent", "rust-quant-market-velocity-backfill/1.0")
             .send()
             .await
-            .with_context(|| format!("request OKX history-candles failed: symbol={symbol}"))?;
+        {
+            Ok(response) => response,
+            Err(error) if attempt < OKX_RATE_LIMIT_MAX_RETRIES => {
+                let backoff_ms = OKX_RATE_LIMIT_BACKOFF_MS * (attempt as u64 + 1);
+                warn!(
+                    "OKX history-candles transport failed; retrying page: symbol={}, attempt={}, backoff_ms={}, error={}",
+                    symbol,
+                    attempt + 1,
+                    backoff_ms,
+                    error
+                );
+                sleep(Duration::from_millis(backoff_ms)).await;
+                continue;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("request OKX history-candles failed: symbol={symbol}")
+                });
+            }
+        };
 
-        if response.status() == StatusCode::TOO_MANY_REQUESTS
+        if (response.status() == StatusCode::TOO_MANY_REQUESTS
+            || response.status().is_server_error())
             && attempt < OKX_RATE_LIMIT_MAX_RETRIES
         {
             let backoff_ms = OKX_RATE_LIMIT_BACKOFF_MS * (attempt as u64 + 1);
             warn!(
-                "OKX history-candles rate limited; retrying page: symbol={}, attempt={}, backoff_ms={}",
+                "OKX history-candles HTTP retry: symbol={}, status={}, attempt={}, backoff_ms={}",
                 symbol,
+                response.status(),
                 attempt + 1,
                 backoff_ms
             );
@@ -709,14 +771,28 @@ async fn request_okx_history_candles_page(
             continue;
         }
 
-        return response
+        let response = response
             .error_for_status()
-            .with_context(|| format!("OKX history-candles HTTP status failed: symbol={symbol}"))?
-            .json::<OkxHistoryCandlesResponse>()
-            .await
-            .with_context(|| {
-                format!("decode OKX history-candles response failed: symbol={symbol}")
-            });
+            .with_context(|| format!("OKX history-candles HTTP status failed: symbol={symbol}"))?;
+        match response.json::<OkxHistoryCandlesResponse>().await {
+            Ok(payload) => return Ok(payload),
+            Err(error) if attempt < OKX_RATE_LIMIT_MAX_RETRIES => {
+                let backoff_ms = OKX_RATE_LIMIT_BACKOFF_MS * (attempt as u64 + 1);
+                warn!(
+                    "OKX history-candles response interrupted; retrying page: symbol={}, attempt={}, backoff_ms={}, error={}",
+                    symbol,
+                    attempt + 1,
+                    backoff_ms,
+                    error
+                );
+                sleep(Duration::from_millis(backoff_ms)).await;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("decode OKX history-candles response failed: symbol={symbol}")
+                });
+            }
+        }
     }
 
     unreachable!("OKX history-candles retry loop always returns on the final attempt")
@@ -1190,6 +1266,40 @@ mod tests {
         );
         assert_eq!(window.fetch_start_ms, 4_800_000 - CANDLE_15M_MS);
         assert_eq!(window.reason, BackfillWindowReason::IncrementalTail);
+    }
+    #[test]
+    fn symbol_start_aligns_configured_time_to_the_next_candle_boundary() {
+        assert_eq!(
+            aligned_symbol_start_ms(1_000_001, None, CANDLE_15M_MS),
+            1_800_000
+        );
+    }
+    #[test]
+    fn symbol_start_clamps_to_listing_time_before_alignment() {
+        assert_eq!(
+            aligned_symbol_start_ms(1_000_000, Some(2_000_001), CANDLE_15M_MS),
+            2_700_000
+        );
+    }
+    #[test]
+    fn unaligned_scheduler_window_does_not_trigger_false_gap_repair() {
+        let configured_start_ms = 1_784_300_865_335;
+        let aligned_start_ms = aligned_symbol_start_ms(configured_start_ms, None, CANDLE_1M_MS);
+        let latest_ts = aligned_start_ms + CANDLE_1M_MS * 2_879;
+        let window = resolve_incremental_backfill_window(
+            aligned_start_ms,
+            latest_ts + CANDLE_1M_MS,
+            CANDLE_1M_MS,
+            CandleContinuityStatus {
+                earliest_ts: Some(aligned_start_ms),
+                latest_ts: Some(latest_ts),
+                actual_count: 2_880,
+                expected_count: 2_880,
+                earliest_gap_start_ts: None,
+            },
+        );
+        assert_eq!(window.reason, BackfillWindowReason::IncrementalTail);
+        assert_eq!(window.fetch_start_ms, latest_ts - CANDLE_1M_MS);
     }
     #[test]
     fn candle_continuity_uses_bounds_and_count_to_detect_missing_rows() {

@@ -31,6 +31,17 @@ fn market_rank_history_restore_targets(now: DateTime<Utc>) -> [DateTime<Utc>; 4]
         now,
     ]
 }
+/// 雷达保持高频内存扫描，但数据库快照只承担重启恢复，按分钟落库即可覆盖 15m/4h/24h horizon。
+fn market_rank_snapshot_persistence_is_due(
+    last_persisted_at: Option<DateTime<Utc>>,
+    captured_at: DateTime<Utc>,
+) -> bool {
+    last_persisted_at
+        .map(|last| {
+            captured_at - last >= Duration::seconds(MARKET_RANK_SNAPSHOT_PERSIST_INTERVAL_SECONDS)
+        })
+        .unwrap_or(true)
+}
 /// 提供rankhistoryfrompersistedsnapshots的集中实现，避免行情数据调用方重复处理相同细节。
 fn rank_history_from_persisted_snapshots(
     snapshots: Vec<MarketRankSnapshot>,

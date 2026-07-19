@@ -48,6 +48,9 @@ pub struct ScannerService {
     market_velocity_signal_config: Option<MarketVelocityStrategySignalConfig>,
     /// 排名history，用于行情、K 线或市场扫描。
     rank_history: VecDeque<RankSnapshot>,
+    /// 最近一次把全市场排名快照持久化到数据库的时间；内存扫描仍保持原频率。
+    /// None 表示首次扫描或上次落库失败，下一轮应立即重试。
+    last_rank_snapshot_persisted_at: Option<DateTime<Utc>>,
     /// 最近top150，用于行情、K 线或市场扫描。
     last_top_150: HashSet<String>,
     /// Telegram 通知器
@@ -70,6 +73,7 @@ const COOLDOWN_MINUTES_24H: i64 = 720; // 12 * 60
 const COOLDOWN_MINUTES_LIST: i64 = 30;
 const MARKET_RANK_TOP_BOUNDARY: i32 = 50;
 const MARKET_RANK_HISTORY_RETENTION_HOURS: i64 = 25;
+const MARKET_RANK_SNAPSHOT_PERSIST_INTERVAL_SECONDS: i64 = 60;
 const MARKET_RANK_TECHNICAL_TIMEFRAME: &str = "4h";
 const MARKET_RANK_TECHNICAL_PERIOD: usize = 20;
 const MARKET_RANK_TECHNICAL_FETCH_LIMIT: u32 = 80;
@@ -116,6 +120,7 @@ impl ScannerService {
             technical_candle_service,
             market_velocity_signal_config,
             rank_history: VecDeque::new(),
+            last_rank_snapshot_persisted_at: None,
             last_top_150: HashSet::new(),
             telegram,
             notification_cooldown: HashMap::new(),
@@ -421,17 +426,24 @@ impl ScannerService {
     }
     /// 持久化 行情与市场数据 结果，保证写入路径和幂等语义集中处理。
     async fn persist_rank_snapshots_from_scan(
-        &self,
+        &mut self,
         current_snapshots: &[TickerSnapshot],
         current_ranks: &HashMap<String, i32>,
         captured_at: DateTime<Utc>,
     ) {
+        if !market_rank_snapshot_persistence_is_due(
+            self.last_rank_snapshot_persisted_at,
+            captured_at,
+        ) {
+            return;
+        }
         let snapshots =
             build_market_rank_snapshots_from_scan(current_snapshots, current_ranks, captured_at);
         if let Err(err) = self.anomaly_repo.save_rank_snapshots(&snapshots).await {
             error!("Failed to save market rank price snapshots: {:?}", err);
             return;
         }
+        self.last_rank_snapshot_persisted_at = Some(captured_at);
     }
     /// 检查并发送排名变化通知 (带冷却期)
     async fn check_and_notify_rank_change(

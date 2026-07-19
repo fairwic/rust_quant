@@ -87,9 +87,9 @@ struct SnapshotRow {
     long_short_ratio: Option<f64>,
     /// 原始 payload；为空时表示没有保留原始响应。
     raw_payload: Option<sqlx::types::Json<serde_json::Value>>,
-    /// 创建时间。
+    /// 创建时间；数据库中的无时区值按 UTC 解释。
     created_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// 最后更新时间。
+    /// 最后更新时间；数据库中的无时区值按 UTC 解释。
     updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 #[derive(Debug, Clone, FromRow)]
@@ -345,6 +345,8 @@ impl VegasFactorResearchService {
             .chain(filtered_signals.iter().map(|row| row.signal_time_ms))
             .max()
             .unwrap_or_default();
+        // 历史表使用 timestamp without time zone 保存 UTC；查询时显式补回时区，
+        // 避免 sqlx 将其直接解码为 DateTime<Utc> 时发生类型不兼容。
         let mut builder = QueryBuilder::<Postgres>::new(
             "SELECT id, source, symbol, metric_type, metric_time, \
              NULLIF(funding_rate, '')::double precision as funding_rate, \
@@ -353,7 +355,8 @@ impl VegasFactorResearchService {
              NULLIF(oracle_price, '')::double precision as oracle_price, \
              NULLIF(mark_price, '')::double precision as mark_price, \
              NULLIF(long_short_ratio, '')::double precision as long_short_ratio, \
-             raw_payload, created_at, updated_at \
+             raw_payload, created_at AT TIME ZONE 'UTC' AS created_at, \
+             updated_at AT TIME ZONE 'UTC' AS updated_at \
              FROM external_market_snapshots WHERE metric_time >= ",
         );
         builder.push_bind(min_time);

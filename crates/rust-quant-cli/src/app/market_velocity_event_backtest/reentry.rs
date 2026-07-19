@@ -107,6 +107,7 @@ fn combine_reentry_result(
         reason: format!("stop_reentry_{}", reentry.reason),
         exit_ts: reentry.exit_ts,
         r: net_r,
+        target_r: reentry.target_r,
         complete: reentry.complete,
         symbol: None,
         event_id: None,

@@ -1917,5 +1917,8 @@ fn trade_record(
         signal_result,
         stop_loss_source: None,
         stop_loss_update_history: None,
+        initial_stop_price: None,
+        initial_risk_amount: None,
+        net_profit_r: None,
     }
 }

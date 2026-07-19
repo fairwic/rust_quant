@@ -197,6 +197,19 @@ mod tests {
         );
     }
     #[test]
+    fn market_rank_snapshot_persistence_is_limited_to_once_per_minute() {
+        let first = DateTime::from_timestamp(1_774_900_000, 0).expect("valid test timestamp");
+        assert!(market_rank_snapshot_persistence_is_due(None, first));
+        assert!(!market_rank_snapshot_persistence_is_due(
+            Some(first),
+            first + Duration::seconds(59)
+        ));
+        assert!(market_rank_snapshot_persistence_is_due(
+            Some(first),
+            first + Duration::seconds(60)
+        ));
+    }
+    #[test]
     fn market_velocity_episode_stale_cutoff_uses_rank_history_window() {
         let now = DateTime::from_timestamp(1_774_814_400, 0).expect("valid test timestamp");
         assert_eq!(

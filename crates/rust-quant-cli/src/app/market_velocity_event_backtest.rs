@@ -4,22 +4,25 @@ use chrono::{SecondsFormat, TimeZone, Utc};
 use rust_quant_domain::entities::BacktestLog;
 use rust_quant_domain::traits::BacktestLogRepository;
 use rust_quant_infrastructure::SqlxBacktestRepository;
-use serde_json::json;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::collections::{BTreeMap, HashMap};
 mod args;
+mod btc_regime;
 mod computed_candles;
 mod data;
+mod directional_reversal;
 mod equity;
 mod equity_stats;
 mod exit;
 mod fvg;
 mod kline_shape;
+mod kline_volume_rank_velocity;
 mod manifest;
 mod paper_outcome;
 mod paper_signal;
 mod reentry;
 mod report;
+mod reversal_retest;
 mod short_entry;
 mod stop_loss;
 #[cfg(test)]
@@ -33,14 +36,23 @@ pub use args::{
     MarketVelocityPaperStrategySignalSink, MarketVelocityStopLossMode,
     MarketVelocityTradeDirection, MarketVelocityTrendTimeframe, StopReentryMode,
 };
+use btc_regime::{filter_confirmed_events_by_btc_regime, print_btc_regime_filter_report};
 use data::load_backtest_data;
+use directional_reversal::{
+    deferred_long_confirmation_entry_idx, deferred_short_confirmation_entry_idx,
+    exhaustion_volume_dominance_filter_reason, is_bearish_continuation_setup,
+    is_bullish_continuation_setup, opposite_net_move_filter_reason,
+    opposite_reversal_confirmation_filter_reason, reversal_average_reclaim_filter_reason,
+    volume_atr_target_r_with_policy,
+};
 pub use equity::{
     build_framework_equity_concentration_reports, build_framework_equity_quartile_reports,
     build_framework_equity_report, build_framework_equity_split_reports,
     build_framework_equity_trade_reports, build_framework_equity_trigger_reports,
-    build_market_velocity_backtest_details, market_velocity_strategy_type,
-    print_framework_equity_reports, FrameworkEquityCloseLegReport, FrameworkEquityReport,
-    FrameworkEquitySymbolReport, FrameworkEquityTradeReport,
+    build_market_velocity_backtest_details, market_velocity_risk_config_detail,
+    market_velocity_strategy_detail, market_velocity_strategy_type, print_framework_equity_reports,
+    FrameworkEquityCloseLegReport, FrameworkEquityReport, FrameworkEquitySymbolReport,
+    FrameworkEquityTradeReport,
 };
 pub use exit::{simulate_trade, EarlyExit, ProfitProtection, RunnerExit};
 use fvg::{
@@ -60,6 +72,7 @@ use report::{
     print_effective_entry_report, print_result_report, print_stage_report,
     print_trigger_quality_report, print_trigger_variant_quality_report,
 };
+use reversal_retest::{find_retest_entry_after_signal, RetestEntrySignal};
 use short_entry::sideways_range_breakdown_candidate;
 pub(crate) use stop_loss::select_stop_loss_for_confirmed_signal;
 pub const MS_15M: i64 = 15 * 60 * 1_000;
@@ -153,6 +166,8 @@ pub struct RadarEvent {
 pub struct ConfirmedEvent {
     /// event，用于行情、K 线或市场扫描。
     pub event: RadarEvent,
+    /// 最终确认的交易方向；延续 K 线等待反转时不能再由原始 K 线颜色反推。
+    pub direction: MarketVelocityTradeDirection,
     /// 时间戳。
     pub entry_ts: i64,
     /// 入场价格。
@@ -196,6 +211,61 @@ pub(super) fn trade_direction_for_event(event: &RadarEvent) -> MarketVelocityTra
         MarketVelocityTradeDirection::Long
     }
 }
+
+/// 为双向反转策略识别“当前仍在延续、目标应反向等待”的真实交易方向。
+fn trade_direction_for_entry_event(
+    event: &RadarEvent,
+    candles: &[ComputedCandle],
+    args: &MarketVelocityEventBacktestArgs,
+) -> MarketVelocityTradeDirection {
+    let candle_direction = trade_direction_for_event(event);
+    let opposite_reversal = args.entry_min_opposite_net_move_pct.is_some()
+        || args.entry_min_opposite_duration_candles.is_some();
+    if args.trade_direction != MarketVelocityTradeDirection::Both || !opposite_reversal {
+        return candle_direction;
+    }
+    let completed_count = completed_candle_count(candles, event.ts, MS_15M);
+    let Some(latest_idx) = completed_count.checked_sub(1) else {
+        return candle_direction;
+    };
+    match candle_direction {
+        MarketVelocityTradeDirection::Short
+            if args.entry_defer_bearish_continuation
+                && is_bearish_continuation_setup(
+                    candles,
+                    latest_idx,
+                    args.entry_min_volume_ratio,
+                )
+                && opposite_net_move_filter_reason(
+                    candles,
+                    completed_count,
+                    MarketVelocityTradeDirection::Long,
+                    args,
+                )
+                .is_none() =>
+        {
+            MarketVelocityTradeDirection::Long
+        }
+        MarketVelocityTradeDirection::Long
+            if args.entry_defer_bullish_continuation
+                && is_bullish_continuation_setup(
+                    candles,
+                    latest_idx,
+                    args.entry_min_volume_ratio,
+                )
+                && opposite_net_move_filter_reason(
+                    candles,
+                    completed_count,
+                    MarketVelocityTradeDirection::Short,
+                    args,
+                )
+                .is_none() =>
+        {
+            MarketVelocityTradeDirection::Short
+        }
+        _ => candle_direction,
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TradeOutcome {
     Win,
@@ -226,6 +296,8 @@ pub struct TradeResult {
     pub exit_ts: i64,
     /// R 倍数；为空时表示无有效风险单位。
     pub r: Option<f64>,
+    /// 本笔交易实际使用的止盈 R；动态 ATR 止盈时每笔可能不同。
+    pub target_r: Option<f64>,
     /// complete，用于记录交易或执行状态。
     pub complete: bool,
     /// 交易对或资产符号。
@@ -323,7 +395,13 @@ pub async fn run_market_velocity_event_backtest(
         &config.args,
     );
     print_stage_report(&data, &evaluation);
-    let symbol_filtered = filter_confirmed_events_by_symbol(&evaluation.confirmed, &config.args);
+    let regime_filtered = filter_confirmed_events_by_btc_regime(
+        &evaluation.confirmed,
+        &data.candles_15m,
+        &config.args,
+    );
+    print_btc_regime_filter_report(&evaluation.confirmed, &regime_filtered, &config.args);
+    let symbol_filtered = filter_confirmed_events_by_symbol(&regime_filtered, &config.args);
     print_symbol_filter_report(&evaluation.confirmed, &symbol_filtered, &config.args);
     let trigger_filtered = filter_confirmed_events_by_entry_trigger(&symbol_filtered, &config.args);
     print_entry_trigger_filter_report(&symbol_filtered, &trigger_filtered, &config.args);
@@ -457,71 +535,6 @@ fn market_velocity_kline_window(
         (start, end, nums)
     }
 }
-/// 提供市场动量策略detail的集中实现，避免回测策略调用方重复处理相同细节。
-fn market_velocity_strategy_detail(args: &MarketVelocityEventBacktestArgs) -> serde_json::Value {
-    json!({
-        "source": "market_velocity_event_backtest",
-        "event_source": match args.event_source {
-            MarketVelocityEventSource::Episodes => "episodes",
-            MarketVelocityEventSource::RawEvents => "raw_events",
-            MarketVelocityEventSource::RawState => "raw_state",
-            MarketVelocityEventSource::Kline15m => "kline_15m",
-        },
-        "trade_direction": args.trade_direction.label(),
-        "entry_rule_version": &args.paper_outcome_entry_rule_version,
-        "entry_period": args.entry_period,
-        "entry_max_distance_pct": args.entry_max_distance_pct,
-        "entry_min_volume_ratio": args.entry_min_volume_ratio,
-        "entry_min_rsi": args.entry_min_rsi,
-        "entry_max_rsi": args.entry_max_rsi,
-        "entry_min_rsi_delta": args.entry_min_rsi_delta,
-        "entry_rsi_delta_lookback_candles": args.entry_rsi_delta_lookback_candles,
-        "entry_bollinger_breakout": args.entry_bollinger_breakout,
-        "entry_min_bollinger_bandwidth_expansion_pct": args.entry_min_bollinger_bandwidth_expansion_pct,
-        "entry_min_recent_drawdown_pct": args.entry_min_recent_drawdown_pct,
-        "entry_recent_drawdown_lookback_candles": args.entry_recent_drawdown_lookback_candles,
-        "entry_symbol_cooldown_candles": args.entry_symbol_cooldown_candles,
-        "entry_max_signal_pullback_pct": args.entry_max_signal_pullback_pct,
-        "entry_max_gap_without_retest_pct": args.entry_max_gap_without_retest_pct,
-        "entry_retest_tolerance_pct": args.entry_retest_tolerance_pct,
-        "entry_retest_after_signal": args.entry_retest_after_signal,
-        "entry_retest_max_wait_candles": args.entry_retest_max_wait_candles,
-        "entry_retest_min_entry_open_gap_pct": args.entry_retest_min_entry_open_gap_pct,
-        "entry_retest_open_fade_min_volume_ratio": args.entry_retest_open_fade_min_volume_ratio,
-        "fvg_impulse_retrace_fill_pct": args.fvg_impulse_retrace_fill_pct,
-        "fvg_impulse_retrace_min_wait_candles": args.fvg_impulse_retrace_min_wait_candles,
-        "trend_timeframe": args.trend_timeframe.label(),
-        "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
-        "min_delta_rank": args.min_delta_rank,
-        "max_delta_rank": args.max_delta_rank,
-        "min_price_change_pct": args.min_price_change_pct,
-        "entry_trigger_allowlist": &args.entry_trigger_allowlist,
-        "entry_trigger_blocklist": &args.entry_trigger_blocklist,
-        "symbol_blocklist": &args.symbol_blocklist,
-    })
-}
-/// 提供市场动量风控配置detail的集中实现，避免回测策略调用方重复处理相同细节。
-fn market_velocity_risk_config_detail(
-    args: &MarketVelocityEventBacktestArgs,
-    target_r: f64,
-) -> serde_json::Value {
-    json!({
-        "mode": "symbol_isolated_100u",
-        "trade_direction": args.trade_direction.label(),
-        "stop_loss_pct": args.stop_loss_pct,
-        "target_r": target_r,
-        "profit_protect_after_r": args.profit_protect_after_r,
-        "profit_protect_stop_r": args.profit_protect_stop_r,
-        "runner_target_r": args.runner_target_r,
-        "runner_fraction": args.runner_fraction,
-        "runner_stop_r": args.runner_stop_r,
-        "early_exit_no_profit_candles": args.early_exit_no_profit_candles,
-        "stop_reentry_mode": args.stop_reentry_mode.label(),
-        "fvg_entry_mode": args.fvg_entry_mode.label(),
-        "fvg_lookback_candles": args.fvg_lookback_candles,
-        "fvg_max_wait_candles": args.fvg_max_wait_candles,
-    })
-}
 /// 解析过滤confirmed事件by入场触发，把外部输入转换成回测策略可用的内部值。
 pub fn filter_confirmed_events_by_entry_trigger(
     confirmed: &[ConfirmedEvent],
@@ -597,7 +610,7 @@ fn entry_trigger_allowed(event: &ConfirmedEvent, args: &MarketVelocityEventBackt
     }
     true
 }
-fn base_entry_trigger(trigger: &str) -> String {
+pub(super) fn base_entry_trigger(trigger: &str) -> String {
     normalize_entry_trigger(trigger)
         .split_once('+')
         .map_or_else(
@@ -766,21 +779,25 @@ pub fn entry_confirmation(
         .previous_volume_avg
         .filter(|average| *average > 0.0)
         .map(|average| latest.candle.volume / average);
-    match direction {
-        MarketVelocityTradeDirection::Long
-            if latest.candle.close <= sma || latest.candle.close <= ema =>
-        {
-            return (false, "price_below_15m_average".to_string());
+    let opposite_move_reversal = args.entry_min_opposite_net_move_pct.is_some()
+        || args.entry_min_opposite_duration_candles.is_some();
+    if !opposite_move_reversal {
+        match direction {
+            MarketVelocityTradeDirection::Long
+                if latest.candle.close <= sma || latest.candle.close <= ema =>
+            {
+                return (false, "price_below_15m_average".to_string());
+            }
+            MarketVelocityTradeDirection::Short
+                if latest.candle.close >= sma || latest.candle.close >= ema =>
+            {
+                return (false, "price_above_15m_average".to_string());
+            }
+            MarketVelocityTradeDirection::Both => {
+                return (false, "invalid_trade_direction".to_string())
+            }
+            _ => {}
         }
-        MarketVelocityTradeDirection::Short
-            if latest.candle.close >= sma || latest.candle.close >= ema =>
-        {
-            return (false, "price_above_15m_average".to_string());
-        }
-        MarketVelocityTradeDirection::Both => {
-            return (false, "invalid_trade_direction".to_string())
-        }
-        _ => {}
     }
     let Some(sma_distance) = moving_average_distance_pct(latest.candle.close, sma) else {
         return (false, "invalid_15m_distance".to_string());
@@ -832,7 +849,44 @@ pub fn entry_confirmation(
     if let Some(reason) = fast_momentum_entry_filter_reason(candles, idx, direction, args) {
         return (false, reason.to_string());
     }
+    if opposite_move_reversal
+        && args.entry_defer_bearish_continuation
+        && direction == MarketVelocityTradeDirection::Long
+        && latest.candle.close < latest.candle.open
+    {
+        if is_bearish_continuation_setup(candles, idx - 1, args.entry_min_volume_ratio) {
+            return (true, "opposite_move_bearish_continuation_setup".to_string());
+        }
+        return (false, "bearish_reversal_not_confirmed".to_string());
+    }
+    if opposite_move_reversal
+        && args.entry_defer_bullish_continuation
+        && direction == MarketVelocityTradeDirection::Short
+        && latest.candle.close > latest.candle.open
+    {
+        if is_bullish_continuation_setup(candles, idx - 1, args.entry_min_volume_ratio) {
+            return (true, "opposite_move_bullish_continuation_setup".to_string());
+        }
+        return (false, "bullish_reversal_not_confirmed".to_string());
+    }
+    if opposite_move_reversal && args.entry_require_opposite_reversal_confirmation {
+        if let Some(reason) =
+            opposite_reversal_confirmation_filter_reason(candles, idx - 1, direction)
+        {
+            return (false, reason.to_string());
+        }
+    }
+    if opposite_move_reversal && args.entry_require_reversal_average_reclaim {
+        if let Some(reason) = reversal_average_reclaim_filter_reason(candles, idx - 1, direction) {
+            return (false, reason.to_string());
+        }
+    }
     let confirmed_trigger = match direction {
+        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Short
+            if opposite_move_reversal =>
+        {
+            Some("opposite_move_momentum_reversal")
+        }
         MarketVelocityTradeDirection::Long if reclaim_ema_candidate => Some("reclaim_ema"),
         MarketVelocityTradeDirection::Long if reclaim_ma_candidate => Some("reclaim_ma"),
         MarketVelocityTradeDirection::Long if breakout_previous_high_candidate => {
@@ -870,6 +924,15 @@ fn fast_momentum_entry_filter_reason(
     let latest_idx = completed_count.checked_sub(1)?;
     let latest = candles.get(latest_idx)?;
     if let Some(reason) = direct_kline_momentum_shape_filter_reason(latest, direction, args) {
+        return Some(reason);
+    }
+    if let Some(reason) = opposite_net_move_filter_reason(candles, completed_count, direction, args)
+    {
+        return Some(reason);
+    }
+    if let Some(reason) =
+        exhaustion_volume_dominance_filter_reason(candles, completed_count, direction, args)
+    {
         return Some(reason);
     }
     if args.entry_min_rsi.is_some()
@@ -1057,6 +1120,7 @@ fn outcome_start_candle_idx(candles: &[ComputedCandle], entry_ts: i64) -> Option
 fn immediate_entry_from_signal(
     event: &RadarEvent,
     candles: &[ComputedCandle],
+    direction: MarketVelocityTradeDirection,
     trigger: String,
 ) -> Result<ConfirmedEvent, String> {
     if !event.current_price.is_finite() || event.current_price <= 0.0 {
@@ -1066,6 +1130,7 @@ fn immediate_entry_from_signal(
         .ok_or_else(|| "no_entry_outcome_candle".to_string())?;
     Ok(ConfirmedEvent {
         event: event.clone(),
+        direction,
         entry_ts: event.ts,
         entry_price: event.current_price,
         entry_idx,
@@ -1225,7 +1290,7 @@ pub fn evaluate_events(
             continue;
         };
         let signal_visible_15m = computed_candles_visible_at_signal(symbol_15m, event.ts);
-        let direction = trade_direction_for_event(event);
+        let direction = trade_direction_for_entry_event(event, signal_visible_15m, args);
         let (trend_ok, trend_reason) = match args.trend_timeframe {
             MarketVelocityTrendTimeframe::FourHour => {
                 let Some(symbol_4h) = candles_4h
@@ -1271,9 +1336,71 @@ pub fn evaluate_events(
                 }
                 increment(&mut stage_counts, "entry_signal_pass");
                 let signal_idx = completed_candle_count(signal_visible_15m, event.ts, MS_15M) - 1;
+                if entry_reason.ends_with("continuation_setup") {
+                    let deferred_entry = find_deferred_reversal_entry_after_signal(
+                        symbol_15m, signal_idx, direction, args,
+                    )
+                    .and_then(|entry| {
+                        if !args.entry_retest_after_signal {
+                            return Ok(entry);
+                        }
+                        let confirmation_idx = entry
+                            .entry_idx
+                            .checked_sub(1)
+                            .ok_or_else(|| "entry_retest_missing_signal".to_string())?;
+                        find_retest_entry_after_signal(
+                            symbol_15m,
+                            confirmation_idx,
+                            direction,
+                            &entry.trigger,
+                            args,
+                        )
+                    });
+                    match deferred_entry {
+                        Ok(entry) => {
+                            if let Some(reason) = entry_signal_pullback_block_reason(
+                                event,
+                                entry.entry_price,
+                                direction,
+                                args,
+                            ) {
+                                increment(&mut stage_counts, "entry_blocked");
+                                increment(&mut stage_counts, "entry_execution_blocked");
+                                increment_nested(&mut blockers, &event.symbol, &reason);
+                                continue;
+                            }
+                            increment(&mut stage_counts, "entry_pass");
+                            increment(&mut stage_counts, "entry_execution_pass");
+                            confirmed.push(ConfirmedEvent {
+                                event: event.clone(),
+                                direction,
+                                entry_ts: entry.entry_ts,
+                                entry_price: entry.entry_price,
+                                entry_idx: entry.entry_idx,
+                                trigger: entry.trigger,
+                                structure_stop_loss_price: entry.structure_stop_loss_price,
+                                structure_stop_loss_source: entry.structure_stop_loss_source,
+                            });
+                        }
+                        Err(reason) => {
+                            increment(&mut stage_counts, "entry_blocked");
+                            increment(&mut stage_counts, "entry_execution_blocked");
+                            increment_nested(&mut blockers, &event.symbol, &reason);
+                        }
+                    }
+                    continue;
+                }
                 if args.entry_retest_after_signal {
+                    // 普通即时策略仍只能使用信号时可见 K 线；v10 反转研究显式等待未来
+                    // 已完成 K 线并从下一根开盘入场，避免把回踩确认收盘价当成可成交价。
+                    let retest_candles =
+                        if base_entry_trigger(&entry_reason) == "opposite_move_momentum_reversal" {
+                            symbol_15m
+                        } else {
+                            signal_visible_15m
+                        };
                     match find_retest_entry_after_signal(
-                        signal_visible_15m,
+                        retest_candles,
                         signal_idx,
                         direction,
                         &entry_reason,
@@ -1295,6 +1422,7 @@ pub fn evaluate_events(
                             increment(&mut stage_counts, "entry_execution_pass");
                             confirmed.push(ConfirmedEvent {
                                 event: event.clone(),
+                                direction,
                                 entry_ts: entry.entry_ts,
                                 entry_price: entry.entry_price,
                                 entry_idx: entry.entry_idx,
@@ -1311,7 +1439,7 @@ pub fn evaluate_events(
                     }
                     continue;
                 }
-                match immediate_entry_from_signal(event, symbol_15m, entry_reason) {
+                match immediate_entry_from_signal(event, symbol_15m, direction, entry_reason) {
                     Ok(confirmed_event) => {
                         increment(&mut stage_counts, "entry_pass");
                         increment(&mut stage_counts, "entry_execution_pass");
@@ -1371,6 +1499,7 @@ pub fn evaluate_events(
                         increment(&mut stage_counts, "entry_execution_pass");
                         confirmed.push(ConfirmedEvent {
                             event: event.clone(),
+                            direction,
                             entry_ts: entry.entry_ts,
                             entry_price: entry.entry_price,
                             entry_idx: entry.entry_15m_idx,
@@ -1435,6 +1564,7 @@ pub fn evaluate_events(
                         increment(&mut stage_counts, "entry_execution_pass");
                         confirmed.push(ConfirmedEvent {
                             event: event.clone(),
+                            direction,
                             entry_ts: entry.entry_ts,
                             entry_price: entry.entry_price,
                             entry_idx: entry.entry_15m_idx,
@@ -1468,6 +1598,7 @@ pub fn evaluate_events(
                                     increment(&mut stage_counts, "entry_execution_pass");
                                     confirmed.push(ConfirmedEvent {
                                         event: event.clone(),
+                                        direction,
                                         entry_ts: entry.entry_ts,
                                         entry_price: entry.entry_price,
                                         entry_idx: entry.entry_idx,
@@ -1553,6 +1684,7 @@ pub fn evaluate_events(
                         increment(&mut stage_counts, "entry_execution_pass");
                         confirmed.push(ConfirmedEvent {
                             event: event.clone(),
+                            direction,
                             entry_ts: entry.entry_ts,
                             entry_price: entry.entry_price,
                             entry_idx: entry.entry_15m_idx,
@@ -1576,120 +1708,53 @@ pub fn evaluate_events(
         blockers,
     }
 }
-#[derive(Debug, Clone, PartialEq)]
-struct RetestEntrySignal {
-    entry_ts: i64,
-    entry_price: f64,
-    entry_idx: usize,
-    trigger: String,
-    structure_stop_loss_price: Option<f64>,
-    structure_stop_loss_source: Option<String>,
-}
-fn find_retest_entry_after_signal(
+fn find_deferred_reversal_entry_after_signal(
     candles: &[ComputedCandle],
     signal_idx: usize,
     direction: MarketVelocityTradeDirection,
-    original_trigger: &str,
     args: &MarketVelocityEventBacktestArgs,
 ) -> Result<RetestEntrySignal, String> {
-    if direction == MarketVelocityTradeDirection::Short {
-        return Err("entry_retest_short_not_supported".to_string());
+    let entry_idx = match direction {
+        MarketVelocityTradeDirection::Long => deferred_long_confirmation_entry_idx(
+            candles,
+            signal_idx,
+            args.entry_defer_max_wait_candles,
+            args.entry_min_volume_ratio,
+        ),
+        MarketVelocityTradeDirection::Short => deferred_short_confirmation_entry_idx(
+            candles,
+            signal_idx,
+            args.entry_defer_max_wait_candles,
+            args.entry_min_volume_ratio,
+        ),
+        MarketVelocityTradeDirection::Both => Err("deferred_reversal_invalid_direction"),
     }
-    let signal = candles
-        .get(signal_idx)
-        .ok_or_else(|| "entry_retest_missing_signal".to_string())?;
-    let base_trigger = base_entry_trigger(original_trigger);
-    let retest_level = match base_trigger.as_str() {
-        "breakout_previous_high" => signal_idx
-            .checked_sub(1)
-            .and_then(|previous_idx| candles.get(previous_idx))
-            .map(|previous| previous.candle.high),
-        "reclaim_ema" => signal.ema,
-        _ => return Err("entry_retest_unsupported_trigger".to_string()),
-    }
-    .filter(|level| level.is_finite() && *level > 0.0)
-    .ok_or_else(|| "entry_retest_invalid_level".to_string())?;
-    let last_confirmation_idx =
-        (signal_idx + args.entry_retest_max_wait_candles).min(candles.len().saturating_sub(1));
-    for confirmation_idx in signal_idx + 1..=last_confirmation_idx {
-        let confirmation = &candles[confirmation_idx];
-        if !retest_confirmation_matches(confirmation, retest_level, args) {
-            continue;
+    .map_err(str::to_string)?;
+    if args.entry_require_reversal_average_reclaim {
+        if let Some(reason) =
+            reversal_average_reclaim_filter_reason(candles, entry_idx - 1, direction)
+        {
+            return Err(reason.to_string());
         }
-        let entry_idx = confirmation_idx + 1;
-        let Some(entry) = candles.get(entry_idx) else {
-            return Err("entry_retest_no_next_entry_candle".to_string());
-        };
-        let volume_ratio = confirmation
-            .previous_volume_avg
-            .filter(|average| *average > 0.0)
-            .map(|average| confirmation.candle.volume / average);
-        if let Some(min_gap_pct) = args.entry_retest_min_entry_open_gap_pct {
-            let gap_pct = moving_average_distance_pct(entry.candle.open, confirmation.candle.close)
-                .ok_or_else(|| "entry_retest_invalid_entry_gap".to_string())?;
-            if gap_pct < min_gap_pct {
-                let rescued =
-                    args.entry_retest_open_fade_min_volume_ratio
-                        .is_some_and(|min_volume_ratio| {
-                            volume_ratio.is_some_and(|ratio| ratio >= min_volume_ratio)
-                        });
-                if !rescued {
-                    return Err("entry_retest_entry_open_faded_confirmation".to_string());
-                }
+    }
+    let entry = candles
+        .get(entry_idx)
+        .ok_or_else(|| "deferred_reversal_no_next_entry_candle".to_string())?;
+    Ok(RetestEntrySignal {
+        entry_ts: entry.candle.ts,
+        entry_price: entry.candle.open,
+        entry_idx,
+        trigger: format!(
+            "opposite_move_momentum_reversal+{}",
+            match direction {
+                MarketVelocityTradeDirection::Long => "deferred_bearish_continuation",
+                MarketVelocityTradeDirection::Short => "deferred_bullish_continuation",
+                MarketVelocityTradeDirection::Both => unreachable!(),
             }
-        }
-        return Ok(RetestEntrySignal {
-            entry_ts: entry.candle.ts,
-            entry_price: entry.candle.open,
-            entry_idx,
-            trigger: format!("{base_trigger}+retest_after_signal"),
-            structure_stop_loss_price: Some(retest_level),
-            structure_stop_loss_source: Some(match base_trigger.as_str() {
-                "reclaim_ema" => "entry_confirmation_ema".to_string(),
-                "breakout_previous_high" => "entry_confirmation_previous_high".to_string(),
-                _ => "entry_confirmation_structure".to_string(),
-            }),
-        });
-    }
-    Err("entry_retest_no_pullback_confirmation".to_string())
-}
-fn retest_confirmation_matches(
-    confirmation: &ComputedCandle,
-    retest_level: f64,
-    args: &MarketVelocityEventBacktestArgs,
-) -> bool {
-    let candle = &confirmation.candle;
-    let tolerance = 1.0 + args.entry_retest_tolerance_pct / 100.0;
-    if candle.low > retest_level * tolerance
-        || candle.close < retest_level
-        || candle.close <= candle.open
-    {
-        return false;
-    }
-    let (Some(sma), Some(ema)) = (confirmation.sma, confirmation.ema) else {
-        return false;
-    };
-    if candle.close <= sma || candle.close <= ema {
-        return false;
-    }
-    let Some(sma_distance) = moving_average_distance_pct(candle.close, sma) else {
-        return false;
-    };
-    let Some(ema_distance) = moving_average_distance_pct(candle.close, ema) else {
-        return false;
-    };
-    if args.entry_max_distance_pct > 0.0
-        && (sma_distance.abs() > args.entry_max_distance_pct
-            || ema_distance.abs() > args.entry_max_distance_pct)
-    {
-        return false;
-    }
-    let volume_ratio = confirmation
-        .previous_volume_avg
-        .filter(|average| *average > 0.0)
-        .map(|average| candle.volume / average);
-    args.entry_min_volume_ratio <= 0.0
-        || volume_ratio.is_some_and(|ratio| ratio >= args.entry_min_volume_ratio)
+        ),
+        structure_stop_loss_price: None,
+        structure_stop_loss_source: None,
+    })
 }
 /// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
 fn summarize_target(
@@ -1712,20 +1777,58 @@ fn summarize_target(
             continue;
         };
         let selected_stop_loss = select_stop_loss_for_confirmed_signal(signal, args);
+        let effective_target_r = if args.volume_atr_take_profit {
+            volume_atr_target_r_with_policy(
+                candles,
+                signal.event.ts,
+                signal.entry_ts,
+                signal.entry_price,
+                selected_stop_loss.stop_loss_pct,
+                args,
+            )
+        } else {
+            Some(target_r)
+        };
+        let Some(effective_target_r) = effective_target_r else {
+            results.push(TradeResult {
+                outcome: TradeOutcome::Incomplete,
+                reason: "volume_atr_target_not_ready".to_string(),
+                exit_ts: signal.entry_ts,
+                r: None,
+                target_r: None,
+                complete: false,
+                symbol: Some(symbol.clone()),
+                event_id: Some(signal.event.id),
+                detected_at: Some(signal.event.detected_at.clone()),
+                entry_ts: signal.entry_ts,
+                entry_price: signal.entry_price,
+                trigger: Some(signal.trigger.clone()),
+                reentry: None,
+            });
+            continue;
+        };
         let mut result = simulate_trade(
             candles,
             signal.entry_idx,
             signal.entry_ts,
             signal.entry_price,
-            trade_direction_for_event(&signal.event),
+            signal.direction,
             selected_stop_loss.stop_loss_pct,
-            target_r,
+            effective_target_r,
             horizon_ms,
-            profit_protection_for_target(args, target_r),
-            runner_exit_for_target(args, target_r),
+            profit_protection_for_target(args, effective_target_r),
+            runner_exit_for_target(args, effective_target_r),
             early_exit(args),
         );
-        result = maybe_apply_stop_reentry(candles, signal, result, target_r, horizon_ms, args);
+        result = maybe_apply_stop_reentry(
+            candles,
+            signal,
+            result,
+            effective_target_r,
+            horizon_ms,
+            args,
+        );
+        result.target_r = Some(effective_target_r);
         result.symbol = Some(symbol.clone());
         result.event_id = Some(signal.event.id);
         result.detected_at = Some(signal.event.detected_at.clone());
@@ -1819,7 +1922,7 @@ fn moving_average_state(
     }
 }
 /// 提供movingaveragedistancepct的集中实现，避免回测策略调用方重复处理相同细节。
-fn moving_average_distance_pct(close: f64, average: f64) -> Option<f64> {
+pub(super) fn moving_average_distance_pct(close: f64, average: f64) -> Option<f64> {
     if average <= 0.0 || !average.is_finite() || !close.is_finite() {
         return None;
     }
@@ -1851,5 +1954,7 @@ fn increment_nested(
 }
 #[cfg(test)]
 mod direct_kline_tests;
+#[cfg(test)]
+mod directional_reversal_tests;
 #[cfg(test)]
 mod tests;

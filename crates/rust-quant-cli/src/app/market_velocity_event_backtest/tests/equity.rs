@@ -24,6 +24,10 @@ fn framework_equity_report_replays_raw_event_at_next_15m_candle() {
     let report = build_framework_equity_report(&confirmed, &candles_by_symbol, 2.0, &args);
 
     assert_eq!(report.total_open_trades, 1);
+    assert_eq!(report.fixed_r_trades, 1);
+    assert!(report.net_sum_r.is_some_and(|value| value > 0.0));
+    assert!(report.net_expectancy_r.is_some_and(|value| value > 0.0));
+    assert_eq!(report.net_profit_factor, None);
     assert_eq!(report.win_rate, Some(100.0));
     assert!(report.total_profit > 5.0);
 }
@@ -261,6 +265,10 @@ fn framework_equity_concentration_report_removes_top_positive_symbols() {
         min_trades: 3,
         total_open_trades: 7,
         total_profit: 40.0,
+        fixed_r_trades: 7,
+        net_sum_r: Some(4.0),
+        net_expectancy_r: Some(4.0 / 7.0),
+        net_profit_factor: Some(2.0),
         win_rate: Some(60.0),
         trade_sharpe: None,
         max_drawdown_pct: 5.0,
@@ -379,6 +387,7 @@ fn framework_equity_report_counts_short_fixed_stop_loss_as_drawdown() {
     candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
     candles.push(ohlc(entry_ts + MS_15M, 102.0, 103.5, 99.0, 103.2));
     let mut event = confirmed_event(44, "SHORT-STOP-USDT-SWAP", entry_ts, "2026-06-01T00:00:00Z");
+    event.direction = MarketVelocityTradeDirection::Short;
     event.event.price_change_pct = -3.0;
     event.trigger = "breakdown_range_low".to_string();
     let confirmed = vec![event];
@@ -697,6 +706,76 @@ fn framework_equity_trade_report_can_ignore_same_symbol_entry_updates_while_open
     assert!(strict_reports[0].profit_loss < 0.0);
 }
 #[test]
+fn framework_equity_trade_report_does_not_reopen_on_same_candle_as_exit() {
+    let entry_ts = MS_15M * 505;
+    let mut candles = (0..505)
+        .map(|index| ohlc(MS_15M * index, 100.0, 100.5, 99.5, 100.0))
+        .collect::<Vec<_>>();
+    candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
+    candles.push(ohlc(entry_ts + MS_15M, 104.0, 106.5, 103.0, 104.0));
+    candles.push(ohlc(entry_ts + MS_15M * 2, 104.0, 104.5, 100.0, 101.0));
+    let first = confirmed_event(
+        54,
+        "SAME-CANDLE-EXIT-USDT-SWAP",
+        entry_ts,
+        "2026-06-01T00:00:00Z",
+    );
+    let mut second = confirmed_event(
+        55,
+        "SAME-CANDLE-EXIT-USDT-SWAP",
+        entry_ts + MS_15M,
+        "2026-06-01T00:15:00Z",
+    );
+    second.entry_price = 104.0;
+    let candles_by_symbol = HashMap::from([("SAME-CANDLE-EXIT-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 1,
+        stop_loss_pct: 0.03,
+        ignore_entry_signal_updates_while_open: true,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let reports =
+        build_framework_equity_trade_reports(&[first, second], &candles_by_symbol, 2.0, &args);
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].event_id, 54);
+    assert!(reports[0].profit_loss > 0.0);
+}
+#[test]
+fn framework_equity_trade_report_keeps_earlier_setup_when_entries_share_timestamp() {
+    let entry_ts = MS_15M * 505;
+    let mut candles = (0..505)
+        .map(|index| ohlc(MS_15M * index, 100.0, 100.5, 99.5, 100.0))
+        .collect::<Vec<_>>();
+    candles.push(ohlc(entry_ts, 100.0, 100.5, 99.5, 100.0));
+    candles.push(ohlc(entry_ts + MS_15M, 106.0, 106.5, 105.0, 106.0));
+    let mut deferred =
+        confirmed_event(52, "SAME-ENTRY-USDT-SWAP", entry_ts, "2026-06-01T00:00:00Z");
+    deferred.event.ts = entry_ts - MS_15M * 2;
+    deferred.trigger = "opposite_move_momentum_reversal+deferred_bearish_continuation".to_string();
+    let immediate = confirmed_event(53, "SAME-ENTRY-USDT-SWAP", entry_ts, "2026-06-01T00:30:00Z");
+    let candles_by_symbol = HashMap::from([("SAME-ENTRY-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 1,
+        stop_loss_pct: 0.03,
+        ignore_entry_signal_updates_while_open: true,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let reports = build_framework_equity_trade_reports(
+        &[deferred, immediate],
+        &candles_by_symbol,
+        2.0,
+        &args,
+    );
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].event_id, 52);
+    assert_eq!(reports[0].signal_ts, entry_ts - MS_15M * 2);
+    assert!(reports[0].trigger.contains("deferred_bearish_continuation"));
+}
+#[test]
 fn framework_equity_trade_report_expands_runner_close_legs() {
     let entry_ts = MS_15M * 505;
     let mut candles = Vec::new();
@@ -748,6 +827,8 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
         target_r: 2.4,
         symbol: "DETAIL-USDT-SWAP".to_string(),
         event_id: 77,
+        signal_ts: MS_15M * 504,
+        direction: MarketVelocityTradeDirection::Long,
         detected_at: "2026-06-01T02:25:36Z".to_string(),
         entry_ts: MS_15M * 505,
         signal_open_position_time: "2026-06-01 10:25:36".to_string(),
@@ -758,6 +839,8 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
         close_type: "LongTakeProfit".to_string(),
         signal_status: 1,
         profit_loss: 6.43,
+        initial_risk_amount: Some(3.0),
+        net_profit_r: Some(2.143333333333333),
         quantity: 1.0,
         outcome: "win",
         trigger: "reclaim_ema".to_string(),
@@ -769,6 +852,8 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
     let args = MarketVelocityEventBacktestArgs {
         stop_loss_pct: 0.03,
         entry_period: 20,
+        entry_min_opposite_duration_candles: Some(96),
+        entry_min_exhaustion_volume_dominance_ratio: Some(1.0),
         paper_outcome_entry_rule_version:
             "rank_radar_4h_trend_15m_episode_research_03sl_24r_rank5_30_v1".to_string(),
         ..MarketVelocityEventBacktestArgs::default()
@@ -813,6 +898,15 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
     assert_eq!(signal_value["rank_event_id"], 77);
     assert_eq!(signal_value["entry_trigger"], "reclaim_ema");
     assert_eq!(signal_value["target_r"], 2.4);
+    assert_eq!(signal_value["entry_min_opposite_duration_candles"], 96);
+    assert_eq!(signal_value["entry_opposite_duration_min_r_squared"], 0.7);
+    assert_eq!(
+        signal_value["entry_min_exhaustion_volume_dominance_ratio"],
+        1.0
+    );
+    assert_eq!(signal_value["entry_exhaustion_volume_lookback_candles"], 96);
+    assert_eq!(signal_value["entry_exhaustion_current_cluster_candles"], 3);
+    assert_eq!(signal_value["entry_exhaustion_swing_radius_candles"], 3);
     assert_eq!(
         signal_value["entry_rule_version"],
         args.paper_outcome_entry_rule_version
@@ -824,6 +918,8 @@ fn framework_equity_trade_report_builds_runner_legacy_backtest_detail_payload() 
         target_r: 2.4,
         symbol: "RUNNER-DETAIL-USDT-SWAP".to_string(),
         event_id: 88,
+        signal_ts: MS_15M * 504,
+        direction: MarketVelocityTradeDirection::Long,
         detected_at: "2026-06-01T02:25:36Z".to_string(),
         entry_ts: MS_15M * 505,
         signal_open_position_time: "2026-06-01 10:25:36".to_string(),
@@ -834,6 +930,8 @@ fn framework_equity_trade_report_builds_runner_legacy_backtest_detail_payload() 
         close_type: "runner_base_target_hit+runner_target_hit".to_string(),
         signal_status: 1,
         profit_loss: 4.0,
+        initial_risk_amount: None,
+        net_profit_r: None,
         quantity: 1.0,
         outcome: "win",
         trigger: "breakout_previous_high".to_string(),
@@ -902,6 +1000,7 @@ fn confirmed_event(id: i64, symbol: &str, entry_ts: i64, detected_at: &str) -> C
             current_price: 100.0,
             price_change_pct: 3.0,
         },
+        direction: MarketVelocityTradeDirection::Long,
         entry_ts,
         entry_price: 100.0,
         entry_idx: 505,

@@ -1242,6 +1242,7 @@ fn summarize_target_can_reenter_after_stop_on_breakout_reclaim() {
             current_price: 102.0,
             price_change_pct: 17.0,
         },
+        direction: MarketVelocityTradeDirection::Long,
         entry_ts: MS_15M,
         entry_price: 102.0,
         entry_idx: 1,
@@ -1358,6 +1359,7 @@ fn select_stop_loss_for_confirmed_signal_places_fixed_stop_above_entry_for_short
     };
     let mut signal = confirmed_event(90, "breakdown_range_low");
     signal.entry_price = 100.0;
+    signal.direction = MarketVelocityTradeDirection::Short;
     signal.event.price_change_pct = -3.5;
 
     let selected = select_stop_loss_for_confirmed_signal(&signal, &args);
@@ -1475,6 +1477,7 @@ fn framework_equity_report_uses_100u_funds_and_min_trade_gate() {
             current_price: 100.0,
             price_change_pct: 3.0,
         },
+        direction: MarketVelocityTradeDirection::Long,
         entry_ts,
         entry_price: 100.0,
         entry_idx: 505,
@@ -1518,6 +1521,7 @@ fn framework_equity_report_calculates_trade_sharpe_and_max_drawdown() {
                 current_price: 100.0,
                 price_change_pct: 3.0,
             },
+            direction: MarketVelocityTradeDirection::Long,
             entry_ts: MS_15M * 505,
             entry_price: 100.0,
             entry_idx: 505,
@@ -1537,6 +1541,7 @@ fn framework_equity_report_calculates_trade_sharpe_and_max_drawdown() {
                 current_price: 100.0,
                 price_change_pct: 2.5,
             },
+            direction: MarketVelocityTradeDirection::Long,
             entry_ts: MS_15M * 507,
             entry_price: 100.0,
             entry_idx: 507,
@@ -2574,6 +2579,7 @@ fn builds_paper_outcomes_for_each_target_and_horizon_without_execution_task_payl
             current_price: 100.0,
             price_change_pct: 3.5,
         },
+        direction: MarketVelocityTradeDirection::Long,
         entry_ts: MS_15M,
         entry_price: 100.0,
         entry_idx: 0,
@@ -2657,6 +2663,7 @@ fn builds_breakdown_short_paper_strategy_signal_as_signal_only_request() {
             current_price: 100.0,
             price_change_pct: -1.2,
         },
+        direction: MarketVelocityTradeDirection::Short,
         entry_ts: MS_15M * 2,
         entry_price: 99.0,
         entry_idx: 2,
@@ -2717,6 +2724,7 @@ fn confirmed_event(id: i64, trigger: &str) -> ConfirmedEvent {
             current_price: 100.0,
             price_change_pct: 3.5,
         },
+        direction: MarketVelocityTradeDirection::Long,
         entry_ts: MS_15M,
         entry_price: 100.0,
         entry_idx: 0,

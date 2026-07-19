@@ -1,6 +1,6 @@
 use super::{
-    trade_direction_for_event, ConfirmedEvent, MarketVelocityEventBacktestArgs,
-    MarketVelocityStopLossMode, MarketVelocityTradeDirection,
+    ConfirmedEvent, MarketVelocityEventBacktestArgs, MarketVelocityStopLossMode,
+    MarketVelocityTradeDirection,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -15,7 +15,7 @@ pub(crate) fn select_stop_loss_for_confirmed_signal(
     signal: &ConfirmedEvent,
     args: &MarketVelocityEventBacktestArgs,
 ) -> SelectedStopLossForSignal {
-    let direction = trade_direction_for_event(&signal.event);
+    let direction = signal.direction;
     let fixed_price =
         stop_loss_price_for_direction(signal.entry_price, args.stop_loss_pct, direction);
     let fixed_source = fixed_stop_loss_source(args.stop_loss_pct);

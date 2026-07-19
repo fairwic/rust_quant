@@ -260,6 +260,42 @@ pub struct MarketVelocityEventBacktestArgs {
     pub entry_min_recent_drawdown_pct: Option<f64>,
     /// 近期回撤确认回看 15m K 线数量，不包含当前突破 K 线。
     pub entry_recent_drawdown_lookback_candles: usize,
+    /// 触发 K 线之前用于判断反向净趋势的回看 K 线数量。
+    pub entry_opposite_move_lookback_candles: usize,
+    /// 反向窗口首根开盘到末根收盘的最小净幅度；为空时不启用。
+    pub entry_min_opposite_net_move_pct: Option<f64>,
+    /// 不要求固定幅度时，反向趋势至少持续的 15m K 线数量；为空时不启用时间分支。
+    pub entry_min_opposite_duration_candles: Option<usize>,
+    /// 当前反转簇相对历史最强已确认极值簇的最小成交量比例；为空时不启用。
+    pub entry_min_exhaustion_volume_dominance_ratio: Option<f64>,
+    /// 入场前 96 根 BTC 15m K 线允许的最大绝对净涨跌幅；为空时不启用基准震荡门禁。
+    pub entry_btc_96_max_abs_net_move_pct: Option<f64>,
+    /// 入场前 384 根 BTC 15m K 线沿交易方向要求的最小净幅度；0 表示只要求同向。
+    pub entry_btc_384_min_directional_net_move_pct: Option<f64>,
+    /// 是否要求入场前最后一根已完成 BTC 15m K 线与交易方向一致。
+    pub entry_btc_require_current_directional_candle: bool,
+    /// 是否按触发量比分层选择 ATR14 止盈距离。
+    pub volume_atr_take_profit: bool,
+    /// 原始 Volume-ATR 目标的风险归一化缩放倍数。
+    pub volume_atr_target_scale: f64,
+    /// Volume-ATR 目标下限；为空时保留旧版本原始目标。
+    pub volume_atr_min_target_r: Option<f64>,
+    /// Volume-ATR 目标上限；为空时保留旧版本原始目标。
+    pub volume_atr_max_target_r: Option<f64>,
+    /// 回测单边手续费 bps；为空时沿用框架旧默认值。
+    pub backtest_fee_bps_per_side: Option<f64>,
+    /// 回测单边滑点 bps，以等价比例交易成本计入。
+    pub backtest_slippage_bps_per_side: f64,
+    /// 放量大阴线是否只创建待确认做多 setup，而不立即入场。
+    pub entry_defer_bearish_continuation: bool,
+    /// 放量大阳线是否只创建待确认做空 setup，而不立即入场。
+    pub entry_defer_bullish_continuation: bool,
+    /// 反向策略是否要求信号 K 线形成方向对称的实体突破确认。
+    pub entry_require_opposite_reversal_confirmation: bool,
+    /// 反转确认收盘是否必须回到 EMA20 与 SMA20 的目标方向一侧。
+    pub entry_require_reversal_average_reclaim: bool,
+    /// 放量大阴线后等待止跌确认的最大 15m K 线数量。
+    pub entry_defer_max_wait_candles: usize,
     /// 同一交易对再次入场前需要等待的 15m K 线数量；为空时不启用。
     pub entry_symbol_cooldown_candles: Option<usize>,
     /// signal 当前价到实际入场价允许的最大回撤百分比；为空时不启用。
@@ -300,6 +336,12 @@ pub struct MarketVelocityEventBacktestArgs {
     pub sample_limit: usize,
     /// K 线样本抽样种子；仅对 kline_15m 数据源生效，保证随机样本可复现。
     pub sample_seed: String,
+    /// 是否用 15m K 线重建滚动 24 小时成交额排名动量，而不是为每根 K 线生成事件。
+    pub kline_volume_rank_velocity: bool,
+    /// 排名上升时是否同时要求本标的滚动 24 小时成交额较前一快照增长。
+    pub kline_volume_rank_require_turnover_growth: bool,
+    /// 是否要求当前和前一根 15m 收盘的排名都连续改善。
+    pub kline_volume_rank_require_consecutive_improvement: bool,
     /// event来源，用于行情、K 线或市场扫描。
     pub event_source: MarketVelocityEventSource,
     /// tradedirection，用于行情、K 线或市场扫描。
@@ -387,6 +429,24 @@ impl Default for MarketVelocityEventBacktestArgs {
             entry_min_range_expansion_ratio: None,
             entry_min_recent_drawdown_pct: None,
             entry_recent_drawdown_lookback_candles: 12,
+            entry_opposite_move_lookback_candles: 12,
+            entry_min_opposite_net_move_pct: None,
+            entry_min_opposite_duration_candles: None,
+            entry_min_exhaustion_volume_dominance_ratio: None,
+            entry_btc_96_max_abs_net_move_pct: None,
+            entry_btc_384_min_directional_net_move_pct: None,
+            entry_btc_require_current_directional_candle: false,
+            volume_atr_take_profit: false,
+            volume_atr_target_scale: 1.0,
+            volume_atr_min_target_r: None,
+            volume_atr_max_target_r: None,
+            backtest_fee_bps_per_side: None,
+            backtest_slippage_bps_per_side: 0.0,
+            entry_defer_bearish_continuation: false,
+            entry_defer_bullish_continuation: false,
+            entry_require_opposite_reversal_confirmation: false,
+            entry_require_reversal_average_reclaim: false,
+            entry_defer_max_wait_candles: 3,
             entry_symbol_cooldown_candles: None,
             entry_max_signal_pullback_pct: None,
             entry_max_gap_without_retest_pct: None,
@@ -407,6 +467,9 @@ impl Default for MarketVelocityEventBacktestArgs {
             max_4h_staleness_min: 240,
             sample_limit: 5,
             sample_seed: "default".to_string(),
+            kline_volume_rank_velocity: false,
+            kline_volume_rank_require_turnover_growth: false,
+            kline_volume_rank_require_consecutive_improvement: false,
             event_source: MarketVelocityEventSource::Episodes,
             trade_direction: MarketVelocityTradeDirection::Long,
             paper_outcome_sink: MarketVelocityPaperOutcomeSink::Off,
@@ -510,6 +573,56 @@ where
             "--entry-recent-drawdown-lookback-candles" => {
                 parsed.entry_recent_drawdown_lookback_candles = parse_next(&mut args, &arg)?
             }
+            "--entry-opposite-move-lookback-candles" => {
+                parsed.entry_opposite_move_lookback_candles = parse_next(&mut args, &arg)?
+            }
+            "--entry-min-opposite-net-move-pct" => {
+                parsed.entry_min_opposite_net_move_pct = Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-min-opposite-duration-candles" => {
+                parsed.entry_min_opposite_duration_candles = Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-min-exhaustion-volume-dominance-ratio" => {
+                parsed.entry_min_exhaustion_volume_dominance_ratio =
+                    Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-btc-96-max-abs-net-move-pct" => {
+                parsed.entry_btc_96_max_abs_net_move_pct = Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-btc-384-min-directional-net-move-pct" => {
+                parsed.entry_btc_384_min_directional_net_move_pct =
+                    Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-btc-require-current-directional-candle" => {
+                parsed.entry_btc_require_current_directional_candle = true
+            }
+            "--volume-atr-take-profit" => parsed.volume_atr_take_profit = true,
+            "--volume-atr-target-scale" => {
+                parsed.volume_atr_target_scale = parse_next(&mut args, &arg)?
+            }
+            "--volume-atr-min-target-r" => {
+                parsed.volume_atr_min_target_r = Some(parse_next(&mut args, &arg)?)
+            }
+            "--volume-atr-max-target-r" => {
+                parsed.volume_atr_max_target_r = Some(parse_next(&mut args, &arg)?)
+            }
+            "--backtest-fee-bps-per-side" => {
+                parsed.backtest_fee_bps_per_side = Some(parse_next(&mut args, &arg)?)
+            }
+            "--backtest-slippage-bps-per-side" => {
+                parsed.backtest_slippage_bps_per_side = parse_next(&mut args, &arg)?
+            }
+            "--entry-defer-bearish-continuation" => parsed.entry_defer_bearish_continuation = true,
+            "--entry-defer-bullish-continuation" => parsed.entry_defer_bullish_continuation = true,
+            "--entry-require-opposite-reversal-confirmation" => {
+                parsed.entry_require_opposite_reversal_confirmation = true
+            }
+            "--entry-require-reversal-average-reclaim" => {
+                parsed.entry_require_reversal_average_reclaim = true
+            }
+            "--entry-defer-max-wait-candles" => {
+                parsed.entry_defer_max_wait_candles = parse_next(&mut args, &arg)?
+            }
             "--entry-symbol-cooldown-candles" => {
                 parsed.entry_symbol_cooldown_candles = Some(parse_next(&mut args, &arg)?)
             }
@@ -557,6 +670,13 @@ where
             "--max-4h-staleness-min" => parsed.max_4h_staleness_min = parse_next(&mut args, &arg)?,
             "--sample-limit" => parsed.sample_limit = parse_next(&mut args, &arg)?,
             "--sample-seed" => parsed.sample_seed = next_arg(&mut args, &arg)?,
+            "--kline-volume-rank-velocity" => parsed.kline_volume_rank_velocity = true,
+            "--kline-volume-rank-require-turnover-growth" => {
+                parsed.kline_volume_rank_require_turnover_growth = true
+            }
+            "--kline-volume-rank-require-consecutive-improvement" => {
+                parsed.kline_volume_rank_require_consecutive_improvement = true
+            }
             "--event-source" => {
                 parsed.event_source =
                     MarketVelocityEventSource::from_str(&next_arg(&mut args, &arg)?)?
@@ -661,6 +781,19 @@ fn validate_args(
     if parsed.entry_period == 0 {
         bail!("--entry-period must be greater than 0");
     }
+    if parsed.kline_volume_rank_velocity
+        && parsed.event_source != MarketVelocityEventSource::Kline15m
+    {
+        bail!("--kline-volume-rank-velocity requires --event-source kline_15m");
+    }
+    if parsed.kline_volume_rank_require_turnover_growth && !parsed.kline_volume_rank_velocity {
+        bail!("--kline-volume-rank-require-turnover-growth requires --kline-volume-rank-velocity");
+    }
+    if parsed.kline_volume_rank_require_consecutive_improvement
+        && !parsed.kline_volume_rank_velocity
+    {
+        bail!("--kline-volume-rank-require-consecutive-improvement requires --kline-volume-rank-velocity");
+    }
     if parsed.stop_loss_pct <= 0.0 {
         bail!("--stop-loss-pct must be greater than 0");
     }
@@ -741,6 +874,79 @@ fn validate_args(
     }
     if parsed.entry_recent_drawdown_lookback_candles == 0 {
         bail!("--entry-recent-drawdown-lookback-candles must be greater than 0");
+    }
+    if parsed.entry_opposite_move_lookback_candles == 0 {
+        bail!("--entry-opposite-move-lookback-candles must be greater than 0");
+    }
+    if parsed
+        .entry_min_opposite_net_move_pct
+        .is_some_and(|min_move_pct| min_move_pct <= 0.0)
+    {
+        bail!("--entry-min-opposite-net-move-pct must be greater than 0");
+    }
+    if parsed
+        .entry_min_opposite_duration_candles
+        .is_some_and(|duration_candles| duration_candles < 4)
+    {
+        bail!("--entry-min-opposite-duration-candles must be at least 4");
+    }
+    if parsed
+        .entry_min_exhaustion_volume_dominance_ratio
+        .is_some_and(|dominance_ratio| dominance_ratio <= 0.0)
+    {
+        bail!("--entry-min-exhaustion-volume-dominance-ratio must be greater than 0");
+    }
+    if parsed
+        .entry_btc_96_max_abs_net_move_pct
+        .is_some_and(|max_move_pct| max_move_pct <= 0.0)
+    {
+        bail!("--entry-btc-96-max-abs-net-move-pct must be greater than 0");
+    }
+    if parsed
+        .entry_btc_384_min_directional_net_move_pct
+        .is_some_and(|min_move_pct| !min_move_pct.is_finite() || min_move_pct < 0.0)
+    {
+        bail!("--entry-btc-384-min-directional-net-move-pct must be finite and non-negative");
+    }
+    if parsed.volume_atr_target_scale <= 0.0 {
+        bail!("--volume-atr-target-scale must be greater than 0");
+    }
+    if parsed
+        .volume_atr_min_target_r
+        .is_some_and(|target_r| target_r <= 0.0)
+    {
+        bail!("--volume-atr-min-target-r must be greater than 0");
+    }
+    if parsed
+        .volume_atr_max_target_r
+        .is_some_and(|target_r| target_r <= 0.0)
+    {
+        bail!("--volume-atr-max-target-r must be greater than 0");
+    }
+    if let (Some(min_target_r), Some(max_target_r)) = (
+        parsed.volume_atr_min_target_r,
+        parsed.volume_atr_max_target_r,
+    ) {
+        if max_target_r < min_target_r {
+            bail!("--volume-atr-max-target-r must be greater than or equal to --volume-atr-min-target-r");
+        }
+    }
+    if parsed
+        .backtest_fee_bps_per_side
+        .is_some_and(|fee_bps| fee_bps < 0.0)
+    {
+        bail!("--backtest-fee-bps-per-side must be zero or greater");
+    }
+    if parsed.backtest_slippage_bps_per_side < 0.0 {
+        bail!("--backtest-slippage-bps-per-side must be zero or greater");
+    }
+    if parsed.backtest_slippage_bps_per_side > 0.0 && parsed.backtest_fee_bps_per_side.is_none() {
+        bail!("--backtest-slippage-bps-per-side requires explicit --backtest-fee-bps-per-side");
+    }
+    if (parsed.entry_defer_bearish_continuation || parsed.entry_defer_bullish_continuation)
+        && parsed.entry_defer_max_wait_candles == 0
+    {
+        bail!("--entry-defer-max-wait-candles must be greater than 0");
     }
     if parsed.entry_symbol_cooldown_candles == Some(0) {
         bail!("--entry-symbol-cooldown-candles must be greater than 0");
@@ -836,6 +1042,9 @@ fn validate_args(
     }
     if parsed.early_exit_no_profit_candles == Some(0) {
         bail!("--early-exit-no-profit-candles must be greater than 0");
+    }
+    if parsed.volume_atr_take_profit && parsed.target_rs.len() != 1 {
+        bail!("--volume-atr-take-profit requires exactly one placeholder --target-rs value");
     }
     if parsed.paper_outcome_sink == MarketVelocityPaperOutcomeSink::Web
         && parsed.stop_reentry_mode != StopReentryMode::Off
@@ -980,7 +1189,7 @@ fn normalized_arg_flag(arg: &str) -> &str {
 /// 执行输出市场动量event回测usage步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_market_velocity_event_backtest_usage() {
     println!(
-        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state|kline_15m] [--trade-direction long|short|both] [--sample-limit 20 --sample-seed batch_a] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02 --stop-loss-mode fixed_pct|structure_or_fixed|structure_with_cap --structure-stop-min-pct 0.01] [--entry-period 20] [--entry-min-rsi 55 --entry-max-rsi 78 --entry-min-rsi-delta 3 --entry-rsi-delta-lookback-candles 3 --entry-bollinger-breakout --entry-min-bollinger-bandwidth-expansion-pct 12 --entry-min-body-ratio-pct 65 --entry-min-close-position-pct 80 --entry-min-range-expansion-ratio 1.5 --entry-min-recent-drawdown-pct 3.5 --entry-recent-drawdown-lookback-candles 12 --entry-symbol-cooldown-candles 8] [--entry-max-signal-pullback-pct 3.0] [--entry-max-gap-without-retest-pct 0.8 --entry-retest-tolerance-pct 0.3 --entry-retest-after-signal --entry-retest-max-wait-candles 8 --entry-retest-min-entry-open-gap-pct 0.0 --entry-retest-open-fade-min-volume-ratio 2.0] [--trend-timeframe 4h|1h|off] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--event-start-ms 1717200000000 --event-end-ms 1719791999999] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--ignore-entry-signal-updates-while-open] [--fvg-entry-mode off|15m_to_1h|1h_to_4h|15m_self_after_signal|15m_impulse_retrace --fvg-impulse-retrace-fill-pct 20 --fvg-impulse-retrace-min-wait-candles 0] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
+        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state|kline_15m --kline-volume-rank-velocity --kline-volume-rank-require-turnover-growth --kline-volume-rank-require-consecutive-improvement] [--trade-direction long|short|both] [--sample-limit 20 --sample-seed batch_a] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02 --stop-loss-mode fixed_pct|structure_or_fixed|structure_with_cap --structure-stop-min-pct 0.01] [--entry-period 20] [--entry-min-rsi 55 --entry-max-rsi 78 --entry-min-rsi-delta 3 --entry-rsi-delta-lookback-candles 3 --entry-bollinger-breakout --entry-min-bollinger-bandwidth-expansion-pct 12 --entry-min-body-ratio-pct 65 --entry-min-close-position-pct 80 --entry-min-range-expansion-ratio 1.5 --entry-min-recent-drawdown-pct 3.5 --entry-recent-drawdown-lookback-candles 12 --entry-opposite-move-lookback-candles 192 --entry-min-opposite-net-move-pct 10 --entry-min-opposite-duration-candles 96 --entry-min-exhaustion-volume-dominance-ratio 1.0 --entry-btc-96-max-abs-net-move-pct 2.0 --entry-btc-384-min-directional-net-move-pct 0 --entry-btc-require-current-directional-candle --volume-atr-take-profit --volume-atr-target-scale 4 --volume-atr-min-target-r 1.8 --volume-atr-max-target-r 3.0 --backtest-fee-bps-per-side 5 --backtest-slippage-bps-per-side 3 --entry-defer-bearish-continuation --entry-defer-bullish-continuation --entry-require-opposite-reversal-confirmation --entry-require-reversal-average-reclaim --entry-defer-max-wait-candles 3 --entry-symbol-cooldown-candles 8] [--entry-max-signal-pullback-pct 3.0] [--entry-max-gap-without-retest-pct 0.8 --entry-retest-tolerance-pct 0.3 --entry-retest-after-signal --entry-retest-max-wait-candles 8 --entry-retest-min-entry-open-gap-pct 0.0 --entry-retest-open-fade-min-volume-ratio 2.0] [--trend-timeframe 4h|1h|off] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--event-start-ms 1717200000000 --event-end-ms 1719791999999] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--ignore-entry-signal-updates-while-open] [--fvg-entry-mode off|15m_to_1h|1h_to_4h|15m_self_after_signal|15m_impulse_retrace --fvg-impulse-retrace-fill-pct 20 --fvg-impulse-retrace-min-wait-candles 0] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
     );
 }
 /// 返回 paper observation CLI usage，并让 preset 列表复用解析常量，避免可运行 preset 漏出帮助文本。
@@ -1025,6 +1234,10 @@ pub(crate) fn market_velocity_paper_observation_usage() -> String {
         MOMENTUM_KLINE15M_BREAKOUT_FVG30_04SL_055R_RESEARCH_PRESET,
         MOMENTUM_KLINE15M_BREAKOUT_FVG50_04SL_052R_RESEARCH_PRESET,
         MOMENTUM_KLINE15M_DIRECT_SHAPE_04SL_10R_RESEARCH_PRESET,
+        MARKET_MOMENTUM_OPPOSITE_MOVE_VOLUME_ATR_RESEARCH_PRESET,
+        MARKET_MOMENTUM_OPPOSITE_MOVE_DEFERRED_LONG_RESEARCH_PRESET,
+        MARKET_MOMENTUM_OPPOSITE_MOVE_DURATION_BOTH_RESEARCH_PRESET,
+        MARKET_MOMENTUM_OPPOSITE_MOVE_EXHAUSTION_VOLUME_RESEARCH_PRESET,
         EPISODE_MOMENTUM_RESEARCH_PRESET,
         EPISODE_MOMENTUM_05SL_20R_RESEARCH_PRESET,
         EPISODE_MOMENTUM_05SL_30R_RESEARCH_PRESET,

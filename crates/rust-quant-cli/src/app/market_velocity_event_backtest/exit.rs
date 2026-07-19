@@ -389,6 +389,7 @@ fn base_trade_result(
         reason: reason.to_string(),
         exit_ts,
         r,
+        target_r: None,
         complete,
         symbol: None,
         event_id: None,

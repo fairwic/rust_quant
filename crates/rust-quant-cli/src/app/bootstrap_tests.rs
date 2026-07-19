@@ -94,15 +94,15 @@ fn test_filter_live_strategy_configs_skips_market_velocity_event_strategy() {
     assert_eq!(filtered[0].symbol, "ETH-USDT-SWAP");
 }
 #[test]
-fn test_default_backtest_targets_keep_enabled_4h_symbols() {
+fn test_default_backtest_targets_keep_enabled_1h_symbols() {
     let targets = default_backtest_targets();
     assert_eq!(
         targets,
         vec![
-            ("ETH-USDT-SWAP".to_string(), "4H".to_string()),
-            ("BTC-USDT-SWAP".to_string(), "4H".to_string()),
-            ("SOL-USDT-SWAP".to_string(), "4H".to_string()),
-            ("BCH-USDT-SWAP".to_string(), "4H".to_string()),
+            ("ETH-USDT-SWAP".to_string(), "1H".to_string()),
+            ("BTC-USDT-SWAP".to_string(), "1H".to_string()),
+            ("SOL-USDT-SWAP".to_string(), "1H".to_string()),
+            ("BCH-USDT-SWAP".to_string(), "1H".to_string()),
         ]
     );
 }

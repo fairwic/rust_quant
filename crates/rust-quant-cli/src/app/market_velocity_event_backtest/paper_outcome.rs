@@ -1,7 +1,11 @@
+use super::directional_reversal::{
+    EXHAUSTION_CURRENT_CLUSTER_CANDLES, EXHAUSTION_SWING_RADIUS_CANDLES,
+    EXHAUSTION_VOLUME_LOOKBACK_CANDLES, OPPOSITE_DURATION_MIN_R_SQUARED,
+};
 use super::{
     args::entry_trigger_filter_version_label, select_stop_loss_for_confirmed_signal,
-    summarize_target, timestamp_ms_to_rfc3339, trade_direction_for_event, BacktestCandle,
-    ConfirmedEvent, MarketVelocityEventBacktestArgs, TradeResult, PAPER_OUTCOME_HORIZONS,
+    summarize_target, timestamp_ms_to_rfc3339, BacktestCandle, ConfirmedEvent,
+    MarketVelocityEventBacktestArgs, TradeResult, PAPER_OUTCOME_HORIZONS,
 };
 use anyhow::{bail, Context, Result};
 use rust_quant_services::rust_quan_web::{
@@ -44,7 +48,7 @@ pub fn build_market_velocity_paper_outcomes(
                     "entry_trigger_allowlist": &args.entry_trigger_allowlist,
                     "entry_trigger_blocklist": &args.entry_trigger_blocklist,
                 });
-                let filters_payload = json!({
+                let mut filters_payload = json!({
                     "min_delta_rank": args.min_delta_rank,
                     "max_delta_rank": args.max_delta_rank,
                     "min_price_change_pct": args.min_price_change_pct,
@@ -60,15 +64,53 @@ pub fn build_market_velocity_paper_outcomes(
                     "entry_min_body_ratio_pct": args.entry_min_body_ratio_pct,
                     "entry_min_close_position_pct": args.entry_min_close_position_pct,
                     "entry_min_range_expansion_ratio": args.entry_min_range_expansion_ratio,
+                    "entry_opposite_move_lookback_candles": args.entry_opposite_move_lookback_candles,
+                    "entry_min_opposite_net_move_pct": args.entry_min_opposite_net_move_pct,
+                    "entry_min_opposite_duration_candles": args.entry_min_opposite_duration_candles,
+                    "entry_opposite_duration_min_r_squared": OPPOSITE_DURATION_MIN_R_SQUARED,
+                    "entry_min_exhaustion_volume_dominance_ratio": args.entry_min_exhaustion_volume_dominance_ratio,
+                    "entry_btc_96_max_abs_net_move_pct": args.entry_btc_96_max_abs_net_move_pct,
+                    "entry_exhaustion_volume_lookback_candles": EXHAUSTION_VOLUME_LOOKBACK_CANDLES,
+                    "entry_exhaustion_current_cluster_candles": EXHAUSTION_CURRENT_CLUSTER_CANDLES,
+                    "entry_exhaustion_swing_radius_candles": EXHAUSTION_SWING_RADIUS_CANDLES,
+                    "volume_atr_take_profit": args.volume_atr_take_profit,
+                    "volume_atr_target_scale": args.volume_atr_target_scale,
+                    "volume_atr_min_target_r": args.volume_atr_min_target_r,
+                    "volume_atr_max_target_r": args.volume_atr_max_target_r,
+                    "fee_bps_per_side": args.backtest_fee_bps_per_side,
+                    "slippage_bps_per_side": args.backtest_slippage_bps_per_side,
+                    "entry_defer_bearish_continuation": args.entry_defer_bearish_continuation,
+                    "entry_defer_bullish_continuation": args.entry_defer_bullish_continuation,
+                    "entry_require_opposite_reversal_confirmation": args.entry_require_opposite_reversal_confirmation,
+                    "entry_require_reversal_average_reclaim": args.entry_require_reversal_average_reclaim,
+                    "entry_defer_max_wait_candles": args.entry_defer_max_wait_candles,
                     "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
                     "max_15m_staleness_min": args.max_15m_staleness_min,
                     "max_4h_staleness_min": args.max_4h_staleness_min,
                 });
+                if let (Some(filters), Some(minimum)) = (
+                    filters_payload.as_object_mut(),
+                    args.entry_btc_384_min_directional_net_move_pct,
+                ) {
+                    filters.insert(
+                        "entry_btc_384_min_directional_net_move_pct".to_string(),
+                        json!(minimum),
+                    );
+                }
+                if args.entry_btc_require_current_directional_candle {
+                    if let Some(filters) = filters_payload.as_object_mut() {
+                        filters.insert(
+                            "entry_btc_require_current_directional_candle".to_string(),
+                            json!(true),
+                        );
+                    }
+                }
+                let effective_target_r = result.target_r.unwrap_or(*target_r);
                 outcomes.push(MarketVelocityPaperOutcomeRequest {
                     rank_event_id: event_id,
                     exchange: signal.event.exchange.trim().to_ascii_lowercase(),
                     symbol,
-                    target_r: *target_r,
+                    target_r: effective_target_r,
                     horizon_hours: *horizon_hours,
                     entry_rule_version: args.paper_outcome_entry_rule_version.clone(),
                     entry_trigger: entry_trigger.clone(),
@@ -88,9 +130,10 @@ pub fn build_market_velocity_paper_outcomes(
                             "current_price": signal.event.current_price,
                             "price_change_pct": signal.event.price_change_pct,
                         },
-                        "target_r": target_r,
+                        "target_r": effective_target_r,
+                        "take_profit_mode": if args.volume_atr_take_profit { "volume_atr" } else { "fixed_r" },
                         "horizon_hours": horizon_hours,
-                        "trade_direction": trade_direction_for_event(&signal.event).label(),
+                        "trade_direction": signal.direction.label(),
                         "stop_loss_pct": args.stop_loss_pct,
                         "stop_loss_mode": args.stop_loss_mode.label(),
                         "selected_stop_loss_pct": selected_stop_loss.stop_loss_pct,
@@ -98,6 +141,12 @@ pub fn build_market_velocity_paper_outcomes(
                         "selected_stop_loss_source": selected_stop_loss.source,
                         "entry_period": args.entry_period,
                         "entry_trigger": entry_trigger,
+                        "setup_ts": signal.event.ts,
+                        "deferred_wait_candles": if signal.trigger.contains("deferred_") {
+                            signal.entry_ts.saturating_sub(signal.event.ts) / super::MS_15M
+                        } else {
+                            0
+                        },
                         "entry_trigger_filter_version": entry_trigger_filter_version,
                         "trade_complete": result.complete,
                         "exit_ts": result.exit_ts,
@@ -247,7 +296,9 @@ fn quant_web_execution_task_config_from_env() -> Result<ExecutionTaskConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::market_velocity_event_backtest::{RadarEvent, MS_15M};
+    use crate::app::market_velocity_event_backtest::{
+        MarketVelocityTradeDirection, RadarEvent, MS_15M,
+    };
 
     #[test]
     fn paper_outcome_payload_keeps_event_features_without_execution_task_payload() {
@@ -275,6 +326,7 @@ mod tests {
                 current_price: 100.0,
                 price_change_pct: 3.5,
             },
+            direction: MarketVelocityTradeDirection::Long,
             entry_ts: MS_15M,
             entry_price: 100.0,
             entry_idx: 0,

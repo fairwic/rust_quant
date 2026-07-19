@@ -96,6 +96,53 @@ fn parses_entry_symbol_cooldown_filter() {
     assert_eq!(args.entry_symbol_cooldown_candles, Some(8));
 }
 #[test]
+fn parses_opposite_duration_filter() {
+    let args = parse_cli_args_from(["--entry-min-opposite-duration-candles", "96"]).unwrap();
+    assert_eq!(args.entry_min_opposite_duration_candles, Some(96));
+}
+
+#[test]
+fn parses_btc_flat_regime_filter_and_rejects_zero() {
+    let args = parse_cli_args_from(["--entry-btc-96-max-abs-net-move-pct", "2.0"]).unwrap();
+    assert_eq!(args.entry_btc_96_max_abs_net_move_pct, Some(2.0));
+
+    let error = parse_cli_args_from(["--entry-btc-96-max-abs-net-move-pct", "0"]).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("--entry-btc-96-max-abs-net-move-pct must be greater than 0"));
+}
+#[test]
+fn parses_btc_broad_direction_filter_and_rejects_invalid_values() {
+    let zero = parse_cli_args_from(["--entry-btc-384-min-directional-net-move-pct", "0"]).unwrap();
+    assert_eq!(zero.entry_btc_384_min_directional_net_move_pct, Some(0.0));
+
+    let positive =
+        parse_cli_args_from(["--entry-btc-384-min-directional-net-move-pct", "1.5"]).unwrap();
+    assert_eq!(
+        positive.entry_btc_384_min_directional_net_move_pct,
+        Some(1.5)
+    );
+
+    for invalid in ["-0.1", "NaN"] {
+        let error = parse_cli_args_from(["--entry-btc-384-min-directional-net-move-pct", invalid])
+            .unwrap_err();
+        assert!(error.to_string().contains(
+            "--entry-btc-384-min-directional-net-move-pct must be finite and non-negative"
+        ));
+    }
+}
+#[test]
+fn parses_btc_current_directional_candle_filter() {
+    let args = parse_cli_args_from(["--entry-btc-require-current-directional-candle"]).unwrap();
+    assert!(args.entry_btc_require_current_directional_candle);
+}
+#[test]
+fn parses_exhaustion_volume_dominance_filter() {
+    let args =
+        parse_cli_args_from(["--entry-min-exhaustion-volume-dominance-ratio", "1.2"]).unwrap();
+    assert_eq!(args.entry_min_exhaustion_volume_dominance_ratio, Some(1.2));
+}
+#[test]
 fn rejects_invalid_fast_momentum_entry_filters() {
     let err = parse_cli_args_from(["--entry-min-rsi", "80", "--entry-max-rsi", "60"]).unwrap_err();
     assert!(err
@@ -113,6 +160,15 @@ fn rejects_invalid_fast_momentum_entry_filters() {
     assert!(err
         .to_string()
         .contains("--entry-symbol-cooldown-candles must be greater than 0"));
+    let err = parse_cli_args_from(["--entry-min-opposite-duration-candles", "3"]).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("--entry-min-opposite-duration-candles must be at least 4"));
+    let err =
+        parse_cli_args_from(["--entry-min-exhaustion-volume-dominance-ratio", "0"]).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("--entry-min-exhaustion-volume-dominance-ratio must be greater than 0"));
 }
 #[test]
 fn parses_short_trade_direction() {
@@ -143,6 +199,55 @@ fn parses_raw_state_event_source_for_signal_state_research() {
 fn parses_kline_15m_event_source_for_signal_logic_research() {
     let args = parse_cli_args_from(["--event-source", "kline_15m"]).unwrap();
     assert_eq!(args.event_source, MarketVelocityEventSource::Kline15m);
+}
+
+#[test]
+fn enables_historical_volume_rank_velocity_only_for_kline_source() {
+    let args = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--kline-volume-rank-velocity",
+    ])
+    .unwrap();
+
+    assert!(args.kline_volume_rank_velocity);
+}
+
+#[test]
+fn rejects_historical_volume_rank_velocity_for_rank_event_sources() {
+    let error = parse_cli_args_from(["--kline-volume-rank-velocity"]).unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("requires --event-source kline_15m"));
+}
+
+#[test]
+fn requires_volume_rank_mode_before_enabling_turnover_growth_gate() {
+    let error = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--kline-volume-rank-require-turnover-growth",
+    ])
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("requires --kline-volume-rank-velocity"));
+}
+
+#[test]
+fn requires_volume_rank_mode_before_enabling_consecutive_rank_gate() {
+    let error = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--kline-volume-rank-require-consecutive-improvement",
+    ])
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("requires --kline-volume-rank-velocity"));
 }
 #[test]
 fn parses_kline_15m_sample_seed_for_reproducible_random_samples() {

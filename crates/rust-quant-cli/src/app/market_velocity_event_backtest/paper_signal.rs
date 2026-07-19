@@ -443,6 +443,7 @@ mod tests {
                 current_price: 100.0,
                 price_change_pct: -1.2,
             },
+            direction: MarketVelocityTradeDirection::Short,
             entry_ts: MS_15M * 2,
             entry_price: 99.0,
             entry_idx: 2,

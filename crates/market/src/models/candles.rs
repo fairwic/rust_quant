@@ -5,6 +5,25 @@ use okx::dto::market_dto::CandleOkxRespDto;
 use sqlx::{Postgres, QueryBuilder};
 use tracing::{debug, info};
 pub struct CandlesModel;
+/// 历史 K 线内容相同时不刷新 updated_at，避免周期补数产生无意义 UPDATE/WAL；
+/// 未完成 K 线只要任一行情字段变化，仍会正常更新。
+fn candle_batch_upsert_clause() -> &'static str {
+    " ON CONFLICT (ts) DO UPDATE SET
+        o = EXCLUDED.o,
+        h = EXCLUDED.h,
+        l = EXCLUDED.l,
+        c = EXCLUDED.c,
+        vol = EXCLUDED.vol,
+        vol_ccy = EXCLUDED.vol_ccy,
+        confirm = EXCLUDED.confirm,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE (current_candle.o, current_candle.h, current_candle.l,
+             current_candle.c, current_candle.vol, current_candle.vol_ccy,
+             current_candle.confirm)
+            IS DISTINCT FROM
+            (EXCLUDED.o, EXCLUDED.h, EXCLUDED.l, EXCLUDED.c,
+             EXCLUDED.vol, EXCLUDED.vol_ccy, EXCLUDED.confirm)"
+}
 impl CandlesModel {
     pub fn new() -> Self {
         Self
@@ -174,7 +193,7 @@ impl CandlesModel {
         let quoted_table_name = quote_legacy_table_name(&table_name)?;
         let pool = get_quant_core_postgres_pool()?;
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(format!(
-            "INSERT INTO {} (ts, o, h, l, c, vol, vol_ccy, confirm) ",
+            "INSERT INTO {} AS current_candle (ts, o, h, l, c, vol, vol_ccy, confirm) ",
             quoted_table_name
         ));
         query_builder.push_values(candles.iter(), |mut b, candle| {
@@ -187,17 +206,7 @@ impl CandlesModel {
                 .push_bind(&candle.vol_ccy)
                 .push_bind(&candle.confirm);
         });
-        query_builder.push(
-            " ON CONFLICT (ts) DO UPDATE SET
-                o = EXCLUDED.o,
-                h = EXCLUDED.h,
-                l = EXCLUDED.l,
-                c = EXCLUDED.c,
-                vol = EXCLUDED.vol,
-                vol_ccy = EXCLUDED.vol_ccy,
-                confirm = EXCLUDED.confirm,
-                updated_at = CURRENT_TIMESTAMP",
-        );
+        query_builder.push(candle_batch_upsert_clause());
         let result = query_builder.build().execute(pool).await?;
         debug!(
             "批量 upsert {} 条 K线数据，影响行数: {}",
@@ -495,7 +504,7 @@ mod tests {
     #[test]
     fn upsert_batch_sql_uses_on_conflict() {
         let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO \"btc-usdt-swap_candles_1h\" (ts, o, h, l, c, vol, vol_ccy, confirm) ",
+            "INSERT INTO \"btc-usdt-swap_candles_1h\" AS current_candle (ts, o, h, l, c, vol, vol_ccy, confirm) ",
         );
         builder.push_values([0_i64].iter(), |mut b, ts| {
             b.push_bind(*ts)
@@ -507,20 +516,11 @@ mod tests {
                 .push_bind("1")
                 .push_bind("1");
         });
-        builder.push(
-            " ON CONFLICT (ts) DO UPDATE SET
-                o = EXCLUDED.o,
-                h = EXCLUDED.h,
-                l = EXCLUDED.l,
-                c = EXCLUDED.c,
-                vol = EXCLUDED.vol,
-                vol_ccy = EXCLUDED.vol_ccy,
-                confirm = EXCLUDED.confirm,
-                updated_at = CURRENT_TIMESTAMP",
-        );
+        builder.push(candle_batch_upsert_clause());
         let sql = builder.build().sql().to_string();
         assert!(sql.contains("ON CONFLICT (ts) DO UPDATE"));
         assert!(sql.contains("EXCLUDED.confirm"));
+        assert!(sql.contains("IS DISTINCT FROM"));
     }
 }
 impl Default for CandlesModel {

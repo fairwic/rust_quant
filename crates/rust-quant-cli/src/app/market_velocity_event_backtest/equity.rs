@@ -1,11 +1,11 @@
 use super::equity_stats::{analyze_profit_losses, format_optional_f64, trade_sharpe};
 use super::{
-    runner_exit_for_target, select_stop_loss_for_confirmed_signal, trade_direction_for_event,
+    runner_exit_for_target, select_stop_loss_for_confirmed_signal, volume_atr_target_r_with_policy,
     BacktestCandle, ConfirmedEvent, MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection,
     RunnerExit,
 };
-use anyhow::Result;
-use chrono::{FixedOffset, TimeZone, Utc};
+use anyhow::{Context, Result};
+use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use rust_quant_domain::entities::BacktestDetail;
 use rust_quant_domain::SignalDirection;
 use rust_quant_strategies::framework::backtest::{
@@ -15,7 +15,13 @@ use rust_quant_strategies::framework::backtest::{
 use rust_quant_strategies::CandleItem;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
+mod detail;
 mod replay_candles;
+use detail::{market_velocity_detail_signal_value, market_velocity_detail_signal_value_for_leg};
+pub use detail::{
+    market_velocity_risk_config_detail, market_velocity_strategy_detail,
+    market_velocity_strategy_type,
+};
 use replay_candles::{framework_replay_candle_items, replay_entry_candle_ts};
 const INITIAL_FUND_PER_SYMBOL: f64 = 100.0;
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +36,14 @@ pub struct FrameworkEquityReport {
     pub total_open_trades: usize,
     /// total收益，用于展示或持久化查询结果。
     pub total_profit: f64,
+    /// 已具备冻结初始风险口径的平仓交易数。
+    pub fixed_r_trades: usize,
+    /// 扣费后固定初始 R 合计；仅在全部平仓交易口径完整时提供。
+    pub net_sum_r: Option<f64>,
+    /// 扣费后每笔固定初始 R 期望；仅在全部平仓交易口径完整时提供。
+    pub net_expectancy_r: Option<f64>,
+    /// 扣费后固定初始 R Profit Factor；仅在全部平仓交易口径完整且存在亏损时提供。
+    pub net_profit_factor: Option<f64>,
     /// 胜率；为空时使用默认值或表示不限制。
     pub win_rate: Option<f64>,
     /// 交易级 Sharpe；为空时表示样本不足。
@@ -102,6 +116,10 @@ pub struct FrameworkEquityTradeReport {
     pub symbol: String,
     /// event ID。
     pub event_id: i64,
+    /// 原始 setup 信号时间戳。
+    pub signal_ts: i64,
+    /// 确认后的真实交易方向。
+    pub direction: MarketVelocityTradeDirection,
     /// 时间字段。
     pub detected_at: String,
     /// 时间戳。
@@ -122,6 +140,10 @@ pub struct FrameworkEquityTradeReport {
     pub signal_status: i32,
     /// 收益亏损，用于展示或持久化查询结果。
     pub profit_loss: f64,
+    /// 入场时冻结止损对应的风险金额；为空时表示旧退出路径未提供该口径。
+    pub initial_risk_amount: Option<f64>,
+    /// 扣除回测成本后的本笔固定初始 R；为空时表示退出路径未提供该口径。
+    pub net_profit_r: Option<f64>,
     /// 数量。
     pub quantity: f64,
     /// outcome，用于展示或持久化查询结果。
@@ -201,6 +223,8 @@ struct ReplayEntry {
     stop_loss_price: f64,
     /// 止损来源。
     stop_loss_source: String,
+    /// 本次交易实际使用的止盈 R；动态 ATR 模式下逐笔计算。
+    target_r: f64,
 }
 #[derive(Debug, Clone, PartialEq)]
 struct ReplayActivePosition {
@@ -218,6 +242,8 @@ struct ReplayActivePosition {
     stop_loss_price: f64,
     /// 止损来源。
     stop_loss_source: String,
+    /// 本次交易实际使用的止盈 R。
+    target_r: f64,
     /// 收益protected，用于记录交易或执行状态。
     profit_protected: bool,
     /// observedK 线，用于记录交易或执行状态。
@@ -237,13 +263,13 @@ struct ReplayOpenTrade {
     quantity: f64,
     /// 状态值。
     signal_status: i32,
+    /// 本次交易实际使用的止盈 R。
+    target_r: f64,
 }
 #[derive(Debug, Clone)]
 struct MarketVelocityReplayStrategy {
     /// 时间戳。
     entries_by_ts: BTreeMap<i64, ReplayEntry>,
-    /// targetr，用于行情、K 线或市场扫描。
-    target_r: f64,
     /// 达到指定 R 倍数后启用利润保护；为空时不启用。
     profit_protect_after_r: Option<f64>,
     /// 收益protect止损r，用于行情、K 线或市场扫描。
@@ -294,6 +320,7 @@ pub fn build_framework_equity_report(
     symbols.dedup();
     let mut symbol_reports = Vec::new();
     let mut all_returns = Vec::new();
+    let mut all_net_profit_rs = Vec::new();
     for symbol in symbols {
         let Some(candles) = candles_15m
             .get(&symbol)
@@ -350,6 +377,7 @@ pub fn build_framework_equity_report(
             max_loss_percent: args.stop_loss_pct,
             is_used_signal_k_line_stop_loss: Some(true),
             dynamic_max_loss: Some(false),
+            trade_fee_rate: framework_trade_cost_rate(args),
             ..BasicRiskStrategyConfig::default()
         };
         let result = run_indicator_strategy_backtest(&symbol, strategy, &candle_items, risk_config);
@@ -360,6 +388,13 @@ pub fn build_framework_equity_report(
                 .filter(|record| record.full_close)
                 .map(|record| record.profit_loss),
             INITIAL_FUND_PER_SYMBOL,
+        );
+        all_net_profit_rs.extend(
+            result
+                .trade_records
+                .iter()
+                .filter(|record| record.full_close)
+                .filter_map(|record| record.net_profit_r),
         );
         let profit = result.funds - INITIAL_FUND_PER_SYMBOL;
         all_returns.extend(closed_stats.returns.iter().copied());
@@ -384,12 +419,33 @@ pub fn build_framework_equity_report(
         .fold(0.0, f64::max);
     let resolved = wins + losses;
     let win_rate = (resolved > 0).then_some(wins as f64 / resolved as f64 * 100.0);
+    let fixed_r_trades = all_net_profit_rs.len();
+    // 动态仓位下不能用 USDT 盈亏近似 R；只在逐笔初始风险口径完整时聚合。
+    let fixed_r_complete = fixed_r_trades > 0 && fixed_r_trades == total_open_trades;
+    let net_sum_r = fixed_r_complete.then(|| all_net_profit_rs.iter().sum::<f64>());
+    let net_expectancy_r = net_sum_r.map(|sum| sum / fixed_r_trades as f64);
+    let gross_profit_r = all_net_profit_rs
+        .iter()
+        .copied()
+        .filter(|value| *value > 0.0)
+        .sum::<f64>();
+    let gross_loss_r = -all_net_profit_rs
+        .iter()
+        .copied()
+        .filter(|value| *value < 0.0)
+        .sum::<f64>();
+    let net_profit_factor =
+        (fixed_r_complete && gross_loss_r > 0.0).then_some(gross_profit_r / gross_loss_r);
     FrameworkEquityReport {
         target_r,
         initial_fund_per_symbol: INITIAL_FUND_PER_SYMBOL,
         min_trades: args.min_trades,
         total_open_trades,
         total_profit,
+        fixed_r_trades,
+        net_sum_r,
+        net_expectancy_r,
+        net_profit_factor,
         win_rate,
         trade_sharpe: trade_sharpe(&all_returns),
         max_drawdown_pct,
@@ -636,6 +692,8 @@ pub fn build_framework_equity_trade_reports(
                     target_r,
                     symbol: symbol.clone(),
                     event_id: trade.event_id,
+                    signal_ts: event.event.ts,
+                    direction: event.direction,
                     detected_at: event.event.detected_at.clone(),
                     entry_ts: event.entry_ts,
                     signal_open_position_time: timestamp_ms_to_shanghai_datetime(event.event.ts),
@@ -646,6 +704,8 @@ pub fn build_framework_equity_trade_reports(
                     close_type: trade.close_type,
                     signal_status: 0,
                     profit_loss: trade.profit_loss,
+                    initial_risk_amount: None,
+                    net_profit_r: None,
                     quantity: trade.quantity,
                     outcome: trade_outcome_label(trade.profit_loss),
                     trigger: event.trigger.clone(),
@@ -676,6 +736,7 @@ pub fn build_framework_equity_trade_reports(
             max_loss_percent: args.stop_loss_pct,
             is_used_signal_k_line_stop_loss: Some(true),
             dynamic_max_loss: Some(false),
+            trade_fee_rate: framework_trade_cost_rate(args),
             ..BasicRiskStrategyConfig::default()
         };
         let result = run_indicator_strategy_backtest(&symbol, strategy, &candle_items, risk_config);
@@ -692,9 +753,11 @@ pub fn build_framework_equity_trade_reports(
                 continue;
             };
             reports.push(FrameworkEquityTradeReport {
-                target_r,
+                target_r: open.target_r,
                 symbol: symbol.clone(),
                 event_id: open.event_id,
+                signal_ts: event.event.ts,
+                direction: event.direction,
                 detected_at: event.event.detected_at.clone(),
                 entry_ts: event.entry_ts,
                 signal_open_position_time: timestamp_ms_to_shanghai_datetime(event.event.ts),
@@ -708,6 +771,8 @@ pub fn build_framework_equity_trade_reports(
                 close_type: framework_close_type(record),
                 signal_status: record.signal_status,
                 profit_loss: record.profit_loss,
+                initial_risk_amount: record.initial_risk_amount,
+                net_profit_r: record.net_profit_r,
                 quantity: if record.quantity > 0.0 {
                     record.quantity
                 } else {
@@ -793,7 +858,7 @@ fn simulate_framework_runner_trade(
     runner: RunnerExit,
 ) -> Option<RunnerReplayTrade> {
     let entry_price = event.entry_price;
-    let direction = trade_direction_for_event(&event.event);
+    let direction = event.direction;
     let quantity = INITIAL_FUND_PER_SYMBOL / entry_price;
     let stop_price = stop_price_for(entry_price, stop_loss_pct, direction);
     let target_price = target_price_for(entry_price, stop_loss_pct, target_r, direction);
@@ -1146,6 +1211,7 @@ fn parse_replay_open_trade(record: &TradeRecord) -> Option<ReplayOpenTrade> {
         .and_then(Value::as_str)
         .unwrap_or("NA")
         .to_string();
+    let target_r = value.get("target_r")?.as_f64()?;
     Some(ReplayOpenTrade {
         event_id,
         trigger,
@@ -1153,6 +1219,7 @@ fn parse_replay_open_trade(record: &TradeRecord) -> Option<ReplayOpenTrade> {
         open_price: record.open_price,
         quantity: record.quantity,
         signal_status: record.signal_status,
+        target_r,
     })
 }
 /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
@@ -1163,9 +1230,16 @@ pub fn build_market_velocity_backtest_details(
 ) -> Result<Vec<BacktestDetail>> {
     let close_position_time = trade
         .close_position_time
-        .clone()
+        .as_deref()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow::anyhow!("market velocity trade missing close_position_time"))?;
+    let signal_open_position_time = legacy_backtest_datetime(
+        &trade.signal_open_position_time,
+        "signal_open_position_time",
+    )?;
+    let open_position_time =
+        legacy_backtest_datetime(&trade.open_position_time, "open_position_time")?;
+    let close_position_time = legacy_backtest_datetime(close_position_time, "close_position_time")?;
     let signal_value = market_velocity_detail_signal_value(trade, args).to_string();
     let signal_result = "market_velocity_framework_replay".to_string();
     let strategy_type = market_velocity_strategy_type(args).to_string();
@@ -1187,10 +1261,10 @@ pub fn build_market_velocity_backtest_details(
         strategy_type.clone(),
         trade.symbol.clone(),
         "15m".to_string(),
-        trade.open_position_time.clone(),
-        Some(trade.signal_open_position_time.clone()),
+        open_position_time.clone(),
+        Some(signal_open_position_time.clone()),
         trade.signal_status,
-        trade.open_position_time.clone(),
+        open_position_time.clone(),
         open_price.clone(),
         None,
         "0".to_string(),
@@ -1214,8 +1288,8 @@ pub fn build_market_velocity_backtest_details(
             strategy_type,
             trade.symbol.clone(),
             "15m".to_string(),
-            trade.open_position_time.clone(),
-            Some(trade.signal_open_position_time.clone()),
+            open_position_time.clone(),
+            Some(signal_open_position_time.clone()),
             trade.signal_status,
             close_position_time,
             open_price,
@@ -1239,6 +1313,8 @@ pub fn build_market_velocity_backtest_details(
     for leg in &trade.close_legs {
         let leg_signal_value =
             market_velocity_detail_signal_value_for_leg(trade, args, leg).to_string();
+        let leg_close_position_time =
+            legacy_backtest_datetime(&leg.close_position_time, "leg.close_position_time")?;
         let (leg_win_nums, leg_loss_nums) = if leg.full_close {
             (win_nums, loss_nums)
         } else {
@@ -1250,10 +1326,10 @@ pub fn build_market_velocity_backtest_details(
             strategy_type.clone(),
             trade.symbol.clone(),
             "15m".to_string(),
-            trade.open_position_time.clone(),
-            Some(trade.signal_open_position_time.clone()),
+            open_position_time.clone(),
+            Some(signal_open_position_time.clone()),
             trade.signal_status,
-            leg.close_position_time.clone(),
+            leg_close_position_time,
             open_price.clone(),
             Some(leg.close_price.to_string()),
             leg.profit_loss.to_string(),
@@ -1273,66 +1349,15 @@ pub fn build_market_velocity_backtest_details(
     }
     Ok(details)
 }
-/// 提供市场动量策略type的集中实现，避免回测策略调用方重复处理相同细节。
-pub fn market_velocity_strategy_type(args: &MarketVelocityEventBacktestArgs) -> &'static str {
-    match args.event_source {
-        super::MarketVelocityEventSource::Episodes => "market_velocity_episode",
-        super::MarketVelocityEventSource::RawEvents => "market_velocity_raw_events",
-        super::MarketVelocityEventSource::RawState => "market_velocity_raw_state",
-        super::MarketVelocityEventSource::Kline15m => "market_velocity_kline_15m",
+
+fn legacy_backtest_datetime(value: &str, field_name: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if let Ok(value) = NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S") {
+        return Ok(value.format("%Y-%m-%d %H:%M:%S").to_string());
     }
-}
-/// 提供市场动量detail信号值的集中实现，避免回测策略调用方重复处理相同细节。
-fn market_velocity_detail_signal_value(
-    trade: &FrameworkEquityTradeReport,
-    args: &MarketVelocityEventBacktestArgs,
-) -> Value {
-    json!({
-        "source": "market_velocity_framework_replay",
-        "rank_event_id": trade.event_id,
-        "detected_at": &trade.detected_at,
-        "entry_ts": trade.entry_ts,
-        "entry_trigger": &trade.trigger,
-        "trade_direction": if trade.price_change_pct < 0.0 { "short" } else { "long" },
-        "new_rank": trade.new_rank,
-        "delta_rank": trade.delta_rank,
-        "price_change_pct": trade.price_change_pct,
-        "target_r": trade.target_r,
-        "stop_loss_pct": args.stop_loss_pct,
-        "entry_rule_version": &args.paper_outcome_entry_rule_version,
-        "event_source": match args.event_source {
-            super::MarketVelocityEventSource::Episodes => "episodes",
-            super::MarketVelocityEventSource::RawEvents => "raw_events",
-            super::MarketVelocityEventSource::RawState => "raw_state",
-            super::MarketVelocityEventSource::Kline15m => "kline_15m",
-        },
-    })
-}
-/// 提供市场动量detail信号值forleg的集中实现，避免回测策略调用方重复处理相同细节。
-fn market_velocity_detail_signal_value_for_leg(
-    trade: &FrameworkEquityTradeReport,
-    args: &MarketVelocityEventBacktestArgs,
-    leg: &FrameworkEquityCloseLegReport,
-) -> Value {
-    let mut value = market_velocity_detail_signal_value(trade, args);
-    if let Some(object) = value.as_object_mut() {
-        object.insert(
-            "exit_reason".to_string(),
-            Value::String(leg.exit_reason.clone()),
-        );
-        object.insert(
-            "runner_target_r".to_string(),
-            args.runner_target_r.map_or(Value::Null, Value::from),
-        );
-        object.insert(
-            "runner_fraction".to_string(),
-            Value::from(args.runner_fraction),
-        );
-        object.insert("runner_stop_r".to_string(), Value::from(args.runner_stop_r));
-        object.insert("leg_result_r".to_string(), Value::from(leg.result_r));
-        object.insert("leg_full_close".to_string(), Value::from(leg.full_close));
-    }
-    value
+    DateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S%:z")
+        .map(|value| value.naive_local().format("%Y-%m-%d %H:%M:%S").to_string())
+        .with_context(|| format!("invalid market velocity {field_name}: {value}"))
 }
 fn timestamp_ms_to_shanghai_datetime(timestamp_ms: i64) -> String {
     let offset = FixedOffset::east_opt(8 * 3600).expect("valid shanghai fixed offset");
@@ -1430,12 +1455,16 @@ pub fn build_framework_equity_concentration_reports(
 /// 执行输出框架equity报告步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_framework_equity_report(report: &FrameworkEquityReport, sample_limit: usize) {
     println!(
-        "framework_equity_result\ttarget={}R\tmode=symbol_isolated_100u\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
+        "framework_equity_result\ttarget={}R\tmode=symbol_isolated_100u\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\tfixed_r_trades={}\tnet_sum_r={}\tnet_expectancy_r={}\tnet_profit_factor={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
         report.target_r,
         report.min_trades,
         report.meets_min_trades,
         report.symbols.len(),
         report.total_open_trades,
+        report.fixed_r_trades,
+        format_optional_f64(report.net_sum_r),
+        format_optional_f64(report.net_expectancy_r),
+        format_optional_f64(report.net_profit_factor),
         format_optional_f64(report.win_rate),
         format_optional_f64(report.trade_sharpe),
         report.max_drawdown_pct,
@@ -1461,7 +1490,7 @@ pub fn print_framework_equity_split_reports(reports: &[FrameworkEquitySplitRepor
     for split in reports {
         let report = &split.report;
         println!(
-            "framework_equity_split_result\ttarget={}R\tmode=symbol_isolated_100u\tsplit={}\tstart_entry_ts={}\tend_entry_ts={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
+            "framework_equity_split_result\ttarget={}R\tmode=symbol_isolated_100u\tsplit={}\tstart_entry_ts={}\tend_entry_ts={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\tfixed_r_trades={}\tnet_sum_r={}\tnet_expectancy_r={}\tnet_profit_factor={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
             report.target_r,
             split.label,
             split.start_entry_ts,
@@ -1470,6 +1499,10 @@ pub fn print_framework_equity_split_reports(reports: &[FrameworkEquitySplitRepor
             report.meets_min_trades,
             report.symbols.len(),
             report.total_open_trades,
+            report.fixed_r_trades,
+            format_optional_f64(report.net_sum_r),
+            format_optional_f64(report.net_expectancy_r),
+            format_optional_f64(report.net_profit_factor),
             format_optional_f64(report.win_rate),
             format_optional_f64(report.trade_sharpe),
             report.max_drawdown_pct,
@@ -1482,7 +1515,7 @@ pub fn print_framework_equity_quartile_reports(reports: &[FrameworkEquitySplitRe
     for split in reports {
         let report = &split.report;
         println!(
-            "framework_equity_quartile_result\ttarget={}R\tmode=symbol_isolated_100u\tquartile={}\tstart_entry_ts={}\tend_entry_ts={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
+            "framework_equity_quartile_result\ttarget={}R\tmode=symbol_isolated_100u\tquartile={}\tstart_entry_ts={}\tend_entry_ts={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\tfixed_r_trades={}\tnet_sum_r={}\tnet_expectancy_r={}\tnet_profit_factor={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
             report.target_r,
             split.label,
             split.start_entry_ts,
@@ -1491,6 +1524,10 @@ pub fn print_framework_equity_quartile_reports(reports: &[FrameworkEquitySplitRe
             report.meets_min_trades,
             report.symbols.len(),
             report.total_open_trades,
+            report.fixed_r_trades,
+            format_optional_f64(report.net_sum_r),
+            format_optional_f64(report.net_expectancy_r),
+            format_optional_f64(report.net_profit_factor),
             format_optional_f64(report.win_rate),
             format_optional_f64(report.trade_sharpe),
             report.max_drawdown_pct,
@@ -1503,13 +1540,17 @@ pub fn print_framework_equity_trigger_reports(reports: &[FrameworkEquityTriggerR
     for trigger in reports {
         let report = &trigger.report;
         println!(
-            "framework_equity_trigger_result\ttarget={}R\tmode=symbol_isolated_100u\ttrigger={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
+            "framework_equity_trigger_result\ttarget={}R\tmode=symbol_isolated_100u\ttrigger={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\tfixed_r_trades={}\tnet_sum_r={}\tnet_expectancy_r={}\tnet_profit_factor={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
             report.target_r,
             trigger.trigger,
             report.min_trades,
             report.meets_min_trades,
             report.symbols.len(),
             report.total_open_trades,
+            report.fixed_r_trades,
+            format_optional_f64(report.net_sum_r),
+            format_optional_f64(report.net_expectancy_r),
+            format_optional_f64(report.net_profit_factor),
             format_optional_f64(report.win_rate),
             format_optional_f64(report.trade_sharpe),
             report.max_drawdown_pct,
@@ -1543,7 +1584,7 @@ pub fn print_framework_equity_feature_reports(reports: &[FrameworkEquityFeatureR
     for feature in reports {
         let report = &feature.report;
         println!(
-            "framework_equity_feature_result\ttarget={}R\tmode=symbol_isolated_100u\tfeature={}\tbucket={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
+            "framework_equity_feature_result\ttarget={}R\tmode=symbol_isolated_100u\tfeature={}\tbucket={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\tfixed_r_trades={}\tnet_sum_r={}\tnet_expectancy_r={}\tnet_profit_factor={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
             report.target_r,
             feature.feature,
             feature.bucket,
@@ -1551,6 +1592,10 @@ pub fn print_framework_equity_feature_reports(reports: &[FrameworkEquityFeatureR
             report.meets_min_trades,
             report.symbols.len(),
             report.total_open_trades,
+            report.fixed_r_trades,
+            format_optional_f64(report.net_sum_r),
+            format_optional_f64(report.net_expectancy_r),
+            format_optional_f64(report.net_profit_factor),
             format_optional_f64(report.win_rate),
             format_optional_f64(report.trade_sharpe),
             report.max_drawdown_pct,
@@ -1563,7 +1608,7 @@ pub fn print_framework_equity_symbol_window_reports(reports: &[FrameworkEquitySy
     for window in reports {
         let report = &window.split.report;
         println!(
-            "framework_equity_symbol_window_result\ttarget={}R\tmode=symbol_isolated_100u\twindow={}\tstart_entry_ts={}\tend_entry_ts={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
+            "framework_equity_symbol_window_result\ttarget={}R\tmode=symbol_isolated_100u\twindow={}\tstart_entry_ts={}\tend_entry_ts={}\tmin_trades={}\tmeets_min_trades={}\tsymbols={}\ttrades={}\tfixed_r_trades={}\tnet_sum_r={}\tnet_expectancy_r={}\tnet_profit_factor={}\twin_rate={}\ttrade_sharpe={}\tmax_drawdown_pct={:.8}\ttotal_profit={:.8}",
             report.target_r,
             window.split.label,
             window.split.start_entry_ts,
@@ -1572,6 +1617,10 @@ pub fn print_framework_equity_symbol_window_reports(reports: &[FrameworkEquitySy
             report.meets_min_trades,
             report.symbols.len(),
             report.total_open_trades,
+            report.fixed_r_trades,
+            format_optional_f64(report.net_sum_r),
+            format_optional_f64(report.net_expectancy_r),
+            format_optional_f64(report.net_profit_factor),
             format_optional_f64(report.win_rate),
             format_optional_f64(report.trade_sharpe),
             report.max_drawdown_pct,
@@ -1599,10 +1648,11 @@ pub fn print_framework_equity_symbol_window_reports(reports: &[FrameworkEquitySy
 pub fn print_framework_equity_trade_reports(reports: &[FrameworkEquityTradeReport]) {
     for trade in reports {
         println!(
-            "framework_equity_trade\ttarget={}R\tmode=symbol_isolated_100u\tsymbol={}\tevent_id={}\tdetected_at={}\tentry_ts={}\topen_time={}\tclose_time={}\topen_price={}\tclose_price={}\tquantity={}\tclose_type={}\tprofit_loss={:.8}\toutcome={}\ttrigger={}\tnew_rank={}\tdelta_rank={}\tprice_change_pct={}",
+            "framework_equity_trade\ttarget={}R\tmode=symbol_isolated_100u\tsymbol={}\tevent_id={}\tdirection={}\tdetected_at={}\tentry_ts={}\topen_time={}\tclose_time={}\topen_price={}\tclose_price={}\tquantity={}\tclose_type={}\tprofit_loss={:.8}\tinitial_risk_amount={}\tnet_profit_r={}\toutcome={}\ttrigger={}\tnew_rank={}\tdelta_rank={}\tprice_change_pct={}",
             trade.target_r,
             trade.symbol,
             trade.event_id,
+            trade.direction.label(),
             trade.detected_at,
             trade.entry_ts,
             trade.open_position_time,
@@ -1615,6 +1665,8 @@ pub fn print_framework_equity_trade_reports(reports: &[FrameworkEquityTradeRepor
             trade.quantity,
             trade.close_type,
             trade.profit_loss,
+            format_optional_f64(trade.initial_risk_amount),
+            format_optional_f64(trade.net_profit_r),
             trade.outcome,
             trade.trigger,
             trade.new_rank,
@@ -1687,27 +1739,40 @@ impl MarketVelocityReplayStrategy {
         early_exit_no_profit_candles: Option<usize>,
         ignore_entry_signal_updates_while_open: bool,
     ) -> Self {
-        let entries_by_ts = events
-            .into_iter()
-            .filter_map(|event| {
-                let selected_stop_loss = select_stop_loss_for_confirmed_signal(&event, args);
-                Some((
-                    replay_entry_candle_ts(candles, event.entry_ts)?,
-                    ReplayEntry {
-                        entry_price: event.entry_price,
-                        event_id: event.event.id,
-                        trigger: event.trigger,
-                        direction: trade_direction_for_event(&event.event),
-                        stop_loss_pct: selected_stop_loss.stop_loss_pct,
-                        stop_loss_price: selected_stop_loss.price,
-                        stop_loss_source: selected_stop_loss.source,
-                    },
-                ))
-            })
-            .collect();
+        let mut entries_by_ts = BTreeMap::new();
+        for event in events {
+            let selected_stop_loss = select_stop_loss_for_confirmed_signal(&event, args);
+            let effective_target_r = if args.volume_atr_take_profit {
+                let Some(target_r) = volume_atr_target_r_with_policy(
+                    candles,
+                    event.event.ts,
+                    event.entry_ts,
+                    event.entry_price,
+                    selected_stop_loss.stop_loss_pct,
+                    args,
+                ) else {
+                    continue;
+                };
+                target_r
+            } else {
+                target_r
+            };
+            let Some(replay_ts) = replay_entry_candle_ts(candles, event.entry_ts) else {
+                continue;
+            };
+            entries_by_ts.entry(replay_ts).or_insert(ReplayEntry {
+                entry_price: event.entry_price,
+                event_id: event.event.id,
+                trigger: event.trigger,
+                direction: event.direction,
+                stop_loss_pct: selected_stop_loss.stop_loss_pct,
+                stop_loss_price: selected_stop_loss.price,
+                stop_loss_source: selected_stop_loss.source,
+                target_r: effective_target_r,
+            });
+        }
         Self {
             entries_by_ts,
-            target_r,
             profit_protect_after_r,
             profit_protect_stop_r,
             early_exit_no_profit_candles,
@@ -1725,6 +1790,7 @@ impl MarketVelocityReplayStrategy {
             stop_loss_pct: entry.stop_loss_pct,
             stop_loss_price: entry.stop_loss_price,
             stop_loss_source: entry.stop_loss_source.clone(),
+            target_r: entry.target_r,
             profit_protected: false,
             observed_candles: 0,
         });
@@ -1737,6 +1803,7 @@ impl MarketVelocityReplayStrategy {
             entry.event_id,
             &entry.trigger,
             entry.direction,
+            entry.target_r,
             false,
         )
     }
@@ -1745,12 +1812,14 @@ impl MarketVelocityReplayStrategy {
         &mut self,
         candle: &CandleItem,
     ) -> Option<SignalResult> {
-        let after_r = self.profit_protect_after_r?;
         let active = self.active_position.as_mut()?;
+        let after_r = self
+            .profit_protect_after_r
+            .filter(|after_r| *after_r < active.target_r)?;
         let target_price = target_price_for(
             active.entry_price,
             active.stop_loss_pct,
-            self.target_r,
+            active.target_r,
             active.direction,
         );
         let current_stop_price = if active.profit_protected {
@@ -1786,6 +1855,7 @@ impl MarketVelocityReplayStrategy {
         let trigger = active.trigger.clone();
         let direction = active.direction;
         let stop_loss_pct = active.stop_loss_pct;
+        let target_r = active.target_r;
         let protected_stop_price = target_price_for(
             entry_price,
             stop_loss_pct,
@@ -1796,7 +1866,7 @@ impl MarketVelocityReplayStrategy {
             return None;
         }
         active.profit_protected = true;
-        Some(self.build_entry_direction_signal(
+        let mut signal = self.build_entry_direction_signal(
             candle.ts,
             entry_price,
             protected_stop_price,
@@ -1805,8 +1875,13 @@ impl MarketVelocityReplayStrategy {
             event_id,
             &trigger,
             direction,
+            target_r,
             true,
-        ))
+        );
+        // 保护价仍以冻结的原始入场风险计算，但更新合法性必须相对当前已完成 K 线收盘判断。
+        // 若继续传原始入场价，框架会把已经跨过入场价的保本止损误判为非保护性更新。
+        signal.open_price = candle.c;
+        Some(signal)
     }
     /// 判断按条件buildearly离场信号，给回测策略流程提供布尔结果。
     fn maybe_build_early_exit_signal(&mut self, candle: &CandleItem) -> Option<SignalResult> {
@@ -1857,7 +1932,7 @@ impl MarketVelocityReplayStrategy {
             let target_price = target_price_for(
                 active.entry_price,
                 active.stop_loss_pct,
-                self.target_r,
+                active.target_r,
                 active.direction,
             );
             let stop_price = if active.profit_protected {
@@ -1895,6 +1970,7 @@ impl MarketVelocityReplayStrategy {
         event_id: i64,
         trigger: &str,
         direction: MarketVelocityTradeDirection,
+        target_r: f64,
         profit_protected: bool,
     ) -> SignalResult {
         SignalResult {
@@ -1907,14 +1983,14 @@ impl MarketVelocityReplayStrategy {
                 .then_some(target_price_for(
                     entry_price,
                     stop_loss_pct,
-                    self.target_r,
+                    target_r,
                     direction,
                 )),
             short_signal_take_profit_price: (direction == MarketVelocityTradeDirection::Short)
                 .then_some(target_price_for(
                     entry_price,
                     stop_loss_pct,
-                    self.target_r,
+                    target_r,
                     direction,
                 )),
             ts: candle_ts,
@@ -1924,7 +2000,7 @@ impl MarketVelocityReplayStrategy {
                     "rank_event_id": event_id,
                     "entry_trigger": trigger,
                     "trade_direction": direction.label(),
-                    "target_r": self.target_r,
+                    "target_r": target_r,
                     "stop_loss_pct": stop_loss_pct,
                     "profit_protected": profit_protected,
                 })
@@ -1939,6 +2015,12 @@ impl MarketVelocityReplayStrategy {
             ..SignalResult::default()
         }
     }
+}
+
+/// 显式费用和等价滑点统一进入框架的双边成本扣减；未配置时保持旧版本默认费率。
+pub(super) fn framework_trade_cost_rate(args: &MarketVelocityEventBacktestArgs) -> Option<f64> {
+    args.backtest_fee_bps_per_side
+        .map(|fee_bps| (fee_bps + args.backtest_slippage_bps_per_side) / 10_000.0)
 }
 impl IndicatorStrategyBacktest for MarketVelocityReplayStrategy {
     type IndicatorCombine = ();
@@ -1962,11 +2044,15 @@ impl IndicatorStrategyBacktest for MarketVelocityReplayStrategy {
         let Some(candle) = candles.last() else {
             return SignalResult::default();
         };
+        let entry = self.entries_by_ts.get(&candle.ts).cloned();
+        let ignore_entry_for_current_candle = entry
+            .as_ref()
+            .is_some_and(|entry| self.should_ignore_entry_update(entry));
         if self.ignore_entry_signal_updates_while_open {
             self.clear_active_position_if_exit_hit(candle);
         }
-        if let Some(entry) = self.entries_by_ts.get(&candle.ts).cloned() {
-            if !self.should_ignore_entry_update(&entry) {
+        if let Some(entry) = entry {
+            if !ignore_entry_for_current_candle && !self.should_ignore_entry_update(&entry) {
                 return self.build_entry_signal(candle.ts, &entry);
             }
         }

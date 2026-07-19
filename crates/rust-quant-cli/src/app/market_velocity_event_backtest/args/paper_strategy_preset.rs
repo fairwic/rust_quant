@@ -1,5 +1,18 @@
 use anyhow::{bail, Result};
 
+mod market_momentum_reversal;
+
+use market_momentum_reversal::append_market_momentum_reversal_args;
+pub(super) use market_momentum_reversal::{
+    MARKET_MOMENTUM_OPPOSITE_MOVE_CONFIRMED_REVERSAL_RESEARCH_PRESET,
+    MARKET_MOMENTUM_OPPOSITE_MOVE_DEFERRED_LONG_RESEARCH_PRESET,
+    MARKET_MOMENTUM_OPPOSITE_MOVE_DURATION_BOTH_RESEARCH_PRESET,
+    MARKET_MOMENTUM_OPPOSITE_MOVE_EXHAUSTION_VOLUME_RESEARCH_PRESET,
+    MARKET_MOMENTUM_OPPOSITE_MOVE_MEAN_RECLAIM_RESEARCH_PRESET,
+    MARKET_MOMENTUM_OPPOSITE_MOVE_RISK_REWARD_RESEARCH_PRESET,
+    MARKET_MOMENTUM_OPPOSITE_MOVE_VOLUME_ATR_RESEARCH_PRESET,
+};
+
 pub(super) const PAPER_STRATEGY_PRESET_FLAG: &str = "--paper-strategy-preset";
 pub(super) const MOMENTUM_PROFIT_PRESET: &str = "momentum_03sl_20r_v5";
 pub(super) const MOMENTUM_PROFIT_ENTRY_RULE_VERSION: &str =
@@ -175,6 +188,9 @@ pub(super) const EPISODE_RUNNER_RESEARCH_ENTRY_RULE_VERSION: &str =
 
 pub(super) const PAPER_STRATEGY_PRESET_LOCKED_FLAGS: &[&str] = &[
     "--event-source",
+    "--kline-volume-rank-velocity",
+    "--kline-volume-rank-require-turnover-growth",
+    "--kline-volume-rank-require-consecutive-improvement",
     "--trade-direction",
     "--target-rs",
     "--stop-loss-pct",
@@ -199,6 +215,14 @@ pub(super) const PAPER_STRATEGY_PRESET_LOCKED_FLAGS: &[&str] = &[
     "--entry-min-range-expansion-ratio",
     "--entry-min-recent-drawdown-pct",
     "--entry-recent-drawdown-lookback-candles",
+    "--entry-opposite-move-lookback-candles",
+    "--entry-min-opposite-net-move-pct",
+    "--entry-min-opposite-duration-candles",
+    "--entry-btc-384-min-directional-net-move-pct",
+    "--entry-btc-require-current-directional-candle",
+    "--volume-atr-take-profit",
+    "--entry-defer-bearish-continuation",
+    "--entry-defer-max-wait-candles",
     "--entry-symbol-cooldown-candles",
     "--trend-min-average-distance-pct",
     "--min-delta-rank",
@@ -252,6 +276,13 @@ pub(super) enum PaperStrategyPreset {
     ResearchMomentumKline15mBreakoutFvg30Sl04R055,
     ResearchMomentumKline15mBreakoutFvg50Sl04R052,
     ResearchMomentumKline15mDirectShapeSl04R10,
+    ResearchMarketMomentumOppositeMoveVolumeAtrBoth15m,
+    ResearchMarketMomentumOppositeMoveDeferredLong15mV2,
+    ResearchMarketMomentumOppositeMoveDurationBoth15mV3,
+    ResearchMarketMomentumOppositeMoveExhaustionVolume15mV4,
+    ResearchMarketMomentumOppositeMoveRiskReward15mV5,
+    ResearchMarketMomentumOppositeMoveConfirmedReversal15mV6,
+    ResearchMarketMomentumOppositeMoveMeanReclaim15mV7,
     ResearchEpisodeMomentum03Sl24RRank5To30,
     ResearchEpisodeMomentum05Sl20RRank5,
     ResearchEpisodeMomentum05Sl30RRank5,
@@ -373,6 +404,27 @@ impl PaperStrategyPreset {
             }
             Self::ResearchMomentumKline15mDirectShapeSl04R10 => {
                 MOMENTUM_KLINE15M_DIRECT_SHAPE_04SL_10R_RESEARCH_PRESET
+            }
+            Self::ResearchMarketMomentumOppositeMoveVolumeAtrBoth15m => {
+                MARKET_MOMENTUM_OPPOSITE_MOVE_VOLUME_ATR_RESEARCH_PRESET
+            }
+            Self::ResearchMarketMomentumOppositeMoveDeferredLong15mV2 => {
+                MARKET_MOMENTUM_OPPOSITE_MOVE_DEFERRED_LONG_RESEARCH_PRESET
+            }
+            Self::ResearchMarketMomentumOppositeMoveDurationBoth15mV3 => {
+                MARKET_MOMENTUM_OPPOSITE_MOVE_DURATION_BOTH_RESEARCH_PRESET
+            }
+            Self::ResearchMarketMomentumOppositeMoveExhaustionVolume15mV4 => {
+                MARKET_MOMENTUM_OPPOSITE_MOVE_EXHAUSTION_VOLUME_RESEARCH_PRESET
+            }
+            Self::ResearchMarketMomentumOppositeMoveRiskReward15mV5 => {
+                MARKET_MOMENTUM_OPPOSITE_MOVE_RISK_REWARD_RESEARCH_PRESET
+            }
+            Self::ResearchMarketMomentumOppositeMoveConfirmedReversal15mV6 => {
+                MARKET_MOMENTUM_OPPOSITE_MOVE_CONFIRMED_REVERSAL_RESEARCH_PRESET
+            }
+            Self::ResearchMarketMomentumOppositeMoveMeanReclaim15mV7 => {
+                MARKET_MOMENTUM_OPPOSITE_MOVE_MEAN_RECLAIM_RESEARCH_PRESET
             }
             Self::ResearchEpisodeMomentum03Sl24RRank5To30 => EPISODE_MOMENTUM_RESEARCH_PRESET,
             Self::ResearchEpisodeMomentum05Sl20RRank5 => EPISODE_MOMENTUM_05SL_20R_RESEARCH_PRESET,
@@ -502,6 +554,27 @@ impl PaperStrategyPreset {
             MOMENTUM_KLINE15M_DIRECT_SHAPE_04SL_10R_RESEARCH_PRESET => {
                 Ok(Self::ResearchMomentumKline15mDirectShapeSl04R10)
             }
+            MARKET_MOMENTUM_OPPOSITE_MOVE_VOLUME_ATR_RESEARCH_PRESET => {
+                Ok(Self::ResearchMarketMomentumOppositeMoveVolumeAtrBoth15m)
+            }
+            MARKET_MOMENTUM_OPPOSITE_MOVE_DEFERRED_LONG_RESEARCH_PRESET => {
+                Ok(Self::ResearchMarketMomentumOppositeMoveDeferredLong15mV2)
+            }
+            MARKET_MOMENTUM_OPPOSITE_MOVE_DURATION_BOTH_RESEARCH_PRESET => {
+                Ok(Self::ResearchMarketMomentumOppositeMoveDurationBoth15mV3)
+            }
+            MARKET_MOMENTUM_OPPOSITE_MOVE_EXHAUSTION_VOLUME_RESEARCH_PRESET => {
+                Ok(Self::ResearchMarketMomentumOppositeMoveExhaustionVolume15mV4)
+            }
+            MARKET_MOMENTUM_OPPOSITE_MOVE_RISK_REWARD_RESEARCH_PRESET => {
+                Ok(Self::ResearchMarketMomentumOppositeMoveRiskReward15mV5)
+            }
+            MARKET_MOMENTUM_OPPOSITE_MOVE_CONFIRMED_REVERSAL_RESEARCH_PRESET => {
+                Ok(Self::ResearchMarketMomentumOppositeMoveConfirmedReversal15mV6)
+            }
+            MARKET_MOMENTUM_OPPOSITE_MOVE_MEAN_RECLAIM_RESEARCH_PRESET => {
+                Ok(Self::ResearchMarketMomentumOppositeMoveMeanReclaim15mV7)
+            }
             EPISODE_MOMENTUM_RESEARCH_PRESET => Ok(Self::ResearchEpisodeMomentum03Sl24RRank5To30),
             EPISODE_MOMENTUM_05SL_20R_RESEARCH_PRESET => {
                 Ok(Self::ResearchEpisodeMomentum05Sl20RRank5)
@@ -515,6 +588,9 @@ impl PaperStrategyPreset {
     }
     /// 把数据加入 回测与策略研究 聚合结果，保持集合构造逻辑集中。
     pub(super) fn append_args(self, args: &mut Vec<String>) {
+        if append_market_momentum_reversal_args(self, args) {
+            return;
+        }
         match self {
             Self::Momentum03Sl20R => {
                 args.extend([
@@ -1765,6 +1841,15 @@ impl PaperStrategyPreset {
                     "off".to_string(),
                     "--ignore-entry-signal-updates-while-open".to_string(),
                 ]);
+            }
+            Self::ResearchMarketMomentumOppositeMoveVolumeAtrBoth15m
+            | Self::ResearchMarketMomentumOppositeMoveDeferredLong15mV2
+            | Self::ResearchMarketMomentumOppositeMoveDurationBoth15mV3
+            | Self::ResearchMarketMomentumOppositeMoveExhaustionVolume15mV4
+            | Self::ResearchMarketMomentumOppositeMoveRiskReward15mV5
+            | Self::ResearchMarketMomentumOppositeMoveConfirmedReversal15mV6
+            | Self::ResearchMarketMomentumOppositeMoveMeanReclaim15mV7 => {
+                unreachable!("market momentum reversal presets are handled before the main match")
             }
             Self::ResearchEpisodeMomentum03Sl24RRank5To30 => {
                 args.extend([

@@ -109,6 +109,7 @@ pub(super) fn print_trigger_quality_report(
         return;
     }
     for target_r in &args.target_rs {
+        let target_label = target_label(args, *target_r);
         for (horizon_name, horizon_ms) in
             [("24h", 24 * 60 * 60 * 1_000), ("48h", 48 * 60 * 60 * 1_000)]
         {
@@ -116,9 +117,9 @@ pub(super) fn print_trigger_quality_report(
                 summarize_target(confirmed, candles_15m, *target_r, horizon_ms, args);
             for summary in summarize_results_by_base_trigger(&results) {
                 println!(
-                    "trigger_quality\tscope={}\ttarget={}R\thorizon={}\ttrigger={}\ttrades={}\twin={}\tloss={}\tflat={}\ttimeout={}\tincomplete={}\tcomplete_avg_r={}",
+                    "trigger_quality\tscope={}\ttarget={}\thorizon={}\ttrigger={}\ttrades={}\twin={}\tloss={}\tflat={}\ttimeout={}\tincomplete={}\tcomplete_avg_r={}",
                     scope,
-                    target_r,
+                    target_label,
                     horizon_name,
                     summary.trigger_label,
                     summary.trades,
@@ -144,6 +145,7 @@ pub(super) fn print_trigger_variant_quality_report(
         return;
     }
     for target_r in &args.target_rs {
+        let target_label = target_label(args, *target_r);
         for (horizon_name, horizon_ms) in
             [("24h", 24 * 60 * 60 * 1_000), ("48h", 48 * 60 * 60 * 1_000)]
         {
@@ -151,9 +153,9 @@ pub(super) fn print_trigger_variant_quality_report(
                 summarize_target(confirmed, candles_15m, *target_r, horizon_ms, args);
             for summary in summarize_results_by_exact_trigger(&results) {
                 println!(
-                    "trigger_variant_quality\tscope={}\ttarget={}R\thorizon={}\ttrigger={}\ttrades={}\twin={}\tloss={}\tflat={}\ttimeout={}\tincomplete={}\tcomplete_avg_r={}",
+                    "trigger_variant_quality\tscope={}\ttarget={}\thorizon={}\ttrigger={}\ttrades={}\twin={}\tloss={}\tflat={}\ttimeout={}\tincomplete={}\tcomplete_avg_r={}",
                     scope,
-                    target_r,
+                    target_label,
                     horizon_name,
                     summary.trigger_label,
                     summary.trades,
@@ -175,6 +177,7 @@ pub(super) fn print_result_report(
     args: &MarketVelocityEventBacktestArgs,
 ) {
     for target_r in &args.target_rs {
+        let target_label = target_label(args, *target_r);
         for (horizon_name, horizon_ms) in
             [("24h", 24 * 60 * 60 * 1_000), ("48h", 48 * 60 * 60 * 1_000)]
         {
@@ -190,8 +193,8 @@ pub(super) fn print_result_report(
             let resolved_win_rate = percent(wins, resolved);
             let avg_r = average_complete_r(&results);
             println!(
-                "result\ttarget={}R\thorizon={}\ttrades={}\tskipped_lock={}\twin={}\tloss={}\tflat={}\ttimeout={}\tincomplete={}\tcomplete_win_rate={}\tresolved_win_rate={}\tavg_r_complete={}",
-                target_r,
+                "result\ttarget={}\thorizon={}\ttrades={}\tskipped_lock={}\twin={}\tloss={}\tflat={}\ttimeout={}\tincomplete={}\tcomplete_win_rate={}\tresolved_win_rate={}\tavg_r_complete={}",
+                target_label,
                 horizon_name,
                 results.len(),
                 skipped_lock,
@@ -206,8 +209,11 @@ pub(super) fn print_result_report(
             );
             for result in results.iter().take(args.sample_limit) {
                 println!(
-                    "trade_sample\ttarget={}R\thorizon={}\t{}\t{}\tentry_ts={}\tentry={:.8}\toutcome={}\treason={}\tr={}",
-                    target_r,
+                    "trade_sample\ttarget={}\thorizon={}\t{}\t{}\tentry_ts={}\tentry={:.8}\toutcome={}\treason={}\tr={}",
+                    result
+                        .target_r
+                        .map(|value| format!("{value:.4}R"))
+                        .unwrap_or_else(|| target_label.clone()),
                     horizon_name,
                     result.symbol.as_deref().unwrap_or("NA"),
                     result.detected_at.as_deref().unwrap_or("NA"),
@@ -219,6 +225,14 @@ pub(super) fn print_result_report(
                 );
             }
         }
+    }
+}
+
+fn target_label(args: &MarketVelocityEventBacktestArgs, target_r: f64) -> String {
+    if args.volume_atr_take_profit {
+        "volume_atr".to_string()
+    } else {
+        format!("{target_r}R")
     }
 }
 /// 提供数量outcomes的集中实现，避免回测策略调用方重复处理相同细节。
@@ -527,6 +541,7 @@ mod tests {
             reason: "test".to_string(),
             exit_ts: 0,
             r,
+            target_r: None,
             complete: outcome != TradeOutcome::Incomplete,
             symbol: Some("TEST-USDT-SWAP".to_string()),
             event_id: Some(1),

@@ -1,3 +1,8 @@
+use super::directional_reversal::{
+    BTC_BROAD_DIRECTION_LOOKBACK_CANDLES, EXHAUSTION_CURRENT_CLUSTER_CANDLES,
+    EXHAUSTION_VOLUME_LOOKBACK_CANDLES,
+};
+use super::kline_volume_rank_velocity::load_kline_volume_rank_events;
 use super::{
     build_computed_candles, BacktestCandle, BacktestDataSet, CandlePair, FvgEntryMode,
     MarketVelocityEventBacktestArgs, MarketVelocityEventSource, MarketVelocityTrendTimeframe,
@@ -290,6 +295,7 @@ fn candle_load_window_ms(
         .unwrap_or(0);
     let post_signal_wait_ms = fvg_post_signal_wait_ms(args)
         .max(retest_post_signal_wait_ms(args))
+        .max(deferred_reversal_post_signal_wait_ms(args))
         .saturating_add(candle_window_tail_buffer_ms(args));
     Some((
         first_event_ts.saturating_sub(warmup_ms),
@@ -329,6 +335,23 @@ fn entry_warmup_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
                 .saturating_add(3),
         );
     }
+    if args.entry_min_opposite_net_move_pct.is_some()
+        || args.entry_min_opposite_duration_candles.is_some()
+    {
+        let opposite_move_candles = args
+            .entry_min_opposite_duration_candles
+            .unwrap_or_default()
+            .max(args.entry_opposite_move_lookback_candles);
+        warmup_candles = warmup_candles.max(opposite_move_candles.saturating_add(3));
+    }
+    if args.entry_min_exhaustion_volume_dominance_ratio.is_some() {
+        warmup_candles = warmup_candles.max(
+            EXHAUSTION_VOLUME_LOOKBACK_CANDLES.saturating_add(EXHAUSTION_CURRENT_CLUSTER_CANDLES),
+        );
+    }
+    if args.entry_btc_384_min_directional_net_move_pct.is_some() {
+        warmup_candles = warmup_candles.max(BTC_BROAD_DIRECTION_LOOKBACK_CANDLES.saturating_add(3));
+    }
     candle_count_ms(warmup_candles, MS_15M)
 }
 fn fvg_warmup_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
@@ -359,6 +382,13 @@ fn retest_post_signal_wait_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
         0
     }
 }
+fn deferred_reversal_post_signal_wait_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
+    if args.entry_defer_bearish_continuation {
+        candle_count_ms(args.entry_defer_max_wait_candles.saturating_add(1), MS_15M)
+    } else {
+        0
+    }
+}
 fn candle_window_tail_buffer_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
     if should_load_4h_candles(args) {
         MS_4H
@@ -384,6 +414,9 @@ async fn load_events(
         return Ok(Vec::new());
     }
     if args.event_source == MarketVelocityEventSource::Kline15m {
+        if args.kline_volume_rank_velocity {
+            return load_kline_volume_rank_events(pool, symbols, args).await;
+        }
         return load_kline_15m_events(pool, symbols, args).await;
     }
     let sql = event_source_sql(args);
@@ -547,6 +580,8 @@ async fn load_kline_15m_events(
             .bind(args.min_price_change_pct)
             .bind(args.max_price_change_pct)
             .bind(args.trade_direction.label())
+            .bind(args.entry_defer_bearish_continuation)
+            .bind(args.entry_defer_bullish_continuation)
             .fetch_all(pool)
             .await
             .with_context(|| format!("load synthetic 15m kline events from {table_name}"))?;
@@ -586,17 +621,21 @@ fn kline_15m_events_sql(table_name: &str) -> String {
           AND ($2::bigint IS NULL OR ts + 900000 <= $2)
           AND o::double precision > 0
           AND (
-            ($5 = 'long' AND c::double precision > o::double precision)
-            OR ($5 = 'short' AND c::double precision < o::double precision)
+            ($5 = 'long' AND (($6 = false AND c::double precision > o::double precision) OR ($6 = true AND c::double precision <> o::double precision)))
+            OR ($5 = 'short' AND (($7 = false AND c::double precision < o::double precision) OR ($7 = true AND c::double precision <> o::double precision)))
             OR ($5 = 'both' AND c::double precision <> o::double precision)
           )
           AND ($3::double precision IS NULL OR CASE
+            WHEN $5 = 'short' AND $7 = true THEN ABS((c::double precision - o::double precision) / o::double precision * 100.0)
             WHEN $5 = 'short' THEN (o::double precision - c::double precision) / o::double precision * 100.0
+            WHEN $5 = 'long' AND $6 = true THEN ABS((c::double precision - o::double precision) / o::double precision * 100.0)
             WHEN $5 = 'both' THEN ABS((c::double precision - o::double precision) / o::double precision * 100.0)
             ELSE (c::double precision - o::double precision) / o::double precision * 100.0
           END >= $3)
           AND ($4::double precision IS NULL OR CASE
+            WHEN $5 = 'short' AND $7 = true THEN ABS((c::double precision - o::double precision) / o::double precision * 100.0)
             WHEN $5 = 'short' THEN (o::double precision - c::double precision) / o::double precision * 100.0
+            WHEN $5 = 'long' AND $6 = true THEN ABS((c::double precision - o::double precision) / o::double precision * 100.0)
             WHEN $5 = 'both' THEN ABS((c::double precision - o::double precision) / o::double precision * 100.0)
             ELSE (c::double precision - o::double precision) / o::double precision * 100.0
           END <= $4)
@@ -759,9 +798,13 @@ mod tests {
     fn kline_15m_event_source_filters_completed_candles_by_trade_direction() {
         let event_sql = kline_15m_events_sql("btc-usdt-swap_candles_15m");
 
-        assert!(event_sql.contains("$5 = 'long' AND c::double precision > o::double precision"));
-        assert!(event_sql.contains("$5 = 'short' AND c::double precision < o::double precision"));
+        assert!(event_sql.contains("$6 = false AND c::double precision > o::double precision"));
+        assert!(event_sql.contains("$6 = true AND c::double precision <> o::double precision"));
+        assert!(event_sql.contains("$7 = false AND c::double precision < o::double precision"));
+        assert!(event_sql.contains("$7 = true AND c::double precision <> o::double precision"));
         assert!(event_sql.contains("$5 = 'both' AND c::double precision <> o::double precision"));
+        assert!(event_sql.contains("$5 = 'long' AND $6 = true THEN ABS"));
+        assert!(event_sql.contains("$5 = 'short' AND $7 = true THEN ABS"));
     }
     #[test]
     fn candle_loader_skips_1h_when_trend_and_fvg_do_not_need_it() {
@@ -942,6 +985,45 @@ mod tests {
         assert!(end_ms >= last_event_ts + 48 * 60 * 60 * 1_000 + MS_4H);
     }
     #[test]
+    fn candle_load_window_covers_opposite_duration_history() {
+        let args = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            entry_min_opposite_duration_candles: Some(120),
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let event_ts = 2_000_000_000_000;
+
+        let (start_ms, _) = candle_load_window_ms(&args, &[sample_event(event_ts)]).unwrap();
+
+        assert!(start_ms <= event_ts - 123 * MS_15M);
+    }
+    #[test]
+    fn candle_load_window_covers_exhaustion_volume_history() {
+        let args = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            entry_min_exhaustion_volume_dominance_ratio: Some(1.0),
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let event_ts = 2_000_000_000_000;
+
+        let (start_ms, _) = candle_load_window_ms(&args, &[sample_event(event_ts)]).unwrap();
+
+        assert!(start_ms <= event_ts - 99 * MS_15M);
+    }
+    #[test]
+    fn candle_load_window_covers_btc_broad_direction_history() {
+        let args = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            entry_btc_384_min_directional_net_move_pct: Some(0.0),
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let event_ts = 2_000_000_000_000;
+
+        let (start_ms, _) = candle_load_window_ms(&args, &[sample_event(event_ts)]).unwrap();
+
+        assert!(start_ms <= event_ts - 387 * MS_15M);
+    }
+    #[test]
     fn candle_load_window_covers_fvg_warmup_and_wait_only_when_fvg_enabled() {
         let args = MarketVelocityEventBacktestArgs {
             trend_timeframe: MarketVelocityTrendTimeframe::Off,
@@ -979,6 +1061,21 @@ mod tests {
 
         assert_eq!(start_ms, first_event_ts - 96 * MS_15M);
         assert_eq!(end_ms, last_event_ts + 48 * 60 * 60 * 1_000 + MS_15M);
+    }
+    #[test]
+    fn candle_load_window_covers_deferred_reversal_confirmation_and_entry() {
+        let args = MarketVelocityEventBacktestArgs {
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            entry_defer_bearish_continuation: true,
+            entry_defer_max_wait_candles: 3,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let event_ts = 2_000_000_000_000;
+        let events = vec![sample_event(event_ts)];
+
+        let (_, end_ms) = candle_load_window_ms(&args, &events).unwrap();
+
+        assert_eq!(end_ms, event_ts + 48 * 60 * 60 * 1_000 + 5 * MS_15M);
     }
     #[test]
     fn candle_load_window_returns_none_without_events() {
