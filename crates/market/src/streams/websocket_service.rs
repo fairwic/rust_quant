@@ -45,7 +45,9 @@ impl WatchdogTarget {
         let Some(last_candle_ts) = self.last_observed_candle_ts else {
             return true;
         };
-        let boundary_ms = last_candle_ts.saturating_add(self.timeframe_ms);
+        // last_candle_ts 是“最后已确认 K 线的开盘时间”。下一次需要观察的是下一根 K 线收盘，
+        // 因此要跨两个周期；只加一个周期会停在上一根的收盘点，真正边界退化成 30 秒轮询。
+        let boundary_ms = last_candle_ts.saturating_add(self.timeframe_ms.saturating_mul(2));
         now_ms >= boundary_ms && now_ms.saturating_sub(boundary_ms) <= WATCHDOG_BOUNDARY_OBSERVE_MS
     }
 }
@@ -507,19 +509,20 @@ mod tests {
     /// 收盘边界短窗口内必须高频查询，边界外不能持续压 DB。
     #[test]
     fn watchdog_target_queries_at_boundary_and_falls_back_after_thirty_seconds() {
+        let timeframe_ms = 14_400_000;
+        let next_close_boundary_ms = 1_000 + timeframe_ms * 2;
         let target = WatchdogTarget {
             symbol: "ETH-USDT-SWAP".to_string(),
             timeframe: "4H".to_string(),
-            timeframe_ms: 14_400_000,
+            timeframe_ms,
             last_observed_candle_ts: Some(1_000),
-            last_db_query_at_ms: Some(14_391_000),
+            last_db_query_at_ms: Some(next_close_boundary_ms - 9_000),
         };
-        let boundary_ms = 1_000 + 14_400_000;
 
-        assert!(!target.should_query_db(boundary_ms - 1));
-        assert!(target.should_query_db(boundary_ms));
-        assert!(target.should_query_db(boundary_ms + 12_000));
-        assert!(!target.should_query_db(boundary_ms + 12_001));
+        assert!(!target.should_query_db(next_close_boundary_ms - 1));
+        assert!(target.should_query_db(next_close_boundary_ms));
+        assert!(target.should_query_db(next_close_boundary_ms + 12_000));
+        assert!(!target.should_query_db(next_close_boundary_ms + 12_001));
         assert!(target.should_query_db(
             target.last_db_query_at_ms.expect("last query") + WATCHDOG_FALLBACK_QUERY_MS
         ));

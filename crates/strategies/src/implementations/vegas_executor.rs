@@ -18,11 +18,45 @@ use async_trait::async_trait;
 use rust_quant_indicators::trend::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::VegasStrategy;
 use std::collections::VecDeque;
+use std::str::FromStr;
 use tracing::{debug, info};
 // ⏳ 移除orchestration依赖，避免循环依赖
 // 使用 ExecutionContext trait 替代直接依赖
 // use rust_quant_orchestration::workflow::strategy_runner::StrategyExecutionStateManager;
 use rust_quant_common::CandleItem;
+use rust_quant_domain::Timeframe;
+
+/// 供 services 层识别可安全重建指标缓存的实时 K 线缺口错误。
+pub const LIVE_CANDLE_GAP_ERROR_PREFIX: &str = "live_strategy_candle_gap";
+
+/// 判断错误链中是否包含实时 K 线缺口，避免对网络、风控或分发错误做自动重试。
+pub fn is_live_candle_gap_error(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().contains(LIVE_CANDLE_GAP_ERROR_PREFIX))
+}
+
+/// 新确认 K 线必须紧邻指标缓存；跨周期增量会让 EMA、ATR 和成交量分位数全部失真。
+fn ensure_incremental_candle_is_contiguous(period: &str, old_ts: i64, new_ts: i64) -> Result<()> {
+    if new_ts <= old_ts {
+        return Ok(());
+    }
+    let timeframe = Timeframe::from_str(period)
+        .map_err(|error| anyhow!("无法校验 Vegas 实时 K 线周期: {}", error))?;
+    let timeframe_ms = timeframe.to_minutes().saturating_mul(60_000);
+    let expected_ts = old_ts.saturating_add(timeframe_ms);
+    if new_ts != expected_ts {
+        return Err(anyhow!(
+            "{}: period={}, old_ts={}, expected_ts={}, new_ts={}",
+            LIVE_CANDLE_GAP_ERROR_PREFIX,
+            period,
+            old_ts,
+            expected_ts,
+            new_ts
+        ));
+    }
+    Ok(())
+}
 /// Vegas 策略执行器
 pub struct VegasStrategyExecutor {
     strategy_type: StrategyType,
@@ -126,6 +160,9 @@ impl StrategyExecutor for VegasStrategyExecutor {
             .await
             .ok_or_else(|| anyhow!("没有找到对应的 Vegas 策略值: {}", key))?;
         let mut new_candle_items: VecDeque<CandleItem> = last_candles_vec.into_iter().collect();
+        if self.strategy_type == StrategyType::VegasUniversal4h {
+            ensure_incremental_candle_is_contiguous(period, old_time, new_candle_item.ts)?;
+        }
         // 4. 检查是否应该执行（使用简化版本，只检查时间戳）
         if !is_new_timestamp(old_time, new_candle_item.ts) {
             debug!(
@@ -192,5 +229,28 @@ impl StrategyExecutor for VegasStrategyExecutor {
         }
         // 11. 返回信号（下单逻辑由services层统一处理）
         Ok(strategy_signal)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn universal_vegas_accepts_the_next_4h_candle() {
+        let old_ts = 1_700_000_000_000;
+
+        ensure_incremental_candle_is_contiguous("4H", old_ts, old_ts + 14_400_000)
+            .expect("adjacent 4H candle");
+    }
+
+    #[test]
+    fn universal_vegas_rejects_a_skipped_4h_candle() {
+        let old_ts = 1_700_000_000_000;
+
+        let error = ensure_incremental_candle_is_contiguous("4H", old_ts, old_ts + 28_800_000)
+            .expect_err("skipped candle must fail closed");
+
+        assert!(is_live_candle_gap_error(&error));
     }
 }

@@ -3,6 +3,7 @@
 //! 协调策略分析、风控检查、订单创建的完整业务流程
 use super::live_decision::{apply_live_decision, approx_eq_opt};
 use super::strategy_signal_payload::{self, StrategySignalPayloadBuildOptions};
+use super::StrategyDataService;
 use crate::rust_quan_web::{ExecutionTaskClient, ExecutionTaskConfig, StrategySignalSubmitRequest};
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
@@ -190,6 +191,7 @@ impl StrategyExecutionService {
         // 必须严格使用配置中的 strategy_type 路由执行器：
         // - detect_strategy 基于参数“猜策略”，在参数为空/通用字段时会误判
         // - 误判会导致读取错误的策略缓存 key，直接失败
+        use rust_quant_strategies::implementations::is_live_candle_gap_error;
         use rust_quant_strategies::strategy_registry::{
             get_strategy_registry, register_strategy_on_demand,
         };
@@ -207,15 +209,48 @@ impl StrategyExecutionService {
             Some(c) => Some(Self::candle_entity_to_item(c)?),
             None => None,
         };
-        // execute() 需要所有权；后续止损计算也需要引用，因此这里保留一份副本
-        let snap_item_for_execute = snap_item.clone();
-        let mut signal = strategy_executor
-            .execute(inst_id, period, config, snap_item_for_execute)
+        let mut signal = match strategy_executor
+            .execute(inst_id, period, config, snap_item.clone())
             .await
-            .map_err(|e| {
-                error!("策略执行失败: {}", e);
-                anyhow!("策略分析失败: {}", e)
-            })?;
+        {
+            Ok(signal) => signal,
+            Err(error) if is_live_candle_gap_error(&error) => {
+                let trigger_ts = snap_item
+                    .as_ref()
+                    .map(|candle| candle.ts)
+                    .ok_or_else(|| anyhow!("实时 K 线缺口恢复需要确认 K 线快照"))?;
+                warn!(
+                    "检测到实时策略 K 线缺口，重建到触发前一根后重试: config_id={}, strategy={:?}, symbol={}, period={}, trigger_ts={}, error={}",
+                    config.id,
+                    config.strategy_type,
+                    inst_id,
+                    period,
+                    trigger_ts,
+                    error
+                );
+                // 重建截止在触发 K 线之前，避免把本次确认 K 线预先吃进缓存而漏掉信号。
+                StrategyDataService::initialize_strategy_before_trigger(config, trigger_ts)
+                    .await
+                    .map_err(|repair_error| {
+                        anyhow!(
+                            "实时策略 K 线缺口恢复失败: original_error={}, repair_error={}",
+                            error,
+                            repair_error
+                        )
+                    })?;
+                strategy_executor
+                    .execute(inst_id, period, config, snap_item.clone())
+                    .await
+                    .map_err(|retry_error| {
+                        error!("策略缺口恢复后重试失败: {}", retry_error);
+                        anyhow!("策略分析失败: {}", retry_error)
+                    })?
+            }
+            Err(error) => {
+                error!("策略执行失败: {}", error);
+                return Err(anyhow!("策略分析失败: {}", error));
+            }
+        };
         if Self::smoke_forced_signal_side_from_env().is_some() {
             let trigger_candle = snap_item.as_ref().ok_or_else(|| {
                 anyhow!("RUST_QUANT_SMOKE_FORCE_SIGNAL requires a confirmed trigger candle")

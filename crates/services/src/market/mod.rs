@@ -246,6 +246,26 @@ pub async fn get_confirmed_candles_for_backtest(
     should_use_quant_core_candle_source()?;
     get_quant_core_sharded_candles_for_backtest(inst_id, period, limit, select_time).await
 }
+/// 从指定交易所读取最新 K 线，供实盘预热修复数据库尾部缺口。
+///
+/// 这里只做公共行情读取，不持久化；策略预热会在合并后再次校验确认状态、目标时间和连续性。
+pub(crate) async fn fetch_latest_candles_for_live_warmup(
+    exchange_name: &str,
+    inst_id: &str,
+    period: &str,
+    limit: usize,
+) -> Result<Vec<CandlesEntity>> {
+    use rust_quant_infrastructure::ExchangeFactory;
+
+    let exchange = ExchangeFactory::create_market_data(exchange_name)?;
+    let candles = exchange
+        .fetch_latest_candles(inst_id, period, Some(limit))
+        .await?;
+    Ok(candles
+        .into_iter()
+        .filter_map(exchange_candle_value_to_entity)
+        .collect())
+}
 /// 判断 行情与市场数据 条件是否满足，给上层流程提供布尔决策。
 pub fn should_use_quant_core_candle_source() -> Result<bool> {
     let source = std::env::var("CANDLE_SOURCE")
