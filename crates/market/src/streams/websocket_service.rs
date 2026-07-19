@@ -399,8 +399,9 @@ async fn run_health_monitor(
         interval.tick().await;
         let public = public_client.health_snapshot();
         let business = business_client.health_snapshot();
-        let now_ms = Utc::now().timestamp_millis();
         let target_snapshots = runtime_registry.snapshots();
+        // 目标快照会被接收任务并发更新；在快照之后取时钟，避免把刚写入的消息误判成“来自未来”。
+        let now_ms = Utc::now().timestamp_millis();
         let target_messages_fresh = target_snapshots.iter().all(|target| {
             message_is_fresh(
                 target.last_message_at_ms,
