@@ -1,5 +1,25 @@
 # 任务计划：PA Quant Tree v1 基础设施
 
+## 2026-07-20：交易系统目标架构文档收敛
+
+- [x] 将目标物理目录收敛为 `domains / quant / contracts / adapters / platform` 五类，并将 Operations 改为边界更窄的 Reconciliation
+- [x] 明确 Model、Policy、Use Case、Port、Adapter、App 与 Wire Contract 的代码位置和依赖方向
+- [x] 明确数据库 Create/Read/Update/Delete、Query、SQLx transaction、Outbox 和 migration 的唯一放置规则
+- [x] 明确 Web ExecutionRequest 与 Core Order/Fill/Protection 事实的 owner 迁移边界
+- [x] 补齐部分成交、保护数量、撤单竞态、Unknown、最大未保护窗口与恢复协议
+- [x] 将迁移改为 Golden Vertical Slice + shadow/parity + CI ratchet，而不是横向大搬迁
+- [x] 补充 AI 编码护栏、Owner-scoped 持久化 ADR 和开源参考取舍
+- [x] 用现有 Vegas/回测主链反向验证目标目录，修正 signal-worker 与账户级 Portfolio/Risk 的运行边界
+- [x] 新增 Research Domain，明确 Experiment、BacktestRun、DatasetManifest、SimulationLedger 与 ResearchEvidence 的唯一 owner
+- [x] 以 ADR-0009 取代 ADR-0008：`quant/backtest` 收敛为纯确定性内核，业务编排回到 Research Use Case
+- [x] 将回测验证拆为 ResearchBar、PaperEvent、RecoveryHarness，避免普通策略回测虚假复刻整套生产 OMS
+- [x] 明确 Vegas Evaluation State 的 run/deployment scope、多币种 decision-time barrier、SimulationLedger 与生产 AccountProjection 的隔离
+- [x] 明确 StrategyArtifact 与 ResearchEvidence 分权，以及对象存储 + PostgreSQL 的 ResearchEvidence 原子可见发布协议
+- [x] 重写 Vegas 迁移实战，补齐逐文件代码分配、Research 数据访问、迁移切片与分层 parity 验收矩阵
+- [x] 将目标架构封装为项目级 `rust-quant-architecture` Skill，并完成官方结构校验和 umbrella 可发现安装
+
+下一步：文档不等于实现；先冻结 Vegas Slice 0 的事件级基线、随机 symbol 输入顺序基线和证据指纹，再建立最小 Research owner 骨架与只拦新增违规的只读 `arch-check`；通过后迁移无副作用 Vegas Evaluator 和 ResearchBar 单资产切片，不能一开始就搬整套 OMS。
+
 ## 目标
 
 在不改变 Vegas 现有交易行为的前提下，交付无 AI 运行时的 PA 量化树纵向切片，并建立可复现的离线 Challenger 评估与 Paper 生命周期基础。

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Quant 架构规范"
+  short_description: "约束 Rust Quant 交易域、研究回测、数据访问与运行边界"
+  default_prompt: "使用 $rust-quant-architecture 审查这项 rust_quant 变更，并明确业务 owner、代码位置、数据访问和验证边界。"

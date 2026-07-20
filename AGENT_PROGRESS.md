@@ -1,5 +1,24 @@
 # Agent 进度：PA Quant Tree
 
+## 2026-07-20：交易系统目标架构文档按最新方案更新
+
+- 目标目录改为 `apps` 加 `crates/{domains,quant,contracts,adapters,platform}`，默认一个 Contracts crate、一个按 owner module 隔离的 Postgres Adapter crate；不预建空 crate。
+- 将含义过宽的 Operations 改为 Reconciliation；`signal-worker` 只产生 StrategySignal，用户账户级 Portfolio 和事前 Risk 等 Web ExecutionRequest 带回稳定账户上下文后由 `execution-worker` 装配，持续 Risk 初期可由 account-worker 装配。
+- 新增业务代码与数据访问规范，固定 Command、Query、Event Consumer 三条调用链，并明确 SQL/Row/事务只在 Postgres Adapter，Use Case 只定义业务原子性。
+- 明确 Web `execution_tasks` 的目标语义是 ExecutionRequest 商业交接；OrderIntent、Order、Fill、Protection 和 Reconciliation 的唯一事实源迁到 Core，Web 只保留结果投影。
+- 将 Strategy Manifest 拆为 Definition、StrategyArtifact、Release、RuntimeSnapshot；ResearchEvidence 改由独立 Research Domain 拥有，Release 只引用已完成证据。
+- 补齐部分成交保护、撤单/成交竞态、Unknown 与最大未保护窗口；新增 AI 放置声明、Golden Template、架构门禁 ratchet 和 ADR-0007。
+- 以 ADR-0009 取代 ADR-0008：`quant/backtest` 只保留确定性时钟、事件调度、回放、成交与成本模型；Experiment、Run、Checkpoint、SimulationLedger 和证据发布全部归 Research。
+- 将模拟分为 ResearchBar、PaperEvent、RecoveryHarness：前者验证策略表现，中者验证订单事件，后者验证 lease/outbox/Unknown/对账恢复，禁止拿普通回测冒充生产恢复验证。
+- 重写 `vegas-backtest-migration.md`，把当前 HTTP -> Runner -> Executor -> Pipeline -> Service -> SQL 主链映射成 Research 控制流和逐 decision-time 事件循环。
+- 明确 Vegas `StrategyEvaluationStateKey = EvaluationScopeId + StrategyRuntimeSnapshotId + MarketStreamPartition`；记录当前 7000/4000/300 窗口、无 config/version 缓存键和仅 Universal 进行缺口检查等 parity 风险。
+- 多币种回放必须先收集同一 `decision_time` 的全部候选，再统一进入 Portfolio 排序、净额、容量和 Risk；随机 symbol 输入顺序不得改变结果。
+- Research 使用独立 SimulationLedger，不写生产 AccountProjection；Evidence 对象先上传，再由 Research owner 数据库事务一次发布 manifest、指标引用、幂等记录和 `Completed`，只承诺原子可见。
+- 将历史 `position_leverage=0.58` 解释为 Portfolio `allocation_ratio`，与真实交易所 leverage 分开；Strategy 只输出候选失效价，最终仓位、止损与审批归 Portfolio/Risk。
+- 本轮只修改架构文档并新增项目级架构 Skill，没有创建业务 crate、实现 `xtask`、迁移数据库、修改运行链路或触发任何交易动作。
+
+下一步：先只读冻结依赖、Contract、表 owner、运行入口、Vegas 逐事件基线与随机 symbol 顺序基线；再建立最小 Research owner 和只拦新增违规的 `arch-check`。随后先迁移 Vegas Evaluator 与 ResearchBar 单资产切片，再扩展多资产 barrier 和 PaperEvent，不直接把完整生产 OMS 搬进普通回测。
+
 ## 2026-07-15
 
 - 完成 BTC、ETH、SOL、BCH 四市场 365 天 15m/1h 已确认 K 线补齐与连续性核对。
