@@ -10,6 +10,20 @@ pub fn env_is_true(key: &str, default: bool) -> bool {
         Err(_) => default,
     }
 }
+
+/// 判断当前进程是否正在执行任一种随机参数回测。
+///
+/// 上层入口允许分别启用 Vegas 与 NWE；底层诊断和持久化必须使用同一口径，
+/// 否则专用随机模式会误写逐笔成交、过滤信号和审计快照。
+pub fn random_backtest_is_enabled() -> bool {
+    [
+        "ENABLE_RANDOM_TEST",
+        "ENABLE_RANDOM_TEST_VEGAS",
+        "ENABLE_RANDOM_TEST_NWE",
+    ]
+    .iter()
+    .any(|key| env_is_true(key, false))
+}
 /// 读取字符串环境变量，若不存在则返回默认值
 pub fn env_or_default(key: &str, default: &str) -> String {
     match env::var(key) {

@@ -41,6 +41,7 @@ containers=(
   quant-core-vegas-eth-4h-worker
   quant-core-vegas-universal-4h-worker
   quant-core-market-velocity-radar
+  quant-core-all-market-candle-volume-monitor
   quant-core-market-velocity-live-handoff-scheduler
   quant-core-market-velocity-breakdown-short-live-handoff-scheduler
   quant-core-execution-worker

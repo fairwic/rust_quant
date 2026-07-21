@@ -15,14 +15,19 @@ mod equity;
 mod equity_stats;
 mod exit;
 mod fvg;
+mod historical_universe;
 mod kline_shape;
 mod kline_volume_rank_velocity;
 mod manifest;
+mod momentum_entry_filters;
+mod one_shot_trend_state;
 mod paper_outcome;
 mod paper_signal;
 mod reentry;
+mod relative_volume_at_time;
 mod report;
 mod reversal_retest;
+mod setup_open_reclaim;
 mod short_entry;
 mod stop_loss;
 #[cfg(test)]
@@ -39,11 +44,11 @@ pub use args::{
 use btc_regime::{filter_confirmed_events_by_btc_regime, print_btc_regime_filter_report};
 use data::load_backtest_data;
 use directional_reversal::{
-    deferred_long_confirmation_entry_idx, deferred_short_confirmation_entry_idx,
-    exhaustion_volume_dominance_filter_reason, is_bearish_continuation_setup,
-    is_bullish_continuation_setup, opposite_net_move_filter_reason,
+    bullish_structure_break_filter_reason, deferred_long_confirmation_entry_idx,
+    deferred_short_confirmation_entry_idx, is_bearish_continuation_setup,
+    is_bullish_continuation_setup, long_buffered_reversal_signal, opposite_net_move_filter_reason,
     opposite_reversal_confirmation_filter_reason, reversal_average_reclaim_filter_reason,
-    volume_atr_target_r_with_policy,
+    two_stage_recovery_filter_reason, volume_atr_target_r_with_policy, LongBufferedReversalSignal,
 };
 pub use equity::{
     build_framework_equity_concentration_reports, build_framework_equity_quartile_reports,
@@ -59,8 +64,9 @@ use fvg::{
     find_15m_impulse_fvg_retrace_after_signal, find_15m_self_fvg_entry_after_signal,
     find_fvg_entry, FvgEntrySearch,
 };
-use kline_shape::direct_kline_momentum_shape_filter_reason;
 pub use manifest::{market_velocity_paper_strategy_preset_manifest, MarketVelocityPresetManifest};
+use momentum_entry_filters::fast_momentum_entry_filter_reason;
+use one_shot_trend_state::extreme_volume_contrarian_direction;
 pub use paper_outcome::build_market_velocity_paper_outcomes;
 use paper_outcome::{
     print_market_velocity_paper_outcomes_jsonl, submit_market_velocity_paper_outcomes,
@@ -68,11 +74,13 @@ use paper_outcome::{
 pub use paper_signal::build_market_velocity_paper_strategy_signal_request;
 use paper_signal::submit_market_velocity_paper_strategy_signals;
 use reentry::maybe_apply_stop_reentry;
+use relative_volume_at_time::relative_volume_at_time_10d_ratio;
 use report::{
     print_effective_entry_report, print_result_report, print_stage_report,
     print_trigger_quality_report, print_trigger_variant_quality_report,
 };
 use reversal_retest::{find_retest_entry_after_signal, RetestEntrySignal};
+use setup_open_reclaim::find_setup_open_reclaim_entry_after_signal;
 use short_entry::sideways_range_breakdown_candidate;
 pub(crate) use stop_loss::select_stop_loss_for_confirmed_signal;
 pub const MS_15M: i64 = 15 * 60 * 1_000;
@@ -129,6 +137,12 @@ pub struct ComputedCandle {
     pub bollinger_lower: Option<f64>,
     /// 布林带宽度百分比；为空时表示中轨无效。
     pub bollinger_bandwidth_pct: Option<f64>,
+    /// 收盘价 MACD(12,26,9) 快慢线差；为空时表示指标尚未预热完成。
+    pub macd_line: Option<f64>,
+    /// 收盘价 MACD(12,26,9) 信号线；为空时表示指标尚未预热完成。
+    pub macd_signal_line: Option<f64>,
+    /// 收盘价 MACD(12,26,9) 柱体；为空时表示指标尚未预热完成。
+    pub macd_histogram: Option<f64>,
 }
 #[derive(Debug, Clone, PartialEq)]
 struct CandlePair {
@@ -219,6 +233,15 @@ fn trade_direction_for_entry_event(
     args: &MarketVelocityEventBacktestArgs,
 ) -> MarketVelocityTradeDirection {
     let candle_direction = trade_direction_for_event(event);
+    if args.entry_extreme_volume_contrarian {
+        let completed_count = completed_candle_count(candles, event.ts, MS_15M);
+        if let Some(latest) = completed_count
+            .checked_sub(1)
+            .and_then(|idx| candles.get(idx))
+        {
+            return extreme_volume_contrarian_direction(latest);
+        }
+    }
     let opposite_reversal = args.entry_min_opposite_net_move_pct.is_some()
         || args.entry_min_opposite_duration_candles.is_some();
     if args.trade_direction != MarketVelocityTradeDirection::Both || !opposite_reversal {
@@ -340,6 +363,8 @@ pub struct StopReentryDetails {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct BacktestDataSet {
+    /// 使用的版本化历史币池；为空时仍按旧抽样逻辑运行。
+    historical_universe_version: Option<String>,
     /// 列表数据。
     pairs: Vec<CandlePair>,
     /// 列表数据。
@@ -427,6 +452,7 @@ pub async fn run_market_velocity_event_backtest(
         || config.args.equity_trigger_report
         || config.args.equity_concentration_report
         || config.args.equity_feature_report
+        || config.args.equity_price_volume_diagnostic_report
         || config.args.equity_symbol_window_report
         || config.args.equity_trade_report
     {
@@ -775,10 +801,14 @@ pub fn entry_confirmation(
     let Some(ema) = latest.ema else {
         return (false, "invalid_15m_average".to_string());
     };
-    let volume_ratio = latest
-        .previous_volume_avg
-        .filter(|average| *average > 0.0)
-        .map(|average| latest.candle.volume / average);
+    let volume_ratio = if args.entry_relative_volume_at_time_10d {
+        relative_volume_at_time_10d_ratio(candles, idx - 1)
+    } else {
+        latest
+            .previous_volume_avg
+            .filter(|average| *average > 0.0)
+            .map(|average| latest.candle.volume / average)
+    };
     let opposite_move_reversal = args.entry_min_opposite_net_move_pct.is_some()
         || args.entry_min_opposite_duration_candles.is_some();
     if !opposite_move_reversal {
@@ -794,7 +824,7 @@ pub fn entry_confirmation(
                 return (false, "price_above_15m_average".to_string());
             }
             MarketVelocityTradeDirection::Both => {
-                return (false, "invalid_trade_direction".to_string())
+                return (false, "invalid_trade_direction".to_string());
             }
             _ => {}
         }
@@ -849,6 +879,23 @@ pub fn entry_confirmation(
     if let Some(reason) = fast_momentum_entry_filter_reason(candles, idx, direction, args) {
         return (false, reason.to_string());
     }
+    if args.entry_defer_long_lower_wick_reversal || args.entry_long_bullish_hammer_reversal {
+        return match long_buffered_reversal_signal(candles, idx, args) {
+            Ok(LongBufferedReversalSignal::Strong) => (
+                true,
+                "opposite_move_momentum_reversal_strong_v30".to_string(),
+            ),
+            Ok(LongBufferedReversalSignal::LowerWickSetup) => (
+                true,
+                "opposite_move_long_lower_wick_buffer_setup".to_string(),
+            ),
+            Ok(LongBufferedReversalSignal::BullishHammer) => (
+                true,
+                "opposite_move_momentum_reversal_bullish_hammer_v31".to_string(),
+            ),
+            Err(reason) => (false, reason.to_string()),
+        };
+    }
     if opposite_move_reversal
         && args.entry_defer_bearish_continuation
         && direction == MarketVelocityTradeDirection::Long
@@ -881,7 +928,31 @@ pub fn entry_confirmation(
             return (false, reason.to_string());
         }
     }
+    if args.entry_require_two_stage_recovery {
+        if let Some(reason) = two_stage_recovery_filter_reason(candles, idx, direction) {
+            return (false, reason.to_string());
+        }
+    }
+    if args.entry_require_bullish_structure_break {
+        if let Some(reason) = bullish_structure_break_filter_reason(candles, idx) {
+            return (false, reason.to_string());
+        }
+    }
     let confirmed_trigger = match direction {
+        MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Short
+            if args.entry_extreme_volume_continuation =>
+        {
+            Some(if args.entry_relative_volume_at_time_10d {
+                "historical_trend_extreme_volume_rvat10_continuation"
+            } else {
+                "historical_trend_extreme_volume_continuation"
+            })
+        }
+        MarketVelocityTradeDirection::Long
+            if opposite_move_reversal && args.entry_require_two_stage_recovery =>
+        {
+            Some("opposite_move_momentum_reversal_two_stage_recovery")
+        }
         MarketVelocityTradeDirection::Long | MarketVelocityTradeDirection::Short
             if opposite_move_reversal =>
         {
@@ -912,132 +983,6 @@ pub fn entry_confirmation(
         return (true, trigger.to_string());
     }
     (false, "timing_not_confirmed".to_string())
-}
-
-/// 聚合 15m 快动量研究过滤：RSI、布林突破和入场前跌幅均只在显式配置时启用。
-fn fast_momentum_entry_filter_reason(
-    candles: &[ComputedCandle],
-    completed_count: usize,
-    direction: MarketVelocityTradeDirection,
-    args: &MarketVelocityEventBacktestArgs,
-) -> Option<&'static str> {
-    let latest_idx = completed_count.checked_sub(1)?;
-    let latest = candles.get(latest_idx)?;
-    if let Some(reason) = direct_kline_momentum_shape_filter_reason(latest, direction, args) {
-        return Some(reason);
-    }
-    if let Some(reason) = opposite_net_move_filter_reason(candles, completed_count, direction, args)
-    {
-        return Some(reason);
-    }
-    if let Some(reason) =
-        exhaustion_volume_dominance_filter_reason(candles, completed_count, direction, args)
-    {
-        return Some(reason);
-    }
-    if args.entry_min_rsi.is_some()
-        || args.entry_max_rsi.is_some()
-        || args.entry_min_rsi_delta.is_some()
-    {
-        let Some(latest_rsi) = latest.rsi14 else {
-            return Some("rsi_not_ready");
-        };
-        if args
-            .entry_min_rsi
-            .is_some_and(|min_rsi| latest_rsi < min_rsi)
-        {
-            return Some("rsi_below_min");
-        }
-        if args
-            .entry_max_rsi
-            .is_some_and(|max_rsi| latest_rsi > max_rsi)
-        {
-            return Some("rsi_above_max");
-        }
-        if let Some(min_delta) = args.entry_min_rsi_delta {
-            let Some(previous_idx) = latest_idx.checked_sub(args.entry_rsi_delta_lookback_candles)
-            else {
-                return Some("rsi_delta_not_ready");
-            };
-            let Some(previous_rsi) = candles.get(previous_idx).and_then(|candle| candle.rsi14)
-            else {
-                return Some("rsi_delta_not_ready");
-            };
-            if latest_rsi - previous_rsi < min_delta {
-                return Some("rsi_delta_not_confirmed");
-            }
-        }
-    }
-    if args.entry_bollinger_breakout {
-        let breakout_ok = match direction {
-            MarketVelocityTradeDirection::Long => latest
-                .bollinger_upper
-                .is_some_and(|upper| latest.candle.close > upper),
-            MarketVelocityTradeDirection::Short => latest
-                .bollinger_lower
-                .is_some_and(|lower| latest.candle.close < lower),
-            MarketVelocityTradeDirection::Both => false,
-        };
-        if !breakout_ok {
-            return Some("bollinger_breakout_not_confirmed");
-        }
-    }
-    if let Some(min_expansion_pct) = args.entry_min_bollinger_bandwidth_expansion_pct {
-        let Some(previous_idx) = latest_idx.checked_sub(1) else {
-            return Some("bollinger_bandwidth_not_ready");
-        };
-        let Some(latest_bandwidth) = latest.bollinger_bandwidth_pct else {
-            return Some("bollinger_bandwidth_not_ready");
-        };
-        let Some(previous_bandwidth) = candles
-            .get(previous_idx)
-            .and_then(|candle| candle.bollinger_bandwidth_pct)
-        else {
-            return Some("bollinger_bandwidth_not_ready");
-        };
-        if !valid_positive(previous_bandwidth) {
-            return Some("bollinger_bandwidth_not_ready");
-        }
-        let expansion_pct = (latest_bandwidth - previous_bandwidth) / previous_bandwidth * 100.0;
-        if expansion_pct < min_expansion_pct {
-            return Some("bollinger_bandwidth_expansion_not_confirmed");
-        }
-    }
-    if let Some(min_drawdown_pct) = args.entry_min_recent_drawdown_pct {
-        let Some(drawdown_pct) = recent_entry_drawdown_pct(
-            candles,
-            latest_idx,
-            args.entry_recent_drawdown_lookback_candles,
-        ) else {
-            return Some("recent_drawdown_not_ready");
-        };
-        if drawdown_pct < min_drawdown_pct {
-            return Some("recent_drawdown_not_confirmed");
-        }
-    }
-    None
-}
-/// 计算当前突破 K 线之前的回看跌幅，避免把已经连续拉升的末端动量当作首轮机会。
-fn recent_entry_drawdown_pct(
-    candles: &[ComputedCandle],
-    latest_idx: usize,
-    lookback_candles: usize,
-) -> Option<f64> {
-    let start = latest_idx.checked_sub(lookback_candles)?;
-    let history = candles.get(start..latest_idx)?;
-    if history.is_empty() {
-        return None;
-    }
-    let mut highest_high = f64::NEG_INFINITY;
-    let mut lowest_low = f64::INFINITY;
-    for candle in history {
-        if !candle.candle.high.is_finite() || !candle.candle.low.is_finite() {
-            return None;
-        }
-        highest_high = highest_high.max(candle.candle.high);
-        lowest_low = lowest_low.min(candle.candle.low);
-    }
-    valid_positive(highest_high).then_some((highest_high - lowest_low) / highest_high * 100.0)
 }
 
 fn entry_signal_pullback_block_reason(
@@ -1336,9 +1281,54 @@ pub fn evaluate_events(
                 }
                 increment(&mut stage_counts, "entry_signal_pass");
                 let signal_idx = completed_candle_count(signal_visible_15m, event.ts, MS_15M) - 1;
-                if entry_reason.ends_with("continuation_setup") {
+                if args.entry_wait_setup_open_reclaim {
+                    match find_setup_open_reclaim_entry_after_signal(
+                        symbol_15m,
+                        signal_idx,
+                        direction,
+                        &entry_reason,
+                        args.entry_defer_max_wait_candles,
+                    ) {
+                        Ok(entry) => {
+                            if let Some(reason) = entry_signal_pullback_block_reason(
+                                event,
+                                entry.entry_price,
+                                direction,
+                                args,
+                            ) {
+                                increment(&mut stage_counts, "entry_blocked");
+                                increment(&mut stage_counts, "entry_execution_blocked");
+                                increment_nested(&mut blockers, &event.symbol, &reason);
+                                continue;
+                            }
+                            increment(&mut stage_counts, "entry_pass");
+                            increment(&mut stage_counts, "entry_execution_pass");
+                            confirmed.push(ConfirmedEvent {
+                                event: event.clone(),
+                                direction,
+                                entry_ts: entry.entry_ts,
+                                entry_price: entry.entry_price,
+                                entry_idx: entry.entry_idx,
+                                trigger: entry.trigger,
+                                structure_stop_loss_price: entry.structure_stop_loss_price,
+                                structure_stop_loss_source: entry.structure_stop_loss_source,
+                            });
+                        }
+                        Err(reason) => {
+                            increment(&mut stage_counts, "entry_blocked");
+                            increment(&mut stage_counts, "entry_execution_blocked");
+                            increment_nested(&mut blockers, &event.symbol, &reason);
+                        }
+                    }
+                    continue;
+                }
+                if entry_reason.ends_with("_setup") {
                     let deferred_entry = find_deferred_reversal_entry_after_signal(
-                        symbol_15m, signal_idx, direction, args,
+                        symbol_15m,
+                        signal_idx,
+                        direction,
+                        &entry_reason,
+                        args,
                     )
                     .and_then(|entry| {
                         if !args.entry_retest_after_signal {
@@ -1712,6 +1702,7 @@ fn find_deferred_reversal_entry_after_signal(
     candles: &[ComputedCandle],
     signal_idx: usize,
     direction: MarketVelocityTradeDirection,
+    signal_trigger: &str,
     args: &MarketVelocityEventBacktestArgs,
 ) -> Result<RetestEntrySignal, String> {
     let entry_idx = match direction {
@@ -1730,7 +1721,7 @@ fn find_deferred_reversal_entry_after_signal(
         MarketVelocityTradeDirection::Both => Err("deferred_reversal_invalid_direction"),
     }
     .map_err(str::to_string)?;
-    if args.entry_require_reversal_average_reclaim {
+    if args.entry_require_reversal_average_reclaim || args.entry_defer_long_lower_wick_reversal {
         if let Some(reason) =
             reversal_average_reclaim_filter_reason(candles, entry_idx - 1, direction)
         {
@@ -1744,14 +1735,18 @@ fn find_deferred_reversal_entry_after_signal(
         entry_ts: entry.candle.ts,
         entry_price: entry.candle.open,
         entry_idx,
-        trigger: format!(
-            "opposite_move_momentum_reversal+{}",
-            match direction {
-                MarketVelocityTradeDirection::Long => "deferred_bearish_continuation",
-                MarketVelocityTradeDirection::Short => "deferred_bullish_continuation",
-                MarketVelocityTradeDirection::Both => unreachable!(),
-            }
-        ),
+        trigger: if signal_trigger == "opposite_move_long_lower_wick_buffer_setup" {
+            "opposite_move_momentum_reversal+deferred_long_lower_wick_buffer".to_string()
+        } else {
+            format!(
+                "opposite_move_momentum_reversal+{}",
+                match direction {
+                    MarketVelocityTradeDirection::Long => "deferred_bearish_continuation",
+                    MarketVelocityTradeDirection::Short => "deferred_bullish_continuation",
+                    MarketVelocityTradeDirection::Both => unreachable!(),
+                }
+            )
+        },
         structure_stop_loss_price: None,
         structure_stop_loss_source: None,
     })

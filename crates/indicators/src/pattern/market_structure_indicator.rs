@@ -28,6 +28,12 @@ pub struct MarketStructureValue {
     pub internal_bearish_bos: bool,        // 内部空头结构突破
     pub internal_bullish_choch: bool,      // 内部多头特性变化
     pub internal_bearish_choch: bool,      // 内部空头特性变化
+    /// 最近一次内部方向事件是否已经完成多头 BOS 延续确认；反向 CHoCH 会清除。
+    #[serde(default)]
+    pub internal_bullish_bos_active: bool,
+    /// 最近一次内部方向事件是否已经完成空头 BOS 延续确认；反向 CHoCH 会清除。
+    #[serde(default)]
+    pub internal_bearish_bos_active: bool,
 }
 /// 市场结构识别指标
 #[derive(Debug, Clone)]
@@ -264,8 +270,12 @@ impl MarketStructureIndicator {
             {
                 if structure_value.internal_trend == -1 {
                     structure_value.internal_bullish_choch = true;
+                    structure_value.internal_bullish_bos_active = false;
+                    structure_value.internal_bearish_bos_active = false;
                 } else {
                     structure_value.internal_bullish_bos = true;
+                    structure_value.internal_bullish_bos_active = true;
+                    structure_value.internal_bearish_bos_active = false;
                 }
                 internal_high.crossed = true;
                 structure_value.internal_trend = 1;
@@ -282,8 +292,12 @@ impl MarketStructureIndicator {
             {
                 if structure_value.internal_trend == 1 {
                     structure_value.internal_bearish_choch = true;
+                    structure_value.internal_bullish_bos_active = false;
+                    structure_value.internal_bearish_bos_active = false;
                 } else {
                     structure_value.internal_bearish_bos = true;
+                    structure_value.internal_bullish_bos_active = false;
+                    structure_value.internal_bearish_bos_active = true;
                 }
                 internal_low.crossed = true;
                 structure_value.internal_trend = -1;
@@ -353,6 +367,55 @@ impl MarketStructureIndicator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internal_bos_state_persists_until_an_opposite_choch_invalidates_it() {
+        let mut indicator = MarketStructureIndicator::new_with_thresholds(4, 2, 0.0, 0.0);
+        indicator.candle_buffer.push_back(CandleItem {
+            ts: 1,
+            o: 101.0,
+            h: 102.0,
+            l: 98.0,
+            c: 99.0,
+            v: 1.0,
+            confirm: 1,
+        });
+        let mut value = MarketStructureValue {
+            internal_low: Some(PivotPoint {
+                price: 100.0,
+                crossed: false,
+                ..PivotPoint::default()
+            }),
+            ..MarketStructureValue::default()
+        };
+
+        indicator.check_structure_signals(&mut value);
+        assert!(value.internal_bearish_bos);
+        assert!(value.internal_bearish_bos_active);
+        assert!(!value.internal_bullish_bos_active);
+
+        indicator.candle_buffer.clear();
+        indicator.candle_buffer.push_back(CandleItem {
+            ts: 2,
+            o: 109.0,
+            h: 112.0,
+            l: 108.0,
+            c: 111.0,
+            v: 1.0,
+            confirm: 1,
+        });
+        value.internal_high = Some(PivotPoint {
+            price: 110.0,
+            crossed: false,
+            ..PivotPoint::default()
+        });
+
+        indicator.check_structure_signals(&mut value);
+        assert!(value.internal_bullish_choch);
+        assert!(!value.internal_bearish_bos_active);
+        assert!(!value.internal_bullish_bos_active);
+    }
+
     #[test]
     /// 提供test市场structurebasic的集中实现，避免回测策略调用方重复处理相同细节。
     fn test_market_structure_basic() {

@@ -1,5 +1,5 @@
 use super::types::{SignalResult, TradeRecord, TradingState};
-use std::env;
+use rust_quant_core::config::random_backtest_is_enabled;
 
 /// 按记录数量计算冻结初始止损对应的价格风险金额。
 fn initial_risk_amount(
@@ -17,7 +17,7 @@ pub fn record_trade_entry(state: &mut TradingState, option_type: String, signal:
     // 批量回测的时候不进行记录
     let trade_position = state.trade_position.clone().unwrap();
     // 随机测试的时候不记录详情日志了
-    if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true" {
+    if random_backtest_is_enabled() {
         return;
     }
     state.trade_records.push(TradeRecord {
@@ -69,7 +69,7 @@ pub fn record_trade_exit_with_full_close(
 ) {
     let trade_position = state.trade_position.clone().unwrap();
     // 随机测试的时候不记录详情日志了
-    if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true" {
+    if random_backtest_is_enabled() {
         return;
     }
     let risk_amount = initial_risk_amount(

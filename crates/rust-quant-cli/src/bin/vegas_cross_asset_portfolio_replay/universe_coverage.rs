@@ -21,6 +21,9 @@ pub(super) struct UniverseCoverageReport {
     pub(super) non_live_listing_snapshot_rows: usize,
     pub(super) delisted_symbols_excluded: bool,
     pub(super) universe_limitation: &'static str,
+    /// 当前 live-only 合约与 4H 表是否完整；该门禁不证明历史时点成员关系。
+    pub(super) current_live_universe_gate_pass: bool,
+    /// 是否能在每个历史回测时点重建当时可交易币种池，而非套用今天的 live 列表。
     pub(super) historical_universe_gate_pass: bool,
     pub(super) blockers: Vec<&'static str>,
 }
@@ -69,19 +72,17 @@ pub(super) async fn load_universe_coverage(
                 AND table_name LIKE '%-usdt-swap_candles_4h') AS candle_tables,
             (SELECT COUNT(*)
                FROM back_test_log
-              WHERE id BETWEEN $1 AND $2
-                AND strategy_type = 'vegas') AS backtest_configs,
+              WHERE id BETWEEN $1 AND $2) AS backtest_configs,
             (SELECT COUNT(*)
                FROM back_test_log b
                JOIN information_schema.tables t
                  ON t.table_schema = 'public'
                 AND t.table_name = lower(b.inst_type) || '_candles_4h'
               WHERE b.id BETWEEN $1 AND $2
-                AND b.strategy_type = 'vegas') AS configs_with_table,
+            ) AS configs_with_table,
             (SELECT COUNT(*)
                FROM back_test_log b
               WHERE b.id BETWEEN $1 AND $2
-                AND b.strategy_type = 'vegas'
                 AND EXISTS (
                     SELECT 1
                       FROM exchange_symbols s
@@ -137,7 +138,7 @@ pub(super) async fn load_universe_coverage(
     let backtest_evidence_complete = backtest_configs > 0
         && configs_with_table == backtest_configs
         && configs_with_metadata == backtest_configs;
-    let gate_pass = live_only_gate_pass(
+    let current_live_gate_pass = live_only_gate_pass(
         eligible_symbols,
         eligible_symbols_with_table,
         backtest_configs,
@@ -153,6 +154,7 @@ pub(super) async fn load_universe_coverage(
     if !backtest_evidence_complete {
         blockers.push("本批回测配置缺少 K 线表、上市时间或交易精度元数据");
     }
+    blockers.push("本地上市快照晚于回测起点且显式排除退市币，不能重建 point-in-time 全市场币种池");
     Ok(UniverseCoverageReport {
         universe_rule:
             "okx_current_live_crypto_usdt_swap_monthly_prior30_complete_utc_day_median_quote_volume_top100_age150d_exclude_delisted",
@@ -174,7 +176,8 @@ pub(super) async fn load_universe_coverage(
         delisted_symbols_excluded: true,
         universe_limitation:
             "按研究边界显式排除退市币；结果只代表当前仍 live 的合约，包含幸存者偏差，不得外推为交易所完整历史币池",
-        historical_universe_gate_pass: gate_pass,
+        current_live_universe_gate_pass: current_live_gate_pass,
+        historical_universe_gate_pass: false,
         blockers,
     })
 }

@@ -328,10 +328,13 @@ impl VegasStrategy {
                 let mut prev_histogram = 0.0f64;
                 let mut prev_prev_histogram = 0.0f64;
                 let replay_period = macd_cfg.slow_period.saturating_add(macd_cfg.signal_period);
-                for item in recent_indicator_replay_window(data_items, replay_period) {
+                let replay_items = recent_indicator_replay_window(data_items, replay_period);
+                let mut replay_histograms = Vec::with_capacity(replay_items.len());
+                for item in replay_items {
                     let macd_output = macd.next(item.c);
                     prev_prev_histogram = prev_histogram;
                     prev_histogram = macd_output.macd - macd_output.signal;
+                    replay_histograms.push(prev_histogram);
                     prev_signal = macd_output.signal;
                     prev_macd = macd_output.macd;
                 }
@@ -343,8 +346,8 @@ impl VegasStrategy {
                 let histogram_increasing = histogram > prev_prev_histogram;
                 let histogram_decreasing = histogram < prev_prev_histogram;
                 // 判断动量是否正在改善（用于识别触底反弹）
-                // 对于负区域：histogram > prev_histogram 表示负值在变小，动量改善
-                let histogram_improving = histogram > prev_histogram;
+                // 对于负区域：当前柱高于上一柱表示负值收缩；旧实现误与当前柱自身比较，恒为 false。
+                let histogram_improving = histogram > prev_prev_histogram;
                 vegas_indicator_signal_values.macd_value = super::signal::MacdSignalValue {
                     macd_line: prev_macd,
                     signal_line: prev_signal,
@@ -357,6 +360,8 @@ impl VegasStrategy {
                     prev_histogram: prev_prev_histogram,
                     histogram_improving,
                 };
+                vegas_indicator_signal_values.macd_divergence_value =
+                    Self::calculate_macd_divergence_value(replay_items, &replay_histograms);
             }
         }
         // ================================================================
@@ -404,7 +409,292 @@ impl VegasStrategy {
             let score = weights.calculate_score(conditions.clone());
             weights.is_signal_valid(&score)
         });
-        if signal_direction.is_none()
+        // V71 是独立策略家族：开启时先隔离旧入口，只产出价值区候选；组合层再以 V69
+        // 为优先基线做容量与重叠裁决，避免新信号在单币回放中修改旧持仓的退出路径。
+        let volume_profile_standalone = self.volume_profile_value_area_retest.is_open
+            || self.volume_profile_value_area_breakout.is_open
+            || self.volume_profile_failed_auction.is_open
+            || self.donchian_volume_breakout.is_open
+            || self.donchian_breakout_acceptance.is_open;
+        let compressed_range_breakout_standalone =
+            self.compressed_range_breakout.is_open && self.compressed_range_breakout.standalone;
+        if volume_profile_standalone || compressed_range_breakout_standalone {
+            signal_direction = None;
+        }
+        let liquidity_sweep_decision = if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+        {
+            self.liquidity_sweep_reversal_decision(data_items, vegas_indicator_signal_values)
+        } else {
+            None
+        };
+        if let Some(decision) = liquidity_sweep_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(if decision.first_retest_confirmation {
+                match (decision.direction, decision.first_retest_wait_bars) {
+                    (SignalDirect::IsLong, 2) => {
+                        "LIQUIDITY_SWEEP_FIRST_RETEST_DELAYED_2_LONG".to_string()
+                    }
+                    (SignalDirect::IsShort, 2) => {
+                        "LIQUIDITY_SWEEP_FIRST_RETEST_DELAYED_2_SHORT".to_string()
+                    }
+                    (SignalDirect::IsLong, _) => "LIQUIDITY_SWEEP_FIRST_RETEST_LONG".to_string(),
+                    (SignalDirect::IsShort, _) => "LIQUIDITY_SWEEP_FIRST_RETEST_SHORT".to_string(),
+                }
+            } else if decision.failed_breakout_close_reentry {
+                "FAILED_BREAKOUT_CLOSE_REENTRY_SHORT".to_string()
+            } else if decision.failed_breakdown_close_reentry {
+                "FAILED_BREAKDOWN_CLOSE_REENTRY_LONG".to_string()
+            } else if decision.failed_breakdown_higher_low_breakout {
+                "FAILED_BREAKDOWN_HIGHER_LOW_BREAKOUT_LONG".to_string()
+            } else if decision.upper_sweep_confirmation_low_break {
+                "UPPER_SWEEP_CONFIRMATION_LOW_BREAK_SHORT".to_string()
+            } else if decision.lower_sweep_confirmation_high_break {
+                "LOWER_SWEEP_CONFIRMATION_HIGH_BREAK_LONG".to_string()
+            } else {
+                match decision.direction {
+                    SignalDirect::IsLong => "LIQUIDITY_SWEEP_REVERSAL_LONG".to_string(),
+                    SignalDirect::IsShort => "LIQUIDITY_SWEEP_REVERSAL_SHORT".to_string(),
+                }
+            });
+            if decision.first_retest_confirmation {
+                if let Some(take_profit_r) = self
+                    .liquidity_sweep_reversal
+                    .first_retest_take_profit_r
+                    .filter(|value| value.is_finite() && *value > 0.0)
+                {
+                    // 信号层只携带冻结比率；有效止损会受最大损失门禁影响，
+                    // 因此必须等持仓层选定初始止损后再换算目标价。
+                    let prefix = if self
+                        .liquidity_sweep_reversal
+                        .first_retest_replace_existing_take_profit
+                    {
+                        "LIQUIDITY_SWEEP_FIRST_RETEST_TP_ONLY_R"
+                    } else {
+                        "LIQUIDITY_SWEEP_FIRST_RETEST_TP_R"
+                    };
+                    dynamic_adjustments.push(format!("{prefix}:{take_profit_r}"));
+                }
+            }
+        }
+        let momentum_retest_decision = if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+        {
+            self.momentum_retest_decision(data_items, vegas_indicator_signal_values)
+        } else {
+            None
+        };
+        if let Some(decision) = momentum_retest_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(match decision.direction {
+                SignalDirect::IsLong => "MOMENTUM_RETEST_LONG".to_string(),
+                SignalDirect::IsShort => "MOMENTUM_RETEST_SHORT".to_string(),
+            });
+        }
+        let compressed_range_breakout_decision =
+            if !volume_profile_standalone && signal_direction.is_none() {
+                self.compressed_range_breakout_decision(data_items, vegas_indicator_signal_values)
+            } else {
+                None
+            };
+        if let Some(decision) = compressed_range_breakout_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(if decision.delayed_confirmation {
+                "COMPRESSED_RANGE_BREAKOUT_SHORT_ONE_BAR_CONFIRMATION".to_string()
+            } else if decision.price_displacement_activation {
+                "COMPRESSED_RANGE_BREAKOUT_SHORT_PRICE_DISPLACEMENT".to_string()
+            } else {
+                match decision.direction {
+                    SignalDirect::IsLong => "COMPRESSED_RANGE_BREAKOUT_LONG".to_string(),
+                    SignalDirect::IsShort => "COMPRESSED_RANGE_BREAKOUT_SHORT".to_string(),
+                }
+            });
+        }
+        let bos_fvg_retest_decision = if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+        {
+            self.bos_fvg_retest_decision(data_items, vegas_indicator_signal_values)
+        } else {
+            None
+        };
+        if let Some(decision) = bos_fvg_retest_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(format!(
+                "BOS_FVG_RETEST_MACD_SHORT(age_bars={})",
+                decision.fvg_age_bars
+            ));
+        }
+        let fvg_reclaim_decision = if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+        {
+            self.fvg_reclaim_decision(data_items, vegas_indicator_signal_values)
+        } else {
+            None
+        };
+        if let Some(decision) = fvg_reclaim_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(format!(
+                "FAILED_BEARISH_FVG_RECLAIM_MACD_LONG(age_bars={})",
+                decision.fvg_age_bars
+            ));
+        }
+        let macd_divergence_reversal_decision = if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+        {
+            self.macd_divergence_reversal_decision(data_items, vegas_indicator_signal_values)
+        } else {
+            None
+        };
+        if let Some(decision) = macd_divergence_reversal_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(format!(
+                "MACD_DIVERGENCE_FRESH_CHOCH_{}(shock_bars_ago={})",
+                match decision.direction {
+                    SignalDirect::IsLong => "LONG",
+                    SignalDirect::IsShort => "SHORT",
+                },
+                decision.shock_bars_ago
+            ));
+        }
+        let macd_trend_reset_bos_decision = if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+        {
+            self.macd_trend_reset_bos_decision(data_items, vegas_indicator_signal_values)
+        } else {
+            None
+        };
+        if let Some(decision) = macd_trend_reset_bos_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(
+                match decision.direction {
+                    SignalDirect::IsLong => "MACD_TREND_RESET_FRESH_BOS_LONG",
+                    SignalDirect::IsShort => "MACD_TREND_RESET_FRESH_BOS_SHORT",
+                }
+                .to_string(),
+            );
+        }
+        let ema_tunnel_retest_confirmation_decision = if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+        {
+            self.ema_tunnel_retest_confirmation_decision(data_items, vegas_indicator_signal_values)
+        } else {
+            None
+        };
+        if let Some(decision) = ema_tunnel_retest_confirmation_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(
+                match decision.direction {
+                    SignalDirect::IsLong => "EMA_TUNNEL_RETEST_CONFIRMATION_LONG",
+                    SignalDirect::IsShort => "EMA_TUNNEL_RETEST_CONFIRMATION_SHORT",
+                }
+                .to_string(),
+            );
+        }
+        let volume_profile_value_area_retest_decision = if !compressed_range_breakout_standalone
+            && self.volume_profile_value_area_retest.is_open
+        {
+            self.volume_profile_value_area_retest_decision(data_items)
+        } else {
+            None
+        };
+        if let Some(decision) = volume_profile_value_area_retest_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(
+                match decision.direction {
+                    SignalDirect::IsLong => "VOLUME_PROFILE_VALUE_AREA_RETEST_LONG",
+                    SignalDirect::IsShort => "VOLUME_PROFILE_VALUE_AREA_RETEST_SHORT",
+                }
+                .to_string(),
+            );
+        }
+        let volume_profile_value_area_breakout_decision = if !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+            && self.volume_profile_value_area_breakout.is_open
+        {
+            self.volume_profile_value_area_breakout_decision(data_items)
+        } else {
+            None
+        };
+        if let Some(decision) = volume_profile_value_area_breakout_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(
+                match decision.direction {
+                    SignalDirect::IsLong => "VOLUME_PROFILE_VALUE_AREA_BREAKOUT_LONG",
+                    SignalDirect::IsShort => "VOLUME_PROFILE_VALUE_AREA_BREAKOUT_SHORT",
+                }
+                .to_string(),
+            );
+            if let Some(take_profit_r) = self
+                .volume_profile_value_area_breakout
+                .fixed_take_profit_r
+                .filter(|value| value.is_finite() && *value > 0.0)
+            {
+                dynamic_adjustments.push(format!(
+                    "VOLUME_PROFILE_VALUE_AREA_BREAKOUT_TP_ONLY_R:{take_profit_r}"
+                ));
+            }
+        }
+        let volume_profile_failed_auction_decision = if !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+            && self.volume_profile_failed_auction.is_open
+        {
+            self.volume_profile_failed_auction_decision(data_items)
+        } else {
+            None
+        };
+        if volume_profile_failed_auction_decision.is_some() {
+            signal_direction = Some(SignalDirect::IsShort);
+            dynamic_adjustments.push("VOLUME_PROFILE_UPPER_FAILED_AUCTION_SHORT".to_string());
+            dynamic_adjustments.push("VOLUME_PROFILE_FAILED_AUCTION_POC_ONLY".to_string());
+        }
+        let donchian_volume_breakout_decision = if !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+            && self.donchian_volume_breakout.is_open
+        {
+            self.donchian_volume_breakout_decision(data_items, vegas_indicator_signal_values)
+        } else {
+            None
+        };
+        if let Some(decision) = donchian_volume_breakout_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(
+                match decision.direction {
+                    SignalDirect::IsLong => "DONCHIAN_VOLUME_BREAKOUT_LONG",
+                    SignalDirect::IsShort => "DONCHIAN_VOLUME_BREAKOUT_SHORT",
+                }
+                .to_string(),
+            );
+            dynamic_adjustments.push("DONCHIAN_VOLUME_BREAKOUT_TP_ONLY_R:2".to_string());
+        }
+        let donchian_breakout_acceptance_decision = if !compressed_range_breakout_standalone
+            && signal_direction.is_none()
+            && self.donchian_breakout_acceptance.is_open
+        {
+            self.donchian_breakout_acceptance_decision(data_items)
+        } else {
+            None
+        };
+        if let Some(decision) = donchian_breakout_acceptance_decision {
+            signal_direction = Some(decision.direction);
+            dynamic_adjustments.push(
+                match decision.direction {
+                    SignalDirect::IsLong => "DONCHIAN_BREAKOUT_ACCEPTANCE_LONG",
+                    SignalDirect::IsShort => "DONCHIAN_BREAKOUT_ACCEPTANCE_SHORT",
+                }
+                .to_string(),
+            );
+            dynamic_adjustments.push("DONCHIAN_BREAKOUT_ACCEPTANCE_TP_ONLY_R:2".to_string());
+        }
+        if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
             && env_flag("VEGAS_EXPERIMENT_EXPANSION_CONTINUATION_LONG")
             && Self::is_expansion_continuation_long_candidate(
                 data_items,
@@ -415,7 +705,9 @@ impl VegasStrategy {
             signal_direction = Some(SignalDirect::IsLong);
             dynamic_adjustments.push("EXPANSION_CONTINUATION_LONG".to_string());
         }
-        if signal_direction.is_none()
+        if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
             && env_flag("VEGAS_EXPERIMENT_FAKE_BREAKOUT_REVERSAL_SHORT")
             && Self::is_fake_breakout_reversal_short_candidate(
                 data_items,
@@ -425,7 +717,9 @@ impl VegasStrategy {
             signal_direction = Some(SignalDirect::IsShort);
             dynamic_adjustments.push("FAKE_BREAKOUT_REVERSAL_SHORT".to_string());
         }
-        if signal_direction.is_none()
+        if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && signal_direction.is_none()
             && Self::is_above_zero_death_cross_range_break_short_candidate(
                 data_items,
                 vegas_indicator_signal_values,
@@ -434,7 +728,10 @@ impl VegasStrategy {
             signal_direction = Some(SignalDirect::IsShort);
             dynamic_adjustments.push("ABOVE_ZERO_DEATH_CROSS_RANGE_BREAK_SHORT".to_string());
         }
-        if env_flag("VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL") {
+        if !volume_profile_standalone
+            && !compressed_range_breakout_standalone
+            && env_flag("VEGAS_EXPERIMENT_ROUND_LEVEL_REVERSAL")
+        {
             let round_level_long_candidate = Self::is_round_level_reversal_long_candidate(
                 data_items,
                 vegas_indicator_signal_values,
@@ -634,6 +931,101 @@ impl VegasStrategy {
                     }
                 }
             }
+            if let Some(decision) = liquidity_sweep_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source = Some(
+                    if decision.first_retest_confirmation {
+                        if decision.first_retest_wait_bars == 2 {
+                            "LiquiditySweepFirstRetestDelayed2_FourBarExtreme"
+                        } else {
+                            "LiquiditySweepFirstRetest_ThreeBarExtreme"
+                        }
+                    } else if decision.failed_breakout_close_reentry {
+                        "FailedBreakoutCloseReentry_TwoBarExtreme"
+                    } else if decision.failed_breakdown_close_reentry {
+                        "FailedBreakdownCloseReentry_TwoBarExtreme"
+                    } else if decision.failed_breakdown_higher_low_breakout {
+                        "FailedBreakdownHigherLowBreakout_PullbackLow"
+                    } else if decision.upper_sweep_confirmation_low_break {
+                        "UpperSweepConfirmationLowBreak_ConfirmationHigh"
+                    } else if decision.lower_sweep_confirmation_high_break {
+                        "LowerSweepConfirmationHighBreak_ConfirmationLow"
+                    } else {
+                        "LiquiditySweepReversal_TwoBarExtreme"
+                    }
+                    .to_string(),
+                );
+            }
+            if let Some(decision) = momentum_retest_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("MomentumRetest_ShockConfirmationExtreme".to_string());
+            }
+            if let Some(protective_stop) =
+                compressed_range_breakout_decision.and_then(|decision| decision.protective_stop)
+            {
+                signal_result.signal_kline_stop_loss_price = Some(protective_stop);
+                signal_result.stop_loss_source = Some(
+                    if compressed_range_breakout_decision
+                        .is_some_and(|decision| decision.delayed_confirmation)
+                    {
+                        "CompressedRangeBreakout_WeakVolumeOneBarConfirmation"
+                    } else {
+                        "CompressedRangeBreakout_PriorRangeInvalidation"
+                    }
+                    .to_string(),
+                );
+            }
+            if let Some(decision) = bos_fvg_retest_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("BosFvgRetest_FvgInvalidationHigh".to_string());
+            }
+            if let Some(decision) = fvg_reclaim_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("FailedBearishFvgReclaim_FvgInvalidationLow".to_string());
+            }
+            if let Some(decision) = macd_divergence_reversal_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("MacdDivergenceFreshChoch_ShockConfirmationExtreme".to_string());
+            }
+            if let Some(decision) = macd_trend_reset_bos_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("MacdTrendResetFreshBos_ThreeBarExtreme".to_string());
+            }
+            if let Some(decision) = ema_tunnel_retest_confirmation_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("EmaTunnelRetestConfirmation_ThreeBarExtreme".to_string());
+            }
+            if let Some(decision) = volume_profile_value_area_retest_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("VolumeProfileValueAreaRetest_RetestExtreme".to_string());
+            }
+            if let Some(decision) = volume_profile_value_area_breakout_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("VolumeProfileValueAreaBreakout_ValueAreaBoundary".to_string());
+            }
+            if let Some(decision) = volume_profile_failed_auction_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("VolumeProfileFailedAuction_TwoBarHigh".to_string());
+                signal_result.short_signal_take_profit_price = Some(decision.point_of_control);
+            }
+            if let Some(decision) = donchian_volume_breakout_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source = Some("DonchianVolumeBreakout_TwoAtr".to_string());
+            }
+            if let Some(decision) = donchian_breakout_acceptance_decision {
+                signal_result.signal_kline_stop_loss_price = Some(decision.protective_stop);
+                signal_result.stop_loss_source =
+                    Some("DonchianBreakoutAcceptance_FrozenBoundary".to_string());
+            }
             // 信号产生时立即记录指标快照（在过滤逻辑之前）
             // 这样即使信号后续被过滤，filtered_signal_log 也能记录当时的指标状态
             signal_result.single_value = Some(json!(vegas_indicator_signal_values).to_string());
@@ -651,6 +1043,22 @@ impl VegasStrategy {
             &mut dynamic_adjustments,
             &mut range_snapshot,
         );
+        self.apply_bullish_rejection_momentum_recovery_short_block(
+            vegas_indicator_signal_values,
+            &mut signal_result,
+        );
+        self.apply_short_lower_rejection_block(vegas_indicator_signal_values, &mut signal_result);
+        self.apply_new_leg_activation_guard(vegas_indicator_signal_values, &mut signal_result);
+        if self.short_profit_protection.is_open && signal_result.should_sell == Some(true) {
+            // 只把版本化的出场语义写入信号；实际价格必须等开仓层冻结最终初始止损后计算。
+            dynamic_adjustments.push(
+                match self.short_profit_protection.mode {
+                    ShortProfitProtectionMode::BreakevenAfter1p5R => "SHORT_PROFIT_PROTECTION_1_5R",
+                    ShortProfitProtectionMode::Lock1rAfter2r => "SHORT_PROFIT_LOCK_2R_TO_1R",
+                }
+                .to_string(),
+            );
+        }
         // 吞没形态与 Vegas 最终方向不一致时，信号棒开盘价会落在止损错误一侧；
         // 若不剔除，下一棒可能以行情范围外的价格产生虚假盈利平仓。
         if Self::reject_non_protective_signal_stop(&mut signal_result) {

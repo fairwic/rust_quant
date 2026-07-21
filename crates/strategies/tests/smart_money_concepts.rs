@@ -96,6 +96,161 @@ fn bullish_fair_value_gap_candles() -> Vec<CandleItem> {
 }
 
 #[test]
+fn causal_features_distinguish_reversal_choch_from_continuation_bos() {
+    let bearish_structure = vec![
+        candle(0, 13.0, 15.0, 12.0, 14.0),
+        candle(1, 14.0, 16.0, 13.0, 15.0),
+        candle(2, 14.0, 14.5, 10.0, 11.0),
+        candle(3, 11.0, 15.0, 11.0, 14.0),
+        candle(4, 12.0, 13.0, 8.0, 9.0),
+        candle(5, 9.0, 16.0, 9.0, 15.5),
+    ];
+    let reversal =
+        SmartMoneyConceptsStrategy::causal_market_structure_features(&bearish_structure, 1);
+    assert!(reversal.bullish_structure_break);
+    assert!(reversal.bullish_choch);
+    assert!(!reversal.bullish_bos);
+
+    let bullish_structure = vec![
+        candle(0, 10.0, 12.0, 8.0, 11.0),
+        candle(1, 11.0, 13.0, 9.0, 12.0),
+        candle(2, 11.0, 11.5, 7.0, 8.0),
+        candle(3, 8.0, 14.0, 10.0, 13.0),
+        candle(4, 11.0, 12.0, 8.0, 9.0),
+        candle(5, 9.0, 15.0, 9.0, 14.5),
+    ];
+    let continuation =
+        SmartMoneyConceptsStrategy::causal_market_structure_features(&bullish_structure, 1);
+    assert!(continuation.bullish_structure_break);
+    assert!(continuation.bullish_bos);
+    assert!(!continuation.bullish_choch);
+}
+
+#[test]
+fn causal_feature_series_matches_each_signal_time_prefix() {
+    let candles = vec![
+        candle(0, 13.0, 15.0, 12.0, 14.0),
+        candle(1, 14.0, 16.0, 13.0, 15.0),
+        candle(2, 14.0, 14.5, 10.0, 11.0),
+        candle(3, 11.0, 15.0, 11.0, 14.0),
+        candle(4, 12.0, 13.0, 8.0, 9.0),
+        candle(5, 9.0, 16.0, 9.0, 15.5),
+        candle(6, 15.5, 18.0, 16.5, 17.5),
+        candle(7, 17.5, 18.5, 14.0, 15.0),
+    ];
+    let series = SmartMoneyConceptsStrategy::causal_market_structure_feature_series(&candles, 1);
+
+    assert_eq!(series.len(), candles.len());
+    for visible in 1..=candles.len() {
+        assert_eq!(
+            series[visible - 1],
+            SmartMoneyConceptsStrategy::causal_market_structure_features(&candles[..visible], 1)
+        );
+    }
+    assert!(series[5].bullish_choch);
+    assert!(series[5].bullish_choch_active);
+    assert_eq!(series[5].bullish_choch_age_bars, Some(0));
+}
+
+#[test]
+fn causal_features_only_mark_fvg_after_the_third_candle_closes() {
+    let candles = vec![
+        candle(0, 9.0, 10.0, 8.0, 9.0),
+        candle(1, 9.0, 12.5, 8.8, 12.0),
+        candle(2, 12.0, 13.0, 10.5, 12.5),
+    ];
+    let before_close =
+        SmartMoneyConceptsStrategy::causal_market_structure_features(&candles[..2], 1);
+    let after_close = SmartMoneyConceptsStrategy::causal_market_structure_features(&candles, 1);
+    assert!(!before_close.bullish_fvg);
+    assert!(after_close.bullish_fvg);
+    assert_eq!(after_close.bullish_fvg_lower, Some(10.0));
+    assert_eq!(after_close.bullish_fvg_upper, Some(10.5));
+    assert_eq!(after_close.active_bullish_fvg_age_bars, Some(0));
+    assert_eq!(after_close.active_bullish_fvg_mitigated_pct, Some(0.0));
+}
+
+#[test]
+fn causal_features_reject_tiny_fvg_without_atr_scaled_displacement() {
+    let candles = vec![
+        candle(0, 100.0, 110.0, 90.0, 100.0),
+        candle(1, 100.0, 110.1, 99.0, 100.2),
+        candle(2, 100.2, 111.0, 110.05, 110.2),
+    ];
+    let features = SmartMoneyConceptsStrategy::causal_market_structure_features(&candles, 1);
+    assert!(!features.bullish_fvg);
+    assert_eq!(features.active_bullish_fvg_lower, None);
+}
+
+#[test]
+fn causal_features_track_partial_and_full_fvg_mitigation() {
+    let mut candles = vec![
+        candle(0, 9.0, 10.0, 8.0, 9.0),
+        candle(1, 9.0, 12.5, 8.8, 12.0),
+        candle(2, 12.0, 13.0, 10.5, 12.5),
+        candle(3, 12.5, 12.8, 10.25, 11.0),
+    ];
+    let partial = SmartMoneyConceptsStrategy::causal_market_structure_features(&candles, 1);
+    assert_eq!(partial.active_bullish_fvg_age_bars, Some(1));
+    assert_eq!(partial.active_bullish_fvg_mitigated_pct, Some(50.0));
+
+    candles.push(candle(4, 11.0, 11.2, 9.9, 10.2));
+    let filled = SmartMoneyConceptsStrategy::causal_market_structure_features(&candles, 1);
+    assert_eq!(filled.active_bullish_fvg_age_bars, None);
+    assert_eq!(filled.active_bullish_fvg_mitigated_pct, None);
+}
+
+#[test]
+fn causal_features_skip_outside_bar_with_unknown_intrabar_pivot_order() {
+    let candles = vec![
+        candle(0, 9.0, 10.0, 8.0, 9.0),
+        candle(1, 9.0, 12.0, 6.0, 10.0),
+        candle(2, 10.0, 11.0, 7.0, 10.5),
+        candle(3, 10.5, 13.0, 9.0, 12.5),
+    ];
+    let features = SmartMoneyConceptsStrategy::causal_market_structure_features(&candles, 1);
+    assert_eq!(features.latest_confirmed_swing_high, None);
+    assert_eq!(features.latest_confirmed_swing_low, None);
+    assert!(!features.bullish_structure_break);
+}
+
+#[test]
+fn causal_features_require_paired_alternating_swings_for_choch() {
+    let incomplete = vec![
+        candle(0, 13.0, 15.0, 12.0, 14.0),
+        candle(1, 14.0, 16.0, 13.0, 15.0),
+        candle(2, 14.0, 14.5, 10.0, 11.0),
+        candle(3, 11.0, 15.0, 11.0, 14.0),
+        candle(4, 14.0, 17.0, 12.0, 16.5),
+    ];
+    let features = SmartMoneyConceptsStrategy::causal_market_structure_features(&incomplete, 1);
+    assert!(features.bullish_structure_break);
+    assert!(!features.bullish_choch);
+    assert!(!features.bullish_bos);
+}
+
+#[test]
+fn causal_features_keep_recent_choch_active_until_protected_low_breaks() {
+    let mut candles = vec![
+        candle(0, 13.0, 15.0, 12.0, 14.0),
+        candle(1, 14.0, 16.0, 13.0, 15.0),
+        candle(2, 14.0, 14.5, 10.0, 11.0),
+        candle(3, 11.0, 15.0, 11.0, 14.0),
+        candle(4, 12.0, 13.0, 8.0, 9.0),
+        candle(5, 9.0, 16.0, 9.0, 15.5),
+        candle(6, 15.5, 16.2, 10.0, 14.0),
+    ];
+    let active = SmartMoneyConceptsStrategy::causal_market_structure_features(&candles, 1);
+    assert!(active.bullish_choch_active);
+    assert_eq!(active.bullish_choch_age_bars, Some(1));
+
+    candles.push(candle(7, 14.0, 14.2, 7.0, 7.5));
+    let invalidated = SmartMoneyConceptsStrategy::causal_market_structure_features(&candles, 1);
+    assert!(!invalidated.bullish_choch_active);
+    assert_eq!(invalidated.bullish_choch_age_bars, None);
+}
+
+#[test]
 fn strategy_type_accepts_smart_money_concepts_research_key() {
     assert_eq!(
         StrategyType::from_str("smart_money_concepts_v1_research"),

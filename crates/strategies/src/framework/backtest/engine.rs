@@ -23,9 +23,14 @@ where
     let min_data_length = strategy.min_data_length();
     // 回测阶段按信号生成、信号过滤、持仓推进串联；每个阶段只修改 BacktestContext
     // 中属于自己的状态，便于后续对比 legacy engine 或定位某根 K 线的决策来源。
+    let fast_mode = rust_quant_core::config::env_is_true("BACKTEST_FAST_MODE", false);
+    let random_mode = rust_quant_core::config::random_backtest_is_enabled();
     let mut pipeline = PipelineRunner::new()
-        .add_stage(SignalStage::new(strategy))
-        .add_stage(FilterStage::new())
+        .add_stage(SignalStage::with_audit(
+            strategy,
+            !fast_mode && !random_mode,
+        ))
+        .add_stage(FilterStage::with_shadow_trading(!random_mode))
         .add_stage(PositionStage::new());
     pipeline.run(candles_list, inst_id, basic_risk_config, min_data_length)
 }

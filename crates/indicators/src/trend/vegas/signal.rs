@@ -129,6 +129,34 @@ pub struct MacdSignalValue {
     /// 用于识别触底反弹信号
     pub histogram_improving: bool,
 }
+/// 当前确认柱之前是否已经形成可审计的价格—MACD 背离。
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
+pub struct MacdDivergenceSignalValue {
+    /// true 表示此前 1—2 根内出现新低但 MACD 空头柱收缩；false 表示条件不完整。
+    pub bullish_divergence: bool,
+    /// bullish divergence 冲击柱距离当前确认柱的已完成 K 线数量。
+    pub bullish_shock_bars_ago: Option<usize>,
+    /// bullish divergence 的此前 20 根参考低点。
+    pub bullish_reference_low: f64,
+    /// bullish divergence 的新低冲击价。
+    pub bullish_shock_low: f64,
+    /// 参考低点对应的 MACD 柱值。
+    pub bullish_reference_histogram: f64,
+    /// 新低冲击柱对应的 MACD 柱值。
+    pub bullish_shock_histogram: f64,
+    /// true 表示此前 1—2 根内出现新高但 MACD 多头柱收缩；false 表示条件不完整。
+    pub bearish_divergence: bool,
+    /// bearish divergence 冲击柱距离当前确认柱的已完成 K 线数量。
+    pub bearish_shock_bars_ago: Option<usize>,
+    /// bearish divergence 的此前 20 根参考高点。
+    pub bearish_reference_high: f64,
+    /// bearish divergence 的新高冲击价。
+    pub bearish_shock_high: f64,
+    /// 参考高点对应的 MACD 柱值。
+    pub bearish_reference_histogram: f64,
+    /// 新高冲击柱对应的 MACD 柱值。
+    pub bearish_shock_histogram: f64,
+}
 /// Fib 回撤入场信号值（趋势回调/反弹入场）
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
 pub struct FibRetracementSignalValue {
@@ -266,12 +294,21 @@ pub struct VegasIndicatorSignalValue {
     /// 市场结构
     #[serde(default)]
     pub market_structure_value: MarketStructureValue,
+    /// MACD 背离反转研究专用结构快照；仅在当次回放内计算，不进入公共 payload。
+    #[serde(skip)]
+    pub macd_divergence_structure_value: MarketStructureValue,
+    /// MACD 趋势复位研究专用结构快照，不允许既有 Vegas 规则读取或进入公共持久化 payload。
+    #[serde(skip)]
+    pub macd_trend_reset_structure_value: MarketStructureValue,
     /// EMA距离过滤（新增）
     #[serde(default)]
     pub ema_distance_filter: super::ema_filter::EmaDistanceFilter,
     /// MACD 信号值（新增）
     #[serde(default)]
     pub macd_value: MacdSignalValue,
+    /// 只使用当前确认柱及更早 K 线形成的价格—MACD 背离快照。
+    #[serde(default)]
+    pub macd_divergence_value: MacdDivergenceSignalValue,
     /// Fib 回撤入场信号值（新增）
     #[serde(default)]
     pub fib_retracement_value: FibRetracementSignalValue,
@@ -297,6 +334,8 @@ mod tests {
         let value = VegasIndicatorSignalValue::default();
         let json = serde_json::to_value(&value).expect("serialize vegas signal value");
         assert!(json.get("market_structure_value").is_some());
+        assert!(json.get("macd_divergence_structure_value").is_none());
+        assert!(json.get("macd_trend_reset_structure_value").is_none());
     }
     #[test]
     fn vegas_signal_value_includes_volume_profile() {

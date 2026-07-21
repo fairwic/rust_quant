@@ -1,5 +1,6 @@
 use super::{
-    simulate_portfolio_with_event_context, Args, CandidateTrade, EventContext, PortfolioReport,
+    simulate_portfolio_with_event_context, Args, CandidateTrade, ComponentPipelineSnapshot,
+    EventContext, PortfolioReport,
 };
 use anyhow::{anyhow, Result};
 use chrono::{Datelike, Months, TimeZone, Utc};
@@ -118,7 +119,9 @@ fn period_report(
     if trades.is_empty() {
         return Ok(None);
     }
-    let report = simulate_portfolio_with_event_context(trades, args, event_context)?;
+    let component_pipeline = ComponentPipelineSnapshot::without_quality_gate(&trades);
+    let report =
+        simulate_portfolio_with_event_context(trades, args, event_context, component_pipeline)?;
     Ok(Some(slim_period_report(
         label,
         start_ts,

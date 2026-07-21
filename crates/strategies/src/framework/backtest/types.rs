@@ -270,6 +270,8 @@ pub struct TradePosition {
     pub open_position_time: String,
     //固定比例止盈价格
     pub fixed_take_profit_price: Option<f64>,
+    /// 是否禁用后续 ATR/指标止盈更新，仅保留入场时冻结的 R 目标。
+    pub fixed_take_profit_only: bool,
     //信号线止损价格
     pub signal_kline_stop_close_price: Option<f64>,
     //atr止损价格
@@ -282,6 +284,12 @@ pub struct TradePosition {
     pub short_signal_take_profit_price: Option<f64>,
     //触发K线开仓价格止损(当达到一个特定的价格位置的时候，移动止损线到开仓价格)
     pub move_stop_open_price: Option<f64>,
+    /// 版本化盈利保护的触发价；只使用入场时冻结的初始 R 计算。
+    pub profit_protection_trigger_price: Option<f64>,
+    /// 触发后从下一根 K 线起生效的保护止损价。
+    pub profit_protection_stop_price: Option<f64>,
+    /// 是否已经由一根完成 K 线触发盈利保护。
+    pub profit_protection_armed: bool,
     //信号状态
     pub signal_status: i32,
     //信号线最高最低价差

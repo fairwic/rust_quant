@@ -261,8 +261,21 @@ impl BacktestExecutor {
     {
         let start_time = Instant::now();
         let strategy_type = strategy.strategy_type();
-        let config_desc = strategy.config_json();
-        let res = strategy.run_test(inst_id, &source_candles, risk_strategy_config);
+        let compute_start = Instant::now();
+        let compute_inst_id = inst_id.to_string();
+        let compute_candles = Arc::clone(&source_candles);
+        // Vegas 回放是 CPU 密集型同步循环；放入 blocking pool，避免并发批次饿死 Tokio
+        // 的数据库保存、Redis 进度和停止检查。Semaphore 仍负责限制同时在跑的组合数。
+        let (config_desc, res) = tokio::task::spawn_blocking(move || {
+            let config_desc = strategy.config_json();
+            let result =
+                strategy.run_test(&compute_inst_id, &compute_candles, risk_strategy_config);
+            (config_desc, result)
+        })
+        .await
+        .map_err(|error| anyhow!("回测计算任务异常退出: {}", error))?;
+        let compute_duration = compute_start.elapsed();
+        let persist_start = Instant::now();
         let back_test_id = self
             .backtest_service
             .save_backtest_log(
@@ -275,14 +288,17 @@ impl BacktestExecutor {
                 strategy_type.as_str(),
             )
             .await?;
+        let persist_duration = persist_start.elapsed();
         let elapsed = start_time.elapsed();
         info!(
-            "[{} 回测] 完成 inst_id={}, period={}, back_test_id={}, 耗时={}ms",
+            "[{} 回测] 完成 inst_id={}, period={}, back_test_id={}, total_ms={}, compute_ms={}, persist_ms={}",
             strategy_type.as_str(),
             inst_id,
             period,
             back_test_id,
-            elapsed.as_millis()
+            elapsed.as_millis(),
+            compute_duration.as_millis(),
+            persist_duration.as_millis(),
         );
         Ok(back_test_id)
     }

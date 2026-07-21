@@ -35,7 +35,7 @@ use rust_quant_services::rust_quan_web::{
 };
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
 use sqlx::postgres::PgPoolOptions;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 include!("bootstrap_dune.rs");
@@ -75,6 +75,11 @@ pub async fn run_modes() -> Result<()> {
         backtest_targets = load_backtest_targets_from_db()
             .await
             .map_err(|e| anyhow!("加载回测配置失败: {}", e))?;
+    }
+    if let Some(overridden_targets) =
+        parse_backtest_target_override(std::env::var("BACKTEST_ONLY_TARGETS").ok().as_deref())?
+    {
+        backtest_targets = overridden_targets;
     }
     // 可选：仅回测指定交易对（不影响数据同步 inst_ids 的覆盖逻辑）
     // 例：BACKTEST_ONLY_INST_IDS="ETH-USDT-SWAP"
@@ -257,10 +262,14 @@ pub async fn run_modes() -> Result<()> {
             Some(&market_data_exchange()),
         )
         .unwrap_or_else(|| market_data_exchange());
+        let runtime_strategy_types = live_runtime_configs
+            .iter()
+            .map(|config| config.strategy_type)
+            .collect::<HashSet<_>>();
         info!("🌐 WebSocket模式已启用");
         info!(
-            "📡 启动WebSocket监听: exchange={}, targets={:?}",
-            market_exchange, ws_inst_ids
+            "📡 启动WebSocket监听: exchange={}, targets={:?}, strategy_types={:?}",
+            market_exchange, ws_inst_ids, runtime_strategy_types
         );
         let (config_service, execution_service) = match live_runtime_services {
             Some((config_service, execution_service)) => (config_service, execution_service),
@@ -277,6 +286,7 @@ pub async fn run_modes() -> Result<()> {
             &ws_inst_ids,
             &ws_periods,
             &market_exchange,
+            runtime_strategy_types,
             config_service,
             execution_service,
         )
@@ -397,7 +407,7 @@ async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
-        .unwrap_or(10);
+        .unwrap_or(60);
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
         .or_else(|_| std::env::var("POSTGRES_QUANT_CORE_DATABASE_URL"))
         .context("缺少 QUANT_CORE_DATABASE_URL，无法启动市场动能雷达")?;
@@ -467,6 +477,7 @@ async fn run_websocket(
     inst_ids: &[String],
     periods: &[String],
     market_exchange: &str,
+    runtime_strategy_types: HashSet<StrategyType>,
     config_service: Arc<StrategyConfigService>,
     execution_service: Arc<StrategyExecutionService>,
 ) {
@@ -477,9 +488,11 @@ async fn run_websocket(
         );
         return;
     }
+    let subscribe_ticker_stream =
+        market_exchange == "okx" && env_is_true("WEBSOCKET_SUBSCRIBE_TICKERS", false);
     info!(
-        "🌐 启动WebSocket数据流: inst_ids={:?}, periods={:?}",
-        inst_ids, periods
+        "🌐 启动WebSocket数据流: inst_ids={:?}, periods={:?}, ticker_stream_enabled={}",
+        inst_ids, periods, subscribe_ticker_stream
     );
     // 🚀 创建策略触发回调函数
     let strategy_trigger = {
@@ -488,6 +501,7 @@ async fn run_websocket(
                 config_service,
                 execution_service,
                 Some(market_exchange.to_string()),
+                runtime_strategy_types,
             ),
         );
         Arc::new(
@@ -519,6 +533,7 @@ async fn run_websocket(
             &inst_ids_vec,
             &periods_vec,
             Some(strategy_trigger),
+            subscribe_ticker_stream,
         )
         .await
         {

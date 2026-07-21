@@ -2,6 +2,8 @@ use super::{
     BacktestCandle, ComputedCandle, MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection,
     MS_15M,
 };
+use rust_quant_strategies::implementations::SmartMoneyConceptsStrategy;
+use rust_quant_strategies::CandleItem;
 
 pub(super) const VOLUME_ATR_PERIOD: usize = 14;
 pub(super) const VOLUME_ATR_AVERAGE_CANDLES: usize = 20;
@@ -17,12 +19,63 @@ pub(super) const CONTINUATION_MAX_CLOSE_FROM_LOW_RATIO: f64 = 0.25;
 pub(super) const CONTINUATION_INVALIDATION_ATR: f64 = 0.50;
 pub(super) const REVERSAL_CONFIRMATION_MIN_BODY_RATIO: f64 = 0.45;
 pub(super) const REVERSAL_CONFIRMATION_MIN_CLOSE_POSITION_RATIO: f64 = 0.65;
-pub(super) const OPPOSITE_DURATION_MIN_R_SQUARED: f64 = 0.70;
+pub(super) const BUFFERED_OPPOSITE_MIN_NET_MOVE_PCT: f64 = 8.0;
+pub(super) const BUFFERED_OPPOSITE_MIN_R_SQUARED: f64 = 0.60;
+pub(super) const STRONG_REVERSAL_MIN_BODY_CHANGE_PCT: f64 = 3.0;
+pub(super) const LOWER_WICK_MIN_RANGE_RATIO: f64 = 0.45;
+pub(super) const LOWER_WICK_MIN_CLOSE_POSITION_RATIO: f64 = 0.65;
+pub(super) const LOWER_WICK_MIN_RANGE_ATR_RATIO: f64 = 1.20;
+pub(super) const TWO_STAGE_RECOVERY_SEGMENT_CANDLES: usize = 24;
 pub(super) const EXHAUSTION_VOLUME_LOOKBACK_CANDLES: usize = 96;
 pub(super) const EXHAUSTION_CURRENT_CLUSTER_CANDLES: usize = 3;
 pub(super) const EXHAUSTION_SWING_RADIUS_CANDLES: usize = 3;
 pub(super) const BTC_REGIME_LOOKBACK_CANDLES: usize = 96;
 pub(super) const BTC_BROAD_DIRECTION_LOOKBACK_CANDLES: usize = 384;
+pub(super) const STRUCTURE_BREAK_LOOKBACK_CANDLES: usize = 192;
+pub(super) const STRUCTURE_BREAK_PIVOT_WING_CANDLES: usize = 5;
+
+/// 用固定 192 根窗口和 5+5 已确认 pivot 判断信号收盘是否真正破坏前高结构。
+pub(super) fn bullish_structure_break_filter_reason(
+    candles: &[ComputedCandle],
+    completed_count: usize,
+) -> Option<&'static str> {
+    let start = completed_count.saturating_sub(STRUCTURE_BREAK_LOOKBACK_CANDLES);
+    let Some(visible) = candles.get(start..completed_count) else {
+        return Some("bullish_structure_break_not_ready");
+    };
+    if visible.len() < STRUCTURE_BREAK_PIVOT_WING_CANDLES * 2 + 2 {
+        return Some("bullish_structure_break_not_ready");
+    }
+    let candles = visible
+        .iter()
+        .map(|item| CandleItem {
+            o: item.candle.open,
+            h: item.candle.high,
+            l: item.candle.low,
+            c: item.candle.close,
+            v: item.candle.volume,
+            ts: item.candle.ts,
+            confirm: 1,
+        })
+        .collect::<Vec<_>>();
+    let features = SmartMoneyConceptsStrategy::causal_market_structure_features(
+        &candles,
+        STRUCTURE_BREAK_PIVOT_WING_CANDLES,
+    );
+    if features.bullish_structure_break {
+        None
+    } else {
+        Some("bullish_structure_break_not_confirmed")
+    }
+}
+
+/// 区分 v30 的即时 A 级强反转与必须延迟确认的 B 级长下引线 setup。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LongBufferedReversalSignal {
+    Strong,
+    BullishHammer,
+    LowerWickSetup,
+}
 
 /// 只读取实际入场前已经完成的基准 K 线，返回固定窗口首尾收盘的绝对净涨跌幅。
 pub(super) fn benchmark_abs_net_move_pct_before_entry(
@@ -88,9 +141,13 @@ pub(super) fn opposite_net_move_filter_reason(
         }
     }
     if let Some(duration_candles) = args.entry_min_opposite_duration_candles {
-        if let Some(duration_confirmed) =
-            opposite_duration_confirmed(candles, latest_idx, direction, duration_candles)
-        {
+        if let Some(duration_confirmed) = opposite_duration_confirmed(
+            candles,
+            latest_idx,
+            direction,
+            duration_candles,
+            args.entry_opposite_duration_min_r_squared,
+        ) {
             ready = true;
             confirmed |= duration_confirmed;
         }
@@ -138,6 +195,7 @@ fn opposite_duration_confirmed(
     latest_idx: usize,
     direction: MarketVelocityTradeDirection,
     duration_candles: usize,
+    min_r_squared: f64,
 ) -> Option<bool> {
     let history = history_before_latest(candles, latest_idx, duration_candles)?;
     let sample_count = history.len() as f64;
@@ -177,7 +235,7 @@ fn opposite_duration_confirmed(
         MarketVelocityTradeDirection::Both => false,
     };
     Some(
-        r_squared >= OPPOSITE_DURATION_MIN_R_SQUARED
+        r_squared >= min_r_squared
             && net_move_is_opposite
             && match direction {
                 MarketVelocityTradeDirection::Long => slope < 0.0,
@@ -185,6 +243,171 @@ fn opposite_duration_confirmed(
                 MarketVelocityTradeDirection::Both => false,
             },
     )
+}
+
+/// 要求信号前两个连续窗口都已向交易方向恢复，避免把单根反抽误判为筑底完成。
+///
+/// 当前信号 K 线不在窗口内；两个窗口只使用各自首尾收盘，不读取后续成交或退出路径。
+pub(super) fn two_stage_recovery_filter_reason(
+    candles: &[ComputedCandle],
+    completed_count: usize,
+    direction: MarketVelocityTradeDirection,
+) -> Option<&'static str> {
+    let latest_idx = completed_count.checked_sub(1)?;
+    let history_candles = TWO_STAGE_RECOVERY_SEGMENT_CANDLES * 2;
+    let Some(history) = history_before_latest(candles, latest_idx, history_candles) else {
+        return Some("two_stage_recovery_not_ready");
+    };
+    let (older, recent) = history.split_at(TWO_STAGE_RECOVERY_SEGMENT_CANDLES);
+    let segment_recovers = |segment: &[ComputedCandle]| {
+        let first = segment.first().map(|item| item.candle.close);
+        let last = segment.last().map(|item| item.candle.close);
+        match (first, last, direction) {
+            (Some(first), Some(last), MarketVelocityTradeDirection::Long)
+                if valid_positive(first) && valid_positive(last) =>
+            {
+                last > first
+            }
+            (Some(first), Some(last), MarketVelocityTradeDirection::Short)
+                if valid_positive(first) && valid_positive(last) =>
+            {
+                last < first
+            }
+            _ => false,
+        }
+    };
+    (!segment_recovers(older) || !segment_recovers(recent))
+        .then_some("two_stage_recovery_not_confirmed")
+}
+
+/// 评估 v30 的两级做多反转；灰区历史只能配合长下引线并延迟入场。
+///
+/// 两个历史分支都截止于 setup 之前，当前 K 线只负责形态确认，避免把信号后的走势
+/// 反向用于放宽 192/96 根历史门禁。
+pub(super) fn long_buffered_reversal_signal(
+    candles: &[ComputedCandle],
+    completed_count: usize,
+    args: &MarketVelocityEventBacktestArgs,
+) -> Result<LongBufferedReversalSignal, &'static str> {
+    let latest_idx = completed_count
+        .checked_sub(1)
+        .ok_or("opposite_move_not_ready")?;
+    let strong_net = args.entry_min_opposite_net_move_pct.and_then(|minimum| {
+        opposite_net_move_confirmed(
+            candles,
+            latest_idx,
+            MarketVelocityTradeDirection::Long,
+            args,
+            minimum,
+        )
+    });
+    let strong_duration = args
+        .entry_min_opposite_duration_candles
+        .and_then(|duration| {
+            opposite_duration_confirmed(
+                candles,
+                latest_idx,
+                MarketVelocityTradeDirection::Long,
+                duration,
+                args.entry_opposite_duration_min_r_squared,
+            )
+        });
+    let buffered_net = opposite_net_move_confirmed(
+        candles,
+        latest_idx,
+        MarketVelocityTradeDirection::Long,
+        args,
+        BUFFERED_OPPOSITE_MIN_NET_MOVE_PCT,
+    );
+    let buffered_duration = args
+        .entry_min_opposite_duration_candles
+        .and_then(|duration| {
+            opposite_duration_confirmed(
+                candles,
+                latest_idx,
+                MarketVelocityTradeDirection::Long,
+                duration,
+                BUFFERED_OPPOSITE_MIN_R_SQUARED,
+            )
+        });
+    if [strong_net, strong_duration, buffered_net, buffered_duration]
+        .into_iter()
+        .all(|decision| decision.is_none())
+    {
+        return Err("opposite_move_not_ready");
+    }
+    let strong_history = strong_net == Some(true) || strong_duration == Some(true);
+    let buffered_history =
+        strong_history || buffered_net == Some(true) || buffered_duration == Some(true);
+    if !buffered_history {
+        return Err("opposite_move_not_confirmed");
+    }
+
+    let current = candles
+        .get(latest_idx)
+        .ok_or("opposite_reversal_candle_not_confirmed")?;
+    let previous = candles
+        .get(latest_idx.checked_sub(1).ok_or("opposite_move_not_ready")?)
+        .ok_or("opposite_move_not_ready")?;
+    let body_change_pct =
+        (current.candle.close - current.candle.open) / current.candle.open * 100.0;
+    if strong_history
+        && body_change_pct >= STRONG_REVERSAL_MIN_BODY_CHANGE_PCT
+        && bullish_reversal_confirmation(&current.candle, &previous.candle)
+        && reversal_average_reclaim_filter_reason(
+            candles,
+            latest_idx,
+            MarketVelocityTradeDirection::Long,
+        )
+        .is_none()
+    {
+        return Ok(LongBufferedReversalSignal::Strong);
+    }
+    if long_lower_wick_setup(candles, latest_idx) {
+        if args.entry_long_bullish_hammer_reversal {
+            if current.candle.close > current.candle.open
+                && reversal_average_reclaim_filter_reason(
+                    candles,
+                    latest_idx,
+                    MarketVelocityTradeDirection::Long,
+                )
+                .is_none()
+            {
+                return Ok(LongBufferedReversalSignal::BullishHammer);
+            }
+            return Err("bullish_hammer_not_confirmed");
+        }
+        return Ok(LongBufferedReversalSignal::LowerWickSetup);
+    }
+    if strong_history {
+        Err("opposite_reversal_candle_not_confirmed")
+    } else {
+        Err("buffered_opposite_move_requires_lower_wick")
+    }
+}
+
+/// 识别扫过前低后收回的长下引线；它只创建 setup，不能在当前收盘立即成交。
+fn long_lower_wick_setup(candles: &[ComputedCandle], candle_idx: usize) -> bool {
+    let Some(current) = candles.get(candle_idx) else {
+        return false;
+    };
+    let Some(previous) = candle_idx.checked_sub(1).and_then(|idx| candles.get(idx)) else {
+        return false;
+    };
+    let candle = &current.candle;
+    let range = candle.high - candle.low;
+    if !valid_positive(range) || candle.close == candle.open {
+        return false;
+    }
+    let lower_wick = candle.open.min(candle.close) - candle.low;
+    let close_position = candle.close - candle.low;
+    let Some(atr) = atr_at_computed(candles, candle_idx, VOLUME_ATR_PERIOD) else {
+        return false;
+    };
+    lower_wick / range >= LOWER_WICK_MIN_RANGE_RATIO
+        && close_position / range >= LOWER_WICK_MIN_CLOSE_POSITION_RATIO
+        && candle.low < previous.candle.low
+        && range / atr >= LOWER_WICK_MIN_RANGE_ATR_RATIO
 }
 
 /// 返回触发 K 线之前固定数量的完整历史，确保任何分支都不会读取未来 K 线。

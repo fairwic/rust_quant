@@ -1,4 +1,6 @@
 //! WebSocket 数据流
+pub mod confirmed_candle_aggregator;
+pub mod confirmed_candle_stream;
 pub mod deep_stream_manager;
 pub mod websocket_runtime;
 pub mod websocket_service;

@@ -1,3 +1,12 @@
+/// 量价冲击后回踩确认候选返回的方向与结构保护止损。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MomentumRetestDecision {
+    /// 确认棒收盘后允许的方向。
+    direction: SignalDirect,
+    /// 冲击棒与确认棒共同极值外的保护价。
+    protective_stop: f64,
+}
+
 impl VegasStrategy {
     /// 在基础 Vegas 信号之后统一执行因果动量窗口与可选 RSI 门禁，避免两者在不同调用链产生分歧。
     fn apply_candle_momentum_entry_gate(
@@ -11,6 +20,14 @@ impl VegasStrategy {
         let has_entry_signal =
             signal_result.should_buy.unwrap_or(false) || signal_result.should_sell.unwrap_or(false);
         if !self.candle_momentum_activation.is_open || !has_entry_signal {
+            return;
+        }
+
+        // Momentum retest 已独立验证同一量价冲击窗口，不要求 Fib 再次声明 delayed volume。
+        if dynamic_adjustments
+            .iter()
+            .any(|adjustment| adjustment.starts_with("MOMENTUM_RETEST_"))
+        {
             return;
         }
 
@@ -214,6 +231,60 @@ impl VegasStrategy {
         )
     }
 
+    /// 在量价冲击后的固定窗口内识别实体中位回踩与方向收复。
+    ///
+    /// 当前棒必须已经完成，且当前 leg/EMA 不能与候选方向冲突；未确认时不保存跨窗口承诺。
+    fn momentum_retest_decision(
+        &self,
+        data_items: &[CandleItem],
+        values: &VegasIndicatorSignalValue,
+    ) -> Option<MomentumRetestDecision> {
+        let config = self.candle_momentum_activation;
+        if !config.is_open || !config.allow_momentum_retest_entry {
+            return None;
+        }
+        let current = data_items.last()?;
+        let stop_buffer = self
+            .fib_retracement_signal
+            .unwrap_or_default()
+            .stop_loss_buffer_ratio
+            .max(0.0);
+
+        if current.c > current.o
+            && values.leg_detection_value.is_bullish_leg
+            && !values.ema_values.is_short_trend
+        {
+            if let Some(bars_ago) = self.delayed_fib_volume_activation_bars_ago(data_items, true) {
+                let trigger = &data_items[data_items.len().checked_sub(bars_ago + 1)?];
+                let body_midpoint = (trigger.o + trigger.c) / 2.0;
+                if current.l <= body_midpoint && current.c > body_midpoint {
+                    return Some(MomentumRetestDecision {
+                        direction: SignalDirect::IsLong,
+                        protective_stop: trigger.l.min(current.l) * (1.0 - stop_buffer).max(0.0),
+                    });
+                }
+            }
+        }
+
+        if current.c < current.o
+            && values.leg_detection_value.is_bearish_leg
+            && !values.ema_values.is_long_trend
+        {
+            if let Some(bars_ago) = self.delayed_fib_volume_activation_bars_ago(data_items, false) {
+                let trigger = &data_items[data_items.len().checked_sub(bars_ago + 1)?];
+                let body_midpoint = (trigger.o + trigger.c) / 2.0;
+                if current.h >= body_midpoint && current.c < body_midpoint {
+                    return Some(MomentumRetestDecision {
+                        direction: SignalDirect::IsShort,
+                        protective_stop: trigger.h.max(current.h) * (1.0 + stop_buffer),
+                    });
+                }
+            }
+        }
+
+        None
+    }
+
     /// 延迟 Fib 确认可选择复用已有中波动带；关闭该限制时保持原激活语义。
     fn delayed_fib_atr_allowed(&self, atr_ratio: f64, is_long: bool) -> bool {
         if !self
@@ -239,7 +310,14 @@ impl VegasStrategy {
                 .candle_momentum_activation
                 .allow_high_volatility_delayed_short
             && atr_ratio >= band.max_atr_ratio;
-        in_choppy_band || is_high_volatility_short
+        let is_high_volatility_long = is_long
+            && self
+                .candle_momentum_activation
+                .allow_high_volatility_delayed_long
+            && atr_ratio >= band.max_atr_ratio;
+        let is_low_volatility = self.candle_momentum_activation.allow_low_volatility_delayed
+            && atr_ratio < band.min_atr_ratio;
+        in_choppy_band || is_high_volatility_short || is_high_volatility_long || is_low_volatility
     }
 }
 
@@ -266,6 +344,9 @@ mod momentum_activation_tests {
             allow_delayed_fib_volume_confirmation: false,
             restrict_delayed_fib_to_choppy_band: false,
             allow_high_volatility_delayed_short: false,
+            allow_high_volatility_delayed_long: false,
+            allow_low_volatility_delayed: false,
+            allow_momentum_retest_entry: false,
             baseline_bars: 4,
             valid_for_bars: 3,
             min_wait_bars: 1,
@@ -492,5 +573,72 @@ mod momentum_activation_tests {
             .allow_high_volatility_delayed_short = true;
         assert!(!strategy.delayed_fib_atr_allowed(0.032, true));
         assert!(strategy.delayed_fib_atr_allowed(0.032, false));
+
+        strategy
+            .candle_momentum_activation
+            .allow_high_volatility_delayed_long = true;
+        assert!(strategy.delayed_fib_atr_allowed(0.032, true));
+        assert!(strategy.delayed_fib_atr_allowed(0.032, false));
+
+        strategy
+            .candle_momentum_activation
+            .allow_low_volatility_delayed = true;
+        assert!(strategy.delayed_fib_atr_allowed(0.0179, true));
+        assert!(strategy.delayed_fib_atr_allowed(0.0179, false));
+    }
+
+    #[test]
+    fn momentum_retest_waits_for_a_completed_mid_body_reclaim() {
+        let mut strategy = strategy();
+        strategy
+            .candle_momentum_activation
+            .allow_delayed_fib_volume_confirmation = true;
+        strategy
+            .candle_momentum_activation
+            .allow_momentum_retest_entry = true;
+        strategy.candle_momentum_activation.direction_mode = CandleMomentumDirectionMode::Same;
+        strategy
+            .fib_retracement_signal
+            .as_mut()
+            .expect("default Fib config")
+            .stop_loss_buffer_ratio = 0.006;
+        let mut candles = vec![
+            candle(1, 10.0, 2.0, 1),
+            candle(2, 10.0, 2.0, 1),
+            candle(3, 10.0, 2.0, 1),
+            candle(4, 10.0, 2.0, 1),
+        ];
+        candles.push(CandleItem {
+            o: 100.0,
+            h: 106.0,
+            l: 99.0,
+            c: 105.0,
+            v: 40.0,
+            ts: 5,
+            confirm: 1,
+        });
+        candles.push(CandleItem {
+            o: 102.0,
+            h: 105.0,
+            l: 101.0,
+            c: 104.0,
+            v: 12.0,
+            ts: 6,
+            confirm: 1,
+        });
+        let mut values = VegasIndicatorSignalValue::default();
+        values.leg_detection_value.is_bullish_leg = true;
+
+        let decision = strategy
+            .momentum_retest_decision(&candles, &values)
+            .expect("completed midpoint reclaim should produce a long");
+
+        assert_eq!(decision.direction, SignalDirect::IsLong);
+        assert!((decision.protective_stop - 98.406).abs() < 1e-9);
+
+        candles.last_mut().expect("confirmation candle").l = 103.0;
+        assert!(strategy
+            .momentum_retest_decision(&candles, &values)
+            .is_none());
     }
 }

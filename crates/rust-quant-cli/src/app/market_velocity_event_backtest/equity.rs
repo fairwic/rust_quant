@@ -16,12 +16,17 @@ use rust_quant_strategies::CandleItem;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 mod detail;
+mod market_structure_features;
+mod price_volume_diagnostics;
 mod replay_candles;
+mod replay_strategy;
 use detail::{market_velocity_detail_signal_value, market_velocity_detail_signal_value_for_leg};
 pub use detail::{
     market_velocity_risk_config_detail, market_velocity_strategy_detail,
     market_velocity_strategy_type,
 };
+use market_structure_features::push_market_structure_feature_reports;
+use price_volume_diagnostics::print_price_volume_diagnostic_reports;
 use replay_candles::{framework_replay_candle_items, replay_entry_candle_ts};
 const INITIAL_FUND_PER_SYMBOL: f64 = 100.0;
 #[derive(Debug, Clone, PartialEq)]
@@ -95,7 +100,7 @@ pub struct FrameworkEquityTriggerReport {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquityFeatureReport {
     /// feature，用于展示或持久化查询结果。
-    pub feature: &'static str,
+    pub feature: String,
     /// bucket，用于展示或持久化查询结果。
     pub bucket: &'static str,
     /// 报告。
@@ -228,6 +233,8 @@ struct ReplayEntry {
 }
 #[derive(Debug, Clone, PartialEq)]
 struct ReplayActivePosition {
+    /// 当前仓位的真实入场 K 线时间戳，用于严格执行最大持仓窗口。
+    entry_ts: i64,
     /// 入场价格。
     entry_price: f64,
     /// event ID。
@@ -276,6 +283,8 @@ struct MarketVelocityReplayStrategy {
     profit_protect_stop_r: f64,
     /// 无盈利时提前退出所需 K 线数量；为空时不启用。
     early_exit_no_profit_candles: Option<usize>,
+    /// 最大持仓毫秒数；为空时保留历史上的无限制权益回放。
+    max_holding_ms: Option<i64>,
     ignore_entry_signal_updates_while_open: bool,
     /// 活动仓位；为空时表示没有活动仓位。
     active_position: Option<ReplayActivePosition>,
@@ -623,8 +632,10 @@ pub fn build_framework_equity_feature_reports(
         "20_plus",
         |event| event.event.price_change_pct >= 20.0,
     );
+    push_market_structure_feature_reports(&mut reports, confirmed, candles_15m, target_r, args);
     reports
 }
+
 /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
 pub fn build_framework_equity_symbol_window_reports(
     confirmed: &[ConfirmedEvent],
@@ -1179,7 +1190,7 @@ fn push_feature_report<F>(
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
     target_r: f64,
     args: &MarketVelocityEventBacktestArgs,
-    feature: &'static str,
+    feature: &str,
     bucket: &'static str,
     include: F,
 ) where
@@ -1192,7 +1203,7 @@ fn push_feature_report<F>(
         .collect::<Vec<_>>();
     if !events.is_empty() {
         reports.push(FrameworkEquityFeatureReport {
-            feature,
+            feature: feature.to_string(),
             bucket,
             report: build_framework_equity_report(&events, candles_15m, target_r, args),
         });
@@ -1681,6 +1692,12 @@ pub fn print_framework_equity_reports(
     candles_15m: &HashMap<String, Vec<BacktestCandle>>,
     args: &MarketVelocityEventBacktestArgs,
 ) {
+    println!(
+        "framework_equity_config\tmax_holding_hours={}",
+        args.equity_max_holding_hours
+            .map(|hours| hours.to_string())
+            .unwrap_or_else(|| "unbounded".to_string())
+    );
     for target_r in &args.target_rs {
         let report = build_framework_equity_report(confirmed, candles_15m, *target_r, args);
         if args.equity_report {
@@ -1709,6 +1726,9 @@ pub fn print_framework_equity_reports(
             let feature_reports =
                 build_framework_equity_feature_reports(confirmed, candles_15m, *target_r, args);
             print_framework_equity_feature_reports(&feature_reports);
+        }
+        if args.equity_price_volume_diagnostic_report {
+            print_price_volume_diagnostic_reports(confirmed, candles_15m, *target_r, args);
         }
         if args.equity_symbol_window_report {
             let window_reports = build_framework_equity_symbol_window_reports(
@@ -1776,6 +1796,10 @@ impl MarketVelocityReplayStrategy {
             profit_protect_after_r,
             profit_protect_stop_r,
             early_exit_no_profit_candles,
+            max_holding_ms: args
+                .equity_max_holding_hours
+                .and_then(|hours| i64::try_from(hours).ok())
+                .and_then(|hours| hours.checked_mul(60 * 60 * 1_000)),
             ignore_entry_signal_updates_while_open,
             active_position: None,
         }
@@ -1783,6 +1807,7 @@ impl MarketVelocityReplayStrategy {
     /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
     fn build_entry_signal(&mut self, candle_ts: i64, entry: &ReplayEntry) -> SignalResult {
         self.active_position = Some(ReplayActivePosition {
+            entry_ts: candle_ts,
             entry_price: entry.entry_price,
             event_id: entry.event_id,
             trigger: entry.trigger.clone(),
@@ -1959,113 +1984,10 @@ impl MarketVelocityReplayStrategy {
                 .as_ref()
                 .is_some_and(|active| active.direction == entry.direction)
     }
-    /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
-    fn build_entry_direction_signal(
-        &self,
-        candle_ts: i64,
-        entry_price: f64,
-        stop_loss_price: f64,
-        stop_loss_pct: f64,
-        stop_loss_source: &str,
-        event_id: i64,
-        trigger: &str,
-        direction: MarketVelocityTradeDirection,
-        target_r: f64,
-        profit_protected: bool,
-    ) -> SignalResult {
-        SignalResult {
-            should_buy: direction == MarketVelocityTradeDirection::Long,
-            should_sell: direction == MarketVelocityTradeDirection::Short,
-            open_price: entry_price,
-            signal_kline_stop_loss_price: Some(stop_loss_price),
-            stop_loss_source: Some(stop_loss_source.to_string()),
-            long_signal_take_profit_price: (direction == MarketVelocityTradeDirection::Long)
-                .then_some(target_price_for(
-                    entry_price,
-                    stop_loss_pct,
-                    target_r,
-                    direction,
-                )),
-            short_signal_take_profit_price: (direction == MarketVelocityTradeDirection::Short)
-                .then_some(target_price_for(
-                    entry_price,
-                    stop_loss_pct,
-                    target_r,
-                    direction,
-                )),
-            ts: candle_ts,
-            single_value: Some(
-                json!({
-                    "source": "market_velocity_framework_replay",
-                    "rank_event_id": event_id,
-                    "entry_trigger": trigger,
-                    "trade_direction": direction.label(),
-                    "target_r": target_r,
-                    "stop_loss_pct": stop_loss_pct,
-                    "profit_protected": profit_protected,
-                })
-                .to_string(),
-            ),
-            single_result: Some("market_velocity_framework_replay".to_string()),
-            direction: match direction {
-                MarketVelocityTradeDirection::Long => SignalDirection::Long,
-                MarketVelocityTradeDirection::Short => SignalDirection::Short,
-                MarketVelocityTradeDirection::Both => SignalDirection::None,
-            },
-            ..SignalResult::default()
-        }
-    }
 }
 
 /// 显式费用和等价滑点统一进入框架的双边成本扣减；未配置时保持旧版本默认费率。
 pub(super) fn framework_trade_cost_rate(args: &MarketVelocityEventBacktestArgs) -> Option<f64> {
     args.backtest_fee_bps_per_side
         .map(|fee_bps| (fee_bps + args.backtest_slippage_bps_per_side) / 10_000.0)
-}
-impl IndicatorStrategyBacktest for MarketVelocityReplayStrategy {
-    type IndicatorCombine = ();
-    type IndicatorValues = ();
-    fn min_data_length(&self) -> usize {
-        1
-    }
-    fn init_indicator_combine(&self) -> Self::IndicatorCombine {}
-    fn build_indicator_values(
-        _: &mut Self::IndicatorCombine,
-        _: &CandleItem,
-    ) -> Self::IndicatorValues {
-    }
-    /// 生成 回测与策略研究 需要的派生数据，供后续执行、展示或审计使用。
-    fn generate_signal(
-        &mut self,
-        candles: &[CandleItem],
-        _: &mut Self::IndicatorValues,
-        _: &BasicRiskStrategyConfig,
-    ) -> SignalResult {
-        let Some(candle) = candles.last() else {
-            return SignalResult::default();
-        };
-        let entry = self.entries_by_ts.get(&candle.ts).cloned();
-        let ignore_entry_for_current_candle = entry
-            .as_ref()
-            .is_some_and(|entry| self.should_ignore_entry_update(entry));
-        if self.ignore_entry_signal_updates_while_open {
-            self.clear_active_position_if_exit_hit(candle);
-        }
-        if let Some(entry) = entry {
-            if !ignore_entry_for_current_candle && !self.should_ignore_entry_update(&entry) {
-                return self.build_entry_signal(candle.ts, &entry);
-            }
-        }
-        if let Some(signal) = self.maybe_build_early_exit_signal(candle) {
-            return signal;
-        }
-        if let Some(signal) = self.maybe_build_profit_protection_signal(candle) {
-            return signal;
-        }
-        SignalResult {
-            ts: candle.ts,
-            open_price: candle.c,
-            ..SignalResult::default()
-        }
-    }
 }

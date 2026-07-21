@@ -234,6 +234,9 @@ mod tests {
             bollinger_upper: None,
             bollinger_lower: None,
             bollinger_bandwidth_pct: None,
+            macd_line: None,
+            macd_signal_line: None,
+            macd_histogram: None,
         }
     }
 

@@ -11,7 +11,7 @@ use super::args::{
 };
 use super::directional_reversal::{
     EXHAUSTION_CURRENT_CLUSTER_CANDLES, EXHAUSTION_SWING_RADIUS_CANDLES,
-    EXHAUSTION_VOLUME_LOOKBACK_CANDLES, OPPOSITE_DURATION_MIN_R_SQUARED,
+    EXHAUSTION_VOLUME_LOOKBACK_CANDLES,
 };
 
 const MARKET_VELOCITY_STRATEGY_KEY: &str = "market_velocity";
@@ -26,10 +26,8 @@ const MARKET_MOMENTUM_OPPOSITE_MOVE_DEFERRED_LONG_PRESET: &str =
     "research_market_momentum_opposite_move10_n192_volume_atr_long_defer3_15m_v2";
 const MARKET_MOMENTUM_OPPOSITE_MOVE_DURATION_BOTH_PRESET: &str =
     "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_both_deferlong3_15m_v3";
-const MARKET_MOMENTUM_OPPOSITE_MOVE_EXHAUSTION_VOLUME_PRESET: &str =
-    "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_both_deferlong3_exhaustionvol1_15m_v4";
-const MARKET_MOMENTUM_OPPOSITE_MOVE_RISK_REWARD_PRESET: &str =
-    "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_r18_30_scale4_both_deferlong3_exhaustionvol1_15m_v5";
+const MARKET_MOMENTUM_OPPOSITE_MOVE_EXHAUSTION_VOLUME_PRESET: &str = "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_both_deferlong3_exhaustionvol1_15m_v4";
+const MARKET_MOMENTUM_OPPOSITE_MOVE_RISK_REWARD_PRESET: &str = "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_r18_30_scale4_both_deferlong3_exhaustionvol1_15m_v5";
 const MARKET_MOMENTUM_OPPOSITE_MOVE_CONFIRMED_REVERSAL_PRESET: &str =
     "research_market_momentum_opposite_move_reversal_confirmed_both_defer3_volatr_r18_30_15m_v6";
 const MARKET_MOMENTUM_OPPOSITE_MOVE_MEAN_RECLAIM_PRESET: &str =
@@ -107,12 +105,15 @@ pub fn market_velocity_paper_strategy_preset_manifest(
         "entry_min_body_ratio_pct": args.entry_min_body_ratio_pct,
         "entry_min_close_position_pct": args.entry_min_close_position_pct,
         "entry_min_range_expansion_ratio": args.entry_min_range_expansion_ratio,
+        "entry_extreme_volume_contrarian": args.entry_extreme_volume_contrarian,
+        "entry_extreme_volume_continuation": args.entry_extreme_volume_continuation,
+        "entry_relative_volume_at_time_10d": args.entry_relative_volume_at_time_10d,
         "entry_min_recent_drawdown_pct": args.entry_min_recent_drawdown_pct,
         "entry_recent_drawdown_lookback_candles": args.entry_recent_drawdown_lookback_candles,
         "entry_opposite_move_lookback_candles": args.entry_opposite_move_lookback_candles,
         "entry_min_opposite_net_move_pct": args.entry_min_opposite_net_move_pct,
         "entry_min_opposite_duration_candles": args.entry_min_opposite_duration_candles,
-        "entry_opposite_duration_min_r_squared": OPPOSITE_DURATION_MIN_R_SQUARED,
+        "entry_opposite_duration_min_r_squared": args.entry_opposite_duration_min_r_squared,
         "entry_min_exhaustion_volume_dominance_ratio": args.entry_min_exhaustion_volume_dominance_ratio,
         "entry_btc_96_max_abs_net_move_pct": args.entry_btc_96_max_abs_net_move_pct,
         "entry_exhaustion_volume_lookback_candles": EXHAUSTION_VOLUME_LOOKBACK_CANDLES,
@@ -120,10 +121,16 @@ pub fn market_velocity_paper_strategy_preset_manifest(
         "entry_exhaustion_swing_radius_candles": EXHAUSTION_SWING_RADIUS_CANDLES,
         "entry_defer_bearish_continuation": args.entry_defer_bearish_continuation,
         "entry_defer_bullish_continuation": args.entry_defer_bullish_continuation,
+        "entry_require_two_stage_recovery": args.entry_require_two_stage_recovery,
+        "entry_require_macd_negative_histogram_improving": args.entry_require_macd_negative_histogram_improving,
         "entry_require_opposite_reversal_confirmation": args.entry_require_opposite_reversal_confirmation,
         "entry_require_reversal_average_reclaim": args.entry_require_reversal_average_reclaim,
         "entry_defer_max_wait_candles": args.entry_defer_max_wait_candles,
         "entry_symbol_cooldown_candles": args.entry_symbol_cooldown_candles,
+        "entry_once_per_opposite_trend_state": args.entry_once_per_opposite_trend_state,
+        "entry_once_per_historical_trend_state": args.entry_once_per_historical_trend_state,
+        "entry_wait_setup_open_reclaim": args.entry_wait_setup_open_reclaim,
+        "entry_opposite_trend_reset_confirm_candles": args.entry_opposite_trend_reset_confirm_candles,
     });
     if let (Some(filters), Some(minimum)) = (
         fast_momentum_filters_json.as_object_mut(),
@@ -159,6 +166,7 @@ pub fn market_velocity_paper_strategy_preset_manifest(
             "kline_volume_rank_velocity": args.kline_volume_rank_velocity,
             "kline_volume_rank_require_turnover_growth": args.kline_volume_rank_require_turnover_growth,
             "kline_volume_rank_require_consecutive_improvement": args.kline_volume_rank_require_consecutive_improvement,
+            "kline_current_live_only": args.kline_current_live_only,
             "kline_volume_rank_lookback_candles": if args.kline_volume_rank_velocity { json!(96) } else { Value::Null },
             "kline_volume_rank_quote_turnover": if args.kline_volume_rank_velocity { "vol_ccy_x_close" } else { "off" },
             "trade_direction": args.trade_direction.label(),
@@ -199,6 +207,10 @@ pub fn market_velocity_paper_strategy_preset_manifest(
             "entry_retest_max_wait_candles": args.entry_retest_max_wait_candles,
             "entry_retest_min_entry_open_gap_pct": args.entry_retest_min_entry_open_gap_pct,
             "entry_retest_open_fade_min_volume_ratio": args.entry_retest_open_fade_min_volume_ratio,
+            "entry_defer_long_lower_wick_reversal": args.entry_defer_long_lower_wick_reversal,
+            "entry_long_bullish_hammer_reversal": args.entry_long_bullish_hammer_reversal,
+            "entry_require_two_stage_recovery": args.entry_require_two_stage_recovery,
+            "entry_require_macd_negative_histogram_improving": args.entry_require_macd_negative_histogram_improving,
             "trend_timeframe": args.trend_timeframe.label(),
             "trend_min_average_distance_pct": args.trend_min_average_distance_pct,
             "min_delta_rank": args.min_delta_rank,

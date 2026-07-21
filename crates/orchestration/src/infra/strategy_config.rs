@@ -18,6 +18,14 @@ pub struct BackTestConfig {
     pub max_concurrent: usize,
     /// K线数据限制
     pub candle_limit: usize,
+    /// Vegas 本轮随机搜索的有限样本数，不等于完整笛卡尔空间大小。
+    pub random_sample_size: usize,
+    /// Vegas 随机搜索固定种子，用于重放同一批参数。
+    pub random_sample_seed: u64,
+    /// 每批提交的参数数；小批次让慢速或内存异常能更早停止。
+    pub random_batch_size: usize,
+    /// 单参数平均耗时上限，单位秒；超限时在当前小批次完成后停止后续采样。
+    pub random_max_seconds_per_run: f64,
     /// enablerandomtest，用于配置运行参数。
     pub enable_random_test: bool,
     /// 是否启用随机策略测试
@@ -35,8 +43,16 @@ impl Default for BackTestConfig {
         Self {
             strategy_config_id: None,
             strategy_key: None,
-            max_concurrent: 30,
-            candle_limit: 40000,
+            max_concurrent: positive_usize_env(
+                "BACKTEST_MAX_CONCURRENT",
+                default_backtest_concurrency(),
+            )
+            .min(32),
+            candle_limit: positive_usize_env("BACKTEST_CANDLE_LIMIT", 40_000),
+            random_sample_size: positive_usize_env("VEGAS_RANDOM_SAMPLE_SIZE", 256),
+            random_sample_seed: u64_env("VEGAS_RANDOM_SAMPLE_SEED", 20_260_721),
+            random_batch_size: positive_usize_env("VEGAS_RANDOM_BATCH_SIZE", 8),
+            random_max_seconds_per_run: positive_f64_env("VEGAS_RANDOM_MAX_SECONDS_PER_RUN", 15.0),
             enable_random_test: env::var("ENABLE_RANDOM_TEST").unwrap_or_default() == "true",
             enable_random_test_vegas: env::var("ENABLE_RANDOM_TEST_VEGAS").unwrap_or_default()
                 == "true",
@@ -49,6 +65,35 @@ impl Default for BackTestConfig {
                 == "true",
         }
     }
+}
+
+fn default_backtest_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map(|parallelism| (parallelism.get() / 2).clamp(1, 6))
+        .unwrap_or(2)
+}
+
+fn positive_usize_env(key: &str, default: usize) -> usize {
+    env::var(key)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
+fn u64_env(key: &str, default: u64) -> u64 {
+    env::var(key)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn positive_f64_env(key: &str, default: f64) -> f64 {
+    env::var(key)
+        .ok()
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(default)
 }
 pub async fn get_strate_config(
     config_service: &StrategyConfigService,
@@ -266,6 +311,9 @@ mod selected_config_tests {
             allow_delayed_fib_volume_confirmation: false,
             restrict_delayed_fib_to_choppy_band: false,
             allow_high_volatility_delayed_short: false,
+            allow_high_volatility_delayed_long: false,
+            allow_low_volatility_delayed: false,
+            allow_momentum_retest_entry: false,
             baseline_bars: 20,
             valid_for_bars: 6,
             min_wait_bars: 3,
@@ -557,6 +605,19 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     let entry_block_config = vegas_strategy.entry_block_config;
     let candle_momentum_activation = vegas_strategy.candle_momentum_activation;
     let cross_asset_adaptive_threshold = vegas_strategy.cross_asset_adaptive_threshold;
+    let liquidity_sweep_reversal = vegas_strategy.liquidity_sweep_reversal;
+    let compressed_range_breakout = vegas_strategy.compressed_range_breakout;
+    let ema_tunnel_retest_confirmation = vegas_strategy.ema_tunnel_retest_confirmation;
+    let volume_profile_value_area_retest = vegas_strategy.volume_profile_value_area_retest;
+    let volume_profile_value_area_breakout = vegas_strategy.volume_profile_value_area_breakout;
+    let volume_profile_failed_auction = vegas_strategy.volume_profile_failed_auction;
+    let donchian_volume_breakout = vegas_strategy.donchian_volume_breakout;
+    let donchian_breakout_acceptance = vegas_strategy.donchian_breakout_acceptance;
+    let bos_fvg_retest = vegas_strategy.bos_fvg_retest;
+    let fvg_reclaim = vegas_strategy.fvg_reclaim;
+    let macd_divergence_reversal = vegas_strategy.macd_divergence_reversal;
+    let macd_trend_reset_bos = vegas_strategy.macd_trend_reset_bos;
+    let short_profit_protection = vegas_strategy.short_profit_protection;
     let ema_distance_config = vegas_strategy.ema_distance_config;
     let atr_stop_loss_multiplier = vegas_strategy.atr_stop_loss_multiplier;
     let emit_debug = vegas_strategy.emit_debug;
@@ -614,6 +675,19 @@ fn convert_strategy_config_to_param(config: &StrategyConfig) -> Result<ParamMerg
     param.entry_block_config = Some(entry_block_config);
     param.candle_momentum_activation = Some(candle_momentum_activation);
     param.cross_asset_adaptive_threshold = Some(cross_asset_adaptive_threshold);
+    param.liquidity_sweep_reversal = Some(liquidity_sweep_reversal);
+    param.compressed_range_breakout = Some(compressed_range_breakout);
+    param.ema_tunnel_retest_confirmation = Some(ema_tunnel_retest_confirmation);
+    param.volume_profile_value_area_retest = Some(volume_profile_value_area_retest);
+    param.volume_profile_value_area_breakout = Some(volume_profile_value_area_breakout);
+    param.volume_profile_failed_auction = Some(volume_profile_failed_auction);
+    param.donchian_volume_breakout = Some(donchian_volume_breakout);
+    param.donchian_breakout_acceptance = Some(donchian_breakout_acceptance);
+    param.bos_fvg_retest = Some(bos_fvg_retest);
+    param.fvg_reclaim = Some(fvg_reclaim);
+    param.macd_divergence_reversal = Some(macd_divergence_reversal);
+    param.macd_trend_reset_bos = Some(macd_trend_reset_bos);
+    param.short_profit_protection = Some(short_profit_protection);
     param.ema_distance_config = Some(ema_distance_config);
     param.atr_stop_loss_multiplier = Some(atr_stop_loss_multiplier);
     param.emit_debug = Some(emit_debug);
@@ -695,7 +769,13 @@ mod tests {
     use super::*;
     use rust_quant_domain::{StrategyType, Timeframe};
     use rust_quant_indicators::trend::vegas::{
-        EmaSignalConfig, KlineHammerConfig, RsiSignalConfig, VolumeSignalConfig,
+        BosFvgRetestConfig, CompressedRangeBreakoutConfig, DonchianBreakoutAcceptanceConfig,
+        DonchianVolumeBreakoutConfig, EmaSignalConfig, EmaTunnelRetestConfirmationConfig,
+        FvgReclaimConfig, KlineHammerConfig, LiquiditySweepReversalConfig,
+        MacdDivergenceReversalConfig, MacdTrendResetBosConfig, RsiSignalConfig,
+        ShortProfitProtectionConfig, VolumeProfileFailedAuctionConfig,
+        VolumeProfileValueAreaBreakoutConfig, VolumeProfileValueAreaRetestConfig,
+        VolumeSignalConfig,
     };
     use rust_quant_indicators::volatility::BollingBandsSignalConfig;
     use serde_json::json;
@@ -729,5 +809,338 @@ mod tests {
         let risk = param.to_risk_config();
 
         assert_eq!(risk.position_leverage, Some(0.6));
+    }
+
+    #[test]
+    fn vegas_config_conversion_preserves_liquidity_sweep_research_gate() {
+        let vegas_strategy = VegasStrategy {
+            period: "4H".to_string(),
+            ema_signal: Some(EmaSignalConfig::default()),
+            volume_signal: Some(VolumeSignalConfig::default()),
+            rsi_signal: Some(RsiSignalConfig::default()),
+            bolling_signal: Some(BollingBandsSignalConfig::default()),
+            kline_hammer_signal: Some(KlineHammerConfig::default()),
+            liquidity_sweep_reversal: LiquiditySweepReversalConfig {
+                is_open: true,
+                enable_failed_breakout_close_reentry_short: true,
+                enable_failed_breakdown_close_reentry_long: true,
+                enable_failed_breakdown_higher_low_breakout_long: true,
+                enable_upper_sweep_confirmation_low_break_short: true,
+                require_upper_sweep_confirmation_macd_above_zero: true,
+                enable_lower_sweep_confirmation_high_break_long: true,
+                require_lower_sweep_confirmation_macd_below_zero: true,
+                enable_first_retest_long: true,
+                enable_first_retest_short: true,
+                first_retest_take_profit_r: Some(2.0),
+                first_retest_replace_existing_take_profit: true,
+                first_retest_max_wait_bars: 2,
+                first_retest_min_volume_ratio: Some(2.0),
+                ..LiquiditySweepReversalConfig::default()
+            },
+            ema_tunnel_retest_confirmation: EmaTunnelRetestConfirmationConfig {
+                is_open: true,
+                enable_long: false,
+                enable_short: true,
+                stop_loss_buffer_ratio: 0.006,
+            },
+            volume_profile_value_area_retest: VolumeProfileValueAreaRetestConfig {
+                is_open: true,
+                enable_long: true,
+                enable_short: false,
+                stop_loss_buffer_ratio: 0.006,
+            },
+            volume_profile_value_area_breakout: VolumeProfileValueAreaBreakoutConfig {
+                is_open: true,
+                enable_long: false,
+                enable_short: true,
+                stop_loss_buffer_ratio: 0.006,
+                require_short_adx_25: true,
+                fixed_take_profit_r: Some(2.0),
+            },
+            volume_profile_failed_auction: VolumeProfileFailedAuctionConfig {
+                is_open: true,
+                stop_loss_buffer_ratio: 0.006,
+            },
+            donchian_volume_breakout: DonchianVolumeBreakoutConfig {
+                is_open: true,
+                enable_long: false,
+                enable_short: true,
+            },
+            donchian_breakout_acceptance: DonchianBreakoutAcceptanceConfig {
+                is_open: true,
+                enable_long: true,
+                enable_short: false,
+                stop_loss_buffer_ratio: 0.006,
+            },
+            bos_fvg_retest: BosFvgRetestConfig {
+                is_open: true,
+                enable_short: true,
+            },
+            fvg_reclaim: FvgReclaimConfig {
+                is_open: true,
+                enable_long: true,
+                require_internal_bullish_choch: true,
+            },
+            macd_divergence_reversal: MacdDivergenceReversalConfig {
+                is_open: true,
+                enable_long: true,
+                enable_short: true,
+            },
+            macd_trend_reset_bos: MacdTrendResetBosConfig {
+                is_open: true,
+                enable_long: true,
+                enable_short: true,
+            },
+            ..VegasStrategy::default()
+        };
+        let config = StrategyConfig::new(
+            2,
+            StrategyType::Vegas,
+            "XRP-USDT-SWAP".to_string(),
+            Timeframe::H4,
+            serde_json::to_value(vegas_strategy).expect("vegas strategy json"),
+            json!({"max_loss_percent": 0.04}),
+        );
+
+        let param = convert_strategy_config_to_param(&config).expect("convert vegas config");
+        let converted = param.to_vegas_strategy("4H".to_string());
+
+        assert!(converted.liquidity_sweep_reversal.is_open);
+        assert!(
+            converted
+                .liquidity_sweep_reversal
+                .enable_failed_breakout_close_reentry_short
+        );
+        assert!(
+            converted
+                .liquidity_sweep_reversal
+                .enable_failed_breakdown_close_reentry_long
+        );
+        assert!(
+            converted
+                .liquidity_sweep_reversal
+                .enable_failed_breakdown_higher_low_breakout_long
+        );
+        assert!(
+            converted
+                .liquidity_sweep_reversal
+                .enable_upper_sweep_confirmation_low_break_short
+        );
+        assert!(
+            converted
+                .liquidity_sweep_reversal
+                .require_upper_sweep_confirmation_macd_above_zero
+        );
+        assert!(
+            converted
+                .liquidity_sweep_reversal
+                .enable_lower_sweep_confirmation_high_break_long
+        );
+        assert!(
+            converted
+                .liquidity_sweep_reversal
+                .require_lower_sweep_confirmation_macd_below_zero
+        );
+        assert!(converted.liquidity_sweep_reversal.enable_first_retest_long);
+        assert!(converted.liquidity_sweep_reversal.enable_first_retest_short);
+        assert_eq!(
+            converted
+                .liquidity_sweep_reversal
+                .first_retest_take_profit_r,
+            Some(2.0)
+        );
+        assert!(
+            converted
+                .liquidity_sweep_reversal
+                .first_retest_replace_existing_take_profit
+        );
+        assert_eq!(
+            converted
+                .liquidity_sweep_reversal
+                .first_retest_max_wait_bars,
+            2
+        );
+        assert_eq!(
+            converted
+                .liquidity_sweep_reversal
+                .first_retest_min_volume_ratio,
+            Some(2.0)
+        );
+        assert_eq!(converted.liquidity_sweep_reversal.lookback_bars, 20);
+        assert!(converted.ema_tunnel_retest_confirmation.is_open);
+        assert!(!converted.ema_tunnel_retest_confirmation.enable_long);
+        assert!(converted.ema_tunnel_retest_confirmation.enable_short);
+        assert_eq!(
+            converted
+                .ema_tunnel_retest_confirmation
+                .stop_loss_buffer_ratio,
+            0.006
+        );
+        assert!(converted.volume_profile_value_area_retest.is_open);
+        assert!(converted.volume_profile_value_area_retest.enable_long);
+        assert!(!converted.volume_profile_value_area_retest.enable_short);
+        assert_eq!(
+            converted
+                .volume_profile_value_area_retest
+                .stop_loss_buffer_ratio,
+            0.006
+        );
+        assert!(converted.volume_profile_value_area_breakout.is_open);
+        assert!(!converted.volume_profile_value_area_breakout.enable_long);
+        assert!(converted.volume_profile_value_area_breakout.enable_short);
+        assert!(
+            converted
+                .volume_profile_value_area_breakout
+                .require_short_adx_25
+        );
+        assert_eq!(
+            converted
+                .volume_profile_value_area_breakout
+                .fixed_take_profit_r,
+            Some(2.0)
+        );
+        assert_eq!(
+            converted
+                .volume_profile_value_area_breakout
+                .stop_loss_buffer_ratio,
+            0.006
+        );
+        assert!(converted.volume_profile_failed_auction.is_open);
+        assert_eq!(
+            converted
+                .volume_profile_failed_auction
+                .stop_loss_buffer_ratio,
+            0.006
+        );
+        assert!(converted.donchian_volume_breakout.is_open);
+        assert!(!converted.donchian_volume_breakout.enable_long);
+        assert!(converted.donchian_volume_breakout.enable_short);
+        assert!(converted.donchian_breakout_acceptance.is_open);
+        assert!(converted.donchian_breakout_acceptance.enable_long);
+        assert!(!converted.donchian_breakout_acceptance.enable_short);
+        assert_eq!(
+            converted
+                .donchian_breakout_acceptance
+                .stop_loss_buffer_ratio,
+            0.006
+        );
+        assert!(converted.bos_fvg_retest.is_open);
+        assert!(converted.bos_fvg_retest.enable_short);
+        assert!(converted.fvg_reclaim.is_open);
+        assert!(converted.fvg_reclaim.enable_long);
+        assert!(converted.fvg_reclaim.require_internal_bullish_choch);
+        assert!(converted.macd_divergence_reversal.is_open);
+        assert!(converted.macd_divergence_reversal.enable_long);
+        assert!(converted.macd_divergence_reversal.enable_short);
+        assert!(converted.macd_trend_reset_bos.is_open);
+        assert!(converted.macd_trend_reset_bos.enable_long);
+        assert!(converted.macd_trend_reset_bos.enable_short);
+    }
+
+    #[test]
+    fn vegas_config_conversion_preserves_short_profit_protection_gate() {
+        let vegas_strategy = VegasStrategy {
+            period: "4H".to_string(),
+            ema_signal: Some(EmaSignalConfig::default()),
+            volume_signal: Some(VolumeSignalConfig::default()),
+            rsi_signal: Some(RsiSignalConfig::default()),
+            bolling_signal: Some(BollingBandsSignalConfig::default()),
+            kline_hammer_signal: Some(KlineHammerConfig::default()),
+            short_profit_protection: ShortProfitProtectionConfig {
+                is_open: true,
+                ..ShortProfitProtectionConfig::default()
+            },
+            ..VegasStrategy::default()
+        };
+        let config = StrategyConfig::new(
+            3,
+            StrategyType::Vegas,
+            "XRP-USDT-SWAP".to_string(),
+            Timeframe::H4,
+            serde_json::to_value(vegas_strategy).expect("vegas strategy json"),
+            json!({"max_loss_percent": 0.04}),
+        );
+
+        let param = convert_strategy_config_to_param(&config).expect("convert vegas config");
+        let converted = param.to_vegas_strategy("4H".to_string());
+
+        assert!(converted.short_profit_protection.is_open);
+    }
+
+    #[test]
+    fn vegas_config_conversion_preserves_compressed_range_breakout_gate() {
+        let vegas_strategy = VegasStrategy {
+            period: "4H".to_string(),
+            ema_signal: Some(EmaSignalConfig::default()),
+            volume_signal: Some(VolumeSignalConfig::default()),
+            rsi_signal: Some(RsiSignalConfig::default()),
+            bolling_signal: Some(BollingBandsSignalConfig::default()),
+            kline_hammer_signal: Some(KlineHammerConfig::default()),
+            compressed_range_breakout: CompressedRangeBreakoutConfig {
+                is_open: true,
+                standalone: true,
+                enable_long: true,
+                enable_short: false,
+                use_prior_range_invalidation_stop: true,
+                block_low_volume_normal_ema_short: true,
+                widen_short_invalidation_stop_to_one_atr: true,
+                delay_low_volume_short_one_bar: true,
+                allow_short_price_displacement_without_volume: true,
+                require_short_relative_volume_2_5: true,
+                require_short_relative_volume_2_0: true,
+            },
+            ..VegasStrategy::default()
+        };
+        let config = StrategyConfig::new(
+            4,
+            StrategyType::Vegas,
+            "XRP-USDT-SWAP".to_string(),
+            Timeframe::H4,
+            serde_json::to_value(vegas_strategy).expect("vegas strategy json"),
+            json!({"max_loss_percent": 0.04}),
+        );
+
+        let param = convert_strategy_config_to_param(&config).expect("convert vegas config");
+        let converted = param.to_vegas_strategy("4H".to_string());
+
+        assert!(converted.compressed_range_breakout.is_open);
+        assert!(converted.compressed_range_breakout.standalone);
+        assert!(converted.compressed_range_breakout.enable_long);
+        assert!(!converted.compressed_range_breakout.enable_short);
+        assert!(
+            converted
+                .compressed_range_breakout
+                .use_prior_range_invalidation_stop
+        );
+        assert!(
+            converted
+                .compressed_range_breakout
+                .block_low_volume_normal_ema_short
+        );
+        assert!(
+            converted
+                .compressed_range_breakout
+                .widen_short_invalidation_stop_to_one_atr
+        );
+        assert!(
+            converted
+                .compressed_range_breakout
+                .delay_low_volume_short_one_bar
+        );
+        assert!(
+            converted
+                .compressed_range_breakout
+                .allow_short_price_displacement_without_volume
+        );
+        assert!(
+            converted
+                .compressed_range_breakout
+                .require_short_relative_volume_2_5
+        );
+        assert!(
+            converted
+                .compressed_range_breakout
+                .require_short_relative_volume_2_0
+        );
     }
 }

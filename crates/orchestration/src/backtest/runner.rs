@@ -382,7 +382,19 @@ impl BacktestRunner {
             .executor
             .load_and_convert_candle_data(inst_id, period, config.candle_limit, None)
             .await?;
-        let random_config = RandomStrategyConfig::default();
+        let random_config = RandomStrategyConfig::for_target(inst_id, period).with_sampling(
+            config.random_sample_size,
+            config.random_sample_seed,
+            config.random_batch_size,
+        );
+        info!(
+            "[Vegas 随机] 参数空间={}, 本轮样本={}, seed={}, batch={}, concurrency={}",
+            random_config.calculate_search_space_size(),
+            random_config.calculate_total_combinations(),
+            random_config.sample_seed,
+            random_config.batch_size,
+            config.max_concurrent,
+        );
         let progress = match StrategyProgressManager::load_progress(inst_id, period).await? {
             Some(saved) => {
                 if StrategyProgressManager::is_config_changed(&random_config, &saved) {
@@ -404,9 +416,9 @@ impl BacktestRunner {
             None => StrategyProgressManager::create_new_progress(inst_id, period, &random_config),
         };
         StrategyProgressManager::save_progress(&progress).await?;
-        let mut generator = ParamGenerator::new(
+        let mut generator = ParamGenerator::new_sampled(
             random_config.bb_periods.clone(),
-            random_config.shadow_ratios.clone(),
+            random_config.k_line_hammer_shadow_ratios.clone(),
             random_config.bb_multipliers.clone(),
             random_config.volume_bar_nums.clone(),
             random_config.volume_ratios.clone(),
@@ -417,6 +429,8 @@ impl BacktestRunner {
             random_config.take_profit_ratios.clone(),
             random_config.is_used_signal_k_line_stop_loss.clone(),
             random_config.fix_signal_kline_take_profit_ratios.clone(),
+            random_config.sample_size,
+            random_config.sample_seed,
         );
         generator.set_current_index(progress.current_index);
         loop {
@@ -424,6 +438,8 @@ impl BacktestRunner {
             if batch.is_empty() {
                 break;
             }
+            let batch_size = batch.len();
+            let batch_start = Instant::now();
             self.executor
                 .run_back_test_strategy(
                     batch,
@@ -434,9 +450,24 @@ impl BacktestRunner {
                     semaphore.clone(),
                 )
                 .await;
+            let batch_elapsed = batch_start.elapsed();
+            let average_seconds = batch_elapsed.as_secs_f64() / batch_size as f64;
+            info!(
+                "[Vegas 随机] 批次性能: count={}, elapsed_ms={}, avg_seconds_per_run={:.3}",
+                batch_size,
+                batch_elapsed.as_millis(),
+                average_seconds,
+            );
             let (current_index, total_count) = generator.progress();
             StrategyProgressManager::update_progress(inst_id, period, current_index, current_index)
                 .await?;
+            if average_seconds > config.random_max_seconds_per_run {
+                return Err(anyhow!(
+                    "Vegas 随机回测单参数平均耗时 {:.3}s 超过 {:.3}s，已停止后续批次",
+                    average_seconds,
+                    config.random_max_seconds_per_run,
+                ));
+            }
             info!(
                 "[Vegas 随机] 进度 {}/{} ({:.2}%), inst_id={}, period={}",
                 current_index,

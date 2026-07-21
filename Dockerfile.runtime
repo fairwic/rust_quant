@@ -16,6 +16,7 @@ RUN --mount=type=cache,id=quant-core-cargo-registry,target=/usr/local/cargo/regi
     --mount=type=cache,id=quant-core-target,target=/app/rust_quant/target \
     cargo build --release -p rust-quant-cli \
       --bin rust_quant \
+      --bin all_market_candle_volume_monitor \
       --bin market_velocity_candle_backfill \
       --bin market_velocity_kline_scanner \
       --bin market_velocity_event_backtest \
@@ -24,6 +25,7 @@ RUN --mount=type=cache,id=quant-core-cargo-registry,target=/usr/local/cargo/regi
       --bin quant_core_schema_ensure \
     && mkdir -p /app/rust_quant/bin \
     && cp target/release/rust_quant /app/rust_quant/bin/rust_quant \
+    && cp target/release/all_market_candle_volume_monitor /app/rust_quant/bin/all_market_candle_volume_monitor \
     && cp target/release/market_velocity_candle_backfill /app/rust_quant/bin/market_velocity_candle_backfill \
     && cp target/release/market_velocity_kline_scanner /app/rust_quant/bin/market_velocity_kline_scanner \
     && cp target/release/market_velocity_event_backtest /app/rust_quant/bin/market_velocity_event_backtest \
@@ -40,6 +42,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/rust_quant/bin/rust_quant /usr/local/bin/rust_quant
+COPY --from=builder /app/rust_quant/bin/all_market_candle_volume_monitor /usr/local/bin/all_market_candle_volume_monitor
 COPY --from=builder /app/rust_quant/bin/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill
 COPY --from=builder /app/rust_quant/bin/market_velocity_kline_scanner /usr/local/bin/market_velocity_kline_scanner
 COPY --from=builder /app/rust_quant/bin/market_velocity_event_backtest /usr/local/bin/market_velocity_event_backtest

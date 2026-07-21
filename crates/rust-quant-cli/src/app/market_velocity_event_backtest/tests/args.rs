@@ -25,6 +25,11 @@ fn defaults_to_4h_trend_timeframe() {
     assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::FourHour);
 }
 #[test]
+fn parses_price_volume_diagnostic_report() {
+    let args = parse_cli_args_from(["--equity-price-volume-diagnostic-report"]).unwrap();
+    assert!(args.equity_price_volume_diagnostic_report);
+}
+#[test]
 fn parses_1h_trend_timeframe() {
     let args = parse_cli_args_from(["--trend-timeframe", "1h"]).unwrap();
     assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::OneHour);
@@ -96,9 +101,353 @@ fn parses_entry_symbol_cooldown_filter() {
     assert_eq!(args.entry_symbol_cooldown_candles, Some(8));
 }
 #[test]
+fn parses_one_shot_extreme_volume_trend_state_research() {
+    let args = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--kline-current-live-only",
+        "--trade-direction",
+        "both",
+        "--entry-opposite-move-lookback-candles",
+        "192",
+        "--entry-min-opposite-net-move-pct",
+        "8",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-opposite-duration-min-r-squared",
+        "0.60",
+        "--entry-min-range-expansion-ratio",
+        "1.4",
+        "--entry-extreme-volume-contrarian",
+        "--entry-once-per-opposite-trend-state",
+        "--entry-wait-setup-open-reclaim",
+        "--entry-opposite-trend-reset-confirm-candles",
+        "8",
+        "--event-start-ms",
+        "1751328000000",
+        "--event-end-ms",
+        "1784278800000",
+    ])
+    .unwrap();
+
+    assert!(args.kline_current_live_only);
+    assert!(args.entry_extreme_volume_contrarian);
+    assert!(args.entry_once_per_opposite_trend_state);
+    assert!(args.entry_wait_setup_open_reclaim);
+    assert_eq!(args.entry_opposite_trend_reset_confirm_candles, 8);
+    assert_eq!(args.trade_direction, MarketVelocityTradeDirection::Both);
+    assert_eq!(args.trend_timeframe, MarketVelocityTrendTimeframe::Off);
+}
+
+#[test]
+fn setup_open_reclaim_requires_one_shot_trend_state() {
+    let err = parse_cli_args_from(["--entry-wait-setup-open-reclaim"]).unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("requires --entry-once-per-opposite-trend-state"));
+}
+
+#[test]
+fn parses_one_shot_extreme_volume_continuation_research() {
+    let args = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--kline-current-live-only",
+        "--trade-direction",
+        "both",
+        "--entry-min-body-ratio-pct",
+        "20",
+        "--entry-min-range-expansion-ratio",
+        "1.4",
+        "--entry-extreme-volume-continuation",
+        "--entry-once-per-historical-trend-state",
+        "--entry-opposite-trend-reset-confirm-candles",
+        "8",
+        "--entry-min-opposite-net-move-pct",
+        "8",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--event-start-ms",
+        "1751328000000",
+        "--event-end-ms",
+        "1784278800000",
+    ])
+    .unwrap();
+
+    assert!(args.entry_extreme_volume_continuation);
+    assert!(args.entry_once_per_historical_trend_state);
+    assert_eq!(args.entry_opposite_trend_reset_confirm_candles, 8);
+}
+
+#[test]
+fn extreme_volume_continuation_requires_one_shot_historical_state() {
+    let err = parse_cli_args_from(["--entry-extreme-volume-continuation"]).unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("requires --entry-once-per-historical-trend-state"));
+}
+
+#[test]
+fn rvat10_requires_extreme_volume_continuation() {
+    let err = parse_cli_args_from(["--entry-relative-volume-at-time-10d"]).unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("requires --entry-extreme-volume-continuation"));
+}
+
+#[test]
+fn stable_reset_confirmation_requires_one_shot_state() {
+    let err =
+        parse_cli_args_from(["--entry-opposite-trend-reset-confirm-candles", "8"]).unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("requires a one-shot trend-state mode"));
+}
+
+#[test]
+fn stable_reset_confirmation_rejects_zero_candles() {
+    let err =
+        parse_cli_args_from(["--entry-opposite-trend-reset-confirm-candles", "0"]).unwrap_err();
+
+    assert!(err.to_string().contains("must be greater than 0"));
+}
+
+#[test]
+fn one_shot_trend_state_fails_closed_without_current_live_universe() {
+    let err = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--trade-direction",
+        "both",
+        "--entry-min-opposite-net-move-pct",
+        "8",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-min-range-expansion-ratio",
+        "1.4",
+        "--entry-extreme-volume-contrarian",
+        "--entry-once-per-opposite-trend-state",
+        "--event-start-ms",
+        "1751328000000",
+        "--event-end-ms",
+        "1784278800000",
+    ])
+    .unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("requires current-live K-line universe"));
+}
+#[test]
 fn parses_opposite_duration_filter() {
-    let args = parse_cli_args_from(["--entry-min-opposite-duration-candles", "96"]).unwrap();
+    let args = parse_cli_args_from([
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-opposite-duration-min-r-squared",
+        "0.60",
+    ])
+    .unwrap();
     assert_eq!(args.entry_min_opposite_duration_candles, Some(96));
+    assert_eq!(args.entry_opposite_duration_min_r_squared, 0.60);
+
+    for invalid in ["0", "1.01", "NaN"] {
+        assert!(
+            parse_cli_args_from(["--entry-opposite-duration-min-r-squared", invalid,]).is_err()
+        );
+    }
+}
+
+#[test]
+fn parses_framework_equity_max_holding_hours() {
+    let args = parse_cli_args_from(["--equity-max-holding-hours", "48"]).unwrap();
+    assert_eq!(args.equity_max_holding_hours, Some(48));
+    assert!(parse_cli_args_from(["--equity-max-holding-hours", "0"]).is_err());
+}
+
+#[test]
+fn parses_research_only_long_lower_wick_buffer() {
+    let args = parse_cli_args_from([
+        "--trade-direction",
+        "long",
+        "--entry-opposite-move-lookback-candles",
+        "192",
+        "--entry-min-opposite-net-move-pct",
+        "10",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-defer-long-lower-wick-reversal",
+        "--entry-defer-max-wait-candles",
+        "1",
+    ])
+    .unwrap();
+
+    assert!(args.entry_defer_long_lower_wick_reversal);
+    assert_eq!(args.entry_defer_max_wait_candles, 1);
+}
+
+#[test]
+fn parses_research_only_bullish_hammer_buffer() {
+    let args = parse_cli_args_from([
+        "--entry-min-opposite-net-move-pct",
+        "10",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-long-bullish-hammer-reversal",
+    ])
+    .unwrap();
+
+    assert!(args.entry_long_bullish_hammer_reversal);
+    assert!(!args.entry_defer_long_lower_wick_reversal);
+}
+
+#[test]
+fn parses_research_only_two_stage_recovery() {
+    let args = parse_cli_args_from([
+        "--entry-min-opposite-net-move-pct",
+        "10",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-require-two-stage-recovery",
+    ])
+    .unwrap();
+
+    assert!(args.entry_require_two_stage_recovery);
+}
+
+#[test]
+fn parses_research_only_macd_negative_histogram_recovery() {
+    let args = parse_cli_args_from([
+        "--entry-min-opposite-net-move-pct",
+        "8",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-require-macd-negative-histogram-improving",
+    ])
+    .unwrap();
+
+    assert!(args.entry_require_macd_negative_histogram_improving);
+}
+
+#[test]
+fn rejects_macd_recovery_outside_long_reversal_research() {
+    assert!(parse_cli_args_from(["--entry-require-macd-negative-histogram-improving"]).is_err());
+    assert!(parse_cli_args_from([
+        "--trade-direction",
+        "short",
+        "--entry-min-opposite-net-move-pct",
+        "8",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-require-macd-negative-histogram-improving",
+    ])
+    .is_err());
+}
+
+#[test]
+fn parses_research_only_bullish_structure_break() {
+    let args = parse_cli_args_from([
+        "--entry-min-opposite-net-move-pct",
+        "8",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-require-bullish-structure-break",
+    ])
+    .unwrap();
+
+    assert!(args.entry_require_bullish_structure_break);
+}
+
+#[test]
+fn rejects_bullish_structure_break_outside_long_reversal_research() {
+    assert!(parse_cli_args_from(["--entry-require-bullish-structure-break"]).is_err());
+    assert!(parse_cli_args_from([
+        "--trade-direction",
+        "short",
+        "--entry-min-opposite-net-move-pct",
+        "8",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-require-bullish-structure-break",
+    ])
+    .is_err());
+}
+
+#[test]
+fn rejects_two_stage_recovery_outside_its_research_contract() {
+    for invalid in [
+        vec!["--entry-require-two-stage-recovery"],
+        vec![
+            "--trade-direction",
+            "short",
+            "--entry-min-opposite-net-move-pct",
+            "10",
+            "--entry-min-opposite-duration-candles",
+            "96",
+            "--entry-require-two-stage-recovery",
+        ],
+        vec![
+            "--entry-min-opposite-net-move-pct",
+            "10",
+            "--entry-min-opposite-duration-candles",
+            "96",
+            "--entry-require-two-stage-recovery",
+            "--entry-long-bullish-hammer-reversal",
+        ],
+    ] {
+        assert!(parse_cli_args_from(invalid).is_err());
+    }
+}
+
+#[test]
+fn rejects_lower_wick_buffer_without_exact_research_contract() {
+    for invalid in [
+        vec![
+            "--entry-defer-long-lower-wick-reversal",
+            "--entry-defer-max-wait-candles",
+            "1",
+        ],
+        vec![
+            "--trade-direction",
+            "short",
+            "--entry-min-opposite-net-move-pct",
+            "10",
+            "--entry-min-opposite-duration-candles",
+            "96",
+            "--entry-defer-long-lower-wick-reversal",
+            "--entry-defer-max-wait-candles",
+            "1",
+        ],
+        vec![
+            "--entry-min-opposite-net-move-pct",
+            "10",
+            "--entry-min-opposite-duration-candles",
+            "96",
+            "--entry-defer-long-lower-wick-reversal",
+        ],
+    ] {
+        assert!(parse_cli_args_from(invalid).is_err());
+    }
+}
+
+#[test]
+fn rejects_bullish_hammer_with_deferred_lower_wick_mode() {
+    let error = parse_cli_args_from([
+        "--entry-min-opposite-net-move-pct",
+        "10",
+        "--entry-min-opposite-duration-candles",
+        "96",
+        "--entry-defer-long-lower-wick-reversal",
+        "--entry-defer-max-wait-candles",
+        "1",
+        "--entry-long-bullish-hammer-reversal",
+    ])
+    .unwrap_err();
+
+    assert!(error.to_string().contains("mutually exclusive"));
 }
 
 #[test]
@@ -263,6 +612,33 @@ fn parses_kline_15m_sample_seed_for_reproducible_random_samples() {
     assert_eq!(args.event_source, MarketVelocityEventSource::Kline15m);
     assert_eq!(args.sample_limit, 20);
     assert_eq!(args.sample_seed, "batch_a");
+}
+#[test]
+fn historical_universe_manifest_replaces_random_kline_sampling_only_with_explicit_window() {
+    let args = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--historical-universe-manifest",
+        "/tmp/universe.json",
+        "--event-start-ms",
+        "100",
+        "--event-end-ms",
+        "200",
+    ])
+    .unwrap();
+    assert_eq!(
+        args.historical_universe_manifest,
+        Some(std::path::PathBuf::from("/tmp/universe.json"))
+    );
+
+    let error = parse_cli_args_from([
+        "--event-source",
+        "kline_15m",
+        "--historical-universe-manifest",
+        "/tmp/universe.json",
+    ])
+    .unwrap_err();
+    assert!(error.to_string().contains("explicit --event-start-ms"));
 }
 #[test]
 fn rejects_unknown_event_source() {

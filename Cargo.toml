@@ -76,6 +76,7 @@ hmac = "0.12.1"
 sha2 = "0.10.8"
 hex = "0.4.3"
 base64 = "0.21.7"
+zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 
 # === 配置管理 ===
 dotenv = "0.15.0"

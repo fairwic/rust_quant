@@ -67,7 +67,8 @@ impl PipelineRunner {
             TradingState::default(),
         );
         let collect_dynamic_config_logs =
-            !rust_quant_core::config::env_is_true("BACKTEST_FAST_MODE", false);
+            !rust_quant_core::config::env_is_true("BACKTEST_FAST_MODE", false)
+                && !rust_quant_core::config::random_backtest_is_enabled();
         let mut dynamic_config_logs: Vec<DynamicConfigLog> = Vec::new();
         // 按原始 K 线顺序逐根推进，保证信号、过滤和成交记录共享同一个时间轴；
         // reset_for_next_candle 只切换当前 candle，不清空跨 candle 的持仓状态。

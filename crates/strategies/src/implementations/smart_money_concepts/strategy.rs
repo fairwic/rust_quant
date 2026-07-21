@@ -1,17 +1,37 @@
 use super::types::{
-    round_price, SmartMoneyConceptsAction, SmartMoneyConceptsBacktestTuning,
-    SmartMoneyConceptsDecision, SmartMoneyConceptsEvent, SmartMoneyConceptsSignalSnapshot,
-    SmartMoneyConceptsThresholds,
+    round_price, CausalMarketStructureFeatures, SmartMoneyConceptsAction,
+    SmartMoneyConceptsBacktestTuning, SmartMoneyConceptsDecision, SmartMoneyConceptsEvent,
+    SmartMoneyConceptsSignalSnapshot, SmartMoneyConceptsThresholds,
 };
 use crate::framework::backtest::{run_indicator_strategy_backtest, IndicatorStrategyBacktest};
 use crate::strategy_common::{BackTestResult, BasicRiskStrategyConfig, SignalResult};
 use crate::CandleItem;
 use serde_json::json;
 
+mod causal_features;
+
+use causal_features::{causal_market_structure_feature_series, causal_market_structure_features};
+
 /// Smart Money Concepts v1 research strategy，复刻结构突破思想但禁止使用未来函数。
 pub struct SmartMoneyConceptsStrategy;
 
 impl SmartMoneyConceptsStrategy {
+    /// 提取可供其他策略分层的因果 BOS/CHoCH/FVG 特征，不生成交易信号。
+    pub fn causal_market_structure_features(
+        candles: &[CandleItem],
+        pivot_confirmation_bars: usize,
+    ) -> CausalMarketStructureFeatures {
+        causal_market_structure_features(candles, pivot_confirmation_bars)
+    }
+
+    /// 一次前向扫描返回每根已完成 K 线的因果结构状态，供长窗口研究复用。
+    pub fn causal_market_structure_feature_series(
+        candles: &[CandleItem],
+        pivot_confirmation_bars: usize,
+    ) -> Vec<CausalMarketStructureFeatures> {
+        causal_market_structure_feature_series(candles, pivot_confirmation_bars)
+    }
+
     /// 基于已确认结构快照评估交易方向；缺少止损保护时必须返回 Flat。
     pub fn evaluate(
         thresholds: &SmartMoneyConceptsThresholds,

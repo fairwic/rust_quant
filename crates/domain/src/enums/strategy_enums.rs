@@ -7,6 +7,42 @@ pub enum StrategyType {
     Vegas,
     /// Vegas 全市场自适应 4H 策略
     VegasUniversal4h,
+    /// Vegas MACD 背离 + fresh CHoCH 4H 研究策略
+    VegasMacdDivergenceFreshChoch4hResearch,
+    /// Vegas MACD 趋势复位 + fresh BOS 4H 研究策略
+    VegasMacdTrendResetFreshBos4hResearch,
+    /// Vegas 扫流动性、确认收回、首次回测 4H 研究策略
+    VegasLiquiditySweepFirstRetest4hResearch,
+    /// Vegas 扫低流动性后两棒确认多头 4H 研究策略
+    VegasLowerLiquiditySweepConfirmation4hResearch,
+    /// Vegas 跌破支撑后收回结构内的多头 4H 研究策略
+    VegasFailedBreakdownCloseReentryLong4hResearch,
+    /// Vegas 失败跌破后更高低点突破多头 4H 研究策略
+    VegasFailedBreakdownHigherLowBreakoutLong4hResearch,
+    /// Vegas 扫高收回后跌破确认棒低点空头 4H 研究策略
+    VegasUpperSweepConfirmationLowBreakShort4hResearch,
+    /// Vegas 仅保留冲击级量能压缩突破空头的 4H 研究策略
+    VegasHighVolumeCompressedSweep4hResearch,
+    /// Vegas 高量压缩基线 + 第二根首次回测的 4H 研究策略
+    VegasHighVolumeCompressedDelayedRetest4hResearch,
+    /// Vegas 使用既有 2.0x 放量标准的压缩突破 4H 研究策略
+    VegasVolumeIncreaseCompressedSweep4hResearch,
+    /// Vegas 压缩区间突破做空、结构止损的独立 4H 研究策略
+    VegasCompressedRangeBreakoutShort4hResearch,
+    /// Vegas 下方扫单收回后突破确认高点的 4H 研究策略
+    VegasLowerSweepConfirmationHighBreakLong4hResearch,
+    /// Vegas EMA144/169 隧道顺势回踩确认 4H 研究策略
+    VegasEmaTunnelRetestConfirmation4hResearch,
+    /// Vegas 固定成交量价值区突破回踩确认 4H 研究策略
+    VegasVolumeProfileValueAreaRetest4hResearch,
+    /// Vegas 固定成交量价值区即时突破 4H 研究策略
+    VegasVolumeProfileValueAreaBreakout4hResearch,
+    /// Vegas 成交量价值区上方失败拍卖做空 4H 研究策略
+    VegasVolumeProfileFailedAuctionShort4hResearch,
+    /// Vegas Donchian 放量通道突破 4H 研究策略
+    VegasDonchianVolumeBreakout4hResearch,
+    /// Vegas Donchian 突破后一棒接受 4H 研究策略
+    VegasDonchianBreakoutAcceptance4hResearch,
     /// NWE 策略
     Nwe,
     /// MACD+KDJ 策略
@@ -57,6 +93,60 @@ impl StrategyType {
         match self {
             StrategyType::Vegas => "vegas",
             StrategyType::VegasUniversal4h => "vegas_universal_4h",
+            StrategyType::VegasMacdDivergenceFreshChoch4hResearch => {
+                "vegas_macd_divergence_fresh_choch_reversal_4h_research"
+            }
+            StrategyType::VegasMacdTrendResetFreshBos4hResearch => {
+                "vegas_macd_trend_reset_fresh_bos_4h_research"
+            }
+            StrategyType::VegasLiquiditySweepFirstRetest4hResearch => {
+                "vegas_liquidity_sweep_first_retest_4h_research"
+            }
+            StrategyType::VegasLowerLiquiditySweepConfirmation4hResearch => {
+                "vegas_lower_liquidity_sweep_confirmation_4h_research"
+            }
+            StrategyType::VegasFailedBreakdownCloseReentryLong4hResearch => {
+                "vegas_failed_breakdown_close_reentry_long_4h_research"
+            }
+            StrategyType::VegasFailedBreakdownHigherLowBreakoutLong4hResearch => {
+                "vegas_failed_breakdown_higher_low_breakout_long_4h_research"
+            }
+            StrategyType::VegasUpperSweepConfirmationLowBreakShort4hResearch => {
+                "vegas_upper_sweep_confirmation_low_break_short_4h_research"
+            }
+            StrategyType::VegasHighVolumeCompressedSweep4hResearch => {
+                "vegas_high_volume_compressed_sweep_4h_research"
+            }
+            StrategyType::VegasHighVolumeCompressedDelayedRetest4hResearch => {
+                "vegas_high_volume_compressed_delayed_retest_4h_research"
+            }
+            StrategyType::VegasVolumeIncreaseCompressedSweep4hResearch => {
+                "vegas_volume_increase_compressed_sweep_4h_research"
+            }
+            StrategyType::VegasCompressedRangeBreakoutShort4hResearch => {
+                "vegas_compressed_range_breakout_short_4h_research"
+            }
+            StrategyType::VegasLowerSweepConfirmationHighBreakLong4hResearch => {
+                "vegas_lower_sweep_confirmation_high_break_long_4h_research"
+            }
+            StrategyType::VegasEmaTunnelRetestConfirmation4hResearch => {
+                "vegas_ema_tunnel_retest_confirmation_4h_research"
+            }
+            StrategyType::VegasVolumeProfileValueAreaRetest4hResearch => {
+                "vegas_volume_profile_value_area_retest_4h_research"
+            }
+            StrategyType::VegasVolumeProfileValueAreaBreakout4hResearch => {
+                "vegas_volume_profile_value_area_breakout_4h_research"
+            }
+            StrategyType::VegasVolumeProfileFailedAuctionShort4hResearch => {
+                "vegas_volume_profile_failed_auction_short_4h_research"
+            }
+            StrategyType::VegasDonchianVolumeBreakout4hResearch => {
+                "vegas_donchian_volume_breakout_4h_research"
+            }
+            StrategyType::VegasDonchianBreakoutAcceptance4hResearch => {
+                "vegas_donchian_breakout_acceptance_4h_research"
+            }
             StrategyType::Nwe => "nwe",
             StrategyType::MacdKdj => "macd_kdj",
             StrategyType::Engulfing => "engulfing",
@@ -97,6 +187,60 @@ impl std::str::FromStr for StrategyType {
         match s.to_lowercase().as_str() {
             "vegas" => Ok(StrategyType::Vegas),
             "vegas_universal_4h" => Ok(StrategyType::VegasUniversal4h),
+            "vegas_macd_divergence_fresh_choch_reversal_4h_research" => {
+                Ok(StrategyType::VegasMacdDivergenceFreshChoch4hResearch)
+            }
+            "vegas_macd_trend_reset_fresh_bos_4h_research" => {
+                Ok(StrategyType::VegasMacdTrendResetFreshBos4hResearch)
+            }
+            "vegas_liquidity_sweep_first_retest_4h_research" => {
+                Ok(StrategyType::VegasLiquiditySweepFirstRetest4hResearch)
+            }
+            "vegas_lower_liquidity_sweep_confirmation_4h_research" => {
+                Ok(StrategyType::VegasLowerLiquiditySweepConfirmation4hResearch)
+            }
+            "vegas_failed_breakdown_close_reentry_long_4h_research" => {
+                Ok(StrategyType::VegasFailedBreakdownCloseReentryLong4hResearch)
+            }
+            "vegas_failed_breakdown_higher_low_breakout_long_4h_research" => {
+                Ok(StrategyType::VegasFailedBreakdownHigherLowBreakoutLong4hResearch)
+            }
+            "vegas_upper_sweep_confirmation_low_break_short_4h_research" => {
+                Ok(StrategyType::VegasUpperSweepConfirmationLowBreakShort4hResearch)
+            }
+            "vegas_high_volume_compressed_sweep_4h_research" => {
+                Ok(StrategyType::VegasHighVolumeCompressedSweep4hResearch)
+            }
+            "vegas_high_volume_compressed_delayed_retest_4h_research" => {
+                Ok(StrategyType::VegasHighVolumeCompressedDelayedRetest4hResearch)
+            }
+            "vegas_volume_increase_compressed_sweep_4h_research" => {
+                Ok(StrategyType::VegasVolumeIncreaseCompressedSweep4hResearch)
+            }
+            "vegas_compressed_range_breakout_short_4h_research" => {
+                Ok(StrategyType::VegasCompressedRangeBreakoutShort4hResearch)
+            }
+            "vegas_lower_sweep_confirmation_high_break_long_4h_research" => {
+                Ok(StrategyType::VegasLowerSweepConfirmationHighBreakLong4hResearch)
+            }
+            "vegas_ema_tunnel_retest_confirmation_4h_research" => {
+                Ok(StrategyType::VegasEmaTunnelRetestConfirmation4hResearch)
+            }
+            "vegas_volume_profile_value_area_retest_4h_research" => {
+                Ok(StrategyType::VegasVolumeProfileValueAreaRetest4hResearch)
+            }
+            "vegas_volume_profile_value_area_breakout_4h_research" => {
+                Ok(StrategyType::VegasVolumeProfileValueAreaBreakout4hResearch)
+            }
+            "vegas_volume_profile_failed_auction_short_4h_research" => {
+                Ok(StrategyType::VegasVolumeProfileFailedAuctionShort4hResearch)
+            }
+            "vegas_donchian_volume_breakout_4h_research" => {
+                Ok(StrategyType::VegasDonchianVolumeBreakout4hResearch)
+            }
+            "vegas_donchian_breakout_acceptance_4h_research" => {
+                Ok(StrategyType::VegasDonchianBreakoutAcceptance4hResearch)
+            }
             "nwe" => Ok(StrategyType::Nwe),
             "macd_kdj" => Ok(StrategyType::MacdKdj),
             "engulfing" => Ok(StrategyType::Engulfing),
@@ -260,6 +404,78 @@ mod tests {
         assert_eq!(
             StrategyType::from_str("vegas_universal_4h"),
             Ok(StrategyType::VegasUniversal4h)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_macd_divergence_fresh_choch_reversal_4h_research"),
+            Ok(StrategyType::VegasMacdDivergenceFreshChoch4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_macd_trend_reset_fresh_bos_4h_research"),
+            Ok(StrategyType::VegasMacdTrendResetFreshBos4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_liquidity_sweep_first_retest_4h_research"),
+            Ok(StrategyType::VegasLiquiditySweepFirstRetest4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_lower_liquidity_sweep_confirmation_4h_research"),
+            Ok(StrategyType::VegasLowerLiquiditySweepConfirmation4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_failed_breakdown_close_reentry_long_4h_research"),
+            Ok(StrategyType::VegasFailedBreakdownCloseReentryLong4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_failed_breakdown_higher_low_breakout_long_4h_research"),
+            Ok(StrategyType::VegasFailedBreakdownHigherLowBreakoutLong4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_upper_sweep_confirmation_low_break_short_4h_research"),
+            Ok(StrategyType::VegasUpperSweepConfirmationLowBreakShort4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_high_volume_compressed_sweep_4h_research"),
+            Ok(StrategyType::VegasHighVolumeCompressedSweep4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_high_volume_compressed_delayed_retest_4h_research"),
+            Ok(StrategyType::VegasHighVolumeCompressedDelayedRetest4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_volume_increase_compressed_sweep_4h_research"),
+            Ok(StrategyType::VegasVolumeIncreaseCompressedSweep4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_compressed_range_breakout_short_4h_research"),
+            Ok(StrategyType::VegasCompressedRangeBreakoutShort4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_lower_sweep_confirmation_high_break_long_4h_research"),
+            Ok(StrategyType::VegasLowerSweepConfirmationHighBreakLong4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_ema_tunnel_retest_confirmation_4h_research"),
+            Ok(StrategyType::VegasEmaTunnelRetestConfirmation4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_volume_profile_value_area_retest_4h_research"),
+            Ok(StrategyType::VegasVolumeProfileValueAreaRetest4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_volume_profile_value_area_breakout_4h_research"),
+            Ok(StrategyType::VegasVolumeProfileValueAreaBreakout4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_volume_profile_failed_auction_short_4h_research"),
+            Ok(StrategyType::VegasVolumeProfileFailedAuctionShort4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_donchian_volume_breakout_4h_research"),
+            Ok(StrategyType::VegasDonchianVolumeBreakout4hResearch)
+        );
+        assert_eq!(
+            StrategyType::from_str("vegas_donchian_breakout_acceptance_4h_research"),
+            Ok(StrategyType::VegasDonchianBreakoutAcceptance4hResearch)
         );
         assert_eq!(StrategyType::from_str("NWE"), Ok(StrategyType::Nwe));
         assert_eq!(

@@ -1,6 +1,6 @@
 use super::directional_reversal::{
     EXHAUSTION_CURRENT_CLUSTER_CANDLES, EXHAUSTION_SWING_RADIUS_CANDLES,
-    EXHAUSTION_VOLUME_LOOKBACK_CANDLES, OPPOSITE_DURATION_MIN_R_SQUARED,
+    EXHAUSTION_VOLUME_LOOKBACK_CANDLES,
 };
 use super::{
     args::entry_trigger_filter_version_label, select_stop_loss_for_confirmed_signal,
@@ -67,7 +67,7 @@ pub fn build_market_velocity_paper_outcomes(
                     "entry_opposite_move_lookback_candles": args.entry_opposite_move_lookback_candles,
                     "entry_min_opposite_net_move_pct": args.entry_min_opposite_net_move_pct,
                     "entry_min_opposite_duration_candles": args.entry_min_opposite_duration_candles,
-                    "entry_opposite_duration_min_r_squared": OPPOSITE_DURATION_MIN_R_SQUARED,
+                    "entry_opposite_duration_min_r_squared": args.entry_opposite_duration_min_r_squared,
                     "entry_min_exhaustion_volume_dominance_ratio": args.entry_min_exhaustion_volume_dominance_ratio,
                     "entry_btc_96_max_abs_net_move_pct": args.entry_btc_96_max_abs_net_move_pct,
                     "entry_exhaustion_volume_lookback_candles": EXHAUSTION_VOLUME_LOOKBACK_CANDLES,

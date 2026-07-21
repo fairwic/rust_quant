@@ -12,10 +12,17 @@ pub struct SignalStage<S: IndicatorStrategyBacktest> {
     candle_buffer: Vec<CandleItem>,
     min_data_length: usize,
     capacity: usize,
+    /// false 表示结果不会持久化审计，此时跳过每根 K 线的 JSON 分配与快照缓存。
+    collect_audit: bool,
 }
 impl<S: IndicatorStrategyBacktest> SignalStage<S> {
     /// 初始化new，确保回测策略依赖和内部状态可直接使用。
     pub fn new(strategy: S) -> Self {
+        Self::with_audit(strategy, true)
+    }
+
+    /// 按运行模式控制逐 K 线审计；策略信号和交易决策本身不受该开关影响。
+    pub fn with_audit(strategy: S, collect_audit: bool) -> Self {
         let indicator_combine = strategy.init_indicator_combine();
         let min_data_length = strategy.min_data_length();
         let window_size = min_data_length;
@@ -30,6 +37,7 @@ impl<S: IndicatorStrategyBacktest> SignalStage<S> {
             candle_buffer: Vec::with_capacity(capacity),
             min_data_length,
             capacity,
+            collect_audit,
         }
     }
 }
@@ -86,7 +94,8 @@ where
             ctx.filter_reasons = signal.filter_reasons.clone();
         }
         ctx.signal = Some(signal);
-        if let Some(ref signal) = ctx.signal {
+        if self.collect_audit {
+            let signal = ctx.signal.as_ref().expect("signal was just assigned");
             let snapshot = SignalSnapshot {
                 ts: ctx.candle.ts,
                 payload: serde_json::to_string(signal).unwrap_or_default(),

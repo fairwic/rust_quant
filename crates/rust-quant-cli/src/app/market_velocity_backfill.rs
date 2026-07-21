@@ -36,6 +36,8 @@ pub struct MarketVelocityBackfillConfig {
     pub symbols: Vec<String>,
     /// require4h，用于配置运行参数。
     pub require_4h: bool,
+    /// 是否按已启用的生产策略配置加载本周期交易对，而不是读取短周期雷达候选。
+    pub enabled_strategy_symbols: bool,
     /// 天数。
     pub days: u64,
     /// 周期。
@@ -67,6 +69,8 @@ pub struct MarketVelocityBackfillCliArgs {
     pub proxy_url: Option<Option<String>>,
     /// 是否要求 4 小时级别数据；为空时使用默认策略。
     pub require_4h: Option<bool>,
+    /// 是否从已启用策略配置加载本周期交易对；为空时保持雷达候选逻辑。
+    pub enabled_strategy_symbols: Option<bool>,
     /// 页码限制；为空时使用默认值或表示不限制。
     pub page_limit: Option<usize>,
     /// 数量数值。
@@ -189,6 +193,7 @@ where
             "--no-proxy" => parsed.proxy_url = Some(None),
             "--require-4h" => parsed.require_4h = Some(true),
             "--all-radar-symbols" => parsed.require_4h = Some(false),
+            "--enabled-strategy-symbols" => parsed.enabled_strategy_symbols = Some(true),
             "--limit" => parsed.page_limit = Some(parse_next(&mut args, &arg)?),
             "--batch-size" => parsed.batch_size = Some(parse_next(&mut args, &arg)?),
             "--dry-run" => parsed.dry_run = Some(true),
@@ -222,7 +227,7 @@ where
 /// 执行输出市场动量backfillusage步骤，串起行情数据需要的状态推进和错误处理。
 pub fn print_market_velocity_backfill_usage() {
     println!(
-        "Usage: market_velocity_candle_backfill [--symbols BTC-USDT-SWAP,ETH-USDT-SWAP] [--days 60] [--timeframe 1m|5m|15m|1h|4h] [--timeframes 1m,5m,15m] [--proxy-url http://127.0.0.1:7897] [--dry-run|--write] [--all-radar-symbols] [--loop-interval-seconds 300]"
+        "Usage: market_velocity_candle_backfill [--symbols BTC-USDT-SWAP,ETH-USDT-SWAP] [--days 60] [--timeframe 1m|5m|15m|1h|4h] [--timeframes 1m,5m,15m] [--enabled-strategy-symbols] [--proxy-url http://127.0.0.1:7897] [--dry-run|--write] [--all-radar-symbols] [--loop-interval-seconds 300]"
     );
 }
 /// 把单进程调度器参数展开成多个周期配置，避免为每个小周期新增一个容器。
@@ -269,6 +274,10 @@ pub fn config_from_env_and_args(
         !parse_env_bool("MARKET_VELOCITY_BACKFILL_ALL_RADAR_SYMBOLS", false)
             && parse_env_bool("MARKET_VELOCITY_BACKFILL_REQUIRE_4H", true)
     });
+    let enabled_strategy_symbols = cli_args.enabled_strategy_symbols.unwrap_or(false);
+    if enabled_strategy_symbols && !symbols.is_empty() {
+        bail!("use only one of --symbols or --enabled-strategy-symbols");
+    }
     let days = cli_args
         .days
         .unwrap_or_else(|| parse_env_u64("MARKET_VELOCITY_BACKFILL_DAYS", DEFAULT_DAYS))
@@ -313,6 +322,7 @@ pub fn config_from_env_and_args(
         proxy_url,
         symbols,
         require_4h,
+        enabled_strategy_symbols,
         days,
         timeframe,
         page_limit,
@@ -332,10 +342,12 @@ pub async fn run_market_velocity_backfill(
         .connect(&config.database_url)
         .await
         .context("connect quant_core Postgres for market velocity candle backfill")?;
-    let mut symbols = if config.symbols.is_empty() {
-        load_market_velocity_backfill_symbols(&pool, config.require_4h).await?
-    } else {
+    let mut symbols = if !config.symbols.is_empty() {
         config.symbols.clone()
+    } else if config.enabled_strategy_symbols {
+        load_enabled_strategy_backfill_symbols(&pool, &config.timeframe).await?
+    } else {
+        load_market_velocity_backfill_symbols(&pool, config.require_4h).await?
     };
     symbols.sort();
     symbols.dedup();
@@ -357,10 +369,11 @@ pub async fn run_market_velocity_backfill(
         failed_symbols: Vec::new(),
     };
     info!(
-        "market velocity candle backfill started: symbols={}, days={}, timeframe={}, dry_run={}, proxy={}",
+        "market velocity candle backfill started: symbols={}, days={}, timeframe={}, enabled_strategy_symbols={}, dry_run={}, proxy={}",
         total,
         config.days,
         config.timeframe,
+        config.enabled_strategy_symbols,
         config.dry_run,
         config.proxy_url.as_deref().unwrap_or("disabled")
     );
@@ -454,7 +467,7 @@ async fn backfill_symbol_candles(
     {
         Ok(candles) => candles,
         Err(error) => {
-            if is_okx_missing_instrument_error(&error) {
+            if should_mark_okx_exchange_symbol_deleted(config.dry_run, &error) {
                 let rows = mark_okx_exchange_symbol_deleted(pool, symbol)
                     .await
                     .with_context(|| format!("mark OKX exchange symbol deleted: {symbol}"))?;
@@ -462,6 +475,11 @@ async fn backfill_symbol_candles(
                     symbol,
                     rows_affected = rows,
                     "marked OKX exchange symbol deleted after missing instrument response"
+                );
+            } else if config.dry_run && is_okx_missing_instrument_error(&error) {
+                warn!(
+                    symbol,
+                    "dry-run observed missing OKX instrument; exchange metadata was not changed"
                 );
             }
             return Err(error);
@@ -526,7 +544,7 @@ fn align_up_to_candle_boundary(timestamp_ms: i64, candle_ms: i64) -> i64 {
     }
 }
 
-/// 读取本地 K 线窗口的连续性摘要，先用 bounds/count 判定是否缺失，再记录最早断点用于缩小修复范围。
+/// 读取本地 K 线窗口的连续性摘要；已结束但仍未确认的 K 线也视为修复点，避免回测静默跳过历史数据。
 async fn load_candle_continuity_status(
     pool: &PgPool,
     symbol: &str,
@@ -556,7 +574,7 @@ async fn load_candle_continuity_status(
     let query = format!(
         r#"
         WITH windowed AS (
-          SELECT ts
+          SELECT ts, confirm
           FROM {quoted_table_name}
           WHERE ts >= $1
             AND ts <= $2
@@ -565,7 +583,10 @@ async fn load_candle_continuity_status(
           SELECT
             MIN(ts) AS earliest_ts,
             MAX(ts) AS latest_ts,
-            COUNT(*)::BIGINT AS actual_count
+            COUNT(*) FILTER (
+              WHERE confirm = '1'
+                 OR ts > $2 - $3
+            )::BIGINT AS actual_count
           FROM windowed
         ),
         ordered AS (
@@ -574,11 +595,20 @@ async fn load_candle_continuity_status(
             LAG(ts) OVER (ORDER BY ts) AS prev_ts
           FROM windowed
         ),
-        gaps AS (
-          SELECT MIN(ts) AS earliest_gap_start_ts
+        repair_points AS (
+          SELECT ts
           FROM ordered
           WHERE prev_ts IS NOT NULL
             AND ts - prev_ts > $3
+          UNION ALL
+          SELECT ts
+          FROM windowed
+          WHERE confirm <> '1'
+            AND ts <= $2 - $3
+        ),
+        gaps AS (
+          SELECT MIN(ts) AS earliest_gap_start_ts
+          FROM repair_points
         )
         SELECT
           bounds.earliest_ts,
@@ -809,6 +839,11 @@ pub fn is_okx_missing_instrument_error(error: &anyhow::Error) -> bool {
         && error_text.to_ascii_lowercase().contains("instrument")
 }
 
+/// 只有显式写入模式才能把 OKX 不存在的合约同步为已删除，保证 dry-run 不修改元数据。
+fn should_mark_okx_exchange_symbol_deleted(dry_run: bool, error: &anyhow::Error) -> bool {
+    !dry_run && is_okx_missing_instrument_error(error)
+}
+
 /// 标记 OKX 永续交易对为删除状态，后续候选查询只读取 trading/live 可用状态。
 pub async fn mark_okx_exchange_symbol_deleted(pool: &PgPool, symbol: &str) -> Result<u64> {
     let result = sqlx::query(mark_okx_exchange_symbol_deleted_sql())
@@ -844,6 +879,40 @@ pub async fn load_market_velocity_backfill_symbols(
         .into_iter()
         .map(|row| row.get::<String, _>("symbol"))
         .collect())
+}
+
+/// 加载当前已启用策略在指定周期使用的 OKX 永续交易对，避免低频补数依赖短周期雷达事件。
+async fn load_enabled_strategy_backfill_symbols(
+    pool: &PgPool,
+    timeframe: &str,
+) -> Result<Vec<String>> {
+    let rows = sqlx::query(load_enabled_strategy_backfill_symbols_sql())
+        .bind(timeframe)
+        .fetch_all(pool)
+        .await
+        .with_context(|| format!("load enabled strategy symbols for timeframe {timeframe}"))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("symbol"))
+        .collect())
+}
+
+/// 只选择已启用策略且交易所仍可交易的标的，防止退市配置继续触发公共行情请求。
+fn load_enabled_strategy_backfill_symbols_sql() -> &'static str {
+    r#"
+        SELECT DISTINCT upper(config.symbol) AS symbol
+        FROM strategy_configs config
+        JOIN exchange_symbols exchange_symbol
+          ON lower(exchange_symbol.exchange) = lower(config.exchange)
+         AND upper(exchange_symbol.normalized_symbol) = upper(config.symbol)
+        WHERE config.enabled = TRUE
+          AND lower(config.exchange) = 'okx'
+          AND lower(config.timeframe) = lower($1)
+          AND NULLIF(trim(config.symbol), '') IS NOT NULL
+          AND exchange_symbol.market_type = 'perpetual'
+          AND lower(exchange_symbol.status) IN ('trading', 'live')
+        ORDER BY symbol
+        "#
 }
 
 /// 生成 Market Velocity 补 K 线候选查询；只允许 OKX 当前可交易的永续合约进入补数链路。
@@ -1161,6 +1230,20 @@ mod tests {
         );
     }
     #[test]
+    fn cli_args_support_enabled_strategy_symbol_source() {
+        let args = parse_cli_args_from([
+            "--enabled-strategy-symbols",
+            "--timeframe",
+            "4h",
+            "--days",
+            "60",
+        ])
+        .unwrap();
+        assert_eq!(args.enabled_strategy_symbols, Some(true));
+        assert_eq!(args.timeframe, Some("4h".to_string()));
+        assert_eq!(args.days, Some(60));
+    }
+    #[test]
     fn history_url_paginates_to_older_candles_with_after() {
         let url = build_okx_history_candles_url(
             "https://www.okx.com/",
@@ -1381,6 +1464,17 @@ mod tests {
     }
 
     #[test]
+    fn enabled_strategy_symbol_scan_is_timeframe_scoped_and_exchange_safe() {
+        let sql = load_enabled_strategy_backfill_symbols_sql().to_ascii_lowercase();
+        assert!(sql.contains("from strategy_configs"));
+        assert!(sql.contains("config.enabled = true"));
+        assert!(sql.contains("lower(config.timeframe) = lower($1)"));
+        assert!(sql.contains("lower(config.exchange) = 'okx'"));
+        assert!(sql.contains("exchange_symbol.market_type = 'perpetual'"));
+        assert!(sql.contains("lower(exchange_symbol.status) in ('trading', 'live')"));
+    }
+
+    #[test]
     fn okx_51001_is_missing_instrument_error() {
         let error = anyhow!(okx_history_candles_api_error(
             "51001",
@@ -1394,6 +1488,17 @@ mod tests {
             "BTC-USDT-SWAP"
         ));
         assert!(!is_okx_missing_instrument_error(&transient));
+    }
+
+    #[test]
+    fn dry_run_does_not_mark_missing_okx_instrument_deleted() {
+        let missing = anyhow!(
+            "OKX history-candles returned code={} msg=instrument missing",
+            OKX_MISSING_INSTRUMENT_CODE
+        );
+
+        assert!(!should_mark_okx_exchange_symbol_deleted(true, &missing));
+        assert!(should_mark_okx_exchange_symbol_deleted(false, &missing));
     }
 
     #[test]

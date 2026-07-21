@@ -38,6 +38,51 @@ pub enum SmartMoneyConceptsEvent {
     BearishFairValueGap,
 }
 
+/// 仅由当前及此前已完成 K 线计算的结构特征；用于给其他研究策略做因果分层。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct CausalMarketStructureFeatures {
+    /// 当前收盘是否首次突破最近一个已确认摆动高点。
+    pub bullish_structure_break: bool,
+    /// 突破前结构已是抬高高低点时，标记为多头 BOS 延续。
+    pub bullish_bos: bool,
+    /// 突破前结构是降低高低点时，标记为多头 CHoCH 反转。
+    pub bullish_choch: bool,
+    /// 当前三根已完成 K 线是否形成多头 fair value gap。
+    pub bullish_fvg: bool,
+    /// 突破前最近两轮交替摆动是否构成高低点同步降低的空头结构。
+    pub prior_bearish_structure: bool,
+    /// 突破前最近两轮交替摆动是否构成高低点同步抬高的多头结构。
+    pub prior_bullish_structure: bool,
+    /// 最近一次多头 CHoCH 是否尚未被其保护低点的收盘跌破所否定。
+    pub bullish_choch_active: bool,
+    /// 最近一次仍有效多头 CHoCH 距当前已完成 K 线的数量。
+    pub bullish_choch_age_bars: Option<usize>,
+    /// 最近一次仍有效多头 CHoCH 突破的结构价格。
+    pub bullish_choch_break_level: Option<f64>,
+    /// 被当前收盘突破的最近已确认摆动高点；未突破时仍保留最近结构位。
+    pub latest_confirmed_swing_high: Option<f64>,
+    /// 最近一个已确认摆动低点；可用于审计 CHoCH 的保护低点。
+    pub latest_confirmed_swing_low: Option<f64>,
+    /// 当前结构突破收盘超过结构位的幅度，单位 ATR。
+    pub bullish_structure_break_margin_atr: Option<f64>,
+    /// 多头 FVG 下边界，即两根前 K 线最高价。
+    pub bullish_fvg_lower: Option<f64>,
+    /// 多头 FVG 上边界，即当前 K 线最低价。
+    pub bullish_fvg_upper: Option<f64>,
+    /// 当前新生多头 FVG 的宽度，单位 ATR。
+    pub bullish_fvg_gap_atr: Option<f64>,
+    /// 当前新生多头 FVG 中间位移 K 线的实体，单位 ATR。
+    pub bullish_fvg_displacement_body_atr: Option<f64>,
+    /// 最近一个尚未完全填补的有效多头 FVG 下边界。
+    pub active_bullish_fvg_lower: Option<f64>,
+    /// 最近一个尚未完全填补的有效多头 FVG 上边界。
+    pub active_bullish_fvg_upper: Option<f64>,
+    /// 最近一个有效多头 FVG 自形成后经过的已完成 K 线数量。
+    pub active_bullish_fvg_age_bars: Option<usize>,
+    /// 最近一个有效多头 FVG 已被价格向下填补的比例，范围 0～100。
+    pub active_bullish_fvg_mitigated_pct: Option<f64>,
+}
+
 impl Default for SmartMoneyConceptsEvent {
     fn default() -> Self {
         Self::None

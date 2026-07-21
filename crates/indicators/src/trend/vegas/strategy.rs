@@ -66,6 +66,45 @@ pub struct VegasStrategy {
     /// 入场硬拦截配置（默认全开，保持旧行为）
     #[serde(default = "default_entry_block_config")]
     pub entry_block_config: EntryBlockConfig,
+    /// 两根 K 线确认的流动性扫单反转；默认关闭，仅供独立研究版本开启。
+    #[serde(default)]
+    pub liquidity_sweep_reversal: LiquiditySweepReversalConfig,
+    /// 窄幅整理后的放量实体突破；默认关闭，仅供独立研究版本开启。
+    #[serde(default)]
+    pub compressed_range_breakout: CompressedRangeBreakoutConfig,
+    /// EMA144/169 隧道顺势回踩后的下一棒突破确认；默认关闭。
+    #[serde(default)]
+    pub ema_tunnel_retest_confirmation: EmaTunnelRetestConfirmationConfig,
+    /// 固定历史成交量价值区放量突破后的下一棒回踩接受；默认关闭。
+    #[serde(default)]
+    pub volume_profile_value_area_retest: VolumeProfileValueAreaRetestConfig,
+    /// 固定历史成交量价值区的即时放量突破；默认关闭。
+    #[serde(default)]
+    pub volume_profile_value_area_breakout: VolumeProfileValueAreaBreakoutConfig,
+    /// 固定历史价值区上方突破失败并收回区内的反向做空；默认关闭。
+    #[serde(default)]
+    pub volume_profile_failed_auction: VolumeProfileFailedAuctionConfig,
+    /// 固定 20 根 Donchian 通道的放量趋势突破；默认关闭。
+    #[serde(default)]
+    pub donchian_volume_breakout: DonchianVolumeBreakoutConfig,
+    /// Donchian 放量突破后紧邻一棒继续接受通道外价格；默认关闭。
+    #[serde(default)]
+    pub donchian_breakout_acceptance: DonchianBreakoutAcceptanceConfig,
+    /// bearish BOS 环境中的 FVG 首次回补失败；默认关闭，仅供独立研究版本开启。
+    #[serde(default)]
+    pub bos_fvg_retest: BosFvgRetestConfig,
+    /// bearish FVG 被多头完整收复；默认关闭，仅供独立研究版本开启。
+    #[serde(default)]
+    pub fvg_reclaim: FvgReclaimConfig,
+    /// MACD 背离后由 fresh internal CHoCH 确认的反转；默认关闭。
+    #[serde(default)]
+    pub macd_divergence_reversal: MacdDivergenceReversalConfig,
+    /// MACD 在趋势侧复位后由 fresh internal BOS 确认的顺势入场；默认关闭。
+    #[serde(default)]
+    pub macd_trend_reset_bos: MacdTrendResetBosConfig,
+    /// 空头达到 `1.5R` 后的保本保护；默认关闭，仅供独立研究版本开启。
+    #[serde(default)]
+    pub short_profit_protection: ShortProfitProtectionConfig,
     /// EMA 距离过滤配置（控制 TooFar/Ranging 等阈值）
     #[serde(default = "default_ema_distance_config")]
     pub ema_distance_config: EmaDistanceConfig,
@@ -164,6 +203,19 @@ impl VegasStrategy {
             macd_signal: default_macd_signal_config(),
             fib_retracement_signal: default_fib_retracement_signal_config(),
             entry_block_config: default_entry_block_config(),
+            liquidity_sweep_reversal: LiquiditySweepReversalConfig::default(),
+            compressed_range_breakout: CompressedRangeBreakoutConfig::default(),
+            ema_tunnel_retest_confirmation: EmaTunnelRetestConfirmationConfig::default(),
+            volume_profile_value_area_retest: VolumeProfileValueAreaRetestConfig::default(),
+            volume_profile_value_area_breakout: VolumeProfileValueAreaBreakoutConfig::default(),
+            volume_profile_failed_auction: VolumeProfileFailedAuctionConfig::default(),
+            donchian_volume_breakout: DonchianVolumeBreakoutConfig::default(),
+            donchian_breakout_acceptance: DonchianBreakoutAcceptanceConfig::default(),
+            bos_fvg_retest: BosFvgRetestConfig::default(),
+            fvg_reclaim: FvgReclaimConfig::default(),
+            macd_divergence_reversal: MacdDivergenceReversalConfig::default(),
+            macd_trend_reset_bos: MacdTrendResetBosConfig::default(),
+            short_profit_protection: ShortProfitProtectionConfig::default(),
             ema_distance_config: default_ema_distance_config(),
             atr_stop_loss_multiplier: default_atr_stop_loss_multiplier(),
             emit_debug: default_emit_debug(),
@@ -181,6 +233,19 @@ include!("strategy/long_rule_helpers.rs");
 include!("strategy/long_entry_helpers.rs");
 include!("strategy/momentum_activation.rs");
 include!("strategy/adaptive_thresholds.rs");
+include!("strategy/liquidity_sweep_reversal.rs");
+include!("strategy/compressed_range_breakout.rs");
+include!("strategy/ema_tunnel_retest_confirmation.rs");
+include!("strategy/volume_profile_value_area_retest.rs");
+include!("strategy/volume_profile_value_area_breakout.rs");
+include!("strategy/volume_profile_failed_auction.rs");
+include!("strategy/donchian_volume_breakout.rs");
+include!("strategy/donchian_breakout_acceptance.rs");
+include!("strategy/bos_fvg_retest.rs");
+include!("strategy/fvg_reclaim.rs");
+include!("strategy/macd_divergence_reversal.rs");
+include!("strategy/macd_trend_reset_bos.rs");
+include!("strategy/new_leg_activation_guard.rs");
 include!("strategy/trade_signal_entry_filters.rs");
 include!("strategy/trade_signal.rs");
 include!("strategy/indicator_helpers.rs");

@@ -28,6 +28,10 @@ pub struct IndicatorCombine {
     pub leg_detection_indicator: Option<LegDetectionIndicator>,
     /// 市场结构指标实例；为空时表示未初始化。
     pub market_structure_indicator: Option<MarketStructureIndicator>,
+    /// MACD 背离反转研究专用结构实例；与公共结构快照隔离。
+    pub macd_divergence_structure_indicator: Option<MarketStructureIndicator>,
+    /// MACD 趋势复位研究专用结构实例；与公共结构快照隔离，避免旁路唤醒旧规则。
+    pub macd_trend_reset_structure_indicator: Option<MarketStructureIndicator>,
 }
 impl IndicatorCombine {
     /// 计算所有启用指标中的最大窗口周期，用于动态设置回看长度

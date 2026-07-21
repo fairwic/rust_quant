@@ -92,8 +92,6 @@ pub struct RandomStrategyConfig {
     /// 列表数据。
     pub bb_multipliers: Vec<f64>,
     /// 列表数据。
-    pub shadow_ratios: Vec<f64>,
-    /// 列表数据。
     pub volume_bar_nums: Vec<usize>,
     /// 列表数据。
     pub volume_ratios: Vec<f64>,
@@ -105,13 +103,17 @@ pub struct RandomStrategyConfig {
     pub rsi_over_buy_sell: Vec<(f64, f64)>,
     /// 数量数值。
     pub batch_size: usize,
+    /// 本轮实际抽取的参数组合数；大于参数空间时自动收敛为全量。
+    pub sample_size: usize,
+    /// 固定采样种子；相同参数空间、种子和样本数必须生成同一批组合。
+    pub sample_seed: u64,
     //risk
     pub max_loss_percent: Vec<f64>,
     /// 列表数据。
     pub take_profit_ratios: Vec<f64>,
     /// isused信号kline止损亏损。
     pub is_used_signal_k_line_stop_loss: Vec<bool>,
-    /// 列表数据。
+    /// K 线锤子线上下影线比例候选。
     pub k_line_hammer_shadow_ratios: Vec<f64>,
     /// 列表数据。
     pub fix_signal_kline_take_profit_ratios: Vec<f64>,
@@ -122,13 +124,14 @@ impl Default for RandomStrategyConfig {
         Self {
             bb_periods: vec![14, 16, 18, 20],
             bb_multipliers: vec![2.0, 2.2, 2.3, 2.5, 3.0],
-            shadow_ratios: vec![0.65, 0.7, 0.75],
             volume_bar_nums: vec![4, 5, 6],
             volume_ratios: (20..=24).map(|x| x as f64 * 0.1).collect(),
             breakthrough_thresholds: vec![0.003],
             rsi_periods: vec![8, 9, 10, 11, 12, 13, 14, 15, 16],
             rsi_over_buy_sell: vec![(75.0, 25.0), (80.0, 20.0), (85.0, 15.0), (90.0, 10.0)],
-            batch_size: 100,
+            batch_size: 8,
+            sample_size: 256,
+            sample_seed: 20_260_721,
             //risk
             max_loss_percent: vec![0.03, 0.04, 0.05],
             take_profit_ratios: vec![0.0],
@@ -139,6 +142,40 @@ impl Default for RandomStrategyConfig {
     }
 }
 impl RandomStrategyConfig {
+    /// 为单一研究目标选择预先定义的参数空间，避免把 ETH 15m 的结论外推到其他市场。
+    pub fn for_target(inst_id: &str, period: &str) -> Self {
+        let mut config = Self::default();
+        if inst_id.eq_ignore_ascii_case("ETH-USDT-SWAP") && period.eq_ignore_ascii_case("15m") {
+            // 第一轮 40,000 根 K 线诊断显示旧空间关闭止盈且费用侵蚀严重；
+            // 第二轮保留表现相对较好的入场维度，并显式搜索 1%~2% 止损和 1.8R~3R 止盈。
+            config.bb_periods = vec![14, 20];
+            config.bb_multipliers = vec![2.5, 3.0];
+            config.volume_bar_nums = vec![4];
+            config.volume_ratios = vec![2.4, 2.6, 2.8, 3.0];
+            config.rsi_periods = vec![8, 14, 16];
+            config.rsi_over_buy_sell = vec![(75.0, 25.0), (90.0, 10.0)];
+            config.max_loss_percent = vec![0.01, 0.02];
+            config.take_profit_ratios = vec![1.8, 2.2, 2.6, 3.0];
+            config.k_line_hammer_shadow_ratios = vec![0.7, 0.75, 0.8];
+        }
+        config
+    }
+
+    /// 覆盖单次随机搜索计划，供本地 smoke 与正式迭代使用。
+    ///
+    /// 样本数和批大小至少为 1，避免一个已启动的实验静默变成空运行。
+    pub fn with_sampling(
+        mut self,
+        sample_size: usize,
+        sample_seed: u64,
+        batch_size: usize,
+    ) -> Self {
+        self.sample_size = sample_size.max(1);
+        self.sample_seed = sample_seed;
+        self.batch_size = batch_size.max(1).min(self.sample_size);
+        self
+    }
+
     /// 计算配置的哈希值，用于检测配置是否变化
     /// 封装当前函数，减少配置运行时调用方重复实现相同细节。
     /// 以结构体实例状态为输入，避免重复传参并保证接口一致性。
@@ -150,11 +187,10 @@ impl RandomStrategyConfig {
         config_json.hash(&mut hasher);
         format!("{:x}", hasher.finish())
     }
-    /// 计算总的参数组合数
-    pub fn calculate_total_combinations(&self) -> usize {
+    /// 计算完整参数空间大小，不受本轮采样上限影响。
+    pub fn calculate_search_space_size(&self) -> usize {
         self.bb_periods.len()
             * self.bb_multipliers.len()
-            * self.shadow_ratios.len()
             * self.volume_bar_nums.len()
             * self.volume_ratios.len()
             * self.breakthrough_thresholds.len()
@@ -164,6 +200,12 @@ impl RandomStrategyConfig {
             * self.take_profit_ratios.len()
             * self.is_used_signal_k_line_stop_loss.len()
             * self.k_line_hammer_shadow_ratios.len()
+            * self.fix_signal_kline_take_profit_ratios.len()
+    }
+
+    /// 计算本轮实际执行数量，进度百分比必须以采样数量而不是完整网格为分母。
+    pub fn calculate_total_combinations(&self) -> usize {
+        self.sample_size.min(self.calculate_search_space_size())
     }
 }
 /// 进度管理器
@@ -313,5 +355,40 @@ impl StrategyProgressManager {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RandomStrategyConfig;
+
+    #[test]
+    fn vegas_progress_uses_bounded_sample_count() {
+        let config = RandomStrategyConfig::default().with_sampling(12, 42, 4);
+        assert_eq!(config.calculate_search_space_size(), 259_200);
+        assert_eq!(config.calculate_total_combinations(), 12);
+        assert_eq!(config.batch_size, 4);
+    }
+
+    #[test]
+    fn vegas_sampling_plan_changes_progress_hash() {
+        let first = RandomStrategyConfig::default().with_sampling(12, 42, 4);
+        let replay = RandomStrategyConfig::default().with_sampling(12, 42, 4);
+        let other_seed = RandomStrategyConfig::default().with_sampling(12, 43, 4);
+        assert_eq!(first.calculate_hash(), replay.calculate_hash());
+        assert_ne!(first.calculate_hash(), other_seed.calculate_hash());
+    }
+
+    #[test]
+    fn eth_15m_profile_enables_cost_aware_exit_search_only_for_that_target() {
+        let eth_15m = RandomStrategyConfig::for_target("ETH-USDT-SWAP", "15m");
+        assert_eq!(eth_15m.max_loss_percent, vec![0.01, 0.02]);
+        assert_eq!(eth_15m.take_profit_ratios, vec![1.8, 2.2, 2.6, 3.0]);
+        assert_eq!(eth_15m.volume_ratios, vec![2.4, 2.6, 2.8, 3.0]);
+        assert_eq!(eth_15m.calculate_search_space_size(), 4_608);
+
+        let btc_15m = RandomStrategyConfig::for_target("BTC-USDT-SWAP", "15m");
+        assert_eq!(btc_15m.max_loss_percent, vec![0.03, 0.04, 0.05]);
+        assert_eq!(btc_15m.take_profit_ratios, vec![0.0]);
     }
 }

@@ -1,4 +1,4 @@
-use super::args::{RankActivationSource, RankUniverse};
+use super::args::{RankActivationSource, RankPriceDirection, RankUniverse};
 use super::{quoted_4h_candle_table, Args, CandidateTrade};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -37,6 +37,8 @@ pub(super) struct RankActivationReport {
     min_price_change_pct: Option<f64>,
     /// 排名比较周期内绝对价格涨跌幅上界，单位百分比。
     max_price_change_pct: Option<f64>,
+    /// 排名比较周期要求的价格冲击方向。
+    price_direction: &'static str,
     /// 排名至少向前跃升的名次数。
     min_delta: i32,
     /// 排名跃升上限；None 表示不排除极端跃升。
@@ -85,6 +87,8 @@ struct RankActivationConfig {
     min_price_change_pct: Option<f64>,
     /// 排名比较周期内绝对价格涨跌幅上界，单位百分比。
     max_price_change_pct: Option<f64>,
+    /// 排名比较周期要求的价格冲击方向。
+    price_direction: RankPriceDirection,
     /// 排名事件允许激活入场的 4H K 线根数。
     valid_for_bars: usize,
     /// 排名事件后至少等待的完整 4H K 线根数。
@@ -151,6 +155,7 @@ pub(super) async fn apply_rank_activation(
         lookback_bars: args.rank_activation_lookback_bars,
         min_price_change_pct: args.rank_activation_min_price_change_pct,
         max_price_change_pct: args.rank_activation_max_price_change_pct,
+        price_direction: args.rank_activation_price_direction,
         valid_for_bars: args.rank_activation_valid_for_bars,
         min_wait_bars: args.rank_activation_min_wait_bars,
         min_rsi: args.rank_activation_min_rsi,
@@ -277,6 +282,7 @@ pub(super) async fn apply_rank_activation(
         lookback_bars: config.lookback_bars,
         min_price_change_pct: config.min_price_change_pct,
         max_price_change_pct: config.max_price_change_pct,
+        price_direction: config.price_direction.report_label(),
         min_delta: config.min_delta,
         max_delta: config.max_delta,
         valid_for_bars: config.valid_for_bars,
@@ -328,6 +334,7 @@ fn empty_report(
         lookback_bars: config.lookback_bars,
         min_price_change_pct: config.min_price_change_pct,
         max_price_change_pct: config.max_price_change_pct,
+        price_direction: config.price_direction.report_label(),
         min_delta: config.min_delta,
         max_delta: config.max_delta,
         valid_for_bars: config.valid_for_bars,
@@ -605,6 +612,9 @@ async fn load_market_rank_events(
            AND ($5::integer IS NULL OR delta_rank <= $5) \
            AND ($6::double precision IS NULL OR abs(price_change_pct) >= $6) \
            AND ($7::double precision IS NULL OR abs(price_change_pct) <= $7) \
+           AND ($8::text = 'any' \
+                OR ($8::text = 'up' AND price_change_pct >= 0) \
+                OR ($8::text = 'down' AND price_change_pct <= 0)) \
          ORDER BY detected_at, symbol, id",
     )
     .bind(symbols)
@@ -614,6 +624,7 @@ async fn load_market_rank_events(
     .bind(config.max_delta)
     .bind(config.min_price_change_pct)
     .bind(config.max_price_change_pct)
+    .bind(config.price_direction.report_label())
     .fetch_all(pool)
     .await
     .context("load archived market-rank activation events")?;
@@ -659,9 +670,15 @@ fn price_change_allowed(
     if !previous.is_finite() || previous <= 0.0 || !current.is_finite() || current <= 0.0 {
         return false;
     }
-    let change_pct = ((current / previous) - 1.0).abs() * 100.0;
-    change_pct >= config.min_price_change_pct.unwrap_or(0.0)
-        && change_pct <= config.max_price_change_pct.unwrap_or(f64::INFINITY)
+    let signed_change_pct = ((current / previous) - 1.0) * 100.0;
+    let comparable_change_pct = match config.price_direction {
+        RankPriceDirection::Any => signed_change_pct.abs(),
+        RankPriceDirection::Up if signed_change_pct >= 0.0 => signed_change_pct,
+        RankPriceDirection::Down if signed_change_pct <= 0.0 => -signed_change_pct,
+        RankPriceDirection::Up | RankPriceDirection::Down => return false,
+    };
+    comparable_change_pct >= config.min_price_change_pct.unwrap_or(0.0)
+        && comparable_change_pct <= config.max_price_change_pct.unwrap_or(f64::INFINITY)
 }
 
 /// 判断交易入场时刻是否位于事件源明确提供的首尾覆盖区间内；缺失任一边界时保守返回 false。
@@ -746,6 +763,7 @@ mod tests {
             lookback_bars: 1,
             min_price_change_pct: None,
             max_price_change_pct: None,
+            price_direction: RankPriceDirection::Any,
             valid_for_bars: 3,
             min_wait_bars: 1,
             min_rsi: Some(25.0),
@@ -845,15 +863,20 @@ mod tests {
     }
 
     #[test]
-    fn price_change_filter_uses_absolute_causal_move() {
+    fn price_change_filter_can_require_a_bullish_causal_move() {
         let mut filtered = config();
         filtered.min_price_change_pct = Some(5.0);
         filtered.max_price_change_pct = Some(10.0);
+        filtered.price_direction = RankPriceDirection::Up;
 
         assert!(price_change_allowed(Some(100.0), Some(106.0), filtered));
-        assert!(price_change_allowed(Some(100.0), Some(94.0), filtered));
+        assert!(!price_change_allowed(Some(100.0), Some(94.0), filtered));
         assert!(!price_change_allowed(Some(100.0), Some(102.0), filtered));
         assert!(!price_change_allowed(Some(100.0), Some(112.0), filtered));
+
+        filtered.price_direction = RankPriceDirection::Down;
+        assert!(price_change_allowed(Some(100.0), Some(94.0), filtered));
+        assert!(!price_change_allowed(Some(100.0), Some(106.0), filtered));
     }
 
     #[test]

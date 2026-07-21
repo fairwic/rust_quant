@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use rust_quant_domain::{SignalDirection, StrategyConfig, StrategyType, Timeframe};
 use rust_quant_strategies::framework::backtest::types::BasicRiskStrategyConfig;
-use rust_quant_strategies::framework::strategy_registry::get_strategy_registry;
+use rust_quant_strategies::framework::strategy_registry::{
+    get_strategy_registry, register_strategy_on_demand,
+};
 use rust_quant_strategies::framework::strategy_trait::StrategyExecutor;
 use rust_quant_strategies::implementations::{
     KeltnerChannelScalperAction, KeltnerChannelScalperBacktestTuning,
@@ -546,6 +548,7 @@ async fn executor_requires_versioned_key_and_preserves_missing_snapshot_as_flat(
     assert!(executor.can_handle(r#"{"strategy_key":"keltner_channel_scalper_1m_v1_research"}"#));
     assert!(!executor.can_handle(r#"{"strategy_key":"keltner_channel_scalper"}"#));
 
+    register_strategy_on_demand(&StrategyType::KeltnerChannelScalper1mV1Research);
     let registry = get_strategy_registry();
     assert!(registry.contains("KeltnerChannelScalper1m"));
     assert_eq!(

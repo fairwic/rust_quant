@@ -99,6 +99,7 @@ pub fn open_long_position(
     set_long_stop_close_price(risk_config, signal, &mut temp_trade_position);
     temp_trade_position.initial_stop_price =
         compute_initial_stop_price(&temp_trade_position, &risk_config);
+    apply_first_retest_take_profit(signal, &mut temp_trade_position);
     if signal.signal_kline_stop_loss_price.is_none()
         && signal.stop_loss_source.as_deref() == Some("RepairLong_NoSignalKline")
     {
@@ -172,7 +173,7 @@ fn set_stop_close_price_common(
         position.atr_stop_loss_price = Some(p);
     }
     // 3. 三级止盈价格
-    if signal.atr_take_profit_level_1.is_some() {
+    if !position.fixed_take_profit_only && signal.atr_take_profit_level_1.is_some() {
         position.atr_take_profit_level_1 = signal.atr_take_profit_level_1;
         position.atr_take_profit_level_2 = signal.atr_take_profit_level_2;
         position.atr_take_profit_level_3 = signal.atr_take_profit_level_3;
@@ -190,18 +191,22 @@ pub fn set_long_stop_close_price(
 ) {
     // ============ Long特有逻辑 ============
     // 1. 信号止盈价格（做多）
-    temp_trade_position.long_signal_take_profit_price = signal.long_signal_take_profit_price;
+    if !temp_trade_position.fixed_take_profit_only {
+        temp_trade_position.long_signal_take_profit_price = signal.long_signal_take_profit_price;
+    }
     // 2. 固定比例止盈（Long: open_price + diff * ratio）
-    if let Some(fixed_take_profit_ratio) = risk_config.fixed_signal_kline_take_profit_ratio {
-        if fixed_take_profit_ratio > 0.0 {
-            if let Some(p) = signal.signal_kline_stop_loss_price {
-                temp_trade_position.signal_high_low_diff = (p - signal.open_price).abs();
-                temp_trade_position.atr_take_ratio_profit_price = Some(
-                    signal.open_price
-                        + temp_trade_position.signal_high_low_diff * fixed_take_profit_ratio,
-                );
-            } else {
-                debug!("skip fixed take profit: protective signal stop is unavailable");
+    if !temp_trade_position.fixed_take_profit_only {
+        if let Some(fixed_take_profit_ratio) = risk_config.fixed_signal_kline_take_profit_ratio {
+            if fixed_take_profit_ratio > 0.0 {
+                if let Some(p) = signal.signal_kline_stop_loss_price {
+                    temp_trade_position.signal_high_low_diff = (p - signal.open_price).abs();
+                    temp_trade_position.atr_take_ratio_profit_price = Some(
+                        signal.open_price
+                            + temp_trade_position.signal_high_low_diff * fixed_take_profit_ratio,
+                    );
+                } else {
+                    debug!("skip fixed take profit: protective signal stop is unavailable");
+                }
             }
         }
     }
@@ -242,10 +247,169 @@ pub fn open_short_position(
     set_short_stop_close_price(risk_config, signal, &mut temp_trade_position);
     temp_trade_position.initial_stop_price =
         compute_initial_stop_price(&temp_trade_position, &risk_config);
+    apply_first_retest_take_profit(signal, &mut temp_trade_position);
+    apply_short_profit_protection(signal, &mut temp_trade_position);
     state.trade_position = Some(temp_trade_position);
     state.open_position_times += 1;
     state.last_signal_result = None;
     record_trade_entry(state, PositionSide::Short.as_str().to_owned(), signal);
+}
+
+/// 根据版本化信号声明，为空头冻结盈利保护的触发价与止损价。
+///
+/// 触发价依赖最终初始止损，因此必须在 `initial_stop_price` 选定后计算；风险检查会在触发 K 线
+/// 完成后更新移动止损，使保本价只从下一根 K 线起生效。
+fn apply_short_profit_protection(signal: &SignalResult, position: &mut TradePosition) {
+    if position.trade_side != TradeSide::Short {
+        return;
+    }
+    let protection = if signal
+        .dynamic_adjustments
+        .iter()
+        .any(|adjustment| adjustment == "SHORT_PROFIT_PROTECTION_1_5R")
+    {
+        Some((1.5, 0.0))
+    } else if signal
+        .dynamic_adjustments
+        .iter()
+        .any(|adjustment| adjustment == "SHORT_PROFIT_LOCK_2R_TO_1R")
+    {
+        Some((2.0, 1.0))
+    } else {
+        None
+    };
+    let Some((trigger_r, stop_r)) = protection else {
+        return;
+    };
+    let Some(initial_stop) = position.initial_stop_price else {
+        return;
+    };
+    if !initial_stop.is_finite() || initial_stop <= position.open_price {
+        return;
+    }
+    let initial_r = initial_stop - position.open_price;
+    position.profit_protection_trigger_price = Some(position.open_price - initial_r * trigger_r);
+    position.profit_protection_stop_price = Some(position.open_price - initial_r * stop_r);
+}
+
+/// 按显式版本化信号冻结唯一价格目标，或用最终有效止损换算 R 目标。
+///
+/// 形态止损可能被最大亏损门禁收紧，所以这里不复用原始形态距离。
+/// 新目标只是上限；已有 ATR 或指标目标更近时仍优先早退出。
+fn apply_first_retest_take_profit(signal: &SignalResult, position: &mut TradePosition) {
+    const FAILED_AUCTION_POC_ONLY: &str = "VOLUME_PROFILE_FAILED_AUCTION_POC_ONLY";
+    const CAP_PREFIX: &str = "LIQUIDITY_SWEEP_FIRST_RETEST_TP_R:";
+    const ONLY_PREFIX: &str = "LIQUIDITY_SWEEP_FIRST_RETEST_TP_ONLY_R:";
+    const VOLUME_PROFILE_ONLY_PREFIX: &str = "VOLUME_PROFILE_VALUE_AREA_BREAKOUT_TP_ONLY_R:";
+    const DONCHIAN_ONLY_PREFIX: &str = "DONCHIAN_VOLUME_BREAKOUT_TP_ONLY_R:";
+    const DONCHIAN_ACCEPTANCE_ONLY_PREFIX: &str = "DONCHIAN_BREAKOUT_ACCEPTANCE_TP_ONLY_R:";
+
+    if signal
+        .dynamic_adjustments
+        .iter()
+        .any(|adjustment| adjustment == FAILED_AUCTION_POC_ONLY)
+    {
+        let explicit_target = match position.trade_side {
+            TradeSide::Long => signal.long_signal_take_profit_price,
+            TradeSide::Short => signal.short_signal_take_profit_price,
+        };
+        if let Some(target) = explicit_target.filter(|target| {
+            target.is_finite()
+                && match position.trade_side {
+                    TradeSide::Long => *target > position.open_price,
+                    TradeSide::Short => *target < position.open_price,
+                }
+        }) {
+            position.fixed_take_profit_price = Some(target);
+            position.fixed_take_profit_only = true;
+            position.atr_take_profit_level_1 = None;
+            position.atr_take_profit_level_2 = None;
+            position.atr_take_profit_level_3 = None;
+            position.atr_take_ratio_profit_price = None;
+            position.long_signal_take_profit_price = None;
+            position.short_signal_take_profit_price = None;
+        }
+        return;
+    }
+
+    let take_profit = signal.dynamic_adjustments.iter().find_map(|adjustment| {
+        let (value, replace_existing) = adjustment
+            .strip_prefix(ONLY_PREFIX)
+            .map(|value| (value, true))
+            .or_else(|| {
+                adjustment
+                    .strip_prefix(VOLUME_PROFILE_ONLY_PREFIX)
+                    .map(|value| (value, true))
+            })
+            .or_else(|| {
+                adjustment
+                    .strip_prefix(DONCHIAN_ONLY_PREFIX)
+                    .map(|value| (value, true))
+            })
+            .or_else(|| {
+                adjustment
+                    .strip_prefix(DONCHIAN_ACCEPTANCE_ONLY_PREFIX)
+                    .map(|value| (value, true))
+            })
+            .or_else(|| {
+                adjustment
+                    .strip_prefix(CAP_PREFIX)
+                    .map(|value| (value, false))
+            })?;
+        value
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .map(|value| (value, replace_existing))
+    });
+    let (Some((take_profit_r, replace_existing)), Some(initial_stop)) =
+        (take_profit, position.initial_stop_price)
+    else {
+        return;
+    };
+    let initial_risk = (initial_stop - position.open_price).abs();
+    if !initial_risk.is_finite() || initial_risk <= 0.0 {
+        return;
+    }
+
+    let r_target = match position.trade_side {
+        TradeSide::Long => position.open_price + initial_risk * take_profit_r,
+        TradeSide::Short => position.open_price - initial_risk * take_profit_r,
+    };
+    if replace_existing {
+        position.fixed_take_profit_price = Some(r_target);
+        position.fixed_take_profit_only = true;
+        position.atr_take_profit_level_1 = None;
+        position.atr_take_profit_level_2 = None;
+        position.atr_take_profit_level_3 = None;
+        position.atr_take_ratio_profit_price = None;
+        position.long_signal_take_profit_price = None;
+        position.short_signal_take_profit_price = None;
+        return;
+    }
+    let existing_targets = [
+        position.atr_take_profit_level_3,
+        position.atr_take_ratio_profit_price,
+        position.long_signal_take_profit_price,
+        position.short_signal_take_profit_price,
+    ];
+    position.fixed_take_profit_price = existing_targets
+        .into_iter()
+        .flatten()
+        .filter(|target| {
+            target.is_finite()
+                && match position.trade_side {
+                    TradeSide::Long => *target > position.open_price,
+                    TradeSide::Short => *target < position.open_price,
+                }
+        })
+        .chain(std::iter::once(r_target))
+        .min_by(|left, right| {
+            (left - position.open_price)
+                .abs()
+                .partial_cmp(&(right - position.open_price).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 }
 /// 更新 交易执行与风控 状态，并保留调用方需要的结果或错误信息。
 pub fn set_short_stop_close_price(
@@ -255,16 +419,20 @@ pub fn set_short_stop_close_price(
 ) {
     // ============ Short特有逻辑 ============
     // 1. 信号止盈价格（做空）
-    temp_trade_position.short_signal_take_profit_price = signal.short_signal_take_profit_price;
+    if !temp_trade_position.fixed_take_profit_only {
+        temp_trade_position.short_signal_take_profit_price = signal.short_signal_take_profit_price;
+    }
     // 2. ATR比例止盈（Short: open_price - diff * ratio）
-    if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {
-        if atr_take_profit_ratio > 0.0 {
-            if let Some(atr_stop_loss_price) = signal.atr_stop_loss_price {
-                let diff_price = (atr_stop_loss_price - signal.open_price).abs();
-                temp_trade_position.atr_take_ratio_profit_price =
-                    Some(signal.open_price - (diff_price * atr_take_profit_ratio));
-            } else {
-                debug!("skip ATR take profit: ATR stop is unavailable");
+    if !temp_trade_position.fixed_take_profit_only {
+        if let Some(atr_take_profit_ratio) = risk_config.atr_take_profit_ratio {
+            if atr_take_profit_ratio > 0.0 {
+                if let Some(atr_stop_loss_price) = signal.atr_stop_loss_price {
+                    let diff_price = (atr_stop_loss_price - signal.open_price).abs();
+                    temp_trade_position.atr_take_ratio_profit_price =
+                        Some(signal.open_price - (diff_price * atr_take_profit_ratio));
+                } else {
+                    debug!("skip ATR take profit: ATR stop is unavailable");
+                }
             }
         }
     }
@@ -444,6 +612,208 @@ mod tests {
 
         let position = state.trade_position.expect("position should open");
         assert!((position.position_nums - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn short_profit_protection_uses_frozen_initial_risk() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            dynamic_max_loss: Some(false),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Short);
+        entry
+            .dynamic_adjustments
+            .push("SHORT_PROFIT_PROTECTION_1_5R".to_string());
+
+        open_short_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("short position should open");
+        assert_eq!(position.initial_stop_price, Some(102.0));
+        assert_eq!(position.profit_protection_trigger_price, Some(97.0));
+        assert_eq!(position.profit_protection_stop_price, Some(100.0));
+        assert_eq!(position.move_stop_open_price, None);
+    }
+
+    #[test]
+    fn short_profit_lock_freezes_two_r_trigger_and_one_r_stop() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            dynamic_max_loss: Some(false),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Short);
+        entry
+            .dynamic_adjustments
+            .push("SHORT_PROFIT_LOCK_2R_TO_1R".to_string());
+
+        open_short_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("short position should open");
+        assert_eq!(position.initial_stop_price, Some(102.0));
+        assert_eq!(position.profit_protection_trigger_price, Some(96.0));
+        assert_eq!(position.profit_protection_stop_price, Some(98.0));
+        assert!(!position.profit_protection_armed);
+    }
+
+    #[test]
+    fn first_retest_take_profit_caps_far_target_at_frozen_two_r() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            dynamic_max_loss: Some(false),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Short);
+        entry.short_signal_take_profit_price = Some(90.0);
+        entry
+            .dynamic_adjustments
+            .push("LIQUIDITY_SWEEP_FIRST_RETEST_TP_R:2".to_string());
+
+        open_short_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("short position should open");
+        assert_eq!(position.initial_stop_price, Some(102.0));
+        assert_eq!(position.fixed_take_profit_price, Some(96.0));
+    }
+
+    #[test]
+    fn first_retest_take_profit_keeps_nearer_existing_target() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            dynamic_max_loss: Some(false),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Short);
+        entry.short_signal_take_profit_price = Some(97.0);
+        entry
+            .dynamic_adjustments
+            .push("LIQUIDITY_SWEEP_FIRST_RETEST_TP_R:2".to_string());
+
+        open_short_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("short position should open");
+        assert_eq!(position.fixed_take_profit_price, Some(97.0));
+    }
+
+    #[test]
+    fn first_retest_exact_r_replaces_and_freezes_existing_targets() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            dynamic_max_loss: Some(false),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Short);
+        entry.short_signal_take_profit_price = Some(97.0);
+        entry
+            .dynamic_adjustments
+            .push("LIQUIDITY_SWEEP_FIRST_RETEST_TP_ONLY_R:2".to_string());
+
+        open_short_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.as_mut().expect("short position");
+        assert_eq!(position.fixed_take_profit_price, Some(96.0));
+        assert!(position.fixed_take_profit_only);
+        assert_eq!(position.short_signal_take_profit_price, None);
+        assert_eq!(position.atr_take_ratio_profit_price, None);
+
+        let mut later_signal = signal(2, 99.0, SignalDirection::Short);
+        later_signal.short_signal_take_profit_price = Some(98.0);
+        set_short_stop_close_price(risk, &later_signal, position);
+        assert_eq!(position.short_signal_take_profit_price, None);
+        assert_eq!(position.fixed_take_profit_price, Some(96.0));
+    }
+
+    #[test]
+    fn volume_profile_breakout_exact_r_reuses_final_effective_initial_stop() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            dynamic_max_loss: Some(false),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Short);
+        entry
+            .dynamic_adjustments
+            .push("VOLUME_PROFILE_VALUE_AREA_BREAKOUT_TP_ONLY_R:2".to_string());
+
+        open_short_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("short position");
+        assert_eq!(position.initial_stop_price, Some(102.0));
+        assert_eq!(position.fixed_take_profit_price, Some(96.0));
+        assert!(position.fixed_take_profit_only);
+        assert_eq!(position.short_signal_take_profit_price, None);
+        assert_eq!(position.atr_take_ratio_profit_price, None);
+    }
+
+    #[test]
+    fn failed_auction_uses_frozen_poc_as_only_take_profit() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            dynamic_max_loss: Some(false),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Short);
+        entry.short_signal_take_profit_price = Some(97.5);
+        entry
+            .dynamic_adjustments
+            .push("VOLUME_PROFILE_FAILED_AUCTION_POC_ONLY".to_string());
+
+        open_short_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("short position");
+        assert_eq!(position.fixed_take_profit_price, Some(97.5));
+        assert!(position.fixed_take_profit_only);
+        assert_eq!(position.atr_take_profit_level_3, None);
+        assert_eq!(position.short_signal_take_profit_price, None);
+    }
+
+    #[test]
+    fn donchian_breakout_freezes_two_r_from_effective_stop() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            dynamic_max_loss: Some(false),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Long);
+        entry
+            .dynamic_adjustments
+            .push("DONCHIAN_VOLUME_BREAKOUT_TP_ONLY_R:2".to_string());
+
+        open_long_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("long position");
+        assert_eq!(position.initial_stop_price, Some(98.0));
+        assert_eq!(position.fixed_take_profit_price, Some(104.0));
+        assert!(position.fixed_take_profit_only);
+    }
+
+    #[test]
+    fn donchian_acceptance_freezes_two_r_from_effective_stop() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.02,
+            dynamic_max_loss: Some(false),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Short);
+        entry
+            .dynamic_adjustments
+            .push("DONCHIAN_BREAKOUT_ACCEPTANCE_TP_ONLY_R:2".to_string());
+
+        open_short_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("short position");
+        assert_eq!(position.initial_stop_price, Some(102.0));
+        assert_eq!(position.fixed_take_profit_price, Some(96.0));
+        assert!(position.fixed_take_profit_only);
     }
 
     #[test]

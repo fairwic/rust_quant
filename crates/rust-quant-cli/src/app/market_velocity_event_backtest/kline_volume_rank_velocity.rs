@@ -1,3 +1,4 @@
+use super::historical_universe::HistoricalUniverseSchedule;
 use super::{MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection, RadarEvent, MS_15M};
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, TimeZone, Utc};
@@ -35,6 +36,7 @@ pub(super) async fn load_kline_volume_rank_events(
     pool: &PgPool,
     symbols: &[String],
     args: &MarketVelocityEventBacktestArgs,
+    historical_universe: Option<&HistoricalUniverseSchedule>,
 ) -> Result<Vec<RadarEvent>> {
     let load_start_ms = args.event_start_ms.map(|event_start_ms| {
         event_start_ms.saturating_sub(
@@ -74,13 +76,18 @@ pub(super) async fn load_kline_volume_rank_events(
             .collect::<Result<Vec<_>>>()?;
         candles_by_symbol.insert(symbol.clone(), candles);
     }
-    Ok(build_kline_volume_rank_events(&candles_by_symbol, args))
+    Ok(build_kline_volume_rank_events(
+        &candles_by_symbol,
+        args,
+        historical_universe,
+    ))
 }
 
 /// 以纯内存方式构造排名事件，确保数据库加载与时序算法可以分别测试。
 fn build_kline_volume_rank_events(
     candles_by_symbol: &HashMap<String, Vec<VolumeRankCandle>>,
     args: &MarketVelocityEventBacktestArgs,
+    historical_universe: Option<&HistoricalUniverseSchedule>,
 ) -> Vec<RadarEvent> {
     let universe_size = candles_by_symbol.len();
     if universe_size < 2 {
@@ -93,13 +100,22 @@ fn build_kline_volume_rank_events(
 
     let ranked_by_event_ts = points_by_event_ts
         .into_iter()
-        .filter_map(|(event_ts, points)| {
-            (points.len() == universe_size).then(|| (event_ts, rank_volume_points(points)))
+        .filter_map(|(event_ts, mut points)| {
+            let (window_index, expected_size) = match historical_universe {
+                Some(schedule) => {
+                    let (window_index, members) = schedule.members_at(event_ts)?;
+                    points.retain(|point| members.contains(&point.symbol));
+                    (Some(window_index), members.len())
+                }
+                None => (None, universe_size),
+            };
+            (points.len() == expected_size)
+                .then(|| (event_ts, (window_index, rank_volume_points(points))))
         })
         .collect::<BTreeMap<_, _>>();
 
     let mut events = Vec::new();
-    for (event_ts, current_points) in &ranked_by_event_ts {
+    for (event_ts, (current_window, current_points)) in &ranked_by_event_ts {
         if args
             .event_start_ms
             .is_some_and(|event_start_ms| *event_ts < event_start_ms)
@@ -109,16 +125,22 @@ fn build_kline_volume_rank_events(
         {
             continue;
         }
-        let Some(previous_points) = ranked_by_event_ts.get(&event_ts.saturating_sub(MS_15M)) else {
+        let Some((previous_window, previous_points)) =
+            ranked_by_event_ts.get(&event_ts.saturating_sub(MS_15M))
+        else {
             continue;
         };
+        if previous_window != current_window {
+            continue;
+        }
         let previous_by_symbol = previous_points
             .iter()
             .map(|point| (point.point.symbol.as_str(), point))
             .collect::<HashMap<_, _>>();
         let two_snapshots_ago_by_symbol = ranked_by_event_ts
             .get(&event_ts.saturating_sub(MS_15M.saturating_mul(2)))
-            .map(|points| {
+            .filter(|(window, _)| window == current_window)
+            .map(|(_, points)| {
                 points
                     .iter()
                     .map(|point| (point.point.symbol.as_str(), point))
@@ -247,7 +269,10 @@ fn accepts_trade_direction(
     args: &MarketVelocityEventBacktestArgs,
 ) -> bool {
     match args.trade_direction {
-        MarketVelocityTradeDirection::Long if args.entry_defer_bearish_continuation => {
+        MarketVelocityTradeDirection::Long
+            if args.entry_defer_bearish_continuation
+                || args.entry_defer_long_lower_wick_reversal =>
+        {
             candle.close != candle.open
         }
         MarketVelocityTradeDirection::Long => candle.close > candle.open,
@@ -351,7 +376,7 @@ mod tests {
 
     #[test]
     fn emits_event_only_after_current_completed_candle_changes_rank() {
-        let events = build_kline_volume_rank_events(&four_symbol_fixture(), &args());
+        let events = build_kline_volume_rank_events(&four_symbol_fixture(), &args(), None);
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].symbol, "D");
@@ -365,7 +390,7 @@ mod tests {
         let mut candles = four_symbol_fixture();
         candles.get_mut("C").unwrap().pop();
 
-        assert!(build_kline_volume_rank_events(&candles, &args()).is_empty());
+        assert!(build_kline_volume_rank_events(&candles, &args(), None).is_empty());
     }
 
     #[test]
@@ -376,7 +401,7 @@ mod tests {
         ] {
             let mut candles = four_symbol_fixture();
             invalid_fixture(&mut candles.get_mut("D").unwrap()[20]);
-            assert!(build_kline_volume_rank_events(&candles, &args()).is_empty());
+            assert!(build_kline_volume_rank_events(&candles, &args(), None).is_empty());
         }
     }
 
@@ -389,12 +414,19 @@ mod tests {
 
         let mut long_args = args();
         long_args.trade_direction = MarketVelocityTradeDirection::Long;
-        assert!(build_kline_volume_rank_events(&candles, &long_args).is_empty());
+        assert!(build_kline_volume_rank_events(&candles, &long_args, None).is_empty());
 
         long_args.entry_defer_bearish_continuation = true;
-        let events = build_kline_volume_rank_events(&candles, &long_args);
+        let events = build_kline_volume_rank_events(&candles, &long_args, None);
         assert_eq!(events.len(), 1);
         assert!(events[0].price_change_pct > 0.0);
+
+        long_args.entry_defer_bearish_continuation = false;
+        long_args.entry_defer_long_lower_wick_reversal = true;
+        assert_eq!(
+            build_kline_volume_rank_events(&candles, &long_args, None).len(),
+            1
+        );
     }
 
     #[test]
@@ -402,11 +434,11 @@ mod tests {
         let candles = four_symbol_fixture();
         let mut filtered = args();
         filtered.max_delta_rank = Some(2);
-        assert!(build_kline_volume_rank_events(&candles, &filtered).is_empty());
+        assert!(build_kline_volume_rank_events(&candles, &filtered, None).is_empty());
 
         filtered.max_delta_rank = None;
         filtered.min_price_change_pct = Some(2.0);
-        assert!(build_kline_volume_rank_events(&candles, &filtered).is_empty());
+        assert!(build_kline_volume_rank_events(&candles, &filtered, None).is_empty());
     }
 
     #[test]
@@ -426,12 +458,12 @@ mod tests {
         let mut rank_args = args();
         rank_args.min_delta_rank = 1;
 
-        let events = build_kline_volume_rank_events(&candles, &rank_args);
+        let events = build_kline_volume_rank_events(&candles, &rank_args, None);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].symbol, "D");
 
         rank_args.kline_volume_rank_require_turnover_growth = true;
-        assert!(build_kline_volume_rank_events(&candles, &rank_args).is_empty());
+        assert!(build_kline_volume_rank_events(&candles, &rank_args, None).is_empty());
     }
 
     #[test]
@@ -460,7 +492,7 @@ mod tests {
         rank_args.min_delta_rank = 1;
         rank_args.kline_volume_rank_require_consecutive_improvement = true;
 
-        let events = build_kline_volume_rank_events(&candles, &rank_args);
+        let events = build_kline_volume_rank_events(&candles, &rank_args, None);
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].symbol, "E");

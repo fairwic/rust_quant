@@ -2,16 +2,18 @@ use super::directional_reversal::{
     BTC_BROAD_DIRECTION_LOOKBACK_CANDLES, EXHAUSTION_CURRENT_CLUSTER_CANDLES,
     EXHAUSTION_VOLUME_LOOKBACK_CANDLES,
 };
+use super::historical_universe::HistoricalUniverseSchedule;
 use super::kline_volume_rank_velocity::load_kline_volume_rank_events;
+use super::one_shot_trend_state::{scan_one_shot_trend_events, OneShotTrendScanStats};
 use super::{
     build_computed_candles, BacktestCandle, BacktestDataSet, CandlePair, FvgEntryMode,
     MarketVelocityEventBacktestArgs, MarketVelocityEventSource, MarketVelocityTrendTimeframe,
     RadarEvent, FAST_MOMENTUM_BOLLINGER_PERIOD, FAST_MOMENTUM_RSI_PERIOD, MS_15M, MS_1H, MS_4H,
     PAPER_OUTCOME_HORIZONS,
 };
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use sqlx::{PgPool, Row};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 const FAST_15M_CONTEXT_WARMUP_CANDLES: usize = 96;
 /// 封装当前函数，减少回测策略调用方重复实现相同细节。
 /// 采用 async 以便与数据库/网络 I/O 协调，减少阻塞并提升并发吞吐。
@@ -19,12 +21,16 @@ pub(super) async fn load_backtest_data(
     pool: &PgPool,
     args: &MarketVelocityEventBacktestArgs,
 ) -> Result<BacktestDataSet> {
-    let pairs = load_candle_pairs(pool, args).await?;
+    let historical_universe = HistoricalUniverseSchedule::from_args(args)?;
+    let pairs = load_candle_pairs(pool, args, historical_universe.as_ref()).await?;
+    if args.entry_once_per_opposite_trend_state || args.entry_once_per_historical_trend_state {
+        return load_one_shot_trend_state_data(pool, args, pairs).await;
+    }
     let symbols = pairs
         .iter()
         .map(|pair| pair.symbol.clone())
         .collect::<Vec<_>>();
-    let events = load_events(pool, &symbols, args).await?;
+    let events = load_events(pool, &symbols, args, historical_universe.as_ref()).await?;
     let candle_window = candle_load_window_ms(args, &events);
     let mut candles_15m = HashMap::new();
     let mut candles_1h = HashMap::new();
@@ -57,6 +63,9 @@ pub(super) async fn load_backtest_data(
         candles_4h.insert(pair.symbol.clone(), raw_4h);
     }
     Ok(BacktestDataSet {
+        historical_universe_version: historical_universe
+            .as_ref()
+            .map(|schedule| schedule.version.clone()),
         pairs,
         candles_15m,
         candles_1h,
@@ -66,11 +75,70 @@ pub(super) async fn load_backtest_data(
         events,
     })
 }
+
+/// 一次性趋势研究从每个 symbol 的完整已存历史开始推进状态，避免窗口起点伪造重新武装。
+async fn load_one_shot_trend_state_data(
+    pool: &PgPool,
+    args: &MarketVelocityEventBacktestArgs,
+    pairs: Vec<CandlePair>,
+) -> Result<BacktestDataSet> {
+    let event_end_ms = args
+        .event_end_ms
+        .context("one-shot trend state requires event end")?;
+    let tail_ms = PAPER_OUTCOME_HORIZONS
+        .iter()
+        .map(|(_, horizon_ms)| *horizon_ms)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(retest_post_signal_wait_ms(args))
+        .saturating_add(MS_15M);
+    let candle_window = Some((0, event_end_ms.saturating_add(tail_ms)));
+    let mut candles_15m = HashMap::new();
+    let mut candles_15m_computed = HashMap::new();
+    let mut events = Vec::new();
+    let mut aggregate = OneShotTrendScanStats::default();
+
+    for pair in &pairs {
+        let raw_15m = load_candles(pool, &pair.candles_15m, candle_window).await?;
+        let computed = build_computed_candles(raw_15m.clone(), args.entry_period);
+        let scan = scan_one_shot_trend_events(&pair.symbol, &computed, args);
+        aggregate.armed_episodes += scan.stats.armed_episodes;
+        aggregate.neutral_resets += scan.stats.neutral_resets;
+        aggregate.valid_setups_before_dedup += scan.stats.valid_setups_before_dedup;
+        aggregate.emitted_setups += scan.stats.emitted_setups;
+        events.extend(scan.events);
+        candles_15m.insert(pair.symbol.clone(), raw_15m);
+        candles_15m_computed.insert(pair.symbol.clone(), computed);
+    }
+    events.sort_by_key(|event| (event.ts, event.id));
+    println!(
+        "one_shot_trend_state_scan\tsymbols={}\tarmed_episodes={}\tneutral_resets={}\tvalid_setups_before_dedup={}\temitted_setups={}",
+        pairs.len(),
+        aggregate.armed_episodes,
+        aggregate.neutral_resets,
+        aggregate.valid_setups_before_dedup,
+        aggregate.emitted_setups,
+    );
+    Ok(BacktestDataSet {
+        historical_universe_version: None,
+        pairs,
+        candles_15m,
+        candles_1h: HashMap::new(),
+        candles_4h: HashMap::new(),
+        candles_15m_computed,
+        candles_4h_computed: HashMap::new(),
+        events,
+    })
+}
 /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 async fn load_candle_pairs(
     pool: &PgPool,
     args: &MarketVelocityEventBacktestArgs,
+    historical_universe: Option<&HistoricalUniverseSchedule>,
 ) -> Result<Vec<CandlePair>> {
+    if let Some(schedule) = historical_universe {
+        return load_historical_candle_pairs(pool, args, schedule).await;
+    }
     let sql = candidate_symbols_sql(args);
     let mut query = sqlx::query(sql)
         .bind(args.min_delta_rank)
@@ -98,6 +166,83 @@ async fn load_candle_pairs(
             candles_4h: row.get("candles_4h"),
         })
         .collect())
+}
+
+/// manifest 模式按成员并集精确加载，不再让 sample limit 或随机种子改变币池。
+async fn load_historical_candle_pairs(
+    pool: &PgPool,
+    args: &MarketVelocityEventBacktestArgs,
+    schedule: &HistoricalUniverseSchedule,
+) -> Result<Vec<CandlePair>> {
+    let symbols = schedule.union_symbols();
+    let sql = if should_load_4h_candles(args) {
+        r#"
+        WITH candidates AS (SELECT unnest($1::text[]) AS symbol)
+        SELECT
+          candidates.symbol,
+          t15.table_name AS candles_15m,
+          t1.table_name AS candles_1h,
+          t4.table_name AS candles_4h
+        FROM candidates
+        JOIN information_schema.tables t15
+          ON t15.table_schema = 'public'
+         AND t15.table_name = lower(candidates.symbol) || '_candles_15m'
+        LEFT JOIN information_schema.tables t1
+          ON t1.table_schema = 'public'
+         AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
+        JOIN information_schema.tables t4
+          ON t4.table_schema = 'public'
+         AND t4.table_name = lower(candidates.symbol) || '_candles_4h'
+        ORDER BY candidates.symbol
+        "#
+    } else {
+        r#"
+        WITH candidates AS (SELECT unnest($1::text[]) AS symbol)
+        SELECT
+          candidates.symbol,
+          t15.table_name AS candles_15m,
+          t1.table_name AS candles_1h,
+          t15.table_name AS candles_4h
+        FROM candidates
+        JOIN information_schema.tables t15
+          ON t15.table_schema = 'public'
+         AND t15.table_name = lower(candidates.symbol) || '_candles_15m'
+        LEFT JOIN information_schema.tables t1
+          ON t1.table_schema = 'public'
+         AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
+        ORDER BY candidates.symbol
+        "#
+    };
+    let rows = sqlx::query(sql)
+        .bind(&symbols)
+        .fetch_all(pool)
+        .await
+        .context("load historical universe candle table pairs")?;
+    let pairs = rows
+        .into_iter()
+        .map(|row| CandlePair {
+            symbol: row.get("symbol"),
+            candles_15m: row.get("candles_15m"),
+            candles_1h: row.try_get("candles_1h").ok(),
+            candles_4h: row.get("candles_4h"),
+        })
+        .collect::<Vec<_>>();
+    let loaded = pairs
+        .iter()
+        .map(|pair| pair.symbol.clone())
+        .collect::<BTreeSet<_>>();
+    let missing = symbols
+        .iter()
+        .filter(|symbol| !loaded.contains(*symbol))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        bail!(
+            "historical universe is missing required candle tables: {}",
+            missing.join(",")
+        );
+    }
+    Ok(pairs)
 }
 /// 判断候选symbolsSQL，给回测策略流程提供布尔结果。
 fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str {
@@ -178,6 +323,71 @@ fn candidate_symbols_sql(args: &MarketVelocityEventBacktestArgs) -> &'static str
             ORDER BY candidates.symbol
             "#
         }
+        MarketVelocityEventSource::Kline15m
+            if args.kline_current_live_only && should_load_4h_candles(args) =>
+        {
+            r#"
+            WITH candidates AS (
+              SELECT
+                upper(replace(table_name, '_candles_15m', '')) AS symbol,
+                table_name AS candles_15m
+              FROM information_schema.tables
+              WHERE table_schema = 'public'
+                AND table_name LIKE '%\_candles\_15m' ESCAPE '\'
+            )
+            SELECT
+              candidates.symbol,
+              candidates.candles_15m,
+              t1.table_name AS candles_1h,
+              t4.table_name AS candles_4h
+            FROM candidates
+            JOIN exchange_symbols exchange_symbol
+              ON exchange_symbol.exchange = 'okx'
+             AND exchange_symbol.market_type = 'perpetual'
+             AND exchange_symbol.status = 'live'
+             AND exchange_symbol.contract_type = 'linear'
+             AND exchange_symbol.exchange_symbol = candidates.symbol
+             AND exchange_symbol.exchange_symbol LIKE '%-USDT-SWAP'
+            LEFT JOIN information_schema.tables t1
+              ON t1.table_schema = 'public'
+             AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
+            JOIN information_schema.tables t4
+              ON t4.table_schema = 'public'
+             AND t4.table_name = lower(candidates.symbol) || '_candles_4h'
+            ORDER BY md5($9::text || ':' || candidates.symbol)
+            LIMIT $8
+            "#
+        }
+        MarketVelocityEventSource::Kline15m if args.kline_current_live_only => {
+            r#"
+            WITH candidates AS (
+              SELECT
+                upper(replace(table_name, '_candles_15m', '')) AS symbol,
+                table_name AS candles_15m
+              FROM information_schema.tables
+              WHERE table_schema = 'public'
+                AND table_name LIKE '%\_candles\_15m' ESCAPE '\'
+            )
+            SELECT
+              candidates.symbol,
+              candidates.candles_15m,
+              t1.table_name AS candles_1h,
+              candidates.candles_15m AS candles_4h
+            FROM candidates
+            JOIN exchange_symbols exchange_symbol
+              ON exchange_symbol.exchange = 'okx'
+             AND exchange_symbol.market_type = 'perpetual'
+             AND exchange_symbol.status = 'live'
+             AND exchange_symbol.contract_type = 'linear'
+             AND exchange_symbol.exchange_symbol = candidates.symbol
+             AND exchange_symbol.exchange_symbol LIKE '%-USDT-SWAP'
+            LEFT JOIN information_schema.tables t1
+              ON t1.table_schema = 'public'
+             AND t1.table_name = lower(candidates.symbol) || '_candles_1h'
+            ORDER BY md5($9::text || ':' || candidates.symbol)
+            LIMIT $8
+            "#
+        }
         MarketVelocityEventSource::Kline15m if should_load_4h_candles(args) => {
             r#"
             WITH candidates AS (
@@ -238,8 +448,9 @@ async fn load_candles(
     let table_name = quote_identifier(table_name);
     let rows = match window_ms {
         Some((start_ms, end_ms)) => {
-            let query =
-                format!("SELECT ts, o, h, l, c, vol FROM {table_name} WHERE ts >= $1 AND ts <= $2 ORDER BY ts");
+            let query = format!(
+                "SELECT ts, o, h, l, c, vol FROM {table_name} WHERE confirm = '1' AND ts >= $1 AND ts <= $2 ORDER BY ts"
+            );
             sqlx::query(&query)
                 .bind(start_ms)
                 .bind(end_ms)
@@ -247,7 +458,9 @@ async fn load_candles(
                 .await
         }
         None => {
-            let query = format!("SELECT ts, o, h, l, c, vol FROM {table_name} ORDER BY ts");
+            let query = format!(
+                "SELECT ts, o, h, l, c, vol FROM {table_name} WHERE confirm = '1' ORDER BY ts"
+            );
             sqlx::query(&query).fetch_all(pool).await
         }
     }
@@ -409,15 +622,20 @@ async fn load_events(
     pool: &PgPool,
     symbols: &[String],
     args: &MarketVelocityEventBacktestArgs,
+    historical_universe: Option<&HistoricalUniverseSchedule>,
 ) -> Result<Vec<RadarEvent>> {
     if symbols.is_empty() {
         return Ok(Vec::new());
     }
     if args.event_source == MarketVelocityEventSource::Kline15m {
         if args.kline_volume_rank_velocity {
-            return load_kline_volume_rank_events(pool, symbols, args).await;
+            return load_kline_volume_rank_events(pool, symbols, args, historical_universe).await;
         }
-        return load_kline_15m_events(pool, symbols, args).await;
+        let mut events = load_kline_15m_events(pool, symbols, args).await?;
+        if let Some(schedule) = historical_universe {
+            events.retain(|event| schedule.allows(&event.symbol, event.ts));
+        }
+        return Ok(events);
     }
     let sql = event_source_sql(args);
     let rows = sqlx::query(sql)
@@ -619,6 +837,7 @@ fn kline_15m_events_sql(table_name: &str) -> String {
         FROM {table_name}
         WHERE ($1::bigint IS NULL OR ts + 900000 >= $1)
           AND ($2::bigint IS NULL OR ts + 900000 <= $2)
+          AND confirm = '1'
           AND o::double precision > 0
           AND (
             ($5 = 'long' AND (($6 = false AND c::double precision > o::double precision) OR ($6 = true AND c::double precision <> o::double precision)))
@@ -754,7 +973,24 @@ mod tests {
         assert!(candidate_sql.contains("LIMIT $8"));
         assert!(!candidate_sql.contains("market_rank_events"));
         assert!(event_sql.contains("ts + 900000 AS detected_ms"));
+        assert!(event_sql.contains("confirm = '1'"));
         assert!(!event_sql.contains("market_rank_events"));
+    }
+    #[test]
+    fn current_live_kline_universe_excludes_deleted_contracts_without_rank_events() {
+        let args = MarketVelocityEventBacktestArgs {
+            event_source: MarketVelocityEventSource::Kline15m,
+            kline_current_live_only: true,
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let candidate_sql = candidate_symbols_sql(&args);
+
+        assert!(candidate_sql.contains("JOIN exchange_symbols exchange_symbol"));
+        assert!(candidate_sql.contains("exchange_symbol.status = 'live'"));
+        assert!(candidate_sql.contains("exchange_symbol.contract_type = 'linear'"));
+        assert!(candidate_sql.contains("LIKE '%-USDT-SWAP'"));
+        assert!(!candidate_sql.contains("market_rank_events"));
     }
     #[test]
     fn kline_15m_event_source_requires_real_4h_table_when_4h_trend_is_enabled() {

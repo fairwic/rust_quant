@@ -75,8 +75,28 @@ impl VegasStrategy {
                         market_structure_signal.internal_length,
                         market_structure_signal.swing_threshold,
                         market_structure_signal.internal_threshold,
-                ));
+                    ));
             }
+        }
+        // 背离研究的 CHoCH 不能借用公共结构快照，否则旧规则会在未投票时改变基线入场。
+        if self.macd_divergence_reversal.is_open {
+            indicator_combine.macd_divergence_structure_indicator =
+                Some(MarketStructureIndicator::new_with_thresholds(
+                    MACD_DIVERGENCE_SWING_LENGTH,
+                    MACD_DIVERGENCE_INTERNAL_LENGTH,
+                    MACD_DIVERGENCE_SWING_THRESHOLD,
+                    MACD_DIVERGENCE_INTERNAL_THRESHOLD,
+                ));
+        }
+        // 研究结构必须使用独立实例；复用公共快照会让旧规则在配置未投票时仍改变行为。
+        if self.macd_trend_reset_bos.is_open {
+            indicator_combine.macd_trend_reset_structure_indicator =
+                Some(MarketStructureIndicator::new_with_thresholds(
+                    MACD_TREND_RESET_SWING_LENGTH,
+                    MACD_TREND_RESET_INTERNAL_LENGTH,
+                    MACD_TREND_RESET_SWING_THRESHOLD,
+                    MACD_TREND_RESET_INTERNAL_THRESHOLD,
+                ));
         }
         if self.entry_block_config.block_opposite_value_area_entry
             || self

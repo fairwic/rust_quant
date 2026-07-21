@@ -398,14 +398,14 @@ fn check_signal_kline_stop(ctx: &ExitContext, stop_price: Option<f64>) -> ExitRe
 }
 /// 检查三级ATR系统的移动止损
 fn check_atr_trailing_stop(ctx: &ExitContext, position: &TradePosition) -> ExitResult {
-    // 必须有三级止盈配置才有移动止损
-    if position.atr_take_profit_level_1.is_none() {
-        return ExitResult::None;
-    }
     match position.move_stop_open_price {
         Some(stop_price) if ctx.is_stop_loss_hit(stop_price) => ExitResult::ExitDynamic {
             price: stop_price,
-            reason: format!("移动止损(触发级别:{})", position.reached_take_profit_level),
+            reason: if position.profit_protection_armed {
+                "空头盈利保护止损".to_string()
+            } else {
+                format!("移动止损(触发级别:{})", position.reached_take_profit_level)
+            },
         },
         _ => ExitResult::None,
     }
@@ -427,34 +427,33 @@ fn update_atr_tiered_levels(
     position: &mut TradePosition,
     risk_config: &BasicRiskStrategyConfig,
 ) -> ExitResult {
-    let (level_1, level_2, level_3) = match (
-        position.atr_take_profit_level_1,
-        position.atr_take_profit_level_2,
-        position.atr_take_profit_level_3,
-    ) {
-        (Some(l1), Some(l2), Some(l3)) => (l1, l2, l3),
-        _ => return ExitResult::None,
+    let Some(level_1) = position.atr_take_profit_level_1 else {
+        return ExitResult::None;
     };
     let current_level = position.reached_take_profit_level;
     // 第三级：5倍ATR，完全平仓
-    if current_level < 3 && ctx.is_take_profit_hit(level_3) {
-        return ExitResult::Exit {
-            price: level_3,
-            reason: "三级止盈(5倍ATR)-完全平仓",
-        };
+    if let Some(level_3) = position.atr_take_profit_level_3 {
+        if current_level < 3 && ctx.is_take_profit_hit(level_3) {
+            return ExitResult::Exit {
+                price: level_3,
+                reason: "三级止盈(5倍ATR)-完全平仓",
+            };
+        }
     }
     // 第二级：2倍ATR，移动止损到第一级止盈价
-    if current_level < 2 && ctx.is_take_profit_hit(level_2) {
-        position.reached_take_profit_level = 2;
-        position.move_stop_open_price = Some(level_1);
-        if let Some(close_ratio) =
-            normalized_close_ratio(risk_config.tiered_take_profit_level_2_close_ratio)
-        {
-            return ExitResult::PartialExit {
-                price: level_2,
-                reason: "分批止盈(级别2)",
-                close_ratio,
-            };
+    if let Some(level_2) = position.atr_take_profit_level_2 {
+        if current_level < 2 && ctx.is_take_profit_hit(level_2) {
+            position.reached_take_profit_level = 2;
+            position.move_stop_open_price = Some(level_1);
+            if let Some(close_ratio) =
+                normalized_close_ratio(risk_config.tiered_take_profit_level_2_close_ratio)
+            {
+                return ExitResult::PartialExit {
+                    price: level_2,
+                    reason: "分批止盈(级别2)",
+                    close_ratio,
+                };
+            }
         }
     }
     // 第一级：1.5倍ATR，移动止损到开仓价
@@ -472,6 +471,23 @@ fn update_atr_tiered_levels(
         }
     }
     ExitResult::None
+}
+
+/// 在当前 K 线完成后武装版本化盈利保护；新止损只会在下一次风险检查中生效。
+fn update_profit_protection(ctx: &ExitContext, position: &mut TradePosition) {
+    if position.profit_protection_armed {
+        return;
+    }
+    let (Some(trigger), Some(stop)) = (
+        position.profit_protection_trigger_price,
+        position.profit_protection_stop_price,
+    ) else {
+        return;
+    };
+    if trigger.is_finite() && stop.is_finite() && ctx.is_take_profit_hit(trigger) {
+        position.move_stop_open_price = Some(stop);
+        position.profit_protection_armed = true;
+    }
 }
 // ============================================================================
 // 止盈检查函数
@@ -560,6 +576,15 @@ fn run_take_profit_checks(
     risk_config: &BasicRiskStrategyConfig,
     position: &mut TradePosition,
 ) -> ExitResult {
+    // 首次回测的 fixed 目标是已有目标与 R 上限的最近价，必须先检查；
+    // 否则同根 K 线同时穿越多个目标时，检查顺序会虚增成交价。
+    let result = check_fixed_take_profit(ctx, position.fixed_take_profit_price);
+    if matches!(result, ExitResult::Exit { .. }) {
+        return result;
+    }
+    if position.fixed_take_profit_only {
+        return ExitResult::None;
+    }
     // 1. 三级ATR止盈（同时更新级别）
     let result = update_atr_tiered_levels(ctx, position, risk_config);
     if matches!(
@@ -577,12 +602,7 @@ fn run_take_profit_checks(
     if matches!(result, ExitResult::Exit { .. }) {
         return result;
     }
-    // 3. 固定信号线比例止盈
-    let result = check_fixed_take_profit(ctx, position.fixed_take_profit_price);
-    if matches!(result, ExitResult::Exit { .. }) {
-        return result;
-    }
-    // 4. 动态止盈（做多/做空）
+    // 3. 动态止盈（做多/做空）
     let result = check_dynamic_take_profit(
         ctx,
         position.long_signal_take_profit_price,
@@ -591,6 +611,8 @@ fn run_take_profit_checks(
     if matches!(result, ExitResult::Exit { .. }) {
         return result;
     }
+    // 真实止盈都未触发时，才在本根完成后武装下一根 K 线使用的盈利保护。
+    update_profit_protection(ctx, position);
     ExitResult::None
 }
 // ============================================================================

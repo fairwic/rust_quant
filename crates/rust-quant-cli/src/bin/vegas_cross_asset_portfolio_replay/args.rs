@@ -36,6 +36,28 @@ pub(super) enum RankActivationSource {
     MarketRankEvents,
 }
 
+/// 排名激活时允许的价格冲击方向；默认 Any 保留既有绝对涨跌幅语义。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum RankPriceDirection {
+    /// 上涨或下跌都可触发，幅度按绝对值比较。
+    Any,
+    /// 只接受正向上涨冲击。
+    Up,
+    /// 只接受负向下跌冲击。
+    Down,
+}
+
+impl RankPriceDirection {
+    /// 返回报告与归档事件查询共用的稳定标签。
+    pub(super) fn report_label(self) -> &'static str {
+        match self {
+            RankPriceDirection::Any => "any",
+            RankPriceDirection::Up => "up",
+            RankPriceDirection::Down => "down",
+        }
+    }
+}
+
 /// 组合回放使用的币池口径；它只决定候选交易是否属于当月币池，不改变信号参数。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum PortfolioUniverse {
@@ -92,6 +114,8 @@ pub(super) struct Args {
     pub(super) side_filter: Option<TradeSideFilter>,
     /// 做空入场允许的最大 EMA 偏离率；None 表示不增加该研究过滤器。
     pub(super) max_short_ema_distance_ratio: Option<f64>,
+    /// 双倍成本压力下允许的最大预估执行成本，单位初始风险 R。
+    pub(super) max_projected_double_execution_cost_r: Option<f64>,
     /// 组合候选交易使用的币池过滤口径。
     pub(super) portfolio_universe: PortfolioUniverse,
     /// 历史排名代理的横截面币池，默认只使用回测范围内的交易对。
@@ -108,6 +132,8 @@ pub(super) struct Args {
     pub(super) rank_activation_min_price_change_pct: Option<f64>,
     /// 排名对比周期内绝对价格涨跌幅上界，单位百分比；None 表示不限制。
     pub(super) rank_activation_max_price_change_pct: Option<f64>,
+    /// 排名对比周期要求的价格冲击方向；Any 表示沿用绝对涨跌幅。
+    pub(super) rank_activation_price_direction: RankPriceDirection,
     /// 排名事件发生后允许 Vegas 入场的最长 4H K 线根数，默认 9。
     pub(super) rank_activation_valid_for_bars: usize,
     /// 排名事件后至少等待的完整 4H K 线根数，默认 1。
@@ -116,7 +142,7 @@ pub(super) struct Args {
     pub(super) rank_activation_min_rsi: Option<f64>,
     /// 排名激活后允许入场的 RSI 上界，不包含边界；None 表示不限制上界。
     pub(super) rank_activation_max_rsi: Option<f64>,
-    /// 无条件保留已在质量基线中出现的入场记录，其余记录才应用排名激活；None 表示不启用。
+    /// 显式合并并保留质量基线中的完整入场路径，其余候选才应用排名激活；None 表示不启用。
     pub(super) rank_passthrough_id_min: Option<i64>,
     /// 质量基线的最大回测 ID，和最小 ID 必须同时提供。
     pub(super) rank_passthrough_id_max: Option<i64>,
@@ -174,6 +200,7 @@ pub(super) fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Arg
         walk_forward_test_months: None,
         side_filter: None,
         max_short_ema_distance_ratio: None,
+        max_projected_double_execution_cost_r: None,
         portfolio_universe: PortfolioUniverse::Backtest,
         rank_universe: RankUniverse::Backtest,
         rank_activation_source: RankActivationSource::Reconstructed4h,
@@ -182,6 +209,7 @@ pub(super) fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Arg
         rank_activation_lookback_bars: 1,
         rank_activation_min_price_change_pct: None,
         rank_activation_max_price_change_pct: None,
+        rank_activation_price_direction: RankPriceDirection::Any,
         rank_activation_valid_for_bars: 9,
         rank_activation_min_wait_bars: 1,
         rank_activation_min_rsi: None,
@@ -193,7 +221,7 @@ pub(super) fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Arg
     while let Some(name) = values.next() {
         if name == "--help" || name == "-h" {
             println!(
-                "Usage: vegas_cross_asset_portfolio_replay --backtest-id-min ID --backtest-id-max ID [--max-concurrent 3] [--initial-equity 100] [--risk-scale 1.0] [--extra-slippage-bps 0] [--funding-bps-per-8h 0] [--oos-start RFC3339] [--walk-forward-train-months 12 --walk-forward-test-months 3] [--side long|short] [--max-short-ema-distance-ratio 0.10] [--portfolio-universe backtest|current-live-monthly-top100] [--rank-universe backtest|all-4h] [--rank-activation-source reconstructed-4h|market-rank-events] [--rank-activation-min-delta 18] [--rank-activation-max-delta 42] [--rank-activation-lookback-bars 1] [--rank-activation-min-price-change-pct 5] [--rank-activation-max-price-change-pct 10] [--rank-activation-valid-for-bars 9] [--rank-activation-min-wait-bars 1] [--rank-activation-min-rsi 25] [--rank-activation-max-rsi 55] [--rank-passthrough-id-min ID --rank-passthrough-id-max ID]"
+                "Usage: vegas_cross_asset_portfolio_replay --backtest-id-min ID --backtest-id-max ID [--max-concurrent 3] [--initial-equity 100] [--risk-scale 1.0] [--extra-slippage-bps 0] [--funding-bps-per-8h 0] [--oos-start RFC3339] [--walk-forward-train-months 12 --walk-forward-test-months 3] [--side long|short] [--max-short-ema-distance-ratio 0.10] [--max-projected-double-execution-cost-r 0.20] [--portfolio-universe backtest|current-live-monthly-top100] [--rank-universe backtest|all-4h] [--rank-activation-source reconstructed-4h|market-rank-events] [--rank-activation-min-delta 18] [--rank-activation-max-delta 42] [--rank-activation-lookback-bars 1] [--rank-activation-min-price-change-pct 5] [--rank-activation-max-price-change-pct 10] [--rank-activation-price-direction any|up|down] [--rank-activation-valid-for-bars 9] [--rank-activation-min-wait-bars 1] [--rank-activation-min-rsi 25] [--rank-activation-max-rsi 55] [--rank-passthrough-id-min ID --rank-passthrough-id-max ID]"
             );
             std::process::exit(0);
         }
@@ -230,6 +258,9 @@ pub(super) fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Arg
             }
             "--max-short-ema-distance-ratio" => {
                 args.max_short_ema_distance_ratio = Some(parse_value(&name, &value)?)
+            }
+            "--max-projected-double-execution-cost-r" => {
+                args.max_projected_double_execution_cost_r = Some(parse_value(&name, &value)?)
             }
             "--portfolio-universe" => {
                 args.portfolio_universe = match value.as_str() {
@@ -276,6 +307,14 @@ pub(super) fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Arg
             }
             "--rank-activation-max-price-change-pct" => {
                 args.rank_activation_max_price_change_pct = Some(parse_value(&name, &value)?)
+            }
+            "--rank-activation-price-direction" => {
+                args.rank_activation_price_direction = match value.as_str() {
+                    "any" => RankPriceDirection::Any,
+                    "up" => RankPriceDirection::Up,
+                    "down" => RankPriceDirection::Down,
+                    _ => bail!("--rank-activation-price-direction must be any, up, or down"),
+                }
             }
             "--rank-activation-valid-for-bars" => {
                 args.rank_activation_valid_for_bars = parse_value(&name, &value)?
@@ -336,6 +375,12 @@ fn validate_args(args: Args) -> Result<()> {
     {
         bail!("--max-short-ema-distance-ratio must be a non-negative finite number");
     }
+    if args
+        .max_projected_double_execution_cost_r
+        .is_some_and(|value| !value.is_finite() || value <= 0.0)
+    {
+        bail!("--max-projected-double-execution-cost-r must be a positive finite number");
+    }
     if let Some(min_delta) = args.rank_activation_min_delta {
         if min_delta <= 0 {
             bail!("--rank-activation-min-delta must be greater than zero");
@@ -392,6 +437,7 @@ fn validate_args(args: Args) -> Result<()> {
         || args.rank_activation_max_rsi.is_some()
         || args.rank_activation_min_price_change_pct.is_some()
         || args.rank_activation_max_price_change_pct.is_some()
+        || args.rank_activation_price_direction != RankPriceDirection::Any
         || args.rank_passthrough_id_min.is_some()
         || args.rank_passthrough_id_max.is_some()
         || args.rank_universe != RankUniverse::Backtest
@@ -487,6 +533,36 @@ mod tests {
     }
 
     #[test]
+    fn parses_projected_double_execution_cost_filter() {
+        let args = parse_args([
+            "--backtest-id-min".to_string(),
+            "1".to_string(),
+            "--backtest-id-max".to_string(),
+            "2".to_string(),
+            "--max-projected-double-execution-cost-r".to_string(),
+            "0.20".to_string(),
+        ])
+        .expect("valid projected cost filter");
+
+        assert_eq!(args.max_projected_double_execution_cost_r, Some(0.20));
+    }
+
+    #[test]
+    fn rejects_non_positive_projected_double_execution_cost_filter() {
+        let error = parse_args([
+            "--backtest-id-min".to_string(),
+            "1".to_string(),
+            "--backtest-id-max".to_string(),
+            "2".to_string(),
+            "--max-projected-double-execution-cost-r".to_string(),
+            "0".to_string(),
+        ])
+        .expect_err("zero projected cost threshold must fail");
+
+        assert!(error.to_string().contains("positive finite"));
+    }
+
+    #[test]
     fn parses_positive_global_risk_scale() {
         let args = parse_args([
             "--backtest-id-min".to_string(),
@@ -531,6 +607,23 @@ mod tests {
         .expect("valid all-4h universe");
 
         assert_eq!(args.rank_universe, RankUniverse::AllAvailable4h);
+    }
+
+    #[test]
+    fn parses_bullish_rank_price_direction() {
+        let args = parse_args([
+            "--backtest-id-min".to_string(),
+            "1".to_string(),
+            "--backtest-id-max".to_string(),
+            "2".to_string(),
+            "--rank-activation-min-delta".to_string(),
+            "3".to_string(),
+            "--rank-activation-price-direction".to_string(),
+            "up".to_string(),
+        ])
+        .expect("valid bullish price direction");
+
+        assert_eq!(args.rank_activation_price_direction, RankPriceDirection::Up);
     }
 
     #[test]

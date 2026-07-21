@@ -1,7 +1,8 @@
 use super::strategy_runner;
-use rust_quant_domain::{StrategyConfig, Timeframe};
+use rust_quant_domain::{StrategyConfig, StrategyType, Timeframe};
 use rust_quant_market::models::CandlesEntity;
 use rust_quant_services::strategy::{StrategyConfigService, StrategyExecutionService};
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -15,6 +16,8 @@ pub struct WebsocketStrategyHandler {
     execution_service: Arc<StrategyExecutionService>,
     /// 当前 WebSocket 行情源交易所，用于避免同周期配置跨交易所重复执行。
     market_exchange: Option<String>,
+    /// 当前 worker 启动成功的策略类型，防止 K 线触发时串载其他运行角色的配置。
+    runtime_strategy_types: HashSet<StrategyType>,
 }
 impl WebsocketStrategyHandler {
     /// 创建新的处理器实例
@@ -22,11 +25,13 @@ impl WebsocketStrategyHandler {
         config_service: Arc<StrategyConfigService>,
         execution_service: Arc<StrategyExecutionService>,
         market_exchange: Option<String>,
+        runtime_strategy_types: HashSet<StrategyType>,
     ) -> Self {
         Self {
             config_service,
             execution_service,
             market_exchange,
+            runtime_strategy_types,
         }
     }
     /// 处理 K 线数据
@@ -34,6 +39,7 @@ impl WebsocketStrategyHandler {
         let config_service = self.config_service.clone();
         let execution_service = self.execution_service.clone();
         let market_exchange = self.market_exchange.clone();
+        let runtime_strategy_types = &self.runtime_strategy_types;
         let candle_ts = snap.ts;
         info!(
             "🎯 K线确认触发策略检查: inst_id={}, time_interval={}, ts={}",
@@ -47,9 +53,10 @@ impl WebsocketStrategyHandler {
                 return;
             }
         };
-        // 查询该交易对和时间周期的所有启用策略
+        // 单角色 worker 直接按策略类型查询，避免把同交易对、同周期的其他策略载入本进程。
+        let strategy_type_selector = single_runtime_strategy_type(runtime_strategy_types);
         let configs = match config_service
-            .load_configs(&inst_id, &time_interval, None)
+            .load_configs(&inst_id, &time_interval, strategy_type_selector)
             .await
         {
             Ok(configs) => configs,
@@ -61,7 +68,8 @@ impl WebsocketStrategyHandler {
                 return;
             }
         };
-        let configs = filter_configs_for_market_exchange(configs, market_exchange.as_deref());
+        let configs =
+            filter_configs_for_runtime(configs, market_exchange.as_deref(), runtime_strategy_types);
         if configs.is_empty() {
             info!(
                 "⚠️  未找到启用的策略配置: inst_id={}, time_interval={}",
@@ -99,37 +107,54 @@ impl WebsocketStrategyHandler {
     }
 }
 
-/// 按当前 WebSocket 行情源过滤策略配置，避免 OKX 行情触发 Binance 配置等跨交易所重复执行。
-fn filter_configs_for_market_exchange(
+/// 按当前 WebSocket 行情源和 worker 运行角色过滤策略配置。
+fn filter_configs_for_runtime(
     configs: Vec<StrategyConfig>,
     market_exchange: Option<&str>,
+    runtime_strategy_types: &HashSet<StrategyType>,
 ) -> Vec<StrategyConfig> {
-    let Some(market_exchange) = market_exchange
+    let market_exchange = market_exchange
         .map(str::trim)
-        .filter(|exchange| !exchange.is_empty())
-    else {
-        return configs;
-    };
+        .filter(|exchange| !exchange.is_empty());
 
     configs
         .into_iter()
         .filter(|config| {
-            config
-                .exchange
-                .as_deref()
-                .map(str::trim)
-                .filter(|exchange| !exchange.is_empty() && !exchange.eq_ignore_ascii_case("all"))
-                .map(|exchange| exchange.eq_ignore_ascii_case(market_exchange))
-                .unwrap_or(true)
+            let exchange_matches = market_exchange.map_or(true, |market_exchange| {
+                config
+                    .exchange
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|exchange| {
+                        !exchange.is_empty() && !exchange.eq_ignore_ascii_case("all")
+                    })
+                    .map(|exchange| exchange.eq_ignore_ascii_case(market_exchange))
+                    .unwrap_or(true)
+            });
+            let strategy_type_matches = runtime_strategy_types.is_empty()
+                || runtime_strategy_types.contains(&config.strategy_type);
+            exchange_matches && strategy_type_matches
         })
         .collect()
+}
+
+/// 单策略角色可在查询阶段精确筛选；多角色进程则在返回后按集合过滤。
+fn single_runtime_strategy_type(runtime_strategy_types: &HashSet<StrategyType>) -> Option<&str> {
+    if runtime_strategy_types.len() == 1 {
+        runtime_strategy_types
+            .iter()
+            .next()
+            .map(StrategyType::as_str)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;
-    use rust_quant_domain::{StrategyConfig, StrategyStatus, StrategyType};
+    use rust_quant_domain::{StrategyConfig, StrategyStatus};
 
     fn test_config(id: i64, exchange: Option<&str>) -> StrategyConfig {
         StrategyConfig {
@@ -155,10 +180,45 @@ mod tests {
         let okx = test_config(1, Some("okx"));
         let binance = test_config(2, Some("binance"));
 
-        let filtered = filter_configs_for_market_exchange(vec![okx, binance], Some("okx"));
+        let filtered = filter_configs_for_runtime(vec![okx, binance], Some("okx"), &HashSet::new());
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, 1);
         assert_eq!(filtered[0].exchange.as_deref(), Some("okx"));
+    }
+
+    #[test]
+    fn dedicated_worker_excludes_universal_strategy_config() {
+        let mut dedicated = test_config(1, Some("okx"));
+        dedicated.strategy_type = StrategyType::Vegas;
+        let mut universal = test_config(2, Some("okx"));
+        universal.strategy_type = StrategyType::VegasUniversal4h;
+
+        let runtime_types = HashSet::from([StrategyType::Vegas]);
+        let filtered =
+            filter_configs_for_runtime(vec![dedicated, universal], Some("okx"), &runtime_types);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].strategy_type, StrategyType::Vegas);
+        assert_eq!(single_runtime_strategy_type(&runtime_types), Some("vegas"));
+    }
+
+    #[test]
+    fn universal_worker_excludes_dedicated_strategy_config() {
+        let mut dedicated = test_config(1, Some("okx"));
+        dedicated.strategy_type = StrategyType::Vegas;
+        let mut universal = test_config(2, Some("okx"));
+        universal.strategy_type = StrategyType::VegasUniversal4h;
+
+        let runtime_types = HashSet::from([StrategyType::VegasUniversal4h]);
+        let filtered =
+            filter_configs_for_runtime(vec![dedicated, universal], Some("okx"), &runtime_types);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].strategy_type, StrategyType::VegasUniversal4h);
+        assert_eq!(
+            single_runtime_strategy_type(&runtime_types),
+            Some("vegas_universal_4h")
+        );
     }
 }

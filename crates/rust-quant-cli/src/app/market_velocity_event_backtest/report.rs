@@ -32,6 +32,9 @@ struct TriggerQualitySummary {
 }
 /// 执行输出stage报告步骤，串起回测策略需要的状态推进和错误处理。
 pub(super) fn print_stage_report(data: &BacktestDataSet, evaluation: &EvaluationReport) {
+    if let Some(version) = &data.historical_universe_version {
+        println!("historical_universe_version={version}");
+    }
     println!("candle_pairs={}", data.pairs.len());
     for pair in &data.pairs {
         let coverage_15m = data
@@ -201,8 +204,14 @@ pub(super) fn print_result_report(
                 wins,
                 counts.get(&TradeOutcome::Loss).copied().unwrap_or_default(),
                 flats,
-                counts.get(&TradeOutcome::Timeout).copied().unwrap_or_default(),
-                counts.get(&TradeOutcome::Incomplete).copied().unwrap_or_default(),
+                counts
+                    .get(&TradeOutcome::Timeout)
+                    .copied()
+                    .unwrap_or_default(),
+                counts
+                    .get(&TradeOutcome::Incomplete)
+                    .copied()
+                    .unwrap_or_default(),
                 format_optional_f64(complete_win_rate),
                 format_optional_f64(resolved_win_rate),
                 format_optional_f64(avg_r)

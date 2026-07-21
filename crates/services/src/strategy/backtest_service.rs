@@ -5,6 +5,7 @@ use anyhow::Result;
 use rust_quant_analytics::calculate_performance_metrics;
 use rust_quant_common::utils::time;
 use rust_quant_common::CandleItem;
+use rust_quant_core::config::random_backtest_is_enabled;
 use rust_quant_domain::entities::{BacktestDetail, BacktestLog, BacktestPerformanceMetrics};
 use rust_quant_domain::traits::{AuditLogRepository, BacktestLogRepository};
 use rust_quant_domain::StrategyType;
@@ -12,7 +13,6 @@ use rust_quant_strategies::strategy_common::{
     BackTestResult, BasicRiskStrategyConfig, TradeRecord,
 };
 use serde_json::json;
-use std::env;
 use std::str::FromStr;
 use tracing::info;
 /// 回测服务
@@ -90,7 +90,7 @@ impl BacktestService {
         log_entity.ten_bar_after_win_rate = 0.0;
         let back_test_id = self.repository.insert_log(&log_entity).await?;
         // 随机测试只用于压力/扰动验证，不能污染正式的交易明细和绩效指标表。
-        if env::var("ENABLE_RANDOM_TEST").unwrap_or_default() != "true" {
+        if !random_backtest_is_enabled() {
             if !back_test_result.trade_records.is_empty() {
                 // 成交明细必须在汇总行之后写入，因为详情表需要稳定的 back_test_id 做审计回溯。
                 self.save_backtest_details(

@@ -1,12 +1,16 @@
 use rust_quant_indicators::signal_weight::SignalWeightsConfig;
 use rust_quant_indicators::trend::vegas::{
     default_chase_confirm_config, default_extreme_k_filter, default_fib_retracement_signal_config,
-    default_large_entity_stop_loss_config, default_macd_signal_config,
-    CandleMomentumActivationConfig, ChaseConfirmConfig, CrossAssetAdaptiveThresholdConfig,
-    EmaDistanceConfig, EmaSignalConfig, EmaTouchTrendSignalConfig, EngulfingSignalConfig,
-    EntryBlockConfig, ExtremeKFilterConfig, FibRetracementSignalConfig, KlineHammerConfig,
-    LegDetectionConfig, MacdSignalConfig, MarketStructureConfig, RangeFilterConfig,
-    RsiSignalConfig, VegasStrategy, VolumeSignalConfig,
+    default_large_entity_stop_loss_config, default_macd_signal_config, BosFvgRetestConfig,
+    CandleMomentumActivationConfig, ChaseConfirmConfig, CompressedRangeBreakoutConfig,
+    CrossAssetAdaptiveThresholdConfig, DonchianBreakoutAcceptanceConfig,
+    DonchianVolumeBreakoutConfig, EmaDistanceConfig, EmaSignalConfig, EmaTouchTrendSignalConfig,
+    EmaTunnelRetestConfirmationConfig, EngulfingSignalConfig, EntryBlockConfig,
+    ExtremeKFilterConfig, FibRetracementSignalConfig, FvgReclaimConfig, KlineHammerConfig,
+    LegDetectionConfig, LiquiditySweepReversalConfig, MacdDivergenceReversalConfig,
+    MacdSignalConfig, MacdTrendResetBosConfig, MarketStructureConfig, RangeFilterConfig,
+    RsiSignalConfig, ShortProfitProtectionConfig, VegasStrategy, VolumeProfileFailedAuctionConfig,
+    VolumeProfileValueAreaBreakoutConfig, VolumeProfileValueAreaRetestConfig, VolumeSignalConfig,
 };
 use rust_quant_indicators::volatility::BollingBandsSignalConfig;
 use rust_quant_strategies::strategy_common::BasicRiskStrategyConfig;
@@ -92,6 +96,32 @@ pub struct ParamMergeBuilder {
     pub candle_momentum_activation: Option<CandleMomentumActivationConfig>,
     /// 跨币种 ATR 与成交量分位数阈值；为空时保持默认关闭。
     pub cross_asset_adaptive_threshold: Option<CrossAssetAdaptiveThresholdConfig>,
+    /// 两根 K 线流动性扫单反转；为空时保持默认关闭。
+    pub liquidity_sweep_reversal: Option<LiquiditySweepReversalConfig>,
+    /// 窄幅整理后的放量实体突破；为空时保持默认关闭。
+    pub compressed_range_breakout: Option<CompressedRangeBreakoutConfig>,
+    /// EMA144/169 隧道顺势回踩确认；为空时保持默认关闭。
+    pub ema_tunnel_retest_confirmation: Option<EmaTunnelRetestConfirmationConfig>,
+    /// 固定历史成交量价值区突破回踩；为空时保持默认关闭。
+    pub volume_profile_value_area_retest: Option<VolumeProfileValueAreaRetestConfig>,
+    /// 固定历史成交量价值区即时突破；为空时保持默认关闭。
+    pub volume_profile_value_area_breakout: Option<VolumeProfileValueAreaBreakoutConfig>,
+    /// 固定历史价值区上方失败拍卖做空；为空时保持默认关闭。
+    pub volume_profile_failed_auction: Option<VolumeProfileFailedAuctionConfig>,
+    /// Donchian 20 根放量通道突破；为空时保持默认关闭。
+    pub donchian_volume_breakout: Option<DonchianVolumeBreakoutConfig>,
+    /// Donchian 突破后紧邻一棒接受；为空时保持默认关闭。
+    pub donchian_breakout_acceptance: Option<DonchianBreakoutAcceptanceConfig>,
+    /// bearish BOS 环境中的 FVG 首次回补失败；为空时保持默认关闭。
+    pub bos_fvg_retest: Option<BosFvgRetestConfig>,
+    /// bearish FVG 完整收复多头；为空时保持默认关闭。
+    pub fvg_reclaim: Option<FvgReclaimConfig>,
+    /// MACD 背离经 fresh internal CHoCH 确认的反转；为空时保持默认关闭。
+    pub macd_divergence_reversal: Option<MacdDivergenceReversalConfig>,
+    /// MACD 趋势侧复位 + fresh internal BOS；为空时保持默认关闭。
+    pub macd_trend_reset_bos: Option<MacdTrendResetBosConfig>,
+    /// 空头 `1.5R` 盈利保护；为空时保持默认关闭。
+    pub short_profit_protection: Option<ShortProfitProtectionConfig>,
 }
 impl ParamMergeBuilder {
     //使用构造器
@@ -262,6 +292,23 @@ impl ParamMergeBuilder {
                 .fib_retracement_signal
                 .or_else(default_fib_retracement_signal_config),
             entry_block_config: self.entry_block_config.unwrap_or_default(),
+            liquidity_sweep_reversal: self.liquidity_sweep_reversal.unwrap_or_default(),
+            compressed_range_breakout: self.compressed_range_breakout.unwrap_or_default(),
+            ema_tunnel_retest_confirmation: self.ema_tunnel_retest_confirmation.unwrap_or_default(),
+            volume_profile_value_area_retest: self
+                .volume_profile_value_area_retest
+                .unwrap_or_default(),
+            volume_profile_value_area_breakout: self
+                .volume_profile_value_area_breakout
+                .unwrap_or_default(),
+            volume_profile_failed_auction: self.volume_profile_failed_auction.unwrap_or_default(),
+            donchian_volume_breakout: self.donchian_volume_breakout.unwrap_or_default(),
+            donchian_breakout_acceptance: self.donchian_breakout_acceptance.unwrap_or_default(),
+            bos_fvg_retest: self.bos_fvg_retest.unwrap_or_default(),
+            fvg_reclaim: self.fvg_reclaim.unwrap_or_default(),
+            macd_divergence_reversal: self.macd_divergence_reversal.unwrap_or_default(),
+            macd_trend_reset_bos: self.macd_trend_reset_bos.unwrap_or_default(),
+            short_profit_protection: self.short_profit_protection.unwrap_or_default(),
             ema_distance_config: self.ema_distance_config.unwrap_or_default(),
             atr_stop_loss_multiplier: self.atr_stop_loss_multiplier.unwrap_or(1.5),
             emit_debug: self.emit_debug.unwrap_or(true),
@@ -275,7 +322,7 @@ pub struct ParamGenerator {
     /// 列表数据。
     bb_periods: Vec<i32>,
     /// 列表数据。
-    shadow_ratios: Vec<f64>,
+    hammer_shadow_ratios: Vec<f64>,
     /// 列表数据。
     bb_multipliers: Vec<f64>,
     /// 列表数据。
@@ -292,6 +339,12 @@ pub struct ParamGenerator {
     current_index: usize,
     /// 总数量。
     total_count: usize,
+    /// 完整笛卡尔参数空间大小；采样索引必须始终映射到该范围内。
+    grid_count: usize,
+    /// 固定种子生成的首个网格索引。
+    sample_start: usize,
+    /// 与网格大小互质的步长，保证有限采样过程中不会重复命中同一组合。
+    sample_stride: usize,
     //risk
     max_loss_percent: Vec<f64>,
     /// 列表数据。
@@ -308,7 +361,7 @@ impl ParamGenerator {
     /// 保留现有接口风格，优先保障可读性、可追踪性与可维护性。
     pub fn new(
         bb_periods: Vec<i32>,
-        shadow_ratios: Vec<f64>,
+        hammer_shadow_ratios: Vec<f64>,
         bb_multipliers: Vec<f64>,
         volume_bar_nums: Vec<usize>,
         volume_ratios: Vec<f64>,
@@ -320,8 +373,44 @@ impl ParamGenerator {
         is_used_signal_k_line_stop_loss: Vec<bool>,
         fix_signal_kline_take_profit_ratios: Vec<f64>,
     ) -> Self {
-        let total_count = bb_periods.len()
-            * shadow_ratios.len()
+        Self::new_sampled(
+            bb_periods,
+            hammer_shadow_ratios,
+            bb_multipliers,
+            volume_bar_nums,
+            volume_ratios,
+            breakthrough_thresholds,
+            rsi_periods,
+            rsi_over_buy_sell,
+            max_loss_percent,
+            take_profit_ratios,
+            is_used_signal_k_line_stop_loss,
+            fix_signal_kline_take_profit_ratios,
+            usize::MAX,
+            0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    /// 构造可重放的有限随机采样器，不预先分配完整参数组合列表。
+    pub fn new_sampled(
+        bb_periods: Vec<i32>,
+        hammer_shadow_ratios: Vec<f64>,
+        bb_multipliers: Vec<f64>,
+        volume_bar_nums: Vec<usize>,
+        volume_ratios: Vec<f64>,
+        breakthrough_thresholds: Vec<f64>,
+        rsi_periods: Vec<usize>,
+        rsi_over_buy_sell: Vec<(f64, f64)>,
+        max_loss_percent: Vec<f64>,
+        take_profit_ratios: Vec<f64>,
+        is_used_signal_k_line_stop_loss: Vec<bool>,
+        fix_signal_kline_take_profit_ratios: Vec<f64>,
+        sample_size: usize,
+        sample_seed: u64,
+    ) -> Self {
+        let grid_count = bb_periods.len()
+            * hammer_shadow_ratios.len()
             * bb_multipliers.len()
             * volume_bar_nums.len()
             * volume_ratios.len()
@@ -332,9 +421,11 @@ impl ParamGenerator {
             * take_profit_ratios.len()
             * is_used_signal_k_line_stop_loss.len()
             * fix_signal_kline_take_profit_ratios.len();
+        let total_count = sample_size.min(grid_count);
+        let (sample_start, sample_stride) = sample_order(grid_count, sample_size, sample_seed);
         Self {
             bb_periods,
-            shadow_ratios,
+            hammer_shadow_ratios,
             bb_multipliers,
             volume_bar_nums,
             volume_ratios,
@@ -343,6 +434,9 @@ impl ParamGenerator {
             rsi_over_buy_sell,
             current_index: 0,
             total_count,
+            grid_count,
+            sample_start,
+            sample_stride,
             max_loss_percent,
             take_profit_ratios,
             is_used_signal_k_line_stop_loss,
@@ -352,23 +446,22 @@ impl ParamGenerator {
     /// 加载 配置、基础设施和运行时 运行所需数据，并把缺失或异常交给调用方处理。
     pub fn get_next_batch(&mut self, batch_size: usize) -> Vec<ParamMergeBuilder> {
         let mut batch = Vec::with_capacity(batch_size);
-        // 计算当前组合的索引
         while batch.len() < batch_size && self.current_index < self.total_count {
-            let mut index = self.current_index;
-            // 计算每个维度的索引
+            // 仿射排列只保存起点和步长，既能固定种子重放，又避免构造完整索引数组。
+            let mut index = sampled_grid_index(
+                self.current_index,
+                self.grid_count,
+                self.sample_start,
+                self.sample_stride,
+            );
             let bb_p_size = self.bb_periods.len();
-            let sr_size = self.shadow_ratios.len();
+            let sr_size = self.hammer_shadow_ratios.len();
             let bm_size = self.bb_multipliers.len();
             let vbn_size = self.volume_bar_nums.len();
             let vir_size = self.volume_ratios.len();
             let bt_size = self.breakthrough_thresholds.len();
             let rp_size = self.rsi_periods.len();
             let rob_size = self.rsi_over_buy_sell.len();
-            let _mlp_size = self.max_loss_percent.len();
-            let _pt_size = self.take_profit_ratios.len();
-            let _usklsl_size = self.is_used_signal_k_line_stop_loss.len();
-            let fsktpr_size = self.fix_signal_kline_take_profit_ratios.len();
-            index /= fsktpr_size;
             let i_bb_p = index % bb_p_size;
             index /= bb_p_size;
             let i_sr = index % sr_size;
@@ -385,8 +478,6 @@ impl ParamGenerator {
             index /= rp_size;
             let i_rob = index % rob_size;
             index /= rob_size;
-            let i_ros = index % self.rsi_over_buy_sell.len();
-            index /= self.rsi_over_buy_sell.len();
             let i_mlp = index % self.max_loss_percent.len();
             index /= self.max_loss_percent.len();
             let i_pt = index % self.take_profit_ratios.len();
@@ -394,11 +485,9 @@ impl ParamGenerator {
             let i_usklsl = index % self.is_used_signal_k_line_stop_loss.len();
             index /= self.is_used_signal_k_line_stop_loss.len();
             let i_fsktpr = index % self.fix_signal_kline_take_profit_ratios.len();
-            // 最后一个维度，无需再除
-            // 获取参数值
             let param = ParamMergeBuilder {
                 bb_period: self.bb_periods[i_bb_p],
-                hammer_shadow_ratio: self.shadow_ratios[i_sr],
+                hammer_shadow_ratio: self.hammer_shadow_ratios[i_sr],
                 bb_multiplier: self.bb_multipliers[i_bm],
                 volume_bar_num: self.volume_bar_nums[i_vbn],
                 volume_increase_ratio: self.volume_ratios[i_vir],
@@ -407,7 +496,7 @@ impl ParamGenerator {
                 ema_signal: None,
                 rsi_period: self.rsi_periods[i_rp],
                 rsi_overbought: self.rsi_over_buy_sell[i_rob].0,
-                rsi_oversold: self.rsi_over_buy_sell[i_ros].1,
+                rsi_oversold: self.rsi_over_buy_sell[i_rob].1,
                 kline_start_time: None,
                 kline_end_time: None,
                 min_k_line_num: None,
@@ -440,6 +529,19 @@ impl ParamGenerator {
                 entry_block_config: None,
                 candle_momentum_activation: None,
                 cross_asset_adaptive_threshold: None,
+                liquidity_sweep_reversal: None,
+                compressed_range_breakout: None,
+                ema_tunnel_retest_confirmation: None,
+                volume_profile_value_area_retest: None,
+                volume_profile_value_area_breakout: None,
+                volume_profile_failed_auction: None,
+                donchian_volume_breakout: None,
+                donchian_breakout_acceptance: None,
+                bos_fvg_retest: None,
+                fvg_reclaim: None,
+                macd_divergence_reversal: None,
+                macd_trend_reset_bos: None,
+                short_profit_protection: None,
             };
             batch.push(param);
             self.current_index += 1;
@@ -462,9 +564,125 @@ impl ParamGenerator {
         self.total_count.saturating_sub(self.current_index)
     }
 }
+
+/// 生成无需额外内存的确定性采样顺序。
+///
+/// 步长必须与网格大小互质，否则仿射序列会在覆盖完整参数空间前提前循环。
+fn sample_order(grid_count: usize, sample_size: usize, sample_seed: u64) -> (usize, usize) {
+    if grid_count <= 1 {
+        return (0, 1);
+    }
+    if sample_size >= grid_count && sample_seed == 0 {
+        return (0, 1);
+    }
+    let sample_start = splitmix64(sample_seed) as usize % grid_count;
+    let mut sample_stride =
+        (splitmix64(sample_seed ^ 0x9E37_79B9_7F4A_7C15) as usize % grid_count).max(1);
+    while greatest_common_divisor(sample_stride, grid_count) != 1 {
+        sample_stride += 1;
+        if sample_stride >= grid_count {
+            sample_stride = 1;
+        }
+    }
+    (sample_start, sample_stride)
+}
+
+fn sampled_grid_index(
+    sample_index: usize,
+    grid_count: usize,
+    sample_start: usize,
+    sample_stride: usize,
+) -> usize {
+    if grid_count == 0 {
+        return 0;
+    }
+    ((sample_start as u128 + sample_index as u128 * sample_stride as u128) % grid_count as u128)
+        as usize
+}
+
+fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
+}
 #[cfg(test)]
 mod tests {
-    use super::ParamMergeBuilder;
+    use super::{ParamGenerator, ParamMergeBuilder};
+    use std::collections::HashSet;
+
+    fn sampled_params(sample_size: usize, seed: u64) -> Vec<ParamMergeBuilder> {
+        let mut generator = ParamGenerator::new_sampled(
+            vec![10, 20],
+            vec![0.6, 0.8],
+            vec![2.0],
+            vec![4],
+            vec![1.8],
+            vec![0.003],
+            vec![8],
+            vec![(70.0, 30.0), (80.0, 20.0)],
+            vec![0.03, 0.05],
+            vec![0.0],
+            vec![true, false],
+            vec![0.0],
+            sample_size,
+            seed,
+        );
+        let expected = sample_size.min(32);
+        let params = generator.get_next_batch(expected.max(1));
+        assert_eq!(generator.progress(), (params.len(), expected));
+        params
+    }
+
+    fn param_identity(param: &ParamMergeBuilder) -> (i32, u64, u64, u64, bool) {
+        (
+            param.bb_period,
+            param.hammer_shadow_ratio.to_bits(),
+            param.rsi_overbought.to_bits(),
+            param.max_loss_percent.to_bits(),
+            param.is_used_signal_k_line_stop_loss,
+        )
+    }
+
+    #[test]
+    fn sampled_generator_is_deterministic_and_has_no_duplicates() {
+        let first = sampled_params(16, 42);
+        let replay = sampled_params(16, 42);
+        let other_seed = sampled_params(16, 43);
+        let first_ids: Vec<_> = first.iter().map(param_identity).collect();
+        let replay_ids: Vec<_> = replay.iter().map(param_identity).collect();
+        let other_ids: Vec<_> = other_seed.iter().map(param_identity).collect();
+        assert_eq!(first_ids, replay_ids);
+        assert_ne!(first_ids, other_ids);
+        assert_eq!(first_ids.iter().copied().collect::<HashSet<_>>().len(), 16);
+    }
+
+    #[test]
+    fn exhaustive_generator_preserves_rsi_pairs_and_all_risk_dimensions() {
+        let params = sampled_params(usize::MAX, 0);
+        let allowed_rsi_pairs = [(70.0, 30.0), (80.0, 20.0)];
+        assert_eq!(params.len(), 32);
+        assert!(params
+            .iter()
+            .all(|param| allowed_rsi_pairs.contains(&(param.rsi_overbought, param.rsi_oversold))));
+        assert!(params.iter().any(|param| param.max_loss_percent == 0.03));
+        assert!(params.iter().any(|param| param.max_loss_percent == 0.05));
+        assert!(params
+            .iter()
+            .any(|param| param.is_used_signal_k_line_stop_loss));
+        assert!(params
+            .iter()
+            .any(|param| !param.is_used_signal_k_line_stop_loss));
+    }
     #[test]
     /// 封装当前函数，减少配置运行时调用方重复实现相同细节。
     /// 当前函数完成参数检查、流程切分与结果封装，确保上层可安全复用。

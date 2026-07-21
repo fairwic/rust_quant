@@ -48,6 +48,38 @@ fn default_backtest_targets() -> Vec<(String, String)> {
         // ("BCH-USDT-SWAP".to_string(), "4H".to_string()),
     ]
 }
+
+/// 解析精确回测目标覆盖，格式为 `SYMBOL@TIMEFRAME`，多个目标使用逗号分隔。
+///
+/// 随机研究不能只按 symbol 过滤，否则默认列表里的其他周期会共享 CPU、进度键和结果口径。
+fn parse_backtest_target_override(raw: Option<&str>) -> Result<Option<Vec<(String, String)>>> {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let mut targets = BTreeSet::new();
+    for item in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
+        let Some((symbol, timeframe)) = item.split_once('@') else {
+            return Err(anyhow!(
+                "BACKTEST_ONLY_TARGETS={} 格式无效，必须使用 SYMBOL@TIMEFRAME",
+                item
+            ));
+        };
+        let symbol = symbol.trim();
+        let timeframe = timeframe.trim();
+        if symbol.is_empty() || timeframe.is_empty() {
+            return Err(anyhow!("BACKTEST_ONLY_TARGETS={} 缺少交易对或周期", item));
+        }
+        targets.insert((symbol.to_string(), timeframe.to_string()));
+    }
+    if targets.is_empty() {
+        return Err(anyhow!("BACKTEST_ONLY_TARGETS 未提供有效目标"));
+    }
+    Ok(Some(targets.into_iter().collect()))
+}
 /// 提供override周期fromCSV的集中实现，避免配置运行时调用方重复处理相同细节。
 fn override_periods_from_csv(periods: Vec<String>, raw: Option<&str>) -> Vec<String> {
     let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
@@ -64,6 +96,32 @@ fn override_periods_from_csv(periods: Vec<String>, raw: Option<&str>) -> Vec<Str
         periods
     } else {
         overridden
+    }
+}
+
+#[cfg(test)]
+mod backtest_target_override_tests {
+    use super::parse_backtest_target_override;
+
+    #[test]
+    fn exact_backtest_targets_are_deduplicated_and_keep_timeframe() {
+        let targets = parse_backtest_target_override(Some(
+            "ETH-USDT-SWAP@15m,ETH-USDT-SWAP@15m,BTC-USDT-SWAP@4H",
+        ))
+        .expect("valid targets")
+        .expect("override");
+        assert_eq!(
+            targets,
+            vec![
+                ("BTC-USDT-SWAP".to_string(), "4H".to_string()),
+                ("ETH-USDT-SWAP".to_string(), "15m".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn exact_backtest_targets_reject_missing_timeframe() {
+        assert!(parse_backtest_target_override(Some("ETH-USDT-SWAP")).is_err());
     }
 }
 /// 提供去重字符串的集中实现，避免配置运行时调用方重复处理相同细节。

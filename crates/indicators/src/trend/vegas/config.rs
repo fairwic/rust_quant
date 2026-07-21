@@ -166,9 +166,22 @@ pub struct CandleMomentumActivationConfig {
     /// 是否只在现有中波动带内允许延迟 Fib 确认，复用 ATR 边界而不新增数值参数。
     #[serde(default)]
     pub restrict_delayed_fib_to_choppy_band: bool,
-    /// 中波动带限制开启时，是否额外允许高波动环境中的延迟做空；延迟做多仍受上界约束。
+    /// 中波动带限制开启时，是否额外允许高波动环境中的延迟做空；默认不改变延迟做多规则。
     #[serde(default)]
     pub allow_high_volatility_delayed_short: bool,
+    /// 中波动带限制开启时，是否额外允许高波动环境中的延迟做多；默认关闭以保持旧版本。
+    #[serde(default)]
+    pub allow_high_volatility_delayed_long: bool,
+    /// 中波动带限制开启时，是否额外允许低于波动带下界的延迟 Fib 确认。
+    ///
+    /// 该开关复用已有波动带下界，不引入新的数值参数；默认关闭以保持旧版本。
+    #[serde(default)]
+    pub allow_low_volatility_delayed: bool,
+    /// 是否允许量价冲击后等待回踩实体中位并收复的独立确认入场。
+    ///
+    /// 该 setup 复用本配置的冲击阈值和窗口；默认关闭以保持旧版本。
+    #[serde(default)]
+    pub allow_momentum_retest_entry: bool,
     /// 计算成交量和振幅基线使用的已确认 K 线数量。
     pub baseline_bars: usize,
     /// 激活事件产生后允许 Vegas 寻找入场的 4H K 线数量。
@@ -202,6 +215,9 @@ impl Default for CandleMomentumActivationConfig {
             allow_delayed_fib_volume_confirmation: false,
             restrict_delayed_fib_to_choppy_band: false,
             allow_high_volatility_delayed_short: false,
+            allow_high_volatility_delayed_long: false,
+            allow_low_volatility_delayed: false,
+            allow_momentum_retest_entry: false,
             baseline_bars: 20,
             valid_for_bars: 6,
             min_wait_bars: default_candle_momentum_min_wait_bars(),
@@ -537,6 +553,415 @@ pub fn default_fib_retracement_signal_config() -> Option<FibRetracementSignalCon
 fn default_min_trend_move_pct() -> f64 {
     0.08
 }
+/// 两根已确认 K 线组成的流动性扫单反转配置。
+///
+/// 默认关闭，避免新增研究逻辑改变既有策略版本；候选版本必须显式开启。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct LiquiditySweepReversalConfig {
+    /// 是否启用扫单反转候选。
+    pub is_open: bool,
+    /// 是否允许下方扫流动性后的多头候选。
+    pub enable_long: bool,
+    /// 是否允许上方扫流动性后的空头候选。
+    pub enable_short: bool,
+    /// 是否要求扫高反转空头位于现有震荡波动带下界之下。
+    ///
+    /// 该开关复用 `choppy_volatility_filter.min_atr_ratio`，不引入独立阈值；默认关闭以保持旧候选语义。
+    pub require_short_below_choppy_atr_min: bool,
+    /// 是否允许“收盘突破后下一棒收回结构内”的失败突破空头。
+    ///
+    /// `true` 只新增严格相邻两根已完成 K 线的失败突破判断；`false` 保持原扫高长影线语义。
+    pub enable_failed_breakout_close_reentry_short: bool,
+    /// 是否允许“收盘跌破后下一棒收回结构内”的失败跌破多头。
+    ///
+    /// 该分支与失败突破空头严格镜像，默认关闭，避免研究规则改变既有信号集合。
+    pub enable_failed_breakdown_close_reentry_long: bool,
+    /// 是否等待失败跌破收回后形成更高低点，并在突破收回棒高点时做多。
+    ///
+    /// `true` 只增加严格相邻四根已完成 K 线的延迟确认；`false` 不改变既有扫单候选。
+    pub enable_failed_breakdown_higher_low_breakout_long: bool,
+    /// 是否在扫高收回后等待下一棒跌破确认棒低点做空。
+    ///
+    /// `true` 只增加严格相邻三根已完成 K 线的破位确认；`false` 不改变既有扫单候选。
+    pub enable_upper_sweep_confirmation_low_break_short: bool,
+    /// 是否要求扫高跌破确认空头生成时 MACD 主线仍位于零轴上方。
+    ///
+    /// 该门禁只约束 `enable_upper_sweep_confirmation_low_break_short` 分支，避免把已经运行到
+    /// 零轴下方的成熟下跌误当成新的扫高反转；默认关闭以保持 v59 与更早版本语义。
+    pub require_upper_sweep_confirmation_macd_above_zero: bool,
+    /// 是否在扫低收回后等待下一棒突破确认棒高点做多。
+    ///
+    /// `true` 只增加严格相邻三根已完成 K 线的局部 BOS 确认；`false` 不改变既有扫单候选。
+    pub enable_lower_sweep_confirmation_high_break_long: bool,
+    /// 是否要求扫低突破确认多头生成时 MACD 主线仍位于零轴下方。
+    ///
+    /// 该门禁只约束对称的下方扫单分支，避免把已经成熟的上涨误当成新的空头衰竭反转。
+    pub require_lower_sweep_confirmation_macd_below_zero: bool,
+    /// 是否在原两棒规则未命中时补充下方扫单后的严格三棒首次回测多头。
+    pub enable_first_retest_long: bool,
+    /// 是否在原两棒规则未命中时补充上方扫单后的严格三棒首次回测空头。
+    ///
+    /// 两个首次回测方向均默认关闭；开启后只增加候选，不替换既有两棒扫单信号。
+    pub enable_first_retest_short: bool,
+    /// 首次回测入场按有效初始止损计算的止盈上限，`None` 保留原退出几何。
+    ///
+    /// 该字段只标记研究信号；有效止损需要由持仓层冻结后才能生成价格。
+    pub first_retest_take_profit_r: Option<f64>,
+    /// 是否让首次回测仓位只使用固定 R 止盈，默认保留既有更近目标。
+    pub first_retest_replace_existing_take_profit: bool,
+    /// 确认收回后允许等待首次触及中点的最大根数。
+    ///
+    /// `1` 保留既有紧邻三棒语义；研究版本可显式设为 `2`，但不会继续等待更晚 K 线。
+    pub first_retest_max_wait_bars: usize,
+    /// 首次回踩分支专用的冲击量下界；`None` 复用两棒扫单的量能门槛。
+    ///
+    /// 独立字段避免研究版本放宽首次回踩时，静默改变两棒扫单及其他确认分支。
+    pub first_retest_min_volume_ratio: Option<f64>,
+    /// 冲击 K 线突破前序高低点时使用的回看根数。
+    pub lookback_bars: usize,
+    /// 冲击 K 线的最小实体占比。
+    pub shock_min_body_ratio: f64,
+    /// 冲击 K 线相对更早成交量均值的最小倍数。
+    pub shock_min_volume_ratio: f64,
+    /// 确认 K 线拒绝影线的最小占比。
+    pub confirmation_min_shadow_ratio: f64,
+    /// 空头要求的最小 Fib 回撤比例；多头使用其对称上界。
+    pub fib_midline_ratio: f64,
+    /// 两根 K 线极值外的保护止损缓冲比例。
+    pub stop_loss_buffer_ratio: f64,
+}
+impl Default for LiquiditySweepReversalConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_long: true,
+            enable_short: true,
+            require_short_below_choppy_atr_min: false,
+            enable_failed_breakout_close_reentry_short: false,
+            enable_failed_breakdown_close_reentry_long: false,
+            enable_failed_breakdown_higher_low_breakout_long: false,
+            enable_upper_sweep_confirmation_low_break_short: false,
+            require_upper_sweep_confirmation_macd_above_zero: false,
+            enable_lower_sweep_confirmation_high_break_long: false,
+            require_lower_sweep_confirmation_macd_below_zero: false,
+            enable_first_retest_long: false,
+            enable_first_retest_short: false,
+            first_retest_take_profit_r: None,
+            first_retest_replace_existing_take_profit: false,
+            first_retest_max_wait_bars: 1,
+            first_retest_min_volume_ratio: None,
+            lookback_bars: 20,
+            shock_min_body_ratio: 0.65,
+            shock_min_volume_ratio: 2.5,
+            confirmation_min_shadow_ratio: 0.45,
+            fib_midline_ratio: 0.50,
+            stop_loss_buffer_ratio: 0.006,
+        }
+    }
+}
+/// 窄幅整理后放量实体突破的独立研究配置。
+///
+/// 结构阈值由对应规则版本固定；这里只保留方向与启停门禁，避免研究阶段扫描参数。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct CompressedRangeBreakoutConfig {
+    /// 是否启用窄幅整理突破候选；`false` 保持既有策略信号集合不变。
+    pub is_open: bool,
+    /// 是否把压缩突破作为唯一入场家族运行。
+    ///
+    /// `true` 会隔离 Legacy Vegas、扫流动性及其他研究分支，避免决策优先级隐藏本家族机会；
+    /// `false` 保留既有 additive 语义与历史版本行为。
+    pub standalone: bool,
+    /// 是否允许多头突破候选；`false` 时即使形态满足也不补充多头信号。
+    pub enable_long: bool,
+    /// 是否允许空头突破候选；`false` 时即使形态满足也不补充空头信号。
+    pub enable_short: bool,
+    /// 是否用突破前整理区边界作为结构失效止损；`false` 沿用既有 ATR 止损。
+    pub use_prior_range_invalidation_stop: bool,
+    /// 是否拦截低于 `2.5x` 相对量且 EMA 距离为 Normal 的空头突破。
+    ///
+    /// `true` 只影响新增压缩突破空头；`false` 保留 v40 的完整信号集合。
+    /// `2.5x` 复用既有扫流动性冲击量阈值，避免为亏损子集新增数值扫描。
+    pub block_low_volume_normal_ema_short: bool,
+    /// 是否把空头整理区失效止损扩到至少距入场 `1ATR`。
+    ///
+    /// `true` 用自然波动单位避免止损落在正常 4H 噪声内；`false` 保留 v40 的原始区间边界。
+    /// 最终止损仍受风险配置中的最大亏损上限约束。
+    pub widen_short_invalidation_stop_to_one_atr: bool,
+    /// 是否把低于 `2.5x` 相对量的空头突破延迟到下一根 K 线确认。
+    ///
+    /// `true` 时强量突破仍立即入场，弱量突破只等待固定一根已完成 K 线；
+    /// `false` 保留 v40/v41 的即时入场语义。
+    pub delay_low_volume_short_one_bar: bool,
+    /// 是否允许 `1.5ATR` 以上的空头价格位移替代缺失的 `1.5x` 量能确认。
+    ///
+    /// `true` 只扩展新增压缩突破空头；`false` 保持原量能门禁。
+    pub allow_short_price_displacement_without_volume: bool,
+    /// 是否要求压缩突破空头达到既有 `2.5x` 冲击量标准。
+    ///
+    /// 该门禁只作用于新增压缩突破空头，并同时禁用弱量延迟路径；默认关闭以保持历史版本不变。
+    pub require_short_relative_volume_2_5: bool,
+    /// 是否要求压缩突破空头达到既有 `2.0x` 放量标准。
+    ///
+    /// 与 `2.5x` 冲击量门禁同时开启时取更严格边界；默认关闭以保持历史版本不变。
+    pub require_short_relative_volume_2_0: bool,
+}
+impl Default for CompressedRangeBreakoutConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            standalone: false,
+            enable_long: true,
+            enable_short: true,
+            use_prior_range_invalidation_stop: false,
+            block_low_volume_normal_ema_short: false,
+            widen_short_invalidation_stop_to_one_atr: false,
+            delay_low_volume_short_one_bar: false,
+            allow_short_price_displacement_without_volume: false,
+            require_short_relative_volume_2_5: false,
+            require_short_relative_volume_2_0: false,
+        }
+    }
+}
+/// EMA144/169 隧道顺势回踩确认的独立研究配置。
+///
+/// 形态使用固定三根已完成 K 线和既有 EMA 周期；配置只保留启停、方向与现有结构缓冲，
+/// 避免在已查看历史上扫描触碰距离、确认幅度或动量阈值。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct EmaTunnelRetestConfirmationConfig {
+    /// 是否启用 EMA 隧道回踩确认；`false` 保持旧版本信号集合不变。
+    pub is_open: bool,
+    /// 是否允许多头顺势回踩确认。
+    pub enable_long: bool,
+    /// 是否允许空头顺势回踩确认。
+    pub enable_short: bool,
+    /// 保护止损放在回踩与确认共同极值之外的比例缓冲。
+    pub stop_loss_buffer_ratio: f64,
+}
+
+impl Default for EmaTunnelRetestConfirmationConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_long: true,
+            enable_short: true,
+            stop_loss_buffer_ratio: 0.006,
+        }
+    }
+}
+/// 固定历史成交量价值区突破并回踩接受的独立研究配置。
+///
+/// 结构参数在 V71 清单中冻结；配置只保留显式启停与方向，避免对已查看历史扫描参数。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct VolumeProfileValueAreaRetestConfig {
+    /// 是否启用价值区突破回踩候选；`false` 保持旧版本信号集合不变。
+    pub is_open: bool,
+    /// 是否允许上破 VAH 后回踩接受的多头候选。
+    pub enable_long: bool,
+    /// 是否允许下破 VAL 后回踩接受的空头候选。
+    pub enable_short: bool,
+    /// 保护止损放在回踩棒极值之外的比例缓冲。
+    pub stop_loss_buffer_ratio: f64,
+}
+
+impl Default for VolumeProfileValueAreaRetestConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_long: true,
+            enable_short: true,
+            stop_loss_buffer_ratio: 0.006,
+        }
+    }
+}
+/// 固定历史成交量价值区即时放量突破的独立研究配置。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct VolumeProfileValueAreaBreakoutConfig {
+    /// 是否启用价值区即时突破；`false` 保持旧版本信号集合不变。
+    pub is_open: bool,
+    /// 是否允许上破 VAH 的多头候选。
+    pub enable_long: bool,
+    /// 是否允许下破 VAL 的空头候选。
+    pub enable_short: bool,
+    /// 结构止损放在价值区边界内侧的比例缓冲。
+    pub stop_loss_buffer_ratio: f64,
+    /// 是否要求空头满足标准 ADX14>=25 且 -DI>+DI；默认关闭以保持 V72 行为。
+    pub require_short_adx_25: bool,
+    /// 以最终有效初始风险冻结并替换动态止盈的固定 R 目标；`None` 保持 V72 退出。
+    pub fixed_take_profit_r: Option<f64>,
+}
+
+impl Default for VolumeProfileValueAreaBreakoutConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_long: true,
+            enable_short: true,
+            stop_loss_buffer_ratio: 0.006,
+            require_short_adx_25: false,
+            fixed_take_profit_r: None,
+        }
+    }
+}
+/// 固定历史价值区上方失败拍卖的独立做空研究配置。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct VolumeProfileFailedAuctionConfig {
+    /// 是否启用上方失败拍卖候选；`false` 保持旧版本信号集合不变。
+    pub is_open: bool,
+    /// 结构止损放在突破棒与确认棒共同高点之外的比例缓冲。
+    pub stop_loss_buffer_ratio: f64,
+}
+
+impl Default for VolumeProfileFailedAuctionConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            stop_loss_buffer_ratio: 0.006,
+        }
+    }
+}
+/// 固定 20 根 Donchian 通道与普通放量确认的独立趋势突破配置。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct DonchianVolumeBreakoutConfig {
+    /// 是否启用 Donchian 放量突破；`false` 保持旧版本信号集合不变。
+    pub is_open: bool,
+    /// 是否允许向上通道突破多头。
+    pub enable_long: bool,
+    /// 是否允许向下通道突破空头。
+    pub enable_short: bool,
+}
+
+impl Default for DonchianVolumeBreakoutConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_long: true,
+            enable_short: true,
+        }
+    }
+}
+/// Donchian 放量突破后紧邻一棒继续接受通道外价格的独立研究配置。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct DonchianBreakoutAcceptanceConfig {
+    /// 是否启用紧邻一棒接受确认；`false` 保持旧版本信号集合不变。
+    pub is_open: bool,
+    /// 是否允许向上突破后的多头接受。
+    pub enable_long: bool,
+    /// 是否允许向下突破后的空头接受。
+    pub enable_short: bool,
+    /// 结构止损进入冻结通道边界内侧的比例。
+    pub stop_loss_buffer_ratio: f64,
+}
+
+impl Default for DonchianBreakoutAcceptanceConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_long: true,
+            enable_short: true,
+            stop_loss_buffer_ratio: 0.006,
+        }
+    }
+}
+/// 已确认 bearish BOS 环境中的 FVG 首次回补失败空头配置。
+///
+/// 结构、FVG 与 MACD 条件使用冻结常量；配置只负责显式启停，避免研究阶段扫描参数。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct BosFvgRetestConfig {
+    /// 是否启用独立 BOS + FVG 回补失败 setup；`false` 保持既有信号集合不变。
+    pub is_open: bool,
+    /// 是否允许该 setup 生成空头；`false` 时只保留审计能力而不补充方向。
+    pub enable_short: bool,
+}
+
+impl Default for BosFvgRetestConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_short: true,
+        }
+    }
+}
+/// bearish FVG 被多头完整收复后的独立反转候选配置。
+///
+/// FVG 尺度、等待窗口与 MACD 条件使用冻结常量；这里只保留显式启停，避免参数扫描。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct FvgReclaimConfig {
+    /// 是否启用 bearish FVG 完整收复 setup；`false` 保持既有信号集合不变。
+    pub is_open: bool,
+    /// 是否允许该 setup 生成多头；`false` 时不补充任何交易方向。
+    pub enable_long: bool,
+    /// 是否要求收复棒当根出现 internal bullish CHoCH。
+    ///
+    /// `true` 用新鲜结构转向排除普通反弹；`false` 保留 v49 的纯 FVG + MACD 研究语义。
+    pub require_internal_bullish_choch: bool,
+}
+
+impl Default for FvgReclaimConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_long: true,
+            require_internal_bullish_choch: false,
+        }
+    }
+}
+/// 价格创新高/新低但 MACD 未确认，随后由 fresh internal CHoCH 确认的反转配置。
+///
+/// 背离窗口、确认时限与结构止损使用冻结常量；这里只保留方向启停，避免研究阶段扫描阈值。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct MacdDivergenceReversalConfig {
+    /// 是否启用独立 MACD 背离反转 setup；`false` 保持既有信号集合不变。
+    pub is_open: bool,
+    /// 是否允许 bullish divergence + fresh bullish CHoCH 生成多头。
+    pub enable_long: bool,
+    /// 是否允许 bearish divergence + fresh bearish CHoCH 生成空头。
+    pub enable_short: bool,
+}
+
+impl Default for MacdDivergenceReversalConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_long: true,
+            enable_short: true,
+        }
+    }
+}
+/// MACD 在趋势侧完成动量复位，并由当前完成柱 fresh internal BOS 确认的顺势配置。
+///
+/// 零轴、柱体交叉、结构新鲜度与止损缓冲使用冻结规则；这里只保留方向启停，
+/// 避免研究阶段扫描阈值或改变既有 Vegas 版本的信号集合。
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct MacdTrendResetBosConfig {
+    /// 是否启用独立 MACD 趋势复位 setup；`false` 保持既有信号集合不变。
+    pub is_open: bool,
+    /// 是否允许零轴上方 golden cross + fresh bullish BOS 生成多头。
+    pub enable_long: bool,
+    /// 是否允许零轴下方 death cross + fresh bearish BOS 生成空头。
+    pub enable_short: bool,
+}
+
+impl Default for MacdTrendResetBosConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            enable_long: true,
+            enable_short: true,
+        }
+    }
+}
 /// 入场硬拦截配置
 ///
 /// 默认保持既有基线；实验性拦截必须显式开启后再做回测验证。
@@ -583,6 +1008,16 @@ pub struct EntryBlockConfig {
     pub block_above_zero_low_volume_no_trend_hanging_short: bool,
     /// 多头趋势深回调但缺少做空结构确认时拦截做空
     pub block_long_trend_pullback_short: bool,
+    /// 多头锤子、布林支撑与 MACD 回升同时出现时拦截立即做空；默认关闭
+    pub block_bullish_rejection_momentum_recovery_short: bool,
+    /// 空头信号棒出现长下影、短上影的下方拒绝形态时拦截追空；默认关闭
+    pub block_short_lower_rejection_entry: bool,
+    /// 新腿首棒尚无延迟量能激活时阻断立即入场；默认关闭
+    pub block_new_leg_without_delayed_activation_entry: bool,
+    /// 下方拒绝空头拦截要求的最小下影线振幅占比
+    pub short_rejection_min_lower_shadow_ratio: f64,
+    /// 下方拒绝空头拦截允许的最大上影线振幅占比
+    pub short_rejection_max_upper_shadow_ratio: f64,
 }
 impl Default for EntryBlockConfig {
     /// 提供默认参数，保证 回测与策略研究 在未显式配置时仍有稳定初始值。
@@ -608,12 +1043,48 @@ impl Default for EntryBlockConfig {
             block_deep_negative_hammer_long: false,
             block_above_zero_low_volume_no_trend_hanging_short: false,
             block_long_trend_pullback_short: false,
+            block_bullish_rejection_momentum_recovery_short: false,
+            block_short_lower_rejection_entry: false,
+            block_new_leg_without_delayed_activation_entry: false,
+            short_rejection_min_lower_shadow_ratio: 0.55,
+            short_rejection_max_upper_shadow_ratio: 0.15,
         }
     }
 }
 pub fn default_entry_block_config() -> EntryBlockConfig {
     EntryBlockConfig::default()
 }
+/// 空头盈利保护配置。
+///
+/// 该候选只声明持仓管理语义；初始 R 在开仓后由回测风险层根据最终保护止损冻结。
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortProfitProtectionMode {
+    /// 达到 `1.5R` 后，从下一根 K 线起移动到保本价。
+    #[default]
+    BreakevenAfter1p5R,
+    /// 达到 `2R` 后，从下一根 K 线起锁定 `+1R`。
+    Lock1rAfter2r,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+pub struct ShortProfitProtectionConfig {
+    /// 是否启用空头盈利保护。
+    pub is_open: bool,
+    /// 固定的版本化保护模式；阈值不在运行时自由调参。
+    pub mode: ShortProfitProtectionMode,
+}
+
+impl Default for ShortProfitProtectionConfig {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            mode: ShortProfitProtectionMode::default(),
+        }
+    }
+}
+
 /// 大实体止损配置
 /// 当K线为大实体（强趋势）时，使用更紧的止损（假设回调不深）
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -646,8 +1117,13 @@ pub fn default_large_entity_stop_loss_config() -> Option<LargeEntityStopLossConf
 #[cfg(test)]
 mod tests {
     use super::{
-        ChoppyVolatilityFilterConfig, CrossAssetAdaptiveThresholdConfig, EntryBlockConfig,
-        MacdSignalConfig,
+        BosFvgRetestConfig, ChoppyVolatilityFilterConfig, CompressedRangeBreakoutConfig,
+        CrossAssetAdaptiveThresholdConfig, DonchianBreakoutAcceptanceConfig,
+        DonchianVolumeBreakoutConfig, EmaTunnelRetestConfirmationConfig, EntryBlockConfig,
+        FvgReclaimConfig, LiquiditySweepReversalConfig, MacdDivergenceReversalConfig,
+        MacdSignalConfig, MacdTrendResetBosConfig, ShortProfitProtectionConfig,
+        ShortProfitProtectionMode, VolumeProfileFailedAuctionConfig,
+        VolumeProfileValueAreaBreakoutConfig, VolumeProfileValueAreaRetestConfig,
     };
 
     #[test]
@@ -692,6 +1168,11 @@ mod tests {
         assert!(!config.block_deep_negative_hammer_long);
         assert!(!config.block_above_zero_low_volume_no_trend_hanging_short);
         assert!(!config.block_long_trend_pullback_short);
+        assert!(!config.block_bullish_rejection_momentum_recovery_short);
+        assert!(!config.block_short_lower_rejection_entry);
+        assert!(!config.block_new_leg_without_delayed_activation_entry);
+        assert_eq!(config.short_rejection_min_lower_shadow_ratio, 0.55);
+        assert_eq!(config.short_rejection_max_upper_shadow_ratio, 0.15);
         assert!(config.block_weak_ema_trend_entry);
     }
     #[test]
@@ -712,7 +1193,12 @@ mod tests {
             "block_normal_bull_leg_no_confirm_long": true,
             "block_deep_negative_hammer_long": true,
             "block_above_zero_low_volume_no_trend_hanging_short": true,
-            "block_long_trend_pullback_short": true
+            "block_long_trend_pullback_short": true,
+            "block_bullish_rejection_momentum_recovery_short": true,
+            "block_short_lower_rejection_entry": true,
+            "block_new_leg_without_delayed_activation_entry": true,
+            "short_rejection_min_lower_shadow_ratio": 0.6,
+            "short_rejection_max_upper_shadow_ratio": 0.1
         }))
         .expect("entry block config should deserialize");
         assert!(!config.block_ema_distance_short);
@@ -731,9 +1217,134 @@ mod tests {
         assert!(config.block_deep_negative_hammer_long);
         assert!(config.block_above_zero_low_volume_no_trend_hanging_short);
         assert!(config.block_long_trend_pullback_short);
+        assert!(config.block_bullish_rejection_momentum_recovery_short);
+        assert!(config.block_short_lower_rejection_entry);
+        assert!(config.block_new_leg_without_delayed_activation_entry);
+        assert_eq!(config.short_rejection_min_lower_shadow_ratio, 0.6);
+        assert_eq!(config.short_rejection_max_upper_shadow_ratio, 0.1);
         assert!(config.block_too_far_outside_fib_short);
         assert!(config.block_conflicting_too_far_new_bear_leg_short);
         assert!(config.block_weak_ema_trend_entry);
+    }
+    #[test]
+    fn liquidity_sweep_reversal_defaults_are_disabled_and_causal() {
+        let config = LiquiditySweepReversalConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_long);
+        assert!(config.enable_short);
+        assert!(!config.enable_failed_breakdown_close_reentry_long);
+        assert!(!config.enable_failed_breakdown_higher_low_breakout_long);
+        assert!(!config.enable_upper_sweep_confirmation_low_break_short);
+        assert!(!config.require_upper_sweep_confirmation_macd_above_zero);
+        assert!(!config.enable_lower_sweep_confirmation_high_break_long);
+        assert!(!config.require_lower_sweep_confirmation_macd_below_zero);
+        assert!(!config.enable_first_retest_long);
+        assert!(!config.enable_first_retest_short);
+        assert_eq!(config.first_retest_take_profit_r, None);
+        assert!(!config.first_retest_replace_existing_take_profit);
+        assert_eq!(config.first_retest_max_wait_bars, 1);
+        assert_eq!(config.first_retest_min_volume_ratio, None);
+        assert_eq!(config.lookback_bars, 20);
+        assert_eq!(config.shock_min_body_ratio, 0.65);
+        assert_eq!(config.shock_min_volume_ratio, 2.5);
+        assert_eq!(config.confirmation_min_shadow_ratio, 0.45);
+        assert_eq!(config.fib_midline_ratio, 0.50);
+        assert_eq!(config.stop_loss_buffer_ratio, 0.006);
+    }
+    #[test]
+    fn ema_tunnel_retest_confirmation_defaults_are_disabled() {
+        let config = EmaTunnelRetestConfirmationConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_long);
+        assert!(config.enable_short);
+        assert_eq!(config.stop_loss_buffer_ratio, 0.006);
+    }
+    #[test]
+    fn volume_profile_value_area_retest_defaults_are_disabled() {
+        let config = VolumeProfileValueAreaRetestConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_long);
+        assert!(config.enable_short);
+        assert_eq!(config.stop_loss_buffer_ratio, 0.006);
+    }
+    #[test]
+    fn volume_profile_value_area_breakout_defaults_are_disabled() {
+        let config = VolumeProfileValueAreaBreakoutConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_long);
+        assert!(config.enable_short);
+        assert_eq!(config.stop_loss_buffer_ratio, 0.006);
+        assert!(!config.require_short_adx_25);
+        assert_eq!(config.fixed_take_profit_r, None);
+    }
+    #[test]
+    fn volume_profile_failed_auction_defaults_are_disabled() {
+        let config = VolumeProfileFailedAuctionConfig::default();
+        assert!(!config.is_open);
+        assert_eq!(config.stop_loss_buffer_ratio, 0.006);
+    }
+    #[test]
+    fn donchian_volume_breakout_defaults_are_disabled() {
+        let config = DonchianVolumeBreakoutConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_long);
+        assert!(config.enable_short);
+    }
+    #[test]
+    fn donchian_breakout_acceptance_defaults_are_disabled() {
+        let config = DonchianBreakoutAcceptanceConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_long);
+        assert!(config.enable_short);
+        assert_eq!(config.stop_loss_buffer_ratio, 0.006);
+    }
+    #[test]
+    fn compressed_range_breakout_quality_gate_defaults_to_disabled() {
+        let config = CompressedRangeBreakoutConfig::default();
+        assert!(!config.standalone);
+        assert!(!config.require_short_relative_volume_2_5);
+        assert!(!config.require_short_relative_volume_2_0);
+    }
+    #[test]
+    fn bos_fvg_retest_defaults_do_not_change_existing_signal_sets() {
+        let config = BosFvgRetestConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_short);
+    }
+    #[test]
+    fn fvg_reclaim_defaults_do_not_change_existing_signal_sets() {
+        let config = FvgReclaimConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_long);
+        assert!(!config.require_internal_bullish_choch);
+    }
+    #[test]
+    fn macd_divergence_reversal_defaults_do_not_change_existing_signal_sets() {
+        let config = MacdDivergenceReversalConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_long);
+        assert!(config.enable_short);
+    }
+    #[test]
+    fn macd_trend_reset_bos_defaults_do_not_change_existing_signal_sets() {
+        let config = MacdTrendResetBosConfig::default();
+        assert!(!config.is_open);
+        assert!(config.enable_long);
+        assert!(config.enable_short);
+    }
+    #[test]
+    fn short_profit_protection_is_explicitly_opt_in() {
+        let default = ShortProfitProtectionConfig::default();
+        assert!(!default.is_open);
+        assert_eq!(default.mode, ShortProfitProtectionMode::BreakevenAfter1p5R);
+
+        let enabled: ShortProfitProtectionConfig = serde_json::from_value(serde_json::json!({
+            "is_open": true,
+            "mode": "lock1r_after2r"
+        }))
+        .expect("short profit protection config should deserialize");
+        assert!(enabled.is_open);
+        assert_eq!(enabled.mode, ShortProfitProtectionMode::Lock1rAfter2r);
     }
     #[test]
     fn macd_signal_config_defaults_keep_directional_falling_knife_filters_enabled() {

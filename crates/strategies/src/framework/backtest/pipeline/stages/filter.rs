@@ -3,10 +3,20 @@ use crate::framework::backtest::pipeline::{BacktestContext, BacktestStage, Stage
 /// 信号过滤阶段
 ///
 /// 处理被过滤的信号，创建Shadow Trade
-pub struct FilterStage;
+pub struct FilterStage {
+    /// 随机筛选不消费过滤信号诊断，关闭后只省略 shadow 产物，不改变真实持仓路径。
+    collect_shadow_trades: bool,
+}
 impl FilterStage {
     pub fn new() -> Self {
-        Self
+        Self::with_shadow_trading(true)
+    }
+
+    /// 控制仅用于诊断的过滤信号影子交易。
+    pub fn with_shadow_trading(collect_shadow_trades: bool) -> Self {
+        Self {
+            collect_shadow_trades,
+        }
     }
 }
 impl Default for FilterStage {
@@ -20,6 +30,9 @@ impl BacktestStage for FilterStage {
     }
     /// 执行当前回测阶段，把阶段输入转换为下一阶段上下文。
     fn process(&mut self, ctx: &mut BacktestContext) -> StageResult {
+        if !self.collect_shadow_trades {
+            return StageResult::Continue;
+        }
         // 更新现有Shadow Trade
         ctx.shadow_manager.update_trades(&ctx.candle);
         // 如果有信号但被过滤，创建Shadow Trade

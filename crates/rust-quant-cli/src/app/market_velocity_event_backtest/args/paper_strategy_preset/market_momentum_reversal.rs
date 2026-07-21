@@ -12,12 +12,10 @@ pub(in super::super) const MARKET_MOMENTUM_OPPOSITE_MOVE_DURATION_BOTH_RESEARCH_
     "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_both_deferlong3_15m_v3";
 const MARKET_MOMENTUM_OPPOSITE_MOVE_DURATION_BOTH_RESEARCH_ENTRY_RULE_VERSION: &str =
     "kline15m_market_momentum_opposite_net10_n192_or_dur96_volatr_both_deferlong3_v3";
-pub(in super::super) const MARKET_MOMENTUM_OPPOSITE_MOVE_EXHAUSTION_VOLUME_RESEARCH_PRESET: &str =
-    "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_both_deferlong3_exhaustionvol1_15m_v4";
+pub(in super::super) const MARKET_MOMENTUM_OPPOSITE_MOVE_EXHAUSTION_VOLUME_RESEARCH_PRESET: &str = "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_both_deferlong3_exhaustionvol1_15m_v4";
 const MARKET_MOMENTUM_OPPOSITE_MOVE_EXHAUSTION_VOLUME_RESEARCH_ENTRY_RULE_VERSION: &str =
     "kline15m_market_momentum_opposite_net10_n192_or_dur96_volatr_both_deferlong3_exvol1_v4";
-pub(in super::super) const MARKET_MOMENTUM_OPPOSITE_MOVE_RISK_REWARD_RESEARCH_PRESET: &str =
-    "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_r18_30_scale4_both_deferlong3_exhaustionvol1_15m_v5";
+pub(in super::super) const MARKET_MOMENTUM_OPPOSITE_MOVE_RISK_REWARD_RESEARCH_PRESET: &str = "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_r18_30_scale4_both_deferlong3_exhaustionvol1_15m_v5";
 const MARKET_MOMENTUM_OPPOSITE_MOVE_RISK_REWARD_RESEARCH_ENTRY_RULE_VERSION: &str =
     "kline15m_market_momentum_opposite_volatr_r18_30_s4_exvol1_v5";
 pub(in super::super) const MARKET_MOMENTUM_OPPOSITE_MOVE_CONFIRMED_REVERSAL_RESEARCH_PRESET: &str =

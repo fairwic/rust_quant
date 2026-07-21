@@ -1,10 +1,11 @@
 use super::directional_reversal::{
     benchmark_abs_net_move_pct_before_entry, benchmark_directional_net_move_pct_before_entry,
-    deferred_long_confirmation_entry_idx, deferred_short_confirmation_entry_idx,
-    exhaustion_volume_dominance_filter_reason, is_bearish_continuation_setup,
-    is_bullish_continuation_setup, opposite_net_move_filter_reason,
-    opposite_reversal_confirmation_filter_reason, reversal_average_reclaim_filter_reason,
-    volume_atr_target_r, volume_atr_target_r_with_policy,
+    bullish_structure_break_filter_reason, deferred_long_confirmation_entry_idx,
+    deferred_short_confirmation_entry_idx, exhaustion_volume_dominance_filter_reason,
+    is_bearish_continuation_setup, is_bullish_continuation_setup, long_buffered_reversal_signal,
+    opposite_net_move_filter_reason, opposite_reversal_confirmation_filter_reason,
+    reversal_average_reclaim_filter_reason, two_stage_recovery_filter_reason, volume_atr_target_r,
+    volume_atr_target_r_with_policy, LongBufferedReversalSignal,
 };
 use super::equity::framework_trade_cost_rate;
 use super::*;
@@ -18,6 +19,36 @@ fn candle(ts: i64, open: f64, close: f64, volume: f64) -> BacktestCandle {
         close,
         volume,
     }
+}
+
+#[test]
+fn bullish_structure_break_requires_a_close_above_a_causally_confirmed_pivot() {
+    let mut candles = (0..25_i64)
+        .map(|index| BacktestCandle {
+            ts: index * MS_15M,
+            open: 100.0,
+            high: 110.0,
+            low: 90.0,
+            close: 100.0,
+            volume: 1_000.0,
+        })
+        .collect::<Vec<_>>();
+    candles[12].high = 120.0;
+    candles[12].close = 105.0;
+    candles[24].high = 123.0;
+    candles[24].close = 121.0;
+    let confirmed = build_computed_candles(candles.clone(), 3);
+    assert_eq!(
+        bullish_structure_break_filter_reason(&confirmed, confirmed.len()),
+        None
+    );
+
+    candles[24].close = 119.0;
+    let not_confirmed = build_computed_candles(candles, 3);
+    assert_eq!(
+        bullish_structure_break_filter_reason(&not_confirmed, not_confirmed.len()),
+        Some("bullish_structure_break_not_confirmed")
+    );
 }
 
 fn net_down_history_with_small_bounces() -> Vec<BacktestCandle> {
@@ -194,6 +225,131 @@ fn deferred_long_candles() -> Vec<BacktestCandle> {
     candles
 }
 
+fn lower_wick_buffer_candles(history_drop_pct: f64, strong_trigger: bool) -> Vec<BacktestCandle> {
+    let mut candles = (0_i64..192_i64)
+        .map(|idx| {
+            let close = if idx < 96 {
+                100.0 - history_drop_pct * idx as f64 / 95.0
+            } else {
+                100.0 - history_drop_pct + if idx % 2 == 0 { 0.05 } else { -0.05 }
+            };
+            candle(idx * MS_15M, close + 0.01, close, 10.0)
+        })
+        .collect::<Vec<_>>();
+    candles.push(if strong_trigger {
+        BacktestCandle {
+            ts: 192 * MS_15M,
+            open: 88.0,
+            high: 92.0,
+            low: 87.0,
+            close: 91.5,
+            volume: 20.0,
+        }
+    } else {
+        BacktestCandle {
+            ts: 192 * MS_15M,
+            open: 91.5,
+            high: 92.2,
+            low: 88.0,
+            close: 91.4,
+            volume: 20.0,
+        }
+    });
+    candles.push(BacktestCandle {
+        ts: 193 * MS_15M,
+        open: 91.4,
+        high: 94.5,
+        low: 91.2,
+        close: 94.2,
+        volume: 12.0,
+    });
+    candles.push(candle(194 * MS_15M, 94.3, 94.8, 10.0));
+    candles
+}
+
+fn lower_wick_buffer_args() -> MarketVelocityEventBacktestArgs {
+    MarketVelocityEventBacktestArgs {
+        event_source: MarketVelocityEventSource::Kline15m,
+        trade_direction: MarketVelocityTradeDirection::Long,
+        trend_timeframe: MarketVelocityTrendTimeframe::Off,
+        entry_period: 20,
+        entry_max_distance_pct: 50.0,
+        entry_min_volume_ratio: 1.5,
+        entry_opposite_move_lookback_candles: 192,
+        entry_min_opposite_net_move_pct: Some(10.0),
+        entry_min_opposite_duration_candles: Some(96),
+        entry_defer_long_lower_wick_reversal: true,
+        entry_defer_max_wait_candles: 1,
+        ..MarketVelocityEventBacktestArgs::default()
+    }
+}
+
+/// 构造两个连续 24 根历史窗口和一根应被门禁排除的当前信号 K 线。
+fn two_stage_recovery_candles(older_recovers: bool, recent_recovers: bool) -> Vec<BacktestCandle> {
+    let mut candles = Vec::with_capacity(49);
+    for idx in 0..24 {
+        let direction = if older_recovers { 1.0 } else { -1.0 };
+        let close = 100.0 + direction * idx as f64 * 0.1;
+        candles.push(candle(idx as i64 * MS_15M, close - 0.02, close, 10.0));
+    }
+    for idx in 0..24 {
+        let direction = if recent_recovers { 1.0 } else { -1.0 };
+        let close = 105.0 + direction * idx as f64 * 0.1;
+        candles.push(candle(
+            (idx + 24) as i64 * MS_15M,
+            close - 0.02,
+            close,
+            10.0,
+        ));
+    }
+    candles.push(candle(48 * MS_15M, 95.0, 80.0, 50.0));
+    candles
+}
+
+#[test]
+fn two_stage_recovery_accepts_two_positive_segments_and_excludes_signal_candle() {
+    let computed = build_computed_candles(two_stage_recovery_candles(true, true), 20);
+
+    assert_eq!(
+        two_stage_recovery_filter_reason(
+            &computed,
+            computed.len(),
+            MarketVelocityTradeDirection::Long,
+        ),
+        None
+    );
+}
+
+#[test]
+fn two_stage_recovery_rejects_a_single_late_rebound() {
+    let computed = build_computed_candles(two_stage_recovery_candles(false, true), 20);
+
+    assert_eq!(
+        two_stage_recovery_filter_reason(
+            &computed,
+            computed.len(),
+            MarketVelocityTradeDirection::Long,
+        ),
+        Some("two_stage_recovery_not_confirmed")
+    );
+}
+
+#[test]
+fn two_stage_recovery_fails_closed_when_history_is_short() {
+    let mut candles = two_stage_recovery_candles(true, true);
+    candles.remove(0);
+    let computed = build_computed_candles(candles, 20);
+
+    assert_eq!(
+        two_stage_recovery_filter_reason(
+            &computed,
+            computed.len(),
+            MarketVelocityTradeDirection::Long,
+        ),
+        Some("two_stage_recovery_not_ready")
+    );
+}
+
 #[test]
 fn long_accepts_ten_percent_net_drop_even_with_small_bounces() {
     let args = MarketVelocityEventBacktestArgs {
@@ -211,6 +367,125 @@ fn long_accepts_ten_percent_net_drop_even_with_small_bounces() {
             &args,
         ),
         None
+    );
+}
+
+#[test]
+fn buffered_history_requires_lower_wick_and_enters_after_next_candle_confirmation() {
+    let candles = lower_wick_buffer_candles(8.5, false);
+    let args = lower_wick_buffer_args();
+    let computed = build_computed_candles(candles.clone(), args.entry_period);
+    let event_ts = 193 * MS_15M;
+
+    assert_eq!(
+        long_buffered_reversal_signal(&computed[..193], 193, &args),
+        Ok(LongBufferedReversalSignal::LowerWickSetup)
+    );
+    assert_eq!(
+        entry_confirmation(
+            &computed[..193],
+            event_ts,
+            MarketVelocityTradeDirection::Long,
+            &args,
+        ),
+        (
+            true,
+            "opposite_move_long_lower_wick_buffer_setup".to_string()
+        )
+    );
+
+    let event = RadarEvent {
+        id: 30,
+        exchange: "okx".to_string(),
+        symbol: "BUFFER-USDT-SWAP".to_string(),
+        ts: event_ts,
+        detected_at: "1970-01-03T00:15:00Z".to_string(),
+        new_rank: 1,
+        delta_rank: 1,
+        current_price: 91.4,
+        price_change_pct: 0.1,
+    };
+    let computed_by_symbol =
+        std::collections::HashMap::from([("BUFFER-USDT-SWAP".to_string(), computed)]);
+    let raw_by_symbol =
+        std::collections::HashMap::from([("BUFFER-USDT-SWAP".to_string(), candles)]);
+    let report = evaluate_events(
+        &[event],
+        &std::collections::HashMap::new(),
+        &computed_by_symbol,
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        &raw_by_symbol,
+        &args,
+    );
+
+    assert_eq!(report.confirmed.len(), 1);
+    assert_eq!(report.confirmed[0].entry_ts, 194 * MS_15M);
+    assert_eq!(report.confirmed[0].entry_price, 94.3);
+    assert_eq!(
+        report.confirmed[0].trigger,
+        "opposite_move_momentum_reversal+deferred_long_lower_wick_buffer"
+    );
+}
+
+#[test]
+fn buffered_history_rejects_move_below_eight_percent() {
+    let candles = lower_wick_buffer_candles(7.5, false);
+    let args = lower_wick_buffer_args();
+    let computed = build_computed_candles(candles, args.entry_period);
+
+    assert_eq!(
+        long_buffered_reversal_signal(&computed[..193], 193, &args),
+        Err("opposite_move_not_confirmed")
+    );
+}
+
+#[test]
+fn bullish_hammer_buffer_confirms_on_the_completed_signal_candle() {
+    let mut candles = lower_wick_buffer_candles(8.5, false);
+    candles[192].close = 91.7;
+    let args = MarketVelocityEventBacktestArgs {
+        entry_defer_long_lower_wick_reversal: false,
+        entry_long_bullish_hammer_reversal: true,
+        ..lower_wick_buffer_args()
+    };
+    let computed = build_computed_candles(candles, args.entry_period);
+
+    assert_eq!(
+        long_buffered_reversal_signal(&computed[..193], 193, &args),
+        Ok(LongBufferedReversalSignal::BullishHammer)
+    );
+    assert_eq!(
+        entry_confirmation(
+            &computed[..193],
+            193 * MS_15M,
+            MarketVelocityTradeDirection::Long,
+            &args,
+        ),
+        (
+            true,
+            "opposite_move_momentum_reversal_bullish_hammer_v31".to_string()
+        )
+    );
+}
+
+#[test]
+fn strong_history_keeps_immediate_three_percent_reversal_branch() {
+    let candles = lower_wick_buffer_candles(12.0, true);
+    let args = lower_wick_buffer_args();
+    let computed = build_computed_candles(candles, args.entry_period);
+
+    assert_eq!(
+        entry_confirmation(
+            &computed[..193],
+            193 * MS_15M,
+            MarketVelocityTradeDirection::Long,
+            &args,
+        ),
+        (
+            true,
+            "opposite_move_momentum_reversal_strong_v30".to_string()
+        )
     );
 }
 
@@ -752,6 +1027,56 @@ fn framework_replay_persists_the_per_trade_volume_atr_target() {
 }
 
 #[test]
+fn framework_equity_horizon_closes_before_a_late_target() {
+    let mut candles = (0..=509)
+        .map(|idx| candle(idx * MS_15M, 100.0, 100.0, 10.0))
+        .collect::<Vec<_>>();
+    candles.push(candle(510 * MS_15M, 100.0, 107.0, 10.0));
+    let entry_ts = 505 * MS_15M;
+    let confirmed = ConfirmedEvent {
+        event: RadarEvent {
+            id: 9,
+            exchange: "okx".to_string(),
+            symbol: "HORIZON-USDT-SWAP".to_string(),
+            ts: entry_ts,
+            detected_at: "2026-07-19T00:00:00Z".to_string(),
+            new_rank: 1,
+            delta_rank: 10,
+            current_price: 100.0,
+            price_change_pct: 1.0,
+        },
+        direction: MarketVelocityTradeDirection::Long,
+        entry_ts,
+        entry_price: 100.0,
+        entry_idx: 505,
+        trigger: "opposite_move_momentum_reversal".to_string(),
+        structure_stop_loss_price: None,
+        structure_stop_loss_source: None,
+    };
+    let args = MarketVelocityEventBacktestArgs {
+        stop_loss_pct: 0.03,
+        equity_max_holding_hours: Some(1),
+        ignore_entry_signal_updates_while_open: true,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+    let candles_by_symbol =
+        std::collections::HashMap::from([("HORIZON-USDT-SWAP".to_string(), candles)]);
+
+    let reports = build_framework_equity_trade_reports(
+        std::slice::from_ref(&confirmed),
+        &candles_by_symbol,
+        2.0,
+        &args,
+    );
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].close_type, "max_holding_timeout");
+    assert_eq!(reports[0].close_price, Some(100.0));
+    let report = build_framework_equity_report(&[confirmed], &candles_by_symbol, 2.0, &args);
+    assert_eq!(report.total_open_trades, 1);
+}
+
+#[test]
 fn bearish_volume_expansion_creates_a_deferred_long_setup() {
     let candles = deferred_long_candles();
     let args = MarketVelocityEventBacktestArgs {
@@ -1202,8 +1527,7 @@ fn bullish_continuation_waits_for_bearish_short_confirmation() {
 #[test]
 fn confirmed_reversal_v6_keeps_same_strategy_identity_and_v5_stable() {
     let v5_preset = "research_market_momentum_opposite_move10_n192_or_duration96_volume_atr_r18_30_scale4_both_deferlong3_exhaustionvol1_15m_v5";
-    let v6_preset =
-        "research_market_momentum_opposite_move_reversal_confirmed_both_defer3_volatr_r18_30_15m_v6";
+    let v6_preset = "research_market_momentum_opposite_move_reversal_confirmed_both_defer3_volatr_r18_30_15m_v6";
     let v5 = parse_paper_observation_args_from(["--paper-strategy-preset", v5_preset])
         .expect("parse v5");
     let v6 = parse_paper_observation_args_from(["--paper-strategy-preset", v6_preset])
@@ -1259,10 +1583,8 @@ fn v7_requires_reversal_close_beyond_both_averages() {
 
 #[test]
 fn mean_reclaim_v7_keeps_same_strategy_identity_and_v6_stable() {
-    let v6_preset =
-        "research_market_momentum_opposite_move_reversal_confirmed_both_defer3_volatr_r18_30_15m_v6";
-    let v7_preset =
-        "research_market_momentum_opposite_move_reversal_mean_reclaim_both_defer3_volatr_r18_30_15m_v7";
+    let v6_preset = "research_market_momentum_opposite_move_reversal_confirmed_both_defer3_volatr_r18_30_15m_v6";
+    let v7_preset = "research_market_momentum_opposite_move_reversal_mean_reclaim_both_defer3_volatr_r18_30_15m_v7";
     let v6 = parse_paper_observation_args_from(["--paper-strategy-preset", v6_preset])
         .expect("parse v6");
     let v7 = parse_paper_observation_args_from(["--paper-strategy-preset", v7_preset])

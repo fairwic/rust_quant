@@ -6,9 +6,10 @@
     use super::{
         recent_indicator_replay_window, CandleMomentumActivationConfig, EmaDistanceState,
         EmaSignalValue, EmaTouchTrendSignalConfig, EngulfingSignalConfig, EntryBlockConfig,
-        FibRetracementSignalConfig, FibRetracementSignalValue, MarketStructureConfig,
-        RsiSignalConfig, SignalCondition, SignalDirect, SignalType, SignalWeightsConfig,
-        VegasIndicatorSignalValue, VegasStrategy, VolumeSignalConfig,
+        FibRetracementSignalConfig, FibRetracementSignalValue, MacdDivergenceReversalConfig,
+        MacdTrendResetBosConfig, MarketStructureConfig, RsiSignalConfig, SignalCondition,
+        SignalDirect, SignalType, SignalWeightsConfig, VegasIndicatorSignalValue, VegasStrategy,
+        VolumeSignalConfig,
     };
     use crate::leg_detection_indicator::LegDetectionValue;
     use rust_quant_common::CandleItem;
@@ -62,6 +63,44 @@
         assert!(indicators.engulfing_indicator.is_none());
         assert!(indicators.market_structure_indicator.is_none());
         assert!(indicators.volume_profile_indicator.is_none());
+    }
+
+    #[test]
+    fn macd_trend_reset_structure_does_not_initialize_public_structure() {
+        let strategy = VegasStrategy {
+            market_structure_signal: Some(MarketStructureConfig {
+                is_open: false,
+                ..MarketStructureConfig::default()
+            }),
+            macd_trend_reset_bos: MacdTrendResetBosConfig {
+                is_open: true,
+                ..MacdTrendResetBosConfig::default()
+            },
+            ..VegasStrategy::default()
+        };
+
+        let indicators = strategy.get_indicator_combine();
+        assert!(indicators.market_structure_indicator.is_none());
+        assert!(indicators.macd_trend_reset_structure_indicator.is_some());
+    }
+
+    #[test]
+    fn macd_divergence_structure_does_not_initialize_public_structure() {
+        let strategy = VegasStrategy {
+            market_structure_signal: Some(MarketStructureConfig {
+                is_open: false,
+                ..MarketStructureConfig::default()
+            }),
+            macd_divergence_reversal: MacdDivergenceReversalConfig {
+                is_open: true,
+                ..MacdDivergenceReversalConfig::default()
+            },
+            ..VegasStrategy::default()
+        };
+
+        let indicators = strategy.get_indicator_combine();
+        assert!(indicators.market_structure_indicator.is_none());
+        assert!(indicators.macd_divergence_structure_indicator.is_some());
     }
 
     #[test]

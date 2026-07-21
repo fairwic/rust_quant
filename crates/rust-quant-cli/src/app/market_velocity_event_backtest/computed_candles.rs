@@ -1,7 +1,11 @@
 use super::{BacktestCandle, ComputedCandle};
+use rust_quant_indicators::momentum::macd::MacdSimpleIndicator;
 
 pub(crate) const FAST_MOMENTUM_RSI_PERIOD: usize = 14;
 pub(crate) const FAST_MOMENTUM_BOLLINGER_PERIOD: usize = 20;
+const FAST_MOMENTUM_MACD_FAST_PERIOD: usize = 12;
+const FAST_MOMENTUM_MACD_SLOW_PERIOD: usize = 26;
+const FAST_MOMENTUM_MACD_SIGNAL_PERIOD: usize = 9;
 const FAST_MOMENTUM_BOLLINGER_STDDEV: f64 = 2.0;
 
 /// 构建 15m/高周期派生 K 线指标，供入场、趋势确认和 paper observation 共用。
@@ -10,6 +14,13 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
     let mut ema: Option<f64> = None;
     let mut rsi_average_gain_loss: Option<(f64, f64)> = None;
     let multiplier = 2.0 / (period as f64 + 1.0);
+    let macd_values = MacdSimpleIndicator::calculate_close_series(
+        candles.iter().map(|candle| candle.close),
+        FAST_MOMENTUM_MACD_FAST_PERIOD,
+        FAST_MOMENTUM_MACD_SLOW_PERIOD,
+        FAST_MOMENTUM_MACD_SIGNAL_PERIOD,
+    )
+    .unwrap_or_else(|| vec![None; candles.len()]);
     for i in 0..candles.len() {
         let sma = if i + 1 >= period {
             simple_average(
@@ -45,6 +56,7 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
             bollinger_bands_at(&candles, i)
                 .map(|bands| (Some(bands.0), Some(bands.1), Some(bands.2), bands.3))
                 .unwrap_or((None, None, None, None));
+        let macd = macd_values.get(i).copied().flatten();
         computed.push(ComputedCandle {
             candle: candles[i].clone(),
             sma,
@@ -56,6 +68,9 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
             bollinger_upper,
             bollinger_lower,
             bollinger_bandwidth_pct,
+            macd_line: macd.map(|value| value.macd_line),
+            macd_signal_line: macd.map(|value| value.signal_line),
+            macd_histogram: macd.map(|value| value.histogram),
         });
     }
     computed

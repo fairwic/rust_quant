@@ -4,10 +4,12 @@ use serde::Serialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[path = "vegas_cross_asset_portfolio_replay/args.rs"]
 mod args;
+#[path = "vegas_cross_asset_portfolio_replay/component_attribution.rs"]
+mod component_attribution;
 #[path = "vegas_cross_asset_portfolio_replay/event_clusters.rs"]
 mod event_clusters;
 #[path = "vegas_cross_asset_portfolio_replay/live_universe.rs"]
@@ -26,6 +28,11 @@ use args::{
     market_rank_database_url, parse_args, quant_core_database_url, Args, RankActivationSource,
     DEFAULT_INITIAL_EQUITY,
 };
+use component_attribution::{
+    apply_projected_cost_quality_gate, classify_opportunity_family,
+    summarize_opportunity_candidates, ComponentPipelineReport, ComponentPipelineSnapshot,
+    OpportunityFamily,
+};
 use event_clusters::{
     build_event_cluster_report, load_event_context, EventClusterReport, EventContext,
 };
@@ -41,6 +48,8 @@ use temporal_validation::{build_temporal_validation_report, TemporalValidationRe
 use universe_coverage::{load_universe_coverage, UniverseCoverageReport};
 
 const BACKTEST_NAIVE_TIME_ZONE: &str = "Asia/Shanghai";
+const LEGACY_BACKTEST_FEE_RATE_PER_SIDE: f64 = 0.0007;
+const DOUBLE_STRESS_EXTRA_SLIPPAGE_BPS: f64 = 10.0;
 
 /// 单币种独立回测产生的一笔完整交易，经标准化后可按共享账户净值重新缩放。
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +88,10 @@ struct CandidateTrade {
     signal_stop_risk_ratio: Option<f64>,
     /// 信号保护价与最大亏损止损中更紧者，占源账户入场权益的比例。
     initial_stop_risk_ratio: Option<f64>,
+    /// 预注册双倍成本压力相对初始保护风险的占比，只使用入场时点事实计算。
+    projected_double_execution_cost_r: Option<f64>,
+    /// 从信号时点审计标签解析出的互斥机会来源。
+    opportunity_family: OpportunityFamily,
     /// 入场 K 线成交量在前序窗口中的因果分位数。
     volume_percentile: f64,
     /// 入场 K 线成交量相对前序基线的倍数。
@@ -103,6 +116,10 @@ struct ActivePosition {
 /// 单账户实际接纳并结算的一笔交易结果。
 #[derive(Debug, Clone, PartialEq)]
 struct SettledTrade {
+    /// 该交易所属的互斥机会来源。
+    opportunity_family: OpportunityFamily,
+    /// 组合接纳时的入场时间，Unix 毫秒时间戳。
+    open_ts: i64,
     /// 产生组合盈亏的交易对。
     symbol: String,
     /// 组合交易方向：`long` 或 `short`。
@@ -151,6 +168,8 @@ struct PortfolioSimulation {
     accepted: usize,
     /// 仅因并发仓位已满而跳过的交易数。
     skipped: usize,
+    /// 因同一交易对已有未平仓仓位而跳过的交易数。
+    skipped_same_symbol: usize,
     /// 回放中实际出现过的最大同时持仓数。
     max_active: usize,
     /// 全部仓位结算后的共享账户权益，单位 U。
@@ -181,6 +200,8 @@ struct PortfolioSimulation {
     settled: Vec<SettledTrade>,
     /// 按冻结规则聚类后的有效市场事件审计。
     event_cluster_audit: Option<EventClusterReport>,
+    /// 进入容量回放前已冻结的机会来源与质量门禁审计。
+    component_pipeline: ComponentPipelineSnapshot,
 }
 
 /// 单个自然年的组合交易统计。
@@ -262,6 +283,8 @@ struct PortfolioReport {
     accepted_trades: usize,
     /// 因并发容量已满而跳过的交易数。
     skipped_by_capacity: usize,
+    /// 因同一交易对已有未平仓仓位而跳过的交易数。
+    skipped_by_symbol_exposure: usize,
     /// 实际结算过交易的不同币种数量。
     traded_symbols: usize,
     /// 组合正收益交易数。
@@ -328,6 +351,12 @@ struct PortfolioReport {
     max_short_ema_distance_ratio: Option<f64>,
     /// 因超过做空 EMA 偏离率上限而被过滤的交易数。
     filtered_by_short_ema_distance: usize,
+    /// 双倍成本压力下允许的最大预估执行成本，单位初始风险 R。
+    max_projected_double_execution_cost_r: Option<f64>,
+    /// 因预估执行成本缺失或超过上限而被过滤的交易数。
+    filtered_by_projected_double_execution_cost: usize,
+    /// 将机会发现、质量门禁与组合容量分开后的逐组件证据。
+    component_pipeline: ComponentPipelineReport,
     /// legacy 回测明细中无时区时间所采用的解释时区。
     backtest_naive_timezone: &'static str,
     /// 具备连续 4H K 线路径的接纳交易数。
@@ -392,7 +421,7 @@ async fn main() -> Result<()> {
     } else {
         None
     };
-    let mut trades = load_candidate_trades(&pool, args).await?;
+    let mut trades = load_candidate_trades_with_passthrough(&pool, args).await?;
     if let Some(side_filter) = args.side_filter {
         trades.retain(|trade| side_filter.matches(&trade.side));
     }
@@ -400,18 +429,77 @@ async fn main() -> Result<()> {
     let rank_activation =
         apply_rank_activation(&pool, rank_event_pool.as_ref(), &mut trades, args).await?;
     let filtered_by_short_ema_distance = apply_short_ema_distance_filter(&mut trades, args);
+    let opportunity_candidates = summarize_opportunity_candidates(&trades);
+    let projected_cost_gate =
+        apply_projected_cost_quality_gate(&mut trades, args.max_projected_double_execution_cost_r);
+    let filtered_by_projected_double_execution_cost = projected_cost_gate.rejected;
+    let component_pipeline = ComponentPipelineSnapshot::new(
+        opportunity_candidates,
+        &trades,
+        projected_cost_gate,
+        args.oos_start_ts,
+    );
     let event_context = load_event_context(&pool, &trades).await?;
     let universe_coverage = load_universe_coverage(&pool, args).await?;
     let temporal_validation =
         build_temporal_validation_report(&trades, args, Some(&event_context))?;
-    let mut report = simulate_portfolio_with_event_context(trades, args, Some(&event_context))?;
+    let mut report = simulate_portfolio_with_event_context(
+        trades,
+        args,
+        Some(&event_context),
+        component_pipeline,
+    )?;
     report.rank_activation = rank_activation;
     report.filtered_by_short_ema_distance = filtered_by_short_ema_distance;
+    report.filtered_by_projected_double_execution_cost =
+        filtered_by_projected_double_execution_cost;
     report.historical_universe_coverage = Some(universe_coverage);
     report.live_universe_audit = live_universe;
     report.temporal_validation = Some(temporal_validation);
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
+}
+
+/// 加载主候选和显式质量基线，并按入场键优先保留基线事实。
+///
+/// 候选规则可能提前开仓，从而改变同币种后续单资产回测路径；只在候选日志中查找
+/// passthrough 会静默丢失基线交易，因此组合层必须显式合并两组完整交易事实。
+async fn load_candidate_trades_with_passthrough(
+    pool: &PgPool,
+    args: Args,
+) -> Result<Vec<CandidateTrade>> {
+    let primary = load_candidate_trades(pool, args).await?;
+    let (Some(id_min), Some(id_max)) = (args.rank_passthrough_id_min, args.rank_passthrough_id_max)
+    else {
+        return Ok(primary);
+    };
+    let mut baseline_args = args;
+    baseline_args.backtest_id_min = id_min;
+    baseline_args.backtest_id_max = id_max;
+    let baseline = load_candidate_trades(pool, baseline_args).await?;
+    Ok(merge_prefer_baseline(baseline, primary))
+}
+
+/// 合并质量基线与新增候选；同一入场事实出现两次时保留基线版本。
+fn merge_prefer_baseline(
+    mut baseline: Vec<CandidateTrade>,
+    additional: Vec<CandidateTrade>,
+) -> Vec<CandidateTrade> {
+    let mut seen = baseline
+        .iter()
+        .map(candidate_entry_key)
+        .collect::<HashSet<_>>();
+    baseline.extend(
+        additional
+            .into_iter()
+            .filter(|trade| seen.insert(candidate_entry_key(trade))),
+    );
+    baseline
+}
+
+/// 生成与研究清单一致的入场事实键，避免同一基线交易被候选日志重复计数。
+fn candidate_entry_key(trade: &CandidateTrade) -> (String, i64, String) {
+    (trade.symbol.clone(), trade.open_ts, trade.side.clone())
 }
 
 /// 加载完整开平仓对，并用该币种入场前净值把收益归一化，供共享账户等比例复算。
@@ -475,7 +563,16 @@ async fn load_candidate_trades(pool: &PgPool, args: Args) -> Result<Vec<Candidat
                    (NULLIF(o.signal_value, '')::jsonb #>>
                        '{ema_distance_filter,distance_ratio}')::double precision,
                    0.0
-               ) AS ema_distance_ratio
+               ) AS ema_distance_ratio,
+               COALESCE((
+                   SELECT d.adjustments::text
+                     FROM dynamic_config_log d
+                    WHERE d.backtest_id = o.back_test_id
+                      AND d.inst_id = o.inst_id
+                      AND d.kline_time = o.open_position_time
+                    ORDER BY d.id DESC
+                    LIMIT 1
+               ), '[]') AS entry_adjustments
           FROM back_test_detail o
           JOIN back_test_log b
             ON b.id = o.back_test_id
@@ -499,7 +596,12 @@ async fn load_candidate_trades(pool: &PgPool, args: Args) -> Result<Vec<Candidat
     let mut original_equity_by_symbol = HashMap::<String, f64>::new();
     let mut trades = Vec::with_capacity(rows.len());
     for row in rows {
+        let detail_id = row.try_get::<i64, _>("detail_id")?;
         let symbol = row.try_get::<String, _>("symbol")?;
+        let entry_adjustments =
+            serde_json::from_str::<Vec<String>>(&row.try_get::<String, _>("entry_adjustments")?)
+                .with_context(|| format!("parse entry adjustments for detail {detail_id}"))?;
+        let opportunity_family = classify_opportunity_family(&entry_adjustments);
         let original_equity = original_equity_by_symbol
             .entry(symbol.clone())
             .or_insert(DEFAULT_INITIAL_EQUITY);
@@ -554,9 +656,16 @@ async fn load_candidate_trades(pool: &PgPool, args: Args) -> Result<Vec<Candidat
         .map(|risk| risk * args.risk_scale);
         let initial_stop_risk_ratio =
             effective_initial_stop_risk_ratio(configured_risk_ratio, signal_stop_risk_ratio);
+        let projected_double_execution_cost_r = projected_double_execution_cost_r(
+            quantity * args.risk_scale,
+            open_price,
+            source_entry_equity,
+            initial_stop_risk_ratio,
+            &symbol,
+        )?;
         *original_equity += original_profit;
         trades.push(CandidateTrade {
-            detail_id: row.try_get("detail_id")?,
+            detail_id,
             backtest_id: row.try_get("back_test_id")?,
             min_k_line_num: usize::try_from(row.try_get::<i64, _>("min_k_line_num")?)
                 .context("min_k_line_num exceeds usize")?,
@@ -574,6 +683,8 @@ async fn load_candidate_trades(pool: &PgPool, args: Args) -> Result<Vec<Candidat
             configured_risk_ratio,
             signal_stop_risk_ratio,
             initial_stop_risk_ratio,
+            projected_double_execution_cost_r,
+            opportunity_family,
             volume_percentile: row.try_get("volume_percentile")?,
             relative_volume_ratio: row.try_get("relative_volume_ratio")?,
             entry_rsi: row.try_get("entry_rsi")?,
@@ -633,6 +744,27 @@ fn effective_initial_stop_risk_ratio(
         (None, Some(signal)) => Some(signal),
         (None, None) => None,
     }
+}
+
+/// 用入场时已知名义价值与初始保护风险估算双倍成本压力，避免用平仓事实决定入场。
+fn projected_double_execution_cost_r(
+    quantity: f64,
+    open_price: f64,
+    source_entry_equity: f64,
+    initial_stop_risk_ratio: Option<f64>,
+    symbol: &str,
+) -> Result<Option<f64>> {
+    let Some(initial_stop_risk_ratio) = initial_stop_risk_ratio else {
+        return Ok(None);
+    };
+    let initial_risk_amount = source_entry_equity * initial_stop_risk_ratio;
+    let stress_rate_per_side =
+        LEGACY_BACKTEST_FEE_RATE_PER_SIDE + DOUBLE_STRESS_EXTRA_SLIPPAGE_BPS / 10_000.0;
+    let projected_cost_r = quantity * 2.0 * open_price * stress_rate_per_side / initial_risk_amount;
+    if !projected_cost_r.is_finite() || projected_cost_r <= 0.0 {
+        bail!("invalid projected double execution cost R for {symbol}: {projected_cost_r}");
+    }
+    Ok(Some(projected_cost_r))
 }
 
 /// 在动量激活后剔除已经远离 EMA 的追空信号；多单不受该研究过滤器影响。
@@ -720,7 +852,8 @@ fn quoted_4h_candle_table(symbol: &str) -> Result<String> {
 /// 按因果量价强度处理同一时刻的竞争信号，并在共享账户上执行容量受限复利回放。
 #[cfg(test)]
 fn simulate_portfolio(candidates: Vec<CandidateTrade>, args: Args) -> Result<PortfolioReport> {
-    simulate_portfolio_with_event_context(candidates, args, None)
+    let component_pipeline = ComponentPipelineSnapshot::without_quality_gate(&candidates);
+    simulate_portfolio_with_event_context(candidates, args, None, component_pipeline)
 }
 
 /// 在共享账户回放结束后，用预先加载的因果行情上下文生成事件聚类审计。
@@ -728,6 +861,7 @@ fn simulate_portfolio_with_event_context(
     mut candidates: Vec<CandidateTrade>,
     args: Args,
     event_context: Option<&EventContext>,
+    component_pipeline: ComponentPipelineSnapshot,
 ) -> Result<PortfolioReport> {
     for trade in &candidates {
         if trade.close_ts < trade.open_ts
@@ -749,6 +883,7 @@ fn simulate_portfolio_with_event_context(
     let mut accepted_positions = Vec::<ActivePosition>::new();
     let mut accepted = 0_usize;
     let mut skipped = 0_usize;
+    let mut skipped_same_symbol = 0_usize;
     let mut max_active = 0_usize;
     let mut configured_risk_covered = 0_usize;
     let mut max_configured_open_risk_ratio = 0.0_f64;
@@ -770,6 +905,15 @@ fn simulate_portfolio_with_event_context(
             .map(|offset| index + offset)
             .unwrap_or(candidates.len());
         for trade in &candidates[index..group_end] {
+            // 生产执行同一交易对只允许一个未平仓方向；组合回放也必须先应用该约束，
+            // 否则合并基线与挑战者时会虚增频率、敞口和独立样本数。
+            if active
+                .iter()
+                .any(|position| position.trade.symbol == trade.symbol)
+            {
+                skipped_same_symbol += 1;
+                continue;
+            }
             if active.len() >= args.max_concurrent {
                 skipped += 1;
                 continue;
@@ -824,6 +968,7 @@ fn simulate_portfolio_with_event_context(
             candidate_count,
             accepted,
             skipped,
+            skipped_same_symbol,
             max_active,
             final_equity: equity,
             max_drawdown,
@@ -841,6 +986,7 @@ fn simulate_portfolio_with_event_context(
             price_path_anomalies: mark_to_market.price_path_anomalies,
             settled,
             event_cluster_audit,
+            component_pipeline,
         },
     )
 }
@@ -884,6 +1030,8 @@ fn settle_through(
                 let profit = position.entry_equity * position.trade.normalized_return;
                 group_profit += profit;
                 settled.push(SettledTrade {
+                    opportunity_family: position.trade.opportunity_family,
+                    open_ts: position.trade.open_ts,
                     symbol: position.trade.symbol,
                     side: position.trade.side,
                     min_k_line_num: position.trade.min_k_line_num,
@@ -1080,6 +1228,7 @@ fn build_report(args: Args, simulation: PortfolioSimulation) -> Result<Portfolio
         (simulation.final_equity - args.initial_equity)
             / simulation.intrabar_conservative_max_drawdown_amount
     });
+    let component_pipeline = simulation.component_pipeline.complete(&simulation.settled);
 
     Ok(PortfolioReport {
         backtest_id_min: args.backtest_id_min,
@@ -1094,6 +1243,7 @@ fn build_report(args: Args, simulation: PortfolioSimulation) -> Result<Portfolio
         candidate_trades: simulation.candidate_count,
         accepted_trades: simulation.accepted,
         skipped_by_capacity: simulation.skipped,
+        skipped_by_symbol_exposure: simulation.skipped_same_symbol,
         traded_symbols: by_symbol.len(),
         wins,
         win_rate_pct: percentage(wins as f64, simulation.accepted as f64),
@@ -1131,6 +1281,9 @@ fn build_report(args: Args, simulation: PortfolioSimulation) -> Result<Portfolio
         rank_activation: None,
         max_short_ema_distance_ratio: args.max_short_ema_distance_ratio,
         filtered_by_short_ema_distance: 0,
+        max_projected_double_execution_cost_r: args.max_projected_double_execution_cost_r,
+        filtered_by_projected_double_execution_cost: 0,
+        component_pipeline,
         backtest_naive_timezone: BACKTEST_NAIVE_TIME_ZONE,
         fully_covered_positions: simulation.fully_covered_positions,
         missing_4h_bars: simulation.missing_4h_bars,
@@ -1215,6 +1368,7 @@ mod tests {
             walk_forward_test_months: None,
             side_filter: None,
             max_short_ema_distance_ratio: None,
+            max_projected_double_execution_cost_r: None,
             portfolio_universe: args::PortfolioUniverse::Backtest,
             rank_universe: args::RankUniverse::Backtest,
             rank_activation_source: RankActivationSource::Reconstructed4h,
@@ -1223,6 +1377,7 @@ mod tests {
             rank_activation_lookback_bars: 1,
             rank_activation_min_price_change_pct: None,
             rank_activation_max_price_change_pct: None,
+            rank_activation_price_direction: args::RankPriceDirection::Any,
             rank_activation_valid_for_bars: 9,
             rank_activation_min_wait_bars: 1,
             rank_activation_min_rsi: None,
@@ -1258,6 +1413,8 @@ mod tests {
             configured_risk_ratio: None,
             signal_stop_risk_ratio: None,
             initial_stop_risk_ratio: None,
+            projected_double_execution_cost_r: None,
+            opportunity_family: OpportunityFamily::LegacyVegasCore,
             volume_percentile: 0.99,
             relative_volume_ratio: volume_ratio,
             entry_rsi: Some(40.0),
@@ -1279,6 +1436,33 @@ mod tests {
         assert_eq!(report.skipped_by_capacity, 1);
         assert_eq!(report.wins, 0);
         assert!((report.final_equity - 98.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn merged_candidate_set_prefers_baseline_entry_fact() {
+        let baseline = trade(1, "A", 0, 10, 0.10, 2.0);
+        let duplicate = trade(2, "A", 0, 12, -0.20, 3.0);
+        let additional = trade(3, "B", 0, 10, 0.05, 2.0);
+
+        let merged =
+            merge_prefer_baseline(vec![baseline.clone()], vec![duplicate, additional.clone()]);
+
+        assert_eq!(merged, vec![baseline, additional]);
+    }
+
+    #[test]
+    fn active_symbol_blocks_overlapping_candidate() {
+        let candidates = vec![
+            trade(1, "A", 0, 10, 0.10, 3.0),
+            trade(2, "A", 1, 5, 0.50, 2.0),
+        ];
+
+        let report = simulate_portfolio(candidates, args(2)).expect("portfolio report");
+
+        assert_eq!(report.accepted_trades, 1);
+        assert_eq!(report.skipped_by_symbol_exposure, 1);
+        assert_eq!(report.skipped_by_capacity, 0);
+        assert!((report.final_equity - 110.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1350,6 +1534,65 @@ mod tests {
     }
 
     #[test]
+    fn projected_double_execution_cost_is_invariant_to_risk_scale() {
+        let full_scale = projected_double_execution_cost_r(1.0, 100.0, 100.0, Some(0.02), "A")
+            .expect("full-scale projected cost")
+            .expect("initial risk coverage");
+        let half_scale = projected_double_execution_cost_r(0.5, 100.0, 100.0, Some(0.01), "A")
+            .expect("half-scale projected cost")
+            .expect("initial risk coverage");
+
+        assert!((full_scale - 0.17).abs() < 1e-12);
+        assert!((full_scale - half_scale).abs() < 1e-12);
+    }
+
+    #[test]
+    fn projected_cost_filter_keeps_boundary_and_blocks_missing_risk() {
+        let mut filter_args = args(3);
+        filter_args.max_projected_double_execution_cost_r = Some(0.20);
+        let mut low = trade(1, "LOW", 0, 10, 0.02, 2.0);
+        low.projected_double_execution_cost_r = Some(0.19);
+        let mut boundary = trade(2, "BOUNDARY", 0, 10, 0.02, 2.0);
+        boundary.projected_double_execution_cost_r = Some(0.20);
+        let mut high = trade(3, "HIGH", 0, 10, 0.02, 2.0);
+        high.projected_double_execution_cost_r = Some(0.21);
+        let missing = trade(4, "MISSING", 0, 10, 0.02, 2.0);
+        let mut trades = vec![low, boundary, high, missing];
+        let legacy_accepted_ids = trades
+            .iter()
+            .filter(|trade| {
+                trade
+                    .projected_double_execution_cost_r
+                    .is_some_and(|cost_r| cost_r <= 0.20)
+            })
+            .map(|trade| trade.detail_id)
+            .collect::<Vec<_>>();
+
+        let opportunity_candidates = trades.clone();
+        let quality_gate = apply_projected_cost_quality_gate(
+            &mut trades,
+            filter_args.max_projected_double_execution_cost_r,
+        );
+
+        assert_eq!(quality_gate.rejected, 2);
+        assert_eq!(quality_gate.candidates_before, opportunity_candidates.len());
+        assert_eq!(
+            trades
+                .iter()
+                .map(|trade| trade.detail_id)
+                .collect::<Vec<_>>(),
+            legacy_accepted_ids
+        );
+        assert_eq!(
+            trades
+                .iter()
+                .map(|trade| trade.symbol.as_str())
+                .collect::<Vec<_>>(),
+            vec!["LOW", "BOUNDARY"]
+        );
+    }
+
+    #[test]
     fn same_bar_trades_share_capacity_then_release_it() {
         let candidates = vec![
             trade(1, "A", 0, 0, 0.01, 4.0),
@@ -1363,6 +1606,22 @@ mod tests {
         assert_eq!(report.accepted_trades, 3);
         assert_eq!(report.skipped_by_capacity, 1);
         assert_eq!(report.max_active_positions, 2);
+    }
+
+    #[test]
+    fn component_attribution_does_not_make_portfolio_depend_on_input_order() {
+        let candidates = vec![
+            trade(1, "B", 0, 10, 0.03, 2.0),
+            trade(2, "A", 0, 10, -0.02, 3.0),
+            trade(3, "C", 10, 20, 0.01, 2.0),
+        ];
+        let mut reversed = candidates.clone();
+        reversed.reverse();
+
+        let forward = simulate_portfolio(candidates, args(2)).expect("forward portfolio report");
+        let backward = simulate_portfolio(reversed, args(2)).expect("reversed portfolio report");
+
+        assert_eq!(forward, backward);
     }
 
     #[test]
