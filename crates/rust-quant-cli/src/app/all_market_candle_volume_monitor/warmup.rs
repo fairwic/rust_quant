@@ -7,11 +7,14 @@ use rust_quant_market::models::{CandlesEntity, CandlesModel, SelectCandleReqDto}
 use rust_quant_market::streams::confirmed_candle_aggregator::{
     AggregatedTimeframe, ConfirmedCandle, VOLUME_LOOKBACK,
 };
+use rust_quant_services::market::ExchangeSymbolSyncService;
+use serde_json::Value;
 use sqlx::{PgPool, Row};
+use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use tracing::info;
+use tracing::{info, warn};
 
 const ONE_MINUTE_WARMUP_CANDLES: usize = 260;
 const HIGHER_TIMEFRAME_WARMUP_CANDLES: usize = VOLUME_LOOKBACK + 2;
@@ -24,9 +27,11 @@ pub(super) struct SymbolWarmupResult {
     pub result: Result<Vec<(AggregatedTimeframe, Vec<ConfirmedCandle>)>>,
 }
 
-/// 从 quant_core 的交易所事实表加载 OKX 当前可交易永续合约。
+/// 取 quant_core active 集合与 OKX 当前 live SWAP 集合的交集，避免陈旧状态拖垮整条订阅。
 pub async fn load_active_okx_perpetual_symbols(
     pool: &PgPool,
+    client: &reqwest::Client,
+    okx_rest_base: &str,
     max_symbols: Option<usize>,
 ) -> Result<Vec<String>> {
     let rows = sqlx::query(
@@ -44,18 +49,89 @@ pub async fn load_active_okx_perpetual_symbols(
     .fetch_all(pool)
     .await
     .context("load active OKX perpetual symbols from quant_core")?;
-    let mut symbols = rows
+    let database_symbols = rows
         .into_iter()
         .map(|row| row.get::<String, _>("symbol"))
         .collect::<Vec<_>>();
-    if let Some(max_symbols) = max_symbols {
-        symbols.truncate(max_symbols);
+    let live_symbols = fetch_live_okx_swap_symbols(client, okx_rest_base).await?;
+    let (symbols, stale_symbols) =
+        intersect_live_symbols(database_symbols, &live_symbols, max_symbols);
+    if !stale_symbols.is_empty() {
+        let examples = stale_symbols.iter().take(10).cloned().collect::<Vec<_>>();
+        warn!(
+            event = "all_market_candle_stale_symbols_excluded",
+            stale_count = stale_symbols.len(),
+            stale_examples = ?examples,
+            "Core active 状态落后于 OKX live instruments，已从本次订阅排除"
+        );
     }
     anyhow::ensure!(
         !symbols.is_empty(),
-        "no active OKX perpetual symbols found in quant_core.exchange_symbols"
+        "no OKX live perpetual symbols remain after reconciling quant_core.exchange_symbols"
+    );
+    info!(
+        event = "all_market_candle_symbol_universe_reconciled",
+        subscribed_symbols = symbols.len(),
+        okx_live_symbols = live_symbols.len(),
+        "全市场 K 线订阅币种池已与 OKX 当前 live instruments 对齐"
     );
     Ok(symbols)
+}
+
+/// 启动时只读取一次 OKX 公共 instruments；该元数据请求不进入分钟收盘热路径。
+async fn fetch_live_okx_swap_symbols(
+    client: &reqwest::Client,
+    okx_rest_base: &str,
+) -> Result<HashSet<String>> {
+    let url = format!(
+        "{}/api/v5/public/instruments",
+        okx_rest_base.trim_end_matches('/')
+    );
+    let payload = client
+        .get(url)
+        .query(&[("instType", "SWAP")])
+        .send()
+        .await
+        .context("fetch current OKX SWAP instruments for candle subscriptions")?
+        .error_for_status()
+        .context("OKX SWAP instruments returned non-success status")?
+        .json::<Value>()
+        .await
+        .context("decode current OKX SWAP instruments")?;
+    let symbols = ExchangeSymbolSyncService::parse_okx_swap_instruments(&payload)?
+        .into_iter()
+        .filter(|instrument| instrument.status.eq_ignore_ascii_case("live"))
+        .map(|instrument| instrument.exchange_symbol.to_ascii_uppercase())
+        .collect::<HashSet<_>>();
+    anyhow::ensure!(!symbols.is_empty(), "OKX returned no live SWAP instruments");
+    Ok(symbols)
+}
+
+/// 保留 Core 已知且交易所仍 live 的确定性交集，并把陈旧 Core 记录单独返回用于审计。
+fn intersect_live_symbols(
+    database_symbols: Vec<String>,
+    live_symbols: &HashSet<String>,
+    max_symbols: Option<usize>,
+) -> (Vec<String>, Vec<String>) {
+    let database_symbols = database_symbols
+        .into_iter()
+        .map(|symbol| symbol.trim().to_ascii_uppercase())
+        .filter(|symbol| !symbol.is_empty())
+        .collect::<BTreeSet<_>>();
+    let mut active = database_symbols
+        .iter()
+        .filter(|symbol| live_symbols.contains(*symbol))
+        .cloned()
+        .collect::<Vec<_>>();
+    let stale = database_symbols
+        .iter()
+        .filter(|symbol| !live_symbols.contains(*symbol))
+        .cloned()
+        .collect::<Vec<_>>();
+    if let Some(max_symbols) = max_symbols {
+        active.truncate(max_symbols);
+    }
+    (active, stale)
 }
 
 /// 逐交易对预热并立即发送结果，避免全市场预热期间积压多个分钟的实时收盘。
@@ -239,5 +315,20 @@ mod tests {
             AggregatedTimeframe::M1,
             now_ms
         ));
+    }
+
+    #[test]
+    fn stale_database_symbol_is_excluded_without_dropping_live_market() {
+        let live_symbols = ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+        let (active, stale) = intersect_live_symbols(
+            vec!["AVAX-USD-SWAP".to_string(), "BTC-USDT-SWAP".to_string()],
+            &live_symbols,
+            None,
+        );
+        assert_eq!(active, vec!["BTC-USDT-SWAP"]);
+        assert_eq!(stale, vec!["AVAX-USD-SWAP"]);
     }
 }

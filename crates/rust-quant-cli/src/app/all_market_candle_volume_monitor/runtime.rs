@@ -87,7 +87,14 @@ pub async fn run_all_market_candle_volume_monitor(
         .connect(&config.database_url)
         .await
         .context("connect quant_core for all-market candle monitor")?;
-    let symbols = load_active_okx_perpetual_symbols(&pool, config.max_symbols).await?;
+    let client = build_okx_http_client(config.proxy_url.as_deref())?;
+    let symbols = load_active_okx_perpetual_symbols(
+        &pool,
+        &client,
+        &config.okx_rest_base,
+        config.max_symbols,
+    )
+    .await?;
     let (confirmed_sender, mut confirmed_receiver) = mpsc::channel(config.confirmed_queue_capacity);
     let (shutdown_sender, shutdown_receiver) = watch::channel(false);
 
@@ -109,7 +116,6 @@ pub async fn run_all_market_candle_volume_monitor(
     let mut warmup_task = tokio::spawn(async move {
         stream_symbol_warmups(warmup_symbols, warmup_config, warmup_sender).await
     });
-    let client = build_okx_http_client(config.proxy_url.as_deref())?;
     let (repair_sender, mut repair_receiver) =
         mpsc::channel::<GapRepairResult>(REPAIR_RESULT_QUEUE_CAPACITY);
     let mut repairing_symbols = HashSet::new();
