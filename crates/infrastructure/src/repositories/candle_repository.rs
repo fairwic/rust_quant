@@ -4,8 +4,52 @@ use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use rust_quant_domain::traits::CandleRepository;
 use rust_quant_domain::{Candle, Price, Timeframe, Volume};
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, PgPool, Postgres, QueryBuilder};
+use std::collections::HashSet;
+use tokio::sync::Mutex;
 use tracing::{debug, error};
+
+/// 单条语句控制在 8,000 个绑定参数内，远低于 PostgreSQL 参数上限。
+const CANDLE_UPSERT_BATCH_SIZE: usize = 1_000;
+
+/// 为同一分表的一批 K 线构造一次 UPSERT，并跳过内容未变化的冲突行。
+fn build_candle_upsert_query(
+    table_name: &str,
+    candles: &[Candle],
+) -> QueryBuilder<'static, Postgres> {
+    let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(format!(
+        "INSERT INTO {} AS current_candle (ts, o, h, l, c, vol, vol_ccy, confirm) ",
+        table_name
+    ));
+    query_builder.push_values(candles, |mut row, candle| {
+        row.push_bind(candle.timestamp)
+            .push_bind(candle.open.value().to_string())
+            .push_bind(candle.high.value().to_string())
+            .push_bind(candle.low.value().to_string())
+            .push_bind(candle.close.value().to_string())
+            .push_bind(candle.volume.value().to_string())
+            .push_bind(candle.volume.value().to_string())
+            .push_bind(if candle.confirmed { "1" } else { "0" });
+    });
+    query_builder.push(
+        " ON CONFLICT (ts) DO UPDATE SET
+            o = EXCLUDED.o,
+            h = EXCLUDED.h,
+            l = EXCLUDED.l,
+            c = EXCLUDED.c,
+            vol = EXCLUDED.vol,
+            vol_ccy = EXCLUDED.vol_ccy,
+            confirm = EXCLUDED.confirm,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE (current_candle.o, current_candle.h, current_candle.l,
+                 current_candle.c, current_candle.vol, current_candle.vol_ccy,
+                 current_candle.confirm)
+                IS DISTINCT FROM
+                (EXCLUDED.o, EXCLUDED.h, EXCLUDED.l, EXCLUDED.c,
+                 EXCLUDED.vol, EXCLUDED.vol_ccy, EXCLUDED.confirm)",
+    );
+    query_builder
+}
 /// K线数据库实体
 #[derive(Debug, Clone, FromRow)]
 #[allow(dead_code)]
@@ -94,14 +138,27 @@ impl SqlxCandleRepository {
 pub struct PostgresCandleRepository {
     /// 数据库连接池。
     pool: PgPool,
+    /// 当前进程已经完成 schema ensure 的 K 线分表。
+    /// 首次访问仍会建表并补注释，后续高频扫描只执行数据 SQL，避免反复访问系统目录。
+    ensured_tables: Mutex<HashSet<String>>,
 }
 impl PostgresCandleRepository {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            ensured_tables: Mutex::new(HashSet::new()),
+        }
     }
-    /// 校验输入和运行前置条件，提前暴露 行情与市场数据 的不可执行原因。
+    /// 首次访问时确保 K 线分表存在，仓储生命周期内同一分表只执行一次 DDL。
+    ///
+    /// 冷启动 DDL 期间有意持有互斥锁，使并发首次访问不能在建表完成前继续查询；
+    /// 建表成功后只剩一次内存集合检查，不再给 PostgreSQL catalog 制造周期性负载。
     pub async fn ensure_table(&self, symbol: &str, timeframe: Timeframe) -> Result<()> {
         let table_name = Self::quoted_table_name(symbol, timeframe)?;
+        let mut ensured_tables = self.ensured_tables.lock().await;
+        if ensured_tables.contains(&table_name) {
+            return Ok(());
+        }
         let create_table_sql = format!(
             r#"
             CREATE TABLE IF NOT EXISTS {} (
@@ -129,6 +186,7 @@ impl PostgresCandleRepository {
                 anyhow!("创建 Postgres K线分表失败: {}", e)
             })?;
         self.comment_table(&table_name).await?;
+        ensured_tables.insert(table_name);
         Ok(())
     }
     /// 提供commenttable的集中实现，避免行情数据调用方重复处理相同细节。
@@ -275,30 +333,12 @@ impl CandleRepository for PostgresCandleRepository {
             .await?;
         let table_name = Self::quoted_table_name(&first_candle.symbol, first_candle.timeframe)?;
         let mut saved_count = 0;
-        for candle in candles {
-            let query = format!(
-                "INSERT INTO {} (ts, o, h, l, c, vol, vol_ccy, confirm)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                 ON CONFLICT (ts) DO UPDATE SET
-                    o = EXCLUDED.o,
-                    h = EXCLUDED.h,
-                    l = EXCLUDED.l,
-                    c = EXCLUDED.c,
-                    vol = EXCLUDED.vol,
-                    vol_ccy = EXCLUDED.vol_ccy,
-                    confirm = EXCLUDED.confirm,
-                    updated_at = CURRENT_TIMESTAMP",
-                table_name
-            );
-            let result = sqlx::query(&query)
-                .bind(candle.timestamp)
-                .bind(candle.open.value().to_string())
-                .bind(candle.high.value().to_string())
-                .bind(candle.low.value().to_string())
-                .bind(candle.close.value().to_string())
-                .bind(candle.volume.value().to_string())
-                .bind(candle.volume.value().to_string())
-                .bind(if candle.confirmed { "1" } else { "0" })
+        // 交易所快照通常包含数十根 K 线；批量写入并跳过内容未变化的冲突行，
+        // 避免全市场轮询把每根历史 K 线放大成独立往返和无意义 WAL。
+        for batch in candles.chunks(CANDLE_UPSERT_BATCH_SIZE) {
+            let mut query_builder = build_candle_upsert_query(&table_name, batch);
+            let result = query_builder
+                .build()
                 .execute(&self.pool)
                 .await
                 .map_err(|e| {
@@ -307,8 +347,47 @@ impl CandleRepository for PostgresCandleRepository {
                 })?;
             saved_count += result.rows_affected() as usize;
         }
-        debug!("批量保存 Postgres K线数据，影响行数: {}", saved_count);
+        debug!(
+            "批量保存 {} 条 Postgres K线数据，实际变更行数: {}",
+            candles.len(),
+            saved_count
+        );
         Ok(saved_count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_quant_domain::{Price, Volume};
+    use sqlx::Execute;
+
+    fn confirmed_candle(timestamp: i64) -> Candle {
+        let mut candle = Candle::new(
+            "BTC-USDT-SWAP".to_string(),
+            Timeframe::M15,
+            timestamp,
+            Price::new(100.0).unwrap(),
+            Price::new(101.0).unwrap(),
+            Price::new(99.0).unwrap(),
+            Price::new(100.5).unwrap(),
+            Volume::new(42.0).unwrap(),
+        );
+        candle.confirm();
+        candle
+    }
+
+    #[test]
+    fn candle_batch_upsert_uses_one_statement_and_skips_unchanged_rows() {
+        let candles = [confirmed_candle(1), confirmed_candle(2)];
+        let mut query_builder =
+            build_candle_upsert_query("\"btc-usdt-swap_candles_15m\"", &candles);
+        let sql = query_builder.build().sql().to_string();
+
+        assert_eq!(sql.matches("INSERT INTO").count(), 1);
+        assert!(sql.contains("ON CONFLICT (ts) DO UPDATE"));
+        assert!(sql.contains("IS DISTINCT FROM"));
+        assert!(sql.contains("EXCLUDED.confirm"));
     }
 }
 #[async_trait]

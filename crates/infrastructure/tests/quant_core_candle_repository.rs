@@ -33,8 +33,10 @@ async fn upserts_and_reads_legacy_sharded_candles_from_quant_core_postgres() -> 
         Volume::new(123.45).unwrap(),
     );
     candle.confirm();
-    let saved = repo.save_candles(vec![candle]).await?;
+    let saved = repo.save_candles(vec![candle.clone()]).await?;
     assert_eq!(saved, 1);
+    let unchanged = repo.save_candles(vec![candle]).await?;
+    assert_eq!(unchanged, 0);
     let candles = repo
         .find_candles(symbol, timeframe, timestamp - 1, timestamp + 1, Some(10))
         .await?;
