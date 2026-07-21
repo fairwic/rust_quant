@@ -150,6 +150,23 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "default deployed service `{service}` must join both the Core compose network and the external app network"
         );
     }
+    for service in [
+        "quant-core-vegas-eth-4h-worker",
+        "quant-core-vegas-universal-4h-worker",
+    ] {
+        let service_block = compose_service_block(&compose, service);
+        assert!(
+            service_block.contains(r#"WEBSOCKET_SUBSCRIBE_TICKERS: "false""#),
+            "strategy worker `{service}` must not duplicate all-symbol ticker subscriptions"
+        );
+    }
+    let radar = compose_service_block(&compose, "quant-core-market-velocity-radar");
+    assert!(
+        radar.contains(
+            "MARKET_VELOCITY_SCAN_INTERVAL_SECS: ${MARKET_VELOCITY_SCAN_INTERVAL_SECS:-60}"
+        ),
+        "market velocity radar must default to a one-minute scan cadence"
+    );
     let execution_worker = compose_service_block(&compose, "quant-core-execution-worker");
     assert!(
         execution_worker.contains(

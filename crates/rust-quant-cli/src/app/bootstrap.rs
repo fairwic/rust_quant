@@ -397,7 +397,7 @@ async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
-        .unwrap_or(10);
+        .unwrap_or(60);
     let database_url = std::env::var("QUANT_CORE_DATABASE_URL")
         .or_else(|_| std::env::var("POSTGRES_QUANT_CORE_DATABASE_URL"))
         .context("缺少 QUANT_CORE_DATABASE_URL，无法启动市场动能雷达")?;
@@ -477,9 +477,11 @@ async fn run_websocket(
         );
         return;
     }
+    let subscribe_ticker_stream =
+        market_exchange == "okx" && env_is_true("WEBSOCKET_SUBSCRIBE_TICKERS", false);
     info!(
-        "🌐 启动WebSocket数据流: inst_ids={:?}, periods={:?}",
-        inst_ids, periods
+        "🌐 启动WebSocket数据流: inst_ids={:?}, periods={:?}, ticker_stream_enabled={}",
+        inst_ids, periods, subscribe_ticker_stream
     );
     // 🚀 创建策略触发回调函数
     let strategy_trigger = {
@@ -519,6 +521,7 @@ async fn run_websocket(
             &inst_ids_vec,
             &periods_vec,
             Some(strategy_trigger),
+            subscribe_ticker_stream,
         )
         .await
         {

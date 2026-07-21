@@ -54,7 +54,7 @@ impl WatchdogTarget {
 
 /// 启动不带策略回调的 WebSocket 行情服务。
 pub async fn run_socket(inst_ids: &[String], times: &[String]) {
-    if let Err(error) = run_socket_with_strategy_trigger(inst_ids, times, None).await {
+    if let Err(error) = run_socket_with_strategy_trigger(inst_ids, times, None, false).await {
         error!("OKX WebSocket 行情服务退出: error={}", error);
     }
 }
@@ -64,6 +64,7 @@ pub async fn run_socket_with_strategy_trigger(
     inst_ids: &[String],
     times: &[String],
     strategy_trigger: Option<StrategyTrigger>,
+    subscribe_ticker_stream: bool,
 ) -> Result<()> {
     let span = span!(Level::DEBUG, "socket_logic");
     let _enter = span.enter();
@@ -112,7 +113,15 @@ pub async fn run_socket_with_strategy_trigger(
         .context("启动 OKX business WebSocket 失败")?;
 
     subscribe_candles(&business_client, inst_ids, times).await?;
-    subscribe_tickers(&public_client, inst_ids).await?;
+    if subscribe_ticker_stream {
+        subscribe_tickers(&public_client, inst_ids).await?;
+    } else {
+        info!(
+            event = "websocket_candle_only_mode",
+            candle_targets = inst_ids.len().saturating_mul(times.len()),
+            "OKX WebSocket 已关闭重复 ticker 订阅，仅消费策略所需 K 线"
+        );
+    }
 
     let inst_filters = Arc::new(inst_ids.to_vec());
     let ticker_service = Arc::new(TickerService::new());
@@ -189,6 +198,7 @@ pub async fn run_socket_with_strategy_trigger(
         public_client.clone(),
         business_client.clone(),
         Arc::clone(&runtime_registry),
+        subscribe_ticker_stream,
     ));
 
     let exit_error = tokio::select! {
@@ -391,6 +401,7 @@ async fn run_health_monitor(
     public_client: AutoReconnectWebsocketClient,
     business_client: AutoReconnectWebsocketClient,
     runtime_registry: Arc<CandleRuntimeRegistry>,
+    ticker_stream_enabled: bool,
 ) -> Result<()> {
     let mut interval = tokio::time::interval(HEALTH_LOG_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -409,7 +420,8 @@ async fn run_health_monitor(
                 BUSINESS_MESSAGE_STALE_AFTER_MS,
             )
         });
-        let public_business_message_fresh = message_is_fresh(
+        let public_business_message_fresh = message_is_fresh_when_required(
+            ticker_stream_enabled,
             public.last_business_message_at_ms,
             now_ms,
             BUSINESS_MESSAGE_STALE_AFTER_MS,
@@ -419,47 +431,52 @@ async fn run_health_monitor(
             now_ms,
             BUSINESS_MESSAGE_STALE_AFTER_MS,
         );
-        let target_health = serde_json::to_string(&target_snapshots)
-            .unwrap_or_else(|error| format!("health_snapshot_serialize_error:{error}"));
-        let healthy = public.manager_task_alive
+        let public_stream_healthy = !ticker_stream_enabled
+            || (public.manager_task_alive
+                && public.connection_state == ConnectionState::Connected
+                && public.all_subscriptions_acknowledged
+                && public_business_message_fresh);
+        let healthy = public_stream_healthy
             && business.manager_task_alive
-            && public.connection_state == ConnectionState::Connected
             && business.connection_state == ConnectionState::Connected
-            && public.all_subscriptions_acknowledged
             && business.all_subscriptions_acknowledged
-            && public_business_message_fresh
             && business_business_message_fresh
             && target_messages_fresh;
-        let log_health = || {
-            info!(
+        if healthy {
+            // 正常状态只保留紧凑 debug，避免每十秒序列化并写出全部 symbol 快照。
+            debug!(
                 event = "websocket_runtime_health",
-                healthy,
+                ticker_stream_enabled,
                 public_state = ?public.connection_state,
-                public_manager_alive = public.manager_task_alive,
-                public_ack = public.acknowledged_subscription_count,
                 public_subscriptions = public.subscription_count,
                 public_reconnects = public.reconnect_count,
-                public_last_message_elapsed_ms = public.last_message_elapsed_ms,
-                public_last_business_message_at_ms = ?public.last_business_message_at_ms,
-                public_business_message_fresh,
                 business_state = ?business.connection_state,
-                business_manager_alive = business.manager_task_alive,
                 business_ack = business.acknowledged_subscription_count,
                 business_subscriptions = business.subscription_count,
                 business_reconnects = business.reconnect_count,
                 business_last_message_elapsed_ms = business.last_message_elapsed_ms,
-                business_last_business_message_at_ms = ?business.last_business_message_at_ms,
-                business_business_message_fresh,
-                target_messages_fresh,
-                candle_targets = %target_health,
+                candle_target_count = target_snapshots.len(),
                 "OKX WebSocket 运行态健康检查"
             );
-        };
-        if healthy {
-            log_health();
         } else {
+            let stale_targets = target_snapshots
+                .iter()
+                .filter(|target| {
+                    !message_is_fresh(
+                        target.last_message_at_ms,
+                        now_ms,
+                        BUSINESS_MESSAGE_STALE_AFTER_MS,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let stale_target_preview = stale_targets
+                .iter()
+                .take(20)
+                .map(|target| format!("{}:{}", target.symbol, target.timeframe))
+                .collect::<Vec<_>>();
             warn!(
                 event = "websocket_runtime_unhealthy",
+                ticker_stream_enabled,
                 public_state = ?public.connection_state,
                 public_manager_alive = public.manager_task_alive,
                 public_ack = public.acknowledged_subscription_count,
@@ -477,7 +494,9 @@ async fn run_health_monitor(
                 business_last_business_message_at_ms = ?business.last_business_message_at_ms,
                 business_business_message_fresh,
                 target_messages_fresh,
-                candle_targets = %target_health,
+                candle_target_count = target_snapshots.len(),
+                stale_target_count = stale_targets.len(),
+                stale_target_preview = ?stale_target_preview,
                 "OKX WebSocket 健康检查失败"
             );
         }
@@ -489,6 +508,16 @@ fn message_is_fresh(last_message_at_ms: Option<i64>, now_ms: i64, max_age_ms: i6
     last_message_at_ms.is_some_and(|timestamp| {
         now_ms >= timestamp && now_ms.saturating_sub(timestamp) <= max_age_ms
     })
+}
+
+/// 可选数据流关闭时不要求业务消息新鲜度，避免 candle-only 模式被误判为异常。
+fn message_is_fresh_when_required(
+    required: bool,
+    last_message_at_ms: Option<i64>,
+    now_ms: i64,
+    max_age_ms: i64,
+) -> bool {
+    !required || message_is_fresh(last_message_at_ms, now_ms, max_age_ms)
 }
 
 /// 把被监督任务的退出结果统一转换为进程退出原因。
@@ -505,7 +534,10 @@ fn supervised_result(
 
 #[cfg(test)]
 mod tests {
-    use super::{message_is_fresh, WatchdogTarget, WATCHDOG_FALLBACK_QUERY_MS};
+    use super::{
+        message_is_fresh, message_is_fresh_when_required, WatchdogTarget,
+        WATCHDOG_FALLBACK_QUERY_MS,
+    };
 
     /// 收盘边界短窗口内必须高频查询，边界外不能持续压 DB。
     #[test]
@@ -535,5 +567,11 @@ mod tests {
         assert!(!message_is_fresh(None, 20_000, 15_000));
         assert!(message_is_fresh(Some(5_000), 20_000, 15_000));
         assert!(!message_is_fresh(Some(4_999), 20_000, 15_000));
+    }
+
+    #[test]
+    fn disabled_ticker_stream_does_not_require_ticker_business_messages() {
+        assert!(message_is_fresh_when_required(false, None, 20_000, 15_000));
+        assert!(!message_is_fresh_when_required(true, None, 20_000, 15_000));
     }
 }

@@ -234,8 +234,10 @@ impl CandleService {
         );
         true
     }
-    /// [已优化] 批量处理K线数据（处理完整数据集）
-    /// 性能提升：处理所有历史数据，确保数据完整性
+    /// 更新最新 K 线，并且只把交易所已确认收盘的数据送入持久化链路。
+    ///
+    /// 未确认 K 线会被交易所高频重复推送，只更新进程内缓存；确认后才同步 Redis、
+    /// 触发策略并写数据库，避免订阅规模放大 Redis 与数据库写入压力。
     pub async fn update_candles_batch(
         &self,
         candles: Vec<CandleOkxRespDto>,
@@ -260,14 +262,14 @@ impl CandleService {
                 return Ok(());
             }
         };
-        // 检查是否需要更新
+        // 同一时间戳从未确认推进到确认时，即使成交量未变化也必须接收，否则会漏掉收盘事件。
         let should_update = match self.cache.get_or_fetch(inst_id, time_interval).await {
             Some(cache_candle) => {
                 new_ts > cache_candle.ts
                     || (new_ts == cache_candle.ts && {
                         let new_vol = latest.vol_ccy.parse::<f64>().unwrap_or(0.0);
                         let old_vol = cache_candle.vol_ccy.parse::<f64>().unwrap_or(0.0);
-                        new_vol >= old_vol
+                        (latest.confirm == "1" && cache_candle.confirm != "1") || new_vol > old_vol
                     })
             }
             None => true,
@@ -288,15 +290,25 @@ impl CandleService {
                 created_at: None,
                 updated_at: Some(now),
             };
-            self.cache.set_both(inst_id, time_interval, &snap).await;
-            // 🚀 K线确认时触发策略执行
-            if snap.confirm == "1" {
-                self.trigger_confirmed_candle(inst_id, time_interval, snap.clone(), "websocket");
+            if snap.confirm != "1" {
+                self.cache.set(inst_id, time_interval, snap);
+                return Ok(());
             }
-            // 🚀 发送到批处理队列（如果启用）或直接写库
+
+            self.cache.set_both(inst_id, time_interval, &snap).await;
+            self.trigger_confirmed_candle(inst_id, time_interval, snap, "websocket");
+            let confirmed_candles = candles
+                .into_iter()
+                .filter(|candle| candle.confirm == "1")
+                .collect::<Vec<_>>();
+            if confirmed_candles.is_empty() {
+                return Ok(());
+            }
+
+            // 持久化队列只承接已收盘事实，盘中更新由进程内缓存吸收。
             if let Some(sender) = &self.persist_sender {
                 let task = PersistTask {
-                    candles,
+                    candles: confirmed_candles,
                     inst_id: inst_id.to_string(),
                     time_interval: time_interval.to_string(),
                 };
@@ -309,7 +321,7 @@ impl CandleService {
                 let per = time_interval.to_string();
                 tokio::spawn(async move {
                     let model = CandlesModel::new();
-                    match model.upsert_batch(candles, &inst, &per).await {
+                    match model.upsert_batch(confirmed_candles, &inst, &per).await {
                         Ok(rows) => {
                             debug!(
                                 "✅ 批量写入成功: inst_id={}, time_interval={}, rows={}",
@@ -348,7 +360,76 @@ impl Default for CandleService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::Future;
+    use std::pin::Pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    /// 记录内存与 Redis 两类写入次数，用于锁定热路径的持久化边界。
+    #[derive(Default)]
+    struct RecordingCache {
+        latest: Mutex<Option<CandlesEntity>>,
+        memory_set_count: AtomicUsize,
+        redis_set_count: AtomicUsize,
+    }
+
+    impl LatestCandleCacheProvider for RecordingCache {
+        fn get(&self, _inst_id: &str, _period: &str) -> Option<CandlesEntity> {
+            self.latest
+                .lock()
+                .expect("recording cache poisoned")
+                .clone()
+        }
+
+        fn set(&self, _inst_id: &str, _period: &str, candle: CandlesEntity) {
+            self.memory_set_count.fetch_add(1, Ordering::Relaxed);
+            *self.latest.lock().expect("recording cache poisoned") = Some(candle);
+        }
+
+        fn remove(&self, _inst_id: &str, _period: &str) {
+            *self.latest.lock().expect("recording cache poisoned") = None;
+        }
+
+        fn get_or_fetch<'a>(
+            &'a self,
+            _inst_id: &'a str,
+            _period: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Option<CandlesEntity>> + Send + 'a>> {
+            let latest = self
+                .latest
+                .lock()
+                .expect("recording cache poisoned")
+                .clone();
+            Box::pin(async move { latest })
+        }
+
+        fn set_both<'a>(
+            &'a self,
+            _inst_id: &'a str,
+            _period: &'a str,
+            candle: &'a CandlesEntity,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                self.redis_set_count.fetch_add(1, Ordering::Relaxed);
+                *self.latest.lock().expect("recording cache poisoned") = Some(candle.clone());
+            })
+        }
+    }
+
+    /// 构造交易所 WebSocket K 线更新，覆盖未确认到确认的状态推进。
+    fn websocket_candle(ts: i64, confirm: &str) -> CandleOkxRespDto {
+        CandleOkxRespDto {
+            ts: ts.to_string(),
+            o: "100".to_string(),
+            h: "101".to_string(),
+            l: "99".to_string(),
+            c: "100".to_string(),
+            v: "1".to_string(),
+            vol_ccy: "100".to_string(),
+            vol_ccy_quote: "100".to_string(),
+            confirm: confirm.to_string(),
+        }
+    }
 
     /// 构造确认 K 线测试数据。
     fn confirmed_candle(ts: i64) -> CandlesEntity {
@@ -415,5 +496,42 @@ mod tests {
             71_000,
         ));
         assert_eq!(counter.load(Ordering::Relaxed), 1);
+    }
+
+    /// 未确认更新不得产生外部写入，确认和重复确认只能落盘一次。
+    #[tokio::test]
+    async fn provisional_updates_stay_in_memory_and_confirmed_candle_is_persisted_once() {
+        let cache = Arc::new(RecordingCache::default());
+        let (persist_tx, mut persist_rx) = mpsc::unbounded_channel();
+        let service = CandleService::new_with_persist_worker(cache.clone(), persist_tx);
+
+        service
+            .update_candles_batch(vec![websocket_candle(1_000, "0")], "ETH-USDT-SWAP", "1m")
+            .await
+            .expect("provisional update should succeed");
+
+        assert_eq!(cache.memory_set_count.load(Ordering::Relaxed), 1);
+        assert_eq!(cache.redis_set_count.load(Ordering::Relaxed), 0);
+        assert!(persist_rx.try_recv().is_err());
+
+        service
+            .update_candles_batch(vec![websocket_candle(1_000, "1")], "ETH-USDT-SWAP", "1m")
+            .await
+            .expect("confirmed update should succeed");
+
+        assert_eq!(cache.redis_set_count.load(Ordering::Relaxed), 1);
+        let task = persist_rx
+            .try_recv()
+            .expect("confirmed candle should enter persistence queue");
+        assert_eq!(task.candles.len(), 1);
+        assert_eq!(task.candles[0].confirm, "1");
+
+        service
+            .update_candles_batch(vec![websocket_candle(1_000, "1")], "ETH-USDT-SWAP", "1m")
+            .await
+            .expect("duplicate confirmed update should be ignored");
+
+        assert_eq!(cache.redis_set_count.load(Ordering::Relaxed), 1);
+        assert!(persist_rx.try_recv().is_err());
     }
 }
