@@ -46,6 +46,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-vegas-eth-4h-worker:",
         "quant-core-vegas-universal-4h-worker:",
         "quant-core-market-velocity-radar:",
+        "quant-core-all-market-candle-volume-monitor:",
         "quant-core-market-velocity-candle-backfill-scheduler:",
         "quant-core-market-velocity-kline-scanner-scheduler:",
         "quant-core-market-velocity-paper-observation-scheduler:",
@@ -76,6 +77,10 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "STRATEGY_SIGNAL_DISPATCH_MODE: ${LIVE_STRATEGY_SIGNAL_DISPATCH_MODE:-web}",
         r#"IS_RUN_MARKET_VELOCITY_RADAR: "true""#,
         r#"MARKET_VELOCITY_RADAR_ONLY: "true""#,
+        "all_market_candle_volume_monitor",
+        "ALL_MARKET_CANDLE_WS_SHARD_SIZE: ${ALL_MARKET_CANDLE_WS_SHARD_SIZE:-150}",
+        "ALL_MARKET_CANDLE_QUEUE_CAPACITY: ${ALL_MARKET_CANDLE_QUEUE_CAPACITY:-4096}",
+        "ALL_MARKET_CANDLE_MIN_VOLUME_RATIO: ${ALL_MARKET_CANDLE_MIN_VOLUME_RATIO:-2.0}",
         "market_velocity_candle_backfill",
         "--timeframes",
         "MARKET_VELOCITY_BACKFILL_TIMEFRAMES:-1m,5m,15m",
@@ -129,6 +134,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "quant-core-vegas-eth-4h-worker",
         "quant-core-vegas-universal-4h-worker",
         "quant-core-market-velocity-radar",
+        "quant-core-all-market-candle-volume-monitor",
         "quant-core-market-velocity-candle-backfill-scheduler",
         "quant-core-market-velocity-kline-scanner-scheduler",
         "quant-core-market-velocity-paper-observation-scheduler",
@@ -166,6 +172,18 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "MARKET_VELOCITY_SCAN_INTERVAL_SECS: ${MARKET_VELOCITY_SCAN_INTERVAL_SECS:-60}"
         ),
         "market velocity radar must default to a one-minute scan cadence"
+    );
+    let candle_monitor =
+        compose_service_block(&compose, "quant-core-all-market-candle-volume-monitor");
+    assert!(
+        candle_monitor.contains("all_market_candle_volume_monitor")
+            && candle_monitor.contains(
+                "ALL_MARKET_CANDLE_WS_SHARD_SIZE: ${ALL_MARKET_CANDLE_WS_SHARD_SIZE:-150}",
+            )
+            && candle_monitor.contains(
+                "ALL_MARKET_CANDLE_QUEUE_CAPACITY: ${ALL_MARKET_CANDLE_QUEUE_CAPACITY:-4096}",
+            ),
+        "all-market candle monitor must use the dedicated binary and bounded WebSocket defaults"
     );
     let execution_worker = compose_service_block(&compose, "quant-core-execution-worker");
     assert!(
@@ -226,6 +244,12 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             "production verifier must stay read-only and exclude `{forbidden_mutation}`"
         );
     }
+    assert!(
+        dockerfile.contains(
+            "COPY --from=builder /app/rust_quant/bin/all_market_candle_volume_monitor /usr/local/bin/all_market_candle_volume_monitor"
+        ),
+        "runtime image must include the all-market candle volume monitor binary"
+    );
     assert!(
         dockerfile.contains(
             "COPY --from=builder /app/rust_quant/bin/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill"
@@ -354,7 +378,7 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             && production_gate.contains("Web fan-out resolves credentials per subscription"),
         "production gate must keep canary scope explicit and leave credentials to Web fan-out when unscoped"
     );
-    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-vegas-universal-4h-worker,quant-core-market-velocity-radar,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-market-velocity-breakdown-short-live-handoff-scheduler,quant-core-execution-worker,quant-core-execution-confirmation-worker,quant-core-execution-report-replay-worker";
+    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-vegas-universal-4h-worker,quant-core-market-velocity-radar,quant-core-all-market-candle-volume-monitor,quant-core-market-velocity-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-market-velocity-breakdown-short-live-handoff-scheduler,quant-core-execution-worker,quant-core-execution-confirmation-worker,quant-core-execution-report-replay-worker";
     for deploy_script in [&promote, &rollback] {
         assert!(
             deploy_script.contains(default_deploy_services),

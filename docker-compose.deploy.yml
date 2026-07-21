@@ -185,6 +185,32 @@ services:
       OKX_API_SECRET: ${OKX_API_SECRET:-public-market-only}
       OKX_PASSPHRASE: ${OKX_PASSPHRASE:-public-market-only}
 
+  quant-core-all-market-candle-volume-monitor:
+    container_name: quant-core-all-market-candle-volume-monitor
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    restart: unless-stopped
+    command:
+      - all_market_candle_volume_monitor
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_market=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      OKX_API_URL: ${OKX_API_URL:-https://www.okx.com}
+      WS_BUSINESS_URL: ${WS_BUSINESS_URL:-wss://ws.okx.com/ws/v5/business}
+      OKX_PROXY_URL: ${OKX_PROXY_URL:-}
+      ALL_MARKET_CANDLE_WS_SHARD_SIZE: ${ALL_MARKET_CANDLE_WS_SHARD_SIZE:-150}
+      ALL_MARKET_CANDLE_QUEUE_CAPACITY: ${ALL_MARKET_CANDLE_QUEUE_CAPACITY:-4096}
+      ALL_MARKET_CANDLE_MIN_VOLUME_RATIO: ${ALL_MARKET_CANDLE_MIN_VOLUME_RATIO:-2.0}
+      ALL_MARKET_CANDLE_REST_REQUEST_SLEEP_MS: ${ALL_MARKET_CANDLE_REST_REQUEST_SLEEP_MS:-120}
+      ALL_MARKET_CANDLE_MAX_SYMBOLS: ${ALL_MARKET_CANDLE_MAX_SYMBOLS:-}
+
   quant-core-market-velocity-candle-backfill-scheduler:
     container_name: quant-core-market-velocity-candle-backfill-scheduler
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}

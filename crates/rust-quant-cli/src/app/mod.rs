@@ -1,3 +1,4 @@
+pub mod all_market_candle_volume_monitor;
 pub mod binance_eth_micro_live_validation;
 pub mod bootstrap;
 pub(crate) mod env_parse;
