@@ -26,6 +26,9 @@ use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::{collections::BTreeMap, time::Duration};
 mod candidates;
+mod multi_runtime;
+
+pub use multi_runtime::run_market_velocity_live_handoff_multi_runtime_from_env;
 mod entry_candles;
 mod handoff;
 pub mod promotion_readiness;
@@ -118,7 +121,8 @@ pub async fn run_market_velocity_live_handoff_runtime_from_env() -> Result<()> {
     let config = market_velocity_live_handoff_config_from_env()?;
     let dependencies = MarketVelocityLiveHandoffDependencies::new(&config)?;
     loop {
-        match run_market_velocity_live_handoff_with_dependencies(&config, &dependencies).await {
+        match run_market_velocity_live_handoff_with_dependencies(&config, &dependencies, None).await
+        {
             Ok(report) => println!("{}", serde_json::to_string_pretty(&report)?),
             Err(error) if !runtime_config.run_once => {
                 eprintln!(
@@ -138,6 +142,7 @@ pub async fn run_market_velocity_live_handoff_runtime_from_env() -> Result<()> {
         tokio::time::sleep(Duration::from_secs(runtime_config.interval_seconds)).await;
     }
 }
+
 /// 提供市场动量livehandoff配置from环境变量的集中实现，避免行情数据调用方重复处理相同细节。
 pub fn market_velocity_live_handoff_config_from_env() -> Result<MarketVelocityLiveHandoffConfig> {
     Ok(MarketVelocityLiveHandoffConfig {
@@ -239,7 +244,7 @@ pub async fn run_market_velocity_live_handoff(
     config: MarketVelocityLiveHandoffConfig,
 ) -> Result<Value> {
     let dependencies = MarketVelocityLiveHandoffDependencies::new(&config)?;
-    run_market_velocity_live_handoff_with_dependencies(&config, &dependencies).await
+    run_market_velocity_live_handoff_with_dependencies(&config, &dependencies, None).await
 }
 
 struct MarketVelocityLiveHandoffDependencies {
@@ -273,6 +278,7 @@ impl MarketVelocityLiveHandoffDependencies {
 async fn run_market_velocity_live_handoff_with_dependencies(
     config: &MarketVelocityLiveHandoffConfig,
     dependencies: &MarketVelocityLiveHandoffDependencies,
+    signal_config: Option<&MarketVelocityStrategySignalConfig>,
 ) -> Result<Value> {
     let client = &dependencies.client;
     let pool = &dependencies.pool;
@@ -309,7 +315,14 @@ async fn run_market_velocity_live_handoff_with_dependencies(
             }
         }
     }
-    let signal_config = load_market_velocity_signal_config_or_env(&pool).await?;
+    let loaded_signal_config;
+    let signal_config = match signal_config {
+        Some(signal_config) => signal_config,
+        None => {
+            loaded_signal_config = load_market_velocity_signal_config_or_env(pool).await?;
+            &loaded_signal_config
+        }
+    };
     validate_market_velocity_live_handoff_signal_config(&signal_config)?;
     let candidate_events = load_market_velocity_live_candidate_events(
         &pool,

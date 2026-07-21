@@ -16,6 +16,12 @@ RUN --mount=type=cache,id=quant-core-cargo-registry,target=/usr/local/cargo/regi
     --mount=type=cache,id=quant-core-target,target=/app/rust_quant/target \
     cargo build --release -p rust-quant-cli \
       --bin rust_quant \
+      --bin quant_core_control_api \
+      --bin quant_core_market_worker \
+      --bin quant_core_signal_worker \
+      --bin quant_core_account_worker \
+      --bin quant_core_execution_worker \
+      --bin quant_core_reconciliation_worker \
       --bin all_market_candle_volume_monitor \
       --bin market_velocity_candle_backfill \
       --bin market_velocity_kline_scanner \
@@ -25,6 +31,12 @@ RUN --mount=type=cache,id=quant-core-cargo-registry,target=/usr/local/cargo/regi
       --bin quant_core_schema_ensure \
     && mkdir -p /app/rust_quant/bin \
     && cp target/release/rust_quant /app/rust_quant/bin/rust_quant \
+    && cp target/release/quant_core_control_api /app/rust_quant/bin/quant_core_control_api \
+    && cp target/release/quant_core_market_worker /app/rust_quant/bin/quant_core_market_worker \
+    && cp target/release/quant_core_signal_worker /app/rust_quant/bin/quant_core_signal_worker \
+    && cp target/release/quant_core_account_worker /app/rust_quant/bin/quant_core_account_worker \
+    && cp target/release/quant_core_execution_worker /app/rust_quant/bin/quant_core_execution_worker \
+    && cp target/release/quant_core_reconciliation_worker /app/rust_quant/bin/quant_core_reconciliation_worker \
     && cp target/release/all_market_candle_volume_monitor /app/rust_quant/bin/all_market_candle_volume_monitor \
     && cp target/release/market_velocity_candle_backfill /app/rust_quant/bin/market_velocity_candle_backfill \
     && cp target/release/market_velocity_kline_scanner /app/rust_quant/bin/market_velocity_kline_scanner \
@@ -42,6 +54,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/rust_quant/bin/rust_quant /usr/local/bin/rust_quant
+COPY --from=builder /app/rust_quant/bin/quant_core_control_api /usr/local/bin/quant_core_control_api
+COPY --from=builder /app/rust_quant/bin/quant_core_market_worker /usr/local/bin/quant_core_market_worker
+COPY --from=builder /app/rust_quant/bin/quant_core_signal_worker /usr/local/bin/quant_core_signal_worker
+COPY --from=builder /app/rust_quant/bin/quant_core_account_worker /usr/local/bin/quant_core_account_worker
+COPY --from=builder /app/rust_quant/bin/quant_core_execution_worker /usr/local/bin/quant_core_execution_worker
+COPY --from=builder /app/rust_quant/bin/quant_core_reconciliation_worker /usr/local/bin/quant_core_reconciliation_worker
 COPY --from=builder /app/rust_quant/bin/all_market_candle_volume_monitor /usr/local/bin/all_market_candle_volume_monitor
 COPY --from=builder /app/rust_quant/bin/market_velocity_candle_backfill /usr/local/bin/market_velocity_candle_backfill
 COPY --from=builder /app/rust_quant/bin/market_velocity_kline_scanner /usr/local/bin/market_velocity_kline_scanner

@@ -37,16 +37,12 @@ checkpoint_sample_secs="$3"
 failures=0
 lease_events=0
 containers=(
-  quant-core-internal-server
-  quant-core-vegas-eth-4h-worker
-  quant-core-vegas-universal-4h-worker
-  quant-core-market-velocity-radar
-  quant-core-all-market-candle-volume-monitor
-  quant-core-market-velocity-live-handoff-scheduler
-  quant-core-market-velocity-breakdown-short-live-handoff-scheduler
+  quant-core-control-api
+  quant-core-market-worker
+  quant-core-signal-worker
+  quant-core-account-worker
   quant-core-execution-worker
-  quant-core-execution-confirmation-worker
-  quant-core-execution-report-replay-worker
+  quant-core-reconciliation-worker
 )
 
 # 只读取指定的非敏感运行参数，避免把容器内的密钥和数据库连接打印到验收日志。
@@ -87,27 +83,21 @@ assert_env() {
 }
 
 assert_env quant-core-execution-worker EXECUTION_WORKER_TASK_TYPES "execute_signal,risk_control_close_candidate"
-assert_env quant-core-vegas-eth-4h-worker LIVE_STRATEGY_ONLY_TYPES "vegas"
-assert_env quant-core-vegas-universal-4h-worker LIVE_STRATEGY_ONLY_TYPES "vegas_universal_4h"
+assert_env quant-core-signal-worker LIVE_STRATEGY_ONLY_TYPES "vegas,vegas_universal_4h"
+assert_env quant-core-signal-worker LIVE_STRATEGY_VEGAS_ONLY_INST_IDS "ETH-USDT-SWAP"
 assert_env quant-core-execution-worker EXECUTION_WORKER_TASK_STATUSES "pending,pending_close"
-assert_env quant-core-execution-worker EXECUTION_WORKER_CONFIRMATION_MODE "false"
-assert_env quant-core-execution-worker EXECUTION_WORKER_REPORT_REPLAY_MODE "false"
-assert_env quant-core-execution-confirmation-worker EXECUTION_WORKER_CONFIRMATION_MODE "true"
-assert_env quant-core-execution-confirmation-worker EXECUTION_WORKER_REPORT_REPLAY_MODE "false"
-assert_env quant-core-execution-report-replay-worker EXECUTION_WORKER_CONFIRMATION_MODE "false"
-assert_env quant-core-execution-report-replay-worker EXECUTION_WORKER_REPORT_REPLAY_MODE "true"
-assert_env quant-core-market-velocity-live-handoff-scheduler MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS "5"
-assert_env quant-core-market-velocity-live-handoff-scheduler MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS "10000"
-assert_env quant-core-market-velocity-breakdown-short-live-handoff-scheduler MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS "5"
-assert_env quant-core-market-velocity-breakdown-short-live-handoff-scheduler MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS "10000"
+assert_env quant-core-signal-worker MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS "5"
+assert_env quant-core-signal-worker MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS "10000"
+assert_env quant-core-market-worker MARKET_VELOCITY_SIGNAL_DISPATCH_MODE "disabled"
+assert_env quant-core-market-worker EXCHANGE_LISTING_SIGNAL_SUBMIT "0"
 
 # 日志只汇总错误和租约事件数量，失败后再由操作者定向读取原始日志。
 for container in \
+  quant-core-market-worker \
+  quant-core-signal-worker \
+  quant-core-account-worker \
   quant-core-execution-worker \
-  quant-core-execution-confirmation-worker \
-  quant-core-execution-report-replay-worker \
-  quant-core-market-velocity-live-handoff-scheduler \
-  quant-core-market-velocity-breakdown-short-live-handoff-scheduler; do
+  quant-core-reconciliation-worker; do
   logs="$(docker logs --since "${log_window}" "${container}" 2>&1 || true)"
   error_count="$(printf '%s' "${logs}" | grep -Eic 'panic|fatal|thread .* panicked|polling failed|worker.*failed|must not exceed signal TTL|boolean value' || true)"
   container_lease_events="$(printf '%s' "${logs}" | grep -Ec 'leased tasks from quant_web|starts leased task' || true)"
@@ -124,7 +114,7 @@ checkpoint_update_count() {
 }
 
 if docker inspect postgres >/dev/null 2>&1; then
-  checkpoint_rows="$(docker exec postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d quant_core -Atc "SELECT count(*) FROM execution_worker_checkpoints WHERE worker_id IN ('\''quant-core-worker-prod'\'','\''quant-core-confirmation-worker-prod'\'','\''quant-core-report-replay-worker-prod'\'');"')"
+  checkpoint_rows="$(docker exec postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d quant_core -Atc "SELECT count(*) FROM execution_worker_checkpoints WHERE worker_id IN ('\''quant-core-worker-prod'\'','\''quant-core-account-worker-prod'\'','\''quant-core-reconciliation-worker-prod'\'');"')"
   before="$(checkpoint_update_count)"
   sleep "${checkpoint_sample_secs}"
   after="$(checkpoint_update_count)"

@@ -18,6 +18,8 @@ pub struct WebsocketStrategyHandler {
     market_exchange: Option<String>,
     /// 当前 worker 启动成功的策略类型，防止 K 线触发时串载其他运行角色的配置。
     runtime_strategy_types: HashSet<StrategyType>,
+    /// 启动预热成功的精确配置 ID；多策略类型共享行情连接时用它阻止 scope 笛卡尔积串载。
+    runtime_config_ids: HashSet<i64>,
 }
 impl WebsocketStrategyHandler {
     /// 创建新的处理器实例
@@ -26,12 +28,14 @@ impl WebsocketStrategyHandler {
         execution_service: Arc<StrategyExecutionService>,
         market_exchange: Option<String>,
         runtime_strategy_types: HashSet<StrategyType>,
+        runtime_config_ids: HashSet<i64>,
     ) -> Self {
         Self {
             config_service,
             execution_service,
             market_exchange,
             runtime_strategy_types,
+            runtime_config_ids,
         }
     }
     /// 处理 K 线数据
@@ -40,6 +44,7 @@ impl WebsocketStrategyHandler {
         let execution_service = self.execution_service.clone();
         let market_exchange = self.market_exchange.clone();
         let runtime_strategy_types = &self.runtime_strategy_types;
+        let runtime_config_ids = &self.runtime_config_ids;
         let candle_ts = snap.ts;
         info!(
             "🎯 K线确认触发策略检查: inst_id={}, time_interval={}, ts={}",
@@ -68,8 +73,12 @@ impl WebsocketStrategyHandler {
                 return;
             }
         };
-        let configs =
-            filter_configs_for_runtime(configs, market_exchange.as_deref(), runtime_strategy_types);
+        let configs = filter_configs_for_runtime(
+            configs,
+            market_exchange.as_deref(),
+            runtime_strategy_types,
+            runtime_config_ids,
+        );
         if configs.is_empty() {
             info!(
                 "⚠️  未找到启用的策略配置: inst_id={}, time_interval={}",
@@ -112,6 +121,7 @@ fn filter_configs_for_runtime(
     configs: Vec<StrategyConfig>,
     market_exchange: Option<&str>,
     runtime_strategy_types: &HashSet<StrategyType>,
+    runtime_config_ids: &HashSet<i64>,
 ) -> Vec<StrategyConfig> {
     let market_exchange = market_exchange
         .map(str::trim)
@@ -133,7 +143,9 @@ fn filter_configs_for_runtime(
             });
             let strategy_type_matches = runtime_strategy_types.is_empty()
                 || runtime_strategy_types.contains(&config.strategy_type);
-            exchange_matches && strategy_type_matches
+            // 启动阶段没有明确准入的 config ID 时必须执行零策略，不能退化为“全部允许”。
+            let config_id_matches = runtime_config_ids.contains(&config.id);
+            exchange_matches && strategy_type_matches && config_id_matches
         })
         .collect()
 }
@@ -180,7 +192,12 @@ mod tests {
         let okx = test_config(1, Some("okx"));
         let binance = test_config(2, Some("binance"));
 
-        let filtered = filter_configs_for_runtime(vec![okx, binance], Some("okx"), &HashSet::new());
+        let filtered = filter_configs_for_runtime(
+            vec![okx, binance],
+            Some("okx"),
+            &HashSet::new(),
+            &HashSet::from([1, 2]),
+        );
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, 1);
@@ -195,8 +212,12 @@ mod tests {
         universal.strategy_type = StrategyType::VegasUniversal4h;
 
         let runtime_types = HashSet::from([StrategyType::Vegas]);
-        let filtered =
-            filter_configs_for_runtime(vec![dedicated, universal], Some("okx"), &runtime_types);
+        let filtered = filter_configs_for_runtime(
+            vec![dedicated, universal],
+            Some("okx"),
+            &runtime_types,
+            &HashSet::from([1, 2]),
+        );
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].strategy_type, StrategyType::Vegas);
@@ -211,8 +232,12 @@ mod tests {
         universal.strategy_type = StrategyType::VegasUniversal4h;
 
         let runtime_types = HashSet::from([StrategyType::VegasUniversal4h]);
-        let filtered =
-            filter_configs_for_runtime(vec![dedicated, universal], Some("okx"), &runtime_types);
+        let filtered = filter_configs_for_runtime(
+            vec![dedicated, universal],
+            Some("okx"),
+            &runtime_types,
+            &HashSet::from([1, 2]),
+        );
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].strategy_type, StrategyType::VegasUniversal4h);
@@ -220,5 +245,39 @@ mod tests {
             single_runtime_strategy_type(&runtime_types),
             Some("vegas_universal_4h")
         );
+    }
+
+    #[test]
+    fn shared_socket_executes_only_configs_admitted_during_startup() {
+        let mut eth_vegas = test_config(11, Some("okx"));
+        eth_vegas.strategy_type = StrategyType::Vegas;
+        let mut btc_vegas = test_config(12, Some("okx"));
+        btc_vegas.strategy_type = StrategyType::Vegas;
+        let mut btc_universal = test_config(13, Some("okx"));
+        btc_universal.strategy_type = StrategyType::VegasUniversal4h;
+
+        let filtered = filter_configs_for_runtime(
+            vec![eth_vegas, btc_vegas, btc_universal],
+            Some("okx"),
+            &HashSet::from([StrategyType::Vegas, StrategyType::VegasUniversal4h]),
+            &HashSet::from([11, 13]),
+        );
+
+        assert_eq!(
+            filtered.iter().map(|config| config.id).collect::<Vec<_>>(),
+            vec![11, 13]
+        );
+    }
+
+    #[test]
+    fn empty_startup_admission_set_executes_no_strategy() {
+        let filtered = filter_configs_for_runtime(
+            vec![test_config(1, Some("okx"))],
+            Some("okx"),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+
+        assert!(filtered.is_empty());
     }
 }

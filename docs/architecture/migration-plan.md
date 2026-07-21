@@ -2,7 +2,7 @@
 
 - 状态：计划中
 - 首次制定：2026-07-18
-- 最近修订：2026-07-20
+- 最近修订：2026-07-21
 - 目标架构：[Rust Quant 长期目标架构](target-architecture.md)
 - 数据访问规则：[业务代码与数据访问放置规范](business-code-and-data-access.md)
 
@@ -35,7 +35,7 @@
 | 当前数据 | 表、字段、唯一键、状态机、数量级 |
 | 目标路径 | App -> Use Case -> Model/Policy -> Port -> Adapter |
 | Contract | 当前版本、目标版本、兼容窗口 |
-| 原子性 | 状态、幂等、Outbox 必须一起写入的内容 |
+| 原子性 | opening slot/业务唯一约束、状态、完整计划、审批引用、幂等、Outbox 必须一起写入的内容；claim/outcome 事务与外部 I/O 时点 |
 | Shadow | 新旧实现如何对比且不产生双副作用 |
 | 切换 | 读切换、写切换、feature flag/release generation |
 | 回滚 | 回滚入口、数据兼容和允许时限 |
@@ -77,8 +77,21 @@
 MarketSnapshot
   -> Market Velocity StrategySignal
   -> Web ExecutionRequest（商业资格交接）
-  -> Core OrderIntent 准备
-  -> paper/dry-run 结果
+  -> PortfolioTarget + PreTradeSnapshot
+  -> Pre-trade RiskDecision
+     ├─ Dry-run
+     │    -> OrderIntent + ExecutionPlan + ProtectionPlan
+     │    -> Dry-run Evidence
+     ├─ PaperEvent
+     │    -> OrderIntent + ExecutionPlan + ProtectionPlan
+     │    -> Simulated Exchange -> SimulationLedger
+     └─ RecoveryHarness
+          -> Risk owner 按 risk_evaluation_id 持久化不可变 RiskDecision
+          -> OrderIntent + ExecutionPlan + ProtectionPlan
+          -> disposable Postgres 原子取得 AccountOpeningSlot
+             + 提交 SubmitPending + Idempotency + Outbox
+          -> Dispatcher + MutationPermit -> Fault-injection Fenced Exchange Mutation Gateway
+          -> attempt / Unknown / replay / recovery evidence
 ```
 
 本阶段不改变策略条件、风险阈值、订单参数，不触发 live mutation。
@@ -89,13 +102,21 @@ MarketSnapshot
 - Portfolio 的最小默认 policy；
 - Pre-trade RiskDecision；
 - Web `execution_tasks` 到 `ExecutionRequest` 的明确映射；
-- Core `OrderIntent` 的本地事实与稳定 identity；
-- Postgres owner module、幂等记录和 outbox；
+- Core `OrderIntent`、`ExecutionPlan`、`ProtectionPlan` 的公开 model、稳定 identity 与纯计划/状态 API；生产形状持久化只在 RecoveryHarness disposable storage 中验证；
+- Dry-run 只保存带运行身份的决策/计划证据，不创建生产 Order、Outbox 或外部调用；
+- PaperEvent 通过 Simulated Exchange 产生订单事件并写 `SimulationLedger`，不写生产 Order/Fill/Account 表，也不复用生产提交 Outbox；
+- RecoveryHarness 单独使用 disposable Postgres 验证权威持久化顺序：Risk owner 按 evaluation identity 提交不可变审批，Execution owner 再原子取得 opening slot，并写入审批唯一绑定、`SubmitPending`、完整计划、幂等和 `OrderSubmissionRequestedV1` Outbox；
+- RecoveryHarness 覆盖两个 staging worker 竞争 opening slot、slot 等待 permit/attempt、Account watermark/保护闭合后释放、cancel/Recovery revoke 与 Gateway permit consume 竞态、stale/expired permit DefinitelyNotSent、Submit/Cancel/Protect mutation generation rollover、attempt outcome 原子性、Unknown outcome 禁止同 kind 直接重投、DefinitivelyAbsent recovery 按原 kind 新建 generation Outbox、旧 delivery ack/no-op、durable blocker retry 和 Outbox 重放；
+- RecoveryHarness 注入 User Stream 与 signed snapshot/query 之间的 Fill/Cancel，证明按 sequence/watermark 合并补 gap，闭合前 NotReady/Dispatcher off；
+- 生产数据库连接、真实凭证与 live Exchange Adapter 在该进程装配中物理不可达；
+- Postgres owner module 与生产 Dispatcher 只通过 RecoveryHarness/fault-injection Adapter 验证，不混入 Dry-run/PaperEvent 收益链路；
 - signal-worker / execution-worker 的 App 装配；
 - command、query、event-consumer 三类最小示例；
 - parity、contract、integration 和 recovery 测试。
 
-验证：新旧路径 shadow 输出在冻结输入下语义一致；写副作用只由一条路径产生；切回 legacy 不需要回滚破坏性 schema。
+本阶段不得把生产 `OrderSubmissionRequestedV1` 路由给 Simulated/Dry-run Adapter：Dry-run、PaperEvent、RecoveryHarness 各守自己的保真度边界。只有 RecoveryHarness 装配生产 Outbox/Dispatcher/MutationPermit/Fenced Gateway 协议，并且生产数据库、live adapter 与真实凭证物理不可达；安全性不能只依赖 `mode=paper` 或可误配的路由开关。数据库事务提交前不得确认上游或调用外部 Adapter。
+
+验证：新旧路径 shadow 输出在冻结输入下语义一致；Dry-run/PaperEvent 不产生生产交易事实；RecoveryHarness 中任一原子写失败时 opening slot、`SubmitPending`、完整计划和 Outbox 均不可见，permit consume/revoke 只有一方成功，stale Dispatcher 不能触达 SDK，Unknown 恢复会原子创建新 Outbox 且未完成 attempt 不被盲目重发，startup gap 不丢事件；切回 legacy 不需要回滚破坏性 schema。
 
 Golden Slice 通过后才允许以它为模板迁移其他业务。
 
@@ -199,6 +220,27 @@ Research::BacktestRun + DatasetManifest
 迁移期间可保留旧二进制名称和 compose command 映射，但每个新 App 只能初始化本职责需要的配置、连接和 Secret。
 
 验证：每个 App 有独立强类型配置、release build、startup/readiness/liveness、取消和优雅关闭测试；Dockerfile、compose、部署/回滚脚本和 deploy contract 同步。
+
+### 9.1 当前落地：六角色 Phase 1
+
+当前实现先完成运行拓扑收敛，不把它误记成领域迁移完成：
+
+- 新增六个固定 binary/组合根，并将生产 Compose、runtime image、发布、回滚和只读验收合同对齐为 `control-api / market-worker / signal-worker / account-worker / execution-worker / reconciliation-worker`；
+- Market 长期进程只合并 symbol sync、radar、scanner 和最多 2 天的 bounded repair；paper、全市场观察、schema 和历史 backfill 保持 Job/profile；Market 不持有 Web execution secret，signal dispatch 固定关闭；
+- Signal 共享 Vegas 4H 行情入口，但按策略类型配置独立 symbol scope，并在启动时冻结允许执行的 config ID；Market Velocity lane 使用 `strategy_key@preset` 精确加载，缺配置、slug 错配或不满足 live cutover contract 时拒绝启动；
+- Execution/Account/Reconciliation 使用代码入口固定的互斥 lane，不再依赖同一二进制的环境变量模式切换；轮询前先完成构造和 audit readiness 检查；
+- 首次切换需要显式 cutover token，并保存 legacy 服务镜像拓扑；单次与 scheduler live-handoff 均纳入清退/回滚范围，避免与新 `signal-worker` 重复消费。CI 在进程稳定检查后强制执行只读生产验收，但仍不把该检查冒充依赖级 readiness。
+- 发布维护入口已去重：promote/rollback 保持薄包装，固定六角色由版本化清单提供，公共 SSH/Compose/安全检查只保留一份；迁移期 cutover/legacy restore 在生产验收与回滚窗口结束后必须删除。
+
+尚未完成、不得被文档掩盖的迁移债务：
+
+1. `account-worker` 仍是 confirmation bridge，成交后保护单同步 mutation 尚未迁回最终 Execution owner；
+2. `reconciliation-worker` 仍是 report replay bridge，尚未拥有完整差异检测、恢复命令和人工升级闭环；
+3. 除 `control-api` 外目前是 process liveness，不是依赖、checkpoint、lease 与数据新鲜度 readiness；
+4. Market radar 内部 legacy detached task 尚未完全纳入统一 supervisor/cancellation；
+5. 生产切换前必须核对两份 Market Velocity `strategy_configs`、六角色环境变量、数据库/Redis/Web internal API 连通性，并在非 mutation 环境完成 shadow/canary。
+
+验证：本阶段只在本地合同和编译通过后算“可进入切换准备”，不能宣称生产已切换；线上完成还必须有六容器 revision、restart、lane 日志、checkpoint 和 Web/Core read-only 链路证据。
 
 ## 10. 阶段 6：策略版本对象拆分
 

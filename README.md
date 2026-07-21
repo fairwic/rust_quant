@@ -81,7 +81,7 @@ IS_RUN_REAL_STRATEGY=false
 
 - 使用 `.env` 中 `IS_BACK_TEST=true` 启动回测模式。
 - Vegas 指定回测通常依赖 `ENABLE_SPECIFIED_TEST_VEGAS=true`。
-- 详细启动说明见 [docs/STARTUP_GUIDE.md](docs/STARTUP_GUIDE.md)。
+- 本地启动后的只读检查见 [docs/dev/local_service_health_runbook.md](docs/dev/local_service_health_runbook.md)；具体运行参数以目标二进制 `--help` 与部署配置为准。
 
 ### 模拟盘 / 实盘验证
 
@@ -115,7 +115,7 @@ cargo test -p rust-quant-services --test okx_simulated_order_flow -- --ignored -
 3. 需要批量测试时，再切换为 `ENABLE_RANDOM_TEST=true`、`ENABLE_RANDOM_TEST_VEGAS=true`、`ENABLE_SPECIFIED_TEST_VEGAS=false`。
 4. 找到更优参数后，恢复指定回测模式并重新生成 `back_test_detail` 供最终对比分析。
 
-Vegas 回测分析与启动细节可参考 [docs/STARTUP_GUIDE.md](docs/STARTUP_GUIDE.md) 以及仓库内相关 UML 图。
+Vegas 回测与实盘边界可参考 [docs/VEGAS_STRATEGY_LIVE_GUIDE.md](docs/VEGAS_STRATEGY_LIVE_GUIDE.md) 以及仓库内相关 UML 图。
 
 ## 使用示例
 
@@ -136,7 +136,7 @@ let risk = RiskManagementService::new();
 
 ## 架构概览
 
-### Workspace 结构
+### 当前 Workspace 基线
 
 ```text
 crates/
@@ -156,7 +156,7 @@ crates/
 └── common/          # 通用工具层
 ```
 
-### 分层依赖
+### 当前 Legacy 分层依赖
 
 ```text
 rust-quant-cli
@@ -172,7 +172,7 @@ market + indicators
 core + common
 ```
 
-完整架构说明见 [docs/quant_system_architecture_redesign.md](docs/quant_system_architecture_redesign.md)。
+以上内容用于描述迁移前的现有结构，不作为新增代码的目标目录。长期目标采用 `domains / quant / contracts / adapters / platform` 五类物理目录；总方案见 [docs/architecture/target-architecture.md](docs/architecture/target-architecture.md)，业务逻辑与数据库 CRUD 放置见 [docs/architecture/business-code-and-data-access.md](docs/architecture/business-code-and-data-access.md)，现有实现如何迁移见 [docs/architecture/migration-plan.md](docs/architecture/migration-plan.md)。
 
 ## Vegas 策略流程图
 
@@ -212,8 +212,17 @@ plantuml -tpng -o image uml/vegas_trade_outcomes_detailed.puml
 
 | 文档 | 说明 |
 | --- | --- |
-| [docs/STARTUP_GUIDE.md](docs/STARTUP_GUIDE.md) | 启动方式、环境变量与运行说明 |
-| [docs/quant_system_architecture_redesign.md](docs/quant_system_architecture_redesign.md) | 架构设计与分层说明 |
+| [docs/dev/local_service_health_runbook.md](docs/dev/local_service_health_runbook.md) | 本地服务与数据库只读健康检查 |
+| [docs/VEGAS_STRATEGY_LIVE_GUIDE.md](docs/VEGAS_STRATEGY_LIVE_GUIDE.md) | Vegas 回测逻辑与实盘边界 |
+| [docs/architecture/target-architecture.md](docs/architecture/target-architecture.md) | 长期目标架构、业务模块、目录形态与交易闭环 |
+| [docs/architecture/production-runtime.md](docs/architecture/production-runtime.md) | 生产启动、执行、订单状态、恢复、对账与关闭 |
+| [docs/architecture/migration-plan.md](docs/architecture/migration-plan.md) | 现有实现迁入目标架构的实施计划 |
+| [docs/architecture/dependency-rules.md](docs/architecture/dependency-rules.md) | 依赖方向、代码归属与 CI 架构门禁 |
+| [docs/architecture/business-code-and-data-access.md](docs/architecture/business-code-and-data-access.md) | 业务逻辑、数据库 CRUD、事务与三类垂直切片模板 |
+| [docs/architecture/common-logic-placement.md](docs/architecture/common-logic-placement.md) | 量化通用逻辑分类、归属与共享晋升规则 |
+| [docs/architecture/ai-coding-guardrails.md](docs/architecture/ai-coding-guardrails.md) | AI 修改前声明、Golden Template、渐进式架构门禁与审查规则 |
+| [docs/architecture/reference-systems.md](docs/architecture/reference-systems.md) | 开源交易系统架构参考与本项目取舍 |
+| [docs/architecture/README.md](docs/architecture/README.md) | 架构文档与 ADR 索引 |
 | [uml/image/vegas_signal_to_trade_detailed.png](uml/image/vegas_signal_to_trade_detailed.png) | Vegas 流程图总览 |
 | [uml/image/vegas_signal_direction_detailed.png](uml/image/vegas_signal_direction_detailed.png) | Vegas 方向判断详图 |
 | [uml/image/vegas_post_filters_detailed.png](uml/image/vegas_post_filters_detailed.png) | Vegas 后置过滤详图 |

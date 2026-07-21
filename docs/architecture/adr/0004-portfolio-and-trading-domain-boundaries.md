@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 首次接受：2026-07-18
-- 最近修订：2026-07-20
+- 最近修订：2026-07-21
 - 决策者：Rust Quant Core
 
 ## 背景
@@ -39,7 +39,7 @@
 
 ### Execution
 
-将批准后的目标变化转换为 `OrderIntent` 和 `ExecutionPlan`，维护订单、撤单、保护单和外部结果状态机。
+将批准后的目标变化转换为 `OrderIntent`、`ExecutionPlan` 和 `ProtectionPlan`，维护订单、撤单、保护单和外部结果状态机。
 
 ### Reconciliation
 
@@ -52,12 +52,14 @@ StrategySignal
   -> PortfolioTarget
   -> PreTradeSnapshot
   -> RiskDecision
-  -> OrderIntent
-  -> ExecutionPlan
+  -> OrderIntent / ExecutionPlan / ProtectionPlan
+  -> Execution submission lifecycle
   -> OrderEvent / FillEvent
   -> AccountProjection
   -> ReconciliationResult
 ```
+
+这里仅表达 owner 与业务对象的交接方向，不定义数据库或交易所 mutation 的先后关系；外部 mutation 的唯一持久化与提交顺序以 [ADR-0006](0006-at-least-once-idempotency-and-recovery.md) 为准。
 
 对于用户自动交易，Web 的 `ExecutionRequest` 位于 StrategySignal 与账户级 Portfolio/Risk 处理之间。它证明商业资格、账户引用、凭证引用和用户风险配置版本，不成为 OMS 订单、最终下单金额、RiskDecision 或成交事实。账户级 Portfolio/Risk 默认由 `execution-worker` 装配；这不表示 Execution Domain 拥有 Portfolio/Risk 规则。
 

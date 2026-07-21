@@ -1,13 +1,13 @@
 ---
 name: rust-quant-architecture
-description: 约束 rust_quant 交易系统的领域归属、Rust 模块拆分、业务逻辑位置、数据库 CRUD、Ports/Adapters、Research 与回测、Vegas 迁移、生产运行和 AI 架构防腐。用于设计、评审、实现或重构 rust_quant 后端模块、策略/组合/风险/执行链路、ResearchBar/PaperEvent/RecoveryHarness、数据访问、运行入口和架构文档；也用于判断新代码应该放在哪里以及检查变更是否违反目标架构。
+description: 约束 rust_quant 的领域归属、代码放置、数据库 CRUD、Ports/Adapters、Research/回测和生产运行边界。用于设计、评审、实现或迁移后端模块、Vegas、策略/组合/风险/执行链路、分级模拟、运行入口和架构文档，以及检查代码是否违反目标架构。
 ---
 
 # Rust Quant 架构规范
 
 ## 目标
 
-把架构文档转换成每次改动都能执行的放置、依赖和验证流程。优先维护业务 owner、时序正确性、交易安全和研究证据可信度，不为迁就 legacy 反向污染目标架构。
+把架构文档转换成可执行的放置、依赖和验证流程，维护业务 owner、时序、交易安全和研究证据边界。
 
 ## 先定位仓库
 
@@ -34,9 +34,7 @@ ADR-0008 只保留为决策历史。遇到 Research 或 backtest 设计冲突时
 
 ### 1. 明确任务边界
 
-区分当前请求是分析、诊断、设计、代码修改、迁移还是运行态验证。分析和诊断请求保持只读；只有用户要求修改时才写文件。实盘 mutation 必须取得明确授权。
-
-先声明假设、歧义和成功标准。存在多个合理 owner 或会改变产品语义时，停止并说明选择影响。
+区分分析、诊断、设计、修改、迁移和运行态验证；分析/诊断保持只读，实盘 mutation 必须取得明确授权。先声明假设、歧义和成功标准；存在多个合理 owner 或会改变产品语义时，停止并说明选择影响。
 
 ### 2. 提交代码放置声明
 
@@ -62,7 +60,7 @@ Adapters：
 
 ### 3. 从真实调用链反向验证
 
-使用当前代码、测试、数据库 contract 和运行入口复核文档假设。标记 legacy 边界，不把历史目录当成目标 owner。
+使用当前代码、测试、数据库 contract 和运行入口复核假设。标记 legacy 边界，不把历史目录当成目标 owner。
 
 对 Vegas 或回测至少追踪：
 
@@ -85,13 +83,11 @@ Adapters：
 
 优先完成一个可验证的 owner slice，不横向搬完整目录：
 
-1. 定义内部 Input/Output 和业务 identity；
-2. 在 Model/Policy 中实现不变量或纯决策；
-3. 在 Use Case 中编排业务动作；
-4. 以业务语言定义 Port；
-5. 在 Adapter 中实现 SQL、HTTP、Redis、对象存储或交易所协议；
-6. 在 App 中完成配置、依赖注入和循环；
-7. 增加对应层级测试与迁移/删除条件。
+1. 定义内部 Input/Output、业务 identity 和 Model/Policy；
+2. 在 Use Case 中编排业务动作，以业务语言定义 Port；
+3. 在 Adapter 中实现 SQL、HTTP、Redis、对象存储或交易所协议；
+4. 在 App 中完成配置、依赖注入和循环；
+5. 增加对应层级测试与迁移/删除条件。
 
 不要顺手清理相邻 legacy，不建立无真实调用方的兼容层或扩展点。
 
@@ -111,11 +107,10 @@ Adapters：
 
 ### Domain 与 Quant
 
-- 业务规则只属于明确 Domain；Domain 不依赖 Wire Contract 或具体 Adapter。
+- 业务规则只属于明确 Domain；Domain 不依赖 Wire Contract 或具体 Adapter，App 只负责组合根、配置和运行循环。
 - `quant/math`、`quant/indicators`、`quant/backtest`、`quant/analytics` 只包含 owner 无关的纯机制。
 - `quant/backtest` 只提供确定性时钟、事件调度、Replay、撮合和费用/滑点/资金费模型；不得依赖 Domain、数据库、环境变量或真实交易所。
 - Research 是终端离线 Domain，可以通过稳定公开 API 编排 Market、Strategy、Portfolio、Risk、Execution 和 Quant；生产 Domain 不得依赖 Research。
-- App 只做组合根、配置和运行循环，不承载交易规则。
 
 ### Strategy 与 Research
 
@@ -143,8 +138,7 @@ EvaluationScopeId + StrategyRuntimeSnapshotId + MarketStreamPartition
 - Handler、Scheduler、Consumer 不直接执行 SQL 或调用交易所 SDK。
 - Use Case 定义业务原子性，Port 使用业务动作命名，Postgres Adapter 实现事务、Row、SQL、锁和错误映射。
 - 禁止 `Repository<T>`、`BaseService`、`update_by_id`、无条件 upsert 和 runtime DDL。
-- 同 owner 的状态、幂等/Inbox、Outbox 和审计事实在单一数据库事务中提交。
-- 跨 owner 使用本地事务 + Outbox/Inbox + 幂等 + 补偿/Reconciliation，不使用跨域大事务。
+- 同 owner 原子提交状态、幂等/Inbox、Outbox 和审计；跨 owner 使用本地事务、Outbox/Inbox、幂等与补偿/Reconciliation，不使用跨域大事务。
 - ResearchEvidence 先按内容哈希上传不可变对象，再由 Research owner 数据库事务发布 manifest、引用、指标、幂等和 Completed；只保证原子可见，不虚构跨存储全局原子事务。
 - 新表和新列必须有数据库原生注释；每条 SQL 都检查索引、基数、锁和扫描成本。
 

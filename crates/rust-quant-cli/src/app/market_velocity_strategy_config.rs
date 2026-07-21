@@ -43,16 +43,40 @@ pub async fn load_market_velocity_signal_config_from_strategy_configs(
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let preferred_preset = preferred_market_velocity_signal_strategy_preset();
+    load_market_velocity_signal_config_for_selector(
+        pool,
+        MARKET_VELOCITY_STRATEGY_KEY,
+        selected_id.as_deref(),
+        Some(&preferred_preset),
+    )
+    .await
+}
+
+/// 按显式 ID 或 preset 加载不可变策略快照，供同一 signal-worker 安全装配多个 handoff lane。
+pub async fn load_market_velocity_signal_config_for_selector(
+    pool: &PgPool,
+    strategy_key: &str,
+    selected_id: Option<&str>,
+    preferred_preset: Option<&str>,
+) -> Result<Option<MarketVelocityStrategySignalConfig>> {
     let row = match selected_id.as_deref() {
-        Some(config_id) => fetch_market_velocity_signal_config_by_id(pool, config_id)
+        Some(config_id) => fetch_market_velocity_signal_config_by_id(pool, strategy_key, config_id)
             .await?
             .ok_or_else(|| {
                 anyhow!(
-                    "{MARKET_VELOCITY_CONFIG_ID_ENV}={} does not reference an enabled market_velocity strategy_config",
-                    config_id
+                    "selected config {} does not reference an enabled {} strategy_config",
+                    config_id,
+                    strategy_key
                 )
             })?,
-        None => match fetch_default_market_velocity_signal_config(pool).await? {
+        None => match fetch_default_market_velocity_signal_config(
+            pool,
+            strategy_key,
+            preferred_preset.unwrap_or_default(),
+        )
+        .await?
+        {
             Some(row) => row,
             None => {
                 info!(
@@ -81,6 +105,7 @@ pub async fn load_market_velocity_signal_config_from_strategy_configs(
 /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_market_velocity_signal_config_by_id(
     pool: &PgPool,
+    strategy_key: &str,
     config_id: &str,
 ) -> Result<Option<MarketVelocityStrategyConfigRow>> {
     sqlx::query_as::<_, MarketVelocityStrategyConfigRow>(
@@ -93,7 +118,7 @@ async fn fetch_market_velocity_signal_config_by_id(
         LIMIT 1
         "#,
     )
-    .bind(MARKET_VELOCITY_STRATEGY_KEY)
+    .bind(strategy_key)
     .bind(config_id)
     .fetch_optional(pool)
     .await
@@ -102,8 +127,9 @@ async fn fetch_market_velocity_signal_config_by_id(
 /// 加载 回测与策略研究 运行所需数据，并把缺失或异常交给调用方处理。
 async fn fetch_default_market_velocity_signal_config(
     pool: &PgPool,
+    strategy_key: &str,
+    preferred_preset: &str,
 ) -> Result<Option<MarketVelocityStrategyConfigRow>> {
-    let preferred_preset = preferred_market_velocity_signal_strategy_preset();
     let rows = sqlx::query_as::<_, MarketVelocityStrategyConfigRow>(
         r#"
         SELECT id::text AS id, legacy_id, version, exchange, symbol, timeframe, config, risk_config
@@ -120,13 +146,13 @@ async fn fetch_default_market_velocity_signal_config(
           created_at DESC
         "#,
     )
-    .bind(MARKET_VELOCITY_STRATEGY_KEY)
+    .bind(strategy_key)
     .fetch_all(pool)
     .await
     .context("query default market_velocity strategy_config candidates")?;
     Ok(select_default_market_velocity_signal_config_row(
         rows,
-        &preferred_preset,
+        preferred_preset,
     ))
 }
 

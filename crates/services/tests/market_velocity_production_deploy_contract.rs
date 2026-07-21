@@ -10,6 +10,14 @@ fn repo_root() -> PathBuf {
 fn read_repo_file(path: &str) -> String {
     fs::read_to_string(repo_root().join(path)).expect(path)
 }
+fn deploy_surface(entrypoint: &str) -> String {
+    format!(
+        "{}\n{}\n{}",
+        read_repo_file(entrypoint),
+        read_repo_file("scripts/deploy/deploy_core.sh"),
+        read_repo_file("scripts/deploy/deploy_core_remote.sh")
+    )
+}
 fn compose_service_block(compose: &str, service: &str) -> String {
     let needle = format!("  {service}:");
     let mut found = false;
@@ -36,8 +44,12 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
     let production_gate = read_repo_file(".github/workflows/market_velocity_production_gate.yml");
     let dockerfile = read_repo_file("Dockerfile.runtime");
     let okx_websocket = read_repo_file("crates/market/src/streams/websocket_service.rs");
-    let promote = read_repo_file("scripts/deploy/promote_stable.sh");
-    let rollback = read_repo_file("scripts/deploy/rollback.sh");
+    let promote_entry = read_repo_file("scripts/deploy/promote_stable.sh");
+    let rollback_entry = read_repo_file("scripts/deploy/rollback.sh");
+    let deploy_core = read_repo_file("scripts/deploy/deploy_core.sh");
+    let runtime_services = read_repo_file("scripts/deploy/runtime-services.txt");
+    let promote = deploy_surface("scripts/deploy/promote_stable.sh");
+    let rollback = deploy_surface("scripts/deploy/rollback.sh");
     let verify = read_repo_file("scripts/deploy/verify_production.sh");
     for service in [
         "quant-core-schema-ensure:",
@@ -405,28 +417,46 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
             && production_gate.contains("Web fan-out resolves credentials per subscription"),
         "production gate must keep canary scope explicit and leave credentials to Web fan-out when unscoped"
     );
-    let default_deploy_services = "quant-core-internal-server,quant-core-exchange-symbol-sync-worker,quant-core-vegas-eth-4h-worker,quant-core-vegas-universal-4h-worker,quant-core-market-velocity-radar,quant-core-all-market-candle-volume-monitor,quant-core-market-velocity-candle-backfill-scheduler,quant-core-strategy-4h-candle-backfill-scheduler,quant-core-market-velocity-kline-scanner-scheduler,quant-core-market-velocity-paper-observation-scheduler,quant-core-market-velocity-kline15m-paper-observation-scheduler,quant-core-market-velocity-breakdown-short-paper-observation-scheduler,quant-core-market-velocity-live-handoff-scheduler,quant-core-market-velocity-breakdown-short-live-handoff-scheduler,quant-core-execution-worker,quant-core-execution-confirmation-worker,quant-core-execution-report-replay-worker";
+    assert_eq!(
+        runtime_services.lines().collect::<Vec<_>>(),
+        [
+            "quant-core-control-api",
+            "quant-core-market-worker",
+            "quant-core-signal-worker",
+            "quant-core-account-worker",
+            "quant-core-execution-worker",
+            "quant-core-reconciliation-worker",
+        ]
+    );
+    assert!(
+        promote_entry.contains("deploy_core.sh\" promote")
+            && rollback_entry.contains("deploy_core.sh\" rollback")
+            && promote_entry.lines().count() <= 10
+            && rollback_entry.lines().count() <= 10,
+        "promote and rollback must stay as thin stable entrypoints"
+    );
+    assert!(
+        deploy_core.contains("DEPLOY_SERVICES is no longer supported")
+            && !workflow.contains("DEPLOY_SERVICES:"),
+        "runtime topology must come from the versioned service manifest, not a CI secret"
+    );
     for deploy_script in [&promote, &rollback] {
         assert!(
-            deploy_script.contains(default_deploy_services),
-            "default Core deployment must run the live handoff scheduler so Market Velocity reaches the production handoff node"
-        );
-        assert!(
-            deploy_script.contains("require_internal_server_deploy_service")
+            deploy_script.contains("require_control_api_deploy_service")
                 && deploy_script.contains(
-                    "DEPLOY_SERVICES must include quant-core-internal-server"
+                    "runtime-services.txt must include quant-core-control-api"
                 ),
-            "default deploy/rollback must fail fast if DEPLOY_SERVICES omits the Web-facing Core internal server"
+            "default deploy/rollback must fail fast if the versioned topology omits the Web-facing control API"
         );
         assert!(
-            deploy_script.contains("--profile observation-scheduler")
-                && deploy_script.contains("--profile breakdown-short-paper-observation-scheduler")
-                && deploy_script.contains("--profile live-handoff-scheduler")
-                && deploy_script.contains("--profile breakdown-short-live-handoff-scheduler")
-                && deploy_script.contains("--profile candle-backfill-scheduler")
-                && deploy_script.contains("--profile kline-scanner-scheduler")
-                && deploy_script.contains("--profile schema-ensure"),
-            "default deploy/rollback must enable required production profiles explicitly"
+            deploy_script.contains("--profile schema-ensure")
+                && !deploy_script.contains("--profile observation-scheduler")
+                && !deploy_script.contains("--profile breakdown-short-paper-observation-scheduler")
+                && !deploy_script.contains("--profile live-handoff-scheduler")
+                && !deploy_script.contains("--profile breakdown-short-live-handoff-scheduler")
+                && !deploy_script.contains("--profile candle-backfill-scheduler")
+                && !deploy_script.contains("--profile kline-scanner-scheduler"),
+            "default deploy/rollback must keep research, historical jobs and legacy handoff profiles opt-in"
         );
         assert!(
             deploy_script.contains("DEPLOY_COMPOSE_SOURCE_FILE"),
@@ -518,22 +548,19 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
                 && deploy_script.contains("hybrid live handoff owns signal emission"),
             "default deploy/rollback must fail fast when persistent env files pin Market Velocity back to legacy direct Web dispatch"
         );
+        let first_service_start = deploy_script
+            .find("compose -f \"${override_file}\" up -d --no-build")
+            .expect("deploy script starts long-running services");
         assert!(
-            deploy_script
+            deploy_script[..first_service_start]
                 .rfind("assert_no_persistent_live_mutation_env_flags")
-                .expect("live mutation env guard must be called")
-                < deploy_script
-                    .find("compose -f \"${override_file}\" up -d --no-build")
-                    .expect("deploy script starts long-running services"),
+                .is_some(),
             "default deploy/rollback must check persistent live mutation flags before starting services"
         );
         assert!(
-            deploy_script
+            deploy_script[..first_service_start]
                 .rfind("assert_no_legacy_market_velocity_dispatch_mode_override")
-                .expect("market velocity dispatch mode guard must be called")
-                < deploy_script
-                    .find("compose -f \"${override_file}\" up -d --no-build")
-                    .expect("deploy script starts long-running services"),
+                .is_some(),
             "default deploy/rollback must reject legacy Market Velocity direct dispatch overrides before starting services"
         );
         assert!(
@@ -550,9 +577,16 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         );
         assert!(
             deploy_script.contains(
-                "retired_services_csv=\"${DEPLOY_RETIRED_SERVICES:-quant-core-vegas-eth-4h-live}\""
-            ) && deploy_script.contains("remove_retired_deployment_containers"),
-            "default deploy/rollback must explicitly remove retired live worker containers without deleting unrelated compose services"
+                "retired_services_csv=\"${DEPLOY_RETIRED_SERVICES:-quant-core-internal-server"
+            )
+                && deploy_script.contains("quant-core-market-velocity-live-handoff,")
+                && deploy_script.contains("quant-core-execution-confirmation-worker")
+                && deploy_script.contains("quant-core-execution-report-replay-worker")
+                && deploy_script.contains(
+                    "obsolete_services_csv=\"${DEPLOY_OBSOLETE_SERVICES:-quant-core-vegas-eth-4h-live}\""
+                )
+                && deploy_script.contains("remove_retired_deployment_containers"),
+            "default deploy/rollback must explicitly enumerate legacy runtime containers without deleting unrelated compose services"
         );
     }
     assert!(
@@ -562,9 +596,10 @@ fn market_velocity_production_deploy_contract_is_compose_and_rust_native() {
         "production compose must not reintroduce the retired legacy Vegas live service; Vegas signals must flow through Web execution tasks and the unified execution worker"
     );
     assert!(
-        promote.contains("run_schema_ensure")
-            && promote.contains("quant-core-schema-ensure")
-            && promote.find("run_schema_ensure").expect("schema ensure helper exists")
+        promote.contains("quant-core-schema-ensure")
+            && promote
+                .find("run --rm --no-deps -T")
+                .expect("schema ensure command exists")
                 < promote
                     .find("compose -f \"${override_file}\" up -d --no-build")
                     .expect("deploy script starts long-running services"),
@@ -833,8 +868,8 @@ fn market_velocity_paper_observation_defaults_use_stable_production_preset() {
 #[test]
 fn market_velocity_kline15m_challenger_has_isolated_paper_scheduler() {
     let compose = read_repo_file("docker-compose.deploy.yml");
-    let promote = read_repo_file("scripts/deploy/promote_stable.sh");
-    let rollback = read_repo_file("scripts/deploy/rollback.sh");
+    let promote = deploy_surface("scripts/deploy/promote_stable.sh");
+    let rollback = deploy_surface("scripts/deploy/rollback.sh");
     let service_name = "quant-core-market-velocity-kline15m-paper-observation-scheduler";
     let service_block = compose_service_block(&compose, service_name);
 
@@ -859,8 +894,8 @@ fn market_velocity_kline15m_challenger_has_isolated_paper_scheduler() {
     for deploy_script in [promote, rollback] {
         assert!(
             deploy_script.contains(service_name)
-                && deploy_script.contains("--profile kline15m-paper-observation-scheduler"),
-            "kline15m paper scheduler must be managed by default deploys once enabled in production"
+                && !deploy_script.contains("--profile kline15m-paper-observation-scheduler"),
+            "kline15m paper scheduler must remain available for explicit jobs but outside default deploys"
         );
     }
 }
@@ -868,8 +903,8 @@ fn market_velocity_kline15m_challenger_has_isolated_paper_scheduler() {
 #[test]
 fn market_velocity_breakdown_short_has_isolated_paper_scheduler_without_live_handoff() {
     let compose = read_repo_file("docker-compose.deploy.yml");
-    let promote = read_repo_file("scripts/deploy/promote_stable.sh");
-    let rollback = read_repo_file("scripts/deploy/rollback.sh");
+    let promote = deploy_surface("scripts/deploy/promote_stable.sh");
+    let rollback = deploy_surface("scripts/deploy/rollback.sh");
     let service_name = "quant-core-market-velocity-breakdown-short-paper-observation-scheduler";
     let service_block = compose_service_block(&compose, service_name);
 
@@ -905,8 +940,8 @@ fn market_velocity_breakdown_short_has_isolated_paper_scheduler_without_live_han
     for deploy_script in [promote, rollback] {
         assert!(
             deploy_script.contains(service_name)
-                && deploy_script.contains("--profile breakdown-short-paper-observation-scheduler"),
-            "breakdown-short paper scheduler must be managed by default deploys with its paper-only profile"
+                && !deploy_script.contains("--profile breakdown-short-paper-observation-scheduler"),
+            "breakdown-short paper scheduler must remain available for explicit jobs but outside default deploys"
         );
     }
 }
@@ -914,8 +949,8 @@ fn market_velocity_breakdown_short_has_isolated_paper_scheduler_without_live_han
 #[test]
 fn market_velocity_breakdown_short_has_isolated_live_handoff_scheduler() {
     let compose = read_repo_file("docker-compose.deploy.yml");
-    let promote = read_repo_file("scripts/deploy/promote_stable.sh");
-    let rollback = read_repo_file("scripts/deploy/rollback.sh");
+    let promote = deploy_surface("scripts/deploy/promote_stable.sh");
+    let rollback = deploy_surface("scripts/deploy/rollback.sh");
     let service_name = "quant-core-market-velocity-breakdown-short-live-handoff-scheduler";
     let service_block = compose_service_block(&compose, service_name);
 
@@ -985,8 +1020,8 @@ fn market_velocity_breakdown_short_has_isolated_live_handoff_scheduler() {
     for deploy_script in [promote, rollback] {
         assert!(
             deploy_script.contains(service_name)
-                && deploy_script.contains("--profile breakdown-short-live-handoff-scheduler"),
-            "breakdown-short live scheduler must be managed by default deploys with its own profile"
+                && !deploy_script.contains("--profile breakdown-short-live-handoff-scheduler"),
+            "legacy breakdown-short handoff must remain restorable but outside default deploys"
         );
     }
 }

@@ -47,7 +47,9 @@ pub use execution_task_contract::{
     MarketVelocityPaperOutcomeResponse, StrategySignalDispatchResponse,
     StrategySignalSubmitRequest, UserExchangeConfig,
 };
-pub use execution_worker::{ExecutionOrderTask, ExecutionWorker, ExecutionWorkerConfig};
+pub use execution_worker::{
+    ExecutionOrderTask, ExecutionWorker, ExecutionWorkerConfig, ExecutionWorkerLane,
+};
 pub use market_velocity_live_readiness::{
     build_market_velocity_scoped_execution_worker_config,
     build_market_velocity_scoped_execution_worker_env,

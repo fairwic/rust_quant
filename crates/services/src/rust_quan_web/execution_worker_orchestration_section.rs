@@ -4,12 +4,11 @@ impl ExecutionWorker {
     pub async fn run_once(&self) -> Result<usize> {
         self.validate_runtime_scope()?;
         self.ensure_live_audit_repository()?;
-        // 维护模式不进入普通租约路径，避免重放报告或确认订单时误触发新下单。
-        if self.config.report_replay_mode {
-            return self.run_report_replay_once().await;
-        }
-        if self.config.confirmation_mode {
-            return self.run_confirmation_once().await;
+        // 通道在构造时已经冻结；运行循环不再受进程环境变化影响，也不会跨状态机消费任务。
+        match self.lane {
+            ExecutionWorkerLane::ReportReplay => return self.run_report_replay_once().await,
+            ExecutionWorkerLane::Confirmation => return self.run_confirmation_once().await,
+            ExecutionWorkerLane::Execution => {}
         }
         // 租约由 Web owner service 发放，Core 只处理拿到租约的任务；这样同一任务不会被多个 worker
         // 并发执行，也能把 task_types/statuses 的筛选规则集中在 Web 的状态机里。

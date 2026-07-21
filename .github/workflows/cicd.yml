@@ -76,6 +76,7 @@ jobs:
       - name: Focused tests
         working-directory: rust_quant
         run: |
+          bash -n scripts/deploy/promote_stable.sh scripts/deploy/rollback.sh scripts/deploy/deploy_core.sh scripts/deploy/deploy_core_remote.sh scripts/deploy/verify_production.sh
           cargo test -p rust-quant-cli market_velocity_live_handoff --lib -- --nocapture
           cargo check -p rust-quant-cli --bin market_velocity_live_handoff
           cargo check -p rust-quant-cli --bin quant_core_schema_ensure
@@ -85,6 +86,8 @@ jobs:
           cargo check -p rust-quant-cli --bin market_velocity_kline_scanner
           cargo check -p rust-quant-cli --bin market_velocity_event_backtest
           cargo test -p rust-quant-services --test market_velocity_production_deploy_contract -- --nocapture
+          cargo test -p rust-quant-services --test six_role_production_deploy_contract -- --nocapture
+          cargo check -p rust-quant-cli --bin quant_core_control_api --bin quant_core_market_worker --bin quant_core_signal_worker --bin quant_core_account_worker --bin quant_core_execution_worker --bin quant_core_reconciliation_worker
           cargo test -p rust-quant-services market_velocity_signal --lib -- --nocapture
           cargo test -p rust-quant-services strategy_signal --lib -- --nocapture
           cargo test -p rust-quant-services target_task --lib -- --nocapture
@@ -189,10 +192,17 @@ jobs:
           DEPLOY_SSH_PORT: ${{ secrets.SSH_PORT }}
           SERVER_APP_PATH: ${{ secrets.SERVER_APP_PATH }}
           DEPLOY_COMPOSE_FILE: ${{ secrets.DEPLOY_COMPOSE_FILE || 'docker-compose.deploy.yml' }}
-          DEPLOY_SERVICES: ${{ secrets.DEPLOY_SERVICES }}
+          DEPLOY_SIX_ROLE_CUTOVER_CONFIRM: ${{ secrets.DEPLOY_SIX_ROLE_CUTOVER_CONFIRM }}
           DEPLOY_GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           DEPLOY_GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
           DEPLOY_IMAGE: ${{ env.REGISTRY }}/${{ steps.image_owner.outputs.value }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+
+      - name: Verify production runtime
+        run: ./scripts/deploy/verify_production.sh "${{ github.sha }}"
+        env:
+          DEPLOY_SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.SSH_PORT }}
 
   rollback-manual:
     name: Manual Rollback
@@ -225,6 +235,5 @@ jobs:
           DEPLOY_SSH_PORT: ${{ secrets.SSH_PORT }}
           SERVER_APP_PATH: ${{ secrets.SERVER_APP_PATH }}
           DEPLOY_COMPOSE_FILE: ${{ secrets.DEPLOY_COMPOSE_FILE || 'docker-compose.deploy.yml' }}
-          DEPLOY_SERVICES: ${{ secrets.DEPLOY_SERVICES }}
           DEPLOY_GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           DEPLOY_GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}

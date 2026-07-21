@@ -72,6 +72,29 @@ const LIVE_STOP_LOSS_MAX_DISTANCE_RATIO: f64 = 0.50;
 const LIVE_ORDERBOOK_DEPTH_LIMIT: u32 = 5;
 const LIVE_ORDERBOOK_MAX_SPREAD_RATIO: f64 = 0.005;
 const LIVE_ORDERBOOK_MIN_DEPTH_NOTIONAL_MULTIPLIER: f64 = 1.20;
+
+/// 固定执行 worker 的职责通道，避免同一长期进程因环境变量漂移切换到其他状态机。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionWorkerLane {
+    /// 租约并执行新的交易任务。
+    Execution,
+    /// 查询已提交订单并推进确认状态。
+    Confirmation,
+    /// 重放此前未成功回写的执行报告。
+    ReportReplay,
+}
+
+impl ExecutionWorkerLane {
+    /// 返回稳定的运行角色名称，供日志、进程诊断和部署验证共用。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Execution => "execution",
+            Self::Confirmation => "confirmation",
+            Self::ReportReplay => "report_replay",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExecutionWorkerConfig {
     /// worker ID。
@@ -154,6 +177,40 @@ impl ExecutionWorkerConfig {
             report_replay_throttle_ms,
         }
     }
+
+    /// 从共享运行参数构建配置，并由代码入口固定职责通道。
+    ///
+    /// 两个 legacy mode 环境变量仍可供旧入口使用，但不能覆盖新六角色拓扑的职责。
+    pub fn from_env_for_lane(lane: ExecutionWorkerLane) -> Self {
+        Self::from_env().with_lane(lane)
+    }
+
+    /// 把配置收敛到单一职责通道，确保确认和报告重放不会同时消费任务。
+    pub fn with_lane(mut self, lane: ExecutionWorkerLane) -> Self {
+        (self.confirmation_mode, self.report_replay_mode) = match lane {
+            ExecutionWorkerLane::Execution => (false, false),
+            ExecutionWorkerLane::Confirmation => (true, false),
+            ExecutionWorkerLane::ReportReplay => (false, true),
+        };
+        self
+    }
+
+    /// 将 legacy mode 布尔值解释为唯一职责；双开时保持旧逻辑的报告重放优先级。
+    pub const fn lane(&self) -> ExecutionWorkerLane {
+        if self.report_replay_mode {
+            ExecutionWorkerLane::ReportReplay
+        } else if self.confirmation_mode {
+            ExecutionWorkerLane::Confirmation
+        } else {
+            ExecutionWorkerLane::Execution
+        }
+    }
+
+    /// Report replay 只回写既有结果，不初始化可触达交易所的 live gateway。
+    pub(crate) const fn requires_live_exchange_gateway(&self) -> bool {
+        !self.dry_run && !matches!(self.lane(), ExecutionWorkerLane::ReportReplay)
+    }
+
     fn report_replay_task_allowed(&self, task_id: i64) -> bool {
         self.target_task_ids.is_empty() || self.target_task_ids.contains(&task_id)
     }
@@ -259,6 +316,8 @@ pub struct ExecutionWorker {
     gateway: CryptoExcAllGateway,
     /// 运行配置。
     config: ExecutionWorkerConfig,
+    /// 构造时冻结的职责通道，运行期间不再读取 mode 环境变量。
+    lane: ExecutionWorkerLane,
     /// 审计repository，用于记录交易或执行状态。
     audit_repository: Arc<dyn ExecutionAuditRepository>,
     /// 空轮询 checkpoint 最近写入时间，避免无任务时持续放大数据库写入。
@@ -271,13 +330,20 @@ impl ExecutionWorker {
         gateway: CryptoExcAllGateway,
         config: ExecutionWorkerConfig,
     ) -> Self {
+        let lane = config.lane();
         Self {
             client,
             gateway,
             config,
+            lane,
             audit_repository: Arc::new(NoopExecutionAuditRepository),
             last_idle_checkpoint_at: Mutex::new(None),
         }
+    }
+
+    /// 返回构造时冻结的职责通道，便于健康检查确认进程不会跨通道消费任务。
+    pub const fn lane(&self) -> ExecutionWorkerLane {
+        self.lane
     }
 
     /// 空闲 heartbeat 最多每 30 秒落库一次；任务处理和失败路径仍即时记录。
@@ -365,12 +431,29 @@ impl ExecutionWorker {
     }
     /// 从外部输入转换为内部模型，隔离 Web 商业、会员和执行准备度 的字段适配细节。
     pub fn from_env() -> Result<Self> {
+        Self::from_env_with_lane(None)
+    }
+
+    /// 从环境读取共享连接参数，但由调用入口固定职责通道而不是接受 mode 环境变量。
+    pub fn from_env_for_lane(lane: ExecutionWorkerLane) -> Result<Self> {
+        Self::from_env_with_lane(Some(lane))
+    }
+
+    fn from_env_with_lane(lane: Option<ExecutionWorkerLane>) -> Result<Self> {
         let base_url = std::env::var("RUST_QUAN_WEB_BASE_URL")
             .or_else(|_| std::env::var("QUANT_WEB_BASE_URL"))
             .map_err(|_| anyhow!("RUST_QUAN_WEB_BASE_URL is required"))?;
         let internal_secret = required_internal_secret_from_env()?;
-        validate_worker_mode_bool_envs()?;
-        let config = ExecutionWorkerConfig::from_env();
+        let config = match lane {
+            Some(lane) => {
+                validate_bool_env_value("EXECUTION_WORKER_DRY_RUN")?;
+                ExecutionWorkerConfig::from_env_for_lane(lane)
+            }
+            None => {
+                validate_worker_mode_bool_envs()?;
+                ExecutionWorkerConfig::from_env()
+            }
+        };
         config.validate_lease_limit()?;
         let client = ExecutionTaskClient::new(ExecutionTaskConfig {
             base_url,
@@ -383,10 +466,10 @@ impl ExecutionWorker {
                 "QUANT_CORE_DATABASE_URL is required for live execution audit"
             ));
         }
-        let gateway = if config.dry_run {
-            CryptoExcAllGateway::dry_run()
-        } else {
+        let gateway = if config.requires_live_exchange_gateway() {
             CryptoExcAllGateway::from_env()?
+        } else {
+            CryptoExcAllGateway::dry_run()
         };
         let mut worker = Self::new(client, gateway, config);
         if let Some(repository) = audit_repository {

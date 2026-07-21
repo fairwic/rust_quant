@@ -241,13 +241,16 @@ pub async fn run_modes() -> Result<()> {
         let swap_order_repo = Arc::new(SqlxSwapOrderRepository::new(get_db_pool().clone()));
         let execution_service = Arc::new(StrategyExecutionService::new(swap_order_repo));
         match start_strategies_from_db(config_service.clone(), execution_service.clone()).await {
-            Ok(started_configs) => {
+            Ok(started_configs) if !started_configs.is_empty() => {
                 live_runtime_configs = started_configs;
                 live_runtime_services = Some((config_service, execution_service));
             }
-            Err(e) => {
-                error!("❌ 启动策略失败: {}", e);
+            Ok(_) => {
+                return Err(anyhow!(
+                    "live strategy runtime has no validated and warmed configuration"
+                ));
             }
+            Err(error) => return Err(error).context("start live strategy runtime"),
         }
     }
     // 4) WebSocket 实时数据（长期运行：必须后台启动，避免阻塞 run() 后续心跳/信号处理）
@@ -265,6 +268,10 @@ pub async fn run_modes() -> Result<()> {
         let runtime_strategy_types = live_runtime_configs
             .iter()
             .map(|config| config.strategy_type)
+            .collect::<HashSet<_>>();
+        let runtime_config_ids = live_runtime_configs
+            .iter()
+            .map(|config| config.id)
             .collect::<HashSet<_>>();
         info!("🌐 WebSocket模式已启用");
         info!(
@@ -287,10 +294,11 @@ pub async fn run_modes() -> Result<()> {
             &ws_periods,
             &market_exchange,
             runtime_strategy_types,
+            runtime_config_ids,
             config_service,
             execution_service,
         )
-        .await;
+        .await?;
     }
     Ok(())
 }
@@ -352,7 +360,7 @@ fn execution_worker_poll_interval_secs_from_map(envs: &HashMap<String, String>) 
     }
 }
 /// 执行 配置、基础设施和运行时 主流程，并把外部依赖调用、状态推进和错误返回串起来。
-async fn run_exchange_symbol_sync_worker_from_env() -> Result<()> {
+pub async fn run_exchange_symbol_sync_worker_from_env() -> Result<()> {
     let interval_secs = std::env::var("EXCHANGE_SYMBOL_SYNC_INTERVAL_SECS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -402,7 +410,7 @@ async fn run_exchange_symbol_sync_worker_from_env() -> Result<()> {
     }
 }
 /// 执行 配置、基础设施和运行时 主流程，并把外部依赖调用、状态推进和错误返回串起来。
-async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
+pub async fn run_market_velocity_radar_worker_from_env() -> Result<()> {
     let interval_secs = std::env::var("MARKET_VELOCITY_SCAN_INTERVAL_SECS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -478,15 +486,18 @@ async fn run_websocket(
     periods: &[String],
     market_exchange: &str,
     runtime_strategy_types: HashSet<StrategyType>,
+    runtime_config_ids: HashSet<i64>,
     config_service: Arc<StrategyConfigService>,
     execution_service: Arc<StrategyExecutionService>,
-) {
+) -> Result<()> {
     if inst_ids.is_empty() || periods.is_empty() {
         warn!(
             "⚠️  WebSocket启动参数为空，跳过启动: inst_ids={:?}, periods={:?}",
             inst_ids, periods
         );
-        return;
+        return Err(anyhow!(
+            "WebSocket runtime requires at least one instrument and timeframe"
+        ));
     }
     let subscribe_ticker_stream =
         market_exchange == "okx" && env_is_true("WEBSOCKET_SUBSCRIBE_TICKERS", false);
@@ -502,6 +513,7 @@ async fn run_websocket(
                 execution_service,
                 Some(market_exchange.to_string()),
                 runtime_strategy_types,
+                runtime_config_ids,
             ),
         );
         Arc::new(
@@ -519,27 +531,24 @@ async fn run_websocket(
     let periods_vec: Vec<String> = periods.to_vec();
     // 使用带策略触发的 WebSocket 服务
     if market_exchange == "binance" {
-        if let Err(error) = rust_quant_services::market::binance_websocket::run_binance_websocket_with_strategy_trigger(
+        rust_quant_services::market::binance_websocket::run_binance_websocket_with_strategy_trigger(
             &inst_ids_vec,
             &periods_vec,
             Some(strategy_trigger),
         )
         .await
-        {
-            error!("❌ Binance WebSocket启动失败: {}", error);
-        }
+        .context("Binance WebSocket runtime exited")?;
     } else {
-        if let Err(error) = streams::run_socket_with_strategy_trigger(
+        streams::run_socket_with_strategy_trigger(
             &inst_ids_vec,
             &periods_vec,
             Some(strategy_trigger),
             subscribe_ticker_stream,
         )
         .await
-        {
-            error!("❌ OKX WebSocket 运行时退出: {}", error);
-        }
+        .context("OKX WebSocket runtime exited")?;
     }
+    Ok(())
 }
 /// 提供CSV过滤值的集中实现，避免配置运行时调用方重复处理相同细节。
 fn csv_filter_values(raw: Option<String>) -> BTreeSet<String> {
@@ -566,14 +575,19 @@ fn filter_live_strategy_configs(configs: Vec<StrategyConfig>) -> Vec<StrategyCon
     let exchanges = csv_lower_filter_values(std::env::var("LIVE_STRATEGY_ONLY_EXCHANGES").ok());
     let strategy_types = csv_lower_filter_values(std::env::var("LIVE_STRATEGY_ONLY_TYPES").ok());
     let fallback_exchange = market_data_exchange();
-    filter_live_strategy_configs_with_filters(
+    let configs = filter_live_strategy_configs_with_filters(
         configs,
         &inst_ids,
         &periods,
         &exchanges,
         &strategy_types,
         &fallback_exchange,
-    )
+    );
+    let scoped_inst_ids = strategy_type_scoped_inst_ids_from_env();
+    configs
+        .into_iter()
+        .filter(|config| strategy_config_matches_scoped_inst_ids(config, &scoped_inst_ids))
+        .collect()
 }
 
 /// 应用 live 策略过滤规则，确保单一 WebSocket worker 不混用多个交易所行情源。

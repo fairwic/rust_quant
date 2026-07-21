@@ -182,3 +182,82 @@ fn derive_market_data_exchange_from_configs(
         }
     }
 }
+
+/// 读取同一 signal-worker 内不同策略类型的 symbol scope，避免合并后形成 type × symbol 串载。
+fn strategy_type_scoped_inst_ids_from_env() -> HashMap<StrategyType, BTreeSet<String>> {
+    [
+        (StrategyType::Vegas, "LIVE_STRATEGY_VEGAS_ONLY_INST_IDS"),
+        (
+            StrategyType::VegasUniversal4h,
+            "LIVE_STRATEGY_VEGAS_UNIVERSAL_4H_ONLY_INST_IDS",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(strategy_type, key)| {
+        std::env::var(key)
+            .ok()
+            .map(|raw| (strategy_type, csv_filter_values(Some(raw))))
+    })
+    .collect()
+}
+
+/// 空集合表示该类型使用数据库内全部已启用 symbol；未配置的策略类型保持旧过滤语义。
+fn strategy_config_matches_scoped_inst_ids(
+    config: &StrategyConfig,
+    scoped_inst_ids: &HashMap<StrategyType, BTreeSet<String>>,
+) -> bool {
+    scoped_inst_ids
+        .get(&config.strategy_type)
+        .map(|symbols| symbols.is_empty() || symbols.contains(&config.symbol))
+        .unwrap_or(true)
+}
+
+#[cfg(test)]
+mod live_strategy_scope_tests {
+    use super::*;
+    use chrono::Utc;
+    use rust_quant_domain::{StrategyStatus, Timeframe};
+
+    fn config(id: i64, strategy_type: StrategyType, symbol: &str) -> StrategyConfig {
+        StrategyConfig {
+            id,
+            version: "v1".to_string(),
+            strategy_type,
+            exchange: Some("okx".to_string()),
+            symbol: symbol.to_string(),
+            timeframe: Timeframe::H4,
+            parameters: serde_json::json!({}),
+            risk_config: serde_json::json!({}),
+            status: StrategyStatus::Running,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            backtest_start: None,
+            backtest_end: None,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn strategy_type_scopes_do_not_form_a_symbol_cross_product() {
+        let scopes = HashMap::from([
+            (
+                StrategyType::Vegas,
+                BTreeSet::from(["ETH-USDT-SWAP".to_string()]),
+            ),
+            (StrategyType::VegasUniversal4h, BTreeSet::new()),
+        ]);
+
+        assert!(strategy_config_matches_scoped_inst_ids(
+            &config(1, StrategyType::Vegas, "ETH-USDT-SWAP"),
+            &scopes
+        ));
+        assert!(!strategy_config_matches_scoped_inst_ids(
+            &config(2, StrategyType::Vegas, "BTC-USDT-SWAP"),
+            &scopes
+        ));
+        assert!(strategy_config_matches_scoped_inst_ids(
+            &config(3, StrategyType::VegasUniversal4h, "BTC-USDT-SWAP"),
+            &scopes
+        ));
+    }
+}

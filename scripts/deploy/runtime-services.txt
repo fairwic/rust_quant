@@ -1,0 +1,6 @@
+quant-core-control-api
+quant-core-market-worker
+quant-core-signal-worker
+quant-core-account-worker
+quant-core-execution-worker
+quant-core-reconciliation-worker

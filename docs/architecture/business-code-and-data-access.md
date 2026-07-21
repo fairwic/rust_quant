@@ -1,7 +1,7 @@
 # 业务代码与数据访问放置规范
 
 - 状态：已接受
-- 日期：2026-07-20
+- 日期：2026-07-21
 - 上位文档：[Rust Quant 长期目标架构](target-architecture.md)
 - 依赖规则：[Rust Quant 依赖与代码归属规则](dependency-rules.md)
 
@@ -62,7 +62,7 @@ Message Contract
 
 | 问题 | 正确位置 | 示例 |
 | --- | --- | --- |
-| 始终必须成立的不变量 | `domains/<owner>/model` | 已 Filled 订单不能回到 Submitted；订单数量必须为正 |
+| 始终必须成立的不变量 | `domains/<owner>/model` | 已 Filled 订单不能回到 Acknowledged；订单数量必须为正 |
 | 基于完整输入作纯决策 | `domains/<owner>/policies` | 资本分配、风险缩减、执行算法选择 |
 | 一个完整业务动作的顺序 | `domains/<owner>/use_cases/commands` | 创建 OrderIntent、申请撤单、发布策略版本 |
 | 一个只读业务问题 | `domains/<owner>/use_cases/queries` | 查询未保护敞口、查询账户 readiness |
@@ -125,19 +125,66 @@ apps/execution-worker/src/
 
 ```rust
 pub trait ExecutionWritePort {
-    async fn persist_order_intent_with_outbox(
+    async fn stage_order_submission_with_outbox(
         &self,
-        change: PersistOrderIntent,
-    ) -> Result<PersistOrderIntentResult, ExecutionStoreError>;
+        change: StageOrderSubmission,
+    ) -> Result<StagedOrderSubmission, ExecutionStoreError>;
 }
 ```
 
 Postgres Adapter 在一个 SQLx transaction 中写入：
 
-1. OrderIntent/Order 初始状态；
-2. 幂等记录或唯一业务键；
-3. Outbox Event；
-4. 必要审计字段。
+1. Inbox/幂等记录和唯一业务键；
+2. 通过 account gate row CAS 或活跃唯一约束取得 `AccountOpeningSlot`；
+3. 不可变 `risk_evaluation_id`/`RiskDecision` 引用、摘要、批准边界和过期时间，并唯一绑定 parent OrderIntent/plan hash；
+4. `OrderIntent` 与当前 child Order 首个持久状态 `SubmitPending`；
+5. 完整不可变 `ExecutionPlan`；
+6. 初始为 `Planned` 的 `ProtectionPlan`；
+7. `OrderSubmissionRequestedV1` Outbox；
+8. correlation、causation 和必要审计字段。
+
+只有事务提交后，Outbox Publisher 才能发布提交任务；Dispatcher 消费任务并取得 fenced send claim/attempt/permit，只有 Fenced Exchange Mutation Gateway 原子消费 current permit 后才能调用 raw SDK。Port 名中的 `stage` 表示“形成可恢复的持久提交任务”，不表示交易所已经收到或接受订单。完整顺序以 [ADR-0006](adr/0006-at-least-once-idempotency-and-recovery.md) 为唯一权威。
+
+Dispatcher、Fenced Gateway 与 Recovery 的关键数据库写也必须使用业务 Port，而不是暴露 attempt/permit 表 CRUD：
+
+```rust
+pub trait ExecutionMutationWritePort {
+    async fn claim_mutation_attempt(
+        &self,
+        claim: ClaimMutationAttempt,
+    ) -> Result<IssuedMutationPermit, ExecutionStoreError>;
+
+    async fn consume_mutation_permit(
+        &self,
+        permit: ConsumeMutationPermit,
+    ) -> Result<ConsumedMutationPermit, ExecutionStoreError>;
+
+    async fn complete_mutation_attempt(
+        &self,
+        outcome: CompleteMutationAttempt,
+    ) -> Result<CompletedMutationAttempt, ExecutionStoreError>;
+
+    async fn recover_unknown_and_enqueue_retry(
+        &self,
+        recovery: RecoverUnknown,
+    ) -> Result<RecoveredMutation, ExecutionStoreError>;
+
+    async fn rollover_mutation_delivery(
+        &self,
+        retry: RolloverMutationDelivery,
+    ) -> Result<ScheduledMutationRetry, ExecutionStoreError>;
+}
+```
+
+- `claim_mutation_attempt` 在短事务中同时校验 `mutation_event_id`、`mutation_generation`、`expected_aggregate_version`、Pending state、空 `send_claim`、account/order fence 和最终门禁证据，再写绑定这三个 mutation 授权字段的 `ExecutionMutationAttempt(Started)` 与短期 `MutationPermit(Issued)`；旧或重复 delivery 只 ack/no-op；
+- `consume_mutation_permit` 只供 Fenced Gateway 在网络 I/O 边界调用，以 attempt/version/fence/generation/payload hash/expiry CAS 消费 current permit；失败返回 DefinitelyNotSent 且不得触达 raw SDK；
+- 提交前取消/Recovery 使用同一 permit CAS；revoke 与 consume 只有一方成功。permit 已 Consumed 时不得本地终结或重发；
+- `complete_mutation_attempt` 在一个事务中一起写 attempt outcome、permit 终态、Order/Protection transition 和后续 Outbox；Unknown outcome 只能创建 query/reconciliation/alert 等恢复任务，不能直接创建同 kind mutation Outbox；
+- `recover_unknown_and_enqueue_retry` 只有在 DefinitivelyAbsent 且无可发送 permit 时，才原子写 RecoveryAuthorized、supersede 旧 mutation generation 的本地授权/投递记录、推进原 kind 的 Pending state，并按 Submit/Cancel/Protect 映射创建对应新 Outbox；只滚动 mutation 三字段和 attempt number，保持原 mutation/目标 identity 与 payload/plan hash，不能依赖旧 Outbox 或进程扫描；
+- `rollover_mutation_delivery` 统一处理 Submit/Cancel/Protect 的 transient blocker、可重试 DefinitelyNotSent 和 fence/gate 变化：确认当前 delivery 的同一事务必须 supersede 旧 generation，并创建 delayed Outbox 或 durable RetrySchedule；Scheduler 到期只能经 owner transaction 物化唯一 Outbox，不能直接 claim；
+- `ExecutionMutationAttempt` 与 Permit 至少保存 mutation kind、stable identity/number、payload/plan hash、fence/generation、expiry、门禁引用、结果/permit 状态和 started/completed time；不得保存明文凭证；
+- raw SDK mutation client/credential 只装配进 Fenced Gateway，不向 Dispatcher 或其他 App 暴露；
+- 暂时 blocker 必须持久化 `next_eligible_at`/唤醒条件并确认当前 delivery，由 durable scheduler/event 唤醒，不能 nack 热循环。
 
 错误做法：
 
@@ -146,6 +193,8 @@ repository.save(entity)
 generic_repository.insert<T>()
 handler 直接 INSERT
 先写订单，事务外再写 outbox
+先调用交易所，成功后再补订单状态
+只持久化 OrderIntent，ExecutionPlan/ProtectionPlan 留在内存
 ```
 
 ### 5.2 Read
@@ -197,6 +246,10 @@ Use case 不接收 `sqlx::Transaction`，而是调用一个表达原子业务动
 - Inbox 或幂等记录；
 - Outbox Event；
 - 同 owner 的审计事实。
+
+Execution 的下单准备是该规则的严格实例：`RiskDecision` 由 Risk owner 先行持久化；Execution 不建立跨 owner 事务，只在自己的单一事务中取得 `AccountOpeningSlot`，并保存不可变审批引用以及 `SubmitPending + OrderIntent + ExecutionPlan + ProtectionPlan + Idempotency + Outbox`。该事务提交前禁止确认上游或发生外部 I/O；提交后由 Dispatcher 执行门禁复核并签发 permit，再由 Fenced Gateway 消费 current permit 后调用交易所。
+
+Opening slot 也是 Execution owner 事实，不由 worker lease 代替。释放必须由业务用例验证全部 child mutation 已确定、没有 attempt/Unknown、Account owner typed watermark 已覆盖 cumulative fill，且剩余敞口保护满足政策；Adapter 只原子执行该决定。
 
 ### 6.3 跨 Owner 一致性
 

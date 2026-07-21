@@ -6,6 +6,8 @@
 
 发生冲突时，以已接受 ADR 为决策依据，以目标架构为总纲，以依赖规则和数据访问规范为具体落地规则。当前实现与目标不一致时，必须标记为 legacy，不得反向修改目标文档来迁就现状。
 
+订单、撤单和保护单外部 mutation 的持久化与提交顺序，以 [ADR-0006](adr/0006-at-least-once-idempotency-and-recovery.md) 为唯一权威；owner-scoped 数据库事务的实现边界以 [ADR-0007](adr/0007-owner-scoped-persistence-and-transaction-boundaries.md) 为准。其他文档只解释各自视角，不得另立一套顺序。
+
 ## 正式文档
 
 | 文档 | 状态 | 说明 |

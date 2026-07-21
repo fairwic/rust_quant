@@ -1,7 +1,7 @@
 # AI 编码与架构防腐护栏
 
 - 状态：已接受
-- 日期：2026-07-20
+- 日期：2026-07-21
 - 上位文档：[Rust Quant 长期目标架构](target-architecture.md)
 - 放置规则：[业务代码与数据访问放置规范](business-code-and-data-access.md)
 
@@ -38,7 +38,10 @@ Ports：
 Adapters：
 运行模式与替换的 Adapter：
 事务边界：
+持久化顺序与外部副作用边界：
+并发业务唯一约束（不得只写 worker lease）：
 幂等身份：
+Attempt / Unknown / 恢复证据：
 失败与恢复 Owner：
 验证：
 ```
@@ -136,15 +139,25 @@ cargo xtask arch-check
 - SQL 是否只在 Postgres Adapter；
 - Port 是否使用业务语言；
 - 事务是否覆盖状态、幂等和 outbox；
+- Execution 下单事务是否同时覆盖 AccountOpeningSlot、不可变审批引用/父 Intent 唯一绑定、OrderIntent、完整 ExecutionPlan/ProtectionPlan、`SubmitPending`、幂等和提交 Outbox；
+- 是否只有事务提交后才确认上游或发布提交任务，且交易所 I/O 只由 Fenced Gateway 在 Dispatcher 签发的 current MutationPermit 被原子消费后发起；
 - 查询是否有索引、范围、分页和锁评估；
 - 新表/列是否有数据库注释；
 - 删除是否符合事实保留规则。
 
 ### 8.3 交易安全
 
-- 是否先持久化稳定订单身份；
+- 是否由 Risk owner 先持久化不可变 RiskDecision，再由 Execution owner 原子持久化稳定订单身份、完整计划、`SubmitPending`、幂等和 Outbox；
 - 是否区分 read-only、dry-run、paper、shadow、canary、live；
 - 是否保留 lease、精度、余额、凭证、新鲜度和保护门禁；
+- 未有独立 Risk Reservation ADR 时，是否以持久 opening slot/唯一约束禁止同账户并发独立开仓，而非只依赖 worker lease；风险降低旁路是否可证明 reduce-only 并先冻结风险增加 claim；
+- Fenced Gateway 是否在网络 I/O 边界原子消费 attempt/version/fence/generation/payload hash/expiry 均匹配的 current permit；revoked/stale/expired 是否 DefinitelyNotSent 且不触达 SDK；raw mutation SDK 是否对 Dispatcher/其他 App 物理不可达；
+- 门禁失败是否按 Expired/Blocked/可恢复分类，后者有 durable next_eligible_at/唤醒条件；
+- attempt claim、提交前取消/恢复 revoke 与 Gateway consume 是否竞争同一 version/permit；attempt ledger 是否区分 Submit/Cancel/Protect 并将 outcome、permit 终态、状态迁移、后续 Outbox 原子提交；
+- Submit/Cancel/Protect 的 mutation event、attempt、permit 是否绑定 `mutation_event_id`/`mutation_generation`/`expected_aggregate_version`，旧 delivery 是否只能 ack/no-op；
+- transient blocker、可重试 DefinitelyNotSent、lease/fence/gate 变化确认 delivery 后，是否原子 rollover 到新 generation 的 delayed Outbox/RetrySchedule；Scheduler 是否被禁止复用旧事件或直接 claim；
+- Unknown outcome 是否禁止直接生成同 kind mutation Outbox；是否只有在持久 DefinitivelyAbsent/RecoveryAuthorized 且无可发送 permit 后，recovery transaction 才保持原 mutation/目标 identity、按 Submit/Cancel/Protect kind 新建对应 Outbox；不具备稳定 client identity 与缺席证明的 live 能力是否 Unsupported；
+- 启动是否先订阅/缓冲 User Stream，再合并 signed snapshot/query watermark 并补 gap；闭合前是否 NotReady 且 Dispatcher 禁用；
 - 部分成交后保护数量是否正确；
 - `Unknown`、撤单/成交竞态和重启是否可恢复；
 - 没有有效止损计划时是否 fail-closed。

@@ -19,6 +19,128 @@ services:
       QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
       DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
 
+  quant-core-control-api:
+    container_name: quant-core-control-api
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      default: {}
+      quant-core-external:
+        aliases:
+          - quant-core-internal-server
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command:
+      - quant_core_control_api
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:5322/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
+      QUANT_INTERNAL_ADDR: 0.0.0.0:5322
+      RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
+      EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
+
+  quant-core-market-worker:
+    container_name: quant-core-market-worker
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command:
+      - quant_core_market_worker
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
+      EXCHANGE_SYMBOL_SYNC_RUN_ONCE: "false"
+      EXCHANGE_SYMBOL_SYNC_INTERVAL_SECS: ${EXCHANGE_SYMBOL_SYNC_INTERVAL_SECS:-3600}
+      EXCHANGE_SYMBOL_SOURCES: ${EXCHANGE_SYMBOL_SOURCES:-okx}
+      EXCHANGE_LISTING_SIGNAL_SUBMIT: "0"
+      MARKET_VELOCITY_SCAN_INTERVAL_SECS: ${MARKET_VELOCITY_SCAN_INTERVAL_SECS:-60}
+      MARKET_VELOCITY_SIGNAL_DISPATCH_MODE: disabled
+      MARKET_WORKER_KLINE_SCAN_INTERVAL_SECS: ${MARKET_WORKER_KLINE_SCAN_INTERVAL_SECS:-60}
+      MARKET_WORKER_RECENT_REPAIR_INTERVAL_SECS: ${MARKET_WORKER_RECENT_REPAIR_INTERVAL_SECS:-300}
+      MARKET_WORKER_RECENT_REPAIR_MAX_SYMBOLS: ${MARKET_WORKER_RECENT_REPAIR_MAX_SYMBOLS:-200}
+      MARKET_VELOCITY_BACKFILL_OKX_REST_BASE: ${MARKET_VELOCITY_BACKFILL_OKX_REST_BASE:-https://www.okx.com}
+      MARKET_VELOCITY_BACKFILL_PROXY_URL: ${MARKET_VELOCITY_BACKFILL_PROXY_URL:-}
+      MARKET_VELOCITY_BACKFILL_BATCH_SIZE: ${MARKET_VELOCITY_BACKFILL_BATCH_SIZE:-500}
+
+  quant-core-signal-worker:
+    container_name: quant-core-signal-worker
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command:
+      - quant_core_signal_worker
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
+      IS_RUN_REAL_STRATEGY: "true"
+      IS_OPEN_SOCKET: "true"
+      WEBSOCKET_SUBSCRIBE_TICKERS: "false"
+      IS_RUN_SYNC_DATA_JOB: "false"
+      IS_RUN_EXECUTION_WORKER: "false"
+      IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER: "false"
+      IS_RUN_MARKET_VELOCITY_RADAR: "false"
+      LIVE_STRATEGY_ONLY_EXCHANGES: ${LIVE_STRATEGY_ONLY_EXCHANGES:-okx}
+      LIVE_STRATEGY_ONLY_PERIODS: 4H
+      LIVE_STRATEGY_ONLY_TYPES: vegas,vegas_universal_4h
+      LIVE_STRATEGY_VEGAS_ONLY_INST_IDS: ${LIVE_STRATEGY_VEGAS_ONLY_INST_IDS:-ETH-USDT-SWAP}
+      LIVE_STRATEGY_VEGAS_UNIVERSAL_4H_ONLY_INST_IDS: ${VEGAS_UNIVERSAL_4H_INST_IDS:-}
+      MARKET_DATA_EXCHANGE: okx
+      DEFAULT_EXCHANGE: okx
+      STRATEGY_SIGNAL_DISPATCH_MODE: web
+      RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
+      EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
+      MARKET_VELOCITY_LIVE_HANDOFF_RUN_ONCE: "false"
+      MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS: ${MARKET_VELOCITY_LIVE_HANDOFF_INTERVAL_SECS:-5}
+      MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS: ${MARKET_VELOCITY_LIVE_HANDOFF_SIGNAL_TTL_MS:-10000}
+      MARKET_VELOCITY_LIVE_HANDOFF_LANES: ${MARKET_VELOCITY_LIVE_HANDOFF_LANES:-market_velocity@research_momentum_04sl_052r_kline15m_breakout_fvg50_vol13_dd35_v1,market_velocity_breakdown_short@research_momentum_short_04sl_10r_15m_support_breakdown_d5_100_pchg2_12_vol10_dist14_v6}
+      MARKET_VELOCITY_SIGNAL_LOOKBACK_HOURS: ${MARKET_VELOCITY_SIGNAL_LOOKBACK_HOURS:-24}
+      MARKET_VELOCITY_LIVE_CANDIDATE_LIMIT: ${MARKET_VELOCITY_LIVE_CANDIDATE_LIMIT:-100}
+      MARKET_VELOCITY_ENTRY_CANDLE_MAX_STALENESS_MINUTES: ${MARKET_VELOCITY_ENTRY_CANDLE_MAX_STALENESS_MINUTES:-45}
+      MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH: ${MARKET_VELOCITY_ENTRY_CANDLE_ON_DEMAND_REFRESH:-true}
+      MARKET_VELOCITY_ENTRY_CANDLE_OKX_REST_BASE: ${MARKET_VELOCITY_ENTRY_CANDLE_OKX_REST_BASE:-https://www.okx.com}
+      MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS: ${MARKET_VELOCITY_ENTRY_CANDLE_REQUEST_SLEEP_MS:-150}
+
   quant-core-internal-server:
     container_name: quant-core-internal-server
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
@@ -28,6 +150,8 @@ services:
     networks:
       - default
       - quant-core-external
+    profiles:
+      - legacy-runtime
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -49,6 +173,8 @@ services:
     networks:
       - default
       - quant-core-external
+    profiles:
+      - legacy-runtime
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -72,6 +198,8 @@ services:
     networks:
       - default
       - quant-core-external
+    profiles:
+      - legacy-runtime
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -105,6 +233,8 @@ services:
     networks:
       - default
       - quant-core-external
+    profiles:
+      - legacy-runtime
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -138,6 +268,8 @@ services:
     networks:
       - default
       - quant-core-external
+    profiles:
+      - legacy-runtime
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -194,6 +326,8 @@ services:
     networks:
       - default
       - quant-core-external
+    profiles:
+      - legacy-runtime
     restart: unless-stopped
     command:
       - all_market_candle_volume_monitor
@@ -595,6 +729,15 @@ services:
       - default
       - quant-core-external
     restart: unless-stopped
+    stop_grace_period: 30s
+    command:
+      - quant_core_execution_worker
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
     environment:
       APP_ENV: ${APP_ENV:-production}
       RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
@@ -615,6 +758,74 @@ services:
       EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
       OKX_REQUEST_EXPIRATION_MS: ${OKX_REQUEST_EXPIRATION_MS:-}
 
+  quant-core-account-worker:
+    container_name: quant-core-account-worker
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command:
+      - quant_core_account_worker
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
+      EXECUTION_WORKER_RUN_ONCE: "false"
+      EXECUTION_WORKER_ID: ${ACCOUNT_WORKER_ID:-quant-core-account-worker-prod}
+      EXECUTION_WORKER_LEASE_LIMIT: ${ACCOUNT_WORKER_LEASE_LIMIT:-10}
+      EXECUTION_WORKER_DEFAULT_EXCHANGE: ${EXECUTION_WORKER_DEFAULT_EXCHANGE:-okx}
+      RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
+      EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
+      OKX_REQUEST_EXPIRATION_MS: ${OKX_REQUEST_EXPIRATION_MS:-}
+
+  quant-core-reconciliation-worker:
+    container_name: quant-core-reconciliation-worker
+    image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
+    pull_policy: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - quant-core-external
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command:
+      - quant_core_reconciliation_worker
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      RUST_LOG: ${RUST_LOG:-rust_quant_cli=info,rust_quant_services=info}
+      QUANT_CORE_DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      DATABASE_URL: ${QUANT_CORE_DATABASE_URL:?QUANT_CORE_DATABASE_URL is required}
+      REDIS_HOST: ${REDIS_HOST:-redis://redis:6379/}
+      EXECUTION_WORKER_RUN_ONCE: "false"
+      EXECUTION_WORKER_ID: ${RECONCILIATION_WORKER_ID:-quant-core-reconciliation-worker-prod}
+      EXECUTION_WORKER_LEASE_LIMIT: ${RECONCILIATION_WORKER_LEASE_LIMIT:-10}
+      EXECUTION_WORKER_DEFAULT_EXCHANGE: ${EXECUTION_WORKER_DEFAULT_EXCHANGE:-okx}
+      EXECUTION_WORKER_REPORT_REPLAY_MAX_PER_RUN: ${EXECUTION_WORKER_REPORT_REPLAY_MAX_PER_RUN:-10}
+      EXECUTION_WORKER_REPORT_REPLAY_FAILURE_BACKOFF_SECONDS: ${EXECUTION_WORKER_REPORT_REPLAY_FAILURE_BACKOFF_SECONDS:-300}
+      EXECUTION_WORKER_REPORT_REPLAY_THROTTLE_MS: ${EXECUTION_WORKER_REPORT_REPLAY_THROTTLE_MS:-100}
+      RUST_QUAN_WEB_BASE_URL: ${RUST_QUAN_WEB_BASE_URL:?RUST_QUAN_WEB_BASE_URL is required}
+      EXECUTION_EVENT_SECRET: ${EXECUTION_EVENT_SECRET:?EXECUTION_EVENT_SECRET is required}
+
   quant-core-execution-confirmation-worker:
     container_name: quant-core-execution-confirmation-worker
     image: ${QUANT_CORE_IMAGE:-ghcr.io/fairwic/quant-core-worker:latest}
@@ -624,6 +835,8 @@ services:
     networks:
       - default
       - quant-core-external
+    profiles:
+      - legacy-runtime
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -652,6 +865,8 @@ services:
     networks:
       - default
       - quant-core-external
+    profiles:
+      - legacy-runtime
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
